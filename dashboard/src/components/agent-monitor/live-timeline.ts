@@ -17,13 +17,13 @@ const activeFilter = signal<FilterKind>('all')
 const autoScroll = signal(true)
 
 const FILTER_CHIPS: { key: FilterKind; label: string }[] = [
-  { key: 'all', label: 'All' },
-  { key: 'heartbeat', label: 'Heartbeat' },
-  { key: 'message', label: 'Message/Board' },
-  { key: 'oas_turn', label: 'OAS Turn' },
-  { key: 'tool', label: 'Tool' },
-  { key: 'error', label: 'Error' },
-  { key: 'lifecycle', label: 'Lifecycle' },
+  { key: 'all', label: '전체' },
+  { key: 'heartbeat', label: '하트비트' },
+  { key: 'message', label: '메시지/보드' },
+  { key: 'oas_turn', label: 'OAS 턴' },
+  { key: 'tool', label: '도구' },
+  { key: 'error', label: '오류' },
+  { key: 'lifecycle', label: '라이프사이클' },
 ]
 
 export function eventMatchesFilter(entry: JournalEntry, filter: FilterKind): boolean {
@@ -158,7 +158,7 @@ export function AgentLiveTimeline({ name }: { name: string }) {
               ? 'border-[rgba(34,197,94,0.4)] text-[var(--color-status-ok)] bg-[var(--white-4)]'
               : 'border-[var(--white-10)] text-[var(--color-fg-disabled)] bg-[var(--white-4)]'}"
             onClick=${() => { autoScroll.value = !autoScroll.value }}
-            title=${autoScroll.value ? 'Auto-scroll ON' : 'Auto-scroll OFF'}
+            title=${autoScroll.value ? '자동 스크롤 ON' : '자동 스크롤 OFF'}
           >
             ${autoScroll.value ? 'AUTO' : 'MANUAL'}
           </button>

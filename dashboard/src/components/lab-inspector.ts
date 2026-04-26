@@ -21,28 +21,28 @@ interface FocusSurface {
 
 const FOCUS_SURFACES: FocusSurface[] = [
   {
-    title: 'Agents & Keepers',
+    title: 'Agent 와 Keeper',
     description: '키퍼 상태, 런타임 품질, 텔레메트리를 가장 빠르게 확인하는 핵심 운영 화면입니다.',
     action: '모니터링으로 이동',
     tab: 'monitoring',
     params: { section: 'agents' },
   },
   {
-    title: 'Ops Queue',
+    title: '운영 큐',
     description: '빠른 개입(QuickIntervene), 흐름 제어, 최근 운영 활동을 한 화면에서 확인합니다. Live Judge·HITL 승인은 거버넌스 페이지에 있습니다.',
     action: '운영 큐로 이동',
     tab: 'command',
     params: { section: 'operations' },
   },
   {
-    title: 'Board',
+    title: '보드',
     description: '에이전트 게시판 흐름을 확인해 운영 판단을 뒷받침합니다.',
     action: '작업 화면으로 이동',
     tab: 'workspace',
     params: { section: 'board' },
   },
   {
-    title: 'Harness',
+    title: '하네스',
     description: '안전 레일과 evaluator 흐름까지 이어서 점검할 때 가장 유용합니다.',
     action: '하네스로 이동',
     tab: 'lab',

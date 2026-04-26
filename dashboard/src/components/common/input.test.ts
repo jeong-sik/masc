@@ -85,6 +85,17 @@ describe('TextInput', () => {
     expect(spy).toHaveBeenCalledOnce()
   })
 
+  it('onBlur fires when the input loses focus (commit-on-blur pattern)', async () => {
+    const spy = vi.fn()
+    render(html`<${TextInput} value="draft" onBlur=${spy} />`, container)
+    const input = container.querySelector('input') as HTMLInputElement
+    input.dispatchEvent(new FocusEvent('blur', { bubbles: false }))
+    await flushUi()
+    expect(spy).toHaveBeenCalledOnce()
+    const ev = spy.mock.calls[0]![0] as FocusEvent
+    expect((ev.target as HTMLInputElement).value).toBe('draft')
+  })
+
   it('forwards name + autoComplete attributes', () => {
     render(
       html`<${TextInput} name="channel" autoComplete="off" />`,
@@ -108,6 +119,13 @@ describe('TextInput', () => {
   it('autoFocus=true sets the autofocus attribute', () => {
     render(html`<${TextInput} autoFocus=${true} />`, container)
     expect(container.querySelector('input')!.hasAttribute('autofocus')).toBe(true)
+  })
+
+  it('inputRef.current points to the inner <input> after mount', () => {
+    const ref: { current: HTMLInputElement | null } = { current: null }
+    render(html`<${TextInput} inputRef=${ref} />`, container)
+    const input = container.querySelector('input') as HTMLInputElement
+    expect(ref.current).toBe(input)
   })
 })
 
@@ -148,5 +166,12 @@ describe('TextArea', () => {
     ta.dispatchEvent(new Event('input', { bubbles: true }))
     await flushUi()
     expect(spy).toHaveBeenCalledOnce()
+  })
+
+  it('inputRef.current points to the inner <textarea> after mount', () => {
+    const ref: { current: HTMLTextAreaElement | null } = { current: null }
+    render(html`<${TextArea} inputRef=${ref} />`, container)
+    const ta = container.querySelector('textarea') as HTMLTextAreaElement
+    expect(ref.current).toBe(ta)
   })
 })

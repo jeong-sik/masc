@@ -50,7 +50,7 @@ masc-mcp contract 표면은 두 갈래:
 
 **범위 실측** — dashboard 가 소비하는 60+ `SSEEventType` 리터럴 중:
 - masc-mcp 자체 emit: 약 **40개** (`agent_*`, `keeper_*`, `board_*`, `approval_*`, `room_*`, `transport_*`, `execution_*` 등)
-- **OAS bridge relay**: **21개** (`oas:*` 접두어) — `agent_sdk` 라이브러리의 `Event_bus.payload` variant 를 `lib/oas_sse_bridge.ml` 이 릴레이
+- **OAS bridge relay**: **21개** (`oas:*` 접두어) — `agent_sdk` 라이브러리의 `Event_bus.payload` variant 를 `lib/oas_event_bridge.ml` 이 릴레이
 
 **OAS 21 이벤트 처리 — Opaque passthrough 채택**:
 

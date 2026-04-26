@@ -373,7 +373,7 @@ OAS에서 LLM 제공자를 구분하는 타입. MASC에서는 `llama`(local), `g
 OAS의 에이전트 실행 진입점. MASC의 always-on keeper loop은 이 API 위에서 실행된다. Keeper 포함 모든 자율 에이전트 루프가 이 경로를 사용한다.
 
 **OAS SSE Bridge**
-OAS 이벤트를 MASC SSE 스트림으로 전달하는 브릿지. OAS 에이전트 실행 중 발생하는 이벤트를 Room의 SSE 구독자에게 전달한다. `-> lib/oas_sse_bridge.mli`
+OAS 이벤트를 MASC SSE 스트림으로 전달하는 브릿지. OAS 에이전트 실행 중 발생하는 이벤트를 Room의 SSE 구독자에게 전달한다. `-> lib/oas_event_bridge.mli`
 
 ---
 

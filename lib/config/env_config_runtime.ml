@@ -582,6 +582,59 @@ module Dashboard = struct
     get_float ~default:0.70 "MASC_DASHBOARD_CTX_PREPARING"
   let ctx_compacting =
     get_float ~default:0.50 "MASC_DASHBOARD_CTX_COMPACTING"
+
+  (** Dashboard shell-cache pre-warm timeouts.
+
+      The pre-warm fires once on server bootstrap. It is wrapped in two
+      nested timeouts: the inner
+      [Dashboard_cache.get_or_compute_with_timeout] budget covers the
+      compute step only, while the outer [Eio.Time.with_timeout] also
+      covers cache lookup, mutex contention and surrounding bookkeeping.
+      The outer budget MUST strictly exceed the inner budget so the inner
+      reports "compute timeout" rather than the fiber being killed by
+      the outer wrapper. The default 30/35 split preserves the 5s
+      headroom that the inline literals encoded.
+
+      Previously hardcoded as inline literals at
+      [server_dashboard_http_execution_surfaces.ml:7] (30.0) and
+      [server_runtime_bootstrap.ml:1686] (35.0). On slow-disk or
+      contended deployments the pre-warm dropped silently and the
+      dashboard rendered cold — operators had no env to raise the
+      ceiling without a rebuild ("기다려야 할 부분을 안 기다리는"
+      pattern). *)
+  let shell_prewarm_inner_timeout_sec =
+    Float.max 1.0
+      (get_float ~default:30.0 "MASC_DASHBOARD_SHELL_PREWARM_TIMEOUT_SEC")
+
+  let shell_prewarm_outer_timeout_sec =
+    Float.max 5.0
+      (get_float ~default:35.0
+         "MASC_DASHBOARD_SHELL_PREWARM_OUTER_TIMEOUT_SEC")
+
+  (** Execution surface compute timeout (light + parameterized).
+
+      Wraps two [Dashboard_cache.get_or_compute_with_timeout] sites at
+      [server_dashboard_http_execution_surfaces.ml:437,449] (execution
+      light/parameterized). Default 120s preserves the inline literals.
+      Floor 5s ensures the budget can complete a typical projection
+      hydration even under aggressive operator override. *)
+  let execution_timeout_sec =
+    Float.max 5.0
+      (get_float ~default:120.0 "MASC_DASHBOARD_EXECUTION_TIMEOUT_SEC")
+
+  (** Execution-trust surface compute timeout.
+
+      Wraps [Dashboard_cache.get_or_compute_with_timeout] at
+      [server_dashboard_http_execution_surfaces.ml:463] (execution-trust
+      score). Default 30s preserves the inline literal. Smaller than
+      [execution_timeout_sec] because the trust projection is
+      intentionally lighter — keeping the split visible lets operators
+      diagnose when trust scoring is the bottleneck vs. the full
+      execution surface. *)
+  let execution_trust_timeout_sec =
+    Float.max 1.0
+      (get_float ~default:30.0
+         "MASC_DASHBOARD_EXECUTION_TRUST_TIMEOUT_SEC")
 end
 
 (** {1 Internal Timers and TTLs}

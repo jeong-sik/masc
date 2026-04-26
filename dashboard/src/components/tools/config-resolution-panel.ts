@@ -14,6 +14,7 @@ import { fetchDashboardRuntimeProbe } from '../../api/dashboard'
 import { Card } from '../common/card'
 import { StatusChip } from '../common/status-chip'
 import { CopyIdButton } from '../common/copy-id-button'
+import { TextInput } from '../common/input'
 
 /** Pure: what string goes into the clipboard when the operator taps the
     copy icon next to a path row? Always the absolute path — not the
@@ -612,13 +613,13 @@ export function ConfigResolutionPanel({
                   </div>
                   ${runtimeResolution.diagnostics.length > 0
                     ? html`
-                        <input
+                        <${TextInput}
                           type="search"
                           value=${diagnosticsQuery.value}
                           placeholder="kind / signal / message 필터"
-                          aria-label="Diagnostics 필터"
+                          ariaLabel="Diagnostics 필터"
                           onInput=${(e: Event) => { diagnosticsQuery.value = (e.target as HTMLInputElement).value }}
-                          class="min-w-40 max-w-60 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--color-fg-primary)] placeholder:text-[var(--color-fg-disabled)] focus:outline-none focus:border-[var(--color-accent-fg)]"
+                          class="min-w-40 max-w-60 flex-1 !px-2 !py-1 !text-2xs"
                         />
                       `
                     : null}

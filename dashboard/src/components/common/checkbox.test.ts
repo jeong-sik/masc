@@ -99,6 +99,35 @@ describe('Checkbox', () => {
     expect(spy.mock.calls[0]![0]).toBe(false)
   })
 
+  it('onClick fires with the raw Event (for stopPropagation in clickable parents)', async () => {
+    // The motivating case: a checkbox inside a row whose row-onClick
+    // navigates somewhere. Without onClick + stopPropagation, toggling
+    // the checkbox would also navigate. This test verifies the prop
+    // forwards and the event reaches the handler with target intact.
+    const spy = vi.fn((e: Event) => { e.stopPropagation() })
+    render(html`<${Checkbox} onClick=${spy} />`, container)
+    const cb = container.querySelector('input') as HTMLInputElement
+    const ev = new MouseEvent('click', { bubbles: true, cancelable: true })
+    cb.dispatchEvent(ev)
+    await flushUi()
+    expect(spy).toHaveBeenCalledOnce()
+    const passed = spy.mock.calls[0]![0] as Event
+    expect(passed.target).toBe(cb)
+  })
+
+  it('onClick does not block onChange — both fire independently', async () => {
+    // Regression guard: forwarding onClick must not steal the change event.
+    const onClickSpy = vi.fn()
+    const onChangeSpy = vi.fn()
+    render(html`<${Checkbox} onClick=${onClickSpy} onChange=${onChangeSpy} />`, container)
+    const cb = container.querySelector('input') as HTMLInputElement
+    cb.checked = true
+    cb.dispatchEvent(new Event('change', { bubbles: true }))
+    await flushUi()
+    expect(onChangeSpy).toHaveBeenCalledOnce()
+    expect(onChangeSpy.mock.calls[0]![0]).toBe(true)
+  })
+
   it('extra `class` prop is appended to the base class string', () => {
     render(html`<${Checkbox} class="extra-hook" />`, container)
     expect(container.querySelector('input')!.className).toContain('extra-hook')

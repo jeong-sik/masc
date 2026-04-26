@@ -55,17 +55,23 @@ let default_base_path () =
   in
   Filename.concat root "cdal_verdicts"
 
-let lookup_latest_verdict ?base_dir
-    ?(limit = Env_config_runtime.Cdal.verdict_lookup_limit ())
-    ~task_id () : Cdal_types.contract_verdict option =
-  let base_dir =
-    match base_dir with
-    | Some dir -> dir
-    | None -> default_base_path ()
-  in
-  let store = Dated_jsonl.create ~base_dir () in
-  let recent = Dated_jsonl.read_recent store limit in
-  let result = List.fold_left (fun acc json ->
+(* #10731: window-widening factor.  When the initial [limit] saturates
+   without a match, retry once at [limit * widen_factor] to cover
+   verdicts pushed beyond the starting window by unrelated traffic.
+   Bounded single retry — not unbounded growth — so worst-case scan
+   cost stays predictable. *)
+let auto_widen_factor = 16
+
+(* #10731: in-process dedup for the "scan saturated" WARN.  Without
+   this, fleets that repeatedly look up the same task (e.g. dashboard
+   poll loops) emit the same operator advisory dozens of times per
+   hour.  We deliberately do not persist this across restarts —
+   restart is exactly when an operator wants to see the warning
+   again. *)
+let saturation_warn_emitted : (string, unit) Hashtbl.t = Hashtbl.create 16
+
+let scan_for_task_id ~task_id recent =
+  List.fold_left (fun acc json ->
     match json with
     | `Assoc fields ->
       (match List.assoc_opt "_task_id" fields with
@@ -76,16 +82,46 @@ let lookup_latest_verdict ?base_dir
           | Error _ -> acc)
        | _ -> acc)
     | _ -> acc
-  ) None recent in
-  (* #10115: distinguish three "verdict not found" cases so the
-     operator gets an accurate diagnosis.  The previous WARN
-     unconditionally said "older verdicts beyond window are
-     silently skipped" — true when the scan saturated [limit],
-     misleading when the ledger is empty or the writer pipeline
-     is dormant (12-day gap observed in production).  If the
-     operator follows the WARN's hint and bumps
-     [MASC_CDAL_VERDICT_LOOKUP_LIMIT], they spend cycles
-     investigating the wrong layer. *)
+  ) None recent
+
+let lookup_latest_verdict ?base_dir
+    ?(limit = Env_config_runtime.Cdal.verdict_lookup_limit ())
+    ~task_id () : Cdal_types.contract_verdict option =
+  let base_dir =
+    match base_dir with
+    | Some dir -> dir
+    | None -> default_base_path ()
+  in
+  let store = Dated_jsonl.create ~base_dir () in
+  let recent = Dated_jsonl.read_recent store limit in
+  let result = scan_for_task_id ~task_id recent in
+  (* #10731: auto-widen on saturation.  If [recent] reached [limit] and
+     no match was found, the verdict (if any) sits beyond the starting
+     window.  Re-scan once at [limit * auto_widen_factor] so the
+     operator does not have to guess [MASC_CDAL_VERDICT_LOOKUP_LIMIT].
+     We do not stream-read incrementally because [Dated_jsonl.read_recent]
+     returns lists and adding cursor support is out of scope here; the
+     re-read cost is paid only on miss with a saturated window. *)
+  let result, recent, used_limit =
+    match result with
+    | Some _ -> result, recent, limit
+    | None when List.length recent >= limit && auto_widen_factor > 1 ->
+      let widened = limit * auto_widen_factor in
+      Log.Task.info
+        "[cdal-gate] task_id=%s: starting window saturated (%d entries) \
+         without match; widening to %d and re-scanning"
+        task_id limit widened;
+      let recent2 = Dated_jsonl.read_recent store widened in
+      let result2 = scan_for_task_id ~task_id recent2 in
+      result2, recent2, widened
+    | None -> result, recent, limit
+  in
+  (* #10115: distinguish "verdict not found" cases so the operator gets
+     an accurate diagnosis.  Three sub-cases:
+       - ledger empty (writer dormant)
+       - scanned everything available, no match (verdict was never written)
+       - saturated even at the widened ceiling (unusually large ledger or
+         very old verdict — operator may need to raise the env knob).  *)
   (match result, recent with
    | Some _, _ -> ()
    | None, [] ->
@@ -94,19 +130,24 @@ let lookup_latest_verdict ?base_dir
         Writer pipeline likely dormant — check that OAS Agent.run \
         emits result.proof and Cdal_eval_v1.persist is reached. (#10115)"
        task_id base_dir
-   | None, _ when List.length recent >= limit ->
-     Log.Task.warn
-       "[cdal-gate] task_id=%s: scanned newest %d entries without \
-        match; older verdicts beyond window are silently skipped \
-        (raise MASC_CDAL_VERDICT_LOOKUP_LIMIT to widen the window)"
-       task_id limit
+   | None, _ when List.length recent >= used_limit ->
+     if not (Hashtbl.mem saturation_warn_emitted task_id) then begin
+       Hashtbl.add saturation_warn_emitted task_id ();
+       Log.Task.warn
+         "[cdal-gate] task_id=%s: scanned newest %d entries (auto-widened \
+          %dx from MASC_CDAL_VERDICT_LOOKUP_LIMIT=%d) without match; older \
+          verdicts beyond this ceiling are silently skipped. Raise \
+          MASC_CDAL_VERDICT_LOOKUP_LIMIT only if the verdict is known to \
+          exist farther back. (#10115 #10731)"
+         task_id used_limit auto_widen_factor limit
+     end
    | None, _ ->
      Log.Task.warn
        "[cdal-gate] task_id=%s: no verdict in current ledger window \
         (%d entries scanned, below limit=%d).  Either the task has \
         never been verified, or the writer pipeline is dormant — \
         bumping MASC_CDAL_VERDICT_LOOKUP_LIMIT will not help. (#10115)"
-       task_id (List.length recent) limit);
+       task_id (List.length recent) used_limit);
   result
 
 (* #10115: ledger health introspection.  Walks [base_dir/YYYY-MM/]

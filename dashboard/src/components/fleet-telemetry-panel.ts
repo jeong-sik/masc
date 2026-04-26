@@ -21,6 +21,7 @@ import { formatTimeAgo } from '../lib/format-time'
 import { isAbortError } from '../lib/async-state'
 import { requestConfirm } from './common/confirm-dialog'
 import { Sparkline } from './common/sparkline'
+import { TextInput } from './common/input'
 import { pushSnapshot, getTrend, type MetricKey, type TrendDirection } from './fleet-trend-store'
 import type { DashboardAttentionEvent, DashboardReadinessPillar } from '../types'
 import {
@@ -578,7 +579,7 @@ export function FleetTelemetryPanel() {
           ? toolQualityResult.value
           : EMPTY_TOOL_QUALITY
       if (toolQualityResult.status === 'rejected' && !isAbortError(toolQualityResult.reason)) {
-        warnings.push(`Tool quality unavailable: ${errorMessage(toolQualityResult.reason)}`)
+        warnings.push(`도구 품질 데이터 사용 불가: ${errorMessage(toolQualityResult.reason)}`)
       }
 
       const telemetrySummary =
@@ -586,7 +587,7 @@ export function FleetTelemetryPanel() {
           ? telemetrySummaryResult.value
           : { generated_at: '', sources: [], total_entries: 0 }
       if (telemetrySummaryResult.status === 'rejected' && !isAbortError(telemetrySummaryResult.reason)) {
-        warnings.push(`Telemetry store summary unavailable: ${errorMessage(telemetrySummaryResult.reason)}`)
+        warnings.push(`텔레메트리 저장소 요약 사용 불가: ${errorMessage(telemetrySummaryResult.reason)}`)
       }
       warnings.push(...buildTelemetryWarnings(telemetrySummary.sources))
 
@@ -595,7 +596,7 @@ export function FleetTelemetryPanel() {
           ? normalizeNamespaceTruth(namespaceTruthResult.value)
           : null
       if (namespaceTruthResult.status === 'rejected' && !isAbortError(namespaceTruthResult.reason)) {
-        warnings.push(`Control room unavailable: ${errorMessage(namespaceTruthResult.reason)}`)
+        warnings.push(`Control room 사용 불가: ${errorMessage(namespaceTruthResult.reason)}`)
       }
 
       const rows = buildFleetRows(keepers, toolQuality)
@@ -754,13 +755,13 @@ export function FleetTelemetryPanel() {
       <div>
         <div class="mb-1 flex items-center justify-between gap-2">
           <div class="text-3xs uppercase tracking-wider text-[var(--color-fg-disabled)]">Keeper 비교</div>
-          <input
+          <${TextInput}
             type="search"
             value=${query.value}
             placeholder="name / model / blocker 필터"
-            aria-label="Keeper 필터"
+            ariaLabel="Keeper 필터"
             onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
-            class="min-w-40 max-w-60 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--color-fg-primary)] placeholder:text-[var(--color-fg-disabled)] focus:outline-none focus:border-[var(--color-accent-fg)]"
+            class="min-w-40 max-w-60 flex-1 !px-2 !py-1 !text-2xs"
           />
         </div>
         ${isFiltering && visibleRows.length === 0 && value.rows.length > 0

@@ -7,6 +7,7 @@ import { EmptyState } from '../common/empty-state'
 import { ErrorState } from '../common/feedback-state'
 import { TextInput } from '../common/input'
 import { Select } from '../common/select'
+import { Checkbox } from '../common/checkbox'
 import { route } from '../../router'
 import type { DashboardToolInventoryItem } from '../../api'
 import { InventoryRow } from './tool-inventory-row'
@@ -154,32 +155,26 @@ export function FullInventoryView({
           onInput=${(v: string) => { categoryFilter.value = v }}
         />
         <label class="inline-flex items-center gap-2 text-xs text-[var(--color-fg-primary)]">
-          <input
-            type="checkbox"
+          <${Checkbox}
             checked=${directOnly.value}
-            onChange=${(e: Event) => {
-              directOnly.value = (e.target as HTMLInputElement).checked
-            }}
+            ariaLabel="직접 호출만"
+            onChange=${(checked: boolean) => { directOnly.value = checked }}
           />
           <span>직접 호출만</span>
         </label>
         <label class="inline-flex items-center gap-2 text-xs text-[var(--color-fg-primary)]">
-          <input
-            type="checkbox"
+          <${Checkbox}
             checked=${showHidden.value}
-            onChange=${(e: Event) => {
-              showHidden.value = (e.target as HTMLInputElement).checked
-            }}
+            ariaLabel="숨김 표시"
+            onChange=${(checked: boolean) => { showHidden.value = checked }}
           />
           <span>숨김 표시</span>
         </label>
         <label class="inline-flex items-center gap-2 text-xs text-[var(--color-fg-primary)]">
-          <input
-            type="checkbox"
+          <${Checkbox}
             checked=${showDeprecated.value}
-            onChange=${(e: Event) => {
-              showDeprecated.value = (e.target as HTMLInputElement).checked
-            }}
+            ariaLabel="지원 중단 표시"
+            onChange=${(checked: boolean) => { showDeprecated.value = checked }}
           />
           <span>지원 중단 표시</span>
         </label>

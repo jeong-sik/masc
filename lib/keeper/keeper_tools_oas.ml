@@ -346,7 +346,6 @@ let make_keeper_tool_handler
         let ts = Time_compat.now () in
         let duration_ms =
           int_of_float ((ts -. t0) *. 1000.0) in
-        let count = prior_fails + 1 in
         let error_text = Printexc.to_string exn in
         let edeadlk_backtrace =
           (* Mutex EDEADLK signature on macOS / Linux pthread errorcheck
@@ -358,7 +357,18 @@ let make_keeper_tool_handler
           then Some (Printexc.raw_backtrace_to_string raw_bt)
           else None
         in
-        Hashtbl.replace failure_counts key count;
+        let is_edeadlk = edeadlk_backtrace <> None in
+        (* #10567: EDEADLK is a transient mutex-contention race in shared
+           coord/keeper Stdlib.Mutex sites, not a real keeper-side failure.
+           Counting it toward [failure_counts] burns the consecutive-failure
+           budget (max 3) and ends the keeper turn even when the next call
+           would succeed.  Skip the counter bump and downgrade the log to
+           warn so dashboards don't conflate transient EDEADLK with real
+           tool errors. The #10682 EDEADLK backtrace logging stays so the
+           underlying Stdlib.Mutex site can still be pinpointed. *)
+        let count = if is_edeadlk then prior_fails else prior_fails + 1 in
+        if not is_edeadlk then
+          Hashtbl.replace failure_counts key count;
         Keeper_registry.record_tool_use ~base_path:config.base_path meta.name ~tool_name:name ~success:false;
         !Keeper_exec_tools.on_keeper_tool_call ~tool_name:name ~success:false ~duration_ms;
         (* Tool-call observability via OAS Event_bus. See above. *)
@@ -373,10 +383,18 @@ let make_keeper_tool_handler
             ("ts_unix", `Float ts);
           ])
          with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
-        let msg = Printf.sprintf "tool %s failed (%d/%d): %s"
-          name count max_consecutive_failures
-          (Printexc.to_string exn) in
-        Log.Keeper.error "%s" msg;
+        let msg =
+          if is_edeadlk then
+            Printf.sprintf
+              "tool %s hit transient mutex contention (EDEADLK); not counted toward consecutive-failure budget. Retry the same call or pick a different tool."
+              name
+          else
+            Printf.sprintf "tool %s failed (%d/%d): %s"
+              name count max_consecutive_failures
+              (Printexc.to_string exn)
+        in
+        if is_edeadlk then Log.Keeper.warn "%s" msg
+        else Log.Keeper.error "%s" msg;
         (match edeadlk_backtrace with
          | Some bt ->
              Log.Keeper.error

@@ -148,10 +148,10 @@ Responsibilities are split cleanly:
 | MASC-specific fold (`stub_tool_results`), repair (`repair_broken_tool_call_pairs`) | MASC (`context_compact_oas.ml`) |
 | Token/message count after compaction | OAS (source of truth) |
 | Audit persistence + retention | MASC (`keeper_compact_audit.ml`) |
-| SSE broadcast (dashboard) | MASC (`oas_sse_bridge.ml`) |
+| SSE broadcast (dashboard) | MASC (`oas_event_bridge.ml`) |
 
 Compaction events flow: **OAS publishes** on Event_bus → **multiple
-MASC subscribers** consume independently (oas_sse_bridge for SSE,
+MASC subscribers** consume independently (oas_event_bridge for SSE,
 keeper_compact_audit for persistence). Each subscriber has its own
 bounded stream — back-pressure in one does not affect the other.
 

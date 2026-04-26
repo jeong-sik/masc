@@ -47,15 +47,15 @@ describe('ctxColor', () => {
 
 describe('ctxSegmentLabel', () => {
   it('returns known label for system_prompt', () => {
-    expect(ctxSegmentLabel('system_prompt')).toBe('System prompt')
+    expect(ctxSegmentLabel('system_prompt')).toBe('시스템 프롬프트')
   })
 
   it('returns known label for dynamic_context', () => {
-    expect(ctxSegmentLabel('dynamic_context')).toBe('Turn context')
+    expect(ctxSegmentLabel('dynamic_context')).toBe('턴 컨텍스트')
   })
 
   it('returns known label for history_tool_use', () => {
-    expect(ctxSegmentLabel('history_tool_use')).toBe('History · tool use')
+    expect(ctxSegmentLabel('history_tool_use')).toBe('히스토리 · tool use')
   })
 
   it('replaces underscores for unknown keys', () => {
@@ -257,9 +257,9 @@ describe('filterCtxCompositionEntries', () => {
   })
 
   it('matches human label when raw key misses', () => {
-    // Raw key is `system_prompt`, label is `System prompt`.
-    // Searching for exactly `system prompt` (with the space) only hits the label.
-    const out = filterCtxCompositionEntries(ctxSample, 'system prompt')
+    // Raw key is `system_prompt`, label is `시스템 프롬프트` (round-50).
+    // Searching for the Korean label substring only hits the label, not the key.
+    const out = filterCtxCompositionEntries(ctxSample, '시스템 프롬프트')
     expect(out.map(([k]) => k)).toEqual(['system_prompt'])
   })
 

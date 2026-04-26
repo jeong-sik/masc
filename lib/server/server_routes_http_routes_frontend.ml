@@ -54,14 +54,6 @@ let with_canonical_loopback_host ~port handler request reqd =
 let redirect_to_dashboard reqd =
   respond_redirect ~location:"/dashboard" reqd
 
-let is_dashboard_observer_stream request =
-  match Server_utils.query_param request "sse_kind" with
-  | Some raw ->
-      let normalized = String.trim raw |> String.lowercase_ascii in
-      String.equal normalized "observer"
-      || String.equal normalized "dashboard"
-  | None -> false
-
 let websocket_discovery_handler request reqd =
   let body =
     websocket_discovery_json request |> Yojson.Safe.to_string
@@ -238,12 +230,7 @@ let add_routes ~port ~host router =
   |> Http.Router.get "/graphiql/react-dom.production.min.js"
        (serve_graphiql_asset "react-dom.production.min.js")
   |> Http.Router.get "/mcp" (fun request reqd ->
-       if is_dashboard_observer_stream request then
-         with_public_read (fun _state req reqd ->
-           handle_get_mcp ~sse_kind:Sse.Observer req reqd
-         ) request reqd
-       else
-         with_read_auth (fun _state req reqd -> handle_get_mcp req reqd) request reqd)
+       with_read_auth (fun _state req reqd -> handle_get_mcp req reqd) request reqd)
   |> Http.Router.post "/" handle_post_mcp
   |> Http.Router.post "/mcp" handle_post_mcp
   |> Http.Router.post "/mcp/managed"
@@ -260,12 +247,3 @@ let add_routes ~port ~host router =
        ~handler:(fun request reqd ->
          with_read_auth (fun _state req reqd -> handle_graphql req reqd) request reqd)
   |> Http.Router.post "/messages" handle_post_messages
-  |> Http.Router.get "/sse"
-       (fun request reqd ->
-         with_public_read (fun _state req reqd ->
-           handle_get_mcp ~sse_kind:Sse.Observer
-             ~legacy_messages_endpoint:(legacy_messages_endpoint_url req)
-             req reqd
-         ) request reqd)
-  |> Http.Router.get "/sse/simple" (fun request reqd ->
-       with_public_read (fun _state req reqd -> sse_simple_handler req reqd) request reqd)

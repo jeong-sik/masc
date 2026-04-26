@@ -447,7 +447,7 @@ describe('ConnectorStatusPanel', () => {
     const warningPanel = container.querySelector('[data-connector-warning-panel]') as HTMLElement | null
     expect(warningPanel).not.toBeNull()
     const text = warningPanel!.textContent?.replace(/\s+/g, ' ').trim() ?? ''
-    expect(text).toContain('Connector API unavailable')
+    expect(text).toContain('Connector API 사용 불가')
     expect(text).toContain('Cause: GET /api/v1/gate/connectors: 503 Service Unavailable')
     expect(text).toContain('Next: refresh the dashboard')
     expect(text).toContain('/api/v1/gate/connectors')
@@ -659,7 +659,7 @@ describe('ConnectorStatusPanel', () => {
     const text = container.textContent?.replace(/\s+/g, ' ').trim() ?? ''
     expect(text).toContain('사이드카 미시작')
     expect(text).toContain('cd sidecars/discord-bot && ./run.sh')
-    expect(text).toContain('원인: sidecar status 파일이')
+    expect(text).toContain('원인: 사이드카 status 파일이')
     expect(text).toContain('/tmp/discord_status.json')
     expect(text).toContain('관찰되지 않았습니다')
     expect(text).toContain('다음:')

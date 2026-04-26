@@ -61,16 +61,58 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
           (Printexc.to_string exn))
   in
   let wait_for_lazy_startup () =
+    (* #10843: per-task elapsed tracking so the autoboot wait log surfaces
+       which lazy task is hung instead of repeating an opaque pending list
+       every 5s. The hash table is local to this fiber — no global state,
+       no product-state machine changes. Threshold 60s mirrors the issue's
+       short-term recommendation; tasks above it are flagged HUNG and the
+       wait log escalates from INFO to WARN. *)
+    let started_at = Hashtbl.create 16 in
+    let hung_threshold_sec = 60.0 in
+    let format_pending now pending =
+      pending
+      |> List.map (fun task ->
+          let elapsed =
+            match Hashtbl.find_opt started_at task with
+            | Some t -> now -. t
+            | None -> 0.0
+          in
+          let tag =
+            if elapsed >= hung_threshold_sec then "HUNG" else "running"
+          in
+          Printf.sprintf "%s (%s %.1fs)" task tag elapsed)
+      |> String.concat ", "
+    in
     let rec loop last_log_at =
       let pending = Server_startup_state.pending_lazy_tasks () in
       if pending = [] then ()
       else begin
         let now = Eio.Time.now clock in
+        List.iter
+          (fun task ->
+            if not (Hashtbl.mem started_at task) then
+              Hashtbl.add started_at task now)
+          pending;
+        Hashtbl.filter_map_inplace
+          (fun task t -> if List.mem task pending then Some t else None)
+          started_at;
         let last_log_at =
           if now -. last_log_at >= 5.0 then begin
-            Log.Keeper.info
+            let max_elapsed =
+              List.fold_left
+                (fun m task ->
+                  match Hashtbl.find_opt started_at task with
+                  | Some s -> Float.max m (now -. s)
+                  | None -> m)
+                0.0 pending
+            in
+            let log_fn =
+              if max_elapsed >= hung_threshold_sec then Log.Keeper.warn
+              else Log.Keeper.info
+            in
+            log_fn
               "autoboot: waiting for lazy startup tasks to finish before keeper boot [%s]"
-              (String.concat ", " pending);
+              (format_pending now pending);
             now
           end else
             last_log_at

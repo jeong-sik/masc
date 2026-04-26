@@ -12,6 +12,7 @@ import {
 } from '../lib/keeper-runtime-display'
 import { signal } from '@preact/signals'
 import { useEffect, useRef, useState } from 'preact/hooks'
+import { ActionButton } from './common/button'
 import { requestConfirm } from './common/confirm-dialog'
 import { isRecord } from './common/normalize'
 import { currentDashboardActor, runOperatorAction } from '../api'
@@ -25,6 +26,8 @@ import {
   wakeKeeper,
 } from '../api/keeper'
 import { TimeAgo } from './common/time-ago'
+import { Checkbox } from './common/checkbox'
+import { TextArea } from './common/input'
 import type { Keeper } from '../types'
 import { invalidateDashboardCache, refreshDashboard } from '../store'
 import { hydrateKeeperStatus, selectKeeper } from '../keeper-runtime'
@@ -514,23 +517,24 @@ function KeeperClearContextDialog({
 
         <label class="flex flex-col gap-2">
           <span class="text-2xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">사유</span>
-          <textarea
-            ref=${reasonRef}
-            class="min-h-[112px] resize-y rounded border border-[var(--color-border-default)] bg-[var(--white-3)] px-3 py-2 text-sm leading-paragraph text-[var(--color-fg-primary)] outline-none focus:border-[var(--accent-45)] focus:ring-2 focus:ring-[var(--accent-18)]"
+          <${TextArea}
+            inputRef=${reasonRef}
+            class="!bg-[var(--white-3)] !min-h-[112px] !text-sm leading-paragraph"
             placeholder="예: stale continuity replay 제거"
+            ariaLabel="비우기 사유"
             disabled=${pending}
             value=${reason}
             onInput=${(event: Event) => onReasonInput((event.currentTarget as HTMLTextAreaElement).value)}
-          ></textarea>
+          />
         </label>
 
         <label class="flex items-start gap-3 rounded border border-[var(--color-border-default)] bg-[var(--white-2)] px-3 py-3 text-xs text-[var(--color-fg-primary)]">
-          <input
-            type="checkbox"
+          <${Checkbox}
             class="mt-0.5"
             checked=${preserveSystemPrompt}
             disabled=${pending}
-            onChange=${(event: Event) => onPreserveToggle((event.currentTarget as HTMLInputElement).checked)}
+            ariaLabel="system prompt 보존"
+            onChange=${(checked: boolean) => onPreserveToggle(checked)}
           />
           <span>
             system prompt는 보존하고 나머지 메시지만 비웁니다.
@@ -543,12 +547,12 @@ function KeeperClearContextDialog({
         </div>
 
         <div class="flex items-center justify-end gap-2">
-          <button
-            type="button"
-            class="px-4 py-2 rounded text-sm font-medium border border-[var(--color-border-default)] bg-[var(--white-4)] text-[var(--color-fg-primary)] hover:bg-[var(--white-8)] transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+          <${ActionButton}
+            variant="ghost"
+            size="lg"
             disabled=${pending}
             onClick=${onClose}
-          >취소</button>
+          >취소<//>
           <button
             type="button"
             class="px-4 py-2 rounded text-sm font-medium border border-transparent bg-[var(--color-status-err)] text-white hover:bg-[rgba(239,68,68,0.88)] transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"

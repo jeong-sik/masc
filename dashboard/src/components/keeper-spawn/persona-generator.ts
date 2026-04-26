@@ -3,6 +3,8 @@ import { useEffect } from 'preact/hooks'
 import { signal } from '@preact/signals'
 import { ActionButton } from '../common/button'
 import { Select } from '../common/select'
+import { Checkbox } from '../common/checkbox'
+import { TextInput } from '../common/input'
 import { showToast } from '../common/toast'
 import {
   generatePersonaDraft,
@@ -122,20 +124,24 @@ export function PersonaGenerator() {
         <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
           <label class="grid gap-1 text-3xs text-[var(--color-fg-muted)]">
             handle
-            <input
+            <${TextInput}
+              type="text"
               value=${handle.value}
               placeholder="auto"
+              ariaLabel="persona handle"
               onInput=${(e: Event) => { handle.value = (e.target as HTMLInputElement).value }}
-              class="rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1.5 text-2xs text-[var(--color-fg-primary)] focus:outline-none focus:border-[var(--color-accent-fg)]"
+              class="!px-2 !py-1.5 !text-2xs"
             />
           </label>
           <label class="grid gap-1 text-3xs text-[var(--color-fg-muted)]">
             display
-            <input
+            <${TextInput}
+              type="text"
               value=${displayName.value}
               placeholder="auto"
+              ariaLabel="persona display name"
               onInput=${(e: Event) => { displayName.value = (e.target as HTMLInputElement).value }}
-              class="rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1.5 text-2xs text-[var(--color-fg-primary)] focus:outline-none focus:border-[var(--color-accent-fg)]"
+              class="!px-2 !py-1.5 !text-2xs"
             />
           </label>
           <label class="grid gap-1 text-3xs text-[var(--color-fg-muted)]">
@@ -149,10 +155,10 @@ export function PersonaGenerator() {
             />
           </label>
           <label class="flex items-center gap-2 pt-5 text-2xs text-[var(--color-fg-primary)]">
-            <input
-              type="checkbox"
+            <${Checkbox}
               checked=${proactiveEnabled.value}
-              onChange=${(e: Event) => { proactiveEnabled.value = (e.target as HTMLInputElement).checked }}
+              ariaLabel="proactive"
+              onChange=${(checked: boolean) => { proactiveEnabled.value = checked }}
             />
             proactive
           </label>
@@ -180,10 +186,10 @@ export function PersonaGenerator() {
             onClick=${() => void saveDraft(false)}
           >${personaSaving.value ? '저장 중...' : '저장'}<//>
           <label class="flex items-center gap-1.5 text-3xs text-[var(--color-fg-muted)]">
-            <input
-              type="checkbox"
+            <${Checkbox}
               checked=${overwrite.value}
-              onChange=${(e: Event) => { overwrite.value = (e.target as HTMLInputElement).checked }}
+              ariaLabel="overwrite"
+              onChange=${(checked: boolean) => { overwrite.value = checked }}
             />
             overwrite
           </label>

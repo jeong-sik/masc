@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
+import { ActionButton } from './common/button'
 import { requestConfirm } from './common/confirm-dialog'
 import {
   deleteKeeperHistorySnapshots,
@@ -8,6 +9,7 @@ import {
   type KeeperCheckpointSummary,
 } from '../api/keeper'
 import { TextInput } from './common/input'
+import { Checkbox } from './common/checkbox'
 import { TimeAgo } from './common/time-ago'
 import { keeperStatusDetails } from '../keeper-state'
 import { isRecord } from './common/normalize'
@@ -199,11 +201,11 @@ export function KeeperCheckpointPanel({
             : null}
         </div>
         <div class="flex items-center gap-2">
-          <button
-            type="button"
-            class="rounded border border-[var(--color-border-default)] bg-[var(--white-4)] px-3 py-1.5 text-2xs font-semibold text-[var(--color-fg-primary)] hover:bg-[var(--white-8)] cursor-pointer"
+          <${ActionButton}
+            variant="ghost"
+            size="md"
             onClick=${loadInventory}
-          >새로고침</button>
+          >새로고침<//>
           <button
             type="button"
             class="rounded border border-[var(--bad-30)] bg-[var(--bad-10)] px-3 py-1.5 text-2xs font-semibold text-[var(--rose-light)] hover:bg-[var(--bad-soft)] cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
@@ -247,11 +249,11 @@ export function KeeperCheckpointPanel({
                 <div class="flex flex-col">
                   ${visibleHistory.map(item => html`
                     <label class="flex gap-3 border-b border-[var(--color-border-default)] px-3 py-3 text-xs last:border-b-0">
-                      <input
-                        type="checkbox"
+                      <${Checkbox}
                         class="mt-1"
                         checked=${selectedIds.includes(item.snapshot_id)}
-                        onChange=${(event: Event) => toggleSnapshot(item.snapshot_id, (event.currentTarget as HTMLInputElement).checked)}
+                        ariaLabel=${`snapshot ${item.snapshot_id} 선택`}
+                        onChange=${(checked: boolean) => toggleSnapshot(item.snapshot_id, checked)}
                       />
                       <div class="min-w-0 flex-1">
                         <div class="flex flex-wrap items-center gap-2">

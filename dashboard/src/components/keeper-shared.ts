@@ -175,7 +175,7 @@ export function KeeperDiagnosticSummary({
     try {
       await hydrateKeeperStatus(keeper.name, true)
     } catch (err) {
-      const message = err instanceof Error ? err.message : `Failed to inspect ${keeper.name}`
+      const message = err instanceof Error ? err.message : `${keeper.name} 점검 실패`
       showToast(message, 'error')
     }
   }
@@ -283,7 +283,7 @@ export function KeeperConversationPanel({
       await sendKeeperThreadMessage(keeperName, prompt)
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') return
-      const message = err instanceof Error ? err.message : `Failed to message ${keeperName}`
+      const message = err instanceof Error ? err.message : `${keeperName} 메시지 전송 실패`
       showToast(message, 'error')
     }
   }
@@ -411,7 +411,7 @@ export function KeeperRuntimeActions({
         class=${recommended === 'probe' ? activeGhostBtn : ghostBtn}
         onClick=${() => {
           void probeKeeperRuntime(keeper.name, actor).catch(err => {
-            const message = err instanceof Error ? err.message : `Failed to probe ${keeper.name}`
+            const message = err instanceof Error ? err.message : `${keeper.name} 점검 실패`
             showToast(message, 'error')
           })
         }}
@@ -423,7 +423,7 @@ export function KeeperRuntimeActions({
         class=${recommended === 'recover' ? activeSecondaryBtn : secondaryBtn}
         onClick=${() => {
           void recoverKeeperRuntime(keeper.name, actor).catch(err => {
-            const message = err instanceof Error ? err.message : `Failed to recover ${keeper.name}`
+            const message = err instanceof Error ? err.message : `${keeper.name} 복구 실패`
             showToast(message, 'error')
           })
         }}

@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark-fantasy">
+<head>
+<meta charset="UTF-8" />
+<title>MASC — Observatory</title>
+<link rel="stylesheet" href="../colors_and_type.css" />
+<style>
+  :root {
+    --hair: rgba(120, 100, 80, 0.14);
+    --hair-strong: rgba(160, 140, 110, 0.22);
+  }
+  body {
+    margin: 0; min-height: 100vh;
+    background: var(--bg-deep);
+    color: var(--text-primary);
+    font-family: var(--font-body);
+  }
+  body::before {
+    content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' seed='3'/><feColorMatrix values='0 0 0 0 0.1  0 0 0 0 0.08  0 0 0 0 0.06  0 0 0 0.35 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)' opacity='0.35'/></svg>");
+    mix-blend-mode: multiply; opacity: 0.5;
+  }
+
+  .shell {
+    position: relative; z-index: 1;
+    max-width: 1240px; margin: 0 auto;
+    padding: 0 40px;
+    min-height: 100vh;
+    display: grid; grid-template-rows: 52px 1fr 44px;
+  }
+
+  /* ───── Top bar ───── */
+  .topbar {
+    display: flex; align-items: center; justify-content: space-between;
+    border-bottom: 1px solid var(--hair);
+    font-family: var(--font-ui); font-size: 11px; letter-spacing: 0.22em; color: var(--text-dim); text-transform: uppercase;
+  }
+  .topbar .left { display: flex; align-items: center; gap: 14px; }
+  .topbar .brand { color: var(--text-bright); letter-spacing: 0.26em; display: inline-flex; align-items: center; gap: 6px; }
+  .topbar .brand .dot { display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: var(--accent-blood); }
+  .topbar .sep { width: 1px; height: 12px; background: var(--hair-strong); }
+  .topbar nav { display: flex; gap: 22px; }
+  .topbar nav a { color: var(--text-dim); text-decoration: none; }
+  .topbar nav a.active { color: var(--text-bright); }
+  .topbar .right { display: flex; align-items: center; gap: 12px; text-transform: none; letter-spacing: 0.08em; font-family: var(--font-mono); font-size: 11px; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 3px 8px; border: 1px solid var(--hair); color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+  }
+  .chip .led { width: 6px; height: 6px; border-radius: 50%; background: #7a9c6e; box-shadow: 0 0 0 0 rgba(122,156,110,0.6); animation: pulse 2s infinite; }
+  .chip.warn .led { background: #b08a3a; }
+  .chip.bad .led  { background: var(--accent-blood); }
+  .chip .k { color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.22em; font-family: var(--font-ui); font-size: 10px; }
+  .chip .v { color: var(--text-bright); }
+  @keyframes pulse {
+    0% { box-shadow: 0 0 0 0 rgba(122,156,110,0.5); }
+    70% { box-shadow: 0 0 0 6px rgba(122,156,110,0); }
+    100% { box-shadow: 0 0 0 0 rgba(122,156,110,0); }
+  }
+
+  /* ───── Main ───── */
+  main {
+    padding: 44px 0 28px;
+    display: grid;
+    grid-template-columns: minmax(320px, 1.1fr) minmax(380px, 1fr);
+    gap: 48px;
+    align-content: start;
+  }
+
+  /* Title column */
+  .mark-row { display: flex; align-items: baseline; gap: 12px; }
+  .mark-row .logo {
+    font-family: var(--font-display);
+    font-size: 34px; line-height: 1; letter-spacing: 0.14em;
+    color: var(--text-bright);
+  }
+  .mark-row .logo .dot { display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: var(--accent-blood); margin-left: 6px; transform: translateY(-10px); }
+  .mark-row .tag {
+    font-family: var(--font-ui); font-size: 10px; letter-spacing: 0.3em;
+    color: var(--text-dim); text-transform: uppercase;
+  }
+
+  .lede {
+    margin-top: 22px; max-width: 520px;
+    font-size: 15px; line-height: 1.65; color: var(--text-primary);
+  }
+  .lede em { color: var(--text-bright); font-style: normal; }
+  .kor { margin-top: 14px; max-width: 520px; font-size: 13px; line-height: 1.7; color: var(--text-dim); }
+
+  .actions {
+    margin-top: 28px; display: flex; gap: 10px; align-items: center;
+  }
+  .btn {
+    font-family: var(--font-ui); font-size: 11px; letter-spacing: 0.22em; text-transform: uppercase;
+    padding: 10px 18px; border: 1px solid var(--hair-strong); background: transparent;
+    color: var(--text-bright); text-decoration: none; cursor: pointer;
+  }
+  .btn.primary { border-color: var(--text-dim); }
+  .btn.ghost { color: var(--text-dim); }
+  .hint { font-family: var(--font-ui); font-size: 10px; letter-spacing: 0.26em; color: var(--text-dim); text-transform: uppercase; }
+
+  /* Status panel */
+  .status {
+    border: 1px solid var(--hair);
+    background: rgba(14, 10, 8, 0.4);
+    padding: 20px 22px;
+  }
+  .status h3 {
+    margin: 0 0 14px;
+    font-family: var(--font-ui); font-size: 10px; letter-spacing: 0.3em;
+    color: var(--text-dim); text-transform: uppercase; font-weight: 500;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .status h3 .r { display: inline-flex; align-items: center; gap: 10px; color: var(--text-primary); letter-spacing: 0.22em; }
+
+  .rows { display: grid; grid-template-columns: 1fr auto; row-gap: 10px; column-gap: 16px; }
+  .rows dt { font-family: var(--font-ui); font-size: 10px; letter-spacing: 0.24em; color: var(--text-dim); text-transform: uppercase; align-self: center; }
+  .rows dd { margin: 0; font-size: 14px; color: var(--text-bright); font-variant-numeric: tabular-nums; text-align: right; }
+  .rows dd .dim { color: var(--text-dim); }
+  .rows dd.warn { color: var(--accent-blood); }
+  .rows .rule { grid-column: 1 / -1; height: 1px; background: var(--hair); }
+
+  .agents { margin-top: 18px; display: flex; flex-direction: column; gap: 6px; }
+  .agent { display: grid; grid-template-columns: 10px 1fr auto; gap: 12px; align-items: center; font-size: 13px; }
+  .agent .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-dim); }
+  .agent.ok .dot   { background: #7a9c6e; }
+  .agent.warn .dot { background: #b08a3a; }
+  .agent.dead .dot { background: var(--accent-blood); }
+  .agent .name { color: var(--text-bright); font-family: var(--font-mono); letter-spacing: 0.04em; }
+  .agent .state { font-family: var(--font-ui); font-size: 10px; letter-spacing: 0.22em; color: var(--text-dim); text-transform: uppercase; }
+  .agent.dead .state { color: var(--accent-blood); }
+
+  /* ───── Bottom bar ───── */
+  .bottombar {
+    display: flex; align-items: center; justify-content: space-between;
+    border-top: 1px solid var(--hair);
+    font-family: var(--font-mono); font-size: 11px; color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+  }
+  .bottombar .cluster { display: flex; align-items: center; gap: 16px; }
+  .bottombar .k { color: var(--text-dim); font-family: var(--font-ui); font-size: 10px; letter-spacing: 0.26em; text-transform: uppercase; }
+  .bottombar .v { color: var(--text-primary); }
+  .bottombar code { color: var(--text-bright); }
+
+  @media (max-width: 960px) {
+    .topbar .right .chip.hide-md { display: none; }
+  }
+  @media (max-width: 860px) {
+    main { grid-template-columns: 1fr; gap: 28px; padding: 32px 0; }
+  }
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <header class="topbar">
+    <div class="left">
+      <span class="brand">MASC<span class="dot"></span></span>
+      <span class="sep"></span>
+      <nav>
+        <a href="#" class="active">Observatory</a>
+        <a href="#">Agents</a>
+        <a href="#">Ledger</a>
+        <a href="#">Docs</a>
+      </nav>
+    </div>
+    <div class="right">
+      <span class="chip hide-md"><span class="led"></span><span class="k">sse</span><span class="v">open</span></span>
+      <span class="chip hide-md"><span class="k">lat</span><span class="v">38 ms</span></span>
+      <span class="chip hide-md"><span class="k">ver</span><span class="v">0.3.2</span></span>
+      <span class="chip hide-md"><span class="k">sha</span><span class="v">a91f7c3</span></span>
+      <span class="sep"></span>
+      <span class="chip"><span class="k">env</span><span class="v">quiet-fox · local</span></span>
+    </div>
+  </header>
+
+  <main>
+    <section>
+      <div class="mark-row">
+        <div class="logo">MASC<span class="dot"></span></div>
+        <div class="tag">Multi-Agent Sustained Chronicle</div>
+      </div>
+
+      <p class="lede">
+        A small observatory for persistent agents. They run continuously —
+        working, arguing, sometimes crashing. Restarts cost something.
+      </p>
+      <p class="kor">
+        여러 에이전트가 지속적으로 실행되며 작업한다. 관찰하고, 재시작 비용을 기록한다.
+      </p>
+
+      <div class="actions">
+        <a class="btn primary" href="#">Open observatory</a>
+        <a class="btn ghost" href="#">Read the codex</a>
+        <span class="hint">⌘K · commands</span>
+      </div>
+    </section>
+
+    <aside class="status">
+      <h3>
+        <span>System</span>
+        <span class="r">T3 · tick 38ms</span>
+      </h3>
+
+      <dl class="rows">
+        <dt>Session</dt>         <dd>quiet-fox</dd>
+        <dt>Uptime</dt>          <dd>6d 14h</dd>
+        <dt>Agents</dt>           <dd>4 <span class="dim">of 5</span></dd>
+        <dt>Restart debt</dt>    <dd class="warn">9 / 20</dd>
+        <dt>Entries</dt>         <dd>1,208</dd>
+        <div class="rule"></div>
+      </dl>
+
+      <div class="agents">
+        <div class="agent ok">  <span class="dot"></span><span class="name">grimja</span>   <span class="state">working</span></div>
+        <div class="agent ok">  <span class="dot"></span><span class="name">iron</span>     <span class="state">reading</span></div>
+        <div class="agent warn"><span class="dot"></span><span class="name">luna</span>     <span class="state">stalled · 42s</span></div>
+        <div class="agent ok">  <span class="dot"></span><span class="name">moth</span>     <span class="state">idle</span></div>
+        <div class="agent dead"><span class="dot"></span><span class="name">cedric</span>   <span class="state">crashed · t2</span></div>
+      </div>
+    </aside>
+  </main>
+
+  <footer class="bottombar">
+    <div class="cluster">
+      <span class="k">sse</span><span class="v">open · 38 ms</span>
+      <span class="k">build</span><code>0.3.2 · a91f7c3</code>
+      <span class="k">node</span><span class="v">localhost:7878</span>
+    </div>
+    <div class="cluster">
+      <span class="k">region</span><span class="v">local</span>
+      <span class="k">tz</span><span class="v">kst · 02:14</span>
+    </div>
+  </footer>
+
+</div>
+</body>
+</html>

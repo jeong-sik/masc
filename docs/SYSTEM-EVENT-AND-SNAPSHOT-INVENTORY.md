@@ -15,14 +15,14 @@ This document is the operator-facing SSOT for:
 - Keeper composite signal path: `lib/keeper/keeper_registry.ml`
 - Keeper heartbeat snapshot path: `lib/keeper/keeper_keepalive.ml`
 - Server-push snapshot loops: `lib/server/server_dashboard_http_core.ml`, `lib/server/server_dashboard_http_execution_surfaces.ml`
-- OAS Event_bus bridge: `lib/oas_events.ml`, `lib/oas_sse_bridge.ml`
+- OAS Event_bus bridge: `lib/oas_events.ml`, `lib/oas_event_bridge.ml`
 
 ## Read Model Rules
 
 - SSE is freshness transport, not the authoritative read model.
 - `keeper_composite_changed` is signal-only. Consumers re-fetch `/api/v1/keepers/:name/composite`.
 - `operator_snapshot` and `operator_digest` are cached server-push surfaces. Default HTTP reads usually return the cache.
-- OAS bridge events are replayable because `oas_sse_bridge` persists them under `.masc/oas-events/`.
+- OAS bridge events are replayable because `oas_event_bridge` persists them under `.masc/oas-events/`.
 
 ## Timing and Trigger Semantics
 
@@ -180,7 +180,7 @@ Source of accepted event names on the dashboard side: `dashboard/src/types/sse.t
 
 ### 2. OAS custom events published by MASC
 
-These originate in `lib/oas_events.ml` and are later relayed by `oas_sse_bridge`.
+These originate in `lib/oas_events.ml` and are later relayed by `oas_event_bridge`.
 
 | Event name | Meaning |
 | --- | --- |
@@ -356,5 +356,5 @@ Meaning:
 - Composite producer: `lib/keeper/keeper_registry.ml`
 - Heartbeat snapshot writer: `lib/keeper/keeper_keepalive.ml`
 - OAS custom event publishers: `lib/oas_events.ml`
-- OAS bridge + durable replay: `lib/oas_sse_bridge.ml`
+- OAS bridge + durable replay: `lib/oas_event_bridge.ml`
 - Server-push snapshot loops: `lib/server/server_dashboard_http_core.ml`, `lib/server/server_dashboard_http_execution_surfaces.ml`, `lib/server/server_dashboard_http_namespace_truth.ml`

@@ -10,6 +10,7 @@ import { ActionButton } from './common/button'
 import { FilterChips } from './common/filter-chips'
 import { TimeAgo } from './common/time-ago'
 import { Sparkline } from './common/sparkline'
+import { TextInput } from './common/input'
 import { ActivityHeatmap } from './activity-heatmap'
 import { KeeperPhaseTimeline } from './keeper-phase-strip'
 import { CollapsibleSection } from './common/collapsible'
@@ -182,13 +183,13 @@ function ActionTimeline({ data }: { data: ActivityGraphResponse }) {
         </div>
         <div class="flex flex-wrap items-center gap-2">
           <${FilterChips} chips=${chips} active=${actionFilter} tone="accent" />
-          <input
+          <${TextInput}
             type="search"
             value=${query}
             placeholder="액션 필터 (title, actor, subject...)"
-            aria-label="액션 타임라인 필터"
+            ariaLabel="액션 타임라인 필터"
             onInput=${(e: Event) => { actionQuery.value = (e.target as HTMLInputElement).value }}
-            class="min-w-40 max-w-60 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--color-fg-primary)] placeholder:text-[var(--color-fg-disabled)] focus:outline-none focus:border-[var(--color-accent-fg)]"
+            class="min-w-40 max-w-60 flex-1 !px-2 !py-1 !text-2xs"
           />
           <button
             type="button"

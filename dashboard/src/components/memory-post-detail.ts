@@ -9,6 +9,7 @@ import { EmptyState } from './common/empty-state'
 import { LoadingState } from './common/feedback-state'
 import { RichComposer } from './common/rich-composer'
 import { RichContent } from './common/rich-content'
+import { TextInput } from './common/input'
 import { stripStateBlocks } from '../keeper-message'
 import { navigate } from '../router'
 import {
@@ -221,13 +222,13 @@ export function CommentThread({ comments, postId }: { comments: BoardComment[]; 
     <div class="flex flex-col gap-2">
       <div class="flex items-center gap-2 mb-1">
         <div class="text-2xs text-[var(--color-fg-muted)]">댓글 ${comments.length}개${isFiltering ? ` · 일치 ${filteredRoots.length}` : ''}</div>
-        <input
+        <${TextInput}
           type="search"
           value=${query.value}
           placeholder="댓글 내용 검색"
-          aria-label="댓글 필터"
+          ariaLabel="댓글 필터"
           onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
-          class="ml-auto min-w-35 max-w-55 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--color-fg-primary)] placeholder:text-[var(--color-fg-disabled)] focus:outline-none focus:border-[var(--color-accent-fg)]"
+          class="ml-auto min-w-35 max-w-55 flex-1 !px-2 !py-1 !text-2xs"
         />
       </div>
       ${isFiltering && filteredRoots.length === 0 ? html`

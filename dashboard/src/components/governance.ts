@@ -12,6 +12,7 @@ import { EmptyState } from './common/empty-state'
 import { StatusDot } from './common/status-dot'
 import { JsonViewerCard } from './common/json-viewer'
 import { ActionButton } from './common/button'
+import { TextInput } from './common/input'
 import {
   governanceData,
   governanceError,
@@ -122,12 +123,12 @@ function GovernanceSummaryStrip() {
       <${KpiCard}
         label="Judge 상태"
         value=${liveJudgeState}
-        hint=${judge?.keeper_name?.trim() || 'live judge'}
+        hint=${judge?.keeper_name?.trim() || '실시간 judge'}
         tone=${judgeUnhealthy ? 'text-warn' : (judgeHealthy ? 'text-ok' : undefined)}
         class=${judgeUnhealthy ? 'border-warn/40 bg-warn/5 ring-1 ring-warn/25' : (judgeHealthy ? 'border-ok/30 bg-ok/5' : '')}
       />
-      <${KpiCard} label="Judge 모델" value=${liveJudgeModel} hint=${judge?.model_used?.trim() ? 'runtime reported' : 'unknown'} />
-      <${KpiCard} label="최근 판단" value=${judgmentCount} hint="live" />
+      <${KpiCard} label="Judge 모델" value=${liveJudgeModel} hint=${judge?.model_used?.trim() ? '런타임 보고' : '알 수 없음'} />
+      <${KpiCard} label="최근 판단" value=${judgmentCount} hint="실시간" />
       <${KpiCard}
         label="관리자 승인 대기"
         value=${approvalCount}
@@ -491,14 +492,14 @@ function KeeperApprovalQueueSection() {
       </div>
       ${hasItems ? html`
         <div class="mb-3 flex items-center gap-2">
-          <input
+          <${TextInput}
             type="search"
             value=${query.value}
             placeholder="keeper / tool / 위험도 필터"
-            aria-label="Keeper HITL 승인 필터"
-            data-testid="keeper-hitl-approval-filter"
+            ariaLabel="Keeper HITL 승인 필터"
+            testId="keeper-hitl-approval-filter"
             onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
-            class="min-w-40 max-w-70 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--color-fg-primary)] placeholder:text-[var(--color-fg-disabled)] focus:outline-none focus:border-[var(--color-accent-fg)]"
+            class="min-w-40 max-w-70 flex-1 !px-2 !py-1 !text-2xs"
           />
         </div>
       ` : null}

@@ -108,14 +108,16 @@ function KanbanCard({ task }: { task: Task }) {
           <span class="rounded border border-current/20 px-2 py-0.5 text-2xs font-semibold">${priorityLabel(p)}</span>
           ${scope ? html`<span class="rounded border border-card-border/70 bg-white/5 px-2 py-0.5 text-2xs font-medium text-text-body">${scope}</span>` : null}
         </div>
-        <button
-          type="button"
-          class="rounded border border-[var(--bad-30)] bg-[var(--bad-10)] px-2 py-1 text-3xs font-semibold text-[var(--bad-light)] transition-colors hover:bg-[rgba(239,68,68,0.16)] disabled:opacity-50 disabled:cursor-not-allowed"
+        <${ActionButton}
+          variant="danger"
+          size="sm"
           onClick=${handleDelete}
           disabled=${isDeleting}
+          ariaBusy=${isDeleting}
+          ariaLabel=${`태스크 삭제: ${task.title}`}
         >
           ${isDeleting ? '삭제 중...' : '삭제'}
-        </button>
+        <//>
       </div>
 
       <button

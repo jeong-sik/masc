@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { useEffect, useMemo, useReducer, useRef, useState } from 'preact/hooks'
 import { InlineSpinner } from './common/inline-spinner'
+import { TextInput } from './common/input'
 
 import {
   fetchKeeperComposite,
@@ -403,13 +404,21 @@ export function FsmHub(props: FsmHubProps = {}) {
 
   useEffect(() => {
     if (paused) return undefined
+    // pollTick was previously a dep, but the interval body already
+    // self-triggers via setPollTick(t => t + 1) — including pollTick
+    // forced clearInterval + setInterval every 30 s for nothing.
     const id = setInterval(() => setPollTick(t => t + 1), 30_000)
     return () => clearInterval(id)
-  }, [paused, pollTick])
+  }, [paused])
 
   useEffect(() => {
     if (paused) return undefined
-    const id = setInterval(() => setNow(Date.now() / 1000), 1_000)
+    // 5s tick: full FSM hub re-renders + deriveLaneDwellHistograms recomputes
+    // each interval. Operator-visible elapsed strings (`fmtDuration`) read
+    // sub-minute precision; 5s granularity is below visual perception
+    // threshold for the dwell/transition surfaces and divides per-second
+    // re-render cost by 5x for a 1012-line component with 9 child renders.
+    const id = setInterval(() => setNow(Date.now() / 1000), 5_000)
     return () => clearInterval(id)
   }, [paused])
 
@@ -785,13 +794,13 @@ function StatusBar({
         </div>
         <div class="flex items-center gap-1.5 flex-wrap" role="tablist" aria-label="Keeper 선택">
           ${keeperNames.length > 0 ? html`
-            <input
+            <${TextInput}
               type="search"
               value=${keeperFilter}
               placeholder="keeper 이름 필터"
-              aria-label="Keeper 이름 필터"
+              ariaLabel="Keeper 이름 필터"
               onInput=${(e: Event) => onKeeperFilterChange((e.target as HTMLInputElement).value)}
-              class="min-w-30 max-w-45 rounded-sm border border-[var(--white-10)] bg-[var(--white-3)] px-2.5 py-0.5 text-3xs font-mono text-[var(--color-fg-primary)] placeholder:text-[var(--color-fg-disabled)] focus:outline-none focus:border-[var(--accent-30)]"
+              class="min-w-30 max-w-45 !rounded-sm !bg-[var(--white-3)] !px-2.5 !py-0.5 !text-3xs font-mono"
             />
           ` : null}
           ${keeperFilterHasNoMatch ? html`

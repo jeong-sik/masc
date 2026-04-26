@@ -136,6 +136,21 @@ let test_agent_status_of_string_opt () =
   check bool "active Some" true (Types.agent_status_of_string_opt "active" = Some Types.Active);
   check bool "unknown None" true (Types.agent_status_of_string_opt "unknown" = None)
 
+(* #10748: Result-based parser must not collapse unknown input to a
+   default — explicit Error preserves the original string so callers
+   can log/route the diagnostic instead of silently routing
+   typos/future-variants to "Active". *)
+let test_agent_status_of_string_r () =
+  check bool "active Ok"
+    true (Types.agent_status_of_string_r "active" = Ok Types.Active);
+  check bool "busy Ok"
+    true (Types.agent_status_of_string_r "busy" = Ok Types.Busy);
+  (match Types.agent_status_of_string_r "bogus" with
+   | Ok _ -> failwith "unknown input must be Error, not Ok"
+   | Error msg ->
+     check bool "Error preserves original input"
+       true (String_util.contains_substring msg "bogus"))
+
 let test_agent_status_to_yojson () =
   let json = Types.agent_status_to_yojson Types.Busy in
   check json_string "busy json" (`String "busy") json
@@ -874,6 +889,7 @@ let agent_status_tests = [
   "to_string all", `Quick, test_agent_status_to_string;
   "of_string all", `Quick, test_agent_status_of_string;
   "of_string_opt", `Quick, test_agent_status_of_string_opt;
+  "of_string_r (#10748)", `Quick, test_agent_status_of_string_r;
   "to_yojson", `Quick, test_agent_status_to_yojson;
   "of_yojson valid", `Quick, test_agent_status_of_yojson_valid;
   "of_yojson invalid", `Quick, test_agent_status_of_yojson_invalid;

@@ -2,373 +2,382 @@
 
 open Types
 
+module AgentMap = Map.Make(String)
+
 (** Session info stored in registry *)
 type session = {
   agent_name: string;
   connected_at: float;     (* Unix timestamp *)
-  mutable last_activity: float;
-  mutable is_listening: bool;
-  mutable message_queue: Yojson.Safe.t list;  (* Pending messages *)
+  last_activity: float;
+  is_listening: bool;
+  message_queue: Yojson.Safe.t Eio.Stream.t;  (* Pending messages *)
 }
 
-(** Rate limit tracking per category.
-
-    All fields are mutable and accessed exclusively under [registry.lock].
-    No lock-free access — the mutex is the single synchronization mechanism. *)
+(** Rate limit tracking per category *)
 type rate_tracker = {
-  mutable general_timestamps: float list;
-  mutable broadcast_timestamps: float list;
-  mutable task_ops_timestamps: float list;
-  mutable burst_used: int;
-  mutable last_burst_reset: float;
+  general_timestamps: float list;
+  broadcast_timestamps: float list;
+  task_ops_timestamps: float list;
+  burst_used: int;
+  last_burst_reset: float;
 }
+
+type msg =
+  | Register of string * float * session Eio.Promise.u
+  | Unregister of string
+  | Update_activity of string * bool option * float
+  | Check_rate_limit_req of string * rate_limit_category * agent_role * float * (bool * int) Eio.Promise.u
+  | Get_rate_limit_status_req of string * agent_role * float * Yojson.Safe.t Eio.Promise.u
+  | Push_message of { from_agent: string; content: string; mention: string option; timestamp: string; reply: string list Eio.Promise.u }
+  | Push_notification of Yojson.Safe.t * int Eio.Promise.u
+  | Get_session of string * session option Eio.Promise.u
+  | Get_sessions of session AgentMap.t Eio.Promise.u
+  | Restore_from_disk_req of string * float * unit Eio.Promise.u
 
 (** Session registry - manages all connected agents *)
 type registry = {
-  mutable sessions: (string, session) Hashtbl.t;
-  mutable rate_trackers: (string, rate_tracker) Hashtbl.t;
   config: rate_limit_config;
-  lock: Eio.Mutex.t;
+  mailbox: msg Eio.Stream.t;
 }
 
-(** Create new registry *)
+type registry_state = {
+  sessions: session AgentMap.t;
+  rate_trackers: rate_tracker AgentMap.t;
+}
+
 let create ?(config = default_rate_limit) () = {
-  sessions = Hashtbl.create 16;
-  rate_trackers = Hashtbl.create 16;
   config;
-  lock = Eio.Mutex.create ();
+  mailbox = Eio.Stream.create max_int;
 }
 
-(** Run a critical section with mutex protection.
-    Uses Eio.Mutex.use_rw for safe lock management - automatically
-    releases lock even on exceptions, preventing deadlocks. *)
-let with_lock registry f =
-  Eio.Mutex.use_rw ~protect:true registry.lock (fun () -> f ())
-
-(** Register a new session *)
-let register registry ~agent_name =
-  with_lock registry (fun () ->
-    let existing = Hashtbl.mem registry.sessions agent_name in
-    let now = Time_compat.now () in
-    let session = {
-      agent_name;
-      connected_at = now;
-      last_activity = now;
-      is_listening = false;
-      message_queue = [];
-    } in
-    Hashtbl.replace registry.sessions agent_name session;
-    let total = Hashtbl.length registry.sessions in
-    if existing then
-      Log.Session.debug "Session refreshed: %s (total: %d)" agent_name total
-    else
-      Log.Session.info "Session registered: %s (total: %d)" agent_name total;
-    session
-  )
-
-(** Unregister session *)
-let unregister registry ~agent_name =
-  with_lock registry (fun () ->
-    Hashtbl.remove registry.sessions agent_name;
-    Log.Session.info "Session unregistered: %s (total: %d)"
-      agent_name (Hashtbl.length registry.sessions)
-  )
-
-
-(** Update activity timestamp *)
-let update_activity registry ~agent_name ?(is_listening = None) () =
-  with_lock registry (fun () ->
-    match Hashtbl.find_opt registry.sessions agent_name with
-    | Some session ->
-        session.last_activity <- Time_compat.now ();
-        (match is_listening with
-         | Some v -> session.is_listening <- v
-         | None -> ())
-    | None -> ()
-  )
-
-(** Create empty rate tracker *)
-let create_tracker () = {
+let create_tracker now = {
   general_timestamps = [];
   broadcast_timestamps = [];
   task_ops_timestamps = [];
   burst_used = 0;
-  last_burst_reset = Time_compat.now ();
+  last_burst_reset = now;
 }
 
-(** Get timestamps for category *)
 let get_timestamps tracker = function
   | GeneralLimit -> tracker.general_timestamps
   | BroadcastLimit -> tracker.broadcast_timestamps
   | TaskOpsLimit -> tracker.task_ops_timestamps
 
-(** Set timestamps for category *)
 let set_timestamps tracker category ts =
   match category with
-  | GeneralLimit -> tracker.general_timestamps <- ts
-  | BroadcastLimit -> tracker.broadcast_timestamps <- ts
-  | TaskOpsLimit -> tracker.task_ops_timestamps <- ts
+  | GeneralLimit -> { tracker with general_timestamps = ts }
+  | BroadcastLimit -> { tracker with broadcast_timestamps = ts }
+  | TaskOpsLimit -> { tracker with task_ops_timestamps = ts }
 
-(** Enhanced rate limit check with category and role *)
-let check_rate_limit_ex registry ~agent_name ~category ~role =
-  with_lock registry (fun () ->
-    let now = Time_compat.now () in
-    let one_minute_ago = now -. 60.0 in
-
-    (* Get or create tracker *)
-    let tracker =
-      match Hashtbl.find_opt registry.rate_trackers agent_name with
-      | Some t -> t
-      | None ->
-          let t = create_tracker () in
-          Hashtbl.replace registry.rate_trackers agent_name t;
-          t
-    in
-
-    (* Reset burst if a minute has passed - mutex-protected *)
-    let last_reset = tracker.last_burst_reset in
-    if now -. last_reset > 60.0 then begin
-      tracker.burst_used <- 0;
-      tracker.last_burst_reset <- now
-    end;
-
-    (* Filter to last minute only *)
-    let timestamps = get_timestamps tracker category in
-    let recent = List.filter (fun t -> t > one_minute_ago) timestamps in
-    set_timestamps tracker category recent;
-
-    (* Compute effective limit based on role *)
-    let base_limit = effective_limit registry.config ~role ~category in
-    let limit =
-      if List.mem agent_name registry.config.priority_agents
-      then int_of_float (float_of_int base_limit *. 1.5)
-      else base_limit
-    in
-
-    let current = List.length recent in
-
-    if current >= limit then begin
-      (* Check if burst is available - mutex-protected read/increment *)
-      let burst = tracker.burst_used in
-      if burst < registry.config.burst_allowed then begin
-        tracker.burst_used <- burst + 1;
-        set_timestamps tracker category (now :: recent);
-        (true, 0)  (* Burst allowed *)
-      end else begin
-        let oldest = List.fold_left min now recent in
-        let wait = int_of_float (oldest +. 60.0 -. now) in
-        (false, max 1 wait)
-      end
-    end else begin
-      set_timestamps tracker category (now :: recent);
-      (true, 0)
-    end
-  )
-
-(** Check rate limit - simple wrapper using defaults *)
-let check_rate_limit registry ~agent_name =
-  check_rate_limit_ex registry ~agent_name ~category:GeneralLimit ~role:Worker
-
-(** Get rate limit status for an agent *)
-let get_rate_limit_status registry ~agent_name ~role =
-  with_lock registry (fun () ->
-    let now = Time_compat.now () in
-    let one_minute_ago = now -. 60.0 in
-
-    let tracker =
-      match Hashtbl.find_opt registry.rate_trackers agent_name with
-      | Some t -> t
-      | None -> create_tracker ()
-    in
-
-    let status_for_category category =
-      let timestamps = get_timestamps tracker category in
-      let recent = List.filter (fun t -> t > one_minute_ago) timestamps in
-      let limit = effective_limit registry.config ~role ~category in
-      let current = List.length recent in
-      `Assoc [
-        ("category", `String (show_rate_limit_category category));
-        ("current", `Int current);
-        ("limit", `Int limit);
-        ("remaining", `Int (max 0 (limit - current)));
-      ]
-    in
-
-    let burst = tracker.burst_used in
-    `Assoc [
-      ("agent", `String agent_name);
-      ("role", `String (agent_role_to_string role));
-      ("burst_remaining", `Int (registry.config.burst_allowed - burst));
-      ("categories", `List [
-        status_for_category GeneralLimit;
-        status_for_category BroadcastLimit;
-        status_for_category TaskOpsLimit;
-      ]);
-    ]
-  )
-
-(** Push message to session queue *)
-let push_message registry ~from_agent ~content ~mention =
-  with_lock registry (fun () ->
-    let notification = `Assoc [
-      ("type", `String "masc/message");
-      ("from", `String from_agent);
-      ("content", `String content);
-      ("mention", Json_util.string_opt_to_json mention);
-      ("timestamp", `String (now_iso ()));
-    ] in
-
-    let targets = ref [] in
-    Hashtbl.iter (fun name session ->
-      (* Don't send to self *)
-      if name <> from_agent then begin
-        (* Check mention filter *)
-        let should_send = match mention with
-          | None -> true  (* Broadcast *)
-          | Some m -> m = name  (* Direct mention *)
-        in
-        if should_send then begin
-          session.message_queue <- session.message_queue @ [notification];
-          targets := name :: !targets
-        end
-      end
-    ) registry.sessions;
-
-    if !targets <> [] then
-      Log.Session.debug "Pushed to: %s" (String.concat ", " !targets);
-
-    !targets
-  )
-
-(** Push notification to all active agent sessions.
-    Unlike push_message, this does NOT exclude the sender and has no mention filter.
-    Used for system events (join, leave, task state changes) that all agents should see. *)
 (* Max notification queue size per session. Oldest events are dropped when exceeded. *)
 let max_notification_queue = 1000
 
-let push_notification_to_active_agents registry ~(event : Yojson.Safe.t) =
-  with_lock registry (fun () ->
-    let count = ref 0 in
-    Hashtbl.iter (fun name session ->
-      let queue = session.message_queue @ [event] in
-      let len = List.length queue in
-      if len > max_notification_queue then begin
-        (* Drop oldest events to stay within cap *)
-        let drop = len - max_notification_queue in
-        let rec drop_n n lst = match n, lst with
-          | 0, rest | _, ([] as rest) -> rest
-          | n, _ :: rest -> drop_n (n - 1) rest
-        in
-        session.message_queue <- drop_n drop queue;
-        Log.Session.info "notification queue capped for %s: dropped %d oldest events" name drop
-      end else
-        session.message_queue <- queue;
-      incr count
-    ) registry.sessions;
-    !count
-  )
-
-(** Pop message from queue (for listen) *)
-let pop_message registry ~agent_name =
-  with_lock registry (fun () ->
-    match Hashtbl.find_opt registry.sessions agent_name with
-    | Some session ->
-        (match session.message_queue with
-         | msg :: rest ->
-             session.message_queue <- rest;
-             Some msg
-         | [] -> None)
-    | None -> None
-  )
-
-(** Wait for message (blocking with timeout) *)
-let wait_for_message registry ~agent_name ~timeout =
-  let start_time = Time_compat.now () in
-  let check_interval = 2.0 in
-
-  (* Ensure session exists — check under lock so the read of
-     [registry.sessions] is atomic with respect to concurrent
-     [register]/[unregister]/[push_message] calls.  [register] itself
-     takes [with_lock] internally, but the existence probe here must
-     also be guarded; without it, a concurrent [unregister] between
-     the probe and the [register] call could cause a redundant
-     re-registration that clobbers a session that was just restored. *)
-  with_lock registry (fun () ->
-    if not (Hashtbl.mem registry.sessions agent_name) then
-      ignore (Hashtbl.replace registry.sessions agent_name {
+let process_msg config state msg =
+  match msg with
+  | Register (agent_name, now, p) ->
+      let existing = AgentMap.mem agent_name state.sessions in
+      let session = {
         agent_name;
-        connected_at = Time_compat.now ();
-        last_activity = Time_compat.now ();
+        connected_at = now;
+        last_activity = now;
         is_listening = false;
-        message_queue = [];
-      }));
+        message_queue = Eio.Stream.create max_notification_queue;
+      } in
+      let sessions' = AgentMap.add agent_name session state.sessions in
+      let total = AgentMap.cardinal sessions' in
+      if existing then
+        Log.Session.debug "Session refreshed: %s (total: %d)" agent_name total
+      else
+        Log.Session.info "Session registered: %s (total: %d)" agent_name total;
+      Eio.Promise.resolve p session;
+      { state with sessions = sessions' }
 
-  update_activity registry ~agent_name ~is_listening:(Some true) ();
+  | Unregister agent_name ->
+      let sessions' = AgentMap.remove agent_name state.sessions in
+      Log.Session.info "Session unregistered: %s (total: %d)"
+        agent_name (AgentMap.cardinal sessions');
+      { state with sessions = sessions' }
 
-  let rec wait_loop () =
-    let elapsed = Time_compat.now () -. start_time in
-    if elapsed >= timeout then
-      None
-    else begin
-      match pop_message registry ~agent_name with
-      | Some msg ->
-          Some msg
-      | None ->
-          (match Process_eio.get_clock () with Ok clk -> Eio.Time.sleep clk check_interval | Error e -> Log.Session.debug "clock unavailable in wait_loop: %s" e);
-          wait_loop ()
-    end
+  | Update_activity (agent_name, is_listening_opt, now) ->
+      (match AgentMap.find_opt agent_name state.sessions with
+       | Some session ->
+           let is_listen = match is_listening_opt with Some v -> v | None -> session.is_listening in
+           let session' = { session with last_activity = now; is_listening = is_listen } in
+           { state with sessions = AgentMap.add agent_name session' state.sessions }
+       | None -> state)
+
+  | Get_session (agent_name, p) ->
+      Eio.Promise.resolve p (AgentMap.find_opt agent_name state.sessions);
+      state
+
+  | Get_sessions p ->
+      Eio.Promise.resolve p state.sessions;
+      state
+
+  | Push_message { from_agent; content; mention; timestamp; reply } ->
+      let notification = `Assoc [
+        ("type", `String "masc/message");
+        ("from", `String from_agent);
+        ("content", `String content);
+        ("mention", Json_util.string_opt_to_json mention);
+        ("timestamp", `String timestamp);
+      ] in
+      let targets = ref [] in
+      AgentMap.iter (fun name session ->
+        if name <> from_agent then begin
+          let should_send = match mention with
+            | None -> true
+            | Some m -> m = name
+          in
+          if should_send then begin
+            let rec try_add st ev =
+            if Eio.Stream.length st >= max_notification_queue then begin
+              ignore (Eio.Stream.take_nonblocking st);
+              try_add st ev
+            end else
+              Eio.Stream.add st ev
+          in
+          try_add session.message_queue notification;
+            targets := name :: !targets
+          end
+        end
+      ) state.sessions;
+      if !targets <> [] then
+        Log.Session.debug "Pushed to: %s" (String.concat ", " !targets);
+      Eio.Promise.resolve reply !targets;
+      state
+
+  | Push_notification (event, reply) ->
+      let count = ref 0 in
+      AgentMap.iter (fun _name session ->
+        let rec try_add st ev =
+          if Eio.Stream.length st >= max_notification_queue then begin
+            ignore (Eio.Stream.take_nonblocking st);
+            try_add st ev
+          end else
+            Eio.Stream.add st ev
+        in
+        try_add session.message_queue event;
+        incr count
+      ) state.sessions;
+      Eio.Promise.resolve reply !count;
+      state
+
+  | Check_rate_limit_req (agent_name, category, role, now, p) ->
+      let one_minute_ago = now -. 60.0 in
+      let tracker =
+        match AgentMap.find_opt agent_name state.rate_trackers with
+        | Some t -> t
+        | None -> create_tracker now
+      in
+      let tracker =
+        if now -. tracker.last_burst_reset > 60.0 then
+          { tracker with burst_used = 0; last_burst_reset = now }
+        else tracker
+      in
+      let timestamps = get_timestamps tracker category in
+      let recent = List.filter (fun t -> t > one_minute_ago) timestamps in
+      let tracker = set_timestamps tracker category recent in
+
+      let base_limit = effective_limit config ~role ~category in
+      let limit =
+        if List.mem agent_name config.priority_agents
+        then int_of_float (float_of_int base_limit *. 1.5)
+        else base_limit
+      in
+
+      let current = List.length recent in
+      if current >= limit then begin
+        if tracker.burst_used < config.burst_allowed then begin
+          let tracker' = { tracker with burst_used = tracker.burst_used + 1 } in
+          let tracker' = set_timestamps tracker' category (now :: recent) in
+          Eio.Promise.resolve p (true, 0);
+          { state with rate_trackers = AgentMap.add agent_name tracker' state.rate_trackers }
+        end else begin
+          let oldest = List.fold_left min now recent in
+          let wait = int_of_float (oldest +. 60.0 -. now) in
+          Eio.Promise.resolve p (false, max 1 wait);
+          { state with rate_trackers = AgentMap.add agent_name tracker state.rate_trackers }
+        end
+      end else begin
+        let tracker' = set_timestamps tracker category (now :: recent) in
+        Eio.Promise.resolve p (true, 0);
+        { state with rate_trackers = AgentMap.add agent_name tracker' state.rate_trackers }
+      end
+
+  | Get_rate_limit_status_req (agent_name, role, now, p) ->
+      let one_minute_ago = now -. 60.0 in
+      let tracker =
+        match AgentMap.find_opt agent_name state.rate_trackers with
+        | Some t -> t
+        | None -> create_tracker now
+      in
+      let status_for_category category =
+        let timestamps = get_timestamps tracker category in
+        let recent = List.filter (fun t -> t > one_minute_ago) timestamps in
+        let limit = effective_limit config ~role ~category in
+        let current = List.length recent in
+        `Assoc [
+          ("category", `String (show_rate_limit_category category));
+          ("current", `Int current);
+          ("limit", `Int limit);
+          ("remaining", `Int (max 0 (limit - current)));
+        ]
+      in
+      let burst = tracker.burst_used in
+      let status = `Assoc [
+        ("agent", `String agent_name);
+        ("role", `String (agent_role_to_string role));
+        ("burst_remaining", `Int (config.burst_allowed - burst));
+        ("categories", `List [
+          status_for_category GeneralLimit;
+          status_for_category BroadcastLimit;
+          status_for_category TaskOpsLimit;
+        ]);
+      ] in
+      Eio.Promise.resolve p status;
+      state
+
+  | Restore_from_disk_req (agents_path, now, p) ->
+      let state' = ref state in
+      if Sys.file_exists agents_path && Sys.is_directory agents_path then begin
+        let restored = ref 0 in
+        Sys.readdir agents_path |> Array.iter (fun name ->
+          if Filename.check_suffix name ".json" then begin
+            let agent_name = Filename.chop_suffix name ".json" in
+            let session = {
+              agent_name;
+              connected_at = now;
+              last_activity = now;
+              is_listening = false;
+              message_queue = Eio.Stream.create max_notification_queue;
+            } in
+            state' := { !state' with sessions = AgentMap.add agent_name session !state'.sessions };
+            incr restored
+          end
+        );
+        if !restored > 0 then
+          Log.Session.info "Restored %d session(s) from disk" !restored
+      end;
+      Eio.Promise.resolve p ();
+      !state'
+
+let start_loop registry ~sw =
+  Eio.Fiber.fork ~sw (fun () ->
+    let rec loop state =
+      let msg = Eio.Stream.take registry.mailbox in
+      let state' = process_msg registry.config state msg in
+      loop state'
+    in
+    loop { sessions = AgentMap.empty; rate_trackers = AgentMap.empty }
+  )
+
+(** Helpers to send messages to the registry *)
+
+let register registry ~agent_name =
+  let p, r = Eio.Promise.create () in
+  Eio.Stream.add registry.mailbox (Register (agent_name, Time_compat.now (), r));
+  Eio.Promise.await p
+
+let unregister registry ~agent_name =
+  Eio.Stream.add registry.mailbox (Unregister agent_name)
+
+let update_activity registry ~agent_name ?is_listening () =
+  Eio.Stream.add registry.mailbox (Update_activity (agent_name, is_listening, Time_compat.now ()))
+
+let check_rate_limit_ex registry ~agent_name ~category ~role =
+  let p, r = Eio.Promise.create () in
+  Eio.Stream.add registry.mailbox (Check_rate_limit_req (agent_name, category, role, Time_compat.now (), r));
+  Eio.Promise.await p
+
+let check_rate_limit registry ~agent_name =
+  check_rate_limit_ex registry ~agent_name ~category:GeneralLimit ~role:Worker
+
+let get_rate_limit_status registry ~agent_name ~role =
+  let p, r = Eio.Promise.create () in
+  Eio.Stream.add registry.mailbox (Get_rate_limit_status_req (agent_name, role, Time_compat.now (), r));
+  Eio.Promise.await p
+
+let push_message registry ~from_agent ~content ~mention =
+  let p, r = Eio.Promise.create () in
+  Eio.Stream.add registry.mailbox (Push_message { from_agent; content; mention; timestamp = now_iso (); reply = r });
+  Eio.Promise.await p
+
+let push_notification_to_active_agents registry ~(event : Yojson.Safe.t) =
+  let p, r = Eio.Promise.create () in
+  Eio.Stream.add registry.mailbox (Push_notification (event, r));
+  Eio.Promise.await p
+
+let get_session registry ~agent_name =
+  let p, r = Eio.Promise.create () in
+  Eio.Stream.add registry.mailbox (Get_session (agent_name, r));
+  Eio.Promise.await p
+
+let get_sessions registry =
+  let p, r = Eio.Promise.create () in
+  Eio.Stream.add registry.mailbox (Get_sessions r);
+  Eio.Promise.await p
+
+let pop_message registry ~agent_name =
+  match get_session registry ~agent_name with
+  | Some session -> Eio.Stream.take_nonblocking session.message_queue
+  | None -> None
+
+let wait_for_message registry ~agent_name ~timeout =
+  (* Ensure session exists *)
+  let session = match get_session registry ~agent_name with
+    | Some s -> s
+    | None -> register registry ~agent_name
   in
-
+  update_activity registry ~agent_name ~is_listening:true ();
+  
   let result =
-    try wait_loop ()
-    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-      Log.Misc.warn "session listen interrupted: %s" (Printexc.to_string exn);
-      None
+    match Process_eio.get_clock () with
+    | Ok clk ->
+        (match
+           Eio.Time.with_timeout clk timeout (fun () ->
+             Ok (Eio.Stream.take session.message_queue)
+           )
+         with
+         | Ok msg -> Some msg
+         | Error `Timeout -> None
+         | exception Eio.Cancel.Cancelled e -> raise (Eio.Cancel.Cancelled e)
+         | exception exn ->
+             Log.Misc.warn "session listen interrupted: %s" (Printexc.to_string exn);
+             None)
+    | Error e ->
+        Log.Session.debug "clock unavailable in wait_for_message: %s" e;
+        None
   in
-  update_activity registry ~agent_name ~is_listening:(Some false) ();
+  update_activity registry ~agent_name ~is_listening:false ();
   result
 
-(** Get inactive agents (idle > threshold seconds) *)
 let get_inactive_agents registry ~threshold =
-  (* [session.last_activity] is mutable and is written by
-     [update_activity] under [registry.lock]; folding the hashtable
-     without the same lock is a contract violation of the type
-     declaration ("accessed exclusively under registry.lock").  Build
-     the result inside the critical section and return it. *)
-  with_lock registry (fun () ->
-    let now = Time_compat.now () in
-    Hashtbl.fold (fun name session acc ->
-      if now -. session.last_activity > threshold then
-        name :: acc
-      else
-        acc
-    ) registry.sessions [])
+  let now = Time_compat.now () in
+  let sessions = get_sessions registry in
+  AgentMap.fold (fun name session acc ->
+    if now -. session.last_activity > threshold then name :: acc else acc
+  ) sessions []
 
-(** Get all agent statuses *)
 let get_agent_statuses registry =
-  (* Reads mutable [is_listening] and [last_activity] fields plus the
-     hashtable itself.  Must hold [registry.lock] to match the
-     contract and to avoid observing torn state after a concurrent
-     [update_activity]/[register]/[unregister]. *)
-  with_lock registry (fun () ->
-    let now = Time_compat.now () in
-    Hashtbl.fold (fun name session acc ->
-      let idle_secs = int_of_float (now -. session.last_activity) in
-      let status_icon =
-        if session.is_listening then "🎧"
-        else if idle_secs > 60 then "💤"
-        else "🔨"
-      in
-      let status = `Assoc [
-        ("name", `String name);
-        ("listening", `Bool session.is_listening);
-        ("idle_seconds", `Int idle_secs);
-        ("status", `String status_icon);
-      ] in
-      status :: acc
-    ) registry.sessions [])
+  let now = Time_compat.now () in
+  let sessions = get_sessions registry in
+  AgentMap.fold (fun name session acc ->
+    let idle_secs = int_of_float (now -. session.last_activity) in
+    let status_icon =
+      if session.is_listening then "🎧"
+      else if idle_secs > 60 then "💤"
+      else "🔨"
+    in
+    let status = `Assoc [
+      ("name", `String name);
+      ("listening", `Bool session.is_listening);
+      ("idle_seconds", `Int idle_secs);
+      ("status", `String status_icon);
+    ] in
+    status :: acc
+  ) sessions []
 
-(** Format status for display *)
 let status_string registry =
   let statuses = get_agent_statuses registry in
   if statuses = [] then
@@ -392,7 +401,6 @@ let status_string registry =
     Buffer.add_string buf "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n";
     Buffer.add_string buf "🎧=리스닝 🔨=작업중 💤=졸고있음(60s+)";
 
-    (* Check inactive agents *)
     let inactive = get_inactive_agents registry ~threshold:Resilience.default_warning_threshold in
     if inactive <> [] then begin
       Buffer.add_string buf "\n\n⚠️ **INACTIVE AGENTS**: ";
@@ -403,117 +411,132 @@ let status_string registry =
     Buffer.contents buf
   end
 
-(** Connected agent names *)
 let connected_agents registry =
-  (* Reading [registry.sessions] without [registry.lock] races with
-     [register]/[unregister] which write under the lock; the type
-     declaration explicitly forbids lock-free access. *)
-  with_lock registry (fun () ->
-    Hashtbl.fold (fun name _ acc -> name :: acc) registry.sessions [])
+  let sessions = get_sessions registry in
+  AgentMap.fold (fun name _ acc -> name :: acc) sessions []
 
-(** Restore sessions from disk (call on server startup) *)
 let restore_from_disk registry ~agents_path =
-  if Sys.file_exists agents_path && Sys.is_directory agents_path then begin
-    let now = Time_compat.now () in
-    let restored = ref 0 in
-    Sys.readdir agents_path |> Array.iter (fun name ->
-      if Filename.check_suffix name ".json" then begin
-        let agent_name = Filename.chop_suffix name ".json" in
-        let session = {
-          agent_name;
-          connected_at = now;  (* Treat as just connected *)
-          last_activity = now;
-          is_listening = false;
-          message_queue = [];
-        } in
-        Hashtbl.replace registry.sessions agent_name session;
-        incr restored
-      end
-    );
-    if !restored > 0 then
-      Log.Session.info "Restored %d session(s) from disk" !restored
-  end
+  let p, r = Eio.Promise.create () in
+  Eio.Stream.add registry.mailbox (Restore_from_disk_req (agents_path, Time_compat.now (), r));
+  Eio.Promise.await p
 
 (* ============================================ *)
 (* MCP 2025-11-25 Spec: Mcp-Session-Id          *)
-(* Legacy compatibility: X-MCP-Session-ID       *)
 (* ============================================ *)
 
-(** MCP Session ID store - separate from agent sessions *)
 module McpSessionStore = struct
   type mcp_session = {
     id: string;
     created_at: float;
-    mutable last_activity: float;
-    mutable agent_name: string option;
-    mutable metadata: (string * string) list;
-    mutable request_count: int;
+    last_activity: float;
+    agent_name: string option;
+    metadata: (string * string) list;
+    request_count: int;
   }
 
-  let sessions : (string, mcp_session) Hashtbl.t = Hashtbl.create 64
+  type store_msg =
+    | Generate_id of string Eio.Promise.u
+    | Create of string option * float * mcp_session Eio.Promise.u
+    | Get of string * float * mcp_session option Eio.Promise.u
+    | Cleanup_stale of float * float * int Eio.Promise.u
+    | List_all of mcp_session list Eio.Promise.u
+    | Remove of string * bool Eio.Promise.u
+
+  let mailbox = Eio.Stream.create max_int
+
   let max_age = ref Env_config.Session.max_age_seconds
 
-  (** Mutex protecting all reads and writes to [sessions].
+  let process_msg state msg =
+    match msg with
+    | Generate_id p ->
+        let bytes = Mirage_crypto_rng.generate 16 in
+        let buf = Buffer.create 32 in
+        for i = 0 to String.length bytes - 1 do
+          Buffer.add_string buf (Printf.sprintf "%02x" (Char.code (String.get bytes i)))
+        done;
+        let id = Printf.sprintf "mcp_%s" (Buffer.contents buf) in
+        Eio.Promise.resolve p id;
+        state
 
-      The background [start_mcp_session_cleanup_loop] fiber runs
-      [cleanup_stale] concurrently with HTTP handler fibers that call
-      [create]/[get]/[remove].  Without the mutex, [Hashtbl.fold] inside
-      [cleanup_stale] can race with [Hashtbl.add] in [create] (rehash
-      under iterator) or with [get]'s mutable field writes on a shared
-      record.  Under single-domain Eio none of the Hashtbl operations
-      yield, so the race is theoretical today; the mutex closes the
-      contract gap documented in issue #6629 and matches the discipline
-      already established by the sibling [registry.lock] in this file. *)
-  let mu = Eio.Mutex.create ()
-  let with_lock f = Eio_guard.with_mutex mu f
+    | Create (agent_name, now, p) ->
+        let bytes = Mirage_crypto_rng.generate 16 in
+        let buf = Buffer.create 32 in
+        for i = 0 to String.length bytes - 1 do
+          Buffer.add_string buf (Printf.sprintf "%02x" (Char.code (String.get bytes i)))
+        done;
+        let id = Printf.sprintf "mcp_%s" (Buffer.contents buf) in
+        let session = {
+          id;
+          created_at = now;
+          last_activity = now;
+          agent_name;
+          metadata = [];
+          request_count = 0;
+        } in
+        Eio.Promise.resolve p session;
+        AgentMap.add session.id session state
 
-  (** Generate MCP session ID *)
-  let generate_id () : string =
-    let bytes = Mirage_crypto_rng.generate 16 in
-    let buf = Buffer.create 32 in
-    for i = 0 to String.length bytes - 1 do
-      Buffer.add_string buf (Printf.sprintf "%02x" (Char.code (String.get bytes i)))
-    done;
-    Printf.sprintf "mcp_%s" (Buffer.contents buf)
+    | Get (session_id, now, p) ->
+        (match AgentMap.find_opt session_id state with
+         | None ->
+             Eio.Promise.resolve p None;
+             state
+         | Some session ->
+             let session' = { session with last_activity = now; request_count = session.request_count + 1 } in
+             Eio.Promise.resolve p (Some session');
+             AgentMap.add session_id session' state)
 
-  (** Create new MCP session *)
-  let create ?agent_name () : mcp_session =
-    with_lock (fun () ->
-      let now = Time_compat.now () in
-      let session = {
-        id = generate_id ();
-        created_at = now;
-        last_activity = now;
-        agent_name;
-        metadata = [];
-        request_count = 0;
-      } in
-      Hashtbl.add sessions session.id session;
-      session)
+    | Cleanup_stale (now, max_age_val, p) ->
+        let state', stale_count =
+          AgentMap.fold (fun id session (acc_state, acc_count) ->
+            if now -. session.last_activity > max_age_val then
+              (AgentMap.remove id acc_state, acc_count + 1)
+            else
+              (acc_state, acc_count)
+          ) state (state, 0)
+        in
+        Eio.Promise.resolve p stale_count;
+        state'
 
-  (** Get MCP session by ID, updating last_activity and request_count. *)
-  let get (session_id : string) : mcp_session option =
-    with_lock (fun () ->
-      match Hashtbl.find_opt sessions session_id with
-      | None -> None
-      | Some session ->
-        session.last_activity <- Time_compat.now ();
-        session.request_count <- session.request_count + 1;
-        Some session)
+    | List_all p ->
+        let all = AgentMap.fold (fun _ s acc -> s :: acc) state [] in
+        Eio.Promise.resolve p all;
+        state
 
-  (** Cleanup stale MCP sessions *)
-  let cleanup_stale () : int =
-    with_lock (fun () ->
-      let now = Time_compat.now () in
-      let stale = Hashtbl.fold (fun id session acc ->
-        if now -. session.last_activity > !max_age then id :: acc else acc
-      ) sessions [] in
-      List.iter (Hashtbl.remove sessions) stale;
-      List.length stale)
+    | Remove (id, p) ->
+        let mem = AgentMap.mem id state in
+        Eio.Promise.resolve p mem;
+        if mem then AgentMap.remove id state else state
 
-  (** Convert MCP session to JSON.
-      Reads immutable fields of the record — no lock needed because
-      the caller owns the value returned by [get]. *)
+  let start_loop ~sw =
+    Eio.Fiber.fork ~sw (fun () ->
+      let rec loop state =
+        let msg = Eio.Stream.take mailbox in
+        loop (process_msg state msg)
+      in
+      loop AgentMap.empty
+    )
+
+  let generate_id () =
+    let p, r = Eio.Promise.create () in
+    Eio.Stream.add mailbox (Generate_id r);
+    Eio.Promise.await p
+
+  let create ?agent_name () =
+    let p, r = Eio.Promise.create () in
+    Eio.Stream.add mailbox (Create (agent_name, Time_compat.now (), r));
+    Eio.Promise.await p
+
+  let get session_id =
+    let p, r = Eio.Promise.create () in
+    Eio.Stream.add mailbox (Get (session_id, Time_compat.now (), r));
+    Eio.Promise.await p
+
+  let cleanup_stale () =
+    let p, r = Eio.Promise.create () in
+    Eio.Stream.add mailbox (Cleanup_stale (Time_compat.now (), !max_age, r));
+    Eio.Promise.await p
+
   let to_json (s : mcp_session) : Yojson.Safe.t =
     `Assoc [
       ("id", `String s.id);
@@ -524,23 +547,20 @@ module McpSessionStore = struct
       ("metadata", `Assoc (List.map (fun (k, v) -> (k, `String v)) s.metadata));
     ]
 
-  (** List all MCP sessions *)
-  let list_all () : mcp_session list =
-    with_lock (fun () ->
-      Hashtbl.fold (fun _ s acc -> s :: acc) sessions [])
+  let list_all () =
+    let p, r = Eio.Promise.create () in
+    Eio.Stream.add mailbox (List_all r);
+    Eio.Promise.await p
 
-  (** Remove session *)
-  let remove (id : string) : bool =
-    with_lock (fun () ->
-      if Hashtbl.mem sessions id then begin
-        Hashtbl.remove sessions id;
-        true
-      end else false)
+  let remove id =
+    let p, r = Eio.Promise.create () in
+    Eio.Stream.add mailbox (Remove (id, r));
+    Eio.Promise.await p
 end
 
-(** Start a background fiber that periodically cleans up stale MCP sessions.
-    Call this once at server startup with the main switch. *)
 let start_mcp_session_cleanup_loop ~sw ~clock ?(interval=Env_config.Session.max_age_seconds /. 10.0) () =
+  (* Also start the store loop since we refactored it to Actor *)
+  McpSessionStore.start_loop ~sw;
   Eio.Fiber.fork ~sw (fun () ->
     let rec loop () =
       Eio.Time.sleep clock interval;
@@ -558,15 +578,11 @@ let start_mcp_session_cleanup_loop ~sw ~clock ?(interval=Env_config.Session.max_
     loop ()
   )
 
-(** Extract MCP Session ID from HTTP headers.
-    Prefers the canonical Mcp-Session-Id header and falls back to the legacy
-    X-MCP-Session-ID alias for compatibility. *)
 let extract_mcp_session_id (headers : Cohttp.Header.t) : string option =
   match Cohttp.Header.get headers "Mcp-Session-Id" with
   | Some _ as result -> result
   | None -> Cohttp.Header.get headers "X-MCP-Session-ID"
 
-(** Get or create MCP session from headers *)
 let get_or_create_mcp_session (headers : Cohttp.Header.t) : McpSessionStore.mcp_session =
   match extract_mcp_session_id headers with
   | Some id ->
@@ -576,11 +592,9 @@ let get_or_create_mcp_session (headers : Cohttp.Header.t) : McpSessionStore.mcp_
   | None ->
     McpSessionStore.create ()
 
-(** Add MCP session ID to response headers *)
 let add_mcp_session_header (headers : Cohttp.Header.t) (session : McpSessionStore.mcp_session) : Cohttp.Header.t =
   Cohttp.Header.add headers "Mcp-Session-Id" session.id
 
-(** MCP tool handler for session management *)
 let handle_mcp_session_tool (arguments : Yojson.Safe.t) : (bool * string) =
   let get_string key =
     match Yojson.Safe.Util.member key arguments with

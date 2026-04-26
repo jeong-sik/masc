@@ -6,68 +6,67 @@
 
 open Types
 
+module AgentMap : Map.S with type key = String.t
+
 (** {1 Session Types} *)
 
 (** Session info stored in the registry. *)
 type session = {
   agent_name: string;
   connected_at: float;
-  mutable last_activity: float;
-  mutable is_listening: bool;
-  mutable message_queue: Yojson.Safe.t list;
+  last_activity: float;
+  is_listening: bool;
+  message_queue: Yojson.Safe.t Eio.Stream.t;
 }
 
-(** Rate-limit tracking per category.
-
-    All fields are mutable and accessed exclusively under [registry.lock].
-    No lock-free access — the mutex is the single synchronization mechanism.
-    Callers must hold [registry.lock] before reading or writing any field. *)
+(** Rate-limit tracking per category. *)
 type rate_tracker = {
-  mutable general_timestamps: float list;
-  mutable broadcast_timestamps: float list;
-  mutable task_ops_timestamps: float list;
-  mutable burst_used: int;
-  mutable last_burst_reset: float;
+  general_timestamps: float list;
+  broadcast_timestamps: float list;
+  task_ops_timestamps: float list;
+  burst_used: int;
+  last_burst_reset: float;
 }
 
 (** Session registry managing all connected agents. *)
-type registry = {
-  mutable sessions: (string, session) Hashtbl.t;
-  mutable rate_trackers: (string, rate_tracker) Hashtbl.t;
-  config: rate_limit_config;
-  lock: Eio.Mutex.t;
-}
+type registry
 
 (** {1 Registry Lifecycle} *)
 
 (** Create a new session registry with optional rate-limit config. *)
 val create : ?config:rate_limit_config -> unit -> registry
 
-(** Run a critical section under the registry's mutex. *)
-val with_lock : registry -> (unit -> 'a) -> 'a
+(** Start the Actor state loop for the registry. *)
+val start_loop : registry -> sw:Eio.Switch.t -> unit
 
 (** {1 Agent Sessions} *)
 
 (** Register a new agent session (or replace if name exists). *)
 val register : registry -> agent_name:string -> session
 
-(** Unregister an agent session (mutex-protected). *)
+(** Unregister an agent session. *)
 val unregister : registry -> agent_name:string -> unit
 
 (** Update the activity timestamp and optionally the listening flag. *)
 val update_activity :
-  registry -> agent_name:string -> ?is_listening:bool option -> unit -> unit
+  registry -> agent_name:string -> ?is_listening:bool -> unit -> unit
+
+(** Get session *)
+val get_session : registry -> agent_name:string -> session option
+
+(** Get all sessions *)
+val get_sessions : registry -> session AgentMap.t
 
 (** {1 Rate Limiting} *)
 
 (** Create an empty rate tracker. *)
-val create_tracker : unit -> rate_tracker
+val create_tracker : float -> rate_tracker
 
 (** Get timestamps for a given rate-limit category. *)
 val get_timestamps : rate_tracker -> rate_limit_category -> float list
 
 (** Set timestamps for a given rate-limit category. *)
-val set_timestamps : rate_tracker -> rate_limit_category -> float list -> unit
+val set_timestamps : rate_tracker -> rate_limit_category -> float list -> rate_tracker
 
 (** Check rate limit for an agent (simple, uses GeneralLimit + Worker). *)
 val check_rate_limit :
@@ -134,11 +133,14 @@ module McpSessionStore : sig
   type mcp_session = {
     id: string;
     created_at: float;
-    mutable last_activity: float;
-    mutable agent_name: string option;
-    mutable metadata: (string * string) list;
-    mutable request_count: int;
+    last_activity: float;
+    agent_name: string option;
+    metadata: (string * string) list;
+    request_count: int;
   }
+
+  (** Start the Actor state loop for the store. *)
+  val start_loop : sw:Eio.Switch.t -> unit
 
   (** Generate a cryptographically random MCP session ID. *)
   val generate_id : unit -> string

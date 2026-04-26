@@ -395,7 +395,7 @@ export function deriveTileNotice(
   if (err !== '') {
     return {
       tone: 'error',
-      label: 'Error',
+      label: '오류',
       detail: err,
     }
   }
@@ -404,7 +404,7 @@ export function deriveTileNotice(
     const ageHint = secs > 0 ? ` (${secs}s threshold)` : ''
     return {
       tone: 'stale',
-      label: 'Stale',
+      label: '오래됨',
       detail: `데이터 오래됨${ageHint}`,
     }
   }

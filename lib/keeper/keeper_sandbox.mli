@@ -89,6 +89,15 @@ val allowed_root_rel_of_meta :
   meta:Keeper_types.keeper_meta ->
   string
 
+(** [keeper_visible_root_abs t] is the absolute path the keeper LLM
+    should treat as its working root.  For Docker keepers this is the
+    in-container path ({!container_root}); for Local keepers this is
+    {!host_root_abs}.  Surfacing the host path to a Docker keeper makes
+    the LLM emit [cd /Users/.../.masc/playground/...] inside the
+    container, which fails because that path does not exist there
+    (#10650). *)
+val keeper_visible_root_abs : t -> string
+
 (** {1 Dashboard / status output} *)
 
 (** Key-value fields describing the sandbox shape (id, backend,

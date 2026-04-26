@@ -2140,9 +2140,23 @@ let test_keeper_config_uses_backend_scoped_private_workspace_root () =
       Alcotest.(check string) "status playground path"
         docker_rel
         (execution_context |> member "playground_path" |> to_string);
+      (* #10650: for a Docker keeper, private_workspace_root in the
+         keeper-LLM-facing status response is the in-container path
+         ([/home/keeper/playground/<sanitized>]), NOT the host abs path.
+         The host path is inaccessible inside the container; surfacing
+         it caused ~890/day [cd: No such file or directory] errors. *)
+      let docker_container_root =
+        Masc_mcp.Keeper_sandbox.container_root keeper_name
+      in
       Alcotest.(check string) "status private workspace root"
+        docker_container_root
+        (execution_context |> member "private_workspace_root" |> to_string);
+      Alcotest.(check string) "status default cwd"
+        docker_container_root
+        (execution_context |> member "default_cwd" |> to_string);
+      Alcotest.(check string) "status sandbox host root preserved"
         docker_abs
-        (execution_context |> member "private_workspace_root" |> to_string))
+        (execution_context |> member "sandbox_host_root" |> to_string))
 
 let test_snapshot_keeper_tool_audit_fallback () =
   Eio_main.run @@ fun env ->

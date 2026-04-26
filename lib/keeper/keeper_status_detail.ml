@@ -1243,6 +1243,13 @@ let handle_keeper_status ctx args : tool_result =
            (let sandbox = Keeper_sandbox.of_meta ~config:ctx.config ~meta:m in
            let playground_rel = sandbox.host_root_rel in
            let playground_abs = sandbox.host_root_abs in
+           (* #10650: default_cwd / private_workspace_root must be a path
+              that resolves *inside* the keeper's runtime.  For Docker
+              keepers the host abs path does not exist inside the
+              container, so the LLM emitted [cd <host_abs>] which fails
+              ~890/day.  keeper_visible_root_abs picks container_root for
+              Docker, host_root_abs for Local. *)
+           let keeper_visible_abs = Keeper_sandbox.keeper_visible_root_abs sandbox in
            "execution_context", `Assoc [
              ("sandbox_id", `String sandbox.sandbox_id);
              ("sandbox_backend", `String (Keeper_sandbox.backend_to_string sandbox.backend));
@@ -1252,8 +1259,8 @@ let handle_keeper_status ctx args : tool_result =
              ("sandbox_host_root", `String sandbox.host_root_abs);
              ("sandbox_container_root", Json_util.string_opt_to_json sandbox.container_root);
              ("playground_path", `String playground_rel);
-             ("default_cwd", `String playground_abs);
-             ("private_workspace_root", `String playground_abs);
+             ("default_cwd", `String keeper_visible_abs);
+             ("private_workspace_root", `String keeper_visible_abs);
              ("sandbox_profile", `String (sandbox_profile_to_string m.sandbox_profile));
              ("network_mode", `String (network_mode_to_string m.network_mode));
              ("shared_memory_scope",

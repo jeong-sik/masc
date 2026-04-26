@@ -106,6 +106,11 @@ let allowed_path_roots ~(name : string) : string list =
 let allowed_path_roots_of_meta ~(meta : Keeper_types.keeper_meta) : string list =
   [ allowed_root_rel_of_meta ~meta ]
 
+let keeper_visible_root_abs (t : t) : string =
+  match t.container_root with
+  | Some container -> container
+  | None -> t.host_root_abs
+
 let storage_lifetime = "persistent_backend_task_overlay"
 
 let context_status_fields (t : t) : (string * Yojson.Safe.t) list =

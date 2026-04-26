@@ -231,6 +231,7 @@ export function SidecarLogViewer({ connectorId }: { connectorId: string }) {
                     <button
                       type="button"
                       class="cursor-pointer rounded border border-[var(--white-8)] px-1.5 py-0.5 text-3xs uppercase tracking-4 text-[var(--color-fg-disabled)] hover:bg-[var(--white-8)] hover:text-[var(--color-fg-primary)]"
+                      aria-label="필터 초기화"
                       data-log-filter-clear
                       onClick=${() => setEntry(connectorId, { level: 'all', keyword: '' })}
                     >clear</button>

@@ -99,7 +99,7 @@ function SpEventsPanel({ sp_events }: { sp_events?: unknown[] }) {
       <div class="text-3xs font-semibold uppercase tracking-widest text-[var(--text-muted)] mb-2">자기 보호 발동 이력</div>
       <div class="space-y-1 max-h-28 overflow-y-auto custom-scrollbar" tabindex="0" role="list" aria-label="자기 보호 발동 이력">
         ${entries.map((e) => html`
-          <div class="flex items-center justify-between py-1 px-2 rounded text-2xs bg-[rgba(139,92,246,0.06)]">
+          <div class="flex items-center justify-between py-1 px-2 rounded text-2xs bg-[rgba(139,92,246,0.06)]" role="listitem">
             <${TimeAgo} timestamp=${e.ts ?? 0} class="font-mono text-[var(--text-muted)]" />
             <span class="text-[#8b5cf6]">${e.suppressed_count ?? 0}/${e.total ?? 0} 억제 (${e.dominant_cohort ?? '--'})</span>
           </div>
@@ -203,7 +203,7 @@ export function SupervisorDiagnosticsPanel({ keeper }: { keeper: Keeper }) {
                 ${visible.length === 0 ? html`
                   <div class="py-2 px-2 text-2xs text-[var(--text-muted)] italic" role="status">선택된 카테고리에 해당하는 장애가 없습니다.</div>
                 ` : visible.map((e) => html`
-                  <div class="flex items-center justify-between py-1 px-2 rounded text-2xs bg-[var(--white-3)]">
+                  <div class="flex items-center justify-between py-1 px-2 rounded text-2xs bg-[var(--white-3)]" role="listitem">
                     <${TimeAgo} timestamp=${e.ts ?? 0} class="font-mono text-[var(--text-muted)]" />
                     <span class="text-[var(--rose-light)]">${e.reason ?? 'unknown'}</span>
                   </div>

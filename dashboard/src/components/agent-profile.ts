@@ -429,7 +429,7 @@ export function AgentProfile({ name }: { name: string }) {
                 const detail = evt.detail as Record<string, string | undefined>
                 const title = detail.title ?? detail.content ?? ''
                 return html`
-                  <div class="agent-timeline-event flex items-baseline gap-1.5 py-1 px-2 text-sm transition-[background] duration-100 rounded hover:bg-[var(--white-4)]" key=${idx}>
+                  <div class="agent-timeline-event flex items-baseline gap-1.5 py-1 px-2 text-sm transition-[background] duration-100 rounded hover:bg-[var(--white-4)]" key=${idx} role="listitem">
                     <span class="text-2xs font-semibold text-[var(--ff-gold)] min-w-8">${timelineEventLabel(evt.type)}</span>
                     ${title ? html`<span class="flex-1 text-sm text-[var(--text-body)]">${trimText(title, 80)}</span>` : null}
                     ${evt.ts ? html`<${TimeAgo} timestamp=${evt.ts} />` : null}

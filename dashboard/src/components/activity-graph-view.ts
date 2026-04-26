@@ -285,7 +285,7 @@ export function GraphView({ data }: GraphViewProps) {
             <div class="text-3xs text-[var(--text-muted)] uppercase tracking-1 mb-2">연결된 관계</div>
             <div class="flex flex-col gap-1.5 max-h-40 overflow-y-auto custom-scrollbar" tabindex="0" role="list" aria-label="연결된 관계 목록">
               ${connectedEdges.slice(0, 20).map(({ edge, otherLabel }) => html`
-                <div class="flex items-center gap-2 text-sm py-1 px-2 rounded bg-[rgba(15,23,42,0.4)]" key=${edge.id ?? `${edge.source}-${edge.kind}-${edge.target}`}>
+                <div class="flex items-center gap-2 text-sm py-1 px-2 rounded bg-[rgba(15,23,42,0.4)]" key=${edge.id ?? `${edge.source}-${edge.kind}-${edge.target}`} role="listitem">
                   <span class="text-[var(--text-slate-light)]">${otherLabel}</span>
                   <span class="text-2xs text-[var(--text-muted)]">${edgeKindLabel(edge.kind)}</span>
                   ${edge.active ? html`<span class="w-1.5 h-1.5 rounded-full bg-[var(--ok)]" aria-label="활성"></span>` : null}

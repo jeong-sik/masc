@@ -419,6 +419,7 @@ export function TransitionTrail({
             <div
               data-trail-index=${trailIndex}
               title=${tooltip}
+              role="listitem"
               class=${`flex items-center gap-2 text-3xs font-mono leading-tight transition-opacity duration-150 cursor-help ${dimmed ? 'opacity-40' : ''} ${rowCls}`}
             >
               <span class="w-[52px] shrink-0 text-right text-[var(--text-dim)]">${ago} ago</span>

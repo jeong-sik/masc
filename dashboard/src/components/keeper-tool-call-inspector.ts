@@ -67,6 +67,7 @@ function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
   return html`
     <div
       class="border-b border-[var(--card-border)] hover:bg-[var(--bg-panel-hover)] transition-colors"
+      role="listitem"
     >
       <button type="button"
         class="w-full flex items-center gap-2 px-3 py-2 text-xs cursor-pointer text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"

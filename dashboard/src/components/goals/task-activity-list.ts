@@ -71,7 +71,7 @@ function ActivityEntry({ event }: { event: UnifiedTraceEvent }) {
 
   if (!hasDetail) {
     return html`
-      <div class="flex items-center gap-3 py-1.5 px-3 rounded hover:bg-[var(--white-3)] transition-colors">
+      <div class="flex items-center gap-3 py-1.5 px-3 rounded hover:bg-[var(--white-3)] transition-colors" role="listitem">
         <span class="text-sm ${kindColor(event.kind)}">${kindIcon(event.kind)}</span>
         <span class="flex-1 text-xs text-text-body truncate" title=${event.summary}>${event.summary}</span>
         ${event.duration_ms != null ? html`<span class="text-3xs tabular-nums ${durationColor(event.duration_ms)}">${event.duration_ms}ms</span>` : null}
@@ -83,6 +83,7 @@ function ActivityEntry({ event }: { event: UnifiedTraceEvent }) {
   return html`
     <details
       class="rounded hover:bg-[var(--white-3)] transition-colors"
+      role="listitem"
       onToggle=${(evt: Event) => {
         setIsOpen((evt.currentTarget as HTMLDetailsElement).open)
       }}

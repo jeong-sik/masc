@@ -211,7 +211,7 @@ function ActionTimeline({ data }: { data: ActivityGraphResponse }) {
         : filteredGroups.map(group => {
             const expanded = expandedActionGroups.value.has(group.id)
             return html`
-              <div class="rounded border border-[var(--card-border)] bg-[var(--card)]/55 p-4 shadow-sm shadow-black/8" key=${group.id}>
+              <div class="rounded border border-[var(--card-border)] bg-[var(--card)]/55 p-4 shadow-sm shadow-black/8" key=${group.id} role="listitem">
                 <div class="flex flex-wrap items-start justify-between gap-3">
                   <div class="min-w-0 flex-1">
                     <div class="flex flex-wrap items-center gap-2">

@@ -102,7 +102,7 @@ function KanbanCard({ task }: { task: Task }) {
   }
 
   return html`
-    <article class="flex flex-col gap-3 rounded border border-card-border/60 border-l-4 bg-[rgba(7,12,20,0.92)] p-4 ${priorityToneClass(p)}">
+    <article class="flex flex-col gap-3 rounded border border-card-border/60 border-l-4 bg-[rgba(7,12,20,0.92)] p-4 ${priorityToneClass(p)}" role="listitem">
       <div class="flex items-start justify-between gap-3">
         <div class="flex flex-wrap items-center gap-2">
           <span class="rounded border border-current/20 px-2 py-0.5 text-2xs font-semibold">${priorityLabel(p)}</span>

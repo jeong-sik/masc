@@ -291,9 +291,9 @@ export function PrometheusMetrics() {
     <div class="flex flex-col gap-4">
       <div class="flex items-center justify-between">
         <div>
-          <h2 class="text-lg font-semibold text-[var(--text-heading)]">Prometheus Metrics</h2>
+          <h2 class="text-lg font-semibold text-[var(--text-heading)]">Prometheus 메트릭</h2>
           <p class="text-xs text-[var(--text-muted)]">
-            /metrics endpoint (${totalMetrics} metrics, ${totalSamples} samples, ${nonZeroSamples} active)
+            /metrics endpoint (${totalMetrics}개 메트릭, ${totalSamples}개 샘플, ${nonZeroSamples}개 활성)
           </p>
         </div>
         <div class="flex items-center gap-3">
@@ -303,7 +303,7 @@ export function PrometheusMetrics() {
             onClick=${refresh}
             disabled=${loading.value}
           >
-            ${loading.value ? 'Loading...' : 'Refresh'}
+            ${loading.value ? '불러오는 중...' : '새로고침'}
           </button>
         </div>
       </div>
@@ -354,11 +354,11 @@ export function PrometheusMetrics() {
               </div>
               <div class="flex items-center gap-2">
                 <span class="rounded-sm bg-[var(--bg-2)] px-2 py-0.5 text-3xs text-[var(--text-muted)]">
-                  ${catMetrics.length} metrics
+                  ${catMetrics.length}개 메트릭
                 </span>
                 ${activeSamples > 0 && html`
                   <span class="rounded-sm bg-[var(--ok-10)] px-2 py-0.5 text-3xs text-[var(--ok)]">
-                    ${activeSamples} active
+                    ${activeSamples}개 활성
                   </span>
                 `}
               </div>
@@ -369,9 +369,9 @@ export function PrometheusMetrics() {
                 <table class="w-full text-xs">
                   <thead>
                     <tr class="border-b border-[var(--card-border)] text-[var(--text-muted)]">
-                      <th class="pb-2 text-left font-normal">Metric</th>
-                      <th class="pb-2 text-left font-normal w-16">Type</th>
-                      <th class="pb-2 text-right font-normal w-24">Value</th>
+                      <th class="pb-2 text-left font-normal">메트릭</th>
+                      <th class="pb-2 text-left font-normal w-16">유형</th>
+                      <th class="pb-2 text-right font-normal w-24">값</th>
                     </tr>
                   </thead>
                   <tbody>

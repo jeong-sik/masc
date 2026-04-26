@@ -36,6 +36,12 @@ interface CheckboxProps {
       checkbox without coupling to DOM position. */
   testId?: string
   onChange?: (checked: boolean) => void
+  /** Click handler that receives the raw Event. Use this when the
+      checkbox sits inside a clickable parent (a row or a card) and
+      you need `event.stopPropagation()` to prevent the parent's
+      click from also firing. `onChange` runs alongside it for state
+      updates; `onClick` is purely for event-flow control. */
+  onClick?: (e: Event) => void
 }
 
 export function Checkbox({
@@ -49,6 +55,7 @@ export function Checkbox({
   value,
   testId,
   onChange,
+  onClick,
 }: CheckboxProps) {
   const handleChange = (e: Event) => { onChange?.((e.target as HTMLInputElement).checked) }
   return html`
@@ -64,6 +71,7 @@ export function Checkbox({
       aria-labelledby=${ariaLabelledby}
       data-testid=${testId}
       onChange=${handleChange}
+      onClick=${onClick}
     />
   `
 }

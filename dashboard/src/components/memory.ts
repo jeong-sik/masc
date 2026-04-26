@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
 import { useEffect, useRef, useCallback, useMemo, useState } from 'preact/hooks'
+import { ActionButton } from './common/button'
 import { Card } from './common/card'
 import { TimeAgo } from './common/time-ago'
 import { showToast } from './common/toast'
@@ -7,6 +8,7 @@ import { requestConfirm } from './common/confirm-dialog'
 import { EmptyState } from './common/empty-state'
 import { LoadingState } from './common/feedback-state'
 import { TextInput } from './common/input'
+import { Checkbox } from './common/checkbox'
 import { RichComposer } from './common/rich-composer'
 import { RichContent } from './common/rich-content'
 import { stripStateBlocks } from '../keeper-message'
@@ -304,13 +306,17 @@ function SortBar() {
         />
         <div class="ml-auto flex items-center gap-2">
           ${selectedPostIds.value.size > 0 ? html`
-            <button type="button"
-              class="px-3 py-1 rounded text-2xs font-medium transition-all duration-150 border cursor-pointer bg-[var(--bad-10)] text-[var(--bad-light)] border-[var(--bad-30)] hover:bg-[var(--bad-20)] disabled:opacity-50 disabled:cursor-not-allowed"
+            <${ActionButton}
+              variant="danger"
+              size="md"
+              class="!px-3"
               onClick=${bulkDeleteSelected}
               disabled=${bulkDeleting.value}
+              ariaBusy=${bulkDeleting.value}
+              ariaLabel="선택한 게시글 일괄 삭제"
             >
               ${bulkDeleting.value ? '삭제 중...' : `선택 삭제 (${selectedPostIds.value.size})`}
-            </button>
+            <//>
             <button type="button"
               class="px-2 py-1 rounded text-2xs font-medium transition-all duration-150 border cursor-pointer bg-transparent text-[var(--color-fg-muted)] border-[var(--border-slate-16)] hover:bg-[var(--white-6)]"
               onClick=${() => { selectedPostIds.value = new Set() }}
@@ -401,9 +407,9 @@ function PostCard({ post }: { post: BoardPost }) {
     >
       <!-- Select checkbox -->
       <div class="flex items-start pt-1">
-        <input type="checkbox"
-          aria-label=${`게시글 선택: ${post.id}`}
-          class="w-3.5 h-3.5 rounded cursor-pointer accent-[var(--color-accent-fg)]"
+        <${Checkbox}
+          ariaLabel=${`게시글 선택: ${post.id}`}
+          class="!w-3.5 !h-3.5"
           checked=${selectedPostIds.value.has(post.id)}
           onClick=${(e: Event) => togglePostSelection(post.id, e)}
         />
@@ -456,14 +462,18 @@ function PostCard({ post }: { post: BoardPost }) {
           ${post.hearth ? html`<span class="inline-flex items-center px-1.5 py-0.5 rounded text-3xs font-medium border bg-[var(--ff-gold-10)] text-[var(--ff-gold-bright)] border-[var(--ff-gold-20)]">${post.hearth}</span>` : null}
           ${post.visibility && visibilityLabel(post.visibility) ? html`<span class="inline-flex items-center px-1.5 py-0.5 rounded text-3xs font-medium border ${visibilityBadgeColor(post.visibility)}">${visibilityLabel(post.visibility)}</span>` : null}
 
-          <!-- Delete button -->
-          <button type="button"
-            class="ml-auto px-2 py-0.5 rounded text-3xs font-semibold border border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--bad-light)] hover:bg-[var(--bad-20)] transition-all cursor-pointer opacity-0 group-hover:opacity-100 disabled:opacity-50 disabled:cursor-not-allowed"
+          <!-- Delete button — reveal on row hover via opacity utilities -->
+          <${ActionButton}
+            variant="danger"
+            size="sm"
+            class="ml-auto !py-0.5 opacity-0 group-hover:opacity-100"
             onClick=${handleDelete}
             disabled=${isDeleting}
+            ariaBusy=${isDeleting}
+            ariaLabel=${`게시글 삭제: ${post.id}`}
           >
             ${isDeleting ? '삭제 중...' : '삭제'}
-          </button>
+          <//>
         </div>
       </div>
     </button>

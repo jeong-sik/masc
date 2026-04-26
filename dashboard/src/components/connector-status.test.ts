@@ -447,7 +447,7 @@ describe('ConnectorStatusPanel', () => {
     const warningPanel = container.querySelector('[data-connector-warning-panel]') as HTMLElement | null
     expect(warningPanel).not.toBeNull()
     const text = warningPanel!.textContent?.replace(/\s+/g, ' ').trim() ?? ''
-    expect(text).toContain('Connector API unavailable')
+    expect(text).toContain('Connector API 사용 불가')
     expect(text).toContain('Cause: GET /api/v1/gate/connectors: 503 Service Unavailable')
     expect(text).toContain('Next: refresh the dashboard')
     expect(text).toContain('/api/v1/gate/connectors')

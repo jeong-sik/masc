@@ -435,7 +435,8 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
          misses its first build window. *)
       cached_surface_or_first_success_json _execution_cache
         ~cache_key:"execution:default:light" ~ttl:120.0 ~clock
-        ~timeout_sec:120.0 (compute ~light:true)
+        ~timeout_sec:Env_config_runtime.Dashboard.execution_timeout_sec
+        (compute ~light:true)
   | _ ->
       (* Parameterized requests (fixture/actor/full): on-demand with SWR cache.
          These are rare (test fixtures, actor-specific views, full mode). *)
@@ -446,7 +447,9 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
           (if full_mode then "full" else "light")
       in
       Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:120.0
-        ~clock ~timeout_sec:120.0 (compute ?actor ?fixture ~light)
+        ~clock
+        ~timeout_sec:Env_config_runtime.Dashboard.execution_timeout_sec
+        (compute ?actor ?fixture ~light)
 
 let dashboard_execution_trust_http_json ~state ~sw ~clock _request =
   let compute () =
@@ -465,7 +468,7 @@ let dashboard_execution_trust_http_json ~state ~sw ~clock _request =
       "execution-trust:default"
       ~ttl:15.0
       ~clock
-      ~timeout_sec:30.0
+      ~timeout_sec:Env_config_runtime.Dashboard.execution_trust_timeout_sec
       compute
   | None ->
     Dashboard_cache.get_or_compute

@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark-fantasy">
+<head>
+<meta charset="UTF-8" />
+<title>Glyphs · MASC</title>
+<link rel="stylesheet" href="../colors_and_type.css" />
+<style>
+  body { padding: 48px 56px; background: var(--bg-deep); }
+  body::before { content: ""; position: fixed; inset: 0; pointer-events: none;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' seed='5'/><feColorMatrix values='0 0 0 0 0.1  0 0 0 0 0.08  0 0 0 0 0.06  0 0 0 0.5 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)' opacity='0.4'/></svg>");
+    mix-blend-mode: multiply; z-index: 0; }
+  .wrap { position: relative; z-index: 1; }
+  h2 { margin: 40px 0 16px; font-size: 14px; }
+  .grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 10px; }
+  .cell { border: 1px solid var(--border-main); background: var(--bg-card); padding: 18px 10px 12px; display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center; }
+  .cell svg { width: 32px; height: 32px; color: var(--accent-brass); }
+  .cell .n { font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); letter-spacing: 0.1em; }
+
+  .frames { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+  .frame-gothic, .frame-arch, .frame-sarc { padding: 28px 22px; min-height: 140px; }
+  .frame-demo .t { font-family: var(--font-display); font-size: 16px; letter-spacing: 0.18em; color: var(--accent-brass); text-transform: uppercase; margin-bottom: 10px; }
+  .frame-demo .b { font-family: var(--font-body); font-style: italic; color: var(--text-primary); font-size: 14px; }
+
+  .tex-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  .tex-grid .sw { height: 130px; border: 1px solid var(--border-main); background: var(--bg-card); position: relative; }
+  .tex-grid .sw > span { position: absolute; bottom: 10px; left: 12px; font-family: var(--font-ui); font-size: 9px; letter-spacing: 0.25em; text-transform: uppercase; color: var(--text-bright); z-index: 2; background: rgba(10,6,5,0.6); padding: 3px 8px; border: 1px solid var(--border-main); }
+
+  .dropcap-demo { max-width: 620px; margin-top: 16px; font-family: var(--font-body); font-size: 16px; line-height: 1.6; color: var(--text-primary); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="overline">MASC · Codex of marks</p>
+  <h1 style="font-size: 34px; letter-spacing: 0.16em;">Glyphs · Frames · Textures</h1>
+  <p class="dropcap-demo" style="margin-top: 14px; font-style: italic;">The ledger is kept in carvings, not screens. Every mark earns a place on the wall.</p>
+
+  <h2>Glyph atlas · 20 marks</h2>
+  <div class="grid">
+    <div class="cell"><svg><use href="../assets/glyphs/atlas.svg#skull"/></svg><div class="n">skull</div></div>
+    <div class="cell"><svg><use href="../assets/glyphs/atlas.svg#dagger"/></svg><div class="n">dagger</div></div>
+    <div class="cell"><svg><use href="../assets/glyphs/atlas.svg#sword"/></svg><div class="n">sword</div></div>
+    <div class="cell"><svg><use href="../assets/glyphs/atlas.svg#shield"/></svg><div class="n">shield</div></div>
+    <div class="cell"><svg><use href="../assets/glyphs/atlas.svg#rune"/></svg><div class="n">rune</div></div>
+    <div class="cell"><svg><use href="../assets/glyphs/atlas.svg#rune-alt"/></svg><div class="n">rune-alt</div></div>
+    <div class="cell"><svg><use href="../assets/glyphs/atlas.svg#rune-circle"/></svg><div class="n">rune-circle</div></div>
+    <div class="cell"><svg><use href="../assets/glyphs/atlas.svg#eye"/></svg><div class="n">eye</div></div>
+    <div class="cell"><svg><use href="../assets/glyphs/atlas.svg#candle"/></svg><div class="n">candle</div></div>
+    <div class="cell"><svg style="color: var(--accent-blood)"><use href="../assets/glyphs/atlas.svg#blood"/></svg><div class="n">blood</div></div>
+    <div class="cell"><svg><use href="../assets/glyphs/atlas.svg#key"/></svg><div class="n">key</div></div>
+    <div class="cell"><svg><use href="../assets/glyphs/atlas.svg#scroll"/></svg><div class="n">scroll</div></div>
+    <div class="cell"><svg><use href="../assets/glyphs/atlas.svg#chalice"/></svg><div class="n">chalice</div></div>
+    <div class="cell"><svg><use href="../assets/glyphs/atlas.svg#tome"/></svg><div class="n">tome</div></div>
+    <div class="cell"><svg><use href="../assets/glyphs/atlas.svg#cross-sword"/></svg><div class="n">cross-sword</div></div>
+    <div class="cell"><svg><use href="../assets/glyphs/atlas.svg#moon"/></svg><div class="n">moon</div></div>
+    <div class="cell"><svg><use href="../assets/glyphs/atlas.svg#coffin"/></svg><div class="n">coffin</div></div>
+    <div class="cell"><svg><use href="../assets/glyphs/atlas.svg#chain"/></svg><div class="n">chain</div></div>
+    <div class="cell"><svg><use href="../assets/glyphs/atlas.svg#lantern"/></svg><div class="n">lantern</div></div>
+    <div class="cell"><svg><use href="../assets/glyphs/atlas.svg#arch"/></svg><div class="n">arch</div></div>
+  </div>
+
+  <h2>Frames</h2>
+  <div class="frames">
+    <div class="frame-gothic frame-demo"><div class="t">Gothic · corners</div><div class="b">Brass L-tabs clamp the card. Use for HUD panels and control rails.</div></div>
+    <div class="frame-arch frame-demo"><div class="t">Arch</div><div class="b">Pointed arch cut from the frame. Use for heroes and section heads.</div></div>
+    <div class="frame-sarc frame-demo"><div class="t">Sarcophagus</div><div class="b">Chamfered corners. Use for stat blocks and dead / crashed keepers.</div></div>
+  </div>
+
+  <h2>Textures</h2>
+  <div class="tex-grid">
+    <div class="sw tex-parchment"><span>parchment</span></div>
+    <div class="sw tex-blood"><span>blood</span></div>
+    <div class="sw tex-wax"><span>wax</span></div>
+    <div class="sw tex-scratch"><span>scratch</span></div>
+  </div>
+
+  <h2>Drop cap</h2>
+  <p class="dropcap-demo dropcap">The manor is quiet. Iron stands at the west door. Moth has gone to the library and not returned. Luna's lantern has not been lit since the second bell. The operator marks the hour, and waits.</p>
+</div>
+</body>
+</html>

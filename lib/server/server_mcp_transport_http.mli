@@ -107,7 +107,6 @@ val handle_get_mcp :
   Httpun.Request.t ->
   Httpun.Reqd.t ->
   unit
-val sse_simple_handler : deps:deps -> Httpun.Request.t -> Httpun.Reqd.t -> unit
 val handle_get_operator_mcp :
   deps:deps -> Httpun.Request.t -> Httpun.Reqd.t -> unit
 val handle_post_messages :

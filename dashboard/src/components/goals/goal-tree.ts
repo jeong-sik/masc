@@ -166,13 +166,20 @@ function badgeClass(badge: string): string {
 
 function healthLabel(health: GoalTreeNode['health']): string {
   switch (health) {
-    case 'done': return 'Done'
-    case 'paused': return 'Paused'
-    case 'blocked': return 'Blocked'
-    case 'at_risk': return 'At Risk'
-    case 'on_track': return 'On Track'
+    case 'done': return '완료'
+    case 'paused': return '일시정지'
+    case 'blocked': return '차단'
+    case 'at_risk': return '위험'
+    case 'on_track': return '정상'
     default: return health
   }
+}
+
+function trustDispositionLabel(disposition: string | null | undefined): string | null {
+  if (!disposition) return null
+  return ({ Alert: '경보', Pause: '정지', Pass: '통과' } as Record<string, string>)[
+    disposition
+  ] ?? disposition
 }
 
 function healthClass(health: GoalTreeNode['health']): string {
@@ -647,7 +654,7 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
         <div class="flex flex-wrap justify-end gap-1.5">
           ${trust?.disposition ? html`
             <span class="rounded border px-2 py-0.5 text-3xs font-semibold ${keeperTrustDispositionClass(trust)}">
-              Trust ${trust.disposition}
+              검증 ${trustDispositionLabel(trust.disposition)}
             </span>
           ` : null}
           ${keeper.latest_execution_outcome ? html`
@@ -658,30 +665,30 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
         </div>
       </div>
       <div class="mt-3 grid grid-cols-2 gap-2 text-2xs text-text-muted">
-        <div>Sandbox</div>
+        <div>샌드박스</div>
         <div class="text-right text-text-body">${keeper.sandbox_profile}</div>
-        <div>Approval</div>
+        <div>승인</div>
         <div class="text-right text-text-body">${trust?.approval_state?.summary ?? keeper.approval_profile ?? '-'}</div>
-        <div>Cascade</div>
+        <div>캐스케이드</div>
         <div class="text-right text-text-body">${keeper.cascade_name}</div>
-        <div>Outcome</div>
+        <div>결과</div>
         <div class="text-right text-text-body">${keeper.cascade_outcome ?? '-'}</div>
       </div>
       ${trustSummary || trust?.approval_state?.state || trust?.next_human_action ? html`
         <div class="mt-3 rounded border border-card-border/50 bg-white/3 p-3">
-          <div class="text-3xs font-semibold uppercase tracking-widest text-text-muted">Trust Summary</div>
+          <div class="text-3xs font-semibold uppercase tracking-widest text-text-muted">검증 요약</div>
           ${trustSummary ? html`
             <div class="mt-2 text-xs leading-relaxed text-text-body">${trustSummary}</div>
           ` : null}
           <div class="mt-2 flex flex-wrap gap-2 text-3xs text-text-muted">
             ${trust?.approval_state?.state ? html`
-              <span>approval ${trust.approval_state.state}</span>
+              <span>승인 상태 ${trust.approval_state.state}</span>
             ` : null}
             ${trust?.execution_summary?.tool_contract_result ? html`
-              <span>contract ${trust.execution_summary.tool_contract_result}</span>
+              <span>계약 ${trust.execution_summary.tool_contract_result}</span>
             ` : null}
             ${trust?.next_human_action ? html`
-              <span>next ${trust.next_human_action}</span>
+              <span>다음 ${trust.next_human_action}</span>
             ` : null}
           </div>
         </div>
@@ -689,7 +696,7 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
       ${latestEvent ? html`
         <div class="mt-3 rounded border border-card-border/50 bg-white/3 p-3">
           <div class="flex flex-wrap items-center justify-between gap-2">
-            <div class="text-3xs font-semibold uppercase tracking-widest text-text-muted">Latest Keeper Event</div>
+            <div class="text-3xs font-semibold uppercase tracking-widest text-text-muted">최근 키퍼 이벤트</div>
             <div class="text-3xs text-text-dim">
               <${TimeAgo} timestamp=${latestEvent.ts} />
             </div>

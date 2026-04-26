@@ -223,7 +223,7 @@ export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStat
 
       ${transitions.length > 0 ? html`
         <div class="grid gap-2">
-          <div class="text-3xs font-semibold uppercase tracking-1 text-[var(--text-muted)]">Observed transitions</div>
+          <div class="text-3xs font-semibold uppercase tracking-1 text-[var(--text-muted)]">관측된 전이</div>
           ${transitions.map(transition => html`
             <div class="rounded border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-2xs leading-normal text-[var(--text-body)]">
               <div class="flex flex-wrap items-center gap-2">

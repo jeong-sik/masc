@@ -965,7 +965,7 @@ function ConnectorLivePanel({
                 aria-label="Keeper directory status: unavailable"
               >
                 <span aria-hidden="true">⚠</span>
-                <span>Directory error</span>
+                <span>디렉토리 오류</span>
               </span>
               ${connector?.gate_health_checked_at
                 ? html`<span class="text-3xs text-[var(--text-dim)]">checked ${timeAgo(connector.gate_health_checked_at)}</span>`
@@ -993,9 +993,9 @@ function ConnectorLivePanel({
                   data-no-keepers-status-chip
                 >
                   <span aria-hidden="true">⊘</span>
-                  <span>Not configured</span>
+                  <span>설정 필요</span>
                 </span>
-                <span class="font-medium text-[var(--text-body)]">No keepers configured</span>
+                <span class="font-medium text-[var(--text-body)]">설정된 키퍼 없음</span>
               </div>
               <div class="text-3xs text-[var(--warn)]/80">
                 Add keeper config files under <code class="rounded bg-[var(--white-4)] px-1">config/keepers/</code> and restart the server.
@@ -1034,9 +1034,9 @@ function ConnectorLivePanel({
                       data-sidecar-status-chip
                     >
                       <span aria-hidden="true">⊘</span>
-                      <span>Not running</span>
+                      <span>실행 중 아님</span>
                     </span>
-                    <span class="font-medium text-[var(--text-body)]">Sidecar not started</span>
+                    <span class="font-medium text-[var(--text-body)]">사이드카 미시작</span>
                     ${connector?.updated_at
                       ? html`<span class="text-3xs text-[var(--text-dim)]">last seen ${timeAgo(connector.updated_at)}</span>`
                       : null}

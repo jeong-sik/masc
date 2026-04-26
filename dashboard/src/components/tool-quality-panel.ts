@@ -184,7 +184,7 @@ function ToolTable({
             <th class="text-left py-1 font-normal">Tool</th>
             <th class="text-right py-1 font-normal">Calls</th>
             <th class="text-right py-1 font-normal">Success</th>
-            <th class="text-right py-1 font-normal">Avg ms</th>
+            <th class="text-right py-1 font-normal">평균 ms</th>
             <th class="text-right py-1 font-normal">Output</th>
           </tr>
         </thead>

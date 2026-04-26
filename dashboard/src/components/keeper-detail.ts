@@ -1113,7 +1113,7 @@ export function KeeperDetailPage() {
 
           <${KeeperDetailSection}
             id="keeper-config"
-            eyebrow="Configuration"
+            eyebrow="설정"
             title="설정 / 작업 방식"
             description="분산되어 있던 tool policy, 작업 budget, playground repo, keeper config를 한 섹션으로 모았습니다."
           >
@@ -1141,7 +1141,7 @@ export function KeeperDetailPage() {
 
           <${KeeperDetailSection}
             id="keeper-debug"
-            eyebrow="Debug"
+            eyebrow="디버그"
             title="디버그"
             description="운영 중에는 덜 자주 보지만, 문제를 깊게 파고들 때 필요한 raw surface를 마지막에 모았습니다."
           >

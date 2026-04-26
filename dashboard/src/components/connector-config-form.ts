@@ -485,7 +485,7 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
                 setEntry(connectorId, { autoRestart: (ev.target as HTMLInputElement).checked })
               }}
             />
-            <span>Auto restart</span>
+            <span>자동 재시작</span>
           </label>
           <${ActionButton}
             variant="ghost"

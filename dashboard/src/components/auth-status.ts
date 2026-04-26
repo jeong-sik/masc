@@ -180,7 +180,7 @@ function AuthPopover() {
         </div>
 
         <div class="flex flex-col gap-2">
-          <div class="text-2xs text-[var(--text-muted)]">Actor override</div>
+          <div class="text-2xs text-[var(--text-muted)]">행위자 재정의</div>
           ${actorOverrideLocked ? html`
             <div class="text-2xs text-[var(--text-muted)]">
               검증된 세션은 token owner를 단일 actor로 사용합니다. 로컬 actor override는 저장되더라도 요청 actor로 쓰이지 않습니다.

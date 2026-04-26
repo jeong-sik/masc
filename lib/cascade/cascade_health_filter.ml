@@ -25,6 +25,7 @@ type cascade_failure_class =
   | Accept_rejected_terminal
   | Cli_transport_required
   | Network_error
+  | Provider_terminal
 
 let classify_failure err = Oas_compat.Http_client.classify err
 

@@ -11,6 +11,14 @@ module Http_client = struct
     | Accept_rejected_terminal
     | Cli_transport_required
     | Network_error
+    | Provider_terminal
+        (** OAS [ProviderTerminal] — provider has signalled a terminal
+            condition (e.g. claude_cli [error_max_turns]). Treat as
+            cascade-stopping; the next provider would face the same
+            agent-level limit. Sub-kind ([Max_turns]/[Other]) is
+            collapsed here because [should_cascade] only needs the
+            terminality bit; consumers wanting the message extract it
+            via the original [ProviderTerminal] match. *)
 
   (* Case-insensitive substring check, mirroring [cascade_health_filter]. *)
   let contains_ci ?(max_scan = 512) ~haystack ~needle () =
@@ -93,12 +101,14 @@ module Http_client = struct
       | Llm_provider.Http_client.CliTransportRequired _ ->
           Cli_transport_required
       | Llm_provider.Http_client.NetworkError _ -> Network_error
+      | Llm_provider.Http_client.ProviderTerminal _ -> Provider_terminal
 
   let should_cascade (err : Llm_provider.Http_client.http_error) : bool =
     match classify err with
     | Local_resource_exhaustion
     | Terminal_http _
-    | Accept_rejected_terminal ->
+    | Accept_rejected_terminal
+    | Provider_terminal ->
         false
     | Context_overflow
     | Provider_parse_error
@@ -107,6 +117,30 @@ module Http_client = struct
     | Cli_transport_required
     | Network_error ->
         true
+
+  let error_message (err : Llm_provider.Http_client.http_error) : string =
+    match err with
+    | Llm_provider.Http_client.NetworkError { message; _ } -> message
+    | Llm_provider.Http_client.AcceptRejected { reason } -> reason
+    | Llm_provider.Http_client.CliTransportRequired { kind } ->
+        Printf.sprintf "%s provider requires a CLI transport" kind
+    | Llm_provider.Http_client.ProviderTerminal
+        { kind = Llm_provider.Http_client.Max_turns { turns; limit }; message } ->
+        Printf.sprintf "provider terminal: max turns exceeded (%d/%d): %s"
+          turns limit message
+    | Llm_provider.Http_client.ProviderTerminal
+        { kind = Llm_provider.Http_client.Other subtype; message } ->
+        Printf.sprintf "provider terminal: %s: %s" subtype message
+    | Llm_provider.Http_client.HttpError { code; body } -> (
+        try
+          let json = Yojson.Safe.from_string body in
+          match Yojson.Safe.Util.member "error" json with
+          | `Assoc fields -> (
+              match List.assoc_opt "message" fields with
+              | Some (`String msg) -> msg
+              | _ -> Printf.sprintf "HTTP %d" code)
+          | _ -> Printf.sprintf "HTTP %d" code
+        with Yojson.Json_error _ -> Printf.sprintf "HTTP %d" code)
 end
 
 module Metrics = struct

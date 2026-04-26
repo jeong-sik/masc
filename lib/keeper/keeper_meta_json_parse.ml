@@ -100,22 +100,28 @@ let parse_keeper_identity (json : Yojson.Safe.t) : (parsed_keeper_identity, stri
         "social_model"
         json
     in
-    let pk_will =
-      Safe_ops.json_string ~default:(Env_config_core.keeper_will ()) "will" json
-      |> normalize_self_model_text
-        ~max_bytes:Keeper_config.prompt_render_max_bytes
+    (* Layer 2 PR-B (commit 5): delegate the four personality fields
+       to [Keeper_personality_io].  parse + coerce yields trim-only
+       canonicalisation; truncation moved to the prompt-render path
+       (Keeper_prompt) so disk and in-memory stay byte-identical.
+       Decision Resolution: write raw, compare normalize, render
+       truncate. *)
+    let personality_defaults : Keeper_personality_io.raw_personality =
+      {
+        will = Env_config_core.keeper_will ();
+        needs = Env_config_core.keeper_needs ();
+        desires = Env_config_core.keeper_desires ();
+        instructions = "";
+      }
     in
-    let pk_needs =
-      Safe_ops.json_string ~default:(Env_config_core.keeper_needs ()) "needs" json
-      |> normalize_self_model_text
-        ~max_bytes:Keeper_config.prompt_render_max_bytes
+    let personality =
+      Keeper_personality_io.parse ~defaults:personality_defaults json
+      |> Keeper_personality_io.coerce |> Keeper_personality_io.to_raw
     in
-    let pk_desires =
-      Safe_ops.json_string ~default:(Env_config_core.keeper_desires ()) "desires" json
-      |> normalize_self_model_text
-        ~max_bytes:Keeper_config.prompt_render_max_bytes
-    in
-    let pk_instructions = Safe_ops.json_string ~default:"" "instructions" json in
+    let pk_will = personality.will in
+    let pk_needs = personality.needs in
+    let pk_desires = personality.desires in
+    let pk_instructions = personality.instructions in
     let pk_cascade_name =
       (* Preserve the raw cascade_name as persisted in runtime JSON so the
        dashboard can distinguish "declared in TOML" from "canonicalized

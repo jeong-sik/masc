@@ -10,28 +10,38 @@ include Keeper_meta_json_scrub
 
 let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
   let rt = m.runtime in
+  (* Layer 2 PR-B (commit 5): personality fields go through
+     [Keeper_personality_io.to_json].  Inlining four [`String] pairs
+     created the original asymmetry that drove the drift loop
+     (#10479 PR-A); centralising the write side guarantees symmetry
+     with [Keeper_personality_io.parse].
+     "models" is intentionally omitted from serialization (see
+     removed_keeper_meta_key_names + scrub_persisted_keeper_meta_json
+     — re-emitting causes a scrub → write → re-scrub loop). *)
+  let personality_pairs =
+    Keeper_personality_io.to_json
+      {
+        will = m.will;
+        needs = m.needs;
+        desires = m.desires;
+        instructions = m.instructions;
+      }
+  in
   `Assoc
-    [ "name", `String m.name
-    ; "agent_name", `String m.agent_name
-    ; "trace_id", `String (Keeper_id.Trace_id.to_string rt.trace_id)
-    ; "trace_history", `List (List.map (fun s -> `String s) rt.trace_history)
-    ; "goal", `String m.goal
-    ; "short_goal", `String m.short_goal
-    ; "mid_goal", `String m.mid_goal
-    ; "long_goal", `String m.long_goal
-    ; "social_model", `String m.social_model
-    ; "cascade_name", `String m.cascade_name
-      (* "models" intentionally omitted from serialization.  The field
-       is in removed_keeper_meta_key_names (via removed_keeper_input_key_names)
-       and scrub_persisted_keeper_meta_json strips it on every load.
-       Re-emitting it here creates a scrub → write → re-scrub loop that
-       fires ~20 INFO log lines per keeper per session.  Models are
-       resolved at runtime from cascade config, not from persisted meta. *)
-    ; "will", `String m.will
-    ; "needs", `String m.needs
-    ; "desires", `String m.desires
-    ; "instructions", `String m.instructions
-    ; "policy_voice_enabled", `Bool m.policy_voice_enabled
+    ([ "name", `String m.name
+     ; "agent_name", `String m.agent_name
+     ; "trace_id", `String (Keeper_id.Trace_id.to_string rt.trace_id)
+     ; "trace_history", `List (List.map (fun s -> `String s) rt.trace_history)
+     ; "goal", `String m.goal
+     ; "short_goal", `String m.short_goal
+     ; "mid_goal", `String m.mid_goal
+     ; "long_goal", `String m.long_goal
+     ; "social_model", `String m.social_model
+     ; "cascade_name", `String m.cascade_name
+     ]
+     @ personality_pairs
+     @ [
+      "policy_voice_enabled", `Bool m.policy_voice_enabled
     ; "sandbox_profile", `String (sandbox_profile_to_string m.sandbox_profile)
     ; "network_mode", `String (network_mode_to_string m.network_mode)
     ; "shared_memory_scope", `String (shared_memory_scope_to_string m.shared_memory_scope)
@@ -138,7 +148,7 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
         | None -> `Null )
     ; "oas_env", `Assoc (List.map (fun (k, v) -> k, `String v) m.oas_env)
     ; "meta_version", `Int m.meta_version
-    ]
+    ])
 ;;
 
 include Keeper_meta_json_parse

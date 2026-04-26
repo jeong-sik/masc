@@ -294,102 +294,11 @@ type claim_next_result =
 
 ## 3. Error Hierarchy
 
-MASC는 두 개의 독립된 에러 계층을 갖는다:
-- `Error.t` -- 인프라/프로토콜 수준 (6 도메인)
-- `masc_error` -- 비즈니스 로직 수준 (MASC 도메인 전용)
+MASC 는 비즈니스 로직 에러를 단일 sum type `masc_error` 로 표현한다.
 
-### 3.1 Error.t (인프라/프로토콜 에러)
+> Historical note: 이전에 별도로 존재하던 `Error.t` 인프라/프로토콜 계층(Room / Federation / Mcp 도메인, `is_recoverable` / `severity_of_error` helper)은 #10659 에서 0-caller dead code 로 삭제되었다 (squash 5d18aae8bc). Room / Federation / Mcp 도메인 에러는 어떤 호출자에도 도달하지 못한 채 design-aspirational 상태로 남아있던 모듈이며, 실제 코드 경로는 처음부터 `masc_error` 만 사용했다.
 
-**소스**: `lib/types/error.ml`
-
-```ocaml
-type t =
-  | Room of room_error
-  | Task of task_error
-  | Agent of agent_error
-  | Federation of federation_error
-  | Storage of storage_error
-  | Mcp of mcp_error
-  | Internal of string
-```
-
-7개 variant, 6개 도메인 에러 + 1개 catch-all.
-
-#### 3.1.1 room_error (4 variants)
-
-```ocaml
-type room_error =
-  | RoomNotFound of string
-  | RoomAlreadyExists of string
-  | RoomLocked of string
-  | RoomFull of int
-```
-
-#### 3.1.2 task_error (4 variants)
-
-```ocaml
-type task_error =
-  | TaskNotFound of string
-  | TaskAlreadyClaimed of string
-  | TaskInvalidState of string * string  (* current, expected *)
-  | TaskCycleDetected
-```
-
-#### 3.1.3 agent_error (4 variants)
-
-```ocaml
-type agent_error =
-  | AgentNotFound of string
-  | AgentTimeout of string * int         (* agent_id, timeout_ms *)
-  | AgentHeartbeatMissing of string
-  | AgentCapabilityMismatch of string
-```
-
-#### 3.1.4 federation_error (4 variants)
-
-```ocaml
-type federation_error =
-  | PortalConnectionFailed of string
-  | PortalAuthFailed of string
-  | PortalTimeout of int
-  | PortalProtocolError of string
-```
-
-#### 3.1.5 storage_error (5 variants)
-
-```ocaml
-type storage_error =
-  | FileNotFound of string
-  | FilePermissionDenied of string
-  | FileLocked of string
-  | GitError of string
-```
-
-#### 3.1.6 mcp_error (5 variants)
-
-```ocaml
-type mcp_error =
-  | McpParseError of string
-  | McpMethodNotFound of string
-  | McpInvalidParams of string
-  | McpAuthError of string
-  | McpInternalError of string
-```
-
-#### Recoverability
-
-`is_recoverable`가 `true`를 반환하는 variant (재시도 안전):
-- `RoomLocked`, `TaskAlreadyClaimed`, `AgentTimeout`, `AgentHeartbeatMissing`, `PortalTimeout`, `FileLocked`
-
-#### Severity Mapping
-
-| Severity | Variants |
-|----------|----------|
-| Warning | `RoomLocked`, `TaskAlreadyClaimed`, `AgentTimeout`, `AgentHeartbeatMissing`, `PortalTimeout`, `FileLocked`, `McpMethodNotFound` |
-| Critical | `Internal` |
-| Error | 나머지 전부 |
-
-### 3.2 masc_error (비즈니스 로직 에러)
+### 3 masc_error (Unified)
 
 **소스**: `lib/types/types_auth.ml`
 
@@ -702,9 +611,7 @@ type rate_limit_error = {
 
 | ID | 불변식 | 검증 방법 |
 |----|--------|----------|
-| INV-TYPE-006 | `Error.t`의 match는 7개 variant 전부를 처리해야 한다 (exhaustiveness). OCaml 컴파일러 warning 8이 이를 강제한다. | 컴파일러가 강제 |
 | INV-TYPE-007 | `masc_error`의 모든 variant는 `masc_error_to_string`에서 처리된다. 새 variant 추가 시 `masc_error_to_string`도 반드시 업데이트해야 한다 (exhaustive match). | 컴파일러 warning 8 |
-| INV-TYPE-008 | `is_recoverable`이 `true`인 에러만 재시도 대상이다. 그 외 에러에 대한 자동 재시도는 금지된다. | `is_recoverable` 반환값 기준 분기 테스트 |
 
 ### Concurrency
 

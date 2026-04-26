@@ -1145,7 +1145,17 @@ let run_named
   let name = Printf.sprintf "oas-%s" cascade_name in
   match candidate_cfgs with
   | [] ->
-      Log.Misc.error "cascade %s: no callable models available" cascade_name;
+      (* #10528: surface rejection context inline so operators can classify
+         root cause from a single log line. Pre-fix: only the cascade name
+         was logged; the sibling WARN with the configured provider list
+         (provider_tool_support.ml:144) was a separate event requiring
+         time/level cross-search. *)
+      Log.Misc.error
+        "cascade %s: no callable models available — configured=[%s] require_tool_choice_support=%b require_tool_support=%b"
+        cascade_name
+        (String.concat ", " configured_labels)
+        require_tool_choice_support
+        require_tool_support;
       Error
       (sdk_error_of_masc_internal_error
          (if require_tool_choice_support then

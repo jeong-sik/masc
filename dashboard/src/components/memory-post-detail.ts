@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { useEffect, useMemo, useState } from 'preact/hooks'
 import { useSignal } from '@preact/signals'
+import { ActionButton } from './common/button'
 import { Card } from './common/card'
 import { TimeAgo } from './common/time-ago'
 import { showToast } from './common/toast'
@@ -143,19 +144,23 @@ function CommentItem({
       <div class="board-comment rounded p-3 bg-[var(--white-3)] border border-[var(--border-slate-12)] ${depth > 0 ? 'border-l-2 border-l-[var(--accent-20)]' : ''}">
         <div class="flex items-center gap-2 mb-1.5">
           <span class="text-xs">${authorAvatar(authorAvatarKey)}</span>
-          <button type="button" class="text-xs font-medium text-[var(--color-fg-primary)] hover:text-[var(--color-accent-fg)] transition-colors cursor-pointer bg-transparent border-none p-0" title=${authorTitle} onClick=${() => navigateToAuthor(comment.author, undefined, comment.author_identity)}>${authorLabel}</button>
+          <${ActionButton} variant="subtle" size="sm" class="text-xs font-medium text-[var(--color-fg-primary)] hover:text-[var(--color-accent-fg)] bg-transparent border-none p-0" title=${authorTitle} ariaLabel=${`작성자 ${authorLabel} 프로필로 이동`} onClick=${() => navigateToAuthor(comment.author, undefined, comment.author_identity)}>${authorLabel}<//>
           <span class="text-2xs text-[var(--color-fg-muted)] opacity-60"><${TimeAgo} timestamp=${comment.created_at} /></span>
-          <button type="button"
-            class="text-2xs text-[var(--color-fg-muted)] hover:text-[var(--color-accent-fg)] cursor-pointer bg-transparent border-0 ml-auto"
+          <${ActionButton}
+            variant="subtle"
+            size="sm"
+            class="text-2xs hover:text-[var(--color-accent-fg)] bg-transparent border-0 ml-auto"
             onClick=${() => { replyingTo.value = isReplying ? null : comment.id; commentText.value = '' }}
-          >${isReplying ? '취소' : '답글'}</button>
+          >${isReplying ? '취소' : '답글'}<//>
         </div>
         <div class="text-sm text-[var(--color-fg-primary)] leading-paragraph"><${RichContent} text=${displayText} previewLimit=${1} /></div>
         ${needsTruncation ? html`
-          <button type="button"
-            class="mt-1 text-2xs text-[var(--color-accent-fg)] hover:underline cursor-pointer bg-transparent border-0"
+          <${ActionButton}
+            variant="subtle"
+            size="sm"
+            class="mt-1 text-2xs text-[var(--color-accent-fg)] hover:underline bg-transparent border-0"
             onClick=${() => setExpanded(!expanded)}
-          >${expanded ? '접기' : '더 보기...'}</button>
+          >${expanded ? '접기' : '더 보기...'}<//>
         ` : null}
         ${isReplying ? html`
           <div class="mt-2">
@@ -169,17 +174,16 @@ function CommentItem({
               previewLimit=${1}
             />
             <div class="mt-2 flex justify-end">
-              <button type="button"
-                class="py-1.5 px-3 rounded text-xs font-medium font-[inherit] cursor-pointer transition-all duration-150 border
-                  ${commentSubmitting.value || commentText.value.trim() === ''
-                    ? 'bg-[var(--white-5)] text-[var(--color-fg-muted)] border-[var(--border-slate-12)] opacity-50 cursor-not-allowed'
-                    : 'bg-[var(--ok-soft)] text-[var(--color-status-ok)] border-[var(--ok-30)] hover:bg-[var(--ok-22)]'
-                  }"
-                onClick=${() => submitComment(postId, comment.id)}
+              <${ActionButton}
+                variant="ghost"
+                size="md"
+                class="text-xs bg-[var(--ok-soft)] text-[var(--color-status-ok)] border-[var(--ok-30)] hover:bg-[var(--ok-22)]"
                 disabled=${commentSubmitting.value || commentText.value.trim() === ''}
+                ariaBusy=${commentSubmitting.value}
+                onClick=${() => submitComment(postId, comment.id)}
               >
                 ${commentSubmitting.value ? '...' : '등록'}
-              </button>
+              <//>
             </div>
           </div>
         ` : null}
@@ -230,17 +234,21 @@ export function CommentThread({ comments, postId }: { comments: BoardComment[]; 
         <${EmptyState} message=${`"${query.value.trim()}" 일치하는 댓글 없음`} compact />
       ` : null}
       ${!expanded && hiddenCount > 0 ? html`
-        <button type="button"
-          class="text-xs text-[var(--color-accent-fg)] hover:underline cursor-pointer bg-transparent border-0 text-left py-1"
+        <${ActionButton}
+          variant="subtle"
+          size="sm"
+          class="text-xs text-[var(--color-accent-fg)] hover:underline bg-transparent border-0 text-left py-1"
           onClick=${() => setExpanded(true)}
-        >이전 댓글 ${hiddenCount}개 더 보기</button>
+        >이전 댓글 ${hiddenCount}개 더 보기<//>
       ` : null}
       ${visible.map(comment => html`<${CommentItem} key=${comment.id} comment=${comment} postId=${postId} depth=${0} childrenMap=${filteredChildrenMap} />`)}
       ${expanded && hiddenCount > 0 ? html`
-        <button type="button"
-          class="text-xs text-[var(--color-fg-muted)] hover:text-[var(--color-accent-fg)] cursor-pointer bg-transparent border-0 text-left py-1"
+        <${ActionButton}
+          variant="subtle"
+          size="sm"
+          class="text-xs hover:text-[var(--color-accent-fg)] bg-transparent border-0 text-left py-1"
           onClick=${() => setExpanded(false)}
-        >접기</button>
+        >접기<//>
       ` : null}
     </div>
   `
@@ -260,17 +268,16 @@ function CommentForm({ postId }: { postId: string }) {
         previewLimit=${1}
       />
       <div class="mt-2 flex justify-end">
-        <button type="button"
-          class="py-2 px-4 rounded text-sm font-medium font-[inherit] cursor-pointer transition-all duration-150 border
-            ${commentSubmitting.value || commentText.value.trim() === ''
-              ? 'bg-[var(--white-5)] text-[var(--color-fg-muted)] border-[var(--border-slate-12)] opacity-50 cursor-not-allowed'
-              : 'bg-[var(--ok-soft)] text-[var(--color-status-ok)] border-[var(--ok-30)] hover:bg-[var(--ok-22)]'
-            }"
-          onClick=${() => submitComment(postId)}
+        <${ActionButton}
+          variant="ghost"
+          size="lg"
+          class="text-sm bg-[var(--ok-soft)] text-[var(--color-status-ok)] border-[var(--ok-30)] hover:bg-[var(--ok-22)]"
           disabled=${commentSubmitting.value || commentText.value.trim() === ''}
+          ariaBusy=${commentSubmitting.value}
+          onClick=${() => submitComment(postId)}
         >
           ${commentSubmitting.value ? '...' : '등록'}
-        </button>
+        <//>
       </div>
     </div>
   `
@@ -299,10 +306,12 @@ export function PostDetail({ post }: { post: BoardPost }) {
 
   return html`
     <div>
-      <button type="button"
-        class="mb-4 px-3 py-1.5 rounded text-xs font-medium text-[var(--color-fg-muted)] bg-transparent border border-[var(--border-slate-16)] hover:bg-[var(--white-6)] hover:text-[var(--color-fg-primary)] transition-all cursor-pointer"
+      <${ActionButton}
+        variant="ghost"
+        size="sm"
+        class="mb-4 text-xs"
         onClick=${() => navigate('workspace', { section: 'board' })}
-      >← 게시판으로 돌아가기</button>
+      >← 게시판으로 돌아가기<//>
 
       <${Card}>
         <div class="flex flex-col gap-4">
@@ -317,7 +326,7 @@ export function PostDetail({ post }: { post: BoardPost }) {
           <!-- Author and meta -->
           <div class="flex gap-2.5 items-center flex-wrap pt-3 border-t border-[var(--border-slate-12)]">
             <span class="text-sm">${authorAvatar(authorAvatarKey)}</span>
-            <button type="button" class="text-xs text-[var(--color-fg-primary)] hover:text-[var(--color-accent-fg)] transition-colors cursor-pointer bg-transparent border-none p-0" title=${authorTitle} onClick=${() => navigateToAuthor(post.author, undefined, post.author_identity)}>${authorLabel}</button>
+            <${ActionButton} variant="subtle" size="sm" class="text-xs text-[var(--color-fg-primary)] hover:text-[var(--color-accent-fg)] bg-transparent border-none p-0" title=${authorTitle} ariaLabel=${`작성자 ${authorLabel} 프로필로 이동`} onClick=${() => navigateToAuthor(post.author, undefined, post.author_identity)}>${authorLabel}<//>
             <span class="text-2xs text-[var(--color-fg-muted)]"><${TimeAgo} timestamp=${post.created_at} /></span>
             <span class="text-2xs text-[var(--color-fg-muted)]">${post.votes ?? 0} votes</span>
           </div>
@@ -356,14 +365,18 @@ export function PostDetail({ post }: { post: BoardPost }) {
 
           <!-- Vote buttons -->
           <div class="flex gap-2">
-            <button type="button"
-              class="vote-btn upvote px-3 py-1.5 rounded text-xs font-medium border border-[var(--border-slate-16)] bg-transparent text-[var(--color-fg-muted)] hover:text-[var(--warn-bright)] hover:border-[var(--warn-30)] hover:bg-[var(--warn-10)] transition-all cursor-pointer"
+            <${ActionButton}
+              variant="ghost"
+              size="sm"
+              class="vote-btn upvote text-xs hover:text-[var(--warn-bright)] hover:border-[var(--warn-30)] hover:bg-[var(--warn-10)]"
               onClick=${() => handleVote('up')}
-            >▲ 추천</button>
-            <button type="button"
-              class="vote-btn downvote px-3 py-1.5 rounded text-xs font-medium border border-[var(--border-slate-16)] bg-transparent text-[var(--color-fg-muted)] hover:text-[var(--color-accent-fg)] hover:border-[var(--accent-30)] hover:bg-[var(--accent-10)] transition-all cursor-pointer"
+            >▲ 추천<//>
+            <${ActionButton}
+              variant="ghost"
+              size="sm"
+              class="vote-btn downvote text-xs hover:text-[var(--color-accent-fg)] hover:border-[var(--accent-30)] hover:bg-[var(--accent-10)]"
               onClick=${() => handleVote('down')}
-            >▼ 비추천</button>
+            >▼ 비추천<//>
           </div>
         </div>
       <//>

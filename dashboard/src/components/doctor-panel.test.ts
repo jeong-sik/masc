@@ -56,14 +56,14 @@ describe('severityChipClass', () => {
 })
 
 describe('doctorHeading', () => {
-  it('returns Config for config entries', () => {
+  it('returns 설정 for config entries', () => {
     const entry: DoctorEntry = {
       name: 'config',
       kind: 'config',
       exit_code: 0,
       payload: {},
     }
-    expect(doctorHeading(entry)).toBe('Config')
+    expect(doctorHeading(entry)).toBe('설정')
   })
   it('capitalises sidecar names', () => {
     const entry: DoctorEntry = {

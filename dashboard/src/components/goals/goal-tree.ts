@@ -139,11 +139,11 @@ function flattenGoalTree(nodes: readonly GoalTreeNode[]): GoalTreeNode[] {
 function badgeLabel(badge: string): string {
   switch (badge) {
     case 'awaiting_approval': return '승인 대기'
-    case 'sandbox': return 'Sandbox'
+    case 'sandbox': return '샌드박스'
     case 'cascade': return 'Cascade'
     case 'task_verification_pending': return 'Task 검증 대기'
-    case 'stalled': return 'Stalled'
-    case 'linkage_warning': return 'Linkage'
+    case 'stalled': return '정체'
+    case 'linkage_warning': return '연결 경고'
     default: return badge
   }
 }
@@ -195,13 +195,13 @@ function healthClass(health: GoalTreeNode['health']): string {
 
 function blockerSourceLabel(source: GoalTreeNode['blocking_source']): string {
   switch (source) {
-    case 'goal_phase': return 'Goal phase'
-    case 'child_goal': return 'Child goal'
-    case 'approval': return 'Approval'
-    case 'keeper_runtime': return 'Keeper runtime'
+    case 'goal_phase': return 'Goal 단계'
+    case 'child_goal': return '하위 Goal'
+    case 'approval': return '승인'
+    case 'keeper_runtime': return '키퍼 런타임'
     case 'task_fsm': return 'Task FSM'
-    case 'goal_linkage': return 'Goal linkage'
-    case 'stalled': return 'Stalled'
+    case 'goal_linkage': return 'Goal 연결'
+    case 'stalled': return '정체'
     default: return source
   }
 }

@@ -11,8 +11,8 @@
 <style>
   /* — page shell — */
   body {
-    background: var(--bg-0);
-    color: var(--fg-1);
+    background: var(--color-bg-page);
+    color: var(--color-fg-primary);
     font: 13px/1.45 var(--font-sans);
     margin: 0;
     padding: 0 0 120px;
@@ -35,7 +35,7 @@
     font: 500 10px/1 var(--font-mono);
     text-transform: uppercase;
     letter-spacing: .12em;
-    color: var(--brass-1);
+    color: var(--color-accent-fg);
     margin-bottom: 10px;
   }
   .pg-head h1 {
@@ -45,18 +45,18 @@
     letter-spacing: -.01em;
   }
   .pg-head .sub {
-    color: var(--fg-3);
+    color: var(--color-fg-muted);
     font-size: 13px;
     max-width: 720px;
   }
   .pg-meta {
     text-align: right;
     font: 10px/1.5 var(--font-mono);
-    color: var(--fg-3);
+    color: var(--color-fg-muted);
     text-transform: uppercase;
     letter-spacing: .08em;
   }
-  .pg-meta b { color: var(--brass-1); font-weight: 500; }
+  .pg-meta b { color: var(--color-accent-fg); font-weight: 500; }
 
   /* — TOC strip — */
   .toc {
@@ -68,21 +68,21 @@
     margin-bottom: 40px;
   }
   .toc > div {
-    background: var(--bg-1);
+    background: var(--color-bg-surface);
     padding: 12px 14px;
   }
   .toc h4 {
     font: 500 10px/1 var(--font-mono);
     text-transform: uppercase;
     letter-spacing: .1em;
-    color: var(--brass-1);
+    color: var(--color-accent-fg);
     margin: 0 0 8px;
   }
   .toc ol { margin: 0; padding: 0; list-style: none; font: 11px/1.6 var(--font-mono); }
-  .toc li { display: flex; gap: 8px; color: var(--fg-2); }
-  .toc li b { color: var(--fg-1); font-weight: 500; min-width: 22px; }
+  .toc li { display: flex; gap: 8px; color: var(--color-fg-secondary); }
+  .toc li b { color: var(--color-fg-primary); font-weight: 500; min-width: 22px; }
   .toc a { color: inherit; text-decoration: none; }
-  .toc a:hover { color: var(--brass-1); }
+  .toc a:hover { color: var(--color-accent-fg); }
 
   /* — sections — */
   section.track {
@@ -93,34 +93,34 @@
     grid-template-columns: auto 1fr auto;
     gap: 16px;
     align-items: end;
-    border-bottom: 1px solid var(--line-2);
+    border-bottom: 1px solid var(--color-border-strong);
     padding-bottom: 10px;
     margin-bottom: 18px;
   }
   .track-head .badge {
     font: 500 11px/1 var(--font-mono);
-    background: var(--bg-3);
-    border: 1px solid var(--line-2);
-    color: var(--brass-1);
+    background: var(--color-bg-elevated);
+    border: 1px solid var(--color-border-strong);
+    color: var(--color-accent-fg);
     padding: 6px 9px;
     letter-spacing: .08em;
   }
   .track-head h2 {
     font: 500 18px/1.2 var(--font-sans);
-    color: var(--fg-1);
+    color: var(--color-fg-primary);
     margin: 0;
     letter-spacing: -.005em;
   }
   .track-head h2 small {
     font: 11px/1 var(--font-mono);
-    color: var(--fg-3);
+    color: var(--color-fg-muted);
     margin-left: 10px;
     text-transform: uppercase;
     letter-spacing: .08em;
   }
   .track-head .summary {
     font: 11px/1.4 var(--font-mono);
-    color: var(--fg-3);
+    color: var(--color-fg-muted);
     text-align: right;
   }
   .track-head .summary b { color: var(--ok-fg); font-weight: 500; }
@@ -133,8 +133,8 @@
   }
   .zones.three { grid-template-columns: repeat(3, 1fr); }
   .zone {
-    background: var(--bg-1);
-    border: 1px solid var(--line-2);
+    background: var(--color-bg-surface);
+    border: 1px solid var(--color-border-strong);
     padding: 16px 18px 18px;
     position: relative;
   }
@@ -142,31 +142,31 @@
     display: flex;
     align-items: baseline;
     gap: 10px;
-    border-bottom: 1px dashed var(--line-2);
+    border-bottom: 1px dashed var(--color-border-strong);
     padding-bottom: 10px;
     margin-bottom: 12px;
   }
   .zone .zid {
     font: 500 10px/1 var(--font-mono);
-    color: var(--bg-0);
-    background: var(--brass-1);
+    color: var(--color-bg-page);
+    background: var(--color-accent-fg);
     padding: 4px 6px;
     letter-spacing: .04em;
   }
   .zone .ztitle {
     font: 500 14px/1.2 var(--font-sans);
-    color: var(--fg-1);
+    color: var(--color-fg-primary);
     margin: 0;
     flex: 1;
   }
   .zone .zkind {
     font: 10px/1 var(--font-mono);
-    color: var(--fg-3);
+    color: var(--color-fg-muted);
     text-transform: uppercase;
     letter-spacing: .08em;
   }
   .zone p.lead {
-    color: var(--fg-2);
+    color: var(--color-fg-secondary);
     font-size: 12px;
     margin: 0 0 14px;
   }
@@ -174,19 +174,19 @@
     font: 500 9px/1 var(--font-mono);
     text-transform: uppercase;
     letter-spacing: .1em;
-    color: var(--fg-3);
+    color: var(--color-fg-muted);
     margin: 0 0 5px;
   }
   .zone .data {
     font: 10.5px/1.55 var(--font-mono);
-    color: var(--fg-2);
-    background: var(--bg-0);
-    border: 1px solid var(--line-1);
+    color: var(--color-fg-secondary);
+    background: var(--color-bg-page);
+    border: 1px solid var(--color-border-default);
     padding: 7px 9px;
     margin: 0 0 12px;
     word-break: break-all;
   }
-  .zone .data b { color: var(--brass-1); font-weight: 500; }
+  .zone .data b { color: var(--color-accent-fg); font-weight: 500; }
   .zone .data em { color: var(--info-fg); font-style: normal; }
   .zone .vars {
     list-style: none;
@@ -195,34 +195,34 @@
     display: grid;
     gap: 4px;
     font: 11.5px/1.5 var(--font-sans);
-    color: var(--fg-2);
+    color: var(--color-fg-secondary);
   }
   .zone .vars li { display: grid; grid-template-columns: 16px 1fr; gap: 6px; }
   .zone .vars li::before {
     content: '';
     width: 6px; height: 6px;
-    background: var(--brass-1);
+    background: var(--color-accent-fg);
     margin-top: 7px;
     margin-left: 5px;
   }
   .zone .vars li b {
     font: 500 11px/1 var(--font-mono);
-    color: var(--fg-1);
+    color: var(--color-fg-primary);
     margin-right: 6px;
   }
   .zone .ide {
-    border-top: 1px dashed var(--line-2);
+    border-top: 1px dashed var(--color-border-strong);
     padding-top: 10px;
     font: 11px/1.5 var(--font-sans);
-    color: var(--fg-2);
+    color: var(--color-fg-secondary);
   }
   .zone .ide .lbl { color: var(--ok-fg); margin-bottom: 6px; }
 
   /* — IDE backbone callout — */
   .ide-callout {
-    background: var(--bg-1);
-    border: 1px solid var(--line-2);
-    border-left: 2px solid var(--brass-1);
+    background: var(--color-bg-surface);
+    border: 1px solid var(--color-border-strong);
+    border-left: 2px solid var(--color-accent-fg);
     padding: 18px 22px;
     margin: 0 0 36px;
     display: grid;
@@ -232,17 +232,17 @@
   }
   .ide-callout h3 {
     font: 500 14px/1.2 var(--font-sans);
-    color: var(--brass-1);
+    color: var(--color-accent-fg);
     margin: 0 0 6px;
   }
   .ide-callout .label {
     font: 500 10px/1 var(--font-mono);
     text-transform: uppercase;
     letter-spacing: .1em;
-    color: var(--fg-3);
+    color: var(--color-fg-muted);
     margin: 0 0 4px;
   }
-  .ide-callout p { margin: 0 0 8px; color: var(--fg-2); font-size: 12.5px; }
+  .ide-callout p { margin: 0 0 8px; color: var(--color-fg-secondary); font-size: 12.5px; }
   .ide-callout .grid3 {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
@@ -250,15 +250,15 @@
     margin-top: 8px;
   }
   .ide-callout .grid3 > div {
-    background: var(--bg-0);
-    border: 1px solid var(--line-1);
+    background: var(--color-bg-page);
+    border: 1px solid var(--color-border-default);
     padding: 10px 12px;
     font: 11px/1.5 var(--font-mono);
-    color: var(--fg-2);
+    color: var(--color-fg-secondary);
   }
   .ide-callout .grid3 b {
     display: block;
-    color: var(--brass-1);
+    color: var(--color-accent-fg);
     margin-bottom: 4px;
     font: 500 10px/1 var(--font-mono);
     text-transform: uppercase;
@@ -273,42 +273,42 @@
     margin-top: 12px;
   }
   .plan th, .plan td {
-    border: 1px solid var(--line-2);
+    border: 1px solid var(--color-border-strong);
     padding: 9px 11px;
     text-align: left;
     vertical-align: top;
   }
   .plan th {
-    background: var(--bg-2);
+    background: var(--color-bg-panel-alt);
     font: 500 10px/1 var(--font-mono);
     text-transform: uppercase;
     letter-spacing: .08em;
-    color: var(--fg-3);
+    color: var(--color-fg-muted);
   }
-  .plan td.mono { font-family: var(--font-mono); font-size: 11.5px; color: var(--fg-2); }
-  .plan td.mono b { color: var(--brass-1); font-weight: 500; }
+  .plan td.mono { font-family: var(--font-mono); font-size: 11.5px; color: var(--color-fg-secondary); }
+  .plan td.mono b { color: var(--color-accent-fg); font-weight: 500; }
   .plan tr td:first-child { width: 70px; }
   .plan tr.parallel td:first-child { color: var(--ok-fg); font-weight: 500; }
 
   /* — footer / acceptance — */
   .accept {
-    background: var(--bg-1);
-    border: 1px solid var(--line-2);
+    background: var(--color-bg-surface);
+    border: 1px solid var(--color-border-strong);
     padding: 18px 22px;
     margin-top: 28px;
   }
-  .accept h3 { font: 500 13px/1.2 var(--font-sans); color: var(--fg-1); margin: 0 0 10px; }
-  .accept ul { margin: 0; padding-left: 18px; color: var(--fg-2); font-size: 12.5px; line-height: 1.6; }
+  .accept h3 { font: 500 13px/1.2 var(--font-sans); color: var(--color-fg-primary); margin: 0 0 10px; }
+  .accept ul { margin: 0; padding-left: 18px; color: var(--color-fg-secondary); font-size: 12.5px; line-height: 1.6; }
   .accept ul li { margin-bottom: 4px; }
-  .accept ul li b { color: var(--brass-1); font-weight: 500; }
+  .accept ul li b { color: var(--color-accent-fg); font-weight: 500; }
 
   /* citations */
   .cite {
     display: inline-block;
     font: 10px/1 var(--font-mono);
-    color: var(--fg-3);
-    background: var(--bg-2);
-    border: 1px solid var(--line-1);
+    color: var(--color-fg-muted);
+    background: var(--color-bg-panel-alt);
+    border: 1px solid var(--color-border-default);
     padding: 3px 5px;
     margin-left: 6px;
     text-transform: lowercase;
@@ -384,7 +384,7 @@
     <div>
       <div class="label">CROSS-CUTTING</div>
       <h3>IDE Backbone</h3>
-      <p style="font-size:11.5px;color:var(--fg-3);margin-top:4px;">
+      <p style="font-size:11.5px;color:var(--color-fg-muted);margin-top:4px;">
         모든 12 zone에 공통으로 적용되는 필터·attribution·navigation 규약.
       </p>
     </div>
@@ -409,7 +409,7 @@
           IDE side에서 PR·commit·file 클릭은 board/audit으로 reverse-lookup 가능해야 한다.
         </div>
       </div>
-      <p style="margin-top:14px;font-size:11.5px;color:var(--fg-3);">
+      <p style="margin-top:14px;font-size:11.5px;color:var(--color-fg-muted);">
         이 backbone은 <b>topbar에 branch dropdown 추가</b>, <b>sidebar에 keeper multi-select 모드 추가</b>,
         <b>모든 신규 zone이 <code>{branch, keepers[]}</code> 컨텍스트를 prop으로 받음</b> — 세 가지 변경으로 구현된다.
       </p>

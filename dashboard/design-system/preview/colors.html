@@ -10,7 +10,7 @@
   .sw-chip {
     height: 88px;
     border-radius: 3px;
-    border: 1px solid var(--line-1);
+    border: 1px solid var(--color-border-default);
     position: relative;
     overflow: hidden;
     display: flex; flex-direction: column; justify-content: space-between;
@@ -42,7 +42,7 @@
     gap: 12px;
     align-items: center;
     padding: 10px 0;
-    border-bottom: 1px solid var(--line-1);
+    border-bottom: 1px solid var(--color-border-default);
   }
   .status-row:last-child { border-bottom: none; }
   .status-name {
@@ -73,8 +73,8 @@
   .keeper-chip {
     display: flex; align-items: center; gap: 10px;
     padding: 12px;
-    background: var(--bg-1);
-    border: 1px solid var(--line-1);
+    background: var(--color-bg-surface);
+    border: 1px solid var(--color-border-default);
     border-radius: 3px;
   }
   .keeper-dot {
@@ -83,8 +83,8 @@
     flex: 0 0 auto;
   }
   .keeper-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-  .keeper-name { font: 600 11px/1.2 var(--font-mono); color: var(--fg-1); }
-  .keeper-role { font: 9px/1.2 var(--font-mono); letter-spacing: var(--track-caps); text-transform: uppercase; color: var(--fg-3); }
+  .keeper-name { font: 600 11px/1.2 var(--font-mono); color: var(--color-fg-primary); }
+  .keeper-role { font: 9px/1.2 var(--font-mono); letter-spacing: var(--track-caps); text-transform: uppercase; color: var(--color-fg-muted); }
 
   /* "Use and don't-use" example */
   .rules {
@@ -94,8 +94,8 @@
   }
   .rule {
     padding: 14px;
-    background: var(--bg-1);
-    border: 1px solid var(--line-1);
+    background: var(--color-bg-surface);
+    border: 1px solid var(--color-border-default);
     border-radius: 3px;
   }
   .rule-h {
@@ -108,12 +108,12 @@
   .rule-h.good { color: var(--ok-fg); }
   .rule-h.bad  { color: var(--err-fg); }
   .rule-h::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-  .rule p { font: var(--type-caption); color: var(--fg-3); line-height: 1.5; }
+  .rule p { font: var(--type-caption); color: var(--color-fg-muted); line-height: 1.5; }
 
   /* Mini UI preview with active row brass */
   .ui-row {
     padding: 10px 12px;
-    border-bottom: 1px solid var(--line-1);
+    border-bottom: 1px solid var(--color-border-default);
     display: grid;
     grid-template-columns: 10px 1fr auto;
     gap: 10px;
@@ -124,12 +124,12 @@
   .ui-row .d { width: 8px; height: 8px; border-radius: 50%; justify-self: center; }
   .ui-row.active {
     background: linear-gradient(90deg, rgb(var(--brass-glow)/.08), transparent 60%);
-    border-left: 2px solid var(--brass-1);
+    border-left: 2px solid var(--color-accent-fg);
     padding-left: 10px;
   }
-  .ui-row.active .name { color: var(--brass-1); }
-  .ui-row .name { color: var(--fg-1); }
-  .ui-row .meta { color: var(--fg-3); font-size: 9px; }
+  .ui-row.active .name { color: var(--color-accent-fg); }
+  .ui-row .name { color: var(--color-fg-primary); }
+  .ui-row .meta { color: var(--color-fg-muted); font-size: 9px; }
 </style>
 </head>
 <body class="masc-ds">
@@ -322,9 +322,9 @@
       <div class="ui-row active">
         <span class="d" style="background:#d4a14a; box-shadow:0 0 8px rgb(var(--brass-glow)/.6)"></span>
         <div><span class="name">masc-improver</span> <span class="meta"> · tool.write_file · running</span></div>
-        <span class="pv-tok" style="color:var(--brass-1); border-color:rgb(var(--brass-glow)/.4)">active</span>
+        <span class="pv-tok" style="color:var(--color-accent-fg); border-color:rgb(var(--brass-glow)/.4)">active</span>
       </div>
-      <div class="ui-row" style="background:var(--bg-2)">
+      <div class="ui-row" style="background:var(--color-bg-panel-alt)">
         <span class="d" style="background:#6a8eb0"></span>
         <div><span class="name">sangsu</span> <span class="meta"> · hover state</span></div>
         <span class="pv-tok">hover</span>

@@ -12,10 +12,10 @@
     gap: 16px;
     align-items: center;
     padding: 8px 16px;
-    border-bottom: 1px solid var(--line-1);
+    border-bottom: 1px solid var(--color-border-default);
   }
   .sp-row:last-child { border-bottom: none; }
-  .sp-name { font: 600 10px/1.2 var(--font-mono); letter-spacing: var(--track-caps); text-transform: uppercase; color: var(--fg-2); }
+  .sp-name { font: 600 10px/1.2 var(--font-mono); letter-spacing: var(--track-caps); text-transform: uppercase; color: var(--color-fg-secondary); }
   .sp-bar-wrap { height: 36px; position: relative; display: flex; align-items: center; }
   .sp-bar {
     background: var(--brass-3);
@@ -23,39 +23,39 @@
     height: 18px;
     position: relative;
   }
-  .sp-val { font: 11px/1 var(--font-mono); color: var(--fg-3); letter-spacing: var(--track-wide); }
+  .sp-val { font: 11px/1 var(--font-mono); color: var(--color-fg-muted); letter-spacing: var(--track-wide); }
 
   /* Radius cards */
   .radius-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
   .radius-card {
-    background: var(--bg-1);
-    border: 1px solid var(--line-1);
+    background: var(--color-bg-surface);
+    border: 1px solid var(--color-border-default);
     padding: 16px;
     display: flex; flex-direction: column; gap: 12px; align-items: center;
     text-align: center;
   }
   .radius-shape {
     width: 72px; height: 72px;
-    background: linear-gradient(135deg, var(--bg-3), var(--bg-4));
-    border: 1px solid var(--line-2);
+    background: linear-gradient(135deg, var(--color-bg-elevated), var(--color-bg-hover));
+    border: 1px solid var(--color-border-strong);
     box-shadow: inset 0 1px 0 rgb(255 255 255 / .04);
   }
-  .radius-name { font: 600 10px/1.2 var(--font-mono); letter-spacing: var(--track-caps); text-transform: uppercase; color: var(--fg-2); }
-  .radius-val { font: 9px/1.2 var(--font-mono); color: var(--fg-3); }
+  .radius-name { font: 600 10px/1.2 var(--font-mono); letter-spacing: var(--track-caps); text-transform: uppercase; color: var(--color-fg-secondary); }
+  .radius-val { font: 9px/1.2 var(--font-mono); color: var(--color-fg-muted); }
 
   /* Elevation stack */
-  .elev-wrap { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; padding: 24px; background: var(--bg-0); border: 1px solid var(--line-1); border-radius: 3px; }
+  .elev-wrap { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; padding: 24px; background: var(--color-bg-page); border: 1px solid var(--color-border-default); border-radius: 3px; }
   .elev-card {
     border-radius: 3px;
     padding: 20px 16px;
     font: 10px/1.2 var(--font-mono);
     letter-spacing: var(--track-caps);
     text-transform: uppercase;
-    color: var(--fg-2);
+    color: var(--color-fg-secondary);
     display: flex; flex-direction: column; gap: 8px;
     min-height: 100px;
   }
-  .elev-card .v { color: var(--fg-1); font-size: 14px; letter-spacing: 0; text-transform: none; }
+  .elev-card .v { color: var(--color-fg-primary); font-size: 14px; letter-spacing: 0; text-transform: none; }
   .elev-0 { background: #0c0b08; border: 1px solid #2a2520; }
   .elev-1 { background: #141210; border: 1px solid #2a2520; box-shadow: inset 0 1px 0 rgb(255 255 255 / .02); }
   .elev-2 { background: #1a1815; border: 1px solid #3a332c; box-shadow: 0 1px 2px rgb(0 0 0 / .4), inset 0 1px 0 rgb(255 255 255 / .03); }
@@ -68,36 +68,36 @@
     display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;
   }
   .density-card {
-    background: var(--bg-1); border: 1px solid var(--line-1); border-radius: 3px;
+    background: var(--color-bg-surface); border: 1px solid var(--color-border-default); border-radius: 3px;
     overflow: hidden;
   }
   .density-h {
     padding: 10px 12px;
-    border-bottom: 1px solid var(--line-1);
+    border-bottom: 1px solid var(--color-border-default);
     font: 600 10px/1 var(--font-mono);
     letter-spacing: var(--track-caps); text-transform: uppercase;
-    color: var(--fg-2);
+    color: var(--color-fg-secondary);
     display: flex; justify-content: space-between;
   }
-  .density-h .meta { color: var(--fg-3); font-size: 9px; }
+  .density-h .meta { color: var(--color-fg-muted); font-size: 9px; }
   .d-row {
     display: grid; grid-template-columns: 10px 1fr auto auto; gap: 10px; align-items: center;
     padding: 0 12px;
     font: 11px/1 var(--font-mono);
-    color: var(--fg-1);
-    border-bottom: 1px solid var(--line-1);
+    color: var(--color-fg-primary);
+    border-bottom: 1px solid var(--color-border-default);
   }
   .d-row:last-child { border-bottom: none; }
   .d-row .dot { width: 6px; height: 6px; border-radius: 50%; justify-self: center; }
-  .d-row .t { color: var(--fg-3); font-size: 9px; }
+  .d-row .t { color: var(--color-fg-muted); font-size: 9px; }
   .d-compact .d-row { height: 18px; }
   .d-normal  .d-row { height: 22px; }
   .d-comfy   .d-row { height: 28px; }
 
   /* Grid layout demo */
   .layout-demo {
-    background: var(--bg-1);
-    border: 1px solid var(--line-1);
+    background: var(--color-bg-surface);
+    border: 1px solid var(--color-border-default);
     border-radius: 3px;
     padding: 16px;
   }
@@ -106,29 +106,29 @@
     grid-template-columns: 180px 1fr 300px;
     grid-template-rows: 34px 32px 60px 32px 1fr 48px 20px;
     gap: 1px;
-    background: var(--line-2);
-    border: 1px solid var(--line-2);
+    background: var(--color-border-strong);
+    border: 1px solid var(--color-border-strong);
     height: 360px;
   }
   .layout-grid > div {
-    background: var(--bg-2);
+    background: var(--color-bg-panel-alt);
     display: flex; align-items: center; justify-content: center;
     font: 600 9px/1 var(--font-mono);
     letter-spacing: var(--track-caps);
     text-transform: uppercase;
-    color: var(--fg-3);
+    color: var(--color-fg-muted);
     padding: 4px;
     text-align: center;
   }
-  .layout-grid .topbar { grid-column: 1 / -1; grid-row: 1; background: var(--bg-1); color: var(--fg-2); }
+  .layout-grid .topbar { grid-column: 1 / -1; grid-row: 1; background: var(--color-bg-surface); color: var(--color-fg-secondary); }
   .layout-grid .ticker { grid-column: 1 / -1; grid-row: 2; }
-  .layout-grid .kpi    { grid-column: 1 / -1; grid-row: 3; background: var(--bg-3); color: var(--fg-1); }
+  .layout-grid .kpi    { grid-column: 1 / -1; grid-row: 3; background: var(--color-bg-elevated); color: var(--color-fg-primary); }
   .layout-grid .life   { grid-column: 1 / -1; grid-row: 4; }
-  .layout-grid .side   { grid-column: 1; grid-row: 5; background: var(--bg-1); }
-  .layout-grid .center { grid-column: 2; grid-row: 5; background: var(--bg-0); color: var(--brass-1); font-size: 10px; }
-  .layout-grid .rail   { grid-column: 3; grid-row: 5; background: var(--bg-1); }
-  .layout-grid .compose{ grid-column: 1 / -1; grid-row: 6; background: var(--bg-3); color: var(--fg-2); }
-  .layout-grid .status { grid-column: 1 / -1; grid-row: 7; background: var(--bg-1); font-size: 8px; }
+  .layout-grid .side   { grid-column: 1; grid-row: 5; background: var(--color-bg-surface); }
+  .layout-grid .center { grid-column: 2; grid-row: 5; background: var(--color-bg-page); color: var(--color-accent-fg); font-size: 10px; }
+  .layout-grid .rail   { grid-column: 3; grid-row: 5; background: var(--color-bg-surface); }
+  .layout-grid .compose{ grid-column: 1 / -1; grid-row: 6; background: var(--color-bg-elevated); color: var(--color-fg-secondary); }
+  .layout-grid .status { grid-column: 1 / -1; grid-row: 7; background: var(--color-bg-surface); font-size: 8px; }
 </style>
 </head>
 <body class="masc-ds">
@@ -198,7 +198,7 @@
     <div class="density-demo">
       <div class="density-card d-compact">
         <div class="density-h"><span>Compact</span><span class="meta">0.85× · 18px</span></div>
-        <div class="d-row"><span class="dot" style="background:var(--brass-1)"></span><span>nick0cave</span><span class="t">t-9f2a</span><span class="t">2m</span></div>
+        <div class="d-row"><span class="dot" style="background:var(--color-accent-fg)"></span><span>nick0cave</span><span class="t">t-9f2a</span><span class="t">2m</span></div>
         <div class="d-row"><span class="dot" style="background:var(--ok-fg)"></span><span>masc-improver</span><span class="t">t-4b11</span><span class="t">5m</span></div>
         <div class="d-row"><span class="dot" style="background:var(--info-fg)"></span><span>sangsu</span><span class="t">t-7c03</span><span class="t">8m</span></div>
         <div class="d-row"><span class="dot" style="background:var(--err-fg)"></span><span>qa-king</span><span class="t">t-2e88</span><span class="t">12m</span></div>
@@ -206,7 +206,7 @@
       </div>
       <div class="density-card d-normal">
         <div class="density-h"><span>Normal</span><span class="meta">1.0× · 22px</span></div>
-        <div class="d-row"><span class="dot" style="background:var(--brass-1)"></span><span>nick0cave</span><span class="t">t-9f2a</span><span class="t">2m</span></div>
+        <div class="d-row"><span class="dot" style="background:var(--color-accent-fg)"></span><span>nick0cave</span><span class="t">t-9f2a</span><span class="t">2m</span></div>
         <div class="d-row"><span class="dot" style="background:var(--ok-fg)"></span><span>masc-improver</span><span class="t">t-4b11</span><span class="t">5m</span></div>
         <div class="d-row"><span class="dot" style="background:var(--info-fg)"></span><span>sangsu</span><span class="t">t-7c03</span><span class="t">8m</span></div>
         <div class="d-row"><span class="dot" style="background:var(--err-fg)"></span><span>qa-king</span><span class="t">t-2e88</span><span class="t">12m</span></div>
@@ -214,7 +214,7 @@
       </div>
       <div class="density-card d-comfy">
         <div class="density-h"><span>Comfortable</span><span class="meta">1.15× · 28px</span></div>
-        <div class="d-row"><span class="dot" style="background:var(--brass-1)"></span><span>nick0cave</span><span class="t">t-9f2a</span><span class="t">2m</span></div>
+        <div class="d-row"><span class="dot" style="background:var(--color-accent-fg)"></span><span>nick0cave</span><span class="t">t-9f2a</span><span class="t">2m</span></div>
         <div class="d-row"><span class="dot" style="background:var(--ok-fg)"></span><span>masc-improver</span><span class="t">t-4b11</span><span class="t">5m</span></div>
         <div class="d-row"><span class="dot" style="background:var(--info-fg)"></span><span>sangsu</span><span class="t">t-7c03</span><span class="t">8m</span></div>
         <div class="d-row"><span class="dot" style="background:var(--err-fg)"></span><span>qa-king</span><span class="t">t-2e88</span><span class="t">12m</span></div>

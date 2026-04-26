@@ -39,13 +39,14 @@ function FocusSidebarContent({ compact = false }: FocusSidebarProps) {
               <span class="text-xs text-[var(--text-muted)]">${list.length}명 활성</span>
             </div>
           `}
-      <div class="grid content-start gap-1.5 overflow-y-auto custom-scrollbar pr-1 ${compact ? 'max-h-[32vh]' : 'max-h-140'}">
+      <div class="grid content-start gap-1.5 overflow-y-auto custom-scrollbar pr-1 ${compact ? 'max-h-[32vh]' : 'max-h-140'}" role="list" aria-label="에이전트 목록" tabindex="0">
         ${list.length === 0
           ? html`<div class="py-6 text-center text-[var(--text-muted)] text-sm" role="status">활성 에이전트 없음. masc_join으로 접속하면 여기에 표시됩니다.</div>`
           : list.map(agent => html`
             <button type="button"
               key=${agent.name}
               class="focus-agent-card w-full rounded border border-[var(--border-slate-12)] bg-[var(--white-3)] p-3.5 transition-colors duration-200 text-left cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent ${selected === agent.name ? 'focus-agent-selected' : ''}"
+              role="listitem"
               onClick=${() => openAgentDetail(agent.name)}
               aria-label=${`${agent.koreanName ?? agent.name}${agent.currentTask ? ` — ${agent.currentTask}` : ''}`}
             >

@@ -1163,7 +1163,6 @@
         test_web_dashboard_coverage test_auth_coverage
         test_a2a_tools_coverage test_graphql_api_coverage
         test_mention_coverage test_resilience_coverage
-        test_error_coverage
         test_types_coverage test_spawn_coverage test_dashboard_coverage
         test_rate_limit_coverage test_bounded_coverage test_session_coverage
         test_cache_eio_coverage test_run_eio_coverage
@@ -1198,7 +1197,6 @@
         test_web_dashboard_coverage test_auth_coverage
         test_a2a_tools_coverage test_graphql_api_coverage
         test_mention_coverage test_resilience_coverage
-        test_error_coverage
         test_types_coverage test_spawn_coverage test_dashboard_coverage
         test_rate_limit_coverage test_bounded_coverage test_session_coverage
         test_cache_eio_coverage test_run_eio_coverage

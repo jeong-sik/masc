@@ -97,7 +97,7 @@ let search_memory_bank
   (* Structured filter: kind (deterministic) *)
   let filtered =
     if kind_filter = "" then parsed
-    else List.filter (fun m -> String.lowercase_ascii m.kind = String.lowercase_ascii kind_filter) parsed
+    else List.filter (fun m -> String_util.equals_ci m.kind kind_filter) parsed
   in
   (* Text match: query against text field (non-deterministic data) *)
   let matched =

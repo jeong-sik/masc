@@ -237,6 +237,15 @@ let test_starts_with_ci_boundaries () =
   check bool "exact length equal" true
     (SU.starts_with_ci ~prefix:"abc" "ABC")
 
+let test_equals_ci_basic () =
+  check bool "exact" true (SU.equals_ci "Content-Type" "Content-Type");
+  check bool "case insensitive" true (SU.equals_ci "Content-Type" "content-type");
+  check bool "mixed case" true (SU.equals_ci "X-Trace-Id" "x-TRACE-id");
+  check bool "different content" false (SU.equals_ci "Content-Type" "Accept");
+  check bool "length mismatch" false (SU.equals_ci "abc" "abcd");
+  check bool "empty equals empty" true (SU.equals_ci "" "");
+  check bool "empty vs non-empty" false (SU.equals_ci "" "x")
+
 
 (* ---- Test runner ---- *)
 
@@ -281,4 +290,6 @@ let () =
             test_contains_substring_ci_empty_and_literal ] );
       ( "starts_with_ci",
         [ test_case "basic" `Quick test_starts_with_ci_basic;
-          test_case "boundaries" `Quick test_starts_with_ci_boundaries ] ) ]
+          test_case "boundaries" `Quick test_starts_with_ci_boundaries ] );
+      ( "equals_ci",
+        [ test_case "basic" `Quick test_equals_ci_basic ] ) ]

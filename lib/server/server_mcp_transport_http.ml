@@ -674,23 +674,6 @@ let handle_get_mcp ~deps ?legacy_messages_endpoint ?(profile = Full)
             Log.Server.info "SSE connected: %s (active: %d/%d)"
               session_id client_count Sse.max_clients)))
 
-let sse_simple_handler ~deps request reqd =
-  let origin = deps.get_origin request in
-  let session_id = Mcp_session.get_or_generate (get_session_id_any request) in
-  let protocol_version = get_protocol_version_for_session ~session_id request in
-  let event =
-    sse_prime_event ()
-    ^ Sse.format_event ~event_type:"connected"
-        (Printf.sprintf {|{"session_id":"%s"}|} session_id)
-  in
-  let headers =
-    Httpun.Headers.of_list
-      (("content-length", string_of_int (String.length event))
-      :: legacy_transport_deprecation_headers
-      @ sse_headers ~deps session_id protocol_version origin)
-  in
-  let response = Httpun.Response.create ~headers `OK in
-  Httpun.Reqd.respond_with_string reqd response event
 
 let handle_get_operator_mcp ~deps request reqd =
   let session_id = Mcp_session.get_or_generate (get_session_id_any request) in

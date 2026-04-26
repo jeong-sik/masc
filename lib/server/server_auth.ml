@@ -92,8 +92,7 @@ let observer_sse_query_token_from_request request =
   in
   match request.Httpun.Request.meth with
   | `GET
-    when observer_stream_requested
-         && (String.equal path "/mcp" || String.equal path "/sse") ->
+    when observer_stream_requested && String.equal path "/mcp" ->
       trim_opt (query_param request "token")
   | _ -> None
 

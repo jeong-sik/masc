@@ -339,7 +339,7 @@ describe('Governance surface', () => {
     expect(container.textContent).toContain('governance-judge')
     expect(container.textContent).toContain('masc_code_delete')
     expect(container.textContent).toContain('critical')
-    expect(container.textContent).toContain('Approval Input')
+    expect(container.textContent).toContain('승인 입력')
     expect(container.textContent).toContain('관리자 승인 대기')
     expect(container.textContent).toContain('1')
     expect(container.textContent).toContain('새로고침')

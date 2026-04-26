@@ -1682,14 +1682,18 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
          (#keeper-bootstrap-stuck). *)
       Atomic.set Server_dashboard_http._shell_warming true;
       Eio.Fiber.fork ~sw (fun () ->
+        let outer_timeout_sec =
+          Env_config_runtime.Dashboard.shell_prewarm_outer_timeout_sec
+        in
         (try
-           match Eio.Time.with_timeout clock 35.0 (fun () ->
+           match Eio.Time.with_timeout clock outer_timeout_sec (fun () ->
              Server_dashboard_http.warm_shell_cache state;
              Ok ())
            with
            | Ok () -> ()
            | Error `Timeout ->
-             Log.Dashboard.warn "shell cache pre-warm timed out (35s)"
+             Log.Dashboard.warn "shell cache pre-warm timed out (%.1fs)"
+               outer_timeout_sec
          with
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->

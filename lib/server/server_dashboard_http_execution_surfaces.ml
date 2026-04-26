@@ -4,7 +4,12 @@
 open Server_utils
 open Server_dashboard_http_core
 
-let shell_prewarm_timeout_s = 30.0
+(* Routed through Env_config_runtime.Dashboard so operators can raise
+   the ceiling on slow-disk deployments without a rebuild. The outer
+   wrapper at [server_runtime_bootstrap.ml] uses the matching
+   [shell_prewarm_outer_timeout_sec] env to keep the 5s headroom. *)
+let shell_prewarm_timeout_s =
+  Env_config_runtime.Dashboard.shell_prewarm_inner_timeout_sec
 
 let warm_shell_cache (state : Mcp_server.server_state) =
   Atomic.set _shell_warming true;

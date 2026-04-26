@@ -226,6 +226,7 @@ function AuthPopover() {
             <div class="flex flex-col gap-2">
               <input
                 type="password"
+                autoComplete="off"
                 placeholder="Bearer 토큰"
                 aria-label="Bearer 토큰"
                 class="w-full py-1.5 px-2 rounded text-2xs border border-[var(--card-border)] bg-[var(--white-4)] text-[var(--text-body)] placeholder-[var(--text-muted)] outline-none focus:border-[rgba(71,184,255,0.5)] focus-visible:ring-2 focus-visible:ring-[var(--accent)]/50"

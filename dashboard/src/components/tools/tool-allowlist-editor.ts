@@ -363,6 +363,7 @@ function ToolSearchPicker({
       <div class="relative">
         <input
           aria-label="도구 검색"
+          autoComplete="off"
           ...${getInputProps({
             placeholder,
             class: 'w-full px-3 py-1.5 rounded border border-[var(--card-border)] bg-[var(--white-3)] text-2xs text-[var(--text-body)] placeholder:text-[var(--text-muted)]',

@@ -383,6 +383,7 @@ function FieldWidget({ id, field, value, revealed, describedById }: {
           <div class="flex items-center gap-1">
             <input
               type=${revealed ? 'text' : 'password'}
+              autoComplete="off"
               id=${fieldId}
               aria-label=${field.name}
               aria-describedby=${describedById}

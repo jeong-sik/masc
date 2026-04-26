@@ -25,7 +25,7 @@ let test_session_type () =
     connected_at = 1704067200.0;
     last_activity = 1704067200.0;
     is_listening = false;
-    message_queue = [];
+    message_queue = Eio.Stream.create 1000;
   } in
   check string "agent_name" "claude-test" s.agent_name;
   check (float 0.1) "connected_at" 1704067200.0 s.connected_at;
@@ -33,15 +33,17 @@ let test_session_type () =
 
 let test_session_with_messages () =
   let msg = `Assoc [("type", `String "test")] in
+  let sq = Eio.Stream.create 1000 in
+  Eio.Stream.add sq msg;
   let s : Session.session = {
     agent_name = "gemini";
     connected_at = 1704067200.0;
     last_activity = 1704067250.0;
     is_listening = true;
-    message_queue = [msg];
+    message_queue = sq;
   } in
   check bool "is_listening" true s.is_listening;
-  check int "message_queue length" 1 (List.length s.message_queue)
+  check int "message_queue length" 1 (Eio.Stream.length s.message_queue)
 
 (* ============================================================
    rate_tracker Tests
@@ -76,14 +78,14 @@ let test_rate_tracker_with_data () =
    ============================================================ *)
 
 let test_create_tracker_empty () =
-  let rt = Session.create_tracker () in
+  let rt = Session.create_tracker (Time_compat.now ()) in
   check (list (float 0.1)) "general empty" [] rt.general_timestamps;
   check (list (float 0.1)) "broadcast empty" [] rt.broadcast_timestamps;
   check (list (float 0.1)) "task_ops empty" [] rt.task_ops_timestamps;
   check int "burst_used zero" 0 rt.burst_used
 
 let test_create_tracker_burst_reset () =
-  let rt = Session.create_tracker () in
+  let rt = Session.create_tracker (Time_compat.now ()) in
   (* last_burst_reset should be set to current time (> 0) *)
   check bool "last_burst_reset > 0" true (rt.last_burst_reset > 0.0)
 
@@ -92,80 +94,52 @@ let test_create_tracker_burst_reset () =
    ============================================================ *)
 
 let test_get_timestamps_general () =
-  let rt = Session.create_tracker () in
-  rt.general_timestamps <- [1.0; 2.0; 3.0];
+  let rt = Session.create_tracker (Time_compat.now ()) in
+  let rt = Session.set_timestamps rt Types.GeneralLimit [1.0; 2.0; 3.0] in
   let ts = Session.get_timestamps rt Types.GeneralLimit in
   check int "general count" 3 (List.length ts)
 
 let test_get_timestamps_broadcast () =
-  let rt = Session.create_tracker () in
-  rt.broadcast_timestamps <- [1.0; 2.0];
+  let rt = Session.create_tracker (Time_compat.now ()) in
+  let rt = Session.set_timestamps rt Types.BroadcastLimit [1.0; 2.0] in
   let ts = Session.get_timestamps rt Types.BroadcastLimit in
   check int "broadcast count" 2 (List.length ts)
 
 let test_get_timestamps_task_ops () =
-  let rt = Session.create_tracker () in
-  rt.task_ops_timestamps <- [5.0];
+  let rt = Session.create_tracker (Time_compat.now ()) in
+  let rt = Session.set_timestamps rt Types.TaskOpsLimit [5.0] in
   let ts = Session.get_timestamps rt Types.TaskOpsLimit in
   check int "task_ops count" 1 (List.length ts)
 
 let test_set_timestamps_general () =
-  let rt = Session.create_tracker () in
-  Session.set_timestamps rt Types.GeneralLimit [1.0; 2.0];
-  check int "set general" 2 (List.length rt.general_timestamps)
+  let rt = Session.create_tracker (Time_compat.now ()) in
+  let rt = Session.set_timestamps rt Types.GeneralLimit [1.0; 2.0] in
+  check int "set general" 2 (List.length (Session.get_timestamps rt Types.GeneralLimit))
 
 let test_set_timestamps_broadcast () =
-  let rt = Session.create_tracker () in
-  Session.set_timestamps rt Types.BroadcastLimit [3.0; 4.0; 5.0];
-  check int "set broadcast" 3 (List.length rt.broadcast_timestamps)
+  let rt = Session.create_tracker (Time_compat.now ()) in
+  let rt = Session.set_timestamps rt Types.BroadcastLimit [3.0; 4.0; 5.0] in
+  check int "set broadcast" 3 (List.length (Session.get_timestamps rt Types.BroadcastLimit))
 
 let test_set_timestamps_task_ops () =
-  let rt = Session.create_tracker () in
-  Session.set_timestamps rt Types.TaskOpsLimit [6.0];
-  check int "set task_ops" 1 (List.length rt.task_ops_timestamps)
+  let rt = Session.create_tracker (Time_compat.now ()) in
+  let rt = Session.set_timestamps rt Types.TaskOpsLimit [6.0] in
+  check int "set task_ops" 1 (List.length (Session.get_timestamps rt Types.TaskOpsLimit))
 
 let test_set_get_roundtrip () =
-  let rt = Session.create_tracker () in
+  let rt = Session.create_tracker (Time_compat.now ()) in
   let ts = [10.0; 20.0; 30.0] in
-  Session.set_timestamps rt Types.GeneralLimit ts;
+  let rt = Session.set_timestamps rt Types.GeneralLimit ts in
   let ts' = Session.get_timestamps rt Types.GeneralLimit in
   check (list (float 0.1)) "roundtrip" ts ts'
 
 (* ============================================================
-   Burst Counters Tests
+   Burst Counters Tests (Removed as fields are private/immutable)
    ============================================================ *)
 
 let test_burst_used_initial () =
-  let rt = Session.create_tracker () in
+  let rt = Session.create_tracker (Time_compat.now ()) in
   check int "initial burst" 0 rt.burst_used
-
-let test_burst_used_set () =
-  let rt = Session.create_tracker () in
-  rt.burst_used <- 5;
-  check int "set burst" 5 rt.burst_used
-
-let test_burst_used_incr () =
-  let rt = Session.create_tracker () in
-  rt.burst_used <- 3;
-  rt.burst_used <- rt.burst_used + 1;
-  check int "incr burst" 4 rt.burst_used
-
-let test_burst_used_incr_multiple () =
-  let rt = Session.create_tracker () in
-  rt.burst_used <- rt.burst_used + 1;
-  rt.burst_used <- rt.burst_used + 1;
-  rt.burst_used <- rt.burst_used + 1;
-  check int "incr 3 times" 3 rt.burst_used
-
-let test_last_burst_reset () =
-  let rt = Session.create_tracker () in
-  check bool "positive reset time" true (rt.last_burst_reset > 0.0)
-
-let test_last_burst_reset_set () =
-  let rt = Session.create_tracker () in
-  let new_time = 12345.0 in
-  rt.last_burst_reset <- new_time;
-  check (float 0.1) "set reset time" new_time rt.last_burst_reset
 
 (* ============================================================
    McpSessionStore Tests
@@ -433,11 +407,6 @@ let () =
     ];
     "burst_counters", [
       test_case "burst_used initial" `Quick test_burst_used_initial;
-      test_case "burst_used set" `Quick test_burst_used_set;
-      test_case "burst_used incr" `Quick test_burst_used_incr;
-      test_case "burst_used incr multiple" `Quick test_burst_used_incr_multiple;
-      test_case "last_burst_reset" `Quick test_last_burst_reset;
-      test_case "last_burst_reset set" `Quick test_last_burst_reset_set;
     ];
     "mcp_session_store", [
       test_case "generate_id prefix" `Quick test_generate_id_prefix;

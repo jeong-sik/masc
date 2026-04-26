@@ -15,6 +15,7 @@ import { createManagedAsyncResource } from '../lib/async-state'
 import { TextInput } from './common/input'
 import { StatusDot } from './common/status-dot'
 import { CopyIdButton } from './common/copy-id-button'
+import { ActionButton } from './common/button'
 
 type StatusTone = 'ok' | 'warn' | 'bad'
 
@@ -392,7 +393,7 @@ export function TransportHealthPanel() {
 
   if (!data) return null
   if (!data.summary || !data.agent_health) {
-    return html`<div class="p-6 text-center text-text-muted text-sm">트랜스포트 데이터 불완전. <button class="underline" onClick=${() => void refreshTransportHealth()}>재시도</button></div>`
+    return html`<div class="p-6 text-center text-text-muted text-sm">트랜스포트 데이터 불완전. <${ActionButton} variant="subtle" size="sm" class="underline" onClick=${() => void refreshTransportHealth()}>재시도<//></div>`
   }
 
   const sseStatus = sseTone(data)
@@ -430,10 +431,12 @@ export function TransportHealthPanel() {
             ? html`<div class="mt-1 text-2xs text-text-muted">${truthLine}</div>`
             : null}
         </div>
-        <button
-          class="text-3xs text-text-muted hover:text-text-body transition-colors"
+        <${ActionButton}
+          variant="subtle"
+          size="sm"
+          class="text-3xs"
           onClick=${() => void refreshTransportHealth()}
-        >새로고침</button>
+        >새로고침<//>
       </div>
 
       <details class="group rounded border border-card-border/50 bg-card/18 overflow-hidden" open=${hasAnyBadTransport}>

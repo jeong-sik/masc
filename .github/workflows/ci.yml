@@ -292,6 +292,7 @@ jobs:
           bash scripts/ci/check-telemetry-coverage.sh
           bash scripts/ci/check-determinism-contract.sh
           bash scripts/audit-hardcoding-truth.sh --fail-on-confirmed
+          bash scripts/ci/check-credential-audits.sh
 
   health:
     name: Health

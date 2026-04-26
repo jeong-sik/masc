@@ -132,13 +132,26 @@ TOTAL_UUID=$(wc -l < "$UUID_FILES_FILE" | tr -d ' ')
 TOTAL_REDIRECTS=$(wc -l < "$REDIRECTS_FILE" | tr -d ' ')
 
 # I1. Dangling redirects: redirect_to target not in UUID inventory.
-awk -F'\t' 'NR==FNR { uuids[$1]=1; next } !($4 in uuids) { print $1 "\t" $4 }' \
-  "$UUID_FILES_FILE" "$REDIRECTS_FILE" > "$DANGLING_FILE"
+# Note: when UUID_FILES_FILE is empty, awk's `NR==FNR` trick mis-treats
+# REDIRECTS_FILE as the first file and never runs the dangling check.
+# Guard with -s so an empty UUID inventory still flags every redirect.
+if [ -s "$UUID_FILES_FILE" ]; then
+  awk -F'\t' 'NR==FNR { uuids[$1]=1; next } !($4 in uuids) { print $1 "\t" $4 }' \
+    "$UUID_FILES_FILE" "$REDIRECTS_FILE" > "$DANGLING_FILE"
+else
+  awk -F'\t' '{ print $1 "\t" $4 }' "$REDIRECTS_FILE" > "$DANGLING_FILE"
+fi
 DANGLING=$(wc -l < "$DANGLING_FILE" | tr -d ' ')
 
 # I2. Orphan UUID files: UUID never appears as a redirect target.
-awk -F'\t' 'NR==FNR { targets[$4]=1; next } !($1 in targets) { print $1 "\t" $2 }' \
-  "$REDIRECTS_FILE" "$UUID_FILES_FILE" > "$ORPHAN_FILE"
+# Same NR==FNR + empty-first-file caveat: when REDIRECTS_FILE is empty,
+# every UUID file is by definition orphan.
+if [ -s "$REDIRECTS_FILE" ]; then
+  awk -F'\t' 'NR==FNR { targets[$4]=1; next } !($1 in targets) { print $1 "\t" $2 }' \
+    "$REDIRECTS_FILE" "$UUID_FILES_FILE" > "$ORPHAN_FILE"
+else
+  awk -F'\t' '{ print $1 "\t" $2 }' "$UUID_FILES_FILE" > "$ORPHAN_FILE"
+fi
 ORPHAN=$(wc -l < "$ORPHAN_FILE" | tr -d ' ')
 
 # I3. Agent_name mismatch: UUID file's agent_name does not match the

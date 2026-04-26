@@ -211,9 +211,9 @@ export function GovernanceMonitor() {
                   <table class="w-full text-xs" aria-label="도구 거부 현황">
                     <thead>
                       <tr class="text-left text-[var(--color-fg-muted)] border-b border-[var(--color-border-default)]">
-                        <th class="py-1.5 pr-4 font-medium">도구</th>
-                        <th class="py-1.5 pr-4 font-medium">사유</th>
-                        <th class="py-1.5 font-medium text-right">횟수</th>
+                        <th scope="col" class="py-1.5 pr-4 font-medium">도구</th>
+                        <th scope="col" class="py-1.5 pr-4 font-medium">사유</th>
+                        <th scope="col" class="py-1.5 font-medium text-right">횟수</th>
                       </tr>
                     </thead>
                     <tbody>

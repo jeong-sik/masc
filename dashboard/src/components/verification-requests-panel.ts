@@ -498,15 +498,15 @@ function RequestsTable({
       <table class="w-full text-xs" aria-label="검증 요청 목록">
         <thead>
           <tr class="text-[var(--color-fg-muted)] border-b border-[var(--color-border-default)]">
-            <th class="text-left py-1 pr-2">상태</th>
-            <th class="text-left py-1 pr-2">요청</th>
-            <th class="text-left py-1 pr-2">작업</th>
-            <th class="text-left py-1 pr-2">제출자</th>
-            <th class="text-left py-1 pr-2">승인자</th>
-            <th class="text-left py-1 pr-2">생성</th>
-            <th class="text-left py-1 pr-2">판정</th>
-            <th class="text-left py-1 pr-2">액션</th>
-            <th class="text-left py-1">세부</th>
+            <th scope="col" class="text-left py-1 pr-2">상태</th>
+            <th scope="col" class="text-left py-1 pr-2">요청</th>
+            <th scope="col" class="text-left py-1 pr-2">작업</th>
+            <th scope="col" class="text-left py-1 pr-2">제출자</th>
+            <th scope="col" class="text-left py-1 pr-2">승인자</th>
+            <th scope="col" class="text-left py-1 pr-2">생성</th>
+            <th scope="col" class="text-left py-1 pr-2">판정</th>
+            <th scope="col" class="text-left py-1 pr-2">액션</th>
+            <th scope="col" class="text-left py-1">세부</th>
           </tr>
         </thead>
         <tbody>

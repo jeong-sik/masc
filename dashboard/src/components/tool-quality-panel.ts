@@ -181,11 +181,11 @@ function ToolTable({
       <table class="w-full text-2xs" aria-label="도구 품질 메트릭">
         <thead>
           <tr class="text-[var(--color-fg-disabled)] border-b border-[var(--color-border-default)]">
-            <th class="text-left py-1 font-normal">도구</th>
-            <th class="text-right py-1 font-normal">호출</th>
-            <th class="text-right py-1 font-normal">성공</th>
-            <th class="text-right py-1 font-normal">평균 ms</th>
-            <th class="text-right py-1 font-normal">출력</th>
+            <th scope="col" class="text-left py-1 font-normal">도구</th>
+            <th scope="col" class="text-right py-1 font-normal">호출</th>
+            <th scope="col" class="text-right py-1 font-normal">성공</th>
+            <th scope="col" class="text-right py-1 font-normal">평균 ms</th>
+            <th scope="col" class="text-right py-1 font-normal">출력</th>
           </tr>
         </thead>
         <tbody>

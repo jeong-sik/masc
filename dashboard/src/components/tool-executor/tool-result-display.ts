@@ -75,10 +75,10 @@ function StoredBlobView({
         </div>
         <div class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] overflow-hidden">
           <div class="flex items-center justify-between px-3 py-1.5 border-b border-[var(--color-border-default)]">
-            <button type="button" class="text-3xs text-[var(--color-fg-muted)] cursor-pointer hover:text-[var(--color-fg-primary)]"
+            <${ActionButton} variant="subtle" size="sm" class="text-3xs"
               onClick=${() => { expanded.value = false }}>
               접기 (${marker.bytes.toLocaleString()}B)
-            </button>
+            <//>
             <${ActionButton} variant="subtle" size="sm"
               onClick=${() => void navigator.clipboard.writeText(fullText.value ?? '')}>복사<//>
           </div>
@@ -154,10 +154,10 @@ export function ToolResultDisplay({ success, text, toolName, timestamp }: ToolRe
       </div>
       <div class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] overflow-hidden">
         <div class="flex items-center justify-between px-3 py-1.5 border-b border-[var(--color-border-default)]">
-          <button type="button" class="text-3xs text-[var(--color-fg-muted)] cursor-pointer hover:text-[var(--color-fg-primary)]"
+          <${ActionButton} variant="subtle" size="sm" class="text-3xs"
             onClick=${() => { expanded.value = !expanded.value }}>
             ${expanded.value ? '접기' : '펼치기'} (${lines}줄)
-          </button>
+          <//>
           <${ActionButton} variant="subtle" size="sm" onClick=${() => void navigator.clipboard.writeText(text)}>복사<//>
         </div>
         ${expanded.value ? html`

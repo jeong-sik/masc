@@ -5,6 +5,7 @@
 
 import { html } from 'htm/preact'
 import { useState } from 'preact/hooks'
+import { ActionButton } from './common/button'
 import { CopyableCode } from './common/copyable-code'
 import { SetupGuideCard } from './setup-guide-card'
 import {
@@ -50,14 +51,14 @@ function OnboardingCard({ connectorId }: { connectorId: KnownConnectorId }) {
           <span class="text-base leading-none" aria-hidden="true">${channelIcon(connectorId)}</span>
           <span class="text-sm font-semibold text-[var(--color-fg-primary)]">${CONNECTOR_DISPLAY_NAMES[connectorId]}</span>
         </div>
-        <button
-          type="button"
-          class=${`rounded cursor-pointer transition-all duration-200 font-medium border border-solid border-[var(--accent-30)] bg-[var(--accent-12)] text-[var(--color-fg-secondary)] hover:bg-[var(--accent-20)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-bg-surface)] py-1 px-2 text-3xs ${starting ? 'opacity-50 pointer-events-none' : 'active:scale-[0.97]'}`}
+        <${ActionButton}
+          variant="primary"
+          size="sm"
           disabled=${starting}
-          aria-busy=${starting ? 'true' : 'false'}
-          data-onboarding-start=${connectorId}
+          ariaBusy=${starting}
+          testId=${`onboarding-start-${connectorId}`}
           onClick=${() => { void onStart() }}
-        >${onboardingStartLabel(starting)}</button>
+        >${onboardingStartLabel(starting)}<//>
       </div>
       <div class="text-2xs text-[var(--color-fg-disabled)]">
         <strong>Start</strong>를 누르면 백엔드가 사이드카를 실행합니다. 또는 명령을 복사해 새 터미널에서 직접 실행하세요.

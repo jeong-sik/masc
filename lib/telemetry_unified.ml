@@ -298,7 +298,7 @@ let freshness_fields ~now latest_ts =
     [ ("latest_ts_unix", `Null); ("latest_ts_iso", `Null); ("latest_age_s", `Null) ]
 
 let source_health_fields ~now ~exists ~entry_count ~latest_ts ~freshness_slo_s
-    ?coverage_gap () =
+    ?(optional_when_missing = false) ?coverage_gap () =
   match coverage_gap with
   | Some gap ->
     [
@@ -309,7 +309,14 @@ let source_health_fields ~now ~exists ~entry_count ~latest_ts ~freshness_slo_s
     ]
   | None ->
     let health, stale_reason =
-      if not exists then ("missing", "store_missing")
+      (* [optional_when_missing] callers (Goal_event, which only materialises
+         after the first goal verification) have a legitimate "file does not
+         exist yet" state. Reporting that as a red [missing] alarm creates
+         dashboard fatigue; report a neutral [not_yet] with an explanatory
+         reason instead. Real write failures still surface via [coverage_gap]
+         regardless of this flag. *)
+      if not exists && optional_when_missing then ("not_yet", "no_entries_yet")
+      else if not exists then ("missing", "store_missing")
       else if entry_count = 0 then ("empty", "no_entries")
       else
         match latest_ts with
@@ -325,6 +332,11 @@ let source_health_fields ~now ~exists ~entry_count ~latest_ts ~freshness_slo_s
       ( "stale_reason",
         if stale_reason = "" then `Null else `String stale_reason );
     ]
+
+let source_optional_when_missing = function
+  | Goal_event -> true
+  | Keeper_metric | Agent_event | Tool_call_io | Trajectory_tool_call
+  | Tool_usage | Oas_event | Execution_receipt | Tool_metric -> false
 
 let latest_coverage_gap_for_source gaps source =
   let source_name = source_to_string source in
@@ -915,7 +927,9 @@ let summary_json ~base_path ~masc_root () : Yojson.Safe.t =
           @ metadata_fields
           @ freshness_fields ~now keeper_latest_ts
           @ source_health_fields ~now ~exists ~entry_count:keeper_total
-              ~latest_ts:keeper_latest_ts ~freshness_slo_s ?coverage_gap ()),
+              ~latest_ts:keeper_latest_ts ~freshness_slo_s
+              ~optional_when_missing:(source_optional_when_missing source)
+              ?coverage_gap ()),
         keeper_total )
     | Trajectory_tool_call ->
       let trajectories_root = Filename.concat masc_root "trajectories" in
@@ -936,7 +950,9 @@ let summary_json ~base_path ~masc_root () : Yojson.Safe.t =
           @ metadata_fields
           @ freshness_fields ~now latest_ts
           @ source_health_fields ~now ~exists ~entry_count:count ~latest_ts
-              ~freshness_slo_s ?coverage_gap ()),
+              ~freshness_slo_s
+              ~optional_when_missing:(source_optional_when_missing source)
+              ?coverage_gap ()),
         count )
     | Execution_receipt ->
       let keepers_root = Filename.concat masc_root "keepers" in
@@ -957,7 +973,9 @@ let summary_json ~base_path ~masc_root () : Yojson.Safe.t =
           @ metadata_fields
           @ freshness_fields ~now latest_ts
           @ source_health_fields ~now ~exists ~entry_count:count ~latest_ts
-              ~freshness_slo_s ?coverage_gap ()),
+              ~freshness_slo_s
+              ~optional_when_missing:(source_optional_when_missing source)
+              ?coverage_gap ()),
         count )
     | Goal_event ->
       let path = goal_events_path ~masc_root in
@@ -976,7 +994,9 @@ let summary_json ~base_path ~masc_root () : Yojson.Safe.t =
           @ metadata_fields
           @ freshness_fields ~now latest_ts
           @ source_health_fields ~now ~exists ~entry_count:count ~latest_ts
-              ~freshness_slo_s ?coverage_gap ()),
+              ~freshness_slo_s
+              ~optional_when_missing:(source_optional_when_missing source)
+              ?coverage_gap ()),
         count )
     | _ ->
       let dir = match fixed_store_dir ~masc_root ~base_path source with
@@ -996,7 +1016,9 @@ let summary_json ~base_path ~masc_root () : Yojson.Safe.t =
           @ metadata_fields
           @ freshness_fields ~now latest_ts
           @ source_health_fields ~now ~exists ~entry_count:count ~latest_ts
-              ~freshness_slo_s ?coverage_gap ()),
+              ~freshness_slo_s
+              ~optional_when_missing:(source_optional_when_missing source)
+              ?coverage_gap ()),
         count )
   in
   let source_summaries = List.map source_json_and_count all_sources in

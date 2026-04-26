@@ -79,20 +79,24 @@ describe('ConnectorOnboardingGrid', () => {
     expect(container.textContent ?? '').toContain('아직 연결된 사이드카가 없습니다')
   })
 
-  it('renders a per-card Start button with data-onboarding-start matching each connector id', () => {
+  it('renders a per-card Start button with testId matching each connector id', () => {
     render(html`<${ConnectorOnboardingGrid} />`, container)
-    const buttons = container.querySelectorAll('[data-onboarding-start]')
+    const buttons = container.querySelectorAll('[data-testid^="onboarding-start-"]')
     expect(buttons.length).toBe(4)
-    const ids = Array.from(buttons).map(b => b.getAttribute('data-onboarding-start'))
+    const ids = Array.from(buttons)
+      .map(b => b.getAttribute('data-testid')!.replace('onboarding-start-', ''))
     expect(ids).toEqual(['discord', 'imessage', 'slack', 'telegram'])
   })
 
   it('per-card Start button starts in the idle "Start" label, not inflight', () => {
     render(html`<${ConnectorOnboardingGrid} />`, container)
-    const discordBtn = container.querySelector('[data-onboarding-start="discord"]') as HTMLButtonElement
+    const discordBtn = container.querySelector('[data-testid="onboarding-start-discord"]') as HTMLButtonElement
     expect(discordBtn.textContent).toContain('Start')
     expect(discordBtn.textContent).not.toContain('Starting')
-    expect(discordBtn.getAttribute('aria-busy')).toBe('false')
+    // ActionButton omits aria-busy when ariaBusy=false (ARIA default is
+    // already "false" — no need to render it). When the inflight state
+    // flips, ariaBusy=true would render aria-busy="true" instead.
+    expect(discordBtn.getAttribute('aria-busy')).toBeNull()
     expect(discordBtn.disabled).toBe(false)
   })
 })

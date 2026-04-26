@@ -11,6 +11,7 @@ import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { signal } from '@preact/signals'
 import { ActionButton } from './common/button'
+import { TextInput } from './common/input'
 import { SkeletonText } from './common/skeleton'
 
 interface LogResponse {
@@ -214,12 +215,12 @@ export function SidecarLogViewer({ connectorId }: { connectorId: string }) {
         ? html`
             <div class="mb-2 flex flex-wrap items-center gap-2">
               <${LevelPills} connectorId=${connectorId} active=${entry.level} />
-              <input
+              <${TextInput}
                 type="search"
+                class="min-w-0 flex-1 !px-2 !py-0.5 !text-2xs"
                 value=${entry.keyword}
                 placeholder="keyword 필터 (case-insensitive)"
-                class="min-w-0 flex-1 rounded border border-[var(--white-8)] bg-[var(--color-bg-page)] px-2 py-0.5 text-2xs text-[var(--color-fg-primary)] focus:border-[var(--accent-1)] focus:outline-none"
-                data-log-keyword
+                ariaLabel="sidecar log keyword 필터"
                 onInput=${(ev: Event) => {
                   const v = (ev.target as HTMLInputElement).value
                   setEntry(connectorId, { keyword: v })

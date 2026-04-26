@@ -143,7 +143,7 @@ export function AuthStatus() {
   return html`
     <div class="relative">
       <button type="button"
-        class="flex items-center gap-1.5 text-2xs py-1 px-2 rounded border border-solid border-[var(--card-border)] bg-[var(--white-4)] cursor-pointer font-[inherit] transition-colors duration-150 hover:bg-[var(--white-8)] text-[var(--text-muted)]"
+        class="flex items-center gap-1.5 text-2xs py-1 px-2 min-h-6 rounded border border-solid border-[var(--card-border)] bg-[var(--white-4)] cursor-pointer font-[inherit] transition-colors duration-150 hover:bg-[var(--white-8)] text-[var(--text-muted)]"
         aria-expanded=${popoverOpen.value}
         aria-controls="auth-popover"
         aria-haspopup="true"
@@ -261,12 +261,12 @@ export function RemoteWarningBanner() {
       <span>${message}</span>
       <div class="flex items-center gap-2 shrink-0">
         <button type="button"
-          class="px-2 py-0.5 rounded text-2xs border border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--accent)] hover:bg-[var(--accent-15)] cursor-pointer transition-colors"
+          class="px-2 py-1 min-h-6 rounded text-2xs border border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--accent)] hover:bg-[var(--accent-15)] cursor-pointer transition-colors"
           aria-label="인증 패널 열기"
           onClick=${openPopover}
         >인증 열기</button>
         <button type="button"
-          class="text-[var(--text-muted)] hover:text-[var(--text-body)] cursor-pointer text-2xs transition-colors"
+          class="text-[var(--text-muted)] hover:text-[var(--text-body)] cursor-pointer text-2xs transition-colors min-h-6 min-w-6 flex items-center justify-center rounded"
           aria-label="\uacbd\uace0 \ub2eb\uae30"
           onClick=${() => { bannerDismissed.value = true }}
         >\u2715</button>

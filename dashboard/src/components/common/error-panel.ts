@@ -65,7 +65,7 @@ export function ErrorPanel({ onClose }: ErrorPanelProps) {
         <span class="text-xs font-medium text-[var(--text-muted)]">미확인 에러 <span class="text-[var(--bad)]">${items.length}</span>건</span>
         <div class="flex items-center gap-1">
           <button type="button"
-            class="text-2xs px-2 py-0.5 rounded border border-[var(--card-border)] bg-[var(--white-4)] text-[var(--text-muted)] hover:bg-[var(--white-10)] cursor-pointer transition-colors"
+            class="text-2xs px-2 py-1 min-h-6 rounded border border-[var(--card-border)] bg-[var(--white-4)] text-[var(--text-muted)] hover:bg-[var(--white-10)] cursor-pointer transition-colors"
             onClick=${() => { clearAllErrors(); onClose() }}
           >모두 확인</button>
           <button type="button" class="text-[var(--text-muted)] hover:text-[var(--text-body)] cursor-pointer p-1.5" onClick=${onClose} aria-label="닫기">

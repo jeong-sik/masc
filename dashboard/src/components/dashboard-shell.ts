@@ -110,7 +110,7 @@ export function ConnectionStatus() {
       ${attentionCount > 0 ? html`
         <${RouteLink}
           tab="overview"
-          class="inline-flex items-center justify-center rounded-sm border border-[var(--card-border)] bg-[var(--white-4)] px-2 py-0.5 tabular-nums attention-badge"
+          class="inline-flex items-center justify-center rounded-sm border border-[var(--card-border)] bg-[var(--white-4)] px-2 py-0.5 min-h-6 tabular-nums attention-badge"
         >주의 ${attentionCount}건<//>
       ` : null}
     </div>
@@ -126,7 +126,7 @@ export function ErrorCounterBadge() {
   return html`
     <div class="relative" role="status">
       <button type="button"
-        class="flex items-center gap-1.5 cursor-pointer rounded px-1 py-0.5 transition-colors hover:bg-[var(--white-5)] ${count > 0 ? 'text-[var(--bad)]' : 'text-[var(--text-muted)]'}"
+        class="flex items-center gap-1.5 cursor-pointer rounded px-1 py-0.5 min-h-6 transition-colors hover:bg-[var(--white-5)] ${count > 0 ? 'text-[var(--bad)]' : 'text-[var(--text-muted)]'}"
         title=${count > 0 ? `미확인 에러 ${count}건` : '에러 없음'}
         aria-label=${count > 0 ? `미확인 에러 ${count}건` : '에러 없음'}
         onClick=${() => { errorPanelOpen.value = !errorPanelOpen.value }}

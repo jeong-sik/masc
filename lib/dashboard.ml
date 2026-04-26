@@ -536,9 +536,9 @@ let generate_compact ?(scope = All) (config : Coord_utils.config) : string =
   (* Keeper phase summary *)
   let keeper_entries = Keeper_registry.all () in
   let keeper_by_phase phase =
-    List.length (List.filter
+    List_util.count_if
       (fun (e : Keeper_registry.registry_entry) -> e.phase = phase)
-      keeper_entries)
+      keeper_entries
   in
   let k_running = keeper_by_phase Running in
   let k_dead = keeper_by_phase Dead in

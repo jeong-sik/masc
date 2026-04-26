@@ -162,7 +162,7 @@ let check_tool_expectations
     (actual_calls : string list)
     : grader_result list =
   List.map (fun (exp : tool_expectation) ->
-    let call_count = List.length (List.filter (fun c -> c = exp.tool_name) actual_calls) in
+    let call_count = List_util.count_if (fun c -> c = exp.tool_name) actual_calls in
     let required_ok = if exp.required then call_count > 0 else true in
     let max_ok = match exp.max_calls with
       | None -> true
@@ -225,7 +225,7 @@ let score_std_dev (scores : float list) : float =
 (** Build eval_result from a list of eval_runs for one scenario. *)
 let summarize_runs ~(scenario : scenario) ~(k : int) (runs : eval_run list) : eval_result =
   let n = List.length runs in
-  let c = List.length (List.filter (fun r -> r.passed) runs) in
+  let c = List_util.count_if (fun r -> r.passed) runs in
   let scores = List.map (fun r -> r.weighted_score) runs in
   let mean = if n = 0 then 0.0
     else List.fold_left (+.) 0.0 scores /. float_of_int n in

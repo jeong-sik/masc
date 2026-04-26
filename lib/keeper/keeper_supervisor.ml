@@ -754,9 +754,9 @@ let sweep_and_recover (ctx : _ context) =
   ) !to_mark_dead;
   List.iter (cleanup_dead_tombstone ctx) !to_cleanup_dead;
   let active_count =
-    List.length (List.filter (fun (e : Keeper_registry.registry_entry) ->
+    List_util.count_if (fun (e : Keeper_registry.registry_entry) ->
       e.phase = Keeper_state_machine.Running || e.phase = Keeper_state_machine.Crashed
-    ) entries) in
+    ) entries in
   let restart_list =
     let keepers_dir =
       Filename.concat (Coord.masc_root_dir ctx.config) "keepers" in

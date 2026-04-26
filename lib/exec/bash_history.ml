@@ -295,7 +295,7 @@ let failure_insight ~base_path ~keeper_name =
 
       (* 2. High failure rate across recent window *)
       let total = List.length recent in
-      let failures = List.length (List.filter (fun e -> not e.success) recent) in
+      let failures = List_util.count_if (fun e -> not e.success) recent in
       let rate = float_of_int failures /. float_of_int total in
       if total >= 5 && rate >= rate_threshold then
         patterns :=

@@ -7,6 +7,7 @@ import { useState } from 'preact/hooks'
 import { CARD_STANDARD } from '../common/card'
 import { ActionButton } from '../common/button'
 import { TextInput } from '../common/input'
+import { Select } from '../common/select'
 import {
   operatorActionBusy,
   operatorSnapshot,
@@ -67,20 +68,17 @@ export function QuickIntervene() {
       </div>
 
       <div class="flex gap-2 items-stretch flex-wrap">
-        <select
-          class="shrink-0 rounded border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-sm text-[var(--color-fg-primary)] transition-colors cursor-pointer min-w-30 focus-visible:outline-none focus-visible:border-[rgba(71,184,255,0.5)] focus-visible:ring-1 focus-visible:ring-[rgba(71,184,255,0.35)]"
+        <${Select}
+          class="shrink-0 px-3 py-2 text-sm min-w-30"
           value=${quickTarget.value}
-          aria-label="개입 대상"
-          onChange=${(e: Event) => { quickTarget.value = (e.target as HTMLSelectElement).value }}
+          ariaLabel="개입 대상"
+          options=${[
+            { value: 'namespace', label: '전체' },
+            ...onlineKeepers.map(k => ({ value: `keeper:${k.name}`, label: k.name })),
+          ]}
+          onInput=${(v: string) => { quickTarget.value = v }}
           disabled=${busy}
-        >
-          <option value="namespace">전체</option>
-          ${onlineKeepers.map(k => html`
-            <option key=${k.name} value=${`keeper:${k.name}`}>
-              ${k.name}
-            </option>
-          `)}
-        </select>
+        />
         <${TextInput}
           class="min-w-50 flex-1 border-[var(--white-8)] bg-[var(--white-3)]"
           placeholder="메시지"

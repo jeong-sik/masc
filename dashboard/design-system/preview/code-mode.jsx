@@ -219,11 +219,11 @@ function Activity({ height = 520 }) {
 // ─────────────────────────────────────────────────────────────
 function Toolbar() {
   return (
-    <div className="code-toolbar" style={{ height: 32, border: '1px solid var(--line-1)', borderRadius: 'var(--r-1)', background: 'var(--bg-1)' }}>
+    <div className="code-toolbar" style={{ height: 32, border: '1px solid var(--color-border-default)', borderRadius: 'var(--r-1)', background: 'var(--color-bg-surface)' }}>
       <span className="code-repo-select">masc-cockpit <span className="arrow">▾</span></span>
       <span className="code-wc-select">main <span className="arrow">▾</span></span>
       <div className="wc-chips">
-        <span className="wc-chip is-active"><span className="dot" style={{ background: 'var(--brass-1)', width: 5, height: 5, borderRadius: '50%' }} />keeper.ts<span className="wc-close">×</span></span>
+        <span className="wc-chip is-active"><span className="dot" style={{ background: 'var(--color-accent-fg)', width: 5, height: 5, borderRadius: '50%' }} />keeper.ts<span className="wc-close">×</span></span>
         <span className="wc-chip">heartbeat.ts<span className="wc-close">×</span></span>
         <span className="wc-chip">cascade.ts<span className="wc-close">×</span></span>
       </div>
@@ -245,7 +245,7 @@ function LayerBar() {
   const [on, setOn] = useState({ time: true, parallel: true, tools: false, approve: true, notes: true });
   const [explode, setExplode] = useState(false);
   return (
-    <div className="layer-bar" style={{ borderRadius: 'var(--r-1)', border: '1px solid var(--line-1)', height: 30 }}>
+    <div className="layer-bar" style={{ borderRadius: 'var(--r-1)', border: '1px solid var(--color-border-default)', height: 30 }}>
       <span className="layer-bar-label">LAYERS</span>
       {[
         { id: 'time', label: 'TIME' },
@@ -269,13 +269,13 @@ function LayerBar() {
 // ─────────────────────────────────────────────────────────────
 function SplitMode({ w = 1400, h = 680 }) {
   return (
-    <div style={{ display: 'grid', gridTemplateRows: '32px 26px 52px 180px minmax(0,1fr) 28px', width: w, height: h, background: 'var(--bg-0)', border: '1px solid var(--line-1)', borderRadius: 'var(--r-1)', overflow: 'hidden' }}>
+    <div style={{ display: 'grid', gridTemplateRows: '32px 26px 52px 180px minmax(0,1fr) 28px', width: w, height: h, background: 'var(--color-bg-page)', border: '1px solid var(--color-border-default)', borderRadius: 'var(--r-1)', overflow: 'hidden' }}>
       {/* topbar */}
-      <div style={{ display: 'flex', alignItems: 'center', padding: '0 12px', gap: 10, background: 'var(--bg-1)', borderBottom: '1px solid var(--line-2)', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-2)' }}>
-        <div style={{ width: 14, height: 14, borderRadius: 2, background: 'linear-gradient(135deg, var(--brass-1), var(--brass-3))' }} />
-        <b style={{ color: 'var(--fg-1)', letterSpacing: '.04em' }}>MASC</b>
+      <div style={{ display: 'flex', alignItems: 'center', padding: '0 12px', gap: 10, background: 'var(--color-bg-surface)', borderBottom: '1px solid var(--color-border-strong)', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--color-fg-secondary)' }}>
+        <div style={{ width: 14, height: 14, borderRadius: 2, background: 'linear-gradient(135deg, var(--color-accent-fg), var(--brass-3))' }} />
+        <b style={{ color: 'var(--color-fg-primary)', letterSpacing: '.04em' }}>MASC</b>
         <span style={{ color: 'var(--fg-4)' }}>v0.42.1</span>
-        <span style={{ width: 1, height: 14, background: 'var(--line-2)' }} />
+        <span style={{ width: 1, height: 14, background: 'var(--color-border-strong)' }} />
         <span>goal-merge-blockers <span style={{ color: 'var(--fg-4)' }}>▾</span></span>
         <div className="mode-switch" style={{ marginLeft: 12 }}>
           <button>COCKPIT</button>
@@ -285,14 +285,14 @@ function SplitMode({ w = 1400, h = 680 }) {
         <div style={{ marginLeft: 'auto', color: 'var(--fg-4)', fontSize: 10 }}>16:32:45Z · 5 keepers live</div>
       </div>
       {/* ticker */}
-      <div style={{ display: 'flex', alignItems: 'center', padding: '0 12px', gap: 16, background: 'linear-gradient(to bottom, var(--bg-1), var(--bg-0))', borderBottom: '1px solid var(--line-1)', fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--fg-3)', whiteSpace: 'nowrap', overflow: 'hidden' }}>
-        <span>16:32:40 <span style={{ color: 'var(--brass-1)' }}>nick0cave</span> edit keeper.ts:12</span>
+      <div style={{ display: 'flex', alignItems: 'center', padding: '0 12px', gap: 16, background: 'linear-gradient(to bottom, var(--color-bg-surface), var(--color-bg-page))', borderBottom: '1px solid var(--color-border-default)', fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--color-fg-muted)', whiteSpace: 'nowrap', overflow: 'hidden' }}>
+        <span>16:32:40 <span style={{ color: 'var(--color-accent-fg)' }}>nick0cave</span> edit keeper.ts:12</span>
         <span>16:32:38 <span style={{ color: 'var(--err)' }}>qa-king</span> flag keeper.ts:10</span>
         <span>16:32:33 <span style={{ color: 'var(--ok)' }}>sangsu</span> refactor tick()</span>
         <span>16:32:29 <span style={{ color: 'var(--info)' }}>masc</span> commit c99012</span>
       </div>
       {/* kpi mini */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6,1fr)', gap: 1, background: 'var(--line-1)', borderBottom: '1px solid var(--line-2)' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6,1fr)', gap: 1, background: 'var(--color-border-default)', borderBottom: '1px solid var(--color-border-strong)' }}>
         {[
           { l: 'keepers', v: '5', s: 'brass' },
           { l: 'running', v: '3' },
@@ -301,42 +301,42 @@ function SplitMode({ w = 1400, h = 680 }) {
           { l: 'cascade', v: '@2 · 1.24s' },
           { l: 'flags', v: '3', s: 'err' },
         ].map((k, i) => (
-          <div key={i} style={{ background: k.s === 'brass' ? 'rgb(var(--brass-glow)/.06)' : 'var(--bg-1)', padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 2, boxShadow: k.s === 'err' ? 'inset 2px 0 0 var(--err)' : k.s === 'ok' ? 'inset 2px 0 0 var(--ok)' : k.s === 'brass' ? 'inset 2px 0 0 var(--brass-1)' : 'none' }}>
-            <div style={{ fontSize: 9, letterSpacing: '.08em', color: 'var(--fg-3)', textTransform: 'uppercase', fontWeight: 600 }}>{k.l}</div>
-            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 15, color: k.s === 'err' ? 'var(--err-fg)' : k.s === 'ok' ? 'var(--ok-fg)' : k.s === 'brass' ? 'var(--brass-1)' : 'var(--fg-1)' }}>{k.v}</div>
+          <div key={i} style={{ background: k.s === 'brass' ? 'rgb(var(--brass-glow)/.06)' : 'var(--color-bg-surface)', padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 2, boxShadow: k.s === 'err' ? 'inset 2px 0 0 var(--err)' : k.s === 'ok' ? 'inset 2px 0 0 var(--ok)' : k.s === 'brass' ? 'inset 2px 0 0 var(--color-accent-fg)' : 'none' }}>
+            <div style={{ fontSize: 9, letterSpacing: '.08em', color: 'var(--color-fg-muted)', textTransform: 'uppercase', fontWeight: 600 }}>{k.l}</div>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 15, color: k.s === 'err' ? 'var(--err-fg)' : k.s === 'ok' ? 'var(--ok-fg)' : k.s === 'brass' ? 'var(--color-accent-fg)' : 'var(--color-fg-primary)' }}>{k.v}</div>
           </div>
         ))}
       </div>
       {/* cockpit strip (180px): lifeline + mini swimlanes */}
-      <div style={{ display: 'grid', gridTemplateColumns: '280px minmax(0,1fr) 220px', background: 'var(--bg-0)', borderBottom: '2px solid var(--brass-3)', minHeight: 0, overflow: 'hidden' }}>
-        <div style={{ padding: 8, borderRight: '1px solid var(--line-1)', display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <div style={{ fontSize: 9, letterSpacing: '.08em', color: 'var(--fg-3)', textTransform: 'uppercase', fontWeight: 600 }}>FLEET</div>
+      <div style={{ display: 'grid', gridTemplateColumns: '280px minmax(0,1fr) 220px', background: 'var(--color-bg-page)', borderBottom: '2px solid var(--brass-3)', minHeight: 0, overflow: 'hidden' }}>
+        <div style={{ padding: 8, borderRight: '1px solid var(--color-border-default)', display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <div style={{ fontSize: 9, letterSpacing: '.08em', color: 'var(--color-fg-muted)', textTransform: 'uppercase', fontWeight: 600 }}>FLEET</div>
           {['nick0cave', 'masc-improver', 'sangsu', 'qa-king', 'rama'].map((k, i) => (
-            <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 6, fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--fg-2)' }}>
-              <span style={{ width: 5, height: 5, borderRadius: '50%', background: ['var(--brass-1)', 'var(--ok)', 'var(--info)', 'var(--err)', 'var(--stalled)'][i], boxShadow: i === 0 ? '0 0 5px rgb(var(--brass-glow)/.7)' : 'none' }} />
+            <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 6, fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--color-fg-secondary)' }}>
+              <span style={{ width: 5, height: 5, borderRadius: '50%', background: ['var(--color-accent-fg)', 'var(--ok)', 'var(--info)', 'var(--err)', 'var(--stalled)'][i], boxShadow: i === 0 ? '0 0 5px rgb(var(--brass-glow)/.7)' : 'none' }} />
               {k}
               <span style={{ marginLeft: 'auto', color: 'var(--fg-4)', fontSize: 9 }}>t-{(0x9f2a + i).toString(16)}</span>
             </div>
           ))}
         </div>
         <div style={{ position: 'relative', padding: 8 }}>
-          <div style={{ fontSize: 9, letterSpacing: '.08em', color: 'var(--fg-3)', textTransform: 'uppercase', fontWeight: 600, marginBottom: 6 }}>SWIMLANES · 60s</div>
+          <div style={{ fontSize: 9, letterSpacing: '.08em', color: 'var(--color-fg-muted)', textTransform: 'uppercase', fontWeight: 600, marginBottom: 6 }}>SWIMLANES · 60s</div>
           {[0, 1, 2, 3, 4].map(i => (
-            <div key={i} style={{ position: 'relative', height: 22, borderBottom: '1px solid var(--line-1)' }}>
+            <div key={i} style={{ position: 'relative', height: 22, borderBottom: '1px solid var(--color-border-default)' }}>
               {[...Array(6)].map((_, j) => (
-                <span key={j} style={{ position: 'absolute', left: `${(j * 14 + Math.random() * 8)}%`, top: '50%', transform: 'translateY(-50%)', width: 8, height: 4, background: j === 5 ? 'var(--brass-2)' : ['var(--fg-2)', 'var(--info)', 'var(--ok)'][j % 3], borderRadius: 1 }} />
+                <span key={j} style={{ position: 'absolute', left: `${(j * 14 + Math.random() * 8)}%`, top: '50%', transform: 'translateY(-50%)', width: 8, height: 4, background: j === 5 ? 'var(--brass-2)' : ['var(--color-fg-secondary)', 'var(--info)', 'var(--ok)'][j % 3], borderRadius: 1 }} />
               ))}
             </div>
           ))}
           <div style={{ position: 'absolute', top: 24, bottom: 8, left: '82%', width: 1, background: 'linear-gradient(to bottom, transparent, rgb(var(--brass-glow)/.7) 20%, rgb(var(--brass-glow)/.7) 80%, transparent)', boxShadow: '0 0 8px 1px rgb(var(--brass-glow)/.4)' }} />
         </div>
-        <div style={{ padding: 8, borderLeft: '1px solid var(--line-1)' }}>
-          <div style={{ fontSize: 9, letterSpacing: '.08em', color: 'var(--fg-3)', textTransform: 'uppercase', fontWeight: 600, marginBottom: 4 }}>NOW · keeper.ts</div>
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--fg-2)', lineHeight: 1.6 }}>
+        <div style={{ padding: 8, borderLeft: '1px solid var(--color-border-default)' }}>
+          <div style={{ fontSize: 9, letterSpacing: '.08em', color: 'var(--color-fg-muted)', textTransform: 'uppercase', fontWeight: 600, marginBottom: 4 }}>NOW · keeper.ts</div>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--color-fg-secondary)', lineHeight: 1.6 }}>
             nick0cave @ line 12<br />
             qa-king flag line 10<br />
             sangsu @ tick()<br />
-            <span style={{ color: 'var(--brass-1)' }}>3 threads open</span>
+            <span style={{ color: 'var(--color-accent-fg)' }}>3 threads open</span>
           </div>
         </div>
       </div>
@@ -348,12 +348,12 @@ function SplitMode({ w = 1400, h = 680 }) {
         <Activity />
       </div>
       {/* status bar */}
-      <div style={{ display: 'flex', alignItems: 'center', padding: '0 12px', gap: 14, background: 'var(--bg-1)', borderTop: '1px solid var(--line-2)', fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--fg-3)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', padding: '0 12px', gap: 14, background: 'var(--color-bg-surface)', borderTop: '1px solid var(--color-border-strong)', fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--color-fg-muted)' }}>
         <span><span style={{ color: 'var(--ok-fg)' }}>●</span> SPLIT MODE</span>
-        <span style={{ width: 1, height: 10, background: 'var(--line-2)' }} />
+        <span style={{ width: 1, height: 10, background: 'var(--color-border-strong)' }} />
         <span>keeper.ts · 47 LOC · +18 −4</span>
-        <span style={{ width: 1, height: 10, background: 'var(--line-2)' }} />
-        <span>cascade: <span style={{ color: 'var(--brass-1)' }}>moonshot@2 · 1.24s</span></span>
+        <span style={{ width: 1, height: 10, background: 'var(--color-border-strong)' }} />
+        <span>cascade: <span style={{ color: 'var(--color-accent-fg)' }}>moonshot@2 · 1.24s</span></span>
         <span style={{ marginLeft: 'auto' }}>⌘K palette · ⇥ focus · esc drawer</span>
       </div>
     </div>
@@ -373,8 +373,8 @@ function ExplodeLayers({ w = 900, h = 560 }) {
   };
 
   const layers = [
-    { id: 'base', label: 'SOURCE · keeper.ts', z: 0, bg: 'var(--bg-0)', render: () => (
-      <div style={{ padding: 12, fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-2)', lineHeight: 1.6 }}>
+    { id: 'base', label: 'SOURCE · keeper.ts', z: 0, bg: 'var(--color-bg-page)', render: () => (
+      <div style={{ padding: 12, fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--color-fg-secondary)', lineHeight: 1.6 }}>
         <div><span style={{ color: '#c195e8' }}>export class</span> <span style={{ color: '#88b5d8' }}>Keeper</span> {'{'}</div>
         <div style={{ paddingLeft: 18 }}>id: <span style={{ color: '#88b5d8' }}>string</span>;</div>
         <div style={{ paddingLeft: 18 }}>goal: <span style={{ color: '#88b5d8' }}>GoalRef</span>;</div>
@@ -392,17 +392,17 @@ function ExplodeLayers({ w = 900, h = 560 }) {
         {[1, .85, .65, .4, .3, .7, .55, .95, .8].map((o, i) => (
           <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, height: 18 }}>
             <span style={{ width: 3, height: 12, background: 'var(--warn)', opacity: o, boxShadow: o > 0.9 ? '0 0 6px rgb(var(--warn-glow)/.7)' : 'none', borderRadius: 1 }} />
-            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: o > 0.7 ? 'var(--warn)' : 'var(--fg-3)' }}>{o > 0.9 ? '2m' : o > 0.7 ? '8m' : o > 0.4 ? '1h' : '4h'} · {['nick', 'nick', 'masc', 'sangsu', 'masc', 'sangsu', 'sangsu', 'nick', 'masc'][i]}</span>
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: o > 0.7 ? 'var(--warn)' : 'var(--color-fg-muted)' }}>{o > 0.9 ? '2m' : o > 0.7 ? '8m' : o > 0.4 ? '1h' : '4h'} · {['nick', 'nick', 'masc', 'sangsu', 'masc', 'sangsu', 'sangsu', 'nick', 'masc'][i]}</span>
           </div>
         ))}
       </div>
     ) },
     { id: 'parallel', label: 'L2 · PARALLEL · keeper cursors', z: 200, bg: 'rgb(106 142 176 / .08)', render: () => (
       <svg viewBox={`0 0 ${w} ${h}`} style={{ width: '100%', height: '100%' }}>
-        <path d={`M 40 40 Q ${w / 2} 60 ${w - 40} 120`} fill="none" stroke="var(--brass-1)" strokeWidth="1.5" opacity=".7" />
+        <path d={`M 40 40 Q ${w / 2} 60 ${w - 40} 120`} fill="none" stroke="var(--color-accent-fg)" strokeWidth="1.5" opacity=".7" />
         <path d={`M 40 120 Q ${w / 2} 180 ${w - 40} 80`} fill="none" stroke="var(--ok)" strokeWidth="1.5" opacity=".6" />
         <path d={`M 40 200 Q ${w / 2} 160 ${w - 40} 220`} fill="none" stroke="var(--info)" strokeWidth="1.5" opacity=".6" strokeDasharray="3 3" />
-        <circle cx={w - 40} cy={120} r="4" fill="var(--brass-1)" />
+        <circle cx={w - 40} cy={120} r="4" fill="var(--color-accent-fg)" />
         <circle cx={w - 40} cy={80} r="4" fill="var(--ok)" />
         <circle cx={w - 40} cy={220} r="4" fill="var(--info)" />
       </svg>
@@ -411,10 +411,10 @@ function ExplodeLayers({ w = 900, h = 560 }) {
       <div style={{ padding: 12 }}>
         {[['◈', 12, 'emit'], ['⌘', 8, 'run'], ['⟳', 5, 'tick'], ['∎', 3, 'guard']].map(([g, n, lab], i) => (
           <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, height: 24 }}>
-            <span style={{ color: 'var(--brass-1)', fontSize: 12, textShadow: '0 0 4px rgb(var(--brass-glow)/.6)' }}>{g}</span>
-            <span style={{ width: n * 6, height: 2, background: 'linear-gradient(90deg, var(--brass-1), transparent)', borderRadius: 1 }} />
+            <span style={{ color: 'var(--color-accent-fg)', fontSize: 12, textShadow: '0 0 4px rgb(var(--brass-glow)/.6)' }}>{g}</span>
+            <span style={{ width: n * 6, height: 2, background: 'linear-gradient(90deg, var(--color-accent-fg), transparent)', borderRadius: 1 }} />
             <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--fg-4)' }}>{n}×</span>
-            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--brass-1)' }}>{lab}</span>
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--color-accent-fg)' }}>{lab}</span>
           </div>
         ))}
       </div>
@@ -431,7 +431,7 @@ function ExplodeLayers({ w = 900, h = 560 }) {
     ) },
     { id: 'notes', label: 'L5 · NOTES · pinned cards', z: 500, bg: 'rgb(138 106 160 / .08)', render: () => (
       <div style={{ padding: 12 }}>
-        <div style={{ width: 240, background: 'linear-gradient(180deg, rgb(138 106 160 / .20), rgb(138 106 160 / .08))', border: '1px solid rgb(var(--stalled-glow)/.4)', borderRadius: 'var(--r-1)', padding: '6px 10px', fontSize: 11, color: 'var(--fg-1)', boxShadow: '0 4px 16px rgb(0 0 0 / .5)', backdropFilter: 'blur(4px)' }}>
+        <div style={{ width: 240, background: 'linear-gradient(180deg, rgb(138 106 160 / .20), rgb(138 106 160 / .08))', border: '1px solid rgb(var(--stalled-glow)/.4)', borderRadius: 'var(--r-1)', padding: '6px 10px', fontSize: 11, color: 'var(--color-fg-primary)', boxShadow: '0 4px 16px rgb(0 0 0 / .5)', backdropFilter: 'blur(4px)' }}>
           <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--stalled)', letterSpacing: '.06em', textTransform: 'uppercase', marginBottom: 4 }}>NOTE · sangsu · 2h</div>
           <div style={{ fontSize: 11, lineHeight: 1.4 }}>GoalRef changed the shape of goal from string to {'{'}id,priority{'}'}. Check downstream emit() contracts.</div>
         </div>
@@ -440,17 +440,17 @@ function ExplodeLayers({ w = 900, h = 560 }) {
   ];
 
   return (
-    <div style={{ width: w, height: h, background: 'var(--bg-0)', border: '1px solid var(--line-1)', borderRadius: 'var(--r-1)', position: 'relative', overflow: 'hidden' }}>
+    <div style={{ width: w, height: h, background: 'var(--color-bg-page)', border: '1px solid var(--color-border-default)', borderRadius: 'var(--r-1)', position: 'relative', overflow: 'hidden' }}>
       {/* pose controls */}
-      <div style={{ position: 'absolute', top: 10, left: 10, zIndex: 10, display: 'flex', gap: 0, border: '1px solid var(--line-2)', borderRadius: 'var(--r-1)', overflow: 'hidden' }}>
+      <div style={{ position: 'absolute', top: 10, left: 10, zIndex: 10, display: 'flex', gap: 0, border: '1px solid var(--color-border-strong)', borderRadius: 'var(--r-1)', overflow: 'hidden' }}>
         {['flat', 'exploded', 'tilt'].map((p, i) => (
-          <button key={p} onClick={() => setPose(i)} style={{ padding: '4px 10px', fontSize: 10, background: pose === i ? 'var(--bg-3)' : 'transparent', color: pose === i ? 'var(--brass-1)' : 'var(--fg-3)', border: 'none', borderRight: i < 2 ? '1px solid var(--line-2)' : 'none', fontFamily: 'var(--font-mono)', letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 600, cursor: 'pointer' }}>{p}</button>
+          <button key={p} onClick={() => setPose(i)} style={{ padding: '4px 10px', fontSize: 10, background: pose === i ? 'var(--color-bg-elevated)' : 'transparent', color: pose === i ? 'var(--color-accent-fg)' : 'var(--color-fg-muted)', border: 'none', borderRight: i < 2 ? '1px solid var(--color-border-strong)' : 'none', fontFamily: 'var(--font-mono)', letterSpacing: '.08em', textTransform: 'uppercase', fontWeight: 600, cursor: 'pointer' }}>{p}</button>
         ))}
       </div>
       {/* z-axis legend */}
       <div style={{ position: 'absolute', top: 10, right: 10, zIndex: 10, fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--fg-4)', letterSpacing: '.08em', textTransform: 'uppercase', textAlign: 'right', lineHeight: 1.6 }}>
         Z-AXIS STACK<br />
-        <span style={{ color: 'var(--fg-3)' }}>5 observational layers</span>
+        <span style={{ color: 'var(--color-fg-muted)' }}>5 observational layers</span>
       </div>
       {/* stage */}
       <div style={{ position: 'absolute', inset: 0, perspective: '1800px', perspectiveOrigin: '50% 25%' }}>
@@ -467,7 +467,7 @@ function ExplodeLayers({ w = 900, h = 560 }) {
               willChange: 'transform, opacity',
               overflow: 'hidden',
             }}>
-              <div style={{ position: 'absolute', top: 4, left: 8, fontFamily: 'var(--font-mono)', fontSize: 8, color: 'var(--brass-1)', letterSpacing: '.08em', textTransform: 'uppercase', opacity: pose === 0 ? 0 : 1, transition: 'opacity .4s' }}>{L.label}</div>
+              <div style={{ position: 'absolute', top: 4, left: 8, fontFamily: 'var(--font-mono)', fontSize: 8, color: 'var(--color-accent-fg)', letterSpacing: '.08em', textTransform: 'uppercase', opacity: pose === 0 ? 0 : 1, transition: 'opacity .4s' }}>{L.label}</div>
               {L.render()}
             </div>
           ))}
@@ -515,7 +515,7 @@ function CodeModeRoot() {
 
       <DCSection id="full" title="Full Code Mode · 4-column composite">
         <DCArtboard id="code-full" label="toolbar · tree · editor · review · activity" width={1800} height={620}>
-          <div style={{ display: 'grid', gridTemplateColumns: '220px minmax(0,1fr) 320px 260px', gridTemplateRows: '32px minmax(0,1fr)', height: 620, background: 'var(--bg-0)', border: '1px solid var(--line-1)' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '220px minmax(0,1fr) 320px 260px', gridTemplateRows: '32px minmax(0,1fr)', height: 620, background: 'var(--color-bg-page)', border: '1px solid var(--color-border-default)' }}>
             <div style={{ gridColumn: '1 / -1' }}><Toolbar /></div>
             <Tree />
             <Editor height={588} />

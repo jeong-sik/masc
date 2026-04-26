@@ -213,6 +213,50 @@ let run_docker_shell_command_with_status
         |> Keeper_alerting_path.normalize_path_for_check
         |> Keeper_alerting_path.strip_trailing_slashes
       in
+      (* #10424: keeper LLM이 sandbox root에서 cd 없이 git/gh 호출 시
+         "fatal: not a git repository" 발생. mount point는 git repo 아니고
+         repos/<repo>/ 안에만 git checkout 존재. filesystem ground truth
+         (repos/ enumeration)로 결정론적 분기:
+         - single-repo → 자동 chdir (silent)
+         - multi-repo → explicit error로 LLM이 정확한 경로 학습
+         - 0 repo → preserve (system misconfig은 별도 fail) *)
+      let cwd_normalized =
+        Keeper_alerting_path.normalize_path_for_check cwd
+        |> Keeper_alerting_path.strip_trailing_slashes
+      in
+      let repos_in_playground () =
+        let repos_dir = Filename.concat host_root "repos" in
+        if not (Sys.file_exists repos_dir && Sys.is_directory repos_dir) then []
+        else
+          try
+            Sys.readdir repos_dir
+            |> Array.to_list
+            |> List.filter (fun name ->
+              let p = Filename.concat repos_dir name in
+              try Sys.is_directory p with Sys_error _ -> false)
+            |> List.sort compare
+          with Sys_error _ -> []
+      in
+      let cwd, multi_repo_blocker =
+        if cwd_normalized = host_root && cmd_targets_git_or_gh cmd then
+          match repos_in_playground () with
+          | [single_repo] ->
+            (Filename.concat (Filename.concat host_root "repos") single_repo, None)
+          | [] -> (cwd, None)
+          | many ->
+            ( cwd
+            , Some
+                (Printf.sprintf
+                   "sandbox root에서 git/gh 직접 호출 불가 \
+                    (mount point %s는 git repo 아님). \
+                    cd repos/<one of: %s> 먼저 실행하세요."
+                   host_root
+                   (String.concat ", " many)) )
+        else (cwd, None)
+      in
+      match multi_repo_blocker with
+      | Some msg -> sandbox_error msg
+      | None ->
       let container_name = keeper_sandbox_container_name meta in
       let container_root = keeper_private_container_root meta in
       let container_cwd = docker_private_workspace_cwd ~config ~meta cwd in

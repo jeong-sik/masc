@@ -117,7 +117,7 @@ function Editor({ height = 520 }) {
         <div className="editor-minimap">
           <svg viewBox="0 0 60 520" width="100%" height="100%">
             {EDITOR_LINES.map((ln, i) => (
-              <rect key={i} x="6" y={i * 14 + 8} width={Math.random() * 40 + 6} height="2" fill={ln.diff === 'add' ? 'var(--ok)' : ln.diff === 'del' ? 'var(--err)' : 'var(--fg-4)'} opacity={ln.diff ? 0.7 : 0.3} />
+              <rect key={i} x="6" y={i * 14 + 8} width={Math.random() * 40 + 6} height="2" fill={ln.diff === 'add' ? 'var(--ok)' : ln.diff === 'del' ? 'var(--err)' : 'var(--color-fg-disabled)'} opacity={ln.diff ? 0.7 : 0.3} />
             ))}
             <rect className="minimap-viewport" x="0" y="40" width="60" height="140" />
           </svg>
@@ -272,17 +272,17 @@ function SplitMode({ w = 1400, h = 680 }) {
     <div style={{ display: 'grid', gridTemplateRows: '32px 26px 52px 180px minmax(0,1fr) 28px', width: w, height: h, background: 'var(--color-bg-page)', border: '1px solid var(--color-border-default)', borderRadius: 'var(--r-1)', overflow: 'hidden' }}>
       {/* topbar */}
       <div style={{ display: 'flex', alignItems: 'center', padding: '0 12px', gap: 10, background: 'var(--color-bg-surface)', borderBottom: '1px solid var(--color-border-strong)', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--color-fg-secondary)' }}>
-        <div style={{ width: 14, height: 14, borderRadius: 2, background: 'linear-gradient(135deg, var(--color-accent-fg), var(--brass-3))' }} />
+        <div style={{ width: 14, height: 14, borderRadius: 2, background: 'linear-gradient(135deg, var(--color-accent-fg), var(--color-accent-fg-dim))' }} />
         <b style={{ color: 'var(--color-fg-primary)', letterSpacing: '.04em' }}>MASC</b>
-        <span style={{ color: 'var(--fg-4)' }}>v0.42.1</span>
+        <span style={{ color: 'var(--color-fg-disabled)' }}>v0.42.1</span>
         <span style={{ width: 1, height: 14, background: 'var(--color-border-strong)' }} />
-        <span>goal-merge-blockers <span style={{ color: 'var(--fg-4)' }}>▾</span></span>
+        <span>goal-merge-blockers <span style={{ color: 'var(--color-fg-disabled)' }}>▾</span></span>
         <div className="mode-switch" style={{ marginLeft: 12 }}>
           <button>COCKPIT</button>
           <button className="is-active">SPLIT</button>
           <button>CODE</button>
         </div>
-        <div style={{ marginLeft: 'auto', color: 'var(--fg-4)', fontSize: 10 }}>16:32:45Z · 5 keepers live</div>
+        <div style={{ marginLeft: 'auto', color: 'var(--color-fg-disabled)', fontSize: 10 }}>16:32:45Z · 5 keepers live</div>
       </div>
       {/* ticker */}
       <div style={{ display: 'flex', alignItems: 'center', padding: '0 12px', gap: 16, background: 'linear-gradient(to bottom, var(--color-bg-surface), var(--color-bg-page))', borderBottom: '1px solid var(--color-border-default)', fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--color-fg-muted)', whiteSpace: 'nowrap', overflow: 'hidden' }}>
@@ -301,21 +301,21 @@ function SplitMode({ w = 1400, h = 680 }) {
           { l: 'cascade', v: '@2 · 1.24s' },
           { l: 'flags', v: '3', s: 'err' },
         ].map((k, i) => (
-          <div key={i} style={{ background: k.s === 'brass' ? 'rgb(var(--brass-glow)/.06)' : 'var(--color-bg-surface)', padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 2, boxShadow: k.s === 'err' ? 'inset 2px 0 0 var(--err)' : k.s === 'ok' ? 'inset 2px 0 0 var(--ok)' : k.s === 'brass' ? 'inset 2px 0 0 var(--color-accent-fg)' : 'none' }}>
+          <div key={i} style={{ background: k.s === 'brass' ? 'rgb(var(--color-accent-glow)/.06)' : 'var(--color-bg-surface)', padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 2, boxShadow: k.s === 'err' ? 'inset 2px 0 0 var(--err)' : k.s === 'ok' ? 'inset 2px 0 0 var(--ok)' : k.s === 'brass' ? 'inset 2px 0 0 var(--color-accent-fg)' : 'none' }}>
             <div style={{ fontSize: 9, letterSpacing: '.08em', color: 'var(--color-fg-muted)', textTransform: 'uppercase', fontWeight: 600 }}>{k.l}</div>
             <div style={{ fontFamily: 'var(--font-mono)', fontSize: 15, color: k.s === 'err' ? 'var(--err-fg)' : k.s === 'ok' ? 'var(--ok-fg)' : k.s === 'brass' ? 'var(--color-accent-fg)' : 'var(--color-fg-primary)' }}>{k.v}</div>
           </div>
         ))}
       </div>
       {/* cockpit strip (180px): lifeline + mini swimlanes */}
-      <div style={{ display: 'grid', gridTemplateColumns: '280px minmax(0,1fr) 220px', background: 'var(--color-bg-page)', borderBottom: '2px solid var(--brass-3)', minHeight: 0, overflow: 'hidden' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '280px minmax(0,1fr) 220px', background: 'var(--color-bg-page)', borderBottom: '2px solid var(--color-accent-fg-dim)', minHeight: 0, overflow: 'hidden' }}>
         <div style={{ padding: 8, borderRight: '1px solid var(--color-border-default)', display: 'flex', flexDirection: 'column', gap: 4 }}>
           <div style={{ fontSize: 9, letterSpacing: '.08em', color: 'var(--color-fg-muted)', textTransform: 'uppercase', fontWeight: 600 }}>FLEET</div>
           {['nick0cave', 'masc-improver', 'sangsu', 'qa-king', 'rama'].map((k, i) => (
             <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 6, fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--color-fg-secondary)' }}>
-              <span style={{ width: 5, height: 5, borderRadius: '50%', background: ['var(--color-accent-fg)', 'var(--ok)', 'var(--info)', 'var(--err)', 'var(--stalled)'][i], boxShadow: i === 0 ? '0 0 5px rgb(var(--brass-glow)/.7)' : 'none' }} />
+              <span style={{ width: 5, height: 5, borderRadius: '50%', background: ['var(--color-accent-fg)', 'var(--ok)', 'var(--info)', 'var(--err)', 'var(--stalled)'][i], boxShadow: i === 0 ? '0 0 5px rgb(var(--color-accent-glow)/.7)' : 'none' }} />
               {k}
-              <span style={{ marginLeft: 'auto', color: 'var(--fg-4)', fontSize: 9 }}>t-{(0x9f2a + i).toString(16)}</span>
+              <span style={{ marginLeft: 'auto', color: 'var(--color-fg-disabled)', fontSize: 9 }}>t-{(0x9f2a + i).toString(16)}</span>
             </div>
           ))}
         </div>
@@ -328,7 +328,7 @@ function SplitMode({ w = 1400, h = 680 }) {
               ))}
             </div>
           ))}
-          <div style={{ position: 'absolute', top: 24, bottom: 8, left: '82%', width: 1, background: 'linear-gradient(to bottom, transparent, rgb(var(--brass-glow)/.7) 20%, rgb(var(--brass-glow)/.7) 80%, transparent)', boxShadow: '0 0 8px 1px rgb(var(--brass-glow)/.4)' }} />
+          <div style={{ position: 'absolute', top: 24, bottom: 8, left: '82%', width: 1, background: 'linear-gradient(to bottom, transparent, rgb(var(--color-accent-glow)/.7) 20%, rgb(var(--color-accent-glow)/.7) 80%, transparent)', boxShadow: '0 0 8px 1px rgb(var(--color-accent-glow)/.4)' }} />
         </div>
         <div style={{ padding: 8, borderLeft: '1px solid var(--color-border-default)' }}>
           <div style={{ fontSize: 9, letterSpacing: '.08em', color: 'var(--color-fg-muted)', textTransform: 'uppercase', fontWeight: 600, marginBottom: 4 }}>NOW · keeper.ts</div>
@@ -407,13 +407,13 @@ function ExplodeLayers({ w = 900, h = 560 }) {
         <circle cx={w - 40} cy={220} r="4" fill="var(--info)" />
       </svg>
     ) },
-    { id: 'tools', label: 'L3 · TOOLS · frequency glyphs', z: 300, bg: 'rgb(var(--brass-glow) / .06)', render: () => (
+    { id: 'tools', label: 'L3 · TOOLS · frequency glyphs', z: 300, bg: 'rgb(var(--color-accent-glow) / .06)', render: () => (
       <div style={{ padding: 12 }}>
         {[['◈', 12, 'emit'], ['⌘', 8, 'run'], ['⟳', 5, 'tick'], ['∎', 3, 'guard']].map(([g, n, lab], i) => (
           <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, height: 24 }}>
-            <span style={{ color: 'var(--color-accent-fg)', fontSize: 12, textShadow: '0 0 4px rgb(var(--brass-glow)/.6)' }}>{g}</span>
+            <span style={{ color: 'var(--color-accent-fg)', fontSize: 12, textShadow: '0 0 4px rgb(var(--color-accent-glow)/.6)' }}>{g}</span>
             <span style={{ width: n * 6, height: 2, background: 'linear-gradient(90deg, var(--color-accent-fg), transparent)', borderRadius: 1 }} />
-            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--fg-4)' }}>{n}×</span>
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--color-fg-disabled)' }}>{n}×</span>
             <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--color-accent-fg)' }}>{lab}</span>
           </div>
         ))}
@@ -448,7 +448,7 @@ function ExplodeLayers({ w = 900, h = 560 }) {
         ))}
       </div>
       {/* z-axis legend */}
-      <div style={{ position: 'absolute', top: 10, right: 10, zIndex: 10, fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--fg-4)', letterSpacing: '.08em', textTransform: 'uppercase', textAlign: 'right', lineHeight: 1.6 }}>
+      <div style={{ position: 'absolute', top: 10, right: 10, zIndex: 10, fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--color-fg-disabled)', letterSpacing: '.08em', textTransform: 'uppercase', textAlign: 'right', lineHeight: 1.6 }}>
         Z-AXIS STACK<br />
         <span style={{ color: 'var(--color-fg-muted)' }}>5 observational layers</span>
       </div>
@@ -460,7 +460,7 @@ function ExplodeLayers({ w = 900, h = 560 }) {
               position: 'absolute', top: 80, left: 60, right: 60, bottom: 60,
               transform: `translateZ(${L.z * (pose === 0 ? 0 : pose === 2 ? .5 : 1)}px)`,
               background: L.bg,
-              border: `1px ${pose === 0 ? 'solid' : 'dashed'} rgb(var(--brass-glow)/.25)`,
+              border: `1px ${pose === 0 ? 'solid' : 'dashed'} rgb(var(--color-accent-glow)/.25)`,
               borderRadius: 'var(--r-1)',
               opacity: pose === 0 ? (i === 0 ? 1 : 0.35) : 1,
               transition: 'transform .7s cubic-bezier(.2,.7,.3,1), opacity .4s',
@@ -474,7 +474,7 @@ function ExplodeLayers({ w = 900, h = 560 }) {
         </div>
       </div>
       {/* caption */}
-      <div style={{ position: 'absolute', bottom: 10, left: 10, right: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--fg-4)', letterSpacing: '.04em' }}>
+      <div style={{ position: 'absolute', bottom: 10, left: 10, right: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--color-fg-disabled)', letterSpacing: '.04em' }}>
         <span>editor-scroll · perspective: 1800px · preserve-3d</span>
         <span>body[data-explode=1] .lyr {'{'} translateZ(40·80·120·160·200px) {'}'}</span>
       </div>

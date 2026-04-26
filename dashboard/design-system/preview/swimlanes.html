@@ -10,72 +10,72 @@
   <style>
     html, body { margin:0; background: var(--color-bg-page); color: var(--color-fg-primary); font-family: var(--font-sans); min-height: 100vh; }
     .page { max-width: 1180px; margin:0 auto; padding: 32px 32px 96px; }
-    .back { font: var(--type-micro); color: var(--fg-4); text-decoration:none; letter-spacing: .08em; display:inline-block; margin-bottom:20px; }
+    .back { font: var(--type-micro); color: var(--color-fg-disabled); text-decoration:none; letter-spacing: .08em; display:inline-block; margin-bottom:20px; }
     .back:hover { color: var(--color-fg-secondary); }
     h1 { font-family: var(--font-mono); font-size: 18px; font-weight: 600; margin: 0 0 4px; }
     .sub { color: var(--color-fg-muted); font-size: 12px; margin-bottom: 28px; line-height:1.5; max-width: 700px; }
     h2 { font: var(--type-label); text-transform: uppercase; letter-spacing: .08em; color: var(--color-fg-muted); font-weight: 600; font-size: 11px; margin: 28px 0 8px; padding-bottom: 6px; border-bottom: 1px solid var(--color-border-strong); }
     h2 .tag { margin-left: 8px; color: var(--color-accent-fg); font-weight: 500; }
-    .stamp { position:fixed; top:12px; right:16px; font-family: var(--font-mono); font-size: 10px; color: var(--fg-4); }
+    .stamp { position:fixed; top:12px; right:16px; font-family: var(--font-mono); font-size: 10px; color: var(--color-fg-disabled); }
 
     .seg { background: var(--color-bg-surface); border: 1px solid var(--color-border-default); border-radius: var(--r-1); padding: 16px; margin-bottom: 10px; display:grid; grid-template-columns: 260px 1fr; gap:18px; align-items:start; }
     .seg .meta { font-family: var(--font-mono); font-size: 11px; color: var(--color-fg-muted); line-height: 1.5; }
     .seg .meta .n { color: var(--color-fg-primary); font-weight:600; font-size: 13px; margin-bottom: 4px; display:block; }
-    .seg .meta .code { display:block; margin-top: 6px; color: var(--fg-4); font-size: 10px; }
+    .seg .meta .code { display:block; margin-top: 6px; color: var(--color-fg-disabled); font-size: 10px; }
 
     /* ── BASE LANE ── sharp / blueprint treatment */
-    .sw { position: relative; background: var(--color-bg-page); border: 1px solid var(--color-border-strong); border-radius: 0; overflow: hidden; box-shadow: inset 0 0 0 1px rgb(0 0 0 / .4), 0 1px 0 rgb(var(--brass-glow)/.05); }
+    .sw { position: relative; background: var(--color-bg-page); border: 1px solid var(--color-border-strong); border-radius: 0; overflow: hidden; box-shadow: inset 0 0 0 1px rgb(0 0 0 / .4), 0 1px 0 rgb(var(--color-accent-glow)/.05); }
     .sw::before, .sw::after { content: ''; position: absolute; width: 8px; height: 8px; pointer-events: none; z-index: 3; }
     .sw::before { top: 0; left: 0; border-top: 1px solid var(--brass-2); border-left: 1px solid var(--brass-2); }
     .sw::after  { bottom: 0; right: 0; border-bottom: 1px solid var(--brass-2); border-right: 1px solid var(--brass-2); }
     .sw-head { display:flex; align-items:center; gap: 10px; padding: 5px 10px; background: linear-gradient(180deg, var(--color-bg-panel-alt), var(--color-bg-surface)); border-bottom: 1px solid var(--color-border-strong); font-family: var(--font-mono); font-size: 9px; color: var(--color-fg-muted); letter-spacing: .1em; text-transform: uppercase; position: relative; }
-    .sw-head::after { content:''; position:absolute; left:0; right:0; bottom:-1px; height:1px; background: linear-gradient(90deg, transparent, rgb(var(--brass-glow)/.4), transparent); }
-    .sw-ruler { display:flex; flex: 1; justify-content: space-between; color: var(--fg-4); }
+    .sw-head::after { content:''; position:absolute; left:0; right:0; bottom:-1px; height:1px; background: linear-gradient(90deg, transparent, rgb(var(--color-accent-glow)/.4), transparent); }
+    .sw-ruler { display:flex; flex: 1; justify-content: space-between; color: var(--color-fg-disabled); }
     .sw-ruler span { font-variant-numeric: tabular-nums; padding: 0 4px; border-left: 1px solid var(--color-border-default); }
     .sw-ruler span:first-child { border-left: none; padding-left: 0; }
     .sw-body { position: relative; background-image: linear-gradient(90deg, transparent 0, transparent calc(25% - 1px), var(--color-border-default) calc(25% - 1px), var(--color-border-default) 25%, transparent 25%), linear-gradient(90deg, transparent 0, transparent calc(50% - 1px), var(--color-border-default) calc(50% - 1px), var(--color-border-default) 50%, transparent 50%), linear-gradient(90deg, transparent 0, transparent calc(75% - 1px), var(--color-border-default) calc(75% - 1px), var(--color-border-default) 75%, transparent 75%); background-size: 100% 100%; background-position: 88px 0; background-repeat: no-repeat; }
     .lane { position: relative; height: 30px; display:flex; align-items:center; gap: 10px; padding: 0 10px; border-bottom: 1px solid var(--color-border-default); }
     .lane:last-child { border-bottom: none; }
-    .lane:hover { background: rgb(var(--brass-glow)/.025); }
+    .lane:hover { background: rgb(var(--color-accent-glow)/.025); }
     .lane-name { width: 88px; font-family: var(--font-mono); font-size: 10px; color: var(--color-fg-secondary); letter-spacing: .04em; display:flex; align-items:center; gap: 5px; flex-shrink:0; padding-right: 8px; border-right: 1px solid var(--color-border-strong); height: 100%; box-sizing: border-box; }
     .lane-name .dot { width: 4px; height: 4px; background: currentColor; border-radius: 0; transform: rotate(45deg); flex-shrink:0; }
     .lane-track { position: relative; flex: 1; height: 18px; }
     .tick { position:absolute; top: 50%; transform: translateY(-50%); height: 10px; border-radius: 0; }
-    .tick.emit    { background: var(--color-accent-fg); box-shadow: 0 0 4px rgb(var(--brass-glow)/.6); clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); width: 8px !important; }
+    .tick.emit    { background: var(--color-accent-fg); box-shadow: 0 0 4px rgb(var(--color-accent-glow)/.6); clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); width: 8px !important; }
     .tick.tool    { background: var(--info); clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%); width: 4px !important; }
     .tick.approve { background: var(--ok); clip-path: polygon(0 0, 100% 50%, 0 100%); width: 8px !important; box-shadow: 0 0 3px rgb(var(--ok-glow)/.5); }
     .tick.flag    { background: var(--err); clip-path: polygon(50% 0, 100% 100%, 0 100%); width: 8px !important; box-shadow: 0 0 4px rgb(var(--err-glow)/.6); }
     .tick.commit  { background: var(--brass-2); height: 16px; clip-path: polygon(0 0, 100% 0, 50% 100%); width: 8px !important; }
     .span { position:absolute; top: 50%; transform: translateY(-50%); height: 8px; border-radius: 0; }
-    .span.run   { background: linear-gradient(90deg, rgb(var(--brass-glow)/.5), rgb(var(--brass-glow)/.12)); border: 1px solid var(--brass-2); border-left-width: 2px; clip-path: polygon(0 0, 100% 0, calc(100% - 4px) 100%, 0 100%); }
+    .span.run   { background: linear-gradient(90deg, rgb(var(--color-accent-glow)/.5), rgb(var(--color-accent-glow)/.12)); border: 1px solid var(--brass-2); border-left-width: 2px; clip-path: polygon(0 0, 100% 0, calc(100% - 4px) 100%, 0 100%); }
     .span.stall { background: repeating-linear-gradient(45deg, rgb(var(--stalled-glow)/.35) 0 4px, transparent 4px 8px); border: 1px dashed var(--stalled); }
-    .now { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px solid rgb(var(--brass-glow)/.85); box-shadow: -1px 0 8px rgb(var(--brass-glow)/.4), 1px 0 0 rgb(var(--brass-glow)/.2); z-index: 2; }
-    .now::before { content: 'NOW'; position:absolute; top: 2px; left: 4px; font-family: var(--font-mono); font-size: 8px; color: var(--color-accent-fg); letter-spacing: .15em; text-shadow: 0 0 4px rgb(var(--brass-glow)/.8); border: 1px solid var(--brass-2); padding: 1px 3px; background: var(--color-bg-page); }
-    .now::after { content: ''; position: absolute; left: -3px; top: 0; width: 7px; height: 7px; background: var(--color-accent-fg); clip-path: polygon(50% 100%, 0 0, 100% 0); box-shadow: 0 0 6px rgb(var(--brass-glow)/.7); }
+    .now { position: absolute; top: 0; bottom: 0; width: 0; border-left: 1px solid rgb(var(--color-accent-glow)/.85); box-shadow: -1px 0 8px rgb(var(--color-accent-glow)/.4), 1px 0 0 rgb(var(--color-accent-glow)/.2); z-index: 2; }
+    .now::before { content: 'NOW'; position:absolute; top: 2px; left: 4px; font-family: var(--font-mono); font-size: 8px; color: var(--color-accent-fg); letter-spacing: .15em; text-shadow: 0 0 4px rgb(var(--color-accent-glow)/.8); border: 1px solid var(--brass-2); padding: 1px 3px; background: var(--color-bg-page); }
+    .now::after { content: ''; position: absolute; left: -3px; top: 0; width: 7px; height: 7px; background: var(--color-accent-fg); clip-path: polygon(50% 100%, 0 0, 100% 0); box-shadow: 0 0 6px rgb(var(--color-accent-glow)/.7); }
 
     /* ── EMPTY ── */
-    .empty-slate { text-align: center; padding: 40px 20px; color: var(--fg-4); font-family: var(--font-mono); font-size: 11px; }
+    .empty-slate { text-align: center; padding: 40px 20px; color: var(--color-fg-disabled); font-family: var(--font-mono); font-size: 11px; }
     .empty-slate .big { font-size: 22px; color: var(--color-fg-muted); opacity: .4; letter-spacing: .1em; }
-    .empty-slate .action { margin-top: 10px; display:inline-block; padding: 4px 12px; border: 1px solid var(--brass-2); color: var(--color-accent-fg); border-radius: 0; font-size: 10px; letter-spacing: .1em; text-transform:uppercase; cursor:pointer; background: rgb(var(--brass-glow)/.06); clip-path: polygon(6px 0, 100% 0, calc(100% - 6px) 100%, 0 100%); padding: 4px 18px; }
+    .empty-slate .action { margin-top: 10px; display:inline-block; padding: 4px 12px; border: 1px solid var(--brass-2); color: var(--color-accent-fg); border-radius: 0; font-size: 10px; letter-spacing: .1em; text-transform:uppercase; cursor:pointer; background: rgb(var(--color-accent-glow)/.06); clip-path: polygon(6px 0, 100% 0, calc(100% - 6px) 100%, 0 100%); padding: 4px 18px; }
 
     /* ── WATERFALL ── */
-    .wf .lane-track .span.run.d1 { left: 2%; width: 22%; background: linear-gradient(90deg, var(--color-accent-fg), rgb(var(--brass-glow)/.2)); }
+    .wf .lane-track .span.run.d1 { left: 2%; width: 22%; background: linear-gradient(90deg, var(--color-accent-fg), rgb(var(--color-accent-glow)/.2)); }
     .wf .lane-track .span.run.d2 { left: 22%; width: 28%; background: linear-gradient(90deg, var(--info), rgb(106 142 176 / .2)); }
     .wf .lane-track .span.run.d3 { left: 48%; width: 18%; background: linear-gradient(90deg, var(--ok), rgb(107 158 107 / .2)); }
-    .wf .lane-track .span.run.d4 { left: 64%; width: 32%; background: linear-gradient(90deg, var(--brass-2), rgb(var(--brass-glow)/.1)); }
+    .wf .lane-track .span.run.d4 { left: 64%; width: 32%; background: linear-gradient(90deg, var(--brass-2), rgb(var(--color-accent-glow)/.1)); }
 
     /* ── HANDOFF arrow ── sharp angle */
     .handoff { position:absolute; top:50%; height: 14px; width: 28px; transform: translateY(-100%); pointer-events:none; }
-    .handoff::before { content: ''; position: absolute; left: 0; right: 6px; top: 0; height: 1px; background: var(--color-accent-fg); box-shadow: 0 0 4px rgb(var(--brass-glow)/.5); }
+    .handoff::before { content: ''; position: absolute; left: 0; right: 6px; top: 0; height: 1px; background: var(--color-accent-fg); box-shadow: 0 0 4px rgb(var(--color-accent-glow)/.5); }
     .handoff::after { content: ''; position: absolute; right: 0; top: 0; width: 6px; height: 14px; border-left: 1px solid var(--color-accent-fg); }
-    .handoff .ah { position:absolute; right: -3px; bottom: -4px; width: 7px; height: 7px; background: var(--color-accent-fg); clip-path: polygon(50% 100%, 0 0, 100% 0); box-shadow: 0 0 4px rgb(var(--brass-glow)/.6); }
+    .handoff .ah { position:absolute; right: -3px; bottom: -4px; width: 7px; height: 7px; background: var(--color-accent-fg); clip-path: polygon(50% 100%, 0 0, 100% 0); box-shadow: 0 0 4px rgb(var(--color-accent-glow)/.6); }
     .handoff-label { position:absolute; top: -14px; font-family: var(--font-mono); font-size: 8px; color: var(--brass-2); letter-spacing: .1em; white-space: nowrap; text-transform: uppercase; padding: 1px 4px; background: var(--color-bg-page); border: 1px solid var(--color-border-strong); }
 
     /* ── COLLAPSED (grouped) ── */
-    .group-bar { position: relative; display:flex; align-items:center; gap: 10px; padding: 0 10px; height: 28px; border-bottom: 1px solid var(--color-border-strong); background: linear-gradient(90deg, rgb(var(--brass-glow)/.06), transparent 60%); }
+    .group-bar { position: relative; display:flex; align-items:center; gap: 10px; padding: 0 10px; height: 28px; border-bottom: 1px solid var(--color-border-strong); background: linear-gradient(90deg, rgb(var(--color-accent-glow)/.06), transparent 60%); }
     .group-name { width: 88px; font-family: var(--font-mono); font-size: 10px; color: var(--color-accent-fg); letter-spacing: .08em; text-transform: uppercase; display:flex; align-items:center; gap:5px; flex-shrink:0; padding-right: 8px; border-right: 1px solid var(--color-border-strong); height: 100%; box-sizing: border-box; }
     .group-name .chev { font-size: 8px; }
-    .group-name .cnt { color: var(--fg-4); font-size: 9px; font-weight: 400; letter-spacing: .04em; }
+    .group-name .cnt { color: var(--color-fg-disabled); font-size: 9px; font-weight: 400; letter-spacing: .04em; }
     .group-stack { flex: 1; position: relative; height: 18px; }
     .group-stack .mini { position:absolute; top: 0; height: 3px; background: var(--color-accent-fg); border-radius: 0; opacity: .65; clip-path: polygon(0 0, 100% 0, calc(100% - 2px) 100%, 0 100%); }
     .group-stack .mini:nth-child(2) { top: 5px; background: var(--info); }
@@ -88,14 +88,14 @@
     .density-bar { display:inline-flex; gap: 0; border: 1px solid var(--color-border-strong); border-radius: 0; overflow: hidden; background: var(--color-bg-surface); margin-bottom: 8px; font-family: var(--font-mono); font-size: 10px; letter-spacing: .1em; text-transform:uppercase; }
     .density-bar button { background: transparent; border: none; color: var(--color-fg-muted); padding: 4px 12px; cursor: pointer; border-right: 1px solid var(--color-border-strong); font-weight: 600; }
     .density-bar button:last-child { border-right: none; }
-    .density-bar button.on { background: rgb(var(--brass-glow)/.1); color: var(--color-accent-fg); box-shadow: inset 0 -2px 0 var(--color-accent-fg); }
+    .density-bar button.on { background: rgb(var(--color-accent-glow)/.1); color: var(--color-accent-fg); box-shadow: inset 0 -2px 0 var(--color-accent-fg); }
     .comfy .lane { height: 38px; }
     .compact .lane { height: 22px; }
     .tiny .lane { height: 14px; border-bottom-style: solid; border-bottom-color: var(--color-border-default); }
     .tiny .lane-name { font-size: 9px; }
     .tiny .tick { height: 6px; }
 
-    .row { display:flex; gap:6px; align-items:center; margin-top: 6px; flex-wrap:wrap; font-family: var(--font-mono); font-size:10px; color: var(--fg-4); }
+    .row { display:flex; gap:6px; align-items:center; margin-top: 6px; flex-wrap:wrap; font-family: var(--font-mono); font-size:10px; color: var(--color-fg-disabled); }
 
     /* chip primitives if primitives.css doesn't load them */
     .chip { display:inline-flex; align-items:center; padding: 2px 8px; font-family: var(--font-mono); font-size: 10px; background: var(--color-bg-panel-alt); border: 1px solid var(--color-border-strong); color: var(--color-fg-secondary); border-radius: 999px; letter-spacing: .04em; }
@@ -135,7 +135,7 @@
           <div class="empty-slate">
             <div class="big">∅</div>
             <div style="margin-top:6px">no keepers registered</div>
-            <div style="color:var(--fg-4); margin-top:4px; font-size:10px;">spawn a keeper to begin · <span style="color:var(--color-accent-fg)">⌘K</span> then "spawn keeper"</div>
+            <div style="color:var(--color-fg-disabled); margin-top:4px; font-size:10px;">spawn a keeper to begin · <span style="color:var(--color-accent-fg)">⌘K</span> then "spawn keeper"</div>
             <div class="action">+ SPAWN KEEPER</div>
           </div>
         </div>
@@ -156,7 +156,7 @@
           <div class="lane"><span class="lane-name" style="color:var(--brass-2)"><span class="dot"></span>commit</span><div class="lane-track"><span class="span run d4"></span></div></div>
           <div class="now" style="left: 96%"></div>
         </div>
-        <div style="padding: 4px 10px; font-family:var(--font-mono); font-size:10px; color:var(--fg-4); background:var(--color-bg-surface); border-top:1px solid var(--color-border-default);">total 1.24s · critical path: moonshot (320ms) → guard (210ms)</div>
+        <div style="padding: 4px 10px; font-family:var(--font-mono); font-size:10px; color:var(--color-fg-disabled); background:var(--color-bg-surface); border-top:1px solid var(--color-border-default);">total 1.24s · critical path: moonshot (320ms) → guard (210ms)</div>
       </div>
     </div>
 

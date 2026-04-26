@@ -11,13 +11,13 @@
 <style>
   body { margin:0; padding:0 0 96px; background:var(--color-bg-page); color:var(--color-fg-primary); font:13px/1.45 var(--font-sans); }
   .pg { max-width:1320px; margin:0 auto; padding:32px 40px 0; }
-  .pg-head { display:grid; grid-template-columns:1fr auto; gap:24px; align-items:end; padding-bottom:20px; margin-bottom:28px; border-bottom:1px solid var(--line-3); }
+  .pg-head { display:grid; grid-template-columns:1fr auto; gap:24px; align-items:end; padding-bottom:20px; margin-bottom:28px; border-bottom:1px solid var(--color-border-divider); }
   .eyebrow { font:500 10px/1 var(--font-mono); letter-spacing:.12em; text-transform:uppercase; color:var(--color-accent-fg); margin-bottom:10px; }
   h1 { margin:0 0 8px; font:500 26px/1.15 var(--font-sans); color:var(--fg-0); }
   .sub { max-width:760px; color:var(--color-fg-muted); }
   .meta { text-align:right; font:10px/1.5 var(--font-mono); color:var(--color-fg-muted); letter-spacing:.08em; text-transform:uppercase; }
   .meta b { color:var(--color-accent-fg); font-weight:500; }
-  .toc { display:grid; grid-template-columns:repeat(5,1fr); gap:1px; background:var(--line-3); border:1px solid var(--line-3); margin-bottom:34px; }
+  .toc { display:grid; grid-template-columns:repeat(5,1fr); gap:1px; background:var(--color-border-divider); border:1px solid var(--color-border-divider); margin-bottom:34px; }
   .toc a { display:block; padding:12px 14px; background:var(--color-bg-surface); color:var(--color-fg-secondary); text-decoration:none; font:11px/1.55 var(--font-mono); }
   .toc a b { display:block; color:var(--color-accent-fg); font-size:10px; letter-spacing:.1em; text-transform:uppercase; margin-bottom:6px; }
   .zones { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; margin-bottom:36px; }
@@ -34,7 +34,7 @@
   code { color:var(--color-accent-fg); font-family:var(--font-mono); }
   table { width:100%; border-collapse:collapse; background:var(--color-bg-surface); border:1px solid var(--color-border-strong); font:11px/1.45 var(--font-mono); }
   th, td { padding:8px 10px; border-bottom:1px solid var(--color-border-default); text-align:left; vertical-align:top; }
-  th { color:var(--fg-4); background:var(--color-bg-panel-alt); text-transform:uppercase; letter-spacing:.08em; }
+  th { color:var(--color-fg-disabled); background:var(--color-bg-panel-alt); text-transform:uppercase; letter-spacing:.08em; }
   td:first-child { color:var(--color-accent-fg); white-space:nowrap; }
   .accept { margin-top:30px; padding:16px 18px; background:var(--color-bg-surface); border:1px solid var(--color-border-strong); border-left:2px solid var(--color-accent-fg); }
   .accept h2 { margin:0 0 10px; font:500 15px/1.2 var(--font-sans); }

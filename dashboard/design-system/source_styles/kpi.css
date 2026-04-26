@@ -78,11 +78,11 @@
 .kpi-delta {
   font: var(--type-caption);
   font-variant-numeric: tabular-nums;
-  color: var(--fg-4);
+  color: var(--color-fg-disabled);
 }
 .kpi-delta.up   { color: var(--ok-fg); }
 .kpi-delta.down { color: var(--err-fg); }
-.kpi-delta.flat { color: var(--fg-4); }
+.kpi-delta.flat { color: var(--color-fg-disabled); }
 
 /* ── Spark (bottom-right corner) ── */
 .kpi-spark {

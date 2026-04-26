@@ -11,6 +11,7 @@ import {
 import { fetchGateKeepers } from '../api/gate'
 import { executionLoaded, keepers, refreshExecution } from '../store'
 import { compositeTick } from '../composite-signals'
+import { nowSecondsSignal, useNowSecondsTicker } from '../lib/now-signal'
 import { useGlobalShortcut } from '../lib/use-global-shortcut'
 import { EmptyState } from './common/empty-state'
 import { Kbd } from './common/kbd'
@@ -247,7 +248,13 @@ export function FsmHub(props: FsmHubProps = {}) {
   const [hub, dispatch] = useReducer(reduceHubState, initialHubState)
   const [keeperFilter, setKeeperFilter] = useState('')
   const [pollTick, setPollTick] = useState(0)
-  const [now, setNow] = useState(() => Date.now() / 1000)
+  // `now` was a per-component useState ticker (5 s setInterval calling
+  // setNow). Hoisted to the shared module-level signal so multiple
+  // components on the page share one interval — and so future cycles
+  // can migrate children to subscribe directly, isolating render scope
+  // to the leaves that actually display elapsed strings.
+  useNowSecondsTicker()
+  const now = nowSecondsSignal.value
   const [graphOpen, setGraphOpen] = useState(false)
   const [hoveredSegment, setHoveredSegment] = useState<HoveredSegment | null>(null)
   const [gateKeeperNames, setGateKeeperNames] = useState<string[]>([])
@@ -411,16 +418,9 @@ export function FsmHub(props: FsmHubProps = {}) {
     return () => clearInterval(id)
   }, [paused])
 
-  useEffect(() => {
-    if (paused) return undefined
-    // 5s tick: full FSM hub re-renders + deriveLaneDwellHistograms recomputes
-    // each interval. Operator-visible elapsed strings (`fmtDuration`) read
-    // sub-minute precision; 5s granularity is below visual perception
-    // threshold for the dwell/transition surfaces and divides per-second
-    // re-render cost by 5x for a 1012-line component with 9 child renders.
-    const id = setInterval(() => setNow(Date.now() / 1000), 5_000)
-    return () => clearInterval(id)
-  }, [paused])
+  // The 5 s tick that previously lived here is now provided by
+  // useNowSecondsTicker() above (shared, ref-counted, runs once
+  // module-wide regardless of how many fsm-hubs are mounted).
 
   const tick = compositeTick.value
   const shouldRefetchForTick =

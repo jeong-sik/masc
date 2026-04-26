@@ -341,9 +341,8 @@ let native_event_to_json (evt : Oas.Event_bus.event) : Yojson.Safe.t option =
          payload aggregate. Skip the relay to avoid flooding SSE
          consumers with high-frequency low-value events. *)
       None
-  | Oas.Event_bus.TurnReady _ ->
-      (* TurnReady event added in newer OAS. Skip the relay to avoid flooding SSE. *)
-      None
+  (* TurnReady is already handled at line 211; the duplicate arm
+     introduced as a lint quick-fix has been removed (warning 11). *)
 
 let relay_max_attempts = 3
 let relay_max_queue_depth = 256

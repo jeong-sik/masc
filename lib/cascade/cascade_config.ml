@@ -493,7 +493,7 @@ let expand_auto_model_string ?rotation_scope (s : string) : string list =
   let trimmed = String.trim s in
   match split_provider_model trimmed with
   | Some (provider_name, model_id)
-    when String.lowercase_ascii model_id = "auto" -> (
+    when String_util.equals_ci model_id "auto" -> (
       match Provider_adapter.auto_models_for_cascade_prefix provider_name with
       | Some models when models <> [] ->
           expand_provider_auto ?rotation_scope ~spec:trimmed provider_name models

@@ -793,7 +793,7 @@ let handle_keeper_bash
         let hint =
           match reason with
           | Worker_dev_tools.Command_not_allowed name
-            when String.lowercase_ascii name = "gh" ->
+            when String_util.equals_ci name "gh" ->
             "`gh` is not allowed via keeper_bash. Use keeper_shell with \
              op=\"gh\" (e.g. keeper_shell op=gh cmd=\"pr list --state open\")."
           | Chain_or_redirect | Pipes_not_allowed | Unsafe_redirect ->
@@ -808,7 +808,7 @@ let handle_keeper_bash
         let alternatives =
           match reason with
           | Worker_dev_tools.Command_not_allowed name
-            when String.lowercase_ascii name = "gh" ->
+            when String_util.equals_ci name "gh" ->
             [ "Use keeper_shell with op=\"gh\" for GitHub CLI operations."
             ; "Example: keeper_shell op=gh cmd=\"pr list --state open\"."
             ]

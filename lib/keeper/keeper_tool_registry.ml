@@ -209,7 +209,7 @@ let normalize_gh_command (cmd : string) : string =
     |> List.filter (fun token -> token <> "")
   in
   let rec drop_leading_gh = function
-    | token :: rest when String.lowercase_ascii token = "gh" ->
+    | token :: rest when String_util.equals_ci token "gh" ->
         drop_leading_gh rest
     | remaining -> remaining
   in

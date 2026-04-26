@@ -304,15 +304,15 @@ function MetricRow({ label, value, sub }: { label: string; value: string | numbe
 }
 
 function transportEyebrow(configured: boolean, listening: boolean, port: number): string {
-  if (!configured) return 'disabled'
-  return listening ? `:${port} live` : `:${port} down`
+  if (!configured) return '비활성'
+  return listening ? `:${port} 활성` : `:${port} 중단`
 }
 
 function webrtcEyebrow(data: TransportHealthData): string {
-  if (!data.webrtc.configured) return 'disabled'
+  if (!data.webrtc.configured) return '비활성'
   return data.webrtc.signaling_available
-    ? `${data.webrtc.ice_server_count} ICE · signaling ready`
-    : 'signaling down'
+    ? `${data.webrtc.ice_server_count} ICE · 시그널링 준비`
+    : '시그널링 중단'
 }
 
 function SectionCard({
@@ -449,7 +449,7 @@ export function TransportHealthPanel() {
         </summary>
         <div class="p-4">
           <div class="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-3">
-            <${SectionCard} title="SSE" status=${sseStatus} eyebrow=${`${data.sse.sessions_total} live`}>
+            <${SectionCard} title="SSE" status=${sseStatus} eyebrow=${`${data.sse.sessions_total} 활성`}>
               <${MetricRow} label="옵저버" value=${data.sse.sessions_observer} />
               <${MetricRow} label="코디네이터" value=${data.sse.sessions_coordinator} />
               <${MetricRow} label="외부 팬아웃" value=${data.sse.external_subscribers} />

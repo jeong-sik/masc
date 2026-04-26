@@ -7,31 +7,6 @@
 
 const P2i = window.MASC_P2;
 
-// keeper color helper (uses kClass from cb-shared)
-function keeperColor(id) {
-  return ({
-    'nick0cave':     'var(--color-accent-fg)',
-    'masc-improver': 'var(--color-status-ok)',
-    'sangsu':        'var(--color-status-info)',
-    'qa-king':       'var(--color-status-err)',
-    'rama':          'var(--color-status-stalled)',
-    'ramarama':      'var(--color-status-stalled)',
-    'scholar':       '#9aa6b8',
-    'janitor':       '#7a8290',
-    'taskmaster':    'var(--color-accent-fg-dim)',
-    'velvet-hammer': '#c97070',
-    'verdict':       '#b89070',
-    'sojin':         '#8aa890',
-    'verifier':      '#6a8a9a',
-    'executor':      '#a08070',
-    'adversary':     '#a06060',
-    'issue_king':    '#b08840',
-    'codex-mcp-client': '#6a7080',
-    'ollama-local':  '#7a9080',
-    'scholar2':      '#9aa6b8',
-  })[id] || 'var(--color-status-idle)';
-}
-
 // ═════════════════════════════════════════════════════════════════
 // I0-A · BRANCH SELECTOR
 // ═════════════════════════════════════════════════════════════════
@@ -100,9 +75,8 @@ function BranchSelector() {
       <div role="list" aria-label={`Active branch keepers · ${cur.keepers.length}`} style={{padding:'5px 10px',background:'var(--color-bg-surface)',border:'1px solid var(--color-border-default)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-10)',color:'var(--color-fg-muted)',display:'flex',gap:'8px',alignItems:'center'}}>
         <span aria-hidden="true" style={{color:'var(--color-fg-disabled)'}}>active branch keepers ·</span>
         {cur.keepers.map(k => (
-          <span key={k} role="listitem" aria-label={k} style={{display:'inline-flex',alignItems:'center',gap:'4px'}}>
-            <span aria-hidden="true" style={{display:'inline-block',width:'8px',height:'8px',borderRadius:'50%',background:keeperColor(k)}}/>
-            <span aria-hidden="true" style={{color:'var(--color-accent-fg)'}}>{k}</span>
+          <span key={k} role="listitem" aria-label={k}>
+            <KeeperBadge id={k} size="sm" />
           </span>
         ))}
       </div>
@@ -141,7 +115,7 @@ function KeeperMultiSelect() {
                     aria-label={k.id}
                     onClick={() => toggle(k.id)}
                     className={`km-chip ${on ? 'on' : ''}`}>
-              <span aria-hidden="true" style={{display:'inline-block',width:'7px',height:'7px',borderRadius:'50%',background:keeperColor(k.id)}}/>
+              <KeeperBadge id={k.id} size="sm" variant="sigil" />
               <span aria-hidden="true">{k.id}</span>
               <span className="role" aria-hidden="true">· {k.role}</span>
               <span className="x" aria-hidden="true">{on ? '×' : '+'}</span>

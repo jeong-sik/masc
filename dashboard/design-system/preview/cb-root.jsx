@@ -2,9 +2,36 @@
 
 const { DesignCanvas, DCSection, DCArtboard } = window;
 
+// HashBridge — when index.html links here with a #section-id hash, focus the
+// first artboard of that section. design-canvas's DCViewport is transform-pan/
+// zoom inside `overflow:hidden`, so native anchor scroll silently no-ops; this
+// shim restores a usable anchor link target by routing hashes into setFocus.
+// Lives inside <DesignCanvas> so it can read DCCtx.
+function HashBridge() {
+  const ctx = React.useContext(window.DCCtx);
+  React.useEffect(() => {
+    if (!ctx) return;
+    const apply = () => {
+      const sid = (location.hash || '').slice(1);
+      if (!sid) return;
+      // Section root carries id={sid}; first artboard slot under it has data-dc-slot.
+      const root = document.getElementById(sid);
+      if (!root) return;
+      const first = root.querySelector('[data-dc-slot]');
+      if (first && first.dataset.dcSlot) ctx.setFocus(`${sid}/${first.dataset.dcSlot}`);
+    };
+    // Initial hash (page loaded with #foo) needs a frame for DOM to mount.
+    const t = setTimeout(apply, 50);
+    window.addEventListener('hashchange', apply);
+    return () => { clearTimeout(t); window.removeEventListener('hashchange', apply); };
+  }, [ctx]);
+  return null;
+}
+
 function App() {
   return (
     <DesignCanvas title="MASC Cockpit — Component Library" subtitle="11 components · 2–3 variants each · interactive">
+      <HashBridge/>
 
       <DCSection id="topbar" title="01 · Topbar" subtitle="Brand · goal · mode · density · stamp">
         <DCArtboard id="topbar-std" label="A · Standard" width={880} height={80}><TopbarStandard/></DCArtboard>

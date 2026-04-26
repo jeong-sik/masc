@@ -1,6 +1,42 @@
 # Changelog
 
 
+## [0.18.1] - 2026-04-26 — patch: rescue v0.18.0 release (ProviderTerminal partial-match fix-forward)
+
+Aggregate of 37 commits since v0.18.0 (14 feat / 10 fix / 9 refactor / 2 chore / 2 diag). No breaking API changes.
+
+The v0.18.0 tag exists but its GitHub release workflow failed: the OAS pin bump to SHA `162940fd` (#10667) added a `ProviderTerminal` variant that broke 6 partial-match sites. This patch ships the fix-forward (#10713 + #10721) plus a batch of dashboard localisation, design-system migration, and keeper hardening work that accumulated on `main`.
+
+### Fixed (rescue path)
+- OAS boundary: close `ProviderTerminal` partial-match in `Oas_compat` + add `error_message` helper (#10721).
+- OAS bridge: add `ProviderTerminal` arm at 3 partial-match sites (#10713).
+
+### Fixed
+- Watchdog: extract to standalone module, cover autoboot path (#10698).
+- Coord: resolve `git_clone` policy at canonical `.masc/config/` path (#10693).
+- Keeper: auto-pause on `cascade_exhausted` to break supervisor restart loop (task-074, #10691).
+- Keeper: use container path for `default_cwd` / `private_workspace_root` in `masc_keeper_status` (#10650, #10686).
+- Deploy: build dashboard SPA in Dockerfile multi-stage build (#10684).
+- Dune: exclude misplaced `worktrees/` (no-dot) from dune scan (#10688).
+- TLA+: add `Recycle` action to clear `OperatorPauseBroadcast` deadlock (#10678).
+- Fleet: use sandbox arguments in `keeper_context_status` instead of host paths (#10677).
+
+### Added (feat)
+- Dashboard localisation rounds 31–41: 70+ chips/labels/headings/aria-labels across many components (#10685, #10689, #10690, #10695, #10697, #10700, #10703, #10708, #10712, #10714, #10723).
+- Audit: keeper credential UUID layout integrity detector (#10718) and dual-identity drift detector (#10706).
+- Design system: `ActionButton` `pressed` prop + tool-picker tier filter swap (PR-CS4, #10679).
+
+### Changed (refactor)
+- Design system PR-CS5 → PR-CS12: ActionButton/Select migration across runtime-monitor (#10722), connector-quick-bind (#10717), governance-monitor (#10715), agent-profile (#10705), memory-post-detail (#10702), tool-picker (#10694), error-panel (#10687), autoresearch (#10683).
+- Rename `Oas_sse_bridge` → `Oas_event_bridge` (transport-agnostic, #10711).
+
+### Chore
+- OAS pin: bump SHA to `97b8a603` (OAS #1201 TurnReady event, #10704, #10709).
+
+### Diagnostics
+- Prometheus: capture EDEADLK backtrace on `metrics_mutex` (#10682, #10707).
+- Keeper-tools-oas: capture backtrace on EDEADLK to identify mutex site (#10682, #10696).
+
 ## [0.18.0] - 2026-04-26
 
 Aggregate of 50 commits since v0.17.0 (18 feat / 11 fix / 9 refactor / 5 perf / 3 docs / 3 chore / 1 diag). No breaking API changes. Headline: dashboard localisation continues (rounds 24–28, 50+ chips/labels), keeper stability gains noop-cycle classifier fix unblocking 8x cooldown trap (#10672) and `/workspace` LLM hallucination negative anchor (#10647), RFC-0008 PR-1 introduces `Credential_provider` trait + `Host_config_provider` (#10660).

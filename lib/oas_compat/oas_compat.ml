@@ -11,6 +11,7 @@ module Http_client = struct
     | Accept_rejected_terminal
     | Cli_transport_required
     | Network_error
+    | Provider_terminal
 
   (* Case-insensitive substring check, mirroring [cascade_health_filter]. *)
   let contains_ci ?(max_scan = 512) ~haystack ~needle () =
@@ -93,12 +94,14 @@ module Http_client = struct
       | Llm_provider.Http_client.CliTransportRequired _ ->
           Cli_transport_required
       | Llm_provider.Http_client.NetworkError _ -> Network_error
+      | Llm_provider.Http_client.ProviderTerminal _ -> Provider_terminal
 
   let should_cascade (err : Llm_provider.Http_client.http_error) : bool =
     match classify err with
     | Local_resource_exhaustion
     | Terminal_http _
-    | Accept_rejected_terminal ->
+    | Accept_rejected_terminal
+    | Provider_terminal ->
         false
     | Context_overflow
     | Provider_parse_error

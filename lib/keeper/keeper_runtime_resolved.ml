@@ -72,7 +72,7 @@ let autonomous_max_idle_turns_live () =
 let turn_timeout_sec_live () =
   Float.max 60.0
     (Float.min 3600.0
-       (get_float ~default:1200.0 "MASC_KEEPER_TURN_TIMEOUT_SEC"))
+       (get_float ~default:3600.0 "MASC_KEEPER_TURN_TIMEOUT_SEC"))
 
 let admission_wait_timeout_sec_live () =
   Float.max 5.0

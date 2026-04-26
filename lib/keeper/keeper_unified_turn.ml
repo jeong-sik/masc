@@ -2222,7 +2222,41 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             ~consecutive:count
             ~threshold
             ~err;
-          if count >= threshold then begin
+          (* task-074 (#fleet-stall 2026-04-26): break the supervisor restart
+             loop on cascade_exhausted. Without this guard, [count >= threshold]
+             below raises [Keeper_fiber_crash], the supervisor restarts the
+             fiber, the same cascade still has no working provider, and the
+             keeper bursts then stalls again. Auto-pausing instead gives the
+             operator a chance to fix the cascade before another restart cycle
+             burns more turns. The pause uses the same [sync_keeper_paused_state]
+             entry point as operator-driven pause, so [operator_paused] stays
+             the SSOT — no new state surface, dashboard already renders this. *)
+          let cascade_auto_paused =
+            EC.is_cascade_exhausted_error err
+            && count >= Keeper_behavioral_regime.turn_fail_streak_threshold
+            && not updated_meta.paused
+          in
+          if cascade_auto_paused then begin
+            match
+              sync_keeper_paused_state ~config ~meta:updated_meta ~paused:true
+            with
+            | Ok _ ->
+                Keeper_registry.set_failure_reason ~base_path:config.base_path
+                  meta.name
+                  (Some (Keeper_registry.Turn_consecutive_failures count));
+                Log.Keeper.warn
+                  "%s: auto-paused after %d cascade_exhausted failures \
+                   (pause_threshold=%d, crash_threshold=%d); operator must \
+                   resume after cascade fix"
+                  meta.name count
+                  Keeper_behavioral_regime.turn_fail_streak_threshold
+                  threshold
+            | Error sync_err ->
+                Log.Keeper.error
+                  "%s: cascade auto-pause sync failed: %s \
+                   (falling through to crash path)" meta.name sync_err
+          end;
+          if count >= threshold && not cascade_auto_paused then begin
             Log.Keeper.error
               "%s: %d consecutive persistent turn failures (threshold=%d), escalating to supervisor crash path"
               meta.name count threshold;

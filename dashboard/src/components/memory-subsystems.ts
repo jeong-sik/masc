@@ -189,7 +189,7 @@ function HebbianMatrix({ synapses }: { synapses: MemorySubsystemsSynapse[] }) {
 
   return html`
     <div class="bg-[var(--white-5)] rounded p-3 overflow-x-auto">
-      <svg viewBox="0 0 ${width} ${height}" class="w-full h-auto" style="max-height:560px">
+      <svg viewBox="0 0 ${width} ${height}" class="w-full h-auto" role="img" style="max-height:560px">
         ${agents.map(
           (name, i) => html`
             <g transform="translate(${leftPad + i * cell + cell / 2}, ${topPad - 6}) rotate(-45)">

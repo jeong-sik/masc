@@ -529,7 +529,7 @@ export function ContextChart({ keeper }: { keeper: Keeper }) {
 
   return html`
     <div class="flex items-center gap-3 mb-5 p-3 rounded border border-[var(--color-border-default)] bg-[var(--white-3)]">
-      <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded" style="background:var(--bg-deepest);">
+      <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded" role="img" style="background:var(--bg-deepest);">
         <line x1="${pad}" y1="${(H - pad - 0.5 * (H - 2 * pad)).toFixed(1)}" x2="${W - pad}" y2="${(H - pad - 0.5 * (H - 2 * pad)).toFixed(1)}" stroke="#444" stroke-dasharray="3,3" stroke-width="0.5"/>
         <line x1="${pad}" y1="${(H - pad - (CTX_WARN_PCT / 100) * (H - 2 * pad)).toFixed(1)}" x2="${W - pad}" y2="${(H - pad - (CTX_WARN_PCT / 100) * (H - 2 * pad)).toFixed(1)}" stroke="#444" stroke-dasharray="3,3" stroke-width="0.5"/>
         <line x1="${pad}" y1="${(H - pad - (CTX_CRITICAL_PCT / 100) * (H - 2 * pad)).toFixed(1)}" x2="${W - pad}" y2="${(H - pad - (CTX_CRITICAL_PCT / 100) * (H - 2 * pad)).toFixed(1)}" stroke="${CTX_COLOR_WARN}" stroke-dasharray="3,3" stroke-width="0.5"/>
@@ -611,7 +611,7 @@ export function TokenTrendChart({ keeper }: { keeper: Keeper }) {
               <span class="font-mono text-[var(--good)]">${formatTokens(lastOutput)}</span>
             </span>
           </div>
-          <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" style="background:var(--bg-deepest);">
+          <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" role="img" style="background:var(--bg-deepest);">
             ${inputLine ? html`<polyline points="${inputLine}" fill="none" stroke="#67e8f9" stroke-width="1.5" opacity="0.8"/>` : null}
             ${outputLine ? html`<polyline points="${outputLine}" fill="none" stroke="var(--color-status-ok)" stroke-width="1.5" opacity="0.8"/>` : null}
           </svg>
@@ -691,7 +691,7 @@ export function PromptTelemetryPanel({ keeper }: { keeper: Keeper }) {
             <span class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)]">estimated prompt tokens</span>
             <span class="text-xs font-mono tabular-nums text-[var(--color-accent-fg)]">${latestTotal != null ? formatTokens(latestTotal) : '-'}</span>
           </div>
-          <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" style="background:var(--bg-deepest);">
+          <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" role="img" style="background:var(--bg-deepest);">
             ${totalLine ? html`<polyline points="${totalLine}" fill="none" stroke="var(--amber-bright)" stroke-width="1.5"/>` : null}
           </svg>
           <div class="mt-1 flex flex-wrap gap-2 text-3xs text-[var(--color-fg-disabled)]">
@@ -851,7 +851,7 @@ export function CtxCompositionPanel({ keeper }: { keeper: Keeper }) {
             <span class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)]">stacked history</span>
             <span class="text-3xs text-[var(--color-fg-disabled)]">${points.length} turns</span>
           </div>
-          <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" style="background:var(--bg-deepest);">
+          <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" role="img" style="background:var(--bg-deepest);">
             ${points.map((point: KeeperMetricPoint, index: number) => {
               const comp = point.ctx_composition
               if (!comp || comp.display_total_tokens <= 0) return null
@@ -995,7 +995,7 @@ export function InferenceTelemetryPanel({ keeper }: { keeper: Keeper }) {
             <span class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)]">wall tok/s</span>
             <span class="text-xs font-mono tabular-nums text-[var(--good)]">${lastWallTps.toFixed(1)}</span>
           </div>
-          <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" style="background:var(--bg-deepest);">
+          <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" role="img" style="background:var(--bg-deepest);">
             ${wallTpsLine ? html`<polyline points="${wallTpsLine}" fill="none" stroke="var(--color-status-ok)" stroke-width="1.5"/>` : null}
           </svg>
           <div class="text-3xs text-[var(--color-fg-disabled)] mt-1">avg ${avgWallTps.toFixed(1)}</div>
@@ -1008,7 +1008,7 @@ export function InferenceTelemetryPanel({ keeper }: { keeper: Keeper }) {
             <span class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)]">hw tok/s</span>
             <span class="text-xs font-mono tabular-nums text-[var(--good)]">${lastHwTps.toFixed(1)}</span>
           </div>
-          <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" style="background:var(--bg-deepest);">
+          <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" role="img" style="background:var(--bg-deepest);">
             ${hwTpsLine ? html`<polyline points="${hwTpsLine}" fill="none" stroke="var(--color-status-ok)" stroke-width="1.5"/>` : null}
           </svg>
           <div class="text-3xs text-[var(--color-fg-disabled)] mt-1">avg ${avgHwTps.toFixed(1)} · decode-only</div>
@@ -1021,7 +1021,7 @@ export function InferenceTelemetryPanel({ keeper }: { keeper: Keeper }) {
             <span class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)]">API latency</span>
             <span class="text-xs font-mono tabular-nums text-[var(--color-accent-fg)]">${lastLatency > 0 ? `${(lastLatency / 1000).toFixed(1)}s` : '-'}</span>
           </div>
-          <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" style="background:var(--bg-deepest);">
+          <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" role="img" style="background:var(--bg-deepest);">
             ${latencyLine ? html`<polyline points="${latencyLine}" fill="none" stroke="#9ad9ff" stroke-width="1.5"/>` : null}
           </svg>
         </div>

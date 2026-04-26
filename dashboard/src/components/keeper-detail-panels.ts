@@ -169,7 +169,7 @@ function OperationalHealth({ keeper }: { keeper: Keeper }) {
       <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
         ${hb ? html`
           <div class="p-2 rounded border ${KPI_TONE[hbTone]} flex flex-col gap-0.5">
-            <span class="text-3xs uppercase tracking-wider text-[var(--text-muted)]">Heartbeat</span>
+            <span class="text-3xs uppercase tracking-wider text-[var(--text-muted)]">하트비트</span>
             <span class="text-xs font-mono ${KPI_VALUE_TONE[hbTone]}">${hb.replace('T', ' ').slice(0, 19)}</span>
           </div>
         ` : null}

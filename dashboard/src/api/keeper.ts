@@ -177,7 +177,7 @@ export async function streamKeeperMessage(
 
   if (!res.ok) {
     const raw = await res.text()
-    let message = raw || `Streaming request failed (${res.status})`
+    let message = raw || `스트리밍 요청 실패 (${res.status})`
     try {
       const parsed = JSON.parse(raw) as { error?: { message?: string }; message?: string }
       message = parsed.error?.message ?? parsed.message ?? message
@@ -188,7 +188,7 @@ export async function streamKeeperMessage(
   }
 
   if (!res.body) {
-    throw new Error('Streaming response body is unavailable')
+    throw new Error('스트리밍 응답 본문 사용 불가')
   }
 
   const reader = res.body.getReader()

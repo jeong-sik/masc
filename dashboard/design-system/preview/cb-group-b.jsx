@@ -15,7 +15,7 @@ function SidebarFleet() {
   const [sel, setSel] = useState('nick0cave');
   return (
     <nav className="cb-sidebar" aria-label="Fleet sidebar">
-      <div className="sec-h" role="heading" aria-level={3}>FLEET <span className="count">{D2.keepers.length}</span></div>
+      <SectionHeading title="FLEET" count={D2.keepers.length} />
       <div role="list" aria-label="Keepers">
         {D2.keepers.map(k => (
           <div key={k.id}
@@ -32,7 +32,7 @@ function SidebarFleet() {
           </div>
         ))}
       </div>
-      <div className="sec-h" role="heading" aria-level={3} style={{marginTop:4}}>GOALS <span className="count">{D2.goals.length}</span></div>
+      <SectionHeading title="GOALS" count={D2.goals.length} style={{marginTop:4}} />
       <div role="list" aria-label="Goals">
         {D2.goals.map(g => (
           <div key={g.id}
@@ -59,7 +59,7 @@ function SidebarGrouped() {
   const [sel, setSel] = useState('nick0cave');
   return (
     <nav className="cb-sidebar" aria-label="Fleet sidebar (grouped)">
-      <div className="sec-h" role="heading" aria-level={3}>ACTIVE <span className="count">{active.length}</span></div>
+      <SectionHeading title="ACTIVE" count={active.length} />
       <div role="list" aria-label="Active keepers">
         {active.map(k => (
           <div key={k.id}
@@ -76,7 +76,7 @@ function SidebarGrouped() {
           </div>
         ))}
       </div>
-      <div className="sec-h" role="heading" aria-level={3}>STANDBY <span className="count">{other.length}</span></div>
+      <SectionHeading title="STANDBY" count={other.length} />
       <div role="list" aria-label="Standby keepers">
         {other.map(k => (
           <div key={k.id} role="listitem" aria-label={`${k.id} · ${k.status}`} className="row idle">
@@ -94,7 +94,7 @@ function SidebarIcons() {
   const [sel, setSel] = useState('nick0cave');
   return (
     <nav className="cb-sidebar icons" aria-label="Fleet sidebar (icons)">
-      <div className="sec-h" role="heading" aria-level={3}>FLEET <span className="count">{D2.keepers.length}</span></div>
+      <SectionHeading title="FLEET" count={D2.keepers.length} />
       <div role="list" aria-label="Keepers">
         {D2.keepers.map(k => (
           <div key={k.id}
@@ -346,7 +346,7 @@ function RailActivity() {
   return (
     <aside className="cb-rail" aria-label="Activity rail">
       <div className="sec">
-        <div className="sec-h" role="heading" aria-level={3}>ACTIVITY <span className="right" aria-hidden="true">11 · 60s</span></div>
+        <SectionHeading title="ACTIVITY" right="11 · 60s" />
         <div className="body" role="log" aria-live="polite" aria-label="Recent fleet events" style={{maxHeight:320, overflow:'auto'}}>
           {D2.events.map((e, i) => (
             <div key={i}
@@ -371,7 +371,7 @@ function RailCascade() {
   return (
     <aside className="cb-rail" aria-label="Cascade rail">
       <div className="sec">
-        <div className="sec-h" role="heading" aria-level={3}>CASCADE <span className="right" aria-hidden="true">cascade-3f19</span></div>
+        <SectionHeading title="CASCADE" right="cascade-3f19" />
         <div className="cb-cascade" role="region" aria-label={`Cascade trace cascade-3f19 · hit at step 2 · total ${D2.cascade.total_ms}ms`}>
           <span className="id" aria-hidden="true">trace · hit @step=2</span>
           <ol aria-label="Cascade steps" style={{listStyle:'none', margin:0, padding:0}}>
@@ -389,7 +389,7 @@ function RailCascade() {
         </div>
       </div>
       <div className="sec">
-        <div className="sec-h" role="heading" aria-level={3}>RECENT <span className="right" aria-hidden="true">3</span></div>
+        <SectionHeading title="RECENT" right="3" />
         <div className="body" role="log" aria-live="polite" aria-label="Recent events">
           {D2.events.slice(0,3).map((e,i) => (
             <div key={i}

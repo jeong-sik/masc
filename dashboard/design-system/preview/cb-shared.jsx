@@ -56,6 +56,42 @@ function Pill({ kind, children }) {
 // Variant caption that sits above an artboard
 function Vhead({ children }) { return <div className="cb-vhead">{children}</div>; }
 
+// Section heading — replaces inline `sec-h` / `sec-title` divs.
+// `variant` selects the className ('h' → .sec-h, 'title' → .sec-title).
+// `title` + `count` + `right` cover the common structured cases; `children`
+// overrides them for ad-hoc markup. `id` enables aria-labelledby cross-refs.
+function SectionHeading({
+  variant = 'h',
+  level = 3,
+  id,
+  title,
+  count,
+  right,
+  className,
+  style,
+  children,
+}) {
+  const base = variant === 'title' ? 'sec-title' : 'sec-h';
+  const cls = base + (className ? ' ' + className : '');
+  return (
+    <div
+      className={cls}
+      role="heading"
+      aria-level={level}
+      {...(id ? { id } : {})}
+      {...(style ? { style } : {})}
+    >
+      {children ?? (
+        <>
+          {title}
+          {count != null && <> <span className="count">{count}</span></>}
+          {right != null && <> <span className="right" aria-hidden="true">{right}</span></>}
+        </>
+      )}
+    </div>
+  );
+}
+
 // Utility — get keeper color var name from id
 function kClass(id) {
   return ({
@@ -121,4 +157,4 @@ function useTyping(strings, cps = 18) {
   return text;
 }
 
-Object.assign(window, { Dot, Spark, Heartbeat, Chip, Pill, Vhead, kClass, useTyping, getTheme, setTheme });
+Object.assign(window, { Dot, Spark, Heartbeat, Chip, Pill, Vhead, SectionHeading, kClass, useTyping, getTheme, setTheme });

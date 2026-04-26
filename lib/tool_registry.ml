@@ -26,16 +26,16 @@ let string_of_source = function
 
 (** Per-tool call statistics *)
 type call_stats = {
-  call_count : int Atomic.t;
-  success_count : int Atomic.t;
-  failure_count : int Atomic.t;
-  last_called_at : float Atomic.t;  (** Unix timestamp, 0.0 = never *)
-  total_duration_ms : int Atomic.t;
-  external_mcp_count : int Atomic.t;
-  keeper_internal_count : int Atomic.t;
-  inline_dispatch_count : int Atomic.t;
-  deprecated_alias_count : int Atomic.t;
-  last_assignment_id : string option Atomic.t;
+  call_count : int;
+  success_count : int;
+  failure_count : int;
+  last_called_at : float;  (** Unix timestamp, 0.0 = never *)
+  total_duration_ms : int;
+  external_mcp_count : int;
+  keeper_internal_count : int;
+  inline_dispatch_count : int;
+  deprecated_alias_count : int;
+  last_assignment_id : string option;
 }
 
 (** Global registry — process-lifetime. Protected by [registry_mu] against
@@ -48,11 +48,103 @@ type call_stats = {
     this module. The mutex makes the contract explicit so the invariant
     survives future code changes (e.g. a yielding telemetry callback) and
     any future cross-domain use. *)
-let registry : (string, call_stats) Hashtbl.t = Hashtbl.create 128
+module StringMap = Map.Make(String)
 
-let registry_mu = Eio.Mutex.create ()
-let with_registry_rw f = Eio_guard.with_mutex registry_mu f
-let with_registry_ro f = Eio_guard.with_mutex_ro registry_mu f
+type msg =
+  | Record_call of { source: call_source; assignment_id: string option; tool_name: string; success: bool; duration_ms: int; timestamp: float }
+  | Get_stats of (string * call_stats) list Eio.Promise.u
+  | Get_unused_since of float * string list Eio.Promise.u
+  | Get_never_called of string list * string list Eio.Promise.u
+  | Total_calls of int Eio.Promise.u
+  | Distinct_tools_called of int Eio.Promise.u
+  | Warm_up of Telemetry_eio.tool_usage_summary * int Eio.Promise.u
+  | Reset of unit Eio.Promise.u
+
+let mailbox = Eio.Stream.create max_int
+
+let process_msg state msg =
+  match msg with
+  | Record_call { source; assignment_id; tool_name; success; duration_ms; timestamp } ->
+      let stats = match StringMap.find_opt tool_name state with
+        | Some s -> s
+        | None -> {
+            call_count = 0;
+            success_count = 0;
+            failure_count = 0;
+            last_called_at = 0.0;
+            total_duration_ms = 0;
+            external_mcp_count = 0;
+            keeper_internal_count = 0;
+            inline_dispatch_count = 0;
+            deprecated_alias_count = 0;
+            last_assignment_id = None;
+          }
+      in
+      let stats = {
+        call_count = stats.call_count + 1;
+        external_mcp_count = (if source = External_mcp then stats.external_mcp_count + 1 else stats.external_mcp_count);
+        keeper_internal_count = (if source = Keeper_internal then stats.keeper_internal_count + 1 else stats.keeper_internal_count);
+        inline_dispatch_count = (if source = Inline_dispatch then stats.inline_dispatch_count + 1 else stats.inline_dispatch_count);
+        deprecated_alias_count = (if source = Deprecated_alias then stats.deprecated_alias_count + 1 else stats.deprecated_alias_count);
+        success_count = (if success then stats.success_count + 1 else stats.success_count);
+        failure_count = (if not success then stats.failure_count + 1 else stats.failure_count);
+        last_called_at = timestamp;
+        total_duration_ms = stats.total_duration_ms + duration_ms;
+        last_assignment_id = (match assignment_id with Some _ as aid -> aid | None -> stats.last_assignment_id);
+      } in
+      StringMap.add tool_name stats state
+  | Get_stats p ->
+      let lst = StringMap.fold (fun k v acc -> (k, v) :: acc) state [] in
+      let sorted = List.sort (fun (_, a) (_, b) -> compare b.call_count a.call_count) lst in
+      Eio.Promise.resolve p sorted;
+      state
+  | Get_unused_since (cutoff, p) ->
+      let lst = StringMap.fold (fun k v acc -> if v.last_called_at < cutoff then k :: acc else acc) state [] in
+      Eio.Promise.resolve p (List.sort String.compare lst);
+      state
+  | Get_never_called (all, p) ->
+      let lst = List.filter (fun name -> not (StringMap.mem name state)) all in
+      Eio.Promise.resolve p (List.sort String.compare lst);
+      state
+  | Total_calls p ->
+      let total = StringMap.fold (fun _ v acc -> acc + v.call_count) state 0 in
+      Eio.Promise.resolve p total;
+      state
+  | Distinct_tools_called p ->
+      Eio.Promise.resolve p (StringMap.cardinal state);
+      state
+  | Warm_up (summary, p) ->
+      let state', count = Hashtbl.fold (fun tool_name (s : Telemetry_eio.tool_usage_stats) (acc_st, acc_count) ->
+        if not (StringMap.mem tool_name acc_st) then
+          let new_st = {
+            call_count = s.count;
+            success_count = s.success_count;
+            failure_count = s.failure_count;
+            last_called_at = (match s.last_used_at with Some t -> t | None -> 0.0);
+            total_duration_ms = 0;
+            external_mcp_count = 0;
+            keeper_internal_count = 0;
+            inline_dispatch_count = 0;
+            deprecated_alias_count = 0;
+            last_assignment_id = None;
+          } in
+          (StringMap.add tool_name new_st acc_st, acc_count + 1)
+        else (acc_st, acc_count)
+      ) summary.stats_by_tool (state, 0) in
+      Eio.Promise.resolve p count;
+      state'
+  | Reset p ->
+      Eio.Promise.resolve p ();
+      StringMap.empty
+
+let start_actor_if_needed ~sw =
+  Eio.Fiber.fork ~sw (fun () ->
+    let rec loop state =
+      let msg = Eio.Stream.take mailbox in
+      loop (process_msg state msg)
+    in
+    loop StringMap.empty
+  )
 (** Use raw_all_tool_schemas to include hidden/internal tools.
     Previously used Config.all_tool_schemas (public-filtered), which caused
     hidden tools to be structurally undercounted in telemetry. *)
@@ -74,46 +166,10 @@ let is_known_tool tool_name =
     for the same [tool_name] and both install a fresh [call_stats] record
     (which would drop one increment). Re-entry is not possible because
     the body performs only non-yielding computation. *)
-let get_or_create_stats tool_name =
-  match with_registry_ro (fun () -> Hashtbl.find_opt registry tool_name) with
-  | Some s -> s
-  | None ->
-      with_registry_rw (fun () ->
-        match Hashtbl.find_opt registry tool_name with
-        | Some s -> s
-        | None ->
-            let s = {
-              call_count = Atomic.make 0;
-              success_count = Atomic.make 0;
-              failure_count = Atomic.make 0;
-              last_called_at = Atomic.make 0.0;
-              total_duration_ms = Atomic.make 0;
-              external_mcp_count = Atomic.make 0;
-              keeper_internal_count = Atomic.make 0;
-              inline_dispatch_count = Atomic.make 0;
-              deprecated_alias_count = Atomic.make 0;
-              last_assignment_id = Atomic.make None;
-            } in
-            Hashtbl.replace registry tool_name s;
-            s)
+
 
 let record_call ?(source = External_mcp) ?assignment_id ~tool_name ~success ~duration_ms () =
-  let stats = get_or_create_stats tool_name in
-  Atomic.incr stats.call_count;
-  (match source with
-   | External_mcp -> Atomic.incr stats.external_mcp_count
-   | Keeper_internal -> Atomic.incr stats.keeper_internal_count
-   | Inline_dispatch -> Atomic.incr stats.inline_dispatch_count
-   | Deprecated_alias -> Atomic.incr stats.deprecated_alias_count);
-  if success then
-    Atomic.incr stats.success_count
-  else
-    Atomic.incr stats.failure_count;
-  Atomic.set stats.last_called_at (Time_compat.now ());
-  ignore (Atomic.fetch_and_add stats.total_duration_ms duration_ms);
-  (match assignment_id with
-   | Some _ as aid -> Atomic.set stats.last_assignment_id aid
-   | None -> ())
+  Eio.Stream.add mailbox (Record_call { source; assignment_id; tool_name; success; duration_ms; timestamp = Time_compat.now () })
 
 let record_call_if_known ?(source = External_mcp) ?assignment_id ~tool_name ~success ~duration_ms () =
   if is_known_tool tool_name then
@@ -129,9 +185,9 @@ let record_call_if_known ?(source = External_mcp) ?assignment_id ~tool_name ~suc
     transactional guarantee across fields, only that the hashtable itself
     is not corrupted). *)
 let get_stats () : (string * call_stats) list =
-  with_registry_ro (fun () ->
-    Hashtbl.fold (fun name stats acc -> (name, stats) :: acc) registry [])
-  |> List.sort (fun (_, a) (_, b) -> compare (Atomic.get b.call_count) (Atomic.get a.call_count))
+  let p, r = Eio.Promise.create () in
+  Eio.Stream.add mailbox (Get_stats r);
+  Eio.Promise.await p
 
 (** Get top N tools by call count *)
 let get_top_n n : (string * call_stats) list =
@@ -147,53 +203,51 @@ let get_top_n n : (string * call_stats) list =
     Only includes tools that are registered (have been called at least once)
     but not recently. *)
 let get_unused_since (cutoff : float) : string list =
-  with_registry_ro (fun () ->
-    Hashtbl.fold
-      (fun name stats acc ->
-        if Atomic.get stats.last_called_at < cutoff then name :: acc else acc)
-      registry [])
-  |> List.sort String.compare
+  let p, r = Eio.Promise.create () in
+  Eio.Stream.add mailbox (Get_unused_since (cutoff, r));
+  Eio.Promise.await p
 
 (** Get tools that have never been called (not in registry at all)
     compared against a list of all known tool names *)
 let get_never_called (all_tool_names : string list) : string list =
-  with_registry_ro (fun () ->
-    List.filter
-      (fun name -> not (Hashtbl.mem registry name))
-      all_tool_names)
-  |> List.sort String.compare
+  let p, r = Eio.Promise.create () in
+  Eio.Stream.add mailbox (Get_never_called (all_tool_names, r));
+  Eio.Promise.await p
 
 (** Total calls across all tools *)
 let total_calls () : int =
-  with_registry_ro (fun () ->
-    Hashtbl.fold (fun _ stats acc -> acc + Atomic.get stats.call_count) registry 0)
+  let p, r = Eio.Promise.create () in
+  Eio.Stream.add mailbox (Total_calls r);
+  Eio.Promise.await p
 
 (** Number of distinct tools that have been called *)
 let distinct_tools_called () : int =
-  with_registry_ro (fun () -> Hashtbl.length registry)
+  let p, r = Eio.Promise.create () in
+  Eio.Stream.add mailbox (Distinct_tools_called r);
+  Eio.Promise.await p
 
 (** Convert call_stats to JSON *)
 let stats_to_json (name, (stats : call_stats)) : Yojson.Safe.t =
-  let calls = Atomic.get stats.call_count in
+  let calls = stats.call_count in
   `Assoc [
     ("name", `String name);
     ("call_count", `Int calls);
-    ("success_count", `Int (Atomic.get stats.success_count));
-    ("failure_count", `Int (Atomic.get stats.failure_count));
+    ("success_count", `Int (stats.success_count));
+    ("failure_count", `Int (stats.failure_count));
     ("avg_duration_ms",
      `Int (if calls > 0
-           then (Atomic.get stats.total_duration_ms) / calls
+           then (stats.total_duration_ms) / calls
            else 0));
-    ("last_called_at", `Float (Atomic.get stats.last_called_at));
+    ("last_called_at", `Float (stats.last_called_at));
     ("last_assignment_id",
-     match Atomic.get stats.last_assignment_id with
+     match stats.last_assignment_id with
      | Some aid -> `String aid
      | None -> `Null);
     ("by_source", `Assoc [
-       ("external_mcp", `Int (Atomic.get stats.external_mcp_count));
-       ("keeper_internal", `Int (Atomic.get stats.keeper_internal_count));
-       ("inline_dispatch", `Int (Atomic.get stats.inline_dispatch_count));
-       ("deprecated_alias", `Int (Atomic.get stats.deprecated_alias_count));
+       ("external_mcp", `Int (stats.external_mcp_count));
+       ("keeper_internal", `Int (stats.keeper_internal_count));
+       ("inline_dispatch", `Int (stats.inline_dispatch_count));
+       ("deprecated_alias", `Int (stats.deprecated_alias_count));
      ]);
   ]
 
@@ -224,30 +278,12 @@ let stats_report ~top_n ~all_tool_names : Yojson.Safe.t =
     runtime is up, so this stays safe when [warm_up] runs during early
     bootstrap. *)
 let warm_up (summary : Telemetry_eio.tool_usage_summary) : int =
-  let count = ref 0 in
-  with_registry_rw (fun () ->
-    Hashtbl.iter
-      (fun tool_name (stats : Telemetry_eio.tool_usage_stats) ->
-        if not (Hashtbl.mem registry tool_name) then (
-          Hashtbl.replace registry tool_name
-            {
-              call_count = Atomic.make stats.count;
-              success_count = Atomic.make stats.success_count;
-              failure_count = Atomic.make stats.failure_count;
-              last_called_at =
-                Atomic.make (match stats.last_used_at with
-                | Some t -> t
-                | None -> 0.0);
-              total_duration_ms = Atomic.make 0;
-              external_mcp_count = Atomic.make 0;
-              keeper_internal_count = Atomic.make 0;
-              inline_dispatch_count = Atomic.make 0;
-              deprecated_alias_count = Atomic.make 0;
-              last_assignment_id = Atomic.make None;
-            };
-          incr count))
-      summary.stats_by_tool);
-  !count
+  let p, r = Eio.Promise.create () in
+  Eio.Stream.add mailbox (Warm_up (summary, r));
+  Eio.Promise.await p
 
 (** Reset all counters (for testing) *)
-let reset () = with_registry_rw (fun () -> Hashtbl.clear registry)
+let reset () =
+  let p, r = Eio.Promise.create () in
+  Eio.Stream.add mailbox (Reset r);
+  Eio.Promise.await p

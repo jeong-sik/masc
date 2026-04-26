@@ -60,6 +60,7 @@ let format_exhausted_error last_err =
     | Some (Llm_provider.Http_client.AcceptRejected { reason }) -> reason
     | Some (Llm_provider.Http_client.CliTransportRequired { kind }) ->
       Printf.sprintf "%s provider requires a CLI transport" kind
+    | Some (Llm_provider.Http_client.ProviderTerminal { message; _ }) -> message
     | Some (Llm_provider.Http_client.NetworkError { message; _ }) -> message
     | Some (Llm_provider.Http_client.ProviderTerminal _ as err) ->
       (* Mirror the rendering shape used elsewhere on main HEAD

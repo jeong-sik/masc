@@ -37,8 +37,13 @@ let create_state ?test_mode:_ ~base_path () =
   Mcp_server.create_state ~base_path
 
 let create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
-  Mcp_server.create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock
+  let state = Mcp_server.create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock
     ~net:(net :> Eio_context.eio_net) ~base_path
+  in
+  Session.start_loop state.session_registry ~sw;
+  Tool_registry.start_actor_if_needed ~sw;
+  Oas_worker_cascade.start_actor_if_needed ~sw;
+  state
 
 (** {1 Re-exported Mcp_server Functions} *)
 

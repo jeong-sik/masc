@@ -324,7 +324,7 @@ function KeeperRuntimePanel({ runtime }: { runtime: KeeperRuntimeResolved | null
   const envCount = KEEPER_RUNTIME_ROWS.filter(r => runtime[r.key]?.source === 'env').length
 
   return html`
-    <div class="mt-4 rounded border border-[var(--card-border)] bg-[var(--white-3)] px-4 py-4" role="group" aria-label="keeper runtime limits">
+    <div class="mt-4 rounded border border-[var(--card-border)] bg-[var(--white-3)] px-4 py-4" role="group" aria-label="키퍼 런타임 제한">
       <div class="mb-3 flex flex-wrap items-center gap-2">
         <div class="text-2xs uppercase tracking-1 text-[var(--text-muted)]">keeper runtime limits</div>
         ${tomlCount > 0 ? html`
@@ -391,7 +391,7 @@ function RuntimeProbePanel() {
   const signal = assessment?.signal ?? null
 
   return html`
-    <div class="mt-4 rounded border border-[var(--card-border)] bg-[var(--white-3)] px-4 py-4" role="group" aria-label="ollama warm / kv probe">
+    <div class="mt-4 rounded border border-[var(--card-border)] bg-[var(--white-3)] px-4 py-4" role="group" aria-label="Ollama 웜업 / KV 프로브">
       <div class="mb-3 flex flex-wrap items-center gap-2">
         <div class="text-2xs uppercase tracking-1 text-[var(--text-muted)]">ollama warm / kv probe</div>
         <${StatusChip} tone=${probeTone(signal, probe?.probe_ok)}>${probeSignalLabel(signal)}<//>
@@ -427,29 +427,29 @@ function RuntimeProbePanel() {
       ${probe
         ? html`
             <div class="grid gap-3 md:grid-cols-2">
-              <${RuntimeMetaRow} label="effective model" value=${probe.effective_model ?? '--'} />
-              <${RuntimeMetaRow} label="server" value=${probe.server_url ?? '--'} />
-              <${RuntimeMetaRow} label="loaded before/after" value=${`${fmtBoolean(probe.model_loaded_before_probe)} / ${fmtBoolean(probe.model_loaded_after_probe)}`} />
+              <${RuntimeMetaRow} label="실효 모델" value=${probe.effective_model ?? '--'} />
+              <${RuntimeMetaRow} label="서버" value=${probe.server_url ?? '--'} />
+              <${RuntimeMetaRow} label="로드 전/후" value=${`${fmtBoolean(probe.model_loaded_before_probe)} / ${fmtBoolean(probe.model_loaded_after_probe)}`} />
               <${RuntimeMetaRow}
-                label="first run load"
+                label="최초 실행 로드"
                 value=${`${fmtNumber(firstRun?.load_duration_ms, 1)} ms`}
               />
               <${RuntimeMetaRow}
-                label="prompt tok/s"
+                label="프롬프트 tok/s"
                 value=${`${fmtNumber(firstRun?.prompt_tokens_per_second, 1)} tok/s`}
               />
               <${RuntimeMetaRow}
-                label="generation tok/s"
+                label="생성 tok/s"
                 value=${`${fmtNumber(firstRun?.generation_tokens_per_second, 1)} tok/s`}
               />
               <${RuntimeMetaRow}
-                label="prompt eval delta"
+                label="프롬프트 평가 차이"
                 value=${assessment?.prompt_eval_duration_reduction_ratio != null
                   ? `${fmtNumber(assessment.prompt_eval_duration_reduction_ratio * 100, 1)}%`
                   : '--'}
               />
               <${RuntimeMetaRow}
-                label="loaded models"
+                label="로드된 모델"
                 value=${String(probe.loaded_models_after?.length ?? probe.loaded_models_before?.length ?? 0)}
               />
             </div>
@@ -532,38 +532,38 @@ export function ConfigResolutionPanel({
 
               <div class="grid gap-3 md:grid-cols-2">
                 <${ConfigRow}
-                  label="config root"
+                  label="설정 루트"
                   item=${resolution.config_root}
                   rootPath=${rootPath}
                   rootSource=${rootSource}
                   isRoot=${true}
                 />
                 <${ConfigRow}
-                  label="cascade authoring"
+                  label="캐스케이드 저작"
                   item=${resolution.cascade_authoring}
                   rootPath=${rootPath}
                   rootSource=${rootSource}
                 />
                 <${ConfigRow}
-                  label="cascade runtime"
+                  label="캐스케이드 런타임"
                   item=${resolution.cascade}
                   rootPath=${rootPath}
                   rootSource=${rootSource}
                 />
                 <${ConfigRow}
-                  label="prompts"
+                  label="프롬프트"
                   item=${resolution.prompts}
                   rootPath=${rootPath}
                   rootSource=${rootSource}
                 />
                 <${ConfigRow}
-                  label="keepers"
+                  label="키퍼"
                   item=${resolution.keepers}
                   rootPath=${rootPath}
                   rootSource=${rootSource}
                 />
                 <${ConfigRow}
-                  label="personas"
+                  label="페르소나"
                   item=${resolution.personas}
                   rootPath=${rootPath}
                   rootSource=${rootSource}
@@ -578,7 +578,7 @@ export function ConfigResolutionPanel({
             <div>
               <div class="mb-3 flex flex-wrap items-center gap-2">
                 <${StatusChip} tone=${toneClass(runtimeResolution.status)}>${runtimeResolution.status}<//>
-                <span class="text-xs text-[var(--text-muted)]">runtime path resolution</span>
+                <span class="text-xs text-[var(--text-muted)]">런타임 경로 해석</span>
                 ${runtimeResolution.source_mismatch
                   ? html`
                       <${StatusChip} tone="bad">source mismatch<//>
@@ -587,25 +587,25 @@ export function ConfigResolutionPanel({
               </div>
 
               <div class="mb-4">
-                <${WarningBlock} title="runtime warnings" warnings=${runtimeResolution.warnings} />
+                <${WarningBlock} title="런타임 경고" warnings=${runtimeResolution.warnings} />
               </div>
 
               <div class="grid gap-3 md:grid-cols-2">
-                <${ConfigRow} label="base path" item=${runtimeResolution.base_path} />
-                <${ConfigRow} label="workspace path" item=${runtimeResolution.workspace_path} />
-                <${ConfigRow} label="resolved base path" item=${runtimeResolution.resolved_base_path} />
-                <${ConfigRow} label="data root" item=${runtimeResolution.data_root} />
-                <${ConfigRow} label="prompt markdown dir" item=${runtimeResolution.prompt_markdown_dir} />
+                <${ConfigRow} label="베이스 경로" item=${runtimeResolution.base_path} />
+                <${ConfigRow} label="워크스페이스 경로" item=${runtimeResolution.workspace_path} />
+                <${ConfigRow} label="해석된 베이스 경로" item=${runtimeResolution.resolved_base_path} />
+                <${ConfigRow} label="데이터 루트" item=${runtimeResolution.data_root} />
+                <${ConfigRow} label="프롬프트 마크다운 디렉터리" item=${runtimeResolution.prompt_markdown_dir} />
               </div>
 
               <div class="mt-4 grid gap-3 md:grid-cols-2">
-                <${RuntimeMetaRow} label="workspace head" value=${runtimeResolution.workspace_git_commit ?? '--'} />
-                <${RuntimeMetaRow} label="resolved base head" value=${runtimeResolution.resolved_base_git_commit ?? '--'} />
-                <${RuntimeMetaRow} label="runtime build" value=${runtimeResolution.build.commit ?? runtimeResolution.build.release_version} />
-                <${RuntimeMetaRow} label="started at" value=${runtimeResolution.build.started_at} />
+                <${RuntimeMetaRow} label="워크스페이스 HEAD" value=${runtimeResolution.workspace_git_commit ?? '--'} />
+                <${RuntimeMetaRow} label="해석된 베이스 HEAD" value=${runtimeResolution.resolved_base_git_commit ?? '--'} />
+                <${RuntimeMetaRow} label="런타임 빌드" value=${runtimeResolution.build.commit ?? runtimeResolution.build.release_version} />
+                <${RuntimeMetaRow} label="시작 시각" value=${runtimeResolution.build.started_at} />
               </div>
 
-              <div class="mt-4" role="group" aria-label="runtime diagnostics">
+              <div class="mt-4" role="group" aria-label="런타임 진단">
                 <div class="mb-2 flex items-center justify-between gap-2">
                   <div class="text-2xs uppercase tracking-1 text-[var(--text-muted)]">
                     recent diagnostics

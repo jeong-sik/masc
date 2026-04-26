@@ -119,7 +119,7 @@ export function LabInspector() {
             <${InspectorTabButton} id="overview" label="개요" />
             <${InspectorTabButton} id="features" label="피처 플래그" />
             <${InspectorTabButton} id="config" label="서버 설정" />
-            <${InspectorTabButton} id="doctor" label="Doctor" />
+            <${InspectorTabButton} id="doctor" label="진단" />
           </div>
         </div>
       <//>

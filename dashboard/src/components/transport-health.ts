@@ -419,23 +419,23 @@ export function TransportHealthPanel() {
         </summary>
         <div class="p-4">
           <div class="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-3">
-            <${SectionCard} title="SSE" status=${sseStatus} eyebrow=${`${data.sse.sessions_total} live`}>
-              <${MetricRow} label="Observer" value=${data.sse.sessions_observer} />
-              <${MetricRow} label="Coordinator" value=${data.sse.sessions_coordinator} />
-              <${MetricRow} label="External Fanout" value=${data.sse.external_subscribers} />
-              <${MetricRow} label="Queue" value=${data.sse.queue_max_depth} sub=${`max / avg ${formatFloat(data.sse.queue_avg_depth)}`} />
-              <${MetricRow} label="Relay Queue" value=${data.sse.relay_queue_depth} />
-              <${MetricRow} label="Relay Retries" value=${data.sse.relay_retry_total} sub=${`append ${data.sse.relay_retry_append} · broadcast ${data.sse.relay_retry_broadcast}`} />
-              <${MetricRow} label="Relay Drops" value=${data.sse.relay_drop_total} sub=${`queue ${data.sse.relay_drop_queue} · append ${data.sse.relay_drop_append} · broadcast ${data.sse.relay_drop_broadcast}`} />
-              <${MetricRow} label="Broadcast Avg" value=${formatLatency(data.sse.broadcast_avg_seconds)} sub=${`${data.sse.broadcast_count} events`} />
+            <${SectionCard} title="SSE" status=${sseStatus} eyebrow=${`${data.sse.sessions_total} 연결됨`}>
+              <${MetricRow} label="옵저버" value=${data.sse.sessions_observer} />
+              <${MetricRow} label="코디네이터" value=${data.sse.sessions_coordinator} />
+              <${MetricRow} label="외부 팬아웃" value=${data.sse.external_subscribers} />
+              <${MetricRow} label="큐" value=${data.sse.queue_max_depth} sub=${`최대 / 평균 ${formatFloat(data.sse.queue_avg_depth)}`} />
+              <${MetricRow} label="릴레이 큐" value=${data.sse.relay_queue_depth} />
+              <${MetricRow} label="릴레이 재시도" value=${data.sse.relay_retry_total} sub=${`추가 ${data.sse.relay_retry_append} · 브로드캐스트 ${data.sse.relay_retry_broadcast}`} />
+              <${MetricRow} label="릴레이 손실" value=${data.sse.relay_drop_total} sub=${`큐 ${data.sse.relay_drop_queue} · 추가 ${data.sse.relay_drop_append} · 브로드캐스트 ${data.sse.relay_drop_broadcast}`} />
+              <${MetricRow} label="브로드캐스트 평균" value=${formatLatency(data.sse.broadcast_avg_seconds)} sub=${`${data.sse.broadcast_count} 이벤트`} />
             <//>
 
             <${SectionCard} title="gRPC" status=${grpcStatus} eyebrow=${transportEyebrow(data.grpc.configured, data.grpc.listening, data.grpc.port)}>
-              <${MetricRow} label="Listener" value=${data.grpc.listening ? 'live' : 'down'} />
-              <${MetricRow} label="Subscribers" value=${data.grpc.subscribers} />
-              <${MetricRow} label="Active Streams" value=${data.grpc.active_streams} />
-              <${MetricRow} label="Heartbeat Avg" value=${formatLatency(data.grpc.heartbeat_avg_seconds)} />
-              <${MetricRow} label="Events Delivered" value=${data.grpc.events_delivered} />
+              <${MetricRow} label="리스너" value=${data.grpc.listening ? '실행 중' : '중단'} />
+              <${MetricRow} label="구독자" value=${data.grpc.subscribers} />
+              <${MetricRow} label="활성 스트림" value=${data.grpc.active_streams} />
+              <${MetricRow} label="하트비트 평균" value=${formatLatency(data.grpc.heartbeat_avg_seconds)} />
+              <${MetricRow} label="전달 이벤트" value=${data.grpc.events_delivered} />
             <//>
 
             <${SectionCard} title="WebSocket" status=${wsStatus} eyebrow=${transportEyebrow(data.websocket.configured, data.websocket.listening, data.websocket.port)}>
@@ -457,7 +457,7 @@ export function TransportHealthPanel() {
               <${MetricRow} label="POST" value=${data.streamable_http.endpoint} />
               <${MetricRow} label="옵저버 스트림" value=${data.streamable_http.observer_stream} />
               <${MetricRow} label="오퍼레이터 표면" value=${data.streamable_http.operator_endpoint} />
-              <${MetricRow} label="레거시" value=${data.streamable_http.legacy_sse_endpoint} sub=${'deprecated'} />
+              <${MetricRow} label="레거시" value=${data.streamable_http.legacy_sse_endpoint} sub=${'사용 중단'} />
             <//>
 
             <${SectionCard} title="에이전트 풀" status=${clusterStatus} eyebrow=${clusterEyebrow}>
@@ -466,7 +466,7 @@ export function TransportHealthPanel() {
               <${MetricRow} label="활성 작업" value=${formatMetricValue(data.cluster.active_operations)} />
               <${MetricRow} label="부실 유닛" value=${formatMetricValue(data.cluster.stale_units)} />
               <${MetricRow} label="부실 에이전트" value=${data.agent_health.stale_total} />
-              <${MetricRow} label="Lifecycle Rejects" value=${data.agent_health.lifecycle_dispatch_rejections_total} />
+              <${MetricRow} label="수명주기 거부" value=${data.agent_health.lifecycle_dispatch_rejections_total} />
             <//>
           </div>
         </div>

@@ -92,15 +92,15 @@ export function DetailPane() {
           <span class="font-mono text-text-strong"><${TimeAgo} timestamp=${selection.ts} mode="both" /></span>
         </div>
         ${selection.bucketCount > 1 ? html`
-          <${MetaRow} label="bucket" value=${`${selection.bucketCount} events`} />
+          <${MetaRow} label="버킷" value=${`${selection.bucketCount} 이벤트`} />
         ` : null}
-        ${source ? html`<${MetaRow} label="source" value=${source} />` : null}
-        ${keeper ? html`<${MetaRow} label="keeper" value=${keeper} />` : null}
+        ${source ? html`<${MetaRow} label="출처" value=${source} />` : null}
+        ${keeper ? html`<${MetaRow} label="키퍼" value=${keeper} />` : null}
         ${typeof selection.entry.session_id === 'string' ? html`
-          <${MetaRow} label="session" value=${selection.entry.session_id} />
+          <${MetaRow} label="세션" value=${selection.entry.session_id} />
         ` : null}
         ${typeof selection.entry.operation_id === 'string' ? html`
-          <${MetaRow} label="operation" value=${selection.entry.operation_id} />
+          <${MetaRow} label="오퍼레이션" value=${selection.entry.operation_id} />
         ` : null}
       </div>
       <details class="border-t border-card-border">

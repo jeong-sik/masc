@@ -589,7 +589,7 @@ export function ToolAllowlistEditor({
           </label>
 
           <div class="flex flex-col gap-1">
-            <${SectionHeader} label="also allow" section="also_allow" listSig=${alsoAllowItems} />
+            <${SectionHeader} label="추가 허용" section="also_allow" listSig=${alsoAllowItems} />
             ${textInputSection.value === 'also_allow'
               ? html`
                 <textarea autoComplete="off"
@@ -612,7 +612,7 @@ export function ToolAllowlistEditor({
         `
         : html`
           <div class="flex flex-col gap-1">
-            <${SectionHeader} label="custom allowlist" section="custom" listSig=${customAllowItems} />
+            <${SectionHeader} label="커스텀 허용 목록" section="custom" listSig=${customAllowItems} />
 
             ${isCustomEmpty
               ? html`
@@ -657,7 +657,7 @@ export function ToolAllowlistEditor({
 
       <!-- Denylist -->
       <div class="flex flex-col gap-1">
-        <${SectionHeader} label="denylist" section="deny" listSig=${denyItems} />
+        <${SectionHeader} label="차단 목록" section="deny" listSig=${denyItems} />
         ${textInputSection.value === 'deny'
           ? html`
             <textarea autoComplete="off"

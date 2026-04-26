@@ -53,11 +53,36 @@ type metric = {
 let metrics : (string, metric) Hashtbl.t = Hashtbl.create 64
 let metrics_mutex = Stdlib.Mutex.create ()
 
+(* #10682 diagnostic: when EDEADLK fires (PTHREAD_MUTEX_ERRORCHECK
+   detects same-thread re-entry on OCaml 5), lock raises Sys_error with
+   message "Mutex.lock: Resource deadlock avoided". Without a backtrace,
+   the actual re-entrant call site is invisible because [with_lock] is
+   used by ~12 sites in this module and is reachable from every read
+   tool dispatch. We capture the raw backtrace at the point of failure
+   and stash it on a side-channel for the next render so the offending
+   site self-documents. The non-failing path is unchanged. *)
+let last_deadlock_backtrace : string option Atomic.t = Atomic.make None
+
 let with_lock f =
-  Stdlib.Mutex.lock metrics_mutex;
+  let bt0 = Printexc.get_callstack 64 in
+  (try Stdlib.Mutex.lock metrics_mutex
+   with Sys_error msg as exn ->
+     let trace = Printexc.raw_backtrace_to_string bt0 in
+     let dump =
+       Printf.sprintf "Prometheus.with_lock: %s\nCaller stack:\n%s"
+         msg trace
+     in
+     Atomic.set last_deadlock_backtrace (Some dump);
+     Printf.eprintf "[ERROR] [Prometheus] %s\n%!" dump;
+     raise exn);
   Fun.protect
     ~finally:(fun () -> Stdlib.Mutex.unlock metrics_mutex)
     f
+
+(** Read-only accessor for the most recent EDEADLK backtrace captured
+    by [with_lock]. Used by diagnostic dumps and tests. *)
+let last_deadlock_backtrace_for_test () =
+  Atomic.get last_deadlock_backtrace
 
 (** {1 Metric Registration} *)
 

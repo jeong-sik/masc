@@ -74,6 +74,11 @@ val metric_keeper_output_tokens : string
 val metric_keeper_cache_creation_tokens : string
 val metric_keeper_cache_read_tokens : string
 val metric_keeper_usage_anomalies : string
+
+(** #10530: keeper required-tool-contract violations.
+    Labels: keeper_name, kind \in \{passive,text_only\}. *)
+val metric_keeper_contract_violations : string
+
 val metric_keeper_metric_emit_dropped : string
 val metric_keeper_context_max_observed : string
 (** #9953: bucketed counter for observed [context_max] values.

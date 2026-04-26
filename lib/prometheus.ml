@@ -187,6 +187,12 @@ let metric_keeper_cache_read_tokens =
 let metric_keeper_usage_anomalies =
   "masc_keeper_usage_anomalies_total"
 
+(** #10530: keeper required-tool-contract violations (passive-only or
+    text-only turns rejected by the keeper agent loop).
+    Labels: keeper_name, kind \in \{passive,text_only\}. *)
+let metric_keeper_contract_violations =
+  "masc_keeper_contract_violations_total"
+
 (* #10047: [append_metrics_snapshot] failures in [keeper_turn.ml] and
    [keeper_unified_turn.ml] used to be log-only, masking state/metric
    divergence. Surface as a counter so dashboards can alert on silent
@@ -925,6 +931,9 @@ let init () =
     Counter;
   add metric_keeper_usage_anomalies
     "Keeper turns whose reported usage was marked untrusted (labels: keeper_name, model, reason)"
+    Counter;
+  add metric_keeper_contract_violations
+    "Keeper turns rejected for required-tool-contract violations (labels: keeper_name, kind={passive|text_only}). #10530."
     Counter;
   (* Tool schema budget gauges — set once at boot via
      [set_tool_schema_stats]. Covers #7483 Step 1. *)

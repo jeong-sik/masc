@@ -121,10 +121,10 @@ export const TRANSITION_FIELDS: Array<{ field: string; key: LaneKey }> = [
 ]
 
 export const INVARIANT_LABELS: Record<keyof KeeperCompositeInvariants, string> = {
-  phase_turn_alignment: 'Phase ⇔ Turn',
-  no_cascade_before_measurement: 'Cascade ordering',
-  compaction_atomicity: 'Compaction atomic',
-  event_priority_monotone: 'Event priority',
+  phase_turn_alignment: '단계 ⇔ 턴',
+  no_cascade_before_measurement: 'Cascade 순서',
+  compaction_atomicity: '압축 원자성',
+  event_priority_monotone: '이벤트 우선순위',
 }
 
 export const LANE_LABELS: Record<LaneKey, string> = {

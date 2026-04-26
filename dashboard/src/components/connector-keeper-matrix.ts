@@ -258,7 +258,7 @@ export function ConnectorKeeperMatrix({ matrix }: { matrix: MatrixData }) {
         : html`
             <div class="overflow-x-auto">
               <div class="grid gap-1 text-2xs" style=${gridCols} data-matrix-grid>
-                <div class="px-1 py-1 text-3xs uppercase tracking-4 text-[var(--color-fg-disabled)]">Keeper ↓ / Connector →</div>
+                <div class="px-1 py-1 text-3xs uppercase tracking-4 text-[var(--color-fg-disabled)]">키퍼 ↓ / 커넥터 →</div>
                 ${matrix.columns.map(colId => html`
                   <button
                     type="button"

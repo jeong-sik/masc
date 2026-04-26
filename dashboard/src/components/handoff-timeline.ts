@@ -284,7 +284,7 @@ export function HandoffTimeline({
     <section role="region" aria-label="A2A 이벤트 타임라인" class="rounded border border-card-border bg-card-bg p-4 flex flex-col gap-3">
       <header class="flex items-baseline justify-between">
         <div>
-          <h3 class="text-sm font-semibold text-text">A2A Event Timeline</h3>
+          <h3 class="text-sm font-semibold text-text">A2A 이벤트 타임라인</h3>
           <p class="text-2xs text-text-muted">
             OAS event_bus → SSE relay. 최근 ${Math.round(windowMs / 1000 / 60)}분, keeper당 row.
           </p>

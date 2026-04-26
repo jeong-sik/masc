@@ -285,7 +285,7 @@ export function KeeperDetailOverviewSidebar({
   activity: KeeperActivityDisplay
 }) {
   return html`
-    <aside class="order-2 xl:order-1 xl:sticky xl:top-[104px] xl:self-start">
+    <aside class="order-2 xl:order-1 xl:sticky xl:top-[104px] xl:self-start" aria-label="키퍼 프로필 요약">
       <div class="flex flex-col gap-4 rounded-[28px] border border-[var(--card-border)] bg-[rgba(9,14,24,0.84)] p-4 shadow-[0_20px_48px_rgba(0,0,0,0.18)]">
         <div>
           <div class="text-3xs font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">개요</div>

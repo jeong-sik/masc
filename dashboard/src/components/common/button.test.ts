@@ -103,4 +103,24 @@ describe('ActionButton', () => {
     render(html`<${ActionButton} class="extra-hook">x<//>`, container)
     expect(container.querySelector('button')!.className).toContain('extra-hook')
   })
+
+  it('pressed=true renders aria-pressed="true" for AT (toggle/tab semantic)', () => {
+    render(html`<${ActionButton} pressed=${true}>Filter<//>`, container)
+    expect(container.querySelector('button')!.getAttribute('aria-pressed')).toBe('true')
+  })
+
+  it('pressed=false renders aria-pressed="false" (button is in toggle group, currently inactive)', () => {
+    render(html`<${ActionButton} pressed=${false}>Filter<//>`, container)
+    expect(container.querySelector('button')!.getAttribute('aria-pressed')).toBe('false')
+  })
+
+  it('pressed unset does NOT render aria-pressed (plain action button)', () => {
+    render(html`<${ActionButton}>Save<//>`, container)
+    expect(container.querySelector('button')!.hasAttribute('aria-pressed')).toBe(false)
+  })
+
+  it('pressed=true with ghost variant overrides bg to accent-12 (visual selected state)', () => {
+    render(html`<${ActionButton} variant="ghost" pressed=${true}>Active<//>`, container)
+    expect(container.querySelector('button')!.className).toContain('bg-[var(--accent-12)]')
+  })
 })

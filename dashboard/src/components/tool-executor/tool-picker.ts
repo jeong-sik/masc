@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { TextInput } from '../common/input'
 import { CountBadge } from '../common/badge'
+import { ActionButton } from '../common/button'
 import { searchQuery, tierFilter, filteredTools, selectedTool, selectTool } from './tool-executor-state'
 import type { McpToolSchema } from '../../types/json-schema'
 
@@ -38,11 +39,12 @@ export function ToolPicker() {
         onInput=${(e: Event) => { searchQuery.value = (e.target as HTMLInputElement).value }} />
       <div class="flex gap-1">
         ${TIER_OPTIONS.map(opt => html`
-          <button type="button" class="text-3xs px-2 py-0.5 rounded transition-colors cursor-pointer
-            ${tierFilter.value === opt.value
-              ? 'bg-[var(--accent-12)] text-[var(--color-fg-secondary)] border border-[var(--accent-30)]'
-              : 'text-[var(--color-fg-muted)] hover:text-[var(--color-fg-primary)] border border-transparent hover:bg-[var(--white-6)]'}"
-            onClick=${() => { tierFilter.value = opt.value }}>${opt.label}</button>
+          <${ActionButton}
+            variant=${tierFilter.value === opt.value ? 'ghost' : 'subtle'}
+            size="sm"
+            pressed=${tierFilter.value === opt.value}
+            class="text-3xs"
+            onClick=${() => { tierFilter.value = opt.value }}>${opt.label}<//>
         `)}
         <span class="text-3xs text-[var(--color-fg-muted)] ml-auto self-center">${tools.length}개</span>
       </div>

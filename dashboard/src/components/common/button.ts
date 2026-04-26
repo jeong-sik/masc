@@ -29,6 +29,18 @@ const VARIANT_CLASSES: Record<ButtonVariant, string> = {
   subtle: 'border-none bg-transparent text-[var(--color-fg-muted)] hover:text-[var(--color-fg-primary)] hover:bg-[var(--white-6)]',
 }
 
+// Pressed-state overrides per variant. Applied when `pressed=true` so the
+// button visually conveys the "selected" / "active filter" / "active tab"
+// state that aria-pressed announces to assistive tech. Without this the
+// button can be aria-pressed but visually identical to unpressed, which
+// is a confusing mismatch.
+const PRESSED_CLASSES: Record<ButtonVariant, string> = {
+  primary: 'bg-[var(--accent-20)]',
+  ghost: 'bg-[var(--accent-12)] border-[var(--accent-30)] text-[var(--color-fg-secondary)]',
+  danger: 'bg-[var(--bad-20)]',
+  subtle: 'bg-[var(--white-6)] text-[var(--color-fg-primary)]',
+}
+
 const BASE = 'rounded cursor-pointer transition-all duration-200 font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-bg-surface)] active:scale-[0.97] active:opacity-90'
 
 interface ActionButtonProps {
@@ -46,6 +58,12 @@ interface ActionButtonProps {
       the UI; the busy role informs AT, the disabled flag handles
       pointer events. */
   ariaBusy?: boolean
+  /** Tab-like / toggle-like buttons that convey selection state.
+      When true, applies aria-pressed=true plus a variant-specific
+      visual override (see PRESSED_CLASSES). Use for tier filters,
+      view toggles, and similar selection patterns where multiple
+      buttons share a slot and one is "active". */
+  pressed?: boolean
   /** Hover tooltip text (native browser title). */
   title?: string
   /** Rendered as `data-testid` so E2E / unit tests can target this
@@ -65,6 +83,7 @@ export function ActionButton({
   block,
   ariaLabel,
   ariaBusy,
+  pressed,
   title,
   testId,
   onClick,
@@ -74,6 +93,7 @@ export function ActionButton({
     BASE,
     SIZE_CLASSES[size],
     VARIANT_CLASSES[variant],
+    pressed ? PRESSED_CLASSES[variant] : '',
     block ? 'w-full' : '',
     disabled ? 'opacity-50 pointer-events-none' : '',
     cx,
@@ -88,6 +108,7 @@ export function ActionButton({
       disabled=${disabled}
       aria-label=${ariaLabel}
       aria-busy=${ariaBusy === true ? 'true' : undefined}
+      aria-pressed=${pressed === true ? 'true' : pressed === false ? 'false' : undefined}
       title=${title}
       data-testid=${testId}
     >${children}</button>

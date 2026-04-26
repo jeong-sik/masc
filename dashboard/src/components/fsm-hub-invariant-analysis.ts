@@ -102,7 +102,7 @@ export function deriveOperationalInsight(
   if (brokenInvariant) {
     return {
       tone: 'error',
-      headline: `Spec drift on ${INVARIANT_LABELS[brokenInvariant]}`,
+      headline: `Spec drift: ${INVARIANT_LABELS[brokenInvariant]}`,
       detail: invariantDetail(snapshot, brokenInvariant, false),
       nextStep: 'Treat this as an observer-level contract breach before trusting downstream state transitions.',
       evidence: [
@@ -144,7 +144,7 @@ export function deriveOperationalInsight(
   if (stalledLane) {
     return {
       tone: 'warn',
-      headline: `${stalledLane.field} is not moving`,
+      headline: `${stalledLane.field} 정체 — not moving`,
       detail: `${stalledLane.value} has been observed for ${fmtDuration(stalledLane.observedForSec)} on this screen without a new edge.`,
       nextStep: nextExpectedStep(snapshot),
       evidence: [

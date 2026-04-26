@@ -339,10 +339,11 @@ let native_event_to_json (evt : Oas.Event_bus.event) : Yojson.Safe.t option =
       (* Per-token telemetry from OAS#1202; not surfaced over SSE — the
          dashboard receives token usage via the existing AgentCompleted
          payload aggregate. Skip the relay to avoid flooding SSE
-         consumers with high-frequency low-value events. *)
-      None
-  | Oas.Event_bus.TurnReady _ ->
-      (* TurnReady event added in newer OAS. Skip the relay to avoid flooding SSE. *)
+         consumers with high-frequency low-value events.
+         The catch-all wildcard below also covers TurnReady (OAS#1201)
+         and any future variant that the bridge does not relay; an
+         explicit arm here was redundant after the wildcard landed
+         and tripped warning-as-error 11. *)
       None
 
 let relay_max_attempts = 3

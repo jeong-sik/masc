@@ -162,6 +162,7 @@ let cn_kimi_api = "kimi-api"
 let cn_glm = "glm-api"
 let cn_glm_coding_plan = "glm-coding-plan"
 let cn_openrouter = "openrouter"
+let cn_dashscope = "dashscope"
 
 let kimi_api_key_envs = [ "KIMI_API_KEY_SB"; "KIMI_API_KEY" ]
 
@@ -250,6 +251,7 @@ let adapter_canonical_name_of_provider_kind
   | Glm -> cn_glm
   | Claude_code -> cn_claude
   | Codex_cli -> cn_codex
+  | DashScope -> cn_dashscope
 
 (** Single source of truth for all provider/runtime adapters.
     Simple names ([claude], [codex], [gemini]) are CLI runtimes.
@@ -1413,7 +1415,8 @@ let adapter_of_provider_config (cfg : Llm_provider.Provider_config.t) =
   | Ollama ->
       resolve_direct_adapter cn_ollama
   | Glm
-  | OpenAI_compat ->
+  | OpenAI_compat
+  | DashScope ->
       resolve_adapter_by_cascade_prefix (provider_label_from_registry cfg)
 
 let provider_label_of_config (cfg : Llm_provider.Provider_config.t) =
@@ -1545,7 +1548,8 @@ let docker_auth_env_keys_of_provider_config (cfg : Llm_provider.Provider_config.
   | Llm_provider.Provider_config.Kimi_cli
   | Llm_provider.Provider_config.Glm
   | Llm_provider.Provider_config.Claude_code
-  | Llm_provider.Provider_config.Codex_cli ->
+  | Llm_provider.Provider_config.Codex_cli
+  | Llm_provider.Provider_config.DashScope ->
       auth_env_keys_of_provider_kind cfg.kind
 
 let all_auth_env_keys () : string list =

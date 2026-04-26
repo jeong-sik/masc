@@ -87,7 +87,7 @@ describe('ConnectorPathsStrip', () => {
     }
     const rows = container.querySelectorAll('[data-paths-row]')
     const labels = Array.from(rows).map(r => r.getAttribute('data-paths-row'))
-    expect(labels).toEqual(['Keepers', 'Sidecars'])
+    expect(labels).toEqual(['키퍼', '사이드카'])
   })
 
   it('surfaces Connectors + Logs rows once a connector reports a names_path', async () => {
@@ -103,7 +103,7 @@ describe('ConnectorPathsStrip', () => {
     }
     const rows = container.querySelectorAll('[data-paths-row]')
     const labels = Array.from(rows).map(r => r.getAttribute('data-paths-row'))
-    expect(labels).toEqual(['Connectors', 'Logs', 'Keepers', 'Sidecars'])
+    expect(labels).toEqual(['커넥터', '로그', '키퍼', '사이드카'])
   })
 
   it('header shows runtime hint when no connector has names_path', () => {

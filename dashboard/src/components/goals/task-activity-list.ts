@@ -98,7 +98,7 @@ function ActivityEntry({ event }: { event: UnifiedTraceEvent }) {
         <div class="px-3 pb-2 pt-1 ml-7">
           ${event.toolArgs != null ? html`
             <div class="mb-1">
-              <${JsonViewerCard} data=${parseJsonLikeData(event.toolArgs)} title="Args" />
+              <${JsonViewerCard} data=${parseJsonLikeData(event.toolArgs)} title="인자" />
             </div>
           ` : null}
           ${event.toolResult != null ? html`

@@ -241,8 +241,8 @@ function ToolCallDetail({ event }: { event: UnifiedTraceEvent }) {
     <div class="mt-2 space-y-2">
       ${event.toolArgs ? html`
         <div>
-          <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)] mb-1">Args</div>
-          <${JsonViewerCard} title="Args" data=${parseJsonLikeData(event.toolArgs)} />
+          <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)] mb-1">인자</div>
+          <${JsonViewerCard} title="인자" data=${parseJsonLikeData(event.toolArgs)} />
         </div>
       ` : null}
       ${resultText ? html`

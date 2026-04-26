@@ -18,11 +18,25 @@
 
 module KK = Masc_mcp.Keeper_keepalive
 
-(** Reset both the completion table and the FIFO wait queue between tests. *)
+(** Reset both the completion table and the FIFO wait queue between tests.
+
+    Keeper_keepalive now uses Eio.Mutex (was Stdlib.Mutex; the latter
+    raised EDEADLK under any fiber contention). All public entries
+    require an Eio fiber context, so each test runs inside Eio_main.run.
+    Tests that need [env] or [sw] take the unit-arg form and fetch them
+    via [Eio.Stdenv.*] inside [body_with_env]. *)
 let with_fresh_state test_body () =
-  KK.reset_autonomous_completion_for_test ();
-  KK.reset_autonomous_turn_queue_for_test ();
-  test_body ()
+  Eio_main.run @@ fun _env ->
+    KK.reset_autonomous_completion_for_test ();
+    KK.reset_autonomous_turn_queue_for_test ();
+    test_body ()
+
+(** Variant for tests that need [env] (clock, sw). *)
+let with_fresh_state_env test_body () =
+  Eio_main.run @@ fun env ->
+    KK.reset_autonomous_completion_for_test ();
+    KK.reset_autonomous_turn_queue_for_test ();
+    test_body env
 
 (* --------------------------------------------------------------------------
    fairness_delay_sec_at: core logic
@@ -110,7 +124,6 @@ let test_delay_decreases_with_elapsed_time () =
   Alcotest.(check bool) "delay decreases over time" true (delay_1s > delay_3s)
 
 let test_reactive_slot_released_when_body_raises () =
-  Eio_main.run @@ fun _env ->
   let before = KK.turn_semaphore_value_for_test () in
   let completed =
     try
@@ -126,9 +139,6 @@ let test_reactive_slot_released_when_body_raises () =
     (KK.turn_semaphore_value_for_test ())
 
 let test_autonomous_slot_released_when_body_raises () =
-  Eio_main.run @@ fun _env ->
-  KK.reset_autonomous_turn_queue_for_test ();
-  KK.reset_autonomous_completion_for_test ();
   let before_turn = KK.turn_semaphore_value_for_test () in
   let before_autonomous = KK.autonomous_turn_semaphore_value_for_test () in
   let completed =
@@ -148,8 +158,7 @@ let test_autonomous_slot_released_when_body_raises () =
   Alcotest.(check (list string)) "autonomous queue drained" []
     (KK.autonomous_waiter_snapshot_for_test ())
 
-let test_in_turn_liveness_pulse_stops_when_body_raises () =
-  Eio_main.run @@ fun env ->
+let test_in_turn_liveness_pulse_stops_when_body_raises env =
   Eio.Switch.run @@ fun sw ->
   let clock = Eio.Stdenv.clock env in
   let ticks = Atomic.make 0 in
@@ -207,6 +216,6 @@ let () =
       ( "in_turn_liveness",
         [
           Alcotest.test_case "pulse stops when body raises" `Quick
-            (with_fresh_state test_in_turn_liveness_pulse_stops_when_body_raises);
+            (with_fresh_state_env test_in_turn_liveness_pulse_stops_when_body_raises);
         ] );
     ]

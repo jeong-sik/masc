@@ -119,7 +119,12 @@ let normalize_memory_text_key (s : string) : string =
    compiled regex without paying the compile cost on every memory row. *)
 let consensus_default_re = Re.Pcre.re {|\d{6,}ep\+?|} |> Re.compile
 
-let consensus_re_mu = Stdlib.Mutex.create ()
+(* Eio.Mutex: cache is touched from keeper memory-row evaluation, which
+   runs inside Eio fibers. Stdlib.Mutex with PTHREAD_MUTEX_ERRORCHECK
+   raises EDEADLK on fiber contention (memory: feedback_eio-mutex-vs-stdlib).
+   The "runtime/dashboard domains" comment above predates the realisation
+   that those callers all share the single Eio_main domain. *)
+let consensus_re_mu = Eio.Mutex.create ()
 let consensus_re_cached : (string * Re.re) option ref = ref None
 
 let consensus_pattern_key () =
@@ -139,17 +144,14 @@ let compile_consensus_re pattern =
 
 let consensus_re () =
   let pattern = consensus_pattern_key () in
-  Stdlib.Mutex.lock consensus_re_mu;
-  Fun.protect
-    ~finally:(fun () -> Stdlib.Mutex.unlock consensus_re_mu)
-    (fun () ->
-      match !consensus_re_cached with
-      | Some (cached_pattern, re) when String.equal cached_pattern pattern ->
-          re
-      | _ ->
-          let re = compile_consensus_re pattern in
-          consensus_re_cached := Some (pattern, re);
-          re)
+  Eio.Mutex.use_rw ~protect:true consensus_re_mu (fun () ->
+    match !consensus_re_cached with
+    | Some (cached_pattern, re) when String.equal cached_pattern pattern ->
+        re
+    | _ ->
+        let re = compile_consensus_re pattern in
+        consensus_re_cached := Some (pattern, re);
+        re)
 
 let has_inflated_consensus_marker (s : string) : bool =
   Re.execp (consensus_re ()) s

@@ -17,11 +17,14 @@ type keeper_state = {
 }
 
 let state : (string, keeper_state) Hashtbl.t = Hashtbl.create 16
-let mutex = Stdlib.Mutex.create ()
+
+(* Eio.Mutex: stay-silent records originate from keeper turn fibers in a
+   single domain. Stdlib.Mutex with PTHREAD_MUTEX_ERRORCHECK turns fiber
+   contention into EDEADLK (memory: feedback_eio-mutex-vs-stdlib). *)
+let mutex = Eio.Mutex.create ()
 
 let with_lock f =
-  Stdlib.Mutex.lock mutex;
-  Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock mutex) f
+  Eio.Mutex.use_rw ~protect:true mutex f
 
 let get_or_create keeper_name =
   match Hashtbl.find_opt state keeper_name with

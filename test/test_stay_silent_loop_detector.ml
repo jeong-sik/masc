@@ -11,6 +11,11 @@
 module D = Masc_mcp.Keeper_stay_silent_loop_detector
 module Prom = Masc_mcp.Prometheus
 
+(* Detector now uses Eio.Mutex (was Stdlib.Mutex; the latter raised EDEADLK
+   under any fiber contention). Every public entry needs an Eio fiber
+   context, so wrap each Alcotest body in Eio_main.run. *)
+let with_eio f () = Eio_main.run @@ fun _env -> f ()
+
 let detected_count keeper =
   Prom.metric_value_or_zero
     "masc_keeper_stay_silent_loop_detected_total"
@@ -144,32 +149,33 @@ let () =
       ( "streak semantics",
         [
           Alcotest.test_case "increments on stay_silent"
-            `Quick test_streak_increments;
+            `Quick (with_eio test_streak_increments);
           Alcotest.test_case "any other act resets"
-            `Quick test_any_other_act_resets;
-          Alcotest.test_case "explicit reset" `Quick test_explicit_reset;
+            `Quick (with_eio test_any_other_act_resets);
+          Alcotest.test_case "explicit reset"
+            `Quick (with_eio test_explicit_reset);
         ] );
       ( "threshold crossing",
         [
           Alcotest.test_case "fires counter at threshold"
-            `Quick test_threshold_crossing_fires_counter;
+            `Quick (with_eio test_threshold_crossing_fires_counter);
           Alcotest.test_case "latched: no repeat while streak grows"
-            `Quick test_latched_no_repeat_while_streak_grows;
+            `Quick (with_eio test_latched_no_repeat_while_streak_grows);
           Alcotest.test_case "latch releases on reset, then re-fires"
-            `Quick test_latch_releases_on_reset_then_refires;
+            `Quick (with_eio test_latch_releases_on_reset_then_refires);
         ] );
       ( "per-keeper isolation",
         [
           Alcotest.test_case "A and B independent"
-            `Quick test_per_keeper_isolation;
+            `Quick (with_eio test_per_keeper_isolation);
         ] );
       ( "threshold env var",
         [
-          Alcotest.test_case "default 10" `Quick
-            test_threshold_env_default_is_10;
-          Alcotest.test_case "custom values" `Quick
-            test_threshold_env_custom;
+          Alcotest.test_case "default 10"
+            `Quick (with_eio test_threshold_env_default_is_10);
+          Alcotest.test_case "custom values"
+            `Quick (with_eio test_threshold_env_custom);
           Alcotest.test_case "invalid falls to default"
-            `Quick test_threshold_env_invalid_falls_through_to_default;
+            `Quick (with_eio test_threshold_env_invalid_falls_through_to_default);
         ] );
     ]

@@ -192,7 +192,7 @@ function AuthPopover() {
             <input
               type="text"
           autoComplete="off"
-              placeholder="dashboard actor"
+              placeholder="대시보드 액터"
               aria-label="대시보드 액터"
               class="min-w-0 flex-1 py-1.5 px-2 rounded text-2xs border border-[var(--card-border)] bg-[var(--white-4)] text-[var(--text-body)] placeholder-[var(--text-muted)] outline-none focus:border-[rgba(71,184,255,0.5)] focus-visible:ring-2 focus-visible:ring-[var(--accent)]/50"
               value=${actorInput.value}

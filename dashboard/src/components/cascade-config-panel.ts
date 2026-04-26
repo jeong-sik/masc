@@ -371,7 +371,7 @@ function ProfileCard({
   }
 
   return html`
-    <article class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] p-3" role="group" aria-label=${`Cascade profile: ${profile.name}`}>
+    <article class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] p-3" role="group" aria-label=${`캐스케이드 프로필: ${profile.name}`}>
       <header class="flex items-center gap-2 mb-2 flex-wrap">
         <span class="font-semibold text-[var(--text-strong)]">${profile.name}</span>
         <${StatusChip} tone=${sourceTone(profile.source)}>
@@ -768,7 +768,7 @@ function HealthTable({
                 <td class="py-1">
                   <code class="text-[var(--text-strong)]">${p.provider_key}</code>
                   ${orphaned
-                    ? html`<span class="ml-1 text-2xs text-[var(--warn)]" title="Provider was tracked but is no longer declared in cascade.json">orphan</span>`
+                    ? html`<span class="ml-1 text-2xs text-[var(--warn)]" title="공급자가 추적되었으나 cascade.json에 더 이상 선언되지 않음">orphan</span>`
                     : null}
                 </td>
                 <td class="py-1">

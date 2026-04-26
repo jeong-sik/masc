@@ -808,10 +808,10 @@ button.is-active, .btn.is-active { background: var(--bg-4); color: var(--brass-1
 /* ═══════════════════════════════════════════════════════════════════
    BONSAI STRUCTURAL TOKENS (shadow primitives)
    ───────────────────────────────────────────────────────────────────
-   4 tokens with theme-specific overrides. `--shadow-inset` is NOT
-   absorbed here — dashboard tokens.css already defines it with a
-   different semantic (top-edge highlight vs bonsai's full ring).
-   Resolution deferred to a later PR.
+   `--shadow-card/panel/glow/raised`: per-theme overrides below.
+   `--shadow-ring`: 1px inset border ring. Renamed from bonsai's
+   former `--shadow-inset` (PR-S3g) to disambiguate from dashboard's
+   `--shadow-inset` which is a top-edge highlight (line ~282).
    ═══════════════════════════════════════════════════════════════════ */
 
 :root {
@@ -819,6 +819,7 @@ button.is-active, .btn.is-active { background: var(--bg-4); color: var(--brass-1
   --shadow-panel:  0 2px 12px rgba(0, 0, 0, 0.6);
   --shadow-glow:   0 0 20px var(--accent-glow);
   --shadow-raised: 0 8px 24px rgba(0, 0, 0, 0.55), 0 0 0 1px var(--border-highlight);
+  --shadow-ring:   inset 0 0 0 1px rgba(196, 162, 101, 0.25);
 }
 
 [data-theme="cyberpunk"] {

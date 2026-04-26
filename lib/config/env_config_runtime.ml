@@ -610,6 +610,31 @@ module Dashboard = struct
     Float.max 5.0
       (get_float ~default:35.0
          "MASC_DASHBOARD_SHELL_PREWARM_OUTER_TIMEOUT_SEC")
+
+  (** Execution surface compute timeout (light + parameterized).
+
+      Wraps two [Dashboard_cache.get_or_compute_with_timeout] sites at
+      [server_dashboard_http_execution_surfaces.ml:437,449] (execution
+      light/parameterized). Default 120s preserves the inline literals.
+      Floor 5s ensures the budget can complete a typical projection
+      hydration even under aggressive operator override. *)
+  let execution_timeout_sec =
+    Float.max 5.0
+      (get_float ~default:120.0 "MASC_DASHBOARD_EXECUTION_TIMEOUT_SEC")
+
+  (** Execution-trust surface compute timeout.
+
+      Wraps [Dashboard_cache.get_or_compute_with_timeout] at
+      [server_dashboard_http_execution_surfaces.ml:463] (execution-trust
+      score). Default 30s preserves the inline literal. Smaller than
+      [execution_timeout_sec] because the trust projection is
+      intentionally lighter — keeping the split visible lets operators
+      diagnose when trust scoring is the bottleneck vs. the full
+      execution surface. *)
+  let execution_trust_timeout_sec =
+    Float.max 1.0
+      (get_float ~default:30.0
+         "MASC_DASHBOARD_EXECUTION_TRUST_TIMEOUT_SEC")
 end
 
 (** {1 Internal Timers and TTLs}

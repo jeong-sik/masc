@@ -799,7 +799,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
 
       <${SectionHeader} title="소스" />
       <${Callout}
-        title="Cascade 선택"
+        title="캐스케이드 선택"
         body=${hasCascadeSelector
           ? '이 selector는 keeper TOML의 cascade_name 을 바꿉니다. catalog authoring source와 generated runtime JSON 경로는 아래 읽기 전용 메타데이터를 보세요.'
           : cascadeSelectionSummary(c)}

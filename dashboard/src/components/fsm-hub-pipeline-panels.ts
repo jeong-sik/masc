@@ -316,7 +316,7 @@ export function HeroPhase({
     >
       <div class="flex items-baseline justify-between">
         <div>
-          <div class="text-3xs font-semibold tracking-[0.06em] text-[var(--text-muted)]" id="ksm-label">Keeper 생명주기 <span class="font-mono text-3xs text-[var(--text-dim)]">KSM</span></div>
+          <div class="text-3xs font-semibold tracking-[0.06em] text-[var(--text-muted)]" id="ksm-label">키퍼생명주기 <span class="font-mono text-3xs text-[var(--text-dim)]">KSM</span></div>
           <div class=${`mt-1 font-mono text-[32px] font-bold tracking-tight ${color}`} aria-labelledby="ksm-label">
             ${displayState(snapshot.phase)}
           </div>

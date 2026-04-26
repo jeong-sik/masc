@@ -187,7 +187,7 @@ export function GovernanceMonitor() {
         ` : null}
       <//>
 
-      <${Card} title="Tool Rejections (${data?.window_minutes ?? windowMinutes.value}m)">
+      <${Card} title="도구 거부 (${data?.window_minutes ?? windowMinutes.value}m)">
         <div class="flex flex-col gap-2">
           <input
             type="search"

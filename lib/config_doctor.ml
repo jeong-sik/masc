@@ -746,6 +746,11 @@ let to_yojson (report : t) =
         match report.sandbox_preflight with
         | Some value -> value
         | None -> `Null );
+      (* Sandbox configuration SSOT snapshot (#10426 P2d).  Operators can
+         read [raw.<section>.<key>] for per-setting provenance
+         (env vs default vs load_bearing_floor) and [derived.*] for the
+         post-cross-cutting-rule values Docker actually sees. *)
+      ( "sandbox_config", Env_config_sandbox.effective_config_json () );
     ]
 
 let render_text (report : t) =

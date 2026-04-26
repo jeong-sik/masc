@@ -129,10 +129,10 @@ let ring_capacity () =
 
 type ring =
   { buf : decision_record option array
-  ; mutable pos : int
-  ; mutable count : int
-  ; mutable unflushed : int
-  ; mutable last_flush_ts : float
+  ; pos : int
+  ; count : int
+  ; unflushed : int
+  ; last_flush_ts : float
   }
 
 let rings : (string, ring) Hashtbl.t = Hashtbl.create 8
@@ -163,9 +163,14 @@ let append ~keeper_name (rec_ : decision_record) =
     let ring = get_or_create_ring keeper_name in
     let cap = Array.length ring.buf in
     ring.buf.(ring.pos mod cap) <- Some rec_;
-    ring.pos <- (ring.pos + 1) mod cap;
-    ring.count <- min (ring.count + 1) cap;
-    ring.unflushed <- min (ring.unflushed + 1) cap)
+    let updated_ring =
+      { ring with
+        pos = (ring.pos + 1) mod cap
+      ; count = min (ring.count + 1) cap
+      ; unflushed = min (ring.unflushed + 1) cap
+      }
+    in
+    Hashtbl.replace rings keeper_name updated_ring)
 ;;
 
 let recent ~keeper_name ~limit : decision_record list =
@@ -232,13 +237,17 @@ let flush_if_needed ~base_path ~keeper_name =
           in
           List.fold_left (fun acc s -> acc ^ s) "" (gather 0 [])
         in
-        (try
-           Fs_compat.append_file dir flush_lines;
-           ring.unflushed <- 0
-         with
-         | Eio.Cancel.Cancelled _ as e -> raise e
-         | e -> Log.Keeper.warn "decision_audit flush failed: %s" (Printexc.to_string e));
-        ring.last_flush_ts <- now))
+        let updated_ring =
+          try
+            Fs_compat.append_file dir flush_lines;
+            { ring with unflushed = 0; last_flush_ts = now }
+          with
+          | Eio.Cancel.Cancelled _ as e -> raise e
+          | e ->
+            Log.Keeper.warn "decision_audit flush failed: %s" (Printexc.to_string e);
+            { ring with last_flush_ts = now }
+        in
+        Hashtbl.replace rings keeper_name updated_ring))
 ;;
 
 (* ================================================================ *)

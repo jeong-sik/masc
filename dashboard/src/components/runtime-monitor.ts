@@ -354,7 +354,7 @@ export function RuntimeMonitor() {
     <div class="flex flex-col gap-4">
       <div class="flex items-center gap-3 flex-wrap">
         <select
-          class="rounded border border-[var(--color-border-default)] bg-[var(--bg-0)] px-2 py-1 text-xs text-[var(--color-fg-secondary)]"
+          class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 text-xs text-[var(--color-fg-secondary)]"
           value=${String(windowMinutes.value)}
           onChange=${(e: Event) => { windowMinutes.value = Number((e.target as HTMLSelectElement).value) }}
         >
@@ -364,7 +364,7 @@ export function RuntimeMonitor() {
           <option value="180">180분</option>
         </select>
         <button
-          class="rounded border border-[var(--color-border-default)] bg-[var(--bg-0)] px-3 py-1 text-xs text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)]"
+          class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-3 py-1 text-xs text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)]"
           onClick=${() => void load()}
         >
           새로고침

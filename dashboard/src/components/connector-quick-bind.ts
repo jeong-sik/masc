@@ -130,7 +130,7 @@ export function QuickBindForm({ connectorId, keepers }: {
         </label>
         <select
           id=${`qb-keeper-${connectorId}`}
-          class="w-full rounded border border-[var(--color-border-default)] bg-[var(--bg-0)] px-2 py-1 font-mono text-2xs text-[var(--color-fg-primary)] focus:border-[var(--accent-1)] focus:outline-none"
+          class="w-full rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 font-mono text-2xs text-[var(--color-fg-primary)] focus:border-[var(--accent-1)] focus:outline-none"
           onChange=${(ev: Event) => {
             const target = ev.currentTarget as HTMLSelectElement
             setEntry(connectorId, { keeperName: target.value })

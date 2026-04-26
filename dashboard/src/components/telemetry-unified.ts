@@ -857,7 +857,7 @@ export function TelemetryUnified() {
       <div class="flex items-center gap-3 flex-wrap">
         <select
           aria-label="텔레메트리 소스 필터"
-          class="rounded border border-[var(--color-border-default)] bg-[var(--bg-0)] px-2 py-1 text-xs text-[var(--color-fg-secondary)]"
+          class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 text-xs text-[var(--color-fg-secondary)]"
           value=${sourceFilter.value}
           onChange=${(e: Event) => { sourceFilter.value = (e.target as HTMLSelectElement).value as TelemetrySource | '' }}
         >
@@ -868,7 +868,7 @@ export function TelemetryUnified() {
           type="text"
           placeholder="키퍼 이름..."
           aria-label="키퍼 이름 필터"
-          class="rounded border border-[var(--color-border-default)] bg-[var(--bg-0)] px-2 py-1 text-xs text-[var(--color-fg-secondary)] w-32"
+          class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 text-xs text-[var(--color-fg-secondary)] w-32"
           value=${keeperFilter.value}
           onInput=${(e: Event) => { keeperFilter.value = (e.target as HTMLInputElement).value }}
         />
@@ -876,7 +876,7 @@ export function TelemetryUnified() {
           type="text"
           placeholder="session_id"
           aria-label="session_id 필터"
-          class="rounded border border-[var(--color-border-default)] bg-[var(--bg-0)] px-2 py-1 text-xs text-[var(--color-fg-secondary)] w-40 font-mono"
+          class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 text-xs text-[var(--color-fg-secondary)] w-40 font-mono"
           value=${sessionFilter.value}
           onInput=${(e: Event) => { sessionFilter.value = (e.target as HTMLInputElement).value.trim() }}
         />
@@ -884,7 +884,7 @@ export function TelemetryUnified() {
           type="text"
           placeholder="operation_id"
           aria-label="operation_id 필터"
-          class="rounded border border-[var(--color-border-default)] bg-[var(--bg-0)] px-2 py-1 text-xs text-[var(--color-fg-secondary)] w-40 font-mono"
+          class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 text-xs text-[var(--color-fg-secondary)] w-40 font-mono"
           value=${operationFilter.value}
           onInput=${(e: Event) => { operationFilter.value = (e.target as HTMLInputElement).value.trim() }}
         />
@@ -892,7 +892,7 @@ export function TelemetryUnified() {
           type="text"
           placeholder="worker_run_id"
           aria-label="worker_run_id 필터"
-          class="rounded border border-[var(--color-border-default)] bg-[var(--bg-0)] px-2 py-1 text-xs text-[var(--color-fg-secondary)] w-40 font-mono"
+          class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 text-xs text-[var(--color-fg-secondary)] w-40 font-mono"
           value=${workerRunFilter.value}
           onInput=${(e: Event) => { workerRunFilter.value = (e.target as HTMLInputElement).value.trim() }}
         />
@@ -900,13 +900,13 @@ export function TelemetryUnified() {
           type="search"
           placeholder="엔트리 검색..."
           aria-label="엔트리 텍스트 검색"
-          class="rounded border border-[var(--color-border-default)] bg-[var(--bg-0)] px-2 py-1 text-xs text-[var(--color-fg-secondary)] w-48"
+          class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 text-xs text-[var(--color-fg-secondary)] w-48"
           value=${entrySearch.value}
           onInput=${(e: Event) => { entrySearch.value = (e.target as HTMLInputElement).value }}
         />
         <select
           aria-label="표시 개수 제한"
-          class="rounded border border-[var(--color-border-default)] bg-[var(--bg-0)] px-2 py-1 text-xs text-[var(--color-fg-secondary)]"
+          class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 text-xs text-[var(--color-fg-secondary)]"
           value=${String(limit.value)}
           onChange=${(e: Event) => { limit.value = Number((e.target as HTMLSelectElement).value) }}
         >
@@ -916,7 +916,7 @@ export function TelemetryUnified() {
           <option value="500">500</option>
         </select>
         <button
-          class="rounded border border-[var(--color-border-default)] bg-[var(--bg-0)] px-3 py-1 text-xs text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)]"
+          class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-3 py-1 text-xs text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)]"
           onClick=${() => void load()}
         >
           Refresh

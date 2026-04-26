@@ -342,7 +342,7 @@ function FieldWidget({ id, field, value, revealed }: {
     setEntry(id, { reveal: { ...getEntry(id).reveal, [field.name]: !revealed } })
   }
 
-  const baseInput = 'w-full rounded border border-[var(--white-8)] bg-[var(--bg-0)] px-2 py-1 font-mono text-2xs text-[var(--color-fg-primary)] focus:border-[var(--accent-1)] focus:outline-none'
+  const baseInput = 'w-full rounded border border-[var(--white-8)] bg-[var(--color-bg-page)] px-2 py-1 font-mono text-2xs text-[var(--color-fg-primary)] focus:border-[var(--accent-1)] focus:outline-none'
 
   switch (field.type) {
     case 'boolean':
@@ -421,7 +421,7 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
 
   if (entry.loading) {
     return html`
-      <div id=${`connector-config-${connectorId}`} class="mt-3 rounded border border-[var(--white-8)] bg-[var(--bg-1)] p-3">
+      <div id=${`connector-config-${connectorId}`} class="mt-3 rounded border border-[var(--white-8)] bg-[var(--color-bg-surface)] p-3">
         <${LoadingState}>config schema 불러오는 중...<//>
       </div>
     `
@@ -443,7 +443,7 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
 
   if (entry.fields.length === 0) {
     return html`
-      <div id=${`connector-config-${connectorId}`} class="mt-3 rounded border border-[var(--white-8)] bg-[var(--bg-1)] p-3 text-2xs text-[var(--color-fg-disabled)]">
+      <div id=${`connector-config-${connectorId}`} class="mt-3 rounded border border-[var(--white-8)] bg-[var(--color-bg-surface)] p-3 text-2xs text-[var(--color-fg-disabled)]">
         schema가 비어있습니다. backend가 sidecar venv를 못 찾았을 수 있어요.
       </div>
     `
@@ -452,7 +452,7 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
   const envBlock = buildEnvBlock(entry)
 
   return html`
-    <div id=${`connector-config-${connectorId}`} class="mt-3 rounded border border-[var(--white-8)] bg-[var(--bg-1)] p-3">
+    <div id=${`connector-config-${connectorId}`} class="mt-3 rounded border border-[var(--white-8)] bg-[var(--color-bg-surface)] p-3">
       <div class="mb-2 flex items-center justify-between">
         <div class="text-3xs uppercase tracking-4 text-[var(--color-fg-disabled)]">
           ${entry.fields.length} fields · ${entry.fields.filter(f => f.required).length} required

@@ -299,7 +299,7 @@ export function PrometheusMetrics() {
         <div class="flex items-center gap-3">
           ${lastUpdated.value && html`<span class="text-xs text-[var(--color-fg-muted)]">${lastUpdated.value}</span>`}
           <button
-            class="rounded border border-[var(--color-border-default)] bg-[var(--bg-1)] px-3 py-1.5 text-xs text-[var(--color-fg-primary)] hover:bg-[var(--bg-2)] transition-colors"
+            class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-1.5 text-xs text-[var(--color-fg-primary)] hover:bg-[var(--color-bg-panel-alt)] transition-colors"
             onClick=${refresh}
             disabled=${loading.value}
           >
@@ -353,7 +353,7 @@ export function PrometheusMetrics() {
                 <span class="text-xs text-[var(--color-fg-muted)]">${meta.description}</span>
               </div>
               <div class="flex items-center gap-2">
-                <span class="rounded-sm bg-[var(--bg-2)] px-2 py-0.5 text-3xs text-[var(--color-fg-muted)]">
+                <span class="rounded-sm bg-[var(--color-bg-panel-alt)] px-2 py-0.5 text-3xs text-[var(--color-fg-muted)]">
                   ${catMetrics.length}개 메트릭
                 </span>
                 ${activeSamples > 0 && html`
@@ -378,7 +378,7 @@ export function PrometheusMetrics() {
                     ${catMetrics.flatMap(m =>
                       m.samples.length === 0
                         ? [html`
-                            <tr key="${m.name}" class="border-b border-[var(--color-border-default)]/30 hover:bg-[var(--bg-1)]">
+                            <tr key="${m.name}" class="border-b border-[var(--color-border-default)]/30 hover:bg-[var(--color-bg-surface)]">
                               <td class="py-1.5 font-mono text-[var(--color-fg-primary)]">
                                 ${m.name}
                                 <div class="text-3xs text-[var(--color-fg-muted)] font-sans">${m.help}</div>
@@ -388,7 +388,7 @@ export function PrometheusMetrics() {
                             </tr>
                           `]
                         : m.samples.map((s, i) => html`
-                            <tr key="${s.name}-${i}" class="border-b border-[var(--color-border-default)]/30 hover:bg-[var(--bg-1)]">
+                            <tr key="${s.name}-${i}" class="border-b border-[var(--color-border-default)]/30 hover:bg-[var(--color-bg-surface)]">
                               <td class="py-1.5 font-mono ${s.value !== 0 ? 'text-[var(--color-fg-primary)]' : 'text-[var(--color-fg-muted)]'}">
                                 ${s.name}${labelPills(s.labels)}
                                 ${i === 0 && html`<div class="text-3xs text-[var(--color-fg-muted)] font-sans">${m.help}</div>`}

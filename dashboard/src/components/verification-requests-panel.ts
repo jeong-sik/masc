@@ -221,10 +221,10 @@ async function submitResolve(
 // ── Row actions (approve/reject UI) ───────────────────
 
 const BTN_PRIMARY =
-  'rounded border border-[var(--color-border-default)] bg-[var(--bg-0)] px-2 py-1 text-2xs text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)] disabled:opacity-50 disabled:cursor-not-allowed'
+  'rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 text-2xs text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)] disabled:opacity-50 disabled:cursor-not-allowed'
 
 const BTN_SECONDARY =
-  'rounded border border-[var(--color-border-default)] bg-[var(--bg-0)] px-2 py-1 text-2xs text-[var(--color-fg-primary)] hover:bg-[var(--color-bg-hover)] disabled:opacity-50 disabled:cursor-not-allowed'
+  'rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 text-2xs text-[var(--color-fg-primary)] hover:bg-[var(--color-bg-hover)] disabled:opacity-50 disabled:cursor-not-allowed'
 
 function RowActions({
   row,
@@ -268,7 +268,7 @@ function RowActions({
       <div class="flex items-center gap-1 flex-wrap">
         <input
           type="text"
-          class="rounded border border-[var(--color-border-default)] bg-[var(--bg-0)] px-2 py-1 text-2xs text-[var(--color-fg-primary)] w-50"
+          class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 text-2xs text-[var(--color-fg-primary)] w-50"
           placeholder="반려 사유 (필수)"
           value=${reason}
           autofocus
@@ -392,7 +392,7 @@ function VerificationRow({
                 <summary class="cursor-pointer text-[var(--color-fg-muted)] hover:text-[var(--color-fg-primary)]">
                   자세히
                 </summary>
-                <div class="flex flex-col gap-2 mt-2 p-2 rounded border border-[var(--color-border-default)] bg-[var(--bg-0)]">
+                <div class="flex flex-col gap-2 mt-2 p-2 rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)]">
                   ${hasTaskTitle
                     ? html`
                         <div>
@@ -570,7 +570,7 @@ export function VerificationRequestsPanel() {
     <div class="flex flex-col gap-4">
       <div class="flex items-center gap-3 flex-wrap">
         <button
-          class="rounded border border-[var(--color-border-default)] bg-[var(--bg-0)] px-3 py-1 text-xs text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)]"
+          class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-3 py-1 text-xs text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)]"
           onClick=${() => void loadData(resource)}
         >
           새로고침

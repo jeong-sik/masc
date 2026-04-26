@@ -73,7 +73,7 @@ function StoredBlobView({
           <span class="text-2xs text-[var(--color-fg-muted)]">${toolName}</span>
           <span class="text-3xs text-[var(--color-fg-muted)] ml-auto">${timeStr}</span>
         </div>
-        <div class="rounded border border-[var(--color-border-default)] bg-[var(--bg-0)] overflow-hidden">
+        <div class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] overflow-hidden">
           <div class="flex items-center justify-between px-3 py-1.5 border-b border-[var(--color-border-default)]">
             <button type="button" class="text-3xs text-[var(--color-fg-muted)] cursor-pointer hover:text-[var(--color-fg-primary)]"
               onClick=${() => { expanded.value = false }}>
@@ -103,7 +103,7 @@ function StoredBlobView({
         <span class="text-2xs text-[var(--color-fg-muted)]">${toolName}</span>
         <span class="text-3xs text-[var(--color-fg-muted)] ml-auto">${timeStr}</span>
       </div>
-      <div class="rounded border border-[var(--color-border-default)] bg-[var(--bg-0)] overflow-hidden">
+      <div class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] overflow-hidden">
         <div class="flex items-center justify-between px-3 py-1.5 border-b border-[var(--color-border-default)]">
           <span class="text-3xs text-[var(--color-fg-muted)]">
             저장된 출력 · ${marker.bytes.toLocaleString()}B · sha ${marker.sha256.slice(0, 12)}\u2026
@@ -152,7 +152,7 @@ export function ToolResultDisplay({ success, text, toolName, timestamp }: ToolRe
         <span class="text-2xs text-[var(--color-fg-muted)]">${toolName}</span>
         <span class="text-3xs text-[var(--color-fg-muted)] ml-auto">${timeStr}</span>
       </div>
-      <div class="rounded border border-[var(--color-border-default)] bg-[var(--bg-0)] overflow-hidden">
+      <div class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] overflow-hidden">
         <div class="flex items-center justify-between px-3 py-1.5 border-b border-[var(--color-border-default)]">
           <button type="button" class="text-3xs text-[var(--color-fg-muted)] cursor-pointer hover:text-[var(--color-fg-primary)]"
             onClick=${() => { expanded.value = !expanded.value }}>

@@ -140,7 +140,7 @@ export function VerificationSpecsPanel() {
     <div class="flex flex-col gap-4">
       <div class="flex items-center gap-3 flex-wrap">
         <button
-          class="rounded border border-[var(--color-border-default)] bg-[var(--bg-0)] px-3 py-1 text-xs text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)]"
+          class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-3 py-1 text-xs text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)]"
           onClick=${() => void loadSpecs(resource)}
         >
           새로고침

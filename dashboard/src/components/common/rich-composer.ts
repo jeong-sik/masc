@@ -63,7 +63,7 @@ export function RichComposer({
             `
           : value.trim()
             ? html`
-                <div class="max-h-80 overflow-auto rounded border border-[var(--color-border-default)] bg-[var(--bg-0)] p-3 custom-scrollbar">
+                <div class="max-h-80 overflow-auto rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] p-3 custom-scrollbar">
                   <${RichContent} text=${value} previewLimit=${previewLimit} />
                 </div>
               `

@@ -133,7 +133,7 @@ export function GovernanceMonitor() {
     <div class="flex flex-col gap-4">
       <div class="flex items-center gap-3 flex-wrap">
         <select
-          class="rounded border border-[var(--color-border-default)] bg-[var(--bg-0)] px-2 py-1 text-xs text-[var(--color-fg-secondary)]"
+          class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 text-xs text-[var(--color-fg-secondary)]"
           value=${String(windowMinutes.value)}
           onChange=${(e: Event) => { windowMinutes.value = Number((e.target as HTMLSelectElement).value) }}
         >
@@ -143,7 +143,7 @@ export function GovernanceMonitor() {
           <option value="720">12h</option>
         </select>
         <button
-          class="rounded border border-[var(--color-border-default)] bg-[var(--bg-0)] px-3 py-1 text-xs text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)]"
+          class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-3 py-1 text-xs text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)]"
           onClick=${() => void load()}
         >새로고침</button>
         <span class="text-xs text-[var(--color-fg-muted)]">${formatAutoRefreshLabel(TELEMETRY_AUTO_REFRESH_MS)}</span>
@@ -193,7 +193,7 @@ export function GovernanceMonitor() {
             placeholder="tool / reason 필터"
             aria-label="Tool rejection 필터"
             onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
-            class="min-w-40 max-w-60 rounded border border-[var(--color-border-default)] bg-[var(--bg-0)] px-2 py-1 text-xs text-[var(--color-fg-secondary)] placeholder:text-[var(--color-fg-muted)] focus:outline-none focus:border-[var(--color-accent-fg)]"
+            class="min-w-40 max-w-60 rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 text-xs text-[var(--color-fg-secondary)] placeholder:text-[var(--color-fg-muted)] focus:outline-none focus:border-[var(--color-accent-fg)]"
           />
           ${allRejections.length === 0
             ? html`<${EmptyState} message="선택한 시간 범위에 tool rejection이 없습니다." compact />`

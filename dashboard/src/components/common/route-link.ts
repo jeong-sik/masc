@@ -23,7 +23,7 @@ export function RouteLink({
   const href = hashForRoute(tab, params)
   const classNameWithFocus = [
     className,
-    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(71,184,255,0.35)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-1)]',
+    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(71,184,255,0.35)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-bg-surface)]',
   ].filter(Boolean).join(' ')
 
   return html`

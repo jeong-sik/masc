@@ -371,7 +371,7 @@ function ProfileCard({
   }
 
   return html`
-    <article class="rounded border border-[var(--color-border-default)] bg-[var(--bg-0)] p-3">
+    <article class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] p-3">
       <header class="flex items-center gap-2 mb-2 flex-wrap">
         <span class="font-semibold text-[var(--color-fg-secondary)]">${profile.name}</span>
         <${StatusChip} tone=${sourceTone(profile.source)}>
@@ -413,7 +413,7 @@ function ProfileCard({
               ? html`
                 <div class="flex items-center gap-2 flex-wrap">
                   <select
-                    class="min-w-44 rounded border border-[var(--color-border-default)] bg-[var(--bg-0)] px-2 py-1 text-xs text-[var(--color-fg-secondary)]"
+                    class="min-w-44 rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 text-xs text-[var(--color-fg-secondary)]"
                     value=${selectedKeeper.value}
                     disabled=${assigning.value}
                     onChange=${(event: Event) => {
@@ -507,7 +507,7 @@ function ProfileCard({
 function OrphanKeeperList({ orphans }: { orphans: readonly CascadeKeeperProfile[] }) {
   if (orphans.length === 0) return null
   return html`
-    <div class="rounded border border-[var(--color-status-warn)] bg-[var(--bg-0)] p-3 text-xs">
+    <div class="rounded border border-[var(--color-status-warn)] bg-[var(--color-bg-page)] p-3 text-xs">
       <div class="font-semibold text-[var(--color-fg-secondary)] mb-1">
         등록된 프로필 없음 (${orphans.length})
       </div>
@@ -1115,7 +1115,7 @@ function CascadeRawConfigEditor({
 
         <form class="flex flex-col gap-3" onSubmit=${handleSave}>
           <textarea
-            class="h-96 w-full rounded border border-[var(--color-border-default)] bg-[var(--bg-0)] px-3 py-2 font-mono text-xs text-[var(--color-fg-secondary)]"
+            class="h-96 w-full rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-3 py-2 font-mono text-xs text-[var(--color-fg-secondary)]"
             spellcheck="false"
             readonly=${!sourceEditable}
             value=${editorText.value}
@@ -1159,7 +1159,7 @@ function CascadeRawConfigEditor({
             </button>
             <button
               type="button"
-              class="rounded border border-[var(--color-border-default)] bg-[var(--bg-0)] px-3 py-1 text-xs text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)] disabled:opacity-50"
+              class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-3 py-1 text-xs text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)] disabled:opacity-50"
               onClick=${handleReset}
               disabled=${saving.value || !editorDirty.value}
             >
@@ -1167,7 +1167,7 @@ function CascadeRawConfigEditor({
             </button>
             <button
               type="button"
-              class="rounded border border-[var(--color-border-default)] bg-[var(--bg-0)] px-3 py-1 text-xs text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)] disabled:opacity-50"
+              class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-3 py-1 text-xs text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)] disabled:opacity-50"
               onClick=${() => void onRefresh()}
               disabled=${saving.value}
             >
@@ -1185,7 +1185,7 @@ function CascadeRawConfigEditor({
                 ${raw?.config_path ?? 'unresolved'}
               </div>
               <textarea
-                class="h-72 w-full rounded border border-[var(--color-border-default)] bg-[var(--bg-0)] px-3 py-2 font-mono text-xs text-[var(--color-fg-secondary)]"
+                class="h-72 w-full rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-3 py-2 font-mono text-xs text-[var(--color-fg-secondary)]"
                 spellcheck="false"
                 readonly
                 value=${raw?.raw_json ?? ''}
@@ -1223,7 +1223,7 @@ export function CascadeConfigPanel() {
     <div class="flex flex-col gap-4">
       <div class="flex items-center gap-3 flex-wrap">
         <button
-          class="rounded border border-[var(--color-border-default)] bg-[var(--bg-0)] px-3 py-1 text-xs text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)]"
+          class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-3 py-1 text-xs text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)]"
           onClick=${() => void loadCascadeData(resource)}
         >
           새로고침

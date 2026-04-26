@@ -226,7 +226,7 @@ export function BuildIdentityBadge() {
   return html`
     <div class="relative">
       <button type="button"
-        class="cursor-pointer rounded-sm border border-[var(--white-10)] bg-[var(--white-4)] px-2.5 py-[5px] text-3xs text-[var(--color-fg-muted)] transition-colors duration-150 hover:border-[var(--accent-20)] hover:text-[var(--color-fg-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-0)]"
+        class="cursor-pointer rounded-sm border border-[var(--white-10)] bg-[var(--white-4)] px-2.5 py-[5px] text-3xs text-[var(--color-fg-muted)] transition-colors duration-150 hover:border-[var(--accent-20)] hover:text-[var(--color-fg-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-bg-page)]"
         aria-expanded=${buildIdentityOpen.value}
         aria-label=${`서버 빌드 정보 ${label}`}
         title=${hoverTitle}
@@ -385,7 +385,7 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
           </div>
         ` : null}
         <button type="button"
-          class="flex size-7 items-center justify-center rounded text-[var(--color-fg-muted)] cursor-pointer transition-colors duration-200 hover:bg-[var(--white-10)] hover:text-[var(--color-fg-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-1)]"
+          class="flex size-7 items-center justify-center rounded text-[var(--color-fg-muted)] cursor-pointer transition-colors duration-200 hover:bg-[var(--white-10)] hover:text-[var(--color-fg-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-bg-surface)]"
           aria-label=${collapsed ? '사이드바 펼치기' : '사이드바 접기'}
           onClick=${onToggle}
           title=${collapsed ? '사이드바 펼치기' : '사이드바 접기'}

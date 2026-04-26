@@ -22,12 +22,20 @@ open Keeper_types
     preserves disk-of-record (raw bytes), but compare uses the
     capped form that the prompt actually renders.  Disk data is
     preserved; loop terminates. *)
+(* Layer 2 PR-B (commit 6): delegate to [Keeper_personality_io].
+   compare path now uses [coerce] (trim only) — symmetric with the
+   read path migrated in commit 5. The Layer 1 "trim AND truncate"
+   workaround is no longer needed because read / write / compare all
+   see the same raw bytes; truncation lives at the prompt-render
+   boundary. *)
 let personality_text_equal a b =
-  String.equal
-    (Keeper_config.normalize_self_model_text
-       ~max_bytes:Keeper_config.prompt_render_max_bytes a)
-    (Keeper_config.normalize_self_model_text
-       ~max_bytes:Keeper_config.prompt_render_max_bytes b)
+  let one_field s : Keeper_personality_io.coerced_personality =
+    Keeper_personality_io.coerce
+      { will = s; needs = ""; desires = ""; instructions = "" }
+  in
+  match Keeper_personality_io.compare_normalized (one_field a) (one_field b) with
+  | `Equal -> true
+  | `Drift _ -> false
 
 (** #10269: when [personality_text_equal] reports a mismatch, the
     operator needs to know WHICH personality field differs and HOW
@@ -48,35 +56,30 @@ let personality_text_equal a b =
 
     The summary is cheap: only invoked on the cycle that actually
     performs a re-sync, never on the stable steady-state path. *)
-let first_byte_diff a b =
-  let len_a = String.length a and len_b = String.length b in
-  let limit = min len_a len_b in
-  let rec loop i =
-    if i >= limit then
-      if len_a = len_b then -1 else limit
-    else if Char.equal a.[i] b.[i] then loop (i + 1)
-    else i
-  in
-  loop 0
-
+(* Layer 2 PR-B (commit 6): same delegation pattern. Log format
+   "<name>(cur=N,tgt=N,diff@P)" preserved verbatim so dashboard log
+   scrapers don't need to migrate. The numbers now reflect post-trim
+   bytes (no truncation), so a 357-byte nick0cave will reads cur=357
+   instead of cur=319 — the value the disk actually holds. *)
 let personality_field_diff_entry name current target =
-  if personality_text_equal current target then None
-  else
-    let cur_n =
-      Keeper_config.normalize_self_model_text
-        ~max_bytes:Keeper_config.prompt_render_max_bytes current
-    in
-    let tgt_n =
-      Keeper_config.normalize_self_model_text
-        ~max_bytes:Keeper_config.prompt_render_max_bytes target
-    in
-    let pos = first_byte_diff cur_n tgt_n in
-    Some
-      (Printf.sprintf "%s(cur=%d,tgt=%d,diff@%d)"
-         name
-         (String.length cur_n)
-         (String.length tgt_n)
-         pos)
+  let one_field s : Keeper_personality_io.coerced_personality =
+    Keeper_personality_io.coerce
+      { will = s; needs = ""; desires = ""; instructions = "" }
+  in
+  match
+    Keeper_personality_io.compare_normalized (one_field current) (one_field target)
+  with
+  | `Equal -> None
+  | `Drift diffs ->
+      (* compare_normalized only inspected the [will] slot we wrapped
+         around the input; the diff list therefore has at most one
+         entry. *)
+      (match diffs with
+       | [] -> None
+       | d :: _ ->
+           Some
+             (Printf.sprintf "%s(cur=%d,tgt=%d,diff@%d)" name
+                d.current_bytes d.target_bytes d.diff_offset))
 
 let personality_diff_summary fields =
   List.filter_map

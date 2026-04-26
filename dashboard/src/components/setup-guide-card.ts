@@ -5,6 +5,7 @@
 import { html } from 'htm/preact'
 import { ChevronRight, ExternalLink } from 'lucide-preact'
 import { signal } from '@preact/signals'
+import { Checkbox } from './common/checkbox'
 import { CONNECTOR_SETUP_GUIDES } from './connector-setup-guides'
 
 // Per-connector expand state — keyed so jumping between bridge sub-sections
@@ -186,17 +187,16 @@ export function SetupGuideCard({ connectorId }: { connectorId: string }) {
                         aria-hidden="true"
                         data-setup-step-circle=${`${connectorId}:${idx}`}
                       >${done ? '✓' : idx + 1}</span>
-                      <input
-                        type="checkbox"
-                        class="mt-[5px] shrink-0 cursor-pointer accent-emerald-400"
+                      <${Checkbox}
+                        class="mt-[5px] shrink-0 !accent-emerald-400"
                         id=${`setup-step-${connectorId}-${idx}`}
-                        data-setup-step=${`${connectorId}:${idx}`}
+                        testId=${`setup-step-${connectorId}:${idx}`}
                         checked=${done}
+                        ariaLabel=${`step ${idx + 1} done`}
                         onClick=${(ev: Event) => {
                           ev.stopPropagation()
                           toggleStepCompletion(connectorId, idx)
                         }}
-                        aria-label=${`step ${idx + 1} done`}
                       />
                       <label
                         for=${`setup-step-${connectorId}-${idx}`}

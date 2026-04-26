@@ -29,11 +29,23 @@ SSE plumbing.
 | Environment | Mechanism |
 |-------------|-----------|
 | Dev (`pnpm --filter masc-dashboard dev`) | `dashboard/.env.development` ships with `VITE_DASHBOARD_WS_ONLY=true` |
-| Staging | Set `VITE_DASHBOARD_WS_ONLY=true` in the staging build pipeline |
-| Production | Set `VITE_DASHBOARD_WS_ONLY=true` in the prod build pipeline (last) |
+| Production (`make build` / `pnpm --filter masc-dashboard build`) | `dashboard/.env.production` ships with `VITE_DASHBOARD_WS_ONLY=true` |
+| Staging | Same as production unless `--mode staging` is invoked with a custom `dashboard/.env.staging` |
+| One-off opt-out | Create `dashboard/.env.production.local` with `VITE_DASHBOARD_WS_ONLY=` (or `=false`); `.local` overrides the tracked file and is git-ignored |
 
-The flag is build-time.  A redeploy is required to flip it server-side.
-For ad-hoc browser overrides, use the runtime injection below.
+The flag is build-time: `vite build` reads `.env.production` (and `.env`,
+`.env.local`) automatically; `vite serve` reads `.env.development`.
+A rebuild is required to flip the tracked default; for a single browser
+tab without a rebuild, use the runtime injection below.
+
+> Dashboard production deployment caveat: as of this PR, the dashboard
+> SPA is built locally by an operator (`make build` triggers
+> `scripts/build-dashboard-if-needed.sh` → `vite build`).  Neither
+> `release.yml` nor `deploy-railway.yml` rebuilds the SPA, and the
+> Dockerfile does not COPY `assets/dashboard/`.  The cutover flag
+> therefore only takes effect on builds an operator produces locally
+> before deploying.  Wiring a real production dashboard build into CI
+> is tracked separately.
 
 ## Reading the beacon
 

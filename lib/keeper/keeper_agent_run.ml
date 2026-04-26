@@ -1854,7 +1854,17 @@ let run_turn
           Keeper_runtime_resolved.oas_timeout_for_estimated_input_tokens
             ~estimated_input_tokens
     in
-    let stream_idle_timeout_s = Some (Float.max 5.0 (timeout_s -. 5.0)) in
+    (* OAS [stream_idle_timeout_s] bounds inter-line idle on HTTP streams
+       (Anthropic/OpenAI/Gemini/GLM/Ollama). The deadline resets after each
+       successful line, so this is gap detection, not total run cap.
+       (CLI subprocess transports ignore it; bounded separately by OAS
+       cli_common_subprocess idle.) Previous value [timeout_s -. 5.0] made
+       the gap window almost equal to the outer turn budget (~3595s),
+       which never fires in practice. 120s catches real network/stream
+       hangs while preserving legitimate reasoning pauses + provider
+       keepalives (Anthropic SSE keepalive ~15s, reasoning models pause
+       10-30s mid-thought). #9639 envelope addendum. *)
+    let stream_idle_timeout_s = Some 120.0 in
     (* Observability for issue #10049: providers that declare runtime MCP
        HTTP header support need claude_mcp_config to reach the masc-mcp
        HTTP MCP endpoint; otherwise the MCP tool catalog is invisible to

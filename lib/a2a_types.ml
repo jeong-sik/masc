@@ -36,7 +36,7 @@ let task_type_of_string = function
 type delegate_result = {
   task_id: string;
   status: string;
-  result: string option;
+  result: string option [@default None];
   artifacts: artifact list;
 } [@@deriving yojson, show]
 

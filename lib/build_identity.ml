@@ -2,7 +2,7 @@
 
 type t = {
   release_version : string;
-  commit : string option;
+  commit : string option [@default None];
   started_at : string;
   uptime_seconds : int;
 } [@@deriving yojson { strict = false }]

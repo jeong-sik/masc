@@ -17,7 +17,7 @@
 (** Provider information for the agent *)
 type provider = {
   organization: string;
-  url: string option;
+  url: string option [@default None];
 } [@@deriving yojson, show, eq]
 
 (** Skill definition for agent capabilities.
@@ -26,7 +26,7 @@ type provider = {
 type skill = {
   id: string;
   name: string;
-  description: string option;
+  description: string option [@default None];
   tags: string list [@default []];           (** Category tags for skill discovery *)
   input_modes: string list;    (** MIME types: "text/plain", "application/json" *)
   output_modes: string list;   (** MIME types: "text/plain", "application/json" *)
@@ -43,9 +43,9 @@ type binding = {
 (** Security scheme for authentication *)
 type security_scheme = {
   scheme_type: string;  (** "bearer" | "apiKey" | "oauth2" | "openIdConnect" | "mutualTLS" | "none" *)
-  bearer_format: string option;
-  api_key_name: string option;
-  api_key_in: string option;  (** "header" | "query" *)
+  bearer_format: string option [@default None];
+  api_key_name: string option [@default None];
+  api_key_in: string option [@default None];  (** "header" | "query" *)
 } [@@deriving yojson, show, eq]
 
 (** Structured capabilities — A2A v0.3 spec *)

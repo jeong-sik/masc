@@ -78,7 +78,7 @@
   --shadow-card:   0 1px 4px rgba(0, 0, 0, 0.5);
   --shadow-raised: 0 8px 24px rgba(0, 0, 0, 0.55), 0 0 0 1px var(--border-highlight);
   --shadow-glow:   0 0 20px var(--accent-glow);
-  --shadow-inset:  inset 0 0 0 1px rgba(196, 162, 101, 0.25);
+  --shadow-ring:   inset 0 0 0 1px rgba(196, 162, 101, 0.25);
 
   /* Spacing (4px grid) */
   --space-1:  4px;
@@ -354,7 +354,7 @@ hr {
 .btn.primary {
   border-color: var(--accent-brass);
   color: var(--accent-brass);
-  box-shadow: var(--shadow-inset);
+  box-shadow: var(--shadow-ring);
 }
 .btn.primary:hover { background: var(--accent-glow); color: var(--text-bright); }
 .btn.ghost { background: transparent; }
@@ -424,7 +424,7 @@ hr {
 .frame-gothic {
   position: relative;
   border: 1px solid var(--border-highlight);
-  box-shadow: var(--shadow-inset), var(--shadow-panel);
+  box-shadow: var(--shadow-ring), var(--shadow-panel);
 }
 .frame-gothic::before,
 .frame-gothic::after {

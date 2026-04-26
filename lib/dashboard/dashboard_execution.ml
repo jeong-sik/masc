@@ -200,8 +200,10 @@ let message_json (message : Types.message) =
 
 (** Maximum wall-clock time for a single dashboard render.
     Keep a real guard for PG stalls, but allow slow cold-start projections
-    to finish at least once so cached surfaces can hydrate. *)
-let render_timeout_s = 60.0
+    to finish at least once so cached surfaces can hydrate. The default
+    (60s) is preserved by [Env_config_runtime.Dashboard.render_timeout_sec];
+    operators can override via [MASC_DASHBOARD_RENDER_TIMEOUT_SEC]. *)
+let render_timeout_s = Env_config_runtime.Dashboard.render_timeout_sec
 
 let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
       let ctx : _ Operator_control.context =

@@ -595,7 +595,7 @@ export function TokenTrendChart({ keeper }: { keeper: Keeper }) {
   return html`
     <div class="mb-5">
       <div class="flex items-center gap-2 mb-2">
-        <span class="text-2xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Turn Token Trend</span>
+        <span class="text-2xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">턴 토큰 추세</span>
         <span class="text-3xs text-[var(--text-dim)]">${points.length} turns</span>
       </div>
       <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -1124,7 +1124,7 @@ export function MetricsCharts({ keeper }: { keeper: Keeper }) {
       ${fallbackCount > 0 ? html`
         <div class="md:col-span-2 p-3 rounded border border-[var(--bad-20)] bg-[var(--bad-6)]">
           <div class="flex items-center justify-between mb-1.5">
-            <span class="text-3xs uppercase tracking-wider text-[var(--text-muted)]">Cascade Fallback</span>
+            <span class="text-3xs uppercase tracking-wider text-[var(--text-muted)]">캐스케이드 폴백</span>
             <span class="text-3xs text-[var(--bad)]">${fallbackCount}회</span>
           </div>
           <div class="flex flex-wrap gap-1.5">

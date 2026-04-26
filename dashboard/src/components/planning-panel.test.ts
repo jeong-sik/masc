@@ -111,7 +111,7 @@ describe('PlanningPanel', () => {
 
     render(html`<${PlanningPanel} />`)
 
-    expect(screen.getByText('Coordination Health')).toBeTruthy()
+    expect(screen.getByText('협력 상태')).toBeTruthy()
     expect(screen.getByText('reward_without_evidence')).toBeTruthy()
     expect(screen.getByText(/Reward missing evidence/)).toBeTruthy()
     expect(screen.getByText(/goal: goal-1/)).toBeTruthy()

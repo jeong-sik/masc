@@ -376,7 +376,7 @@ export function ToolQualityPanel() {
       ` : null}
 
       <div>
-        <div class="text-3xs text-[var(--text-dim)] uppercase tracking-wider mb-1">Per Keeper</div>
+        <div class="text-3xs text-[var(--text-dim)] uppercase tracking-wider mb-1">키퍼별</div>
         <${KeeperRateBars} keepers=${d.by_keeper} />
       </div>
 
@@ -401,7 +401,7 @@ export function ToolQualityPanel() {
       </div>
 
       <div>
-        <div class="text-3xs text-[var(--text-dim)] uppercase tracking-wider mb-1">Failure Categories</div>
+        <div class="text-3xs text-[var(--text-dim)] uppercase tracking-wider mb-1">실패 분류</div>
         <${FailureList} categories=${d.failure_categories} />
       </div>
     </div>

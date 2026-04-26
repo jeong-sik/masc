@@ -3,7 +3,7 @@ status: runbook
 last_verified: 2026-04-17
 code_refs:
   - lib/oas_events.ml
-  - lib/oas_sse_bridge.ml
+  - lib/oas_event_bridge.ml
   - lib/telemetry_unified.ml
 ---
 
@@ -22,13 +22,13 @@ This audit records the producer -> bridge -> durable store -> dashboard consumer
 
 ### 2. Bridge
 
-- `lib/oas_sse_bridge.ml` subscribes to the OAS event bus with `accept_all`.
+- `lib/oas_event_bridge.ml` subscribes to the OAS event bus with `accept_all`.
 - Native events are serialized with an `oas:` prefix.
 - Envelope fields `correlation_id`, `run_id`, and `ts_unix` are emitted for every relayed event.
 
 ### 3. Durable Store
 
-- `lib/oas_sse_bridge.ml` appends every relayed OAS event to `.masc/oas-events/` through `Dated_jsonl.append`.
+- `lib/oas_event_bridge.ml` appends every relayed OAS event to `.masc/oas-events/` through `Dated_jsonl.append`.
 - This durable JSONL store is the replay source for dashboard recovery and telemetry inspection.
 
 ### 4. Server Read Path

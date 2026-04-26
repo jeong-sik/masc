@@ -127,6 +127,63 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
          "%s: Fiber_started rejected during supervised launch: %s"
          meta.name
          (Keeper_state_machine.transition_error_to_string err));
+  (* Stale-turn watchdog (#fleet-stall 2026-04-26 Step 3).
+     Runs in its own Eio fiber so it stays responsive even if the heartbeat
+     fiber is blocked on a long synchronous call (the failure mode that
+     produced the "KSM=Running but no live turn" cluster). Polls
+     last_turn_ts via Keeper_registry; emits operator_broadcast_required
+     once per stale window so a Running-but-mute keeper becomes an
+     addressable event instead of a cosmetic dashboard chip.
+     Constants kept inline (no env knob — see memory:
+     no-hyperparameter-as-env-knob). *)
+  let stale_threshold_sec = 300.0 in
+  let watchdog_poll_sec = 30.0 in
+  let last_broadcast_ts = ref 0.0 in
+  Eio.Fiber.fork ~sw:ctx.sw (fun () ->
+    let rec watchdog_loop () =
+      if Atomic.get reg.fiber_stop then ()
+      else begin
+        Eio.Fiber.yield ();
+        let now = Time_compat.now () in
+        (try
+           match Keeper_registry.get ~base_path meta.name with
+           | Some entry
+             when entry.phase = Keeper_state_machine.Running ->
+             let last_turn = entry.meta.runtime.usage.last_turn_ts in
+             let stale =
+               last_turn > 0.0 && now -. last_turn > stale_threshold_sec
+             in
+             let cooldown_ok =
+               !last_broadcast_ts = 0.0
+               || now -. !last_broadcast_ts > stale_threshold_sec
+             in
+             if stale && cooldown_ok then begin
+               last_broadcast_ts := now;
+               Keeper_execution_receipt.emit_stale_keeper_broadcast
+                 ctx.config
+                 ~keeper_name:meta.name
+                 ~agent_name:meta.agent_name
+                 ~trace_id:
+                   (Keeper_id.Trace_id.to_string entry.meta.runtime.trace_id)
+                 ~generation:entry.meta.runtime.generation
+                 ~stale_seconds:(now -. last_turn)
+                 ~last_turn_ts:last_turn
+             end
+           | _ -> ()
+         with
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | exn ->
+           Log.Keeper.warn
+             "%s: stale watchdog tick failed (suppressed): %s"
+             meta.name (Printexc.to_string exn));
+        (try Eio.Time.sleep ctx.clock watchdog_poll_sec with
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | _ -> ());
+        watchdog_loop ()
+      end
+    in
+    try watchdog_loop ()
+    with Eio.Cancel.Cancelled _ -> ());
   Eio.Fiber.fork ~sw:ctx.sw (fun () ->
     let resolved = ref false in
     let resolve_done value =

@@ -63,7 +63,31 @@ type t =
 val stop_reason_to_string : Oas_worker.stop_reason -> string
 val sandbox_kind_of_meta : Keeper_types.keeper_meta -> string
 val to_json : t -> Yojson.Safe.t
+
+(** Derived display pair (disposition, reason) computed from receipt fields.
+    Exposed for test access; the runtime path consumes it via [append]. *)
+val operator_disposition : t -> string * string
+
+(** [needs_operator_broadcast disposition] returns true when the disposition
+    indicates a silent dead-end that operators must be notified about. *)
+val needs_operator_broadcast : string -> bool
+
 val append : Coord.config -> t -> unit
 val latest_json : Coord.config -> string -> Yojson.Safe.t option
 val latest_json_by_keeper :
   Coord.config -> string list -> (string * Yojson.Safe.t) list
+
+(** Emit a watchdog-sourced operator_broadcast_required event for a keeper
+    that has been Running but not produced a turn within the stale
+    threshold. Used by the supervisor watchdog fiber (Step 3 of the
+    keeper-pause-broadcast-watchdog change) to convert silent stalls into
+    addressable events. *)
+val emit_stale_keeper_broadcast :
+  Coord.config ->
+  keeper_name:string ->
+  agent_name:string ->
+  trace_id:string ->
+  generation:int ->
+  stale_seconds:float ->
+  last_turn_ts:float ->
+  unit

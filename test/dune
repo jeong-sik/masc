@@ -74,6 +74,7 @@
         test_keeper_accountability
         test_accountability_emit_skip_10314
         test_keeper_exec_status
+        test_keeper_pause_broadcast
         test_keeper_adaptive_thinking
         test_keeper_turn_intent
         test_keeper_lifecycle
@@ -225,6 +226,7 @@
           test_keeper_accountability
           test_accountability_emit_skip_10314
           test_keeper_exec_status
+          test_keeper_pause_broadcast
         test_keeper_adaptive_thinking
           test_keeper_turn_intent
           test_keeper_lifecycle

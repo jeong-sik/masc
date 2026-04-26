@@ -334,12 +334,105 @@ let to_json (receipt : t) =
       ("ended_at", `String receipt.ended_at);
     ]
 
+(* Operator broadcast hook (#fleet-stall 2026-04-26): operator_disposition
+   was a derived display field — emitted nowhere. A pause_human/alert_exhausted
+   verdict therefore had no transition out: dashboard turned a chip red, but
+   no event reached operators and no supervisor handoff fired. We now emit a
+   structured "keeper.operator_broadcast_required" activity event so the gate
+   verdict becomes addressable instead of cosmetic. *)
+let needs_operator_broadcast = function
+  | "pause_human" | "alert_exhausted" | "unknown" -> true
+  | _ -> false
+
+let emit_operator_broadcast config (receipt : t) ~disposition ~reason =
+  let payload =
+    `Assoc
+      [ "schema", `String "keeper.operator_broadcast_required.v1"
+      ; "keeper_name", `String receipt.keeper_name
+      ; "agent_name", `String receipt.agent_name
+      ; "trace_id", `String receipt.trace_id
+      ; "generation", `Int receipt.generation
+      ; "disposition", `String disposition
+      ; "disposition_reason", `String reason
+      ; "outcome", `String receipt.outcome
+      ; "terminal_reason_code", `String receipt.terminal_reason_code
+      ; "cascade_name", `String receipt.cascade_name
+      ; "cascade_outcome", `String receipt.cascade_outcome
+      ; "tool_contract_result", `String receipt.tool_contract_result
+      ; ( "error_kind"
+        , match receipt.error_kind with
+          | Some v -> `String v
+          | None -> `Null )
+      ; ( "error_message"
+        , match receipt.error_message with
+          | Some v -> `String v
+          | None -> `Null )
+      ; "ended_at", `String receipt.ended_at
+      ]
+  in
+  let event =
+    Activity_graph.emit config
+      ~actor:{ Activity_graph.kind = "agent"; id = receipt.agent_name }
+      ~kind:"keeper.operator_broadcast_required"
+      ~payload
+      ()
+  in
+  Log.Keeper.info
+    "%s: operator_broadcast_required emitted disposition=%s reason=%s seq=%d"
+    receipt.keeper_name disposition reason event.seq
+
 let append (config : Coord.config) (receipt : t) =
   let store =
     Keeper_types_support.keeper_execution_receipt_store config
       receipt.keeper_name
   in
-  Dated_jsonl.append store (to_json receipt)
+  Dated_jsonl.append store (to_json receipt);
+  let disposition, reason = operator_disposition receipt in
+  if needs_operator_broadcast disposition then
+    try emit_operator_broadcast config receipt ~disposition ~reason with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn ->
+      (* fail-closed: log loud, do not silently swallow. The append itself
+         has already persisted the receipt; the broadcast failure is its
+         own diagnostic that watchdogs/log alerts will pick up. *)
+      Log.Keeper.error
+        "%s: operator_broadcast_required EMIT FAILED disposition=%s \
+         reason=%s exn=%s"
+        receipt.keeper_name disposition reason (Printexc.to_string exn)
+
+(* Watchdog-driven broadcast (#fleet-stall 2026-04-26 Step 3): emitted by a
+   supervisor-side fiber when a Running keeper has not produced a turn for
+   longer than the stale threshold. This is the path that catches the
+   "KSM=Running but no live turn" failure mode where the heartbeat fiber is
+   blocked on a long call and would otherwise never produce a receipt. *)
+let emit_stale_keeper_broadcast config
+    ~keeper_name ~agent_name ~trace_id ~generation
+    ~stale_seconds ~last_turn_ts =
+  let payload =
+    `Assoc
+      [ "schema", `String "keeper.operator_broadcast_required.v1"
+      ; "keeper_name", `String keeper_name
+      ; "agent_name", `String agent_name
+      ; "trace_id", `String trace_id
+      ; "generation", `Int generation
+      ; "disposition", `String "stalled"
+      ; "disposition_reason"
+      , `String (Printf.sprintf "stale_turn_%.0fs" stale_seconds)
+      ; "stale_seconds", `Float stale_seconds
+      ; "last_turn_ts", `Float last_turn_ts
+      ; "source", `String "watchdog"
+      ]
+  in
+  let event =
+    Activity_graph.emit config
+      ~actor:{ Activity_graph.kind = "watchdog"; id = keeper_name }
+      ~kind:"keeper.operator_broadcast_required"
+      ~payload
+      ()
+  in
+  Log.Keeper.error
+    "%s: stale_keeper_broadcast emitted last_turn=%.0fs ago seq=%d"
+    keeper_name stale_seconds event.seq
 
 let latest_json (config : Coord.config) keeper_name =
   let store =

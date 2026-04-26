@@ -399,3 +399,11 @@ val update_uptime : unit -> unit
     Called automatically at module load via [let () = init ()].
     Idempotent — safe to call again. *)
 val init : unit -> unit
+
+(** {1 Diagnostics — issue #10682}
+
+    The most recent EDEADLK backtrace captured by [with_lock]. [None]
+    until the first re-entrant lock failure. Set side-effectfully when
+    [Stdlib.Mutex.lock metrics_mutex] raises [Sys_error]. The backtrace
+    pinpoints the offending re-entrant caller without requiring repro. *)
+val last_deadlock_backtrace_for_test : unit -> string option

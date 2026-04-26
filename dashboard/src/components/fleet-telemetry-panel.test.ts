@@ -783,7 +783,7 @@ describe('FleetTelemetryPanel', () => {
     await flushUi()
 
     expect(container.textContent).toContain('3 tool calls')
-    expect(container.textContent).not.toContain('No recent tools')
+    expect(container.textContent).not.toContain('최근 도구 기록 없음')
     expect(container.textContent).toContain('glm-5.1')
   })
 

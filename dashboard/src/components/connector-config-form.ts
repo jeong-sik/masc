@@ -374,6 +374,7 @@ function FieldWidget({ id, field, value, revealed }: {
           onInput=${onInput}
           step=${field.type === 'integer' ? 1 : 'any'}
           placeholder=${defaultToString(field.default)}
+          aria-label=${field.name}
           class=${baseInput}
         />
       `
@@ -443,6 +444,7 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
         <button
           type="button"
           class="mt-2 cursor-pointer rounded border border-[var(--bad-20)] px-2 py-1 text-3xs hover:bg-[var(--bad-10)]"
+          aria-label="config schema 다시 가져오기"
           onClick=${() => fetchSchema(connectorId)}
         >다시 시도</button>
       </div>
@@ -472,6 +474,7 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
                   class="ml-2 cursor-pointer rounded border border-[var(--ok-20)] bg-[var(--ok-10)] px-1.5 py-0.5 text-3xs text-[var(--color-status-ok)] hover:bg-[var(--ok-10)] disabled:cursor-not-allowed disabled:opacity-50"
                   disabled=${entry.restarting}
                   title="POST /sidecar/stop → 800ms → POST /sidecar/start"
+                  aria-label="sidecar 재시작"
                   onClick=${() => { void restartSidecar(connectorId) }}
                 >
                   ${entry.restarting ? '재시작 중...' : '🔄 재시작'}

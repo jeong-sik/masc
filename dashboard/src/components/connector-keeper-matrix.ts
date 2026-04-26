@@ -207,6 +207,7 @@ function MatrixCellButton({ cell }: { cell: MatrixCell }) {
       onClick=${onClick}
       disabled=${disabled}
       title=${title}
+      aria-label=${title}
       data-matrix-cell=${`${cell.keeperName}:${cell.connectorId}`}
       data-matrix-state=${cell.state}
     >
@@ -265,6 +266,7 @@ export function ConnectorKeeperMatrix({ matrix }: { matrix: MatrixData }) {
                     class="flex cursor-pointer items-center justify-center gap-1 rounded px-1 py-1 text-3xs uppercase tracking-3 text-[var(--color-fg-disabled)] hover:text-[var(--color-fg-primary)]"
                     onClick=${() => scrollToConnectorRow(colId)}
                     title=${`${CONNECTOR_DISPLAY_NAMES[colId] ?? colId} — 행으로 이동`}
+                    aria-label=${`${CONNECTOR_DISPLAY_NAMES[colId] ?? colId} — 행으로 이동`}
                   >
                     <span aria-hidden="true">${channelIcon(colId)}</span>
                     <span>${CONNECTOR_DISPLAY_NAMES[colId] ?? colId}</span>
@@ -354,6 +356,7 @@ function MatrixRowRender({ row }: { row: MatrixRow }) {
       class=${`flex cursor-pointer items-center gap-2 truncate rounded px-2 py-1 text-left text-xs hover:bg-[var(--white-4)] ${row.known ? 'text-[var(--color-fg-primary)]' : 'text-[var(--color-status-warn)]'}`}
       onClick=${() => scrollToKeeper(row.keeperName)}
       title=${row.known ? row.keeperName : `${row.keeperName} — directory 밖 keeper`}
+      aria-label=${row.known ? row.keeperName : `${row.keeperName} — directory 밖 keeper`}
     >
       ${row.known ? null : html`<span class="text-[var(--color-status-warn)]" aria-hidden="true">⚠</span>`}
       <span class="truncate">${row.keeperName}</span>

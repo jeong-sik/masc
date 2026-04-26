@@ -1207,6 +1207,7 @@ function ConnectorLivePanel({
                                                 type="button"
                                                 class="cursor-pointer rounded-sm border border-[var(--color-border-default)] bg-[var(--white-4)] px-2 py-0.5 text-3xs text-[var(--color-fg-primary)] hover:bg-[var(--white-8)]"
                                                 title=${roomId}
+                                                aria-label=${humanized ? `select ${humanized}` : `select ${truncateMiddle(roomId, 22)}`}
                                                 onClick=${() => { patchConnectorUiState(connectorId, { channelDraft: roomId }) }}
                                               >${humanized
                                                 ? html`<span>${humanized}</span><span class="ml-1 text-[var(--color-fg-disabled)]">· ${truncateMiddle(roomId, 10)}</span>`

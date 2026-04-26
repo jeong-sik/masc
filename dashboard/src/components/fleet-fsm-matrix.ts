@@ -60,12 +60,12 @@ export const FLEET_HISTORY_LEN = 30
 // cascade's tool calls (failure streak counter), so it is temporally
 // downstream of the other five for any given turn.
 const AXES: Array<{ key: LaneKey; label: string; acronym: string }> = [
-  { key: 'phase',      label: 'Lifecycle',   acronym: 'KSM' },
-  { key: 'turn',       label: 'Turn',        acronym: 'KTC' },
-  { key: 'decision',   label: 'Decision',    acronym: 'KDP' },
-  { key: 'cascade',    label: 'Cascade',     acronym: 'KCL' },
-  { key: 'compaction', label: 'Compaction',  acronym: 'KMC' },
-  { key: 'breaker',    label: 'Breaker',     acronym: 'KCB' },
+  { key: 'phase',      label: '생명주기',   acronym: 'KSM' },
+  { key: 'turn',       label: '턴',        acronym: 'KTC' },
+  { key: 'decision',   label: '결정',      acronym: 'KDP' },
+  { key: 'cascade',    label: 'Cascade',   acronym: 'KCL' },
+  { key: 'compaction', label: '압축',      acronym: 'KMC' },
+  { key: 'breaker',    label: '차단기',    acronym: 'KCB' },
 ]
 
 const INVARIANT_KEYS = Object.keys(INVARIANT_LABELS) as Array<

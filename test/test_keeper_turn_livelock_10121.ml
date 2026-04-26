@@ -37,6 +37,12 @@ let () =
 module L = Masc_mcp.Keeper_turn_livelock
 module Prom = Masc_mcp.Prometheus
 
+(* Keeper_turn_livelock now uses Eio.Mutex (was Stdlib.Mutex; the latter
+   raised EDEADLK whenever two Eio fibers contended). Every public entry
+   needs an Eio fiber context, so wrap each Alcotest test body in
+   Eio_main.run. *)
+let with_eio f () = Eio_main.run @@ fun _env -> f ()
+
 let starts_for ~keeper =
   Prom.metric_value_or_zero Prom.metric_keeper_turn_starts
     ~labels:[ ("keeper", keeper) ] ()
@@ -262,39 +268,39 @@ let () =
       ( "fresh",
         [
           Alcotest.test_case "first start is Fresh" `Quick
-            test_fresh_first_start;
+            (with_eio test_fresh_first_start);
         ] );
       ( "reattempt",
         [
           Alcotest.test_case "same id is Reattempt" `Quick
-            test_same_turn_classifies_as_reattempt;
+            (with_eio test_same_turn_classifies_as_reattempt);
           Alcotest.test_case "reattempt count grows" `Quick
-            test_reattempt_count_grows_monotonically;
+            (with_eio test_reattempt_count_grows_monotonically);
           Alcotest.test_case "forward advance resets" `Quick
-            test_forward_advance_resets;
+            (with_eio test_forward_advance_resets);
         ] );
       ( "regression",
         [
           Alcotest.test_case "backward id is Regression" `Quick
-            test_backward_turn_classifies_as_regression;
+            (with_eio test_backward_turn_classifies_as_regression);
         ] );
       ( "isolation",
         [
           Alcotest.test_case "per-keeper labels" `Quick
-            test_keeper_isolation;
+            (with_eio test_keeper_isolation);
         ] );
       ( "timing",
         [
           Alcotest.test_case "seconds_since_first_attempt" `Quick
-            test_seconds_since_first_attempt;
+            (with_eio test_seconds_since_first_attempt);
         ] );
       ( "guard",
         [
           Alcotest.test_case "max attempts gates attempt 4" `Quick
-            test_guard_blocks_after_max_attempts;
+            (with_eio test_guard_blocks_after_max_attempts);
           Alcotest.test_case "stuck age gates dispatch" `Quick
-            test_guard_blocks_on_stuck_age;
+            (with_eio test_guard_blocks_on_stuck_age);
           Alcotest.test_case "forward advance resets guard" `Quick
-            test_guard_forward_advance_resets;
+            (with_eio test_guard_forward_advance_resets);
         ] );
     ]

@@ -156,9 +156,13 @@ type autonomous_waiter =
     keeper_name : string;
   }
 
-(* Stdlib.Mutex: queue operations are pure/non-yielding and test helpers call
-   them outside Eio_main. *)
-let autonomous_wait_queue_mutex = Stdlib.Mutex.create ()
+(* Eio.Mutex: queue operations are pure/non-yielding. Stdlib.Mutex is
+   PTHREAD_MUTEX_ERRORCHECK on OCaml 5 and raises "Resource deadlock
+   avoided" whenever two Eio fibers on the same OS thread contend, which
+   is the default in single-domain Eio_main (memory:
+   feedback_eio-mutex-vs-stdlib). Test helpers must run inside Eio_main
+   to use this. *)
+let autonomous_wait_queue_mutex = Eio.Mutex.create ()
 
 let autonomous_wait_queue : autonomous_waiter list ref = ref []
 
@@ -167,10 +171,7 @@ let autonomous_wait_queue_next_ticket = ref 0
 let autonomous_queue_poll_sec = 0.05
 
 let with_autonomous_wait_queue f =
-  Mutex.lock autonomous_wait_queue_mutex;
-  Fun.protect
-    ~finally:(fun () -> Mutex.unlock autonomous_wait_queue_mutex)
-    f
+  Eio.Mutex.use_rw ~protect:true autonomous_wait_queue_mutex f
 
 let reset_autonomous_turn_queue_for_test () =
   with_autonomous_wait_queue (fun () ->
@@ -249,15 +250,15 @@ let semaphore_wait_timeout_sec =
     yield less aggressively. *)
 let last_autonomous_completion : (string, float) Hashtbl.t = Hashtbl.create 16
 
-(* Stdlib.Mutex: completion table may be accessed from keepers on different
-   domains concurrently. *)
-let last_autonomous_completion_mutex = Stdlib.Mutex.create ()
+(* Eio.Mutex: completion table is accessed from keeper Eio fibers in the
+   same domain. The previous "different domains concurrently" comment was
+   speculative — every actual caller (record_turn_start path in
+   run_keepalive_unified_turn) runs under Eio_main. Stdlib.Mutex's
+   PTHREAD_MUTEX_ERRORCHECK semantics turn fiber contention into EDEADLK. *)
+let last_autonomous_completion_mutex = Eio.Mutex.create ()
 
 let with_completion_table f =
-  Mutex.lock last_autonomous_completion_mutex;
-  Fun.protect
-    ~finally:(fun () -> Mutex.unlock last_autonomous_completion_mutex)
-    f
+  Eio.Mutex.use_rw ~protect:true last_autonomous_completion_mutex f
 
 let record_autonomous_completion ~(keeper_name : string) : unit =
   with_completion_table (fun () ->

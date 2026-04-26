@@ -26,16 +26,18 @@ type attempt_state = {
   first_started_at : float;
 }
 
-let mu = Stdlib.Mutex.create ()
+(* Eio.Mutex: keeper turn lifecycle is invoked from Eio fibers in a single
+   domain. Stdlib.Mutex is PTHREAD_MUTEX_ERRORCHECK on OCaml 5 and raises
+   "Resource deadlock avoided" the moment two fibers on the same OS thread
+   contend (memory: feedback_eio-mutex-vs-stdlib). All callbacks below are
+   pure Hashtbl ops with no yielding effects, so use_rw is a drop-in. *)
+let mu = Eio.Mutex.create ()
 let state : (string, attempt_state) Hashtbl.t = Hashtbl.create 16
 
 (** Reset for tests so each test starts clean.  Public so the test
     harness can call it without poking at internals. *)
 let reset_for_tests () =
-  Stdlib.Mutex.lock mu;
-  Fun.protect
-    ~finally:(fun () -> Stdlib.Mutex.unlock mu)
-    (fun () -> Hashtbl.clear state)
+  Eio.Mutex.use_rw ~protect:true mu (fun () -> Hashtbl.clear state)
 
 (** [start_outcome] records what happened on a [record_turn_start]
     call.  Returned so callers (tests, future gating logic) don't
@@ -127,11 +129,8 @@ let classify_and_update_start ~now ~(keeper : string) ~(turn_id : int)
 
 let record_turn_start ~(keeper : string) ~(turn_id : int) : start_outcome =
   let outcome =
-    Stdlib.Mutex.lock mu;
-    Fun.protect
-      ~finally:(fun () -> Stdlib.Mutex.unlock mu)
-      (fun () ->
-        classify_and_update_start ~now:(now_unix ()) ~keeper ~turn_id)
+    Eio.Mutex.use_rw ~protect:true mu (fun () ->
+      classify_and_update_start ~now:(now_unix ()) ~keeper ~turn_id)
   in
   (* Counter emissions outside the lock — Prometheus calls allocate
      and can recurse; minimise critical-section scope. *)
@@ -144,11 +143,8 @@ let guard_and_record_turn_start ?(now = now_unix) ~(keeper : string)
   let stuck_after_sec = Float.max 0.0 stuck_after_sec in
   let now_value = now () in
   let outcome =
-    Stdlib.Mutex.lock mu;
-    Fun.protect
-      ~finally:(fun () -> Stdlib.Mutex.unlock mu)
-      (fun () ->
-        match Hashtbl.find_opt state keeper with
+    Eio.Mutex.use_rw ~protect:true mu (fun () ->
+      match Hashtbl.find_opt state keeper with
         | Some prev when prev.turn_id = turn_id ->
           let age_sec = now_value -. prev.first_started_at in
           if prev.attempts >= max_attempts then
@@ -182,10 +178,7 @@ let guard_and_record_turn_start ?(now = now_unix) ~(keeper : string)
     Useful for diagnostics and future gating logic that wants to
     decide BEFORE incrementing. *)
 let current_state ~(keeper : string) : attempt_state option =
-  Stdlib.Mutex.lock mu;
-  Fun.protect
-    ~finally:(fun () -> Stdlib.Mutex.unlock mu)
-    (fun () -> Hashtbl.find_opt state keeper)
+  Eio.Mutex.use_rw ~protect:true mu (fun () -> Hashtbl.find_opt state keeper)
 
 (** [seconds_since_first_attempt ~keeper] returns the age of the
     current turn's FIRST attempt for [keeper], or [None] if no state

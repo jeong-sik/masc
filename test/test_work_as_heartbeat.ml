@@ -188,6 +188,9 @@ let test_semaphore_wait_timeout_exception_shape () =
   check (float 0.001) "exception carries wait sec" 42.5 carried
 
 let test_autonomous_queue_fifo_prevents_reentry_cutting () =
+  (* Keeper_keepalive.autonomous_wait_queue_mutex switched to Eio.Mutex —
+     queue helpers now require an Eio fiber context. *)
+  Eio_main.run @@ fun _env ->
   KK.reset_autonomous_turn_queue_for_test ();
   let cheolsu_1 = KK.enqueue_autonomous_waiter_for_test "cheolsu" in
   let sangsu = KK.enqueue_autonomous_waiter_for_test "sangsu" in

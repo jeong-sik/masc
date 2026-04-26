@@ -203,10 +203,13 @@ let make_generated_id prefix =
   let digest = Digestif.SHA256.(digest_string entropy |> to_hex) in
   prefix ^ "_" ^ String.sub digest 0 12
 
-let rules_mu = Stdlib.Mutex.create ()
+(* Eio.Mutex: rules read/write happens from approval-flow Eio fibers in a
+   single domain. Stdlib.Mutex with PTHREAD_MUTEX_ERRORCHECK turns fiber
+   contention into EDEADLK (memory: feedback_eio-mutex-vs-stdlib). *)
+let rules_mu = Eio.Mutex.create ()
 
 let with_rules_lock f =
-  Stdlib.Mutex.protect rules_mu f
+  Eio.Mutex.use_rw ~protect:true rules_mu f
 
 let rules_path ?base_path () =
   let base_path =
@@ -378,8 +381,11 @@ let find_matching_rule ?base_path ~keeper_name ~tool_name ~input ~risk_level
     Stored at [<base_path>/.masc/audit-approvals/YYYY-MM/DD.jsonl].
     Dashboard and room-scoped keeper runs pass [base_path] explicitly so approval
     history stays with the room that made the decision. *)
-let audit_stores_mu = Stdlib.Mutex.create ()
-let audit_io_mu = Stdlib.Mutex.create ()
+(* Eio.Mutex: audit store map and audit-IO are accessed from approval-flow
+   Eio fibers (single domain). Stdlib.Mutex with PTHREAD_MUTEX_ERRORCHECK
+   raises EDEADLK on fiber contention (memory: feedback_eio-mutex-vs-stdlib). *)
+let audit_stores_mu = Eio.Mutex.create ()
+let audit_io_mu = Eio.Mutex.create ()
 let audit_stores : (string, Dated_jsonl.t) Hashtbl.t = Hashtbl.create 4
 
 let audit_today_path base_dir =
@@ -396,7 +402,7 @@ let audit_today_path base_dir =
 let get_audit_store ?base_path () =
   let base = Option.value ~default:(Env_config_core.base_path ()) base_path in
   try
-    Stdlib.Mutex.protect audit_stores_mu (fun () ->
+    Eio.Mutex.use_rw ~protect:true audit_stores_mu (fun () ->
       match Hashtbl.find_opt audit_stores base with
       | Some store -> Some store
       | None ->
@@ -458,7 +464,7 @@ let audit_approval_event ?base_path ~event_type ~id ~keeper_name ~tool_name
          | None -> []))
     in
     Safe_ops.protect ~default:() (fun () ->
-      Stdlib.Mutex.protect audit_io_mu (fun () ->
+      Eio.Mutex.use_rw ~protect:true audit_io_mu (fun () ->
         Fs_compat.append_jsonl
           (audit_today_path (Dated_jsonl.base_dir store))
           json))
@@ -499,7 +505,7 @@ let read_recent_audit ?base_path ?keeper_name ?(n = 20) () : Yojson.Safe.t list 
 
 module For_testing = struct
   let reset_audit_store () =
-    Stdlib.Mutex.protect audit_stores_mu (fun () ->
+    Eio.Mutex.use_rw ~protect:true audit_stores_mu (fun () ->
       Hashtbl.clear audit_stores)
 end
 

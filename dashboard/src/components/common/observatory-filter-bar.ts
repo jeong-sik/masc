@@ -60,28 +60,28 @@ export function ObservatoryFilterBar() {
       <span class="text-3xs uppercase tracking-wider text-text-dim font-semibold">필터</span>
       ${keeper ? html`
         <${Chip}
-          label="Keeper"
+          label="키퍼"
           value=${keeper}
           onClear=${() => setObservatoryFilter({ keeper: null })}
         />
       ` : null}
       ${namespace ? html`
         <${Chip}
-          label="Namespace"
+          label="네임스페이스"
           value=${namespace}
           onClear=${() => setObservatoryFilter({ namespace: null })}
         />
       ` : null}
       ${operation ? html`
         <${Chip}
-          label="Operation"
+          label="작업"
           value=${operation}
           onClear=${() => setObservatoryFilter({ operation: null })}
         />
       ` : null}
       ${range ? html`
         <${Chip}
-          label="Range"
+          label="기간"
           value=${timeRangeLabel(range)}
           onClear=${() => setObservatoryFilter({ range: null })}
         />

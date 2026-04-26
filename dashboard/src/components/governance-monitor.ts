@@ -168,16 +168,16 @@ export function GovernanceMonitor() {
               value=${fmtSec(data.approval_queue.p50_wait_sec)}
             />
             <${StatCell}
-              label="p95 Wait"
+              label="p95 대기"
               value=${fmtSec(data.approval_queue.p95_wait_sec)}
             />
             <div class="flex items-center gap-2">
               <${StatCell}
-                label="Oldest"
+                label="최장 대기"
                 value=${fmtSec(data.approval_queue.oldest_pending_sec)}
               />
               <${StatusChip}
-                label=${data.approval_queue.depth === 0 ? 'clear' : `${data.approval_queue.depth} pending`}
+                label=${data.approval_queue.depth === 0 ? '없음' : `${data.approval_queue.depth}건 대기`}
                 tone=${queueTone(data.approval_queue.depth, data.approval_queue.oldest_pending_sec)}
               />
             </div>

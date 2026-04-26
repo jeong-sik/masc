@@ -525,13 +525,13 @@ export function Memory() {
         <${NewPostForm} />
       </div>
       <div class="mb-3 flex items-center gap-2">
-        <input
+        <${TextInput}
           type="search"
           value=${contentQuery}
           placeholder="제목/본문에서 검색"
-          aria-label="게시글 본문 필터"
+          ariaLabel="게시글 본문 필터"
           onInput=${(e: Event) => setContentQuery((e.target as HTMLInputElement).value)}
-          class="min-w-45 max-w-80 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-xs text-[var(--color-fg-primary)] placeholder:text-[var(--color-fg-disabled)] focus:outline-none focus:border-[var(--color-accent-fg)]"
+          class="min-w-45 max-w-80 flex-1 !px-2 !py-1 !text-xs"
         />
       </div>
       ${isFiltering && posts.length === 0 && rawPosts.length > 0

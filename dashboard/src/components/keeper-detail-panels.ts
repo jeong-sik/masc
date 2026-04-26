@@ -29,17 +29,17 @@ export function autonomyHint(count: number | undefined, proactiveEnabled: boolea
 }
 
 const CTX_SEGMENT_LABELS: Record<string, string> = {
-  system_prompt: 'System prompt',
-  dynamic_context: 'Turn context',
-  memory_context: 'Memory',
-  temporal_context: 'Temporal',
-  user_message: 'Current input',
-  history_user: 'History · user',
-  history_assistant_text: 'History · assistant',
-  history_tool_use: 'History · tool use',
-  history_tool_result: 'History · tool result',
-  history_other: 'History · other',
-  unattributed: 'Unattributed',
+  system_prompt: '시스템 프롬프트',
+  dynamic_context: '턴 컨텍스트',
+  memory_context: '메모리',
+  temporal_context: '시간',
+  user_message: '현재 입력',
+  history_user: '히스토리 · user',
+  history_assistant_text: '히스토리 · assistant',
+  history_tool_use: '히스토리 · tool use',
+  history_tool_result: '히스토리 · tool result',
+  history_other: '히스토리 · 기타',
+  unattributed: '미할당',
 }
 
 const CTX_SEGMENT_COLORS: Record<string, string> = {

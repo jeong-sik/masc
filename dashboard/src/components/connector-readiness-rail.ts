@@ -259,7 +259,7 @@ export function deriveRail(
     {
       key: 'process',
       state: processState,
-      label: 'Process',
+      label: '프로세스',
       detail: processDetail,
       hint: processState === 'bad' ? '클릭하면 sidecar Start' : '클릭하면 sidecar Stop',
       onClick: on.toggleProcess,
@@ -277,7 +277,7 @@ export function deriveRail(
     {
       key: 'bindings',
       state: bindingsState,
-      label: 'Bindings',
+      label: '바인딩',
       detail: bindingsDetail,
       hint: bindingsState !== 'ok' ? 'keeper 디렉토리로 스크롤' : null,
       onClick: on.scrollToBindings,

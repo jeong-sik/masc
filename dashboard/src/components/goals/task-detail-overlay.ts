@@ -270,9 +270,9 @@ function ContractSection({ task }: { task: Task }) {
         </div>
       ` : null}
 
-      <${GateSection} title="Done Gate" gate=${gate?.done} />
-      <${GateSection} title="Inspect → Implement" gate=${gate?.inspect_to_implement} />
-      <${GateSection} title="Verify → Review" gate=${gate?.verify_to_review} />
+      <${GateSection} title="완료 게이트" gate=${gate?.done} />
+      <${GateSection} title="검수 → 구현" gate=${gate?.inspect_to_implement} />
+      <${GateSection} title="검증 → 리뷰" gate=${gate?.verify_to_review} />
 
       ${completionItems.length > 0 ? html`
         <div class="rounded border border-[var(--white-10)] bg-[var(--white-3)] px-4 py-3">

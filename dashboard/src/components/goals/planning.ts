@@ -244,19 +244,19 @@ export function Planning() {
             </div>
             <${TaskCreateForm} />
             <div class="mt-3 flex items-center gap-2">
-              <${ExternalDocLink} href=${QUICK_START_DOC_URL} label="Quick Start" />
+              <${ExternalDocLink} href=${QUICK_START_DOC_URL} label="빠른 시작" />
             </div>
           </section>
 
           <${GuideCard}
-            eyebrow="Goal Pipeline"
+            eyebrow="목표 파이프라인"
             title="장기 목표 파이프라인"
             count=${goals.value.length}
             summary=${hasGoals
               ? '등록된 목표를 단기/중기/장기로 나눠 추적합니다.'
               : '등록된 목표가 없습니다. 목표를 등록하면 여기에 표시됩니다.'}
             docHref=${QUICK_START_DOC_URL}
-            docLabel="Quick Start"
+            docLabel="빠른 시작"
           />
         </div>
       </section>

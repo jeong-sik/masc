@@ -521,7 +521,7 @@ export function TransportHealthPanel() {
               <${MetricRow} label="활성 작업" value=${formatMetricValue(data.cluster.active_operations)} />
               <${MetricRow} label="부실 유닛" value=${formatMetricValue(data.cluster.stale_units)} />
               <${MetricRow} label="부실 에이전트" value=${data.agent_health.stale_total} />
-              <${MetricRow} label="Lifecycle Rejects" value=${data.agent_health.lifecycle_dispatch_rejections_total} />
+              <${MetricRow} label="라이프사이클 거부" value=${data.agent_health.lifecycle_dispatch_rejections_total} />
             <//>
           </div>
         </div>

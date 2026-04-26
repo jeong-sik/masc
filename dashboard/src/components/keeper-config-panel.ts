@@ -952,7 +952,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
           <${SetupGuideCard} connectorId="sandbox_hardened" />
         ` : null}
         <${Callout}
-          title="Base Path Anchor"
+          title="기본 경로 앵커"
           body=${sandboxAnchorText(c)}
         />
         ${rd.sandbox_profile === 'docker' ? html`

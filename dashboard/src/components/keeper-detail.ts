@@ -891,7 +891,7 @@ export function KeeperDetailPage() {
 
           <${KeeperDetailSection}
             id="keeper-summary"
-            eyebrow="State Overview"
+            eyebrow="상태 개요"
             title="운영 상태 개요"
             description="상태 기계, 메모리 티어, KPI, 추론/컨텍스트 계측을 먼저 훑어 keeper의 현재 건강도를 빠르게 판단합니다."
           >
@@ -1001,7 +1001,7 @@ export function KeeperDetailPage() {
 
           <${KeeperDetailSection}
             id="keeper-runtime"
-            eyebrow="Runtime Diagnostics"
+            eyebrow="런타임 진단"
             title="진단 / 운영"
             description="eval, supervisor, 복구 액션, tool audit, 품질 시그널을 한 군데로 모아 원인 파악과 개입을 빠르게 합니다."
           >

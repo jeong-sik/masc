@@ -297,7 +297,7 @@ describe('TransportHealthPanel', () => {
     expect(container.textContent).toContain('릴레이 큐')
     expect(container.textContent).toContain('릴레이 재시도')
     expect(container.textContent).toContain('릴레이 드롭')
-    expect(container.textContent).toContain('Lifecycle Rejects')
+    expect(container.textContent).toContain('라이프사이클 거부')
     expect(container.textContent).toContain('append 1 · broadcast 3')
     expect(container.textContent).toContain('queue 1 · append 1 · broadcast 0')
   })

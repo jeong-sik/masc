@@ -1242,7 +1242,7 @@ export function RelationshipList({ rels }: { rels: Record<string, string> }) {
   if (entries.length === 0) return html`<div class="py-2 px-3 text-xs text-[var(--text-muted)] italic" role="status">관계 없음</div>`
 
   return html`
-    <div class="max-h-55 overflow-y-auto custom-scrollbar flex flex-col gap-1.5">
+    <div role="region" aria-label="관계 목록" class="max-h-55 overflow-y-auto custom-scrollbar flex flex-col gap-1.5">
       ${entries.map(([name, relation]) => html`
         <div class="flex items-center gap-2 py-2 px-3 bg-[var(--white-3)] rounded">
           <span class="inline-flex items-center py-0.5 px-2 rounded-sm text-2xs font-medium bg-[var(--accent-12)] text-[var(--accent)] border border-[var(--accent-30)]">${name}</span>

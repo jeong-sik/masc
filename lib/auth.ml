@@ -328,16 +328,19 @@ let load_credential config agent_name : agent_credential option =
     try
       let content = read_text_file file in
       let json = Yojson.Safe.from_string content in
-      (* Redirect stub: { "redirect_to": "<uuid>.json" } *)
+      (* Redirect stub: { "redirect_to": "<uuid>.json" } — single
+         [List.assoc_opt] walk replaces the [mem_assoc + assoc] pair
+         (two passes, second raises [Not_found]). *)
       match json with
-      | `Assoc fields when List.mem_assoc "redirect_to" fields -> (
-          match List.assoc "redirect_to" fields with
-          | `String target -> (
+      | `Assoc fields -> (
+          match List.assoc_opt "redirect_to" fields with
+          | Some (`String target) -> (
               match redirect_target_file config target with
               | Some redirect_path ->
                   load_credential_from_path_raw config agent_name redirect_path
               | None -> None)
-          | _ -> None)
+          | Some _ -> None
+          | None -> load_credential_from_path_raw config agent_name file)
       | _ -> load_credential_from_path_raw config agent_name file
     with Sys_error _ | Yojson.Json_error _ -> None
 

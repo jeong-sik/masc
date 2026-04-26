@@ -58,6 +58,24 @@ let failure_reason_to_string = function
   | Fiber_unresolved -> "fiber_unresolved"
   | Exception s -> Printf.sprintf "exception(%s)" s
 
+(** #10584: cohort key for grouping failures by variant, ignoring
+    parameters (e.g. failure count, timeout seconds).  Lives next to
+    [failure_reason_to_string] in the source-of-truth module so any
+    new variant added to [failure_reason] forces a same-PR update of
+    BOTH conversion arms — the consumer in keeper_supervisor (and
+    any other dashboard / metrics call site) just delegates here.
+    This is Option B from #10584: avoid the recurring-P0 pattern
+    where consumer-side exhaustive matches catch up to upstream
+    variant additions only after the warn-error build trip. *)
+let failure_reason_cohort_key = function
+  | Some (Heartbeat_consecutive_failures _) -> "heartbeat_failures"
+  | Some (Turn_consecutive_failures _) -> "turn_failures"
+  | Some (Stale_turn_timeout _) -> "stale_turn_timeout"
+  | Some (Ambiguous_partial_commit _) -> "ambiguous_partial_commit"
+  | Some Fiber_unresolved -> "fiber_unresolved"
+  | Some (Exception _) -> "exception"
+  | None -> "unknown"
+
 (** Pure control-flow signal for immediate fiber termination (RFC-0002).
     Carries no state — failure reason must be pre-stored via
     [set_failure_reason] before raising. *)

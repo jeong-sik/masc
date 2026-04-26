@@ -10,7 +10,7 @@
     grid-template-columns: 160px 1fr 200px;
     gap: 20px;
     padding: 16px 18px;
-    border-bottom: 1px solid var(--line-1);
+    border-bottom: 1px solid var(--color-border-default);
     align-items: baseline;
   }
   .type-row:last-child { border-bottom: none; }
@@ -18,14 +18,14 @@
     font: 600 10px/1.2 var(--font-mono);
     letter-spacing: var(--track-caps);
     text-transform: uppercase;
-    color: var(--fg-2);
+    color: var(--color-fg-secondary);
   }
   .type-spec {
     font: 9px/1.4 var(--font-mono);
-    color: var(--fg-3);
+    color: var(--color-fg-muted);
     letter-spacing: var(--track-wide);
   }
-  .type-sample-inline { color: var(--fg-1); }
+  .type-sample-inline { color: var(--color-fg-primary); }
 
   .scale-grid {
     display: grid;
@@ -33,8 +33,8 @@
     gap: 10px;
   }
   .scale-cell {
-    background: var(--bg-1);
-    border: 1px solid var(--line-1);
+    background: var(--color-bg-surface);
+    border: 1px solid var(--color-border-default);
     border-radius: 3px;
     padding: 18px 14px;
     display: flex; flex-direction: column; gap: 10px;
@@ -42,21 +42,21 @@
   }
   .scale-num {
     font-family: var(--font-mono);
-    color: var(--fg-1);
+    color: var(--color-fg-primary);
     font-variant-numeric: tabular-nums;
     line-height: 1;
   }
   .scale-meta {
     font: 9px/1.2 var(--font-mono);
-    color: var(--fg-3);
+    color: var(--color-fg-muted);
     letter-spacing: var(--track-caps);
     text-transform: uppercase;
     margin-top: auto;
   }
 
   .family-card {
-    background: var(--bg-1);
-    border: 1px solid var(--line-1);
+    background: var(--color-bg-surface);
+    border: 1px solid var(--color-border-default);
     border-radius: 3px;
     padding: 20px;
     display: flex; flex-direction: column; gap: 14px;
@@ -65,17 +65,17 @@
     font: 600 10px/1 var(--font-mono);
     letter-spacing: var(--track-caps);
     text-transform: uppercase;
-    color: var(--fg-3);
+    color: var(--color-fg-muted);
   }
-  .family-demo { font-size: 40px; line-height: 1; color: var(--fg-1); }
-  .family-stack { font-family: var(--font-mono); font-size: 10px; color: var(--fg-3); word-break: break-all; }
+  .family-demo { font-size: 40px; line-height: 1; color: var(--color-fg-primary); }
+  .family-stack { font-family: var(--font-mono); font-size: 10px; color: var(--color-fg-muted); word-break: break-all; }
 
   .usage-row {
     display: grid; grid-template-columns: 1fr 1fr; gap: 14px;
   }
   .do, .dont {
-    background: var(--bg-1);
-    border: 1px solid var(--line-1);
+    background: var(--color-bg-surface);
+    border: 1px solid var(--color-border-default);
     border-radius: 3px;
     padding: 14px 16px;
     display: flex; flex-direction: column; gap: 10px;
@@ -92,31 +92,31 @@
 
   .kpi-demo {
     display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;
-    background: var(--bg-1); border: 1px solid var(--line-1); border-radius: 3px;
+    background: var(--color-bg-surface); border: 1px solid var(--color-border-default); border-radius: 3px;
     padding: 14px 16px;
   }
-  .kpi-cell { display: flex; flex-direction: column; gap: 4px; padding-right: 14px; border-right: 1px solid var(--line-1); }
+  .kpi-cell { display: flex; flex-direction: column; gap: 4px; padding-right: 14px; border-right: 1px solid var(--color-border-default); }
   .kpi-cell:last-child { border-right: none; }
-  .kpi-label { font: 600 9px/1.2 var(--font-mono); letter-spacing: var(--track-caps); text-transform: uppercase; color: var(--fg-3); }
-  .kpi-val   { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 20px; color: var(--fg-1); }
-  .kpi-val .u { font-size: 9px; color: var(--fg-3); margin-left: 4px; letter-spacing: var(--track-caps); text-transform: uppercase; }
-  .kpi-val.brass { color: var(--brass-1); }
+  .kpi-label { font: 600 9px/1.2 var(--font-mono); letter-spacing: var(--track-caps); text-transform: uppercase; color: var(--color-fg-muted); }
+  .kpi-val   { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 20px; color: var(--color-fg-primary); }
+  .kpi-val .u { font-size: 9px; color: var(--color-fg-muted); margin-left: 4px; letter-spacing: var(--track-caps); text-transform: uppercase; }
+  .kpi-val.brass { color: var(--color-accent-fg); }
   .kpi-val.ok    { color: var(--ok-fg); }
   .kpi-val.err   { color: var(--err-fg); }
 
   pre.voice {
-    background: var(--bg-0);
-    border: 1px solid var(--line-1);
+    background: var(--color-bg-page);
+    border: 1px solid var(--color-border-default);
     border-radius: 3px;
     padding: 14px 16px;
     font-family: var(--font-mono);
     font-size: 12px;
     line-height: 1.7;
-    color: var(--fg-2);
+    color: var(--color-fg-secondary);
     white-space: pre-wrap;
   }
-  pre.voice .brass { color: var(--brass-1); }
-  pre.voice .dim { color: var(--fg-3); }
+  pre.voice .brass { color: var(--color-accent-fg); }
+  pre.voice .dim { color: var(--color-fg-muted); }
   pre.voice .ok { color: var(--ok-fg); }
   pre.voice .err { color: var(--err-fg); }
   pre.voice .info { color: var(--info-fg); }
@@ -187,13 +187,13 @@
 
       <div class="type-row">
         <span class="type-role">Hero · h2</span>
-        <span class="type-sample-inline" style="font:600 28px/1.2 var(--font-mono); letter-spacing:-0.01em; font-variant-numeric:tabular-nums">TPS 1.24<span style="font-size:12px; color:var(--fg-3); margin-left:4px">s</span></span>
+        <span class="type-sample-inline" style="font:600 28px/1.2 var(--font-mono); letter-spacing:-0.01em; font-variant-numeric:tabular-nums">TPS 1.24<span style="font-size:12px; color:var(--color-fg-muted); margin-left:4px">s</span></span>
         <span class="type-spec">mono 28 / 600 / tabular</span>
       </div>
 
       <div class="type-row">
         <span class="type-role">KPI-L · h3</span>
-        <span class="type-sample-inline" style="font:600 20px/1.2 var(--font-mono); font-variant-numeric:tabular-nums; color:var(--brass-1)">87<span style="font-size:10px; color:var(--fg-3); margin-left:3px">%</span> <span style="color:var(--ok-fg)">PASS</span></span>
+        <span class="type-sample-inline" style="font:600 20px/1.2 var(--font-mono); font-variant-numeric:tabular-nums; color:var(--color-accent-fg)">87<span style="font-size:10px; color:var(--color-fg-muted); margin-left:3px">%</span> <span style="color:var(--ok-fg)">PASS</span></span>
         <span class="type-spec">mono 20 / 600 / tabular</span>
       </div>
 
@@ -211,31 +211,31 @@
 
       <div class="type-row">
         <span class="type-role">Label · .label</span>
-        <span class="type-sample-inline" style="font:600 11px/1.2 var(--font-sans); letter-spacing:.08em; text-transform:uppercase; color:var(--fg-3)">Tool Use</span>
+        <span class="type-sample-inline" style="font:600 11px/1.2 var(--font-sans); letter-spacing:.08em; text-transform:uppercase; color:var(--color-fg-muted)">Tool Use</span>
         <span class="type-spec">sans 11 / 600 / +.08 / UPPER</span>
       </div>
 
       <div class="type-row">
         <span class="type-role">Meta · mono</span>
-        <span class="type-sample-inline" style="font:12px/1.2 var(--font-mono); color:var(--fg-2); font-variant-numeric:tabular-nums">t-9f2a · 2026-04-24 16:31:27Z · +18 −4</span>
+        <span class="type-sample-inline" style="font:12px/1.2 var(--font-mono); color:var(--color-fg-secondary); font-variant-numeric:tabular-nums">t-9f2a · 2026-04-24 16:31:27Z · +18 −4</span>
         <span class="type-spec">mono 12 / 400 / tabular</span>
       </div>
 
       <div class="type-row">
         <span class="type-role">Caption · .caption</span>
-        <span class="type-sample-inline" style="font:10px/1.2 var(--font-mono); color:var(--fg-3); letter-spacing:.04em">CASCADE HIT @ STEP 2 · ANTHROPIC</span>
+        <span class="type-sample-inline" style="font:10px/1.2 var(--font-mono); color:var(--color-fg-muted); letter-spacing:.04em">CASCADE HIT @ STEP 2 · ANTHROPIC</span>
         <span class="type-spec">mono 10 / 400 / +.04</span>
       </div>
 
       <div class="type-row">
         <span class="type-role">Micro</span>
-        <span class="type-sample-inline" style="font:9px/1.2 var(--font-mono); color:var(--fg-3); letter-spacing:.04em">v 0.42.1 · BUILD 2847 · MAIN@e81a7f</span>
+        <span class="type-sample-inline" style="font:9px/1.2 var(--font-mono); color:var(--color-fg-muted); letter-spacing:.04em">v 0.42.1 · BUILD 2847 · MAIN@e81a7f</span>
         <span class="type-spec">mono 9 / 400 / +.04</span>
       </div>
 
       <div class="type-row">
         <span class="type-role">Code</span>
-        <span class="type-sample-inline" style="font:12px/1.45 var(--font-mono); color:var(--fg-2)">await keeper.claim(<span style="color:var(--brass-1)">"t-9f2a"</span>)</span>
+        <span class="type-sample-inline" style="font:12px/1.45 var(--font-mono); color:var(--color-fg-secondary)">await keeper.claim(<span style="color:var(--color-accent-fg)">"t-9f2a"</span>)</span>
         <span class="type-spec">mono 12 / 400 / 1.45</span>
       </div>
 
@@ -298,7 +298,7 @@
     <div class="usage-row">
       <div class="do">
         <div class="do-h">Do</div>
-        <ul style="list-style:none; padding:0; display:flex; flex-direction:column; gap:6px; font: var(--type-body); color:var(--fg-2)">
+        <ul style="list-style:none; padding:0; display:flex; flex-direction:column; gap:6px; font: var(--type-body); color:var(--color-fg-secondary)">
           <li>— Use <span class="mono">tabular-nums</span> on every data cell</li>
           <li>— Keep labels ≤11px, UPPERCASE, .08em tracked</li>
           <li>— Keeper names always lowercase mono: <span class="mono">nick0cave</span></li>
@@ -308,7 +308,7 @@
       </div>
       <div class="dont">
         <div class="dont-h">Don't</div>
-        <ul style="list-style:none; padding:0; display:flex; flex-direction:column; gap:6px; font: var(--type-body); color:var(--fg-2)">
+        <ul style="list-style:none; padding:0; display:flex; flex-direction:column; gap:6px; font: var(--type-body); color:var(--color-fg-secondary)">
           <li>— No emoji. No exclamation marks.</li>
           <li>— No pure white text — warm cream only</li>
           <li>— No sans for numbers or IDs</li>

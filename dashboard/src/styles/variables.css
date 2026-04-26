@@ -278,4 +278,27 @@
   --z-layout: 1;
   --z-tab-sticky: 30;
   --z-header: 40;
+
+  /* SPEC v0.1 §3.1-3.5 — Semantic vocabulary alias to dashboard raw tier.
+     See dashboard/design-system/SPEC.md. New components should prefer
+     these --color-* names; legacy --text-/--border-/--bg- usage is
+     migrated per-screen in Stage 2+ PRs. */
+  --color-bg-page: var(--bg-root);
+  --color-bg-surface: var(--bg-panel);
+  --color-bg-hover: var(--bg-panel-hover);
+
+  --color-fg-primary: var(--text-body);
+  --color-fg-secondary: var(--text-strong);
+  --color-fg-muted: var(--text-muted);
+  --color-fg-disabled: var(--text-dim);
+
+  --color-border-default: var(--border-base);
+  --color-border-strong: var(--border-strong);
+  --color-border-divider: var(--border-subtle);
+
+  --color-accent-fg: var(--accent);
+
+  --color-status-ok: var(--ok);
+  --color-status-warn: var(--warn);
+  --color-status-err: var(--bad);
 }

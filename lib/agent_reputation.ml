@@ -143,7 +143,7 @@ let count_mention_activity (config : Coord.config) ~(agent_name : string)
     : int * int =
   let all = Mention_inbox.read_mentions config ~target_agent:agent_name ~limit:10000 in
   let received = List.length all in
-  let responded = List.length (List.filter (fun r -> r.Mention_inbox.read_at > 0.0) all) in
+  let responded = List_util.count_if (fun r -> r.Mention_inbox.read_at > 0.0) all in
   (received, responded)
 
 (** {1 Overall Score Computation} *)

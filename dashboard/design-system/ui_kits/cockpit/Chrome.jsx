@@ -166,7 +166,7 @@ function Lifeline() {
       <span className="life-label">Lifeline · 60s</span>
       <div className="life-trace">
         <svg viewBox="0 0 600 20" preserveAspectRatio="none">
-          <path d={d} stroke="var(--brass-1)" strokeWidth="1" fill="none" />
+          <path d={d} stroke="var(--color-accent-fg)" strokeWidth="1" fill="none" />
         </svg>
       </div>
       <span className="life-now"><span className="life-dot"></span> 1.24 TPS · NOW</span>

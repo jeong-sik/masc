@@ -16,6 +16,13 @@ val starts_with_ci : prefix:string -> string -> bool
     of [prefix] and [s] inline during the compare. Returns [true] when
     [prefix] is empty. *)
 
+val equals_ci : string -> string -> bool
+(** [equals_ci a b] is the ASCII case-insensitive equality. Performs
+    no allocation; equivalent to [String.lowercase_ascii a =
+    String.lowercase_ascii b] but short-circuits on length mismatch and
+    first differing byte. Hot for HTTP header / case-insensitive flag
+    lookup. *)
+
 val find_substring : ?pos:int -> string -> string -> int option
 (** [find_substring ?pos haystack needle] returns the byte index of the
     first occurrence of [needle] in [haystack] at or after [pos]

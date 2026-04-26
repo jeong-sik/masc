@@ -75,7 +75,7 @@ let check_convergence ~goal_id ~tasks ?(stagnation_threshold = 5)
   let total = List.length goal_tasks in
   if total = 0 then None
   else
-    let completed = List.length (List.filter is_completed goal_tasks) in
+    let completed = List_util.count_if is_completed goal_tasks in
     let all_terminal = List.for_all is_terminal goal_tasks in
     if all_terminal && completed = total then
       Some (AllSubTasksDone { completed; total })

@@ -8,23 +8,23 @@
   <link rel="stylesheet" href="../source_styles/tokens.css" />
   <link rel="stylesheet" href="../source_styles/primitives.css" />
   <style>
-    html, body { margin:0; background: var(--bg-0); color: var(--fg-1); font-family: var(--font-sans); min-height: 100vh; }
+    html, body { margin:0; background: var(--color-bg-page); color: var(--color-fg-primary); font-family: var(--font-sans); min-height: 100vh; }
     .page { max-width: 1180px; margin:0 auto; padding: 32px 32px 96px; }
     .back { font: var(--type-micro); color: var(--fg-4); text-decoration:none; letter-spacing: .08em; display:inline-block; margin-bottom:20px; }
-    .back:hover { color: var(--fg-2); }
+    .back:hover { color: var(--color-fg-secondary); }
     h1 { font-family: var(--font-mono); font-size: 18px; font-weight: 600; margin: 0 0 4px; }
-    .sub { color: var(--fg-3); font-size: 12px; margin-bottom: 28px; line-height:1.5; max-width: 700px; }
-    h2 { font: var(--type-label); text-transform: uppercase; letter-spacing: .08em; color: var(--fg-3); font-weight: 600; font-size: 11px; margin: 28px 0 8px; padding-bottom: 6px; border-bottom: 1px solid var(--line-2); }
-    h2 .tag { margin-left: 8px; color: var(--brass-1); font-weight: 500; }
+    .sub { color: var(--color-fg-muted); font-size: 12px; margin-bottom: 28px; line-height:1.5; max-width: 700px; }
+    h2 { font: var(--type-label); text-transform: uppercase; letter-spacing: .08em; color: var(--color-fg-muted); font-weight: 600; font-size: 11px; margin: 28px 0 8px; padding-bottom: 6px; border-bottom: 1px solid var(--color-border-strong); }
+    h2 .tag { margin-left: 8px; color: var(--color-accent-fg); font-weight: 500; }
     .stamp { position:fixed; top:12px; right:16px; font-family: var(--font-mono); font-size: 10px; color: var(--fg-4); }
 
-    .seg { background: var(--bg-1); border: 1px solid var(--line-1); border-radius: var(--r-1); padding: 16px; margin-bottom: 10px; display:grid; grid-template-columns: 280px 1fr; gap:20px; align-items:start; }
-    .seg .meta { font-family: var(--font-mono); font-size: 11px; color: var(--fg-3); line-height: 1.5; }
-    .seg .meta .n { color: var(--fg-1); font-weight:600; font-size: 13px; margin-bottom: 4px; display:block; }
-    .seg .meta .code { display:block; margin-top: 8px; color: var(--fg-4); font-size: 10px; line-height: 1.5; padding: 6px 8px; background: var(--bg-2); border: 1px solid var(--line-1); border-radius: 2px; }
+    .seg { background: var(--color-bg-surface); border: 1px solid var(--color-border-default); border-radius: var(--r-1); padding: 16px; margin-bottom: 10px; display:grid; grid-template-columns: 280px 1fr; gap:20px; align-items:start; }
+    .seg .meta { font-family: var(--font-mono); font-size: 11px; color: var(--color-fg-muted); line-height: 1.5; }
+    .seg .meta .n { color: var(--color-fg-primary); font-weight:600; font-size: 13px; margin-bottom: 4px; display:block; }
+    .seg .meta .code { display:block; margin-top: 8px; color: var(--fg-4); font-size: 10px; line-height: 1.5; padding: 6px 8px; background: var(--color-bg-panel-alt); border: 1px solid var(--color-border-default); border-radius: 2px; }
 
-    .canvas { background: var(--bg-0); border: 1px solid var(--line-1); border-radius: var(--r-1); overflow: hidden; min-height: 180px; position:relative; }
-    .src-pane { padding: 14px 18px; font-family: var(--font-mono); font-size: 11px; color: var(--fg-2); line-height: 1.7; position: relative; }
+    .canvas { background: var(--color-bg-page); border: 1px solid var(--color-border-default); border-radius: var(--r-1); overflow: hidden; min-height: 180px; position:relative; }
+    .src-pane { padding: 14px 18px; font-family: var(--font-mono); font-size: 11px; color: var(--color-fg-secondary); line-height: 1.7; position: relative; }
     .ln { display:flex; gap: 10px; }
     .ln .n { color: var(--fg-4); width: 18px; text-align:right; flex-shrink:0; }
     .k { color: #c195e8; } .t { color: #88b5d8; } .s { color: #a8c97a; } .f { color: #e8c976; }
@@ -35,18 +35,18 @@
     .l1-rec .bar { width: 6px; background: var(--warn); border-radius: 1px 1px 0 0; opacity: .55; position: relative; }
     .l1-rec .bar.hot { opacity: 1; box-shadow: 0 0 8px rgb(var(--warn-glow)/.8); }
     .l1-rec .bar.cold { opacity: .22; background: var(--fg-4); box-shadow: none; }
-    .l1-rec .bar.now { background: var(--brass-1); box-shadow: 0 0 10px rgb(var(--brass-glow)/.9); }
-    .l1-rec .bar[data-by]::after { content: attr(data-by); position: absolute; top: -11px; left: 50%; transform: translateX(-50%); font-family: var(--font-mono); font-size: 7px; color: var(--brass-1); letter-spacing: .04em; white-space: nowrap; opacity: .85; }
-    .l1-axis { display:flex; justify-content:space-between; font-family: var(--font-mono); font-size: 9px; color: var(--fg-4); letter-spacing: .04em; margin-top: 6px; padding-top: 4px; border-top: 1px dashed var(--line-1); }
+    .l1-rec .bar.now { background: var(--color-accent-fg); box-shadow: 0 0 10px rgb(var(--brass-glow)/.9); }
+    .l1-rec .bar[data-by]::after { content: attr(data-by); position: absolute; top: -11px; left: 50%; transform: translateX(-50%); font-family: var(--font-mono); font-size: 7px; color: var(--color-accent-fg); letter-spacing: .04em; white-space: nowrap; opacity: .85; }
+    .l1-axis { display:flex; justify-content:space-between; font-family: var(--font-mono); font-size: 9px; color: var(--fg-4); letter-spacing: .04em; margin-top: 6px; padding-top: 4px; border-top: 1px dashed var(--color-border-default); }
     .l1-legend { display:flex; gap: 14px; align-items:center; margin-top: 8px; font-family: var(--font-mono); font-size: 9px; color: var(--fg-4); letter-spacing: .04em; }
     .l1-legend .swatch { display:inline-block; width: 10px; height: 6px; border-radius: 1px; vertical-align: middle; margin-right: 4px; }
-    .l1-meta { display:flex; gap: 10px; align-items:center; padding: 6px 18px; background: var(--bg-2); border-top: 1px solid var(--line-1); border-bottom: 1px solid var(--line-1); font-family: var(--font-mono); font-size: 10px; color: var(--fg-3); }
+    .l1-meta { display:flex; gap: 10px; align-items:center; padding: 6px 18px; background: var(--color-bg-panel-alt); border-top: 1px solid var(--color-border-default); border-bottom: 1px solid var(--color-border-default); font-family: var(--font-mono); font-size: 10px; color: var(--color-fg-muted); }
     .l1-meta .k { color: var(--fg-4); font-size: 9px; letter-spacing: .06em; text-transform: uppercase; margin-right: 4px; }
-    .l1-meta .v { color: var(--fg-1); font-variant-numeric: tabular-nums; margin-right: 14px; }
+    .l1-meta .v { color: var(--color-fg-primary); font-variant-numeric: tabular-nums; margin-right: 14px; }
 
     /* ── L2 PARALLEL ── */
     .l2 { position: relative; height: 180px; padding: 14px; }
-    .l2 .lane { position:absolute; left: 14px; right: 14px; height: 22px; border-bottom: 1px dashed var(--line-1); display:flex; align-items:center; }
+    .l2 .lane { position:absolute; left: 14px; right: 14px; height: 22px; border-bottom: 1px dashed var(--color-border-default); display:flex; align-items:center; }
     .l2 .lane .name { width: 70px; font-family: var(--font-mono); font-size: 9px; color: var(--fg-4); letter-spacing: .04em; }
     .l2 .cursor { position: absolute; width: 10px; height: 14px; border-radius: 1px; top: 50%; transform: translateY(-50%); }
     .l2 .cursor::after { content: ''; position: absolute; left: 5px; top: -6px; width: 1px; height: 20px; background: currentColor; opacity: .4; }
@@ -54,16 +54,16 @@
     /* ── L3 TOOLS ── */
     .l3 { display:flex; flex-direction: column; gap: 5px; padding: 14px 18px; }
     .l3-row { display:grid; grid-template-columns: 18px 100px 1fr 70px 50px; align-items:center; gap: 10px; padding: 2px 0; border-bottom: 1px dashed transparent; }
-    .l3-row:hover { border-bottom-color: var(--line-1); }
-    .l3-glyph { font-family: var(--font-mono); font-size: 13px; color: var(--brass-1); text-shadow: 0 0 4px rgb(var(--brass-glow)/.6); text-align:center; }
-    .l3-freq { height: 4px; background: linear-gradient(90deg, var(--brass-1), rgb(var(--brass-glow)/.15)); border-radius: 999px; box-shadow: 0 0 4px rgb(var(--brass-glow)/.4); }
+    .l3-row:hover { border-bottom-color: var(--color-border-default); }
+    .l3-glyph { font-family: var(--font-mono); font-size: 13px; color: var(--color-accent-fg); text-shadow: 0 0 4px rgb(var(--brass-glow)/.6); text-align:center; }
+    .l3-freq { height: 4px; background: linear-gradient(90deg, var(--color-accent-fg), rgb(var(--brass-glow)/.15)); border-radius: 999px; box-shadow: 0 0 4px rgb(var(--brass-glow)/.4); }
     .l3-label { font-family: var(--font-mono); font-size: 11px; color: var(--brass-2); letter-spacing: .04em; }
     .l3-by { font-family: var(--font-mono); font-size: 9px; color: var(--fg-4); letter-spacing: .04em; }
-    .l3-count { font-family: var(--font-mono); font-size: 10px; color: var(--fg-3); text-align: right; font-variant-numeric: tabular-nums; }
-    .l3-head { display:grid; grid-template-columns: 18px 100px 1fr 70px 50px; gap: 10px; padding: 6px 18px 4px; font-family: var(--font-mono); font-size: 8px; color: var(--fg-4); letter-spacing: .08em; text-transform: uppercase; border-bottom: 1px solid var(--line-1); }
+    .l3-count { font-family: var(--font-mono); font-size: 10px; color: var(--color-fg-muted); text-align: right; font-variant-numeric: tabular-nums; }
+    .l3-head { display:grid; grid-template-columns: 18px 100px 1fr 70px 50px; gap: 10px; padding: 6px 18px 4px; font-family: var(--font-mono); font-size: 8px; color: var(--fg-4); letter-spacing: .08em; text-transform: uppercase; border-bottom: 1px solid var(--color-border-default); }
 
     /* ── L4 APPROVE ── */
-    .l4-block { padding: 12px 18px; background: rgb(107 158 107 / .05); border-left: 2px solid var(--ok); position: relative; font-family: var(--font-mono); font-size: 11px; color: var(--fg-2); margin-bottom: 6px; }
+    .l4-block { padding: 12px 18px; background: rgb(107 158 107 / .05); border-left: 2px solid var(--ok); position: relative; font-family: var(--font-mono); font-size: 11px; color: var(--color-fg-secondary); margin-bottom: 6px; }
     .l4-block.flag { background: rgb(196 106 90 / .05); border-left-color: var(--err); }
     .l4-stamp { position:absolute; right: 18px; top: 50%; transform: translateY(-50%) rotate(-10deg); font-family: var(--font-mono); font-size: 28px; color: var(--ok); opacity: .18; font-weight: 700; letter-spacing: .08em; }
     .l4-block.flag .l4-stamp { color: var(--err); }
@@ -74,30 +74,30 @@
     .l5-note { width: 260px; background: linear-gradient(180deg, rgb(138 106 160 / .15), rgb(138 106 160 / .05)); border: 1px solid rgb(var(--stalled-glow)/.4); border-radius: var(--r-1); padding: 8px 10px; backdrop-filter: blur(3px); box-shadow: 0 6px 20px rgba(0,0,0,.45); }
     .l5-head { display:flex; align-items:center; gap: 5px; font-family: var(--font-mono); font-size: 9px; color: var(--stalled); letter-spacing: .06em; text-transform: uppercase; margin-bottom: 4px; }
     .l5-head .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--stalled); box-shadow: 0 0 4px rgb(var(--stalled-glow)/.8); }
-    .l5-body { font-size: 11px; color: var(--fg-1); line-height: 1.45; }
-    .l5-pin { position: absolute; top: -6px; right: 20px; width: 10px; height: 10px; border-radius: 50%; background: var(--brass-1); box-shadow: 0 0 8px rgb(var(--brass-glow)/.7); border: 1px solid var(--brass-3); }
+    .l5-body { font-size: 11px; color: var(--color-fg-primary); line-height: 1.45; }
+    .l5-pin { position: absolute; top: -6px; right: 20px; width: 10px; height: 10px; border-radius: 50%; background: var(--color-accent-fg); box-shadow: 0 0 8px rgb(var(--brass-glow)/.7); border: 1px solid var(--brass-3); }
 
     /* ── COMBINED ── */
-    .combo { position: relative; padding: 14px 18px; background: var(--bg-0); }
+    .combo { position: relative; padding: 14px 18px; background: var(--color-bg-page); }
     .combo .layer-labels { position:absolute; top: 10px; right: 14px; display:flex; flex-direction: column; gap: 3px; font-family: var(--font-mono); font-size: 9px; letter-spacing: .08em; }
-    .combo .layer-labels span { padding: 2px 6px; border: 1px solid var(--line-2); border-radius: 2px; background: var(--bg-1); }
-    .combo .layer-labels .on { color: var(--brass-1); border-color: var(--brass-2); background: rgb(var(--brass-glow)/.08); }
+    .combo .layer-labels span { padding: 2px 6px; border: 1px solid var(--color-border-strong); border-radius: 2px; background: var(--color-bg-surface); }
+    .combo .layer-labels .on { color: var(--color-accent-fg); border-color: var(--brass-2); background: rgb(var(--brass-glow)/.08); }
     .code-line { display:flex; align-items:center; gap: 8px; font-family: var(--font-mono); font-size: 11px; padding: 2px 0; position: relative; }
     .code-line .time-bar { width: 3px; height: 14px; background: var(--warn); border-radius: 1px; }
     .code-line .num { color: var(--fg-4); width: 20px; text-align: right; }
-    .code-line .src { flex: 1; color: var(--fg-2); }
+    .code-line .src { flex: 1; color: var(--color-fg-secondary); }
     .code-line .src .hl { background: rgb(201 162 74 / .12); padding: 0 2px; }
     .code-line .cursor-chip { font-size: 9px; padding: 0 4px; border-radius: 2px; font-family: var(--font-mono); letter-spacing: .04em; }
-    .code-line .cursor-chip.c-nick { background: rgb(var(--brass-glow)/.15); color: var(--brass-1); border: 1px solid var(--brass-2); }
+    .code-line .cursor-chip.c-nick { background: rgb(var(--brass-glow)/.15); color: var(--color-accent-fg); border: 1px solid var(--brass-2); }
     .code-line .cursor-chip.c-qa { background: rgb(196 106 90 / .15); color: var(--err-fg); border: 1px solid var(--err); }
     .code-line .cursor-chip.c-ss { background: rgb(107 158 107 / .12); color: var(--ok-fg); border: 1px solid var(--ok); }
-    .code-line .tool-glyph { color: var(--brass-1); text-shadow: 0 0 4px rgb(var(--brass-glow)/.6); font-size: 11px; }
+    .code-line .tool-glyph { color: var(--color-accent-fg); text-shadow: 0 0 4px rgb(var(--brass-glow)/.6); font-size: 11px; }
 
     /* bar toggle */
-    .bar { display:inline-flex; gap: 0; border: 1px solid var(--line-2); border-radius: var(--r-1); overflow: hidden; background: var(--bg-1); }
-    .bar button { background: transparent; border: none; color: var(--fg-3); padding: 5px 10px; font-family: var(--font-mono); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; font-weight:600; cursor: pointer; border-right: 1px solid var(--line-2); }
+    .bar { display:inline-flex; gap: 0; border: 1px solid var(--color-border-strong); border-radius: var(--r-1); overflow: hidden; background: var(--color-bg-surface); }
+    .bar button { background: transparent; border: none; color: var(--color-fg-muted); padding: 5px 10px; font-family: var(--font-mono); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; font-weight:600; cursor: pointer; border-right: 1px solid var(--color-border-strong); }
     .bar button:last-child { border-right: none; }
-    .bar button.on { background: rgb(var(--brass-glow)/.08); color: var(--brass-1); box-shadow: inset 0 -1.5px 0 var(--brass-1); }
+    .bar button.on { background: rgb(var(--brass-glow)/.08); color: var(--color-accent-fg); box-shadow: inset 0 -1.5px 0 var(--color-accent-fg); }
   </style>
 </head>
 <body>
@@ -105,7 +105,7 @@
   <div class="page">
     <a class="back" href="index.html">← design system</a>
     <h1>L2 Observational Layers</h1>
-    <p class="sub">Five semantic overlays that stack over the source buffer. Each reveals a different axis of what the fleet is doing to this file. Toggleable from the <span style="color:var(--brass-1); font-family:var(--font-mono)">[L]</span> bar; exploded along the z-axis in Code Mode's <span style="color:var(--brass-1); font-family:var(--font-mono)">3D explode</span>.</p>
+    <p class="sub">Five semantic overlays that stack over the source buffer. Each reveals a different axis of what the fleet is doing to this file. Toggleable from the <span style="color:var(--color-accent-fg); font-family:var(--font-mono)">[L]</span> bar; exploded along the z-axis in Code Mode's <span style="color:var(--color-accent-fg); font-family:var(--font-mono)">3D explode</span>.</p>
 
     <h2>Toggle bar <span class="tag">L1–L5 · opacity knob · explode</span></h2>
     <div class="seg">
@@ -122,9 +122,9 @@
           <button>L5 · NOTES</button>
         </div>
         <span style="margin-left: 8px; font-family:var(--font-mono); font-size:9px; color:var(--fg-4); letter-spacing:.08em;">OPACITY</span>
-        <input type="range" min="0" max="100" value="75" style="width: 120px; accent-color: var(--brass-1);" />
+        <input type="range" min="0" max="100" value="75" style="width: 120px; accent-color: var(--color-accent-fg);" />
         <span class="chip is-brass" style="margin-left: 2px">75%</span>
-        <span style="margin-left: auto; font-family:var(--font-mono); font-size:10px; color:var(--brass-1); cursor:pointer; letter-spacing:.08em; text-transform:uppercase;">↕ EXPLODE</span>
+        <span style="margin-left: auto; font-family:var(--font-mono); font-size:10px; color:var(--color-accent-fg); cursor:pointer; letter-spacing:.08em; text-transform:uppercase;">↕ EXPLODE</span>
       </div>
     </div>
 
@@ -138,7 +138,7 @@
           <span class="k">file</span><span class="v">src/keeper.ts</span>
           <span class="k">window</span><span class="v">5h</span>
           <span class="k">edits</span><span class="v">17</span>
-          <span class="k">last</span><span class="v" style="color:var(--brass-1)">12s ago · nick0cave</span>
+          <span class="k">last</span><span class="v" style="color:var(--color-accent-fg)">12s ago · nick0cave</span>
         </div>
         <div class="l1-wrap">
           <div class="l1-rec">
@@ -161,13 +161,13 @@
             <span class="bar now"  style="height: 52px" title="12s · nick0cave · LIVE" data-by="NOW"></span>
           </div>
           <div class="l1-axis">
-            <span>−5h</span><span>−4h</span><span>−3h</span><span>−2h</span><span>−1h</span><span>−30m</span><span>−10m</span><span style="color: var(--brass-1)">NOW</span>
+            <span>−5h</span><span>−4h</span><span>−3h</span><span>−2h</span><span>−1h</span><span>−30m</span><span>−10m</span><span style="color: var(--color-accent-fg)">NOW</span>
           </div>
           <div class="l1-legend">
             <span><i class="swatch" style="background:var(--fg-4); opacity:.22"></i>cold (&gt;1h)</span>
             <span><i class="swatch" style="background:var(--warn); opacity:.55"></i>warm</span>
             <span><i class="swatch" style="background:var(--warn); box-shadow:0 0 4px rgb(var(--warn-glow))"></i>hot (&lt;30m)</span>
-            <span><i class="swatch" style="background:var(--brass-1); box-shadow:0 0 4px rgb(var(--brass-glow))"></i>live (&lt;1m)</span>
+            <span><i class="swatch" style="background:var(--color-accent-fg); box-shadow:0 0 4px rgb(var(--brass-glow))"></i>live (&lt;1m)</span>
             <span style="margin-left:auto">hover for actor + timestamp</span>
           </div>
         </div>
@@ -177,13 +177,13 @@
     <h2>L2 · Parallel <span class="tag">keeper cursors</span></h2>
     <div class="seg">
       <div class="meta"><span class="n">parallel</span>Real-time cursor positions for every keeper currently inside this file. Color = keeper identity. Vertical tail = selection. Ghosted when a keeper moves to another file.
-        <span class="code">.cursor[data-keeper="nick0cave"] { color: var(--brass-1); }</span>
+        <span class="code">.cursor[data-keeper="nick0cave"] { color: var(--color-accent-fg); }</span>
       </div>
       <div class="canvas">
         <div class="l2">
           <div class="lane" style="top: 10px">
             <span class="name">nick0cave</span>
-            <span class="cursor" style="left: 70%; color: var(--brass-1); background: var(--brass-1); box-shadow: 0 0 6px rgb(var(--brass-glow)/.7)"></span>
+            <span class="cursor" style="left: 70%; color: var(--color-accent-fg); background: var(--color-accent-fg); box-shadow: 0 0 6px rgb(var(--brass-glow)/.7)"></span>
           </div>
           <div class="lane" style="top: 42px">
             <span class="name">qa-king</span>
@@ -252,12 +252,12 @@
           <div class="l5-note" style="position: relative; margin-top: 16px">
             <span class="l5-pin"></span>
             <div class="l5-head"><span class="dot"></span>sangsu · 2h · pinned line 12</div>
-            <div class="l5-body">GoalRef changed shape from <code style="color:var(--brass-1)">string</code> to <code style="color:var(--brass-1)">{'{'}id,priority{'}'}</code>. Check downstream emit() contracts before merging.</div>
+            <div class="l5-body">GoalRef changed shape from <code style="color:var(--color-accent-fg)">string</code> to <code style="color:var(--color-accent-fg)">{'{'}id,priority{'}'}</code>. Check downstream emit() contracts before merging.</div>
           </div>
           <div class="l5-note" style="position: relative; margin-top: 40px">
             <span class="l5-pin" style="right: 60px"></span>
             <div class="l5-head"><span class="dot"></span>masc-improver · 5m · anchored tick()</div>
-            <div class="l5-body">Refactored to <code style="color:var(--brass-1)">async generator</code>. Breaks existing subscribers — migration path in <code style="color:var(--brass-1)">cascade.md</code>.</div>
+            <div class="l5-body">Refactored to <code style="color:var(--color-accent-fg)">async generator</code>. Breaks existing subscribers — migration path in <code style="color:var(--color-accent-fg)">cascade.md</code>.</div>
           </div>
           <div class="l5-note" style="position: relative; margin-top: 72px">
             <span class="l5-pin"></span>
@@ -289,15 +289,15 @@
           <div class="code-line"><span class="time-bar" style="opacity:.85" title="L1 · 2m"></span><span class="num">12</span><span class="src">  <span class="k">await</span> this.<span class="f">runCascade</span>(<span class="s">'moonshot'</span>);</span><span class="cursor-chip c-ss" title="L2 · sangsu reading">sangsu</span></div>
           <div class="code-line"><span class="time-bar" style="opacity:.2; height:8px" title="L1 · cold"></span><span class="num">13</span><span class="src">{'}'}</span></div>
           <div class="l4-block" style="margin-top: 10px; padding: 8px 12px" title="L4 · approval block">
-            <div style="font-family:var(--font-mono); font-size:11px; color:var(--fg-2)">lines 9–13 reviewed</div>
+            <div style="font-family:var(--font-mono); font-size:11px; color:var(--color-fg-secondary)">lines 9–13 reviewed</div>
             <div class="l4-by">sangsu · 2m ago · cascade: moonshot@2 · 1.24s</div>
             <span class="l4-stamp" style="font-size: 22px">LGTM</span>
           </div>
-          <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--line-1);">
-            <div style="font-family: var(--font-mono); font-size: 9px; color: var(--fg-3); line-height: 1.5;"><b style="color:var(--warn)">① L1</b> left bar height = recency. Brighter = more recent edit.</div>
-            <div style="font-family: var(--font-mono); font-size: 9px; color: var(--fg-3); line-height: 1.5;"><b style="color:var(--brass-1)">② L2</b> right chips = live keeper cursors per line.</div>
-            <div style="font-family: var(--font-mono); font-size: 9px; color: var(--fg-3); line-height: 1.5;"><b style="color:var(--brass-1)">③ L3</b> inline glyph = recent tool-call site. Hover for count.</div>
-            <div style="font-family: var(--font-mono); font-size: 9px; color: var(--fg-3); line-height: 1.5;"><b style="color:var(--ok-fg)">④ L4</b> trailing block + stamp = approval status of the diff.</div>
+          <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--color-border-default);">
+            <div style="font-family: var(--font-mono); font-size: 9px; color: var(--color-fg-muted); line-height: 1.5;"><b style="color:var(--warn)">① L1</b> left bar height = recency. Brighter = more recent edit.</div>
+            <div style="font-family: var(--font-mono); font-size: 9px; color: var(--color-fg-muted); line-height: 1.5;"><b style="color:var(--color-accent-fg)">② L2</b> right chips = live keeper cursors per line.</div>
+            <div style="font-family: var(--font-mono); font-size: 9px; color: var(--color-fg-muted); line-height: 1.5;"><b style="color:var(--color-accent-fg)">③ L3</b> inline glyph = recent tool-call site. Hover for count.</div>
+            <div style="font-family: var(--font-mono); font-size: 9px; color: var(--color-fg-muted); line-height: 1.5;"><b style="color:var(--ok-fg)">④ L4</b> trailing block + stamp = approval status of the diff.</div>
           </div>
         </div>
       </div>

@@ -3,5 +3,5 @@
  (name masc_core)
  (public_name masc_mcp.masc_core)
  (wrapped false)
- (modules json_util safe_ops common validation circuit_breaker eio_guard executor_pool_ref masc_runtime_events text_similarity string_util)
+ (modules json_util safe_ops common validation circuit_breaker eio_guard executor_pool_ref masc_runtime_events text_similarity string_util list_util)
  (libraries yojson unix re re.pcre eio eio.unix time_compat fs_compat masc_log runtime_events base))

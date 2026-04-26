@@ -363,12 +363,12 @@ let parse_verdict (text : string) : (verdict, string) result =
            c = ' ' || c = ':' || c = '-')
   in
   if String.length upper >= 7
-     && String.sub upper 0 7 = "APPROVE"
+     && String.starts_with ~prefix:"APPROVE" upper
      && has_boundary "APPROVE"
   then
     Ok Approve
   else if String.length upper >= 6
-          && String.sub upper 0 6 = "REJECT"
+          && String.starts_with ~prefix:"REJECT" upper
           && has_boundary "REJECT"
   then
     let rest =

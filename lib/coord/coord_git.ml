@@ -302,9 +302,9 @@ let list ~base_path =
         let branch = ref "" in
         List.iter
           (fun line ->
-            if String.length line > 9 && String.sub line 0 9 = "worktree " then
+            if String.length line > 9 && String.starts_with ~prefix:"worktree " line then
               path := String.sub line 9 (String.length line - 9)
-            else if String.length line > 7 && String.sub line 0 7 = "branch " then
+            else if String.length line > 7 && String.starts_with ~prefix:"branch " line then
               branch := String.sub line 7 (String.length line - 7))
           block;
         if !path <> "" then

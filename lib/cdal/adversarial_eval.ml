@@ -291,14 +291,14 @@ let check_untested_additions inputs =
     List.exists
       (fun path ->
         let base = Filename.basename path in
-        String.length base > 5 && String.sub base 0 5 = "test_")
+        String.length base > 5 && String.starts_with ~prefix:"test_" base)
       changed_paths
   in
   let lib_files =
     List.filter
       (fun path ->
         let base = Filename.basename path in
-        not (String.length base > 5 && String.sub base 0 5 = "test_"))
+        not (String.length base > 5 && String.starts_with ~prefix:"test_" base))
       changed_paths
   in
   if List.length lib_files > 0 && not has_test_file then

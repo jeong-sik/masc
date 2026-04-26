@@ -158,19 +158,19 @@ export function GovernanceMonitor() {
         ? html`<${LoadingState}>governance metrics 불러오는 중...<//>`
         : null}
 
-      <${Card} title="Approval Queue">
+      <${Card} title="승인 대기열">
         ${data ? html`
           <div class="grid grid-cols-4 gap-3">
             <${StatCell}
-              label="Queue Depth"
+              label="대기열 깊이"
               value=${data.approval_queue.depth}
             />
             <${StatCell}
-              label="p50 Wait"
+              label="p50 대기"
               value=${fmtSec(data.approval_queue.p50_wait_sec)}
             />
             <${StatCell}
-              label="p95 Wait"
+              label="p95 대기"
               value=${fmtSec(data.approval_queue.p95_wait_sec)}
             />
             <div class="flex items-center gap-2">

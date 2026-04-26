@@ -1516,10 +1516,10 @@ function GateAnalyticsSection({
         : html`
             <div>
               <div class="mb-3 grid grid-cols-4 gap-2 max-[720px]:grid-cols-2">
-                <${StatCard} label="Messages" value=${gate.total_messages} />
-                <${StatCard} label="Success" value=${gate.total_success} />
-                <${StatCard} label="Errors" value=${gate.total_errors} />
-                <${StatCard} label="Dedup Keys" value=${gate.dedup_table_size} />
+                <${StatCard} label="메시지" value=${gate.total_messages} />
+                <${StatCard} label="성공" value=${gate.total_success} />
+                <${StatCard} label="오류" value=${gate.total_errors} />
+                <${StatCard} label="중복 제거 키" value=${gate.dedup_table_size} />
               </div>
 
               <div class="mb-4 grid grid-cols-2 gap-2 text-2xs text-[var(--text-dim)] max-[720px]:grid-cols-1">

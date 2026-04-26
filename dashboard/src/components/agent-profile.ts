@@ -248,7 +248,7 @@ function CharacterPlate({ name }: { name: string }) {
           activityAge=${lastActivity}
           signalTruth=${signalTruth}
         />
-        ${isKeeper ? html`<div class="text-3xs font-bold tracking-[1.5px] text-[var(--ff-gold)] uppercase text-center">KEEPER</div>` : null}
+        ${isKeeper ? html`<div class="text-3xs font-bold tracking-[1.5px] text-[var(--ff-gold)] uppercase text-center">키퍼</div>` : null}
       </div>
 
       <div class="flex flex-col gap-1.5 min-w-0">

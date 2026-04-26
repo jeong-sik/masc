@@ -1326,7 +1326,7 @@ export function CascadeConfigPanel() {
                 detail="연속 실패"
               />
               <${StatCell}
-                label="Cooldown"
+                label="쿨다운"
                 value=${`${health.cooldown_sec}s`}
                 detail="활성 시 차단 시간"
               />

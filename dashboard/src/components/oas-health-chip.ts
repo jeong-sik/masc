@@ -140,7 +140,7 @@ export function OasHealthChip() {
           detail="자율성 트레이스"
         />
         <${StatCell}
-          label="Keeper 스냅샷"
+          label="키퍼 스냅샷"
           value=${summary.value.keeperSnapshotsCount}
           detail="활성 keeper"
         />

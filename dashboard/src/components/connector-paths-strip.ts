@@ -102,13 +102,13 @@ export function ConnectorPathsStrip({ connectors }: { connectors: GateConnectorI
         ? html`
             <div id="connector-paths-body" class="space-y-1.5 border-t border-[var(--card-border)] px-3 py-2">
               ${paths.connectorsDir
-                ? html`<${PathRow} label="Connectors" value=${paths.connectorsDir} hint="sidecar names.json / status.json 위치" />`
+                ? html`<${PathRow} label="커넥터" value=${paths.connectorsDir} hint="sidecar names.json / status.json 위치" />`
                 : null}
               ${paths.logsDir
-                ? html`<${PathRow} label="Logs" value=${paths.logsDir} hint="sidecar 로그 디렉토리" />`
+                ? html`<${PathRow} label="로그" value=${paths.logsDir} hint="sidecar 로그 디렉토리" />`
                 : null}
-              <${PathRow} label="Keepers" value=${paths.keepersDir} hint="keeper TOML 설정 파일" />
-              <${PathRow} label="Sidecars" value=${paths.sidecarsDir} hint="sidecar 스크립트 (run.sh) 위치" />
+              <${PathRow} label="키퍼" value=${paths.keepersDir} hint="keeper TOML 설정 파일" />
+              <${PathRow} label="사이드카" value=${paths.sidecarsDir} hint="sidecar 스크립트 (run.sh) 위치" />
             </div>
           `
         : null}

@@ -58,56 +58,56 @@ export function CommandPalette() {
       {
         id: 'nav-overview',
         title: '상황판으로 이동 (Overview)',
-        section: 'Navigation',
+        section: '내비게이션',
         keywords: 'home main board',
         handler: () => navigate('overview')
       },
       {
         id: 'nav-monitoring',
         title: '모니터링으로 이동 (Monitoring)',
-        section: 'Navigation',
+        section: '내비게이션',
         keywords: 'status health metrics',
         handler: () => navigate('monitoring')
       },
       {
         id: 'nav-workspace',
         title: '작업 화면으로 이동 (Workspace)',
-        section: 'Navigation',
+        section: '내비게이션',
         keywords: 'tasks work',
         handler: () => navigate('workspace')
       },
       {
         id: 'nav-command',
         title: '운영 화면으로 이동 (Operations)',
-        section: 'Navigation',
+        section: '내비게이션',
         keywords: 'control admin ops governance intervene',
         handler: () => navigate('command')
       },
       {
         id: 'nav-governance',
         title: '거버넌스로 이동 (Governance)',
-        section: 'Navigation',
+        section: '내비게이션',
         keywords: 'approval review hitl judge',
         handler: () => navigate('command', { section: 'operations' })
       },
       {
         id: 'nav-lab',
         title: '실험실로 이동 (Lab)',
-        section: 'Navigation',
+        section: '내비게이션',
         keywords: 'experiment test',
         handler: () => navigate('lab')
       },
       {
         id: 'nav-logs',
         title: '로그 뷰어로 이동 (Logs)',
-        section: 'Navigation',
+        section: '내비게이션',
         keywords: 'debug output system',
         handler: () => navigate('logs')
       },
       {
         id: 'action-gc',
         title: '유지보수: GC (Garbage Collection) 실행',
-        section: 'System Ops',
+        section: '시스템 운영',
         keywords: 'clear clean memory',
         handler: async () => {
           const confirmed = await requestConfirm({ title: '유지보수', message: 'GC를 실행합니까?' })
@@ -117,7 +117,7 @@ export function CommandPalette() {
       {
         id: 'action-zombie',
         title: '유지보수: 좀비 에이전트 정리',
-        section: 'System Ops',
+        section: '시스템 운영',
         keywords: 'kill process clear',
         handler: async () => {
           const confirmed = await requestConfirm({ title: '유지보수', message: '좀비 에이전트를 정리합니까?', tone: 'danger' })
@@ -131,7 +131,7 @@ export function CommandPalette() {
     const agentActions: CommandPaletteAction[] = agents.map(agent => ({
       id: `nav-agent-${agent.agent_name}`,
       title: `에이전트 상세: ${agent.display_name || agent.agent_name}`,
-      section: 'Agents',
+      section: '에이전트',
       keywords: `worker detail status ${agent.status || ''}`,
       handler: () => navigate('overview', { section: 'worker', operation_id: agent.agent_name })
     }))
@@ -141,7 +141,7 @@ export function CommandPalette() {
     const keeperActions: CommandPaletteAction[] = keepers.map(keeper => ({
       id: `nav-keeper-${keeper.name}`,
       title: `키퍼 상세: ${keeper.name}`,
-      section: 'Keepers',
+      section: '키퍼',
       keywords: `bot detail status ${keeper.status || ''}`,
       handler: () => navigate('overview', { section: 'keeper', operation_id: keeper.name })
     }))
@@ -151,7 +151,7 @@ export function CommandPalette() {
     const sessionActions: CommandPaletteAction[] = sessions.map(s => ({
       id: `nav-session-${s.session_id}`,
       title: `세션 확인: ${s.goal || s.session_id}`,
-      section: 'Sessions',
+      section: '세션',
       keywords: `task run ${s.status || ''}`,
       handler: () => navigate('workspace', { section: 'session', session_id: s.session_id })
     }))

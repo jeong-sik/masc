@@ -559,7 +559,7 @@ export function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
 
         <div>
           <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">최근 인계 목록</div>
-          <div class="text-2xs text-[var(--text-dim)] mb-2">Latest recorded rollover appears first so operators can compare the current trace against recent history.</div>
+          <div class="text-2xs text-[var(--text-dim)] mb-2">가장 최근 인계 기록이 먼저 표시되어, 현재 추적과 최근 기록을 비교할 수 있습니다.</div>
           ${recent.length > 0
             ? html`
               <div class="flex flex-col gap-2">
@@ -605,7 +605,7 @@ export function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
                 })}
               </div>
             `
-            : html`<div class="text-2xs text-[var(--text-muted)]">No recorded handoff entries yet.</div>`}
+            : html`<div class="text-2xs text-[var(--text-muted)]">아직 기록된 인계 항목이 없습니다.</div>`}
         </div>
 
         ${manifestPath || indexPath

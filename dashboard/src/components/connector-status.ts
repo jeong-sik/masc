@@ -963,7 +963,7 @@ function ConnectorLivePanel({
                 aria-label="키퍼 디렉터리 상태: 사용 불가"
               >
                 <span aria-hidden="true">⚠</span>
-                <span>Directory error</span>
+                <span>디렉터리 오류</span>
               </span>
               ${connector?.gate_health_checked_at
                 ? html`<span class="text-3xs text-[var(--text-dim)]">checked ${timeAgo(connector.gate_health_checked_at)}</span>`
@@ -991,9 +991,9 @@ function ConnectorLivePanel({
                   data-no-keepers-status-chip
                 >
                   <span aria-hidden="true">⊘</span>
-                  <span>Not configured</span>
+                  <span>미설정</span>
                 </span>
-                <span class="font-medium text-[var(--text-body)]">No keepers configured</span>
+                <span class="font-medium text-[var(--text-body)]">설정된 키퍼 없음</span>
               </div>
               <div class="text-3xs text-[var(--warn)]/80">
                 Add keeper config files under <code class="rounded bg-[var(--white-4)] px-1">config/keepers/</code> and restart the server.
@@ -1032,9 +1032,9 @@ function ConnectorLivePanel({
                       data-sidecar-status-chip
                     >
                       <span aria-hidden="true">⊘</span>
-                      <span>Not running</span>
+                      <span>미실행</span>
                     </span>
-                    <span class="font-medium text-[var(--text-body)]">Sidecar not started</span>
+                    <span class="font-medium text-[var(--text-body)]">사이드카 미시작</span>
                     ${connector?.updated_at
                       ? html`<span class="text-3xs text-[var(--text-dim)]">last seen ${timeAgo(connector.updated_at)}</span>`
                       : null}
@@ -1498,7 +1498,7 @@ function GateAnalyticsSection({
   if (gateError) {
     subtitle = `Gate metrics unavailable: ${gateError}`
   } else if (gate === null) {
-    subtitle = 'Gate-observed traffic is not available yet.'
+    subtitle = '게이트 관측 트래픽을 아직 사용할 수 없습니다.'
   }
 
   return html`
@@ -1510,7 +1510,7 @@ function GateAnalyticsSection({
       ${gate === null
         ? html`
             <div class="rounded border border-dashed border-[var(--card-border)] px-3 py-4 text-xs text-[var(--text-dim)]">
-              Gate-advertised connector runtime is visible, but Gate-observed traffic is not available yet.
+              게이트 광고 커넥터 런타임은 표시되지만, 게이트 관측 트래픽을 아직 사용할 수 없습니다.
             </div>
           `
         : html`

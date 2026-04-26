@@ -60,7 +60,7 @@ export function ExcusePatterns() {
   if (s.status === 'error') {
     return html`
       <${Card} title="반합리화 패턴">
-        <div class="p-4 text-[var(--bad-light)]" role="alert">Failed to load patterns: ${s.message}</div>
+        <div class="p-4 text-[var(--bad-light)]" role="alert">패턴 로드 실패: ${s.message}</div>
       </Card>
     `
   }

@@ -489,7 +489,7 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
 
 function TelemetrySourcesPanel({ sources }: { sources: TelemetrySourceSummary[] }) {
   if (sources.length === 0) {
-    return html`<div class="text-2xs text-[var(--text-dim)]" role="status">Telemetry store summary is unavailable.</div>`
+    return html`<div class="text-2xs text-[var(--text-dim)]" role="status">텔레메트리 스토어 요약을 사용할 수 없습니다.</div>`
   }
 
   const sorted = [...sources].sort((a, b) => b.entry_count - a.entry_count)

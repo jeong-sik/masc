@@ -318,7 +318,7 @@ export function DoctorPanel() {
                   </div>
                   <button type="button"
                     class="rounded border border-[var(--white-8)] px-2.5 py-1 text-2xs text-[var(--text-muted)] transition-colors hover:border-[var(--accent)] hover:text-[var(--text-body)]"
-                    aria-label="Doctor 결과 새로고침"
+                    aria-label="진단 결과 새로고침"
                     onClick=${() => { void refreshDoctor() }}
                   >새로고침</button>
                 </div>

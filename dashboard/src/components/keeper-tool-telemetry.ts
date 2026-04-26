@@ -8,6 +8,7 @@ import { fetchKeeperToolStats } from '../api/dashboard'
 import type { ToolStat, HourlyBucket, ToolStatsResponse, TelemetryFreshnessMetadata } from '../api/dashboard'
 import { toolCategory, formatDuration, durationColor } from './tool-call-shared'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
+import { TextInput } from './common/input'
 import { SectionCap } from './common/section-cap'
 import { formatElapsedCompact } from '../lib/format-time'
 
@@ -276,13 +277,13 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
         <div class="flex items-center justify-between gap-2 mb-1">
           <${SectionCap} tone="dim" weight="semibold">호출 빈도<//>
           <div class="flex items-center gap-2">
-            <input
+            <${TextInput}
               type="search"
+              class="min-w-40 !px-2 !py-1 !text-2xs"
               value=${query}
               placeholder="도구 검색 (이름/카테고리)"
-              aria-label="도구 텔레메트리 검색"
+              ariaLabel="도구 텔레메트리 검색"
               onInput=${(e: Event) => { setQuery((e.target as HTMLInputElement).value) }}
-              class="min-w-40 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--color-fg-primary)] placeholder:text-[var(--color-fg-disabled)] focus:outline-none focus:border-[var(--color-accent-fg)]"
             />
             <span class="text-3xs text-[var(--color-fg-muted)] tabular-nums">
               ${trimmedQuery

@@ -23,11 +23,5 @@ val with_mutex : Eio.Mutex.t -> (unit -> 'a) -> 'a
 val with_mutex_ro : Eio.Mutex.t -> (unit -> 'a) -> 'a
 (** Acquire read-only lock if Eio is ready, run [f] directly otherwise. *)
 
-val with_rw : Eio.Mutex.t -> (unit -> 'a) -> 'a
-(** @deprecated Alias for {!with_mutex}. *)
-
-val with_ro : Eio.Mutex.t -> (unit -> 'a) -> 'a
-(** @deprecated Alias for {!with_mutex_ro}. *)
-
 val run_in_systhread : (unit -> 'a) -> 'a
 (** Run [f] in a system thread if Eio is ready, directly otherwise. *)

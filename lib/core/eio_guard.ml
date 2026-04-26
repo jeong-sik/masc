@@ -50,9 +50,3 @@ let run_in_systhread f =
     Eio_unix.run_in_systhread f
   else
     f ()
-
-(** @deprecated Use {!with_mutex} instead. *)
-let with_rw = with_mutex
-
-(** @deprecated Use {!with_mutex_ro} instead. *)
-let with_ro = with_mutex_ro

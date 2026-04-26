@@ -2,8 +2,8 @@
 
 .zone-ticker {
   grid-area: ticker;
-  background: linear-gradient(to bottom, var(--bg-1), var(--bg-0));
-  border-bottom: 1px solid var(--line-2);
+  background: linear-gradient(to bottom, var(--color-bg-surface), var(--color-bg-page));
+  border-bottom: 1px solid var(--color-border-strong);
   overflow: hidden;
   position: relative;
 }
@@ -12,8 +12,8 @@
   content: ""; position: absolute; top: 0; bottom: 0; width: 40px; z-index: 2;
   pointer-events: none;
 }
-.zone-ticker::before { left: 0; background: linear-gradient(to right, var(--bg-1), transparent); }
-.zone-ticker::after  { right: 0; background: linear-gradient(to left,  var(--bg-1), transparent); }
+.zone-ticker::before { left: 0; background: linear-gradient(to right, var(--color-bg-surface), transparent); }
+.zone-ticker::after  { right: 0; background: linear-gradient(to left,  var(--color-bg-surface), transparent); }
 
 .tk-rail {
   display: flex;
@@ -33,7 +33,7 @@
   padding: 6px 14px;
   background: transparent;
   border: none;
-  border-right: 1px solid var(--line-1);
+  border-right: 1px solid var(--color-border-default);
   border-radius: 0;
   cursor: pointer;
   transition: background .12s ease;
@@ -41,12 +41,12 @@
   position: relative;
 }
 .tk-item:last-child { border-right: none; }
-.tk-item:hover { background: var(--bg-2); color: var(--fg-1); }
+.tk-item:hover { background: var(--color-bg-panel-alt); color: var(--color-fg-primary); }
 .tk-item.is-active {
-  background: var(--bg-3);
-  box-shadow: inset 0 -2px 0 var(--brass-1);
+  background: var(--color-bg-elevated);
+  box-shadow: inset 0 -2px 0 var(--color-accent-fg);
 }
-.tk-item.is-active .tk-sym { color: var(--brass-1); }
+.tk-item.is-active .tk-sym { color: var(--color-accent-fg); }
 
 .tk-dot { display: inline-flex; }
 
@@ -54,12 +54,12 @@
   font-size: 11px;
   font-weight: 600;
   letter-spacing: .06em;
-  color: var(--fg-1);
+  color: var(--color-fg-primary);
   min-width: 36px;
 }
 .tk-price {
   font-size: 11px;
-  color: var(--fg-2);
+  color: var(--color-fg-secondary);
   min-width: 34px;
   text-align: right;
 }
@@ -74,10 +74,10 @@
   letter-spacing: .02em;
   min-width: 42px;
   text-align: right;
-  color: var(--fg-3);
+  color: var(--color-fg-muted);
 }
 .tk-arrow { display: inline-block; margin-right: 2px; font-size: 8px; }
 
 .tk-item.tk-up   .tk-delta { color: var(--ok); }
 .tk-item.tk-down .tk-delta { color: var(--err); }
-.tk-item.tk-flat .tk-delta { color: var(--fg-3); }
+.tk-item.tk-flat .tk-delta { color: var(--color-fg-muted); }

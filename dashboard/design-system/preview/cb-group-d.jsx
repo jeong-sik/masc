@@ -441,11 +441,11 @@ function ResponsibilityMatrix() {
         </table>
         <div role="note" aria-label="Matrix density legend" style={{marginTop:8, padding:'6px 8px', fontFamily:'var(--font-mono)', fontSize:'10px', color:'var(--fg-4)', display:'flex', gap:8, alignItems:'center'}}>
           <span aria-hidden="true">density:</span>
-          <span aria-hidden="true" style={{padding:'1px 6px', background:'var(--bg-0)', border:'1px solid var(--line-1)'}}>0</span>
+          <span aria-hidden="true" style={{padding:'1px 6px', background:'var(--color-bg-page)', border:'1px solid var(--line-1)'}}>0</span>
           <span aria-hidden="true" style={{padding:'1px 6px', background:'rgb(var(--brass-glow)/.05)', color:'var(--fg-2)'}}>1–2</span>
           <span aria-hidden="true" style={{padding:'1px 6px', background:'rgb(var(--brass-glow)/.12)', color:'var(--fg-1)'}}>3–4</span>
           <span aria-hidden="true" style={{padding:'1px 6px', background:'rgb(var(--brass-glow)/.22)', color:'var(--brass-1)'}}>5–6</span>
-          <span aria-hidden="true" style={{padding:'1px 6px', background:'var(--brass-1)', color:'var(--bg-0)'}}>7+</span>
+          <span aria-hidden="true" style={{padding:'1px 6px', background:'var(--brass-1)', color:'var(--color-bg-page)'}}>7+</span>
         </div>
       </div>
     </section>

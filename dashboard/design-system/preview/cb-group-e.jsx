@@ -115,7 +115,7 @@ function BoardThread() {
             </article>
           ))}
         </div>
-        <div role="textbox" aria-label="Reply composer (placeholder)" style={{marginTop:8, padding:'6px 8px', background:'var(--bg-1)', border:'1px dashed var(--line-2)', fontFamily:'var(--font-mono)', fontSize:'11px', color:'var(--fg-4)'}}>
+        <div role="textbox" aria-label="Reply composer (placeholder)" style={{marginTop:8, padding:'6px 8px', background:'var(--color-bg-surface)', border:'1px dashed var(--line-2)', fontFamily:'var(--font-mono)', fontSize:'11px', color:'var(--fg-4)'}}>
           <span aria-hidden="true" style={{color:'var(--brass-1)'}}>masc&gt;</span> reply...
           <span aria-hidden="true" style={{color:'var(--brass-1)', animation:'anim-blink 1s step-end infinite'}}> ▌</span>
         </div>
@@ -291,7 +291,7 @@ function StateBlockMessage() {
                      role="listitem"
                      className="ms-msg"
                      aria-label={`#${m.seq} · ${m.from} ${m.kind} → #${m.room} · ${m.at}: ${m.body} · state: ${m.state}`}
-                     style={{padding:'8px 10px', background:'var(--bg-1)', border:'1px solid var(--line-1)', borderLeft:'2px solid var(--brass-2)', borderRadius:0}}>
+                     style={{padding:'8px 10px', background:'var(--color-bg-surface)', border:'1px solid var(--line-1)', borderLeft:'2px solid var(--brass-2)', borderRadius:0}}>
               <div className="seq" aria-hidden="true">#{m.seq}</div>
               <div className="body">
                 <div className="h" aria-hidden="true">
@@ -341,7 +341,7 @@ function ComposerV2Broadcast() {
           <span style={{marginLeft:'auto'}}>last broadcast 16s ago</span>
         </div>
       </div>
-      <div style={{flex:1, background:'var(--bg-0)'}} aria-hidden="true" />
+      <div style={{flex:1, background:'var(--color-bg-page)'}} aria-hidden="true" />
     </div>
   );
 }
@@ -353,11 +353,11 @@ function ComposerV2Mention() {
       <div className="cm2" role="region" aria-label="Composer v2 · mention with autocomplete" style={{position:'relative'}}>
         <div role="listbox" aria-label="Mention autocomplete (match @nick)" style={{
           position:'absolute', bottom:'100%', left:14, marginBottom:4,
-          background:'var(--bg-1)', border:'1px solid var(--brass-2)', borderRadius:0, minWidth:240, padding:0,
+          background:'var(--color-bg-surface)', border:'1px solid var(--brass-2)', borderRadius:0, minWidth:240, padding:0,
           fontFamily:'var(--font-mono)', fontSize:'11px',
           boxShadow:'0 -4px 12px rgb(0 0 0 / .4)',
         }}>
-          <div role="presentation" style={{padding:'3px 8px', background:'var(--bg-2)', color:'var(--fg-4)', fontSize:'9px', letterSpacing:'.1em', textTransform:'uppercase'}}>match @nick</div>
+          <div role="presentation" style={{padding:'3px 8px', background:'var(--color-bg-panel-alt)', color:'var(--fg-4)', fontSize:'9px', letterSpacing:'.1em', textTransform:'uppercase'}}>match @nick</div>
           {[
             { id:'nick0cave', role:'Captain · merge', match:true },
             { id:'nickelodeon', role:'(unknown — alias)', match:false },
@@ -395,7 +395,7 @@ function ComposerV2Mention() {
           <span aria-hidden="true" style={{marginLeft:'auto', color:'var(--fg-4)', textTransform:'none'}}>↑↓ pick · ⇥ accept · esc dismiss</span>
         </div>
       </div>
-      <div style={{flex:1, background:'var(--bg-0)'}} aria-hidden="true" />
+      <div style={{flex:1, background:'var(--color-bg-page)'}} aria-hidden="true" />
     </div>
   );
 }
@@ -432,7 +432,7 @@ function ComposerV2State() {
           <span aria-hidden="true" style={{marginLeft:'auto', color:'var(--fg-4)', textTransform:'none'}}>4 keys · valid · will update belief in 9 keepers</span>
         </div>
       </div>
-      <div style={{flex:1, background:'var(--bg-0)'}} aria-hidden="true" />
+      <div style={{flex:1, background:'var(--color-bg-page)'}} aria-hidden="true" />
     </div>
   );
 }

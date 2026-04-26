@@ -707,6 +707,7 @@ export function MemorySubsystems() {
             class="flex-1 min-w-50 bg-[var(--white-5)] border border-[var(--white-10)] rounded px-2 py-1 text-sm text-[var(--text-muted)] placeholder:text-[var(--text-muted)] focus:border-[var(--white-10)] focus:outline-none"
           />
           <select
+            autoComplete="off"
             aria-label="키퍼 필터"
             value=${keeperFilter.value}
             onChange=${(e: Event) => (keeperFilter.value = (e.target as HTMLSelectElement).value)}
@@ -715,10 +716,10 @@ export function MemorySubsystems() {
             <option value="">모든 키퍼</option>
             ${knownKeepers.map(
               (k: string) => html`<option value=${k}>${k}</option>`,
-          autoComplete="off"
             )}
           </select>
           <select
+            autoComplete="off"
             aria-label="결과 필터"
             value=${outcomeFilter.value}
             onChange=${(e: Event) => (outcomeFilter.value = (e.target as HTMLSelectElement).value)}

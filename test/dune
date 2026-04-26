@@ -1779,3 +1779,9 @@
  (name test_env_config_dashboard_execution_timeouts)
  (modules test_env_config_dashboard_execution_timeouts)
  (libraries masc_test_deps))
+
+; Process_eio subprocess default timeout SSOT
+(test
+ (name test_process_eio_default_timeout)
+ (modules test_process_eio_default_timeout)
+ (libraries masc_test_deps))

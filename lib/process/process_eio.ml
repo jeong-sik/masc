@@ -57,6 +57,29 @@ let reset_for_testing () =
 
 let default_buffer_size = 1024
 
+(** Default subprocess wall-clock budget (seconds).
+
+    Eleven public APIs (run_argv*, run_unix_argv*_fallback,
+    with_unix_capture) shared the same hardcoded literal [60.0] as their
+    [?timeout_sec] default — a magic-number anti-pattern that made
+    tuning impossible without rebuilding. Callers that care about
+    timeout still pass [~timeout_sec:N] explicitly (and most do); the
+    handful of sites that rely on the default now go through one knob
+    that operators can override on slow-disk fleets via
+    [MASC_PROCESS_DEFAULT_TIMEOUT_SEC].
+
+    Floor 1s — anything smaller than a second cannot capture even a
+    trivial subprocess startup and is almost certainly an operator
+    misconfiguration. Read once at module load (mirrors the pattern in
+    [Env_config_runtime]); operator overrides take effect on next
+    process restart, not mid-run. *)
+let default_timeout_sec =
+  let raw =
+    try float_of_string (Sys.getenv "MASC_PROCESS_DEFAULT_TIMEOUT_SEC")
+    with Not_found | Failure _ -> 60.0
+  in
+  Float.max 1.0 raw
+
 let get_proc_mgr () =
   match Atomic.get runtime_state with
   | Some runtime -> Ok runtime.proc_mgr
@@ -159,7 +182,7 @@ let captured_stderr_or_empty path_opt =
   | None -> ""
 
 let with_unix_capture ?env ?cwd ?stdin_content ?(capture_stderr = false)
-    ?(timeout_sec = 60.0)
+    ?(timeout_sec = default_timeout_sec)
     (argv : string list)
     ~(on_error : string -> string -> 'a)
     ~(on_success : Unix.process_status -> string -> string -> 'a) : 'a =
@@ -371,7 +394,7 @@ let with_unix_capture ?env ?cwd ?stdin_content ?(capture_stderr = false)
          cleanup ();
          on_error (reason_of_exn_for_output exn) stderr)
 
-let run_unix_argv_fallback ?(timeout_sec = 60.0) ?env (argv : string list) : string =
+let run_unix_argv_fallback ?(timeout_sec = default_timeout_sec) ?env (argv : string list) : string =
   let label = String.concat " " (List.map Filename.quote argv) in
   with_unix_capture ?env ~timeout_sec argv
     ~on_error:(fun reason stderr ->
@@ -380,7 +403,7 @@ let run_unix_argv_fallback ?(timeout_sec = 60.0) ?env (argv : string list) : str
     ~on_success:(fun status stdout stderr ->
       output_for_status ~status ~stdout ~stderr)
 
-let run_unix_argv_with_status_split_fallback ?(timeout_sec = 60.0) ?env ?cwd (argv : string list) :
+let run_unix_argv_with_status_split_fallback ?(timeout_sec = default_timeout_sec) ?env ?cwd (argv : string list) :
     Unix.process_status * string * string =
   let label = String.concat " " (List.map Filename.quote argv) in
   with_unix_capture ?env ?cwd ~timeout_sec ~capture_stderr:true argv
@@ -390,7 +413,7 @@ let run_unix_argv_with_status_split_fallback ?(timeout_sec = 60.0) ?env ?cwd (ar
     ~on_success:(fun status stdout stderr ->
       (status, stdout, stderr))
 
-let run_unix_argv_with_stdin_fallback ?(timeout_sec = 60.0) ?env ~(stdin_content : string)
+let run_unix_argv_with_stdin_fallback ?(timeout_sec = default_timeout_sec) ?env ~(stdin_content : string)
     (argv : string list) : string =
   let label = String.concat " " (List.map Filename.quote argv) in
   with_unix_capture ?env ~timeout_sec ~stdin_content argv
@@ -401,7 +424,7 @@ let run_unix_argv_with_stdin_fallback ?(timeout_sec = 60.0) ?env ~(stdin_content
       output_for_status ~status ~stdout ~stderr)
 
 let run_unix_argv_with_stdin_and_status_split_fallback
-    ?(timeout_sec = 60.0)
+    ?(timeout_sec = default_timeout_sec)
     ?env
     ?cwd
     ~(stdin_content : string)
@@ -478,7 +501,7 @@ let spawn_and_drain_both ~sw pm ~cwd ?env ?stdin_source argv stdout_buf
   | `Exited n -> Unix.WEXITED n
   | `Signaled n -> Unix.WSIGNALED n
 
-let run_argv ?(timeout_sec = 60.0) ?env (argv : string list) : string =
+let run_argv ?(timeout_sec = default_timeout_sec) ?env (argv : string list) : string =
   Exec_tap.record ~kind:Exec_tap.Process_eio_run_argv ~argv ?env ();
   if not (is_initialized ()) then
     run_unix_argv_fallback ~timeout_sec ?env argv
@@ -513,7 +536,7 @@ let run_argv ?(timeout_sec = 60.0) ?env (argv : string list) : string =
                 (Printexc.to_string exn);
               process_error_output ~label ~reason:(reason_of_exn_for_output exn) ())
 
-let run_argv_with_stdin ?(timeout_sec = 60.0) ?env ~(stdin_content : string) (argv : string list) : string =
+let run_argv_with_stdin ?(timeout_sec = default_timeout_sec) ?env ~(stdin_content : string) (argv : string list) : string =
   Exec_tap.record ~kind:Exec_tap.Process_eio_run_argv_with_stdin ~argv ?env ();
   if not (is_initialized ()) then
     run_unix_argv_with_stdin_fallback ~timeout_sec ?env ~stdin_content argv
@@ -550,7 +573,7 @@ let run_argv_with_stdin ?(timeout_sec = 60.0) ?env ~(stdin_content : string) (ar
               process_error_output ~label ~reason:(reason_of_exn_for_output exn) ())
 
 let run_argv_with_stdin_and_status_split
-    ?(timeout_sec = 60.0)
+    ?(timeout_sec = default_timeout_sec)
     ?env
     ?cwd
     ~(stdin_content : string)
@@ -614,7 +637,7 @@ let run_argv_with_stdin_and_status_split
                   ~reason:(reason_of_exn_for_output exn) () ))
 
 let run_argv_with_stdin_and_status
-    ?(timeout_sec = 60.0)
+    ?(timeout_sec = default_timeout_sec)
     ?env
     ?cwd
     ~(stdin_content : string)
@@ -625,7 +648,7 @@ let run_argv_with_stdin_and_status
   in
   (status, output_for_status ~status ~stdout ~stderr)
 
-let run_argv_with_status_split ?(timeout_sec = 60.0) ?env ?cwd
+let run_argv_with_status_split ?(timeout_sec = default_timeout_sec) ?env ?cwd
     (argv : string list) : Unix.process_status * string * string =
   Exec_tap.record ~kind:Exec_tap.Process_eio_run_argv_with_status ~argv ?env ?cwd ();
   if not (is_initialized ()) then
@@ -681,7 +704,7 @@ let run_argv_with_status_split ?(timeout_sec = 60.0) ?env ?cwd
                 process_error_output ~label
                   ~reason:(reason_of_exn_for_output exn) () ))
 
-let run_argv_with_status ?(timeout_sec = 60.0) ?env ?cwd
+let run_argv_with_status ?(timeout_sec = default_timeout_sec) ?env ?cwd
     (argv : string list) : Unix.process_status * string =
   let status, stdout, stderr =
     run_argv_with_status_split ~timeout_sec ?env ?cwd argv

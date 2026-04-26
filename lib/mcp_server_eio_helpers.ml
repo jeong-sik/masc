@@ -17,23 +17,23 @@ let log_mcp_exn ~label exn =
 let wait_for_message_eio ~clock (registry : Session.registry) ~agent_name ~timeout =
   let start_time = Time_compat.now () in
   let check_interval = 2.0 in
-  (match Hashtbl.find_opt registry.Session.sessions agent_name with
+  (match Session.get_session registry ~agent_name with
    | Some _ -> ()
    | None ->
        (try
           let _session = Session.register registry ~agent_name in
           ()
         with Eio.Cancel.Cancelled _ as e -> raise e | exn -> log_mcp_exn ~label:"session register (SSE) failed" exn));
-  Session.update_activity registry ~agent_name ~is_listening:(Some true) ();
+  Session.update_activity registry ~agent_name ~is_listening:true ();
   let rec wait_loop () =
     let elapsed = Time_compat.now () -. start_time in
     if elapsed >= timeout then begin
-      Session.update_activity registry ~agent_name ~is_listening:(Some false) ();
+      Session.update_activity registry ~agent_name ~is_listening:false ();
       None
     end else begin
       match Session.pop_message registry ~agent_name with
       | Some msg ->
-          Session.update_activity registry ~agent_name ~is_listening:(Some false) ();
+          Session.update_activity registry ~agent_name ~is_listening:false ();
           Some msg
       | None ->
           Eio.Time.sleep clock check_interval;
@@ -43,5 +43,5 @@ let wait_for_message_eio ~clock (registry : Session.registry) ~agent_name ~timeo
   try wait_loop ()
   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     log_mcp_exn ~label:"listen wait_loop interrupted" exn;
-    Session.update_activity registry ~agent_name ~is_listening:(Some false) ();
+    Session.update_activity registry ~agent_name ~is_listening:false ();
     None

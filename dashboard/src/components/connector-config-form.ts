@@ -254,7 +254,7 @@ async function saveConfig(id: string) {
     }
   } catch (err) {
     setEntry(id, { saving: false })
-    showToast(err instanceof Error ? err.message : 'config save failed', 'error')
+    showToast(err instanceof Error ? err.message : 'config 저장 실패', 'error')
   }
 }
 

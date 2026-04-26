@@ -171,7 +171,7 @@ async function submitMention(target: string): Promise<void> {
     showToast(`${target}에게 전송`, 'success')
     void loadProfile(target)
   } catch (err) {
-    showToast(err instanceof Error ? err.message : 'Failed', 'error')
+    showToast(err instanceof Error ? err.message : '실패', 'error')
   } finally {
     sendingMention.value = false
   }

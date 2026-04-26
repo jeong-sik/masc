@@ -179,7 +179,7 @@ export function SwimlaneTimeline({
                       ? 'text-[var(--indigo)] border-[var(--indigo-40)] bg-[rgba(129,140,248,0.08)]'
                       : 'text-[var(--text-body)] border-[var(--white-10)]'
                 }`}
-                title=${`${lane.label} · ${count} transition${count === 1 ? '' : 's'} in this window`}
+                title=${`${lane.label} · 이 구간에서 ${count}회 전환`}
               >${lane.short} ${count}</span>
             `
           })}
@@ -200,7 +200,7 @@ export function SwimlaneTimeline({
               <div class="w-11 shrink-0 text-3xs font-mono font-semibold text-[var(--text-muted)]">
                 ${lane.short}
               </div>
-              <div class="flex h-4 flex-1 overflow-hidden rounded border border-[var(--white-8)]" role="group" aria-label=${`${lane.label} swimlane with ${segments.length} segments`}>
+              <div class="flex h-4 flex-1 overflow-hidden rounded border border-[var(--white-8)]" role="group" aria-label=${`${lane.label} 스윔레인, ${segments.length}개 구간`}>
                 ${segments.map((seg, segIndex) => {
                   const pct = ((seg.to - seg.from) / spanWidth) * 100
                   const holdFor = fmtDuration(Math.max(0, seg.to - seg.from))

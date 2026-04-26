@@ -851,7 +851,7 @@ function ConnectorLivePanel({
                 <button type="button"
                   class="cursor-pointer rounded border border-[var(--bad-20)] bg-[var(--bad-10)] px-2 py-0.5 text-3xs uppercase tracking-4 text-[var(--bad-light)] hover:bg-[var(--bad-10)] disabled:opacity-50"
                   disabled=${isActionLoading}
-                  aria-label=${`stop ${connectorName} sidecar`}
+                  aria-label=${`${connectorName} 사이드카 중단`}
                   onClick=${() => { void stopSidecar(connectorId) }}
                 >${isActionLoading ? '…' : 'Stop'}</button>
               `
@@ -1385,7 +1385,7 @@ function BindingRow({ binding }: { binding: BindingInfo }) {
   const lastError = shortText(binding.last_error, 72)
 
   return html`
-    <div class="rounded border border-[var(--card-border)] bg-[var(--white-4)] px-3 py-2" role="group" aria-label=${`${binding.channel} binding: ${tone.label}`}>
+    <div class="rounded border border-[var(--card-border)] bg-[var(--white-4)] px-3 py-2" role="group" aria-label=${`${binding.channel} 바인딩: ${tone.label}`}>
       <div class="flex items-start justify-between gap-3">
         <div class="min-w-0">
           <div class="text-xs font-medium text-[var(--text-body)]">
@@ -1431,7 +1431,7 @@ function EventRow({ event }: { event: GateEventInfo }) {
     : 'border border-[var(--card-border)] bg-[var(--white-4)] text-[var(--text-dim)]'
 
   return html`
-    <div class="rounded border border-[var(--card-border)] bg-[var(--white-4)] px-3 py-2" role="group" aria-label=${`${event.channel} event: ${event.outcome}`}>
+    <div class="rounded border border-[var(--card-border)] bg-[var(--white-4)] px-3 py-2" role="group" aria-label=${`${event.channel} 이벤트: ${event.outcome}`}>
       <div class="flex items-start justify-between gap-3">
         <div class="min-w-0 text-2xs text-[var(--text-dim)]">
           <div class="font-medium text-[var(--text-body)]">

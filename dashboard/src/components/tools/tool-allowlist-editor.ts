@@ -264,7 +264,7 @@ export function ResolvedPreview({ tools, catMap }: { tools: string[]; catMap: Ma
                   class="self-start text-3xs text-[var(--text-muted)] hover:text-[var(--text-body)] cursor-pointer transition-colors"
                   aria-expanded=${expanded}
                   aria-controls="allowlist-expanded"
-                  aria-label=${expanded ? 'resolved allowlist 접기' : `resolved allowlist 전체 ${tools.length}개 보기`}
+                  aria-label=${expanded ? '해석된 허용 목록 접기' : `해석된 허용 목록 전체 ${tools.length}개 보기`}
                   onClick=${() => setExpanded(value => !value)}
                 >
                   ${expanded ? '접기' : `전체 ${tools.length}개 보기`}

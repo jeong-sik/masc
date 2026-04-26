@@ -426,7 +426,7 @@ describe('ConnectorStatusPanel', () => {
     expect(dirPanel!.className).toContain('border-l-amber-500')
     // Named chip: "Directory error" is what AT hears.
     const dirChip = dirPanel!.querySelector('[aria-label]')
-    expect(dirChip?.getAttribute('aria-label')).toContain('unavailable')
+    expect(dirChip?.getAttribute('aria-label')).toContain('사용 불가')
   })
 
   it('pairs connector API failures with a browser/server next action', async () => {
@@ -659,9 +659,13 @@ describe('ConnectorStatusPanel', () => {
     const text = container.textContent?.replace(/\s+/g, ' ').trim() ?? ''
     expect(text).toContain('사이드카 미시작')
     expect(text).toContain('cd sidecars/discord-bot && ./run.sh')
-    expect(text).toContain('Cause: no sidecar status file has been observed at /tmp/discord_status.json')
-    expect(text).toContain('Next: click Start to spawn via the backend')
-    expect(text).toContain('Use status and tail logs if it stays offline')
+    expect(text).toContain('원인: sidecar status 파일이')
+    expect(text).toContain('/tmp/discord_status.json')
+    expect(text).toContain('관찰되지 않았습니다')
+    expect(text).toContain('다음:')
+    expect(text).toContain('Start')
+    expect(text).toContain('status')
+    expect(text).toContain('tail logs')
 
     // Regression guard for the screenshot bug: when a connector card's
     // brand accent is green (iMessage), the outer card renders a green
@@ -677,7 +681,7 @@ describe('ConnectorStatusPanel', () => {
     // And the explicit "Not running" status chip is the one AT users hear.
     const chip = panel!.querySelector('[data-sidecar-status-chip]')
     expect(chip).toBeTruthy()
-    expect(chip!.getAttribute('aria-label')).toContain('not running')
+    expect(chip!.getAttribute('aria-label')).toContain('실행 중 아님')
     expect(chip!.textContent).toContain('실행 중 아님')
 
     const copyLabels = Array.from(panel!.querySelectorAll<HTMLButtonElement>('[data-copy-button]'))
@@ -725,7 +729,7 @@ describe('ConnectorStatusPanel', () => {
     expect(emptyPanel!.className).toContain('border-l-amber-500')
     const chip = emptyPanel!.querySelector('[data-no-keepers-status-chip]')
     expect(chip).toBeTruthy()
-    expect(chip!.getAttribute('aria-label')).toContain('none configured')
+    expect(chip!.getAttribute('aria-label')).toContain('설정된 키퍼 없음')
     expect(chip!.textContent).toContain('설정 필요')
   })
 

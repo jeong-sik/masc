@@ -298,10 +298,17 @@ let has_substantive_tool_calls (tools_used : string list) : bool =
   List.exists Keeper_tool_disclosure.is_execution_progress_tool_name tools_used
 
 (** A cycle is noop when it produced no text AND all tools used (if any)
-    are observation-only.  Productive cycles reset consecutive_noop_count. *)
+    are passive-status only (e.g. board_list, context_status).  A turn whose
+    only tool is a [Claim_context] action such as [keeper_task_claim] is NOT
+    a noop: claiming a task mutates server-side assignment state and is the
+    documented first step of the multi-turn task lifecycle (claim -> act ->
+    done) per the prompt.  The noop-backoff was originally introduced in
+    #7168 to penalise the [board_list]-only pattern; sweeping
+    [Claim_context] into noop was an unintended side-effect that pinned
+    real keepers at the 8x cooldown cap. *)
 let is_noop_cycle ~has_text ~(tools_used : string list) : bool =
   not has_text
-  && List.for_all is_observation_only_tool_name tools_used
+  && List.for_all Keeper_tool_disclosure.is_passive_status_tool_name tools_used
 
 let visible_run_validation (result : Keeper_agent_run.run_result) :
     Oas.Raw_trace.run_validation option =

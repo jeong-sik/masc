@@ -38,13 +38,43 @@ DEFAULT_BASELINE = (
     REPO_ROOT / "scripts" / "lint" / "yojson-option-default.allowlist"
 )
 
-DERIVING_RE = re.compile(r"\[@@deriving[^]]*\byojson\b")
+DERIVING_BLOCK_RE = re.compile(r"\[@@deriving([^]]*)\]")
+# Decoders that consume incoming JSON and therefore must handle missing keys.
+# Encoder-only derivers (`to_yojson`) cannot fail on a missing optional field
+# because there is no decode path. Whole-token match against the deriver list
+# avoids false-positives like `to_yojson` accidentally matching `\byojson\b`
+# (Python's `\b` happens to treat `_y` as non-boundary because `_` is a word
+# character, but relying on that quirk is fragile — parse the comma-separated
+# token list explicitly).
+DECODING_DERIVERS = frozenset({"yojson", "of_yojson"})
 TYPE_START_RE = re.compile(r"^\s*(?:type|and)\s+\w")
 OPTION_FIELD_RE = re.compile(
     r"^\s*([\w']+)\s*:\s*[^;]*\boption\b[^;]*;"
 )
 DEFAULT_NONE_RE = re.compile(r"\[@default\s+None\s*\]")
 YOJSON_OPTION_RE = re.compile(r"\[@yojson\.option\]")
+
+
+def _has_decoding_deriver(text: str) -> bool:
+    """True iff text contains a `[@@deriving ...]` block whose comma-separated
+    token list includes `yojson` or `of_yojson` as a whole token. Encoder-only
+    derivers like `to_yojson` are exempt because they cannot fail on a missing
+    optional key (no decode path exists).
+
+    Per-deriver options like `{strict = false}` are tolerated by stripping
+    everything up to the first whitespace/brace.
+    """
+    for match in DERIVING_BLOCK_RE.finditer(text):
+        body = match.group(1)
+        for raw in body.split(","):
+            token = raw.strip()
+            if not token:
+                continue
+            # Trim ppx options: `yojson { strict = false }` -> `yojson`.
+            head = re.split(r"[\s{(]", token, maxsplit=1)[0]
+            if head in DECODING_DERIVERS:
+                return True
+    return False
 
 
 @dataclass(frozen=True)
@@ -87,7 +117,7 @@ def _scan_file(path: Path) -> list[Violation]:
         if not in_block:
             return
         joined = "\n".join(line for _, line in block_lines)
-        if DERIVING_RE.search(joined):
+        if _has_decoding_deriver(joined):
             for ln, line in block_lines:
                 m = OPTION_FIELD_RE.match(line)
                 if not m:
@@ -128,11 +158,11 @@ def _scan_file(path: Path) -> list[Violation]:
                 block_lines = [(i + 1, line)]
                 # If the deriving attribute is on the same line, close
                 # immediately after.
-                if DERIVING_RE.search(line):
+                if DERIVING_BLOCK_RE.search(line):
                     flush(i + 1)
         else:
             block_lines.append((i + 1, line))
-            if DERIVING_RE.search(line):
+            if DERIVING_BLOCK_RE.search(line):
                 flush(i + 1)
             elif line.strip() == "" and i + 1 < len(src):
                 nxt = src[i + 1]

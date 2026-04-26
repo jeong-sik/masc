@@ -133,9 +133,16 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
      not produced a turn for longer than stale_threshold_sec, the watchdog
      signals fiber stop so the supervisor restarts the keeper automatically.
      This closes the "KSM=Running but no live turn" gap where the previous
-     implementation only emitted a broadcast without triggering recovery. *)
+     implementation only emitted a broadcast without triggering recovery.
+
+     Two stall detection modes:
+     1. Idle stall: no turn executed for > stale_threshold_sec
+     2. Failure loop: turns keep running but all fail (consecutive_noop_count
+        >= 3) — the turn timeout loop keeps last_turn_ts fresh so the idle
+        check alone never fires. *)
   let stale_threshold_sec = 300.0 in
   let watchdog_poll_sec = 30.0 in
+  let noop_threshold = 3 in
   let last_broadcast_ts = ref 0.0 in
   Eio.Fiber.fork ~sw:ctx.sw (fun () ->
     let rec watchdog_loop () =
@@ -148,29 +155,31 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
            | Some entry
              when entry.phase = Keeper_state_machine.Running ->
              let last_turn = entry.meta.runtime.usage.last_turn_ts in
-             let stale =
+             let idle_stale =
                last_turn > 0.0 && now -. last_turn > stale_threshold_sec
              in
+             let noop_count =
+               entry.meta.runtime.proactive_rt.consecutive_noop_count
+             in
+             let failure_loop = noop_count >= noop_threshold in
+             let stale = idle_stale || failure_loop in
              let cooldown_ok =
                !last_broadcast_ts = 0.0
                || now -. !last_broadcast_ts > stale_threshold_sec
              in
              if stale && cooldown_ok then begin
-               (* Fail-closed ordering: signal fiber stop + failure reason
-                  FIRST so sweep_and_recover restarts unconditionally. The
-                  broadcast is best-effort; if it throws, the keeper still
-                  gets restarted instead of being silently stuck. *)
+               let reason_desc =
+                 if idle_stale
+                 then Printf.sprintf "idle %.0fs" (now -. last_turn)
+                 else Printf.sprintf "failure-loop noop=%d" noop_count
+               in
                Keeper_registry.set_failure_reason ~base_path meta.name
                  (Some (Keeper_registry.Stale_turn_timeout
                           (now -. last_turn)));
                Atomic.set reg.fiber_stop true;
                Log.Keeper.error
-                 "%s: stale watchdog terminating fiber (%.0fs since last turn)"
-                 meta.name (now -. last_turn);
-               (* Broadcast wrapped separately. last_broadcast_ts is only
-                  advanced on successful emit so a failed broadcast retries
-                  on the next tick instead of being suppressed for
-                  stale_threshold_sec. *)
+                 "%s: stale watchdog terminating fiber (%s)"
+                 meta.name reason_desc;
                (try
                   Keeper_execution_receipt.emit_stale_keeper_broadcast
                     ctx.config

@@ -595,8 +595,8 @@ export function toolSummary(row: FleetRow): { label: string; title: string } {
   }
   if (row.tool_activity_known) {
     return {
-      label: 'No recent tools recorded',
-      title: 'No recent tools recorded',
+      label: '최근 도구 기록 없음',
+      title: '최근 도구 기록 없음',
     }
   }
   return {

@@ -10,24 +10,24 @@ import type { InvariantViolationCounts } from './fsm-hub-types'
     pending" } so the tooltip reflects the active half of the flag. */
 const MEASUREMENT_FLAG_DESCRIPTIONS: Record<string, { on: string; off: string }> = {
   reflect: {
-    on: 'Keeper will pause before the next turn to self-evaluate its recent output (Reflexion loop).',
-    off: 'No reflection pending — keeper runs its next turn without self-check.',
+    on: '키퍼가 다음 턴 전에 일시 정지하고 최근 출력을 자기 평가합니다 (Reflexion loop).',
+    off: '예약된 reflection 없음 — 키퍼는 self-check 없이 다음 턴을 실행합니다.',
   },
   plan: {
-    on: 'Keeper will re-plan its remaining steps before executing the next action.',
-    off: 'No re-plan scheduled — keeper follows its existing plan.',
+    on: '키퍼가 다음 행동 실행 전에 남은 단계를 재계획합니다.',
+    off: '예약된 재계획 없음 — 키퍼는 기존 계획을 따릅니다.',
   },
   compact: {
-    on: 'Context compaction is scheduled — older messages will be summarized to reclaim token budget.',
-    off: 'No compaction pending — the context window still has room.',
+    on: '컨텍스트 압축 예약됨 — 오래된 메시지를 요약해 토큰 예산을 회수합니다.',
+    off: '예약된 압축 없음 — 컨텍스트 윈도우에 여유가 있습니다.',
   },
   handoff: {
-    on: 'Keeper will roll over to a new trace/generation while preserving the same keeper identity.',
-    off: 'No handoff scheduled — the current generation keeps running on the same trace.',
+    on: '키퍼가 동일 정체성을 유지하며 새 trace/generation 으로 이관됩니다.',
+    off: '예약된 handoff 없음 — 현재 generation 이 같은 trace 에서 계속 실행됩니다.',
   },
   guardrail: {
-    on: 'A guardrail has tripped — the keeper will halt pending operator intervention.',
-    off: 'No guardrail active — keeper runs under its normal safety envelope.',
+    on: 'guardrail 발동됨 — 키퍼가 운영자 개입 대기 상태로 멈춥니다.',
+    off: '활성 guardrail 없음 — 키퍼가 일반 safety envelope 안에서 실행됩니다.',
   },
 }
 
@@ -36,7 +36,7 @@ export function MeasurementCard({ snapshot }: { snapshot: KeeperCompositeSnapsho
   return html`
     <div class="rounded border border-[var(--white-8)] bg-[var(--white-2)] p-3">
       <div class="text-3xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)] mb-2">
-        Measurement
+        측정
       </div>
       ${m.captured && m.auto_rules ? html`
         <div class="flex flex-col gap-1.5 text-2xs text-[var(--color-fg-primary)]">

@@ -705,7 +705,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
           onClick=${enterEditMode}
         >편집</button>
       `}
-      ${saveError.value ? html`<span class="text-xs text-[var(--bad)]">${saveError.value}</span>` : null}
+      ${saveError.value ? html`<span class="text-xs text-[var(--bad)]" role="alert">${saveError.value}</span>` : null}
     </div>
   `
 
@@ -827,7 +827,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
                     : '변경 시 keeper manifest의 cascade_name 이 즉시 갱신됩니다.'}
               </span>
               ${cascadeSaveError.value
-                ? html`<span class="text-2xs text-[var(--bad)]">${cascadeSaveError.value}</span>`
+                ? html`<span class="text-2xs text-[var(--bad)]" role="alert">${cascadeSaveError.value}</span>`
                 : null}
               ${invalidCascadeProfiles.length > 0
                 ? html`<span class="text-2xs text-[var(--warn)]">invalid profile ${invalidCascadeProfiles.length}개: ${invalidCascadeSummary}</span>`

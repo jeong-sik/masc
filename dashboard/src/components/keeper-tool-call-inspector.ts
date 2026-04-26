@@ -211,7 +211,7 @@ export function KeeperToolCallInspector({ keeperName }: { keeperName: string }) 
   }
 
   if (resource.state.value.error) {
-    return html`<div class="text-xs text-[var(--color-status-err)] p-4">${resource.state.value.error}</div>`
+    return html`<div class="text-xs text-[var(--color-status-err)] p-4" role="alert">${resource.state.value.error}</div>`
   }
 
   const entries = allEntries

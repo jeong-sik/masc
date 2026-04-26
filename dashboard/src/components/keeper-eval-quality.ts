@@ -185,6 +185,7 @@ export function KeeperEvalQualityPanel({ keeperName }: { keeperName: string }) {
           class="text-3xs text-[var(--color-fg-disabled)] hover:text-[var(--color-fg-muted)] cursor-pointer bg-transparent border-0 p-0"
           onClick=${() => void loadEvalData(keeperName)}
           title="새로고침"
+          aria-label="평가 결과 새로고침"
         >${loading ? '...' : '\u21bb'}</button>
       </div>
 

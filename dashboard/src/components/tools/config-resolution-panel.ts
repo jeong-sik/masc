@@ -401,7 +401,7 @@ function RuntimeProbePanel() {
             `
           : null}
         <button
-          class="ml-auto rounded border border-[var(--color-border-default)] bg-[var(--bg-0)] px-3 py-1 text-2xs text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)]"
+          class="ml-auto rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-3 py-1 text-2xs text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)]"
           onClick=${() => void load(true)}
         >
           ${state.value.loading ? 'probing...' : 'refresh probe'}

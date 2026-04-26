@@ -70,7 +70,7 @@ export function ConfirmDialogOverlay() {
 
   let iconColor = 'text-warn'
   let iconBg = 'bg-warn/10 border-warn/20'
-  let confirmBtnClass = 'bg-[var(--color-status-warn)] text-[var(--bg-0)] hover:bg-[var(--color-status-warn)]/90'
+  let confirmBtnClass = 'bg-[var(--color-status-warn)] text-[var(--color-bg-page)] hover:bg-[var(--color-status-warn)]/90'
   let IconComponent = AlertTriangle
 
   if (state.tone === 'danger') {
@@ -81,7 +81,7 @@ export function ConfirmDialogOverlay() {
   } else if (state.tone === 'info') {
     iconColor = 'text-accent'
     iconBg = 'bg-[var(--accent-10)] border-accent/20'
-    confirmBtnClass = 'bg-[var(--color-accent-fg)] text-[var(--bg-0)] hover:bg-[var(--color-accent-fg)]/90'
+    confirmBtnClass = 'bg-[var(--color-accent-fg)] text-[var(--color-bg-page)] hover:bg-[var(--color-accent-fg)]/90'
     IconComponent = Info
   }
 

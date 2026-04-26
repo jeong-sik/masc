@@ -632,7 +632,7 @@ function ShortcutsOverlay({
       aria-label="키보드 단축키"
     >
       <div
-        class="rounded border border-[var(--white-10)] bg-[var(--bg-0)] p-5 min-w-70 shadow-sm"
+        class="rounded border border-[var(--white-10)] bg-[var(--color-bg-page)] p-5 min-w-70 shadow-sm"
         onClick=${(e: MouseEvent) => e.stopPropagation()}
       >
         <div class="flex items-center justify-between mb-3">
@@ -808,7 +808,7 @@ function StatusBar({
                 role="tab"
                 aria-selected=${active}
                 tabindex=${active ? 0 : -1}
-                class=${`rounded-sm border px-2.5 py-0.5 text-3xs font-mono transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-fg)] focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--bg-0)] ${cls}`}
+                class=${`rounded-sm border px-2.5 py-0.5 text-3xs font-mono transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-fg)] focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--color-bg-page)] ${cls}`}
                 onClick=${() => onSelect(name)}
                 title=${i < 9 ? `${name} — 단축키 ${i + 1}` : name}
                 onKeyDown=${(e: KeyboardEvent) => {

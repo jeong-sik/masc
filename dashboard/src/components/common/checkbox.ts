@@ -12,7 +12,7 @@
 
 import { html } from 'htm/preact'
 
-const CHECKBOX_BASE = 'w-4 h-4 rounded border border-[var(--color-border-default)] bg-[var(--white-4)] cursor-pointer transition-colors hover:bg-[var(--white-8)] hover:border-[var(--white-20)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-1)] accent-[var(--color-accent-fg)]'
+const CHECKBOX_BASE = 'w-4 h-4 rounded border border-[var(--color-border-default)] bg-[var(--white-4)] cursor-pointer transition-colors hover:bg-[var(--white-8)] hover:border-[var(--white-20)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-bg-surface)] accent-[var(--color-accent-fg)]'
 
 interface CheckboxProps {
   checked?: boolean

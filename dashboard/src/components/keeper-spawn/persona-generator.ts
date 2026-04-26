@@ -222,7 +222,7 @@ export function PersonaGenerator() {
             value=${profileText.value}
             placeholder="초안을 생성하면 profile.json이 표시됩니다"
             onInput=${(e: Event) => { profileText.value = (e.target as HTMLTextAreaElement).value }}
-            class="w-full rounded border border-[var(--white-10)] bg-[var(--bg-0)] px-2 py-2 font-mono text-3xs leading-5 text-[var(--color-fg-primary)] placeholder:text-[var(--color-fg-disabled)] focus:outline-none focus:border-[var(--color-accent-fg)]"
+            class="w-full rounded border border-[var(--white-10)] bg-[var(--color-bg-page)] px-2 py-2 font-mono text-3xs leading-5 text-[var(--color-fg-primary)] placeholder:text-[var(--color-fg-disabled)] focus:outline-none focus:border-[var(--color-accent-fg)]"
           />
         </div>
 

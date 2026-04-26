@@ -1472,7 +1472,7 @@ function DisclosurePanel({
   testId: string
 }) {
   return html`
-    <details class="mb-4 rounded border border-[var(--color-border-default)] bg-[var(--bg-1)]" data-testid=${testId}>
+    <details class="mb-4 rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]" data-testid=${testId}>
       <summary class="cursor-pointer list-none px-3 py-2.5">
         <div class="flex items-center justify-between gap-3">
           <div>
@@ -1677,7 +1677,7 @@ export function ConnectorStatusPanel() {
         ? html`
             <div
               id="connector-detail-panel"
-              class="mb-4 rounded border border-[var(--color-border-default)] bg-[var(--bg-0)]/40 p-3"
+              class="mb-4 rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)]/40 p-3"
               data-testid="connector-detail-panel"
             >
               <div class="mb-3 flex items-center justify-between gap-3 text-2xs">

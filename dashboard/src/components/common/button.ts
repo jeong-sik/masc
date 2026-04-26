@@ -29,7 +29,7 @@ const VARIANT_CLASSES: Record<ButtonVariant, string> = {
   subtle: 'border-none bg-transparent text-[var(--color-fg-muted)] hover:text-[var(--color-fg-primary)] hover:bg-[var(--white-6)]',
 }
 
-const BASE = 'rounded cursor-pointer transition-all duration-200 font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-1)] active:scale-[0.97] active:opacity-90'
+const BASE = 'rounded cursor-pointer transition-all duration-200 font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-bg-surface)] active:scale-[0.97] active:opacity-90'
 
 interface ActionButtonProps {
   variant?: ButtonVariant

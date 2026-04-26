@@ -11,7 +11,7 @@
 
 import { html } from 'htm/preact'
 
-const SELECT_BASE = 'w-full rounded bg-[var(--white-4)] border border-[var(--color-border-default)] text-[var(--color-fg-primary)] transition-colors hover:bg-[var(--white-6)] focus-visible:bg-[var(--bg-0)] focus-visible:outline-none focus-visible:border-[rgba(71,184,255,0.6)] focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-1)] appearance-none cursor-pointer'
+const SELECT_BASE = 'w-full rounded bg-[var(--white-4)] border border-[var(--color-border-default)] text-[var(--color-fg-primary)] transition-colors hover:bg-[var(--white-6)] focus-visible:bg-[var(--color-bg-page)] focus-visible:outline-none focus-visible:border-[rgba(71,184,255,0.6)] focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-bg-surface)] appearance-none cursor-pointer'
 
 interface SelectOption { value: string; label: string }
 

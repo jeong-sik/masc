@@ -249,19 +249,19 @@ function ControlRoomPanel({ state }: { state: FleetTelemetryState }) {
         <${SummaryCard}
           title="승인 대기"
           value=${pendingApprovals.toString()}
-          detail=${pendingApprovals > 0 ? 'Operator approval queue is non-empty.' : 'No pending approvals are visible.'}
+          detail=${pendingApprovals > 0 ? '오퍼레이터 승인 대기열이 비어있지 않습니다.' : '대기 중인 승인이 없습니다.'}
           tone=${pendingApprovals > 0 ? 'warn' : 'ok'}
         />
         <${SummaryCard}
           title="주의"
           value=${attentionEvents.length.toString()}
-          detail=${attentionEvents.length > 0 ? 'Critical blockers and pause-worthy states are surfaced here.' : 'No active attention events are reported.'}
+          detail=${attentionEvents.length > 0 ? '심각한 차단 요인과 일시정지 후보 상태를 표시합니다.' : '활성 주의 이벤트가 없습니다.'}
           tone=${attentionEvents.length > 0 ? 'warn' : 'ok'}
         />
         <${SummaryCard}
           title="목표 범위"
           value=${state.rows.length > 0 ? `${state.rows.filter(row => row.goal_linked).length}/${state.rows.length}` : '0/0'}
-          detail=${state.rows.some(row => !row.goal_linked) ? 'Some keepers are active without a visible goal link.' : 'All surfaced keepers have a goal anchor.'}
+          detail=${state.rows.some(row => !row.goal_linked) ? '일부 키퍼가 목표 링크 없이 활동 중입니다.' : '모든 표시된 키퍼에 목표가 연결되어 있습니다.'}
           tone=${state.rows.length === 0 || state.rows.every(row => row.goal_linked) ? 'ok' : 'warn'}
         />
       </div>
@@ -714,29 +714,29 @@ export function FleetTelemetryPanel() {
         <${SummaryCard}
           title="Keeper 가동률"
           value=${`${counts.live}/${value.rows.length || 0}`}
-          detail=${`${counts.toolCovered}/${value.rows.length || 0} keepers surfaced recent tool activity.`}
+          detail=${`${counts.toolCovered}/${value.rows.length || 0} 키퍼가 최근 도구 활동을 보였습니다.`}
           tone=${liveTone}
         />
         <${SummaryCard}
           title="런타임 압박"
           value=${`${counts.hot} hot / ${counts.warn} warn`}
-          detail=${counts.stale > 0 ? `${counts.stale} keepers are stale beyond ${Math.round(STALE_ACTIVITY_SEC / 60)}m.` : 'No stale keepers crossed the activity threshold.'}
+          detail=${counts.stale > 0 ? `${counts.stale}개 키퍼가 ${Math.round(STALE_ACTIVITY_SEC / 60)}분 이상 정체 중입니다.` : '정체된 키퍼가 활동 임계값을 넘기지 않았습니다.'}
           tone=${toneForPressure(counts.hot, counts.warn)}
         />
         <${SummaryCard}
           title="도구 성공률"
           value=${value.tool_quality.total > 0 ? formatPercent(value.tool_quality.success_rate, 1) : 'n/a'}
           detail=${value.tool_quality.total > 0
-            ? `${value.tool_quality.failure.toLocaleString()} failures across ${value.tool_quality.total.toLocaleString()}${value.tool_quality.sampling_mode === 'window_hours' && value.tool_quality.window_hours != null ? ` calls in the last ${value.tool_quality.window_hours}h.` : ' recent calls.'}`
+            ? `${value.tool_quality.total.toLocaleString()}회 중 ${value.tool_quality.failure.toLocaleString()}회 실패${value.tool_quality.sampling_mode === 'window_hours' && value.tool_quality.window_hours != null ? ` (최근 ${value.tool_quality.window_hours}시간).` : ' (최근 호출).'}`
             : value.tool_quality.sampling_mode === 'window_hours' && value.tool_quality.window_hours != null
-              ? `No tool quality samples were recorded in the last ${value.tool_quality.window_hours}h.`
-              : 'No recent tool quality samples were recorded.'}
+              ? `최근 ${value.tool_quality.window_hours}시간 동안 도구 품질 샘플이 없습니다.`
+              : '최근 도구 품질 샘플이 없습니다.'}
           tone=${value.tool_quality.total > 0 ? toneForToolSuccess(value.tool_quality.success_rate) : 'neutral'}
         />
         <${SummaryCard}
           title="텔레메트리 저장소"
           value=${value.total_telemetry_entries.toLocaleString()}
-          detail=${`${sourcesWithData}/${value.telemetry_sources.length || 0} stores currently have data.`}
+          detail=${`${sourcesWithData}/${value.telemetry_sources.length || 0} 저장소에 데이터가 있습니다.`}
           tone=${sourcesWithData > 0 ? 'ok' : 'warn'}
         />
       </div>

@@ -391,7 +391,7 @@ function FieldWidget({ id, field, value, revealed }: {
             <button
               type="button"
               class="shrink-0 cursor-pointer rounded border border-[var(--white-8)] p-1 text-[var(--color-fg-disabled)] hover:bg-[var(--white-8)] hover:text-[var(--color-fg-primary)]"
-              aria-label=${revealed ? 'Hide value' : 'Reveal value'}
+              aria-label=${revealed ? '값 숨기기' : '값 표시'}
               onClick=${toggleReveal}
             >
               ${revealed ? html`<${EyeOff} size=${12} />` : html`<${Eye} size=${12} />`}

@@ -692,7 +692,12 @@ let broadcast_impl target json =
   List.iter (fun sid -> unregister sid) !failed;
   (* Record broadcast duration for transport observability *)
   let elapsed = Time_compat.now () -. t0 in
-  Transport_metrics.observe_broadcast_duration elapsed;
+  let target_label = match target with
+    | All -> "all"
+    | Observers -> "observers"
+    | Coordinators -> "coordinators"
+  in
+  Transport_metrics.observe_broadcast_duration ~target:target_label elapsed;
   sync_transport_snapshot ();
   (* Notify external subscribers (gRPC streams, etc.) *)
   notify_external_subscribers event

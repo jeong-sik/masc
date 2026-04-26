@@ -106,7 +106,7 @@ describe('Governance surface', () => {
     expect(container.textContent).toContain('judge-only / 최근 판단 0건')
     expect(container.textContent).toContain('Judge 상태')
     expect(container.textContent).toContain('Judge 모델')
-    expect(container.textContent).toContain('Live Judge')
+    expect(container.textContent).toContain('실시간 판정')
     expect(container.textContent).toContain('새로고침')
     expect(container.querySelector('[data-testid="governance-retired-banner"]')).toBeNull()
     expect(container.textContent).not.toContain('retired')

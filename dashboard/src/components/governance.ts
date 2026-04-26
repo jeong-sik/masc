@@ -99,7 +99,7 @@ function GovernanceSummaryStrip() {
     ` : null}
     <div class="mb-2.5 flex items-center justify-between gap-3 px-0.5">
       <div class="flex items-center gap-3 min-w-0">
-        <h2 class="text-lg font-bold text-text-strong tracking-wide">Live Judge</h2>
+        <h2 class="text-lg font-bold text-text-strong tracking-wide">실시간 판정</h2>
         <span class="rounded border border-white/5 bg-[var(--white-3)] px-2 py-0.5 text-2xs font-medium text-text-muted">
           ${judgeOnlyLabel}
         </span>

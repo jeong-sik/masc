@@ -3,6 +3,7 @@ import { useEffect } from 'preact/hooks'
 import { signal } from '@preact/signals'
 import { ActionButton } from '../common/button'
 import { Select } from '../common/select'
+import { Checkbox } from '../common/checkbox'
 import { showToast } from '../common/toast'
 import {
   generatePersonaDraft,
@@ -149,10 +150,10 @@ export function PersonaGenerator() {
             />
           </label>
           <label class="flex items-center gap-2 pt-5 text-2xs text-[var(--color-fg-primary)]">
-            <input
-              type="checkbox"
+            <${Checkbox}
               checked=${proactiveEnabled.value}
-              onChange=${(e: Event) => { proactiveEnabled.value = (e.target as HTMLInputElement).checked }}
+              ariaLabel="proactive"
+              onChange=${(checked: boolean) => { proactiveEnabled.value = checked }}
             />
             proactive
           </label>
@@ -180,10 +181,10 @@ export function PersonaGenerator() {
             onClick=${() => void saveDraft(false)}
           >${personaSaving.value ? '저장 중...' : '저장'}<//>
           <label class="flex items-center gap-1.5 text-3xs text-[var(--color-fg-muted)]">
-            <input
-              type="checkbox"
+            <${Checkbox}
               checked=${overwrite.value}
-              onChange=${(e: Event) => { overwrite.value = (e.target as HTMLInputElement).checked }}
+              ariaLabel="overwrite"
+              onChange=${(checked: boolean) => { overwrite.value = checked }}
             />
             overwrite
           </label>

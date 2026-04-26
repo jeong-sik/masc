@@ -214,6 +214,12 @@ let handle_keeper_pr_review_reply
       let owner_repo =
         if repo <> "" then repo
         else
+          (* Deviation from Env_config_exec_timeout.Pr_review (15s):
+             one-off [nameWithOwner] lookup is read-only and tightly
+             bounded.  See #10594 — a dedicated caller variant for a
+             single site is over-engineering, so this stays
+             hardcoded.  If a third site needs 5s budget,
+             reconsider. *)
           let st, out =
             Process_eio.run_argv_with_status ~timeout_sec:5.0
               [ "/bin/zsh"; "-lc";

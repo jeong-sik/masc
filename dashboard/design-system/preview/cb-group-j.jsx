@@ -3,7 +3,7 @@
 
 window.MASC_P3 = (function () {
   const keepers = [
-    { id: "nick0cave", initials: "NC", role: "captain", color: "var(--brass-1)" },
+    { id: "nick0cave", initials: "NC", role: "captain", color: "var(--color-accent-fg)" },
     { id: "masc-improver", initials: "MI", role: "improver", color: "var(--ok)" },
     { id: "sangsu", initials: "SG", role: "analyst", color: "var(--info)" },
     { id: "qa-king", initials: "QA", role: "qa", color: "var(--err)" },

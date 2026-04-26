@@ -49,7 +49,7 @@ function GoalHorizonTrack() {
             <div className="hz" aria-hidden="true">
               <span>{g.label}</span>
               <span className="n">{g.note}</span>
-              <span className="n" style={{marginTop:'auto', color:'var(--brass-1)'}}>{g.goals.length}</span>
+              <span className="n" style={{marginTop:'auto', color:'var(--color-accent-fg)'}}>{g.goals.length}</span>
             </div>
             <div className="lst" role="list" aria-label={`${g.label} goals`}>
               {g.goals.length === 0 && <div className="cb-mute" role="listitem" style={{padding:'8px',fontFamily:'var(--font-mono)',fontSize:'10px'}}>— no goals at this horizon —</div>}
@@ -148,7 +148,7 @@ function GoalSnapshotDiff() {
         branch="main"
         keepers={["scholar"]}
         meta="2026-04-22 → 2026-04-23"
-        right={<span className="meta" style={{color:'var(--brass-1)'}}>{P2.goalSnapshots.length} drift</span>}
+        right={<span className="meta" style={{color:'var(--color-accent-fg)'}}>{P2.goalSnapshots.length} drift</span>}
       />
       <div className="body">
         <div className="gz-snap" role="list" aria-label="Goal snapshot rows">
@@ -249,7 +249,7 @@ function TaskBacklog() {
                 </td>
                 <td className="pri">{t.title}</td>
                 <td className="mute" aria-label={`Branch ${t.branch}`}><span aria-hidden="true">⎇ </span>{t.branch}</td>
-                <td>{t.keeper ? <span style={{color:'var(--brass-1)'}}>{t.keeper}</span> : <span className="mute" aria-label="No keeper">—</span>}</td>
+                <td>{t.keeper ? <span style={{color:'var(--color-accent-fg)'}}>{t.keeper}</span> : <span className="mute" aria-label="No keeper">—</span>}</td>
                 <td className="mute" title={t.goal}>{t.goal.replace('goal-','')}</td>
                 <td className="num">{t.age}</td>
               </tr>
@@ -298,7 +298,7 @@ function TaskStaleAlert() {
           ))}
         </div>
         <div role="note" style={{marginTop:8, padding:'6px 8px', borderTop:'1px dashed var(--color-border-strong)', fontFamily:'var(--font-mono)', fontSize:'10px', color:'var(--color-fg-disabled)'}}>
-          taskmaster cannot force-release others' claims · operator nudge channel: <span style={{color:'var(--brass-1)'}}>hint</span>
+          taskmaster cannot force-release others' claims · operator nudge channel: <span style={{color:'var(--color-accent-fg)'}}>hint</span>
         </div>
       </div>
     </section>
@@ -425,27 +425,27 @@ function ResponsibilityMatrix() {
                   {grid[r].map((n, i) => (
                     <td key={i} className={bucket(n)} aria-label={`${r} × ${cols[i]}: ${n} verdicts`} title={`${r} × ${cols[i]}: ${n} verdicts`}>{n || '·'}</td>
                   ))}
-                  <td style={{color:'var(--brass-1)', fontWeight:600}} aria-label={`${r} total: ${total} verdicts`}>{total}</td>
+                  <td style={{color:'var(--color-accent-fg)', fontWeight:600}} aria-label={`${r} total: ${total} verdicts`}>{total}</td>
                 </tr>
               );
             })}
             <tr style={{borderTop:'2px solid var(--brass-2)'}}>
-              <th className="row-h" scope="row" style={{color:'var(--brass-1)'}}>Σ scope</th>
+              <th className="row-h" scope="row" style={{color:'var(--color-accent-fg)'}}>Σ scope</th>
               {cols.map((_, i) => {
                 const sum = rows.reduce((a, r) => a + grid[r][i], 0);
-                return <td key={i} aria-label={`${cols[i]} total: ${sum} verdicts`} style={{color:'var(--brass-1)', fontWeight:600}}>{sum}</td>;
+                return <td key={i} aria-label={`${cols[i]} total: ${sum} verdicts`} style={{color:'var(--color-accent-fg)', fontWeight:600}}>{sum}</td>;
               })}
-              <td aria-label={`Grand total verdicts`} style={{color:'var(--brass-1)', fontWeight:600}}>{rows.reduce((a, r) => a + grid[r].reduce((x,y)=>x+y, 0), 0)}</td>
+              <td aria-label={`Grand total verdicts`} style={{color:'var(--color-accent-fg)', fontWeight:600}}>{rows.reduce((a, r) => a + grid[r].reduce((x,y)=>x+y, 0), 0)}</td>
             </tr>
           </tbody>
         </table>
         <div role="note" aria-label="Matrix density legend" style={{marginTop:8, padding:'6px 8px', fontFamily:'var(--font-mono)', fontSize:'10px', color:'var(--color-fg-disabled)', display:'flex', gap:8, alignItems:'center'}}>
           <span aria-hidden="true">density:</span>
           <span aria-hidden="true" style={{padding:'1px 6px', background:'var(--color-bg-page)', border:'1px solid var(--color-border-default)'}}>0</span>
-          <span aria-hidden="true" style={{padding:'1px 6px', background:'rgb(var(--brass-glow)/.05)', color:'var(--color-fg-secondary)'}}>1–2</span>
-          <span aria-hidden="true" style={{padding:'1px 6px', background:'rgb(var(--brass-glow)/.12)', color:'var(--color-fg-primary)'}}>3–4</span>
-          <span aria-hidden="true" style={{padding:'1px 6px', background:'rgb(var(--brass-glow)/.22)', color:'var(--brass-1)'}}>5–6</span>
-          <span aria-hidden="true" style={{padding:'1px 6px', background:'var(--brass-1)', color:'var(--color-bg-page)'}}>7+</span>
+          <span aria-hidden="true" style={{padding:'1px 6px', background:'rgb(var(--color-accent-glow)/.05)', color:'var(--color-fg-secondary)'}}>1–2</span>
+          <span aria-hidden="true" style={{padding:'1px 6px', background:'rgb(var(--color-accent-glow)/.12)', color:'var(--color-fg-primary)'}}>3–4</span>
+          <span aria-hidden="true" style={{padding:'1px 6px', background:'rgb(var(--color-accent-glow)/.22)', color:'var(--color-accent-fg)'}}>5–6</span>
+          <span aria-hidden="true" style={{padding:'1px 6px', background:'var(--color-accent-fg)', color:'var(--color-bg-page)'}}>7+</span>
         </div>
       </div>
     </section>

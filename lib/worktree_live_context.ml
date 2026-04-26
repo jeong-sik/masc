@@ -84,70 +84,63 @@ type status_cache_entry = {
 let status_cache : (string, status_cache_entry) Hashtbl.t =
   Hashtbl.create 4
 
-(* Stdlib.Mutex: status_cache may be accessed from keepers on different
-   domains concurrently. *)
-let status_cache_mu = Stdlib.Mutex.create ()
+(* Eio.Mutex: shared between fibers on the same domain.  Stdlib.Mutex with
+   PTHREAD_MUTEX_ERRORCHECK raises Sys_error("Resource deadlock avoided")
+   when a second fiber on the same OS thread tries to acquire while the
+   first is suspended (e.g. waiting on git status fork+exec).  Eio.Mutex
+   suspends the second fiber instead, letting the first complete first.
+   Ref: #10682 EDEADLK at line 165 captured by #10707 diag hook. *)
+let status_cache_mu = Eio.Mutex.create ()
 
 let status_cache_ttl_sec () =
   Env_config_core.get_float ~default:5.0 "MASC_WORKTREE_STATUS_CACHE_TTL_S"
 
 let status_cache_lookup repo_root ~now ~ttl =
   if ttl <= 0.0 then None
-  else begin
-    Stdlib.Mutex.lock status_cache_mu;
-    Fun.protect
-      ~finally:(fun () -> Stdlib.Mutex.unlock status_cache_mu)
-      (fun () ->
-        match Hashtbl.find_opt status_cache repo_root with
-        | Some entry when now -. entry.refreshed_at <= ttl ->
-            Some entry.lines
-        | _ -> None)
-  end
+  else
+    Eio.Mutex.use_rw ~protect:true status_cache_mu (fun () ->
+      match Hashtbl.find_opt status_cache repo_root with
+      | Some entry when now -. entry.refreshed_at <= ttl ->
+          Some entry.lines
+      | _ -> None)
 
 let status_cache_store repo_root lines ~now ~ttl =
-  if ttl > 0.0 then begin
-    Stdlib.Mutex.lock status_cache_mu;
-    Fun.protect
-      ~finally:(fun () -> Stdlib.Mutex.unlock status_cache_mu)
-      (fun () ->
-        Hashtbl.replace status_cache repo_root { lines; refreshed_at = now })
-  end
+  if ttl > 0.0 then
+    Eio.Mutex.use_rw ~protect:true status_cache_mu (fun () ->
+      Hashtbl.replace status_cache repo_root { lines; refreshed_at = now })
 
 let clear_status_cache_for_tests () =
-  Stdlib.Mutex.lock status_cache_mu;
-  Fun.protect
-    ~finally:(fun () -> Stdlib.Mutex.unlock status_cache_mu)
-    (fun () -> Hashtbl.clear status_cache)
+  Eio.Mutex.use_rw ~protect:true status_cache_mu (fun () ->
+    Hashtbl.clear status_cache)
 
-(* Single-flight gates: per-repo Stdlib.Mutex serialising concurrent cache
+(* Single-flight gates: per-repo Eio.Mutex serialising concurrent cache
    misses so only one [git status] runs per repo at a time.  Without this
    gate N keepers + dashboard fibers hitting an expired cache simultaneously
    each fork+exec git, multiplying the I/O contention that was already
    making git status take 10s+ on a 13-line working tree (#9632).  After
    the winner refreshes the cache, followers re-check and reuse it.
-   Pattern: Go [singleflight.Group], Caffeine loading cache. *)
-let single_flight_registry : (string, Stdlib.Mutex.t) Hashtbl.t =
+   Pattern: Go [singleflight.Group], Caffeine loading cache.
+
+   Originally Stdlib.Mutex; migrated to Eio.Mutex after #10682 captured an
+   EDEADLK backtrace at line 165 — a second fiber on the same domain
+   re-locked while the holder was suspended in run_git_capture_lines. *)
+let single_flight_registry : (string, Eio.Mutex.t) Hashtbl.t =
   Hashtbl.create 4
 
-let single_flight_registry_mu = Stdlib.Mutex.create ()
+let single_flight_registry_mu = Eio.Mutex.create ()
 
 let single_flight_gate repo_root =
-  Stdlib.Mutex.lock single_flight_registry_mu;
-  Fun.protect
-    ~finally:(fun () -> Stdlib.Mutex.unlock single_flight_registry_mu)
-    (fun () ->
-      match Hashtbl.find_opt single_flight_registry repo_root with
-      | Some mu -> mu
-      | None ->
-          let mu = Stdlib.Mutex.create () in
-          Hashtbl.replace single_flight_registry repo_root mu;
-          mu)
+  Eio.Mutex.use_rw ~protect:true single_flight_registry_mu (fun () ->
+    match Hashtbl.find_opt single_flight_registry repo_root with
+    | Some mu -> mu
+    | None ->
+        let mu = Eio.Mutex.create () in
+        Hashtbl.replace single_flight_registry repo_root mu;
+        mu)
 
 let clear_single_flight_for_tests () =
-  Stdlib.Mutex.lock single_flight_registry_mu;
-  Fun.protect
-    ~finally:(fun () -> Stdlib.Mutex.unlock single_flight_registry_mu)
-    (fun () -> Hashtbl.clear single_flight_registry)
+  Eio.Mutex.use_rw ~protect:true single_flight_registry_mu (fun () ->
+    Hashtbl.clear single_flight_registry)
 
 let current_status_lines_uncached ~repo_root =
   run_git_capture_lines ~workdir:repo_root
@@ -162,21 +155,18 @@ let current_status_lines ~repo_root =
   | Some lines -> lines
   | None ->
       let gate = single_flight_gate repo_root in
-      Stdlib.Mutex.lock gate;
-      Fun.protect
-        ~finally:(fun () -> Stdlib.Mutex.unlock gate)
-        (fun () ->
-          (* Double-check: the caller that won the race may have refreshed
-             the cache while we were blocked on [gate]. *)
-          match
-            status_cache_lookup repo_root ~now:(Time_compat.now ()) ~ttl
-          with
-          | Some lines -> lines
-          | None ->
-              let lines = current_status_lines_uncached ~repo_root in
-              status_cache_store repo_root lines
-                ~now:(Time_compat.now ()) ~ttl;
-              lines)
+      Eio.Mutex.use_rw ~protect:true gate (fun () ->
+        (* Double-check: the caller that won the race may have refreshed
+           the cache while we were blocked on [gate]. *)
+        match
+          status_cache_lookup repo_root ~now:(Time_compat.now ()) ~ttl
+        with
+        | Some lines -> lines
+        | None ->
+            let lines = current_status_lines_uncached ~repo_root in
+            status_cache_store repo_root lines
+              ~now:(Time_compat.now ()) ~ttl;
+            lines)
 
 let state_dir ~repo_root =
   Filename.concat

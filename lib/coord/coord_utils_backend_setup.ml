@@ -342,12 +342,21 @@ let default_config base_path =
   let resolved_path = resolve_masc_base_path base_path in
   sync_test_base_path_env resolved_path;
   let backend_config = backend_config_for resolved_path in
-  Log.Backend.info "MASC Backend: type=%s"
+  (* #10919: this factory is invoked per-tool-dispatch (8 call sites:
+     mcp_server_eio_call_tool, tool_autoresearch, inline_dispatch_coord,
+     keeper_rollover, ...) — 1745 inits / 2 days = 3490 INFO events
+     for what is conceptually a static config.  Demote the success
+     path to DEBUG; the failure / fallback paths below stay at
+     WARN so operators still see degraded backend selection.  A
+     per-base_path memoization patch (root fix for the per-call
+     factory pattern itself) is left for a follow-up since it needs
+     concurrency-safe state and broader test coverage. *)
+  Log.Backend.debug "MASC Backend: type=%s"
     (Backend_types.show_backend_type backend_config.backend_type);
   let backend =
     match create_backend backend_config with
     | Ok backend ->
-        Log.Backend.info "Backend initialized: %s"
+        Log.Backend.debug "Backend initialized: %s"
           (match backend with
            | Memory _ -> "Memory"
            | FileSystem _ -> "FileSystem");
@@ -379,12 +388,14 @@ let default_config_eio ~sw ?(on_backend_ready = fun _backend -> ()) base_path =
   let resolved_path = resolve_masc_base_path base_path in
   sync_test_base_path_env resolved_path;
   let backend_config = backend_config_for resolved_path in
-  Log.Backend.info "MASC Backend: type=%s"
+  (* #10919: same noise pattern as [default_config]; demote success
+     path to DEBUG.  Failure / fallback paths below stay at WARN. *)
+  Log.Backend.debug "MASC Backend: type=%s"
     (Backend_types.show_backend_type backend_config.backend_type);
   let backend =
     match create_backend_eio ~sw backend_config with
     | Ok backend ->
-        Log.Backend.info "Backend initialized: %s"
+        Log.Backend.debug "Backend initialized: %s"
           (match backend with
            | Memory _ -> "Memory"
            | FileSystem _ -> "FileSystem");

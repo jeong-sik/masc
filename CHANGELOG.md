@@ -1,6 +1,37 @@
 # Changelog
 
 
+## [0.18.0] - 2026-04-26
+
+Aggregate of 50 commits since v0.17.0 (18 feat / 11 fix / 9 refactor / 5 perf / 3 docs / 3 chore / 1 diag). No breaking API changes. Headline: dashboard localisation continues (rounds 24–28, 50+ chips/labels), keeper stability gains noop-cycle classifier fix unblocking 8x cooldown trap (#10672) and `/workspace` LLM hallucination negative anchor (#10647), RFC-0008 PR-1 introduces `Credential_provider` trait + `Host_config_provider` (#10660).
+
+### Added (feat)
+- Dashboard localisation rounds 24–28: 50+ chips/labels/headings across multiple components (#10644 round-24, #10651 round-25, #10653 round-26, #10655 round-27, #10666 round-28); WS-only cutover dev default + transport beacon (#10657).
+- Keeper architecture: RFC-0008 PR-1 — `Credential_provider` trait + `Host_config_provider` (#10660).
+- Config SSOT: `Pr_review_post` caller (30s) + migrate `gh pr review` write site (#10626); `Git_meta` + `Shell_probe` callers added to `exec_timeout` SSOT (#10603).
+
+### Changed (refactor)
+- Common: `auth_dir` / `agents_dir` helpers hoisted to break P2 cycle (#10658); orphaned `Error` module + its coverage test dropped (#10659).
+- Dashboard: `bg-0` / `bg-1` / `bg-2` migrated to semantic aliases (#10638); inline buttons replaced with `ActionButton` in transport-health (PR-CS1, #10646) and autoresearch (PR-CS2, #10656).
+- Alerting: default 15→20s + `gh-issue-create` site migration (#10622).
+
+### Fixed
+- Keeper proactive scheduler: `Claim_context` excluded from noop cycle (#10672) — unblocks 8x cooldown trap that was pinning `ollama-local` and `qa-king` keepers.
+- Keeper sandbox prompt: `/workspace` negative anchor + `workspace` word replaced (#10647) — addresses LLM training-time prior hallucination.
+- Keeper concurrency: `Stdlib.Mutex` migrated to `Eio.Mutex` in single-domain hot paths (#10649).
+- Cascade: judge profiles ordered gemini-first to skip codex 30s timeout cycle (#10642).
+- Observability: `[max_turns]` / `[hard_quota]` class label prepended to cascade-fallback log (#10641, addresses #10629).
+- Dashboard tests: `successClass` / `statusChipClass` aligned with semantic aliases (#10662); telemetry / overview tests aligned with current source (#10654).
+
+### Performance
+- 5 perf commits (text-similarity, gate-diff, auth, cdal-judge SSOT delegations).
+
+### Diagnostics
+- Observer: `last_turn_ts` exposed in composite snapshot for watchdog diagnosis (#10663).
+
+### Documentation
+- CHANGELOG 0.16.0 + 0.17.0 release notes filled (#10639).
+
 ## [0.17.0] - 2026-04-26
 
 Aggregate of 103 commits since v0.16.0 (42 feat / 24 fix / 15 perf / 15 refactor / 4 chore / 2 docs). No breaking API changes. Headline: design-system semantic alias migration completes its bulk of CSS/JSX surface; cascade unblock series resolves repeated `agent_sdk` cap drift; keeper stability gains stale watchdog fiber restart and stream-idle gap-detection.

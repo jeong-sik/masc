@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en" data-theme="dark-fantasy">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>cb-group-g · Foundational primitives</title>
+  <link rel="stylesheet" href="../source_styles/tokens.css" />
+  <link rel="stylesheet" href="../type_layer.css" />
+  <link rel="stylesheet" href="_preview.css" />
+  <style>
+    .pv-cell { padding: 18px; gap: 14px; }
+    .pv-cell-label { font: 600 var(--type-label); letter-spacing: var(--track-caps); text-transform: uppercase; color: var(--color-fg-muted); }
+    .pv-cell-id    { font-family: var(--font-mono); font-size: var(--fs-9); color: var(--color-fg-disabled); letter-spacing: var(--track-caps); text-transform: uppercase; }
+    .pv-grid-2 { gap: 14px; }
+  </style>
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+</head>
+<body class="masc-ds">
+  <main class="pv-root">
+    <header class="pv-head">
+      <div class="pv-eyebrow">cb-group-g · foundational primitives</div>
+      <h1 class="pv-title">Empty · Loading · Error · Pagination · Breadcrumb</h1>
+      <p class="pv-sub">
+        Cross-cutting primitives every cockpit surface needs but were not bundled
+        in cb-group-a..f / h..k. Each variant is self-contained — no
+        <code class="mono">MASC_DATA</code> dependency — and follows SPEC §5
+        a11y patterns: empty/loading announce via <code class="mono">role="status"</code>,
+        errors via <code class="mono">role="alert"</code>, pagination uses a
+        labelled <code class="mono">&lt;nav&gt;</code>, breadcrumb is an
+        <code class="mono">&lt;ol&gt;</code> with <code class="mono">aria-current="page"</code>.
+      </p>
+    </header>
+
+    <!-- G1 EMPTY -->
+    <section class="pv-sect" aria-labelledby="g1-h">
+      <div class="pv-sect-h">
+        <h2 id="g1-h">G1 · Empty state</h2>
+        <span class="sub">role="status" · aria-live="polite"</span>
+      </div>
+      <div class="pv-grid-2">
+        <div class="pv-cell">
+          <div class="pv-cell-h">
+            <span class="pv-cell-label">no-data</span>
+            <span class="pv-cell-id">cb-g1-a</span>
+          </div>
+          <div id="m-g1a"></div>
+        </div>
+        <div class="pv-cell">
+          <div class="pv-cell-h">
+            <span class="pv-cell-label">search · no results</span>
+            <span class="pv-cell-id">cb-g1-b</span>
+          </div>
+          <div id="m-g1b"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- G2 LOADING -->
+    <section class="pv-sect" aria-labelledby="g2-h">
+      <div class="pv-sect-h">
+        <h2 id="g2-h">G2 · Loading skeleton</h2>
+        <span class="sub">aria-busy="true" · role="status"</span>
+      </div>
+      <div class="pv-grid-2">
+        <div class="pv-cell">
+          <div class="pv-cell-h">
+            <span class="pv-cell-label">rows</span>
+            <span class="pv-cell-id">cb-g2-a</span>
+          </div>
+          <div id="m-g2a"></div>
+        </div>
+        <div class="pv-cell">
+          <div class="pv-cell-h">
+            <span class="pv-cell-label">kpi strip</span>
+            <span class="pv-cell-id">cb-g2-b</span>
+          </div>
+          <div id="m-g2b"></div>
+        </div>
+        <div class="pv-cell" style="grid-column: span 2;">
+          <div class="pv-cell-h">
+            <span class="pv-cell-label">panel</span>
+            <span class="pv-cell-id">cb-g2-c</span>
+          </div>
+          <div id="m-g2c"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- G3 ERROR -->
+    <section class="pv-sect" aria-labelledby="g3-h">
+      <div class="pv-sect-h">
+        <h2 id="g3-h">G3 · Error boundary</h2>
+        <span class="sub">role="alert" · 1px ring · soft tinted bg</span>
+      </div>
+      <div class="pv-grid-2">
+        <div class="pv-cell">
+          <div class="pv-cell-h">
+            <span class="pv-cell-label">recoverable</span>
+            <span class="pv-cell-id">cb-g3-a</span>
+          </div>
+          <div id="m-g3a"></div>
+        </div>
+        <div class="pv-cell">
+          <div class="pv-cell-h">
+            <span class="pv-cell-label">fatal</span>
+            <span class="pv-cell-id">cb-g3-b</span>
+          </div>
+          <div id="m-g3b"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- G4 PAGINATION -->
+    <section class="pv-sect" aria-labelledby="g4-h">
+      <div class="pv-sect-h">
+        <h2 id="g4-h">G4 · Pagination</h2>
+        <span class="sub">nav[aria-label] · aria-current="page" · aria-disabled boundary</span>
+      </div>
+      <div class="pv-grid-2">
+        <div class="pv-cell">
+          <div class="pv-cell-h">
+            <span class="pv-cell-label">numeric</span>
+            <span class="pv-cell-id">cb-g4-a</span>
+          </div>
+          <div id="m-g4a"></div>
+        </div>
+        <div class="pv-cell">
+          <div class="pv-cell-h">
+            <span class="pv-cell-label">cursor</span>
+            <span class="pv-cell-id">cb-g4-b</span>
+          </div>
+          <div id="m-g4b"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- G5 BREADCRUMB -->
+    <section class="pv-sect" aria-labelledby="g5-h">
+      <div class="pv-sect-h">
+        <h2 id="g5-h">G5 · Breadcrumb</h2>
+        <span class="sub">nav + ol · aria-current="page" on tail · separator aria-hidden</span>
+      </div>
+      <div class="pv-grid-2">
+        <div class="pv-cell">
+          <div class="pv-cell-h">
+            <span class="pv-cell-label">path</span>
+            <span class="pv-cell-id">cb-g5-a</span>
+          </div>
+          <div id="m-g5a"></div>
+        </div>
+        <div class="pv-cell">
+          <div class="pv-cell-h">
+            <span class="pv-cell-label">with overflow (≥ 5 levels)</span>
+            <span class="pv-cell-id">cb-g5-b</span>
+          </div>
+          <div id="m-g5b"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script type="text/babel" src="cb-group-g.jsx"></script>
+  <script type="text/babel">
+    const r = (id, el) => ReactDOM.createRoot(document.getElementById(id)).render(el);
+    r('m-g1a', <EmptyNoData action="Probe lane" />);
+    r('m-g1b', <EmptySearchNoResults query="grpc.timeout" />);
+    r('m-g2a', <SkeletonRows rows={5} />);
+    r('m-g2b', <SkeletonKpi count={4} />);
+    r('m-g2c', <SkeletonPanel height={140} />);
+    r('m-g3a', <ErrorRecoverable />);
+    r('m-g3b', <ErrorFatal />);
+    r('m-g4a', <PaginationNumeric total={18} initial={4} />);
+    r('m-g4b', <PaginationCursor />);
+    r('m-g5a', <BreadcrumbPath />);
+    r('m-g5b', <BreadcrumbWithOverflow />);
+  </script>
+</body>
+</html>

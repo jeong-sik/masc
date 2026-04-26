@@ -158,8 +158,8 @@ export function rawConfigModeSummary(
       '저장 시 TOML parse 검증 뒤 generated runtime JSON을 다시 materialize 합니다.',
     secondary:
       `아래 preview는 ${jsonPath} 에 기록되는 generated cascade.json runtime artifact 입니다.`,
-    saveLabel: 'Save cascade.toml',
-    previewTitle: 'Generated cascade.json Preview',
+    saveLabel: 'cascade.toml 저장',
+    previewTitle: '생성된 cascade.json 미리보기',
   }
 }
 

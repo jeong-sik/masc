@@ -527,3 +527,209 @@ button, .btn {
 }
 button:hover, .btn:hover { background: var(--bg-3); color: var(--fg-1); }
 button.is-active, .btn.is-active { background: var(--bg-4); color: var(--brass-1); border-color: var(--brass-3); }
+
+/* ═══════════════════════════════════════════════════════════════════
+   BONSAI VOCABULARY EXTENSION (SPEC §3 + §4)
+   ───────────────────────────────────────────────────────────────────
+   Canonical raw token extension absorbed from dashboard_bonsai/static/
+   colors_and_type.css. Two purposes:
+
+   (1) Provide single SSOT for raw color values used by both surfaces
+       (dashboard/(Preact) + dashboard_bonsai/(Bonsai/OCaml)).
+   (2) Register 5 named theme variants (dark-fantasy / cyberpunk /
+       terminal / parchment / paper) as canonical [data-theme] overrides.
+
+   This block is ADDITIVE only: dashboard/ components do not yet
+   reference these tokens. Bonsai surface continues to consume its own
+   colors_and_type.css. Future PR will redirect bonsai's file to import
+   from this canonical SSOT.
+
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ── Dark Fantasy (default) — Visceral · decay-forward ─────────── */
+:root {
+  /* Bonsai surface stack — wet stone, blood-soaked wood */
+  --bg-deep:        #0a0706;     /* pitch with a red undertone */
+  --bg-panel:       #14100d;     /* rotted wood */
+  --bg-panel-alt:   #1b1612;     /* card base */
+  --bg-card:        #221815;     /* bruised meat */
+  --bg-card-hover:  #2e211c;
+
+  /* Bonsai borders — scabbed, stitched leather */
+  --border-main:      #2a1a14;
+  --border-highlight: #5a3028;
+
+  /* Bonsai text — bone and bandage */
+  --text-bright:  #e8d8b8;       /* clean bone */
+  --text-primary: #b8a488;       /* dirty bandage */
+  --text-dim:     #9a846e;       /* mold dust — WCAG AA */
+
+  /* Bonsai accents — blood is primary; brass demoted to warning */
+  --accent-blood:      #e85050;  /* WCAG AA */
+  --accent-blood-dim:  #8a2828;
+  --accent-viscera:    #c94a3a;
+  --accent-bile:       #6a7a3a;
+  --accent-mold:       #3a5a48;
+  --accent-brass:      #968228;  /* WCAG AA — bonsai's brass differs from --brass-1 */
+  --accent-brass-dim:  #6a5620;
+  --accent-bone:       #d8c8a0;
+  --accent-ink:        #3a2a5a;
+  --accent-ember:      #c4461a;
+  --accent-glow:       rgba(232, 80, 80, 0.28);
+  --accent-blood-glow: rgba(232, 80, 80, 0.32);
+
+  /* Bonsai status — distinct from dashboard --ok/--warn/--err palette */
+  --status-ok:    #6a9a4a;       /* WCAG AA */
+  --status-warn:  #b87828;       /* WCAG AA */
+  --status-bad:   #e85050;       /* synced with --accent-blood */
+  --status-idle:  #4a3a32;
+
+  /* Trace frame — bonsai-only swimlane / flame / tool-category bars */
+  --t-llm:   #6a7a9c;            /* muted blue-gray — inference */
+  --t-tool:  #8a7a3a;            /* muted brass — tool call */
+  --t-think: #4a4a5a;            /* slate — reasoning */
+  --t-wait:  #2a2520;            /* deep dusk — idle */
+  --t-err:   var(--accent-blood);
+}
+
+/* ── Dark Fantasy explicit — same as :root default ───────────── */
+[data-theme="dark-fantasy"] {
+  color-scheme: dark;
+  --bg-deep:        #0a0706;
+  --bg-panel:       #14100d;
+  --bg-panel-alt:   #1b1612;
+  --bg-card:        #221815;
+  --bg-card-hover:  #2e211c;
+  --border-main:      #2a1a14;
+  --border-highlight: #5a3028;
+  --text-bright:  #e8d8b8;
+  --text-primary: #b8a488;
+  --text-dim:     #9a846e;
+  --accent-blood:    #e85050;
+  --accent-brass:    #968228;
+  --status-ok:    #6a9a4a;
+  --status-warn:  #b87828;
+  --status-bad:   #e85050;
+  --status-idle:  #4a3a32;
+  --t-llm:   #6a7a9c;
+  --t-tool:  #8a7a3a;
+  --t-think: #4a4a5a;
+  --t-wait:  #2a2520;
+  --t-err:   var(--accent-blood);
+}
+
+/* ── Cyberpunk ──────────────────────────────────────────────── */
+[data-theme="cyberpunk"] {
+  color-scheme: dark;
+  --bg-deep:      #05000f;
+  --bg-panel:     #0d0821;
+  --bg-panel-alt: #130e2a;
+  --bg-card:      #1a1235;
+  --bg-card-hover:#221a42;
+  --border-main:      #2a1a4a;
+  --border-highlight: #6a2fd6;
+  --text-bright:  #f5f0ff;
+  --text-primary: #e0d4ff;
+  --text-dim:     #9082b5;
+  --accent-brass: #00ffcc;
+  --accent-brass-dim: #008866;
+  --accent-blood: #ff2266;
+  --accent-ink:   #6a2fd6;
+  --accent-glow:  rgba(0, 255, 204, 0.12);
+  --status-ok:   #00ffcc;
+  --status-warn: #ffaa00;
+  --status-bad:  #ff2266;
+  --t-llm:   #6a2fd6;
+  --t-tool:  #00ffcc;
+  --t-think: #3a2555;
+  --t-wait:  #0d0821;
+  --t-err:   #ff2266;
+}
+
+/* ── Terminal ───────────────────────────────────────────────── */
+[data-theme="terminal"] {
+  color-scheme: dark;
+  --bg-deep:      #000800;
+  --bg-panel:     #001200;
+  --bg-panel-alt: #001a00;
+  --bg-card:      #002200;
+  --bg-card-hover:#003000;
+  --border-main:      #0a3a0a;
+  --border-highlight: #00aa00;
+  --text-bright:  #00ff00;
+  --text-primary: #00cc00;
+  --text-dim:     #009900;
+  --accent-brass: #00ff00;
+  --accent-brass-dim: #009900;
+  --accent-blood: #ffcc00;
+  --accent-ink:   #00aaaa;
+  --accent-glow:  rgba(0, 255, 0, 0.08);
+  --status-ok:   #00ff00;
+  --status-warn: #ffcc00;
+  --status-bad:  #ff4400;
+  --t-llm:   #00aa00;
+  --t-tool:  #ffcc00;
+  --t-think: #006633;
+  --t-wait:  #000800;
+  --t-err:   #ff4400;
+}
+
+/* ── Parchment (in-app warm theme) ──────────────────────────── */
+[data-theme="parchment"] {
+  color-scheme: dark;
+  --bg-deep:      #1a1610;
+  --bg-panel:     #241f18;
+  --bg-panel-alt: #2e2820;
+  --bg-card:      #332d24;
+  --bg-card-hover:#3d362c;
+  --border-main:      #4a3f30;
+  --border-highlight: #6a5d48;
+  --text-bright:  #f0e4cc;
+  --text-primary: #d4c4a0;
+  --text-dim:     #9c8f7a;
+  --accent-brass: #c4a050;
+  --accent-brass-dim: #8a7035;
+  --accent-blood: #8b4513;
+  --accent-ink:   #556b2f;
+  --accent-glow:  rgba(196, 160, 80, 0.1);
+  --t-llm:   #6a5d48;
+  --t-tool:  #c4a050;
+  --t-think: #4a3f30;
+  --t-wait:  #1a1610;
+  --t-err:   #8b4513;
+}
+
+/* ── Paper (docs + light-surface inversion) ─────────────────── */
+[data-theme="paper"] {
+  color-scheme: light;
+  --paper:   #F5F2EA;
+  --paper-2: #EFEBE0;
+  --paper-3: #E5E0D1;
+  --paper-4: #D8D2BF;
+  --ink:     #151515;
+  --ink-2:   #2E2E2C;
+  --ink-3:   #515049;
+  --ink-4:   #656358;
+  --bg-deep:      var(--paper);
+  --bg-panel:     var(--paper-2);
+  --bg-panel-alt: var(--paper-3);
+  --bg-card:      var(--paper-2);
+  --bg-card-hover:var(--paper-3);
+  --border-main:      rgba(21,21,21,0.22);
+  --border-highlight: rgba(21,21,21,0.48);
+  --text-bright:  var(--ink);
+  --text-primary: var(--ink-2);
+  --text-dim:     var(--ink-4);
+  --accent-brass: #8C6A1E;
+  --accent-blood: #8B3A3A;
+  --accent-ink:   #3E4A5C;
+  --accent-glow:  rgba(140,106,30,0.12);
+  --status-ok:   #2D5F4E;
+  --status-warn: #B35A1F;
+  --status-bad:  #8B3A3A;
+  --t-llm:   #3E4A5C;
+  --t-tool:  #8C6A1E;
+  --t-think: #5C3E56;
+  --t-wait:  #E5E0D1;
+  --t-err:   #8B3A3A;
+}

@@ -778,7 +778,19 @@ let dashboard_general_agent_count agents =
 let provider_capacity_json () : Yojson.Safe.t =
   `Assoc []
 
+(* #10544: light mode is meant to skip the heavy belief/tension evaluation
+   and the full board scan, so it should also have a smaller wall-clock
+   budget. Pre-fix both modes shared the 16s timeout (post-#9766 8→16
+   bump for the full path), which masked any "light isn't really light"
+   regression — the operator cannot tell from log noise alone whether
+   light is genuinely under-scoped or has accidentally taken on full's
+   work. Splitting the budget makes that distinction visible: a light
+   timeout means "light path is doing too much"; a full timeout means
+   "the full path needs more headroom or a real perf fix". *)
 let dashboard_shell_timeout_s = 16.0
+let dashboard_shell_light_timeout_s = 8.0
+let dashboard_shell_timeout_for ~light =
+  if light then dashboard_shell_light_timeout_s else dashboard_shell_timeout_s
 
 (* Meta_cognition.summary_json does a full board_posts.jsonl scan +
    belief/tension/desire rule evaluation. On a room with 450+ posts this
@@ -1227,7 +1239,9 @@ let dashboard_shell_http_json ?clock ?request ?(light = false) (config : Coord.c
         match clock_opt with
         | Some clock ->
             Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:15.0
-              ~clock ~timeout_sec:dashboard_shell_timeout_s compute
+              ~clock
+              ~timeout_sec:(dashboard_shell_timeout_for ~light)
+              compute
         | None ->
             Dashboard_cache.get_or_compute cache_key ~ttl:15.0 compute
       in

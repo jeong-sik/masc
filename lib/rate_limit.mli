@@ -23,6 +23,7 @@ val rate : t -> float
 val burst : t -> int
 val create : ?rate:float -> ?burst:int -> unit -> t
 val create_from_env : unit -> t
+val start_actor_if_needed : sw:Eio.Switch.t -> t -> unit
 
 (** {1 Rate Checking} *)
 

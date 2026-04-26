@@ -45,6 +45,64 @@ val load_credential : string -> string -> agent_credential option
 (** [load_credential config agent_name] looks up the agent's credential.
     Falls back to agent-type prefix for generated nicknames. *)
 
+(** Outcome of {!load_credential_of}: distinguishes "no credential file
+    at all" from "credential found but its owner does not match the
+    dispatcher-validated [ctx_agent_name]".  The second case is the
+    {b dual identity} mode where {!load_credential} silently returned a
+    credential whose [agent_name] differs from the caller's claimed
+    identity (e.g. requested [sangsu] resolves to bare-nickname cred
+    while [ctx_agent_name] is [keeper-sangsu-agent]).
+    [load_credential_of] surfaces the mismatch instead of
+    perpetuating it. *)
+type load_credential_error =
+  | Credential_missing of { ctx_agent_name : string }
+  | Credential_mismatch of {
+      ctx_agent_name : string;
+      resolved_credential_stem : string;
+    }
+
+val pp_load_credential_error :
+  Format.formatter -> load_credential_error -> unit
+
+val show_load_credential_error : load_credential_error -> string
+
+val load_credential_of :
+  string ->
+  ctx_agent_name:string ->
+  resolved_credential_stem:string ->
+  (agent_credential, load_credential_error) result
+(** [load_credential_of config ~ctx_agent_name ~resolved_credential_stem]
+    looks up a keeper credential and {b rejects identity drift
+    explicitly}.
+
+    Caller is responsible for resolving the requested alias to a
+    [resolved_credential_stem] before calling — typically through
+    {!Keeper_identity.normalize_all_names} on the dispatch site.  This
+    keeps [Auth] free of any dependency on [Keeper_identity] (the
+    inverse direction is required by P3 preflight, so Auth → Keeper
+    would be a cycle).
+
+    Branches (RFC §2.2, adjusted for the dependency direction):
+    {ul
+    {- [resolved_credential_stem = ctx_agent_name] — load directly.
+       Returns [Error (Credential_missing _)] on absence.}
+    {- otherwise — return [Error (Credential_mismatch _)] {b without}
+       falling back to a different identity, even when a credential
+       for [resolved_credential_stem] exists on disk.}}
+
+    Convention: when the caller has nothing to resolve (empty alias or
+    alias already equal to ctx), it should pass [ctx_agent_name] as
+    [resolved_credential_stem]; the function then degenerates to a
+    simple exact-match lookup with explicit error variants.
+
+    This replaces the silent fallback in {!load_credential_with_aliases}
+    where a stem of [sangsu] against a [ctx_agent_name] of
+    [keeper-sangsu-agent] would return the bare-nickname credential and
+    perpetuate dual identity.  Callers that still need the legacy
+    behavior keep using {!load_credential_with_aliases}; new dispatcher
+    paths should adopt [load_credential_of] one site at a time
+    (RFC P2-b through P2-d). *)
+
 val save_credential : string -> agent_credential -> unit
 
 val delete_credential : string -> string -> unit

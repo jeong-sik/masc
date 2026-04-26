@@ -31,6 +31,11 @@ interface TextInputProps {
   autoFocus?: boolean
   onInput?: (e: Event) => void
   onKeyDown?: (e: KeyboardEvent) => void
+  /** Fires when the input loses focus. Common pattern: commit pending
+      filter/search value when the user tabs away (mirrors Enter handling
+      in onKeyDown). Accepts FocusEvent so callers can use relatedTarget
+      without a cast. */
+  onBlur?: (e: FocusEvent) => void
 }
 
 export function TextInput({
@@ -48,6 +53,7 @@ export function TextInput({
   autoFocus,
   onInput,
   onKeyDown,
+  onBlur,
 }: TextInputProps) {
   return html`
     <input
@@ -65,6 +71,7 @@ export function TextInput({
       autofocus=${autoFocus}
       onInput=${onInput}
       onKeyDown=${onKeyDown}
+      onBlur=${onBlur}
     />
   `
 }

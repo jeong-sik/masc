@@ -85,6 +85,17 @@ describe('TextInput', () => {
     expect(spy).toHaveBeenCalledOnce()
   })
 
+  it('onBlur fires when the input loses focus (commit-on-blur pattern)', async () => {
+    const spy = vi.fn()
+    render(html`<${TextInput} value="draft" onBlur=${spy} />`, container)
+    const input = container.querySelector('input') as HTMLInputElement
+    input.dispatchEvent(new FocusEvent('blur', { bubbles: false }))
+    await flushUi()
+    expect(spy).toHaveBeenCalledOnce()
+    const ev = spy.mock.calls[0]![0] as FocusEvent
+    expect((ev.target as HTMLInputElement).value).toBe('draft')
+  })
+
   it('forwards name + autoComplete attributes', () => {
     render(
       html`<${TextInput} name="channel" autoComplete="off" />`,

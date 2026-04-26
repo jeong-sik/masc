@@ -6,6 +6,7 @@ import { VirtualList } from '../common/virtual-list'
 import { EmptyState } from '../common/empty-state'
 import { ErrorState } from '../common/feedback-state'
 import { TextInput } from '../common/input'
+import { Select } from '../common/select'
 import { route } from '../../router'
 import type { DashboardToolInventoryItem } from '../../api'
 import { InventoryRow } from './tool-inventory-row'
@@ -138,20 +139,20 @@ export function FullInventoryView({
             searchQuery.value = (e.target as HTMLInputElement).value
           }}
         />
-        <select
-          class="px-3 py-2 rounded bg-[var(--white-3)] border border-[var(--color-border-default)] text-[var(--color-fg-primary)] text-sm focus:border-[var(--color-accent-fg)]/50 outline-none"
+        <${Select}
+          class="px-3 py-2 text-sm"
           name="tool_inventory_category"
-          aria-label="도구 카테고리 필터"
+          ariaLabel="도구 카테고리 필터"
           value=${categoryFilter.value}
-          onChange=${(e: Event) => {
-            categoryFilter.value = (e.target as HTMLSelectElement).value
-          }}
-        >
-          <option value="all">전체 카테고리</option>
-          ${categories.map(category => html`
-            <option value=${category}>${category === 'uncategorized' ? '미분류' : category}</option>
-          `)}
-        </select>
+          options=${[
+            { value: 'all', label: '전체 카테고리' },
+            ...categories.map(category => ({
+              value: category,
+              label: category === 'uncategorized' ? '미분류' : category,
+            })),
+          ]}
+          onInput=${(v: string) => { categoryFilter.value = v }}
+        />
         <label class="inline-flex items-center gap-2 text-xs text-[var(--color-fg-primary)]">
           <input
             type="checkbox"

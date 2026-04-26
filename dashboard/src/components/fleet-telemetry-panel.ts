@@ -214,7 +214,7 @@ function AttentionEventList({ events }: { events: DashboardAttentionEvent[] }) {
               : null}
           </div>
           ${event.recommended_action
-            ? html`<div class="mt-1 text-3xs text-[var(--text-dim)]">Next: ${event.recommended_action}</div>`
+            ? html`<div class="mt-1 text-3xs text-[var(--text-dim)]">다음: ${event.recommended_action}</div>`
             : null}
         </div>
       `)}

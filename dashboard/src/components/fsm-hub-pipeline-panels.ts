@@ -103,7 +103,7 @@ export function OperationalMeaningPanel({
       </div>
 
       <div class="mt-2 text-3xs text-[var(--text-body)]">
-        <span class="font-semibold text-[var(--text-muted)]">Next:</span> ${insight.nextStep}
+        <span class="font-semibold text-[var(--text-muted)]">다음:</span> ${insight.nextStep}
       </div>
 
       <div class="mt-2 flex flex-wrap gap-1.5">

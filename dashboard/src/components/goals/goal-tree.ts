@@ -364,13 +364,13 @@ function TreeSummary({
       ${goalVerificationCount > 0 ? html`
         <div class="rounded border border-amber-400/30 bg-amber-400/10 p-3 text-center">
           <div class="text-2xl font-bold text-amber-200 tabular-nums">${goalVerificationCount}</div>
-          <div class="mt-1 text-3xs font-semibold uppercase tracking-widest text-amber-100/80">Goal 검증 대기</div>
+          <div class="mt-1 text-3xs font-semibold uppercase tracking-widest text-amber-100/80">목표 검증 대기</div>
         </div>
       ` : null}
       ${awaitingVerificationCount > 0 ? html`
         <div class="rounded border border-accent/30 bg-[var(--accent-10)] p-3 text-center">
           <div class="text-2xl font-bold text-accent tabular-nums">${awaitingVerificationCount}</div>
-          <div class="mt-1 text-3xs font-semibold uppercase tracking-widest text-accent/80">Task 검증 대기</div>
+          <div class="mt-1 text-3xs font-semibold uppercase tracking-widest text-accent/80">태스크 검증 대기</div>
         </div>
       ` : null}
       <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-3">
@@ -865,7 +865,7 @@ function GoalDetailPanel({
         <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4">
           <div class="mb-3 flex items-center justify-between gap-3">
             <div>
-              <div class="text-2xs font-semibold uppercase tracking-widest text-text-muted">Goal-Scoped Task</div>
+              <div class="text-2xs font-semibold uppercase tracking-widest text-text-muted">목표 범위 태스크</div>
               <div class="mt-1 text-sm text-text-body">이 goal에 직접 연결되는 새 태스크를 backlog에 넣습니다.</div>
             </div>
           </div>

@@ -937,13 +937,13 @@ function ConnectorLivePanel({
                 ${connectorError ? 'Connector API unavailable' : 'Sidecar status warning'}
               </div>
               <div class="mt-1">
-                <span class="font-medium">Cause: </span> ${connectorError ?? connector?.error}
+                <span class="font-medium">원인: </span> ${connectorError ?? connector?.error}
               </div>
               <div class="mt-1">
-                <span class="font-medium">Next: </span>
+                <span class="font-medium">다음: </span>
                 ${connectorError
-                  ? html`refresh the dashboard or check <code class="rounded bg-[var(--white-4)] px-1">/api/v1/gate/connectors</code> on ${connector?.gate_base_url || 'the Gate server'}.`
-                  : html`run the ${connectorName} status command and inspect <code class="rounded bg-[var(--white-4)] px-1">${connector?.status_path || `sidecars/${connectorId}-bot/status.json`}</code>.`}
+                  ? html`대시보드를 새로고침하거나 ${connector?.gate_base_url || 'Gate 서버'}의 <code class="rounded bg-[var(--white-4)] px-1">/api/v1/gate/connectors</code>를 확인하세요.`
+                  : html`${connectorName} 상태 명령을 실행하고 <code class="rounded bg-[var(--white-4)] px-1">${connector?.status_path || `sidecars/${connectorId}-bot/status.json`}</code>를 점검하세요.`}
               </div>
             </div>
           `
@@ -966,13 +966,13 @@ function ConnectorLivePanel({
                 <span>디렉터리 오류</span>
               </span>
               ${connector?.gate_health_checked_at
-                ? html`<span class="text-3xs text-[var(--text-dim)]">checked ${timeAgo(connector.gate_health_checked_at)}</span>`
+                ? html`<span class="text-3xs text-[var(--text-dim)]">확인: ${timeAgo(connector.gate_health_checked_at)}</span>`
                 : null}
               <div class="mt-1">
-                <span class="font-medium">Cause: </span> keeper directory unavailable, manual entry only.
+                <span class="font-medium">원인: </span> 키퍼 디렉터리 사용 불가, 수동 입력만 가능.
               </div>
               <div class="mt-1">
-                <span class="font-medium">Next: </span> continue with manual entry now, then restore <code class="rounded bg-[var(--white-4)] px-1">config/keepers/</code> or fix <code class="rounded bg-[var(--white-4)] px-1">/api/v1/gate/keepers</code> before relying on directory suggestions.
+                <span class="font-medium">다음: </span> 지금은 수동 입력으로 진행하고, 이후 <code class="rounded bg-[var(--white-4)] px-1">config/keepers/</code>를 복원하거나 <code class="rounded bg-[var(--white-4)] px-1">/api/v1/gate/keepers</code>를 수정하세요.
               </div>
             </div>
           `

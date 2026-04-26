@@ -356,7 +356,7 @@ export function ToolQualityPanel() {
       ` : null}
 
       <div>
-        <div class="text-3xs text-[var(--text-dim)] uppercase tracking-wider mb-1">Keeper별</div>
+        <div class="text-3xs text-[var(--text-dim)] uppercase tracking-wider mb-1">키퍼별</div>
         <${KeeperRateBars} keepers=${d.by_keeper} />
       </div>
 

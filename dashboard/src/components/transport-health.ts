@@ -388,7 +388,7 @@ export function TransportHealthPanel() {
   }
 
   if (error && !data) {
-    return html`<div class="p-6 text-center text-[var(--color-status-err)] text-sm">${error}</div>`
+    return html`<div class="p-6 text-center text-[var(--color-status-err)] text-sm" role="alert">${error}</div>`
   }
 
   if (!data) return null

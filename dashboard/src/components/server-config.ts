@@ -186,7 +186,7 @@ export function ServerConfig() {
       </div>
 
       ${error ? html`
-        <div class="text-sm text-[var(--color-status-err)] mb-3">${error}</div>
+        <div class="text-sm text-[var(--color-status-err)] mb-3" role="alert">${error}</div>
       ` : null}
 
       ${loading && !data ? html`

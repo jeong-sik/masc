@@ -244,13 +244,30 @@ let run_docker_shell_command_with_status
             (Filename.concat (Filename.concat host_root "repos") single_repo, None)
           | [] -> (cwd, None)
           | many ->
+            (* #10680: keeper-executor-agent saw 17 events / 5min in a single
+               session (mcp_VHsjtow_92C_2a0o, 2026-04-26 08:00→08:06) where
+               the LLM read this descriptive error and still re-issued the
+               same bare git/gh in the next turn.  Make the message
+               self-correcting: include the original cmd and the exact
+               next-call shape so the LLM can copy-paste rather than
+               re-derive the cwd convention from prose. *)
+            let cmd_preview =
+              let s = String.trim cmd in
+              if String.length s > 120 then String.sub s 0 117 ^ "..." else s
+            in
+            let example_repo = List.hd many in
             ( cwd
             , Some
                 (Printf.sprintf
                    "sandbox root에서 git/gh 직접 호출 불가 \
                     (mount point %s는 git repo 아님). \
-                    cd repos/<one of: %s> 먼저 실행하세요."
+                    필수: 다음 호출에서 cwd를 명시. 예: \
+                    keeper_bash { cmd: \"cd repos/%s && %s\" } \
+                    (가능한 repo: %s). \
+                    같은 cmd를 다음 turn에서 cwd 변경 없이 다시 호출하지 마세요."
                    host_root
+                   example_repo
+                   cmd_preview
                    (String.concat ", " many)) )
         else (cwd, None)
       in

@@ -374,12 +374,9 @@ let keeper_context_status_json
   (* Give the keeper sandbox-relative paths from the SSOT so it never needs
      to interpolate host storage paths such as ".masc/playground/<name>/". *)
   let sandbox = Keeper_sandbox.of_meta ~config ~meta in
-  let playground_bundle = sandbox.host_root_rel in
-  let sandbox_root =
-    Keeper_alerting_path.strip_trailing_slashes sandbox.host_root_rel
-  in
-  let playground_mind = sandbox_root ^ "/mind/" in
-  let playground_repos = sandbox_root ^ "/repos/" in
+  let playground_bundle = sandbox.root_arg in
+  let playground_mind = sandbox.mind_arg in
+  let playground_repos = sandbox.repos_arg in
   let sandbox_live =
     Keeper_sandbox_control.live_status_json
       ~include_preflight:true

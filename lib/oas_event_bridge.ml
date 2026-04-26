@@ -80,6 +80,7 @@ let emit_native_event_log (evt : Oas.Event_bus.event) (json : Yojson.Safe.t) =
         (Printf.sprintf
            "tool completed agent=%s tool_name=%s"
            agent_name tool_name)
+  | Oas.Event_bus.TurnReady _ -> ()
   | Oas.Event_bus.ContextCompacted
       { agent_name; before_tokens; after_tokens; phase } ->
       log
@@ -207,6 +208,7 @@ let native_event_to_json (evt : Oas.Event_bus.event) : Yojson.Safe.t option =
           ]
       in
       Some (wrap ~event_type:"turn_completed" ~payload ~agent_name ~turn ())
+  | Oas.Event_bus.TurnReady _ -> None
   | Oas.Event_bus.HandoffRequested { from_agent; to_agent; reason } ->
       let payload =
         `Assoc

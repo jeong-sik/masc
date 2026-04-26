@@ -387,7 +387,7 @@ describe('toolSummary', () => {
 
   it('shows no recent tools when activity known but nothing', () => {
     const row = makeRow({ recent_tools: [], tool_calls: 0, tool_activity_known: true })
-    expect(toolSummary(row).label).toContain('No recent tools')
+    expect(toolSummary(row).label).toContain('최근 도구 기록 없음')
   })
 
   it('shows unavailable when activity unknown', () => {

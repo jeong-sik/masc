@@ -14,11 +14,11 @@ const DENSITY_LABEL = { c: 'Compact', n: 'Normal', l: 'Loose' };
 
 const TOPBAR_DEFAULT_KEEPERS = ["nick0cave","masc-improver","sangsu","qa-king","rama"];
 const TOPBAR_KEEPER_COLOR = {
-  "nick0cave": "var(--k-nick)",
-  "masc-improver": "var(--k-masc)",
-  "sangsu": "var(--k-sangsu)",
-  "qa-king": "var(--k-qa)",
-  "rama": "var(--k-rama)",
+  "nick0cave": "var(--color-keeper-1)",
+  "masc-improver": "var(--color-keeper-2)",
+  "sangsu": "var(--color-keeper-3)",
+  "qa-king": "var(--color-keeper-4)",
+  "rama": "var(--color-keeper-5)",
 };
 
 function TopbarStandard({

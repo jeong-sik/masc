@@ -16,7 +16,7 @@ function ComposerPrompt() {
         <div className="line" aria-live="polite">
           <span className="prompt" aria-hidden="true">masc&gt;</span>
           <span aria-label={`Current input: ${typed}`}>{typed}</span>
-          <span className="caret" aria-hidden="true" style={{color:'var(--brass-1)'}}>▌</span>
+          <span className="caret" aria-hidden="true" style={{color:'var(--color-accent-fg)'}}>▌</span>
         </div>
         <div className="hint" aria-hidden="true">
           <span><span className="kbd">⌘K</span>command</span>
@@ -52,15 +52,15 @@ function ComposerSuggest() {
                  className={`item ${on===i?'on':''}`}
                  onMouseEnter={()=>setOn(i)}>
               <span className="kind" aria-hidden="true">{s.kind}</span>
-              <span aria-hidden="true" style={{color:'var(--fg-1)'}}>{s.name}</span>
-              <span aria-hidden="true" style={{color:'var(--fg-3)', marginLeft:8}}>{s.desc}</span>
+              <span aria-hidden="true" style={{color:'var(--color-fg-primary)'}}>{s.name}</span>
+              <span aria-hidden="true" style={{color:'var(--color-fg-muted)', marginLeft:8}}>{s.desc}</span>
             </div>
           ))}
         </div>
         <div className="line">
           <span className="prompt" aria-hidden="true">masc&gt;</span>
           <span className="fn" aria-label="Current input: keeper.">keeper.</span>
-          <span className="caret" aria-hidden="true" style={{color:'var(--brass-1)'}}>▌</span>
+          <span className="caret" aria-hidden="true" style={{color:'var(--color-accent-fg)'}}>▌</span>
         </div>
         <div className="hint" aria-hidden="true">
           <span><span className="kbd">↑↓</span>move</span>
@@ -102,7 +102,7 @@ function ComposerMultiLine() {
             <span className="arg">dry_run</span>
             <span>=</span>
             <span className="fn">false</span>
-            <span className="caret" style={{color:'var(--brass-1)'}}>▌</span>
+            <span className="caret" style={{color:'var(--color-accent-fg)'}}>▌</span>
           </div>
           <div className="line" aria-hidden="true">
             <span>)</span>
@@ -111,7 +111,7 @@ function ComposerMultiLine() {
         <div className="hint" aria-hidden="true">
           <span><span className="kbd">⌘↵</span>run</span>
           <span><span className="kbd">⇧↵</span>newline</span>
-          <span style={{marginLeft:'auto', color:'var(--fg-4)'}}>4 lines · will burn ~1.2s</span>
+          <span style={{marginLeft:'auto', color:'var(--color-fg-disabled)'}}>4 lines · will burn ~1.2s</span>
         </div>
       </div>
     </div>
@@ -164,8 +164,8 @@ function StatusVerbose() {
         <span className="seg" role="group" aria-label="Connection: connected"><span className="on" aria-hidden="true">●</span>CONNECTED</span>
         <span className="sep" aria-hidden="true" />
         <span className="seg" role="group" aria-label="Goal goal-merge-blockers">goal <span className="brass">goal-merge-blockers</span></span>
-        <span className="seg" role="group" aria-label="Task t-9f2a">task <span style={{color:'var(--fg-2)'}}>t-9f2a</span></span>
-        <span className="seg" role="group" aria-label="Keeper nick0cave">keeper <span style={{color:'var(--brass-1)'}}>nick0cave</span></span>
+        <span className="seg" role="group" aria-label="Task t-9f2a">task <span style={{color:'var(--color-fg-secondary)'}}>t-9f2a</span></span>
+        <span className="seg" role="group" aria-label="Keeper nick0cave">keeper <span style={{color:'var(--color-accent-fg)'}}>nick0cave</span></span>
         <span className="sep" aria-hidden="true" />
         <span className="seg" role="group" aria-label="Cascade hit at step 2 in 1.24 seconds">CASCADE hit@2 · <span className="brass">1.24s</span></span>
         <span className="sep" aria-hidden="true" />
@@ -211,7 +211,7 @@ function DrawerTask() {
             <div className="cmt flag" role="article" aria-label="Flag from sangsu, 3 minutes ago: drift detected at pipeline.ts L187 — signature mismatch">
               <div className="h" aria-hidden="true">
                 <span className="kind">FLAG</span>
-                <span style={{color:'var(--fg-2)'}}>sangsu</span>
+                <span style={{color:'var(--color-fg-secondary)'}}>sangsu</span>
                 <span className="t">3m ago</span>
               </div>
               <div className="body">drift detected at pipeline.ts L187 — signature mismatch</div>
@@ -219,7 +219,7 @@ function DrawerTask() {
             <div className="cmt question" role="article" aria-label="Question from qa-king, 2 minutes ago: is the backport going to re-open suite-merge-blockers?">
               <div className="h" aria-hidden="true">
                 <span className="kind">QUESTION</span>
-                <span style={{color:'var(--fg-2)'}}>qa-king</span>
+                <span style={{color:'var(--color-fg-secondary)'}}>qa-king</span>
                 <span className="t">2m ago</span>
               </div>
               <div className="body">is the backport going to re-open suite-merge-blockers?</div>
@@ -227,7 +227,7 @@ function DrawerTask() {
             <div className="cmt note" role="article" aria-label="Note from nick0cave, 1 minute ago: rebased on release-0.42, re-running CI">
               <div className="h" aria-hidden="true">
                 <span className="kind">NOTE</span>
-                <span style={{color:'var(--fg-2)'}}>nick0cave</span>
+                <span style={{color:'var(--color-fg-secondary)'}}>nick0cave</span>
                 <span className="t">1m ago</span>
               </div>
               <div className="body">rebased on release-0.42 · re-running CI</div>
@@ -274,10 +274,10 @@ function DrawerGoal() {
               <div key={t.id}
                    role="listitem"
                    aria-label={`${t.id} · ${t.title} · ${t.keeper} · ${t.status}`}
-                   style={{display:'flex', alignItems:'center', gap:7, padding:'4px 7px', background:'var(--color-bg-surface)', border:'1px solid var(--line-1)', borderRadius:3, fontSize:11}}>
+                   style={{display:'flex', alignItems:'center', gap:7, padding:'4px 7px', background:'var(--color-bg-surface)', border:'1px solid var(--color-border-default)', borderRadius:3, fontSize:11}}>
                 <Dot kind={kClass(t.keeper)} size="sm" />
-                <span className="cb-mono" aria-hidden="true" style={{color:'var(--fg-4)'}}>{t.id}</span>
-                <span aria-hidden="true" style={{color:'var(--fg-1)', flex:1}}>{t.title}</span>
+                <span className="cb-mono" aria-hidden="true" style={{color:'var(--color-fg-disabled)'}}>{t.id}</span>
+                <span aria-hidden="true" style={{color:'var(--color-fg-primary)', flex:1}}>{t.title}</span>
                 <Pill kind={t.status==='running'?'running':t.status==='fail'?'err':t.status==='stalled'?'stalled':'paused'}>{t.status}</Pill>
               </div>
             ))}
@@ -325,7 +325,7 @@ function DrawerKeeper() {
       <div className="body">
         <section aria-labelledby="drawer-keeper-heartbeat">
           <SectionHeading variant="title" title="HEARTBEAT" id="drawer-keeper-heartbeat" />
-          <div aria-label="Heartbeat trace, 60-second window" style={{background:'var(--color-bg-surface)', padding:6, border:'1px solid var(--line-1)', borderRadius:3}}>
+          <div aria-label="Heartbeat trace, 60-second window" style={{background:'var(--color-bg-surface)', padding:6, border:'1px solid var(--color-border-default)', borderRadius:3}}>
             <span aria-hidden="true"><Heartbeat width={260} height={40} /></span>
           </div>
         </section>
@@ -346,8 +346,8 @@ function DrawerKeeper() {
               <div key={i}
                    role="article"
                    aria-label={`${e.t.slice(0,8)} · ${e.text}`}
-                   style={{fontFamily:'var(--font-mono)', fontSize:10, color:'var(--fg-2)'}}>
-                <span aria-hidden="true" style={{color:'var(--fg-4)'}}>{e.t.slice(0,8)} </span>
+                   style={{fontFamily:'var(--font-mono)', fontSize:10, color:'var(--color-fg-secondary)'}}>
+                <span aria-hidden="true" style={{color:'var(--color-fg-disabled)'}}>{e.t.slice(0,8)} </span>
                 <span aria-hidden="true">{e.text}</span>
               </div>
             ))}

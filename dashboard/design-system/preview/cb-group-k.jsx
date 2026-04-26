@@ -5,7 +5,7 @@ const P3K = window.MASC_P3;
 const P2K = window.MASC_P2 || {};
 
 function k3Keeper(id) {
-  return (P3K.keepers || []).find(k => k.id === id) || { id, initials: id.slice(0, 2), color: "var(--idle)" };
+  return (P3K.keepers || []).find(k => k.id === id) || { id, initials: id.slice(0, 2), color: "var(--color-status-idle)" };
 }
 
 function k3KeeperIds(keepers) {

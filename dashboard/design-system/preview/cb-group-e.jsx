@@ -101,7 +101,7 @@ function BoardThread() {
       />
       <div className="body">
         <BoardPost post={post} expanded={true} />
-        <div role="heading" aria-level={3} style={{padding:'4px 0', fontFamily:'var(--font-mono)', fontSize:'10px', color:'var(--fg-4)', letterSpacing:'.08em', textTransform:'uppercase'}}>
+        <div role="heading" aria-level={3} style={{padding:'4px 0', fontFamily:'var(--font-mono)', fontSize:'10px', color:'var(--color-fg-disabled)', letterSpacing:'.08em', textTransform:'uppercase'}}>
           ━━ {replies.length} replies
         </div>
         <div className="bd-thread" role="log" aria-live="polite" aria-label={`${replies.length} replies on ${post.id}`}>
@@ -115,9 +115,9 @@ function BoardThread() {
             </article>
           ))}
         </div>
-        <div role="textbox" aria-label="Reply composer (placeholder)" style={{marginTop:8, padding:'6px 8px', background:'var(--color-bg-surface)', border:'1px dashed var(--line-2)', fontFamily:'var(--font-mono)', fontSize:'11px', color:'var(--fg-4)'}}>
-          <span aria-hidden="true" style={{color:'var(--brass-1)'}}>masc&gt;</span> reply...
-          <span aria-hidden="true" style={{color:'var(--brass-1)', animation:'anim-blink 1s step-end infinite'}}> ▌</span>
+        <div role="textbox" aria-label="Reply composer (placeholder)" style={{marginTop:8, padding:'6px 8px', background:'var(--color-bg-surface)', border:'1px dashed var(--color-border-strong)', fontFamily:'var(--font-mono)', fontSize:'11px', color:'var(--color-fg-disabled)'}}>
+          <span aria-hidden="true" style={{color:'var(--color-accent-fg)'}}>masc&gt;</span> reply...
+          <span aria-hidden="true" style={{color:'var(--color-accent-fg)', animation:'anim-blink 1s step-end infinite'}}> ▌</span>
         </div>
       </div>
     </section>
@@ -236,10 +236,10 @@ function MentionInbox() {
         branch="main"
         keepers={[me]}
         meta={`${mine.length} for me · ${otherMentions.length} others`}
-        right={<span className="meta" style={{color:'var(--brass-1)'}}>@{me}</span>}
+        right={<span className="meta" style={{color:'var(--color-accent-fg)'}}>@{me}</span>}
       />
       <div className="body">
-        <div role="heading" aria-level={3} style={{fontFamily:'var(--font-mono)', fontSize:'10px', color:'var(--brass-1)', letterSpacing:'.1em', textTransform:'uppercase', padding:'2px 0'}}>━━ for me · {mine.length}</div>
+        <div role="heading" aria-level={3} style={{fontFamily:'var(--font-mono)', fontSize:'10px', color:'var(--color-accent-fg)', letterSpacing:'.1em', textTransform:'uppercase', padding:'2px 0'}}>━━ for me · {mine.length}</div>
         <div className="ms-inbox" role="log" aria-live="polite" aria-label={`${mine.length} mentions for me`}>
           {mine.map(m => (
             <article key={m.seq} className="mn" aria-label={`#${m.seq} · ${m.from} in #${m.room} at ${m.at}: ${m.body}`}>
@@ -252,10 +252,10 @@ function MentionInbox() {
             </article>
           ))}
         </div>
-        <div role="heading" aria-level={3} style={{fontFamily:'var(--font-mono)', fontSize:'10px', color:'var(--fg-4)', letterSpacing:'.1em', textTransform:'uppercase', padding:'8px 0 2px', borderTop:'1px dashed var(--line-2)'}}>━━ other mentions · {otherMentions.length}</div>
+        <div role="heading" aria-level={3} style={{fontFamily:'var(--font-mono)', fontSize:'10px', color:'var(--color-fg-disabled)', letterSpacing:'.1em', textTransform:'uppercase', padding:'8px 0 2px', borderTop:'1px dashed var(--color-border-strong)'}}>━━ other mentions · {otherMentions.length}</div>
         <div className="ms-inbox" role="log" aria-live="polite" aria-label={`${otherMentions.length} other mentions`}>
           {otherMentions.map(m => (
-            <article key={m.seq} className="mn" aria-label={`#${m.seq} · ${m.from} in #${m.room} at ${m.at}: ${m.body}`} style={{borderLeftColor:'var(--info)', opacity:.7}}>
+            <article key={m.seq} className="mn" aria-label={`#${m.seq} · ${m.from} in #${m.room} at ${m.at}: ${m.body}`} style={{borderLeftColor:'var(--color-status-info)', opacity:.7}}>
               <div className="h" aria-hidden="true">
                 <span className="au">{m.from}</span>
                 <span className="rm">→ #{m.room}</span>
@@ -282,7 +282,7 @@ function StateBlockMessage() {
         meta={`${stateMsgs.length} state-bearing msgs · structured payload`}
       />
       <div className="body">
-        <p style={{fontFamily:'var(--font-mono)', fontSize:'10px', color:'var(--fg-4)', padding:'4px 0', lineHeight:1.5}}>
+        <p style={{fontFamily:'var(--font-mono)', fontSize:'10px', color:'var(--color-fg-disabled)', padding:'4px 0', lineHeight:1.5}}>
           [STATE] blocks are inline, machine-readable structure inside human prose. Keepers stamp them on every broadcast that changes goal/intention/blocker state. Other keepers parse them silently and update local belief.
         </p>
         <div role="list" aria-label={`${stateMsgs.length} state messages`}>
@@ -291,7 +291,7 @@ function StateBlockMessage() {
                      role="listitem"
                      className="ms-msg"
                      aria-label={`#${m.seq} · ${m.from} ${m.kind} → #${m.room} · ${m.at}: ${m.body} · state: ${m.state}`}
-                     style={{padding:'8px 10px', background:'var(--color-bg-surface)', border:'1px solid var(--line-1)', borderLeft:'2px solid var(--brass-2)', borderRadius:0}}>
+                     style={{padding:'8px 10px', background:'var(--color-bg-surface)', border:'1px solid var(--color-border-default)', borderLeft:'2px solid var(--brass-2)', borderRadius:0}}>
               <div className="seq" aria-hidden="true">#{m.seq}</div>
               <div className="body">
                 <div className="h" aria-hidden="true">
@@ -327,7 +327,7 @@ function ComposerV2Broadcast() {
           </div>
           <span className="room-sel" aria-label="Target room: default">default</span>
           <span className="grow" aria-hidden="true" />
-          <span aria-label="Sequence 9 keepers, 38 chars" style={{fontFamily:'var(--font-mono)', fontSize:'10px', color:'var(--fg-4)', letterSpacing:'.04em'}}>
+          <span aria-label="Sequence 9 keepers, 38 chars" style={{fontFamily:'var(--font-mono)', fontSize:'10px', color:'var(--color-fg-disabled)', letterSpacing:'.04em'}}>
             seq {P2e.messages[0].seq + 1} · 9 keepers · 38 chars
           </span>
           <button type="button" className="send">send ⌘↵</button>
@@ -357,7 +357,7 @@ function ComposerV2Mention() {
           fontFamily:'var(--font-mono)', fontSize:'11px',
           boxShadow:'0 -4px 12px rgb(0 0 0 / .4)',
         }}>
-          <div role="presentation" style={{padding:'3px 8px', background:'var(--color-bg-panel-alt)', color:'var(--fg-4)', fontSize:'9px', letterSpacing:'.1em', textTransform:'uppercase'}}>match @nick</div>
+          <div role="presentation" style={{padding:'3px 8px', background:'var(--color-bg-panel-alt)', color:'var(--color-fg-disabled)', fontSize:'9px', letterSpacing:'.1em', textTransform:'uppercase'}}>match @nick</div>
           {[
             { id:'nick0cave', role:'Captain · merge', match:true },
             { id:'nickelodeon', role:'(unknown — alias)', match:false },
@@ -368,13 +368,13 @@ function ComposerV2Mention() {
                  aria-label={`@${k.id} · ${k.role}${k.match ? '' : ' · no match'}`}
                  style={{
                    padding:'4px 8px', display:'flex', gap:6, alignItems:'center',
-                   background: i===0 ? 'rgb(var(--brass-glow)/.12)' : 'transparent',
-                   borderLeft: i===0 ? '2px solid var(--brass-1)' : '2px solid transparent',
+                   background: i===0 ? 'rgb(var(--color-accent-glow)/.12)' : 'transparent',
+                   borderLeft: i===0 ? '2px solid var(--color-accent-fg)' : '2px solid transparent',
                    cursor:'pointer',
                    opacity: k.match ? 1 : .5,
                  }}>
-              <span aria-hidden="true" style={{color:'var(--brass-1)'}}>@{k.id}</span>
-              <span aria-hidden="true" style={{color:'var(--fg-4)', marginLeft:'auto', fontSize:'9px', letterSpacing:'.04em', textTransform:'uppercase'}}>{k.role}</span>
+              <span aria-hidden="true" style={{color:'var(--color-accent-fg)'}}>@{k.id}</span>
+              <span aria-hidden="true" style={{color:'var(--color-fg-disabled)', marginLeft:'auto', fontSize:'9px', letterSpacing:'.04em', textTransform:'uppercase'}}>{k.role}</span>
             </div>
           ))}
         </div>
@@ -392,7 +392,7 @@ function ComposerV2Mention() {
         <div className="targets" aria-label="Will mention: @nick0cave">
           <span aria-hidden="true">will mention:</span>
           <span className="t-pill" aria-hidden="true">@nick0cave</span>
-          <span aria-hidden="true" style={{marginLeft:'auto', color:'var(--fg-4)', textTransform:'none'}}>↑↓ pick · ⇥ accept · esc dismiss</span>
+          <span aria-hidden="true" style={{marginLeft:'auto', color:'var(--color-fg-disabled)', textTransform:'none'}}>↑↓ pick · ⇥ accept · esc dismiss</span>
         </div>
       </div>
       <div style={{flex:1, background:'var(--color-bg-page)'}} aria-hidden="true" />
@@ -412,7 +412,7 @@ function ComposerV2State() {
             <button type="button" role="radio" aria-checked="true" className="on">state</button>
           </div>
           <span className="room-sel" aria-label="Target room: default">default</span>
-          <span aria-label="Structured · machine-readable" style={{fontFamily:'var(--font-mono)', fontSize:'10px', color:'var(--brass-1)', letterSpacing:'.04em'}}>
+          <span aria-label="Structured · machine-readable" style={{fontFamily:'var(--font-mono)', fontSize:'10px', color:'var(--color-accent-fg)', letterSpacing:'.04em'}}>
             ◆ structured · machine-readable
           </span>
           <span className="grow" aria-hidden="true" />
@@ -429,7 +429,7 @@ function ComposerV2State() {
           <span className="t-pill" aria-hidden="true">Phase</span>
           <span className="t-pill" aria-hidden="true">Next</span>
           <span className="t-pill" aria-hidden="true">Blocker</span>
-          <span aria-hidden="true" style={{marginLeft:'auto', color:'var(--fg-4)', textTransform:'none'}}>4 keys · valid · will update belief in 9 keepers</span>
+          <span aria-hidden="true" style={{marginLeft:'auto', color:'var(--color-fg-disabled)', textTransform:'none'}}>4 keys · valid · will update belief in 9 keepers</span>
         </div>
       </div>
       <div style={{flex:1, background:'var(--color-bg-page)'}} aria-hidden="true" />

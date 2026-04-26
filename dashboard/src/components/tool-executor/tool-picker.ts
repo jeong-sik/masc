@@ -17,16 +17,20 @@ function ToolRow({ tool, isSelected }: { tool: McpToolSchema; isSelected: boolea
   const isReadOnly = tool.annotations?.readOnlyHint === true
   const isDeprecated = tool.annotations?.deprecated === true
   return html`
-    <button type="button" class="w-full text-left px-3 py-2 rounded transition-colors cursor-pointer
-      ${isSelected ? 'bg-[var(--accent-12)] border border-[var(--accent-30)]' : 'hover:bg-[var(--white-6)] border border-transparent'}
-      ${isDeprecated ? 'opacity-50' : ''}" onClick=${() => selectTool(tool)}>
+    <${ActionButton}
+      block
+      variant=${isSelected ? 'ghost' : 'subtle'}
+      size="md"
+      pressed=${isSelected}
+      class=${`text-left px-3 py-2 ${isDeprecated ? 'opacity-50' : ''}`}
+      onClick=${() => selectTool(tool)}>
       <div class="flex items-center gap-1.5">
         <span class="text-xs text-[var(--color-fg-secondary)] font-mono truncate flex-1">${tool.name}</span>
         ${isDestructive ? html`<${CountBadge} tone="bad">D<//>` : null}
         ${isReadOnly ? html`<${CountBadge} tone="ok">R<//>` : null}
       </div>
       <div class="text-3xs text-[var(--color-fg-muted)] mt-0.5 line-clamp-1">${tool.description}</div>
-    </button>
+    <//>
   `
 }
 

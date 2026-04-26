@@ -227,9 +227,9 @@ describe('TelemetryUnified', () => {
     })
     await flushUi()
 
-    const copyButton = container.querySelector('[aria-label="Copy telemetry entry JSON"]') as HTMLButtonElement | null
+    const copyButton = container.querySelector('[aria-label="텔레메트리 항목 JSON 복사"]') as HTMLButtonElement | null
     expect(copyButton).not.toBeNull()
-    expect(copyButton?.getAttribute('title')).toBe('Copy telemetry entry JSON')
+    expect(copyButton?.getAttribute('title')).toBe('텔레메트리 항목 JSON 복사')
   })
 
   it('surfaces a raw JSON copy action inside an expanded telemetry entry', async () => {
@@ -251,9 +251,9 @@ describe('TelemetryUnified', () => {
     })
     await flushUi()
 
-    const expandedCopyButton = container.querySelector('[aria-label="Copy expanded telemetry entry JSON"]') as HTMLButtonElement | null
+    const expandedCopyButton = container.querySelector('[aria-label="펼친 텔레메트리 항목 JSON 복사"]') as HTMLButtonElement | null
     expect(expandedCopyButton).not.toBeNull()
-    expect(expandedCopyButton?.getAttribute('title')).toBe('Copy expanded telemetry entry JSON')
+    expect(expandedCopyButton?.getAttribute('title')).toBe('펼친 텔레메트리 항목 JSON 복사')
   })
 
   it('condenses consecutive noisy telemetry into grouped categories', async () => {
@@ -333,9 +333,9 @@ describe('TelemetryUnified', () => {
     })
     await flushUi()
 
-    const expandedCopyButton = container.querySelector('[aria-label="Copy expanded telemetry group JSON"]') as HTMLButtonElement | null
+    const expandedCopyButton = container.querySelector('[aria-label="펼친 텔레메트리 그룹 JSON 복사"]') as HTMLButtonElement | null
     expect(expandedCopyButton).not.toBeNull()
-    expect(expandedCopyButton?.getAttribute('title')).toBe('Copy expanded telemetry group JSON')
+    expect(expandedCopyButton?.getAttribute('title')).toBe('펼친 텔레메트리 그룹 JSON 복사')
   })
 
   it('groups heartbeat keeper metrics into a heartbeat category', async () => {

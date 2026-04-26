@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark-fantasy">
+<head>
+<meta charset="UTF-8" />
+<title>MASC — Charts</title>
+<link rel="stylesheet" href="../colors_and_type.css" />
+<style>
+  :root {
+    --hair: rgba(120, 100, 80, 0.14);
+    --hair-strong: rgba(160, 140, 110, 0.24);
+    --axis: #3a2f24;
+    --axis-lbl: #6a5848;
+    --grid: rgba(120, 100, 80, 0.08);
+    --ok:   #7a9c6e;
+    --warn: #b08a3a;
+    --bad:  #a01818;
+  }
+  body {
+    margin: 0; min-height: 100vh;
+    background: var(--bg-deep);
+    color: var(--text-primary);
+    font-family: var(--font-body);
+  }
+  body::before {
+    content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='220'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' seed='3'/><feColorMatrix values='0 0 0 0 0.1  0 0 0 0 0.08  0 0 0 0 0.06  0 0 0 0.3 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)' opacity='0.3'/></svg>");
+    mix-blend-mode: multiply; opacity: 0.5;
+  }
+  .shell { position: relative; z-index: 1; max-width: 1240px; margin: 0 auto; padding: 32px 40px 60px; }
+
+  /* Page header */
+  .page-head { border-bottom: 1px solid var(--hair); padding-bottom: 14px; margin-bottom: 28px; display: flex; justify-content: space-between; align-items: baseline; }
+  .page-head h1 {
+    font-family: var(--font-display); font-size: 20px; letter-spacing: 0.22em;
+    color: var(--text-bright); text-transform: uppercase; text-shadow: none; margin: 0;
+  }
+  .page-head .crumb { font-family: var(--font-ui); font-size: 10px; letter-spacing: 0.26em; color: var(--text-dim); text-transform: uppercase; }
+
+  /* Card */
+  .card {
+    background: rgba(14, 10, 8, 0.4);
+    border: 1px solid var(--hair);
+    border-radius: 0;
+    padding: 18px 20px 16px;
+    box-shadow: none;
+    margin-bottom: 24px;
+  }
+  .card > header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 14px; }
+  .card > header h2 {
+    font-family: var(--font-ui); font-size: 10px; letter-spacing: 0.3em;
+    color: var(--text-dim); text-transform: uppercase; font-weight: 500; margin: 0;
+  }
+  .card > header .r { font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+  .card > header .r b { color: var(--text-bright); font-weight: 400; }
+
+  .legend { display: inline-flex; gap: 14px; font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); }
+  .legend .lg-i { display: inline-flex; align-items: center; gap: 6px; }
+  .legend .sw { width: 10px; height: 2px; display: inline-block; }
+
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  @media (max-width: 900px) { .grid-2 { grid-template-columns: 1fr; } }
+
+  /* SVG defaults */
+  svg.chart { display: block; width: 100%; font-family: var(--font-mono); }
+  svg.chart text { fill: var(--axis-lbl); font-size: 10px; }
+  svg.chart .axis line, svg.chart .axis path { stroke: var(--axis); }
+  svg.chart .grid line { stroke: var(--grid); }
+  svg.chart .hair { stroke: var(--hair-strong); stroke-dasharray: 2 3; }
+
+  /* Tooltip */
+  .tt {
+    position: absolute; pointer-events: none;
+    background: #0c0806; border: 1px solid var(--hair-strong);
+    padding: 8px 10px; font-family: var(--font-mono); font-size: 11px; color: var(--text-bright);
+    white-space: nowrap; z-index: 20; transform: translate(10px, -50%);
+    box-shadow: 0 4px 18px rgba(0,0,0,0.6);
+  }
+  .tt .row { display: flex; gap: 10px; align-items: center; }
+  .tt .k { color: var(--text-dim); }
+  .tt .sw { width: 8px; height: 8px; display: inline-block; border-radius: 50%; }
+
+  /* Sparkline row (agents) */
+  .agents {
+    border: 1px solid var(--hair);
+    background: rgba(14, 10, 8, 0.4);
+  }
+  .agent-row {
+    display: grid; grid-template-columns: 14px 90px 1fr 80px 80px; gap: 14px; align-items: center;
+    padding: 10px 16px; border-bottom: 1px solid var(--hair);
+  }
+  .agent-row:last-child { border-bottom: 0; }
+  .agent-row .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); }
+  .agent-row.warn .dot { background: var(--warn); }
+  .agent-row.bad .dot  { background: var(--bad); }
+  .agent-row .name { font-family: var(--font-mono); font-size: 12px; color: var(--text-bright); letter-spacing: 0.04em; }
+  .agent-row .spark { height: 28px; }
+  .agent-row .val { font-family: var(--font-mono); font-size: 11px; color: var(--text-primary); text-align: right; font-variant-numeric: tabular-nums; }
+  .agent-row .state { font-family: var(--font-ui); font-size: 10px; letter-spacing: 0.22em; color: var(--text-dim); text-transform: uppercase; text-align: right; }
+  .agent-row.bad .state { color: var(--bad); }
+
+  /* Flame graph */
+  .flame {
+    position: relative;
+    font-family: var(--font-mono); font-size: 11px;
+    color: var(--text-bright);
+    border: 1px solid var(--hair);
+    background: #0c0806;
+    padding: 1px;
+  }
+  .flame .f-row { display: flex; height: 20px; gap: 1px; margin-bottom: 1px; }
+  .flame .f-row:last-child { margin-bottom: 0; }
+  .flame .f {
+    background: #2a2018; color: var(--text-bright);
+    padding: 0 8px; display: flex; align-items: center;
+    overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+    border: 1px solid transparent;
+    cursor: default;
+  }
+  .flame .f:hover { border-color: var(--hair-strong); }
+  .flame .f.a { background: #3a2a1a; }
+  .flame .f.b { background: #2a3a2a; }
+  .flame .f.c { background: #3a2a2a; }
+  .flame .f.d { background: #2a2838; }
+  .flame .f.dim { background: #1a1410; color: var(--text-dim); }
+  .flame .f.err { background: #3a1010; color: #e0b8a8; }
+  .flame .f .num { margin-left: auto; color: var(--text-dim); }
+  .flame-scale {
+    display: flex; justify-content: space-between;
+    font-family: var(--font-mono); font-size: 10px; color: var(--text-dim);
+    margin-top: 6px; padding: 0 2px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Histogram */
+  .hist-bars rect.bar { fill: #4a3f30; }
+  .hist-bars rect.bar.hot { fill: #6a5a20; }
+  .hist-bars rect.bar.tail { fill: #6a3a20; }
+  .hist-stats {
+    display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px;
+    border-top: 1px solid var(--hair); margin-top: 12px; padding-top: 12px;
+  }
+  .hist-stats .k { font-family: var(--font-ui); font-size: 9px; letter-spacing: 0.26em; color: var(--text-dim); text-transform: uppercase; }
+  .hist-stats .v { font-family: var(--font-mono); font-size: 14px; color: var(--text-bright); font-variant-numeric: tabular-nums; margin-top: 2px; }
+
+  .pattern-caption {
+    font-family: var(--font-ui); font-size: 10px; letter-spacing: 0.26em; color: var(--text-dim);
+    text-transform: uppercase; margin: 0 0 10px;
+  }
+
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <header class="page-head">
+    <h1>Charts &amp; Monitoring</h1>
+    <span class="crumb">Preview · pattern library</span>
+  </header>
+
+  <p class="pattern-caption">01 · Time-series line</p>
+  <!-- ─── Time-series line: context usage per agent ─── -->
+  <section class="card" id="card-ts">
+    <header>
+      <h2>Context usage · last 60 min</h2>
+      <span class="r"><b>4</b> agents · 1-min buckets · <b>%</b> of window</span>
+    </header>
+    <div class="legend" id="ts-legend"></div>
+    <div style="position: relative;">
+      <svg class="chart" id="ts-chart" viewBox="0 0 800 240" preserveAspectRatio="none"></svg>
+      <div class="tt" id="ts-tt" style="display:none"></div>
+    </div>
+  </section>
+
+  <p class="pattern-caption">02 · Tick latency (single series, area)</p>
+  <!-- ─── Tick latency: single series with area fill ─── -->
+  <section class="card" id="card-tick">
+    <header>
+      <h2>Tick latency · last 5 min</h2>
+      <span class="r">p50 <b>34ms</b> · p95 <b>72ms</b> · p99 <b>128ms</b></span>
+    </header>
+    <div style="position: relative;">
+      <svg class="chart" id="tick-chart" viewBox="0 0 800 180" preserveAspectRatio="none"></svg>
+      <div class="tt" id="tick-tt" style="display:none"></div>
+    </div>
+  </section>
+
+  <div class="grid-2">
+    <div>
+      <p class="pattern-caption">03 · Sparklines (agent roster)</p>
+      <section class="agents" id="agents">
+        <!-- filled by JS -->
+      </section>
+    </div>
+
+    <div>
+      <p class="pattern-caption">04 · Histogram (tool call duration)</p>
+      <section class="card" id="card-hist">
+        <header>
+          <h2>Tool call duration · 1,208 samples</h2>
+          <span class="r">log-ms buckets</span>
+        </header>
+        <div style="position: relative;">
+          <svg class="chart" id="hist-chart" viewBox="0 0 800 200" preserveAspectRatio="none"></svg>
+          <div class="tt" id="hist-tt" style="display:none"></div>
+        </div>
+        <div class="hist-stats">
+          <div><div class="k">p50</div><div class="v">42<span style="color:var(--text-dim)">ms</span></div></div>
+          <div><div class="k">p90</div><div class="v">180<span style="color:var(--text-dim)">ms</span></div></div>
+          <div><div class="k">p99</div><div class="v">2.1<span style="color:var(--text-dim)">s</span></div></div>
+          <div><div class="k">max</div><div class="v">14.8<span style="color:var(--text-dim)">s</span></div></div>
+          <div><div class="k">errors</div><div class="v" style="color:var(--bad)">31</div></div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <p class="pattern-caption">05 · Flame graph (tool call stack)</p>
+  <!-- ─── Flame graph ─── -->
+  <section class="card" id="card-flame">
+    <header>
+      <h2>Latest trace · grimja · 2.4s wall</h2>
+      <span class="r">24 frames · 3 errors</span>
+    </header>
+    <div class="flame" id="flame">
+      <div class="f-row" style="--w: 100%;">
+        <div class="f a" style="flex: 240;">grimja.turn()<span class="num">2.40s</span></div>
+      </div>
+      <div class="f-row">
+        <div class="f b" style="flex: 40;">plan()<span class="num">0.40</span></div>
+        <div class="f c" style="flex: 160;">execute()<span class="num">1.60</span></div>
+        <div class="f a" style="flex: 40;">reflect()<span class="num">0.40</span></div>
+      </div>
+      <div class="f-row">
+        <div class="f dim" style="flex: 12;">llm.c</div>
+        <div class="f dim" style="flex: 28;">read_ctx<span class="num">0.28</span></div>
+        <div class="f d" style="flex: 70;">tool.search<span class="num">0.70</span></div>
+        <div class="f c" style="flex: 60;">tool.write_file<span class="num">0.60</span></div>
+        <div class="f err" style="flex: 30;">tool.db.query · timeout<span class="num">0.30</span></div>
+        <div class="f dim" style="flex: 40;">llm.reflect<span class="num">0.40</span></div>
+      </div>
+      <div class="f-row">
+        <div class="f dim" style="flex: 12;"></div>
+        <div class="f dim" style="flex: 28;"></div>
+        <div class="f d" style="flex: 28;">embed<span class="num">0.28</span></div>
+        <div class="f d" style="flex: 42;">fetch.arxiv<span class="num">0.42</span></div>
+        <div class="f c" style="flex: 22;">diff<span class="num">0.22</span></div>
+        <div class="f c" style="flex: 38;">fs.write<span class="num">0.38</span></div>
+        <div class="f err" style="flex: 30;">retry ×3</div>
+        <div class="f dim" style="flex: 40;"></div>
+      </div>
+      <div class="f-row">
+        <div class="f dim" style="flex: 40;"></div>
+        <div class="f dim" style="flex: 28;">tokenize</div>
+        <div class="f dim" style="flex: 42;">http.get</div>
+        <div class="f dim" style="flex: 22;"></div>
+        <div class="f dim" style="flex: 38;">fsync</div>
+        <div class="f dim" style="flex: 30;"></div>
+        <div class="f dim" style="flex: 40;"></div>
+      </div>
+    </div>
+    <div class="flame-scale">
+      <span>0 ms</span>
+      <span>600</span>
+      <span>1,200</span>
+      <span>1,800</span>
+      <span>2,400 ms</span>
+    </div>
+  </section>
+
+</div>
+
+<script>
+// ══════ Helpers ══════
+const $ = (s, r=document) => r.querySelector(s);
+const rand = (seed) => { let s = seed; return () => { s = (s * 16807) % 2147483647; return s / 2147483647; }; };
+
+// ══════ 01 Time-series line ══════
+(function tsChart() {
+  const svg = $('#ts-chart');
+  const W = 800, H = 240, padL = 44, padR = 12, padT = 16, padB = 28;
+  const iw = W - padL - padR, ih = H - padT - padB;
+
+  const agents = [
+    { name: 'grimja', color: '#7a9c6e', seed: 3 },
+    { name: 'iron',   color: '#b08a3a', seed: 11 },
+    { name: 'luna',   color: '#a01818', seed: 23 },
+    { name: 'moth',   color: '#6a7a9c', seed: 41 },
+  ];
+  const N = 60;
+  agents.forEach(a => {
+    const r = rand(a.seed);
+    let v = 30 + r() * 30;
+    a.pts = [];
+    for (let i = 0; i < N; i++) {
+      v += (r() - 0.5) * 8;
+      if (a.name === 'iron') v += 0.4; // drifting up
+      if (a.name === 'luna' && i > 40) v += 1.2; // climbing toward context limit
+      v = Math.max(10, Math.min(98, v));
+      a.pts.push(v);
+    }
+  });
+
+  const xAt = i => padL + (i / (N - 1)) * iw;
+  const yAt = v => padT + (1 - v / 100) * ih;
+
+  // grid
+  let html = '';
+  html += '<g class="grid">';
+  [0, 25, 50, 75, 100].forEach(v => {
+    html += `<line x1="${padL}" x2="${padL+iw}" y1="${yAt(v)}" y2="${yAt(v)}" />`;
+    html += `<text x="${padL-8}" y="${yAt(v)+3}" text-anchor="end">${v}%</text>`;
+  });
+  html += '</g>';
+  // axis
+  html += `<g class="axis"><line x1="${padL}" x2="${padL+iw}" y1="${padT+ih}" y2="${padT+ih}"/></g>`;
+  ['-60m','-45m','-30m','-15m','now'].forEach((t,i) => {
+    const x = padL + (i/4)*iw;
+    html += `<text x="${x}" y="${padT+ih+16}" text-anchor="middle">${t}</text>`;
+  });
+  // 80% threshold
+  html += `<line x1="${padL}" x2="${padL+iw}" y1="${yAt(80)}" y2="${yAt(80)}" class="hair"/>`;
+  html += `<text x="${padL+iw-2}" y="${yAt(80)-4}" text-anchor="end" fill="#b08a3a">ctx threshold · 80%</text>`;
+
+  // lines
+  agents.forEach(a => {
+    const d = a.pts.map((v,i) => `${i===0?'M':'L'}${xAt(i).toFixed(1)} ${yAt(v).toFixed(1)}`).join(' ');
+    html += `<path d="${d}" fill="none" stroke="${a.color}" stroke-width="1.4" stroke-linejoin="round"/>`;
+  });
+
+  // hover layer
+  html += `<g id="ts-hover" style="display:none"><line class="hair" y1="${padT}" y2="${padT+ih}" stroke-dasharray="2 3"/>`;
+  agents.forEach(a => html += `<circle r="3" fill="${a.color}" data-name="${a.name}"/>`);
+  html += `</g>`;
+  // capture rect
+  html += `<rect id="ts-capture" x="${padL}" y="${padT}" width="${iw}" height="${ih}" fill="transparent" />`;
+
+  svg.innerHTML = html;
+
+  // legend
+  $('#ts-legend').innerHTML = agents.map(a =>
+    `<span class="lg-i"><span class="sw" style="background:${a.color}"></span>${a.name}</span>`
+  ).join('');
+
+  // hover
+  const cap = $('#ts-capture'), hov = $('#ts-hover'), tt = $('#ts-tt');
+  const cr = svg.getBoundingClientRect.bind(svg);
+  cap.addEventListener('mousemove', e => {
+    const rect = svg.getBoundingClientRect();
+    const sx = rect.width / W;
+    const relX = (e.clientX - rect.left) / sx;
+    const i = Math.round(((relX - padL) / iw) * (N - 1));
+    if (i < 0 || i >= N) return;
+    const x = xAt(i);
+    hov.style.display = '';
+    hov.querySelector('line').setAttribute('x1', x);
+    hov.querySelector('line').setAttribute('x2', x);
+    agents.forEach((a, k) => {
+      const c = hov.querySelectorAll('circle')[k];
+      c.setAttribute('cx', x);
+      c.setAttribute('cy', yAt(a.pts[i]));
+    });
+    tt.style.display = '';
+    tt.style.left = (rect.left + x * sx - svg.parentElement.getBoundingClientRect().left) + 'px';
+    tt.style.top = (rect.top + yAt(50) * (rect.height/H) - svg.parentElement.getBoundingClientRect().top) + 'px';
+    const mins = 60 - i;
+    tt.innerHTML = `<div class="row"><span class="k">t−${mins}m</span></div>` +
+      agents.map(a => `<div class="row"><span class="sw" style="background:${a.color}"></span>${a.name}<span style="margin-left:auto">${a.pts[i].toFixed(1)}%</span></div>`).join('');
+  });
+  cap.addEventListener('mouseleave', () => { hov.style.display='none'; tt.style.display='none'; });
+})();
+
+// ══════ 02 Tick latency area ══════
+(function tickChart() {
+  const svg = $('#tick-chart');
+  const W = 800, H = 180, padL = 44, padR = 12, padT = 12, padB = 24;
+  const iw = W - padL - padR, ih = H - padT - padB;
+  const N = 120;
+  const r = rand(7);
+  let v = 34;
+  const pts = [];
+  for (let i = 0; i < N; i++) {
+    v += (r() - 0.5) * 6;
+    if (i === 78 || i === 79) v += 70; // spike
+    if (i === 112) v += 40;
+    v = Math.max(18, Math.min(140, v));
+    pts.push(v);
+  }
+  const max = 140;
+  const xAt = i => padL + (i/(N-1))*iw;
+  const yAt = v => padT + (1 - v/max)*ih;
+
+  let html = '';
+  html += '<defs><linearGradient id="g-tick" x1="0" x2="0" y1="0" y2="1">' +
+    '<stop offset="0%" stop-color="#a01818" stop-opacity="0.35"/>' +
+    '<stop offset="100%" stop-color="#a01818" stop-opacity="0"/>' +
+    '</linearGradient></defs>';
+  html += '<g class="grid">';
+  [0,50,100].forEach(y => {
+    html += `<line x1="${padL}" x2="${padL+iw}" y1="${yAt(y)}" y2="${yAt(y)}"/>`;
+    html += `<text x="${padL-8}" y="${yAt(y)+3}" text-anchor="end">${y}ms</text>`;
+  });
+  html += '</g>';
+  // threshold lines
+  html += `<line x1="${padL}" x2="${padL+iw}" y1="${yAt(72)}" y2="${yAt(72)}" class="hair"/>`;
+  html += `<text x="${padL+iw-2}" y="${yAt(72)-4}" text-anchor="end" fill="#b08a3a">p95 · 72ms</text>`;
+  // area
+  const line = pts.map((v,i) => `${i===0?'M':'L'}${xAt(i).toFixed(1)} ${yAt(v).toFixed(1)}`).join(' ');
+  html += `<path d="${line} L${xAt(N-1)} ${yAt(0)} L${xAt(0)} ${yAt(0)} Z" fill="url(#g-tick)"/>`;
+  html += `<path d="${line}" fill="none" stroke="#c94a3a" stroke-width="1.2"/>`;
+  // time ticks
+  ['-5m','-4','-3','-2','-1','now'].forEach((t,i) => {
+    const x = padL + (i/5)*iw;
+    html += `<text x="${x}" y="${padT+ih+14}" text-anchor="middle">${t}</text>`;
+  });
+
+  // hover
+  html += `<g id="tk-hover" style="display:none"><line class="hair" y1="${padT}" y2="${padT+ih}" stroke-dasharray="2 3"/><circle r="3" fill="#e8d8b8"/></g>`;
+  html += `<rect id="tk-capture" x="${padL}" y="${padT}" width="${iw}" height="${ih}" fill="transparent"/>`;
+  svg.innerHTML = html;
+
+  const cap = $('#tk-capture'), hov = $('#tk-hover'), tt = $('#tick-tt');
+  cap.addEventListener('mousemove', e => {
+    const rect = svg.getBoundingClientRect();
+    const sx = rect.width / W;
+    const relX = (e.clientX - rect.left) / sx;
+    const i = Math.round(((relX - padL) / iw) * (N - 1));
+    if (i < 0 || i >= N) return;
+    const x = xAt(i), y = yAt(pts[i]);
+    hov.style.display = '';
+    hov.querySelector('line').setAttribute('x1', x);
+    hov.querySelector('line').setAttribute('x2', x);
+    hov.querySelector('circle').setAttribute('cx', x);
+    hov.querySelector('circle').setAttribute('cy', y);
+    tt.style.display = '';
+    const parent = svg.parentElement.getBoundingClientRect();
+    tt.style.left = (rect.left + x * sx - parent.left) + 'px';
+    tt.style.top = (rect.top + y * (rect.height/H) - parent.top) + 'px';
+    const sec = Math.round((N-1-i) * 2.5);
+    tt.innerHTML = `<div class="row"><span class="k">−${sec}s</span></div><div class="row"><b>${pts[i].toFixed(1)} ms</b></div>`;
+  });
+  cap.addEventListener('mouseleave', () => { hov.style.display='none'; tt.style.display='none'; });
+})();
+
+// ══════ 03 Sparklines ══════
+(function sparklines() {
+  const agents = [
+    { name: 'grimja', state: 'working',      cls: '',     val: '58%', seed: 3, acc: '#7a9c6e' },
+    { name: 'iron',   state: 'reading',      cls: '',     val: '71%', seed: 9, acc: '#7a9c6e' },
+    { name: 'luna',   state: 'stalled · 42s',cls: 'warn', val: '84%', seed: 17, acc: '#b08a3a' },
+    { name: 'moth',   state: 'idle',         cls: '',     val: '22%', seed: 29, acc: '#7a9c6e' },
+    { name: 'cedric', state: 'crashed · t2', cls: 'bad',  val: '—',   seed: 37, acc: '#a01818' },
+  ];
+  const N = 40;
+  const W = 220, H = 28, padY = 4;
+  const root = $('#agents');
+  root.innerHTML = agents.map(a => {
+    const r = rand(a.seed);
+    let v = 40 + r()*30;
+    const pts = [];
+    for (let i=0;i<N;i++) {
+      v += (r()-0.5)*10;
+      if (a.cls === 'bad' && i > 28) v = 0;
+      if (a.cls === 'warn' && i > 30) v -= 4;
+      v = Math.max(0, Math.min(100, v));
+      pts.push(v);
+    }
+    const maxV = Math.max(...pts, 1);
+    const xAt = i => (i/(N-1))*W;
+    const yAt = v => padY + (1 - v/maxV)*(H-padY*2);
+    const d = pts.map((v,i) => `${i===0?'M':'L'}${xAt(i).toFixed(1)} ${yAt(v).toFixed(1)}`).join(' ');
+    const area = d + ` L${W} ${H-padY} L0 ${H-padY} Z`;
+    return `<div class="agent-row ${a.cls}">
+      <span class="dot"></span>
+      <span class="name">${a.name}</span>
+      <svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+        <path d="${area}" fill="${a.acc}" fill-opacity="0.12"/>
+        <path d="${d}" fill="none" stroke="${a.acc}" stroke-width="1.2"/>
+      </svg>
+      <span class="val">${a.val}</span>
+      <span class="state">${a.state}</span>
+    </div>`;
+  }).join('');
+})();
+
+// ══════ 04 Histogram ══════
+(function hist() {
+  const svg = $('#hist-chart');
+  const W = 800, H = 200, padL = 44, padR = 12, padT = 12, padB = 28;
+  const iw = W - padL - padR, ih = H - padT - padB;
+  // log-ms buckets: 1, 2, 5, 10, 20, 50, 100, 200, 500, 1k, 2k, 5k, 10k
+  const labels = ['1','2','5','10','20','50','100','200','500','1k','2k','5k','10k','+'];
+  const counts = [4, 11, 28, 62, 120, 196, 240, 188, 132, 90, 72, 38, 18, 9];
+  const max = Math.max(...counts);
+  const n = counts.length;
+  const bw = iw / n;
+  const errIdx = [10,11,12,13];
+  const hotIdx = [5,6,7];
+
+  let html = '';
+  html += '<g class="grid">';
+  [0, 0.25, 0.5, 0.75, 1].forEach(t => {
+    const y = padT + ih*(1-t);
+    html += `<line x1="${padL}" x2="${padL+iw}" y1="${y}" y2="${y}"/>`;
+    html += `<text x="${padL-8}" y="${y+3}" text-anchor="end">${Math.round(max*t)}</text>`;
+  });
+  html += '</g>';
+
+  counts.forEach((c,i) => {
+    const h = (c/max)*ih;
+    const x = padL + i*bw + 1;
+    const y = padT + ih - h;
+    const cls = errIdx.includes(i) ? 'bar tail' : (hotIdx.includes(i) ? 'bar hot' : 'bar');
+    html += `<rect class="${cls}" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${(bw-2).toFixed(1)}" height="${h.toFixed(1)}" data-i="${i}"/>`;
+  });
+  // x labels
+  labels.forEach((l,i) => {
+    const x = padL + i*bw + bw/2;
+    html += `<text x="${x}" y="${padT+ih+14}" text-anchor="middle">${l}</text>`;
+  });
+  // p50 / p95 markers
+  const p50x = padL + 6.2*bw;
+  const p95x = padL + 10.3*bw;
+  html += `<line x1="${p50x}" x2="${p50x}" y1="${padT}" y2="${padT+ih}" class="hair"/>`;
+  html += `<text x="${p50x+4}" y="${padT+10}">p50</text>`;
+  html += `<line x1="${p95x}" x2="${p95x}" y1="${padT}" y2="${padT+ih}" class="hair" stroke="#a01818"/>`;
+  html += `<text x="${p95x+4}" y="${padT+10}" fill="#a01818">p95</text>`;
+
+  svg.innerHTML = `<g class="hist-bars">${html}</g>`;
+
+  // hover
+  const tt = $('#hist-tt');
+  svg.querySelectorAll('rect.bar').forEach(el => {
+    el.addEventListener('mousemove', e => {
+      const i = +el.dataset.i;
+      const rect = svg.getBoundingClientRect();
+      const parent = svg.parentElement.getBoundingClientRect();
+      tt.style.display = '';
+      tt.style.left = (e.clientX - parent.left + 8) + 'px';
+      tt.style.top  = (e.clientY - parent.top) + 'px';
+      tt.innerHTML = `<div class="row"><b>${labels[i]} ms</b><span class="k" style="margin-left:8px">bucket</span></div><div class="row"><span class="k">count</span><b style="margin-left:auto">${counts[i]}</b></div>`;
+    });
+    el.addEventListener('mouseleave', () => { tt.style.display = 'none'; });
+  });
+})();
+</script>
+</body>
+</html>

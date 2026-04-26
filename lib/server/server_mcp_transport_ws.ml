@@ -782,7 +782,9 @@ let cleanup_session session_id =
     (with_sessions_rw (fun () -> Hashtbl.length sessions));
   Sse.unsubscribe_external session_id;
   if removed then
-    Log.Server.info "WebSocket session %s closed" session_id
+    (* #10875: see server_ws_standalone — per-session lifecycle is DEBUG
+       to avoid logging amplification during WS storm (#10701). *)
+    Log.Server.debug "WebSocket session %s closed" session_id
 
 (** Number of active WebSocket sessions. *)
 let session_count () =
@@ -823,7 +825,9 @@ let upgrade_connection
               then
                 cleanup_session session_id)
             ();
-          Log.Server.info "WebSocket session %s connected" session_id;
+          (* #10875: see cleanup_session — per-session lifecycle is DEBUG
+             to avoid logging amplification during WS storm (#10701). *)
+          Log.Server.debug "WebSocket session %s connected" session_id;
           { Httpun_ws.Websocket_connection.
             frame = (fun ~opcode ~is_fin ~len payload ->
               match opcode with

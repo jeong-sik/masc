@@ -26,7 +26,14 @@ let store_ref : Dated_jsonl.t option ref = ref None
 let source_name = "tool_usage"
 let source_producer = "tool_usage_log"
 let dashboard_surface = "/api/v1/dashboard/tools"
-let freshness_slo_s = 900.0
+(* Sparse-source SLO. Tool_usage logs only Tool_catalog_surfaces.System_internal
+   surface tools, which are admin-only invocations driven by operators. Real
+   workloads can legitimately go an hour or more without an admin tool call,
+   so the original 900 s SLO inherited from high-volume sources caused false
+   "stale" alerts on healthy fleets. 3600 s matches the operational rhythm
+   without masking a true write-pipeline failure — Dated_jsonl append errors
+   already record a coverage_gap that bypasses this SLO. *)
+let freshness_slo_s = 3600.0
 
 let store_dir masc_root = Filename.concat masc_root "tool_usage"
 

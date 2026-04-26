@@ -6,6 +6,7 @@
   <title>MASC — L2 Observational Layers</title>
   <link rel="stylesheet" href="../colors_and_type.css" />
   <link rel="stylesheet" href="../source_styles/tokens.css" />
+  <link rel="stylesheet" href="../source_styles/semantic.css" />
   <link rel="stylesheet" href="../source_styles/primitives.css" />
   <style>
     html, body { margin:0; background: var(--color-bg-page); color: var(--color-fg-primary); font-family: var(--font-sans); min-height: 100vh; }
@@ -79,8 +80,10 @@
 
     /* ── COMBINED ── */
     .combo { position: relative; padding: 14px 18px; background: var(--color-bg-page); }
-    .combo .layer-labels { position:absolute; top: 10px; right: 14px; display:flex; flex-direction: column; gap: 3px; font-family: var(--font-mono); font-size: 9px; letter-spacing: .08em; }
-    .combo .layer-labels span { padding: 2px 6px; border: 1px solid var(--color-border-strong); border-radius: 2px; background: var(--color-bg-surface); }
+    .combo .combo-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+    .combo .combo-head .src-meta { font-family: var(--font-mono); font-size: 9px; color: var(--color-fg-disabled); letter-spacing: .08em; text-transform: uppercase; }
+    .combo .layer-labels { display:flex; gap: 4px; font-family: var(--font-mono); font-size: 9px; letter-spacing: .08em; flex-shrink: 0; }
+    .combo .layer-labels span { padding: 2px 6px; border: 1px solid var(--color-border-strong); border-radius: 2px; background: var(--color-bg-surface); color: var(--color-fg-muted); }
     .combo .layer-labels .on { color: var(--color-accent-fg); border-color: var(--brass-2); background: rgb(var(--color-accent-glow)/.08); }
     .code-line { display:flex; align-items:center; gap: 8px; font-family: var(--font-mono); font-size: 11px; padding: 2px 0; position: relative; }
     .code-line .time-bar { width: 3px; height: 14px; background: var(--warn); border-radius: 1px; }
@@ -275,19 +278,21 @@
       </div>
       <div class="canvas">
         <div class="combo" style="padding: 14px 18px 12px;">
-          <div class="layer-labels">
-            <span class="on">L1 TIME</span>
-            <span class="on">L2 PARA</span>
-            <span class="on">L3 TOOL</span>
-            <span class="on">L4 APPR</span>
-            <span>L5 NOTE</span>
+          <div class="combo-head">
+            <div class="src-meta">src/keeper.ts · branch feat/keeper-clarity · 3 keepers attached</div>
+            <div class="layer-labels">
+              <span class="on">L1</span>
+              <span class="on">L2</span>
+              <span class="on">L3</span>
+              <span class="on">L4</span>
+              <span>L5</span>
+            </div>
           </div>
-          <div style="font-family: var(--font-mono); font-size: 9px; color: var(--color-fg-disabled); letter-spacing: .08em; text-transform: uppercase; margin-bottom: 6px;">src/keeper.ts · branch feat/keeper-clarity · 3 keepers attached</div>
-          <div class="code-line"><span class="time-bar" style="opacity:.3; height:10px" title="L1 · cold (3h)"></span><span class="num">09</span><span class="src"><span class="k">async</span> <span class="f">tick</span>() {'{'}</span></div>
+          <div class="code-line"><span class="time-bar" style="opacity:.3; height:10px" title="L1 · cold (3h)"></span><span class="num">09</span><span class="src"><span class="k">async</span> <span class="f">tick</span>() {</span></div>
           <div class="code-line"><span class="time-bar" style="opacity:.9; box-shadow:0 0 6px rgb(var(--warn-glow)/.8)" title="L1 · 4m"></span><span class="num">10</span><span class="src">  <span class="k">if</span> (this.state !== <span class="s">'running'</span>) <span class="k">return</span>;</span><span class="cursor-chip c-qa" title="L2 · qa-king at col 24">qa-king</span></div>
           <div class="code-line"><span class="time-bar" style="opacity:1; box-shadow:0 0 8px rgb(var(--warn-glow))" title="L1 · 12s · live"></span><span class="num">11</span><span class="src">  <span class="tool-glyph" title="L3 · emit() called 12× in 60s">◈</span> <span class="f hl">emit</span>(<span class="s">'heartbeat'</span>);</span><span class="cursor-chip c-nick" title="L2 · nick0cave editing">nick0cave</span></div>
           <div class="code-line"><span class="time-bar" style="opacity:.85" title="L1 · 2m"></span><span class="num">12</span><span class="src">  <span class="k">await</span> this.<span class="f">runCascade</span>(<span class="s">'moonshot'</span>);</span><span class="cursor-chip c-ss" title="L2 · sangsu reading">sangsu</span></div>
-          <div class="code-line"><span class="time-bar" style="opacity:.2; height:8px" title="L1 · cold"></span><span class="num">13</span><span class="src">{'}'}</span></div>
+          <div class="code-line"><span class="time-bar" style="opacity:.2; height:8px" title="L1 · cold"></span><span class="num">13</span><span class="src">}</span></div>
           <div class="l4-block" style="margin-top: 10px; padding: 8px 12px" title="L4 · approval block">
             <div style="font-family:var(--font-mono); font-size:11px; color:var(--color-fg-secondary)">lines 9–13 reviewed</div>
             <div class="l4-by">sangsu · 2m ago · cascade: moonshot@2 · 1.24s</div>

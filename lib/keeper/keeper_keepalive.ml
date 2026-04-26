@@ -2249,6 +2249,16 @@ let bootstrap_live_keeper_meta ~(ctx : _ context) (m : keeper_meta) : keeper_met
       | None -> m
     in
     let synced = ensure_keeper_room_presence ctx.config m in
+    (* Reset stale timestamp from previous server lifecycle.
+       Without this, the stale watchdog reads the old last_turn_ts
+       and immediately terminates the fiber on server restart. *)
+    let synced =
+      { synced with
+        runtime = { synced.runtime with
+          usage = { synced.runtime.usage with last_turn_ts = 0.0 };
+        };
+      }
+    in
     (match write_meta ~force:true ctx.config synced with
      | Ok () -> ()
      | Error e ->

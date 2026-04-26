@@ -147,6 +147,39 @@ module KeeperSupervisor = struct
     Float.max 300.0 (get_float ~default:Masc_time_constants.day "MASC_KEEPER_PAUSED_CLEANUP_TTL_SEC")
 end
 
+(** {1 Keeper Watchdog Configuration}
+
+    Thresholds for the stale-turn watchdog fiber
+    ({!Keeper_stale_watchdog}). Previously hardcoded; extracted so
+    operators can tune per deployment without a rebuild.
+
+    Precedence: process env > hardcoded default below. *)
+
+module KeeperWatchdog = struct
+  (** Seconds since last turn before a Running keeper is considered idle-stale.
+      Must be >= 60. Default: 300 (5 minutes). *)
+  let stale_threshold_sec =
+    Float.max 60.0 (get_float ~default:300.0 "MASC_KEEPER_WATCHDOG_STALE_SEC")
+
+  (** Watchdog poll interval in seconds. Must be >= 5.
+      Default: 30. *)
+  let poll_sec =
+    Float.max 5.0 (get_float ~default:30.0 "MASC_KEEPER_WATCHDOG_POLL_SEC")
+
+  (** Consecutive noop turns before considering the keeper stuck in a
+      failure loop. Must be >= 2. Default: 3. *)
+  let noop_threshold =
+    max 2 (get_int ~default:3 "MASC_KEEPER_WATCHDOG_NOOP_THRESHOLD")
+
+  (** Grace period after fiber start before idle-stale detection activates.
+      Prevents false positives on server restart when [last_turn_ts] is
+      carried over from a previous server lifecycle.
+      Must be >= 0. Default: 360 (6 minutes — covers proactive warmup
+      up to 255 s plus one heartbeat cycle). *)
+  let grace_period_sec =
+    Float.max 0.0 (get_float ~default:360.0 "MASC_KEEPER_WATCHDOG_GRACE_SEC")
+end
+
 (** {1 Keeper Runtime Configuration} *)
 
 module KeeperRuntime = struct

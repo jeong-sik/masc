@@ -90,6 +90,7 @@ specs/**/TraceData.tla
 # defaults).  Use .env.<mode>.local for local secret overrides; those
 # remain ignored by the .env.* rule above.
 !dashboard/.env.development
+!dashboard/.env.production
 
 # Infrastructure secrets (launchd plist contains env vars with tokens)
 infrastructure/launchd/*.plist

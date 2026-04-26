@@ -8,6 +8,7 @@ import {
   type KeeperCheckpointSummary,
 } from '../api/keeper'
 import { TextInput } from './common/input'
+import { Checkbox } from './common/checkbox'
 import { TimeAgo } from './common/time-ago'
 import { keeperStatusDetails } from '../keeper-state'
 import { isRecord } from './common/normalize'
@@ -247,11 +248,11 @@ export function KeeperCheckpointPanel({
                 <div class="flex flex-col">
                   ${visibleHistory.map(item => html`
                     <label class="flex gap-3 border-b border-[var(--color-border-default)] px-3 py-3 text-xs last:border-b-0">
-                      <input
-                        type="checkbox"
+                      <${Checkbox}
                         class="mt-1"
                         checked=${selectedIds.includes(item.snapshot_id)}
-                        onChange=${(event: Event) => toggleSnapshot(item.snapshot_id, (event.currentTarget as HTMLInputElement).checked)}
+                        ariaLabel=${`snapshot ${item.snapshot_id} 선택`}
+                        onChange=${(checked: boolean) => toggleSnapshot(item.snapshot_id, checked)}
                       />
                       <div class="min-w-0 flex-1">
                         <div class="flex flex-wrap items-center gap-2">

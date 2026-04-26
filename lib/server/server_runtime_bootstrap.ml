@@ -946,6 +946,26 @@ let sync_bootable_keeper_credentials (state : Mcp_server.server_state) =
          Log.Server.error
            "startup keeper credential sync failed for %s: %s"
            keeper_name detail);
+  (* #10440: write a short-form alias for each keeper so callers
+     that look up by [agent_name=<keeper_name>] resolve directly
+     instead of falling through to legacy_credential_aliases.
+     Without the alias, 8/14 keepers fail [load_credential] for the
+     short-form lookup path (per the issue's evidence on the live
+     fleet). *)
+  List.iter2
+    (fun keeper_name agent_name ->
+      if not (String.equal keeper_name agent_name) then
+        match
+          Auth.ensure_credential_alias base_path
+            ~canonical_name:agent_name ~alias_name:keeper_name
+        with
+        | Ok () -> ()
+        | Error err ->
+            Log.Server.warn
+              "short-form alias write failed: keeper=%s canonical=%s: %s"
+              keeper_name agent_name
+              (Types.masc_error_to_string err))
+    keeper_names keeper_agent_names;
   let rotation_outcomes =
     Auth.rotate_shared_tokens_for_agents base_path
       ~agent_names:keeper_agent_names

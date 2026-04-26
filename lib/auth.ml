@@ -402,6 +402,78 @@ let save_credential config (cred : agent_credential) =
       Option.iter remove_file_if_exists previous_target;
       save_private_text_file stub_file json_str)
 
+(** #10440: write a short-form alias [<alias_name>.json] as a
+    redirect stub pointing at the same UUID file as
+    [<canonical_name>.json].
+
+    Issue #10440 documented credential file asymmetry: 6/14
+    keepers had a short-form [<keeper>.json] (created via some
+    other path) and 8/14 had only the long-form
+    [keeper-<n>-agent.json]. Callers that look up by
+    [agent_name=<keeper>] hit ENOENT for the 8 long-form-only
+    keepers, which is the [feedback_keeper-credential-name-drift]
+    fail mode. This helper writes the short-form alias once at
+    bootstrap so all 14 keepers resolve via a single
+    [load_credential] call.
+
+    Idempotent: pre-existing alias with the same redirect target
+    is a no-op; a stale alias pointing elsewhere is overwritten so
+    operators can recover from manual file edits.
+
+    Returns [Error] if the canonical credential is itself a
+    direct (non-redirect) credential, since "alias" semantics
+    require both sides to share the same UUID file. *)
+let ensure_credential_alias config ~canonical_name ~alias_name :
+    (unit, masc_error) result =
+  if String.equal canonical_name alias_name then Ok ()
+  else
+    let canonical_file = credential_file config canonical_name in
+    if not (file_exists canonical_file) then
+      Error
+        (IoError
+           (Printf.sprintf
+              "canonical credential not found for alias setup: \
+               canonical=%s alias=%s"
+              canonical_name alias_name))
+    else
+      match load_redirect_target config canonical_file with
+      | None ->
+          Error
+            (IoError
+               (Printf.sprintf
+                  "canonical credential %s is not a redirect stub; \
+                   cannot create alias %s without a UUID-backed \
+                   credential"
+                  canonical_name alias_name))
+      | Some uuid_file ->
+          let uuid_basename = Filename.basename uuid_file in
+          let alias_file = credential_file config alias_name in
+          let desired_stub =
+            `Assoc [ ("redirect_to", `String uuid_basename) ]
+          in
+          let already_correct =
+            match load_redirect_target config alias_file with
+            | Some existing when Filename.basename existing = uuid_basename ->
+                true
+            | _ -> false
+          in
+          if already_correct then Ok ()
+          else
+            (try
+               ensure_auth_dirs config;
+               save_private_text_file alias_file
+                 (Yojson.Safe.pretty_to_string desired_stub);
+               Ok ()
+             with
+             | Eio.Cancel.Cancelled _ as e -> raise e
+             | exn ->
+                 Error
+                   (IoError
+                      (Printf.sprintf
+                         "Failed to write alias %s -> %s: %s"
+                         alias_name canonical_name
+                         (Printexc.to_string exn))))
+
 let load_raw_token config ~agent_name =
   let file = raw_token_file config agent_name in
   if file_exists file then

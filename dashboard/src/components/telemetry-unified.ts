@@ -883,7 +883,7 @@ export function TelemetryUnified() {
             })}
           </div>
         ` : null}
-        <div class="max-h-150 overflow-y-auto custom-scrollbar" tabindex="0">
+        <div class="max-h-150 overflow-y-auto custom-scrollbar" tabindex="0" role="list" aria-label="이벤트 목록">
           ${displayItems.length > 0
             ? displayItems.map(item => item.kind === 'group'
               ? html`<${GroupRow} key=${item.key} item=${item} />`

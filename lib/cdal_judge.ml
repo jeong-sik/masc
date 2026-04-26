@@ -243,20 +243,17 @@ let marker_to_string = function
 
 (* --- low-level text helpers (no re lib; keep deps thin) --- *)
 
+(* Delegates to [String_util] SSOT (byte-wise scan, no per-step
+   allocation). The SSOT [contains_substring] returns [true] for an
+   empty needle natively, matching the original local helper.
+   [contains_substring_ci] returns [false] for empty needle, so guard
+   explicitly to preserve the legacy convention. *)
 let contains_sub s sub =
-  let ls = String.length s and lsub = String.length sub in
-  if lsub = 0 then true
-  else if lsub > ls then false
-  else
-    let rec loop i =
-      if i + lsub > ls then false
-      else if String.sub s i lsub = sub then true
-      else loop (i + 1)
-    in
-    loop 0
+  String_util.contains_substring s sub
 
 let contains_ci s sub =
-  contains_sub (String.lowercase_ascii s) (String.lowercase_ascii sub)
+  if sub = "" then true
+  else String_util.contains_substring_ci s sub
 
 (* Counts occurrences of a fixed substring. *)
 let count_sub s sub =

@@ -288,7 +288,7 @@ export function KeeperDetailOverviewSidebar({
     <aside class="order-2 xl:order-1 xl:sticky xl:top-[104px] xl:self-start">
       <div class="flex flex-col gap-4 rounded-[28px] border border-[var(--card-border)] bg-[rgba(9,14,24,0.84)] p-4 shadow-[0_20px_48px_rgba(0,0,0,0.18)]">
         <div>
-          <div class="text-3xs font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">Overview</div>
+          <div class="text-3xs font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">개요</div>
           <p class="m-0 mt-2 text-sm leading-relaxed text-[var(--text-secondary)]">
             긴 단일 모달 대신 keeper 상세를 별도 화면으로 펼쳤습니다. 운영자가 자주 오가는 맥락 단위로 나눠서 바로 점프할 수 있습니다.
           </p>

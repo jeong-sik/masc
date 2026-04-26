@@ -197,20 +197,20 @@ body[data-explode="1"] .lyr::before {
   0%, 100% { opacity: 0.35; }
   50%      { opacity: 0.75; }
 }
-.parallel-streak.k-nick    { stroke: var(--k-nick); color: var(--k-nick); }
-.parallel-streak.k-masc    { stroke: var(--k-masc); color: var(--k-masc); }
-.parallel-streak.k-sangsu  { stroke: var(--k-sangsu); color: var(--k-sangsu); }
-.parallel-streak.k-qa      { stroke: var(--k-qa); color: var(--k-qa); }
-.parallel-streak.k-rama    { stroke: var(--k-rama); color: var(--k-rama); }
+.parallel-streak.k-nick    { stroke: var(--color-keeper-1); color: var(--color-keeper-1); }
+.parallel-streak.k-masc    { stroke: var(--color-keeper-2); color: var(--color-keeper-2); }
+.parallel-streak.k-sangsu  { stroke: var(--color-keeper-3); color: var(--color-keeper-3); }
+.parallel-streak.k-qa      { stroke: var(--color-keeper-4); color: var(--color-keeper-4); }
+.parallel-streak.k-rama    { stroke: var(--color-keeper-5); color: var(--color-keeper-5); }
 .parallel-cursor-dot {
   r: 3;
   filter: drop-shadow(0 0 4px currentColor);
 }
-.parallel-cursor-dot.k-nick    { fill: var(--k-nick); color: var(--k-nick); }
-.parallel-cursor-dot.k-masc    { fill: var(--k-masc); color: var(--k-masc); }
-.parallel-cursor-dot.k-sangsu  { fill: var(--k-sangsu); color: var(--k-sangsu); }
-.parallel-cursor-dot.k-qa      { fill: var(--k-qa); color: var(--k-qa); }
-.parallel-cursor-dot.k-rama    { fill: var(--k-rama); color: var(--k-rama); }
+.parallel-cursor-dot.k-nick    { fill: var(--color-keeper-1); color: var(--color-keeper-1); }
+.parallel-cursor-dot.k-masc    { fill: var(--color-keeper-2); color: var(--color-keeper-2); }
+.parallel-cursor-dot.k-sangsu  { fill: var(--color-keeper-3); color: var(--color-keeper-3); }
+.parallel-cursor-dot.k-qa      { fill: var(--color-keeper-4); color: var(--color-keeper-4); }
+.parallel-cursor-dot.k-rama    { fill: var(--color-keeper-5); color: var(--color-keeper-5); }
 
 /* ════════ LYR: TOOLS ════════
    Per-block left margin icons with use-frequency bars. */

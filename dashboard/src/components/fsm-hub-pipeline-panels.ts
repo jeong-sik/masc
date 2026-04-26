@@ -15,6 +15,7 @@ import { deriveOperationalInsight } from './fsm-hub-invariant-analysis'
 import { deriveObservedLaneSummaries } from './fsm-hub-lane-analysis'
 import { deriveSwimlaneSegments } from './fsm-hub-derivations'
 import { CytoscapeFsm } from './common/cytoscape-fsm'
+import { TextInput } from './common/input'
 import { buildCompositeFsmSpec } from './keeper-fsm-specs'
 
 /**
@@ -118,13 +119,13 @@ export function OperationalMeaningPanel({
         <div class="text-3xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">
           관찰 레인
         </div>
-        <input
+        <${TextInput}
           type="search"
+          class="min-w-40 max-w-65 flex-1 !px-2 !py-1 !text-2xs"
           value=${query}
           placeholder="field / label / state / meaning 필터"
-          aria-label="관찰 레인 필터"
+          ariaLabel="관찰 레인 필터"
           onInput=${(e: Event) => setQuery((e.target as HTMLInputElement).value)}
-          class="min-w-40 max-w-65 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--color-fg-primary)] placeholder:text-[var(--color-fg-disabled)] focus:outline-none focus:border-[var(--color-accent-fg)]"
         />
       </div>
 

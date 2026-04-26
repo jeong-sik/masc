@@ -585,7 +585,7 @@ function JourneyCard({ record }: { record: JourneyRecord }) {
               : null}
           <//>
 
-          <${JourneyTile} label="Contract" class="md:col-span-2">
+          <${JourneyTile} label="계약" class="md:col-span-2">
             ${task
               ? html`
                   <div class="flex flex-wrap items-center gap-2">

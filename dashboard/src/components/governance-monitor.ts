@@ -175,7 +175,7 @@ export function GovernanceMonitor() {
             />
             <div class="flex items-center gap-2">
               <${StatCell}
-                label="Oldest"
+                label="최장 대기"
                 value=${fmtSec(data.approval_queue.oldest_pending_sec)}
               />
               <${StatusChip}

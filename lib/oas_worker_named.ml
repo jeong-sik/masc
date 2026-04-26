@@ -1350,6 +1350,13 @@ let run_named
         | Some (Llm_provider.Http_client.CliTransportRequired { kind }) ->
             Keeper_types.Other_detail
               (Printf.sprintf "%s provider requires a CLI transport" kind)
+        | Some (Llm_provider.Http_client.ProviderTerminal
+            { kind = Llm_provider.Http_client.Max_turns _; _ }) ->
+            Keeper_types.Max_turns_exceeded
+        | Some (Llm_provider.Http_client.ProviderTerminal
+            { kind = Llm_provider.Http_client.Other subtype; message }) ->
+            Keeper_types.Other_detail
+              (Printf.sprintf "provider terminal %s: %s" subtype message)
         | None -> Keeper_types.No_providers_available
       in
       let observation =

@@ -140,7 +140,7 @@ function WarningBanner({ warnings }: { warnings: string[] }) {
   if (warnings.length === 0) return null
   return html`
     <div class="rounded border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-2xs text-[var(--warn)]">
-      <div class="font-medium text-[var(--warn)]">Partial telemetry</div>
+      <div class="font-medium text-[var(--warn)]">부분 텔레메트리</div>
       <div class="mt-1 flex flex-col gap-1">
         ${warnings.map(warning => html`<div>${warning}</div>`)}
       </div>
@@ -406,7 +406,7 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
                     class=${row.goal_linked
                       ? 'rounded bg-[var(--ok-10)] px-1.5 py-0.5 text-3xs text-[var(--ok)]'
                       : 'rounded bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs text-[var(--warn)]'}
-                    title=${row.goal_label ?? 'No active goal is linked to this keeper.'}
+                    title=${row.goal_label ?? '이 키퍼에 연결된 활성 목표가 없습니다.'}
                   >
                     ${row.goal_label
                       ? (row.active_goal_count > 1 ? `goal ${row.active_goal_count}` : 'goal linked')
@@ -416,7 +416,7 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
                     class=${row.sandbox_profile
                       ? 'rounded bg-[var(--white-8)] px-1.5 py-0.5 text-3xs text-[var(--text-dim)]'
                       : 'rounded bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs text-[var(--warn)]'}
-                    title=${row.effective_sandbox_image ?? row.sandbox_profile ?? 'Sandbox profile unavailable.'}
+                    title=${row.effective_sandbox_image ?? row.sandbox_profile ?? '샌드박스 프로필 정보 없음.'}
                   >
                     ${row.sandbox_profile ? `sandbox ${row.sandbox_profile}` : 'sandbox unknown'}
                   </span>
@@ -570,7 +570,7 @@ export function FleetTelemetryPanel() {
           ? normalizeKeepers(executionResult.value.keepers)
           : []
       if (executionResult.status === 'rejected' && !isAbortError(executionResult.reason)) {
-        warnings.push(`Execution snapshot unavailable: ${errorMessage(executionResult.reason)}`)
+        warnings.push(`실행 스냅샷 사용 불가: ${errorMessage(executionResult.reason)}`)
       }
 
       const toolQuality =
@@ -614,7 +614,7 @@ export function FleetTelemetryPanel() {
 
       state.value = {
         loading: false,
-        error: hasAnyData ? null : 'No fleet telemetry data available.',
+        error: hasAnyData ? null : '함대 텔레메트리 데이터가 없습니다.',
         warnings,
         rows,
         tool_quality: toolQuality,

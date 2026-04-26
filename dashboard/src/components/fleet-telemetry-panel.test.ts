@@ -418,7 +418,7 @@ describe('FleetTelemetryPanel', () => {
     })
     await flushUi()
 
-    expect(container.textContent).toContain('Partial telemetry')
+    expect(container.textContent).toContain('부분 텔레메트리')
     expect(container.textContent).toContain('keepers are blocked in the admission queue')
     expect(container.textContent).toContain('Admission queue wait timeout after 45.0s.')
   }, 30_000)
@@ -812,8 +812,8 @@ describe('FleetTelemetryPanel', () => {
     })
     await flushUi()
 
-    expect(container.textContent).toContain('Partial telemetry')
-    expect(container.textContent).toContain('Execution snapshot unavailable: execution down')
+    expect(container.textContent).toContain('부분 텔레메트리')
+    expect(container.textContent).toContain('실행 스냅샷 사용 불가: execution down')
     expect(container.textContent).toContain('keeper-fallback')
     expect(container.textContent).toContain('텔레메트리 저장소')
   }, 60_000)
@@ -853,7 +853,7 @@ describe('FleetTelemetryPanel', () => {
     })
     await flushUi()
 
-    expect(container.textContent).toContain('Partial telemetry')
+    expect(container.textContent).toContain('부분 텔레메트리')
     expect(container.textContent).toContain('OAS event relay trails agent events by 16m 40s.')
     expect(container.textContent).toContain('last 17m 10s ago')
   }, 60_000)

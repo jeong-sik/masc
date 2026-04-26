@@ -763,7 +763,7 @@ export function JourneyPanel() {
   const keeperRecords = visible.filter((record) => record.kind === 'keeper')
 
   return html`
-    <div class="flex flex-col gap-4" role="region" aria-label="Journey 패널">
+    <div class="flex flex-col gap-4" role="region" aria-label="저니 패널">
       <${Card} class="flex flex-col gap-4">
         <div class="flex flex-col gap-2">
           <div class="flex flex-wrap items-center gap-2">

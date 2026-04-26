@@ -400,7 +400,7 @@ function ProfileCard({
       ${profile.keeper_assignable
         ? html`
           <form
-            aria-label="Keeper assignment"
+            aria-label="키퍼 할당"
             class="rounded border border-[var(--card-border)] bg-[var(--bg-panel)] p-2 mb-3"
             onSubmit=${handleAssignKeeper}
           >

@@ -60,7 +60,7 @@ export function RuntimePanel() {
   const view = activeView.value
 
   return html`
-    <div class="flex flex-col gap-4" role="region" aria-label="Runtime 패널">
+    <div class="flex flex-col gap-4" role="region" aria-label="런타임 패널">
       <${FilterChips}
         chips=${VIEW_CHIPS}
         value=${view}

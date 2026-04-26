@@ -449,7 +449,7 @@ export function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
   const latestEntryMeta = latestEntry ? lineageVerdictMeta(latestEntry.continuity_verdict) : null
 
   return html`
-    <div class="md:col-span-2" role="region" aria-label="Generation Lineage">
+    <div class="md:col-span-2" role="region" aria-label="생성 계보">
       <${KeeperDetailSectionCard} title="Generation Lineage">
         <div class="text-2xs text-[var(--text-muted)] mb-3">
           Track keeper state transfer across successful handoffs. Lineage telemetry is append-only, shows the latest rollover first, and helps explain whether the same keeper identity carried into the new trace.

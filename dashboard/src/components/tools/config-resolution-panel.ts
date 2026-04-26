@@ -617,7 +617,7 @@ export function ConfigResolutionPanel({
                           autoComplete="off"
                           value=${diagnosticsQuery.value}
                           placeholder="kind / signal / message 필터"
-                          aria-label="Diagnostics 필터"
+                          aria-label="진단 필터"
                           onInput=${(e: Event) => { diagnosticsQuery.value = (e.target as HTMLInputElement).value }}
                           class="min-w-40 max-w-60 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)] focus-visible:ring-2 focus-visible:ring-[var(--accent)]/50"
                         />

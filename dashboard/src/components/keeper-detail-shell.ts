@@ -80,7 +80,7 @@ function KeeperCascadeSelector({ keeper }: { keeper: Keeper }) {
     <div class="flex items-center gap-1.5">
       <select autoComplete="off"
         class="py-0.5 px-1 rounded text-3xs font-mono bg-[var(--white-5)] text-[var(--text-muted)] border border-[var(--white-8)] cursor-pointer"
-        aria-label="Cascade profile"
+        aria-label="캐스케이드 프로필"
         title=${invalidProfiles.length > 0
           ? `Cascade profile\n\nDisabled invalid presets:\n${invalidSummary}`
           : 'Cascade profile'}

@@ -34,7 +34,7 @@ const MEASUREMENT_FLAG_DESCRIPTIONS: Record<string, { on: string; off: string }>
 export function MeasurementCard({ snapshot }: { snapshot: KeeperCompositeSnapshot }) {
   const m = snapshot.measurement
   return html`
-    <div class="rounded border border-[var(--white-8)] bg-[var(--white-2)] p-3" role="region" aria-label="Measurement auto-rules">
+    <div class="rounded border border-[var(--white-8)] bg-[var(--white-2)] p-3" role="region" aria-label="측정 자동 규칙">
       <div class="text-3xs font-semibold uppercase tracking-1 text-[var(--text-muted)] mb-2">
         Measurement
       </div>
@@ -117,7 +117,7 @@ export function InvariantsPanel({
   const allOk = okCount === total
   const badgeText = allOk ? `${total}/${total}` : `${okCount}/${total}`
   return html`
-    <div class="rounded border border-[var(--white-8)] bg-[var(--white-2)] p-3" role="region" aria-label="Safety invariants">
+    <div class="rounded border border-[var(--white-8)] bg-[var(--white-2)] p-3" role="region" aria-label="안전 불변량">
       <div class="flex items-center justify-between mb-2">
         <div class="text-3xs font-semibold uppercase tracking-1 text-[var(--text-muted)]">
           Safety

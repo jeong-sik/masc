@@ -142,7 +142,7 @@ const LEVEL_LABEL: Record<LogLevel, string> = {
 
 function LevelPills({ connectorId, active }: { connectorId: string; active: LogLevel }) {
   return html`
-    <div class="flex items-center gap-1" role="radiogroup" aria-label="log level filter">
+    <div class="flex items-center gap-1" role="radiogroup" aria-label="로그 레벨 필터">
       ${LEVELS.map(level => {
         const isActive = level === active
         const base = 'cursor-pointer rounded border px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-4'

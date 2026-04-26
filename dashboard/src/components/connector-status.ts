@@ -863,7 +863,7 @@ function ConnectorLivePanel({
             : null}
           <button type="button"
             class="cursor-pointer rounded border border-[var(--card-border)] px-1.5 text-2xs text-[var(--text-dim)] hover:text-[var(--text-body)]"
-            aria-label="toggle header details"
+            aria-label="헤더 상세 정보 전환"
             onClick=${() => { patchConnectorUiState(connectorId, { headerExpanded: !ui.headerExpanded }) }}
           ><span aria-hidden="true">${ui.headerExpanded ? '▴' : '▾'}</span></button>
         </span>
@@ -960,7 +960,7 @@ function ConnectorLivePanel({
             >
               <span
                 class="mr-2 inline-flex items-center gap-1 rounded-sm border border-[var(--warn-20)] bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-4 text-[var(--warn)]"
-                aria-label="Keeper directory status: unavailable"
+                aria-label="키퍼 디렉터리 상태: 사용 불가"
               >
                 <span aria-hidden="true">⚠</span>
                 <span>Directory error</span>
@@ -987,7 +987,7 @@ function ConnectorLivePanel({
               <div class="mb-1 flex items-center gap-2">
                 <span
                   class="inline-flex items-center gap-1 rounded-sm border border-[var(--warn-20)] bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-4 text-[var(--warn)]"
-                  aria-label="Keeper configuration status: none configured"
+                  aria-label="키퍼 설정 상태: 미설정"
                   data-no-keepers-status-chip
                 >
                   <span aria-hidden="true">⊘</span>
@@ -1028,7 +1028,7 @@ function ConnectorLivePanel({
                   <div class="flex flex-wrap items-center gap-2">
                     <span
                       class="inline-flex items-center gap-1 rounded-sm border border-[var(--warn-20)] bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-4 text-[var(--warn)]"
-                      aria-label="Sidecar process status: not running"
+                      aria-label="사이드카 프로세스 상태: 미실행"
                       data-sidecar-status-chip
                     >
                       <span aria-hidden="true">⊘</span>

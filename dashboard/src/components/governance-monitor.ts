@@ -194,7 +194,7 @@ export function GovernanceMonitor() {
             autoComplete="off"
             value=${query.value}
             placeholder="tool / reason 필터"
-            aria-label="Tool rejection 필터"
+            aria-label="도구 거부 필터"
             onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
             class="min-w-40 max-w-60 rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-2 py-1 text-xs text-[var(--text-strong)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--accent)] focus-visible:ring-2 focus-visible:ring-[var(--accent)]/50"
           />

@@ -169,7 +169,7 @@ export function KeeperEvalQualityPanel({ keeperName }: { keeperName: string }) {
   const trend = computeTrend(data.snapshots)
 
   return html`
-    <div class="p-4 rounded border ${coverageTone(coverage)} transition-colors" role="region" aria-label="Eval Quality">
+    <div class="p-4 rounded border ${coverageTone(coverage)} transition-colors" role="region" aria-label="평가 품질">
       ${'' /* Header */}
       <div class="flex items-center justify-between mb-3">
         <div class="flex items-center gap-2">
@@ -191,7 +191,7 @@ export function KeeperEvalQualityPanel({ keeperName }: { keeperName: string }) {
       ${'' /* Coverage bar */}
       <div class="flex items-center gap-3 mb-3">
         <span class="text-3xs text-[var(--text-muted)] flex-shrink-0 w-16">Coverage</span>
-        <div class="flex-1 h-2 bg-[var(--white-6)] rounded-sm overflow-hidden" role="progressbar" aria-valuenow=${Math.round(coveragePct)} aria-valuemin=${0} aria-valuemax=${100} aria-label="Eval coverage">
+        <div class="flex-1 h-2 bg-[var(--white-6)] rounded-sm overflow-hidden" role="progressbar" aria-valuenow=${Math.round(coveragePct)} aria-valuemin=${0} aria-valuemax=${100} aria-label="평가 커버리지">
           <div
             class="h-full rounded-sm transition-all duration-500"
             style="width:${coveragePct}%;background:${coverageColor(coverage)}"

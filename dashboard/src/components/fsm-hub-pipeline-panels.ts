@@ -202,7 +202,7 @@ function PhaseSparkline({
         viewBox=${`0 0 ${W} ${H}`}
         class="shrink-0"
         role="img"
-        aria-label="Phase duration sparkline"
+        aria-label="단계 지속시간 스파크라인"
       >
         ${bars.map((b) => html`
           <rect

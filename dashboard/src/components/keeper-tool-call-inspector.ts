@@ -163,16 +163,16 @@ function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
             <div class="text-3xs text-[var(--color-fg-muted)]">model: <span class="text-[var(--color-fg-secondary)] font-mono">${entry.model}</span></div>
           ` : null}
           <${CopyableToolCallBlock}
-            title="Input"
+            title="입력"
             value=${formattedInput}
             maxHeightClass="max-h-48"
-            ariaLabel="Copy tool call input"
+            ariaLabel="도구 호출 입력 복사"
           />
           <${CopyableToolCallBlock}
-            title="Output"
+            title="출력"
             value=${formattedOutput}
             maxHeightClass="max-h-64"
-            ariaLabel="Copy tool call output"
+            ariaLabel="도구 호출 출력 복사"
           />
         </div>
       ` : null}
@@ -242,7 +242,7 @@ export function KeeperToolCallInspector({ keeperName }: { keeperName: string }) 
         <${FreshnessLine} data=${response ?? { source: 'tool_call_io' }} />
         <input
           type="text"
-          placeholder="Filter tool..."
+          placeholder="도구 필터..."
           class="text-xs font-mono bg-[var(--bg-deep)] border border-[var(--color-border-default)] rounded px-2 py-1 w-40 text-[var(--color-fg-secondary)]"
           value=${filterTool.value}
           onInput=${(e: Event) => { filterTool.value = (e.target as HTMLInputElement).value }}

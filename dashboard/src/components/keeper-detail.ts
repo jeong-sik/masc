@@ -657,7 +657,7 @@ function PlaygroundReposPanel({ keeperName }: { keeperName: string }) {
   if (repos.length === 0 && prs.length === 0 && worktrees.length === 0) return null
 
   return html`
-    <${SectionCard} title="Playground">
+    <${SectionCard} title="플레이그라운드">
       <div class="flex flex-col gap-3">
         ${repos.length > 0 ? html`
           <div>

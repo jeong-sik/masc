@@ -39,6 +39,12 @@ let masc_dirname = ".masc"
 let masc_dir_from_base_path ~base_path =
   Filename.concat base_path masc_dirname
 
+let auth_dir_from_base_path ~base_path =
+  Filename.concat (masc_dir_from_base_path ~base_path) "auth"
+
+let agents_dir_from_base_path ~base_path =
+  Filename.concat (auth_dir_from_base_path ~base_path) "agents"
+
 (** Maximum output bytes for tool responses. SSOT for the 64KB cap. *)
 let max_tool_output_bytes = 65_536
 

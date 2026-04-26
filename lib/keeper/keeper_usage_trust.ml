@@ -31,7 +31,7 @@ let provider_kind_uses_anthropic_caching
   match kind with
   | Anthropic | Claude_code -> true
   | OpenAI_compat | Ollama | Gemini | Gemini_cli | Kimi | Kimi_cli | Glm
-  | Codex_cli ->
+  | Codex_cli | DashScope ->
       false
 
 let model_label_provider_kind label =

@@ -29,6 +29,7 @@ import type {
 import { fleetCompositeSnapshot } from '../composite-signals'
 import { dispatchOperatorAction } from '../operator-store'
 import { showToast } from './common/toast'
+import { TextInput } from './common/input'
 import {
   displayState,
   extractLaneValue,
@@ -845,14 +846,14 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
         <span class="text-xs text-[var(--color-fg-muted)]0">
           키퍼 ${data.count}명 · ${new Date(data.generated_at * 1000).toLocaleTimeString()} 업데이트
         </span>
-        <input
+        <${TextInput}
           type="search"
           value=${query}
           placeholder="name / 상태 필터 (예: gen12, trying)"
-          aria-label="Keeper 필터"
-          data-testid="fleet-fsm-matrix-filter"
+          ariaLabel="Keeper 필터"
+          testId="fleet-fsm-matrix-filter"
           onInput=${(e: Event) => setQuery((e.target as HTMLInputElement).value)}
-          class="min-w-40 max-w-65 rounded border border-[var(--white-10)] bg-[var(--white-5)] px-2 py-0.5 text-xs text-[var(--color-fg-muted)] placeholder:text-[var(--color-fg-muted)]0 focus:border-[var(--white-10)]0 focus:outline-none"
+          class="min-w-40 max-w-65 !bg-[var(--white-5)] !px-2 !py-0.5 !text-xs"
         />
         ${runtimeTallies
           ? html`

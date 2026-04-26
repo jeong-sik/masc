@@ -38,13 +38,13 @@ stylesheet
     display: grid;
     grid-template-columns: repeat(6, 1fr);
     gap: 1px;
-    background: var(--border-main);
-    border: 1px solid var(--border-highlight);
+    background: var(--color-border-default);
+    border: 1px solid var(--color-border-strong);
     border-radius: 2px;
     box-shadow:
-      inset 0 0 0 1px color-mix(in oklab, var(--accent-brass) 8%, transparent),
-      0 2px 12px color-mix(in oklab, var(--bg-deep) 60%, transparent),
-      0 16px 24px -16px color-mix(in oklab, var(--bg-deep) 90%, transparent);
+      inset 0 0 0 1px color-mix(in oklab, var(--color-accent-fg) 8%, transparent),
+      0 2px 12px color-mix(in oklab, var(--color-bg-page) 60%, transparent),
+      0 16px 24px -16px color-mix(in oklab, var(--color-bg-page) 90%, transparent);
     backdrop-filter: blur(2px);
   }
 
@@ -54,7 +54,7 @@ stylesheet
     position: absolute;
     width: 14px;
     height: 14px;
-    border: 1px solid var(--accent-brass);
+    border: 1px solid var(--color-accent-fg);
     pointer-events: none;
     z-index: 1;
   }
@@ -74,7 +74,7 @@ stylesheet
   }
 
   .cell {
-    background: var(--bg-panel);
+    background: var(--color-bg-surface);
     padding: 10px 14px;
     display: flex;
     flex-direction: column;
@@ -86,19 +86,19 @@ stylesheet
     font-size: 11px;
     letter-spacing: 0.2em;
     text-transform: uppercase;
-    color: var(--text-dim);
+    color: var(--color-fg-muted);
   }
 
   .v {
     font-family: 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
     font-variant-numeric: tabular-nums;
     font-size: 12px;
-    color: var(--text-primary);
+    color: var(--color-fg-primary);
   }
 
-  .v_ok   { color: var(--status-ok); }
-  .v_warn { color: var(--status-warn); }
-  .v_bad  { color: var(--status-bad); }
+  .v_ok   { color: var(--color-status-ok); }
+  .v_warn { color: var(--color-status-warn); }
+  .v_bad  { color: var(--color-status-err); }
 
   @media (prefers-contrast: more) {
     .hud { border-width: 2px; border-color: var(--text-bright); }

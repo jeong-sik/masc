@@ -24,7 +24,7 @@ stylesheet
     font-size: 11px;
     letter-spacing: 0.3em;
     text-transform: uppercase;
-    color: var(--text-dim, #9a846e);
+    color: var(--color-fg-muted, #9a846e);
     margin: 0;
   }
 
@@ -38,7 +38,7 @@ stylesheet
   }
 
   .tail_brass {
-    color: var(--accent-brass, #968228);
+    color: var(--color-accent-fg, #968228);
     font-size: 18px;
     margin-left: 14px;
   }
@@ -53,7 +53,7 @@ stylesheet
     font-family: 'EB Garamond', serif;
     font-style: italic;
     font-size: 14px;
-    color: var(--text-primary, #c8b88c);
+    color: var(--color-fg-primary, #c8b88c);
     margin: 0;
     max-width: 640px;
   }

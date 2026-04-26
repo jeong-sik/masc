@@ -211,7 +211,7 @@ function ResultViewer({ text, hint, isError: isErr }: { text: string; hint: Cont
              style=${shouldCollapse ? `max-height: ${RESULT_COLLAPSED_MAX_HEIGHT}px` : ''}>
           ${hint === 'diff' ? html`<${DiffBlock} text=${text} />`
             : hint === 'json' ? html`<${JsonViewerCard} title=${titleLabel} data=${parseJsonLikeData(text)} />`
-            : html`<pre class="m-0 text-2xs font-mono ${isErr ? 'text-[var(--bad)]' : 'text-[var(--text-body)]'} p-3 overflow-x-auto whitespace-pre-wrap break-all leading-relaxed" tabindex="0">${displayText}</pre>`}
+            : html`<pre class="m-0 text-2xs font-mono ${isErr ? 'text-[var(--bad)]' : 'text-[var(--text-body)]'} p-3 overflow-x-auto whitespace-pre-wrap break-all leading-relaxed" tabindex="0" aria-label=${titleLabel}>${displayText}</pre>`}
           ${shouldCollapse ? html`
             <div class="absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t ${isErr ? 'from-[rgba(239,68,68,0.08)]' : 'from-[var(--white-3)]'} to-transparent pointer-events-none"></div>
           ` : null}
@@ -418,7 +418,7 @@ function OasDetail({ event }: { event: UnifiedTraceEvent }) {
         ${responseText ? html`
           <details class="mt-1">
             <summary class="text-3xs text-[var(--text-dim)] cursor-pointer hover:text-[var(--text-body)]">응답 텍스트</summary>
-            <pre class="mt-1 p-2 rounded bg-[var(--white-3)] text-2xs font-mono text-[var(--text-body)] whitespace-pre-wrap break-all max-h-75 overflow-auto leading-[1.4]" tabindex="0">${responseText}</pre>
+            <pre class="mt-1 p-2 rounded bg-[var(--white-3)] text-2xs font-mono text-[var(--text-body)] whitespace-pre-wrap break-all max-h-75 overflow-auto leading-[1.4]" tabindex="0" aria-label="응답 텍스트">${responseText}</pre>
           </details>
         ` : null}
       </div>

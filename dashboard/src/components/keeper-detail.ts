@@ -25,6 +25,7 @@ import {
   wakeKeeper,
 } from '../api/keeper'
 import { TimeAgo } from './common/time-ago'
+import { Checkbox } from './common/checkbox'
 import type { Keeper } from '../types'
 import { invalidateDashboardCache, refreshDashboard } from '../store'
 import { hydrateKeeperStatus, selectKeeper } from '../keeper-runtime'
@@ -525,12 +526,12 @@ function KeeperClearContextDialog({
         </label>
 
         <label class="flex items-start gap-3 rounded border border-[var(--color-border-default)] bg-[var(--white-2)] px-3 py-3 text-xs text-[var(--color-fg-primary)]">
-          <input
-            type="checkbox"
+          <${Checkbox}
             class="mt-0.5"
             checked=${preserveSystemPrompt}
             disabled=${pending}
-            onChange=${(event: Event) => onPreserveToggle((event.currentTarget as HTMLInputElement).checked)}
+            ariaLabel="system prompt 보존"
+            onChange=${(checked: boolean) => onPreserveToggle(checked)}
           />
           <span>
             system prompt는 보존하고 나머지 메시지만 비웁니다.

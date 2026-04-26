@@ -152,7 +152,7 @@ function TickerMarquee() {
         <div className="tape">
           {evs.map((e, i) => (
             <span key={i} className={`evt ${e.kind}`} role="listitem" aria-label={`${e.keeper} ${e.kind}: ${e.text}, at ${e.t.slice(0,8)}`}>
-              <Dot kind={kClass(e.keeper)} size="sm" />
+              <KeeperBadge id={e.keeper} variant="sigil" size="sm" />
               <span className="k" aria-hidden="true">{e.keeper}</span>
               <span className="body" aria-hidden="true">{e.text}</span>
               <span className="t" aria-hidden="true">{e.t.slice(0,8)}</span>
@@ -172,7 +172,7 @@ function TickerChunks() {
         <div className="tape">
           {evs.map((e, i) => (
             <span key={i} className={`evt ${e.kind}`} role="listitem" aria-label={`${e.keeper} ${e.kind}: ${e.text.slice(0,40)}`}>
-              <Dot kind={kClass(e.keeper)} size="sm" />
+              <KeeperBadge id={e.keeper} variant="sigil" size="sm" />
               <span className="k" aria-hidden="true">{e.keeper}</span>
               <span className="body" aria-hidden="true">{e.text.slice(0, 40)}</span>
             </span>
@@ -192,7 +192,7 @@ function TickerVertical() {
           {evs.map((e, i) => (
             <span key={i} className={`evt ${e.kind}`} role="listitem" aria-label={`${e.t.slice(0,8)} ${e.keeper} ${e.kind}: ${e.text}`} style={{display:'flex', alignItems:'center', gap:6}}>
               <span className="t" aria-hidden="true">{e.t.slice(0,8)}</span>
-              <Dot kind={kClass(e.keeper)} size="sm" />
+              <KeeperBadge id={e.keeper} variant="sigil" size="sm" />
               <span className="k" aria-hidden="true">{e.keeper}</span>
               <span className="body" aria-hidden="true">{e.text}</span>
             </span>
@@ -299,7 +299,7 @@ function LifelineStacked() {
           <div className="row" key={k.id} role="listitem" aria-label={`${k.id} heartbeat, ${k.status === 'running' ? 'running' : k.status}`}>
             <span className="name" aria-hidden="true">{k.id}</span>
             <Heartbeat width={240} height={14} phase={(phase + i*0.07) % 1} />
-            <Dot kind={kClass(k.id)} size="sm" beat={k.status==='running'} />
+            <KeeperBadge id={k.id} variant="sigil" size="sm" beat={k.status==='running'} />
           </div>
         ))}
       </div>

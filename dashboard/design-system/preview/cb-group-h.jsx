@@ -16,7 +16,7 @@ function KeeperTabs({ keepers, sel, onSelect, label }) {
                 aria-label={`Keeper ${kp.id}`}
                 className={sel === kp.id ? 'on' : ''}
                 onClick={() => onSelect(kp.id)}>
-          <Dot kind={kClass(kp.id)} size="sm" /> <span aria-hidden="true">{kp.id}</span>
+          <KeeperBadge id={kp.id} variant="sigil" size="sm" /> <span aria-hidden="true">{kp.id}</span>
         </button>
       ))}
     </div>
@@ -32,7 +32,7 @@ function KeeperBDIPanel() {
       <KeeperTabs keepers={P2h.keepersFull} sel={sel} onSelect={setSel} label="Select keeper for BDI panel" />
       <div role="tabpanel" aria-label={`BDI panel for ${k.id}`}>
         <div role="region" aria-label={`${k.id} · ${k.role} · social model ${k.social_model}`} style={{padding:'4px 8px',background:'var(--color-bg-panel-alt)',border:'1px solid var(--color-border-strong)',display:'flex',alignItems:'center',gap:'8px',fontFamily:'var(--font-mono)',fontSize:'var(--fs-10)',color:'var(--color-fg-muted)'}}>
-          <Dot kind={kClass(k.id)} beat />
+          <KeeperBadge id={k.id} variant="sigil" beat />
           <span aria-hidden="true" style={{color:'var(--color-accent-fg)'}}>{k.id}</span>
           <span aria-hidden="true">·</span>
           <span aria-hidden="true">{k.role}</span>
@@ -110,7 +110,7 @@ function KeeperTokenStats() {
         <tbody>
           {[...keepers].sort((a,b) => b.tokens.in - a.tokens.in).map(k => (
             <tr key={k.id} className="row">
-              <th scope="row" className="ag"><Dot kind={kClass(k.id)} size="sm" /> <span aria-hidden="true">{k.id}</span></th>
+              <th scope="row" className="ag"><KeeperBadge id={k.id} variant="sigil" size="sm" /> <span aria-hidden="true">{k.id}</span></th>
               <td className="num">{(k.tokens.in/1000).toFixed(0)}k</td>
               <td className="num">{(k.tokens.out/1000).toFixed(1)}k</td>
               <td className="bar" aria-hidden="true"><i style={{width:`${k.tokens.in/maxIn*100}%`}} /></td>

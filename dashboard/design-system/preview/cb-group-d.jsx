@@ -326,7 +326,7 @@ function TaskWall() {
                    className={`kpr ${ts.length === 0 ? 'empty' : ''}`}
                    aria-label={`${k} · ${ts.length} task${ts.length === 1 ? '' : 's'}${ts.some(t=>t.status==='running') ? ' · running' : ''}`}>
                 <div className="h" aria-hidden="true">
-                  <Dot kind={kClass(k)} size="sm" beat={ts.some(t=>t.status==='running')} />
+                  <KeeperBadge id={k} variant="sigil" size="sm" beat={ts.some(t=>t.status==='running')} />
                   <span className="nm">{k}</span>
                   <span className="cn">{ts.length}</span>
                 </div>

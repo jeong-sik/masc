@@ -201,7 +201,9 @@ let run_docker_shell_command_with_status
   else
     let _cleanup =
       Keeper_sandbox_runtime.maybe_cleanup_stale_containers
-        ~base_path:config.base_path ~timeout_sec:2.0 ()
+        ~base_path:config.base_path
+        ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Sandbox ())
+        ()
     in
     match ensure_keeper_sandbox_runtime ~timeout_sec with
     | Error err -> sandbox_error err

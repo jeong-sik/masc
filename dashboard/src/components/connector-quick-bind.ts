@@ -12,6 +12,7 @@ import { signal } from '@preact/signals'
 import type { GateKeeperInfo } from '../api/gate'
 import { ActionButton } from './common/button'
 import { TextInput } from './common/input'
+import { Select } from './common/select'
 import { bindConnector } from './connector-status'
 
 interface FormEntry {
@@ -128,18 +129,14 @@ export function QuickBindForm({ connectorId, keepers }: {
         <label class="mb-1 block text-3xs uppercase tracking-4 text-[var(--color-fg-disabled)]" for=${`qb-keeper-${connectorId}`}>
           Keeper
         </label>
-        <select
+        <${Select}
           id=${`qb-keeper-${connectorId}`}
-          class="w-full rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 font-mono text-2xs text-[var(--color-fg-primary)] focus:border-[var(--accent-1)] focus:outline-none"
-          onChange=${(ev: Event) => {
-            const target = ev.currentTarget as HTMLSelectElement
-            setEntry(connectorId, { keeperName: target.value })
-          }}
-        >
-          ${keepers.map(k => html`
-            <option value=${k.name} selected=${k.name === entry.keeperName}>${k.name}</option>
-          `)}
-        </select>
+          class="px-2 py-1 font-mono text-2xs"
+          ariaLabel="키퍼 선택"
+          value=${entry.keeperName}
+          options=${keepers.map(k => k.name)}
+          onInput=${(v: string) => { setEntry(connectorId, { keeperName: v }) }}
+        />
       </div>
       <${ActionButton}
         variant="primary"

@@ -554,7 +554,7 @@ describe('ConnectorStatusPanel', () => {
     await flushUi()
 
     const bindButton = Array.from(container.querySelectorAll('button'))
-      .find(candidate => candidate.textContent?.trim() === 'bind')
+      .find(candidate => candidate.textContent?.trim() === '연결')
     expect(bindButton).toBeDefined()
     bindButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     await flushUi()

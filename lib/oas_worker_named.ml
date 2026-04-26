@@ -1347,8 +1347,9 @@ let run_named
               Keeper_types.Max_turns_exceeded
             else
               Keeper_types.Other_detail r
-        | Some (Llm_provider.Http_client.CliTransportRequired { kind }) ->
-            Keeper_types.Other_detail
+        | Some (Llm_provider.Http_client.ProviderTerminal { message; _ }) ->
+            Keeper_types.Other_detail message
+        | Some (Llm_provider.Http_client.CliTransportRequired { kind }) ->            Keeper_types.Other_detail
               (Printf.sprintf "%s provider requires a CLI transport" kind)
         | None -> Keeper_types.No_providers_available
       in

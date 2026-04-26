@@ -178,7 +178,7 @@ export function KeeperDetailHeaderInfo({
       </button>
       <div class="size-12 shrink-0 rounded bg-[var(--white-5)] border border-[var(--white-8)] flex items-center justify-center text-2xl">${keeper.emoji}</div>
       <div class="flex flex-col gap-0.5">
-        <div class="text-3xs font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">Monitoring / Agents / Keeper Detail</div>
+        <div class="text-3xs font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">모니터링 / 에이전트 / 키퍼 상세</div>
         <div class="mt-1 flex flex-wrap items-center gap-2.5">
           <h2 id=${titleId} class="m-0 text-lg font-semibold text-[var(--text-strong)]">${keeper.name}</h2>
           <${KeeperPhaseAndStage} phase=${keeper.phase} pipelineStage=${keeper.pipeline_stage} phaseEnteredAtSec=${phaseEnteredAtSec} />

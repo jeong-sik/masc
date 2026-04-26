@@ -872,7 +872,7 @@ function GoalDetailPanel({
         <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4">
           <div class="mb-3 flex items-center justify-between gap-3">
             <div>
-              <div class="text-2xs font-semibold uppercase tracking-widest text-text-muted">Goal-Scoped Task</div>
+              <div class="text-2xs font-semibold uppercase tracking-widest text-text-muted">Goal 범위 태스크</div>
               <div class="mt-1 text-sm text-text-body">이 goal에 직접 연결되는 새 태스크를 backlog에 넣습니다.</div>
             </div>
           </div>

@@ -661,7 +661,7 @@ function PlaygroundReposPanel({ keeperName }: { keeperName: string }) {
       <div class="flex flex-col gap-3">
         ${repos.length > 0 ? html`
           <div>
-            <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)] mb-1.5">Repos (${repos.length})</div>
+            <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)] mb-1.5">저장소 (${repos.length})</div>
             <div class="flex flex-col gap-1.5">
               ${repos.map(r => html`
                 <div class="flex items-center gap-3 px-3 py-2 rounded border border-[var(--white-8)] bg-[var(--white-2)]">
@@ -698,7 +698,7 @@ function PlaygroundReposPanel({ keeperName }: { keeperName: string }) {
 
         ${worktrees.length > 0 ? html`
           <div>
-            <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)] mb-1.5">Worktrees (${worktrees.length})</div>
+            <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)] mb-1.5">워크트리 (${worktrees.length})</div>
             <div class="flex flex-wrap gap-1.5">
               ${worktrees.map(w => html`
                 <span class="text-3xs font-mono px-2 py-1 rounded border border-[var(--white-8)] bg-[var(--white-2)] text-[var(--color-fg-muted)]" title=${w.path}>${w.name}</span>

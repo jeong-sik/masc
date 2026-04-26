@@ -213,7 +213,7 @@ export function KeeperEvalQualityPanel({ keeperName }: { keeperName: string }) {
       ${'' /* 24h Trend */}
       ${trend ? html`
         <div class="flex items-center gap-2 pt-2 border-t border-[var(--white-8)]">
-          <span class="text-3xs uppercase tracking-wider text-[var(--color-fg-disabled)]">Trend (24h)</span>
+          <span class="text-3xs uppercase tracking-wider text-[var(--color-fg-disabled)]">추세 (24h)</span>
           <span class="text-2xs font-mono tabular-nums text-[var(--color-fg-muted)]">
             ${trend.oldCoverage.toFixed(2)} \u2192 ${trend.newCoverage.toFixed(2)}
           </span>

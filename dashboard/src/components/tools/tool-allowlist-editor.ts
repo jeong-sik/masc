@@ -362,6 +362,7 @@ function ToolSearchPicker({
 
       <div class="relative">
         <input
+          type="text"
           aria-label="도구 검색"
           autoComplete="off"
           ...${getInputProps({

@@ -29,3 +29,18 @@ let to_json (p : raw_personality) : (string * Yojson.Safe.t) list =
     ("desires", `String p.desires);
     ("instructions", `String p.instructions);
   ]
+
+(* coerced_personality is just raw_personality under a different name.
+   The .mli keeps the constructor private so callers cannot bypass
+   [coerce] to mint one — same trick samchon uses for parser stages. *)
+type coerced_personality = raw_personality
+
+let coerce (p : raw_personality) : coerced_personality =
+  {
+    will = String.trim p.will;
+    needs = String.trim p.needs;
+    desires = String.trim p.desires;
+    instructions = String.trim p.instructions;
+  }
+
+let to_raw (c : coerced_personality) : raw_personality = c

@@ -47,3 +47,22 @@ val to_json : raw_personality -> (string * Yojson.Safe.t) list
     are returned as a list (rather than an [`Assoc]) so the caller can
     splice them into a larger record without an intermediate
     [Yojson.Safe.Util.combine] round-trip. *)
+
+(** Personality after the coerce step. Wraps [raw_personality] so the
+    type system distinguishes "trimmed and ready for compare" from
+    "as persisted on disk". Use [to_raw] to project back to the disk
+    representation. The constructor is private — only [coerce] can
+    produce a value of this type. *)
+type coerced_personality
+
+val coerce : raw_personality -> coerced_personality
+(** [coerce p] applies the canonical text normalisation used by the
+    compare path: [String.trim] on every field. No truncation, no NFC,
+    no encoding rewrite — those belong to the validate layer (length
+    cap, structured errors) and to the prompt-render path
+    ([Keeper_prompt.render_for_prompt ~max_bytes]) added in later
+    commits. Idempotent: [coerce (to_raw (coerce p)) = coerce p]. *)
+
+val to_raw : coerced_personality -> raw_personality
+(** Project a coerced value back to a [raw_personality]. Loses the
+    "this has been coerced" type tag but keeps the byte contents. *)

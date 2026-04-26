@@ -16,6 +16,7 @@ import {
 } from '../lib/dashboard-actor'
 import { refreshShell, shellAuthSummary } from '../store'
 import { showToast } from './common/toast'
+import { TextInput } from './common/input'
 
 const popoverOpen = signal(false)
 const tokenInput = signal('')
@@ -187,11 +188,11 @@ function AuthPopover() {
             </div>
           ` : null}
           <div class="flex gap-2">
-            <input
+            <${TextInput}
               type="text"
               placeholder="대시보드 행위자"
-              aria-label="대시보드 행위자"
-              class="min-w-0 flex-1 py-1.5 px-2 rounded text-2xs border border-[var(--color-border-default)] bg-[var(--white-4)] text-[var(--color-fg-primary)] placeholder-[var(--color-fg-muted)] outline-none focus:border-[rgba(71,184,255,0.5)]"
+              ariaLabel="대시보드 행위자"
+              class="min-w-0 flex-1 !py-1.5 !px-2 !text-2xs"
               value=${actorInput.value}
               disabled=${actorOverrideLocked}
               onInput=${(e: Event) => { actorInput.value = (e.target as HTMLInputElement).value }}
@@ -220,11 +221,11 @@ function AuthPopover() {
             >토큰 제거</button>
           ` : html`
             <div class="flex flex-col gap-2">
-              <input
+              <${TextInput}
                 type="password"
                 placeholder="Bearer token"
-                aria-label="Bearer token"
-                class="w-full py-1.5 px-2 rounded text-2xs border border-[var(--color-border-default)] bg-[var(--white-4)] text-[var(--color-fg-primary)] placeholder-[var(--color-fg-muted)] outline-none focus:border-[rgba(71,184,255,0.5)]"
+                ariaLabel="Bearer token"
+                class="w-full !py-1.5 !px-2 !text-2xs"
                 value=${tokenInput.value}
                 onInput=${(e: Event) => { tokenInput.value = (e.target as HTMLInputElement).value }}
                 onKeyDown=${(e: KeyboardEvent) => { if (e.key === 'Enter') void handleSetToken() }}

@@ -89,14 +89,16 @@ let handle_keeper_pr_review_read
       "cd %s && gh pr view %d%s --json title,body,state,files,reviews,comments,additions,deletions 2>&1"
       (Filename.quote root) pr_number repo_flag in
     let st_meta, out_meta =
-      Process_eio.run_argv_with_status ~timeout_sec:15.0
+      Process_eio.run_argv_with_status
+        ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Pr_review ())
         [ "/bin/zsh"; "-lc"; meta_cmd ] in
     (* Get PR diff (truncated) *)
     let diff_cmd = Printf.sprintf
       "cd %s && gh pr diff %d%s 2>&1 | head -c %d"
       (Filename.quote root) pr_number repo_flag Common.max_tool_output_bytes in
     let st_diff, out_diff =
-      Process_eio.run_argv_with_status ~timeout_sec:15.0
+      Process_eio.run_argv_with_status
+        ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Pr_review ())
         [ "/bin/zsh"; "-lc"; diff_cmd ] in
     let diff_truncated = String.length out_diff >= Common.max_tool_output_bytes in
     let meta_ok = (st_meta = Unix.WEXITED 0) in
@@ -228,7 +230,8 @@ let handle_keeper_pr_review_reply
           owner_repo comment_id
           (Filename.quote body) in
         let st, out =
-          Process_eio.run_argv_with_status ~timeout_sec:15.0
+          Process_eio.run_argv_with_status
+            ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Pr_review ())
             [ "/bin/zsh"; "-lc"; cmd ] in
         Log.Keeper.info "pr_review_reply: pr=%d comment=%d keeper=%s ok=%b"
           pr_number comment_id meta.name (st = Unix.WEXITED 0);

@@ -1035,7 +1035,7 @@ export function InferenceTelemetryPanel({ keeper }: { keeper: Keeper }) {
 
         ${'' /* reasoning tokens */}
         <div class="p-3 rounded border border-[var(--color-border-default)] bg-[var(--white-3)] flex flex-col justify-between">
-          <span class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)]">Reasoning</span>
+          <span class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)]">추론</span>
           <span class="text-lg font-mono tabular-nums text-[var(--color-status-warn)]">${totalReasoning > 0 ? totalReasoning.toLocaleString() : '-'}</span>
           <span class="text-3xs text-[var(--color-fg-disabled)]">total tokens</span>
         </div>

@@ -75,7 +75,8 @@ let dashboard_cache_key (config : Coord.config) prefix suffix =
   Printf.sprintf "%s:%s:%s:%s" prefix config.base_path
     (cache_partition_segment config) suffix
 
-let dashboard_mission_timeout_s = 25.0
+let dashboard_mission_timeout_s =
+  Env_config_runtime.Dashboard.mission_timeout_sec
 
 let attach_projection_diagnostics json diagnostics =
   match json with
@@ -787,8 +788,10 @@ let provider_capacity_json () : Yojson.Safe.t =
    work. Splitting the budget makes that distinction visible: a light
    timeout means "light path is doing too much"; a full timeout means
    "the full path needs more headroom or a real perf fix". *)
-let dashboard_shell_timeout_s = 16.0
-let dashboard_shell_light_timeout_s = 8.0
+let dashboard_shell_timeout_s =
+  Env_config_runtime.Dashboard.shell_timeout_sec
+let dashboard_shell_light_timeout_s =
+  Env_config_runtime.Dashboard.shell_light_timeout_sec
 let dashboard_shell_timeout_for ~light =
   if light then dashboard_shell_light_timeout_s else dashboard_shell_timeout_s
 

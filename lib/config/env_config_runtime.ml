@@ -635,6 +635,49 @@ module Dashboard = struct
     Float.max 1.0
       (get_float ~default:30.0
          "MASC_DASHBOARD_EXECUTION_TRUST_TIMEOUT_SEC")
+
+  (** Mission card compute timeout.
+
+      Wraps three [Dashboard_cache.get_or_compute_with_timeout] sites at
+      [server_dashboard_http_core.ml:624,633,678] (mission projections).
+      Default 25s preserves the pre-extraction inline literal. Floor 1s
+      protects against degenerate operator config. *)
+  let mission_timeout_sec =
+    Float.max 1.0
+      (get_float ~default:25.0 "MASC_DASHBOARD_MISSION_TIMEOUT_SEC")
+
+  (** Shell render compute timeout (full path).
+
+      Used by [Dashboard_cache.get_or_compute_with_timeout] for the full
+      shell render. Default 16s preserves the pre-extraction literal at
+      [server_dashboard_http_core.ml:790]. *)
+  let shell_timeout_sec =
+    Float.max 1.0
+      (get_float ~default:16.0 "MASC_DASHBOARD_SHELL_TIMEOUT_SEC")
+
+  (** Shell render compute timeout (light path).
+
+      Default 8s. Must remain strictly less than [shell_timeout_sec] so
+      the split-budget signal (light vs full) stays meaningful: if a
+      light render takes longer than the full budget, that means light
+      has accidentally taken on full's work. Floor clamps at 0.5s to
+      keep the comparison meaningful even under operator override. *)
+  let shell_light_timeout_sec =
+    Float.max 0.5
+      (get_float ~default:8.0 "MASC_DASHBOARD_SHELL_LIGHT_TIMEOUT_SEC")
+
+  (** Maximum wall-clock for a single dashboard render
+      ([Dashboard_execution.json_render]).
+
+      Wraps the entire render pipeline including PG stalls and cold-start
+      projection hydration. Default 60s preserves the pre-extraction
+      literal at [dashboard_execution.ml:204]. Floor 5s ensures even
+      aggressive operator overrides leave room for cold-start hydration.
+      Render budget should comfortably exceed the longest inner compute
+      budget (currently [mission_timeout_sec] = 25s). *)
+  let render_timeout_sec =
+    Float.max 5.0
+      (get_float ~default:60.0 "MASC_DASHBOARD_RENDER_TIMEOUT_SEC")
 end
 
 (** {1 Internal Timers and TTLs}

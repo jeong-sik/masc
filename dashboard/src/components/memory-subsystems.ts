@@ -288,7 +288,7 @@ function HebbianMatrix({ synapses }: { synapses: MemorySubsystemsSynapse[] }) {
           )}
         </g>
       </svg>
-      <div class="mt-2 text-xs text-[var(--color-fg-muted)]0 text-center">
+      <div class="mt-2 text-xs text-[var(--color-fg-muted)] text-center">
         행 = from · 열 = to · 셀 = 시냅스 가중치 · 정렬 = 활동량 내림차순
       </div>
     </div>
@@ -334,7 +334,7 @@ function HebbianTopLinks({ synapses }: { synapses: MemorySubsystemsSynapse[] }) 
   const top = [...synapses].sort((a, b) => b.weight - a.weight).slice(0, TOP_LINK_COUNT)
   return html`
     <div class="bg-[var(--white-5)] rounded p-3 mt-3">
-      <div class="text-xs text-[var(--color-fg-muted)]0 mb-2">강한 연결 Top ${TOP_LINK_COUNT} · sparkline = 학습 궤적</div>
+      <div class="text-xs text-[var(--color-fg-muted)] mb-2">강한 연결 Top ${TOP_LINK_COUNT} · sparkline = 학습 궤적</div>
       <div class="space-y-1.5">
         ${top.map(s => {
           const pct = Math.round(s.weight * 100)
@@ -400,7 +400,7 @@ function SynapseRow({ s }: { s: MemorySubsystemsSynapse }) {
       </td>
       <td class="py-1.5 px-2 text-sm text-[var(--color-status-ok)] text-center">${s.success_count}</td>
       <td class="py-1.5 px-2 text-sm text-[var(--bad-light)] text-center">${s.failure_count}</td>
-      <td class="py-1.5 px-2 text-xs text-[var(--color-fg-muted)]0">${formatTimeAgo(s.last_updated * 1000)}</td>
+      <td class="py-1.5 px-2 text-xs text-[var(--color-fg-muted)]">${formatTimeAgo(s.last_updated * 1000)}</td>
     </tr>
   `
 }
@@ -421,9 +421,9 @@ function EpisodeCard({ ep }: { ep: MemorySubsystemsEpisode }) {
           <span class="${outcomeColor} text-xs">${outcomeIcon}</span>
           <span class="text-sm font-medium text-[var(--color-fg-muted)] truncate">${ep.summary}</span>
         </div>
-        <span class="text-xs text-[var(--color-fg-muted)]0 shrink-0">${formatTimeAgo(ep.timestamp * 1000)}</span>
+        <span class="text-xs text-[var(--color-fg-muted)] shrink-0">${formatTimeAgo(ep.timestamp * 1000)}</span>
       </div>
-      <div class="flex items-center gap-2 text-xs text-[var(--color-fg-muted)]0 mb-1 flex-wrap">
+      <div class="flex items-center gap-2 text-xs text-[var(--color-fg-muted)] mb-1 flex-wrap">
         <span class="bg-[var(--white-5)] px-1.5 py-0.5 rounded">${ep.event_type}</span>
         ${ep.participants.map(
           (p: string) => html`<span class="font-mono">${p}</span>`,
@@ -448,7 +448,7 @@ function EpisodeCard({ ep }: { ep: MemorySubsystemsEpisode }) {
               <div class="mt-1 flex gap-2 flex-wrap">
                 ${Object.entries(ep.context).map(
                   ([k, v]) =>
-                    html`<span class="text-xs bg-[var(--white-5)] px-1.5 py-0.5 rounded text-[var(--color-fg-muted)]0"
+                    html`<span class="text-xs bg-[var(--white-5)] px-1.5 py-0.5 rounded text-[var(--color-fg-muted)]"
                       >${k}: ${v}</span
                     >`,
                 )}
@@ -572,7 +572,7 @@ export function MemorySubsystems() {
             <span class="text-xs">${showArch.value ? '▼' : '▶'}</span>
             아키텍처 — 데이터 흐름도
           </span>
-          <span class="text-xs text-[var(--color-fg-muted)]0">
+          <span class="text-xs text-[var(--color-fg-muted)]">
             Keeper turn → episodes / task_done → Hebbian. Keeper memory bank와 checkpoint는 다른 패널에서 본다.
           </span>
         </button>
@@ -595,7 +595,7 @@ export function MemorySubsystems() {
       <section aria-label="Hebbian 시냅스 그래프">
         <div class="flex items-center justify-between mb-3">
           <h3 class="text-base font-semibold text-[var(--color-fg-muted)]">Hebbian 시냅스 그래프</h3>
-          <div class="flex items-center gap-3 text-xs text-[var(--color-fg-muted)]0">
+          <div class="flex items-center gap-3 text-xs text-[var(--color-fg-muted)]">
             <span>${synapses.length}개 시냅스</span>
             ${
               lastConsolidation > 0
@@ -614,7 +614,7 @@ export function MemorySubsystems() {
         }
         ${
           synapses.length === 0
-            ? html`<div class="text-sm text-[var(--color-fg-muted)]0 bg-[var(--white-5)] rounded p-4 text-center">
+            ? html`<div class="text-sm text-[var(--color-fg-muted)] bg-[var(--white-5)] rounded p-4 text-center">
                 시냅스 데이터 없음. keeper task 완료 시 자동 생성됩니다.
               </div>`
             : html`
@@ -631,21 +631,21 @@ export function MemorySubsystems() {
                   />
                   ${
                     isSynapseFiltering
-                      ? html`<span class="text-xs text-[var(--color-fg-muted)]0">${visibleSynapses.length}/${synapses.length}</span>`
+                      ? html`<span class="text-xs text-[var(--color-fg-muted)]">${visibleSynapses.length}/${synapses.length}</span>`
                       : null
                   }
                 </div>
                 ${
                   isSynapseFiltering && visibleSynapses.length === 0
-                    ? html`<div class="text-sm text-[var(--color-fg-muted)]0 bg-[var(--white-5)] rounded p-4 text-center">
+                    ? html`<div class="text-sm text-[var(--color-fg-muted)] bg-[var(--white-5)] rounded p-4 text-center">
                         필터 결과 없음 (${synapses.length} items)
                       </div>`
                     : html`<div class="overflow-x-auto">
-                        <table class="w-full text-left">
+                        <table class="w-full text-left" aria-label="Hebbian 시냅스 상세 테이블">
                           <thead>
-                            <tr class="border-b border-[var(--white-10)] text-xs text-[var(--color-fg-muted)]0">
+                            <tr class="border-b border-[var(--white-10)] text-xs text-[var(--color-fg-muted)]">
                               <th scope="col" class="py-1.5 px-2">출처</th>
-                              <th scope="col" class="py-1.5 px-2"></th>
+                              <th scope="col" class="py-1.5 px-2"><span class="sr-only">방향</span></th>
                               <th scope="col" class="py-1.5 px-2">대상</th>
                               <th scope="col" class="py-1.5 px-2 text-right">가중치</th>
                               <th scope="col" class="py-1.5 px-2 text-center">성공</th>
@@ -669,7 +669,7 @@ export function MemorySubsystems() {
       <section aria-label="에피소드 기록">
         <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
           <h3 class="text-base font-semibold text-[var(--color-fg-muted)]">에피소드 기록</h3>
-          <span class="text-xs text-[var(--color-fg-muted)]0">
+          <span class="text-xs text-[var(--color-fg-muted)]">
             총 ${totalEpisodes}개 · 필터 ${filteredTotal}개 · 표시 ${visibleEpisodes.length}개
           </span>
         </div>
@@ -677,7 +677,7 @@ export function MemorySubsystems() {
         ${
           pairFilter
             ? html`<div class="flex items-center gap-2 mb-2 px-2 py-1 bg-[var(--white-5)] border border-[var(--white-10)] rounded text-xs">
-                <span class="text-[var(--color-fg-muted)]0">시냅스 쌍 필터</span>
+                <span class="text-[var(--color-fg-muted)]">시냅스 쌍 필터</span>
                 <span class="text-[var(--color-fg-muted)] font-mono">${shortAgentLabel(pairFilter.from)} → ${shortAgentLabel(pairFilter.to)}</span>
                 <button
                   class="ml-auto text-[var(--color-fg-muted)] hover:text-[var(--color-fg-muted)]"
@@ -732,7 +732,7 @@ export function MemorySubsystems() {
 
         ${
           visibleEpisodes.length === 0
-            ? html`<div class="text-sm text-[var(--color-fg-muted)]0 bg-[var(--white-5)] rounded p-4 text-center">
+            ? html`<div class="text-sm text-[var(--color-fg-muted)] bg-[var(--white-5)] rounded p-4 text-center">
                 ${hasFilter
                   ? '필터 조건에 맞는 에피소드가 없습니다.'
                   : '에피소드 없음. keeper [STATE] 출력 시 자동 기록됩니다.'}

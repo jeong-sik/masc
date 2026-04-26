@@ -16,7 +16,7 @@ function ComposerPrompt() {
         <div className="line" aria-live="polite">
           <span className="prompt" aria-hidden="true">masc&gt;</span>
           <span aria-label={`Current input: ${typed}`}>{typed}</span>
-          <span className="caret" aria-hidden="true" style={{color:'var(--brass-1)'}}>▌</span>
+          <span className="caret" aria-hidden="true" style={{color:'var(--color-accent-fg)'}}>▌</span>
         </div>
         <div className="hint" aria-hidden="true">
           <span><span className="kbd">⌘K</span>command</span>
@@ -60,7 +60,7 @@ function ComposerSuggest() {
         <div className="line">
           <span className="prompt" aria-hidden="true">masc&gt;</span>
           <span className="fn" aria-label="Current input: keeper.">keeper.</span>
-          <span className="caret" aria-hidden="true" style={{color:'var(--brass-1)'}}>▌</span>
+          <span className="caret" aria-hidden="true" style={{color:'var(--color-accent-fg)'}}>▌</span>
         </div>
         <div className="hint" aria-hidden="true">
           <span><span className="kbd">↑↓</span>move</span>
@@ -102,7 +102,7 @@ function ComposerMultiLine() {
             <span className="arg">dry_run</span>
             <span>=</span>
             <span className="fn">false</span>
-            <span className="caret" style={{color:'var(--brass-1)'}}>▌</span>
+            <span className="caret" style={{color:'var(--color-accent-fg)'}}>▌</span>
           </div>
           <div className="line" aria-hidden="true">
             <span>)</span>
@@ -165,7 +165,7 @@ function StatusVerbose() {
         <span className="sep" aria-hidden="true" />
         <span className="seg" role="group" aria-label="Goal goal-merge-blockers">goal <span className="brass">goal-merge-blockers</span></span>
         <span className="seg" role="group" aria-label="Task t-9f2a">task <span style={{color:'var(--color-fg-secondary)'}}>t-9f2a</span></span>
-        <span className="seg" role="group" aria-label="Keeper nick0cave">keeper <span style={{color:'var(--brass-1)'}}>nick0cave</span></span>
+        <span className="seg" role="group" aria-label="Keeper nick0cave">keeper <span style={{color:'var(--color-accent-fg)'}}>nick0cave</span></span>
         <span className="sep" aria-hidden="true" />
         <span className="seg" role="group" aria-label="Cascade hit at step 2 in 1.24 seconds">CASCADE hit@2 · <span className="brass">1.24s</span></span>
         <span className="sep" aria-hidden="true" />

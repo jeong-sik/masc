@@ -96,7 +96,7 @@ function AuditLedgerHeader({ left, right }) {
   return (
     <div role="heading" aria-level={3} style={{padding:'5px 8px',borderBottom:'1px solid var(--color-border-strong)',display:'flex',gap:'8px',background:'var(--color-bg-panel-alt)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',letterSpacing:'.12em',textTransform:'uppercase',color:'var(--color-fg-disabled)'}}>
       <span>{left}</span>
-      <span style={{marginLeft:'auto',color:'var(--brass-1)'}}>{right}</span>
+      <span style={{marginLeft:'auto',color:'var(--color-accent-fg)'}}>{right}</span>
     </div>
   );
 }
@@ -154,7 +154,7 @@ function AuditSummary() {
     <section aria-label={`Audit summary · ${sorted.length} kinds · ${total} events`} style={{display:'flex',flexDirection:'column',gap:'2px'}}>
       <div role="heading" aria-level={3} style={{padding:'5px 8px',background:'var(--color-bg-panel-alt)',border:'1px solid var(--color-border-strong)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',letterSpacing:'.12em',textTransform:'uppercase',color:'var(--color-fg-disabled)',display:'flex'}}>
         <span>summary · last 12 events</span>
-        <span style={{marginLeft:'auto',color:'var(--brass-1)'}}>{total} total</span>
+        <span style={{marginLeft:'auto',color:'var(--color-accent-fg)'}}>{total} total</span>
       </div>
       <div role="list" aria-label="Event kind summary rows">
         {sorted.map(([kind, n]) => {
@@ -163,9 +163,9 @@ function AuditSummary() {
           return (
             <div key={kind} role="listitem" aria-label={`${kind}: ${n} events (${pct}%)`} style={{display:'grid',gridTemplateColumns:'140px 30px 1fr',gap:'6px',alignItems:'center',padding:'3px 8px',background:'var(--color-bg-surface)',border:'1px solid var(--color-border-default)'}}>
               <span className={`kn ${cat}`} aria-hidden="true" style={{fontFamily:'var(--font-mono)',fontSize:'var(--fs-10)',padding:'1px 5px',border:'1px solid var(--color-border-strong)',justifySelf:'flex-start'}}>{kind}</span>
-              <span aria-hidden="true" style={{fontFamily:'var(--font-mono)',fontSize:'var(--fs-11)',color:'var(--brass-1)',fontVariantNumeric:'tabular-nums',textAlign:'right'}}>{n}</span>
+              <span aria-hidden="true" style={{fontFamily:'var(--font-mono)',fontSize:'var(--fs-11)',color:'var(--color-accent-fg)',fontVariantNumeric:'tabular-nums',textAlign:'right'}}>{n}</span>
               <div aria-hidden="true" style={{height:'10px',background:'var(--color-bg-panel-alt)',border:'1px solid var(--color-border-default)',position:'relative'}}>
-                <div style={{height:'100%',width:`${pct}%`,background:'linear-gradient(90deg, var(--brass-3), var(--brass-1))'}}></div>
+                <div style={{height:'100%',width:`${pct}%`,background:'linear-gradient(90deg, var(--color-accent-fg-dim), var(--color-accent-fg))'}}></div>
               </div>
             </div>
           );
@@ -239,12 +239,12 @@ function SafeAutoByKeeper() {
     <section aria-label={`Safe Autonomy findings · by keeper · ${sorted.length} keepers`} style={{display:'flex',flexDirection:'column',gap:'4px'}}>
       <div role="heading" aria-level={3} style={{padding:'5px 8px',background:'var(--color-bg-panel-alt)',border:'1px solid var(--color-border-strong)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',letterSpacing:'.12em',textTransform:'uppercase',color:'var(--color-fg-disabled)',display:'flex'}}>
         <span>findings by keeper</span>
-        <span style={{marginLeft:'auto',color:'var(--brass-1)'}}>{sorted.length} keepers</span>
+        <span style={{marginLeft:'auto',color:'var(--color-accent-fg)'}}>{sorted.length} keepers</span>
       </div>
       <div role="list">
         {sorted.map(([k, v]) => (
           <div key={k} role="listitem" aria-label={`${k} · ${v.high} high, ${v.medium} medium, ${v.low} low`} style={{display:'grid',gridTemplateColumns:'120px 60px 60px 60px 1fr',gap:'6px',alignItems:'center',padding:'4px 8px',background:'var(--color-bg-surface)',border:'1px solid var(--color-border-default)'}}>
-            <span aria-hidden="true" style={{fontFamily:'var(--font-mono)',fontSize:'var(--fs-11)',color:'var(--brass-1)'}}>{k}</span>
+            <span aria-hidden="true" style={{fontFamily:'var(--font-mono)',fontSize:'var(--fs-11)',color:'var(--color-accent-fg)'}}>{k}</span>
             <span className="sev high"   aria-hidden="true" style={{fontFamily:'var(--font-mono)',fontSize:'var(--fs-10)',padding:'1px 5px',textAlign:'center',opacity: v.high?1:0.15}}>{v.high}</span>
             <span className="sev medium" aria-hidden="true" style={{fontFamily:'var(--font-mono)',fontSize:'var(--fs-10)',padding:'1px 5px',textAlign:'center',opacity: v.medium?1:0.15}}>{v.medium}</span>
             <span className="sev low"    aria-hidden="true" style={{fontFamily:'var(--font-mono)',fontSize:'var(--fs-10)',padding:'1px 5px',textAlign:'center',opacity: v.low?1:0.15}}>{v.low}</span>
@@ -272,7 +272,7 @@ function SafeAutoTrend() {
           const bad = v < 78;
           return (
             <div key={i} style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',gap:'2px'}}>
-              <div style={{width:'100%',height:`${pct}%`,background: bad ? 'linear-gradient(180deg, var(--err), var(--err-border))' : 'linear-gradient(180deg, var(--brass-1), var(--brass-3))'}}></div>
+              <div style={{width:'100%',height:`${pct}%`,background: bad ? 'linear-gradient(180deg, var(--err), var(--err-border))' : 'linear-gradient(180deg, var(--color-accent-fg), var(--color-accent-fg-dim))'}}></div>
             </div>
           );
         })}
@@ -332,10 +332,10 @@ function CostPerAgent() {
         <tbody>
           {rows.map(r => (
             <tr key={r.agent}>
-              <th scope="row" style={{color:'var(--brass-1)'}}>{r.agent}</th>
+              <th scope="row" style={{color:'var(--color-accent-fg)'}}>{r.agent}</th>
               <td className="lat-num">{(r.in_tok/1000).toFixed(0)}k</td>
               <td className="lat-num">{(r.out_tok/1000).toFixed(1)}k</td>
-              <td className="lat-num" style={{color:'var(--brass-1)'}}>${r.cost.toFixed(2)}</td>
+              <td className="lat-num" style={{color:'var(--color-accent-fg)'}}>${r.cost.toFixed(2)}</td>
               <td className="bar" aria-hidden="true"><i style={{width:`${r.cost/maxCost*100}%`}}></i></td>
               <td className="lat-num">{r.p50_ms}</td>
               <td className={`lat-num ${r.p95_ms > 8000 ? 'bad' : ''}`} aria-label={`${r.p95_ms}ms${r.p95_ms > 8000 ? ' · over budget' : ''}`}>{r.p95_ms}</td>
@@ -364,7 +364,7 @@ function CostMatrix() {
     <section aria-label={`Cost matrix · provider × model · total $${P2f.costs.total_cost_usd.toFixed(2)} over 24h`} style={{display:'flex',flexDirection:'column',gap:'8px'}}>
       <div role="heading" aria-level={3} style={{padding:'5px 8px',background:'var(--color-bg-panel-alt)',border:'1px solid var(--color-border-strong)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',letterSpacing:'.12em',textTransform:'uppercase',color:'var(--color-fg-disabled)',display:'flex'}}>
         <span>provider × model · $ spent (24h)</span>
-        <span style={{marginLeft:'auto',color:'var(--brass-1)'}}>${P2f.costs.total_cost_usd.toFixed(2)}</span>
+        <span style={{marginLeft:'auto',color:'var(--color-accent-fg)'}}>${P2f.costs.total_cost_usd.toFixed(2)}</span>
       </div>
       <table className="cs-mat" aria-label="Provider × model cost matrix">
         <thead>
@@ -396,7 +396,7 @@ function CostLatency() {
     <section aria-label={`Cost latency distribution · ${total} calls · p50 ${P2f.costs.p50}ms · p95 ${P2f.costs.p95}ms`} style={{display:'flex',flexDirection:'column',gap:'8px'}}>
       <div role="heading" aria-level={3} style={{padding:'5px 8px',background:'var(--color-bg-panel-alt)',border:'1px solid var(--color-border-strong)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',letterSpacing:'.12em',textTransform:'uppercase',color:'var(--color-fg-disabled)',display:'flex',gap:'12px'}}>
         <span>latency distribution · {total} calls</span>
-        <span style={{marginLeft:'auto'}}>p50 · <span style={{color:'var(--brass-1)'}}>{P2f.costs.p50}ms</span></span>
+        <span style={{marginLeft:'auto'}}>p50 · <span style={{color:'var(--color-accent-fg)'}}>{P2f.costs.p50}ms</span></span>
         <span>p95 · <span style={{color:'var(--err-fg)'}}>{P2f.costs.p95}ms</span></span>
       </div>
       <div className="cs-hist" role="img" aria-label={`Latency histogram · ${buckets.length} buckets`}>
@@ -414,7 +414,7 @@ function CostLatency() {
       <div role="list" aria-label="Latency band totals" style={{display:'grid',gridTemplateColumns:'repeat(4, 1fr)',gap:'1px',background:'var(--color-border-strong)',border:'1px solid var(--color-border-strong)'}}>
         {[
           { l:'< 1s',  v: buckets.filter(b=>b.hi<=1000).reduce((s,b)=>s+b.n,0), c:'var(--ok-fg)' },
-          { l:'1–4s',  v: buckets.filter(b=>b.lo>=1000&&b.hi<=4000).reduce((s,b)=>s+b.n,0), c:'var(--brass-1)' },
+          { l:'1–4s',  v: buckets.filter(b=>b.lo>=1000&&b.hi<=4000).reduce((s,b)=>s+b.n,0), c:'var(--color-accent-fg)' },
           { l:'4–16s', v: buckets.filter(b=>b.lo>=4000&&b.hi<=16000).reduce((s,b)=>s+b.n,0), c:'var(--warn)' },
           { l:'> 16s', v: buckets.filter(b=>b.lo>=16000).reduce((s,b)=>s+b.n,0), c:'var(--err-fg)' },
         ].map(b => (
@@ -500,9 +500,9 @@ function HeuristicByModule() {
               <span aria-hidden="true" style={{fontFamily:'var(--font-mono)',fontSize:'var(--fs-11)',color:'var(--color-fg-primary)'}}>{mod}</span>
               <span aria-hidden="true" style={{fontFamily:'var(--font-mono)',fontSize:'var(--fs-10)',color:'var(--color-fg-muted)'}}>{v.fired}/{v.total} fired</span>
               <div aria-hidden="true" style={{height:'10px',background:'var(--color-bg-panel-alt)',border:'1px solid var(--color-border-default)'}}>
-                <div style={{height:'100%',width:`${pct}%`,background: pct > 50 ? 'linear-gradient(90deg, var(--warn), var(--err))' : 'linear-gradient(90deg, var(--brass-3), var(--brass-1))'}}></div>
+                <div style={{height:'100%',width:`${pct}%`,background: pct > 50 ? 'linear-gradient(90deg, var(--warn), var(--err))' : 'linear-gradient(90deg, var(--color-accent-fg-dim), var(--color-accent-fg))'}}></div>
               </div>
-              <span aria-hidden="true" style={{fontFamily:'var(--font-mono)',fontSize:'var(--fs-11)',color: pct > 50 ? 'var(--err-fg)' : 'var(--brass-1)',fontVariantNumeric:'tabular-nums',textAlign:'right'}}>{pct.toFixed(0)}%</span>
+              <span aria-hidden="true" style={{fontFamily:'var(--font-mono)',fontSize:'var(--fs-11)',color: pct > 50 ? 'var(--err-fg)' : 'var(--color-accent-fg)',fontVariantNumeric:'tabular-nums',textAlign:'right'}}>{pct.toFixed(0)}%</span>
               <span aria-hidden="true" style={{gridColumn:'1 / -1',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',color:'var(--color-fg-disabled)',letterSpacing:'.04em'}}>sites · {[...v.sites].join(' · ')}</span>
             </div>
           );

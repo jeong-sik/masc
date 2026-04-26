@@ -116,8 +116,8 @@ function BoardThread() {
           ))}
         </div>
         <div role="textbox" aria-label="Reply composer (placeholder)" style={{marginTop:8, padding:'6px 8px', background:'var(--color-bg-surface)', border:'1px dashed var(--color-border-strong)', fontFamily:'var(--font-mono)', fontSize:'11px', color:'var(--color-fg-disabled)'}}>
-          <span aria-hidden="true" style={{color:'var(--brass-1)'}}>masc&gt;</span> reply...
-          <span aria-hidden="true" style={{color:'var(--brass-1)', animation:'anim-blink 1s step-end infinite'}}> ▌</span>
+          <span aria-hidden="true" style={{color:'var(--color-accent-fg)'}}>masc&gt;</span> reply...
+          <span aria-hidden="true" style={{color:'var(--color-accent-fg)', animation:'anim-blink 1s step-end infinite'}}> ▌</span>
         </div>
       </div>
     </section>
@@ -236,10 +236,10 @@ function MentionInbox() {
         branch="main"
         keepers={[me]}
         meta={`${mine.length} for me · ${otherMentions.length} others`}
-        right={<span className="meta" style={{color:'var(--brass-1)'}}>@{me}</span>}
+        right={<span className="meta" style={{color:'var(--color-accent-fg)'}}>@{me}</span>}
       />
       <div className="body">
-        <div role="heading" aria-level={3} style={{fontFamily:'var(--font-mono)', fontSize:'10px', color:'var(--brass-1)', letterSpacing:'.1em', textTransform:'uppercase', padding:'2px 0'}}>━━ for me · {mine.length}</div>
+        <div role="heading" aria-level={3} style={{fontFamily:'var(--font-mono)', fontSize:'10px', color:'var(--color-accent-fg)', letterSpacing:'.1em', textTransform:'uppercase', padding:'2px 0'}}>━━ for me · {mine.length}</div>
         <div className="ms-inbox" role="log" aria-live="polite" aria-label={`${mine.length} mentions for me`}>
           {mine.map(m => (
             <article key={m.seq} className="mn" aria-label={`#${m.seq} · ${m.from} in #${m.room} at ${m.at}: ${m.body}`}>
@@ -368,12 +368,12 @@ function ComposerV2Mention() {
                  aria-label={`@${k.id} · ${k.role}${k.match ? '' : ' · no match'}`}
                  style={{
                    padding:'4px 8px', display:'flex', gap:6, alignItems:'center',
-                   background: i===0 ? 'rgb(var(--brass-glow)/.12)' : 'transparent',
-                   borderLeft: i===0 ? '2px solid var(--brass-1)' : '2px solid transparent',
+                   background: i===0 ? 'rgb(var(--color-accent-glow)/.12)' : 'transparent',
+                   borderLeft: i===0 ? '2px solid var(--color-accent-fg)' : '2px solid transparent',
                    cursor:'pointer',
                    opacity: k.match ? 1 : .5,
                  }}>
-              <span aria-hidden="true" style={{color:'var(--brass-1)'}}>@{k.id}</span>
+              <span aria-hidden="true" style={{color:'var(--color-accent-fg)'}}>@{k.id}</span>
               <span aria-hidden="true" style={{color:'var(--color-fg-disabled)', marginLeft:'auto', fontSize:'9px', letterSpacing:'.04em', textTransform:'uppercase'}}>{k.role}</span>
             </div>
           ))}
@@ -412,7 +412,7 @@ function ComposerV2State() {
             <button type="button" role="radio" aria-checked="true" className="on">state</button>
           </div>
           <span className="room-sel" aria-label="Target room: default">default</span>
-          <span aria-label="Structured · machine-readable" style={{fontFamily:'var(--font-mono)', fontSize:'10px', color:'var(--brass-1)', letterSpacing:'.04em'}}>
+          <span aria-label="Structured · machine-readable" style={{fontFamily:'var(--font-mono)', fontSize:'10px', color:'var(--color-accent-fg)', letterSpacing:'.04em'}}>
             ◆ structured · machine-readable
           </span>
           <span className="grow" aria-hidden="true" />

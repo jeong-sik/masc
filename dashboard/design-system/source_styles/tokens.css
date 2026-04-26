@@ -391,7 +391,12 @@ body[data-density="comfortable"]  { --density: 1.15; }
   --color-border-divider: var(--line-3);
 
   --color-accent-fg:      var(--brass-1);
+  --color-accent-fg-dim:  var(--brass-3);
+  --color-accent-glow:    var(--brass-glow);
   /* --color-accent already defined in colors_and_type.css */
+  /* NOTE: --brass-2 is a "mid" tone with no canonical alias yet (SPEC v0.1).
+     Used in 3 cb-group-* refs as escape hatch — escalate to SPEC §3.4 if
+     count grows. */
 
   --color-status-added:    var(--ok);
   --color-status-modified: var(--warn);
@@ -428,6 +433,8 @@ body[data-density="comfortable"]  { --density: 1.15; }
   --color-border-divider: #c8c0b0;
 
   --color-accent-fg:      var(--brass-3);
+  --color-accent-fg-dim:  #8a5f28;
+  --color-accent-glow:    var(--brass-glow);
 
   --color-status-added:    #3d7a3d;
   --color-status-modified: #8a6a1a;
@@ -456,6 +463,8 @@ body[data-density="comfortable"]  { --density: 1.15; }
     --color-border-strong:  #b8b0a0;
     --color-border-divider: #c8c0b0;
     --color-accent-fg:      var(--brass-3);
+    --color-accent-fg-dim:  #8a5f28;
+    --color-accent-glow:    var(--brass-glow);
     --color-status-added:    #3d7a3d;
     --color-status-modified: #8a6a1a;
     --color-status-deleted:  #a04030;

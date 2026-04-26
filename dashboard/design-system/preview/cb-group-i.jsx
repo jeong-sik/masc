@@ -10,7 +10,7 @@ const P2i = window.MASC_P2;
 // keeper color helper (uses kClass from cb-shared)
 function keeperColor(id) {
   return ({
-    'nick0cave':     'var(--brass-1)',
+    'nick0cave':     'var(--color-accent-fg)',
     'masc-improver': 'var(--ok)',
     'sangsu':        'var(--info)',
     'qa-king':       'var(--err)',
@@ -18,7 +18,7 @@ function keeperColor(id) {
     'ramarama':      'var(--stalled)',
     'scholar':       '#9aa6b8',
     'janitor':       '#7a8290',
-    'taskmaster':    'var(--brass-3)',
+    'taskmaster':    'var(--color-accent-fg-dim)',
     'velvet-hammer': '#c97070',
     'verdict':       '#b89070',
     'sojin':         '#8aa890',
@@ -67,7 +67,7 @@ function BranchSelector() {
 
       <div role="heading" aria-level={3} style={{padding:'4px 8px',background:'var(--color-bg-panel-alt)',border:'1px solid var(--color-border-strong)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',letterSpacing:'.12em',textTransform:'uppercase',color:'var(--color-fg-disabled)',display:'flex',gap:'8px'}}>
         <span aria-hidden="true">switch branch · {P2i.branches.length} known</span>
-        <span aria-hidden="true" style={{marginLeft:'auto',color:'var(--brass-1)'}}>active · {sel}</span>
+        <span aria-hidden="true" style={{marginLeft:'auto',color:'var(--color-accent-fg)'}}>active · {sel}</span>
       </div>
       <div className="br-list" role="listbox" aria-label="Available branches">
         {P2i.branches.map(b => {
@@ -102,7 +102,7 @@ function BranchSelector() {
         {cur.keepers.map(k => (
           <span key={k} role="listitem" aria-label={k} style={{display:'inline-flex',alignItems:'center',gap:'4px'}}>
             <span aria-hidden="true" style={{display:'inline-block',width:'8px',height:'8px',borderRadius:'50%',background:keeperColor(k)}}/>
-            <span aria-hidden="true" style={{color:'var(--brass-1)'}}>{k}</span>
+            <span aria-hidden="true" style={{color:'var(--color-accent-fg)'}}>{k}</span>
           </span>
         ))}
       </div>
@@ -154,7 +154,7 @@ function KeeperMultiSelect() {
         {['Swimlanes','Activity','Audit','Decisions','Memory','Cost','Stress','Episodes'].map(z => (
           <span key={z} aria-hidden="true" style={{padding:'1px 5px',background:'var(--color-bg-surface)',border:'1px solid var(--color-border-default)',color:'var(--color-fg-secondary)'}}>{z}</span>
         ))}
-        <span aria-hidden="true" style={{marginLeft:'auto',color: sel.size === 0 ? 'var(--err-fg)' : 'var(--brass-1)'}}>
+        <span aria-hidden="true" style={{marginLeft:'auto',color: sel.size === 0 ? 'var(--err-fg)' : 'var(--color-accent-fg)'}}>
           {sel.size === 0 ? '⚠ all hidden' : `→ ${sel.size}-way scope`}
         </span>
       </div>
@@ -174,7 +174,7 @@ function OperatorNudgeLog() {
     <section aria-label={`Operator nudge log · ${P2i.nudges.length} total · ${P2i.nudges.filter(n => !n.ack).length} pending ack`} style={{display:'flex',flexDirection:'column',gap:'6px'}}>
       <div role="heading" aria-level={3} style={{padding:'4px 8px',background:'var(--color-bg-panel-alt)',border:'1px solid var(--color-border-strong)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',letterSpacing:'.12em',textTransform:'uppercase',color:'var(--color-fg-disabled)',display:'flex',gap:'8px'}}>
         <span>operator · nudge log</span>
-        <span style={{marginLeft:'auto',color:'var(--brass-1)'}}>{P2i.nudges.length} nudges · {P2i.nudges.filter(n => !n.ack).length} pending ack</span>
+        <span style={{marginLeft:'auto',color:'var(--color-accent-fg)'}}>{P2i.nudges.length} nudges · {P2i.nudges.filter(n => !n.ack).length} pending ack</span>
       </div>
       <div role="log" aria-live="polite" aria-label="Operator nudge history" style={{background:'var(--color-bg-page)'}}>
         {P2i.nudges.map(n => (

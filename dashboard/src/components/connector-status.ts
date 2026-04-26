@@ -1102,14 +1102,14 @@ function ConnectorLivePanel({
         ? html`
             <div class="mt-3 space-y-2" id=${`keepers-${connectorId}`}>
               <div class="flex items-center justify-end">
-                <input
+                <${TextInput}
                   type="search"
                   value=${keeperQuery}
                   placeholder="keeper / model / runtime 필터"
-                  aria-label="Keeper 필터"
-                  data-testid=${`keeper-filter-${connectorId}`}
+                  ariaLabel="Keeper 필터"
+                  testId=${`keeper-filter-${connectorId}`}
                   onInput=${(e: Event) => { patchConnectorUiState(connectorId, { keeperGroupQuery: (e.target as HTMLInputElement).value }) }}
-                  class="min-w-40 max-w-65 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--color-fg-primary)] placeholder:text-[var(--color-fg-disabled)] focus:outline-none focus:border-[var(--color-accent-fg)]"
+                  class="min-w-40 max-w-65 flex-1 !px-2 !py-1 !text-2xs"
                 />
               </div>
               ${isFilteringKeepers && visibleKnownGroups.length === 0

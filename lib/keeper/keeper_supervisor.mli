@@ -20,6 +20,21 @@ val supervise_keepalive :
     On fiber termination, resolves the Promise and publishes
     keeper-lifecycle events via Event_bus. *)
 
+(** {1 Watchdog} *)
+
+val fork_stale_watchdog :
+  'a context -> keeper_meta -> Keeper_registry.registry_entry -> unit
+(** Fork a stale-turn watchdog fiber for the given keeper.
+
+    Two detection modes:
+    - Idle stall: [last_turn_ts] older than 300s while [Running].
+    - Failure loop: [consecutive_noop_count >= 3] — catches keepers in
+      LLM timeout loops where [last_turn_ts] stays fresh.
+
+    On detection, sets [fiber_stop] and emits a stale broadcast. The
+    supervisor's [sweep_and_recover] picks up the stopped fiber and
+    restarts with exponential backoff. *)
+
 (** {1 Sweep and Recovery} *)
 
 val sweep_and_recover : 'a context -> unit

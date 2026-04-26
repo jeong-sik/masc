@@ -674,7 +674,7 @@ describe('deriveTileNotice (pure)', () => {
     }))
     expect(notice).toEqual({
       tone: 'error',
-      label: 'Error',
+      label: '오류',
       detail: 'Discord gateway timeout',
     })
   })
@@ -691,7 +691,7 @@ describe('deriveTileNotice (pure)', () => {
     }))
     expect(notice).toEqual({
       tone: 'stale',
-      label: 'Stale',
+      label: '오래됨',
       detail: '데이터 오래됨 (60s threshold)',
     })
   })

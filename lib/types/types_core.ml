@@ -482,173 +482,36 @@ type worktree_info = {
   path: string;                                (* worktree path relative to git root *)
   git_root: string;                            (* absolute path to .git parent *)
   repo_name: string;                           (* repository name (basename of git_root) *)
-} [@@deriving show]
-
-let worktree_info_to_yojson wt =
-  `Assoc [
-    ("branch", `String wt.branch);
-    ("path", `String wt.path);
-    ("git_root", `String wt.git_root);
-    ("repo_name", `String wt.repo_name);
-  ]
-
-let worktree_info_of_yojson json =
-  let open Yojson.Safe.Util in
-  try
-    let branch = json |> member "branch" |> to_string in
-    let path = json |> member "path" |> to_string in
-    let git_root = json |> member "git_root" |> to_string in
-    let repo_name = json |> member "repo_name" |> to_string in
-    Ok { branch; path; git_root; repo_name }
-  with e -> Error (Printexc.to_string e)
+} [@@deriving show, yojson { strict = false }]
 
 (** Task execution links - tie task state to runtime evidence producers *)
 type task_execution_links = {
-  operation_id : string option;
-  session_id : string option;
-  autoresearch_loop_id : string option;
-} [@@deriving show]
-
-let task_execution_links_to_yojson (links : task_execution_links) =
-  `Assoc
-    [
-      ("operation_id", Json_util.string_opt_to_json links.operation_id);
-      ("session_id", Json_util.string_opt_to_json links.session_id);
-      ( "autoresearch_loop_id",
-        Json_util.string_opt_to_json links.autoresearch_loop_id );
-    ]
-
-let task_execution_links_of_yojson json =
-  let open Yojson.Safe.Util in
-  try
-    Ok
-      {
-        operation_id = json |> member "operation_id" |> to_string_option;
-        session_id = json |> member "session_id" |> to_string_option;
-        autoresearch_loop_id =
-          json |> member "autoresearch_loop_id" |> to_string_option;
-      }
-  with e -> Error (Printexc.to_string e)
+  operation_id : string option; [@default None]
+  session_id : string option; [@default None]
+  autoresearch_loop_id : string option; [@default None]
+} [@@deriving show, yojson { strict = false }]
 
 (** Task contract - persisted deterministic gate inputs *)
 type task_contract = {
-  strict : bool;
-  completion_contract : string list;
-  required_tools : string list;
-  required_evidence : string list;
-  inspect_gate_evidence : string list;
-  verify_gate_evidence : string list;
-  links : task_execution_links;
-} [@@deriving show]
-
-let task_contract_string_list json key =
-  let open Yojson.Safe.Util in
-  match json |> member key with
-  | `List items ->
-      items
-      |> List.filter_map (function
-           | `String value ->
-               let trimmed = String.trim value in
-               if trimmed = "" then None else Some trimmed
-           | _ -> None)
-  | _ -> []
-
-let string_list_to_yojson values =
-  `List (List.map (fun value -> `String value) values)
-
-let task_contract_to_yojson (contract : task_contract) =
-  `Assoc
-    [
-      ("strict", `Bool contract.strict);
-      ( "completion_contract",
-        string_list_to_yojson contract.completion_contract );
-      ("required_tools", string_list_to_yojson contract.required_tools);
-      ("required_evidence", string_list_to_yojson contract.required_evidence);
-      ( "inspect_gate_evidence",
-        string_list_to_yojson contract.inspect_gate_evidence );
-      ( "verify_gate_evidence",
-        string_list_to_yojson contract.verify_gate_evidence );
-      ("links", task_execution_links_to_yojson contract.links);
-    ]
-
-let task_contract_of_yojson json =
-  let open Yojson.Safe.Util in
-  try
-    let strict =
-      json |> member "strict" |> to_bool_option |> Option.value ~default:false
-    in
-    let links =
-      match json |> member "links" with
-      | `Null ->
-          {
-            operation_id = None;
-            session_id = None;
-            autoresearch_loop_id = None;
-          }
-      | links_json -> (
-          match task_execution_links_of_yojson links_json with
-          | Ok links -> links
-          | Error _ ->
-              {
-                operation_id = None;
-                session_id = None;
-                autoresearch_loop_id = None;
-              })
-    in
-    Ok
-      {
-        strict;
-        completion_contract = task_contract_string_list json "completion_contract";
-        required_tools = task_contract_string_list json "required_tools";
-        required_evidence = task_contract_string_list json "required_evidence";
-        inspect_gate_evidence =
-          task_contract_string_list json "inspect_gate_evidence";
-        verify_gate_evidence =
-          task_contract_string_list json "verify_gate_evidence";
-        links;
-      }
-  with e -> Error (Printexc.to_string e)
+  strict : bool; [@default false]
+  completion_contract : string list; [@default []]
+  required_tools : string list; [@default []]
+  required_evidence : string list; [@default []]
+  inspect_gate_evidence : string list; [@default []]
+  verify_gate_evidence : string list; [@default []]
+  links : task_execution_links; [@default { operation_id = None; session_id = None; autoresearch_loop_id = None }]
+} [@@deriving show, yojson { strict = false }]
 
 (** Handoff context persisted across release/reclaim cycles *)
 type task_handoff_context = {
-  summary : string;
-  reason : string option;
-  next_step : string option;
-  failure_mode : string option;
-  evidence_refs : string list;
-  updated_at : string option;
-  updated_by : string option;
-} [@@deriving show]
-
-let task_handoff_context_to_yojson (context : task_handoff_context) =
-  `Assoc
-    [
-      ("summary", `String context.summary);
-      ("reason", Json_util.string_opt_to_json context.reason);
-      ("next_step", Json_util.string_opt_to_json context.next_step);
-      ("failure_mode", Json_util.string_opt_to_json context.failure_mode);
-      ("evidence_refs", string_list_to_yojson context.evidence_refs);
-      ("updated_at", Json_util.string_opt_to_json context.updated_at);
-      ("updated_by", Json_util.string_opt_to_json context.updated_by);
-    ]
-
-let task_handoff_context_of_yojson json =
-  let open Yojson.Safe.Util in
-  try
-    let summary =
-      json |> member "summary" |> to_string_option |> Option.value ~default:""
-    in
-    Ok
-      {
-        summary;
-        reason = json |> member "reason" |> to_string_option;
-        next_step = json |> member "next_step" |> to_string_option;
-        failure_mode = json |> member "failure_mode" |> to_string_option;
-        evidence_refs = task_contract_string_list json "evidence_refs";
-        updated_at = json |> member "updated_at" |> to_string_option;
-        updated_by = json |> member "updated_by" |> to_string_option;
-      }
-  with e -> Error (Printexc.to_string e)
+  summary : string; [@default ""]
+  reason : string option; [@default None]
+  next_step : string option; [@default None]
+  failure_mode : string option; [@default None]
+  evidence_refs : string list; [@default []]
+  updated_at : string option; [@default None]
+  updated_by : string option; [@default None]
+} [@@deriving show, yojson { strict = false }]
 
 (** Task definition *)
 type task = {

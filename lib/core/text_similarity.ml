@@ -9,21 +9,24 @@ module StringMap = Map.Make (String)
     These functions have no external dependencies beyond Stdlib. *)
 
 (** Strip non-alphanumeric ASCII, keep multibyte (CJK, etc.) and digits.
-    Returns a cleaned lowercase string for tokenization. *)
+    Returns a cleaned lowercase string for tokenization.
+
+    [String.map] folds lowercase + transform into one allocation; the
+    previous implementation chained three (lowercase_ascii ->
+    Bytes.of_string -> Bytes.to_string). Hot in keeper memory recall
+    and tool dispatch fuzzy matching. *)
 let clean_for_similarity (s : string) : string =
-  let s = String.lowercase_ascii s in
-  let b = Bytes.of_string s in
-  for i = 0 to Bytes.length b - 1 do
-    let c = Bytes.get b i in
-    let code = Char.code c in
-    let keep =
-      (c >= 'a' && c <= 'z') ||
-      (c >= '0' && c <= '9') ||
-      code >= 128
-    in
-    if not keep then Bytes.set b i ' '
-  done;
-  Bytes.to_string b
+  String.map
+    (fun c ->
+      let lc = Char.lowercase_ascii c in
+      let code = Char.code lc in
+      let keep =
+        (lc >= 'a' && lc <= 'z') ||
+        (lc >= '0' && lc <= '9') ||
+        code >= 128
+      in
+      if keep then lc else ' ')
+    s
 
 (** Extract unique word tokens (space-split, length >= 2). *)
 let normalize_for_similarity (s : string) : string list =

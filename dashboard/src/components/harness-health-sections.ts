@@ -7,6 +7,7 @@ import { navigate } from '../router'
 import { formatTimeAgo, formatTimestampKo } from '../lib/format-time'
 import { SurfaceCard } from './common/card'
 import { CopyIdButton } from './common/copy-id-button'
+import { TextInput } from './common/input'
 import { SectionCap } from './common/section-cap'
 import { StatusChip } from './common/status-chip'
 import { StatusDot } from './common/status-dot'
@@ -365,13 +366,13 @@ export function RecentVerdictsList({ items }: { items: HarnessVerdictItem[] }) {
   return html`
     <div class="space-y-2">
       <div class="flex justify-end">
-        <input
+        <${TextInput}
           type="search"
+          class="min-w-40 max-w-65 flex-1 !px-2 !py-1 !text-2xs"
           value=${query.value}
           placeholder="task / agent / gate / cascade 필터"
-          aria-label="판정 필터"
+          ariaLabel="판정 필터"
           onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
-          class="min-w-40 max-w-65 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--color-fg-primary)] placeholder:text-[var(--color-fg-disabled)] focus:outline-none focus:border-[var(--color-accent-fg)]"
         />
       </div>
       ${isFiltering && visibleItems.length === 0
@@ -412,13 +413,13 @@ export function PreCompactList({ section }: { section: HarnessSignalSection<PreC
   return html`
     <div class="space-y-2">
       <div class="flex justify-end">
-        <input
+        <${TextInput}
           type="search"
+          class="min-w-40 max-w-65 flex-1 !px-2 !py-1 !text-2xs"
           value=${query.value}
           placeholder="keeper / trigger / model / strategy 필터"
-          aria-label="압축 이벤트 필터"
+          ariaLabel="압축 이벤트 필터"
           onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
-          class="min-w-40 max-w-65 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--color-fg-primary)] placeholder:text-[var(--color-fg-disabled)] focus:outline-none focus:border-[var(--color-accent-fg)]"
         />
       </div>
       ${isFiltering && visibleItems.length === 0
@@ -464,13 +465,13 @@ export function HandoffList({ section }: { section: HarnessSignalSection<Handoff
   return html`
     <div class="space-y-2">
       <div class="flex justify-end">
-        <input
+        <${TextInput}
           type="search"
+          class="min-w-40 max-w-65 flex-1 !px-2 !py-1 !text-2xs"
           value=${query.value}
           placeholder="keeper / model / trace_id 필터"
-          aria-label="세대 교체 필터"
+          ariaLabel="세대 교체 필터"
           onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
-          class="min-w-40 max-w-65 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--color-fg-primary)] placeholder:text-[var(--color-fg-disabled)] focus:outline-none focus:border-[var(--color-accent-fg)]"
         />
       </div>
       ${isFiltering && visibleItems.length === 0

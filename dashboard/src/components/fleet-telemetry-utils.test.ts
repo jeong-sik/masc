@@ -152,9 +152,9 @@ describe('successClass', () => {
     expect(successClass(50)).toContain('var(--bad-light)')
   })
 
-  it('returns dim for null/non-finite', () => {
-    expect(successClass(null)).toContain('dim')
-    expect(successClass(NaN)).toContain('dim')
+  it('returns disabled for null/non-finite', () => {
+    expect(successClass(null)).toContain('color-fg-disabled')
+    expect(successClass(NaN)).toContain('color-fg-disabled')
   })
 })
 

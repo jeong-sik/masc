@@ -76,7 +76,7 @@ describe('ConnectorOnboardingGrid', () => {
 
   it('shows the cold-start heading explaining the empty state', () => {
     render(html`<${ConnectorOnboardingGrid} />`, container)
-    expect(container.textContent ?? '').toContain('아직 연결된 sidecar가 없습니다')
+    expect(container.textContent ?? '').toContain('아직 연결된 사이드카가 없습니다')
   })
 
   it('renders a per-card Start button with data-onboarding-start matching each connector id', () => {

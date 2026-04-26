@@ -657,7 +657,7 @@ describe('ConnectorStatusPanel', () => {
     await flushUi()
 
     const text = container.textContent?.replace(/\s+/g, ' ').trim() ?? ''
-    expect(text).toContain('Sidecar not started')
+    expect(text).toContain('사이드카 미시작')
     expect(text).toContain('cd sidecars/discord-bot && ./run.sh')
     expect(text).toContain('Cause: no sidecar status file has been observed at /tmp/discord_status.json')
     expect(text).toContain('Next: click Start to spawn via the backend')
@@ -678,7 +678,7 @@ describe('ConnectorStatusPanel', () => {
     const chip = panel!.querySelector('[data-sidecar-status-chip]')
     expect(chip).toBeTruthy()
     expect(chip!.getAttribute('aria-label')).toContain('not running')
-    expect(chip!.textContent).toContain('Not running')
+    expect(chip!.textContent).toContain('실행 중 아님')
 
     const copyLabels = Array.from(panel!.querySelectorAll<HTMLButtonElement>('[data-copy-button]'))
       .map(button => button.getAttribute('aria-label'))
@@ -714,7 +714,7 @@ describe('ConnectorStatusPanel', () => {
     await flushUi()
 
     const text = container.textContent?.replace(/\s+/g, ' ').trim() ?? ''
-    expect(text).toContain('No keepers configured')
+    expect(text).toContain('설정된 키퍼 없음')
 
     // Sibling of the "Sidecar not started" panel (#8038). Same fix:
     // explicit amber override so the parent accent gradient (iMessage
@@ -726,7 +726,7 @@ describe('ConnectorStatusPanel', () => {
     const chip = emptyPanel!.querySelector('[data-no-keepers-status-chip]')
     expect(chip).toBeTruthy()
     expect(chip!.getAttribute('aria-label')).toContain('none configured')
-    expect(chip!.textContent).toContain('Not configured')
+    expect(chip!.textContent).toContain('설정 필요')
   })
 
   it('expands [▾] header toggle to show per-dot liveness and metadata', async () => {

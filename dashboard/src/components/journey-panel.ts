@@ -804,7 +804,7 @@ export function JourneyPanel() {
             ${taskRecords.length > 0
               ? html`
                   <div class="flex flex-col gap-3">
-                    <div class="text-2xs font-semibold uppercase tracking-3 text-[var(--text-muted)]">Task Journeys</div>
+                    <div class="text-2xs font-semibold uppercase tracking-3 text-[var(--text-muted)]">작업 여정</div>
                     ${taskRecords.map((record) => html`<${JourneyCard} key=${record.key} record=${record} />`)}
                   </div>
                 `

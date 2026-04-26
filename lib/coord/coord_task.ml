@@ -1421,6 +1421,23 @@ let transition_task_r
        | Types.Release, Types.Claimed _ | Types.Release, Types.InProgress _
        | Types.Release, Types.AwaitingVerification _ | Types.Release, Types.Done _
        | Types.Release, Types.Cancelled _ -> ());
+        (* #10719: surface tasks that have crossed the oscillation
+           threshold (5 release cycles) so dashboards/triage can pick
+           them up before they reach 20+ cycles with zero progress
+           (task-049 hit cycle 20 still in [todo]).  Pure observation:
+           does not block the release.  Fires once per crossing
+           (cycle_count = 4 → 5) to avoid log amplification on
+           subsequent releases of the same task. *)
+        (match action with
+         | Types.Release when task.cycle_count = 4 ->
+           Log.RoomTask.warn
+             "task_oscillation_threshold task=%s agent=%s cycle_count=%d \
+              threshold=5 (sustained claim->release loop, candidate for triage)"
+             task_id agent_name (task.cycle_count + 1)
+         | Types.Release | Types.Claim | Types.Start
+         | Types.Done_action | Types.Cancel
+         | Types.Submit_for_verification | Types.Approve_verification
+         | Types.Reject_verification -> ());
       if new_status = task.task_status && set_current = None then
         (* Idempotent no-op: status unchanged, skip write/events.
            Match None explicitly so set_current=Some is never silently dropped. *)

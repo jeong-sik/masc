@@ -36,7 +36,7 @@ function TopbarStandard() {
           <span className="stamp" aria-label="Build 2604, 16:32:45 UTC">BUILD 2604 · 16:32:45Z</span>
         </div>
       </header>
-      <div style={{flex:1, background:'var(--bg-0)'}} aria-hidden="true" />
+      <div style={{flex:1, background:'var(--color-bg-page)'}} aria-hidden="true" />
     </div>
   );
 }
@@ -75,7 +75,7 @@ function TopbarExpanded() {
           <span className="stamp" aria-label="5 active keepers, 2 idle">5 ACTIVE · 2 IDLE</span>
         </div>
       </header>
-      <div style={{flex:1, background:'var(--bg-0)'}} aria-hidden="true" />
+      <div style={{flex:1, background:'var(--color-bg-page)'}} aria-hidden="true" />
     </div>
   );
 }
@@ -96,7 +96,7 @@ function TopbarMinimal() {
           <span className="stamp" aria-label="16:32:45 UTC">16:32:45Z</span>
         </div>
       </header>
-      <div style={{flex:1, background:'var(--bg-0)'}} aria-hidden="true" />
+      <div style={{flex:1, background:'var(--color-bg-page)'}} aria-hidden="true" />
     </div>
   );
 }
@@ -121,7 +121,7 @@ function TickerMarquee() {
           ))}
         </div>
       </div>
-      <div style={{flex:1, background:'var(--bg-0)'}} aria-hidden="true" />
+      <div style={{flex:1, background:'var(--color-bg-page)'}} aria-hidden="true" />
     </div>
   );
 }
@@ -140,7 +140,7 @@ function TickerChunks() {
           ))}
         </div>
       </div>
-      <div style={{flex:1, background:'var(--bg-0)'}} aria-hidden="true" />
+      <div style={{flex:1, background:'var(--color-bg-page)'}} aria-hidden="true" />
     </div>
   );
 }
@@ -160,7 +160,7 @@ function TickerVertical() {
           ))}
         </div>
       </div>
-      <div style={{flex:1, background:'var(--bg-0)'}} aria-hidden="true" />
+      <div style={{flex:1, background:'var(--color-bg-page)'}} aria-hidden="true" />
     </div>
   );
 }
@@ -195,7 +195,7 @@ function KpiStandard() {
           </div>
         ))}
       </div>
-      <div style={{flex:1, background:'var(--bg-0)'}} aria-hidden="true" />
+      <div style={{flex:1, background:'var(--color-bg-page)'}} aria-hidden="true" />
     </div>
   );
 }
@@ -210,7 +210,7 @@ function KpiCompact() {
           </div>
         ))}
       </div>
-      <div style={{flex:1, background:'var(--bg-0)'}} aria-hidden="true" />
+      <div style={{flex:1, background:'var(--color-bg-page)'}} aria-hidden="true" />
     </div>
   );
 }
@@ -226,7 +226,7 @@ function KpiStacked() {
           </div>
         ))}
       </div>
-      <div style={{flex:1, background:'var(--bg-0)'}} aria-hidden="true" />
+      <div style={{flex:1, background:'var(--color-bg-page)'}} aria-hidden="true" />
     </div>
   );
 }
@@ -245,7 +245,7 @@ function LifelineBeat() {
         <Heartbeat phase={phase} />
         <span className="bpm" aria-hidden="true"><span className="n">72</span> BPM · 60s</span>
       </div>
-      <div style={{flex:1, background:'var(--bg-0)'}} aria-hidden="true" />
+      <div style={{flex:1, background:'var(--color-bg-page)'}} aria-hidden="true" />
     </div>
   );
 }
@@ -264,7 +264,7 @@ function LifelineStacked() {
           </div>
         ))}
       </div>
-      <div style={{flex:1, background:'var(--bg-0)'}} aria-hidden="true" />
+      <div style={{flex:1, background:'var(--color-bg-page)'}} aria-hidden="true" />
     </div>
   );
 }

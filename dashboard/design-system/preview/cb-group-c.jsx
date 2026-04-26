@@ -11,7 +11,7 @@ function ComposerPrompt() {
   ], 22);
   return (
     <div className="cb-board">
-      <div style={{flex:1, background:'var(--bg-0)'}} aria-hidden="true" />
+      <div style={{flex:1, background:'var(--color-bg-page)'}} aria-hidden="true" />
       <div className="cb-composer" role="region" aria-label="Command composer">
         <div className="line" aria-live="polite">
           <span className="prompt" aria-hidden="true">masc&gt;</span>
@@ -40,7 +40,7 @@ function ComposerSuggest() {
   ];
   return (
     <div className="cb-board">
-      <div style={{flex:1, background:'var(--bg-0)'}} aria-hidden="true" />
+      <div style={{flex:1, background:'var(--color-bg-page)'}} aria-hidden="true" />
       <div className="cb-composer" role="region" aria-label="Command composer with suggestions" style={{position:'relative'}}>
         <div className="sug" role="listbox" aria-label="Command suggestions">
           {sugs.map((s, i) => (
@@ -75,7 +75,7 @@ function ComposerSuggest() {
 function ComposerMultiLine() {
   return (
     <div className="cb-board">
-      <div style={{flex:1, background:'var(--bg-0)'}} aria-hidden="true" />
+      <div style={{flex:1, background:'var(--color-bg-page)'}} aria-hidden="true" />
       <div className="cb-composer" role="region" aria-label="Multi-line command composer">
         <pre aria-label="cascade.run(goal=&quot;goal-merge-blockers&quot;, providers=[anthropic, moonshot], dry_run=false)" style={{margin:0, font:'inherit', background:'transparent'}}>
           <div className="line">
@@ -122,7 +122,7 @@ function ComposerMultiLine() {
 function StatusStandard() {
   return (
     <div className="cb-board">
-      <div style={{flex:1, background:'var(--bg-0)'}} aria-hidden="true" />
+      <div style={{flex:1, background:'var(--color-bg-page)'}} aria-hidden="true" />
       <div className="cb-statusbar" role="status" aria-live="polite" aria-label="System status: connected, build 2604, version 0.42.1, anthropic ok, moonshot ok, openai degraded, xai offline, TPS 1.24s, time 16:32:45 UTC">
         <span className="seg" role="group" aria-label="Connection: connected"><span className="on" aria-hidden="true">●</span>CONNECTED</span>
         <span className="sep" aria-hidden="true" />
@@ -145,7 +145,7 @@ function StatusStandard() {
 function StatusCompact() {
   return (
     <div className="cb-board">
-      <div style={{flex:1, background:'var(--bg-0)'}} aria-hidden="true" />
+      <div style={{flex:1, background:'var(--color-bg-page)'}} aria-hidden="true" />
       <div className="cb-statusbar" role="status" aria-live="polite" aria-label="MASC: 5 of 8 keepers active, 3 providers ok, TPS 1.24s">
         <span className="seg" role="group" aria-label="MASC"><span className="brass" aria-hidden="true">●</span>MASC</span>
         <span className="seg" role="group" aria-label="5 of 8 keepers active">5/8 ACTIVE</span>
@@ -159,7 +159,7 @@ function StatusCompact() {
 function StatusVerbose() {
   return (
     <div className="cb-board">
-      <div style={{flex:1, background:'var(--bg-0)'}} aria-hidden="true" />
+      <div style={{flex:1, background:'var(--color-bg-page)'}} aria-hidden="true" />
       <div className="cb-statusbar" role="status" aria-live="polite" aria-label="Connected · goal goal-merge-blockers, task t-9f2a, keeper nick0cave, cascade hit at step 2 in 1.24s, suite 3 fail of 47 pass" style={{height:28, flexWrap:'wrap'}}>
         <span className="seg" role="group" aria-label="Connection: connected"><span className="on" aria-hidden="true">●</span>CONNECTED</span>
         <span className="sep" aria-hidden="true" />
@@ -274,7 +274,7 @@ function DrawerGoal() {
               <div key={t.id}
                    role="listitem"
                    aria-label={`${t.id} · ${t.title} · ${t.keeper} · ${t.status}`}
-                   style={{display:'flex', alignItems:'center', gap:7, padding:'4px 7px', background:'var(--bg-1)', border:'1px solid var(--line-1)', borderRadius:3, fontSize:11}}>
+                   style={{display:'flex', alignItems:'center', gap:7, padding:'4px 7px', background:'var(--color-bg-surface)', border:'1px solid var(--line-1)', borderRadius:3, fontSize:11}}>
                 <Dot kind={kClass(t.keeper)} size="sm" />
                 <span className="cb-mono" aria-hidden="true" style={{color:'var(--fg-4)'}}>{t.id}</span>
                 <span aria-hidden="true" style={{color:'var(--fg-1)', flex:1}}>{t.title}</span>
@@ -325,7 +325,7 @@ function DrawerKeeper() {
       <div className="body">
         <section aria-labelledby="drawer-keeper-heartbeat">
           <SectionHeading variant="title" title="HEARTBEAT" id="drawer-keeper-heartbeat" />
-          <div aria-label="Heartbeat trace, 60-second window" style={{background:'var(--bg-1)', padding:6, border:'1px solid var(--line-1)', borderRadius:3}}>
+          <div aria-label="Heartbeat trace, 60-second window" style={{background:'var(--color-bg-surface)', padding:6, border:'1px solid var(--line-1)', borderRadius:3}}>
             <span aria-hidden="true"><Heartbeat width={260} height={40} /></span>
           </div>
         </section>

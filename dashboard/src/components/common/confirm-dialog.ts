@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { AlertTriangle, AlertCircle, Info } from 'lucide-preact'
+import { ActionButton } from './button'
 
 type ConfirmTone = 'danger' | 'warning' | 'info'
 
@@ -99,10 +100,11 @@ export function ConfirmDialogOverlay() {
             </div>
           </div>
           <div class="mt-6 flex items-center justify-end gap-2">
-            <button type="button"
-              class="px-4 py-2 rounded text-sm font-medium border border-[var(--color-border-default)] bg-[var(--white-4)] text-text-body hover:bg-[var(--white-8)] transition-colors cursor-pointer"
+            <${ActionButton}
+              variant="ghost"
+              size="lg"
               onClick=${state.onCancel}
-            >${state.cancelText}</button>
+            >${state.cancelText}<//>
             <button type="button"
               class="px-4 py-2 rounded text-sm font-medium border border-transparent transition-colors cursor-pointer ${confirmBtnClass}"
               onClick=${state.onConfirm}

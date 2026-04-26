@@ -38,6 +38,16 @@ val argv_program : string list -> string
     ["<empty>"] for an empty argv).  Exposed for tests and parity with
     the hook payload. *)
 
+val default_timeout_sec : float
+(** Default subprocess wall-clock budget shared by every [run_argv*],
+    [run_unix_argv*_fallback], and [with_unix_capture] [?timeout_sec]
+    parameter when the caller does not pass one explicitly.
+
+    Read once at module load from [MASC_PROCESS_DEFAULT_TIMEOUT_SEC]
+    (default [60.0], floor [1.0]). Operator overrides take effect on
+    next process restart. Exposed primarily for regression tests that
+    pin the historical [60.0] literal against silent shifts. *)
+
 (** {1 Eio-native process execution (global refs)} *)
 
 (** Run command with explicit argv (no shell). Safe from injection.

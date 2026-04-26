@@ -450,24 +450,24 @@ export function TransportHealthPanel() {
         <div class="p-4">
           <div class="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-3">
             <${SectionCard} title="SSE" status=${sseStatus} eyebrow=${`${data.sse.sessions_total} live`}>
-              <${MetricRow} label="Observer" value=${data.sse.sessions_observer} />
-              <${MetricRow} label="Coordinator" value=${data.sse.sessions_coordinator} />
-              <${MetricRow} label="External Fanout" value=${data.sse.external_subscribers} />
-              <${MetricRow} label="Queue" value=${data.sse.queue_max_depth} sub=${`max / avg ${formatFloat(data.sse.queue_avg_depth)}`} />
-              <${MetricRow} label="Relay Queue" value=${data.sse.relay_queue_depth} />
-              <${MetricRow} label="Relay Retries" value=${data.sse.relay_retry_total} sub=${`append ${data.sse.relay_retry_append} · broadcast ${data.sse.relay_retry_broadcast}`} />
-              <${MetricRow} label="Relay Drops" value=${data.sse.relay_drop_total} sub=${`queue ${data.sse.relay_drop_queue} · append ${data.sse.relay_drop_append} · broadcast ${data.sse.relay_drop_broadcast}`} />
-              <${MetricRow} label="Broadcast Avg" value=${formatLatency(data.sse.broadcast_avg_seconds)} sub=${`${data.sse.broadcast_count} events`} />
+              <${MetricRow} label="옵저버" value=${data.sse.sessions_observer} />
+              <${MetricRow} label="코디네이터" value=${data.sse.sessions_coordinator} />
+              <${MetricRow} label="외부 팬아웃" value=${data.sse.external_subscribers} />
+              <${MetricRow} label="큐" value=${data.sse.queue_max_depth} sub=${`최대 / 평균 ${formatFloat(data.sse.queue_avg_depth)}`} />
+              <${MetricRow} label="릴레이 큐" value=${data.sse.relay_queue_depth} />
+              <${MetricRow} label="릴레이 재시도" value=${data.sse.relay_retry_total} sub=${`append ${data.sse.relay_retry_append} · broadcast ${data.sse.relay_retry_broadcast}`} />
+              <${MetricRow} label="릴레이 드롭" value=${data.sse.relay_drop_total} sub=${`queue ${data.sse.relay_drop_queue} · append ${data.sse.relay_drop_append} · broadcast ${data.sse.relay_drop_broadcast}`} />
+              <${MetricRow} label="브로드캐스트 평균" value=${formatLatency(data.sse.broadcast_avg_seconds)} sub=${`${data.sse.broadcast_count}개 이벤트`} />
             <//>
 
             <${SectionCard} title="gRPC" status=${grpcStatus} eyebrow=${transportEyebrow(data.grpc.configured, data.grpc.listening, data.grpc.port)}>
-              <${MetricRow} label="Listener" value=${data.grpc.listening ? 'live' : 'down'} />
-              <${MetricRow} label="Subscribers" value=${data.grpc.subscribers} />
-              <${MetricRow} label="Active Streams" value=${data.grpc.active_streams} />
-              <${MetricRow} label="Heartbeat Avg" value=${formatLatency(data.grpc.heartbeat_avg_seconds)} />
-              <${MetricRow} label="Events Delivered" value=${data.grpc.events_delivered} />
+              <${MetricRow} label="리스너" value=${data.grpc.listening ? '활성' : '중단'} />
+              <${MetricRow} label="구독자" value=${data.grpc.subscribers} />
+              <${MetricRow} label="활성 스트림" value=${data.grpc.active_streams} />
+              <${MetricRow} label="하트비트 평균" value=${formatLatency(data.grpc.heartbeat_avg_seconds)} />
+              <${MetricRow} label="전달된 이벤트" value=${data.grpc.events_delivered} />
               <${MetricRow}
-                label="Events Dropped"
+                label="드롭된 이벤트"
                 value=${data.grpc.events_dropped}
                 sub=${data.grpc.events_dropped > 0 ? '버퍼 포화' : '정상'}
               />

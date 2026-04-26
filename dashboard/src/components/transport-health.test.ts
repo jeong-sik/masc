@@ -294,9 +294,9 @@ describe('TransportHealthPanel', () => {
     await flushUi()
 
     expect(container.textContent).toContain('high')
-    expect(container.textContent).toContain('Relay Queue')
-    expect(container.textContent).toContain('Relay Retries')
-    expect(container.textContent).toContain('Relay Drops')
+    expect(container.textContent).toContain('릴레이 큐')
+    expect(container.textContent).toContain('릴레이 재시도')
+    expect(container.textContent).toContain('릴레이 드롭')
     expect(container.textContent).toContain('Lifecycle Rejects')
     expect(container.textContent).toContain('append 1 · broadcast 3')
     expect(container.textContent).toContain('queue 1 · append 1 · broadcast 0')
@@ -328,7 +328,7 @@ describe('TransportHealthPanel', () => {
     await flushUi()
 
     expect(fetchTransportHealth).toHaveBeenCalled()
-    expect(container.textContent).toContain('Events Dropped')
+    expect(container.textContent).toContain('드롭된 이벤트')
     expect(container.textContent).toContain('7')
     // The '서킷 오픈' counterpart on the WebSocket card is '버퍼 포화'
     // on gRPC — both variants convey "capacity pressure, attention
@@ -349,7 +349,7 @@ describe('TransportHealthPanel', () => {
     render(html`<${TransportHealthPanel} />`, container)
     await flushUi()
 
-    expect(container.textContent).toContain('Events Dropped')
+    expect(container.textContent).toContain('드롭된 이벤트')
     expect(container.textContent).toContain('정상')
     expect(container.textContent).not.toContain('버퍼 포화')
   })

@@ -129,11 +129,11 @@ export function SetupGuideCard({ connectorId }: { connectorId: string }) {
             ? html`
                 <span
                   class="inline-flex items-center gap-1 rounded-sm border border-[var(--ok-20)] bg-[var(--ok-10)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-4 text-[var(--color-status-ok)]"
-                  aria-label="Setup guide complete"
+                  aria-label="설정 가이드 완료"
                   data-setup-complete-badge
                 >
                   <span aria-hidden="true">✓</span>
-                  <span>Complete</span>
+                  <span>완료</span>
                 </span>
               `
             : null}
@@ -154,7 +154,7 @@ export function SetupGuideCard({ connectorId }: { connectorId: string }) {
         aria-valuenow=${pct}
         aria-valuemin=${0}
         aria-valuemax=${100}
-        aria-label="Setup guide progress"
+        aria-label="설정 가이드 진행률"
         data-setup-progress-bar
       >
         <div

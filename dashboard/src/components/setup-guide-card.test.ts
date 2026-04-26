@@ -175,7 +175,7 @@ describe('SetupGuideCard', () => {
     }
     const badge = container.querySelector('[data-setup-complete-badge]')
     expect(badge).toBeTruthy()
-    expect(badge!.getAttribute('aria-label')).toBe('Setup guide complete')
+    expect(badge!.getAttribute('aria-label')).toBe('설정 가이드 완료')
     const wrapper = container.querySelector('[data-setup-guide-tone]')!
     expect(wrapper.getAttribute('data-setup-guide-tone')).toBe('complete')
     const bar = container.querySelector('[role="progressbar"]')!

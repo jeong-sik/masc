@@ -1,25 +1,30 @@
 comment = "Checked-in seed for cascade authoring. Keep repo defaults boring: bootstrap keeper profile big_three, local keeper profile ollama_only, system-only fallback/judge/phase-routing profiles (default, governance_judge, operator_judge, local_only, local_recovery, tool_rerank), and move personal/live experiments to $MASC_BASE_PATH/.masc/config/cascade.toml."
 
 [default]
-comment = "System-only fallback profile for unknown/missing cascade names. codex_cli removed per #10097 (lib/oas_worker_exec_transport.ml:16-26 — keeper-bound MCP omission strips 35+ runtime tools per turn → end_turn early stops). Server config validator rejects weight=0, so removal of the model entry is the only path. Restore once OAS transport ships per-turn auth via stdin/env (not argv-leak-prone TOML override)."
+comment = "System-only fallback profile for unknown/missing cascade names. Mirrors big_three without Claude CLI so automatic recovery does not pull Claude by default."
 models = [
+  { model = "codex_cli:auto", weight = 1 },
   { model = "gemini_cli:auto", weight = 1 },
+  { model = "codex_cli:gpt-5.3-codex-spark", weight = 1 },
 ]
 temperature = 0.2
 max_tokens = 16384
 keeper_assignable = false
 
 [big_three]
-comment = "Canonical keeper bootstrap profile. codex_cli removed per #10097 (keeper-bound MCP tool omission strips 35+ runtime tools per turn). Server config validator rejects weight=0, hence model removal. Effective lane = gemini_cli until codex_cli auth-header path lands without argv leak."
+comment = "Canonical keeper bootstrap profile exposed by the checked-in seed. Automatic keepers stay off Claude CLI unless an operator opts in via live config."
 models = [
+  { model = "codex_cli:auto", weight = 1 },
   { model = "gemini_cli:auto", weight = 1 },
+  { model = "codex_cli:gpt-5.3-codex-spark", weight = 1 },
 ]
 temperature = 0.2
 max_tokens = 16384
 
 [governance_judge]
-comment = "System-only dashboard governance judge profile. codex_cli removed per #10097 (judge probes also lose keeper-bound MCP surface)."
+comment = "System-only dashboard governance judge profile. Explicitly defined so background judge loops do not inherit fallback providers such as Claude CLI."
 models = [
+  { model = "codex_cli:auto", weight = 1 },
   { model = "gemini_cli:auto", weight = 1 },
 ]
 temperature = 0.2
@@ -27,8 +32,9 @@ max_tokens = 16384
 keeper_assignable = false
 
 [operator_judge]
-comment = "System-only dashboard operator judge profile. codex_cli removed per #10097."
+comment = "System-only dashboard operator judge profile. Mirrors governance_judge so background control loops stay off Claude CLI by default."
 models = [
+  { model = "codex_cli:auto", weight = 1 },
   { model = "gemini_cli:auto", weight = 1 },
 ]
 temperature = 0.2

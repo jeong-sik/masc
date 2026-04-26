@@ -345,9 +345,11 @@
 ; ============================================================
 (tests
  (names test_pbt_mention test_pbt_validation test_pbt_text_processing test_pbt_context_overflow
-        test_keeper_state_machine_pbt test_telemetry_eio_pbt)
+        test_keeper_state_machine_pbt test_telemetry_eio_pbt
+        test_metrics_store_eio_pbt test_prompt_registry_pbt)
  (modules test_pbt_mention test_pbt_validation test_pbt_text_processing test_pbt_context_overflow
-          test_keeper_state_machine_pbt test_telemetry_eio_pbt)
+          test_keeper_state_machine_pbt test_telemetry_eio_pbt
+          test_metrics_store_eio_pbt test_prompt_registry_pbt)
  (libraries masc_test_deps))
 
 ; ============================================================

@@ -10,7 +10,7 @@ type prompt_entry = {
   template : string;
   version : string;
   variables : string list;
-  metrics : prompt_metrics option;
+  metrics : prompt_metrics option; [@default None]
   created_at : float;
   deprecated : bool;
 }

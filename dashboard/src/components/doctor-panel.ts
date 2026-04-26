@@ -72,9 +72,9 @@ export function severityChipClass(code: number): string {
 }
 
 // Human-readable heading for a doctor entry — sidecar names get capitalised
-// for display; config stays as "Config".
+// for display; config kind renders as "설정".
 export function doctorHeading(entry: DoctorEntry): string {
-  if (entry.kind === 'config') return 'Config'
+  if (entry.kind === 'config') return '설정'
   return entry.name.charAt(0).toUpperCase() + entry.name.slice(1)
 }
 

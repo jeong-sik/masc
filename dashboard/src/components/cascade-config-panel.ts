@@ -906,17 +906,17 @@ function SloCard({ slo }: { slo: CascadeSloResponse }) {
       </div>
       <div class="grid grid-cols-3 gap-3">
         <${StatCell}
-          label="Ordered Ratio"
+          label="정렬 비율"
           value=${`${ratioPct}%`}
           detail=${`≥ ${targetPct}% 목표`}
         />
         <${StatCell}
-          label="Exhaustion (sample)"
+          label="소진 (표본)"
           value=${String(exh)}
           detail=${`≤ ${exhTarget} 목표`}
         />
         <${StatCell}
-          label="Burn Rate"
+          label="소진율"
           value=${burn}
           detail=${`≤ ${slo.targets.burn_rate_max.toFixed(1)} 목표`}
         />
@@ -1268,17 +1268,17 @@ export function CascadeConfigPanel() {
                 <${CascadeValidationBanner} config=${config} />
                 <div class="grid grid-cols-3 gap-3 mb-3">
                   <${StatCell}
-                    label="Profiles"
+                    label="프로필"
                     value=${config.profiles.length}
                     detail=${catalogSourceSummary(config)}
                   />
                   <${StatCell}
-                    label="Keepers"
+                    label="키퍼"
                     value=${config.keeper_profiles.length}
                     detail="cascade_name 등록됨"
                   />
                   <${StatCell}
-                    label="Drift"
+                    label="드리프트"
                     value=${driftTotal}
                     detail="raw ≠ canonical"
                   />
@@ -1316,12 +1316,12 @@ export function CascadeConfigPanel() {
           ? html`
             <div class="grid grid-cols-3 gap-3 mb-3">
               <${StatCell}
-                label="Window"
+                label="윈도우"
                 value=${`${health.window_sec}s`}
-                detail=${`${health.providers.length} tracked`}
+                detail=${`${health.providers.length} 추적`}
               />
               <${StatCell}
-                label="Cooldown Threshold"
+                label="쿨다운 임계값"
                 value=${health.cooldown_threshold}
                 detail="연속 실패"
               />

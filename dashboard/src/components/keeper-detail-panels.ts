@@ -738,7 +738,7 @@ export function PromptTelemetryPanel({ keeper }: { keeper: Keeper }) {
                 <span class="text-3xs uppercase tracking-wider text-[var(--text-muted)]">${formatSegmentLabel(segmentKey)}</span>
                 <span class="inline-flex items-center gap-1">
                   <span class="text-3xs font-mono text-[var(--text-dim)]" title=${segment.fingerprint ?? ''}>${formatFingerprint(segment.fingerprint)}</span>
-                  ${segment.fingerprint ? html`<${CopyIdButton} value=${segment.fingerprint} label="segment fingerprint" size=${10} />` : null}
+                  ${segment.fingerprint ? html`<${CopyIdButton} value=${segment.fingerprint} label="세그먼트 핑거프린트" size=${10} />` : null}
                 </span>
               </div>
               <div class="grid grid-cols-2 gap-2 text-xs">

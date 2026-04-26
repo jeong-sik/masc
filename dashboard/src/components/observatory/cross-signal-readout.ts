@@ -106,7 +106,7 @@ export function CrossSignalReadout({ events, hourlyTrend, eventWindowMs }: Props
           tone=${toolFailures > 0 ? 'warn' : 'neutral'}
         />
         <${Row}
-          label="성공률 (최근 hour)"
+          label="성공률 (최근 1시간)"
           value=${trendPoint != null ? `${trendPoint.success_rate.toFixed(1)}%` : '-'}
           tone=${successRateTone}
         />

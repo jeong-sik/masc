@@ -206,7 +206,7 @@ export function KeeperDiagnosticSummary({
         ${diagnostic?.next_action_path
           ? html`<${DiagChip} label=${'next: ' + nextActionLabel(diagnostic.next_action_path)} />`
           : null}
-        ${busy ? html`<${DiagChip} label="refreshing" />` : null}
+        ${busy ? html`<${DiagChip} label="갱신 중" />` : null}
       </div>
       <div class="text-xs text-[var(--text-body)] leading-relaxed">
         ${diagnostic?.continuity_summary

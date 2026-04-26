@@ -850,7 +850,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
             value=${c.execution.selected_cascade_canonical}
           />`
         : null}
-      <${ConfigRow} label="catalog source" value=${cascadeCatalogSourceLabel(c)} />
+      <${ConfigRow} label="카탈로그 소스" value=${cascadeCatalogSourceLabel(c)} />
       <div class="flex items-center justify-between py-2 px-3 rounded bg-[var(--white-3)]">
         <span class="text-xs text-[var(--text-muted)]">라이브 오버라이드</span>
         <${BoolBadge} value=${c.sources.has_live_override} />
@@ -884,7 +884,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
 
       <${SectionHeader} title="실행" />
       <${ConfigRow} label="활성 모델" value=${c.execution.active_model || '--'} />
-      <${ConfigRow} label="provider timeout" value=${perProviderTimeoutLabel(c.execution)} />
+      <${ConfigRow} label="공급자 타임아웃" value=${perProviderTimeoutLabel(c.execution)} />
       <div class="mb-1.5 rounded border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-2xs leading-relaxed text-[var(--text-muted)]">
         cascade fallback 중 마지막 provider를 제외한 provider들에만 적용됩니다.
       </div>

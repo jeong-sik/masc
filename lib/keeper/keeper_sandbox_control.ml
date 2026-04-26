@@ -158,7 +158,9 @@ let start_managed_container
                       image;
                       "sh";
                       "-lc";
-                      "trap : TERM INT; while :; do sleep 3600; done";
+                      Printf.sprintf
+                        "trap : TERM INT; while :; do sleep %d; done"
+                        (Env_config_sandbox.Cleanup.managed_sleep_sec ());
                     ]
                   in
                   let st, out =

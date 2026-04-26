@@ -363,13 +363,13 @@ function GoalRelationSection({ goalIds }: { goalIds: string[] }) {
       <div class="flex flex-wrap items-center gap-2">
         <div class="text-2xs font-semibold uppercase tracking-3 text-text-muted">담당 키퍼의 활성 목표</div>
         ${goalIds.length > 1 ? html`
-          <input
+          <${TextInput}
             type="search"
             value=${query}
             placeholder="목표 검색 (title/status/metric)"
-            aria-label="목표 검색"
+            ariaLabel="목표 검색"
             onInput=${(e: Event) => { goalRelationSearchQuery.value = (e.target as HTMLInputElement).value }}
-            class="min-w-40 max-w-60 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--color-fg-primary)] placeholder:text-[var(--color-fg-disabled)] focus:outline-none focus:border-[var(--color-accent-fg)]"
+            class="min-w-40 max-w-60 flex-1 !px-2 !py-1 !text-2xs"
           />
           <span class="text-3xs text-[var(--color-fg-muted)] tabular-nums">
             ${isFiltering

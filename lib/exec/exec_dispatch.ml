@@ -24,9 +24,8 @@ let rec resolve_arg = function
       let buf = Buffer.create 64 in
       List.iter (fun a -> Buffer.add_string buf (resolve_arg a)) parts;
       Buffer.contents buf
-  | Var name -> (
-      try Unix.getenv name
-      with Not_found -> "")
+  | Var name ->
+      (match Sys.getenv_opt name with Some v -> v | None -> "")
 
 let resolve_env env_bindings =
   List.map

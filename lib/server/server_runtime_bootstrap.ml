@@ -1567,14 +1567,25 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
               in
               let response_str = Yojson.Safe.to_string response_json in
               if response_str <> "null" then begin
-                if not
-                     (Server_mcp_transport_ws.send_to_session
-                        ws_session_id response_str)
-                then
-                  Log.Server.warn
-                    "WS send_to_session dropped response for session=%s (session \
-                     gone or write failed; session cleaned up by transport)"
-                    ws_session_id
+                (* #10648: split the single conflated WARN into two paths so
+                   operators can distinguish "client disconnected" (expected,
+                   noise) from "transport write failed" (real bug warranting
+                   attention). *)
+                match
+                  Server_mcp_transport_ws.send_to_session_result
+                    ws_session_id response_str
+                with
+                | Sent -> ()
+                | Session_gone ->
+                    Log.Server.debug
+                      "WS send dropped: session=%s gone (client disconnected, \
+                       expected)"
+                      ws_session_id
+                | Send_failed ->
+                    Log.Server.warn
+                      "WS send_to_session WRITE FAILED for session=%s \
+                       (transport-side error; session cleaned up)"
+                      ws_session_id
               end
             with
             | Eio.Cancel.Cancelled _ as e -> raise e

@@ -847,18 +847,43 @@ let upgrade_connection
        httpun-ws handles this internally when using respond_with_upgrade. *)
     ignore ws_conn)
 
-(** Send a text frame to a specific session by ID.
-    Returns [false] if the session is not found or the send fails. *)
-let send_to_session session_id text =
+(** Outcome of {!send_to_session_result}.  [Sent] is the happy path;
+    [Session_gone] is the expected case where the session has already
+    been cleaned up by the transport (client disconnect, no real bug);
+    [Send_failed] is a real transport-side failure (broken pipe,
+    encoding error, write saturation) and is the only signal that
+    warrants operator attention.  #10648. *)
+type send_outcome =
+  | Sent
+  | Session_gone
+  | Send_failed
+
+(** Structured variant of {!send_to_session}.  Callers that need to
+    distinguish the two failure modes should use this; the boolean
+    {!send_to_session} stays for callers that only want a happy/sad
+    indicator. *)
+let send_to_session_result session_id text =
   let session_opt =
     with_sessions_rw (fun () -> Hashtbl.find_opt sessions session_id)
   in
   match session_opt with
-  | None -> false
+  | None -> Session_gone
   | Some session ->
       let sent = send_text_checked ~context:"send-to-session" session text in
-      if not sent then cleanup_session session_id;
-      sent
+      if sent then Sent
+      else begin
+        cleanup_session session_id;
+        Send_failed
+      end
+
+(** Send a text frame to a specific session by ID.
+    Returns [false] if the session is not found or the send fails.
+    Prefer {!send_to_session_result} when the caller needs to
+    distinguish "session gone" (expected) from "send failed" (bug). *)
+let send_to_session session_id text =
+  match send_to_session_result session_id text with
+  | Sent -> true
+  | Session_gone | Send_failed -> false
 
 (** Broadcast a JSON string to all WebSocket sessions.
     Independent of SSE -- for WS-only messages. *)

@@ -130,11 +130,11 @@ const VERDICT_LINEAGE_LABELS = new Set([
 function verdictStageLabel(label: string): string {
   switch (label) {
     case 'submit_for_verification':
-    case 'awaiting_verification': return 'Submit'
+    case 'awaiting_verification': return '제출'
     case 'approve':
-    case 'approved': return 'Approve'
+    case 'approved': return '승인'
     case 'reject':
-    case 'rejected': return 'Reject'
+    case 'rejected': return '반려'
     default: return label
   }
 }

@@ -15,9 +15,9 @@ function pressureClass(pressure: 'calm' | 'normal' | 'hot'): string {
 
 function pressureLabel(pressure: 'calm' | 'normal' | 'hot'): string {
   switch (pressure) {
-    case 'hot': return 'High'
-    case 'normal': return 'Active'
-    default: return 'Calm'
+    case 'hot': return '높음'
+    case 'normal': return '활동중'
+    default: return '평온'
   }
 }
 

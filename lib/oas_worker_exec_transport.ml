@@ -1256,5 +1256,5 @@ let non_http_transport_of_provider
                           Llm_provider.Transport_codex_cli.default_config with
                           cwd;
                         }))))
-  | Anthropic | OpenAI_compat | Ollama | Gemini | Glm | Kimi ->
+  | Anthropic | OpenAI_compat | Ollama | Gemini | Glm | Kimi | DashScope ->
       Ok None

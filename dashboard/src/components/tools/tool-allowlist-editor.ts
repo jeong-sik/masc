@@ -3,7 +3,7 @@ import { signal, computed } from '@preact/signals'
 import { useEffect, useState, useMemo } from 'preact/hooks'
 import { useCombobox } from 'downshift'
 import { editKeeperTools, type ToolEditResponse } from '../../api/keeper'
-import { TextInput } from '../common/input'
+import { TextInput, TextArea } from '../common/input'
 import { Select } from '../common/select'
 import { toolsData } from './tool-state'
 
@@ -590,9 +590,10 @@ export function ToolAllowlistEditor({
             <${SectionHeader} label="also allow" section="also_allow" listSig=${alsoAllowItems} />
             ${textInputSection.value === 'also_allow'
               ? html`
-                <textarea
-                  class="min-h-18 w-full px-3 py-2 rounded border border-[var(--color-border-default)] bg-[var(--white-3)] text-2xs text-[var(--color-fg-primary)] placeholder:text-[var(--color-fg-muted)]"
+                <${TextArea}
+                  class="!bg-[var(--white-3)] !min-h-18 !text-2xs"
                   placeholder="쉼표 또는 줄바꿈으로 구분"
+                  ariaLabel="also allow 항목 입력"
                   value=${textInputBuffer.value}
                   onInput=${(e: Event) => { textInputBuffer.value = (e.target as HTMLTextAreaElement).value }}
                 />`
@@ -633,9 +634,10 @@ export function ToolAllowlistEditor({
 
             ${textInputSection.value === 'custom'
               ? html`
-                <textarea
-                  class="min-h-[88px] w-full px-3 py-2 rounded border border-[var(--color-border-default)] bg-[var(--white-3)] text-2xs text-[var(--color-fg-primary)] placeholder:text-[var(--color-fg-muted)]"
+                <${TextArea}
+                  class="!bg-[var(--white-3)] !min-h-[88px] !text-2xs"
                   placeholder="쉼표 또는 줄바꿈으로 구분"
+                  ariaLabel="custom allowlist 항목 입력"
                   value=${textInputBuffer.value}
                   onInput=${(e: Event) => { textInputBuffer.value = (e.target as HTMLTextAreaElement).value }}
                 />`
@@ -656,9 +658,10 @@ export function ToolAllowlistEditor({
         <${SectionHeader} label="denylist" section="deny" listSig=${denyItems} />
         ${textInputSection.value === 'deny'
           ? html`
-            <textarea
-              class="min-h-18 w-full px-3 py-2 rounded border border-[var(--color-border-default)] bg-[var(--white-3)] text-2xs text-[var(--color-fg-primary)] placeholder:text-[var(--color-fg-muted)]"
+            <${TextArea}
+              class="!bg-[var(--white-3)] !min-h-18 !text-2xs"
               placeholder="쉼표 또는 줄바꿈으로 구분"
+              ariaLabel="denylist 항목 입력"
               value=${textInputBuffer.value}
               onInput=${(e: Event) => { textInputBuffer.value = (e.target as HTMLTextAreaElement).value }}
             />`

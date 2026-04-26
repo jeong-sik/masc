@@ -3,6 +3,7 @@
 
 import { html } from 'htm/preact'
 import { FilterChips } from '../common/filter-chips'
+import { TextInput } from '../common/input'
 import {
   getKindCounts, getTraceFilter, setTraceFilter,
   getStatusCounts, getTraceStatusFilter, setTraceStatusFilter,
@@ -58,15 +59,16 @@ export function SessionTraceFilter({ agentName }: { agentName: string }) {
     <div class="space-y-2">
       <!-- Search -->
       <div class="relative">
-        <input
+        <${TextInput}
           type="text"
           placeholder="이벤트 검색..."
+          ariaLabel="세션 이벤트 검색"
           value=${searchQuery}
           onInput=${(e: Event) => {
             const v = (e.target as HTMLInputElement).value
             setTraceSearchQuery(agentName, v)
           }}
-          class="w-full px-3 py-1.5 text-xs rounded bg-[var(--white-3)] border border-[var(--white-6)] text-[var(--color-fg-primary)] placeholder:text-[var(--color-fg-disabled)] outline-none focus:border-[var(--color-accent-fg)]"
+          class="w-full !bg-[var(--white-3)] !border-[var(--white-6)] !px-3 !py-1.5 !text-xs"
         />
         ${searchQuery ? html`
           <button

@@ -209,6 +209,44 @@ let test_gate_latest_verdict_wins () =
     | Some msg ->
       Alcotest.fail (Printf.sprintf "Latest Satisfied should allow, got: %s" msg))
 
+(* #10731: target verdict is written first, then [limit] unrelated
+   verdicts are written after.  With the original code the target sat
+   beyond [limit] and lookup_latest_verdict returned None, causing
+   gate_check to silently reject a task whose verdict actually
+   existed.  Auto-widen retries at [limit * auto_widen_factor] and
+   recovers the verdict. *)
+let test_lookup_auto_widens_past_starting_limit () =
+  with_temp_dir (fun base_dir ->
+    let target = make_verdict ~run_id:"target-run" ~status:CT.Satisfied () in
+    write_verdict_jsonl ~base_dir ~task_id:"task-target" target;
+    let small_limit = 5 in
+    for i = 1 to small_limit + 2 do
+      let filler = make_verdict ~run_id:(Printf.sprintf "filler-%d" i)
+        ~status:CT.Satisfied () in
+      write_verdict_jsonl ~base_dir ~task_id:(Printf.sprintf "task-other-%d" i) filler
+    done;
+    match CVG.lookup_latest_verdict ~base_dir ~limit:small_limit
+            ~task_id:"task-target" () with
+    | Some v ->
+      Alcotest.(check string) "auto-widen recovered run_id" "target-run" v.run_id
+    | None ->
+      Alcotest.fail "auto-widen should have recovered the verdict beyond starting limit")
+
+(* #10731: when the task verdict genuinely does not exist, auto-widen
+   must still terminate and return None — not loop. *)
+let test_lookup_auto_widen_terminates_on_genuine_miss () =
+  with_temp_dir (fun base_dir ->
+    let small_limit = 3 in
+    for i = 1 to small_limit + 2 do
+      let filler = make_verdict ~run_id:(Printf.sprintf "filler-%d" i) () in
+      write_verdict_jsonl ~base_dir ~task_id:(Printf.sprintf "task-other-%d" i) filler
+    done;
+    match CVG.lookup_latest_verdict ~base_dir ~limit:small_limit
+            ~task_id:"task-never-written" () with
+    | None -> ()
+    | Some _ ->
+      Alcotest.fail "Genuine miss must return None even after auto-widen")
+
 (* ================================================================ *)
 (* Attribution conversion tests                                      *)
 (* ================================================================ *)
@@ -361,6 +399,10 @@ let () =
       Alcotest.test_case "violated verdict rejects" `Quick test_gate_violated_verdict_rejects;
       Alcotest.test_case "different task_id not found" `Quick test_gate_different_task_id_not_found;
       Alcotest.test_case "latest verdict wins" `Quick test_gate_latest_verdict_wins;
+      Alcotest.test_case "auto-widens past starting limit (#10731)" `Quick
+        test_lookup_auto_widens_past_starting_limit;
+      Alcotest.test_case "auto-widen terminates on genuine miss (#10731)" `Quick
+        test_lookup_auto_widen_terminates_on_genuine_miss;
     ]);
     ("attribution", [
       Alcotest.test_case "satisfied → Passed" `Quick

@@ -11,6 +11,11 @@ let test_agent_status_roundtrip () =
     | Error e -> Alcotest.fail e
   ) statuses
 
+let test_agent_status_of_string_r () =
+  match agent_status_of_string_r "unknown_status" with
+  | Ok _ -> Alcotest.fail "expected error for unknown status"
+  | Error msg -> Alcotest.(check string) "error message" "Unknown agent status: unknown_status" msg
+
 let test_task_status_todo () =
   let status = Todo in
   let json = task_status_to_yojson status in
@@ -272,6 +277,7 @@ let () =
   Alcotest.run "Types" [
     "agent_status", [
       Alcotest.test_case "roundtrip" `Quick test_agent_status_roundtrip;
+      Alcotest.test_case "of_string_r rejects unknown" `Quick test_agent_status_of_string_r;
     ];
     "task_status", [
       Alcotest.test_case "todo" `Quick test_task_status_todo;

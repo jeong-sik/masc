@@ -243,6 +243,7 @@ let adapter_canonical_name_of_provider_kind
   | Anthropic -> cn_claude_api
   | Kimi -> cn_kimi_api
   | OpenAI_compat -> cn_codex_api
+  | DashScope -> cn_codex_api
   | Ollama -> cn_ollama
   | Gemini -> cn_gemini_api
   | Gemini_cli -> cn_gemini
@@ -1412,6 +1413,8 @@ let adapter_of_provider_config (cfg : Llm_provider.Provider_config.t) =
       resolve_direct_adapter cn_kimi_api
   | Ollama ->
       resolve_direct_adapter cn_ollama
+  | DashScope ->
+      resolve_direct_adapter cn_codex_api
   | Glm
   | OpenAI_compat ->
       resolve_adapter_by_cascade_prefix (provider_label_from_registry cfg)
@@ -1544,6 +1547,7 @@ let docker_auth_env_keys_of_provider_config (cfg : Llm_provider.Provider_config.
   | Llm_provider.Provider_config.Gemini_cli
   | Llm_provider.Provider_config.Kimi_cli
   | Llm_provider.Provider_config.Glm
+  | Llm_provider.Provider_config.DashScope
   | Llm_provider.Provider_config.Claude_code
   | Llm_provider.Provider_config.Codex_cli ->
       auth_env_keys_of_provider_kind cfg.kind

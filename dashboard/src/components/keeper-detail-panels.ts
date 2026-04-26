@@ -1151,41 +1151,41 @@ export function RawDataDebug({ keeper }: { keeper: Keeper }) {
   const filter = fieldSearch.value.toLowerCase()
 
   const fields: { title: string; key: string; value: string }[] = [
-    { title: 'Name', key: 'name', value: keeper.name },
-    { title: 'Emoji', key: 'emoji', value: keeper.emoji ?? '-' },
-    { title: 'Korean', key: 'koreanName', value: keeper.koreanName ?? '-' },
-    { title: 'Model', key: 'model', value: keeper.model ?? '-' },
-    { title: 'Status', key: 'status', value: keeper.status },
-    { title: 'Primary', key: 'primaryValue', value: keeper.primaryValue ?? '-' },
-    { title: 'Gen', key: 'generation', value: String(keeper.generation ?? '-') },
-    { title: 'Turns', key: 'turn_count', value: String(keeper.turn_count ?? '-') },
-    { title: 'Context', key: 'context_ratio', value: formatPct(keeper.context_ratio) },
-    { title: 'Heartbeat', key: 'last_heartbeat', value: keeper.last_heartbeat ?? '-' },
-    { title: 'Traits', key: 'traits', value: keeper.traits?.join(', ') || '-' },
-    { title: 'Interests', key: 'interests', value: keeper.interests?.join(', ') || '-' },
+    { title: '이름', key: 'name', value: keeper.name },
+    { title: '이모지', key: 'emoji', value: keeper.emoji ?? '-' },
+    { title: '한글명', key: 'koreanName', value: keeper.koreanName ?? '-' },
+    { title: '모델', key: 'model', value: keeper.model ?? '-' },
+    { title: '상태', key: 'status', value: keeper.status },
+    { title: '주력', key: 'primaryValue', value: keeper.primaryValue ?? '-' },
+    { title: '세대', key: 'generation', value: String(keeper.generation ?? '-') },
+    { title: '턴', key: 'turn_count', value: String(keeper.turn_count ?? '-') },
+    { title: '컨텍스트', key: 'context_ratio', value: formatPct(keeper.context_ratio) },
+    { title: '하트비트', key: 'last_heartbeat', value: keeper.last_heartbeat ?? '-' },
+    { title: '특성', key: 'traits', value: keeper.traits?.join(', ') || '-' },
+    { title: '관심사', key: 'interests', value: keeper.interests?.join(', ') || '-' },
   ]
 
   // Extra fields from keeper object
   const extras: { title: string; value: string; mono?: boolean }[] = []
-  if (keeper.trace_id) extras.push({ title: 'Trace ID', value: keeper.trace_id, mono: true })
-  if (keeper.agent_name) extras.push({ title: 'Agent', value: keeper.agent_name })
-  if (keeper.primary_model) extras.push({ title: 'Primary Model', value: keeper.primary_model, mono: true })
-  if (keeper.active_model) extras.push({ title: 'Active Model', value: keeper.active_model, mono: true })
-  if (keeper.next_model_hint) extras.push({ title: 'Next Model Hint', value: keeper.next_model_hint, mono: true })
-  if (keeper.skill_primary) extras.push({ title: 'Skill (Primary)', value: keeper.skill_primary })
-  if (keeper.skill_secondary?.length) extras.push({ title: 'Skill (Secondary)', value: keeper.skill_secondary.join(', ') })
-  if (keeper.skill_reason) extras.push({ title: 'Skill Reason', value: keeper.skill_reason })
-  if (keeper.context_source) extras.push({ title: 'Context Source', value: keeper.context_source })
-  if (keeper.context_tokens != null) extras.push({ title: 'Context Tokens', value: formatTokens(keeper.context_tokens) })
-  if (keeper.context_max != null) extras.push({ title: 'Context Max', value: formatTokens(keeper.context_max) })
-  if (keeper.memory_recent_note) extras.push({ title: 'Memory Note', value: keeper.memory_recent_note })
-  if (keeper.k2k_count != null) extras.push({ title: 'K2K Count', value: String(keeper.k2k_count) })
-  if (keeper.conversation_tail_count != null) extras.push({ title: 'Conv Tail', value: String(keeper.conversation_tail_count) })
-  if (keeper.handoff_count_total != null) extras.push({ title: 'Total Handoffs', value: String(keeper.handoff_count_total) })
-  if (keeper.compaction_count != null) extras.push({ title: 'Compactions', value: String(keeper.compaction_count) })
-  if (keeper.last_compaction_saved_tokens != null) extras.push({ title: 'Last Compact Saved', value: formatTokens(keeper.last_compaction_saved_tokens) })
-  if (keeper.context?.message_count != null) extras.push({ title: 'Message Count', value: String(keeper.context.message_count) })
-  if (keeper.context?.has_checkpoint != null) extras.push({ title: 'Has Checkpoint', value: keeper.context.has_checkpoint ? 'Yes' : 'No' })
+  if (keeper.trace_id) extras.push({ title: '추적 ID', value: keeper.trace_id, mono: true })
+  if (keeper.agent_name) extras.push({ title: '에이전트', value: keeper.agent_name })
+  if (keeper.primary_model) extras.push({ title: '주력 모델', value: keeper.primary_model, mono: true })
+  if (keeper.active_model) extras.push({ title: '활성 모델', value: keeper.active_model, mono: true })
+  if (keeper.next_model_hint) extras.push({ title: '다음 모델 힌트', value: keeper.next_model_hint, mono: true })
+  if (keeper.skill_primary) extras.push({ title: '스킬 (주)', value: keeper.skill_primary })
+  if (keeper.skill_secondary?.length) extras.push({ title: '스킬 (보조)', value: keeper.skill_secondary.join(', ') })
+  if (keeper.skill_reason) extras.push({ title: '스킬 사유', value: keeper.skill_reason })
+  if (keeper.context_source) extras.push({ title: '컨텍스트 소스', value: keeper.context_source })
+  if (keeper.context_tokens != null) extras.push({ title: '컨텍스트 토큰', value: formatTokens(keeper.context_tokens) })
+  if (keeper.context_max != null) extras.push({ title: '컨텍스트 최대', value: formatTokens(keeper.context_max) })
+  if (keeper.memory_recent_note) extras.push({ title: '메모리 노트', value: keeper.memory_recent_note })
+  if (keeper.k2k_count != null) extras.push({ title: 'K2K 카운트', value: String(keeper.k2k_count) })
+  if (keeper.conversation_tail_count != null) extras.push({ title: '대화 tail', value: String(keeper.conversation_tail_count) })
+  if (keeper.handoff_count_total != null) extras.push({ title: '핸드오프 총합', value: String(keeper.handoff_count_total) })
+  if (keeper.compaction_count != null) extras.push({ title: '압축 횟수', value: String(keeper.compaction_count) })
+  if (keeper.last_compaction_saved_tokens != null) extras.push({ title: '마지막 압축 절약', value: formatTokens(keeper.last_compaction_saved_tokens) })
+  if (keeper.context?.message_count != null) extras.push({ title: '메시지 수', value: String(keeper.context.message_count) })
+  if (keeper.context?.has_checkpoint != null) extras.push({ title: '체크포인트 보유', value: keeper.context.has_checkpoint ? '예' : '아니오' })
 
   const filtered = filter
     ? fields.filter(f => f.title.toLowerCase().includes(filter) || f.key.includes(filter) || f.value.toLowerCase().includes(filter))

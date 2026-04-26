@@ -229,7 +229,6 @@ export function ResolvedPreview({ tools, catMap }: { tools: string[]; catMap: Ma
           autoComplete="off"
           value=${query}
           placeholder="도구/카테고리 필터"
-          aria-label="도구 검색 필터"
           aria-label="해석된 허용 목록 필터"
           onInput=${(e: Event) => setQuery((e.target as HTMLInputElement).value)}
           class="min-w-35 max-w-55 flex-1 rounded border border-[var(--card-border)] bg-[var(--white-3)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--accent)] focus-visible:ring-2 focus-visible:ring-[var(--accent)]/50"

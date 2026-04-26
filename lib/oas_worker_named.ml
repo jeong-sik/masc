@@ -1521,11 +1521,25 @@ let run_named
                  from hard failures.  The exec layer's per-tier
                  "agent errored" log was also demoted to DEBUG in the
                  same change, so this INFO is the canonical per-tier
-                 signal. *)
-              Log.Misc.info "[cascade-fallback] cascade %s: %s failed (%s), trying next" cascade_name provider_cfg.model_id (Oas.Error.to_string sdk_err);
+                 signal.
+
+                 #10629: prepend a classification label so
+                 [cli_wrapped_max_turns] and [hard_quota] inside
+                 NetworkError messages stay legible at the dashboard /
+                 log-grep layer.  Pre-fix the log read "Network error:
+                 claude exited with code 1: {...subtype error_max_turns...}"
+                 which masked that this was a graceful turn-budget exit
+                 (33/day claude_code, 2.5x growth). *)
+              let class_label =
+                if sdk_error_is_hard_quota sdk_err then "[hard_quota] "
+                else if sdk_error_is_max_turns_exceeded sdk_err
+                then "[max_turns] "
+                else ""
+              in
+              Log.Misc.info "[cascade-fallback] cascade %s: %s failed (%s%s), trying next" cascade_name provider_cfg.model_id class_label (Oas.Error.to_string sdk_err);
               Oas_worker_cascade.record_fallback_event capture ~candidate_cfgs
                 ~from_model:provider_cfg.model_id ~to_model:"next"
-                ~reason:(Oas.Error.to_string sdk_err);
+                ~reason:(class_label ^ Oas.Error.to_string sdk_err);
               try_cascade ?resume_checkpoint:next_resume rest new_err
             | Cascade_fsm.Exhausted _ ->
               let observation =

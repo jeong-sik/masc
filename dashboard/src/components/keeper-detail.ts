@@ -257,15 +257,15 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
     : 'border-[var(--card-border)] bg-[var(--white-3)]'
   const runtimeBlockerLabel = runtimeBlockerClass
     ? {
-        ambiguous_post_commit_timeout: 'Post-commit timeout',
-        ambiguous_post_commit_failure: 'Post-commit failure',
-        autonomous_slot_wait_timeout: 'Autonomous slot wait timeout',
-        admission_queue_wait_timeout: 'Admission queue wait timeout',
-        turn_timeout_after_queue_wait: 'Turn timeout after queue wait',
-        oas_timeout_budget: 'OAS timeout budget',
-        turn_timeout: 'Turn timeout',
-        completion_contract_violation: 'Completion contract violation',
-        cascade_exhausted: 'Cascade exhausted',
+        ambiguous_post_commit_timeout: '커밋 후 응답 없음',
+        ambiguous_post_commit_failure: '커밋 후 실패',
+        autonomous_slot_wait_timeout: '자율 슬롯 대기 만료',
+        admission_queue_wait_timeout: '대기열 진입 만료',
+        turn_timeout_after_queue_wait: '대기 후 턴 만료',
+        oas_timeout_budget: 'OAS 응답 만료',
+        turn_timeout: '턴 응답 만료',
+        completion_contract_violation: '완료 계약 위반',
+        cascade_exhausted: '캐스케이드 소진',
       }[runtimeBlockerClass]
     : null
   const trustToneClass =
@@ -276,6 +276,11 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
         : trustDisposition === 'Pass'
           ? 'bg-[var(--ok-10)] text-[var(--ok)]'
           : 'bg-[var(--white-6)] text-[var(--text-strong)]'
+  const trustDispositionLabel = trustDisposition
+    ? ({ Alert: '경보', Pause: '정지', Pass: '통과' } as Record<string, string>)[
+        trustDisposition
+      ] ?? trustDisposition
+    : null
 
   return html`
     <div class="px-6 pt-4">
@@ -307,7 +312,7 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
             ? html`<span>하트비트는 유지되지만 자율 행동은 멈춰 있습니다.</span>`
           : null}
         ${hbStale
-          ? html`<span class="inline-flex items-center rounded-sm px-2 py-0.5 text-2xs font-semibold bg-[var(--bad-soft)] text-[var(--bad)]">Heartbeat stale</span>
+          ? html`<span class="inline-flex items-center rounded-sm px-2 py-0.5 text-2xs font-semibold bg-[var(--bad-soft)] text-[var(--bad)]">하트비트 끊김</span>
             <span>마지막 하트비트: <${TimeAgo} timestamp=${keeper.last_heartbeat} /></span>`
           : null}
         ${continueGate
@@ -320,14 +325,14 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
           : socialFallbackActive
           ? html`
               <span class="inline-flex items-center rounded-sm px-2 py-0.5 text-2xs font-semibold bg-[var(--warn-14)] text-[var(--warn)]">
-                Social fallback
+                소셜 폴백
               </span>
               ${hasActivitySignal ? html`<span class="text-[var(--text-muted)]">${renderActivitySignal()}</span>` : null}
             `
           : runtimeBlockerClass
           ? html`
               <span class="inline-flex items-center rounded-sm px-2 py-0.5 text-2xs font-semibold bg-[var(--bad-soft)] text-[var(--bad)]">
-                ${runtimeBlockerLabel ?? 'Runtime blocker'}
+                ${runtimeBlockerLabel ?? '런타임 차단'}
               </span>
               ${hasActivitySignal ? html`<span class="text-[var(--text-muted)]">${renderActivitySignal()}</span>` : null}
             `
@@ -350,21 +355,21 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
         ${trustDisposition
           ? html`
               <span class="inline-flex items-center rounded-sm px-2 py-0.5 text-2xs font-semibold ${trustToneClass}">
-                Trust ${trustDisposition}
+                검증 ${trustDispositionLabel}
               </span>
             `
           : null}
         ${trustSummary
-          ? html`<span><strong class="text-[var(--text-strong)]">Trust</strong> · ${trustSummary}</span>`
+          ? html`<span><strong class="text-[var(--text-strong)]">검증</strong> · ${trustSummary}</span>`
           : null}
         ${runtimeProofStatus
-          ? html`<span><strong class="text-[var(--text-strong)]">Proof</strong> · ${runtimeProofStatus}</span>`
+          ? html`<span><strong class="text-[var(--text-strong)]">증명</strong> · ${runtimeProofStatus}</span>`
           : null}
         ${requiredTools.length > 0
-          ? html`<span><strong class="text-[var(--text-strong)]">Required</strong> · ${requiredTools.join(', ')}</span>`
+          ? html`<span><strong class="text-[var(--text-strong)]">필요 도구</strong> · ${requiredTools.join(', ')}</span>`
           : null}
         ${usedTools.length > 0
-          ? html`<span><strong class="text-[var(--text-strong)]">Used</strong> · ${usedTools.join(', ')}</span>`
+          ? html`<span><strong class="text-[var(--text-strong)]">사용 도구</strong> · ${usedTools.join(', ')}</span>`
           : null}
         ${missingRequiredTools.length > 0
           ? html`<span class="text-[var(--bad)]"><strong>Missing</strong> · ${missingRequiredTools.join(', ')}</span>`

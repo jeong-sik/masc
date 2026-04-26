@@ -329,12 +329,12 @@ describe('FleetTelemetryPanel', () => {
     expect(fetchTelemetrySummary).toHaveBeenCalledTimes(1)
     expect(fetchDashboardNamespaceTruth).toHaveBeenCalledTimes(1)
     expect(container.textContent).toContain('Keeper 가동률')
-    expect(container.textContent).toContain('1/2 keepers surfaced recent tool activity.')
+    expect(container.textContent).toContain('1/2 키퍼가 최근 도구 활동을 보였습니다.')
     expect(container.textContent).toContain('keeper-alpha')
     expect(container.textContent).toContain('keeper-beta')
     expect(container.textContent).toContain('Keeper 턴 로그')
     expect(container.textContent).toContain('Failure Categories')
-    expect(container.textContent).toContain('Fleet Control Room')
+    expect(container.textContent).toContain('함대 통제실')
   }, 60_000)
 
   it('renders readiness cards, attention events, and keeper goal or sandbox badges', async () => {
@@ -366,8 +366,8 @@ describe('FleetTelemetryPanel', () => {
     })
     await flushUi()
 
-    expect(container.textContent).toContain('Readiness')
-    expect(container.textContent).toContain('Approvals')
+    expect(container.textContent).toContain('준비 상태')
+    expect(container.textContent).toContain('승인 대기')
     expect(container.textContent).toContain('Attention Queue')
     expect(container.textContent).toContain('keeper-alpha is blocked on a continue decision.')
     expect(container.textContent).toContain('goal linked')
@@ -418,7 +418,7 @@ describe('FleetTelemetryPanel', () => {
     })
     await flushUi()
 
-    expect(container.textContent).toContain('Partial telemetry')
+    expect(container.textContent).toContain('부분 텔레메트리')
     expect(container.textContent).toContain('keepers are blocked in the admission queue')
     expect(container.textContent).toContain('Admission queue wait timeout after 45.0s.')
   }, 30_000)
@@ -812,10 +812,10 @@ describe('FleetTelemetryPanel', () => {
     })
     await flushUi()
 
-    expect(container.textContent).toContain('Partial telemetry')
-    expect(container.textContent).toContain('Execution snapshot unavailable: execution down')
+    expect(container.textContent).toContain('부분 텔레메트리')
+    expect(container.textContent).toContain('실행 스냅샷 사용 불가: execution down')
     expect(container.textContent).toContain('keeper-fallback')
-    expect(container.textContent).toContain('Telemetry Stores')
+    expect(container.textContent).toContain('텔레메트리 저장소')
   }, 60_000)
 
   it('warns when the OAS relay lags behind fresher agent telemetry', async () => {
@@ -853,7 +853,7 @@ describe('FleetTelemetryPanel', () => {
     })
     await flushUi()
 
-    expect(container.textContent).toContain('Partial telemetry')
+    expect(container.textContent).toContain('부분 텔레메트리')
     expect(container.textContent).toContain('OAS event relay trails agent events by 16m 40s.')
     expect(container.textContent).toContain('last 17m 10s ago')
   }, 60_000)

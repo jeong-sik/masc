@@ -140,7 +140,7 @@ function WarningBanner({ warnings }: { warnings: string[] }) {
   if (warnings.length === 0) return null
   return html`
     <div class="rounded border border-[var(--warn-20)] bg-[var(--warn-10)] px-3 py-2 text-2xs text-[var(--warn)]">
-      <div class="font-medium text-[var(--warn)]">Partial telemetry</div>
+      <div class="font-medium text-[var(--warn)]">부분 텔레메트리</div>
       <div class="mt-1 flex flex-col gap-1">
         ${warnings.map(warning => html`<div>${warning}</div>`)}
       </div>
@@ -241,34 +241,34 @@ function ControlRoomPanel({ state }: { state: FleetTelemetryState }) {
     <div class="flex flex-col gap-3">
       <div class="grid grid-cols-1 gap-3 xl:grid-cols-4">
         <${SummaryCard}
-          title="Readiness"
+          title="준비 상태"
           value=${readiness.score.toFixed(2)}
           detail=${`${readiness.blocking_count} blockers · ${readiness.decision_required_count} decisions required.`}
           tone=${readinessTone(readiness.status)}
         />
         <${SummaryCard}
-          title="Approvals"
+          title="승인 대기"
           value=${pendingApprovals.toString()}
-          detail=${pendingApprovals > 0 ? 'Operator approval queue is non-empty.' : 'No pending approvals are visible.'}
+          detail=${pendingApprovals > 0 ? '오퍼레이터 승인 대기열이 비어있지 않습니다.' : '대기 중인 승인이 없습니다.'}
           tone=${pendingApprovals > 0 ? 'warn' : 'ok'}
         />
         <${SummaryCard}
-          title="Attention"
+          title="주의"
           value=${attentionEvents.length.toString()}
-          detail=${attentionEvents.length > 0 ? 'Critical blockers and pause-worthy states are surfaced here.' : 'No active attention events are reported.'}
+          detail=${attentionEvents.length > 0 ? '심각한 차단 요인과 일시정지 후보 상태를 표시합니다.' : '활성 주의 이벤트가 없습니다.'}
           tone=${attentionEvents.length > 0 ? 'warn' : 'ok'}
         />
         <${SummaryCard}
-          title="Goal Scope"
+          title="목표 범위"
           value=${state.rows.length > 0 ? `${state.rows.filter(row => row.goal_linked).length}/${state.rows.length}` : '0/0'}
-          detail=${state.rows.some(row => !row.goal_linked) ? 'Some keepers are active without a visible goal link.' : 'All surfaced keepers have a goal anchor.'}
+          detail=${state.rows.some(row => !row.goal_linked) ? '일부 키퍼가 목표 링크 없이 활동 중입니다.' : '모든 표시된 키퍼에 목표가 연결되어 있습니다.'}
           tone=${state.rows.length === 0 || state.rows.every(row => row.goal_linked) ? 'ok' : 'warn'}
         />
       </div>
 
       <div class="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,2fr)_minmax(0,1.3fr)]">
         <div>
-          <div class="mb-1 text-3xs uppercase tracking-wider text-[var(--text-dim)]">Readiness Pillars</div>
+          <div class="mb-1 text-3xs uppercase tracking-wider text-[var(--text-dim)]">준비 상태 항목</div>
           <div class="grid grid-cols-1 gap-2 md:grid-cols-2">
             ${readiness.pillars.map(pillar => html`<${ReadinessPillarCard} pillar=${pillar} />`)}
           </div>
@@ -406,7 +406,7 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
                     class=${row.goal_linked
                       ? 'rounded bg-[var(--ok-10)] px-1.5 py-0.5 text-3xs text-[var(--ok)]'
                       : 'rounded bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs text-[var(--warn)]'}
-                    title=${row.goal_label ?? 'No active goal is linked to this keeper.'}
+                    title=${row.goal_label ?? '이 키퍼에 연결된 활성 목표가 없습니다.'}
                   >
                     ${row.goal_label
                       ? (row.active_goal_count > 1 ? `goal ${row.active_goal_count}` : 'goal linked')
@@ -416,7 +416,7 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
                     class=${row.sandbox_profile
                       ? 'rounded bg-[var(--white-8)] px-1.5 py-0.5 text-3xs text-[var(--text-dim)]'
                       : 'rounded bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs text-[var(--warn)]'}
-                    title=${row.effective_sandbox_image ?? row.sandbox_profile ?? 'Sandbox profile unavailable.'}
+                    title=${row.effective_sandbox_image ?? row.sandbox_profile ?? '샌드박스 프로필 정보 없음.'}
                   >
                     ${row.sandbox_profile ? `sandbox ${row.sandbox_profile}` : 'sandbox unknown'}
                   </span>
@@ -570,7 +570,7 @@ export function FleetTelemetryPanel() {
           ? normalizeKeepers(executionResult.value.keepers)
           : []
       if (executionResult.status === 'rejected' && !isAbortError(executionResult.reason)) {
-        warnings.push(`Execution snapshot unavailable: ${errorMessage(executionResult.reason)}`)
+        warnings.push(`실행 스냅샷 사용 불가: ${errorMessage(executionResult.reason)}`)
       }
 
       const toolQuality =
@@ -614,7 +614,7 @@ export function FleetTelemetryPanel() {
 
       state.value = {
         loading: false,
-        error: hasAnyData ? null : 'No fleet telemetry data available.',
+        error: hasAnyData ? null : '함대 텔레메트리 데이터가 없습니다.',
         warnings,
         rows,
         tool_quality: toolQuality,
@@ -714,35 +714,35 @@ export function FleetTelemetryPanel() {
         <${SummaryCard}
           title="Keeper 가동률"
           value=${`${counts.live}/${value.rows.length || 0}`}
-          detail=${`${counts.toolCovered}/${value.rows.length || 0} keepers surfaced recent tool activity.`}
+          detail=${`${counts.toolCovered}/${value.rows.length || 0} 키퍼가 최근 도구 활동을 보였습니다.`}
           tone=${liveTone}
         />
         <${SummaryCard}
-          title="Runtime Pressure"
+          title="런타임 압박"
           value=${`${counts.hot} hot / ${counts.warn} warn`}
-          detail=${counts.stale > 0 ? `${counts.stale} keepers are stale beyond ${Math.round(STALE_ACTIVITY_SEC / 60)}m.` : 'No stale keepers crossed the activity threshold.'}
+          detail=${counts.stale > 0 ? `${counts.stale}개 키퍼가 ${Math.round(STALE_ACTIVITY_SEC / 60)}분 이상 정체 중입니다.` : '정체된 키퍼가 활동 임계값을 넘기지 않았습니다.'}
           tone=${toneForPressure(counts.hot, counts.warn)}
         />
         <${SummaryCard}
-          title="Tool Success"
+          title="도구 성공률"
           value=${value.tool_quality.total > 0 ? formatPercent(value.tool_quality.success_rate, 1) : 'n/a'}
           detail=${value.tool_quality.total > 0
-            ? `${value.tool_quality.failure.toLocaleString()} failures across ${value.tool_quality.total.toLocaleString()}${value.tool_quality.sampling_mode === 'window_hours' && value.tool_quality.window_hours != null ? ` calls in the last ${value.tool_quality.window_hours}h.` : ' recent calls.'}`
+            ? `${value.tool_quality.total.toLocaleString()}회 중 ${value.tool_quality.failure.toLocaleString()}회 실패${value.tool_quality.sampling_mode === 'window_hours' && value.tool_quality.window_hours != null ? ` (최근 ${value.tool_quality.window_hours}시간).` : ' (최근 호출).'}`
             : value.tool_quality.sampling_mode === 'window_hours' && value.tool_quality.window_hours != null
-              ? `No tool quality samples were recorded in the last ${value.tool_quality.window_hours}h.`
-              : 'No recent tool quality samples were recorded.'}
+              ? `최근 ${value.tool_quality.window_hours}시간 동안 도구 품질 샘플이 없습니다.`
+              : '최근 도구 품질 샘플이 없습니다.'}
           tone=${value.tool_quality.total > 0 ? toneForToolSuccess(value.tool_quality.success_rate) : 'neutral'}
         />
         <${SummaryCard}
-          title="Telemetry Stores"
+          title="텔레메트리 저장소"
           value=${value.total_telemetry_entries.toLocaleString()}
-          detail=${`${sourcesWithData}/${value.telemetry_sources.length || 0} stores currently have data.`}
+          detail=${`${sourcesWithData}/${value.telemetry_sources.length || 0} 저장소에 데이터가 있습니다.`}
           tone=${sourcesWithData > 0 ? 'ok' : 'warn'}
         />
       </div>
 
       <div>
-        <div class="mb-1 text-3xs uppercase tracking-wider text-[var(--text-dim)]">Fleet Control Room</div>
+        <div class="mb-1 text-3xs uppercase tracking-wider text-[var(--text-dim)]">함대 통제실</div>
         <${ControlRoomPanel} state=${value} />
       </div>
 

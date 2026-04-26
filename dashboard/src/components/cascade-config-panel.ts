@@ -573,7 +573,7 @@ function CascadeValidationBanner({ config }: { config: CascadeConfigResponse }) 
         : null}
       ${visibleProfiles.length > 0
         ? html`
-          <div class="text-[var(--text-strong)] mb-1">Rejected Profiles</div>
+          <div class="text-[var(--text-strong)] mb-1">거부된 프로파일</div>
           <ul class="flex flex-col gap-1 text-[var(--text-muted)]">
             ${visibleProfiles.map(invalidProfile => html`
               <${InvalidProfileSummary} invalidProfile=${invalidProfile} />
@@ -715,18 +715,18 @@ function HealthTable({
           <thead>
             <tr class="text-[var(--text-muted)] border-b border-[var(--card-border)]">
               <th class="text-left py-1 w-4"></th>
-              <th class="text-left py-1">Provider</th>
+              <th class="text-left py-1">제공자</th>
               <th
                 class="text-left py-1"
-                title="Operational state: active (recent events), cooldown (blocked), configured (declared but untouched)"
-              >Status</th>
-              <th class="text-right py-1">Success</th>
-              <th class="text-right py-1">Consec. fail</th>
-              <th class="text-right py-1">Events</th>
+                title="운영 상태: 활성 (최근 이벤트), 쿨다운 (차단), 설정됨 (선언만 됨)"
+              >상태</th>
+              <th class="text-right py-1">성공률</th>
+              <th class="text-right py-1">연속 실패</th>
+              <th class="text-right py-1">이벤트</th>
               <th
                 class="text-right py-1"
                 title="응답은 왔지만 accept 게이트에서 거부된 이벤트 수"
-              >Rejected</th>
+              >거부</th>
               <th
                 class="text-right py-1"
                 title="Prompt prefill throughput (entry-weighted mean across this provider's models)"
@@ -739,7 +739,7 @@ function HealthTable({
                 class="text-right py-1"
                 title="Latency p50 / p95 in milliseconds (approximation: weighted mean of per-model percentiles)"
               >Latency p50/p95</th>
-              <th class="text-right py-1">Cooldown</th>
+              <th class="text-right py-1">쿨다운</th>
             </tr>
           </thead>
           <tbody>
@@ -897,17 +897,17 @@ function SloCard({ slo }: { slo: CascadeSloResponse }) {
       </div>
       <div class="grid grid-cols-3 gap-3">
         <${StatCell}
-          label="Ordered Ratio"
+          label="정렬 비율"
           value=${`${ratioPct}%`}
           detail=${`≥ ${targetPct}% 목표`}
         />
         <${StatCell}
-          label="Exhaustion (sample)"
+          label="소진 (샘플)"
           value=${String(exh)}
           detail=${`≤ ${exhTarget} 목표`}
         />
         <${StatCell}
-          label="Burn Rate"
+          label="소진율"
           value=${burn}
           detail=${`≤ ${slo.targets.burn_rate_max.toFixed(1)} 목표`}
         />
@@ -933,11 +933,11 @@ function StrategyTraceTable({
       <thead>
         <tr class="text-[var(--text-muted)] border-b border-[var(--card-border)]">
           <th class="text-left py-1 w-20">시간</th>
-          <th class="text-left py-1">Cascade</th>
-          <th class="text-left py-1">Strategy</th>
-          <th class="text-right py-1">Cycle</th>
-          <th class="text-right py-1">In/Out</th>
-          <th class="text-right py-1">Backoff(ms)</th>
+          <th class="text-left py-1">캐스케이드</th>
+          <th class="text-left py-1">전략</th>
+          <th class="text-right py-1">사이클</th>
+          <th class="text-right py-1">입/출</th>
+          <th class="text-right py-1">백오프(ms)</th>
           <th class="text-left py-1">결과</th>
         </tr>
       </thead>
@@ -1001,11 +1001,11 @@ function ClientCapacityTable({ capacity }: { capacity: CascadeClientCapacityResp
       <thead>
         <tr class="text-[var(--text-muted)] border-b border-[var(--card-border)]">
           <th class="text-left py-1 w-4"></th>
-          <th class="text-left py-1">Kind</th>
-          <th class="text-left py-1">Key</th>
-          <th class="text-right py-1">Active</th>
-          <th class="text-right py-1">Available</th>
-          <th class="text-right py-1">Total</th>
+          <th class="text-left py-1">종류</th>
+          <th class="text-left py-1">키</th>
+          <th class="text-right py-1">활성</th>
+          <th class="text-right py-1">가용</th>
+          <th class="text-right py-1">전체</th>
         </tr>
       </thead>
       <tbody>
@@ -1240,7 +1240,7 @@ export function CascadeConfigPanel() {
         ? html`<${LoadingState}>cascade snapshot 불러오는 중...<//>`
         : null}
 
-      <${Card} title="Cascade Routing">
+      <${Card} title="캐스케이드 라우팅">
         ${config
           ? (() => {
               const keeperGroups = groupKeepersByCanonicalCascade(config.keeper_profiles)
@@ -1257,17 +1257,17 @@ export function CascadeConfigPanel() {
                 <${CascadeValidationBanner} config=${config} />
                 <div class="grid grid-cols-3 gap-3 mb-3">
                   <${StatCell}
-                    label="Profiles"
+                    label="프로파일"
                     value=${config.profiles.length}
                     detail=${catalogSourceSummary(config)}
                   />
                   <${StatCell}
-                    label="Keepers"
+                    label="키퍼"
                     value=${config.keeper_profiles.length}
                     detail="cascade_name 등록됨"
                   />
                   <${StatCell}
-                    label="Drift"
+                    label="드리프트"
                     value=${driftTotal}
                     detail="raw ≠ canonical"
                   />
@@ -1300,22 +1300,22 @@ export function CascadeConfigPanel() {
         onRefresh=${() => loadCascadeData(resource)}
       />
 
-      <${Card} title="Health Tracker">
+      <${Card} title="헬스 트래커">
         ${health
           ? html`
             <div class="grid grid-cols-3 gap-3 mb-3">
               <${StatCell}
-                label="Window"
+                label="윈도우"
                 value=${`${health.window_sec}s`}
-                detail=${`${health.providers.length} tracked`}
+                detail=${`${health.providers.length} 추적 중`}
               />
               <${StatCell}
-                label="Cooldown Threshold"
+                label="쿨다운 임계값"
                 value=${health.cooldown_threshold}
                 detail="연속 실패"
               />
               <${StatCell}
-                label="Cooldown"
+                label="쿨다운"
                 value=${`${health.cooldown_sec}s`}
                 detail="활성 시 차단 시간"
               />
@@ -1325,7 +1325,7 @@ export function CascadeConfigPanel() {
           : null}
       <//>
 
-      <${Card} title="Client Capacity">
+      <${Card} title="클라이언트 용량">
         ${capacity
           ? html`<${ClientCapacityTable} capacity=${capacity} />`
           : null}

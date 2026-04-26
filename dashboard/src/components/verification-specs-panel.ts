@@ -79,11 +79,11 @@ function SpecsTable({ entries }: { entries: TlaSpecEntry[] }) {
       <table class="w-full text-xs tabular-nums">
         <thead class="text-left text-slate-400">
           <tr>
-            <th class="py-1 pr-4">Spec</th>
-            <th class="py-1 pr-4">Category</th>
+            <th class="py-1 pr-4">사양</th>
+            <th class="py-1 pr-4">분류</th>
             <th class="py-1 pr-4">Cfg</th>
-            <th class="py-1 pr-4">Path</th>
-            <th class="py-1">Modified</th>
+            <th class="py-1 pr-4">경로</th>
+            <th class="py-1">수정일</th>
           </tr>
         </thead>
         <tbody>

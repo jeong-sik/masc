@@ -293,6 +293,7 @@ jobs:
           bash scripts/ci/check-determinism-contract.sh
           bash scripts/audit-hardcoding-truth.sh --fail-on-confirmed
           bash scripts/ci/check-credential-audits.sh
+          bash scripts/ci/check-accept-fd-lifecycle.sh
 
   health:
     name: Health

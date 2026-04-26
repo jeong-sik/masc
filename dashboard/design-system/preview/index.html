@@ -11,21 +11,21 @@
     html, body { margin:0; padding:0; background: var(--bg-0); color: var(--fg-1); font-family: var(--font-sans); min-height:100vh; }
     .hub { max-width: 1200px; margin: 0 auto; padding: 48px 32px 120px; }
     .brand { display:flex; align-items:center; gap:12px; margin-bottom: 6px; }
-    .brand-mark { width:28px; height:28px; border-radius:4px; background: linear-gradient(135deg, var(--brass-1), var(--brass-3)); box-shadow: 0 0 12px rgb(var(--brass-glow)/.35), inset 0 0 6px rgb(var(--brass-glow)/.3); }
+    .brand-mark { width:28px; height:28px; border-radius:4px; background: linear-gradient(135deg, var(--brass-1), var(--color-accent-fg-dim)); box-shadow: 0 0 12px rgb(var(--color-accent-glow)/.35), inset 0 0 6px rgb(var(--color-accent-glow)/.3); }
     h1 { font: var(--type-title); font-size: 22px; font-weight: 600; letter-spacing: -.01em; margin: 0; font-family: var(--font-mono); }
     .sub { color: var(--fg-3); font-size: 13px; margin-top: 4px; }
     h2 { font: var(--type-label); text-transform: uppercase; letter-spacing: .08em; color: var(--fg-3); font-weight: 600; font-size: 11px; margin: 40px 0 12px; padding-bottom: 6px; border-bottom: 1px solid var(--line-2); }
     .grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
     a.card { display:flex; flex-direction:column; gap:6px; padding: 14px 16px; background: var(--bg-1); border:1px solid var(--line-1); border-radius: var(--r-1); text-decoration:none; color: inherit; transition: background .15s, border-color .15s, transform .15s; position:relative; overflow:hidden; }
     a.card:hover { background: var(--bg-2); border-color: var(--line-2); }
-    a.card .n { font: var(--type-micro); color: var(--fg-4); letter-spacing: .08em; }
+    a.card .n { font: var(--type-micro); color: var(--color-fg-disabled); letter-spacing: .08em; }
     a.card .title { font-size: 14px; color: var(--fg-1); font-weight: 500; }
     a.card .desc { font-size: 12px; color: var(--fg-3); line-height: 1.4; }
     a.card .stripe { position:absolute; left:0; top:0; bottom:0; width:2px; background: var(--line-2); }
     a.card:hover .stripe { background: var(--brass-1); }
-    a.card .count { margin-top: 4px; font-family: var(--font-mono); font-size: 10px; color: var(--fg-4); letter-spacing: .04em; }
+    a.card .count { margin-top: 4px; font-family: var(--font-mono); font-size: 10px; color: var(--color-fg-disabled); letter-spacing: .04em; }
     .tag { display:inline-block; font-family: var(--font-mono); font-size: 10px; padding: 1px 6px; border:1px solid var(--line-2); border-radius: 2px; color: var(--fg-3); letter-spacing: .04em; margin-right: 4px; }
-    .stamp { position: absolute; top: 24px; right: 32px; font-family: var(--font-mono); font-size: 10px; color: var(--fg-4); letter-spacing: .06em; }
+    .stamp { position: absolute; top: 24px; right: 32px; font-family: var(--font-mono); font-size: 10px; color: var(--color-fg-disabled); letter-spacing: .06em; }
   </style>
 </head>
 <body>

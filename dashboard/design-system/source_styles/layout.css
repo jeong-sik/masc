@@ -28,7 +28,7 @@
 .topbar-brand .brand-dot {
   display: inline-block; width: 7px; height: 7px;
   background: var(--brass-1); border-radius: 50%; margin-right: 8px;
-  box-shadow: 0 0 6px rgb(var(--brass-glow) / .5);
+  box-shadow: 0 0 6px rgb(var(--color-accent-glow) / .5);
 }
 .topbar-sep { width: 1px; height: 14px; background: var(--line-2); flex-shrink: 0; }
 .topbar-crumbs { display: flex; gap: var(--sp-2); color: var(--fg-3); min-width: 0; overflow: hidden; }
@@ -79,8 +79,8 @@
   color: var(--fg-1); font: var(--fs-13)/1 var(--font-sans);
   padding: 8px 12px; height: 32px; min-width: 0;
 }
-.composer-input::placeholder { color: var(--fg-4); }
-.composer-input:focus { border-color: var(--brass-3); outline: none; }
+.composer-input::placeholder { color: var(--color-fg-disabled); }
+.composer-input:focus { border-color: var(--color-accent-fg-dim); outline: none; }
 
 .pane { display: flex; flex-direction: column; min-height: 0; min-width: 0; border-bottom: 1px solid var(--line-1); }
 .pane:last-child { border-bottom: none; }
@@ -159,7 +159,7 @@
 .zone-deck {
   grid-area: deck;
   background: var(--bg-1);
-  border-top: 1px solid var(--line-3);
+  border-top: 1px solid var(--color-border-divider);
   display: flex; flex-direction: column;
   min-height: 0; min-width: 0;
   overflow: hidden;

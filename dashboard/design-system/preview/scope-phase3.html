@@ -11,13 +11,13 @@
 <style>
   body { margin:0; padding:0 0 96px; background:var(--bg-0); color:var(--fg-1); font:13px/1.45 var(--font-sans); }
   .pg { max-width:1320px; margin:0 auto; padding:32px 40px 0; }
-  .pg-head { display:grid; grid-template-columns:1fr auto; gap:24px; align-items:end; padding-bottom:20px; margin-bottom:28px; border-bottom:1px solid var(--line-3); }
+  .pg-head { display:grid; grid-template-columns:1fr auto; gap:24px; align-items:end; padding-bottom:20px; margin-bottom:28px; border-bottom:1px solid var(--color-border-divider); }
   .eyebrow { font:500 10px/1 var(--font-mono); letter-spacing:.12em; text-transform:uppercase; color:var(--brass-1); margin-bottom:10px; }
   h1 { margin:0 0 8px; font:500 26px/1.15 var(--font-sans); color:var(--fg-0); }
   .sub { max-width:760px; color:var(--fg-3); }
   .meta { text-align:right; font:10px/1.5 var(--font-mono); color:var(--fg-3); letter-spacing:.08em; text-transform:uppercase; }
   .meta b { color:var(--brass-1); font-weight:500; }
-  .toc { display:grid; grid-template-columns:repeat(5,1fr); gap:1px; background:var(--line-3); border:1px solid var(--line-3); margin-bottom:34px; }
+  .toc { display:grid; grid-template-columns:repeat(5,1fr); gap:1px; background:var(--color-border-divider); border:1px solid var(--color-border-divider); margin-bottom:34px; }
   .toc a { display:block; padding:12px 14px; background:var(--bg-1); color:var(--fg-2); text-decoration:none; font:11px/1.55 var(--font-mono); }
   .toc a b { display:block; color:var(--brass-1); font-size:10px; letter-spacing:.1em; text-transform:uppercase; margin-bottom:6px; }
   .zones { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; margin-bottom:36px; }
@@ -34,7 +34,7 @@
   code { color:var(--brass-1); font-family:var(--font-mono); }
   table { width:100%; border-collapse:collapse; background:var(--bg-1); border:1px solid var(--line-2); font:11px/1.45 var(--font-mono); }
   th, td { padding:8px 10px; border-bottom:1px solid var(--line-1); text-align:left; vertical-align:top; }
-  th { color:var(--fg-4); background:var(--bg-2); text-transform:uppercase; letter-spacing:.08em; }
+  th { color:var(--color-fg-disabled); background:var(--bg-2); text-transform:uppercase; letter-spacing:.08em; }
   td:first-child { color:var(--brass-1); white-space:nowrap; }
   .accept { margin-top:30px; padding:16px 18px; background:var(--bg-1); border:1px solid var(--line-2); border-left:2px solid var(--brass-1); }
   .accept h2 { margin:0 0 10px; font:500 15px/1.2 var(--font-sans); }

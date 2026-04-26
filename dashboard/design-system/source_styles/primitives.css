@@ -18,12 +18,12 @@
   border-radius: var(--r-1);
   white-space: nowrap;
 }
-.chip.is-brass { color: var(--brass-1); border-color: var(--brass-3); background: rgb(var(--brass-glow) / .08); }
-.chip.is-ok    { color: var(--ok);    border-color: rgb(var(--ok-glow) / .35); background: rgb(var(--ok-glow) / .08); }
-.chip.is-warn  { color: var(--warn);  border-color: rgb(var(--warn-glow) / .35); background: rgb(var(--warn-glow) / .08); }
-.chip.is-err   { color: var(--err);   border-color: rgb(var(--err-glow) / .35); background: rgb(var(--err-glow) / .08); }
-.chip.is-info  { color: var(--info);  border-color: rgb(var(--info-glow) / .35); background: rgb(var(--info-glow) / .08); }
-.chip.is-stalled { color: var(--stalled); border-color: rgb(var(--stalled-glow) / .35); background: rgb(var(--stalled-glow) / .08); }
+.chip.is-brass { color: var(--brass-1); border-color: var(--color-accent-fg-dim); background: rgb(var(--color-accent-glow) / .08); }
+.chip.is-ok    { color: var(--color-status-ok);    border-color: rgb(var(--ok-glow) / .35); background: rgb(var(--ok-glow) / .08); }
+.chip.is-warn  { color: var(--color-status-warn);  border-color: rgb(var(--warn-glow) / .35); background: rgb(var(--warn-glow) / .08); }
+.chip.is-err   { color: var(--color-status-err);   border-color: rgb(var(--err-glow) / .35); background: rgb(var(--err-glow) / .08); }
+.chip.is-info  { color: var(--color-status-info);  border-color: rgb(var(--info-glow) / .35); background: rgb(var(--info-glow) / .08); }
+.chip.is-stalled { color: var(--color-status-stalled); border-color: rgb(var(--stalled-glow) / .35); background: rgb(var(--stalled-glow) / .08); }
 .chip.is-ghost { background: transparent; border-color: var(--line-2); }
 
 /* chip size variants */
@@ -46,13 +46,13 @@
   border-radius: 999px;
   white-space: nowrap;
 }
-.pill.is-running { color: var(--brass-1); background: rgb(var(--brass-glow) / .12); }
+.pill.is-running { color: var(--brass-1); background: rgb(var(--color-accent-glow) / .12); }
 .pill.is-paused  { color: var(--fg-3);    background: var(--bg-3); }
-.pill.is-ok      { color: var(--ok);      background: rgb(var(--ok-glow) / .12); }
-.pill.is-err     { color: var(--err);     background: rgb(var(--err-glow) / .12); }
-.pill.is-warn    { color: var(--warn);    background: rgb(var(--warn-glow) / .12); }
-.pill.is-info    { color: var(--info);    background: rgb(var(--info-glow) / .12); }
-.pill.is-stalled { color: var(--stalled); background: rgb(var(--stalled-glow) / .12); }
+.pill.is-ok      { color: var(--color-status-ok);      background: rgb(var(--ok-glow) / .12); }
+.pill.is-err     { color: var(--color-status-err);     background: rgb(var(--err-glow) / .12); }
+.pill.is-warn    { color: var(--color-status-warn);    background: rgb(var(--warn-glow) / .12); }
+.pill.is-info    { color: var(--color-status-info);    background: rgb(var(--info-glow) / .12); }
+.pill.is-stalled { color: var(--color-status-stalled); background: rgb(var(--stalled-glow) / .12); }
 
 /* ════════ BAR ════════
    Progress bar — fill inside track. Used in tasks, goals, budgets. */
@@ -69,9 +69,9 @@
   background: var(--brass-2);
   transition: width var(--t-med) var(--ease-out);
 }
-.bar.is-ok  > .fill { background: var(--ok); }
-.bar.is-warn > .fill { background: var(--warn); }
-.bar.is-err > .fill { background: var(--err); }
+.bar.is-ok  > .fill { background: var(--color-status-ok); }
+.bar.is-warn > .fill { background: var(--color-status-warn); }
+.bar.is-err > .fill { background: var(--color-status-err); }
 
 /* bar with segments (a/b/c split — e.g. passing/failing/skipped) */
 .bar-seg {
@@ -79,10 +79,10 @@
   background: var(--bg-3); border-radius: 2px; overflow: hidden;
 }
 .bar-seg > span { display: block; height: 100%; }
-.bar-seg .seg-ok { background: var(--ok); }
-.bar-seg .seg-err { background: var(--err); }
-.bar-seg .seg-warn { background: var(--warn); }
-.bar-seg .seg-idle { background: var(--idle); }
+.bar-seg .seg-ok { background: var(--color-status-ok); }
+.bar-seg .seg-err { background: var(--color-status-err); }
+.bar-seg .seg-warn { background: var(--color-status-warn); }
+.bar-seg .seg-idle { background: var(--color-status-idle); }
 
 /* ════════ SPARK ════════
    Tiny bar-chart trend. Used in KPI strip + provider table.
@@ -98,11 +98,11 @@
   border-radius: 1px;
 }
 .spark.is-brass > i { background: var(--brass-2); }
-.spark.is-ok > i { background: var(--ok); }
-.spark.is-err > i { background: var(--err); }
-.spark.is-warn > i { background: var(--warn); }
+.spark.is-ok > i { background: var(--color-status-ok); }
+.spark.is-err > i { background: var(--color-status-err); }
+.spark.is-warn > i { background: var(--color-status-warn); }
 /* last bar brightens to signal "now" */
-.spark > i:last-child { background: var(--brass-1); box-shadow: 0 0 3px rgb(var(--brass-glow) / .5); }
+.spark > i:last-child { background: var(--brass-1); box-shadow: 0 0 3px rgb(var(--color-accent-glow) / .5); }
 
 /* ════════ SECTION HEAD ════════
    Panel header strip — small-caps label + optional right chip. */
@@ -118,7 +118,7 @@
   color: var(--fg-3);
   flex-shrink: 0;
 }
-.section-head > .count { margin-left: auto; font-family: var(--font-mono); color: var(--fg-4); font-weight: 500; }
+.section-head > .count { margin-left: auto; font-family: var(--font-mono); color: var(--color-fg-disabled); font-weight: 500; }
 .section-head > .tail  { margin-left: auto; display: flex; gap: 4px; align-items: center; }
 
 /* ════════ KV ROW ════════
@@ -146,16 +146,16 @@
 .btn.primary {
   background: var(--brass-2);
   color: var(--bg-0);
-  border-color: var(--brass-3);
+  border-color: var(--color-accent-fg-dim);
   font-weight: 600;
 }
 .btn.primary:hover { background: var(--brass-1); color: var(--bg-0); }
 
 .btn.danger {
   border-color: rgb(var(--err-glow) / .4);
-  color: var(--err);
+  color: var(--color-status-err);
 }
-.btn.danger:hover { background: rgb(var(--err-glow) / .1); color: var(--err); }
+.btn.danger:hover { background: rgb(var(--err-glow) / .1); color: var(--color-status-err); }
 
 .btn.ghost { border-color: transparent; color: var(--fg-3); }
 .btn.ghost:hover { background: var(--bg-2); color: var(--fg-1); }
@@ -189,11 +189,11 @@
   background: var(--line-2);
   border-radius: 1px 1px 0 0;
 }
-.band.is-running { background: var(--brass-1); box-shadow: 0 0 6px rgb(var(--brass-glow) / .5); }
-.band.is-ok      { background: var(--ok); }
-.band.is-warn    { background: var(--warn); }
-.band.is-err     { background: var(--err); }
-.band.is-stalled { background: var(--stalled); }
+.band.is-running { background: var(--brass-1); box-shadow: 0 0 6px rgb(var(--color-accent-glow) / .5); }
+.band.is-ok      { background: var(--color-status-ok); }
+.band.is-warn    { background: var(--color-status-warn); }
+.band.is-err     { background: var(--color-status-err); }
+.band.is-stalled { background: var(--color-status-stalled); }
 
 /* ════════ SEP ════════ */
 .sep-v { width: 1px; height: 16px; background: var(--line-2); margin: 0 var(--sp-2); }
@@ -208,8 +208,8 @@
   background: var(--bg-3);
   color: var(--fg-1);
 }
-.tk.is-brass { color: var(--brass-1); background: rgb(var(--brass-glow) / .08); }
-.tk.is-err   { color: var(--err);     background: rgb(var(--err-glow) / .08); }
+.tk.is-brass { color: var(--brass-1); background: rgb(var(--color-accent-glow) / .08); }
+.tk.is-err   { color: var(--color-status-err);     background: rgb(var(--err-glow) / .08); }
 
 /* ════════ SCROLL PANEL ════════
    Standard scrolling inner panel — flex:1 + min-height:0 + overflow. */
@@ -219,7 +219,7 @@
 /* ════════ TYPE ROLE CLASSES ════════
    Prefer these over raw --fs-* sizes in new styles. Role names
    match tokens.css. Each applies font shorthand + sensible color. */
-.t-micro   { font: var(--type-micro);   color: var(--fg-4); letter-spacing: var(--track-caps); text-transform: uppercase; }
+.t-micro   { font: var(--type-micro);   color: var(--color-fg-disabled); letter-spacing: var(--track-caps); text-transform: uppercase; }
 .t-caption { font: var(--type-caption); color: var(--fg-3); letter-spacing: var(--track-wide); }
 .t-label   { font: var(--type-label);   color: var(--fg-3); letter-spacing: var(--track-caps); text-transform: uppercase; font-weight: var(--fw-semi); }
 .t-meta    { font: var(--type-meta);    color: var(--fg-3); }
@@ -233,7 +233,7 @@
 
 /* colour-modifier classes that pair with type roles */
 .t-dim { color: var(--fg-3); }
-.t-mute { color: var(--fg-4); }
+.t-mute { color: var(--color-fg-disabled); }
 .t-brass { color: var(--brass-1); }
 .t-ok { color: var(--ok-fg); }
 .t-warn { color: var(--warn-fg); }
@@ -304,8 +304,8 @@ body[data-grid="1"]::before {
   pointer-events: none;
   z-index: var(--z-toast);
   background-image:
-    linear-gradient(to right,  rgb(var(--brass-glow) / .06) 1px, transparent 1px),
-    linear-gradient(to bottom, rgb(var(--brass-glow) / .06) 1px, transparent 1px);
+    linear-gradient(to right,  rgb(var(--color-accent-glow) / .06) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(var(--color-accent-glow) / .06) 1px, transparent 1px);
   background-size: var(--grid-unit) var(--grid-unit);
 }
 
@@ -319,7 +319,7 @@ body[data-grid="1"]::before {
 @keyframes anim-slide-right { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: none; } }
 @keyframes anim-pop         { from { opacity: 0; transform: scale(.92); } to { opacity: 1; transform: none; } }
 @keyframes anim-pulse       { 0%,100% { opacity: 1; } 50% { opacity: .55; } }
-@keyframes anim-pulse-glow  { 0%,100% { box-shadow: 0 0 0 rgb(var(--brass-glow) / 0); } 50% { box-shadow: 0 0 10px rgb(var(--brass-glow) / .5); } }
+@keyframes anim-pulse-glow  { 0%,100% { box-shadow: 0 0 0 rgb(var(--color-accent-glow) / 0); } 50% { box-shadow: 0 0 10px rgb(var(--color-accent-glow) / .5); } }
 @keyframes anim-pulse-err   { 0%,100% { box-shadow: 0 0 0 rgb(var(--err-glow)   / 0); } 50% { box-shadow: 0 0 10px rgb(var(--err-glow)   / .55); } }
 @keyframes anim-pulse-warn  { 0%,100% { box-shadow: 0 0 0 rgb(var(--warn-glow)  / 0); } 50% { box-shadow: 0 0 10px rgb(var(--warn-glow)  / .5); } }
 @keyframes anim-pulse-ok    { 0%,100% { box-shadow: 0 0 0 rgb(var(--ok-glow)    / 0); } 50% { box-shadow: 0 0 10px rgb(var(--ok-glow)    / .5); } }
@@ -382,7 +382,7 @@ body[data-grid="1"]::before {
 .is-loading::after {
   content: "";
   position: absolute; inset: 0;
-  background: linear-gradient(90deg, transparent, rgb(var(--brass-glow) / .08), transparent);
+  background: linear-gradient(90deg, transparent, rgb(var(--color-accent-glow) / .08), transparent);
   background-size: 200% 100%;
   animation: anim-shimmer 1.4s linear infinite;
 }

@@ -21,11 +21,11 @@
 .wf-bar {
   position: absolute; top: 2px; height: 10px; border-radius: 1px; min-width: 2px;
 }
-.wf-bar.s-err { background: var(--err); }
-.wf-bar.s-info { background: var(--info); }
+.wf-bar.s-err { background: var(--color-status-err); }
+.wf-bar.s-info { background: var(--color-status-info); }
 .wf-bar.s-tool { background: var(--brass-2); }
-.wf-bar.s-text { background: var(--info); opacity: .6; }
-.wf-bar.s-noop { background: var(--idle); opacity: .4; }
+.wf-bar.s-text { background: var(--color-status-info); opacity: .6; }
+.wf-bar.s-noop { background: var(--color-status-idle); opacity: .4; }
 .wf-bar:hover { outline: 1px solid var(--color-fg-primary); z-index: 2; }
 
 .wf-scale-ctrl { display: flex; gap: 2px; margin-left: auto; }
@@ -35,7 +35,7 @@
   padding: 3px 7px; cursor: pointer; border-radius: 2px; letter-spacing: .03em;
 }
 .wf-scale-ctrl button:hover { color: var(--color-fg-primary); }
-.wf-scale-ctrl button.is-active { background: var(--color-bg-elevated); border-color: var(--brass-3); color: var(--color-accent-fg); }
+.wf-scale-ctrl button.is-active { background: var(--color-bg-elevated); border-color: var(--color-accent-fg-dim); color: var(--color-accent-fg); }
 .wf-scale-ctrl + .pane-meta { margin-left: var(--sp-3); }
 
 .feed-row {
@@ -51,14 +51,14 @@
 .feed-ts { color: var(--color-fg-muted); }
 .feed-kind { font-size: 10px; color: var(--color-fg-secondary); text-transform: uppercase; letter-spacing: .04em; }
 .feed-kind.k-tool { color: var(--color-accent-fg); }
-.feed-kind.k-error { color: var(--err); }
-.feed-kind.k-noop { color: var(--idle); }
-.feed-kind.k-text { color: var(--info); }
-.feed-kind.k-claim { color: var(--ok); }
+.feed-kind.k-error { color: var(--color-status-err); }
+.feed-kind.k-noop { color: var(--color-status-idle); }
+.feed-kind.k-text { color: var(--color-status-info); }
+.feed-kind.k-claim { color: var(--color-status-ok); }
 .feed-actor { color: var(--color-fg-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .feed-body {
   color: var(--color-fg-primary);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font-family: var(--font-sans); font-size: var(--fs-12);
 }
-.feed-row.is-error .feed-body { color: var(--err); }
+.feed-row.is-error .feed-body { color: var(--color-status-err); }

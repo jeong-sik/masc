@@ -78,6 +78,6 @@
 }
 .tk-arrow { display: inline-block; margin-right: 2px; font-size: 8px; }
 
-.tk-item.tk-up   .tk-delta { color: var(--ok); }
-.tk-item.tk-down .tk-delta { color: var(--err); }
+.tk-item.tk-up   .tk-delta { color: var(--color-status-ok); }
+.tk-item.tk-down .tk-delta { color: var(--color-status-err); }
 .tk-item.tk-flat .tk-delta { color: var(--color-fg-muted); }

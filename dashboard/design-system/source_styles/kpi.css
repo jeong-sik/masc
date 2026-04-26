@@ -78,11 +78,11 @@
 .kpi-delta {
   font: var(--type-caption);
   font-variant-numeric: tabular-nums;
-  color: var(--fg-4);
+  color: var(--color-fg-disabled);
 }
 .kpi-delta.up   { color: var(--ok-fg); }
 .kpi-delta.down { color: var(--err-fg); }
-.kpi-delta.flat { color: var(--fg-4); }
+.kpi-delta.flat { color: var(--color-fg-disabled); }
 
 /* ── Spark (bottom-right corner) ── */
 .kpi-spark {
@@ -110,7 +110,7 @@
 .kpi-cell.is-crit .kpi-value { color: var(--err-fg); }
 .kpi-cell.is-crit {
   background: linear-gradient(0deg, var(--err-soft), transparent 60%);
-  box-shadow: inset 2px 0 0 var(--err);
+  box-shadow: inset 2px 0 0 var(--color-status-err);
 }
 .kpi-cell.is-crit:hover {
   background: linear-gradient(0deg, var(--err-soft), var(--hover-overlay));
@@ -119,12 +119,12 @@
 .kpi-cell.is-warn .kpi-value { color: var(--warn-fg); }
 .kpi-cell.is-warn {
   background: linear-gradient(0deg, var(--warn-soft), transparent 70%);
-  box-shadow: inset 2px 0 0 var(--warn);
+  box-shadow: inset 2px 0 0 var(--color-status-warn);
 }
 
 .kpi-cell.is-ok .kpi-value { color: var(--ok-fg); }
 .kpi-cell.is-ok {
-  box-shadow: inset 2px 0 0 var(--ok);
+  box-shadow: inset 2px 0 0 var(--color-status-ok);
 }
 
 .kpi-cell.is-brass .kpi-value { color: var(--brass-fg); }

@@ -39,20 +39,20 @@
 .layer-toggle:hover { color: var(--color-fg-primary); background: var(--color-bg-elevated); }
 .layer-toggle .glyph {
   width: 10px; height: 10px; border-radius: 50%;
-  background: var(--fg-4);
+  background: var(--color-fg-disabled);
   transition: all var(--t-fast) var(--ease);
 }
 .layer-toggle.is-on .glyph { transform: scale(1.2); }
-.layer-toggle.is-on[data-layer="time"]     { color: var(--warn);   border-color: rgb(var(--warn-glow) / .4); background: rgb(var(--warn-glow) / .06); }
-.layer-toggle.is-on[data-layer="time"]     .glyph { background: var(--warn); box-shadow: 0 0 5px rgb(var(--warn-glow) / .6); }
-.layer-toggle.is-on[data-layer="parallel"] { color: var(--info);   border-color: rgb(var(--info-glow) / .4); background: rgb(var(--info-glow) / .06); }
-.layer-toggle.is-on[data-layer="parallel"] .glyph { background: var(--info); box-shadow: 0 0 5px rgb(var(--info-glow) / .6); }
-.layer-toggle.is-on[data-layer="tools"]    { color: var(--color-accent-fg); border-color: var(--brass-3); background: rgb(var(--brass-glow) / .08); }
-.layer-toggle.is-on[data-layer="tools"]    .glyph { background: var(--color-accent-fg); box-shadow: 0 0 5px rgb(var(--brass-glow) / .6); }
-.layer-toggle.is-on[data-layer="approve"]  { color: var(--ok);     border-color: rgb(var(--ok-glow) / .4); background: rgb(var(--ok-glow) / .06); }
-.layer-toggle.is-on[data-layer="approve"]  .glyph { background: var(--ok); box-shadow: 0 0 5px rgb(var(--ok-glow) / .6); }
-.layer-toggle.is-on[data-layer="notes"]    { color: var(--stalled); border-color: rgb(var(--stalled-glow) / .4); background: rgb(var(--stalled-glow) / .06); }
-.layer-toggle.is-on[data-layer="notes"]    .glyph { background: var(--stalled); box-shadow: 0 0 5px rgb(var(--stalled-glow) / .6); }
+.layer-toggle.is-on[data-layer="time"]     { color: var(--color-status-warn);   border-color: rgb(var(--warn-glow) / .4); background: rgb(var(--warn-glow) / .06); }
+.layer-toggle.is-on[data-layer="time"]     .glyph { background: var(--color-status-warn); box-shadow: 0 0 5px rgb(var(--warn-glow) / .6); }
+.layer-toggle.is-on[data-layer="parallel"] { color: var(--color-status-info);   border-color: rgb(var(--info-glow) / .4); background: rgb(var(--info-glow) / .06); }
+.layer-toggle.is-on[data-layer="parallel"] .glyph { background: var(--color-status-info); box-shadow: 0 0 5px rgb(var(--info-glow) / .6); }
+.layer-toggle.is-on[data-layer="tools"]    { color: var(--color-accent-fg); border-color: var(--color-accent-fg-dim); background: rgb(var(--color-accent-glow) / .08); }
+.layer-toggle.is-on[data-layer="tools"]    .glyph { background: var(--color-accent-fg); box-shadow: 0 0 5px rgb(var(--color-accent-glow) / .6); }
+.layer-toggle.is-on[data-layer="approve"]  { color: var(--color-status-ok);     border-color: rgb(var(--ok-glow) / .4); background: rgb(var(--ok-glow) / .06); }
+.layer-toggle.is-on[data-layer="approve"]  .glyph { background: var(--color-status-ok); box-shadow: 0 0 5px rgb(var(--ok-glow) / .6); }
+.layer-toggle.is-on[data-layer="notes"]    { color: var(--color-status-stalled); border-color: rgb(var(--stalled-glow) / .4); background: rgb(var(--stalled-glow) / .06); }
+.layer-toggle.is-on[data-layer="notes"]    .glyph { background: var(--color-status-stalled); box-shadow: 0 0 5px rgb(var(--stalled-glow) / .6); }
 
 .layer-opacity {
   display: none;
@@ -77,7 +77,7 @@
   -webkit-appearance: none; appearance: none;
   width: 10px; height: 10px; border-radius: 50%;
   background: var(--color-accent-fg); cursor: pointer;
-  box-shadow: 0 0 4px rgb(var(--brass-glow) / .6);
+  box-shadow: 0 0 4px rgb(var(--color-accent-glow) / .6);
 }
 
 .layer-explode {
@@ -96,9 +96,9 @@
 }
 .layer-explode:hover { background: var(--color-bg-elevated); color: var(--color-fg-primary); }
 .layer-explode.is-on {
-  background: rgb(var(--brass-glow) / .12);
+  background: rgb(var(--color-accent-glow) / .12);
   color: var(--color-accent-fg);
-  border-color: var(--brass-3);
+  border-color: var(--color-accent-fg-dim);
 }
 
 /* ════════ DOT-MATRIX BACKGROUND ════════ */
@@ -106,7 +106,7 @@
   --dot-op: 0.12;
   --dot-size: 14px;
   background-image:
-    radial-gradient(circle at center, rgb(var(--brass-glow) / var(--dot-op)) 0.7px, transparent 1.2px);
+    radial-gradient(circle at center, rgb(var(--color-accent-glow) / var(--dot-op)) 0.7px, transparent 1.2px);
   background-size: var(--dot-size) var(--dot-size);
   background-position: 0 0;
   background-color: var(--color-bg-page);
@@ -147,7 +147,7 @@ body[data-explode="1"] .lyr-notes    { transform: translateZ(200px); }
 body[data-explode="1"] .lyr::before {
   content: "";
   position: absolute; inset: -4px;
-  border: 1px dashed rgb(var(--brass-glow) / .15);
+  border: 1px dashed rgb(var(--color-accent-glow) / .15);
   border-radius: 2px;
   pointer-events: none;
 }
@@ -162,14 +162,14 @@ body[data-explode="1"] .lyr::before {
 .time-stripe {
   position: absolute; left: 4px; width: 3px;
   border-radius: 1px;
-  background: var(--warn);
+  background: var(--color-status-warn);
   opacity: 0;
   transition: opacity var(--t-med) var(--ease), top var(--t-slow) var(--ease-out), height var(--t-slow) var(--ease-out);
 }
-.time-stripe.age-recent   { opacity: 1;   background: var(--warn);   box-shadow: 0 0 8px rgb(var(--warn-glow) / .6); }
-.time-stripe.age-near     { opacity: .7;  background: var(--warn); }
+.time-stripe.age-recent   { opacity: 1;   background: var(--color-status-warn);   box-shadow: 0 0 8px rgb(var(--warn-glow) / .6); }
+.time-stripe.age-near     { opacity: .7;  background: var(--color-status-warn); }
 .time-stripe.age-mid      { opacity: .4;  background: var(--color-fg-muted); }
-.time-stripe.age-far      { opacity: .2;  background: var(--fg-4); }
+.time-stripe.age-far      { opacity: .2;  background: var(--color-fg-disabled); }
 .time-stripe .time-label {
   position: absolute; left: 6px; top: 0;
   font-family: var(--font-mono); font-size: var(--fs-9);
@@ -227,18 +227,18 @@ body[data-explode="1"] .lyr::before {
 .tool-mark .tool-icon {
   font-size: 10px;
   color: var(--color-accent-fg);
-  text-shadow: 0 0 4px rgb(var(--brass-glow) / .6);
+  text-shadow: 0 0 4px rgb(var(--color-accent-glow) / .6);
   line-height: 1;
 }
 .tool-mark .tool-bar {
   width: 16px; height: 2px;
   background: linear-gradient(90deg, var(--color-accent-fg), transparent);
   border-radius: 1px;
-  box-shadow: 0 0 3px rgb(var(--brass-glow) / .4);
+  box-shadow: 0 0 3px rgb(var(--color-accent-glow) / .4);
 }
 .tool-mark .tool-count {
   font-size: var(--fs-9);
-  color: var(--fg-4);
+  color: var(--color-fg-disabled);
   font-family: var(--font-mono);
 }
 
@@ -257,12 +257,12 @@ body[data-explode="1"] .lyr::before {
 }
 .approve-stamp.k-approve {
   background: rgb(var(--ok-glow) / .05);
-  border-left: 2px solid var(--ok);
+  border-left: 2px solid var(--color-status-ok);
   box-shadow: inset 0 0 40px rgb(var(--ok-glow) / .04);
 }
 .approve-stamp.k-flag {
   background: rgb(var(--err-glow) / .07);
-  border-left: 2px solid var(--err);
+  border-left: 2px solid var(--color-status-err);
   box-shadow: inset 0 0 40px rgb(var(--err-glow) / .06);
   animation: flag-pulse 2.4s ease-in-out infinite;
 }
@@ -280,8 +280,8 @@ body[data-explode="1"] .lyr::before {
   transform: rotate(-12deg);
   text-transform: uppercase;
 }
-.approve-stamp.k-approve .stamp-glyph { color: var(--ok); }
-.approve-stamp.k-flag    .stamp-glyph { color: var(--err); }
+.approve-stamp.k-approve .stamp-glyph { color: var(--color-status-ok); }
+.approve-stamp.k-flag    .stamp-glyph { color: var(--color-status-err); }
 
 /* ════════ LYR: NOTES ════════
    Append-able pinned note cards, anchored to blocks. */
@@ -317,23 +317,23 @@ body[data-explode="1"] .lyr::before {
   position: absolute; left: -10px; top: 7px;
   width: 6px; height: 6px;
   border-radius: 50%;
-  background: var(--stalled);
+  background: var(--color-status-stalled);
   box-shadow: 0 0 5px rgb(var(--stalled-glow) / .6);
 }
 .note-pin .np-head {
   display: flex; align-items: baseline; gap: 6px;
   margin-bottom: 4px;
   font-family: var(--font-mono); font-size: var(--fs-9);
-  color: var(--stalled);
+  color: var(--color-status-stalled);
   letter-spacing: .06em; text-transform: uppercase;
 }
 .note-pin .np-head .np-author { color: var(--color-fg-muted); text-transform: none; letter-spacing: 0; }
-.note-pin .np-head .np-ts { margin-left: auto; color: var(--fg-4); }
+.note-pin .np-head .np-ts { margin-left: auto; color: var(--color-fg-disabled); }
 .note-pin .np-body { line-height: 1.4; color: var(--color-fg-primary); font-size: var(--fs-11); }
 .note-pin .np-actions {
   display: flex; gap: 4px; margin-top: 6px;
   font-size: var(--fs-9);
-  color: var(--fg-4);
+  color: var(--color-fg-disabled);
   font-family: var(--font-mono);
 }
 .note-pin .np-actions button {
@@ -341,7 +341,7 @@ body[data-explode="1"] .lyr::before {
   color: var(--color-fg-muted); cursor: pointer; font-size: var(--fs-9);
   letter-spacing: .06em; text-transform: uppercase;
 }
-.note-pin .np-actions button:hover { color: var(--stalled); }
+.note-pin .np-actions button:hover { color: var(--color-status-stalled); }
 .note-pin .np-actions .np-spacer { flex: 1; }
 
 /* Append-note composer at the bottom of notes layer */
@@ -353,7 +353,7 @@ body[data-explode="1"] .lyr::before {
   border: 1px dashed rgb(var(--stalled-glow) / .3);
   border-radius: var(--r-1);
   padding: 8px;
-  color: var(--stalled);
+  color: var(--color-status-stalled);
   font-size: var(--fs-10);
   font-family: var(--font-mono);
   letter-spacing: .06em;
@@ -376,7 +376,7 @@ body[data-explode="1"] .lyr::before {
 }
 .code-line.is-focused {
   filter: none;
-  background: rgb(var(--brass-glow) / .04);
+  background: rgb(var(--color-accent-glow) / .04);
 }
 
 /* ════════ Block recency aura (active when time layer on) ════════ */
@@ -385,7 +385,7 @@ body[data-layer-time="1"] .code-line.is-recent {
 }
 body[data-layer-time="1"] .code-line.is-very-recent {
   background: linear-gradient(90deg, rgb(var(--warn-glow) / .12), transparent 40%);
-  box-shadow: inset 3px 0 0 var(--warn);
+  box-shadow: inset 3px 0 0 var(--color-status-warn);
 }
 
 /* when explode is on, hide minimap (clutters the 3D view) */

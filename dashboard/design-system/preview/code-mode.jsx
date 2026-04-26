@@ -117,7 +117,7 @@ function Editor({ height = 520 }) {
         <div className="editor-minimap">
           <svg viewBox="0 0 60 520" width="100%" height="100%">
             {EDITOR_LINES.map((ln, i) => (
-              <rect key={i} x="6" y={i * 14 + 8} width={Math.random() * 40 + 6} height="2" fill={ln.diff === 'add' ? 'var(--ok)' : ln.diff === 'del' ? 'var(--err)' : 'var(--fg-4)'} opacity={ln.diff ? 0.7 : 0.3} />
+              <rect key={i} x="6" y={i * 14 + 8} width={Math.random() * 40 + 6} height="2" fill={ln.diff === 'add' ? 'var(--color-status-ok)' : ln.diff === 'del' ? 'var(--color-status-err)' : 'var(--color-fg-disabled)'} opacity={ln.diff ? 0.7 : 0.3} />
             ))}
             <rect className="minimap-viewport" x="0" y="40" width="60" height="140" />
           </svg>
@@ -272,24 +272,24 @@ function SplitMode({ w = 1400, h = 680 }) {
     <div style={{ display: 'grid', gridTemplateRows: '32px 26px 52px 180px minmax(0,1fr) 28px', width: w, height: h, background: 'var(--bg-0)', border: '1px solid var(--line-1)', borderRadius: 'var(--r-1)', overflow: 'hidden' }}>
       {/* topbar */}
       <div style={{ display: 'flex', alignItems: 'center', padding: '0 12px', gap: 10, background: 'var(--bg-1)', borderBottom: '1px solid var(--line-2)', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--fg-2)' }}>
-        <div style={{ width: 14, height: 14, borderRadius: 2, background: 'linear-gradient(135deg, var(--brass-1), var(--brass-3))' }} />
+        <div style={{ width: 14, height: 14, borderRadius: 2, background: 'linear-gradient(135deg, var(--brass-1), var(--color-accent-fg-dim))' }} />
         <b style={{ color: 'var(--fg-1)', letterSpacing: '.04em' }}>MASC</b>
-        <span style={{ color: 'var(--fg-4)' }}>v0.42.1</span>
+        <span style={{ color: 'var(--color-fg-disabled)' }}>v0.42.1</span>
         <span style={{ width: 1, height: 14, background: 'var(--line-2)' }} />
-        <span>goal-merge-blockers <span style={{ color: 'var(--fg-4)' }}>▾</span></span>
+        <span>goal-merge-blockers <span style={{ color: 'var(--color-fg-disabled)' }}>▾</span></span>
         <div className="mode-switch" style={{ marginLeft: 12 }}>
           <button>COCKPIT</button>
           <button className="is-active">SPLIT</button>
           <button>CODE</button>
         </div>
-        <div style={{ marginLeft: 'auto', color: 'var(--fg-4)', fontSize: 10 }}>16:32:45Z · 5 keepers live</div>
+        <div style={{ marginLeft: 'auto', color: 'var(--color-fg-disabled)', fontSize: 10 }}>16:32:45Z · 5 keepers live</div>
       </div>
       {/* ticker */}
       <div style={{ display: 'flex', alignItems: 'center', padding: '0 12px', gap: 16, background: 'linear-gradient(to bottom, var(--bg-1), var(--bg-0))', borderBottom: '1px solid var(--line-1)', fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--fg-3)', whiteSpace: 'nowrap', overflow: 'hidden' }}>
         <span>16:32:40 <span style={{ color: 'var(--brass-1)' }}>nick0cave</span> edit keeper.ts:12</span>
-        <span>16:32:38 <span style={{ color: 'var(--err)' }}>qa-king</span> flag keeper.ts:10</span>
-        <span>16:32:33 <span style={{ color: 'var(--ok)' }}>sangsu</span> refactor tick()</span>
-        <span>16:32:29 <span style={{ color: 'var(--info)' }}>masc</span> commit c99012</span>
+        <span>16:32:38 <span style={{ color: 'var(--color-status-err)' }}>qa-king</span> flag keeper.ts:10</span>
+        <span>16:32:33 <span style={{ color: 'var(--color-status-ok)' }}>sangsu</span> refactor tick()</span>
+        <span>16:32:29 <span style={{ color: 'var(--color-status-info)' }}>masc</span> commit c99012</span>
       </div>
       {/* kpi mini */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6,1fr)', gap: 1, background: 'var(--line-1)', borderBottom: '1px solid var(--line-2)' }}>
@@ -301,21 +301,21 @@ function SplitMode({ w = 1400, h = 680 }) {
           { l: 'cascade', v: '@2 · 1.24s' },
           { l: 'flags', v: '3', s: 'err' },
         ].map((k, i) => (
-          <div key={i} style={{ background: k.s === 'brass' ? 'rgb(var(--brass-glow)/.06)' : 'var(--bg-1)', padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 2, boxShadow: k.s === 'err' ? 'inset 2px 0 0 var(--err)' : k.s === 'ok' ? 'inset 2px 0 0 var(--ok)' : k.s === 'brass' ? 'inset 2px 0 0 var(--brass-1)' : 'none' }}>
+          <div key={i} style={{ background: k.s === 'brass' ? 'rgb(var(--color-accent-glow)/.06)' : 'var(--bg-1)', padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 2, boxShadow: k.s === 'err' ? 'inset 2px 0 0 var(--color-status-err)' : k.s === 'ok' ? 'inset 2px 0 0 var(--color-status-ok)' : k.s === 'brass' ? 'inset 2px 0 0 var(--brass-1)' : 'none' }}>
             <div style={{ fontSize: 9, letterSpacing: '.08em', color: 'var(--fg-3)', textTransform: 'uppercase', fontWeight: 600 }}>{k.l}</div>
             <div style={{ fontFamily: 'var(--font-mono)', fontSize: 15, color: k.s === 'err' ? 'var(--err-fg)' : k.s === 'ok' ? 'var(--ok-fg)' : k.s === 'brass' ? 'var(--brass-1)' : 'var(--fg-1)' }}>{k.v}</div>
           </div>
         ))}
       </div>
       {/* cockpit strip (180px): lifeline + mini swimlanes */}
-      <div style={{ display: 'grid', gridTemplateColumns: '280px minmax(0,1fr) 220px', background: 'var(--bg-0)', borderBottom: '2px solid var(--brass-3)', minHeight: 0, overflow: 'hidden' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '280px minmax(0,1fr) 220px', background: 'var(--bg-0)', borderBottom: '2px solid var(--color-accent-fg-dim)', minHeight: 0, overflow: 'hidden' }}>
         <div style={{ padding: 8, borderRight: '1px solid var(--line-1)', display: 'flex', flexDirection: 'column', gap: 4 }}>
           <div style={{ fontSize: 9, letterSpacing: '.08em', color: 'var(--fg-3)', textTransform: 'uppercase', fontWeight: 600 }}>FLEET</div>
           {['nick0cave', 'masc-improver', 'sangsu', 'qa-king', 'rama'].map((k, i) => (
             <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 6, fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--fg-2)' }}>
-              <span style={{ width: 5, height: 5, borderRadius: '50%', background: ['var(--brass-1)', 'var(--ok)', 'var(--info)', 'var(--err)', 'var(--stalled)'][i], boxShadow: i === 0 ? '0 0 5px rgb(var(--brass-glow)/.7)' : 'none' }} />
+              <span style={{ width: 5, height: 5, borderRadius: '50%', background: ['var(--brass-1)', 'var(--color-status-ok)', 'var(--color-status-info)', 'var(--color-status-err)', 'var(--color-status-stalled)'][i], boxShadow: i === 0 ? '0 0 5px rgb(var(--color-accent-glow)/.7)' : 'none' }} />
               {k}
-              <span style={{ marginLeft: 'auto', color: 'var(--fg-4)', fontSize: 9 }}>t-{(0x9f2a + i).toString(16)}</span>
+              <span style={{ marginLeft: 'auto', color: 'var(--color-fg-disabled)', fontSize: 9 }}>t-{(0x9f2a + i).toString(16)}</span>
             </div>
           ))}
         </div>
@@ -324,11 +324,11 @@ function SplitMode({ w = 1400, h = 680 }) {
           {[0, 1, 2, 3, 4].map(i => (
             <div key={i} style={{ position: 'relative', height: 22, borderBottom: '1px solid var(--line-1)' }}>
               {[...Array(6)].map((_, j) => (
-                <span key={j} style={{ position: 'absolute', left: `${(j * 14 + Math.random() * 8)}%`, top: '50%', transform: 'translateY(-50%)', width: 8, height: 4, background: j === 5 ? 'var(--brass-2)' : ['var(--fg-2)', 'var(--info)', 'var(--ok)'][j % 3], borderRadius: 1 }} />
+                <span key={j} style={{ position: 'absolute', left: `${(j * 14 + Math.random() * 8)}%`, top: '50%', transform: 'translateY(-50%)', width: 8, height: 4, background: j === 5 ? 'var(--brass-2)' : ['var(--fg-2)', 'var(--color-status-info)', 'var(--color-status-ok)'][j % 3], borderRadius: 1 }} />
               ))}
             </div>
           ))}
-          <div style={{ position: 'absolute', top: 24, bottom: 8, left: '82%', width: 1, background: 'linear-gradient(to bottom, transparent, rgb(var(--brass-glow)/.7) 20%, rgb(var(--brass-glow)/.7) 80%, transparent)', boxShadow: '0 0 8px 1px rgb(var(--brass-glow)/.4)' }} />
+          <div style={{ position: 'absolute', top: 24, bottom: 8, left: '82%', width: 1, background: 'linear-gradient(to bottom, transparent, rgb(var(--color-accent-glow)/.7) 20%, rgb(var(--color-accent-glow)/.7) 80%, transparent)', boxShadow: '0 0 8px 1px rgb(var(--color-accent-glow)/.4)' }} />
         </div>
         <div style={{ padding: 8, borderLeft: '1px solid var(--line-1)' }}>
           <div style={{ fontSize: 9, letterSpacing: '.08em', color: 'var(--fg-3)', textTransform: 'uppercase', fontWeight: 600, marginBottom: 4 }}>NOW · keeper.ts</div>
@@ -391,8 +391,8 @@ function ExplodeLayers({ w = 900, h = 560 }) {
       <div style={{ padding: 12 }}>
         {[1, .85, .65, .4, .3, .7, .55, .95, .8].map((o, i) => (
           <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, height: 18 }}>
-            <span style={{ width: 3, height: 12, background: 'var(--warn)', opacity: o, boxShadow: o > 0.9 ? '0 0 6px rgb(var(--warn-glow)/.7)' : 'none', borderRadius: 1 }} />
-            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: o > 0.7 ? 'var(--warn)' : 'var(--fg-3)' }}>{o > 0.9 ? '2m' : o > 0.7 ? '8m' : o > 0.4 ? '1h' : '4h'} · {['nick', 'nick', 'masc', 'sangsu', 'masc', 'sangsu', 'sangsu', 'nick', 'masc'][i]}</span>
+            <span style={{ width: 3, height: 12, background: 'var(--color-status-warn)', opacity: o, boxShadow: o > 0.9 ? '0 0 6px rgb(var(--warn-glow)/.7)' : 'none', borderRadius: 1 }} />
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: o > 0.7 ? 'var(--color-status-warn)' : 'var(--fg-3)' }}>{o > 0.9 ? '2m' : o > 0.7 ? '8m' : o > 0.4 ? '1h' : '4h'} · {['nick', 'nick', 'masc', 'sangsu', 'masc', 'sangsu', 'sangsu', 'nick', 'masc'][i]}</span>
           </div>
         ))}
       </div>
@@ -400,20 +400,20 @@ function ExplodeLayers({ w = 900, h = 560 }) {
     { id: 'parallel', label: 'L2 · PARALLEL · keeper cursors', z: 200, bg: 'rgb(106 142 176 / .08)', render: () => (
       <svg viewBox={`0 0 ${w} ${h}`} style={{ width: '100%', height: '100%' }}>
         <path d={`M 40 40 Q ${w / 2} 60 ${w - 40} 120`} fill="none" stroke="var(--brass-1)" strokeWidth="1.5" opacity=".7" />
-        <path d={`M 40 120 Q ${w / 2} 180 ${w - 40} 80`} fill="none" stroke="var(--ok)" strokeWidth="1.5" opacity=".6" />
-        <path d={`M 40 200 Q ${w / 2} 160 ${w - 40} 220`} fill="none" stroke="var(--info)" strokeWidth="1.5" opacity=".6" strokeDasharray="3 3" />
+        <path d={`M 40 120 Q ${w / 2} 180 ${w - 40} 80`} fill="none" stroke="var(--color-status-ok)" strokeWidth="1.5" opacity=".6" />
+        <path d={`M 40 200 Q ${w / 2} 160 ${w - 40} 220`} fill="none" stroke="var(--color-status-info)" strokeWidth="1.5" opacity=".6" strokeDasharray="3 3" />
         <circle cx={w - 40} cy={120} r="4" fill="var(--brass-1)" />
-        <circle cx={w - 40} cy={80} r="4" fill="var(--ok)" />
-        <circle cx={w - 40} cy={220} r="4" fill="var(--info)" />
+        <circle cx={w - 40} cy={80} r="4" fill="var(--color-status-ok)" />
+        <circle cx={w - 40} cy={220} r="4" fill="var(--color-status-info)" />
       </svg>
     ) },
-    { id: 'tools', label: 'L3 · TOOLS · frequency glyphs', z: 300, bg: 'rgb(var(--brass-glow) / .06)', render: () => (
+    { id: 'tools', label: 'L3 · TOOLS · frequency glyphs', z: 300, bg: 'rgb(var(--color-accent-glow) / .06)', render: () => (
       <div style={{ padding: 12 }}>
         {[['◈', 12, 'emit'], ['⌘', 8, 'run'], ['⟳', 5, 'tick'], ['∎', 3, 'guard']].map(([g, n, lab], i) => (
           <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, height: 24 }}>
-            <span style={{ color: 'var(--brass-1)', fontSize: 12, textShadow: '0 0 4px rgb(var(--brass-glow)/.6)' }}>{g}</span>
+            <span style={{ color: 'var(--brass-1)', fontSize: 12, textShadow: '0 0 4px rgb(var(--color-accent-glow)/.6)' }}>{g}</span>
             <span style={{ width: n * 6, height: 2, background: 'linear-gradient(90deg, var(--brass-1), transparent)', borderRadius: 1 }} />
-            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--fg-4)' }}>{n}×</span>
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--color-fg-disabled)' }}>{n}×</span>
             <span style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--brass-1)' }}>{lab}</span>
           </div>
         ))}
@@ -421,18 +421,18 @@ function ExplodeLayers({ w = 900, h = 560 }) {
     ) },
     { id: 'approve', label: 'L4 · APPROVE · block stamp', z: 400, bg: 'rgb(107 158 107 / .05)', render: () => (
       <div style={{ padding: 12, position: 'relative' }}>
-        <div style={{ padding: '8px 16px', background: 'rgb(107 158 107 / .08)', borderLeft: '2px solid var(--ok)', borderRadius: 2, display: 'flex', alignItems: 'center', height: 60 }}>
-          <span style={{ marginLeft: 'auto', fontFamily: 'var(--font-mono)', fontSize: 36, color: 'var(--ok)', opacity: 0.15, letterSpacing: '.08em', fontWeight: 700, transform: 'rotate(-12deg)' }}>LGTM</span>
+        <div style={{ padding: '8px 16px', background: 'rgb(107 158 107 / .08)', borderLeft: '2px solid var(--color-status-ok)', borderRadius: 2, display: 'flex', alignItems: 'center', height: 60 }}>
+          <span style={{ marginLeft: 'auto', fontFamily: 'var(--font-mono)', fontSize: 36, color: 'var(--color-status-ok)', opacity: 0.15, letterSpacing: '.08em', fontWeight: 700, transform: 'rotate(-12deg)' }}>LGTM</span>
         </div>
-        <div style={{ marginTop: 8, padding: '8px 16px', background: 'rgb(196 106 90 / .08)', borderLeft: '2px solid var(--err)', borderRadius: 2, display: 'flex', alignItems: 'center', height: 60 }}>
-          <span style={{ marginLeft: 'auto', fontFamily: 'var(--font-mono)', fontSize: 36, color: 'var(--err)', opacity: 0.15, letterSpacing: '.08em', fontWeight: 700, transform: 'rotate(-12deg)' }}>FLAG</span>
+        <div style={{ marginTop: 8, padding: '8px 16px', background: 'rgb(196 106 90 / .08)', borderLeft: '2px solid var(--color-status-err)', borderRadius: 2, display: 'flex', alignItems: 'center', height: 60 }}>
+          <span style={{ marginLeft: 'auto', fontFamily: 'var(--font-mono)', fontSize: 36, color: 'var(--color-status-err)', opacity: 0.15, letterSpacing: '.08em', fontWeight: 700, transform: 'rotate(-12deg)' }}>FLAG</span>
         </div>
       </div>
     ) },
     { id: 'notes', label: 'L5 · NOTES · pinned cards', z: 500, bg: 'rgb(138 106 160 / .08)', render: () => (
       <div style={{ padding: 12 }}>
         <div style={{ width: 240, background: 'linear-gradient(180deg, rgb(138 106 160 / .20), rgb(138 106 160 / .08))', border: '1px solid rgb(var(--stalled-glow)/.4)', borderRadius: 'var(--r-1)', padding: '6px 10px', fontSize: 11, color: 'var(--fg-1)', boxShadow: '0 4px 16px rgb(0 0 0 / .5)', backdropFilter: 'blur(4px)' }}>
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--stalled)', letterSpacing: '.06em', textTransform: 'uppercase', marginBottom: 4 }}>NOTE · sangsu · 2h</div>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--color-status-stalled)', letterSpacing: '.06em', textTransform: 'uppercase', marginBottom: 4 }}>NOTE · sangsu · 2h</div>
           <div style={{ fontSize: 11, lineHeight: 1.4 }}>GoalRef changed the shape of goal from string to {'{'}id,priority{'}'}. Check downstream emit() contracts.</div>
         </div>
       </div>
@@ -448,7 +448,7 @@ function ExplodeLayers({ w = 900, h = 560 }) {
         ))}
       </div>
       {/* z-axis legend */}
-      <div style={{ position: 'absolute', top: 10, right: 10, zIndex: 10, fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--fg-4)', letterSpacing: '.08em', textTransform: 'uppercase', textAlign: 'right', lineHeight: 1.6 }}>
+      <div style={{ position: 'absolute', top: 10, right: 10, zIndex: 10, fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--color-fg-disabled)', letterSpacing: '.08em', textTransform: 'uppercase', textAlign: 'right', lineHeight: 1.6 }}>
         Z-AXIS STACK<br />
         <span style={{ color: 'var(--fg-3)' }}>5 observational layers</span>
       </div>
@@ -460,7 +460,7 @@ function ExplodeLayers({ w = 900, h = 560 }) {
               position: 'absolute', top: 80, left: 60, right: 60, bottom: 60,
               transform: `translateZ(${L.z * (pose === 0 ? 0 : pose === 2 ? .5 : 1)}px)`,
               background: L.bg,
-              border: `1px ${pose === 0 ? 'solid' : 'dashed'} rgb(var(--brass-glow)/.25)`,
+              border: `1px ${pose === 0 ? 'solid' : 'dashed'} rgb(var(--color-accent-glow)/.25)`,
               borderRadius: 'var(--r-1)',
               opacity: pose === 0 ? (i === 0 ? 1 : 0.35) : 1,
               transition: 'transform .7s cubic-bezier(.2,.7,.3,1), opacity .4s',
@@ -474,7 +474,7 @@ function ExplodeLayers({ w = 900, h = 560 }) {
         </div>
       </div>
       {/* caption */}
-      <div style={{ position: 'absolute', bottom: 10, left: 10, right: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--fg-4)', letterSpacing: '.04em' }}>
+      <div style={{ position: 'absolute', bottom: 10, left: 10, right: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--color-fg-disabled)', letterSpacing: '.04em' }}>
         <span>editor-scroll · perspective: 1800px · preserve-3d</span>
         <span>body[data-explode=1] .lyr {'{'} translateZ(40·80·120·160·200px) {'}'}</span>
       </div>

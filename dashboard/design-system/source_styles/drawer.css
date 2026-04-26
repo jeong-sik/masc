@@ -60,12 +60,12 @@
   border: 1px solid var(--line-1); border-radius: var(--r-1);
   color: var(--fg-2); letter-spacing: .02em;
 }
-.chip-err { background: rgb(196 106 90 / .1); border-color: rgb(196 106 90 / .3); color: var(--err); }
-.chip.k-tool { color: var(--brass-1); border-color: var(--brass-3); }
-.chip.k-claim { color: var(--ok); border-color: rgb(107 158 107 / .4); }
-.chip.k-text { color: var(--info); border-color: rgb(106 142 176 / .4); }
+.chip-err { background: rgb(196 106 90 / .1); border-color: rgb(196 106 90 / .3); color: var(--color-status-err); }
+.chip.k-tool { color: var(--brass-1); border-color: var(--color-accent-fg-dim); }
+.chip.k-claim { color: var(--color-status-ok); border-color: rgb(107 158 107 / .4); }
+.chip.k-text { color: var(--color-status-info); border-color: rgb(106 142 176 / .4); }
 .chip.k-noop { color: var(--fg-3); }
-.chip.k-error { color: var(--err); border-color: rgb(196 106 90 / .4); }
+.chip.k-error { color: var(--color-status-err); border-color: rgb(196 106 90 / .4); }
 
 .pre {
   font-family: var(--font-mono); font-size: 10.5px; line-height: 1.45;
@@ -113,7 +113,7 @@
   padding: 4px 6px; border-radius: var(--r-1); font-size: var(--fs-11);
 }
 .fsm-trans:hover { background: var(--bg-2); }
-.fsm-trans.is-active { background: var(--bg-3); outline: 1px solid var(--brass-3); }
+.fsm-trans.is-active { background: var(--bg-3); outline: 1px solid var(--color-accent-fg-dim); }
 
 .bar {
   display: inline-block; flex: 1; height: 6px;
@@ -122,10 +122,10 @@
 }
 .bar-fill { display: block; height: 100%; background: var(--fg-3); }
 .bar-fill.k-tool { background: var(--brass-2); }
-.bar-fill.k-claim { background: var(--ok); }
-.bar-fill.k-text { background: var(--info); }
-.bar-fill.k-noop { background: var(--idle); }
-.bar-fill.k-error { background: var(--err); }
+.bar-fill.k-claim { background: var(--color-status-ok); }
+.bar-fill.k-text { background: var(--color-status-info); }
+.bar-fill.k-noop { background: var(--color-status-idle); }
+.bar-fill.k-error { background: var(--color-status-err); }
 
 /* ── Domain-detail drawer (tasks/goals/memory) ── */
 .dd-tag-row { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 10px; }
@@ -148,7 +148,7 @@
   background: var(--bg-2); border: 1px solid var(--line-1);
   font-size: var(--fs-12);
 }
-.dd-goal-row.is-active { border-color: var(--brass-3); background: var(--bg-3); }
+.dd-goal-row.is-active { border-color: var(--color-accent-fg-dim); background: var(--bg-3); }
 .dd-goal-tag {
   font-family: var(--font-mono); font-size: 10px;
   color: var(--fg-3); text-transform: uppercase;
@@ -156,7 +156,7 @@
 }
 .dd-goal-row.is-active .dd-goal-tag { color: var(--brass-1); }
 
-.chip.k-active   { color: var(--ok); border-color: rgb(107 158 107 / .4); }
-.chip.k-blocked  { color: var(--warn); border-color: rgb(194 157 94 / .4); }
-.chip.k-stalled  { color: var(--idle); }
-.chip.k-done     { color: var(--info); border-color: rgb(106 142 176 / .4); }
+.chip.k-active   { color: var(--color-status-ok); border-color: rgb(107 158 107 / .4); }
+.chip.k-blocked  { color: var(--color-status-warn); border-color: rgb(194 157 94 / .4); }
+.chip.k-stalled  { color: var(--color-status-idle); }
+.chip.k-done     { color: var(--color-status-info); border-color: rgb(106 142 176 / .4); }

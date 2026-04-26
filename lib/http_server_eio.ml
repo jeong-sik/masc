@@ -667,17 +667,32 @@ let run ~sw ~net ~clock config routes =
          let flow, client_addr = Eio.Net.accept ~sw socket in
          reset_backoff ();
          Eio.Fiber.fork ~sw (fun () ->
-           try
-             Httpun_eio.Server.create_connection_handler
-               ~sw
-               ~request_handler
-               ~error_handler
-               client_addr
-               flow
-           with
-           | Eio.Cancel.Cancelled _ as e -> raise e
-           | exn ->
-             Log.Http.error "Connection error: %s" (Printexc.to_string exn))
+           (* Per-connection switch so the accepted [flow] is released
+              when the H1 handler exits, not when the long-lived server
+              [sw] closes. Without this each connection's TCP FD lingers
+              in [CLOSED] state until shutdown — same class of bug
+              addressed for the WS standalone accept loop in #10840 and
+              already adopted by [http_server_h2.ml] and three accept
+              points in [server_bootstrap_http.ml]. Currently latent
+              here because the MCP HTTP port has low connection churn. *)
+           Eio.Switch.run (fun conn_sw ->
+             Eio.Switch.on_release conn_sw (fun () ->
+               try Eio.Flow.close flow with
+               | Eio.Cancel.Cancelled _ as e -> raise e
+               | exn ->
+                 Log.Http.warn "[http-eio] flow close failed: %s"
+                   (Printexc.to_string exn));
+             try
+               Httpun_eio.Server.create_connection_handler
+                 ~sw:conn_sw
+                 ~request_handler
+                 ~error_handler
+                 client_addr
+                 flow
+             with
+             | Eio.Cancel.Cancelled _ as e -> raise e
+             | exn ->
+               Log.Http.error "Connection error: %s" (Printexc.to_string exn)))
        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
          if is_cancelled exn then raise exn;
          let delay = !backoff_s in

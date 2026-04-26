@@ -69,12 +69,12 @@ export function ExcusePatterns() {
   const jsonStr = data ? JSON.stringify(data, null, 2) : '[]'
 
   return html`
-    <${Card} title="Anti-Rationalization Excuse Patterns">
+    <${Card} title="Anti-Rationalization 핑계 패턴">
       <div class="p-4">
         <p class="text-sm text-[var(--color-fg-muted)] mb-4">
-          These patterns are matched against agent completion notes. If matched, the task is rejected.
-          Changes here are saved to <code>config/excuse_patterns.json</code> and applied immediately without restarting.
-          The format must be a JSON array of arrays, each containing two strings: <code>["pattern", "reason"]</code>.
+          이 패턴들은 에이전트 completion note 와 매칭됩니다. 매칭되면 해당 task 는 거부됩니다.
+          변경 사항은 <code>config/excuse_patterns.json</code> 에 저장되며 재시작 없이 즉시 적용됩니다.
+          형식은 두 개의 문자열을 담은 배열들의 JSON 배열이어야 합니다: <code>["pattern", "reason"]</code>.
         </p>
 
         <form onSubmit=${handleSave}>

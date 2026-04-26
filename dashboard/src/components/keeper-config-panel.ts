@@ -750,7 +750,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
     <${PromptBlock} title="세계관" block=${c.prompt.system_prompt_blocks.world} />
     <${PromptBlock} title="능력" block=${c.prompt.system_prompt_blocks.capabilities} />
     <details class="mt-3">
-      <summary class="cursor-pointer py-2 px-3 text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)] list-none select-none rounded hover:bg-[var(--white-3)] transition-colors">컴파일된 시스템 프롬프트 보기</summary>
+      <summary class="cursor-pointer py-2 px-3 text-2xs font-semibold uppercase tracking-wider text-[var(--text-muted)] list-none select-none rounded hover:bg-[var(--white-3)] transition-colors">컴파일된 시스템 프롬프트 보기</summary>
       <${LongText} text=${c.prompt.effective_system_prompt} truncateAt=${null} />
     </details>
   `

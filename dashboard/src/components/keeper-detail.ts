@@ -878,7 +878,7 @@ export function KeeperDetailPage() {
           >
         <${PipelineStageBar} stage=${keeper.pipeline_stage} />
         <details class="rounded border border-[var(--white-8)] bg-[var(--white-2)]">
-          <summary class="cursor-pointer py-2 px-4 text-3xs font-semibold uppercase tracking-widest text-[var(--text-muted)] list-none select-none flex items-center gap-2">
+          <summary class="cursor-pointer py-2 px-4 text-2xs font-semibold uppercase tracking-widest text-[var(--text-muted)] list-none select-none flex items-center gap-2">
             <span class="w-1.5 h-1.5 rounded-full bg-[rgba(71,184,255,0.5)]" aria-hidden="true"></span>
             Phase State Machine
           </summary>
@@ -888,7 +888,7 @@ export function KeeperDetailPage() {
         </details>
 
         <details class="rounded border border-[var(--white-8)] bg-[var(--white-2)]">
-          <summary class="cursor-pointer py-2 px-4 text-3xs font-semibold uppercase tracking-widest text-[var(--text-muted)] list-none select-none flex items-center gap-2">
+          <summary class="cursor-pointer py-2 px-4 text-2xs font-semibold uppercase tracking-widest text-[var(--text-muted)] list-none select-none flex items-center gap-2">
             <span class="w-1.5 h-1.5 rounded-full bg-[rgba(99,102,241,0.5)]" aria-hidden="true"></span>
             Memory Tier & Compaction
           </summary>

@@ -154,7 +154,7 @@ export function AgentLiveTimeline({ name }: { name: string }) {
           <span class="px-2 py-0.5 rounded bg-[var(--white-4)] border border-[var(--white-8)] text-[var(--text-muted)] text-3xs">${eventsPerMin}/min</span>
           <span class="text-[var(--text-muted)]">${filtered.length} events</span>
           <button type="button"
-            class="px-2 py-0.5 rounded text-3xs border cursor-pointer transition-all duration-150 ${autoScroll.value
+            class="px-2 py-0.5 rounded text-2xs border cursor-pointer transition-all duration-150 ${autoScroll.value
               ? 'border-[rgba(34,197,94,0.4)] text-[var(--ok)] bg-[var(--white-4)]'
               : 'border-[var(--white-10)] text-[var(--text-dim)] bg-[var(--white-4)]'}"
             onClick=${() => { autoScroll.value = !autoScroll.value }}

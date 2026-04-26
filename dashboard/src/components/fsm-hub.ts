@@ -534,7 +534,7 @@ export function FsmHub(props: FsmHubProps = {}) {
           open=${graphOpen}
           onToggle=${(e: Event) => setGraphOpen((e.target as HTMLDetailsElement).open)}
         >
-          <summary class="cursor-pointer select-none px-4 py-2.5 text-3xs font-semibold uppercase tracking-1 text-[var(--text-muted)] hover:text-[var(--text-body)]">
+          <summary class="cursor-pointer select-none px-4 py-2.5 text-2xs font-semibold uppercase tracking-1 text-[var(--text-muted)] hover:text-[var(--text-body)]">
             Compound Graph — 5 sub-FSMs (Cytoscape)
           </summary>
           <div class="px-3 pb-3">
@@ -579,7 +579,7 @@ function ShortcutsOverlay({
           키보드 단축키
         </div>
         <button type="button"
-          class="text-3xs text-[var(--text-dim)] hover:text-[var(--text-body)] cursor-pointer"
+          class="text-2xs text-[var(--text-dim)] hover:text-[var(--text-body)] cursor-pointer"
           onClick=${onClose}
           aria-label="닫기"
         >Esc</button>
@@ -673,7 +673,7 @@ function StatusBar({
           <span class="text-3xs font-semibold uppercase tracking-3 text-[var(--text-muted)]">FSM Hub</span>
           <${Kbd} size="sm" class="hidden md:inline-flex" title="단축키 목록 (?)">?<//>
           <button type="button"
-            class=${`text-3xs font-mono px-1.5 py-0.5 rounded border cursor-pointer transition-all ${
+            class=${`text-2xs font-mono px-1.5 py-0.5 rounded border cursor-pointer transition-all ${
               refreshFlash
                 ? 'border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--accent)]'
                 : 'border-[var(--white-10)] bg-[var(--white-3)] text-[var(--text-dim)] hover:text-[var(--text-body)] hover:border-[var(--accent-30)]'

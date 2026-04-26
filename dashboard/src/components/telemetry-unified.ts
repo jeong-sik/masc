@@ -525,8 +525,8 @@ function EntryRow({ entry }: { entry: TelemetryEntry }) {
         <span class="mr-2 inline-flex flex-shrink-0">
           <${CopyIdButton}
             value=${rawJson}
-            label="telemetry entry JSON"
-            ariaLabel="Copy telemetry entry JSON"
+            label="텔레메트리 항목 JSON"
+            ariaLabel="텔레메트리 항목 JSON 복사"
             size=${13}
           />
         </span>
@@ -543,8 +543,8 @@ function EntryRow({ entry }: { entry: TelemetryEntry }) {
               <span class="text-3xs font-medium text-[var(--text-dim)]">원본 JSON</span>
               <${CopyIdButton}
                 value=${rawJson}
-                label="expanded telemetry entry JSON"
-                ariaLabel="Copy expanded telemetry entry JSON"
+                label="펼친 텔레메트리 항목 JSON"
+                ariaLabel="펼친 텔레메트리 항목 JSON 복사"
                 size=${13}
               />
             </div>
@@ -601,8 +601,8 @@ function GroupRow({ item }: { item: Extract<TelemetryDisplayItem, { kind: 'group
         <span class="mr-2 inline-flex flex-shrink-0">
           <${CopyIdButton}
             value=${rawJson}
-            label="telemetry group JSON"
-            ariaLabel="Copy telemetry group JSON"
+            label="텔레메트리 그룹 JSON"
+            ariaLabel="텔레메트리 그룹 JSON 복사"
             size=${13}
           />
         </span>
@@ -632,8 +632,8 @@ ${rawJson}</pre>
               </details>
               <${CopyIdButton}
                 value=${rawJson}
-                label="expanded telemetry group JSON"
-                ariaLabel="Copy expanded telemetry group JSON"
+                label="펼친 텔레메트리 그룹 JSON"
+                ariaLabel="펼친 텔레메트리 그룹 JSON 복사"
                 size=${13}
               />
             </div>

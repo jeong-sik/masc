@@ -168,7 +168,12 @@ let autonomous_wait_queue : autonomous_waiter list ref = ref []
 
 let autonomous_wait_queue_next_ticket = ref 0
 
-let autonomous_queue_poll_sec = 0.05
+(* Routed through Env_config_keeper so operators can tune cadence
+   without a rebuild (same fragmentation class as the watchdog
+   thresholds extracted in #10740). The value is read once at
+   module load — restart required to pick up env changes. *)
+let autonomous_queue_poll_sec =
+  Env_config_keeper.KeeperPollIntervals.autonomous_queue_poll_sec
 
 let with_autonomous_wait_queue f =
   Eio.Mutex.use_rw ~protect:true autonomous_wait_queue_mutex f

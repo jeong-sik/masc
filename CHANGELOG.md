@@ -3,19 +3,72 @@
 
 ## [0.17.0] - 2026-04-26
 
-### Changed
-- TBD
+Aggregate of 103 commits since v0.16.0 (42 feat / 24 fix / 15 perf / 15 refactor / 4 chore / 2 docs). No breaking API changes. Headline: design-system semantic alias migration completes its bulk of CSS/JSX surface; cascade unblock series resolves repeated `agent_sdk` cap drift; keeper stability gains stale watchdog fiber restart and stream-idle gap-detection.
 
-### Deprecated
-- TBD
+### Added (feat)
+- Design-system semantic alias migration (35 PRs, batches PR-M14 through PR-M26 + S3e–S3h). SPEC §3 alias introduced to both products at Stage 1 (#10611), then sweeps over `layout.css` (#10586), `sidebar.css` (#10587), `drawer.css` (#10588), `swimlanes.css` (#10589), `primitives.css` (#10590), `deck.css` (#10591), `code.css` (#10595), `cockpit.css` (#10597), `preview/*.html` (#10600), `preview/*.jsx` (#10601), `ui_kits/cockpit/*.jsx` (#10602), `_preview.css` (#10621). Bonsai shadow-ring rename + SPEC §6.2 escape hatch (#10620). Bonsai paper colors + scrollbar absorbed (#10556).
+- Topbar variant API unified (Phase 3 consistency, #10505); SectionHeading primitive extracted (#10476).
+
+### Changed (refactor)
+- SSOT consolidation: cohort_key moved to source-of-truth module (#10618); 12 deprecated re-exports dropped from `Keeper_exec_context` (#10616); KeeperSandbox/DockerPlayground aliased to `Env_config_sandbox` (#10536); 5 Alerting/Pr_review timeout literals migrated to SSOT (#10502); 4 Sandbox/Turn_sandbox timeout literals migrated (#10486); 3 sandbox hardcoded constants migrated (#10551); personality I/O consolidated via samchon-style harness (#10538). Alerting default 15→20s (#10615).
+- Yojson hygiene: drop unused decoder for `agent_identity.t` + `post_eval_result` (#10526); lint exempts encoder-only deriving from option-default rule (#10537).
+- Bumped `agent_sdk` floor to 0.177.0 (#10608) after raising cap to <0.178.0 to align with pinned SHA v0.177.0 (#10592).
+
+### Fixed
+- Cascade unblock series: accept `weight=0` in toml materializer (#10571 / #10610) after the codex_cli weight=0 sweep (#10554) was reverted (#10613). Pin agent_sdk upper bound to <0.177.0 (#10497 / #10529), then raised to <0.178.0 (#10592). `check-oas-pin` regex accepts capped-floor pattern (#10596). Keeper supervisor handles `Stale_turn_timeout` in cohort_key (#10572 / #10574).
+- Keeper stability: stale watchdog triggers fiber restart instead of cosmetic broadcast (#10540); `stream_idle_timeout` set to gap-detection value 120s (#10604); `Stdlib.Lazy` replaced with Atomic+Mutex memo in keeper memory bank (#10399 / #10407); personality re-sync loop stopped via symmetric compare (#10479); turn_timeout_sec_live aligned with SSOT (#10456 / #10469); pause directive persist + duplicate cohort key drop (#10593).
+- Sandbox: accept legacy 3-field `docker inspect` without `ttl_sec` (#10488 / #10513 / #10514); preserve trailing tab; scrub `roots=` leak from path-rejection errors (#10349 / #10383); `gh-validation` inlines allowed command list in blocked error (#10561 / #10566).
+- Auth: write short-form alias for every keeper at bootstrap (#10440 / #10525). Auth bridge SSOT routing (#10400 follow-through).
+- Observability: inline rejection context in `cascade-no-callable-models` ERROR (#10528 / #10541); align `system_log` filename to UTC (#10392 / #10401); duplicate `InferenceTelemetry` emit dropped (#10489 / #10490 / #10511).
+- TLA+: `OperatorPauseBroadcast` spec wired into `tla-check.sh` (#10516 / #10521).
+- Dashboard: cb-group-a.jsx de-duplication after squash union (#10437 + #10451 → #10467).
+
+### Performance
+- String hot paths: `String.sub` equality replaced with `String.starts_with` across 8 hot paths (#10532), sweep 2 across 7 files (#10543), gh-validation 5 hunks (#10548); WS SSE data payload single `String.sub` (#10560); `String_util.equals_ci` SSOT applied to HTTP header lookup (#10612).
+- List hot paths: `List.length` emptiness check replaced with `[] =` (13 hunks, O(N)→O(1), #10568); `List_util.count_if` SSOT introduced + sweep 16 sites across 14 files (#10609); single-pass `count_if` for 7 `List.length(List.filter)` sites in model_inference_metrics (#10607); file-private `take` helper for top-N truncation (#10619).
+- Lookup: `try Hashtbl.find/Unix.getenv` replaced with `_opt` variants in 2 hot paths (#10575).
+- Server auth: 2 allocations dropped from Bearer header check (#10483).
+- MCP accept-header: redundant lowercase removed from callbacks (#10539, parked).
+
+### Documentation
+- See PR notes; 2 commits.
 
 ## [0.16.0] - 2026-04-26
 
-### Changed
-- TBD
+Aggregate of 206 commits since v0.15.0 (95 fix / 38 perf / 21 feat / 13 chore / 10 refactor / 9 diag / 5 test / 3 obs / 2 docs). No breaking API changes. Headline: stability-heavy release — 95-fix sweep across keeper/sandbox/cascade/auth + 38 hot-path performance reductions + Trust system Phase 0a–1.
 
-### Deprecated
-- TBD
+### Added (feat)
+- Cascade trust system: fingerprint counter for trust observability (Phase 0a, #10292), JSONL snapshot of trust state every minute (Phase 0b, #10331), `trust_score` auto-rotation on persistent failures (Phase 1, #10365).
+- Keeper identity: `normalize_all_names` SSOT (P1, #10417); silent identity-fallback paths surfaced (PR-I scope 1, #10351).
+- Governance: destructive vs evasion-only payload severity split (#10355); routine matcher preflight + `keeper_shell git_clone` allowlist (PR-E, #10396).
+- Transport: identity headers preserved on Codex CLI runtime MCP (#10359).
+- Keeper runtime: sandbox cleanup error messages emitted in janitor loop (#10433); `keeper_composite` exposes `fiber_stop` / `fiber_wakeup` / `noop_count` / `idle_seconds` (#10312).
+- Dashboard: low-trust operator recommendations (Phase 2a, #10416); a11y baseline for Code IDE v2 (#10394) and dashboard Phase 1 cb-group-a (#10451); semantic color tokens + theme infra (#10427).
+- Config: `Env_config_exec_timeout` SSOT scaffold for #10426 P1 (#10452).
+
+### Changed (refactor / chore)
+- 10 refactor + 13 chore commits — see PR refs.
+
+### Fixed
+- Build / cascade unblock: main build unblocked after Phase-1 trust revert orphans (#10441 / #10445); `discover_keepers_toml` per-cycle WARN spam dedup (#10259 / #10380); `cascade_name` with `keeper_assignable=false` rejected (#10388 / #10406); degraded TOML-section fallback for keeper-name validator (#10259 / #10274); attribute and cool down Kimi resumable failures (#10285 / #10300); scheduler-safe RNG mutex (#10413).
+- Keeper / sandbox: keepers taught to chdir before git in sandbox (#10424 / #10435); fall back to gh CLI keychain for sandbox `GH_TOKEN` (#10378); price cache usage in turn cost (#10379); register sandbox cleanup in server background loop (#10366); raise `git status` timeout default (#10360); consensus regex cache guard (#10377).
+- Auth / dispatcher: ctx identity enforced on board author/voter (#10297 / #10305); keeper bearer tokens split at bootstrap (#10304 / #10313).
+- Telemetry: tolerate nullable `Tool_assigned` preset (#10450); recover tool and task lifecycle diagnostics (#10358 / #10369); time-based flush makes sub-cap heuristic-metrics emit visible (#10348 / #10363); per-failure learning tags emitted instead of boilerplate (#10325 / #10330).
+- Goal / FSM: `Awaiting_verification` exit transitions added (#10411 / #10420); periodic sweep fiber added in goal-janitor bootstrap loops (#10405 / #10439); lifecycle states blocked on goal upsert (#10247 / #10261).
+- Transport: tunnel host detection in `legacy_messages_endpoint_url` corrected (#10454).
+- Anti-rationalization: Korean rationalization patterns added (#10385 / #10391).
+- Discovery history: all loaded models per probe preserved (#10404 / #10414).
+- File I/O: `dated_jsonl` file-scope mutex registry shares lock across instances (#10372 / #10376); double-dropping tail prefix avoided (#10328).
+- Bonsai: keeper SSOT bug eliminated by removing 3-source merge (#10343).
+- OAS bridge: route Governance/Operator judges through OAS bridge SSOT (#9629 / #10400).
+
+### Performance
+- String hot paths: per-request `String.sub` allocations dropped on h2-gateway route prefix match (#10455), keeper-api-route per-suffix (#10444), ws-transport SSE/route (#10434), transport-read-model `trim_trailing_slashes` single-pass (#10438); 13 forked `starts_with`/`has_prefix`/`has_suffix` helpers routed through `Stdlib` (#10393); 7 forked `contains_substring` helpers routed through `String_util` SSOT (#10386); gh-cmd-validation routed through SSOT (#10384); `Json_util` SSOT applied to `json-string-field` 2 forks (#10410) + 2 more delegates (#10422); `Dashboard_http_helpers` `normalize_text` SSOT (#10402).
+- PCRE caching: `Re.compile` hoisted in 4 hot paths + `String_util.find_substring` added (#10371); 2 more per-call `Re.compile` hoisted in drift-guard / board-votes (#10375); output-parse / memory-bank / consensus paths (#10367); tool-board / notify / inline-dispatch (#10361); link-preview compiled PCREs cached in `first_match` (#10381).
+
+### Diagnostics
+- Per-field personality drift exposed on re-sync (#10269 / #10370); structured `Timeout` / `Parse_degraded` from agent-stress failure path (#10341 / #10346); structured signals replace boilerplate institution-episode failure learnings (#10325 / #10339); `agent_stress` emits `Turn_failure` from `keeper_unified_turn` (#10341 / #10362); 9 diag commits total.
+
 ## [0.15.0] - 2026-04-25
 
 Aggregate of 185 commits since v0.14.0 (26 feat / 93 fix / 30 perf-refactor-obs-docs / 10 chore / 26 misc). No breaking API changes.

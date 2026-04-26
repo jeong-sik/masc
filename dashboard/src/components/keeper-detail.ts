@@ -276,6 +276,11 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
         : trustDisposition === 'Pass'
           ? 'bg-[var(--ok-10)] text-[var(--ok)]'
           : 'bg-[var(--white-6)] text-[var(--text-strong)]'
+  const trustDispositionLabel = trustDisposition
+    ? ({ Alert: '경보', Pause: '정지', Pass: '통과' } as Record<string, string>)[
+        trustDisposition
+      ] ?? trustDisposition
+    : null
 
   return html`
     <div class="px-6 pt-4">
@@ -350,21 +355,21 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
         ${trustDisposition
           ? html`
               <span class="inline-flex items-center rounded-sm px-2 py-0.5 text-2xs font-semibold ${trustToneClass}">
-                Trust ${trustDisposition}
+                검증 ${trustDispositionLabel}
               </span>
             `
           : null}
         ${trustSummary
-          ? html`<span><strong class="text-[var(--text-strong)]">Trust</strong> · ${trustSummary}</span>`
+          ? html`<span><strong class="text-[var(--text-strong)]">검증</strong> · ${trustSummary}</span>`
           : null}
         ${runtimeProofStatus
-          ? html`<span><strong class="text-[var(--text-strong)]">Proof</strong> · ${runtimeProofStatus}</span>`
+          ? html`<span><strong class="text-[var(--text-strong)]">증명</strong> · ${runtimeProofStatus}</span>`
           : null}
         ${requiredTools.length > 0
-          ? html`<span><strong class="text-[var(--text-strong)]">Required</strong> · ${requiredTools.join(', ')}</span>`
+          ? html`<span><strong class="text-[var(--text-strong)]">필요 도구</strong> · ${requiredTools.join(', ')}</span>`
           : null}
         ${usedTools.length > 0
-          ? html`<span><strong class="text-[var(--text-strong)]">Used</strong> · ${usedTools.join(', ')}</span>`
+          ? html`<span><strong class="text-[var(--text-strong)]">사용 도구</strong> · ${usedTools.join(', ')}</span>`
           : null}
         ${missingRequiredTools.length > 0
           ? html`<span class="text-[var(--bad)]"><strong>Missing</strong> · ${missingRequiredTools.join(', ')}</span>`

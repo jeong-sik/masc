@@ -233,19 +233,19 @@ function groupTitle(category: ActivityCategory, events: ActivityGraphTimelineEve
   const subjectId = groupSubjectId(events)
   const actor = groupActor(events)
   const latest = events[events.length - 1]
-  if (!latest) return 'Activity'
+  if (!latest) return '활동'
 
   switch (category) {
     case 'task':
-      return payloadString(latest, ['task_title', 'title']) || subjectId || 'Task activity'
+      return payloadString(latest, ['task_title', 'title']) || subjectId || '태스크 활동'
     case 'session':
-      return subjectId || payloadString(latest, ['session_id', 'operation_id']) || 'Session activity'
+      return subjectId || payloadString(latest, ['session_id', 'operation_id']) || '세션 활동'
     case 'message':
-      return actor ? `${actor} message burst` : 'Message burst'
+      return actor ? `${actor} 메시지 다발` : '메시지 다발'
     case 'board':
-      return payloadString(latest, ['title']) || subjectId || 'Board activity'
+      return payloadString(latest, ['title']) || subjectId || '보드 활동'
     case 'governance':
-      return subjectId || 'Governance activity'
+      return subjectId || '거버넌스 활동'
     case 'lifecycle':
       return actor || eventKindLabel(latest.kind)
     default:

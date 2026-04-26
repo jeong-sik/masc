@@ -62,9 +62,6 @@ val default_drift_max_clauses : int
     longer values; the cap applies at prompt build time. *)
 val prompt_render_max_bytes : int
 
-val default_drift_max_chars : int
-  [@@deprecated "Use prompt_render_max_bytes. Alias removed in Layer 2 follow-up."]
-
 (** {1 Environment Variable Parsing} *)
 
 (** Parse a boolean env var where the default is [true] when unset. *)

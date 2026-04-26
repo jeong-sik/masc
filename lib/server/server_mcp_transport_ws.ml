@@ -490,11 +490,17 @@ let sse_data_prefix = "data:"
 
 let extract_sse_data_payload_line line =
   if String.starts_with ~prefix:sse_data_prefix line then
+    let line_len = String.length line in
     let prefix_len = String.length sse_data_prefix in
-    let raw = String.sub line prefix_len (String.length line - prefix_len) in
-    if String.length raw > 0 && Char.equal raw.[0] ' ' then
-      Some (String.sub raw 1 (String.length raw - 1))
-    else Some raw
+    (* Per RFC: a single optional space follows "data:". Fold the skip
+       into the same [String.sub] to avoid an intermediate allocation
+       on the dashboard fanout hot path (~1 alloc per SSE data line). *)
+    let start =
+      if line_len > prefix_len && Char.equal line.[prefix_len] ' '
+      then prefix_len + 1
+      else prefix_len
+    in
+    Some (String.sub line start (line_len - start))
   else None
 
 let extract_sse_data_line sse_event =

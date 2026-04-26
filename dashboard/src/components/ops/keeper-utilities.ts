@@ -81,6 +81,7 @@ export function KeeperUtilitiesPanel() {
           </p>
         </div>
         <select
+          autoComplete="off"
           class="shrink-0 rounded border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-xs text-[var(--text-body)] transition-colors cursor-pointer min-w-36 focus-visible:outline-none focus-visible:border-[rgba(71,184,255,0.5)] focus-visible:ring-1 focus-visible:ring-[rgba(71,184,255,0.35)]"
           aria-label="키퍼 유틸리티 대상"
           value=${selectedName}

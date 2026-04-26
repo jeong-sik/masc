@@ -131,6 +131,7 @@ export function QuickBindForm({ connectorId, keepers }: {
           Keeper
         </label>
         <select
+          autoComplete="off"
           aria-label="키퍼 선택"
           id=${`qb-keeper-${connectorId}`}
           class="w-full rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-2 py-1 font-mono text-2xs text-[var(--text-body)] focus:border-[var(--accent-1)] focus:outline-none"

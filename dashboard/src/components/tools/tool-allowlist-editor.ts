@@ -227,6 +227,7 @@ export function ResolvedPreview({ tools, catMap }: { tools: string[]; catMap: Ma
         <input
           type="search"
           autoComplete="off"
+          autoComplete="off"
           value=${query}
           placeholder="도구/카테고리 필터"
           aria-label="해석된 허용 목록 필터"

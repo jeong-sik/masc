@@ -520,6 +520,7 @@ export function Memory() {
       <div class="mb-3 flex items-center gap-2">
         <input
           type="search"
+          autoComplete="off"
           value=${contentQuery}
           placeholder="제목/본문에서 검색"
           aria-label="게시글 본문 필터"

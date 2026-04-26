@@ -414,6 +414,7 @@ function ProfileCard({
               ? html`
                 <div class="flex items-center gap-2 flex-wrap">
                   <select
+          autoComplete="off"
                     aria-label="키퍼 선택"
                     class="min-w-44 rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-2 py-1 text-xs text-[var(--text-strong)]"
                     value=${selectedKeeper.value}
@@ -701,6 +702,7 @@ function HealthTable({
     <div class="flex items-center gap-3 mb-2">
       <${TextInput}
         type="search"
+          autoComplete="off"
         autoComplete="off"
         class="max-w-70"
         placeholder="provider 필터 (key, cooldown...)"
@@ -1122,6 +1124,7 @@ function CascadeRawConfigEditor({
           ${mode.secondary}
         </p>
 
+          autoComplete="off"
         <form aria-label="설정 소스 편집" class="flex flex-col gap-3" onSubmit=${handleSave}>
           <textarea
             aria-label="설정 소스 편집"
@@ -1191,6 +1194,7 @@ function CascadeRawConfigEditor({
                 ${mode.previewTitle}
               </div>
               <div class="text-xs text-[var(--text-muted)]">
+          autoComplete="off"
                 ${raw?.config_path ?? 'unresolved'}
               </div>
               <textarea

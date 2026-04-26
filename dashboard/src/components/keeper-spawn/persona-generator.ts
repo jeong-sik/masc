@@ -122,6 +122,7 @@ export function PersonaGenerator() {
           <label class="grid gap-1 text-3xs text-[var(--text-muted)]">
             handle
             <input
+              autoComplete="off"
               value=${handle.value}
               placeholder="auto"
               onInput=${(e: Event) => { handle.value = (e.target as HTMLInputElement).value }}
@@ -130,6 +131,7 @@ export function PersonaGenerator() {
           </label>
           <label class="grid gap-1 text-3xs text-[var(--text-muted)]">
             display
+              autoComplete="off"
             <input
               value=${displayName.value}
               placeholder="auto"

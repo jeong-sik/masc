@@ -36,6 +36,8 @@ interface SelectProps {
   testId?: string
   /** Native required flag — participates in form validation. */
   required?: boolean
+  /** Prevents browser autofill/autocomplete. Defaults to "off". */
+  autoComplete?: string
   onInput?: (value: string) => void
   /** Fires when the select loses focus — the natural hook for
       validate-on-blur ("you must pick one"). */
@@ -55,6 +57,7 @@ export function Select({
   ariaDescribedBy,
   testId,
   required,
+  autoComplete = 'off',
   onInput,
   onBlur,
 }: SelectProps) {
@@ -72,6 +75,7 @@ export function Select({
       aria-describedby=${ariaDescribedBy}
       data-testid=${testId}
       required=${required}
+      autocomplete=${autoComplete}
       onChange=${handleChange}
       onBlur=${onBlur}
     >

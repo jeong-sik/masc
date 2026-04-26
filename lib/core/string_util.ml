@@ -73,6 +73,22 @@ let contains_substring_ci haystack needle =
     in
     loop 0
 
+(* ASCII case-insensitive prefix check.  No allocation; lowercases
+   byte by byte during compare. *)
+let starts_with_ci ~prefix s =
+  let plen = String.length prefix in
+  let slen = String.length s in
+  if plen > slen then false
+  else
+    let rec match_at i =
+      if i = plen then true
+      else
+        let p = Char.lowercase_ascii (String.unsafe_get prefix i) in
+        let c = Char.lowercase_ascii (String.unsafe_get s i) in
+        if p <> c then false else match_at (i + 1)
+    in
+    match_at 0
+
 (* Byte-wise non-overlapping replace: scans [haystack] for [needle] and
    substitutes [by] for each occurrence. Empty needle is a no-op (would
    loop forever otherwise). Skips ahead by [needle_len] after a match,

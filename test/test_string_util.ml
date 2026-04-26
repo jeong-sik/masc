@@ -217,6 +217,26 @@ let test_contains_substring_ci_empty_and_literal () =
   check bool "regex wildcard is not magic" false
     (SU.contains_substring_ci "literal abc needle" ".*")
 
+let test_starts_with_ci_basic () =
+  check bool "exact case" true
+    (SU.starts_with_ci ~prefix:"Bearer " "Bearer abc123");
+  check bool "lowercase prefix vs mixed value" true
+    (SU.starts_with_ci ~prefix:"bearer " "Bearer abc123");
+  check bool "uppercase prefix vs lowercase value" true
+    (SU.starts_with_ci ~prefix:"BEARER " "bearer abc123");
+  check bool "mismatch" false
+    (SU.starts_with_ci ~prefix:"Bearer " "Basic abc123")
+
+let test_starts_with_ci_boundaries () =
+  check bool "empty prefix matches anything" true
+    (SU.starts_with_ci ~prefix:"" "anything");
+  check bool "empty prefix matches empty string" true
+    (SU.starts_with_ci ~prefix:"" "");
+  check bool "prefix longer than string" false
+    (SU.starts_with_ci ~prefix:"hello" "hi");
+  check bool "exact length equal" true
+    (SU.starts_with_ci ~prefix:"abc" "ABC")
+
 
 (* ---- Test runner ---- *)
 
@@ -258,4 +278,7 @@ let () =
       ( "contains_substring_ci",
         [ test_case "ASCII" `Quick test_contains_substring_ci_ascii;
           test_case "empty and literal" `Quick
-            test_contains_substring_ci_empty_and_literal ] ) ]
+            test_contains_substring_ci_empty_and_literal ] );
+      ( "starts_with_ci",
+        [ test_case "basic" `Quick test_starts_with_ci_basic;
+          test_case "boundaries" `Quick test_starts_with_ci_boundaries ] ) ]

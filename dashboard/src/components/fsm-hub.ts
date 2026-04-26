@@ -410,7 +410,12 @@ export function FsmHub(props: FsmHubProps = {}) {
 
   useEffect(() => {
     if (paused) return undefined
-    const id = setInterval(() => setNow(Date.now() / 1000), 1_000)
+    // 5s tick: full FSM hub re-renders + deriveLaneDwellHistograms recomputes
+    // each interval. Operator-visible elapsed strings (`fmtDuration`) read
+    // sub-minute precision; 5s granularity is below visual perception
+    // threshold for the dwell/transition surfaces and divides per-second
+    // re-render cost by 5x for a 1012-line component with 9 child renders.
+    const id = setInterval(() => setNow(Date.now() / 1000), 5_000)
     return () => clearInterval(id)
   }, [paused])
 

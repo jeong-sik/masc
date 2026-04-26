@@ -295,7 +295,7 @@ case "${MODE}" in
     echo "OAS API surface drift detected against ${FINGERPRINT_FILE}." >&2
     echo "  Review the delta above against MASC consumer sites:" >&2
     echo "    lib/oas_compat/oas_compat.ml      (Http_client + Metrics — single source)" >&2
-    echo "    lib/oas_sse_bridge.ml             (Event_bus payload matches — until adapter covers it)" >&2
+    echo "    lib/oas_event_bridge.ml           (Event_bus payload matches — until adapter covers it)" >&2
     echo
     echo "  Repair flow (after consumer changes compile clean):" >&2
     echo "    bash scripts/oas-drift-check.sh --regenerate" >&2

@@ -19,7 +19,8 @@ let is_ephemeral_agent_name name =
   Base.String.is_prefix name ~prefix:"agent-"
 
 let is_transient_agent_name name =
-  is_ephemeral_agent_name name || Nickname.is_generated_nickname name
+  is_ephemeral_agent_name name
+  || Nickname.is_dictionary_generated_nickname name
 
 let silent_auth_token_error_kind = function
   | Types.InvalidToken _ -> "token_mismatch"

@@ -74,6 +74,25 @@ let is_generated_nickname name =
   let parts = String.split_on_char '-' name in
   List.length parts >= 3
 
+(** Strict check: returns true only when the trailing components match the
+    actual [adjectives]/[animals] word lists used by [generate]/[generate_unique].
+
+    The looser [is_generated_nickname] uses a 3+ part shape rule so that
+    structured fixture names ("admin-board-keeper", "agent-test-alpha") are
+    accepted as nicknames by the join/coord_lifecycle path. Auth code that
+    decides whether to rewrite an inferred alias to its bearer-token owner
+    must NOT do so for structured operator names like [keeper-<id>-agent];
+    they only happen to share the [a-b-c] shape. Use this strict variant
+    on that path. *)
+let is_dictionary_generated_nickname name =
+  let parts = String.split_on_char '-' name in
+  match List.rev parts with
+  | hex :: animal :: adj :: _ :: _ when is_hex4 hex ->
+      array_contains adjectives adj && array_contains animals animal
+  | animal :: adj :: _ :: _ ->
+      array_contains adjectives adj && array_contains animals animal
+  | _ -> false
+
 (** Extract the stable agent prefix from a generated nickname.
     "claude-swift-fox" -> Some "claude"
     "qa-king-warm-heron" -> Some "qa-king"

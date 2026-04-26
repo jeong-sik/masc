@@ -2007,6 +2007,51 @@ let test_filter_candidate_providers_for_tool_support_keeps_header_capable_cli_fo
     [ "claude_code:auto"; "kimi_cli:kimi-for-coding" ]
     (List.map Provider_tool_support.provider_debug_label filtered)
 
+(* #10681: filter rejection diagnostics. When [filter_*] empties the
+   cascade, the WARN log now lists each rejected provider with its
+   classification — these tests pin the classifier to its 3-stage
+   short-circuit so a regression in any check surfaces here instead
+   of in production WARN spam.  *)
+let test_classify_filter_rejection_codex_keeper_bound_actor () =
+  with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
+  with_env "MASC_INTERNAL_MCP_TOKEN" "internal-keeper-token" @@ fun () ->
+  let runtime_mcp_policy =
+    Oas_worker_exec.public_mcp_runtime_policy_of_tool_names
+      ~agent_name:"keeper-sangsu-agent" [ "masc_status"; "masc_claim_next" ]
+  in
+  let reason =
+    Masc_mcp.Oas_worker_named.classify_filter_rejection
+      ~keeper_name:"sangsu"
+      ?runtime_mcp_policy
+      ~require_tool_choice_support:true
+      ~require_tool_support:true
+      (make_codex_cli_provider_cfg ())
+  in
+  Alcotest.(check (option string))
+    "codex_cli with bound-actor policy classified as keeper_bound_actor"
+    (Some "codex_keeper_bound_actor_required")
+    (Option.map
+       Masc_mcp.Oas_worker_named.filter_rejection_reason_label reason)
+
+let test_classify_filter_rejection_passes_when_provider_supported () =
+  with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
+  with_env "MASC_MCP_TOKEN" "shared-codex-token" @@ fun () ->
+  let runtime_mcp_policy =
+    Oas_worker_exec.public_mcp_runtime_policy_of_tool_names
+      ~agent_name:"keeper-sangsu-agent" [ "masc_status" ]
+  in
+  let reason =
+    Masc_mcp.Oas_worker_named.classify_filter_rejection
+      ~keeper_name:"sangsu"
+      ?runtime_mcp_policy
+      ~require_tool_choice_support:true
+      ~require_tool_support:true
+      (make_codex_cli_provider_cfg ())
+  in
+  Alcotest.(check bool)
+    "codex_cli passing the filter classifies as None"
+    true (reason = None)
+
 let test_kimi_mcp_config_json_of_policy_filters_to_allowed_servers () =
   let policy =
     {
@@ -3813,6 +3858,12 @@ let () =
         "provider-normalized filter keeps header-capable keeper-internal lanes"
         `Quick
         test_filter_candidate_providers_for_tool_support_keeps_header_capable_cli_for_keeper_internal_tools;
+      Alcotest.test_case
+        "classify_filter_rejection: codex bound-actor policy → keeper_bound_actor"
+        `Quick test_classify_filter_rejection_codex_keeper_bound_actor;
+      Alcotest.test_case
+        "classify_filter_rejection: returns None when provider passes"
+        `Quick test_classify_filter_rejection_passes_when_provider_supported;
       Alcotest.test_case "kimi runtime MCP config keeps only allowed servers" `Quick
         test_kimi_mcp_config_json_of_policy_filters_to_allowed_servers;
       Alcotest.test_case "runtime MCP policy injects keeper agent header for masc server" `Quick

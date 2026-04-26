@@ -118,6 +118,77 @@ let codex_cli_cannot_carry_keeper_bound_runtime_mcp
         policy.allowed_tool_names
   | _ -> false
 
+(* #10681: per-provider rejection reason produced by the cascade filter.
+   When the filter empties the cascade, operators previously saw only a
+   flat list of provider names; root-cause classification required
+   re-running each predicate by hand. The reason is now attached to the
+   provider in the WARN log so the next [no_tool_capable_provider] event
+   pinpoints the failing check on the first read.
+
+   Order of preference (mirrors the filter's short-circuit):
+   1. [Codex_keeper_bound_actor_required] — codex_cli cannot carry a
+      runtime MCP policy that requires bound-actor tools (keeper-scoped).
+   2. [Tool_lane_unsupported] — [resolve_tool_lane_for_oas_tools]
+      returned [Error], typically transport/auth/capability mismatch
+      surfaced by [Oas_worker_exec].
+   3. [Required_tool_use { reason }] — the inline-tool-choice / runtime
+      MCP capability gate from [Provider_tool_support]. Re-uses the
+      existing [rejection_reason] so dashboards stay consistent with
+      [masc_cascade_filter_rejection_total]. *)
+type filter_rejection_reason =
+  | Codex_keeper_bound_actor_required
+  | Tool_lane_unsupported
+  | Required_tool_use of Provider_tool_support.rejection_reason
+
+let filter_rejection_reason_label = function
+  | Codex_keeper_bound_actor_required -> "codex_keeper_bound_actor_required"
+  | Tool_lane_unsupported -> "tool_lane_unsupported"
+  | Required_tool_use r ->
+      Provider_tool_support.rejection_reason_label r
+
+let classify_filter_rejection
+    ~(keeper_name : string)
+    ?runtime_mcp_policy
+    ?(tools = [])
+    ~require_tool_choice_support
+    ~require_tool_support
+    (provider_cfg : Llm_provider.Provider_config.t)
+  : filter_rejection_reason option =
+  let normalized_runtime_mcp_policy =
+    runtime_mcp_policy_for_provider
+      ~keeper_name ~provider_cfg runtime_mcp_policy
+  in
+  if codex_cli_cannot_carry_keeper_bound_runtime_mcp
+       ~keeper_name ~provider_cfg normalized_runtime_mcp_policy
+  then Some Codex_keeper_bound_actor_required
+  else
+    let tool_lane_supported =
+      match tools with
+      | [] -> true
+      | _ -> (
+          match
+            Oas_worker_exec.resolve_tool_lane_for_oas_tools
+              ?agent_name:(keeper_agent_name_opt keeper_name)
+              ~tool_requirement:
+                (if require_tool_choice_support || require_tool_support
+                 then `Required
+                 else `Optional)
+              ~provider_cfg ~tools ()
+          with
+          | Ok _ -> true
+          | Error _ -> false)
+    in
+    if not tool_lane_supported then Some Tool_lane_unsupported
+    else
+      match
+        Provider_tool_support.classify_rejection
+          ?runtime_mcp_policy:normalized_runtime_mcp_policy
+          ~require_tool_choice_support ~require_tool_support
+          provider_cfg
+      with
+      | Some reason -> Some (Required_tool_use reason)
+      | None -> None
+
 let filter_candidate_providers_for_tool_support
     ~(keeper_name : string)
     ?runtime_mcp_policy
@@ -129,47 +200,31 @@ let filter_candidate_providers_for_tool_support
   if not require_tool_choice_support && not require_tool_support then
     provider_cfgs
   else
-    let filtered =
-      List.filter
+    let kept, rejected =
+      List.partition_map
         (fun provider_cfg ->
-           let normalized_runtime_mcp_policy =
-             runtime_mcp_policy_for_provider
-               ~keeper_name ~provider_cfg runtime_mcp_policy
-           in
-           let tool_lane_supported =
-             match tools with
-             | [] -> true
-             | _ -> (
-                 match
-                   Oas_worker_exec.resolve_tool_lane_for_oas_tools
-                     ?agent_name:(keeper_agent_name_opt keeper_name)
-                     ~tool_requirement:
-                       (if require_tool_choice_support || require_tool_support
-                        then `Required
-                        else `Optional)
-                     ~provider_cfg ~tools ()
-                 with
-                 | Ok _ -> true
-                 | Error _ -> false)
-           in
-           (not
-              (codex_cli_cannot_carry_keeper_bound_runtime_mcp
-                 ~keeper_name ~provider_cfg normalized_runtime_mcp_policy))
-           && tool_lane_supported
-           && Provider_tool_support.supports_required_tool_use
-             ?runtime_mcp_policy:normalized_runtime_mcp_policy
-             ~require_tool_choice_support
-             ~require_tool_support
-             provider_cfg)
+           match
+             classify_filter_rejection
+               ~keeper_name ?runtime_mcp_policy ~tools
+               ~require_tool_choice_support ~require_tool_support
+               provider_cfg
+           with
+           | None -> Either.Left provider_cfg
+           | Some reason -> Either.Right (provider_cfg, reason))
         provider_cfgs
     in
-    if filtered = [] && provider_cfgs <> [] then
+    if kept = [] && provider_cfgs <> [] then
       Log.Misc.warn
-        "cascade %s: provider-normalized tool-use gate removed all providers (providers=[%s])"
+        "cascade %s: provider-normalized tool-use gate removed all providers (rejections=[%s])"
         label
         (String.concat ", "
-           (List.map Provider_tool_support.provider_debug_label provider_cfgs));
-    filtered
+           (List.map
+              (fun (cfg, reason) ->
+                Printf.sprintf "%s:%s"
+                  (Provider_tool_support.provider_debug_label cfg)
+                  (filter_rejection_reason_label reason))
+              rejected));
+    kept
 
 type masc_internal_error =
   | Cascade_exhausted of {

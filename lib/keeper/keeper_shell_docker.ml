@@ -127,6 +127,38 @@ let cmd_targets_gh cmd =
     let tokens = String.split_on_char ' ' trimmed in
     List.exists (fun tok -> tok = "gh") tokens
 
+(* #10855: keeper LLM (issue_king, masc-improver) hallucinated gh syntax
+   `gh --repo X api Y` (108 events / 24h, 2026-04-25→04-26). gh CLI
+   semantics: `--repo` is a subcommand flag (gh issue/pr/release/...),
+   not a global option, and `gh api` rejects it with "unknown flag: --repo".
+   Detect the misuse pre-exec so we can emit a self-correcting error
+   instead of letting the docker exec waste a turn surfacing gh's raw
+   error.  Same self-correcting-message pattern as #10869's multi-repo
+   sandbox blocker. *)
+let detect_gh_repo_flag_with_api_misuse cmd =
+  let strip_quotes s =
+    let len = String.length s in
+    if len >= 2
+       && ((s.[0] = '\'' && s.[len-1] = '\'')
+           || (s.[0] = '"' && s.[len-1] = '"'))
+    then String.sub s 1 (len - 2)
+    else s
+  in
+  let toks =
+    String.split_on_char ' ' (String.trim cmd)
+    |> List.filter (fun s -> s <> "")
+    |> List.map strip_quotes
+  in
+  if not (List.mem "gh" toks) then None
+  else
+    let rec scan = function
+      | "--repo" :: repo_arg :: "api" :: endpoint :: _ ->
+          Some (repo_arg, endpoint)
+      | _ :: rest -> scan rest
+      | [] -> None
+    in
+    scan toks
+
 (* Emit a ("gh_exit_class", "…") JSON field when [cmd] targets gh,
    AND increment the matching Legendary_counters bucket.  Callers
    append the returned list to their `Assoc payload unconditionally —
@@ -243,19 +275,49 @@ let run_docker_shell_command_with_status
           | [single_repo] ->
             (Filename.concat (Filename.concat host_root "repos") single_repo, None)
           | [] -> (cwd, None)
-          | many ->
+          | example_repo :: _ as many ->
+            (* #10680: keeper-executor-agent saw 17 events / 5min in a single
+               session (mcp_VHsjtow_92C_2a0o, 2026-04-26 08:00→08:06) where
+               the LLM read this descriptive error and still re-issued the
+               same bare git/gh in the next turn.  Make the message
+               self-correcting: include the original cmd and the exact
+               next-call shape so the LLM can copy-paste rather than
+               re-derive the cwd convention from prose. *)
+            let cmd_preview =
+              let s = String.trim cmd in
+              if String.length s > 120 then String.sub s 0 117 ^ "..." else s
+            in
             ( cwd
             , Some
                 (Printf.sprintf
                    "sandbox root에서 git/gh 직접 호출 불가 \
                     (mount point %s는 git repo 아님). \
-                    cd repos/<one of: %s> 먼저 실행하세요."
+                    필수: 다음 호출에서 cwd를 명시. 예: \
+                    keeper_bash { cmd: \"cd repos/%s && %s\" } \
+                    (가능한 repo: %s). \
+                    같은 cmd를 다음 turn에서 cwd 변경 없이 다시 호출하지 마세요."
                    host_root
+                   example_repo
+                   cmd_preview
                    (String.concat ", " many)) )
         else (cwd, None)
       in
       match multi_repo_blocker with
       | Some msg -> sandbox_error msg
+      | None ->
+      (* #10855: surface gh syntax misuse before docker exec so the LLM
+         sees a corrected-form hint in the same turn rather than gh's raw
+         "unknown flag: --repo" error after the round-trip. *)
+      match detect_gh_repo_flag_with_api_misuse cmd with
+      | Some (repo_arg, endpoint) ->
+        sandbox_error
+          (Printf.sprintf
+             "잘못된 gh syntax: 'gh --repo %s api %s ...' \
+              — '--repo' 는 subcommand flag (gh issue/pr/release/run) 전용이고 \
+              'gh api' 에는 적용 안 됨. \
+              올바른 형태: 'gh api repos/%s/%s' (endpoint 안에 org/repo 포함). \
+              다음 turn 에서 cmd 를 수정하세요."
+             repo_arg endpoint repo_arg endpoint)
       | None ->
       let container_name = keeper_sandbox_container_name meta in
       let container_root = keeper_private_container_root meta in

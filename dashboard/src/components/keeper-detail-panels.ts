@@ -880,13 +880,13 @@ export function CtxCompositionPanel({ keeper }: { keeper: Keeper }) {
             <span class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)]">latest breakdown</span>
             <span class="text-3xs font-mono text-[var(--color-fg-disabled)]">${visibleCtxEntries.length}/${latestEntries.length}</span>
           </div>
-          <input
+          <${TextInput}
             type="search"
+            class="mb-2 !px-2 !py-1 !text-2xs"
             value=${ctxCompositionSearch.value}
             placeholder="세그먼트 필터 (예: history, memory)"
-            aria-label="context composition 세그먼트 필터"
+            ariaLabel="context composition 세그먼트 필터"
             onInput=${(e: Event) => { ctxCompositionSearch.value = (e.target as HTMLInputElement).value }}
-            class="mb-2 w-full rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--color-fg-primary)] placeholder:text-[var(--color-fg-disabled)] focus:outline-none focus:border-[var(--color-accent-fg)]"
           />
           ${visibleCtxEntries.length === 0 ? html`
             <div class="py-4 text-center text-2xs text-[var(--color-fg-disabled)]">

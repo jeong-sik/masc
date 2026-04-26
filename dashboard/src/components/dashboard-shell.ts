@@ -376,7 +376,7 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
   const visibleSurfaces = DASHBOARD_SURFACES.filter(surface => surface.hidden !== true)
 
   return html`
-    <nav class="flex flex-col h-full" aria-label="Dashboard navigation">
+    <nav class="flex flex-col h-full" aria-label="대시보드 내비게이션">
       <div class="flex items-center ${collapsed ? 'justify-center' : 'justify-between'} px-2 pt-2 pb-1">
         ${!collapsed ? html`
           <div class="px-1">

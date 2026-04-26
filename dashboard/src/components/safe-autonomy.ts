@@ -383,15 +383,15 @@ export function SafeAutonomyPanel() {
               <//>
 
               <div class="grid grid-cols-1 gap-4 xl:grid-cols-2">
-                <${Card} title="Findings" class="section">
+                <${Card} title="발견" class="section">
                   <${FindingsList} findings=${data.findings} />
                 <//>
-                <${Card} title="Timeline" class="section">
+                <${Card} title="타임라인" class="section">
                   <${TimelineList} timeline=${data.timeline} />
                 <//>
               </div>
 
-              <${JsonViewerCard} title="Artifacts" data=${data.artifacts} />
+              <${JsonViewerCard} title="아티팩트" data=${data.artifacts} />
             </div>
           `}
         />

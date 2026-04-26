@@ -71,31 +71,30 @@ and cascade_fallback_event = {
   reason : string;
 }
 
+module StringMap = Map.Make(String)
+
 type cascade_counter = {
-  mutable calls : int;
-  mutable successes : int;
-  mutable failures : int;
-  mutable rejected : int;
-  mutable fallback_calls : int;
-  mutable total_attempts : int;
-  mutable total_fallback_events : int;
-  mutable last_selected_model : string option;
-  mutable last_selected_index : int option;
-  mutable last_candidate_models : string list;
-  mutable last_attempts : cascade_attempt list;
-  mutable last_fallback_events : cascade_fallback_event list;
-  mutable last_attempt_details_available : bool;
-  mutable last_attempt_details_source : string option;
-  mutable last_used_at : float;
-  selected_models : (string, int) Hashtbl.t;
-  attempted_models : (string, int) Hashtbl.t;
-  errored_models : (string, int) Hashtbl.t;
+  calls : int;
+  successes : int;
+  failures : int;
+  rejected : int;
+  fallback_calls : int;
+  total_attempts : int;
+  total_fallback_events : int;
+  last_selected_model : string option;
+  last_selected_index : int option;
+  last_candidate_models : string list;
+  last_attempts : cascade_attempt list;
+  last_fallback_events : cascade_fallback_event list;
+  last_attempt_details_available : bool;
+  last_attempt_details_source : string option;
+  last_used_at : float;
+  selected_models : int StringMap.t;
+  attempted_models : int StringMap.t;
+  errored_models : int StringMap.t;
 }
 
-let cascade_counters : (string, cascade_counter) Hashtbl.t = Hashtbl.create 8
-let cascade_counters_mu = Eio.Mutex.create ()
 let cascade_max_keys = 256
-let cascade_audit_store_ref : Dated_jsonl.t option ref = ref None
 
 let create_cascade_counter ~now () =
   {
@@ -114,9 +113,9 @@ let create_cascade_counter ~now () =
     last_attempt_details_available = false;
     last_attempt_details_source = None;
     last_used_at = now;
-    selected_models = Hashtbl.create 8;
-    attempted_models = Hashtbl.create 8;
-    errored_models = Hashtbl.create 8;
+    selected_models = StringMap.empty;
+    attempted_models = StringMap.empty;
+    errored_models = StringMap.empty;
   }
 
 type cascade_eviction = {
@@ -125,8 +124,8 @@ type cascade_eviction = {
   last_used_at : float;
 }
 
-let find_cascade_eviction_candidate () =
-  Hashtbl.fold
+let find_cascade_eviction_candidate counters =
+  StringMap.fold
     (fun name (counter : cascade_counter) best ->
       match best with
       | None ->
@@ -140,12 +139,8 @@ let find_cascade_eviction_candidate () =
               { name; calls = counter.calls; last_used_at = counter.last_used_at }
           else
             best)
-    cascade_counters None
+    counters None
 
-let reset_cascade_counters_for_test () =
-  Eio.Mutex.use_rw ~protect:true cascade_counters_mu (fun () ->
-    Hashtbl.clear cascade_counters);
-  cascade_audit_store_ref := None
 
 (* ================================================================ *)
 (* Provider label helpers                                            *)
@@ -427,8 +422,8 @@ let cascade_observation_to_json (obs : cascade_observation) : Yojson.Safe.t =
       ("attempt_details_source", `String obs.attempt_details_source);
     ]
 
-let get_cascade_audit_store () =
-  match !cascade_audit_store_ref with
+let get_cascade_audit_store store_opt =
+  match store_opt with
   | Some store -> Some store
   | None ->
       let base_path = Env_config_core.base_path () in
@@ -438,9 +433,7 @@ let get_cascade_audit_store () =
           "cascade_audit"
       in
       (match Dated_jsonl.create ~base_dir:dir () with
-      | store ->
-          cascade_audit_store_ref := Some store;
-          Some store
+      | store -> Some store
       | exception (Eio.Cancel.Cancelled _ as e) -> raise e
       | exception exn ->
           Log.Misc.warn "cascade audit store creation failed: %s"
@@ -464,8 +457,8 @@ let cascade_audit_json ~now ~cascade_name ~observation ~outcome =
         | None -> `Null );
     ]
 
-let record_cascade_audit ~now ~cascade_name ~observation ~outcome =
-  match get_cascade_audit_store () with
+let record_cascade_audit store_opt ~now ~cascade_name ~observation ~outcome =
+  match store_opt with
   | None -> ()
   | Some store ->
       (try
@@ -481,15 +474,15 @@ let record_cascade_audit ~now ~cascade_name ~observation ~outcome =
 (* Aggregate metrics recording                                       *)
 (* ================================================================ *)
 
-let increment_counter table key =
-  let count = Option.value ~default:0 (Hashtbl.find_opt table key) in
-  Hashtbl.replace table key (count + 1)
+let increment_counter map key =
+  let count = Option.value ~default:0 (StringMap.find_opt key map) in
+  StringMap.add key (count + 1) map
 
-let distribution_json table =
-  Hashtbl.fold
+let distribution_json map =
+  StringMap.fold
     (fun model count acc ->
       `Assoc [ ("model", `String model); ("count", `Int count) ] :: acc)
-    table []
+    map []
   |> List.sort (fun left right ->
          let count_of = function
            | `Assoc fields ->
@@ -505,66 +498,75 @@ let attempt_model_display (attempt : cascade_attempt) =
   | Some label when String.trim label <> "" -> label
   | _ -> attempt.model_id
 
-let record_cascade ~observation ~cascade_name ~outcome =
-  let now = Time_compat.now () in
-  let evicted =
-    Eio.Mutex.use_rw ~protect:true cascade_counters_mu (fun () ->
-      let counter, evicted =
-        match Hashtbl.find_opt cascade_counters cascade_name with
-        | Some c -> (c, None)
-        | None ->
-            let evicted =
-              if Hashtbl.length cascade_counters >= cascade_max_keys then
-                match find_cascade_eviction_candidate () with
-                | Some candidate ->
-                    Hashtbl.remove cascade_counters candidate.name;
-                    Some candidate
-                | None -> None
-              else
-                None
-            in
-            let c = create_cascade_counter ~now () in
-            Hashtbl.replace cascade_counters cascade_name c;
-            (c, evicted)
-      in
-      counter.calls <- counter.calls + 1;
-      counter.last_used_at <- now;
-      (match observation with
-      | Some obs ->
-          counter.last_candidate_models <- obs.candidate_models;
-          counter.last_selected_model <- obs.selected_model;
-          counter.last_selected_index <- obs.selected_index;
-          counter.last_attempts <- obs.attempts;
-          counter.last_fallback_events <- obs.fallback_events;
-          counter.last_attempt_details_available <- obs.attempt_details_available;
-          counter.last_attempt_details_source <- Some obs.attempt_details_source;
-          if obs.fallback_applied then
-            counter.fallback_calls <- counter.fallback_calls + 1;
-          counter.total_attempts <- counter.total_attempts + List.length obs.attempts;
-          counter.total_fallback_events <-
-            counter.total_fallback_events + List.length obs.fallback_events;
-          (match obs.selected_model with
+type msg =
+  | Record_cascade of {
+      cascade_name : string;
+      observation : cascade_observation option;
+      outcome : [ `Success | `Failure | `Rejected ];
+      now : float;
+    }
+  | Get_metrics_json of Yojson.Safe.t Eio.Promise.u
+  | Reset_counters_for_test
+
+type state = {
+  counters : cascade_counter StringMap.t;
+  audit_store : Dated_jsonl.t option;
+}
+
+let stream = Eio.Stream.create 1024
+
+let handle_record state ~now ~cascade_name ~observation ~outcome =
+  let counters = state.counters in
+  let counter, counters, evicted =
+    match StringMap.find_opt cascade_name counters with
+    | Some c -> (c, counters, None)
+    | None ->
+        let (counters_after_evict, evicted) =
+          if StringMap.cardinal counters >= cascade_max_keys then
+            match find_cascade_eviction_candidate counters with
+            | Some candidate -> (StringMap.remove candidate.name counters, Some candidate)
+            | None -> (counters, None)
+          else (counters, None)
+        in
+        let c = create_cascade_counter ~now () in
+        (c, StringMap.add cascade_name c counters_after_evict, evicted)
+  in
+  let counter = { counter with calls = counter.calls + 1; last_used_at = now } in
+  let counter =
+    match observation with
+    | Some obs ->
+        let counter = { counter with
+          last_candidate_models = obs.candidate_models;
+          last_selected_model = obs.selected_model;
+          last_selected_index = obs.selected_index;
+          last_attempts = obs.attempts;
+          last_fallback_events = obs.fallback_events;
+          last_attempt_details_available = obs.attempt_details_available;
+          last_attempt_details_source = Some obs.attempt_details_source;
+          fallback_calls = if obs.fallback_applied then counter.fallback_calls + 1 else counter.fallback_calls;
+          total_attempts = counter.total_attempts + List.length obs.attempts;
+          total_fallback_events = counter.total_fallback_events + List.length obs.fallback_events;
+        } in
+        let counter =
+          match obs.selected_model with
           | Some model when String.trim model <> "" ->
-              increment_counter counter.selected_models model
-          | _ -> ());
-          List.iter
-            (fun attempt ->
-              increment_counter
-                counter.attempted_models
-                (attempt_model_display attempt);
-              match attempt.error with
-              | Some _ ->
-                  increment_counter
-                    counter.errored_models
-                    (attempt_model_display attempt)
-              | None -> ())
-            obs.attempts
-      | None -> ());
-      (match outcome with
-      | `Success -> counter.successes <- counter.successes + 1
-      | `Failure -> counter.failures <- counter.failures + 1
-      | `Rejected -> counter.rejected <- counter.rejected + 1);
-      evicted)
+              { counter with selected_models = increment_counter counter.selected_models model }
+          | _ -> counter
+        in
+        List.fold_left (fun c attempt ->
+          let model = attempt_model_display attempt in
+          let c = { c with attempted_models = increment_counter c.attempted_models model } in
+          match attempt.error with
+          | Some _ -> { c with errored_models = increment_counter c.errored_models model }
+          | None -> c
+        ) counter obs.attempts
+    | None -> counter
+  in
+  let counter =
+    match outcome with
+    | `Success -> { counter with successes = counter.successes + 1 }
+    | `Failure -> { counter with failures = counter.failures + 1 }
+    | `Rejected -> { counter with rejected = counter.rejected + 1 }
   in
   Option.iter
     (fun candidate ->
@@ -573,52 +575,84 @@ let record_cascade ~observation ~cascade_name ~outcome =
         candidate.name candidate.calls candidate.last_used_at cascade_name
         cascade_max_keys)
     evicted;
-  record_cascade_audit ~now ~cascade_name ~observation ~outcome
+  let audit_store_next = get_cascade_audit_store state.audit_store in
+  record_cascade_audit audit_store_next ~now ~cascade_name ~observation ~outcome;
+  { counters = StringMap.add cascade_name counter counters; audit_store = audit_store_next }
 
-let cascade_metrics_json () : Yojson.Safe.t =
-  Eio.Mutex.use_rw ~protect:true cascade_counters_mu (fun () ->
-    let entries =
-      Hashtbl.fold
-        (fun name (c : cascade_counter) acc ->
-          let error_rate =
-            if c.calls > 0 then
-              float_of_int (c.failures + c.rejected) /. float_of_int c.calls
-            else
-              0.0
-          in
-          `Assoc
-            [
-              ("cascade_name", `String name);
-              ("calls", `Int c.calls);
-              ("successes", `Int c.successes);
-              ("failures", `Int c.failures);
-              ("rejected", `Int c.rejected);
-              ("fallback_calls", `Int c.fallback_calls);
-              ("total_attempts", `Int c.total_attempts);
-              ("total_fallback_events", `Int c.total_fallback_events);
-              ("last_selected_model", Json_util.string_opt_to_json c.last_selected_model);
-              ("last_selected_index", Json_util.int_opt_to_json c.last_selected_index);
-              ( "last_candidate_models",
-                `List (List.map (fun model -> `String model) c.last_candidate_models) );
-              ( "last_attempts",
-                `List (List.map cascade_attempt_to_json c.last_attempts) );
-              ( "last_fallback_events",
-                `List
-                  (List.map cascade_fallback_event_to_json c.last_fallback_events) );
-              ("last_attempt_details_available", `Bool c.last_attempt_details_available);
-              ( "last_attempt_details_source",
-                Json_util.string_opt_to_json c.last_attempt_details_source );
-              ("selected_models", `List (distribution_json c.selected_models));
-              ("attempted_models", `List (distribution_json c.attempted_models));
-              ("errored_models", `List (distribution_json c.errored_models));
-              ("error_rate", `Float error_rate);
-            ]
-          :: acc)
-        cascade_counters []
-    in
-    `List
-      (List.sort
-         (fun a b ->
-           let get_calls j = Yojson.Safe.Util.(j |> member "calls" |> to_int) in
-           Int.compare (get_calls b) (get_calls a))
-         entries))
+let handle_get_metrics state p =
+  let counters = state.counters in
+  let entries =
+    StringMap.fold
+      (fun name (c : cascade_counter) acc ->
+        let error_rate =
+          if c.calls > 0 then
+            float_of_int (c.failures + c.rejected) /. float_of_int c.calls
+          else
+            0.0
+        in
+        `Assoc
+          [
+            ("cascade_name", `String name);
+            ("calls", `Int c.calls);
+            ("successes", `Int c.successes);
+            ("failures", `Int c.failures);
+            ("rejected", `Int c.rejected);
+            ("fallback_calls", `Int c.fallback_calls);
+            ("total_attempts", `Int c.total_attempts);
+            ("total_fallback_events", `Int c.total_fallback_events);
+            ("last_selected_model", Json_util.string_opt_to_json c.last_selected_model);
+            ("last_selected_index", Json_util.int_opt_to_json c.last_selected_index);
+            ( "last_candidate_models",
+              `List (List.map (fun model -> `String model) c.last_candidate_models) );
+            ( "last_attempts",
+              `List (List.map cascade_attempt_to_json c.last_attempts) );
+            ( "last_fallback_events",
+              `List
+                (List.map cascade_fallback_event_to_json c.last_fallback_events) );
+            ("last_attempt_details_available", `Bool c.last_attempt_details_available);
+            ( "last_attempt_details_source",
+              Json_util.string_opt_to_json c.last_attempt_details_source );
+            ("selected_models", `List (distribution_json c.selected_models));
+            ("attempted_models", `List (distribution_json c.attempted_models));
+            ("errored_models", `List (distribution_json c.errored_models));
+            ("error_rate", `Float error_rate);
+          ]
+        :: acc)
+      counters []
+  in
+  let json = `List
+    (List.sort
+       (fun a b ->
+         let get_calls j = Yojson.Safe.Util.(j |> member "calls" |> to_int) in
+         Int.compare (get_calls b) (get_calls a))
+       entries)
+  in
+  Eio.Promise.resolve p json
+
+let run_actor () =
+  let rec loop state =
+    match Eio.Stream.take stream with
+    | Record_cascade { cascade_name; observation; outcome; now } ->
+        loop (handle_record state ~now ~cascade_name ~observation ~outcome)
+    | Get_metrics_json p ->
+        handle_get_metrics state p;
+        loop state
+    | Reset_counters_for_test ->
+        loop { counters = StringMap.empty; audit_store = None }
+  in
+  loop { counters = StringMap.empty; audit_store = None }
+
+let start_actor_if_needed ~sw =
+  Eio.Fiber.fork ~sw run_actor
+
+let record_cascade ~observation ~cascade_name ~outcome =
+  let now = Time_compat.now () in
+  Eio.Stream.add stream (Record_cascade { cascade_name; observation; outcome; now })
+
+let cascade_metrics_json () =
+  let p, u = Eio.Promise.create () in
+  Eio.Stream.add stream (Get_metrics_json u);
+  Eio.Promise.await p
+
+let reset_cascade_counters_for_test () =
+  Eio.Stream.add stream Reset_counters_for_test

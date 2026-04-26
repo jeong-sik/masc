@@ -604,7 +604,7 @@ export function RuntimeMonitor() {
                       ${expandedModel.value === metric.model_id
                         ? html`<div id=${`recent-entries-${metric.model_id}`} role="region" aria-label="최근 요청 상세" class="mt-1 border-t border-card-border/50 pt-2">
                             <div class="grid grid-cols-7 gap-1 text-3xs text-[var(--text-muted)] font-medium mb-1" aria-hidden="true">
-                              <div>time</div><div>in tok</div><div>out tok</div><div>latency</div><div>prefill tok/s</div><div>cost</div><div>tools</div>
+                              <div>시간</div><div>입력 토큰</div><div>출력 토큰</div><div>지연</div><div>프리필 tok/s</div><div>비용</div><div>도구</div>
                             </div>
                             ${metric.recent_entries?.map(re => {
                               const detail = recentEntryDetail(re)

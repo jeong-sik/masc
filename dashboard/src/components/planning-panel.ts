@@ -163,7 +163,7 @@ function CoordinationHealthPanel() {
         </div>
       ` : null}
       ${violations.length === 0 ? html`
-        <div class="mt-2 text-xs text-text-muted">Aligned</div>
+        <div class="mt-2 text-xs text-text-muted">정렬됨</div>
       ` : html`
         <ul class="mt-2 grid gap-2" aria-label="조정 위반 목록">
           ${topViolations.map((violation, index) => html`

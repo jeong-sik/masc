@@ -320,7 +320,7 @@ export function ConnectorConfigToggle({ connectorId }: { connectorId: string }) 
       aria-expanded=${entry.open}
       aria-controls=${`connector-config-${connectorId}`}
       onClick=${onClick}
-    ><span aria-hidden="true">⚙</span> Config</button>
+    ><span aria-hidden="true">⚙</span> 설정</button>
   `
 }
 

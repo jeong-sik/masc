@@ -658,13 +658,13 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
         </div>
       </div>
       <div class="mt-3 grid grid-cols-2 gap-2 text-2xs text-text-muted">
-        <div>Sandbox</div>
+        <div>샌드박스</div>
         <div class="text-right text-text-body">${keeper.sandbox_profile}</div>
-        <div>Approval</div>
+        <div>승인</div>
         <div class="text-right text-text-body">${trust?.approval_state?.summary ?? keeper.approval_profile ?? '-'}</div>
-        <div>Cascade</div>
+        <div>캐스케이드</div>
         <div class="text-right text-text-body">${keeper.cascade_name}</div>
-        <div>Outcome</div>
+        <div>결과</div>
         <div class="text-right text-text-body">${keeper.cascade_outcome ?? '-'}</div>
       </div>
       ${trustSummary || trust?.approval_state?.state || trust?.next_human_action ? html`

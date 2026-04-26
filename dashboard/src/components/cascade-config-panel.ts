@@ -724,31 +724,31 @@ function HealthTable({
                 scope="col"
                 class="text-left py-1"
                 title="운영 상태: active (최근 이벤트 있음), cooldown (차단됨), configured (선언됨, 미사용)"
-              >Status</th>
-              <th scope="col" class="text-right py-1">Success</th>
-              <th scope="col" class="text-right py-1">Consec. fail</th>
-              <th scope="col" class="text-right py-1">Events</th>
+              >상태</th>
+              <th scope="col" class="text-right py-1">성공</th>
+              <th scope="col" class="text-right py-1">연속 실패</th>
+              <th scope="col" class="text-right py-1">이벤트</th>
               <th
                 scope="col"
                 class="text-right py-1"
                 title="응답은 왔지만 accept 게이트에서 거부된 이벤트 수"
-              >Rejected</th>
+              >거부</th>
               <th
                 scope="col"
                 class="text-right py-1"
                 title="프롬프트 프리필 처리량 (이 공급자 모델의 항목 가중 평균)"
-              >Prefill tok/s</th>
+              >프리필 tok/s</th>
               <th
                 scope="col"
                 class="text-right py-1"
                 title="디코드 처리량 (예측 토큰/초, 항목 가중)"
-              >Decode tok/s</th>
+              >디코드 tok/s</th>
               <th
                 scope="col"
                 class="text-right py-1"
                 title="지연 p50 / p95 밀리초 (근사치: 모델별 백분위수의 가중 평균)"
-              >Latency p50/p95</th>
-              <th scope="col" class="text-right py-1">Cooldown</th>
+              >지연 p50/p95</th>
+              <th scope="col" class="text-right py-1">쿨다운</th>
             </tr>
           </thead>
           <tbody>

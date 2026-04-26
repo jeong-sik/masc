@@ -133,7 +133,7 @@ export function SetupGuideCard({ connectorId }: { connectorId: string }) {
                   data-setup-complete-badge
                 >
                   <span aria-hidden="true">✓</span>
-                  <span>Complete</span>
+                  <span>완료</span>
                 </span>
               `
             : null}

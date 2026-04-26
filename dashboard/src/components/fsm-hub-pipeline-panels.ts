@@ -197,7 +197,7 @@ function PhaseSparkline({
 
   return html`
     <div class="mt-2 flex items-center gap-2">
-      <span class="text-3xs text-[var(--text-dim)]">phase</span>
+      <span class="text-3xs text-[var(--text-dim)]">단계</span>
       <svg
         width=${W} height=${H}
         viewBox=${`0 0 ${W} ${H}`}

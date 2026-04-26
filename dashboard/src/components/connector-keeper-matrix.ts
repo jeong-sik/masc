@@ -274,7 +274,7 @@ export function ConnectorKeeperMatrix({ matrix }: { matrix: MatrixData }) {
                   class="px-1 py-1 text-center text-3xs uppercase tracking-4 text-[var(--text-dim)]"
                   title="키퍼별 커버리지 합계 (바인딩 / 언바인딩 / 해당없음)"
                   data-matrix-coverage-header
-                >Coverage</div>
+                >커버리지</div>
 
                 ${matrix.rows.map(row => html`
                   <${MatrixRowRender} row=${row} />
@@ -306,7 +306,7 @@ function MatrixColumnTotalsRow({ matrix }: { matrix: MatrixData }) {
     <div
       class="flex items-center gap-1 px-2 py-1 text-3xs uppercase tracking-4 text-[var(--text-dim)]"
       data-matrix-column-totals-label
-    >Totals →</div>
+    >합계 →</div>
     ${matrix.columns.map((_, idx) => html`
       <${ColumnTotalsCell} counts=${summarizeMatrixColumn(matrix, idx)} />
     `)}

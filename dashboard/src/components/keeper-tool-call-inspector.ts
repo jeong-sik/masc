@@ -175,9 +175,9 @@ export function KeeperToolCallInspector({ keeperName }: { keeperName: string }) 
       <div class="border border-[var(--card-border)] rounded overflow-hidden max-h-[500px] overflow-y-auto custom-scrollbar" tabindex="0" role="list" aria-label="도구 호출 목록">
         <${SectionCap} class="flex items-center gap-2 px-3 py-1.5 bg-[var(--bg-deep)] border-b border-[var(--card-border)]">
           <span class="w-4"></span>
-          <span class="w-16">Time</span>
-          <span class="flex-1">Tool</span>
-          <span class="w-16 text-right">Duration</span>
+          <span class="w-16">시간</span>
+          <span class="flex-1">도구</span>
+          <span class="w-16 text-right">소요</span>
           <span class="w-5 text-center" title="성공 여부">OK</span>
           <span class="w-4"></span>
         </div>

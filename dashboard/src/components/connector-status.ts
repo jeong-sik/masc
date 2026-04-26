@@ -1321,23 +1321,23 @@ function ChannelCard({ ch }: { ch: ChannelInfo }) {
 
       <div class="grid grid-cols-3 gap-2 text-xs">
         <div>
-          <div class="text-[var(--text-dim)]">messages</div>
+          <div class="text-[var(--text-dim)]">메시지</div>
           <div class="font-mono text-[var(--text-body)]">${ch.message_count}</div>
         </div>
         <div>
-          <div class="text-[var(--text-dim)]">success</div>
+          <div class="text-[var(--text-dim)]">성공</div>
           <div class="font-mono text-[var(--text-body)]">${ch.success_rate_pct}%</div>
         </div>
         <div>
-          <div class="text-[var(--text-dim)]">errors</div>
+          <div class="text-[var(--text-dim)]">오류</div>
           <div class="font-mono text-[var(--text-body)]">${ch.error_count}</div>
         </div>
         <div>
-          <div class="text-[var(--text-dim)]">duplicates</div>
+          <div class="text-[var(--text-dim)]">중복</div>
           <div class="font-mono text-[var(--text-body)]">${ch.duplicate_count}</div>
         </div>
         <div>
-          <div class="text-[var(--text-dim)]">namespaces</div>
+          <div class="text-[var(--text-dim)]">네임스페이스</div>
           <div class="font-mono text-[var(--text-body)]">${ch.room_count}</div>
         </div>
         <div>

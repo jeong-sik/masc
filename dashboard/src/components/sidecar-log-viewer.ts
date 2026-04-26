@@ -127,7 +127,7 @@ export function SidecarLogToggle({ connectorId }: { connectorId: string }) {
       aria-expanded=${entry.open}
       aria-controls=${`sidecar-log-${connectorId}`}
       onClick=${onClick}
-    ><span aria-hidden="true">📋</span> Logs</button>
+    ><span aria-hidden="true">📋</span> 로그</button>
   `
 }
 
@@ -232,7 +232,7 @@ export function SidecarLogViewer({ connectorId }: { connectorId: string }) {
                       aria-label="필터 초기화"
                       data-log-filter-clear
                       onClick=${() => setEntry(connectorId, { level: 'all', keyword: '' })}
-                    >clear</button>
+                    >초기화</button>
                   `
                 : null}
             </div>

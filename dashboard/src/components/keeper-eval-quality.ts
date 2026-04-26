@@ -190,7 +190,7 @@ export function KeeperEvalQualityPanel({ keeperName }: { keeperName: string }) {
 
       ${'' /* Coverage bar */}
       <div class="flex items-center gap-3 mb-3">
-        <span class="text-3xs text-[var(--text-muted)] flex-shrink-0 w-16">Coverage</span>
+        <span class="text-3xs text-[var(--text-muted)] flex-shrink-0 w-16">커버리지</span>
         <div class="flex-1 h-2 bg-[var(--white-6)] rounded-sm overflow-hidden" role="progressbar" aria-valuenow=${Math.round(coveragePct)} aria-valuemin=${0} aria-valuemax=${100} aria-label="평가 커버리지">
           <div
             class="h-full rounded-sm transition-all duration-500"

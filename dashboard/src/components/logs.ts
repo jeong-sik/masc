@@ -452,11 +452,11 @@ export function LogViewer() {
 
         <div class="px-3 pt-3" aria-hidden="true">
           <div class="grid grid-cols-[11rem_5rem_10rem_8rem_minmax(0,1fr)] gap-3 px-3 py-2 text-left text-3xs font-semibold uppercase tracking-4 text-[var(--text-muted)]">
-            <div>timestamp</div>
-            <div>level</div>
-            <div>module</div>
-            <div>source</div>
-            <div>message</div>
+            <div>시각</div>
+            <div>수준</div>
+            <div>모듈</div>
+            <div>출처</div>
+            <div>메시지</div>
           </div>
         </div>
 

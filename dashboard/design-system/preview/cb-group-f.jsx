@@ -272,7 +272,7 @@ function SafeAutoTrend() {
           const bad = v < 78;
           return (
             <div key={i} style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',gap:'2px'}}>
-              <div style={{width:'100%',height:`${pct}%`,background: bad ? 'linear-gradient(180deg, var(--err), var(--err-border))' : 'linear-gradient(180deg, var(--color-accent-fg), var(--color-accent-fg-dim))'}}></div>
+              <div style={{width:'100%',height:`${pct}%`,background: bad ? 'linear-gradient(180deg, var(--color-status-err), var(--err-border))' : 'linear-gradient(180deg, var(--color-accent-fg), var(--color-accent-fg-dim))'}}></div>
             </div>
           );
         })}
@@ -415,7 +415,7 @@ function CostLatency() {
         {[
           { l:'< 1s',  v: buckets.filter(b=>b.hi<=1000).reduce((s,b)=>s+b.n,0), c:'var(--ok-fg)' },
           { l:'1–4s',  v: buckets.filter(b=>b.lo>=1000&&b.hi<=4000).reduce((s,b)=>s+b.n,0), c:'var(--color-accent-fg)' },
-          { l:'4–16s', v: buckets.filter(b=>b.lo>=4000&&b.hi<=16000).reduce((s,b)=>s+b.n,0), c:'var(--warn)' },
+          { l:'4–16s', v: buckets.filter(b=>b.lo>=4000&&b.hi<=16000).reduce((s,b)=>s+b.n,0), c:'var(--color-status-warn)' },
           { l:'> 16s', v: buckets.filter(b=>b.lo>=16000).reduce((s,b)=>s+b.n,0), c:'var(--err-fg)' },
         ].map(b => (
           <div key={b.l} role="listitem" aria-label={`${b.l}: ${b.v} calls (${(b.v/total*100).toFixed(0)}%)`} style={{background:'var(--color-bg-surface)',padding:'6px 10px',display:'flex',flexDirection:'column',gap:'2px'}}>
@@ -500,7 +500,7 @@ function HeuristicByModule() {
               <span aria-hidden="true" style={{fontFamily:'var(--font-mono)',fontSize:'var(--fs-11)',color:'var(--color-fg-primary)'}}>{mod}</span>
               <span aria-hidden="true" style={{fontFamily:'var(--font-mono)',fontSize:'var(--fs-10)',color:'var(--color-fg-muted)'}}>{v.fired}/{v.total} fired</span>
               <div aria-hidden="true" style={{height:'10px',background:'var(--color-bg-panel-alt)',border:'1px solid var(--color-border-default)'}}>
-                <div style={{height:'100%',width:`${pct}%`,background: pct > 50 ? 'linear-gradient(90deg, var(--warn), var(--err))' : 'linear-gradient(90deg, var(--color-accent-fg-dim), var(--color-accent-fg))'}}></div>
+                <div style={{height:'100%',width:`${pct}%`,background: pct > 50 ? 'linear-gradient(90deg, var(--color-status-warn), var(--color-status-err))' : 'linear-gradient(90deg, var(--color-accent-fg-dim), var(--color-accent-fg))'}}></div>
               </div>
               <span aria-hidden="true" style={{fontFamily:'var(--font-mono)',fontSize:'var(--fs-11)',color: pct > 50 ? 'var(--err-fg)' : 'var(--color-accent-fg)',fontVariantNumeric:'tabular-nums',textAlign:'right'}}>{pct.toFixed(0)}%</span>
               <span aria-hidden="true" style={{gridColumn:'1 / -1',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',color:'var(--color-fg-disabled)',letterSpacing:'.04em'}}>sites · {[...v.sites].join(' · ')}</span>

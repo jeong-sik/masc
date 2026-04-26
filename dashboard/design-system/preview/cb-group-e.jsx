@@ -255,7 +255,7 @@ function MentionInbox() {
         <div role="heading" aria-level={3} style={{fontFamily:'var(--font-mono)', fontSize:'10px', color:'var(--color-fg-disabled)', letterSpacing:'.1em', textTransform:'uppercase', padding:'8px 0 2px', borderTop:'1px dashed var(--color-border-strong)'}}>━━ other mentions · {otherMentions.length}</div>
         <div className="ms-inbox" role="log" aria-live="polite" aria-label={`${otherMentions.length} other mentions`}>
           {otherMentions.map(m => (
-            <article key={m.seq} className="mn" aria-label={`#${m.seq} · ${m.from} in #${m.room} at ${m.at}: ${m.body}`} style={{borderLeftColor:'var(--info)', opacity:.7}}>
+            <article key={m.seq} className="mn" aria-label={`#${m.seq} · ${m.from} in #${m.room} at ${m.at}: ${m.body}`} style={{borderLeftColor:'var(--color-status-info)', opacity:.7}}>
               <div className="h" aria-hidden="true">
                 <span className="au">{m.from}</span>
                 <span className="rm">→ #{m.room}</span>

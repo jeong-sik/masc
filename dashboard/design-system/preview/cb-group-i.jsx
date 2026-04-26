@@ -11,11 +11,11 @@ const P2i = window.MASC_P2;
 function keeperColor(id) {
   return ({
     'nick0cave':     'var(--color-accent-fg)',
-    'masc-improver': 'var(--ok)',
-    'sangsu':        'var(--info)',
-    'qa-king':       'var(--err)',
-    'rama':          'var(--stalled)',
-    'ramarama':      'var(--stalled)',
+    'masc-improver': 'var(--color-status-ok)',
+    'sangsu':        'var(--color-status-info)',
+    'qa-king':       'var(--color-status-err)',
+    'rama':          'var(--color-status-stalled)',
+    'ramarama':      'var(--color-status-stalled)',
     'scholar':       '#9aa6b8',
     'janitor':       '#7a8290',
     'taskmaster':    'var(--color-accent-fg-dim)',
@@ -29,7 +29,7 @@ function keeperColor(id) {
     'codex-mcp-client': '#6a7080',
     'ollama-local':  '#7a9080',
     'scholar2':      '#9aa6b8',
-  })[id] || 'var(--idle)';
+  })[id] || 'var(--color-status-idle)';
 }
 
 // ═════════════════════════════════════════════════════════════════

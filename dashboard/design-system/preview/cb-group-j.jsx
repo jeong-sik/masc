@@ -4,10 +4,10 @@
 window.MASC_P3 = (function () {
   const keepers = [
     { id: "nick0cave", initials: "NC", role: "captain", color: "var(--color-accent-fg)" },
-    { id: "masc-improver", initials: "MI", role: "improver", color: "var(--ok)" },
-    { id: "sangsu", initials: "SG", role: "analyst", color: "var(--info)" },
-    { id: "qa-king", initials: "QA", role: "qa", color: "var(--err)" },
-    { id: "rama", initials: "RA", role: "research", color: "var(--stalled)" },
+    { id: "masc-improver", initials: "MI", role: "improver", color: "var(--color-status-ok)" },
+    { id: "sangsu", initials: "SG", role: "analyst", color: "var(--color-status-info)" },
+    { id: "qa-king", initials: "QA", role: "qa", color: "var(--color-status-err)" },
+    { id: "rama", initials: "RA", role: "research", color: "var(--color-status-stalled)" },
   ];
 
   const files = [

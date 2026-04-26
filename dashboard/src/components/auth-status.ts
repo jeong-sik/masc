@@ -189,8 +189,8 @@ function AuthPopover() {
           <div class="flex gap-2">
             <input
               type="text"
-              placeholder="dashboard actor"
-              aria-label="Dashboard actor"
+              placeholder="대시보드 행위자"
+              aria-label="대시보드 행위자"
               class="min-w-0 flex-1 py-1.5 px-2 rounded text-2xs border border-[var(--color-border-default)] bg-[var(--white-4)] text-[var(--color-fg-primary)] placeholder-[var(--color-fg-muted)] outline-none focus:border-[rgba(71,184,255,0.5)]"
               value=${actorInput.value}
               disabled=${actorOverrideLocked}

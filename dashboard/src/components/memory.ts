@@ -282,12 +282,12 @@ function SortBar() {
             </button>
           `
         })}
-        <input
+        <${TextInput}
           type="text"
           placeholder="작성자"
-          aria-label="작성자 필터"
+          ariaLabel="작성자 필터"
           value=${boardAuthorFilter.value}
-          class="px-2.5 py-1 rounded text-2xs font-medium border bg-transparent text-[var(--text)] border-[var(--border-slate-16)] placeholder:text-[var(--color-fg-muted)] w-28 focus:outline-none focus:border-[var(--color-accent-fg)]"
+          class="!bg-transparent !px-2.5 !py-1 !text-2xs !font-medium w-28"
           onKeyDown=${(e: KeyboardEvent) => {
             if (e.key === 'Enter') {
               boardAuthorFilter.value = (e.target as HTMLInputElement).value.trim()

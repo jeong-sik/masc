@@ -71,6 +71,28 @@ let test_oversized_with_trailing_whitespace_is_equal () =
     true
     (KR.personality_text_equal nick0cave_will with_newline)
 
+let test_unicode_trailing_whitespace_is_equal () =
+  (* #10552: NBSP (U+00A0 = C2 A0) and ideographic space (U+3000 = E3 80 80)
+     are not stripped by [String.trim] but were the residual 4-byte drift
+     that survived the #10479 symmetric-compare fix and kept nick0cave's
+     personality re-sync firing at ~1/min. After [utf8_trim_trailing_whitespace],
+     both sides must collapse to the same normalised form. *)
+  let with_nbsp = nick0cave_will ^ "\xC2\xA0\xC2\xA0" in  (* 2 NBSP = 4 bytes *)
+  let with_ideographic = nick0cave_will ^ "\xE3\x80\x80" in  (* 1 IS = 3 bytes *)
+  let with_zero_width = nick0cave_will ^ "\xE2\x80\x8B" in  (* 1 ZWS = 3 bytes *)
+  Alcotest.(check bool)
+    "trailing NBSP (C2 A0) compares equal"
+    true
+    (KR.personality_text_equal nick0cave_will with_nbsp);
+  Alcotest.(check bool)
+    "trailing ideographic space (E3 80 80) compares equal"
+    true
+    (KR.personality_text_equal nick0cave_will with_ideographic);
+  Alcotest.(check bool)
+    "trailing zero-width space (E2 80 8B) compares equal"
+    true
+    (KR.personality_text_equal nick0cave_will with_zero_width)
+
 let test_diff_summary_is_empty_for_identical_oversized () =
   (* The reconcile path uses [personality_diff_summary] to decide
      whether [personality_changed] fires.  An empty list is the
@@ -137,6 +159,8 @@ let () =
             `Quick test_oversized_real_diff_still_detected;
           Alcotest.test_case "oversized + trailing whitespace equal"
             `Quick test_oversized_with_trailing_whitespace_is_equal;
+          Alcotest.test_case "unicode trailing whitespace equal (#10552)"
+            `Quick test_unicode_trailing_whitespace_is_equal;
           Alcotest.test_case "diff_summary empty for identical oversized"
             `Quick test_diff_summary_is_empty_for_identical_oversized;
           Alcotest.test_case "diff_summary reports normalised lengths"

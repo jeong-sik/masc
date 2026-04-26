@@ -259,8 +259,54 @@ let utf8_repair_string (s : string) : string =
   loop 0;
   Buffer.contents buf
 
+(** #10552: trim Unicode whitespace beyond ASCII so TOML/JSON sources that
+    end with NBSP (U+00A0 = 2 bytes), ideographic space (U+3000 = 3 bytes),
+    or zero-width space (U+200B = 3 bytes) compare equal to a stripped
+    counterpart. [String.trim] only handles ASCII whitespace, so a 4-byte
+    drift survived the #10479 symmetric-compare fix and continued to fire
+    nick0cave personality re-sync at ~1/min. *)
+let utf8_trim_trailing_whitespace (s : string) : string =
+  let n = String.length s in
+  let is_ascii_ws_byte b =
+    let c = Char.code b in
+    c = 0x20 || c = 0x09 || c = 0x0A || c = 0x0B || c = 0x0C || c = 0x0D
+  in
+  let ends_with_unicode_ws end_pos =
+    if end_pos < 2 then None
+    else
+      let b0 = Char.code s.[end_pos - 2] in
+      let b1 = Char.code s.[end_pos - 1] in
+      if b0 = 0xC2 && b1 = 0xA0 then Some 2  (* U+00A0 NBSP : C2 A0 *)
+      else if end_pos >= 3 then begin
+        let b_2 = Char.code s.[end_pos - 3] in
+        if b_2 = 0xE3 && b0 = 0x80 && b1 = 0x80 then Some 3  (* U+3000 *)
+        else if b_2 = 0xE2 && b0 = 0x80
+             && (b1 = 0x8B || b1 = 0xA8 || b1 = 0xA9)
+        then Some 3  (* U+200B / U+2028 / U+2029 *)
+        else None
+      end
+      else None
+  in
+  let rec loop_end pos =
+    if pos = 0 then 0
+    else if is_ascii_ws_byte s.[pos - 1] then loop_end (pos - 1)
+    else
+      match ends_with_unicode_ws pos with
+      | Some k -> loop_end (pos - k)
+      | None -> pos
+  in
+  let trimmed_end = loop_end n in
+  let rec loop_start pos =
+    if pos >= trimmed_end then trimmed_end
+    else if is_ascii_ws_byte s.[pos] then loop_start (pos + 1)
+    else pos
+  in
+  let trimmed_start = loop_start 0 in
+  if trimmed_start = 0 && trimmed_end = n then s
+  else String.sub s trimmed_start (trimmed_end - trimmed_start)
+
 let normalize_self_model_text ~(max_bytes : int) (raw : string) : string =
-  let s = String.trim raw in
+  let s = utf8_trim_trailing_whitespace raw in
   if s = "" then ""
   else utf8_safe_prefix_bytes s ~max_bytes
 

@@ -346,7 +346,7 @@ function KpiSection({ title, question, children }: {
   children: unknown
 }) {
   return html`
-    <section class="rounded border border-[var(--color-border-default)] bg-[var(--white-2)] p-3">
+    <section class="rounded border border-[var(--color-border-default)] bg-[var(--white-2)] p-3" aria-label=${title}>
       <header class="mb-2 flex items-baseline justify-between gap-2">
         <h3 class="text-2xs font-semibold tracking-1 uppercase text-[var(--color-fg-muted)]">${title}</h3>
         <span class="text-3xs text-[var(--color-fg-disabled)] truncate">${question}</span>

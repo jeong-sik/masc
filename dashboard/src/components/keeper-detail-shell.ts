@@ -340,6 +340,7 @@ export function KeeperDetailSection({
     <section
       id=${id}
       class="scroll-mt-24 rounded-[28px] border border-[var(--card-border)] bg-[linear-gradient(180deg,rgba(12,19,34,0.94),rgba(8,13,24,0.98))] shadow-[0_24px_48px_rgba(0,0,0,0.22)]"
+      aria-label=${title}
     >
       <div class="border-b border-[var(--white-8)] px-5 py-4 sm:px-6">
         <div class="text-3xs font-semibold uppercase tracking-[0.22em] text-[var(--text-muted)]">${eyebrow}</div>

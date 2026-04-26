@@ -840,6 +840,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
     <section
       data-testid="fleet-fsm-matrix"
       class="rounded border border-[var(--white-10)] bg-[var(--white-5)]"
+      aria-label="Fleet FSM 통합 상태"
     >
       <header class="flex flex-wrap items-baseline gap-3 border-b border-[var(--white-10)] p-3">
         <h2 class="text-sm font-semibold text-[var(--color-fg-muted)]">Fleet 통합 (KSM × KTC × KDP × KCL × KMC × KCB)</h2>

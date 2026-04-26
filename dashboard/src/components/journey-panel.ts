@@ -468,7 +468,7 @@ function JourneyTile({
   children: preact.ComponentChildren
 }) {
   return html`
-    <section class="rounded-xl border border-[var(--color-border-default)] bg-[var(--white-3)] p-4 flex flex-col gap-3 min-h-[150px]">
+    <section class="rounded-xl border border-[var(--color-border-default)] bg-[var(--white-3)] p-4 flex flex-col gap-3 min-h-[150px]" aria-label=${label}>
       <div class="text-3xs font-semibold uppercase tracking-4 text-[var(--color-fg-disabled)]">${label}</div>
       <div class="flex flex-col gap-2 text-sm text-[var(--color-fg-primary)]">
         ${children}

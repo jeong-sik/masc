@@ -138,6 +138,7 @@ export function CompositeFsmFlowchart(props: CompositeFsmFlowchartProps = {}) {
     <section
       data-testid="composite-fsm-flowchart"
       class="rounded border border-[var(--white-10)] bg-[var(--white-5)] ${props.class ?? ''}"
+      aria-label="Composite FSM flowchart"
     >
       <header class="border-b border-[var(--white-10)] p-3">
         <h2 class="text-sm font-semibold text-[var(--color-fg-muted)]">

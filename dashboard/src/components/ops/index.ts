@@ -209,12 +209,12 @@ export function Ops() {
   ])
 
   return html`
-    <section class="flex flex-col gap-4">
-      ${operatorError.value ? html`<section class="ops-banner rounded py-3 px-3.5 border border-[var(--color-border-default)] error">${operatorError.value}</section>` : null}
-      ${operatorDigestError.value ? html`<section class="ops-banner rounded py-3 px-3.5 border border-[var(--color-border-default)] error">${operatorDigestError.value}</section>` : null}
+    <section class="flex flex-col gap-4" aria-label="운영 작업 패널">
+      ${operatorError.value ? html`<section class="ops-banner rounded py-3 px-3.5 border border-[var(--color-border-default)] error" role="alert">${operatorError.value}</section>` : null}
+      ${operatorDigestError.value ? html`<section class="ops-banner rounded py-3 px-3.5 border border-[var(--color-border-default)] error" role="alert">${operatorDigestError.value}</section>` : null}
 
       ${workflowContext ? html`
-        <section class="ops-banner rounded py-3 px-3.5 border border-[var(--color-border-default)] ${workflowReady ? 'info' : 'warn'} grid gap-2">
+        <section class="ops-banner rounded py-3 px-3.5 border border-[var(--color-border-default)] ${workflowReady ? 'info' : 'warn'} grid gap-2" aria-label="워크플로우 컨텍스트">
           <div class="flex gap-2 flex-wrap items-center text-[var(--color-fg-primary)]">
             <strong class="font-semibold">${workflowContext.source_label}</strong>
             <span>${workflowActionLabel(workflowContext.action_type)}</span>
@@ -237,7 +237,7 @@ export function Ops() {
           <${KeeperUtilitiesPanel} />
         </div>
 
-        <section class="${CARD_STANDARD} grid gap-3 order-2 max-[1200px]:order-1">
+        <section class="${CARD_STANDARD} grid gap-3 order-2 max-[1200px]:order-1" aria-label="최근 운영 활동">
           <div>
             <h2 class="text-sm font-semibold text-[var(--color-fg-secondary)]">최근 운영 활동</h2>
             <p class="mt-1 text-xs text-[var(--color-fg-muted)]">최근 처리와 직접 개입을 시간순으로 함께 보여줍니다. 검토 큐와 Live Judge 판단은 거버넌스 페이지에서 처리합니다.</p>

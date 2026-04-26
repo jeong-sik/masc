@@ -133,7 +133,7 @@ function CoordinationHealthPanel() {
   const warnCount = coordinationCount(snapshot, 'warn')
   const evidenceCount = coordinationCount(snapshot, 'evidence')
   return html`
-    <section class="rounded border border-card-border/70 bg-[rgba(8,13,22,0.74)] p-3">
+    <section class="rounded border border-card-border/70 bg-[rgba(8,13,22,0.74)] p-3" aria-label="협력 상태">
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div>
           <div class="text-sm font-semibold text-text-strong">협력 상태</div>

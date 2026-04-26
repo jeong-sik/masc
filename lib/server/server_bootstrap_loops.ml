@@ -61,14 +61,24 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
           (Printexc.to_string exn))
   in
   let wait_for_lazy_startup () =
-    (* #10843: per-task elapsed tracking so the autoboot wait log surfaces
-       which lazy task is hung instead of repeating an opaque pending list
-       every 5s. The hash table is local to this fiber — no global state,
-       no product-state machine changes. Threshold 60s mirrors the issue's
-       short-term recommendation; tasks above it are flagged HUNG and the
-       wait log escalates from INFO to WARN. *)
+    (* Combines #10843 (per-task elapsed diagnostic, merged via #10854) with
+       a per-task boot guard.  The diagnostic surface stays as #10854
+       intended — running/HUNG tags + INFO→WARN escalation at 60s — and
+       the boot guard kicks in at [boot_guard_sec] (default 120s) to
+       fail-out tasks that exceed it via [Server_startup_state.fail_lazy_task].
+       Without a hard ceiling, a single hung task (e.g. [restore_sessions]
+       hanging 17 min, #10843) blocks keeper boot indefinitely; the 240s
+       startup watchdog does NOT cover this case because [activate_lazy]
+       sets state_ready=true before the lazy fibers finish. *)
     let started_at = Hashtbl.create 16 in
     let hung_threshold_sec = 60.0 in
+    let boot_guard_sec =
+      match Sys.getenv_opt "MASC_LAZY_TASK_BOOT_GUARD_SEC" with
+      | Some v -> (match float_of_string_opt (String.trim v) with
+                   | Some f when f > 0.0 -> f
+                   | _ -> 120.0)
+      | None -> 120.0
+    in
     let format_pending now pending =
       pending
       |> List.map (fun task ->
@@ -96,29 +106,57 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
         Hashtbl.filter_map_inplace
           (fun task t -> if List.mem task pending then Some t else None)
           started_at;
-        let last_log_at =
-          if now -. last_log_at >= 5.0 then begin
-            let max_elapsed =
-              List.fold_left
-                (fun m task ->
-                  match Hashtbl.find_opt started_at task with
-                  | Some s -> Float.max m (now -. s)
-                  | None -> m)
-                0.0 pending
-            in
-            let log_fn =
-              if max_elapsed >= hung_threshold_sec then Log.Keeper.warn
-              else Log.Keeper.info
-            in
-            log_fn
-              "autoboot: waiting for lazy startup tasks to finish before keeper boot [%s]"
-              (format_pending now pending);
-            now
-          end else
-            last_log_at
+        let stuck =
+          List.filter (fun task ->
+            match Hashtbl.find_opt started_at task with
+            | Some seen_at -> now -. seen_at >= boot_guard_sec
+            | None -> false)
+            pending
         in
-        Eio.Time.sleep clock 0.25;
-        loop last_log_at
+        if stuck <> [] then begin
+          List.iter (fun task ->
+            let elapsed =
+              match Hashtbl.find_opt started_at task with
+              | Some seen_at -> now -. seen_at
+              | None -> 0.0
+            in
+            Log.Keeper.error
+              "autoboot: lazy task %s exceeded boot guard %.0fs (elapsed %.1fs) — failing it so keeper boot can proceed"
+              task boot_guard_sec elapsed;
+            Prometheus.inc_counter
+              "masc_lazy_task_boot_guard_fired_total"
+              ~labels:[ ("task", task) ]
+              ();
+            Server_startup_state.fail_lazy_task
+              ~task
+              ~error:(Printf.sprintf "lazy_task_boot_guard:%.0fs" boot_guard_sec))
+            stuck;
+          loop last_log_at
+        end else begin
+          let last_log_at =
+            if now -. last_log_at >= 5.0 then begin
+              let max_elapsed =
+                List.fold_left
+                  (fun m task ->
+                    match Hashtbl.find_opt started_at task with
+                    | Some s -> Float.max m (now -. s)
+                    | None -> m)
+                  0.0 pending
+              in
+              let log_fn =
+                if max_elapsed >= hung_threshold_sec then Log.Keeper.warn
+                else Log.Keeper.info
+              in
+              log_fn
+                "autoboot: waiting for lazy startup tasks to finish before keeper boot [%s]"
+                (format_pending now pending);
+              now
+            end else
+              last_log_at
+          in
+          Eio.Time.sleep clock 0.25;
+          loop last_log_at
+        end
       end
     in
     loop (Eio.Time.now clock)

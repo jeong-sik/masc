@@ -52,13 +52,32 @@ let sdk_error_kind = function
   | Oas.Error.A2a _ -> "a2a"
   | Oas.Error.Internal _ -> "internal"
 
+(* Per-variant terminal_reason_code for Oas.Error.Api.
+   Previously every API failure collapsed to "api_error", so 7 keepers
+   stuck on different conditions (rate limit, overload, server fault,
+   auth) all displayed the same dashboard chip and the broadcast
+   payload could not differentiate them. Memory:
+   no-collapse-richer-enum-at-sdk-boundary. *)
+let api_error_terminal_reason_code (err : Oas.Error.api_error) : string =
+  match err with
+  | Oas.Retry.RateLimited _ -> "api_error_rate_limited"
+  | Oas.Retry.Overloaded _ -> "api_error_overloaded"
+  | Oas.Retry.ServerError { status; _ } ->
+    Printf.sprintf "api_error_server:%d" status
+  | Oas.Retry.AuthError _ -> "api_error_auth"
+  | Oas.Retry.InvalidRequest _ -> "api_error_invalid_request"
+  | Oas.Retry.NotFound _ -> "api_error_not_found"
+  | Oas.Retry.ContextOverflow _ -> "api_error_context_overflow"
+  | Oas.Retry.NetworkError _ -> "api_error_network"
+  | Oas.Retry.Timeout _ -> "api_error_timeout"
+
 let terminal_reason_code_of_sdk_error = function
   | Oas.Error.Agent
       (Oas.Error.CompletionContractViolation { contract; _ }) ->
     Printf.sprintf
       "completion_contract_violation:%s"
       (Oas.Completion_contract_id.to_string contract)
-  | Oas.Error.Api _ -> "api_error"
+  | Oas.Error.Api err -> api_error_terminal_reason_code err
   | Oas.Error.Agent _ -> "agent_error"
   | Oas.Error.Mcp _ -> "mcp_error"
   | Oas.Error.Config _ -> "config_error"

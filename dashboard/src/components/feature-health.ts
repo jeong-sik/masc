@@ -120,14 +120,14 @@ function statusLabel(status: FeatureStatus): string {
 function statusChipClass(status: FeatureStatus): string {
   switch (status) {
     case 'healthy':
-      return 'border-[var(--ok-30)] bg-[var(--ok-12)] text-[var(--color-status-ok)]'
+      return 'border-[var(--ok-30)] bg-[var(--ok-12)] text-[var(--ok)]'
     case 'warning':
-      return 'border-[var(--warn-30)] bg-[var(--warn-12)] text-[var(--color-status-warn)]'
+      return 'border-[var(--warn-30)] bg-[var(--warn-12)] text-[var(--warn)]'
     case 'inactive':
-      return 'border-[var(--white-12)] bg-[var(--white-4)] text-[var(--color-fg-muted)]'
+      return 'border-[var(--white-12)] bg-[var(--white-4)] text-[var(--text-muted)]'
     case 'deprecated':
     default:
-      return 'border-[var(--bad-30)] bg-[var(--bad-12)] text-[var(--color-status-err)]'
+      return 'border-[var(--bad-30)] bg-[var(--bad-12)] text-[var(--bad)]'
   }
 }
 
@@ -145,20 +145,20 @@ function FeatureItem({ item }: { item: FeatureHealthItem }) {
       <div class="flex items-start justify-between gap-3">
         <div class="flex-1">
           <div class="flex items-center gap-2">
-            <code class="text-xs font-medium text-[var(--color-fg-secondary)]">${item.env_name}</code>
+            <code class="text-xs font-medium text-[var(--text-strong)]">${item.env_name}</code>
             <${StatusPill} status=${item.status} />
             ${item.is_enabled ? html`
-              <span class="inline-flex items-center rounded border border-[var(--ok-30)] bg-[var(--ok-12)] px-1.5 py-0.5 text-3xs font-semibold text-[var(--color-status-ok)]">
+              <span class="inline-flex items-center rounded border border-[var(--ok-30)] bg-[var(--ok-12)] px-1.5 py-0.5 text-3xs font-semibold text-[var(--ok)]">
                 ON
               </span>
             ` : html`
-              <span class="inline-flex items-center rounded border border-[var(--white-12)] bg-[var(--white-4)] px-1.5 py-0.5 text-3xs font-semibold text-[var(--color-fg-muted)]">
+              <span class="inline-flex items-center rounded border border-[var(--white-12)] bg-[var(--white-4)] px-1.5 py-0.5 text-3xs font-semibold text-[var(--text-muted)]">
                 OFF
               </span>
             `}
           </div>
-          <div class="mt-1.5 text-sm text-[var(--color-fg-primary)]">${item.description}</div>
-          <div class="mt-1 flex items-center gap-3 text-xs text-[var(--color-fg-muted)]">
+          <div class="mt-1.5 text-sm text-[var(--text-body)]">${item.description}</div>
+          <div class="mt-1 flex items-center gap-3 text-xs text-[var(--text-muted)]">
             <span>source: ${item.source}</span>
             <span>since: v${item.since}</span>
           </div>
@@ -176,12 +176,12 @@ function CategorySection({ category, categoryData }: { category: string; categor
     <div class="rounded border border-[var(--white-8)] bg-[var(--white-3)] p-4">
       <div class="mb-3 flex items-center justify-between">
         <div>
-          <div class="text-sm font-medium text-[var(--color-fg-secondary)]">${categoryLabel}</div>
-          <div class="mt-0.5 text-xs text-[var(--color-fg-muted)]">
+          <div class="text-sm font-medium text-[var(--text-strong)]">${categoryLabel}</div>
+          <div class="mt-0.5 text-xs text-[var(--text-muted)]">
             ${categoryData.enabled} / ${categoryData.total} enabled (${enabledRatio}%)
           </div>
         </div>
-        <div class="rounded-sm border border-[var(--white-8)] bg-[var(--white-6)] px-3 py-1 text-xs font-semibold text-[var(--color-fg-primary)]">
+        <div class="rounded-sm border border-[var(--white-8)] bg-[var(--white-6)] px-3 py-1 text-xs font-semibold text-[var(--text-body)]">
           ${categoryData.total}
         </div>
       </div>
@@ -211,18 +211,18 @@ export function FeatureHealth() {
                 <div class="rounded border border-[var(--white-8)] bg-[var(--white-4)] p-4">
                   <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                     <div class="max-w-3xl">
-                      <${SectionCap}>Feature Flags Health<//>
-                      <div class="mt-2 text-2xl font-semibold text-[var(--color-fg-secondary)]">
+                      <${SectionCap}>기능 플래그 상태<//>
+                      <div class="mt-2 text-2xl font-semibold text-[var(--text-strong)]">
                         ${overview.enabled_count} / ${overview.total_features} 기능 활성화
                       </div>
-                      <div class="mt-2 text-sm leading-airy text-[var(--color-fg-primary)]">
+                      <div class="mt-2 text-sm leading-airy text-[var(--text-body)]">
                         시스템 기능 플래그 상태를 실시간으로 모니터링합니다.
                         ${overview.overridden_count ? `${overview.overridden_count}개 플래그가 환경변수로 오버라이드되었습니다.` : ''}
                       </div>
                     </div>
                     <button
                       type="button"
-                      class="rounded border border-[var(--white-8)] px-2.5 py-1 text-2xs text-[var(--color-fg-muted)] transition-colors hover:border-[var(--color-accent-fg)] hover:text-[var(--color-fg-primary)]"
+                      class="rounded border border-[var(--white-8)] px-2.5 py-1 text-2xs text-[var(--text-muted)] transition-colors hover:border-[var(--accent)] hover:text-[var(--text-body)]"
                       onClick=${() => { void loadFeatureHealth() }}
                     >새로고침</button>
                   </div>
@@ -236,7 +236,7 @@ export function FeatureHealth() {
                     <${StatCard} label="폐기 예정" value=${overview.deprecated_count} />
                   </div>
 
-                  <div class="mt-4 text-xs text-[var(--color-fg-disabled)]">
+                  <div class="mt-4 text-xs text-[var(--text-dim)]">
                     generated ${formatTimeAgo(data.generated_at)}
                   </div>
                 </div>
@@ -284,14 +284,14 @@ export function FeatureHealth() {
                   )
                   if (filtered.length === 0) {
                     return html`
-                      <div class="rounded border border-[var(--white-8)] bg-[var(--white-3)] p-4 text-xs text-[var(--color-fg-disabled)]">
+                      <div class="rounded border border-[var(--white-8)] bg-[var(--white-3)] p-4 text-xs text-[var(--text-dim)]">
                         조건에 맞는 기능이 없습니다.
                       </div>
                     `
                   }
                   return html`
                     <div class="rounded border border-[var(--white-8)] bg-[var(--white-3)] p-4">
-                      <div class="mb-3 text-xs text-[var(--color-fg-muted)]">
+                      <div class="mb-3 text-xs text-[var(--text-muted)]">
                         ${filtered.length} / ${data.all_features.length}개 기능
                       </div>
                       <div class="space-y-2">

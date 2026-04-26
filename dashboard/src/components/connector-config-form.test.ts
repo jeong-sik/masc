@@ -343,7 +343,7 @@ describe('ConnectorConfigForm', () => {
     await flushUi()
     await flushUi()
 
-    const toggle = container.querySelector('[data-auto-restart-toggle]') as HTMLInputElement
+    const toggle = container.querySelector('[data-testid="auto-restart-toggle"]') as HTMLInputElement
     expect(toggle).toBeTruthy()
     expect(toggle.checked).toBe(false)
 
@@ -384,7 +384,7 @@ describe('ConnectorConfigForm', () => {
     await flushUi()
     await flushUi()
 
-    const toggle = container.querySelector('[data-auto-restart-toggle]') as HTMLInputElement
+    const toggle = container.querySelector('[data-testid="auto-restart-toggle"]') as HTMLInputElement
     toggle.click()
     await flushUi()
 
@@ -429,7 +429,7 @@ describe('ConnectorConfigForm', () => {
     await flushUi()
     await flushUi()
 
-    ;(container.querySelector('[data-auto-restart-toggle]') as HTMLInputElement).click()
+    ;(container.querySelector('[data-testid="auto-restart-toggle"]') as HTMLInputElement).click()
     await flushUi()
     const btn = Array.from(container.querySelectorAll('button'))
       .find(b => b.textContent?.trim() === 'Save & Apply') as HTMLButtonElement

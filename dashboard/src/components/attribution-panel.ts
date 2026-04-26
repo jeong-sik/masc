@@ -18,6 +18,7 @@ import {
 import { SurfaceCard } from './common/card'
 import { ErrorState, LoadingState } from './common/feedback-state'
 import { EmptyState } from './common/empty-state'
+import { TextInput } from './common/input'
 import { highlightMatch } from '../lib/highlight-match'
 
 const POLL_INTERVAL_MS = 5_000
@@ -328,16 +329,16 @@ export function AttributionPanel() {
               </button>
             </div>`
           : html`<div></div>`}
-        <input
+        <${TextInput}
           type="search"
           value=${query.value}
           placeholder="gate / origin / reason 필터"
-          aria-label="Attribution 이벤트 필터"
+          ariaLabel="Attribution 이벤트 필터"
           onInput=${(e: Event) => {
             query.value = (e.target as HTMLInputElement).value
             selectedEventIdx.value = null
           }}
-          class="min-w-40 max-w-60 flex-1 rounded border border-[var(--color-border-default)] bg-[var(--white-5)]/20 px-2 py-1 text-2xs text-[var(--text-primary)] placeholder:text-[var(--color-fg-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-20)]0/50"
+          class="min-w-40 max-w-60 flex-1 !bg-[var(--white-5)]/20 !px-2 !py-1 !text-2xs"
         />
       </div>
 

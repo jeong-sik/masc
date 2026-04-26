@@ -392,13 +392,18 @@ export function AgentProfile({ name }: { name: string }) {
               ${collabs.length > 0 ? html`
                 <div class="flex flex-col gap-1">
                   ${collabs.map(c => html`
-                    <button type="button" class="w-full flex items-center gap-2 px-2 py-1.5 transition-colors duration-150 hover:bg-[var(--gold-8)] rounded text-left cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent" key=${c.name}
-                      onClick=${() => navigate('monitoring', { section: 'agents', agent: c.name })}
-                    >
+                    <${ActionButton}
+                      key=${c.name}
+                      block
+                      variant="subtle"
+                      size="sm"
+                      class="text-left px-2 py-1.5 hover:bg-[var(--gold-8)]"
+                      ariaLabel=${`${c.name} 에이전트 프로필 열기`}
+                      onClick=${() => navigate('monitoring', { section: 'agents', agent: c.name })}>
                       <span class="text-[var(--ff-gold)] font-semibold text-base flex-1">${c.name}</span>
                       <span class="text-[var(--white-50)] text-sm tabular-nums">${c.collaborations}회</span>
                       ${c.last_collab ? html`<span class="ff-relation-time"><${TimeAgo} timestamp=${c.last_collab} /></span>` : null}
-                    </button>
+                    <//>
                   `)}
                 </div>
               ` : null}

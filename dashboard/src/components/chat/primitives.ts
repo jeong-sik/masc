@@ -205,6 +205,7 @@ function ChatMessageBubble({
                   isMessenger ? 'rounded px-2.5 py-1' : 'rounded-sm px-3 py-1'
                 }`}
                 onClick=${() => { setExpandedRaw(!expandedRaw) }}
+                aria-expanded=${expanded}
               >
                 ${expanded ? '상세 숨기기' : '상세 보기'}
               </button>

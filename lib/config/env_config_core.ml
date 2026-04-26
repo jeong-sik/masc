@@ -300,7 +300,7 @@ let running_under_test_executable () =
   let basename =
     Sys.executable_name |> Filename.basename |> String.lowercase_ascii
   in
-  String.length basename >= 5 && String.sub basename 0 5 = "test_"
+  String.length basename >= 5 && String.starts_with ~prefix:"test_" basename
 
 (** #9903: production base-path safeguard for test executables.
 

@@ -118,7 +118,7 @@ let decode_html_entities text =
       | Some semi ->
           let entity = String.sub basic index (semi - index + 1) in
           if String.length entity >= 4
-             && String.sub entity 0 2 = "&#"
+             && String.starts_with ~prefix:"&#" entity
           then (
             match decode_numeric entity with
             | Some _ -> loop (semi + 1)

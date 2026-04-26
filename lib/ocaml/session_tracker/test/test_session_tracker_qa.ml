@@ -48,9 +48,9 @@ let escape_string s =
 
 let parse_connection_url url =
   let url =
-    if String.length url > 13 && String.sub url 0 13 = "postgresql://" then
+    if String.length url > 13 && String.starts_with ~prefix:"postgresql://" url then
       String.sub url 13 (String.length url - 13)
-    else if String.length url > 11 && String.sub url 0 11 = "postgres://" then
+    else if String.length url > 11 && String.starts_with ~prefix:"postgres://" url then
       String.sub url 11 (String.length url - 11)
     else
       url

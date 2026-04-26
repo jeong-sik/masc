@@ -69,7 +69,7 @@ let test_exec_home_guard ~op path =
     Sys.executable_name |> Filename.basename |> String.lowercase_ascii
   in
   let is_test_exec =
-    String.length basename >= 5 && String.sub basename 0 5 = "test_"
+    String.length basename >= 5 && String.starts_with ~prefix:"test_" basename
   in
   if not is_test_exec then ()
   else

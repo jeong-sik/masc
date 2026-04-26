@@ -115,8 +115,8 @@ let test_repo_seed_excludes_claude_from_automatic_profiles () =
     [ "codex_cli:auto"; "gemini_cli:auto"; "codex_cli:gpt-5.3-codex-spark" ];
   expect_profile_models "big_three"
     [ "codex_cli:auto"; "gemini_cli:auto"; "codex_cli:gpt-5.3-codex-spark" ];
-  expect_profile_models "governance_judge" [ "codex_cli:auto"; "gemini_cli:auto" ];
-  expect_profile_models "operator_judge" [ "codex_cli:auto"; "gemini_cli:auto" ];
+  expect_profile_models "governance_judge" [ "gemini_cli:auto"; "codex_cli:auto" ];
+  expect_profile_models "operator_judge" [ "gemini_cli:auto"; "codex_cli:auto" ];
   check bool "governance_judge is system-only" false
     (rendered |> member "governance_judge_keeper_assignable" |> to_bool);
   check bool "operator_judge is system-only" false

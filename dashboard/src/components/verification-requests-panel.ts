@@ -266,12 +266,13 @@ function RowActions({
     const canSubmit = reason.trim().length > 0
     return html`
       <div class="flex items-center gap-1 flex-wrap">
-        <input
+        <${TextInput}
           type="text"
-          class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 text-2xs text-[var(--color-fg-primary)] w-50"
+          class="!px-2 !py-1 !text-2xs w-50"
           placeholder="반려 사유 (필수)"
+          ariaLabel="반려 사유"
           value=${reason}
-          autofocus
+          autoFocus
           onInput=${(e: Event) => setRowAction(requestId, {
             kind: 'compose-reject',
             reason: (e.target as HTMLInputElement).value,

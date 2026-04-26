@@ -167,7 +167,7 @@ function labelPills(labels: Record<string, string>): ReturnType<typeof html> | n
     if (k === 'keeper') {
       return html`<button type="button"
         class="rounded bg-[var(--accent-10)] px-1 py-0.5 text-3xs text-[var(--accent)] font-mono hover:bg-[var(--accent-10)] hover:text-[var(--accent)] transition-colors cursor-pointer"
-        title="View keeper detail"
+        title="키퍼 상세 보기"
         onClick=${(e: Event) => {
           e.stopPropagation()
           navigate('monitoring', { section: 'agents', keeper: v })
@@ -177,7 +177,7 @@ function labelPills(labels: Record<string, string>): ReturnType<typeof html> | n
     if (k === 'tool_name' || k === 'tool') {
       return html`<button type="button"
         class="rounded bg-[var(--warn-10)] px-1 py-0.5 text-3xs text-[var(--warn)] font-mono hover:bg-[var(--warn-10)] hover:text-[var(--warn)] transition-colors cursor-pointer"
-        title="View tool quality"
+        title="도구 품질 보기"
         onClick=${(e: Event) => {
           e.stopPropagation()
           navigate('monitoring', { section: 'fleet-health', view: 'tool-quality', tool: v })

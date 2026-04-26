@@ -1713,7 +1713,7 @@ export function ConnectorStatusPanel() {
       ${!filterId
         ? html`
             <${DisclosurePanel}
-              title="Keeper Matrix"
+              title="키퍼 매트릭스"
               subtitle="cross-connector binding 현황은 필요할 때만 펼쳐 봅니다."
               testId="connector-matrix-disclosure"
             >

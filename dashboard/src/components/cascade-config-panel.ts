@@ -723,7 +723,7 @@ function HealthTable({
               <th
                 scope="col"
                 class="text-left py-1"
-                title="Operational state: active (recent events), cooldown (blocked), configured (declared but untouched)"
+                title="운영 상태: active (최근 이벤트 있음), cooldown (차단됨), configured (선언됨, 미사용)"
               >Status</th>
               <th scope="col" class="text-right py-1">Success</th>
               <th scope="col" class="text-right py-1">Consec. fail</th>
@@ -736,17 +736,17 @@ function HealthTable({
               <th
                 scope="col"
                 class="text-right py-1"
-                title="Prompt prefill throughput (entry-weighted mean across this provider's models)"
+                title="프롬프트 프리필 처리량 (이 공급자 모델의 항목 가중 평균)"
               >Prefill tok/s</th>
               <th
                 scope="col"
                 class="text-right py-1"
-                title="Decode throughput (predicted tokens / second, entry-weighted)"
+                title="디코드 처리량 (예측 토큰/초, 항목 가중)"
               >Decode tok/s</th>
               <th
                 scope="col"
                 class="text-right py-1"
-                title="Latency p50 / p95 in milliseconds (approximation: weighted mean of per-model percentiles)"
+                title="지연 p50 / p95 밀리초 (근사치: 모델별 백분위수의 가중 평균)"
               >Latency p50/p95</th>
               <th scope="col" class="text-right py-1">Cooldown</th>
             </tr>

@@ -344,7 +344,7 @@ export function SafeAutonomyPanel() {
                 <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                   <div class="max-w-3xl">
                     <div class="text-2xs font-semibold uppercase tracking-1 text-[var(--text-muted)]">
-                      Advisory Truth Layer
+                      자문 진실 레이어
                     </div>
                     <div class="mt-2 flex items-center gap-2">
                       <div class="text-2xl font-semibold text-[var(--text-strong)]">
@@ -353,20 +353,20 @@ export function SafeAutonomyPanel() {
                       <${StatusPill} status=${data.summary.status} />
                     </div>
                     <div class="mt-2 text-sm leading-paragraph text-[var(--text-body)]">
-                      Tool correctness, sandbox truth, approval gates, cascade/FSM gracefulness,
-                      audit trail completeness를 keeper별로 한 번에 보여줍니다.
+                      도구 정확성, 샌드박스 진실, 승인 게이트, 캐스케이드/FSM 우아함,
+                      감사 추적 완전성을 키퍼별로 한 번에 보여줍니다.
                     </div>
                     <div class="mt-2 text-3xs text-[var(--text-muted)]">
                       generated ${data.generated_at ? html`<${TimeAgo} timestamp=${data.generated_at} />` : '정보 없음'}
                     </div>
                   </div>
                   <div class="grid grid-cols-2 gap-2 xl:grid-cols-4">
-                    <${StatCard} label="keepers" value=${data.summary.keeper_count} />
-                    <${StatCard} label="active goals" value=${data.summary.active_goal_count} />
-                    <${StatCard} label="findings" value=${data.summary.findings_total} />
-                    <${StatCard} label="human queue" value=${data.summary.human_action_required_count} />
-                    <${StatCard} label="with task" value=${data.summary.keepers_with_current_task} />
-                    <${StatCard} label="approval depth" value=${data.summary.approval_queue_depth} />
+                    <${StatCard} label="키퍼" value=${data.summary.keeper_count} />
+                    <${StatCard} label="활성 목표" value=${data.summary.active_goal_count} />
+                    <${StatCard} label="발견" value=${data.summary.findings_total} />
+                    <${StatCard} label="사람 대기열" value=${data.summary.human_action_required_count} />
+                    <${StatCard} label="태스크 보유" value=${data.summary.keepers_with_current_task} />
+                    <${StatCard} label="승인 깊이" value=${data.summary.approval_queue_depth} />
                   </div>
                 </div>
               </div>

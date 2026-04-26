@@ -501,7 +501,7 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
             ${coordinationViolations.length > 0 ? html`
               <span
                 class="rounded border px-2 py-0.5 text-3xs font-medium ${coordinationHasError ? 'border-bad/30 bg-bad/10 text-bad' : 'border-warn/30 bg-warn/10 text-warn'}"
-                title="Goal x Task x Board x Reward"
+                title="목표 × 태스크 × 보드 × 보상"
               >
                 FSM ${coordinationViolations.length}
               </span>

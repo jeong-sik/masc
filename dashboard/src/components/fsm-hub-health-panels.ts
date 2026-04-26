@@ -50,7 +50,7 @@ export function MeasurementCard({ snapshot }: { snapshot: KeeperCompositeSnapsho
             <${Flag} label="guardrail" on=${m.auto_rules.guardrail_stop} tone="warn" />
             <span
               class="text-3xs text-[var(--text-dim)] cursor-help"
-              title="Goal drift: 0 = keeper is on-target; higher = keeper output is diverging from its declared goal. Values above ~0.5 typically trigger the guardrail."
+              title="목표 드리프트: 0 = 키퍼가 목표에 부합, 높을수록 선언된 목표에서 이탈. ~0.5 이상이면 일반적으로 가드레일이 트리거됩니다."
             >drift ${m.auto_rules.goal_drift.toFixed(2)}</span>
           </div>
           ${m.auto_rules.guardrail_reason ? html`

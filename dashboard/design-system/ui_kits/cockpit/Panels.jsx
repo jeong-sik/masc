@@ -174,12 +174,12 @@ function Deck({ tasks, goals, providers, cascade }) {
             <tbody>
               {tasks.map(t => (
                 <tr key={t.id} className={t.status==="running" ? "running":""}>
-                  <td style={{color:"var(--fg-3)"}}>{t.id}</td>
+                  <td style={{color:"var(--color-fg-muted)"}}>{t.id}</td>
                   <td>{t.title}</td>
                   <td style={{color:`var(--${keeperTone[t.keeper]==="brass" ? "brass-1" : keeperTone[t.keeper]+"-fg"})`}}>{t.keeper}</td>
-                  <td style={{color:"var(--fg-3)"}}>{t.goal.replace("goal-","")}</td>
+                  <td style={{color:"var(--color-fg-muted)"}}>{t.goal.replace("goal-","")}</td>
                   <td><span className={"chip "+statusColor(t.status)}><span className="d"></span>{t.status}</span></td>
-                  <td style={{color:"var(--fg-3)"}}>{t.t}</td>
+                  <td style={{color:"var(--color-fg-muted)"}}>{t.t}</td>
                 </tr>
               ))}
             </tbody>
@@ -199,8 +199,8 @@ function Deck({ tasks, goals, providers, cascade }) {
                   <span>priority {g.priority}</span>
                   <span>·</span>
                   <span>{g.progress} / {g.total} tasks</span>
-                  <span style={{flex:1,marginLeft:10,height:4,background:"var(--bg-0)",border:"1px solid var(--line-1)",borderRadius:1,overflow:"hidden"}}>
-                    <span style={{display:"block",height:"100%",width:(g.progress/g.total*100)+"%",background:g.status==="done"?"var(--ok-fg)":"var(--brass-1)"}}></span>
+                  <span style={{flex:1,marginLeft:10,height:4,background:"var(--color-bg-page)",border:"1px solid var(--color-border-default)",borderRadius:1,overflow:"hidden"}}>
+                    <span style={{display:"block",height:"100%",width:(g.progress/g.total*100)+"%",background:g.status==="done"?"var(--ok-fg)":"var(--color-accent-fg)"}}></span>
                   </span>
                   <span>{Math.round(g.progress/g.total*100)}%</span>
                 </div>
@@ -247,16 +247,16 @@ function Deck({ tasks, goals, providers, cascade }) {
                 </div>
               ))}
             </div>
-            <div style={{font:"10px/1.5 var(--font-mono)",color:"var(--fg-3)",paddingTop:4}}>
-              Triggered by <span style={{color:"var(--brass-1)"}}>nick0cave</span> on <span style={{color:"var(--fg-1)"}}>t-9f2a</span> · soft rate-limit on anthropic → fell through to moonshot at step 2 · kimi-k2 responded in 420ms.
+            <div style={{font:"10px/1.5 var(--font-mono)",color:"var(--color-fg-muted)",paddingTop:4}}>
+              Triggered by <span style={{color:"var(--color-accent-fg)"}}>nick0cave</span> on <span style={{color:"var(--color-fg-primary)"}}>t-9f2a</span> · soft rate-limit on anthropic → fell through to moonshot at step 2 · kimi-k2 responded in 420ms.
             </div>
           </div>
         )}
 
         {tab === "sandbox" && (
-          <div style={{font:"12px/1.6 var(--font-mono)", color:"var(--fg-2)"}}>
-            <div style={{color:"var(--fg-3)",marginBottom:8}}>$ keeper.sandbox — ephemeral scratch env</div>
-            <pre style={{margin:0,color:"var(--fg-1)"}}>{
+          <div style={{font:"12px/1.6 var(--font-mono)", color:"var(--color-fg-secondary)"}}>
+            <div style={{color:"var(--color-fg-muted)",marginBottom:8}}>$ keeper.sandbox — ephemeral scratch env</div>
+            <pre style={{margin:0,color:"var(--color-fg-primary)"}}>{
 `> keeper.claim({ goal: "goal-merge-blockers", priority: 1 })
   ↳ task=t-9f2a assigned to nick0cave
 
@@ -320,15 +320,15 @@ function Rail({ events, cascade }) {
             <div key={i} style={{
               display:"grid", gridTemplateColumns:"80px auto 1fr auto",
               gap:8, alignItems:"center",
-              padding:"6px 0", borderBottom:"1px solid var(--line-1)",
+              padding:"6px 0", borderBottom:"1px solid var(--color-border-default)",
               font:"10px/1 var(--font-mono)"
             }}>
-              <span style={{color:"var(--fg-1)",fontWeight:600}}>{s.provider}</span>
+              <span style={{color:"var(--color-fg-primary)",fontWeight:600}}>{s.provider}</span>
               <span className={"chip "+(s.status==="hit"?"ok":s.status==="miss"?"warn":"idle")}>
                 <span className="d"></span>{s.status}
               </span>
-              <span style={{color:"var(--fg-3)"}}>{s.reason}</span>
-              <span style={{color:"var(--fg-2)",fontVariantNumeric:"tabular-nums"}}>{s.ms}ms</span>
+              <span style={{color:"var(--color-fg-muted)"}}>{s.reason}</span>
+              <span style={{color:"var(--color-fg-secondary)",fontVariantNumeric:"tabular-nums"}}>{s.ms}ms</span>
             </div>
           ))}
         </div>

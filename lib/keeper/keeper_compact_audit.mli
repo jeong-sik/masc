@@ -29,38 +29,37 @@
 (** {1 Types} *)
 
 type trigger =
-  | Proactive          (** OAS string ["proactive"] *)
-  | Emergency          (** OAS string ["emergency"] *)
-  | Operator           (** OAS string ["operator"] *)
+  | Proactive (** OAS string ["proactive"] *)
+  | Emergency (** OAS string ["emergency"] *)
+  | Operator (** OAS string ["operator"] *)
   | Unknown_trigger of string
 
 val parse_trigger : string -> trigger
-
 val trigger_to_string : trigger -> string
 
-type start_record = {
-  compaction_id : string;   (** Synthesized: ulid-like per-start *)
-  ts_unix : float;
-  keeper_name : string;
-  trigger : trigger;
-  correlation_id : string;  (** From OAS envelope *)
-  run_id : string;          (** From OAS envelope *)
-}
+type start_record =
+  { compaction_id : string (** Synthesized: ulid-like per-start *)
+  ; ts_unix : float
+  ; keeper_name : string
+  ; trigger : trigger
+  ; correlation_id : string (** From OAS envelope *)
+  ; run_id : string (** From OAS envelope *)
+  }
 
-type complete_record = {
-  compaction_id : string;   (** Same as paired start; empty if orphan *)
-  ts_unix : float;
-  keeper_name : string;
-  before_tokens : int;
-  after_tokens : int;
-  tokens_freed : int;       (** before_tokens - after_tokens, clamped >= 0 *)
-  phase_hint : string;      (** OAS raw phase string, e.g. ["proactive(85%)"] *)
-  correlation_id : string;
-  run_id : string;
-}
+type complete_record =
+  { compaction_id : string (** Same as paired start; empty if orphan *)
+  ; ts_unix : float
+  ; keeper_name : string
+  ; before_tokens : int
+  ; after_tokens : int
+  ; tokens_freed : int (** before_tokens - after_tokens, clamped >= 0 *)
+  ; phase_hint : string (** OAS raw phase string, e.g. ["proactive(85%)"] *)
+  ; correlation_id : string
+  ; run_id : string
+  }
 
 type write_error =
-  | Io_failure        of string
+  | Io_failure of string
   | Serialize_failure of string
 
 (** {1 Write API} *)
@@ -86,15 +85,12 @@ val persist_complete
 (** Delete [.jsonl] day-files in [{base_path}/data/harness-compact/]
     whose date is older than [retention_days] days ago. Thin wrapper
     over {!Dated_jsonl.prune}; returns the count of files deleted. *)
-val prune_older_than
-  :  base_path:string
-  -> retention_days:int
-  -> int
+val prune_older_than : base_path:string -> retention_days:int -> int
 
 (** {1 Read API} *)
 
 type row =
-  | Start    of start_record
+  | Start of start_record
   | Complete of complete_record
 
 (** Read events from both the new [harness-compact/] path and the
@@ -110,10 +106,13 @@ val read_events
   -> (row list, write_error) result
 
 type pair_result =
-  | Paired          of { start : start_record; complete : complete_record }
-  | Orphan_start    of start_record
+  | Paired of
+      { start : start_record
+      ; complete : complete_record
+      }
+  | Orphan_start of start_record
   | Orphan_complete of complete_record
-    (** Should be rare — indicates subscriber missed the Start event
+  (** Should be rare — indicates subscriber missed the Start event
         (e.g. server restart mid-compaction). *)
 
 (** Pair Start and Complete rows by [compaction_id]. *)

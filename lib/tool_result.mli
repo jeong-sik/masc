@@ -10,12 +10,12 @@
 *)
 
 (** Structured result from a tool invocation. *)
-type t = {
-  success : bool;
-  data : Yojson.Safe.t;
-  tool_name : string;
-  duration_ms : float;
-}
+type t =
+  { success : bool
+  ; data : Yojson.Safe.t
+  ; tool_name : string
+  ; duration_ms : float
+  }
 
 (** [wrap ~tool_name ~start_time raw] converts a legacy [(bool * string)]
     tuple into a structured result.
@@ -28,7 +28,7 @@ type t = {
     @param raw The [(success, message)] tuple from the handler *)
 val structured_payload_of_message : string -> Yojson.Safe.t option
 
-val wrap : tool_name:string -> start_time:float -> (bool * string) -> t
+val wrap : tool_name:string -> start_time:float -> bool * string -> t
 
 (** [to_json t] serializes to JSON for logging and observability. *)
 val to_json : t -> Yojson.Safe.t

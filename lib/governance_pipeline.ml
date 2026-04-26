@@ -12,12 +12,12 @@ type risk_level = Governance_pipeline_types.risk_level =
   | High
   | Critical
 
-type governance_decision = Governance_pipeline_types.governance_decision = {
-  tool_name : string;
-  risk : risk_level;
-  action : [ `Allow | `Require_confirm of string | `Deny of string ];
-  trace_id : string;
-}
+type governance_decision = Governance_pipeline_types.governance_decision =
+  { tool_name : string
+  ; risk : risk_level
+  ; action : [ `Allow | `Require_confirm of string | `Deny of string ]
+  ; trace_id : string
+  }
 
 type capability_class = Governance_pipeline_types.capability_class =
   | External_input
@@ -37,6 +37,7 @@ let generate_trace_id () =
   match Otel_spans.current_trace_id () with
   | Some otel_tid -> otel_tid
   | None -> Operator_pending_confirm.trace_id "gov"
+;;
 
 (* ── Policy Decision ────────────────────────────────────────── *)
 
@@ -52,14 +53,17 @@ let confirm_threshold = function
   | "production" -> Some Critical
   | "development" -> None
   | other ->
-      Log.Governance.warn
-        "confirm_threshold: unknown governance_level %S -> fail-closed (require confirm at Critical); see #7641"
-        other;
-      Some Critical
+    Log.Governance.warn
+      "confirm_threshold: unknown governance_level %S -> fail-closed (require confirm at \
+       Critical); see #7641"
+      other;
+    Some Critical
+;;
 
 let keeper_confirm_threshold = function
   | "production" -> Some High
   | other -> confirm_threshold other
+;;
 
 (** Minimum risk level that triggers audit logging. *)
 let audit_threshold = function
@@ -67,6 +71,7 @@ let audit_threshold = function
   | "production" -> Some Medium
   | "development" -> Some High
   | _ -> Some High
+;;
 
 let decide ~governance_level ~tool_name ~input =
   let risk = assess_risk ~tool_name ~input in
@@ -74,13 +79,16 @@ let decide ~governance_level ~tool_name ~input =
   let action =
     match confirm_threshold governance_level with
     | Some threshold when risk_level_to_int risk >= risk_level_to_int threshold ->
-        `Require_confirm
-          (Printf.sprintf
-             "Governance (%s): %s risk tool %S requires confirmation"
-             governance_level (risk_level_to_string risk) tool_name)
+      `Require_confirm
+        (Printf.sprintf
+           "Governance (%s): %s risk tool %S requires confirmation"
+           governance_level
+           (risk_level_to_string risk)
+           tool_name)
     | _ -> `Allow
   in
   { tool_name; risk; action; trace_id }
+;;
 
 (* ── Audit Integration ──────────────────────────────────────── *)
 
@@ -88,6 +96,7 @@ let should_audit ~governance_level risk =
   match audit_threshold governance_level with
   | Some threshold -> risk_level_to_int risk >= risk_level_to_int threshold
   | None -> false
+;;
 
 let audit_decision (config : Coord.config) (decision : governance_decision) =
   let action_str =
@@ -96,72 +105,83 @@ let audit_decision (config : Coord.config) (decision : governance_decision) =
     | `Require_confirm _ -> "require_confirm"
     | `Deny _ -> "deny"
   in
-  Audit_log.log_governance_decision config
+  Audit_log.log_governance_decision
+    config
     ~agent_id:"governance-pipeline"
     ~trace_id:decision.trace_id
     ~decision:action_str
     ~action_type:(risk_level_to_string decision.risk)
     ~confirmation_state:action_str
     ()
+;;
 
 (* ── Auto-Petition for High/Critical Risk ──────────────────── *)
 
 let maybe_create_petition ~config:_ ~(decision : governance_decision) =
-  if risk_level_to_int decision.risk >= risk_level_to_int High then
-    Log.Governance.info "high-risk tool=%s (petition skipped; governance petitions retired)"
+  if risk_level_to_int decision.risk >= risk_level_to_int High
+  then
+    Log.Governance.info
+      "high-risk tool=%s (petition skipped; governance petitions retired)"
       decision.tool_name
+;;
 
 (* ── Pre-Hook Construction ──────────────────────────────────── *)
 
 let make_pre_hook ~config ~governance_level =
   fun ~name ~args ->
-    let decision = decide ~governance_level ~tool_name:name ~input:args in
-    if should_audit ~governance_level decision.risk then
-      audit_decision config decision;
-    match decision.action with
-    | `Allow -> Tool_dispatch.Pass
-    | `Require_confirm reason ->
-        maybe_create_petition ~config ~decision;
-        Log.Governance.info "[%s] tool=%s risk=%s -> require_confirm (trace=%s)"
-          governance_level name (risk_level_to_string decision.risk) decision.trace_id;
-        let response =
-          `Assoc
-            [
-              ("status", `String "awaiting_approval");
-              ("trace_id", `String decision.trace_id);
-              ("risk_level", `String (risk_level_to_string decision.risk));
-              ("governance_level", `String governance_level);
-              ("reason", `String reason);
-              ("tool_name", `String name);
-            ]
-        in
-        Tool_dispatch.Reject {
-          Tool_result.success = false;
-          data = response;
-          tool_name = name;
-          duration_ms = 0.0;
-        }
-    | `Deny reason ->
-        maybe_create_petition ~config ~decision;
-        Log.Governance.warn "[%s] tool=%s risk=%s -> deny (trace=%s)"
-          governance_level name (risk_level_to_string decision.risk) decision.trace_id;
-        let response =
-          `Assoc
-            [
-              ("status", `String "denied");
-              ("trace_id", `String decision.trace_id);
-              ("risk_level", `String (risk_level_to_string decision.risk));
-              ("governance_level", `String governance_level);
-              ("reason", `String reason);
-              ("tool_name", `String name);
-            ]
-        in
-        Tool_dispatch.Reject {
-          Tool_result.success = false;
-          data = response;
-          tool_name = name;
-          duration_ms = 0.0;
-        }
+  let decision = decide ~governance_level ~tool_name:name ~input:args in
+  if should_audit ~governance_level decision.risk then audit_decision config decision;
+  match decision.action with
+  | `Allow -> Tool_dispatch.Pass
+  | `Require_confirm reason ->
+    maybe_create_petition ~config ~decision;
+    Log.Governance.info
+      "[%s] tool=%s risk=%s -> require_confirm (trace=%s)"
+      governance_level
+      name
+      (risk_level_to_string decision.risk)
+      decision.trace_id;
+    let response =
+      `Assoc
+        [ "status", `String "awaiting_approval"
+        ; "trace_id", `String decision.trace_id
+        ; "risk_level", `String (risk_level_to_string decision.risk)
+        ; "governance_level", `String governance_level
+        ; "reason", `String reason
+        ; "tool_name", `String name
+        ]
+    in
+    Tool_dispatch.Reject
+      { Tool_result.success = false
+      ; data = response
+      ; tool_name = name
+      ; duration_ms = 0.0
+      }
+  | `Deny reason ->
+    maybe_create_petition ~config ~decision;
+    Log.Governance.warn
+      "[%s] tool=%s risk=%s -> deny (trace=%s)"
+      governance_level
+      name
+      (risk_level_to_string decision.risk)
+      decision.trace_id;
+    let response =
+      `Assoc
+        [ "status", `String "denied"
+        ; "trace_id", `String decision.trace_id
+        ; "risk_level", `String (risk_level_to_string decision.risk)
+        ; "governance_level", `String governance_level
+        ; "reason", `String reason
+        ; "tool_name", `String name
+        ]
+    in
+    Tool_dispatch.Reject
+      { Tool_result.success = false
+      ; data = response
+      ; tool_name = name
+      ; duration_ms = 0.0
+      }
+;;
 
 (* ── Installation ───────────────────────────────────────────── *)
 
@@ -169,82 +189,82 @@ let install ~config ~governance_level =
   let hook = make_pre_hook ~config ~governance_level in
   Tool_dispatch.register_pre_hook hook;
   Log.Governance.info "pipeline installed: level=%s" governance_level
+;;
 
 (* ── OAS Approval Pipeline bridge (#5902) ─────────────────── *)
 
 let nonempty_trimmed value =
   let trimmed = String.trim value in
   if trimmed = "" then None else Some trimmed
+;;
 
 let selected_model_of_meta = function
   | None -> None
   | Some (meta : Keeper_types.keeper_meta) ->
-      match nonempty_trimmed meta.runtime.usage.last_model_used with
-      | Some _ as selected_model -> selected_model
-      | None -> (
-          match meta.models with
-          | model :: _ -> nonempty_trimmed model
-          | [] -> None)
+    (match nonempty_trimmed meta.runtime.usage.last_model_used with
+     | Some _ as selected_model -> selected_model
+     | None ->
+       (match meta.models with
+        | model :: _ -> nonempty_trimmed model
+        | [] -> None))
+;;
 
 let input_op_opt input =
   Option.bind (Safe_ops.json_string_opt "op" input) nonempty_trimmed
+;;
 
 let destructive_tool_or_op ~tool_name ~input =
   let normalized_tool = String.lowercase_ascii tool_name in
   let normalized_op =
-    input_op_opt input
-    |> Option.map String.lowercase_ascii
-    |> Option.value ~default:""
+    input_op_opt input |> Option.map String.lowercase_ascii |> Option.value ~default:""
   in
   let destructive_ops =
-    [
-      "bash";
-      "git";
-      "git_commit";
-      "git_push";
-      "git_push_force";
-      "git_reset";
-      "git_reset_hard";
-      "git_rebase";
-      "git_clean";
-      "git_apply";
+    [ "bash"
+    ; "git"
+    ; "git_commit"
+    ; "git_push"
+    ; "git_push_force"
+    ; "git_reset"
+    ; "git_reset_hard"
+    ; "git_rebase"
+    ; "git_clean"
+    ; "git_apply"
     ]
   in
   String_util.contains_substring_ci normalized_tool "shell"
   || String_util.contains_substring_ci normalized_tool "git"
   || List.mem normalized_op destructive_ops
+;;
 
 let runtime_auto_approval_blocked = function
   | None -> false
   | Some (meta : Keeper_types.keeper_meta) ->
-      let continue_gate =
-        match meta.runtime.last_blocker_class with
-        | Some blocker_class ->
-            Keeper_types.blocker_class_continue_gate blocker_class
-        | None -> false
-      in
-      let blocker_class =
-        Option.map Keeper_types.blocker_class_to_string
-          meta.runtime.last_blocker_class
-      in
-      let blocker_summary = nonempty_trimmed meta.runtime.last_blocker in
-      continue_gate
-      ||
-      match blocker_class with
-      | Some "completion_contract_violation"
-      | Some "cascade_exhausted" ->
-          true
+    let continue_gate =
+      match meta.runtime.last_blocker_class with
+      | Some blocker_class -> Keeper_types.blocker_class_continue_gate blocker_class
+      | None -> false
+    in
+    let blocker_class =
+      Option.map Keeper_types.blocker_class_to_string meta.runtime.last_blocker_class
+    in
+    let blocker_summary = nonempty_trimmed meta.runtime.last_blocker in
+    continue_gate
+    ||
+      (match blocker_class with
+      | Some "completion_contract_violation" | Some "cascade_exhausted" -> true
       | _ ->
-          (match blocker_summary with
-          | Some summary ->
-              String_util.contains_substring_ci summary "manual block"
-              || String_util.contains_substring_ci summary "sandbox"
-          | None -> false)
+        (match blocker_summary with
+         | Some summary ->
+           String_util.contains_substring_ci summary "manual block"
+           || String_util.contains_substring_ci summary "sandbox"
+         | None -> false))
+;;
 
 let auto_approval_forbidden ~tool_name ~input ~risk meta =
   risk = Critical
   || destructive_tool_or_op ~tool_name ~input
   || runtime_auto_approval_blocked meta
+;;
 
 (** PR-E (Plan v3 Leak 1): split the legacy [auto_approval_forbidden]
     into a "hard" component that always wins and a "soft" pattern
@@ -266,12 +286,15 @@ let auto_approval_forbidden ~tool_name ~input ~risk meta =
     existing caller that wants the combined predicate. *)
 let auto_approval_hard_forbidden ~risk meta =
   risk = Critical || runtime_auto_approval_blocked meta
+;;
 
 let auto_approval_soft_forbidden ~tool_name ~input =
   destructive_tool_or_op ~tool_name ~input
+;;
 
-let to_oas_approval_callback
-    ?config ~governance_level ~keeper_name ?meta () : Oas.Hooks.approval_callback =
+let to_oas_approval_callback ?config ~governance_level ~keeper_name ?meta ()
+  : Oas.Hooks.approval_callback
+  =
   let queue_risk_level = function
     | Low -> Keeper_approval_queue.Low
     | Medium -> Keeper_approval_queue.Medium
@@ -284,7 +307,7 @@ let to_oas_approval_callback
       |> Tool_shard.tools_of_shards
       |> List.map (fun (s : Types.tool_schema) -> s.name)
     in
-    let (trifecta_count, _, _, _) = assess_trifecta ~active_tool_names in
+    let trifecta_count, _, _, _ = assess_trifecta ~active_tool_names in
     let trifecta_active = trifecta_count >= 3 in
     let base_risk = assess_risk ~tool_name ~input in
     let risk =
@@ -295,26 +318,28 @@ let to_oas_approval_callback
       | Some threshold -> risk_level_to_int risk >= risk_level_to_int threshold
       | None -> false
     in
-    if trifecta_active then
+    if trifecta_active
+    then
       Log.Governance.debug
         "[%s] trifecta_active tool=%s base=%s effective=%s needs_approval=%b"
-        keeper_name tool_name
+        keeper_name
+        tool_name
         (risk_level_to_string base_risk)
         (risk_level_to_string risk)
         needs_approval;
-    if trifecta_active
-       && risk_level_to_int risk > risk_level_to_int base_risk
+    if trifecta_active && risk_level_to_int risk > risk_level_to_int base_risk
     then
       Log.Governance.warn
         "[%s] trifecta escalated tool=%s base=%s effective=%s"
-        keeper_name tool_name
+        keeper_name
+        tool_name
         (risk_level_to_string base_risk)
         (risk_level_to_string risk);
-    if needs_approval then
+    if needs_approval
+    then (
       let turn_id =
         Option.map
-          (fun (meta : Keeper_types.keeper_meta) ->
-            meta.runtime.usage.total_turns + 1)
+          (fun (meta : Keeper_types.keeper_meta) -> meta.runtime.usage.total_turns + 1)
           meta
       in
       let task_id =
@@ -327,14 +352,13 @@ let to_oas_approval_callback
       in
       let goal_ids =
         Option.map
-          (fun (keeper_meta : Keeper_types.keeper_meta) ->
-            keeper_meta.active_goal_ids)
+          (fun (keeper_meta : Keeper_types.keeper_meta) -> keeper_meta.active_goal_ids)
           meta
       in
       let runtime_contract =
         Option.map
           (fun keeper_meta ->
-            Keeper_runtime_contract.runtime_contract_json ?config keeper_meta)
+             Keeper_runtime_contract.runtime_contract_json ?config keeper_meta)
           meta
       in
       let selected_model = selected_model_of_meta meta in
@@ -355,7 +379,8 @@ let to_oas_approval_callback
       in
       let hard_forbidden = auto_approval_hard_forbidden ~risk meta in
       let soft_forbidden =
-        if Option.is_some routine_label then false
+        if Option.is_some routine_label
+        then false
         else auto_approval_soft_forbidden ~tool_name ~input
       in
       let forbidden = hard_forbidden || soft_forbidden in
@@ -369,64 +394,101 @@ let to_oas_approval_callback
         |> Option.value ~default:false
       in
       let rule_match =
-        if forbidden || Option.is_some routine_label then
-          None
+        if forbidden || Option.is_some routine_label
+        then None
         else
           Keeper_approval_queue.find_matching_rule
-            ?base_path ~keeper_name ~tool_name ~input
-            ~risk_level ?runtime_contract ()
+            ?base_path
+            ~keeper_name
+            ~tool_name
+            ~input
+            ~risk_level
+            ?runtime_contract
+            ()
       in
-      if (not forbidden) && always_approve then (
+      if (not forbidden) && always_approve
+      then (
         Keeper_approval_queue.audit_approval_event
           ?base_path
           ~event_type:"auto_approved_always"
           ~id:(Printf.sprintf "auto_always_%s_%s" keeper_name tool_name)
-          ~keeper_name ~tool_name ~risk_level ?turn_id ?task_id ?goal_id
-          ~goal_ids:(Option.value ~default:[] goal_ids) ?runtime_contract
-          ?selected_model ~disposition:"Pass"
-          ~disposition_reason:"always_approve_enabled" ~auto_approved:true ();
-        Oas.Hooks.Approve
-      ) else if Option.is_some routine_label then (
+          ~keeper_name
+          ~tool_name
+          ~risk_level
+          ?turn_id
+          ?task_id
+          ?goal_id
+          ~goal_ids:(Option.value ~default:[] goal_ids)
+          ?runtime_contract
+          ?selected_model
+          ~disposition:"Pass"
+          ~disposition_reason:"always_approve_enabled"
+          ~auto_approved:true
+          ();
+        Oas.Hooks.Approve)
+      else if Option.is_some routine_label
+      then (
         let label = Option.get routine_label in
         Keeper_approval_queue.audit_approval_event
           ?base_path
           ~event_type:"auto_approved_keeper_routine"
           ~id:(Printf.sprintf "auto_routine_%s_%s" keeper_name tool_name)
-          ~keeper_name ~tool_name ~risk_level ?turn_id ?task_id ?goal_id
-          ~goal_ids:(Option.value ~default:[] goal_ids) ?runtime_contract
-          ?selected_model ~disposition:"Pass"
-          ~disposition_reason:label ~auto_approved:true ();
+          ~keeper_name
+          ~tool_name
+          ~risk_level
+          ?turn_id
+          ?task_id
+          ?goal_id
+          ~goal_ids:(Option.value ~default:[] goal_ids)
+          ?runtime_contract
+          ?selected_model
+          ~disposition:"Pass"
+          ~disposition_reason:label
+          ~auto_approved:true
+          ();
         Log.Governance.debug
           "[%s] keeper-routine auto-approve tool=%s risk=%s label=%s"
-          keeper_name tool_name (risk_level_to_string risk) label;
-        Oas.Hooks.Approve
-      ) else
+          keeper_name
+          tool_name
+          (risk_level_to_string risk)
+          label;
+        Oas.Hooks.Approve)
+      else (
         match rule_match with
         | Some matched ->
-            Keeper_approval_queue.audit_approval_event
-              ?base_path
-              ~event_type:"auto_approved_rule_match"
-              ~id:(Printf.sprintf "auto_%s_%s" keeper_name matched.rule_id)
-              ~keeper_name ~tool_name ~risk_level ?turn_id ?task_id ?goal_id
-              ~goal_ids:(Option.value ~default:[] goal_ids) ?runtime_contract
-              ?selected_model ~disposition:"Pass"
-              ~disposition_reason:"healthy" ~rule_match:matched
-              ~auto_approved:true ();
-            Oas.Hooks.Approve
+          Keeper_approval_queue.audit_approval_event
+            ?base_path
+            ~event_type:"auto_approved_rule_match"
+            ~id:(Printf.sprintf "auto_%s_%s" keeper_name matched.rule_id)
+            ~keeper_name
+            ~tool_name
+            ~risk_level
+            ?turn_id
+            ?task_id
+            ?goal_id
+            ~goal_ids:(Option.value ~default:[] goal_ids)
+            ?runtime_contract
+            ?selected_model
+            ~disposition:"Pass"
+            ~disposition_reason:"healthy"
+            ~rule_match:matched
+            ~auto_approved:true
+            ();
+          Oas.Hooks.Approve
         | None ->
-            Keeper_approval_queue.submit_and_await
-              ~keeper_name
-              ~tool_name
-              ~input
-              ?turn_id
-              ?task_id
-              ?goal_id
-              ?goal_ids
-              ?runtime_contract
-              ?selected_model
-              ~disposition:"Pause"
-              ~disposition_reason:"waiting_approval"
-              ~risk_level
-              ()
-    else
-      Oas.Hooks.Approve
+          Keeper_approval_queue.submit_and_await
+            ~keeper_name
+            ~tool_name
+            ~input
+            ?turn_id
+            ?task_id
+            ?goal_id
+            ?goal_ids
+            ?runtime_contract
+            ?selected_model
+            ~disposition:"Pause"
+            ~disposition_reason:"waiting_approval"
+            ~risk_level
+            ()))
+    else Oas.Hooks.Approve
+;;

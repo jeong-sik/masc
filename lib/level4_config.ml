@@ -17,11 +17,8 @@
     same env-var semantics (trim + malformed-value fallback) as the rest
     of the codebase. *)
 
-let get_env_float name default =
-  Env_config_core.get_float ~default name
-
-let get_env_int name default =
-  Env_config_core.get_int ~default name
+let get_env_float name default = Env_config_core.get_float ~default name
+let get_env_int name default = Env_config_core.get_int ~default name
 
 (** {1 Random Number Generator} *)
 
@@ -29,21 +26,26 @@ let get_env_int name default =
 let rng_initialized = Atomic.make false
 
 let ensure_rng_init () =
-  if not (Atomic.get rng_initialized) then begin
-    let seed = get_env_int "MASC_RANDOM_SEED" (int_of_float (Time_compat.now () *. 1000.0)) in
+  if not (Atomic.get rng_initialized)
+  then (
+    let seed =
+      get_env_int "MASC_RANDOM_SEED" (int_of_float (Time_compat.now () *. 1000.0))
+    in
     Random.init seed;
-    Atomic.set rng_initialized true
-  end
+    Atomic.set rng_initialized true)
+;;
 
 (** Get random float with guaranteed initialization *)
 let random_float max =
   ensure_rng_init ();
   Random.float max
+;;
 
 (** Get random int with guaranteed initialization *)
 let random_int max =
   ensure_rng_init ();
   Random.int max
+;;
 
 (** {2 Parameterized RNG}
 
@@ -52,11 +54,13 @@ let random_int max =
 *)
 
 let make_rng ?seed () =
-  let s = match seed with
+  let s =
+    match seed with
     | Some s -> s
     | None -> get_env_int "MASC_RANDOM_SEED" (int_of_float (Time_compat.now () *. 1000.0))
   in
-  Random.State.make [|s|]
+  Random.State.make [| s |]
+;;
 
 (** {1 Validation} *)
 
@@ -65,6 +69,7 @@ let is_finite f =
   match classify_float f with
   | FP_normal | FP_subnormal | FP_zero -> true
   | FP_infinite | FP_nan -> false
+;;
 
 (** {1 Normalized Type — Parse Don't Validate}
 
@@ -87,14 +92,8 @@ module Normalized : sig
 end = struct
   type t = float
 
-  let of_float f =
-    if not (is_finite f) || f < 0.0 || f > 1.0 then None
-    else Some f
-
-  let of_float_clamped f =
-    if not (is_finite f) then 0.5
-    else max 0.0 (min 1.0 f)
-
+  let of_float f = if (not (is_finite f)) || f < 0.0 || f > 1.0 then None else Some f
+  let of_float_clamped f = if not (is_finite f) then 0.5 else max 0.0 (min 1.0 f)
   let to_float t = t
   let compare = Float.compare
   let to_json t = `Float t
@@ -103,6 +102,7 @@ end = struct
     | `Float f -> of_float f
     | `Int i -> of_float (float_of_int i)
     | _ -> None
+  ;;
 end
 
 (** Fitness: Normalized + domain-specific helpers for agent fitness *)
@@ -127,15 +127,9 @@ end = struct
   let compare = Normalized.compare
   let to_json = Normalized.to_json
   let of_json = Normalized.of_json
-
-  let initial () =
-    of_float_clamped 0.5
-
-  let combine a b =
-    of_float_clamped ((to_float a +. to_float b) /. 2.0)
-
-  let adjust t ~delta =
-    of_float_clamped (to_float t +. delta)
+  let initial () = of_float_clamped 0.5
+  let combine a b = of_float_clamped ((to_float a +. to_float b) /. 2.0)
+  let adjust t ~delta = of_float_clamped (to_float t +. delta)
 end
 
 (** Strength: Normalized alias for pheromone strength *)

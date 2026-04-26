@@ -18,17 +18,17 @@
 (** Flag lifecycle state machine. *)
 type lifecycle =
   | Active
-  | Deprecated of string  (** reason for deprecation *)
-  | Experimental          (** not yet stable, may change without notice *)
+  | Deprecated of string (** reason for deprecation *)
+  | Experimental (** not yet stable, may change without notice *)
 
-type flag = {
-  env_name : string;      (** MASC_* environment variable name *)
-  description : string;
-  default : bool;
-  category : string;      (** Grouping: transport/tool/keeper/dashboard/inference/runtime *)
-  lifecycle : lifecycle;
-  since : string;
-}
+type flag =
+  { env_name : string (** MASC_* environment variable name *)
+  ; description : string
+  ; default : bool
+  ; category : string (** Grouping: transport/tool/keeper/dashboard/inference/runtime *)
+  ; lifecycle : lifecycle
+  ; since : string
+  }
 
 (** {1 Registry} *)
 

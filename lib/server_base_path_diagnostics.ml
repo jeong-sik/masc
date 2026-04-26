@@ -5,76 +5,87 @@
     startup payloads can explain where the process was launched from without
     reviving stale-path warnings or abort paths. *)
 
-type t = {
-  process_cwd : string;
-  input_base_path : string option;
-  effective_base_path : string;
-  effective_masc_root : string;
-  env_masc_base_path : string option;
-  resolution_source : string option;
-  effective_has_masc_dir : bool;
-  effective_legacy_dirs : string list;
-  roots_diverge : bool;
-  strict_mode_requested : bool;
-  startup_rejected : bool;
-  startup_abort_eligible : bool;
-  warning : string option;
-}
+type t =
+  { process_cwd : string
+  ; input_base_path : string option
+  ; effective_base_path : string
+  ; effective_masc_root : string
+  ; env_masc_base_path : string option
+  ; resolution_source : string option
+  ; effective_has_masc_dir : bool
+  ; effective_legacy_dirs : string list
+  ; roots_diverge : bool
+  ; strict_mode_requested : bool
+  ; startup_rejected : bool
+  ; startup_abort_eligible : bool
+  ; warning : string option
+  }
 
 let trim_opt = function
   | Some raw ->
-      let trimmed = String.trim raw in
-      if trimmed = "" then None else Some trimmed
+    let trimmed = String.trim raw in
+    if trimmed = "" then None else Some trimmed
   | None -> None
+;;
 
 let strip_trailing_slashes path =
   let rec loop idx =
-    if idx <= 1 then String.sub path 0 idx
-    else if path.[idx - 1] = '/' then loop (idx - 1)
+    if idx <= 1
+    then String.sub path 0 idx
+    else if path.[idx - 1] = '/'
+    then loop (idx - 1)
     else String.sub path 0 idx
   in
-  if path = "" then "."
-  else loop (String.length path)
+  if path = "" then "." else loop (String.length path)
+;;
 
 let normalize_path ~cwd path =
   let base = strip_trailing_slashes (String.trim path) in
-  let absolute =
-    if Filename.is_relative base then Filename.concat cwd base else base
-  in
+  let absolute = if Filename.is_relative base then Filename.concat cwd base else base in
   try Unix.realpath absolute with
   | Unix.Unix_error _ -> absolute
+;;
 
-let dir_exists path =
-  Sys.file_exists path && Sys.is_directory path
-
+let dir_exists path = Sys.file_exists path && Sys.is_directory path
 let legacy_dir_names = [ "perpetual"; "resident-keepers"; "rooms" ]
 
 let legacy_dirs_under masc_root =
-  if not (dir_exists masc_root) then
-    []
+  if not (dir_exists masc_root)
+  then []
   else
-    List.filter (fun name -> dir_exists (Filename.concat masc_root name))
-      legacy_dir_names
+    List.filter (fun name -> dir_exists (Filename.concat masc_root name)) legacy_dir_names
+;;
 
 let format_legacy_dirs = function
   | [] -> "none"
   | dirs -> String.concat ", " dirs
+;;
 
 let strict_mode_env_enabled () =
   match Sys.getenv_opt "MASC_BASE_PATH_STRICT" with
-  | Some raw -> (
-      match String.lowercase_ascii (String.trim raw) with
-      | "1" | "true" | "yes" -> true
-      | _ -> false)
+  | Some raw ->
+    (match String.lowercase_ascii (String.trim raw) with
+     | "1" | "true" | "yes" -> true
+     | _ -> false)
   | None -> false
+;;
 
 let resolution_source_opt ?resolution_source () =
   match resolution_source with
   | Some raw -> trim_opt (Some raw)
   | None -> trim_opt (Sys.getenv_opt "MASC_BASE_PATH_RESOLUTION_SOURCE")
+;;
 
-let detect ?cwd ?env_masc_base_path ?strict ?input_base_path ?resolution_source
-    ~effective_base_path ~effective_masc_root () =
+let detect
+      ?cwd
+      ?env_masc_base_path
+      ?strict
+      ?input_base_path
+      ?resolution_source
+      ~effective_base_path
+      ~effective_masc_root
+      ()
+  =
   let cwd =
     match cwd with
     | Some path -> path
@@ -95,97 +106,99 @@ let detect ?cwd ?env_masc_base_path ?strict ?input_base_path ?resolution_source
   let startup_rejected = false in
   let startup_abort_eligible = false in
   let warning = None in
-  {
-    process_cwd = cwd_norm;
-    input_base_path;
-    effective_base_path = effective_base_norm;
-    effective_masc_root = effective_masc_norm;
-    env_masc_base_path = trim_opt env_masc_base_path;
-    resolution_source;
-    effective_has_masc_dir;
-    effective_legacy_dirs;
-    roots_diverge;
-    strict_mode_requested;
-    startup_rejected;
-    startup_abort_eligible;
-    warning;
+  { process_cwd = cwd_norm
+  ; input_base_path
+  ; effective_base_path = effective_base_norm
+  ; effective_masc_root = effective_masc_norm
+  ; env_masc_base_path = trim_opt env_masc_base_path
+  ; resolution_source
+  ; effective_has_masc_dir
+  ; effective_legacy_dirs
+  ; roots_diverge
+  ; strict_mode_requested
+  ; startup_rejected
+  ; startup_abort_eligible
+  ; warning
   }
+;;
 
 let strict_violation (diag : t) =
   let _ = diag in
   false
+;;
 
 let startup_lines (diag : t) =
   let lines =
-    [
-      Some (Printf.sprintf "   Process cwd: %s" diag.process_cwd);
-      (match diag.input_base_path with
+    [ Some (Printf.sprintf "   Process cwd: %s" diag.process_cwd)
+    ; (match diag.input_base_path with
        | Some path when not (String.equal path diag.effective_base_path) ->
-           Some (Printf.sprintf "   Base path (input): %s" path)
-       | _ -> None);
-      (match diag.env_masc_base_path with
+         Some (Printf.sprintf "   Base path (input): %s" path)
+       | _ -> None)
+    ; (match diag.env_masc_base_path with
        | Some path -> Some (Printf.sprintf "   MASC_BASE_PATH(env): %s" path)
-       | None -> None);
-      (match diag.resolution_source with
+       | None -> None)
+    ; (match diag.resolution_source with
        | Some source -> Some (Printf.sprintf "   Base path source: %s" source)
-       | None -> None);
-      (match diag.warning with
+       | None -> None)
+    ; (match diag.warning with
        | Some message -> Some (Printf.sprintf "   Path warning: %s" message)
-       | None -> None);
-      (if diag.effective_has_masc_dir then
+       | None -> None)
+    ; (if diag.effective_has_masc_dir
+       then
          Some
-           (Printf.sprintf "   Active .masc legacy dirs: %s"
+           (Printf.sprintf
+              "   Active .masc legacy dirs: %s"
               (format_legacy_dirs diag.effective_legacy_dirs))
-       else
-         None);
-      (if diag.strict_mode_requested then
-         Some "   Path strict mode: enabled"
-       else
-         None);
-      (if diag.startup_rejected then
-         Some "   Path startup rejection: enabled"
-       else
-         None);
+       else None)
+    ; (if diag.strict_mode_requested then Some "   Path strict mode: enabled" else None)
+    ; (if diag.startup_rejected then Some "   Path startup rejection: enabled" else None)
     ]
   in
   List.filter_map (fun line -> line) lines
+;;
 
 let _logged_once : bool ref = ref false
 
 let log_startup_warning (diag : t) =
   match diag.warning with
   | Some message when not !_logged_once ->
-      _logged_once := true;
-      Log.Server.warn "%s%s" message
-        (if diag.strict_mode_requested then " (strict mode enabled)" else "")
+    _logged_once := true;
+    Log.Server.warn
+      "%s%s"
+      message
+      (if diag.strict_mode_requested then " (strict mode enabled)" else "")
   | Some message ->
-      Log.Server.debug "%s%s" message
-        (if diag.strict_mode_requested then " (strict mode enabled)" else "")
+    Log.Server.debug
+      "%s%s"
+      message
+      (if diag.strict_mode_requested then " (strict mode enabled)" else "")
   | None -> ()
+;;
 
 let option_field name = function
   | Some value -> Some (name, `String value)
   | None -> None
+;;
 
 let to_yojson (diag : t) =
   `Assoc
-    ([
-       ("cwd", `String diag.process_cwd);
-       ("effective_base_path", `String diag.effective_base_path);
-       ("effective_masc_root", `String diag.effective_masc_root);
-       ("effective_has_masc_dir", `Bool diag.effective_has_masc_dir);
-       ( "effective_legacy_dirs",
-         `List (List.map (fun dir -> `String dir) diag.effective_legacy_dirs) );
-       ("roots_diverge", `Bool diag.roots_diverge);
-       ("strict_mode_requested", `Bool diag.strict_mode_requested);
-       ("startup_rejected", `Bool diag.startup_rejected);
-       ("startup_abort_eligible", `Bool diag.startup_abort_eligible);
-       ("strict_violation", `Bool (strict_violation diag));
+    ([ "cwd", `String diag.process_cwd
+     ; "effective_base_path", `String diag.effective_base_path
+     ; "effective_masc_root", `String diag.effective_masc_root
+     ; "effective_has_masc_dir", `Bool diag.effective_has_masc_dir
+     ; ( "effective_legacy_dirs"
+       , `List (List.map (fun dir -> `String dir) diag.effective_legacy_dirs) )
+     ; "roots_diverge", `Bool diag.roots_diverge
+     ; "strict_mode_requested", `Bool diag.strict_mode_requested
+     ; "startup_rejected", `Bool diag.startup_rejected
+     ; "startup_abort_eligible", `Bool diag.startup_abort_eligible
+     ; "strict_violation", `Bool (strict_violation diag)
      ]
-    @ List.filter_map (fun item -> item)
-        [
-          option_field "input_base_path" diag.input_base_path;
-          option_field "env_masc_base_path" diag.env_masc_base_path;
-          option_field "resolution_source" diag.resolution_source;
-          option_field "warning" diag.warning;
-        ])
+     @ List.filter_map
+         (fun item -> item)
+         [ option_field "input_base_path" diag.input_base_path
+         ; option_field "env_masc_base_path" diag.env_masc_base_path
+         ; option_field "resolution_source" diag.resolution_source
+         ; option_field "warning" diag.warning
+         ])
+;;

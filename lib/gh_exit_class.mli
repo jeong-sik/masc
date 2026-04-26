@@ -27,20 +27,17 @@
 (** Classification bucket. Order matches RFC-0007 §PR-2 table. *)
 type t =
   | Ok_0
-      (** [exit_code = 0]. The [gh] call succeeded at the CLI layer.
+  (** [exit_code = 0]. The [gh] call succeeded at the CLI layer.
           Business success still depends on [stdout]. *)
   | Policy_blocked
-      (** masc-mcp internal block surfaced through a reserved exit
+  (** masc-mcp internal block surfaced through a reserved exit
           code (R1/R2 destructive-mutation guards). *)
   | Type_mismatch
-      (** Argparse / schema failure shape. Retry with a corrected
+  (** Argparse / schema failure shape. Retry with a corrected
           argv shape, not a different intent. *)
-  | Auth_failed
-      (** [gh auth] error surface — missing/expired token, 401, 403. *)
-  | Network
-      (** curl/TLS/DNS failure. Transient, retry after backoff. *)
-  | Unknown
-      (** Fail-safe bucket. Never claim a class we cannot prove. *)
+  | Auth_failed (** [gh auth] error surface — missing/expired token, 401, 403. *)
+  | Network (** curl/TLS/DNS failure. Transient, retry after backoff. *)
+  | Unknown (** Fail-safe bucket. Never claim a class we cannot prove. *)
 
 val to_string : t -> string
 
@@ -49,13 +46,13 @@ val classify : exit_code:int -> stderr:string -> t
 
 (** Structured result for a [gh] subprocess invocation. New callers
     return this directly; legacy callers use {!to_legacy_result}. *)
-type gh_result = private {
-  stdout : string;
-  stderr : string;
-  exit_code : int;
-  class_ : t;
-  interpretation : string option;
-}
+type gh_result = private
+  { stdout : string
+  ; stderr : string
+  ; exit_code : int
+  ; class_ : t
+  ; interpretation : string option
+  }
 
 (** [make ~stdout ~stderr ~exit_code] classifies and constructs the
     result. [interpretation] is a short, ready-to-show hint derived
@@ -70,11 +67,11 @@ val to_legacy_result : gh_result -> (string, string) result
 (** A single classification rule: [(predicate, class)]. The classifier
     walks the rule list head-to-tail and returns the class of the
     first matching rule, falling through to [Unknown]. *)
-type rule = {
-  exit_code : int;
-  stderr_contains : string option;  (** [None] = match any stderr. *)
-  class_ : t;
-}
+type rule =
+  { exit_code : int
+  ; stderr_contains : string option (** [None] = match any stderr. *)
+  ; class_ : t
+  }
 
 (** Default rule table baked into this module. Exposed so that tests
     can assert against it and config loaders can layer overrides. *)

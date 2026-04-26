@@ -14,7 +14,6 @@
     module. *)
 
 val default_metric_name : string
-
 val prompt_snippet : ?metric_name:string -> unit -> string
 
 (** {1 Re-exports from [String_util]} *)
@@ -41,30 +40,30 @@ val validate_metric_fn : string -> (string, string) result
     [(stdout, elapsed_ms)] on exit code 0, or an [Error] describing the
     failure (including clock unavailability, non-zero exit, timeout,
     signal). *)
-val run_metric_argv :
-  workdir:string ->
-  timeout_s:float ->
-  string list ->
-  (string * int, string) result
+val run_metric_argv
+  :  workdir:string
+  -> timeout_s:float
+  -> string list
+  -> (string * int, string) result
 
 (** [measure_metric ~workdir ~timeout_s metric_fn] tokenises, runs, and
     parses [metric_fn]. On success returns [(score, elapsed_ms)];
     [Error] on tokenisation failure, exec failure, or unparsable output
     (neither a metric-contract tag nor a float on the last line). *)
-val measure_metric :
-  workdir:string ->
-  timeout_s:float ->
-  string ->
-  (float * int, string) result
+val measure_metric
+  :  workdir:string
+  -> timeout_s:float
+  -> string
+  -> (float * int, string) result
 
 (** [measure_metric_with_retry ~workdir ~timeout_s ?max_retries metric_fn]
     retries on transient errors (messages containing ["timeout"],
     ["timed_out"], or ["connection"]) with a 1-second sleep between
     attempts. [max_retries] defaults to [2] (up to 3 total attempts).
     Non-transient errors return immediately. *)
-val measure_metric_with_retry :
-  workdir:string ->
-  timeout_s:float ->
-  ?max_retries:int ->
-  string ->
-  (float * int, string) result
+val measure_metric_with_retry
+  :  workdir:string
+  -> timeout_s:float
+  -> ?max_retries:int
+  -> string
+  -> (float * int, string) result

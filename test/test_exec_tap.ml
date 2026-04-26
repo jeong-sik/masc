@@ -6,23 +6,30 @@
 let substring_contains ~haystack ~needle =
   let hl = String.length haystack in
   let nl = String.length needle in
-  if nl = 0 then true
-  else if nl > hl then false
-  else
+  if nl = 0
+  then true
+  else if nl > hl
+  then false
+  else (
     let rec find i =
-      if i + nl > hl then false
-      else if String.sub haystack i nl = needle then true
+      if i + nl > hl
+      then false
+      else if String.sub haystack i nl = needle
+      then true
       else find (i + 1)
     in
-    find 0
+    find 0)
+;;
 
 let must_contain ~tag line needle =
-  if not (substring_contains ~haystack:line ~needle) then
-    failwith (Printf.sprintf "%s: expected %S in %S" tag needle line)
+  if not (substring_contains ~haystack:line ~needle)
+  then failwith (Printf.sprintf "%s: expected %S in %S" tag needle line)
+;;
 
 let must_not_contain ~tag line needle =
-  if substring_contains ~haystack:line ~needle then
-    failwith (Printf.sprintf "%s: must not contain %S in %S" tag needle line)
+  if substring_contains ~haystack:line ~needle
+  then failwith (Printf.sprintf "%s: must not contain %S in %S" tag needle line)
+;;
 
 let test_off_is_noop () =
   Exec_tap.disable ();
@@ -30,6 +37,7 @@ let test_off_is_noop () =
   (* This must not raise, nor touch any writer. *)
   Exec_tap.record ~kind:Exec_tap.Process_eio_run_argv ~argv:[ "ls" ] ();
   assert (not (Exec_tap.enabled ()))
+;;
 
 let test_on_emits_one_line () =
   let captured = ref [] in
@@ -37,9 +45,12 @@ let test_on_emits_one_line () =
   assert (Exec_tap.enabled ());
   Exec_tap.record
     ~kind:Exec_tap.Process_eio_run_argv_with_status
-    ~argv:[ "git"; "status" ] ~cwd:"/tmp" ();
+    ~argv:[ "git"; "status" ]
+    ~cwd:"/tmp"
+    ();
   assert (List.length !captured = 1);
   Exec_tap.disable ()
+;;
 
 let test_json_shape () =
   let captured = ref "" in
@@ -48,7 +59,8 @@ let test_json_shape () =
     ~kind:Exec_tap.Unix_create_process
     ~argv:[ "ls"; "-la" ]
     ~env:[| "PATH=/usr/bin"; "HOME=/root" |]
-    ~cwd:"/tmp" ();
+    ~cwd:"/tmp"
+    ();
   let line = !captured in
   Exec_tap.disable ();
   must_contain ~tag:"trailing newline" line "}\n";
@@ -59,6 +71,7 @@ let test_json_shape () =
   (* Env values must not leak into the line. *)
   must_not_contain ~tag:"env value /usr/bin" line "/usr/bin";
   must_not_contain ~tag:"env value /root" line "/root\""
+;;
 
 let test_defaults_are_null () =
   let captured = ref "" in
@@ -68,12 +81,14 @@ let test_defaults_are_null () =
   Exec_tap.disable ();
   must_contain ~tag:"env null" line "\"env_keys\":null";
   must_contain ~tag:"cwd null" line "\"cwd\":null"
+;;
 
 let test_writer_exception_is_swallowed () =
   Exec_tap.enable ~writer:(fun _ -> failwith "intentional");
   (* Must not raise — writer errors are the tap's own problem. *)
   Exec_tap.record ~kind:Exec_tap.Process_eio_run_argv ~argv:[ "x" ] ();
   Exec_tap.disable ()
+;;
 
 let test_multiple_calls_each_line () =
   let captured = ref [] in
@@ -88,10 +103,11 @@ let test_multiple_calls_each_line () =
   (* Every captured line must end with a newline. *)
   List.iter
     (fun line ->
-      assert (String.length line > 0);
-      assert (line.[String.length line - 1] = '\n'))
+       assert (String.length line > 0);
+       assert (line.[String.length line - 1] = '\n'))
     !captured;
   Exec_tap.disable ()
+;;
 
 let test_gate_decision_shape () =
   let captured = ref "" in
@@ -112,6 +128,7 @@ let test_gate_decision_shape () =
   must_contain ~tag:"mode" line "\"gate_mode\":\"parallel\"";
   must_contain ~tag:"verdict" line "\"gate_verdict\":\"allow\"";
   must_contain ~tag:"enforced" line "\"gate_enforced\":false"
+;;
 
 let () =
   test_off_is_noop ();
@@ -122,3 +139,4 @@ let () =
   test_multiple_calls_each_line ();
   test_gate_decision_shape ();
   print_endline "[test_exec_tap] all tests passed"
+;;

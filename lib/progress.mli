@@ -5,12 +5,12 @@
 
 (** {1 Types} *)
 
-type progress = {
-  task_id : string;
-  progress : float;
-  message : string option;
-  estimated_remaining : float option;
-}
+type progress =
+  { task_id : string
+  ; progress : float
+  ; message : string option
+  ; estimated_remaining : float option
+  }
 
 type validation_error =
   | TaskIdEmpty
@@ -32,20 +32,24 @@ val progress_to_jsonrpc : progress -> Yojson.Safe.t
 
     Step-based progress tracking with automatic rate estimation. *)
 module Tracker : sig
-  type t = {
-    task_id : string;
-    mutable current : float;
-    total_steps : int;
-    mutable completed_steps : int;
-    start_time : float;
-  }
+  type t =
+    { task_id : string
+    ; mutable current : float
+    ; total_steps : int
+    ; mutable completed_steps : int
+    ; start_time : float
+    }
 
-  val notify_ref :
-    (task_id:string -> progress:float -> ?message:string ->
-     ?estimated_remaining:float -> unit -> unit) ref
+  val notify_ref
+    : (task_id:string
+       -> progress:float
+       -> ?message:string
+       -> ?estimated_remaining:float
+       -> unit
+       -> unit)
+        ref
 
   val assert_wired : unit -> unit
-
   val create : task_id:string -> ?total_steps:int -> unit -> t
   val update : t -> progress:float -> ?message:string -> unit -> unit
   val step : t -> ?message:string -> unit -> unit
@@ -55,9 +59,15 @@ end
 (** {1 State management} *)
 
 val set_sse_callback : (Yojson.Safe.t -> unit) -> unit
-val notify :
-  task_id:string -> progress:float -> ?message:string ->
-  ?estimated_remaining:float -> unit -> unit
+
+val notify
+  :  task_id:string
+  -> progress:float
+  -> ?message:string
+  -> ?estimated_remaining:float
+  -> unit
+  -> unit
+
 val start_tracking : task_id:string -> ?total_steps:int -> unit -> Tracker.t
 val get_tracker : string -> Tracker.t option
 val stop_tracking : string -> unit

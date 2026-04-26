@@ -11,12 +11,12 @@
 
 (** {1 Types} *)
 
-type verification_request = {
-  action_description : string;
-  action_result : string;
-  goal : string;
-  context_summary : string;
-}
+type verification_request =
+  { action_description : string
+  ; action_result : string
+  ; goal : string
+  ; context_summary : string
+  }
 
 type verdict =
   | Pass

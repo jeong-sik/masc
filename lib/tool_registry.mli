@@ -13,28 +13,41 @@ type call_source =
   | Inline_dispatch
   | Deprecated_alias
 
-type call_stats = {
-  call_count : int;
-  success_count : int;
-  failure_count : int;
-  last_called_at : float;
-  total_duration_ms : int;
-  external_mcp_count : int;
-  keeper_internal_count : int;
-  inline_dispatch_count : int;
-  deprecated_alias_count : int;
-  last_assignment_id : string option;
-}
+type call_stats =
+  { call_count : int
+  ; success_count : int
+  ; failure_count : int
+  ; last_called_at : float
+  ; total_duration_ms : int
+  ; external_mcp_count : int
+  ; keeper_internal_count : int
+  ; inline_dispatch_count : int
+  ; deprecated_alias_count : int
+  ; last_assignment_id : string option
+  }
 
 (** {1 Recording} *)
 
 val start_actor_if_needed : sw:Eio.Switch.t -> unit
-
 val string_of_source : call_source -> string
-val record_call :
-  ?source:call_source -> ?assignment_id:string -> tool_name:string -> success:bool -> duration_ms:int -> unit -> unit
-val record_call_if_known :
-  ?source:call_source -> ?assignment_id:string -> tool_name:string -> success:bool -> duration_ms:int -> unit -> unit
+
+val record_call
+  :  ?source:call_source
+  -> ?assignment_id:string
+  -> tool_name:string
+  -> success:bool
+  -> duration_ms:int
+  -> unit
+  -> unit
+
+val record_call_if_known
+  :  ?source:call_source
+  -> ?assignment_id:string
+  -> tool_name:string
+  -> success:bool
+  -> duration_ms:int
+  -> unit
+  -> unit
 
 (** {1 Queries} *)
 

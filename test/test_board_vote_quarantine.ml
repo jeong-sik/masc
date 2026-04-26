@@ -1,7 +1,6 @@
 (* #9886: verify fixture-vote quarantine default behaviour. *)
 
 open Alcotest
-
 module BV = Masc_mcp.Board_votes
 
 let with_env key value f =
@@ -13,6 +12,7 @@ let with_env key value f =
       | Some v -> Unix.putenv key v
       | None -> Unix.putenv key "")
     f
+;;
 
 (* [Unix.unsetenv] is not available portably, so the default-unset case
    is exercised by the matching [quarantine_enabled] branch below via
@@ -22,8 +22,12 @@ let with_env key value f =
    paths. *)
 let test_quarantine_empty_treated_as_disabled () =
   with_env "MASC_BOARD_VOTE_QUARANTINE" "" (fun () ->
-    check bool "empty string disables (explicit operator opt-out)"
-      false (BV.quarantine_enabled ()))
+    check
+      bool
+      "empty string disables (explicit operator opt-out)"
+      false
+      (BV.quarantine_enabled ()))
+;;
 
 let test_quarantine_explicit_true () =
   with_env "MASC_BOARD_VOTE_QUARANTINE" "true" (fun () ->
@@ -32,6 +36,7 @@ let test_quarantine_explicit_true () =
     check bool "'1' enables" true (BV.quarantine_enabled ()));
   with_env "MASC_BOARD_VOTE_QUARANTINE" "TRUE" (fun () ->
     check bool "'TRUE' enables (case)" true (BV.quarantine_enabled ()))
+;;
 
 let test_quarantine_explicit_false () =
   with_env "MASC_BOARD_VOTE_QUARANTINE" "0" (fun () ->
@@ -40,13 +45,18 @@ let test_quarantine_explicit_false () =
     check bool "'false' disables" false (BV.quarantine_enabled ()));
   with_env "MASC_BOARD_VOTE_QUARANTINE" "off" (fun () ->
     check bool "'off' disables" false (BV.quarantine_enabled ()))
+;;
 
 let () =
-  run "board_vote_quarantine" [
-    "explicit", [
-      test_case "empty string treated as disabled" `Quick
-        test_quarantine_empty_treated_as_disabled;
-      test_case "truthy values enable" `Quick test_quarantine_explicit_true;
-      test_case "falsy values disable" `Quick test_quarantine_explicit_false;
-    ];
-  ]
+  run
+    "board_vote_quarantine"
+    [ ( "explicit"
+      , [ test_case
+            "empty string treated as disabled"
+            `Quick
+            test_quarantine_empty_treated_as_disabled
+        ; test_case "truthy values enable" `Quick test_quarantine_explicit_true
+        ; test_case "falsy values disable" `Quick test_quarantine_explicit_false
+        ] )
+    ]
+;;

@@ -12,9 +12,7 @@
 module StringMap = Map.Make (String)
 
 let table : string StringMap.t Atomic.t = Atomic.make StringMap.empty
-
-let get_opt name =
-  StringMap.find_opt name (Atomic.get table)
+let get_opt name = StringMap.find_opt name (Atomic.get table)
 
 let set name value =
   let rec loop () =
@@ -23,6 +21,7 @@ let set name value =
     if not (Atomic.compare_and_set table current updated) then loop ()
   in
   loop ()
+;;
 
 let clear name =
   let rec loop () =
@@ -31,14 +30,15 @@ let clear name =
     if not (Atomic.compare_and_set table current updated) then loop ()
   in
   loop ()
+;;
 
-let reset_for_tests () =
-  Atomic.set table StringMap.empty
+let reset_for_tests () = Atomic.set table StringMap.empty
 
 let source name =
   match Sys.getenv_opt name with
   | Some _ -> "env"
   | None ->
-      (match get_opt name with
-       | Some _ -> "boot_override"
-       | None -> "default")
+    (match get_opt name with
+     | Some _ -> "boot_override"
+     | None -> "default")
+;;

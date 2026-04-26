@@ -31,27 +31,31 @@ let load_source rel =
     | None -> Sys.getcwd ()
   in
   let path = Filename.concat source_root rel in
-  if not (Sys.file_exists path) then
-    failwith (Printf.sprintf "source file not found: %s" path)
-  else
+  if not (Sys.file_exists path)
+  then failwith (Printf.sprintf "source file not found: %s" path)
+  else (
     let ic = open_in path in
-    Fun.protect
-      ~finally:(fun () -> close_in_noerr ic)
-      (fun () -> In_channel.input_all ic)
+    Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () -> In_channel.input_all ic))
+;;
 
 let contains_re haystack re =
   try
     let _ = Str.search_forward re haystack 0 in
     true
-  with Not_found -> false
+  with
+  | Not_found -> false
+;;
 
 let test_no_ignore_write_meta () =
   let src = load_source target_file in
   let re = Str.regexp "ignore[ \t]*([ \t]*write_meta" in
-  check bool
-    "keeper_supervisor.ml must not call `ignore (write_meta ...)` (silent failure — issue #8391 HIGH #3)"
+  check
+    bool
+    "keeper_supervisor.ml must not call `ignore (write_meta ...)` (silent failure — \
+     issue #8391 HIGH #3)"
     false
     (contains_re src re)
+;;
 
 let test_error_arm_present () =
   let src = load_source target_file in
@@ -59,19 +63,24 @@ let test_error_arm_present () =
      refactor cannot re-silence the failure. *)
   let match_re = Str.regexp "match[ \t\n]+write_meta" in
   let error_re = Str.regexp "|[ \t]*Error" in
-  check bool
+  check
+    bool
     "keeper_supervisor.ml must retain `match write_meta ...` handling"
     true
     (contains_re src match_re);
-  check bool
+  check
+    bool
     "keeper_supervisor.ml must retain an `Error` arm near write_meta"
     true
     (contains_re src error_re)
+;;
 
 let () =
-  run "keeper_supervisor_write_meta_source" [
-    "silent_failure_guard", [
-      test_case "no `ignore (write_meta ...)`" `Quick test_no_ignore_write_meta;
-      test_case "match write_meta + Error arm present" `Quick test_error_arm_present;
-    ];
-  ]
+  run
+    "keeper_supervisor_write_meta_source"
+    [ ( "silent_failure_guard"
+      , [ test_case "no `ignore (write_meta ...)`" `Quick test_no_ignore_write_meta
+        ; test_case "match write_meta + Error arm present" `Quick test_error_arm_present
+        ] )
+    ]
+;;

@@ -26,19 +26,18 @@ module Types = Prompt_registry.Types
 let opt_metrics =
   let open QCheck.Gen in
   oneof
-    [
-      return None;
-      map
+    [ return None
+    ; map
         (fun (usage_count, avg_score_int, last_used_int) ->
-          Some
-            Types.
-              {
-                usage_count;
-                avg_score = float_of_int avg_score_int /. 100.0;
-                last_used = float_of_int last_used_int;
-              })
-        (triple nat_small (int_range 0 1000) nat_small);
+           Some
+             Types.
+               { usage_count
+               ; avg_score = float_of_int avg_score_int /. 100.0
+               ; last_used = float_of_int last_used_int
+               })
+        (triple nat_small (int_range 0 1000) nat_small)
     ]
+;;
 
 let gen_prompt_entry : Types.prompt_entry QCheck.Gen.t =
   let open QCheck.Gen in
@@ -49,28 +48,29 @@ let gen_prompt_entry : Types.prompt_entry QCheck.Gen.t =
   let* metrics = opt_metrics in
   let* created_at = map float_of_int nat_small in
   let* deprecated = bool in
-  return
-    Types.
-      { id; template; version; variables; metrics; created_at; deprecated }
+  return Types.{ id; template; version; variables; metrics; created_at; deprecated }
+;;
 
 let show_prompt_entry (e : Types.prompt_entry) : string =
   Yojson.Safe.pretty_to_string (Types.prompt_entry_to_yojson e)
+;;
 
 let arb_prompt_entry = QCheck.make ~print:show_prompt_entry gen_prompt_entry
 
 let saturated_prompt_entry : Types.prompt_entry =
-  {
-    id = "code-review-v2";
-    template = "Review {{x}}";
-    version = "2.0";
-    variables = [ "x" ];
-    metrics = Some { usage_count = 7; avg_score = 0.82; last_used = 1.0 };
-    created_at = 1_777_120_000.0;
-    deprecated = false;
+  { id = "code-review-v2"
+  ; template = "Review {{x}}"
+  ; version = "2.0"
+  ; variables = [ "x" ]
+  ; metrics = Some { usage_count = 7; avg_score = 0.82; last_used = 1.0 }
+  ; created_at = 1_777_120_000.0
+  ; deprecated = false
   }
+;;
 
 let null_field key fields =
-  List.map (fun (k, v) -> if k = key then (k, `Null) else (k, v)) fields
+  List.map (fun (k, v) -> if k = key then k, `Null else k, v) fields
+;;
 
 let drop_field key fields = List.filter (fun (k, _) -> k <> key) fields
 
@@ -78,38 +78,51 @@ let mutate_top f json =
   match json with
   | `Assoc top -> `Assoc (f top)
   | _ -> json
+;;
 
 let prop_roundtrip =
-  QCheck.Test.make ~count:200
-    ~name:"prompt_entry JSON round-trip" arb_prompt_entry (fun r ->
-      let json = Types.prompt_entry_to_yojson r in
-      match Types.prompt_entry_of_yojson json with
-      | Ok r' -> r = r'
-      | Error _ -> false)
+  QCheck.Test.make
+    ~count:200
+    ~name:"prompt_entry JSON round-trip"
+    arb_prompt_entry
+    (fun r ->
+       let json = Types.prompt_entry_to_yojson r in
+       match Types.prompt_entry_of_yojson json with
+       | Ok r' -> r = r'
+       | Error _ -> false)
+;;
 
 let prop_null_absorption =
-  QCheck.Test.make ~count:1
-    ~name:"prompt_entry: nulling [metrics] still parses" QCheck.unit
+  QCheck.Test.make
+    ~count:1
+    ~name:"prompt_entry: nulling [metrics] still parses"
+    QCheck.unit
     (fun () ->
-      let base = Types.prompt_entry_to_yojson saturated_prompt_entry in
-      let mutated = mutate_top (null_field "metrics") base in
-      match Types.prompt_entry_of_yojson mutated with
-      | Ok _ -> true
-      | Error _ -> false)
+       let base = Types.prompt_entry_to_yojson saturated_prompt_entry in
+       let mutated = mutate_top (null_field "metrics") base in
+       match Types.prompt_entry_of_yojson mutated with
+       | Ok _ -> true
+       | Error _ -> false)
+;;
 
 let prop_drop_absorption =
-  QCheck.Test.make ~count:1
-    ~name:"prompt_entry: dropping [metrics] still parses" QCheck.unit
+  QCheck.Test.make
+    ~count:1
+    ~name:"prompt_entry: dropping [metrics] still parses"
+    QCheck.unit
     (fun () ->
-      let base = Types.prompt_entry_to_yojson saturated_prompt_entry in
-      let mutated = mutate_top (drop_field "metrics") base in
-      match Types.prompt_entry_of_yojson mutated with
-      | Ok _ -> true
-      | Error _ -> false)
+       let base = Types.prompt_entry_to_yojson saturated_prompt_entry in
+       let mutated = mutate_top (drop_field "metrics") base in
+       match Types.prompt_entry_of_yojson mutated with
+       | Ok _ -> true
+       | Error _ -> false)
+;;
 
 let () =
   let suite =
-    List.map QCheck_alcotest.to_alcotest
+    List.map
+      QCheck_alcotest.to_alcotest
       [ prop_roundtrip; prop_null_absorption; prop_drop_absorption ]
   in
-  Alcotest.run "Prompt_registry PBT" [ ("yojson contract", suite) ]
+  Alcotest.run "Prompt_registry PBT" [ "yojson contract", suite ]
+;;

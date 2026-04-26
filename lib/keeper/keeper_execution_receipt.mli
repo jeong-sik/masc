@@ -74,20 +74,19 @@ val needs_operator_broadcast : string -> bool
 
 val append : Coord.config -> t -> unit
 val latest_json : Coord.config -> string -> Yojson.Safe.t option
-val latest_json_by_keeper :
-  Coord.config -> string list -> (string * Yojson.Safe.t) list
+val latest_json_by_keeper : Coord.config -> string list -> (string * Yojson.Safe.t) list
 
 (** Emit a watchdog-sourced operator_broadcast_required event for a keeper
     that has been Running but not produced a turn within the stale
     threshold. Used by the supervisor watchdog fiber (Step 3 of the
     keeper-pause-broadcast-watchdog change) to convert silent stalls into
     addressable events. *)
-val emit_stale_keeper_broadcast :
-  Coord.config ->
-  keeper_name:string ->
-  agent_name:string ->
-  trace_id:string ->
-  generation:int ->
-  stale_seconds:float ->
-  last_turn_ts:float ->
-  unit
+val emit_stale_keeper_broadcast
+  :  Coord.config
+  -> keeper_name:string
+  -> agent_name:string
+  -> trace_id:string
+  -> generation:int
+  -> stale_seconds:float
+  -> last_turn_ts:float
+  -> unit

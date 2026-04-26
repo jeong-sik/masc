@@ -24,56 +24,60 @@ type t =
   }
 
 let strip_trailing_slashes path =
-  let rec loop i =
-    if i > 0 && path.[i - 1] = '/' then loop (i - 1) else i
-  in
+  let rec loop i = if i > 0 && path.[i - 1] = '/' then loop (i - 1) else i in
   let len = loop (String.length path) in
   if len = String.length path then path else String.sub path 0 len
+;;
 
 let backend_of_profile = function
   | Keeper_types.Local -> Local
   | Keeper_types.Docker -> Docker
+;;
 
 let backend_to_string = function
   | Local -> "local"
   | Docker -> "docker"
+;;
 
-let sandbox_id_of_name name =
-  "keeper:" ^ Playground_paths.sanitize_keeper_name name
+let sandbox_id_of_name name = "keeper:" ^ Playground_paths.sanitize_keeper_name name
 
 let host_root_rel_of_backend ~(backend : backend) name =
   match backend with
   | Local -> Playground_paths.bundle_root name
   | Docker ->
-      Printf.sprintf "%s/docker/%s/"
-        Playground_paths.all_playgrounds_prefix
-        (Playground_paths.sanitize_keeper_name name)
+    Printf.sprintf
+      "%s/docker/%s/"
+      Playground_paths.all_playgrounds_prefix
+      (Playground_paths.sanitize_keeper_name name)
+;;
 
 let host_root_rel_of_profile sandbox_profile name =
-  host_root_rel_of_backend
-    ~backend:(backend_of_profile sandbox_profile)
-    name
+  host_root_rel_of_backend ~backend:(backend_of_profile sandbox_profile) name
+;;
 
 let host_root_rel_of_meta ~(meta : Keeper_types.keeper_meta) =
   host_root_rel_of_profile meta.sandbox_profile meta.name
+;;
 
-let host_root_rel name =
-  Playground_paths.bundle_root name
+let host_root_rel name = Playground_paths.bundle_root name
 
 let host_root_abs_of_backend ~(config : Coord.config) ~(backend : backend) name =
   Filename.concat config.base_path (host_root_rel_of_backend ~backend name)
+;;
 
-let host_root_abs_of_meta ~(config : Coord.config)
-    (meta : Keeper_types.keeper_meta) =
+let host_root_abs_of_meta ~(config : Coord.config) (meta : Keeper_types.keeper_meta) =
   Filename.concat config.base_path (host_root_rel_of_meta ~meta)
+;;
 
 let host_root_abs ~(config : Coord.config) name =
   Filename.concat config.base_path (host_root_rel name)
+;;
 
 let container_root name =
   Filename.concat
     Env_config_keeper.DockerPlayground.container_playground_root
     (Playground_paths.sanitize_keeper_name name)
+;;
 
 let of_meta ~(config : Coord.config) ~(meta : Keeper_types.keeper_meta) : t =
   let backend = backend_of_profile meta.sandbox_profile in
@@ -93,23 +97,25 @@ let of_meta ~(config : Coord.config) ~(meta : Keeper_types.keeper_meta) : t =
   ; repos_arg = "repos"
   ; task_overlay_pattern = "repos/<repo>/.worktrees/<keeper>-<task_id>"
   }
+;;
 
-let allowed_root_rel ~(name : string) : string =
-  Playground_paths.bundle_root name
+let allowed_root_rel ~(name : string) : string = Playground_paths.bundle_root name
 
 let allowed_root_rel_of_meta ~(meta : Keeper_types.keeper_meta) : string =
   host_root_rel_of_meta ~meta
+;;
 
-let allowed_path_roots ~(name : string) : string list =
-  [ allowed_root_rel ~name ]
+let allowed_path_roots ~(name : string) : string list = [ allowed_root_rel ~name ]
 
 let allowed_path_roots_of_meta ~(meta : Keeper_types.keeper_meta) : string list =
   [ allowed_root_rel_of_meta ~meta ]
+;;
 
 let keeper_visible_root_abs (t : t) : string =
   match t.container_root with
   | Some container -> container
   | None -> t.host_root_abs
+;;
 
 let storage_lifetime = "persistent_backend_task_overlay"
 
@@ -130,3 +136,4 @@ let context_status_fields (t : t) : (string * Yojson.Safe.t) list =
         ; "repos", `String t.repos_arg
         ] )
   ]
+;;

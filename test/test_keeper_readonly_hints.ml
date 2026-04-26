@@ -12,11 +12,14 @@ let contains needle haystack =
   let nlen = String.length needle in
   let hlen = String.length haystack in
   let rec scan i =
-    if i + nlen > hlen then false
-    else if String.sub haystack i nlen = needle then true
+    if i + nlen > hlen
+    then false
+    else if String.sub haystack i nlen = needle
+    then true
     else scan (i + 1)
   in
   scan 0
+;;
 
 let check_example category =
   let hint = Shell.readonly_hint_of_category category in
@@ -28,22 +31,31 @@ let check_example category =
     (Printf.sprintf "%s hint contains Bad:" category)
     true
     (contains "Bad:" hint)
+;;
 
 let test_all_named_categories_carry_examples () =
-  List.iter check_example
+  List.iter
+    check_example
     [ "chaining"; "redirect"; "git_write"; "package_install"; "destructive" ]
+;;
 
 let test_unknown_category_falls_back () =
   let hint = Shell.readonly_hint_of_category "not_a_real_category" in
-  Alcotest.(check bool) "fallback does not claim Good:/Bad:" false
-    (contains "Good:" hint)
+  Alcotest.(check bool) "fallback does not claim Good:/Bad:" false (contains "Good:" hint)
+;;
 
 let () =
-  Alcotest.run "keeper_readonly_hints" [
-    ("Good:/Bad: examples",
-     [ Alcotest.test_case "all named categories" `Quick
-         test_all_named_categories_carry_examples
-     ; Alcotest.test_case "unknown category fallback" `Quick
-         test_unknown_category_falls_back
-     ])
-  ]
+  Alcotest.run
+    "keeper_readonly_hints"
+    [ ( "Good:/Bad: examples"
+      , [ Alcotest.test_case
+            "all named categories"
+            `Quick
+            test_all_named_categories_carry_examples
+        ; Alcotest.test_case
+            "unknown category fallback"
+            `Quick
+            test_unknown_category_falls_back
+        ] )
+    ]
+;;

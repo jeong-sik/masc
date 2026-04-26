@@ -19,11 +19,14 @@ let init_eio_clock ?sw env =
   Time_compat.set_clock clock;
   Eio_context.set_clock clock;
   Option.iter Eio_context.set_switch sw
+;;
 
 let init_keeper_tool_registry () =
-  if not (Masc_mcp.Tool_dispatch.is_tag_registry_initialized ()) then
+  if not (Masc_mcp.Tool_dispatch.is_tag_registry_initialized ())
+  then (
     let _ = Masc_mcp.Mcp_server_eio.governance_defaults in
-    ()
+    ())
+;;
 
 (** Walk up the directory tree from [Sys.getcwd()] until
     [config/tool_policy.toml] is found, then return that directory.
@@ -33,15 +36,18 @@ let find_project_root () =
   let marker = "config/tool_policy.toml" in
   let start_dir = Sys.getcwd () in
   let rec walk dir =
-    if Sys.file_exists (Filename.concat dir marker) then dir
-    else
+    if Sys.file_exists (Filename.concat dir marker)
+    then dir
+    else (
       let parent = Filename.dirname dir in
-      if String.equal parent dir then
+      if String.equal parent dir
+      then
         failwith
           (Printf.sprintf
              "Could not find %s when walking upward from %s"
-             marker start_dir)
-      else
-        walk parent
+             marker
+             start_dir)
+      else walk parent)
   in
   walk start_dir
+;;

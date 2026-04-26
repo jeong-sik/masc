@@ -1,68 +1,70 @@
 (** MASC Orchestrator - Self-sustaining agent coordination *)
 
 (** Orchestrator configuration *)
-type config = {
-  check_interval_s: float;      (* How often to check (default: 300s = 5min) *)
-  min_priority: int;            (* Minimum task priority to trigger (default: 1) *)
-  agent_timeout_s: int;         (* Timeout for spawned orchestrator (default: 300) *)
-  orchestrator_agent: string;   (* Which agent to spawn as orchestrator (env: MASC_ORCHESTRATOR_AGENT) *)
-  enabled: bool;                (* Is auto-orchestration enabled *)
-  port: int;                    (* MASC HTTP port for API calls *)
-}
+type config =
+  { check_interval_s : float (* How often to check (default: 300s = 5min) *)
+  ; min_priority : int (* Minimum task priority to trigger (default: 1) *)
+  ; agent_timeout_s : int (* Timeout for spawned orchestrator (default: 300) *)
+  ; orchestrator_agent : string
+    (* Which agent to spawn as orchestrator (env: MASC_ORCHESTRATOR_AGENT) *)
+  ; enabled : bool (* Is auto-orchestration enabled *)
+  ; port : int (* MASC HTTP port for API calls *)
+  }
 
 (** Load config from environment or use defaults *)
 let load_config () =
-  {
-    check_interval_s =
-      Env_config_core.get_float ~default:300.0 "MASC_ORCHESTRATOR_INTERVAL";
-    min_priority =
-      Env_config_core.get_int ~default:2 "MASC_ORCHESTRATOR_MIN_PRIORITY";
-    agent_timeout_s =
-      Env_config_core.get_int ~default:300 "MASC_ORCHESTRATOR_TIMEOUT";
-    orchestrator_agent = Env_config.Orchestrator.agent_name;
-    enabled =
-      Env_config_core.get_bool ~default:false
-        Env_config_core.orchestrator_enabled_env_key;
-    port = Env_config_core.masc_http_port_int ();
+  { check_interval_s =
+      Env_config_core.get_float ~default:300.0 "MASC_ORCHESTRATOR_INTERVAL"
+  ; min_priority = Env_config_core.get_int ~default:2 "MASC_ORCHESTRATOR_MIN_PRIORITY"
+  ; agent_timeout_s = Env_config_core.get_int ~default:300 "MASC_ORCHESTRATOR_TIMEOUT"
+  ; orchestrator_agent = Env_config.Orchestrator.agent_name
+  ; enabled =
+      Env_config_core.get_bool ~default:false Env_config_core.orchestrator_enabled_env_key
+  ; port = Env_config_core.masc_http_port_int ()
   }
+;;
 
 let default_config = load_config ()
 
 (** Check if orchestration is needed *)
 let should_orchestrate ~min_priority room_config =
   (* Check if room is paused first *)
-  if Coord.is_paused room_config then begin
+  if Coord.is_paused room_config
+  then (
     Log.Orchestrator.debug "room is paused, skipping";
-    false
-  end else begin
-  match Coord.read_backlog_r room_config with
-  | Error msg ->
-      Log.Orchestrator.error
-        "backlog unavailable, skipping orchestration check: %s" msg;
+    false)
+  else (
+    match Coord.read_backlog_r room_config with
+    | Error msg ->
+      Log.Orchestrator.error "backlog unavailable, skipping orchestration check: %s" msg;
       false
-  | Ok backlog ->
+    | Ok backlog ->
       (* Get unclaimed tasks with priority <= min_priority *)
-      let unclaimed_important = List.filter (fun (task: Types.task) ->
-        task.task_status = Types.Todo && task.priority <= min_priority
-      ) backlog.tasks in
-
+      let unclaimed_important =
+        List.filter
+          (fun (task : Types.task) ->
+             task.task_status = Types.Todo && task.priority <= min_priority)
+          backlog.tasks
+      in
       (* Get active (non-zombie) agents *)
       let agents = Coord.get_agents_raw room_config in
-      let active_agents = List.filter (fun (agent: Types.agent) ->
-        not (Resilience.Zombie.is_zombie agent.last_seen)
-      ) agents in
-
-      (* Need orchestration if: important tasks exist AND no active agents *)
-      let needs_orchestration =
-        unclaimed_important <> [] && active_agents = []
+      let active_agents =
+        List.filter
+          (fun (agent : Types.agent) -> not (Resilience.Zombie.is_zombie agent.last_seen))
+          agents
       in
+      (* Need orchestration if: important tasks exist AND no active agents *)
+      let needs_orchestration = unclaimed_important <> [] && active_agents = [] in
+      if needs_orchestration
+      then
+        Log.Orchestrator.info
+          "%d unclaimed tasks, %d active agents, spawning"
+          (List.length unclaimed_important)
+          (List.length active_agents);
+      needs_orchestration)
+;;
 
-      if needs_orchestration then
-        Log.Orchestrator.info "%d unclaimed tasks, %d active agents, spawning"
-          (List.length unclaimed_important) (List.length active_agents);
-
-      needs_orchestration
-  end  (* end of else begin for pause check *)
+(* end of else begin for pause check *)
 
 (** The orchestrator prompt - MCP tools are now available via --allowedTools! *)
 let make_orchestrator_prompt ~port:_ =
@@ -100,47 +102,57 @@ You have access to MASC MCP tools via mcp__masc__* prefix.
 - mcp__masc__masc_heartbeat - Update your heartbeat
 
 Start by calling mcp__masc__masc_status to see the current room state.|}
+;;
 
 (** Spawn the orchestrator agent. *)
 let spawn_orchestrator ~sw:_ ~proc_mgr:_ ?domain_mgr:_ config room_config =
-  if Coord.is_paused room_config then begin
+  if Coord.is_paused room_config
+  then (
     Log.Orchestrator.debug "room paused before spawn, aborting";
-    { Spawn.success = false; output = "Coord paused"; exit_code = 0; elapsed_ms = 0;
-      input_tokens = None; output_tokens = None; cache_creation_tokens = None;
-      cache_read_tokens = None; cost_usd = None }
-  end else begin
-  Log.Orchestrator.info "spawning agent: %s (with MCP tools)" config.orchestrator_agent;
-
-  let _msg = Coord.broadcast room_config ~from_agent:"system"
-    ~content:"Auto-orchestrator activated - spawning coordinator with MCP tools" in
-
-  let prompt = make_orchestrator_prompt ~port:config.port in
-  let result =
-    Spawn.spawn ~agent_name:config.orchestrator_agent ~prompt
-      ~timeout_seconds:config.agent_timeout_s ()
-  in
-
-  if result.success then
-    Log.Orchestrator.info "completed in %dms" result.elapsed_ms
-  else
-    Log.Orchestrator.warn "failed (exit %d) in %dms"
-      result.exit_code result.elapsed_ms;
-
-  result
-  end
+    { Spawn.success = false
+    ; output = "Coord paused"
+    ; exit_code = 0
+    ; elapsed_ms = 0
+    ; input_tokens = None
+    ; output_tokens = None
+    ; cache_creation_tokens = None
+    ; cache_read_tokens = None
+    ; cost_usd = None
+    })
+  else (
+    Log.Orchestrator.info "spawning agent: %s (with MCP tools)" config.orchestrator_agent;
+    let _msg =
+      Coord.broadcast
+        room_config
+        ~from_agent:"system"
+        ~content:"Auto-orchestrator activated - spawning coordinator with MCP tools"
+    in
+    let prompt = make_orchestrator_prompt ~port:config.port in
+    let result =
+      Spawn.spawn
+        ~agent_name:config.orchestrator_agent
+        ~prompt
+        ~timeout_seconds:config.agent_timeout_s
+        ()
+    in
+    if result.success
+    then Log.Orchestrator.info "completed in %dms" result.elapsed_ms
+    else
+      Log.Orchestrator.warn "failed (exit %d) in %dms" result.exit_code result.elapsed_ms;
+    result)
+;;
 
 (* ── Pulse helpers ─────────────────────────────────────────── *)
 
 (** Fixed-interval rhythm with no quiet hours.
     Orchestrator runs at constant interval regardless of time of day. *)
-let fixed_rhythm base_s =
-  { Pulse.base_s; min_s = base_s; max_s = base_s; quiet = (0, 0) }
+let fixed_rhythm base_s = { Pulse.base_s; min_s = base_s; max_s = base_s; quiet = 0, 0 }
 
 (** Pulse instances for orchestrator and zombie cleanup.
     Stored in refs for shutdown access. *)
 let orchestrator_pulse : Pulse.t option ref = ref None
-let zombie_pulse : Pulse.t option ref = ref None
 
+let zombie_pulse : Pulse.t option ref = ref None
 let pulse_mu = Eio.Mutex.create ()
 let with_pulse_rw f = Eio_guard.with_mutex pulse_mu f
 let with_pulse_ro f = Eio_guard.with_mutex_ro pulse_mu f
@@ -148,35 +160,45 @@ let with_pulse_ro f = Eio_guard.with_mutex_ro pulse_mu f
 (** Build the orchestrator check consumer.
     Checks if orchestration is needed and spawns coordinator if so. *)
 let make_orchestrator_check_consumer ~sw ~proc_mgr ?domain_mgr ~config ~room_config ()
-    : (module Pulse.Consumer) =
+  : (module Pulse.Consumer)
+  =
   (module struct
     let name = "orchestrator-check"
     let should_act _beat = config.enabled
+
     let on_beat _beat =
       try
-        if should_orchestrate ~min_priority:config.min_priority room_config then
+        if should_orchestrate ~min_priority:config.min_priority room_config
+        then
           Eio.Fiber.fork ~sw (fun () ->
             try
               let (_ : Spawn.spawn_result) =
                 spawn_orchestrator ~sw ~proc_mgr ?domain_mgr config room_config
               in
               ()
-            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-              Log.Orchestrator.error "spawn failed: %s" (Printexc.to_string exn));
+            with
+            | Eio.Cancel.Cancelled _ as e -> raise e
+            | exn -> Log.Orchestrator.error "spawn failed: %s" (Printexc.to_string exn));
         Ok ()
-      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-        let msg = Printf.sprintf "orchestrator check error: %s" (Printexc.to_string exn) in
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn ->
+        let msg =
+          Printf.sprintf "orchestrator check error: %s" (Printexc.to_string exn)
+        in
         Log.Orchestrator.warn "%s (recovering...)" msg;
         Error msg
+    ;;
   end)
+;;
 
 (** Build the zero-zombie cleanup consumer.
     Runs Coord.cleanup_zombies and logs if zombies were found. *)
-let make_zero_zombie_consumer ~sw ~room_config
-    : (module Pulse.Consumer) =
+let make_zero_zombie_consumer ~sw ~room_config : (module Pulse.Consumer) =
   (module struct
     let name = "zero-zombie-cleanup"
     let should_act _beat = true
+
     let on_beat _beat =
       (* Run GC in background fiber to avoid blocking Pulse consumers.
          Heartbeat and other consumers proceed without waiting for
@@ -185,75 +207,107 @@ let make_zero_zombie_consumer ~sw ~room_config
         try
           let status = Coord.cleanup_zombies room_config in
           let status_trimmed = String.trim status in
-          if String.length status_trimmed > 0 then begin
+          if String.length status_trimmed > 0
+          then (
             let has_zombie_indicator =
               try
-                Base.String.is_prefix status_trimmed ~prefix:"\xf0\x9f\xa7\x9f" ||
-                Base.String.is_prefix status_trimmed ~prefix:"Cleaned"
-              with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-                Log.Orchestrator.warn "zombie indicator check failed: %s" (Printexc.to_string exn);
+                Base.String.is_prefix status_trimmed ~prefix:"\xf0\x9f\xa7\x9f"
+                || Base.String.is_prefix status_trimmed ~prefix:"Cleaned"
+              with
+              | Eio.Cancel.Cancelled _ as e -> raise e
+              | exn ->
+                Log.Orchestrator.warn
+                  "zombie indicator check failed: %s"
+                  (Printexc.to_string exn);
                 false
             in
-            if has_zombie_indicator then
-              Log.Orchestrator.info "[zombie] %s" status_trimmed
-          end;
+            if has_zombie_indicator
+            then Log.Orchestrator.info "[zombie] %s" status_trimmed);
           let ttl = Env_config_runtime.Claim.ttl_seconds in
-          (try
-            let released = Coord_task_schedule.release_stale_claims room_config ~ttl_seconds:ttl in
-            if released <> [] then
-              Log.Orchestrator.info "[stale-claims] released %d stale task(s): %s"
+          try
+            let released =
+              Coord_task_schedule.release_stale_claims room_config ~ttl_seconds:ttl
+            in
+            if released <> []
+            then
+              Log.Orchestrator.info
+                "[stale-claims] released %d stale task(s): %s"
                 (List.length released)
-                (String.concat ", " (List.map (fun (tid, agent) ->
-                  Printf.sprintf "%s(%s)" tid agent) released))
-          with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-            Log.Orchestrator.warn "[stale-claims] error: %s" (Printexc.to_string exn))
-        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-          if not (Resilience.ZeroZombie.is_benign_error exn) then
-            Log.Orchestrator.warn "[zombie] error: %s" (Printexc.to_string exn));
+                (String.concat
+                   ", "
+                   (List.map
+                      (fun (tid, agent) -> Printf.sprintf "%s(%s)" tid agent)
+                      released))
+          with
+          | Eio.Cancel.Cancelled _ as e -> raise e
+          | exn ->
+            Log.Orchestrator.warn "[stale-claims] error: %s" (Printexc.to_string exn)
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn ->
+          if not (Resilience.ZeroZombie.is_benign_error exn)
+          then Log.Orchestrator.warn "[zombie] error: %s" (Printexc.to_string exn));
       Ok ()
+    ;;
   end)
+;;
 
 (** Start the orchestrator background services using Pulse.
     Returns a cancel function to gracefully stop both Pulse engines. *)
 let start ~sw ~proc_mgr ~clock ?domain_mgr room_config =
   let config = load_config () in
-
   (* Zero-Zombie cleanup: always enabled, configurable interval *)
   let neo4j_interval = Env_config_governance.Timeouts.neo4j_timeout_sec in
   Log.Orchestrator.debug "zero-zombie cleanup enabled (interval: %.0fs)" neo4j_interval;
   let zombie_consumer = make_zero_zombie_consumer ~sw ~room_config in
   let dedup_consumer = Channel_gate.make_dedup_cleanup_consumer () in
-  let zp = Pulse.create ~clock ~rhythm:(fixed_rhythm neo4j_interval) ~lifecycle:Always_on ~consumers:[zombie_consumer; dedup_consumer] in
+  let zp =
+    Pulse.create
+      ~clock
+      ~rhythm:(fixed_rhythm neo4j_interval)
+      ~lifecycle:Always_on
+      ~consumers:[ zombie_consumer; dedup_consumer ]
+  in
   with_pulse_rw (fun () -> zombie_pulse := Some zp);
   Eio.Fiber.fork ~sw (fun () ->
-    try Pulse.run ~sw zp
-    with
+    try Pulse.run ~sw zp with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
-      Log.Orchestrator.error "zombie cleanup pulse crashed: %s"
-        (Printexc.to_string exn));
-
+      Log.Orchestrator.error "zombie cleanup pulse crashed: %s" (Printexc.to_string exn));
   (* Orchestrator check: respects enabled flag via should_act *)
-  if config.enabled then
-    Log.Orchestrator.debug "loop enabled (interval: %.0fs, agent: %s)"
-      config.check_interval_s config.orchestrator_agent
-  else
-    Log.Orchestrator.debug "loop disabled (set MASC_ORCHESTRATOR_ENABLED=1 to enable)";
-
-  let orch_consumer = make_orchestrator_check_consumer ~sw ~proc_mgr ?domain_mgr ~config ~room_config () in
-  let op = Pulse.create ~clock ~rhythm:(fixed_rhythm config.check_interval_s) ~lifecycle:Always_on ~consumers:[orch_consumer] in
+  if config.enabled
+  then
+    Log.Orchestrator.debug
+      "loop enabled (interval: %.0fs, agent: %s)"
+      config.check_interval_s
+      config.orchestrator_agent
+  else Log.Orchestrator.debug "loop disabled (set MASC_ORCHESTRATOR_ENABLED=1 to enable)";
+  let orch_consumer =
+    make_orchestrator_check_consumer ~sw ~proc_mgr ?domain_mgr ~config ~room_config ()
+  in
+  let op =
+    Pulse.create
+      ~clock
+      ~rhythm:(fixed_rhythm config.check_interval_s)
+      ~lifecycle:Always_on
+      ~consumers:[ orch_consumer ]
+  in
   with_pulse_rw (fun () -> orchestrator_pulse := Some op);
   Eio.Fiber.fork ~sw (fun () ->
-    try Pulse.run ~sw op
-    with
+    try Pulse.run ~sw op with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
-      Log.Orchestrator.error "orchestrator check pulse crashed: %s"
+      Log.Orchestrator.error
+        "orchestrator check pulse crashed: %s"
         (Printexc.to_string exn));
-
   (* Return cancel function — shuts down both Pulse engines *)
   fun () ->
     with_pulse_ro (fun () ->
-      (match !orchestrator_pulse with Some p -> Pulse.shutdown p | None -> ()));
+      match !orchestrator_pulse with
+      | Some p -> Pulse.shutdown p
+      | None -> ());
     with_pulse_ro (fun () ->
-      (match !zombie_pulse with Some p -> Pulse.shutdown p | None -> ()))
+      match !zombie_pulse with
+      | Some p -> Pulse.shutdown p
+      | None -> ())
+;;

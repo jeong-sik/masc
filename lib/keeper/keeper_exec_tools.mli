@@ -1,11 +1,12 @@
 open Keeper_types
 
-val keeper_allowed_tool_names :
-  ?write_done:bool ->
-  ?phase:Keeper_state_machine.phase ->
-  keeper_meta -> string list
-val keeper_allowed_model_tools :
-  ?write_done:bool -> keeper_meta -> Types.tool_schema list
+val keeper_allowed_tool_names
+  :  ?write_done:bool
+  -> ?phase:Keeper_state_machine.phase
+  -> keeper_meta
+  -> string list
+
+val keeper_allowed_model_tools : ?write_done:bool -> keeper_meta -> Types.tool_schema list
 
 (** Universe tool names: candidates minus denied, no policy filter.
     Superset of [keeper_allowed_tool_names].  Used as the BM25 retrieval
@@ -61,8 +62,7 @@ val has_mutating_side_effect : string -> bool
 
 (** Input-aware mutation check for mixed tools such as [keeper_shell] with
     op=gh where read-only and mutating subcommands share the same tool name. *)
-val has_mutating_side_effect_with_input :
-  tool_name:string -> input:Yojson.Safe.t -> bool
+val has_mutating_side_effect_with_input : tool_name:string -> input:Yojson.Safe.t -> bool
 
 (** Schema for the keeper_tool_search tool. *)
 val keeper_tool_search_schema : Types.tool_schema
@@ -98,14 +98,13 @@ val is_keeper_denied : string -> bool
 
 (** Callback for recording keeper-internal tool calls.
     Set at server initialization to avoid Config dependency cycle. *)
-val on_keeper_tool_call :
-  (tool_name:string -> success:bool -> duration_ms:int -> unit) ref
+val on_keeper_tool_call
+  : (tool_name:string -> success:bool -> duration_ms:int -> unit) ref
 
 (** Callback for keeper_tool_search BM25 search.
     Process-global fallback; prefer passing [~search_fn] to
     [execute_keeper_tool_call] for session-scoped, race-free search. *)
-val tool_search_fn :
-  (query:string -> max_results:int -> Yojson.Safe.t) ref
+val tool_search_fn : (query:string -> max_results:int -> Yojson.Safe.t) ref
 
 (** Classification of a keeper tool result payload for circuit-breaker
     bookkeeping.
@@ -123,18 +122,21 @@ type tool_result_payload =
 (** Bridge-facing execution outcome.
     [tool_not_allowed] remains a non-failure outcome so preset/policy
     rejections do not trip repeated-failure guardrails. *)
-type execution_outcome = [ `Success | `Failure ]
+type execution_outcome =
+  [ `Success
+  | `Failure
+  ]
 
 (** Typed keeper tool execution result.
     [raw_output] preserves the original payload, [outcome] is the
     authoritative success/failure decision for bridge consumers, and
     [payload_shape] captures the post-execution wire shape for telemetry
     and malformed-payload handling. *)
-type executed_tool_result = {
-  raw_output : string;
-  outcome : execution_outcome;
-  payload_shape : tool_result_payload;
-}
+type executed_tool_result =
+  { raw_output : string
+  ; outcome : execution_outcome
+  ; payload_shape : tool_result_payload
+  }
 
 (** Inspect a keeper tool result payload without applying side effects. *)
 val classify_tool_result_payload : string -> tool_result_payload
@@ -152,28 +154,28 @@ val keeper_masc_tool_schemas : keeper_meta -> Types.tool_schema list
 (** Compute the keeper's sender identity for portals and broadcasts.
     Guards against double "keeper-" prefix. See #5104. *)
 
-val execute_keeper_tool_call_with_outcome :
-  config:Coord.config ->
-  meta:keeper_meta ->
-  ctx_work:working_context ->
-  ?turn_sandbox_runtime:Keeper_turn_sandbox_runtime.t ->
-  ?turn_sandbox_runtime_git:Keeper_turn_sandbox_runtime.t ->
-  exec_cache:Masc_exec.Exec_cache.t option ->
-  ?search_fn:(query:string -> max_results:int -> Yojson.Safe.t) ->
-  name:string ->
-  input:Yojson.Safe.t ->
-  unit ->
-  executed_tool_result
+val execute_keeper_tool_call_with_outcome
+  :  config:Coord.config
+  -> meta:keeper_meta
+  -> ctx_work:working_context
+  -> ?turn_sandbox_runtime:Keeper_turn_sandbox_runtime.t
+  -> ?turn_sandbox_runtime_git:Keeper_turn_sandbox_runtime.t
+  -> exec_cache:Masc_exec.Exec_cache.t option
+  -> ?search_fn:(query:string -> max_results:int -> Yojson.Safe.t)
+  -> name:string
+  -> input:Yojson.Safe.t
+  -> unit
+  -> executed_tool_result
 
-val execute_keeper_tool_call :
-  config:Coord.config ->
-  meta:keeper_meta ->
-  ctx_work:working_context ->
-  ?turn_sandbox_runtime:Keeper_turn_sandbox_runtime.t ->
-  ?turn_sandbox_runtime_git:Keeper_turn_sandbox_runtime.t ->
-  exec_cache:Masc_exec.Exec_cache.t option ->
-  ?search_fn:(query:string -> max_results:int -> Yojson.Safe.t) ->
-  name:string ->
-  input:Yojson.Safe.t ->
-  unit ->
-  string
+val execute_keeper_tool_call
+  :  config:Coord.config
+  -> meta:keeper_meta
+  -> ctx_work:working_context
+  -> ?turn_sandbox_runtime:Keeper_turn_sandbox_runtime.t
+  -> ?turn_sandbox_runtime_git:Keeper_turn_sandbox_runtime.t
+  -> exec_cache:Masc_exec.Exec_cache.t option
+  -> ?search_fn:(query:string -> max_results:int -> Yojson.Safe.t)
+  -> name:string
+  -> input:Yojson.Safe.t
+  -> unit
+  -> string

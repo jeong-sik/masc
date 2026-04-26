@@ -13,9 +13,7 @@
     runs inline in the current fiber. *)
 
 let pool : Eio.Executor_pool.t option Atomic.t = Atomic.make None
-
 let get () = Atomic.get pool
-
 let set p = Atomic.set pool (Some p)
 
 (** Submit [f] to the executor pool if available, or run inline.
@@ -24,12 +22,14 @@ let set p = Atomic.set pool (Some p)
 let submit_or_inline ?(weight = 1.0) f =
   match Atomic.get pool with
   | Some p ->
-      (try Eio.Executor_pool.submit_exn p ~weight (fun () ->
-         Eio.Switch.run (fun _sw -> f ()))
-       with
-       | Eio.Cancel.Cancelled _ as e -> raise e
-       | exn ->
-           Log.Misc.warn "executor_pool submit failed, running inline: %s"
-             (Printexc.to_string exn);
-           f ())
+    (try
+       Eio.Executor_pool.submit_exn p ~weight (fun () -> Eio.Switch.run (fun _sw -> f ()))
+     with
+     | Eio.Cancel.Cancelled _ as e -> raise e
+     | exn ->
+       Log.Misc.warn
+         "executor_pool submit failed, running inline: %s"
+         (Printexc.to_string exn);
+       f ())
   | None -> f ()
+;;

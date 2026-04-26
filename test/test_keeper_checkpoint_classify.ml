@@ -28,23 +28,27 @@ module Store = Masc_mcp.Keeper_checkpoint_store
 
 let check_not_found name detail =
   Alcotest.(check bool) name true (Store.is_not_found_detail detail)
+;;
 
 let check_not_classified_as_not_found name detail =
   Alcotest.(check bool) name false (Store.is_not_found_detail detail)
+;;
 
 (* ─── Legacy prefixes (regression guard) ─────────────────────── *)
 
 let test_legacy_no_such_file_prefix () =
-  check_not_found "no_such_file underscore prefix (legacy)"
-    "no_such_file: trace-xyz"
+  check_not_found "no_such_file underscore prefix (legacy)" "no_such_file: trace-xyz"
+;;
 
 let test_legacy_no_such_file_space_prefix () =
-  check_not_found "no such file prefix"
-    "No such file or directory"
+  check_not_found "no such file prefix" "No such file or directory"
+;;
 
 let test_legacy_unix_error_prefix () =
-  check_not_found "unix_error(enoent prefix (POSIX)"
+  check_not_found
+    "unix_error(enoent prefix (POSIX)"
     "Unix_error (ENOENT, \"openat\", \"/tmp/x\")"
+;;
 
 (* ─── Regression: Eio.Io rendered form from Printexc ─────────── *)
 
@@ -53,17 +57,19 @@ let test_eio_io_fs_not_found_rendered () =
      trace-1775487505102-6a347 — the keeper looping fix target. *)
   check_not_found
     "Eio.Io Fs Not_found Unix_error rendered by Printexc.to_string"
-    "Eio.Io Fs Not_found Unix_error (No such file or directory, \
-     \"openat\", \"/Users/dancer/me/.masc/traces/trace-123/trace-123.json\"), \
-     \n  opening <fs:/Users/dancer/me/.masc/traces/trace-123/trace-123.json>"
+    "Eio.Io Fs Not_found Unix_error (No such file or directory, \"openat\", \
+     \"/Users/dancer/me/.masc/traces/trace-123/trace-123.json\"), \n\
+    \  opening <fs:/Users/dancer/me/.masc/traces/trace-123/trace-123.json>"
+;;
 
 (* ─── Substring fallback: wrapper layers may prepend context ──── *)
 
 let test_substring_embedded_no_such_file () =
   check_not_found
     "substring match for 'no such file or directory' anywhere in detail"
-    "load trace-abc: wrapped error: Sys_error \
-     \"/path/trace.json: No such file or directory\""
+    "load trace-abc: wrapped error: Sys_error \"/path/trace.json: No such file or \
+     directory\""
+;;
 
 (* ─── Negative cases ─────────────────────────────────────────── *)
 
@@ -71,32 +77,46 @@ let test_parse_error_not_misclassified () =
   check_not_classified_as_not_found
     "JSON parse error must stay classified as Parse_error"
     "JSON error: Unexpected end of input"
+;;
 
 let test_permission_denied_not_misclassified () =
   check_not_classified_as_not_found
     "permission denied must stay classified as Io_error"
     "Unix_error (EACCES, \"openat\", \"/path/trace.json\")"
+;;
 
 let () =
-  Alcotest.run "Keeper_checkpoint_classify"
-    [
-      ( "is_not_found_detail",
-        [
-          Alcotest.test_case "legacy no_such_file underscore prefix" `Quick
-            test_legacy_no_such_file_prefix;
-          Alcotest.test_case "legacy 'No such file' prefix" `Quick
-            test_legacy_no_such_file_space_prefix;
-          Alcotest.test_case "legacy Unix_error(ENOENT prefix" `Quick
-            test_legacy_unix_error_prefix;
-          Alcotest.test_case
+  Alcotest.run
+    "Keeper_checkpoint_classify"
+    [ ( "is_not_found_detail"
+      , [ Alcotest.test_case
+            "legacy no_such_file underscore prefix"
+            `Quick
+            test_legacy_no_such_file_prefix
+        ; Alcotest.test_case
+            "legacy 'No such file' prefix"
+            `Quick
+            test_legacy_no_such_file_space_prefix
+        ; Alcotest.test_case
+            "legacy Unix_error(ENOENT prefix"
+            `Quick
+            test_legacy_unix_error_prefix
+        ; Alcotest.test_case
             "Eio.Io Fs Not_found Unix_error rendered (regression)"
-            `Quick test_eio_io_fs_not_found_rendered;
-          Alcotest.test_case
-            "'no such file or directory' substring match" `Quick
-            test_substring_embedded_no_such_file;
-          Alcotest.test_case "JSON parse error not misclassified" `Quick
-            test_parse_error_not_misclassified;
-          Alcotest.test_case "EACCES not misclassified" `Quick
-            test_permission_denied_not_misclassified;
-        ] );
+            `Quick
+            test_eio_io_fs_not_found_rendered
+        ; Alcotest.test_case
+            "'no such file or directory' substring match"
+            `Quick
+            test_substring_embedded_no_such_file
+        ; Alcotest.test_case
+            "JSON parse error not misclassified"
+            `Quick
+            test_parse_error_not_misclassified
+        ; Alcotest.test_case
+            "EACCES not misclassified"
+            `Quick
+            test_permission_denied_not_misclassified
+        ] )
     ]
+;;

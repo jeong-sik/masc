@@ -19,36 +19,36 @@ type change_type =
 
 val change_type_to_string : change_type -> string
 
-type subscription = {
-  id: string;
-  subscriber: string;
-  resource: resource_type;
-  filter: string option;
-  created_at: float;
-}
+type subscription =
+  { id : string
+  ; subscriber : string
+  ; resource : resource_type
+  ; filter : string option
+  ; created_at : float
+  }
 
-type notification = {
-  subscription_id: string;
-  resource: resource_type;
-  change: change_type;
-  resource_id: string;
-  data: Yojson.Safe.t;
-  timestamp: float;
-}
+type notification =
+  { subscription_id : string
+  ; resource : resource_type
+  ; change : change_type
+  ; resource_id : string
+  ; data : Yojson.Safe.t
+  ; timestamp : float
+  }
 
 (** {1 Subscription Store} *)
 
 module SubscriptionStore : sig
-  val subscribe :
-    subscriber:string ->
-    resource:resource_type ->
-    ?filter:string ->
-    unit ->
-    subscription
+  val subscribe
+    :  subscriber:string
+    -> resource:resource_type
+    -> ?filter:string
+    -> unit
+    -> subscription
+
   val unsubscribe : string -> bool
   val get : string -> subscription option
-  val find_matching :
-    resource:resource_type -> resource_id:string -> subscription list
+  val find_matching : resource:resource_type -> resource_id:string -> subscription list
   val get_for_subscriber : string -> subscription list
   val queue_notification : string -> notification -> unit
   val pop_notifications : string -> notification list
@@ -63,21 +63,26 @@ val push_event_to_sessions : Yojson.Safe.t -> unit
 
 (** {1 Change Notifications} *)
 
-val notify_change :
-  resource:resource_type ->
-  change:change_type ->
-  resource_id:string ->
-  data:Yojson.Safe.t ->
-  int
+val notify_change
+  :  resource:resource_type
+  -> change:change_type
+  -> resource_id:string
+  -> data:Yojson.Safe.t
+  -> int
 
-val notify_task_change :
-  change:change_type -> task_id:string -> data:Yojson.Safe.t -> unit
+val notify_task_change
+  :  change:change_type
+  -> task_id:string
+  -> data:Yojson.Safe.t
+  -> unit
 
-val notify_agent_change :
-  change:change_type -> agent_name:string -> data:Yojson.Safe.t -> unit
+val notify_agent_change
+  :  change:change_type
+  -> agent_name:string
+  -> data:Yojson.Safe.t
+  -> unit
 
-val notify_message :
-  message_id:string -> data:Yojson.Safe.t -> unit
+val notify_message : message_id:string -> data:Yojson.Safe.t -> unit
 
 (** {1 Serialization} *)
 

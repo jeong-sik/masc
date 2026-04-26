@@ -9,18 +9,18 @@
 
 (** {1 Types} *)
 
-type tempo_config = {
-  min_interval_s : float;      (** Minimum interval (fast tempo) *)
-  max_interval_s : float;      (** Maximum interval (slow tempo) *)
-  default_interval_s : float;
-  adaptive : bool;             (** Enable adaptive tempo *)
-}
+type tempo_config =
+  { min_interval_s : float (** Minimum interval (fast tempo) *)
+  ; max_interval_s : float (** Maximum interval (slow tempo) *)
+  ; default_interval_s : float
+  ; adaptive : bool (** Enable adaptive tempo *)
+  }
 
-type tempo_state = {
-  current_interval_s : float;
-  last_adjusted : float;
-  reason : string;
-}
+type tempo_state =
+  { current_interval_s : float
+  ; last_adjusted : float
+  ; reason : string
+  }
 
 (** {1 Configuration} *)
 
@@ -52,8 +52,7 @@ val save_state : Coord_utils.config -> tempo_state -> unit
 (** [set_tempo config ~interval_s ~reason] clamps [interval_s] to
     [[min_interval_s; max_interval_s]], updates [last_adjusted], and
     persists. *)
-val set_tempo :
-  Coord_utils.config -> interval_s:float -> reason:string -> tempo_state
+val set_tempo : Coord_utils.config -> interval_s:float -> reason:string -> tempo_state
 
 (** Alias for {!load_state}. *)
 val get_tempo : Coord_utils.config -> tempo_state

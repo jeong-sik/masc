@@ -18,27 +18,27 @@ type broadcast_target =
   | Observers
   | Coordinators
 
-type client = {
-  id : int;
-  kind : session_kind;
-  event_stream : string Eio.Stream.t;
-  last_event_id : int Atomic.t;
-  created_at : float;
-  last_seen_at : float Atomic.t;
-}
+type client =
+  { id : int
+  ; kind : session_kind
+  ; event_stream : string Eio.Stream.t
+  ; last_event_id : int Atomic.t
+  ; created_at : float
+  ; last_seen_at : float Atomic.t
+  }
 
-type client_registry_state = {
-  entries : client SMap.t;
-  count : int;
-}
+type client_registry_state =
+  { entries : client SMap.t
+  ; count : int
+  }
 
-type session_snapshot = {
-  session_id : string;
-  kind : session_kind;
-  queue_depth : int;
-  last_event_id : int;
-  idle_seconds : float;
-}
+type session_snapshot =
+  { session_id : string
+  ; kind : session_kind
+  ; queue_depth : int
+  ; last_event_id : int
+  ; idle_seconds : float
+  }
 
 (** {1 Constants} *)
 
@@ -48,9 +48,12 @@ val buffer_ttl_seconds : float
 
 (** {1 Session Management} *)
 
-val register :
-  ?kind:session_kind -> string -> last_event_id:int ->
-  int * string Eio.Stream.t * string option
+val register
+  :  ?kind:session_kind
+  -> string
+  -> last_event_id:int
+  -> int * string Eio.Stream.t * string option
+
 val unregister : string -> unit
 val unregister_if_current : string -> int -> unit
 val exists : string -> bool
@@ -81,8 +84,13 @@ val try_pop : string -> string option
 
 (** {1 External Subscribers} *)
 
-val subscribe_external :
-  id:string -> callback:(string -> unit) -> ?is_alive:(unit -> bool) -> unit -> unit
+val subscribe_external
+  :  id:string
+  -> callback:(string -> unit)
+  -> ?is_alive:(unit -> bool)
+  -> unit
+  -> unit
+
 val unsubscribe_external : string -> unit
 val external_subscriber_count : unit -> int
 val external_subscriber_count_with_prefix : string -> int

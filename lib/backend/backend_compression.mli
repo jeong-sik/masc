@@ -8,7 +8,6 @@
 (** {1 Constants} *)
 
 val min_size : int
-
 val default_level : int
 
 (** {1 Low-level primitives} *)
@@ -21,8 +20,7 @@ val compress : ?level:int -> string -> string * bool * bool
 (** [decompress ~orig_size ~used_dict compressed] returns
     [Some plaintext] on success, [None] on decompression error
     (logged via [Log.Misc.error]). *)
-val decompress :
-  orig_size:int -> used_dict:bool -> string -> string option
+val decompress : orig_size:int -> used_dict:bool -> string -> string option
 
 (** {1 Header framing}
 

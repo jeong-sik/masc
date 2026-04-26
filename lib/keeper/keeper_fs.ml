@@ -23,7 +23,8 @@ let ensure_dir (path : string) : string =
      isolation cascade failures). *)
   let deferred_exn = ref None in
   Eio_guard.with_mutex dir_mu (fun () ->
-    if not (Hashtbl.mem ensured_dirs path) || not (Fs_compat.file_exists path) then begin
+    if (not (Hashtbl.mem ensured_dirs path)) || not (Fs_compat.file_exists path)
+    then (
       match
         try
           Fs_compat.mkdir_p path;
@@ -31,27 +32,29 @@ let ensure_dir (path : string) : string =
           Ok ()
         with
         | Eio.Cancel.Cancelled _ as exn ->
-            Log.Keeper.warn "keeper_fs: ensure_dir cancelled path=%s" path;
-            Error (exn, Printexc.get_raw_backtrace ())
+          Log.Keeper.warn "keeper_fs: ensure_dir cancelled path=%s" path;
+          Error (exn, Printexc.get_raw_backtrace ())
         | exn ->
-            Log.Keeper.warn "keeper_fs: ensure_dir failed path=%s: %s"
-              path (Printexc.to_string exn);
-            Error (exn, Printexc.get_raw_backtrace ())
+          Log.Keeper.warn
+            "keeper_fs: ensure_dir failed path=%s: %s"
+            path
+            (Printexc.to_string exn);
+          Error (exn, Printexc.get_raw_backtrace ())
       with
       | Ok () -> ()
-      | Error err -> deferred_exn := Some err
-    end);
+      | Error err -> deferred_exn := Some err));
   match !deferred_exn with
   | Some (exn, bt) -> Printexc.raise_with_backtrace exn bt
   | None -> path
+;;
 
 let invalidate_dir (path : string) : unit =
-  Eio_guard.with_mutex dir_mu (fun () ->
-    Hashtbl.remove ensured_dirs path)
+  Eio_guard.with_mutex dir_mu (fun () -> Hashtbl.remove ensured_dirs path)
+;;
 
 let clear_dir_cache () : unit =
-  Eio_guard.with_mutex dir_mu (fun () ->
-    Hashtbl.clear ensured_dirs)
+  Eio_guard.with_mutex dir_mu (fun () -> Hashtbl.clear ensured_dirs)
+;;
 
 (* ================================================================ *)
 (* Atomic File Write (write-to-temp + rename)                       *)
@@ -69,18 +72,20 @@ let save_atomic (path : string) (content : string) : (unit, string) result =
     match Fs_compat.save_file_atomic path content with
     | Ok () -> Ok ()
     | Error msg ->
-        Log.Keeper.warn "keeper_fs: save_atomic failed path=%s error=%s" path msg;
-        Error msg
+      Log.Keeper.warn "keeper_fs: save_atomic failed path=%s error=%s" path msg;
+      Error msg
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
-      let msg = Printexc.to_string exn in
-      Log.Keeper.warn "keeper_fs: save_atomic raised path=%s error=%s" path msg;
-      Error msg
+    let msg = Printexc.to_string exn in
+    Log.Keeper.warn "keeper_fs: save_atomic raised path=%s error=%s" path msg;
+    Error msg
+;;
 
 (** Atomically save a Yojson value as pretty-printed JSON. *)
 let save_json_atomic (path : string) (json : Yojson.Safe.t) : (unit, string) result =
   save_atomic path (Yojson.Safe.pretty_to_string json)
+;;
 
 (* ================================================================ *)
 (* Standard Keeper Paths                                            *)
@@ -89,10 +94,13 @@ let save_json_atomic (path : string) (json : Yojson.Safe.t) : (unit, string) res
 let keeper_dir (config : Coord.config) : string =
   let d = Filename.concat (Coord.masc_root_dir config) "keepers" in
   ensure_dir d
+;;
 
 let session_base_dir (config : Coord.config) : string =
   let d = Filename.concat (Coord.masc_root_dir config) "traces" in
   ensure_dir d
+;;
 
 let keeper_session_dir (config : Coord.config) (trace_id : string) : string =
   Filename.concat (session_base_dir config) trace_id
+;;

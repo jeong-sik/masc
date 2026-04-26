@@ -26,36 +26,38 @@ let temp_dir () =
   Unix.unlink dir;
   Unix.mkdir dir 0o755;
   dir
+;;
 
-let ensure_fs env =
-  if not (Fs_compat.has_fs ()) then
-    Fs_compat.set_fs (Eio.Stdenv.fs env)
+let ensure_fs env = if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env)
 
 let cleanup_dir dir =
   let rec rm path =
-    if Sys.file_exists path then
-      if Sys.is_directory path then (
+    if Sys.file_exists path
+    then
+      if Sys.is_directory path
+      then (
         Array.iter (fun name -> rm (Filename.concat path name)) (Sys.readdir path);
         Unix.rmdir path)
-      else
-        Unix.unlink path
+      else Unix.unlink path
   in
-  try rm dir with _ -> ()
+  try rm dir with
+  | _ -> ()
+;;
 
 let make_meta ~name =
   match
     Keeper_types.meta_of_json
       (`Assoc
-        [
-          ("name", `String name);
-          ("agent_name", `String ("keeper-" ^ name ^ "-agent"));
-          ("trace_id", `String ("trace-" ^ name));
-          ("goal", `String "test keeper");
-          ("autoboot_enabled", `Bool false);
-        ])
+          [ "name", `String name
+          ; "agent_name", `String ("keeper-" ^ name ^ "-agent")
+          ; "trace_id", `String ("trace-" ^ name)
+          ; "goal", `String "test keeper"
+          ; "autoboot_enabled", `Bool false
+          ])
   with
   | Ok m -> m
   | Error e -> fail ("meta_of_json failed: " ^ e)
+;;
 
 (* The race we model:
 
@@ -71,88 +73,108 @@ let make_meta ~name =
    - on-disk joined_room_ids must be [r1; r2]  (disk wins)
    - on-disk meta_version must be > N+1       (we wrote past it) *)
 let test_caller_wins_cycle_disk_wins_heartbeat () =
-  Eio_main.run @@ fun env ->
+  Eio_main.run
+  @@ fun env ->
   ensure_fs env;
-  Eio.Switch.run @@ fun _sw ->
+  Eio.Switch.run
+  @@ fun _sw ->
   let base_dir = temp_dir () in
-  Fun.protect ~finally:(fun () -> cleanup_dir base_dir) (fun () ->
-    let config = Coord.default_config base_dir in
-    ignore (Coord.init config ~agent_name:(Some "operator"));
-    let name = "race9733" in
-    let m0 =
-      let m = make_meta ~name in
-      { m with joined_room_ids = ["r1"] }
-    in
-    (match Keeper_types.write_meta ~force:true config m0 with
-     | Ok () -> ()
-     | Error e -> fail ("seed write failed: " ^ e));
-    let caller_view = match Keeper_types.read_meta config name with
-      | Ok (Some m) -> m
-      | _ -> fail "seed read failed"
-    in
-    (* Heartbeat fiber: bumps version, adds room. *)
-    let heartbeat_payload =
-      { caller_view with joined_room_ids = ["r1"; "r2"] }
-    in
-    (match Keeper_types.write_meta config heartbeat_payload with
-     | Ok () -> ()
-     | Error e -> fail ("heartbeat write failed: " ^ e));
-    (* Cycle fiber: had stale joined_room_ids; writes its own
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+       let config = Coord.default_config base_dir in
+       ignore (Coord.init config ~agent_name:(Some "operator"));
+       let name = "race9733" in
+       let m0 =
+         let m = make_meta ~name in
+         { m with joined_room_ids = [ "r1" ] }
+       in
+       (match Keeper_types.write_meta ~force:true config m0 with
+        | Ok () -> ()
+        | Error e -> fail ("seed write failed: " ^ e));
+       let caller_view =
+         match Keeper_types.read_meta config name with
+         | Ok (Some m) -> m
+         | _ -> fail "seed read failed"
+       in
+       (* Heartbeat fiber: bumps version, adds room. *)
+       let heartbeat_payload = { caller_view with joined_room_ids = [ "r1"; "r2" ] } in
+       (match Keeper_types.write_meta config heartbeat_payload with
+        | Ok () -> ()
+        | Error e -> fail ("heartbeat write failed: " ^ e));
+       (* Cycle fiber: had stale joined_room_ids; writes its own
        cycle payload. *)
-    let cycle_payload =
-      { caller_view with goal = "cycle done" }
-    in
-    (match
-       Keeper_types.write_meta_with_merge
-         ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
-         config cycle_payload
-     with
-     | Ok () -> ()
-     | Error e -> fail ("merged retry failed: " ^ e));
-    let final = match Keeper_types.read_meta config name with
-      | Ok (Some m) -> m
-      | _ -> fail "final read failed"
-    in
-    check string "caller wins: goal" "cycle done" final.goal;
-    check (list string)
-      "disk wins: joined_room_ids preserved heartbeat update"
-      ["r1"; "r2"] final.joined_room_ids;
-    check bool "version moved past heartbeat write" true
-      (final.meta_version > heartbeat_payload.meta_version))
+       let cycle_payload = { caller_view with goal = "cycle done" } in
+       (match
+          Keeper_types.write_meta_with_merge
+            ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
+            config
+            cycle_payload
+        with
+        | Ok () -> ()
+        | Error e -> fail ("merged retry failed: " ^ e));
+       let final =
+         match Keeper_types.read_meta config name with
+         | Ok (Some m) -> m
+         | _ -> fail "final read failed"
+       in
+       check string "caller wins: goal" "cycle done" final.goal;
+       check
+         (list string)
+         "disk wins: joined_room_ids preserved heartbeat update"
+         [ "r1"; "r2" ]
+         final.joined_room_ids;
+       check
+         bool
+         "version moved past heartbeat write"
+         true
+         (final.meta_version > heartbeat_payload.meta_version))
+;;
 
 (* Sanity: when no concurrent writer interferes, the merge function
    is never called and behaviour matches plain
    [write_meta_with_retry]. *)
 let test_no_race_writes_first_attempt () =
-  Eio_main.run @@ fun env ->
+  Eio_main.run
+  @@ fun env ->
   ensure_fs env;
-  Eio.Switch.run @@ fun _sw ->
+  Eio.Switch.run
+  @@ fun _sw ->
   let base_dir = temp_dir () in
-  Fun.protect ~finally:(fun () -> cleanup_dir base_dir) (fun () ->
-    let config = Coord.default_config base_dir in
-    ignore (Coord.init config ~agent_name:(Some "operator"));
-    let m0 = make_meta ~name:"smooth9733" in
-    (match
-       Keeper_types.write_meta_with_merge
-         ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
-         config m0
-     with
-     | Ok () -> ()
-     | Error e -> fail ("first write failed: " ^ e));
-    let on_disk = match Keeper_types.read_meta config "smooth9733" with
-      | Ok (Some m) -> m
-      | _ -> fail "read failed"
-    in
-    check string "goal landed" "test keeper" on_disk.goal)
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+       let config = Coord.default_config base_dir in
+       ignore (Coord.init config ~agent_name:(Some "operator"));
+       let m0 = make_meta ~name:"smooth9733" in
+       (match
+          Keeper_types.write_meta_with_merge
+            ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
+            config
+            m0
+        with
+        | Ok () -> ()
+        | Error e -> fail ("first write failed: " ^ e));
+       let on_disk =
+         match Keeper_types.read_meta config "smooth9733" with
+         | Ok (Some m) -> m
+         | _ -> fail "read failed"
+       in
+       check string "goal landed" "test keeper" on_disk.goal)
+;;
 
 let () =
-  run "Keeper meta heartbeat-retain merge (#9733)"
-    [
-      ( "merge-contract",
-        [
-          test_case "caller wins cycle, disk wins heartbeat" `Quick
-            test_caller_wins_cycle_disk_wins_heartbeat;
-          test_case "no race: first attempt succeeds" `Quick
-            test_no_race_writes_first_attempt;
-        ] );
+  run
+    "Keeper meta heartbeat-retain merge (#9733)"
+    [ ( "merge-contract"
+      , [ test_case
+            "caller wins cycle, disk wins heartbeat"
+            `Quick
+            test_caller_wins_cycle_disk_wins_heartbeat
+        ; test_case
+            "no race: first attempt succeeds"
+            `Quick
+            test_no_race_writes_first_attempt
+        ] )
     ]
+;;

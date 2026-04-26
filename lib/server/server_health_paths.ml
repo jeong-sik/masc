@@ -19,12 +19,10 @@
     @stability Internal *)
 
 let liveness = "/health/live"
-
 let readiness = "/health/ready"
 
 (** All public health probe paths whitelisted for unauthenticated
     read access and treated as benign during startup takeover. *)
 let public : string list = [ liveness; readiness ]
 
-let is_public path =
-  List.exists (String.equal path) public
+let is_public path = List.exists (String.equal path) public

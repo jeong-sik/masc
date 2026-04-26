@@ -1,23 +1,24 @@
 (include_subdirs no)
+
 (library
  (name masc_autoresearch)
  (public_name masc_mcp.masc_autoresearch)
  (wrapped false)
  (modules
-   autoresearch_types
-   autoresearch_serde
-   autoresearch_storage
-   autoresearch_metric
-   autoresearch_git
-   autoresearch_file)
+  autoresearch_types
+  autoresearch_serde
+  autoresearch_storage
+  autoresearch_metric
+  autoresearch_git
+  autoresearch_file)
  (libraries
-   yojson
-   unix
-   time_compat
-   fs_compat
-   masc_log
-   masc_core
-   masc_process
-   masc_mcp.masc_exec
-   agent_sdk
-   eio))
+  yojson
+  unix
+  time_compat
+  fs_compat
+  masc_log
+  masc_core
+  masc_process
+  masc_mcp.masc_exec
+  agent_sdk
+  eio))

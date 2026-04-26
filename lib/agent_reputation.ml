@@ -7,49 +7,51 @@
     @since Phase 3B — Keeper Deliberation Engine
 *)
 
-type agent_reputation = {
-  agent_name: string;
-  tasks_completed: int; [@default 0]
-  tasks_claimed: int; [@default 0]
-  completion_rate: float; [@default 0.0]
-  mentions_received: int; [@default 0]
-  mentions_responded: int; [@default 0]
-  response_rate: float; [@default 0.0]
-  board_posts: int; [@default 0]
-  board_comments: int; [@default 0]
-  accountability_score: float; [@default 1.0]
-  accountability_risk_band: string; [@default "low"]
-  accountability_evidence_coverage: float; [@default 1.0]
-  accountability_unsupported_completion_rate: float; [@default 0.0]
-  accountability_open_overdue_commitments: int; [@default 0]
-  accountability_keeper_name: string; [@default ""]
-  accountability_source: string; [@default "none"]
-  accountability_source_label: string; [@default "No accountability history"]
-  overall_score: float; [@default 0.0]
-} [@@deriving yojson { strict = false }]
+type agent_reputation =
+  { agent_name : string
+  ; tasks_completed : int [@default 0]
+  ; tasks_claimed : int [@default 0]
+  ; completion_rate : float [@default 0.0]
+  ; mentions_received : int [@default 0]
+  ; mentions_responded : int [@default 0]
+  ; response_rate : float [@default 0.0]
+  ; board_posts : int [@default 0]
+  ; board_comments : int [@default 0]
+  ; accountability_score : float [@default 1.0]
+  ; accountability_risk_band : string [@default "low"]
+  ; accountability_evidence_coverage : float [@default 1.0]
+  ; accountability_unsupported_completion_rate : float [@default 0.0]
+  ; accountability_open_overdue_commitments : int [@default 0]
+  ; accountability_keeper_name : string [@default ""]
+  ; accountability_source : string [@default "none"]
+  ; accountability_source_label : string [@default "No accountability history"]
+  ; overall_score : float [@default 0.0]
+  }
+[@@deriving yojson { strict = false }]
 
 (** {1 Defaults} *)
 
 let default_reputation ~(agent_name : string) : agent_reputation =
-  { agent_name;
-    tasks_completed = 0;
-    tasks_claimed = 0;
-    completion_rate = 0.0;
-    mentions_received = 0;
-    mentions_responded = 0;
-    response_rate = 0.0;
-    board_posts = 0;
-    board_comments = 0;
-    accountability_score = 1.0;
-    accountability_risk_band = "low";
-    accountability_evidence_coverage = 1.0;
-    accountability_unsupported_completion_rate = 0.0;
-    accountability_open_overdue_commitments = 0;
-    accountability_keeper_name = agent_name;
-    accountability_source = "none";
-    accountability_source_label = "No accountability history";
-    overall_score = 0.0;
+  { agent_name
+  ; tasks_completed = 0
+  ; tasks_claimed = 0
+  ; completion_rate = 0.0
+  ; mentions_received = 0
+  ; mentions_responded = 0
+  ; response_rate = 0.0
+  ; board_posts = 0
+  ; board_comments = 0
+  ; accountability_score = 1.0
+  ; accountability_risk_band = "low"
+  ; accountability_evidence_coverage = 1.0
+  ; accountability_unsupported_completion_rate = 0.0
+  ; accountability_open_overdue_commitments = 0
+  ; accountability_keeper_name = agent_name
+  ; accountability_source = "none"
+  ; accountability_source_label = "No accountability history"
+  ; overall_score = 0.0
   }
+;;
 
 (** {1 JSON Serialization}
 
@@ -58,8 +60,7 @@ let default_reputation ~(agent_name : string) : agent_reputation =
     the legacy [option]-returning API for callers that haven't migrated
     to [result] yet. *)
 
-let reputation_to_json : agent_reputation -> Yojson.Safe.t =
-  agent_reputation_to_yojson
+let reputation_to_json : agent_reputation -> Yojson.Safe.t = agent_reputation_to_yojson
 
 let reputation_of_json (json : Yojson.Safe.t) : agent_reputation option =
   match agent_reputation_of_yojson json with
@@ -68,52 +69,56 @@ let reputation_of_json (json : Yojson.Safe.t) : agent_reputation option =
   | Error msg ->
     Log.Reputation.warn "agent reputation of_json: %s" msg;
     None
+;;
 
 (** {1 JSONL Helpers} *)
 
 (** Load a JSONL file, filter out malformed lines. *)
 let load_jsonl_safe (path : string) : Yojson.Safe.t list =
-  if not (Sys.file_exists path) then []
-  else
+  if not (Sys.file_exists path)
+  then []
+  else (
     match Safe_ops.read_file_safe path with
     | Error _ -> []
     | Ok content ->
       String.split_on_char '\n' content
       |> List.filter (fun line -> String.length (String.trim line) > 0)
       |> List.filter_map (fun line ->
-          try Some (Yojson.Safe.from_string line)
-          with Yojson.Json_error _ -> None)
+        try Some (Yojson.Safe.from_string line) with
+        | Yojson.Json_error _ -> None))
+;;
 
 (** {1 Task Counting from Coord State} *)
 
 (** Count tasks claimed and completed by an agent from the room's task list.
     Reads the canonical Coord backlog so reputation follows the same storage
     path as task transitions. *)
-let count_tasks_from_room (config : Coord.config) ~(agent_name : string)
-    : int * int =
+let count_tasks_from_room (config : Coord.config) ~(agent_name : string) : int * int =
   let claimed = ref 0 in
   let completed = ref 0 in
   Coord.get_tasks_safe config
   |> List.iter (fun (task : Types.task) ->
-         match task.task_status with
-         | Types.Claimed { assignee; _ }
-         | Types.InProgress { assignee; _ }
-         | Types.AwaitingVerification { assignee; _ }
-           when assignee = agent_name ->
-             incr claimed
-         | Types.Done { assignee; _ } when assignee = agent_name ->
-             incr claimed;
-             incr completed
-         | Types.Todo
-         | Types.Claimed _ | Types.InProgress _ | Types.AwaitingVerification _
-         | Types.Done _ | Types.Cancelled _ -> ());
-  (!claimed, !completed)
+    match task.task_status with
+    | Types.Claimed { assignee; _ }
+    | Types.InProgress { assignee; _ }
+    | Types.AwaitingVerification { assignee; _ }
+      when assignee = agent_name -> incr claimed
+    | Types.Done { assignee; _ } when assignee = agent_name ->
+      incr claimed;
+      incr completed
+    | Types.Todo
+    | Types.Claimed _
+    | Types.InProgress _
+    | Types.AwaitingVerification _
+    | Types.Done _
+    | Types.Cancelled _ -> ());
+  !claimed, !completed
+;;
 
 (** {1 Board Counting} *)
 
 (** Count board posts and comments authored by an agent from JSONL files. *)
-let count_board_activity (config : Coord.config) ~(agent_name : string)
-    : int * int =
+let count_board_activity (config : Coord.config) ~(agent_name : string) : int * int =
   let board_dir = Coord.masc_dir config in
   (* Board posts JSONL *)
   let posts_path = Filename.concat board_dir "board_posts.jsonl" in
@@ -121,8 +126,8 @@ let count_board_activity (config : Coord.config) ~(agent_name : string)
   let post_count =
     posts_rows
     |> List.filter (fun json ->
-        let author = Safe_ops.json_string ~default:"" "author" json in
-        author = agent_name)
+      let author = Safe_ops.json_string ~default:"" "author" json in
+      author = agent_name)
     |> List.length
   in
   (* Board comments JSONL *)
@@ -131,20 +136,21 @@ let count_board_activity (config : Coord.config) ~(agent_name : string)
   let comment_count =
     comments_rows
     |> List.filter (fun json ->
-        let author = Safe_ops.json_string ~default:"" "author" json in
-        author = agent_name)
+      let author = Safe_ops.json_string ~default:"" "author" json in
+      author = agent_name)
     |> List.length
   in
-  (post_count, comment_count)
+  post_count, comment_count
+;;
 
 (** {1 Mention Counting} *)
 
-let count_mention_activity (config : Coord.config) ~(agent_name : string)
-    : int * int =
+let count_mention_activity (config : Coord.config) ~(agent_name : string) : int * int =
   let all = Mention_inbox.read_mentions config ~target_agent:agent_name ~limit:10000 in
   let received = List.length all in
   let responded = List_util.count_if (fun r -> r.Mention_inbox.read_at > 0.0) all in
-  (received, responded)
+  received, responded
+;;
 
 (** {1 Overall Score Computation} *)
 
@@ -162,25 +168,30 @@ let clamp01 value = Float.max 0.0 (Float.min 1.0 value)
 
     TODO(RFC-0001 Phase 3): Register in Runtime_params for tuning. *)
 let weight_completion = 0.4
-let weight_response   = 0.3
-let weight_board      = 0.3
+
+let weight_response = 0.3
+let weight_board = 0.3
 let board_activity_cap = 20.0
 
-let compute_accountability_score ~evidence_coverage
-    ~unsupported_completion_rate ~open_overdue_commitments : float =
-  let overdue_penalty =
-    Float.min 0.5 (0.1 *. float_of_int open_overdue_commitments)
-  in
-  clamp01
-    (evidence_coverage -. unsupported_completion_rate -. overdue_penalty)
+let compute_accountability_score
+      ~evidence_coverage
+      ~unsupported_completion_rate
+      ~open_overdue_commitments
+  : float
+  =
+  let overdue_penalty = Float.min 0.5 (0.1 *. float_of_int open_overdue_commitments) in
+  clamp01 (evidence_coverage -. unsupported_completion_rate -. overdue_penalty)
+;;
 
-let compute_overall_score ~completion_rate ~response_rate
-    ~board_posts ~board_comments : float =
+let compute_overall_score ~completion_rate ~response_rate ~board_posts ~board_comments
+  : float
+  =
   let board_total = float_of_int (board_posts + board_comments) in
   let board_norm = Float.min 1.0 (board_total /. board_activity_cap) in
   (weight_completion *. completion_rate)
   +. (weight_response *. response_rate)
   +. (weight_board *. board_norm)
+;;
 
 (** {1 Accountability Penalty} *)
 
@@ -188,85 +199,89 @@ let keeper_name_of_agent agent_name =
   match Keeper_identity.canonical_keeper_name_from_agent_name agent_name with
   | Some keeper_name -> keeper_name
   | None -> String.trim agent_name
+;;
 
 let accountability_metrics (config : Coord.config) ~(agent_name : string) =
   let keeper_name = keeper_name_of_agent agent_name in
   let summary =
-    Keeper_accountability.accountability_summary_json config
-      ~keeper_name ~agent_name
+    Keeper_accountability.accountability_summary_json config ~keeper_name ~agent_name
   in
-  let evidence_coverage =
-    Safe_ops.json_float ~default:1.0 "evidence_coverage" summary
-  in
+  let evidence_coverage = Safe_ops.json_float ~default:1.0 "evidence_coverage" summary in
   let unsupported_completion_rate =
     Safe_ops.json_float ~default:0.0 "unsupported_completion_rate" summary
   in
   let open_overdue_commitments =
     Safe_ops.json_int ~default:0 "open_overdue_commitments" summary
   in
-  let risk_band =
-    Safe_ops.json_string ~default:"low" "risk_band" summary
-  in
-  let source =
-    Safe_ops.json_string ~default:"none" "source" summary
-  in
+  let risk_band = Safe_ops.json_string ~default:"low" "risk_band" summary in
+  let source = Safe_ops.json_string ~default:"none" "source" summary in
   let source_label =
-    Safe_ops.json_string ~default:"No accountability history" "source_label"
-      summary
+    Safe_ops.json_string ~default:"No accountability history" "source_label" summary
   in
   let score =
-    compute_accountability_score ~evidence_coverage
-      ~unsupported_completion_rate ~open_overdue_commitments
+    compute_accountability_score
+      ~evidence_coverage
+      ~unsupported_completion_rate
+      ~open_overdue_commitments
   in
-  (score, risk_band, evidence_coverage, unsupported_completion_rate,
-   open_overdue_commitments, keeper_name, source, source_label)
+  ( score
+  , risk_band
+  , evidence_coverage
+  , unsupported_completion_rate
+  , open_overdue_commitments
+  , keeper_name
+  , source
+  , source_label )
+;;
 
 (** {1 Main Computation} *)
 
-let compute_reputation (config : Coord.config) ~(agent_name : string)
-    : agent_reputation =
-  let (tasks_claimed, tasks_completed) =
-    count_tasks_from_room config ~agent_name
-  in
+let compute_reputation (config : Coord.config) ~(agent_name : string) : agent_reputation =
+  let tasks_claimed, tasks_completed = count_tasks_from_room config ~agent_name in
   let completion_rate =
-    if tasks_claimed > 0 then
-      float_of_int tasks_completed /. float_of_int tasks_claimed
+    if tasks_claimed > 0
+    then float_of_int tasks_completed /. float_of_int tasks_claimed
     else 0.0
   in
-  let (mentions_received, mentions_responded) =
-    count_mention_activity config ~agent_name
-  in
+  let mentions_received, mentions_responded = count_mention_activity config ~agent_name in
   let response_rate =
-    if mentions_received > 0 then
-      float_of_int mentions_responded /. float_of_int mentions_received
+    if mentions_received > 0
+    then float_of_int mentions_responded /. float_of_int mentions_received
     else 0.0
   in
-  let (board_posts, board_comments) = count_board_activity config ~agent_name in
-  let (accountability_score, accountability_risk_band,
-       accountability_evidence_coverage,
-       accountability_unsupported_completion_rate,
-       accountability_open_overdue_commitments,
-       accountability_keeper_name,
-       accountability_source,
-       accountability_source_label) =
+  let board_posts, board_comments = count_board_activity config ~agent_name in
+  let ( accountability_score
+      , accountability_risk_band
+      , accountability_evidence_coverage
+      , accountability_unsupported_completion_rate
+      , accountability_open_overdue_commitments
+      , accountability_keeper_name
+      , accountability_source
+      , accountability_source_label )
+    =
     accountability_metrics config ~agent_name
   in
   let overall_score =
-    compute_overall_score ~completion_rate
-      ~response_rate ~board_posts ~board_comments
+    compute_overall_score ~completion_rate ~response_rate ~board_posts ~board_comments
     *. clamp01 accountability_score
   in
-  { agent_name;
-    tasks_completed; tasks_claimed; completion_rate;
-    mentions_received; mentions_responded; response_rate;
-    board_posts; board_comments;
-    accountability_score;
-    accountability_risk_band;
-    accountability_evidence_coverage;
-    accountability_unsupported_completion_rate;
-    accountability_open_overdue_commitments;
-    accountability_keeper_name;
-    accountability_source;
-    accountability_source_label;
-    overall_score;
+  { agent_name
+  ; tasks_completed
+  ; tasks_claimed
+  ; completion_rate
+  ; mentions_received
+  ; mentions_responded
+  ; response_rate
+  ; board_posts
+  ; board_comments
+  ; accountability_score
+  ; accountability_risk_band
+  ; accountability_evidence_coverage
+  ; accountability_unsupported_completion_rate
+  ; accountability_open_overdue_commitments
+  ; accountability_keeper_name
+  ; accountability_source
+  ; accountability_source_label
+  ; overall_score
   }
+;;

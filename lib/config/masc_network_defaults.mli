@@ -89,11 +89,8 @@ val vite_dev_default_origins : string list
 (** {1 SearXNG & OpenTelemetry} *)
 
 val searxng_default_port : int
-
 val searxng_default_url : string
-
 val otel_default_port : int
-
 val otel_default_url : string
 
 (** {1 CORS / DNS rebinding allowlist} *)

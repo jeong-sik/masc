@@ -13,6 +13,7 @@ open Keeper_exec_shared
 let egress_policy_path ~(config : Coord.config) ~(meta : keeper_meta) =
   let playground = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   Filename.concat playground "egress.json"
+;;
 
 let check_egress ~(config : Coord.config) ~(meta : keeper_meta) ~cmd =
   let path = egress_policy_path ~config ~meta in
@@ -20,81 +21,86 @@ let check_egress ~(config : Coord.config) ~(meta : keeper_meta) ~cmd =
   match Masc_exec.Egress_policy.check_command policy cmd with
   | Masc_exec.Egress_policy.Allowed -> None
   | Masc_exec.Egress_policy.Blocked _ as blocked ->
-      Some (Masc_exec.Egress_policy.blocked_to_json blocked)
+    Some (Masc_exec.Egress_policy.blocked_to_json blocked)
+;;
 
 (* ── Container naming ──────────────────────────────────── *)
 
 let keeper_sandbox_container_name (meta : keeper_meta) =
-  Printf.sprintf "masc-keeper-%s-%d-%d"
+  Printf.sprintf
+    "masc-keeper-%s-%d-%d"
     (Coord_utils.safe_filename meta.name)
     (Unix.getpid ())
     (int_of_float (Unix.gettimeofday () *. 1000.0))
+;;
 
 let keeper_private_container_root (meta : keeper_meta) =
   Keeper_sandbox.container_root meta.name
+;;
 
-let docker_private_workspace_cwd ~(config : Coord.config) ~(meta : keeper_meta)
-    host_cwd =
+let docker_private_workspace_cwd ~(config : Coord.config) ~(meta : keeper_meta) host_cwd =
   let normalize_path_for_containment path =
     Keeper_alerting_path.normalize_path_for_check path
     |> Keeper_alerting_path.strip_trailing_slashes
   in
   let host_root =
-    Keeper_sandbox.host_root_abs_of_meta ~config meta
-    |> normalize_path_for_containment
+    Keeper_sandbox.host_root_abs_of_meta ~config meta |> normalize_path_for_containment
   in
   let container_root = keeper_private_container_root meta in
   let host_cwd = normalize_path_for_containment host_cwd in
-  if host_cwd = host_root then
-    container_root
-  else if String.starts_with ~prefix:(host_root ^ "/") host_cwd then
+  if host_cwd = host_root
+  then container_root
+  else if String.starts_with ~prefix:(host_root ^ "/") host_cwd
+  then (
     let suffix =
-      String.sub host_cwd (String.length host_root + 1)
+      String.sub
+        host_cwd
+        (String.length host_root + 1)
         (String.length host_cwd - String.length host_root - 1)
     in
-    Filename.concat container_root suffix
-  else
-    container_root
+    Filename.concat container_root suffix)
+  else container_root
+;;
 
 (* ── Profile resolution ────────────────────────────────── *)
 
 let effective_sandbox_profile ~(meta : keeper_meta) ~in_playground =
-  if Env_config_keeper.KeeperSandbox.hard_mode () then
-    (meta.sandbox_profile, meta.network_mode)
-  else if meta.sandbox_profile = Local
-     && Env_config_keeper.DockerPlayground.enabled
-     && in_playground
-  then
-    (Docker, Network_inherit)
-  else
-    (meta.sandbox_profile, meta.network_mode)
+  if Env_config_keeper.KeeperSandbox.hard_mode ()
+  then meta.sandbox_profile, meta.network_mode
+  else if
+    meta.sandbox_profile = Local
+    && Env_config_keeper.DockerPlayground.enabled
+    && in_playground
+  then Docker, Network_inherit
+  else meta.sandbox_profile, meta.network_mode
+;;
 
 (* ── Nested runtime detection ──────────────────────────── *)
 
-let nested_container_runtime_tokens =
-  [ "docker"; "podman"; "nerdctl"; "buildah" ]
+let nested_container_runtime_tokens = [ "docker"; "podman"; "nerdctl"; "buildah" ]
 
 let sandbox_socket_markers =
-  [
-    "/var/run/docker.sock";
-    "/run/docker.sock";
-    "/run/podman/podman.sock";
-    "podman.sock";
-    "containerd.sock";
-    "buildkitd.sock";
+  [ "/var/run/docker.sock"
+  ; "/run/docker.sock"
+  ; "/run/podman/podman.sock"
+  ; "podman.sock"
+  ; "containerd.sock"
+  ; "buildkitd.sock"
   ]
+;;
 
 let command_uses_nested_container_runtime cmd =
   let lowered_words = lowercase_shell_words cmd in
   let lowered_cmd = String.lowercase_ascii cmd in
-  List.exists (fun token -> List.mem token nested_container_runtime_tokens)
-    lowered_words
+  List.exists (fun token -> List.mem token nested_container_runtime_tokens) lowered_words
   || List.exists (String_util.contains_substring lowered_cmd) sandbox_socket_markers
+;;
 
 (* ── Sandbox runtime preflight ─────────────────────────── *)
 
 let ensure_keeper_sandbox_runtime ~timeout_sec =
   Keeper_sandbox_runtime.ensure_keeper_sandbox_runtime ~timeout_sec
+;;
 
 let cmd_targets_git_or_gh cmd =
   let trimmed = String.trim cmd in
@@ -112,6 +118,7 @@ let cmd_targets_git_or_gh cmd =
        git/gh. *)
     let tokens = String.split_on_char ' ' trimmed in
     List.exists (fun tok -> tok = "git" || tok = "gh") tokens
+;;
 
 let cmd_targets_gh cmd =
   let trimmed = String.trim cmd in
@@ -120,21 +127,25 @@ let cmd_targets_gh cmd =
     | Some i -> String.sub trimmed 0 i
     | None -> trimmed
   in
-  if first_word = "gh" then true
-  else
+  if first_word = "gh"
+  then true
+  else (
     (* Same "prefixed by cd ..." allowance as cmd_targets_git_or_gh,
        but strict to gh for classification purposes. *)
     let tokens = String.split_on_char ' ' trimmed in
-    List.exists (fun tok -> tok = "gh") tokens
+    List.exists (fun tok -> tok = "gh") tokens)
+;;
 
 (* Emit a ("gh_exit_class", "…") JSON field when [cmd] targets gh,
    AND increment the matching Legendary_counters bucket.  Callers
    append the returned list to their `Assoc payload unconditionally —
    it is empty for non-gh commands, so call sites keep their shape. *)
 let gh_exit_class_field ~cmd ~status ~output : (string * Yojson.Safe.t) list =
-  if not (cmd_targets_gh cmd) then []
-  else
-    let exit_code = match status with
+  if not (cmd_targets_gh cmd)
+  then []
+  else (
+    let exit_code =
+      match status with
       | Unix.WEXITED n -> n
       | Unix.WSIGNALED n -> 128 + n
       | Unix.WSTOPPED n -> 256 + n
@@ -144,21 +155,24 @@ let gh_exit_class_field ~cmd ~status ~output : (string * Yojson.Safe.t) list =
        buffer as [stderr] is sound. *)
     let class_ = Gh_exit_class.classify ~exit_code ~stderr:output in
     Legendary_counters.incr_gh_exit_class class_;
-    [ ("gh_exit_class", `String (Gh_exit_class.to_string class_)) ]
+    [ "gh_exit_class", `String (Gh_exit_class.to_string class_) ])
+;;
 
 let optional_ro_mount ~host ~container =
-  if host = "" then []
-  else if not (Sys.file_exists host) then []
+  if host = ""
+  then []
+  else if not (Sys.file_exists host)
+  then []
   else [ "-v"; host ^ ":" ^ container ^ ":ro" ]
+;;
 
 (* ── Docker invocation ─────────────────────────────────── *)
 
 type docker_shell_result =
-  {
-    status : Unix.process_status;
-    output : string;
-    image : string;
-    network_label : string;
+  { status : Unix.process_status
+  ; output : string
+  ; image : string
+  ; network_label : string
   }
 
 (* docker run --rm includes image layer pull + container creation cold start.
@@ -167,38 +181,41 @@ type docker_shell_result =
 let docker_run_min_timeout_sec = 5.0
 
 let run_docker_shell_command_with_status
-    ~(config : Coord.config)
-    ~(meta : keeper_meta)
-    ~(cwd : string)
-    ~(timeout_sec : float)
-    ~(cmd : string)
-    ~(git_creds_enabled : bool)
-    ~(network_mode : network_mode)
+      ~(config : Coord.config)
+      ~(meta : keeper_meta)
+      ~(cwd : string)
+      ~(timeout_sec : float)
+      ~(cmd : string)
+      ~(git_creds_enabled : bool)
+      ~(network_mode : network_mode)
   =
   let timeout_sec = max timeout_sec docker_run_min_timeout_sec in
   let image = Env_config_keeper.KeeperSandbox.docker_image () in
   let network_mode =
-    if Env_config_keeper.KeeperSandbox.hard_mode () then
-      Network_none
-    else
-      network_mode
+    if Env_config_keeper.KeeperSandbox.hard_mode () then Network_none else network_mode
   in
   let sandbox_error message =
     Keeper_registry.record_error ~base_path:config.base_path meta.name message;
     Error message
   in
-  if String.trim image = "" then
-    sandbox_error "keeper sandbox docker image is not configured"
-  else if git_creds_enabled && Env_config_keeper.KeeperSandbox.hard_mode () then
+  if String.trim image = ""
+  then sandbox_error "keeper sandbox docker image is not configured"
+  else if git_creds_enabled && Env_config_keeper.KeeperSandbox.hard_mode ()
+  then
     sandbox_error
-      "sandbox hard mode forbids Docker git credential dispatch; use keeper_shell op=git_clone or op=gh so git/gh egress is brokered outside the container"
-  else if command_uses_nested_container_runtime cmd then
+      "sandbox hard mode forbids Docker git credential dispatch; use keeper_shell \
+       op=git_clone or op=gh so git/gh egress is brokered outside the container"
+  else if command_uses_nested_container_runtime cmd
+  then
     sandbox_error
-      (if git_creds_enabled then
-         "sandbox_profile=docker+git_creds blocks nested container runtimes and host socket references"
+      (if git_creds_enabled
+       then
+         "sandbox_profile=docker+git_creds blocks nested container runtimes and host \
+          socket references"
        else
-         "sandbox_profile=docker blocks nested container runtimes and host socket references")
-  else
+         "sandbox_profile=docker blocks nested container runtimes and host socket \
+          references")
+  else (
     let _cleanup =
       Keeper_sandbox_runtime.maybe_cleanup_stale_containers
         ~base_path:config.base_path
@@ -226,54 +243,56 @@ let run_docker_shell_command_with_status
       in
       let repos_in_playground () =
         let repos_dir = Filename.concat host_root "repos" in
-        if not (Sys.file_exists repos_dir && Sys.is_directory repos_dir) then []
-        else
+        if not (Sys.file_exists repos_dir && Sys.is_directory repos_dir)
+        then []
+        else (
           try
             Sys.readdir repos_dir
             |> Array.to_list
             |> List.filter (fun name ->
               let p = Filename.concat repos_dir name in
-              try Sys.is_directory p with Sys_error _ -> false)
+              try Sys.is_directory p with
+              | Sys_error _ -> false)
             |> List.sort compare
-          with Sys_error _ -> []
+          with
+          | Sys_error _ -> [])
       in
       let cwd, multi_repo_blocker =
-        if cwd_normalized = host_root && cmd_targets_git_or_gh cmd then
+        if cwd_normalized = host_root && cmd_targets_git_or_gh cmd
+        then (
           match repos_in_playground () with
-          | [single_repo] ->
-            (Filename.concat (Filename.concat host_root "repos") single_repo, None)
-          | [] -> (cwd, None)
+          | [ single_repo ] ->
+            Filename.concat (Filename.concat host_root "repos") single_repo, None
+          | [] -> cwd, None
           | many ->
             ( cwd
             , Some
                 (Printf.sprintf
-                   "sandbox root에서 git/gh 직접 호출 불가 \
-                    (mount point %s는 git repo 아님). \
-                    cd repos/<one of: %s> 먼저 실행하세요."
+                   "sandbox root에서 git/gh 직접 호출 불가 (mount point %s는 git repo 아님). cd \
+                    repos/<one of: %s> 먼저 실행하세요."
                    host_root
-                   (String.concat ", " many)) )
-        else (cwd, None)
+                   (String.concat ", " many)) ))
+        else cwd, None
       in
-      match multi_repo_blocker with
-      | Some msg -> sandbox_error msg
-      | None ->
-      let container_name = keeper_sandbox_container_name meta in
-      let container_root = keeper_private_container_root meta in
-      let container_cwd = docker_private_workspace_cwd ~config ~meta cwd in
-      let uid = Unix.getuid () in
-      let gid = Unix.getgid () in
-      let network_args, network_label =
-        if git_creds_enabled then
-          ([ "--network"; "bridge" ], "bridge")
-        else
-          Keeper_sandbox_runtime.docker_network_args network_mode
-      in
-      let cred_root = Host_config_provider.cred_root in
-      let cred_result =
-        if not git_creds_enabled then
-          Ok ([], [])
-        else
-          (* RFC-0008 PR-1: composition centralised in
+      (match multi_repo_blocker with
+       | Some msg -> sandbox_error msg
+       | None ->
+         let container_name = keeper_sandbox_container_name meta in
+         let container_root = keeper_private_container_root meta in
+         let container_cwd = docker_private_workspace_cwd ~config ~meta cwd in
+         let uid = Unix.getuid () in
+         let gid = Unix.getgid () in
+         let network_args, network_label =
+           if git_creds_enabled
+           then [ "--network"; "bridge" ], "bridge"
+           else Keeper_sandbox_runtime.docker_network_args network_mode
+         in
+         let cred_root = Host_config_provider.cred_root in
+         let cred_result =
+           if not git_creds_enabled
+           then Ok ([], [])
+           else (
+             (* RFC-0008 PR-1: composition centralised in
              [Host_config_provider.resolve].  Pre-extraction this
              site inlined ~60 lines reading from
              [Keeper_gh_env.keeper_binding], [Env_config_sandbox.Auth_paths],
@@ -282,262 +301,286 @@ let run_docker_shell_command_with_status
              new mounts) and makes the lifecycle explicit so PR-3
              can swap to [In_container_login_provider] without
              rewiring this caller.  See RFC-0008 §3 / §4. *)
-          match
-            Host_config_provider.resolve ~config ~identity:meta.name
-          with
-          | Error err ->
-              Error (Credential_provider.pp_error err)
-          | Ok binding ->
-              let mounts =
-                List.concat_map
-                  (fun (m : Credential_provider.ro_mount) ->
-                    [ "-v"; m.host ^ ":" ^ m.container ^ ":ro" ])
-                  binding.ro_mounts
-              in
-              let envs =
-                List.concat_map
-                  (fun (k, v) -> [ "-e"; k ^ "=" ^ v ])
-                  binding.env
-              in
-              Ok (mounts, envs)
-      in
-      match cred_result with
-      | Error err -> sandbox_error err
-      | Ok (cred_mounts, cred_envs) ->
-      let ssh_auth_sock = Sys.getenv_opt "SSH_AUTH_SOCK" in
-      let ssh_auth_mount, ssh_auth_env =
-        let empty = ([], []) in
-        if not git_creds_enabled then empty
-        else
-          match ssh_auth_sock with
-          | None -> empty
-          | Some path when Sys.file_exists path ->
-              let container_path =
-                Filename.concat cred_root "ssh-agent.sock"
-              in
-              ( [ "-v"; path ^ ":" ^ container_path ],
-                [ "-e"; "SSH_AUTH_SOCK=" ^ container_path ] )
-          | Some _ -> empty
-      in
-      let token_env =
-        let gh_token =
-          if git_creds_enabled then
-            Env_config_keeper.KeeperSandbox.gh_token ()
-          else
-            ""
-        in
-        if (not git_creds_enabled) || gh_token = "" then
-          []
-        else
-          [ "-e"; "GH_TOKEN=" ^ gh_token ]
-      in
-      let argv =
-        Keeper_sandbox_runtime.docker_command_argv ()
-        @ [
-            "run";
-            "--rm";
-            "--name";
-            container_name;
-          ]
-        @ Keeper_sandbox_runtime.docker_label_args
-            ~base_path:config.base_path
-            ~keeper_name:meta.name
-            ~container_kind:"oneshot"
-            ~network_label ()
-        @ [
-          "-i";
-          "--user";
-          Printf.sprintf "%d:%d" uid gid;
-        ]
-        @ Keeper_sandbox_runtime.docker_nofile_args ()
-        @ Env_config_keeper.KeeperSandbox.read_only_rootfs_args ()
-        @ [
-          "--tmpfs";
-          Env_config_keeper.KeeperSandbox.tmpfs_mount ();
-          "--cap-drop=ALL";
-          "--security-opt";
-          "no-new-privileges";
-        ]
-        @ seccomp_args
-        @ [
-          "--pids-limit";
-          string_of_int (Env_config_keeper.KeeperSandbox.pids_limit ());
-          "--memory";
-          Env_config_keeper.KeeperSandbox.memory ();
-          "-v";
-          host_root ^ ":" ^ container_root ^ ":rw";
-          "--workdir";
-          container_cwd;
-        ]
-        @ network_args
-        @ cred_mounts
-        @ cred_envs
-        @ ssh_auth_mount
-        @ ssh_auth_env
-        @ token_env
-        @ [ image; "bash"; "-lc"; cmd ]
-      in
-      (try
-         let status, output =
-           Process_eio.run_argv_with_status
-             ~env:(Unix.environment ())
-             ~cwd:(Sys.getcwd ()) ~timeout_sec argv
+             match Host_config_provider.resolve ~config ~identity:meta.name with
+             | Error err -> Error (Credential_provider.pp_error err)
+             | Ok binding ->
+               let mounts =
+                 List.concat_map
+                   (fun (m : Credential_provider.ro_mount) ->
+                      [ "-v"; m.host ^ ":" ^ m.container ^ ":ro" ])
+                   binding.ro_mounts
+               in
+               let envs =
+                 List.concat_map (fun (k, v) -> [ "-e"; k ^ "=" ^ v ]) binding.env
+               in
+               Ok (mounts, envs))
          in
-         if status <> Unix.WEXITED 0 then
-           Keeper_registry.record_error ~base_path:config.base_path meta.name
-             (Printf.sprintf "sandbox docker exec failed (%s): %s"
-                image
-                (Worker_dev_tools.truncate_for_log output))
-         else
-           Keeper_registry.clear_error ~base_path:config.base_path meta.name;
-         Ok { status; output; image; network_label }
-       with
-       | Failure err -> sandbox_error err)
+         (match cred_result with
+          | Error err -> sandbox_error err
+          | Ok (cred_mounts, cred_envs) ->
+            let ssh_auth_sock = Sys.getenv_opt "SSH_AUTH_SOCK" in
+            let ssh_auth_mount, ssh_auth_env =
+              let empty = [], [] in
+              if not git_creds_enabled
+              then empty
+              else (
+                match ssh_auth_sock with
+                | None -> empty
+                | Some path when Sys.file_exists path ->
+                  let container_path = Filename.concat cred_root "ssh-agent.sock" in
+                  ( [ "-v"; path ^ ":" ^ container_path ]
+                  , [ "-e"; "SSH_AUTH_SOCK=" ^ container_path ] )
+                | Some _ -> empty)
+            in
+            let token_env =
+              let gh_token =
+                if git_creds_enabled
+                then Env_config_keeper.KeeperSandbox.gh_token ()
+                else ""
+              in
+              if (not git_creds_enabled) || gh_token = ""
+              then []
+              else [ "-e"; "GH_TOKEN=" ^ gh_token ]
+            in
+            let argv =
+              Keeper_sandbox_runtime.docker_command_argv ()
+              @ [ "run"; "--rm"; "--name"; container_name ]
+              @ Keeper_sandbox_runtime.docker_label_args
+                  ~base_path:config.base_path
+                  ~keeper_name:meta.name
+                  ~container_kind:"oneshot"
+                  ~network_label
+                  ()
+              @ [ "-i"; "--user"; Printf.sprintf "%d:%d" uid gid ]
+              @ Keeper_sandbox_runtime.docker_nofile_args ()
+              @ Env_config_keeper.KeeperSandbox.read_only_rootfs_args ()
+              @ [ "--tmpfs"
+                ; Env_config_keeper.KeeperSandbox.tmpfs_mount ()
+                ; "--cap-drop=ALL"
+                ; "--security-opt"
+                ; "no-new-privileges"
+                ]
+              @ seccomp_args
+              @ [ "--pids-limit"
+                ; string_of_int (Env_config_keeper.KeeperSandbox.pids_limit ())
+                ; "--memory"
+                ; Env_config_keeper.KeeperSandbox.memory ()
+                ; "-v"
+                ; host_root ^ ":" ^ container_root ^ ":rw"
+                ; "--workdir"
+                ; container_cwd
+                ]
+              @ network_args
+              @ cred_mounts
+              @ cred_envs
+              @ ssh_auth_mount
+              @ ssh_auth_env
+              @ token_env
+              @ [ image; "bash"; "-lc"; cmd ]
+            in
+            (try
+               let status, output =
+                 Process_eio.run_argv_with_status
+                   ~env:(Unix.environment ())
+                   ~cwd:(Sys.getcwd ())
+                   ~timeout_sec
+                   argv
+               in
+               if status <> Unix.WEXITED 0
+               then
+                 Keeper_registry.record_error
+                   ~base_path:config.base_path
+                   meta.name
+                   (Printf.sprintf
+                      "sandbox docker exec failed (%s): %s"
+                      image
+                      (Worker_dev_tools.truncate_for_log output))
+               else Keeper_registry.clear_error ~base_path:config.base_path meta.name;
+               Ok { status; output; image; network_label }
+             with
+             | Failure err -> sandbox_error err))))
+;;
 
 let run_docker_with_git_bash
-    ~(turn_sandbox_runtime : Keeper_turn_sandbox_runtime.t option)
-    ~(config : Coord.config)
-    ~(meta : keeper_meta)
-    ~(cwd : string)
-    ~(timeout_sec : float)
-    ~(cmd : string) () =
+      ~(turn_sandbox_runtime : Keeper_turn_sandbox_runtime.t option)
+      ~(config : Coord.config)
+      ~(meta : keeper_meta)
+      ~(cwd : string)
+      ~(timeout_sec : float)
+      ~(cmd : string)
+      ()
+  =
   let image = Env_config_keeper.KeeperSandbox.docker_image () in
   let sandbox_error_json message =
     Keeper_registry.record_error ~base_path:config.base_path meta.name message;
     error_json message
   in
-  if String.trim image = "" then
-    sandbox_error_json "keeper sandbox docker image is not configured"
-  else if Env_config_keeper.KeeperSandbox.hard_mode () then
+  if String.trim image = ""
+  then sandbox_error_json "keeper sandbox docker image is not configured"
+  else if Env_config_keeper.KeeperSandbox.hard_mode ()
+  then
     sandbox_error_json
-      "sandbox hard mode forbids Docker git credential dispatch; use keeper_shell op=git_clone or op=gh so git/gh egress is brokered outside the container"
-  else if command_uses_nested_container_runtime cmd then
+      "sandbox hard mode forbids Docker git credential dispatch; use keeper_shell \
+       op=git_clone or op=gh so git/gh egress is brokered outside the container"
+  else if command_uses_nested_container_runtime cmd
+  then
     sandbox_error_json
-      "sandbox_profile=docker+git_creds blocks nested container runtimes and host socket references"
-  else
+      "sandbox_profile=docker+git_creds blocks nested container runtimes and host socket \
+       references"
+  else (
     (* P12: check egress policy for git commands with network access *)
-    (match check_egress ~config ~meta ~cmd with
-     | Some blocked_json -> blocked_json
-     | None ->
-    match turn_sandbox_runtime with
-    | Some runtime ->
-      (match
-         Keeper_turn_sandbox_runtime.run_bash_with_status runtime
-           ~cwd ~cmd ~timeout_sec ()
-       with
-       | Error message -> sandbox_error_json message
-       | Ok (st, out) ->
-         if st <> Unix.WEXITED 0 then
-           Keeper_registry.record_error ~base_path:config.base_path meta.name
-             (Printf.sprintf "sandbox docker exec failed (%s): %s"
-                image
-                (Worker_dev_tools.truncate_for_log out))
-         else
-           Keeper_registry.clear_error ~base_path:config.base_path meta.name;
-         Yojson.Safe.to_string
-           (`Assoc
-              ([
-                ("ok", `Bool (st = Unix.WEXITED 0));
-                ("via", `String "docker");
-                ("cwd", `String cwd);
-                ("sandbox_profile", `String "docker");
-                ("git_creds_enabled", `Bool true);
-                ("network_mode", `String (network_mode_to_string Network_inherit));
-                ("effective_sandbox_image", `String image);
-                ("status", Keeper_alerting_path.process_status_to_json st);
-                ("output", `String out);
-              ] @ gh_exit_class_field ~cmd ~status:st ~output:out)))
+    match check_egress ~config ~meta ~cmd with
+    | Some blocked_json -> blocked_json
     | None ->
-      match
-        run_docker_shell_command_with_status ~config ~meta ~cwd ~timeout_sec
-          ~cmd ~git_creds_enabled:true ~network_mode:Network_inherit
-      with
-      | Error message -> error_json message
-      | Ok result ->
-        Yojson.Safe.to_string
-          (`Assoc
-             ([
-               ("ok", `Bool (result.status = Unix.WEXITED 0));
-               ("via", `String "docker");
-               ("cwd", `String cwd);
-               ("sandbox_profile", `String "docker");
-               ("git_creds_enabled", `Bool true);
-               ("network_mode", `String result.network_label);
-               ("effective_sandbox_image", `String result.image);
-               ( "status",
-                 Keeper_alerting_path.process_status_to_json result.status );
-               ("output", `String result.output);
-             ] @ gh_exit_class_field ~cmd ~status:result.status ~output:result.output)))
+      (match turn_sandbox_runtime with
+       | Some runtime ->
+         (match
+            Keeper_turn_sandbox_runtime.run_bash_with_status
+              runtime
+              ~cwd
+              ~cmd
+              ~timeout_sec
+              ()
+          with
+          | Error message -> sandbox_error_json message
+          | Ok (st, out) ->
+            if st <> Unix.WEXITED 0
+            then
+              Keeper_registry.record_error
+                ~base_path:config.base_path
+                meta.name
+                (Printf.sprintf
+                   "sandbox docker exec failed (%s): %s"
+                   image
+                   (Worker_dev_tools.truncate_for_log out))
+            else Keeper_registry.clear_error ~base_path:config.base_path meta.name;
+            Yojson.Safe.to_string
+              (`Assoc
+                  ([ "ok", `Bool (st = Unix.WEXITED 0)
+                   ; "via", `String "docker"
+                   ; "cwd", `String cwd
+                   ; "sandbox_profile", `String "docker"
+                   ; "git_creds_enabled", `Bool true
+                   ; "network_mode", `String (network_mode_to_string Network_inherit)
+                   ; "effective_sandbox_image", `String image
+                   ; "status", Keeper_alerting_path.process_status_to_json st
+                   ; "output", `String out
+                   ]
+                   @ gh_exit_class_field ~cmd ~status:st ~output:out)))
+       | None ->
+         (match
+            run_docker_shell_command_with_status
+              ~config
+              ~meta
+              ~cwd
+              ~timeout_sec
+              ~cmd
+              ~git_creds_enabled:true
+              ~network_mode:Network_inherit
+          with
+          | Error message -> error_json message
+          | Ok result ->
+            Yojson.Safe.to_string
+              (`Assoc
+                  ([ "ok", `Bool (result.status = Unix.WEXITED 0)
+                   ; "via", `String "docker"
+                   ; "cwd", `String cwd
+                   ; "sandbox_profile", `String "docker"
+                   ; "git_creds_enabled", `Bool true
+                   ; "network_mode", `String result.network_label
+                   ; "effective_sandbox_image", `String result.image
+                   ; "status", Keeper_alerting_path.process_status_to_json result.status
+                   ; "output", `String result.output
+                   ]
+                   @ gh_exit_class_field ~cmd ~status:result.status ~output:result.output
+                  )))))
+;;
 
 let run_docker_hardened_bash
-    ~(turn_sandbox_runtime : Keeper_turn_sandbox_runtime.t option)
-    ~(config : Coord.config)
-    ~(meta : keeper_meta)
-    ~(cwd : string)
-    ~(timeout_sec : float)
-    ~(cmd : string)
-    ~(network_mode : network_mode) =
+      ~(turn_sandbox_runtime : Keeper_turn_sandbox_runtime.t option)
+      ~(config : Coord.config)
+      ~(meta : keeper_meta)
+      ~(cwd : string)
+      ~(timeout_sec : float)
+      ~(cmd : string)
+      ~(network_mode : network_mode)
+  =
   let image = Env_config_keeper.KeeperSandbox.docker_image () in
   let sandbox_error_json message =
     Keeper_registry.record_error ~base_path:config.base_path meta.name message;
     error_json message
   in
-  if String.trim image = "" then
-    sandbox_error_json "keeper sandbox docker image is not configured"
-  else if command_uses_nested_container_runtime cmd then
+  if String.trim image = ""
+  then sandbox_error_json "keeper sandbox docker image is not configured"
+  else if command_uses_nested_container_runtime cmd
+  then
     sandbox_error_json
       "sandbox_profile=docker blocks nested container runtimes and host socket references"
-  else
+  else (
     match turn_sandbox_runtime, network_mode with
     | Some runtime, Network_none ->
       (match
-         Keeper_turn_sandbox_runtime.run_bash_with_status runtime
-           ~cwd ~cmd ~timeout_sec ()
+         Keeper_turn_sandbox_runtime.run_bash_with_status
+           runtime
+           ~cwd
+           ~cmd
+           ~timeout_sec
+           ()
        with
        | Error message -> sandbox_error_json message
        | Ok (st, out) ->
-         if st <> Unix.WEXITED 0 then
-           Keeper_registry.record_error ~base_path:config.base_path meta.name
-             (Printf.sprintf "sandbox docker exec failed (%s): %s"
+         if st <> Unix.WEXITED 0
+         then
+           Keeper_registry.record_error
+             ~base_path:config.base_path
+             meta.name
+             (Printf.sprintf
+                "sandbox docker exec failed (%s): %s"
                 image
                 (Worker_dev_tools.truncate_for_log out))
-         else
-           Keeper_registry.clear_error ~base_path:config.base_path meta.name;
+         else Keeper_registry.clear_error ~base_path:config.base_path meta.name;
          Yojson.Safe.to_string
            (`Assoc
-              ([
-                ("ok", `Bool (st = Unix.WEXITED 0));
-                ("via", `String "docker");
-                ("cwd", `String cwd);
-                ("sandbox_profile", `String "docker");
-                ("git_creds_enabled", `Bool false);
-                ("network_mode", `String (network_mode_to_string network_mode));
-                ("effective_sandbox_image", `String image);
-                ("status", Keeper_alerting_path.process_status_to_json st);
-                ("output", `String out);
-              ] @ gh_exit_class_field ~cmd ~status:st ~output:out)))
+               ([ "ok", `Bool (st = Unix.WEXITED 0)
+                ; "via", `String "docker"
+                ; "cwd", `String cwd
+                ; "sandbox_profile", `String "docker"
+                ; "git_creds_enabled", `Bool false
+                ; "network_mode", `String (network_mode_to_string network_mode)
+                ; "effective_sandbox_image", `String image
+                ; "status", Keeper_alerting_path.process_status_to_json st
+                ; "output", `String out
+                ]
+                @ gh_exit_class_field ~cmd ~status:st ~output:out)))
     | _ ->
       (* P12: check egress policy before running networked container *)
       (match check_egress ~config ~meta ~cmd with
        | Some blocked_json -> blocked_json
        | None ->
-       match
-        run_docker_shell_command_with_status ~config ~meta ~cwd ~timeout_sec
-          ~cmd ~git_creds_enabled:false ~network_mode
-      with
-      | Error message -> error_json message
-      | Ok result ->
-        Yojson.Safe.to_string
-          (`Assoc
-             ([
-               ("ok", `Bool (result.status = Unix.WEXITED 0));
-               ("via", `String "docker");
-               ("cwd", `String cwd);
-               ("sandbox_profile", `String "docker");
-               ("git_creds_enabled", `Bool false);
-               ("network_mode", `String result.network_label);
-               ("effective_sandbox_image", `String result.image);
-               ( "status",
-                 Keeper_alerting_path.process_status_to_json result.status );
-               ("output", `String result.output);
-             ] @ gh_exit_class_field ~cmd ~status:result.status ~output:result.output)))
+         (match
+            run_docker_shell_command_with_status
+              ~config
+              ~meta
+              ~cwd
+              ~timeout_sec
+              ~cmd
+              ~git_creds_enabled:false
+              ~network_mode
+          with
+          | Error message -> error_json message
+          | Ok result ->
+            Yojson.Safe.to_string
+              (`Assoc
+                  ([ "ok", `Bool (result.status = Unix.WEXITED 0)
+                   ; "via", `String "docker"
+                   ; "cwd", `String cwd
+                   ; "sandbox_profile", `String "docker"
+                   ; "git_creds_enabled", `Bool false
+                   ; "network_mode", `String result.network_label
+                   ; "effective_sandbox_image", `String result.image
+                   ; "status", Keeper_alerting_path.process_status_to_json result.status
+                   ; "output", `String result.output
+                   ]
+                   @ gh_exit_class_field ~cmd ~status:result.status ~output:result.output
+                  )))))
+;;

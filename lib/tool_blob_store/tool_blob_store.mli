@@ -9,14 +9,13 @@
 
 type t
 
-val create : base_path:string -> t
 (** Create a blob store rooted at [base_path/.masc/tool_blobs/].
     Directory creation is lazy (happens on first [put]). *)
+val create : base_path:string -> t
 
-val root_dir : t -> string
 (** Absolute path of the store root. Mainly for diagnostics/testing. *)
+val root_dir : t -> string
 
-val put : t -> bytes:string -> mime:string -> Tool_output.t
 (** Store [bytes] under its sha256 digest.
 
     Returns [Tool_output.Stored {sha256; bytes; preview; mime}] where
@@ -24,15 +23,16 @@ val put : t -> bytes:string -> mime:string -> Tool_output.t
     replaced with [?], whitespace collapsed to spaces).
 
     Idempotent: re-putting the same bytes is a no-op (file already exists). *)
+val put : t -> bytes:string -> mime:string -> Tool_output.t
 
-val fetch : t -> sha256:string -> string option
 (** Retrieve bytes by sha256. Returns [None] if not in store. *)
+val fetch : t -> sha256:string -> string option
 
-val list_all : t -> string list
 (** List all sha256 hashes currently in the store. O(n) in store size.
     Mainly used by [gc] and tests. *)
+val list_all : t -> string list
 
-val gc : t -> keep_set:string list -> int
 (** Delete every artifact whose sha256 is NOT in [keep_set].
     Returns the number of artifacts deleted. Best-effort: unlink failures
     are silently skipped. *)
+val gc : t -> keep_set:string list -> int

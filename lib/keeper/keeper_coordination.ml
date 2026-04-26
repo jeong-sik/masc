@@ -18,27 +18,25 @@ let compact_if_needed = Keeper_exec_context.compact_if_needed
 let generate_trace_id = Keeper_exec_context.generate_trace_id
 let keeper_board_write_tool_names = Keeper_exec_context.keeper_board_write_tool_names
 let keeper_write_done = Keeper_exec_context.keeper_write_done
-let keeper_action_kind_of_tool_names = Keeper_exec_context.keeper_action_kind_of_tool_names
+
+let keeper_action_kind_of_tool_names =
+  Keeper_exec_context.keeper_action_kind_of_tool_names
+;;
 
 let effective_model_labels_for_turn (m : keeper_meta) : string list =
   Keeper_exec_context.effective_model_labels_for_turn m
+;;
 
 let room_cursor_for meta room_id =
   meta.last_seen_seq_by_room
   |> List.find_map (fun (rid, seq) -> if rid = room_id then Some seq else None)
   |> Option.value ~default:0
+;;
 
 let set_room_cursor meta room_id seq =
-  let kept =
-    meta.last_seen_seq_by_room
-    |> List.filter (fun (rid, _) -> rid <> room_id)
-  in
-  {
-    meta with
-    last_seen_seq_by_room = dedupe_keep_order ((room_id, seq) :: kept);
-  }
+  let kept = meta.last_seen_seq_by_room |> List.filter (fun (rid, _) -> rid <> room_id) in
+  { meta with last_seen_seq_by_room = dedupe_keep_order ((room_id, seq) :: kept) }
+;;
 
-let room_ids_for_meta _config (_meta : keeper_meta) : string list =
-  [ "default" ]
-
+let room_ids_for_meta _config (_meta : keeper_meta) : string list = [ "default" ]
 let ensure_keeper_room_presence = Keeper_exec_context.ensure_keeper_room_presence

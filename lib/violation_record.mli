@@ -8,18 +8,18 @@
 
 (** Violation kind — re-exported from [Agent_sdk.Mode_enforcer.violation_kind]. *)
 type violation_kind = Agent_sdk.Mode_enforcer.violation_kind =
-  | Mutating_in_diagnose  (** workspace mutation attempted in Diagnose mode *)
-  | External_in_draft     (** external effect attempted in Draft mode *)
-  | Scope_violation       (** violated allowed_mutations constraint *)
+  | Mutating_in_diagnose (** workspace mutation attempted in Diagnose mode *)
+  | External_in_draft (** external effect attempted in Draft mode *)
+  | Scope_violation (** violated allowed_mutations constraint *)
 
 (** A single violation record — re-exported from [Agent_sdk.Mode_enforcer.violation]. *)
-type t = Agent_sdk.Mode_enforcer.violation = {
-  ts : float;
-  tool_name : string;
-  input_summary : string;
-  effective_mode : Agent_sdk.Execution_mode.t;
-  violation_kind : violation_kind;
-}
+type t = Agent_sdk.Mode_enforcer.violation =
+  { ts : float
+  ; tool_name : string
+  ; input_summary : string
+  ; effective_mode : Agent_sdk.Execution_mode.t
+  ; violation_kind : violation_kind
+  }
 
 (** Parse a single violation from JSON.
     Delegates to [Agent_sdk.Mode_enforcer.violation_of_yojson].
@@ -44,4 +44,5 @@ val minimum_required_mode : t -> Agent_sdk.Execution_mode.t
 
 (** Violation kind to/from string. Delegates to OAS canonical functions. *)
 val violation_kind_to_string : violation_kind -> string
+
 val violation_kind_of_string : string -> (violation_kind, string) result

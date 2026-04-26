@@ -14,7 +14,6 @@
     - Tool implementations are direct-style Eio
 *)
 
-
 (** {1 Types} *)
 
 (** Server state - same as Mcp_server.server_state for compatibility *)
@@ -45,13 +44,13 @@ val get_field : string -> Yojson.Safe.t -> Yojson.Safe.t option
 (** {1 Network Context} *)
 
 (** Type alias for Eio network capability (Generic + Unix for Agent SDK) *)
-type eio_net = [`Generic | `Unix] Eio.Net.ty Eio.Resource.t
+type eio_net = [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
 
 (** Set the Eio network reference for server-side network calls.
     Must be called from main_eio.ml during server initialization.
     Requires Generic + Unix capabilities for Agent SDK compatibility.
     @param net Eio network capability *)
-val set_net : [> `Generic | `Unix] Eio.Net.ty Eio.Resource.t -> unit
+val set_net : [> `Generic | `Unix ] Eio.Net.ty Eio.Resource.t -> unit
 
 (** Set the Eio clock reference for async sleep. *)
 val set_clock : float Eio.Time.clock_ty Eio.Resource.t -> unit
@@ -78,15 +77,15 @@ val create_state : ?test_mode:bool -> base_path:string -> unit -> server_state
     @param mono_clock Eio monotonic clock
     @param net Eio network capability for HTTP/TLS calls
     @param base_path Base path for MASC data directory *)
-val create_state_eio :
-  sw:Eio.Switch.t ->
-  proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t ->
-  fs:Eio.Fs.dir_ty Eio.Path.t ->
-  clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  mono_clock:Eio.Time.Mono.ty Eio.Resource.t ->
-  net:[> `Generic | `Unix] Eio.Net.ty Eio.Resource.t ->
-  base_path:string ->
-  server_state
+val create_state_eio
+  :  sw:Eio.Switch.t
+  -> proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t
+  -> fs:Eio.Fs.dir_ty Eio.Path.t
+  -> clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> mono_clock:Eio.Time.Mono.ty Eio.Resource.t
+  -> net:[> `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  -> base_path:string
+  -> server_state
 
 (** {1 Request Handling - Eio Native} *)
 
@@ -101,30 +100,30 @@ val create_state_eio :
     @param state Server state
     @param request_str Raw JSON-RPC request string
     @return JSON response *)
-val handle_request :
-  clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  sw:Eio.Switch.t ->
-  ?profile:tool_profile ->
-  ?mcp_session_id:string ->
-  ?auth_token:string ->
-  ?internal_keeper_runtime:bool ->
-  server_state ->
-  string ->
-  Yojson.Safe.t
+val handle_request
+  :  clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> sw:Eio.Switch.t
+  -> ?profile:tool_profile
+  -> ?mcp_session_id:string
+  -> ?auth_token:string
+  -> ?internal_keeper_runtime:bool
+  -> server_state
+  -> string
+  -> Yojson.Safe.t
 
 (** Execute a single tool by name (for REST API)
     @return (success, result_json_string) *)
-val execute_tool_eio :
-  sw:Eio.Switch.t ->
-  clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  ?profile:tool_profile ->
-  ?mcp_session_id:string ->
-  ?auth_token:string ->
-  ?internal_keeper_runtime:bool ->
-  server_state ->
-  name:string ->
-  arguments:Yojson.Safe.t ->
-  bool * string
+val execute_tool_eio
+  :  sw:Eio.Switch.t
+  -> clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> ?profile:tool_profile
+  -> ?mcp_session_id:string
+  -> ?auth_token:string
+  -> ?internal_keeper_runtime:bool
+  -> server_state
+  -> name:string
+  -> arguments:Yojson.Safe.t
+  -> bool * string
 
 (** Clear MCP resource subscriptions associated with a session.
     Called by streamable HTTP transport when a session is deleted. *)
@@ -143,17 +142,20 @@ val clear_resource_subscriptions_for_session : string -> unit
 val run_stdio : sw:Eio.Switch.t -> env:Eio_unix.Stdenv.base -> server_state -> unit
 
 (** {1 Protocol Detection} *)
-type transport_mode = Framed | LineDelimited
+type transport_mode =
+  | Framed
+  | LineDelimited
+
 val detect_mode : string -> transport_mode
 
 (** {1 Governance} *)
 
 (** Governance configuration *)
-type governance_config = {
-  level: string;
-  audit_enabled: bool;
-  anomaly_detection: bool;
-}
+type governance_config =
+  { level : string
+  ; audit_enabled : bool
+  ; anomaly_detection : bool
+  }
 
 (** Get default governance config for a given level.
     - "development" (default): audit=false, anomaly=false
@@ -164,12 +166,12 @@ val governance_defaults : string -> governance_config
 (** {1 MCP Sessions} *)
 
 (** MCP session record for HTTP session persistence *)
-type mcp_session_record = {
-  id: string;
-  agent_name: string option;
-  created_at: float;
-  last_seen: float;
-}
+type mcp_session_record =
+  { id : string
+  ; agent_name : string option
+  ; created_at : float
+  ; last_seen : float
+  }
 
 (** Serialize MCP session to JSON *)
 val mcp_session_to_json : mcp_session_record -> Yojson.Safe.t

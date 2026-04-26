@@ -11,7 +11,7 @@ type t
 (** The result of resolving a preset: either the full candidate set
     (when [all_candidates = true] in config) or an explicit subset. *)
 type preset_resolution =
-  | All_candidates        (** Use the entire candidate tool set *)
+  | All_candidates (** Use the entire candidate tool set *)
   | Subset of string list (** Use exactly this list of tool names *)
 
 (** Load and parse [tool_policy.toml] from the resolved config root for
@@ -26,12 +26,12 @@ val load : base_path:string -> (t, string) result
 
     @param masc_filter  applied to each MASC tool name; only those
       returning [true] are included.  Defaults to [fun _ -> true]. *)
-val resolve_preset :
-  t ->
-  string ->
-  ?masc_filter:(string -> bool) ->
-  unit ->
-  preset_resolution option
+val resolve_preset
+  :  t
+  -> string
+  -> ?masc_filter:(string -> bool)
+  -> unit
+  -> preset_resolution option
 
 (** Resolve all groups and merge their tool names.
     Used to build the full candidate set (superset of all presets). *)

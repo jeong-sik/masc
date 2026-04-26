@@ -30,42 +30,46 @@ let getenv_with_alias ~primary ~deprecated =
   | None ->
     (match Sys.getenv_opt deprecated with
      | Some _ as some ->
-       if not (Hashtbl.mem deprecation_warned deprecated) then begin
+       if not (Hashtbl.mem deprecation_warned deprecated)
+       then (
          Hashtbl.add deprecation_warned deprecated ();
          Printf.eprintf
            "[warn] env var %s is deprecated; use %s (same semantics)\n%!"
-           deprecated primary
-       end;
+           deprecated
+           primary);
        some
      | None -> None)
+;;
 
 let read_float_setting ~primary ~deprecated ~default =
   match getenv_with_alias ~primary ~deprecated with
   | None -> default
   | Some raw ->
     let trimmed = String.trim raw in
-    if trimmed = "" then default
-    else
+    if trimmed = ""
+    then default
+    else (
       match Safe_ops.float_of_string_safe trimmed with
       | Some value -> value
       | None ->
-        Log.Misc.warn "Invalid float for %s=%S, using default %.1f"
-          primary raw default;
-        default
+        Log.Misc.warn "Invalid float for %s=%S, using default %.1f" primary raw default;
+        default)
+;;
 
 let read_int_setting ~primary ~deprecated ~default =
   match getenv_with_alias ~primary ~deprecated with
   | None -> default
   | Some raw ->
     let trimmed = String.trim raw in
-    if trimmed = "" then default
-    else
+    if trimmed = ""
+    then default
+    else (
       match Safe_ops.int_of_string_safe trimmed with
       | Some value -> value
       | None ->
-        Log.Misc.warn "Invalid int for %s=%S, using default %d"
-          primary raw default;
-        default
+        Log.Misc.warn "Invalid int for %s=%S, using default %d" primary raw default;
+        default)
+;;
 
 (** Rolling window duration in seconds.  Events older than this are
     discarded on read.  Default: 300s (5 minutes), matching OpenRouter's
@@ -75,6 +79,7 @@ let window_sec =
     ~primary:"MASC_CASCADE_HEALTH_WINDOW_SEC"
     ~deprecated:"OAS_CASCADE_HEALTH_WINDOW_SEC"
     ~default:300.0
+;;
 
 (** Number of consecutive failures before cooldown activates.
     Default: 3, matching LiteLLM's [allowed_fails] concept. *)
@@ -83,6 +88,7 @@ let cooldown_threshold =
     ~primary:"MASC_CASCADE_COOLDOWN_THRESHOLD"
     ~deprecated:"OAS_CASCADE_COOLDOWN_THRESHOLD"
     ~default:3
+;;
 
 (** Cooldown duration in seconds.  During cooldown, the provider is
     skipped (not attempted).  Default: 60s.
@@ -99,6 +105,7 @@ let cooldown_sec =
     ~primary:"MASC_CASCADE_COOLDOWN_SEC"
     ~deprecated:"OAS_CASCADE_COOLDOWN_SEC"
     ~default:60.0
+;;
 
 (** Cooldown duration for provider calls classified as hard-quota exhaustion
     (account balance depleted, monthly quota reached, resource exhausted).
@@ -118,6 +125,7 @@ let hard_quota_cooldown_sec =
     ~primary:"MASC_CASCADE_HARD_QUOTA_COOLDOWN_SEC"
     ~deprecated:"OAS_CASCADE_HARD_QUOTA_COOLDOWN_SEC"
     ~default:3600.0
+;;
 
 (** Cooldown duration for provider calls classified as terminal structural
     failures, where retrying the same provider on the next cascade tick is
@@ -135,7 +143,7 @@ let terminal_failure_cooldown_sec =
     ~primary:"MASC_CASCADE_TERMINAL_FAILURE_COOLDOWN_SEC"
     ~deprecated:"OAS_CASCADE_TERMINAL_FAILURE_COOLDOWN_SEC"
     ~default:3600.0
-
+;;
 
 (* ── Types ────────────────────────────────────── *)
 
@@ -157,35 +165,37 @@ let terminal_failure_cooldown_sec =
    conflict is the motivating case: fallback is correct for the current call,
    but repeatedly attempting Kimi first on every later call only adds latency
    and silently degrades cascade diversity. *)
-type outcome = Success | Failure | Rejected | Hard_quota | Terminal_failure
+type outcome =
+  | Success
+  | Failure
+  | Rejected
+  | Hard_quota
+  | Terminal_failure
 
-type event = {
-  time: float;  (* Unix timestamp *)
-  outcome: outcome;
-}
+type event =
+  { time : float (* Unix timestamp *)
+  ; outcome : outcome
+  }
 
-type provider_state = {
-  mutable events: event list;  (* newest first *)
-  mutable consecutive_failures: int;
-  mutable cooldown_until: float;  (* 0.0 = not in cooldown *)
-  fingerprint_counts: (string, int) Hashtbl.t;
-  (* Per-fingerprint cumulative counter (lifetime, no rolling decay).
+type provider_state =
+  { mutable events : event list (* newest first *)
+  ; mutable consecutive_failures : int
+  ; mutable cooldown_until : float (* 0.0 = not in cooldown *)
+  ; fingerprint_counts : (string, int) Hashtbl.t
+  ; (* Per-fingerprint cumulative counter (lifetime, no rolling decay).
      Phase 0 observability anchor for "which error keeps recurring".
      Updated under [t.mu]. *)
-  mutable last_failure_at: float;  (* 0.0 = none *)
-}
+    mutable last_failure_at : float (* 0.0 = none *)
+  }
 
-type t = {
-  providers: (string, provider_state) Hashtbl.t;
-  mu: Stdlib.Mutex.t;
-}
+type t =
+  { providers : (string, provider_state) Hashtbl.t
+  ; mu : Stdlib.Mutex.t
+  }
 
 (* ── Constructor ──────────────────────────────── *)
 
-let create () : t = {
-  providers = Hashtbl.create 8;
-  mu = Stdlib.Mutex.create ();
-}
+let create () : t = { providers = Hashtbl.create 8; mu = Stdlib.Mutex.create () }
 
 (* #9873: Stdlib.Mutex, not Eio.Mutex, per the module doc at line 11.
 
@@ -209,23 +219,24 @@ let create () : t = {
    the correct pick and matches the documented design. *)
 let with_lock t f =
   Stdlib.Mutex.lock t.mu;
-  Fun.protect
-    ~finally:(fun () -> Stdlib.Mutex.unlock t.mu)
-    (fun () -> f ())
+  Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock t.mu) (fun () -> f ())
+;;
 
 let get_or_create_state t key =
   match Hashtbl.find_opt t.providers key with
   | Some s -> s
   | None ->
-    let s = {
-      events = [];
-      consecutive_failures = 0;
-      cooldown_until = 0.0;
-      fingerprint_counts = Hashtbl.create 4;
-      last_failure_at = 0.0;
-    } in
+    let s =
+      { events = []
+      ; consecutive_failures = 0
+      ; cooldown_until = 0.0
+      ; fingerprint_counts = Hashtbl.create 4
+      ; last_failure_at = 0.0
+      }
+    in
     Hashtbl.replace t.providers key s;
     s
+;;
 
 (* Build a stable fingerprint from caller-provided classification.
    Format: "kind|hash8(reason)" — kind defaults to "unclassified",
@@ -242,13 +253,13 @@ let make_fingerprint ?error_kind ?error_reason () =
   | None -> kind
   | Some r ->
     let r = String.trim r in
-    if r = "" then kind
-    else
+    if r = ""
+    then kind
+    else (
       let h = Digest.to_hex (Digest.string r) in
-      let h_short =
-        if String.length h >= 8 then String.sub h 0 8 else h
-      in
-      kind ^ "|" ^ h_short
+      let h_short = if String.length h >= 8 then String.sub h 0 8 else h in
+      kind ^ "|" ^ h_short)
+;;
 
 let bump_fingerprint state fp =
   let prev =
@@ -257,12 +268,14 @@ let bump_fingerprint state fp =
     | None -> 0
   in
   Hashtbl.replace state.fingerprint_counts fp (prev + 1)
+;;
 
 (* ── Recording ────────────────────────────────── *)
 
 let prune_old_events now events =
   let cutoff = now -. window_sec in
   List.filter (fun e -> e.time >= cutoff) events
+;;
 
 let record t ~provider_key ~outcome ?error_kind ?error_reason ~now () =
   with_lock t (fun () ->
@@ -288,8 +301,8 @@ let record t ~provider_key ~outcome ?error_kind ?error_reason ~now () =
          [provider_info] can count Rejected separately for dashboards. *)
       state.consecutive_failures <- state.consecutive_failures + 1;
       bump_failure_fp ();
-      if state.consecutive_failures >= cooldown_threshold then
-        state.cooldown_until <- now +. cooldown_sec
+      if state.consecutive_failures >= cooldown_threshold
+      then state.cooldown_until <- now +. cooldown_sec
     | Hard_quota ->
       (* Hard-quota errors (balance depleted, quota exceeded, resource
          exhausted) don't recover on short-window retries — set a long
@@ -300,8 +313,7 @@ let record t ~provider_key ~outcome ?error_kind ?error_reason ~now () =
       state.consecutive_failures <- state.consecutive_failures + 1;
       bump_failure_fp ();
       let new_until = now +. hard_quota_cooldown_sec in
-      if new_until > state.cooldown_until then
-        state.cooldown_until <- new_until
+      if new_until > state.cooldown_until then state.cooldown_until <- new_until
     | Terminal_failure ->
       (* Terminal structural errors are not quota exhaustion, but they have the
          same retry shape: the next cascade tick will hit the same provider
@@ -313,27 +325,56 @@ let record t ~provider_key ~outcome ?error_kind ?error_reason ~now () =
       state.consecutive_failures <- state.consecutive_failures + 1;
       bump_failure_fp ();
       let new_until = now +. terminal_failure_cooldown_sec in
-      if new_until > state.cooldown_until then
-        state.cooldown_until <- new_until)
+      if new_until > state.cooldown_until then state.cooldown_until <- new_until)
+;;
 
 let record_success t ~provider_key =
   record t ~provider_key ~outcome:Success ~now:(Unix.gettimeofday ()) ()
+;;
 
 let record_failure t ~provider_key ?error_kind ?error_reason () =
-  record t ~provider_key ~outcome:Failure ?error_kind ?error_reason
-    ~now:(Unix.gettimeofday ()) ()
+  record
+    t
+    ~provider_key
+    ~outcome:Failure
+    ?error_kind
+    ?error_reason
+    ~now:(Unix.gettimeofday ())
+    ()
+;;
 
 let record_rejected t ~provider_key ?error_kind ?error_reason () =
-  record t ~provider_key ~outcome:Rejected ?error_kind ?error_reason
-    ~now:(Unix.gettimeofday ()) ()
+  record
+    t
+    ~provider_key
+    ~outcome:Rejected
+    ?error_kind
+    ?error_reason
+    ~now:(Unix.gettimeofday ())
+    ()
+;;
 
 let record_hard_quota t ~provider_key ?error_kind ?error_reason () =
-  record t ~provider_key ~outcome:Hard_quota ?error_kind ?error_reason
-    ~now:(Unix.gettimeofday ()) ()
+  record
+    t
+    ~provider_key
+    ~outcome:Hard_quota
+    ?error_kind
+    ?error_reason
+    ~now:(Unix.gettimeofday ())
+    ()
+;;
 
 let record_terminal_failure t ~provider_key ?error_kind ?error_reason () =
-  record t ~provider_key ~outcome:Terminal_failure ?error_kind ?error_reason
-    ~now:(Unix.gettimeofday ()) ()
+  record
+    t
+    ~provider_key
+    ~outcome:Terminal_failure
+    ?error_kind
+    ?error_reason
+    ~now:(Unix.gettimeofday ())
+    ()
+;;
 
 (* ── Queries ──────────────────────────────────── *)
 
@@ -346,12 +387,14 @@ let success_rate t ~provider_key =
     | Some state ->
       let now = Unix.gettimeofday () in
       let recent = prune_old_events now state.events in
-      match recent with
-      | [] -> 1.0
-      | _ ->
-        let successes = List.length
-            (List.filter (fun e -> e.outcome = Success) recent) in
-        float_of_int successes /. float_of_int (List.length recent))
+      (match recent with
+       | [] -> 1.0
+       | _ ->
+         let successes =
+           List.length (List.filter (fun e -> e.outcome = Success) recent)
+         in
+         float_of_int successes /. float_of_int (List.length recent)))
+;;
 
 (** Whether the provider is currently in cooldown.  A cooled-down provider
     should be skipped in cascade selection.
@@ -363,13 +406,13 @@ let is_in_cooldown t ~provider_key =
     | None -> false
     | Some state ->
       let now = Unix.gettimeofday () in
-      if state.cooldown_until > now then true
-      else begin
+      if state.cooldown_until > now
+      then true
+      else (
         (* Expired cooldown — clear it *)
-        if state.cooldown_until > 0.0 then
-          state.cooldown_until <- 0.0;
-        false
-      end)
+        if state.cooldown_until > 0.0 then state.cooldown_until <- 0.0;
+        false))
+;;
 
 (** Compute effective weight for a provider.
 
@@ -378,10 +421,12 @@ let is_in_cooldown t ~provider_key =
     Providers in cooldown get weight 0 (skipped).  Unknown providers
     get their full config weight (optimistic). *)
 let effective_weight t ~provider_key ~config_weight =
-  if is_in_cooldown t ~provider_key then 0
-  else
+  if is_in_cooldown t ~provider_key
+  then 0
+  else (
     let rate = success_rate t ~provider_key in
-    max 1 (int_of_float (float_of_int config_weight *. rate))
+    max 1 (int_of_float (float_of_int config_weight *. rate)))
+;;
 
 (** Summary for debugging/telemetry. *)
 let provider_summary t ~provider_key =
@@ -392,27 +437,33 @@ let provider_summary t ~provider_key =
       let now = Unix.gettimeofday () in
       let recent = prune_old_events now state.events in
       let total = List.length recent in
-      let successes = List.length
-          (List.filter (fun e -> e.outcome = Success) recent) in
+      let successes = List.length (List.filter (fun e -> e.outcome = Success) recent) in
       let in_cd = state.cooldown_until > now in
-      Printf.sprintf "%s: %d/%d ok (%.0f%%) consec_fail=%d cooldown=%b"
-        provider_key successes total
-        (if total > 0 then 100.0 *. float_of_int successes /. float_of_int total else 100.0)
-        state.consecutive_failures in_cd)
+      Printf.sprintf
+        "%s: %d/%d ok (%.0f%%) consec_fail=%d cooldown=%b"
+        provider_key
+        successes
+        total
+        (if total > 0
+         then 100.0 *. float_of_int successes /. float_of_int total
+         else 100.0)
+        state.consecutive_failures
+        in_cd)
+;;
 
 (** Structured provider snapshot — shared by [provider_info] and [all_providers].
     Built inside the mutex so the snapshot is consistent. *)
-type provider_info = {
-  provider_key : string;
-  success_rate : float;
-  consecutive_failures : int;
-  in_cooldown : bool;
-  cooldown_expires_at : float option;
-  events_in_window : int;
-  rejected_in_window : int;
-  top_fingerprints : (string * int) list;
-  last_failure_at : float option;
-}
+type provider_info =
+  { provider_key : string
+  ; success_rate : float
+  ; consecutive_failures : int
+  ; in_cooldown : bool
+  ; cooldown_expires_at : float option
+  ; events_in_window : int
+  ; rejected_in_window : int
+  ; top_fingerprints : (string * int) list
+  ; last_failure_at : float option
+  }
 
 let take_first_n n lst =
   let rec loop k acc = function
@@ -421,39 +472,34 @@ let take_first_n n lst =
     | x :: rest -> loop (k - 1) (x :: acc) rest
   in
   loop n [] lst
+;;
 
 let build_info_locked ~now ~key state =
   let recent = prune_old_events now state.events in
   let total = List.length recent in
-  let successes = List.length
-      (List.filter (fun e -> e.outcome = Success) recent) in
-  let rejected = List.length
-      (List.filter (fun e -> e.outcome = Rejected) recent) in
-  let rate =
-    if total = 0 then 1.0
-    else float_of_int successes /. float_of_int total
-  in
+  let successes = List.length (List.filter (fun e -> e.outcome = Success) recent) in
+  let rejected = List.length (List.filter (fun e -> e.outcome = Rejected) recent) in
+  let rate = if total = 0 then 1.0 else float_of_int successes /. float_of_int total in
   let in_cd = state.cooldown_until > now in
   let top_fingerprints =
-    Hashtbl.fold (fun fp count acc -> (fp, count) :: acc)
-      state.fingerprint_counts []
+    Hashtbl.fold (fun fp count acc -> (fp, count) :: acc) state.fingerprint_counts []
     |> List.sort (fun (_, a) (_, b) -> compare b a)
     |> take_first_n 3
   in
   let last_failure_at =
     if state.last_failure_at > 0.0 then Some state.last_failure_at else None
   in
-  {
-    provider_key = key;
-    success_rate = rate;
-    consecutive_failures = state.consecutive_failures;
-    in_cooldown = in_cd;
-    cooldown_expires_at = (if in_cd then Some state.cooldown_until else None);
-    events_in_window = total;
-    rejected_in_window = rejected;
-    top_fingerprints;
-    last_failure_at;
+  { provider_key = key
+  ; success_rate = rate
+  ; consecutive_failures = state.consecutive_failures
+  ; in_cooldown = in_cd
+  ; cooldown_expires_at = (if in_cd then Some state.cooldown_until else None)
+  ; events_in_window = total
+  ; rejected_in_window = rejected
+  ; top_fingerprints
+  ; last_failure_at
   }
+;;
 
 let provider_info t ~provider_key =
   with_lock t (fun () ->
@@ -461,6 +507,7 @@ let provider_info t ~provider_key =
     | None -> None
     | Some state ->
       Some (build_info_locked ~now:(Unix.gettimeofday ()) ~key:provider_key state))
+;;
 
 (** Evict tracker entries whose rolling window has fully aged out and
     whose cooldown has expired — they carry no information but would
@@ -474,14 +521,14 @@ let evict_idle t =
     let to_remove =
       Hashtbl.fold
         (fun key state acc ->
-          let recent = prune_old_events now state.events in
-          if recent = [] && state.cooldown_until <= now then key :: acc
-          else acc)
+           let recent = prune_old_events now state.events in
+           if recent = [] && state.cooldown_until <= now then key :: acc else acc)
         t.providers
         []
     in
     List.iter (Hashtbl.remove t.providers) to_remove;
     List.length to_remove)
+;;
 
 let all_providers t =
   (* Opportunistic maintenance: reaping aged-out entries here keeps the
@@ -495,6 +542,7 @@ let all_providers t =
       t.providers
       []
     |> List.sort (fun a b -> String.compare a.provider_key b.provider_key))
+;;
 
 (* ── Global singleton ─────────────────────────── *)
 

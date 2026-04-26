@@ -1,6 +1,8 @@
 ; RFC v5 Phase A0 — typed IR for local exec gate.
 ; Internal sub-library of masc_mcp.  No public name.
+
 (include_subdirs no)
+
 (library
  (name masc_exec)
  (public_name masc_mcp.masc_exec)

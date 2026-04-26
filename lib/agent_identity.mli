@@ -11,18 +11,18 @@ type channel =
   | External of string
 
 (** Agent identity record *)
-type t = {
-  uuid : string;              (** Permanent unique identifier *)
-  session_key : string;
-  agent_name : string;
-  channel : channel option;
-  user_id : string option;
-  room_id : string option;
-  capabilities : string list;
-  registered_at : float;
-  mutable last_seen : float;
-  metadata : (string * string) list;
-}
+type t =
+  { uuid : string (** Permanent unique identifier *)
+  ; session_key : string
+  ; agent_name : string
+  ; channel : channel option
+  ; user_id : string option
+  ; room_id : string option
+  ; capabilities : string list
+  ; registered_at : float
+  ; mutable last_seen : float
+  ; metadata : (string * string) list
+  }
 
 (** {1 Channel Utilities} *)
 
@@ -68,10 +68,10 @@ val to_yojson : t -> Yojson.Safe.t
 
 (** MAGI archetypes for agent specialization *)
 type archetype =
-  | Melchior   (** 🔬 Scientist *)
-  | Balthasar  (** 🪞 Mirror/Ethics *)
-  | Casper     (** ♟️ Strategist *)
-  | Athena     (** 🧠 Reasoner *)
+  | Melchior (** 🔬 Scientist *)
+  | Balthasar (** 🪞 Mirror/Ethics *)
+  | Casper (** ♟️ Strategist *)
+  | Athena (** 🧠 Reasoner *)
   | Generalist (** 🌐 No specialization *)
 
 val archetype_to_string : archetype -> string
@@ -86,8 +86,6 @@ val archetype_of_string_opt : string -> archetype option
 val archetype_of_string : string -> archetype
 
 val archetype_emoji : archetype -> string
-
 val get_archetype : t -> archetype
 val set_archetype : t -> archetype -> t
-
 val archetype_weight : archetype -> string -> float

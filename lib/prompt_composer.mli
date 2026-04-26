@@ -7,7 +7,11 @@
 
 (** A section of a composed prompt. *)
 type section =
-  | Identity of { name : string; role : string; model : string }
+  | Identity of
+      { name : string
+      ; role : string
+      ; model : string
+      }
   | TeamContext of Team_context.team_context
   | AvailableTools of string list
   | Guidelines of string list

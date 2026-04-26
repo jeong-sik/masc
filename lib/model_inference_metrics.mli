@@ -7,110 +7,107 @@
     @since 2.259.0
     Extended with cost/tool/error metrics: @since 2.270.0 *)
 
-type recent_entry = {
-  re_ts_unix : float;
-  re_provider : string option;
-  re_outcome : string;
-  re_stop_reason : string option;
-  re_turn_lane : string option;
-  re_input_tokens : int option;
-  re_output_tokens : int option;
-  re_latency_ms : float option;
-  re_prompt_tok_per_sec : float option;
-  re_peak_memory_gb : float option;
-  re_cost_usd : float option;
-  re_tools_count : int;
-  re_usage_reported : bool option;
-  re_telemetry_reported : bool option;
-  re_usage_trust : string option;
-  re_usage_anomaly_reasons : string list;
-  re_coverage_reason : string option;
-  re_coverage_stage : string option;
-}
+type recent_entry =
+  { re_ts_unix : float
+  ; re_provider : string option
+  ; re_outcome : string
+  ; re_stop_reason : string option
+  ; re_turn_lane : string option
+  ; re_input_tokens : int option
+  ; re_output_tokens : int option
+  ; re_latency_ms : float option
+  ; re_prompt_tok_per_sec : float option
+  ; re_peak_memory_gb : float option
+  ; re_cost_usd : float option
+  ; re_tools_count : int
+  ; re_usage_reported : bool option
+  ; re_telemetry_reported : bool option
+  ; re_usage_trust : string option
+  ; re_usage_anomaly_reasons : string list
+  ; re_coverage_reason : string option
+  ; re_coverage_stage : string option
+  }
 
-type coverage_reason_count = {
-  crc_reason : string;
-  crc_count : int;
-}
+type coverage_reason_count =
+  { crc_reason : string
+  ; crc_count : int
+  }
 
-type bucket_metric = {
-  b_ts_start : float;
-    (** Unix seconds at the floor of the bucket (inclusive start). *)
-  b_entry_count : int;
-  b_success_count : int;
-  b_error_count : int;
-  b_p50_latency_ms : float option;
-  b_p95_latency_ms : float option;
-  b_error_rate : float;
-    (** error_count / entry_count; 0.0 when bucket is empty. *)
-  b_total_cost_usd : float option;
-  b_cache_hit_ratio : float option;
+type bucket_metric =
+  { b_ts_start : float (** Unix seconds at the floor of the bucket (inclusive start). *)
+  ; b_entry_count : int
+  ; b_success_count : int
+  ; b_error_count : int
+  ; b_p50_latency_ms : float option
+  ; b_p95_latency_ms : float option
+  ; b_error_rate : float (** error_count / entry_count; 0.0 when bucket is empty. *)
+  ; b_total_cost_usd : float option
+  ; b_cache_hit_ratio : float option
     (** cache_read_tokens / (cache_read_tokens + input_tokens); [Some 0.0]
         when the denominator is explicitly zero, [None] when no bucket entry
         reported either field. *)
-}
+  }
 
-type model_bucketed = {
-  mb_model_id : string;
-  mb_buckets : bucket_metric list;
+type model_bucketed =
+  { mb_model_id : string
+  ; mb_buckets : bucket_metric list
     (** Ordered oldest-first; only non-empty buckets are emitted. *)
-}
+  }
 
-type model_stats = {
-  model_id : string;
-  provider : string option;
-  entry_count : int;
-  avg_tok_per_sec : float option;
-  p50_tok_per_sec : float option;
-  p95_tok_per_sec : float option;
-  prompt_avg_tok_per_sec : float option;
-  prompt_p50_tok_per_sec : float option;
-  prompt_p95_tok_per_sec : float option;
-  hw_decode_avg_tok_per_sec : float option;
-  hw_decode_p50_tok_per_sec : float option;
-  hw_decode_p95_tok_per_sec : float option;
-  max_peak_memory_gb : float option;
-  thinking_fraction : float option;
+type model_stats =
+  { model_id : string
+  ; provider : string option
+  ; entry_count : int
+  ; avg_tok_per_sec : float option
+  ; p50_tok_per_sec : float option
+  ; p95_tok_per_sec : float option
+  ; prompt_avg_tok_per_sec : float option
+  ; prompt_p50_tok_per_sec : float option
+  ; prompt_p95_tok_per_sec : float option
+  ; hw_decode_avg_tok_per_sec : float option
+  ; hw_decode_p50_tok_per_sec : float option
+  ; hw_decode_p95_tok_per_sec : float option
+  ; max_peak_memory_gb : float option
+  ; thinking_fraction : float option
     (** Fraction [0.0, 1.0] of turns in window where the model was sent
         think=true (Keeper_turn_intent adaptive classifier decision).
         [None] when no entry in the window reported [thinking_enabled]
         (older jsonl rows predating the field, or providers that don't
         expose it). Denominator = count of reporting entries. *)
-  avg_latency_ms : float option;
-  p50_latency_ms : float option;
-  p95_latency_ms : float option;
-  total_input_tokens : int option;
-  total_output_tokens : int option;
-  total_cache_read_tokens : int option;
-  total_reasoning_tokens : int option;
-  usage_sample_count : int;
-  telemetry_sample_count : int;
-  usage_missing_count : int;
-  telemetry_missing_count : int;
-  coverage_status : string;
-  primary_coverage_stage : string option;
-  primary_coverage_reason : string option;
-  coverage_reason_counts : coverage_reason_count list;
-  fallback_count : int;
-  success_count : int;
-  error_count : int;
-  total_cost_usd : float option;
-  avg_tool_calls_per_turn : float;
-  total_tool_calls : int;
-  top_tools : (string * int) list;
-  recent_entries : recent_entry list;
-  buckets : bucket_metric list;
-}
+  ; avg_latency_ms : float option
+  ; p50_latency_ms : float option
+  ; p95_latency_ms : float option
+  ; total_input_tokens : int option
+  ; total_output_tokens : int option
+  ; total_cache_read_tokens : int option
+  ; total_reasoning_tokens : int option
+  ; usage_sample_count : int
+  ; telemetry_sample_count : int
+  ; usage_missing_count : int
+  ; telemetry_missing_count : int
+  ; coverage_status : string
+  ; primary_coverage_stage : string option
+  ; primary_coverage_reason : string option
+  ; coverage_reason_counts : coverage_reason_count list
+  ; fallback_count : int
+  ; success_count : int
+  ; error_count : int
+  ; total_cost_usd : float option
+  ; avg_tool_calls_per_turn : float
+  ; total_tool_calls : int
+  ; top_tools : (string * int) list
+  ; recent_entries : recent_entry list
+  ; buckets : bucket_metric list
+  }
 
-type aggregate = {
-  window_minutes : int;
-  bucket_minutes : int;
-  models : model_stats list;
-  total_entries : int;
-  total_error_entries : int;
-}
+type aggregate =
+  { window_minutes : int
+  ; bucket_minutes : int
+  ; models : model_stats list
+  ; total_entries : int
+  ; total_error_entries : int
+  }
 
-val compute : base_path:string -> window_minutes:int -> aggregate
 (** [compute ~base_path ~window_minutes] reads all keeper decisions.jsonl
     files, filters entries within the last [window_minutes], and returns
     per-model aggregate statistics sorted by entry count descending.
@@ -119,20 +116,16 @@ val compute : base_path:string -> window_minutes:int -> aggregate
     The returned [model_stats] record carries an empty [buckets] list and
     the enclosing [aggregate.bucket_minutes] is [0]. To include a
     time-bucketed series, call {!compute_with_buckets} instead. *)
+val compute : base_path:string -> window_minutes:int -> aggregate
 
-val compute_with_buckets :
-  base_path:string ->
-  window_minutes:int ->
-  bucket_minutes:int ->
-  aggregate
 (** Same as {!compute} but each returned [model_stats] additionally carries
     a [buckets] list produced by {!aggregate_buckets}. *)
+val compute_with_buckets
+  :  base_path:string
+  -> window_minutes:int
+  -> bucket_minutes:int
+  -> aggregate
 
-val aggregate_buckets :
-  base_path:string ->
-  window_min:int ->
-  bucket_min:int ->
-  model_bucketed list
 (** [aggregate_buckets ~base_path ~window_min ~bucket_min] splits the last
     [window_min] minutes into [bucket_min]-minute buckets, groups entries
     per model, and for each non-empty bucket computes:
@@ -143,12 +136,17 @@ val aggregate_buckets :
     - Buckets are returned oldest-first within each model.
     - [cache_hit_ratio] is [0.0] when the denominator is zero (never NaN).
     - A non-positive [bucket_min] is treated as [1]. *)
+val aggregate_buckets
+  :  base_path:string
+  -> window_min:int
+  -> bucket_min:int
+  -> model_bucketed list
 
-val to_json : aggregate -> Yojson.Safe.t
 (** Serialize [aggregate] to JSON for API responses. *)
+val to_json : aggregate -> Yojson.Safe.t
 
-val model_stats_to_json : model_stats -> Yojson.Safe.t
 (** Serialize a single [model_stats] entry to JSON. *)
+val model_stats_to_json : model_stats -> Yojson.Safe.t
 
 (** Per-provider rollup of {!model_stats} aggregated across every model id
     whose [provider] matches. Feeds {!Dashboard_cascade.health_json}'s
@@ -163,30 +161,29 @@ val model_stats_to_json : model_stats -> Yojson.Safe.t
     instead of this rollup).
 
     @since 0.173.0 *)
-type provider_stats = {
-  ps_provider : string;
-  ps_entry_count : int;
-  ps_model_count : int;
+type provider_stats =
+  { ps_provider : string
+  ; ps_entry_count : int
+  ; ps_model_count : int
     (** Number of distinct [model_id]s contributing to this rollup. *)
-  ps_avg_tok_per_sec : float option;
+  ; ps_avg_tok_per_sec : float option
     (** Wall-clock throughput, entry-weighted mean across models. *)
-  ps_avg_prompt_tok_per_sec : float option;
+  ; ps_avg_prompt_tok_per_sec : float option
     (** Prefill throughput (prompt_per_second from OAS inference_timings),
         entry-weighted. [None] when no contributing model reported it
         (Anthropic/Gemini path). *)
-  ps_avg_decode_tok_per_sec : float option;
+  ; ps_avg_decode_tok_per_sec : float option
     (** Hardware decode throughput (predicted_per_second), entry-weighted. *)
-  ps_avg_latency_ms : float option;
-  ps_p50_latency_ms : float option;
+  ; ps_avg_latency_ms : float option
+  ; ps_p50_latency_ms : float option
     (** Entry-weighted mean of per-model p50. Approximate, not a true
         p50 across all entries. *)
-  ps_p95_latency_ms : float option;
+  ; ps_p95_latency_ms : float option
     (** Entry-weighted mean of per-model p95. Approximate; see
         {!ps_p50_latency_ms}. *)
-  ps_total_cost_usd : float option;
-}
+  ; ps_total_cost_usd : float option
+  }
 
-val provider_rollup : aggregate -> provider_stats list
 (** Group the per-model entries in [aggregate] by [provider] and return
     a rollup sorted by [ps_entry_count] descending. Models with
     [provider = None] are excluded — if this drops a meaningful chunk of
@@ -195,8 +192,8 @@ val provider_rollup : aggregate -> provider_stats list
     guessed at here.
 
     @since 0.173.0 *)
+val provider_rollup : aggregate -> provider_stats list
 
-val provider_stats_to_json : provider_stats -> Yojson.Safe.t
 (** JSON shape consumed by {!Dashboard_cascade}:
     {[
       {
@@ -216,3 +213,4 @@ val provider_stats_to_json : provider_stats -> Yojson.Safe.t
     zero means "reported and equal to zero".
 
     @since 0.173.0 *)
+val provider_stats_to_json : provider_stats -> Yojson.Safe.t

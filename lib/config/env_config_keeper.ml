@@ -17,134 +17,120 @@ open Env_config_core
 
 module KeeperBootstrap = struct
   (** Enable startup keeper bootstrap scan *)
-  let enabled =
-    Feature_flag_registry.get_bool "MASC_KEEPER_BOOTSTRAP_ENABLED"
+  let enabled = Feature_flag_registry.get_bool "MASC_KEEPER_BOOTSTRAP_ENABLED"
 
   (** Keeper considered stale when last turn exceeds this threshold (seconds) *)
   let stale_turn_seconds =
     get_float ~default:3600.0 "MASC_KEEPER_BOOTSTRAP_STALE_TURN_SEC"
+  ;;
 
   (** Max keeper meta files to scan during bootstrap *)
-  let max_scan =
-    get_int ~default:10000 "MASC_KEEPER_BOOTSTRAP_MAX_SCAN"
+  let max_scan = get_int ~default:10000 "MASC_KEEPER_BOOTSTRAP_MAX_SCAN"
 
   (** Maximum concurrently active keepers. Guards keeper creation and bootstrap. *)
   let max_active_keepers =
     get_int ~default:10000 "MASC_KEEPER_BOOTSTRAP_MAX_ACTIVE_KEEPERS"
+  ;;
 end
 
 (** {1 Keeper Metrics Rotation Configuration} *)
 
 module KeeperMetrics = struct
   (** Maximum metrics file size in bytes before rotation (default: 10MB) *)
-  let max_file_bytes =
-    get_int ~default:10_485_760 "MASC_KEEPER_METRICS_MAX_BYTES"
+  let max_file_bytes = get_int ~default:10_485_760 "MASC_KEEPER_METRICS_MAX_BYTES"
 
   (** Number of rotated files to keep (default: 1, i.e. .1 only) *)
-  let max_rotated_files =
-    get_int ~default:1 "MASC_KEEPER_METRICS_MAX_ROTATED"
+  let max_rotated_files = get_int ~default:1 "MASC_KEEPER_METRICS_MAX_ROTATED"
 end
 
 (** {1 Keeper Interesting Alert Configuration} *)
 
 module KeeperAlert = struct
   (** Master switch for keeper interesting alert detection/fanout *)
-  let enabled =
-    Feature_flag_registry.get_bool "MASC_KEEPER_ALERT_ENABLED"
+  let enabled = Feature_flag_registry.get_bool "MASC_KEEPER_ALERT_ENABLED"
 
   (** Minimum score required to trigger alert fanout *)
-  let min_score =
-    get_float ~default:0.70 "MASC_KEEPER_ALERT_MIN_SCORE"
+  let min_score = get_float ~default:0.70 "MASC_KEEPER_ALERT_MIN_SCORE"
 
   (** Maximum alert body chars used for external fanout payloads *)
-  let max_body_chars =
-    get_int ~default:1200 "MASC_KEEPER_ALERT_MAX_BODY_CHARS"
+  let max_body_chars = get_int ~default:1200 "MASC_KEEPER_ALERT_MAX_BODY_CHARS"
 
   (** Retry count for each fanout channel (in addition to initial attempt) *)
-  let max_retries =
-    get_int ~default:2 "MASC_KEEPER_ALERT_MAX_RETRIES"
+  let max_retries = get_int ~default:2 "MASC_KEEPER_ALERT_MAX_RETRIES"
 
   (** Base retry delay in milliseconds (exponential backoff) *)
-  let retry_base_delay_ms =
-    get_int ~default:250 "MASC_KEEPER_ALERT_RETRY_BASE_DELAY_MS"
+  let retry_base_delay_ms = get_int ~default:250 "MASC_KEEPER_ALERT_RETRY_BASE_DELAY_MS"
 
   (** Board fanout configuration *)
-  let board_enabled =
-    Feature_flag_registry.get_bool "MASC_KEEPER_ALERT_BOARD_ENABLED"
+  let board_enabled = Feature_flag_registry.get_bool "MASC_KEEPER_ALERT_BOARD_ENABLED"
 
   let board_author =
     get_string ~default:"keeper-alert-bot" "MASC_KEEPER_ALERT_BOARD_AUTHOR"
+  ;;
 
-  let board_hearth =
-    get_string ~default:"keeper-alert" "MASC_KEEPER_ALERT_BOARD_HEARTH"
+  let board_hearth = get_string ~default:"keeper-alert" "MASC_KEEPER_ALERT_BOARD_HEARTH"
 
   let board_visibility =
     get_string ~default:"internal" "MASC_KEEPER_ALERT_BOARD_VISIBILITY"
+  ;;
 
   (** Slack fanout configuration *)
-  let slack_enabled =
-    Feature_flag_registry.get_bool "MASC_KEEPER_ALERT_SLACK_ENABLED"
+  let slack_enabled = Feature_flag_registry.get_bool "MASC_KEEPER_ALERT_SLACK_ENABLED"
 
-  let slack_webhook_url =
-    get_string ~default:"" "MASC_KEEPER_ALERT_SLACK_WEBHOOK_URL"
+  let slack_webhook_url = get_string ~default:"" "MASC_KEEPER_ALERT_SLACK_WEBHOOK_URL"
 
   (** Slack DM fanout configuration *)
   let slack_dm_enabled =
     Feature_flag_registry.get_bool "MASC_KEEPER_ALERT_SLACK_DM_ENABLED"
+  ;;
 
-  let slack_dm_user_id =
-    get_string ~default:"" "MASC_KEEPER_ALERT_SLACK_DM_USER_ID"
+  let slack_dm_user_id = get_string ~default:"" "MASC_KEEPER_ALERT_SLACK_DM_USER_ID"
 
   (** GitHub issue fanout configuration *)
-  let github_enabled =
-    Feature_flag_registry.get_bool "MASC_KEEPER_ALERT_GITHUB_ENABLED"
+  let github_enabled = Feature_flag_registry.get_bool "MASC_KEEPER_ALERT_GITHUB_ENABLED"
 
-  let github_repo =
-    get_string ~default:"" "MASC_KEEPER_ALERT_GITHUB_REPO"
-
-  let github_label =
-    get_string ~default:"keeper-alert" "MASC_KEEPER_ALERT_GITHUB_LABEL"
-
-  let github_min_score =
-    get_float ~default:0.85 "MASC_KEEPER_ALERT_GITHUB_MIN_SCORE"
+  let github_repo = get_string ~default:"" "MASC_KEEPER_ALERT_GITHUB_REPO"
+  let github_label = get_string ~default:"keeper-alert" "MASC_KEEPER_ALERT_GITHUB_LABEL"
+  let github_min_score = get_float ~default:0.85 "MASC_KEEPER_ALERT_GITHUB_MIN_SCORE"
 end
 
 (** {1 Keeper Supervisor Configuration} *)
 
 module KeeperSupervisor = struct
   (** Maximum restart attempts before declaring a keeper dead *)
-  let max_restarts =
-    get_int ~default:5 "MASC_KEEPER_SUPERVISOR_MAX_RESTARTS"
+  let max_restarts = get_int ~default:5 "MASC_KEEPER_SUPERVISOR_MAX_RESTARTS"
 
   (** Base delay for exponential backoff between restarts (seconds) *)
-  let backoff_base_s =
-    get_float ~default:10.0 "MASC_KEEPER_SUPERVISOR_BACKOFF_BASE_S"
+  let backoff_base_s = get_float ~default:10.0 "MASC_KEEPER_SUPERVISOR_BACKOFF_BASE_S"
 
   (** Maximum backoff delay cap (seconds) *)
-  let backoff_max_s =
-    get_float ~default:300.0 "MASC_KEEPER_SUPERVISOR_BACKOFF_MAX_S"
+  let backoff_max_s = get_float ~default:300.0 "MASC_KEEPER_SUPERVISOR_BACKOFF_MAX_S"
 
   (** Interval between supervisor sweep runs (seconds) *)
-  let sweep_interval_sec =
-    get_float ~default:30.0 "MASC_KEEPER_SUPERVISOR_SWEEP_SEC"
+  let sweep_interval_sec = get_float ~default:30.0 "MASC_KEEPER_SUPERVISOR_SWEEP_SEC"
 
   (** Self-preservation: ratio of crashed keepers to trigger suppression *)
   let self_preservation_ratio =
-    Float.min 1.0 (Float.max 0.0
-      (get_float ~default:0.3 "MASC_KEEPER_SELF_PRESERVATION_RATIO"))
+    Float.min
+      1.0
+      (Float.max 0.0 (get_float ~default:0.3 "MASC_KEEPER_SELF_PRESERVATION_RATIO"))
+  ;;
 
   (** Self-preservation: minimum crashed candidates to trigger *)
   let self_preservation_min_candidates =
     max 1 (get_int ~default:2 "MASC_KEEPER_SELF_PRESERVATION_MIN_CANDIDATES")
+  ;;
 
   (** Dead tombstone TTL: seconds before Dead entries are cleaned up *)
-  let dead_ttl_sec =
-    Float.max 60.0 (get_float ~default:3600.0 "MASC_KEEPER_DEAD_TTL_SEC")
+  let dead_ttl_sec = Float.max 60.0 (get_float ~default:3600.0 "MASC_KEEPER_DEAD_TTL_SEC")
 
   (** Paused keeper file TTL: seconds before stale paused keeper meta files
       are removed from disk. Default: 86400 (24 hours). *)
   let paused_cleanup_ttl_sec =
-    Float.max 300.0 (get_float ~default:Masc_time_constants.day "MASC_KEEPER_PAUSED_CLEANUP_TTL_SEC")
+    Float.max
+      300.0
+      (get_float ~default:Masc_time_constants.day "MASC_KEEPER_PAUSED_CLEANUP_TTL_SEC")
+  ;;
 end
 
 (** {1 Keeper Runtime Configuration} *)
@@ -158,11 +144,10 @@ module KeeperRuntime = struct
       Runtime_params, not parent-shell env edits. *)
   let deliberation_daily_budget_usd () =
     get_float ~default:0.10 "MASC_KEEPER_DELIBERATION_DAILY_BUDGET_USD"
+  ;;
 
   (** Keeper keepalive snapshot interval, clamped to [15, 3600]. Default: 300. *)
-  let snapshot_sec =
-    max 15 (min 3600 (get_int ~default:300 "MASC_KEEPER_SNAPSHOT_SEC"))
-
+  let snapshot_sec = max 15 (min 3600 (get_int ~default:300 "MASC_KEEPER_SNAPSHOT_SEC"))
 end
 
 (** {1 Keeper Context Reducer Configuration}
@@ -180,6 +165,7 @@ module KeeperReducer = struct
       Env: [MASC_KEEPER_REDUCER_CAP_TOKENS]. *)
   let cap_message_tokens =
     max 1024 (get_int ~default:32000 "MASC_KEEPER_REDUCER_CAP_TOKENS")
+  ;;
 
   (** Recent messages kept verbatim by
       {!Agent_sdk.Context_reducer.cap_message_tokens}.  Default: 3.
@@ -188,19 +174,20 @@ module KeeperReducer = struct
       Env: [MASC_KEEPER_REDUCER_KEEP_RECENT]. *)
   let cap_message_keep_recent =
     max 1 (min 20 (get_int ~default:3 "MASC_KEEPER_REDUCER_KEEP_RECENT"))
+  ;;
 end
 
 (** {1 Alert Dedup Configuration} *)
 
 module AlertDedup = struct
   (** Alert dedup window, clamped to >= 5s. Default: 60. *)
-  let window_sec =
-    Float.max 5.0 (get_float ~default:60.0 "MASC_ALERT_DEDUP_WINDOW_SEC")
+  let window_sec = Float.max 5.0 (get_float ~default:60.0 "MASC_ALERT_DEDUP_WINDOW_SEC")
 end
 
 (** Shared: keepalive interval, read early so WorkAsHeartbeat can reference it. *)
 let keepalive_interval_sec_ =
   max 5 (min 300 (get_int ~default:30 "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC"))
+;;
 
 (** {1 Work-as-Heartbeat Configuration (Phase 1)} *)
 
@@ -208,14 +195,14 @@ module WorkAsHeartbeat = struct
   (** Master switch. When true, successful Coord.heartbeat after a
       unified turn counts as presence proof, allowing the next cycle to skip
       the full ensure_keeper_room_presence call. *)
-  let enabled =
-    Feature_flag_registry.get_bool "MASC_KEEPER_WORK_AS_HEARTBEAT"
+  let enabled = Feature_flag_registry.get_bool "MASC_KEEPER_WORK_AS_HEARTBEAT"
 
   (** Maximum seconds since last successful room heartbeat before presence
       sync is required again. Floor = keepalive interval (dynamic). *)
   let max_silence_sec =
     let floor = Float.of_int keepalive_interval_sec_ in
     Float.max floor (get_float ~default:120.0 "MASC_KEEPER_MAX_SILENCE_SEC")
+  ;;
 end
 
 (** {1 Smart Heartbeat Configuration (Phase 2)} *)
@@ -224,8 +211,7 @@ module SmartHeartbeat = struct
   (** Master switch for adaptive heartbeat scheduling in the keepalive loop.
       When true, Heartbeat_smart.should_emit gates presence/snapshot/board/turn
       blocks, skipping cycles when the keeper is busy or deeply idle. *)
-  let enabled =
-    Feature_flag_registry.get_bool "MASC_KEEPER_SMART_HEARTBEAT"
+  let enabled = Feature_flag_registry.get_bool "MASC_KEEPER_SMART_HEARTBEAT"
 end
 
 (** {1 Keeper Keepalive Loop Constants} *)
@@ -242,32 +228,38 @@ module KeeperKeepalive = struct
       Range: [2, 50]. *)
   let max_consecutive_failures =
     max 2 (min 50 (get_int ~default:5 "MASC_KEEPER_MAX_CONSECUTIVE_HB_FAILURES"))
+  ;;
 
   (** Maximum consecutive unified turn failures before marking keeper as
       crashed. Covers LLM timeout, rate limit, and other turn errors.
       Default: 10. Range: [3, 100]. *)
   let max_consecutive_turn_failures =
     max 3 (min 100 (get_int ~default:10 "MASC_KEEPER_MAX_CONSECUTIVE_TURN_FAILURES"))
+  ;;
 
   (** Board-reactive wakeup debounce in seconds. Prevents rapid repeated
       wakeups from the same board post. Default: 60.0.
       Range: [5, 300]. *)
   let board_debounce_sec =
-    Float.max 5.0 (Float.min 300.0
-      (get_float ~default:60.0 "MASC_KEEPER_BOARD_DEBOUNCE_SEC"))
+    Float.max
+      5.0
+      (Float.min 300.0 (get_float ~default:60.0 "MASC_KEEPER_BOARD_DEBOUNCE_SEC"))
+  ;;
 
   (** Interruptible sleep chunk size in seconds. Smaller = faster wakeup
       response but more CPU polling. Default: 2.0.
       Range: [0.1, 10.0]. *)
   let sleep_chunk_sec =
-    Float.max 0.1 (Float.min 10.0
-      (get_float ~default:2.0 "MASC_KEEPER_SLEEP_CHUNK_SEC"))
+    Float.max 0.1 (Float.min 10.0 (get_float ~default:2.0 "MASC_KEEPER_SLEEP_CHUNK_SEC"))
+  ;;
 
   (** Jitter factor applied to heartbeat interval (fraction of base).
       Default: 0.2 (20%). Range: [0.0, 0.5]. *)
   let jitter_factor =
-    Float.max 0.0 (Float.min 0.5
-      (get_float ~default:0.2 "MASC_KEEPER_HEARTBEAT_JITTER_FACTOR"))
+    Float.max
+      0.0
+      (Float.min 0.5 (get_float ~default:0.2 "MASC_KEEPER_HEARTBEAT_JITTER_FACTOR"))
+  ;;
 
   (** {2 Idle Turn Constants}
 
@@ -282,12 +274,14 @@ module KeeperKeepalive = struct
       Env: [MASC_KEEPER_MAX_IDLE_TURNS_AUTONOMOUS]. Default: 10. *)
   let max_idle_turns_autonomous =
     max 2 (min 50 (get_int ~default:10 "MASC_KEEPER_MAX_IDLE_TURNS_AUTONOMOUS"))
+  ;;
 
   (** Max idle turns for reactive (board/mention triggered) keeper turns.
       Reactive turns have an explicit trigger — more patience warranted.
       Env: [MASC_KEEPER_MAX_IDLE_TURNS_REACTIVE]. Default: 15. *)
   let max_idle_turns_reactive =
     max 2 (min 50 (get_int ~default:15 "MASC_KEEPER_MAX_IDLE_TURNS_REACTIVE"))
+  ;;
 
   (** Wall-clock timeout in seconds for a single unified turn (including all
       retries and cascade fallbacks). Prevents indefinite blocking when an
@@ -299,8 +293,10 @@ module KeeperKeepalive = struct
       cascade. The new floor matches the budgeted ceiling and gives
       operators headroom; range upper bumped to 7200 for the same reason. *)
   let turn_timeout_sec =
-    Float.max 60.0 (Float.min 7200.0
-      (get_float ~default:3600.0 "MASC_KEEPER_TURN_TIMEOUT_SEC"))
+    Float.max
+      60.0
+      (Float.min 7200.0 (get_float ~default:3600.0 "MASC_KEEPER_TURN_TIMEOUT_SEC"))
+  ;;
 
   (** Maximum time a proactive keeper will wait in the MASC admission queue
       before abandoning the current OAS attempt.
@@ -313,8 +309,12 @@ module KeeperKeepalive = struct
       Env: [MASC_KEEPER_ADMISSION_WAIT_TIMEOUT_SEC]. Default: 180.0.
       Range: [5, 1200]. *)
   let admission_wait_timeout_sec =
-    Float.max 5.0 (Float.min 1200.0
-      (get_float ~default:180.0 "MASC_KEEPER_ADMISSION_WAIT_TIMEOUT_SEC"))
+    Float.max
+      5.0
+      (Float.min
+         1200.0
+         (get_float ~default:180.0 "MASC_KEEPER_ADMISSION_WAIT_TIMEOUT_SEC"))
+  ;;
 
   (** Maximum time a scheduled autonomous keeper will wait for the local
       keeper turn gate before skipping the cycle. Reactive turns still wait
@@ -322,8 +322,12 @@ module KeeperKeepalive = struct
       Env: [MASC_KEEPER_AUTONOMOUS_SLOT_WAIT_TIMEOUT_SEC]. Default: 30.0.
       Range: [5, 300]. *)
   let autonomous_slot_wait_timeout_sec =
-    Float.max 5.0 (Float.min 300.0
-      (get_float ~default:30.0 "MASC_KEEPER_AUTONOMOUS_SLOT_WAIT_TIMEOUT_SEC"))
+    Float.max
+      5.0
+      (Float.min
+         300.0
+         (get_float ~default:30.0 "MASC_KEEPER_AUTONOMOUS_SLOT_WAIT_TIMEOUT_SEC"))
+  ;;
 
   (** Per-call timeout in seconds for a single OAS Agent.run execution.
       Guards against indefinite LLM response waits within a turn.
@@ -340,9 +344,14 @@ module KeeperKeepalive = struct
   let oas_timeout_sec_override =
     match Env_config_core.raw_value_opt "MASC_KEEPER_OAS_TIMEOUT_SEC" with
     | Some raw ->
-      Some (Float.max 30.0 (Float.min turn_timeout_sec
-        (Option.value ~default:300.0 (Float.of_string_opt (String.trim raw)))))
+      Some
+        (Float.max
+           30.0
+           (Float.min
+              turn_timeout_sec
+              (Option.value ~default:300.0 (Float.of_string_opt (String.trim raw)))))
     | None -> None
+  ;;
 
   (** Maximum turns per single OAS Agent.run call.
       Keeper resumes via checkpoint in the next keepalive cycle when
@@ -356,6 +365,7 @@ module KeeperKeepalive = struct
       Env: [MASC_KEEPER_OAS_MAX_TURNS_PER_CALL]. Default: 30. Range: [1, 100]. *)
   let oas_max_turns_per_call =
     max 1 (min 100 (get_int ~default:30 "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL"))
+  ;;
 
   (** Smaller turn budget for scheduled autonomous cycles so one keeper does
       not monopolize the autonomous semaphore for minutes at a time.
@@ -371,14 +381,20 @@ module KeeperKeepalive = struct
       Default: min(global, 10). Range: [1, global]. *)
   let oas_max_turns_per_call_scheduled_autonomous =
     let default = min oas_max_turns_per_call 10 in
-    max 1
-      (min oas_max_turns_per_call
-         (min 100
-            (get_int ~default
-               "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL_SCHEDULED_AUTONOMOUS")))
+    max
+      1
+      (min
+         oas_max_turns_per_call
+         (min
+            100
+            (get_int ~default "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL_SCHEDULED_AUTONOMOUS")))
+  ;;
 
   let oas_timeout_for_estimated_input_tokens_with_turn_budget
-      ~(estimated_input_tokens : int) ~(max_turns : int) : float =
+        ~(estimated_input_tokens : int)
+        ~(max_turns : int)
+    : float
+    =
     let _ = max_turns in
     match oas_timeout_sec_override with
     | Some v -> v
@@ -411,18 +427,18 @@ module KeeperKeepalive = struct
          signature because callers still pass the value; ignored
          for budget computation. *)
       turn_timeout_sec
+  ;;
 
-  let oas_timeout_for_estimated_input_tokens
-      ~(estimated_input_tokens : int) : float =
+  let oas_timeout_for_estimated_input_tokens ~(estimated_input_tokens : int) : float =
     oas_timeout_for_estimated_input_tokens_with_turn_budget
       ~estimated_input_tokens
       ~max_turns:oas_max_turns_per_call
+  ;;
 
   (** Backward-compatible accessor: returns the env override or 300s default.
       Prefer {!oas_timeout_for_estimated_input_tokens} when a live prompt
       estimate is available. *)
-  let oas_timeout_sec =
-    Option.value ~default:300.0 oas_timeout_sec_override
+  let oas_timeout_sec = Option.value ~default:300.0 oas_timeout_sec_override
 
   (** Consecutive idle tool repetitions before on_idle hook issues Skip.
       Below this: graduated Nudge messages.
@@ -432,6 +448,7 @@ module KeeperKeepalive = struct
       Env: [MASC_KEEPER_IDLE_SKIP_THRESHOLD]. Default: 4. *)
   let idle_skip_threshold =
     max 2 (min 20 (get_int ~default:4 "MASC_KEEPER_IDLE_SKIP_THRESHOLD"))
+  ;;
 end
 
 (** {1 gRPC Heartbeat Reconnect} *)
@@ -441,12 +458,15 @@ module KeeperGrpc = struct
       Default: 5. Range: [1, 20]. *)
   let max_reconnect_attempts =
     max 1 (min 20 (get_int ~default:5 "MASC_KEEPER_GRPC_MAX_RECONNECT"))
+  ;;
 
   (** Backoff delay between gRPC reconnect attempts in seconds.
       Default: 5.0. Range: [1.0, 60.0]. *)
   let reconnect_backoff_sec =
-    Float.max 1.0 (Float.min 60.0
-      (get_float ~default:5.0 "MASC_KEEPER_GRPC_RECONNECT_BACKOFF_SEC"))
+    Float.max
+      1.0
+      (Float.min 60.0 (get_float ~default:5.0 "MASC_KEEPER_GRPC_RECONNECT_BACKOFF_SEC"))
+  ;;
 end
 
 (** {1 Proactive Generation} *)
@@ -456,11 +476,13 @@ module KeeperProactive = struct
       Default: 3. Range: [1, 10]. *)
   let max_attempts =
     max 1 (min 10 (get_int ~default:3 "MASC_KEEPER_PROACTIVE_MAX_ATTEMPTS"))
+  ;;
 
   (** Stage timing ring buffer size for Phase 0 profiling.
       Default: 100. Range: [10, 1000]. *)
   let stage_timing_ring_size =
     max 10 (min 1000 (get_int ~default:100 "MASC_KEEPER_STAGE_TIMING_RING_SIZE"))
+  ;;
 end
 
 (** {1 Tool Execution} *)
@@ -471,6 +493,7 @@ module KeeperToolExec = struct
       Default: 3. Range: [2, 20]. *)
   let max_consecutive_tool_failures =
     max 2 (min 20 (get_int ~default:3 "MASC_KEEPER_MAX_CONSECUTIVE_TOOL_FAILURES"))
+  ;;
 end
 
 (** {1 Context Ratio Hard Cap}
@@ -481,6 +504,7 @@ end
 
 let context_ratio_hard_cap =
   Float.max 0.80 (Float.min 0.99 (get_float ~default:0.95 "MASC_CONTEXT_RATIO_HARD_CAP"))
+;;
 
 (** {1 Context Compaction (OAS)} *)
 
@@ -488,22 +512,21 @@ module ContextCompact = struct
   let w_recency = get_float ~default:0.50 "MASC_COMPACT_W_RECENCY"
   let w_role = get_float ~default:0.35 "MASC_COMPACT_W_ROLE"
   let w_tool = get_float ~default:0.15 "MASC_COMPACT_W_TOOL"
-
   let role_system = get_float ~default:1.0 "MASC_COMPACT_ROLE_SYSTEM"
   let role_tool = get_float ~default:0.7 "MASC_COMPACT_ROLE_TOOL"
   let role_user = get_float ~default:0.6 "MASC_COMPACT_ROLE_USER"
   let role_assistant = get_float ~default:0.4 "MASC_COMPACT_ROLE_ASSISTANT"
-
   let tool_present = get_float ~default:0.8 "MASC_COMPACT_TOOL_PRESENT"
   let tool_absent = get_float ~default:0.5 "MASC_COMPACT_TOOL_ABSENT"
-
   let anchor_boost = get_float ~default:0.95 "MASC_COMPACT_ANCHOR_BOOST"
   let drop_importance_threshold = get_float ~default:0.3 "MASC_COMPACT_DROP_THRESHOLD"
   let summarize_keep_recent = get_int ~default:5 "MASC_COMPACT_KEEP_RECENT"
-
   let tool_output_prune_limit = get_int ~default:1500 "MASC_COMPACT_TOOL_PRUNE_LIMIT"
 
-  let dynamic_multi_agent_ratio = get_float ~default:0.80 "MASC_COMPACT_DYN_MULTI_AGENT_RATIO"
+  let dynamic_multi_agent_ratio =
+    get_float ~default:0.80 "MASC_COMPACT_DYN_MULTI_AGENT_RATIO"
+  ;;
+
   let dynamic_focused_ratio = get_float ~default:0.70 "MASC_COMPACT_DYN_FOCUSED_RATIO"
   let small_local_floor = get_int ~default:64_000 "MASC_COMPACT_SMALL_LOCAL_FLOOR"
   let large_cloud_floor = get_int ~default:500_000 "MASC_COMPACT_LARGE_CLOUD_FLOOR"
@@ -525,14 +548,14 @@ module DockerPlayground = struct
       P2b: aliased to {!Env_config_sandbox.Runtime.docker_playground_enabled};
       [()] call freezes the value at module init to preserve the
       original [Feature_flag_registry.get_bool] semantics. *)
-  let enabled =
-    Env_config_sandbox.Runtime.docker_playground_enabled ()
+  let enabled = Env_config_sandbox.Runtime.docker_playground_enabled ()
 
   (** Docker container name for keeper playground execution.
       Env: [MASC_KEEPER_DOCKER_CONTAINER]. Default: "keeper-playground".
       Not yet in {!Env_config_sandbox} — kept here. *)
   let container_name =
     get_string ~default:"keeper-playground" "MASC_KEEPER_DOCKER_CONTAINER"
+  ;;
 
   (** Container-side root under which keeper playground bundles are mounted.
       Host [<base_path>/.masc/playground/<keeper>/…] maps to
@@ -541,8 +564,8 @@ module DockerPlayground = struct
       Default: "/home/keeper/playground".
       Not yet in {!Env_config_sandbox} — kept here. *)
   let container_playground_root =
-    get_string ~default:"/home/keeper/playground"
-      "MASC_KEEPER_DOCKER_PLAYGROUND_ROOT"
+    get_string ~default:"/home/keeper/playground" "MASC_KEEPER_DOCKER_PLAYGROUND_ROOT"
+  ;;
 end
 
 module KeeperSandbox = struct
@@ -559,51 +582,34 @@ module KeeperSandbox = struct
       semantics, env var names, and defaults. *)
 
   let hard_mode = Env_config_sandbox.Hardening.hard_mode
-
   let docker_image = Env_config_sandbox.Runtime.docker_image
-
   let preflight_enabled = Env_config_sandbox.Preflight.enabled
-
   let pids_limit = Env_config_sandbox.Hardening.pids_limit
-
   let nofile_limit = Env_config_sandbox.Hardening.nofile_limit
-
   let memory = Env_config_sandbox.Hardening.memory
-
   let tmpfs_size = Env_config_sandbox.Hardening.tmpfs_size
-
   let relax_fs = Env_config_sandbox.Hardening.relax_fs
-
   let read_only_rootfs_args = Env_config_sandbox.Hardening.read_only_rootfs_args
-
   let tmpfs_mount = Env_config_sandbox.Hardening.tmpfs_mount
-
   let seccomp_profile = Env_config_sandbox.Hardening.seccomp_profile
-
   let require_rootless = Env_config_sandbox.Hardening.require_rootless
-
   let require_userns = Env_config_sandbox.Hardening.require_userns
-
   let cleanup_enabled = Env_config_sandbox.Cleanup.enabled
-
   let cleanup_stale_after_sec = Env_config_sandbox.Cleanup.stale_after_sec
-
   let cleanup_interval_sec = Env_config_sandbox.Cleanup.interval_sec
-
   let with_git_dispatch_enabled = Env_config_sandbox.Runtime.git_dispatch
-
   let gh_creds_host_path = Env_config_sandbox.Auth_paths.gh_creds
-
   let gitconfig_host_path = Env_config_sandbox.Auth_paths.gitconfig
-
   let ssh_dir_host_path = Env_config_sandbox.Auth_paths.ssh_dir
 
   let gh_token_probe_timeout_sec =
     Env_config_sandbox.Auth_paths.gh_token_probe_timeout_sec
+  ;;
 
   let close_fd_noerr fd =
     try Unix.close fd with
     | Unix.Unix_error _ -> ()
+  ;;
 
   let waitpid_nohang pid =
     try
@@ -612,6 +618,7 @@ module KeeperSandbox = struct
       | _, status -> Some status
     with
     | Unix.Unix_error (Unix.ECHILD, _, _) -> Some (Unix.WEXITED 127)
+  ;;
 
   let terminate_process pid =
     (try Unix.kill pid Sys.sigterm with
@@ -621,18 +628,19 @@ module KeeperSandbox = struct
       match waitpid_nohang pid with
       | Some _ -> ()
       | None when Unix.gettimeofday () < deadline ->
-          ignore (Unix.select [] [] [] 0.02);
-          wait_for_exit ()
+        ignore (Unix.select [] [] [] 0.02);
+        wait_for_exit ()
       | None ->
-          (try Unix.kill pid Sys.sigkill with
-           | Unix.Unix_error _ -> ());
-          (try
-             let _status = Unix.waitpid [] pid in
-             ()
-           with
-           | Unix.Unix_error _ -> ())
+        (try Unix.kill pid Sys.sigkill with
+         | Unix.Unix_error _ -> ());
+        (try
+           let _status = Unix.waitpid [] pid in
+           ()
+         with
+         | Unix.Unix_error _ -> ())
     in
     wait_for_exit ()
+  ;;
 
   let read_available fd buf =
     let chunk = Bytes.create 512 in
@@ -640,13 +648,13 @@ module KeeperSandbox = struct
       match Unix.read fd chunk 0 (Bytes.length chunk) with
       | 0 -> ()
       | n ->
-          Buffer.add_subbytes buf chunk 0 n;
-          loop ()
-      | exception Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK), _, _) ->
-          ()
+        Buffer.add_subbytes buf chunk 0 n;
+        loop ()
+      | exception Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK), _, _) -> ()
       | exception Unix.Unix_error (Unix.EINTR, _, _) -> loop ()
     in
     loop ()
+  ;;
 
   let run_gh_auth_token_probe () =
     let stdout_rd, stdout_wr = Unix.pipe () in
@@ -660,42 +668,47 @@ module KeeperSandbox = struct
         close_fd_noerr stdin_fd;
         close_fd_noerr stderr_fd)
       (fun () ->
-        let pid =
-          Unix.create_process "gh"
-            [| "gh"; "auth"; "token"; "--hostname"; "github.com" |]
-            stdin_fd stdout_wr stderr_fd
-        in
-        pid_ref := Some pid;
-        close_fd_noerr stdout_wr;
-        Unix.set_nonblock stdout_rd;
-        let deadline = Unix.gettimeofday () +. gh_token_probe_timeout_sec () in
-        let buf = Buffer.create 128 in
-        let rec loop () =
-          read_available stdout_rd buf;
-          match waitpid_nohang pid with
-          | Some (Unix.WEXITED 0) ->
-              read_available stdout_rd buf;
-              let token = String.trim (Buffer.contents buf) in
-              if token = "" then None else Some token
-          | Some _ -> None
-          | None ->
-              let remaining = deadline -. Unix.gettimeofday () in
-              if remaining <= 0.0 then (
-                terminate_process pid;
-                None)
-              else (
-                ignore (Unix.select [ stdout_rd ] [] [] (min 0.05 remaining));
-                loop ())
-        in
-        loop ())
+         let pid =
+           Unix.create_process
+             "gh"
+             [| "gh"; "auth"; "token"; "--hostname"; "github.com" |]
+             stdin_fd
+             stdout_wr
+             stderr_fd
+         in
+         pid_ref := Some pid;
+         close_fd_noerr stdout_wr;
+         Unix.set_nonblock stdout_rd;
+         let deadline = Unix.gettimeofday () +. gh_token_probe_timeout_sec () in
+         let buf = Buffer.create 128 in
+         let rec loop () =
+           read_available stdout_rd buf;
+           match waitpid_nohang pid with
+           | Some (Unix.WEXITED 0) ->
+             read_available stdout_rd buf;
+             let token = String.trim (Buffer.contents buf) in
+             if token = "" then None else Some token
+           | Some _ -> None
+           | None ->
+             let remaining = deadline -. Unix.gettimeofday () in
+             if remaining <= 0.0
+             then (
+               terminate_process pid;
+               None)
+             else (
+               ignore (Unix.select [ stdout_rd ] [] [] (min 0.05 remaining));
+               loop ())
+         in
+         loop ())
     |> fun result ->
     match result, !pid_ref with
     | None, Some pid ->
-        (match waitpid_nohang pid with
-        | None -> terminate_process pid
-        | Some _ -> ());
-        None
+      (match waitpid_nohang pid with
+       | None -> terminate_process pid
+       | Some _ -> ());
+      None
     | _ -> result
+  ;;
 
   type gh_token_probe_cache =
     | Unchecked
@@ -708,17 +721,19 @@ module KeeperSandbox = struct
     match Atomic.get gh_token_probe_cache with
     | Checked token -> token
     | Unchecked ->
-        let token =
-          try
-            match (Atomic.get gh_token_probe) () with
-            | Some token -> String.trim token
-            | None -> ""
-          with _ -> ""
-        in
-        ignore (Atomic.compare_and_set gh_token_probe_cache Unchecked (Checked token));
-        (match Atomic.get gh_token_probe_cache with
-        | Checked cached -> cached
-        | Unchecked -> token)
+      let token =
+        try
+          match (Atomic.get gh_token_probe) () with
+          | Some token -> String.trim token
+          | None -> ""
+        with
+        | _ -> ""
+      in
+      ignore (Atomic.compare_and_set gh_token_probe_cache Unchecked (Checked token));
+      (match Atomic.get gh_token_probe_cache with
+       | Checked cached -> cached
+       | Unchecked -> token)
+  ;;
 
   (** GitHub token forwarded as GH_TOKEN env into the docker git-creds
       execution path. Resolution order:
@@ -733,23 +748,23 @@ module KeeperSandbox = struct
       then skips the -e GH_TOKEN injection and the container falls back to
       whatever credentials are present in the mounted hosts.yml. *)
   let gh_token () =
-    if hard_mode () then
-      ""
-    else
+    if hard_mode ()
+    then ""
+    else (
       let override = get_string ~default:"" "MASC_KEEPER_SANDBOX_GH_TOKEN" in
-      if override <> "" then override
-      else
+      if override <> ""
+      then override
+      else (
         let from_env =
           match Sys.getenv_opt "GH_TOKEN" with
           | Some token -> token
           | None -> ""
         in
-        if from_env <> "" then from_env
-        else gh_token_from_probe_cache ()
+        if from_env <> "" then from_env else gh_token_from_probe_cache ()))
+  ;;
 
   module For_testing = struct
-    let reset_gh_token_probe_cache () =
-      Atomic.set gh_token_probe_cache Unchecked
+    let reset_gh_token_probe_cache () = Atomic.set gh_token_probe_cache Unchecked
 
     let with_gh_token_probe probe f =
       let prior = Atomic.get gh_token_probe in
@@ -760,6 +775,7 @@ module KeeperSandbox = struct
           Atomic.set gh_token_probe prior;
           reset_gh_token_probe_cache ())
         f
+    ;;
   end
 
   (** Legacy RFC-0006 Phase B-1 flag.
@@ -769,14 +785,14 @@ module KeeperSandbox = struct
       config surfaces and should not gate runtime sandbox policy. *)
   let symmetric_read_containment () =
     get_bool ~default:false "MASC_KEEPER_SYMMETRIC_SANDBOX"
+  ;;
 
   (** Legacy RFC-0006 Phase B-2 flag.
 
       Docker read routing now follows [sandbox_profile=docker]
       unconditionally. This getter remains only for backward-compatible
       config surfaces and should not gate runtime sandbox policy. *)
-  let docker_read_routing () =
-    get_bool ~default:false "MASC_KEEPER_DOCKER_READ"
+  let docker_read_routing () = get_bool ~default:false "MASC_KEEPER_DOCKER_READ"
 end
 
 module DashboardHealth = struct
@@ -784,7 +800,10 @@ module DashboardHealth = struct
   let ctx_warn = get_float ~default:0.8 "MASC_DASHBOARD_HEALTH_CTX_WARN"
   let penalty_critical = get_float ~default:20.0 "MASC_DASHBOARD_HEALTH_PENALTY_CRITICAL"
   let penalty_warn = get_float ~default:10.0 "MASC_DASHBOARD_HEALTH_PENALTY_WARN"
-  let runtime_warning_ctx_ratio = get_float ~default:0.95 "MASC_DASHBOARD_RUNTIME_WARNING_CTX_RATIO"
+
+  let runtime_warning_ctx_ratio =
+    get_float ~default:0.95 "MASC_DASHBOARD_RUNTIME_WARNING_CTX_RATIO"
+  ;;
 end
 
 (** {1 Wake-time Payload Telemetry}
@@ -801,8 +820,7 @@ end
 module KeeperTelemetry = struct
   (** Master switch for wake-payload measurement. Default off so the hot
       path is untouched until a baseline sweep is explicitly requested. *)
-  let payload_telemetry_enabled () =
-    get_bool ~default:false "MASC_PAYLOAD_TELEMETRY"
+  let payload_telemetry_enabled () = get_bool ~default:false "MASC_PAYLOAD_TELEMETRY"
 end
 
 (** {1 Cascade Runtime Overrides}
@@ -844,6 +862,7 @@ module KeeperCascade = struct
       (match parts with
        | [] -> None
        | _ -> Some parts)
+  ;;
 end
 
 (** Print configuration summary for debugging *)

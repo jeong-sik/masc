@@ -31,11 +31,12 @@
 (* MASC_BASE_PATH must be set BEFORE Masc_mcp module init. *)
 let () =
   let dir =
-    Filename.concat (Filename.get_temp_dir_name ())
-      (Printf.sprintf "masc-test-anti-rat-gate2-10113-%06x"
-         (Random.bits ()))
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc-test-anti-rat-gate2-10113-%06x" (Random.bits ()))
   in
   Unix.putenv "MASC_BASE_PATH" dir
+;;
 
 module AR = Masc_mcp.Anti_rationalization
 module Prom = Masc_mcp.Prometheus
@@ -43,52 +44,52 @@ module Prom = Masc_mcp.Prometheus
 let metric = Prom.metric_anti_rationalization_excuse_pattern
 
 let counter_for ~pattern ~decision =
-  Prom.metric_value_or_zero metric
-    ~labels:[ ("pattern", pattern); ("decision", decision) ]
-    ()
+  Prom.metric_value_or_zero metric ~labels:[ "pattern", pattern; "decision", decision ] ()
+;;
 
 let make_request ~notes : AR.review_request =
-  {
-    agent_name = "test-keeper-10113";
-    task_title = "test task";
-    task_description = "test description";
-    completion_notes = notes;
+  { agent_name = "test-keeper-10113"
+  ; task_title = "test task"
+  ; task_description = "test description"
+  ; completion_notes = notes
   }
+;;
 
 (* The advisory text must contain the flagged phrase verbatim and
    the reason mapping — operators audit logs by matching this
    exact substring shape, and dashboards pull patterns by name. *)
 let test_build_prompt_includes_advisory_when_supplied () =
   let req =
-    make_request
-      ~notes:"Fixed login flow.  Filed a follow-up issue for the optimization."
+    make_request ~notes:"Fixed login flow.  Filed a follow-up issue for the optimization."
   in
   let prompt =
-    AR.build_prompt
-      ~excuse_advisory:("follow-up", "deferring to a follow-up")
-      req
+    AR.build_prompt ~excuse_advisory:("follow-up", "deferring to a follow-up") req
   in
-  let contains needle =
-    String_util.contains_substring prompt needle
-  in
+  let contains needle = String_util.contains_substring prompt needle in
   Alcotest.(check bool)
     "advisory section appears in prompt"
-    true (contains "<gate2_advisory>");
+    true
+    (contains "<gate2_advisory>");
   Alcotest.(check bool)
     "flagged phrase appears verbatim in advisory"
-    true (contains "follow-up");
+    true
+    (contains "follow-up");
   Alcotest.(check bool)
     "advisory cites the documented reason"
-    true (contains "deferring to a follow-up");
+    true
+    (contains "deferring to a follow-up");
   (* Operator contract: the advisory must explicitly tell the LLM
      to approve in normal engineering context.  This is the
      anti-false-positive instruction. *)
   Alcotest.(check bool)
     "advisory tells LLM to approve in engineering context"
-    true (contains "engineering context");
+    true
+    (contains "engineering context");
   Alcotest.(check bool)
     "advisory says heuristic signal, not verdict"
-    true (contains "heuristic signal")
+    true
+    (contains "heuristic signal")
+;;
 
 (* Without an advisory the prompt should be the normal review
    prompt with NO gate2 leakage. *)
@@ -99,6 +100,7 @@ let test_build_prompt_no_advisory_section_without_input () =
     "no <gate2_advisory> tag when no advisory supplied"
     false
     (String_util.contains_substring prompt "<gate2_advisory>")
+;;
 
 (* Counter label vocabulary contract — pin each decision string
    so dashboards keyed on these labels do not silently break.
@@ -114,12 +116,12 @@ let test_counter_label_vocabulary () =
   let before_advisory = counter_for ~pattern ~decision:"advisory_to_llm" in
   let before_terminal = counter_for ~pattern ~decision:"terminal_reject" in
   let before_safety = counter_for ~pattern ~decision:"advisory_safety_net_reject" in
-  Prom.inc_counter metric
-    ~labels:[ ("pattern", pattern); ("decision", "advisory_to_llm") ] ();
-  Prom.inc_counter metric
-    ~labels:[ ("pattern", pattern); ("decision", "terminal_reject") ] ();
-  Prom.inc_counter metric
-    ~labels:[ ("pattern", pattern); ("decision", "advisory_safety_net_reject") ] ();
+  Prom.inc_counter metric ~labels:[ "pattern", pattern; "decision", "advisory_to_llm" ] ();
+  Prom.inc_counter metric ~labels:[ "pattern", pattern; "decision", "terminal_reject" ] ();
+  Prom.inc_counter
+    metric
+    ~labels:[ "pattern", pattern; "decision", "advisory_safety_net_reject" ]
+    ();
   Alcotest.(check (float 0.0001))
     "advisory_to_llm bucket +1"
     (before_advisory +. 1.0)
@@ -132,40 +134,43 @@ let test_counter_label_vocabulary () =
     "advisory_safety_net_reject bucket +1"
     (before_safety +. 1.0)
     (counter_for ~pattern ~decision:"advisory_safety_net_reject")
+;;
 
 (* Per-pattern label isolation — flagging "follow-up" must not
    leak into the "pre-existing" counter and vice versa.
    Regression guard for the "single undifferentiated counter"
    anti-pattern. *)
 let test_pattern_label_isolation () =
-  let before_other =
-    counter_for ~pattern:"out of scope" ~decision:"advisory_to_llm"
-  in
-  Prom.inc_counter metric
-    ~labels:[
-      ("pattern", "follow-up");
-      ("decision", "advisory_to_llm");
-    ] ();
+  let before_other = counter_for ~pattern:"out of scope" ~decision:"advisory_to_llm" in
+  Prom.inc_counter
+    metric
+    ~labels:[ "pattern", "follow-up"; "decision", "advisory_to_llm" ]
+    ();
   Alcotest.(check (float 0.0001))
     "out-of-scope bucket unchanged when follow-up fires"
     before_other
     (counter_for ~pattern:"out of scope" ~decision:"advisory_to_llm")
+;;
 
 let () =
-  Alcotest.run "anti_rationalization_gate2_advisory_10113"
-    [
-      ( "build_prompt",
-        [
-          Alcotest.test_case "advisory section included when supplied"
-            `Quick test_build_prompt_includes_advisory_when_supplied;
-          Alcotest.test_case "no advisory section without input"
-            `Quick test_build_prompt_no_advisory_section_without_input;
-        ] );
-      ( "counter_labels",
-        [
-          Alcotest.test_case "decision vocabulary stable"
-            `Quick test_counter_label_vocabulary;
-          Alcotest.test_case "per-pattern isolation"
-            `Quick test_pattern_label_isolation;
-        ] );
+  Alcotest.run
+    "anti_rationalization_gate2_advisory_10113"
+    [ ( "build_prompt"
+      , [ Alcotest.test_case
+            "advisory section included when supplied"
+            `Quick
+            test_build_prompt_includes_advisory_when_supplied
+        ; Alcotest.test_case
+            "no advisory section without input"
+            `Quick
+            test_build_prompt_no_advisory_section_without_input
+        ] )
+    ; ( "counter_labels"
+      , [ Alcotest.test_case
+            "decision vocabulary stable"
+            `Quick
+            test_counter_label_vocabulary
+        ; Alcotest.test_case "per-pattern isolation" `Quick test_pattern_label_isolation
+        ] )
     ]
+;;

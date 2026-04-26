@@ -2,13 +2,13 @@
     Exposed so dashboard surfaces can report the real count of
     [pending_ruling] cases instead of a hardcoded zero.  See #7815. *)
 
-type case = {
-  id : string;
-  title : string;
-  status : string;
-  risk_class : string;
-  created_at : float;
-}
+type case =
+  { id : string
+  ; title : string
+  ; status : string
+  ; risk_class : string
+  ; created_at : float
+  }
 
 (** [cases_dir ~base_path] is the on-disk location the helper scans. *)
 val cases_dir : base_path:string -> string
@@ -29,5 +29,4 @@ val pending_ruling_count : base_path:string -> int
     [pending_ruling], relative to [now_ts].  Returns [None] when no
     such case exists or when the newest created_at is in the future
     (clock skew). *)
-val oldest_pending_ruling_age_s :
-  base_path:string -> now_ts:float -> float option
+val oldest_pending_ruling_age_s : base_path:string -> now_ts:float -> float option

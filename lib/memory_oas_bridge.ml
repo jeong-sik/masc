@@ -24,13 +24,13 @@
     @since 2.140.0 (filesystem-first: JSONL long_term_backend always)
     @since 2.266.0 (RFC-MASC-004 Phase 3: imperative seeding removed) *)
 
-module SMap = Map.Make(String)
+module SMap = Map.Make (String)
 
 let rec atomic_update atomic f =
   let old_val = Atomic.get atomic in
   let new_val = f old_val in
-  if Atomic.compare_and_set atomic old_val new_val then ()
-  else atomic_update atomic f
+  if Atomic.compare_and_set atomic old_val new_val then () else atomic_update atomic f
+;;
 
 (** Default importance for memories stored via OAS Memory.store.
     Configurable via MASC_MEMORY_OAS_DEFAULT_IMPORTANCE. *)
@@ -44,6 +44,7 @@ let importance_of_json (json : Yojson.Safe.t) : int =
      | Some (`Int n) -> max 1 (min 10 n)
      | _ -> default_importance ())
   | _ -> default_importance ()
+;;
 
 (** Extract content string from JSON value. *)
 let content_of_json (json : Yojson.Safe.t) : string =
@@ -54,10 +55,10 @@ let content_of_json (json : Yojson.Safe.t) : string =
      | Some (`String s) -> s
      | _ -> Yojson.Safe.to_string json)
   | _ -> Yojson.Safe.to_string json
+;;
 
 (** Generate a timestamp-based session ID as fallback. *)
-let generate_session_id () =
-  Printf.sprintf "%d" (int_of_float (Unix.gettimeofday ()))
+let generate_session_id () = Printf.sprintf "%d" (int_of_float (Unix.gettimeofday ()))
 
 (** Resolve the JSONL fallback root for OAS memory.
 
@@ -70,6 +71,7 @@ let resolve_base_dir ?(base_dir : string option) ?(config : Coord_utils.config o
   | Some dir, _ -> dir
   | None, Some cfg -> Common.masc_dir_from_base_path ~base_path:cfg.base_path
   | None, None -> Common.masc_dir_from_base_path ~base_path:(Env_config.base_path ())
+;;
 
 type file_stamp = float * int
 
@@ -80,20 +82,22 @@ let file_stamp_opt path =
   with
   | Unix.Unix_error _ -> None
   | Sys_error _ -> None
+;;
 
-type episode_file_cache = {
-  stamp : file_stamp option;
-  episodes : Institution_eio.episode list;
-  ids : unit SMap.t;
-}
+type episode_file_cache =
+  { stamp : file_stamp option
+  ; episodes : Institution_eio.episode list
+  ; ids : unit SMap.t
+  }
 
-let episode_file_cache_tbl : episode_file_cache SMap.t Atomic.t =
-  Atomic.make SMap.empty
+let episode_file_cache_tbl : episode_file_cache SMap.t Atomic.t = Atomic.make SMap.empty
 
 let episode_ids_of episodes =
   List.fold_left
     (fun acc (episode : Institution_eio.episode) -> SMap.add episode.id () acc)
-    SMap.empty episodes
+    SMap.empty
+    episodes
+;;
 
 (* Keep at most this many episodes in the in-memory cache.
    Callers that need fewer use cached_recent_episodes ~limit. *)
@@ -104,10 +108,9 @@ let episode_cache_limit = 500
    with no lock held. *)
 let build_episode_cache_from_disk path =
   let stamp = file_stamp_opt path in
-  let episodes =
-    Institution_eio.load_recent_episodes_jsonl ~limit:episode_cache_limit
-  in
+  let episodes = Institution_eio.load_recent_episodes_jsonl ~limit:episode_cache_limit in
   { stamp; episodes; ids = episode_ids_of episodes }
+;;
 
 (* Cache-aware episode loader.
 
@@ -143,21 +146,22 @@ let load_all_episodes_cached () =
   match cached_opt with
   | Some cache -> cache
   | None ->
-      let fresh = build_episode_cache_from_disk path in
-      atomic_update episode_file_cache_tbl (fun map ->
-        SMap.add path fresh map);
-      fresh
+    let fresh = build_episode_cache_from_disk path in
+    atomic_update episode_file_cache_tbl (fun map -> SMap.add path fresh map);
+    fresh
+;;
 
 let rec drop_list n = function
   | [] -> []
   | remaining when n <= 0 -> remaining
   | _ :: rest -> drop_list (n - 1) rest
+;;
 
 let cached_recent_episodes ~limit =
   let cache = load_all_episodes_cached () in
   let total = List.length cache.episodes in
-  if total <= limit then cache.episodes
-  else drop_list (total - limit) cache.episodes
+  if total <= limit then cache.episodes else drop_list (total - limit) cache.episodes
+;;
 
 (* Record an episode that was just appended to the JSONL file.
 
@@ -179,41 +183,40 @@ let note_episode_flush (episode : Institution_eio.episode) =
     match SMap.find_opt path map with
     | None -> map
     | Some cache ->
-      if not (SMap.mem episode.id cache.ids) then begin
-        let episodes = cache.episodes @ [episode] in
+      if not (SMap.mem episode.id cache.ids)
+      then (
+        let episodes = cache.episodes @ [ episode ] in
         let total = List.length episodes in
         let ids_ref = ref (SMap.add episode.id () cache.ids) in
         let episodes =
-          if total > episode_cache_limit then
+          if total > episode_cache_limit
+          then (
             let drop_n = total - episode_cache_limit in
             let rec drop_with_evict n = function
               | [] -> []
               | remaining when n <= 0 -> remaining
               | (ep : Institution_eio.episode) :: rest ->
-                  ids_ref := SMap.remove ep.id !ids_ref;
-                  drop_with_evict (n - 1) rest
+                ids_ref := SMap.remove ep.id !ids_ref;
+                drop_with_evict (n - 1) rest
             in
-            drop_with_evict drop_n episodes
-          else
-            episodes
+            drop_with_evict drop_n episodes)
+          else episodes
         in
-        let new_cache = {
-          stamp = file_stamp_opt path;
-          episodes;
-          ids = !ids_ref;
-        } in
-        SMap.add path new_cache map
-      end else
-        let new_cache = { cache with stamp = file_stamp_opt path } in
+        let new_cache = { stamp = file_stamp_opt path; episodes; ids = !ids_ref } in
         SMap.add path new_cache map)
+      else (
+        let new_cache = { cache with stamp = file_stamp_opt path } in
+        SMap.add path new_cache map))
+;;
 
-type procedure_file_cache = {
-  stamp : file_stamp option;
-  procedures : Procedural_memory.procedure list;
-}
+type procedure_file_cache =
+  { stamp : file_stamp option
+  ; procedures : Procedural_memory.procedure list
+  }
 
 let procedure_file_cache_tbl : procedure_file_cache SMap.t Atomic.t =
   Atomic.make SMap.empty
+;;
 
 let load_procedures_cached ~(agent_name : string) =
   let path = Procedural_memory.procedures_path ~agent_name in
@@ -221,24 +224,29 @@ let load_procedures_cached ~(agent_name : string) =
   match SMap.find_opt path (Atomic.get procedure_file_cache_tbl) with
   | Some cache when cache.stamp = stamp -> cache.procedures
   | _ ->
-      let procedures = Procedural_memory.load_procedures ~agent_name in
-      atomic_update procedure_file_cache_tbl (fun map ->
-        SMap.add path { stamp; procedures } map);
-      procedures
+    let procedures = Procedural_memory.load_procedures ~agent_name in
+    atomic_update procedure_file_cache_tbl (fun map ->
+      SMap.add path { stamp; procedures } map);
+    procedures
+;;
 
-let store_procedures_cache ~(agent_name : string)
-    (procedures : Procedural_memory.procedure list) =
+let store_procedures_cache
+      ~(agent_name : string)
+      (procedures : Procedural_memory.procedure list)
+  =
   let path = Procedural_memory.procedures_path ~agent_name in
   let stamp = file_stamp_opt path in
   atomic_update procedure_file_cache_tbl (fun map ->
     SMap.add path { stamp; procedures } map)
+;;
 
 let top_procedures_cached ~(agent_name : string) ~(limit : int) =
   load_procedures_cached ~agent_name
   |> List.filter Procedural_memory.is_crystallized
   |> List.sort (fun (a : Procedural_memory.procedure) (b : Procedural_memory.procedure) ->
-         Float.compare b.confidence a.confidence)
+    Float.compare b.confidence a.confidence)
   |> List.filteri (fun i _ -> i < limit)
+;;
 
 (** Create an OAS [long_term_backend].
 
@@ -246,29 +254,38 @@ let top_procedures_cached ~(agent_name : string) ~(limit : int) =
     [.masc/memory/<agent_name>/<session_id>.jsonl].
     Filesystem-first: PG pool availability is not checked. *)
 let make_backend ?base_dir ~(agent_name : string) ~(session_id : string) ()
-  : Oas.Memory.long_term_backend =
+  : Oas.Memory.long_term_backend
+  =
   let base_dir = resolve_base_dir ?base_dir () in
   Memory_jsonl.make_backend ~base_dir ~agent_name ~session_id
+;;
 
 (** Create an OAS [Memory.t] instance.
 
     Uses JSONL long_term_backend (filesystem-first).
     @param session_id Session identifier; defaults to timestamp-based ID. *)
-let create_memory ~(agent_name : string) ?(base_dir : string option)
-    ?(session_id : string option)
-    () : Oas.Memory.t =
-  let sid = match session_id with
+let create_memory
+      ~(agent_name : string)
+      ?(base_dir : string option)
+      ?(session_id : string option)
+      ()
+  : Oas.Memory.t
+  =
+  let sid =
+    match session_id with
     | Some s -> s
     | None -> generate_session_id ()
   in
   let backend = make_backend ?base_dir ~agent_name ~session_id:sid () in
   Oas.Memory.create ~long_term:backend ()
+;;
 
 (** Load and return the institution welcome text, or [None] when empty.
     Used by [load_institution_text]. *)
 let read_institution_welcome (config : Coord_utils.config) : string option =
   let welcome = Institution_eio.load_and_format_for_welcome ~fs:() config in
   if welcome = "" then None else Some welcome
+;;
 
 (* ================================================================ *)
 (* Episodic tier: Institution_eio JSONL <-> OAS episodes            *)
@@ -281,39 +298,42 @@ let default_episode_salience (episode : Institution_eio.episode) =
     | `Failure -> 0.95
     | `Partial -> 0.6
   in
-  let learning_bonus =
-    min 0.15 (float_of_int (List.length episode.learnings) *. 0.03)
-  in
+  let learning_bonus = min 0.15 (float_of_int (List.length episode.learnings) *. 0.03) in
   Float.min 1.0 (base +. learning_bonus)
+;;
 
 let oas_outcome_of_institution (episode : Institution_eio.episode) =
   match episode.outcome with
   | `Success -> Oas.Memory.Success episode.summary
   | `Failure -> Oas.Memory.Failure episode.summary
   | `Partial -> Oas.Memory.Neutral
+;;
 
 let metadata_string key metadata =
   match List.assoc_opt key metadata with
   | Some (`String value) when String.trim value <> "" -> Some value
   | _ -> None
+;;
 
 let metadata_string_list key metadata =
   match List.assoc_opt key metadata with
   | Some (`List values) ->
-      values
-      |> List.filter_map (function
-           | `String value when String.trim value <> "" -> Some value
-           | _ -> None)
+    values
+    |> List.filter_map (function
+      | `String value when String.trim value <> "" -> Some value
+      | _ -> None)
   | _ -> []
+;;
 
 let metadata_context key metadata =
   match List.assoc_opt key metadata with
   | Some (`Assoc fields) ->
-      fields
-      |> List.filter_map (function
-           | k, `String value -> Some (k, value)
-           | _ -> None)
+    fields
+    |> List.filter_map (function
+      | k, `String value -> Some (k, value)
+      | _ -> None)
   | _ -> []
+;;
 
 let metadata_float key metadata =
   match List.assoc_opt key metadata with
@@ -321,53 +341,49 @@ let metadata_float key metadata =
   | Some (`Int value) -> Some (float_of_int value)
   | Some (`Intlit value) -> float_of_string_opt value
   | _ -> None
+;;
 
 let institution_outcome_to_string = function
   | `Success -> "success"
   | `Failure -> "failure"
   | `Partial -> "partial"
+;;
 
 let institution_outcome_of_string = function
   | "success" -> Some `Success
   | "failure" -> Some `Failure
   | "partial" -> Some `Partial
   | _ -> None
+;;
 
-let oas_episode_of_institution (episode : Institution_eio.episode) :
-    Oas.Memory.episode =
-  {
-    id = episode.id;
-    timestamp = episode.timestamp;
-    participants = episode.participants;
-    action = episode.summary;
-    outcome = oas_outcome_of_institution episode;
-    salience = default_episode_salience episode;
-    metadata =
-      [
-        ("event_type", `String episode.event_type);
-        ("institution_summary", `String episode.summary);
-        ( "institution_outcome",
-          `String (institution_outcome_to_string episode.outcome) );
-        ( "learnings",
-          `List (List.map (fun learning -> `String learning) episode.learnings)
-        );
-        ( "context",
-          `Assoc
-            (List.map (fun (key, value) -> (key, `String value)) episode.context)
-        );
-        ("source", `String "institution_jsonl");
-      ];
+let oas_episode_of_institution (episode : Institution_eio.episode) : Oas.Memory.episode =
+  { id = episode.id
+  ; timestamp = episode.timestamp
+  ; participants = episode.participants
+  ; action = episode.summary
+  ; outcome = oas_outcome_of_institution episode
+  ; salience = default_episode_salience episode
+  ; metadata =
+      [ "event_type", `String episode.event_type
+      ; "institution_summary", `String episode.summary
+      ; "institution_outcome", `String (institution_outcome_to_string episode.outcome)
+      ; "learnings", `List (List.map (fun learning -> `String learning) episode.learnings)
+      ; ( "context"
+        , `Assoc (List.map (fun (key, value) -> key, `String value) episode.context) )
+      ; "source", `String "institution_jsonl"
+      ]
   }
+;;
 
-let institution_episode_of_oas ~(agent_name : string)
-    (episode : Oas.Memory.episode) : Institution_eio.episode =
+let institution_episode_of_oas ~(agent_name : string) (episode : Oas.Memory.episode)
+  : Institution_eio.episode
+  =
   let summary =
     metadata_string "institution_summary" episode.metadata
     |> Option.value ~default:episode.action
   in
   let event_type =
-    metadata_string "event_type" episode.metadata
-    |> Option.value ~default:"oas_memory"
+    metadata_string "event_type" episode.metadata |> Option.value ~default:"oas_memory"
   in
   let learnings = metadata_string_list "learnings" episode.metadata in
   let context = metadata_context "context" episode.metadata in
@@ -378,28 +394,27 @@ let institution_episode_of_oas ~(agent_name : string)
         institution_outcome_of_string
     with
     | Some preserved -> preserved
-    | None -> (
-        match episode.outcome with
-        | Oas.Memory.Success _ -> `Success
-        | Oas.Memory.Failure _ -> `Failure
-        | Oas.Memory.Neutral -> `Partial)
+    | None ->
+      (match episode.outcome with
+       | Oas.Memory.Success _ -> `Success
+       | Oas.Memory.Failure _ -> `Failure
+       | Oas.Memory.Neutral -> `Partial)
   in
   let participants =
-    if episode.participants <> [] then episode.participants
-    else [ agent_name ]
+    if episode.participants <> [] then episode.participants else [ agent_name ]
   in
-  {
-    Institution_eio.id = episode.id;
-    timestamp =
+  { Institution_eio.id = episode.id
+  ; timestamp =
       metadata_float "timestamp" episode.metadata
-      |> Option.value ~default:episode.timestamp;
-    participants;
-    event_type;
-    summary;
-    outcome;
-    learnings;
-    context;
+      |> Option.value ~default:episode.timestamp
+  ; participants
+  ; event_type
+  ; summary
+  ; outcome
+  ; learnings
+  ; context
   }
+;;
 
 (** Create an OAS episode from a keeper [STATE] snapshot and store it
     in [Memory.t].  The episode is later flushed to institution JSONL by
@@ -408,17 +423,19 @@ let institution_episode_of_oas ~(agent_name : string)
     Metadata keys match what [institution_episode_of_oas] expects, so
     the round-trip Institution_eio -> OAS -> Institution_eio is lossless. *)
 let store_episode_from_snapshot
-    ~(memory : Oas.Memory.t)
-    ~(keeper_name : string)
-    ~(turn : int)
-    ~(trace_id : string)
-    (snapshot : Keeper_memory_policy.keeper_state_snapshot) : unit =
+      ~(memory : Oas.Memory.t)
+      ~(keeper_name : string)
+      ~(turn : int)
+      ~(trace_id : string)
+      (snapshot : Keeper_memory_policy.keeper_state_snapshot)
+  : unit
+  =
   let parts =
-    List.filter_map Fun.id
-      [
-        Option.map (fun g -> "Goal: " ^ g) snapshot.goal;
-        Option.map (fun p -> "Progress: " ^ p) snapshot.progress;
-        Option.map (fun d -> "Done: " ^ d) snapshot.done_summary;
+    List.filter_map
+      Fun.id
+      [ Option.map (fun g -> "Goal: " ^ g) snapshot.goal
+      ; Option.map (fun p -> "Progress: " ^ p) snapshot.progress
+      ; Option.map (fun d -> "Done: " ^ d) snapshot.done_summary
       ]
   in
   let summary =
@@ -427,110 +444,111 @@ let store_episode_from_snapshot
     | _ -> String.concat "; " parts
   in
   let learnings =
-    (snapshot.decisions @ snapshot.constraints)
+    snapshot.decisions @ snapshot.constraints
     |> List.filter (fun s -> String.trim s <> "")
   in
   let outcome_str, outcome =
-    if snapshot.done_summary <> None then
-      ("success", Oas.Memory.Success summary)
-    else ("partial", Oas.Memory.Neutral)
+    if snapshot.done_summary <> None
+    then "success", Oas.Memory.Success summary
+    else "partial", Oas.Memory.Neutral
   in
   let ts = Time_compat.now () in
   let episode_id =
-    Printf.sprintf "keeper-%s-t%d-%d" keeper_name turn
+    Printf.sprintf
+      "keeper-%s-t%d-%d"
+      keeper_name
+      turn
       (int_of_float (ts *. 1000.0) mod 1_000_000)
   in
   let episode : Oas.Memory.episode =
-    {
-      id = episode_id;
-      timestamp = ts;
-      participants = [ keeper_name ];
-      action = summary;
-      outcome;
-      salience = 0.6;
-      metadata =
-        [
-          ("event_type", `String "keeper_turn");
-          ("institution_summary", `String summary);
-          ("institution_outcome", `String outcome_str);
-          ( "learnings",
-            `List (List.map (fun l -> `String l) learnings) );
-          ( "context",
-            `Assoc
-              [
-                ("trace_id", `String trace_id);
-                ("turn", `String (string_of_int turn));
-              ] );
-        ];
+    { id = episode_id
+    ; timestamp = ts
+    ; participants = [ keeper_name ]
+    ; action = summary
+    ; outcome
+    ; salience = 0.6
+    ; metadata =
+        [ "event_type", `String "keeper_turn"
+        ; "institution_summary", `String summary
+        ; "institution_outcome", `String outcome_str
+        ; "learnings", `List (List.map (fun l -> `String l) learnings)
+        ; ( "context"
+          , `Assoc [ "trace_id", `String trace_id; "turn", `String (string_of_int turn) ]
+          )
+        ]
     }
   in
   Oas.Memory.store_episode memory episode
+;;
 
 (** #10341 (#10350): emit Agent_stress Timeout event for timeout-shaped
     error_kind from institution failure path. *)
 let timeout_error_kinds =
   [ "oas_timeout_budget"; "turn_timeout"; "admission_queue_timeout" ]
+;;
 
 let stress_kind_for_error_kind error_kind =
   let trimmed = String.trim error_kind in
-  if List.exists (String.equal trimmed) timeout_error_kinds then
-    Some Agent_stress.Timeout
+  if List.exists (String.equal trimmed) timeout_error_kinds
+  then Some Agent_stress.Timeout
   else None
+;;
 
 let emit_stress_for_failure ~keeper_name ~error_kind =
   match stress_kind_for_error_kind error_kind with
   | None -> ()
   | Some stress_kind ->
-      Agent_stress.record
-        {
-          agent_name = keeper_name;
-          room_id = "";
-          kind = stress_kind;
-          timestamp = Unix.gettimeofday ();
-        }
+    Agent_stress.record
+      { agent_name = keeper_name
+      ; room_id = ""
+      ; kind = stress_kind
+      ; timestamp = Unix.gettimeofday ()
+      }
+;;
 
 (** #10325 (#10339): per-failure-kind counter + structured learnings replacing
     boilerplate. Was 97% identical static string before. *)
 let institution_episode_failure_kind_metric =
   "masc_institution_episode_failure_kind_total"
+;;
 
 let () =
   Prometheus.register_counter
     ~name:institution_episode_failure_kind_metric
     ~help:
-      "Total institution_episodes failure entries grouped by \
-       error_kind. Pre-#10325 the [learnings] field was a static \
-       boilerplate string in 97% of failure rows; this counter \
-       surfaces the actual failure-mode distribution so operators \
-       can see which kind dominates without grepping the JSONL.  \
-       Labels: error_kind."
+      "Total institution_episodes failure entries grouped by error_kind. Pre-#10325 the \
+       [learnings] field was a static boilerplate string in 97% of failure rows; this \
+       counter surfaces the actual failure-mode distribution so operators can see which \
+       kind dominates without grepping the JSONL.  Labels: error_kind."
     ()
+;;
 
 let normalize_error_kind kind =
   let trimmed = String.trim kind in
   if trimmed = "" then "unspecified" else trimmed
+;;
 
 let failure_learnings ~error_kind ~error_preview =
-  let kind_part =
-    Printf.sprintf "failure_kind: %s" (normalize_error_kind error_kind)
-  in
+  let kind_part = Printf.sprintf "failure_kind: %s" (normalize_error_kind error_kind) in
   let preview_part =
     let trimmed = String.trim error_preview in
-    if trimmed = "" then None
-    else Some (Printf.sprintf "error_preview: %s" trimmed)
+    if trimmed = "" then None else Some (Printf.sprintf "error_preview: %s" trimmed)
   in
   match preview_part with
   | Some p -> [ kind_part; p ]
   | None -> [ kind_part ]
+;;
 
 let store_failed_turn_episode
-    ~(memory : Oas.Memory.t)
-    ~(keeper_name : string)
-    ~(turn : int)
-    ~(trace_id : string)
-    ~(error_kind : string)
-    ~(error_message : string)
-    () : unit =
+      ~(memory : Oas.Memory.t)
+      ~(keeper_name : string)
+      ~(turn : int)
+      ~(trace_id : string)
+      ~(error_kind : string)
+      ~(error_message : string)
+      ()
+  : unit
+  =
   let error_preview =
     String_util.utf8_safe ~max_bytes:403 ~suffix:"..." error_message
     |> String_util.to_string
@@ -540,35 +558,34 @@ let store_failed_turn_episode
     |> String_util.to_string
   in
   let summary =
-    Printf.sprintf "keeper turn %d failed (%s): %s" turn error_kind
-      error_preview
+    Printf.sprintf "keeper turn %d failed (%s): %s" turn error_kind error_preview
   in
-  Prometheus.inc_counter institution_episode_failure_kind_metric
-    ~labels:[ ("error_kind", normalize_error_kind error_kind) ]
+  Prometheus.inc_counter
+    institution_episode_failure_kind_metric
+    ~labels:[ "error_kind", normalize_error_kind error_kind ]
     ();
   let ts = Time_compat.now () in
   let episode_id =
-    Printf.sprintf "keeper-%s-t%d-failure-%d" keeper_name turn
+    Printf.sprintf
+      "keeper-%s-t%d-failure-%d"
+      keeper_name
+      turn
       (int_of_float (ts *. 1000.0) mod 1_000_000)
   in
   emit_stress_for_failure ~keeper_name ~error_kind;
-  let learnings =
-    failure_learnings ~error_kind ~error_preview
-  in
+  let learnings = failure_learnings ~error_kind ~error_preview in
   let episode : Oas.Memory.episode =
-    {
-      id = episode_id;
-      timestamp = ts;
-      participants = [ keeper_name ];
-      action = summary;
-      outcome = Oas.Memory.Failure error_context;
-      salience = 0.8;
-      metadata =
-        [
-          ("event_type", `String "keeper_turn");
-          ("institution_summary", `String summary);
-          ("institution_outcome", `String "failure");
-          (* #10325: emit failure-specific learning tags from the
+    { id = episode_id
+    ; timestamp = ts
+    ; participants = [ keeper_name ]
+    ; action = summary
+    ; outcome = Oas.Memory.Failure error_context
+    ; salience = 0.8
+    ; metadata =
+        [ "event_type", `String "keeper_turn"
+        ; "institution_summary", `String summary
+        ; "institution_outcome", `String "failure"
+        ; (* #10325: emit failure-specific learning tags from the
              structured error metadata.  Generic boilerplate
              ("persist failed keeper turns ...") was removed because
              it filled 97% of failure entries with no per-failure
@@ -576,23 +593,21 @@ let store_failed_turn_episode
              When neither error_kind nor error_message has signal,
              emit the explicit [NO_LEARNING] sentinel so downstream
              readers can distinguish absent data from a placeholder. *)
-          ( "learnings",
-            `List (List.map (fun s -> `String s) learnings) );
-          ( "context",
-            `Assoc
-              [
-                ("trace_id", `String trace_id);
-                ("turn", `String (string_of_int turn));
-                ("error_kind", `String error_kind);
-                ("error_message", `String error_context);
-              ] );
-        ];
+          "learnings", `List (List.map (fun s -> `String s) learnings)
+        ; ( "context"
+          , `Assoc
+              [ "trace_id", `String trace_id
+              ; "turn", `String (string_of_int turn)
+              ; "error_kind", `String error_kind
+              ; "error_message", `String error_context
+              ] )
+        ]
     }
   in
   Oas.Memory.store_episode memory episode
+;;
 
-let persisted_episode_ids () =
-  (load_all_episodes_cached ()).ids
+let persisted_episode_ids () = (load_all_episodes_cached ()).ids
 
 (** Flush new OAS episodes.
 
@@ -606,27 +621,30 @@ let flush_episodes ~(memory : Oas.Memory.t) ~(agent_name : string) : int =
     Oas.Memory.recall_episodes memory ~limit:max_int ()
     |> List.fold_left
          (fun (flushed, p_ids) (episode : Oas.Memory.episode) ->
-           if SMap.mem episode.id p_ids then (flushed, p_ids)
-           else (
-             let persisted = institution_episode_of_oas ~agent_name episode in
-             Fs_compat.append_jsonl path
-               (Institution_eio.episode_to_json persisted);
-             note_episode_flush persisted;
-             (flushed + 1, SMap.add episode.id () p_ids)))
+            if SMap.mem episode.id p_ids
+            then flushed, p_ids
+            else (
+              let persisted = institution_episode_of_oas ~agent_name episode in
+              Fs_compat.append_jsonl path (Institution_eio.episode_to_json persisted);
+              note_episode_flush persisted;
+              flushed + 1, SMap.add episode.id () p_ids))
          (0, persisted_ids)
   in
   (* Cap file growth. Called after append so we only rewrite when needed. *)
-  if flushed > 0 then begin
+  if flushed > 0
+  then (
     try
       let dropped = Institution_eio.cap_episodes_jsonl () in
-      if dropped > 0 then
-        Log.Institution.info "capped institution_episodes.jsonl: dropped %d old entries" dropped
+      if dropped > 0
+      then
+        Log.Institution.info
+          "capped institution_episodes.jsonl: dropped %d old entries"
+          dropped
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn ->
-      Log.Institution.warn "episode cap failed: %s" (Printexc.to_string exn)
-  end;
+    | exn -> Log.Institution.warn "episode cap failed: %s" (Printexc.to_string exn));
   flushed
+;;
 
 (* ================================================================ *)
 (* Procedural tier: Procedural_memory <-> OAS procedures            *)
@@ -638,62 +656,79 @@ let flush_episodes ~(memory : Oas.Memory.t) ~(agent_name : string) : int =
     OAS separates [pattern] (trigger) from [action] (what to do).
     We use the full string for both fields since they are combined
     in MASC's representation. *)
-let oas_procedure_of_masc (p : Procedural_memory.procedure) :
-    Oas.Memory.procedure =
-  {
-    id = p.id;
-    pattern = p.pattern;
-    action = p.pattern;  (* MASC combines trigger+action in pattern *)
-    success_count = p.success_count;
-    failure_count = p.failure_count;
-    confidence = p.confidence;
-    last_used = p.last_applied;
-    metadata = [
-      ("agent_name", `String p.agent_name);
-      ("created_at", `Float p.created_at);
-      ("evidence_count", `Int (List.length p.evidence));
-    ];
+let oas_procedure_of_masc (p : Procedural_memory.procedure) : Oas.Memory.procedure =
+  { id = p.id
+  ; pattern = p.pattern
+  ; action = p.pattern
+  ; (* MASC combines trigger+action in pattern *)
+    success_count = p.success_count
+  ; failure_count = p.failure_count
+  ; confidence = p.confidence
+  ; last_used = p.last_applied
+  ; metadata =
+      [ "agent_name", `String p.agent_name
+      ; "created_at", `Float p.created_at
+      ; "evidence_count", `Int (List.length p.evidence)
+      ]
   }
+;;
 
-let render_lesson_prompt_context ~(memory : Oas.Memory.t)
-    ~(pattern : string) ~(limit : int) =
+let render_lesson_prompt_context
+      ~(memory : Oas.Memory.t)
+      ~(pattern : string)
+      ~(limit : int)
+  =
   Oas.Lesson_memory.retrieve_lessons memory ~pattern ~limit ()
   |> Oas.Lesson_memory.render_prompt_context
+;;
 
-let record_failure_lesson ~(memory : Oas.Memory.t)
-    ~(pattern : string) ~(summary : string)
-    ?action ?stdout ?stderr ?diff_summary ?trace_summary ?metric_name
-    ?metric_error ~(participants : string list)
-    ~(metadata : (string * Yojson.Safe.t) list) () =
+let record_failure_lesson
+      ~(memory : Oas.Memory.t)
+      ~(pattern : string)
+      ~(summary : string)
+      ?action
+      ?stdout
+      ?stderr
+      ?diff_summary
+      ?trace_summary
+      ?metric_name
+      ?metric_error
+      ~(participants : string list)
+      ~(metadata : (string * Yojson.Safe.t) list)
+      ()
+  =
   ignore
-    (Oas.Lesson_memory.record_failure memory
-       {
-         pattern;
-         summary;
-         action;
-         stdout;
-         stderr;
-         diff_summary;
-         trace_summary;
-         metric_name;
-         metric_error;
-         participants;
-         metadata;
+    (Oas.Lesson_memory.record_failure
+       memory
+       { pattern
+       ; summary
+       ; action
+       ; stdout
+       ; stderr
+       ; diff_summary
+       ; trace_summary
+       ; metric_name
+       ; metric_error
+       ; participants
+       ; metadata
        })
+;;
 
 let dedupe_procedures_by_id (procs : Procedural_memory.procedure list) =
   let latest_by_id = Hashtbl.create (max 16 (List.length procs)) in
-  List.iter (fun (p : Procedural_memory.procedure) ->
-    Hashtbl.replace latest_by_id p.id p
-  ) procs;
+  List.iter
+    (fun (p : Procedural_memory.procedure) -> Hashtbl.replace latest_by_id p.id p)
+    procs;
   let seen = Hashtbl.create (Hashtbl.length latest_by_id) in
-  List.filter_map (fun (p : Procedural_memory.procedure) ->
-    if Hashtbl.mem seen p.id then None
-    else begin
-      Hashtbl.add seen p.id ();
-      Hashtbl.find_opt latest_by_id p.id
-    end
-  ) procs
+  List.filter_map
+    (fun (p : Procedural_memory.procedure) ->
+       if Hashtbl.mem seen p.id
+       then None
+       else (
+         Hashtbl.add seen p.id ();
+         Hashtbl.find_opt latest_by_id p.id))
+    procs
+;;
 
 (** Flush OAS procedures back to [Procedural_memory].
 
@@ -701,58 +736,65 @@ let dedupe_procedures_by_id (procs : Procedural_memory.procedure list) =
     (new success/failure counts) and persists them.
     Returns the number of procedures flushed. *)
 let flush_procedures ~(memory : Oas.Memory.t) ~(agent_name : string) : int =
-  let oas_procs =
-    Oas.Memory.matching_procedures memory
-      ~pattern:"" ()
-  in
+  let oas_procs = Oas.Memory.matching_procedures memory ~pattern:"" () in
   let existing_raw = load_procedures_cached ~agent_name in
   let procedures = ref (dedupe_procedures_by_id existing_raw) in
   let needs_rewrite = ref (List.length existing_raw <> List.length !procedures) in
   let flushed = ref 0 in
-  List.iter (fun (op : Oas.Memory.procedure) ->
-    let updated =
-      match List.find_opt (fun (p : Procedural_memory.procedure) ->
-        p.id = op.id
-      ) !procedures with
-      | Some old_p ->
-        (* Only flush if counts changed *)
-        if old_p.success_count <> op.success_count
-           || old_p.failure_count <> op.failure_count then begin
-          let updated_p = { old_p with
-            success_count = op.success_count;
-            failure_count = op.failure_count;
-            confidence = op.confidence;
-            last_applied = op.last_used;
-          } in
-          procedures := List.map (fun (p : Procedural_memory.procedure) ->
-            if p.id = old_p.id then updated_p else p
-          ) !procedures;
-          needs_rewrite := true;
-          true
-        end else false
-      | None ->
-        (* New procedure from OAS -- create in MASC *)
-        let new_p : Procedural_memory.procedure = {
-          id = op.id;
-          agent_name;
-          pattern = op.pattern;
-          evidence = [];
-          success_count = op.success_count;
-          failure_count = op.failure_count;
-          confidence = op.confidence;
-          created_at = Unix.gettimeofday ();
-          last_applied = op.last_used;
-        } in
-        procedures := !procedures @ [new_p];
-        needs_rewrite := true;
-        true
-    in
-    if updated then incr flushed
-  ) oas_procs;
-  if !needs_rewrite then
-    Procedural_memory.rewrite_procedures ~agent_name !procedures;
+  List.iter
+    (fun (op : Oas.Memory.procedure) ->
+       let updated =
+         match
+           List.find_opt
+             (fun (p : Procedural_memory.procedure) -> p.id = op.id)
+             !procedures
+         with
+         | Some old_p ->
+           (* Only flush if counts changed *)
+           if
+             old_p.success_count <> op.success_count
+             || old_p.failure_count <> op.failure_count
+           then (
+             let updated_p =
+               { old_p with
+                 success_count = op.success_count
+               ; failure_count = op.failure_count
+               ; confidence = op.confidence
+               ; last_applied = op.last_used
+               }
+             in
+             procedures
+             := List.map
+                  (fun (p : Procedural_memory.procedure) ->
+                     if p.id = old_p.id then updated_p else p)
+                  !procedures;
+             needs_rewrite := true;
+             true)
+           else false
+         | None ->
+           (* New procedure from OAS -- create in MASC *)
+           let new_p : Procedural_memory.procedure =
+             { id = op.id
+             ; agent_name
+             ; pattern = op.pattern
+             ; evidence = []
+             ; success_count = op.success_count
+             ; failure_count = op.failure_count
+             ; confidence = op.confidence
+             ; created_at = Unix.gettimeofday ()
+             ; last_applied = op.last_used
+             }
+           in
+           procedures := !procedures @ [ new_p ];
+           needs_rewrite := true;
+           true
+       in
+       if updated then incr flushed)
+    oas_procs;
+  if !needs_rewrite then Procedural_memory.rewrite_procedures ~agent_name !procedures;
   store_procedures_cache ~agent_name !procedures;
   !flushed
+;;
 
 (* ================================================================ *)
 (* Pure-read functions for hook-first memory injection               *)
@@ -773,13 +815,22 @@ let load_episodes_text ~(limit : int) : string option =
   match episodes with
   | [] -> None
   | eps ->
-    let lines = List.map (fun (ep : Institution_eio.episode) ->
-      Printf.sprintf "- [%s] %s (%s)"
-        ep.event_type ep.summary
-        (institution_outcome_to_string ep.outcome)
-    ) eps in
-    Some (Printf.sprintf "[episodic memory: %d episodes]\n%s"
-      (List.length eps) (String.concat "\n" lines))
+    let lines =
+      List.map
+        (fun (ep : Institution_eio.episode) ->
+           Printf.sprintf
+             "- [%s] %s (%s)"
+             ep.event_type
+             ep.summary
+             (institution_outcome_to_string ep.outcome))
+        eps
+    in
+    Some
+      (Printf.sprintf
+         "[episodic memory: %d episodes]\n%s"
+         (List.length eps)
+         (String.concat "\n" lines))
+;;
 
 (** Load crystallized procedures as a text block for system context injection.
 
@@ -792,11 +843,18 @@ let load_procedures_text ~(agent_name : string) ~(limit : int) : string option =
   match procs with
   | [] -> None
   | ps ->
-    let lines = List.map (fun (p : Procedural_memory.procedure) ->
-      Printf.sprintf "- [%.0f%% confidence] %s" (p.confidence *. 100.0) p.pattern
-    ) ps in
-    Some (Printf.sprintf "[procedural memory: %d procedures]\n%s"
-      (List.length ps) (String.concat "\n" lines))
+    let lines =
+      List.map
+        (fun (p : Procedural_memory.procedure) ->
+           Printf.sprintf "- [%.0f%% confidence] %s" (p.confidence *. 100.0) p.pattern)
+        ps
+    in
+    Some
+      (Printf.sprintf
+         "[procedural memory: %d procedures]\n%s"
+         (List.length ps)
+         (String.concat "\n" lines))
+;;
 
 (** Load institutional memory as a text block for system context injection.
 
@@ -808,6 +866,7 @@ let load_institution_text ~(config : Coord_utils.config) : string option =
   Option.map
     (fun w -> Printf.sprintf "[institutional memory]\n%s" w)
     (read_institution_welcome config)
+;;
 
 (** Incrementally flush episodes and procedures.
 
@@ -816,10 +875,10 @@ let load_institution_text ~(config : Coord_utils.config) : string option =
     already-persisted entries are skipped via ID check.
 
     @since v2.265.0 (RFC-MASC-004 Phase 1) *)
-let flush_incremental ~(memory : Oas.Memory.t) ~(agent_name : string)
-    : int * int =
+let flush_incremental ~(memory : Oas.Memory.t) ~(agent_name : string) : int * int =
   (* Reuse existing flush logic which is already incremental
      (skips persisted episode IDs, only writes changed procedures). *)
   let ep = flush_episodes ~memory ~agent_name in
   let pr = flush_procedures ~memory ~agent_name in
-  (ep, pr)
+  ep, pr
+;;

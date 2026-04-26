@@ -14,31 +14,46 @@
 open Types
 open Tool_args
 
-type context = {
-  config : Coord.config;
-  agent_name : string;
-}
+type context =
+  { config : Coord.config
+  ; agent_name : string
+  }
 
 type tool_result = bool * string
 
-let max_write_size = 1024 * 1024  (* 1 MiB *)
-
-let normalize_dir_prefix path =
-  Tool_code.normalize_path path ^ "/"
+let max_write_size = 1024 * 1024 (* 1 MiB *)
+let normalize_dir_prefix path = Tool_code.normalize_path path ^ "/"
 
 let first_nonempty_line output =
   output
   |> String.split_on_char '\n'
   |> List.map String.trim
   |> List.find_opt (fun s -> s <> "")
+;;
 
 (* Shell command allowlist *)
-let allowed_shell_commands = [
-  "dune"; "make"; "npm"; "npx"; "node";
-  "git"; "ls"; "cat"; "head"; "tail"; "wc";
-  "rg"; "find"; "diff"; "patch"; "mkdir";
-  "opam"; "ocamlfind"; "tsc";
-]
+let allowed_shell_commands =
+  [ "dune"
+  ; "make"
+  ; "npm"
+  ; "npx"
+  ; "node"
+  ; "git"
+  ; "ls"
+  ; "cat"
+  ; "head"
+  ; "tail"
+  ; "wc"
+  ; "rg"
+  ; "find"
+  ; "diff"
+  ; "patch"
+  ; "mkdir"
+  ; "opam"
+  ; "ocamlfind"
+  ; "tsc"
+  ]
+;;
 
 let validate_code_shell_command (command : string) : (unit, string) result =
   Worker_dev_tools.validate_command_coding_with_allowlist
@@ -46,6 +61,7 @@ let validate_code_shell_command (command : string) : (unit, string) result =
     ~allowed_commands:allowed_shell_commands
     command
   |> Result.map_error Worker_dev_tools.block_reason_to_string
+;;
 
 let git_common_root path =
   try
@@ -69,23 +85,26 @@ let git_common_root path =
   | Eio.Cancel.Cancelled _ as e -> raise e
   | Unix.Unix_error _ -> None
   | Sys_error _ -> None
+;;
 
 let dedupe_keep_order paths =
   let seen = Hashtbl.create (List.length paths) in
   List.filter
     (fun path ->
-      if Hashtbl.mem seen path then false
-      else (
-        Hashtbl.replace seen path ();
-        true))
+       if Hashtbl.mem seen path
+       then false
+       else (
+         Hashtbl.replace seen path ();
+         true))
     paths
+;;
 
 let allowed_worktree_prefixes config =
-  [ git_common_root config.Coord.base_path;
-    git_common_root (Sys.getcwd ()) ]
+  [ git_common_root config.Coord.base_path; git_common_root (Sys.getcwd ()) ]
   |> List.filter_map (fun root -> root)
   |> dedupe_keep_order
   |> List.map (fun root -> normalize_dir_prefix (Filename.concat root ".worktrees"))
+;;
 
 (* Security: Validate path is within an allowed writable sandbox.
    Uses canonical paths from Tool_code.validate_path — already normalized.
@@ -107,24 +126,28 @@ let validate_writable_path ~(agent_name : string) config path =
     let worktree_prefixes = allowed_worktree_prefixes config in
     let agent_playground_prefix =
       normalize_dir_prefix
-        (Filename.concat config.Coord.base_path
+        (Filename.concat
+           config.Coord.base_path
            (Keeper_alerting_path.playground_path_of_keeper agent_name))
     in
-    if List.exists
-         (fun prefix -> String.starts_with ~prefix canonical_path)
-         worktree_prefixes
-       || String.starts_with ~prefix:agent_playground_prefix canonical_path then
-      Ok canonical_path
+    if
+      List.exists
+        (fun prefix -> String.starts_with ~prefix canonical_path)
+        worktree_prefixes
+      || String.starts_with ~prefix:agent_playground_prefix canonical_path
+    then Ok canonical_path
     else
-      Error (IoError (Printf.sprintf
-        "Write restricted to allowed sandboxes for agent %s. \
-         Expected path prefix: %s (or /.worktrees/ for server ops). \
-         Got: %s. Cross-agent playground writes are blocked — write \
-         under your own playground only. Call masc_status if you are \
-         unsure of your agent_name."
-        agent_name
-        agent_playground_prefix
-        canonical_path))
+      Error
+        (IoError
+           (Printf.sprintf
+              "Write restricted to allowed sandboxes for agent %s. Expected path prefix: \
+               %s (or /.worktrees/ for server ops). Got: %s. Cross-agent playground \
+               writes are blocked — write under your own playground only. Call \
+               masc_status if you are unsure of your agent_name."
+              agent_name
+              agent_playground_prefix
+              canonical_path))
+;;
 
 (* Issue #8522: Variant SSOT for git action.  Adding a constructor
    forces compilation in [git_action_to_string] AND extends
@@ -157,6 +180,7 @@ let git_action_to_string = function
   | Stash -> "stash"
   | Fetch -> "fetch"
   | Clone -> "clone"
+;;
 
 let git_action_of_string_opt raw =
   match String.trim (String.lowercase_ascii raw) with
@@ -172,23 +196,25 @@ let git_action_of_string_opt raw =
   | "fetch" -> Some Fetch
   | "clone" -> Some Clone
   | _ -> None
+;;
 
 let all_git_actions =
   [ Add; Commit; Push; Diff; Status; Log; Branch; Checkout; Stash; Fetch; Clone ]
+;;
 
 let valid_git_action_strings = List.map git_action_to_string all_git_actions
 
 (* Allowlist re-uses the SSOT — kept as the prior name for any other
    call sites that grep for it. *)
 let allowed_git_actions = valid_git_action_strings
-
 let max_output_bytes = 10 * 1024
 let max_output_label = "10KB"
 
 let truncate_output s =
-  if String.length s > max_output_bytes then
-    String.sub s 0 max_output_bytes ^ "\n... (truncated)"
+  if String.length s > max_output_bytes
+  then String.sub s 0 max_output_bytes ^ "\n... (truncated)"
   else s
+;;
 
 (* ── Git clone config (cycle-free) ──────────────────────────────── *)
 
@@ -204,14 +230,18 @@ let get_policy_config ~base_path =
   match !_policy_config_cache with
   | Some cfg -> Some cfg
   | None ->
-    match Keeper_tool_policy_config.load ~base_path with
-    | Ok cfg -> _policy_config_cache := Some cfg; Some cfg
-    | Error _ -> None
+    (match Keeper_tool_policy_config.load ~base_path with
+     | Ok cfg ->
+       _policy_config_cache := Some cfg;
+       Some cfg
+     | Error _ -> None)
+;;
 
 let load_clone_allowed_orgs ~base_path =
   match get_policy_config ~base_path with
   | Some cfg -> Keeper_tool_policy_config.git_clone_allowed_orgs cfg
   | None -> []
+;;
 
 (** Extract GitHub org from clone URL (case-normalized to lowercase).
     Strict matching: URL must start with an exact known prefix to prevent
@@ -222,52 +252,51 @@ let load_clone_allowed_orgs ~base_path =
     - [ssh://git@github.com/ORG/repo\[.git\]] *)
 let extract_github_org url =
   let lc = String.lowercase_ascii url in
-  let prefixes = [
-    "https://github.com/";
-    "git@github.com:";
-    "ssh://git@github.com/";
-  ] in
+  let prefixes = [ "https://github.com/"; "git@github.com:"; "ssh://git@github.com/" ] in
   let after_prefix =
-    List.find_map (fun prefix ->
-      if String.starts_with ~prefix lc then
-        let len = String.length prefix in
-        Some (String.sub lc len (String.length lc - len))
-      else None
-    ) prefixes
+    List.find_map
+      (fun prefix ->
+         if String.starts_with ~prefix lc
+         then (
+           let len = String.length prefix in
+           Some (String.sub lc len (String.length lc - len)))
+         else None)
+      prefixes
   in
   match after_prefix with
   | None -> None
   | Some rest ->
     (* rest must be "org/repo[.git]" — reject if org contains suspicious chars *)
-    match String.index_opt rest '/' with
-    | None -> None
-    | Some idx ->
-      let org = String.sub rest 0 idx in
-      (* GitHub org names: alphanumeric + hyphens only *)
-      let valid_org_char c =
-        (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c = '-'
-      in
-      if org = "" || not (String.to_seq org |> Seq.for_all valid_org_char) then
-        None
-      else
-        Some org
+    (match String.index_opt rest '/' with
+     | None -> None
+     | Some idx ->
+       let org = String.sub rest 0 idx in
+       (* GitHub org names: alphanumeric + hyphens only *)
+       let valid_org_char c =
+         (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c = '-'
+       in
+       if org = "" || not (String.to_seq org |> Seq.for_all valid_org_char)
+       then None
+       else Some org)
+;;
 
 (** Extract "org/repo" from a GitHub clone URL (lowercase, .git and trailing
     slash stripped). Returns exactly two path segments or None. *)
 let extract_github_org_repo url =
   let lc = String.lowercase_ascii url in
-  let prefixes = [
-    "https://github.com/";
-    "git@github.com:";
-    "ssh://git@github.com/";
-  ] in
+  let prefixes = [ "https://github.com/"; "git@github.com:"; "ssh://git@github.com/" ] in
   let after_prefix =
-    List.find_map (fun prefix ->
-      if String.starts_with ~prefix lc then
-        Some (String.sub lc (String.length prefix)
+    List.find_map
+      (fun prefix ->
+         if String.starts_with ~prefix lc
+         then
+           Some
+             (String.sub
+                lc
+                (String.length prefix)
                 (String.length lc - String.length prefix))
-      else None
-    ) prefixes
+         else None)
+      prefixes
   in
   match after_prefix with
   | None -> None
@@ -284,39 +313,46 @@ let extract_github_org_repo url =
       else rest
     in
     (* Validate exactly "org/repo" — two segments, no deeper paths *)
-    match String.split_on_char '/' stripped with
-    | [org; repo] when org <> "" && repo <> "" ->
-      Some (org ^ "/" ^ repo)
-    | _ -> None
+    (match String.split_on_char '/' stripped with
+     | [ org; repo ] when org <> "" && repo <> "" -> Some (org ^ "/" ^ repo)
+     | _ -> None)
+;;
 
 let load_clone_denied_repos ~base_path =
   match get_policy_config ~base_path with
   | Some cfg -> Keeper_tool_policy_config.git_clone_denied_repos cfg
   | None -> []
+;;
 
 let validate_clone_url ~base_path url =
   let allowed = load_clone_allowed_orgs ~base_path in
-  if allowed = [] then
-    Error "No allowed orgs configured for git clone (git_clone.allowed_orgs in tool_policy.toml)"
-  else
+  if allowed = []
+  then
+    Error
+      "No allowed orgs configured for git clone (git_clone.allowed_orgs in \
+       tool_policy.toml)"
+  else (
     match extract_github_org url with
-    | None ->
-      Error (Printf.sprintf "Cannot parse GitHub org from URL: %s" url)
+    | None -> Error (Printf.sprintf "Cannot parse GitHub org from URL: %s" url)
     | Some org ->
       let allowed_lc = List.map String.lowercase_ascii allowed in
-      if not (List.mem org allowed_lc) then
+      if not (List.mem org allowed_lc)
+      then
         Error
           (Printf.sprintf
-             "GitHub org '%s' not in allowed list: %s. Use the actual GitHub owner from the clone URL; do not infer an org from local workspace path segments."
-             org (String.concat ", " allowed))
-      else
+             "GitHub org '%s' not in allowed list: %s. Use the actual GitHub owner from \
+              the clone URL; do not infer an org from local workspace path segments."
+             org
+             (String.concat ", " allowed))
+      else (
         (* Check repo-level deny list *)
         let denied = load_clone_denied_repos ~base_path in
         let denied_lc = List.map String.lowercase_ascii denied in
         match extract_github_org_repo url with
         | Some org_repo when List.mem org_repo denied_lc ->
           Error (Printf.sprintf "Repository '%s' is in the denied list" org_repo)
-        | _ -> Ok ()
+        | _ -> Ok ()))
+;;
 
 (** Validate cwd for clone: allows .worktrees/ itself (not just subdirs)
     and THIS agent's own .masc/playground/<agent_name>/repos/ directory.
@@ -328,81 +364,98 @@ let validate_clone_cwd ~(agent_name : string) config cwd =
   match Tool_code.validate_path config cwd with
   | Error e -> Error e
   | Ok canonical_path ->
-    match Coord_git.git_root ~base_path:config.Coord.base_path with
-    | None -> Error (IoError "Not in a git repository")
-    | Some root ->
-      let worktree_prefix = Tool_code.normalize_path
-        (Filename.concat root ".worktrees") in
-      let agent_playground_prefix = Tool_code.normalize_path
-        (Filename.concat root
-           (Keeper_alerting_path.playground_path_of_keeper agent_name)) in
-      let in_worktrees =
-        canonical_path = worktree_prefix ||
-        String.starts_with ~prefix:(worktree_prefix ^ "/") canonical_path
-      in
-      let in_agent_playground_repos =
-        (* Match <agent_playground_prefix>/repos or subdirs thereof.
+    (match Coord_git.git_root ~base_path:config.Coord.base_path with
+     | None -> Error (IoError "Not in a git repository")
+     | Some root ->
+       let worktree_prefix =
+         Tool_code.normalize_path (Filename.concat root ".worktrees")
+       in
+       let agent_playground_prefix =
+         Tool_code.normalize_path
+           (Filename.concat
+              root
+              (Keeper_alerting_path.playground_path_of_keeper agent_name))
+       in
+       let in_worktrees =
+         canonical_path = worktree_prefix
+         || String.starts_with ~prefix:(worktree_prefix ^ "/") canonical_path
+       in
+       let in_agent_playground_repos =
+         (* Match <agent_playground_prefix>/repos or subdirs thereof.
            [playground_path_of_keeper] already ends with "/", and the
            canonical normalisation strips trailing slashes, so we strip
            the trailing slash before prefix matching. *)
-        let prefix_no_slash =
-          if String.length agent_playground_prefix > 0
+         let prefix_no_slash =
+           if
+             String.length agent_playground_prefix > 0
              && agent_playground_prefix.[String.length agent_playground_prefix - 1] = '/'
-          then String.sub agent_playground_prefix 0
-                 (String.length agent_playground_prefix - 1)
-          else agent_playground_prefix
-        in
-        canonical_path = Filename.concat prefix_no_slash "repos"
-        || String.starts_with
-             ~prefix:(Filename.concat prefix_no_slash "repos/")
-             canonical_path
-      in
-      if in_worktrees || in_agent_playground_repos then
-        Ok canonical_path
-      else
-        Error (IoError (Printf.sprintf
-          "Clone restricted to /.worktrees/ or this agent's own \
-           %srepos/ (got: %s). Cross-agent playground clones are blocked \
-           — clone into %srepos/<repo-name> instead. Call masc_status \
-           if you are unsure of your agent_name (currently %s)."
-          agent_playground_prefix
-          canonical_path
-          agent_playground_prefix
-          agent_name))
+           then
+             String.sub
+               agent_playground_prefix
+               0
+               (String.length agent_playground_prefix - 1)
+           else agent_playground_prefix
+         in
+         canonical_path = Filename.concat prefix_no_slash "repos"
+         || String.starts_with
+              ~prefix:(Filename.concat prefix_no_slash "repos/")
+              canonical_path
+       in
+       if in_worktrees || in_agent_playground_repos
+       then Ok canonical_path
+       else
+         Error
+           (IoError
+              (Printf.sprintf
+                 "Clone restricted to /.worktrees/ or this agent's own %srepos/ (got: \
+                  %s). Cross-agent playground clones are blocked — clone into \
+                  %srepos/<repo-name> instead. Call masc_status if you are unsure of \
+                  your agent_name (currently %s)."
+                 agent_playground_prefix
+                 canonical_path
+                 agent_playground_prefix
+                 agent_name)))
+;;
 
 (* Handler: masc_code_write — Create or overwrite a file *)
 let handle_code_write ctx args =
   let path = get_string args "path" "" in
   let content = get_string args "content" "" in
   let create_dirs = get_bool args "create_dirs" false in
-
-  if path = "" then
-    (false, "path parameter required")
-  else if String.length content > max_write_size then
-    (false, Printf.sprintf "Content too large: %d bytes (max: %d)"
-       (String.length content) max_write_size)
-  else if Tool_code.is_binary_file path then
-    (false, "Binary file extension not allowed for write")
-  else begin
+  if path = ""
+  then false, "path parameter required"
+  else if String.length content > max_write_size
+  then
+    ( false
+    , Printf.sprintf
+        "Content too large: %d bytes (max: %d)"
+        (String.length content)
+        max_write_size )
+  else if Tool_code.is_binary_file path
+  then false, "Binary file extension not allowed for write"
+  else (
     match validate_writable_path ~agent_name:ctx.agent_name ctx.config path with
-    | Error e -> (false, Types.masc_error_to_string e)
+    | Error e -> false, Types.masc_error_to_string e
     | Ok abs_path ->
-      try
-        if create_dirs then begin
-          let dir = Filename.dirname abs_path in
-          Fs_compat.mkdir_p dir
-        end;
-        Fs_compat.save_file abs_path content;
-        let response = `Assoc [
-          ("status", `String "ok");
-          ("path", `String path);
-          ("bytes_written", `Int (String.length content));
-          ("agent", `String ctx.agent_name);
-        ] in
-        (true, Yojson.Safe.to_string response)
-      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-        (false, Printf.sprintf "Write failed: %s" (Printexc.to_string exn))
-  end
+      (try
+         if create_dirs
+         then (
+           let dir = Filename.dirname abs_path in
+           Fs_compat.mkdir_p dir);
+         Fs_compat.save_file abs_path content;
+         let response =
+           `Assoc
+             [ "status", `String "ok"
+             ; "path", `String path
+             ; "bytes_written", `Int (String.length content)
+             ; "agent", `String ctx.agent_name
+             ]
+         in
+         true, Yojson.Safe.to_string response
+       with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | exn -> false, Printf.sprintf "Write failed: %s" (Printexc.to_string exn)))
+;;
 
 (* Handler: masc_code_edit — Replace old_string with new_string in a file *)
 let handle_code_edit ctx args =
@@ -410,17 +463,19 @@ let handle_code_edit ctx args =
   let old_string = get_string args "old_string" "" in
   let new_string = get_string args "new_string" "" in
   let replace_all = get_bool args "replace_all" false in
-
-  if path = "" then (false, "path parameter required")
-  else if old_string = "" then (false, "old_string parameter required")
-  else if old_string = new_string then (false, "old_string and new_string are identical")
-  else begin
+  if path = ""
+  then false, "path parameter required"
+  else if old_string = ""
+  then false, "old_string parameter required"
+  else if old_string = new_string
+  then false, "old_string and new_string are identical"
+  else (
     match validate_writable_path ~agent_name:ctx.agent_name ctx.config path with
-    | Error e -> (false, Types.masc_error_to_string e)
+    | Error e -> false, Types.masc_error_to_string e
     | Ok abs_path ->
-      if not (Sys.file_exists abs_path) then
-        (false, Printf.sprintf "File not found: %s" path)
-      else begin
+      if not (Sys.file_exists abs_path)
+      then false, Printf.sprintf "File not found: %s" path
+      else (
         try
           let content = Fs_compat.load_file abs_path in
           (* Count occurrences *)
@@ -428,14 +483,14 @@ let handle_code_edit ctx args =
           let pos = ref 0 in
           let old_len = String.length old_string in
           while !pos <= String.length content - old_len do
-            if String.sub content !pos old_len = old_string then begin
+            if String.sub content !pos old_len = old_string
+            then (
               incr count;
-              pos := !pos + old_len
-            end else
-              incr pos
+              pos := !pos + old_len)
+            else incr pos
           done;
-
-          if !count = 0 then
+          if !count = 0
+          then (
             (* Exact match failed. Look for the first line of old_string
                (trimmed) inside the file and surface up to 3 matching
                lines — the LLM almost always got whitespace / indent /
@@ -451,270 +506,316 @@ let handle_code_edit ctx args =
               | None -> old_string
             in
             let needle = String.trim first_line in
-            if String.length needle < 8 then
-              (false, "old_string not found in file")
-            else
+            if String.length needle < 8
+            then false, "old_string not found in file"
+            else (
               let matches =
                 String.split_on_char '\n' content
-                |> List.filter (fun line ->
-                     String_util.contains_substring line needle)
+                |> List.filter (fun line -> String_util.contains_substring line needle)
                 |> List.filteri (fun i _ -> i < 3)
               in
               let hint =
                 match matches with
                 | [] -> ""
                 | samples ->
-                  "\nLines in file matching the first trimmed line of \
-                   old_string (check whitespace/indent):\n  "
+                  "\n\
+                   Lines in file matching the first trimmed line of old_string (check \
+                   whitespace/indent):\n\
+                  \  "
                   ^ String.concat "\n  " samples
               in
-              (false, "old_string not found in file." ^ hint)
-          else if !count > 1 && not replace_all then
-            (false, Printf.sprintf
-               "old_string found %d times. Use replace_all=true or provide more context"
-               !count)
-          else begin
+              false, "old_string not found in file." ^ hint))
+          else if !count > 1 && not replace_all
+          then
+            ( false
+            , Printf.sprintf
+                "old_string found %d times. Use replace_all=true or provide more context"
+                !count )
+          else (
             (* Perform replacement *)
             let new_content =
-              if replace_all then begin
+              if replace_all
+              then (
                 let buf = Buffer.create (String.length content) in
                 let i = ref 0 in
                 while !i <= String.length content - old_len do
-                  if String.sub content !i old_len = old_string then begin
+                  if String.sub content !i old_len = old_string
+                  then (
                     Buffer.add_string buf new_string;
-                    i := !i + old_len
-                  end else begin
+                    i := !i + old_len)
+                  else (
                     Buffer.add_char buf content.[!i];
-                    incr i
-                  end
+                    incr i)
                 done;
                 (* Add remaining characters *)
-                if !i < String.length content then
-                  Buffer.add_string buf
+                if !i < String.length content
+                then
+                  Buffer.add_string
+                    buf
                     (String.sub content !i (String.length content - !i));
-                Buffer.contents buf
-              end else begin
+                Buffer.contents buf)
+              else (
                 (* Replace first occurrence only *)
                 let idx = ref (-1) in
                 let i = ref 0 in
                 while !idx = -1 && !i <= String.length content - old_len do
-                  if String.sub content !i old_len = old_string then
-                    idx := !i
-                  else
-                    incr i
+                  if String.sub content !i old_len = old_string then idx := !i else incr i
                 done;
                 match !idx with
                 | -1 -> content (* should not happen *)
                 | pos ->
                   String.sub content 0 pos
                   ^ new_string
-                  ^ String.sub content (pos + old_len)
-                      (String.length content - pos - old_len)
-              end
+                  ^ String.sub
+                      content
+                      (pos + old_len)
+                      (String.length content - pos - old_len))
             in
             Fs_compat.save_file abs_path new_content;
-            let response = `Assoc [
-              ("status", `String "ok");
-              ("path", `String path);
-              ("replacements", `Int !count);
-              ("agent", `String ctx.agent_name);
-            ] in
-            (true, Yojson.Safe.to_string response)
-          end
-        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-          (false, Printf.sprintf "Edit failed: %s" (Printexc.to_string exn))
-      end
-  end
+            let response =
+              `Assoc
+                [ "status", `String "ok"
+                ; "path", `String path
+                ; "replacements", `Int !count
+                ; "agent", `String ctx.agent_name
+                ]
+            in
+            true, Yojson.Safe.to_string response)
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn -> false, Printf.sprintf "Edit failed: %s" (Printexc.to_string exn)))
+;;
 
 (* Handler: masc_code_delete — Delete a file *)
 let handle_code_delete ctx args =
   let path = get_string args "path" "" in
-
-  if path = "" then (false, "path parameter required")
-  else begin
+  if path = ""
+  then false, "path parameter required"
+  else (
     match validate_writable_path ~agent_name:ctx.agent_name ctx.config path with
-    | Error e -> (false, Types.masc_error_to_string e)
+    | Error e -> false, Types.masc_error_to_string e
     | Ok abs_path ->
-      if not (Sys.file_exists abs_path) then
-        (false, Printf.sprintf "File not found: %s" path)
-      else if Sys.is_directory abs_path then
-        (false, "Cannot delete directories, only files")
-      else begin
+      if not (Sys.file_exists abs_path)
+      then false, Printf.sprintf "File not found: %s" path
+      else if Sys.is_directory abs_path
+      then false, "Cannot delete directories, only files"
+      else (
         try
           Sys.remove abs_path;
-          let response = `Assoc [
-            ("status", `String "ok");
-            ("path", `String path);
-            ("agent", `String ctx.agent_name);
-          ] in
-          (true, Yojson.Safe.to_string response)
-        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-          (false, Printf.sprintf "Delete failed: %s" (Printexc.to_string exn))
-      end
-  end
+          let response =
+            `Assoc
+              [ "status", `String "ok"
+              ; "path", `String path
+              ; "agent", `String ctx.agent_name
+              ]
+          in
+          true, Yojson.Safe.to_string response
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn -> false, Printf.sprintf "Delete failed: %s" (Printexc.to_string exn)))
+;;
 
 (* Handler: masc_code_shell — Bounded shell execution *)
 let handle_code_shell ctx args =
   let command = get_string args "command" "" in
   let cwd = get_string args "cwd" "" in
   let timeout = get_int args "timeout" 30 in
-
-  if command = "" then (false, "command parameter required")
-  else
+  if command = ""
+  then false, "command parameter required"
+  else (
     match validate_code_shell_command command with
-    | Error reason -> (false, reason)
+    | Error reason -> false, reason
     | Ok () ->
-        (* Validate cwd if provided *)
-        let cwd_result =
-          if cwd = "" then Ok None
-          else
-            match validate_writable_path ~agent_name:ctx.agent_name ctx.config cwd with
-            | Ok abs_cwd -> Ok (Some abs_cwd)
-            | Error e -> Error e
-        in
-        (match cwd_result with
-         | Error e -> (false, Types.masc_error_to_string e)
-         | Ok cwd_opt ->
-             let safe_timeout = Float.of_int (max 5 (min 120 timeout)) in
-             let cmd_parts = ["sh"; "-c"; command] in
-             let full_cmd =
-               match cwd_opt with
-               | None -> cmd_parts
-               | Some dir ->
-                   [ "sh"; "-c"; Printf.sprintf "cd %s && %s"
-                       (Filename.quote dir) command ]
-             in
-             match Process_eio.run_argv_with_status ~timeout_sec:safe_timeout full_cmd with
-             | Unix.WEXITED code, output ->
-                 let response = `Assoc [
-                   ("status", `String (if code = 0 then "ok" else "error"));
-                   ("exit_code", `Int code);
-                   ("output", `String (truncate_output output));
-                   ("command", `String command);
-                   ("agent", `String ctx.agent_name);
-                 ] in
-                 (code = 0, Yojson.Safe.pretty_to_string response)
-             | _, output ->
-                 (false, Printf.sprintf "Command failed: %s" (truncate_output output)))
+      (* Validate cwd if provided *)
+      let cwd_result =
+        if cwd = ""
+        then Ok None
+        else (
+          match validate_writable_path ~agent_name:ctx.agent_name ctx.config cwd with
+          | Ok abs_cwd -> Ok (Some abs_cwd)
+          | Error e -> Error e)
+      in
+      (match cwd_result with
+       | Error e -> false, Types.masc_error_to_string e
+       | Ok cwd_opt ->
+         let safe_timeout = Float.of_int (max 5 (min 120 timeout)) in
+         let cmd_parts = [ "sh"; "-c"; command ] in
+         let full_cmd =
+           match cwd_opt with
+           | None -> cmd_parts
+           | Some dir ->
+             [ "sh"; "-c"; Printf.sprintf "cd %s && %s" (Filename.quote dir) command ]
+         in
+         (match Process_eio.run_argv_with_status ~timeout_sec:safe_timeout full_cmd with
+          | Unix.WEXITED code, output ->
+            let response =
+              `Assoc
+                [ "status", `String (if code = 0 then "ok" else "error")
+                ; "exit_code", `Int code
+                ; "output", `String (truncate_output output)
+                ; "command", `String command
+                ; "agent", `String ctx.agent_name
+                ]
+            in
+            code = 0, Yojson.Safe.pretty_to_string response
+          | _, output ->
+            false, Printf.sprintf "Command failed: %s" (truncate_output output))))
+;;
 
 (* Handler: masc_code_git — Git operations *)
 let handle_code_git ctx args =
   let action = get_string args "action" "" in
-  let git_args = match args with
+  let git_args =
+    match args with
     | `Assoc fields ->
       (match List.assoc_opt "args" fields with
        | Some (`List l) ->
-         List.filter_map (function `String s -> Some s | _ -> None) l
+         List.filter_map
+           (function
+             | `String s -> Some s
+             | _ -> None)
+           l
        | _ -> [])
     | _ -> []
   in
   let cwd = get_string args "cwd" "" in
-
-  if action = "" then (false, "action parameter required")
-  else if not (List.mem action allowed_git_actions) then
-    (false, Printf.sprintf "Git action '%s' not allowed. Allowed: %s"
-       action (String.concat ", " allowed_git_actions))
-  else if action = "clone" then begin
+  if action = ""
+  then false, "action parameter required"
+  else if not (List.mem action allowed_git_actions)
+  then
+    ( false
+    , Printf.sprintf
+        "Git action '%s' not allowed. Allowed: %s"
+        action
+        (String.concat ", " allowed_git_actions) )
+  else if action = "clone"
+  then (
     (* Clone: validate org allowlist + cwd within .worktrees/.
        Block all flag-like args to prevent --upload-pack injection (CVE-like). *)
-    let url = match git_args with url :: _ -> url | [] -> "" in
-    let has_flag_args = List.exists (fun a -> String.length a > 0 && a.[0] = '-') git_args in
-    if url = "" then
-      (false, "clone requires a repository URL as first argument")
-    else if has_flag_args then
-      (false, "clone does not accept flags (security: --upload-pack injection blocked)")
-    else if cwd = "" then
-      (false, "cwd parameter required for clone")
-    else
+    let url =
+      match git_args with
+      | url :: _ -> url
+      | [] -> ""
+    in
+    let has_flag_args =
+      List.exists (fun a -> String.length a > 0 && a.[0] = '-') git_args
+    in
+    if url = ""
+    then false, "clone requires a repository URL as first argument"
+    else if has_flag_args
+    then false, "clone does not accept flags (security: --upload-pack injection blocked)"
+    else if cwd = ""
+    then false, "cwd parameter required for clone"
+    else (
       match validate_clone_url ~base_path:ctx.config.Coord.base_path url with
-      | Error msg -> (false, msg)
+      | Error msg -> false, msg
       | Ok () ->
-        match validate_clone_cwd ~agent_name:ctx.agent_name ctx.config cwd with
-        | Error e -> (false, Types.masc_error_to_string e)
-        | Ok abs_cwd ->
-          (* Only pass the validated URL — no extra args allowed.
+        (match validate_clone_cwd ~agent_name:ctx.agent_name ctx.config cwd with
+         | Error e -> false, Types.masc_error_to_string e
+         | Ok abs_cwd ->
+           (* Only pass the validated URL — no extra args allowed.
              Depth and timeout are config-driven via [git_clone] in tool_policy.toml. *)
-          let depth = match get_policy_config ~base_path:ctx.config.Coord.base_path with
-            | Some cfg -> Keeper_tool_policy_config.clone_depth cfg
-            | None -> 0
-          in
-          let depth_flag =
-            if depth > 0 then Printf.sprintf " --depth %d" depth else ""
-          in
-          let timeout = match get_policy_config ~base_path:ctx.config.Coord.base_path with
-            | Some cfg -> Keeper_tool_policy_config.clone_timeout_sec cfg
-            | None -> 120.0
-          in
-          let cmd = ["sh"; "-c";
-                     Printf.sprintf "cd %s && git clone%s %s"
-                       (Filename.quote abs_cwd)
-                       depth_flag
-                       (Filename.quote url)]
-          in
-          match Process_eio.run_argv_with_status ~timeout_sec:timeout cmd with
-          | Unix.WEXITED code, output ->
-            let response = `Assoc [
-              ("status", `String (if code = 0 then "ok" else "error"));
-              ("exit_code", `Int code);
-              ("output", `String (truncate_output output));
-              ("action", `String "clone");
-              ("url", `String url);
-              ("agent", `String ctx.agent_name);
-            ] in
-            (code = 0, Yojson.Safe.pretty_to_string response)
-          | _, output ->
-            (false, Printf.sprintf "Git clone failed: %s" (truncate_output output))
-  end
-  else begin
+           let depth =
+             match get_policy_config ~base_path:ctx.config.Coord.base_path with
+             | Some cfg -> Keeper_tool_policy_config.clone_depth cfg
+             | None -> 0
+           in
+           let depth_flag =
+             if depth > 0 then Printf.sprintf " --depth %d" depth else ""
+           in
+           let timeout =
+             match get_policy_config ~base_path:ctx.config.Coord.base_path with
+             | Some cfg -> Keeper_tool_policy_config.clone_timeout_sec cfg
+             | None -> 120.0
+           in
+           let cmd =
+             [ "sh"
+             ; "-c"
+             ; Printf.sprintf
+                 "cd %s && git clone%s %s"
+                 (Filename.quote abs_cwd)
+                 depth_flag
+                 (Filename.quote url)
+             ]
+           in
+           (match Process_eio.run_argv_with_status ~timeout_sec:timeout cmd with
+            | Unix.WEXITED code, output ->
+              let response =
+                `Assoc
+                  [ "status", `String (if code = 0 then "ok" else "error")
+                  ; "exit_code", `Int code
+                  ; "output", `String (truncate_output output)
+                  ; "action", `String "clone"
+                  ; "url", `String url
+                  ; "agent", `String ctx.agent_name
+                  ]
+              in
+              code = 0, Yojson.Safe.pretty_to_string response
+            | _, output ->
+              false, Printf.sprintf "Git clone failed: %s" (truncate_output output)))))
+  else (
     (* Non-clone actions: existing validation *)
     let is_dangerous =
-      (action = "push" && List.mem "--force" git_args) ||
-      (action = "push" && List.mem "-f" git_args) ||
-      (action = "push" && List.exists (fun a ->
-         a = "main" || a = "master" || a = "origin/main" || a = "origin/master"
-       ) git_args) ||
-      (action = "checkout" && List.mem "--" git_args &&
-       List.mem "." git_args)
+      (action = "push" && List.mem "--force" git_args)
+      || (action = "push" && List.mem "-f" git_args)
+      || (action = "push"
+          && List.exists
+               (fun a ->
+                  a = "main" || a = "master" || a = "origin/main" || a = "origin/master")
+               git_args)
+      || (action = "checkout" && List.mem "--" git_args && List.mem "." git_args)
     in
-    if is_dangerous then
-      (false, "Dangerous git operation blocked (force push, main push, or checkout .)")
-    else begin
+    if is_dangerous
+    then false, "Dangerous git operation blocked (force push, main push, or checkout .)"
+    else (
       let cwd_result =
-        if cwd = "" then (false, "cwd parameter required for git operations") |> fun (ok, msg) ->
-          if ok then Ok None else Error (IoError msg)
-        else match validate_writable_path ~agent_name:ctx.agent_name ctx.config cwd with
+        if cwd = ""
+        then
+          (false, "cwd parameter required for git operations")
+          |> fun (ok, msg) -> if ok then Ok None else Error (IoError msg)
+        else (
+          match validate_writable_path ~agent_name:ctx.agent_name ctx.config cwd with
           | Ok abs_cwd -> Ok (Some abs_cwd)
-          | Error e -> Error e
+          | Error e -> Error e)
       in
       match cwd_result with
-      | Error e -> (false, Types.masc_error_to_string e)
+      | Error e -> false, Types.masc_error_to_string e
       | Ok cwd_opt ->
-        let dir = match cwd_opt with Some d -> d | None -> "." in
-        let cmd = ["sh"; "-c";
-                   Printf.sprintf "cd %s && git %s %s"
-                     (Filename.quote dir)
-                     action
-                     (String.concat " " (List.map Filename.quote git_args))]
+        let dir =
+          match cwd_opt with
+          | Some d -> d
+          | None -> "."
+        in
+        let cmd =
+          [ "sh"
+          ; "-c"
+          ; Printf.sprintf
+              "cd %s && git %s %s"
+              (Filename.quote dir)
+              action
+              (String.concat " " (List.map Filename.quote git_args))
+          ]
         in
         let env_opt =
-          if action = "commit" then
-            Some (Keeper_identity.git_env_for_keeper ~keeper_name:ctx.agent_name)
+          if action = "commit"
+          then Some (Keeper_identity.git_env_for_keeper ~keeper_name:ctx.agent_name)
           else None
         in
-        match Process_eio.run_argv_with_status ~timeout_sec:30.0 ?env:env_opt cmd with
-        | Unix.WEXITED code, output ->
-          let response = `Assoc [
-            ("status", `String (if code = 0 then "ok" else "error"));
-            ("exit_code", `Int code);
-            ("output", `String (truncate_output output));
-            ("action", `String action);
-            ("agent", `String ctx.agent_name);
-          ] in
-          (code = 0, Yojson.Safe.pretty_to_string response)
-        | _, output ->
-          (false, Printf.sprintf "Git command failed: %s" (truncate_output output))
-    end
-  end
+        (match Process_eio.run_argv_with_status ~timeout_sec:30.0 ?env:env_opt cmd with
+         | Unix.WEXITED code, output ->
+           let response =
+             `Assoc
+               [ "status", `String (if code = 0 then "ok" else "error")
+               ; "exit_code", `Int code
+               ; "output", `String (truncate_output output)
+               ; "action", `String action
+               ; "agent", `String ctx.agent_name
+               ]
+           in
+           code = 0, Yojson.Safe.pretty_to_string response
+         | _, output ->
+           false, Printf.sprintf "Git command failed: %s" (truncate_output output))))
+;;
 
 (* Dispatch *)
 let dispatch ctx ~name ~args : tool_result option =
@@ -725,152 +826,200 @@ let dispatch ctx ~name ~args : tool_result option =
   | "masc_code_shell" -> Some (handle_code_shell ctx args)
   | "masc_code_git" -> Some (handle_code_git ctx args)
   | _ -> None
+;;
 
 (* Tool schemas *)
-let schemas : Types.tool_schema list = [
-  {
-    name = "masc_code_write";
-    description = "Create or overwrite a file in an allowed coding sandbox \
-(.worktrees/ or .masc/playground/). \
-Use to generate new source files, configs, or replace entire file contents. \
-For partial edits (change a function, fix a line), use masc_code_edit instead. \
-Returns bytes_written. Max 1MB. Set up a worktree first with masc_worktree_create.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("path", `Assoc [
-          ("type", `String "string");
-          ("description", `String "File path to write (must be within .worktrees/ or .masc/playground/)");
-        ]);
-        ("content", `Assoc [
-          ("type", `String "string");
-          ("description", `String "File content to write");
-        ]);
-        ("create_dirs", `Assoc [
-          ("type", `String "boolean");
-          ("description", `String "Create intermediate directories if needed (default: false)");
-          ("default", `Bool false);
-        ]);
-      ]);
-      ("required", `List [`String "path"; `String "content"]);
-    ];
-  };
-
-  {
-    name = "masc_code_edit";
-    description = "Replace text in a file in an allowed coding sandbox \
-(.worktrees/ or .masc/playground/). \
-Use for surgical edits: fix a bug, update a function, change a config value. \
-old_string must match exactly once (unless replace_all=true). Returns replacement_count. \
-For full file replacement, use masc_code_write. Read the file first with masc_code_read \
-to get the exact text to replace.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("path", `Assoc [
-          ("type", `String "string");
-          ("description", `String "File path to edit (must be within .worktrees/ or .masc/playground/)");
-        ]);
-        ("old_string", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Exact string to find and replace");
-        ]);
-        ("new_string", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Replacement string");
-        ]);
-        ("replace_all", `Assoc [
-          ("type", `String "boolean");
-          ("description", `String "Replace all occurrences (default: false, requires unique match)");
-          ("default", `Bool false);
-        ]);
-      ]);
-      ("required", `List [`String "path"; `String "old_string"; `String "new_string"]);
-    ];
-  };
-
-  {
-    name = "masc_code_delete";
-    description = "Delete a file in an allowed coding sandbox \
-(.worktrees/ or .masc/playground/). Cannot delete directories. \
-Use when removing generated, obsolete, or conflicting files during code work.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("path", `Assoc [
-          ("type", `String "string");
-          ("description", `String "File path to delete (must be within .worktrees/ or .masc/playground/)");
-        ]);
-      ]);
-      ("required", `List [`String "path"]);
-    ];
-  };
-
-  {
-    name = "masc_code_shell";
-    description = "Run an allowlisted command in an allowed coding sandbox \
-(.worktrees/ or .masc/playground/). \
-Allowed: dune, make, npm, npx, node, git, ls, cat, head, tail, wc, rg, find, \
-diff, patch, mkdir, opam, ocamlfind, tsc. Use for building and testing code \
-in isolated worktrees. For unrestricted shell at project root, use keeper_bash. \
-Returns exit_code and stdout (truncated at " ^ max_output_label ^ ").";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("command", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Single shell command to run (no pipes/chaining; first token must be in allowlist)");
-        ]);
-        ("cwd", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Working directory (must be within .worktrees/ or .masc/playground/)");
-        ]);
-        ("timeout", `Assoc [
-          ("type", `String "integer");
-          ("description", `String "Timeout in seconds (default: 30, max: 120)");
-          ("default", `Int 30);
-        ]);
-      ]);
-      ("required", `List [`String "command"]);
-    ];
-  };
-
-  {
-    name = "masc_code_git";
-    description = "Run git commands in an allowed coding sandbox \
-(.worktrees/ or .masc/playground/). Structured alternative \
-to masc_code_shell for git operations. Supports: add, commit, push, diff, status, \
-log, branch, checkout, stash, fetch, clone. Force push and push to main/master are blocked. \
-Clone is restricted to allowed GitHub orgs (configured in config/tool_policy.toml). \
-Returns git command output.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc [
-        ("action", `Assoc [
-          ("type", `String "string");
-          (* Issue #8522: derive from Variant SSOT — adding a new
+let schemas : Types.tool_schema list =
+  [ { name = "masc_code_write"
+    ; description =
+        "Create or overwrite a file in an allowed coding sandbox (.worktrees/ or \
+         .masc/playground/). Use to generate new source files, configs, or replace \
+         entire file contents. For partial edits (change a function, fix a line), use \
+         masc_code_edit instead. Returns bytes_written. Max 1MB. Set up a worktree first \
+         with masc_worktree_create."
+    ; input_schema =
+        `Assoc
+          [ "type", `String "object"
+          ; ( "properties"
+            , `Assoc
+                [ ( "path"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; ( "description"
+                        , `String
+                            "File path to write (must be within .worktrees/ or \
+                             .masc/playground/)" )
+                      ] )
+                ; ( "content"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; "description", `String "File content to write"
+                      ] )
+                ; ( "create_dirs"
+                  , `Assoc
+                      [ "type", `String "boolean"
+                      ; ( "description"
+                        , `String
+                            "Create intermediate directories if needed (default: false)" )
+                      ; "default", `Bool false
+                      ] )
+                ] )
+          ; "required", `List [ `String "path"; `String "content" ]
+          ]
+    }
+  ; { name = "masc_code_edit"
+    ; description =
+        "Replace text in a file in an allowed coding sandbox (.worktrees/ or \
+         .masc/playground/). Use for surgical edits: fix a bug, update a function, \
+         change a config value. old_string must match exactly once (unless \
+         replace_all=true). Returns replacement_count. For full file replacement, use \
+         masc_code_write. Read the file first with masc_code_read to get the exact text \
+         to replace."
+    ; input_schema =
+        `Assoc
+          [ "type", `String "object"
+          ; ( "properties"
+            , `Assoc
+                [ ( "path"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; ( "description"
+                        , `String
+                            "File path to edit (must be within .worktrees/ or \
+                             .masc/playground/)" )
+                      ] )
+                ; ( "old_string"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; "description", `String "Exact string to find and replace"
+                      ] )
+                ; ( "new_string"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; "description", `String "Replacement string"
+                      ] )
+                ; ( "replace_all"
+                  , `Assoc
+                      [ "type", `String "boolean"
+                      ; ( "description"
+                        , `String
+                            "Replace all occurrences (default: false, requires unique \
+                             match)" )
+                      ; "default", `Bool false
+                      ] )
+                ] )
+          ; ( "required"
+            , `List [ `String "path"; `String "old_string"; `String "new_string" ] )
+          ]
+    }
+  ; { name = "masc_code_delete"
+    ; description =
+        "Delete a file in an allowed coding sandbox (.worktrees/ or .masc/playground/). \
+         Cannot delete directories. Use when removing generated, obsolete, or \
+         conflicting files during code work."
+    ; input_schema =
+        `Assoc
+          [ "type", `String "object"
+          ; ( "properties"
+            , `Assoc
+                [ ( "path"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; ( "description"
+                        , `String
+                            "File path to delete (must be within .worktrees/ or \
+                             .masc/playground/)" )
+                      ] )
+                ] )
+          ; "required", `List [ `String "path" ]
+          ]
+    }
+  ; { name = "masc_code_shell"
+    ; description =
+        "Run an allowlisted command in an allowed coding sandbox (.worktrees/ or \
+         .masc/playground/). Allowed: dune, make, npm, npx, node, git, ls, cat, head, \
+         tail, wc, rg, find, diff, patch, mkdir, opam, ocamlfind, tsc. Use for building \
+         and testing code in isolated worktrees. For unrestricted shell at project root, \
+         use keeper_bash. Returns exit_code and stdout (truncated at "
+        ^ max_output_label
+        ^ ")."
+    ; input_schema =
+        `Assoc
+          [ "type", `String "object"
+          ; ( "properties"
+            , `Assoc
+                [ ( "command"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; ( "description"
+                        , `String
+                            "Single shell command to run (no pipes/chaining; first token \
+                             must be in allowlist)" )
+                      ] )
+                ; ( "cwd"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; ( "description"
+                        , `String
+                            "Working directory (must be within .worktrees/ or \
+                             .masc/playground/)" )
+                      ] )
+                ; ( "timeout"
+                  , `Assoc
+                      [ "type", `String "integer"
+                      ; ( "description"
+                        , `String "Timeout in seconds (default: 30, max: 120)" )
+                      ; "default", `Int 30
+                      ] )
+                ] )
+          ; "required", `List [ `String "command" ]
+          ]
+    }
+  ; { name = "masc_code_git"
+    ; description =
+        "Run git commands in an allowed coding sandbox (.worktrees/ or \
+         .masc/playground/). Structured alternative to masc_code_shell for git \
+         operations. Supports: add, commit, push, diff, status, log, branch, checkout, \
+         stash, fetch, clone. Force push and push to main/master are blocked. Clone is \
+         restricted to allowed GitHub orgs (configured in config/tool_policy.toml). \
+         Returns git command output."
+    ; input_schema =
+        `Assoc
+          [ "type", `String "object"
+          ; ( "properties"
+            , `Assoc
+                [ ( "action"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; (* Issue #8522: derive from Variant SSOT — adding a new
              constructor flows through here automatically. *)
-          ("enum", `List (List.map (fun s -> `String s) valid_git_action_strings));
-          ("description", `String "Git action to perform");
-        ]);
-        ("args", `Assoc [
-          ("type", `String "array");
-          ("items", `Assoc [("type", `String "string")]);
-          ("description", `String "Additional git arguments");
-        ]);
-        ("cwd", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Working directory (must be within .worktrees/ or .masc/playground/)");
-        ]);
-      ]);
-      ("required", `List [`String "action"; `String "cwd"]);
-    ];
-  };
-]
+                        ( "enum"
+                        , `List (List.map (fun s -> `String s) valid_git_action_strings) )
+                      ; "description", `String "Git action to perform"
+                      ] )
+                ; ( "args"
+                  , `Assoc
+                      [ "type", `String "array"
+                      ; "items", `Assoc [ "type", `String "string" ]
+                      ; "description", `String "Additional git arguments"
+                      ] )
+                ; ( "cwd"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; ( "description"
+                        , `String
+                            "Working directory (must be within .worktrees/ or \
+                             .masc/playground/)" )
+                      ] )
+                ] )
+          ; "required", `List [ `String "action"; `String "cwd" ]
+          ]
+    }
+  ]
+;;
 
 (** Tool names for keeper gating *)
-let tool_names : string list =
-  schemas |> List.map (fun (t : Types.tool_schema) -> t.name)
+let tool_names : string list = schemas |> List.map (fun (t : Types.tool_schema) -> t.name)
 
 (* ================================================================ *)
 (* Tool_spec registration                                           *)
@@ -879,12 +1028,13 @@ let tool_names : string list =
 let () =
   List.iter
     (fun (s : tool_schema) ->
-      Tool_spec.register
-        (Tool_spec.create
-           ~name:s.name
-           ~description:s.description
-           ~module_tag:Tool_dispatch.Mod_code_write
-           ~input_schema:s.input_schema
-           ~handler_binding:Tag_dispatch
-           ()))
+       Tool_spec.register
+         (Tool_spec.create
+            ~name:s.name
+            ~description:s.description
+            ~module_tag:Tool_dispatch.Mod_code_write
+            ~input_schema:s.input_schema
+            ~handler_binding:Tag_dispatch
+            ()))
     schemas
+;;

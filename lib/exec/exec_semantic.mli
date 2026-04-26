@@ -17,6 +17,8 @@
     [planning/claude-plans/20m-me-workspace-yousleepwhen-masc-mcp-graceful-panda.md]
     Phase 1). *)
 
+(** Polymorphic variant so downstream modules can narrow the set in
+    their own match arms without introducing a module dependency. *)
 type t =
   [ `Ok
   | `Fail of int
@@ -26,27 +28,21 @@ type t =
   | `Oom_killed
   | `Policy_denied of string
   | `Tool_missing of string
-  | `Permission_denied of string ]
-(** Polymorphic variant so downstream modules can narrow the set in
-    their own match arms without introducing a module dependency. *)
+  | `Permission_denied of string
+  ]
 
-val interpret :
-  argv:string list ->
-  status:Unix.process_status ->
-  stdout:string ->
-  stderr:string ->
-  t
 (** Map a finished [Unix.process_status] plus captured output into a
     semantic classification.
 
     Callers that only have a merged [output] string (e.g.
     [Exec_core.outcome]) should use [interpret_cmd] instead. *)
+val interpret
+  :  argv:string list
+  -> status:Unix.process_status
+  -> stdout:string
+  -> stderr:string
+  -> t
 
-val interpret_cmd :
-  cmd:string ->
-  status:Unix.process_status ->
-  output:string ->
-  t
 (** Best-effort [interpret] for call sites that carry a single
     [cmd:string] instead of an [argv] list and a merged
     [output:string] (stdout ++ stderr) instead of split streams.
@@ -63,36 +59,37 @@ val interpret_cmd :
     - otherwise exit n     -> [`Fail n]
 
     [interpret] is total and never raises. *)
+val interpret_cmd : cmd:string -> status:Unix.process_status -> output:string -> t
 
-    (* interpret_cmd doc intentionally above; keeps interpret doc local. *)
+(* interpret_cmd doc intentionally above; keeps interpret doc local. *)
 
-val to_hint : t -> string option
 (** Human-readable operator hint for LLM consumption. None for [`Ok]. *)
+val to_hint : t -> string option
 
-val to_alternatives : t -> string list
 (** Self-correction alternatives for each semantic exit kind.
     Each string is a complete, actionable suggestion that an LLM agent
     can execute directly. Empty list means no auto-correction is
     possible (operator intervention required). *)
+val to_alternatives : t -> string list
 
-type payload_value =
-  [ `String of string
-  | `Int of int
-  | `Float of float ]
 (** Minimal sum to describe variant payloads without forcing a
     [Yojson] dependency on [masc_exec]. The JSON envelope itself is
     rendered by the caller (e.g. [Exec_core] uses [Yojson.Safe]). *)
+type payload_value =
+  [ `String of string
+  | `Int of int
+  | `Float of float
+  ]
 
-val to_kind : t -> string
 (** Stable string tag for the semantic variant — e.g. ["ok"], ["fail"],
     ["git_not_a_repo"]. Additive-only: new variants extend the set but
     never rename or remove an existing tag. *)
+val to_kind : t -> string
 
-val to_payload : t -> (string * payload_value) list
 (** Variant-specific key/value pairs (e.g. [("exit_code", `Int 2)]).
     Empty for nullary variants. *)
+val to_payload : t -> (string * payload_value) list
 
-val enabled : unit -> bool
 (** Runtime feature flag reader. Reads [MASC_BASH_SEMANTIC_EXIT].
 
     Default (post-#8721): [true] — the semantic field is emitted
@@ -104,3 +101,4 @@ val enabled : unit -> bool
     [interpret] / [to_json] functions are always safe to call; the
     flag only gates whether producers include the result in the
     user-visible response. *)
+val enabled : unit -> bool

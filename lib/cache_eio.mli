@@ -7,13 +7,13 @@
 
 (** {1 Types} *)
 
-type cache_entry = {
-  key : string;
-  value : string;
-  created_at : float;
-  expires_at : float option;
-  tags : string list;
-}
+type cache_entry =
+  { key : string
+  ; value : string
+  ; created_at : float
+  ; expires_at : float option
+  ; tags : string list
+  }
 
 (** {1 Configuration} *)
 
@@ -34,14 +34,15 @@ val entry_of_json : Yojson.Safe.t -> cache_entry option
 
 (** {1 Core Operations} *)
 
-val set :
-  Coord_utils.config ->
-  key:string ->
-  value:string ->
-  ?ttl_seconds:int ->
-  ?tags:string list ->
-  unit ->
-  (cache_entry, string) result
+val set
+  :  Coord_utils.config
+  -> key:string
+  -> value:string
+  -> ?ttl_seconds:int
+  -> ?tags:string list
+  -> unit
+  -> (cache_entry, string) result
+
 val get : Coord_utils.config -> key:string -> (cache_entry option, string) result
 val delete : Coord_utils.config -> key:string -> (bool, string) result
 val list : Coord_utils.config -> ?tag:string -> unit -> cache_entry list

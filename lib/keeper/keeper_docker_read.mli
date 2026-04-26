@@ -20,11 +20,11 @@ val should_route_read : meta:Keeper_types.keeper_meta -> bool
     counterpart. Returns [Error _] when [host_path] is not inside the
     keeper's playground bundle (programmer error — caller should have
     run the containment check first). *)
-val container_path_of_host :
-  config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
-  host_path:string ->
-  (string, string) result
+val container_path_of_host
+  :  config:Coord.config
+  -> meta:Keeper_types.keeper_meta
+  -> host_path:string
+  -> (string, string) result
 
 (** [read_file_in_container ~config ~meta ~host_path ~max_bytes
     ~timeout_sec ()] runs [docker run --rm <image> cat
@@ -33,15 +33,15 @@ val container_path_of_host :
 
     Errors include image misconfiguration, docker exit non-zero, or
     the input not being inside the playground. *)
-val read_file_in_container :
-  ?turn_sandbox_runtime:Keeper_turn_sandbox_runtime.t ->
-  config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
-  host_path:string ->
-  max_bytes:int ->
-  timeout_sec:float ->
-  unit ->
-  (string, string) result
+val read_file_in_container
+  :  ?turn_sandbox_runtime:Keeper_turn_sandbox_runtime.t
+  -> config:Coord.config
+  -> meta:Keeper_types.keeper_meta
+  -> host_path:string
+  -> max_bytes:int
+  -> timeout_sec:float
+  -> unit
+  -> (string, string) result
 
 (** [run_command_in_container ~config ~meta ~command_argv ~max_bytes
     ~timeout_sec ()] is the general-purpose primitive that
@@ -61,28 +61,28 @@ val read_file_in_container :
     preflight failure, and docker exit non-zero. The error tag uses
     the program name (e.g. [docker_rg_failed], [docker_cat_failed])
     for caller log forensics. *)
-val run_command_in_container_with_status :
-  ?turn_sandbox_runtime:Keeper_turn_sandbox_runtime.t ->
-  ?ok_exit_codes:int list ->
-  config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
-  command_argv:string list ->
-  max_bytes:int ->
-  timeout_sec:float ->
-  unit ->
-  (Unix.process_status * string, string) result
+val run_command_in_container_with_status
+  :  ?turn_sandbox_runtime:Keeper_turn_sandbox_runtime.t
+  -> ?ok_exit_codes:int list
+  -> config:Coord.config
+  -> meta:Keeper_types.keeper_meta
+  -> command_argv:string list
+  -> max_bytes:int
+  -> timeout_sec:float
+  -> unit
+  -> (Unix.process_status * string, string) result
 
 (** [run_command_in_container ?ok_exit_codes ~config ~meta ~command_argv
     ~max_bytes ~timeout_sec ()] is a convenience wrapper around
     [run_command_in_container_with_status] that drops the returned
     process status and keeps only the captured stdout bytes. *)
-val run_command_in_container :
-  ?turn_sandbox_runtime:Keeper_turn_sandbox_runtime.t ->
-  ?ok_exit_codes:int list ->
-  config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
-  command_argv:string list ->
-  max_bytes:int ->
-  timeout_sec:float ->
-  unit ->
-  (string, string) result
+val run_command_in_container
+  :  ?turn_sandbox_runtime:Keeper_turn_sandbox_runtime.t
+  -> ?ok_exit_codes:int list
+  -> config:Coord.config
+  -> meta:Keeper_types.keeper_meta
+  -> command_argv:string list
+  -> max_bytes:int
+  -> timeout_sec:float
+  -> unit
+  -> (string, string) result

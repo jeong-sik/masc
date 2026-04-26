@@ -10,11 +10,7 @@ let keeper_task_result_json = function
 
 let keeper_tool_result_json ~(ok : bool) ~(message : string) =
   Yojson.Safe.to_string
-    (`Assoc
-       [
-         "ok", `Bool ok;
-         ((if ok then "result" else "error"), `String message);
-       ])
+    (`Assoc [ "ok", `Bool ok; (if ok then "result" else "error"), `String message ])
 ;;
 
 let validate_goal_id config goal_id =
@@ -26,46 +22,41 @@ let validate_goal_id config goal_id =
 let resolve_task_create_goal_id ~config ~(meta : keeper_meta) args =
   match Safe_ops.json_string_opt "goal_id" args with
   | Some s when String.trim s <> "" ->
-      validate_goal_id config (String.trim s) |> Result.map Option.some
+    validate_goal_id config (String.trim s) |> Result.map Option.some
   | _ ->
-      (match meta.active_goal_ids with
-       | [] -> Ok None
-       | [ goal_id ] ->
-           validate_goal_id config goal_id |> Result.map Option.some
-       | goal_ids ->
-           Error
-             (Printf.sprintf
-                "goal_id is required when keeper has multiple active_goal_ids: [%s]"
-                (String.concat ", " goal_ids)))
+    (match meta.active_goal_ids with
+     | [] -> Ok None
+     | [ goal_id ] -> validate_goal_id config goal_id |> Result.map Option.some
+     | goal_ids ->
+       Error
+         (Printf.sprintf
+            "goal_id is required when keeper has multiple active_goal_ids: [%s]"
+            (String.concat ", " goal_ids)))
 ;;
 
 let parse_task_contract_arg args =
   match Yojson.Safe.Util.member "contract" args with
   | `Null -> Ok None
-  | (`Assoc _ as json) -> (
-      match Types.task_contract_of_yojson json with
-      | Ok contract -> Ok (Some contract)
-      | Error message ->
-          Error (Printf.sprintf "Invalid contract payload: %s" message))
+  | `Assoc _ as json ->
+    (match Types.task_contract_of_yojson json with
+     | Ok contract -> Ok (Some contract)
+     | Error message -> Error (Printf.sprintf "Invalid contract payload: %s" message))
   | _ -> Error "contract must be an object when provided"
 ;;
 
-let active_goal_scope_json ~(meta : keeper_meta) ?matched_goal_id
-    ?excluded_count () =
+let active_goal_scope_json ~(meta : keeper_meta) ?matched_goal_id ?excluded_count () =
   let scoped = meta.active_goal_ids <> [] in
   let fields =
-    [
-      ("mode", `String (if scoped then "active_goal_ids" else "all_tasks"));
-      ("scoped", `Bool scoped);
-      ( "active_goal_ids",
-        `List (List.map (fun goal_id -> `String goal_id) meta.active_goal_ids)
-      );
-      ("matched_goal_id", Json_util.string_opt_to_json matched_goal_id);
+    [ "mode", `String (if scoped then "active_goal_ids" else "all_tasks")
+    ; "scoped", `Bool scoped
+    ; ( "active_goal_ids"
+      , `List (List.map (fun goal_id -> `String goal_id) meta.active_goal_ids) )
+    ; "matched_goal_id", Json_util.string_opt_to_json matched_goal_id
     ]
   in
   let fields =
     match excluded_count with
-    | Some count -> fields @ [ ("excluded_count", `Int count) ]
+    | Some count -> fields @ [ "excluded_count", `Int count ]
     | None -> fields
   in
   `Assoc fields
@@ -74,40 +65,38 @@ let active_goal_scope_json ~(meta : keeper_meta) ?matched_goal_id
 let find_task_goal_id config task_id =
   Coord.get_tasks_raw config
   |> List.find_map (fun (task : Types.task) ->
-         if String.equal task.id task_id then task.goal_id else None)
+    if String.equal task.id task_id then task.goal_id else None)
 ;;
 
 let merge_current_task_id ~(latest : keeper_meta) ~(caller : keeper_meta) =
-  {
-    latest with
-    current_task_id = caller.current_task_id;
-    updated_at = caller.updated_at;
-  }
+  { latest with current_task_id = caller.current_task_id; updated_at = caller.updated_at }
 ;;
 
 let sync_keeper_meta_current_task
-    ~(config : Coord.config)
-    ~(meta : keeper_meta)
-    ~(task_id : string)
+      ~(config : Coord.config)
+      ~(meta : keeper_meta)
+      ~(task_id : string)
   =
   match Keeper_id.Task_id.of_string task_id with
   | Error msg ->
     Log.Keeper.warn
       "keeper:%s could not sync claimed task %s into current_task_id: %s"
-      meta.name task_id msg
+      meta.name
+      task_id
+      msg
   | Ok current_task_id ->
     let updated_meta =
       { meta with current_task_id = Some current_task_id; updated_at = now_iso () }
     in
     Keeper_registry.update_meta ~base_path:config.base_path meta.name updated_meta;
-    (match
-       write_meta_with_merge ~merge:merge_current_task_id config updated_meta
-     with
+    (match write_meta_with_merge ~merge:merge_current_task_id config updated_meta with
      | Ok () -> ()
      | Error msg ->
        Log.Keeper.warn
          "keeper:%s failed to persist claimed current_task_id=%s: %s"
-         meta.name task_id msg)
+         meta.name
+         task_id
+         msg)
 ;;
 
 let handle_keeper_task_tool
@@ -146,20 +135,30 @@ let handle_keeper_task_tool
         orphans
     in
     let action_hint =
-      if orphans = [] then
-        "ACTION: STOP calling keeper_tasks_audit — no orphans found. Move on to other work or end your turn."
+      if orphans = []
+      then
+        "ACTION: STOP calling keeper_tasks_audit — no orphans found. Move on to other \
+         work or end your turn."
       else
-        Printf.sprintf "ACTION: %d orphan(s) found. Use keeper_task_force_release or keeper_task_force_done to resolve, then STOP re-auditing."
+        Printf.sprintf
+          "ACTION: %d orphan(s) found. Use keeper_task_force_release or \
+           keeper_task_force_done to resolve, then STOP re-auditing."
           (List.length orphans)
     in
     Yojson.Safe.to_string
-      (`Assoc [ "orphan_count", `Int (List.length orphans); "orphans", `List items;
-                "action", `String action_hint ])
+      (`Assoc
+          [ "orphan_count", `Int (List.length orphans)
+          ; "orphans", `List items
+          ; "action", `String action_hint
+          ])
   | "keeper_task_force_release" ->
     let task_id = Safe_ops.json_string ~default:"" "task_id" args |> String.trim in
     let reason = Safe_ops.json_string ~default:"" "reason" args in
     if task_id = ""
-    then error_json "task_id is required. Use the task_id from keeper_tasks_list or keeper_tasks_audit."
+    then
+      error_json
+        "task_id is required. Use the task_id from keeper_tasks_list or \
+         keeper_tasks_audit."
     else (
       let agent = keeper_agent_sender ~meta in
       let _ =
@@ -178,7 +177,10 @@ let handle_keeper_task_tool
     let task_id = Safe_ops.json_string ~default:"" "task_id" args |> String.trim in
     let notes = Safe_ops.json_string ~default:"" "notes" args in
     if task_id = ""
-    then error_json "task_id is required. Use the task_id from keeper_tasks_list or keeper_tasks_audit."
+    then
+      error_json
+        "task_id is required. Use the task_id from keeper_tasks_list or \
+         keeper_tasks_audit."
     else
       keeper_task_result_json
         (Coord.force_done_task_r
@@ -190,7 +192,8 @@ let handle_keeper_task_tool
   | "keeper_broadcast" ->
     let message = Safe_ops.json_string ~default:"" "message" args |> String.trim in
     if message = ""
-    then error_json "message is required. Good: message='Build complete, all tests pass.'."
+    then
+      error_json "message is required. Good: message='Build complete, all tests pass.'."
     else (
       let _ =
         Coord.broadcast config ~from_agent:(keeper_agent_sender ~meta) ~content:message
@@ -198,7 +201,9 @@ let handle_keeper_task_tool
       Yojson.Safe.to_string (`Assoc [ "ok", `Bool true; "broadcast", `String message ]))
   | "keeper_task_create" ->
     let title = Safe_ops.json_string ~default:"" "title" args |> String.trim in
-    let description = Safe_ops.json_string ~default:"" "description" args |> String.trim in
+    let description =
+      Safe_ops.json_string ~default:"" "description" args |> String.trim
+    in
     let priority = Safe_ops.json_int ~default:3 "priority" args |> max 1 |> min 5 in
     if title = ""
     then error_json "title is required. Provide a clear, actionable task title."
@@ -208,20 +213,18 @@ let handle_keeper_task_tool
       match resolve_task_create_goal_id ~config ~meta args with
       | Error message -> error_json message
       | Ok goal_id ->
-          (match parse_task_contract_arg args with
-           | Error message -> error_json message
-           | Ok contract ->
-              let result =
-                Coord_task.add_task ?contract ?goal_id config ~title ~priority
-                  ~description
-              in
-              Yojson.Safe.to_string
-                (`Assoc
-                  [
-                    "ok", `Bool true;
-                    "result", `String result;
-                    "goal_id", Json_util.string_opt_to_json goal_id;
-                  ])))
+        (match parse_task_contract_arg args with
+         | Error message -> error_json message
+         | Ok contract ->
+           let result =
+             Coord_task.add_task ?contract ?goal_id config ~title ~priority ~description
+           in
+           Yojson.Safe.to_string
+             (`Assoc
+                 [ "ok", `Bool true
+                 ; "result", `String result
+                 ; "goal_id", Json_util.string_opt_to_json goal_id
+                 ])))
   | "keeper_task_claim" ->
     let task_filter =
       match meta.active_goal_ids with
@@ -231,8 +234,12 @@ let handle_keeper_task_tool
     in
     let agent_tool_names = Keeper_tool_policy.keeper_allowed_tool_names meta in
     let result =
-      Coord.claim_next_r config ~agent_name:meta.agent_name ~agent_tool_names
-        ~task_filter ()
+      Coord.claim_next_r
+        config
+        ~agent_name:meta.agent_name
+        ~agent_tool_names
+        ~task_filter
+        ()
     in
     (match result with
      | Coord.Claim_next_claimed { task_id; _ } ->
@@ -242,66 +249,61 @@ let handle_keeper_task_tool
      | Coord.Claim_next_error _ -> ());
     let accountability_warning =
       if
-        Keeper_accountability.accountability_risk_is_high config
-          ~keeper_name:meta.name ~agent_name:meta.agent_name
+        Keeper_accountability.accountability_risk_is_high
+          config
+          ~keeper_name:meta.name
+          ~agent_name:meta.agent_name
       then
         Some
-          "⚠ Accountability risk is high for this keeper. Prefer manual review or lower-risk routing when equivalent."
-      else
-        None
+          "⚠ Accountability risk is high for this keeper. Prefer manual review or \
+           lower-risk routing when equivalent."
+      else None
     in
     let message =
       match result with
       | Coord.Claim_next_claimed { message; _ } -> message
-      | Coord.Claim_next_no_unclaimed -> "📋 No unclaimed tasks. ACTION: Stop task-checking — nothing to claim."
+      | Coord.Claim_next_no_unclaimed ->
+        "📋 No unclaimed tasks. ACTION: Stop task-checking — nothing to claim."
       | Coord.Claim_next_no_eligible { excluded_count; _ } ->
         let scope_suffix =
           match meta.active_goal_ids with
           | [] -> ""
           | goal_ids ->
-              Printf.sprintf
-                " within active_goal_ids=[%s]"
-                (String.concat ", " goal_ids)
+            Printf.sprintf " within active_goal_ids=[%s]" (String.concat ", " goal_ids)
         in
         Printf.sprintf
           "📋 No eligible tasks%s. ACTION: Stop task-checking — blocked/excluded=%d."
-          scope_suffix excluded_count
+          scope_suffix
+          excluded_count
       | Coord.Claim_next_error e -> Printf.sprintf "❌ Error: %s" e
     in
     let claim_scope, claimed_task_fields =
       match result with
       | Coord.Claim_next_claimed { task_id; title; priority; released_task_id; _ } ->
-          let matched_goal_id = find_task_goal_id config task_id in
-          ( active_goal_scope_json ~meta ?matched_goal_id ()
-          , [
-              ( "claimed_task",
-                `Assoc
-                  [
-                    ("task_id", `String task_id);
-                    ("title", `String title);
-                    ("priority", `Int priority);
-                    ( "goal_id",
-                      Json_util.string_opt_to_json matched_goal_id );
-                    ( "released_task_id",
-                      Json_util.string_opt_to_json released_task_id );
-                  ] );
-            ] )
+        let matched_goal_id = find_task_goal_id config task_id in
+        ( active_goal_scope_json ~meta ?matched_goal_id ()
+        , [ ( "claimed_task"
+            , `Assoc
+                [ "task_id", `String task_id
+                ; "title", `String title
+                ; "priority", `Int priority
+                ; "goal_id", Json_util.string_opt_to_json matched_goal_id
+                ; "released_task_id", Json_util.string_opt_to_json released_task_id
+                ] )
+          ] )
       | Coord.Claim_next_no_eligible { excluded_count } ->
-          (active_goal_scope_json ~meta ~excluded_count (), [])
+        active_goal_scope_json ~meta ~excluded_count (), []
       | Coord.Claim_next_no_unclaimed | Coord.Claim_next_error _ ->
-          (active_goal_scope_json ~meta (), [])
+        active_goal_scope_json ~meta (), []
     in
     Yojson.Safe.to_string
       (`Assoc
-         ([
-            ("result", `String message);
-            ("claim_scope", claim_scope);
-          ]
-         @ claimed_task_fields
-         @
-         match accountability_warning with
-         | Some warning -> [ ("routing_warning", `String warning) ]
-         | None -> []))
+          ([ "result", `String message; "claim_scope", claim_scope ]
+           @ claimed_task_fields
+           @
+           match accountability_warning with
+           | Some warning -> [ "routing_warning", `String warning ]
+           | None -> []))
   | "keeper_task_done" ->
     let task_id = Safe_ops.json_string ~default:"" "task_id" args |> String.trim in
     let result_text = Safe_ops.json_string ~default:"" "result" args |> String.trim in
@@ -310,17 +312,15 @@ let handle_keeper_task_tool
     else (
       let ok, message =
         Tool_task.handle_transition
-          {
-            Tool_task.config;
-            agent_name = keeper_agent_sender ~meta;
-            sw = Eio_context.get_switch_opt ();
+          { Tool_task.config
+          ; agent_name = keeper_agent_sender ~meta
+          ; sw = Eio_context.get_switch_opt ()
           }
           (`Assoc
-             [
-               "task_id", `String task_id;
-               "action", `String "done";
-               "notes", `String result_text;
-             ])
+              [ "task_id", `String task_id
+              ; "action", `String "done"
+              ; "notes", `String result_text
+              ])
       in
       keeper_tool_result_json ~ok ~message)
   | "keeper_task_submit_for_verification" ->
@@ -336,17 +336,15 @@ let handle_keeper_task_tool
     else (
       let ok, message =
         Tool_task.handle_transition
-          {
-            Tool_task.config;
-            agent_name = keeper_agent_sender ~meta;
-            sw = Eio_context.get_switch_opt ();
+          { Tool_task.config
+          ; agent_name = keeper_agent_sender ~meta
+          ; sw = Eio_context.get_switch_opt ()
           }
           (`Assoc
-             [
-               "task_id", `String task_id;
-               "action", `String "submit_for_verification";
-               "notes", `String (notes ^ "\nPR: " ^ pr_url);
-             ])
+              [ "task_id", `String task_id
+              ; "action", `String "submit_for_verification"
+              ; "notes", `String (notes ^ "\nPR: " ^ pr_url)
+              ])
       in
       keeper_tool_result_json ~ok ~message)
   | other -> error_json ~fields:[ "tool", `String other ] "unknown_task_tool"

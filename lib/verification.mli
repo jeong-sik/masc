@@ -31,16 +31,16 @@ type request_status =
   | Assigned of string
   | Completed of verdict
 
-type verification_request = {
-  id: string;
-  task_id: string;
-  output: Yojson.Safe.t;
-  criteria: criterion list;
-  worker: string;
-  verifier: string option;
-  created_at: float;
-  status: request_status;
-}
+type verification_request =
+  { id : string
+  ; task_id : string
+  ; output : Yojson.Safe.t
+  ; criteria : criterion list
+  ; worker : string
+  ; verifier : string option
+  ; created_at : float
+  ; status : request_status
+  }
 
 (** {1 Serialization} *)
 
@@ -62,39 +62,36 @@ val list_requests : string -> verification_request list
 
 (** {1 High-level API} *)
 
-val create_request :
-  base_path:string ->
-  task_id:string ->
-  output:Yojson.Safe.t ->
-  criteria:criterion list ->
-  worker:string ->
-  ?verifier:string ->
-  ?request_id:string ->
-  unit ->
-  (verification_request, string) result
+val create_request
+  :  base_path:string
+  -> task_id:string
+  -> output:Yojson.Safe.t
+  -> criteria:criterion list
+  -> worker:string
+  -> ?verifier:string
+  -> ?request_id:string
+  -> unit
+  -> (verification_request, string) result
 
-val assign_verifier :
-  base_path:string ->
-  req_id:string ->
-  verifier:string ->
-  (verification_request, string) result
+val assign_verifier
+  :  base_path:string
+  -> req_id:string
+  -> verifier:string
+  -> (verification_request, string) result
 
-val submit_verdict :
-  base_path:string ->
-  req_id:string ->
-  verifier:string ->
-  verdict:verdict ->
-  (verification_request, string) result
+val submit_verdict
+  :  base_path:string
+  -> req_id:string
+  -> verifier:string
+  -> verdict:verdict
+  -> (verification_request, string) result
 
-val auto_verify :
-  base_path:string ->
-  req_id:string ->
-  (verification_request, string) result
+val auto_verify
+  :  base_path:string
+  -> req_id:string
+  -> (verification_request, string) result
 
-val pending_for_agent :
-  base_path:string ->
-  agent:string ->
-  verification_request list
+val pending_for_agent : base_path:string -> agent:string -> verification_request list
 
 (** {1 Attribution envelope (Layer 1)}
 
@@ -104,32 +101,32 @@ val pending_for_agent :
     invokes an LLM judge and is [NonDet]. Origin is derived from the
     criteria set. *)
 
-val origin_of_criteria : criterion list -> Attribution.origin
 (** [Det] when all criteria are rule-based, [NonDet] if any [Custom]
     criterion is present. *)
+val origin_of_criteria : criterion list -> Attribution.origin
 
-val criteria_counts : criterion list -> Yojson.Safe.t
 (** Count criteria by kind ({schema_match, contains, not_contains, custom}).
     Used as compact evidence payload — signals the Det/NonDet mix without
     dumping full criterion contents. *)
+val criteria_counts : criterion list -> Yojson.Safe.t
 
-val to_attribution :
-  origin:Attribution.origin ->
-  evidence:Yojson.Safe.t ->
-  verdict ->
-  Attribution.t
 (** Direct verdict → Attribution conversion. Caller supplies [origin]
     (typically via [origin_of_criteria]) and [evidence]. Mapping:
     - [Pass]                → [Attribution.Passed]
     - [Fail reason]         → [Attribution.Policy_failed { reason }]
     - [Partial (s, reason)] → [Attribution.Partial_pass { score = s;
                                  rationale = reason }] *)
+val to_attribution
+  :  origin:Attribution.origin
+  -> evidence:Yojson.Safe.t
+  -> verdict
+  -> Attribution.t
 
-val evidence_of_request : verification_request -> Yojson.Safe.t
 (** Standard evidence shape for a verification request:
     [{ request_id, task_id, worker, verifier, criteria_counts }]. *)
+val evidence_of_request : verification_request -> Yojson.Safe.t
 
-val attribution_of_request : verification_request -> Attribution.t option
 (** Returns [Some attribution] when the request carries a [Completed]
     verdict (origin derived from criteria, standard evidence shape).
     [None] for [Pending] / [Assigned] — there is no verdict yet. *)
+val attribution_of_request : verification_request -> Attribution.t option

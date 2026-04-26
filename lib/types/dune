@@ -1,8 +1,10 @@
 (include_subdirs no)
+
 (library
  (name masc_types)
  (public_name masc_mcp.masc_types)
  (wrapped false)
  (modules ids types_core types_auth types task_stage severity)
  (libraries yojson unix time_compat masc_core base64 uuidm)
- (preprocess (pps ppx_deriving.show ppx_deriving.eq ppx_deriving_yojson)))
+ (preprocess
+  (pps ppx_deriving.show ppx_deriving.eq ppx_deriving_yojson)))

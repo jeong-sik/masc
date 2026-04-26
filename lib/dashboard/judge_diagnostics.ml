@@ -6,8 +6,10 @@
    acceptable here because the consumer is a log line, not a UI surface. *)
 let truncate_with_marker ?(max_bytes = 500) s =
   let len = String.length s in
-  if len <= max_bytes then s
+  if len <= max_bytes
+  then s
   else String.sub s 0 max_bytes ^ Printf.sprintf "…[+%d chars]" (len - max_bytes)
+;;
 
 (* When a judge's [Lenient_json.parse] returns the [`Assoc [("raw", _)]]
    fallback, format a single message that names the judge, the raw size,
@@ -16,7 +18,9 @@ let truncate_with_marker ?(max_bytes = 500) s =
    diagnostic without enabling raw provider logging. *)
 let format_lenient_fallback ~judge_label raw =
   Printf.sprintf
-    "%s judge returned unparseable response (Lenient_json fallback hit; %d chars; preview: %s)"
+    "%s judge returned unparseable response (Lenient_json fallback hit; %d chars; \
+     preview: %s)"
     judge_label
     (String.length raw)
     (truncate_with_marker raw)
+;;

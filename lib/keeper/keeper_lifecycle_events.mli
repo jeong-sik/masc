@@ -30,9 +30,11 @@ val all_event_names : string list
     legacy [?phase] argument used to provide; [Phase_event] is the case
     where the wire event name IS the phase name. *)
 type lifecycle_event =
-  | Custom_event of { verb : t; phase : Keeper_state_machine.phase option }
+  | Custom_event of
+      { verb : t
+      ; phase : Keeper_state_machine.phase option
+      }
   | Phase_event of Keeper_state_machine.phase
 
 val lifecycle_event_to_string : lifecycle_event -> string
-val lifecycle_event_phase :
-  lifecycle_event -> Keeper_state_machine.phase option
+val lifecycle_event_phase : lifecycle_event -> Keeper_state_machine.phase option

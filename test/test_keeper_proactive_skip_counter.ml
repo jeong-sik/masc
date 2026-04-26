@@ -24,12 +24,13 @@ let test_metric_name_stable () =
     "proactive skip counter canonical name"
     "masc_keeper_proactive_skip_total"
     KK.proactive_skip_reason_metric
+;;
 
 (* [verdict_reasons_to_strings] is the actual producer of the
    [reason] label at the emit site.  Pin each concrete variant's
    string form so a silent enum rename becomes a failed test. *)
 let test_skip_reason_labels_match_counter () =
-  let mk reason = KW.Skip { reasons = (reason, []) } in
+  let mk reason = KW.Skip { reasons = reason, [] } in
   let reason_str v =
     match KW.verdict_reasons_to_strings v with
     | [ s ] -> s
@@ -39,36 +40,43 @@ let test_skip_reason_labels_match_counter () =
            "expected exactly one reason string, got [%s]"
            (String.concat "; " other))
   in
-  Alcotest.(check string) "keeper_paused label"
-    "keeper_paused" (reason_str (mk KW.Keeper_paused));
-  Alcotest.(check string) "approval_pending label"
-    "approval_pending" (reason_str (mk KW.Approval_pending));
-  Alcotest.(check string) "scheduled_autonomous_disabled label"
+  Alcotest.(check string)
+    "keeper_paused label"
+    "keeper_paused"
+    (reason_str (mk KW.Keeper_paused));
+  Alcotest.(check string)
+    "approval_pending label"
+    "approval_pending"
+    (reason_str (mk KW.Approval_pending));
+  Alcotest.(check string)
+    "scheduled_autonomous_disabled label"
     "scheduled_autonomous_disabled"
     (reason_str (mk KW.Scheduled_autonomous_disabled));
-  Alcotest.(check string) "no_signal label"
-    "no_signal" (reason_str (mk KW.No_signal));
-  Alcotest.(check string) "idle_gate_pending label"
+  Alcotest.(check string) "no_signal label" "no_signal" (reason_str (mk KW.No_signal));
+  Alcotest.(check string)
+    "idle_gate_pending label"
     "idle_gate_pending"
     (reason_str (mk (KW.Idle_gate_pending { remaining_sec = 42 })));
-  Alcotest.(check string) "cooldown_pending label"
+  Alcotest.(check string)
+    "cooldown_pending label"
     "cooldown_pending"
     (reason_str (mk (KW.Cooldown_pending { remaining_sec = 42 })));
-  Alcotest.(check string) "provider_cooldown_pending label"
+  Alcotest.(check string)
+    "provider_cooldown_pending label"
     "provider_cooldown_pending"
     (reason_str (mk (KW.Provider_cooldown_pending { remaining_sec = 42 })))
+;;
 
 let () =
-  Alcotest.run "keeper_proactive_skip_counter_10008fm3"
-    [
-      ( "metric_name",
-        [
-          Alcotest.test_case "canonical name stable" `Quick
-            test_metric_name_stable;
-        ] );
-      ( "skip_reason_labels",
-        [
-          Alcotest.test_case "variants map to label strings" `Quick
-            test_skip_reason_labels_match_counter;
-        ] );
+  Alcotest.run
+    "keeper_proactive_skip_counter_10008fm3"
+    [ ( "metric_name"
+      , [ Alcotest.test_case "canonical name stable" `Quick test_metric_name_stable ] )
+    ; ( "skip_reason_labels"
+      , [ Alcotest.test_case
+            "variants map to label strings"
+            `Quick
+            test_skip_reason_labels_match_counter
+        ] )
     ]
+;;

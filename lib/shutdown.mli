@@ -10,12 +10,12 @@
 
 (** {1 Configuration} *)
 
-type config = {
-  notify_delay_s : float;
-  drain_timeout_s : float;
-  cleanup_timeout_s : float;
-  force_timeout_s : float;
-}
+type config =
+  { notify_delay_s : float
+  ; drain_timeout_s : float
+  ; cleanup_timeout_s : float
+  ; force_timeout_s : float
+  }
 
 val default_config : config
 val config_from_env : unit -> config
@@ -38,11 +38,11 @@ val create : ?config:config -> unit -> state
 
 (** {1 Hook Registry} *)
 
-type hook = {
-  name : string;
-  priority : int;
-  action : unit -> unit;
-}
+type hook =
+  { name : string
+  ; priority : int
+  ; action : unit -> unit
+  }
 
 val register : name:string -> ?priority:int -> (unit -> unit) -> unit
 val sorted_hooks : unit -> hook list
@@ -53,13 +53,14 @@ val is_shutting_down_global : unit -> bool
 
 (** {1 Phase Execution} *)
 
-val initiate :
-  state -> clock:'a Eio.Time.clock ->
-  reason:string ->
-  notify_fn:(string -> unit) ->
-  drain_check:(unit -> bool) ->
-  exit_fn:(unit -> unit) ->
-  unit
+val initiate
+  :  state
+  -> clock:'a Eio.Time.clock
+  -> reason:string
+  -> notify_fn:(string -> unit)
+  -> drain_check:(unit -> bool)
+  -> exit_fn:(unit -> unit)
+  -> unit
 
 (** {1 Queries} *)
 

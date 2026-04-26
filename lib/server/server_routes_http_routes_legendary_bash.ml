@@ -39,66 +39,60 @@
 
 open Server_utils
 open Server_auth
-
 module Http = Http_server_eio
 
 let snapshot_response () : Yojson.Safe.t =
   let snap = Legendary_counters.snapshot () in
   Legendary_counters.snapshot_to_json_with_ratios snap
+;;
 
 let task_detail_json ~now (tid, started_at) : Yojson.Safe.t =
   let elapsed_ms =
     let seconds = max 0.0 (now -. started_at) in
     int_of_float (seconds *. 1000.0)
   in
-  `Assoc [
-    ("task_id", `String (Bg_task.task_id_to_string tid));
-    ("started_at_unix", `Float started_at);
-    ("elapsed_ms", `Int elapsed_ms);
-  ]
+  `Assoc
+    [ "task_id", `String (Bg_task.task_id_to_string tid)
+    ; "started_at_unix", `Float started_at
+    ; "elapsed_ms", `Int elapsed_ms
+    ]
+;;
 
 let bg_tasks_response ~keeper : Yojson.Safe.t =
   let rows = Bg_task.list_with_started_at ~keeper in
   let now = Unix.gettimeofday () in
-  let ids_as_strings =
-    List.map (fun (tid, _) -> Bg_task.task_id_to_string tid) rows
-  in
-  `Assoc [
-    ("keeper", `String keeper);
-    ("count", `Int (List.length rows));
-    ("tasks", `List (List.map (fun s -> `String s) ids_as_strings));
-    ("task_details",
-     `List (List.map (task_detail_json ~now) rows));
-  ]
+  let ids_as_strings = List.map (fun (tid, _) -> Bg_task.task_id_to_string tid) rows in
+  `Assoc
+    [ "keeper", `String keeper
+    ; "count", `Int (List.length rows)
+    ; "tasks", `List (List.map (fun s -> `String s) ids_as_strings)
+    ; "task_details", `List (List.map (task_detail_json ~now) rows)
+    ]
+;;
 
 let add_routes router =
   router
-  |> Http.Router.get "/api/v1/legendary_bash/shadow_counters"
-       (fun request reqd ->
-         with_public_read
-           (fun _state _req reqd ->
-             let json = snapshot_response () in
-             respond_public_read_json ~status:`OK request reqd
-               (Yojson.Safe.to_string json))
-           request reqd)
-  |> Http.Router.prefix_get "/api/v1/legendary_bash/bg_tasks/"
-       (fun request reqd ->
-         with_public_read
-           (fun _state _req reqd ->
-             let path = Http.Request.path request in
-             match
-               extract_path_param
-                 ~prefix:"/api/v1/legendary_bash/bg_tasks/" path
-             with
-             | None | Some "" ->
-                 Http.Response.json
-                   (Yojson.Safe.to_string
-                      (`Assoc [
-                         ("error", `String "keeper name is required");
-                       ]))
-                   ~status:`Bad_request reqd
-             | Some keeper ->
-                 let json = bg_tasks_response ~keeper in
-                 respond_public_read_json ~status:`OK request reqd
-                   (Yojson.Safe.to_string json))
-           request reqd)
+  |> Http.Router.get "/api/v1/legendary_bash/shadow_counters" (fun request reqd ->
+    with_public_read
+      (fun _state _req reqd ->
+         let json = snapshot_response () in
+         respond_public_read_json ~status:`OK request reqd (Yojson.Safe.to_string json))
+      request
+      reqd)
+  |> Http.Router.prefix_get "/api/v1/legendary_bash/bg_tasks/" (fun request reqd ->
+    with_public_read
+      (fun _state _req reqd ->
+         let path = Http.Request.path request in
+         match extract_path_param ~prefix:"/api/v1/legendary_bash/bg_tasks/" path with
+         | None | Some "" ->
+           Http.Response.json
+             (Yojson.Safe.to_string
+                (`Assoc [ "error", `String "keeper name is required" ]))
+             ~status:`Bad_request
+             reqd
+         | Some keeper ->
+           let json = bg_tasks_response ~keeper in
+           respond_public_read_json ~status:`OK request reqd (Yojson.Safe.to_string json))
+      request
+      reqd)
+;;

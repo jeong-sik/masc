@@ -14,12 +14,10 @@
 
     @since 2.264.0 *)
 
-val record : Attribution.t -> unit
 (** [record attr] appends [attr] to its gate's ring. Thread-safe. When the
     per-gate cap is reached, the oldest entry is dropped. *)
+val record : Attribution.t -> unit
 
-val recent :
-  ?gate:string -> ?limit:int -> unit -> (Attribution.t * float) list
 (** [recent ?gate ?limit ()] returns up to [limit] most recent events,
     newest first. Each tuple is [(attribution, recorded_at)] where
     [recorded_at] is [Unix.gettimeofday] at {!record} time.
@@ -29,22 +27,23 @@ val recent :
       gates return [[]].
     - When [gate] is absent, events are merged across gates and sorted by
       timestamp descending. *)
+val recent : ?gate:string -> ?limit:int -> unit -> (Attribution.t * float) list
 
-type gate_summary = {
-  gate : string;
-  passed : int;
-  policy_failed : int;
-  transition_blocked : int;
-  partial_pass : int;
-  total : int;
-}
+type gate_summary =
+  { gate : string
+  ; passed : int
+  ; policy_failed : int
+  ; transition_blocked : int
+  ; partial_pass : int
+  ; total : int
+  }
 
-val summary : unit -> gate_summary list
 (** [summary ()] returns per-gate outcome counts over the current ring
     window. Order is unspecified. *)
+val summary : unit -> gate_summary list
 
-val reset : unit -> unit
 (** Clear all rings. For tests only. *)
+val reset : unit -> unit
 
-val per_gate_cap : int
 (** The bounded window size per gate (exposed for tests). *)
+val per_gate_cap : int

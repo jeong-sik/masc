@@ -7,6 +7,7 @@ let setup () = M.clear ()
 
 let make_result ~name ~success ~duration_ms =
   { R.success; data = `Null; tool_name = name; duration_ms }
+;;
 
 let test_record_and_stats () =
   setup ();
@@ -20,13 +21,13 @@ let test_record_and_stats () =
     Alcotest.(check int) "failure" 1 s.failure_count;
     Alcotest.(check bool) "mean > 0" true (s.mean_ms > 0.0)
   | None -> Alcotest.fail "expected stats"
+;;
 
 let test_percentiles () =
   setup ();
   (* Insert 100 values: 1.0, 2.0, ..., 100.0 *)
   for i = 1 to 100 do
-    M.record (make_result ~name:"perc" ~success:true
-                ~duration_ms:(float_of_int i))
+    M.record (make_result ~name:"perc" ~success:true ~duration_ms:(float_of_int i))
   done;
   match M.stats_for "perc" with
   | Some s ->
@@ -35,10 +36,12 @@ let test_percentiles () =
     Alcotest.(check bool) "p99 ~ 99" true (s.p99_ms >= 98.0 && s.p99_ms <= 100.0);
     Alcotest.(check bool) "mean ~ 50.5" true (s.mean_ms >= 49.0 && s.mean_ms <= 52.0)
   | None -> Alcotest.fail "expected stats"
+;;
 
 let test_unknown_tool () =
   setup ();
   Alcotest.(check bool) "none" true (Option.is_none (M.stats_for "ghost"))
+;;
 
 let test_all_stats_sorted () =
   setup ();
@@ -49,6 +52,7 @@ let test_all_stats_sorted () =
   let all = M.all_stats () in
   Alcotest.(check int) "2 tools" 2 (List.length all);
   Alcotest.(check string) "most called first" "often" (List.hd all).tool_name
+;;
 
 let test_to_json () =
   setup ();
@@ -58,12 +62,17 @@ let test_to_json () =
     let json = M.to_json s in
     (match json with
      | `Assoc fields ->
-       Alcotest.(check bool) "has tool_name" true
+       Alcotest.(check bool)
+         "has tool_name"
+         true
          (List.exists (fun (k, _) -> k = "tool_name") fields);
-       Alcotest.(check bool) "has p50" true
+       Alcotest.(check bool)
+         "has p50"
+         true
          (List.exists (fun (k, _) -> k = "p50_ms") fields)
      | _ -> Alcotest.fail "expected Assoc")
   | None -> Alcotest.fail "expected stats"
+;;
 
 let test_all_to_json () =
   setup ();
@@ -72,19 +81,20 @@ let test_all_to_json () =
   match M.all_to_json () with
   | `List l -> Alcotest.(check int) "2 entries" 2 (List.length l)
   | _ -> Alcotest.fail "expected List"
+;;
 
 let () =
-  Alcotest.run "Tool_metrics" [
-    "recording", [
-      Alcotest.test_case "record and stats" `Quick test_record_and_stats;
-      Alcotest.test_case "unknown tool" `Quick test_unknown_tool;
-    ];
-    "percentiles", [
-      Alcotest.test_case "p50/p95/p99" `Quick test_percentiles;
-    ];
-    "aggregation", [
-      Alcotest.test_case "sorted by count" `Quick test_all_stats_sorted;
-      Alcotest.test_case "to_json" `Quick test_to_json;
-      Alcotest.test_case "all_to_json" `Quick test_all_to_json;
-    ];
-  ]
+  Alcotest.run
+    "Tool_metrics"
+    [ ( "recording"
+      , [ Alcotest.test_case "record and stats" `Quick test_record_and_stats
+        ; Alcotest.test_case "unknown tool" `Quick test_unknown_tool
+        ] )
+    ; "percentiles", [ Alcotest.test_case "p50/p95/p99" `Quick test_percentiles ]
+    ; ( "aggregation"
+      , [ Alcotest.test_case "sorted by count" `Quick test_all_stats_sorted
+        ; Alcotest.test_case "to_json" `Quick test_to_json
+        ; Alcotest.test_case "all_to_json" `Quick test_all_to_json
+        ] )
+    ]
+;;

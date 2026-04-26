@@ -1,4 +1,5 @@
 [@@@warning "-32-69"]
+
 open Masc_tui_types
 open Masc_tui_ansi
 open Masc_tui_render
@@ -8,66 +9,77 @@ open Masc_tui_loader
 exception Break
 
 (** Send a message to a keeper via HTTP POST to /api/v1/keepers/chat/stream *)
-let send_keeper_message (state : state) (keeper_name : string) (message : string) : string =
+let send_keeper_message (state : state) (keeper_name : string) (message : string) : string
+  =
   try
     let host = Env_config_core.masc_host () in
     let port = state.port in
     let addr = Unix.ADDR_INET (Unix.inet_addr_of_string host, port) in
-    let (ic, oc) = Unix.open_connection addr in
+    let ic, oc = Unix.open_connection addr in
     Fun.protect
       ~finally:(fun () ->
         Unix.shutdown_connection ic;
         close_in_noerr ic;
         close_out_noerr oc)
       (fun () ->
-        (* Build JSON body *)
-        let body = Printf.sprintf {|{"name":"%s","message":"%s","models":[]}|}
-          (String.escaped keeper_name)
-          (String.escaped message) in
-        let body_len = String.length body in
-
-        (* Send HTTP request *)
-        let request = Printf.sprintf
-          "POST /api/v1/keepers/chat/stream HTTP/1.1\r\n\
-           Host: %s:%d\r\n\
-           Content-Type: application/json\r\n\
-           Content-Length: %d\r\n\
-           Connection: close\r\n\
-           \r\n\
-           %s"
-          host port body_len body in
-        output_string oc request;
-        flush oc;
-
-        (* Read response *)
-        let buf = Buffer.create 4096 in
-        (try while true do
-           let line = input_line ic in
-           Buffer.add_string buf line;
-           Buffer.add_char buf '\n'
-         done with End_of_file -> ());
-
-        let response = Buffer.contents buf in
-        (match Tui_decode.parse_keeper_chat_response response with
+         (* Build JSON body *)
+         let body =
+           Printf.sprintf
+             {|{"name":"%s","message":"%s","models":[]}|}
+             (String.escaped keeper_name)
+             (String.escaped message)
+         in
+         let body_len = String.length body in
+         (* Send HTTP request *)
+         let request =
+           Printf.sprintf
+             "POST /api/v1/keepers/chat/stream HTTP/1.1\r\n\
+              Host: %s:%d\r\n\
+              Content-Type: application/json\r\n\
+              Content-Length: %d\r\n\
+              Connection: close\r\n\
+              \r\n\
+              %s"
+             host
+             port
+             body_len
+             body
+         in
+         output_string oc request;
+         flush oc;
+         (* Read response *)
+         let buf = Buffer.create 4096 in
+         (try
+            while true do
+              let line = input_line ic in
+              Buffer.add_string buf line;
+              Buffer.add_char buf '\n'
+            done
+          with
+          | End_of_file -> ());
+         let response = Buffer.contents buf in
+         match Tui_decode.parse_keeper_chat_response response with
          | Ok reply -> reply
-         | Error err -> "(response parsing failed: " ^ err ^ ")"))
+         | Error err -> "(response parsing failed: " ^ err ^ ")")
   with
   | Unix.Unix_error (err, _, _) ->
-    Printf.sprintf "(connection failed: %s -- is MASC server running on port %d?)"
-      (Unix.error_message err) state.port
-  | exn ->
-    Printf.sprintf "(error: %s)" (Printexc.to_string exn)
+    Printf.sprintf
+      "(connection failed: %s -- is MASC server running on port %d?)"
+      (Unix.error_message err)
+      state.port
+  | exn -> Printf.sprintf "(error: %s)" (Printexc.to_string exn)
+;;
 
 (** Read a single byte from stdin, returning Some char or None *)
 let read_byte () : char option =
-  let ready, _, _ = Unix.select [Unix.stdin] [] [] 0.1 in
-  if List.length ready > 0 then begin
+  let ready, _, _ = Unix.select [ Unix.stdin ] [] [] 0.1 in
+  if List.length ready > 0
+  then (
     let buf = Bytes.create 1 in
     let n = Unix.read Unix.stdin buf 0 1 in
-    if n > 0 then Some (Bytes.get buf 0)
-    else None
-  end else
-    None
+    if n > 0 then Some (Bytes.get buf 0) else None)
+  else None
+;;
 
 (** Try to read an escape sequence. Returns a key description. *)
 let read_key () : string option =
@@ -75,24 +87,28 @@ let read_key () : string option =
   | None -> None
   | Some '\027' ->
     (* Escape sequence: try to read [ and then the code *)
-    let ready2, _, _ = Unix.select [Unix.stdin] [] [] 0.05 in
-    if List.length ready2 > 0 then begin
+    let ready2, _, _ = Unix.select [ Unix.stdin ] [] [] 0.05 in
+    if List.length ready2 > 0
+    then (
       let buf2 = Bytes.create 1 in
       let _ = Unix.read Unix.stdin buf2 0 1 in
-      if Bytes.get buf2 0 = '[' then begin
-        let ready3, _, _ = Unix.select [Unix.stdin] [] [] 0.05 in
-        if List.length ready3 > 0 then begin
+      if Bytes.get buf2 0 = '['
+      then (
+        let ready3, _, _ = Unix.select [ Unix.stdin ] [] [] 0.05 in
+        if List.length ready3 > 0
+        then (
           let buf3 = Bytes.create 1 in
           let _ = Unix.read Unix.stdin buf3 0 1 in
           match Bytes.get buf3 0 with
           | 'A' -> Some "up"
           | 'B' -> Some "down"
           | 'Z' -> Some "shift-tab"
-          | _ -> Some "unknown-esc"
-        end else Some "esc"
-      end else Some "esc"
-    end else Some "esc"
+          | _ -> Some "unknown-esc")
+        else Some "esc")
+      else Some "esc")
+    else Some "esc"
   | Some c -> Some (String.make 1 c)
+;;
 
 (** Parse command line arguments *)
 let parse_args () =
@@ -100,36 +116,41 @@ let parse_args () =
   let room = ref "" in
   let refresh = ref 2.0 in
   let base_path = ref "" in
-
-  let specs = [
-    ("--port", Arg.Set_int port, Printf.sprintf "MASC server port (default: %d)" (Env_config_core.masc_http_port_int ()));
-    ("--room", Arg.Set_string room, "Coord name (default: from base path)");
-    ("--refresh", Arg.Set_float refresh, "Refresh interval in seconds (default: 2)");
-    ("--base", Arg.Set_string base_path, "Base path (default: MASC_BASE_PATH or HOME)");
-  ] in
-
+  let specs =
+    [ ( "--port"
+      , Arg.Set_int port
+      , Printf.sprintf
+          "MASC server port (default: %d)"
+          (Env_config_core.masc_http_port_int ()) )
+    ; "--room", Arg.Set_string room, "Coord name (default: from base path)"
+    ; "--refresh", Arg.Set_float refresh, "Refresh interval in seconds (default: 2)"
+    ; "--base", Arg.Set_string base_path, "Base path (default: MASC_BASE_PATH or HOME)"
+    ]
+  in
   Arg.parse specs (fun _ -> ()) "masc-tui [OPTIONS]";
-
   (* Resolve base path *)
   let base =
-    if !base_path <> "" then !base_path
-    else
+    if !base_path <> ""
+    then !base_path
+    else (
       match Sys.getenv_opt "MASC_BASE_PATH" with
       | Some p when String.trim p <> "" -> p
       | _ ->
-          (match Sys.getenv_opt "HOME" with
-           | Some home when String.trim home <> "" -> home
-           | _ -> Sys.getcwd ())
+        (match Sys.getenv_opt "HOME" with
+         | Some home when String.trim home <> "" -> home
+         | _ -> Sys.getcwd ()))
   in
-
   (* Resolve room *)
-  let r = if !room <> "" then !room
-    else match Env_config_core.cluster_name_opt () with
+  let r =
+    if !room <> ""
+    then !room
+    else (
+      match Env_config_core.cluster_name_opt () with
       | Some name -> name
-      | None -> Filename.basename base
+      | None -> Filename.basename base)
   in
-
-  (base, r, !port, !refresh)
+  base, r, !port, !refresh
+;;
 
 (** Handle key input for message mode *)
 let handle_message_key (state : state) (base_path : string) (key : string) : bool =
@@ -141,7 +162,8 @@ let handle_message_key (state : state) (base_path : string) (key : string) : boo
   | "\r" | "\n" ->
     (* Send the message *)
     let text = Buffer.contents state.msg_input in
-    if String.length (String.trim text) > 0 then begin
+    if String.length (String.trim text) > 0
+    then (
       let keeper_name =
         match List.nth_opt state.keepers state.keeper_cursor with
         | Some k -> k.k_name
@@ -149,71 +171,67 @@ let handle_message_key (state : state) (base_path : string) (key : string) : boo
       in
       (* Add user message to history *)
       let now = Unix.localtime (Unix.gettimeofday ()) in
-      let ts = Printf.sprintf "%02d:%02d:%02d"
-        now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
-      state.msg_history <- state.msg_history @ [{
-        me_role = "user";
-        me_text = text;
-        me_timestamp = ts;
-      }];
+      let ts =
+        Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec
+      in
+      state.msg_history
+      <- state.msg_history @ [ { me_role = "user"; me_text = text; me_timestamp = ts } ];
       Buffer.clear state.msg_input;
-
       (* Render to show "sending..." *)
       state.msg_sending <- true;
       render state;
-
       (* Send and get reply *)
       let reply = send_keeper_message state keeper_name text in
-
       (* Add reply to history *)
       let now2 = Unix.localtime (Unix.gettimeofday ()) in
-      let ts2 = Printf.sprintf "%02d:%02d:%02d"
-        now2.Unix.tm_hour now2.Unix.tm_min now2.Unix.tm_sec in
-      state.msg_history <- state.msg_history @ [{
-        me_role = "assistant";
-        me_text = reply;
-        me_timestamp = ts2;
-      }];
+      let ts2 =
+        Printf.sprintf
+          "%02d:%02d:%02d"
+          now2.Unix.tm_hour
+          now2.Unix.tm_min
+          now2.Unix.tm_sec
+      in
+      state.msg_history
+      <- state.msg_history
+         @ [ { me_role = "assistant"; me_text = reply; me_timestamp = ts2 } ];
       state.msg_sending <- false;
       add_event state "message" (Printf.sprintf "Sent to %s" keeper_name);
-
       (* Refresh data after message *)
-      load_from_masc_dir state base_path
-    end;
+      load_from_masc_dir state base_path);
     true
   | "\127" | "\b" ->
     (* Backspace: delete last character *)
     let len = Buffer.length state.msg_input in
-    if len > 0 then begin
+    if len > 0
+    then (
       let new_content = Buffer.sub state.msg_input 0 (len - 1) in
       Buffer.clear state.msg_input;
-      Buffer.add_string state.msg_input new_content
-    end;
+      Buffer.add_string state.msg_input new_content);
     true
   | s when String.length s = 1 ->
     let c = Char.code s.[0] in
-    if c = 21 then begin
+    if c = 21
+    then (
       (* Ctrl-U: clear line *)
       Buffer.clear state.msg_input;
-      true
-    end else if c >= 32 && c < 127 then begin
+      true)
+    else if c >= 32 && c < 127
+    then (
       (* Printable character *)
       Buffer.add_string state.msg_input s;
-      true
-    end else
-      true  (* Consume but ignore other control chars *)
+      true)
+    else true (* Consume but ignore other control chars *)
   | _ -> true
+;;
 
 (** Main loop *)
 let main () =
-  let (base_path, room, port, refresh) = parse_args () in
+  let base_path, room, port, refresh = parse_args () in
   let state = create_state ~room ~port ~refresh_interval:refresh in
-
   (* Setup terminal *)
   let old_term = Unix.tcgetattr Unix.stdin in
   let new_term = { old_term with Unix.c_icanon = false; c_echo = false } in
   Unix.tcsetattr Unix.stdin Unix.TCSANOW new_term;
-
   (* Cleanup on exit *)
   let cleanup () =
     print_string Ansi.show_cursor;
@@ -223,12 +241,10 @@ let main () =
   in
   at_exit cleanup;
   Sys.set_signal Sys.sigint (Sys.Signal_handle (fun _ -> exit 0));
-
   (* Initial load *)
   load_from_masc_dir state base_path;
   add_event state "system" "TUI started";
   state.connection_status <- "connected";
-
   (* Main loop *)
   let last_check = ref (Unix.gettimeofday ()) in
   try
@@ -237,126 +253,119 @@ let main () =
       let key = read_key () in
       (match key with
        | Some k when state.view = Keeper_message ->
-           let _handled = handle_message_key state base_path k in
-           ()
+         let _handled = handle_message_key state base_path k in
+         ()
        | Some "q" | Some "Q" -> raise Break
        | Some "r" | Some "R" ->
-           load_from_masc_dir state base_path;
-           (* Also reload logs if in log view *)
-           (match state.view with
-            | Keeper_logs ->
-                (match List.nth_opt state.keepers state.keeper_cursor with
-                 | Some k ->
-                     state.log_entries <- load_keeper_logs base_path k.k_name 200
-                 | None -> ())
-            | Dashboard | Keeper_list | Keeper_detail | Keeper_message -> ());
-           add_event state "system" "Manual refresh"
+         load_from_masc_dir state base_path;
+         (* Also reload logs if in log view *)
+         (match state.view with
+          | Keeper_logs ->
+            (match List.nth_opt state.keepers state.keeper_cursor with
+             | Some k -> state.log_entries <- load_keeper_logs base_path k.k_name 200
+             | None -> ())
+          | Dashboard | Keeper_list | Keeper_detail | Keeper_message -> ());
+         add_event state "system" "Manual refresh"
        | Some "\t" ->
-           (* Tab toggles between Dashboard and Keeper_list *)
-           (match state.view with
-            | Dashboard -> state.view <- Keeper_list
-            | Keeper_list -> state.view <- Dashboard
-            | Keeper_detail ->
-                state.view <- Dashboard;
-                state.detail_scroll <- 0
-            | Keeper_logs ->
-                state.view <- Dashboard;
-                state.log_scroll <- 0
-            | Keeper_message ->
-                state.view <- Dashboard)
+         (* Tab toggles between Dashboard and Keeper_list *)
+         (match state.view with
+          | Dashboard -> state.view <- Keeper_list
+          | Keeper_list -> state.view <- Dashboard
+          | Keeper_detail ->
+            state.view <- Dashboard;
+            state.detail_scroll <- 0
+          | Keeper_logs ->
+            state.view <- Dashboard;
+            state.log_scroll <- 0
+          | Keeper_message -> state.view <- Dashboard)
        | Some "esc" ->
-           (* Esc goes back *)
-           (match state.view with
-            | Keeper_detail ->
-                state.view <- Keeper_list;
-                state.detail_scroll <- 0
-            | Keeper_logs ->
-                state.view <- Keeper_detail;
-                state.log_scroll <- 0;
-                state.detail_scroll <- 0
-            | Keeper_message ->
-                state.view <- Keeper_detail;
-                state.detail_scroll <- 0
-            | Dashboard | Keeper_list -> ())
+         (* Esc goes back *)
+         (match state.view with
+          | Keeper_detail ->
+            state.view <- Keeper_list;
+            state.detail_scroll <- 0
+          | Keeper_logs ->
+            state.view <- Keeper_detail;
+            state.log_scroll <- 0;
+            state.detail_scroll <- 0
+          | Keeper_message ->
+            state.view <- Keeper_detail;
+            state.detail_scroll <- 0
+          | Dashboard | Keeper_list -> ())
        | Some "j" | Some "down" ->
-           (match state.view with
-            | Keeper_list ->
-                if state.keeper_cursor < List.length state.keepers - 1 then begin
-                  state.keeper_cursor <- state.keeper_cursor + 1;
-                  (match List.nth_opt state.keepers state.keeper_cursor with
-                   | Some k -> load_live_context state base_path k.k_name
-                   | None -> ())
-                end
-            | Keeper_detail ->
-                state.detail_scroll <- state.detail_scroll + 1
-            | Keeper_logs ->
-                state.log_scroll <- state.log_scroll + 1
-            | Dashboard | Keeper_message -> ())
+         (match state.view with
+          | Keeper_list ->
+            if state.keeper_cursor < List.length state.keepers - 1
+            then (
+              state.keeper_cursor <- state.keeper_cursor + 1;
+              match List.nth_opt state.keepers state.keeper_cursor with
+              | Some k -> load_live_context state base_path k.k_name
+              | None -> ())
+          | Keeper_detail -> state.detail_scroll <- state.detail_scroll + 1
+          | Keeper_logs -> state.log_scroll <- state.log_scroll + 1
+          | Dashboard | Keeper_message -> ())
        | Some "k" | Some "up" ->
-           (match state.view with
-            | Keeper_list ->
-                if state.keeper_cursor > 0 then begin
-                  state.keeper_cursor <- state.keeper_cursor - 1;
-                  (match List.nth_opt state.keepers state.keeper_cursor with
-                   | Some k -> load_live_context state base_path k.k_name
-                   | None -> ())
-                end
-            | Keeper_detail ->
-                if state.detail_scroll > 0 then
-                  state.detail_scroll <- state.detail_scroll - 1
-            | Keeper_logs ->
-                if state.log_scroll > 0 then
-                  state.log_scroll <- state.log_scroll - 1
-            | Dashboard | Keeper_message -> ())
+         (match state.view with
+          | Keeper_list ->
+            if state.keeper_cursor > 0
+            then (
+              state.keeper_cursor <- state.keeper_cursor - 1;
+              match List.nth_opt state.keepers state.keeper_cursor with
+              | Some k -> load_live_context state base_path k.k_name
+              | None -> ())
+          | Keeper_detail ->
+            if state.detail_scroll > 0 then state.detail_scroll <- state.detail_scroll - 1
+          | Keeper_logs ->
+            if state.log_scroll > 0 then state.log_scroll <- state.log_scroll - 1
+          | Dashboard | Keeper_message -> ())
        | Some "\r" | Some "\n" ->
-           (* Enter opens detail from list *)
-           (match state.view with
-            | Keeper_list ->
-                (match List.nth_opt state.keepers state.keeper_cursor with
-                 | Some k ->
-                     state.view <- Keeper_detail;
-                     state.detail_scroll <- 0;
-                     load_live_context state base_path k.k_name
-                 | None -> ())
-            | Dashboard | Keeper_detail | Keeper_logs | Keeper_message -> ())
+         (* Enter opens detail from list *)
+         (match state.view with
+          | Keeper_list ->
+            (match List.nth_opt state.keepers state.keeper_cursor with
+             | Some k ->
+               state.view <- Keeper_detail;
+               state.detail_scroll <- 0;
+               load_live_context state base_path k.k_name
+             | None -> ())
+          | Dashboard | Keeper_detail | Keeper_logs | Keeper_message -> ())
        | Some "l" | Some "L" ->
-           (* L opens log view from detail *)
-           (match state.view with
-            | Keeper_detail ->
-                (match List.nth_opt state.keepers state.keeper_cursor with
-                 | Some k ->
-                     state.log_entries <- load_keeper_logs base_path k.k_name 200;
-                     state.log_scroll <- max 0 (List.length state.log_entries - 1);
-                     state.view <- Keeper_logs
-                 | None -> ())
-            | Dashboard | Keeper_list | Keeper_logs | Keeper_message -> ())
+         (* L opens log view from detail *)
+         (match state.view with
+          | Keeper_detail ->
+            (match List.nth_opt state.keepers state.keeper_cursor with
+             | Some k ->
+               state.log_entries <- load_keeper_logs base_path k.k_name 200;
+               state.log_scroll <- max 0 (List.length state.log_entries - 1);
+               state.view <- Keeper_logs
+             | None -> ())
+          | Dashboard | Keeper_list | Keeper_logs | Keeper_message -> ())
        | Some "m" | Some "M" ->
-           (* M opens message view from detail *)
-           (match state.view with
-            | Keeper_detail when state.keeper_cursor < List.length state.keepers ->
-                Buffer.clear state.msg_input;
-                state.view <- Keeper_message
-            | Keeper_detail | Dashboard | Keeper_list | Keeper_logs | Keeper_message -> ())
+         (* M opens message view from detail *)
+         (match state.view with
+          | Keeper_detail when state.keeper_cursor < List.length state.keepers ->
+            Buffer.clear state.msg_input;
+            state.view <- Keeper_message
+          | Keeper_detail | Dashboard | Keeper_list | Keeper_logs | Keeper_message -> ())
        | _ -> ());
-
       (* Periodic refresh *)
       let now = Unix.gettimeofday () in
-      if now -. !last_check >= refresh then begin
+      if now -. !last_check >= refresh
+      then (
         load_from_masc_dir state base_path;
         (* Also refresh logs if viewing them *)
         (match state.view with
          | Keeper_logs ->
-             (match List.nth_opt state.keepers state.keeper_cursor with
-              | Some k ->
-                  state.log_entries <- load_keeper_logs base_path k.k_name 200
-              | None -> ())
+           (match List.nth_opt state.keepers state.keeper_cursor with
+            | Some k -> state.log_entries <- load_keeper_logs base_path k.k_name 200
+            | None -> ())
          | Dashboard | Keeper_list | Keeper_detail | Keeper_message -> ());
-        last_check := now
-      end;
-
+        last_check := now);
       (* Render *)
       render state
     done
-  with Break -> ()
+  with
+  | Break -> ()
+;;
 
 let () = main ()

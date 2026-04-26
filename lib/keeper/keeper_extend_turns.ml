@@ -14,11 +14,11 @@
 let default_ceiling = 200
 
 let make ~agent_ref ~max_turns ?ceiling () : Oas.Tool.t =
-  let ceiling = match ceiling with Some c -> c | None -> max max_turns default_ceiling in
-  let budget =
-    Oas.Agent_turn_budget.create
-      ~initial:max_turns
-      ~ceiling
-      ()
+  let ceiling =
+    match ceiling with
+    | Some c -> c
+    | None -> max max_turns default_ceiling
   in
+  let budget = Oas.Agent_turn_budget.create ~initial:max_turns ~ceiling () in
   Oas.Agent.make_extend_turns_tool ~agent_ref ~budget ()
+;;

@@ -20,20 +20,26 @@ let is_checkpoint_file (filename : string) : bool =
   let len = String.length filename in
   len > String.length checkpoint_prefix + String.length checkpoint_suffix
   && String.sub filename 0 (String.length checkpoint_prefix) = checkpoint_prefix
-  && String.sub filename (len - String.length checkpoint_suffix)
-       (String.length checkpoint_suffix) = checkpoint_suffix
+  && String.sub
+       filename
+       (len - String.length checkpoint_suffix)
+       (String.length checkpoint_suffix)
+     = checkpoint_suffix
+;;
 
 (* ================================================================ *)
 (* List                                                               *)
 (* ================================================================ *)
 
 let list_checkpoints ~(session_dir : string) : string list =
-  if not (Fs_compat.file_exists session_dir) then []
+  if not (Fs_compat.file_exists session_dir)
+  then []
   else
     Sys.readdir session_dir
     |> Array.to_list
     |> List.filter is_checkpoint_file
     |> List.sort (fun a b -> compare b a)
+;;
 
 (** Maximum number of checkpoint files to retain per session.
     Only the latest N are kept; older ones are deleted after each save. *)
@@ -45,46 +51,54 @@ let max_checkpoints_retained = 3
 
 let prune ~(session_dir : string) ~(keep : int) : int =
   let files = list_checkpoints ~session_dir in
-  if List.length files <= keep then 0
-  else
+  if List.length files <= keep
+  then 0
+  else (
     let to_remove = List.filteri (fun i _ -> i >= keep) files in
-    List.iter (fun filename ->
-      let path = Filename.concat session_dir filename in
-      (try Sys.remove path
-       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-         Log.Keeper.warn "checkpoint cleanup failed for %s: %s"
-           path (Printexc.to_string exn)))
+    List.iter
+      (fun filename ->
+         let path = Filename.concat session_dir filename in
+         try Sys.remove path with
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | exn ->
+           Log.Keeper.warn
+             "checkpoint cleanup failed for %s: %s"
+             path
+             (Printexc.to_string exn))
       to_remove;
-    List.length to_remove
+    List.length to_remove)
+;;
 
 (* ================================================================ *)
 (* Save                                                               *)
 (* ================================================================ *)
 
-let save
-    ~(session_dir : string)
-    (ckpt : Keeper_types.checkpoint) : unit =
-  let path = Filename.concat session_dir
-    (sprintf "%s%s" ckpt.checkpoint_id checkpoint_suffix) in
-  let context_json =
-    try Yojson.Safe.from_string ckpt.serialized
-    with Eio.Cancel.Cancelled _ as e -> raise e | _ -> `String ckpt.serialized
+let save ~(session_dir : string) (ckpt : Keeper_types.checkpoint) : unit =
+  let path =
+    Filename.concat session_dir (sprintf "%s%s" ckpt.checkpoint_id checkpoint_suffix)
   in
-  let json = `Assoc [
-    ("checkpoint_id", `String ckpt.checkpoint_id);
-    ("timestamp", `Float ckpt.timestamp);
-    ("generation", `Int ckpt.generation);
-    ("message_count", `Int ckpt.message_count);
-    ("token_count", `Int ckpt.token_count);
-    ("context", context_json);
-  ] in
+  let context_json =
+    try Yojson.Safe.from_string ckpt.serialized with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | _ -> `String ckpt.serialized
+  in
+  let json =
+    `Assoc
+      [ "checkpoint_id", `String ckpt.checkpoint_id
+      ; "timestamp", `Float ckpt.timestamp
+      ; "generation", `Int ckpt.generation
+      ; "message_count", `Int ckpt.message_count
+      ; "token_count", `Int ckpt.token_count
+      ; "context", context_json
+      ]
+  in
   let content = Yojson.Safe.to_string json in
   match Keeper_fs.save_atomic path content with
   | Ok () ->
     (* Auto-prune old checkpoints after each save *)
     ignore (prune ~session_dir ~keep:max_checkpoints_retained)
-  | Error msg ->
-    Log.Keeper.warn "save_checkpoint failed for %s: %s" path msg
+  | Error msg -> Log.Keeper.warn "save_checkpoint failed for %s: %s" path msg
+;;
 
 (* ================================================================ *)
 (* Load Latest                                                        *)
@@ -92,39 +106,37 @@ let save
 
 let parse_checkpoint_file (path : string) : Keeper_types.checkpoint =
   let content = Fs_compat.load_file path in
-  let json =
-    content
-    |> Inference_utils.sanitize_text_utf8
-    |> Yojson.Safe.from_string
-  in
+  let json = content |> Inference_utils.sanitize_text_utf8 |> Yojson.Safe.from_string in
   let open Yojson.Safe.Util in
   let serialized =
     match json |> member "context" with
-    | `Null | exception Yojson.Safe.Util.Type_error _ ->
-        json |> member "serialized" |> to_string
+    | `Null | (exception Yojson.Safe.Util.Type_error _) ->
+      json |> member "serialized" |> to_string
     | ctx -> Yojson.Safe.to_string ctx
   in
-  {
-    Keeper_types.checkpoint_id =
-      json |> member "checkpoint_id" |> to_string;
-    timestamp = json |> member "timestamp" |> to_number;
-    generation = json |> member "generation" |> to_int;
-    message_count = json |> member "message_count" |> to_int;
-    token_count = json |> member "token_count" |> to_int;
-    serialized;
+  { Keeper_types.checkpoint_id = json |> member "checkpoint_id" |> to_string
+  ; timestamp = json |> member "timestamp" |> to_number
+  ; generation = json |> member "generation" |> to_int
+  ; message_count = json |> member "message_count" |> to_int
+  ; token_count = json |> member "token_count" |> to_int
+  ; serialized
   }
+;;
 
 let load_latest ~(session_dir : string) : Keeper_types.checkpoint option =
   match list_checkpoints ~session_dir with
   | [] -> None
   | latest :: _ ->
     let path = Filename.concat session_dir latest in
-    (try Some (parse_checkpoint_file path)
-     with Eio.Cancel.Cancelled _ as e -> raise e
+    (try Some (parse_checkpoint_file path) with
+     | Eio.Cancel.Cancelled _ as e -> raise e
      | exn ->
-       Log.Keeper.warn "malformed checkpoint ignored in %s: %s"
-         path (Printexc.to_string exn);
+       Log.Keeper.warn
+         "malformed checkpoint ignored in %s: %s"
+         path
+         (Printexc.to_string exn);
        None)
+;;
 
 (* ================================================================ *)
 (* OAS Checkpoint Compatibility                                      *)
@@ -132,6 +144,7 @@ let load_latest ~(session_dir : string) : Keeper_types.checkpoint option =
 
 let oas_checkpoint_path ~(session_dir : string) ~(session_id : string) =
   Filename.concat session_dir (session_id ^ ".json")
+;;
 
 let oas_history_prefix = "oas-snapshot-"
 let oas_history_suffix = ".json"
@@ -140,89 +153,113 @@ let is_oas_history_file (filename : string) : bool =
   let len = String.length filename in
   len > String.length oas_history_prefix + String.length oas_history_suffix
   && String.sub filename 0 (String.length oas_history_prefix) = oas_history_prefix
-  && String.sub filename (len - String.length oas_history_suffix)
-       (String.length oas_history_suffix) = oas_history_suffix
+  && String.sub
+       filename
+       (len - String.length oas_history_suffix)
+       (String.length oas_history_suffix)
+     = oas_history_suffix
+;;
 
 let list_oas_history_files ~(session_dir : string) : string list =
-  if not (Fs_compat.file_exists session_dir) then []
+  if not (Fs_compat.file_exists session_dir)
+  then []
   else
     Sys.readdir session_dir
     |> Array.to_list
     |> List.filter is_oas_history_file
     |> List.sort (fun a b -> compare b a)
+;;
 
 let max_oas_history_retained = 12
 
 let oas_history_path ~(session_dir : string) ~(snapshot_id : string) =
   Filename.concat session_dir snapshot_id
+;;
 
 let oas_history_snapshot_id_of_checkpoint (ckpt : Oas.Checkpoint.t) : string =
   let generation =
     match ckpt.working_context with
-    | Some (`Assoc fields) -> (
-        match List.assoc_opt "keeper_generation" fields with
-        | Some (`Int n) -> n
-        | Some (`Intlit raw) -> Option.value ~default:0 (int_of_string_opt raw)
-        | _ -> 0)
+    | Some (`Assoc fields) ->
+      (match List.assoc_opt "keeper_generation" fields with
+       | Some (`Int n) -> n
+       | Some (`Intlit raw) -> Option.value ~default:0 (int_of_string_opt raw)
+       | _ -> 0)
     | _ -> 0
   in
   let created_ms = max 0 (int_of_float (ckpt.created_at *. 1000.0)) in
-  Printf.sprintf "%s%013d-g%d%s"
-    oas_history_prefix created_ms generation oas_history_suffix
+  Printf.sprintf
+    "%s%013d-g%d%s"
+    oas_history_prefix
+    created_ms
+    generation
+    oas_history_suffix
+;;
 
 let save_oas_history ~(session_dir : string) (ckpt : Oas.Checkpoint.t) : unit =
   let snapshot_id = oas_history_snapshot_id_of_checkpoint ckpt in
-  match Keeper_fs.save_atomic
-    (oas_history_path ~session_dir ~snapshot_id)
-    (Oas.Checkpoint.to_string ckpt) with
+  match
+    Keeper_fs.save_atomic
+      (oas_history_path ~session_dir ~snapshot_id)
+      (Oas.Checkpoint.to_string ckpt)
+  with
   | Ok () ->
     let files = list_oas_history_files ~session_dir in
-    if List.length files > max_oas_history_retained then
+    if List.length files > max_oas_history_retained
+    then
       files
       |> List.filteri (fun index _ -> index >= max_oas_history_retained)
       |> List.iter (fun filename ->
-           let path = oas_history_path ~session_dir ~snapshot_id:filename in
-           try Sys.remove path with
-           | Eio.Cancel.Cancelled _ as e -> raise e
-           | exn ->
-               Log.Keeper.warn "OAS snapshot cleanup failed for %s: %s"
-                 path (Printexc.to_string exn))
-  | Error msg ->
-    Log.Keeper.warn "save_oas_history failed for %s: %s" snapshot_id msg
-
-let delete_oas_history_files ~(session_dir : string) ~(snapshot_ids : string list)
-    : string list * string list =
-  List.fold_left
-    (fun (deleted, missing) snapshot_id ->
-      let path = oas_history_path ~session_dir ~snapshot_id in
-      if Fs_compat.file_exists path then (
-        try
-          Sys.remove path;
-          (snapshot_id :: deleted, missing)
-        with
+        let path = oas_history_path ~session_dir ~snapshot_id:filename in
+        try Sys.remove path with
         | Eio.Cancel.Cancelled _ as e -> raise e
         | exn ->
-            Log.Keeper.warn "OAS snapshot delete failed for %s: %s"
-              path (Printexc.to_string exn);
-            (deleted, snapshot_id :: missing))
-      else
-        (deleted, snapshot_id :: missing))
+          Log.Keeper.warn
+            "OAS snapshot cleanup failed for %s: %s"
+            path
+            (Printexc.to_string exn))
+  | Error msg -> Log.Keeper.warn "save_oas_history failed for %s: %s" snapshot_id msg
+;;
+
+let delete_oas_history_files ~(session_dir : string) ~(snapshot_ids : string list)
+  : string list * string list
+  =
+  List.fold_left
+    (fun (deleted, missing) snapshot_id ->
+       let path = oas_history_path ~session_dir ~snapshot_id in
+       if Fs_compat.file_exists path
+       then (
+         try
+           Sys.remove path;
+           snapshot_id :: deleted, missing
+         with
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | exn ->
+           Log.Keeper.warn
+             "OAS snapshot delete failed for %s: %s"
+             path
+             (Printexc.to_string exn);
+           deleted, snapshot_id :: missing)
+       else deleted, snapshot_id :: missing)
     ([], [])
     snapshot_ids
-  |> fun (deleted, missing) -> (List.rev deleted, List.rev missing)
+  |> fun (deleted, missing) -> List.rev deleted, List.rev missing
+;;
 
-let save_oas ~(session_dir : string) (ckpt : Oas.Checkpoint.t)
-  : (unit, string) result =
+let save_oas ~(session_dir : string) (ckpt : Oas.Checkpoint.t) : (unit, string) result =
   let fallback () =
-    match Keeper_fs.save_atomic
-      (oas_checkpoint_path ~session_dir ~session_id:ckpt.session_id)
-      (Oas.Checkpoint.to_string ckpt) with
+    match
+      Keeper_fs.save_atomic
+        (oas_checkpoint_path ~session_dir ~session_id:ckpt.session_id)
+        (Oas.Checkpoint.to_string ckpt)
+    with
     | Ok () ->
       (try save_oas_history ~session_dir ckpt with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->
-           Log.Keeper.warn "OAS snapshot archive write failed for %s: %s"
-             ckpt.session_id (Printexc.to_string exn));
+         Log.Keeper.warn
+           "OAS snapshot archive write failed for %s: %s"
+           ckpt.session_id
+           (Printexc.to_string exn));
       Ok ()
     | Error msg -> Error msg
   in
@@ -230,24 +267,26 @@ let save_oas ~(session_dir : string) (ckpt : Oas.Checkpoint.t)
     ignore (Keeper_fs.ensure_dir session_dir);
     match Fs_compat.get_fs_opt () with
     | Some fs when Eio_guard.is_ready () ->
-        let dir = Eio.Path.(fs / session_dir) in
-        (match Oas.Checkpoint_store.create dir with
-         | Ok store -> (
-             match Oas.Checkpoint_store.save store ckpt with
-             | Ok () ->
-                 (try save_oas_history ~session_dir ckpt with
-                  | Eio.Cancel.Cancelled _ as e -> raise e
-                  | exn ->
-                      Log.Keeper.warn "OAS snapshot archive write failed for %s: %s"
-                        ckpt.session_id (Printexc.to_string exn));
-                 Ok ()
-             | Error err -> Error (Oas.Error.to_string err))
-         | Error err -> Error (Oas.Error.to_string err))
-    | Some _ | None ->
-        fallback ()
+      let dir = Eio.Path.(fs / session_dir) in
+      (match Oas.Checkpoint_store.create dir with
+       | Ok store ->
+         (match Oas.Checkpoint_store.save store ckpt with
+          | Ok () ->
+            (try save_oas_history ~session_dir ckpt with
+             | Eio.Cancel.Cancelled _ as e -> raise e
+             | exn ->
+               Log.Keeper.warn
+                 "OAS snapshot archive write failed for %s: %s"
+                 ckpt.session_id
+                 (Printexc.to_string exn));
+            Ok ()
+          | Error err -> Error (Oas.Error.to_string err))
+       | Error err -> Error (Oas.Error.to_string err))
+    | Some _ | None -> fallback ()
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn -> Error (Printf.sprintf "save_oas: %s" (Printexc.to_string exn))
+;;
 
 (* Delta Checkpoint Shadow-Apply removed: Oas.Checkpoint.delta
    type was removed upstream. Functions had zero callers. *)
@@ -290,22 +329,28 @@ let is_not_found_detail (detail : string) : bool =
      string helper — this module has no .mli so every top-level [let]
      is exported. *)
   let has_substring haystack needle =
-    let hl = String.length haystack and nl = String.length needle in
-    if nl = 0 then true
-    else if nl > hl then false
-    else
+    let hl = String.length haystack
+    and nl = String.length needle in
+    if nl = 0
+    then true
+    else if nl > hl
+    then false
+    else (
       let rec loop i =
-        if i + nl > hl then false
-        else if String.sub haystack i nl = needle then true
+        if i + nl > hl
+        then false
+        else if String.sub haystack i nl = needle
+        then true
         else loop (i + 1)
       in
-      loop 0
+      loop 0)
   in
-  String.starts_with ~prefix:"no_such_file" d  (* legacy masc-mcp path *)
+  String.starts_with ~prefix:"no_such_file" d (* legacy masc-mcp path *)
   || String.starts_with ~prefix:"no such file" d
-  || String.starts_with ~prefix:"unix_error (enoent" d  (* POSIX *)
-  || String.starts_with ~prefix:"eio.io fs not_found" d  (* Eio.Io (Fs Not_found _) *)
+  || String.starts_with ~prefix:"unix_error (enoent" d (* POSIX *)
+  || String.starts_with ~prefix:"eio.io fs not_found" d (* Eio.Io (Fs Not_found _) *)
   || has_substring d "no such file or directory"
+;;
 
 (* #8605 family: exhaustive on Oas.Error.sdk_error top-level
    variants. The previous wildcard collapsed Api / Agent / Mcp / Config
@@ -318,17 +363,18 @@ let is_not_found_detail (detail : string) : bool =
 let classify_sdk_error (e : Oas.Error.sdk_error) : checkpoint_load_error =
   match e with
   | Io (FileOpFailed r) ->
-      if is_not_found_detail r.detail then Not_found
-      else Io_error (sprintf "file %s failed on %s: %s" r.op r.path r.detail)
+    if is_not_found_detail r.detail
+    then Not_found
+    else Io_error (sprintf "file %s failed on %s: %s" r.op r.path r.detail)
   | Io (ValidationFailed r) -> Store_error r.detail
   | Serialization (JsonParseError r) -> Parse_error r.detail
   | Serialization (VersionMismatch r) ->
-      Parse_error (sprintf "version mismatch: expected %d, got %d" r.expected r.got)
+    Parse_error (sprintf "version mismatch: expected %d, got %d" r.expected r.got)
   | Serialization (UnknownVariant r) ->
-      Parse_error (sprintf "unknown variant %s: %s" r.type_name r.value)
-  | Api _ | Agent _ | Mcp _ | Config _
-  | Orchestration _ | A2a _ | Internal _ ->
-      Sdk_other_error (Oas.Error.to_string e)
+    Parse_error (sprintf "unknown variant %s: %s" r.type_name r.value)
+  | Api _ | Agent _ | Mcp _ | Config _ | Orchestration _ | A2a _ | Internal _ ->
+    Sdk_other_error (Oas.Error.to_string e)
+;;
 
 let result_all items =
   let rec loop acc = function
@@ -337,39 +383,35 @@ let result_all items =
     | Error e :: _ -> Error e
   in
   loop [] items
+;;
 
 let content_block_of_json_strict json =
   try
     match Oas.Api.content_block_of_json json with
     | Some block -> Ok block
     | None ->
-        let open Yojson.Safe.Util in
-        let block_type =
-          json |> member "type" |> to_string_option |> Option.value ~default:"<missing>"
-        in
-        Error
-          (Oas.Error.Serialization
-             (JsonParseError
-                {
-                  detail =
-                    Printf.sprintf "Unknown content block type: %s" block_type;
-                }))
+      let open Yojson.Safe.Util in
+      let block_type =
+        json |> member "type" |> to_string_option |> Option.value ~default:"<missing>"
+      in
+      Error
+        (Oas.Error.Serialization
+           (JsonParseError
+              { detail = Printf.sprintf "Unknown content block type: %s" block_type }))
   with
   | Yojson.Safe.Util.Type_error (msg, _) ->
-      Error
-        (Oas.Error.Serialization
-           (JsonParseError
-              { detail = Printf.sprintf "Invalid content block: %s" msg }))
+    Error
+      (Oas.Error.Serialization
+         (JsonParseError { detail = Printf.sprintf "Invalid content block: %s" msg }))
   | Yojson.Json_error msg ->
-      Error
-        (Oas.Error.Serialization
-           (JsonParseError
-              { detail = Printf.sprintf "Invalid content block: %s" msg }))
+    Error
+      (Oas.Error.Serialization
+         (JsonParseError { detail = Printf.sprintf "Invalid content block: %s" msg }))
   | Failure msg ->
-      Error
-        (Oas.Error.Serialization
-           (JsonParseError
-              { detail = Printf.sprintf "Invalid content block: %s" msg }))
+    Error
+      (Oas.Error.Serialization
+         (JsonParseError { detail = Printf.sprintf "Invalid content block: %s" msg }))
+;;
 
 let role_of_string_compat raw =
   match String.lowercase_ascii (String.trim raw) with
@@ -378,140 +420,141 @@ let role_of_string_compat raw =
   | "assistant" -> Ok Oas.Types.Assistant
   | "tool" -> Ok Oas.Types.Tool
   | other ->
-      Error
-        (Oas.Error.Serialization
-           (UnknownVariant { type_name = "role"; value = other }))
+    Error (Oas.Error.Serialization (UnknownVariant { type_name = "role"; value = other }))
+;;
 
 let message_of_json_compat json =
   let open Yojson.Safe.Util in
   try
     let role = json |> member "role" |> to_string |> role_of_string_compat in
     let content =
-      json |> member "content" |> to_list
+      json
+      |> member "content"
+      |> to_list
       |> List.map content_block_of_json_strict
       |> result_all
     in
     match role, content with
     | Ok role, Ok content ->
-        Ok
-          {
-            Oas.Types.role;
-            content;
-            name = json |> member "name" |> to_string_option;
-            tool_call_id = json |> member "tool_call_id" |> to_string_option;
-            metadata = [];
-          }
+      Ok
+        { Oas.Types.role
+        ; content
+        ; name = json |> member "name" |> to_string_option
+        ; tool_call_id = json |> member "tool_call_id" |> to_string_option
+        ; metadata = []
+        }
     | Error e, _ -> Error e
     | _, Error e -> Error e
   with
   | Yojson.Safe.Util.Type_error (msg, _) ->
-      Error
-        (Oas.Error.Serialization
-           (JsonParseError
-              { detail = Printf.sprintf "Invalid checkpoint message: %s" msg }))
+    Error
+      (Oas.Error.Serialization
+         (JsonParseError { detail = Printf.sprintf "Invalid checkpoint message: %s" msg }))
   | Yojson.Json_error msg ->
-      Error
-        (Oas.Error.Serialization
-           (JsonParseError
-              { detail = Printf.sprintf "Invalid checkpoint message: %s" msg }))
+    Error
+      (Oas.Error.Serialization
+         (JsonParseError { detail = Printf.sprintf "Invalid checkpoint message: %s" msg }))
+;;
 
 let normalize_checkpoint_json_for_sdk json =
   let normalize_message = function
     | `Assoc fields ->
-        `Assoc
-          (List.map
-             (function
-               | "role", `String ("assistant" | "user" as role) ->
-                   ("role", `String role)
-               | "role", `String _ ->
-                   ("role", `String "assistant")
-               | field -> field)
-             fields)
+      `Assoc
+        (List.map
+           (function
+             | "role", `String (("assistant" | "user") as role) -> "role", `String role
+             | "role", `String _ -> "role", `String "assistant"
+             | field -> field)
+           fields)
     | other -> other
   in
   match json with
   | `Assoc fields ->
-      `Assoc
-        (List.map
-           (function
-             | "messages", `List messages ->
-                 ("messages", `List (List.map normalize_message messages))
-             | field -> field)
-           fields)
+    `Assoc
+      (List.map
+         (function
+           | "messages", `List messages ->
+             "messages", `List (List.map normalize_message messages)
+           | field -> field)
+         fields)
   | other -> other
+;;
 
 let checkpoint_of_json_compat json =
   let open Yojson.Safe.Util in
   try
     let messages =
-      json |> member "messages" |> to_list
+      json
+      |> member "messages"
+      |> to_list
       |> List.map message_of_json_compat
       |> result_all
     in
     match messages with
     | Error e -> Error e
-    | Ok messages -> (
-        match Oas.Checkpoint.of_json (normalize_checkpoint_json_for_sdk json) with
-        | Ok checkpoint -> Ok { checkpoint with messages }
-        | Error e -> Error e)
+    | Ok messages ->
+      (match Oas.Checkpoint.of_json (normalize_checkpoint_json_for_sdk json) with
+       | Ok checkpoint -> Ok { checkpoint with messages }
+       | Error e -> Error e)
   with
   | Yojson.Safe.Util.Type_error (msg, _) ->
-      Error
-        (Oas.Error.Serialization
-           (JsonParseError
-              { detail = Printf.sprintf "Checkpoint.of_json compat: %s" msg }))
+    Error
+      (Oas.Error.Serialization
+         (JsonParseError { detail = Printf.sprintf "Checkpoint.of_json compat: %s" msg }))
   | Yojson.Json_error msg ->
-      Error
-        (Oas.Error.Serialization
-           (JsonParseError
-              { detail = Printf.sprintf "Checkpoint.of_json compat: %s" msg }))
+    Error
+      (Oas.Error.Serialization
+         (JsonParseError { detail = Printf.sprintf "Checkpoint.of_json compat: %s" msg }))
+;;
 
 let checkpoint_of_string_compat raw =
   match Oas.Checkpoint.of_string raw with
   | Ok checkpoint -> Ok checkpoint
   | Error _ ->
-      let json =
-        raw
-        |> Inference_utils.sanitize_text_utf8
-        |> Yojson.Safe.from_string
-      in
-      checkpoint_of_json_compat json
+    let json = raw |> Inference_utils.sanitize_text_utf8 |> Yojson.Safe.from_string in
+    checkpoint_of_json_compat json
+;;
 
-let load_oas_history_file ~(session_dir : string) ~(snapshot_id : string) :
-    (Oas.Checkpoint.t, checkpoint_load_error) result =
+let load_oas_history_file ~(session_dir : string) ~(snapshot_id : string)
+  : (Oas.Checkpoint.t, checkpoint_load_error) result
+  =
   let path = oas_history_path ~session_dir ~snapshot_id in
-  if Fs_compat.file_exists path then
+  if Fs_compat.file_exists path
+  then (
     try
       match checkpoint_of_string_compat (Fs_compat.load_file path) with
       | Ok ckpt -> Ok ckpt
       | Error e -> Error (classify_sdk_error e)
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn -> Error (Io_error (Printexc.to_string exn))
+    | exn -> Error (Io_error (Printexc.to_string exn)))
   else Error Not_found
+;;
 
-let load_oas ~(session_dir : string) ~(session_id : string) :
-    (Oas.Checkpoint.t, checkpoint_load_error) result =
+let load_oas ~(session_dir : string) ~(session_id : string)
+  : (Oas.Checkpoint.t, checkpoint_load_error) result
+  =
   let fallback () =
     let path = oas_checkpoint_path ~session_dir ~session_id in
-    if Fs_compat.file_exists path then
+    if Fs_compat.file_exists path
+    then (
       try
         match checkpoint_of_string_compat (Fs_compat.load_file path) with
         | Ok ckpt -> Ok ckpt
         | Error e -> Error (classify_sdk_error e)
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
-      | exn -> Error (Io_error (Printexc.to_string exn))
+      | exn -> Error (Io_error (Printexc.to_string exn)))
     else Error Not_found
   in
   match Fs_compat.get_fs_opt () with
   | Some fs when Eio_guard.is_ready () ->
-      let dir = Eio.Path.(fs / session_dir) in
-      (match Oas.Checkpoint_store.create dir with
-       | Ok store -> (
-           match Oas.Checkpoint_store.load store session_id with
-           | Ok ckpt -> Ok ckpt
-           | Error e -> Error (classify_sdk_error e))
-       | Error e -> Error (Store_error (Oas.Error.to_string e)))
-  | Some _ | None ->
-      fallback ()
+    let dir = Eio.Path.(fs / session_dir) in
+    (match Oas.Checkpoint_store.create dir with
+     | Ok store ->
+       (match Oas.Checkpoint_store.load store session_id with
+        | Ok ckpt -> Ok ckpt
+        | Error e -> Error (classify_sdk_error e))
+     | Error e -> Error (Store_error (Oas.Error.to_string e)))
+  | Some _ | None -> fallback ()
+;;

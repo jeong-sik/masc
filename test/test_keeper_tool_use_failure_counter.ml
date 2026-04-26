@@ -11,8 +11,9 @@ module Prom = Masc_mcp.Prometheus
 let counter_for ~keeper ~tool =
   Prom.metric_value_or_zero
     H.tool_use_failure_metric
-    ~labels:[ ("keeper", keeper); ("tool", tool) ]
+    ~labels:[ "keeper", keeper; "tool", tool ]
     ()
+;;
 
 let test_metric_name_matches_convention () =
   (* Prometheus _total suffix + masc_ prefix follow the existing
@@ -22,6 +23,7 @@ let test_metric_name_matches_convention () =
     "tool_use_failure counter uses canonical masc_*_total name"
     "masc_keeper_tool_use_failure_total"
     H.tool_use_failure_metric
+;;
 
 let test_record_increments_with_labels () =
   let keeper = "test-keeper-9919-a" in
@@ -30,7 +32,9 @@ let test_record_increments_with_labels () =
   H.record_tool_use_failure ~keeper_name:keeper ~tool_name:tool;
   Alcotest.(check (float 0.0001))
     "counter +1 for (keeper, tool) pair"
-    (before +. 1.0) (counter_for ~keeper ~tool)
+    (before +. 1.0)
+    (counter_for ~keeper ~tool)
+;;
 
 let test_labels_isolate_keeper_tool_pairs () =
   (* #9919 root complaint: prior emit had no identifying dimension.
@@ -44,25 +48,33 @@ let test_labels_isolate_keeper_tool_pairs () =
   let b_before = counter_for ~keeper:b_keeper ~tool in
   H.record_tool_use_failure ~keeper_name:a_keeper ~tool_name:tool;
   Alcotest.(check (float 0.0001))
-    "A counter +1" (a_before +. 1.0)
+    "A counter +1"
+    (a_before +. 1.0)
     (counter_for ~keeper:a_keeper ~tool);
   Alcotest.(check (float 0.0001))
-    "B counter unchanged" b_before
+    "B counter unchanged"
+    b_before
     (counter_for ~keeper:b_keeper ~tool)
+;;
 
 let () =
-  Alcotest.run "keeper_tool_use_failure_counter_9919"
-    [
-      ( "metric_name",
-        [
-          Alcotest.test_case "masc_*_total convention" `Quick
-            test_metric_name_matches_convention;
-        ] );
-      ( "counter",
-        [
-          Alcotest.test_case "increments with labels" `Quick
-            test_record_increments_with_labels;
-          Alcotest.test_case "isolates keeper/tool pairs" `Quick
-            test_labels_isolate_keeper_tool_pairs;
-        ] );
+  Alcotest.run
+    "keeper_tool_use_failure_counter_9919"
+    [ ( "metric_name"
+      , [ Alcotest.test_case
+            "masc_*_total convention"
+            `Quick
+            test_metric_name_matches_convention
+        ] )
+    ; ( "counter"
+      , [ Alcotest.test_case
+            "increments with labels"
+            `Quick
+            test_record_increments_with_labels
+        ; Alcotest.test_case
+            "isolates keeper/tool pairs"
+            `Quick
+            test_labels_isolate_keeper_tool_pairs
+        ] )
     ]
+;;

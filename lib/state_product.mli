@@ -21,13 +21,13 @@ module Keeper = Keeper_state_machine
 
 module Agent_turn : sig
   type phase =
-    | Idle            (** Waiting for next turn *)
-    | Prompting       (** Constructing API request *)
-    | Awaiting        (** Waiting for LLM response *)
-    | Parsing         (** Parsing LLM response *)
-    | Dispatching     (** Executing tool calls *)
-    | Collecting      (** Collecting tool results *)
-    | Finalizing      (** Post-turn hooks *)
+    | Idle (** Waiting for next turn *)
+    | Prompting (** Constructing API request *)
+    | Awaiting (** Waiting for LLM response *)
+    | Parsing (** Parsing LLM response *)
+    | Dispatching (** Executing tool calls *)
+    | Collecting (** Collecting tool results *)
+    | Finalizing (** Post-turn hooks *)
 
   val phase_to_string : phase -> string
   val all_phases : phase list
@@ -44,7 +44,12 @@ module Agent_turn : sig
 
   val event_to_string : event -> string
 
-  type transition = Applied of phase | Ignored of { phase: phase; event: event }
+  type transition =
+    | Applied of phase
+    | Ignored of
+        { phase : phase
+        ; event : event
+        }
 
   (** Pure transition function. Returns [Ignored] for invalid transitions. *)
   val apply_event : current:phase -> event -> transition
@@ -57,13 +62,13 @@ end
 
 module Tool_validation : sig
   type phase =
-    | Unchecked       (** Raw JSON received *)
-    | Det_correcting  (** Running deterministic correction stages *)
-    | Det_valid       (** Passed after deterministic correction *)
-    | Det_invalid     (** Failed deterministic, awaiting NonDet *)
+    | Unchecked (** Raw JSON received *)
+    | Det_correcting (** Running deterministic correction stages *)
+    | Det_valid (** Passed after deterministic correction *)
+    | Det_invalid (** Failed deterministic, awaiting NonDet *)
     | Nondet_retrying (** LLM re-prompt in progress *)
-    | Valid           (** Passed validation (det or nondet) *)
-    | Rejected        (** Failed all retries *)
+    | Valid (** Passed validation (det or nondet) *)
+    | Rejected (** Failed all retries *)
 
   val phase_to_string : phase -> string
   val all_phases : phase list
@@ -79,33 +84,36 @@ module Tool_validation : sig
 
   val event_to_string : event -> string
 
-  type transition = Applied of phase | Ignored of { phase: phase; event: event }
+  type transition =
+    | Applied of phase
+    | Ignored of
+        { phase : phase
+        ; event : event
+        }
 
-  val default_max_nondet_retries : int
   (** Default cap on [Nondet_attempt] transitions (3). *)
+  val default_max_nondet_retries : int
 
-  val apply_event :
-    ?max_nondet_retries:int -> current:phase -> event -> transition
   (** Pure transition function. When [current = Nondet_retrying] and
       [event = Nondet_attempt n], the attempt is rejected (transitions to
       [Rejected]) if [n >= max_nondet_retries] (default {!default_max_nondet_retries}).
       Returns [Ignored] for otherwise invalid transitions. *)
+  val apply_event : ?max_nondet_retries:int -> current:phase -> event -> transition
 
-  val apply_event_lossy :
-    ?max_nondet_retries:int -> current:phase -> event -> phase
   (** Like [apply_event] but silently returns the phase on invalid transitions. *)
+  val apply_event_lossy : ?max_nondet_retries:int -> current:phase -> event -> phase
 end
 
 (** {4 Product State} *)
 
-type product = {
-  keeper : Keeper.phase;
-  turn : Agent_turn.phase;
-  validation : Tool_validation.phase;
-}
+type product =
+  { keeper : Keeper.phase
+  ; turn : Agent_turn.phase
+  ; validation : Tool_validation.phase
+  }
 
-val initial : product
 (** [{ keeper = Offline; turn = Idle; validation = Unchecked }] *)
+val initial : product
 
 (** {5 Cross-Dimension Invariants} *)
 
@@ -125,15 +133,16 @@ val check_invariants : product -> (unit, string) result
 (** Apply a turn event.
     Also resets validation on [Turn_start], [Turn_complete], [Turn_error]
     (TLA+ verified: prevents orphaned validation state). *)
-val apply_turn_event :
-  product -> Agent_turn.event -> (product, string) result
+val apply_turn_event : product -> Agent_turn.event -> (product, string) result
 
 (** Apply a validation event.
     Guarded: validation events are only accepted when [turn = Dispatching].
     @param max_nondet_retries cap on [Nondet_attempt] retries (default 3). *)
-val apply_validation_event :
-  ?max_nondet_retries:int ->
-  product -> Tool_validation.event -> (product, string) result
+val apply_validation_event
+  :  ?max_nondet_retries:int
+  -> product
+  -> Tool_validation.event
+  -> (product, string) result
 
 (** {7 Serialization} *)
 

@@ -13,7 +13,7 @@ type caller =
   | Sandbox
   | Pr_review
   | Pr_review_post
-      (** [gh pr review --body --event] mutation (post a review with
+  (** [gh pr review --body --event] mutation (post a review with
           body).  Default 30.0s — server-side processing of the
           review state machine + notification fanout is materially
           slower than read ops; the [Pr_review] 15s read budget is
@@ -26,13 +26,13 @@ type caller =
   | Turn_sandbox
   | Turn_up
   | Git_meta
-      (** Local git metadata commands (e.g. [git remote get-url],
+  (** Local git metadata commands (e.g. [git remote get-url],
           [git rev-parse]).  Default 5.0s — these are local disk
           operations that should complete in <1s; a 5s ceiling
           surfaces NFS hangs or repository corruption without
           masking them. *)
   | Shell_probe
-      (** PATH availability probes (e.g. [command -v <name>]).
+  (** PATH availability probes (e.g. [command -v <name>]).
           Default 2.0s — pure OS lookup; longer timeouts mask
           shell-startup misconfiguration rather than helping. *)
   | Unknown of string

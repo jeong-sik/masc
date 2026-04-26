@@ -33,14 +33,13 @@ module Http_client : sig
     | Network_error
     | Provider_terminal
 
-  val classify : Llm_provider.Http_client.http_error -> cascade_failure_class
   (** Classify an OAS HTTP/client failure into MASC's typed cascade boundary.
 
       Compatibility string checks remain quarantined in this adapter. Downstream
       cascade/FSM code should branch on this class rather than reparsing
       provider error text. *)
+  val classify : Llm_provider.Http_client.http_error -> cascade_failure_class
 
-  val should_cascade : Llm_provider.Http_client.http_error -> bool
   (** Decide whether an error should cascade to the next provider.
 
       Exhaustive match over [Llm_provider.Http_client.http_error].
@@ -63,8 +62,8 @@ module Http_client : sig
       All of these are per-provider, not cascade-wide; a fallback provider
       may succeed where the current one rejected. See masc-mcp #9932
       (kimi fallback), #9850 (codex_cli runtime_mcp_auth). *)
+  val should_cascade : Llm_provider.Http_client.http_error -> bool
 
-  val error_message : Llm_provider.Http_client.http_error -> string
   (** Extract a human-readable message from an OAS HTTP error.
 
       Centralises the "render error for log/observation" logic so callers
@@ -78,18 +77,10 @@ module Http_client : sig
       For [HttpError] the body is parsed as JSON to surface the
       provider-supplied [error.message] when present; otherwise the HTTP
       status code is rendered. *)
+  val error_message : Llm_provider.Http_client.http_error -> string
 end
 
 module Metrics : sig
-  val make :
-    ?on_cache_hit:(model_id:string -> unit) ->
-    ?on_cache_miss:(model_id:string -> unit) ->
-    ?on_request_start:(model_id:string -> unit) ->
-    ?on_request_end:(model_id:string -> latency_ms:int -> unit) ->
-    ?on_error:(model_id:string -> error:string -> unit) ->
-    ?on_http_status:(provider:string -> model_id:string -> status:int -> unit) ->
-    unit ->
-    Llm_provider.Metrics.t
   (** Construct a [Llm_provider.Metrics.t] value.
 
       Each callback is optional; unset callbacks and any OAS fields
@@ -101,4 +92,13 @@ module Metrics : sig
       fragile under upstream churn because OCaml records require all
       fields to be set explicitly. Centralizing the literal here
       means field additions change this file and no other. *)
+  val make
+    :  ?on_cache_hit:(model_id:string -> unit)
+    -> ?on_cache_miss:(model_id:string -> unit)
+    -> ?on_request_start:(model_id:string -> unit)
+    -> ?on_request_end:(model_id:string -> latency_ms:int -> unit)
+    -> ?on_error:(model_id:string -> error:string -> unit)
+    -> ?on_http_status:(provider:string -> model_id:string -> status:int -> unit)
+    -> unit
+    -> Llm_provider.Metrics.t
 end

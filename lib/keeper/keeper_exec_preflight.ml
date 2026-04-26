@@ -12,7 +12,8 @@ let handle_keeper_preflight_check
   let results = Buffer.create 256 in
   let all_ok = ref true in
   let add_check name ok _value =
-    Buffer.add_string results
+    Buffer.add_string
+      results
       (Printf.sprintf "  %s: %s\n" name (if ok then "ok" else "FAILED"));
     if not ok then all_ok := false
   in
@@ -28,27 +29,31 @@ let handle_keeper_preflight_check
   (* Check 2: repo access *)
   let default_branch = ref "main" in
   let () =
-    if repo = "" then
-      add_check "repo_access" true "(current project)"
-    else
+    if repo = ""
+    then add_check "repo_access" true "(current project)"
+    else (
       let st, out =
         Process_eio.run_argv_with_status
           ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Preflight ())
-          [ "/bin/zsh"; "-lc";
-            Printf.sprintf "gh repo view %s --json name,defaultBranchRef 2>&1"
-              (Filename.quote repo) ]
+          [ "/bin/zsh"
+          ; "-lc"
+          ; Printf.sprintf
+              "gh repo view %s --json name,defaultBranchRef 2>&1"
+              (Filename.quote repo)
+          ]
       in
       let ok = st = Unix.WEXITED 0 in
       (* Extract default branch from JSON if available *)
-      (if ok then
-         Safe_ops.protect ~default:() (fun () ->
-           let json = Yojson.Safe.from_string out in
-           let branch_ref =
-             Yojson.Safe.Util.(
-               json |> member "defaultBranchRef" |> member "name" |> to_string)
-           in
-           default_branch := branch_ref));
-      add_check "repo_access" ok out
+      if ok
+      then
+        Safe_ops.protect ~default:() (fun () ->
+          let json = Yojson.Safe.from_string out in
+          let branch_ref =
+            Yojson.Safe.Util.(
+              json |> member "defaultBranchRef" |> member "name" |> to_string)
+          in
+          default_branch := branch_ref);
+      add_check "repo_access" ok out)
   in
   (* Check 3: keeper identity *)
   let author = Keeper_identity.keeper_git_author ~keeper_name:meta.name in
@@ -68,7 +73,9 @@ let handle_keeper_preflight_check
   let () = add_check "preset" preset_ok preset_name in
   (* Check 5: accountability risk *)
   let accountability_summary =
-    Keeper_accountability.accountability_summary_json config ~keeper_name:meta.name
+    Keeper_accountability.accountability_summary_json
+      config
+      ~keeper_name:meta.name
       ~agent_name:meta.agent_name
   in
   let risk_band =
@@ -79,36 +86,39 @@ let handle_keeper_preflight_check
     json_string_field "routing_hint" accountability_summary
     |> Option.value ~default:"normal_routing"
   in
-  let accountability_risk =
-    String.equal risk_band "high"
-  in
+  let accountability_risk = String.equal risk_band "high" in
   let () =
-    add_check "accountability_risk" (not accountability_risk)
+    add_check
+      "accountability_risk"
+      (not accountability_risk)
       (if accountability_risk then "RISK_HIGH" else "ok")
   in
   (* Check 6: sandbox clone target *)
-  let repo_name_arg =
-    Safe_ops.json_string ~default:"" "repo_name" args |> String.trim
-  in
+  let repo_name_arg = Safe_ops.json_string ~default:"" "repo_name" args |> String.trim in
   let clone_target =
     let repo_name =
-      if repo_name_arg <> "" then repo_name_arg
+      if repo_name_arg <> ""
+      then repo_name_arg
       else Keeper_repo_readiness.repo_name_of_repo_arg ~project_root:root repo
     in
     Filename.concat "repos" repo_name
   in
   (* Check 6: sandbox repo readiness *)
   let repo_readiness =
-    Keeper_repo_readiness.inspect ~config ~meta
+    Keeper_repo_readiness.inspect
+      ~config
+      ~meta
       ?repo_name:(if repo_name_arg = "" then None else Some repo_name_arg)
-      ~repo ~default_branch:!default_branch ()
+      ~repo
+      ~default_branch:!default_branch
+      ()
   in
   let repo_ready =
     match repo_readiness with
-    | `Assoc fields -> (
-        match List.assoc_opt "ok" fields with
-        | Some (`Bool ok) -> ok
-        | _ -> false)
+    | `Assoc fields ->
+      (match List.assoc_opt "ok" fields with
+       | Some (`Bool ok) -> ok
+       | _ -> false)
     | _ -> false
   in
   let repo_state =
@@ -131,3 +141,4 @@ let handle_keeper_preflight_check
         ; "repo_readiness", repo_readiness
         ; "keeper", `String meta.name
         ])
+;;

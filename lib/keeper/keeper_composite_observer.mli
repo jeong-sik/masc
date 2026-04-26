@@ -104,92 +104,91 @@ val all_invariant_keys : invariant_key list
     Each field is [true] when the invariant holds for the observed
     snapshot. A [false] value signals a composite-level safety violation
     that the dashboard should surface to the operator. *)
-type invariants_check = {
-  phase_turn_alignment : bool;
-  no_cascade_before_measurement : bool;
-  compaction_atomicity : bool;
-  event_priority_monotone : bool;
-}
+type invariants_check =
+  { phase_turn_alignment : bool
+  ; no_cascade_before_measurement : bool
+  ; compaction_atomicity : bool
+  ; event_priority_monotone : bool
+  }
 
 (** Increment [masc_keeper_invariant_violations_total\{keeper, invariant\}]
     once per violated invariant. No-op when all invariants hold. Called
     automatically from [observe]; exposed so unit tests can assert the
     counter bump without going through the full snapshot pipeline. *)
-val bump_invariant_violations :
-  keeper_name:string -> invariants_check -> unit
+val bump_invariant_violations : keeper_name:string -> invariants_check -> unit
 
 (** Frozen outcome of the most recently completed turn (RFC-0003
     Phase 2). Surfaces terminal data ([Done]/[Guard_ok]/...) without
     polluting the live sub-FSM fields. [None] until the first turn
     has finished after registration. *)
-type last_outcome = {
-  turn_id : int;
-  ended_at : float;
-  decision_stage : decision_stage;
-  cascade_state : cascade_state;
-  selected_model : string option;
-}
+type last_outcome =
+  { turn_id : int
+  ; ended_at : float
+  ; decision_stage : decision_stage
+  ; cascade_state : cascade_state
+  ; selected_model : string option
+  }
 
-type snapshot = {
-  keeper_name : string;
-      (** Canonical keeper identity from the registry entry. This is separate
+type snapshot =
+  { keeper_name : string
+    (** Canonical keeper identity from the registry entry. This is separate
           from [correlation_id], which may come from an external event envelope
           and is not a stable row key for fleet dashboards. *)
-  correlation_id : string;
-  run_id : string;
-  ts : float;
-  ksm_phase : ksm_phase;
-  collapsed_from : Keeper_state_machine.phase option;
-      (** Raw keeper phase collapsed into [Ksm_stable], when applicable.
+  ; correlation_id : string
+  ; run_id : string
+  ; ts : float
+  ; ksm_phase : ksm_phase
+  ; collapsed_from : Keeper_state_machine.phase option
+    (** Raw keeper phase collapsed into [Ksm_stable], when applicable.
           [None] for active composite phases or older payload readers.
           Lets operator surfaces distinguish "quiet" from terminal or
           operator-paused raw phases without widening the composite enum. *)
-  ktc_turn_phase : turn_phase;
-  kdp_decision : decision_stage;
-  kcl_cascade_state : cascade_state;
-  kmc_compaction : compaction_stage;
-  kcb_state : Keeper_failure_circuit_breaker.display_state;
-      (** 6th axis (LT-16-KCB). Observable circuit-breaker state —
+  ; ktc_turn_phase : turn_phase
+  ; kdp_decision : decision_stage
+  ; kcl_cascade_state : cascade_state
+  ; kmc_compaction : compaction_stage
+  ; kcb_state : Keeper_failure_circuit_breaker.display_state
+    (** 6th axis (LT-16-KCB). Observable circuit-breaker state —
           never [Tripped] because the mutator resets [consecutive_count]
           before snapshots can see it. See
           {!Keeper_failure_circuit_breaker.display_state}. *)
-  shared_measurement : Keeper_state_machine.auto_rule_summary option;
-  invariants : invariants_check;
-  is_live : bool;
-      (** [true] when [current_turn_observation] is [Some] — a turn is
+  ; shared_measurement : Keeper_state_machine.auto_rule_summary option
+  ; invariants : invariants_check
+  ; is_live : bool
+    (** [true] when [current_turn_observation] is [Some] — a turn is
           actively executing and the live sub-FSM fields reflect its
           state. [false] indicates an idle keeper; sub-FSM fields
           revert to [Idle]/[Undecided]. *)
-  last_outcome : last_outcome option;
-      (** Most recent completed turn, surfaced separately from live
+  ; last_outcome : last_outcome option
+    (** Most recent completed turn, surfaced separately from live
           state so operators can see "what just finished" without
           confusing it with "what's running now". *)
-  fiber_stop_flag : bool;
-      (** Snapshot of [registry_entry.fiber_stop] at observation time.
+  ; fiber_stop_flag : bool
+    (** Snapshot of [registry_entry.fiber_stop] at observation time.
           When [true] without a corresponding stopped/dead phase, the
           keepalive loop will exit on its next iteration — used to
           discriminate fiber-supervisor wedge from cycle-gate wedge in
           fleet silence diagnoses. *)
-  fiber_wakeup_flag : bool;
-      (** Snapshot of [registry_entry.fiber_wakeup]. [true] means a
+  ; fiber_wakeup_flag : bool
+    (** Snapshot of [registry_entry.fiber_wakeup]. [true] means a
           wake signal is queued; the next [interruptible_sleep] chunk
           will return early. Stale [true] points at a wake source
           that was set but never consumed. *)
-  consecutive_noop_count : int;
-      (** Lifetime [consecutive_noop_count] from the proactive runtime.
+  ; consecutive_noop_count : int
+    (** Lifetime [consecutive_noop_count] from the proactive runtime.
           Increments per cycle that produced no text and only used
           observation-only tools; resets on substantive output. Reaching
           ≥3 caps the noop backoff multiplier at 8x. *)
-  idle_seconds : int;
-      (** Wall-clock seconds since the keeper last did something the
+  ; idle_seconds : int
+    (** Wall-clock seconds since the keeper last did something the
           metrics layer treated as substantive. Compared against
           [proactive.idle_sec] to gate scheduled-autonomous turns. *)
-  last_turn_ts : float;
-      (** Raw [runtime.usage.last_turn_ts] from the registry entry.
+  ; last_turn_ts : float
+    (** Raw [runtime.usage.last_turn_ts] from the registry entry.
           Exposed for watchdog staleness diagnosis — the stale watchdog
           in [Keeper_supervisor] reads this exact field. A value of [0.0]
           means the registry never recorded a completed turn. *)
-}
+  }
 
 (** Derive a composite snapshot from a live registry entry.
 
@@ -199,12 +198,12 @@ type snapshot = {
     [keeper:<name>:<transition_seq>] as a stable identifier so repeated
     reads within the same keeper transition return the same id. *)
 
-val observe :
-  ?correlation_id:string ->
-  ?run_id:string ->
-  ?now:float ->
-  Keeper_registry.registry_entry ->
-  snapshot
+val observe
+  :  ?correlation_id:string
+  -> ?run_id:string
+  -> ?now:float
+  -> Keeper_registry.registry_entry
+  -> snapshot
 
 (** Observe every registered keeper under [base_path] once. Used by
     [GET /api/v1/keepers/composite] to render fleet-level matrices
@@ -214,26 +213,27 @@ val all_snapshots : base_path:string -> unit -> snapshot list
 (** Stringify [turn_phase] for JSON serialisation. Mirrors the lowercase
     edge labels used in KeeperTurnCycle.tla. *)
 val ksm_phase_to_string : ksm_phase -> string
-val ksm_phase_of_string : string -> ksm_phase option
 
+val ksm_phase_of_string : string -> ksm_phase option
 val turn_phase_to_string : turn_phase -> string
 val turn_phase_of_string : string -> turn_phase option
 
 (** Stringify [decision_stage]. Mirrors KeeperDecisionPipeline.tla. *)
 val decision_stage_to_string : decision_stage -> string
+
 val decision_stage_of_string : string -> decision_stage option
 
 (** Stringify [cascade_state]. Mirrors KeeperCascadeLifecycle.tla. *)
 val cascade_state_to_string : cascade_state -> string
+
 val cascade_state_of_string : string -> cascade_state option
 
 (** Stringify [compaction_stage]. Mirrors KeeperCompactionLifecycle.tla. *)
 val compaction_stage_to_string : compaction_stage -> string
-val compaction_stage_of_string : string -> compaction_stage option
 
+val compaction_stage_of_string : string -> compaction_stage option
 val tla_action_to_string : tla_action -> string
 val tla_action_of_string : string -> tla_action option
-
 val invariant_key_to_string : invariant_key -> string
 val invariant_key_of_string : string -> invariant_key option
 

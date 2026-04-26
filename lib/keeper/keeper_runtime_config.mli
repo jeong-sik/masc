@@ -42,10 +42,10 @@ val load_and_apply : base_path:string -> (int, string) result
 
     Returns [(count, overrides)] where [overrides] is
     [(env_name, value) list]. *)
-val resolve_overrides :
-  ?env_lookup:(string -> string option) ->
-  Keeper_toml_loader.toml_doc ->
-  int * (string * string) list
+val resolve_overrides
+  :  ?env_lookup:(string -> string option)
+  -> Keeper_toml_loader.toml_doc
+  -> int * (string * string) list
 
 (** TOML schema (for documentation):
 

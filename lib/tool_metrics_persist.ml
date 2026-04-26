@@ -17,20 +17,20 @@ let flush_interval_s = Env_config.InternalTimers.metrics_flush_sec
 
 let record_to_json (r : Tool_result.t) : Yojson.Safe.t =
   `Assoc
-    [ ("tool_name", `String r.tool_name)
-    ; ("success", `Bool r.success)
-    ; ("duration_ms", `Float r.duration_ms)
-    ; ("ts", `Float (Time_compat.now ()))
+    [ "tool_name", `String r.tool_name
+    ; "success", `Bool r.success
+    ; "duration_ms", `Float r.duration_ms
+    ; "ts", `Float (Time_compat.now ())
     ]
+;;
 
-type persisted_record = {
-  tool_name : string;
-  success : bool;
-  duration_ms : float;
-}
+type persisted_record =
+  { tool_name : string
+  ; success : bool
+  ; duration_ms : float
+  }
 
-let parse_record (json : Yojson.Safe.t)
-  : (persisted_record, string) result =
+let parse_record (json : Yojson.Safe.t) : (persisted_record, string) result =
   let tool_name = Safe_ops.json_string_opt "tool_name" json in
   let success = Safe_ops.json_bool_opt "success" json in
   let duration_ms = Safe_ops.json_float_opt "duration_ms" json in
@@ -38,34 +38,34 @@ let parse_record (json : Yojson.Safe.t)
   | Some tn, Some s, Some d -> Ok { tool_name = tn; success = s; duration_ms = d }
   | _ ->
     let missing =
-      [ ("tool_name", Option.is_none tool_name)
-      ; ("success", Option.is_none success)
-      ; ("duration_ms", Option.is_none duration_ms)
+      [ "tool_name", Option.is_none tool_name
+      ; "success", Option.is_none success
+      ; "duration_ms", Option.is_none duration_ms
       ]
       |> List.filter_map (fun (field, is_missing) ->
         if is_missing then Some field else None)
     in
-    Prometheus.inc_counter Prometheus.metric_error_events ~labels:[("type", "parsing")] ();
-    Error
-      (Printf.sprintf "missing required field(s): %s"
-         (String.concat ", " missing))
+    Prometheus.inc_counter Prometheus.metric_error_events ~labels:[ "type", "parsing" ] ();
+    Error (Printf.sprintf "missing required field(s): %s" (String.concat ", " missing))
+;;
 
 (* ── Write queue ────────────────────────────────────── *)
 
 let write_queue : Yojson.Safe.t Eio.Stream.t = Eio.Stream.create 4096
-
 let store_ref : (string * Dated_jsonl.t) option ref = ref None
 
 let rec drain_queue_without_store dropped =
   match Eio.Stream.take_nonblocking write_queue with
   | None -> dropped
   | Some _ -> drain_queue_without_store (dropped + 1)
+;;
 
 let reset_for_testing () =
   let dropped = drain_queue_without_store 0 in
-  if dropped > 0 then
-    Log.Metrics.warn "tool_metrics_persist: reset dropped %d queued records" dropped;
+  if dropped > 0
+  then Log.Metrics.warn "tool_metrics_persist: reset dropped %d queued records" dropped;
   store_ref := None
+;;
 
 let get_or_create_store ~base_path : Dated_jsonl.t =
   match !store_ref with
@@ -76,12 +76,14 @@ let get_or_create_store ~base_path : Dated_jsonl.t =
     let s = Dated_jsonl.create ~base_dir:dir () in
     store_ref := Some (base_path, s);
     s
+;;
 
 let enqueue (result : Tool_result.t) =
   let json = record_to_json result in
   (* Bounded stream (4096): blocks briefly if full, providing backpressure.
      Under normal operation the flush fiber drains well before capacity. *)
   Eio.Stream.add write_queue json
+;;
 
 (* ── Flush logic ────────────────────────────────────── *)
 
@@ -94,13 +96,17 @@ let drain_to_store (store : Dated_jsonl.t) : int =
       (try
          Dated_jsonl.append store json;
          incr count
-       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-         Log.Metrics.error "tool_metrics_persist: append failed: %s"
+       with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | exn ->
+         Log.Metrics.error
+           "tool_metrics_persist: append failed: %s"
            (Printexc.to_string exn));
       drain ()
   in
   drain ();
   !count
+;;
 
 let flush_now () =
   match !store_ref with
@@ -108,28 +114,33 @@ let flush_now () =
     (* Store not yet initialized — drain and discard to prevent unbounded growth.
        In practice, restore() initializes store_ref before any enqueue calls. *)
     let dropped = drain_queue_without_store 0 in
-    if dropped > 0 then
-      Log.Metrics.warn "tool_metrics_persist: flush_now called before init, dropped %d records"
+    if dropped > 0
+    then
+      Log.Metrics.warn
+        "tool_metrics_persist: flush_now called before init, dropped %d records"
         dropped
   | Some (_, store) ->
     let flushed = drain_to_store store in
     Log.Metrics.debug "tool_metrics_persist: flushed %d records" flushed
+;;
 
 let start_flush_fiber ~sw ~clock ~base_path =
   let store = get_or_create_store ~base_path in
   Eio.Fiber.fork ~sw (fun () ->
-    Log.Metrics.info "tool_metrics_persist: flush fiber started (interval=%.0fs)"
+    Log.Metrics.info
+      "tool_metrics_persist: flush fiber started (interval=%.0fs)"
       flush_interval_s;
     let rec loop () =
       Eio.Time.sleep clock flush_interval_s;
       (try
          let n = drain_to_store store in
-         if n > 0 then
-           Log.Metrics.info "tool_metrics_persist: flushed %d records to disk" n
+         if n > 0
+         then Log.Metrics.info "tool_metrics_persist: flushed %d records to disk" n
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->
-         Log.Metrics.error "tool_metrics_persist: flush iteration failed: %s"
+         Log.Metrics.error
+           "tool_metrics_persist: flush iteration failed: %s"
            (Printexc.to_string exn));
       loop ()
     in
@@ -138,11 +149,15 @@ let start_flush_fiber ~sw ~clock ~base_path =
   Shutdown.register ~name:"tool_metrics_persist_flush" ~priority:25 (fun () ->
     try
       let n = drain_to_store store in
-      if n > 0 then
-        Log.Metrics.info "tool_metrics_persist: shutdown flush wrote %d records" n
-    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-      Log.Metrics.error "tool_metrics_persist: shutdown flush failed: %s"
+      if n > 0
+      then Log.Metrics.info "tool_metrics_persist: shutdown flush wrote %d records" n
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn ->
+      Log.Metrics.error
+        "tool_metrics_persist: shutdown flush failed: %s"
         (Printexc.to_string exn))
+;;
 
 (* ── Restore on startup ─────────────────────────────── *)
 
@@ -154,23 +169,25 @@ let restore ~base_path : int =
   (try
      (* Read all available records (cap at 1M to avoid OOM on huge histories) *)
      let jsons = Dated_jsonl.read_recent store 1_000_000 in
-     List.iter (fun json ->
-       match parse_record json with
-       | Ok r ->
-         let result : Tool_result.t = {
-           tool_name = r.tool_name;
-           success = r.success;
-           duration_ms = r.duration_ms;
-           data = `Null;
-         } in
-         Tool_metrics.record result;
-         incr count
-       | Error reason ->
-         incr skipped;
-         if Option.is_none !first_skip_reason then
-           first_skip_reason := Some reason
-     ) jsons;
-     if !skipped > 0 then
+     List.iter
+       (fun json ->
+          match parse_record json with
+          | Ok r ->
+            let result : Tool_result.t =
+              { tool_name = r.tool_name
+              ; success = r.success
+              ; duration_ms = r.duration_ms
+              ; data = `Null
+              }
+            in
+            Tool_metrics.record result;
+            incr count
+          | Error reason ->
+            incr skipped;
+            if Option.is_none !first_skip_reason then first_skip_reason := Some reason)
+       jsons;
+     if !skipped > 0
+     then
        Log.Metrics.warn
          "tool_metrics_persist: skipped %d malformed restore record(s)%s"
          !skipped
@@ -180,6 +197,6 @@ let restore ~base_path : int =
    with
    | Eio.Cancel.Cancelled _ as e -> raise e
    | exn ->
-     Log.Metrics.error "tool_metrics_persist: restore failed: %s"
-       (Printexc.to_string exn));
+     Log.Metrics.error "tool_metrics_persist: restore failed: %s" (Printexc.to_string exn));
   !count
+;;

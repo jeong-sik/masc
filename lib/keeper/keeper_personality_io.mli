@@ -23,30 +23,30 @@
     four fields are kept separate from the rest of [keeper_meta] so
     the I/O harness can reason about them without dragging the full
     record schema into every test. *)
-type raw_personality = {
-  will : string;
-  needs : string;
-  desires : string;
-  instructions : string;
-}
+type raw_personality =
+  { will : string
+  ; needs : string
+  ; desires : string
+  ; instructions : string
+  }
 
-val empty : raw_personality
 (** All four fields = "". Useful as a fallback when a keeper has no
     persisted JSON yet. *)
+val empty : raw_personality
 
-val parse : ?defaults:raw_personality -> Yojson.Safe.t -> raw_personality
 (** [parse ?defaults json] reads the four personality strings from a
     keeper JSON object, falling back to [defaults] (or [empty]) when
     a field is missing or the wrong shape. **No normalization is
     applied** — that belongs to the [coerce] layer added in a later
     commit. The return value is the raw bytes as persisted. *)
+val parse : ?defaults:raw_personality -> Yojson.Safe.t -> raw_personality
 
-val to_json : raw_personality -> (string * Yojson.Safe.t) list
 (** [to_json p] returns the four [(key, `String value)] pairs in the
     canonical order used by [Keeper_meta_json.meta_to_json]. The pairs
     are returned as a list (rather than an [`Assoc]) so the caller can
     splice them into a larger record without an intermediate
     [Yojson.Safe.Util.combine] round-trip. *)
+val to_json : raw_personality -> (string * Yojson.Safe.t) list
 
 (** Personality after the coerce step. Wraps [raw_personality] so the
     type system distinguishes "trimmed and ready for compare" from
@@ -55,46 +55,49 @@ val to_json : raw_personality -> (string * Yojson.Safe.t) list
     produce a value of this type. *)
 type coerced_personality
 
-val coerce : raw_personality -> coerced_personality
 (** [coerce p] applies the canonical text normalisation used by the
     compare path: [String.trim] on every field. No truncation, no NFC,
     no encoding rewrite — those belong to the validate layer (length
     cap, structured errors) and to the prompt-render path
     ([Keeper_prompt.render_for_prompt ~max_bytes]) added in later
     commits. Idempotent: [coerce (to_raw (coerce p)) = coerce p]. *)
+val coerce : raw_personality -> coerced_personality
 
-val to_raw : coerced_personality -> raw_personality
 (** Project a coerced value back to a [raw_personality]. Loses the
     "this has been coerced" type tag but keeps the byte contents. *)
+val to_raw : coerced_personality -> raw_personality
 
 (** {1 Validate} *)
 
 (** Identifier of the personality field that triggered a warning.
     Wrapping in a sum makes the cap-warning record portable to Layer 4
     structured-feedback responses without leaking string keys. *)
-type field = Will | Needs | Desires | Instructions
+type field =
+  | Will
+  | Needs
+  | Desires
+  | Instructions
 
-val field_to_string : field -> string
 (** Snake_case name of the field — stable identifier for log lines and
     Prometheus labels. *)
+val field_to_string : field -> string
 
 (** Soft warning emitted when a field exceeds the configured byte cap.
     The harness never truncates: callers decide whether to soft-warn
     (default for boundary code) or reject (Layer 4 self-edit). *)
-type cap_warning = {
-  field : field;
-  observed_bytes : int;
-  cap_bytes : int;
-  hint : string;
-}
+type cap_warning =
+  { field : field
+  ; observed_bytes : int
+  ; cap_bytes : int
+  ; hint : string
+  }
 
-val check_byte_caps :
-  ?max_bytes:int -> coerced_personality -> cap_warning list
 (** [check_byte_caps ?max_bytes p] returns a warning per oversized
     field. [max_bytes] defaults to [Keeper_config.prompt_render_max_bytes].
     Always pure — no logging, no Prometheus, no transformation. The
     caller chooses what to do with the warnings (soft-warn at create/
     update boundaries; structured-feedback in Layer 4 retry). *)
+val check_byte_caps : ?max_bytes:int -> coerced_personality -> cap_warning list
 
 (** {1 Compare} *)
 
@@ -103,17 +106,13 @@ val check_byte_caps :
     in the trimmed values, useful for log strings like
     [will(cur=319,tgt=357,diff@319)] (the format Layer 1
     [Keeper_runtime.personality_field_diff_entry] emits). *)
-type field_diff = {
-  field : field;
-  current_bytes : int;
-  target_bytes : int;
-  diff_offset : int;
-}
+type field_diff =
+  { field : field
+  ; current_bytes : int
+  ; target_bytes : int
+  ; diff_offset : int
+  }
 
-val compare_normalized :
-  coerced_personality ->
-  coerced_personality ->
-  [ `Equal | `Drift of field_diff list ]
 (** [compare_normalized current target] returns [`Equal] when every
     field matches byte-for-byte after coerce, or [`Drift diffs] with
     one entry per differing field (in canonical order:
@@ -125,11 +124,13 @@ val compare_normalized :
     [coerced_personality], there is no way to compare a raw value
     against a trimmed one — the type system enforces the symmetry
     Layer 1 had to enforce at runtime. *)
+val compare_normalized
+  :  coerced_personality
+  -> coerced_personality
+  -> [ `Equal | `Drift of field_diff list ]
 
 (** {1 Render for prompt} *)
 
-val to_prompt_form :
-  max_bytes:int -> raw_personality -> raw_personality
 (** [to_prompt_form ~max_bytes p] returns a copy of [p] with each
     field trimmed and then truncated to [max_bytes] using
     [Keeper_config.utf8_safe_prefix_bytes] (UTF-8 boundary safe).
@@ -142,3 +143,4 @@ val to_prompt_form :
     because the truncation may break the "trim-only" invariant —
     after slicing on a UTF-8 boundary the trailing whitespace
     promise no longer holds in general. *)
+val to_prompt_form : max_bytes:int -> raw_personality -> raw_personality

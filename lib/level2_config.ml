@@ -12,29 +12,33 @@
 module Drift_guard = struct
   let default_threshold () =
     Env_config_core.get_float ~default:0.85 "MASC_DRIFT_THRESHOLD"
+  ;;
 
   (** Similarity weights for Jaccard/Cosine combination *)
-  type weights = { jaccard: float; cosine: float }
-  let weights () = {
-    jaccard = Env_config_core.get_float ~default:0.4 "MASC_DRIFT_JACCARD_WEIGHT";
-    cosine = Env_config_core.get_float ~default:0.6 "MASC_DRIFT_COSINE_WEIGHT";
-  }
+  type weights =
+    { jaccard : float
+    ; cosine : float
+    }
+
+  let weights () =
+    { jaccard = Env_config_core.get_float ~default:0.4 "MASC_DRIFT_JACCARD_WEIGHT"
+    ; cosine = Env_config_core.get_float ~default:0.6 "MASC_DRIFT_COSINE_WEIGHT"
+    }
+  ;;
 end
 
 (** Lock configuration *)
 module Lock = struct
-  let warn_threshold_ms () =
-    Env_config_core.get_float ~default:100.0 "MASC_LOCK_WARN_MS"
+  let warn_threshold_ms () = Env_config_core.get_float ~default:100.0 "MASC_LOCK_WARN_MS"
 end
 
 (** Hebbian learning configuration *)
 module Hebbian = struct
-  let learning_rate () =
-    Env_config_core.get_float ~default:0.075 "MASC_HEBBIAN_RATE"
-  let decay_rate () =
-    Env_config_core.get_float ~default:0.01 "MASC_HEBBIAN_DECAY"
+  let learning_rate () = Env_config_core.get_float ~default:0.075 "MASC_HEBBIAN_RATE"
+  let decay_rate () = Env_config_core.get_float ~default:0.01 "MASC_HEBBIAN_DECAY"
   let min_weight () = 0.05
   let max_weight () = 1.0
+
   (* #9876: consolidation scheduler cadence and horizon. Defaults are
      conservative: once per hour, decay synapses untouched for 14 days.
      Hebbian models in neuroscience (Song, Miller, Abbott 2000) typically
@@ -44,18 +48,22 @@ module Hebbian = struct
      single synapse's decay window closes. *)
   let consolidation_interval_s () =
     Env_config_core.get_float ~default:3600.0 "MASC_HEBBIAN_CONSOLIDATION_INTERVAL_S"
+  ;;
+
   let decay_after_days () =
     Env_config_core.get_float ~default:14.0 "MASC_HEBBIAN_DECAY_AFTER_DAYS"
+  ;;
 end
 
 (** Get all config as JSON for debugging *)
 let to_json () : Yojson.Safe.t =
-  `Assoc [
-    ("drift_threshold", `Float (Drift_guard.default_threshold ()));
-    ("lock_warn_ms", `Float (Lock.warn_threshold_ms ()));
-    ("hebbian_rate", `Float (Hebbian.learning_rate ()));
-    ("hebbian_decay", `Float (Hebbian.decay_rate ()));
-  ]
+  `Assoc
+    [ "drift_threshold", `Float (Drift_guard.default_threshold ())
+    ; "lock_warn_ms", `Float (Lock.warn_threshold_ms ())
+    ; "hebbian_rate", `Float (Hebbian.learning_rate ())
+    ; "hebbian_decay", `Float (Hebbian.decay_rate ())
+    ]
+;;
 
 (** Print config to stderr for debugging *)
 let print_config () =
@@ -63,3 +71,4 @@ let print_config () =
   Log.Level2.info "  MASC_DRIFT_THRESHOLD=%.2f" (Drift_guard.default_threshold ());
   Log.Level2.info "  MASC_LOCK_WARN_MS=%.0f" (Lock.warn_threshold_ms ());
   Log.Level2.info "  MASC_HEBBIAN_RATE=%.3f" (Hebbian.learning_rate ())
+;;

@@ -16,7 +16,6 @@ type t =
 
 val to_string : t -> string
 val of_string : string -> (t, string) result
-
 val to_yojson : t -> Yojson.Safe.t
 val of_yojson : Yojson.Safe.t -> (t, string) result
 

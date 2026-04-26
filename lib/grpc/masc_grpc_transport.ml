@@ -15,6 +15,7 @@ let from_env () =
   | Some Env_config.Transport.Webrtc -> Webrtc
   | Some Env_config.Transport.Local -> Local
   | Some (Env_config.Transport.Unknown_agent_transport _) | None -> Local
+;;
 
 let to_string = function
   | Http -> "http"
@@ -22,3 +23,4 @@ let to_string = function
   | Ws -> "ws"
   | Webrtc -> "webrtc"
   | Local -> "local"
+;;

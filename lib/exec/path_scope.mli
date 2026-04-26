@@ -8,15 +8,15 @@
 type t
 
 type scope =
-  | Inside_worktree of string      (** path beneath the current workspace root *)
-  | Inside_sandbox of string        (** [.masc/], [/tmp/masc-*] and similar *)
-  | Outside_worktree of string      (** path escapes the workspace root *)
-  | Absolute_unknown of string      (** absolute path we cannot place *)
+  | Inside_worktree of string (** path beneath the current workspace root *)
+  | Inside_sandbox of string (** [.masc/], [/tmp/masc-*] and similar *)
+  | Outside_worktree of string (** path escapes the workspace root *)
+  | Absolute_unknown of string (** absolute path we cannot place *)
 
-val classify : raw:string -> cwd:string -> t
 (** Classify [raw] relative to [cwd].  Arm selection is deterministic
     and fail-closed: a path that cannot be resolved lands in
     [Absolute_unknown] rather than being silently admitted. *)
+val classify : raw:string -> cwd:string -> t
 
 val scope : t -> scope
 val raw : t -> string

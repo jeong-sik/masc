@@ -9,7 +9,9 @@ let summarize = Tool_call_quality_benchmark_summary.summarize
 let json_check_to_yojson = Tool_call_quality_benchmark_render.json_check_to_yojson
 let case_score_to_yojson = Tool_call_quality_benchmark_render.case_score_to_yojson
 let summary_row_to_yojson = Tool_call_quality_benchmark_render.summary_row_to_yojson
+
 let benchmark_summary_to_yojson =
   Tool_call_quality_benchmark_render.benchmark_summary_to_yojson
+;;
 
 let summary_rows_to_csv = Tool_call_quality_benchmark_render.summary_rows_to_csv

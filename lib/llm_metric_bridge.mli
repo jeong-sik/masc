@@ -18,8 +18,7 @@ val http_status_metric : string
     per-call OAS [Metrics.t] literal that wants to forward
     [on_http_status] (e.g. cascade observation captures).  Single
     source of truth for the label shape. *)
-val emit_http_status :
-  provider:string -> model_id:string -> status:int -> unit
+val emit_http_status : provider:string -> model_id:string -> status:int -> unit
 
 (** Emit a single latency observation to the Prometheus histogram.
     Called by both the global sink built in {!make_sink} and any

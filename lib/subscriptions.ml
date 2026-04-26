@@ -21,6 +21,7 @@ let resource_type_to_string = function
   | Messages -> "messages"
   | Votes -> "votes"
   | Custom s -> s
+;;
 
 let resource_type_of_string = function
   | "tasks" -> Tasks
@@ -28,6 +29,7 @@ let resource_type_of_string = function
   | "messages" -> Messages
   | "votes" -> Votes
   | s -> Custom s
+;;
 
 (** Change type *)
 type change_type =
@@ -39,29 +41,31 @@ let change_type_to_string = function
   | Created -> "created"
   | Updated -> "updated"
   | Deleted -> "deleted"
+;;
 
 (** Subscription record *)
-type subscription = {
-  id: string;
-  subscriber: string;  (* agent_name or session_id *)
-  resource: resource_type;
-  filter: string option;  (* Optional filter, e.g., task_id *)
-  created_at: float;
-}
+type subscription =
+  { id : string
+  ; subscriber : string (* agent_name or session_id *)
+  ; resource : resource_type
+  ; filter : string option (* Optional filter, e.g., task_id *)
+  ; created_at : float
+  }
 
 (** Change notification *)
-type notification = {
-  subscription_id: string;
-  resource: resource_type;
-  change: change_type;
-  resource_id: string;
-  data: Yojson.Safe.t;
-  timestamp: float;
-}
+type notification =
+  { subscription_id : string
+  ; resource : resource_type
+  ; change : change_type
+  ; resource_id : string
+  ; data : Yojson.Safe.t
+  ; timestamp : float
+  }
 
 (** Subscription store *)
 module SubscriptionStore = struct
   let subscriptions : (string, subscription) Hashtbl.t = Hashtbl.create 64
+
   (* Use Queue for O(1) append instead of O(n) list append *)
   let pending_notifications : (string, notification Queue.t) Hashtbl.t = Hashtbl.create 64
 
@@ -73,53 +77,72 @@ module SubscriptionStore = struct
       Buffer.add_string buf (Printf.sprintf "%02x" (Char.code (String.get bytes i)))
     done;
     Printf.sprintf "sub_%s" (Buffer.contents buf)
+  ;;
 
   (** Subscribe to resource changes *)
-  let subscribe ~(subscriber : string) ~(resource : resource_type) ?(filter : string option) () : subscription =
-    let sub = {
-      id = generate_id ();
-      subscriber;
-      resource;
-      filter;
-      created_at = Time_compat.now ();
-    } in
+  let subscribe
+        ~(subscriber : string)
+        ~(resource : resource_type)
+        ?(filter : string option)
+        ()
+    : subscription
+    =
+    let sub =
+      { id = generate_id ()
+      ; subscriber
+      ; resource
+      ; filter
+      ; created_at = Time_compat.now ()
+      }
+    in
     Hashtbl.add subscriptions sub.id sub;
     Log.Sub.info "%s subscribed to %s" subscriber (resource_type_to_string resource);
     sub
+  ;;
 
   (** Unsubscribe *)
   let unsubscribe (id : string) : bool =
-    if Hashtbl.mem subscriptions id then begin
+    if Hashtbl.mem subscriptions id
+    then (
       Hashtbl.remove subscriptions id;
       Hashtbl.remove pending_notifications id;
-      true
-    end else false
+      true)
+    else false
+  ;;
 
   (** Get subscription by ID *)
-  let get (id : string) : subscription option =
-    Hashtbl.find_opt subscriptions id
+  let get (id : string) : subscription option = Hashtbl.find_opt subscriptions id
 
   (** Find subscriptions for a resource change *)
-  let find_matching ~(resource : resource_type) ~(resource_id : string) : subscription list =
-    Hashtbl.fold (fun _ (sub : subscription) (acc : subscription list) ->
-      if sub.resource = resource then
-        match sub.filter with
-        | None -> sub :: acc  (* No filter = match all *)
-        | Some f when f = resource_id -> sub :: acc
-        | Some f when f = "*" -> sub :: acc
-        | _ -> acc
-      else acc
-    ) subscriptions []
+  let find_matching ~(resource : resource_type) ~(resource_id : string)
+    : subscription list
+    =
+    Hashtbl.fold
+      (fun _ (sub : subscription) (acc : subscription list) ->
+         if sub.resource = resource
+         then (
+           match sub.filter with
+           | None -> sub :: acc (* No filter = match all *)
+           | Some f when f = resource_id -> sub :: acc
+           | Some f when f = "*" -> sub :: acc
+           | _ -> acc)
+         else acc)
+      subscriptions
+      []
+  ;;
 
   (** Get all subscriptions for a subscriber *)
   let get_for_subscriber (subscriber : string) : subscription list =
-    Hashtbl.fold (fun _ sub acc ->
-      if sub.subscriber = subscriber then sub :: acc else acc
-    ) subscriptions []
+    Hashtbl.fold
+      (fun _ sub acc -> if sub.subscriber = subscriber then sub :: acc else acc)
+      subscriptions
+      []
+  ;;
 
   (** Queue notification for a subscription - O(1) with Queue *)
   let queue_notification (sub_id : string) (notif : notification) : unit =
-    let q = match Hashtbl.find_opt pending_notifications sub_id with
+    let q =
+      match Hashtbl.find_opt pending_notifications sub_id with
       | Some q -> q
       | None ->
         let q = Queue.create () in
@@ -127,6 +150,7 @@ module SubscriptionStore = struct
         q
     in
     Queue.add notif q
+  ;;
 
   (** Pop notifications for a subscription - returns all pending as list *)
   let pop_notifications (sub_id : string) : notification list =
@@ -135,14 +159,15 @@ module SubscriptionStore = struct
       Hashtbl.remove pending_notifications sub_id;
       Queue.fold (fun acc n -> n :: acc) [] q |> List.rev
     | None -> []
+  ;;
 
   (** List all subscriptions *)
   let list_all () : subscription list =
     Hashtbl.fold (fun _ s acc -> s :: acc) subscriptions []
+  ;;
 
   (** Count subscriptions *)
-  let count () : int =
-    Hashtbl.length subscriptions
+  let count () : int = Hashtbl.length subscriptions
 end
 
 (** Session registry bridge for notification harness.
@@ -166,75 +191,98 @@ let set_session_push_fn (fn : Yojson.Safe.t -> int) =
      code paths clear the ref) would warn again. Current code never
      clears the ref, but the reset keeps the gate honest. *)
   Atomic.set unwired_warned false
+;;
 
 (** Push a structured event to all active agent sessions.
     Used by modules (e.g. Tool_task) that lack direct Session.registry access. *)
 let push_event_to_sessions (event : Yojson.Safe.t) : unit =
   match !session_registry_ref with
   | Some push_fn ->
-      (try let _ = push_fn event in ()
-       with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Sub.error "push_event failed: %s" (Printexc.to_string exn))
+    (try
+       let _ = push_fn event in
+       ()
+     with
+     | Eio.Cancel.Cancelled _ as e -> raise e
+     | exn -> Log.Sub.error "push_event failed: %s" (Printexc.to_string exn))
   | None ->
-      if Atomic.compare_and_set unwired_warned false true then
-        Log.Sub.info
-          "push_event_to_sessions: registry not wired \
-           (further calls silenced until set_session_push_fn runs)"
+    if Atomic.compare_and_set unwired_warned false true
+    then
+      Log.Sub.info
+        "push_event_to_sessions: registry not wired (further calls silenced until \
+         set_session_push_fn runs)"
+;;
 
 (** Notify all subscribers of a resource change *)
-let notify_change ~(resource : resource_type) ~(change : change_type)
-    ~(resource_id : string) ~(data : Yojson.Safe.t) : int =
+let notify_change
+      ~(resource : resource_type)
+      ~(change : change_type)
+      ~(resource_id : string)
+      ~(data : Yojson.Safe.t)
+  : int
+  =
   let subs = SubscriptionStore.find_matching ~resource ~resource_id in
   let now = Time_compat.now () in
-  List.iter (fun sub ->
-    let notif = {
-      subscription_id = sub.id;
-      resource;
-      change;
-      resource_id;
-      data;
-      timestamp = now;
-    } in
-    SubscriptionStore.queue_notification sub.id notif
-  ) subs;
+  List.iter
+    (fun sub ->
+       let notif =
+         { subscription_id = sub.id
+         ; resource
+         ; change
+         ; resource_id
+         ; data
+         ; timestamp = now
+         }
+       in
+       SubscriptionStore.queue_notification sub.id notif)
+    subs;
   (* Bridge: also push to session queues for notification harness *)
   (match !session_registry_ref with
    | Some push_fn ->
-       let event = `Assoc [
-         ("type", `String "masc/notification");
-         ("resource", `String (resource_type_to_string resource));
-         ("change", `String (change_type_to_string change));
-         ("resource_id", `String resource_id);
-         ("data", data);
-         ("timestamp", `Float now);
-       ] in
-       (try let _ = push_fn event in ()
-        with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Sub.error "push_sub_event failed: %s" (Printexc.to_string exn))
+     let event =
+       `Assoc
+         [ "type", `String "masc/notification"
+         ; "resource", `String (resource_type_to_string resource)
+         ; "change", `String (change_type_to_string change)
+         ; "resource_id", `String resource_id
+         ; "data", data
+         ; "timestamp", `Float now
+         ]
+     in
+     (try
+        let _ = push_fn event in
+        ()
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn -> Log.Sub.error "push_sub_event failed: %s" (Printexc.to_string exn))
    | None -> ());
   List.length subs
+;;
 
 (** Subscription to JSON *)
 let subscription_to_json (s : subscription) : Yojson.Safe.t =
-  `Assoc [
-    ("id", `String s.id);
-    ("subscriber", `String s.subscriber);
-    ("resource", `String (resource_type_to_string s.resource));
-    ("filter", Json_util.string_opt_to_json s.filter);
-    ("created_at", `Float s.created_at);
-  ]
+  `Assoc
+    [ "id", `String s.id
+    ; "subscriber", `String s.subscriber
+    ; "resource", `String (resource_type_to_string s.resource)
+    ; "filter", Json_util.string_opt_to_json s.filter
+    ; "created_at", `Float s.created_at
+    ]
+;;
 
 (** Notification to JSON *)
 let notification_to_json (n : notification) : Yojson.Safe.t =
-  `Assoc [
-    ("subscription_id", `String n.subscription_id);
-    ("resource", `String (resource_type_to_string n.resource));
-    ("change", `String (change_type_to_string n.change));
-    ("resource_id", `String n.resource_id);
-    ("data", n.data);
-    ("timestamp", `Float n.timestamp);
-  ]
+  `Assoc
+    [ "subscription_id", `String n.subscription_id
+    ; "resource", `String (resource_type_to_string n.resource)
+    ; "change", `String (change_type_to_string n.change)
+    ; "resource_id", `String n.resource_id
+    ; "data", n.data
+    ; "timestamp", `Float n.timestamp
+    ]
+;;
 
 (** MCP tool handler for subscriptions *)
-let handle_subscription_tool (arguments : Yojson.Safe.t) : (bool * string) =
+let handle_subscription_tool (arguments : Yojson.Safe.t) : bool * string =
   let get_string key =
     match Yojson.Safe.Util.member key arguments with
     | `String s -> Some s
@@ -247,60 +295,74 @@ let handle_subscription_tool (arguments : Yojson.Safe.t) : (bool * string) =
        let resource = resource_type_of_string resource_str in
        let filter = get_string "filter" in
        let sub = SubscriptionStore.subscribe ~subscriber ~resource ?filter () in
-       (true, Yojson.Safe.to_string (subscription_to_json sub))
-     | _ -> (false, "subscriber and resource required"))
-
+       true, Yojson.Safe.to_string (subscription_to_json sub)
+     | _ -> false, "subscriber and resource required")
   | Some "unsubscribe" ->
     (match get_string "subscription_id" with
      | Some id ->
-       if SubscriptionStore.unsubscribe id then
-         (true, Printf.sprintf "Unsubscribed from '%s'" id)
-       else
-         (false, Printf.sprintf "Subscription '%s' not found" id)
-     | None -> (false, "subscription_id required"))
-
+       if SubscriptionStore.unsubscribe id
+       then true, Printf.sprintf "Unsubscribed from '%s'" id
+       else false, Printf.sprintf "Subscription '%s' not found" id
+     | None -> false, "subscription_id required")
   | Some "list" ->
     (match get_string "subscriber" with
      | Some subscriber ->
        let subs = SubscriptionStore.get_for_subscriber subscriber in
-       let json = `Assoc [
-         ("count", `Int (List.length subs));
-         ("subscriptions", `List (List.map subscription_to_json subs));
-       ] in
-       (true, Yojson.Safe.to_string json)
+       let json =
+         `Assoc
+           [ "count", `Int (List.length subs)
+           ; "subscriptions", `List (List.map subscription_to_json subs)
+           ]
+       in
+       true, Yojson.Safe.to_string json
      | None ->
        let subs = SubscriptionStore.list_all () in
-       let json = `Assoc [
-         ("count", `Int (List.length subs));
-         ("subscriptions", `List (List.map subscription_to_json subs));
-       ] in
-       (true, Yojson.Safe.to_string json))
-
+       let json =
+         `Assoc
+           [ "count", `Int (List.length subs)
+           ; "subscriptions", `List (List.map subscription_to_json subs)
+           ]
+       in
+       true, Yojson.Safe.to_string json)
   | Some "poll" ->
     (match get_string "subscription_id" with
      | Some id ->
        let notifs = SubscriptionStore.pop_notifications id in
-       let json = `Assoc [
-         ("count", `Int (List.length notifs));
-         ("notifications", `List (List.map notification_to_json notifs));
-       ] in
-       (true, Yojson.Safe.to_string json)
-     | None -> (false, "subscription_id required"))
-
-  | Some other -> (false, Printf.sprintf "Unknown action: %s" other)
-  | None -> (false, "action required: subscribe, unsubscribe, list, poll")
+       let json =
+         `Assoc
+           [ "count", `Int (List.length notifs)
+           ; "notifications", `List (List.map notification_to_json notifs)
+           ]
+       in
+       true, Yojson.Safe.to_string json
+     | None -> false, "subscription_id required")
+  | Some other -> false, Printf.sprintf "Unknown action: %s" other
+  | None -> false, "action required: subscribe, unsubscribe, list, poll"
+;;
 
 (** Hook function to notify task changes - call from Coord module *)
-let notify_task_change ~(change : change_type) ~(task_id : string) ~(data : Yojson.Safe.t) : unit =
+let notify_task_change ~(change : change_type) ~(task_id : string) ~(data : Yojson.Safe.t)
+  : unit
+  =
   let _ = notify_change ~resource:Tasks ~change ~resource_id:task_id ~data in
   ()
+;;
 
 (** Hook function to notify agent changes *)
-let notify_agent_change ~(change : change_type) ~(agent_name : string) ~(data : Yojson.Safe.t) : unit =
+let notify_agent_change
+      ~(change : change_type)
+      ~(agent_name : string)
+      ~(data : Yojson.Safe.t)
+  : unit
+  =
   let _ = notify_change ~resource:Agents ~change ~resource_id:agent_name ~data in
   ()
+;;
 
 (** Hook function to notify message changes *)
 let notify_message ~(message_id : string) ~(data : Yojson.Safe.t) : unit =
-  let _ = notify_change ~resource:Messages ~change:Created ~resource_id:message_id ~data in
+  let _ =
+    notify_change ~resource:Messages ~change:Created ~resource_id:message_id ~data
+  in
   ()
+;;

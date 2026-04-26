@@ -7,23 +7,24 @@
 let contains_substring haystack needle =
   let hay_len = String.length haystack in
   let needle_len = String.length needle in
-  if needle_len = 0 then true
-  else if needle_len > hay_len then false
-  else
+  if needle_len = 0
+  then true
+  else if needle_len > hay_len
+  then false
+  else (
     let rec match_at i j =
-      if j = needle_len then true
-      else if String.unsafe_get haystack (i + j)
-            <> String.unsafe_get needle j
+      if j = needle_len
+      then true
+      else if String.unsafe_get haystack (i + j) <> String.unsafe_get needle j
       then false
       else match_at i (j + 1)
     in
     let last = hay_len - needle_len in
     let rec loop i =
-      if i > last then false
-      else if match_at i 0 then true
-      else loop (i + 1)
+      if i > last then false else if match_at i 0 then true else loop (i + 1)
     in
-    loop 0
+    loop 0)
+;;
 
 (* Byte-wise substring search: returns the index of the first match at or
    after [pos] (default 0), or [None] if absent. Empty needle returns
@@ -32,78 +33,87 @@ let find_substring ?(pos = 0) haystack needle =
   if pos < 0 then invalid_arg "String_util.find_substring: negative position";
   let hay_len = String.length haystack in
   let needle_len = String.length needle in
-  if needle_len = 0 then Some pos
-  else if pos + needle_len > hay_len then None
-  else
+  if needle_len = 0
+  then Some pos
+  else if pos + needle_len > hay_len
+  then None
+  else (
     let rec match_at i j =
-      if j = needle_len then true
-      else if String.unsafe_get haystack (i + j)
-            <> String.unsafe_get needle j
+      if j = needle_len
+      then true
+      else if String.unsafe_get haystack (i + j) <> String.unsafe_get needle j
       then false
       else match_at i (j + 1)
     in
     let last = hay_len - needle_len in
     let rec loop i =
-      if i > last then None
-      else if match_at i 0 then Some i
-      else loop (i + 1)
+      if i > last then None else if match_at i 0 then Some i else loop (i + 1)
     in
-    loop pos
+    loop pos)
+;;
 
 (* ASCII case-insensitive substring containment without lowercasing
    either string.  Lowering happens byte-by-byte during compare. *)
 let contains_substring_ci haystack needle =
   let hay_len = String.length haystack in
   let needle_len = String.length needle in
-  if needle_len = 0 then false
-  else if needle_len > hay_len then false
-  else
+  if needle_len = 0
+  then false
+  else if needle_len > hay_len
+  then false
+  else (
     let rec match_at i j =
-      if j = needle_len then true
-      else
+      if j = needle_len
+      then true
+      else (
         let h = Char.lowercase_ascii (String.unsafe_get haystack (i + j)) in
         let n = Char.lowercase_ascii (String.unsafe_get needle j) in
-        if h <> n then false else match_at i (j + 1)
+        if h <> n then false else match_at i (j + 1))
     in
     let last = hay_len - needle_len in
     let rec loop i =
-      if i > last then false
-      else if match_at i 0 then true
-      else loop (i + 1)
+      if i > last then false else if match_at i 0 then true else loop (i + 1)
     in
-    loop 0
+    loop 0)
+;;
 
 (* ASCII case-insensitive prefix check.  No allocation; lowercases
    byte by byte during compare. *)
 let starts_with_ci ~prefix s =
   let plen = String.length prefix in
   let slen = String.length s in
-  if plen > slen then false
-  else
+  if plen > slen
+  then false
+  else (
     let rec match_at i =
-      if i = plen then true
-      else
+      if i = plen
+      then true
+      else (
         let p = Char.lowercase_ascii (String.unsafe_get prefix i) in
         let c = Char.lowercase_ascii (String.unsafe_get s i) in
-        if p <> c then false else match_at (i + 1)
+        if p <> c then false else match_at (i + 1))
     in
-    match_at 0
+    match_at 0)
+;;
 
 (* ASCII case-insensitive equality.  No allocation; equivalent to
    [String.lowercase_ascii a = String.lowercase_ascii b] but
    short-circuits on length and on first mismatching byte. *)
 let equals_ci a b =
   let la = String.length a in
-  if la <> String.length b then false
-  else
+  if la <> String.length b
+  then false
+  else (
     let rec match_at i =
-      if i = la then true
-      else
+      if i = la
+      then true
+      else (
         let ca = Char.lowercase_ascii (String.unsafe_get a i) in
         let cb = Char.lowercase_ascii (String.unsafe_get b i) in
-        if ca <> cb then false else match_at (i + 1)
+        if ca <> cb then false else match_at (i + 1))
     in
-    match_at 0
+    match_at 0)
+;;
 
 (* Byte-wise non-overlapping replace: scans [haystack] for [needle] and
    substitutes [by] for each occurrence. Empty needle is a no-op (would
@@ -112,76 +122,88 @@ let equals_ci a b =
 let replace_substring ~needle ~by haystack =
   let hay_len = String.length haystack in
   let needle_len = String.length needle in
-  if needle_len = 0 || needle_len > hay_len then haystack
-  else
+  if needle_len = 0 || needle_len > hay_len
+  then haystack
+  else (
     let buf = Buffer.create hay_len in
     let rec match_at i j =
-      if j = needle_len then true
-      else if String.unsafe_get haystack (i + j)
-            <> String.unsafe_get needle j
+      if j = needle_len
+      then true
+      else if String.unsafe_get haystack (i + j) <> String.unsafe_get needle j
       then false
       else match_at i (j + 1)
     in
     let last = hay_len - needle_len in
     let rec loop i =
-      if i > last then
-        Buffer.add_substring buf haystack i (hay_len - i)
-      else if match_at i 0 then begin
+      if i > last
+      then Buffer.add_substring buf haystack i (hay_len - i)
+      else if match_at i 0
+      then (
         Buffer.add_string buf by;
-        loop (i + needle_len)
-      end
-      else begin
+        loop (i + needle_len))
+      else (
         Buffer.add_char buf (String.unsafe_get haystack i);
-        loop (i + 1)
-      end
+        loop (i + 1))
     in
     loop 0;
-    Buffer.contents buf
+    Buffer.contents buf)
+;;
 
 type truncation =
   | Untouched of string
-  | Truncated of { prefix : string; suffix : string; dropped_bytes : int }
+  | Truncated of
+      { prefix : string
+      ; suffix : string
+      ; dropped_bytes : int
+      }
 
 (* Find the largest k <= idx such that [String.sub s 0 k] ends at a valid
    UTF-8 character boundary. Handles invalid UTF-8 on a best-effort basis:
    walks back through continuation bytes and cuts before an incomplete lead. *)
 let utf8_char_boundary s idx =
   let len = String.length s in
-  if idx >= len then len
-  else if idx <= 0 then 0
-  else
-    let is_continuation k = (Char.code s.[k] land 0xC0) = 0x80 in
-    if not (is_continuation idx) then
+  if idx >= len
+  then len
+  else if idx <= 0
+  then 0
+  else (
+    let is_continuation k = Char.code s.[k] land 0xC0 = 0x80 in
+    if not (is_continuation idx)
+    then
       (* s.[idx] starts a new char — idx is already a boundary *)
       idx
-    else
+    else (
       (* s.[idx] is a continuation; walk back to find the lead byte of the
          incomplete character and cut before it. ASCII bytes encountered
          before any lead are complete on their own, so cut *after* them. *)
       let rec find k =
-        if k < 0 then 0
-        else
+        if k < 0
+        then 0
+        else (
           let b = Char.code s.[k] in
-          if (b land 0x80) = 0 then k + 1
-          else if (b land 0xC0) = 0xC0 then k
-          else find (k - 1)
+          if b land 0x80 = 0 then k + 1 else if b land 0xC0 = 0xC0 then k else find (k - 1))
       in
-      find (idx - 1)
+      find (idx - 1)))
+;;
 
 let utf8_safe ~max_bytes ~suffix s =
   let len = String.length s in
-  if len <= max_bytes then Untouched s
-  else
+  if len <= max_bytes
+  then Untouched s
+  else (
     let suffix_len = String.length suffix in
     let budget = max 0 (max_bytes - suffix_len) in
     let cut = utf8_char_boundary s budget in
     let prefix = String.sub s 0 cut in
-    Truncated { prefix; suffix; dropped_bytes = len - cut }
+    Truncated { prefix; suffix; dropped_bytes = len - cut })
+;;
 
 let to_string = function
   | Untouched s -> s
   | Truncated { prefix; suffix; _ } -> prefix ^ suffix
+;;
 
 let was_truncated = function
   | Untouched _ -> false
   | Truncated _ -> true
+;;

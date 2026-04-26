@@ -22,27 +22,29 @@
 type task_id = string
 
 let task_id_to_string t = t
-
-let task_id_of_string s =
-  if s = "" then Error "empty handle" else Ok s
+let task_id_of_string s = if s = "" then Error "empty handle" else Ok s
 
 let task_id_of_string_exn s =
   match task_id_of_string s with
   | Ok task_id -> task_id
   | Error msg -> invalid_arg ("Bg_task.task_id_of_string_exn: " ^ msg)
+;;
 
-type snapshot = {
-  stdout_since : string;
-  stderr_since : string;
-  closed : bool;
-  status : Unix.process_status option;
-  bytes_dropped_stdout : int;
-  bytes_dropped_stderr : int;
-}
+type snapshot =
+  { stdout_since : string
+  ; stderr_since : string
+  ; closed : bool
+  ; status : Unix.process_status option
+  ; bytes_dropped_stdout : int
+  ; bytes_dropped_stderr : int
+  }
 
 type spawn_error =
   | Spawn_failed of string
-  | Too_many_tasks of { keeper : string; limit : int }
+  | Too_many_tasks of
+      { keeper : string
+      ; limit : int
+      }
   | Invalid_cwd of string
 
 type read_error =
@@ -53,20 +55,20 @@ type kill_error =
   | Unknown_task_kill of task_id
   | Kill_failed of string
 
-type state = {
-  handle : Process_eio.detached_handle;
-  keeper : string;
-  timeout_sec : float;
-  stdout_buf : Buffer.t;
-  stderr_buf : Buffer.t;
-  mutable status : Unix.process_status option;
-  mutable closed : bool;
-  mutable stdout_eof : bool;
-  mutable stderr_eof : bool;
-  pid_file : string option;
-      (** Full path to the persistence sidecar when
+type state =
+  { handle : Process_eio.detached_handle
+  ; keeper : string
+  ; timeout_sec : float
+  ; stdout_buf : Buffer.t
+  ; stderr_buf : Buffer.t
+  ; mutable status : Unix.process_status option
+  ; mutable closed : bool
+  ; mutable stdout_eof : bool
+  ; mutable stderr_eof : bool
+  ; pid_file : string option
+    (** Full path to the persistence sidecar when
           [~base_path] was supplied at spawn. Deleted on close/kill. *)
-}
+  }
 
 (* Tick 7: PID-file helpers. Path convention:
      <base_path>/.masc/keeper/<keeper>/bg/<task_id>.pid
@@ -79,18 +81,21 @@ let bg_dir_of ~base_path ~keeper =
        (Common.masc_dir_from_base_path ~base_path)
        (Filename.concat "keeper" keeper))
     "bg"
+;;
 
 let pid_file_of ~base_path ~keeper ~task_id =
   Filename.concat (bg_dir_of ~base_path ~keeper) (task_id ^ ".pid")
+;;
 
 let rec ensure_dir path =
-  if Sys.file_exists path then ()
-  else begin
+  if Sys.file_exists path
+  then ()
+  else (
     let parent = Filename.dirname path in
     if parent <> path then ensure_dir parent;
-    (try Unix.mkdir path 0o755
-     with Unix.Unix_error (Unix.EEXIST, _, _) -> ())
-  end
+    try Unix.mkdir path 0o755 with
+    | Unix.Unix_error (Unix.EEXIST, _, _) -> ())
+;;
 
 let try_write_pid_file path ~pid ~pgid ~started_at =
   Safe_ops.protect ~default:() (fun () ->
@@ -98,10 +103,12 @@ let try_write_pid_file path ~pid ~pgid ~started_at =
     let oc = open_out_gen [ Open_wronly; Open_creat; Open_trunc ] 0o644 path in
     Printf.fprintf oc "%d\n%d\n%f\n" pid pgid started_at;
     close_out_noerr oc)
+;;
 
 let try_delete_pid_file = function
   | None -> ()
   | Some path -> Safe_ops.protect ~default:() (fun () -> Unix.unlink path)
+;;
 
 let registry : (string, state) Hashtbl.t = Hashtbl.create 16
 let registry_mu = Mutex.create ()
@@ -110,16 +117,23 @@ let id_counter = ref 0
 let with_reg f =
   Mutex.lock registry_mu;
   match f () with
-  | v -> Mutex.unlock registry_mu; v
-  | exception e -> Mutex.unlock registry_mu; raise e
+  | v ->
+    Mutex.unlock registry_mu;
+    v
+  | exception e ->
+    Mutex.unlock registry_mu;
+    raise e
+;;
 
 let fresh_id () =
   with_reg (fun () ->
     incr id_counter;
-    Printf.sprintf "bgt-%d-%06d-%d"
+    Printf.sprintf
+      "bgt-%d-%06d-%d"
       (int_of_float (Unix.gettimeofday ()))
       !id_counter
       (Unix.getpid ()))
+;;
 
 let try_set_nonblock fd = Safe_ops.protect ~default:() (fun () -> Unix.set_nonblock fd)
 
@@ -133,212 +147,234 @@ let drain_fd_to_buf buf fd =
         let r, _, _ = Unix.select [ fd ] [] [] 0.0 in
         r)
     in
-    if readable = [] then false
-    else
+    if readable = []
+    then false
+    else (
       match Unix.read fd chunk 0 (Bytes.length chunk) with
       | 0 -> true
-      | n -> Buffer.add_subbytes buf chunk 0 n; loop ()
+      | n ->
+        Buffer.add_subbytes buf chunk 0 n;
+        loop ()
       | exception Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK), _, _) -> false
       | exception Unix.Unix_error (Unix.EINTR, _, _) -> loop ()
-      | exception _ -> true
+      | exception _ -> true)
   in
   loop ()
+;;
 
 (* Called under [registry_mu]. Drains pipes, reaps if exited, kills
    on timeout. *)
 let poll_state st =
-  if st.closed then ()
-  else begin
-    if not st.stdout_eof then begin
+  if st.closed
+  then ()
+  else (
+    if not st.stdout_eof
+    then (
       let eof = drain_fd_to_buf st.stdout_buf st.handle.stdout_fd in
-      st.stdout_eof <- eof
-    end;
-    if not st.stderr_eof then begin
+      st.stdout_eof <- eof);
+    if not st.stderr_eof
+    then (
       let eof = drain_fd_to_buf st.stderr_buf st.handle.stderr_fd in
-      st.stderr_eof <- eof
-    end;
+      st.stderr_eof <- eof);
     (match st.status with
      | Some _ -> ()
      | None ->
-         (match Unix.waitpid [ Unix.WNOHANG ] st.handle.pid with
-          | 0, _ -> ()
-          | _, s -> st.status <- Some s
-          | exception Unix.Unix_error (Unix.ECHILD, _, _) ->
-              st.status <- Some (Unix.WEXITED 0)
-          | exception _ -> ()));
-    if st.status = None
-       && st.timeout_sec > 0.0
-       && Unix.gettimeofday () -. st.handle.started_at > st.timeout_sec
-    then begin
-      Process_eio.tree_kill ~pgid:st.handle.pgid
-        ~signal:Sys.sigterm ~grace_sec:2.0;
-      (match Unix.waitpid [ Unix.WNOHANG ] st.handle.pid with
-       | 0, _ -> ()
-       | _, s -> st.status <- Some s
-       | exception _ -> ())
-    end;
-    if st.status <> None && st.stdout_eof && st.stderr_eof then begin
+       (match Unix.waitpid [ Unix.WNOHANG ] st.handle.pid with
+        | 0, _ -> ()
+        | _, s -> st.status <- Some s
+        | exception Unix.Unix_error (Unix.ECHILD, _, _) ->
+          st.status <- Some (Unix.WEXITED 0)
+        | exception _ -> ()));
+    if
+      st.status = None
+      && st.timeout_sec > 0.0
+      && Unix.gettimeofday () -. st.handle.started_at > st.timeout_sec
+    then (
+      Process_eio.tree_kill ~pgid:st.handle.pgid ~signal:Sys.sigterm ~grace_sec:2.0;
+      match Unix.waitpid [ Unix.WNOHANG ] st.handle.pid with
+      | 0, _ -> ()
+      | _, s -> st.status <- Some s
+      | exception _ -> ());
+    if st.status <> None && st.stdout_eof && st.stderr_eof
+    then (
       st.closed <- true;
       Safe_ops.protect ~default:() (fun () -> Unix.close st.handle.stdout_fd);
       Safe_ops.protect ~default:() (fun () -> Unix.close st.handle.stderr_fd);
-      try_delete_pid_file st.pid_file
-    end
-  end
+      try_delete_pid_file st.pid_file))
+;;
 
 let spawn ?base_path ~keeper ~argv ~cwd ~envp ~timeout_sec () =
   match Process_eio.spawn_detached ~argv ~env:envp ~cwd with
   | Error e -> Error (Spawn_failed e)
   | Ok handle ->
-      try_set_nonblock handle.stdout_fd;
-      try_set_nonblock handle.stderr_fd;
-      let tid = fresh_id () in
-      let pid_file =
-        match base_path with
-        | None | Some "" -> None
-        | Some bp ->
-            let path = pid_file_of ~base_path:bp ~keeper ~task_id:tid in
-            try_write_pid_file path
-              ~pid:handle.pid
-              ~pgid:handle.pgid
-              ~started_at:handle.started_at;
-            Some path
-      in
-      let st =
-        {
-          handle;
-          keeper;
-          timeout_sec;
-          stdout_buf = Buffer.create 4096;
-          stderr_buf = Buffer.create 4096;
-          status = None;
-          closed = false;
-          stdout_eof = false;
-          stderr_eof = false;
-          pid_file;
-        }
-      in
-      with_reg (fun () -> Hashtbl.replace registry tid st);
-      Ok tid
+    try_set_nonblock handle.stdout_fd;
+    try_set_nonblock handle.stderr_fd;
+    let tid = fresh_id () in
+    let pid_file =
+      match base_path with
+      | None | Some "" -> None
+      | Some bp ->
+        let path = pid_file_of ~base_path:bp ~keeper ~task_id:tid in
+        try_write_pid_file
+          path
+          ~pid:handle.pid
+          ~pgid:handle.pgid
+          ~started_at:handle.started_at;
+        Some path
+    in
+    let st =
+      { handle
+      ; keeper
+      ; timeout_sec
+      ; stdout_buf = Buffer.create 4096
+      ; stderr_buf = Buffer.create 4096
+      ; status = None
+      ; closed = false
+      ; stdout_eof = false
+      ; stderr_eof = false
+      ; pid_file
+      }
+    in
+    with_reg (fun () -> Hashtbl.replace registry tid st);
+    Ok tid
+;;
 
 let bufsub buf since =
   let len = Buffer.length buf in
-  if since < 0 || since >= len then ""
-  else Buffer.sub buf since (len - since)
+  if since < 0 || since >= len then "" else Buffer.sub buf since (len - since)
+;;
 
 let read tid ~since_stdout ~since_stderr =
   let st_opt = with_reg (fun () -> Hashtbl.find_opt registry tid) in
   match st_opt with
   | None -> Error (Unknown_task tid)
   | Some st ->
-      (try
-         with_reg (fun () -> poll_state st);
-         Ok
-           {
-             stdout_since = bufsub st.stdout_buf since_stdout;
-             stderr_since = bufsub st.stderr_buf since_stderr;
-             closed = st.closed;
-             status = st.status;
-             bytes_dropped_stdout = 0;
-             bytes_dropped_stderr = 0;
-           }
-       with e -> Error (Read_failed (Printexc.to_string e)))
+    (try
+       with_reg (fun () -> poll_state st);
+       Ok
+         { stdout_since = bufsub st.stdout_buf since_stdout
+         ; stderr_since = bufsub st.stderr_buf since_stderr
+         ; closed = st.closed
+         ; status = st.status
+         ; bytes_dropped_stdout = 0
+         ; bytes_dropped_stderr = 0
+         }
+     with
+     | e -> Error (Read_failed (Printexc.to_string e)))
+;;
 
 let kill tid ~signal ~grace_sec =
   let st_opt = with_reg (fun () -> Hashtbl.find_opt registry tid) in
   match st_opt with
   | None -> Error (Unknown_task_kill tid)
   | Some st ->
-      (try
-         Process_eio.tree_kill ~pgid:st.handle.pgid ~signal ~grace_sec;
-         with_reg (fun () -> poll_state st);
-         (* Best-effort PID file cleanup: if poll_state did not
+    (try
+       Process_eio.tree_kill ~pgid:st.handle.pgid ~signal ~grace_sec;
+       with_reg (fun () -> poll_state st);
+       (* Best-effort PID file cleanup: if poll_state did not
             observe EOF yet (slow-closing FDs), at least unlink the
             sidecar so the next reap cycle does not flag a live
             task as orphan. *)
-         if st.closed then try_delete_pid_file st.pid_file;
-         Ok ()
-       with e -> Error (Kill_failed (Printexc.to_string e)))
+       if st.closed then try_delete_pid_file st.pid_file;
+       Ok ()
+     with
+     | e -> Error (Kill_failed (Printexc.to_string e)))
+;;
 
 let list ~keeper =
   with_reg (fun () ->
     Hashtbl.fold
       (fun tid st acc -> if st.keeper = keeper then tid :: acc else acc)
-      registry [])
+      registry
+      [])
+;;
 
 let list_with_started_at ~keeper =
   with_reg (fun () ->
     Hashtbl.fold
       (fun tid st acc ->
-        if st.keeper = keeper then (tid, st.handle.started_at) :: acc
-        else acc)
-      registry [])
+         if st.keeper = keeper then (tid, st.handle.started_at) :: acc else acc)
+      registry
+      [])
+;;
 
 (* Directory walk helpers — avoid Filename.Infix / extra deps. *)
 
 let safe_readdir dir =
   Safe_ops.protect ~default:[] (fun () -> Array.to_list (Sys.readdir dir))
+;;
 
 let is_dir p = Safe_ops.protect ~default:false (fun () -> Sys.is_directory p)
 
 let read_pid_file path =
   Safe_ops.protect ~default:None (fun () ->
     let ic = open_in path in
-    Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
-      match int_of_string_opt (String.trim (input_line ic)),
-            int_of_string_opt (String.trim (input_line ic))
-      with
-      | Some pid, Some pgid -> Some (pid, pgid)
-      | _ -> None))
+    Fun.protect
+      ~finally:(fun () -> close_in_noerr ic)
+      (fun () ->
+         match
+           ( int_of_string_opt (String.trim (input_line ic))
+           , int_of_string_opt (String.trim (input_line ic)) )
+         with
+         | Some pid, Some pgid -> Some (pid, pgid)
+         | _ -> None))
+;;
 
 let pid_is_live pid =
-  try Unix.kill pid 0; true
+  try
+    Unix.kill pid 0;
+    true
   with
   | Unix.Unix_error (Unix.ESRCH, _, _) -> false
   (* EPERM means pid exists but we lack permission — still considered
      live for orphan detection. *)
   | Unix.Unix_error (Unix.EPERM, _, _) -> true
   | _ -> false
+;;
 
 let live_task_ids () =
-  with_reg (fun () ->
-    Hashtbl.fold (fun tid _ acc -> tid :: acc) registry [])
+  with_reg (fun () -> Hashtbl.fold (fun tid _ acc -> tid :: acc) registry [])
+;;
 
 (* Scan <base_path>/.masc/keeper/*/bg/*.pid, SIGKILL any pgroup whose
    task_id is absent from the live registry, and delete the sidecar.
    Stale files whose leader pid no longer exists are also removed.
    Returns the count of files removed. *)
 let reap_orphans ~base_path =
-  if base_path = "" then 0
-  else
+  if base_path = ""
+  then 0
+  else (
     let keeper_root =
-      Filename.concat
-        (Common.masc_dir_from_base_path ~base_path)
-        "keeper"
+      Filename.concat (Common.masc_dir_from_base_path ~base_path) "keeper"
     in
-    if not (is_dir keeper_root) then 0
-    else
+    if not (is_dir keeper_root)
+    then 0
+    else (
       let live = live_task_ids () in
       let reaped = ref 0 in
-      List.iter (fun keeper ->
-        let bg_dir = Filename.concat (Filename.concat keeper_root keeper) "bg" in
-        if is_dir bg_dir then
-          List.iter (fun entry ->
-            if Filename.check_suffix entry ".pid" then begin
-              let task_id = Filename.chop_suffix entry ".pid" in
-              let path = Filename.concat bg_dir entry in
-              let live_here = List.mem task_id live in
-              if live_here then ()
-              else begin
-                (match read_pid_file path with
-                 | Some (pid, pgid) when pid_is_live pid ->
-                     (* Orphan: live pgroup, no registry entry. *)
-                     Process_eio.tree_kill ~pgid
-                       ~signal:Sys.sigterm ~grace_sec:1.0
-                 | None | Some (_, _) -> ());
-                Safe_ops.protect ~default:() (fun () -> Unix.unlink path);
-                incr reaped
-              end
-            end)
-            (safe_readdir bg_dir))
+      List.iter
+        (fun keeper ->
+           let bg_dir = Filename.concat (Filename.concat keeper_root keeper) "bg" in
+           if is_dir bg_dir
+           then
+             List.iter
+               (fun entry ->
+                  if Filename.check_suffix entry ".pid"
+                  then (
+                    let task_id = Filename.chop_suffix entry ".pid" in
+                    let path = Filename.concat bg_dir entry in
+                    let live_here = List.mem task_id live in
+                    if live_here
+                    then ()
+                    else (
+                      (match read_pid_file path with
+                       | Some (pid, pgid) when pid_is_live pid ->
+                         (* Orphan: live pgroup, no registry entry. *)
+                         Process_eio.tree_kill ~pgid ~signal:Sys.sigterm ~grace_sec:1.0
+                       | None | Some (_, _) -> ());
+                      Safe_ops.protect ~default:() (fun () -> Unix.unlink path);
+                      incr reaped)))
+               (safe_readdir bg_dir))
         (safe_readdir keeper_root);
-      !reaped
+      !reaped))
+;;

@@ -10,33 +10,32 @@
 
 (** Risk classification for a tool invocation. *)
 type risk_level =
-  | Low       (** Pure reads: status, list, query *)
-  | Medium    (** State-changing reads: claim, join, leave *)
-  | High      (** Write ops: create, update, deploy *)
-  | Critical  (** Destructive ops: delete, force-push, drop *)
+  | Low (** Pure reads: status, list, query *)
+  | Medium (** State-changing reads: claim, join, leave *)
+  | High (** Write ops: create, update, deploy *)
+  | Critical (** Destructive ops: delete, force-push, drop *)
 
 (** Result of governance evaluation for a single tool call. *)
-type governance_decision = {
-  tool_name : string;
-  risk : risk_level;
-  action : [ `Allow | `Require_confirm of string | `Deny of string ];
-  trace_id : string;
-}
+type governance_decision =
+  { tool_name : string
+  ; risk : risk_level
+  ; action : [ `Allow | `Require_confirm of string | `Deny of string ]
+  ; trace_id : string
+  }
 
 val risk_level_to_string : risk_level -> string
 val risk_level_to_int : risk_level -> int
 
-val confirm_threshold : string -> risk_level option
 (** Minimum risk level that requires confirmation for the given governance level.
     Returns [None] for "development" (no confirmation needed). *)
+val confirm_threshold : string -> risk_level option
 
-val keeper_confirm_threshold : string -> risk_level option
 (** Keeper-specific confirmation threshold.
     Keepers are more autonomous than front-door tool dispatch, so production
     keepers confirm from High upward while the generic production surface
     confirms only Critical. *)
+val keeper_confirm_threshold : string -> risk_level option
 
-val assess_risk : tool_name:string -> input:Yojson.Safe.t -> risk_level
 (** Classify tool risk using, in order:
     - tool metadata overrides (readonly/destructive)
     - payload-sensitive destructive semantics for selected mutation fields
@@ -48,30 +47,31 @@ val assess_risk : tool_name:string -> input:Yojson.Safe.t -> risk_level
     - High: write ops
     - Medium: state-changing reads
     - Low: readonly/status/query surfaces *)
+val assess_risk : tool_name:string -> input:Yojson.Safe.t -> risk_level
 
-val decide :
-  governance_level:string ->
-  tool_name:string ->
-  input:Yojson.Safe.t ->
-  governance_decision
 (** Evaluate a tool call against governance policy and return a decision.
     - development: allow all, audit High+Critical
     - production: confirm Critical, audit Medium+
     - enterprise: confirm High+Critical, audit all
     - paranoid: confirm Medium+High+Critical, audit all *)
+val decide
+  :  governance_level:string
+  -> tool_name:string
+  -> input:Yojson.Safe.t
+  -> governance_decision
 
-val make_pre_hook :
-  config:Coord.config ->
-  governance_level:string ->
-  Tool_dispatch.pre_hook
 (** Create a Tool_dispatch pre_hook closure for the given governance level.
     Returns [Pass] (proceed) for allowed calls,
     [Reject result] (short-circuit) for confirm-required or denied calls. *)
+val make_pre_hook
+  :  config:Coord.config
+  -> governance_level:string
+  -> Tool_dispatch.pre_hook
 
-val install : config:Coord.config -> governance_level:string -> unit
 (** Register the governance pipeline as a Tool_dispatch pre_hook.
     Reads governance level from the [governance_level] argument.
     Called once at server startup. *)
+val install : config:Coord.config -> governance_level:string -> unit
 
 (** {1 Combinatorial Risk — Lethal Trifecta}
 
@@ -82,36 +82,28 @@ val install : config:Coord.config -> governance_level:string -> unit
     @since 2.264.0 *)
 
 type capability_class =
-  | External_input      (** Receives data from untrusted external sources *)
-  | Sensitive_access    (** Can read potentially sensitive data *)
-  | State_modification  (** Can modify system state *)
+  | External_input (** Receives data from untrusted external sources *)
+  | Sensitive_access (** Can read potentially sensitive data *)
+  | State_modification (** Can modify system state *)
 
-val tool_capabilities : string -> capability_class list
 (** Return capability classes for a tool name. Empty for unclassified tools. *)
+val tool_capabilities : string -> capability_class list
 
-val assess_trifecta :
-  active_tool_names:string list -> int * bool * bool * bool
 (** Compute trifecta status from active tool names.
     Returns [(class_count, has_external, has_sensitive, has_state_mod)]. *)
+val assess_trifecta : active_tool_names:string list -> int * bool * bool * bool
 
-val combinatorial_risk_escalation :
-  trifecta_active:bool ->
-  tool_name:string ->
-  base_risk:risk_level ->
-  input:Yojson.Safe.t ->
-  risk_level
 (** If trifecta is active and the tool is a state_modification tool,
     escalate risk to at least High. Read-only keeper_shell op=gh subcommands
     remain at [base_risk] even though the top-level tool can mutate.
     Otherwise return base_risk unchanged. *)
+val combinatorial_risk_escalation
+  :  trifecta_active:bool
+  -> tool_name:string
+  -> base_risk:risk_level
+  -> input:Yojson.Safe.t
+  -> risk_level
 
-val to_oas_approval_callback :
-  ?config:Coord.config ->
-  governance_level:string ->
-  keeper_name:string ->
-  ?meta:Keeper_types.keeper_meta ->
-  unit ->
-  Oas.Hooks.approval_callback
 (** Build an OAS approval callback with genuine HITL fiber suspension.
 
     Pre-computes trifecta status from the keeper's active shard tool set.
@@ -125,3 +117,10 @@ val to_oas_approval_callback :
     Tools below the threshold are auto-approved.
 
     @since 2.262.0 (#5902, #5907) *)
+val to_oas_approval_callback
+  :  ?config:Coord.config
+  -> governance_level:string
+  -> keeper_name:string
+  -> ?meta:Keeper_types.keeper_meta
+  -> unit
+  -> Oas.Hooks.approval_callback

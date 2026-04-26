@@ -12,6 +12,7 @@ let nonempty_env name =
   match Sys.getenv_opt name with
   | Some value when String.trim value <> "" -> Some (String.trim value)
   | _ -> None
+;;
 
 (** Default port for Ollama (OpenAI-compatible at /v1). *)
 let ollama_default_port = 11434
@@ -27,14 +28,12 @@ let openai_chat_completions_path = "/v1/chat/completions"
 let openai_models_path = "/v1/models"
 
 (** Default URL for Ollama. *)
-let ollama_default_url =
-  Printf.sprintf "http://127.0.0.1:%d" ollama_default_port
+let ollama_default_url = Printf.sprintf "http://127.0.0.1:%d" ollama_default_port
 
 (** Substring used by Ollama URL heuristics: [":<port>"].  Keeps the
     heuristic anchored to {!ollama_default_port} so changing the port
     updates every classifier in one place. *)
-let ollama_port_needle =
-  Printf.sprintf ":%d" ollama_default_port
+let ollama_port_needle = Printf.sprintf ":%d" ollama_default_port
 
 (** Ollama native API path for the running-models ("process status")
     endpoint.  Used by both {!Cascade_ollama_probe} (cascade-level
@@ -54,14 +53,18 @@ let ollama_api_generate_path = "/api/generate"
 let is_ollama_url url =
   let hlen = String.length url in
   let nlen = String.length ollama_port_needle in
-  if nlen = 0 || nlen > hlen then false
-  else
+  if nlen = 0 || nlen > hlen
+  then false
+  else (
     let rec loop i =
-      if i + nlen > hlen then false
-      else if String.sub url i nlen = ollama_port_needle then true
+      if i + nlen > hlen
+      then false
+      else if String.sub url i nlen = ollama_port_needle
+      then true
       else loop (i + 1)
     in
-    loop 0
+    loop 0)
+;;
 
 (** Sentinel prefix marking a CLI-backed transport (e.g. [cli:codex]).
     Used by capacity classifiers to distinguish CLI endpoints from HTTP
@@ -74,8 +77,8 @@ let cli_sentinel_prefix = "cli:"
     start of the sentinel string. *)
 let is_cli_sentinel_url url =
   let plen = String.length cli_sentinel_prefix in
-  String.length url > plen
-  && String.sub url 0 plen = cli_sentinel_prefix
+  String.length url > plen && String.sub url 0 plen = cli_sentinel_prefix
+;;
 
 (** Default URL for the local OpenAI-compatible runtime.
     Override order: OAS_LOCAL_LLM_URL -> OAS_LOCAL_QWEN_URL -> local runtime. *)
@@ -84,13 +87,13 @@ let local_llm_default_url =
   | Some value, _ -> value
   | _, Some value -> value
   | _ -> ollama_default_url
+;;
 
 (** Default port for the MASC HTTP server. *)
 let masc_http_default_port = 8935
 
 (** Default port as string (for env config fallback). *)
-let masc_http_default_port_s =
-  string_of_int masc_http_default_port
+let masc_http_default_port_s = string_of_int masc_http_default_port
 
 (** Default host for the MASC HTTP server. *)
 let masc_http_default_host = "127.0.0.1"
@@ -104,19 +107,21 @@ let is_loopback_host host =
   let normalized = String.trim host |> String.lowercase_ascii in
   match normalized with
   | "localhost" -> true
-  | _ -> (
-      match Ipaddr.of_string normalized with
-      | Ok ip -> (
-          match ip with
-          | Ipaddr.V4 addr -> Ipaddr.V4.compare addr Ipaddr.V4.localhost = 0
-          | Ipaddr.V6 addr -> Ipaddr.V6.compare addr Ipaddr.V6.localhost = 0)
-      | Error _ -> false)
+  | _ ->
+    (match Ipaddr.of_string normalized with
+     | Ok ip ->
+       (match ip with
+        | Ipaddr.V4 addr -> Ipaddr.V4.compare addr Ipaddr.V4.localhost = 0
+        | Ipaddr.V6 addr -> Ipaddr.V6.compare addr Ipaddr.V6.localhost = 0)
+     | Error _ -> false)
+;;
 
 (** Convenience wrapper for [Uri.host]-style inputs.  Returns [false]
     when the host is absent. *)
 let is_loopback_host_opt = function
   | Some host -> is_loopback_host host
   | None -> false
+;;
 
 (** Default port for the dashboard's Vite dev server.  Used by
     [Server_auth.default_loopback_dev_mutation_origins] to whitelist
@@ -127,34 +132,33 @@ let vite_dev_default_port = 5173
     {!vite_dev_default_port}.  Ordered [127.0.0.1 → localhost → ::1]
     to match the historical CORS allowlist. *)
 let vite_dev_default_origins =
-  [
-    Printf.sprintf "http://127.0.0.1:%d" vite_dev_default_port;
-    Printf.sprintf "http://localhost:%d" vite_dev_default_port;
-    Printf.sprintf "http://[::1]:%d" vite_dev_default_port;
+  [ Printf.sprintf "http://127.0.0.1:%d" vite_dev_default_port
+  ; Printf.sprintf "http://localhost:%d" vite_dev_default_port
+  ; Printf.sprintf "http://[::1]:%d" vite_dev_default_port
   ]
+;;
 
 (** Default port for SearXNG local search. *)
 let searxng_default_port = 8888
 
 (** Default URL for SearXNG. *)
-let searxng_default_url =
-  Printf.sprintf "http://localhost:%d" searxng_default_port
+let searxng_default_url = Printf.sprintf "http://localhost:%d" searxng_default_port
 
 (** Default port for OpenTelemetry OTLP HTTP exporter. *)
 let otel_default_port = 4318
 
 (** Default URL for OpenTelemetry OTLP HTTP endpoint. *)
-let otel_default_url =
-  Printf.sprintf "http://localhost:%d" otel_default_port
+let otel_default_url = Printf.sprintf "http://localhost:%d" otel_default_port
 
 (** Allowed origins for DNS rebinding / CORS protection.
     Update here; [server_routes_http_common.ml] reads this list. *)
-let allowed_origins = [
-  "http://localhost";
-  "https://localhost";
-  "http://127.0.0.1";
-  "https://127.0.0.1";
-  (* Cloudflare tunnel *)
-  "https://masc.crying.pictures";
-  "https://masc-dev.crying.pictures";
-]
+let allowed_origins =
+  [ "http://localhost"
+  ; "https://localhost"
+  ; "http://127.0.0.1"
+  ; "https://127.0.0.1"
+  ; (* Cloudflare tunnel *)
+    "https://masc.crying.pictures"
+  ; "https://masc-dev.crying.pictures"
+  ]
+;;

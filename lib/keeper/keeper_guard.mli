@@ -11,13 +11,9 @@
 (** Evaluate all guard conditions against a frozen measurement snapshot.
     Returns all events that fire, ordered by priority (highest first).
     The caller decides whether to act on the first or process all. *)
-val evaluate :
-  Keeper_measurement.measurement_snapshot ->
-  Keeper_state_machine.event list
+val evaluate : Keeper_measurement.measurement_snapshot -> Keeper_state_machine.event list
 
 (** Select the highest-priority event from the guard output.
     Priority: Guardrail > Crash > Compact > Handoff > No_transition.
     Returns [Heartbeat_ok] if the list is empty (no transitions needed). *)
-val prioritized_event :
-  Keeper_state_machine.event list ->
-  Keeper_state_machine.event
+val prioritized_event : Keeper_state_machine.event list -> Keeper_state_machine.event

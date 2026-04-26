@@ -17,51 +17,52 @@
 (** {1 Connector Module Type} *)
 
 module type S = sig
-  val connector_id : string
   (** Unique identifier for this connector (e.g. "discord", "openclaw"). *)
+  val connector_id : string
 
-  val display_name : string
   (** Human-readable name (e.g. "Discord", "OpenClaw"). *)
+  val display_name : string
 
-  val channel : string
   (** Channel identifier used in gate message routing. *)
+  val channel : string
 
-  val status_json : ?audit_limit:int -> unit -> Yojson.Safe.t
   (** Runtime status snapshot for this connector. *)
+  val status_json : ?audit_limit:int -> unit -> Yojson.Safe.t
 
-  val connector_json :
-    ?gate_status_json:Yojson.Safe.t ->
-    ?audit_limit:int ->
-    unit ->
-    Yojson.Safe.t
   (** Full connector descriptor for dashboard consumption. *)
+  val connector_json
+    :  ?gate_status_json:Yojson.Safe.t
+    -> ?audit_limit:int
+    -> unit
+    -> Yojson.Safe.t
 
-  val bind :
-    channel_id:string ->
-    keeper_name:string ->
-    actor_name:string ->
-    (Yojson.Safe.t, string) result
   (** Create or update a channel-to-keeper binding. *)
+  val bind
+    :  channel_id:string
+    -> keeper_name:string
+    -> actor_name:string
+    -> (Yojson.Safe.t, string) result
 
-  val unbind :
-    channel_id:string ->
-    actor_name:string ->
-    (Yojson.Safe.t, string) result
   (** Remove a channel-to-keeper binding. *)
+  val unbind : channel_id:string -> actor_name:string -> (Yojson.Safe.t, string) result
 end
 
 (** {1 Registry} *)
 
-val register : (module S) -> unit
 (** Register a connector.  Replaces any existing connector with the
     same [connector_id].  Call at server startup. *)
+val register : (module S) -> unit
 
-val find : string -> (module S) option
 (** [find name] returns the connector registered under [name], if any. *)
+val find : string -> (module S) option
 
-val all : unit -> (module S) list
 (** All registered connectors, in unspecified order. *)
+val all : unit -> (module S) list
 
-val connectors_json : ?gate_status_json:Yojson.Safe.t -> ?audit_limit:int -> unit -> Yojson.Safe.t
 (** Aggregate descriptor for all registered connectors.
     Returns [{connectors: [...], total: N, active_count: N, generated_at: "..."}]. *)
+val connectors_json
+  :  ?gate_status_json:Yojson.Safe.t
+  -> ?audit_limit:int
+  -> unit
+  -> Yojson.Safe.t

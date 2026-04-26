@@ -4,7 +4,6 @@
 include Activity_graph_types
 include Activity_graph_registry
 include Activity_graph_reducer
-
 module StringMap = Map.Make (String)
 
 (* ================================================================ *)
@@ -13,43 +12,47 @@ module StringMap = Map.Make (String)
 
 let root_dir (config : Coord_utils.config) =
   Filename.concat (Coord_utils.masc_dir config) "activity-events"
+;;
 
 let month_dir (config : Coord_utils.config) =
   let tm = Unix.gmtime (Time_compat.now ()) in
-  Filename.concat (root_dir config)
+  Filename.concat
+    (root_dir config)
     (Printf.sprintf "%04d-%02d" (tm.tm_year + 1900) (tm.tm_mon + 1))
+;;
 
 let day_path (config : Coord_utils.config) =
   let tm = Unix.gmtime (Time_compat.now ()) in
   Filename.concat (month_dir config) (Printf.sprintf "%02d.jsonl" tm.tm_mday)
+;;
 
-let seq_path (config : Coord_utils.config) =
-  Filename.concat (root_dir config) "_seq"
-
-let lock_path (config : Coord_utils.config) =
-  Filename.concat (root_dir config) "_stream"
+let seq_path (config : Coord_utils.config) = Filename.concat (root_dir config) "_seq"
+let lock_path (config : Coord_utils.config) = Filename.concat (root_dir config) "_stream"
 
 let ensure_dirs config =
   Coord_utils.mkdir_p (root_dir config);
   Coord_utils.mkdir_p (month_dir config)
+;;
 
 let read_current_seq config =
   match Safe_ops.read_file_safe (seq_path config) with
-  | Ok raw -> (
-      match int_of_string_opt (String.trim raw) with
-      | Some value -> value
-      | None -> 0)
+  | Ok raw ->
+    (match int_of_string_opt (String.trim raw) with
+     | Some value -> value
+     | None -> 0)
   | Error _ -> 0
+;;
 
 let write_current_seq config seq =
   Fs_compat.save_file (seq_path config) (string_of_int seq)
+;;
 
-let append_line path line =
-  Fs_compat.append_file path line
+let append_line path line = Fs_compat.append_file path line
 
 let format_sse_event (value : event) =
   let data = Yojson.Safe.to_string (event_to_yojson value) in
   Printf.sprintf "id: %d\nevent: activity\ndata: %s\n\n" value.seq data
+;;
 
 (* ================================================================ *)
 (* Event reading                                                    *)
@@ -59,82 +62,87 @@ let parse_event_line line =
   match Safe_ops.parse_json_safe ~context:"activity_graph:event_line" line with
   | Ok json -> event_of_yojson json
   | Error _ -> None
+;;
 
 let collect_event_files config =
   let root = root_dir config in
-  if not (Sys.file_exists root) then
-    []
+  if not (Sys.file_exists root)
+  then []
   else
     Sys.readdir root
     |> Array.to_list
     |> List.sort compare
     |> List.filter_map (fun month ->
-           let month_path = Filename.concat root month in
-           if Sys.file_exists month_path && Sys.is_directory month_path then
-             Some
-               (Sys.readdir month_path
-               |> Array.to_list
-               |> List.sort compare
-               |> List.filter_map (fun name ->
-                      if Filename.check_suffix name ".jsonl" then
-                        Some (Filename.concat month_path name)
-                      else
-                        None))
-           else
-             None)
+      let month_path = Filename.concat root month in
+      if Sys.file_exists month_path && Sys.is_directory month_path
+      then
+        Some
+          (Sys.readdir month_path
+           |> Array.to_list
+           |> List.sort compare
+           |> List.filter_map (fun name ->
+             if Filename.check_suffix name ".jsonl"
+             then Some (Filename.concat month_path name)
+             else None))
+      else None)
     |> List.flatten
+;;
 
 let read_all_events config =
   collect_event_files config
   |> List.fold_left
        (fun acc path ->
-         let content = Fs_compat.load_file path in
-         let lines = String.split_on_char '\n' content in
-         let rows =
-           List.filter_map (fun line ->
-             if String.trim line = "" then None
-             else parse_event_line line) lines
-         in
-         List.rev_append rows acc)
+          let content = Fs_compat.load_file path in
+          let lines = String.split_on_char '\n' content in
+          let rows =
+            List.filter_map
+              (fun line -> if String.trim line = "" then None else parse_event_line line)
+              lines
+          in
+          List.rev_append rows acc)
        []
   |> List.sort (fun a b -> Int.compare a.seq b.seq)
+;;
 
 let matches_filters ?(kinds = []) (value : event) =
   kinds = [] || List.mem value.kind kinds
+;;
 
 (** Returns [(page, total_matching)] where [total_matching] is the count
     of all events matching filters before [limit] is applied. *)
-let list_events_with_total config ?(kinds = []) ~after_seq ~limit
-    ?since_ms () =
+let list_events_with_total config ?(kinds = []) ~after_seq ~limit ?since_ms () =
   let all =
     read_all_events config
     |> List.filter (fun value ->
-           value.seq > after_seq
-           && matches_filters ~kinds value
-           && (match since_ms with
-               | None -> true
-               | Some ms -> value.ts_ms >= ms))
+      value.seq > after_seq
+      && matches_filters ~kinds value
+      &&
+      match since_ms with
+      | None -> true
+      | Some ms -> value.ts_ms >= ms)
   in
   let total = List.length all in
   let page =
-    if after_seq > 0 then
-      List.take limit all
-    else
-      all |> List.drop (max 0 (total - limit))
+    if after_seq > 0
+    then List.take limit all
+    else all |> List.drop (max 0 (total - limit))
   in
-  (page, total)
+  page, total
+;;
 
 let list_events config ?(kinds = []) ~after_seq ~limit () =
   fst (list_events_with_total config ~kinds ~after_seq ~limit ())
+;;
 
-let window_meta ~limit ~events_shown ~events_store_total
-    ?(extra = []) () : Yojson.Safe.t =
-  `Assoc ([
-    ("limit", `Int limit);
-    ("events_shown", `Int events_shown);
-    ("events_store_total", `Int events_store_total);
-    ("has_more", `Bool (events_store_total > events_shown));
-  ] @ extra)
+let window_meta ~limit ~events_shown ~events_store_total ?(extra = []) () : Yojson.Safe.t =
+  `Assoc
+    ([ "limit", `Int limit
+     ; "events_shown", `Int events_shown
+     ; "events_store_total", `Int events_store_total
+     ; "has_more", `Bool (events_store_total > events_shown)
+     ]
+     @ extra)
+;;
 
 let latest_seq config = read_current_seq config
 
@@ -145,45 +153,47 @@ let latest_seq config = read_current_seq config
 let emit config ?actor ?subject ?(tags = []) ~kind ~payload () =
   let value =
     Coord_utils.with_file_lock config (lock_path config) (fun () ->
-        ensure_dirs config;
-        let seq = read_current_seq config + 1 in
-        write_current_seq config seq;
-        let value =
-          {
-            seq;
-            ts_ms = now_ts_ms ();
-            ts_iso = Types.now_iso ();
-            room_id = "default";  (* retained for JSONL backward compat *)
-            kind;
-            actor;
-            subject;
-            payload;
-            tags;
-          }
-        in
-        append_line (day_path config)
-          (Yojson.Safe.to_string (event_to_yojson value) ^ "\n");
-        value)
+      ensure_dirs config;
+      let seq = read_current_seq config + 1 in
+      write_current_seq config seq;
+      let value =
+        { seq
+        ; ts_ms = now_ts_ms ()
+        ; ts_iso = Types.now_iso ()
+        ; room_id = "default"
+        ; (* retained for JSONL backward compat *)
+          kind
+        ; actor
+        ; subject
+        ; payload
+        ; tags
+        }
+      in
+      append_line (day_path config) (Yojson.Safe.to_string (event_to_yojson value) ^ "\n");
+      value)
   in
   let encoded = format_sse_event value in
   let snapshot =
-    with_registry_ro (fun () -> Hashtbl.fold (fun key client acc -> (key, client) :: acc) clients [])
+    with_registry_ro (fun () ->
+      Hashtbl.fold (fun key client acc -> (key, client) :: acc) clients [])
   in
   let failed = ref [] in
   List.iter
     (fun (session_id, client) ->
-      if value.seq > client.last_seq && client_matches client value then
-        (try
-          client.push encoded;
-          client.last_seq <- value.seq
-        with
-        | Eio.Cancel.Cancelled _ as e -> raise e
-        | exn ->
-            Log.Misc.warn "SSE push failed for %s: %s" session_id (Printexc.to_string exn);
-            failed := session_id :: !failed))
+       if value.seq > client.last_seq && client_matches client value
+       then (
+         try
+           client.push encoded;
+           client.last_seq <- value.seq
+         with
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | exn ->
+           Log.Misc.warn "SSE push failed for %s: %s" session_id (Printexc.to_string exn);
+           failed := session_id :: !failed))
     snapshot;
   List.iter unregister !failed;
   value
+;;
 
 (* ================================================================ *)
 (* JSON response                                                    *)
@@ -197,23 +207,23 @@ let json_response config ?(kinds = []) ~after_seq ~limit () =
     | [] -> after_seq
   in
   `Assoc
-    [
-      ("events", `List (List.map event_to_yojson events));
-      ("count", `Int (List.length events));
-      ("after_seq", `Int after_seq);
-      ("next_after_seq", `Int next_after_seq);
-      ("limit", `Int limit);
-      ("room_id", `String "default");  (* backward compat *)
-      ("kinds", `List (List.map (fun value -> `String value) kinds));
-      ("latest_seq", `Int (latest_seq config));
+    [ "events", `List (List.map event_to_yojson events)
+    ; "count", `Int (List.length events)
+    ; "after_seq", `Int after_seq
+    ; "next_after_seq", `Int next_after_seq
+    ; "limit", `Int limit
+    ; "room_id", `String "default"
+    ; (* backward compat *)
+      "kinds", `List (List.map (fun value -> `String value) kinds)
+    ; "latest_seq", `Int (latest_seq config)
     ]
+;;
 
 (* ================================================================ *)
 (* Graph building                                                   *)
 (* ================================================================ *)
 
-let graph_json config ?(kinds = []) ?(limit = 500)
-    ?(timeline_limit = 80) ?since_ms () =
+let graph_json config ?(kinds = []) ?(limit = 500) ?(timeline_limit = 80) ?since_ms () =
   let events, events_store_total =
     list_events_with_total config ~kinds ~after_seq:0 ~limit ?since_ms ()
   in
@@ -221,44 +231,38 @@ let graph_json config ?(kinds = []) ?(limit = 500)
     let counts =
       List.fold_left
         (fun acc (e : event) ->
-          let prev = StringMap.find_opt e.kind acc |> Option.value ~default:0 in
-          StringMap.add e.kind (prev + 1) acc)
+           let prev = StringMap.find_opt e.kind acc |> Option.value ~default:0 in
+           StringMap.add e.kind (prev + 1) acc)
         StringMap.empty
         events
     in
     `Assoc
-      (StringMap.fold
-         (fun kind count acc -> (kind, `Int count) :: acc)
-         counts []
-      |> List.sort (fun (a, _) (b, _) -> String.compare a b))
+      (StringMap.fold (fun kind count acc -> (kind, `Int count) :: acc) counts []
+       |> List.sort (fun (a, _) (b, _) -> String.compare a b))
   in
   let heatmap_json =
     let matrix = Array.init 7 (fun _ -> Array.make 24 0) in
     let max_count = ref 0 in
     List.iter
       (fun (e : event) ->
-        let tm = Unix.localtime (float_of_int e.ts_ms /. 1000.0) in
-        let day = if tm.tm_wday = 0 then 6 else tm.tm_wday - 1 in
-        let hour = tm.tm_hour in
-        let next_count = matrix.(day).(hour) + 1 in
-        matrix.(day).(hour) <- next_count;
-        if next_count > !max_count then max_count := next_count)
+         let tm = Unix.localtime (float_of_int e.ts_ms /. 1000.0) in
+         let day = if tm.tm_wday = 0 then 6 else tm.tm_wday - 1 in
+         let hour = tm.tm_hour in
+         let next_count = matrix.(day).(hour) + 1 in
+         matrix.(day).(hour) <- next_count;
+         if next_count > !max_count then max_count := next_count)
       events;
     let matrix_json =
       `List
         (Array.to_list
            (Array.map
-              (fun row ->
-                `List
-                  (Array.to_list
-                     (Array.map (fun count -> `Int count) row)))
+              (fun row -> `List (Array.to_list (Array.map (fun count -> `Int count) row)))
               matrix))
     in
     `Assoc
-      [
-        ("matrix", matrix_json);
-        ("max", `Int !max_count);
-        ("total", `Int (List.length events));
+      [ "matrix", matrix_json
+      ; "max", `Int !max_count
+      ; "total", `Int (List.length events)
       ]
   in
   let nodes = Hashtbl.create 64 in
@@ -267,42 +271,42 @@ let graph_json config ?(kinds = []) ?(limit = 500)
   let nodes_json =
     Hashtbl.fold
       (fun _ node acc ->
-        graph_node_to_yojson
-          {
-            id = node.node_id;
-            kind = node.node_kind;
-            label = node.label;
-            status = node.status;
-            weight = node.weight;
-            semantic_weight = node.semantic_weight;
-            last_event_at = node.last_event_at;
-            meta = node.meta;
-          }
-        :: acc)
-      nodes []
+         graph_node_to_yojson
+           { id = node.node_id
+           ; kind = node.node_kind
+           ; label = node.label
+           ; status = node.status
+           ; weight = node.weight
+           ; semantic_weight = node.semantic_weight
+           ; last_event_at = node.last_event_at
+           ; meta = node.meta
+           }
+         :: acc)
+      nodes
+      []
     |> List.sort (fun a b ->
-           let open Yojson.Safe.Util in
-           compare (a |> member "id" |> to_string) (b |> member "id" |> to_string))
+      let open Yojson.Safe.Util in
+      compare (a |> member "id" |> to_string) (b |> member "id" |> to_string))
   in
   let edges_json =
     Hashtbl.fold
       (fun _ edge acc ->
-        graph_edge_to_yojson
-          {
-            id = edge.edge_id;
-            source = edge.source;
-            target = edge.target;
-            kind = edge.edge_kind;
-            weight = edge.weight;
-            active = edge.active;
-            last_event_at = edge.last_event_at;
-            meta = edge.meta;
-          }
-        :: acc)
-      edges []
+         graph_edge_to_yojson
+           { id = edge.edge_id
+           ; source = edge.source
+           ; target = edge.target
+           ; kind = edge.edge_kind
+           ; weight = edge.weight
+           ; active = edge.active
+           ; last_event_at = edge.last_event_at
+           ; meta = edge.meta
+           }
+         :: acc)
+      edges
+      []
     |> List.sort (fun a b ->
-           let open Yojson.Safe.Util in
-           compare (a |> member "id" |> to_string) (b |> member "id" |> to_string))
+      let open Yojson.Safe.Util in
+      compare (a |> member "id" |> to_string) (b |> member "id" |> to_string))
   in
   let timeline =
     let total = List.length events in
@@ -312,24 +316,21 @@ let graph_json config ?(kinds = []) ?(limit = 500)
     nodes_json
     |> List.fold_left
          (fun acc node ->
-           match Yojson.Safe.Util.member "kind" node with
-           | `String kind when String.equal kind prefix -> acc + 1
-           | _ -> acc)
+            match Yojson.Safe.Util.member "kind" node with
+            | `String kind when String.equal kind prefix -> acc + 1
+            | _ -> acc)
          0
   in
   let active_agents =
     nodes_json
     |> List.fold_left
          (fun acc node ->
-           let open Yojson.Safe.Util in
-           match (member "kind" node, member "status" node) with
-           | `String "agent", `String status
-             when
-               not
-                 (List.mem status
-                    [ "offline"; "retired"; "stopped"; "finalized" ]) ->
-               acc + 1
-           | _ -> acc)
+            let open Yojson.Safe.Util in
+            match member "kind" node, member "status" node with
+            | `String "agent", `String status
+              when not (List.mem status [ "offline"; "retired"; "stopped"; "finalized" ])
+              -> acc + 1
+            | _ -> acc)
          0
   in
   let stats_history =
@@ -337,71 +338,78 @@ let graph_json config ?(kinds = []) ?(limit = 500)
     match events with
     | [] -> []
     | _ ->
-        let min_ts = List.fold_left (fun m e -> min m e.ts_ms) max_int events in
-        let max_ts = List.fold_left (fun m e -> max m e.ts_ms) 0 events in
-        let range = max 1 (max_ts - min_ts) in
-        let bucket_width = max 1 (range / num_buckets) in
-        let buckets = Array.make num_buckets (0, (Hashtbl.create 4 : (string, bool) Hashtbl.t), 0) in
-        Array.iteri (fun i _ ->
-          buckets.(i) <- (0, Hashtbl.create 4, 0)
-        ) buckets;
-        List.iter (fun (e : event) ->
-          let idx = min (num_buckets - 1) ((e.ts_ms - min_ts) / bucket_width) in
-          let (count, agents_tbl, tasks_done) = buckets.(idx) in
-          let new_tasks_done =
-            tasks_done
-            + (if String.equal e.kind
-                 (Event_kind.Task.to_string Event_kind.Task.Done)
-               then 1 else 0)
-          in
-          (match e.actor with
-           | Some actor -> Hashtbl.replace agents_tbl actor.id true
-           | None -> ());
-          buckets.(idx) <- (count + 1, agents_tbl, new_tasks_done)
-        ) events;
-        Array.to_list (Array.mapi (fun i (count, agents_tbl, tasks_done) ->
-          let bucket_start = min_ts + (i * bucket_width) in
-          let bucket_end = if i = num_buckets - 1 then max_ts else bucket_start + bucket_width in
-          `Assoc [
-            ("bucket", `Int i);
-            ("start_ms", `Int bucket_start);
-            ("end_ms", `Int bucket_end);
-            ("events", `Int count);
-            ("active_agents", `Int (Hashtbl.length agents_tbl));
-            ("tasks_done", `Int tasks_done);
-          ]
-        ) buckets)
+      let min_ts = List.fold_left (fun m e -> min m e.ts_ms) max_int events in
+      let max_ts = List.fold_left (fun m e -> max m e.ts_ms) 0 events in
+      let range = max 1 (max_ts - min_ts) in
+      let bucket_width = max 1 (range / num_buckets) in
+      let buckets =
+        Array.make num_buckets (0, (Hashtbl.create 4 : (string, bool) Hashtbl.t), 0)
+      in
+      Array.iteri (fun i _ -> buckets.(i) <- 0, Hashtbl.create 4, 0) buckets;
+      List.iter
+        (fun (e : event) ->
+           let idx = min (num_buckets - 1) ((e.ts_ms - min_ts) / bucket_width) in
+           let count, agents_tbl, tasks_done = buckets.(idx) in
+           let new_tasks_done =
+             tasks_done
+             +
+             if String.equal e.kind (Event_kind.Task.to_string Event_kind.Task.Done)
+             then 1
+             else 0
+           in
+           (match e.actor with
+            | Some actor -> Hashtbl.replace agents_tbl actor.id true
+            | None -> ());
+           buckets.(idx) <- count + 1, agents_tbl, new_tasks_done)
+        events;
+      Array.to_list
+        (Array.mapi
+           (fun i (count, agents_tbl, tasks_done) ->
+              let bucket_start = min_ts + (i * bucket_width) in
+              let bucket_end =
+                if i = num_buckets - 1 then max_ts else bucket_start + bucket_width
+              in
+              `Assoc
+                [ "bucket", `Int i
+                ; "start_ms", `Int bucket_start
+                ; "end_ms", `Int bucket_end
+                ; "events", `Int count
+                ; "active_agents", `Int (Hashtbl.length agents_tbl)
+                ; "tasks_done", `Int tasks_done
+                ])
+           buckets)
   in
   `Assoc
-    [
-      ("generated_at", `String (Types.now_iso ()));
-      ( "window",
-        window_meta ~limit
+    [ "generated_at", `String (Types.now_iso ())
+    ; ( "window"
+      , window_meta
+          ~limit
           ~events_shown:(List.length events)
           ~events_store_total
-          ~extra:[
-            ("room_id", `String "default");
-            ("kinds", `List (List.map (fun value -> `String value) kinds));
-          ] () );
-      ( "stats",
-        `Assoc
-          [
-            ("event_count", `Int (List.length events));
-            ("node_count", `Int (List.length nodes_json));
-            ("edge_count", `Int (List.length edges_json));
-            ("agent_count", `Int (count_kind "agent"));
-            ("task_count", `Int (count_kind "task"));
-            ("decision_count", `Int (count_kind "decision"));
-            ("operation_count", `Int (count_kind "operation"));
-            ("active_agents", `Int active_agents);
-          ] );
-      ("stats_history", `List stats_history);
-      ("kind_counts", kind_counts_json);
-      ("heatmap", heatmap_json);
-      ("nodes", `List nodes_json);
-      ("edges", `List edges_json);
-      ("timeline", `List (List.map event_to_yojson timeline));
+          ~extra:
+            [ "room_id", `String "default"
+            ; "kinds", `List (List.map (fun value -> `String value) kinds)
+            ]
+          () )
+    ; ( "stats"
+      , `Assoc
+          [ "event_count", `Int (List.length events)
+          ; "node_count", `Int (List.length nodes_json)
+          ; "edge_count", `Int (List.length edges_json)
+          ; "agent_count", `Int (count_kind "agent")
+          ; "task_count", `Int (count_kind "task")
+          ; "decision_count", `Int (count_kind "decision")
+          ; "operation_count", `Int (count_kind "operation")
+          ; "active_agents", `Int active_agents
+          ] )
+    ; "stats_history", `List stats_history
+    ; "kind_counts", kind_counts_json
+    ; "heatmap", heatmap_json
+    ; "nodes", `List nodes_json
+    ; "edges", `List edges_json
+    ; "timeline", `List (List.map event_to_yojson timeline)
     ]
+;;
 
 (* ================================================================ *)
 (* Agent spans                                                      *)
@@ -414,6 +422,7 @@ let span_start_kind = function
   | "operation.started" -> Some "operation"
   | "keeper.autonomy_started" -> Some "autonomy"
   | _ -> None
+;;
 
 (** Issue #8711: single SSOT for span-ending event kinds. The previous
     [span_end_kind] / [span_end_status] pair reproduced the same
@@ -423,23 +432,26 @@ let span_start_kind = function
     information. Combining them forces both pieces to stay in sync at
     compile time (Parse, don't validate). *)
 let span_end_classification = function
-  | "task.done"                 -> Some ("task",      Span_completed)
-  | "task.released"             -> Some ("task",      Span_released)
-  | "task.cancelled"            -> Some ("task",      Span_cancelled)
-  | "agent.left"                -> Some ("presence",  Span_left)
-  | "agent.retired"             -> Some ("presence",  Span_retired)
-  | "operation.finalized"       -> Some ("operation", Span_finalized)
-  | "operation.stopped"         -> Some ("operation", Span_stopped)
-  | "keeper.autonomy_completed" -> Some ("autonomy",  Span_completed)
-  | _                           -> None
+  | "task.done" -> Some ("task", Span_completed)
+  | "task.released" -> Some ("task", Span_released)
+  | "task.cancelled" -> Some ("task", Span_cancelled)
+  | "agent.left" -> Some ("presence", Span_left)
+  | "agent.retired" -> Some ("presence", Span_retired)
+  | "operation.finalized" -> Some ("operation", Span_finalized)
+  | "operation.stopped" -> Some ("operation", Span_stopped)
+  | "keeper.autonomy_completed" -> Some ("autonomy", Span_completed)
+  | _ -> None
+;;
 
-let span_end_kind kind =
-  Option.map fst (span_end_classification kind)
+let span_end_kind kind = Option.map fst (span_end_classification kind)
 
 let span_end_status kind =
   match span_end_classification kind with
   | Some (_, status) -> status
-  | None -> Span_ended  (* unreachable in practice — call sites first
+  | None -> Span_ended
+;;
+
+(* unreachable in practice — call sites first
                            check [span_end_kind] / [span_end_classification] *)
 
 let agent_spans_json config ?(limit = 500) ?since_ms () =
@@ -452,73 +464,82 @@ let agent_spans_json config ?(limit = 500) ?since_ms () =
   in
   let closed_spans : agent_span list ref = ref [] in
   let agents_set : (string, bool) Hashtbl.t = Hashtbl.create 16 in
-  List.iter (fun (e : event) ->
-    let agent_id = match e.actor with
-      | Some a -> Some a.id
-      | None -> None
-    in
-    let subject_id = match e.subject with
-      | Some s -> Some s.id
-      | None -> None
-    in
-    match agent_id with
-    | None -> ()
-    | Some aid ->
-        Hashtbl.replace agents_set aid true;
-        (match span_start_kind e.kind with
-         | Some sk ->
-             let label = match subject_id with
-               | Some sid -> sid
-               | None -> e.kind
-             in
-             Hashtbl.replace open_spans (aid, subject_id) (e.ts_ms, sk, label)
-         | None -> ());
-        (match span_end_classification e.kind with
-         | Some (ek, status) ->
-             let key = (aid, subject_id) in
-             (match Hashtbl.find_opt open_spans key with
-              | Some (start_ms, sk, label) when String.equal sk ek ->
-                  Hashtbl.remove open_spans key;
-                  closed_spans := {
-                    agent = aid;
-                    start_ms;
-                    end_ms = e.ts_ms;
-                    span_kind = sk;
-                    label;
-                    span_status = status;
-                  } :: !closed_spans
-              | None | Some _ -> ())
-         | None -> ())
-  ) events;
-  Hashtbl.iter (fun (aid, _subj) (start_ms, sk, label) ->
-    closed_spans := {
-      agent = aid;
-      start_ms;
-      end_ms = now_ms;
-      span_kind = sk;
-      label;
-      span_status = Span_open;
-    } :: !closed_spans
-  ) open_spans;
+  List.iter
+    (fun (e : event) ->
+       let agent_id =
+         match e.actor with
+         | Some a -> Some a.id
+         | None -> None
+       in
+       let subject_id =
+         match e.subject with
+         | Some s -> Some s.id
+         | None -> None
+       in
+       match agent_id with
+       | None -> ()
+       | Some aid ->
+         Hashtbl.replace agents_set aid true;
+         (match span_start_kind e.kind with
+          | Some sk ->
+            let label =
+              match subject_id with
+              | Some sid -> sid
+              | None -> e.kind
+            in
+            Hashtbl.replace open_spans (aid, subject_id) (e.ts_ms, sk, label)
+          | None -> ());
+         (match span_end_classification e.kind with
+          | Some (ek, status) ->
+            let key = aid, subject_id in
+            (match Hashtbl.find_opt open_spans key with
+             | Some (start_ms, sk, label) when String.equal sk ek ->
+               Hashtbl.remove open_spans key;
+               closed_spans
+               := { agent = aid
+                  ; start_ms
+                  ; end_ms = e.ts_ms
+                  ; span_kind = sk
+                  ; label
+                  ; span_status = status
+                  }
+                  :: !closed_spans
+             | None | Some _ -> ())
+          | None -> ()))
+    events;
+  Hashtbl.iter
+    (fun (aid, _subj) (start_ms, sk, label) ->
+       closed_spans
+       := { agent = aid
+          ; start_ms
+          ; end_ms = now_ms
+          ; span_kind = sk
+          ; label
+          ; span_status = Span_open
+          }
+          :: !closed_spans)
+    open_spans;
   let all_spans = List.rev !closed_spans in
-  let agents = Hashtbl.fold (fun k _ acc -> k :: acc) agents_set []
-    |> List.sort String.compare
+  let agents =
+    Hashtbl.fold (fun k _ acc -> k :: acc) agents_set [] |> List.sort String.compare
   in
-  let min_ms = List.fold_left (fun m (s : agent_span) -> min m s.start_ms) max_int all_spans in
+  let min_ms =
+    List.fold_left (fun m (s : agent_span) -> min m s.start_ms) max_int all_spans
+  in
   let max_ms = List.fold_left (fun m (s : agent_span) -> max m s.end_ms) 0 all_spans in
   let time_range_min = if all_spans = [] then now_ms else min_ms in
   let time_range_max = if all_spans = [] then now_ms else max_ms in
-  `Assoc [
-    ("agents", `List (List.map (fun a -> `String a) agents));
-    ("spans", `List (List.map agent_span_to_yojson all_spans));
-    ("time_range", `Assoc [
-      ("min_ms", `Int time_range_min);
-      ("max_ms", `Int time_range_max);
-    ]);
-    ("window",
-     window_meta ~limit
-       ~events_shown:(List.length events)
-       ~events_store_total
-       ~extra:[("spans_count", `Int (List.length all_spans))]
-       ());
-  ]
+  `Assoc
+    [ "agents", `List (List.map (fun a -> `String a) agents)
+    ; "spans", `List (List.map agent_span_to_yojson all_spans)
+    ; ( "time_range"
+      , `Assoc [ "min_ms", `Int time_range_min; "max_ms", `Int time_range_max ] )
+    ; ( "window"
+      , window_meta
+          ~limit
+          ~events_shown:(List.length events)
+          ~events_store_total
+          ~extra:[ "spans_count", `Int (List.length all_spans) ]
+          () )
+    ]
+;;

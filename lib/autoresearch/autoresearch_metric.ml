@@ -6,25 +6,50 @@
     @since 2.80.0 *)
 
 let contains_substring = String_util.contains_substring
-
 let default_metric_name = Agent_sdk.Metric_contract.default_metric_name
 
 let prompt_snippet ?metric_name () =
   Agent_sdk.Metric_contract.prompt_snippet ?metric_name ()
+;;
 
 (** Shell metacharacters that indicate injection risk in metric_fn when they
     appear outside quotes. *)
 let dangerous_shell_chars =
-  [';'; '|'; '&'; '`'; '$'; '('; ')'; '{'; '}'; '<'; '>'; '#'; '!'; '~'; '['; ']'; '*'; '?'; '\\']
+  [ ';'
+  ; '|'
+  ; '&'
+  ; '`'
+  ; '$'
+  ; '('
+  ; ')'
+  ; '{'
+  ; '}'
+  ; '<'
+  ; '>'
+  ; '#'
+  ; '!'
+  ; '~'
+  ; '['
+  ; ']'
+  ; '*'
+  ; '?'
+  ; '\\'
+  ]
+;;
 
-type quote_mode = Single | Double
+type quote_mode =
+  | Single
+  | Double
 
 let clip text max_len =
-  String_util.utf8_safe ~max_bytes:(max_len + 3) ~suffix:"..." text |> String_util.to_string
+  String_util.utf8_safe ~max_bytes:(max_len + 3) ~suffix:"..." text
+  |> String_util.to_string
+;;
 
 let is_blank = function
   | ' ' | '\t' -> true
   | _ -> false
+;;
 
 let split_metric_fn_argv fn =
   let len = String.length fn in
@@ -32,13 +57,14 @@ let split_metric_fn_argv fn =
   let tokens = ref [] in
   let quote = ref None in
   let push_token () =
-    if Buffer.length buf > 0 then begin
+    if Buffer.length buf > 0
+    then (
       tokens := Buffer.contents buf :: !tokens;
-      Buffer.clear buf
-    end
+      Buffer.clear buf)
   in
   let rec loop i =
-    if i >= len then
+    if i >= len
+    then (
       match !quote with
       | Some Single -> Error "metric_fn has an unterminated single quote"
       | Some Double -> Error "metric_fn has an unterminated double quote"
@@ -46,12 +72,11 @@ let split_metric_fn_argv fn =
         push_token ();
         (match List.rev !tokens with
          | [] -> Error "metric_fn is empty"
-         | argv -> Ok argv)
-    else
+         | argv -> Ok argv))
+    else (
       let c = fn.[i] in
       match !quote with
-      | None when c = '\n' || c = '\r' ->
-        Error "metric_fn must be a single-line command"
+      | None when c = '\n' || c = '\r' -> Error "metric_fn must be a single-line command"
       | None when is_blank c ->
         push_token ();
         loop (i + 1)
@@ -72,31 +97,32 @@ let split_metric_fn_argv fn =
            Buffer.add_char buf c;
            loop (i + 1))
       | Some Single ->
-        if c = '\'' then begin
+        if c = '\''
+        then (
           quote := None;
-          loop (i + 1)
-        end else begin
+          loop (i + 1))
+        else (
           Buffer.add_char buf c;
-          loop (i + 1)
-        end
+          loop (i + 1))
       | Some Double ->
-        if c = '"' then begin
+        if c = '"'
+        then (
           quote := None;
-          loop (i + 1)
-        end else if c = '\\' && i + 1 < len then begin
+          loop (i + 1))
+        else if c = '\\' && i + 1 < len
+        then (
           Buffer.add_char buf fn.[i + 1];
-          loop (i + 2)
-        end else begin
+          loop (i + 2))
+        else (
           Buffer.add_char buf c;
-          loop (i + 1)
-        end
+          loop (i + 1)))
   in
   loop 0
+;;
 
 (** Validate that metric_fn can be tokenized safely.
     Returns Ok fn on success, Error message on failure. *)
-let validate_metric_fn fn =
-  split_metric_fn_argv fn |> Result.map (fun _ -> fn)
+let validate_metric_fn fn = split_metric_fn_argv fn |> Result.map (fun _ -> fn)
 
 let last_nonempty_line output =
   output
@@ -104,6 +130,7 @@ let last_nonempty_line output =
   |> List.rev
   |> List.find_opt (fun line -> String.trim line <> "")
   |> Option.map String.trim
+;;
 
 let parse_metric_output output =
   let trimmed = String.trim output in
@@ -115,46 +142,48 @@ let parse_metric_output output =
       | Some line -> line
       | None -> trimmed
     in
-    match float_of_string_opt candidate with
-    | Some v -> Result.ok v
-    | None ->
-      Result.error
-        (Printf.sprintf
-           "metric_fn output not a float or metric tag: %S (%s). Expected contract: %s"
-           (clip trimmed 240) tag_error
-           (prompt_snippet ()))
+    (match float_of_string_opt candidate with
+     | Some v -> Result.ok v
+     | None ->
+       Result.error
+         (Printf.sprintf
+            "metric_fn output not a float or metric tag: %S (%s). Expected contract: %s"
+            (clip trimmed 240)
+            tag_error
+            (prompt_snippet ())))
+;;
 
 let run_metric_argv ~workdir ~timeout_s argv =
-  let config =
-    { Agent_sdk.Autonomy_exec.default_config with
-      cwd = Some workdir; }
-  in
+  let config = { Agent_sdk.Autonomy_exec.default_config with cwd = Some workdir } in
   match Process_eio.get_clock () with
   | Error e -> Result.error (Printf.sprintf "metric_fn runtime unavailable: %s" e)
   | Ok clock ->
-    Eio.Switch.run @@ fun sw ->
-    match Agent_sdk.Autonomy_exec.run ~sw ~clock ~config ~argv ~timeout_s with
-    | Error err ->
-      Result.error
-        (Printf.sprintf "metric_fn exec failed: %s"
-           (Agent_sdk.Error.to_string err))
-    | Ok output ->
-      let elapsed_ms = int_of_float (output.elapsed_s *. 1000.0) in
-      (match output.status with
-       | Agent_sdk.Autonomy_exec.Exit_code 0 ->
-         Result.ok (output.stdout, elapsed_ms)
-       | status ->
-         let detail =
-           let stderr = String.trim output.stderr in
-           let stdout = String.trim output.stdout in
-           if stderr <> "" then stderr
-           else if stdout <> "" then stdout
-           else Agent_sdk.Autonomy_exec.argv_to_string output.effective_argv
-         in
-         Result.error
-           (Printf.sprintf "metric_fn %s: %s"
-              (Agent_sdk.Autonomy_exec.status_to_string status)
-              (clip detail 240)))
+    Eio.Switch.run
+    @@ fun sw ->
+    (match Agent_sdk.Autonomy_exec.run ~sw ~clock ~config ~argv ~timeout_s with
+     | Error err ->
+       Result.error
+         (Printf.sprintf "metric_fn exec failed: %s" (Agent_sdk.Error.to_string err))
+     | Ok output ->
+       let elapsed_ms = int_of_float (output.elapsed_s *. 1000.0) in
+       (match output.status with
+        | Agent_sdk.Autonomy_exec.Exit_code 0 -> Result.ok (output.stdout, elapsed_ms)
+        | status ->
+          let detail =
+            let stderr = String.trim output.stderr in
+            let stdout = String.trim output.stdout in
+            if stderr <> ""
+            then stderr
+            else if stdout <> ""
+            then stdout
+            else Agent_sdk.Autonomy_exec.argv_to_string output.effective_argv
+          in
+          Result.error
+            (Printf.sprintf
+               "metric_fn %s: %s"
+               (Agent_sdk.Autonomy_exec.status_to_string status)
+               (clip detail 240))))
+;;
 
 (** Run metric_fn command and parse either a strict metric tag or the last
     non-empty stdout line as a float.
@@ -167,8 +196,8 @@ let measure_metric ~workdir ~timeout_s metric_fn =
     (match run_metric_argv ~workdir ~timeout_s argv with
      | Error _ as err -> err
      | Ok (raw_output, elapsed_ms) ->
-       parse_metric_output raw_output
-       |> Result.map (fun score -> (score, elapsed_ms)))
+       parse_metric_output raw_output |> Result.map (fun score -> score, elapsed_ms))
+;;
 
 (** Run metric_fn with retry on transient errors (timeout, connection).
     Returns Ok (score, total_elapsed_ms) or Error on non-transient failure.
@@ -189,3 +218,4 @@ let measure_metric_with_retry ~workdir ~timeout_s ?(max_retries = 2) metric_fn =
     | Error _ as err -> err
   in
   attempt 0
+;;

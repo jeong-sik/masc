@@ -1,4 +1,3 @@
-
 (** Tool_inline_dispatch_extra — additional inline tool dispatch arms
     (recall, board, conversation).
     Returns [Some (success, message)] if handled, [None] otherwise. *)
@@ -8,51 +7,57 @@ let emit_activity config ~kind ~actor ?subject ?(tags = []) ~payload () =
     let payload =
       match payload with
       | `Assoc fields ->
-          `Assoc
-            (("actor_identity", Server_utils.board_actor_identity_json actor)
-            :: List.filter (fun (k, _) -> k <> "actor_identity") fields)
+        `Assoc
+          (("actor_identity", Server_utils.board_actor_identity_json actor)
+           :: List.filter (fun (k, _) -> k <> "actor_identity") fields)
       | other -> other
     in
     ignore
-      (Activity_graph.emit config
+      (Activity_graph.emit
+         config
          ~actor:(Server_utils.board_actor_entity actor)
-         ?subject ~kind ~payload ~tags ())
+         ?subject
+         ~kind
+         ~payload
+         ~tags
+         ())
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
-      Log.Misc.warn "activity emit failed (%s): %s" kind
-        (Printexc.to_string exn)
+  | exn -> Log.Misc.warn "activity emit failed (%s): %s" kind (Printexc.to_string exn)
+;;
 
 let extract_board_post_id (message : string) =
   match String.index_opt message '{' with
   | None -> None
   | Some idx ->
-      try
-        let json =
-          Yojson.Safe.from_string
-            (String.sub message idx (String.length message - idx))
-        in
-        match Yojson.Safe.Util.member "id" json with
-        | `String id when String.trim id <> "" -> Some id
-        | _ -> None
-      with
-      | Invalid_argument _
-      | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
+    (try
+       let json =
+         Yojson.Safe.from_string (String.sub message idx (String.length message - idx))
+       in
+       match Yojson.Safe.Util.member "id" json with
+       | `String id when String.trim id <> "" -> Some id
+       | _ -> None
+     with
+     | Invalid_argument _ | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None)
+;;
 
 let json_upsert_assoc_field name value fields =
   (name, value) :: List.filter (fun (k, _) -> k <> name) fields
+;;
 
 let json_upsert_meta_string_field name value fields =
   let value = String.trim value in
-  if value = "" then fields
-  else
+  if value = ""
+  then fields
+  else (
     let meta_json =
       match List.assoc_opt "meta" fields with
       | Some (`Assoc meta_fields) ->
-          `Assoc (json_upsert_assoc_field name (`String value) meta_fields)
-      | _ -> `Assoc [ (name, `String value) ]
+        `Assoc (json_upsert_assoc_field name (`String value) meta_fields)
+      | _ -> `Assoc [ name, `String value ]
     in
-    json_upsert_assoc_field "meta" meta_json fields
+    json_upsert_assoc_field "meta" meta_json fields)
+;;
 
 (** #10297: Prometheus counter recording the cycle when a board-tool
     caller supplied an identity field whose canonical form disagrees
@@ -63,34 +68,35 @@ let json_upsert_meta_string_field name value fields =
 
     Cardinality is bounded: 4 board tools x 2 identity fields ([author],
     [voter]) = 8 series at most. *)
-let board_actor_identity_spoof_metric =
-  "masc_board_actor_identity_spoof_total"
+let board_actor_identity_spoof_metric = "masc_board_actor_identity_spoof_total"
 
 let () =
   Prometheus.register_counter
     ~name:board_actor_identity_spoof_metric
     ~help:
-      "Total board-tool calls where the caller-supplied identity field \
-       (author / voter) canonicalised to a different keeper than the \
-       runtime contract's agent_name. The dispatcher rewrites the field \
-       to the trusted ctx value and preserves the caller's claim in \
-       [meta.<field>_caller_claim]; this counter surfaces the rewrite \
-       so operators can rate-alert on identity drift. \
-       Labels: [tool, field]."
+      "Total board-tool calls where the caller-supplied identity field (author / voter) \
+       canonicalised to a different keeper than the runtime contract's agent_name. The \
+       dispatcher rewrites the field to the trusted ctx value and preserves the caller's \
+       claim in [meta.<field>_caller_claim]; this counter surfaces the rewrite so \
+       operators can rate-alert on identity drift. Labels: [tool, field]."
     ()
+;;
 
 let canonical_board_author raw =
   Server_utils.board_actor_author_for_write (String.trim raw)
+;;
 
 let record_identity_raw_surface field raw canonical fields =
-  if raw = "" || String.equal raw canonical then fields
+  if raw = "" || String.equal raw canonical
+  then fields
   else json_upsert_meta_string_field (field ^ "_raw_agent_name") raw fields
+;;
 
 let record_author_legacy_mismatch claim fields =
   fields
   |> json_upsert_meta_string_field "caller_supplied_author" claim
-  |> json_upsert_meta_string_field "author_rewrite_reason"
-       "caller_author_mismatch"
+  |> json_upsert_meta_string_field "author_rewrite_reason" "caller_author_mismatch"
+;;
 
 (** #10297: enforce that a board-tool caller cannot author / vote under
     a principal other than the runtime contract's [agent_name].  Pre-fix
@@ -122,323 +128,339 @@ let record_author_legacy_mismatch claim fields =
     drift to metrics. *)
 let enforce_caller_identity ~tool ~field ~agent_name arguments =
   let ctx_raw = String.trim agent_name in
-  let ctx_canonical =
-    if ctx_raw = "" then "" else canonical_board_author ctx_raw
-  in
+  let ctx_canonical = if ctx_raw = "" then "" else canonical_board_author ctx_raw in
   match arguments with
-  | `Assoc fields -> (
-      let raw_existing =
-        match List.assoc_opt field fields with
-        | Some (`String s) -> String.trim s
-        | _ -> ""
-      in
-      match raw_existing with
-      | "" | "anonymous" ->
-          (* Fill from ctx when caller left the field blank or
+  | `Assoc fields ->
+    let raw_existing =
+      match List.assoc_opt field fields with
+      | Some (`String s) -> String.trim s
+      | _ -> ""
+    in
+    (match raw_existing with
+     | "" | "anonymous" ->
+       (* Fill from ctx when caller left the field blank or
              explicitly marked it anonymous; if ctx is also empty,
              leave the original arguments untouched. *)
-          if ctx_canonical = "" then arguments
-          else
-            let fields =
-              json_upsert_assoc_field field (`String ctx_canonical) fields
-            in
-            let fields =
-              record_identity_raw_surface field ctx_raw ctx_canonical fields
-            in
-            `Assoc fields
-      | claim ->
-          let claim_canonical = canonical_board_author claim in
-          if ctx_canonical = "" then
-            (* No ctx to compare against - preserve the caller's
+       if ctx_canonical = ""
+       then arguments
+       else (
+         let fields = json_upsert_assoc_field field (`String ctx_canonical) fields in
+         let fields = record_identity_raw_surface field ctx_raw ctx_canonical fields in
+         `Assoc fields)
+     | claim ->
+       let claim_canonical = canonical_board_author claim in
+       if ctx_canonical = ""
+       then
+         (* No ctx to compare against - preserve the caller's
                canonicalisation as the legacy code did. *)
-            if String.equal claim_canonical claim then arguments
-            else
-              `Assoc
-                (json_upsert_assoc_field field (`String claim_canonical)
-                   fields)
-          else if String.equal claim_canonical ctx_canonical then
-            (* Caller's claim resolves to the same keeper as ctx.
+         if String.equal claim_canonical claim
+         then arguments
+         else `Assoc (json_upsert_assoc_field field (`String claim_canonical) fields)
+       else if String.equal claim_canonical ctx_canonical
+       then (
+         (* Caller's claim resolves to the same keeper as ctx.
                Store the canonical keeper name and preserve the raw
                surface that actually differed from the canonical form. *)
-            let fields =
-              json_upsert_assoc_field field (`String ctx_canonical) fields
-            in
-            let fields =
-              record_identity_raw_surface field claim ctx_canonical fields
-            in
-            `Assoc fields
-          else (
-            (* Mismatch: caller tried to author / vote under a different
+         let fields = json_upsert_assoc_field field (`String ctx_canonical) fields in
+         let fields = record_identity_raw_surface field claim ctx_canonical fields in
+         `Assoc fields)
+       else (
+         (* Mismatch: caller tried to author / vote under a different
                principal. Rewrite to ctx, preserve the claim, and count
                the rewrite. *)
-            Prometheus.inc_counter board_actor_identity_spoof_metric
-              ~labels:[ ("tool", tool); ("field", field) ]
-              ();
-            let fields =
-              json_upsert_assoc_field field (`String ctx_canonical) fields
-            in
-            let fields =
-              json_upsert_meta_string_field
-                (field ^ "_caller_claim") claim fields
-            in
-            let fields =
-              record_identity_raw_surface field ctx_raw ctx_canonical fields
-            in
-            let fields =
-              if String.equal field "author" then
-                record_author_legacy_mismatch claim fields
-              else fields
-            in
-            `Assoc fields))
+         Prometheus.inc_counter
+           board_actor_identity_spoof_metric
+           ~labels:[ "tool", tool; "field", field ]
+           ();
+         let fields = json_upsert_assoc_field field (`String ctx_canonical) fields in
+         let fields =
+           json_upsert_meta_string_field (field ^ "_caller_claim") claim fields
+         in
+         let fields = record_identity_raw_surface field ctx_raw ctx_canonical fields in
+         let fields =
+           if String.equal field "author"
+           then record_author_legacy_mismatch claim fields
+           else fields
+         in
+         `Assoc fields))
   | _ -> arguments
+;;
 
 (** Backward-compatible aliases retained for direct callers (tests,
     HTTP handlers).  New dispatch sites should call
     {!enforce_caller_identity} with an explicit [tool] label. *)
-let canonicalize_board_actor_field ?(tool = "unknown") ?agent_name field
-    arguments =
-  enforce_caller_identity ~tool ~field
+let canonicalize_board_actor_field ?(tool = "unknown") ?agent_name field arguments =
+  enforce_caller_identity
+    ~tool
+    ~field
     ~agent_name:(Option.value ~default:"" agent_name)
     arguments
+;;
 
 let ensure_board_post_author ~agent_name arguments =
-  enforce_caller_identity ~tool:"masc_board_post" ~field:"author"
-    ~agent_name arguments
+  enforce_caller_identity ~tool:"masc_board_post" ~field:"author" ~agent_name arguments
+;;
 
-let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~sw ~clock ~name =
+let dispatch
+      ~config
+      ~agent_name
+      ~arguments
+      ~(state : Mcp_server.server_state)
+      ~sw
+      ~clock
+      ~name
+  =
   ignore (config, state, sw, clock);
   let arguments =
     match name with
     | "masc_board_post" ->
-        enforce_caller_identity ~tool:name ~field:"author" ~agent_name
-          arguments
+      enforce_caller_identity ~tool:name ~field:"author" ~agent_name arguments
     | "masc_board_comment" ->
-        enforce_caller_identity ~tool:name ~field:"author" ~agent_name
-          arguments
+      enforce_caller_identity ~tool:name ~field:"author" ~agent_name arguments
     | "masc_board_vote" | "masc_board_comment_vote" ->
-        enforce_caller_identity ~tool:name ~field:"voter" ~agent_name
-          arguments
+      enforce_caller_identity ~tool:name ~field:"voter" ~agent_name arguments
     | _ -> arguments
   in
-  let arg_get_string key default =
-    Safe_ops.json_string ~default key arguments in
-  let arg_get_int key default =
-    Safe_ops.json_int ~default key arguments in
-  let arg_get_float key default =
-    Safe_ops.json_float ~default key arguments in
-  let arg_get_bool key default =
-    Safe_ops.json_bool ~default key arguments in
-  let arg_get_string_list key =
-    Safe_ops.json_string_list key arguments in
+  let arg_get_string key default = Safe_ops.json_string ~default key arguments in
+  let arg_get_int key default = Safe_ops.json_int ~default key arguments in
+  let arg_get_float key default = Safe_ops.json_float ~default key arguments in
+  let arg_get_bool key default = Safe_ops.json_bool ~default key arguments in
+  let arg_get_string_list key = Safe_ops.json_string_list key arguments in
   let arg_get_string_opt key =
     match Safe_ops.json_string_opt key arguments with
     | Some "" -> None
-    | other -> other in
-  let arg_get_float_opt key =
-    Safe_ops.json_float_opt key arguments in
-  ignore (arg_get_string, arg_get_int, arg_get_float, arg_get_bool, arg_get_string_list, arg_get_string_opt, arg_get_float_opt);
+    | other -> other
+  in
+  let arg_get_float_opt key = Safe_ops.json_float_opt key arguments in
+  ignore
+    ( arg_get_string
+    , arg_get_int
+    , arg_get_float
+    , arg_get_bool
+    , arg_get_string_list
+    , arg_get_string_opt
+    , arg_get_float_opt );
   match (name : string) with
   | "masc_board_post" ->
-      let (success, message) as result = Tool_board.handle_tool name arguments in
-      if success then begin
-        let author = Safe_ops.json_string ~default:"anonymous" "author" arguments in
-        let content = Safe_ops.json_string ~default:"" "content" arguments in
-        let post_id = extract_board_post_id message in
-        (* Record board activity as a fitness metric so board-active agents
+    let ((success, message) as result) = Tool_board.handle_tool name arguments in
+    if success
+    then (
+      let author = Safe_ops.json_string ~default:"anonymous" "author" arguments in
+      let content = Safe_ops.json_string ~default:"" "content" arguments in
+      let post_id = extract_board_post_id message in
+      (* Record board activity as a fitness metric so board-active agents
            appear in agent_fitness queries (Issue #1861). *)
-        (try
-           let now = Time_compat.now () in
-           let metric : Metrics_store_eio.task_metric = {
-             id = Metrics_store_eio.generate_id ();
-             agent_id = author;
-             task_id = "board_post";
-             started_at = now;
-             completed_at = Some now;
-             success = true;
-             error_message = None;
-             collaborators = [];
-             handoff_from = None;
-             handoff_to = None;
-           } in
-           Metrics_store_eio.record config metric
-         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-           Log.Misc.error "board_post fitness record failed: %s"
-             (Printexc.to_string exn));
-        let notification = `Assoc [
-          ("type", `String "masc/board_post");
-          ("author", `String author);
-          ("author_identity", Server_utils.board_actor_identity_json author);
-          ("content", `String (String.sub content 0 (min 200 (String.length content))));
-          ("post_id", `String (Option.value post_id ~default:"unknown"));
-          ("timestamp", `String (Types.now_iso ()));
-        ] in
-        Mcp_server.sse_broadcast state notification;
-        A2a_tools.notify_event
-          ~event_type:A2a_tools.Broadcast
-          ~agent:author
-          ~data:(`Assoc [
-            ("event", `String "board_post");
-            ("content_preview", `String (String.sub content 0 (min 100 (String.length content))));
-          ]);
-        emit_activity config ~kind:(Event_kind.Board.to_string Event_kind.Board.Posted) ~actor:author
-          ?subject:
-            (Option.map (Activity_graph.entity ~kind:"post") post_id)
-          ~tags:[ "board"; Event_kind.Board.to_string Event_kind.Board.Posted ]
-          ~payload:
-            (`Assoc
-              [
-                ("content", `String content);
-                ( "post_id",
-                  match post_id with
+      (try
+         let now = Time_compat.now () in
+         let metric : Metrics_store_eio.task_metric =
+           { id = Metrics_store_eio.generate_id ()
+           ; agent_id = author
+           ; task_id = "board_post"
+           ; started_at = now
+           ; completed_at = Some now
+           ; success = true
+           ; error_message = None
+           ; collaborators = []
+           ; handoff_from = None
+           ; handoff_to = None
+           }
+         in
+         Metrics_store_eio.record config metric
+       with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | exn ->
+         Log.Misc.error "board_post fitness record failed: %s" (Printexc.to_string exn));
+      let notification =
+        `Assoc
+          [ "type", `String "masc/board_post"
+          ; "author", `String author
+          ; "author_identity", Server_utils.board_actor_identity_json author
+          ; "content", `String (String.sub content 0 (min 200 (String.length content)))
+          ; "post_id", `String (Option.value post_id ~default:"unknown")
+          ; "timestamp", `String (Types.now_iso ())
+          ]
+      in
+      Mcp_server.sse_broadcast state notification;
+      A2a_tools.notify_event
+        ~event_type:A2a_tools.Broadcast
+        ~agent:author
+        ~data:
+          (`Assoc
+              [ "event", `String "board_post"
+              ; ( "content_preview"
+                , `String (String.sub content 0 (min 100 (String.length content))) )
+              ]);
+      emit_activity
+        config
+        ~kind:(Event_kind.Board.to_string Event_kind.Board.Posted)
+        ~actor:author
+        ?subject:(Option.map (Activity_graph.entity ~kind:"post") post_id)
+        ~tags:[ "board"; Event_kind.Board.to_string Event_kind.Board.Posted ]
+        ~payload:
+          (`Assoc
+              [ "content", `String content
+              ; ( "post_id"
+                , match post_id with
                   | Some id -> `String id
-                  | None -> `Null );
+                  | None -> `Null )
               ])
-          ();
-        (* Mention processing — mirror masc_broadcast pattern *)
-        let mention = Mention.extract content in
-        (match mention with
-         | Some target ->
-             Notify.notify_mention ~from_agent:author
-               ~target_agent:target ~message:content ();
-             ignore (Auto_responder.maybe_respond ~sw
-               ~base_path:config.base_path ~from_agent:author
-               ~content ~mention)
-         | None -> ())
-      end;
-      Some result
-
+        ();
+      (* Mention processing — mirror masc_broadcast pattern *)
+      let mention = Mention.extract content in
+      match mention with
+      | Some target ->
+        Notify.notify_mention ~from_agent:author ~target_agent:target ~message:content ();
+        ignore
+          (Auto_responder.maybe_respond
+             ~sw
+             ~base_path:config.base_path
+             ~from_agent:author
+             ~content
+             ~mention)
+      | None -> ());
+    Some result
   | "masc_board_comment" ->
-      let (success, _message) as result = Tool_board.handle_tool name arguments in
-      if success then begin
-        let author = Safe_ops.json_string ~default:"anonymous" "author" arguments in
-        let content = Safe_ops.json_string ~default:"" "content" arguments in
-        let post_id = Safe_ops.json_string ~default:"unknown" "post_id" arguments in
-        (* Record board comment as a fitness metric (Issue #1861). *)
-        (try
-           let now = Time_compat.now () in
-           let metric : Metrics_store_eio.task_metric = {
-             id = Metrics_store_eio.generate_id ();
-             agent_id = author;
-             task_id = "board_comment:" ^ post_id;
-             started_at = now;
-             completed_at = Some now;
-             success = true;
-             error_message = None;
-             collaborators = [];
-             handoff_from = None;
-             handoff_to = None;
-           } in
-           Metrics_store_eio.record config metric
-         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-           Log.Misc.error "board_comment fitness record failed: %s"
-             (Printexc.to_string exn));
-        let notification = `Assoc [
-          ("type", `String "board_comment");
-          ("author", `String author);
-          ("author_identity", Server_utils.board_actor_identity_json author);
-          ("post_id", `String post_id);
-          ("content", `String (String.sub content 0 (min 200 (String.length content))));
-          ("timestamp", `String (Types.now_iso ()));
-        ] in
-        Mcp_server.sse_broadcast state notification;
-        A2a_tools.notify_event
-          ~event_type:A2a_tools.Broadcast
-          ~agent:author
-          ~data:(`Assoc [
-            ("event", `String "board_comment");
-            ("post_id", `String post_id);
-            ("content_preview", `String (String.sub content 0 (min 100 (String.length content))));
-          ]);
-        emit_activity config ~kind:(Event_kind.Board.to_string Event_kind.Board.Commented) ~actor:author
-          ~subject:(Activity_graph.entity ~kind:"post" post_id)
-          ~tags:[ "board"; Event_kind.Board.to_string Event_kind.Board.Commented ]
-          ~payload:
-            (`Assoc
-              [
-                ("post_id", `String post_id);
-                ("content", `String content);
-              ])
-          ();
-        (* Mention processing — mirror masc_broadcast pattern *)
-        let mention = Mention.extract content in
-        (match mention with
-         | Some target ->
-             Notify.notify_mention ~from_agent:author
-               ~target_agent:target ~message:content ();
-             ignore (Auto_responder.maybe_respond ~sw
-               ~base_path:config.base_path ~from_agent:author
-               ~content ~mention)
-         | None -> ())
-      end;
-      Some result
-
+    let ((success, _message) as result) = Tool_board.handle_tool name arguments in
+    if success
+    then (
+      let author = Safe_ops.json_string ~default:"anonymous" "author" arguments in
+      let content = Safe_ops.json_string ~default:"" "content" arguments in
+      let post_id = Safe_ops.json_string ~default:"unknown" "post_id" arguments in
+      (* Record board comment as a fitness metric (Issue #1861). *)
+      (try
+         let now = Time_compat.now () in
+         let metric : Metrics_store_eio.task_metric =
+           { id = Metrics_store_eio.generate_id ()
+           ; agent_id = author
+           ; task_id = "board_comment:" ^ post_id
+           ; started_at = now
+           ; completed_at = Some now
+           ; success = true
+           ; error_message = None
+           ; collaborators = []
+           ; handoff_from = None
+           ; handoff_to = None
+           }
+         in
+         Metrics_store_eio.record config metric
+       with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | exn ->
+         Log.Misc.error "board_comment fitness record failed: %s" (Printexc.to_string exn));
+      let notification =
+        `Assoc
+          [ "type", `String "board_comment"
+          ; "author", `String author
+          ; "author_identity", Server_utils.board_actor_identity_json author
+          ; "post_id", `String post_id
+          ; "content", `String (String.sub content 0 (min 200 (String.length content)))
+          ; "timestamp", `String (Types.now_iso ())
+          ]
+      in
+      Mcp_server.sse_broadcast state notification;
+      A2a_tools.notify_event
+        ~event_type:A2a_tools.Broadcast
+        ~agent:author
+        ~data:
+          (`Assoc
+              [ "event", `String "board_comment"
+              ; "post_id", `String post_id
+              ; ( "content_preview"
+                , `String (String.sub content 0 (min 100 (String.length content))) )
+              ]);
+      emit_activity
+        config
+        ~kind:(Event_kind.Board.to_string Event_kind.Board.Commented)
+        ~actor:author
+        ~subject:(Activity_graph.entity ~kind:"post" post_id)
+        ~tags:[ "board"; Event_kind.Board.to_string Event_kind.Board.Commented ]
+        ~payload:(`Assoc [ "post_id", `String post_id; "content", `String content ])
+        ();
+      (* Mention processing — mirror masc_broadcast pattern *)
+      let mention = Mention.extract content in
+      match mention with
+      | Some target ->
+        Notify.notify_mention ~from_agent:author ~target_agent:target ~message:content ();
+        ignore
+          (Auto_responder.maybe_respond
+             ~sw
+             ~base_path:config.base_path
+             ~from_agent:author
+             ~content
+             ~mention)
+      | None -> ());
+    Some result
   | "masc_board_vote" | "masc_board_comment_vote" ->
-      let (success, _message) as result = Tool_board.handle_tool name arguments in
-      (* Record vote activity as a fitness metric (Issue #1861). *)
-      if success then begin
-        let voter = Safe_ops.json_string ~default:"anonymous" "voter" arguments in
-        let target_id =
-          if name = "masc_board_vote" then
-            Safe_ops.json_string ~default:"unknown" "post_id" arguments
-          else
-            Safe_ops.json_string ~default:"unknown" "comment_id" arguments
-        in
-        (try
-           let now = Time_compat.now () in
-           let metric : Metrics_store_eio.task_metric = {
-             id = Metrics_store_eio.generate_id ();
-             agent_id = voter;
-             task_id = "board_vote:" ^ target_id;
-             started_at = now;
-             completed_at = Some now;
-             success = true;
-             error_message = None;
-             collaborators = [];
-             handoff_from = None;
-             handoff_to = None;
-           } in
-           Metrics_store_eio.record config metric
-         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-           Log.Misc.error "board_vote fitness record failed: %s"
-             (Printexc.to_string exn));
-        let subject_kind =
-          if String.equal name "masc_board_vote" then "post" else "comment"
-        in
-        emit_activity config ~kind:(Event_kind.Board.to_string Event_kind.Board.Voted) ~actor:voter
-          ~subject:(Activity_graph.entity ~kind:subject_kind target_id)
-          ~tags:[ "board"; Event_kind.Board.to_string Event_kind.Board.Voted ]
-          ~payload:
-            (`Assoc
-              [
-                ("target_id", `String target_id);
-                ("target_kind", `String subject_kind);
-              ])
-          ()
-      end;
-      Some result
-
+    let ((success, _message) as result) = Tool_board.handle_tool name arguments in
+    (* Record vote activity as a fitness metric (Issue #1861). *)
+    if success
+    then (
+      let voter = Safe_ops.json_string ~default:"anonymous" "voter" arguments in
+      let target_id =
+        if name = "masc_board_vote"
+        then Safe_ops.json_string ~default:"unknown" "post_id" arguments
+        else Safe_ops.json_string ~default:"unknown" "comment_id" arguments
+      in
+      (try
+         let now = Time_compat.now () in
+         let metric : Metrics_store_eio.task_metric =
+           { id = Metrics_store_eio.generate_id ()
+           ; agent_id = voter
+           ; task_id = "board_vote:" ^ target_id
+           ; started_at = now
+           ; completed_at = Some now
+           ; success = true
+           ; error_message = None
+           ; collaborators = []
+           ; handoff_from = None
+           ; handoff_to = None
+           }
+         in
+         Metrics_store_eio.record config metric
+       with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | exn ->
+         Log.Misc.error "board_vote fitness record failed: %s" (Printexc.to_string exn));
+      let subject_kind =
+        if String.equal name "masc_board_vote" then "post" else "comment"
+      in
+      emit_activity
+        config
+        ~kind:(Event_kind.Board.to_string Event_kind.Board.Voted)
+        ~actor:voter
+        ~subject:(Activity_graph.entity ~kind:subject_kind target_id)
+        ~tags:[ "board"; Event_kind.Board.to_string Event_kind.Board.Voted ]
+        ~payload:
+          (`Assoc [ "target_id", `String target_id; "target_kind", `String subject_kind ])
+        ());
+    Some result
   | "masc_board_delete" ->
-      let (success, _message) as result = Tool_board.handle_tool name arguments in
-      if success then begin
-        let post_id = Safe_ops.json_string ~default:"unknown" "post_id" arguments in
-        let notification = `Assoc [
-          ("type", `String "masc/board_delete");
-          ("post_id", `String post_id);
-          ("timestamp", `String (Types.now_iso ()));
-        ] in
-        Mcp_server.sse_broadcast state notification;
-        emit_activity config ~kind:(Event_kind.Board.to_string Event_kind.Board.Deleted) ~actor:agent_name
-          ~subject:(Activity_graph.entity ~kind:"post" post_id)
-          ~tags:[ "board"; Event_kind.Board.to_string Event_kind.Board.Deleted ]
-          ~payload:(`Assoc [ ("post_id", `String post_id) ])
-          ()
-      end;
-      Some result
-
-  | "masc_board_list" | "masc_board_get"
+    let ((success, _message) as result) = Tool_board.handle_tool name arguments in
+    if success
+    then (
+      let post_id = Safe_ops.json_string ~default:"unknown" "post_id" arguments in
+      let notification =
+        `Assoc
+          [ "type", `String "masc/board_delete"
+          ; "post_id", `String post_id
+          ; "timestamp", `String (Types.now_iso ())
+          ]
+      in
+      Mcp_server.sse_broadcast state notification;
+      emit_activity
+        config
+        ~kind:(Event_kind.Board.to_string Event_kind.Board.Deleted)
+        ~actor:agent_name
+        ~subject:(Activity_graph.entity ~kind:"post" post_id)
+        ~tags:[ "board"; Event_kind.Board.to_string Event_kind.Board.Deleted ]
+        ~payload:(`Assoc [ "post_id", `String post_id ])
+        ());
+    Some result
+  | "masc_board_list"
+  | "masc_board_get"
   | "masc_board_stats"
-  | "masc_board_search" | "masc_board_profile"
-  | "masc_board_hearths" ->
-      Some (Tool_board.handle_tool name arguments)
-
+  | "masc_board_search"
+  | "masc_board_profile"
+  | "masc_board_hearths" -> Some (Tool_board.handle_tool name arguments)
   | _ -> None
+;;

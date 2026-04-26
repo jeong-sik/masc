@@ -2,25 +2,25 @@
 
 (** {1 Request/Response Types} *)
 
-type request = {
-  id: string option;
-  method_name: string;
-  params: Yojson.Safe.t;
-  headers: (string * string) list;
-}
+type request =
+  { id : string option
+  ; method_name : string
+  ; params : Yojson.Safe.t
+  ; headers : (string * string) list
+  }
 
-type response = {
-  id: string option;
-  success: bool;
-  result: Yojson.Safe.t option;
-  error: error option;
-}
+type response =
+  { id : string option
+  ; success : bool
+  ; result : Yojson.Safe.t option
+  ; error : error option
+  }
 
-and error = {
-  code: int;
-  message: string;
-  data: Yojson.Safe.t option;
-}
+and error =
+  { code : int
+  ; message : string
+  ; data : Yojson.Safe.t option
+  }
 
 (** Protocol type *)
 type protocol =
@@ -35,11 +35,11 @@ val protocol_to_string : protocol -> string
 val protocol_of_string : string -> protocol option
 
 (** Transport binding configuration *)
-type binding = {
-  protocol: protocol;
-  url: string;
-  options: (string * string) list;
-}
+type binding =
+  { protocol : protocol
+  ; url : string
+  ; options : (string * string) list
+  }
 
 (** {1 Error Codes} *)
 
@@ -57,11 +57,15 @@ end
 
 (** {1 Response Constructors} *)
 
-val make_error :
-  ?id:string -> ?data:Yojson.Safe.t option -> code:int -> message:string -> unit -> response
+val make_error
+  :  ?id:string
+  -> ?data:Yojson.Safe.t option
+  -> code:int
+  -> message:string
+  -> unit
+  -> response
 
-val make_success :
-  ?id:string -> result:Yojson.Safe.t -> unit -> response
+val make_success : ?id:string -> result:Yojson.Safe.t -> unit -> response
 
 (** {1 JSON-RPC 2.0} *)
 
@@ -69,28 +73,38 @@ module JsonRpc : sig
   val version : string
   val parse_request : Yojson.Safe.t -> (request, string) result
   val serialize_response : response -> Yojson.Safe.t
-  val make_request :
-    ?id:string -> method_name:string -> params:Yojson.Safe.t -> unit -> Yojson.Safe.t
+
+  val make_request
+    :  ?id:string
+    -> method_name:string
+    -> params:Yojson.Safe.t
+    -> unit
+    -> Yojson.Safe.t
 end
 
 (** {1 REST API} *)
 
 module Rest : sig
-  type http_method = GET | POST | PUT | DELETE | PATCH
+  type http_method =
+    | GET
+    | POST
+    | PUT
+    | DELETE
+    | PATCH
 
   val method_to_string : http_method -> string
   val tool_to_endpoint : string -> http_method * string
-  val parse_request :
-    http_method:string ->
-    path:string ->
-    query_params:(string * Yojson.Safe.t) list ->
-    body:string ->
-    request
+
+  val parse_request
+    :  http_method:string
+    -> path:string
+    -> query_params:(string * Yojson.Safe.t) list
+    -> body:string
+    -> request
+
   val generate_openapi_paths : unit -> Yojson.Safe.t
-  val generate_openapi_document :
-    ?host:string -> ?port:int -> unit -> Yojson.Safe.t
-  val operation_catalog_entry :
-    string -> Types.tool_schema -> Yojson.Safe.t
+  val generate_openapi_document : ?host:string -> ?port:int -> unit -> Yojson.Safe.t
+  val operation_catalog_entry : string -> Types.tool_schema -> Yojson.Safe.t
 end
 
 (** {1 Bindings} *)

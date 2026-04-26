@@ -24,11 +24,10 @@ val wakeup_keeper : ?base_path:string -> string -> unit
     or system-wide events. *)
 val wakeup_all_keepers : ?base_path:string -> unit -> unit
 
-val keeper_turn_throttle_limit : int
 (** Runtime keeper turn concurrency limit derived from
     [MASC_KEEPER_AUTOBOOT_MAX]. *)
+val keeper_turn_throttle_limit : int
 
-val proactive_skip_reason_metric : string
 (** Canonical Prometheus metric name for the proactive-scheduler
     skip-reason counter.  Labels: [("keeper", <name>); ("reason",
     <skip_reason_label>)].  [reason] is produced by
@@ -37,20 +36,21 @@ val proactive_skip_reason_metric : string
     scheduled_autonomous_disabled | provider_cooldown_pending |
     idle_gate_pending | cooldown_pending | no_signal].
     #10008 failure mode 3. *)
+val proactive_skip_reason_metric : string
 
-val semaphore_wait_timeout_sec : float
 (** Wall-clock cap on [Eio.Semaphore.acquire] when waiting for a keeper
     turn slot. Derived from [MASC_KEEPER_SEMAPHORE_WAIT_TIMEOUT_SEC]
     (default 60.0, range [5, 600]). Keepers whose peers hold slots past
     this cap are skipped for the current cycle and retry on the next
     heartbeat. *)
+val semaphore_wait_timeout_sec : float
 
-exception Semaphore_wait_timeout of float
 (** Raised inside [with_keeper_turn_slot] when acquiring either the
     autonomous or turn semaphore exceeds [semaphore_wait_timeout_sec].
     The float carries the wait cap so the caller can render it without
     re-reading the env var. Callers should treat this as "skip this
     turn, retry on next heartbeat" rather than a keeper failure. *)
+exception Semaphore_wait_timeout of float
 
 (** Test-only reset for the autonomous FIFO wait queue. *)
 val reset_autonomous_turn_queue_for_test : unit -> unit
@@ -60,10 +60,12 @@ val autonomous_waiter_snapshot_for_test : unit -> string list
 
 (** Test-only snapshots of the current semaphore availability. *)
 val turn_semaphore_value_for_test : unit -> int
+
 val autonomous_turn_semaphore_value_for_test : unit -> int
 
 (** Test-only FIFO queue primitives for autonomous fairness regression tests. *)
 val enqueue_autonomous_waiter_for_test : string -> int
+
 val drop_autonomous_waiter_for_test : int -> unit
 
 (** Pure computation: seconds keeper should yield before re-entering queue
@@ -81,10 +83,10 @@ val fairness_delay_sec_at : now:float -> keeper_name:string -> float
     ever running a turn. *)
 val smart_heartbeat_cycle_continues : Heartbeat_smart.decision -> bool
 
-val status_tick_usage_json : unit -> Yojson.Safe.t
 (** Usage payload for heartbeat/status metrics rows.  Status ticks are not
     LLM calls, so all per-turn token counters are explicit zeroes while
     preserving the same cache-token field shape as turn snapshots. *)
+val status_tick_usage_json : unit -> Yojson.Safe.t
 
 (** Test-only: stamp a completion time directly (bypasses [Time_compat.now]).
     Use to set up deterministic fairness-cooldown scenarios. *)
@@ -94,44 +96,49 @@ val record_autonomous_completion_at_for_test : keeper_name:string -> ts:float ->
 val reset_autonomous_completion_for_test : unit -> unit
 
 (** Test-only wrapper around the keeper turn slot acquisition path. *)
-val with_keeper_turn_slot_for_test :
-  keeper_name:string ->
-  channel:Keeper_world_observation.keeper_cycle_channel ->
-  (semaphore_wait_ms:int -> 'a) ->
-  ('a, [> `Semaphore_wait_timeout of float ]) result
+val with_keeper_turn_slot_for_test
+  :  keeper_name:string
+  -> channel:Keeper_world_observation.keeper_cycle_channel
+  -> (semaphore_wait_ms:int -> 'a)
+  -> ('a, [> `Semaphore_wait_timeout of float ]) result
 
 (** Test-only wrapper for the in-turn liveness pulse lifecycle. *)
-val with_in_turn_liveness_pulse_for_test :
-  sw:Eio.Switch.t ->
-  clock:'a Eio.Time.clock ->
-  interval_sec:float ->
-  tick:(unit -> unit) ->
-  (unit -> 'b) ->
-  'b
+val with_in_turn_liveness_pulse_for_test
+  :  sw:Eio.Switch.t
+  -> clock:'a Eio.Time.clock
+  -> interval_sec:float
+  -> tick:(unit -> unit)
+  -> (unit -> 'b)
+  -> 'b
 
 (** Keepalive loop meta selection. Disk wins when it changed; otherwise
     fall back to the latest registry snapshot instead of the original boot
     meta so continuity/runtime fields do not regress across turns. *)
-val effective_keepalive_meta :
-  base_path:string ->
-  fallback:keeper_meta ->
-  disk_meta_opt:keeper_meta option ->
-  keeper_meta
+val effective_keepalive_meta
+  :  base_path:string
+  -> fallback:keeper_meta
+  -> disk_meta_opt:keeper_meta option
+  -> keeper_meta
 
-val wakeup_relevant_keeper_for_board_signal :
-  config:Coord.config -> Board_dispatch.keeper_board_signal -> unit
+val wakeup_relevant_keeper_for_board_signal
+  :  config:Coord.config
+  -> Board_dispatch.keeper_board_signal
+  -> unit
 
 (** The heartbeat loop body, extracted for reuse by the supervisor.
     Runs synchronously in the calling fiber until [stop] becomes true. *)
-val run_heartbeat_loop :
-  proactive_warmup_sec:int -> 'a context -> keeper_meta -> bool Atomic.t ->
-  wakeup:bool Atomic.t -> unit
+val run_heartbeat_loop
+  :  proactive_warmup_sec:int
+  -> 'a context
+  -> keeper_meta
+  -> bool Atomic.t
+  -> wakeup:bool Atomic.t
+  -> unit
 
 (** Compute the p-th percentile of a float array.
     Returns 0.0 for empty arrays. Used by per-stage profiling. *)
 val percentile : float array -> float -> float
 
-val start_keepalive :
-  ?proactive_warmup_sec:int -> 'a context -> keeper_meta -> unit
+val start_keepalive : ?proactive_warmup_sec:int -> 'a context -> keeper_meta -> unit
 val stop_keepalive : ?base_path:string -> string -> unit
 val stop_all_keepalives : unit -> unit

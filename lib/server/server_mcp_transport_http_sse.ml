@@ -8,5 +8,4 @@ type deps = Server_mcp_transport_http_types.deps
 
 include Server_mcp_transport_http_conn
 
-let respond_sse_rate_limited =
-  Server_mcp_transport_http_respond.respond_sse_rate_limited
+let respond_sse_rate_limited = Server_mcp_transport_http_respond.respond_sse_rate_limited

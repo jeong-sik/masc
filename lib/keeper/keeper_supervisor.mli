@@ -13,17 +13,14 @@ open Keeper_types
 
 (** {1 Supervised Execution} *)
 
-val supervise_keepalive :
-  proactive_warmup_sec:int -> 'a context -> keeper_meta -> unit
 (** Start a keeper heartbeat loop inside a supervised fiber.
     Registers in [Keeper_registry] (SSOT) and launches the fiber.
     On fiber termination, resolves the Promise and publishes
     keeper-lifecycle events via Event_bus. *)
+val supervise_keepalive : proactive_warmup_sec:int -> 'a context -> keeper_meta -> unit
 
 (** {1 Watchdog} *)
 
-val fork_stale_watchdog :
-  'a context -> keeper_meta -> Keeper_registry.registry_entry -> unit
 (** Fork a stale-turn watchdog fiber for the given keeper.
 
     Two detection modes:
@@ -34,35 +31,44 @@ val fork_stale_watchdog :
     On detection, sets [fiber_stop] and emits a stale broadcast. The
     supervisor's [sweep_and_recover] picks up the stopped fiber and
     restarts with exponential backoff. *)
+val fork_stale_watchdog
+  :  'a context
+  -> keeper_meta
+  -> Keeper_registry.registry_entry
+  -> unit
 
 (** {1 Sweep and Recovery} *)
 
-val sweep_and_recover : 'a context -> unit
 (** Scan all supervised keepers in [Keeper_registry]. Detect zombies
     (resolved Promise), restart with exponential backoff if within
     budget, mark dead otherwise. Called periodically by the keeper
     supervisor loop. *)
+val sweep_and_recover : 'a context -> unit
 
 (** {1 Pure Helpers (exposed for testing)} *)
 
-val backoff_delay : int -> float
 (** Compute exponential backoff delay for the given attempt number.
     Uses MASC_KEEPER_SUPERVISOR_BACKOFF_BASE_S and _MAX_S. *)
+val backoff_delay : int -> float
 
-val keep_last_n : int -> 'a -> 'a list -> 'a list
 (** [keep_last_n n item lst] prepends [item] and keeps at most [n] entries. *)
+val keep_last_n : int -> 'a -> 'a list -> 'a list
 
-val should_cleanup_dead : now:float -> dead_ttl_sec:float -> Keeper_registry.registry_entry -> bool
 (** True when a dead tombstone has exceeded the configured TTL. *)
+val should_cleanup_dead
+  :  now:float
+  -> dead_ttl_sec:float
+  -> Keeper_registry.registry_entry
+  -> bool
 
-val cohort_key_of_reason : Keeper_registry.failure_reason option -> string
 (** Map a structured failure_reason to a cohort key for self-preservation grouping. *)
+val cohort_key_of_reason : Keeper_registry.failure_reason option -> string
 
-val apply_self_preservation :
-  keepers_dir:string ->
-  total_keepers:int ->
-  (Keeper_registry.registry_entry * string) list ->
-  (Keeper_registry.registry_entry * string) list
 (** Self-preservation gate. Suppresses restarts when a dominant failure
     cohort exceeds ratio threshold AND minimum candidate count.
     Returns the filtered list of entries that should proceed with restart. *)
+val apply_self_preservation
+  :  keepers_dir:string
+  -> total_keepers:int
+  -> (Keeper_registry.registry_entry * string) list
+  -> (Keeper_registry.registry_entry * string) list

@@ -6,28 +6,36 @@ open Masc_mcp
 let temp_dir = ref ""
 
 let rec rm_rf path =
-  if Sys.file_exists path then
-    if Sys.is_directory path then begin
-      Sys.readdir path
-      |> Array.iter (fun name -> rm_rf (Filename.concat path name));
-      Unix.rmdir path
-    end else
-      Unix.unlink path
+  if Sys.file_exists path
+  then
+    if Sys.is_directory path
+    then (
+      Sys.readdir path |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+      Unix.rmdir path)
+    else Unix.unlink path
+;;
 
 let setup () =
-  let dir = Filename.concat (Filename.get_temp_dir_name ())
-    (Printf.sprintf "planning_eio_test_%d" (int_of_float (Unix.gettimeofday () *. 1000.))) in
+  let dir =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf
+         "planning_eio_test_%d"
+         (int_of_float (Unix.gettimeofday () *. 1000.)))
+  in
   Unix.mkdir dir 0o755;
   temp_dir := dir
+;;
 
 let teardown () =
   (* Clean up temp directory *)
-  if !temp_dir <> "" then begin
-    (try rm_rf !temp_dir with _ -> ())
-  end
+  if !temp_dir <> ""
+  then (
+    try rm_rf !temp_dir with
+    | _ -> ())
+;;
 
-let make_config () : Coord.config =
-  Coord.default_config !temp_dir
+let make_config () : Coord.config = Coord.default_config !temp_dir
 
 (* ===== Type Tests ===== *)
 
@@ -40,64 +48,82 @@ let test_create_context () =
   check string "deliverable empty" "" ctx.deliverable;
   check bool "created_at not empty" true (String.length ctx.created_at > 0);
   check bool "updated_at not empty" true (String.length ctx.updated_at > 0)
+;;
 
 let test_json_serialization () =
   let ctx = Planning_eio.create_context ~task_id:"json-test" in
-  let ctx = { ctx with
-    task_plan = "Test plan";
-    notes = ["Note 1"; "Note 2"];
-    deliverable = "Test deliverable";
-  } in
+  let ctx =
+    { ctx with
+      task_plan = "Test plan"
+    ; notes = [ "Note 1"; "Note 2" ]
+    ; deliverable = "Test deliverable"
+    }
+  in
   let json = Planning_eio.planning_context_to_yojson ctx in
   match Planning_eio.planning_context_of_yojson json with
   | Ok restored ->
-      check string "task_id" ctx.task_id restored.task_id;
-      check string "task_plan" ctx.task_plan restored.task_plan;
-      check int "notes count" (List.length ctx.notes) (List.length restored.notes);
-      check string "deliverable" ctx.deliverable restored.deliverable
-  | Error e ->
-      fail (Printf.sprintf "JSON deserialization failed: %s" e)
+    check string "task_id" ctx.task_id restored.task_id;
+    check string "task_plan" ctx.task_plan restored.task_plan;
+    check int "notes count" (List.length ctx.notes) (List.length restored.notes);
+    check string "deliverable" ctx.deliverable restored.deliverable
+  | Error e -> fail (Printf.sprintf "JSON deserialization failed: %s" e)
+;;
 
 let test_error_entry_serialization () =
-  let entry : Planning_eio.error_entry = {
-    timestamp = "2025-01-01T00:00:00Z";
-    error_type = "build";
-    message = "Test error";
-    context = Some "test_file.ml";
-    resolved = false;
-  } in
+  let entry : Planning_eio.error_entry =
+    { timestamp = "2025-01-01T00:00:00Z"
+    ; error_type = "build"
+    ; message = "Test error"
+    ; context = Some "test_file.ml"
+    ; resolved = false
+    }
+  in
   let json = Planning_eio.error_entry_to_yojson entry in
   match Planning_eio.error_entry_of_yojson json with
   | Ok restored ->
-      check string "timestamp" entry.timestamp restored.timestamp;
-      check string "error_type" entry.error_type restored.error_type;
-      check string "message" entry.message restored.message;
-      check (option string) "context" entry.context restored.context;
-      check bool "resolved" entry.resolved restored.resolved
-  | Error e ->
-      fail (Printf.sprintf "Error entry deserialization failed: %s" e)
+    check string "timestamp" entry.timestamp restored.timestamp;
+    check string "error_type" entry.error_type restored.error_type;
+    check string "message" entry.message restored.message;
+    check (option string) "context" entry.context restored.context;
+    check bool "resolved" entry.resolved restored.resolved
+  | Error e -> fail (Printf.sprintf "Error entry deserialization failed: %s" e)
+;;
 
 (* ===== File Operations Tests ===== *)
 
 let test_init () =
-  Eio_main.run @@ fun env ->
+  Eio_main.run
+  @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let config = make_config () in
   match Planning_eio.init config ~task_id:"init-test" with
   | Ok ctx ->
-      check string "task_id" "init-test" ctx.task_id;
-      (* Check files were created *)
-      let dir = Filename.concat !temp_dir "planning/init-test" in
-      check bool "task_plan.md exists" true (Sys.file_exists (Filename.concat dir "task_plan.md"));
-      check bool "notes.md exists" true (Sys.file_exists (Filename.concat dir "notes.md"));
-      check bool "errors.md exists" true (Sys.file_exists (Filename.concat dir "errors.md"));
-      check bool "deliverable.md exists" true (Sys.file_exists (Filename.concat dir "deliverable.md"));
-      check bool "context.json exists" true (Sys.file_exists (Filename.concat dir "context.json"))
-  | Error e ->
-      fail (Printf.sprintf "Init failed: %s" e)
+    check string "task_id" "init-test" ctx.task_id;
+    (* Check files were created *)
+    let dir = Filename.concat !temp_dir "planning/init-test" in
+    check
+      bool
+      "task_plan.md exists"
+      true
+      (Sys.file_exists (Filename.concat dir "task_plan.md"));
+    check bool "notes.md exists" true (Sys.file_exists (Filename.concat dir "notes.md"));
+    check bool "errors.md exists" true (Sys.file_exists (Filename.concat dir "errors.md"));
+    check
+      bool
+      "deliverable.md exists"
+      true
+      (Sys.file_exists (Filename.concat dir "deliverable.md"));
+    check
+      bool
+      "context.json exists"
+      true
+      (Sys.file_exists (Filename.concat dir "context.json"))
+  | Error e -> fail (Printf.sprintf "Init failed: %s" e)
+;;
 
 let test_load () =
-  Eio_main.run @@ fun env ->
+  Eio_main.run
+  @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let config = make_config () in
   (* Initialize first *)
@@ -106,30 +132,38 @@ let test_load () =
    | Error e -> fail (Printf.sprintf "Init for load test failed: %s" e));
   (* Then load *)
   match Planning_eio.load config ~task_id:"load-test" with
-  | Ok ctx ->
-      check string "task_id" "load-test" ctx.task_id
-  | Error e ->
-      fail (Printf.sprintf "Load failed: %s" e)
+  | Ok ctx -> check string "task_id" "load-test" ctx.task_id
+  | Error e -> fail (Printf.sprintf "Load failed: %s" e)
+;;
 
 let test_load_nonexistent () =
-  Eio_main.run @@ fun env ->
+  Eio_main.run
+  @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let config = make_config () in
   match Planning_eio.load config ~task_id:"nonexistent-task" with
-  | Ok _ ->
-      fail "Expected error for nonexistent task"
+  | Ok _ -> fail "Expected error for nonexistent task"
   | Error _ ->
-      (* Expected behavior *)
-      ()
+    (* Expected behavior *)
+    ()
+;;
 
 let test_find_substring_from_preserves_empty_needle_bounds () =
-  check (option int) "empty needle at end" (Some 3)
+  check
+    (option int)
+    "empty needle at end"
+    (Some 3)
     (Planning_eio.find_substring_from "abc" ~needle:"" ~from:3);
-  check (option int) "empty needle past end" None
+  check
+    (option int)
+    "empty needle past end"
+    None
     (Planning_eio.find_substring_from "abc" ~needle:"" ~from:4)
+;;
 
 let test_update_plan () =
-  Eio_main.run @@ fun env ->
+  Eio_main.run
+  @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let config = make_config () in
   (* Initialize first *)
@@ -140,20 +174,22 @@ let test_update_plan () =
   let content = "# My Task Plan\n\n1. Step 1\n2. Step 2\n3. Step 3" in
   match Planning_eio.update_plan config ~task_id:"update-plan-test" ~content with
   | Ok ctx ->
-      check string "task_plan updated" content ctx.task_plan;
-      (* Verify file *)
-      let plan_path = Filename.concat !temp_dir "planning/update-plan-test/task_plan.md" in
-      let file_content =
-        let ic = open_in plan_path in
-        Fun.protect ~finally:(fun () -> close_in ic) (fun () ->
-          really_input_string ic (in_channel_length ic))
-      in
-      check string "file content" content file_content
-  | Error e ->
-      fail (Printf.sprintf "Update plan failed: %s" e)
+    check string "task_plan updated" content ctx.task_plan;
+    (* Verify file *)
+    let plan_path = Filename.concat !temp_dir "planning/update-plan-test/task_plan.md" in
+    let file_content =
+      let ic = open_in plan_path in
+      Fun.protect
+        ~finally:(fun () -> close_in ic)
+        (fun () -> really_input_string ic (in_channel_length ic))
+    in
+    check string "file content" content file_content
+  | Error e -> fail (Printf.sprintf "Update plan failed: %s" e)
+;;
 
 let test_update_plan_full_context_syncs_deliverable () =
-  Eio_main.run @@ fun env ->
+  Eio_main.run
+  @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let config = make_config () in
   (match Planning_eio.init config ~task_id:"update-plan-full-context" with
@@ -161,7 +197,9 @@ let test_update_plan_full_context_syncs_deliverable () =
    | Error e -> fail (Printf.sprintf "Init failed: %s" e));
   let stale_deliverable = "Task-163 completed. Stale deliverable." in
   (match
-     Planning_eio.set_deliverable config ~task_id:"update-plan-full-context"
+     Planning_eio.set_deliverable
+       config
+       ~task_id:"update-plan-full-context"
        ~content:stale_deliverable
    with
    | Ok _ -> ()
@@ -190,51 +228,64 @@ In progress. Do not treat task-163 as completed.
 |}
   in
   match
-    Planning_eio.update_plan config ~task_id:"update-plan-full-context"
+    Planning_eio.update_plan
+      config
+      ~task_id:"update-plan-full-context"
       ~content:full_context
   with
   | Error e -> fail (Printf.sprintf "Full context update failed: %s" e)
   | Ok ctx ->
-      check string "task_plan extracted"
-        "- Fix owned/current drift in the MASC task control plane."
-        ctx.task_plan;
-      check string "deliverable synced"
-        "In progress. Do not treat task-163 as completed."
-        ctx.deliverable;
-      let deliverable_path =
-        Filename.concat !temp_dir
-          "planning/update-plan-full-context/deliverable.md"
-      in
-      let deliverable_file =
-        let ic = open_in deliverable_path in
-        Fun.protect ~finally:(fun () -> close_in ic) (fun () ->
-          really_input_string ic (in_channel_length ic))
-      in
-      check string "deliverable file synced"
-        "In progress. Do not treat task-163 as completed."
-        deliverable_file;
-      (match
-         Planning_eio.load config ~task_id:"update-plan-full-context"
-       with
-       | Error e -> fail (Printf.sprintf "Load after full context update failed: %s" e)
-       | Ok loaded ->
-           check string "loaded deliverable synced"
-             "In progress. Do not treat task-163 as completed."
-             loaded.deliverable;
-           let markdown = Planning_eio.get_context_markdown loaded in
-           let contains substr =
-             try
-               ignore (Str.search_forward (Str.regexp_string substr) markdown 0);
-               true
-             with Not_found -> false
-           in
-           check bool "markdown contains new deliverable" true
-             (contains "In progress. Do not treat task-163 as completed.");
-           check bool "markdown excludes stale deliverable" false
-             (contains stale_deliverable))
+    check
+      string
+      "task_plan extracted"
+      "- Fix owned/current drift in the MASC task control plane."
+      ctx.task_plan;
+    check
+      string
+      "deliverable synced"
+      "In progress. Do not treat task-163 as completed."
+      ctx.deliverable;
+    let deliverable_path =
+      Filename.concat !temp_dir "planning/update-plan-full-context/deliverable.md"
+    in
+    let deliverable_file =
+      let ic = open_in deliverable_path in
+      Fun.protect
+        ~finally:(fun () -> close_in ic)
+        (fun () -> really_input_string ic (in_channel_length ic))
+    in
+    check
+      string
+      "deliverable file synced"
+      "In progress. Do not treat task-163 as completed."
+      deliverable_file;
+    (match Planning_eio.load config ~task_id:"update-plan-full-context" with
+     | Error e -> fail (Printf.sprintf "Load after full context update failed: %s" e)
+     | Ok loaded ->
+       check
+         string
+         "loaded deliverable synced"
+         "In progress. Do not treat task-163 as completed."
+         loaded.deliverable;
+       let markdown = Planning_eio.get_context_markdown loaded in
+       let contains substr =
+         try
+           ignore (Str.search_forward (Str.regexp_string substr) markdown 0);
+           true
+         with
+         | Not_found -> false
+       in
+       check
+         bool
+         "markdown contains new deliverable"
+         true
+         (contains "In progress. Do not treat task-163 as completed.");
+       check bool "markdown excludes stale deliverable" false (contains stale_deliverable))
+;;
 
 let test_add_note () =
-  Eio_main.run @@ fun env ->
+  Eio_main.run
+  @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let config = make_config () in
   (* Initialize first *)
@@ -242,21 +293,24 @@ let test_add_note () =
    | Ok _ -> ()
    | Error e -> fail (Printf.sprintf "Init failed: %s" e));
   (* Add notes *)
-  (match Planning_eio.add_note config ~task_id:"add-note-test" ~note:"First observation" with
-   | Ok ctx ->
-       check int "notes count 1" 1 (List.length ctx.notes)
-   | Error e ->
-       fail (Printf.sprintf "Add note 1 failed: %s" e));
-  match Planning_eio.add_note config ~task_id:"add-note-test" ~note:"Second observation" with
+  (match
+     Planning_eio.add_note config ~task_id:"add-note-test" ~note:"First observation"
+   with
+   | Ok ctx -> check int "notes count 1" 1 (List.length ctx.notes)
+   | Error e -> fail (Printf.sprintf "Add note 1 failed: %s" e));
+  match
+    Planning_eio.add_note config ~task_id:"add-note-test" ~note:"Second observation"
+  with
   | Ok ctx ->
-      check int "notes count 2" 2 (List.length ctx.notes);
-      check string "first note" "First observation" (List.nth ctx.notes 0);
-      check string "second note" "Second observation" (List.nth ctx.notes 1)
-  | Error e ->
-      fail (Printf.sprintf "Add note 2 failed: %s" e)
+    check int "notes count 2" 2 (List.length ctx.notes);
+    check string "first note" "First observation" (List.nth ctx.notes 0);
+    check string "second note" "Second observation" (List.nth ctx.notes 1)
+  | Error e -> fail (Printf.sprintf "Add note 2 failed: %s" e)
+;;
 
 let test_set_deliverable () =
-  Eio_main.run @@ fun env ->
+  Eio_main.run
+  @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let config = make_config () in
   (* Initialize first *)
@@ -266,32 +320,41 @@ let test_set_deliverable () =
   (* Set deliverable *)
   let content = "# Final Deliverable\n\nTask completed successfully!" in
   match Planning_eio.set_deliverable config ~task_id:"deliverable-test" ~content with
-  | Ok ctx ->
-      check string "deliverable" content ctx.deliverable
-  | Error e ->
-      fail (Printf.sprintf "Set deliverable failed: %s" e)
+  | Ok ctx -> check string "deliverable" content ctx.deliverable
+  | Error e -> fail (Printf.sprintf "Set deliverable failed: %s" e)
+;;
 
 let test_set_deliverable_auto_init () =
-  Eio_main.run @@ fun env ->
+  Eio_main.run
+  @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let config = make_config () in
   (* Do NOT call init -- set_deliverable should auto-init *)
   let content = "# Auto-init Deliverable\n\nDelivered without prior plan_init." in
   match Planning_eio.set_deliverable config ~task_id:"auto-init-deliver" ~content with
   | Ok ctx ->
-      check string "deliverable" content ctx.deliverable;
-      check string "task_id" "auto-init-deliver" ctx.task_id;
-      (* Verify planning directory was auto-created *)
-      let dir = Filename.concat !temp_dir "planning/auto-init-deliver" in
-      check bool "context.json exists" true (Sys.file_exists (Filename.concat dir "context.json"));
-      check bool "deliverable.md exists" true (Sys.file_exists (Filename.concat dir "deliverable.md"))
-  | Error e ->
-      fail (Printf.sprintf "Set deliverable (auto-init) failed: %s" e)
+    check string "deliverable" content ctx.deliverable;
+    check string "task_id" "auto-init-deliver" ctx.task_id;
+    (* Verify planning directory was auto-created *)
+    let dir = Filename.concat !temp_dir "planning/auto-init-deliver" in
+    check
+      bool
+      "context.json exists"
+      true
+      (Sys.file_exists (Filename.concat dir "context.json"));
+    check
+      bool
+      "deliverable.md exists"
+      true
+      (Sys.file_exists (Filename.concat dir "deliverable.md"))
+  | Error e -> fail (Printf.sprintf "Set deliverable (auto-init) failed: %s" e)
+;;
 
 (* ===== Error Tracking Tests ===== *)
 
 let test_add_error () =
-  Eio_main.run @@ fun env ->
+  Eio_main.run
+  @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let config = make_config () in
   (* Initialize first *)
@@ -299,41 +362,56 @@ let test_add_error () =
    | Ok _ -> ()
    | Error e -> fail (Printf.sprintf "Init failed: %s" e));
   (* Add error *)
-  match Planning_eio.add_error config ~task_id:"error-test"
-    ~error_type:"build" ~message:"Compilation failed" ~context:"lib/main.ml" () with
+  match
+    Planning_eio.add_error
+      config
+      ~task_id:"error-test"
+      ~error_type:"build"
+      ~message:"Compilation failed"
+      ~context:"lib/main.ml"
+      ()
+  with
   | Ok ctx ->
-      check int "errors count" 1 (List.length ctx.errors);
-      let err = List.hd ctx.errors in
-      check string "error_type" "build" err.error_type;
-      check string "message" "Compilation failed" err.message;
-      check (option string) "context" (Some "lib/main.ml") err.context;
-      check bool "not resolved" false err.resolved
-  | Error e ->
-      fail (Printf.sprintf "Add error failed: %s" e)
+    check int "errors count" 1 (List.length ctx.errors);
+    let err = List.hd ctx.errors in
+    check string "error_type" "build" err.error_type;
+    check string "message" "Compilation failed" err.message;
+    check (option string) "context" (Some "lib/main.ml") err.context;
+    check bool "not resolved" false err.resolved
+  | Error e -> fail (Printf.sprintf "Add error failed: %s" e)
+;;
 
 let test_resolve_error () =
-  Eio_main.run @@ fun env ->
+  Eio_main.run
+  @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let config = make_config () in
   (* Initialize and add error *)
   (match Planning_eio.init config ~task_id:"resolve-test" with
    | Ok _ -> ()
    | Error e -> fail (Printf.sprintf "Init failed: %s" e));
-  (match Planning_eio.add_error config ~task_id:"resolve-test"
-    ~error_type:"test" ~message:"Test failed" () with
+  (match
+     Planning_eio.add_error
+       config
+       ~task_id:"resolve-test"
+       ~error_type:"test"
+       ~message:"Test failed"
+       ()
+   with
    | Ok _ -> ()
    | Error e -> fail (Printf.sprintf "Add error failed: %s" e));
   (* Resolve error *)
   match Planning_eio.resolve_error config ~task_id:"resolve-test" ~index:0 with
   | Ok ctx ->
-      check int "errors count" 1 (List.length ctx.errors);
-      let err = List.hd ctx.errors in
-      check bool "resolved" true err.resolved
-  | Error e ->
-      fail (Printf.sprintf "Resolve error failed: %s" e)
+    check int "errors count" 1 (List.length ctx.errors);
+    let err = List.hd ctx.errors in
+    check bool "resolved" true err.resolved
+  | Error e -> fail (Printf.sprintf "Resolve error failed: %s" e)
+;;
 
 let test_resolve_invalid_index () =
-  Eio_main.run @@ fun env ->
+  Eio_main.run
+  @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let config = make_config () in
   (* Initialize and add error *)
@@ -342,29 +420,36 @@ let test_resolve_invalid_index () =
    | Error e -> fail (Printf.sprintf "Init failed: %s" e));
   (* Try to resolve nonexistent error *)
   match Planning_eio.resolve_error config ~task_id:"invalid-resolve-test" ~index:0 with
-  | Ok _ ->
-      fail "Expected error for invalid index"
+  | Ok _ -> fail "Expected error for invalid index"
   | Error _ ->
-      (* Expected behavior *)
-      ()
+    (* Expected behavior *)
+    ()
+;;
 
 (* ===== Session Context Tests ===== *)
 
 let test_session_context () =
-  Eio_main.run @@ fun env ->
+  Eio_main.run
+  @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let config = make_config () in
   (* Initially no current task *)
   check (option string) "no current task" None (Planning_eio.get_current_task config);
   (* Set current task *)
   Planning_eio.set_current_task config ~task_id:"session-test-task";
-  check (option string) "current task set" (Some "session-test-task") (Planning_eio.get_current_task config);
+  check
+    (option string)
+    "current task set"
+    (Some "session-test-task")
+    (Planning_eio.get_current_task config);
   (* Clear current task *)
   Planning_eio.clear_current_task config;
   check (option string) "current task cleared" None (Planning_eio.get_current_task config)
+;;
 
 let test_resolve_task_id () =
-  Eio_main.run @@ fun env ->
+  Eio_main.run
+  @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let config = make_config () in
   (* With explicit task_id *)
@@ -380,63 +465,86 @@ let test_resolve_task_id () =
   match Planning_eio.resolve_task_id config ~task_id:"" with
   | Ok id -> check string "fallback to current" "current-fallback" id
   | Error e -> fail (Printf.sprintf "Fallback resolution failed: %s" e)
+;;
 
 (* ===== Display Helper Tests ===== *)
 
 let test_get_context_markdown () =
-  let ctx : Planning_eio.planning_context = {
-    task_id = "md-test";
-    task_plan = "# My Plan\n\nDo something";
-    notes = ["Note 1"; "Note 2"];
-    errors = [
-      { timestamp = "2025-01-01T00:00:00Z"; error_type = "build"; message = "Failed"; context = None; resolved = false };
-      { timestamp = "2025-01-01T01:00:00Z"; error_type = "test"; message = "Passed"; context = Some "test.ml"; resolved = true };
-    ];
-    deliverable = "Done!";
-    created_at = "2025-01-01T00:00:00Z";
-    updated_at = "2025-01-01T02:00:00Z";
-  } in
+  let ctx : Planning_eio.planning_context =
+    { task_id = "md-test"
+    ; task_plan = "# My Plan\n\nDo something"
+    ; notes = [ "Note 1"; "Note 2" ]
+    ; errors =
+        [ { timestamp = "2025-01-01T00:00:00Z"
+          ; error_type = "build"
+          ; message = "Failed"
+          ; context = None
+          ; resolved = false
+          }
+        ; { timestamp = "2025-01-01T01:00:00Z"
+          ; error_type = "test"
+          ; message = "Passed"
+          ; context = Some "test.ml"
+          ; resolved = true
+          }
+        ]
+    ; deliverable = "Done!"
+    ; created_at = "2025-01-01T00:00:00Z"
+    ; updated_at = "2025-01-01T02:00:00Z"
+    }
+  in
   let md = Planning_eio.get_context_markdown ctx in
-  let contains substr = try ignore (Str.search_forward (Str.regexp_string substr) md 0); true with Not_found -> false in
+  let contains substr =
+    try
+      ignore (Str.search_forward (Str.regexp_string substr) md 0);
+      true
+    with
+    | Not_found -> false
+  in
   check bool "contains task_id" true (contains "md-test");
   check bool "contains plan" true (contains "My Plan");
   check bool "contains notes" true (contains "Note 1");
   check bool "contains deliverable" true (contains "Done!")
+;;
 
 (* ===== Test Suite ===== *)
 
 let () =
   setup ();
   at_exit teardown;
-  run "Planning_eio" [
-    "types", [
-      test_case "create_context" `Quick test_create_context;
-      test_case "json_serialization" `Quick test_json_serialization;
-      test_case "error_entry_serialization" `Quick test_error_entry_serialization;
-    ];
-    "file_operations", [
-      test_case "init" `Quick test_init;
-      test_case "load" `Quick test_load;
-      test_case "load_nonexistent" `Quick test_load_nonexistent;
-      test_case "find_substring_from_preserves_empty_needle_bounds" `Quick
-        test_find_substring_from_preserves_empty_needle_bounds;
-      test_case "update_plan" `Quick test_update_plan;
-      test_case "update_plan_full_context_syncs_deliverable" `Quick
-        test_update_plan_full_context_syncs_deliverable;
-      test_case "add_note" `Quick test_add_note;
-      test_case "set_deliverable" `Quick test_set_deliverable;
-      test_case "set_deliverable_auto_init" `Quick test_set_deliverable_auto_init;
-    ];
-    "error_tracking", [
-      test_case "add_error" `Quick test_add_error;
-      test_case "resolve_error" `Quick test_resolve_error;
-      test_case "resolve_invalid_index" `Quick test_resolve_invalid_index;
-    ];
-    "session_context", [
-      test_case "session_context" `Quick test_session_context;
-      test_case "resolve_task_id" `Quick test_resolve_task_id;
-    ];
-    "display", [
-      test_case "get_context_markdown" `Quick test_get_context_markdown;
-    ];
-  ]
+  run
+    "Planning_eio"
+    [ ( "types"
+      , [ test_case "create_context" `Quick test_create_context
+        ; test_case "json_serialization" `Quick test_json_serialization
+        ; test_case "error_entry_serialization" `Quick test_error_entry_serialization
+        ] )
+    ; ( "file_operations"
+      , [ test_case "init" `Quick test_init
+        ; test_case "load" `Quick test_load
+        ; test_case "load_nonexistent" `Quick test_load_nonexistent
+        ; test_case
+            "find_substring_from_preserves_empty_needle_bounds"
+            `Quick
+            test_find_substring_from_preserves_empty_needle_bounds
+        ; test_case "update_plan" `Quick test_update_plan
+        ; test_case
+            "update_plan_full_context_syncs_deliverable"
+            `Quick
+            test_update_plan_full_context_syncs_deliverable
+        ; test_case "add_note" `Quick test_add_note
+        ; test_case "set_deliverable" `Quick test_set_deliverable
+        ; test_case "set_deliverable_auto_init" `Quick test_set_deliverable_auto_init
+        ] )
+    ; ( "error_tracking"
+      , [ test_case "add_error" `Quick test_add_error
+        ; test_case "resolve_error" `Quick test_resolve_error
+        ; test_case "resolve_invalid_index" `Quick test_resolve_invalid_index
+        ] )
+    ; ( "session_context"
+      , [ test_case "session_context" `Quick test_session_context
+        ; test_case "resolve_task_id" `Quick test_resolve_task_id
+        ] )
+    ; "display", [ test_case "get_context_markdown" `Quick test_get_context_markdown ]
+    ]
+;;

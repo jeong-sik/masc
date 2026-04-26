@@ -16,26 +16,26 @@
     @since v2.145.0 *)
 
 (** Review request: task context + agent's completion claim. *)
-type review_request = {
-  task_title : string;
-  task_description : string;
-  completion_notes : string;
-  agent_name : string;
-}
+type review_request =
+  { task_title : string
+  ; task_description : string
+  ; completion_notes : string
+  ; agent_name : string
+  }
 
 (** Gate verdict. *)
 type verdict =
   | Approve
   | Reject of string
 
-val verdict_constructor_name : verdict -> string
 (** Issue #8436: canonical UPPERCASE name (without payload) for a
     [verdict] — used as the witness function for schema enum SSOT. *)
+val verdict_constructor_name : verdict -> string
 
-val valid_verdict_strings : string list
 (** Issue #8436: complete list of canonical [verdict] strings the
     schema enum advertises. Adding a 3rd constructor will fail
     compilation in [verdict_constructor_name]. *)
+val valid_verdict_strings : string list
 
 (** Which gate produced the verdict. Variant type prevents typos that
     would silently compile with a stringly-typed field. *)
@@ -51,13 +51,13 @@ type gate =
 val gate_to_string : gate -> string
 
 (** Structured review result with audit metadata for cross-model tracking. *)
-type review_result = {
-  verdict : verdict;
-  evaluator_cascade : string;
-  generator_cascade : string option;
-  gate : gate;
-  fallback_reason : string option;  (** Error message when gate=Fallback *)
-}
+type review_result =
+  { verdict : verdict
+  ; evaluator_cascade : string
+  ; generator_cascade : string option
+  ; gate : gate
+  ; fallback_reason : string option (** Error message when gate=Fallback *)
+  }
 
 (** Review a task completion claim with optional cross-model separation.
 
@@ -66,24 +66,26 @@ type review_result = {
       cross-model evaluation (e.g. ["cross_verifier"]).
     @param generator_cascade Optional name of the generator's cascade.
       Logged for auditing; not used in verification logic. *)
-val review :
-  ?evaluator_cascade:string ->
-  ?generator_cascade:string ->
-  ?completion_contract:string list ->
-  ?on_verdict:(review_result -> unit) ->
-  ?few_shot_block:string ->
-  ?sw:Eio.Switch.t ->
-  review_request -> review_result
+val review
+  :  ?evaluator_cascade:string
+  -> ?generator_cascade:string
+  -> ?completion_contract:string list
+  -> ?on_verdict:(review_result -> unit)
+  -> ?few_shot_block:string
+  -> ?sw:Eio.Switch.t
+  -> review_request
+  -> review_result
 
 (** Backward-compatible wrapper returning only the verdict. *)
-val review_verdict :
-  ?evaluator_cascade:string ->
-  ?generator_cascade:string ->
-  ?completion_contract:string list ->
-  ?on_verdict:(review_result -> unit) ->
-  ?few_shot_block:string ->
-  ?sw:Eio.Switch.t ->
-  review_request -> verdict
+val review_verdict
+  :  ?evaluator_cascade:string
+  -> ?generator_cascade:string
+  -> ?completion_contract:string list
+  -> ?on_verdict:(review_result -> unit)
+  -> ?few_shot_block:string
+  -> ?sw:Eio.Switch.t
+  -> review_request
+  -> verdict
 
 (** Check completion notes against a contract. Returns unmet items.
     Used internally by Gate 2.5; exposed for testing. *)
@@ -118,10 +120,11 @@ val find_excuse_pattern : string -> (string * string) option
     avoidance phrase to the LLM as a heuristic signal rather than
     a verdict — see #10113.  Exposed so tests can pin the prompt
     contract without standing up an OAS cascade. *)
-val build_prompt :
-  ?few_shot_block:string ->
-  ?excuse_advisory:string * string ->
-  review_request -> string
+val build_prompt
+  :  ?few_shot_block:string
+  -> ?excuse_advisory:string * string
+  -> review_request
+  -> string
 
 (** Parse LLM text output into a verdict (lenient fallback path).
     "APPROVE" -> [Ok Approve], "REJECT: reason" -> [Ok (Reject reason)].

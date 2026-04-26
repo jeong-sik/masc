@@ -21,47 +21,47 @@
     no fiber to transplant.  The pgid-owned child in Bg_task was
     already the right unit of ownership. *)
 
-type completed = {
-  status : Unix.process_status;
-  stdout : string;
-  stderr : string;
-  bytes_dropped_stdout : int;
-  bytes_dropped_stderr : int;
-}
+type completed =
+  { status : Unix.process_status
+  ; stdout : string
+  ; stderr : string
+  ; bytes_dropped_stdout : int
+  ; bytes_dropped_stderr : int
+  }
 
-type promoted = {
-  task_id : Bg_task.task_id;
-  partial_stdout : string;
-  partial_stderr : string;
-  bytes_dropped_stdout : int;
-  bytes_dropped_stderr : int;
-}
+type promoted =
+  { task_id : Bg_task.task_id
+  ; partial_stdout : string
+  ; partial_stderr : string
+  ; bytes_dropped_stdout : int
+  ; bytes_dropped_stderr : int
+  }
 
 type outcome =
   | Completed of completed
   | Promoted of promoted
   | Spawn_error of Bg_task.spawn_error
 
-val default_budget_ms : unit -> int
 (** Reads [MASC_BLOCKING_BUDGET_MS].  Defaults to [15_000] to match
     claude-code's foreground timeout.  A value of [0] or negative
     disables the race (behaves as unbounded foreground). *)
+val default_budget_ms : unit -> int
 
-val run_with_auto_bg :
-  clock:_ Eio.Time.clock ->
-  ?poll_interval_ms:int ->
-  ?base_path:string ->
-  budget_ms:int ->
-  keeper:string ->
-  argv:string list ->
-  cwd:string ->
-  envp:string array ->
-  timeout_sec:float ->
-  unit ->
-  outcome
 (** Spawn [argv] as a Bg_task, then race its completion against
     [budget_ms].  [poll_interval_ms] defaults to [50] — tight enough
     to catch a fast-exiting command inside the budget without burning
     CPU on idle polls.  [timeout_sec] is the upper-bound wall clock
     that Bg_task enforces even after promotion (pass [0.0] to
     disable). *)
+val run_with_auto_bg
+  :  clock:_ Eio.Time.clock
+  -> ?poll_interval_ms:int
+  -> ?base_path:string
+  -> budget_ms:int
+  -> keeper:string
+  -> argv:string list
+  -> cwd:string
+  -> envp:string array
+  -> timeout_sec:float
+  -> unit
+  -> outcome

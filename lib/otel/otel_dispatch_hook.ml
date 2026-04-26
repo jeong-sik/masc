@@ -21,21 +21,23 @@ module OT = Opentelemetry
 (** Record a tool call as an OTel span and Prometheus histogram observation. *)
 let on_tool_result (result : Tool_result.t) : Tool_result.t =
   (* Prometheus histogram: always active regardless of MASC_OTEL_ENABLED *)
-  Prometheus.observe_histogram "masc_tool_call_duration_seconds"
-    ~labels:[("tool_name", result.tool_name)]
+  Prometheus.observe_histogram
+    "masc_tool_call_duration_seconds"
+    ~labels:[ "tool_name", result.tool_name ]
     (result.duration_ms /. 1000.0);
   (* OTel span: only when enabled *)
-  if Otel_config.enabled then begin
+  if Otel_config.enabled
+  then (
     let status_attrs =
-      if result.success then
-        [("otel.status_code", `String "OK")]
-      else
-        [("otel.status_code", `String "ERROR")]
+      if result.success
+      then [ "otel.status_code", `String "OK" ]
+      else [ "otel.status_code", `String "ERROR" ]
     in
     let legacy_attrs =
-      [ ("tool.name", `String result.tool_name);
-        ("tool.success", `Bool result.success);
-        ("tool.duration_ms", `Int (int_of_float result.duration_ms)) ]
+      [ "tool.name", `String result.tool_name
+      ; "tool.success", `Bool result.success
+      ; "tool.duration_ms", `Int (int_of_float result.duration_ms)
+      ]
     in
     (* OpenTelemetry GenAI semantic conventions
        (https://opentelemetry.io/docs/specs/semconv/gen-ai/). Tool execution
@@ -44,14 +46,13 @@ let on_tool_result (result : Tool_result.t) : Tool_result.t =
        those belong on the parent agent / chat span (Step 2 of #7461),
        not on the inner tool span which is provider-agnostic. *)
     let gen_ai_attrs =
-      [ ("gen_ai.operation.name", `String "execute_tool");
-        ("gen_ai.tool.name", `String result.tool_name) ]
+      [ "gen_ai.operation.name", `String "execute_tool"
+      ; "gen_ai.tool.name", `String result.tool_name
+      ]
     in
     let attrs = legacy_attrs @ gen_ai_attrs @ status_attrs in
-    ignore (OT.Trace.with_ ("tool/" ^ result.tool_name) ~attrs
-      (fun _scope -> ()))
-  end;
+    ignore (OT.Trace.with_ ("tool/" ^ result.tool_name) ~attrs (fun _scope -> ())));
   result
+;;
 
-let install () =
-  Tool_dispatch.register_post_hook on_tool_result
+let install () = Tool_dispatch.register_post_hook on_tool_result

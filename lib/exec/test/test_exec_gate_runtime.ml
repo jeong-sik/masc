@@ -11,18 +11,19 @@ let with_env name value f =
       | Some v -> Unix.putenv name v
       | None -> Unix.putenv name "")
     f
+;;
 
 let with_tap_capture f =
   let captured = ref [] in
   Exec_tap.enable ~writer:(fun line -> captured := line :: !captured);
-  Fun.protect
-    ~finally:(fun () -> Exec_tap.disable ())
-    (fun () -> f captured)
+  Fun.protect ~finally:(fun () -> Exec_tap.disable ()) (fun () -> f captured)
+;;
 
 let find_gate_line lines =
   List.find_opt
     (fun line -> String_util.contains_substring line "\"kind\":\"Exec_gate.decision\"")
     lines
+;;
 
 let test_enforced_strict_safe_blocks () =
   with_env "MASC_EXEC_GATE" (Some "enforced") (fun () ->
@@ -36,6 +37,7 @@ let test_enforced_strict_safe_blocks () =
     in
     assert (status = Unix.WEXITED 126);
     assert (String_util.contains_substring out "ask_required"))
+;;
 
 let test_parallel_records_shadow_and_executes () =
   with_tap_capture (fun captured ->
@@ -55,6 +57,7 @@ let test_parallel_records_shadow_and_executes () =
         assert (String_util.contains_substring line "\"gate_mode\":\"parallel\"");
         assert (String_util.contains_substring line "\"gate_verdict\":\"ask\"");
         assert (String_util.contains_substring line "\"gate_enforced\":false")))
+;;
 
 let test_enforced_internal_audited_allows () =
   with_env "MASC_EXEC_GATE" (Some "enforced") (fun () ->
@@ -68,6 +71,7 @@ let test_enforced_internal_audited_allows () =
     in
     assert (status = Unix.WEXITED 0);
     assert (String_util.contains_substring out "git version"))
+;;
 
 let test_enforced_internal_stdin_allows () =
   with_env "MASC_EXEC_GATE" (Some "enforced") (fun () ->
@@ -82,6 +86,7 @@ let test_enforced_internal_stdin_allows () =
     in
     assert (status = Unix.WEXITED 0);
     assert (String_util.contains_substring out "hello"))
+;;
 
 let () =
   test_enforced_strict_safe_blocks ();
@@ -89,3 +94,4 @@ let () =
   test_enforced_internal_audited_allows ();
   test_enforced_internal_stdin_allows ();
   print_endline "[test_exec_gate_runtime] all tests passed"
+;;

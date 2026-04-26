@@ -5,20 +5,20 @@
  (public_name masc_mcp.gate)
  (wrapped false)
  (modules
-   channel_gate
-   channel_gate_connector
-   channel_gate_discord_names
-   channel_gate_discord_state
-   channel_gate_imessage_state
-   channel_gate_metrics
-   gate_protocol
-   gate_time_util)
+  channel_gate
+  channel_gate_connector
+  channel_gate_discord_names
+  channel_gate_discord_state
+  channel_gate_imessage_state
+  channel_gate_metrics
+  gate_protocol
+  gate_time_util)
  (libraries
-   yojson
-   unix
-   eio
-   eio.unix
-   masc_config
-   masc_core
-   masc_pulse
-   fs_compat))
+  yojson
+  unix
+  eio
+  eio.unix
+  masc_config
+  masc_core
+  masc_pulse
+  fs_compat))

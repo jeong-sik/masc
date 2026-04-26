@@ -11,16 +11,15 @@
     log aggregators) and in-memory totals (for dashboards / HTTP
     snapshot endpoints). *)
 
-val incr_gate_diff : Gate_diff_types.gate_diff -> unit
 (** Record one P5 shadow-gate call under the given bucket.  Always
     increments [gate_diff_total] in the snapshot. *)
+val incr_gate_diff : Gate_diff_types.gate_diff -> unit
 
-val incr_auto_bg_observed : promoted_candidate:bool -> unit
 (** Record one P4 foreground-only call that the observer inspected.
     When [promoted_candidate] is [true] the elapsed duration would
     have tripped [MASC_BLOCKING_BUDGET_MS]. *)
+val incr_auto_bg_observed : promoted_candidate:bool -> unit
 
-val incr_gh_exit_class : Gh_exit_class.t -> unit
 (** Record one docker-sandbox gh invocation under its exit class, as
     classified by {!Gh_exit_class.classify}.  Callers increment this
     from the docker shell emission sites in [Keeper_shell_docker] so
@@ -31,8 +30,8 @@ val incr_gh_exit_class : Gh_exit_class.t -> unit
 
     This is the first production consumer of {!Gh_exit_class};
     previous callers only relied on raw exit codes. *)
+val incr_gh_exit_class : Gh_exit_class.t -> unit
 
-val incr_too_complex_by_tag : string -> unit
 (** Record one shadow rejection attributable to a subset-excluded
     bash construct.  [tag] is the [parse_tag] string emitted by
     [Worker_dev_tools.shadow_parse_outcome] — accepted forms are the
@@ -43,57 +42,58 @@ val incr_too_complex_by_tag : string -> unit
     Callers should invoke this IN ADDITION to [incr_gate_diff
     `Shadow_cannot_parse] — the per-reason buckets are a histogram
     refinement of that single bucket, not a replacement. *)
+val incr_too_complex_by_tag : string -> unit
 
-val reset : unit -> unit
 (** Zero every counter.  Used by tests; operators should not rely on
     this surface. *)
+val reset : unit -> unit
 
-type snapshot = {
-  gate_diff_total : int;
-  gate_diff_agree : int;
-  gate_diff_legacy_allow_shadow_deny : int;
-  gate_diff_legacy_deny_shadow_allow : int;
-  gate_diff_shadow_cannot_parse : int;
-  auto_bg_observed : int;
-  auto_bg_would_have_promoted : int;
-  (* Per-reason histogram of the shadow_cannot_parse bucket.  Mirrors
+type snapshot =
+  { gate_diff_total : int
+  ; gate_diff_agree : int
+  ; gate_diff_legacy_allow_shadow_deny : int
+  ; gate_diff_legacy_deny_shadow_allow : int
+  ; gate_diff_shadow_cannot_parse : int
+  ; auto_bg_observed : int
+  ; auto_bg_would_have_promoted : int
+  ; (* Per-reason histogram of the shadow_cannot_parse bucket.  Mirrors
      [Parsed.reason_too_complex] 1:1 except for [Unknown_construct]
      which collapses into [too_complex_other].  The sum of the
      per-reason buckets plus [too_complex_parse_error] plus
      [too_complex_parse_aborted] plus [too_complex_other] matches
      [gate_diff_shadow_cannot_parse]. *)
-  too_complex_redirect : int;
-  too_complex_logic_op : int;
-  too_complex_heredoc : int;
-  too_complex_here_string : int;
-  too_complex_cmd_subst : int;
-  too_complex_proc_subst : int;
-  too_complex_subshell : int;
-  too_complex_arith_expansion : int;
-  too_complex_control_flow : int;
-  too_complex_function_def : int;
-  too_complex_glob_brace : int;
-  too_complex_background : int;
-  too_complex_parse_error : int;
-  too_complex_parse_aborted : int;
-  too_complex_other : int;
-  (* Distribution of docker-sandbox gh invocations by exit class, as
+    too_complex_redirect : int
+  ; too_complex_logic_op : int
+  ; too_complex_heredoc : int
+  ; too_complex_here_string : int
+  ; too_complex_cmd_subst : int
+  ; too_complex_proc_subst : int
+  ; too_complex_subshell : int
+  ; too_complex_arith_expansion : int
+  ; too_complex_control_flow : int
+  ; too_complex_function_def : int
+  ; too_complex_glob_brace : int
+  ; too_complex_background : int
+  ; too_complex_parse_error : int
+  ; too_complex_parse_aborted : int
+  ; too_complex_other : int
+  ; (* Distribution of docker-sandbox gh invocations by exit class, as
      classified by {!Gh_exit_class.classify}.  Callers increment these
      from the JSON emission sites in [Keeper_shell_docker]; non-gh
      commands in the same sandbox do not touch these counters. *)
-  gh_exit_ok_0 : int;
-  gh_exit_policy_blocked : int;
-  gh_exit_type_mismatch : int;
-  gh_exit_auth_failed : int;
-  gh_exit_network : int;
-  gh_exit_unknown : int;
-}
+    gh_exit_ok_0 : int
+  ; gh_exit_policy_blocked : int
+  ; gh_exit_type_mismatch : int
+  ; gh_exit_auth_failed : int
+  ; gh_exit_network : int
+  ; gh_exit_unknown : int
+  }
 
 val snapshot : unit -> snapshot
 
-val snapshot_to_json : snapshot -> Yojson.Safe.t
 (** Stable JSON shape for dashboard / HTTP consumers.  Field names
     mirror the record labels exactly. *)
+val snapshot_to_json : snapshot -> Yojson.Safe.t
 
 (** {2 Derived ratios}
 
@@ -106,7 +106,6 @@ val snapshot_to_json : snapshot -> Yojson.Safe.t
     "observer off" read must be safely serialisable as a finite
     float (no NaN / inf in the JSON output). *)
 
-val disagree_ratio : snapshot -> float
 (** [(gate_diff_legacy_allow_shadow_deny +
         gate_diff_legacy_deny_shadow_allow)
      / gate_diff_total].
@@ -115,8 +114,8 @@ val disagree_ratio : snapshot -> float
     AST gate produced opposite verdicts, excluding [`Shadow_cannot_parse].
     Drives the [MASC_BASH_AST_ONLY] flip criterion (target 0.0 over a
     rolling 7-day window). *)
+val disagree_ratio : snapshot -> float
 
-val shadow_parse_coverage : snapshot -> float
 (** [1.0 - gate_diff_shadow_cannot_parse / gate_diff_total].
 
     Fraction of observed P5 calls that the AST gate could fully parse
@@ -124,8 +123,8 @@ val shadow_parse_coverage : snapshot -> float
     disagreement, not a parser bailout).  Drives the "parse gap
     < 1%" flip criterion in the runbook — a coverage of [0.99] or
     higher is the flip target. *)
+val shadow_parse_coverage : snapshot -> float
 
-val auto_bg_promotion_rate : snapshot -> float
 (** [auto_bg_would_have_promoted / auto_bg_observed].
 
     Fraction of P4 observed foreground calls that exceeded
@@ -133,8 +132,8 @@ val auto_bg_promotion_rate : snapshot -> float
     tuning ("would promotion fire too often?") and the
     [MASC_BASH_AUTO_BG] default-flip decision ("is promotion rare
     enough to be tolerable?"). *)
+val auto_bg_promotion_rate : snapshot -> float
 
-val snapshot_to_json_with_ratios : snapshot -> Yojson.Safe.t
 (** Same flat field set as {!snapshot_to_json}, with an additional
     ["ratios"] sibling object containing the three derived ratios
     ({!disagree_ratio}, {!shadow_parse_coverage},
@@ -144,3 +143,4 @@ val snapshot_to_json_with_ratios : snapshot -> Yojson.Safe.t
     existing dashboards keep working.  All ratio values are finite
     ([0.0] when the denominator is zero), so the output remains a
     valid JSON document regardless of observer state. *)
+val snapshot_to_json_with_ratios : snapshot -> Yojson.Safe.t

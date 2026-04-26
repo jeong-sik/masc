@@ -9,7 +9,6 @@
     w.r.t. other fibers, so no mutex is needed. *)
 
 open Keeper_types
-
 module StringMap : Map.S with type key = string
 
 (** Structured failure reason for crash cohort detection. *)
@@ -17,10 +16,10 @@ type ambiguous_partial_commit_kind =
   | Post_commit_timeout
   | Post_commit_failure
 
-type ambiguous_partial_commit = {
-  kind : ambiguous_partial_commit_kind;
-  detail : string;
-}
+type ambiguous_partial_commit =
+  { kind : ambiguous_partial_commit_kind
+  ; detail : string
+  }
 
 type failure_reason =
   | Heartbeat_consecutive_failures of int
@@ -30,9 +29,7 @@ type failure_reason =
   | Fiber_unresolved
   | Exception of string
 
-val ambiguous_partial_commit_kind_to_string :
-  ambiguous_partial_commit_kind -> string
-
+val ambiguous_partial_commit_kind_to_string : ambiguous_partial_commit_kind -> string
 val failure_reason_to_string : failure_reason -> string
 
 (** #10584: cohort key for grouping failures by variant (ignores
@@ -72,66 +69,65 @@ type compaction_stage =
   | Compaction_compacting
   | Compaction_done
 
-type turn_measurement = {
-  tm_captured_at : float;
-  tm_auto_rules : Keeper_state_machine.auto_rule_summary;
-}
+type turn_measurement =
+  { tm_captured_at : float
+  ; tm_auto_rules : Keeper_state_machine.auto_rule_summary
+  }
 
-type registry_entry = {
-  base_path : string;
-  name : string;
-  meta : keeper_meta;
-  phase : Keeper_state_machine.phase;
-      (** Keeper lifecycle phase (RFC-0002 11-state machine). *)
-  conditions : Keeper_state_machine.conditions;
-      (** Observable conditions that derive [phase]. *)
-  fiber_stop : bool Atomic.t;
-  fiber_wakeup : bool Atomic.t;
-  started_at : float;
-  grpc_close : (unit -> unit) option Atomic.t;
-  done_p : [ `Stopped | `Crashed of string ] Eio.Promise.t;
-  done_r : [ `Stopped | `Crashed of string ] Eio.Promise.u;
-      (** Exposed so keeper lifecycle coordinators can resolve stop/crash exactly once.
+type registry_entry =
+  { base_path : string
+  ; name : string
+  ; meta : keeper_meta
+  ; phase : Keeper_state_machine.phase
+    (** Keeper lifecycle phase (RFC-0002 11-state machine). *)
+  ; conditions : Keeper_state_machine.conditions
+    (** Observable conditions that derive [phase]. *)
+  ; fiber_stop : bool Atomic.t
+  ; fiber_wakeup : bool Atomic.t
+  ; started_at : float
+  ; grpc_close : (unit -> unit) option Atomic.t
+  ; done_p : [ `Stopped | `Crashed of string ] Eio.Promise.t
+  ; done_r : [ `Stopped | `Crashed of string ] Eio.Promise.u
+    (** Exposed so keeper lifecycle coordinators can resolve stop/crash exactly once.
           Callers must preserve a single terminal outcome per keeper run. *)
-  restart_count : int;
-  last_restart_ts : float;
-  dead_since_ts : float option;
-  crash_log : (float * string) list;
-  last_error : string option;
-  last_failure_reason : failure_reason option;
-  turn_consecutive_failures : int;
-  last_agent_count : int;
-  board_wakeups : float StringMap.t;
-  board_cursor_ts : float;
-  board_cursor_post_id : string option;
-  tool_usage : Keeper_types.tool_call_entry StringMap.t;
-  transition_seq : int;
-  waiting_for_inference : bool Atomic.t;
-      (** Ephemeral flag: true when keeper is blocked in admission queue.
+  ; restart_count : int
+  ; last_restart_ts : float
+  ; dead_since_ts : float option
+  ; crash_log : (float * string) list
+  ; last_error : string option
+  ; last_failure_reason : failure_reason option
+  ; turn_consecutive_failures : int
+  ; last_agent_count : int
+  ; board_wakeups : float StringMap.t
+  ; board_cursor_ts : float
+  ; board_cursor_post_id : string option
+  ; tool_usage : Keeper_types.tool_call_entry StringMap.t
+  ; transition_seq : int
+  ; waiting_for_inference : bool Atomic.t
+    (** Ephemeral flag: true when keeper is blocked in admission queue.
           Does not affect state machine phase derivation. *)
-  last_auto_rules :
-    (float * Keeper_state_machine.auto_rule_summary) option;
-      (** Snapshot of the most recent [Context_measured] auto-rule summary.
+  ; last_auto_rules : (float * Keeper_state_machine.auto_rule_summary) option
+    (** Snapshot of the most recent [Context_measured] auto-rule summary.
           Stored as [(wall_clock, summary)] so the composite observer
           (RFC-0003 §6) can surface the last measurement without reading
           history files. [None] until the first [Context_measured] event
           has been dispatched. *)
-  last_event_bus_correlation : string option;
-      (** Most recent OAS Event_bus [correlation_id] extracted after a
+  ; last_event_bus_correlation : string option
+    (** Most recent OAS Event_bus [correlation_id] extracted after a
           keeper turn via [Event_bus.drain]. [None] until the first
           successful drain. Stable per session (= [meta.runtime.trace_id]
           as passed to OAS). *)
-  pending_turn_measurement : turn_measurement option;
-      (** Fresh measurement captured by [Context_measured] and reserved
+  ; pending_turn_measurement : turn_measurement option
+    (** Fresh measurement captured by [Context_measured] and reserved
           for the next [mark_turn_measurement] call. Hidden from idle
           observers so the composite snapshot stays turn-scoped. *)
-  current_turn_observation : turn_observation option;
-      (** Live, turn-scoped observation record (issue #7122 Phase 1).
+  ; current_turn_observation : turn_observation option
+    (** Live, turn-scoped observation record (issue #7122 Phase 1).
           [Some _] while a turn is actively executing. [None] outside
           any turn. Anti-stale barrier: sub-FSM live states are only
           observable while [Some]. *)
-  last_completed_turn : completed_turn_observation option;
-      (** Frozen snapshot of the most recently completed turn
+  ; last_completed_turn : completed_turn_observation option
+    (** Frozen snapshot of the most recently completed turn
           (RFC-0003 Phase 2 design A3). Populated by
           [mark_turn_finished] when [current_turn_observation] is
           [Some]; carries terminal data for the composite observer's
@@ -142,37 +138,36 @@ type registry_entry = {
           result": idle keepers never surface stale terminal states
           on the live sub-FSM fields, but operators can still see
           the most recent outcome in [last_outcome]. *)
-  compaction_stage : compaction_stage;
-      (** Explicit KMC projection owned by the runtime, not derived from
+  ; compaction_stage : compaction_stage
+    (** Explicit KMC projection owned by the runtime, not derived from
           parent phase on read. This lets the observer surface
           [done] without guessing from conditions. *)
-}
+  }
 
-and turn_observation = {
-  turn_id : int;
-      (** Per-keeper turn counter at turn start (matches
+and turn_observation =
+  { turn_id : int
+    (** Per-keeper turn counter at turn start (matches
           [meta.runtime.usage.total_turns] + 1). *)
-  started_at : float;
-      (** Unix timestamp when this turn record was installed. *)
-  turn_phase : turn_phase;
-  decision_stage : decision_stage;
-  cascade_state : cascade_state;
-  measurement : turn_measurement option;
-  measurement_bind_count : int;
-      (** Number of [Context_measured] snapshots bound to this live turn.
+  ; started_at : float (** Unix timestamp when this turn record was installed. *)
+  ; turn_phase : turn_phase
+  ; decision_stage : decision_stage
+  ; cascade_state : cascade_state
+  ; measurement : turn_measurement option
+  ; measurement_bind_count : int
+    (** Number of [Context_measured] snapshots bound to this live turn.
           The composite observer's [event_priority_monotone] invariant
           requires this to stay <= 1. *)
-  selected_model : string option;
-}
+  ; selected_model : string option
+  }
 
-and completed_turn_observation = {
-  ct_turn_id : int;
-  ct_started_at : float;
-  ct_ended_at : float;
-  ct_decision_stage : decision_stage;
-  ct_cascade_state : cascade_state;
-  ct_selected_model : string option;
-}
+and completed_turn_observation =
+  { ct_turn_id : int
+  ; ct_started_at : float
+  ; ct_ended_at : float
+  ; ct_decision_stage : decision_stage
+  ; ct_cascade_state : cascade_state
+  ; ct_selected_model : string option
+  }
 
 (** Register a keeper with an already-live fiber. Primarily used by tests and
     direct fixtures that want a keeper to begin in [Running]. *)
@@ -191,9 +186,12 @@ val register_restarting : base_path:string -> string -> keeper_meta -> registry_
 (** Prepare a registry entry for a newly launched keepalive fiber.
     Clears stale per-fiber atomic latches before applying [Fiber_started] so
     the runtime stop flag matches the state machine's restart semantics. *)
-val prepare_fiber_launch :
-  base_path:string -> string ->
-  (Keeper_state_machine.transition_result, Keeper_state_machine.transition_error) result
+val prepare_fiber_launch
+  :  base_path:string
+  -> string
+  -> ( Keeper_state_machine.transition_result
+       , Keeper_state_machine.transition_error )
+       result
 
 (** Unregister a keeper (removes from registry). *)
 val unregister : base_path:string -> string -> unit
@@ -234,29 +232,24 @@ val mark_turn_started : base_path:string -> string -> unit
 val mark_turn_measurement : base_path:string -> string -> unit
 
 (** Advance the live turn's projected decision stage. No-op if idle. *)
-val set_turn_decision_stage :
-  base_path:string -> string -> decision_stage -> unit
+val set_turn_decision_stage : base_path:string -> string -> decision_stage -> unit
 
 (** Advance the live turn's projected cascade state. No-op if idle.
     Sets [turn_phase] to [Turn_executing] for [Cascade_trying] and to
     [Turn_finalizing] for terminal cascade states. *)
-val set_turn_cascade_state :
-  base_path:string -> string -> cascade_state -> unit
+val set_turn_cascade_state : base_path:string -> string -> cascade_state -> unit
 
 (** Update the live turn's phase directly. No-op if idle. *)
-val set_turn_phase :
-  base_path:string -> string -> turn_phase -> unit
+val set_turn_phase : base_path:string -> string -> turn_phase -> unit
 
 (** Record the surface model selected for the current turn. No-op if idle. *)
-val set_turn_selected_model :
-  base_path:string -> string -> string option -> unit
+val set_turn_selected_model : base_path:string -> string -> string option -> unit
 
 (** Reset a live turn into the post-compaction retry posture used by
     overflow recovery. Preserves the bound measurement, but clears the
     previous cascade attempt and selected model so the next retry starts
     from [Prompting + Guard_ok + Cascade_idle]. *)
-val prepare_turn_retry_after_compaction :
-  base_path:string -> string -> unit
+val prepare_turn_retry_after_compaction : base_path:string -> string -> unit
 
 (** Cross-registry convenience for hooks that only know the keeper name. *)
 val mark_turn_gate_rejected_by_name : string -> unit
@@ -314,10 +307,13 @@ val fiber_health_of : base_path:string -> string -> fiber_health
 val crash_log_of : base_path:string -> string -> (float * string) list
 
 (** Restore supervisor state on a freshly registered entry (used by restart). *)
-val restore_supervisor_state :
-  base_path:string -> string ->
-  restart_count:int -> last_restart_ts:float ->
-  crash_log:(float * string) list -> unit
+val restore_supervisor_state
+  :  base_path:string
+  -> string
+  -> restart_count:int
+  -> last_restart_ts:float
+  -> crash_log:(float * string) list
+  -> unit
 
 (** Last known agent count for roster-change detection. Returns 0 if not found. *)
 val get_last_agent_count : base_path:string -> string -> int
@@ -327,8 +323,12 @@ val set_last_agent_count : base_path:string -> string -> int -> unit
 
 (** Check if a board-reactive wakeup is allowed (debounce).
     Records timestamp if allowed. Returns true for unregistered keepers. *)
-val board_wakeup_allowed :
-  base_path:string -> string -> post_id:string -> debounce_sec:float -> bool
+val board_wakeup_allowed
+  :  base_path:string
+  -> string
+  -> post_id:string
+  -> debounce_sec:float
+  -> bool
 
 (** Clear all board wakeup timestamps for a keeper. No-op if not found. *)
 val clear_board_wakeups : base_path:string -> string -> unit
@@ -349,16 +349,21 @@ val set_board_cursor_ts : base_path:string -> string -> float -> unit
 val get_board_cursor : base_path:string -> string -> float * string option
 
 (** Update board event cursor token. No-op if not found. *)
-val set_board_cursor :
-  base_path:string -> string -> float -> string option -> unit
+val set_board_cursor : base_path:string -> string -> float -> string option -> unit
 
 (** Record a tool call for a keeper. No-op if not found. *)
-val record_tool_use :
-  base_path:string -> string -> tool_name:string -> success:bool -> unit
+val record_tool_use
+  :  base_path:string
+  -> string
+  -> tool_name:string
+  -> success:bool
+  -> unit
 
 (** Get tool usage sorted by call count descending. *)
-val tool_usage_of : base_path:string -> string ->
-  (string * Keeper_types.tool_call_entry) list
+val tool_usage_of
+  :  base_path:string
+  -> string
+  -> (string * Keeper_types.tool_call_entry) list
 
 (** Look up a keeper by name across all base_paths (O(n) scan). *)
 val find_by_name : string -> registry_entry option
@@ -370,15 +375,17 @@ val find_by_agent_name : string -> registry_entry option
 val find_by_id : Keeper_id.Uid.t -> registry_entry option
 
 (** Get tool usage by keeper name (scans all base_paths). *)
-val tool_usage_of_by_name : string ->
-  (string * Keeper_types.tool_call_entry) list
+val tool_usage_of_by_name : string -> (string * Keeper_types.tool_call_entry) list
 
 (** Resolve config for a keeper tool dispatch.
     Tries scoped lookup first (O(1) map lookup), then falls back to
     cross-base_path scan (O(n)) when not found in the caller's scope.
     Returns config with the keeper's actual base_path, or the original
     config unchanged if the keeper is not in the registry. *)
-val resolve_config : Coord_utils_backend_setup.config -> string -> Coord_utils_backend_setup.config
+val resolve_config
+  :  Coord_utils_backend_setup.config
+  -> string
+  -> Coord_utils_backend_setup.config
 
 (** Flush in-memory tool usage stats to disk for persistence across restarts. *)
 val flush_tool_usage : base_path:string -> string -> unit
@@ -392,19 +399,26 @@ val restore_tool_usage : base_path:string -> string -> unit
     Updates conditions, derives new phase, syncs legacy state.
     Returns the transition result or an error for invalid transitions.
     Prefer this over [set_state] for new code. *)
-val dispatch_event :
-  base_path:string -> string -> Keeper_state_machine.event ->
-  (Keeper_state_machine.transition_result, Keeper_state_machine.transition_error) result
+val dispatch_event
+  :  base_path:string
+  -> string
+  -> Keeper_state_machine.event
+  -> ( Keeper_state_machine.transition_result
+       , Keeper_state_machine.transition_error )
+       result
 
 (** Like [dispatch_event], but preserves richer audit metadata when the event
     causes a phase transition. *)
-val dispatch_event_with_audit :
-  base_path:string ->
-  ?snapshot:Keeper_measurement.measurement_snapshot ->
-  ?events_fired:Keeper_state_machine.event list ->
-  ?selected_event:Keeper_state_machine.event ->
-  string -> Keeper_state_machine.event ->
-  (Keeper_state_machine.transition_result, Keeper_state_machine.transition_error) result
+val dispatch_event_with_audit
+  :  base_path:string
+  -> ?snapshot:Keeper_measurement.measurement_snapshot
+  -> ?events_fired:Keeper_state_machine.event list
+  -> ?selected_event:Keeper_state_machine.event
+  -> string
+  -> Keeper_state_machine.event
+  -> ( Keeper_state_machine.transition_result
+       , Keeper_state_machine.transition_error )
+       result
 
 (** Get the fine-grained phase of a keeper. *)
 val get_phase : base_path:string -> string -> Keeper_state_machine.phase option

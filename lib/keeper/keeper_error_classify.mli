@@ -30,13 +30,14 @@ val is_auto_recoverable_turn_error : Oas.Error.sdk_error -> bool
 
 (** Reclassify any post-commit turn error as a persistent integrity error when
     mutating tool calls already committed in the same turn. *)
-val reclassify_error_after_side_effect :
-  tool_names:string list ->
-  Oas.Error.sdk_error ->
-  Oas.Error.sdk_error
+val reclassify_error_after_side_effect
+  :  tool_names:string list
+  -> Oas.Error.sdk_error
+  -> Oas.Error.sdk_error
 
-val post_commit_failure_kind_of_error :
-  Oas.Error.sdk_error -> Keeper_registry.ambiguous_partial_commit_kind
+val post_commit_failure_kind_of_error
+  :  Oas.Error.sdk_error
+  -> Keeper_registry.ambiguous_partial_commit_kind
 
 (** [true] when an error represents an ambiguous partial commit after a
     mutating tool call succeeded but the turn failed before a clean result. *)
@@ -57,10 +58,10 @@ type degraded_retry =
 (** Opportunistically fail open to a broader cascade when the current
     effective cascade is temporarily unavailable (for example cooldown /
     local-only bootstrap fallback). *)
-val fallback_cascade_for_unavailable_profile :
-  base_cascade:string ->
-  effective_cascade:string ->
-  string option
+val fallback_cascade_for_unavailable_profile
+  :  base_cascade:string
+  -> effective_cascade:string
+  -> string option
 
 (** Classifies an SDK error into a fallback reason label when the cascade
     failure is recoverable via [fallback_cascade] or [degraded_rotation].
@@ -69,17 +70,16 @@ val fallback_cascade_for_unavailable_profile :
     Exposed for unit tests; production callers go through
     [degraded_retry_after_recoverable_error] or
     [degraded_rotation_after_recoverable_error]. *)
-val recoverable_cascade_failure_reason :
-  Oas.Error.sdk_error -> string option
+val recoverable_cascade_failure_reason : Oas.Error.sdk_error -> string option
 
 (** Returns the one-shot degraded retry lane for recoverable whole-cascade
     failures. Required-tool turns stay terminal, and already-degraded lanes
     do not broaden further. *)
-val degraded_retry_after_recoverable_error :
-  effective_cascade:string ->
-  tool_requirement:string ->
-  Oas.Error.sdk_error ->
-  degraded_retry option
+val degraded_retry_after_recoverable_error
+  :  effective_cascade:string
+  -> tool_requirement:string
+  -> Oas.Error.sdk_error
+  -> degraded_retry option
 
 (** Returns the next untried cascade in the same-turn recovery group for a
     whole-cascade failure. [rotation_cascades], when provided, is the
@@ -94,31 +94,30 @@ val degraded_retry_after_recoverable_error :
     any other candidate; if it duplicates the effective cascade or has
     already been attempted, the next legal candidate is returned.
     @since 0.174.0 *)
-val degraded_rotation_after_recoverable_error :
-  ?rotation_cascades:string list ->
-  ?fallback_hint:string ->
-  base_cascade:string ->
-  effective_cascade:string ->
-  tool_requirement:string ->
-  attempted_cascades:string list ->
-  Oas.Error.sdk_error ->
-  degraded_retry option
+val degraded_rotation_after_recoverable_error
+  :  ?rotation_cascades:string list
+  -> ?fallback_hint:string
+  -> base_cascade:string
+  -> effective_cascade:string
+  -> tool_requirement:string
+  -> attempted_cascades:string list
+  -> Oas.Error.sdk_error
+  -> degraded_retry option
 
 val max_transient_retries : int
-
 val transient_backoff_sec : int -> float
 
 (** Filter and deduplicate tool names to those with mutating side effects. *)
 val committed_mutating_tools : string list -> string list
 
-val classify_post_commit_failure :
-  tool_names:string list ->
-  ?kind:Keeper_registry.ambiguous_partial_commit_kind ->
-  Oas.Error.sdk_error ->
-  (Oas.Error.sdk_error * Keeper_registry.failure_reason) option
+val classify_post_commit_failure
+  :  tool_names:string list
+  -> ?kind:Keeper_registry.ambiguous_partial_commit_kind
+  -> Oas.Error.sdk_error
+  -> (Oas.Error.sdk_error * Keeper_registry.failure_reason) option
 
-val summarize_post_commit_failure :
-  tool_names:string list ->
-  kind:Keeper_registry.ambiguous_partial_commit_kind ->
-  Oas.Error.sdk_error ->
-  string
+val summarize_post_commit_failure
+  :  tool_names:string list
+  -> kind:Keeper_registry.ambiguous_partial_commit_kind
+  -> Oas.Error.sdk_error
+  -> string

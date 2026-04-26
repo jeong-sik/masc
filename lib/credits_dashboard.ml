@@ -14,12 +14,10 @@
 *)
 
 (** Get base path for local dashboard data *)
-let base_path () =
-  Env_config_core.base_path ()
+let base_path () = Env_config_core.base_path ()
 
 (** Credits JSON path *)
-let credits_json_path () =
-  Filename.concat (base_path ()) "data/state/credits.json"
+let credits_json_path () = Filename.concat (base_path ()) "data/state/credits.json"
 
 (** Read credits.json *)
 let read_credits_json () : Yojson.Safe.t option =
@@ -27,27 +25,28 @@ let read_credits_json () : Yojson.Safe.t option =
   match Safe_ops.read_json_file_safe path with
   | Ok json -> Some json
   | Error _ -> None
+;;
 
 (** Get credits JSON as string *)
 let json_api () : string =
   match read_credits_json () with
   | Some json -> Yojson.Safe.to_string json
   | None -> {|{"error": "credits.json not found"}|}
+;;
 
 (** Color for percentage (CSS class) *)
 let color_class pct =
-  if pct >= 70.0 then "green"
-  else if pct >= 30.0 then "yellow"
-  else "red"
+  if pct >= 70.0 then "green" else if pct >= 30.0 then "yellow" else "red"
+;;
 
 (** Color for balance *)
 let balance_class bal =
-  if bal >= 50.0 then "green"
-  else if bal >= 20.0 then "yellow"
-  else "red"
+  if bal >= 50.0 then "green" else if bal >= 20.0 then "yellow" else "red"
+;;
 
 (** Generate the dashboard HTML page *)
-let html () = {|<!DOCTYPE html>
+let html () =
+  {|<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -523,3 +522,4 @@ let html () = {|<!DOCTYPE html>
   </script>
 </body>
 </html>|}
+;;

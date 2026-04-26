@@ -48,20 +48,21 @@ val is_agent_joined : config -> agent_name:string -> bool
 (** {1 Messages} *)
 
 (** Return raw messages since [since_seq], up to [limit]. *)
-val get_messages_raw :
-  config -> since_seq:int -> limit:int -> Types.message list
+val get_messages_raw : config -> since_seq:int -> limit:int -> Types.message list
 
 (** Return all raw messages after [since_seq], ordered
     from oldest unseen to newest unseen. *)
-val get_all_messages_raw :
-  config -> since_seq:int -> Types.message list
+val get_all_messages_raw : config -> since_seq:int -> Types.message list
 
 (** {1 Formatted Output} *)
 
 (** List tasks with optional filters, returning a formatted string. *)
-val list_tasks :
-  ?include_done:bool -> ?include_cancelled:bool -> ?status:string ->
-  config -> string
+val list_tasks
+  :  ?include_done:bool
+  -> ?include_cancelled:bool
+  -> ?status:string
+  -> config
+  -> string
 
 (** Return recent messages as a formatted string. *)
 val get_messages : config -> since_seq:int -> limit:int -> string
@@ -86,6 +87,10 @@ val take_first : int -> 'a list -> 'a list
 
 (** Read most-recent messages from filesystem or PG backend without
     parsing the entire history directory. *)
-val collect_recent_messages :
-  config -> msgs_path:string -> since_seq:int -> limit:int ->
-  warn_label:string -> Types.message list
+val collect_recent_messages
+  :  config
+  -> msgs_path:string
+  -> since_seq:int
+  -> limit:int
+  -> warn_label:string
+  -> Types.message list

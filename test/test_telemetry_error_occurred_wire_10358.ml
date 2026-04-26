@@ -41,25 +41,29 @@ let make_config () =
   Unix.mkdir dir 0o755;
   let config = Masc_mcp.Coord.default_config dir in
   ignore (Masc_mcp.Coord.init config ~agent_name:(Some "test-10358"));
-  (config, dir)
+  config, dir
+;;
 
 let rec rm_rf path =
-  if Sys.file_exists path then
-    if Sys.is_directory path then begin
-      Sys.readdir path
-      |> Array.iter (fun n -> rm_rf (Filename.concat path n));
-      Unix.rmdir path
-    end else
-      Sys.remove path
+  if Sys.file_exists path
+  then
+    if Sys.is_directory path
+    then (
+      Sys.readdir path |> Array.iter (fun n -> rm_rf (Filename.concat path n));
+      Unix.rmdir path)
+    else Sys.remove path
+;;
 
 (* [track_tool_called] reaches the Dated_jsonl store via an Eio.Mutex,
    so callers need an Eio runtime even when the JSONL ends up routed
    through the in-memory backend. *)
 let with_temp_config f =
-  Eio_main.run @@ fun env ->
+  Eio_main.run
+  @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let config, dir = make_config () in
   Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f config)
+;;
 
 (* Read the most recent [n] event tags via [Telemetry_eio]'s own
    read API so we hit the same Dated_jsonl store the writer cached.
@@ -75,6 +79,7 @@ let event_kind_tag (e : T.event) =
   | T.Error_occurred _ -> "Error_occurred"
   | T.Tool_called _ -> "Tool_called"
   | T.Tool_assigned _ -> "Tool_assigned"
+;;
 
 (* [Coord.init] emits an [Agent_joined] event during setup; filter
    it out so test assertions only see the events explicitly emitted
@@ -83,42 +88,55 @@ let recent_events_kinds config _n =
   let records = T.read_all_events config in
   records
   |> List.filter_map (fun (r : T.event_record) ->
-         match event_kind_tag r.event with
-         | "Agent_joined" -> None
-         | tag -> Some tag)
+    match event_kind_tag r.event with
+    | "Agent_joined" -> None
+    | tag -> Some tag)
+;;
 
 (* --- 1. success=true + error_kind: only Tool_called ------------ *)
 
 let test_success_true_no_error_emit () =
-  with_temp_config @@ fun config ->
-  T.track_tool_called config ~tool_name:"masc_status"
-    ~success:true ~duration_ms:5
+  with_temp_config
+  @@ fun config ->
+  T.track_tool_called
+    config
+    ~tool_name:"masc_status"
+    ~success:true
+    ~duration_ms:5
     ~error_kind:"timeout"
     ();
   let kinds = recent_events_kinds config 5 in
-  check (list string)
-    "only Tool_called when success=true (no Error_occurred even \
-     if error_kind passed)"
-    [ "Tool_called" ] kinds
+  check
+    (list string)
+    "only Tool_called when success=true (no Error_occurred even if error_kind passed)"
+    [ "Tool_called" ]
+    kinds
+;;
 
 (* --- 2. success=false + no error_kind: only Tool_called -------- *)
 
 let test_failure_without_error_kind_no_pair () =
-  with_temp_config @@ fun config ->
-  T.track_tool_called config ~tool_name:"masc_status"
-    ~success:false ~duration_ms:9
-    ();
+  with_temp_config
+  @@ fun config ->
+  T.track_tool_called config ~tool_name:"masc_status" ~success:false ~duration_ms:9 ();
   let kinds = recent_events_kinds config 5 in
-  check (list string)
+  check
+    (list string)
     "only Tool_called when error_kind is None (back-compat)"
-    [ "Tool_called" ] kinds
+    [ "Tool_called" ]
+    kinds
+;;
 
 (* --- 3. success=false + error_kind: pair Tool_called + Error_occurred *)
 
 let test_failure_with_error_kind_pairs () =
-  with_temp_config @@ fun config ->
-  T.track_tool_called config ~tool_name:"keeper_bash"
-    ~success:false ~duration_ms:30000
+  with_temp_config
+  @@ fun config ->
+  T.track_tool_called
+    config
+    ~tool_name:"keeper_bash"
+    ~success:false
+    ~duration_ms:30000
     ~agent_id:"keeper-executor-agent"
     ~source:"keeper_internal"
     ~session_id:"sess-10358"
@@ -126,76 +144,103 @@ let test_failure_with_error_kind_pairs () =
     ~error_message:"timeout=1|duration_ms=30000|detail=deadline"
     ();
   let kinds = recent_events_kinds config 5 in
-  check (list string)
+  check
+    (list string)
     "fan-out: Tool_called then Error_occurred"
-    [ "Tool_called"; "Error_occurred" ] kinds;
-  match T.read_all_events config |> List.filter (fun (r : T.event_record) ->
-    match r.event with
-    | T.Agent_joined _ -> false
-    | _ -> true)
+    [ "Tool_called"; "Error_occurred" ]
+    kinds;
+  match
+    T.read_all_events config
+    |> List.filter (fun (r : T.event_record) ->
+      match r.event with
+      | T.Agent_joined _ -> false
+      | _ -> true)
   with
   | { T.event = T.Tool_called tool; _ } :: _ ->
-      check (option string) "Tool_called.error_kind"
-        (Some "timeout") tool.error_kind;
-      check (option string) "Tool_called.error_message"
-        (Some "timeout=1|duration_ms=30000|detail=deadline")
-        tool.error_message
+    check (option string) "Tool_called.error_kind" (Some "timeout") tool.error_kind;
+    check
+      (option string)
+      "Tool_called.error_message"
+      (Some "timeout=1|duration_ms=30000|detail=deadline")
+      tool.error_message
   | _ -> failf "expected Tool_called as first explicit record"
+;;
 
 (* --- 4. whitespace error_kind suppresses the pair -------------- *)
 
 let test_whitespace_error_kind_no_pair () =
-  with_temp_config @@ fun config ->
-  T.track_tool_called config ~tool_name:"masc_status"
-    ~success:false ~duration_ms:1
+  with_temp_config
+  @@ fun config ->
+  T.track_tool_called
+    config
+    ~tool_name:"masc_status"
+    ~success:false
+    ~duration_ms:1
     ~error_kind:"   "
     ();
   let kinds = recent_events_kinds config 5 in
-  check (list string)
+  check
+    (list string)
     "whitespace-only error_kind treated as no signal"
-    [ "Tool_called" ] kinds
+    [ "Tool_called" ]
+    kinds
+;;
 
 (* --- 5. message override preserved ---------------------------- *)
 
 let test_error_message_override_preserved () =
-  with_temp_config @@ fun config ->
-  T.track_tool_called config ~tool_name:"keeper_edit"
-    ~success:false ~duration_ms:42
+  with_temp_config
+  @@ fun config ->
+  T.track_tool_called
+    config
+    ~tool_name:"keeper_edit"
+    ~success:false
+    ~duration_ms:42
     ~error_kind:"tool_failure"
     ~error_message:"file not found: /tmp/missing.ml"
     ();
   let records = T.read_all_events config in
   match List.rev records with
-  | last :: _ -> (
-      match last.event with
-      | T.Error_occurred { message; _ } ->
-          check string "explicit error_message preserved verbatim"
-            "file not found: /tmp/missing.ml" message
-      | other ->
-          failf "expected Error_occurred, got %s"
-            (event_kind_tag other))
+  | last :: _ ->
+    (match last.event with
+     | T.Error_occurred { message; _ } ->
+       check
+         string
+         "explicit error_message preserved verbatim"
+         "file not found: /tmp/missing.ml"
+         message
+     | other -> failf "expected Error_occurred, got %s" (event_kind_tag other))
   | [] -> failf "no telemetry records written"
+;;
 
 let () =
-  run "telemetry_error_occurred_wire_10358"
-    [
-      ( "no-pair-on-success",
-        [
-          test_case "success=true ignores error_kind" `Quick
-            test_success_true_no_error_emit;
-        ] );
-      ( "back-compat",
-        [
-          test_case "success=false without error_kind: only Tool_called"
-            `Quick test_failure_without_error_kind_no_pair;
-          test_case "whitespace error_kind treated as no signal" `Quick
-            test_whitespace_error_kind_no_pair;
-        ] );
-      ( "fan-out",
-        [
-          test_case "success=false + error_kind: pair emit" `Quick
-            test_failure_with_error_kind_pairs;
-          test_case "explicit error_message preserved" `Quick
-            test_error_message_override_preserved;
-        ] );
+  run
+    "telemetry_error_occurred_wire_10358"
+    [ ( "no-pair-on-success"
+      , [ test_case
+            "success=true ignores error_kind"
+            `Quick
+            test_success_true_no_error_emit
+        ] )
+    ; ( "back-compat"
+      , [ test_case
+            "success=false without error_kind: only Tool_called"
+            `Quick
+            test_failure_without_error_kind_no_pair
+        ; test_case
+            "whitespace error_kind treated as no signal"
+            `Quick
+            test_whitespace_error_kind_no_pair
+        ] )
+    ; ( "fan-out"
+      , [ test_case
+            "success=false + error_kind: pair emit"
+            `Quick
+            test_failure_with_error_kind_pairs
+        ; test_case
+            "explicit error_message preserved"
+            `Quick
+            test_error_message_override_preserved
+        ] )
     ]
+;;

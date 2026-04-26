@@ -6,19 +6,19 @@
 
     @since 2.130.0 *)
 
-type t = {
-  sw : Eio.Switch.t;
-  net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t;
-  clock : float Eio.Time.clock_ty Eio.Resource.t option;
-}
+type t =
+  { sw : Eio.Switch.t
+  ; net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  ; clock : float Eio.Time.clock_ty Eio.Resource.t option
+  }
 
 let env : t option Atomic.t = Atomic.make None
-
 let init ~sw ~net ?clock () = Atomic.set env (Some { sw; net; clock })
 
 let get () =
   match Atomic.get env with
   | Some e -> e
   | None -> invalid_arg "Masc_eio_env.get: not initialized. Call init at server startup."
+;;
 
 let get_opt () = Atomic.get env

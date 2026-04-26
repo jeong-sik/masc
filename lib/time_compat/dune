@@ -1,4 +1,5 @@
 (include_subdirs no)
+
 (library
  (name time_compat)
  (public_name masc_mcp.time_compat)

@@ -8,25 +8,25 @@
 (** {1 Diagnostic record}
 
     All fields are observed at detection time; the record is immutable. *)
-type t = {
-  process_cwd : string;
-  input_base_path : string option;
-  effective_base_path : string;
-  effective_masc_root : string;
-  env_masc_base_path : string option;
-  resolution_source : string option;
-  effective_has_masc_dir : bool;
-  effective_legacy_dirs : string list;
-      (** Subset of {["perpetual"; "resident-keepers"; "rooms"]} present
+type t =
+  { process_cwd : string
+  ; input_base_path : string option
+  ; effective_base_path : string
+  ; effective_masc_root : string
+  ; env_masc_base_path : string option
+  ; resolution_source : string option
+  ; effective_has_masc_dir : bool
+  ; effective_legacy_dirs : string list
+    (** Subset of {["perpetual"; "resident-keepers"; "rooms"]} present
           under [effective_masc_root]. *)
-  roots_diverge : bool;
-      (** [true] when the normalised process cwd differs from
+  ; roots_diverge : bool
+    (** [true] when the normalised process cwd differs from
           [effective_base_path]. *)
-  strict_mode_requested : bool;
-  startup_rejected : bool;
-  startup_abort_eligible : bool;
-  warning : string option;
-}
+  ; strict_mode_requested : bool
+  ; startup_rejected : bool
+  ; startup_abort_eligible : bool
+  ; warning : string option
+  }
 
 (** {1 Detection} *)
 
@@ -42,16 +42,16 @@ type t = {
 
     All paths are normalised through [Unix.realpath] with best-effort
     fallback to the absolute form. *)
-val detect :
-  ?cwd:string ->
-  ?env_masc_base_path:string ->
-  ?strict:bool ->
-  ?input_base_path:string ->
-  ?resolution_source:string ->
-  effective_base_path:string ->
-  effective_masc_root:string ->
-  unit ->
-  t
+val detect
+  :  ?cwd:string
+  -> ?env_masc_base_path:string
+  -> ?strict:bool
+  -> ?input_base_path:string
+  -> ?resolution_source:string
+  -> effective_base_path:string
+  -> effective_masc_root:string
+  -> unit
+  -> t
 
 (** Reserved for future strict-mode enforcement; currently always [false]. *)
 val strict_violation : t -> bool

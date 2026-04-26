@@ -14,16 +14,15 @@
     as a deprecated alias (legacy of the v0.149.0 OAS→MASC migration)
     and emits a one-time warning. *)
 
-val window_sec : float
 (** Rolling window duration in seconds.  Default 300.0 (5 min). *)
+val window_sec : float
 
-val cooldown_threshold : int
 (** Consecutive failures before cooldown activates.  Default 3. *)
+val cooldown_threshold : int
 
-val cooldown_sec : float
 (** Cooldown duration in seconds.  Default 60.0. *)
+val cooldown_sec : float
 
-val hard_quota_cooldown_sec : float
 (** Cooldown duration applied immediately on a hard-quota-classified error
     (balance depleted, monthly quota reached, resource exhausted).  Unlike
     {!cooldown_sec}, no threshold is required — one hard-quota event is
@@ -33,15 +32,15 @@ val hard_quota_cooldown_sec : float
     [OAS_CASCADE_HARD_QUOTA_COOLDOWN_SEC] alias).
 
     @since 0.161.0 *)
+val hard_quota_cooldown_sec : float
 
-val terminal_failure_cooldown_sec : float
 (** Cooldown duration applied immediately on a terminal structural
     provider/adapter failure, such as a Kimi CLI resumable-session conflict.
     Unlike {!cooldown_sec}, no threshold is required.  Default 3600.0 (1h).
 
     Env: [MASC_CASCADE_TERMINAL_FAILURE_COOLDOWN_SEC] (with deprecated
     [OAS_CASCADE_TERMINAL_FAILURE_COOLDOWN_SEC] alias). *)
-
+val terminal_failure_cooldown_sec : float
 
 (** Opaque health tracker state. *)
 type t
@@ -64,13 +63,13 @@ val record_success : t -> provider_key:string -> unit
     fingerprint ["unclassified"].
 
     @since 0.174.0 *)
-val record_failure :
-  t ->
-  provider_key:string ->
-  ?error_kind:string ->
-  ?error_reason:string ->
-  unit ->
-  unit
+val record_failure
+  :  t
+  -> provider_key:string
+  -> ?error_kind:string
+  -> ?error_reason:string
+  -> unit
+  -> unit
 
 (** Record a provider call where the response arrived but was rejected
     by the cascade's [accept] predicate (e.g. empty body, schema gate).
@@ -89,13 +88,13 @@ val record_failure :
     See {!record_failure} for [error_kind] / [error_reason] semantics.
 
     @since 0.160.0 *)
-val record_rejected :
-  t ->
-  provider_key:string ->
-  ?error_kind:string ->
-  ?error_reason:string ->
-  unit ->
-  unit
+val record_rejected
+  :  t
+  -> provider_key:string
+  -> ?error_kind:string
+  -> ?error_reason:string
+  -> unit
+  -> unit
 
 (** Record a provider call that failed with a hard-quota error (balance
     depleted, monthly quota reached, resource exhausted — classified
@@ -114,13 +113,13 @@ val record_rejected :
     See {!record_failure} for [error_kind] / [error_reason] semantics.
 
     @since 0.161.0 *)
-val record_hard_quota :
-  t ->
-  provider_key:string ->
-  ?error_kind:string ->
-  ?error_reason:string ->
-  unit ->
-  unit
+val record_hard_quota
+  :  t
+  -> provider_key:string
+  -> ?error_kind:string
+  -> ?error_reason:string
+  -> unit
+  -> unit
 
 (** Record a provider call that failed with a terminal structural
     provider/adapter error.
@@ -130,13 +129,13 @@ val record_hard_quota :
     adapter/session failures without pretending the account is out of credit.
 
     See {!record_failure} for [error_kind] / [error_reason] semantics. *)
-val record_terminal_failure :
-  t ->
-  provider_key:string ->
-  ?error_kind:string ->
-  ?error_reason:string ->
-  unit ->
-  unit
+val record_terminal_failure
+  :  t
+  -> provider_key:string
+  -> ?error_kind:string
+  -> ?error_reason:string
+  -> unit
+  -> unit
 
 (** Drop tracker entries whose rolling window is empty AND whose cooldown
     has expired.  Intended as opportunistic maintenance — idle providers
@@ -168,25 +167,26 @@ val provider_summary : t -> provider_key:string -> string
 (** Structured summary for telemetry/dashboard consumption.
 
     @since 0.139.0 *)
-type provider_info = {
-  provider_key : string;
-  success_rate : float;               (** 0.0 to 1.0, 1.0 if unknown *)
-  consecutive_failures : int;
-  in_cooldown : bool;
-  cooldown_expires_at : float option; (** Unix timestamp, Some iff [in_cooldown] *)
-  events_in_window : int;             (** Events retained in rolling window *)
-  rejected_in_window : int;           (** Subset of [events_in_window] whose outcome was [Rejected]. @since 0.160.0 *)
-  top_fingerprints : (string * int) list;
-  (** Top-N error fingerprints with cumulative counts (descending), capped
+type provider_info =
+  { provider_key : string
+  ; success_rate : float (** 0.0 to 1.0, 1.0 if unknown *)
+  ; consecutive_failures : int
+  ; in_cooldown : bool
+  ; cooldown_expires_at : float option (** Unix timestamp, Some iff [in_cooldown] *)
+  ; events_in_window : int (** Events retained in rolling window *)
+  ; rejected_in_window : int
+    (** Subset of [events_in_window] whose outcome was [Rejected]. @since 0.160.0 *)
+  ; top_fingerprints : (string * int) list
+    (** Top-N error fingerprints with cumulative counts (descending), capped
       at 3.  Fingerprint format: ["error_kind|hash8(error_reason)"] —
       built by {!record_failure} / {!record_rejected} / {!record_hard_quota}
       from caller-provided classifications.  Empty list when no failures
       have been recorded.  @since 0.174.0 *)
-  last_failure_at : float option;
-  (** Unix timestamp of the most recent non-success event, or [None] if
+  ; last_failure_at : float option
+    (** Unix timestamp of the most recent non-success event, or [None] if
       none.  Phase 0 observability anchor for "did this provider fail
       recently".  @since 0.174.0 *)
-}
+  }
 
 (** Structured info for a single provider. Returns [None] if untracked.
     @since 0.139.0 *)

@@ -15,9 +15,9 @@
 
 (** Restart policy for a child. *)
 type restart_strategy =
-  | Permanent  (** Always restart on failure *)
-  | Temporary  (** Never restart — failure is expected *)
-  | Transient  (** Restart only on abnormal exit (exception) *)
+  | Permanent (** Always restart on failure *)
+  | Temporary (** Never restart — failure is expected *)
+  | Transient (** Restart only on abnormal exit (exception) *)
 
 (** Opaque child specification — construct via {!child}. *)
 type child_spec
@@ -27,27 +27,27 @@ type t
 
 (** Snapshot returned by {!status}. [strategy] is serialised as
     one of ["permanent" | "temporary" | "transient"]. *)
-type child_status = {
-  name : string;
-  running : bool;
-  disabled : bool;
-  restart_count : int;
-  strategy : string;
-}
+type child_status =
+  { name : string
+  ; running : bool
+  ; disabled : bool
+  ; restart_count : int
+  ; strategy : string
+  }
 
 (** {1 Construction} *)
 
 (** [child ~name ~start ?strategy ?max_restarts ?restart_window_s ()].
     Defaults: [strategy = Permanent], [max_restarts = 5],
     [restart_window_s = 60.0]. *)
-val child :
-  name:string ->
-  start:(unit -> unit) ->
-  ?strategy:restart_strategy ->
-  ?max_restarts:int ->
-  ?restart_window_s:float ->
-  unit ->
-  child_spec
+val child
+  :  name:string
+  -> start:(unit -> unit)
+  -> ?strategy:restart_strategy
+  -> ?max_restarts:int
+  -> ?restart_window_s:float
+  -> unit
+  -> child_spec
 
 val create : child_spec list -> t
 
@@ -56,25 +56,20 @@ val create : child_spec list -> t
 (** Start all children. Must be called within an [Eio.Switch]
     context. Idempotent — logs a warning and does nothing on a second
     call. *)
-val start :
-  sw:Eio.Switch.t ->
-  clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  t ->
-  unit
+val start : sw:Eio.Switch.t -> clock:float Eio.Time.clock_ty Eio.Resource.t -> t -> unit
 
 (** Re-enable a child that was auto-disabled after exceeding
     [max_restarts] in [restart_window_s]. Returns [true] when a
     disabled child with [name] was re-enabled, [false] otherwise
     (unknown name or already running). *)
-val reenable :
-  sw:Eio.Switch.t ->
-  clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  t ->
-  string ->
-  bool
+val reenable
+  :  sw:Eio.Switch.t
+  -> clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> t
+  -> string
+  -> bool
 
 (** {1 Observation} *)
 
 val status : t -> child_status list
-
 val status_to_json : child_status -> Yojson.Safe.t

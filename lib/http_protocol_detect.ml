@@ -27,10 +27,9 @@ let detect_from_fd (fd : Unix.file_descr) : (protocol, string) result =
   let buf = Bytes.create h2_preface_len in
   match Unix.recv fd buf 0 h2_preface_len [ Unix.MSG_PEEK ] with
   | n when n >= h2_preface_len ->
-    if Bytes.sub_string buf 0 h2_preface_len = h2_preface_prefix then
-      Ok Http2
-    else
-      Ok Http1
+    if Bytes.sub_string buf 0 h2_preface_len = h2_preface_prefix
+    then Ok Http2
+    else Ok Http1
   | n when n > 0 ->
     (* Partial read: not enough bytes for H2 preface, treat as HTTP/1.1.
        This can happen if the client sends a very short request, but any
@@ -46,6 +45,7 @@ let detect_from_fd (fd : Unix.file_descr) : (protocol, string) result =
     Ok Http1
   | exception Unix.Unix_error (err, _fn, _arg) ->
     Error (Printf.sprintf "peek failed: %s" (Unix.error_message err))
+;;
 
 (** [detect flow] extracts the underlying Unix FD from an Eio stream
     socket, peeks at the first bytes, and returns the detected protocol.
@@ -56,9 +56,10 @@ let detect (flow : _ Eio.Net.stream_socket) : (protocol, string) result =
   match Eio_unix.Resource.fd_opt (flow :> _ Eio.Resource.t) with
   | None -> Error "no Unix FD available on this socket"
   | Some eio_fd ->
-    Eio_unix.Fd.use_exn "protocol_detect" eio_fd (fun unix_fd ->
-      detect_from_fd unix_fd)
+    Eio_unix.Fd.use_exn "protocol_detect" eio_fd (fun unix_fd -> detect_from_fd unix_fd)
+;;
 
 let protocol_to_string = function
   | Http1 -> "HTTP/1.1"
   | Http2 -> "HTTP/2"
+;;

@@ -4,19 +4,19 @@
  (name masc_config)
  (public_name masc_mcp.config)
  (modules
-   config_boot_overrides
-   env_config
-   env_config_core
-   env_config_exec_timeout
-   env_config_governance
-   env_config_keeper
-   env_config_oas_bridge
-   env_config_runtime
-   env_config_sandbox
-   env_config_snapshot
-   feature_flag_registry
-   masc_network_defaults
-   masc_time_constants
-   playground_paths)
+  config_boot_overrides
+  env_config
+  env_config_core
+  env_config_exec_timeout
+  env_config_governance
+  env_config_keeper
+  env_config_oas_bridge
+  env_config_runtime
+  env_config_sandbox
+  env_config_snapshot
+  feature_flag_registry
+  masc_network_defaults
+  masc_time_constants
+  playground_paths)
  (wrapped false)
  (libraries masc_core masc_log yojson uri ipaddr unix))

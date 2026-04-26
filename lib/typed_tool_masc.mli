@@ -14,22 +14,22 @@ type ('input, 'output) t
 
 (** {1 Construction} *)
 
-val create :
-  name:string ->
-  description:string ->
-  module_tag:Tool_dispatch.module_tag ->
-  params:Agent_sdk.Types.tool_param list ->
-  parse:(Yojson.Safe.t -> ('input, string) result) ->
-  handler:('input -> ('output, string) result) ->
-  encode:('output -> Yojson.Safe.t) ->
-  ?is_read_only:bool ->
-  ?is_destructive:bool ->
-  ?is_idempotent:bool ->
-  ?visibility:Tool_catalog.visibility ->
-  ?requires_join:bool ->
-  ?effect_domain:Tool_catalog.effect_domain ->
-  unit ->
-  ('input, 'output) t
+val create
+  :  name:string
+  -> description:string
+  -> module_tag:Tool_dispatch.module_tag
+  -> params:Agent_sdk.Types.tool_param list
+  -> parse:(Yojson.Safe.t -> ('input, string) result)
+  -> handler:('input -> ('output, string) result)
+  -> encode:('output -> Yojson.Safe.t)
+  -> ?is_read_only:bool
+  -> ?is_destructive:bool
+  -> ?is_idempotent:bool
+  -> ?visibility:Tool_catalog.visibility
+  -> ?requires_join:bool
+  -> ?effect_domain:Tool_catalog.effect_domain
+  -> unit
+  -> ('input, 'output) t
 
 (** {1 Registration} *)
 

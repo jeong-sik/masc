@@ -20,25 +20,29 @@
    construct an empty profile environment. *)
 
 open Alcotest
-
 module Coord = Masc_mcp.Coord
 module KR = Masc_mcp.Keeper_runtime
 
 let rec rm_rf path =
-  if Sys.file_exists path then
-    if Sys.is_directory path then (
-      Sys.readdir path
-      |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+  if Sys.file_exists path
+  then
+    if Sys.is_directory path
+    then (
+      Sys.readdir path |> Array.iter (fun name -> rm_rf (Filename.concat path name));
       Unix.rmdir path)
-    else
-      Sys.remove path
+    else Sys.remove path
+;;
 
 let with_temp_masc_dir f =
-  Eio_main.run @@ fun env ->
+  Eio_main.run
+  @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base =
-    Filename.concat (Filename.get_temp_dir_name ())
-      (Printf.sprintf "masc-10125-%d-%d" (Unix.getpid ())
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf
+         "masc-10125-%d-%d"
+         (Unix.getpid ())
          (int_of_float (Unix.gettimeofday () *. 1_000_000.)))
   in
   Unix.mkdir base 0o755;
@@ -49,6 +53,7 @@ let with_temp_masc_dir f =
       ignore (Coord.reset config);
       rm_rf base)
     (fun () -> f config)
+;;
 
 (* The regression case the fix is for: bootstrap reported [enabled
    = false] AND [started = 0]. Pre-fix this killed the supervisor
@@ -58,13 +63,14 @@ let with_temp_masc_dir f =
 let test_disabled_bootstrap_with_disk_keepers_starts_sweep () =
   with_temp_masc_dir (fun config ->
     let stats =
-      KR.{ enabled = false; scanned = 0; started = 0;
-           stale = 0; recovering = 0 }
+      KR.{ enabled = false; scanned = 0; started = 0; stale = 0; recovering = 0 }
     in
-    check bool
+    check
+      bool
       "disabled bootstrap + disk keepers (operator profile) → true"
       true
       (KR.should_start_supervisor_sweep ~config ~stats))
+;;
 
 (* Even without [enabled], a positive [started] count is enough.
    This covers the second post-fix invariant: the boot path
@@ -74,13 +80,14 @@ let test_disabled_bootstrap_with_disk_keepers_starts_sweep () =
 let test_started_gt_zero_starts_sweep_without_enabled () =
   with_temp_masc_dir (fun config ->
     let stats =
-      KR.{ enabled = false; scanned = 1; started = 1;
-           stale = 0; recovering = 0 }
+      KR.{ enabled = false; scanned = 1; started = 1; stale = 0; recovering = 0 }
     in
-    check bool
+    check
+      bool
       "stats.started > 0 even when enabled = false → true"
       true
       (KR.should_start_supervisor_sweep ~config ~stats))
+;;
 
 (* Sanity check: predicate runs without raising on a fully
    defaulted [stats] record.  Pre-fix this would short-circuit on
@@ -90,20 +97,28 @@ let test_started_gt_zero_starts_sweep_without_enabled () =
 let test_predicate_total_on_defaulted_stats () =
   with_temp_masc_dir (fun config ->
     let stats =
-      KR.{ enabled = false; scanned = 0; started = 0;
-           stale = 0; recovering = 0 }
+      KR.{ enabled = false; scanned = 0; started = 0; stale = 0; recovering = 0 }
     in
     let _ : bool = KR.should_start_supervisor_sweep ~config ~stats in
     ())
+;;
 
 let () =
-  run "supervisor_start_predicate_10125" [
-    "predicate", [
-      test_case "disabled bootstrap + disk keeper → true (regression fix)" `Quick
-        test_disabled_bootstrap_with_disk_keepers_starts_sweep;
-      test_case "stats.started > 0 even when enabled = false → true" `Quick
-        test_started_gt_zero_starts_sweep_without_enabled;
-      test_case "predicate is total on defaulted stats (no raise)" `Quick
-        test_predicate_total_on_defaulted_stats;
-    ];
-  ]
+  run
+    "supervisor_start_predicate_10125"
+    [ ( "predicate"
+      , [ test_case
+            "disabled bootstrap + disk keeper → true (regression fix)"
+            `Quick
+            test_disabled_bootstrap_with_disk_keepers_starts_sweep
+        ; test_case
+            "stats.started > 0 even when enabled = false → true"
+            `Quick
+            test_started_gt_zero_starts_sweep_without_enabled
+        ; test_case
+            "predicate is total on defaulted stats (no raise)"
+            `Quick
+            test_predicate_total_on_defaulted_stats
+        ] )
+    ]
+;;

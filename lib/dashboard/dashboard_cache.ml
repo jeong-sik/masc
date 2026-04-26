@@ -25,26 +25,30 @@
     that the table still holds its [cond].  This prevents an evicted
     fiber from clobbering a replacement slot. *)
 
-module SMap = Map.Make(String)
+module SMap = Map.Make (String)
 
 let rec atomic_update atomic f =
   let old_val = Atomic.get atomic in
-  let (result, new_val) = f old_val in
-  if Atomic.compare_and_set atomic old_val new_val then result
-  else atomic_update atomic f
+  let result, new_val = f old_val in
+  if Atomic.compare_and_set atomic old_val new_val then result else atomic_update atomic f
+;;
 
 let token_counter = Atomic.make 0
 let next_token () = Atomic.fetch_and_add token_counter 1
 
-type entry = {
-  value : Yojson.Safe.t;
-  expires_at : float;
-  stale_until : float;
-}
+type entry =
+  { value : Yojson.Safe.t
+  ; expires_at : float
+  ; stale_until : float
+  }
 
 type slot =
   | Ready of entry
-  | Computing of { token : int; started_at : float; stale : Yojson.Safe.t option }
+  | Computing of
+      { token : int
+      ; started_at : float
+      ; stale : Yojson.Safe.t option
+      }
 
 let table : slot SMap.t Atomic.t = Atomic.make SMap.empty
 
@@ -52,32 +56,39 @@ let table : slot SMap.t Atomic.t = Atomic.make SMap.empty
     Evicts expired entries first, then oldest stale entries. *)
 let max_entries =
   match Sys.getenv_opt "MASC_DASHBOARD_CACHE_MAX_ENTRIES" with
-  | Some s -> (match int_of_string_opt (String.trim s) with Some v -> max 16 (min 512 v) | None -> 64)
+  | Some s ->
+    (match int_of_string_opt (String.trim s) with
+     | Some v -> max 16 (min 512 v)
+     | None -> 64)
   | None -> 64
+;;
 
 (** Evict one expired or stale entry when table exceeds max_entries.
     Must be called inside the mutex-guarded section. *)
 let maybe_evict map =
-  if SMap.cardinal map > max_entries then begin
+  if SMap.cardinal map > max_entries
+  then (
     let now_ts = Time_compat.now () in
     let victim = ref None in
-    SMap.iter (fun key slot ->
-      match slot with
-      | Ready entry when entry.stale_until <= now_ts ->
-          (match !victim with
-           | Some (_, true) -> ()
-           | _ -> victim := Some (key, true))
-      | Ready entry when entry.expires_at <= now_ts ->
-          (match !victim with
-           | Some (_, true) -> ()
-           | _ -> victim := Some (key, false))
-      | Ready _ -> ()
-      | Computing _ -> ()
-    ) map;
+    SMap.iter
+      (fun key slot ->
+         match slot with
+         | Ready entry when entry.stale_until <= now_ts ->
+           (match !victim with
+            | Some (_, true) -> ()
+            | _ -> victim := Some (key, true))
+         | Ready entry when entry.expires_at <= now_ts ->
+           (match !victim with
+            | Some (_, true) -> ()
+            | _ -> victim := Some (key, false))
+         | Ready _ -> ()
+         | Computing _ -> ())
+      map;
     match !victim with
     | Some (key, _) -> SMap.remove key map
-    | None -> map
-  end else map
+    | None -> map)
+  else map
+;;
 
 let now () = Time_compat.now ()
 
@@ -99,25 +110,27 @@ exception Compute_timeout of string * bool
 let is_internal_race_cancel exn =
   match exn with
   | Eio.Cancel.Cancelled _ ->
-      let msg = Printexc.to_string exn in
-      String.equal msg "Cancelled: Eio__core__Fiber.Not_first"
-      || String.ends_with ~suffix:"Eio__core__Fiber.Not_first" msg
+    let msg = Printexc.to_string exn in
+    String.equal msg "Cancelled: Eio__core__Fiber.Not_first"
+    || String.ends_with ~suffix:"Eio__core__Fiber.Not_first" msg
   | _ -> false
+;;
 
 let should_restore_stale_after_failure exn =
   match exn with
   | Compute_timeout _ -> true
   | Eio.Cancel.Cancelled _ -> true
   | _ -> false
+;;
 
 let timeout_json ~key ~timeout_sec ~timeout_kind =
   `Assoc
-    [
-      ("error", `String "computation_timeout");
-      ("timeout_sec", `Float timeout_sec);
-      ("key", `String key);
-      ("timeout_kind", `String timeout_kind);
+    [ "error", `String "computation_timeout"
+    ; "timeout_sec", `Float timeout_sec
+    ; "key", `String key
+    ; "timeout_kind", `String timeout_kind
     ]
+;;
 
 (** Maximum seconds a waiter will poll for a [Computing] slot before evicting
     it and recomputing.
@@ -128,6 +141,7 @@ let timeout_json ~key ~timeout_sec ~timeout_kind =
     exhausted, causing early failures and duplicate recomputation.  Keep this
     above the current 120s caller budget. *)
 let max_wait_sec = 130.0
+
 let wait_poll_interval_sec = 0.25
 
 (** Eio path: per-key locking with stampede protection + stale-while-revalidate.
@@ -149,42 +163,53 @@ let wait_poll_interval_sec = 0.25
 let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
   let stale_grace = ttl *. stale_factor in
   let rec try_get ~waited ~watching_token =
-    let action = atomic_update table (fun map ->
-      let map = maybe_evict map in
-      match SMap.find_opt key map with
-      | Some (Ready entry) when entry.expires_at > now () ->
-        (`Hit entry.value, map)
-      | Some (Ready entry) when entry.stale_until > now () ->
-        let token = next_token () in
-        (`Stale (entry.value, token), SMap.add key (Computing { token; started_at = now (); stale = Some entry.value }) map)
-      | Some (Computing { stale = Some stale_value; _ }) ->
-        (`Hit stale_value, map)
-      | Some (Computing { token; started_at; stale = None }) ->
-        let waited =
-          match watching_token with
-          | Some t when t <> token -> 0.0
-          | _ -> waited
-        in
-        let elapsed = now () -. started_at in
-        let timed_out_waiter =
-          match wait_timeout_sec with
-          | Some timeout_sec -> waited >= timeout_sec
-          | None -> false
-        in
-        if timed_out_waiter then
-          (`Timed_out, map)
-        else if elapsed > max_wait_sec || waited > max_wait_sec then begin
-          Log.Dashboard.warn "cache: evicting stale Computing slot for %s (%.1fs elapsed)" key elapsed;
-          (`Retry, SMap.remove key map)
-        end else
-          (`Wait token, map)
-      | Some (Ready entry) ->
-        let token = next_token () in
-        (`Compute token, SMap.add key (Computing { token; started_at = now (); stale = Some entry.value }) map)
-      | None ->
-        let token = next_token () in
-        (`Compute token, SMap.add key (Computing { token; started_at = now (); stale = None }) map)
-    ) in
+    let action =
+      atomic_update table (fun map ->
+        let map = maybe_evict map in
+        match SMap.find_opt key map with
+        | Some (Ready entry) when entry.expires_at > now () -> `Hit entry.value, map
+        | Some (Ready entry) when entry.stale_until > now () ->
+          let token = next_token () in
+          ( `Stale (entry.value, token)
+          , SMap.add
+              key
+              (Computing { token; started_at = now (); stale = Some entry.value })
+              map )
+        | Some (Computing { stale = Some stale_value; _ }) -> `Hit stale_value, map
+        | Some (Computing { token; started_at; stale = None }) ->
+          let waited =
+            match watching_token with
+            | Some t when t <> token -> 0.0
+            | _ -> waited
+          in
+          let elapsed = now () -. started_at in
+          let timed_out_waiter =
+            match wait_timeout_sec with
+            | Some timeout_sec -> waited >= timeout_sec
+            | None -> false
+          in
+          if timed_out_waiter
+          then `Timed_out, map
+          else if elapsed > max_wait_sec || waited > max_wait_sec
+          then (
+            Log.Dashboard.warn
+              "cache: evicting stale Computing slot for %s (%.1fs elapsed)"
+              key
+              elapsed;
+            `Retry, SMap.remove key map)
+          else `Wait token, map
+        | Some (Ready entry) ->
+          let token = next_token () in
+          ( `Compute token
+          , SMap.add
+              key
+              (Computing { token; started_at = now (); stale = Some entry.value })
+              map )
+        | None ->
+          let token = next_token () in
+          ( `Compute token
+          , SMap.add key (Computing { token; started_at = now (); stale = None }) map ))
+    in
     match action with
     | `Hit v -> v
     | `Timed_out -> raise (Compute_timeout (key, true))
@@ -199,149 +224,191 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
           atomic_update table (fun map ->
             match SMap.find_opt key map with
             | Some (Computing { token = c; _ }) when c = token ->
-              ((), SMap.add key (Ready { value; expires_at = ts +. ttl; stale_until = ts +. ttl +. stale_grace }) map)
+              ( ()
+              , SMap.add
+                  key
+                  (Ready
+                     { value
+                     ; expires_at = ts +. ttl
+                     ; stale_until = ts +. ttl +. stale_grace
+                     })
+                  map )
             | _ ->
-              Log.Dashboard.info "cache: bg-revalidate discarded for %s (slot replaced)" key;
-              ((), map)
-          )
+              Log.Dashboard.info
+                "cache: bg-revalidate discarded for %s (slot replaced)"
+                key;
+              (), map)
         | exception exn ->
           (match exn with
            | Compute_timeout _ -> ()
            | _ when is_internal_race_cancel exn -> ()
-           | _ -> Log.Dashboard.warn "cache bg-revalidate failed (%s): %s" key (Printexc.to_string exn));
+           | _ ->
+             Log.Dashboard.warn
+               "cache bg-revalidate failed (%s): %s"
+               key
+               (Printexc.to_string exn));
           atomic_update table (fun map ->
             match SMap.find_opt key map with
             | Some (Computing { token = c; _ }) when c = token ->
               let ts = now () in
               let backoff_grace = stale_grace *. bg_revalidate_backoff_factor in
-              ((), SMap.add key (Ready { value = stale_value; expires_at = ts; stale_until = ts +. backoff_grace }) map)
-            | _ -> ((), map)
-          )
+              ( ()
+              , SMap.add
+                  key
+                  (Ready
+                     { value = stale_value
+                     ; expires_at = ts
+                     ; stale_until = ts +. backoff_grace
+                     })
+                  map )
+            | _ -> (), map)
       and restore_stale_ready () =
         atomic_update table (fun map ->
           match SMap.find_opt key map with
           | Some (Computing { token = c; _ }) when c = token ->
-              let ts = now () in
-              let backoff_grace = stale_grace *. bg_revalidate_backoff_factor in
-              ((), SMap.add key
-                (Ready { value = stale_value; expires_at = ts; stale_until = ts +. backoff_grace })
-                map)
-          | _ -> ((), map)
-        )
+            let ts = now () in
+            let backoff_grace = stale_grace *. bg_revalidate_backoff_factor in
+            ( ()
+            , SMap.add
+                key
+                (Ready
+                   { value = stale_value
+                   ; expires_at = ts
+                   ; stale_until = ts +. backoff_grace
+                   })
+                map )
+          | _ -> (), map)
       in
       (match Eio_context.get_switch_opt () with
        | Some sw ->
-           (try
-              Eio.Fiber.fork ~sw (fun () ->
-                try do_bg_compute ()
-                with
-                | Eio.Cancel.Cancelled _ as e ->
-                    restore_stale_ready ();
-                    raise e)
-            with
-            | Invalid_argument _ ->
-                restore_stale_ready ()
-            | Eio.Cancel.Cancelled _ -> ())
+         (try
+            Eio.Fiber.fork ~sw (fun () ->
+              try do_bg_compute () with
+              | Eio.Cancel.Cancelled _ as e ->
+                restore_stale_ready ();
+                raise e)
+          with
+          | Invalid_argument _ -> restore_stale_ready ()
+          | Eio.Cancel.Cancelled _ -> ())
        | None ->
-           Log.Dashboard.warn "cache: no switch for background revalidation, computing inline";
-           do_bg_compute ());
+         Log.Dashboard.warn
+           "cache: no switch for background revalidation, computing inline";
+         do_bg_compute ());
       stale_value
     | `Compute token ->
       let result_ref = ref None in
       let run_compute () =
-        try result_ref := Some (Ok (compute ()))
-        with
+        try result_ref := Some (Ok (compute ())) with
         | Eio.Cancel.Cancelled _ as e -> raise e
         | exn -> result_ref := Some (Error exn)
       in
       (match Eio_context.get_clock_opt () with
        | Some clock ->
-           let compute_done = ref false in
-           Eio.Fiber.first
-             (fun () ->
-                run_compute ();
-                compute_done := true)
-             (fun () ->
-                Eio.Time.sleep clock max_wait_sec;
-                if not !compute_done then
-                  Log.Dashboard.warn "cache compute timeout: %s (%.0fs)" key max_wait_sec)
+         let compute_done = ref false in
+         Eio.Fiber.first
+           (fun () ->
+              run_compute ();
+              compute_done := true)
+           (fun () ->
+              Eio.Time.sleep clock max_wait_sec;
+              if not !compute_done
+              then Log.Dashboard.warn "cache compute timeout: %s (%.0fs)" key max_wait_sec)
        | None ->
-           (* Some read-model tests enable Eio without seeding the global
+         (* Some read-model tests enable Eio without seeding the global
               Eio_context clock. In that harness, run inline without the
               watchdog rather than hard-failing. *)
-           run_compute ());
+         run_compute ());
       let ts = now () in
       (match !result_ref with
        | Some (Ok value) ->
-           atomic_update table (fun map ->
-             match SMap.find_opt key map with
-             | Some (Computing { token = c; _ }) when c = token ->
-               ((), SMap.add key (Ready { value; expires_at = ts +. ttl; stale_until = ts +. ttl +. stale_grace }) map)
-             | _ ->
-               Log.Dashboard.info "cache: compute result discarded for %s (slot replaced)" key;
-               ((), map)
-           );
-           value
+         atomic_update table (fun map ->
+           match SMap.find_opt key map with
+           | Some (Computing { token = c; _ }) when c = token ->
+             ( ()
+             , SMap.add
+                 key
+                 (Ready
+                    { value
+                    ; expires_at = ts +. ttl
+                    ; stale_until = ts +. ttl +. stale_grace
+                    })
+                 map )
+           | _ ->
+             Log.Dashboard.info
+               "cache: compute result discarded for %s (slot replaced)"
+               key;
+             (), map);
+         value
        | Some (Error exn) ->
-           let fallback_val = ref None in
-           if not (is_internal_race_cancel exn) then
-             Log.Dashboard.error "cache revalidation failed: %s" (Printexc.to_string exn);
-           atomic_update table (fun map ->
-             match SMap.find_opt key map with
-             | Some (Computing { token = c; stale = Some stale_value; _ }) when c = token ->
-                 fallback_val := Some stale_value;
-                 let backoff_grace = stale_grace *. bg_revalidate_backoff_factor in
-                 ((), SMap.add key
-                   (Ready { value = stale_value; expires_at = ts; stale_until = ts +. backoff_grace })
-                   map)
-             | Some (Computing { token = c; stale = None; _ }) when c = token ->
-                 ((), SMap.remove key map)
-             | _ -> ((), map)
-           );
-           if should_restore_stale_after_failure exn then
-             match !fallback_val with
-             | Some value -> value
-             | None -> raise exn
-           else
-             raise exn
+         let fallback_val = ref None in
+         if not (is_internal_race_cancel exn)
+         then Log.Dashboard.error "cache revalidation failed: %s" (Printexc.to_string exn);
+         atomic_update table (fun map ->
+           match SMap.find_opt key map with
+           | Some (Computing { token = c; stale = Some stale_value; _ }) when c = token ->
+             fallback_val := Some stale_value;
+             let backoff_grace = stale_grace *. bg_revalidate_backoff_factor in
+             ( ()
+             , SMap.add
+                 key
+                 (Ready
+                    { value = stale_value
+                    ; expires_at = ts
+                    ; stale_until = ts +. backoff_grace
+                    })
+                 map )
+           | Some (Computing { token = c; stale = None; _ }) when c = token ->
+             (), SMap.remove key map
+           | _ -> (), map);
+         if should_restore_stale_after_failure exn
+         then (
+           match !fallback_val with
+           | Some value -> value
+           | None -> raise exn)
+         else raise exn
        | None ->
-           let fallback_val = ref None in
-           atomic_update table (fun map ->
-             match SMap.find_opt key map with
-             | Some (Computing { token = c; stale; _ }) when c = token ->
-                 (match stale with
-                  | Some s ->
-                      fallback_val := Some s;
-                      let cooldown = { value = s; expires_at = ts +. 5.0; stale_until = ts +. 10.0 } in
-                      ((), SMap.add key (Ready cooldown) map)
-                  | None ->
-                      let err_json =
-                        timeout_json ~key ~timeout_sec:max_wait_sec ~timeout_kind:"compute"
-                      in
-                      fallback_val := Some err_json;
-                      let cooldown = { value = err_json; expires_at = ts +. 5.0; stale_until = ts +. 5.0 } in
-                      ((), SMap.add key (Ready cooldown) map))
-             | _ -> ((), map)
-           );
-           (match !fallback_val with
-            | Some v -> v
-            | None -> `Assoc [("error", `String "Compute timeout")]))
+         let fallback_val = ref None in
+         atomic_update table (fun map ->
+           match SMap.find_opt key map with
+           | Some (Computing { token = c; stale; _ }) when c = token ->
+             (match stale with
+              | Some s ->
+                fallback_val := Some s;
+                let cooldown =
+                  { value = s; expires_at = ts +. 5.0; stale_until = ts +. 10.0 }
+                in
+                (), SMap.add key (Ready cooldown) map
+              | None ->
+                let err_json =
+                  timeout_json ~key ~timeout_sec:max_wait_sec ~timeout_kind:"compute"
+                in
+                fallback_val := Some err_json;
+                let cooldown =
+                  { value = err_json; expires_at = ts +. 5.0; stale_until = ts +. 5.0 }
+                in
+                (), SMap.add key (Ready cooldown) map)
+           | _ -> (), map);
+         (match !fallback_val with
+          | Some v -> v
+          | None -> `Assoc [ "error", `String "Compute timeout" ]))
     | `Retry -> try_get ~waited ~watching_token
   in
   try_get ~waited:0.0 ~watching_token:None
+;;
 
 let get_or_compute_simple key ~ttl compute =
   let ts = now () in
   let stale_grace = ttl *. stale_factor in
-  match atomic_update table (fun map ->
-    let map = maybe_evict map in
-    match SMap.find_opt key map with
-    | Some (Ready entry) when entry.stale_until > ts ->
-      (`Hit entry.value, map)
-    | _ ->
-      let token = next_token () in
-      (`Compute token, SMap.add key (Computing { token; started_at = ts; stale = None }) map)
-  ) with
+  match
+    atomic_update table (fun map ->
+      let map = maybe_evict map in
+      match SMap.find_opt key map with
+      | Some (Ready entry) when entry.stale_until > ts -> `Hit entry.value, map
+      | _ ->
+        let token = next_token () in
+        ( `Compute token
+        , SMap.add key (Computing { token; started_at = ts; stale = None }) map ))
+  with
   | `Hit v -> v
   | `Compute token ->
     (match compute () with
@@ -350,21 +417,30 @@ let get_or_compute_simple key ~ttl compute =
        atomic_update table (fun map ->
          match SMap.find_opt key map with
          | Some (Computing { token = c; _ }) when c = token ->
-           ((), SMap.add key (Ready { value; expires_at = ts_after +. ttl; stale_until = ts_after +. ttl +. stale_grace }) map)
-         | _ -> ((), map)
-       );
+           ( ()
+           , SMap.add
+               key
+               (Ready
+                  { value
+                  ; expires_at = ts_after +. ttl
+                  ; stale_until = ts_after +. ttl +. stale_grace
+                  })
+               map )
+         | _ -> (), map);
        value
      | exception exn ->
        atomic_update table (fun map ->
          match SMap.find_opt key map with
-         | Some (Computing { token = c; _ }) when c = token -> ((), SMap.remove key map)
-         | _ -> ((), map)
-       );
+         | Some (Computing { token = c; _ }) when c = token -> (), SMap.remove key map
+         | _ -> (), map);
        raise exn)
+;;
 
 let get_or_compute key ~ttl compute =
-  if Eio_guard.is_ready () then get_or_compute_eio key ~ttl compute
+  if Eio_guard.is_ready ()
+  then get_or_compute_eio key ~ttl compute
   else get_or_compute_simple key ~ttl compute
+;;
 
 let peek key =
   let ts = now () in
@@ -373,71 +449,68 @@ let peek key =
   | Some (Ready entry) when entry.stale_until > ts -> Some entry.value
   | Some (Computing { stale = Some stale_value; _ }) -> Some stale_value
   | _ -> None
+;;
 
 let timeout_error_json ?(waiting = false) key timeout_sec =
   let message =
-    if waiting then
+    if waiting
+    then
       Printf.sprintf
         "Dashboard %s timed out after %.0fs waiting for an in-flight computation"
-        key timeout_sec
-    else
-      Printf.sprintf "Dashboard %s timed out after %.0fs" key timeout_sec
+        key
+        timeout_sec
+    else Printf.sprintf "Dashboard %s timed out after %.0fs" key timeout_sec
   in
   `Assoc
-    [
-      ("error", `String "computation_timeout");
-      ("message", `String message);
-      ("generated_at", `String (Types.now_iso ()));
-      ("timeout_kind", `String (if waiting then "waiter" else "owner"));
-      ("timeout_sec", `Float timeout_sec);
-      ("key", `String key);
+    [ "error", `String "computation_timeout"
+    ; "message", `String message
+    ; "generated_at", `String (Types.now_iso ())
+    ; "timeout_kind", `String (if waiting then "waiter" else "owner")
+    ; "timeout_sec", `Float timeout_sec
+    ; "key", `String key
     ]
+;;
 
 let get_or_compute_with_timeout key ~ttl ~clock ~timeout_sec compute =
   try
-    if Eio_guard.is_ready () then
+    if Eio_guard.is_ready ()
+    then
       get_or_compute_eio ~wait_timeout_sec:timeout_sec key ~ttl (fun () ->
-        match
-          Eio.Time.with_timeout clock timeout_sec (fun () ->
-            Ok (compute ()))
-        with
+        match Eio.Time.with_timeout clock timeout_sec (fun () -> Ok (compute ())) with
         | Ok value -> value
         | Error `Timeout ->
           Log.Dashboard.warn "cache compute timeout: %s (%.0fs)" key timeout_sec;
           raise (Compute_timeout (key, false)))
     else
       get_or_compute_simple key ~ttl (fun () ->
-        match
-          Eio.Time.with_timeout clock timeout_sec (fun () ->
-            Ok (compute ()))
-        with
+        match Eio.Time.with_timeout clock timeout_sec (fun () -> Ok (compute ())) with
         | Ok value -> value
         | Error `Timeout ->
           Log.Dashboard.warn "cache compute timeout: %s (%.0fs)" key timeout_sec;
           raise (Compute_timeout (key, false)))
   with
-  | Compute_timeout (key, waiting) ->
-      timeout_error_json ~waiting key timeout_sec
+  | Compute_timeout (key, waiting) -> timeout_error_json ~waiting key timeout_sec
+;;
 
 let seed_stale_if_missing key ~stale_for value =
   let ts = now () in
   atomic_update table (fun map ->
-      match SMap.find_opt key map with
-      | Some _ -> ((), map)
-      | None ->
-          ((), SMap.add key
-            (Ready { value; expires_at = ts; stale_until = ts +. stale_for })
-            map))
+    match SMap.find_opt key map with
+    | Some _ -> (), map
+    | None ->
+      ( ()
+      , SMap.add key (Ready { value; expires_at = ts; stale_until = ts +. stale_for }) map
+      ))
+;;
 
-let invalidate key =
-  atomic_update table (fun map -> ((), SMap.remove key map))
+let invalidate key = atomic_update table (fun map -> (), SMap.remove key map)
 
 let invalidate_prefix prefix =
   atomic_update table (fun map ->
-    ((), SMap.filter (fun k _ -> not (String.starts_with ~prefix k)) map))
+    (), SMap.filter (fun k _ -> not (String.starts_with ~prefix k)) map)
+;;
 
-let invalidate_all () =
-  Atomic.set table SMap.empty
+let invalidate_all () = Atomic.set table SMap.empty
 
 let stats () =
   let map = Atomic.get table in
@@ -446,24 +519,25 @@ let stats () =
   let ready_stale = ref 0 in
   let ready_expired = ref 0 in
   let computing = ref 0 in
-  SMap.iter (fun _ v ->
-    match v with
-    | Ready e ->
-        if now_ts <= e.expires_at then
-          incr ready_fresh
-        else if now_ts <= e.stale_until then
-          incr ready_stale
-        else
-          incr ready_expired
-    | Computing _ -> incr computing
-  ) map;
-  `Assoc [
-    ("entries", `Int (SMap.cardinal map));
-    ("fresh", `Int !ready_fresh);
-    ("stale", `Int !ready_stale);
-    ("expired", `Int !ready_expired);
-    ("ready_fresh", `Int !ready_fresh);
-    ("ready_stale", `Int !ready_stale);
-    ("computing", `Int !computing);
-    ("max_entries", `Int max_entries);
-  ]
+  SMap.iter
+    (fun _ v ->
+       match v with
+       | Ready e ->
+         if now_ts <= e.expires_at
+         then incr ready_fresh
+         else if now_ts <= e.stale_until
+         then incr ready_stale
+         else incr ready_expired
+       | Computing _ -> incr computing)
+    map;
+  `Assoc
+    [ "entries", `Int (SMap.cardinal map)
+    ; "fresh", `Int !ready_fresh
+    ; "stale", `Int !ready_stale
+    ; "expired", `Int !ready_expired
+    ; "ready_fresh", `Int !ready_fresh
+    ; "ready_stale", `Int !ready_stale
+    ; "computing", `Int !computing
+    ; "max_entries", `Int max_entries
+    ]
+;;

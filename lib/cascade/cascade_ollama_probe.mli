@@ -29,18 +29,14 @@
 
 (** {1 URL classification} *)
 
-val is_ollama_url : string -> bool
 (** [is_ollama_url url] mirrors the heuristic in
     {!Cascade_client_capacity.looks_like_ollama}: any URL whose
     host:port substring contains [:11434].  Re-exported here so
     callers do not have to depend on both modules. *)
+val is_ollama_url : string -> bool
 
 (** {1 Cache lookup (synchronous, IO-free)} *)
 
-val cached_capacity :
-  ?now:float ->
-  string ->
-  Cascade_throttle.capacity_info option
 (** [cached_capacity ?now url] returns the most recent cache entry
     for [url] when its [recorded_at + ttl_ms / 1000 > now], or
     [None] when the cache is empty / expired / [url] was never
@@ -50,17 +46,10 @@ val cached_capacity :
     strategy's pure [order_candidates] without breaking the
     strategy's "no IO" invariant — the IO already happened in
     the corresponding {!try_probe}. *)
+val cached_capacity : ?now:float -> string -> Cascade_throttle.capacity_info option
 
 (** {1 Active probe (performs HTTP GET)} *)
 
-val try_probe :
-  sw:Eio.Switch.t ->
-  net:[> [> `Generic ] Eio.Net.ty ] Eio.Resource.t ->
-  ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
-  ?timeout_s:float ->
-  ?now:float ->
-  string ->
-  Cascade_throttle.capacity_info option
 (** [try_probe ~sw ~net url] issues [GET <url>/api/ps] with a short
     timeout (default [0.5] seconds), parses the JSON body, and
     updates the cache.  Returns the freshly-recorded
@@ -73,15 +62,17 @@ val try_probe :
 
     The HTTP error path is intentionally silent — failed probes
     must never break the cascade, only deny the optimisation. *)
+val try_probe
+  :  sw:Eio.Switch.t
+  -> net:[> [> `Generic ] Eio.Net.ty ] Eio.Resource.t
+  -> ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t
+  -> ?timeout_s:float
+  -> ?now:float
+  -> string
+  -> Cascade_throttle.capacity_info option
 
 (** {1 Probing many URLs} *)
 
-val refresh_many :
-  sw:Eio.Switch.t ->
-  net:[> [> `Generic ] Eio.Net.ty ] Eio.Resource.t ->
-  ?timeout_s:float ->
-  string list ->
-  unit
 (** [refresh_many ~sw ~net urls] runs {!try_probe} on every URL in
     [urls] that {!is_ollama_url} accepts and is not already covered
     by a fresh cache entry.  Probes run sequentially in the
@@ -89,14 +80,15 @@ val refresh_many :
     where [N] is the number of probes actually issued.
 
     Idempotent: URLs whose cache is still fresh are skipped. *)
+val refresh_many
+  :  sw:Eio.Switch.t
+  -> net:[> [> `Generic ] Eio.Net.ty ] Eio.Resource.t
+  -> ?timeout_s:float
+  -> string list
+  -> unit
 
 (** {1 Pure JSON parser (test surface)} *)
 
-val parse_response :
-  ?total:int ->
-  ?now:float ->
-  Yojson.Safe.t ->
-  Cascade_throttle.capacity_info option
 (** [parse_response ?total ?now json] interprets an ollama
     [/api/ps] response.  Returns [Some info] when [json] is a JSON
     object containing a [models] field that is a JSON array;
@@ -108,11 +100,16 @@ val parse_response :
     Returns [None] on any other shape — no field, wrong type,
     invalid JSON.  This makes the parser easy to unit-test without
     spinning up an HTTP server. *)
+val parse_response
+  :  ?total:int
+  -> ?now:float
+  -> Yojson.Safe.t
+  -> Cascade_throttle.capacity_info option
 
 (** {1 Test helpers} *)
 
-val cache_clear : unit -> unit
 (** Empty the probe cache.  Test helper. *)
+val cache_clear : unit -> unit
 
-val cache_size : unit -> int
 (** Number of cached entries.  Test helper. *)
+val cache_size : unit -> int

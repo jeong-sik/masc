@@ -12,21 +12,28 @@ let temp_dir () =
   Unix.unlink dir;
   Unix.mkdir dir 0o755;
   dir
+;;
 
 let cleanup_dir dir =
   let rec rm path =
-    if Sys.file_exists path then
-      if Sys.is_directory path then (
+    if Sys.file_exists path
+    then
+      if Sys.is_directory path
+      then (
         Array.iter (fun name -> rm (Filename.concat path name)) (Sys.readdir path);
         Unix.rmdir path)
-      else
-        Unix.unlink path
+      else Unix.unlink path
   in
-  try rm dir with _ -> ()
+  try rm dir with
+  | _ -> ()
+;;
 
 let with_eio_temp_base_path f =
   let dir = temp_dir () in
-  let prev = try Some (Unix.getenv "MASC_BASE_PATH") with Not_found -> None in
+  let prev =
+    try Some (Unix.getenv "MASC_BASE_PATH") with
+    | Not_found -> None
+  in
   Unix.putenv "MASC_BASE_PATH" dir;
   Fun.protect
     ~finally:(fun () ->
@@ -35,9 +42,11 @@ let with_eio_temp_base_path f =
        | None -> ());
       cleanup_dir dir)
     (fun () ->
-      Eio_main.run @@ fun env ->
-      Fs_compat.set_fs (Eio.Stdenv.fs env);
-      f ())
+       Eio_main.run
+       @@ fun env ->
+       Fs_compat.set_fs (Eio.Stdenv.fs env);
+       f ())
+;;
 
 (* --- Test 1: Assigned snapshot has all fields --- *)
 
@@ -59,6 +68,7 @@ let test_assigned_snapshot_has_all_fields () =
     match Tool_assignment_telemetry.find_latest_assignment_id ~agent_id:"agent-1" with
     | None -> fail "expected assignment_id in index"
     | Some id -> check string "assignment_id matches" assignment_id id)
+;;
 
 (* --- Test 2: Called links to correct assignment_id --- *)
 
@@ -82,6 +92,7 @@ let test_called_links_to_assignment_id () =
     match called_id with
     | None -> fail "expected called to find assignment_id"
     | Some id -> check string "called links to assigned" assignment_id id)
+;;
 
 (* --- Test 3: Completed temporal ordering --- *)
 
@@ -116,6 +127,7 @@ let test_completed_temporal_ordering () =
     let t2 = Time_compat.now () in
     check bool "assigned before called" true (t0 <= t1);
     check bool "called before completed" true (t1 <= t2))
+;;
 
 (* --- Test 4: Config hash format validation --- *)
 
@@ -135,18 +147,15 @@ let test_config_hash_format () =
     (* Config hash is not directly exposed; verify via read_recent JSON round-trip. *)
     match Tool_assignment_telemetry.read_recent ~n:10 with
     | Error msg -> fail ("read_recent failed: " ^ msg)
-    | Ok events -> (
-        match events with
-        | [] -> fail "expected at least one event"
-        | Assigned ev :: _ ->
-            check bool "config_hash is hex" true
-              (String.length ev.config_hash = 64);
-            let is_hex c =
-              (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')
-            in
-            check bool "config_hash all hex" true
-              (String.for_all is_hex ev.config_hash)
-        | _ -> fail "expected Assigned event"))
+    | Ok events ->
+      (match events with
+       | [] -> fail "expected at least one event"
+       | Assigned ev :: _ ->
+         check bool "config_hash is hex" true (String.length ev.config_hash = 64);
+         let is_hex c = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') in
+         check bool "config_hash all hex" true (String.for_all is_hex ev.config_hash)
+       | _ -> fail "expected Assigned event"))
+;;
 
 (* --- Test 5: read_recent returns newest-first --- *)
 
@@ -171,34 +180,37 @@ let test_read_recent_newest_first () =
     in
     match Tool_assignment_telemetry.read_recent ~n:10 with
     | Error msg -> fail ("read_recent failed: " ^ msg)
-    | Ok events -> (
-        match events with
-        | Assigned ev :: _ ->
-            check string "newest first" id2 ev.assignment_id;
-            (* Verify the older one is present too. *)
-            let has_id1 =
-              List.exists
-                (function
-                  | Assigned a -> String.equal a.assignment_id id1
-                  | _ -> false)
-                events
-            in
-            check bool "older event present" true has_id1
-        | _ -> fail "expected Assigned event at head"))
+    | Ok events ->
+      (match events with
+       | Assigned ev :: _ ->
+         check string "newest first" id2 ev.assignment_id;
+         (* Verify the older one is present too. *)
+         let has_id1 =
+           List.exists
+             (function
+               | Assigned a -> String.equal a.assignment_id id1
+               | _ -> false)
+             events
+         in
+         check bool "older event present" true has_id1
+       | _ -> fail "expected Assigned event at head"))
+;;
 
 let () =
-  run "Tool_assignment_telemetry"
-    [
-      ( "assignment lifecycle",
-        [
-          test_case "assigned snapshot has all fields" `Quick
-            test_assigned_snapshot_has_all_fields;
-          test_case "called links to assignment_id" `Quick
-            test_called_links_to_assignment_id;
-          test_case "completed temporal ordering" `Quick
-            test_completed_temporal_ordering;
-          test_case "config hash format" `Quick test_config_hash_format;
-          test_case "read_recent newest first" `Quick
-            test_read_recent_newest_first;
-        ] );
+  run
+    "Tool_assignment_telemetry"
+    [ ( "assignment lifecycle"
+      , [ test_case
+            "assigned snapshot has all fields"
+            `Quick
+            test_assigned_snapshot_has_all_fields
+        ; test_case
+            "called links to assignment_id"
+            `Quick
+            test_called_links_to_assignment_id
+        ; test_case "completed temporal ordering" `Quick test_completed_temporal_ordering
+        ; test_case "config hash format" `Quick test_config_hash_format
+        ; test_case "read_recent newest first" `Quick test_read_recent_newest_first
+        ] )
     ]
+;;

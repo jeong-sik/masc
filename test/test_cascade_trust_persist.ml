@@ -19,15 +19,17 @@ let temp_base_path () =
   Sys.remove dir;
   Unix.mkdir dir 0o755;
   dir
+;;
 
 let rec rm_rf path =
-  if Sys.file_exists path then
-    if Sys.is_directory path then begin
-      Sys.readdir path
-      |> Array.iter (fun name -> rm_rf (Filename.concat path name));
-      Unix.rmdir path
-    end else
-      Sys.remove path
+  if Sys.file_exists path
+  then
+    if Sys.is_directory path
+    then (
+      Sys.readdir path |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+      Unix.rmdir path)
+    else Sys.remove path
+;;
 
 (* [Dated_jsonl.append] uses [Eio.Mutex] internally, which requires the
    [Cancel.Get_context] effect handler installed by [Eio_main.run].
@@ -42,39 +44,45 @@ let with_temp_base f =
       P.reset_for_testing ();
       rm_rf dir)
     (fun () -> Eio_main.run (fun _env -> f dir))
+;;
 
 let read_all_jsonl_in dir : Yojson.Safe.t list =
   let cascade_dir = Filename.concat dir "cascade_trust" in
-  if not (Sys.file_exists cascade_dir) then []
-  else
+  if not (Sys.file_exists cascade_dir)
+  then []
+  else (
     let lines = ref [] in
     let rec walk path =
-      if Sys.is_directory path then
-        Sys.readdir path
-        |> Array.iter (fun name -> walk (Filename.concat path name))
-      else if Filename.check_suffix path ".jsonl" then
+      if Sys.is_directory path
+      then Sys.readdir path |> Array.iter (fun name -> walk (Filename.concat path name))
+      else if Filename.check_suffix path ".jsonl"
+      then (
         let ic = open_in path in
         Fun.protect
           ~finally:(fun () -> close_in_noerr ic)
           (fun () ->
-            try
-              while true do
-                lines := input_line ic :: !lines
-              done
-            with End_of_file -> ())
+             try
+               while true do
+                 lines := input_line ic :: !lines
+               done
+             with
+             | End_of_file -> ()))
     in
     walk cascade_dir;
-    List.rev_map Yojson.Safe.from_string !lines
+    List.rev_map Yojson.Safe.from_string !lines)
+;;
 
 let member key json = Yojson.Safe.Util.member key json
 
 let to_list_exn = function
   | `List xs -> xs
   | _ -> fail "expected JSON list"
+;;
 
 let to_string_exn = function
   | `String s -> s
   | _ -> fail "expected JSON string"
+;;
 
 (* ── Tests ─────────────────────────────────────── *)
 
@@ -84,6 +92,7 @@ let test_snapshot_writes_jsonl_record () =
     match read_all_jsonl_in dir with
     | [] -> fail "snapshot_now produced no JSONL record"
     | _ :: _ -> ())
+;;
 
 let test_snapshot_record_has_ts_and_providers () =
   with_temp_base (fun dir ->
@@ -97,12 +106,17 @@ let test_snapshot_record_has_ts_and_providers () =
       (match member "providers" record with
        | `List _ -> ()
        | _ -> fail "providers must be list"))
+;;
 
 let test_snapshot_includes_recorded_provider () =
   with_temp_base (fun dir ->
     let key = "test_persist_includes:" ^ string_of_int (Random.bits ()) in
-    H.record_failure H.global ~provider_key:key
-      ~error_kind:"failure" ~error_reason:"boom" ();
+    H.record_failure
+      H.global
+      ~provider_key:key
+      ~error_kind:"failure"
+      ~error_reason:"boom"
+      ();
     P.snapshot_now ~base_path:dir;
     match read_all_jsonl_in dir with
     | [] -> fail "no record"
@@ -111,70 +125,77 @@ let test_snapshot_includes_recorded_provider () =
       let found =
         List.exists
           (fun p ->
-            match member "provider_key" p with
-            | `String k -> String.equal k key
-            | _ -> false)
+             match member "provider_key" p with
+             | `String k -> String.equal k key
+             | _ -> false)
           providers
       in
       check bool "recorded provider appears in snapshot" true found)
+;;
 
 let test_snapshot_provider_record_shape () =
   with_temp_base (fun dir ->
     let key = "test_persist_shape:" ^ string_of_int (Random.bits ()) in
-    H.record_failure H.global ~provider_key:key
-      ~error_kind:"timeout" ~error_reason:"deadline" ();
+    H.record_failure
+      H.global
+      ~provider_key:key
+      ~error_kind:"timeout"
+      ~error_reason:"deadline"
+      ();
     P.snapshot_now ~base_path:dir;
     match read_all_jsonl_in dir with
     | [] -> fail "no record"
     | record :: _ ->
       let providers = to_list_exn (member "providers" record) in
-      match
-        List.find_opt
-          (fun p ->
-            match member "provider_key" p with
-            | `String k -> String.equal k key
-            | _ -> false)
-          providers
-      with
-      | None -> fail "missing recorded provider"
-      | Some p ->
-        let required_fields =
-          [ "provider_key"
-          ; "success_rate"
-          ; "consecutive_failures"
-          ; "in_cooldown"
-          ; "events_in_window"
-          ; "rejected_in_window"
-          ; "top_fingerprints"
-          ; "last_failure_at"
-          ]
-        in
-        List.iter
-          (fun field ->
-            match member field p with
-            | `Null when field = "last_failure_at" -> ()
-            | `Null -> fail (Printf.sprintf "field %s missing" field)
-            | _ -> ())
-          required_fields;
-        let fps = to_list_exn (member "top_fingerprints" p) in
-        check bool "top_fingerprints non-empty after failure"
-          true (fps <> []);
-        match fps with
-        | first :: _ ->
-          let fp_str = to_string_exn (member "fingerprint" first) in
-          check bool "fingerprint kind prefix preserved"
-            true
-            (String.length fp_str >= String.length "timeout"
-             && String.sub fp_str 0 (String.length "timeout") = "timeout")
-        | [] -> fail "unreachable")
+      (match
+         List.find_opt
+           (fun p ->
+              match member "provider_key" p with
+              | `String k -> String.equal k key
+              | _ -> false)
+           providers
+       with
+       | None -> fail "missing recorded provider"
+       | Some p ->
+         let required_fields =
+           [ "provider_key"
+           ; "success_rate"
+           ; "consecutive_failures"
+           ; "in_cooldown"
+           ; "events_in_window"
+           ; "rejected_in_window"
+           ; "top_fingerprints"
+           ; "last_failure_at"
+           ]
+         in
+         List.iter
+           (fun field ->
+              match member field p with
+              | `Null when field = "last_failure_at" -> ()
+              | `Null -> fail (Printf.sprintf "field %s missing" field)
+              | _ -> ())
+           required_fields;
+         let fps = to_list_exn (member "top_fingerprints" p) in
+         check bool "top_fingerprints non-empty after failure" true (fps <> []);
+         (match fps with
+          | first :: _ ->
+            let fp_str = to_string_exn (member "fingerprint" first) in
+            check
+              bool
+              "fingerprint kind prefix preserved"
+              true
+              (String.length fp_str >= String.length "timeout"
+               && String.sub fp_str 0 (String.length "timeout") = "timeout")
+          | [] -> fail "unreachable")))
+;;
 
 let test_two_snapshots_produce_two_records () =
   with_temp_base (fun dir ->
     P.snapshot_now ~base_path:dir;
     P.snapshot_now ~base_path:dir;
     let records = read_all_jsonl_in dir in
-    check int "two snapshot calls → two JSONL records"
-      2 (List.length records))
+    check int "two snapshot calls → two JSONL records" 2 (List.length records))
+;;
 
 let test_snapshot_does_not_throw_on_empty_tracker () =
   with_temp_base (fun dir ->
@@ -184,22 +205,34 @@ let test_snapshot_does_not_throw_on_empty_tracker () =
     match read_all_jsonl_in dir with
     | [] -> fail "expected at least one record"
     | _ -> ())
+;;
 
 let () =
   Random.self_init ();
-  run "cascade_trust_persist"
+  run
+    "cascade_trust_persist"
     [ ( "snapshot"
-      , [ test_case "writes a JSONL record" `Quick
-            test_snapshot_writes_jsonl_record
-        ; test_case "record has ts + providers" `Quick
+      , [ test_case "writes a JSONL record" `Quick test_snapshot_writes_jsonl_record
+        ; test_case
+            "record has ts + providers"
+            `Quick
             test_snapshot_record_has_ts_and_providers
-        ; test_case "recorded provider appears" `Quick
+        ; test_case
+            "recorded provider appears"
+            `Quick
             test_snapshot_includes_recorded_provider
-        ; test_case "provider record has expected shape" `Quick
+        ; test_case
+            "provider record has expected shape"
+            `Quick
             test_snapshot_provider_record_shape
-        ; test_case "two calls → two records" `Quick
+        ; test_case
+            "two calls → two records"
+            `Quick
             test_two_snapshots_produce_two_records
-        ; test_case "no throw on empty tracker" `Quick
+        ; test_case
+            "no throw on empty tracker"
+            `Quick
             test_snapshot_does_not_throw_on_empty_tracker
         ] )
     ]
+;;

@@ -128,15 +128,16 @@ let find_free_port () =
        match Unix.bind socket (Unix.ADDR_INET (Unix.inet_addr_loopback, 0)) with
        | () ->
          (match Unix.getsockname socket with
-         | Unix.ADDR_INET (_, port) -> Some port
-         | _ -> fail "unexpected socket address")
+          | Unix.ADDR_INET (_, port) -> Some port
+          | _ -> fail "unexpected socket address")
        | exception Unix.Unix_error ((Unix.EPERM | Unix.EACCES), "bind", _) -> None)
 ;;
 
 let mock_openai_text_response ?(id = "chatcmpl-dashboard-routes") text =
   Printf.sprintf
     {|{"id":"%s","object":"chat.completion","model":"mock","choices":[{"index":0,"message":{"role":"assistant","content":"%s"},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":1,"total_tokens":11}}|}
-    id text
+    id
+    text
 ;;
 
 let wait_for_tcp_listener ~port ~timeout_s =
@@ -185,7 +186,12 @@ let with_mock_model f =
     Unix.listen server 16;
     let response =
       Printf.sprintf
-        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s"
+        "HTTP/1.1 200 OK\r\n\
+         Content-Type: application/json\r\n\
+         Content-Length: %d\r\n\
+         Connection: close\r\n\
+         \r\n\
+         %s"
         (String.length response_body)
         response_body
     in
@@ -197,7 +203,9 @@ let with_mock_model f =
            let buffer = Bytes.create 4096 in
            (try ignore (Unix.read client buffer 0 (Bytes.length buffer)) with
             | Unix.Unix_error _ -> ());
-           try ignore (Unix.write_substring client response 0 (String.length response)) with
+           try
+             ignore (Unix.write_substring client response 0 (String.length response))
+           with
            | Unix.Unix_error _ -> ());
       serve ()
     in
@@ -212,10 +220,8 @@ let with_mock_model f =
     then (
       cleanup ();
       fail (Printf.sprintf "mock model server failed to listen on port %d" port));
-    Fun.protect
-      ~finally:cleanup
-      (fun () ->
-         f (Printf.sprintf "custom:mock@http://127.0.0.1:%d/v1" port))
+    Fun.protect ~finally:cleanup (fun () ->
+      f (Printf.sprintf "custom:mock@http://127.0.0.1:%d/v1" port))
 ;;
 
 let wait_for_health ~port ~timeout_s =
@@ -318,27 +324,25 @@ let with_temp_config_root cascade_json f =
    | _ -> ());
   Unix.mkdir root 0o755;
   let cleanup () = rm_rf root in
-  Fun.protect
-    ~finally:cleanup
-    (fun () ->
-       mkdir_p (Filename.concat root "personas");
-       mkdir_p (Filename.concat root "keepers");
-       mkdir_p (Filename.concat root "prompts");
-       write_file (Filename.concat root "cascade.json") cascade_json;
-       write_file
-         (Filename.concat root "tool_policy.toml")
-         (read_file (repo_config_path "tool_policy.toml"));
-       f root)
+  Fun.protect ~finally:cleanup (fun () ->
+    mkdir_p (Filename.concat root "personas");
+    mkdir_p (Filename.concat root "keepers");
+    mkdir_p (Filename.concat root "prompts");
+    write_file (Filename.concat root "cascade.json") cascade_json;
+    write_file
+      (Filename.concat root "tool_policy.toml")
+      (read_file (repo_config_path "tool_policy.toml"));
+    f root)
 ;;
 
 let with_config_dir config_root f =
   let prev = Sys.getenv_opt "MASC_CONFIG_DIR" in
   Fun.protect
     ~finally:(fun () ->
-       (match prev with
-        | Some value -> Unix.putenv "MASC_CONFIG_DIR" value
-        | None -> Unix.putenv "MASC_CONFIG_DIR" "");
-       Masc_mcp.Config_dir_resolver.reset ())
+      (match prev with
+       | Some value -> Unix.putenv "MASC_CONFIG_DIR" value
+       | None -> Unix.putenv "MASC_CONFIG_DIR" "");
+      Masc_mcp.Config_dir_resolver.reset ())
     (fun () ->
        Unix.putenv "MASC_CONFIG_DIR" config_root;
        Masc_mcp.Config_dir_resolver.reset ();
@@ -433,7 +437,7 @@ let run_curl_get ?token ~port ~path () =
     let args =
       match token with
       | Some raw_token ->
-          base_args @ [ "-H"; Printf.sprintf "Authorization: Bearer %s" raw_token ]
+        base_args @ [ "-H"; Printf.sprintf "Authorization: Bearer %s" raw_token ]
       | None -> base_args
     in
     Array.of_list (args @ [ url ])
@@ -462,15 +466,13 @@ let execution_keeper_paused body keeper_name =
   let json = Yojson.Safe.from_string body in
   let keepers = json |> member "keepers" |> to_list in
   match
-    List.find_opt
-      (fun row -> row |> member "name" |> to_string = keeper_name)
-      keepers
+    List.find_opt (fun row -> row |> member "name" |> to_string = keeper_name) keepers
   with
-  | Some row -> (
-      match row |> member "paused" with
-      | `Bool value -> value
-      | `Null -> false
-      | _ -> false)
+  | Some row ->
+    (match row |> member "paused" with
+     | `Bool value -> value
+     | `Null -> false
+     | _ -> false)
   | None -> fail ("keeper missing from execution payload: " ^ keeper_name)
 ;;
 
@@ -479,11 +481,11 @@ let profile_names body =
   let json = Yojson.Safe.from_string body in
   match json |> member "profiles" with
   | `List items ->
-      List.filter_map
-        (function
-          | `String value -> Some value
-          | _ -> None)
-        items
+    List.filter_map
+      (function
+        | `String value -> Some value
+        | _ -> None)
+      items
   | _ -> []
 ;;
 
@@ -492,12 +494,12 @@ let invalid_profile_names body =
   let json = Yojson.Safe.from_string body in
   match json |> member "invalid_profiles" with
   | `List items ->
-      List.filter_map
-        (fun item ->
-           match item |> member "name" with
-           | `String value -> Some value
-           | _ -> None)
-        items
+    List.filter_map
+      (fun item ->
+         match item |> member "name" with
+         | `String value -> Some value
+         | _ -> None)
+      items
   | _ -> []
 ;;
 
@@ -506,9 +508,7 @@ let keeper_profile_cascade_name body keeper_name =
   let json = Yojson.Safe.from_string body in
   let rows = json |> member "keeper_profiles" |> to_list in
   match
-    List.find_opt
-      (fun row -> row |> member "keeper" |> to_string = keeper_name)
-      rows
+    List.find_opt (fun row -> row |> member "keeper" |> to_string = keeper_name) rows
   with
   | Some row -> row |> member "cascade_name" |> to_string
   | None -> fail ("keeper profile missing from cascade config: " ^ keeper_name)
@@ -566,20 +566,20 @@ let seed_auth_and_keeper ~base_path ~keeper_name =
 let seed_agent_file ?(agent_type = "worker") ?(capabilities = []) config agent_name =
   let timestamp = Types.now_iso () in
   let agent : Types.agent =
-    {
-      id = None;
-      name = agent_name;
-      agent_type;
-      status = Types.Active;
-      capabilities;
-      current_task = None;
-      joined_at = timestamp;
-      last_seen = timestamp;
-      meta = None;
+    { id = None
+    ; name = agent_name
+    ; agent_type
+    ; status = Types.Active
+    ; capabilities
+    ; current_task = None
+    ; joined_at = timestamp
+    ; last_seen = timestamp
+    ; meta = None
     }
   in
   let agent_file =
-    Filename.concat (Masc_mcp.Coord.agents_dir config)
+    Filename.concat
+      (Masc_mcp.Coord.agents_dir config)
       (Masc_mcp.Coord.safe_filename agent_name ^ ".json")
   in
   Masc_mcp.Coord.write_json config agent_file (Types.agent_to_yojson agent)
@@ -595,69 +595,62 @@ let append_execution_receipt config ~keeper_name =
   let started_at = Types.now_iso () in
   let ended_at = Types.now_iso () in
   let receipt : Masc_mcp.Keeper_execution_receipt.t =
-    {
-      keeper_name = meta.name;
-      agent_name = meta.agent_name;
-      trace_id = Masc_mcp.Keeper_id.Trace_id.to_string meta.runtime.trace_id;
-      generation = meta.runtime.generation;
-      turn_count = Some 2;
-      current_task_id = None;
-      goal_ids = meta.active_goal_ids;
-      outcome = "ok";
-      terminal_reason_code = "completed";
-      response_text_present = true;
-      model_used = Some "custom:mock";
-      requested_tools = [ "keeper_task_claim"; "keeper_fs_read" ];
-      reported_tools = [ "Read" ];
-      observed_tools = [ "keeper_fs_read" ];
-      canonical_tools = [ "keeper_fs_read" ];
-      unexpected_tools = [ "WebSearch" ];
-      tools_used = [ "keeper_fs_read" ];
-      tool_contract_result = "satisfied";
-      tool_surface =
-        {
-          turn_lane = "tool";
-          tool_surface_class = "mixed";
-          tool_requirement = "required";
-          visible_tool_count = 2;
-          tool_gate_enabled = true;
-          tool_surface_fallback_used = false;
-          required_tools = [];
-          missing_required_tools = [];
-        };
-      sandbox_kind =
-        Masc_mcp.Keeper_execution_receipt.sandbox_kind_of_meta meta;
-      sandbox_root = Some config.base_path;
-      network_mode =
-        Masc_mcp.Keeper_types.network_mode_to_string meta.network_mode;
-      approval_profile = Some "trusted_local";
-      approval_profile_derived = false;
-      cascade_name = meta.cascade_name;
-      cascade_selected_model = Some "custom:mock";
-      cascade_attempt_count = 2;
-      cascade_fallback_applied = true;
-      cascade_outcome = "passed_to_next_model";
-      degraded_retry_applied = true;
-      degraded_retry_cascade =
-        Some Masc_mcp.Keeper_config.local_recovery_cascade_name;
-      fallback_reason = Some "turn_timeout";
-      cascade_rotation_attempts =
-        [
-          {
-            from_cascade = meta.cascade_name;
-            to_cascade = Masc_mcp.Keeper_config.local_recovery_cascade_name;
-            reason = "turn_timeout";
-            outcome = "retry_scheduled";
-            error_kind = Some "internal";
-            error_message = Some "turn timeout";
-            recorded_at = ended_at;
-          };
-        ];
-      stop_reason = Some "completed";
-      error_kind = None;
-      error_message = None;
-      started_at;
-      ended_at;
+    { keeper_name = meta.name
+    ; agent_name = meta.agent_name
+    ; trace_id = Masc_mcp.Keeper_id.Trace_id.to_string meta.runtime.trace_id
+    ; generation = meta.runtime.generation
+    ; turn_count = Some 2
+    ; current_task_id = None
+    ; goal_ids = meta.active_goal_ids
+    ; outcome = "ok"
+    ; terminal_reason_code = "completed"
+    ; response_text_present = true
+    ; model_used = Some "custom:mock"
+    ; requested_tools = [ "keeper_task_claim"; "keeper_fs_read" ]
+    ; reported_tools = [ "Read" ]
+    ; observed_tools = [ "keeper_fs_read" ]
+    ; canonical_tools = [ "keeper_fs_read" ]
+    ; unexpected_tools = [ "WebSearch" ]
+    ; tools_used = [ "keeper_fs_read" ]
+    ; tool_contract_result = "satisfied"
+    ; tool_surface =
+        { turn_lane = "tool"
+        ; tool_surface_class = "mixed"
+        ; tool_requirement = "required"
+        ; visible_tool_count = 2
+        ; tool_gate_enabled = true
+        ; tool_surface_fallback_used = false
+        ; required_tools = []
+        ; missing_required_tools = []
+        }
+    ; sandbox_kind = Masc_mcp.Keeper_execution_receipt.sandbox_kind_of_meta meta
+    ; sandbox_root = Some config.base_path
+    ; network_mode = Masc_mcp.Keeper_types.network_mode_to_string meta.network_mode
+    ; approval_profile = Some "trusted_local"
+    ; approval_profile_derived = false
+    ; cascade_name = meta.cascade_name
+    ; cascade_selected_model = Some "custom:mock"
+    ; cascade_attempt_count = 2
+    ; cascade_fallback_applied = true
+    ; cascade_outcome = "passed_to_next_model"
+    ; degraded_retry_applied = true
+    ; degraded_retry_cascade = Some Masc_mcp.Keeper_config.local_recovery_cascade_name
+    ; fallback_reason = Some "turn_timeout"
+    ; cascade_rotation_attempts =
+        [ { from_cascade = meta.cascade_name
+          ; to_cascade = Masc_mcp.Keeper_config.local_recovery_cascade_name
+          ; reason = "turn_timeout"
+          ; outcome = "retry_scheduled"
+          ; error_kind = Some "internal"
+          ; error_message = Some "turn timeout"
+          ; recorded_at = ended_at
+          }
+        ]
+    ; stop_reason = Some "completed"
+    ; error_kind = None
+    ; error_message = None
+    ; started_at
+    ; ended_at
     }
   in
   let tm = Unix.gmtime (Unix.gettimeofday ()) in
@@ -740,7 +733,8 @@ let with_seeded_server ?(env_overrides = []) f =
   if has_env_override "MASC_CONFIG_DIR" env_overrides
   then run_with_env_overrides env_overrides
   else
-    with_mock_model @@ fun valid_model ->
+    with_mock_model
+    @@ fun valid_model ->
     with_temp_config_root
       (Printf.sprintf
          {|{"default_models":["%s"],"keeper_unified_models":["%s"]}|}
@@ -816,15 +810,15 @@ let test_keeper_lifecycle_routes_do_not_fall_through_to_generic_404 () =
     true
     (contains_substr {|"action":"boot"|} boot_result.body);
   (match Masc_mcp.Keeper_types.read_meta config keeper_name with
-   | Ok (Some meta) ->
-       check bool "boot resumes paused keeper meta" false meta.paused
+   | Ok (Some meta) -> check bool "boot resumes paused keeper meta" false meta.paused
    | Ok None -> fail "keeper meta missing after boot route"
    | Error err -> fail ("failed to read keeper meta after boot route: " ^ err));
-  let execution_after_boot =
-    run_curl_get ~port ~path:"/api/v1/dashboard/execution" ()
-  in
+  let execution_after_boot = run_curl_get ~port ~path:"/api/v1/dashboard/execution" () in
   require_status "execution GET returns 200 after boot" 200 execution_after_boot;
-  check bool "execution reflects resumed keeper after boot" false
+  check
+    bool
+    "execution reflects resumed keeper after boot"
+    false
     (execution_keeper_paused execution_after_boot.body keeper_name);
   let shutdown_result =
     run_curl_post ~body:"{}" ~token:admin_token ~port ~path:shutdown_path ()
@@ -842,21 +836,16 @@ let test_keeper_lifecycle_routes_do_not_fall_through_to_generic_404 () =
     (contains_substr {|"action":"shutdown"|} shutdown_result.body);
   (match Masc_mcp.Keeper_types.read_meta config keeper_name with
    | Ok (Some meta) ->
-       let updated_meta =
-         {
-           meta with
-           continuity_summary = "stale continuity snapshot";
-           updated_at = Masc_mcp.Keeper_types.now_iso ();
-           runtime =
-             {
-               meta.runtime with
-               last_continuity_update_ts = 1234.0;
-             };
-         }
-       in
-       (match Masc_mcp.Keeper_types.write_meta ~force:true config updated_meta with
-        | Ok () -> ()
-        | Error err -> fail ("failed to seed continuity summary: " ^ err))
+     let updated_meta =
+       { meta with
+         continuity_summary = "stale continuity snapshot"
+       ; updated_at = Masc_mcp.Keeper_types.now_iso ()
+       ; runtime = { meta.runtime with last_continuity_update_ts = 1234.0 }
+       }
+     in
+     (match Masc_mcp.Keeper_types.write_meta ~force:true config updated_meta with
+      | Ok () -> ()
+      | Error err -> fail ("failed to seed continuity summary: " ^ err))
    | Ok None -> fail "keeper meta missing before clear route"
    | Error err -> fail ("failed to read keeper meta before clear: " ^ err));
   let clear_result =
@@ -885,9 +874,12 @@ let test_keeper_lifecycle_routes_do_not_fall_through_to_generic_404 () =
     (contains_substr {|"continuity_cleared":true|} clear_result.body);
   (match Masc_mcp.Keeper_types.read_meta config keeper_name with
    | Ok (Some meta) ->
-       check string "clear resets continuity summary" "" meta.continuity_summary;
-       check (float 0.0001) "clear resets continuity freshness" 0.0
-         meta.runtime.last_continuity_update_ts
+     check string "clear resets continuity summary" "" meta.continuity_summary;
+     check
+       (float 0.0001)
+       "clear resets continuity freshness"
+       0.0
+       meta.runtime.last_continuity_update_ts
    | Ok None -> fail "keeper meta missing after clear route"
    | Error err -> fail ("failed to read keeper meta after clear: " ^ err));
   match Masc_mcp.Keeper_types.read_meta config keeper_name with
@@ -899,9 +891,7 @@ let test_keeper_lifecycle_routes_do_not_fall_through_to_generic_404 () =
 let test_keeper_directive_resume_updates_paused_meta () =
   with_seeded_server
   @@ fun ~port ~config ~admin_token ~keeper_name ->
-  let directive_path =
-    Printf.sprintf "/api/v1/keepers/%s/directive" keeper_name
-  in
+  let directive_path = Printf.sprintf "/api/v1/keepers/%s/directive" keeper_name in
   let resume_result =
     run_curl_post
       ~body:{|{"action":"resume"}|}
@@ -920,14 +910,16 @@ let test_keeper_directive_resume_updates_paused_meta () =
     run_curl_get ~port ~path:"/api/v1/dashboard/execution" ()
   in
   require_status "execution GET returns 200 after directive" 200 execution_after_resume;
-  check bool "execution reflects resumed keeper after directive" false
+  check
+    bool
+    "execution reflects resumed keeper after directive"
+    false
     (execution_keeper_paused execution_after_resume.body keeper_name);
   match Masc_mcp.Keeper_types.read_meta config keeper_name with
   | Ok (Some meta) ->
-      check bool "directive resume clears paused keeper meta" false meta.paused
+    check bool "directive resume clears paused keeper meta" false meta.paused
   | Ok None -> fail "keeper meta missing after directive resume"
-  | Error err ->
-      fail ("failed to read keeper meta after directive resume: " ^ err)
+  | Error err -> fail ("failed to read keeper meta after directive resume: " ^ err)
 ;;
 
 let test_agent_purge_route_removes_plain_agent_artifacts () =
@@ -935,8 +927,7 @@ let test_agent_purge_route_removes_plain_agent_artifacts () =
   @@ fun ~port ~config ~admin_token ~keeper_name:_ ->
   let agent_name = "worker-swift-fox" in
   seed_agent_file ~capabilities:[ "coding" ] config agent_name;
-  ignore
-    (Masc_mcp.Auth.create_token config.base_path ~agent_name ~role:Types.Admin);
+  ignore (Masc_mcp.Auth.create_token config.base_path ~agent_name ~role:Types.Admin);
   let metrics_dir = Masc_mcp.Metrics_store_eio.agent_metrics_dir config agent_name in
   Fs_compat.mkdir_p metrics_dir;
   write_file (Filename.concat metrics_dir "2026-04.jsonl") "{}\n";
@@ -949,20 +940,30 @@ let test_agent_purge_route_removes_plain_agent_artifacts () =
       ()
   in
   require_status "agent purge route returns 200" 200 purge_result;
-  check bool "agent purge identifies plain agent" true
+  check
+    bool
+    "agent purge identifies plain agent"
+    true
     (contains_substr {|"target_kind":"agent"|} purge_result.body);
-  check bool "agent file removed" false
+  check
+    bool
+    "agent file removed"
+    false
     (Sys.file_exists
-       (Filename.concat (Masc_mcp.Coord.agents_dir config)
+       (Filename.concat
+          (Masc_mcp.Coord.agents_dir config)
           (Masc_mcp.Coord.safe_filename agent_name ^ ".json")));
-  check bool "agent credential removed" false
-    (Sys.file_exists
-       (Masc_mcp.Auth.credential_file config.base_path agent_name));
+  check
+    bool
+    "agent credential removed"
+    false
+    (Sys.file_exists (Masc_mcp.Auth.credential_file config.base_path agent_name));
   check bool "agent metrics removed" false (Sys.file_exists metrics_dir)
 ;;
 
 let test_agent_purge_route_removes_keeper_artifacts_and_toml () =
-  with_mock_model @@ fun valid_model ->
+  with_mock_model
+  @@ fun valid_model ->
   with_temp_config_root
     (Printf.sprintf
        {|{"default_models":["%s"],"keeper_unified_models":["%s"]}|}
@@ -974,8 +975,7 @@ let test_agent_purge_route_removes_keeper_artifacts_and_toml () =
     Filename.concat (Filename.concat config_root "keepers") (keeper_name ^ ".toml")
   in
   write_keeper_toml_fixture ~config_root ~keeper_name;
-  with_seeded_server
-    ~env_overrides:[ "MASC_CONFIG_DIR", config_root ]
+  with_seeded_server ~env_overrides:[ "MASC_CONFIG_DIR", config_root ]
   @@ fun ~port ~config ~admin_token ~keeper_name ->
   let meta =
     match Masc_mcp.Keeper_types.read_meta config keeper_name with
@@ -983,16 +983,16 @@ let test_agent_purge_route_removes_keeper_artifacts_and_toml () =
     | Ok None -> fail "keeper meta missing before purge"
     | Error err -> fail ("failed to read keeper meta before purge: " ^ err)
   in
-  seed_agent_file
-    ~agent_type:"keeper"
-    ~capabilities:[ "keeper" ]
-    config
-    meta.agent_name;
+  seed_agent_file ~agent_type:"keeper" ~capabilities:[ "keeper" ] config meta.agent_name;
   ignore
-    (Masc_mcp.Auth.create_token config.base_path ~agent_name:keeper_name
+    (Masc_mcp.Auth.create_token
+       config.base_path
+       ~agent_name:keeper_name
        ~role:Types.Admin);
   ignore
-    (Masc_mcp.Auth.create_token config.base_path ~agent_name:meta.agent_name
+    (Masc_mcp.Auth.create_token
+       config.base_path
+       ~agent_name:meta.agent_name
        ~role:Types.Admin);
   let agent_metrics_dir =
     Masc_mcp.Metrics_store_eio.agent_metrics_dir config meta.agent_name
@@ -1009,38 +1009,59 @@ let test_agent_purge_route_removes_keeper_artifacts_and_toml () =
       ()
   in
   require_status "keeper purge route returns 200" 200 purge_result;
-  check bool "keeper purge identifies keeper target" true
+  check
+    bool
+    "keeper purge identifies keeper target"
+    true
     (contains_substr {|"target_kind":"keeper"|} purge_result.body);
-  check bool "keeper purge reports toml deletion" true
+  check
+    bool
+    "keeper purge reports toml deletion"
+    true
     (contains_substr {|"removed_keeper_toml":true|} purge_result.body);
   (match Masc_mcp.Keeper_types.read_meta config keeper_name with
    | Ok None -> ()
    | Ok (Some _) -> fail "keeper meta should be removed after purge"
    | Error err -> fail ("failed to read keeper meta after purge: " ^ err));
   check bool "keeper toml removed" false (Sys.file_exists keeper_toml_path);
-  check bool "keeper agent file removed" false
+  check
+    bool
+    "keeper agent file removed"
+    false
     (Sys.file_exists
-       (Filename.concat (Masc_mcp.Coord.agents_dir config)
+       (Filename.concat
+          (Masc_mcp.Coord.agents_dir config)
           (Masc_mcp.Coord.safe_filename meta.agent_name ^ ".json")));
-  check bool "keeper credential removed" false
-    (Sys.file_exists
-       (Masc_mcp.Auth.credential_file config.base_path keeper_name));
-  check bool "keeper agent credential removed" false
-    (Sys.file_exists
-       (Masc_mcp.Auth.credential_file config.base_path meta.agent_name));
-  check bool "keeper agent metrics removed" false
-    (Sys.file_exists agent_metrics_dir);
-  check bool "keeper runtime directory removed" false
+  check
+    bool
+    "keeper credential removed"
+    false
+    (Sys.file_exists (Masc_mcp.Auth.credential_file config.base_path keeper_name));
+  check
+    bool
+    "keeper agent credential removed"
+    false
+    (Sys.file_exists (Masc_mcp.Auth.credential_file config.base_path meta.agent_name));
+  check bool "keeper agent metrics removed" false (Sys.file_exists agent_metrics_dir);
+  check
+    bool
+    "keeper runtime directory removed"
+    false
     (Sys.file_exists
        (Filename.concat (Masc_mcp.Keeper_types.keeper_dir config) keeper_name));
-  check bool "keeper session trace removed" false
+  check
+    bool
+    "keeper session trace removed"
+    false
     (Sys.file_exists
-       (Masc_mcp.Keeper_types.keeper_session_dir config
+       (Masc_mcp.Keeper_types.keeper_session_dir
+          config
           (Masc_mcp.Keeper_id.Trace_id.to_string meta.runtime.trace_id)))
 ;;
 
 let test_available_cascade_profiles_filter_invalid_catalog_entries () =
-  with_mock_model @@ fun valid_model ->
+  with_mock_model
+  @@ fun valid_model ->
   with_temp_config_root
     (Printf.sprintf
        {|
@@ -1053,19 +1074,24 @@ let test_available_cascade_profiles_filter_invalid_catalog_entries () =
        valid_model
        valid_model)
   @@ fun config_root ->
-  with_config_dir config_root @@ fun () ->
+  with_config_dir config_root
+  @@ fun () ->
   check
     (list string)
     "assignable cascades exclude invalid presets"
     [ "default"; "good" ]
     (Routes.available_cascade_profiles ());
   let invalid = Routes.invalid_cascade_profiles () in
-  check bool "invalid preset is surfaced separately" true
+  check
+    bool
+    "invalid preset is surfaced separately"
+    true
     (List.mem_assoc "broken" invalid)
 ;;
 
 let test_keeper_cascade_routes_filter_invalid_catalog_entries () =
-  with_mock_model @@ fun valid_model ->
+  with_mock_model
+  @@ fun valid_model ->
   with_temp_config_root
     (Printf.sprintf
        {|
@@ -1078,38 +1104,42 @@ let test_keeper_cascade_routes_filter_invalid_catalog_entries () =
        valid_model
        valid_model)
   @@ fun config_root ->
-  with_seeded_server
-    ~env_overrides:[ "MASC_CONFIG_DIR", config_root ]
+  with_seeded_server ~env_overrides:[ "MASC_CONFIG_DIR", config_root ]
   @@ fun ~port ~config:_ ~admin_token ~keeper_name ->
-  let list_result =
-    run_curl_get ~port ~path:"/api/v1/keeper/cascades" ()
-  in
+  let list_result = run_curl_get ~port ~path:"/api/v1/keeper/cascades" () in
   require_status "keeper cascades GET returns 200" 200 list_result;
   let profiles = profile_names list_result.body in
   let invalid_profiles = invalid_profile_names list_result.body in
   check bool "valid profile remains assignable" true (List.mem "good" profiles);
-  check bool "invalid profile omitted from assignable list" false
+  check
+    bool
+    "invalid profile omitted from assignable list"
+    false
     (List.mem "broken" profiles);
-  check bool "invalid profile is surfaced in payload" true
+  check
+    bool
+    "invalid profile is surfaced in payload"
+    true
     (List.mem "broken" invalid_profiles);
   let assign_invalid_result =
     run_curl_post
-      ~body:
-        (Printf.sprintf
-           {|{"keeper":"%s","cascade_name":"broken"}|}
-           keeper_name)
+      ~body:(Printf.sprintf {|{"keeper":"%s","cascade_name":"broken"}|} keeper_name)
       ~token:admin_token
       ~port
       ~path:"/api/v1/keeper/cascade"
       ()
   in
   require_status "invalid cascade assignment returns 409" 409 assign_invalid_result;
-  check bool "invalid cascade rejection explains config error" true
+  check
+    bool
+    "invalid cascade rejection explains config error"
+    true
     (contains_substr "invalid in active cascade.json" assign_invalid_result.body)
 ;;
 
 let test_keeper_cascade_assignment_updates_dashboard_projection () =
-  with_mock_model @@ fun valid_model ->
+  with_mock_model
+  @@ fun valid_model ->
   with_temp_config_root
     (Printf.sprintf
        {|{"default_models":["%s"],"keeper_unified_models":["%s"]}|}
@@ -1118,8 +1148,7 @@ let test_keeper_cascade_assignment_updates_dashboard_projection () =
   @@ fun config_root ->
   let seeded_keeper_name = "route_shadow_demo" in
   write_keeper_toml_fixture ~config_root ~keeper_name:seeded_keeper_name;
-  with_seeded_server
-    ~env_overrides:[ "MASC_CONFIG_DIR", config_root ]
+  with_seeded_server ~env_overrides:[ "MASC_CONFIG_DIR", config_root ]
   @@ fun ~port ~config ~admin_token ~keeper_name ->
   check string "fixture keeper name" seeded_keeper_name keeper_name;
   let boot_path = Printf.sprintf "/api/v1/keepers/%s/boot" keeper_name in
@@ -1127,19 +1156,17 @@ let test_keeper_cascade_assignment_updates_dashboard_projection () =
     run_curl_post ~body:"{}" ~token:admin_token ~port ~path:boot_path ()
   in
   require_status "boot route registers keeper" 200 boot_result;
-  let before =
-    run_curl_get ~port ~path:"/api/v1/cascade/config" ()
-  in
+  let before = run_curl_get ~port ~path:"/api/v1/cascade/config" () in
   require_status "cascade config GET before assignment returns 200" 200 before;
-  check string "dashboard starts with seeded meta cascade"
+  check
+    string
+    "dashboard starts with seeded meta cascade"
     Masc_mcp.Keeper_config.default_cascade_name
     (keeper_profile_cascade_name before.body keeper_name);
   let assign_result =
     run_curl_post
       ~body:
-        (Printf.sprintf
-           {|{"keeper":"%s","cascade_name":"keeper_unified"}|}
-           keeper_name)
+        (Printf.sprintf {|{"keeper":"%s","cascade_name":"keeper_unified"}|} keeper_name)
       ~token:admin_token
       ~port
       ~path:"/api/v1/keeper/cascade"
@@ -1148,68 +1175,99 @@ let test_keeper_cascade_assignment_updates_dashboard_projection () =
   require_status "valid cascade assignment returns 200" 200 assign_result;
   let open Yojson.Safe.Util in
   let assign_json = Yojson.Safe.from_string assign_result.body in
-  check bool "assignment synced live meta" true
+  check
+    bool
+    "assignment synced live meta"
+    true
     (assign_json |> member "live_meta_synced" |> to_bool);
-  let after =
-    run_curl_get ~port ~path:"/api/v1/cascade/config" ()
-  in
+  let after = run_curl_get ~port ~path:"/api/v1/cascade/config" () in
   require_status "cascade config GET after assignment returns 200" 200 after;
-  check string "dashboard projection reflects assigned cascade"
+  check
+    string
+    "dashboard projection reflects assigned cascade"
     "keeper_unified"
     (keeper_profile_cascade_name after.body keeper_name);
-  (match Masc_mcp.Keeper_types.read_meta config keeper_name with
-   | Ok (Some meta) ->
-       check string "persistent meta cascade updated"
-         "keeper_unified" meta.cascade_name
-   | Ok None -> fail "keeper meta missing after cascade assignment"
-   | Error msg -> fail ("read_meta failed after cascade assignment: " ^ msg))
+  match Masc_mcp.Keeper_types.read_meta config keeper_name with
+  | Ok (Some meta) ->
+    check string "persistent meta cascade updated" "keeper_unified" meta.cascade_name
+  | Ok None -> fail "keeper meta missing after cascade assignment"
+  | Error msg -> fail ("read_meta failed after cascade assignment: " ^ msg)
 ;;
 
 let test_execution_trust_route_surfaces_trust_summary_fields () =
   with_seeded_server
   @@ fun ~port ~config ~admin_token:_ ~keeper_name ->
   append_execution_receipt config ~keeper_name;
-  let result =
-    run_curl_get ~port ~path:"/api/v1/dashboard/execution-trust" ()
-  in
+  let result = run_curl_get ~port ~path:"/api/v1/dashboard/execution-trust" () in
   require_status "execution trust GET returns 200" 200 result;
   let open Yojson.Safe.Util in
   let json = Yojson.Safe.from_string result.body in
-  check string "route surfaces execution trust source" "execution_receipt"
+  check
+    string
+    "route surfaces execution trust source"
+    "execution_receipt"
     (json |> member "source" |> to_string);
-  check string "route surfaces execution trust health" "ok"
+  check
+    string
+    "route surfaces execution trust health"
+    "ok"
     (json |> member "health" |> to_string);
-  check string "route surfaces execution trust dashboard surface"
+  check
+    string
+    "route surfaces execution trust dashboard surface"
     "/api/v1/dashboard/execution-trust"
     (json |> member "dashboard_surface" |> to_string);
   let row =
     match json |> member "keepers" |> to_list with
     | keeper :: _ -> keeper
     | [] ->
-        Alcotest.failf "expected execution trust keeper row for %s: %s"
-          keeper_name result.body
+      Alcotest.failf
+        "expected execution trust keeper row for %s: %s"
+        keeper_name
+        result.body
   in
-  check bool "route surfaces trust outcome" true
+  check
+    bool
+    "route surfaces trust outcome"
+    true
     (List.mem
        (row |> member "trust" |> member "last_outcome" |> to_string)
        [ "ok"; "not_run" ]);
-  check string "route surfaces trust sandbox kind" "local"
-    (row |> member "trust" |> member "sandbox" |> member "kind"
-     |> to_string);
-  check bool "route surfaces trust contract result" true
+  check
+    string
+    "route surfaces trust sandbox kind"
+    "local"
+    (row |> member "trust" |> member "sandbox" |> member "kind" |> to_string);
+  check
+    bool
+    "route surfaces trust contract result"
+    true
     (List.mem
        (row |> member "trust" |> member "tool_contract_result" |> to_string)
        [ "satisfied"; "unknown" ]);
-  check string "route surfaces trust disposition" "Pass"
+  check
+    string
+    "route surfaces trust disposition"
+    "Pass"
     (row |> member "trust" |> member "disposition" |> to_string);
-  check string "route surfaces trust approval state" "idle"
-    (row |> member "trust" |> member "approval_state" |> member "state"
-     |> to_string);
-  check string "route surfaces execution summary mutation guard"
+  check
+    string
+    "route surfaces trust approval state"
+    "idle"
+    (row |> member "trust" |> member "approval_state" |> member "state" |> to_string);
+  check
+    string
+    "route surfaces execution summary mutation guard"
     "mutation_contract_satisfied"
-    (row |> member "trust" |> member "execution_summary"
-     |> member "mutation_guard_summary" |> to_string);
-  check bool "route surfaces latest causal event field" true
+    (row
+     |> member "trust"
+     |> member "execution_summary"
+     |> member "mutation_guard_summary"
+     |> to_string);
+  check
+    bool
+    "route surfaces latest causal event field"
+    true
     (match row |> member "trust" |> member "latest_causal_event" with
      | `Null | `Assoc _ -> true
      | _ -> false)
@@ -1224,27 +1282,43 @@ let test_composite_routes_surface_latest_execution_receipt () =
   in
   require_status "boot route registers keeper before composite read" 200 boot_result;
   append_execution_receipt config ~keeper_name;
-  let per_keeper_path =
-    Printf.sprintf "/api/v1/keepers/%s/composite" keeper_name
-  in
+  let per_keeper_path = Printf.sprintf "/api/v1/keepers/%s/composite" keeper_name in
   let per_keeper = run_curl_get ~port ~path:per_keeper_path () in
   require_status "per-keeper composite GET returns 200" 200 per_keeper;
   let open Yojson.Safe.Util in
   let per_keeper_json = Yojson.Safe.from_string per_keeper.body in
-  check string "per-keeper composite exposes keeper identity" keeper_name
+  check
+    string
+    "per-keeper composite exposes keeper identity"
+    keeper_name
     (per_keeper_json |> member "keeper" |> to_string);
   let execution = per_keeper_json |> member "execution" in
-  check bool "composite exposes latest receipt presence" true
+  check
+    bool
+    "composite exposes latest receipt presence"
+    true
     (execution |> member "latest_receipt_present" |> to_bool);
-  check string "composite exposes terminal reason" "completed"
+  check
+    string
+    "composite exposes terminal reason"
+    "completed"
     (execution |> member "terminal_reason_code" |> to_string);
-  check bool "composite exposes receipt duration" true
+  check
+    bool
+    "composite exposes receipt duration"
+    true
     (match execution |> member "duration_ms" with
      | `Float _ | `Int _ -> true
      | _ -> false);
-  check string "composite exposes cascade fallback reason" "turn_timeout"
+  check
+    string
+    "composite exposes cascade fallback reason"
+    "turn_timeout"
     (execution |> member "cascade" |> member "fallback_reason" |> to_string);
-  check int "composite exposes provider attempt count" 2
+  check
+    int
+    "composite exposes provider attempt count"
+    2
     (execution |> member "cascade" |> member "attempt_count" |> to_int);
   let fleet = run_curl_get ~port ~path:"/api/v1/keepers/composite" () in
   require_status "fleet composite GET returns 200" 200 fleet;
@@ -1254,12 +1328,21 @@ let test_composite_routes_surface_latest_execution_receipt () =
     | snapshot :: _ -> snapshot
     | [] -> fail "expected at least one fleet composite snapshot"
   in
-  check string "fleet composite exposes keeper identity" keeper_name
+  check
+    string
+    "fleet composite exposes keeper identity"
+    keeper_name
     (fleet_snapshot |> member "keeper" |> to_string);
   let fleet_execution = fleet_snapshot |> member "execution" in
-  check bool "fleet composite exposes latest receipt presence" true
+  check
+    bool
+    "fleet composite exposes latest receipt presence"
+    true
     (fleet_execution |> member "latest_receipt_present" |> to_bool);
-  check string "fleet composite exposes selected model" "custom:mock"
+  check
+    string
+    "fleet composite exposes selected model"
+    "custom:mock"
     (fleet_execution |> member "cascade" |> member "selected_model" |> to_string)
 ;;
 
@@ -1267,7 +1350,8 @@ let test_tool_calls_route_surfaces_coverage_gap_health () =
   with_seeded_server
   @@ fun ~port ~config ~admin_token:_ ~keeper_name ->
   let masc_root = Masc_mcp.Coord.masc_root_dir config in
-  Eio_main.run @@ fun env ->
+  Eio_main.run
+  @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Masc_mcp.Telemetry_coverage_gap.record
     ~masc_root
@@ -1280,18 +1364,27 @@ let test_tool_calls_route_surfaces_coverage_gap_health () =
     ~trace_id:"trace-tool-call-gap"
     ();
   let result =
-    run_curl_get ~port
+    run_curl_get
+      ~port
       ~path:(Printf.sprintf "/api/v1/keepers/%s/tool-calls" keeper_name)
       ()
   in
   require_status "tool calls GET returns 200" 200 result;
   let open Yojson.Safe.Util in
   let json = Yojson.Safe.from_string result.body in
-  check string "route surfaces tool_call_io source" "tool_call_io"
+  check
+    string
+    "route surfaces tool_call_io source"
+    "tool_call_io"
     (json |> member "source" |> to_string);
-  check string "route surfaces coverage gap health" "coverage_gap"
+  check
+    string
+    "route surfaces coverage gap health"
+    "coverage_gap"
     (json |> member "health" |> to_string);
-  check string "route surfaces coverage gap stale reason"
+  check
+    string
+    "route surfaces coverage gap stale reason"
     "tool_call_io_append_failed"
     (json |> member "stale_reason" |> to_string)
 ;;
@@ -1304,66 +1397,61 @@ let test_merge_keeper_trace_lines_includes_internal_history () =
   Fun.protect
     ~finally:(fun () -> rm_rf base_path)
     (fun () ->
-  let config = Masc_mcp.Coord.default_config base_path in
-  ignore (Masc_mcp.Coord.init config ~agent_name:(Some "bootstrap-admin"));
-  let trace_id = "trace-route-shadow-demo-seed" in
-  let internal_history_path =
-    Masc_mcp.Keeper_types.keeper_internal_history_path config trace_id
-  in
-  Fs_compat.mkdir_p (Filename.dirname internal_history_path);
-  write_file
-    internal_history_path
-    (String.concat
-       "\n"
-       [ {|{"timestamp":1000.0,"ts_unix":1000.0,"source":"internal_assistant","role":"assistant","content":"first internal thought"}|}
-       ; {|{"timestamp":1001.0,"ts_unix":1001.0,"source":"internal_assistant","role":"assistant","content":"second internal thought"}|}
-       ]
-     ^ "\n");
-  let trajectory_lines =
-    [
-      Masc_mcp.Trajectory.Tool_call
-        {
-          Masc_mcp.Trajectory.ts = 1002.0;
-          ts_iso = "1970-01-01T00:16:42Z";
-          turn = 3;
-          round = 1;
-          tool_name = "masc_tasks";
-          args_json = "{}";
-          gate_decision = Masc_mcp.Trajectory.Pass;
-          result = Some {|{"ok":true}|};
-          duration_ms = 12;
-          error = None;
-          cost_usd = 0.0;
-        };
-    ]
-  in
-  let merged =
-    Keeper_api.merge_keeper_trace_lines ~config ~trace_id trajectory_lines
-  in
-  check int "merged entry count" 3 (List.length merged);
-  (match List.nth merged 0 with
-   | Masc_mcp.Trajectory.Thinking entry ->
-     check string "first merged content" "first internal thought" entry.content
-   | Masc_mcp.Trajectory.Tool_call _ ->
-     fail "expected internal history entry first");
-  (match List.nth merged 1 with
-   | Masc_mcp.Trajectory.Thinking entry ->
-     check string "second merged content" "second internal thought" entry.content
-   | Masc_mcp.Trajectory.Tool_call _ ->
-     fail "expected internal history entry second");
-  (match List.nth merged 2 with
-   | Masc_mcp.Trajectory.Tool_call entry ->
-     check string "tool entry remains present" "masc_tasks" entry.tool_name
-   | Masc_mcp.Trajectory.Thinking _ ->
-     fail "expected tool entry last");
-  let tool_only =
-    List.filter
-      (function
-        | Masc_mcp.Trajectory.Tool_call _ -> true
-        | Masc_mcp.Trajectory.Thinking _ -> false)
-      merged
-  in
-  check int "thinking entries can still be filtered out" 1 (List.length tool_only))
+       let config = Masc_mcp.Coord.default_config base_path in
+       ignore (Masc_mcp.Coord.init config ~agent_name:(Some "bootstrap-admin"));
+       let trace_id = "trace-route-shadow-demo-seed" in
+       let internal_history_path =
+         Masc_mcp.Keeper_types.keeper_internal_history_path config trace_id
+       in
+       Fs_compat.mkdir_p (Filename.dirname internal_history_path);
+       write_file
+         internal_history_path
+         (String.concat
+            "\n"
+            [ {|{"timestamp":1000.0,"ts_unix":1000.0,"source":"internal_assistant","role":"assistant","content":"first internal thought"}|}
+            ; {|{"timestamp":1001.0,"ts_unix":1001.0,"source":"internal_assistant","role":"assistant","content":"second internal thought"}|}
+            ]
+          ^ "\n");
+       let trajectory_lines =
+         [ Masc_mcp.Trajectory.Tool_call
+             { Masc_mcp.Trajectory.ts = 1002.0
+             ; ts_iso = "1970-01-01T00:16:42Z"
+             ; turn = 3
+             ; round = 1
+             ; tool_name = "masc_tasks"
+             ; args_json = "{}"
+             ; gate_decision = Masc_mcp.Trajectory.Pass
+             ; result = Some {|{"ok":true}|}
+             ; duration_ms = 12
+             ; error = None
+             ; cost_usd = 0.0
+             }
+         ]
+       in
+       let merged =
+         Keeper_api.merge_keeper_trace_lines ~config ~trace_id trajectory_lines
+       in
+       check int "merged entry count" 3 (List.length merged);
+       (match List.nth merged 0 with
+        | Masc_mcp.Trajectory.Thinking entry ->
+          check string "first merged content" "first internal thought" entry.content
+        | Masc_mcp.Trajectory.Tool_call _ -> fail "expected internal history entry first");
+       (match List.nth merged 1 with
+        | Masc_mcp.Trajectory.Thinking entry ->
+          check string "second merged content" "second internal thought" entry.content
+        | Masc_mcp.Trajectory.Tool_call _ -> fail "expected internal history entry second");
+       (match List.nth merged 2 with
+        | Masc_mcp.Trajectory.Tool_call entry ->
+          check string "tool entry remains present" "masc_tasks" entry.tool_name
+        | Masc_mcp.Trajectory.Thinking _ -> fail "expected tool entry last");
+       let tool_only =
+         List.filter
+           (function
+             | Masc_mcp.Trajectory.Tool_call _ -> true
+             | Masc_mcp.Trajectory.Thinking _ -> false)
+           merged
+       in
+       check int "thinking entries can still be filtered out" 1 (List.length tool_only))
 ;;
 
 let dashboard_dev_token_test_dir () =
@@ -1379,8 +1467,9 @@ let test_ensure_dashboard_dev_token_rotates_legacy_dashboard_dev_owner () =
     ~finally:(fun () -> rm_rf base_path)
     (fun () ->
        let legacy_raw =
-         match Auth.create_token base_path ~agent_name:"dashboard-dev"
-                 ~role:Types.Admin with
+         match
+           Auth.create_token base_path ~agent_name:"dashboard-dev" ~role:Types.Admin
+         with
          | Ok (raw, _cred) -> raw
          | Error err -> fail (Types.masc_error_to_string err)
        in
@@ -1390,18 +1479,17 @@ let test_ensure_dashboard_dev_token_rotates_legacy_dashboard_dev_owner () =
        match Routes.ensure_dashboard_dev_token base_path with
        | Error msg -> fail msg
        | Ok raw ->
-           check bool "legacy token rotates to canonical owner" true
-             (not (String.equal raw legacy_raw));
-           check bool "canonical token file written" true
-             (Sys.file_exists canonical_path);
-           check bool "legacy token file removed" false
-             (Sys.file_exists legacy_path);
-           (match Auth.verify_token base_path ~agent_name:"dashboard" ~token:raw with
-            | Ok cred ->
-                check string "canonical credential owner" "dashboard"
-                  cred.agent_name
-            | Error err ->
-                fail (Types.masc_error_to_string err)))
+         check
+           bool
+           "legacy token rotates to canonical owner"
+           true
+           (not (String.equal raw legacy_raw));
+         check bool "canonical token file written" true (Sys.file_exists canonical_path);
+         check bool "legacy token file removed" false (Sys.file_exists legacy_path);
+         (match Auth.verify_token base_path ~agent_name:"dashboard" ~token:raw with
+          | Ok cred ->
+            check string "canonical credential owner" "dashboard" cred.agent_name
+          | Error err -> fail (Types.masc_error_to_string err)))
 ;;
 
 let test_ensure_dashboard_dev_token_reuses_canonical_dashboard_token () =
@@ -1411,14 +1499,14 @@ let test_ensure_dashboard_dev_token_reuses_canonical_dashboard_token () =
     ~finally:(fun () -> rm_rf base_path)
     (fun () ->
        let canonical_raw =
-         match Auth.create_token base_path ~agent_name:"dashboard"
-                 ~role:Types.Admin with
+         match Auth.create_token base_path ~agent_name:"dashboard" ~role:Types.Admin with
          | Ok (raw, _cred) -> raw
          | Error err -> fail (Types.masc_error_to_string err)
        in
        let legacy_raw =
-         match Auth.create_token base_path ~agent_name:"dashboard-dev"
-                 ~role:Types.Admin with
+         match
+           Auth.create_token base_path ~agent_name:"dashboard-dev" ~role:Types.Admin
+         with
          | Ok (raw, _cred) -> raw
          | Error err -> fail (Types.masc_error_to_string err)
        in
@@ -1429,11 +1517,9 @@ let test_ensure_dashboard_dev_token_reuses_canonical_dashboard_token () =
        match Routes.ensure_dashboard_dev_token base_path with
        | Error msg -> fail msg
        | Ok raw ->
-           check string "canonical token reused" canonical_raw raw;
-           check bool "legacy token file cleaned up" false
-             (Sys.file_exists legacy_path);
-           check bool "canonical token file kept" true
-             (Sys.file_exists canonical_path))
+         check string "canonical token reused" canonical_raw raw;
+         check bool "legacy token file cleaned up" false (Sys.file_exists legacy_path);
+         check bool "canonical token file kept" true (Sys.file_exists canonical_path))
 ;;
 
 let () =

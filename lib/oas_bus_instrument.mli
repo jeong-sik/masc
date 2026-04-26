@@ -75,8 +75,6 @@ module For_testing : sig
     ]
 
   val current_depth : purpose:string -> int
-  val sample_threshold_transitions
-    :  warn_threshold:int
-    -> transition list
+  val sample_threshold_transitions : warn_threshold:int -> transition list
   val reset : unit -> unit
 end

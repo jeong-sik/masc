@@ -20,38 +20,39 @@
 
 (** Why did this beat happen? *)
 type trigger =
-  | Rhythm                (** Regular interval elapsed *)
-  | Nudge of string       (** External stimulus with reason *)
-  | Demand                (** Forced immediate beat (startup, shutdown) *)
+  | Rhythm (** Regular interval elapsed *)
+  | Nudge of string (** External stimulus with reason *)
+  | Demand (** Forced immediate beat (startup, shutdown) *)
 
 (** A single heartbeat event. *)
-type beat = {
-  seq     : int;          (** Monotonically increasing beat counter *)
-  ts      : float;        (** Unix timestamp when this beat fired *)
-  trigger : trigger;      (** What caused this beat *)
-}
+type beat =
+  { seq : int (** Monotonically increasing beat counter *)
+  ; ts : float (** Unix timestamp when this beat fired *)
+  ; trigger : trigger (** What caused this beat *)
+  }
 
 (** Adaptive rhythm configuration. *)
-type rhythm = {
-  base_s  : float;        (** Base interval in seconds *)
-  min_s   : float;        (** Floor: never beat faster than this *)
-  max_s   : float;        (** Ceiling: never beat slower than this *)
-  quiet   : int * int;    (** (start_hour, end_hour) in KST — stretch interval during these hours *)
-}
+type rhythm =
+  { base_s : float (** Base interval in seconds *)
+  ; min_s : float (** Floor: never beat faster than this *)
+  ; max_s : float (** Ceiling: never beat slower than this *)
+  ; quiet : int * int
+    (** (start_hour, end_hour) in KST — stretch interval during these hours *)
+  }
 
 (** Space lifecycle. The only difference between spaces. *)
 type lifecycle =
-  | Always_on             (** Never stops (Keeper Autonomy). Runs until explicit shutdown. *)
+  | Always_on (** Never stops (Keeper Autonomy). Runs until explicit shutdown. *)
   | Bounded of (beat -> bool)
-    (** Stops when predicate returns true (TRPG session end, time limit, etc.) *)
+  (** Stops when predicate returns true (TRPG session end, time limit, etc.) *)
 
 (** Runtime statistics. *)
-type stats = {
-  total_beats   : int;
-  total_nudges  : int;
-  uptime_s      : float;
-  avg_interval  : float;
-}
+type stats =
+  { total_beats : int
+  ; total_nudges : int
+  ; uptime_s : float
+  ; avg_interval : float
+  }
 
 (** {1 Consumer — who rides each beat} *)
 
@@ -59,17 +60,15 @@ type stats = {
     The Pulse calls [should_act] to filter, then [on_beat] to execute.
     Consumers are fully decoupled — they don't know about each other. *)
 module type Consumer = sig
-  val name       : string
+  val name : string
   val should_act : beat -> bool
-  val on_beat    : beat -> (unit, string) result
+  val on_beat : beat -> (unit, string) result
 end
 
 (** {1 Consumer Recovery} *)
 
 (** Recovery configuration for consumer failure tracking. *)
-type recovery_config = {
-  max_consecutive_failures : int;
-}
+type recovery_config = { max_consecutive_failures : int }
 
 val default_recovery_config : recovery_config
 
@@ -85,12 +84,12 @@ type t
     @param rhythm Adaptive rhythm configuration
     @param lifecycle Always_on or Bounded
     @param consumers First-class consumer modules to notify on each beat *)
-val create :
-  clock:_ Eio.Time.clock ->
-  rhythm:rhythm ->
-  lifecycle:lifecycle ->
-  consumers:(module Consumer) list ->
-  t
+val create
+  :  clock:_ Eio.Time.clock
+  -> rhythm:rhythm
+  -> lifecycle:lifecycle
+  -> consumers:(module Consumer) list
+  -> t
 
 (** Start the pulse loop. Blocks the calling fiber until the lifecycle ends.
     Call this inside [Eio.Switch.run] or [Eio.Fiber.fork].
@@ -153,11 +152,11 @@ val default_rhythm : rhythm
 
     Pure functions exposed for unit testing. Not for production use. *)
 module For_testing : sig
-  val is_quiet_hour_at : hour:int -> quiet_range:(int * int) -> bool
   (** [is_quiet_hour_at ~hour ~quiet_range] checks if [hour] (0-23) falls
       within the quiet range. Handles wrap-around (e.g., 22..6). *)
+  val is_quiet_hour_at : hour:int -> quiet_range:int * int -> bool
 
-  val effective_interval_at : hour:int -> rhythm -> float
   (** [effective_interval_at ~hour rhythm] computes the interval in seconds.
       During quiet hours: base * 3.0, clamped to [min_s, max_s]. *)
+  val effective_interval_at : hour:int -> rhythm -> float
 end

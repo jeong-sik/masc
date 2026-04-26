@@ -30,47 +30,46 @@ val kind_to_string : call_kind -> string
 
 (** {1 Control} *)
 
-val enable : writer:(string -> unit) -> unit
 (** Enable the tap.  [writer] is invoked once per exec call with a complete
     JSONL line (trailing newline included).  Subsequent [enable] calls
     replace the writer.  Thread-safe. *)
+val enable : writer:(string -> unit) -> unit
 
 val disable : unit -> unit
-
 val enabled : unit -> bool
 
-val install_from_env : unit -> unit
 (** If [MASC_EXEC_TAP] is truthy ([1]/[true]/[yes]), open the output file
     at [MASC_EXEC_TAP_OUT] (default [audits/exec-corpus.jsonl]) for append
     and install a line-atomic writer.  No-op otherwise.  Safe to call
     multiple times — later calls replace the writer. *)
+val install_from_env : unit -> unit
 
 (** {1 Recording} *)
 
-val record :
-  kind:call_kind ->
-  argv:string list ->
-  ?env:string array ->
-  ?cwd:string ->
-  unit ->
-  unit
 (** Emit one JSONL line when enabled, no-op otherwise.  [env] is reduced
     to its keys (values stripped — avoids secret leakage).  [cwd] is the
     caller-provided working directory, not the process cwd. *)
+val record
+  :  kind:call_kind
+  -> argv:string list
+  -> ?env:string array
+  -> ?cwd:string
+  -> unit
+  -> unit
 
-val record_gate_decision :
-  actor:string ->
-  raw_source:string ->
-  summary:string ->
-  gate_mode:string ->
-  gate_verdict:string ->
-  gate_enforced:bool ->
-  argv:string list ->
-  ?env:string array ->
-  ?cwd:string ->
-  unit ->
-  unit
 (** Emit one JSONL line describing an exec-gate decision.  This is
     separate from the eventual [Process_eio.*] spawn record so shadow
     mode can publish verdict evidence without mutating the actual spawn
     path or double-counting spawns in downstream reports. *)
+val record_gate_decision
+  :  actor:string
+  -> raw_source:string
+  -> summary:string
+  -> gate_mode:string
+  -> gate_verdict:string
+  -> gate_enforced:bool
+  -> argv:string list
+  -> ?env:string array
+  -> ?cwd:string
+  -> unit
+  -> unit

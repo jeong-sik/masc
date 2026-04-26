@@ -5,7 +5,6 @@
     @since 0.1.0 *)
 
 type tool_result = Tool_inline_dispatch_types.tool_result
-
 type context = Tool_inline_dispatch_types.context
 
 (** {1 Handlers} *)

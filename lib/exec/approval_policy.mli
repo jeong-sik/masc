@@ -12,17 +12,11 @@
     The decision is overlay-aware: the caller supplies the
     per-actor [Approval_config.agent_overlay] chosen for this exec. *)
 
-type t = {
-  raw_source : string;  (** original pre-parse string, for the Ask UI *)
-  summary : string;     (** human-readable one-liner, for the Ask UI *)
-}
+type t =
+  { raw_source : string (** original pre-parse string, for the Ask UI *)
+  ; summary : string (** human-readable one-liner, for the Ask UI *)
+  }
 
-val decide :
-  t ->
-  overlay:Approval_config.agent_overlay ->
-  caps:Capability.t list ->
-  simple:Shell_ir.simple ->
-  Verdict.t
 (** Pure policy decision.  The rule cascade (checked top to bottom):
 
     - [Destructive] git op anywhere in the cap list:
@@ -36,3 +30,9 @@ val decide :
       dispatch to the corresponding [overlay.*_trust] level:
       [Enforced] → [Ask], [Auto_safe]/[Observe] → [Allow],
       [Suggest] → [Suggest_confirm]. *)
+val decide
+  :  t
+  -> overlay:Approval_config.agent_overlay
+  -> caps:Capability.t list
+  -> simple:Shell_ir.simple
+  -> Verdict.t

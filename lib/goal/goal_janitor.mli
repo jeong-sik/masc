@@ -13,20 +13,20 @@
 
 (** {1 Configuration} *)
 
-type sweep_config = {
-  dropped_ttl_days : int;  (** Delete Dropped goals after this many days. *)
-  stagnant_days : int;     (** Drop Active goals with no update after this many days. *)
-}
+type sweep_config =
+  { dropped_ttl_days : int (** Delete Dropped goals after this many days. *)
+  ; stagnant_days : int (** Drop Active goals with no update after this many days. *)
+  }
 
 val default_config : sweep_config
 
 (** {1 Result} *)
 
-type sweep_result = {
-  purged : int;     (** Dropped goals deleted. *)
-  stagnated : int;  (** Active goals marked Dropped. *)
-  orphans : int;    (** Orphaned [active_goal_ids] cleaned. *)
-}
+type sweep_result =
+  { purged : int (** Dropped goals deleted. *)
+  ; stagnated : int (** Active goals marked Dropped. *)
+  ; orphans : int (** Orphaned [active_goal_ids] cleaned. *)
+  }
 
 val sweep_result_to_yojson : sweep_result -> Yojson.Safe.t
 
@@ -35,10 +35,7 @@ val sweep_result_to_yojson : sweep_result -> Yojson.Safe.t
 (** [prune_active_goal_ids ~valid_goal_ids active_ids] keeps only
     ids in [valid_goal_ids]. Returns the pruned list and the number
     of removed ids. *)
-val prune_active_goal_ids :
-  valid_goal_ids:string list ->
-  string list ->
-  string list * int
+val prune_active_goal_ids : valid_goal_ids:string list -> string list -> string list * int
 
 (** {1 Entry point} *)
 

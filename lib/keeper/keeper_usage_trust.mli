@@ -21,34 +21,32 @@ val anthropic_cache_min_input_tokens : int
     the provider registry. Bare model ids intentionally stay unknown so
     substring matches such as [openrouter:anthropic/...] cannot produce
     false cache-anomaly trust signals. *)
-val model_uses_anthropic_caching :
-  model_used:string -> resolved_model_id:string -> bool
+val model_uses_anthropic_caching : model_used:string -> resolved_model_id:string -> bool
 
-val model_uses_anthropic_caching_with_provider_kind :
-  provider_kind:Llm_provider.Provider_config.provider_kind option ->
-  model_used:string -> resolved_model_id:string -> bool
+val model_uses_anthropic_caching_with_provider_kind
+  :  provider_kind:Llm_provider.Provider_config.provider_kind option
+  -> model_used:string
+  -> resolved_model_id:string
+  -> bool
 
-val classify :
-  usage_reported:bool ->
-  usage:Oas.Types.api_usage ->
-  model_used:string ->
-  resolved_model_id:string ->
-  context_max:int ->
-  t
+val classify
+  :  usage_reported:bool
+  -> usage:Oas.Types.api_usage
+  -> model_used:string
+  -> resolved_model_id:string
+  -> context_max:int
+  -> t
 
-val classify_with_provider_kind :
-  provider_kind:Llm_provider.Provider_config.provider_kind option ->
-  usage_reported:bool ->
-  usage:Oas.Types.api_usage ->
-  model_used:string ->
-  resolved_model_id:string ->
-  context_max:int ->
-  t
+val classify_with_provider_kind
+  :  provider_kind:Llm_provider.Provider_config.provider_kind option
+  -> usage_reported:bool
+  -> usage:Oas.Types.api_usage
+  -> model_used:string
+  -> resolved_model_id:string
+  -> context_max:int
+  -> t
 
 val is_trusted : t -> bool
-
 val to_string : t -> string
-
 val reasons : t -> string list
-
 val json_fields : t -> (string * Yojson.Safe.t) list

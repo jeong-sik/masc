@@ -16,49 +16,53 @@ let compute_enabled () =
   match Sys.getenv_opt "MASC_TLA_TRACE" with
   | Some ("1" | "true" | "yes") -> true
   | _ -> false
+;;
 
 let enabled () =
   match Atomic.get enabled_cache with
   | Some enabled -> enabled
   | None ->
-      Mutex.protect enabled_cache_mu (fun () ->
-        match Atomic.get enabled_cache with
-        | Some enabled -> enabled
-        | None ->
-            let enabled = compute_enabled () in
-            Atomic.set enabled_cache (Some enabled);
-            enabled)
+    Mutex.protect enabled_cache_mu (fun () ->
+      match Atomic.get enabled_cache with
+      | Some enabled -> enabled
+      | None ->
+        let enabled = compute_enabled () in
+        Atomic.set enabled_cache (Some enabled);
+        enabled)
+;;
 
 let trace_path ~base_path ~keeper_name =
   Filename.concat
     (Filename.concat (Common.masc_dir_from_base_path ~base_path) "keepers")
     (keeper_name ^ ".tla-trace.jsonl")
+;;
 
 let emit_transition
-    ~(keeper_name : string)
-    ~(base_path : string)
-    ~(seq : int)
-    ~(event : SM.event)
-    ~(prev_phase : SM.phase)
-    ~(new_phase : SM.phase)
-    ~(conditions_after : SM.conditions)
-    ~(restart_count : int)
+      ~(keeper_name : string)
+      ~(base_path : string)
+      ~(seq : int)
+      ~(event : SM.event)
+      ~(prev_phase : SM.phase)
+      ~(new_phase : SM.phase)
+      ~(conditions_after : SM.conditions)
+      ~(restart_count : int)
   =
-  if not (enabled ()) then ()
-  else
-    let json = `Assoc [
-      "seq", `Int seq;
-      "ts_unix", `Float (Time_compat.now ());
-      "event", `String (SM.event_to_string event);
-      "prev_phase", `String (SM.phase_to_string prev_phase);
-      "new_phase", `String (SM.phase_to_string new_phase);
-      "conditions_after", SM.conditions_to_json conditions_after;
-      "restart_count", `Int restart_count;
-    ] in
+  if not (enabled ())
+  then ()
+  else (
+    let json =
+      `Assoc
+        [ "seq", `Int seq
+        ; "ts_unix", `Float (Time_compat.now ())
+        ; "event", `String (SM.event_to_string event)
+        ; "prev_phase", `String (SM.phase_to_string prev_phase)
+        ; "new_phase", `String (SM.phase_to_string new_phase)
+        ; "conditions_after", SM.conditions_to_json conditions_after
+        ; "restart_count", `Int restart_count
+        ]
+    in
     let path = trace_path ~base_path ~keeper_name in
-    try Keeper_types_support.append_jsonl_line path json
-    with
+    try Keeper_types_support.append_jsonl_line path json with
     | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn ->
-        Log.Keeper.warn "trace_emit: %s: %s"
-          keeper_name (Printexc.to_string exn)
+    | exn -> Log.Keeper.warn "trace_emit: %s: %s" keeper_name (Printexc.to_string exn))
+;;

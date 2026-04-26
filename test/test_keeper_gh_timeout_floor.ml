@@ -16,16 +16,19 @@ module Shell = Masc_mcp.Keeper_exec_shell
 let test_floor_is_at_least_network_latency () =
   Alcotest.(check (float 0.01))
     "gh_min_timeout_sec floor >= network latency budget (15s)"
-    15.0 Shell.gh_min_timeout_sec;
+    15.0
+    Shell.gh_min_timeout_sec;
   Alcotest.(check bool)
     "floor is strictly above historical 5s failure point"
     true
     (Shell.gh_min_timeout_sec > 5.0)
+;;
 
 let () =
-  Alcotest.run "keeper_gh_timeout_floor" [
-    ("gh_min_timeout_sec",
-     [ Alcotest.test_case "floor >= 15s" `Quick
-         test_floor_is_at_least_network_latency
-     ])
-  ]
+  Alcotest.run
+    "keeper_gh_timeout_floor"
+    [ ( "gh_min_timeout_sec"
+      , [ Alcotest.test_case "floor >= 15s" `Quick test_floor_is_at_least_network_latency
+        ] )
+    ]
+;;

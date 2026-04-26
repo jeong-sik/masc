@@ -19,43 +19,43 @@ type completeness_impact =
   | Annotation_only
 
 (** A single finding from a contract check. *)
-type contract_finding = {
-  check_id : string;
-  event_id : string option;
-  observed : Yojson.Safe.t;
-  expected : Yojson.Safe.t;
-  trace_ref : string option;
-}
+type contract_finding =
+  { check_id : string
+  ; event_id : string option
+  ; observed : Yojson.Safe.t
+  ; expected : Yojson.Safe.t
+  ; trace_ref : string option
+  }
 
 (** A gap in the evidence completeness. *)
-type completeness_gap = {
-  artifact : string;
-  reason : string;
-  impact : completeness_impact;
-}
+type completeness_gap =
+  { artifact : string
+  ; reason : string
+  ; impact : completeness_impact
+  }
 
 (** Result of a single contract check. *)
-type check_result = {
-  check_id : string;
-  status : contract_status;
-  findings : contract_finding list;
-  completeness_gaps : completeness_gap list;
-}
+type check_result =
+  { check_id : string
+  ; status : contract_status
+  ; findings : contract_finding list
+  ; completeness_gaps : completeness_gap list
+  }
 
 (** Full verdict for a contract evaluation run. *)
-type contract_verdict = {
-  run_id : string;
-  contract_id : string;
-  claim_scope : string;
-  judgment_basis_hash : string;
-  judgment_hash : string;
-  loader_semantics_version : string;
-  schema_compat_mode : string;
-  status : contract_status;
-  findings : contract_finding list;
-  completeness_gaps : completeness_gap list;
-  check_results : check_result list;
-}
+type contract_verdict =
+  { run_id : string
+  ; contract_id : string
+  ; claim_scope : string
+  ; judgment_basis_hash : string
+  ; judgment_hash : string
+  ; loader_semantics_version : string
+  ; schema_compat_mode : string
+  ; status : contract_status
+  ; findings : contract_finding list
+  ; completeness_gaps : completeness_gap list
+  ; check_results : check_result list
+  }
 
 (** {2 Claim scope constant} *)
 

@@ -6,211 +6,355 @@ open Masc_tui_ansi
 
 (** Render the dashboard (original view) *)
 let render_dashboard (state : state) =
-  let (rows, cols) = get_terminal_size () in
+  let rows, cols = get_terminal_size () in
   let buf = Buffer.create 4096 in
-
   (* Clear screen *)
   Buffer.add_string buf Ansi.clear;
   Buffer.add_string buf Ansi.hide_cursor;
-
   (* Header *)
   let now = Unix.localtime (Unix.gettimeofday ()) in
-  let timestamp = Printf.sprintf "%02d:%02d:%02d"
-    now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
-  let header = Printf.sprintf " MASC Dashboard  %s[%s]%s  %s  %s"
-    Ansi.cyan state.room Ansi.reset timestamp
-    (match state.connection_status with
-     | "connected" -> Ansi.green ^ "[connected]" ^ Ansi.reset
-     | "connecting" -> Ansi.yellow ^ "[connecting...]" ^ Ansi.reset
-     | "reconnecting" -> Ansi.yellow ^ "[reconnecting...]" ^ Ansi.reset
-     | _ -> Ansi.red ^ "[disconnected]" ^ Ansi.reset) in
-
+  let timestamp =
+    Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec
+  in
+  let header =
+    Printf.sprintf
+      " MASC Dashboard  %s[%s]%s  %s  %s"
+      Ansi.cyan
+      state.room
+      Ansi.reset
+      timestamp
+      (match state.connection_status with
+       | "connected" -> Ansi.green ^ "[connected]" ^ Ansi.reset
+       | "connecting" -> Ansi.yellow ^ "[connecting...]" ^ Ansi.reset
+       | "reconnecting" -> Ansi.yellow ^ "[reconnecting...]" ^ Ansi.reset
+       | _ -> Ansi.red ^ "[disconnected]" ^ Ansi.reset)
+  in
   (* Top border *)
-  Buffer.add_string buf (Printf.sprintf "%s%s%s%s%s\n"
-    Ansi.gray Ansi.box_tl (draw_hline (cols - 2)) Ansi.box_tr Ansi.reset);
-
+  Buffer.add_string
+    buf
+    (Printf.sprintf
+       "%s%s%s%s%s\n"
+       Ansi.gray
+       Ansi.box_tl
+       (draw_hline (cols - 2))
+       Ansi.box_tr
+       Ansi.reset);
   (* Header line *)
-  Buffer.add_string buf (Printf.sprintf "%s%s%s %s%s%s\n"
-    Ansi.gray Ansi.box_v Ansi.reset
-    (Ansi.bold ^ header)
-    (String.make (max 0 (cols - String.length header - 20)) ' ')
-    (Ansi.gray ^ Ansi.box_v ^ Ansi.reset));
-
+  Buffer.add_string
+    buf
+    (Printf.sprintf
+       "%s%s%s %s%s%s\n"
+       Ansi.gray
+       Ansi.box_v
+       Ansi.reset
+       (Ansi.bold ^ header)
+       (String.make (max 0 (cols - String.length header - 20)) ' ')
+       (Ansi.gray ^ Ansi.box_v ^ Ansi.reset));
   (* Divider after header *)
-  Buffer.add_string buf (Printf.sprintf "%s%s%s%s%s\n"
-    Ansi.gray Ansi.box_l (draw_hline (cols - 2)) Ansi.box_r Ansi.reset);
-
+  Buffer.add_string
+    buf
+    (Printf.sprintf
+       "%s%s%s%s%s\n"
+       Ansi.gray
+       Ansi.box_l
+       (draw_hline (cols - 2))
+       Ansi.box_r
+       Ansi.reset);
   (* Calculate panel sizes *)
-  let panel_width = (cols - 3) / 2 in  (* -3 for borders *)
-  let content_height = rows - 10 in  (* Reserve space for header/footer *)
-
+  let panel_width = (cols - 3) / 2 in
+  (* -3 for borders *)
+  let content_height = rows - 10 in
+  (* Reserve space for header/footer *)
   (* Agents panel (left side) *)
   let agents_title = " Agents " in
-  Buffer.add_string buf (Printf.sprintf "%s%s%s%s%s%s%s%s%s%s%s\n"
-    Ansi.gray Ansi.box_v Ansi.reset
-    Ansi.bold agents_title Ansi.reset
-    (String.make (max 0 (panel_width - String.length agents_title)) ' ')
-    (Ansi.gray ^ Ansi.box_v ^ Ansi.reset)
-    " Events "
-    (String.make (max 0 (panel_width - 8)) ' ')
-    (Ansi.gray ^ Ansi.box_v ^ Ansi.reset));
-
+  Buffer.add_string
+    buf
+    (Printf.sprintf
+       "%s%s%s%s%s%s%s%s%s%s%s\n"
+       Ansi.gray
+       Ansi.box_v
+       Ansi.reset
+       Ansi.bold
+       agents_title
+       Ansi.reset
+       (String.make (max 0 (panel_width - String.length agents_title)) ' ')
+       (Ansi.gray ^ Ansi.box_v ^ Ansi.reset)
+       " Events "
+       (String.make (max 0 (panel_width - 8)) ' ')
+       (Ansi.gray ^ Ansi.box_v ^ Ansi.reset));
   (* Agent/Event rows *)
   let agent_rows = min content_height (max 3 (List.length state.agents)) in
   for i = 0 to agent_rows - 1 do
     (* Agent column *)
     let agent_str =
-      if i < List.length state.agents then
+      if i < List.length state.agents
+      then (
         let a = List.nth state.agents i in
-        Printf.sprintf "%s %s%s%s %s%s%s"
+        Printf.sprintf
+          "%s %s%s%s %s%s%s"
           (agent_icon a.name)
-          (agent_color a.name) a.name Ansi.reset
-          (status_color a.status) a.status Ansi.reset
+          (agent_color a.name)
+          a.name
+          Ansi.reset
+          (status_color a.status)
+          a.status
+          Ansi.reset)
       else ""
     in
     (* Event column *)
     let event_str =
-      if i < List.length state.events then
+      if i < List.length state.events
+      then (
         let e = List.nth state.events i in
-        Printf.sprintf "%s[%s]%s %s"
-          Ansi.dim e.timestamp Ansi.reset
-          (fit_width e.content (panel_width - 12))
+        Printf.sprintf
+          "%s[%s]%s %s"
+          Ansi.dim
+          e.timestamp
+          Ansi.reset
+          (fit_width e.content (panel_width - 12)))
       else ""
     in
-    Buffer.add_string buf (Printf.sprintf "%s%s%s %s %s%s%s %s %s%s%s\n"
-      Ansi.gray Ansi.box_v Ansi.reset
-      (fit_width agent_str (panel_width - 2))
-      Ansi.gray Ansi.box_v Ansi.reset
-      (fit_width event_str (panel_width - 2))
-      Ansi.gray Ansi.box_v Ansi.reset)
+    Buffer.add_string
+      buf
+      (Printf.sprintf
+         "%s%s%s %s %s%s%s %s %s%s%s\n"
+         Ansi.gray
+         Ansi.box_v
+         Ansi.reset
+         (fit_width agent_str (panel_width - 2))
+         Ansi.gray
+         Ansi.box_v
+         Ansi.reset
+         (fit_width event_str (panel_width - 2))
+         Ansi.gray
+         Ansi.box_v
+         Ansi.reset)
   done;
-
   (* Tasks section divider *)
-  Buffer.add_string buf (Printf.sprintf "%s%s%s%s%s\n"
-    Ansi.gray Ansi.box_l (draw_hline (cols - 2)) Ansi.box_r Ansi.reset);
-
+  Buffer.add_string
+    buf
+    (Printf.sprintf
+       "%s%s%s%s%s\n"
+       Ansi.gray
+       Ansi.box_l
+       (draw_hline (cols - 2))
+       Ansi.box_r
+       Ansi.reset);
   (* Tasks header *)
-  Buffer.add_string buf (Printf.sprintf "%s%s%s %sTasks%s %s%s%s%s\n"
-    Ansi.gray Ansi.box_v Ansi.reset
-    Ansi.bold Ansi.reset
-    (String.make (max 0 (cols - 10)) ' ')
-    Ansi.gray Ansi.box_v Ansi.reset);
-
+  Buffer.add_string
+    buf
+    (Printf.sprintf
+       "%s%s%s %sTasks%s %s%s%s%s\n"
+       Ansi.gray
+       Ansi.box_v
+       Ansi.reset
+       Ansi.bold
+       Ansi.reset
+       (String.make (max 0 (cols - 10)) ' ')
+       Ansi.gray
+       Ansi.box_v
+       Ansi.reset);
   (* Task rows *)
   let task_rows = min 5 (List.length state.tasks) in
-  if task_rows = 0 then
-    Buffer.add_string buf (Printf.sprintf "%s%s%s   %s(no tasks)%s %s%s%s%s\n"
-      Ansi.gray Ansi.box_v Ansi.reset
-      Ansi.dim Ansi.reset
-      (String.make (max 0 (cols - 15)) ' ')
-      Ansi.gray Ansi.box_v Ansi.reset)
+  if task_rows = 0
+  then
+    Buffer.add_string
+      buf
+      (Printf.sprintf
+         "%s%s%s   %s(no tasks)%s %s%s%s%s\n"
+         Ansi.gray
+         Ansi.box_v
+         Ansi.reset
+         Ansi.dim
+         Ansi.reset
+         (String.make (max 0 (cols - 15)) ' ')
+         Ansi.gray
+         Ansi.box_v
+         Ansi.reset)
   else
     for i = 0 to task_rows - 1 do
       let t = List.nth state.tasks i in
-      let claimed_str = match t.claimed_by with
+      let claimed_str =
+        match t.claimed_by with
         | Some a -> Printf.sprintf " @%s" a
         | None -> ""
       in
-      let task_line = Printf.sprintf "  %s [%s] %s (%s%s) %s"
-        (task_status_icon t.status)
-        t.id
-        t.title
-        t.status
-        claimed_str
-        (priority_indicator t.priority)
+      let task_line =
+        Printf.sprintf
+          "  %s [%s] %s (%s%s) %s"
+          (task_status_icon t.status)
+          t.id
+          t.title
+          t.status
+          claimed_str
+          (priority_indicator t.priority)
       in
-      Buffer.add_string buf (Printf.sprintf "%s%s%s %s %s%s%s\n"
-        Ansi.gray Ansi.box_v Ansi.reset
-        (fit_width task_line (cols - 4))
-        Ansi.gray Ansi.box_v Ansi.reset)
+      Buffer.add_string
+        buf
+        (Printf.sprintf
+           "%s%s%s %s %s%s%s\n"
+           Ansi.gray
+           Ansi.box_v
+           Ansi.reset
+           (fit_width task_line (cols - 4))
+           Ansi.gray
+           Ansi.box_v
+           Ansi.reset)
     done;
-
   (* Bottom border *)
-  Buffer.add_string buf (Printf.sprintf "%s%s%s%s%s\n"
-    Ansi.gray Ansi.box_bl (draw_hline (cols - 2)) Ansi.box_br Ansi.reset);
-
+  Buffer.add_string
+    buf
+    (Printf.sprintf
+       "%s%s%s%s%s\n"
+       Ansi.gray
+       Ansi.box_bl
+       (draw_hline (cols - 2))
+       Ansi.box_br
+       Ansi.reset);
   (* Footer *)
-  Buffer.add_string buf (Printf.sprintf "%s  q:quit  r:refresh  Tab:keepers  | Refresh: %.0fs | Port: %d%s\n"
-    Ansi.dim state.refresh_interval state.port Ansi.reset);
-
+  Buffer.add_string
+    buf
+    (Printf.sprintf
+       "%s  q:quit  r:refresh  Tab:keepers  | Refresh: %.0fs | Port: %d%s\n"
+       Ansi.dim
+       state.refresh_interval
+       state.port
+       Ansi.reset);
   print_string (Buffer.contents buf);
   flush stdout
+;;
 
 (** Render the keeper list view *)
 let render_keeper_list (state : state) =
-  let (rows, cols) = get_terminal_size () in
+  let rows, cols = get_terminal_size () in
   let buf = Buffer.create 4096 in
-
   Buffer.add_string buf Ansi.clear;
   Buffer.add_string buf Ansi.hide_cursor;
-
   (* Header *)
   let now = Unix.localtime (Unix.gettimeofday ()) in
-  let timestamp = Printf.sprintf "%02d:%02d:%02d"
-    now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec in
+  let timestamp =
+    Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min now.Unix.tm_sec
+  in
   let keeper_count = List.length state.keepers in
   let header = Printf.sprintf " MASC Keepers (%d)  %s" keeper_count timestamp in
-
   (* Top border *)
-  Buffer.add_string buf (Printf.sprintf "%s%s%s%s%s\n"
-    Ansi.gray Ansi.box_tl (draw_hline (cols - 2)) Ansi.box_tr Ansi.reset);
-
+  Buffer.add_string
+    buf
+    (Printf.sprintf
+       "%s%s%s%s%s\n"
+       Ansi.gray
+       Ansi.box_tl
+       (draw_hline (cols - 2))
+       Ansi.box_tr
+       Ansi.reset);
   (* Header line *)
-  Buffer.add_string buf (Printf.sprintf "%s%s%s %s%s%s%s%s\n"
-    Ansi.gray Ansi.box_v Ansi.reset
-    Ansi.bold header Ansi.reset
-    (String.make (max 0 (cols - String.length header - 6)) ' ')
-    (Ansi.gray ^ Ansi.box_v ^ Ansi.reset));
-
+  Buffer.add_string
+    buf
+    (Printf.sprintf
+       "%s%s%s %s%s%s%s%s\n"
+       Ansi.gray
+       Ansi.box_v
+       Ansi.reset
+       Ansi.bold
+       header
+       Ansi.reset
+       (String.make (max 0 (cols - String.length header - 6)) ' ')
+       (Ansi.gray ^ Ansi.box_v ^ Ansi.reset));
   (* Divider *)
-  Buffer.add_string buf (Printf.sprintf "%s%s%s%s%s\n"
-    Ansi.gray Ansi.box_l (draw_hline (cols - 2)) Ansi.box_r Ansi.reset);
-
+  Buffer.add_string
+    buf
+    (Printf.sprintf
+       "%s%s%s%s%s\n"
+       Ansi.gray
+       Ansi.box_l
+       (draw_hline (cols - 2))
+       Ansi.box_r
+       Ansi.reset);
   (* Column headers *)
-  let col_header = Printf.sprintf "  %s  %-16s %-14s %5s  %-20s %s  %s"
-    " " "Name" "Profile" "Gen" "Model" "Pro" "Goal" in
-  Buffer.add_string buf (Printf.sprintf "%s%s%s %s%s%s %s%s%s\n"
-    Ansi.gray Ansi.box_v Ansi.reset
-    Ansi.dim (fit_width col_header (cols - 4)) Ansi.reset
-    Ansi.gray Ansi.box_v Ansi.reset);
-
+  let col_header =
+    Printf.sprintf
+      "  %s  %-16s %-14s %5s  %-20s %s  %s"
+      " "
+      "Name"
+      "Profile"
+      "Gen"
+      "Model"
+      "Pro"
+      "Goal"
+  in
+  Buffer.add_string
+    buf
+    (Printf.sprintf
+       "%s%s%s %s%s%s %s%s%s\n"
+       Ansi.gray
+       Ansi.box_v
+       Ansi.reset
+       Ansi.dim
+       (fit_width col_header (cols - 4))
+       Ansi.reset
+       Ansi.gray
+       Ansi.box_v
+       Ansi.reset);
   (* Divider *)
-  Buffer.add_string buf (Printf.sprintf "%s%s%s%s%s\n"
-    Ansi.gray Ansi.box_l (draw_hline (cols - 2)) Ansi.box_r Ansi.reset);
-
+  Buffer.add_string
+    buf
+    (Printf.sprintf
+       "%s%s%s%s%s\n"
+       Ansi.gray
+       Ansi.box_l
+       (draw_hline (cols - 2))
+       Ansi.box_r
+       Ansi.reset);
   (* Keeper rows *)
-  let content_height = rows - 8 in  (* header + column header + footer *)
+  let content_height = rows - 8 in
+  (* header + column header + footer *)
   let visible_count = min content_height (List.length state.keepers) in
   (* Scroll offset: keep cursor visible *)
   let scroll_offset =
-    if state.keeper_cursor >= content_height then
-      state.keeper_cursor - content_height + 1
+    if state.keeper_cursor >= content_height
+    then state.keeper_cursor - content_height + 1
     else 0
   in
-
-  if visible_count = 0 then begin
-    Buffer.add_string buf (Printf.sprintf "%s%s%s   %s(no keepers found in .masc/keepers/)%s %s%s%s%s\n"
-      Ansi.gray Ansi.box_v Ansi.reset
-      Ansi.dim Ansi.reset
-      (String.make (max 0 (cols - 50)) ' ')
-      Ansi.gray Ansi.box_v Ansi.reset);
+  if visible_count = 0
+  then (
+    Buffer.add_string
+      buf
+      (Printf.sprintf
+         "%s%s%s   %s(no keepers found in .masc/keepers/)%s %s%s%s%s\n"
+         Ansi.gray
+         Ansi.box_v
+         Ansi.reset
+         Ansi.dim
+         Ansi.reset
+         (String.make (max 0 (cols - 50)) ' ')
+         Ansi.gray
+         Ansi.box_v
+         Ansi.reset);
     for _ = 1 to max 0 (content_height - 1) do
-      Buffer.add_string buf (Printf.sprintf "%s%s%s %s %s%s%s\n"
-        Ansi.gray Ansi.box_v Ansi.reset
-        (String.make (cols - 4) ' ')
-        Ansi.gray Ansi.box_v Ansi.reset)
-    done
-  end else begin
+      Buffer.add_string
+        buf
+        (Printf.sprintf
+           "%s%s%s %s %s%s%s\n"
+           Ansi.gray
+           Ansi.box_v
+           Ansi.reset
+           (String.make (cols - 4) ' ')
+           Ansi.gray
+           Ansi.box_v
+           Ansi.reset)
+    done)
+  else
     for i = 0 to content_height - 1 do
       let idx = i + scroll_offset in
-      if idx < List.length state.keepers then begin
+      if idx < List.length state.keepers
+      then (
         let k = List.nth state.keepers idx in
         let is_selected = idx = state.keeper_cursor in
         let model_short = short_model (Option.value ~default:"-" k.k_active_model) in
-        let proactive_str = if k.k_proactive_enabled then
-          Ansi.green ^ "on" ^ Ansi.reset
-        else
-          Ansi.gray ^ "--" ^ Ansi.reset
+        let proactive_str =
+          if k.k_proactive_enabled
+          then Ansi.green ^ "on" ^ Ansi.reset
+          else Ansi.gray ^ "--" ^ Ansi.reset
         in
         (* Truncate goal to remaining space *)
         let goal_width = max 10 (cols - 68) in
@@ -219,64 +363,103 @@ let render_keeper_list (state : state) =
         let gen_col = Printf.sprintf "%5d" k.k_generation in
         let model_col = Printf.sprintf "%-20s" model_short in
         let line_content =
-          if is_selected then
-            Ansi.reverse ^ ">" ^ Ansi.reset
-            ^ "  " ^ Ansi.bold ^ name_col ^ Ansi.reset
-            ^ " " ^ gen_col
-            ^ "  " ^ model_col
-            ^ " " ^ proactive_str
-            ^ "  " ^ Ansi.dim ^ goal_trunc ^ Ansi.reset
+          if is_selected
+          then
+            Ansi.reverse
+            ^ ">"
+            ^ Ansi.reset
+            ^ "  "
+            ^ Ansi.bold
+            ^ name_col
+            ^ Ansi.reset
+            ^ " "
+            ^ gen_col
+            ^ "  "
+            ^ model_col
+            ^ " "
+            ^ proactive_str
+            ^ "  "
+            ^ Ansi.dim
+            ^ goal_trunc
+            ^ Ansi.reset
           else
             " "
-            ^ "  " ^ name_col
-            ^ " " ^ gen_col
-            ^ "  " ^ model_col
-            ^ " " ^ proactive_str
-            ^ "  " ^ Ansi.dim ^ goal_trunc ^ Ansi.reset
+            ^ "  "
+            ^ name_col
+            ^ " "
+            ^ gen_col
+            ^ "  "
+            ^ model_col
+            ^ " "
+            ^ proactive_str
+            ^ "  "
+            ^ Ansi.dim
+            ^ goal_trunc
+            ^ Ansi.reset
         in
-        Buffer.add_string buf (Printf.sprintf "%s%s%s %s %s%s%s\n"
-          Ansi.gray Ansi.box_v Ansi.reset
-          (fit_width line_content (cols - 4))
-          Ansi.gray Ansi.box_v Ansi.reset)
-      end else
-        Buffer.add_string buf (Printf.sprintf "%s%s%s %s %s%s%s\n"
-          Ansi.gray Ansi.box_v Ansi.reset
-          (String.make (cols - 4) ' ')
-          Ansi.gray Ansi.box_v Ansi.reset)
-    done
-  end;
-
+        Buffer.add_string
+          buf
+          (Printf.sprintf
+             "%s%s%s %s %s%s%s\n"
+             Ansi.gray
+             Ansi.box_v
+             Ansi.reset
+             (fit_width line_content (cols - 4))
+             Ansi.gray
+             Ansi.box_v
+             Ansi.reset))
+      else
+        Buffer.add_string
+          buf
+          (Printf.sprintf
+             "%s%s%s %s %s%s%s\n"
+             Ansi.gray
+             Ansi.box_v
+             Ansi.reset
+             (String.make (cols - 4) ' ')
+             Ansi.gray
+             Ansi.box_v
+             Ansi.reset)
+    done;
   (* Bottom border *)
-  Buffer.add_string buf (Printf.sprintf "%s%s%s%s%s\n"
-    Ansi.gray Ansi.box_bl (draw_hline (cols - 2)) Ansi.box_br Ansi.reset);
-
+  Buffer.add_string
+    buf
+    (Printf.sprintf
+       "%s%s%s%s%s\n"
+       Ansi.gray
+       Ansi.box_bl
+       (draw_hline (cols - 2))
+       Ansi.box_br
+       Ansi.reset);
   (* Footer *)
-  Buffer.add_string buf (Printf.sprintf "%s  j/k:move  Enter:detail  Tab:dashboard  q:quit  r:refresh%s\n"
-    Ansi.dim Ansi.reset);
-
+  Buffer.add_string
+    buf
+    (Printf.sprintf
+       "%s  j/k:move  Enter:detail  Tab:dashboard  q:quit  r:refresh%s\n"
+       Ansi.dim
+       Ansi.reset);
   print_string (Buffer.contents buf);
   flush stdout
+;;
 
 (** Render keeper detail view with live context and scrolling *)
 let render_keeper_detail (state : state) =
-  let (rows, cols) = get_terminal_size () in
+  let rows, cols = get_terminal_size () in
   let buf = Buffer.create 4096 in
-
   Buffer.add_string buf Ansi.clear;
   Buffer.add_string buf Ansi.hide_cursor;
-
-  if state.keeper_cursor >= List.length state.keepers then begin
+  if state.keeper_cursor >= List.length state.keepers
+  then (
     Buffer.add_string buf "No keeper selected.\n";
     print_string (Buffer.contents buf);
-    flush stdout
-  end else begin
+    flush stdout)
+  else (
     let k = List.nth state.keepers state.keeper_cursor in
-    let inner = cols - 4 in  (* width inside borders *)
-
+    let inner = cols - 4 in
+    (* width inside borders *)
     (* Build all detail lines first, then apply scroll *)
     let lines = ref [] in
     let add_line s = lines := s :: !lines in
-
     (* Helper to add a labeled row *)
     let add_row label value =
       add_line (Printf.sprintf "  %s%-22s%s %s" Ansi.cyan label Ansi.reset value)
@@ -285,7 +468,6 @@ let render_keeper_detail (state : state) =
     let add_section title =
       add_line (Printf.sprintf "  %s%s%s" Ansi.bold title Ansi.reset)
     in
-
     (* Identity section *)
     add_section "Identity";
     add_row "Name:" k.k_name;
@@ -293,34 +475,35 @@ let render_keeper_detail (state : state) =
     add_row "Trigger Mode:" k.k_trigger_mode;
     add_row "Verify:" (bool_indicator k.k_verify);
     add_empty ();
-
     (* Goals section *)
     add_section "Goals";
     add_row "Goal:" (fit_width k.k_goal (inner - 26));
     add_row "Short Goal:" (fit_width k.k_short_goal (inner - 26));
     add_empty ();
-
     (* Live Context section (Phase 2) *)
     add_section "Live Context";
-    if state.live_context_max > 0 then begin
+    if state.live_context_max > 0
+    then (
       let pct = state.live_context_ratio *. 100.0 in
       let bar_width = min 30 (inner - 40) in
-      add_row "Context:" (Printf.sprintf "%s%.1f%%%s  %s  %d / %d tokens"
-        (ctx_color state.live_context_ratio) pct Ansi.reset
-        (ctx_bar state.live_context_ratio bar_width)
-        state.live_context_tokens state.live_context_max);
-      add_row "Messages:" (string_of_int state.live_message_count);
-    end else begin
-      add_row "Context:" (Ansi.dim ^ "(no metrics data)" ^ Ansi.reset);
-    end;
+      add_row
+        "Context:"
+        (Printf.sprintf
+           "%s%.1f%%%s  %s  %d / %d tokens"
+           (ctx_color state.live_context_ratio)
+           pct
+           Ansi.reset
+           (ctx_bar state.live_context_ratio bar_width)
+           state.live_context_tokens
+           state.live_context_max);
+      add_row "Messages:" (string_of_int state.live_message_count))
+    else add_row "Context:" (Ansi.dim ^ "(no metrics data)" ^ Ansi.reset);
     add_empty ();
-
     (* Model section *)
     add_section "Model";
     add_row "Active Model:" (Option.value ~default:"-" k.k_active_model);
     add_row "Available:" (String.concat ", " k.k_models);
     add_empty ();
-
     (* Runtime section *)
     add_section "Runtime Stats";
     add_row "Total Turns:" (string_of_int k.k_total_turns);
@@ -328,131 +511,158 @@ let render_keeper_detail (state : state) =
     add_row "Total Cost:" (Printf.sprintf "$%.4f" k.k_total_cost_usd);
     add_row "Last Turn:" (short_ts k.k_last_turn_ts);
     add_row "Compactions:" (string_of_int k.k_compaction_count);
-    add_row "Compaction Gate:" (Printf.sprintf "%.0f%%" (k.k_compaction_ratio_gate *. 100.0));
+    add_row
+      "Compaction Gate:"
+      (Printf.sprintf "%.0f%%" (k.k_compaction_ratio_gate *. 100.0));
     add_row "Context Budget:" (string_of_int k.k_context_budget);
-    add_row "Handoff Threshold:" (Printf.sprintf "%.0f%%" (k.k_handoff_threshold *. 100.0));
+    add_row
+      "Handoff Threshold:"
+      (Printf.sprintf "%.0f%%" (k.k_handoff_threshold *. 100.0));
     add_empty ();
-
     (* Behavior section *)
     add_section "Behavior";
     add_row "Proactive:" (bool_indicator k.k_proactive_enabled);
-    add_row "Initiative:" (bool_indicator (Option.value ~default:false k.k_initiative_enabled));
+    add_row
+      "Initiative:"
+      (bool_indicator (Option.value ~default:false k.k_initiative_enabled));
     add_row "Drift:" (bool_indicator k.k_drift_enabled);
     add_empty ();
-
     (* Timestamps section *)
     add_section "Timestamps";
     add_row "Created:" (short_ts k.k_created_at);
     add_row "Updated:" (short_ts k.k_updated_at);
-
     (* Reverse to get correct order *)
     let all_lines = List.rev !lines in
     let total_lines = List.length all_lines in
-
     (* Top border *)
     box_top buf cols;
-
     (* Title *)
     let title = Printf.sprintf " Keeper: %s%s%s " Ansi.bold k.k_name Ansi.reset in
-    Buffer.add_string buf (Printf.sprintf "%s%s%s %s%s%s%s%s\n"
-      Ansi.gray Ansi.box_v Ansi.reset
-      title
-      (String.make (max 0 (inner - String.length title + 10)) ' ')
-      Ansi.gray Ansi.box_v Ansi.reset);
-
+    Buffer.add_string
+      buf
+      (Printf.sprintf
+         "%s%s%s %s%s%s%s%s\n"
+         Ansi.gray
+         Ansi.box_v
+         Ansi.reset
+         title
+         (String.make (max 0 (inner - String.length title + 10)) ' ')
+         Ansi.gray
+         Ansi.box_v
+         Ansi.reset);
     (* Divider *)
     box_divider buf cols;
-
     (* Content area with scrolling *)
-    let content_height = rows - 6 in  (* header + title + divider + bottom + footer + extra *)
+    let content_height = rows - 6 in
+    (* header + title + divider + bottom + footer + extra *)
     let visible_lines = min content_height total_lines in
     let scroll = min state.detail_scroll (max 0 (total_lines - content_height)) in
-
     for i = 0 to visible_lines - 1 do
       let idx = i + scroll in
-      if idx < total_lines then
-        box_line buf cols (List.nth all_lines idx)
-      else
-        box_empty buf cols
+      if idx < total_lines
+      then box_line buf cols (List.nth all_lines idx)
+      else box_empty buf cols
     done;
-
     (* Fill remaining space *)
     for _ = visible_lines to content_height - 1 do
       box_empty buf cols
     done;
-
     (* Scroll indicator *)
-    if total_lines > content_height then begin
-      let indicator = Printf.sprintf "%s[%d/%d]%s" Ansi.dim (scroll + 1) (total_lines - content_height + 1) Ansi.reset in
-      box_line buf cols indicator
-    end;
-
+    if total_lines > content_height
+    then (
+      let indicator =
+        Printf.sprintf
+          "%s[%d/%d]%s"
+          Ansi.dim
+          (scroll + 1)
+          (total_lines - content_height + 1)
+          Ansi.reset
+      in
+      box_line buf cols indicator);
     (* Bottom border *)
     box_bottom buf cols;
-
     (* Footer *)
-    Buffer.add_string buf (Printf.sprintf "%s  j/k:scroll  l:logs  m:message  Esc:back  Tab:dashboard  q:quit  r:refresh%s\n"
-      Ansi.dim Ansi.reset);
-
+    Buffer.add_string
+      buf
+      (Printf.sprintf
+         "%s  j/k:scroll  l:logs  m:message  Esc:back  Tab:dashboard  q:quit  r:refresh%s\n"
+         Ansi.dim
+         Ansi.reset);
     print_string (Buffer.contents buf);
-    flush stdout
-  end
+    flush stdout)
+;;
 
 (** Render keeper log view *)
 let render_keeper_logs (state : state) =
-  let (rows, cols) = get_terminal_size () in
+  let rows, cols = get_terminal_size () in
   let buf = Buffer.create 4096 in
-
   Buffer.add_string buf Ansi.clear;
   Buffer.add_string buf Ansi.hide_cursor;
-
-  if state.keeper_cursor >= List.length state.keepers then begin
+  if state.keeper_cursor >= List.length state.keepers
+  then (
     Buffer.add_string buf "No keeper selected.\n";
     print_string (Buffer.contents buf);
-    flush stdout
-  end else begin
+    flush stdout)
+  else (
     let k = List.nth state.keepers state.keeper_cursor in
     let total_entries = List.length state.log_entries in
-
     (* Header *)
-    let header = Printf.sprintf " Keeper Logs: %s%s%s  (%d entries)"
-      Ansi.bold k.k_name Ansi.reset total_entries in
-
+    let header =
+      Printf.sprintf
+        " Keeper Logs: %s%s%s  (%d entries)"
+        Ansi.bold
+        k.k_name
+        Ansi.reset
+        total_entries
+    in
     box_top buf cols;
     box_line buf cols header;
     box_divider buf cols;
-
     (* Column header *)
-    let col_hdr = Printf.sprintf "%s  %-8s %-5s %-7s %12s %8s %7s %6s  %-10s%s"
-      Ansi.dim "Time" "Chan" "Ctx" "Tokens" "In/Out" "Lat" "Cost" "Work" Ansi.reset in
+    let col_hdr =
+      Printf.sprintf
+        "%s  %-8s %-5s %-7s %12s %8s %7s %6s  %-10s%s"
+        Ansi.dim
+        "Time"
+        "Chan"
+        "Ctx"
+        "Tokens"
+        "In/Out"
+        "Lat"
+        "Cost"
+        "Work"
+        Ansi.reset
+    in
     box_line buf cols col_hdr;
     box_divider buf cols;
-
     (* Content area *)
     let content_height = rows - 8 in
     let scroll = min state.log_scroll (max 0 (total_entries - content_height)) in
-
-    if total_entries = 0 then begin
+    if total_entries = 0
+    then (
       box_line buf cols (Ansi.dim ^ "  (no log entries found)" ^ Ansi.reset);
       for _ = 1 to content_height - 1 do
         box_empty buf cols
-      done
-    end else begin
+      done)
+    else
       for i = 0 to content_height - 1 do
         let idx = i + scroll in
-        if idx < total_entries then begin
+        if idx < total_entries
+        then (
           let e = List.nth state.log_entries idx in
           (* Extract just the time portion from ts *)
           let time_str =
-            if String.length e.le_ts >= 19 then
-              String.sub e.le_ts 11 8  (* HH:MM:SS *)
+            if String.length e.le_ts >= 19
+            then String.sub e.le_ts 11 8 (* HH:MM:SS *)
             else e.le_ts
           in
           let pct = e.le_context_ratio *. 100.0 in
-          let ctx_str = Printf.sprintf "%s%5.1f%%%s"
-            (ctx_color e.le_context_ratio) pct Ansi.reset in
-          let tokens_str = Printf.sprintf "%6d/%6d"
-            e.le_context_tokens e.le_context_max in
+          let ctx_str =
+            Printf.sprintf "%s%5.1f%%%s" (ctx_color e.le_context_ratio) pct Ansi.reset
+          in
+          let tokens_str =
+            Printf.sprintf "%6d/%6d" e.le_context_tokens e.le_context_max
+          in
           let io_str =
             match e.le_input_tokens, e.le_output_tokens with
             | Some input, Some output -> Printf.sprintf "%4d/%4d" input output
@@ -469,8 +679,12 @@ let render_keeper_logs (state : state) =
             | _ -> Ansi.dim ^ "   --" ^ Ansi.reset
           in
           let tools_str =
-            if List.length e.le_tools_used > 0 then
-              " " ^ Ansi.dim ^ (String.concat "," (List.filteri (fun i _ -> i < 2) e.le_tools_used)) ^ Ansi.reset
+            if List.length e.le_tools_used > 0
+            then
+              " "
+              ^ Ansi.dim
+              ^ String.concat "," (List.filteri (fun i _ -> i < 2) e.le_tools_used)
+              ^ Ansi.reset
             else ""
           in
           let guardrail_str =
@@ -479,133 +693,161 @@ let render_keeper_logs (state : state) =
             | _ -> ""
           in
           let work_kind = Option.value ~default:"" e.le_work_kind in
-          let line = Printf.sprintf "  %s %s %s %s %s %s %s  %-10s%s%s"
-            time_str (channel_color e.le_channel) ctx_str tokens_str
-            io_str lat_str cost_str work_kind tools_str guardrail_str
+          let line =
+            Printf.sprintf
+              "  %s %s %s %s %s %s %s  %-10s%s%s"
+              time_str
+              (channel_color e.le_channel)
+              ctx_str
+              tokens_str
+              io_str
+              lat_str
+              cost_str
+              work_kind
+              tools_str
+              guardrail_str
           in
-          box_line buf cols line
-        end else
-          box_empty buf cols
-      done
-    end;
-
+          box_line buf cols line)
+        else box_empty buf cols
+      done;
     (* Scroll indicator *)
-    if total_entries > content_height then begin
-      let indicator = Printf.sprintf "%s[%d/%d entries, scroll %d]%s"
-        Ansi.dim total_entries (total_entries) scroll Ansi.reset in
-      box_line buf cols indicator
-    end;
-
+    if total_entries > content_height
+    then (
+      let indicator =
+        Printf.sprintf
+          "%s[%d/%d entries, scroll %d]%s"
+          Ansi.dim
+          total_entries
+          total_entries
+          scroll
+          Ansi.reset
+      in
+      box_line buf cols indicator);
     box_bottom buf cols;
-
     (* Footer *)
-    Buffer.add_string buf (Printf.sprintf "%s  j/k:scroll  Esc:back  q:quit  r:refresh%s\n"
-      Ansi.dim Ansi.reset);
-
+    Buffer.add_string
+      buf
+      (Printf.sprintf
+         "%s  j/k:scroll  Esc:back  q:quit  r:refresh%s\n"
+         Ansi.dim
+         Ansi.reset);
     print_string (Buffer.contents buf);
-    flush stdout
-  end
+    flush stdout)
+;;
 
 (** Render message input/conversation view *)
 let render_keeper_message (state : state) =
-  let (rows, cols) = get_terminal_size () in
+  let rows, cols = get_terminal_size () in
   let buf = Buffer.create 4096 in
-
   Buffer.add_string buf Ansi.clear;
-  Buffer.add_string buf Ansi.show_cursor;  (* Show cursor for text input *)
-
-  if state.keeper_cursor >= List.length state.keepers then begin
+  Buffer.add_string buf Ansi.show_cursor;
+  (* Show cursor for text input *)
+  if state.keeper_cursor >= List.length state.keepers
+  then (
     Buffer.add_string buf "No keeper selected.\n";
     print_string (Buffer.contents buf);
-    flush stdout
-  end else begin
+    flush stdout)
+  else (
     let k = List.nth state.keepers state.keeper_cursor in
-
     (* Header *)
-    let header = Printf.sprintf " Message to: %s%s%s  (port %d)"
-      Ansi.bold k.k_name Ansi.reset state.port in
-
+    let header =
+      Printf.sprintf
+        " Message to: %s%s%s  (port %d)"
+        Ansi.bold
+        k.k_name
+        Ansi.reset
+        state.port
+    in
     box_top buf cols;
     box_line buf cols header;
     box_divider buf cols;
-
     (* Message history *)
-    let history_height = rows - 10 in  (* Reserve space for input area *)
+    let history_height = rows - 10 in
+    (* Reserve space for input area *)
     let msg_count = List.length state.msg_history in
     let start_idx = max 0 (msg_count - history_height) in
-
-    if msg_count = 0 then begin
-      box_line buf cols (Ansi.dim ^ "  (no messages yet -- type below and press Enter)" ^ Ansi.reset);
+    if msg_count = 0
+    then (
+      box_line
+        buf
+        cols
+        (Ansi.dim ^ "  (no messages yet -- type below and press Enter)" ^ Ansi.reset);
       for _ = 1 to history_height - 1 do
         box_empty buf cols
-      done
-    end else begin
+      done)
+    else (
       let displayed = ref 0 in
-      List.iteri (fun i m ->
-        if i >= start_idx && !displayed < history_height then begin
-          let role_color = match m.me_role with
-            | "user" -> Ansi.cyan
-            | "assistant" -> Ansi.green
-            | _ -> Ansi.white
-          in
-          let role_label = match m.me_role with
-            | "user" -> "you"
-            | "assistant" -> k.k_name
-            | s -> s
-          in
-          let prefix = Printf.sprintf "  %s[%s] %s:%s "
-            role_color m.me_timestamp role_label Ansi.reset in
-          (* Word-wrap the message text across multiple lines *)
-          let text_width = max 20 (cols - 30) in
-          let text = m.me_text in
-          let text_len = String.length text in
-          if text_len <= text_width then begin
-            box_line buf cols (prefix ^ text);
-            incr displayed
-          end else begin
-            (* First line with prefix *)
-            box_line buf cols (prefix ^ String.sub text 0 text_width);
-            incr displayed;
-            (* Continuation lines *)
-            let indent = String.make (String.length "  [HH:MM:SS] xxxxxxx: ") ' ' in
-            let pos = ref text_width in
-            while !pos < text_len && !displayed < history_height do
-              let chunk_len = min text_width (text_len - !pos) in
-              box_line buf cols (indent ^ String.sub text !pos chunk_len);
-              pos := !pos + chunk_len;
-              incr displayed
-            done
-          end
-        end
-      ) state.msg_history;
+      List.iteri
+        (fun i m ->
+           if i >= start_idx && !displayed < history_height
+           then (
+             let role_color =
+               match m.me_role with
+               | "user" -> Ansi.cyan
+               | "assistant" -> Ansi.green
+               | _ -> Ansi.white
+             in
+             let role_label =
+               match m.me_role with
+               | "user" -> "you"
+               | "assistant" -> k.k_name
+               | s -> s
+             in
+             let prefix =
+               Printf.sprintf
+                 "  %s[%s] %s:%s "
+                 role_color
+                 m.me_timestamp
+                 role_label
+                 Ansi.reset
+             in
+             (* Word-wrap the message text across multiple lines *)
+             let text_width = max 20 (cols - 30) in
+             let text = m.me_text in
+             let text_len = String.length text in
+             if text_len <= text_width
+             then (
+               box_line buf cols (prefix ^ text);
+               incr displayed)
+             else (
+               (* First line with prefix *)
+               box_line buf cols (prefix ^ String.sub text 0 text_width);
+               incr displayed;
+               (* Continuation lines *)
+               let indent = String.make (String.length "  [HH:MM:SS] xxxxxxx: ") ' ' in
+               let pos = ref text_width in
+               while !pos < text_len && !displayed < history_height do
+                 let chunk_len = min text_width (text_len - !pos) in
+                 box_line buf cols (indent ^ String.sub text !pos chunk_len);
+                 pos := !pos + chunk_len;
+                 incr displayed
+               done)))
+        state.msg_history;
       (* Fill remaining space *)
       for _ = !displayed to history_height - 1 do
         box_empty buf cols
-      done
-    end;
-
+      done);
     (* Input area divider *)
     box_divider buf cols;
-
     (* Input line *)
     let input_text = Buffer.contents state.msg_input in
     let prompt =
-      if state.msg_sending then
-        Printf.sprintf "  %s(sending...)%s" Ansi.yellow Ansi.reset
-      else
-        Printf.sprintf "  %s>%s %s" Ansi.cyan Ansi.reset input_text
+      if state.msg_sending
+      then Printf.sprintf "  %s(sending...)%s" Ansi.yellow Ansi.reset
+      else Printf.sprintf "  %s>%s %s" Ansi.cyan Ansi.reset input_text
     in
     box_line buf cols prompt;
-
     box_bottom buf cols;
-
     (* Footer *)
-    Buffer.add_string buf (Printf.sprintf "%s  Enter:send  Esc:back  Ctrl-U:clear line%s\n"
-      Ansi.dim Ansi.reset);
-
+    Buffer.add_string
+      buf
+      (Printf.sprintf
+         "%s  Enter:send  Esc:back  Ctrl-U:clear line%s\n"
+         Ansi.dim
+         Ansi.reset);
     print_string (Buffer.contents buf);
-    flush stdout
-  end
+    flush stdout)
+;;
 
 (** Dispatch render based on current view *)
 let render (state : state) =
@@ -615,3 +857,4 @@ let render (state : state) =
   | Keeper_detail -> render_keeper_detail state
   | Keeper_logs -> render_keeper_logs state
   | Keeper_message -> render_keeper_message state
+;;

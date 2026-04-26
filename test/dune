@@ -2,6 +2,7 @@
 ; Test Environment Configuration
 ; Force filesystem backend to avoid external DB connection timeouts
 ; ============================================================
+
 (env
  (_
   (env-vars
@@ -30,335 +31,403 @@
 ; ============================================================
 ; Group 1: Pure synchronous tests
 ; ============================================================
+
 (tests
- (names test_attribution test_attribution_tagged test_autoresearch_result_bridge test_dashboard_attribution test_masc_runtime_events test_room test_room_state_recovery test_types test_exec_tap test_auth test_auth_doctor test_auth_login test_audit_log test_governance_anomaly test_http_negotiation
-        test_attempt_state
-        test_sse test_cancellation test_graphql_api
-        test_graphql_endpoint
-        test_subscriptions test_session test_progress test_spawn
-        test_validation test_response
-        test_channel_gate_connector_routes
-        test_sidecar_lifecycle_routes
-        test_channel_gate_imessage_state
-        test_dashboard
-        test_dashboard_perf
-        test_dashboard_tool_host_events
-        test_tool_assignment_telemetry
-        test_dashboard_link_preview
-        test_gate_keeper_backend
-        test_transport_read_model
-        test_multi_room test_worktree_detection test_bounded test_mention
-        test_heartbeat_qw test_sse_qw test_sse_stream test_agent_health
-        test_post_verifier
-        test_keeper_cascade_profile
-        test_keeper_hooks_oas_provider
-        test_keeper_hooks_oas_pricing
-        test_keeper_hooks_oas_telemetry
-        test_agent_stress
-        test_keeper_tool_use_failure_counter
-        test_keeper_compaction_outcome_counter
-        test_keeper_usage_trust_counter
-        test_cost_usd_source_attribution_10318
-        test_response_model_empty_10083
-        test_heuristic_theatre_audit
-        test_hebbian_edge_update_counter
-        test_keeper_proactive_skip_counter
-        test_oas_error_kind_counter
-        test_board_author_identity_10297
-        test_fsm_drift_counter
-        test_process_timeout_counter
-        test_git_fetch_timeout_9587
-        test_auth_ambiguous_lookup_9786
-        test_auth_load_credential_of
-        test_keeper_wake_telemetry
-        test_keeper_memory
-        test_keeper_accountability
-        test_accountability_emit_skip_10314
-        test_keeper_exec_status
-        test_keeper_pause_broadcast
-        test_keeper_terminal_reason
-        test_keeper_adaptive_thinking
-        test_keeper_turn_intent
-        test_keeper_lifecycle
-        test_keeper_lifecycle_chaos
-        test_keeper_rollover_gate
-        test_keeper_generation_lineage
-        test_keeper_deliberation
-        test_keeper_registry
-        test_keeper_supervisor
-        test_keeper_allowed_paths
-        test_keeper_repo_readiness
-        test_keeper_tool_surface_guard
-        test_keeper_benchmark_canary
-        test_keeper_pr_review
-        test_playground_paths
-        test_keeper_llama_only
-        test_keeper_meta_cwd_resilience
-        test_metrics_rotation
-        test_tool_access_policy
-        test_tool_access_role
-        test_tool_token
-        test_tool_exposure
-        test_autonomy_liberation
-        test_keeper_unified
-        test_decision_pipeline
-        test_decision_pipeline_observer
-        test_keeper_composite_observer
-        test_keeper_behavioral_regime
-        test_keeper_toml
-        test_keeper_runtime_toml
-        test_keeper_tool_policy_config
-        test_coord_worktree_policy_path
-        test_keeper_toml_config_validation
-        test_keeper_id
-        test_exec_core
-        test_exec_dispatch
-        test_keeper_bash_safety
-        test_hitl_approval
-        test_approval_callback_wired
-        test_keeper_discovered_tools
-        test_keeper_tool_affinity
-        test_keeper_tool_alias
-        test_keeper_sandbox_containment
-        test_keeper_transition_audit
-        test_keeper_shell_containment
-        test_keeper_shell_docker_route
-        test_env_git_noninteractive
-        test_gh_exit_class
-        test_gh_exit_class_wiring
-        test_stay_silent_loop_detector
-        test_oas_compat_cascade_fallback
-        test_heuristic_metrics_boot_wireup
-        test_heuristic_metrics_periodic_flush_10348
-        test_cap_blocker_structured_error
-        test_context_overflow_action_tracker
-        test_keeper_fs_edit_patch
-        test_keeper_docker_read
-        test_keeper_path_ssot
-        test_keeper_github_read_only
-        test_worktree_live_context
-        test_worktree_status_single_flight_9632
-        test_tool_input_validation
-        test_failure_learnings_10325
-        test_agent_stress_emit_10341
-        test_autoresearch_codegen
-        test_autoresearch_oas_primitives
-        test_autoresearch_target_score
-        ; test_contract_risk removed (team session cleanup)
-        ; test_contract_composer removed (team session cleanup)
-        test_cdal_conformance
-        test_task_stage
-        test_ocaml_north_star_task_lifecycle
-        ; test_risk_digest removed (team session cleanup)
-        test_tool_blob_store
-        test_tool_bridge_externalize
-        test_keeper_artifact_hydrator
-        test_artifacts_endpoint
-        test_tool_output_washing_e2e
-        test_keeper_context_core_dedup
-        test_adversarial_eval
-        test_labeling
-        test_tool_deep_review
-        test_tool_call_quality_benchmark
-        test_keeper_prompt_metrics
-        test_cache_metrics_wiring
-        test_tool_surface_ssot
-        test_keeper_retrieval_quality
-        test_observability_redact
-        test_observability_provider_contracts
-        test_config_doctor
-        test_cascade_toml_materialization
-        test_cascade_toml_section_fallback_10259
-        test_doctor_dispatch
-        test_disk_hygiene_script
-        test_run_local_script
-        test_tool_prefilter
-        test_keeper_state_machine
-        test_keeper_social_model_magentic_ledger_fsm
-        test_keeper_overflow_recovery
-        test_team_memory
-        test_telemetry_unified
-        test_telemetry_error_occurred_wire_10358
-        test_keeper_topk_llm
-        test_warn_root_causes
-        test_memory_hooks
-        test_agent_stress_timeout_wire_10341
-        test_institution_episodes_failure_learnings_10325
-        test_mid_turn_resume
-        test_lockfree_atomic)
- (modules test_attribution test_attribution_tagged test_autoresearch_result_bridge test_dashboard_attribution test_masc_runtime_events test_room test_room_state_recovery test_types test_exec_tap test_auth test_auth_doctor test_auth_login test_audit_log test_governance_anomaly test_http_negotiation
-          test_attempt_state
-          test_sse test_cancellation test_graphql_api
-          test_graphql_endpoint
-          test_subscriptions test_session test_progress test_spawn
-          test_validation test_response
-          test_channel_gate_connector_routes
-        test_sidecar_lifecycle_routes
-          test_channel_gate_imessage_state
-          test_dashboard
-          test_dashboard_perf
-          test_dashboard_tool_host_events
-          test_tool_assignment_telemetry
-          test_dashboard_link_preview
-          test_gate_keeper_backend
-          test_transport_read_model
-          test_multi_room test_worktree_detection test_bounded test_mention
-          test_heartbeat_qw test_sse_qw test_sse_stream test_agent_health
-          test_post_verifier
-          test_keeper_cascade_profile
-          test_keeper_hooks_oas_provider
-          test_keeper_hooks_oas_pricing
-          test_keeper_hooks_oas_telemetry
-          test_agent_stress
-          test_keeper_tool_use_failure_counter
-          test_keeper_compaction_outcome_counter
-          test_keeper_usage_trust_counter
-          test_cost_usd_source_attribution_10318
-          test_response_model_empty_10083
-          test_heuristic_theatre_audit
-          test_hebbian_edge_update_counter
-          test_keeper_proactive_skip_counter
-          test_oas_error_kind_counter
-          test_board_author_identity_10297
-          test_fsm_drift_counter
-          test_process_timeout_counter
-          test_git_fetch_timeout_9587
-          test_auth_ambiguous_lookup_9786
-          test_auth_load_credential_of
-          test_keeper_wake_telemetry
-          test_keeper_memory
-          test_keeper_accountability
-          test_accountability_emit_skip_10314
-          test_keeper_exec_status
-          test_keeper_pause_broadcast
-          test_keeper_terminal_reason
-        test_keeper_adaptive_thinking
-          test_keeper_turn_intent
-          test_keeper_lifecycle
-          test_keeper_lifecycle_chaos
-          test_keeper_rollover_gate
-          test_keeper_generation_lineage
-          test_keeper_deliberation
-          test_keeper_registry
-          test_keeper_supervisor
-          test_keeper_allowed_paths
-          test_keeper_repo_readiness
-          test_keeper_tool_surface_guard
-          test_keeper_benchmark_canary
-          test_keeper_pr_review
-          test_playground_paths
-          test_keeper_llama_only
-          test_keeper_meta_cwd_resilience
-          test_metrics_rotation
-          test_tool_access_policy
-          test_tool_access_role
-          test_tool_token
-          test_tool_exposure
-          test_autonomy_liberation
-          test_keeper_unified
-          test_decision_pipeline
-          test_decision_pipeline_observer
-          test_keeper_composite_observer
-          test_keeper_behavioral_regime
-          test_keeper_toml
-          test_keeper_runtime_toml
-          test_keeper_tool_policy_config
-          test_coord_worktree_policy_path
-          test_keeper_toml_config_validation
-          test_keeper_id
-          test_exec_core
-          test_exec_dispatch
-          test_keeper_bash_safety
-          test_hitl_approval
-          test_approval_callback_wired
-          test_keeper_discovered_tools
-          test_keeper_tool_affinity
-          test_keeper_tool_alias
-          test_keeper_sandbox_containment
-          test_keeper_transition_audit
-          test_keeper_shell_containment
-          test_keeper_shell_docker_route
-          test_env_git_noninteractive
-          test_gh_exit_class
-          test_gh_exit_class_wiring
-          test_stay_silent_loop_detector
-          test_oas_compat_cascade_fallback
-          test_heuristic_metrics_boot_wireup
-          test_heuristic_metrics_periodic_flush_10348
-          test_cap_blocker_structured_error
-          test_context_overflow_action_tracker
-          test_keeper_fs_edit_patch
-          test_keeper_docker_read
-          test_keeper_path_ssot
-          test_keeper_github_read_only
-          test_worktree_live_context
-          test_worktree_status_single_flight_9632
-          test_tool_input_validation
-          test_failure_learnings_10325
-          test_agent_stress_emit_10341
-          test_autoresearch_codegen
-          test_autoresearch_oas_primitives
-          test_autoresearch_target_score
-          ; test_contract_risk removed (team session cleanup)
-          ; test_contract_composer removed (team session cleanup)
-          test_cdal_conformance
-          test_task_stage
-          test_ocaml_north_star_task_lifecycle
-          ; test_risk_digest removed (team session cleanup)
-          test_tool_blob_store
-          test_tool_bridge_externalize
-          test_keeper_artifact_hydrator
-          test_artifacts_endpoint
-          test_tool_output_washing_e2e
-          test_keeper_context_core_dedup
-          test_adversarial_eval
-          test_labeling
-          test_tool_deep_review
-          test_tool_call_quality_benchmark
-          test_keeper_prompt_metrics
-          test_cache_metrics_wiring
-          test_tool_surface_ssot
-          test_keeper_retrieval_quality
-          test_observability_redact
-          test_observability_provider_contracts
-          test_config_doctor
-          test_cascade_toml_materialization
-          test_cascade_toml_section_fallback_10259
-          test_doctor_dispatch
-          test_disk_hygiene_script
-          test_run_local_script
-          test_tool_prefilter
-          test_keeper_state_machine
-          test_keeper_social_model_magentic_ledger_fsm
-          test_keeper_overflow_recovery
-          test_team_memory
-          test_telemetry_unified
-          test_telemetry_error_occurred_wire_10358
-          test_keeper_topk_llm
-          test_warn_root_causes
-          test_memory_hooks
-          test_agent_stress_timeout_wire_10341
-          test_institution_episodes_failure_learnings_10325
-          test_mid_turn_resume
-          test_lockfree_atomic
-          )
+ (names
+  test_attribution
+  test_attribution_tagged
+  test_autoresearch_result_bridge
+  test_dashboard_attribution
+  test_masc_runtime_events
+  test_room
+  test_room_state_recovery
+  test_types
+  test_exec_tap
+  test_auth
+  test_auth_doctor
+  test_auth_login
+  test_audit_log
+  test_governance_anomaly
+  test_http_negotiation
+  test_attempt_state
+  test_sse
+  test_cancellation
+  test_graphql_api
+  test_graphql_endpoint
+  test_subscriptions
+  test_session
+  test_progress
+  test_spawn
+  test_validation
+  test_response
+  test_channel_gate_connector_routes
+  test_sidecar_lifecycle_routes
+  test_channel_gate_imessage_state
+  test_dashboard
+  test_dashboard_perf
+  test_dashboard_tool_host_events
+  test_tool_assignment_telemetry
+  test_dashboard_link_preview
+  test_gate_keeper_backend
+  test_transport_read_model
+  test_multi_room
+  test_worktree_detection
+  test_bounded
+  test_mention
+  test_heartbeat_qw
+  test_sse_qw
+  test_sse_stream
+  test_agent_health
+  test_post_verifier
+  test_keeper_cascade_profile
+  test_keeper_hooks_oas_provider
+  test_keeper_hooks_oas_pricing
+  test_keeper_hooks_oas_telemetry
+  test_agent_stress
+  test_keeper_tool_use_failure_counter
+  test_keeper_compaction_outcome_counter
+  test_keeper_usage_trust_counter
+  test_cost_usd_source_attribution_10318
+  test_response_model_empty_10083
+  test_heuristic_theatre_audit
+  test_hebbian_edge_update_counter
+  test_keeper_proactive_skip_counter
+  test_oas_error_kind_counter
+  test_board_author_identity_10297
+  test_fsm_drift_counter
+  test_process_timeout_counter
+  test_git_fetch_timeout_9587
+  test_auth_ambiguous_lookup_9786
+  test_auth_load_credential_of
+  test_keeper_wake_telemetry
+  test_keeper_memory
+  test_keeper_accountability
+  test_accountability_emit_skip_10314
+  test_keeper_exec_status
+  test_keeper_pause_broadcast
+  test_keeper_terminal_reason
+  test_keeper_adaptive_thinking
+  test_keeper_turn_intent
+  test_keeper_lifecycle
+  test_keeper_lifecycle_chaos
+  test_keeper_rollover_gate
+  test_keeper_generation_lineage
+  test_keeper_deliberation
+  test_keeper_registry
+  test_keeper_supervisor
+  test_keeper_allowed_paths
+  test_keeper_repo_readiness
+  test_keeper_tool_surface_guard
+  test_keeper_benchmark_canary
+  test_keeper_pr_review
+  test_playground_paths
+  test_keeper_llama_only
+  test_keeper_meta_cwd_resilience
+  test_metrics_rotation
+  test_tool_access_policy
+  test_tool_access_role
+  test_tool_token
+  test_tool_exposure
+  test_autonomy_liberation
+  test_keeper_unified
+  test_decision_pipeline
+  test_decision_pipeline_observer
+  test_keeper_composite_observer
+  test_keeper_behavioral_regime
+  test_keeper_toml
+  test_keeper_runtime_toml
+  test_keeper_tool_policy_config
+  test_coord_worktree_policy_path
+  test_keeper_toml_config_validation
+  test_keeper_id
+  test_exec_core
+  test_exec_dispatch
+  test_keeper_bash_safety
+  test_hitl_approval
+  test_approval_callback_wired
+  test_keeper_discovered_tools
+  test_keeper_tool_affinity
+  test_keeper_tool_alias
+  test_keeper_sandbox_containment
+  test_keeper_transition_audit
+  test_keeper_shell_containment
+  test_keeper_shell_docker_route
+  test_env_git_noninteractive
+  test_gh_exit_class
+  test_gh_exit_class_wiring
+  test_stay_silent_loop_detector
+  test_oas_compat_cascade_fallback
+  test_heuristic_metrics_boot_wireup
+  test_heuristic_metrics_periodic_flush_10348
+  test_cap_blocker_structured_error
+  test_context_overflow_action_tracker
+  test_keeper_fs_edit_patch
+  test_keeper_docker_read
+  test_keeper_path_ssot
+  test_keeper_github_read_only
+  test_worktree_live_context
+  test_worktree_status_single_flight_9632
+  test_tool_input_validation
+  test_failure_learnings_10325
+  test_agent_stress_emit_10341
+  test_autoresearch_codegen
+  test_autoresearch_oas_primitives
+  test_autoresearch_target_score
+  ; test_contract_risk removed (team session cleanup)
+  ; test_contract_composer removed (team session cleanup)
+  test_cdal_conformance
+  test_task_stage
+  test_ocaml_north_star_task_lifecycle
+  ; test_risk_digest removed (team session cleanup)
+  test_tool_blob_store
+  test_tool_bridge_externalize
+  test_keeper_artifact_hydrator
+  test_artifacts_endpoint
+  test_tool_output_washing_e2e
+  test_keeper_context_core_dedup
+  test_adversarial_eval
+  test_labeling
+  test_tool_deep_review
+  test_tool_call_quality_benchmark
+  test_keeper_prompt_metrics
+  test_cache_metrics_wiring
+  test_tool_surface_ssot
+  test_keeper_retrieval_quality
+  test_observability_redact
+  test_observability_provider_contracts
+  test_config_doctor
+  test_cascade_toml_materialization
+  test_cascade_toml_section_fallback_10259
+  test_doctor_dispatch
+  test_disk_hygiene_script
+  test_run_local_script
+  test_tool_prefilter
+  test_keeper_state_machine
+  test_keeper_social_model_magentic_ledger_fsm
+  test_keeper_overflow_recovery
+  test_team_memory
+  test_telemetry_unified
+  test_telemetry_error_occurred_wire_10358
+  test_keeper_topk_llm
+  test_warn_root_causes
+  test_memory_hooks
+  test_agent_stress_timeout_wire_10341
+  test_institution_episodes_failure_learnings_10325
+  test_mid_turn_resume
+  test_lockfree_atomic)
+ (modules
+  test_attribution
+  test_attribution_tagged
+  test_autoresearch_result_bridge
+  test_dashboard_attribution
+  test_masc_runtime_events
+  test_room
+  test_room_state_recovery
+  test_types
+  test_exec_tap
+  test_auth
+  test_auth_doctor
+  test_auth_login
+  test_audit_log
+  test_governance_anomaly
+  test_http_negotiation
+  test_attempt_state
+  test_sse
+  test_cancellation
+  test_graphql_api
+  test_graphql_endpoint
+  test_subscriptions
+  test_session
+  test_progress
+  test_spawn
+  test_validation
+  test_response
+  test_channel_gate_connector_routes
+  test_sidecar_lifecycle_routes
+  test_channel_gate_imessage_state
+  test_dashboard
+  test_dashboard_perf
+  test_dashboard_tool_host_events
+  test_tool_assignment_telemetry
+  test_dashboard_link_preview
+  test_gate_keeper_backend
+  test_transport_read_model
+  test_multi_room
+  test_worktree_detection
+  test_bounded
+  test_mention
+  test_heartbeat_qw
+  test_sse_qw
+  test_sse_stream
+  test_agent_health
+  test_post_verifier
+  test_keeper_cascade_profile
+  test_keeper_hooks_oas_provider
+  test_keeper_hooks_oas_pricing
+  test_keeper_hooks_oas_telemetry
+  test_agent_stress
+  test_keeper_tool_use_failure_counter
+  test_keeper_compaction_outcome_counter
+  test_keeper_usage_trust_counter
+  test_cost_usd_source_attribution_10318
+  test_response_model_empty_10083
+  test_heuristic_theatre_audit
+  test_hebbian_edge_update_counter
+  test_keeper_proactive_skip_counter
+  test_oas_error_kind_counter
+  test_board_author_identity_10297
+  test_fsm_drift_counter
+  test_process_timeout_counter
+  test_git_fetch_timeout_9587
+  test_auth_ambiguous_lookup_9786
+  test_auth_load_credential_of
+  test_keeper_wake_telemetry
+  test_keeper_memory
+  test_keeper_accountability
+  test_accountability_emit_skip_10314
+  test_keeper_exec_status
+  test_keeper_pause_broadcast
+  test_keeper_terminal_reason
+  test_keeper_adaptive_thinking
+  test_keeper_turn_intent
+  test_keeper_lifecycle
+  test_keeper_lifecycle_chaos
+  test_keeper_rollover_gate
+  test_keeper_generation_lineage
+  test_keeper_deliberation
+  test_keeper_registry
+  test_keeper_supervisor
+  test_keeper_allowed_paths
+  test_keeper_repo_readiness
+  test_keeper_tool_surface_guard
+  test_keeper_benchmark_canary
+  test_keeper_pr_review
+  test_playground_paths
+  test_keeper_llama_only
+  test_keeper_meta_cwd_resilience
+  test_metrics_rotation
+  test_tool_access_policy
+  test_tool_access_role
+  test_tool_token
+  test_tool_exposure
+  test_autonomy_liberation
+  test_keeper_unified
+  test_decision_pipeline
+  test_decision_pipeline_observer
+  test_keeper_composite_observer
+  test_keeper_behavioral_regime
+  test_keeper_toml
+  test_keeper_runtime_toml
+  test_keeper_tool_policy_config
+  test_coord_worktree_policy_path
+  test_keeper_toml_config_validation
+  test_keeper_id
+  test_exec_core
+  test_exec_dispatch
+  test_keeper_bash_safety
+  test_hitl_approval
+  test_approval_callback_wired
+  test_keeper_discovered_tools
+  test_keeper_tool_affinity
+  test_keeper_tool_alias
+  test_keeper_sandbox_containment
+  test_keeper_transition_audit
+  test_keeper_shell_containment
+  test_keeper_shell_docker_route
+  test_env_git_noninteractive
+  test_gh_exit_class
+  test_gh_exit_class_wiring
+  test_stay_silent_loop_detector
+  test_oas_compat_cascade_fallback
+  test_heuristic_metrics_boot_wireup
+  test_heuristic_metrics_periodic_flush_10348
+  test_cap_blocker_structured_error
+  test_context_overflow_action_tracker
+  test_keeper_fs_edit_patch
+  test_keeper_docker_read
+  test_keeper_path_ssot
+  test_keeper_github_read_only
+  test_worktree_live_context
+  test_worktree_status_single_flight_9632
+  test_tool_input_validation
+  test_failure_learnings_10325
+  test_agent_stress_emit_10341
+  test_autoresearch_codegen
+  test_autoresearch_oas_primitives
+  test_autoresearch_target_score
+  ; test_contract_risk removed (team session cleanup)
+  ; test_contract_composer removed (team session cleanup)
+  test_cdal_conformance
+  test_task_stage
+  test_ocaml_north_star_task_lifecycle
+  ; test_risk_digest removed (team session cleanup)
+  test_tool_blob_store
+  test_tool_bridge_externalize
+  test_keeper_artifact_hydrator
+  test_artifacts_endpoint
+  test_tool_output_washing_e2e
+  test_keeper_context_core_dedup
+  test_adversarial_eval
+  test_labeling
+  test_tool_deep_review
+  test_tool_call_quality_benchmark
+  test_keeper_prompt_metrics
+  test_cache_metrics_wiring
+  test_tool_surface_ssot
+  test_keeper_retrieval_quality
+  test_observability_redact
+  test_observability_provider_contracts
+  test_config_doctor
+  test_cascade_toml_materialization
+  test_cascade_toml_section_fallback_10259
+  test_doctor_dispatch
+  test_disk_hygiene_script
+  test_run_local_script
+  test_tool_prefilter
+  test_keeper_state_machine
+  test_keeper_social_model_magentic_ledger_fsm
+  test_keeper_overflow_recovery
+  test_team_memory
+  test_telemetry_unified
+  test_telemetry_error_occurred_wire_10358
+  test_keeper_topk_llm
+  test_warn_root_causes
+  test_memory_hooks
+  test_agent_stress_timeout_wire_10341
+  test_institution_episodes_failure_learnings_10325
+  test_mid_turn_resume
+  test_lockfree_atomic)
  (libraries masc_test_deps))
 
 ; ============================================================
 ; Group 2: Property-based tests (QCheck)
 ; ============================================================
+
 (tests
- (names test_pbt_mention test_pbt_validation test_pbt_text_processing test_pbt_context_overflow
-        test_keeper_state_machine_pbt test_telemetry_eio_pbt
-        test_metrics_store_eio_pbt test_prompt_registry_pbt)
- (modules test_pbt_mention test_pbt_validation test_pbt_text_processing test_pbt_context_overflow
-          test_keeper_state_machine_pbt test_telemetry_eio_pbt
-          test_metrics_store_eio_pbt test_prompt_registry_pbt)
+ (names
+  test_pbt_mention
+  test_pbt_validation
+  test_pbt_text_processing
+  test_pbt_context_overflow
+  test_keeper_state_machine_pbt
+  test_telemetry_eio_pbt
+  test_metrics_store_eio_pbt
+  test_prompt_registry_pbt)
+ (modules
+  test_pbt_mention
+  test_pbt_validation
+  test_pbt_text_processing
+  test_pbt_context_overflow
+  test_keeper_state_machine_pbt
+  test_telemetry_eio_pbt
+  test_metrics_store_eio_pbt
+  test_prompt_registry_pbt)
  (libraries masc_test_deps))
 
 ; ============================================================
 ; Focused single-module tests
 ; ============================================================
+
 (test
  (name test_meta_cognition_snapshot)
  (modules test_meta_cognition_snapshot)
@@ -458,8 +527,12 @@
  (name test_personality_text_equal)
  (modules test_personality_text_equal)
  (action
-  (setenv MASC_BASE_PATH /tmp/test-personality-text-equal
-   (setenv MASC_BASE_PATH_INPUT /tmp/test-personality-text-equal
+  (setenv
+   MASC_BASE_PATH
+   /tmp/test-personality-text-equal
+   (setenv
+    MASC_BASE_PATH_INPUT
+    /tmp/test-personality-text-equal
     (run %{test}))))
  (libraries masc_test_deps))
 
@@ -467,8 +540,12 @@
  (name test_personality_diff_summary_10269)
  (modules test_personality_diff_summary_10269)
  (action
-  (setenv MASC_BASE_PATH /tmp/test-personality-diff-summary-10269
-   (setenv MASC_BASE_PATH_INPUT /tmp/test-personality-diff-summary-10269
+  (setenv
+   MASC_BASE_PATH
+   /tmp/test-personality-diff-summary-10269
+   (setenv
+    MASC_BASE_PATH_INPUT
+    /tmp/test-personality-diff-summary-10269
     (run %{test}))))
  (libraries masc_test_deps))
 
@@ -476,22 +553,30 @@
  (name test_keeper_personality_round_trip)
  (modules test_keeper_personality_round_trip)
  (action
-  (setenv MASC_BASE_PATH /tmp/test-keeper-personality-round-trip
-   (setenv MASC_BASE_PATH_INPUT /tmp/test-keeper-personality-round-trip
+  (setenv
+   MASC_BASE_PATH
+   /tmp/test-keeper-personality-round-trip
+   (setenv
+    MASC_BASE_PATH_INPUT
+    /tmp/test-keeper-personality-round-trip
     (run %{test}))))
  (libraries masc_test_deps))
-
 
 ; #10091: dedicated stanza so MASC_BASE_PATH is set BEFORE the
 ; test executable loads — the top-level Masc_mcp init includes
 ; [Cdal_verdict_gate.default_base_path] which triggers the #9903
 ; prod-guard when base_path resolves to the operator's HOME.
+
 (test
  (name test_require_tool_use_violation_counter_10091)
  (modules test_require_tool_use_violation_counter_10091)
  (action
-  (setenv MASC_BASE_PATH /tmp/test-require-tool-use-violation-counter-10091
-   (setenv MASC_BASE_PATH_INPUT /tmp/test-require-tool-use-violation-counter-10091
+  (setenv
+   MASC_BASE_PATH
+   /tmp/test-require-tool-use-violation-counter-10091
+   (setenv
+    MASC_BASE_PATH_INPUT
+    /tmp/test-require-tool-use-violation-counter-10091
     (run %{test}))))
  (libraries masc_test_deps))
 
@@ -503,90 +588,130 @@
 ; #10097: dedicated stanza so MASC_BASE_PATH is set BEFORE the
 ; test executable loads — same reason as test_require_tool_use_
 ; violation_counter_10091 above.  See that stanza's comment.
+
 (test
  (name test_codex_cli_omission_dedup_10097)
  (modules test_codex_cli_omission_dedup_10097)
  (action
-  (setenv MASC_BASE_PATH /tmp/test-codex-cli-omission-dedup-10097
-   (setenv MASC_BASE_PATH_INPUT /tmp/test-codex-cli-omission-dedup-10097
+  (setenv
+   MASC_BASE_PATH
+   /tmp/test-codex-cli-omission-dedup-10097
+   (setenv
+    MASC_BASE_PATH_INPUT
+    /tmp/test-codex-cli-omission-dedup-10097
     (run %{test}))))
  (libraries masc_test_deps))
 
 ; #9953: dedicated stanza so MASC_BASE_PATH is set BEFORE the
 ; test executable loads. Same rationale as #10091/#10097/#10101.
+
 (test
  (name test_context_max_observed_9953)
  (modules test_context_max_observed_9953)
  (action
-  (setenv MASC_BASE_PATH /tmp/test-context-max-observed-9953
-   (setenv MASC_BASE_PATH_INPUT /tmp/test-context-max-observed-9953
+  (setenv
+   MASC_BASE_PATH
+   /tmp/test-context-max-observed-9953
+   (setenv
+    MASC_BASE_PATH_INPUT
+    /tmp/test-context-max-observed-9953
     (run %{test}))))
  (libraries masc_test_deps))
 
 ; #10121: dedicated stanza so MASC_BASE_PATH is set BEFORE the
 ; test executable loads. Same rationale as #10091/#10097/#10101.
+
 (test
  (name test_keeper_turn_livelock_10121)
  (modules test_keeper_turn_livelock_10121)
  (action
-  (setenv MASC_BASE_PATH /tmp/test-keeper-turn-livelock-10121
-   (setenv MASC_BASE_PATH_INPUT /tmp/test-keeper-turn-livelock-10121
+  (setenv
+   MASC_BASE_PATH
+   /tmp/test-keeper-turn-livelock-10121
+   (setenv
+    MASC_BASE_PATH_INPUT
+    /tmp/test-keeper-turn-livelock-10121
     (run %{test}))))
  (libraries masc_test_deps))
 
 ; #10101: same rationale as #10091 / #10097 — Masc_mcp module
 ; init triggers #9903 prod-guard on HOME; setenv before exec.
+
 (test
  (name test_tool_help_registry_shard_coverage_10101)
  (modules test_tool_help_registry_shard_coverage_10101)
  (action
-  (setenv MASC_BASE_PATH /tmp/test-tool-help-registry-shard-coverage-10101
-   (setenv MASC_BASE_PATH_INPUT /tmp/test-tool-help-registry-shard-coverage-10101
+  (setenv
+   MASC_BASE_PATH
+   /tmp/test-tool-help-registry-shard-coverage-10101
+   (setenv
+    MASC_BASE_PATH_INPUT
+    /tmp/test-tool-help-registry-shard-coverage-10101
     (run %{test}))))
  (libraries masc_test_deps))
 
 ; #10113: dedicated stanza so MASC_BASE_PATH is set BEFORE the
 ; test executable loads. Same rationale as #10091/#10097/#10101.
+
 (test
  (name test_anti_rationalization_gate2_advisory_10113)
  (modules test_anti_rationalization_gate2_advisory_10113)
  (action
-  (setenv MASC_BASE_PATH /tmp/test-anti-rat-gate2-advisory-10113
-   (setenv MASC_BASE_PATH_INPUT /tmp/test-anti-rat-gate2-advisory-10113
+  (setenv
+   MASC_BASE_PATH
+   /tmp/test-anti-rat-gate2-advisory-10113
+   (setenv
+    MASC_BASE_PATH_INPUT
+    /tmp/test-anti-rat-gate2-advisory-10113
     (run %{test}))))
  (libraries masc_test_deps))
 
 ; #10094: dedicated stanza so MASC_BASE_PATH is set BEFORE the
 ; test executable loads.  Same rationale as #10091/#10097/#10101.
+
 (test
  (name test_oas_bridge_timeout_ssot_10094)
  (modules test_oas_bridge_timeout_ssot_10094)
  (action
-  (setenv MASC_BASE_PATH /tmp/test-oas-bridge-timeout-ssot-10094
-   (setenv MASC_BASE_PATH_INPUT /tmp/test-oas-bridge-timeout-ssot-10094
+  (setenv
+   MASC_BASE_PATH
+   /tmp/test-oas-bridge-timeout-ssot-10094
+   (setenv
+    MASC_BASE_PATH_INPUT
+    /tmp/test-oas-bridge-timeout-ssot-10094
     (run %{test}))))
  (libraries masc_test_deps))
 
 ; #9629: judge callers (Governance_judge, Operator_judge) added to
 ; the OAS bridge SSOT.  Dedicated stanza for the same MASC_BASE_PATH
 ; reason as #10094.
+
 (test
  (name test_oas_bridge_judge_callers_9629)
  (modules test_oas_bridge_judge_callers_9629)
  (action
-  (setenv MASC_BASE_PATH /tmp/test-oas-bridge-judge-callers-9629
-   (setenv MASC_BASE_PATH_INPUT /tmp/test-oas-bridge-judge-callers-9629
+  (setenv
+   MASC_BASE_PATH
+   /tmp/test-oas-bridge-judge-callers-9629
+   (setenv
+    MASC_BASE_PATH_INPUT
+    /tmp/test-oas-bridge-judge-callers-9629
     (run %{test}))))
  (libraries masc_test_deps))
 
 ; #10115: dedicated stanza so MASC_BASE_PATH is set BEFORE the
 ; test executable loads. Same rationale as #10091/#10097/#10101.
+
 (test
  (name test_cdal_ledger_health_10115)
  (modules test_cdal_ledger_health_10115)
  (action
-  (setenv MASC_BASE_PATH /tmp/test-cdal-ledger-health-10115
-   (setenv MASC_BASE_PATH_INPUT /tmp/test-cdal-ledger-health-10115
+  (setenv
+   MASC_BASE_PATH
+   /tmp/test-cdal-ledger-health-10115
+   (setenv
+    MASC_BASE_PATH_INPUT
+    /tmp/test-cdal-ledger-health-10115
     (run %{test}))))
  (libraries masc_test_deps))
 
@@ -598,403 +723,400 @@
 ; Group 3: Eio-native tests (single-module, standard deps)
 ; Merged from ~100 individual (test ...) stanzas.
 ; ============================================================
+
 (tests
  (names
-        test_runtime_params
-        test_config_dir_resolver
-        test_room_coverage
-        test_streamable_http
-        test_dashboard_mission
-        test_dashboard_mission_briefing
-        ; test_dashboard_proof removed (team session cleanup)
-        ; test_command_plane_help removed (CP purge)
-
-        test_dashboard_cache
-        test_dashboard_execution
-        test_dashboard_http_core
-        test_dashboard_autoresearch
-        test_dashboard_harness_health
-        test_eval_feed
-        test_dashboard_tools
-        test_dashboard_cascade
-        test_dashboard_verification
-        test_tool_quality_classify
-        test_tui_decode
-        test_dashboard_governance
-        test_dashboard_labels
-        test_dashboard_safe_autonomy
-        test_dashboard_surface_readiness
-        test_activity_graph
-        test_masc_log
-        test_dashboard_namespace_truth
-        test_server_runtime_bootstrap
-        test_server_base_path_diagnostics
-        test_server_startup_takeover
-        test_keeper_meta_listing
-        test_keeper_meta_cas_retry
-        test_judge_diagnostics
-        test_judge_json_recovery
-        test_keeper_cli_mcp_config
-        test_board_vote_quarantine
-        test_keeper_identity_parse
-        test_keeper_identity_normalize
-        test_keeper_personality_io_parse
-        test_keeper_personality_io_coerce
-        test_keeper_personality_io_validate
-        test_keeper_personality_io_compare
-        test_keeper_personality_io_render
-        test_keeper_identity_outcome_label
-        test_worker_runtime
-        test_capability_registry
-        test_tool_local_runtime_verify
-        test_tool_local_runtime_probe
-        test_board_ttl
-        test_worker_dev_tools
-        test_shadow_parse
-        test_destructive_class
-        test_gate_diff
-        test_legendary_counters
-        test_legendary_bash_bg_tasks_route
-        test_oas_integration
-        test_memory_oas_5tier
-        test_verifier_oas_bridge
-        test_oas_adapters
-        ; test_team_session_oas_bridge removed (team session cleanup)
-        ; test_team_session_swarm_runner removed (team session cleanup)
-        test_cache_eio
-        test_metrics_store_eio
-        test_hebbian_eio
-        test_planning_eio
-        test_thompson_sampling
-        test_safe_ops
-        test_json_util
-        test_process_eio_coverage
-        test_with_process_coverage
-        test_bg_task_stub
-        test_process_eio_detached
-        test_provider_adapter
-        test_worker_container_coverage
-        test_resilience
-        test_common
-        test_room_messages_raw
-        ; test_cp_cleanup, test_cp_search_fabric, test_cp_section_cache, test_cp_jsonl_tail removed (CP purge)
-        ; test_swarm_persistence removed (team session cleanup)
-        test_local_runtime_pool
-        test_keeper_tools_oas
-        test_keeper_tool_exposure
-        test_keeper_runtime_denylist
-        test_keeper_runtime_config_ssot
-        test_dashboard_render_timing_9766
-        test_gh_command_blocked_message_10561
-        test_keeper_turn_timeout_default_10456
-        test_task_status_label_10421
-        test_task_completion_path_10449
-        test_filter_rejection_10474
-        test_sandbox_inspect_trim_10488
-        test_credential_alias_10440
-        test_credential_provider
-        test_keeper_profile_normalize_10552
-        test_personality_field_diff_10269
-        test_toml_skip_dedup_10259
-        test_discovery_history_models_10404
-        test_masc_log_utc_filename_10392
-        test_keeper_task_dispatch
-        test_keeper_tag_dispatch
-        test_autoresearch_knowledge
-        test_mcp_server_eio
-        test_mcp_server_eio_call_tool
-        test_code_navigation_eio
-        test_backend
-        test_room_eio
-        test_http_server_eio
-        test_compression
-        test_fs_compat
-        test_concurrency_stress
-        test_eio_mutex_concurrency
-        test_a2a_e2e
-        test_board_dispatch
-        test_board_fixture_detector
-        test_vote_ts_preservation_10086
-
-        test_task_dispatch
-        test_drift_guard_core
-        test_verify_handoff_tool
-        test_memory_horizon_classifier
-        test_param_type_classifier
-        test_tool_contract_truth
-        test_file_lock_eio
-        test_error_logging_coverage
-        test_agent_identity
-        test_mcp_full_cycle
-        test_agent_registry_eio
-        test_identity_e2e
-        test_identity_edge_cases
-        test_verification
-        test_pulse
-        test_transport_metrics
-        test_adaptive_cache_ttl
-        test_keeper_compact_audit
-        test_oas_bus_instrument
-        test_tool_compact
-        test_trajectory
-        test_eval_gate
-        test_eval_harness
-        test_tool_board_coverage
-        test_anti_rationalization_fail_mode
-        test_board_truncation_detection
-        ; test_proof_criteria removed (team session cleanup)
-        test_tool_registration_consistency
-        ; test_tree_index removed (CP purge)
-        test_tool_registry
-        test_tool_dispatch
-        test_tool_spec
-        test_typed_tool_masc
-        test_state_product
-        test_coordination_product
-        test_tool_result
-        test_tool_hooks
-        test_governance_pipeline
-        test_keeper_routine_allowlist
-        test_keeper_agent_isolation
-        test_sse_external_sub
-        test_ws_transport
-        test_webrtc_signaling
-        test_transport_integration
-        test_tool_metrics
-        test_tool_metrics_persist
-        test_model_inference_metrics
-        test_keeper_tool_call_log
-        test_tool_unified
-        test_build_identity
-        test_workflow_guide
-        test_agent_economy
-        test_lifecycle
-        test_auto_recall_activity_coverage
-        test_grpc_coordination
-        test_grpc_client
-        test_http_protocol_detect
-        test_keeper_safety_gates
-        test_keeper_guards
-        test_eval_gate_evasion
-        test_prompt_registry_defaults
-        test_keeper_recurring
-        test_cdal_types
-        test_cdal_loader
-        test_cdal_judge
-        test_cdal_verifiable_markers
-        test_cdal_eval_v1
-        test_cdal_friction_projection
-        test_cdal_verdict_gate
-        test_verification_fsm
-        test_task_sandbox
-        test_governance_yojson_roundtrip
-        test_eval_calibration
-        test_goal_janitor
-        test_goal_tools
-        test_goal_upsert_fsm_bypass_10247
-        test_goal_store
-        test_goal_verification
-        test_string_util
-        test_board_core_payload
-        test_voice_config)
+  test_runtime_params
+  test_config_dir_resolver
+  test_room_coverage
+  test_streamable_http
+  test_dashboard_mission
+  test_dashboard_mission_briefing
+  ; test_dashboard_proof removed (team session cleanup)
+  ; test_command_plane_help removed (CP purge)
+  test_dashboard_cache
+  test_dashboard_execution
+  test_dashboard_http_core
+  test_dashboard_autoresearch
+  test_dashboard_harness_health
+  test_eval_feed
+  test_dashboard_tools
+  test_dashboard_cascade
+  test_dashboard_verification
+  test_tool_quality_classify
+  test_tui_decode
+  test_dashboard_governance
+  test_dashboard_labels
+  test_dashboard_safe_autonomy
+  test_dashboard_surface_readiness
+  test_activity_graph
+  test_masc_log
+  test_dashboard_namespace_truth
+  test_server_runtime_bootstrap
+  test_server_base_path_diagnostics
+  test_server_startup_takeover
+  test_keeper_meta_listing
+  test_keeper_meta_cas_retry
+  test_judge_diagnostics
+  test_judge_json_recovery
+  test_keeper_cli_mcp_config
+  test_board_vote_quarantine
+  test_keeper_identity_parse
+  test_keeper_identity_normalize
+  test_keeper_personality_io_parse
+  test_keeper_personality_io_coerce
+  test_keeper_personality_io_validate
+  test_keeper_personality_io_compare
+  test_keeper_personality_io_render
+  test_keeper_identity_outcome_label
+  test_worker_runtime
+  test_capability_registry
+  test_tool_local_runtime_verify
+  test_tool_local_runtime_probe
+  test_board_ttl
+  test_worker_dev_tools
+  test_shadow_parse
+  test_destructive_class
+  test_gate_diff
+  test_legendary_counters
+  test_legendary_bash_bg_tasks_route
+  test_oas_integration
+  test_memory_oas_5tier
+  test_verifier_oas_bridge
+  test_oas_adapters
+  ; test_team_session_oas_bridge removed (team session cleanup)
+  ; test_team_session_swarm_runner removed (team session cleanup)
+  test_cache_eio
+  test_metrics_store_eio
+  test_hebbian_eio
+  test_planning_eio
+  test_thompson_sampling
+  test_safe_ops
+  test_json_util
+  test_process_eio_coverage
+  test_with_process_coverage
+  test_bg_task_stub
+  test_process_eio_detached
+  test_provider_adapter
+  test_worker_container_coverage
+  test_resilience
+  test_common
+  test_room_messages_raw
+  ; test_cp_cleanup, test_cp_search_fabric, test_cp_section_cache, test_cp_jsonl_tail removed (CP purge)
+  ; test_swarm_persistence removed (team session cleanup)
+  test_local_runtime_pool
+  test_keeper_tools_oas
+  test_keeper_tool_exposure
+  test_keeper_runtime_denylist
+  test_keeper_runtime_config_ssot
+  test_dashboard_render_timing_9766
+  test_gh_command_blocked_message_10561
+  test_keeper_turn_timeout_default_10456
+  test_task_status_label_10421
+  test_task_completion_path_10449
+  test_filter_rejection_10474
+  test_sandbox_inspect_trim_10488
+  test_credential_alias_10440
+  test_credential_provider
+  test_keeper_profile_normalize_10552
+  test_personality_field_diff_10269
+  test_toml_skip_dedup_10259
+  test_discovery_history_models_10404
+  test_masc_log_utc_filename_10392
+  test_keeper_task_dispatch
+  test_keeper_tag_dispatch
+  test_autoresearch_knowledge
+  test_mcp_server_eio
+  test_mcp_server_eio_call_tool
+  test_code_navigation_eio
+  test_backend
+  test_room_eio
+  test_http_server_eio
+  test_compression
+  test_fs_compat
+  test_concurrency_stress
+  test_eio_mutex_concurrency
+  test_a2a_e2e
+  test_board_dispatch
+  test_board_fixture_detector
+  test_vote_ts_preservation_10086
+  test_task_dispatch
+  test_drift_guard_core
+  test_verify_handoff_tool
+  test_memory_horizon_classifier
+  test_param_type_classifier
+  test_tool_contract_truth
+  test_file_lock_eio
+  test_error_logging_coverage
+  test_agent_identity
+  test_mcp_full_cycle
+  test_agent_registry_eio
+  test_identity_e2e
+  test_identity_edge_cases
+  test_verification
+  test_pulse
+  test_transport_metrics
+  test_adaptive_cache_ttl
+  test_keeper_compact_audit
+  test_oas_bus_instrument
+  test_tool_compact
+  test_trajectory
+  test_eval_gate
+  test_eval_harness
+  test_tool_board_coverage
+  test_anti_rationalization_fail_mode
+  test_board_truncation_detection
+  ; test_proof_criteria removed (team session cleanup)
+  test_tool_registration_consistency
+  ; test_tree_index removed (CP purge)
+  test_tool_registry
+  test_tool_dispatch
+  test_tool_spec
+  test_typed_tool_masc
+  test_state_product
+  test_coordination_product
+  test_tool_result
+  test_tool_hooks
+  test_governance_pipeline
+  test_keeper_routine_allowlist
+  test_keeper_agent_isolation
+  test_sse_external_sub
+  test_ws_transport
+  test_webrtc_signaling
+  test_transport_integration
+  test_tool_metrics
+  test_tool_metrics_persist
+  test_model_inference_metrics
+  test_keeper_tool_call_log
+  test_tool_unified
+  test_build_identity
+  test_workflow_guide
+  test_agent_economy
+  test_lifecycle
+  test_auto_recall_activity_coverage
+  test_grpc_coordination
+  test_grpc_client
+  test_http_protocol_detect
+  test_keeper_safety_gates
+  test_keeper_guards
+  test_eval_gate_evasion
+  test_prompt_registry_defaults
+  test_keeper_recurring
+  test_cdal_types
+  test_cdal_loader
+  test_cdal_judge
+  test_cdal_verifiable_markers
+  test_cdal_eval_v1
+  test_cdal_friction_projection
+  test_cdal_verdict_gate
+  test_verification_fsm
+  test_task_sandbox
+  test_governance_yojson_roundtrip
+  test_eval_calibration
+  test_goal_janitor
+  test_goal_tools
+  test_goal_upsert_fsm_bypass_10247
+  test_goal_store
+  test_goal_verification
+  test_string_util
+  test_board_core_payload
+  test_voice_config)
  (modules
-        test_runtime_params
-        test_config_dir_resolver
-        test_room_coverage
-        test_streamable_http
-        test_dashboard_mission
-        test_dashboard_mission_briefing
-        ; test_dashboard_proof removed (team session cleanup)
-        ; test_command_plane_help removed (CP purge)
-
-        test_dashboard_cache
-        test_dashboard_execution
-        test_dashboard_http_core
-        test_dashboard_autoresearch
-        test_dashboard_harness_health
-        test_eval_feed
-        test_dashboard_tools
-        test_dashboard_cascade
-        test_dashboard_verification
-        test_tool_quality_classify
-        test_tui_decode
-        test_dashboard_governance
-        test_dashboard_labels
-        test_dashboard_safe_autonomy
-        test_dashboard_surface_readiness
-        test_activity_graph
-        test_masc_log
-        test_dashboard_namespace_truth
-        test_server_runtime_bootstrap
-        test_server_base_path_diagnostics
-        test_server_startup_takeover
-        test_keeper_meta_listing
-        test_keeper_meta_cas_retry
-        test_judge_diagnostics
-        test_judge_json_recovery
-        test_keeper_cli_mcp_config
-        test_board_vote_quarantine
-        test_keeper_identity_parse
-        test_keeper_identity_normalize
-        test_keeper_personality_io_parse
-        test_keeper_personality_io_coerce
-        test_keeper_personality_io_validate
-        test_keeper_personality_io_compare
-        test_keeper_personality_io_render
-        test_keeper_identity_outcome_label
-        test_worker_runtime
-        test_capability_registry
-        test_tool_local_runtime_verify
-        test_tool_local_runtime_probe
-        test_board_ttl
-        test_worker_dev_tools
-        test_shadow_parse
-        test_destructive_class
-        test_gate_diff
-        test_legendary_counters
-        test_legendary_bash_bg_tasks_route
-        test_oas_integration
-        test_memory_oas_5tier
-        test_verifier_oas_bridge
-        test_oas_adapters
-        ; test_team_session_oas_bridge removed (team session cleanup)
-        ; test_team_session_swarm_runner removed (team session cleanup)
-        test_cache_eio
-        test_metrics_store_eio
-        test_hebbian_eio
-        test_planning_eio
-        test_thompson_sampling
-        test_safe_ops
-        test_json_util
-        test_process_eio_coverage
-        test_with_process_coverage
-        test_bg_task_stub
-        test_process_eio_detached
-        test_provider_adapter
-        test_worker_container_coverage
-        test_resilience
-        test_common
-        test_room_messages_raw
-        ; test_cp_cleanup, test_cp_search_fabric, test_cp_section_cache, test_cp_jsonl_tail removed (CP purge)
-        ; test_swarm_persistence removed (team session cleanup)
-        test_local_runtime_pool
-        test_keeper_tools_oas
-        test_keeper_tool_exposure
-        test_keeper_runtime_denylist
-        test_keeper_runtime_config_ssot
-        test_dashboard_render_timing_9766
-        test_gh_command_blocked_message_10561
-        test_keeper_turn_timeout_default_10456
-        test_task_status_label_10421
-        test_task_completion_path_10449
-        test_filter_rejection_10474
-        test_sandbox_inspect_trim_10488
-        test_credential_alias_10440
-        test_credential_provider
-        test_keeper_profile_normalize_10552
-        test_personality_field_diff_10269
-        test_toml_skip_dedup_10259
-        test_discovery_history_models_10404
-        test_masc_log_utc_filename_10392
-        test_keeper_task_dispatch
-        test_keeper_tag_dispatch
-        test_autoresearch_knowledge
-        test_mcp_server_eio
-        test_mcp_server_eio_call_tool
-        test_code_navigation_eio
-        test_backend
-        test_room_eio
-        test_http_server_eio
-        test_compression
-        test_fs_compat
-        test_concurrency_stress
-        test_eio_mutex_concurrency
-        test_a2a_e2e
-        test_board_dispatch
-        test_board_fixture_detector
-        test_vote_ts_preservation_10086
-
-        test_task_dispatch
-        test_drift_guard_core
-        test_verify_handoff_tool
-        test_memory_horizon_classifier
-        test_param_type_classifier
-        test_tool_contract_truth
-        test_file_lock_eio
-        test_error_logging_coverage
-        test_agent_identity
-          test_mcp_full_cycle
-          test_agent_registry_eio
-          test_identity_e2e
-        test_identity_edge_cases
-        test_verification
-        test_pulse
-        test_transport_metrics
-        test_adaptive_cache_ttl
-        test_keeper_compact_audit
-        test_oas_bus_instrument
-        test_tool_compact
-        test_trajectory
-        test_eval_gate
-        test_eval_harness
-        test_tool_board_coverage
-        test_anti_rationalization_fail_mode
-        test_board_truncation_detection
-        ; test_proof_criteria removed (team session cleanup)
-        test_tool_registration_consistency
-        ; test_tree_index removed (CP purge)
-        test_tool_registry
-        test_tool_dispatch
-        test_tool_spec
-        test_typed_tool_masc
-        test_state_product
-        test_coordination_product
-        test_tool_result
-        test_tool_hooks
-        test_governance_pipeline
-        test_keeper_routine_allowlist
-        test_keeper_agent_isolation
-        test_sse_external_sub
-        test_ws_transport
-        test_webrtc_signaling
-        test_transport_integration
-        test_tool_metrics
-        test_tool_metrics_persist
-        test_model_inference_metrics
-        test_tool_unified
-        test_keeper_tool_call_log
-        test_build_identity
-        test_workflow_guide
-        test_agent_economy
-        test_lifecycle
-        test_auto_recall_activity_coverage
-        test_grpc_coordination
-        test_grpc_client
-        test_http_protocol_detect
-        test_keeper_safety_gates
-        test_keeper_guards
-        test_eval_gate_evasion
-        test_prompt_registry_defaults
-        test_keeper_recurring
-        test_cdal_types
-        test_cdal_loader
-        test_cdal_judge
-        test_cdal_verifiable_markers
-        test_cdal_eval_v1
-        test_cdal_friction_projection
-        test_cdal_verdict_gate
-        test_verification_fsm
-        test_task_sandbox
-        test_governance_yojson_roundtrip
-        test_eval_calibration
-        test_goal_janitor
-        test_goal_tools
-        test_goal_upsert_fsm_bypass_10247
-        test_goal_store
-        test_goal_verification
-        test_string_util
-        test_board_core_payload
-        test_voice_config)
+  test_runtime_params
+  test_config_dir_resolver
+  test_room_coverage
+  test_streamable_http
+  test_dashboard_mission
+  test_dashboard_mission_briefing
+  ; test_dashboard_proof removed (team session cleanup)
+  ; test_command_plane_help removed (CP purge)
+  test_dashboard_cache
+  test_dashboard_execution
+  test_dashboard_http_core
+  test_dashboard_autoresearch
+  test_dashboard_harness_health
+  test_eval_feed
+  test_dashboard_tools
+  test_dashboard_cascade
+  test_dashboard_verification
+  test_tool_quality_classify
+  test_tui_decode
+  test_dashboard_governance
+  test_dashboard_labels
+  test_dashboard_safe_autonomy
+  test_dashboard_surface_readiness
+  test_activity_graph
+  test_masc_log
+  test_dashboard_namespace_truth
+  test_server_runtime_bootstrap
+  test_server_base_path_diagnostics
+  test_server_startup_takeover
+  test_keeper_meta_listing
+  test_keeper_meta_cas_retry
+  test_judge_diagnostics
+  test_judge_json_recovery
+  test_keeper_cli_mcp_config
+  test_board_vote_quarantine
+  test_keeper_identity_parse
+  test_keeper_identity_normalize
+  test_keeper_personality_io_parse
+  test_keeper_personality_io_coerce
+  test_keeper_personality_io_validate
+  test_keeper_personality_io_compare
+  test_keeper_personality_io_render
+  test_keeper_identity_outcome_label
+  test_worker_runtime
+  test_capability_registry
+  test_tool_local_runtime_verify
+  test_tool_local_runtime_probe
+  test_board_ttl
+  test_worker_dev_tools
+  test_shadow_parse
+  test_destructive_class
+  test_gate_diff
+  test_legendary_counters
+  test_legendary_bash_bg_tasks_route
+  test_oas_integration
+  test_memory_oas_5tier
+  test_verifier_oas_bridge
+  test_oas_adapters
+  ; test_team_session_oas_bridge removed (team session cleanup)
+  ; test_team_session_swarm_runner removed (team session cleanup)
+  test_cache_eio
+  test_metrics_store_eio
+  test_hebbian_eio
+  test_planning_eio
+  test_thompson_sampling
+  test_safe_ops
+  test_json_util
+  test_process_eio_coverage
+  test_with_process_coverage
+  test_bg_task_stub
+  test_process_eio_detached
+  test_provider_adapter
+  test_worker_container_coverage
+  test_resilience
+  test_common
+  test_room_messages_raw
+  ; test_cp_cleanup, test_cp_search_fabric, test_cp_section_cache, test_cp_jsonl_tail removed (CP purge)
+  ; test_swarm_persistence removed (team session cleanup)
+  test_local_runtime_pool
+  test_keeper_tools_oas
+  test_keeper_tool_exposure
+  test_keeper_runtime_denylist
+  test_keeper_runtime_config_ssot
+  test_dashboard_render_timing_9766
+  test_gh_command_blocked_message_10561
+  test_keeper_turn_timeout_default_10456
+  test_task_status_label_10421
+  test_task_completion_path_10449
+  test_filter_rejection_10474
+  test_sandbox_inspect_trim_10488
+  test_credential_alias_10440
+  test_credential_provider
+  test_keeper_profile_normalize_10552
+  test_personality_field_diff_10269
+  test_toml_skip_dedup_10259
+  test_discovery_history_models_10404
+  test_masc_log_utc_filename_10392
+  test_keeper_task_dispatch
+  test_keeper_tag_dispatch
+  test_autoresearch_knowledge
+  test_mcp_server_eio
+  test_mcp_server_eio_call_tool
+  test_code_navigation_eio
+  test_backend
+  test_room_eio
+  test_http_server_eio
+  test_compression
+  test_fs_compat
+  test_concurrency_stress
+  test_eio_mutex_concurrency
+  test_a2a_e2e
+  test_board_dispatch
+  test_board_fixture_detector
+  test_vote_ts_preservation_10086
+  test_task_dispatch
+  test_drift_guard_core
+  test_verify_handoff_tool
+  test_memory_horizon_classifier
+  test_param_type_classifier
+  test_tool_contract_truth
+  test_file_lock_eio
+  test_error_logging_coverage
+  test_agent_identity
+  test_mcp_full_cycle
+  test_agent_registry_eio
+  test_identity_e2e
+  test_identity_edge_cases
+  test_verification
+  test_pulse
+  test_transport_metrics
+  test_adaptive_cache_ttl
+  test_keeper_compact_audit
+  test_oas_bus_instrument
+  test_tool_compact
+  test_trajectory
+  test_eval_gate
+  test_eval_harness
+  test_tool_board_coverage
+  test_anti_rationalization_fail_mode
+  test_board_truncation_detection
+  ; test_proof_criteria removed (team session cleanup)
+  test_tool_registration_consistency
+  ; test_tree_index removed (CP purge)
+  test_tool_registry
+  test_tool_dispatch
+  test_tool_spec
+  test_typed_tool_masc
+  test_state_product
+  test_coordination_product
+  test_tool_result
+  test_tool_hooks
+  test_governance_pipeline
+  test_keeper_routine_allowlist
+  test_keeper_agent_isolation
+  test_sse_external_sub
+  test_ws_transport
+  test_webrtc_signaling
+  test_transport_integration
+  test_tool_metrics
+  test_tool_metrics_persist
+  test_model_inference_metrics
+  test_tool_unified
+  test_keeper_tool_call_log
+  test_build_identity
+  test_workflow_guide
+  test_agent_economy
+  test_lifecycle
+  test_auto_recall_activity_coverage
+  test_grpc_coordination
+  test_grpc_client
+  test_http_protocol_detect
+  test_keeper_safety_gates
+  test_keeper_guards
+  test_eval_gate_evasion
+  test_prompt_registry_defaults
+  test_keeper_recurring
+  test_cdal_types
+  test_cdal_loader
+  test_cdal_judge
+  test_cdal_verifiable_markers
+  test_cdal_eval_v1
+  test_cdal_friction_projection
+  test_cdal_verdict_gate
+  test_verification_fsm
+  test_task_sandbox
+  test_governance_yojson_roundtrip
+  test_eval_calibration
+  test_goal_janitor
+  test_goal_tools
+  test_goal_upsert_fsm_bypass_10247
+  test_goal_store
+  test_goal_verification
+  test_string_util
+  test_board_core_payload
+  test_voice_config)
  (libraries masc_test_deps)
  (deps ../bin/main_eio.exe))
 
@@ -1009,6 +1131,7 @@
  (libraries masc_test_deps))
 
 ; Tool diversity: Shannon entropy + QCheck PBT
+
 (test
  (name test_tool_diversity)
  (modules test_tool_diversity)
@@ -1024,12 +1147,15 @@
 ; "provider unavailable" error path, so the file-level (ZAI_API_KEY "")
 ; default does NOT need to be overridden here — a known provider with
 ; an unset API key is a soft pass, only unknown providers hard-fail.
+
 (test
  (name test_cascade_config_validity)
  (modules test_cascade_config_validity)
  (deps %{workspace_root}/config/cascade.json)
  (action
-  (setenv MASC_CASCADE_JSON_PATH %{workspace_root}/config/cascade.json
+  (setenv
+   MASC_CASCADE_JSON_PATH
+   %{workspace_root}/config/cascade.json
    (run %{test})))
  (libraries masc_test_deps))
 
@@ -1049,6 +1175,7 @@
  (libraries masc_test_deps))
 
 ; Issue #8159: gemini: prefix must resolve to Gemini kind, not OpenAI_compat.
+
 (test
  (name test_provider_kind_resolution)
  (modules test_provider_kind_resolution)
@@ -1062,6 +1189,7 @@
 ; Ratchet for gh_min_timeout_sec (#8688). 41 gh_command_timed_out
 ; rejections on 2026-04-17/18 at timeout_sec=5. Floor must stay
 ; at/above network latency budget.
+
 (test
  (name test_keeper_gh_timeout_floor)
  (modules test_keeper_gh_timeout_floor)
@@ -1070,6 +1198,7 @@
 ; Regression for Tool_task.completion_rejection_message — every
 ; rejection must embed completion_notes_example so the keeper sees
 ; a concrete density of accepted notes (#8688 root-cause sweep).
+
 (test
  (name test_tool_task_completion_example)
  (modules test_tool_task_completion_example)
@@ -1078,6 +1207,7 @@
 ; Precondition pin: parse_verdict "" must return exactly
 ; Error "empty review output" so the liveness-approve branch in
 ; Anti_rationalization.review keeps matching (#8688).
+
 (test
  (name test_anti_rationalization_empty_liveness)
  (modules test_anti_rationalization_empty_liveness)
@@ -1086,10 +1216,12 @@
 ; Regression for readonly_hint_of_category — every named category
 ; must carry a concrete Good:/Bad: example so small-LLM keepers can
 ; self-correct (#8688 root-cause sweep follow-up).
+
 (test
  (name test_keeper_readonly_hints)
  (modules test_keeper_readonly_hints)
  (libraries masc_test_deps))
+
 (test
  (name test_cascade_health_tracker)
  (modules test_cascade_health_tracker)
@@ -1121,18 +1253,21 @@
  (libraries masc_test_deps))
 
 ; ── Tool_name variant roundtrip + coverage ──────────────
+
 (test
  (name test_tool_name)
  (modules test_tool_name)
  (libraries masc_test_deps))
 
 ; ── Event_kind variant roundtrip (#8455) ────────────────
+
 (test
  (name test_event_kind)
  (modules test_event_kind)
  (libraries masc_test_deps))
 
 ; ── Core Triad: State x Decision x Cascade ──────────────
+
 (test
  (name test_keeper_cascade_routing)
  (modules test_keeper_cascade_routing)
@@ -1149,6 +1284,7 @@
  (libraries masc_test_deps))
 
 ; task-074: pin the two predicates the cascade auto-pause guard depends on.
+
 (test
  (name test_keeper_cascade_auto_pause_task074)
  (modules test_keeper_cascade_auto_pause_task074)
@@ -1157,75 +1293,136 @@
 ; ============================================================
 ; Group 4: Coverage tests (generated by Agent Autonomy)
 ; ============================================================
+
 (tests
- (names test_admission_queue_coverage
-        test_backend_coverage test_tools_coverage test_types_utils_coverage
-        test_agent_card_coverage test_misc_coverage test_relay_coverage
-        test_tempo_coverage test_transport_coverage test_validation_coverage
-        test_dashboard_resilience_coverage
-        test_nickname_coverage test_level2_config_coverage
-        test_config_coverage
-        test_progress_coverage
-        test_mcp_protocol_coverage test_notify_coverage
-        test_mcp_session_coverage test_sse_coverage
-        test_credits_dashboard_coverage test_room_utils_coverage
-        test_orchestrator_coverage test_cancellation_coverage
-        test_web_dashboard_coverage test_auth_coverage
-        test_a2a_tools_coverage test_graphql_api_coverage
-        test_mention_coverage test_resilience_coverage
-        test_types_coverage test_spawn_coverage test_dashboard_coverage
-        test_rate_limit_coverage test_bounded_coverage test_session_coverage
-        test_cache_eio_coverage test_run_eio_coverage
-        test_handover_eio_coverage test_mcp_server_eio_coverage
-        test_http_server_eio_coverage test_telemetry_eio_coverage
-        test_room_git_coverage test_prometheus_coverage
-        test_auto_responder_coverage test_tool_plan_coverage
-        test_tool_worktree_coverage
-        test_tool_agent_coverage
-        test_tool_task_coverage test_tool_coord_coverage
-        test_tool_control_coverage test_tool_misc_coverage
-        test_ag_ui_coverage
-        test_tool_suspend_coverage test_tool_code_coverage
-        test_tool_code_write_coverage
-        test_tool_code_read_containment
-        test_tool_library_coverage test_tool_shard_coverage
-        test_context_compact_oas_coverage test_keeper_masc_bridge
-        test_anti_rationalization_coverage test_field_validation
-        test_circuit_breaker)
- (modules test_admission_queue_coverage
-        test_backend_coverage test_tools_coverage test_types_utils_coverage
-        test_agent_card_coverage test_misc_coverage test_relay_coverage
-        test_tempo_coverage test_transport_coverage test_validation_coverage
-        test_dashboard_resilience_coverage
-        test_nickname_coverage test_level2_config_coverage
-        test_config_coverage
-        test_progress_coverage
-        test_mcp_protocol_coverage test_notify_coverage
-        test_mcp_session_coverage test_sse_coverage
-        test_credits_dashboard_coverage test_room_utils_coverage
-        test_orchestrator_coverage test_cancellation_coverage
-        test_web_dashboard_coverage test_auth_coverage
-        test_a2a_tools_coverage test_graphql_api_coverage
-        test_mention_coverage test_resilience_coverage
-        test_types_coverage test_spawn_coverage test_dashboard_coverage
-        test_rate_limit_coverage test_bounded_coverage test_session_coverage
-        test_cache_eio_coverage test_run_eio_coverage
-        test_handover_eio_coverage test_mcp_server_eio_coverage
-        test_http_server_eio_coverage test_telemetry_eio_coverage
-        test_room_git_coverage test_prometheus_coverage
-        test_auto_responder_coverage test_tool_plan_coverage
-        test_tool_worktree_coverage
-        test_tool_agent_coverage
-        test_tool_task_coverage test_tool_coord_coverage
-        test_tool_control_coverage test_tool_misc_coverage
-        test_ag_ui_coverage
-        test_tool_suspend_coverage test_tool_code_coverage
-        test_tool_code_write_coverage
-        test_tool_code_read_containment
-        test_tool_library_coverage test_tool_shard_coverage
-        test_context_compact_oas_coverage test_keeper_masc_bridge
-        test_anti_rationalization_coverage test_field_validation
-        test_circuit_breaker)
+ (names
+  test_admission_queue_coverage
+  test_backend_coverage
+  test_tools_coverage
+  test_types_utils_coverage
+  test_agent_card_coverage
+  test_misc_coverage
+  test_relay_coverage
+  test_tempo_coverage
+  test_transport_coverage
+  test_validation_coverage
+  test_dashboard_resilience_coverage
+  test_nickname_coverage
+  test_level2_config_coverage
+  test_config_coverage
+  test_progress_coverage
+  test_mcp_protocol_coverage
+  test_notify_coverage
+  test_mcp_session_coverage
+  test_sse_coverage
+  test_credits_dashboard_coverage
+  test_room_utils_coverage
+  test_orchestrator_coverage
+  test_cancellation_coverage
+  test_web_dashboard_coverage
+  test_auth_coverage
+  test_a2a_tools_coverage
+  test_graphql_api_coverage
+  test_mention_coverage
+  test_resilience_coverage
+  test_types_coverage
+  test_spawn_coverage
+  test_dashboard_coverage
+  test_rate_limit_coverage
+  test_bounded_coverage
+  test_session_coverage
+  test_cache_eio_coverage
+  test_run_eio_coverage
+  test_handover_eio_coverage
+  test_mcp_server_eio_coverage
+  test_http_server_eio_coverage
+  test_telemetry_eio_coverage
+  test_room_git_coverage
+  test_prometheus_coverage
+  test_auto_responder_coverage
+  test_tool_plan_coverage
+  test_tool_worktree_coverage
+  test_tool_agent_coverage
+  test_tool_task_coverage
+  test_tool_coord_coverage
+  test_tool_control_coverage
+  test_tool_misc_coverage
+  test_ag_ui_coverage
+  test_tool_suspend_coverage
+  test_tool_code_coverage
+  test_tool_code_write_coverage
+  test_tool_code_read_containment
+  test_tool_library_coverage
+  test_tool_shard_coverage
+  test_context_compact_oas_coverage
+  test_keeper_masc_bridge
+  test_anti_rationalization_coverage
+  test_field_validation
+  test_circuit_breaker)
+ (modules
+  test_admission_queue_coverage
+  test_backend_coverage
+  test_tools_coverage
+  test_types_utils_coverage
+  test_agent_card_coverage
+  test_misc_coverage
+  test_relay_coverage
+  test_tempo_coverage
+  test_transport_coverage
+  test_validation_coverage
+  test_dashboard_resilience_coverage
+  test_nickname_coverage
+  test_level2_config_coverage
+  test_config_coverage
+  test_progress_coverage
+  test_mcp_protocol_coverage
+  test_notify_coverage
+  test_mcp_session_coverage
+  test_sse_coverage
+  test_credits_dashboard_coverage
+  test_room_utils_coverage
+  test_orchestrator_coverage
+  test_cancellation_coverage
+  test_web_dashboard_coverage
+  test_auth_coverage
+  test_a2a_tools_coverage
+  test_graphql_api_coverage
+  test_mention_coverage
+  test_resilience_coverage
+  test_types_coverage
+  test_spawn_coverage
+  test_dashboard_coverage
+  test_rate_limit_coverage
+  test_bounded_coverage
+  test_session_coverage
+  test_cache_eio_coverage
+  test_run_eio_coverage
+  test_handover_eio_coverage
+  test_mcp_server_eio_coverage
+  test_http_server_eio_coverage
+  test_telemetry_eio_coverage
+  test_room_git_coverage
+  test_prometheus_coverage
+  test_auto_responder_coverage
+  test_tool_plan_coverage
+  test_tool_worktree_coverage
+  test_tool_agent_coverage
+  test_tool_task_coverage
+  test_tool_coord_coverage
+  test_tool_control_coverage
+  test_tool_misc_coverage
+  test_ag_ui_coverage
+  test_tool_suspend_coverage
+  test_tool_code_coverage
+  test_tool_code_write_coverage
+  test_tool_code_read_containment
+  test_tool_library_coverage
+  test_tool_shard_coverage
+  test_context_compact_oas_coverage
+  test_keeper_masc_bridge
+  test_anti_rationalization_coverage
+  test_field_validation
+  test_circuit_breaker)
  (libraries masc_test_deps))
 
 ; ============================================================
@@ -1238,6 +1435,7 @@
 
 ; RFC-MASC-001 Phase 1: structured working_context in Checkpoint.
 ; Round-trip, envelope, patch_checkpoint, dual-source read.
+
 (test
  (name test_keeper_state_snapshot_json)
  (modules test_keeper_state_snapshot_json)
@@ -1246,6 +1444,7 @@
 ; RFC-MASC-001 Phase 1 prose echo guard: prompt-time summary filter
 ; strips backward-looking fields (Done, Decisions, Progress) while
 ; preserving forward-looking ones (Goal, Next plan, Next, etc.).
+
 (test
  (name test_continuity_forward_filter)
  (modules test_continuity_forward_filter)
@@ -1254,6 +1453,7 @@
 ; Gen4 compaction-layer [STATE] guard: keeper_summarizer scrubs
 ; [STATE]...[/STATE] from Text blocks before OAS default extractive
 ; summarization. Registered via Builder.with_summarizer (OAS 0.152.0).
+
 (test
  (name test_keeper_summarizer)
  (modules test_keeper_summarizer)
@@ -1262,6 +1462,7 @@
 ; Gen7 persistence-layer guard: cap_snapshot bounds string/list
 ; growth before continuity_summary is rendered + persisted. Stops
 ; monotonic growth when the LLM produces ever-longer [STATE] blocks.
+
 (test
  (name test_snapshot_size_cap)
  (modules test_snapshot_size_cap)
@@ -1272,6 +1473,7 @@
 ; current_intention, blocker, need) carried across turns via
 ; previous_state. Stays silent does not clear state, so without
 ; this cap the narrative accumulates monotonically.
+
 (test
  (name test_social_state_cap)
  (modules test_social_state_cap)
@@ -1280,6 +1482,7 @@
 ; Gen12 load-path guard: checkpoint JSON deserialization also
 ; truncates narrative fields so pre-Gen8 snapshots do not
 ; reintroduce unbounded strings into meta.runtime.
+
 (test
  (name test_social_state_cap_on_load)
  (modules test_social_state_cap_on_load)
@@ -1289,6 +1492,7 @@
 ; narrative fields after Bdi returns; this test locks the cap
 ; invariant at the emission point so both speech models honour the
 ; same budget.
+
 (test
  (name test_magentic_ledger_cap)
  (modules test_magentic_ledger_cap)
@@ -1297,36 +1501,44 @@
 ; Keeper_checkpoint_store.is_not_found_detail classifier
 ; regression (observed 334-retry loop on trace-1775487505102-6a347
 ; on 2026-04-12 — Eio.Io rendered form not recognized as Not_found)
+
 (test
  (name test_keeper_checkpoint_classify)
  (modules test_keeper_checkpoint_classify)
  (libraries masc_test_deps))
 
 ; Keeper autonomous semaphore fairness cooldown (#6810)
+
 (test
  (name test_keeper_semaphore_fairness)
  (modules test_keeper_semaphore_fairness)
  (libraries masc_test_deps))
 
 ; Dashboard_governance_metrics — tool rejection ring + approval queue
+
 (test
  (name test_dashboard_governance_metrics)
  (modules test_dashboard_governance_metrics)
  (libraries masc_test_deps))
+
 ; Operator Control (7 modules)
+
 (test
  (name test_operator_control)
- (modules test_operator_control
-          test_operator_control_support
-          test_operator_control_snapshot
-          test_operator_control_actions
-          test_operator_control_judgment
-          test_operator_control_swarm
-          test_operator_control_keeper)
+ (modules
+  test_operator_control
+  test_operator_control_support
+  test_operator_control_snapshot
+  test_operator_control_actions
+  test_operator_control_judgment
+  test_operator_control_swarm
+  test_operator_control_keeper)
  (libraries masc_test_deps)
- (enabled_if (= %{env:MASC_INCLUDE_OPERATOR_CONTROL=true} "true")))
+ (enabled_if
+  (= %{env:MASC_INCLUDE_OPERATOR_CONTROL=true} "true")))
 
 ; Normalized actor (operator_pending_confirm)
+
 (test
  (name test_normalized_actor)
  (modules test_normalized_actor)
@@ -1335,6 +1547,7 @@
 ; test_failover_leader removed (CP purge)
 
 ; MCP Tool Matrix (2 modules + generated names + runner dep)
+
 (test
  (name test_mcp_tool_matrix)
  (modules test_mcp_tool_matrix)
@@ -1342,6 +1555,7 @@
  (libraries masc_test_deps keeper_tool_matrix_cases_lib))
 
 ; Keeper Tool Matrix — shared case modules as a library
+
 (library
  (name keeper_tool_matrix_cases_lib)
  (wrapped false)
@@ -1349,6 +1563,7 @@
  (libraries masc_test_deps))
 
 ; Keeper Tool Matrix (test driver + runner dep)
+
 (test
  (name test_keeper_tool_matrix)
  (modules test_keeper_tool_matrix)
@@ -1360,10 +1575,12 @@
 ; ============================================================
 
 ; OAS Worker (suppresses warning 32)
+
 (test
  (name test_oas_worker)
  (modules test_oas_worker)
- (ocamlopt_flags (:standard -w -32))
+ (ocamlopt_flags
+  (:standard -w -32))
  (libraries masc_test_deps))
 
 ; ============================================================
@@ -1377,28 +1594,32 @@
  (modules test_mcp_post_sse_e2e)
  (libraries alcotest yojson unix)
  (deps ../bin/main_eio.exe)
- (enabled_if (= %{env:MASC_E2E_TESTS=false} "true")))
+ (enabled_if
+  (= %{env:MASC_E2E_TESTS=false} "true")))
 
 (test
  (name test_sse_storm_e2e)
  (modules test_sse_storm_e2e)
  (libraries alcotest yojson unix)
  (deps ../bin/main_eio.exe)
- (enabled_if (= %{env:MASC_E2E_TESTS=false} "true")))
+ (enabled_if
+  (= %{env:MASC_E2E_TESTS=false} "true")))
 
 (test
  (name test_board_api_e2e)
  (modules test_board_api_e2e)
  (libraries alcotest unix)
  (deps ../bin/main_eio.exe)
- (enabled_if (= %{env:MASC_E2E_TESTS=false} "true")))
+ (enabled_if
+  (= %{env:MASC_E2E_TESTS=false} "true")))
 
 (test
  (name test_openapi_api_e2e)
  (modules test_openapi_api_e2e)
  (libraries alcotest yojson unix)
  (deps ../bin/main_eio.exe)
- (enabled_if (= %{env:MASC_E2E_TESTS=false} "true")))
+ (enabled_if
+  (= %{env:MASC_E2E_TESTS=false} "true")))
 
 (test
  (name test_operator_mcp_e2e)
@@ -1407,14 +1628,16 @@
  (deps
   ../bin/main_eio.exe
   (source_tree ../config))
- (enabled_if (= %{env:MASC_E2E_TESTS=false} "true")))
+ (enabled_if
+  (= %{env:MASC_E2E_TESTS=false} "true")))
 
 (test
  (name test_dashboard_keeper_routes)
  (modules test_dashboard_keeper_routes)
  (libraries masc_test_deps)
  (deps ../bin/main_eio.exe)
- (enabled_if (= %{env:MASC_E2E_TESTS=false} "true")))
+ (enabled_if
+  (= %{env:MASC_E2E_TESTS=false} "true")))
 
 ; ============================================================
 ; Special: Minimal dependency tests (CI scripts, governance)
@@ -1500,7 +1723,6 @@
  (modules test_tool_call_replay_harness)
  (libraries masc_mcp fs_compat alcotest yojson unix))
 
-
 (test
  (name test_dated_jsonl)
  (modules test_dated_jsonl)
@@ -1524,19 +1746,13 @@
 (test
  (name test_keeper_path_roots_leak_10349)
  (modules test_keeper_path_roots_leak_10349)
- (libraries
-  masc_mcp
-  fs_compat
-  astring
-  alcotest
-  eio
-  eio_main
-  unix))
+ (libraries masc_mcp fs_compat astring alcotest eio eio_main unix))
 
 (test
  (name test_keeper_memory_bank_consensus_re_10399)
  (modules test_keeper_memory_bank_consensus_re_10399)
  (libraries masc_mcp alcotest eio eio_main))
+
 ; ============================================================
 ; Special: Heartbeat/keeper minimal deps
 ; ============================================================
@@ -1550,8 +1766,12 @@
  (name test_phase2_self_preservation)
  (modules test_phase2_self_preservation)
  (action
-  (setenv MASC_BASE_PATH /tmp/test-phase2
-   (setenv MASC_BASE_PATH_INPUT /tmp/test-phase2
+  (setenv
+   MASC_BASE_PATH
+   /tmp/test-phase2
+   (setenv
+    MASC_BASE_PATH_INPUT
+    /tmp/test-phase2
     (run %{test}))))
  (libraries masc_mcp masc_mcp.config alcotest eio eio_main unix fs_compat))
 
@@ -1559,8 +1779,12 @@
  (name test_heartbeat_integration)
  (modules test_heartbeat_integration)
  (action
-  (setenv MASC_BASE_PATH /tmp/test-heartbeat-integ
-   (setenv MASC_BASE_PATH_INPUT /tmp/test-heartbeat-integ
+  (setenv
+   MASC_BASE_PATH
+   /tmp/test-heartbeat-integ
+   (setenv
+    MASC_BASE_PATH_INPUT
+    /tmp/test-heartbeat-integ
     (run %{test}))))
  (libraries masc_mcp masc_mcp.config fs_compat alcotest eio eio_main unix))
 
@@ -1603,7 +1827,9 @@
  (name test_keeper_autoboot_supervisor_start_10125)
  (modules test_keeper_autoboot_supervisor_start_10125)
  (action
-  (setenv MASC_BASE_PATH /tmp/test-keeper-autoboot-sup-10125
+  (setenv
+   MASC_BASE_PATH
+   /tmp/test-keeper-autoboot-sup-10125
    (run %{test})))
  (libraries masc_mcp alcotest unix))
 
@@ -1616,7 +1842,9 @@
  (name test_keeper_long_turn_9943)
  (modules test_keeper_long_turn_9943)
  (action
-  (setenv MASC_BASE_PATH /tmp/test-keeper-long-turn-9943
+  (setenv
+   MASC_BASE_PATH
+   /tmp/test-keeper-long-turn-9943
    (run %{test})))
  (libraries masc_mcp alcotest unix))
 
@@ -1624,7 +1852,9 @@
  (name test_keeper_supervisor_observability_10125)
  (modules test_keeper_supervisor_observability_10125)
  (action
-  (setenv MASC_BASE_PATH /tmp/test-keeper-supervisor-obs-10125
+  (setenv
+   MASC_BASE_PATH
+   /tmp/test-keeper-supervisor-obs-10125
    (run %{test})))
  (libraries masc_mcp alcotest unix))
 
@@ -1632,7 +1862,6 @@
  (name test_auth_bearer_mismatch_9786)
  (modules test_auth_bearer_mismatch_9786)
  (libraries masc_mcp masc_types alcotest unix))
-
 
 ; ============================================================
 ; Executables (benchmarks, distributed tests, tools)
@@ -1691,24 +1920,28 @@
  (libraries masc_test_deps keeper_tool_matrix_cases_lib))
 
 ; Context Isolation (multi-keeper)
+
 (test
  (name test_keeper_context_isolation)
  (modules test_keeper_context_isolation)
  (libraries masc_test_deps))
 
 ; Transport_bridge.seal guard
+
 (test
  (name test_transport_bridge_seal)
  (modules test_transport_bridge_seal)
  (libraries masc_test_deps))
 
 ; OpenTelemetry trace context (W3C traceparent)
+
 (test
  (name test_otel_trace_context)
  (modules test_otel_trace_context)
  (libraries masc_test_deps))
 
 ; OpenTelemetry GenAI semantic convention helpers
+
 (test
  (name test_otel_genai)
  (modules test_otel_genai)
@@ -1720,24 +1953,28 @@
  (libraries masc_test_deps))
 
 ; #9571 SSOT enforcement — no inline ".masc" literal outside Common.masc_dirname
+
 (test
  (name test_masc_dirname_ssot)
  (modules test_masc_dirname_ssot)
  (libraries masc_test_deps unix str))
 
 ; Timeout policy SSOT (#9639, #9662)
+
 (test
  (name test_timeout_policy)
  (modules test_timeout_policy)
  (libraries masc_test_deps))
 
 ; write_meta CAS field-merge (#9769)
+
 (test
  (name test_keeper_meta_merge)
  (modules test_keeper_meta_merge)
  (libraries masc_test_deps))
 
 ; Instrumentation-theatre guard (#7718)
+
 (test
  (name test_heuristic_metrics_diagnostics)
  (modules test_heuristic_metrics_diagnostics)
@@ -1749,12 +1986,14 @@
  (libraries masc_test_deps keeper_tool_matrix_cases_lib))
 
 ; Per-caller subprocess exec timeout SSOT (#10426)
+
 (test
  (name test_env_config_exec_timeout_10426)
  (modules test_env_config_exec_timeout_10426)
  (libraries masc_test_deps))
 
 ; Sandbox configuration SSOT (P2a follow-up to #10426)
+
 (test
  (name test_env_config_sandbox)
  (modules test_env_config_sandbox)

@@ -24,23 +24,24 @@ let test_kimi_cli_exit_1_cascades () =
   in
   let err = Http_client.AcceptRejected { reason } in
   Alcotest.(check bool)
-    "kimi_cli exit 1 must cascade — permanent error is Moonshot-specific, \
-     next cascade hop (claude/gpt/ollama) unaffected"
+    "kimi_cli exit 1 must cascade — permanent error is Moonshot-specific, next cascade \
+     hop (claude/gpt/ollama) unaffected"
     true
     (Oas_compat.Http_client.should_cascade err)
+;;
 
 let test_gemini_cli_startup_crash_cascades () =
   let reason =
-    "gemini_cli startup crash detected (unsettled top-level await / \
-     yoga_wasm). Known bad CLI runtime; rejecting without retry so the \
-     cascade can move on."
+    "gemini_cli startup crash detected (unsettled top-level await / yoga_wasm). Known \
+     bad CLI runtime; rejecting without retry so the cascade can move on."
   in
   let err = Http_client.AcceptRejected { reason } in
   Alcotest.(check bool)
-    "gemini_cli startup crash must cascade — OAS source labels intent \
-     explicitly ('so the cascade can move on')"
+    "gemini_cli startup crash must cascade — OAS source labels intent explicitly ('so \
+     the cascade can move on')"
     true
     (Oas_compat.Http_client.should_cascade err)
+;;
 
 let test_does_not_support_still_cascades () =
   (* Regression pin for #9850: the provider-capability-mismatch marker
@@ -48,16 +49,16 @@ let test_does_not_support_still_cascades () =
      cascading. *)
   let err =
     Http_client.AcceptRejected
-      {
-        reason =
-          "codex_cli does not support runtime_mcp_auth headers for \
-           masc_plan_set_task, masc_claim_next, masc_transition";
+      { reason =
+          "codex_cli does not support runtime_mcp_auth headers for masc_plan_set_task, \
+           masc_claim_next, masc_transition"
       }
   in
   Alcotest.(check bool)
     "'does not support' cascades (pre-existing behaviour, #9850)"
     true
     (Oas_compat.Http_client.should_cascade err)
+;;
 
 let test_unknown_reason_does_not_cascade () =
   (* The whitelist is additive — reasons that do not match any marker
@@ -71,6 +72,7 @@ let test_unknown_reason_does_not_cascade () =
     "AcceptRejected with no marker does not cascade"
     false
     (Oas_compat.Http_client.should_cascade err)
+;;
 
 let test_http_429_cascades () =
   (* Smoke test: HTTP-level cascadable codes are untouched by this fix. *)
@@ -79,6 +81,7 @@ let test_http_429_cascades () =
     "HTTP 429 cascades (baseline)"
     true
     (Oas_compat.Http_client.should_cascade err)
+;;
 
 (* --- ProviderTerminal: pin classify, should_cascade, and the new
        error_message helper. The variant arrived in agent_sdk without
@@ -91,8 +94,7 @@ let test_http_429_cascades () =
 let test_provider_terminal_max_turns () =
   let err =
     Http_client.ProviderTerminal
-      { kind = Max_turns { turns = 10; limit = 10 };
-        message = "agent reached max_turns" }
+      { kind = Max_turns { turns = 10; limit = 10 }; message = "agent reached max_turns" }
   in
   Alcotest.(check bool)
     "ProviderTerminal Max_turns must NOT cascade — agent-level terminal"
@@ -108,12 +110,14 @@ let test_provider_terminal_max_turns () =
     (String.length rendered > 0
      && Astring.String.is_infix ~affix:"max turns exceeded" rendered
      && Astring.String.is_infix ~affix:"10/10" rendered)
+;;
 
 let test_provider_terminal_other () =
   let err =
     Http_client.ProviderTerminal
-      { kind = Other "structured_terminal_subtype";
-        message = "provider signalled terminal condition" }
+      { kind = Other "structured_terminal_subtype"
+      ; message = "provider signalled terminal condition"
+      }
   in
   Alcotest.(check bool)
     "ProviderTerminal Other must NOT cascade"
@@ -128,56 +132,72 @@ let test_provider_terminal_other () =
     true
     (Astring.String.is_infix ~affix:"structured_terminal_subtype" rendered
      && Astring.String.is_infix ~affix:"provider signalled" rendered)
+;;
 
 let test_error_message_baseline () =
   (* Smoke check that the new helper preserves existing semantics for
      the variants that already had inline matches at the call sites. *)
-  let net = Http_client.NetworkError
-              { message = "boom"; kind = Llm_provider.Http_client.Unknown } in
-  Alcotest.(check string) "NetworkError -> message"
-    "boom" (Oas_compat.Http_client.error_message net);
+  let net =
+    Http_client.NetworkError { message = "boom"; kind = Llm_provider.Http_client.Unknown }
+  in
+  Alcotest.(check string)
+    "NetworkError -> message"
+    "boom"
+    (Oas_compat.Http_client.error_message net);
   let cli = Http_client.CliTransportRequired { kind = "claude" } in
-  Alcotest.(check string) "CliTransportRequired -> humanised"
+  Alcotest.(check string)
+    "CliTransportRequired -> humanised"
     "claude provider requires a CLI transport"
     (Oas_compat.Http_client.error_message cli);
   let acc = Http_client.AcceptRejected { reason = "x" } in
-  Alcotest.(check string) "AcceptRejected -> reason"
-    "x" (Oas_compat.Http_client.error_message acc)
+  Alcotest.(check string)
+    "AcceptRejected -> reason"
+    "x"
+    (Oas_compat.Http_client.error_message acc)
+;;
 
 let () =
-  Alcotest.run "oas_compat_cascade_fallback"
-    [
-      ( "AcceptRejected — per-provider failure cascades (#9932)",
-        [
-          Alcotest.test_case "kimi_cli exit 1 cascades"
-            `Quick test_kimi_cli_exit_1_cascades;
-          Alcotest.test_case "gemini_cli startup crash cascades"
-            `Quick test_gemini_cli_startup_crash_cascades;
-        ] );
-      ( "AcceptRejected — capability mismatch still cascades (#9850)",
-        [
-          Alcotest.test_case "'does not support' cascades"
-            `Quick test_does_not_support_still_cascades;
-        ] );
-      ( "AcceptRejected — unrelated reasons do not cascade",
-        [
-          Alcotest.test_case "unknown reason stays non-cascadable"
-            `Quick test_unknown_reason_does_not_cascade;
-        ] );
-      ( "Baseline: HTTP errors unaffected",
-        [
-          Alcotest.test_case "HTTP 429 cascades" `Quick test_http_429_cascades;
-        ] );
-      ( "ProviderTerminal — agent-level terminal does not cascade",
-        [
-          Alcotest.test_case "Max_turns classify + cascade + message"
-            `Quick test_provider_terminal_max_turns;
-          Alcotest.test_case "Other classify + cascade + message"
-            `Quick test_provider_terminal_other;
-        ] );
-      ( "error_message helper baseline",
-        [
-          Alcotest.test_case "preserves existing variants"
-            `Quick test_error_message_baseline;
-        ] );
+  Alcotest.run
+    "oas_compat_cascade_fallback"
+    [ ( "AcceptRejected — per-provider failure cascades (#9932)"
+      , [ Alcotest.test_case
+            "kimi_cli exit 1 cascades"
+            `Quick
+            test_kimi_cli_exit_1_cascades
+        ; Alcotest.test_case
+            "gemini_cli startup crash cascades"
+            `Quick
+            test_gemini_cli_startup_crash_cascades
+        ] )
+    ; ( "AcceptRejected — capability mismatch still cascades (#9850)"
+      , [ Alcotest.test_case
+            "'does not support' cascades"
+            `Quick
+            test_does_not_support_still_cascades
+        ] )
+    ; ( "AcceptRejected — unrelated reasons do not cascade"
+      , [ Alcotest.test_case
+            "unknown reason stays non-cascadable"
+            `Quick
+            test_unknown_reason_does_not_cascade
+        ] )
+    ; ( "Baseline: HTTP errors unaffected"
+      , [ Alcotest.test_case "HTTP 429 cascades" `Quick test_http_429_cascades ] )
+    ; ( "ProviderTerminal — agent-level terminal does not cascade"
+      , [ Alcotest.test_case
+            "Max_turns classify + cascade + message"
+            `Quick
+            test_provider_terminal_max_turns
+        ; Alcotest.test_case
+            "Other classify + cascade + message"
+            `Quick
+            test_provider_terminal_other
+        ] )
+    ; ( "error_message helper baseline"
+      , [ Alcotest.test_case
+            "preserves existing variants"
+            `Quick
+            test_error_message_baseline
+        ] )
     ]
+;;

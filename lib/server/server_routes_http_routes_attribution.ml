@@ -8,7 +8,6 @@
       current ring window, for the dashboard graph nodes. *)
 
 open Server_auth
-
 module Http = Http_server_eio
 module DA = Dashboard_attribution
 module A = Attribution
@@ -17,41 +16,38 @@ let trimmed_query_param req key =
   match Server_utils.query_param req key |> Option.map String.trim with
   | Some v when v <> "" -> Some v
   | _ -> None
+;;
 
 let event_json ((attr, recorded_at) : A.t * float) : Yojson.Safe.t =
-  `Assoc
-    [
-      ("attribution", A.to_yojson attr);
-      ("recorded_at", `Float recorded_at);
-    ]
+  `Assoc [ "attribution", A.to_yojson attr; "recorded_at", `Float recorded_at ]
+;;
 
 let recent_json ?gate ?limit () : Yojson.Safe.t =
   let events = DA.recent ?gate ?limit () in
   `Assoc
-    [
-      ("events", `List (List.map event_json events));
-      ("count", `Int (List.length events));
-    ]
+    [ "events", `List (List.map event_json events); "count", `Int (List.length events) ]
+;;
 
 let gate_summary_json (s : DA.gate_summary) : Yojson.Safe.t =
   `Assoc
-    [
-      ("gate", `String s.gate);
-      ("passed", `Int s.passed);
-      ("policy_failed", `Int s.policy_failed);
-      ("transition_blocked", `Int s.transition_blocked);
-      ("partial_pass", `Int s.partial_pass);
-      ("total", `Int s.total);
+    [ "gate", `String s.gate
+    ; "passed", `Int s.passed
+    ; "policy_failed", `Int s.policy_failed
+    ; "transition_blocked", `Int s.transition_blocked
+    ; "partial_pass", `Int s.partial_pass
+    ; "total", `Int s.total
     ]
+;;
 
 let summary_json () : Yojson.Safe.t =
-  `Assoc
-    [ ("gates", `List (List.map gate_summary_json (DA.summary ()))) ]
+  `Assoc [ "gates", `List (List.map gate_summary_json (DA.summary ())) ]
+;;
 
 let add_routes router =
   router
   |> Http.Router.get "/api/v1/attribution/recent" (fun request reqd ->
-       with_public_read (fun _state req reqd ->
+    with_public_read
+      (fun _state req reqd ->
          let gate = trimmed_query_param req "gate" in
          let limit =
            match trimmed_query_param req "limit" with
@@ -59,12 +55,14 @@ let add_routes router =
            | None -> None
          in
          let json = recent_json ?gate ?limit () in
-         Http.Response.json ~compress:true ~request:req
-           (Yojson.Safe.to_string json) reqd
-       ) request reqd)
+         Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd)
+      request
+      reqd)
   |> Http.Router.get "/api/v1/attribution/summary" (fun request reqd ->
-       with_public_read (fun _state req reqd ->
+    with_public_read
+      (fun _state req reqd ->
          let json = summary_json () in
-         Http.Response.json ~compress:true ~request:req
-           (Yojson.Safe.to_string json) reqd
-       ) request reqd)
+         Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd)
+      request
+      reqd)
+;;

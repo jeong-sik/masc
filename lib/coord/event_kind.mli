@@ -28,16 +28,16 @@ module Task : sig
     | Rejected
     | Linked
 
-  val to_string : t -> string
   (** Canonical dotted-form wire name ([task.claimed] etc.). *)
+  val to_string : t -> string
 
-  val of_string : string -> t option
   (** Inverse of {!to_string}. Returns [None] for unknown inputs so
       consumers can opt between fail-closed and fail-open. *)
+  val of_string : string -> t option
 
-  val all : t list
   (** Exhaustive enumeration; useful for tests that want to assert
       every variant round-trips through JSON. *)
+  val all : t list
 end
 
 module Message : sig
@@ -45,8 +45,8 @@ module Message : sig
     | Broadcast
     | Mentioned
 
-  val to_string : t -> string
   (** Canonical dotted-form wire name (e.g. [message.broadcast]). *)
+  val to_string : t -> string
 
   val of_string : string -> t option
   val all : t list
@@ -59,8 +59,8 @@ module Board : sig
     | Voted
     | Deleted
 
-  val to_string : t -> string
   (** Canonical dotted-form wire name (e.g. [board.posted]). *)
+  val to_string : t -> string
 
   val of_string : string -> t option
   val all : t list

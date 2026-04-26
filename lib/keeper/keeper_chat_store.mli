@@ -10,11 +10,11 @@
 
 (** {1 Types} *)
 
-type chat_message = {
-  role : string;
-  content : string;
-  ts : float option;
-}
+type chat_message =
+  { role : string
+  ; content : string
+  ; ts : float option
+  }
 
 (** {1 I/O} *)
 
@@ -22,18 +22,17 @@ type chat_message = {
     appends two lines (user then assistant) sharing a single
     timestamp. Failures are logged but never raised except for
     {!Eio.Cancel.Cancelled}. *)
-val append_pair :
-  base_dir:string ->
-  keeper_name:string ->
-  user_content:string ->
-  assistant_content:string ->
-  unit
+val append_pair
+  :  base_dir:string
+  -> keeper_name:string
+  -> user_content:string
+  -> assistant_content:string
+  -> unit
 
 (** [load ~base_dir ~keeper_name] returns the most recent
     [max_history] messages in chronological order. Missing files
     return [[]]. Unparseable lines are skipped. *)
-val load :
-  base_dir:string -> keeper_name:string -> chat_message list
+val load : base_dir:string -> keeper_name:string -> chat_message list
 
 (** {1 Serialisation} *)
 

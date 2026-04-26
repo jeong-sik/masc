@@ -110,20 +110,21 @@ type pre_dispatch_checkpoint_hygiene_result =
   ; save_error : string option
   }
 
-val prepare_resume_checkpoint_for_dispatch :
-     meta:Keeper_types.keeper_meta
+val prepare_resume_checkpoint_for_dispatch
+  :  meta:Keeper_types.keeper_meta
   -> now_ts:float
   -> loaded_checkpoint_present:bool
-  -> save_checkpoint:
-       (Keeper_types.working_context -> (Oas.Checkpoint.t, string) result)
+  -> save_checkpoint:(Keeper_types.working_context -> (Oas.Checkpoint.t, string) result)
   -> Keeper_types.working_context
   -> pre_dispatch_checkpoint_hygiene_result
 
-val should_require_tools_for_initial_turn :
-  max_turns:int -> turn_affordances:string list -> bool
+val should_require_tools_for_initial_turn
+  :  max_turns:int
+  -> turn_affordances:string list
+  -> bool
 
-val preferred_tool_choice_for_required_turn :
-     has_current_task:bool
+val preferred_tool_choice_for_required_turn
+  :  has_current_task:bool
   -> turn_affordances:string list
   -> allowed_tool_names:string list
   -> Oas.Types.tool_choice
@@ -135,8 +136,10 @@ val preferred_tool_choice_for_required_turn :
     so keepers without the relevant action tools (e.g. a [social]
     preset facing unclaimed tasks) aren't forced into unwinnable
     contract violations. *)
-val turn_affordances_require_tool_gate_with_allowed :
-  allowed_tool_names:string list -> string list -> bool
+val turn_affordances_require_tool_gate_with_allowed
+  :  allowed_tool_names:string list
+  -> string list
+  -> bool
 
 (** Canonical model label for MASC status/metrics surfaces.
     Prefers the final cascade attempt label when available, then the
@@ -163,14 +166,14 @@ val surface_resolved_model_id : run_result -> string
 
 (** {1 Telemetry serialisation} *)
 
-val build_prompt_metrics :
-     system_prompt:string
+val build_prompt_metrics
+  :  system_prompt:string
   -> dynamic_context:string
   -> user_message:string
   -> prompt_metrics
 
-val build_ctx_composition_metrics :
-     system_prompt:string
+val build_ctx_composition_metrics
+  :  system_prompt:string
   -> dynamic_context:string
   -> memory_context:string
   -> temporal_context:string
@@ -187,8 +190,8 @@ val ctx_composition_to_json : ctx_composition_metrics -> Yojson.Safe.t
 (** Adaptive thinking budget: raises budget when tool errors, long context,
     or retry conditions are detected. Pure function — safe to call from
     tests without Eio context. *)
-val adaptive_thinking_budget :
-     enabled:bool
+val adaptive_thinking_budget
+  :  enabled:bool
   -> is_retry:bool
   -> last_tool_results:Oas.Types.tool_result list
   -> user_message:string
@@ -225,15 +228,13 @@ val adaptive_thinking_budget :
     @param is_retry When [true], replays current user message without persisting
     @param shared_context Optional shared OAS context for cross-turn state
     @param event_bus Optional MASC event bus *)
-val run_turn :
-     config:Coord.config
+val run_turn
+  :  config:Coord.config
   -> meta:Keeper_types.keeper_meta
   -> base_dir:string
   -> max_context:int
   -> build_turn_prompt:
-       (   base_system_prompt:string
-        -> messages:Oas.Types.message list
-        -> turn_prompt)
+       (base_system_prompt:string -> messages:Oas.Types.message list -> turn_prompt)
   -> user_message:string
   -> cascade_name:string
   -> ?turn_affordances:string list
@@ -255,8 +256,7 @@ val run_turn :
   -> ?degraded_retry_applied:bool
   -> ?degraded_retry_cascade:string
   -> ?fallback_reason:string
-  -> ?cascade_rotation_attempts:
-       Keeper_execution_receipt.cascade_rotation_attempt list
+  -> ?cascade_rotation_attempts:Keeper_execution_receipt.cascade_rotation_attempt list
   -> ?is_retry:bool
   -> ?shared_context:Oas.Context.t
   -> ?event_bus:Oas.Event_bus.t

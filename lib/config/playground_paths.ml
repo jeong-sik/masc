@@ -17,8 +17,7 @@
     literal ["".masc""] lives in a single place
     ([Common.masc_dirname]); this module remains the SSOT for the
     [<.masc>/playground] sub-tree. *)
-let all_playgrounds_prefix : string =
-  Filename.concat Common.masc_dirname "playground"
+let all_playgrounds_prefix : string = Filename.concat Common.masc_dirname "playground"
 
 (** Strip the [keeper-...-agent] canonical wrapper when present,
     returning the inner short name.  E.g.
@@ -40,14 +39,16 @@ let all_playgrounds_prefix : string =
     (12 chars) passes through unchanged because its inner part would
     be empty. *)
 let strip_keeper_agent_wrapper (name : string) : string =
-  let prefix = "keeper-" and suffix = "-agent" in
-  let plen = String.length prefix and slen = String.length suffix in
+  let prefix = "keeper-"
+  and suffix = "-agent" in
+  let plen = String.length prefix
+  and slen = String.length suffix in
   let nlen = String.length name in
-  if nlen > plen + slen
-     && String.starts_with ~prefix name
-     && String.ends_with ~suffix name
+  if
+    nlen > plen + slen && String.starts_with ~prefix name && String.ends_with ~suffix name
   then String.sub name plen (nlen - plen - slen)
   else name
+;;
 
 (** Sanitize a keeper name into a filesystem-safe component.
 
@@ -61,32 +62,45 @@ let strip_keeper_agent_wrapper (name : string) : string =
 let sanitize_keeper_name (name : string) : string =
   let name = strip_keeper_agent_wrapper name in
   let mapped =
-    String.map (fun c ->
-      if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
-         || (c >= '0' && c <= '9') || c = '-' || c = '_' || c = '.'
-      then c else '_') name
+    String.map
+      (fun c ->
+         if
+           (c >= 'A' && c <= 'Z')
+           || (c >= 'a' && c <= 'z')
+           || (c >= '0' && c <= '9')
+           || c = '-'
+           || c = '_'
+           || c = '.'
+         then c
+         else '_')
+      name
   in
   match mapped with
   | "" -> "_"
   | "." -> "_"
   | ".." -> "__"
   | _ -> mapped
+;;
 
 (** Relative path [".masc/playground/<safe_name>/"] (trailing slash). *)
 let bundle_root (name : string) : string =
   Printf.sprintf "%s/%s/" all_playgrounds_prefix (sanitize_keeper_name name)
+;;
 
 (** Relative path [".masc/playground/<safe_name>/mind/"]. *)
 let mind_path (name : string) : string =
   Printf.sprintf "%s/%s/mind/" all_playgrounds_prefix (sanitize_keeper_name name)
+;;
 
 (** Relative path [".masc/playground/<safe_name>/repos/"]. *)
 let repos_path (name : string) : string =
   Printf.sprintf "%s/%s/repos/" all_playgrounds_prefix (sanitize_keeper_name name)
+;;
 
 (** All three bundle subdirs in canonical order. *)
 let bundle_paths (name : string) : string list =
   [ bundle_root name; mind_path name; repos_path name ]
+;;
 
 (** {1 Worktree Naming}
 
@@ -101,6 +115,7 @@ let bundle_paths (name : string) : string list =
     Example: [worktree_dir_name "sangsu" "fix-bug"] -> ["sangsu-fix-bug"]. *)
 let worktree_dir_name (agent_name : string) (task_id : string) : string =
   Printf.sprintf "%s-%s" agent_name task_id
+;;
 
 (** Git branch name for a keeper worktree:
     ["<agent_name>/<task_id>"].
@@ -108,3 +123,4 @@ let worktree_dir_name (agent_name : string) (task_id : string) : string =
     Example: [worktree_branch_name "sangsu" "fix-bug"] -> ["sangsu/fix-bug"]. *)
 let worktree_branch_name (agent_name : string) (task_id : string) : string =
   Printf.sprintf "%s/%s" agent_name task_id
+;;

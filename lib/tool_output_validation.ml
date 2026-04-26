@@ -21,10 +21,12 @@ let max_output_chars = Common.max_tool_output_bytes
 
 let cap (output : string) : string =
   let len = String.length output in
-  if len <= max_output_chars then output
-  else
+  if len <= max_output_chars
+  then output
+  else (
     let kept = String.sub output 0 max_output_chars in
-    Printf.sprintf "%s\n[capped: %d/%d chars]" kept max_output_chars len
+    Printf.sprintf "%s\n[capped: %d/%d chars]" kept max_output_chars len)
+;;
 
 (* ── Post-hook for Tool_dispatch ────────────────────────────── *)
 
@@ -34,17 +36,19 @@ let post_hook (result : Tool_result.t) : Tool_result.t =
     { result with data = `String (cap s) }
   | `List _ | `Assoc _ ->
     let serialized = Yojson.Safe.to_string result.data in
-    if String.length serialized <= max_output_chars then result
-    else
-      { result with data = `String (cap serialized) }
+    if String.length serialized <= max_output_chars
+    then result
+    else { result with data = `String (cap serialized) }
   | _ -> result
+;;
 
 (* ── Installation ───────────────────────────────────────────── *)
 
 let installed = Atomic.make false
 
 let install () =
-  if not (Atomic.get installed) then begin
+  if not (Atomic.get installed)
+  then (
     Tool_dispatch.register_post_hook post_hook;
-    Atomic.set installed true
-  end
+    Atomic.set installed true)
+;;

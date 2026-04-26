@@ -26,20 +26,20 @@ type backend_type =
 
 (** {1 Health} *)
 
-type health_result = {
-  latency_ms : float;
-  is_healthy : bool;
-}
+type health_result =
+  { latency_ms : float
+  ; is_healthy : bool
+  }
 
 (** {1 Config} *)
 
-type config = {
-  backend_type : backend_type;
-  base_path : string;
-  node_id : string;
-  cluster_name : string;
-  pubsub_max_messages : int;
-}
+type config =
+  { backend_type : backend_type
+  ; base_path : string
+  ; node_id : string
+  ; cluster_name : string
+  ; pubsub_max_messages : int
+  }
 
 (** Currently returns a fixed literal (1000). Kept as a function to
     allow future env-var override without API change. *)
@@ -86,6 +86,5 @@ module Pubsub_mem : sig
   val publish : t -> channel:string -> message:string -> int result
 
   (** Append [callback] to the subscriber list for [channel]. *)
-  val subscribe :
-    t -> channel:string -> callback:(string -> unit) -> unit result
+  val subscribe : t -> channel:string -> callback:(string -> unit) -> unit result
 end

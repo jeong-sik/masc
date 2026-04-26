@@ -4,8 +4,6 @@
 
 open Keeper_types
 
-val fork_stale_watchdog :
-  'a context -> keeper_meta -> Keeper_registry.registry_entry -> unit
 (** Fork a stale-turn watchdog fiber for the given keeper.
 
     Two detection modes:
@@ -16,3 +14,8 @@ val fork_stale_watchdog :
     On detection, sets [fiber_stop] and emits a stale broadcast. The
     supervisor's [sweep_and_recover] picks up the stopped fiber and
     restarts with exponential backoff. *)
+val fork_stale_watchdog
+  :  'a context
+  -> keeper_meta
+  -> Keeper_registry.registry_entry
+  -> unit

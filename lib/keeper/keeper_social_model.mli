@@ -43,29 +43,27 @@ type transition_reason = Keeper_social_model_types.transition_reason =
   | Protocol_violation_no_tools_no_social_headers
   | Failure_run_error
 
-type social_state = Keeper_social_model_types.social_state = {
-  social_model : string;
-  belief_summary : string;
-  active_desire : string option;
-  current_intention : string option;
-  blocker : string option;
-  need : string option;
-  speech_act : speech_act;
-  delivery_surface : delivery_surface;
-}
+type social_state = Keeper_social_model_types.social_state =
+  { social_model : string
+  ; belief_summary : string
+  ; active_desire : string option
+  ; current_intention : string option
+  ; blocker : string option
+  ; need : string option
+  ; speech_act : speech_act
+  ; delivery_surface : delivery_surface
+  }
 
-type accountability_claim = {
-  subject : string;
-  task_id : string option;
-  evidence_refs : string list;
-}
+type accountability_claim =
+  { subject : string
+  ; task_id : string option
+  ; evidence_refs : string list
+  }
 
 val speech_act_to_string : speech_act -> string
 val delivery_surface_to_string : delivery_surface -> string
-val delivery_surface_view_of_meta :
-  Keeper_types.keeper_meta -> delivery_surface option
-val delivery_surface_view_source_of_meta :
-  Keeper_types.keeper_meta -> string option
+val delivery_surface_view_of_meta : Keeper_types.keeper_meta -> delivery_surface option
+val delivery_surface_view_source_of_meta : Keeper_types.keeper_meta -> string option
 val model_id_to_string : model_id -> string
 val model_id_of_string : string -> model_id option
 val all_model_ids : model_id list
@@ -75,20 +73,22 @@ val fallback_social_model : string -> string option
 val normalize_social_model : string -> string
 val transition_reason_to_string : transition_reason -> string
 val previous_state_of_meta : Keeper_types.keeper_meta -> social_state option
-val extract_accountability_claim :
-  Keeper_agent_run.run_result -> accountability_claim option
 
-val derive_failure_state :
-  meta:Keeper_types.keeper_meta ->
-  observation:Keeper_world_observation.world_observation ->
-  previous_state:social_state option ->
-  is_auto_recoverable:bool ->
-  reason:string ->
-  social_state * transition_reason
+val extract_accountability_claim
+  :  Keeper_agent_run.run_result
+  -> accountability_claim option
 
-val apply_to_result :
-  meta:Keeper_types.keeper_meta ->
-  observation:Keeper_world_observation.world_observation ->
-  previous_state:social_state option ->
-  Keeper_agent_run.run_result ->
-  Keeper_agent_run.run_result * social_state * transition_reason
+val derive_failure_state
+  :  meta:Keeper_types.keeper_meta
+  -> observation:Keeper_world_observation.world_observation
+  -> previous_state:social_state option
+  -> is_auto_recoverable:bool
+  -> reason:string
+  -> social_state * transition_reason
+
+val apply_to_result
+  :  meta:Keeper_types.keeper_meta
+  -> observation:Keeper_world_observation.world_observation
+  -> previous_state:social_state option
+  -> Keeper_agent_run.run_result
+  -> Keeper_agent_run.run_result * social_state * transition_reason

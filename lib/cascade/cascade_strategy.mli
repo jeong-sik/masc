@@ -20,100 +20,87 @@
 
 (** {1 Signal context — what the strategy can read} *)
 
-type signal_ctx = {
-  health : Cascade_health_tracker.t;
-  (** Health tracker for success_rate, cooldown, effective_weight. *)
-
-  capacity : string -> Cascade_throttle.capacity_info option;
-  (** Per-endpoint capacity probe keyed by [base_url].  Returns [None]
+type signal_ctx =
+  { health : Cascade_health_tracker.t
+    (** Health tracker for success_rate, cooldown, effective_weight. *)
+  ; capacity : string -> Cascade_throttle.capacity_info option
+    (** Per-endpoint capacity probe keyed by [base_url].  Returns [None]
       when the endpoint is not in the throttle table (CLI providers,
       unprobed HTTP providers).  The strategy must treat [None] as
       "unknown → optimistically available" to avoid false starvation. *)
-
-  now : float;
-  (** Current wall clock time (seconds since epoch).  Passed in for
+  ; now : float
+    (** Current wall clock time (seconds since epoch).  Passed in for
       determinism in tests. *)
-
-  rand_int : int -> int;
-  (** Random integer generator in [0, n).  Passed in for determinism
+  ; rand_int : int -> int
+    (** Random integer generator in [0, n).  Passed in for determinism
       in tests. *)
-
-  keeper_name : string;
-  (** Owning keeper.  Used by [Sticky] to key its state.  Set to ["" ]
+  ; keeper_name : string
+    (** Owning keeper.  Used by [Sticky] to key its state.  Set to ["" ]
       when the cascade is invoked outside a keeper context (CLI,
       bootstrap probes); [Sticky] then degrades to a per-cascade-only
       affinity (still useful), and other kinds ignore the field.
 
       @since 0.9.7 *)
-
-  cascade_name : string;
-  (** Cascade identifier (the [<name>] in [<name>_models]).  Used by
+  ; cascade_name : string
+    (** Cascade identifier (the [<name>] in [<name>_models]).  Used by
       [Sticky] and [Round_robin] to scope their state.  Required for
       stateful kinds; tolerated as ["" ] for stateless kinds.
 
       @since 0.9.7 *)
-}
+  }
 
 (** {1 Cycle policy — orthogonal to strategy kind} *)
 
-type cycle_policy = {
-  max_cycles : int;
-  (** Maximum cycle count before returning [Cascade_exhausted].
+type cycle_policy =
+  { max_cycles : int
+    (** Maximum cycle count before returning [Cascade_exhausted].
       [max_cycles = 1] means the current linear failover behaviour
       (no retry after first pass). *)
-
-  backoff_base_ms : int;
-  (** Exponential backoff base in milliseconds.
+  ; backoff_base_ms : int
+    (** Exponential backoff base in milliseconds.
       Actual sleep = [min backoff_cap_ms (backoff_base_ms * 2^(cycle-1))]. *)
+  ; backoff_cap_ms : int (** Upper bound on per-cycle backoff. *)
+  }
 
-  backoff_cap_ms : int;
-  (** Upper bound on per-cycle backoff. *)
-}
-
-val default_cycle_policy : cycle_policy
 (** [{ max_cycles = 1; backoff_base_ms = 500; backoff_cap_ms = 10_000 }].
     Backward-compatible with pre-strategy behaviour (linear failover). *)
+val default_cycle_policy : cycle_policy
 
-val backoff_ms : cycle_policy -> cycle:int -> int
 (** [backoff_ms policy ~cycle] returns the sleep duration for [cycle]
     before the next cascade attempt.  [cycle] is 1-indexed: the first
     retry after cycle 0 uses [backoff_ms ~cycle:1]. *)
+val backoff_ms : cycle_policy -> cycle:int -> int
 
 (** {1 Strategy kind} *)
 
 type kind =
   | Failover
-    (** S1 — input order preserved, always-available.  Equivalent to
+  (** S1 — input order preserved, always-available.  Equivalent to
         the pre-strategy behaviour (linear failover). *)
-
   | Capacity_aware
-    (** S2 — filters candidates whose endpoint capacity reports
+  (** S2 — filters candidates whose endpoint capacity reports
         [process_available = 0].  Unknown capacity is treated as
         available (fail-open). *)
-
   | Weighted_random
-    (** S3 — weighted shuffle using [config_weight * success_rate].
+  (** S3 — weighted shuffle using [config_weight * success_rate].
         Cooled-down providers (effective_weight = 0) are filtered,
         with the order_weighted_entries guarantee that at least one
         provider survives to avoid starvation. *)
-
   | Circuit_breaker_cycling
-    (** S4 — S2 capacity filter AND [is_in_cooldown] exclusion,
+  (** S4 — S2 capacity filter AND [is_in_cooldown] exclusion,
         combined with [max_cycles > 1] and exponential backoff.  The
         circuit-breaker semantics live in Cascade_health_tracker; this
         strategy is the policy that reads them. *)
-
   | Priority_tier
-    (** S5 — providers grouped into ordered tiers via [tiers] in {!t}.
+  (** S5 — providers grouped into ordered tiers via [tiers] in {!t}.
         Cycle [n] only considers tier [n] (clamped to last tier).
         Within a tier, capacity-aware filtering is applied; the tier
         is "active" iff at least one of its providers survives the
         filter, otherwise the cycle yields the empty list and the
         caller advances to the next cycle (i.e. next tier).
         @since 0.9.7 *)
-
   | Sticky
-    (** S6 — per-[(keeper_name, cascade_name)] affinity.  When a
+  (** S6 — per-[(keeper_name, cascade_name)] affinity.  When a
         previous successful provider is still within [sticky_ttl_ms],
         return only that provider as the singleton ordering.  When no
         sticky entry exists or it has expired, fall back to plain
@@ -121,9 +108,8 @@ type kind =
         invoking {!record_choice} after a successful attempt so the
         affinity is recorded.
         @since 0.9.7 *)
-
   | Round_robin
-    (** S7 — per-cascade rotation cursor.  The first attempt of each
+  (** S7 — per-cascade rotation cursor.  The first attempt of each
         cascade call rotates the input list by the current cursor
         value (mod list length), then advances the cursor.  Within a
         single cycle, the rotated order is preserved (Failover
@@ -132,54 +118,52 @@ type kind =
 
 val kind_to_string : kind -> string
 
-val all_kinds : kind list
 (** All [kind] constructors in declaration order.  Adding a new
     constructor forces compile errors in [kind_to_string] (which
     powers [valid_kind_strings] used by the [parse_kind] error
     message), so the operator-visible "expected one of" list stays
     in sync automatically.  Issue #8603. *)
+val all_kinds : kind list
 
-val valid_kind_strings : string list
 (** Wire-format names for {!all_kinds}, derived via {!kind_to_string}. *)
+val valid_kind_strings : string list
 
-val parse_kind : string -> (kind, string) result
 (** [parse_kind s] returns [Ok kind] for known names, [Error msg] for
     unknown values.  The [Error] message lists {!valid_kind_strings}
     so it stays in sync with the variant.  Callers should warn-and-fallback
     to [Failover] rather than raise, to keep keeper startup resilient to
     config typos. *)
+val parse_kind : string -> (kind, string) result
 
 (** {1 Strategy value} *)
 
-type t = {
-  kind : kind;
-  cycle : cycle_policy;
-
-  tiers : string list list;
-  (** Used only by [Priority_tier].  Each inner list is the set of
+type t =
+  { kind : kind
+  ; cycle : cycle_policy
+  ; tiers : string list list
+    (** Used only by [Priority_tier].  Each inner list is the set of
       provider keys (matched against [adapter.health_key]) that form
       one tier; outer order is tier order (tier 0 = highest priority).
       Empty list when the strategy is not [Priority_tier].
       @since 0.9.7 *)
-
-  sticky_ttl_ms : int;
-  (** Used only by [Sticky].  Time-to-live for a recorded sticky
+  ; sticky_ttl_ms : int
+    (** Used only by [Sticky].  Time-to-live for a recorded sticky
       choice in milliseconds.  Defaults to [300_000] (5 minutes) when
       the strategy is [Sticky]; ignored otherwise.  Values [<= 0]
       effectively disable affinity (every call is a fresh Failover).
       @since 0.9.7 *)
-}
+  }
 
-val failover : t
 (** [{ kind = Failover; cycle = default_cycle_policy; tiers = [];
        sticky_ttl_ms = 0 }].  What callers receive when no per-cascade
     strategy is configured. *)
+val failover : t
 
-val default_sticky_ttl_ms : int
 (** [300_000] (5 minutes).  The fallback TTL used by config loaders
     when [Sticky] is selected without an explicit
     [<name>_sticky_ttl_ms].
     @since 0.9.7 *)
+val default_sticky_ttl_ms : int
 
 (** {1 Candidate adapter}
 
@@ -192,21 +176,14 @@ val default_sticky_ttl_ms : int
     weights.  The adapter is resolution-time data; strategies do not
     mutate it. *)
 
-type 'a adapter = {
-  health_key : 'a -> string;
-  capacity_key : 'a -> string;
-  weight : 'a -> int;
-}
+type 'a adapter =
+  { health_key : 'a -> string
+  ; capacity_key : 'a -> string
+  ; weight : 'a -> int
+  }
 
 (** {1 Ordering} *)
 
-val order_candidates :
-  t ->
-  adapter:'a adapter ->
-  ctx:signal_ctx ->
-  cycle:int ->
-  'a list ->
-  'a list
 (** [order_candidates t ~adapter ~ctx ~cycle candidates] is the ordered
     subset of [candidates] to attempt in [cycle].  Returns the empty
     list when no candidate is usable right now (e.g. all endpoints
@@ -224,17 +201,19 @@ val order_candidates :
     every call); the function still returns deterministic output for
     a given state snapshot, and tests can reset the snapshot via
     {!Cascade_state.clear_all}. *)
+val order_candidates
+  :  t
+  -> adapter:'a adapter
+  -> ctx:signal_ctx
+  -> cycle:int
+  -> 'a list
+  -> 'a list
 
 (** {1 Stateful hooks}
 
     Phase B kinds need a write path so the cascade caller can record
     successful attempts.  Phase A kinds ignore these hooks. *)
 
-val record_choice :
-  t ->
-  ctx:signal_ctx ->
-  provider_key:string ->
-  unit
 (** [record_choice t ~ctx ~provider_key] is invoked by the cascade
     caller after a successful attempt completes (HTTP 200, FSM
     [Accept]/[Accept_on_exhaustion]).  For [Sticky], stores
@@ -248,3 +227,4 @@ val record_choice :
     {!Cascade_state} mutex.
 
     @since 0.9.7 *)
+val record_choice : t -> ctx:signal_ctx -> provider_key:string -> unit

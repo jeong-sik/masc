@@ -10,100 +10,103 @@
 (* Configuration                                                     *)
 (* ================================================================ *)
 
-type stop_reason =
-  Oas_worker_exec_agent.stop_reason =
+type stop_reason = Oas_worker_exec_agent.stop_reason =
   | Completed
-  | TurnBudgetExhausted of { turns_used : int; limit : int }
-  | MutationBoundaryReached of { turns_used : int; tool_name : string option }
+  | TurnBudgetExhausted of
+      { turns_used : int
+      ; limit : int
+      }
+  | MutationBoundaryReached of
+      { turns_used : int
+      ; tool_name : string option
+      }
 
-type cli_transport_overrides =
-  Oas_worker_exec_transport.cli_transport_overrides = {
-  cwd : string option;
-  claude_mcp_config : string option;
-  claude_allowed_tools : string list option;
-  claude_permission_mode : string option;
-  claude_max_turns : int option;
-  gemini_yolo : bool option;
-}
+type cli_transport_overrides = Oas_worker_exec_transport.cli_transport_overrides =
+  { cwd : string option
+  ; claude_mcp_config : string option
+  ; claude_allowed_tools : string list option
+  ; claude_permission_mode : string option
+  ; claude_max_turns : int option
+  ; gemini_yolo : bool option
+  }
 
-type config =
-  Oas_worker_exec_agent.config = {
-  name : string;
-  provider_cfg : Llm_provider.Provider_config.t;
-  provider : Oas.Provider.config;
-  model_id : string;
-  priority : Llm_provider.Request_priority.t option;
-  system_prompt : string;
-  tools : Oas.Tool.t list;
-  runtime_mcp_policy :
-    Llm_provider.Llm_transport.runtime_mcp_policy option;
-  max_turns : int;
-  max_idle_turns : int;
-  stream_idle_timeout_s : float option;
-  max_tokens : int;
-  max_input_tokens : int option;
-  max_cost_usd : float option;
-  temperature : float;
-  hooks : Oas.Hooks.hooks option;
-  context_reducer : Oas.Context_reducer.t option;
-  guardrails : Oas.Guardrails.t option;
-  event_bus : Oas.Event_bus.t option;
-  checkpoint_dir : string option;
-  session_id : string option;
-  description : string option;
-  memory : Oas.Memory.t option;
-  initial_messages : Oas.Types.message list;
-  raw_trace : Oas.Raw_trace.t option;
-  tool_retry_policy : Oas.Tool_retry_policy.t option;
-  required_tool_satisfaction :
-    Oas.Completion_contract.required_tool_satisfaction;
-  contract : Oas.Risk_contract.t option;
-  enable_thinking : bool option;
-  transport : Masc_grpc_transport.t;
-  allowed_paths : string list;
-  checkpoint_sidecar : Yojson.Safe.t option;
-  cache_system_prompt : bool;
-  yield_on_tool : bool;
-  compact_ratio : float option;
-  context_injector : Oas.Hooks.context_injector option;
-  context : Oas.Context.t option;
-  slot_id : int option;
-  approval : Oas.Hooks.approval_callback option;
-  exit_condition : (int -> bool) option;
-  exit_condition_result : (int -> stop_reason * string option) option;
-  summarizer : (Oas.Types.message list -> string) option;
-  cli_transport_overrides : cli_transport_overrides option;
-      (** Custom summarizer for OAS [Budget_strategy.reduce_for_budget]
+type config = Oas_worker_exec_agent.config =
+  { name : string
+  ; provider_cfg : Llm_provider.Provider_config.t
+  ; provider : Oas.Provider.config
+  ; model_id : string
+  ; priority : Llm_provider.Request_priority.t option
+  ; system_prompt : string
+  ; tools : Oas.Tool.t list
+  ; runtime_mcp_policy : Llm_provider.Llm_transport.runtime_mcp_policy option
+  ; max_turns : int
+  ; max_idle_turns : int
+  ; stream_idle_timeout_s : float option
+  ; max_tokens : int
+  ; max_input_tokens : int option
+  ; max_cost_usd : float option
+  ; temperature : float
+  ; hooks : Oas.Hooks.hooks option
+  ; context_reducer : Oas.Context_reducer.t option
+  ; guardrails : Oas.Guardrails.t option
+  ; event_bus : Oas.Event_bus.t option
+  ; checkpoint_dir : string option
+  ; session_id : string option
+  ; description : string option
+  ; memory : Oas.Memory.t option
+  ; initial_messages : Oas.Types.message list
+  ; raw_trace : Oas.Raw_trace.t option
+  ; tool_retry_policy : Oas.Tool_retry_policy.t option
+  ; required_tool_satisfaction : Oas.Completion_contract.required_tool_satisfaction
+  ; contract : Oas.Risk_contract.t option
+  ; enable_thinking : bool option
+  ; transport : Masc_grpc_transport.t
+  ; allowed_paths : string list
+  ; checkpoint_sidecar : Yojson.Safe.t option
+  ; cache_system_prompt : bool
+  ; yield_on_tool : bool
+  ; compact_ratio : float option
+  ; context_injector : Oas.Hooks.context_injector option
+  ; context : Oas.Context.t option
+  ; slot_id : int option
+  ; approval : Oas.Hooks.approval_callback option
+  ; exit_condition : (int -> bool) option
+  ; exit_condition_result : (int -> stop_reason * string option) option
+  ; summarizer : (Oas.Types.message list -> string) option
+  ; cli_transport_overrides : cli_transport_overrides option
+    (** Custom summarizer for OAS [Budget_strategy.reduce_for_budget]
           Emergency-phase compaction. Defaults to OAS's extractive
           default. Keeper workers inject [Keeper_summarizer.keeper_summarizer]
           to scrub [STATE] blocks before the 100-char truncation. *)
-}
+  }
 
 let default_config = Oas_worker_exec_agent.default_config
 
-type run_result = {
-  response : Oas.Types.api_response;
-  checkpoint : Oas.Checkpoint.t option;
-  session_id : string;
-  turns : int;
-  trace_ref : Oas.Raw_trace.run_ref option;
-  run_validation : Oas.Raw_trace.run_validation option;
-  proof : Oas.Cdal_proof.t option;
-  cascade_observation : Oas_worker_cascade.cascade_observation option;
-  stop_reason : stop_reason;
-}
+type run_result =
+  { response : Oas.Types.api_response
+  ; checkpoint : Oas.Checkpoint.t option
+  ; session_id : string
+  ; turns : int
+  ; trace_ref : Oas.Raw_trace.run_ref option
+  ; run_validation : Oas.Raw_trace.run_validation option
+  ; proof : Oas.Cdal_proof.t option
+  ; cascade_observation : Oas_worker_cascade.cascade_observation option
+  ; stop_reason : stop_reason
+  }
 
 let lowercase_enum_case_name raw =
   let raw =
     match String.rindex_opt raw '.' with
     | Some idx when idx + 1 < String.length raw ->
-        String.sub raw (idx + 1) (String.length raw - idx - 1)
+      String.sub raw (idx + 1) (String.length raw - idx - 1)
     | _ -> raw
   in
   String.lowercase_ascii raw
+;;
 
 let proof_result_status_to_string status =
   Oas.Cdal_proof.show_result_status status |> lowercase_enum_case_name
+;;
 
 (* ================================================================ *)
 (* Internal: resolve provider                                        *)
@@ -114,136 +117,141 @@ let proof_result_status_to_string status =
     Explicit model-label execution must never silently substitute a
     discovery-only model. Callers are expected to validate labels
     before reaching this helper. *)
-type label_resolution_error =
-  Oas_worker_exec_transport.label_resolution_error =
+type label_resolution_error = Oas_worker_exec_transport.label_resolution_error =
   | Invalid_model_label of string
 
 let label_resolution_error_to_string =
   Oas_worker_exec_transport.label_resolution_error_to_string
+;;
 
 let label_resolution_error_to_sdk_error =
   Oas_worker_exec_transport.label_resolution_error_to_sdk_error
+;;
 
 let resolve_provider_config_of_label =
   Oas_worker_exec_transport.resolve_provider_config_of_label
+;;
 
-let invalid_runtime_config =
-  Oas_worker_exec_transport.invalid_runtime_config
-
-let cli_model_override =
-  Oas_worker_exec_transport.cli_model_override
-
-let provider_caps_of_config =
-  Oas_worker_exec_transport.provider_caps_of_config
+let invalid_runtime_config = Oas_worker_exec_transport.invalid_runtime_config
+let cli_model_override = Oas_worker_exec_transport.cli_model_override
+let provider_caps_of_config = Oas_worker_exec_transport.provider_caps_of_config
 
 let kimi_mcp_config_json_of_policy =
   Oas_worker_exec_transport.kimi_mcp_config_json_of_policy
+;;
 
-let kimi_cli_model_for_provider =
-  Oas_worker_exec_transport.kimi_cli_model_for_provider
+let kimi_cli_model_for_provider = Oas_worker_exec_transport.kimi_cli_model_for_provider
 
 let kimi_cli_config_json_for_provider =
   Oas_worker_exec_transport.kimi_cli_config_json_for_provider
+;;
 
 let provider_supports_inline_tools =
   Oas_worker_exec_transport.provider_supports_inline_tools
+;;
 
 let provider_supports_runtime_mcp_lane =
   Oas_worker_exec_transport.provider_supports_runtime_mcp_lane
+;;
 
-let dedupe_preserve_order =
-  Oas_worker_exec_transport.dedupe_preserve_order
+let dedupe_preserve_order = Oas_worker_exec_transport.dedupe_preserve_order
 
 let public_mcp_tool_names_of_oas_tools =
   Oas_worker_exec_transport.public_mcp_tool_names_of_oas_tools
+;;
 
 let public_mcp_tool_requires_bound_actor =
   Oas_worker_exec_transport.public_mcp_tool_requires_bound_actor
+;;
 
 let runtime_mcp_tool_requires_bound_actor =
   Oas_worker_exec_transport.runtime_mcp_tool_requires_bound_actor
+;;
 
 let runtime_mcp_policy_with_masc_agent_name =
   Oas_worker_exec_transport.runtime_mcp_policy_with_masc_agent_name
+;;
 
 let runtime_mcp_policy_for_provider =
   Oas_worker_exec_transport.runtime_mcp_policy_for_provider
+;;
 
-let kimi_cli_runtime_mcp_jsons =
-  Oas_worker_exec_transport.kimi_cli_runtime_mcp_jsons
+let kimi_cli_runtime_mcp_jsons = Oas_worker_exec_transport.kimi_cli_runtime_mcp_jsons
 
 let public_mcp_tools_of_oas_tools =
   Oas_worker_exec_transport.public_mcp_tools_of_oas_tools
+;;
 
-let tool_names_are_public_mcp =
-  Oas_worker_exec_transport.tool_names_are_public_mcp
+let tool_names_are_public_mcp = Oas_worker_exec_transport.tool_names_are_public_mcp
 
 let public_mcp_runtime_policy_of_tool_names =
   Oas_worker_exec_transport.public_mcp_runtime_policy_of_tool_names
+;;
 
 let runtime_mcp_policy_of_tool_names =
   Oas_worker_exec_transport.runtime_mcp_policy_of_tool_names
+;;
 
-let provider_label =
-  Oas_worker_exec_transport.provider_label
+let provider_label = Oas_worker_exec_transport.provider_label
 
 let resolve_tool_lane_for_oas_tools =
   Oas_worker_exec_transport.resolve_tool_lane_for_oas_tools
+;;
 
 let make_per_call_switch_transport =
   Oas_worker_exec_transport.make_per_call_switch_transport
+;;
 
 module Kimi_cli_transport_local = Oas_worker_exec_transport.Kimi_cli_transport_local
 
 let non_http_transport_of_provider =
   Oas_worker_exec_transport.non_http_transport_of_provider
+;;
 
 (* ================================================================ *)
 (* Internal: event publishing                                        *)
 (* ================================================================ *)
 
-let publish_lifecycle =
-  Oas_worker_exec_checkpoint.publish_lifecycle
+let publish_lifecycle = Oas_worker_exec_checkpoint.publish_lifecycle
 
 (* ================================================================ *)
 (* Internal: checkpoint persistence                                  *)
 (* ================================================================ *)
 
-let persist_checkpoint =
-  Oas_worker_exec_checkpoint.persist_checkpoint
-
-let build_checkpoint =
-  Oas_worker_exec_checkpoint.build_checkpoint
-
-let partial_response_of_stop =
-  Oas_worker_exec_checkpoint.partial_response_of_stop
+let persist_checkpoint = Oas_worker_exec_checkpoint.persist_checkpoint
+let build_checkpoint = Oas_worker_exec_checkpoint.build_checkpoint
+let partial_response_of_stop = Oas_worker_exec_checkpoint.partial_response_of_stop
 
 (* ================================================================ *)
 (* Build                                                             *)
 (* ================================================================ *)
 
 let build
-    ~(sw : Eio.Switch.t)
-    ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
-    ~(config : config)
-  : (Oas.Agent.t, Oas.Error.sdk_error) result =
+      ~(sw : Eio.Switch.t)
+      ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
+      ~(config : config)
+  : (Oas.Agent.t, Oas.Error.sdk_error) result
+  =
   match
-    non_http_transport_of_provider ~sw ~provider_cfg:config.provider_cfg
+    non_http_transport_of_provider
+      ~sw
+      ~provider_cfg:config.provider_cfg
       ?runtime_mcp_policy:config.runtime_mcp_policy
       ?cli_transport_overrides:config.cli_transport_overrides
       ()
   with
   | Error _ as e -> e
   | Ok transport ->
-      let builder =
-        Oas_worker_exec_agent.builder_without_approval ~net ~config ?transport ()
-      in
-      let builder =
-        match config.approval with
-        | Some cb -> Oas.Builder.with_approval cb builder
-        | None -> builder
-      in
-      Oas.Builder.build_safe builder
+    let builder =
+      Oas_worker_exec_agent.builder_without_approval ~net ~config ?transport ()
+    in
+    let builder =
+      match config.approval with
+      | Some cb -> Oas.Builder.with_approval cb builder
+      | None -> builder
+    in
+    Oas.Builder.build_safe builder
+;;
 
 (* ================================================================ *)
 (* Idle-detail enrichment                                           *)
@@ -255,8 +263,7 @@ let build
 
     Exposed at module level so it can be unit-tested independently of
     the network-bound [run] function. *)
-let enrich_idle_detail =
-  Oas_worker_exec_checkpoint.enrich_idle_detail
+let enrich_idle_detail = Oas_worker_exec_checkpoint.enrich_idle_detail
 
 (* ================================================================ *)
 (* Resume from checkpoint                                            *)
@@ -283,281 +290,335 @@ let enrich_idle_detail =
       cumulative budgets); OAS must not override MASC model/temperature
       selection after resume. *)
 let resume_from_checkpoint
-    ~(sw : Eio.Switch.t)
-    ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
-    ~(config : config)
-    ~(checkpoint : Oas.Checkpoint.t)
-  : (Oas.Agent.t, Oas.Error.sdk_error) result =
+      ~(sw : Eio.Switch.t)
+      ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
+      ~(config : config)
+      ~(checkpoint : Oas.Checkpoint.t)
+  : (Oas.Agent.t, Oas.Error.sdk_error) result
+  =
   match
-    non_http_transport_of_provider ~sw ~provider_cfg:config.provider_cfg
+    non_http_transport_of_provider
+      ~sw
+      ~provider_cfg:config.provider_cfg
       ?runtime_mcp_policy:config.runtime_mcp_policy
       ?cli_transport_overrides:config.cli_transport_overrides
       ()
   with
   | Error _ as e -> e
   | Ok transport ->
-      let prepared_resume =
-        Oas_worker_exec_agent.prepare_resume ~config ~checkpoint
-      in
-      Log.Misc.info
-        "oas_worker %s: resume checkpoint_turn_count=%d per_call_turn_budget=%d effective_max_turns=%d"
-        config.name checkpoint.turn_count config.max_turns
-        prepared_resume.agent_config.max_turns;
-      let options = { prepared_resume.options with transport } in
-      Ok
-        (Oas.Agent.resume ~net ~checkpoint:prepared_resume.patched_checkpoint
-           ~tools:config.tools ?context:config.context
-           ~options ~config:prepared_resume.agent_config ())
+    let prepared_resume = Oas_worker_exec_agent.prepare_resume ~config ~checkpoint in
+    Log.Misc.info
+      "oas_worker %s: resume checkpoint_turn_count=%d per_call_turn_budget=%d \
+       effective_max_turns=%d"
+      config.name
+      checkpoint.turn_count
+      config.max_turns
+      prepared_resume.agent_config.max_turns;
+    let options = { prepared_resume.options with transport } in
+    Ok
+      (Oas.Agent.resume
+         ~net
+         ~checkpoint:prepared_resume.patched_checkpoint
+         ~tools:config.tools
+         ?context:config.context
+         ~options
+         ~config:prepared_resume.agent_config
+         ())
+;;
 
 (* ================================================================ *)
 (* Run                                                               *)
 (* ================================================================ *)
 
 let run
-    ~(sw : Eio.Switch.t)
-    ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
-    ~(config : config)
-    ?oas_checkpoint
-    ?(on_event : (Oas.Types.sse_event -> unit) option)
-    ?(on_yield : (unit -> unit) option)
-    ?(on_resume : (unit -> unit) option)
-    ?(agent_ref : Oas.Agent.t option ref option)
-    ?(proof_ref : Oas.Cdal_proof.t option ref option)
-    ?(contract : Oas.Risk_contract.t option)
-    (goal : string)
-  : (run_result, Oas.Error.sdk_error) result =
-  let session_id = match config.session_id with
+      ~(sw : Eio.Switch.t)
+      ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
+      ~(config : config)
+      ?oas_checkpoint
+      ?(on_event : (Oas.Types.sse_event -> unit) option)
+      ?(on_yield : (unit -> unit) option)
+      ?(on_resume : (unit -> unit) option)
+      ?(agent_ref : Oas.Agent.t option ref option)
+      ?(proof_ref : Oas.Cdal_proof.t option ref option)
+      ?(contract : Oas.Risk_contract.t option)
+      (goal : string)
+  : (run_result, Oas.Error.sdk_error) result
+  =
+  let session_id =
+    match config.session_id with
     | Some id -> id
     | None ->
-      Printf.sprintf "%s-%d-%06x"
+      Printf.sprintf
+        "%s-%d-%06x"
         config.name
         (int_of_float (Time_compat.now () *. 1000.0))
         (Hashtbl.hash (Unix.gettimeofday ()) land 0xFFFFFF)
   in
   (match config.transport with
-  | Masc_grpc_transport.Local -> ()
-  | t ->
-    Log.Misc.info "oas_worker %s: transport=%s"
-      config.name (Masc_grpc_transport.to_string t));
-  Option.iter (fun bus ->
-    publish_lifecycle bus ~name:config.name ~event:"build" ~detail:goal
-      ()
-  ) config.event_bus;
-  let agent_result = match oas_checkpoint with
+   | Masc_grpc_transport.Local -> ()
+   | t ->
+     Log.Misc.info
+       "oas_worker %s: transport=%s"
+       config.name
+       (Masc_grpc_transport.to_string t));
+  Option.iter
+    (fun bus -> publish_lifecycle bus ~name:config.name ~event:"build" ~detail:goal ())
+    config.event_bus;
+  let agent_result =
+    match oas_checkpoint with
     | Some checkpoint ->
-      (try resume_from_checkpoint ~sw ~net ~config ~checkpoint
-       with
+      (try resume_from_checkpoint ~sw ~net ~config ~checkpoint with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->
-         Log.Misc.warn "oas_worker %s: resume_from_checkpoint failed (%s), falling back to build"
-           config.name (Printexc.to_string exn);
+         Log.Misc.warn
+           "oas_worker %s: resume_from_checkpoint failed (%s), falling back to build"
+           config.name
+           (Printexc.to_string exn);
          build ~sw ~net ~config)
     | None -> build ~sw ~net ~config
   in
   match agent_result with
   | Error e ->
-    Option.iter (fun bus ->
-      publish_lifecycle bus ~name:config.name ~event:"build_error"
-        ~detail:(Oas.Error.to_string e)
-        ~error:(Oas.Error.to_string e)
-        ~status:"build_error"
-        ~session_id
-        ()
-    ) config.event_bus;
+    Option.iter
+      (fun bus ->
+         publish_lifecycle
+           bus
+           ~name:config.name
+           ~event:"build_error"
+           ~detail:(Oas.Error.to_string e)
+           ~error:(Oas.Error.to_string e)
+           ~status:"build_error"
+           ~session_id
+           ())
+      config.event_bus;
     Error e
   | Ok agent ->
-  (match agent_ref with Some r -> r := Some agent | None -> ());
-  let effective_contract = match contract with Some c -> Some c | None -> config.contract in
-  (try
-    let result, proof = match effective_contract with
-      | Some c ->
-        let cr = Oas.Contract_runner.run ~sw ~contract:c agent goal in
-        (cr.response, Some cr.proof)
-      | None ->
-        let r = match on_event with
-          | Some cb -> Oas.Agent.run_stream ~sw ?on_yield ?on_resume ~on_event:cb agent goal
-          | None -> Oas.Agent.run ~sw ?on_yield ?on_resume agent goal
-        in
-        (r, None)
+    (match agent_ref with
+     | Some r -> r := Some agent
+     | None -> ());
+    let effective_contract =
+      match contract with
+      | Some c -> Some c
+      | None -> config.contract
     in
-    (match proof_ref with Some ref_ -> ref_ := proof | None -> ());
-    let checkpoint =
-      let ckpt =
-        build_checkpoint ~session_id
-          ?checkpoint_sidecar:config.checkpoint_sidecar agent
-      in
-      (match config.checkpoint_dir with
-       | Some dir ->
-         (try persist_checkpoint ~dir ~session_id ckpt
-          with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-            Log.Misc.error "oas_worker: Checkpoint save failed: %s"
-              (Printexc.to_string exn))
-       | None -> ());
-      Some ckpt
-    in
-    Option.iter (fun bus ->
-      let status = match result with Ok _ -> "completed" | Error _ -> "failed" in
-      let error =
-        match result with
-        | Ok _ -> None
-        | Error e -> Some (Oas.Error.to_string e)
-      in
-      publish_lifecycle bus ~name:config.name ~event:status
-        ~detail:(Printf.sprintf "session=%s" session_id)
-        ?error
-        ~session_id
-        ~status
-        ()
-    ) config.event_bus;
-    let turns = (Oas.Agent.state agent).turn_count in
-    let trace_ref = Oas.Agent.last_raw_trace_run agent in
-    Oas.Agent.close agent;
-    let run_validation =
-      match trace_ref with
-      | Some ref_ ->
-        (match Oas.Raw_trace_query.validate_run ref_ with
-         | Ok v -> Some v
-         | Error err ->
-           Log.Misc.warn "oas_worker: run_validation failed: %s"
-             (Oas.Error.to_string err);
-           None)
-      | None -> None
-    in
-    (match result with
-    | Ok response ->
-      Ok
-        {
-          response;
-          checkpoint;
-          session_id;
-          turns;
-          trace_ref;
-          run_validation;
-          proof;
-          cascade_observation = None;
-          stop_reason = Completed;
-        }
-    | Error (Oas.Error.Agent (Oas.Error.MaxTurnsExceeded r)) ->
-      let partial_response =
-        partial_response_of_stop
-          ~session_id
-          ~model_id:config.model_id
-          ~text:(Printf.sprintf
-            "[turn budget exhausted: %d/%d turns used]" r.turns r.limit)
-      in
-      Ok
-        {
-          response = partial_response;
-          checkpoint;
-          session_id;
-          turns;
-          trace_ref;
-          run_validation;
-          proof;
-          cascade_observation = None;
-          stop_reason = TurnBudgetExhausted { turns_used = r.turns; limit = r.limit };
-        }
-    | Error (Oas.Error.Agent (Oas.Error.ExitConditionMet r)) -> (
-      match config.exit_condition_result with
-      | Some render ->
-        let stop_reason, response_text_opt = render r.turn in
-        let response_text =
-          match response_text_opt with
-          | Some text when String.trim text <> "" -> text
-          | _ -> Printf.sprintf "[exit condition met at turn %d]" r.turn
-        in
-        let partial_response =
-          partial_response_of_stop
-            ~session_id
-            ~model_id:config.model_id
-            ~text:response_text
-        in
-        Ok
-          {
-            response = partial_response;
-            checkpoint;
-            session_id;
-            turns;
-            trace_ref;
-            run_validation;
-            proof;
-            cascade_observation = None;
-            stop_reason;
-          }
-      | None ->
-        Error (Oas.Error.Agent (Oas.Error.ExitConditionMet r)))
-    | Error err ->
-      let detail = Oas.Error.to_string err in
-      let detail =
-        enrich_idle_detail detail (Oas.Agent.state agent).messages
-      in
-      (* Demoted from WARN to DEBUG (task-239): this fires once per tier,
+    (try
+       let result, proof =
+         match effective_contract with
+         | Some c ->
+           let cr = Oas.Contract_runner.run ~sw ~contract:c agent goal in
+           cr.response, Some cr.proof
+         | None ->
+           let r =
+             match on_event with
+             | Some cb ->
+               Oas.Agent.run_stream ~sw ?on_yield ?on_resume ~on_event:cb agent goal
+             | None -> Oas.Agent.run ~sw ?on_yield ?on_resume agent goal
+           in
+           r, None
+       in
+       (match proof_ref with
+        | Some ref_ -> ref_ := proof
+        | None -> ());
+       let checkpoint =
+         let ckpt =
+           build_checkpoint
+             ~session_id
+             ?checkpoint_sidecar:config.checkpoint_sidecar
+             agent
+         in
+         (match config.checkpoint_dir with
+          | Some dir ->
+            (try persist_checkpoint ~dir ~session_id ckpt with
+             | Eio.Cancel.Cancelled _ as e -> raise e
+             | exn ->
+               Log.Misc.error
+                 "oas_worker: Checkpoint save failed: %s"
+                 (Printexc.to_string exn))
+          | None -> ());
+         Some ckpt
+       in
+       Option.iter
+         (fun bus ->
+            let status =
+              match result with
+              | Ok _ -> "completed"
+              | Error _ -> "failed"
+            in
+            let error =
+              match result with
+              | Ok _ -> None
+              | Error e -> Some (Oas.Error.to_string e)
+            in
+            publish_lifecycle
+              bus
+              ~name:config.name
+              ~event:status
+              ~detail:(Printf.sprintf "session=%s" session_id)
+              ?error
+              ~session_id
+              ~status
+              ())
+         config.event_bus;
+       let turns = (Oas.Agent.state agent).turn_count in
+       let trace_ref = Oas.Agent.last_raw_trace_run agent in
+       Oas.Agent.close agent;
+       let run_validation =
+         match trace_ref with
+         | Some ref_ ->
+           (match Oas.Raw_trace_query.validate_run ref_ with
+            | Ok v -> Some v
+            | Error err ->
+              Log.Misc.warn
+                "oas_worker: run_validation failed: %s"
+                (Oas.Error.to_string err);
+              None)
+         | None -> None
+       in
+       match result with
+       | Ok response ->
+         Ok
+           { response
+           ; checkpoint
+           ; session_id
+           ; turns
+           ; trace_ref
+           ; run_validation
+           ; proof
+           ; cascade_observation = None
+           ; stop_reason = Completed
+           }
+       | Error (Oas.Error.Agent (Oas.Error.MaxTurnsExceeded r)) ->
+         let partial_response =
+           partial_response_of_stop
+             ~session_id
+             ~model_id:config.model_id
+             ~text:
+               (Printf.sprintf
+                  "[turn budget exhausted: %d/%d turns used]"
+                  r.turns
+                  r.limit)
+         in
+         Ok
+           { response = partial_response
+           ; checkpoint
+           ; session_id
+           ; turns
+           ; trace_ref
+           ; run_validation
+           ; proof
+           ; cascade_observation = None
+           ; stop_reason = TurnBudgetExhausted { turns_used = r.turns; limit = r.limit }
+           }
+       | Error (Oas.Error.Agent (Oas.Error.ExitConditionMet r)) ->
+         (match config.exit_condition_result with
+          | Some render ->
+            let stop_reason, response_text_opt = render r.turn in
+            let response_text =
+              match response_text_opt with
+              | Some text when String.trim text <> "" -> text
+              | _ -> Printf.sprintf "[exit condition met at turn %d]" r.turn
+            in
+            let partial_response =
+              partial_response_of_stop
+                ~session_id
+                ~model_id:config.model_id
+                ~text:response_text
+            in
+            Ok
+              { response = partial_response
+              ; checkpoint
+              ; session_id
+              ; turns
+              ; trace_ref
+              ; run_validation
+              ; proof
+              ; cascade_observation = None
+              ; stop_reason
+              }
+          | None -> Error (Oas.Error.Agent (Oas.Error.ExitConditionMet r)))
+       | Error err ->
+         let detail = Oas.Error.to_string err in
+         let detail = enrich_idle_detail detail (Oas.Agent.state agent).messages in
+         (* Demoted from WARN to DEBUG (task-239): this fires once per tier,
          but a cascade caller (Oas_worker_named.run_named) retries on the
          next provider.  Emitting WARN/ERROR here creates noise on
          recovered cascades.  The cascade layer logs [cascade-fallback] at
          INFO when it retries and emits ERROR only on full exhaustion. *)
-      (match proof with
-       | Some p ->
-         Log.Misc.debug "oas_worker: agent errored with CDAL proof: run_id=%s status=%s error=%s"
-           p.run_id
-           (proof_result_status_to_string p.result_status)
-           detail
-       | None ->
-         Log.Misc.debug "oas_worker: agent errored (no proof): %s" detail);
-      Error err)
-  with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn ->
-    let bt = Printexc.get_backtrace () in
-    (try Oas.Agent.close agent with close_exn ->
-      Log.Misc.warn "agent close failed during cleanup: %s" (Printexc.to_string close_exn));
-    Log.Misc.error "oas_worker %s: execution exception: %s\nBacktrace: %s"
-      config.name (Printexc.to_string exn) bt;
-    Error (Oas.Error.Internal (Printf.sprintf "execution exception: %s" (Printexc.to_string exn))))
+         (match proof with
+          | Some p ->
+            Log.Misc.debug
+              "oas_worker: agent errored with CDAL proof: run_id=%s status=%s error=%s"
+              p.run_id
+              (proof_result_status_to_string p.result_status)
+              detail
+          | None -> Log.Misc.debug "oas_worker: agent errored (no proof): %s" detail);
+         Error err
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       let bt = Printexc.get_backtrace () in
+       (try Oas.Agent.close agent with
+        | close_exn ->
+          Log.Misc.warn
+            "agent close failed during cleanup: %s"
+            (Printexc.to_string close_exn));
+       Log.Misc.error
+         "oas_worker %s: execution exception: %s\nBacktrace: %s"
+         config.name
+         (Printexc.to_string exn)
+         bt;
+       Error
+         (Oas.Error.Internal
+            (Printf.sprintf "execution exception: %s" (Printexc.to_string exn))))
+;;
 
 (* ================================================================ *)
 (* Convenience: run_with_masc_tools                                  *)
 (* ================================================================ *)
 
 let run_with_masc_tools
-    ~(sw : Eio.Switch.t)
-    ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
-    ~(config : config)
-    ~(masc_tools : Types.tool_schema list)
-    ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
-    ?contract
-    ?on_event
-    ?on_yield
-    ?on_resume
-    (goal : string)
-  : (run_result, Oas.Error.sdk_error) result =
+      ~(sw : Eio.Switch.t)
+      ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
+      ~(config : config)
+      ~(masc_tools : Types.tool_schema list)
+      ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
+      ?contract
+      ?on_event
+      ?on_yield
+      ?on_resume
+      (goal : string)
+  : (run_result, Oas.Error.sdk_error) result
+  =
   match
     public_mcp_runtime_policy_of_tool_names
       (List.map (fun (td : Types.tool_schema) -> td.name) masc_tools)
   with
   | Some runtime_mcp_policy
     when Provider_tool_support.provider_supports_runtime_mcp_policy
-           config.provider_cfg runtime_mcp_policy ->
-      let config = { config with runtime_mcp_policy = Some runtime_mcp_policy } in
-      run ~sw ~net ~config ?on_event ?on_yield ?on_resume ?contract goal
+           config.provider_cfg
+           runtime_mcp_policy ->
+    let config = { config with runtime_mcp_policy = Some runtime_mcp_policy } in
+    run ~sw ~net ~config ?on_event ?on_yield ?on_resume ?contract goal
   | _ when masc_tools = [] ->
-      run ~sw ~net ~config ?on_event ?on_yield ?on_resume ?contract goal
+    run ~sw ~net ~config ?on_event ?on_yield ?on_resume ?contract goal
   | _ when provider_supports_inline_tools config.provider_cfg ->
-      let oas_tools =
-        List.map
-          (fun (td : Types.tool_schema) ->
-            Tool_bridge.oas_tool_of_masc
-              ~name:td.name
-              ~description:td.description
-              ~input_schema:td.input_schema
-              (fun input -> dispatch ~name:td.name ~args:input))
-          masc_tools
-      in
-      let config = { config with tools = oas_tools @ config.tools } in
-      run ~sw ~net ~config ?on_event ?on_yield ?on_resume ?contract goal
+    let oas_tools =
+      List.map
+        (fun (td : Types.tool_schema) ->
+           Tool_bridge.oas_tool_of_masc
+             ~name:td.name
+             ~description:td.description
+             ~input_schema:td.input_schema
+             (fun input -> dispatch ~name:td.name ~args:input))
+        masc_tools
+    in
+    let config = { config with tools = oas_tools @ config.tools } in
+    run ~sw ~net ~config ?on_event ?on_yield ?on_resume ?contract goal
   | _ ->
-      Error
-        (invalid_runtime_config "tool_support"
-           (Printf.sprintf
-              "%s does not support inline tools or request-scoped runtime MCP tools"
-              (provider_label config.provider_cfg)))
+    Error
+      (invalid_runtime_config
+         "tool_support"
+         (Printf.sprintf
+            "%s does not support inline tools or request-scoped runtime MCP tools"
+            (provider_label config.provider_cfg)))
+;;

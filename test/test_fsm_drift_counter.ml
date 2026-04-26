@@ -19,17 +19,16 @@
 let counter_for ~variant ~force =
   Masc_mcp.Prometheus.metric_value_or_zero
     Masc_mcp.Coord.fsm_drift_metric
-    ~labels:[
-      ("variant", variant);
-      ("force", if force then "true" else "false");
-    ]
+    ~labels:[ "variant", variant; ("force", if force then "true" else "false") ]
     ()
+;;
 
 let test_metric_name_stable () =
   Alcotest.(check string)
     "fsm drift canonical metric name"
     "masc_task_fsm_drift_total"
     Masc_mcp.Coord.fsm_drift_metric
+;;
 
 (* Exhaustive enum → label mapping.  Adding a new
    [Coord_task_lifecycle.drift] variant forces the reviewer to
@@ -42,6 +41,7 @@ let test_variant_label_claimed_to_done_skip () =
     "claimed_to_done_skip → canonical label"
     "claimed_to_done_skip"
     (Coord_task.drift_variant_label Coord_task_lifecycle.Claimed_to_done_skip)
+;;
 
 let test_record_increments_variant_and_force () =
   let variant =
@@ -63,13 +63,12 @@ let test_record_increments_variant_and_force () =
     "force=true +1"
     (before_true +. 1.0)
     (counter_for ~variant ~force:true)
+;;
 
 let test_label_isolation () =
   (* Unknown variant label must not bleed into the known
      variant's count — validates the label-key split. *)
-  let known =
-    Coord_task.drift_variant_label Coord_task_lifecycle.Claimed_to_done_skip
-  in
+  let known = Coord_task.drift_variant_label Coord_task_lifecycle.Claimed_to_done_skip in
   let unknown = "unused_test_variant_9795" in
   let before_known = counter_for ~variant:known ~force:false in
   Masc_mcp.Coord.record_fsm_drift ~variant:unknown ~force:false;
@@ -77,25 +76,25 @@ let test_label_isolation () =
     "known variant counter unchanged"
     before_known
     (counter_for ~variant:known ~force:false)
+;;
 
 let () =
-  Alcotest.run "fsm_drift_counter_9795"
-    [
-      ( "metric_name",
-        [
-          Alcotest.test_case "canonical name stable" `Quick
-            test_metric_name_stable;
-        ] );
-      ( "variant_label",
-        [
-          Alcotest.test_case "claimed_to_done_skip" `Quick
-            test_variant_label_claimed_to_done_skip;
-        ] );
-      ( "counter",
-        [
-          Alcotest.test_case "increments with variant + force" `Quick
-            test_record_increments_variant_and_force;
-          Alcotest.test_case "label isolation" `Quick
-            test_label_isolation;
-        ] );
+  Alcotest.run
+    "fsm_drift_counter_9795"
+    [ ( "metric_name"
+      , [ Alcotest.test_case "canonical name stable" `Quick test_metric_name_stable ] )
+    ; ( "variant_label"
+      , [ Alcotest.test_case
+            "claimed_to_done_skip"
+            `Quick
+            test_variant_label_claimed_to_done_skip
+        ] )
+    ; ( "counter"
+      , [ Alcotest.test_case
+            "increments with variant + force"
+            `Quick
+            test_record_increments_variant_and_force
+        ; Alcotest.test_case "label isolation" `Quick test_label_isolation
+        ] )
     ]
+;;

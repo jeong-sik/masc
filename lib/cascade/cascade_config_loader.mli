@@ -24,17 +24,17 @@ val invalidate_cache_entry : string -> unit
     Weight defaults to 1 when not specified.
     @since 0.137.0
     @since 0.150.0 [supports_tool_choice] field added *)
-type weighted_entry = {
-  model: string;
-  weight: int;
-  supports_tool_choice: bool option;
-  (** Per-entry capability override forwarded to
+type weighted_entry =
+  { model : string
+  ; weight : int
+  ; supports_tool_choice : bool option
+    (** Per-entry capability override forwarded to
       [Llm_provider.Provider_config.supports_tool_choice_override].
       [None] = use registry default; [Some b] = force [b]. Consumers
       declare verified model-side tool_choice support per cascade entry
       (e.g. Qwen3.5 w/ native Jinja chat template) without the SDK
       pattern-matching on [model_id]. *)
-}
+  }
 
 (** Catalog metadata for one named cascade profile discovered from
     [cascade.json].
@@ -44,13 +44,13 @@ type weighted_entry = {
     ["{name}_temperature"], ["{name}_strategy"], etc. This keeps
     profile discovery aligned with the loader's typed schema instead of
     duplicating ad-hoc JSON-key parsing at call sites. *)
-type catalog_entry = {
-  name : string;
-  keeper_assignable : bool;
-  (** Whether the profile may be assigned to keepers. Defaults to [true]
+type catalog_entry =
+  { name : string
+  ; keeper_assignable : bool
+    (** Whether the profile may be assigned to keepers. Defaults to [true]
       when ["{name}_keeper_assignable"] is absent. *)
-  fallback_cascade : string option;
-  (** Optional declarative escalation hint. When set, the cascade
+  ; fallback_cascade : string option
+    (** Optional declarative escalation hint. When set, the cascade
       rotation logic prefers this name as the immediate next cascade
       after a recoverable cascade failure (single-provider profiles
       otherwise have no internal escalation path).
@@ -60,7 +60,7 @@ type catalog_entry = {
       to drop the hint when it does not match a live catalog entry.
 
       @since 0.174.0 *)
-}
+  }
 
 (** Load the cascade catalog from [config_path].
 
@@ -71,19 +71,14 @@ type catalog_entry = {
     not appear in keeper-assignment UIs.
 
     Returns [Error _] when the file cannot be read or parsed. *)
-val load_catalog :
-  config_path:string ->
-  (catalog_entry list, string) result
+val load_catalog : config_path:string -> (catalog_entry list, string) result
 
 (** Load a named model list from a JSON config file.
 
     The JSON file maps ["{name}_models"] keys to string arrays.
     Results are cached and hot-reloaded when the file mtime changes.
     Returns an empty list when the file is missing or the key is absent. *)
-val load_profile :
-  config_path:string ->
-  name:string ->
-  string list
+val load_profile : config_path:string -> name:string -> string list
 
 (** Like {!load_profile} but preserves weight information.
 
@@ -95,22 +90,19 @@ val load_profile :
     (preserving backward-compatible fixed ordering).
 
     @since 0.137.0 *)
-val load_profile_weighted :
-  config_path:string ->
-  name:string ->
-  weighted_entry list
+val load_profile_weighted : config_path:string -> name:string -> weighted_entry list
 
 (** Per-cascade inference parameter overrides. *)
-type inference_params = {
-  temperature: float option;
-  max_tokens: int option;
-  keep_alive: string option;
-  (** Ollama [keep_alive] override: integer seconds or duration string.
+type inference_params =
+  { temperature : float option
+  ; max_tokens : int option
+  ; keep_alive : string option
+    (** Ollama [keep_alive] override: integer seconds or duration string.
       Honored only when the resolved provider is Ollama. *)
-  num_ctx: int option;
-  (** Ollama [num_ctx] override: per-request KV cache allocation in
+  ; num_ctx : int option
+    (** Ollama [num_ctx] override: per-request KV cache allocation in
       tokens. Honored only when the resolved provider is Ollama. *)
-}
+  }
 
 (** Resolve inference parameters from cascade.json.
 
@@ -120,8 +112,7 @@ type inference_params = {
     2. ["default_temperature"] / ["default_max_tokens"] /
        ["default_keep_alive"] / ["default_num_ctx"]
     3. [None] (caller uses own defaults) *)
-val resolve_inference_params :
-  config_path:string -> name:string -> inference_params
+val resolve_inference_params : config_path:string -> name:string -> inference_params
 
 (** Resolve per-cascade API key env var overrides from cascade.json.
 
@@ -134,8 +125,7 @@ val resolve_inference_params :
     or an object mapping provider names to env var names.
 
     @since 0.122.0 *)
-val resolve_api_key_env :
-  config_path:string -> name:string -> (string * string) list
+val resolve_api_key_env : config_path:string -> name:string -> (string * string) list
 
 (** Per-cascade pluggable-strategy override.
 
@@ -146,50 +136,39 @@ val resolve_api_key_env :
     [kind] string and warn-and-fallback on unknown values.
 
     @since 0.9.6 *)
-type strategy_config = {
-  kind : string option;
-  (** ["{name}_strategy"]. Recognized values: ["failover"],
+type strategy_config =
+  { kind : string option
+    (** ["{name}_strategy"]. Recognized values: ["failover"],
       ["capacity_aware"], ["weighted_random"],
       ["circuit_breaker_cycling"]. *)
-
-  max_cycles : int option;
-  (** ["{name}_max_cycles"]. Defaults to 1. *)
-
-  backoff_base_ms : int option;
-  (** ["{name}_backoff_base_ms"]. Defaults to 500. *)
-
-  backoff_cap_ms : int option;
-  (** ["{name}_backoff_cap_ms"]. Defaults to 10_000. *)
-
-  ollama_max_concurrent : int option;
-  (** ["{name}_ollama_max_concurrent"]. When set, overrides the
+  ; max_cycles : int option (** ["{name}_max_cycles"]. Defaults to 1. *)
+  ; backoff_base_ms : int option (** ["{name}_backoff_base_ms"]. Defaults to 500. *)
+  ; backoff_cap_ms : int option (** ["{name}_backoff_cap_ms"]. Defaults to 10_000. *)
+  ; ollama_max_concurrent : int option
+    (** ["{name}_ollama_max_concurrent"]. When set, overrides the
       ollama auto-registration default for any ollama-like base URL
       in this cascade's candidate list. *)
-
-  cli_max_concurrent : int option;
-  (** ["{name}_cli_max_concurrent"]. When set, overrides the CLI
+  ; cli_max_concurrent : int option
+    (** ["{name}_cli_max_concurrent"]. When set, overrides the CLI
       auto-registration default ([MASC_CLI_MAX_CONCURRENT] or 1)
       for every CLI provider (Claude_code / Gemini_cli / Codex_cli)
       in this cascade's candidate list.  CLI providers share a
       single concurrency cap because each CLI binary is typically
       limited to one in-flight subprocess.
       @since 0.9.8 *)
-
-  tiers : string list list option;
-  (** ["{name}_tiers"]. Used by the [priority_tier] strategy.  Each
+  ; tiers : string list list option
+    (** ["{name}_tiers"]. Used by the [priority_tier] strategy.  Each
       inner array is a tier of provider keys (matched against the
       [model] field in [{name}_models]); outer order is tier order
       (tier 0 = highest priority).  Example JSON:
       [\[\["ollama:qwen3-coder:30b"\], \["gemini_cli:gemini-2.5-flash"\]\]].
       @since 0.9.7 *)
-
-  sticky_ttl_ms : int option;
-  (** ["{name}_sticky_ttl_ms"]. Used by the [sticky] strategy.
+  ; sticky_ttl_ms : int option
+    (** ["{name}_sticky_ttl_ms"]. Used by the [sticky] strategy.
       Defaults to {!Cascade_strategy.default_sticky_ttl_ms}
       ([300_000]) when [kind] is [sticky] and this field is absent.
       Values [<= 0] disable affinity entirely.
       @since 0.9.7 *)
-}
+  }
 
-val resolve_strategy_config :
-  config_path:string -> name:string -> strategy_config
+val resolve_strategy_config : config_path:string -> name:string -> strategy_config

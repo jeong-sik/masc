@@ -14,24 +14,24 @@
 
     @since 0.9.6 *)
 
-type spec_entry = {
-  name : string;          (** File stem without extension (e.g. ["CascadeStrategy"]). *)
-  path : string;          (** Path relative to [specs_dir] (e.g. ["boundary/CascadeStrategy.tla"]). *)
-  category : string;      (** ["boundary"] | ["bug-models"] | ["other"]. *)
-  has_clean_cfg : bool;   (** [<name>.cfg] is present next to the [.tla]. *)
-  has_buggy_cfg : bool;   (** [<name>-buggy.cfg] is present next to the [.tla]. *)
-  mtime : float;          (** Unix timestamp of the [.tla] file. *)
-}
+type spec_entry =
+  { name : string (** File stem without extension (e.g. ["CascadeStrategy"]). *)
+  ; path : string
+    (** Path relative to [specs_dir] (e.g. ["boundary/CascadeStrategy.tla"]). *)
+  ; category : string (** ["boundary"] | ["bug-models"] | ["other"]. *)
+  ; has_clean_cfg : bool (** [<name>.cfg] is present next to the [.tla]. *)
+  ; has_buggy_cfg : bool (** [<name>-buggy.cfg] is present next to the [.tla]. *)
+  ; mtime : float (** Unix timestamp of the [.tla] file. *)
+  }
 
-val specs_dir : unit -> string
 (** Resolved specs directory.  Reads [MASC_SPECS_DIR], falls back to ["specs"]
     (relative to the current working directory). *)
+val specs_dir : unit -> string
 
-val list_specs : unit -> spec_entry list
 (** Enumerate all [.tla] files under {!specs_dir}.  Returns [[]] when the
     directory does not exist.  Sort order: [(category, name)] ascending. *)
+val list_specs : unit -> spec_entry list
 
-val specs_json : unit -> Yojson.Safe.t
 (** JSON bundle suitable for [/api/v1/verification/specs].
 
     Shape:
@@ -51,3 +51,4 @@ val specs_json : unit -> Yojson.Safe.t
       }
     ]}
 *)
+val specs_json : unit -> Yojson.Safe.t

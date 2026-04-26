@@ -1,14 +1,12 @@
 (include_subdirs no)
+
 (library
  (name masc_backend)
  (public_name masc_mcp.masc_backend)
  (wrapped false)
- (modules
-  backend_types
-  backend_compression
-  backend)
+ (modules backend_types backend_compression backend)
  (libraries
- masc_types
+  masc_types
   masc_core
   masc_mcp.config
   masc_process
@@ -26,4 +24,5 @@
   mtime
   zstd
   base)
- (preprocess (pps ppx_deriving.show ppx_deriving.eq ppx_deriving_yojson)))
+ (preprocess
+  (pps ppx_deriving.show ppx_deriving.eq ppx_deriving_yojson)))

@@ -13,8 +13,9 @@ val strip_state_blocks_text : string -> string
 val trim_to_option : string -> string option
 
 (** Extract a fallback reply string from a state snapshot. *)
-val state_snapshot_reply_fallback :
-  Keeper_memory_policy.keeper_state_snapshot option -> string option
+val state_snapshot_reply_fallback
+  :  Keeper_memory_policy.keeper_state_snapshot option
+  -> string option
 
 (** Strip skill-route lines and state blocks from a reply. *)
 val strip_internal_reply_markup : string -> string

@@ -23,16 +23,16 @@ let configured_port () = Env_config.Transport.ws_port
 
 (** Check whether standalone WS is enabled (default: enabled).
     Disable with MASC_WS_ENABLED=0 or MASC_WS_ENABLED=false. *)
-let is_enabled () =
-  Transport_metrics.ws_enabled ()
+let is_enabled () = Transport_metrics.ws_enabled ()
 
 (** WebSocket handler factory.
 
     For each accepted connection, httpun-ws-eio calls this with the
     client address and a [Wsd.t].  We create a session in the shared
     registry and wire frame callbacks to [on_message]. *)
-let make_websocket_handler ~on_message _client_addr (wsd : Ws.Wsd.t) :
-    Ws.Websocket_connection.input_handlers =
+let make_websocket_handler ~on_message _client_addr (wsd : Ws.Wsd.t)
+  : Ws.Websocket_connection.input_handlers
+  =
   let session_id = Server_mcp_transport_ws.next_id () in
   let session = Server_mcp_transport_ws.new_session ~id:session_id ~wsd in
   Server_mcp_transport_ws.with_sessions_rw (fun () ->
@@ -41,36 +41,36 @@ let make_websocket_handler ~on_message _client_addr (wsd : Ws.Wsd.t) :
     (Server_mcp_transport_ws.with_sessions_rw (fun () ->
        Hashtbl.length Server_mcp_transport_ws.sessions));
   (* Register as SSE external subscriber for broadcast events *)
-  Sse.subscribe_external ~id:session_id
-    ~is_alive:(fun () ->
-      not session.closed && not (Ws.Wsd.is_closed session.wsd))
+  Sse.subscribe_external
+    ~id:session_id
+    ~is_alive:(fun () -> (not session.closed) && not (Ws.Wsd.is_closed session.wsd))
     ~callback:(fun sse_event ->
-      if not session.closed
-         && not
-              (Server_mcp_transport_ws.send_dashboard_or_raw_sse session
-                 sse_event)
-      then
-        Server_mcp_transport_ws.cleanup_session session_id)
+      if
+        (not session.closed)
+        && not (Server_mcp_transport_ws.send_dashboard_or_raw_sse session sse_event)
+      then Server_mcp_transport_ws.cleanup_session session_id)
     ();
   Log.Server.info "WebSocket session %s connected (standalone port)" session_id;
-  { Ws.Websocket_connection.
-    frame = (fun ~opcode ~is_fin ~len payload ->
-      match opcode with
-      | `Text | `Binary | `Continuation ->
-        Server_mcp_transport_ws.read_inbound_message_frame session
-          ~on_message ~is_fin ~len payload
-      | `Ping ->
-        Ws.Wsd.send_pong wsd;
-        Ws.Payload.close payload
-      | `Connection_close ->
-        Server_mcp_transport_ws.cleanup_session session_id;
-        Ws.Payload.close payload
-      | `Pong | `Other _ ->
-        Ws.Payload.close payload
-    );
-    eof = (fun ?error:_ () ->
-      Server_mcp_transport_ws.cleanup_session session_id)
+  { Ws.Websocket_connection.frame =
+      (fun ~opcode ~is_fin ~len payload ->
+        match opcode with
+        | `Text | `Binary | `Continuation ->
+          Server_mcp_transport_ws.read_inbound_message_frame
+            session
+            ~on_message
+            ~is_fin
+            ~len
+            payload
+        | `Ping ->
+          Ws.Wsd.send_pong wsd;
+          Ws.Payload.close payload
+        | `Connection_close ->
+          Server_mcp_transport_ws.cleanup_session session_id;
+          Ws.Payload.close payload
+        | `Pong | `Other _ -> Ws.Payload.close payload)
+  ; eof = (fun ?error:_ () -> Server_mcp_transport_ws.cleanup_session session_id)
   }
+;;
 
 (** Start the standalone WebSocket server.
 
@@ -83,15 +83,17 @@ let make_websocket_handler ~on_message _client_addr (wsd : Ws.Wsd.t) :
     @param on_message Called with [(session_id, body_str)] for each
       inbound text frame. *)
 let start
-    ~(sw : Eio.Switch.t)
-    ~(env : Eio_unix.Stdenv.base)
-    ~(on_message : string -> string -> unit)
-  : unit =
-  if not (is_enabled ()) then begin
+      ~(sw : Eio.Switch.t)
+      ~(env : Eio_unix.Stdenv.base)
+      ~(on_message : string -> string -> unit)
+  : unit
+  =
+  if not (is_enabled ())
+  then (
     Transport_metrics.set_ws_runtime_listening false;
     Transport_metrics.set_ws_listen_status "disabled";
-    Log.Server.info "WebSocket transport disabled (MASC_WS_ENABLED=0)"
-  end else begin
+    Log.Server.info "WebSocket transport disabled (MASC_WS_ENABLED=0)")
+  else (
     let port = configured_port () in
     let net = Eio.Stdenv.net env in
     let addr = `Tcp (Eio.Net.Ipaddr.V4.loopback, port) in
@@ -102,8 +104,7 @@ let start
       Transport_metrics.set_ws_runtime_listening true;
       Transport_metrics.set_ws_listen_status "listening";
       let connection_handler =
-        Ws_eio.Server.create_connection_handler ~sw
-          (make_websocket_handler ~on_message)
+        Ws_eio.Server.create_connection_handler ~sw (make_websocket_handler ~on_message)
       in
       Eio.Fiber.fork ~sw (fun () ->
         (* Safe: finally is Atomic.set — no I/O, no exception risk *)
@@ -112,34 +113,37 @@ let start
             Transport_metrics.set_ws_runtime_listening false;
             Transport_metrics.set_ws_listen_status "stopped")
           (fun () ->
-            Log.Server.info "WebSocket server starting on port %d" port;
-            let rec accept_loop backoff_s =
-              try
-                let flow, client_addr = Eio.Net.accept ~sw socket in
-                Eio.Fiber.fork ~sw (fun () ->
-                  try connection_handler client_addr flow
-                  with
+             Log.Server.info "WebSocket server starting on port %d" port;
+             let rec accept_loop backoff_s =
+               try
+                 let flow, client_addr = Eio.Net.accept ~sw socket in
+                 Eio.Fiber.fork ~sw (fun () ->
+                   try connection_handler client_addr flow with
+                   | Eio.Cancel.Cancelled _ as e -> raise e
+                   | exn ->
+                     Log.Server.warn
+                       "WS standalone handler error: %s"
+                       (Printexc.to_string exn));
+                 accept_loop 0.05
+               with
+               | Eio.Cancel.Cancelled _ as e -> raise e
+               | exn ->
+                 Log.Server.error
+                   "WS standalone accept error: %s"
+                   (Printexc.to_string exn);
+                 (* Backoff to avoid tight error loops *)
+                 (try Eio.Time.sleep (Eio.Stdenv.clock env) backoff_s with
                   | Eio.Cancel.Cancelled _ as e -> raise e
                   | exn ->
-                    Log.Server.warn "WS standalone handler error: %s"
+                    Log.Server.warn
+                      "WS standalone backoff sleep failed on port %d (backoff=%.2fs): %s"
+                      port
+                      backoff_s
                       (Printexc.to_string exn));
-                accept_loop 0.05
-              with
-              | Eio.Cancel.Cancelled _ as e -> raise e
-              | exn ->
-                Log.Server.error "WS standalone accept error: %s"
-                  (Printexc.to_string exn);
-                (* Backoff to avoid tight error loops *)
-                (try Eio.Time.sleep (Eio.Stdenv.clock env) backoff_s
-                 with Eio.Cancel.Cancelled _ as e -> raise e
-                    | exn ->
-                        Log.Server.warn
-                          "WS standalone backoff sleep failed on port %d (backoff=%.2fs): %s"
-                          port backoff_s (Printexc.to_string exn));
-                let next_backoff = Float.min 2.0 (backoff_s *. 1.5) in
-                accept_loop next_backoff
-            in
-            accept_loop 0.05))
+                 let next_backoff = Float.min 2.0 (backoff_s *. 1.5) in
+                 accept_loop next_backoff
+             in
+             accept_loop 0.05))
     | exception (Eio.Cancel.Cancelled _ as e) -> raise e
     | exception Unix.Unix_error (Unix.EADDRINUSE, _, _) ->
       Transport_metrics.set_ws_runtime_listening false;
@@ -150,6 +154,8 @@ let start
     | exception exn ->
       Transport_metrics.set_ws_runtime_listening false;
       Transport_metrics.set_ws_listen_status "bind_failed";
-      Log.Server.error "WebSocket bind failed on port %d: %s"
-        port (Printexc.to_string exn)
-  end
+      Log.Server.error
+        "WebSocket bind failed on port %d: %s"
+        port
+        (Printexc.to_string exn))
+;;

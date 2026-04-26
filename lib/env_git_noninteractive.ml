@@ -11,25 +11,22 @@
    SSH_ASKPASS="" — same rationale for SSH-over-git URLs. *)
 
 let env : (string * string) list =
-  [
-    "GIT_TERMINAL_PROMPT", "0";
-    "GIT_ASKPASS", "";
-    "GCM_INTERACTIVE", "Never";
-    "SSH_ASKPASS", "";
+  [ "GIT_TERMINAL_PROMPT", "0"
+  ; "GIT_ASKPASS", ""
+  ; "GCM_INTERACTIVE", "Never"
+  ; "SSH_ASKPASS", ""
   ]
+;;
 
-let env_pairs =
-  List.map (fun (k, v) -> k ^ "=" ^ v) env
-
-let docker_args =
-  List.concat_map (fun (k, v) -> [ "-e"; k ^ "=" ^ v ]) env
-
+let env_pairs = List.map (fun (k, v) -> k ^ "=" ^ v) env
+let docker_args = List.concat_map (fun (k, v) -> [ "-e"; k ^ "=" ^ v ]) env
 let docker_env_args = docker_args
 
 let key_of_entry entry =
   match String.index_opt entry '=' with
   | None -> entry
   | Some i -> String.sub entry 0 i
+;;
 
 let inject_into_environment existing =
   let override_keys =
@@ -39,7 +36,7 @@ let inject_into_environment existing =
   in
   let filtered =
     Array.to_list existing
-    |> List.filter (fun e ->
-         not (Hashtbl.mem override_keys (key_of_entry e)))
+    |> List.filter (fun e -> not (Hashtbl.mem override_keys (key_of_entry e)))
   in
   Array.of_list (env_pairs @ filtered)
+;;

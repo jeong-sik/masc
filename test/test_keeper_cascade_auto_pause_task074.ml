@@ -34,34 +34,47 @@ module Regime = Masc_mcp.Keeper_behavioral_regime
 
 let mk_cascade_exhausted () =
   Owne.sdk_error_of_masc_internal_error
-    (Owne.Cascade_exhausted
-       { cascade_name = "test"; reason = KT.All_providers_failed })
+    (Owne.Cascade_exhausted { cascade_name = "test"; reason = KT.All_providers_failed })
+;;
 
 let mk_no_tool_capable () =
   Owne.sdk_error_of_masc_internal_error
-    (Owne.No_tool_capable_provider
-       { cascade_name = "test"; configured_labels = [] })
+    (Owne.No_tool_capable_provider { cascade_name = "test"; configured_labels = [] })
+;;
 
 let mk_accept_rejected () =
   Owne.sdk_error_of_masc_internal_error
     (Owne.Accept_rejected { scope = "test"; model = None; reason = "x" })
+;;
 
 let mk_resumable_cli_session () =
   Owne.sdk_error_of_masc_internal_error
     (Owne.Resumable_cli_session
-       { cascade_name = "test";
-         detail = "rollout-thread-not-found";
-         exit_code = Some 1 })
+       { cascade_name = "test"; detail = "rollout-thread-not-found"; exit_code = Some 1 })
+;;
 
 let test_pause_fires_on_cascade_exhausted_variants () =
-  check bool "Cascade_exhausted -> pause" true
+  check
+    bool
+    "Cascade_exhausted -> pause"
+    true
     (EC.is_cascade_exhausted_error (mk_cascade_exhausted ()));
-  check bool "No_tool_capable_provider -> pause" true
+  check
+    bool
+    "No_tool_capable_provider -> pause"
+    true
     (EC.is_cascade_exhausted_error (mk_no_tool_capable ()));
-  check bool "Accept_rejected -> pause" true
+  check
+    bool
+    "Accept_rejected -> pause"
+    true
     (EC.is_cascade_exhausted_error (mk_accept_rejected ()));
-  check bool "Resumable_cli_session -> pause" true
+  check
+    bool
+    "Resumable_cli_session -> pause"
+    true
     (EC.is_cascade_exhausted_error (mk_resumable_cli_session ()))
+;;
 
 (* --- 2. is_cascade_exhausted_error stays false for transient/timeout variants ---
    If this regresses, a single 429 + 2 prior unrelated failures would
@@ -70,29 +83,40 @@ let test_pause_fires_on_cascade_exhausted_variants () =
 let mk_oas_timeout_budget () =
   Owne.sdk_error_of_masc_internal_error
     (Owne.Oas_timeout_budget
-       { budget_sec = 30.0;
-         keeper_turn_timeout_sec = 60.0;
-         estimated_input_tokens = 1000;
-         source = "test" })
+       { budget_sec = 30.0
+       ; keeper_turn_timeout_sec = 60.0
+       ; estimated_input_tokens = 1000
+       ; source = "test"
+       })
+;;
 
 let mk_turn_timeout () =
-  Owne.sdk_error_of_masc_internal_error
-    (Owne.Turn_timeout { elapsed_sec = 60.0 })
+  Owne.sdk_error_of_masc_internal_error (Owne.Turn_timeout { elapsed_sec = 60.0 })
+;;
 
 let mk_admission_queue_timeout () =
   Owne.sdk_error_of_masc_internal_error
     (Owne.Admission_queue_timeout
-       { keeper_name = "test_keeper";
-         cascade_name = "test";
-         wait_sec = 5.0 })
+       { keeper_name = "test_keeper"; cascade_name = "test"; wait_sec = 5.0 })
+;;
 
 let test_pause_does_not_fire_on_transient () =
-  check bool "Oas_timeout_budget -> no pause" false
+  check
+    bool
+    "Oas_timeout_budget -> no pause"
+    false
     (EC.is_cascade_exhausted_error (mk_oas_timeout_budget ()));
-  check bool "Turn_timeout -> no pause" false
+  check
+    bool
+    "Turn_timeout -> no pause"
+    false
     (EC.is_cascade_exhausted_error (mk_turn_timeout ()));
-  check bool "Admission_queue_timeout -> no pause" false
+  check
+    bool
+    "Admission_queue_timeout -> no pause"
+    false
     (EC.is_cascade_exhausted_error (mk_admission_queue_timeout ()))
+;;
 
 (* --- 3. threshold ordering: pause fires before crash --- *)
 
@@ -102,42 +126,49 @@ let test_threshold_pin () =
      [keeper_max_turn_failures] (default 5). If someone bumps
      [turn_fail_streak_threshold] above the crash threshold the guard
      becomes dead code — this test catches that drift. *)
-  check int "turn_fail_streak_threshold pinned at 3"
-    3 Regime.turn_fail_streak_threshold;
-  check bool "pause threshold strictly less than crash threshold default 5"
+  check int "turn_fail_streak_threshold pinned at 3" 3 Regime.turn_fail_streak_threshold;
+  check
+    bool
+    "pause threshold strictly less than crash threshold default 5"
     true
     (Regime.turn_fail_streak_threshold < 5)
+;;
 
 (* --- 4. behavioral regime regards 3 failures of the cascade-class as Thrashing,
    which is the qualitative signal the guard escalates to a hard pause for. --- *)
 
 let test_regime_flips_to_thrashing_at_threshold () =
-  let input : Regime.input = {
-    turn_consecutive_failures = Regime.turn_fail_streak_threshold;
-    restart_count = 0;
-    last_restart_ts = 0.0;
-    tool_aggregates = [];
-  } in
+  let input : Regime.input =
+    { turn_consecutive_failures = Regime.turn_fail_streak_threshold
+    ; restart_count = 0
+    ; last_restart_ts = 0.0
+    ; tool_aggregates = []
+    }
+  in
   let snapshot = Regime.derive ~now:0.0 input in
-  check string "regime -> thrashing"
-    "thrashing" (Regime.string_of_regime snapshot.regime);
-  check string "rule_id -> turn_fail_streak"
-    "turn_fail_streak" snapshot.reason.rule_id
+  check string "regime -> thrashing" "thrashing" (Regime.string_of_regime snapshot.regime);
+  check string "rule_id -> turn_fail_streak" "turn_fail_streak" snapshot.reason.rule_id
+;;
 
 let () =
-  run "keeper_cascade_auto_pause_task074"
-    [
-      ( "predicate covers cascade-class errors",
-        [
-          test_case "cascade variants trigger pause" `Quick
-            test_pause_fires_on_cascade_exhausted_variants;
-          test_case "transient variants do not trigger pause" `Quick
-            test_pause_does_not_fire_on_transient;
-        ] );
-      ( "threshold ordering",
-        [
-          test_case "pause threshold < crash default" `Quick test_threshold_pin;
-          test_case "regime flip at threshold" `Quick
-            test_regime_flips_to_thrashing_at_threshold;
-        ] );
+  run
+    "keeper_cascade_auto_pause_task074"
+    [ ( "predicate covers cascade-class errors"
+      , [ test_case
+            "cascade variants trigger pause"
+            `Quick
+            test_pause_fires_on_cascade_exhausted_variants
+        ; test_case
+            "transient variants do not trigger pause"
+            `Quick
+            test_pause_does_not_fire_on_transient
+        ] )
+    ; ( "threshold ordering"
+      , [ test_case "pause threshold < crash default" `Quick test_threshold_pin
+        ; test_case
+            "regime flip at threshold"
+            `Quick
+            test_regime_flips_to_thrashing_at_threshold
+        ] )
     ]
+;;

@@ -17,17 +17,17 @@
 (** {1 Types} *)
 
 (** A learned procedure — "When X, do Y". *)
-type procedure = {
-  id : string;
-  agent_name : string;
-  pattern : string;            (** "When X, do Y" description *)
-  evidence : string list;      (** Decision IDs supporting this pattern *)
-  success_count : int;
-  failure_count : int;
-  confidence : float;          (** [success / (success + failure)] *)
-  created_at : float;
-  last_applied : float;
-}
+type procedure =
+  { id : string
+  ; agent_name : string
+  ; pattern : string (** "When X, do Y" description *)
+  ; evidence : string list (** Decision IDs supporting this pattern *)
+  ; success_count : int
+  ; failure_count : int
+  ; confidence : float (** [success / (success + failure)] *)
+  ; created_at : float
+  ; last_applied : float
+  }
 
 (** {1 Paths} *)
 
@@ -56,12 +56,12 @@ val rewrite_procedures : agent_name:string -> procedure list -> unit
     an existing procedure with the same [pattern] and updates its
     counts, or creates a new one. Persists the change and returns the
     updated/new procedure. *)
-val record_outcome :
-  agent_name:string ->
-  pattern:string ->
-  evidence_id:string ->
-  success:bool ->
-  procedure
+val record_outcome
+  :  agent_name:string
+  -> pattern:string
+  -> evidence_id:string
+  -> success:bool
+  -> procedure
 
 (** {1 Crystallisation} *)
 

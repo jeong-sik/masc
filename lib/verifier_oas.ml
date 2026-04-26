@@ -9,12 +9,12 @@
 open Printf
 
 (* Re-export core types for backward compatibility *)
-type verification_request = Verifier_core.verification_request = {
-  action_description : string;
-  action_result : string;
-  goal : string;
-  context_summary : string;
-}
+type verification_request = Verifier_core.verification_request =
+  { action_description : string
+  ; action_result : string
+  ; goal : string
+  ; context_summary : string
+  }
 
 type verdict = Verifier_core.verdict =
   | Pass
@@ -34,7 +34,7 @@ let parse_verdict_from_json = Verifier_core.parse_verdict_from_json
 
 let build_prompt (req : verification_request) : string =
   sprintf
-{|You are a verification agent. Evaluate whether this action was correct.
+    {|You are a verification agent. Evaluate whether this action was correct.
 
 Goal: %s
 
@@ -56,6 +56,7 @@ One line only.|}
     req.action_description
     (String_util.utf8_safe ~max_bytes:503 ~suffix:"..." req.action_result
      |> String_util.to_string)
+;;
 
 (* ================================================================ *)
 (* Core: verify                                                     *)
@@ -71,25 +72,25 @@ One line only.|}
     The fallback path is nondeterministic but returns Error on failure
     instead of silently degrading. *)
 let verify (req : verification_request) : (verdict, string) result =
-  if should_skip ~action_description:req.action_description then
-    Ok Pass
-  else
+  if should_skip ~action_description:req.action_description
+  then Ok Pass
+  else (
     let prompt = build_prompt req in
     let verdict_ref = ref None in
     let dispatch ~name:_ ~args =
       match parse_verdict_from_json args with
       | Ok v ->
         verdict_ref := Some v;
-        (false, sprintf "Verdict recorded: %s" (verdict_to_string v))
+        false, sprintf "Verdict recorded: %s" (verdict_to_string v)
       | Error msg ->
         Log.Verifier.warn "Structured verdict parse failed: %s" msg;
-        (false, sprintf "Invalid verdict format: %s" msg)
+        false, sprintf "Invalid verdict format: %s" msg
     in
     match
       Oas_worker_named.run_named_with_masc_tools
         ~cascade_name:"verifier"
         ~goal:prompt
-        ~masc_tools:[report_verdict_schema]
+        ~masc_tools:[ report_verdict_schema ]
         ~dispatch
         ~max_turns:1
         ~temperature:Oas_worker_cascade.deterministic_temperature
@@ -109,11 +110,13 @@ let verify (req : verification_request) : (verdict, string) result =
          (match parse_verdict text with
           | Ok verdict -> Ok verdict
           | Error parse_err ->
-            Log.Verifier.warn "Verdict parse failed (%s); raw=%s"
-              parse_err (String.sub text 0 (min 80 (String.length text)));
+            Log.Verifier.warn
+              "Verdict parse failed (%s); raw=%s"
+              parse_err
+              (String.sub text 0 (min 80 (String.length text)));
             Error (sprintf "verdict parse: %s" parse_err)))
-    | Error err ->
-      Error (Oas.Error.to_string err)
+    | Error err -> Error (Oas.Error.to_string err))
+;;
 
 (* ================================================================ *)
 (* Verdict -> Hook Decision (OAS bridge)                            *)
@@ -137,46 +140,49 @@ let verdict_to_hook_decision (v : verdict) : Oas.Hooks.hook_decision =
   | Fail reason ->
     Log.Verifier.error "FAIL (skipping tool): %s" reason;
     Oas.Hooks.Skip
+;;
 
 let continue_with_degraded_verifier ~tool_name ~reason =
   Log.Verifier.error
     "verification degraded for %s; allowing tool to continue: %s"
-    tool_name reason;
+    tool_name
+    reason;
   Oas.Hooks.Continue
+;;
 
 let handle_pre_tool_use
-    ?(verify_fn = verify)
-    ~(goal : string)
-    ~(context_summary : string)
-    ~(tool_name : string)
-    ~(input : Yojson.Safe.t)
-    ()
-  : Oas.Hooks.hook_decision =
+      ?(verify_fn = verify)
+      ~(goal : string)
+      ~(context_summary : string)
+      ~(tool_name : string)
+      ~(input : Yojson.Safe.t)
+      ()
+  : Oas.Hooks.hook_decision
+  =
   let action_description = sprintf "tool:%s" tool_name in
-  if should_skip ~action_description then
-    Oas.Hooks.Continue
-  else
-    (match
-       try Ok (Yojson.Safe.to_string input)
-       with Eio.Cancel.Cancelled _ as e -> raise e
-          | exn -> Error (Printexc.to_string exn)
-     with
-     | Error msg ->
-         continue_with_degraded_verifier ~tool_name
-           ~reason:(Printf.sprintf "input serialization failed: %s" msg)
-     | Ok input_str ->
-         let req : verification_request = {
-           action_description;
-           action_result = input_str;
-           goal;
-           context_summary;
-         } in
-         begin match verify_fn req with
-         | Ok verdict -> verdict_to_hook_decision verdict
-         | Error msg ->
-             continue_with_degraded_verifier ~tool_name
-               ~reason:(Printf.sprintf "verifier backend error: %s" msg)
-         end)
+  if should_skip ~action_description
+  then Oas.Hooks.Continue
+  else (
+    match
+      try Ok (Yojson.Safe.to_string input) with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn -> Error (Printexc.to_string exn)
+    with
+    | Error msg ->
+      continue_with_degraded_verifier
+        ~tool_name
+        ~reason:(Printf.sprintf "input serialization failed: %s" msg)
+    | Ok input_str ->
+      let req : verification_request =
+        { action_description; action_result = input_str; goal; context_summary }
+      in
+      (match verify_fn req with
+       | Ok verdict -> verdict_to_hook_decision verdict
+       | Error msg ->
+         continue_with_degraded_verifier
+           ~tool_name
+           ~reason:(Printf.sprintf "verifier backend error: %s" msg)))
+;;
 
 (* ================================================================ *)
 (* PreToolUse Hook                                                   *)
@@ -192,28 +198,27 @@ let handle_pre_tool_use
 
     @param goal The current agent goal (for verification prompt context).
     @param context_summary Brief summary of agent state. *)
-let make_pre_tool_hook
-    ?(verify_fn = verify)
-    ~(goal : string)
-    ~(context_summary : string)
-  : Oas.Hooks.hook =
+let make_pre_tool_hook ?(verify_fn = verify) ~(goal : string) ~(context_summary : string)
+  : Oas.Hooks.hook
+  =
   fun event ->
-    match event with
-    | Oas.Hooks.PreToolUse { tool_name; input; _ } ->
-      handle_pre_tool_use ~verify_fn ~goal ~context_summary ~tool_name ~input ()
-    | Oas.Hooks.BeforeTurn _
-    | Oas.Hooks.BeforeTurnParams _
-    | Oas.Hooks.AfterTurn _
-    | Oas.Hooks.PostToolUse _
-    | Oas.Hooks.PostToolUseFailure _
-    | Oas.Hooks.OnStop _
-    | Oas.Hooks.OnIdle _
-    | Oas.Hooks.OnIdleEscalated _
-    | Oas.Hooks.OnError _
-    | Oas.Hooks.OnToolError _
-    | Oas.Hooks.PreCompact _
-    | Oas.Hooks.PostCompact _
-    | Oas.Hooks.OnContextCompacted _ -> Oas.Hooks.Continue
+  match event with
+  | Oas.Hooks.PreToolUse { tool_name; input; _ } ->
+    handle_pre_tool_use ~verify_fn ~goal ~context_summary ~tool_name ~input ()
+  | Oas.Hooks.BeforeTurn _
+  | Oas.Hooks.BeforeTurnParams _
+  | Oas.Hooks.AfterTurn _
+  | Oas.Hooks.PostToolUse _
+  | Oas.Hooks.PostToolUseFailure _
+  | Oas.Hooks.OnStop _
+  | Oas.Hooks.OnIdle _
+  | Oas.Hooks.OnIdleEscalated _
+  | Oas.Hooks.OnError _
+  | Oas.Hooks.OnToolError _
+  | Oas.Hooks.PreCompact _
+  | Oas.Hooks.PostCompact _
+  | Oas.Hooks.OnContextCompacted _ -> Oas.Hooks.Continue
+;;
 
 (** Install the verifier hook into an existing OAS hooks record.
 
@@ -226,13 +231,11 @@ let make_pre_tool_hook
     @param goal The agent goal.
     @param context_summary The agent context summary.
     @return Updated hooks record with the verifier installed in pre_tool_use. *)
-let install_hook
-    ~(hooks : Oas.Hooks.hooks)
-    ~(goal : string)
-    ~(context_summary : string)
-  : Oas.Hooks.hooks =
-  { hooks with
-    pre_tool_use = Some (make_pre_tool_hook ~goal ~context_summary) }
+let install_hook ~(hooks : Oas.Hooks.hooks) ~(goal : string) ~(context_summary : string)
+  : Oas.Hooks.hooks
+  =
+  { hooks with pre_tool_use = Some (make_pre_tool_hook ~goal ~context_summary) }
+;;
 
 (* ================================================================ *)
 (* Read-Only Detection as OAS Guardrails.Custom                      *)
@@ -255,14 +258,11 @@ let install_hook
     predicate. Since all tools should remain visible to the MODEL, it
     always returns [true]. The predicate is provided for integration
     with custom pipelines that want to inspect read-only status. *)
-let guardrails_with_read_only_tag
-    ?(max_tool_calls_per_turn : int option)
-    ()
-  : Oas.Guardrails.t =
-  {
-    tool_filter = Oas.Guardrails.AllowAll;
-    max_tool_calls_per_turn;
-  }
+let guardrails_with_read_only_tag ?(max_tool_calls_per_turn : int option) ()
+  : Oas.Guardrails.t
+  =
+  { tool_filter = Oas.Guardrails.AllowAll; max_tool_calls_per_turn }
+;;
 
 (** Create an OAS Guardrails.Custom filter that identifies read-only tools.
 
@@ -271,6 +271,7 @@ let guardrails_with_read_only_tag
     guardrails pipelines for conditional verification bypass. *)
 let read_only_predicate (schema : Oas.Types.tool_schema) : bool =
   should_skip ~action_description:schema.name
+;;
 
 (* ================================================================ *)
 (* Eval_gate -> OAS Guardrails bridge                               *)
@@ -290,22 +291,19 @@ let read_only_predicate (schema : Oas.Types.tool_schema) : bool =
     defense-in-depth.
 
     @since Phase 6 — OAS Guardrails bridge *)
-let eval_gate_to_oas_guardrails (gate : Eval_gate.gate_config) :
-    Oas.Guardrails.t =
+let eval_gate_to_oas_guardrails (gate : Eval_gate.gate_config) : Oas.Guardrails.t =
   let tool_filter =
-    match (gate.allowlist_enabled, gate.allowed_tools, gate.denied_tools) with
+    match gate.allowlist_enabled, gate.allowed_tools, gate.denied_tools with
     | true, (_ :: _ as allowed), _ ->
-        (* AllowList is the stricter filter; deny is handled at runtime *)
-        Oas.Guardrails.AllowList allowed
+      (* AllowList is the stricter filter; deny is handled at runtime *)
+      Oas.Guardrails.AllowList allowed
     | true, [], _ ->
-        (* Allowlist enabled but empty = deny all tools *)
-        Oas.Guardrails.AllowList []
-    | false, _, (_ :: _ as denied) ->
-        Oas.Guardrails.DenyList denied
-    | false, _, [] ->
-        Oas.Guardrails.AllowAll
+      (* Allowlist enabled but empty = deny all tools *)
+      Oas.Guardrails.AllowList []
+    | false, _, (_ :: _ as denied) -> Oas.Guardrails.DenyList denied
+    | false, _, [] -> Oas.Guardrails.AllowAll
   in
-  {
-    Oas.Guardrails.tool_filter;
-    max_tool_calls_per_turn = Some gate.max_tool_calls_per_turn;
+  { Oas.Guardrails.tool_filter
+  ; max_tool_calls_per_turn = Some gate.max_tool_calls_per_turn
   }
+;;

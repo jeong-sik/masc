@@ -1,4 +1,3 @@
-
 open Types
 open Server_utils
 open Server_auth
@@ -7,7 +6,7 @@ open Server_auth
 include Server_dashboard_http_cache
 
 type dashboard_compute_mode =
-  Server_dashboard_http_runtime_support.dashboard_compute_mode =
+      Server_dashboard_http_runtime_support.dashboard_compute_mode =
   | Inline_shared
   | Offloaded_readonly
 
@@ -17,21 +16,38 @@ let runtime_support = Server_dashboard_http_runtime_support.default ()
     Pool reference is shared via [Executor_pool_ref] in masc_core. *)
 let set_executor_pool = Server_dashboard_http_runtime_support.set_executor_pool
 
-let dashboard_runtime ?net ?mono_clock (config : Coord.config) :
-    Server_dashboard_http_runtime_support.runtime option =
+let dashboard_runtime ?net ?mono_clock (config : Coord.config)
+  : Server_dashboard_http_runtime_support.runtime option
+  =
   let _ = config in
   match net, mono_clock with
   | Some net, Some mono_clock -> Some { net; mono_clock }
   | _ -> None
+;;
 
-let run_dashboard_compute ?(mode = Offloaded_readonly) ?net ?mono_clock ~sw ~clock
-    ~(config : Coord.config) compute =
+let run_dashboard_compute
+      ?(mode = Offloaded_readonly)
+      ?net
+      ?mono_clock
+      ~sw
+      ~clock
+      ~(config : Coord.config)
+      compute
+  =
   let runtime = dashboard_runtime ?net ?mono_clock config in
-  Server_dashboard_http_runtime_support.run_dashboard_compute runtime_support
-    ~mode ?runtime ~sw ~clock ~config compute
+  Server_dashboard_http_runtime_support.run_dashboard_compute
+    runtime_support
+    ~mode
+    ?runtime
+    ~sw
+    ~clock
+    ~config
+    compute
+;;
 
 let state_dashboard_runtime_caps (state : Mcp_server.server_state) =
-  (state.Mcp_server.net, state.Mcp_server.mono_clock)
+  state.Mcp_server.net, state.Mcp_server.mono_clock
+;;
 
 (* ================================================================ *)
 (* Dashboard Data (Batch API)                                       *)
@@ -59,21 +75,33 @@ let _last_good_shell : Yojson.Safe.t Atomic.t = Atomic.make (`Assoc [])
 (** Wrap a dashboard computation with a configurable timeout.
     Returns a partial-response JSON on timeout instead of hanging. *)
 let with_dashboard_timeout ~clock compute =
-  match Eio.Time.with_timeout clock dashboard_request_timeout_s (fun () -> Ok (compute ())) with
+  match
+    Eio.Time.with_timeout clock dashboard_request_timeout_s (fun () -> Ok (compute ()))
+  with
   | Ok v -> v
   | Error `Timeout ->
-      `Assoc [
-        ("error", `String "timeout");
-        ("partial", `Bool true);
-        ("message", `String (Printf.sprintf "Dashboard computation timed out after %.0fs." dashboard_request_timeout_s));
-        ("generated_at", `String (Types.now_iso ()));
+    `Assoc
+      [ "error", `String "timeout"
+      ; "partial", `Bool true
+      ; ( "message"
+        , `String
+            (Printf.sprintf
+               "Dashboard computation timed out after %.0fs."
+               dashboard_request_timeout_s) )
+      ; "generated_at", `String (Types.now_iso ())
       ]
+;;
 
 let cache_partition_segment (_config : Coord.config) = "default"
 
 let dashboard_cache_key (config : Coord.config) prefix suffix =
-  Printf.sprintf "%s:%s:%s:%s" prefix config.base_path
-    (cache_partition_segment config) suffix
+  Printf.sprintf
+    "%s:%s:%s:%s"
+    prefix
+    config.base_path
+    (cache_partition_segment config)
+    suffix
+;;
 
 let dashboard_mission_timeout_s = 25.0
 
@@ -81,29 +109,33 @@ let attach_projection_diagnostics json diagnostics =
   match json with
   | `Assoc fields -> `Assoc (("projection_diagnostics", diagnostics) :: fields)
   | other -> other
+;;
 
 let projection_diagnostics_json ~surface ~started_at ~extra json =
   let build_ms = int_of_float ((Unix.gettimeofday () -. started_at) *. 1000.0) in
   let payload_bytes = String.length (Yojson.Safe.to_string json) in
   `Assoc
-    ([
-       ("surface", `String surface);
-       ("build_ms", `Int build_ms);
-       ("payload_bytes", `Int payload_bytes);
-       ("generated_at", `String (Types.now_iso ()));
+    ([ "surface", `String surface
+     ; "build_ms", `Int build_ms
+     ; "payload_bytes", `Int payload_bytes
+     ; "generated_at", `String (Types.now_iso ())
      ]
-    @ extra)
+     @ extra)
+;;
 
 let with_projection_diagnostics ~surface ~started_at ~extra json =
-  attach_projection_diagnostics json
+  attach_projection_diagnostics
+    json
     (projection_diagnostics_json ~surface ~started_at ~extra json)
+;;
 
 let initialized_json_opt ?(allow_initializing = false) = function
-  | `Assoc fields as json -> (
-      match List.assoc_opt "status" fields with
-      | Some (`String "initializing") when not allow_initializing -> None
-      | _ -> Some json)
+  | `Assoc fields as json ->
+    (match List.assoc_opt "status" fields with
+     | Some (`String "initializing") when not allow_initializing -> None
+     | _ -> Some json)
   | _ -> None
+;;
 
 let dashboard_batch_json ?(compact = false) (config : Coord.config) : Yojson.Safe.t =
   let room_state = Coord.read_state config in
@@ -113,11 +145,10 @@ let dashboard_batch_json ?(compact = false) (config : Coord.config) : Yojson.Saf
   let agents = Coord.get_active_agents config in
   let msgs = Coord.get_messages_raw config ~since_seq:0 ~limit:20 in
   let now_ts = Time_compat.now () in
-  let (board_monitor_json, board_contract_ok) = board_monitoring_json ~now_ts in
-  let (governance_monitor_json, governance_feed_ok) =
+  let board_monitor_json, board_contract_ok = board_monitoring_json ~now_ts in
+  let governance_monitor_json, governance_feed_ok =
     governance_monitoring_json ~now_ts ~base_path:config.base_path
   in
-
   let proactive_fallback_warn = 0.20 in
   let proactive_fallback_bad = 0.40 in
   let proactive_similarity_warn = 0.90 in
@@ -125,119 +156,134 @@ let dashboard_batch_json ?(compact = false) (config : Coord.config) : Yojson.Saf
   let alert_toast_cooldown_sec = 300 in
   let cluster = Env_config_core.cluster_name () in
   let status_json =
-    `Assoc [
-      ("cluster", `String cluster);
-      ("base_path", `String config.base_path);
-      ("coordination_root", `String config.base_path);
-      ("workspace_path", `String config.workspace_path);
-      ("workspace_differs", `Bool (config.workspace_path <> config.base_path));
-      ("cluster", `String (Env_config_core.cluster_name ()));
-      ("project", `String room_state.project);
-      ("tempo_interval_s", `Float tempo.current_interval_s);
-      ("paused", `Bool room_state.paused);
-      ("tool_call_health", tool_call_health_json config);
-      ("alert_thresholds", `Assoc [
-        ("proactive_fallback_warn", `Float proactive_fallback_warn);
-        ("proactive_fallback_bad", `Float (max proactive_fallback_warn proactive_fallback_bad));
-        ("proactive_similarity_warn", `Float proactive_similarity_warn);
-        ("proactive_similarity_bad", `Float (max proactive_similarity_warn proactive_similarity_bad));
-        ("toast_cooldown_sec", `Int alert_toast_cooldown_sec);
-      ]);
-      ("monitoring", `Assoc [
-        ("board", board_monitor_json);
-        ("governance", governance_monitor_json);
-        ("room_state", Coord_eio.state_health_counters ());
-        ("executor", executor_outcomes_json config);
-        ("slots", slot_monitoring_json ());
-      ]);
-      ("data_quality", `Assoc [
-        ("board_contract_ok", `Bool board_contract_ok);
-        ("governance_feed_ok", `Bool governance_feed_ok);
-        ("last_sync_at", `String (Types.now_iso ()));
-      ]);
-    ]
+    `Assoc
+      [ "cluster", `String cluster
+      ; "base_path", `String config.base_path
+      ; "coordination_root", `String config.base_path
+      ; "workspace_path", `String config.workspace_path
+      ; "workspace_differs", `Bool (config.workspace_path <> config.base_path)
+      ; "cluster", `String (Env_config_core.cluster_name ())
+      ; "project", `String room_state.project
+      ; "tempo_interval_s", `Float tempo.current_interval_s
+      ; "paused", `Bool room_state.paused
+      ; "tool_call_health", tool_call_health_json config
+      ; ( "alert_thresholds"
+        , `Assoc
+            [ "proactive_fallback_warn", `Float proactive_fallback_warn
+            ; ( "proactive_fallback_bad"
+              , `Float (max proactive_fallback_warn proactive_fallback_bad) )
+            ; "proactive_similarity_warn", `Float proactive_similarity_warn
+            ; ( "proactive_similarity_bad"
+              , `Float (max proactive_similarity_warn proactive_similarity_bad) )
+            ; "toast_cooldown_sec", `Int alert_toast_cooldown_sec
+            ] )
+      ; ( "monitoring"
+        , `Assoc
+            [ "board", board_monitor_json
+            ; "governance", governance_monitor_json
+            ; "room_state", Coord_eio.state_health_counters ()
+            ; "executor", executor_outcomes_json config
+            ; "slots", slot_monitoring_json ()
+            ] )
+      ; ( "data_quality"
+        , `Assoc
+            [ "board_contract_ok", `Bool board_contract_ok
+            ; "governance_feed_ok", `Bool governance_feed_ok
+            ; "last_sync_at", `String (Types.now_iso ())
+            ] )
+      ]
   in
   let tasks_json =
-    List.map (fun (t : Types.task) ->
-      let base_fields =
-        [
-          ("id", `String t.id);
-          ("title", `String t.title);
-          ("description", `String t.description);
-          ("status", `String (Types.string_of_task_status t.task_status));
-          ("priority", `Int t.priority);
-          ( "assignee",
-            match t.task_status with
-            | Claimed { assignee; _ }
-            | InProgress { assignee; _ }
-            | Done { assignee; _ } ->
-                `String assignee
-            | _ -> `Null );
-          ("created_at", `String t.created_at);
-        ]
-      in
-      let projection_fields =
-        match (fun _t -> ignore config; `Assoc []) t with
-        | `Assoc fields -> fields
-        | _ -> []
-      in
-      `Assoc (base_fields @ projection_fields))
+    List.map
+      (fun (t : Types.task) ->
+         let base_fields =
+           [ "id", `String t.id
+           ; "title", `String t.title
+           ; "description", `String t.description
+           ; "status", `String (Types.string_of_task_status t.task_status)
+           ; "priority", `Int t.priority
+           ; ( "assignee"
+             , match t.task_status with
+               | Claimed { assignee; _ }
+               | InProgress { assignee; _ }
+               | Done { assignee; _ } -> `String assignee
+               | _ -> `Null )
+           ; "created_at", `String t.created_at
+           ]
+         in
+         let projection_fields =
+           match
+             (fun _t ->
+                ignore config;
+                `Assoc [])
+               t
+           with
+           | `Assoc fields -> fields
+           | _ -> []
+         in
+         `Assoc (base_fields @ projection_fields))
       (List.filter
          (fun (t : Types.task) ->
-           match t.task_status with
-           | Types.Cancelled _ -> false
-           | Types.Done _ -> not compact
-           | Types.Todo -> true
-           | Types.Claimed _ | Types.InProgress _ -> true
-           | Types.AwaitingVerification _ -> true)
+            match t.task_status with
+            | Types.Cancelled _ -> false
+            | Types.Done _ -> not compact
+            | Types.Todo -> true
+            | Types.Claimed _ | Types.InProgress _ -> true
+            | Types.AwaitingVerification _ -> true)
          tasks)
   in
   let agents_json =
-    List.map (fun (a : Types.agent) ->
-      let profile = Dashboard_execution_helpers.get_agent_profile a.name in
-      `Assoc [
-        ("name", `String a.name);
-        ("status", `String (Types.string_of_agent_status a.status));
-        ("current_task", Json_util.string_opt_to_json a.current_task);
-        ("last_seen", `String a.last_seen);
-        ("emoji", `String profile.emoji);
-        ("koreanName", `String profile.korean_name);
-        ("model", Json_util.string_opt_to_json profile.model);
-        ("traits", `List (List.map (fun t -> `String t) profile.traits));
-        ("interests", `List (List.map (fun i -> `String i) profile.interests));
-        ("activityLevel", Json_util.float_opt_to_json profile.activity_level);
-        ("primaryValue", Json_util.string_opt_to_json profile.primary_value);
-        ("generation", `Null);
-        ("context_ratio", `Null);
-        ("turn_count", `Null);
-      ]
-    ) agents
+    List.map
+      (fun (a : Types.agent) ->
+         let profile = Dashboard_execution_helpers.get_agent_profile a.name in
+         `Assoc
+           [ "name", `String a.name
+           ; "status", `String (Types.string_of_agent_status a.status)
+           ; "current_task", Json_util.string_opt_to_json a.current_task
+           ; "last_seen", `String a.last_seen
+           ; "emoji", `String profile.emoji
+           ; "koreanName", `String profile.korean_name
+           ; "model", Json_util.string_opt_to_json profile.model
+           ; "traits", `List (List.map (fun t -> `String t) profile.traits)
+           ; "interests", `List (List.map (fun i -> `String i) profile.interests)
+           ; "activityLevel", Json_util.float_opt_to_json profile.activity_level
+           ; "primaryValue", Json_util.string_opt_to_json profile.primary_value
+           ; "generation", `Null
+           ; "context_ratio", `Null
+           ; "turn_count", `Null
+           ])
+      agents
   in
   let msgs_json =
     List.map
       (fun (m : Types.message) ->
-        `Assoc [
-          ("from", `String m.from_agent);
-          ("content", `String m.content);
-          ("timestamp", `String m.timestamp);
-          ("seq", `Int m.seq);
-        ])
+         `Assoc
+           [ "from", `String m.from_agent
+           ; "content", `String m.content
+           ; "timestamp", `String m.timestamp
+           ; "seq", `Int m.seq
+           ])
       (List.filteri (fun idx _ -> idx < 20) msgs)
   in
-  `Assoc [
-    ("status", status_json);
-    ("tasks", `Assoc [ ("tasks", `List tasks_json); ("total", `Int (List.length tasks_json)) ]);
-    ("agents", `Assoc [ ("agents", `List agents_json); ("total", `Int (List.length agents_json)) ]);
-    ("messages", `Assoc [ ("messages", `List msgs_json); ("total", `Int (List.length msgs_json)) ]);
-    ("keepers", keepers_dashboard_json ~compact config);
-  ]
+  `Assoc
+    [ "status", status_json
+    ; ( "tasks"
+      , `Assoc [ "tasks", `List tasks_json; "total", `Int (List.length tasks_json) ] )
+    ; ( "agents"
+      , `Assoc [ "agents", `List agents_json; "total", `Int (List.length agents_json) ] )
+    ; ( "messages"
+      , `Assoc [ "messages", `List msgs_json; "total", `Int (List.length msgs_json) ] )
+    ; "keepers", keepers_dashboard_json ~compact config
+    ]
+;;
 
 let operator_actor_hint request =
   match agent_from_request request with
   | Some raw ->
-      let sanitized = sanitize_dashboard_actor_name raw in
-      if sanitized = "" then None else Some sanitized
+    let sanitized = sanitize_dashboard_actor_name raw in
+    if sanitized = "" then None else Some sanitized
   | None -> None
+;;
 
 (* --- Operator proactive refresh ---
    Default (no-param) requests are served from a background-refreshed ref.
@@ -253,17 +299,23 @@ let operator_actor_hint request =
    Sse module is in scope.  Same pattern as _broadcast_room_truth_ref. *)
 let _operator_snapshot_broadcast_ref : (Yojson.Safe.t -> unit) ref =
   ref (fun (_json : Yojson.Safe.t) -> ())
+;;
 
 let _operator_digest_broadcast_ref : (Yojson.Safe.t -> unit) ref =
   ref (fun (_json : Yojson.Safe.t) -> ())
+;;
 
 let _operator_snapshot_cache =
   create_cached_surface
-    (`Assoc [ ("status", `String "initializing"); ("generated_at", `String (Types.now_iso ())) ])
+    (`Assoc
+        [ "status", `String "initializing"; "generated_at", `String (Types.now_iso ()) ])
+;;
 
 let _operator_digest_cache =
   create_cached_surface
-    (`Assoc [ ("health", `String "initializing"); ("generated_at", `String (Types.now_iso ())) ])
+    (`Assoc
+        [ "health", `String "initializing"; "generated_at", `String (Types.now_iso ()) ])
+;;
 
 let _operator_refresh_interval_s =
   float_of_env_default
@@ -271,11 +323,11 @@ let _operator_refresh_interval_s =
     ~default:60.0
     ~min_v:10.0
     ~max_v:600.0
+;;
 
 let operator_snapshot_extra () =
-  [
-    ("readonly_pool", Coord_utils.domain_local_pg_backend_diagnostics_json ());
-  ]
+  [ "readonly_pool", Coord_utils.domain_local_pg_backend_diagnostics_json () ]
+;;
 
 let start_operator_snapshot_refresh_loop ~state ~sw ~clock =
   let config = state.Mcp_server.room_config in
@@ -285,53 +337,70 @@ let start_operator_snapshot_refresh_loop ~state ~sw ~clock =
     mark_cached_surface_attempt _operator_snapshot_cache;
     let started_at = Unix.gettimeofday () in
     try
-      run_dashboard_compute ~mode:Offloaded_readonly ?net ?mono_clock ~sw
-        ~clock ~config
+      run_dashboard_compute
+        ~mode:Offloaded_readonly
+        ?net
+        ?mono_clock
+        ~sw
+        ~clock
+        ~config
         (fun ~config ~sw ->
-          let ctx : _ Operator_control.context =
-            {
-              config;
-              agent_name = "dashboard";
-              sw;
-              clock;
-              proc_mgr;
-              net = None;
-              mcp_session_id = None;
-            }
-          in
-          let t_snapshot = Unix.gettimeofday () in
-          let json =
-            Operator_control.snapshot_json ~actor:"dashboard" ~view:"summary"
-              ~include_messages:true ~include_keepers:true
-              ~include_summary_fields:false
-              ~lightweight_summary:true
-              ctx
-          in
-          let dt_snapshot = Unix.gettimeofday () -. t_snapshot in
-          let dt_total = Unix.gettimeofday () -. started_at in
-          if dt_total >= 5.0 then
-            Log.Dashboard.warn
-              "[operator_snapshot profile] total=%.1fs snapshot=%.1fs"
-              dt_total dt_snapshot;
-          json
-          |> with_projection_diagnostics ~surface:"operator_snapshot" ~started_at
-               ~extra:(operator_snapshot_extra ()))
+           let ctx : _ Operator_control.context =
+             { config
+             ; agent_name = "dashboard"
+             ; sw
+             ; clock
+             ; proc_mgr
+             ; net = None
+             ; mcp_session_id = None
+             }
+           in
+           let t_snapshot = Unix.gettimeofday () in
+           let json =
+             Operator_control.snapshot_json
+               ~actor:"dashboard"
+               ~view:"summary"
+               ~include_messages:true
+               ~include_keepers:true
+               ~include_summary_fields:false
+               ~lightweight_summary:true
+               ctx
+           in
+           let dt_snapshot = Unix.gettimeofday () -. t_snapshot in
+           let dt_total = Unix.gettimeofday () -. started_at in
+           if dt_total >= 5.0
+           then
+             Log.Dashboard.warn
+               "[operator_snapshot profile] total=%.1fs snapshot=%.1fs"
+               dt_total
+               dt_snapshot;
+           json
+           |> with_projection_diagnostics
+                ~surface:"operator_snapshot"
+                ~started_at
+                ~extra:(operator_snapshot_extra ()))
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
       mark_cached_surface_error _operator_snapshot_cache exn;
       raise exn
   in
-  Proactive_refresh.start ~sw ~clock
-    ~config:{ (Proactive_refresh.default_config
-                 ~label:"operator_snapshot"
-                 ~interval_s:_operator_refresh_interval_s)
-              with timeout_s = _operator_refresh_interval_s *. 0.8;
-                   warm_delay_s = 120.0 }
+  Proactive_refresh.start
+    ~sw
+    ~clock
+    ~config:
+      { (Proactive_refresh.default_config
+           ~label:"operator_snapshot"
+           ~interval_s:_operator_refresh_interval_s)
+        with
+        timeout_s = _operator_refresh_interval_s *. 0.8
+      ; warm_delay_s = 120.0
+      }
     ~compute
     ~on_result:(fun json ->
       mark_cached_surface_success _operator_snapshot_cache json;
       !_operator_snapshot_broadcast_ref json)
+;;
 
 let start_operator_digest_refresh_loop ~state ~sw ~clock =
   let config = state.Mcp_server.room_config in
@@ -341,50 +410,62 @@ let start_operator_digest_refresh_loop ~state ~sw ~clock =
     mark_cached_surface_attempt _operator_digest_cache;
     let started_at = Unix.gettimeofday () in
     try
-      run_dashboard_compute ~mode:Offloaded_readonly ?net ?mono_clock ~sw
-        ~clock ~config
+      run_dashboard_compute
+        ~mode:Offloaded_readonly
+        ?net
+        ?mono_clock
+        ~sw
+        ~clock
+        ~config
         (fun ~config ~sw ->
-          let ctx : _ Operator_control.context =
-            {
-              config;
-              agent_name = "dashboard";
-              sw;
-              clock;
-              proc_mgr;
-              net = None;
-              mcp_session_id = None;
-            }
-          in
-          match
-            Operator_control.digest_json ~actor:"dashboard" ~target_type:"root"
-              ctx
-          with
-          | Ok json ->
-              with_projection_diagnostics ~surface:"operator_digest" ~started_at
-                ~extra:(operator_snapshot_extra ()) json
-          | Error err -> invalid_arg ("server_dashboard_http_core: operator digest failed: " ^ err))
+           let ctx : _ Operator_control.context =
+             { config
+             ; agent_name = "dashboard"
+             ; sw
+             ; clock
+             ; proc_mgr
+             ; net = None
+             ; mcp_session_id = None
+             }
+           in
+           match
+             Operator_control.digest_json ~actor:"dashboard" ~target_type:"root" ctx
+           with
+           | Ok json ->
+             with_projection_diagnostics
+               ~surface:"operator_digest"
+               ~started_at
+               ~extra:(operator_snapshot_extra ())
+               json
+           | Error err ->
+             invalid_arg ("server_dashboard_http_core: operator digest failed: " ^ err))
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
       mark_cached_surface_error _operator_digest_cache exn;
       raise exn
   in
-  Proactive_refresh.start ~sw ~clock
-    ~config:{ (Proactive_refresh.default_config
-                 ~label:"operator_digest"
-                 ~interval_s:_operator_refresh_interval_s)
-              with timeout_s = _operator_refresh_interval_s *. 0.8;
-                   warm_delay_s = 150.0 }
+  Proactive_refresh.start
+    ~sw
+    ~clock
+    ~config:
+      { (Proactive_refresh.default_config
+           ~label:"operator_digest"
+           ~interval_s:_operator_refresh_interval_s)
+        with
+        timeout_s = _operator_refresh_interval_s *. 0.8
+      ; warm_delay_s = 150.0
+      }
     ~compute
     ~on_result:(fun json ->
       mark_cached_surface_success _operator_digest_cache json;
       !_operator_digest_broadcast_ref json)
+;;
 
 let operator_snapshot_http_json ~state ~sw ~clock request =
   let net, mono_clock = state_dashboard_runtime_caps state in
   let actor =
-    dashboard_actor_for_request ~base_path:state.Mcp_server.room_config.base_path
-      request
+    dashboard_actor_for_request ~base_path:state.Mcp_server.room_config.base_path request
   in
   let view = query_param request "view" in
   let default_summary_request =
@@ -396,9 +477,9 @@ let operator_snapshot_http_json ~state ~sw ~clock request =
     | None -> true
     | Some raw -> String.equal (String.lowercase_ascii (String.trim raw)) "summary"
   in
-  if default_summary_request then
-    cached_surface_json _operator_snapshot_cache
-  else begin
+  if default_summary_request
+  then cached_surface_json _operator_snapshot_cache
+  else (
     let started_at = Unix.gettimeofday () in
     let include_messages =
       match query_param request "include_messages" with
@@ -415,51 +496,56 @@ let operator_snapshot_http_json ~state ~sw ~clock request =
       | Some raw -> String.equal (String.lowercase_ascii (String.trim raw)) "summary"
       | None -> false
     in
-    let mode =
-      if lightweight_summary then Inline_shared else Offloaded_readonly
-    in
-    match Eio.Time.with_timeout clock dashboard_request_timeout_s (fun () ->
-      Ok
-        (run_dashboard_compute ~mode ?net ?mono_clock ~sw ~clock
-           ~config:state.Mcp_server.room_config
-           (fun ~config ~sw ->
-             let ctx : _ Operator_control.context =
-               {
-                 config;
-                 agent_name = Option.value ~default:"dashboard" actor;
-                 sw;
-                 clock;
-                 proc_mgr = state.Mcp_server.proc_mgr;
-                 net = state.Mcp_server.net;
-                 mcp_session_id = None;
-               }
-             in
-            Operator_control.snapshot_json ?actor ?view
-               ~include_messages ~include_keepers
-               ~include_summary_fields:(not lightweight_summary)
-               ~lightweight_summary
-               ctx))
-    ) with
+    let mode = if lightweight_summary then Inline_shared else Offloaded_readonly in
+    match
+      Eio.Time.with_timeout clock dashboard_request_timeout_s (fun () ->
+        Ok
+          (run_dashboard_compute
+             ~mode
+             ?net
+             ?mono_clock
+             ~sw
+             ~clock
+             ~config:state.Mcp_server.room_config
+             (fun ~config ~sw ->
+                let ctx : _ Operator_control.context =
+                  { config
+                  ; agent_name = Option.value ~default:"dashboard" actor
+                  ; sw
+                  ; clock
+                  ; proc_mgr = state.Mcp_server.proc_mgr
+                  ; net = state.Mcp_server.net
+                  ; mcp_session_id = None
+                  }
+                in
+                Operator_control.snapshot_json
+                  ?actor
+                  ?view
+                  ~include_messages
+                  ~include_keepers
+                  ~include_summary_fields:(not lightweight_summary)
+                  ~lightweight_summary
+                  ctx)))
+    with
     | Ok json ->
-        with_projection_diagnostics ~surface:"operator_snapshot" ~started_at
-          ~extra:
-            [
-              ("readonly_pool", Coord_utils.domain_local_pg_backend_diagnostics_json ());
-            ]
-          json
+      with_projection_diagnostics
+        ~surface:"operator_snapshot"
+        ~started_at
+        ~extra:
+          [ "readonly_pool", Coord_utils.domain_local_pg_backend_diagnostics_json () ]
+        json
     | Error `Timeout ->
-        `Assoc [
-          ("error", `String "timeout");
-          ("message", `String "Operator snapshot timed out after 30s");
-          ("generated_at", `String (Types.now_iso ()));
-        ]
-  end
+      `Assoc
+        [ "error", `String "timeout"
+        ; "message", `String "Operator snapshot timed out after 30s"
+        ; "generated_at", `String (Types.now_iso ())
+        ])
+;;
 
 let operator_digest_http_json ~state ~sw ~clock request =
   let net, mono_clock = state_dashboard_runtime_caps state in
   let actor =
-    dashboard_actor_for_request ~base_path:state.Mcp_server.room_config.base_path
-      request
+    dashboard_actor_for_request ~base_path:state.Mcp_server.room_config.base_path request
   in
   let target_type = query_param request "target_type" in
   let target_id = query_param request "target_id" in
@@ -481,60 +567,64 @@ let operator_digest_http_json ~state ~sw ~clock request =
     && include_workers = None
     && namespace_target_type target_type
   in
-  if default_namespace_request then
-    Ok (cached_surface_json _operator_digest_cache)
-  else
+  if default_namespace_request
+  then Ok (cached_surface_json _operator_digest_cache)
+  else (
     let started_at = Unix.gettimeofday () in
-    let effective_target_type =
-      Option.value ~default:"root" target_type
-    in
-    match Eio.Time.with_timeout clock dashboard_request_timeout_s (fun () ->
-      Ok
-        (run_dashboard_compute ~mode:Offloaded_readonly ?net ?mono_clock ~sw
-           ~clock
-           ~config:state.Mcp_server.room_config
-           (fun ~config ~sw ->
-             let ctx : _ Operator_control.context =
-               {
-                 config;
-                 agent_name = Option.value ~default:"dashboard" actor;
-                 sw;
-                 clock;
-                 proc_mgr = state.Mcp_server.proc_mgr;
-                 net = state.Mcp_server.net;
-                 mcp_session_id = None;
-               }
-             in
-             match
-               Operator_control.digest_json ?actor ~target_type:effective_target_type
-                 ?target_id ?include_workers
-                 ctx
-             with
-             | Ok json -> json
-             | Error err ->
-                 `Assoc
-                   [
-                     ("error", `String "validation_error");
-                     ("message", `String err);
-                     ("generated_at", `String (Types.now_iso ()));
-                   ]))
-    ) with
+    let effective_target_type = Option.value ~default:"root" target_type in
+    match
+      Eio.Time.with_timeout clock dashboard_request_timeout_s (fun () ->
+        Ok
+          (run_dashboard_compute
+             ~mode:Offloaded_readonly
+             ?net
+             ?mono_clock
+             ~sw
+             ~clock
+             ~config:state.Mcp_server.room_config
+             (fun ~config ~sw ->
+                let ctx : _ Operator_control.context =
+                  { config
+                  ; agent_name = Option.value ~default:"dashboard" actor
+                  ; sw
+                  ; clock
+                  ; proc_mgr = state.Mcp_server.proc_mgr
+                  ; net = state.Mcp_server.net
+                  ; mcp_session_id = None
+                  }
+                in
+                match
+                  Operator_control.digest_json
+                    ?actor
+                    ~target_type:effective_target_type
+                    ?target_id
+                    ?include_workers
+                    ctx
+                with
+                | Ok json -> json
+                | Error err ->
+                  `Assoc
+                    [ "error", `String "validation_error"
+                    ; "message", `String err
+                    ; "generated_at", `String (Types.now_iso ())
+                    ])))
+    with
     | Ok json ->
-        Ok
-          (with_projection_diagnostics ~surface:"operator_digest" ~started_at
-             ~extra:
-               [
-                 ("readonly_pool", Coord_utils.domain_local_pg_backend_diagnostics_json ());
-               ]
-             json)
+      Ok
+        (with_projection_diagnostics
+           ~surface:"operator_digest"
+           ~started_at
+           ~extra:
+             [ "readonly_pool", Coord_utils.domain_local_pg_backend_diagnostics_json () ]
+           json)
     | Error `Timeout ->
-        Ok
-          (`Assoc
-            [
-              ("error", `String "timeout");
-              ("message", `String "Operator digest timed out after 30s");
-              ("generated_at", `String (Types.now_iso ()));
-            ])
+      Ok
+        (`Assoc
+            [ "error", `String "timeout"
+            ; "message", `String "Operator digest timed out after 30s"
+            ; "generated_at", `String (Types.now_iso ())
+            ]))
+;;
 
 (* --- Mission proactive refresh ----------------------------------------
    A background fiber recomputes the mission snapshot periodically.
@@ -545,18 +635,18 @@ let operator_digest_http_json ~state ~sw ~clock request =
 let _mission_cache =
   create_cached_surface
     (`Assoc
-      [
-        ("generated_at", `String (Types.now_iso ()));
-        ("summary", `Assoc [("room_health", `String "initializing")]);
-        ("incidents", `List []);
-        ("recommended_actions", `List []);
-        ("command_focus", `Assoc []);
-        ("operator_targets", `Assoc []);
-        ("attention_queue", `List []);
-        ("agent_briefs", `List []);
-        ("keeper_briefs", `List []);
-        ("internal_signals", `List []);
-      ])
+        [ "generated_at", `String (Types.now_iso ())
+        ; "summary", `Assoc [ "room_health", `String "initializing" ]
+        ; "incidents", `List []
+        ; "recommended_actions", `List []
+        ; "command_focus", `Assoc []
+        ; "operator_targets", `Assoc []
+        ; "attention_queue", `List []
+        ; "agent_briefs", `List []
+        ; "keeper_briefs", `List []
+        ; "internal_signals", `List []
+        ])
+;;
 
 let start_mission_refresh_loop ~state ~sw ~clock =
   let room_config = state.Mcp_server.room_config in
@@ -567,20 +657,20 @@ let start_mission_refresh_loop ~state ~sw ~clock =
     mark_cached_surface_attempt _mission_cache;
     let t0_mission = Unix.gettimeofday () in
     try
-      run_dashboard_compute ~mode:Offloaded_readonly ?net ?mono_clock ~sw
-        ~clock ~config:room_config
-        |> fun run_compute ->
-        let result =
-          run_compute
-          (fun ~config ~sw ->
-            Dashboard_mission.json ~config ~sw
-              ~clock ~proc_mgr ())
-        in
+      run_dashboard_compute
+        ~mode:Offloaded_readonly
+        ?net
+        ?mono_clock
+        ~sw
+        ~clock
+        ~config:room_config
+      |> fun run_compute ->
+      let result =
+        run_compute (fun ~config ~sw ->
+          Dashboard_mission.json ~config ~sw ~clock ~proc_mgr ())
+      in
       let dt_total = Unix.gettimeofday () -. t0_mission in
-      if dt_total >= 5.0 then
-        Log.Dashboard.warn
-          "[mission profile] total=%.1fs"
-          dt_total;
+      if dt_total >= 5.0 then Log.Dashboard.warn "[mission profile] total=%.1fs" dt_total;
       result
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
@@ -588,94 +678,132 @@ let start_mission_refresh_loop ~state ~sw ~clock =
       mark_cached_surface_error _mission_cache exn;
       raise exn
   in
-  Proactive_refresh.start ~sw ~clock
-    ~config:{ (Proactive_refresh.default_config ~label:"mission" ~interval_s:120.0)
-              with timeout_s = mission_refresh_timeout_s;
-                   warm_delay_s = 90.0 }
+  Proactive_refresh.start
+    ~sw
+    ~clock
+    ~config:
+      { (Proactive_refresh.default_config ~label:"mission" ~interval_s:120.0) with
+        timeout_s = mission_refresh_timeout_s
+      ; warm_delay_s = 90.0
+      }
     ~compute
     ~on_result:(mark_cached_surface_success _mission_cache)
+;;
 
 let dashboard_mission_http_json ~state ~sw ~clock request =
   let net, mono_clock = state_dashboard_runtime_caps state in
   let actor =
-    dashboard_actor_for_request ~base_path:state.Mcp_server.room_config.base_path
-      request
+    dashboard_actor_for_request ~base_path:state.Mcp_server.room_config.base_path request
   in
   let compute ?actor () =
     let started_at = Unix.gettimeofday () in
-    run_dashboard_compute ~mode:Offloaded_readonly ?net ?mono_clock ~sw
+    run_dashboard_compute
+      ~mode:Offloaded_readonly
+      ?net
+      ?mono_clock
+      ~sw
       ~clock
       ~config:state.Mcp_server.room_config
       (fun ~config ~sw ->
-        Dashboard_mission.json ?actor
-          ~config ~sw ~clock
-          ~proc_mgr:state.Mcp_server.proc_mgr ())
-    |> with_projection_diagnostics ~surface:"mission" ~started_at
-         ~extra:[]
+         Dashboard_mission.json
+           ?actor
+           ~config
+           ~sw
+           ~clock
+           ~proc_mgr:state.Mcp_server.proc_mgr
+           ())
+    |> with_projection_diagnostics ~surface:"mission" ~started_at ~extra:[]
   in
   let full_json =
     match actor with
     | None ->
-        (* Mirror execution surface behavior: serve cached mission instantly
+      (* Mirror execution surface behavior: serve cached mission instantly
            after the first success, but let the very first default read
            bootstrap that success instead of staying "initializing" forever
            when proactive warm-up misses its first build window. *)
-        cached_surface_or_first_success_json _mission_cache
-          ~cache_key:"mission:default" ~ttl:120.0 ~clock ~timeout_sec:dashboard_mission_timeout_s
-          (fun () -> compute ())
+      cached_surface_or_first_success_json
+        _mission_cache
+        ~cache_key:"mission:default"
+        ~ttl:120.0
+        ~clock
+        ~timeout_sec:dashboard_mission_timeout_s
+        (fun () -> compute ())
     | Some _ ->
       (* Actor-parameterized: on-demand with SWR cache. *)
       let cache_key =
-        dashboard_cache_key state.Mcp_server.room_config "mission"
+        dashboard_cache_key
+          state.Mcp_server.room_config
+          "mission"
           (Option.value ~default:"" actor)
       in
-      Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:120.0
-        ~clock ~timeout_sec:dashboard_mission_timeout_s (compute ?actor)
+      Dashboard_cache.get_or_compute_with_timeout
+        cache_key
+        ~ttl:120.0
+        ~clock
+        ~timeout_sec:dashboard_mission_timeout_s
+        (compute ?actor)
   in
   full_json
+;;
 
 let dashboard_session_http_json ~state ~sw ~clock request =
   match query_param request "session_id" with
   | Some session_id when String.trim session_id <> "" ->
-      Dashboard_mission.session_json
-        ?actor:
-          (dashboard_actor_for_request
-             ~base_path:state.Mcp_server.room_config.base_path request)
-        ~session_id:(String.trim session_id)
-        ~config:state.Mcp_server.room_config ~sw ~clock
-        ~proc_mgr:state.Mcp_server.proc_mgr ()
+    Dashboard_mission.session_json
+      ?actor:
+        (dashboard_actor_for_request
+           ~base_path:state.Mcp_server.room_config.base_path
+           request)
+      ~session_id:(String.trim session_id)
+      ~config:state.Mcp_server.room_config
+      ~sw
+      ~clock
+      ~proc_mgr:state.Mcp_server.proc_mgr
+      ()
   | _ ->
-      `Assoc
-        [
-          ("generated_at", `String (Types.now_iso ()));
-          ("session_id", `Null);
-          ("session", `Null);
-          ("timeline", `List []);
-          ("participants", `List []);
-          ("operations", `List []);
-          ("keepers", `List []);
-          ("error", `String "session_id is required");
-        ]
+    `Assoc
+      [ "generated_at", `String (Types.now_iso ())
+      ; "session_id", `Null
+      ; "session", `Null
+      ; "timeline", `List []
+      ; "participants", `List []
+      ; "operations", `List []
+      ; "keepers", `List []
+      ; "error", `String "session_id is required"
+      ]
+;;
 
 let dashboard_mission_briefing_http_json ~state ~sw ~clock request =
   let actor =
-    dashboard_actor_for_request ~base_path:state.Mcp_server.room_config.base_path
-      request
+    dashboard_actor_for_request ~base_path:state.Mcp_server.room_config.base_path request
   in
   let force = bool_query_param request "force" ~default:false in
   let compute () =
-    Dashboard_mission_briefing.json ?actor ~force
-      ~config:state.Mcp_server.room_config ~sw ~clock
-      ~proc_mgr:state.Mcp_server.proc_mgr ()
+    Dashboard_mission_briefing.json
+      ?actor
+      ~force
+      ~config:state.Mcp_server.room_config
+      ~sw
+      ~clock
+      ~proc_mgr:state.Mcp_server.proc_mgr
+      ()
   in
-  if force then with_dashboard_timeout ~clock compute
-  else
+  if force
+  then with_dashboard_timeout ~clock compute
+  else (
     let cache_key =
-      dashboard_cache_key state.Mcp_server.room_config "mission_briefing"
+      dashboard_cache_key
+        state.Mcp_server.room_config
+        "mission_briefing"
         (Option.value ~default:"" actor)
     in
-    Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:120.0
-      ~clock ~timeout_sec:dashboard_mission_timeout_s compute
+    Dashboard_cache.get_or_compute_with_timeout
+      cache_key
+      ~ttl:120.0
+      ~clock
+      ~timeout_sec:dashboard_mission_timeout_s
+      compute)
+;;
 
 let dashboard_shell_status_json (config : Coord.config) : Yojson.Safe.t =
   let room_state = Coord.read_state config in
@@ -683,100 +811,107 @@ let dashboard_shell_status_json (config : Coord.config) : Yojson.Safe.t =
   let tempo = Tempo.get_tempo config in
   let build = Build_identity.current () in
   `Assoc
-    [
-      ("cluster", `String cluster);
-      ("base_path", `String config.base_path);
-      ("coordination_root", `String config.base_path);
-      ("workspace_path", `String config.workspace_path);
-      ("workspace_differs", `Bool (config.workspace_path <> config.base_path));
-      ("cluster", `String (Env_config_core.cluster_name ()));
-      ("project", `String room_state.project);
-      ("tempo_interval_s", `Float tempo.current_interval_s);
-      ("paused", `Bool room_state.paused);
-      ("version", `String build.release_version);
-      ("build", Build_identity.to_yojson build);
+    [ "cluster", `String cluster
+    ; "base_path", `String config.base_path
+    ; "coordination_root", `String config.base_path
+    ; "workspace_path", `String config.workspace_path
+    ; "workspace_differs", `Bool (config.workspace_path <> config.base_path)
+    ; "cluster", `String (Env_config_core.cluster_name ())
+    ; "project", `String room_state.project
+    ; "tempo_interval_s", `Float tempo.current_interval_s
+    ; "paused", `Bool room_state.paused
+    ; "version", `String build.release_version
+    ; "build", Build_identity.to_yojson build
     ]
+;;
 
 let dashboard_task_assignee (task : Types.task) =
   match task.task_status with
-  | Claimed { assignee; _ } | InProgress { assignee; _ }
-  | AwaitingVerification { assignee; _ } | Done { assignee; _ } ->
-      Some assignee
+  | Claimed { assignee; _ }
+  | InProgress { assignee; _ }
+  | AwaitingVerification { assignee; _ }
+  | Done { assignee; _ } -> Some assignee
   | Todo | Cancelled _ -> None
+;;
 
 let dashboard_task_json config (task : Types.task) =
   let base_fields =
-    [
-      ("id", `String task.id);
-      ("title", `String task.title);
-      ("description", `String task.description);
-      ("status", `String (Types.string_of_task_status task.task_status));
-      ("priority", `Int task.priority);
-      ("assignee", Json_util.string_opt_to_json (dashboard_task_assignee task));
-      ("created_at", `String task.created_at);
+    [ "id", `String task.id
+    ; "title", `String task.title
+    ; "description", `String task.description
+    ; "status", `String (Types.string_of_task_status task.task_status)
+    ; "priority", `Int task.priority
+    ; "assignee", Json_util.string_opt_to_json (dashboard_task_assignee task)
+    ; "created_at", `String task.created_at
     ]
   in
   let projection_fields =
-    match (fun _t -> ignore config; `Assoc []) task with
+    match
+      (fun _t ->
+         ignore config;
+         `Assoc [])
+        task
+    with
     | `Assoc fields -> fields
     | _ -> []
   in
   `Assoc (base_fields @ projection_fields)
+;;
 
 let dashboard_agent_json (agent : Types.agent) =
   let profile = Dashboard_execution_helpers.get_agent_profile agent.name in
   let meta = agent.meta in
   `Assoc
-    [
-      ("name", `String agent.name);
-      ("agent_type", `String agent.agent_type);
-      ("keeper_name", Json_util.string_opt_to_json (Option.bind meta (fun m -> m.keeper_name)));
-      ("keeper_id", Json_util.string_opt_to_json (Option.bind meta (fun m -> m.keeper_id)));
-      ("status", `String (Types.string_of_agent_status agent.status));
-      ("current_task", Json_util.string_opt_to_json agent.current_task);
-      ("joined_at", `String agent.joined_at);
-      ("last_seen", `String agent.last_seen);
-      ("capabilities", `List (List.map (fun item -> `String item) agent.capabilities));
-      ("emoji", `String profile.emoji);
-      ("koreanName", `String profile.korean_name);
-      ("model", Json_util.string_opt_to_json profile.model);
-      ("traits", `List (List.map (fun t -> `String t) profile.traits));
-      ("interests", `List (List.map (fun i -> `String i) profile.interests));
-      ("activityLevel", Json_util.float_opt_to_json profile.activity_level);
-      ("primaryValue", Json_util.string_opt_to_json profile.primary_value);
+    [ "name", `String agent.name
+    ; "agent_type", `String agent.agent_type
+    ; ( "keeper_name"
+      , Json_util.string_opt_to_json (Option.bind meta (fun m -> m.keeper_name)) )
+    ; "keeper_id", Json_util.string_opt_to_json (Option.bind meta (fun m -> m.keeper_id))
+    ; "status", `String (Types.string_of_agent_status agent.status)
+    ; "current_task", Json_util.string_opt_to_json agent.current_task
+    ; "joined_at", `String agent.joined_at
+    ; "last_seen", `String agent.last_seen
+    ; "capabilities", `List (List.map (fun item -> `String item) agent.capabilities)
+    ; "emoji", `String profile.emoji
+    ; "koreanName", `String profile.korean_name
+    ; "model", Json_util.string_opt_to_json profile.model
+    ; "traits", `List (List.map (fun t -> `String t) profile.traits)
+    ; "interests", `List (List.map (fun i -> `String i) profile.interests)
+    ; "activityLevel", Json_util.float_opt_to_json profile.activity_level
+    ; "primaryValue", Json_util.string_opt_to_json profile.primary_value
     ]
+;;
 
 let dashboard_message_json (message : Types.message) =
   `Assoc
-    [
-      ("from", `String message.from_agent);
-      ("content", `String message.content);
-      ("timestamp", `String message.timestamp);
-      ("seq", `Int message.seq);
+    [ "from", `String message.from_agent
+    ; "content", `String message.content
+    ; "timestamp", `String message.timestamp
+    ; "seq", `Int message.seq
     ]
+;;
 
 (* dashboard_current_room_id removed — namespace retired (#unify-namespace). *)
 
-let dashboard_tasks_safe config =
-  Coord.get_tasks_safe config
-
-let dashboard_agents_safe config =
-  Coord.get_active_agents config
+let dashboard_tasks_safe config = Coord.get_tasks_safe config
+let dashboard_agents_safe config = Coord.get_active_agents config
 
 let dashboard_messages_safe config ~since_seq ~limit =
   Coord.get_messages_raw config ~since_seq ~limit
+;;
 
 let is_keeper_agent (agent : Types.agent) =
   String.equal (String.lowercase_ascii (String.trim agent.agent_type)) "keeper"
+;;
 
 let dashboard_general_agent_count agents =
   agents
   |> List.fold_left
        (fun count agent -> if is_keeper_agent agent then count else count + 1)
        0
+;;
 
-let provider_capacity_json () : Yojson.Safe.t =
-  `Assoc []
+let provider_capacity_json () : Yojson.Safe.t = `Assoc []
 
 (* #10544: light mode is meant to skip the heavy belief/tension evaluation
    and the full board scan, so it should also have a smaller wall-clock
@@ -789,8 +924,10 @@ let provider_capacity_json () : Yojson.Safe.t =
    "the full path needs more headroom or a real perf fix". *)
 let dashboard_shell_timeout_s = 16.0
 let dashboard_shell_light_timeout_s = 8.0
+
 let dashboard_shell_timeout_for ~light =
   if light then dashboard_shell_light_timeout_s else dashboard_shell_timeout_s
+;;
 
 (* Meta_cognition.summary_json does a full board_posts.jsonl scan +
    belief/tension/desire rule evaluation. On a room with 450+ posts this
@@ -808,38 +945,45 @@ let meta_cognition_summary_stale_for = meta_cognition_summary_ttl *. 3.0
 
 let meta_cognition_summary_empty_json =
   `Assoc
-    [
-      ("stagnation_score", `Float 0.0);
-      ("belief_count", `Int 0);
-      ("contested_belief_count", `Int 0);
-      ("dominant_belief", `Null);
-      ("top_tension", `Null);
-      ("top_desire", `Null);
+    [ "stagnation_score", `Float 0.0
+    ; "belief_count", `Int 0
+    ; "contested_belief_count", `Int 0
+    ; "dominant_belief", `Null
+    ; "top_tension", `Null
+    ; "top_desire", `Null
     ]
+;;
 
 let dashboard_shell_cache_prefix (config : Coord.config) =
   Printf.sprintf "shell:coord=%s:" config.base_path
+;;
 
 let dashboard_shell_cache_key ?(light = false) (config : Coord.config) =
-  Printf.sprintf "%sworkspace=%s:mode=%s"
+  Printf.sprintf
+    "%sworkspace=%s:mode=%s"
     (dashboard_shell_cache_prefix config)
     config.workspace_path
     (if light then "light" else "full")
+;;
 
 let meta_cognition_summary_key (config : Coord.config) =
   dashboard_cache_key config "meta_cognition_summary" "dashboard_shell"
+;;
 
 let store_last_good_meta_cognition_summary key json =
   Eio_guard.with_mutex meta_cognition_last_good_mu (fun () ->
-      Hashtbl.replace meta_cognition_last_good key json)
+    Hashtbl.replace meta_cognition_last_good key json)
+;;
 
 let find_last_good_meta_cognition_summary key =
   Eio_guard.with_mutex meta_cognition_last_good_mu (fun () ->
-      Hashtbl.find_opt meta_cognition_last_good key)
+    Hashtbl.find_opt meta_cognition_last_good key)
+;;
 
 let clear_meta_cognition_warm_flag key =
   Eio_guard.with_mutex meta_cognition_warm_mu (fun () ->
-      Hashtbl.remove meta_cognition_warm_inflight key)
+    Hashtbl.remove meta_cognition_warm_inflight key)
+;;
 
 let schedule_meta_cognition_summary_warm (config : Coord.config) =
   let key = meta_cognition_summary_key config in
@@ -850,36 +994,38 @@ let schedule_meta_cognition_summary_warm (config : Coord.config) =
   in
   let should_start =
     Eio_guard.with_mutex meta_cognition_warm_mu (fun () ->
-        if Hashtbl.mem meta_cognition_warm_inflight key then
-          false
-        else (
-          Hashtbl.replace meta_cognition_warm_inflight key ();
-          true))
+      if Hashtbl.mem meta_cognition_warm_inflight key
+      then false
+      else (
+        Hashtbl.replace meta_cognition_warm_inflight key ();
+        true))
   in
-  if should_start then
+  if should_start
+  then (
     match Eio_context.get_switch_opt () with
     | Some sw ->
-        Eio.Fiber.fork ~sw (fun () ->
-            Fun.protect
-              ~finally:(fun () -> clear_meta_cognition_warm_flag key)
-              (fun () ->
-                try
-                  Dashboard_cache.invalidate key;
-                  ignore
-                    (Dashboard_cache.get_or_compute key ~ttl:meta_cognition_summary_ttl
-                       compute)
-                  (* Drop cached shell payloads that were rendered while the
-                     meta-cognition summary was still warming. *)
-                  ;
-                  Dashboard_cache.invalidate_prefix
-                    (dashboard_shell_cache_prefix config)
-                with
-                | Eio.Cancel.Cancelled _ as e -> raise e
-                | exn ->
-                    Log.Server.warn
-                      "dashboard shell meta_cognition warm failed: %s"
-                      (Printexc.to_string exn)))
-    | None -> clear_meta_cognition_warm_flag key
+      Eio.Fiber.fork ~sw (fun () ->
+        Fun.protect
+          ~finally:(fun () -> clear_meta_cognition_warm_flag key)
+          (fun () ->
+             try
+               Dashboard_cache.invalidate key;
+               ignore
+                 (Dashboard_cache.get_or_compute
+                    key
+                    ~ttl:meta_cognition_summary_ttl
+                    compute)
+               (* Drop cached shell payloads that were rendered while the
+                     meta-cognition summary was still warming. *);
+               Dashboard_cache.invalidate_prefix (dashboard_shell_cache_prefix config)
+             with
+             | Eio.Cancel.Cancelled _ as e -> raise e
+             | exn ->
+               Log.Server.warn
+                 "dashboard shell meta_cognition warm failed: %s"
+                 (Printexc.to_string exn)))
+    | None -> clear_meta_cognition_warm_flag key)
+;;
 
 let meta_cognition_summary_cached (config : Coord.config) : Yojson.Safe.t =
   let key = meta_cognition_summary_key config in
@@ -895,19 +1041,21 @@ let meta_cognition_summary_cached (config : Coord.config) : Yojson.Safe.t =
   in
   match Dashboard_cache.peek key with
   | Some _ ->
-      let result =
-        Dashboard_cache.get_or_compute key ~ttl:meta_cognition_summary_ttl
-          compute
-      in
-      if result = `Null then fallback else result
+    let result =
+      Dashboard_cache.get_or_compute key ~ttl:meta_cognition_summary_ttl compute
+    in
+    if result = `Null then fallback else result
   | None ->
-      (match find_last_good_meta_cognition_summary key with
-       | Some stale ->
-           Dashboard_cache.seed_stale_if_missing key
-             ~stale_for:meta_cognition_summary_stale_for stale
-       | None -> ());
-      schedule_meta_cognition_summary_warm config;
-      if fallback = meta_cognition_summary_empty_json then `Null else fallback
+    (match find_last_good_meta_cognition_summary key with
+     | Some stale ->
+       Dashboard_cache.seed_stale_if_missing
+         key
+         ~stale_for:meta_cognition_summary_stale_for
+         stale
+     | None -> ());
+    schedule_meta_cognition_summary_warm config;
+    if fallback = meta_cognition_summary_empty_json then `Null else fallback
+;;
 
 let dashboard_shell_paths_json (config : Coord.config) : Yojson.Safe.t =
   Server_base_path_diagnostics.detect
@@ -917,52 +1065,52 @@ let dashboard_shell_paths_json (config : Coord.config) : Yojson.Safe.t =
     ~effective_masc_root:(Coord.masc_root_dir config)
     ()
   |> Server_base_path_diagnostics.to_yojson
+;;
 
 let dashboard_shell_bootstrap_json (config : Coord.config) : Yojson.Safe.t =
   let generated_at = Types.now_iso () in
   let started_at = Unix.gettimeofday () in
   `Assoc
-    [
-      ("generated_at", `String generated_at);
-      ( "status",
-        `Assoc
-          [
-            ("project", `String "initializing");
-            ("generated_at", `String generated_at);
-          ] );
-      ("paths", dashboard_shell_paths_json config);
-      ( "counts",
-        `Assoc
-          [
-            ("agents", `Int 0);
-            ("tasks", `Int 0);
-            ("keepers", `Int 0);
-            ("total_runtimes", `Int 0);
-          ] );
-      ("configured_keepers", `Int 0);
-      ("providers", `Assoc []);
-      ("meta_cognition", `Null);
-      ("config_resolution", `Null);
-      ("runtime_resolution", `Null);
+    [ "generated_at", `String generated_at
+    ; ( "status"
+      , `Assoc [ "project", `String "initializing"; "generated_at", `String generated_at ]
+      )
+    ; "paths", dashboard_shell_paths_json config
+    ; ( "counts"
+      , `Assoc
+          [ "agents", `Int 0
+          ; "tasks", `Int 0
+          ; "keepers", `Int 0
+          ; "total_runtimes", `Int 0
+          ] )
+    ; "configured_keepers", `Int 0
+    ; "providers", `Assoc []
+    ; "meta_cognition", `Null
+    ; "config_resolution", `Null
+    ; "runtime_resolution", `Null
     ]
-  |> with_projection_diagnostics ~surface:"shell" ~started_at
+  |> with_projection_diagnostics
+       ~surface:"shell"
+       ~started_at
        ~extra:
-         [
-           ("cache_state", `String "initializing");
-           ("bootstrap_source", `String "shell_prewarm");
+         [ "cache_state", `String "initializing"
+         ; "bootstrap_source", `String "shell_prewarm"
          ]
+;;
 
 let dashboard_shell_last_good_opt () =
   match Atomic.get _last_good_shell with
   | `Assoc [] -> None
   | json -> Some json
+;;
 
 let is_dashboard_cache_timeout_json = function
-  | `Assoc fields -> (
-      match List.assoc_opt "error" fields with
-      | Some (`String ("Compute timeout" | "computation_timeout")) -> true
-      | _ -> false)
+  | `Assoc fields ->
+    (match List.assoc_opt "error" fields with
+     | Some (`String ("Compute timeout" | "computation_timeout")) -> true
+     | _ -> false)
   | _ -> false
+;;
 
 let dashboard_shell_payload_json ?(light = false) (config : Coord.config) : Yojson.Safe.t =
   let cluster = Env_config_core.cluster_name () in
@@ -971,22 +1119,26 @@ let dashboard_shell_payload_json ?(light = false) (config : Coord.config) : Yojs
     let t0 = Unix.gettimeofday () in
     let value = f () in
     let elapsed_ms = int_of_float ((Unix.gettimeofday () -. t0) *. 1000.0) in
-    (value, elapsed_ms)
+    value, elapsed_ms
   in
   let measure_json_projection label f =
     measure_ms (fun () ->
-        try f () with
-        | Eio.Cancel.Cancelled _ as e -> raise e
-        | exn ->
-            Log.Server.warn "dashboard shell %s projection failed: %s" label
-              (Printexc.to_string exn);
-            `Null)
+      try f () with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn ->
+        Log.Server.warn
+          "dashboard shell %s projection failed: %s"
+          label
+          (Printexc.to_string exn);
+        `Null)
   in
   (* Cold workspaces lazily materialize room/keeper state on first access.
      Keep those stateful reads sequential so one failing init path does not
      cancel sibling fibers and poison shared Eio mutexes. Retain parallelism
      only for projection-style reads that are safe to drop to `Null`. *)
-  let status_json, status_ms = measure_ms (fun () -> dashboard_shell_status_json config) in
+  let status_json, status_ms =
+    measure_ms (fun () -> dashboard_shell_status_json config)
+  in
   let agents, agents_ms = measure_ms (fun () -> dashboard_agents_safe config) in
   let general_agents = dashboard_general_agent_count agents in
   let tasks, tasks_ms = measure_ms (fun () -> dashboard_tasks_safe config) in
@@ -997,69 +1149,70 @@ let dashboard_shell_payload_json ?(light = false) (config : Coord.config) : Yojs
   let meta_cognition_r = ref (`Null, 0) in
   let config_resolution_r = ref (`Null, 0) in
   let runtime_resolution_r = ref (`Null, 0) in
-  if light then
-    meta_cognition_r :=
-      measure_json_projection "meta_cognition" (fun () ->
-          meta_cognition_summary_cached config)
+  if light
+  then
+    meta_cognition_r
+    := measure_json_projection "meta_cognition" (fun () ->
+         meta_cognition_summary_cached config)
   else
     Eio.Fiber.all
-      [
-        (fun () ->
-          meta_cognition_r :=
-            measure_json_projection "meta_cognition" (fun () ->
-                meta_cognition_summary_cached config));
-        (fun () ->
-          config_resolution_r :=
-            measure_json_projection "config_resolution" (fun () ->
-                Config_dir_resolver.(resolve () |> to_json)));
-        (fun () ->
-          runtime_resolution_r :=
-            measure_json_projection "runtime_resolution" (fun () ->
-                Server_dashboard_http_runtime_info.runtime_resolution_json config));
+      [ (fun () ->
+          meta_cognition_r
+          := measure_json_projection "meta_cognition" (fun () ->
+               meta_cognition_summary_cached config))
+      ; (fun () ->
+          config_resolution_r
+          := measure_json_projection "config_resolution" (fun () ->
+               Config_dir_resolver.(resolve () |> to_json)))
+      ; (fun () ->
+          runtime_resolution_r
+          := measure_json_projection "runtime_resolution" (fun () ->
+               Server_dashboard_http_runtime_info.runtime_resolution_json config))
       ];
   let meta_cognition_json, meta_cognition_ms = !meta_cognition_r in
   let config_resolution_json, config_resolution_ms = !config_resolution_r in
   let runtime_resolution_json, runtime_resolution_ms = !runtime_resolution_r in
   `Assoc
-    [
-      ("generated_at", `String (Types.now_iso ()));
-      ("status", status_json);
-      ("paths", dashboard_shell_paths_json config);
-      ( "counts",
-        `Assoc
-          [
-            ("agents", `Int general_agents);
-            ("tasks", `Int (List.length tasks));
-            ("keepers", `Int active_keepers);
-            ("total_runtimes", `Int (general_agents + active_keepers));
-          ] );
-      ("configured_keepers", `Int configured_keepers);
-      ("providers", provider_capacity_json ());
-      ("meta_cognition", meta_cognition_json);
-      ("config_resolution", config_resolution_json);
-      ("runtime_resolution", runtime_resolution_json);
+    [ "generated_at", `String (Types.now_iso ())
+    ; "status", status_json
+    ; "paths", dashboard_shell_paths_json config
+    ; ( "counts"
+      , `Assoc
+          [ "agents", `Int general_agents
+          ; "tasks", `Int (List.length tasks)
+          ; "keepers", `Int active_keepers
+          ; "total_runtimes", `Int (general_agents + active_keepers)
+          ] )
+    ; "configured_keepers", `Int configured_keepers
+    ; "providers", provider_capacity_json ()
+    ; "meta_cognition", meta_cognition_json
+    ; "config_resolution", config_resolution_json
+    ; "runtime_resolution", runtime_resolution_json
     ]
-  |> with_projection_diagnostics ~surface:"shell" ~started_at
+  |> with_projection_diagnostics
+       ~surface:"shell"
+       ~started_at
        ~extra:
-         [
-           ("cluster", `String cluster);
-           ("coordination_root", `String config.base_path);
-           ("workspace_path", `String config.workspace_path);
-           ("keeper_count_source", `String "runtime_keepalive");
-           ("configured_keeper_count_source", `String "keeper_meta");
-           ("status_ms", `Int status_ms);
-           ("agents_ms", `Int agents_ms);
-           ("tasks_ms", `Int tasks_ms);
-           ("keepers_ms", `Int keepers_ms);
-           ("configured_keepers_ms", `Int configured_keepers_ms);
-           ("meta_cognition_ms", `Int meta_cognition_ms);
-           ("config_resolution_ms", `Int config_resolution_ms);
-           ("runtime_resolution_ms", `Int runtime_resolution_ms);
-           ("light", `Bool light);
+         [ "cluster", `String cluster
+         ; "coordination_root", `String config.base_path
+         ; "workspace_path", `String config.workspace_path
+         ; "keeper_count_source", `String "runtime_keepalive"
+         ; "configured_keeper_count_source", `String "keeper_meta"
+         ; "status_ms", `Int status_ms
+         ; "agents_ms", `Int agents_ms
+         ; "tasks_ms", `Int tasks_ms
+         ; "keepers_ms", `Int keepers_ms
+         ; "configured_keepers_ms", `Int configured_keepers_ms
+         ; "meta_cognition_ms", `Int meta_cognition_ms
+         ; "config_resolution_ms", `Int config_resolution_ms
+         ; "runtime_resolution_ms", `Int runtime_resolution_ms
+         ; "light", `Bool light
          ]
+;;
 
-let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Coord.config) :
-    Yojson.Safe.t =
+let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Coord.config)
+  : Yojson.Safe.t
+  =
   let contains_substring haystack needle =
     (* Empty-needle returns false here, unlike String_util.contains_substring's
        Re.execp-compatible empty=true. Guard preserves the original contract. *)
@@ -1069,19 +1222,17 @@ let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Coord.conf
     | Types.InvalidToken _ -> Some "invalid_token"
     | Types.TokenExpired _ -> Some "token_expired"
     | Types.Forbidden { agent = "browser"; action = "cross-origin HTTP mutation" } ->
-        Some "same_origin_blocked"
+      Some "same_origin_blocked"
     | Types.Forbidden _ -> Some "insufficient_role"
     | Types.Unauthorized reason ->
-        let normalized = String.lowercase_ascii reason in
-        if contains_substring normalized "bearer token belongs to" then
-          Some "actor_mismatch"
-        else if
-          contains_substring normalized "token required"
-          || contains_substring normalized "authentication required"
-        then
-          Some "missing_token"
-        else
-          Some "unknown"
+      let normalized = String.lowercase_ascii reason in
+      if contains_substring normalized "bearer token belongs to"
+      then Some "actor_mismatch"
+      else if
+        contains_substring normalized "token required"
+        || contains_substring normalized "authentication required"
+      then Some "missing_token"
+      else Some "unknown"
     | _ -> Some "unknown"
   in
   let auth_cfg = Auth.load_auth_config config.base_path in
@@ -1089,7 +1240,8 @@ let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Coord.conf
   let token_credential_result =
     match token with
     | None -> None
-    | Some raw_token -> Some (Auth.find_credential_by_token config.base_path ~token:raw_token)
+    | Some raw_token ->
+      Some (Auth.find_credential_by_token config.base_path ~token:raw_token)
   in
   let requested_agent = request_actor_hint request in
   let token_present = Option.is_some token in
@@ -1107,12 +1259,12 @@ let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Coord.conf
     match dashboard_actor_for_request ~base_path:config.base_path request with
     | Some agent_name -> Ok agent_name
     | None ->
-        if auth_cfg.enabled && auth_cfg.require_token && token_present then
-          Error
-            (Types.Unauthorized
-               "Agent name required (X-Gate-Agent / X-MASC-Agent or token-bound credential)")
-        else
-          Ok "dashboard"
+      if auth_cfg.enabled && auth_cfg.require_token && token_present
+      then
+        Error
+          (Types.Unauthorized
+             "Agent name required (X-Gate-Agent / X-MASC-Agent or token-bound credential)")
+      else Ok "dashboard"
   in
   let effective_agent =
     match resolved_agent_name_result with
@@ -1123,37 +1275,33 @@ let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Coord.conf
     match resolved_agent_name_result with
     | Error err -> Error err
     | Ok agent_name ->
-        Auth.resolve_role_with_auth_config config.base_path ~auth_cfg
-          ~agent_name ~token
+      Auth.resolve_role_with_auth_config config.base_path ~auth_cfg ~agent_name ~token
   in
   let endpoint_gate_result =
-    match
-      if token_present then Ok ()
-      else ensure_same_origin_browser_request request
-    with
+    match if token_present then Ok () else ensure_same_origin_browser_request request with
     | Error err -> Error err
-    | Ok () -> (
-        match
-          ensure_strict_http_token_auth
-            ~endpoint:"HTTP tool access for masc_keeper_msg" auth_cfg
-        with
-        | Ok _ -> Ok ()
-        | Error msg -> Error (Types.Unauthorized msg))
+    | Ok () ->
+      (match
+         ensure_strict_http_token_auth
+           ~endpoint:"HTTP tool access for masc_keeper_msg"
+           auth_cfg
+       with
+       | Ok _ -> Ok ()
+       | Error msg -> Error (Types.Unauthorized msg))
   in
   let keeper_authorization_result =
     match endpoint_gate_result with
     | Error err -> Error err
-    | Ok () -> (
-        match resolved_agent_name_result, effective_role_result with
-        | Error err, _ | _, Error err -> Error err
-        | Ok agent_name, Ok role ->
-            Auth.authorize_tool_for_role ~agent_name ~role
-              ~tool_name:"masc_keeper_msg")
+    | Ok () ->
+      (match resolved_agent_name_result, effective_role_result with
+       | Error err, _ | _, Error err -> Error err
+       | Ok agent_name, Ok role ->
+         Auth.authorize_tool_for_role ~agent_name ~role ~tool_name:"masc_keeper_msg")
   in
   let can_keeper_msg, keeper_msg_error =
     match keeper_authorization_result with
-    | Ok () -> (true, None)
-    | Error err -> (false, Some (Types.masc_error_to_string err))
+    | Ok () -> true, None
+    | Error err -> false, Some (Types.masc_error_to_string err)
   in
   let effective_admin =
     match effective_role_result with
@@ -1170,38 +1318,40 @@ let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Coord.conf
     | Some (Error (Types.InvalidToken _ as err)) -> Some err
     | Some (Error (Types.TokenExpired _ as err)) -> Some err
     | Some (Error err) -> Some err
-    | _ -> (
-        match keeper_authorization_result with
-        | Error err -> Some err
-        | Ok () -> None)
+    | _ ->
+      (match keeper_authorization_result with
+       | Error err -> Some err
+       | Ok () -> None)
   in
   `Assoc
-    [
-      ("enabled", `Bool auth_cfg.enabled);
-      ("require_token", `Bool auth_cfg.require_token);
-      ("token_present", `Bool token_present);
-      ("token_valid", `Bool token_valid);
-      ("token_agent", Json_util.string_opt_to_json token_agent);
-      ("requested_agent", Json_util.string_opt_to_json requested_agent);
-      ("effective_agent", Json_util.string_opt_to_json effective_agent);
-      ("effective_role", Json_util.string_opt_to_json effective_role);
-      ( "auth_error_code",
-        match auth_error with
-        | Some err -> (
-            match dashboard_auth_error_code err with
-            | Some code -> `String code
-            | None -> `Null )
-        | None -> `Null );
-      ( "auth_error_detail",
-        match auth_error with
+    [ "enabled", `Bool auth_cfg.enabled
+    ; "require_token", `Bool auth_cfg.require_token
+    ; "token_present", `Bool token_present
+    ; "token_valid", `Bool token_valid
+    ; "token_agent", Json_util.string_opt_to_json token_agent
+    ; "requested_agent", Json_util.string_opt_to_json requested_agent
+    ; "effective_agent", Json_util.string_opt_to_json effective_agent
+    ; "effective_role", Json_util.string_opt_to_json effective_role
+    ; ( "auth_error_code"
+      , match auth_error with
+        | Some err ->
+          (match dashboard_auth_error_code err with
+           | Some code -> `String code
+           | None -> `Null)
+        | None -> `Null )
+    ; ( "auth_error_detail"
+      , match auth_error with
         | Some err -> `String (Types.masc_error_to_string err)
-        | None -> `Null );
-      ("effective_admin", Json_util.bool_opt_to_json effective_admin);
-      ("can_keeper_msg", `Bool can_keeper_msg);
-      ("keeper_msg_error", Json_util.string_opt_to_json keeper_msg_error);
+        | None -> `Null )
+    ; "effective_admin", Json_util.bool_opt_to_json effective_admin
+    ; "can_keeper_msg", `Bool can_keeper_msg
+    ; "keeper_msg_error", Json_util.string_opt_to_json keeper_msg_error
     ]
+;;
 
-let dashboard_shell_http_json ?clock ?request ?(light = false) (config : Coord.config) : Yojson.Safe.t =
+let dashboard_shell_http_json ?clock ?request ?(light = false) (config : Coord.config)
+  : Yojson.Safe.t
+  =
   let cache_key = dashboard_shell_cache_key ~light config in
   let compute () =
     (* Shell endpoint is read-only; use config directly without isolation
@@ -1222,8 +1372,7 @@ let dashboard_shell_http_json ?clock ?request ?(light = false) (config : Coord.c
     let current = Server_startup_state.(!state) in
     (not (Atomic.get _shell_warmed))
     && current.state_ready
-    && Server_startup_state.elapsed_since_start ()
-       < (dashboard_shell_timeout_s +. 10.0)
+    && Server_startup_state.elapsed_since_start () < dashboard_shell_timeout_s +. 10.0
   in
   let apply_startup_prewarm_guard = Option.is_some request in
   let startup_prewarm_pending =
@@ -1232,30 +1381,29 @@ let dashboard_shell_http_json ?clock ?request ?(light = false) (config : Coord.c
     && not (Atomic.get _shell_warmed)
   in
   let payload =
-    if startup_prewarm_pending then
-      fallback_payload ()
-    else
+    if startup_prewarm_pending
+    then fallback_payload ()
+    else (
       let computed =
         match clock_opt with
         | Some clock ->
-            Dashboard_cache.get_or_compute_with_timeout cache_key ~ttl:15.0
-              ~clock
-              ~timeout_sec:(dashboard_shell_timeout_for ~light)
-              compute
-        | None ->
-            Dashboard_cache.get_or_compute cache_key ~ttl:15.0 compute
+          Dashboard_cache.get_or_compute_with_timeout
+            cache_key
+            ~ttl:15.0
+            ~clock
+            ~timeout_sec:(dashboard_shell_timeout_for ~light)
+            compute
+        | None -> Dashboard_cache.get_or_compute cache_key ~ttl:15.0 compute
       in
-      if is_dashboard_cache_timeout_json computed then
-        fallback_payload ()
-      else
-        computed
+      if is_dashboard_cache_timeout_json computed then fallback_payload () else computed)
   in
   match request with
   | None -> payload
-  | Some request -> (
-      match payload with
-      | `Assoc fields ->
-          `Assoc
-            (("auth", dashboard_shell_auth_json ~request config)
-            :: List.remove_assoc "auth" fields)
-      | other -> other)
+  | Some request ->
+    (match payload with
+     | `Assoc fields ->
+       `Assoc
+         (("auth", dashboard_shell_auth_json ~request config)
+          :: List.remove_assoc "auth" fields)
+     | other -> other)
+;;

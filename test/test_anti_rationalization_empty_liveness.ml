@@ -20,27 +20,35 @@ module AR = Masc_mcp.Anti_rationalization
 let test_empty_verdict_emits_canonical_error () =
   match AR.parse_verdict "" with
   | Error msg ->
-      Alcotest.(check string)
-        "empty text gives canonical 'empty review output' error"
-        "empty review output" msg
-  | Ok _ ->
-      Alcotest.fail "parse_verdict \"\" should return Error"
+    Alcotest.(check string)
+      "empty text gives canonical 'empty review output' error"
+      "empty review output"
+      msg
+  | Ok _ -> Alcotest.fail "parse_verdict \"\" should return Error"
+;;
 
 let test_whitespace_only_verdict_also_empty () =
   match AR.parse_verdict "   \n\t  " with
   | Error msg ->
-      Alcotest.(check string)
-        "whitespace-only text trims to empty"
-        "empty review output" msg
-  | Ok _ ->
-      Alcotest.fail "parse_verdict of whitespace should return Error"
+    Alcotest.(check string)
+      "whitespace-only text trims to empty"
+      "empty review output"
+      msg
+  | Ok _ -> Alcotest.fail "parse_verdict of whitespace should return Error"
+;;
 
 let () =
-  Alcotest.run "anti_rationalization_empty_liveness" [
-    ("parse_verdict empty precondition",
-     [ Alcotest.test_case "exactly empty" `Quick
-         test_empty_verdict_emits_canonical_error
-     ; Alcotest.test_case "whitespace-only" `Quick
-         test_whitespace_only_verdict_also_empty
-     ])
-  ]
+  Alcotest.run
+    "anti_rationalization_empty_liveness"
+    [ ( "parse_verdict empty precondition"
+      , [ Alcotest.test_case
+            "exactly empty"
+            `Quick
+            test_empty_verdict_emits_canonical_error
+        ; Alcotest.test_case
+            "whitespace-only"
+            `Quick
+            test_whitespace_only_verdict_also_empty
+        ] )
+    ]
+;;

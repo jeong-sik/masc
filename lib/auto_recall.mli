@@ -22,33 +22,33 @@
 
 (** Source types for context retrieval *)
 type recall_source =
-  | Masc_cache        (** Shared context store *)
+  | Masc_cache (** Shared context store *)
   | Recent_broadcasts (** Last N broadcasts in room *)
-  | File_context      (** Recently touched files from the current working tree *)
+  | File_context (** Recently touched files from the current working tree *)
 
 (** Configuration for auto-recall *)
-type recall_config = {
-  enabled: bool;                 (** Enable/disable auto-recall *)
-  sources: recall_source list;   (** Which sources to query *)
-  max_tokens: int;               (** Budget per injection *)
-  max_broadcasts: int;           (** Max broadcasts to fetch *)
-  cache_tags: string list;       (** Filter cache by these tags *)
-}
+type recall_config =
+  { enabled : bool (** Enable/disable auto-recall *)
+  ; sources : recall_source list (** Which sources to query *)
+  ; max_tokens : int (** Budget per injection *)
+  ; max_broadcasts : int (** Max broadcasts to fetch *)
+  ; cache_tags : string list (** Filter cache by these tags *)
+  }
 
 (** A single piece of recalled context *)
-type recall_item = {
-  source: recall_source;
-  content: string;
-  relevance: float;  (** 0.0 - 1.0, higher = more relevant *)
-  metadata: Yojson.Safe.t;
-}
+type recall_item =
+  { source : recall_source
+  ; content : string
+  ; relevance : float (** 0.0 - 1.0, higher = more relevant *)
+  ; metadata : Yojson.Safe.t
+  }
 
 (** Result of a recall operation *)
-type recall_result = {
-  items: recall_item list;
-  total_tokens: int;  (** Approximate token count *)
-  truncated: bool;    (** Whether results were truncated *)
-}
+type recall_result =
+  { items : recall_item list
+  ; total_tokens : int (** Approximate token count *)
+  ; truncated : bool (** Whether results were truncated *)
+  }
 
 (** {1 Configuration} *)
 
@@ -56,14 +56,14 @@ type recall_result = {
 val default_config : recall_config
 
 (** Create configuration with optional parameters *)
-val make_config :
-  ?enabled:bool ->
-  ?sources:recall_source list ->
-  ?max_tokens:int ->
-  ?max_broadcasts:int ->
-  ?cache_tags:string list ->
-  unit ->
-  recall_config
+val make_config
+  :  ?enabled:bool
+  -> ?sources:recall_source list
+  -> ?max_tokens:int
+  -> ?max_broadcasts:int
+  -> ?cache_tags:string list
+  -> unit
+  -> recall_config
 
 (** {1 Token Estimation} *)
 
@@ -80,12 +80,12 @@ val estimate_tokens : string -> int
     @param query Optional query for relevance ranking
     @return Recall result with items and metadata
 *)
-val fetch_context :
-  Coord_utils.config ->
-  config:recall_config ->
-  ?query:string ->
-  unit ->
-  recall_result
+val fetch_context
+  :  Coord_utils.config
+  -> config:recall_config
+  -> ?query:string
+  -> unit
+  -> recall_result
 
 (** Fetch context with Eio runtime context.
     Uses the same retrieval sources as {!fetch_context}.
@@ -97,15 +97,15 @@ val fetch_context :
     @param query Query string for semantic search
     @return Recall result from configured sources
 *)
-val fetch_context_eio :
-  sw:Eio.Switch.t ->
-  env:< net : _ Eio.Net.t; .. > ->
-  clock:_ Eio.Time.clock ->
-  Coord_utils.config ->
-  config:recall_config ->
-  ?query:string ->
-  unit ->
-  recall_result
+val fetch_context_eio
+  :  sw:Eio.Switch.t
+  -> env:< net : _ Eio.Net.t ; .. >
+  -> clock:_ Eio.Time.clock
+  -> Coord_utils.config
+  -> config:recall_config
+  -> ?query:string
+  -> unit
+  -> recall_result
 
 (** Fetch context with query-based relevance boosting.
     Items matching the query get their relevance boosted.
@@ -115,12 +115,12 @@ val fetch_context_eio :
     @param query Query string for matching
     @return Recall result with boosted relevance
 *)
-val fetch_context_smart :
-  Coord_utils.config ->
-  config:recall_config ->
-  query:string ->
-  unit ->
-  recall_result
+val fetch_context_smart
+  :  Coord_utils.config
+  -> config:recall_config
+  -> query:string
+  -> unit
+  -> recall_result
 
 (** {1 Formatting} *)
 

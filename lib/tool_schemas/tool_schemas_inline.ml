@@ -5,3 +5,4 @@ let schemas =
   Tool_schemas_inline_coord.schemas
   @ Tool_schemas_inline_infra.schemas
   @ Tool_schemas_inline_episodes.schemas
+;;

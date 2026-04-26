@@ -3,11 +3,11 @@
 
     @since 2.260.0 *)
 
-type broadcast_output = {
-  delivered : bool;
-  room_message : string;
-  mention : string option;
-}
+type broadcast_output =
+  { delivered : bool
+  ; room_message : string
+  ; mention : string option
+  }
 
 val broadcast_schema : string Agent_sdk.Tool_schema_gen.schema
 val encode_broadcast : broadcast_output -> Yojson.Safe.t

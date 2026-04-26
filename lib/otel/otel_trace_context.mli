@@ -6,52 +6,55 @@
     @since 2.105.0 *)
 
 (** Parsed W3C trace context. *)
-type t = {
-  traceparent : string;
-  trace_id : Opentelemetry.Trace_id.t;
-  parent_id : Opentelemetry.Span_id.t;
-  sampled : bool;
-}
+type t =
+  { traceparent : string
+  ; trace_id : Opentelemetry.Trace_id.t
+  ; parent_id : Opentelemetry.Span_id.t
+  ; sampled : bool
+  }
 
 (** {2 Parsing} *)
 
-val parse : string -> t option
 (** Parse a W3C traceparent header value. [None] on invalid format. *)
+val parse : string -> t option
 
 (** {2 Generation} *)
 
-val to_traceparent :
-  trace_id:Opentelemetry.Trace_id.t ->
-  parent_id:Opentelemetry.Span_id.t ->
-  ?sampled:bool -> unit -> string
 (** Generate a W3C traceparent string from typed components. *)
+val to_traceparent
+  :  trace_id:Opentelemetry.Trace_id.t
+  -> parent_id:Opentelemetry.Span_id.t
+  -> ?sampled:bool
+  -> unit
+  -> string
 
-val from_ambient : unit -> string option
 (** Capture current ambient trace context as a traceparent string.
     [None] when OTel is disabled or no active span. *)
+val from_ambient : unit -> string option
 
 (** {2 Propagation} *)
 
-val propagate : t -> t
 (** Create a child context: same trace_id, fresh parent_id. *)
+val propagate : t -> t
 
 (** {2 JSON helpers} *)
 
-val of_json : Yojson.Safe.t -> t option
 (** Extract [trace_context] field from a JSON object. *)
+val of_json : Yojson.Safe.t -> t option
 
-val inject_json :
-  (string * Yojson.Safe.t) list -> string option ->
-  (string * Yojson.Safe.t) list
 (** Inject [trace_context] field into JSON assoc list. No-op when [None]. *)
+val inject_json
+  :  (string * Yojson.Safe.t) list
+  -> string option
+  -> (string * Yojson.Safe.t) list
 
 (** {2 HTTP header helpers} *)
 
-val header_name : string
 (** ["traceparent"] *)
+val header_name : string
 
-val of_headers : (string * string) list -> t option
 (** Extract traceparent from HTTP headers (case-insensitive). *)
+val of_headers : (string * string) list -> t option
 
-val to_header : t -> string * string
 (** Build [(header_name, traceparent)] pair for outbound HTTP. *)
+val to_header : t -> string * string

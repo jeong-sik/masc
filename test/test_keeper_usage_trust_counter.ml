@@ -15,14 +15,16 @@ module Prom = Masc_mcp.Prometheus
 let outcome_for ~keeper ~outcome =
   Prom.metric_value_or_zero
     UM.usage_trust_outcome_metric
-    ~labels:[ ("keeper", keeper); ("outcome", outcome) ]
+    ~labels:[ "keeper", keeper; "outcome", outcome ]
     ()
+;;
 
 let reason_for ~keeper ~reason =
   Prom.metric_value_or_zero
     UM.usage_anomaly_reason_metric
-    ~labels:[ ("keeper", keeper); ("reason", reason) ]
+    ~labels:[ "keeper", keeper; "reason", reason ]
     ()
+;;
 
 let test_metric_names_stable () =
   (* Dashboards / Grafana rules pin these exact strings. *)
@@ -34,6 +36,7 @@ let test_metric_names_stable () =
     "anomaly reason metric canonical"
     "masc_keeper_usage_anomaly_reason_total"
     UM.usage_anomaly_reason_metric
+;;
 
 let test_trusted_outcome_only () =
   let keeper = "test-keeper-9959-ok" in
@@ -43,6 +46,7 @@ let test_trusted_outcome_only () =
     "trusted outcome +1"
     (before +. 1.0)
     (outcome_for ~keeper ~outcome:"trusted")
+;;
 
 let test_missing_outcome_only () =
   (* Ollama-style "no usage reported at all" — honest signal, not an
@@ -50,9 +54,7 @@ let test_missing_outcome_only () =
      per-reason counter moves. *)
   let keeper = "test-keeper-9959-missing" in
   let outcome_before = outcome_for ~keeper ~outcome:"missing" in
-  let reason_before =
-    reason_for ~keeper ~reason:"input_tokens_gt_1m"
-  in
+  let reason_before = reason_for ~keeper ~reason:"input_tokens_gt_1m" in
   UM.record_usage_trust ~keeper_name:keeper ~trust:UM.Usage_missing;
   Alcotest.(check (float 0.0001))
     "missing outcome +1"
@@ -62,6 +64,7 @@ let test_missing_outcome_only () =
     "no reason counter movement for missing"
     reason_before
     (reason_for ~keeper ~reason:"input_tokens_gt_1m")
+;;
 
 let test_untrusted_bumps_per_reason () =
   (* The #9959 path: per-response api_usage carries accumulated
@@ -71,14 +74,10 @@ let test_untrusted_bumps_per_reason () =
   let keeper = "test-keeper-9959-untrusted" in
   let outcome_before = outcome_for ~keeper ~outcome:"untrusted" in
   let gt1m_before = reason_for ~keeper ~reason:"input_tokens_gt_1m" in
-  let gt2x_before =
-    reason_for ~keeper ~reason:"input_tokens_gt_2x_context_max"
-  in
+  let gt2x_before = reason_for ~keeper ~reason:"input_tokens_gt_2x_context_max" in
   UM.record_usage_trust
     ~keeper_name:keeper
-    ~trust:
-      (UM.Usage_untrusted
-         [ "input_tokens_gt_1m"; "input_tokens_gt_2x_context_max" ]);
+    ~trust:(UM.Usage_untrusted [ "input_tokens_gt_1m"; "input_tokens_gt_2x_context_max" ]);
   Alcotest.(check (float 0.0001))
     "untrusted outcome +1"
     (outcome_before +. 1.0)
@@ -91,42 +90,46 @@ let test_untrusted_bumps_per_reason () =
     "input_tokens_gt_2x_context_max reason +1"
     (gt2x_before +. 1.0)
     (reason_for ~keeper ~reason:"input_tokens_gt_2x_context_max")
+;;
 
 let test_per_keeper_isolation () =
   let a = "test-keeper-9959-a" in
   let b = "test-keeper-9959-b" in
   let a_before = outcome_for ~keeper:a ~outcome:"untrusted" in
   let b_before = outcome_for ~keeper:b ~outcome:"untrusted" in
-  UM.record_usage_trust ~keeper_name:a
+  UM.record_usage_trust
+    ~keeper_name:a
     ~trust:(UM.Usage_untrusted [ "zero_token_usage_reported" ]);
   Alcotest.(check (float 0.0001))
     "A untrusted +1"
     (a_before +. 1.0)
     (outcome_for ~keeper:a ~outcome:"untrusted");
   Alcotest.(check (float 0.0001))
-    "B untrusted unchanged" b_before
+    "B untrusted unchanged"
+    b_before
     (outcome_for ~keeper:b ~outcome:"untrusted")
+;;
 
 let () =
-  Alcotest.run "keeper_usage_trust_counter_9959"
-    [
-      ( "metric_names",
-        [
-          Alcotest.test_case "canonical names stable" `Quick
-            test_metric_names_stable;
-        ] );
-      ( "trust_outcomes",
-        [
-          Alcotest.test_case "trusted increments outcome only" `Quick
-            test_trusted_outcome_only;
-          Alcotest.test_case "missing increments outcome only" `Quick
-            test_missing_outcome_only;
-          Alcotest.test_case "untrusted bumps per-reason" `Quick
-            test_untrusted_bumps_per_reason;
-        ] );
-      ( "isolation",
-        [
-          Alcotest.test_case "per-keeper independent" `Quick
-            test_per_keeper_isolation;
-        ] );
+  Alcotest.run
+    "keeper_usage_trust_counter_9959"
+    [ ( "metric_names"
+      , [ Alcotest.test_case "canonical names stable" `Quick test_metric_names_stable ] )
+    ; ( "trust_outcomes"
+      , [ Alcotest.test_case
+            "trusted increments outcome only"
+            `Quick
+            test_trusted_outcome_only
+        ; Alcotest.test_case
+            "missing increments outcome only"
+            `Quick
+            test_missing_outcome_only
+        ; Alcotest.test_case
+            "untrusted bumps per-reason"
+            `Quick
+            test_untrusted_bumps_per_reason
+        ] )
+    ; ( "isolation"
+      , [ Alcotest.test_case "per-keeper independent" `Quick test_per_keeper_isolation ] )
     ]
+;;

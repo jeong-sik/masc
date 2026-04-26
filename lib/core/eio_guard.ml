@@ -13,11 +13,8 @@
     avoiding [Effect.Unhandled] exceptions on the normal code path. *)
 
 let ready = Atomic.make false
-
 let enable () = Atomic.set ready true
-
 let disable () = Atomic.set ready false
-
 let is_ready () = Atomic.get ready
 
 (** {1 Mutex Guards}
@@ -29,24 +26,16 @@ let is_ready () = Atomic.get ready
 
 (** Read-write guard: acquires mutex if Eio is ready, runs directly otherwise. *)
 let with_mutex mutex f =
-  if Atomic.get ready then
-    Eio.Mutex.use_rw ~protect:true mutex (fun () -> f ())
-  else
-    f ()
+  if Atomic.get ready then Eio.Mutex.use_rw ~protect:true mutex (fun () -> f ()) else f ()
+;;
 
 (** Read-only guard: acquires read lock if Eio is ready, runs directly otherwise. *)
 let with_mutex_ro mutex f =
-  if Atomic.get ready then
-    Eio.Mutex.use_ro mutex (fun () -> f ())
-  else
-    f ()
+  if Atomic.get ready then Eio.Mutex.use_ro mutex (fun () -> f ()) else f ()
+;;
 
 (** {1 Systhread Guard} *)
 
 (** Run [f] in a system thread when Eio is active, or directly when
     no Eio runtime is available (e.g. unit tests). *)
-let run_in_systhread f =
-  if Atomic.get ready then
-    Eio_unix.run_in_systhread f
-  else
-    f ()
+let run_in_systhread f = if Atomic.get ready then Eio_unix.run_in_systhread f else f ()

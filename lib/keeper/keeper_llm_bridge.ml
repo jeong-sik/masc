@@ -27,9 +27,7 @@ let run_with_timeout_and_fallback ~timeout_s fn =
     | Some clock -> Eio.Time.with_timeout_exn clock timeout_s fn
     | None -> fn ()
   in
-  try
-    do_timeout fn
-  with
+  try do_timeout fn with
   | Eio.Time.Timeout ->
     let wall = elapsed () in
     (* #9639/#9662: Eio cancel is cooperative. When the fiber blocks inside
@@ -42,15 +40,19 @@ let run_with_timeout_and_fallback ~timeout_s fn =
         ~layer:Timeout_policy.Layer.Oas_bridge
         ~origin:"keeper_llm_bridge"
         ~wall_cap_s:timeout_s
-        ~now:(t0)
+        ~now:t0
     in
-    let _ : bool =
-      Timeout_policy.overshoot_warn ~deadline ~actual_wall_s:wall ()
-    in
+    let _ : bool = Timeout_policy.overshoot_warn ~deadline ~actual_wall_s:wall () in
     Log.Keeper.warn
-      "keeper_llm_bridge: OAS execution timed out after %.1fs (budget=%.0fs; OAS context rollback only; external tool side effects are not reverted)"
-      wall timeout_s;
-    Error (Oas.Error.Api (Timeout { message = Printf.sprintf "Timeout after %.1fs (budget=%.0fs)" wall timeout_s }))
+      "keeper_llm_bridge: OAS execution timed out after %.1fs (budget=%.0fs; OAS context \
+       rollback only; external tool side effects are not reverted)"
+      wall
+      timeout_s;
+    Error
+      (Oas.Error.Api
+         (Timeout
+            { message = Printf.sprintf "Timeout after %.1fs (budget=%.0fs)" wall timeout_s
+            }))
   | Eio.Cancel.Cancelled _ as exn ->
     (* TLA+: FiberHandlesCancellation -> Rollback context.
        Cancelled means a parent fiber (server shutdown, global stop) requested
@@ -59,11 +61,16 @@ let run_with_timeout_and_fallback ~timeout_s fn =
     let bt = Printexc.get_raw_backtrace () in
     let wall = elapsed () in
     Log.Keeper.warn
-      "keeper_llm_bridge: OAS execution cancelled after %.1fs (re-raising; OAS context rollback only; external tool side effects are not reverted)"
+      "keeper_llm_bridge: OAS execution cancelled after %.1fs (re-raising; OAS context \
+       rollback only; external tool side effects are not reverted)"
       wall;
     Printexc.raise_with_backtrace exn bt
   | exn ->
     (* TLA+: HandleError -> Rollback context *)
     let bt = Printexc.get_backtrace () in
-    Log.Keeper.error "keeper_llm_bridge: OAS execution error: %s\n%s" (Printexc.to_string exn) bt;
+    Log.Keeper.error
+      "keeper_llm_bridge: OAS execution error: %s\n%s"
+      (Printexc.to_string exn)
+      bt;
     Error (Oas.Error.Internal (Printexc.to_string exn))
+;;

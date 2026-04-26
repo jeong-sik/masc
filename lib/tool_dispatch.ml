@@ -19,12 +19,14 @@ let registry : (string, handler) Hashtbl.t = Hashtbl.create 256
 (** Mutex protecting all mutable state in this module.
     Uses Eio_guard for dual-mode (pre/post Eio runtime) locking. *)
 let dispatch_mu = Eio.Mutex.create ()
+
 let with_dispatch_rw f = Eio_guard.with_mutex dispatch_mu f
 let with_dispatch_ro f = Eio_guard.with_mutex_ro dispatch_mu f
 
 (** Register a single tool name → handler mapping. *)
 let register ~tool_name ~(handler : handler) =
   with_dispatch_rw (fun () -> Hashtbl.replace registry tool_name handler)
+;;
 
 (** Bulk-register every tool name from a schema list to the same handler.
     This is the primary registration path — it extracts names from the
@@ -33,9 +35,9 @@ let register ~tool_name ~(handler : handler) =
 let register_module ~(schemas : Types.tool_schema list) ~(handler : handler) =
   with_dispatch_rw (fun () ->
     List.iter
-      (fun (schema : Types.tool_schema) ->
-        Hashtbl.replace registry schema.name handler)
+      (fun (schema : Types.tool_schema) -> Hashtbl.replace registry schema.name handler)
       schemas)
+;;
 
 (** {2 Dispatch Hooks}
 
@@ -49,9 +51,9 @@ let register_module ~(schemas : Types.tool_schema list) ~(handler : handler) =
 
 (** Pre-hook action: determines how dispatch proceeds after a hook runs. *)
 type pre_hook_action =
-  | Pass                        (** This hook has no opinion — continue *)
-  | Proceed of Yojson.Safe.t   (** Replace args (e.g. type coercion) and continue *)
-  | Reject of Tool_result.t    (** Short-circuit with error result *)
+  | Pass (** This hook has no opinion — continue *)
+  | Proceed of Yojson.Safe.t (** Replace args (e.g. type coercion) and continue *)
+  | Reject of Tool_result.t (** Short-circuit with error result *)
 
 (** Pre-hook: receives tool name and args before handler runs. *)
 type pre_hook = name:string -> args:Yojson.Safe.t -> pre_hook_action
@@ -64,31 +66,36 @@ let pre_hooks : pre_hook list ref = ref []
 let post_hooks : post_hook list ref = ref []
 
 let register_pre_hook (hook : pre_hook) =
-  with_dispatch_rw (fun () -> pre_hooks := !pre_hooks @ [hook])
+  with_dispatch_rw (fun () -> pre_hooks := !pre_hooks @ [ hook ])
+;;
 
 let register_post_hook (hook : post_hook) =
-  with_dispatch_rw (fun () -> post_hooks := !post_hooks @ [hook])
+  with_dispatch_rw (fun () -> post_hooks := !post_hooks @ [ hook ])
+;;
 
 let clear_hooks () =
-  with_dispatch_rw (fun () -> pre_hooks := []; post_hooks := [])
+  with_dispatch_rw (fun () ->
+    pre_hooks := [];
+    post_hooks := [])
+;;
 
 (** Run pre-hooks in order, threading coerced args through the chain.
     First [Reject] wins (short-circuit). [Proceed] replaces args for
     subsequent hooks and the final handler. *)
 let run_pre_hooks ~name ~args =
   let rec go current_args = function
-    | [] -> (None, current_args)
+    | [] -> None, current_args
     | hook :: rest ->
       (match hook ~name ~args:current_args with
-       | Reject result -> (Some result, current_args)
+       | Reject result -> Some result, current_args
        | Proceed new_args -> go new_args rest
        | Pass -> go current_args rest)
   in
   go args !pre_hooks
+;;
 
 (** Run post-hooks in order, threading the result through. *)
-let run_post_hooks result =
-  List.fold_left (fun r hook -> hook r) result !post_hooks
+let run_post_hooks result = List.fold_left (fun r hook -> hook r) result !post_hooks
 
 (** O(1) dispatch.  Returns [Some (success, message)] when a handler is
     found, [None] when the tool name is unknown to the registry.
@@ -104,11 +111,14 @@ let dispatch ~(token : Tool_token.t) ~args : (bool * string) option =
   | Some handler ->
     let start_time = Time_compat.now () in
     let result =
-      try handler ~name ~args
-      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+      try handler ~name ~args with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn ->
         Some
-          ( false,
-            Printf.sprintf "dispatch_v2 handler error for %s: %s" name
+          ( false
+          , Printf.sprintf
+              "dispatch_v2 handler error for %s: %s"
+              name
               (Printexc.to_string exn) )
     in
     (match result with
@@ -118,6 +128,7 @@ let dispatch ~(token : Tool_token.t) ~args : (bool * string) option =
        Some (Tool_result.to_legacy tr')
      | None -> None)
   | None -> None
+;;
 
 (** Structured dispatch with hook support.
 
@@ -130,13 +141,14 @@ let dispatch ~(token : Tool_token.t) ~args : (bool * string) option =
 let dispatch_structured ~(token : Tool_token.t) ~args : Tool_result.t option =
   let name = token.name in
   match run_pre_hooks ~name ~args with
-  | (Some _ as blocked, _) -> blocked
-  | (None, coerced_args) ->
+  | (Some _ as blocked), _ -> blocked
+  | None, coerced_args ->
     let start_time = Time_compat.now () in
     (match dispatch ~token ~args:coerced_args with
      | Some (success, message) ->
        Some (Tool_result.wrap ~tool_name:name ~start_time (success, message))
      | None -> None)
+;;
 
 (** Feature flag: use the new dispatch path.
     Default ON since v2.102 — use MASC_DISPATCH_V2=0 to disable. *)
@@ -159,27 +171,38 @@ let idempotent_set : (string, unit) Hashtbl.t = Hashtbl.create 32
 let init_read_only_set (names : string list) =
   with_dispatch_rw (fun () ->
     List.iter (fun name -> Hashtbl.replace read_only_set name ()) names)
+;;
 
 let init_requires_join_set (names : string list) =
   with_dispatch_rw (fun () ->
     List.iter (fun name -> Hashtbl.replace requires_join_set name ()) names)
+;;
 
 let init_mcp_context_required_set (names : string list) =
   with_dispatch_rw (fun () ->
     List.iter (fun name -> Hashtbl.replace mcp_context_required_set name ()) names)
+;;
 
 let init_destructive_set (names : string list) =
   with_dispatch_rw (fun () ->
     List.iter (fun name -> Hashtbl.replace destructive_set name ()) names)
+;;
 
 let init_idempotent_set (names : string list) =
   with_dispatch_rw (fun () ->
     List.iter (fun name -> Hashtbl.replace idempotent_set name ()) names)
+;;
 
 let is_read_only name = with_dispatch_ro (fun () -> Hashtbl.mem read_only_set name)
-let is_join_required name = with_dispatch_ro (fun () -> Hashtbl.mem requires_join_set name)
+
+let is_join_required name =
+  with_dispatch_ro (fun () -> Hashtbl.mem requires_join_set name)
+;;
+
 let is_mcp_context_required name =
   with_dispatch_ro (fun () -> Hashtbl.mem mcp_context_required_set name)
+;;
+
 let is_destructive name = with_dispatch_ro (fun () -> Hashtbl.mem destructive_set name)
 let is_idempotent name = with_dispatch_ro (fun () -> Hashtbl.mem idempotent_set name)
 
@@ -191,16 +214,24 @@ let is_idempotent name = with_dispatch_ro (fun () -> Hashtbl.mem idempotent_set 
     ~210 Hashtbl.replace ops. *)
 
 type module_tag =
-  | Mod_plan | Mod_operator
+  | Mod_plan
+  | Mod_operator
   | Mod_local_runtime
   | Mod_worktree
-  | Mod_code | Mod_code_write
+  | Mod_code
+  | Mod_code_write
   | Mod_a2a
   | Mod_run
   | Mod_compact
-  | Mod_agent | Mod_task | Mod_room
-  | Mod_control | Mod_agent_timeline | Mod_misc | Mod_suspend
-  | Mod_library | Mod_keeper
+  | Mod_agent
+  | Mod_task
+  | Mod_room
+  | Mod_control
+  | Mod_agent_timeline
+  | Mod_misc
+  | Mod_suspend
+  | Mod_library
+  | Mod_keeper
   | Mod_inline
   | Mod_autoresearch
   | Mod_shard
@@ -216,21 +247,33 @@ let schema_registry : (string, Yojson.Safe.t) Hashtbl.t = Hashtbl.create 512
 
 let register_module_tag ~(schemas : Types.tool_schema list) ~tag =
   with_dispatch_rw (fun () ->
-    List.iter (fun (s : Types.tool_schema) ->
-      Hashtbl.replace tag_registry s.name tag;
-      Hashtbl.replace schema_registry s.name s.input_schema) schemas)
+    List.iter
+      (fun (s : Types.tool_schema) ->
+         Hashtbl.replace tag_registry s.name tag;
+         Hashtbl.replace schema_registry s.name s.input_schema)
+      schemas)
+;;
 
 (** Register a single tool name with a tag (for modules without schema exports). *)
 let register_name_tag ~tool_name ~tag =
   with_dispatch_rw (fun () -> Hashtbl.replace tag_registry tool_name tag)
+;;
 
 let lookup_tag name = with_dispatch_ro (fun () -> Hashtbl.find_opt tag_registry name)
-let lookup_schema name = with_dispatch_ro (fun () -> Hashtbl.find_opt schema_registry name)
+
+let lookup_schema name =
+  with_dispatch_ro (fun () -> Hashtbl.find_opt schema_registry name)
+;;
 
 let tag_registry_count () = with_dispatch_ro (fun () -> Hashtbl.length tag_registry)
 
-let mark_tag_registry_initialized () = with_dispatch_rw (fun () -> Atomic.set tag_registry_initialized true)
-let is_tag_registry_initialized () = with_dispatch_ro (fun () -> Atomic.get tag_registry_initialized)
+let mark_tag_registry_initialized () =
+  with_dispatch_rw (fun () -> Atomic.set tag_registry_initialized true)
+;;
+
+let is_tag_registry_initialized () =
+  with_dispatch_ro (fun () -> Atomic.get tag_registry_initialized)
+;;
 
 (** Mint a [Tool_token.t] validated against both registries.
     Protected by dispatch_mu for thread safety (Copilot review).
@@ -242,18 +285,16 @@ let mint_token ~name =
     Tool_token.mint_with
       ~validate:(fun n -> Hashtbl.mem tag_registry n || Hashtbl.mem registry n)
       ~name)
+;;
 
 (** Enumerate every tool name registered in either the tag_registry (primary)
     or the handler registry (fallback). Used by [find_similar_names] to
     drive "did you mean" suggestions for Unknown tool errors (#9784). *)
 let all_registered_names () =
   with_dispatch_ro (fun () ->
-    let acc =
-      Hashtbl.fold (fun n _ a -> n :: a) tag_registry []
-    in
-    Hashtbl.fold
-      (fun n _ a -> if List.mem n a then a else n :: a)
-      registry acc)
+    let acc = Hashtbl.fold (fun n _ a -> n :: a) tag_registry [] in
+    Hashtbl.fold (fun n _ a -> if List.mem n a then a else n :: a) registry acc)
+;;
 
 (* #9784: Unknown tool errors must include closest-name suggestions so the
    LLM can self-correct on the next turn. Jaccard works well for snake_case
@@ -266,16 +307,15 @@ let find_similar_names ?(limit = 3) ?(min_score = 0.4) ~query () =
   let scored =
     List.filter_map
       (fun n ->
-        let s = Text_similarity.jaccard_similarity query n in
-        if s >= min_score then Some (s, n) else None)
+         let s = Text_similarity.jaccard_similarity query n in
+         if s >= min_score then Some (s, n) else None)
       candidates
   in
-  let sorted =
-    List.sort (fun (a, _) (b, _) -> Float.compare b a) scored
-  in
+  let sorted = List.sort (fun (a, _) (b, _) -> Float.compare b a) scored in
   let rec take k = function
     | _ when k <= 0 -> []
     | [] -> []
     | (_, n) :: rest -> n :: take (k - 1) rest
   in
   take limit sorted
+;;

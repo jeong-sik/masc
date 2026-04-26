@@ -11,20 +11,20 @@ type backend =
   | Local
   | Docker
 
-type t = {
-  keeper_name : string;
-  sandbox_id : string;
-  backend : backend;
-  sandbox_profile : string;
-  network_mode : string;
-  host_root_rel : string;
-  host_root_abs : string;
-  container_root : string option;
-  root_arg : string;
-  mind_arg : string;
-  repos_arg : string;
-  task_overlay_pattern : string;
-}
+type t =
+  { keeper_name : string
+  ; sandbox_id : string
+  ; backend : backend
+  ; sandbox_profile : string
+  ; network_mode : string
+  ; host_root_rel : string
+  ; host_root_abs : string
+  ; container_root : string option
+  ; root_arg : string
+  ; mind_arg : string
+  ; repos_arg : string
+  ; task_overlay_pattern : string
+  }
 
 (** {1 Backend helpers} *)
 
@@ -38,23 +38,15 @@ val host_root_abs : config:Coord.config -> string -> string
 
 (** [host_root_rel_of_profile sandbox_profile name] returns the
     backend-scoped relative sandbox root for the given profile/name. *)
-val host_root_rel_of_profile :
-  Keeper_types.sandbox_profile ->
-  string ->
-  string
+val host_root_rel_of_profile : Keeper_types.sandbox_profile -> string -> string
 
 (** [host_root_rel_of_meta ~meta] returns the backend-scoped relative
     sandbox root for [meta]. *)
-val host_root_rel_of_meta :
-  meta:Keeper_types.keeper_meta ->
-  string
+val host_root_rel_of_meta : meta:Keeper_types.keeper_meta -> string
 
 (** [host_root_abs_of_meta ~config meta] returns the absolute
     backend-scoped sandbox root for [meta]. *)
-val host_root_abs_of_meta :
-  config:Coord.config ->
-  Keeper_types.keeper_meta ->
-  string
+val host_root_abs_of_meta : config:Coord.config -> Keeper_types.keeper_meta -> string
 
 (** [container_root name] returns the in-container path used by the
     hardened Docker backend. *)
@@ -64,10 +56,7 @@ val container_root : string -> string
 
 (** [of_meta ~config ~meta] derives the full sandbox record from a
     keeper meta entry. Backend is chosen from [meta.sandbox_profile]. *)
-val of_meta :
-  config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
-  t
+val of_meta : config:Coord.config -> meta:Keeper_types.keeper_meta -> t
 
 (** {1 Access control hints} *)
 
@@ -77,17 +66,13 @@ val allowed_path_roots : name:string -> string list
 
 (** Relative roots that tools may touch inside [meta]'s backend-scoped
     sandbox. Currently a single-element list. *)
-val allowed_path_roots_of_meta :
-  meta:Keeper_types.keeper_meta ->
-  string list
+val allowed_path_roots_of_meta : meta:Keeper_types.keeper_meta -> string list
 
 (** Single legacy unscoped relative root for [name] (convenience). *)
 val allowed_root_rel : name:string -> string
 
 (** Single backend-scoped relative root for [meta]. *)
-val allowed_root_rel_of_meta :
-  meta:Keeper_types.keeper_meta ->
-  string
+val allowed_root_rel_of_meta : meta:Keeper_types.keeper_meta -> string
 
 (** [keeper_visible_root_abs t] is the absolute path the keeper LLM
     should treat as its working root.  For Docker keepers this is the
@@ -103,5 +88,4 @@ val keeper_visible_root_abs : t -> string
 (** Key-value fields describing the sandbox shape (id, backend,
     profile, network mode, lifetime, root/mind/repos args, overlay
     pattern). Suitable for splicing into a JSON [Assoc]. *)
-val context_status_fields :
-  t -> (string * Yojson.Safe.t) list
+val context_status_fields : t -> (string * Yojson.Safe.t) list

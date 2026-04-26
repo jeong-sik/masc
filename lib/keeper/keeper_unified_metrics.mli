@@ -6,16 +6,16 @@
     @since 0.120.0 *)
 
 (** Derive the trigger list from the observation. *)
-val observed_triggers_of_observation :
-  ?meta:Keeper_types.keeper_meta ->
-  Keeper_world_observation.world_observation ->
-  string list
+val observed_triggers_of_observation
+  :  ?meta:Keeper_types.keeper_meta
+  -> Keeper_world_observation.world_observation
+  -> string list
 
 (** Derive the affordance list from the observation. *)
-val observed_affordances_of_observation :
-  ?meta:Keeper_types.keeper_meta ->
-  Keeper_world_observation.world_observation ->
-  string list
+val observed_affordances_of_observation
+  :  ?meta:Keeper_types.keeper_meta
+  -> Keeper_world_observation.world_observation
+  -> string list
 
 type turn_mode =
   | Tool_use
@@ -28,29 +28,27 @@ type usage_trust = Keeper_usage_trust.t =
   | Usage_trusted
   | Usage_untrusted of string list
 
-val classify_usage_trust :
-  usage_reported:bool ->
-  usage:Oas.Types.api_usage ->
-  model_used:string ->
-  resolved_model_id:string ->
-  context_max:int ->
-  usage_trust
+val classify_usage_trust
+  :  usage_reported:bool
+  -> usage:Oas.Types.api_usage
+  -> model_used:string
+  -> resolved_model_id:string
+  -> context_max:int
+  -> usage_trust
 
 val usage_trust_is_trusted : usage_trust -> bool
 
-val estimate_trusted_usage_cost_usd :
-  usage_trusted:bool ->
-  model:string ->
-  Oas.Types.api_usage ->
-  float
 (** Estimate turn cost for trusted usage using the OAS pricing catalog,
     including cache creation/read token multipliers.  Returns [0.0] for
     untrusted or missing usage. *)
+val estimate_trusted_usage_cost_usd
+  :  usage_trusted:bool
+  -> model:string
+  -> Oas.Types.api_usage
+  -> float
 
 val usage_trust_to_string : usage_trust -> string
-
 val usage_trust_reasons : usage_trust -> string list
-
 val usage_trust_json_fields : usage_trust -> (string * Yojson.Safe.t) list
 
 (** Canonical metric names for the per-turn usage-trust counters
@@ -64,6 +62,7 @@ val usage_trust_json_fields : usage_trust -> (string * Yojson.Safe.t) list
       where [reason] is one of the strings [classify_usage_trust]
       attaches to [Usage_untrusted]. *)
 val usage_trust_outcome_metric : string
+
 val usage_anomaly_reason_metric : string
 
 (** [record_usage_trust ~keeper_name ~trust] increments the outcome
@@ -75,29 +74,26 @@ val usage_anomaly_reason_metric : string
     [update_metrics_from_result]. Other classify sites serialize
     [trust] into the JSONL ledger without bumping the counter so
     the counter rate equals the per-turn rate. *)
-val record_usage_trust :
-  keeper_name:string ->
-  trust:usage_trust ->
-  unit
+val record_usage_trust : keeper_name:string -> trust:usage_trust -> unit
 
-val context_max_bucket : int -> string
 (** #9953: bucket a raw [context_max] integer into a bounded
     label vocabulary [zero | 64k | 128k | 200k | 256k | 1m |
     other].  Pure helper exposed so dashboards / runbooks can
     reference the same string mapping the metric uses. *)
+val context_max_bucket : int -> string
 
-val record_context_max_observation :
-  keeper:string ->
-  model_used:string ->
-  resolved_model_id:string ->
-  context_max:int ->
-  unit
 (** #9953: emit the
     [masc_keeper_context_max_observed_total
        {keeper, model_used, resolved_model_id, context_max_bucket}]
     counter for one turn.  Intended to be called once per
     snapshot-write so the counter rate equals the per-turn
     rate. *)
+val record_context_max_observation
+  :  keeper:string
+  -> model_used:string
+  -> resolved_model_id:string
+  -> context_max:int
+  -> unit
 
 (** {1 #9943: long-turn observer}
 
@@ -116,120 +112,111 @@ val record_context_max_observation :
 val turn_latency_bucket : int -> string
 
 val long_turn_warn_threshold_ms_default : int
-
 val long_turn_warn_threshold_ms : unit -> int
+val record_turn_latency_bucket : keeper:string -> latency_ms:int -> unit
 
-val record_turn_latency_bucket :
-  keeper:string -> latency_ms:int -> unit
-
-val provider_kind_of_model_used : string -> string
 (** Derive the bounded provider label from a keeper [model_used]
     surface such as [claude_code:auto] or [kimi_cli:kimi-for-coding].
     Empty or unprefixed values collapse to [unknown]. *)
+val provider_kind_of_model_used : string -> string
 
-val record_turn_latency_by_model_bucket :
-  keeper:string ->
-  channel:string ->
-  model_used:string ->
-  resolved_model_id:string ->
-  cascade_profile:string ->
-  latency_ms:int ->
-  unit
+val record_turn_latency_by_model_bucket
+  :  keeper:string
+  -> channel:string
+  -> model_used:string
+  -> resolved_model_id:string
+  -> cascade_profile:string
+  -> latency_ms:int
+  -> unit
 
+val update_metrics_from_result
+  :  Keeper_types.keeper_meta
+  -> latency_ms:int
+  -> observation:Keeper_world_observation.world_observation
+  -> ?is_autonomous_turn:bool
+  -> ?update_proactive_rt:bool
+  -> ?social_state:Keeper_social_model.social_state
+  -> ?social_transition_reason:string
+  -> ?context_max:int
+  -> Keeper_agent_run.run_result
+  -> Keeper_types.keeper_meta
 
-val update_metrics_from_result :
-  Keeper_types.keeper_meta ->
-  latency_ms:int ->
-  observation:Keeper_world_observation.world_observation ->
-  ?is_autonomous_turn:bool ->
-  ?update_proactive_rt:bool ->
-  ?social_state:Keeper_social_model.social_state ->
-  ?social_transition_reason:string ->
-  ?context_max:int ->
-  Keeper_agent_run.run_result ->
-  Keeper_types.keeper_meta
+val update_metrics_from_failure
+  :  Keeper_types.keeper_meta
+  -> latency_ms:int
+  -> observation:Keeper_world_observation.world_observation
+  -> reason:string
+  -> ?is_transient:bool
+  -> ?social_state:Keeper_social_model.social_state
+  -> ?social_transition_reason:string
+  -> ?sdk_error:Oas.Error.sdk_error
+  -> unit
+  -> Keeper_types.keeper_meta
 
-val update_metrics_from_failure :
-  Keeper_types.keeper_meta ->
-  latency_ms:int ->
-  observation:Keeper_world_observation.world_observation ->
-  reason:string ->
-  ?is_transient:bool ->
-  ?social_state:Keeper_social_model.social_state ->
-  ?social_transition_reason:string ->
-  ?sdk_error:Oas.Error.sdk_error ->
-  unit ->
-  Keeper_types.keeper_meta
+val append_metrics_snapshot
+  :  config:Coord.config
+  -> meta:Keeper_types.keeper_meta
+  -> observation:Keeper_world_observation.world_observation
+  -> result:Keeper_agent_run.run_result
+  -> latency_ms:int
+  -> turn_cost:float
+  -> turn_generation:int
+  -> channel:string
+  -> snapshot_source:string
+  -> context_ratio:float
+  -> context_tokens:int
+  -> context_max:int
+  -> message_count:int
+  -> compaction:Keeper_exec_context.compaction_event
+  -> handoff_json:Yojson.Safe.t option
+  -> ?timeout_budget_json:Yojson.Safe.t
+  -> ?deliberation_execution:Keeper_deliberation.execution_result
+  -> unit
+  -> unit
 
-val append_metrics_snapshot :
-  config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
-  observation:Keeper_world_observation.world_observation ->
-  result:Keeper_agent_run.run_result ->
-  latency_ms:int ->
-  turn_cost:float ->
-  turn_generation:int ->
-  channel:string ->
-  snapshot_source:string ->
-  context_ratio:float ->
-  context_tokens:int ->
-  context_max:int ->
-  message_count:int ->
-  compaction:Keeper_exec_context.compaction_event ->
-  handoff_json:Yojson.Safe.t option ->
-  ?timeout_budget_json:Yojson.Safe.t ->
-  ?deliberation_execution:Keeper_deliberation.execution_result ->
-  unit ->
-  unit
+val append_decision_record
+  :  config:Coord.config
+  -> meta:Keeper_types.keeper_meta
+  -> observation:Keeper_world_observation.world_observation
+  -> latency_ms:int
+  -> ?semaphore_wait_ms:int
+  -> outcome:string
+  -> ?degraded_retry_applied:bool
+  -> ?degraded_retry_cascade:string
+  -> ?fallback_reason:string
+  -> ?turn_mode:turn_mode
+  -> ?social_state:Keeper_social_model.social_state
+  -> ?deliberation_execution:Keeper_deliberation.execution_result
+  -> ?result:Keeper_agent_run.run_result option
+  -> ?error:string
+  -> unit
+  -> unit
 
-val append_decision_record :
-  config:Coord.config ->
-  meta:Keeper_types.keeper_meta ->
-  observation:Keeper_world_observation.world_observation ->
-  latency_ms:int ->
-  ?semaphore_wait_ms:int ->
-  outcome:string ->
-  ?degraded_retry_applied:bool ->
-  ?degraded_retry_cascade:string ->
-  ?fallback_reason:string ->
-  ?turn_mode:turn_mode ->
-  ?social_state:Keeper_social_model.social_state ->
-  ?deliberation_execution:Keeper_deliberation.execution_result ->
-  ?result:Keeper_agent_run.run_result option ->
-  ?error:string ->
-  unit ->
-  unit
-
-val broadcast_lifecycle_events :
-  name:string ->
-  turn_generation:int ->
-  compaction:Keeper_exec_context.compaction_event ->
-  handoff_json:Yojson.Safe.t option ->
-  unit
+val broadcast_lifecycle_events
+  :  name:string
+  -> turn_generation:int
+  -> compaction:Keeper_exec_context.compaction_event
+  -> handoff_json:Yojson.Safe.t option
+  -> unit
 
 val has_substantive_tool_calls : string list -> bool
 
-val visible_run_validation :
-  Keeper_agent_run.run_result -> Oas.Raw_trace.run_validation option
+val visible_run_validation
+  :  Keeper_agent_run.run_result
+  -> Oas.Raw_trace.run_validation option
 
 val turn_mode_of_result : Keeper_agent_run.run_result -> turn_mode
-
 val turn_mode_to_string : turn_mode -> string
-
 val turn_mode_of_string : string -> turn_mode option
-
 val turn_mode_of_json : Yojson.Safe.t -> turn_mode option
-
 val work_kind_of_turn_mode : turn_mode -> string
-
 val work_kind_of_json : Yojson.Safe.t -> string option
 
-val accountability_evidence_refs :
-  trace_id:string ->
-  turn_number:int ->
-  result:Keeper_agent_run.run_result ->
-  validated_evidence:Oas.Raw_trace.run_validation option ->
-  string list
+val accountability_evidence_refs
+  :  trace_id:string
+  -> turn_number:int
+  -> result:Keeper_agent_run.run_result
+  -> validated_evidence:Oas.Raw_trace.run_validation option
+  -> string list
 
-val decision_channel_of_observation :
-  Keeper_world_observation.world_observation -> string
+val decision_channel_of_observation : Keeper_world_observation.world_observation -> string

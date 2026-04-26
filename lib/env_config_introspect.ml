@@ -12,18 +12,25 @@ let server_meta () =
     | _ -> None
   in
   `Assoc
-    [
-      ("version", `String Version.version);
-      ("git_commit", Json_util.string_opt_to_json git_commit);
-      ("ocaml_version", `String Sys.ocaml_version);
-      ("uptime_seconds", `Float (Server_startup_state.elapsed_since_start ()));
-      ("pid", `Int (Unix.getpid ()));
+    [ "version", `String Version.version
+    ; "git_commit", Json_util.string_opt_to_json git_commit
+    ; "ocaml_version", `String Sys.ocaml_version
+    ; "uptime_seconds", `Float (Server_startup_state.elapsed_since_start ())
+    ; "pid", `Int (Unix.getpid ())
     ]
+;;
 
 let to_json () =
-  Env_config_snapshot.to_json ~server_meta:(server_meta ())
-    ~generated_at:(Types.now_iso ()) ()
+  Env_config_snapshot.to_json
+    ~server_meta:(server_meta ())
+    ~generated_at:(Types.now_iso ())
+    ()
+;;
 
 let to_json_filtered ?cat () =
-  Env_config_snapshot.to_json ?cat ~server_meta:(server_meta ())
-    ~generated_at:(Types.now_iso ()) ()
+  Env_config_snapshot.to_json
+    ?cat
+    ~server_meta:(server_meta ())
+    ~generated_at:(Types.now_iso ())
+    ()
+;;

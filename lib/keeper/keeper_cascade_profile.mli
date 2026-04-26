@@ -26,54 +26,51 @@ type t =
   | Big_three
   | Tool_rerank
 
-val all : t list
 (** [all] is exhaustive: every variant constructor of {!t} appears
     exactly once. *)
+val all : t list
 
-val to_string : t -> string
 (** Canonical lowercase-snake-case name. *)
+val to_string : t -> string
 
-val of_string_opt : string -> t option
 (** Parse a raw cascade name into the variant. Handles legacy aliases
     by collapsing them to [Big_three]. Returns [None] for unknown names
     and catalog-routed names ("keeper_unified", "tool_use_strict",
     "resilient_breaker", "local_only", "local_recovery"). *)
+val of_string_opt : string -> t option
 
-val canonical : string -> t
 (** [canonical raw] = [of_string_opt raw |> Option.value ~default]. *)
+val canonical : string -> t
 
 val default : t
-val default_name : string
-(** [default_name = to_string default = "big_three"]. *)
 
-val known_cascades : string list
+(** [default_name = to_string default = "big_three"]. *)
+val default_name : string
+
 (** [known_cascades = List.map to_string all]. Provided for consumers
     that still operate on strings; new code should take {!t} directly. *)
+val known_cascades : string list
 
-val catalog_names : ?config_path:string -> unit -> string list
 (** Live profile catalog discovered from the active [cascade.json].
     When the file cannot be read, returns [[]]. *)
+val catalog_names : ?config_path:string -> unit -> string list
 
-val catalog_names_result : ?config_path:string -> unit -> (string list, string) result
 (** Like {!catalog_names}, but preserves the loader error so validation
     boundaries can fail loud instead of collapsing catalog drift into an empty
     dynamic profile set. *)
+val catalog_names_result : ?config_path:string -> unit -> (string list, string) result
 
 (** Provenance of the names returned by {!catalog_names_with_toml_fallback}. *)
 type catalog_names_source =
   | Live_catalog
-      (** The full strict catalog ([Cascade_config_loader.load_catalog])
+  (** The full strict catalog ([Cascade_config_loader.load_catalog])
           succeeded; names are the live, validated catalog entries. *)
   | Toml_section_fallback of { catalog_error : string }
-      (** Strict catalog load failed but [cascade.toml] was parseable.
+  (** Strict catalog load failed but [cascade.toml] was parseable.
           Names come from the top-level table sections; [catalog_error]
           is the original loader error so callers can WARN about the
           degraded mode. *)
 
-val catalog_names_with_toml_fallback :
-  ?config_path:string ->
-  unit ->
-  (string list * catalog_names_source, string) result
 (** #10259 — accept-list source for the keeper cascade-name validator.
 
     On strict-load success, returns the live catalog names tagged
@@ -87,15 +84,18 @@ val catalog_names_with_toml_fallback :
     materialization so a localized field-whitelist regression in the
     materializer does not silently reject every operator-defined
     cascade across the fleet. *)
+val catalog_names_with_toml_fallback
+  :  ?config_path:string
+  -> unit
+  -> (string list * catalog_names_source, string) result
 
-val keeper_catalog_names : ?config_path:string -> unit -> string list
 (** Assignable live profile names from {!catalog_names}, filtered by
     [keeper_assignable] metadata. *)
+val keeper_catalog_names : ?config_path:string -> unit -> string list
 
-val system_catalog_names : ?config_path:string -> unit -> string list
 (** Live system-only profile names present in [cascade.json]. *)
+val system_catalog_names : ?config_path:string -> unit -> string list
 
-val fallback_cascade_for : ?config_path:string -> string -> string option
 (** Declarative escalation hint for [name].
 
     Returns [Some target] when:
@@ -109,32 +109,33 @@ val fallback_cascade_for : ?config_path:string -> string -> string option
     must never crash because of a stale fallback hint.
 
     @since 0.174.0 *)
+val fallback_cascade_for : ?config_path:string -> string -> string option
 
-val is_system_only_cascade : string -> bool
 (** Exact-name membership check against the active config's
     {!system_catalog_names}. *)
+val is_system_only_cascade : string -> bool
 
-val canonicalize_with_catalog : catalog:string list -> string -> string
 (** Resolves dynamic profiles against an explicit live catalog. *)
+val canonicalize_with_catalog : catalog:string list -> string -> string
 
-val resolve_live_with_catalog : catalog:string list -> string -> string
 (** Resolves a keeper-declared cascade against an explicit live catalog.
 
     Compile-time built-in names absent from the runtime catalog are treated
     as drift and fall back to {!default_name}. *)
+val resolve_live_with_catalog : catalog:string list -> string -> string
 
-val resolve_live : ?config_path:string -> string -> string
 (** Like {!resolve_live_with_catalog}, but reads the active catalog from the
     resolved cascade config path. *)
+val resolve_live : ?config_path:string -> string -> string
 
-val canonicalize : string -> string
 (** [canonicalize raw = to_string (canonical raw)]. Legacy aliases collapse
     to their canonical name, live catalog names pass through, unknown values
     fall back to {!default_name}. *)
+val canonicalize : string -> string
 
-val normalize_declared_name : string -> string
 (** Normalizes keeper-side implicit default and legacy aliases.
     Unknown nonblank names are preserved (trimmed). *)
+val normalize_declared_name : string -> string
 
 (** {1 cascade.json key helpers} *)
 
@@ -144,5 +145,6 @@ val max_tokens_key_t : t -> string
 
 (** String-based wrappers; first canonicalize, then build the key. *)
 val models_key : string -> string
+
 val temperature_key : string -> string
 val max_tokens_key : string -> string

@@ -4,9 +4,10 @@ let keep_recent_from_env () =
   match Sys.getenv_opt "MASC_TOOL_HYDRATE_RECENT" with
   | None -> default_keep_recent
   | Some s ->
-      (match int_of_string_opt (String.trim s) with
-       | Some n when n >= 0 -> n
-       | _ -> default_keep_recent)
+    (match int_of_string_opt (String.trim s) with
+     | Some n when n >= 0 -> n
+     | _ -> default_keep_recent)
+;;
 
 (* Try to fetch [sha256] from the store, returning the bytes on hit and
    the original marker string on miss / store error. *)
@@ -24,26 +25,30 @@ let try_hydrate ~store ~sha256 ~marker =
   | _ ->
     ignore marker;
     None
+;;
 
-let hydrate_block ~store ~remaining
-    (block : Oas.Types.content_block) : Oas.Types.content_block =
+let hydrate_block ~store ~remaining (block : Oas.Types.content_block)
+  : Oas.Types.content_block
+  =
   match block with
   | Oas.Types.ToolResult { tool_use_id; content; is_error; json } ->
-      if !remaining = 0 then block
-      else
-        (match Tool_output.decode_from_oas content with
-         | Tool_output.Stored { sha256; _ } ->
-             (match try_hydrate ~store ~sha256 ~marker:content with
-              | Some bytes ->
-                  decr remaining;
-                  Oas.Types.ToolResult
-                    { tool_use_id; content = bytes; is_error; json }
-              | None -> block)
-         | Tool_output.Inline _ -> block)
+    if !remaining = 0
+    then block
+    else (
+      match Tool_output.decode_from_oas content with
+      | Tool_output.Stored { sha256; _ } ->
+        (match try_hydrate ~store ~sha256 ~marker:content with
+         | Some bytes ->
+           decr remaining;
+           Oas.Types.ToolResult { tool_use_id; content = bytes; is_error; json }
+         | None -> block)
+      | Tool_output.Inline _ -> block)
   | _ -> block
+;;
 
-let hydrate_messages ~store ~keep_recent
-    (messages : Oas.Types.message list) : Oas.Types.message list =
+let hydrate_messages ~store ~keep_recent (messages : Oas.Types.message list)
+  : Oas.Types.message list
+  =
   let remaining = ref keep_recent in
   (* "Recent" = tail of the message list. Reverse first so iteration
      visits the LAST message first; the counter then ticks down on the
@@ -57,24 +62,23 @@ let hydrate_messages ~store ~keep_recent
   let mapped =
     List.map
       (fun (msg : Oas.Types.message) ->
-        let new_content =
-          List.map (hydrate_block ~store ~remaining) msg.content
-        in
-        { msg with content = new_content })
+         let new_content = List.map (hydrate_block ~store ~remaining) msg.content in
+         { msg with content = new_content })
       reversed
   in
   List.rev mapped
+;;
 
 let hydrate_recent ~store ~keep_recent : Oas.Context_reducer.t =
-  let strategy =
-    Oas.Context_reducer.Custom (hydrate_messages ~store ~keep_recent)
-  in
+  let strategy = Oas.Context_reducer.Custom (hydrate_messages ~store ~keep_recent) in
   { Oas.Context_reducer.strategy }
+;;
 
 let reducer_from_env () =
   match Env_config_core.base_path_opt () with
   | None -> None
   | Some base_path ->
-      let store = Tool_blob_store.create ~base_path in
-      let keep_recent = keep_recent_from_env () in
-      Some (hydrate_recent ~store ~keep_recent)
+    let store = Tool_blob_store.create ~base_path in
+    let keep_recent = keep_recent_from_env () in
+    Some (hydrate_recent ~store ~keep_recent)
+;;

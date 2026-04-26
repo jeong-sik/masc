@@ -17,6 +17,7 @@ include Coord_broadcast
    dashboards. *)
 let drift_variant_label = function
   | Coord_task_lifecycle.Claimed_to_done_skip -> "claimed_to_done_skip"
+;;
 
 (* #10449: classify a task's contract surface so the completion-path
    metric can split bypass-rate by creation-side data presence.
@@ -24,8 +25,7 @@ let drift_variant_label = function
 let classify_contract_state (contract : Types.task_contract option) =
   match contract with
   | None -> "no_contract"
-  | Some c when c.completion_contract = [] && c.required_evidence = [] ->
-    "empty_contract"
+  | Some c when c.completion_contract = [] && c.required_evidence = [] -> "empty_contract"
   | Some _ -> "with_contract"
 ;;
 
@@ -37,14 +37,14 @@ let classify_contract_state (contract : Types.task_contract option) =
    and consensual claimed→done jumps, so the [force] flag is the
    only distinguisher. *)
 let classify_completion_path
-    ~(action : Types.task_action)
-    ~(drift : Coord_task_lifecycle.drift option)
-    ~(force : bool) =
+      ~(action : Types.task_action)
+      ~(drift : Coord_task_lifecycle.drift option)
+      ~(force : bool)
+  =
   match action, drift, force with
   | Types.Approve_verification, _, _ -> "via_verification"
   | _, _, true -> "forced_done"
-  | _, Some Coord_task_lifecycle.Claimed_to_done_skip, false ->
-    "claimed_to_done_skip"
+  | _, Some Coord_task_lifecycle.Claimed_to_done_skip, false -> "claimed_to_done_skip"
   | _, None, false -> "in_progress_to_done"
 ;;
 
@@ -169,8 +169,7 @@ let task_required_tools (task : Types.task) =
 
 let missing_required_tools ~allowed required =
   List.filter
-    (fun required_name ->
-       not (List.exists (String.equal required_name) allowed))
+    (fun required_name -> not (List.exists (String.equal required_name) allowed))
     required
 ;;
 
@@ -179,31 +178,33 @@ let required_tool_claim_guard config ~agent_name ?agent_tool_names task =
   match required_tools, agent_tool_names with
   | [], _ -> Ok ()
   | _ :: _, None ->
-    log_event config
+    log_event
+      config
       (Yojson.Safe.to_string
          (`Assoc
              [ "type", `String "task_claim_required_tools_unknown_surface"
              ; "agent", `String agent_name
              ; "task", `String task.id
-             ; ( "required_tools",
-                 `List (List.map (fun name -> `String name) required_tools) )
+             ; ( "required_tools"
+               , `List (List.map (fun name -> `String name) required_tools) )
              ; "ts", `String (now_iso ())
              ]));
     Ok ()
   | _ :: _, Some allowed ->
     let missing = missing_required_tools ~allowed required_tools in
-    if missing = [] then Ok ()
+    if missing = []
+    then Ok ()
     else (
-      log_event config
+      log_event
+        config
         (Yojson.Safe.to_string
            (`Assoc
                [ "type", `String "task_claim_required_tools_blocked"
                ; "agent", `String agent_name
                ; "task", `String task.id
-               ; ( "required_tools",
-                   `List (List.map (fun name -> `String name) required_tools) )
-               ; ( "missing_tools",
-                   `List (List.map (fun name -> `String name) missing) )
+               ; ( "required_tools"
+                 , `List (List.map (fun name -> `String name) required_tools) )
+               ; "missing_tools", `List (List.map (fun name -> `String name) missing)
                ; "ts", `String (now_iso ())
                ]));
       Error
@@ -215,9 +216,7 @@ let required_tool_claim_guard config ~agent_name ?agent_tool_names task =
               (String.concat ", " missing))))
 ;;
 
-let default_verification_evidence_refs =
-  [ "completion_notes"; "pr_url_or_artifact_ref" ]
-;;
+let default_verification_evidence_refs = [ "completion_notes"; "pr_url_or_artifact_ref" ]
 
 let first_line text =
   match String.index_opt text '\n' with
@@ -226,8 +225,7 @@ let first_line text =
 ;;
 
 let truncate ~max_len text =
-  if String.length text <= max_len then text
-  else String.sub text 0 max_len ^ "..."
+  if String.length text <= max_len then text else String.sub text 0 max_len ^ "..."
 ;;
 
 let default_completion_contract_text ~title ~description =
@@ -236,7 +234,8 @@ let default_completion_contract_text ~title ~description =
   if description = ""
   then Printf.sprintf "Task scope satisfied: %s" title
   else
-    truncate ~max_len:220
+    truncate
+      ~max_len:220
       (Printf.sprintf "Task scope satisfied: %s - %s" title description)
 ;;
 
@@ -523,15 +522,7 @@ let find_duplicate_task (backlog : backlog) ~(title : string) ~(goal_id : string
 (** Add task — file-locked to prevent task ID collision under concurrency.
     Rejects tasks with duplicate titles (exact match after normalization)
     to prevent the same work from being created multiple times. *)
-let add_task
-      ?contract
-      ?goal_id
-      ?created_by
-      config
-      ~title
-      ~priority
-      ~description
-  =
+let add_task ?contract ?goal_id ?created_by config ~title ~priority ~description =
   ensure_initialized config;
   let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
   let actor = Option.value ~default:"system" created_by in
@@ -551,12 +542,7 @@ let add_task
          | None ->
            let task_id = Printf.sprintf "task-%03d" (next_task_number config backlog) in
            let contract =
-             Some
-               (ensure_task_contract_for_verification
-                  ?contract
-                  ~title
-                  ~description
-                  ())
+             Some (ensure_task_contract_for_verification ?contract ~title ~description ())
            in
            let new_task =
              { id = task_id
@@ -736,13 +722,12 @@ let is_legacy_auto_cycle_do_not_reclaim_reason reason =
       len > prefix_len + suffix_len
       && String.starts_with ~prefix trimmed
       && String.ends_with ~suffix trimmed
-    then
+    then (
       let raw_count = String.sub trimmed prefix_len (len - prefix_len - suffix_len) in
       match int_of_string_opt raw_count with
       | Some count -> count >= 3
-      | None -> false
-    else
-      false
+      | None -> false)
+    else false
   in
   parse_suffix " releases" || parse_suffix " cancellations"
 ;;
@@ -784,7 +769,9 @@ let claim_task config ~agent_name ~task_id =
                   then (
                     found := true;
                     (* Cycle-prevention gate: see _r variant below for rationale. *)
-                    (match do_not_reclaim_reason_blocks_claim task.do_not_reclaim_reason with
+                    (match
+                       do_not_reclaim_reason_blocks_claim task.do_not_reclaim_reason
+                     with
                      | Some r -> blocked_reason := Some r
                      | None -> ());
                     match task.task_status with
@@ -891,15 +878,15 @@ let claim_task_r config ~agent_name ~task_id ?agent_tool_names ()
     | Ok backlog ->
       (try
          (* Check role constraint before attempting claim *)
-         let target_task = List.find_opt (fun (t : task) -> t.id = task_id) backlog.tasks in
+         let target_task =
+           List.find_opt (fun (t : task) -> t.id = task_id) backlog.tasks
+         in
          let* task =
            match target_task with
            | None -> Error (Types.TaskNotFound task_id)
            | Some task -> Ok task
          in
-         let* () =
-           required_tool_claim_guard config ~agent_name ?agent_tool_names task
-         in
+         let* () = required_tool_claim_guard config ~agent_name ?agent_tool_names task in
          (* Cycle-prevention gate: refuse claim when do_not_reclaim_reason is set.
          The reason can come from cancel/release hard-stop logic or be applied
          directly by an operator. See PRs #7794 (schema), #7798 (cancel hook). *)
@@ -1052,9 +1039,7 @@ let derive_release_do_not_reclaim_reason (task : Types.task) handoff_context =
       | [] -> None
     in
     if release_should_block_reclaim handoff_context
-    then
-      Some
-        (Option.value first_text ~default:"release hard-stop requested")
+    then Some (Option.value first_text ~default:"release hard-stop requested")
     else None
 ;;
 
@@ -1121,8 +1106,7 @@ let transition_task_r
           | Types.Approve_verification
           | Types.Reject_verification
           | Types.Done_action
-          | Types.Cancel ->
-            Ok ()
+          | Types.Cancel -> Ok ()
         in
         let* () =
           match action, do_not_reclaim_reason_blocks_claim task.do_not_reclaim_reason with
@@ -1237,10 +1221,10 @@ let transition_task_r
         let set_current = decision.set_current in
         let* () =
           match action, task.task_status, new_status, prepare_verification_request with
-          | ( Types.Submit_for_verification,
-              _,
-              Types.AwaitingVerification { assignee; verification_id; _ },
-              Some prepare ) ->
+          | ( Types.Submit_for_verification
+            , _
+            , Types.AwaitingVerification { assignee; verification_id; _ }
+            , Some prepare ) ->
             let evidence_refs =
               match task.contract with
               | Some c -> c.verify_gate_evidence
@@ -1261,38 +1245,36 @@ let transition_task_r
             Error
               (Types.TaskInvalidState
                  (Printf.sprintf
-                    "submit_for_verification did not produce AwaitingVerification \
-                     for task %s"
+                    "submit_for_verification did not produce AwaitingVerification for \
+                     task %s"
                     task_id))
-          | ( Types.Claim
-            | Types.Start
-            | Types.Done_action
-            | Types.Cancel
-            | Types.Release
-            | Types.Approve_verification
-            | Types.Reject_verification ),
-            _,
-            _,
-            Some _ ->
-            Ok ()
-          | ( Types.Claim
-            | Types.Start
-            | Types.Done_action
-            | Types.Cancel
-            | Types.Release
-            | Types.Approve_verification
-            | Types.Reject_verification
-            | Types.Submit_for_verification ),
-            _,
-            _,
-            None ->
-            Ok ()
+          | ( ( Types.Claim
+              | Types.Start
+              | Types.Done_action
+              | Types.Cancel
+              | Types.Release
+              | Types.Approve_verification
+              | Types.Reject_verification )
+            , _
+            , _
+            , Some _ ) -> Ok ()
+          | ( ( Types.Claim
+              | Types.Start
+              | Types.Done_action
+              | Types.Cancel
+              | Types.Release
+              | Types.Approve_verification
+              | Types.Reject_verification
+              | Types.Submit_for_verification )
+            , _
+            , _
+            , None ) -> Ok ()
         in
         let* () =
           match action, task.task_status, prepare_verification_verdict with
-          | ( Types.Approve_verification,
-              Types.AwaitingVerification { verification_id; _ },
-              Some prepare ) ->
+          | ( Types.Approve_verification
+            , Types.AwaitingVerification { verification_id; _ }
+            , Some prepare ) ->
             (match
                prepare
                  ~task
@@ -1310,9 +1292,9 @@ let transition_task_r
                        task_id
                        verification_id
                        e)))
-          | ( Types.Reject_verification,
-              Types.AwaitingVerification { verification_id; _ },
-              Some prepare ) ->
+          | ( Types.Reject_verification
+            , Types.AwaitingVerification { verification_id; _ }
+            , Some prepare ) ->
             let reject_reason = if notes <> "" then notes else reason in
             (match
                prepare
@@ -1338,26 +1320,24 @@ let transition_task_r
                     "verification verdict action did not start from AwaitingVerification \
                      for task %s"
                     task_id))
-          | ( Types.Claim
-            | Types.Start
-            | Types.Done_action
-            | Types.Cancel
-            | Types.Release
-            | Types.Submit_for_verification ),
-            _,
-            Some _ ->
-            Ok ()
-          | ( Types.Claim
-            | Types.Start
-            | Types.Done_action
-            | Types.Cancel
-            | Types.Release
-            | Types.Submit_for_verification
-            | Types.Approve_verification
-            | Types.Reject_verification ),
-            _,
-            None ->
-            Ok ()
+          | ( ( Types.Claim
+              | Types.Start
+              | Types.Done_action
+              | Types.Cancel
+              | Types.Release
+              | Types.Submit_for_verification )
+            , _
+            , Some _ ) -> Ok ()
+          | ( ( Types.Claim
+              | Types.Start
+              | Types.Done_action
+              | Types.Cancel
+              | Types.Release
+              | Types.Submit_for_verification
+              | Types.Approve_verification
+              | Types.Reject_verification )
+            , _
+            , None ) -> Ok ()
         in
         (match decision.drift with
          | Some Coord_task_lifecycle.Claimed_to_done_skip ->
@@ -1373,8 +1353,7 @@ let transition_task_r
               wired by [lib/coord.ml] at startup to emit a
               Prometheus counter. *)
            (Atomic.get Coord_hooks.fsm_drift_observer_fn)
-             ~variant:(drift_variant_label
-                         Coord_task_lifecycle.Claimed_to_done_skip)
+             ~variant:(drift_variant_label Coord_task_lifecycle.Claimed_to_done_skip)
              ~force
              ~agent_name;
            Log.RoomTask.warn
@@ -1391,13 +1370,16 @@ let transition_task_r
         (match new_status with
          | Types.Done _ ->
            let contract_state = classify_contract_state task.contract in
-           let path =
-             classify_completion_path ~action ~drift:decision.drift ~force
-           in
+           let path = classify_completion_path ~action ~drift:decision.drift ~force in
            (Atomic.get Coord_hooks.task_completion_path_observed_fn)
-             ~path ~contract_state ~agent_name
-         | Types.Todo | Types.Claimed _ | Types.InProgress _
-         | Types.AwaitingVerification _ | Types.Cancelled _ -> ());
+             ~path
+             ~contract_state
+             ~agent_name
+         | Types.Todo
+         | Types.Claimed _
+         | Types.InProgress _
+         | Types.AwaitingVerification _
+         | Types.Cancelled _ -> ());
         (match action, task.task_status with
          | Types.Release, Types.Todo ->
            (* Idempotent: already in backlog, nothing to release.
@@ -1405,14 +1387,21 @@ let transition_task_r
               (e.g. confused the target of a multi-task release) can
               still detect the no-op without seeing it as an error. *)
            Log.RoomTask.debug "release on already-todo task %s — no-op" task_id
-       | Types.Claim, _ | Types.Start, _ | Types.Done_action, _ | Types.Cancel, _
-       | Types.Submit_for_verification, _ | Types.Approve_verification, _
-       | Types.Reject_verification, _
-       | Types.Release, Types.Claimed _ | Types.Release, Types.InProgress _
-       | Types.Release, Types.AwaitingVerification _ | Types.Release, Types.Done _
-       | Types.Release, Types.Cancelled _ -> ());
-      if new_status = task.task_status && set_current = None then
-        (* Idempotent no-op: status unchanged, skip write/events.
+         | Types.Claim, _
+         | Types.Start, _
+         | Types.Done_action, _
+         | Types.Cancel, _
+         | Types.Submit_for_verification, _
+         | Types.Approve_verification, _
+         | Types.Reject_verification, _
+         | Types.Release, Types.Claimed _
+         | Types.Release, Types.InProgress _
+         | Types.Release, Types.AwaitingVerification _
+         | Types.Release, Types.Done _
+         | Types.Release, Types.Cancelled _ -> ());
+        if new_status = task.task_status && set_current = None
+        then
+          (* Idempotent no-op: status unchanged, skip write/events.
            Match None explicitly so set_current=Some is never silently dropped. *)
           Ok
             (Printf.sprintf
@@ -1757,9 +1746,7 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Types.masc_result
                               String_util.contains_substring lower "do not reclaim"
                               || String_util.contains_substring lower "scope mismatch"
                             in
-                            if flagged && reason <> ""
-                            then Some reason
-                            else None
+                            if flagged && reason <> "" then Some reason else None
                         in
                         { t with
                           task_status =

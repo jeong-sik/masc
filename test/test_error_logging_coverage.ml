@@ -12,7 +12,6 @@
 *)
 
 open Alcotest
-
 module Tool_task = Masc_mcp.Tool_task
 module A2a_tools = Masc_mcp.A2a_tools
 module Coord = Masc_mcp.Coord
@@ -27,11 +26,12 @@ module Coord = Masc_mcp.Coord
     flushes the OCaml stderr buffer, then restores and reads the pipe.
     Sets the read end non-blocking to avoid hanging on empty output. *)
 let capture_stderr f =
-  let (pipe_read, pipe_write) = Unix.pipe () in
+  let pipe_read, pipe_write = Unix.pipe () in
   let saved_stderr = Unix.dup Unix.stderr in
   Unix.dup2 pipe_write Unix.stderr;
   Unix.close pipe_write;
-  (try f () with _ -> ());
+  (try f () with
+   | _ -> ());
   (* Flush OCaml's stderr buffer into the pipe before restoring *)
   flush stderr;
   Unix.dup2 saved_stderr Unix.stderr;
@@ -43,58 +43,76 @@ let capture_stderr f =
   let rec read_all () =
     match Unix.read pipe_read tmp 0 256 with
     | 0 -> ()
-    | n -> Buffer.add_subbytes buf tmp 0 n; read_all ()
+    | n ->
+      Buffer.add_subbytes buf tmp 0 n;
+      read_all ()
     | exception Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK), _, _) -> ()
     | exception _ -> ()
   in
   read_all ();
   Unix.close pipe_read;
   Buffer.contents buf
+;;
 
 let str_contains haystack needle =
   let hl = String.length haystack in
   let nl = String.length needle in
-  if nl = 0 then true
-  else if nl > hl then false
-  else begin
+  if nl = 0
+  then true
+  else if nl > hl
+  then false
+  else (
     let found = ref false in
     let i = ref 0 in
     while !i <= hl - nl && not !found do
       if String.sub haystack !i nl = needle then found := true;
       incr i
     done;
-    !found
-  end
+    !found)
+;;
 
 (* ============================================================
    Test environment helpers
    ============================================================ *)
 
 let make_test_dir () =
-  let unique_id = Printf.sprintf "masc_errlog_%d_%d"
-    (Unix.getpid ())
-    (int_of_float (Unix.gettimeofday () *. 1_000_000.)) in
+  let unique_id =
+    Printf.sprintf
+      "masc_errlog_%d_%d"
+      (Unix.getpid ())
+      (int_of_float (Unix.gettimeofday () *. 1_000_000.))
+  in
   Filename.concat (Filename.get_temp_dir_name ()) unique_id
+;;
 
 let rec rm_rf path =
-  if Sys.file_exists path then begin
-    if Sys.is_directory path then begin
+  if Sys.file_exists path
+  then
+    if Sys.is_directory path
+    then (
       Array.iter (fun name -> rm_rf (Filename.concat path name)) (Sys.readdir path);
-      Unix.rmdir path
-    end else
-      Unix.unlink path
-  end
+      Unix.rmdir path)
+    else Unix.unlink path
+;;
 
 let with_test_room f =
   let dir = make_test_dir () in
   Unix.mkdir dir 0o755;
-  Eio_main.run @@ fun env ->
+  Eio_main.run
+  @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let config = Coord.default_config dir in
   let _ = Coord.init config ~agent_name:(Some "test-agent") in
   Fun.protect
-    ~finally:(fun () -> (try let _ = Coord.reset config in () with _ -> ()); rm_rf dir)
+    ~finally:(fun () ->
+      (try
+         let _ = Coord.reset config in
+         ()
+       with
+       | _ -> ());
+      rm_rf dir)
     (fun () -> f config)
+;;
 
 (* ============================================================
    tool_task: done transition on nonexistent task → "[task]" on stderr
@@ -104,31 +122,37 @@ let with_test_room f =
     Coord.transition_task_r returns Error (TaskNotFound ...) and
     the notification path fires the [task] eprintf. *)
 let test_tool_task_done_nonexistent_logs () =
-  with_test_room @@ fun config ->
+  with_test_room
+  @@ fun config ->
   let ctx : Tool_task.context = { config; agent_name = "test-agent"; sw = None } in
-  let args = `Assoc [
-    ("task_id", `String "task-does-not-exist-xyz");
-    ("notes", `String "");
-  ] in
-  let output = capture_stderr (fun () ->
-    ignore (Tool_task.handle_done ctx args)
-  ) in
-  check bool "stderr contains [Task] prefix for done on missing task"
-    true (str_contains output "[Task]")
+  let args =
+    `Assoc [ "task_id", `String "task-does-not-exist-xyz"; "notes", `String "" ]
+  in
+  let output = capture_stderr (fun () -> ignore (Tool_task.handle_done ctx args)) in
+  check
+    bool
+    "stderr contains [Task] prefix for done on missing task"
+    true
+    (str_contains output "[Task]")
+;;
 
 (** handle_cancel with a task_id that does not exist → "[task]" eprintf. *)
 let test_tool_task_cancel_nonexistent_logs () =
-  with_test_room @@ fun config ->
+  with_test_room
+  @@ fun config ->
   let ctx : Tool_task.context = { config; agent_name = "test-agent"; sw = None } in
-  let args = `Assoc [
-    ("task_id", `String "task-phantom-abc");
-    ("reason", `String "test cancel");
-  ] in
-  let output = capture_stderr (fun () ->
-    ignore (Tool_task.handle_cancel_task ctx args)
-  ) in
-  check bool "stderr contains [Task] prefix for cancel on missing task"
-    true (str_contains output "[Task]")
+  let args =
+    `Assoc [ "task_id", `String "task-phantom-abc"; "reason", `String "test cancel" ]
+  in
+  let output =
+    capture_stderr (fun () -> ignore (Tool_task.handle_cancel_task ctx args))
+  in
+  check
+    bool
+    "stderr contains [Task] prefix for cancel on missing task"
+    true
+    (str_contains output "[Task]")
+;;
 
 (* ============================================================
    a2a_tools: submit_heartbeat_result unknown status → "[a2a]" on stderr
@@ -138,35 +162,49 @@ let test_tool_task_cancel_nonexistent_logs () =
     or "failed". result becomes Error "Unknown worker status: ..." and the
     [a2a] eprintf fires. *)
 let test_a2a_submit_unknown_status_logs () =
-  let output = capture_stderr (fun () ->
-    ignore (A2a_tools.submit_heartbeat_result
-      ~worker_name:"test-worker"
-      ~agent:"test-agent"
-      ~status:"INVALID_STATUS_XYZ"
-      ~summary:"test summary"
-      ~tool_call_count:0
-      ~tool_names:[]
-      ~decision_reason:"invalid test"
-      ~decision_confidence:0.0
-      ())
-  ) in
-  check bool "stderr contains [Misc] prefix for unknown status"
-    true (str_contains output "[Misc]")
+  let output =
+    capture_stderr (fun () ->
+      ignore
+        (A2a_tools.submit_heartbeat_result
+           ~worker_name:"test-worker"
+           ~agent:"test-agent"
+           ~status:"INVALID_STATUS_XYZ"
+           ~summary:"test summary"
+           ~tool_call_count:0
+           ~tool_names:[]
+           ~decision_reason:"invalid test"
+           ~decision_confidence:0.0
+           ()))
+  in
+  check
+    bool
+    "stderr contains [Misc] prefix for unknown status"
+    true
+    (str_contains output "[Misc]")
+;;
 
 (* ============================================================
    Test runner
    ============================================================ *)
 
 let () =
-  run "Error logging coverage (PR #466)" [
-    "tool_task", [
-      test_case "done on missing task logs [task]"
-        `Quick test_tool_task_done_nonexistent_logs;
-      test_case "cancel on missing task logs [task]"
-        `Quick test_tool_task_cancel_nonexistent_logs;
-    ];
-    "a2a_tools", [
-      test_case "submit_heartbeat unknown status logs [a2a]"
-        `Quick test_a2a_submit_unknown_status_logs;
-    ];
-  ]
+  run
+    "Error logging coverage (PR #466)"
+    [ ( "tool_task"
+      , [ test_case
+            "done on missing task logs [task]"
+            `Quick
+            test_tool_task_done_nonexistent_logs
+        ; test_case
+            "cancel on missing task logs [task]"
+            `Quick
+            test_tool_task_cancel_nonexistent_logs
+        ] )
+    ; ( "a2a_tools"
+      , [ test_case
+            "submit_heartbeat unknown status logs [a2a]"
+            `Quick
+            test_a2a_submit_unknown_status_logs
+        ] )
+    ]
+;;

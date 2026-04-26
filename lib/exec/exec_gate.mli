@@ -7,15 +7,14 @@
     approval policy, optionally emit shadow evidence, and only then
     delegate to [Process_eio]. *)
 
+(** Non-allow outcomes.  [Ask_required] carries the approval request
+    so the caller may route it through the approval queue.  [Denied]
+    is terminal — no user-approved override exists. *)
 type error =
   [ `Ask_required of Verdict.request
   | `Denied of Verdict.deny_reason
   ]
-(** Non-allow outcomes.  [Ask_required] carries the approval request
-    so the caller may route it through the approval queue.  [Denied]
-    is terminal — no user-approved override exists. *)
 
-val run : Verdict.t -> (Verdict.Trusted_argv.t, error) result
 (** [run verdict] dispatches on the four verdict arms.
 
     On [Allow trusted] or [Suggest_confirm (trusted, _)], returns
@@ -24,61 +23,62 @@ val run : Verdict.t -> (Verdict.Trusted_argv.t, error) result
 
     On [Ask request], returns [Error (`Ask_required request)].
     On [Deny { reason; _ }], returns [Error (`Denied reason)]. *)
+val run : Verdict.t -> (Verdict.Trusted_argv.t, error) result
 
-val run_argv :
-  actor:string ->
-  raw_source:string ->
-  summary:string ->
-  ?timeout_sec:float ->
-  ?env:string array ->
-  string list ->
-  string
 (** Typed gate in front of [Process_eio.run_argv].  In [parallel] mode,
     Ask/Deny verdicts are recorded but execution still proceeds.  In
     [enforced] mode, Ask/Deny return a synthetic blocked output. *)
+val run_argv
+  :  actor:string
+  -> raw_source:string
+  -> summary:string
+  -> ?timeout_sec:float
+  -> ?env:string array
+  -> string list
+  -> string
 
-val run_argv_with_status :
-  actor:string ->
-  raw_source:string ->
-  summary:string ->
-  ?timeout_sec:float ->
-  ?env:string array ->
-  ?cwd:string ->
-  string list ->
-  (Unix.process_status * string)
 (** Typed gate in front of [Process_eio.run_argv_with_status]. *)
+val run_argv_with_status
+  :  actor:string
+  -> raw_source:string
+  -> summary:string
+  -> ?timeout_sec:float
+  -> ?env:string array
+  -> ?cwd:string
+  -> string list
+  -> Unix.process_status * string
 
-val run_argv_with_status_split :
-  actor:string ->
-  raw_source:string ->
-  summary:string ->
-  ?timeout_sec:float ->
-  ?env:string array ->
-  ?cwd:string ->
-  string list ->
-  (Unix.process_status * string * string)
 (** Typed gate in front of [Process_eio.run_argv_with_status_split]. *)
+val run_argv_with_status_split
+  :  actor:string
+  -> raw_source:string
+  -> summary:string
+  -> ?timeout_sec:float
+  -> ?env:string array
+  -> ?cwd:string
+  -> string list
+  -> Unix.process_status * string * string
 
-val run_argv_with_stdin_and_status :
-  actor:string ->
-  raw_source:string ->
-  summary:string ->
-  ?timeout_sec:float ->
-  ?env:string array ->
-  ?cwd:string ->
-  stdin_content:string ->
-  string list ->
-  (Unix.process_status * string)
 (** Typed gate in front of [Process_eio.run_argv_with_stdin_and_status]. *)
+val run_argv_with_stdin_and_status
+  :  actor:string
+  -> raw_source:string
+  -> summary:string
+  -> ?timeout_sec:float
+  -> ?env:string array
+  -> ?cwd:string
+  -> stdin_content:string
+  -> string list
+  -> Unix.process_status * string
 
-val run_argv_with_stdin_and_status_split :
-  actor:string ->
-  raw_source:string ->
-  summary:string ->
-  ?timeout_sec:float ->
-  ?env:string array ->
-  ?cwd:string ->
-  stdin_content:string ->
-  string list ->
-  (Unix.process_status * string * string)
 (** Typed gate in front of [Process_eio.run_argv_with_stdin_and_status_split]. *)
+val run_argv_with_stdin_and_status_split
+  :  actor:string
+  -> raw_source:string
+  -> summary:string
+  -> ?timeout_sec:float
+  -> ?env:string array
+  -> ?cwd:string
+  -> stdin_content:string
+  -> string list
+  -> Unix.process_status * string * string

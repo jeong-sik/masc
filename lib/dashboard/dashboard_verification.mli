@@ -52,11 +52,7 @@
     - [limit]: clamped into [\[1, 500\]]; defaults to 100. Sort is
       reverse-chronological by [created_at] so the newest request wins
       when the cap trims. *)
-val requests_json :
-  ?task_id:string ->
-  ?limit:int ->
-  unit ->
-  Yojson.Safe.t
+val requests_json : ?task_id:string -> ?limit:int -> unit -> Yojson.Safe.t
 
 (** Build a one-shot summary snapshot: status bucket counts plus the most
     recent rejections (carriers of verdict_reason / PR / issue refs).

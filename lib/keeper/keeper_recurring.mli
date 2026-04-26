@@ -9,33 +9,33 @@
 
     Thread-safe: protected by Eio.Mutex when available. *)
 
-type action =
-  | Broadcast of string   (** Broadcast a message to the keeper's room *)
+type action = Broadcast of string (** Broadcast a message to the keeper's room *)
 
-type recurring_task = {
-  id : string;
-  keeper_name : string;
-  label : string;          (** Human-readable description *)
-  interval_sec : int;      (** Minimum seconds between runs *)
-  action : action;
-  mutable last_run_ts : float;
-  mutable run_count : int;
-  mutable failure_count : int;
-  max_failures : int;      (** Auto-disable after this many consecutive failures, 0 = unlimited *)
-  mutable enabled : bool;
-}
+type recurring_task =
+  { id : string
+  ; keeper_name : string
+  ; label : string (** Human-readable description *)
+  ; interval_sec : int (** Minimum seconds between runs *)
+  ; action : action
+  ; mutable last_run_ts : float
+  ; mutable run_count : int
+  ; mutable failure_count : int
+  ; max_failures : int
+    (** Auto-disable after this many consecutive failures, 0 = unlimited *)
+  ; mutable enabled : bool
+  }
 
 (** Generate a short unique task ID. *)
 val generate_id : unit -> string
 
 (** Register a new recurring task. Returns the task. *)
-val add :
-  keeper_name:string ->
-  label:string ->
-  interval_sec:int ->
-  ?max_failures:int ->
-  action ->
-  recurring_task
+val add
+  :  keeper_name:string
+  -> label:string
+  -> interval_sec:int
+  -> ?max_failures:int
+  -> action
+  -> recurring_task
 
 (** Remove a recurring task by ID. Returns true if found and removed. *)
 val remove : id:string -> bool
@@ -50,11 +50,11 @@ val list_all : unit -> recurring_task list
     [~now_ts] is the current timestamp.
     [~dispatch] is called for each due task's action.
     Returns the number of tasks dispatched. *)
-val dispatch_due :
-  keeper_name:string ->
-  now_ts:float ->
-  dispatch:(recurring_task -> action -> (unit, string) result) ->
-  int
+val dispatch_due
+  :  keeper_name:string
+  -> now_ts:float
+  -> dispatch:(recurring_task -> action -> (unit, string) result)
+  -> int
 
 (** Serialize a task to JSON. *)
 val task_to_json : recurring_task -> Yojson.Safe.t

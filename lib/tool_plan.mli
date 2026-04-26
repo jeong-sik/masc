@@ -6,9 +6,7 @@
 *)
 
 (** Tool handler context *)
-type context = {
-  config: Coord.config;
-}
+type context = { config : Coord.config }
 
 (** Tool result type *)
 type tool_result = bool * string

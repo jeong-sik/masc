@@ -7,5 +7,4 @@
     landed; centralising avoids re-defining the helper per file and
     makes the intent searchable. *)
 
-let count_if pred xs =
-  List.fold_left (fun n x -> if pred x then n + 1 else n) 0 xs
+let count_if pred xs = List.fold_left (fun n x -> if pred x then n + 1 else n) 0 xs

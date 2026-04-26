@@ -3,6 +3,7 @@
 
 module Keeper_name : sig
   type t = private string
+
   val of_string : string -> (t, string) result
   val to_string : t -> string
   val equal : t -> t -> bool
@@ -10,6 +11,7 @@ end
 
 module Trace_id : sig
   type t = private string
+
   val of_string : string -> (t, string) result
   val to_string : t -> string
   val equal : t -> t -> bool
@@ -17,6 +19,7 @@ end
 
 module Task_id : sig
   type t = private string
+
   val of_string : string -> (t, string) result
   val to_string : t -> string
   val equal : t -> t -> bool
@@ -25,6 +28,7 @@ end
 module Uid : sig
   (** Stable unique identifier for a keeper.  Format: "keeper-<uuidv4>". *)
   type t = private string
+
   val generate : unit -> t
   val of_string : string -> (t, string) result
   val to_string : t -> string

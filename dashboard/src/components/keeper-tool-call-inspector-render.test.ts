@@ -76,11 +76,11 @@ describe('KeeperToolCallInspector render', () => {
     })
     await flushUi()
 
-    const inputCopy = container.querySelector('[aria-label="Copy tool call input"]') as HTMLButtonElement | null
-    const outputCopy = container.querySelector('[aria-label="Copy tool call output"]') as HTMLButtonElement | null
+    const inputCopy = container.querySelector('[aria-label="도구 호출 입력 복사"]') as HTMLButtonElement | null
+    const outputCopy = container.querySelector('[aria-label="도구 호출 출력 복사"]') as HTMLButtonElement | null
     expect(inputCopy).not.toBeNull()
     expect(outputCopy).not.toBeNull()
-    expect(inputCopy?.getAttribute('title')).toBe('Copy tool call input')
-    expect(outputCopy?.getAttribute('title')).toBe('Copy tool call output')
+    expect(inputCopy?.getAttribute('title')).toBe('도구 호출 입력 복사')
+    expect(outputCopy?.getAttribute('title')).toBe('도구 호출 출력 복사')
   })
 })

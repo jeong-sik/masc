@@ -2,6 +2,7 @@ import { html } from 'htm/preact'
 import { useSignal } from '@preact/signals'
 import { ActionButton } from '../common/button'
 import { CARD_STANDARD } from '../common/card'
+import { Select } from '../common/select'
 import { operatorActionBusy, operatorSnapshot } from '../../operator-store'
 import type { OperatorActionDescriptor } from '../../types'
 import { actionTypeLabel, executeAction, normalizeStatus } from './helpers'
@@ -80,19 +81,16 @@ export function KeeperUtilitiesPanel() {
             서버 available_actions catalog 기준으로 노출합니다.
           </p>
         </div>
-        <select
-          class="shrink-0 rounded border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-xs text-[var(--color-fg-primary)] transition-colors cursor-pointer min-w-36 focus-visible:outline-none focus-visible:border-[rgba(71,184,255,0.5)] focus-visible:ring-1 focus-visible:ring-[rgba(71,184,255,0.35)]"
-          aria-label="키퍼 유틸리티 대상"
+        <${Select}
+          class="shrink-0 px-3 py-2 text-xs min-w-36"
+          ariaLabel="키퍼 유틸리티 대상"
           value=${selectedName}
           disabled=${busy || onlineKeepers.length === 0}
-          onChange=${(event: Event) => { selectedKeeper.value = (event.target as HTMLSelectElement).value }}
-        >
-          ${onlineKeepers.length === 0
-            ? html`<option value="">온라인 keeper 없음</option>`
-            : onlineKeepers.map(keeper => html`
-                <option key=${keeper.name} value=${keeper.name}>${keeper.name}</option>
-              `)}
-        </select>
+          options=${onlineKeepers.length === 0
+            ? [{ value: '', label: '온라인 keeper 없음' }]
+            : onlineKeepers.map(keeper => ({ value: keeper.name, label: keeper.name }))}
+          onInput=${(v: string) => { selectedKeeper.value = v }}
+        />
       </div>
 
       <div class="grid gap-2">

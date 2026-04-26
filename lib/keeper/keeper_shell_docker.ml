@@ -268,65 +268,38 @@ let run_docker_shell_command_with_status
         else
           Keeper_sandbox_runtime.docker_network_args network_mode
       in
-      let cred_root = "/tmp/keeper-creds" in
+      let cred_root = Host_config_provider.cred_root in
       let cred_result =
         if not git_creds_enabled then
           Ok ([], [])
         else
-          match Keeper_gh_env.keeper_binding config ~keeper_name:meta.name with
-          | Error err -> Error err
+          (* RFC-0008 PR-1: composition centralised in
+             [Host_config_provider.resolve].  Pre-extraction this
+             site inlined ~60 lines reading from
+             [Keeper_gh_env.keeper_binding], [Env_config_sandbox.Auth_paths],
+             [Keeper_identity], and [Env_git_noninteractive].  The
+             trait keeps that surface identical (no new env keys, no
+             new mounts) and makes the lifecycle explicit so PR-3
+             can swap to [In_container_login_provider] without
+             rewiring this caller.  See RFC-0008 §3 / §4. *)
+          match
+            Host_config_provider.resolve ~config ~identity:meta.name
+          with
+          | Error err ->
+              Error (Credential_provider.pp_error err)
           | Ok binding ->
-            let gh_creds =
-              match binding.gh_config_dir with
-              | Some dir -> dir
-              | None ->
-                  Env_config_keeper.KeeperSandbox.gh_creds_host_path ()
-            in
-            let gitconfig = Env_config_keeper.KeeperSandbox.gitconfig_host_path () in
-            let ssh_dir = Env_config_keeper.KeeperSandbox.ssh_dir_host_path () in
-            let mounts =
-              optional_ro_mount ~host:gh_creds
-                ~container:(Filename.concat cred_root ".config/gh")
-              @ optional_ro_mount ~host:gitconfig
-                  ~container:(Filename.concat cred_root ".gitconfig")
-              @ optional_ro_mount ~host:ssh_dir
-                  ~container:(Filename.concat cred_root ".ssh")
-            in
-            let git_author_name, git_author_email =
-              match binding with
-              | { github_identity = Some id; git_identity_mode = "github_identity"; _ } ->
-                  id, id ^ "@users.noreply.github.com"
-              | _ ->
-                  ( Keeper_identity.keeper_git_author
-                      ~keeper_name:meta.name,
-                    Keeper_identity.keeper_git_email
-                      ~keeper_name:meta.name )
-            in
-            let git_identity_env ~name ~email =
-              [
-                "-e"; "GIT_AUTHOR_NAME=" ^ name;
-                "-e"; "GIT_AUTHOR_EMAIL=" ^ email;
-                "-e"; "GIT_COMMITTER_NAME=" ^ name;
-                "-e"; "GIT_COMMITTER_EMAIL=" ^ email;
-              ]
-            in
-            let envs =
-              [
-                "-e"; "HOME=" ^ cred_root;
-                "-e"; "GH_CONFIG_DIR=" ^ Filename.concat cred_root ".config/gh";
-                "-e"; "GIT_CONFIG_GLOBAL=" ^ Filename.concat cred_root ".gitconfig";
-                "-e"; "GIT_CONFIG_COUNT=1";
-                "-e"; "GIT_CONFIG_KEY_0=safe.directory";
-                "-e"; "GIT_CONFIG_VALUE_0=*";
-              ]
-              (* RFC-0007 PR-1: non-interactive git constants must reach the
-                 container. Without these, git's credential helpers can
-                 open /dev/tty inside a sandbox that has no tty and hang
-                 until the outer wall-clock timeout trips silently. *)
-              @ Env_git_noninteractive.docker_args
-              @ git_identity_env ~name:git_author_name ~email:git_author_email
-            in
-            Ok (mounts, envs)
+              let mounts =
+                List.concat_map
+                  (fun (m : Credential_provider.ro_mount) ->
+                    [ "-v"; m.host ^ ":" ^ m.container ^ ":ro" ])
+                  binding.ro_mounts
+              in
+              let envs =
+                List.concat_map
+                  (fun (k, v) -> [ "-e"; k ^ "=" ^ v ])
+                  binding.env
+              in
+              Ok (mounts, envs)
       in
       match cred_result with
       | Error err -> sandbox_error err

@@ -905,7 +905,17 @@ let handle_keeper_directive_post state _agent_name req reqd body_str =
           | Some _ | None -> ()
         in
         let proceed () =
+          (* #10583: pause was missing from the first match, falling
+             through to the [_] arm and emitting a false
+             "Unknown keeper directive: pause" WARN even though the
+             second match (line 923) handles pause correctly. The
+             persisted paused=true also was not reaching meta.json
+             because persist_paused_state(true) was never called for
+             the pause action. Adding the case here both removes the
+             false WARN and restores meta-side durability so the next
+             server restart preserves the operator's pause decision. *)
           (match action_str with
+           | "pause" -> persist_paused_state true
            | "resume" -> persist_paused_state false
            | "wakeup" -> ()
            | _ ->

@@ -223,14 +223,14 @@ describe('pickActiveKeepers', () => {
 
 describe('severityToneClass', () => {
   it.each<[string | null | undefined, string]>([
-    ['critical', 'text-[var(--bad)]'],
-    ['HIGH', 'text-[var(--bad)]'],
-    ['warn', 'text-[var(--warn)]'],
-    ['medium', 'text-[var(--warn)]'],
-    ['info', 'text-[var(--text-muted)]'],
-    ['', 'text-[var(--text-muted)]'],
-    [null, 'text-[var(--text-muted)]'],
-    [undefined, 'text-[var(--text-muted)]'],
+    ['critical', 'text-[var(--color-status-err)]'],
+    ['HIGH', 'text-[var(--color-status-err)]'],
+    ['warn', 'text-[var(--color-status-warn)]'],
+    ['medium', 'text-[var(--color-status-warn)]'],
+    ['info', 'text-[var(--color-fg-muted)]'],
+    ['', 'text-[var(--color-fg-muted)]'],
+    [null, 'text-[var(--color-fg-muted)]'],
+    [undefined, 'text-[var(--color-fg-muted)]'],
   ])('maps severity %s to expected tone', (input, expected) => {
     expect(severityToneClass(input)).toBe(expected)
   })

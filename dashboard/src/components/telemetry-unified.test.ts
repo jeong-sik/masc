@@ -199,7 +199,7 @@ describe('TelemetryUnified', () => {
     })
     await flushUi()
 
-    expect(container.textContent).toContain('Runtime Diagnosis')
+    expect(container.textContent).toContain('런타임 진단')
     expect(container.textContent).toContain('MASC telemetry store')
     expect(container.textContent).toContain('Refresh')
     expect(container.textContent).toContain('30초 자동 갱신')

@@ -357,16 +357,16 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
       <table class="w-full text-2xs">
         <thead>
           <tr class="border-b border-[var(--color-border-default)] text-[var(--color-fg-disabled)]">
-            <th class="py-1 text-left font-normal">Keeper</th>
-            <th class="py-1 text-right font-normal">Status</th>
-            <th class="py-1 text-right font-normal">Activity</th>
+            <th class="py-1 text-left font-normal">키퍼</th>
+            <th class="py-1 text-right font-normal">상태</th>
+            <th class="py-1 text-right font-normal">활동</th>
             <th class="py-1 text-right font-normal">측정</th>
-            <th class="py-1 text-right font-normal">Tools</th>
-            <th class="py-1 text-right font-normal">Success</th>
+            <th class="py-1 text-right font-normal">도구</th>
+            <th class="py-1 text-right font-normal">성공</th>
             <th class="py-1 text-right font-normal">Ctx</th>
-            <th class="py-1 text-right font-normal">Latency</th>
-            <th class="py-1 text-right font-normal">Model</th>
-            <th class="py-1 text-center font-normal">Budget</th>
+            <th class="py-1 text-right font-normal">지연</th>
+            <th class="py-1 text-right font-normal">모델</th>
+            <th class="py-1 text-center font-normal">예산</th>
             <th class="w-8 py-1"></th>
           </tr>
         </thead>

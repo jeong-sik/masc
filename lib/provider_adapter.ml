@@ -162,6 +162,7 @@ let cn_kimi_api = "kimi-api"
 let cn_glm = "glm-api"
 let cn_glm_coding_plan = "glm-coding-plan"
 let cn_openrouter = "openrouter"
+let cn_dashscope_api = "dashscope-api"
 
 let kimi_api_key_envs = [ "KIMI_API_KEY_SB"; "KIMI_API_KEY" ]
 
@@ -250,6 +251,7 @@ let adapter_canonical_name_of_provider_kind
   | Glm -> cn_glm
   | Claude_code -> cn_claude
   | Codex_cli -> cn_codex
+  | DashScope -> cn_dashscope_api
 
 (** Single source of truth for all provider/runtime adapters.
     Simple names ([claude], [codex], [gemini]) are CLI runtimes.
@@ -570,6 +572,29 @@ let direct_adapters =
       model_policy =
         {
           default_model_env = Some "OPENROUTER_DEFAULT_MODEL";
+          default_model_fallback = None;
+          auto_models = No_auto_models;
+          expand_auto = false;
+          family = Generic;
+        };
+      tool_policy = no_tool_http_headers;
+      telemetry_policy = telemetry_reported;
+    };
+    {
+      canonical_name = cn_dashscope_api;
+      runtime_kind = Direct_api;
+      auth_mode = Api_key "DASHSCOPE_API_KEY";
+      aliases = [ cn_dashscope_api; "dashscope"; "qwen" ];
+      spawn_key = None;
+      cascade_prefix = "dashscope";
+      default_voice = None;
+      endpoint_url =
+        Some (env_url_or ~env:"DASHSCOPE_BASE_URL"
+                ~default:(registry_default_base_url "dashscope"));
+      default_model_id = None;
+      model_policy =
+        {
+          default_model_env = Some "DASHSCOPE_DEFAULT_MODEL";
           default_model_fallback = None;
           auto_models = No_auto_models;
           expand_auto = false;
@@ -1413,7 +1438,8 @@ let adapter_of_provider_config (cfg : Llm_provider.Provider_config.t) =
   | Ollama ->
       resolve_direct_adapter cn_ollama
   | Glm
-  | OpenAI_compat ->
+  | OpenAI_compat
+  | DashScope ->
       resolve_adapter_by_cascade_prefix (provider_label_from_registry cfg)
 
 let provider_label_of_config (cfg : Llm_provider.Provider_config.t) =
@@ -1545,7 +1571,8 @@ let docker_auth_env_keys_of_provider_config (cfg : Llm_provider.Provider_config.
   | Llm_provider.Provider_config.Kimi_cli
   | Llm_provider.Provider_config.Glm
   | Llm_provider.Provider_config.Claude_code
-  | Llm_provider.Provider_config.Codex_cli ->
+  | Llm_provider.Provider_config.Codex_cli
+  | Llm_provider.Provider_config.DashScope ->
       auth_env_keys_of_provider_kind cfg.kind
 
 let all_auth_env_keys () : string list =

@@ -508,7 +508,7 @@ export function MemorySubsystems() {
   const { loading, error, data } = state.value
   if (loading && !data) return html`<${LoadingState} label="기억 서브시스템 로드 중..." />`
   if (error && !data)
-    return html`<div class="p-4 text-[var(--bad-light)]">Error: ${error}</div>`
+    return html`<div class="p-4 text-[var(--bad-light)]">오류: ${error}</div>`
 
   const synapses = data?.hebbian?.synapses ?? []
   const lastConsolidation = data?.hebbian?.last_consolidation ?? 0

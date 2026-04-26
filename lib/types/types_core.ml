@@ -72,13 +72,23 @@ let agent_status_of_string_opt = function
   | "inactive" -> Some Inactive
   | _ -> None
 
-let agent_status_of_string_r s =
+(** [agent_status_of_string_r s] — explicit-failure parser.  Prefer this
+    over {!agent_status_of_string} (which silently maps unknown input to
+    [Active]).  The "permissive default" pattern was flagged in #10748:
+    it merges semantically distinct inputs (typo, future variant, garbage
+    payload) into a healthy "Active" presence and erases the diagnostic
+    trail.  Callers that genuinely want a default should pin it at the
+    call site so the choice is local and reviewable. *)
+let agent_status_of_string_r s : (agent_status, string) result =
   match agent_status_of_string_opt s with
   | Some status -> Ok status
-  | None -> Error ("Unknown agent status: " ^ s)
+  | None -> Error (Printf.sprintf "unknown agent_status: %S" s)
 
 [@@@ocaml.warning "-3"]
 let agent_status_of_string s =
+  (* #10748: legacy "permissive default" — kept for source compatibility.
+     New code should call {!agent_status_of_string_r} (Result-based) or
+     {!agent_status_of_string_opt}. *)
   match agent_status_of_string_opt s with
   | Some status -> status
   | None -> Active

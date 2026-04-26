@@ -299,11 +299,11 @@ let count_tasks_in_progress events =
   List.length (List.sort_uniq String.compare in_progress)
 
 let count_completed_tasks events =
-  List.length (List.filter (fun r ->
+  List_util.count_if (fun r ->
     match r.event with
     | Task_completed _ -> true
     | _ -> false
-  ) events)
+  ) events
 
 let avg_duration events =
   let durations = List.filter_map (fun r ->
@@ -318,25 +318,25 @@ let avg_duration events =
       sum /. float_of_int (List.length times)
 
 let calculate_handoff_rate events =
-  let handoffs = List.length (List.filter (fun r ->
+  let handoffs = List_util.count_if (fun r ->
     match r.event with
     | Handoff_triggered _ -> true
     | _ -> false
-  ) events) in
-  let task_events = List.length (List.filter (fun r ->
+  ) events in
+  let task_events = List_util.count_if (fun r ->
     match r.event with
     | Task_started _ | Task_completed _ -> true
     | _ -> false
-  ) events) in
+  ) events in
   if task_events = 0 then 0.0
   else float_of_int handoffs /. float_of_int task_events
 
 let calculate_error_rate events =
-  let errors = List.length (List.filter (fun r ->
+  let errors = List_util.count_if (fun r ->
     match r.event with
     | Error_occurred _ -> true
     | _ -> false
-  ) events) in
+  ) events in
   let total = List.length events in
   if total = 0 then 0.0
   else float_of_int errors /. float_of_int total

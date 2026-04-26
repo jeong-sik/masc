@@ -461,8 +461,8 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
             Log.Keeper.warn
               "autoboot: gave up after %d retries; %d/%d keepers remain unbooted"
               max_retries
-              (total - List.length (List.filter (fun name ->
-                Keeper_registry.is_running ~base_path:config.base_path name) names))
+              (total - List_util.count_if (fun name ->
+                Keeper_registry.is_running ~base_path:config.base_path name) names)
               total
           else begin
             Eio.Time.sleep clock retry_interval_s;

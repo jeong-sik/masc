@@ -1235,13 +1235,13 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
                       ("all_passed", `Bool s.verdict.all_passed);
                       ("layer_count", `Int (List.length s.verdict.layer_results));
                       ("passed_count",
-                        `Int (List.length (List.filter
+                        `Int (List_util.count_if
                           (fun (lr : Dashboard_eval_feed.layer_result_json) -> lr.passed)
-                          s.verdict.layer_results)));
+                          s.verdict.layer_results));
                       ("failed_count",
-                        `Int (List.length (List.filter
+                        `Int (List_util.count_if
                           (fun (lr : Dashboard_eval_feed.layer_result_json) -> not lr.passed)
-                          s.verdict.layer_results)));
+                          s.verdict.layer_results));
                       ("timestamp", `Float s.timestamp);
                       ("baseline_status", Json_util.string_opt_to_json s.baseline_status);
                     ]

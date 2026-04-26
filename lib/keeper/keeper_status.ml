@@ -330,7 +330,7 @@ let handle_keeper_eval ctx args : tool_result =
         let tool_counts =
           List.map
             (fun tn ->
-              let c = List.length (List.filter (fun n -> n = tn) tool_names) in
+              let c = List_util.count_if (fun n -> n = tn) tool_names in
               (tn, c))
             unique_tools
         in

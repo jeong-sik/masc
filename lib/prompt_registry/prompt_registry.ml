@@ -472,7 +472,7 @@ let stats () : registry_stats =
   with_mutex (fun () ->
     let all_entries = Hashtbl.fold (fun _ entry acc -> entry :: acc) registry [] in
     let total = List.length all_entries in
-    let active = List.length (List.filter (fun e -> not e.deprecated) all_entries) in
+    let active = List_util.count_if (fun e -> not e.deprecated) all_entries in
     let deprecated = total - active in
 
     let most_used =

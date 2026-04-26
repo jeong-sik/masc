@@ -14,4 +14,16 @@
   [style*="workingPulse"] { animation: none; }
   [style*="keeperPulse"] { animation: none; }
   [style*="activityFadeIn"] { animation: none; }
+
+  /* Tailwind animation utilities */
+  .animate-pulse { animation: none; }
+  .animate-ping { animation: none; }
+  .animate-spin { animation: none; }
+  .animate-bounce { animation: none; }
+
+  /* Custom keyframe animations via animate-[...] */
+  [class*="animate-["] { animation: none; }
+
+  /* Transition duration — reduce to instant for motion-sensitive users */
+  * { transition-duration: 0s !important; animation-duration: 0s !important; }
 }

@@ -669,6 +669,7 @@
         test_keeper_runtime_denylist
         test_keeper_runtime_config_ssot
         test_dashboard_render_timing_9766
+        test_keeper_turn_timeout_default_10456
         test_task_status_label_10421
         test_task_completion_path_10449
         test_personality_field_diff_10269
@@ -854,6 +855,7 @@
         test_keeper_runtime_denylist
         test_keeper_runtime_config_ssot
         test_dashboard_render_timing_9766
+        test_keeper_turn_timeout_default_10456
         test_task_status_label_10421
         test_task_completion_path_10449
         test_personality_field_diff_10269

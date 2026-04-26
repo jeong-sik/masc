@@ -1,8 +1,22 @@
-(** Supervisor — One-for-one Eio fiber supervisor.
+(** Supervisor — One-for-one Eio {b fiber} supervisor.
 
-    Manages a set of named child fibers with restart policies.
-    When a child crashes, the supervisor decides whether to restart,
-    back off and retry, or escalate.
+    {1 Scope of protection}
+
+    Manages a set of named child fibers within a {b single OS process}.
+    When a child fiber crashes, the supervisor decides whether to
+    restart, back off and retry, or escalate within the same process.
+
+    {b This module does NOT supervise the OS process itself.}  If the
+    process exits — uncaught exception in a non-supervised fiber, OOM
+    kill, signal, or kernel panic — there is no automatic restart from
+    this layer.  Process-level recovery is the responsibility of an
+    outer supervisor (launchd / systemd / a respawn-loop wrapper
+    script) which is intentionally not bundled here per repo policy.
+
+    Tracking: [#10828] ([no process-level supervisor]) records the
+    gap and proposes operator-side runbook options.
+
+    {1 Mechanics}
 
     Erlang/OTP-inspired but adapted to Eio's cooperative model:
     - Children are [(unit -> unit)] functions, not OS processes

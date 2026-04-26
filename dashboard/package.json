@@ -10,6 +10,7 @@
   "scripts": {
     "dev": "MASC_DASHBOARD_PROXY_TARGET=http://127.0.0.1:8935 vite",
     "build": "vite build",
+    "build:report": "BUNDLE_REPORT=1 vite build",
     "lint": "eslint src",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview",
@@ -48,6 +49,7 @@
     "eslint-plugin-react-hooks": "^7.0.1",
     "globals": "^17.4.0",
     "happy-dom": "^20.8.9",
+    "rollup-plugin-visualizer": "^7.0.1",
     "tailwindcss": "^4.2.2",
     "typescript": "^6.0.2",
     "typescript-eslint": "^8.58.1",

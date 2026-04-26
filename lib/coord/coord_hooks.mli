@@ -57,3 +57,12 @@ val tool_assigned_fn : (agent_id:string ->
            Atomic.t
 val task_completion_path_observed_fn : (path:string -> contract_state:string -> agent_name:string -> unit)
            Atomic.t
+
+val claim_post_provision_fn : (Coord_utils_backend_setup.config ->
+            agent_name:string ->
+            task_id:string -> unit)
+           Atomic.t
+(** Post-claim provisioning hook (e.g., sandbox warm-up, runtime
+    contract write) wired by [keeper_runtime] at startup.  Default
+    no-op keeps [masc_coord] free of a direct dependency on
+    [masc_mcp]. *)

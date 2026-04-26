@@ -248,6 +248,11 @@ let adapter_canonical_name_of_provider_kind
   | Gemini_cli -> cn_gemini
   | Kimi_cli -> cn_kimi
   | Glm -> cn_glm
+  | DashScope ->
+      (* OAS 0.179+: Alibaba DashScope OpenAI-compat endpoint.  Treated
+         as an OpenAI-compat adapter for canonical naming until masc-mcp
+         needs a dedicated label. *)
+      cn_codex_api
   | Claude_code -> cn_claude
   | Codex_cli -> cn_codex
 
@@ -1413,6 +1418,7 @@ let adapter_of_provider_config (cfg : Llm_provider.Provider_config.t) =
   | Ollama ->
       resolve_direct_adapter cn_ollama
   | Glm
+  | DashScope
   | OpenAI_compat ->
       resolve_adapter_by_cascade_prefix (provider_label_from_registry cfg)
 
@@ -1544,6 +1550,7 @@ let docker_auth_env_keys_of_provider_config (cfg : Llm_provider.Provider_config.
   | Llm_provider.Provider_config.Gemini_cli
   | Llm_provider.Provider_config.Kimi_cli
   | Llm_provider.Provider_config.Glm
+  | Llm_provider.Provider_config.DashScope
   | Llm_provider.Provider_config.Claude_code
   | Llm_provider.Provider_config.Codex_cli ->
       auth_env_keys_of_provider_kind cfg.kind

@@ -504,7 +504,7 @@ describe('TelemetryUnified', () => {
     expect(groupRow?.getAttribute('aria-expanded')).toBe('true')
     expect(container.textContent).toContain('Latest:')
     expect(container.textContent).toContain('keeper-alpha -> masc_status')
-    expect(container.textContent).toContain('Raw JSON')
+    expect(container.textContent).toContain('원본 JSON')
   })
 
   it('keeps condensed keys stable when repeated no-timestamp groups reappear', async () => {

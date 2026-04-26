@@ -167,7 +167,7 @@ export function ToolMetrics() {
           </div>
           <div class="flex flex-col items-center gap-1 rounded border border-[var(--card-border)] bg-[var(--card)] p-3">
             <span class="mt-1.5 text-[var(--text-strong)] text-3xl font-bold leading-none tabular-nums">${data.dispatch_v2_enabled ? 'ON' : 'OFF'}</span>
-            <span class="text-2xs text-[var(--text-muted)] font-medium">Dispatch v2</span>
+            <span class="text-2xs text-[var(--text-muted)] font-medium">디스패치 v2</span>
           </div>
         </div>
 

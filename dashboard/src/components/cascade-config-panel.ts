@@ -576,7 +576,7 @@ function CascadeValidationBanner({ config }: { config: CascadeConfigResponse }) 
         : null}
       ${visibleProfiles.length > 0
         ? html`
-          <div class="text-[var(--text-strong)] mb-1">Rejected Profiles</div>
+          <div class="text-[var(--text-strong)] mb-1">거부된 프로필</div>
           <ul class="flex flex-col gap-1 text-[var(--text-muted)]">
             ${visibleProfiles.map(invalidProfile => html`
               <${InvalidProfileSummary} invalidProfile=${invalidProfile} />

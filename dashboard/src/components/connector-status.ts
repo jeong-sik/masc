@@ -1051,10 +1051,10 @@ function ConnectorLivePanel({
                 </div>
                 <div class="text-2xs text-[var(--warn)]/80">
                   <div>
-                    <span class="font-medium">Cause: </span> no sidecar status file has been observed at <code class="rounded bg-[var(--white-4)] px-1">${connector?.status_path || `sidecars/${connectorId}-bot/status.json`}</code>.
+                    <span class="font-medium">원인: </span> 사이드카 상태 파일이 관찰되지 않았습니다: <code class="rounded bg-[var(--white-4)] px-1">${connector?.status_path || `sidecars/${connectorId}-bot/status.json`}</code>.
                   </div>
                   <div class="mt-1">
-                    <span class="font-medium">Next: </span> click <strong>Start</strong> to spawn via the backend, or copy the command below to run it from a terminal. Use <strong>status</strong> and <strong>tail logs</strong> if it stays offline.
+                    <span class="font-medium">다음: </span> <strong>시작</strong>을 클릭하여 백엔드에서 실행하거나, 아래 명령을 복사해 터미널에서 실행하세요. 오프라인 상태가 지속되면 <strong>상태</strong> 및 <strong>로그 추적</strong>을 확인하세요.
                   </div>
                 </div>
                 <div class="mt-2 grid grid-cols-1 gap-1.5">

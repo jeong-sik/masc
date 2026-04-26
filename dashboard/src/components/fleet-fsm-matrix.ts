@@ -356,7 +356,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
       <header class="flex flex-wrap items-baseline gap-3 border-b border-[var(--white-10)] p-3">
         <h2 class="text-sm font-semibold text-[var(--text-muted)]">Fleet composite (KSM × KTC × KDP × KCL × KMC)</h2>
         <span class="text-xs text-[var(--text-muted)]">
-          ${data.count} keepers · <${TimeAgo} timestamp=${data.generated_at} mode="both" />
+          ${data.count} 키퍼 · <${TimeAgo} timestamp=${data.generated_at} mode="both" />
         </span>
         <input
           type="search"

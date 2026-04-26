@@ -557,7 +557,7 @@ function GroupRow({ item }: { item: Extract<TelemetryDisplayItem, { kind: 'group
             `
           })}
           <details class="rounded bg-[var(--black-20)] px-2 py-1.5">
-            <summary class="cursor-pointer text-3xs text-[var(--text-dim)]">Raw JSON</summary>
+            <summary class="cursor-pointer text-3xs text-[var(--text-dim)]">원본 JSON</summary>
             <pre class="mt-2 text-3xs font-mono text-[var(--text-muted)] overflow-x-auto max-h-70 overflow-y-auto custom-scrollbar whitespace-pre-wrap break-all leading-[1.4]" tabindex="0" aria-label="원본 JSON">
 ${JSON.stringify(item.entries, null, 2)}</pre>
           </details>

@@ -669,7 +669,7 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
       </div>
       ${trustSummary || trust?.approval_state?.state || trust?.next_human_action ? html`
         <div class="mt-3 rounded border border-card-border/50 bg-white/3 p-3">
-          <div class="text-3xs font-semibold uppercase tracking-widest text-text-muted">Trust Summary</div>
+          <div class="text-3xs font-semibold uppercase tracking-widest text-text-muted">신뢰 요약</div>
           ${trustSummary ? html`
             <div class="mt-2 text-xs leading-relaxed text-text-body">${trustSummary}</div>
           ` : null}
@@ -763,7 +763,7 @@ function GoalDetailPanel({
     <section class="flex flex-col gap-4 rounded border border-card-border/70 bg-[rgba(9,14,24,0.88)] p-5" role="region" aria-label="목표 상세">
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div class="max-w-150">
-          <div class="text-2xs font-semibold uppercase tracking-[0.18em] text-text-muted">Goal Detail</div>
+          <div class="text-2xs font-semibold uppercase tracking-[0.18em] text-text-muted">목표 상세</div>
           <h3 class="mt-1 text-xl font-semibold tracking-[-0.02em] text-text-strong">${selectedNode.title}</h3>
           <div class="mt-2 flex flex-wrap items-center gap-2">
             <${HealthBadge} health=${selectedNode.health} />
@@ -799,7 +799,7 @@ function GoalDetailPanel({
         ${selectedNode.blocking_source !== 'none' ? html`
           <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4">
             <div class="mb-2 flex flex-wrap items-center gap-2">
-              <span class="text-2xs font-semibold uppercase tracking-widest text-text-muted">Blocking Context</span>
+              <span class="text-2xs font-semibold uppercase tracking-widest text-text-muted">차단 컨텍스트</span>
               <span class="rounded border px-2 py-0.5 text-3xs font-semibold ${blockerSourceClass(selectedNode.blocking_source)}">
                 ${blockerSourceLabel(selectedNode.blocking_source)}
               </span>
@@ -1018,7 +1018,7 @@ export function GoalTree() {
       <section class="rounded border border-card-border/70 bg-[rgba(9,14,24,0.88)] p-5" aria-label="목표 관리자">
         <div class="mb-4 flex flex-wrap items-start justify-between gap-4">
           <div class="max-w-190">
-            <div class="text-2xs font-semibold uppercase tracking-[0.18em] text-text-muted">Goal Manager</div>
+            <div class="text-2xs font-semibold uppercase tracking-[0.18em] text-text-muted">목표 관리자</div>
             <h3 class="mt-1 text-2xl font-semibold tracking-[-0.02em] text-text-strong">목표 중심 계획 뷰</h3>
             <p class="mt-1.5 text-sm leading-relaxed text-text-muted">
               goal-task 연결, keeper evidence, approval 대기, sandbox/cascade 신호를 한 표면에서 봅니다.
@@ -1056,7 +1056,7 @@ export function GoalTree() {
 
         ${data && data.tree.length > 0 ? html`
           <div class="mb-4 flex flex-wrap items-center gap-2">
-            <span class="text-3xs font-semibold uppercase tracking-[0.18em] text-text-muted">Goal Phase</span>
+            <span class="text-3xs font-semibold uppercase tracking-[0.18em] text-text-muted">목표 단계</span>
             <${FilterChips}
               chips=${([
                 'all',

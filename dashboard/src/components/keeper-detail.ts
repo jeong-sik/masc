@@ -350,10 +350,10 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
           ? html`<span><strong class="text-[var(--text-strong)]">Required</strong> · ${requiredTools.join(', ')}</span>`
           : null}
         ${usedTools.length > 0
-          ? html`<span><strong class="text-[var(--text-strong)]">Used</strong> · ${usedTools.join(', ')}</span>`
+          ? html`<span><strong class="text-[var(--text-strong)]">사용됨</strong> · ${usedTools.join(', ')}</span>`
           : null}
         ${missingRequiredTools.length > 0
-          ? html`<span class="text-[var(--bad)]"><strong>Missing</strong> · ${missingRequiredTools.join(', ')}</span>`
+          ? html`<span class="text-[var(--bad)]"><strong>누락</strong> · ${missingRequiredTools.join(', ')}</span>`
           : null}
         ${providerSelectedModel || cascadeOutcome || typeof providerAttempts === 'number'
           ? html`
@@ -381,10 +381,10 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
           ? html`<span><strong class="text-[var(--text-strong)]">Always</strong> · ${persistedPolicyCount} rules</span>`
           : null}
         ${typeof goalLinkedTasks === 'number'
-          ? html`<span><strong class="text-[var(--text-strong)]">Goal Tasks</strong> · ${goalLinkedTasks}</span>`
+          ? html`<span><strong class="text-[var(--text-strong)]">목표 태스크</strong> · ${goalLinkedTasks}</span>`
           : null}
         ${typeof goalConvergence === 'number'
-          ? html`<span><strong class="text-[var(--text-strong)]">Goal Progress</strong> · ${Math.round(goalConvergence * 100)}%</span>`
+          ? html`<span><strong class="text-[var(--text-strong)]">목표 진행</strong> · ${Math.round(goalConvergence * 100)}%</span>`
           : null}
         ${hasActivitySignal
           ? html`<span><strong class="text-[var(--text-strong)]">최근 신호</strong> · ${renderActivitySignal()}</span>`
@@ -643,7 +643,7 @@ function PlaygroundReposPanel({ keeperName }: { keeperName: string }) {
       <div class="flex flex-col gap-3">
         ${repos.length > 0 ? html`
           <div>
-            <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1.5">Repos (${repos.length})</div>
+            <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1.5">저장소 (${repos.length})</div>
             <div class="flex flex-col gap-1.5">
               ${repos.map(r => html`
                 <div class="flex items-center gap-3 px-3 py-2 rounded border border-[var(--white-8)] bg-[var(--white-2)]">
@@ -680,7 +680,7 @@ function PlaygroundReposPanel({ keeperName }: { keeperName: string }) {
 
         ${worktrees.length > 0 ? html`
           <div>
-            <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1.5">Worktrees (${worktrees.length})</div>
+            <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1.5">워크트리 (${worktrees.length})</div>
             <div class="flex flex-wrap gap-1.5">
               ${worktrees.map(w => html`
                 <span class="text-3xs font-mono px-2 py-1 rounded border border-[var(--white-8)] bg-[var(--white-2)] text-[var(--text-muted)]" title=${w.path}>${w.name}</span>

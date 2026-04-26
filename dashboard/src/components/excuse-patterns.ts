@@ -72,9 +72,9 @@ export function ExcusePatterns() {
     <${Card} title="반합리화 패턴">
       <div class="p-4">
         <p class="text-sm text-[var(--text-muted)] mb-4">
-          These patterns are matched against agent completion notes. If matched, the task is rejected.
-          Changes here are saved to <code>config/excuse_patterns.json</code> and applied immediately without restarting.
-          The format must be a JSON array of arrays, each containing two strings: <code>["pattern", "reason"]</code>.
+          에이전트 완료 노트와 매칭되는 패턴입니다. 매칭 시 태스크가 거부됩니다.
+          변경 사항은 <code>config/excuse_patterns.json</code>에 저장되며, 재시작 없이 즉시 적용됩니다.
+          형식은 문자열 두 개를 포함하는 배열의 배열이어야 합니다: <code>["패턴", "사유"]</code>.
         </p>
 
         <form aria-label="핑계 패턴 편집" onSubmit=${handleSave}>

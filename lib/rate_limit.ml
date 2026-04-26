@@ -14,15 +14,19 @@ module StringMap = Map.Make (String)
 (** {1 Token Bucket Algorithm} *)
 
 type bucket = {
-  mutable tokens: float;
-  mutable last_update: float;
+  tokens: float;
+  last_update: float;
 }
+
+type msg =
+  | Check of string * float * bool Eio.Promise.u
+  | Remaining of string * int Eio.Promise.u
+  | Cleanup of float * int Eio.Promise.u
 
 type t = {
   rate: float;
   burst: int;
-  buckets: bucket StringMap.t ref;
-  mutex: Eio.Mutex.t;
+  mailbox: msg Eio.Stream.t;
 }
 
 (** {1 Configuration} *)
@@ -36,12 +40,56 @@ let burst_from_env () = Env_config.Rate_bucket.burst
 
 (** {1 Limiter Creation} *)
 
+let process_msg state limiter msg =
+  match msg with
+  | Check (key, now, p) ->
+      let bucket = match StringMap.find_opt key state with
+        | Some b -> b
+        | None -> { tokens = float_of_int limiter.burst; last_update = now }
+      in
+      let elapsed = now -. bucket.last_update in
+      let new_tokens = bucket.tokens +. (elapsed *. limiter.rate) in
+      let capped_tokens = min (float_of_int limiter.burst) new_tokens in
+
+      if capped_tokens >= 1.0 then begin
+        let bucket' = { tokens = capped_tokens -. 1.0; last_update = now } in
+        Eio.Promise.resolve p true;
+        StringMap.add key bucket' state
+      end else begin
+        let bucket' = { tokens = capped_tokens; last_update = now } in
+        Eio.Promise.resolve p false;
+        StringMap.add key bucket' state
+      end
+
+  | Remaining (key, p) ->
+      (match StringMap.find_opt key state with
+      | Some b -> Eio.Promise.resolve p (int_of_float b.tokens)
+      | None -> Eio.Promise.resolve p limiter.burst);
+      state
+
+  | Cleanup (threshold, p) ->
+      let to_remove = StringMap.fold (fun key bucket acc ->
+        if bucket.last_update <= threshold then key :: acc
+        else acc
+      ) state [] in
+      let state' = List.fold_left (fun m k -> StringMap.remove k m) state to_remove in
+      Eio.Promise.resolve p (List.length to_remove);
+      state'
+
+let start_actor_if_needed ~sw limiter =
+  Eio.Fiber.fork ~sw (fun () ->
+    let rec loop state =
+      let msg = Eio.Stream.take limiter.mailbox in
+      loop (process_msg state limiter msg)
+    in
+    loop StringMap.empty
+  )
+
 let create ?(rate=default_rate) ?(burst=default_burst) () =
   {
     rate;
     burst;
-    buckets = ref StringMap.empty;
-    mutex = Eio.Mutex.create ();
+    mailbox = Eio.Stream.create max_int;
   }
 
 let rate t = t.rate
@@ -52,51 +100,24 @@ let create_from_env () =
 
 (** {1 Rate Checking} *)
 
-let with_lock limiter f =
-  Eio.Mutex.use_rw ~protect:true limiter.mutex (fun () -> f ())
-
 let check limiter ~key =
-  with_lock limiter (fun () ->
-    let now = Time_compat.now () in
-    let bucket = match StringMap.find_opt key !(limiter.buckets) with
-      | Some b -> b
-      | None ->
-          let b = { tokens = float_of_int limiter.burst; last_update = now } in
-          limiter.buckets := StringMap.add key b !(limiter.buckets);
-          b
-    in
-    let elapsed = now -. bucket.last_update in
-    let new_tokens = bucket.tokens +. (elapsed *. limiter.rate) in
-    bucket.tokens <- min (float_of_int limiter.burst) new_tokens;
-    bucket.last_update <- now;
-
-    if bucket.tokens >= 1.0 then begin
-      bucket.tokens <- bucket.tokens -. 1.0;
-      true
-    end else
-      false
-  )
+  let p, r = Eio.Promise.create () in
+  Eio.Stream.add limiter.mailbox (Check (key, Time_compat.now (), r));
+  Eio.Promise.await p
 
 let remaining limiter ~key =
-  with_lock limiter (fun () ->
-    match StringMap.find_opt key !(limiter.buckets) with
-    | Some b -> int_of_float b.tokens
-    | None -> limiter.burst
-  )
+  let p, r = Eio.Promise.create () in
+  Eio.Stream.add limiter.mailbox (Remaining (key, r));
+  Eio.Promise.await p
 
 (** {1 Cleanup} *)
 
 let cleanup limiter ~older_than_seconds =
-  with_lock limiter (fun () ->
-    let now = Time_compat.now () in
-    let threshold = now -. float_of_int older_than_seconds in
-    let to_remove = StringMap.fold (fun key bucket acc ->
-      if bucket.last_update <= threshold then key :: acc
-      else acc
-    ) !(limiter.buckets) [] in
-    limiter.buckets := List.fold_left (fun m k -> StringMap.remove k m) !(limiter.buckets) to_remove;
-    List.length to_remove
-  )
+  let now = Time_compat.now () in
+  let threshold = now -. float_of_int older_than_seconds in
+  let p, r = Eio.Promise.create () in
+  Eio.Stream.add limiter.mailbox (Cleanup (threshold, r));
+  Eio.Promise.await p
 
 (** {1 Global Instance}
 
@@ -116,6 +137,7 @@ let remaining_global ~key =
 (** Start a background fiber that periodically cleans up stale rate limit buckets.
     Call this once at server startup with the main switch. *)
 let start_cleanup_loop ~sw ~clock ?(interval=Env_config.RateLimit.cleanup_interval_seconds) limiter =
+  start_actor_if_needed ~sw limiter;
   Eio.Fiber.fork ~sw (fun () ->
     let rec loop () =
       Eio.Time.sleep clock interval;
@@ -154,11 +176,6 @@ let headers_global ~key =
 
 (** {1 Client Address Key Extraction} *)
 
-(** Convert an [Eio.Net.Sockaddr.stream] to a rate-limit key string.
-    For TCP connections the key is the client IP address (dotted-decimal for
-    IPv4, colon-hex for IPv6).  Unix-domain sockets use a "unix:" prefix so
-    they never collide with TCP keys.  The port is excluded so that all
-    connections from the same host share one rate-limit bucket. *)
 let key_of_sockaddr (client_addr : Eio.Net.Sockaddr.stream) =
   match client_addr with
   | `Tcp (ip, _) -> Fmt.str "%a" Eio.Net.Ipaddr.pp ip

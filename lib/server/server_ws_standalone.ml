@@ -52,7 +52,9 @@ let make_websocket_handler ~on_message _client_addr (wsd : Ws.Wsd.t) :
       then
         Server_mcp_transport_ws.cleanup_session session_id)
     ();
-  Log.Server.info "WebSocket session %s connected (standalone port)" session_id;
+  (* #10875: see lib/server/server_mcp_transport_ws.ml — connect log
+     emitted at DEBUG, close path classifies on lifetime. *)
+  Log.Server.debug "WebSocket session %s connected (standalone port)" session_id;
   { Ws.Websocket_connection.
     frame = (fun ~opcode ~is_fin ~len payload ->
       match opcode with

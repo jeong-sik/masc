@@ -21,6 +21,12 @@ let sha1 s =
 type ws_session = {
   id: string;
   wsd: Httpun_ws.Wsd.t;
+  connected_at: float;
+  (** Unix epoch when the session was registered.  Drives lifetime-aware
+      close logging (#10875): sessions that close within
+      [immediate_close_threshold_s] are anomalies (storms, port-probes,
+      dashboard reconnect races) and surface at WARN; normal disconnects
+      stay at DEBUG. *)
   mutable closed: bool;
   mutable dashboard_authenticated: bool;
   mutable dashboard_agent: string option;
@@ -125,10 +131,17 @@ let next_id =
 let log_ws_delivery_dropped ~context session_id =
   Log.Transport.warn "WS %s not delivered for session=%s" context session_id
 
+(* #10875: storm threshold.  4029 connect/close pairs in 31 minutes was
+   the trigger fleet.  Each pair occurred within ~1s; legitimate clients
+   (dashboard, MCP) keep sessions alive on the order of minutes.  1 second
+   cleanly separates the two populations without burning a config knob. *)
+let immediate_close_threshold_s = 1.0
+
 let new_session ~id ~wsd =
   {
     id;
     wsd;
+    connected_at = Unix.gettimeofday ();
     closed = false;
     dashboard_authenticated = false;
     dashboard_agent = None;
@@ -765,10 +778,13 @@ let read_inbound_message_frame session ~on_message ~is_fin ~len payload =
 
 (** Remove a session and unsubscribe from SSE. *)
 let cleanup_session session_id =
-  let removed =
+  (* #10875: capture connected_at inside the lock so the close log can
+     classify lifetime.  Returning [Some lifetime] keeps the log emission
+     outside the critical section. *)
+  let lifetime_s =
     with_sessions_rw (fun () ->
         match Hashtbl.find_opt sessions session_id with
-        | None -> false
+        | None -> None
         | Some session ->
             session.closed <- true;
             (try Httpun_ws.Wsd.close session.wsd
@@ -776,13 +792,22 @@ let cleanup_session session_id =
                 | exn -> Log.Server.warn "WS close failed for %s: %s" session_id (Printexc.to_string exn));
             Hashtbl.remove sessions session_id;
             slice_index_remove_session_locked session_id;
-            true)
+            Some (Unix.gettimeofday () -. session.connected_at))
   in
   Transport_metrics.set_ws_sessions
     (with_sessions_rw (fun () -> Hashtbl.length sessions));
   Sse.unsubscribe_external session_id;
-  if removed then
-    Log.Server.info "WebSocket session %s closed" session_id
+  match lifetime_s with
+  | None -> ()
+  | Some lifetime when lifetime < immediate_close_threshold_s ->
+      (* Storm signal: connect/close pair within ~1s.  WARN keeps it
+         visible to operators while suppressing routine session noise. *)
+      Log.Server.warn
+        "WebSocket session %s closed after %.3fs (immediate close, possible storm)"
+        session_id lifetime
+  | Some lifetime ->
+      Log.Server.debug "WebSocket session %s closed (lifetime=%.1fs)"
+        session_id lifetime
 
 (** Number of active WebSocket sessions. *)
 let session_count () =
@@ -823,7 +848,10 @@ let upgrade_connection
               then
                 cleanup_session session_id)
             ();
-          Log.Server.info "WebSocket session %s connected" session_id;
+          (* #10875: connect log paired 1:1 with close log; emitting at
+             DEBUG matches the close-path level for normal sessions and
+             eliminates ~190k INFO lines/day on the storm path. *)
+          Log.Server.debug "WebSocket session %s connected" session_id;
           { Httpun_ws.Websocket_connection.
             frame = (fun ~opcode ~is_fin ~len payload ->
               match opcode with

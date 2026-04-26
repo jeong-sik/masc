@@ -169,12 +169,20 @@ let model_entry_json ~path value =
                         loop rest
                     | Error _ as err -> err)
                 | "weight" -> (
+                    (* #10571: weight=0 means "configured but disabled"
+                       (cascade dispatcher skips the entry).  Pre-fix the
+                       validator rejected weight=0, breaking dashboard
+                       cascade.json materialization on every hot-reload
+                       once #10097 introduced explicit weight=0 entries
+                       to disable codex_cli without removing it from the
+                       seed list.  Negative weights stay rejected — they
+                       have no operational meaning. *)
                     match int_value ~path:(path ^ ".weight") field_value with
-                    | Ok value when value > 0 ->
+                    | Ok value when value >= 0 ->
                         weight := Some value;
                         loop rest
                     | Ok _ ->
-                        errorf "expected %s.weight to be > 0" path
+                        errorf "expected %s.weight to be >= 0" path
                     | Error _ as err -> err)
                 | "supports_tool_choice" -> (
                     match bool_value ~path:(path ^ ".supports_tool_choice") field_value with

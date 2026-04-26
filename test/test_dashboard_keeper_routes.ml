@@ -585,7 +585,8 @@ let seed_agent_file ?(agent_type = "worker") ?(capabilities = []) config agent_n
   Masc_mcp.Coord.write_json config agent_file (Types.agent_to_yojson agent)
 ;;
 
-let append_execution_receipt config ~keeper_name =
+let append_execution_receipt ?(tool_contract_result = "satisfied")
+    ?(tools_used = [ "keeper_fs_read" ]) config ~keeper_name =
   let meta =
     match Masc_mcp.Keeper_types.read_meta config keeper_name with
     | Ok (Some meta) -> meta
@@ -612,8 +613,8 @@ let append_execution_receipt config ~keeper_name =
       observed_tools = [ "keeper_fs_read" ];
       canonical_tools = [ "keeper_fs_read" ];
       unexpected_tools = [ "WebSearch" ];
-      tools_used = [ "keeper_fs_read" ];
-      tool_contract_result = "satisfied";
+      tools_used;
+      tool_contract_result;
       tool_surface =
         {
           turn_lane = "tool";
@@ -1263,6 +1264,40 @@ let test_composite_routes_surface_latest_execution_receipt () =
     (fleet_execution |> member "cascade" |> member "selected_model" |> to_string)
 ;;
 
+let test_composite_routes_surface_runtime_recommended_actions () =
+  with_seeded_server
+  @@ fun ~port ~config ~admin_token ~keeper_name ->
+  let boot_path = Printf.sprintf "/api/v1/keepers/%s/boot" keeper_name in
+  let boot_result =
+    run_curl_post ~body:"{}" ~token:admin_token ~port ~path:boot_path ()
+  in
+  require_status "boot route registers keeper before composite read" 200 boot_result;
+  append_execution_receipt ~tool_contract_result:"missing_required_tool_use"
+    ~tools_used:[] config ~keeper_name;
+  let path = Printf.sprintf "/api/v1/keepers/%s/composite" keeper_name in
+  let result = run_curl_get ~port ~path () in
+  require_status "per-keeper composite GET returns 200" 200 result;
+  let open Yojson.Safe.Util in
+  let json = Yojson.Safe.from_string result.body in
+  let actions = json |> member "recommended_actions" |> to_list in
+  check bool "composite recommends keeper_probe" true
+    (List.exists
+       (fun row ->
+         row |> member "action_type" |> to_string = "keeper_probe"
+         && row |> member "target_id" |> to_string = keeper_name)
+       actions);
+  check bool "composite recommends keeper_message" true
+    (List.exists
+       (fun row ->
+         row |> member "action_type" |> to_string = "keeper_message"
+         && row |> member "target_id" |> to_string = keeper_name)
+       actions);
+  check bool "tool-contract blocker does not recommend restart" false
+    (List.exists
+       (fun row -> row |> member "action_type" |> to_string = "keeper_recover")
+       actions)
+;;
+
 let test_tool_calls_route_surfaces_coverage_gap_health () =
   with_seeded_server
   @@ fun ~port ~config ~admin_token:_ ~keeper_name ->
@@ -1480,6 +1515,10 @@ let () =
             "composite routes surface latest execution receipt"
             `Slow
             test_composite_routes_surface_latest_execution_receipt
+        ; test_case
+            "composite routes surface runtime recommended actions"
+            `Slow
+            test_composite_routes_surface_runtime_recommended_actions
         ; test_case
             "tool calls route surfaces coverage gap health"
             `Slow

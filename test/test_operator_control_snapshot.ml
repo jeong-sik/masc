@@ -356,6 +356,12 @@ let test_snapshot_pending_confirm_summary_tracks_actor_scope () =
                row |> member "action_type" |> to_string)
              = "keeper_github_identity_login_prepare")
            confirm_required_actions);
+      Alcotest.(check bool) "keeper recover listed" true
+        (List.exists
+           (fun row ->
+             Yojson.Safe.Util.(row |> member "action_type" |> to_string)
+             = "keeper_recover")
+           confirm_required_actions);
       Alcotest.(check bool) "team stop removed from confirm surface" false
         (List.exists
            (fun row ->

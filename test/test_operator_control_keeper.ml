@@ -485,7 +485,7 @@ let test_snapshot_exposes_keeper_and_social_actions () =
           in
           Alcotest.(check string) "keeper_recover target_type" "keeper"
             Yojson.Safe.Util.(keeper_recover |> member "target_type" |> to_string);
-          Alcotest.(check bool) "keeper_recover confirm false" false
+          Alcotest.(check bool) "keeper_recover confirm true" true
             Yojson.Safe.Util.(keeper_recover |> member "confirm_required" |> to_bool);
           let keeper_identity_login_prepare =
             match find_action "keeper_github_identity_login_prepare" with
@@ -1481,9 +1481,27 @@ let test_operator_keeper_recover_accepts_agent_name_alias () =
         | Ok json -> json
         | Error err -> Alcotest.fail err
       in
+      Alcotest.(check bool) "recover requires confirmation" true
+        Yojson.Safe.Util.(action_json |> member "confirm_required" |> to_bool);
       Alcotest.(check string) "recover delegates to keeper recover"
         "masc_keeper_recover"
         Yojson.Safe.Util.(action_json |> member "tool_name" |> to_string);
+      let confirm_token =
+        Yojson.Safe.Util.(action_json |> member "confirm_token" |> to_string)
+      in
+      let action_json =
+        match
+          Operator_control.confirm_json ctx
+            (`Assoc
+              [
+                ("actor", `String "operator");
+                ("confirm_token", `String confirm_token);
+                ("decision", `String "confirm");
+              ])
+        with
+        | Ok json -> json
+        | Error err -> Alcotest.fail err
+      in
       let delegated_result =
         Yojson.Safe.Util.(action_json |> member "result" |> member "result")
       in

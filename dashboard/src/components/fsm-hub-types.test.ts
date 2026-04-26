@@ -34,6 +34,7 @@ function snapshot(overrides: Partial<KeeperCompositeSnapshot> = {}): KeeperCompo
     },
     is_live: false,
     last_outcome: null,
+    recommended_actions: [],
     ...overrides,
   }
 }

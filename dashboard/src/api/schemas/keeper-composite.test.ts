@@ -32,6 +32,7 @@ describe('parseKeeperCompositeSnapshot', () => {
     expect(result.turn_phase).toBe('idle')
     expect(result.is_live).toBe(true)
     expect(result.last_outcome).toBeNull()
+    expect(result.recommended_actions).toEqual([])
   })
 
   it('parses explicit keeper identity when emitted by the backend', () => {
@@ -127,6 +128,34 @@ describe('parseKeeperCompositeSnapshot', () => {
     expect(result.execution?.terminal_reason_code).toBe('config_error')
     expect(result.execution?.cascade?.fallback_reason).toBe('turn_timeout')
     expect(result.execution?.error?.message_preview).toContain('fallback_cascade')
+  })
+
+  it('parses backend-recommended runtime actions', () => {
+    const result = parseKeeperCompositeSnapshot({
+      ...VALID_SNAPSHOT,
+      recommended_actions: [
+        {
+          action_type: 'keeper_recover',
+          target_type: 'keeper',
+          target_id: 'analyst',
+          severity: 'bad',
+          reason: 'Controlled keeper recovery for runtime stall: api_error',
+          confirm_required: true,
+          suggested_payload: {
+            source: 'fleet_fsm',
+            keeper: 'analyst',
+          },
+          preview: {
+            actor: 'fleet_fsm',
+            action_type: 'keeper_recover',
+          },
+        },
+      ],
+    })
+
+    expect(result.recommended_actions).toHaveLength(1)
+    expect(result.recommended_actions[0]!.action_type).toBe('keeper_recover')
+    expect(result.recommended_actions[0]!.confirm_required).toBe(true)
   })
 
   it('parses snapshot with measurement auto_rules', () => {

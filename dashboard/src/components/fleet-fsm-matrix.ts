@@ -171,12 +171,20 @@ export type FleetRuntimeAssistRequest = {
 export type FleetRuntimeAssistHandler =
   (request: FleetRuntimeAssistRequest) => Promise<void> | void
 
+type FleetRuntimeAction = KeeperCompositeSnapshot['recommended_actions'][number]
+
 const RUNTIME_ATTENTION_CLASS: Record<FleetRuntimeAttentionLevel, string> = {
   ok: 'bg-[var(--ok-10)] text-[var(--color-status-ok)] border-[var(--ok-20)]',
   stale: 'bg-[var(--warn-10)] text-[var(--color-status-warn)] border-[var(--warn-20)]',
   idle: 'bg-[var(--warn-10)] text-[var(--color-status-warn)] border-[var(--warn-20)]',
   blocked: 'bg-[var(--bad-10)] text-[var(--bad-light)] border-[var(--bad-20)]',
 }
+
+const RUNTIME_ACTION_TYPES = new Set([
+  'keeper_probe',
+  'keeper_recover',
+  'keeper_message',
+])
 
 export type FleetCellPresentation = {
   label: string
@@ -397,6 +405,58 @@ async function requestRuntimeAssistViaOperator(
   showToast(`${request.keeperName} AI 진단 요청을 보냈습니다`, 'success')
 }
 
+function runtimeActionPayload(action: FleetRuntimeAction): Record<string, unknown> {
+  const payload = action.suggested_payload
+  if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+    return payload as Record<string, unknown>
+  }
+  return {}
+}
+
+function runtimeActionLabel(action: FleetRuntimeAction): string {
+  switch (action.action_type) {
+    case 'keeper_probe':
+      return '상태 확인'
+    case 'keeper_recover':
+      return '복구 요청'
+    case 'keeper_message':
+      return 'AI 진단'
+    default:
+      return action.action_type
+  }
+}
+
+function runtimeActionBusyLabel(action: FleetRuntimeAction): string {
+  switch (action.action_type) {
+    case 'keeper_probe':
+      return '확인 중'
+    case 'keeper_recover':
+      return '요청 중'
+    case 'keeper_message':
+      return '진단 중'
+    default:
+      return '실행 중'
+  }
+}
+
+function runtimeActionTone(action: FleetRuntimeAction): string {
+  if (action.action_type === 'keeper_recover') {
+    return 'text-[var(--warn)]'
+  }
+  return 'text-[var(--accent)]'
+}
+
+function runtimeActionsForSnapshot(
+  snapshot: KeeperCompositeSnapshot,
+  attention: FleetRuntimeAttention,
+): FleetRuntimeAction[] {
+  if (attention.level === 'ok') return []
+  return (snapshot.recommended_actions ?? [])
+    .filter(action => RUNTIME_ACTION_TYPES.has(action.action_type))
+    .filter(action => action.target_type === 'keeper')
+    .slice(0, 3)
+}
+
 export function runtimeAttentionForSnapshot(
   snapshot: KeeperCompositeSnapshot,
   generatedAt: number,
@@ -593,6 +653,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
   const [loading, setLoading] = useState<boolean>(true)
   const [query, setQuery] = useState<string>('')
   const [assistBusy, setAssistBusy] = useState<Set<string>>(() => new Set())
+  const [actionBusy, setActionBusy] = useState<Set<string>>(() => new Set())
   const lastStreamedAtRef = useRef<number | null>(null)
   // Observation ring. Ref rather than state because pushObservation
   // returns a fresh record per tick and we pair it with a setData call
@@ -631,6 +692,43 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
       })
     }
   }, [props.onRequestRuntimeAssist])
+
+  const refreshFleetComposite = useCallback(async () => {
+    const snap = await fetcher()
+    applySnapshot(snap)
+  }, [applySnapshot, fetcher])
+
+  const runRuntimeAction = useCallback(async (
+    keeperName: string,
+    action: FleetRuntimeAction,
+  ) => {
+    const key = `${keeperName}:${action.action_type}`
+    setActionBusy(prev => new Set(prev).add(key))
+    try {
+      const result = await dispatchOperatorAction({
+        actor: currentDashboardActor(),
+        action_type: action.action_type,
+        target_type: action.target_type || 'keeper',
+        target_id: action.target_id ?? keeperName,
+        payload: runtimeActionPayload(action),
+      })
+      if (result.confirm_required) {
+        showToast(`${keeperName} ${runtimeActionLabel(action)} 승인 대기 중`, 'success')
+      } else {
+        showToast(`${keeperName} ${runtimeActionLabel(action)} 실행 완료`, 'success')
+      }
+      await refreshFleetComposite()
+    } catch (err) {
+      const message = err instanceof Error ? err.message : `${runtimeActionLabel(action)} 실패`
+      showToast(message, 'error')
+    } finally {
+      setActionBusy(prev => {
+        const next = new Set(prev)
+        next.delete(key)
+        return next
+      })
+    }
+  }, [refreshFleetComposite])
 
   useEffect(() => {
     if (!allowStreamedData) return
@@ -840,6 +938,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
               }
               const name = inferKeeperNameFrom(snap)
               const assisting = assistBusy.has(name)
+              const runtimeActions = runtimeActionsForSnapshot(snap, attention)
               return html`
                 <tr
                   data-keeper=${name}
@@ -870,7 +969,34 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
                       >
                         다음: ${attention.nextStep}
                       </span>
-                      ${attention.level !== 'ok'
+                      ${runtimeActions.length > 0
+                        ? html`
+                            <div class="flex flex-wrap gap-1" data-runtime-actions>
+                              ${runtimeActions.map(action => {
+                                const key = `${name}:${action.action_type}`
+                                const busy = actionBusy.has(key)
+                                return html`
+                                  <button
+                                    type="button"
+                                    key=${key}
+                                    data-runtime-action
+                                    data-runtime-action-type=${action.action_type}
+                                    class="self-start rounded border border-[var(--white-10)] bg-[var(--white-5)] px-2 py-0.5 text-3xs font-semibold ${runtimeActionTone(action)} hover:bg-[var(--white-10)] disabled:cursor-not-allowed disabled:opacity-50"
+                                    title=${action.reason}
+                                    disabled=${busy}
+                                    onClick=${(event: MouseEvent) => {
+                                      event.stopPropagation()
+                                      void runRuntimeAction(name, action)
+                                    }}
+                                  >
+                                    ${busy ? runtimeActionBusyLabel(action) : runtimeActionLabel(action)}
+                                  </button>
+                                `
+                              })}
+                            </div>
+                          `
+                        : null}
+                      ${attention.level !== 'ok' && runtimeActions.length === 0
                         ? html`
                             <button
                               type="button"

@@ -58,6 +58,7 @@ function snapshot(
     },
     is_live: false,
     last_outcome: null,
+    recommended_actions: [],
   }
 
   return {

@@ -22,6 +22,7 @@ import {
   pauseKeeper,
   resumeKeeper,
   shutdownKeeper,
+  wakeupKeeper,
 } from '../api/keeper'
 import { TimeAgo } from './common/time-ago'
 import type { Keeper } from '../types'
@@ -226,13 +227,17 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
   if (!needsAttention && !hasActivitySignal) return null
 
   const directiveLoading = signal(false)
-  const handleDirective = async (action: 'pause' | 'resume') => {
+  const handleDirective = async (action: 'pause' | 'resume' | 'wakeup') => {
     directiveLoading.value = true
     try {
-      const fn = action === 'pause' ? pauseKeeper : resumeKeeper
+      const fn = action === 'pause' ? pauseKeeper : action === 'resume' ? resumeKeeper : wakeupKeeper
       const res = await fn(keeper.name)
       if (res.ok) {
-        showToast(action === 'pause' ? `${keeper.name} 일시정지됨` : `${keeper.name} 재개됨`, 'success')
+        const successLabel =
+          action === 'pause' ? `${keeper.name} 일시정지됨`
+          : action === 'resume' ? `${keeper.name} 재개됨`
+          : `${keeper.name} 깨움 신호 전송됨`
+        showToast(successLabel, 'success')
         await refreshAfterRuntimeAction()
       } else {
         showToast(res.error ?? '실패', 'error')
@@ -285,6 +290,16 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
               disabled=${directiveLoading.value}
               onClick=${() => handleDirective('pause')}
             >일시정지</button>`}
+        <button
+          class=${`inline-flex items-center rounded px-2 py-0.5 text-2xs font-medium transition-colors disabled:opacity-50 ${
+            hbStale
+              ? 'bg-[var(--warn-14)] hover:bg-[var(--warn-24)] text-[var(--warn)]'
+              : 'bg-[var(--white-6)] hover:bg-[var(--white-8)] text-[var(--text-strong)]'
+          }`}
+          disabled=${directiveLoading.value}
+          onClick=${() => handleDirective('wakeup')}
+          title="강제로 keeper fiber 를 깨우는 신호를 보냅니다 (heartbeat skip 무시)"
+        >${hbStale ? '강제 깨우기' : '깨우기'}</button>
         ${keeper.paused && keeper.keepalive_running && continueGate
           ? html`<span>하트비트는 유지되지만 승인 전까지 자동 재개하지 않습니다.</span>`
           : keeper.paused && keeper.keepalive_running

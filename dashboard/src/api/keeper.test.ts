@@ -24,6 +24,7 @@ import {
   sendKeeperMessageDetailed,
   shutdownKeeper,
   streamKeeperMessage,
+  wakeupKeeper,
 } from './keeper'
 
 afterEach(() => {
@@ -277,6 +278,39 @@ describe('keeper lifecycle', () => {
     const [url, init] = fetchMock.mock.calls[0]!
     expect(url).toBe('/api/v1/keepers/janitor/directive')
     expect(JSON.parse(init.body)).toEqual({ action: 'resume' })
+  })
+
+  it('sends POST with action=wakeup via directive endpoint', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true, action: 'wakeup', name: 'sangsu' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await wakeupKeeper('sangsu')
+
+    expect(result.ok).toBe(true)
+    const [url, init] = fetchMock.mock.calls[0]!
+    expect(url).toBe('/api/v1/keepers/sangsu/directive')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body)).toEqual({ action: 'wakeup' })
+  })
+
+  it('encodes keeper name in wakeup directive URL', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await wakeupKeeper('keeper with space')
+
+    const [url] = fetchMock.mock.calls[0]!
+    expect(url).toBe('/api/v1/keepers/keeper%20with%20space/directive')
   })
 
   it('returns error when pause directive fails', async () => {

@@ -472,6 +472,14 @@ export function resumeKeeper(name: string): Promise<KeeperLifecycleResponse> {
     `Failed to resume ${name}`,
   )
 }
+
+export function wakeupKeeper(name: string): Promise<KeeperLifecycleResponse> {
+  return safeKeeperPostWithBody(
+    `/api/v1/keepers/${encodeURIComponent(name)}/directive`,
+    { action: 'wakeup' },
+    `Failed to wake ${name}`,
+  )
+}
 // --- Keeper tool policy editing ---
 
 interface KeeperToolPolicyInput {

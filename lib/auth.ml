@@ -348,6 +348,36 @@ let load_credential_with_aliases config agent_name : agent_credential option =
       legacy_credential_aliases agent_name
       |> List.find_map (load_credential config)
 
+type load_credential_error =
+  | Credential_missing of { ctx_agent_name : string }
+  | Credential_mismatch of {
+      ctx_agent_name : string;
+      resolved_credential_stem : string;
+    }
+
+let pp_load_credential_error fmt = function
+  | Credential_missing { ctx_agent_name } ->
+      Format.fprintf fmt
+        "Credential_missing { ctx_agent_name = %S }" ctx_agent_name
+  | Credential_mismatch { ctx_agent_name; resolved_credential_stem } ->
+      Format.fprintf fmt
+        "Credential_mismatch { ctx_agent_name = %S; resolved_credential_stem \
+         = %S }"
+        ctx_agent_name resolved_credential_stem
+
+let show_load_credential_error err =
+  Format.asprintf "%a" pp_load_credential_error err
+
+let load_credential_of config ~ctx_agent_name ~resolved_credential_stem :
+    (agent_credential, load_credential_error) result =
+  if String.equal resolved_credential_stem ctx_agent_name then
+    match load_credential config ctx_agent_name with
+    | Some cred -> Ok cred
+    | None -> Error (Credential_missing { ctx_agent_name })
+  else
+    Error
+      (Credential_mismatch { ctx_agent_name; resolved_credential_stem })
+
 (** Save agent credential.
 
     When [cred.id] is present the credential is stored under

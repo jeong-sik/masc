@@ -358,3 +358,13 @@ let prune t ~days =
   end
 
 (* Duplicate count_entries removed — canonical definition at line 225 *)
+
+module For_testing = struct
+  let mutex t = Atomic.get t.mutex
+
+  let mutex_for_base_dir = mutex_for_base_dir
+
+  let registry_size () =
+    Stdlib.Mutex.protect mutex_registry_mu (fun () ->
+      Hashtbl.length mutex_registry)
+end

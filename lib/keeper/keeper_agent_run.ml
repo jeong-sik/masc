@@ -2348,6 +2348,10 @@ let run_turn
                  meta.name result.turns
                  (List.length actual_keeper_tool_names)
                  reason;
+               Prometheus.inc_counter
+                 Prometheus.metric_keeper_contract_violations
+                 ~labels:[ ("keeper_name", meta.name); ("kind", "passive") ]
+                 ();
                Error (contract_violation_error reason)
            | Ok (), None ->
                receipt_tool_contract_result_ref := tool_contract_status ();
@@ -2374,6 +2378,10 @@ let run_turn
                  meta.name result.turns
                  (List.length actual_keeper_tool_names)
                  contract_str reason;
+               Prometheus.inc_counter
+                 Prometheus.metric_keeper_contract_violations
+                 ~labels:[ ("keeper_name", meta.name); ("kind", "text_only") ]
+                 ();
                Error (contract_violation_error reason)
          in
          let finalize_response_text raw_response_text =

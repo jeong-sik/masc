@@ -6,6 +6,7 @@ import type { LogEntry } from '../api/dashboard.js'
 import { VirtualList } from './common/virtual-list'
 import { TextInput } from './common/input'
 import { Select } from './common/select'
+import { Checkbox } from './common/checkbox'
 import { createAsyncResource, loaded } from '../lib/async-state'
 import { toolCategory } from './tool-call-shared'
 
@@ -415,12 +416,11 @@ export function LogViewer() {
           <div class="logs-actions flex flex-wrap gap-3 items-center text-2xs text-[color:var(--color-fg-muted)]">
             <span class="rounded-sm border border-[var(--white-10)] bg-[var(--white-3)] px-2.5 py-1 tabular-nums">${logEntries.length.toLocaleString()} / ${logTotal.toLocaleString()}</span>
             <label class="logs-auto-label flex items-center gap-1.5 cursor-pointer">
-              <input
-                type="checkbox"
+              <${Checkbox}
                 name="log-auto-refresh"
-                aria-label="자동 새로고침"
+                ariaLabel="자동 새로고침"
                 checked=${autoRefresh.value}
-                onChange=${() => { autoRefresh.value = !autoRefresh.value }}
+                onChange=${(checked: boolean) => { autoRefresh.value = checked }}
               />
               자동
             </label>

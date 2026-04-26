@@ -127,15 +127,13 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
          "%s: Fiber_started rejected during supervised launch: %s"
          meta.name
          (Keeper_state_machine.transition_error_to_string err));
-  (* Stale-turn watchdog (#fleet-stall 2026-04-26 Step 3).
+  (* Stale-turn watchdog (#fleet-stall 2026-04-26 Step 3 → Step 4).
      Runs in its own Eio fiber so it stays responsive even if the heartbeat
-     fiber is blocked on a long synchronous call (the failure mode that
-     produced the "KSM=Running but no live turn" cluster). Polls
-     last_turn_ts via Keeper_registry; emits operator_broadcast_required
-     once per stale window so a Running-but-mute keeper becomes an
-     addressable event instead of a cosmetic dashboard chip.
-     Constants kept inline (no env knob — see memory:
-     no-hyperparameter-as-env-knob). *)
+     fiber is blocked on a long synchronous call. When a Running keeper has
+     not produced a turn for longer than stale_threshold_sec, the watchdog
+     signals fiber stop so the supervisor restarts the keeper automatically.
+     This closes the "KSM=Running but no live turn" gap where the previous
+     implementation only emitted a broadcast without triggering recovery. *)
   let stale_threshold_sec = 300.0 in
   let watchdog_poll_sec = 30.0 in
   let last_broadcast_ts = ref 0.0 in
@@ -167,7 +165,18 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
                    (Keeper_id.Trace_id.to_string entry.meta.runtime.trace_id)
                  ~generation:entry.meta.runtime.generation
                  ~stale_seconds:(now -. last_turn)
-                 ~last_turn_ts:last_turn
+                 ~last_turn_ts:last_turn;
+               (* Step 4: signal fiber stop + record failure reason.
+                  The heartbeat loop exits on fiber_stop; the supervisor's
+                  normal-exit handler checks for Stale_turn_timeout and
+                  resolves as `Crashed so sweep_and_recover restarts. *)
+               Keeper_registry.set_failure_reason ~base_path meta.name
+                 (Some (Keeper_registry.Stale_turn_timeout
+                          (now -. last_turn)));
+               Atomic.set reg.fiber_stop true;
+               Log.Keeper.error
+                 "%s: stale watchdog terminating fiber (%.0fs since last turn)"
+                 meta.name (now -. last_turn)
              end
            | _ -> ()
          with
@@ -199,22 +208,55 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
         (try
            Keeper_keepalive.run_heartbeat_loop ~proactive_warmup_sec
              ctx meta reg.fiber_stop ~wakeup:reg.fiber_wakeup;
-           (* Normal exit: stop flag was set — dispatch typed events *)
-           (match Keeper_registry.dispatch_event ~base_path meta.name
-              Keeper_state_machine.Stop_requested with
-            | Ok _ -> ()
-            | Error e ->
-                Log.Keeper.warn "supervisor: Stop_requested dispatch failed: %s"
-                  (Keeper_state_machine.transition_error_to_string e));
-           (match Keeper_registry.dispatch_event ~base_path meta.name
-              Keeper_state_machine.Drain_complete with
-            | Ok _ -> ()
-            | Error e ->
-                Log.Keeper.warn "supervisor: Drain_complete dispatch failed: %s"
-                  (Keeper_state_machine.transition_error_to_string e));
-           if resolve_done `Stopped then
-             publish_phase_lifecycle ~phase:Keeper_state_machine.Stopped
-               meta.name "normal exit" ()
+           (* Check if watchdog set a failure reason that should trigger
+              crash recovery instead of a clean stop. When the stale
+              watchdog sets fiber_stop + Stale_turn_timeout, the heartbeat
+              loop exits normally but the supervisor must treat this as a
+              crash so sweep_and_recover restarts the keeper. *)
+           let watchdog_triggered =
+             match Keeper_registry.get ~base_path meta.name with
+             | Some e -> (
+                 match e.last_failure_reason with
+                 | Some (Keeper_registry.Stale_turn_timeout _) -> true
+                 | _ -> false)
+             | None -> false
+           in
+           if watchdog_triggered then begin
+             let reason =
+               match Keeper_registry.get ~base_path meta.name with
+               | Some e ->
+                   Option.map Keeper_registry.failure_reason_to_string
+                     e.last_failure_reason
+                   |> Option.value ~default:"stale_turn_timeout"
+               | None -> "stale_turn_timeout"
+             in
+             (match Keeper_registry.dispatch_event ~base_path meta.name
+                (Keeper_state_machine.Fiber_terminated { outcome = reason }) with
+              | Ok _ -> ()
+              | Error e ->
+                  Log.Keeper.warn "supervisor: Fiber_terminated dispatch failed: %s"
+                    (Keeper_state_machine.transition_error_to_string e));
+             if resolve_done (`Crashed reason) then
+               publish_phase_lifecycle ~phase:Keeper_state_machine.Crashed
+                 meta.name reason ()
+           end else begin
+             (* Normal exit: stop flag was set — dispatch typed events *)
+             (match Keeper_registry.dispatch_event ~base_path meta.name
+                Keeper_state_machine.Stop_requested with
+              | Ok _ -> ()
+              | Error e ->
+                  Log.Keeper.warn "supervisor: Stop_requested dispatch failed: %s"
+                    (Keeper_state_machine.transition_error_to_string e));
+             (match Keeper_registry.dispatch_event ~base_path meta.name
+                Keeper_state_machine.Drain_complete with
+              | Ok _ -> ()
+              | Error e ->
+                  Log.Keeper.warn "supervisor: Drain_complete dispatch failed: %s"
+                    (Keeper_state_machine.transition_error_to_string e));
+             if resolve_done `Stopped then
+               publish_phase_lifecycle ~phase:Keeper_state_machine.Stopped
+                 meta.name "normal exit" ()
+           end
          with
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->

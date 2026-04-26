@@ -274,13 +274,36 @@ let dashboard_actor_for_request ~base_path request =
             ~labels:[ ("outcome", "none") ]
             ();
           request_actor_hint request
-      | Error _ ->
+      | Error err ->
+          (* The previous warn line elided the actual error string and the
+             request actor hint, leaving operators with a counter that only
+             told them *something* errored — not what.  Production logs
+             showed the warn firing 1–2 times/second with no diagnostic
+             surface, so the WARN was loud noise without root-cause
+             attribution.  Surface both the error class and the hint. *)
+          let err_str = Types.masc_error_to_string err in
+          let hint =
+            match request_actor_hint request with
+            | Some s -> s
+            | None -> "<none>"
+          in
+          let err_kind =
+            match err with
+            | Types.Unauthorized _ -> "unauthorized"
+            | Types.Forbidden _ -> "forbidden"
+            | Types.AgentNotFound _ -> "agent_not_found"
+            | Types.IoError _ -> "io_error"
+            | Types.InvalidJson _ -> "invalid_json"
+            | _ -> "other"
+          in
           Log.Auth.warn
-            "[silent:dashboard_actor_fallback] outcome=error - bearer token \
-             resolution errored, falling back to request actor hint";
+            "[silent:dashboard_actor_fallback] outcome=error \
+             err_kind=%s actor_hint=%s err=%s — falling back to request \
+             actor hint"
+            err_kind hint err_str;
           Prometheus.inc_counter
             Prometheus.metric_silent_dashboard_actor_fallback
-            ~labels:[ ("outcome", "error") ]
+            ~labels:[ ("outcome", "error"); ("err_kind", err_kind) ]
             ();
           request_actor_hint request)
   | None -> request_actor_hint request

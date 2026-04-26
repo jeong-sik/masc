@@ -57,7 +57,7 @@ graph TB
     CC[context_compact_oas.ml]
     MOB[memory_oas_bridge.ml]
     OE[oas_events.ml]
-    OSB[oas_sse_bridge.ml]
+    OSB[oas_event_bridge.ml]
     OM[oas_message.ml]
     OR[oas_response.ml]
     OMR[oas_model_resolve.ml]
@@ -324,9 +324,9 @@ MASC 조율 이벤트를 OAS `Event_bus`에 `Custom("masc:<type>", json)` 형식
 | `masc:reputation_changed` | 평판 변경 |
 | `masc:institution_episode` | institution 에피소드 기록 |
 
-### 8.2 SSE Relay (oas_sse_bridge.ml)
+### 8.2 SSE Relay (oas_event_bridge.ml)
 
-`oas_sse_bridge.ml`이 Event_bus의 native OAS events와 `masc:*` custom events를 모두 SSE로 중계하고 durable JSONL로도 기록한다.
+`oas_event_bridge.ml`이 Event_bus의 native OAS events와 `masc:*` custom events를 모두 SSE로 중계하고 durable JSONL로도 기록한다.
 
 동작:
 1. `Event_bus.subscribe`로 전체 OAS event bus를 구독

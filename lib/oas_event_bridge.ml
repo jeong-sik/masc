@@ -385,7 +385,7 @@ let update_relay_queue_depth pending =
 let emit_relay_retry_log ~(pending : pending_relay) ~(stage : relay_stage)
     ~(attempt : int) exn =
   Log.Misc.warn
-    "oas_sse_bridge: retrying event_type=%s stage=%s attempt=%d/%d correlation_id=%s run_id=%s error=%s"
+    "oas_event_bridge: retrying event_type=%s stage=%s attempt=%d/%d correlation_id=%s run_id=%s error=%s"
     (relay_event_type pending.json)
     (relay_stage_to_string stage)
     attempt
@@ -401,7 +401,7 @@ let emit_relay_retry_log ~(pending : pending_relay) ~(stage : relay_stage)
 let emit_relay_drop_log ~(pending : pending_relay) ~(stage_label : string)
     ~(attempts : int) =
   Log.Server.error
-    "oas_sse_bridge: dropping event_type=%s stage=%s attempts=%d correlation_id=%s run_id=%s"
+    "oas_event_bridge: dropping event_type=%s stage=%s attempts=%d correlation_id=%s run_id=%s"
     (relay_event_type pending.json)
     stage_label
     attempts
@@ -442,7 +442,7 @@ let broadcast_drop_marker ~(pending : pending_relay) ~(stage_label : string)
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
-      Log.Misc.warn "oas_sse_bridge: drop marker broadcast failed: %s"
+      Log.Misc.warn "oas_event_bridge: drop marker broadcast failed: %s"
         (Printexc.to_string exn)
 
 let prepare_pending_event evt =
@@ -638,7 +638,7 @@ let start_impl ~interval_s ~sw ~clock ~(config : Coord.config) ~bus =
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->
          Log.Misc.warn
-           "oas_sse_bridge: relay iteration failed: %s"
+           "oas_event_bridge: relay iteration failed: %s"
            (Printexc.to_string exn));
       Eio.Time.sleep clock interval_s;
       loop ()

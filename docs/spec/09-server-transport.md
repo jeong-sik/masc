@@ -839,7 +839,7 @@ sequenceDiagram
 | `mcp_server_eio_governance.ml` | 110 | Governance 설정 |
 | `sse.ml` | 474 | SSE event registry + broadcast |
 | `sse_room_filter.ml` | 63 | Room별 SSE 필터링 |
-| `oas_sse_bridge.ml` | 56 | OAS -> SSE 이벤트 브릿지 |
+| `oas_event_bridge.ml` | 56 | OAS -> SSE 이벤트 브릿지 |
 | `transport.ml` | 674 | 프로토콜 바인딩 추상화 + OpenAPI 생성 |
 | `http_server_eio.ml` | 675 | httpun-eio 래퍼 (Router, Compression) |
 | `http_server_h2.ml` | 325 | h2-eio 래퍼 |

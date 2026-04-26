@@ -117,7 +117,7 @@ describe('TaskActivityList', () => {
     await waitFor(() => {
       expect(screen.getByTestId('json-viewer-card')).toBeInTheDocument()
     })
-    expect(screen.getByTestId('json-viewer-card')).toHaveAttribute('data-title', 'Result')
+    expect(screen.getByTestId('json-viewer-card')).toHaveAttribute('data-title', '결과')
     const text = screen.getByTestId('json-viewer-card').textContent ?? ''
     expect(text).toContain('"ok":true')
   })
@@ -146,7 +146,7 @@ describe('TaskActivityList', () => {
       expect(screen.getByTestId('json-viewer-card')).toBeInTheDocument()
     })
     const card = screen.getByTestId('json-viewer-card')
-    expect(card).toHaveAttribute('data-title', 'Detail')
+    expect(card).toHaveAttribute('data-title', '세부')
     const text = card.textContent ?? ''
     expect(text).toContain('keeper-sojin-agent')
     expect(text).toContain('turn_completed')

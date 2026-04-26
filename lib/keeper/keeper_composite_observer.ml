@@ -122,6 +122,7 @@ type snapshot = {
   fiber_wakeup_flag : bool;
   consecutive_noop_count : int;
   idle_seconds : int;
+  last_turn_ts : float;
 }
 
 let ksm_phase_to_string = function
@@ -470,6 +471,7 @@ let observe
       (let last = entry.meta.runtime.proactive_rt.last_ts in
        if last <= 0.0 then 0
        else int_of_float (max 0.0 (Time_compat.now () -. last)));
+    last_turn_ts = entry.meta.runtime.usage.last_turn_ts;
   }
 
 (* Fleet fold — observe every currently-registered keeper under
@@ -558,4 +560,5 @@ let snapshot_to_json (s : snapshot) : Yojson.Safe.t =
     "fiber_wakeup_flag", `Bool s.fiber_wakeup_flag;
     "consecutive_noop_count", `Int s.consecutive_noop_count;
     "idle_seconds", `Int s.idle_seconds;
+    "last_turn_ts", `Float s.last_turn_ts;
   ]

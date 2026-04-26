@@ -56,8 +56,8 @@ describe('PlanningPanel', () => {
 
   it('renders FilterChips with 2 options', () => {
     render(html`<${PlanningPanel} />`)
-    expect(screen.getByText('Goal Manager')).toBeTruthy()
-    expect(screen.getByText('Backlog')).toBeTruthy()
+    expect(screen.getByText('목표 관리자')).toBeTruthy()
+    expect(screen.getByText('백로그')).toBeTruthy()
   })
 
   it('falls back to goal-tree for unknown view', () => {

@@ -80,7 +80,7 @@ export function RuntimePanel() {
           ? html`<${VerificationSpecsPanel} />`
         : html`
             <${OasHealthChip} />
-            <${CollapsibleSection} id="runtime-details-cascade" title="Cascade">
+            <${CollapsibleSection} id="runtime-details-cascade" title="캐스케이드">
               <${CascadeConfigPanel} />
             <//>
             <${CollapsibleSection} id="runtime-details-providers" title="프로바이더">

@@ -565,7 +565,7 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
         <div class="mt-1.5 flex flex-col gap-1.5">
           ${verificationSummary.open_request ? html`
             <div class="ml-6 rounded border border-amber-400/20 bg-amber-400/8 p-2 text-xs text-amber-100">
-              <div class="mb-1 text-3xs font-semibold uppercase tracking-widest text-amber-200/80">Goal Verification</div>
+              <div class="mb-1 text-3xs font-semibold uppercase tracking-widest text-amber-200/80">목표 검증</div>
               <div>request ${verificationSummary.open_request.id}</div>
               <div>
                 quorum ${verificationSummary.approve_count}/${verificationSummary.open_request.policy_snapshot.required_verdicts},
@@ -770,7 +770,7 @@ function GoalDetailPanel({
     <section class="flex flex-col gap-4 rounded border border-card-border/70 bg-[rgba(9,14,24,0.88)] p-5">
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div class="max-w-150">
-          <div class="text-2xs font-semibold uppercase tracking-[0.18em] text-text-muted">Goal Detail</div>
+          <div class="text-2xs font-semibold uppercase tracking-[0.18em] text-text-muted">목표 상세</div>
           <h3 class="mt-1 text-xl font-semibold tracking-[-0.02em] text-text-strong">${selectedNode.title}</h3>
           <div class="mt-2 flex flex-wrap items-center gap-2">
             <${HealthBadge} health=${selectedNode.health} />
@@ -806,7 +806,7 @@ function GoalDetailPanel({
         ${selectedNode.blocking_source !== 'none' ? html`
           <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4">
             <div class="mb-2 flex flex-wrap items-center gap-2">
-              <span class="text-2xs font-semibold uppercase tracking-widest text-text-muted">Blocking Context</span>
+              <span class="text-2xs font-semibold uppercase tracking-widest text-text-muted">차단 맥락</span>
               <span class="rounded border px-2 py-0.5 text-3xs font-semibold ${blockerSourceClass(selectedNode.blocking_source)}">
                 ${blockerSourceLabel(selectedNode.blocking_source)}
               </span>
@@ -838,7 +838,7 @@ function GoalDetailPanel({
 
         ${verificationSummary.effective_policy ? html`
           <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4">
-            <div class="mb-2 text-2xs font-semibold uppercase tracking-widest text-text-muted">Goal Verification</div>
+            <div class="mb-2 text-2xs font-semibold uppercase tracking-widest text-text-muted">목표 검증</div>
             <div class="flex flex-wrap items-center gap-2 text-xs text-text-body">
               <span class="rounded border border-amber-400/20 bg-amber-400/8 px-2 py-1 text-amber-100">
                 quorum ${verificationSummary.approve_count}/${verificationSummary.effective_policy.required_verdicts}
@@ -896,7 +896,7 @@ function GoalDetailPanel({
         <div class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
           <div class="flex flex-col gap-4">
             <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4">
-              <div class="mb-3 text-2xs font-semibold uppercase tracking-widest text-text-muted">Keeper Readiness</div>
+              <div class="mb-3 text-2xs font-semibold uppercase tracking-widest text-text-muted">키퍼 준비 상태</div>
               ${detail ? (
                 detail.linked_keepers.length > 0
                   ? html`
@@ -909,7 +909,7 @@ function GoalDetailPanel({
             </div>
 
             <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4">
-              <div class="mb-3 text-2xs font-semibold uppercase tracking-widest text-text-muted">Pending Approvals</div>
+              <div class="mb-3 text-2xs font-semibold uppercase tracking-widest text-text-muted">승인 대기</div>
               ${detail ? (
                 detail.approvals.length > 0
                   ? html`
@@ -931,7 +931,7 @@ function GoalDetailPanel({
           </div>
 
           <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4">
-            <div class="mb-3 text-2xs font-semibold uppercase tracking-widest text-text-muted">Unified Timeline</div>
+            <div class="mb-3 text-2xs font-semibold uppercase tracking-widest text-text-muted">통합 타임라인</div>
             ${detail ? html`<${GoalTimeline} events=${detail.timeline} />` : null}
           </div>
         </div>
@@ -1025,7 +1025,7 @@ export function GoalTree() {
       <section class="rounded border border-card-border/70 bg-[rgba(9,14,24,0.88)] p-5">
         <div class="mb-4 flex flex-wrap items-start justify-between gap-4">
           <div class="max-w-190">
-            <div class="text-2xs font-semibold uppercase tracking-[0.18em] text-text-muted">Goal Manager</div>
+            <div class="text-2xs font-semibold uppercase tracking-[0.18em] text-text-muted">목표 관리자</div>
             <h3 class="mt-1 text-2xl font-semibold tracking-[-0.02em] text-text-strong">목표 중심 계획 뷰</h3>
             <p class="mt-1.5 text-sm leading-relaxed text-text-muted">
               goal-task 연결, keeper evidence, approval 대기, sandbox/cascade 신호를 한 표면에서 봅니다.
@@ -1062,7 +1062,7 @@ export function GoalTree() {
 
         ${data && data.tree.length > 0 ? html`
           <div class="mb-4 flex flex-wrap items-center gap-2">
-            <span class="text-3xs font-semibold uppercase tracking-[0.18em] text-text-muted">Goal Phase</span>
+            <span class="text-3xs font-semibold uppercase tracking-[0.18em] text-text-muted">목표 단계</span>
             <${FilterChips}
               chips=${([
                 'all',

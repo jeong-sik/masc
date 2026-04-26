@@ -31,8 +31,8 @@ const activeView = computed<PlanningView>(() => {
 })
 
 const VIEW_CHIPS: Array<{ key: PlanningView; label: string }> = [
-  { key: 'goal-tree', label: 'Goal Manager' },
-  { key: 'default',   label: 'Backlog' },
+  { key: 'goal-tree', label: '목표 관리자' },
+  { key: 'default',   label: '백로그' },
 ]
 
 function updateViewParam(view: PlanningView): void {

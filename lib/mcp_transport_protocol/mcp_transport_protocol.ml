@@ -135,21 +135,22 @@ module Http_negotiation = struct
                 ~type_:(String.lowercase_ascii mt.type_)
                 ~subtype:(String.lowercase_ascii mt.subtype))
 
+  (* [exists_accepted] already passes [type_]/[subtype] lowercased to
+     [check] (see above), so callbacks compare against lowercase
+     literals directly — no second lowercase allocation per media
+     type. *)
   let accepts_sse_header = function
     | None -> false
     | Some h ->
         exists_accepted h ~check:(fun ~type_ ~subtype ->
-            String.lowercase_ascii type_ = "text"
-            && String.lowercase_ascii subtype = "event-stream")
+            type_ = "text" && subtype = "event-stream")
 
   let accepts_json = function
     | None -> false
     | Some h ->
         exists_accepted h ~check:(fun ~type_ ~subtype ->
-            let t = String.lowercase_ascii type_ in
-            let s = String.lowercase_ascii subtype in
-            (t = "application" && s = "json")
-            || (t = "*" && s = "*"))
+            (type_ = "application" && subtype = "json")
+            || (type_ = "*" && subtype = "*"))
 
   let accepts_streamable_mcp = function
     | None -> false

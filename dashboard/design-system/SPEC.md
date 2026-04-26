@@ -265,6 +265,8 @@ bonsai의 5 테마는 production user에게 URL hash로 공유 가능한 자산.
 | `keeperColor()` 헬퍼 | `dashboard/design-system/preview/cb-group-i.jsx` | 12 keeper persona를 attribution token 5종으로 환원 불가 — hex extension 의도적 |
 | `rgba(... / .NN)` alpha 조합 | 어느 곳이든 | `rgb(var(--token-glow) / .12)` 형태로 raw token alpha 조합은 허용 |
 | 폰트 fallback chain | `--font-*` 정의 내 | system font name (e.g., `Inter`, `JetBrains Mono`) |
+| 4-slot status pattern | `tokens.css`의 `--{ok\|warn\|err\|info\|idle\|stalled}-{soft\|fg\|border\|ring}` | 컴포넌트별 정교한 surface/text/border/ring 4 slot 조합. single-slot semantic alias로 환원 불가. 컴포넌트는 raw 참조 허용 (PR-M5 결정). |
+| `--brass-2` mid tone | accent palette mid-tone 사용처 | SPEC v0.1 §3.4은 accent를 fg/fg-dim 2 slot만 정의. 사용 빈도 증가 시 `--color-accent-fg-mid` 추가 검토. |
 
 ### 6.3 Surface 적용 의무
 

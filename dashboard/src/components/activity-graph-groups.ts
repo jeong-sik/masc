@@ -259,14 +259,14 @@ function groupSummary(category: ActivityCategory, events: ActivityGraphTimelineE
 
   switch (category) {
     case 'message':
-      return `${events.length} message events · ${eventPreview(latest)}`
+      return `${events.length} 메시지 이벤트 · ${eventPreview(latest)}`
     case 'board':
-      return `${events.length} board events · ${eventPreview(latest)}`
+      return `${events.length} 보드 이벤트 · ${eventPreview(latest)}`
     case 'lifecycle':
       return eventDetail(latest)
     default: {
       const sequence = sequenceSummary(events)
-      return events.length > 1 ? `${sequence} · ${events.length} events` : sequence
+      return events.length > 1 ? `${sequence} · ${events.length} 이벤트` : sequence
     }
   }
 }

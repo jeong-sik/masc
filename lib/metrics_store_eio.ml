@@ -240,7 +240,7 @@ let get_recent config ~agent_id ~days : task_metric list =
 (** Calculate aggregated metrics for fitness - synchronous *)
 let calculate_agent_metrics config ~agent_id ~days : agent_metrics option =
   let metrics = get_recent config ~agent_id ~days in
-  if List.length metrics = 0 then
+  if metrics = [] then
     None
   else
     let now = Time_compat.now () in
@@ -265,7 +265,7 @@ let calculate_agent_metrics config ~agent_id ~days : agent_metrics option =
     (* Calculate handoff success rate *)
     let handoffs = List.filter (fun m -> Option.is_some m.handoff_from || Option.is_some m.handoff_to) metrics in
     let successful_handoffs = List.filter (fun m -> m.success) handoffs in
-    let handoff_rate = if List.length handoffs > 0 then
+    let handoff_rate = if handoffs <> [] then
       float_of_int (List.length successful_handoffs) /. float_of_int (List.length handoffs)
     else 1.0 in  (* No handoffs = perfect handoff rate *)
 

@@ -83,7 +83,7 @@ let format_section (s : section) : string =
   let top_border = header ^ String.make (border_len - String.length header) '=' in
   let bottom_border = String.make border_len '-' in
   let content =
-    if List.length s.content = 0 then
+    if s.content = [] then
       [Printf.sprintf "  %s" s.empty_msg]
     else
       List.map (fun line ->

@@ -170,7 +170,7 @@ let build_session_seed session_json _cards =
       if explicit > 0 then explicit else List.length member_names
     in
     let counts_basis =
-      if List.length (string_list_of_json (member_assoc "planned_participants" summary)) > 0 then
+      if string_list_of_json (member_assoc "planned_participants" summary) <> [] then
         "live=recent_turns · planned=planned_participants"
       else
         "live=recent_turns · planned=known_members"

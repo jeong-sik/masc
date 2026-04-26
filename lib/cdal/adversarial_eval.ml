@@ -301,7 +301,7 @@ let check_untested_additions inputs =
         not (String.length base > 5 && String.starts_with ~prefix:"test_" base))
       changed_paths
   in
-  if List.length lib_files > 0 && not has_test_file then
+  if lib_files <> [] && not has_test_file then
     [
       {
         finding_id = next_finding_id ();

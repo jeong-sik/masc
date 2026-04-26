@@ -196,7 +196,7 @@ let top_procedures ~agent_name ~limit : procedure list =
 (** Format procedures for capsule injection. *)
 let format_for_dna ~agent_name ~limit : string =
   let procs = top_procedures ~agent_name ~limit in
-  if List.length procs = 0 then ""
+  if procs = [] then ""
   else
     let lines = List.map (fun p ->
       sprintf "- %s (confidence: %.0f%%, evidence: %d)"

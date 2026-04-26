@@ -92,7 +92,7 @@ export function ConnectorPathsStrip({ connectors }: { connectors: GateConnectorI
         aria-controls="connector-paths-body"
       >
         <span>
-          <span class="mr-2 text-3xs uppercase tracking-4">Paths</span>
+          <span class="mr-2 text-3xs uppercase tracking-4">경로</span>
           <span class="font-mono">${paths.connectorsDir ?? paths.sidecarsDir}</span>
           <span class="ml-2 text-[var(--text-dim)]">${paths.connectorsDir ? '' : '(런타임 미관찰 · sidecar 경로만 표시)'}</span>
         </span>

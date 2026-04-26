@@ -500,12 +500,12 @@ function RequestsTable({
         <thead>
           <tr class="text-[var(--text-muted)] border-b border-[var(--card-border)]">
             <th scope="col" class="text-left py-1 pr-2">상태</th>
-            <th scope="col" class="text-left py-1 pr-2">Request</th>
-            <th scope="col" class="text-left py-1 pr-2">Task</th>
+            <th scope="col" class="text-left py-1 pr-2">요청</th>
+            <th scope="col" class="text-left py-1 pr-2">태스크</th>
             <th scope="col" class="text-left py-1 pr-2">제출자</th>
             <th scope="col" class="text-left py-1 pr-2">승인자</th>
             <th scope="col" class="text-left py-1 pr-2">생성</th>
-            <th scope="col" class="text-left py-1 pr-2">Verdict</th>
+            <th scope="col" class="text-left py-1 pr-2">판정</th>
             <th scope="col" class="text-left py-1 pr-2">액션</th>
             <th scope="col" class="text-left py-1">세부</th>
           </tr>

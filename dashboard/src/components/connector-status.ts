@@ -924,7 +924,7 @@ function ConnectorLivePanel({
                 <span>keeper dir ${keepers.length}</span>
               </div>
               <div class="mt-3">
-                <${ActionButton} variant="ghost" size="sm" disabled=${loading || isActionLoading} onClick=${() => { void refresh() }}>Refresh<//>
+                <${ActionButton} variant="ghost" size="sm" disabled=${loading || isActionLoading} onClick=${() => { void refresh() }}>새로고침<//>
               </div>
             </div>
           `

@@ -719,7 +719,7 @@ function HealthTable({
           <thead>
             <tr class="text-[var(--text-muted)] border-b border-[var(--card-border)]">
               <th scope="col" class="text-left py-1 w-4"></th>
-              <th scope="col" class="text-left py-1">Provider</th>
+              <th scope="col" class="text-left py-1">공급자</th>
               <th
                 scope="col"
                 class="text-left py-1"
@@ -1010,11 +1010,11 @@ function ClientCapacityTable({ capacity }: { capacity: CascadeClientCapacityResp
       <thead>
         <tr class="text-[var(--text-muted)] border-b border-[var(--card-border)]">
           <th scope="col" class="text-left py-1 w-4"></th>
-          <th scope="col" class="text-left py-1">Kind</th>
-          <th scope="col" class="text-left py-1">Key</th>
-          <th scope="col" class="text-right py-1">Active</th>
-          <th scope="col" class="text-right py-1">Available</th>
-          <th scope="col" class="text-right py-1">Total</th>
+          <th scope="col" class="text-left py-1">종류</th>
+          <th scope="col" class="text-left py-1">키</th>
+          <th scope="col" class="text-right py-1">활성</th>
+          <th scope="col" class="text-right py-1">가용</th>
+          <th scope="col" class="text-right py-1">전체</th>
         </tr>
       </thead>
       <tbody>

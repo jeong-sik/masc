@@ -649,10 +649,10 @@ export function MemorySubsystems() {
                         <table class="w-full text-left" aria-label="시냅스 연결 목록">
                           <thead>
                             <tr class="border-b border-[var(--white-10)] text-xs text-[var(--text-muted)]">
-                              <th scope="col" class="py-1.5 px-2">From</th>
+                              <th scope="col" class="py-1.5 px-2">출발</th>
                               <th scope="col" class="py-1.5 px-2"></th>
-                              <th scope="col" class="py-1.5 px-2">To</th>
-                              <th scope="col" class="py-1.5 px-2 text-right">Weight</th>
+                              <th scope="col" class="py-1.5 px-2">도착</th>
+                              <th scope="col" class="py-1.5 px-2 text-right">가중치</th>
                               <th scope="col" class="py-1.5 px-2 text-center">성공</th>
                               <th scope="col" class="py-1.5 px-2 text-center">실패</th>
                               <th scope="col" class="py-1.5 px-2">마지막</th>

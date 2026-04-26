@@ -94,11 +94,11 @@ function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
             <div class="text-3xs text-[var(--text-muted)]">model: <span class="text-[var(--text-strong)] font-mono">${entry.model}</span></div>
           ` : null}
           <div>
-            <${SectionCap} class="mb-1">Input<//>
+            <${SectionCap} class="mb-1">입력<//>
             <pre class="text-xs font-mono bg-[var(--bg-deep)] rounded p-2 overflow-x-auto max-h-48 whitespace-pre-wrap text-[var(--text-strong)] leading-[1.4]" tabindex="0" aria-label="도구 입력">${formatInput(entry.input)}</pre>
           </div>
           <div>
-            <${SectionCap} class="mb-1">Output<//>
+            <${SectionCap} class="mb-1">출력<//>
             <pre class="text-xs font-mono bg-[var(--bg-deep)] rounded p-2 overflow-x-auto max-h-64 whitespace-pre-wrap text-[var(--text-strong)] leading-[1.4]" tabindex="0" aria-label="도구 출력">${formatOutput(entry.output)}</pre>
           </div>
         </div>

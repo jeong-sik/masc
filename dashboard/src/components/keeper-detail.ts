@@ -341,13 +341,13 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
             `
           : null}
         ${trustSummary
-          ? html`<span><strong class="text-[var(--text-strong)]">Trust</strong> · ${trustSummary}</span>`
+          ? html`<span><strong class="text-[var(--text-strong)]">신뢰</strong> · ${trustSummary}</span>`
           : null}
         ${runtimeProofStatus
-          ? html`<span><strong class="text-[var(--text-strong)]">Proof</strong> · ${runtimeProofStatus}</span>`
+          ? html`<span><strong class="text-[var(--text-strong)]">증명</strong> · ${runtimeProofStatus}</span>`
           : null}
         ${requiredTools.length > 0
-          ? html`<span><strong class="text-[var(--text-strong)]">Required</strong> · ${requiredTools.join(', ')}</span>`
+          ? html`<span><strong class="text-[var(--text-strong)]">필수</strong> · ${requiredTools.join(', ')}</span>`
           : null}
         ${usedTools.length > 0
           ? html`<span><strong class="text-[var(--text-strong)]">사용됨</strong> · ${usedTools.join(', ')}</span>`
@@ -358,10 +358,10 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
         ${providerSelectedModel || cascadeOutcome || typeof providerAttempts === 'number'
           ? html`
               <span>
-                <strong class="text-[var(--text-strong)]">Provider</strong>
-                · ${providerSelectedModel ?? cascadeOutcome ?? 'observed'}
-                ${typeof providerAttempts === 'number' ? ` · ${providerAttempts} tries` : ''}
-                ${providerFallback === true ? ' · fallback' : ''}
+                <strong class="text-[var(--text-strong)]">공급자</strong>
+                · ${providerSelectedModel ?? cascadeOutcome ?? '관측됨'}
+                ${typeof providerAttempts === 'number' ? ` · ${providerAttempts}회 시도` : ''}
+                ${providerFallback === true ? ' · 폴백' : ''}
               </span>
             `
           : null}
@@ -375,10 +375,10 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
             `
           : null}
         ${sandboxTarget
-          ? html`<span><strong class="text-[var(--text-strong)]">Sandbox</strong> · ${sandboxTarget}</span>`
+          ? html`<span><strong class="text-[var(--text-strong)]">샌드박스</strong> · ${sandboxTarget}</span>`
           : null}
         ${typeof persistedPolicyCount === 'number'
-          ? html`<span><strong class="text-[var(--text-strong)]">Always</strong> · ${persistedPolicyCount} rules</span>`
+          ? html`<span><strong class="text-[var(--text-strong)]">항상</strong> · ${persistedPolicyCount} 규칙</span>`
           : null}
         ${typeof goalLinkedTasks === 'number'
           ? html`<span><strong class="text-[var(--text-strong)]">목표 태스크</strong> · ${goalLinkedTasks}</span>`

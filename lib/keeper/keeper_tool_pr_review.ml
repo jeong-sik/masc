@@ -166,7 +166,8 @@ let handle_keeper_pr_review_comment
         (Filename.quote body)
         (pr_review_event_to_gh_flag event) in
       let st, out =
-        Process_eio.run_argv_with_status ~timeout_sec:30.0
+        Process_eio.run_argv_with_status
+          ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Pr_review_post ())
           [ "/bin/zsh"; "-lc"; cmd ] in
       Log.Keeper.info "pr_review_comment: pr=%d event=%s keeper=%s ok=%b"
         pr_number (pr_review_event_to_string event) meta.name (st = Unix.WEXITED 0);

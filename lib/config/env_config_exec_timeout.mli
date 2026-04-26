@@ -12,6 +12,12 @@ type caller =
   | Repo_readiness
   | Sandbox
   | Pr_review
+  | Pr_review_post
+      (** [gh pr review --body --event] mutation (post a review with
+          body).  Default 30.0s — server-side processing of the
+          review state machine + notification fanout is materially
+          slower than read ops; the [Pr_review] 15s read budget is
+          too tight here. *)
   | Dispatch
   | Memory_audit
   | Alerting

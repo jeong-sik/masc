@@ -1506,10 +1506,43 @@ let run_named
           Cascade_health_tracker.(
             record_terminal_failure global ~provider_key:provider_cfg.model_id
               ~error_kind:"resumable_cli_session" ~error_reason:err_str ())
-        else
+        else (
+          (* Classify the err_str into named buckets so Cascade_health_tracker
+             fingerprint groups separate codex internal-state corruption
+             (transient_codex_rollout — auto-recovers on next call) from
+             provider-permanent failures (e.g. kimi_cli auth-rejected) and
+             generic CLI exit (network_other).  Without this, every
+             [stop=error] is grouped under a single "failure" kind and
+             dashboards can't tell a known-recoverable bug pattern from a
+             persistent provider outage.  Pattern observed: 89 codex /
+             34 kimi / 13 claude exit-1 events in 3h (#10000-class). *)
+          let error_kind =
+            let contains needle hay =
+              let nl = String.length needle in
+              let hl = String.length hay in
+              let rec loop i =
+                i + nl <= hl
+                && (String.sub hay i nl = needle || loop (i + 1))
+              in
+              loop 0
+            in
+            if contains "thread " err_str
+               && contains " not found" err_str
+               && contains "rollout" err_str
+            then "transient_codex_rollout"
+            else if contains "kimi_cli rejected" err_str then
+              "permanent_kimi_rejected"
+            else if contains "Network error: codex exited" err_str then
+              "network_codex_other"
+            else if contains "Network error: claude exited" err_str then
+              "network_claude_other"
+            else if contains "Network error: gemini exited" err_str then
+              "network_gemini_other"
+            else "failure"
+          in
           Cascade_health_tracker.(
             record_failure global ~provider_key:provider_cfg.model_id
-              ~error_kind:"failure" ~error_reason:err_str ());
+              ~error_kind ~error_reason:err_str ()));
         (* FSM: Call_err → decide *)
         (match sdk_error_to_cascade_outcome sdk_err with
          | Some outcome ->

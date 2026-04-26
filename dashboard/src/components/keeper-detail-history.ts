@@ -610,7 +610,7 @@ export function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
                 })}
               </div>
             `
-            : html`<div class="text-2xs text-[var(--color-fg-muted)]">No recorded handoff entries yet.</div>`}
+            : html`<div class="text-2xs text-[var(--color-fg-muted)]">기록된 핸드오프 항목이 아직 없습니다.</div>`}
         </div>
 
         ${manifestPath || indexPath

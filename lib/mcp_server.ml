@@ -529,6 +529,12 @@ let create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
       base_path
   in
   let registry = Session.create () in
+  (* Start the registry's actor consumer fiber. Without this, every
+     [Session.*] helper that awaits a reply (register, restore_from_disk,
+     check_rate_limit, push_message, push_notification, get_session,
+     get_sessions) hangs forever — the mailbox has no consumer.
+     Missed when #10664 introduced the actor model. *)
+  Session.start_loop registry ~sw;
   (* Wire notification harness: subscription events → session queues *)
   Subscriptions.set_session_push_fn (fun event ->
     Session.push_notification_to_active_agents registry ~event

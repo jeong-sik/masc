@@ -6,6 +6,7 @@ import { Card } from './common/card'
 import { EmptyState } from './common/empty-state'
 import { ErrorState, LoadingState } from './common/feedback-state'
 import { Select } from './common/select'
+import { TextInput } from './common/input'
 import { StatCell } from './common/stat-cell'
 import { StatusChip } from './common/status-chip'
 import { TELEMETRY_AUTO_REFRESH_MS } from '../config/constants'
@@ -193,13 +194,13 @@ export function GovernanceMonitor() {
 
       <${Card} title="도구 거부 (${data?.window_minutes ?? windowMinutes.value}m)">
         <div class="flex flex-col gap-2">
-          <input
+          <${TextInput}
             type="search"
             value=${query.value}
             placeholder="tool / reason 필터"
-            aria-label="Tool rejection 필터"
+            ariaLabel="Tool rejection 필터"
             onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
-            class="min-w-40 max-w-60 rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 text-xs text-[var(--color-fg-secondary)] placeholder:text-[var(--color-fg-muted)] focus:outline-none focus:border-[var(--color-accent-fg)]"
+            class="min-w-40 max-w-60 !bg-[var(--color-bg-page)] !px-2 !py-1 !text-xs"
           />
           ${allRejections.length === 0
             ? html`<${EmptyState} message="선택한 시간 범위에 tool rejection이 없습니다." compact />`

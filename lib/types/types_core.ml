@@ -72,10 +72,17 @@ let agent_status_of_string_opt = function
   | "inactive" -> Some Inactive
   | _ -> None
 
+let agent_status_of_string_r s =
+  match agent_status_of_string_opt s with
+  | Some status -> Ok status
+  | None -> Error ("Unknown agent status: " ^ s)
+
+[@@@ocaml.warning "-3"]
 let agent_status_of_string s =
   match agent_status_of_string_opt s with
   | Some status -> status
-  | None -> Active  (* Safe default instead of raising *)
+  | None -> Active
+[@@ocaml.warning "-3"]
 
 (* Custom yojson converters for lowercase JSON compatibility *)
 let agent_status_to_yojson status = `String (agent_status_to_string status)

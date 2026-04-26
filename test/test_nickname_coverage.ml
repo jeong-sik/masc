@@ -78,6 +78,44 @@ let test_is_generated_nickname_short () =
 let test_is_generated_nickname_empty () =
   check bool "empty invalid" false (Nickname.is_generated_nickname "")
 
+(* The strict variant is what auth code uses. It must accept real generated
+   nicknames (dictionary adjective + animal) while rejecting structured
+   operator names like [keeper-<id>-agent], which only happen to share the
+   3-part shape. Pre-fix the auth path used the loose [is_generated_nickname],
+   misclassified those names, sent each keeper subprocess through the
+   bearer-token rewrite path, and produced [silent:auth_token_resolve_error]
+   storms (~20 events / 5min observed in fleet logs 2026-04-26). *)
+let test_is_dictionary_generated_nickname_accepts_real () =
+  check bool "claude-swift-fox" true
+    (Nickname.is_dictionary_generated_nickname "claude-swift-fox");
+  check bool "claude-swift-fox-a3b2" true
+    (Nickname.is_dictionary_generated_nickname "claude-swift-fox-a3b2");
+  check bool "qa-king-warm-heron multi-part type" true
+    (Nickname.is_dictionary_generated_nickname "qa-king-warm-heron");
+  check bool "fresh generated" true
+    (Nickname.is_dictionary_generated_nickname (Nickname.generate "claude"));
+  check bool "fresh unique" true
+    (Nickname.is_dictionary_generated_nickname
+       (Nickname.generate_unique "claude"))
+
+let test_is_dictionary_generated_nickname_rejects_structured () =
+  check bool "keeper-sangsu-agent" false
+    (Nickname.is_dictionary_generated_nickname "keeper-sangsu-agent");
+  check bool "keeper-issue_king-agent" false
+    (Nickname.is_dictionary_generated_nickname "keeper-issue_king-agent");
+  check bool "keeper-verifier-agent" false
+    (Nickname.is_dictionary_generated_nickname "keeper-verifier-agent");
+  check bool "keeper-nick0cave-agent" false
+    (Nickname.is_dictionary_generated_nickname "keeper-nick0cave-agent");
+  check bool "admin-board-keeper" false
+    (Nickname.is_dictionary_generated_nickname "admin-board-keeper");
+  check bool "non-list adj/animal" false
+    (Nickname.is_dictionary_generated_nickname "claude-foo-bar");
+  check bool "two parts" false
+    (Nickname.is_dictionary_generated_nickname "claude-opus");
+  check bool "empty" false
+    (Nickname.is_dictionary_generated_nickname "")
+
 (* ============================================================
    extract_agent_type Tests
    ============================================================ *)
@@ -144,6 +182,12 @@ let () =
       test_case "manual valid" `Quick test_is_generated_nickname_manual;
       test_case "short invalid" `Quick test_is_generated_nickname_short;
       test_case "empty invalid" `Quick test_is_generated_nickname_empty;
+    ];
+    "is_dictionary_generated_nickname", [
+      test_case "accepts real" `Quick
+        test_is_dictionary_generated_nickname_accepts_real;
+      test_case "rejects structured" `Quick
+        test_is_dictionary_generated_nickname_rejects_structured;
     ];
     "extract_agent_type", [
       test_case "generated" `Quick test_extract_agent_type_generated;

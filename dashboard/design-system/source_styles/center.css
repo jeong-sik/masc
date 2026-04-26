@@ -35,7 +35,7 @@
   padding: 3px 7px; cursor: pointer; border-radius: 2px; letter-spacing: .03em;
 }
 .wf-scale-ctrl button:hover { color: var(--color-fg-primary); }
-.wf-scale-ctrl button.is-active { background: var(--color-bg-elevated); border-color: var(--brass-3); color: var(--color-accent-fg); }
+.wf-scale-ctrl button.is-active { background: var(--color-bg-elevated); border-color: var(--color-accent-fg-dim); color: var(--color-accent-fg); }
 .wf-scale-ctrl + .pane-meta { margin-left: var(--sp-3); }
 
 .feed-row {

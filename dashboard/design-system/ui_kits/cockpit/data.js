@@ -2,14 +2,14 @@
 
 window.MASC_DATA = (function () {
   const keepers = [
-    { id: "nick0cave",      role: "Captain",    color: "var(--brass-1)",    dotVar: "brass",    status: "running",  task: "t-9f2a", tool: "tool.write_file" },
+    { id: "nick0cave",      role: "Captain",    color: "var(--color-accent-fg)",    dotVar: "brass",    status: "running",  task: "t-9f2a", tool: "tool.write_file" },
     { id: "masc-improver",  role: "Improver",   color: "var(--ok-fg)",      dotVar: "ok",       status: "running",  task: "t-4b11", tool: "tool.read_file" },
     { id: "sangsu",         role: "Analyst",    color: "var(--info-fg)",    dotVar: "info",     status: "pending",  task: "t-7c03", tool: "review.drift" },
     { id: "qa-king",        role: "QA",         color: "var(--err-fg)",     dotVar: "err",      status: "fail",     task: "t-2e88", tool: "suite.run" },
     { id: "rama",           role: "Researcher", color: "var(--stalled-fg)", dotVar: "stalled",  status: "stalled",  task: "t-d551", tool: "(await analyst)" },
-    { id: "scholar",        role: "Scholar",    color: "var(--fg-2)",       dotVar: "idle",     status: "idle",     task: "—",      tool: "—" },
-    { id: "taskmaster",     role: "Orchestr.",  color: "var(--fg-2)",       dotVar: "idle",     status: "idle",     task: "—",      tool: "—" },
-    { id: "velvet-hammer",  role: "Gatekeep.",  color: "var(--fg-2)",       dotVar: "idle",     status: "idle",     task: "—",      tool: "—" },
+    { id: "scholar",        role: "Scholar",    color: "var(--color-fg-secondary)",       dotVar: "idle",     status: "idle",     task: "—",      tool: "—" },
+    { id: "taskmaster",     role: "Orchestr.",  color: "var(--color-fg-secondary)",       dotVar: "idle",     status: "idle",     task: "—",      tool: "—" },
+    { id: "velvet-hammer",  role: "Gatekeep.",  color: "var(--color-fg-secondary)",       dotVar: "idle",     status: "idle",     task: "—",      tool: "—" },
   ];
 
   const goals = [

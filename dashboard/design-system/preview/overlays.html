@@ -10,12 +10,12 @@
   <style>
     html, body { margin:0; background: var(--color-bg-page); color: var(--color-fg-primary); font-family: var(--font-sans); min-height: 100vh; }
     .page { max-width: 1180px; margin:0 auto; padding: 32px 32px 96px; }
-    .back { font: var(--type-micro); color: var(--fg-4); text-decoration:none; letter-spacing: .08em; display:inline-block; margin-bottom:20px; }
+    .back { font: var(--type-micro); color: var(--color-fg-disabled); text-decoration:none; letter-spacing: .08em; display:inline-block; margin-bottom:20px; }
     .back:hover { color: var(--color-fg-secondary); }
     h1 { font-family: var(--font-mono); font-size: 18px; font-weight: 600; margin: 0 0 4px; }
     .sub { color: var(--color-fg-muted); font-size: 12px; margin-bottom: 28px; }
     h2 { font: var(--type-label); text-transform: uppercase; letter-spacing: .08em; color: var(--color-fg-muted); font-weight: 600; font-size: 11px; margin: 28px 0 8px; padding-bottom: 6px; border-bottom: 1px solid var(--color-border-strong); }
-    .stamp { position:fixed; top:12px; right:16px; font-family: var(--font-mono); font-size: 10px; color: var(--fg-4); }
+    .stamp { position:fixed; top:12px; right:16px; font-family: var(--font-mono); font-size: 10px; color: var(--color-fg-disabled); }
 
     /* static frame that hosts a "live" overlay demo */
     .stage { position: relative; width: 100%; height: 320px; background: var(--color-bg-surface); border: 1px solid var(--color-border-default); border-radius: var(--r-1); overflow: hidden; }
@@ -26,18 +26,18 @@
         var(--color-bg-page);
       opacity: .45;
     }
-    .stage-caption { position: absolute; top: 8px; left: 10px; font-family: var(--font-mono); font-size: 9px; color: var(--fg-4); letter-spacing: .08em; text-transform: uppercase; }
+    .stage-caption { position: absolute; top: 8px; left: 10px; font-family: var(--font-mono); font-size: 9px; color: var(--color-fg-disabled); letter-spacing: .08em; text-transform: uppercase; }
     .stage-action { position: absolute; top: 8px; right: 10px; }
     .btn-ghost { background: var(--color-bg-panel-alt); border: 1px solid var(--color-border-strong); color: var(--color-fg-secondary); font-family: var(--font-mono); font-size: 10px; letter-spacing: .06em; text-transform: uppercase; font-weight: 600; padding: 3px 8px; border-radius: var(--r-1); cursor: pointer; }
     .btn-ghost:hover { border-color: var(--brass-2); color: var(--color-accent-fg); }
 
     /* ────── MODAL ────── */
     .scrim { position: absolute; inset: 0; background: rgba(10, 10, 12, .68); backdrop-filter: blur(2px); display: grid; place-items: center; z-index: 2; }
-    .modal { width: min(440px, 84%); background: var(--color-bg-surface); border: 1px solid var(--color-border-strong); border-radius: var(--r-1); box-shadow: 0 20px 60px rgba(0,0,0,.5), 0 0 0 1px rgb(var(--brass-glow)/.08); overflow: hidden; }
+    .modal { width: min(440px, 84%); background: var(--color-bg-surface); border: 1px solid var(--color-border-strong); border-radius: var(--r-1); box-shadow: 0 20px 60px rgba(0,0,0,.5), 0 0 0 1px rgb(var(--color-accent-glow)/.08); overflow: hidden; }
     .modal-head { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--color-border-default); background: linear-gradient(180deg, var(--color-bg-panel-alt), var(--color-bg-surface)); }
     .modal-head .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--err); box-shadow: 0 0 4px var(--err-glow); }
     .modal-head h3 { margin: 0; font-family: var(--font-mono); font-size: 12px; font-weight: 600; letter-spacing: .04em; color: var(--color-fg-primary); }
-    .modal-head .close { margin-left: auto; font-family: var(--font-mono); font-size: 12px; color: var(--fg-4); cursor: pointer; background: none; border: none; }
+    .modal-head .close { margin-left: auto; font-family: var(--font-mono); font-size: 12px; color: var(--color-fg-disabled); cursor: pointer; background: none; border: none; }
     .modal-body { padding: 14px; font-size: 12px; line-height: 1.55; color: var(--color-fg-secondary); }
     .modal-body .mono { font-family: var(--font-mono); color: var(--color-fg-primary); background: var(--color-bg-panel-alt); padding: 1px 5px; border-radius: 2px; border: 1px solid var(--color-border-default); font-size: 11px; }
     .modal-foot { display: flex; justify-content: flex-end; gap: 6px; padding: 10px 14px; border-top: 1px solid var(--color-border-default); background: var(--color-bg-page); }
@@ -45,17 +45,17 @@
     .btn:hover { border-color: var(--brass-2); color: var(--color-accent-fg); }
     .btn.is-danger { background: rgb(var(--err-glow)/.15); border-color: var(--err); color: var(--err-fg); }
     .btn.is-danger:hover { background: rgb(var(--err-glow)/.25); }
-    .btn.is-primary { background: rgb(var(--brass-glow)/.12); border-color: var(--color-accent-fg); color: var(--color-accent-fg); box-shadow: 0 0 8px rgb(var(--brass-glow)/.25); }
+    .btn.is-primary { background: rgb(var(--color-accent-glow)/.12); border-color: var(--color-accent-fg); color: var(--color-accent-fg); box-shadow: 0 0 8px rgb(var(--color-accent-glow)/.25); }
 
     /* ────── POPOVER ────── */
     .anchor-btn { position: absolute; top: 120px; left: 60px; background: var(--color-bg-panel-alt); border: 1px dashed var(--color-border-strong); color: var(--color-fg-secondary); font-family: var(--font-mono); font-size: 11px; padding: 5px 10px; border-radius: var(--r-1); cursor: pointer; }
-    .popover { position: absolute; background: var(--color-bg-panel-alt); border: 1px solid var(--color-border-strong); border-radius: var(--r-1); box-shadow: 0 10px 30px rgba(0,0,0,.45), 0 0 0 1px rgb(var(--brass-glow)/.08); min-width: 220px; z-index: 2; }
+    .popover { position: absolute; background: var(--color-bg-panel-alt); border: 1px solid var(--color-border-strong); border-radius: var(--r-1); box-shadow: 0 10px 30px rgba(0,0,0,.45), 0 0 0 1px rgb(var(--color-accent-glow)/.08); min-width: 220px; z-index: 2; }
     .popover::before { content:''; position: absolute; top: -5px; left: 24px; width: 8px; height: 8px; background: var(--color-bg-panel-alt); border-left: 1px solid var(--color-border-strong); border-top: 1px solid var(--color-border-strong); transform: rotate(45deg); }
     .popover-row { display: flex; align-items: center; gap: 8px; padding: 6px 10px; font-family: var(--font-mono); font-size: 11px; color: var(--color-fg-secondary); cursor: pointer; border-bottom: 1px solid var(--color-border-default); }
     .popover-row:last-child { border-bottom: none; }
     .popover-row:hover { background: var(--color-bg-elevated); color: var(--color-accent-fg); }
-    .popover-row .kbd { margin-left: auto; font-size: 9px; padding: 1px 4px; border: 1px solid var(--color-border-strong); border-radius: 2px; color: var(--fg-4); background: var(--color-bg-surface); }
-    .popover-header { padding: 6px 10px 4px; font-family: var(--font-mono); font-size: 9px; letter-spacing: .08em; color: var(--fg-4); text-transform: uppercase; font-weight: 600; border-bottom: 1px solid var(--color-border-default); }
+    .popover-row .kbd { margin-left: auto; font-size: 9px; padding: 1px 4px; border: 1px solid var(--color-border-strong); border-radius: 2px; color: var(--color-fg-disabled); background: var(--color-bg-surface); }
+    .popover-header { padding: 6px 10px 4px; font-family: var(--font-mono); font-size: 9px; letter-spacing: .08em; color: var(--color-fg-disabled); text-transform: uppercase; font-weight: 600; border-bottom: 1px solid var(--color-border-default); }
 
     /* ────── TOOLTIP ────── */
     .tt { position: absolute; background: var(--color-bg-elevated); color: var(--color-fg-primary); font-family: var(--font-mono); font-size: 10px; padding: 4px 8px; border-radius: var(--r-1); border: 1px solid var(--color-border-strong); box-shadow: 0 4px 12px rgba(0,0,0,.45); z-index: 2; max-width: 220px; }
@@ -68,14 +68,14 @@
     .toast { display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px 8px 8px; background: var(--color-bg-panel-alt); border: 1px solid var(--color-border-strong); border-left: 2px solid var(--color-border-strong); border-radius: var(--r-1); box-shadow: 0 6px 18px rgba(0,0,0,.5); font-size: 11px; color: var(--color-fg-primary); }
     .toast .icon { width: 14px; text-align: center; font-family: var(--font-mono); font-weight: 700; font-size: 11px; flex-shrink: 0; line-height: 1.4; }
     .toast .body { flex: 1; line-height: 1.4; }
-    .toast .time { font-family: var(--font-mono); font-size: 9px; color: var(--fg-4); letter-spacing: .04em; margin-top: 1px; }
-    .toast .close { font-family: var(--font-mono); color: var(--fg-4); cursor: pointer; background: none; border: none; padding: 0 2px; }
+    .toast .time { font-family: var(--font-mono); font-size: 9px; color: var(--color-fg-disabled); letter-spacing: .04em; margin-top: 1px; }
+    .toast .close { font-family: var(--font-mono); color: var(--color-fg-disabled); cursor: pointer; background: none; border: none; padding: 0 2px; }
     .toast.is-ok { border-left-color: var(--ok); }
     .toast.is-ok .icon { color: var(--ok); }
     .toast.is-err { border-left-color: var(--err); }
     .toast.is-err .icon { color: var(--err); }
     .toast.is-brass { border-left-color: var(--color-accent-fg); }
-    .toast.is-brass .icon { color: var(--color-accent-fg); text-shadow: 0 0 4px rgb(var(--brass-glow)/.6); }
+    .toast.is-brass .icon { color: var(--color-accent-fg); text-shadow: 0 0 4px rgb(var(--color-accent-glow)/.6); }
     .toast.is-warn { border-left-color: var(--warn); }
     .toast.is-warn .icon { color: var(--warn); }
 
@@ -83,28 +83,28 @@
     .ctxmenu { position: absolute; min-width: 200px; background: var(--color-bg-panel-alt); border: 1px solid var(--color-border-strong); border-radius: var(--r-1); box-shadow: 0 10px 30px rgba(0,0,0,.5); z-index: 2; padding: 4px 0; }
     .ctxmenu .item { display: flex; align-items: center; gap: 8px; padding: 4px 10px; font-family: var(--font-mono); font-size: 11px; color: var(--color-fg-secondary); cursor: pointer; }
     .ctxmenu .item:hover { background: var(--color-bg-elevated); color: var(--color-accent-fg); }
-    .ctxmenu .item .glyph { width: 12px; color: var(--fg-4); text-align: center; }
+    .ctxmenu .item .glyph { width: 12px; color: var(--color-fg-disabled); text-align: center; }
     .ctxmenu .item:hover .glyph { color: var(--color-accent-fg); }
-    .ctxmenu .item .kbd { margin-left: auto; font-size: 9px; padding: 1px 4px; border: 1px solid var(--color-border-strong); border-radius: 2px; color: var(--fg-4); background: var(--color-bg-surface); }
+    .ctxmenu .item .kbd { margin-left: auto; font-size: 9px; padding: 1px 4px; border: 1px solid var(--color-border-strong); border-radius: 2px; color: var(--color-fg-disabled); background: var(--color-bg-surface); }
     .ctxmenu .sep { height: 1px; background: var(--color-border-default); margin: 4px 0; }
     .ctxmenu .item.is-danger { color: var(--err-fg); }
 
     /* ────── CMD PALETTE ────── */
     .cmdk-scrim { position: absolute; inset: 0; background: rgba(10,10,12,.7); backdrop-filter: blur(3px); display: flex; justify-content: center; padding-top: 40px; z-index: 2; }
-    .cmdk { width: min(520px, 86%); background: var(--color-bg-surface); border: 1px solid var(--brass-2); box-shadow: 0 20px 60px rgba(0,0,0,.6), 0 0 40px rgb(var(--brass-glow)/.15); border-radius: var(--r-1); overflow: hidden; height: fit-content; }
+    .cmdk { width: min(520px, 86%); background: var(--color-bg-surface); border: 1px solid var(--brass-2); box-shadow: 0 20px 60px rgba(0,0,0,.6), 0 0 40px rgb(var(--color-accent-glow)/.15); border-radius: var(--r-1); overflow: hidden; height: fit-content; }
     .cmdk-input { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--color-border-strong); }
-    .cmdk-input .prompt { font-family: var(--font-mono); color: var(--color-accent-fg); font-size: 13px; text-shadow: 0 0 6px rgb(var(--brass-glow)/.6); }
+    .cmdk-input .prompt { font-family: var(--font-mono); color: var(--color-accent-fg); font-size: 13px; text-shadow: 0 0 6px rgb(var(--color-accent-glow)/.6); }
     .cmdk-input input { flex: 1; background: transparent; border: none; outline: none; color: var(--color-fg-primary); font-family: var(--font-mono); font-size: 13px; caret-color: var(--color-accent-fg); }
-    .cmdk-input .hint { font-family: var(--font-mono); font-size: 9px; color: var(--fg-4); letter-spacing: .08em; text-transform: uppercase; }
+    .cmdk-input .hint { font-family: var(--font-mono); font-size: 9px; color: var(--color-fg-disabled); letter-spacing: .08em; text-transform: uppercase; }
     .cmdk-results { max-height: 230px; overflow-y: auto; }
-    .cmdk-group-head { padding: 6px 14px 2px; font-family: var(--font-mono); font-size: 9px; letter-spacing: .08em; color: var(--fg-4); text-transform: uppercase; font-weight: 600; }
+    .cmdk-group-head { padding: 6px 14px 2px; font-family: var(--font-mono); font-size: 9px; letter-spacing: .08em; color: var(--color-fg-disabled); text-transform: uppercase; font-weight: 600; }
     .cmdk-item { display: flex; align-items: center; gap: 10px; padding: 6px 14px; font-size: 12px; color: var(--color-fg-secondary); font-family: var(--font-mono); cursor: pointer; }
-    .cmdk-item .glyph { width: 16px; color: var(--fg-4); text-align: center; }
-    .cmdk-item .meta { margin-left: auto; font-size: 10px; color: var(--fg-4); }
-    .cmdk-item.is-sel { background: rgb(var(--brass-glow)/.1); color: var(--color-accent-fg); box-shadow: inset 2px 0 0 var(--color-accent-fg); }
-    .cmdk-item.is-sel .glyph { color: var(--color-accent-fg); text-shadow: 0 0 4px rgb(var(--brass-glow)/.6); }
+    .cmdk-item .glyph { width: 16px; color: var(--color-fg-disabled); text-align: center; }
+    .cmdk-item .meta { margin-left: auto; font-size: 10px; color: var(--color-fg-disabled); }
+    .cmdk-item.is-sel { background: rgb(var(--color-accent-glow)/.1); color: var(--color-accent-fg); box-shadow: inset 2px 0 0 var(--color-accent-fg); }
+    .cmdk-item.is-sel .glyph { color: var(--color-accent-fg); text-shadow: 0 0 4px rgb(var(--color-accent-glow)/.6); }
     .cmdk-item.is-sel .meta { color: var(--brass-2); }
-    .cmdk-foot { display: flex; gap: 14px; padding: 6px 14px; border-top: 1px solid var(--color-border-strong); background: var(--color-bg-page); font-family: var(--font-mono); font-size: 9px; color: var(--fg-4); letter-spacing: .06em; }
+    .cmdk-foot { display: flex; gap: 14px; padding: 6px 14px; border-top: 1px solid var(--color-border-strong); background: var(--color-bg-page); font-family: var(--font-mono); font-size: 9px; color: var(--color-fg-disabled); letter-spacing: .06em; }
     .cmdk-foot .k { padding: 1px 4px; border: 1px solid var(--color-border-strong); border-radius: 2px; color: var(--color-fg-muted); margin-right: 3px; }
   </style>
 </head>
@@ -131,7 +131,7 @@
             <span class="mono">3 threads</span> on keeper.ts will be abandoned and any in-flight emit() calls rolled back.
           </div>
           <div class="modal-foot">
-            <button class="btn">Cancel <span style="color:var(--fg-4); margin-left:4px">ESC</span></button>
+            <button class="btn">Cancel <span style="color:var(--color-fg-disabled); margin-left:4px">ESC</span></button>
             <button class="btn is-danger">Kill &amp; abandon</button>
           </div>
         </div>
@@ -182,7 +182,7 @@
     <div class="stage">
       <div class="faux"></div>
       <div class="stage-caption">on-thread context · 3 groups separated</div>
-      <span style="position:absolute; top:110px; left:180px; font-family:var(--font-mono); font-size:11px; color:var(--color-accent-fg); padding: 3px 8px; background: rgb(var(--brass-glow)/.1); border-radius: 2px;">thread t-9f2a</span>
+      <span style="position:absolute; top:110px; left:180px; font-family:var(--font-mono); font-size:11px; color:var(--color-accent-fg); padding: 3px 8px; background: rgb(var(--color-accent-glow)/.1); border-radius: 2px;">thread t-9f2a</span>
       <div class="ctxmenu" style="top:140px; left:180px">
         <div class="item"><span class="glyph">↗</span>open in rail <span class="kbd">↵</span></div>
         <div class="item"><span class="glyph">#</span>jump to line</div>

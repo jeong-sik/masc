@@ -18,7 +18,7 @@
   border-radius: var(--r-1);
   white-space: nowrap;
 }
-.chip.is-brass { color: var(--color-accent-fg); border-color: var(--brass-3); background: rgb(var(--brass-glow) / .08); }
+.chip.is-brass { color: var(--color-accent-fg); border-color: var(--color-accent-fg-dim); background: rgb(var(--color-accent-glow) / .08); }
 .chip.is-ok    { color: var(--ok);    border-color: rgb(var(--ok-glow) / .35); background: rgb(var(--ok-glow) / .08); }
 .chip.is-warn  { color: var(--warn);  border-color: rgb(var(--warn-glow) / .35); background: rgb(var(--warn-glow) / .08); }
 .chip.is-err   { color: var(--err);   border-color: rgb(var(--err-glow) / .35); background: rgb(var(--err-glow) / .08); }
@@ -46,7 +46,7 @@
   border-radius: 999px;
   white-space: nowrap;
 }
-.pill.is-running { color: var(--color-accent-fg); background: rgb(var(--brass-glow) / .12); }
+.pill.is-running { color: var(--color-accent-fg); background: rgb(var(--color-accent-glow) / .12); }
 .pill.is-paused  { color: var(--color-fg-muted);    background: var(--color-bg-elevated); }
 .pill.is-ok      { color: var(--ok);      background: rgb(var(--ok-glow) / .12); }
 .pill.is-err     { color: var(--err);     background: rgb(var(--err-glow) / .12); }
@@ -102,7 +102,7 @@
 .spark.is-err > i { background: var(--err); }
 .spark.is-warn > i { background: var(--warn); }
 /* last bar brightens to signal "now" */
-.spark > i:last-child { background: var(--color-accent-fg); box-shadow: 0 0 3px rgb(var(--brass-glow) / .5); }
+.spark > i:last-child { background: var(--color-accent-fg); box-shadow: 0 0 3px rgb(var(--color-accent-glow) / .5); }
 
 /* ════════ SECTION HEAD ════════
    Panel header strip — small-caps label + optional right chip. */
@@ -118,7 +118,7 @@
   color: var(--color-fg-muted);
   flex-shrink: 0;
 }
-.section-head > .count { margin-left: auto; font-family: var(--font-mono); color: var(--fg-4); font-weight: 500; }
+.section-head > .count { margin-left: auto; font-family: var(--font-mono); color: var(--color-fg-disabled); font-weight: 500; }
 .section-head > .tail  { margin-left: auto; display: flex; gap: 4px; align-items: center; }
 
 /* ════════ KV ROW ════════
@@ -146,7 +146,7 @@
 .btn.primary {
   background: var(--brass-2);
   color: var(--color-bg-page);
-  border-color: var(--brass-3);
+  border-color: var(--color-accent-fg-dim);
   font-weight: 600;
 }
 .btn.primary:hover { background: var(--color-accent-fg); color: var(--color-bg-page); }
@@ -189,7 +189,7 @@
   background: var(--color-border-strong);
   border-radius: 1px 1px 0 0;
 }
-.band.is-running { background: var(--color-accent-fg); box-shadow: 0 0 6px rgb(var(--brass-glow) / .5); }
+.band.is-running { background: var(--color-accent-fg); box-shadow: 0 0 6px rgb(var(--color-accent-glow) / .5); }
 .band.is-ok      { background: var(--ok); }
 .band.is-warn    { background: var(--warn); }
 .band.is-err     { background: var(--err); }
@@ -208,7 +208,7 @@
   background: var(--color-bg-elevated);
   color: var(--color-fg-primary);
 }
-.tk.is-brass { color: var(--color-accent-fg); background: rgb(var(--brass-glow) / .08); }
+.tk.is-brass { color: var(--color-accent-fg); background: rgb(var(--color-accent-glow) / .08); }
 .tk.is-err   { color: var(--err);     background: rgb(var(--err-glow) / .08); }
 
 /* ════════ SCROLL PANEL ════════
@@ -219,7 +219,7 @@
 /* ════════ TYPE ROLE CLASSES ════════
    Prefer these over raw --fs-* sizes in new styles. Role names
    match tokens.css. Each applies font shorthand + sensible color. */
-.t-micro   { font: var(--type-micro);   color: var(--fg-4); letter-spacing: var(--track-caps); text-transform: uppercase; }
+.t-micro   { font: var(--type-micro);   color: var(--color-fg-disabled); letter-spacing: var(--track-caps); text-transform: uppercase; }
 .t-caption { font: var(--type-caption); color: var(--color-fg-muted); letter-spacing: var(--track-wide); }
 .t-label   { font: var(--type-label);   color: var(--color-fg-muted); letter-spacing: var(--track-caps); text-transform: uppercase; font-weight: var(--fw-semi); }
 .t-meta    { font: var(--type-meta);    color: var(--color-fg-muted); }
@@ -233,7 +233,7 @@
 
 /* colour-modifier classes that pair with type roles */
 .t-dim { color: var(--color-fg-muted); }
-.t-mute { color: var(--fg-4); }
+.t-mute { color: var(--color-fg-disabled); }
 .t-brass { color: var(--color-accent-fg); }
 .t-ok { color: var(--ok-fg); }
 .t-warn { color: var(--warn-fg); }
@@ -304,8 +304,8 @@ body[data-grid="1"]::before {
   pointer-events: none;
   z-index: var(--z-toast);
   background-image:
-    linear-gradient(to right,  rgb(var(--brass-glow) / .06) 1px, transparent 1px),
-    linear-gradient(to bottom, rgb(var(--brass-glow) / .06) 1px, transparent 1px);
+    linear-gradient(to right,  rgb(var(--color-accent-glow) / .06) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(var(--color-accent-glow) / .06) 1px, transparent 1px);
   background-size: var(--grid-unit) var(--grid-unit);
 }
 
@@ -319,7 +319,7 @@ body[data-grid="1"]::before {
 @keyframes anim-slide-right { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: none; } }
 @keyframes anim-pop         { from { opacity: 0; transform: scale(.92); } to { opacity: 1; transform: none; } }
 @keyframes anim-pulse       { 0%,100% { opacity: 1; } 50% { opacity: .55; } }
-@keyframes anim-pulse-glow  { 0%,100% { box-shadow: 0 0 0 rgb(var(--brass-glow) / 0); } 50% { box-shadow: 0 0 10px rgb(var(--brass-glow) / .5); } }
+@keyframes anim-pulse-glow  { 0%,100% { box-shadow: 0 0 0 rgb(var(--color-accent-glow) / 0); } 50% { box-shadow: 0 0 10px rgb(var(--color-accent-glow) / .5); } }
 @keyframes anim-pulse-err   { 0%,100% { box-shadow: 0 0 0 rgb(var(--err-glow)   / 0); } 50% { box-shadow: 0 0 10px rgb(var(--err-glow)   / .55); } }
 @keyframes anim-pulse-warn  { 0%,100% { box-shadow: 0 0 0 rgb(var(--warn-glow)  / 0); } 50% { box-shadow: 0 0 10px rgb(var(--warn-glow)  / .5); } }
 @keyframes anim-pulse-ok    { 0%,100% { box-shadow: 0 0 0 rgb(var(--ok-glow)    / 0); } 50% { box-shadow: 0 0 10px rgb(var(--ok-glow)    / .5); } }
@@ -382,7 +382,7 @@ body[data-grid="1"]::before {
 .is-loading::after {
   content: "";
   position: absolute; inset: 0;
-  background: linear-gradient(90deg, transparent, rgb(var(--brass-glow) / .08), transparent);
+  background: linear-gradient(90deg, transparent, rgb(var(--color-accent-glow) / .08), transparent);
   background-size: 200% 100%;
   animation: anim-shimmer 1.4s linear infinite;
 }

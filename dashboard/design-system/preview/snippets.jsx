@@ -374,9 +374,9 @@ const SNIPPETS = [
   <div class="nd-row">
     <span class="ts">12:05</span>
     <span style="font-family:var(--font-mono);font-size:11px;color:var(--color-accent-fg)">@sangsu</span>
-    <span style="font-family:var(--font-mono);font-size:9px;padding:1px 5px;border:1px solid var(--brass-3);color:var(--color-accent-fg);background:rgb(var(--brass-glow)/.08);text-transform:uppercase;letter-spacing:.06em">→ keeper-merge</span>
+    <span style="font-family:var(--font-mono);font-size:9px;padding:1px 5px;border:1px solid var(--color-accent-fg-dim);color:var(--color-accent-fg);background:rgb(var(--color-accent-glow)/.08);text-transform:uppercase;letter-spacing:.06em">→ keeper-merge</span>
     <span style="font-family:var(--font-mono);font-size:11px;color:var(--color-fg-primary);line-height:1.4">extend probe window to 4s before fallback — see ar-2025-04-11/f-002</span>
-    <span style="font-family:var(--font-mono);font-size:9px;color:var(--fg-4);text-transform:uppercase;letter-spacing:.06em">cooldown 30s</span>
+    <span style="font-family:var(--font-mono);font-size:9px;color:var(--color-fg-disabled);text-transform:uppercase;letter-spacing:.06em">cooldown 30s</span>
   </div>
 </div>`,
   },

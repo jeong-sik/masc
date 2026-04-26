@@ -11,7 +11,7 @@
     html, body { margin:0; background: var(--color-bg-page); color: var(--color-fg-primary); font-family: var(--font-sans); }
     .page { max-width: 1180px; margin:0 auto; padding: 32px 32px 96px; }
     .brand-row { display:flex; align-items:center; gap:10px; margin-bottom: 20px; }
-    .back { font: var(--type-micro); color: var(--fg-4); text-decoration:none; letter-spacing: .08em; }
+    .back { font: var(--type-micro); color: var(--color-fg-disabled); text-decoration:none; letter-spacing: .08em; }
     .back:hover { color: var(--color-fg-secondary); }
     h1 { font-family: var(--font-mono); font-size: 18px; font-weight: 600; margin: 0 0 4px; }
     .sub { color: var(--color-fg-muted); font-size: 12px; margin-bottom: 28px; }
@@ -19,17 +19,17 @@
     .seg { background: var(--color-bg-surface); border: 1px solid var(--color-border-default); border-radius: var(--r-1); padding: 16px 18px; margin-bottom: 10px; display: grid; grid-template-columns: 200px 1fr; gap: 20px; align-items: start; }
     .seg .meta { font-family: var(--font-mono); font-size: 11px; color: var(--color-fg-muted); }
     .seg .meta .n { color: var(--color-fg-primary); font-weight:600; font-size: 13px; margin-bottom: 4px; display:block; }
-    .seg .meta .code { display:block; margin-top: 6px; color: var(--fg-4); font-size: 10px; line-height: 1.5; }
+    .seg .meta .code { display:block; margin-top: 6px; color: var(--color-fg-disabled); font-size: 10px; line-height: 1.5; }
     .seg .demo { display:flex; flex-wrap:wrap; gap: 8px; align-items:center; min-height: 28px; }
     .seg .demo.col { flex-direction:column; align-items:stretch; gap: 4px; }
     .row-demo { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-    .grp-label { font: var(--type-micro); color: var(--fg-4); letter-spacing: .08em; text-transform:uppercase; margin-right: 4px; }
+    .grp-label { font: var(--type-micro); color: var(--color-fg-disabled); letter-spacing: .08em; text-transform:uppercase; margin-right: 4px; }
     .swatch { display:inline-flex; flex-direction:column; align-items:center; gap:3px; min-width: 56px; }
     .swatch .sw { width: 100%; height: 20px; border-radius: 2px; border: 1px solid var(--color-border-default); }
-    .swatch .lb { font: var(--type-micro); color: var(--fg-4); letter-spacing: .04em; }
+    .swatch .lb { font: var(--type-micro); color: var(--color-fg-disabled); letter-spacing: .04em; }
     /* kv showcase */
     .kv-sample { background: var(--color-bg-panel-alt); border:1px solid var(--color-border-default); border-radius: var(--r-1); padding: 8px 12px; min-width: 280px; }
-    .stamp { position:fixed; top:12px; right:16px; font-family: var(--font-mono); font-size: 10px; color: var(--fg-4); }
+    .stamp { position:fixed; top:12px; right:16px; font-family: var(--font-mono); font-size: 10px; color: var(--color-fg-disabled); }
   </style>
 </head>
 <body>
@@ -235,7 +235,7 @@
       <div class="demo col">
         <div class="row-demo">
           <span class="grp-label">heartbeat</span>
-          <span class="dot-k-nick" style="width:9px; height:9px; border-radius:50%; background: var(--color-accent-fg); box-shadow: 0 0 6px rgb(var(--brass-glow)/.7)" class="anim-heartbeat"></span>
+          <span class="dot-k-nick" style="width:9px; height:9px; border-radius:50%; background: var(--color-accent-fg); box-shadow: 0 0 6px rgb(var(--color-accent-glow)/.7)" class="anim-heartbeat"></span>
           <span style="width:16px"></span>
           <span class="grp-label">pulse-glow</span>
           <span style="width: 60px; height: 18px; border-radius: 3px; background: var(--color-bg-elevated); display:inline-block" class="anim-pulse-glow"></span>

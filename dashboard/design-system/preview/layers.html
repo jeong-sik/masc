@@ -10,23 +10,23 @@
   <style>
     html, body { margin:0; background: var(--color-bg-page); color: var(--color-fg-primary); font-family: var(--font-sans); min-height: 100vh; }
     .page { max-width: 1180px; margin:0 auto; padding: 32px 32px 96px; }
-    .back { font: var(--type-micro); color: var(--fg-4); text-decoration:none; letter-spacing: .08em; display:inline-block; margin-bottom:20px; }
+    .back { font: var(--type-micro); color: var(--color-fg-disabled); text-decoration:none; letter-spacing: .08em; display:inline-block; margin-bottom:20px; }
     .back:hover { color: var(--color-fg-secondary); }
     h1 { font-family: var(--font-mono); font-size: 18px; font-weight: 600; margin: 0 0 4px; }
     .sub { color: var(--color-fg-muted); font-size: 12px; margin-bottom: 28px; line-height:1.5; max-width: 700px; }
     h2 { font: var(--type-label); text-transform: uppercase; letter-spacing: .08em; color: var(--color-fg-muted); font-weight: 600; font-size: 11px; margin: 28px 0 8px; padding-bottom: 6px; border-bottom: 1px solid var(--color-border-strong); }
     h2 .tag { margin-left: 8px; color: var(--color-accent-fg); font-weight: 500; }
-    .stamp { position:fixed; top:12px; right:16px; font-family: var(--font-mono); font-size: 10px; color: var(--fg-4); }
+    .stamp { position:fixed; top:12px; right:16px; font-family: var(--font-mono); font-size: 10px; color: var(--color-fg-disabled); }
 
     .seg { background: var(--color-bg-surface); border: 1px solid var(--color-border-default); border-radius: var(--r-1); padding: 16px; margin-bottom: 10px; display:grid; grid-template-columns: 280px 1fr; gap:20px; align-items:start; }
     .seg .meta { font-family: var(--font-mono); font-size: 11px; color: var(--color-fg-muted); line-height: 1.5; }
     .seg .meta .n { color: var(--color-fg-primary); font-weight:600; font-size: 13px; margin-bottom: 4px; display:block; }
-    .seg .meta .code { display:block; margin-top: 8px; color: var(--fg-4); font-size: 10px; line-height: 1.5; padding: 6px 8px; background: var(--color-bg-panel-alt); border: 1px solid var(--color-border-default); border-radius: 2px; }
+    .seg .meta .code { display:block; margin-top: 8px; color: var(--color-fg-disabled); font-size: 10px; line-height: 1.5; padding: 6px 8px; background: var(--color-bg-panel-alt); border: 1px solid var(--color-border-default); border-radius: 2px; }
 
     .canvas { background: var(--color-bg-page); border: 1px solid var(--color-border-default); border-radius: var(--r-1); overflow: hidden; min-height: 180px; position:relative; }
     .src-pane { padding: 14px 18px; font-family: var(--font-mono); font-size: 11px; color: var(--color-fg-secondary); line-height: 1.7; position: relative; }
     .ln { display:flex; gap: 10px; }
-    .ln .n { color: var(--fg-4); width: 18px; text-align:right; flex-shrink:0; }
+    .ln .n { color: var(--color-fg-disabled); width: 18px; text-align:right; flex-shrink:0; }
     .k { color: #c195e8; } .t { color: #88b5d8; } .s { color: #a8c97a; } .f { color: #e8c976; }
 
     /* ── L1 TIME ── */
@@ -34,20 +34,20 @@
     .l1-rec { display:flex; gap: 2px; align-items: flex-end; height: 60px; }
     .l1-rec .bar { width: 6px; background: var(--warn); border-radius: 1px 1px 0 0; opacity: .55; position: relative; }
     .l1-rec .bar.hot { opacity: 1; box-shadow: 0 0 8px rgb(var(--warn-glow)/.8); }
-    .l1-rec .bar.cold { opacity: .22; background: var(--fg-4); box-shadow: none; }
-    .l1-rec .bar.now { background: var(--color-accent-fg); box-shadow: 0 0 10px rgb(var(--brass-glow)/.9); }
+    .l1-rec .bar.cold { opacity: .22; background: var(--color-fg-disabled); box-shadow: none; }
+    .l1-rec .bar.now { background: var(--color-accent-fg); box-shadow: 0 0 10px rgb(var(--color-accent-glow)/.9); }
     .l1-rec .bar[data-by]::after { content: attr(data-by); position: absolute; top: -11px; left: 50%; transform: translateX(-50%); font-family: var(--font-mono); font-size: 7px; color: var(--color-accent-fg); letter-spacing: .04em; white-space: nowrap; opacity: .85; }
-    .l1-axis { display:flex; justify-content:space-between; font-family: var(--font-mono); font-size: 9px; color: var(--fg-4); letter-spacing: .04em; margin-top: 6px; padding-top: 4px; border-top: 1px dashed var(--color-border-default); }
-    .l1-legend { display:flex; gap: 14px; align-items:center; margin-top: 8px; font-family: var(--font-mono); font-size: 9px; color: var(--fg-4); letter-spacing: .04em; }
+    .l1-axis { display:flex; justify-content:space-between; font-family: var(--font-mono); font-size: 9px; color: var(--color-fg-disabled); letter-spacing: .04em; margin-top: 6px; padding-top: 4px; border-top: 1px dashed var(--color-border-default); }
+    .l1-legend { display:flex; gap: 14px; align-items:center; margin-top: 8px; font-family: var(--font-mono); font-size: 9px; color: var(--color-fg-disabled); letter-spacing: .04em; }
     .l1-legend .swatch { display:inline-block; width: 10px; height: 6px; border-radius: 1px; vertical-align: middle; margin-right: 4px; }
     .l1-meta { display:flex; gap: 10px; align-items:center; padding: 6px 18px; background: var(--color-bg-panel-alt); border-top: 1px solid var(--color-border-default); border-bottom: 1px solid var(--color-border-default); font-family: var(--font-mono); font-size: 10px; color: var(--color-fg-muted); }
-    .l1-meta .k { color: var(--fg-4); font-size: 9px; letter-spacing: .06em; text-transform: uppercase; margin-right: 4px; }
+    .l1-meta .k { color: var(--color-fg-disabled); font-size: 9px; letter-spacing: .06em; text-transform: uppercase; margin-right: 4px; }
     .l1-meta .v { color: var(--color-fg-primary); font-variant-numeric: tabular-nums; margin-right: 14px; }
 
     /* ── L2 PARALLEL ── */
     .l2 { position: relative; height: 180px; padding: 14px; }
     .l2 .lane { position:absolute; left: 14px; right: 14px; height: 22px; border-bottom: 1px dashed var(--color-border-default); display:flex; align-items:center; }
-    .l2 .lane .name { width: 70px; font-family: var(--font-mono); font-size: 9px; color: var(--fg-4); letter-spacing: .04em; }
+    .l2 .lane .name { width: 70px; font-family: var(--font-mono); font-size: 9px; color: var(--color-fg-disabled); letter-spacing: .04em; }
     .l2 .cursor { position: absolute; width: 10px; height: 14px; border-radius: 1px; top: 50%; transform: translateY(-50%); }
     .l2 .cursor::after { content: ''; position: absolute; left: 5px; top: -6px; width: 1px; height: 20px; background: currentColor; opacity: .4; }
 
@@ -55,19 +55,19 @@
     .l3 { display:flex; flex-direction: column; gap: 5px; padding: 14px 18px; }
     .l3-row { display:grid; grid-template-columns: 18px 100px 1fr 70px 50px; align-items:center; gap: 10px; padding: 2px 0; border-bottom: 1px dashed transparent; }
     .l3-row:hover { border-bottom-color: var(--color-border-default); }
-    .l3-glyph { font-family: var(--font-mono); font-size: 13px; color: var(--color-accent-fg); text-shadow: 0 0 4px rgb(var(--brass-glow)/.6); text-align:center; }
-    .l3-freq { height: 4px; background: linear-gradient(90deg, var(--color-accent-fg), rgb(var(--brass-glow)/.15)); border-radius: 999px; box-shadow: 0 0 4px rgb(var(--brass-glow)/.4); }
+    .l3-glyph { font-family: var(--font-mono); font-size: 13px; color: var(--color-accent-fg); text-shadow: 0 0 4px rgb(var(--color-accent-glow)/.6); text-align:center; }
+    .l3-freq { height: 4px; background: linear-gradient(90deg, var(--color-accent-fg), rgb(var(--color-accent-glow)/.15)); border-radius: 999px; box-shadow: 0 0 4px rgb(var(--color-accent-glow)/.4); }
     .l3-label { font-family: var(--font-mono); font-size: 11px; color: var(--brass-2); letter-spacing: .04em; }
-    .l3-by { font-family: var(--font-mono); font-size: 9px; color: var(--fg-4); letter-spacing: .04em; }
+    .l3-by { font-family: var(--font-mono); font-size: 9px; color: var(--color-fg-disabled); letter-spacing: .04em; }
     .l3-count { font-family: var(--font-mono); font-size: 10px; color: var(--color-fg-muted); text-align: right; font-variant-numeric: tabular-nums; }
-    .l3-head { display:grid; grid-template-columns: 18px 100px 1fr 70px 50px; gap: 10px; padding: 6px 18px 4px; font-family: var(--font-mono); font-size: 8px; color: var(--fg-4); letter-spacing: .08em; text-transform: uppercase; border-bottom: 1px solid var(--color-border-default); }
+    .l3-head { display:grid; grid-template-columns: 18px 100px 1fr 70px 50px; gap: 10px; padding: 6px 18px 4px; font-family: var(--font-mono); font-size: 8px; color: var(--color-fg-disabled); letter-spacing: .08em; text-transform: uppercase; border-bottom: 1px solid var(--color-border-default); }
 
     /* ── L4 APPROVE ── */
     .l4-block { padding: 12px 18px; background: rgb(107 158 107 / .05); border-left: 2px solid var(--ok); position: relative; font-family: var(--font-mono); font-size: 11px; color: var(--color-fg-secondary); margin-bottom: 6px; }
     .l4-block.flag { background: rgb(196 106 90 / .05); border-left-color: var(--err); }
     .l4-stamp { position:absolute; right: 18px; top: 50%; transform: translateY(-50%) rotate(-10deg); font-family: var(--font-mono); font-size: 28px; color: var(--ok); opacity: .18; font-weight: 700; letter-spacing: .08em; }
     .l4-block.flag .l4-stamp { color: var(--err); }
-    .l4-by { font-size: 9px; color: var(--fg-4); letter-spacing: .04em; margin-top: 3px; }
+    .l4-by { font-size: 9px; color: var(--color-fg-disabled); letter-spacing: .04em; margin-top: 3px; }
 
     /* ── L5 NOTES ── */
     .l5 { padding: 14px 18px; display:flex; gap: 12px; align-items:flex-start; }
@@ -75,29 +75,29 @@
     .l5-head { display:flex; align-items:center; gap: 5px; font-family: var(--font-mono); font-size: 9px; color: var(--stalled); letter-spacing: .06em; text-transform: uppercase; margin-bottom: 4px; }
     .l5-head .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--stalled); box-shadow: 0 0 4px rgb(var(--stalled-glow)/.8); }
     .l5-body { font-size: 11px; color: var(--color-fg-primary); line-height: 1.45; }
-    .l5-pin { position: absolute; top: -6px; right: 20px; width: 10px; height: 10px; border-radius: 50%; background: var(--color-accent-fg); box-shadow: 0 0 8px rgb(var(--brass-glow)/.7); border: 1px solid var(--brass-3); }
+    .l5-pin { position: absolute; top: -6px; right: 20px; width: 10px; height: 10px; border-radius: 50%; background: var(--color-accent-fg); box-shadow: 0 0 8px rgb(var(--color-accent-glow)/.7); border: 1px solid var(--color-accent-fg-dim); }
 
     /* ── COMBINED ── */
     .combo { position: relative; padding: 14px 18px; background: var(--color-bg-page); }
     .combo .layer-labels { position:absolute; top: 10px; right: 14px; display:flex; flex-direction: column; gap: 3px; font-family: var(--font-mono); font-size: 9px; letter-spacing: .08em; }
     .combo .layer-labels span { padding: 2px 6px; border: 1px solid var(--color-border-strong); border-radius: 2px; background: var(--color-bg-surface); }
-    .combo .layer-labels .on { color: var(--color-accent-fg); border-color: var(--brass-2); background: rgb(var(--brass-glow)/.08); }
+    .combo .layer-labels .on { color: var(--color-accent-fg); border-color: var(--brass-2); background: rgb(var(--color-accent-glow)/.08); }
     .code-line { display:flex; align-items:center; gap: 8px; font-family: var(--font-mono); font-size: 11px; padding: 2px 0; position: relative; }
     .code-line .time-bar { width: 3px; height: 14px; background: var(--warn); border-radius: 1px; }
-    .code-line .num { color: var(--fg-4); width: 20px; text-align: right; }
+    .code-line .num { color: var(--color-fg-disabled); width: 20px; text-align: right; }
     .code-line .src { flex: 1; color: var(--color-fg-secondary); }
     .code-line .src .hl { background: rgb(201 162 74 / .12); padding: 0 2px; }
     .code-line .cursor-chip { font-size: 9px; padding: 0 4px; border-radius: 2px; font-family: var(--font-mono); letter-spacing: .04em; }
-    .code-line .cursor-chip.c-nick { background: rgb(var(--brass-glow)/.15); color: var(--color-accent-fg); border: 1px solid var(--brass-2); }
+    .code-line .cursor-chip.c-nick { background: rgb(var(--color-accent-glow)/.15); color: var(--color-accent-fg); border: 1px solid var(--brass-2); }
     .code-line .cursor-chip.c-qa { background: rgb(196 106 90 / .15); color: var(--err-fg); border: 1px solid var(--err); }
     .code-line .cursor-chip.c-ss { background: rgb(107 158 107 / .12); color: var(--ok-fg); border: 1px solid var(--ok); }
-    .code-line .tool-glyph { color: var(--color-accent-fg); text-shadow: 0 0 4px rgb(var(--brass-glow)/.6); font-size: 11px; }
+    .code-line .tool-glyph { color: var(--color-accent-fg); text-shadow: 0 0 4px rgb(var(--color-accent-glow)/.6); font-size: 11px; }
 
     /* bar toggle */
     .bar { display:inline-flex; gap: 0; border: 1px solid var(--color-border-strong); border-radius: var(--r-1); overflow: hidden; background: var(--color-bg-surface); }
     .bar button { background: transparent; border: none; color: var(--color-fg-muted); padding: 5px 10px; font-family: var(--font-mono); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; font-weight:600; cursor: pointer; border-right: 1px solid var(--color-border-strong); }
     .bar button:last-child { border-right: none; }
-    .bar button.on { background: rgb(var(--brass-glow)/.08); color: var(--color-accent-fg); box-shadow: inset 0 -1.5px 0 var(--color-accent-fg); }
+    .bar button.on { background: rgb(var(--color-accent-glow)/.08); color: var(--color-accent-fg); box-shadow: inset 0 -1.5px 0 var(--color-accent-fg); }
   </style>
 </head>
 <body>
@@ -113,7 +113,7 @@
         <span class="code">&lt;div class="bar"&gt; &lt;button class="on"&gt;L1&lt;/button&gt; … &lt;/div&gt;</span>
       </div>
       <div class="canvas" style="min-height: 60px; display:flex; align-items:center; gap: 14px; padding: 12px 14px;">
-        <span style="font-family:var(--font-mono); font-size:9px; color:var(--fg-4); letter-spacing:.08em; text-transform:uppercase;">LAYERS</span>
+        <span style="font-family:var(--font-mono); font-size:9px; color:var(--color-fg-disabled); letter-spacing:.08em; text-transform:uppercase;">LAYERS</span>
         <div class="bar">
           <button class="on">L1 · TIME</button>
           <button class="on">L2 · PARALLEL</button>
@@ -121,7 +121,7 @@
           <button class="on">L4 · APPROVE</button>
           <button>L5 · NOTES</button>
         </div>
-        <span style="margin-left: 8px; font-family:var(--font-mono); font-size:9px; color:var(--fg-4); letter-spacing:.08em;">OPACITY</span>
+        <span style="margin-left: 8px; font-family:var(--font-mono); font-size:9px; color:var(--color-fg-disabled); letter-spacing:.08em;">OPACITY</span>
         <input type="range" min="0" max="100" value="75" style="width: 120px; accent-color: var(--color-accent-fg);" />
         <span class="chip is-brass" style="margin-left: 2px">75%</span>
         <span style="margin-left: auto; font-family:var(--font-mono); font-size:10px; color:var(--color-accent-fg); cursor:pointer; letter-spacing:.08em; text-transform:uppercase;">↕ EXPLODE</span>
@@ -164,10 +164,10 @@
             <span>−5h</span><span>−4h</span><span>−3h</span><span>−2h</span><span>−1h</span><span>−30m</span><span>−10m</span><span style="color: var(--color-accent-fg)">NOW</span>
           </div>
           <div class="l1-legend">
-            <span><i class="swatch" style="background:var(--fg-4); opacity:.22"></i>cold (&gt;1h)</span>
+            <span><i class="swatch" style="background:var(--color-fg-disabled); opacity:.22"></i>cold (&gt;1h)</span>
             <span><i class="swatch" style="background:var(--warn); opacity:.55"></i>warm</span>
             <span><i class="swatch" style="background:var(--warn); box-shadow:0 0 4px rgb(var(--warn-glow))"></i>hot (&lt;30m)</span>
-            <span><i class="swatch" style="background:var(--color-accent-fg); box-shadow:0 0 4px rgb(var(--brass-glow))"></i>live (&lt;1m)</span>
+            <span><i class="swatch" style="background:var(--color-accent-fg); box-shadow:0 0 4px rgb(var(--color-accent-glow))"></i>live (&lt;1m)</span>
             <span style="margin-left:auto">hover for actor + timestamp</span>
           </div>
         </div>
@@ -183,7 +183,7 @@
         <div class="l2">
           <div class="lane" style="top: 10px">
             <span class="name">nick0cave</span>
-            <span class="cursor" style="left: 70%; color: var(--color-accent-fg); background: var(--color-accent-fg); box-shadow: 0 0 6px rgb(var(--brass-glow)/.7)"></span>
+            <span class="cursor" style="left: 70%; color: var(--color-accent-fg); background: var(--color-accent-fg); box-shadow: 0 0 6px rgb(var(--color-accent-glow)/.7)"></span>
           </div>
           <div class="lane" style="top: 42px">
             <span class="name">qa-king</span>
@@ -282,7 +282,7 @@
             <span class="on">L4 APPR</span>
             <span>L5 NOTE</span>
           </div>
-          <div style="font-family: var(--font-mono); font-size: 9px; color: var(--fg-4); letter-spacing: .08em; text-transform: uppercase; margin-bottom: 6px;">src/keeper.ts · branch feat/keeper-clarity · 3 keepers attached</div>
+          <div style="font-family: var(--font-mono); font-size: 9px; color: var(--color-fg-disabled); letter-spacing: .08em; text-transform: uppercase; margin-bottom: 6px;">src/keeper.ts · branch feat/keeper-clarity · 3 keepers attached</div>
           <div class="code-line"><span class="time-bar" style="opacity:.3; height:10px" title="L1 · cold (3h)"></span><span class="num">09</span><span class="src"><span class="k">async</span> <span class="f">tick</span>() {'{'}</span></div>
           <div class="code-line"><span class="time-bar" style="opacity:.9; box-shadow:0 0 6px rgb(var(--warn-glow)/.8)" title="L1 · 4m"></span><span class="num">10</span><span class="src">  <span class="k">if</span> (this.state !== <span class="s">'running'</span>) <span class="k">return</span>;</span><span class="cursor-chip c-qa" title="L2 · qa-king at col 24">qa-king</span></div>
           <div class="code-line"><span class="time-bar" style="opacity:1; box-shadow:0 0 8px rgb(var(--warn-glow))" title="L1 · 12s · live"></span><span class="num">11</span><span class="src">  <span class="tool-glyph" title="L3 · emit() called 12× in 60s">◈</span> <span class="f hl">emit</span>(<span class="s">'heartbeat'</span>);</span><span class="cursor-chip c-nick" title="L2 · nick0cave editing">nick0cave</span></div>

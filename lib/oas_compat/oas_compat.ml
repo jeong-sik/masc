@@ -100,6 +100,7 @@ module Http_client = struct
             Accept_rejected_terminal
       | Llm_provider.Http_client.CliTransportRequired _ ->
           Cli_transport_required
+      | Llm_provider.Http_client.ProviderTerminal _ -> Terminal_http 0
       | Llm_provider.Http_client.NetworkError _ -> Network_error
       | Llm_provider.Http_client.ProviderTerminal _ -> Provider_terminal
 

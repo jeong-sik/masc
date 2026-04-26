@@ -19,7 +19,7 @@ let () =
               let stats = Tool_registry.get_stats () in
               let count =
                 List.assoc_opt "masc_status" stats
-                |> Option.map (fun s -> (Atomic.get s.Tool_registry.call_count))
+                |> Option.map (fun s -> (s.Tool_registry.call_count))
                 |> Option.value ~default:0
               in
               check int "call_count" 2 count);
@@ -33,9 +33,9 @@ let () =
                 ~duration_ms:8 ();
               let stats = Tool_registry.get_stats () in
               let s = List.assoc "masc_join" stats in
-              check int "call_count" 3 (Atomic.get s.call_count);
-              check int "success_count" 2 (Atomic.get s.success_count);
-              check int "failure_count" 1 (Atomic.get s.failure_count));
+              check int "call_count" 3 (s.call_count);
+              check int "success_count" 2 (s.success_count);
+              check int "failure_count" 1 (s.failure_count));
           test_case "accumulates duration" `Quick (fun () ->
               Tool_registry.reset ();
               Tool_registry.record_call ~tool_name:"masc_broadcast" ~success:true
@@ -44,7 +44,7 @@ let () =
                 ~duration_ms:200 ();
               let stats = Tool_registry.get_stats () in
               let s = List.assoc "masc_broadcast" stats in
-              check int "total_duration_ms" 300 (Atomic.get s.total_duration_ms));
+              check int "total_duration_ms" 300 (s.total_duration_ms));
           test_case "ignores unknown tool names when gated" `Quick (fun () ->
               Tool_registry.reset ();
               Tool_registry.record_call_if_known ~tool_name:"totally_unknown_tool"
@@ -60,9 +60,9 @@ let () =
                 ~tool_name:"masc_status" ~success:false ~duration_ms:5 ();
               let stats = Tool_registry.get_stats () in
               let s = List.assoc "masc_status" stats in
-              check int "call_count" 3 (Atomic.get s.call_count);
-              check int "external_mcp_count" 1 (Atomic.get s.external_mcp_count);
-              check int "keeper_internal_count" 2 (Atomic.get s.keeper_internal_count));
+              check int "call_count" 3 (s.call_count);
+              check int "external_mcp_count" 1 (s.external_mcp_count);
+              check int "keeper_internal_count" 2 (s.keeper_internal_count));
         ] );
       ( "get_top_n",
         [

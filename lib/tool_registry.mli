@@ -14,19 +14,21 @@ type call_source =
   | Deprecated_alias
 
 type call_stats = {
-  call_count : int Atomic.t;
-  success_count : int Atomic.t;
-  failure_count : int Atomic.t;
-  last_called_at : float Atomic.t;
-  total_duration_ms : int Atomic.t;
-  external_mcp_count : int Atomic.t;
-  keeper_internal_count : int Atomic.t;
-  inline_dispatch_count : int Atomic.t;
-  deprecated_alias_count : int Atomic.t;
-  last_assignment_id : string option Atomic.t;
+  call_count : int;
+  success_count : int;
+  failure_count : int;
+  last_called_at : float;
+  total_duration_ms : int;
+  external_mcp_count : int;
+  keeper_internal_count : int;
+  inline_dispatch_count : int;
+  deprecated_alias_count : int;
+  last_assignment_id : string option;
 }
 
 (** {1 Recording} *)
+
+val start_actor_if_needed : sw:Eio.Switch.t -> unit
 
 val string_of_source : call_source -> string
 val record_call :

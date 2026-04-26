@@ -249,6 +249,7 @@ function ActionTimeline({ data }: { data: ActivityGraphResponse }) {
                       type="button"
                       class="rounded border border-[var(--white-10)] bg-[var(--white-4)] px-3 py-1.5 text-2xs text-[var(--color-fg-primary)] transition-all duration-150 hover:bg-[var(--white-8)]"
                       onClick=${() => toggleExpandedGroup(group.id)}
+                      aria-expanded=${expanded}
                     >
                       ${expanded ? '원본 접기' : '원본 보기'}
                     </button>

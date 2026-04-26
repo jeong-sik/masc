@@ -761,3 +761,30 @@ button.is-active, .btn.is-active { background: var(--bg-4); color: var(--brass-1
   --space-7: 48px;
   --space-8: 64px;
 }
+
+/* ═══════════════════════════════════════════════════════════════════
+   BONSAI STRUCTURAL TOKENS (radius primitives)
+   ───────────────────────────────────────────────────────────────────
+   cyberpunk + terminal flatten xs/sm/md to 0 (sharp corners).
+   parchment + paper inherit :root values.
+   ═══════════════════════════════════════════════════════════════════ */
+
+:root {
+  --radius-xs:   2px;
+  --radius-sm:   4px;
+  --radius-md:   6px;
+  --radius-lg:   12px;
+  --radius-pill: 999px;
+}
+
+[data-theme="cyberpunk"] {
+  --radius-xs: 0;
+  --radius-sm: 0;
+  --radius-md: 0;
+}
+
+[data-theme="terminal"] {
+  --radius-xs: 0;
+  --radius-sm: 0;
+  --radius-md: 0;
+}

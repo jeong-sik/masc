@@ -18,7 +18,8 @@ let normalize_cli_provider_caps
         supports_runtime_mcp_tools = true;
         supports_runtime_tool_events = true;
       }
-  | Llm_provider.Provider_config.Kimi_cli ->
+  | Llm_provider.Provider_config.Kimi_cli
+  | Llm_provider.Provider_config.Gemini_cli ->
       {
         caps with
         supports_tools = false;

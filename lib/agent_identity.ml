@@ -89,7 +89,7 @@ type t = {
   mutable last_seen : float;      (** Last activity timestamp *)
   metadata : (string * string) list;  (** Additional metadata *)
 }
-[@@deriving yojson]
+[@@deriving to_yojson]
 
 (** Generate a unique agent UUID from name + timestamp hash *)
 let generate_uuid ~agent_name =

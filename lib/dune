@@ -562,6 +562,7 @@
    keeper_invariant_check
    keeper_trace_emit
    keeper_supervisor
+   keeper_stale_watchdog
    keeper_runtime
    keeper_turn_setup
    keeper_turn_up_args

@@ -1094,9 +1094,9 @@ function CascadeRawConfigEditor({
       saveMessage.value = 'Saved. Refreshing cascade snapshot...'
       try {
         await onRefresh()
-        saveMessage.value = 'Saved successfully.'
+        saveMessage.value = '저장 완료.'
       } catch (error) {
-        saveMessage.value = `Saved, but refresh failed: ${errorMessage(error)}`
+        saveMessage.value = `저장됨, 새로고침 실패: ${errorMessage(error)}`
       }
     } catch (error) {
       saveMessage.value = `Failed to save: ${errorMessage(error)}`

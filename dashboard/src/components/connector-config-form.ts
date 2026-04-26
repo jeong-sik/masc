@@ -21,6 +21,7 @@ import { useEffect } from 'preact/hooks'
 import { signal } from '@preact/signals'
 import { Eye, EyeOff } from 'lucide-preact'
 import { ActionButton } from './common/button'
+import { Checkbox } from './common/checkbox'
 import { CopyableCode } from './common/copyable-code'
 import { LoadingState } from './common/feedback-state'
 import { TextInput } from './common/input'
@@ -485,13 +486,12 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
             class="flex cursor-pointer items-center gap-1 text-3xs uppercase tracking-4 text-[var(--color-fg-disabled)] hover:text-[var(--color-fg-primary)]"
             title="저장 직후 자동으로 sidecar 재시작 (stop → 800ms → start)"
           >
-            <input
-              type="checkbox"
-              class="cursor-pointer"
+            <${Checkbox}
               checked=${entry.autoRestart}
-              data-auto-restart-toggle
-              onChange=${(ev: Event) => {
-                setEntry(connectorId, { autoRestart: (ev.target as HTMLInputElement).checked })
+              testId="auto-restart-toggle"
+              ariaLabel="자동 재시작"
+              onChange=${(checked: boolean) => {
+                setEntry(connectorId, { autoRestart: checked })
               }}
             />
             <span>자동 재시작</span>

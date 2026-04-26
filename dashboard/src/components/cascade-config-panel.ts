@@ -413,6 +413,7 @@ function ProfileCard({
               ? html`
                 <div class="flex items-center gap-2 flex-wrap">
                   <select
+                    aria-label="키퍼 선택"
                     class="min-w-44 rounded border border-[var(--card-border)] bg-[var(--color-bg-page)] px-2 py-1 text-xs text-[var(--text-strong)]"
                     value=${selectedKeeper.value}
                     disabled=${assigning.value}

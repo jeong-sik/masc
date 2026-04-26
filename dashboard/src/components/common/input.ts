@@ -23,6 +23,12 @@ interface TextInputProps {
   name?: string
   ariaLabel?: string
   autoComplete?: string
+  /** Rendered as `data-testid` so E2E / unit tests can target this
+      <input> without coupling to placeholder text (which may be i18n'd).
+      Mirrors the same prop on Select. */
+  testId?: string
+  /** Native autofocus — applied on initial mount. */
+  autoFocus?: boolean
   onInput?: (e: Event) => void
   onKeyDown?: (e: KeyboardEvent) => void
 }
@@ -38,6 +44,8 @@ export function TextInput({
   name,
   ariaLabel,
   autoComplete,
+  testId,
+  autoFocus,
   onInput,
   onKeyDown,
 }: TextInputProps) {
@@ -53,6 +61,8 @@ export function TextInput({
       name=${name}
       aria-label=${ariaLabel}
       autocomplete=${autoComplete}
+      data-testid=${testId}
+      autofocus=${autoFocus}
       onInput=${onInput}
       onKeyDown=${onKeyDown}
     />

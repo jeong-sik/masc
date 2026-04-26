@@ -90,7 +90,7 @@ export function ExcusePatterns() {
               class="px-4 py-2 bg-[var(--accent-primary)] text-white rounded hover:opacity-90 disabled:opacity-50 text-sm font-medium"
               disabled=${saving.value}
             >
-              ${saving.value ? 'Saving...' : 'Save Patterns'}
+              ${saving.value ? '저장 중...' : '패턴 저장'}
             </button>
             ${saveMessage.value ? html`
               <span class="text-sm ${saveMessage.value.startsWith('Failed') || saveMessage.value.startsWith('Invalid') ? 'text-[var(--bad-light)]' : 'text-[var(--color-status-ok)]'}">

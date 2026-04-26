@@ -80,6 +80,70 @@ let test_http_429_cascades () =
     true
     (Oas_compat.Http_client.should_cascade err)
 
+(* --- ProviderTerminal: pin classify, should_cascade, and the new
+       error_message helper. The variant arrived in agent_sdk without
+       a sweep, so [warn-error +8] flipped 5 [partial-match] warnings
+       to hard errors on main (#oas-providerterminal-sweep
+       2026-04-26). The new helper [Oas_compat.Http_client.error_message]
+       centralises the per-variant rendering so the next OAS variant
+       addition fails to compile *only* in this adapter. *)
+
+let test_provider_terminal_max_turns () =
+  let err =
+    Http_client.ProviderTerminal
+      { kind = Max_turns { turns = 10; limit = 10 };
+        message = "agent reached max_turns" }
+  in
+  Alcotest.(check bool)
+    "ProviderTerminal Max_turns must NOT cascade — agent-level terminal"
+    false
+    (Oas_compat.Http_client.should_cascade err);
+  (match Oas_compat.Http_client.classify err with
+   | Provider_terminal -> ()
+   | _ -> Alcotest.fail "Max_turns must classify as Provider_terminal");
+  let rendered = Oas_compat.Http_client.error_message err in
+  Alcotest.(check bool)
+    "error_message renders kind + turns/limit + message"
+    true
+    (String.length rendered > 0
+     && Astring.String.is_infix ~affix:"max turns exceeded" rendered
+     && Astring.String.is_infix ~affix:"10/10" rendered)
+
+let test_provider_terminal_other () =
+  let err =
+    Http_client.ProviderTerminal
+      { kind = Other "structured_terminal_subtype";
+        message = "provider signalled terminal condition" }
+  in
+  Alcotest.(check bool)
+    "ProviderTerminal Other must NOT cascade"
+    false
+    (Oas_compat.Http_client.should_cascade err);
+  (match Oas_compat.Http_client.classify err with
+   | Provider_terminal -> ()
+   | _ -> Alcotest.fail "Other must classify as Provider_terminal");
+  let rendered = Oas_compat.Http_client.error_message err in
+  Alcotest.(check bool)
+    "error_message renders subtype + message"
+    true
+    (Astring.String.is_infix ~affix:"structured_terminal_subtype" rendered
+     && Astring.String.is_infix ~affix:"provider signalled" rendered)
+
+let test_error_message_baseline () =
+  (* Smoke check that the new helper preserves existing semantics for
+     the variants that already had inline matches at the call sites. *)
+  let net = Http_client.NetworkError
+              { message = "boom"; kind = Llm_provider.Http_client.Unknown } in
+  Alcotest.(check string) "NetworkError -> message"
+    "boom" (Oas_compat.Http_client.error_message net);
+  let cli = Http_client.CliTransportRequired { kind = "claude" } in
+  Alcotest.(check string) "CliTransportRequired -> humanised"
+    "claude provider requires a CLI transport"
+    (Oas_compat.Http_client.error_message cli);
+  let acc = Http_client.AcceptRejected { reason = "x" } in
+  Alcotest.(check string) "AcceptRejected -> reason"
+    "x" (Oas_compat.Http_client.error_message acc)
+
 let () =
   Alcotest.run "oas_compat_cascade_fallback"
     [
@@ -103,5 +167,17 @@ let () =
       ( "Baseline: HTTP errors unaffected",
         [
           Alcotest.test_case "HTTP 429 cascades" `Quick test_http_429_cascades;
+        ] );
+      ( "ProviderTerminal — agent-level terminal does not cascade",
+        [
+          Alcotest.test_case "Max_turns classify + cascade + message"
+            `Quick test_provider_terminal_max_turns;
+          Alcotest.test_case "Other classify + cascade + message"
+            `Quick test_provider_terminal_other;
+        ] );
+      ( "error_message helper baseline",
+        [
+          Alcotest.test_case "preserves existing variants"
+            `Quick test_error_message_baseline;
         ] );
     ]

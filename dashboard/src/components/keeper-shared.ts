@@ -417,7 +417,7 @@ export function KeeperRuntimeActions({
         }}
         disabled=${probing || !actor.trim()}
       >
-        ${probing ? 'Probing...' : 'Probe'}
+        ${probing ? '점검 중...' : '점검'}
       </button>
       <button type="button"
         class=${recommended === 'recover' ? activeSecondaryBtn : secondaryBtn}
@@ -429,7 +429,7 @@ export function KeeperRuntimeActions({
         }}
         disabled=${recovering || !canRecover || !actor.trim()}
       >
-        ${recovering ? 'Recovering...' : 'Recover'}
+        ${recovering ? '복구 중...' : '복구'}
       </button>
       <button type="button"
         class=${recommended === 'manual_social_sweep' ? activeGhostBtn : ghostBtn}

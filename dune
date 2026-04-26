@@ -1,4 +1,4 @@
-(dirs (:standard \ .worktrees _build_codex_trpg archive dashboard_bonsai))
+(dirs (:standard \ .worktrees worktrees _build_codex_trpg archive dashboard_bonsai))
 
 (env
  (dev

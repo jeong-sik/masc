@@ -66,3 +66,32 @@ val coerce : raw_personality -> coerced_personality
 val to_raw : coerced_personality -> raw_personality
 (** Project a coerced value back to a [raw_personality]. Loses the
     "this has been coerced" type tag but keeps the byte contents. *)
+
+(** {1 Validate} *)
+
+(** Identifier of the personality field that triggered a warning.
+    Wrapping in a sum makes the cap-warning record portable to Layer 4
+    structured-feedback responses without leaking string keys. *)
+type field = Will | Needs | Desires | Instructions
+
+val field_to_string : field -> string
+(** Snake_case name of the field — stable identifier for log lines and
+    Prometheus labels. *)
+
+(** Soft warning emitted when a field exceeds the configured byte cap.
+    The harness never truncates: callers decide whether to soft-warn
+    (default for boundary code) or reject (Layer 4 self-edit). *)
+type cap_warning = {
+  field : field;
+  observed_bytes : int;
+  cap_bytes : int;
+  hint : string;
+}
+
+val check_byte_caps :
+  ?max_bytes:int -> coerced_personality -> cap_warning list
+(** [check_byte_caps ?max_bytes p] returns a warning per oversized
+    field. [max_bytes] defaults to [Keeper_config.prompt_render_max_bytes].
+    Always pure — no logging, no Prometheus, no transformation. The
+    caller chooses what to do with the warnings (soft-warn at create/
+    update boundaries; structured-feedback in Layer 4 retry). *)

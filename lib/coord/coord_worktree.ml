@@ -79,11 +79,31 @@ let policy_string_array_of_line ~key line =
       in
       Some items
 
+(* SSOT path resolution: canonical config root is [<base_path>/.masc/config/]
+   (same primitive Config_dir_resolver.path_from_local_masc uses via
+   Common.masc_dir_from_base_path). The legacy [<base_path>/config/] form is
+   retained as a secondary lookup for older deployments. Reading order:
+   canonical first, legacy fallback only when canonical is absent. *)
 let load_git_clone_policy ~base_path =
-  let path = Filename.concat (Filename.concat base_path "config") "tool_policy.toml" in
-  match Safe_ops.read_file_safe path with
-  | Error _ -> [], []
-  | Ok content ->
+  let canonical =
+    Filename.concat
+      (Common.masc_dir_from_base_path ~base_path |> fun d -> Filename.concat d "config")
+      "tool_policy.toml"
+  in
+  let legacy = Filename.concat (Filename.concat base_path "config") "tool_policy.toml" in
+  let read_or_empty p =
+    match Safe_ops.read_file_safe p with
+    | Error _ -> None
+    | Ok content -> Some content
+  in
+  let content_opt =
+    match read_or_empty canonical with
+    | Some c -> Some c
+    | None -> read_or_empty legacy
+  in
+  match content_opt with
+  | None -> [], []
+  | Some content ->
       let rec loop in_git_clone allowed denied = function
         | [] -> allowed, denied
         | raw_line :: rest ->

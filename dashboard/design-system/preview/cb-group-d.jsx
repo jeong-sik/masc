@@ -66,7 +66,7 @@ function GoalHorizonTrack() {
                   <div className="prog" aria-hidden="true">
                     <span className="pct">{Math.round(go.progress / go.total * 100)}%</span>
                     <span className="b"><i style={{width: `${go.progress / go.total * 100}%`}} /></span>
-                    <span style={{color:'var(--fg-4)',fontSize:'9px'}}>{go.progress}/{go.total}</span>
+                    <span style={{color:'var(--color-fg-disabled)',fontSize:'9px'}}>{go.progress}/{go.total}</span>
                   </div>
                 </div>
               ))}
@@ -169,7 +169,7 @@ function GoalSnapshotDiff() {
                 <div className="diff" aria-hidden="true">
                   <div className="y">
                     <span className="lbl">yesterday</span>
-                    <span>progress: <span className="v" style={{color:'var(--fg-2)'}}>{s.yesterday.progress}/{s.yesterday.total}</span> · {yPct}%</span>
+                    <span>progress: <span className="v" style={{color:'var(--color-fg-secondary)'}}>{s.yesterday.progress}/{s.yesterday.total}</span> · {yPct}%</span>
                     <br />
                     <span>phase: {s.yesterday.phase}</span>
                   </div>
@@ -287,7 +287,7 @@ function TaskStaleAlert() {
               <div className="why" aria-hidden="true">
                 {t.drift ? 'metadata_drift detected · backlog L42' : `claim_age > threshold · last activity ${t.age} ago`}
                 <br />
-                <span style={{color:'var(--fg-4)'}}>⎇ {t.branch} · {t.tools}</span>
+                <span style={{color:'var(--color-fg-disabled)'}}>⎇ {t.branch} · {t.tools}</span>
               </div>
               <div className="acts" role="toolbar" aria-label={`Actions for ${t.id}`}>
                 <button type="button">nudge</button>
@@ -297,7 +297,7 @@ function TaskStaleAlert() {
             </div>
           ))}
         </div>
-        <div role="note" style={{marginTop:8, padding:'6px 8px', borderTop:'1px dashed var(--line-2)', fontFamily:'var(--font-mono)', fontSize:'10px', color:'var(--fg-4)'}}>
+        <div role="note" style={{marginTop:8, padding:'6px 8px', borderTop:'1px dashed var(--line-2)', fontFamily:'var(--font-mono)', fontSize:'10px', color:'var(--color-fg-disabled)'}}>
           taskmaster cannot force-release others' claims · operator nudge channel: <span style={{color:'var(--brass-1)'}}>hint</span>
         </div>
       </div>
@@ -439,11 +439,11 @@ function ResponsibilityMatrix() {
             </tr>
           </tbody>
         </table>
-        <div role="note" aria-label="Matrix density legend" style={{marginTop:8, padding:'6px 8px', fontFamily:'var(--font-mono)', fontSize:'10px', color:'var(--fg-4)', display:'flex', gap:8, alignItems:'center'}}>
+        <div role="note" aria-label="Matrix density legend" style={{marginTop:8, padding:'6px 8px', fontFamily:'var(--font-mono)', fontSize:'10px', color:'var(--color-fg-disabled)', display:'flex', gap:8, alignItems:'center'}}>
           <span aria-hidden="true">density:</span>
           <span aria-hidden="true" style={{padding:'1px 6px', background:'var(--color-bg-page)', border:'1px solid var(--line-1)'}}>0</span>
-          <span aria-hidden="true" style={{padding:'1px 6px', background:'rgb(var(--brass-glow)/.05)', color:'var(--fg-2)'}}>1–2</span>
-          <span aria-hidden="true" style={{padding:'1px 6px', background:'rgb(var(--brass-glow)/.12)', color:'var(--fg-1)'}}>3–4</span>
+          <span aria-hidden="true" style={{padding:'1px 6px', background:'rgb(var(--brass-glow)/.05)', color:'var(--color-fg-secondary)'}}>1–2</span>
+          <span aria-hidden="true" style={{padding:'1px 6px', background:'rgb(var(--brass-glow)/.12)', color:'var(--color-fg-primary)'}}>3–4</span>
           <span aria-hidden="true" style={{padding:'1px 6px', background:'rgb(var(--brass-glow)/.22)', color:'var(--brass-1)'}}>5–6</span>
           <span aria-hidden="true" style={{padding:'1px 6px', background:'var(--brass-1)', color:'var(--color-bg-page)'}}>7+</span>
         </div>

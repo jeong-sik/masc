@@ -881,7 +881,7 @@ function SkeletonBar({ w, h = 'h-3' }: { w: string; h?: string }) {
 
 function SkeletonLayout() {
   return html`
-    <div class="flex flex-col gap-3" aria-hidden="true" aria-label="Loading composite snapshot">
+    <div class="flex flex-col gap-3" aria-hidden="true" aria-label="통합 스냅샷 로딩 중">
       ${/* Operator Meaning skeleton */ ''}
       <div class="rounded border border-[var(--white-8)] bg-[var(--white-2)] p-4">
         <${SkeletonBar} w="w-24" h="h-2" />

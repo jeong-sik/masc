@@ -729,15 +729,15 @@ function HealthTable({
               >거부</th>
               <th
                 class="text-right py-1"
-                title="Prompt prefill throughput (entry-weighted mean across this provider's models)"
+                title="프롬프트 prefill 처리량 (이 provider 의 모델 entry-가중 평균)"
               >Prefill tok/s</th>
               <th
                 class="text-right py-1"
-                title="Decode throughput (predicted tokens / second, entry-weighted)"
+                title="Decode 처리량 (예측 토큰 / 초, entry-가중)"
               >Decode tok/s</th>
               <th
                 class="text-right py-1"
-                title="Latency p50 / p95 in milliseconds (approximation: weighted mean of per-model percentiles)"
+                title="Latency p50 / p95 (밀리초, 모델별 퍼센타일의 가중 평균 근사)"
               >Latency p50/p95</th>
               <th class="text-right py-1">쿨다운</th>
             </tr>
@@ -759,7 +759,7 @@ function HealthTable({
                 <td class="py-1">
                   <code class="text-[var(--text-strong)]">${p.provider_key}</code>
                   ${orphaned
-                    ? html`<span class="ml-1 text-2xs text-[var(--warn)]" title="Provider was tracked but is no longer declared in cascade.json">orphan</span>`
+                    ? html`<span class="ml-1 text-2xs text-[var(--warn)]" title="Provider 가 추적되었지만 cascade.json 에 더 이상 선언되어 있지 않음">orphan</span>`
                     : null}
                 </td>
                 <td class="py-1">

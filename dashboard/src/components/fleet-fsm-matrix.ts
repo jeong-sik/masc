@@ -762,23 +762,23 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
                 <span
                   data-runtime-truth="live"
                   class="rounded border px-2 py-0.5 text-xs ${runtimeTallies.live === runtimeTallies.total ? RUNTIME_ATTENTION_CLASS.ok : RUNTIME_ATTENTION_CLASS.stale}"
-                  title="Composite observer is_live count"
+                  title="통합 observer 의 is_live 카운트"
                 >
-                  Runtime live: ${runtimeTallies.live}/${runtimeTallies.total}
+                  런타임 활성: ${runtimeTallies.live}/${runtimeTallies.total}
                 </span>
                 <span
                   data-runtime-truth="blocked"
                   class="rounded border px-2 py-0.5 text-xs ${runtimeTallies.blocked === 0 ? RUNTIME_ATTENTION_CLASS.ok : RUNTIME_ATTENTION_CLASS.blocked}"
-                  title="Rows with operator disposition, terminal error, or failed tool contract evidence"
+                  title="운영자 disposition, 터미널 에러, 또는 tool contract 위반 evidence 가 있는 row"
                 >
-                  Evidence blocked: ${runtimeTallies.blocked}
+                  근거 차단: ${runtimeTallies.blocked}
                 </span>
                 <span
                   data-runtime-truth="stale"
                   class="rounded border px-2 py-0.5 text-xs ${runtimeTallies.stale + runtimeTallies.idle === 0 ? RUNTIME_ATTENTION_CLASS.ok : RUNTIME_ATTENTION_CLASS.stale}"
-                  title="Rows that are not live or stayed in the idle composite longer than the operator threshold"
+                  title="활성 상태가 아니거나 운영자 임계값보다 오래 idle 통합 상태를 유지한 row"
                 >
-                  Idle/stale: ${runtimeTallies.stale + runtimeTallies.idle}
+                  유휴/지연: ${runtimeTallies.stale + runtimeTallies.idle}
                 </span>
               </div>
             `

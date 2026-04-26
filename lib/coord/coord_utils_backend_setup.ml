@@ -337,7 +337,43 @@ let create_backend_eio ~sw cfg =
   let _ = sw in
   create_backend cfg
 
-let default_config base_path =
+(* #10919: per-call Backend init was producing 1745 inits / 2 days
+   (~83 inits per server lifetime against an expected 1) plus 3490
+   INFO log lines.  Hot callers — [Coord.default_config] from every
+   MCP tool dispatch, [tool_autoresearch_cycle] per cycle iteration,
+   [keeper_rollover] per rollover — were paying both filesystem
+   resolution and a fresh Backend handshake per invocation.
+
+   The returned [config] is an immutable record and the underlying
+   storage is already deduplicated upstream:
+
+   - [Backend.Memory.shared_instances] keys by base_path (line 685),
+     so two Memory backends for the same path were already pointing
+     at identical hashtable state — the wrapper [config] was the
+     duplicate.
+   - FileSystem backends are pointers to on-disk state; multiple
+     handles for the same directory share the underlying files.
+
+   Caching [config] keyed by the input [base_path] therefore avoids
+   1744 redundant inits without changing observable semantics.  Tests
+   that need a fresh config (e.g. resetting filesystem state between
+   cases) call [reset_default_config_cache] from outside this module
+   when needed. *)
+let default_config_cache : (string, config) Hashtbl.t = Hashtbl.create 4
+let default_config_cache_mutex = Mutex.create ()
+
+let with_default_config_cache_mutex f =
+  Mutex.lock default_config_cache_mutex;
+  Fun.protect ~finally:(fun () -> Mutex.unlock default_config_cache_mutex) f
+
+(** Drop the cached configs.  Intended for tests that need to force a
+    re-init (e.g. after relocating the on-disk state).  Production
+    code should never call this. *)
+let reset_default_config_cache () =
+  with_default_config_cache_mutex (fun () ->
+    Hashtbl.clear default_config_cache)
+
+let build_default_config base_path =
   (* Resolve to git root for worktree support - all worktrees share same .masc/ *)
   let resolved_path = resolve_masc_base_path base_path in
   sync_test_base_path_env resolved_path;
@@ -380,6 +416,15 @@ let default_config base_path =
     backend_config;
     backend;
   }
+
+let default_config base_path =
+  with_default_config_cache_mutex (fun () ->
+    match Hashtbl.find_opt default_config_cache base_path with
+    | Some cfg -> cfg
+    | None ->
+        let cfg = build_default_config base_path in
+        Hashtbl.replace default_config_cache base_path cfg;
+        cfg)
 
 (** Create config with Eio context.
     [on_backend_ready] is called after backend creation, allowing callers

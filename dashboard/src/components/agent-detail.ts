@@ -342,13 +342,13 @@ export function AgentDetailOverlay() {
               ? html`<span class="ml-2 normal-case tracking-normal text-text-muted">할당 ${visibleOwnedTasks.length}/${ownedTasks.length} · 이력 ${visibleHistories.length}/${historyRows.length}</span>`
               : null}
           </div>
-          <input
+          <${TextInput}
             type="search"
+            class="min-w-40 max-w-70 flex-1 !px-2 !py-1 !text-2xs"
             value=${taskQuery.value}
             placeholder="id / title / status 필터"
-            aria-label="작업 필터"
+            ariaLabel="작업 필터"
             onInput=${(e: Event) => { taskQuery.value = (e.target as HTMLInputElement).value }}
-            class="min-w-40 max-w-70 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--color-fg-primary)] placeholder:text-[var(--color-fg-disabled)] focus:outline-none focus:border-[var(--color-accent-fg)]"
           />
         </div>
 

@@ -711,7 +711,7 @@ function HealthTable({
     ${isFiltering && filtered.length === 0
       ? html`<div class="py-4 text-center text-2xs text-[var(--text-muted)]">필터 결과 없음 (${health.providers.length} providers)</div>`
       : html`
-        <table class="w-full text-xs">
+        <table class="w-full text-xs" aria-label="cascade provider 상태">
           <thead>
             <tr class="text-[var(--text-muted)] border-b border-[var(--card-border)]">
               <th class="text-left py-1 w-4"></th>
@@ -929,7 +929,7 @@ function StrategyTraceTable({
     : trace.events
   return html`
     ${query ? html`<div class="text-xs text-[var(--text-muted)] mb-2">${filtered.length}/${trace.events.length}건</div>` : null}
-    <table class="w-full text-xs">
+    <table class="w-full text-xs" aria-label="strategy trace 이벤트">
       <thead>
         <tr class="text-[var(--text-muted)] border-b border-[var(--card-border)]">
           <th class="text-left py-1 w-20">시간</th>
@@ -967,7 +967,7 @@ function ClientCapacityHistoryTable({
     return html`<${EmptyState}>최근 capacity 이벤트가 없습니다. (acquire/release가 아직 발생하지 않음)<//>`
   }
   return html`
-    <table class="w-full text-xs">
+    <table class="w-full text-xs" aria-label="capacity 이벤트 이력">
       <thead>
         <tr class="text-[var(--text-muted)] border-b border-[var(--card-border)]">
           <th class="text-left py-1 w-20">시간</th>
@@ -997,7 +997,7 @@ function ClientCapacityTable({ capacity }: { capacity: CascadeClientCapacityResp
     return html`<${EmptyState}>등록된 client-capacity 슬롯이 없습니다. (cascade가 한 번도 호출되지 않았거나 CLI/ollama provider 미사용)<//>`
   }
   return html`
-    <table class="w-full text-xs">
+    <table class="w-full text-xs" aria-label="client capacity 슬롯">
       <thead>
         <tr class="text-[var(--text-muted)] border-b border-[var(--card-border)]">
           <th class="text-left py-1 w-4"></th>

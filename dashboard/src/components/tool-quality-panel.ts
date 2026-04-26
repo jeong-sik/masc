@@ -178,7 +178,7 @@ function ToolTable({
   }
   return html`
     <div class="overflow-x-auto">
-      <table class="w-full text-2xs">
+      <table class="w-full text-2xs" aria-label="도구 품질 메트릭">
         <thead>
           <tr class="text-[var(--color-fg-disabled)] border-b border-[var(--color-border-default)]">
             <th class="text-left py-1 font-normal">도구</th>

@@ -366,7 +366,7 @@ export function PrometheusMetrics() {
 
             ${expanded && html`
               <div class="mt-3 overflow-x-auto">
-                <table class="w-full text-xs">
+                <table class="w-full text-xs" aria-label="Prometheus 메트릭 시계열">
                   <thead>
                     <tr class="border-b border-[var(--card-border)] text-[var(--text-muted)]">
                       <th class="pb-2 text-left font-normal">메트릭</th>

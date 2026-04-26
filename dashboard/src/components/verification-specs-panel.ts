@@ -76,7 +76,7 @@ export function shortMtime(iso: string): string {
 function SpecsTable({ entries }: { entries: TlaSpecEntry[] }) {
   return html`
     <div class="overflow-x-auto">
-      <table class="w-full text-xs tabular-nums">
+      <table class="w-full text-xs tabular-nums" aria-label="TLA+ 스펙 목록">
         <thead class="text-left text-slate-400">
           <tr>
             <th class="py-1 pr-4">사양</th>

@@ -280,7 +280,7 @@ function CycleHistoryTable({ cycles }: { cycles: AutoresearchCycleRecord[] }) {
         ? html`<div class="py-4 text-center text-2xs text-[var(--text-dim)]">필터 결과 없음 (${cycles.length} cycles)</div>`
         : html`
           <div class="overflow-x-auto overflow-y-auto max-h-100 custom-scrollbar rounded border border-[var(--white-6)] bg-[rgba(0,0,0,0.1)]">
-            <table class="w-full text-xs">
+            <table class="w-full text-xs" aria-label="자율 연구 사이클 목록">
               <thead>
                 <tr class="text-[var(--text-muted)] text-3xs uppercase tracking-wider border-b border-[var(--white-10)]">
                   <th scope="col" class="sticky top-0 z-10 bg-[var(--backdrop-modal)] backdrop-blur-sm text-left py-2.5 px-3 font-medium">#</th>

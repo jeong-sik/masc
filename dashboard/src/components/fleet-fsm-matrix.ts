@@ -915,7 +915,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
           `
         : null}
       <div class="overflow-x-auto">
-        <table class="min-w-full text-xs">
+        <table class="min-w-full text-xs" aria-label="키퍼 FSM 상태 행렬">
           <thead class="bg-[var(--white-5)] text-[var(--color-fg-muted)]">
             <tr>
               <th class="px-3 py-2 text-left font-semibold">키퍼</th>

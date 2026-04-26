@@ -355,7 +355,7 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
 
   return html`
     <div class="overflow-x-auto">
-      <table class="w-full text-2xs">
+      <table class="w-full text-2xs" aria-label="키퍼 텔레메트리 현황">
         <thead>
           <tr class="border-b border-[var(--color-border-default)] text-[var(--color-fg-disabled)]">
             <th class="py-1 text-left font-normal">키퍼</th>

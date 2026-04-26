@@ -599,7 +599,7 @@
    oas_worker_named
    masc_oas_bridge
    oas_bus_instrument
-   oas_sse_bridge
+   oas_event_bridge
    env_config_introspect
    env_git_noninteractive
    runtime_params

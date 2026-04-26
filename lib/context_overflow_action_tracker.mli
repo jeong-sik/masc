@@ -16,7 +16,7 @@
     Design: pure in-memory per-keeper state, single-domain
     Stdlib.Mutex (no Eio dependency — matches
     Cascade_health_tracker after #9873). Called from the
-    oas_sse_bridge event translation path, which is serialized
+    oas_event_bridge event translation path, which is serialized
     per-agent.
 
     Observability contract:

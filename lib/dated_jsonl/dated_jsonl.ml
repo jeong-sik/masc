@@ -24,7 +24,7 @@ type t = {
    Pre-fix every [create] minted a fresh [Eio.Mutex.t]. When two
    stores pointed at the same JSONL directory their mutexes were
    distinct, so concurrent [append] calls did not coordinate.
-   [oas_sse_bridge.ml:483] in particular re-creates the store on
+   [oas_event_bridge.ml:483] in particular re-creates the store on
    every relay error while another fiber still holds the previous
    instance, opening a window where 4-8 KB [oas_worker:build]
    payloads interleave inside the same line — POSIX [O_APPEND]

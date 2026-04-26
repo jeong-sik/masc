@@ -15,7 +15,7 @@
     Scope: this initial adapter covers [Http_client.http_error] and
     [Metrics.t], the two surfaces whose MASC consumer is a record
     literal or small match. [Event_bus.payload] has an elaborate
-    per-variant JSON projection in [oas_sse_bridge.ml]; a full
+    per-variant JSON projection in [oas_event_bridge.ml]; a full
     classifier is deferred to follow-up because a genuine abstraction
     there requires touching the JSON-emission path, which carries
     regression risk that should not ride this foundational PR. *)

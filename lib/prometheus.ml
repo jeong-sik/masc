@@ -437,7 +437,10 @@ let metric_oas_bridge_timeout =
   "masc_oas_bridge_timeout_total"
 
 
-(* OAS SSE relay (oas_sse_bridge.ml). *)
+(* OAS event relay (oas_event_bridge.ml).  Metric strings keep the
+   historical [oas_sse_*] prefix for Grafana/alert continuity; renaming
+   the operational contract is deferred to a separate PR with a
+   dashboard migration plan. *)
 let metric_oas_sse_relay_retries =
   "masc_oas_sse_relay_retries_total"
 let metric_oas_sse_relay_drops =

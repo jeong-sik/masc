@@ -779,3 +779,25 @@ button.is-active, .btn.is-active { background: var(--bg-4); color: var(--brass-1
   --t-wait:  #E5E0D1;
   --t-err:   #8B3A3A;
 }
+
+/* ═══════════════════════════════════════════════════════════════════
+   BONSAI STRUCTURAL TOKENS (spacing primitives)
+   ───────────────────────────────────────────────────────────────────
+   Bonsai surface uses a 4px-grid spacing scale. These values are
+   theme-invariant (no [data-theme] override in colors_and_type.css).
+
+   Absorbed into canonical tokens.css for SSOT consolidation. Bonsai's
+   colors_and_type.css continues to define the same values until
+   PR-S2.5 redirects bonsai to import canonical tokens.css.
+   ═══════════════════════════════════════════════════════════════════ */
+
+:root {
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+}

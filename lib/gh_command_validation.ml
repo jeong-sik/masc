@@ -108,10 +108,10 @@ let extract_gh_api_method cmd =
     | [] -> "GET"
     | "-X" :: m :: _ | "--method" :: m :: _ -> String.uppercase_ascii m
     | tok :: _ when String.length tok > 9
-                    && String.sub tok 0 9 = "--method=" ->
+                    && String.starts_with ~prefix:"--method=" tok ->
       String.uppercase_ascii (String.sub tok 9 (String.length tok - 9))
     | tok :: _ when String.length tok > 3
-                    && String.sub tok 0 3 = "-X=" ->
+                    && String.starts_with ~prefix:"-X=" tok ->
       String.uppercase_ascii (String.sub tok 3 (String.length tok - 3))
     | _ :: rest -> find rest
   in
@@ -156,7 +156,7 @@ let extract_gh_repo_owner cmd =
   let rec find = function
     | [] -> None
     | "--repo" :: slug :: _ | "-R" :: slug :: _ -> owner_of_slug slug
-    | tok :: rest when String.length tok > 7 && String.sub tok 0 7 = "--repo=" ->
+    | tok :: rest when String.length tok > 7 && String.starts_with ~prefix:"--repo=" tok ->
       let slug = String.sub tok 7 (String.length tok - 7) in
       (match owner_of_slug slug with
        | Some _ as o -> o
@@ -265,9 +265,9 @@ let has_implicit_post_flags parts =
     | tok :: rest ->
       let tok_lower = String.lowercase_ascii tok in
       if tok = "-f" || tok = "-F" || tok = "--field" || tok = "--raw-field"
-         || String.length tok_lower > 3 && String.sub tok_lower 0 3 = "-f="
-         || String.length tok_lower > 8 && String.sub tok_lower 0 8 = "--field="
-         || String.length tok_lower > 12 && String.sub tok_lower 0 12 = "--raw-field="
+         || String.length tok_lower > 3 && String.starts_with ~prefix:"-f=" tok_lower
+         || String.length tok_lower > 8 && String.starts_with ~prefix:"--field=" tok_lower
+         || String.length tok_lower > 12 && String.starts_with ~prefix:"--raw-field=" tok_lower
       then true
       else check rest
   in

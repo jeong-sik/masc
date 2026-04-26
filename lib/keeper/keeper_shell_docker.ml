@@ -127,6 +127,38 @@ let cmd_targets_gh cmd =
     let tokens = String.split_on_char ' ' trimmed in
     List.exists (fun tok -> tok = "gh") tokens
 
+(* #10855: keeper LLM (issue_king, masc-improver) hallucinated gh syntax
+   `gh --repo X api Y` (108 events / 24h, 2026-04-25→04-26). gh CLI
+   semantics: `--repo` is a subcommand flag (gh issue/pr/release/...),
+   not a global option, and `gh api` rejects it with "unknown flag: --repo".
+   Detect the misuse pre-exec so we can emit a self-correcting error
+   instead of letting the docker exec waste a turn surfacing gh's raw
+   error.  Same self-correcting-message pattern as #10869's multi-repo
+   sandbox blocker. *)
+let detect_gh_repo_flag_with_api_misuse cmd =
+  let strip_quotes s =
+    let len = String.length s in
+    if len >= 2
+       && ((s.[0] = '\'' && s.[len-1] = '\'')
+           || (s.[0] = '"' && s.[len-1] = '"'))
+    then String.sub s 1 (len - 2)
+    else s
+  in
+  let toks =
+    String.split_on_char ' ' (String.trim cmd)
+    |> List.filter (fun s -> s <> "")
+    |> List.map strip_quotes
+  in
+  if not (List.mem "gh" toks) then None
+  else
+    let rec scan = function
+      | "--repo" :: repo_arg :: "api" :: endpoint :: _ ->
+          Some (repo_arg, endpoint)
+      | _ :: rest -> scan rest
+      | [] -> None
+    in
+    scan toks
+
 (* Emit a ("gh_exit_class", "…") JSON field when [cmd] targets gh,
    AND increment the matching Legendary_counters bucket.  Callers
    append the returned list to their `Assoc payload unconditionally —
@@ -273,6 +305,20 @@ let run_docker_shell_command_with_status
       in
       match multi_repo_blocker with
       | Some msg -> sandbox_error msg
+      | None ->
+      (* #10855: surface gh syntax misuse before docker exec so the LLM
+         sees a corrected-form hint in the same turn rather than gh's raw
+         "unknown flag: --repo" error after the round-trip. *)
+      match detect_gh_repo_flag_with_api_misuse cmd with
+      | Some (repo_arg, endpoint) ->
+        sandbox_error
+          (Printf.sprintf
+             "잘못된 gh syntax: 'gh --repo %s api %s ...' \
+              — '--repo' 는 subcommand flag (gh issue/pr/release/run) 전용이고 \
+              'gh api' 에는 적용 안 됨. \
+              올바른 형태: 'gh api repos/%s/%s' (endpoint 안에 org/repo 포함). \
+              다음 turn 에서 cmd 를 수정하세요."
+             repo_arg endpoint repo_arg endpoint)
       | None ->
       let container_name = keeper_sandbox_container_name meta in
       let container_root = keeper_private_container_root meta in

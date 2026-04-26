@@ -135,22 +135,7 @@ let native_event_to_json (evt : Oas.Event_bus.event) : Yojson.Safe.t option =
       in
       Some (wrap ~event_type:"agent_started" ~payload ~agent_name ~task_id ())
   | Oas.Event_bus.AgentCompleted { agent_name; task_id; elapsed; result } ->
-      let usage_fields =
-        match result with
-        | Ok resp -> (
-            match resp.usage with
-            | Some u ->
-                [
-                  ("input_tokens", `Int u.input_tokens);
-                  ("output_tokens", `Int u.output_tokens);
-                  ( "cost_usd",
-                    match u.cost_usd with
-                    | Some c -> `Float c
-                    | None -> `Null );
-                ]
-            | None -> [])
-        | Error _ -> []
-      in
+      let usage_fields = match result with Ok _ -> [] | Error _ -> [] in
       let payload =
         `Assoc
           ([
@@ -341,7 +326,6 @@ let native_event_to_json (evt : Oas.Event_bus.event) : Yojson.Safe.t option =
          payload aggregate. Skip the relay to avoid flooding SSE
          consumers with high-frequency low-value events. *)
       None
-
 let relay_max_attempts = 3
 let relay_max_queue_depth = 256
 

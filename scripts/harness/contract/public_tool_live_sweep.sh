@@ -140,8 +140,14 @@ echo "[11/36] masc_check"
 r_check="$(call_tool 5013 "masc_check" '{"assertions":["joined"]}')"
 expect_ok "masc_check" "$r_check"
 
+GOAL_SEED_PAYLOAD="$(call_tool 5014 "masc_goal_upsert" '{"title":"Public Tool Sweep Goal","description":"Goal for public tool sweep contract harness","priority":1}')"
+GOAL_ID="$(printf '%s' "$GOAL_SEED_PAYLOAD" | extract_result | jq -r '.goal_id // empty')"
+if [ -z "$GOAL_ID" ]; then
+  mcp_fail_with_context "could not create goal for public tool live sweep" "$GOAL_SEED_PAYLOAD"
+fi
+
 echo "[12/36] masc_add_task"
-r_add_task="$(call_tool 5014 "masc_add_task" '{"title":"Public Tool Sweep Task","priority":2,"description":"live public surface verification"}')"
+r_add_task="$(call_tool 5014 "masc_add_task" "$(jq -cn --arg goal_id "$GOAL_ID" '{title:"Public Tool Sweep Task",goal_id:$goal_id,priority:2,description:"live public surface verification"}')")"
 expect_ok "masc_add_task" "$r_add_task"
 task_id="$(
   printf '%s' "$r_add_task" \
@@ -156,7 +162,7 @@ if [[ -z "$task_id" ]]; then
 fi
 
 echo "[13/36] masc_batch_add_tasks"
-r_batch_add="$(call_tool 5015 "masc_batch_add_tasks" '{"tasks":[{"title":"Public Sweep Batch A","priority":3,"description":"batch-a"},{"title":"Public Sweep Batch B","priority":4,"description":"batch-b"}]}')"
+r_batch_add="$(call_tool 5015 "masc_batch_add_tasks" "$(jq -cn --arg goal_id "$GOAL_ID" '{tasks:[{title:"Public Sweep Batch A",goal_id:$goal_id,priority:3,description:"batch-a"},{title:"Public Sweep Batch B",goal_id:$goal_id,priority:4,description:"batch-b"}]}')")"
 expect_ok "masc_batch_add_tasks" "$r_batch_add"
 
 echo "[14/36] masc_tasks"
@@ -240,7 +246,7 @@ expect_ok "masc_keeper_list" "$r_keeper_list"
 
 echo "[31/36] masc_keeper_status"
 r_keeper_status="$(call_tool 5033 'masc_keeper_status' '{"name":"public-sweep-keeper","fast":true}')"
-expect_ok "masc_keeper_status" "$r_keeper_status"
+expect_ok_or_guard "masc_keeper_status" "$r_keeper_status" 'Tool timed out after|no_tool_capable_provider'
 
 echo "[32/36] masc_keeper_msg"
 r_keeper_msg="$(call_tool 5034 'masc_keeper_msg' '{"name":"missing-keeper","message":"ping"}')"

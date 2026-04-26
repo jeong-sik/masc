@@ -215,10 +215,16 @@ let validate_gh_command ?(allowed_orgs = []) cmd =
     | (Some command, subcmd) ->
       let command = String.lowercase_ascii command in
       if not (List.mem command gh_allowed_commands) then
+        (* #10561: inline the allowed list so the LLM sees valid alternatives
+           on the same retry instead of random-guessing into the next
+           [gh_command_blocked] error.  Same pattern as
+           [path_not_found_under_allowed_roots] which surfaces roots=[...].
+           Memory: feedback_tool-error-messages-teach-llm. *)
         Error
           (Printf.sprintf
-             "gh command blocked: '%s' is not in the approved command list"
-             command)
+             "gh command blocked: '%s' is not in the approved command list (allowed=[%s])"
+             command
+             (String.concat ", " gh_allowed_commands))
       else
         let sub =
           Option.value ~default:"" subcmd |> String.lowercase_ascii

@@ -12,6 +12,7 @@ import {
 } from '../lib/keeper-runtime-display'
 import { signal } from '@preact/signals'
 import { useEffect, useRef, useState } from 'preact/hooks'
+import { ActionButton } from './common/button'
 import { requestConfirm } from './common/confirm-dialog'
 import { isRecord } from './common/normalize'
 import { currentDashboardActor, runOperatorAction } from '../api'
@@ -546,12 +547,12 @@ function KeeperClearContextDialog({
         </div>
 
         <div class="flex items-center justify-end gap-2">
-          <button
-            type="button"
-            class="px-4 py-2 rounded text-sm font-medium border border-[var(--color-border-default)] bg-[var(--white-4)] text-[var(--color-fg-primary)] hover:bg-[var(--white-8)] transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+          <${ActionButton}
+            variant="ghost"
+            size="lg"
             disabled=${pending}
             onClick=${onClose}
-          >취소</button>
+          >취소<//>
           <button
             type="button"
             class="px-4 py-2 rounded text-sm font-medium border border-transparent bg-[var(--color-status-err)] text-white hover:bg-[rgba(239,68,68,0.88)] transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"

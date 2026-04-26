@@ -864,7 +864,7 @@ function GoalDetailPanel({
 
         ${selectedNode.badges.length > 0 ? html`
           <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4">
-            <div class="mb-2 text-2xs font-semibold uppercase tracking-widest text-text-muted">Badges</div>
+            <div class="mb-2 text-2xs font-semibold uppercase tracking-widest text-text-muted">배지</div>
             <${GoalBadges} badges=${selectedNode.badges} />
           </div>
         ` : null}

@@ -365,11 +365,11 @@ export function ToolQualityPanel() {
         </div>
         <div class="text-center">
           <div class="text-lg font-mono text-[var(--bad-light)]/80">${d.failure}</div>
-          <div class="text-3xs text-[var(--color-fg-disabled)] uppercase">Failures</div>
+          <div class="text-3xs text-[var(--color-fg-disabled)] uppercase">실패</div>
         </div>
       </div>
 
-      <${RateGauge} rate=${d.success_rate} label="Overall" />
+      <${RateGauge} rate=${d.success_rate} label="전체" />
 
       ${d.hourly_trend && d.hourly_trend.length >= 2 ? html`
         <${TrendSparkline} points=${d.hourly_trend} />

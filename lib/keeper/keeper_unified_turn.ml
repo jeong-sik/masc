@@ -1741,6 +1741,37 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                       err_preview;
                   mark_terminal_error reclassified;
                   Error reclassified
+                end else if
+                  (* Fast-fail on second consecutive contract violation: if
+                     we already rotated once because the LLM only used
+                     passive/read-only tools, rotating to a weaker cascade
+                     is unlikely to change the LLM's choice on the same
+                     prompt.  Each rotation eats ~600s of turn budget, and
+                     in production we observe 4–5 rotations all hitting
+                     the same violation before the OAS retry guard
+                     finally aborts the cycle (see fleet logs:
+                     "passive status/read tools" cascade=big_three →
+                     keeper_unified → kimi_cli_keeper → … →
+                     oas_timeout_budget at 1064s/1200s).  Cap rotation
+                     at 1 for this error class so the keeper releases
+                     its turn budget for actionable work. *)
+                  EC.is_required_tool_contract_violation err
+                  && List.length attempted_cascades >= 1
+                then begin
+                  Log.Keeper.warn
+                    "%s: required_tool_contract_violation on second cascade \
+                     (%s after %d prior rotation(s)) — skipping further \
+                     rotation; rotating again is unlikely to change the \
+                     model's passive-tool choice. Error: %s"
+                    meta.name execution.cascade_name
+                    (List.length attempted_cascades)
+                    (short_preview (Oas.Error.to_string err));
+                  Prometheus.inc_counter
+                    "masc_keeper_contract_violation_rotation_capped_total"
+                    ~labels:[ ("keeper", meta.name) ]
+                    ();
+                  mark_terminal_error err;
+                  Error err
                 end else
                   match
                     next_fail_open_cascade_for_turn_with_budget

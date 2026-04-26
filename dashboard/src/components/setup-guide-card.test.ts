@@ -98,7 +98,7 @@ describe('SetupGuideCard', () => {
     const progress = container.querySelector('[data-setup-progress="discord"]')!
     expect(progress.textContent).toMatch(/\d+ steps/)
 
-    const firstCheckbox = container.querySelector('[data-setup-step="discord:0"]') as HTMLInputElement
+    const firstCheckbox = container.querySelector('[data-testid="setup-step-discord:0"]') as HTMLInputElement
     expect(firstCheckbox).toBeTruthy()
     firstCheckbox.click()
     await flushUi()
@@ -125,7 +125,7 @@ describe('SetupGuideCard', () => {
     render(html`<${SetupGuideCard} connectorId="discord" />`, container)
     ;(container.querySelector('button[aria-expanded]') as HTMLButtonElement).click()
     await flushUi()
-    const cb = container.querySelector('[data-setup-step="discord:0"]') as HTMLInputElement
+    const cb = container.querySelector('[data-testid="setup-step-discord:0"]') as HTMLInputElement
     cb.click()
     await flushUi()
 
@@ -157,7 +157,7 @@ describe('SetupGuideCard', () => {
     render(html`<${SetupGuideCard} connectorId="discord" />`, container)
     ;(container.querySelector('button[aria-expanded]') as HTMLButtonElement).click()
     await flushUi()
-    ;(container.querySelector('[data-setup-step="discord:0"]') as HTMLInputElement).click()
+    ;(container.querySelector('[data-testid="setup-step-discord:0"]') as HTMLInputElement).click()
     await flushUi()
     const firstCircle = container.querySelector('[data-setup-step-circle="discord:0"]') as HTMLElement
     expect(firstCircle.textContent).toBe('✓')
@@ -168,7 +168,7 @@ describe('SetupGuideCard', () => {
     render(html`<${SetupGuideCard} connectorId="discord" />`, container)
     ;(container.querySelector('button[aria-expanded]') as HTMLButtonElement).click()
     await flushUi()
-    const checkboxes = Array.from(container.querySelectorAll('[data-setup-step^="discord:"]')) as HTMLInputElement[]
+    const checkboxes = Array.from(container.querySelectorAll('[data-testid^="setup-step-discord:"]')) as HTMLInputElement[]
     for (const cb of checkboxes) {
       cb.click()
       await flushUi()
@@ -186,7 +186,7 @@ describe('SetupGuideCard', () => {
     render(html`<${SetupGuideCard} connectorId="slack" />`, container)
     ;(container.querySelector('button[aria-expanded]') as HTMLButtonElement).click()
     await flushUi()
-    const box = container.querySelector('[data-setup-step="slack:0"]') as HTMLInputElement
+    const box = container.querySelector('[data-testid="setup-step-slack:0"]') as HTMLInputElement
     box.click()
     await flushUi()
     expect(container.querySelector('[data-setup-progress="slack"]')!.textContent).toMatch(/1 of \d+ done/)
@@ -200,7 +200,7 @@ describe('SetupGuideCard', () => {
     render(html`<${SetupGuideCard} connectorId="discord" />`, container)
     ;(container.querySelector('button[aria-expanded]') as HTMLButtonElement).click()
     await flushUi()
-    ;(container.querySelector('[data-setup-step="discord:0"]') as HTMLInputElement).click()
+    ;(container.querySelector('[data-testid="setup-step-discord:0"]') as HTMLInputElement).click()
     await flushUi()
 
     // Switch to Telegram — header should still say "N steps" (not "X of N done")

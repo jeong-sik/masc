@@ -61,19 +61,14 @@ let destructive_class_substrings : (string * destructive_class) list = [
   "reboot",            System_control;
 ]
 
-(* Case-insensitive substring-hit test without a regex engine. *)
-let contains_sub_ci (s : string) (sub : string) : bool =
-  let ls = String.length s and lsub = String.length sub in
-  if lsub = 0 then true
-  else if lsub > ls then false
-  else
-    let s = String.lowercase_ascii s and sub = String.lowercase_ascii sub in
-    let rec loop i =
-      if i + lsub > ls then false
-      else if String.sub s i lsub = sub then true
-      else loop (i + 1)
-    in
-    loop 0
+(* Delegates to [String_util.contains_substring_ci] (SSOT). Preserves
+   the historical [sub = ""] -> true convention used by the original
+   inline walker; the SSOT returns [false] for empty needle so we
+   guard here. [destructive_class_substrings] never carries an empty
+   pattern, but the guard keeps the invariant explicit. *)
+let contains_sub_ci s sub =
+  if sub = "" then true
+  else String_util.contains_substring_ci s sub
 
 (* Returns the matching class (first hit in declaration order) plus
    the literal substring that triggered.  [None] means "no known

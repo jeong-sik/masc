@@ -334,7 +334,7 @@ describe('FleetTelemetryPanel', () => {
     expect(container.textContent).toContain('keeper-beta')
     expect(container.textContent).toContain('Keeper 턴 로그')
     expect(container.textContent).toContain('Failure Categories')
-    expect(container.textContent).toContain('Fleet Control Room')
+    expect(container.textContent).toContain('함대 통제실')
   }, 60_000)
 
   it('renders readiness cards, attention events, and keeper goal or sandbox badges', async () => {
@@ -366,8 +366,8 @@ describe('FleetTelemetryPanel', () => {
     })
     await flushUi()
 
-    expect(container.textContent).toContain('Readiness')
-    expect(container.textContent).toContain('Approvals')
+    expect(container.textContent).toContain('준비 상태')
+    expect(container.textContent).toContain('승인 대기')
     expect(container.textContent).toContain('Attention Queue')
     expect(container.textContent).toContain('keeper-alpha is blocked on a continue decision.')
     expect(container.textContent).toContain('goal linked')
@@ -815,7 +815,7 @@ describe('FleetTelemetryPanel', () => {
     expect(container.textContent).toContain('Partial telemetry')
     expect(container.textContent).toContain('Execution snapshot unavailable: execution down')
     expect(container.textContent).toContain('keeper-fallback')
-    expect(container.textContent).toContain('Telemetry Stores')
+    expect(container.textContent).toContain('텔레메트리 저장소')
   }, 60_000)
 
   it('warns when the OAS relay lags behind fresher agent telemetry', async () => {

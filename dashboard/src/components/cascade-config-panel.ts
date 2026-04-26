@@ -430,7 +430,7 @@ function ProfileCard({
                     class="rounded border border-[var(--accent-primary)] bg-[var(--accent-primary)] px-3 py-1 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
                     disabled=${assigning.value || selectedKeeper.value === ''}
                   >
-                    ${assigning.value ? 'Assigning...' : 'Assign keeper'}
+                    ${assigning.value ? '할당 중...' : '키퍼 할당'}
                   </button>
                 </div>
               `
@@ -1155,7 +1155,7 @@ function CascadeRawConfigEditor({
               class="rounded border border-[var(--accent-primary)] bg-[var(--accent-primary)] px-3 py-1 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
               disabled=${saveDisabled}
             >
-              ${saving.value ? 'Saving...' : mode.saveLabel}
+              ${saving.value ? '저장 중...' : mode.saveLabel}
             </button>
             <button
               type="button"

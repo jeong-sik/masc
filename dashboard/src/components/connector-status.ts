@@ -1222,7 +1222,7 @@ function ConnectorLivePanel({
                                       size="sm"
                                       disabled=${isActionLoading || ui.channelDraft.trim().length === 0}
                                       onClick=${() => { void bindConnector(connectorId, group.name, ui.channelDraft.trim()) }}
-                                    >${isActionLoading ? 'Applying...' : 'bind'}<//>
+                                    >${isActionLoading ? '적용 중...' : '연결'}<//>
                                   </div>
                                 </div>
                               `

@@ -9,9 +9,11 @@ import {
   type DashboardRuntimeProviderSnapshot,
   type DashboardRuntimeProvidersResponse,
 } from '../api/dashboard'
+import { ActionButton } from './common/button'
 import { Card } from './common/card'
 import { EmptyState } from './common/empty-state'
 import { ErrorState, LoadingState } from './common/feedback-state'
+import { Select } from './common/select'
 import { StatCell } from './common/stat-cell'
 import { StatusChip } from './common/status-chip'
 import { TextInput } from './common/input'
@@ -353,22 +355,24 @@ export function RuntimeMonitor() {
   return html`
     <div class="flex flex-col gap-4">
       <div class="flex items-center gap-3 flex-wrap">
-        <select
-          class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 text-xs text-[var(--color-fg-secondary)]"
+        <${Select}
+          class="px-2 py-1 text-xs"
           value=${String(windowMinutes.value)}
-          onChange=${(e: Event) => { windowMinutes.value = Number((e.target as HTMLSelectElement).value) }}
-        >
-          <option value="15">15분</option>
-          <option value="30">30분</option>
-          <option value="60">60분</option>
-          <option value="180">180분</option>
-        </select>
-        <button
-          class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-3 py-1 text-xs text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)]"
+          ariaLabel="시간 윈도우 선택"
+          options=${[
+            { value: '15', label: '15분' },
+            { value: '30', label: '30분' },
+            { value: '60', label: '60분' },
+            { value: '180', label: '180분' },
+          ]}
+          onInput=${(v: string) => { windowMinutes.value = Number(v) }}
+        />
+        <${ActionButton}
+          variant="ghost"
+          size="sm"
+          ariaLabel="runtime snapshot 새로고침"
           onClick=${() => void load()}
-        >
-          새로고침
-        </button>
+        >새로고침<//>
         ${current.loading ? html`<span class="text-xs text-[var(--color-fg-muted)]">로딩 중...</span>` : null}
       </div>
 

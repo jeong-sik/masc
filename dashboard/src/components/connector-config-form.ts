@@ -316,7 +316,7 @@ export function ConnectorConfigToggle({ connectorId }: { connectorId: string }) 
   }
   return html`
     <button type="button"
-      class="cursor-pointer rounded border border-[var(--white-8)] px-2 py-0.5 text-3xs uppercase tracking-4 text-[var(--text-dim)] hover:bg-[var(--white-8)] hover:text-[var(--text-body)]"
+      class="cursor-pointer rounded border border-[var(--white-8)] px-2 py-0.5 text-2xs uppercase tracking-4 text-[var(--text-dim)] hover:bg-[var(--white-8)] hover:text-[var(--text-body)]"
       aria-expanded=${entry.open}
       aria-controls=${`connector-config-${connectorId}`}
       onClick=${onClick}
@@ -448,7 +448,7 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
         <div class="font-semibold">schema 가져오기 실패</div>
         <div class="mt-1 text-3xs opacity-80">${entry.error}</div>
         <button type="button"
-          class="mt-2 cursor-pointer rounded border border-[var(--bad-20)] px-2 py-1 text-3xs hover:bg-[var(--bad-10)]"
+          class="mt-2 cursor-pointer rounded border border-[var(--bad-20)] px-2 py-1 text-2xs hover:bg-[var(--bad-10)]"
           aria-label="schema 다시 불러오기"
           onClick=${() => fetchSchema(connectorId)}
         >다시 시도</button>
@@ -475,7 +475,7 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
             ? html`
                 <span class="ml-2 text-[var(--ok)]">· 저장됨 <${TimeAgo} timestamp=${entry.lastSavedAt} /></span>
                 <button type="button"
-                  class="ml-2 cursor-pointer rounded border border-[var(--ok-20)] bg-[var(--ok-10)] px-1.5 py-0.5 text-3xs text-[var(--ok)] hover:bg-[var(--ok-10)] disabled:cursor-not-allowed disabled:opacity-50"
+                  class="ml-2 cursor-pointer rounded border border-[var(--ok-20)] bg-[var(--ok-10)] px-1.5 py-0.5 text-2xs text-[var(--ok)] hover:bg-[var(--ok-10)] disabled:cursor-not-allowed disabled:opacity-50"
                   disabled=${entry.restarting}
                   aria-label=${entry.restarting ? `${connectorId} 재시작 중` : `${connectorId} sidecar 재시작`}
                   aria-busy=${entry.restarting ? 'true' : 'false'}
@@ -489,7 +489,7 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
         </div>
         <div class="flex items-center gap-2">
           <label
-            class="flex cursor-pointer items-center gap-1 text-3xs uppercase tracking-4 text-[var(--text-dim)] hover:text-[var(--text-body)]"
+            class="flex cursor-pointer items-center gap-1 text-2xs uppercase tracking-4 text-[var(--text-dim)] hover:text-[var(--text-body)]"
             title="저장 직후 자동으로 sidecar 재시작 (stop → 800ms → start)"
           >
             <input

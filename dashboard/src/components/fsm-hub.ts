@@ -685,7 +685,7 @@ function StatusBar({
             <span aria-hidden="true">${refreshFlash ? '✓' : '↻'}</span>
           </button>
           <button type="button"
-            class="text-3xs font-mono px-1.5 py-0.5 rounded border border-[var(--white-10)] bg-[var(--white-3)] text-[var(--text-dim)] hover:text-[var(--text-body)] hover:border-[var(--accent-30)] cursor-pointer"
+            class="text-2xs font-mono px-1.5 py-0.5 rounded border border-[var(--white-10)] bg-[var(--white-3)] text-[var(--text-dim)] hover:text-[var(--text-body)] hover:border-[var(--accent-30)] cursor-pointer"
             onClick=${onDensityToggle}
             title=${`현재 밀도: ${density === 'compact' ? '조밀' : '여유'} (단축키 d)`}
             aria-label=${`밀도 토글: 현재 ${density === 'compact' ? '조밀' : '여유'}`}
@@ -740,7 +740,7 @@ function StatusBar({
                 id=${`fsm-tab-${name}`}
                 aria-selected=${active}
                 tabindex=${active ? 0 : -1}
-                class=${`rounded-sm border px-2.5 py-0.5 text-3xs font-mono transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--bg-0)] ${cls}`}
+                class=${`rounded-sm border px-2.5 py-0.5 text-2xs font-mono transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--bg-0)] ${cls}`}
                 onClick=${() => onSelect(name)}
                 title=${i < 9 ? `${name} — 단축키 ${i + 1}` : name}
                 onKeyDown=${(e: KeyboardEvent) => {

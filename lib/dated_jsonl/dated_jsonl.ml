@@ -357,4 +357,19 @@ let prune t ~days =
     !deleted
   end
 
+(* Test hooks declared in the .mli — implementation lives in this
+   module so tests can verify mutex-registry sharing without
+   widening the public API surface. *)
+module For_testing = struct
+  let mutex (t : t) = Atomic.get t.mutex
+
+  let mutex_for_base_dir base_dir =
+    let cell = mutex_for_base_dir ~base_dir ~injected:None in
+    Atomic.get cell
+
+  let registry_size () =
+    Stdlib.Mutex.protect mutex_registry_mu (fun () ->
+      Hashtbl.length mutex_registry)
+end
+
 (* Duplicate count_entries removed — canonical definition at line 225 *)

@@ -195,7 +195,7 @@ export function ToastContainer() {
             </button>
           ` : null}
           <button type="button"
-            class="shrink-0 text-[var(--text-muted)] hover:text-[var(--text-body)] cursor-pointer p-1 rounded hover:bg-[var(--white-5)] transition-colors duration-150 flex items-center justify-center"
+            class="shrink-0 text-[var(--text-muted)] hover:text-[var(--text-body)] cursor-pointer p-1.5 rounded hover:bg-[var(--white-5)] transition-colors duration-150 flex items-center justify-center"
             aria-label="닫기"
             title="닫기"
             onClick=${(e: Event) => {

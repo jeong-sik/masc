@@ -156,27 +156,39 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
                || now -. !last_broadcast_ts > stale_threshold_sec
              in
              if stale && cooldown_ok then begin
-               last_broadcast_ts := now;
-               Keeper_execution_receipt.emit_stale_keeper_broadcast
-                 ctx.config
-                 ~keeper_name:meta.name
-                 ~agent_name:meta.agent_name
-                 ~trace_id:
-                   (Keeper_id.Trace_id.to_string entry.meta.runtime.trace_id)
-                 ~generation:entry.meta.runtime.generation
-                 ~stale_seconds:(now -. last_turn)
-                 ~last_turn_ts:last_turn;
-               (* Step 4: signal fiber stop + record failure reason.
-                  The heartbeat loop exits on fiber_stop; the supervisor's
-                  normal-exit handler checks for Stale_turn_timeout and
-                  resolves as `Crashed so sweep_and_recover restarts. *)
+               (* Fail-closed ordering: signal fiber stop + failure reason
+                  FIRST so sweep_and_recover restarts unconditionally. The
+                  broadcast is best-effort; if it throws, the keeper still
+                  gets restarted instead of being silently stuck. *)
                Keeper_registry.set_failure_reason ~base_path meta.name
                  (Some (Keeper_registry.Stale_turn_timeout
                           (now -. last_turn)));
                Atomic.set reg.fiber_stop true;
                Log.Keeper.error
                  "%s: stale watchdog terminating fiber (%.0fs since last turn)"
-                 meta.name (now -. last_turn)
+                 meta.name (now -. last_turn);
+               (* Broadcast wrapped separately. last_broadcast_ts is only
+                  advanced on successful emit so a failed broadcast retries
+                  on the next tick instead of being suppressed for
+                  stale_threshold_sec. *)
+               (try
+                  Keeper_execution_receipt.emit_stale_keeper_broadcast
+                    ctx.config
+                    ~keeper_name:meta.name
+                    ~agent_name:meta.agent_name
+                    ~trace_id:
+                      (Keeper_id.Trace_id.to_string
+                         entry.meta.runtime.trace_id)
+                    ~generation:entry.meta.runtime.generation
+                    ~stale_seconds:(now -. last_turn)
+                    ~last_turn_ts:last_turn;
+                  last_broadcast_ts := now
+                with
+                | Eio.Cancel.Cancelled _ as e -> raise e
+                | exn ->
+                  Log.Keeper.warn
+                    "%s: stale broadcast emit failed (restart still triggered): %s"
+                    meta.name (Printexc.to_string exn))
              end
            | _ -> ()
          with

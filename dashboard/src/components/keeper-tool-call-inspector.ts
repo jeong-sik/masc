@@ -13,6 +13,7 @@ import { toolCategory, formatDuration, durationColor } from './tool-call-shared'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
 import { parseToolBlobMarker } from '../lib/tool-blob-marker'
 import { CopyIdButton } from './common/copy-id-button'
+import { TextInput } from './common/input'
 
 // Delegated to lib/format-time (SSOT)
 const formatTimestamp = formatTimeHms
@@ -240,10 +241,11 @@ export function KeeperToolCallInspector({ keeperName }: { keeperName: string }) 
           <span class=${successRate < 80 ? 'text-[var(--color-status-warn)]' : ''}>${successRate}% ok</span>
         </div>
         <${FreshnessLine} data=${response ?? { source: 'tool_call_io' }} />
-        <input
+        <${TextInput}
           type="text"
           placeholder="도구 필터..."
-          class="text-xs font-mono bg-[var(--bg-deep)] border border-[var(--color-border-default)] rounded px-2 py-1 w-40 text-[var(--color-fg-secondary)]"
+          ariaLabel="도구 필터"
+          class="!bg-[var(--bg-deep)] !px-2 !py-1 !text-xs font-mono w-40"
           value=${filterTool.value}
           onInput=${(e: Event) => { filterTool.value = (e.target as HTMLInputElement).value }}
         />

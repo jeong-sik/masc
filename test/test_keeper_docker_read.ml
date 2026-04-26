@@ -468,8 +468,8 @@ let test_docker_network_args_follow_masc_policy () =
   let args_inherit, label_inherit =
     Keeper_sandbox_runtime.docker_network_args Keeper_types.Network_inherit
   in
-  Alcotest.(check (list string)) "network inherit omits docker flag"
-    [] args_inherit;
+  Alcotest.(check (list string)) "network inherit uses host network (#10431)"
+    [ "--network"; "host" ] args_inherit;
   Alcotest.(check string) "network inherit label" "inherit" label_inherit
 
 let test_docker_nofile_args_follow_config () =

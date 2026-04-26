@@ -7,6 +7,7 @@ import {
   type KeeperCheckpointInventory,
   type KeeperCheckpointSummary,
 } from '../api/keeper'
+import { TextInput } from './common/input'
 import { TimeAgo } from './common/time-ago'
 import { keeperStatusDetails } from '../keeper-state'
 import { isRecord } from './common/normalize'
@@ -225,13 +226,13 @@ export function KeeperCheckpointPanel({
               ? html`<span class="ml-2 text-3xs font-normal normal-case tracking-normal text-[var(--color-fg-disabled)]">${filterCheckpointHistory(inventory.history, historyQuery).length}/${inventory.history.length}</span>`
               : null}
           </div>
-          <input
+          <${TextInput}
             type="search"
+            class="min-w-40 max-w-65 flex-1 !px-2 !py-1 !text-2xs"
             value=${historyQuery}
             placeholder="snapshot id / preview / 요약 필터"
-            aria-label="OAS snapshot history 필터"
+            ariaLabel="OAS snapshot history 필터"
             onInput=${(e: Event) => { setHistoryQuery((e.target as HTMLInputElement).value) }}
-            class="min-w-40 max-w-65 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--color-fg-primary)] placeholder:text-[var(--color-fg-disabled)] focus:outline-none focus:border-[var(--color-accent-fg)]"
           />
         </div>
         ${!inventory || inventory.history.length === 0

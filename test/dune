@@ -108,6 +108,7 @@
         test_keeper_toml
         test_keeper_runtime_toml
         test_keeper_tool_policy_config
+        test_coord_worktree_policy_path
         test_keeper_toml_config_validation
         test_keeper_id
         test_exec_core
@@ -262,6 +263,7 @@
           test_keeper_toml
           test_keeper_runtime_toml
           test_keeper_tool_policy_config
+          test_coord_worktree_policy_path
           test_keeper_toml_config_validation
           test_keeper_id
           test_exec_core

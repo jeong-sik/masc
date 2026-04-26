@@ -443,6 +443,8 @@ function InlineToggleRow({ label, value, onChange }: { label: string; value: boo
       <span class="text-xs font-medium text-text-muted">${label}</span>
       <button type="button"
         class="relative inline-flex h-5 w-9 items-center rounded-sm transition-colors cursor-pointer ${value ? 'bg-ok/60' : 'bg-white/10'}"
+        aria-label=${`${label} ${value ? '비활성화' : '활성화'}`}
+        aria-pressed=${value ? 'true' : 'false'}
         onClick=${() => onChange(!value)}
       >
         <span class="inline-block h-3.5 w-3.5 rounded-sm bg-white shadow-sm transition-transform ${value ? 'translate-x-[18px]' : 'translate-x-[3px]'}" />

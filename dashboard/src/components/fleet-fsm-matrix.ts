@@ -985,6 +985,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
                                     data-runtime-action-type=${action.action_type}
                                     class="self-start rounded border border-[var(--white-10)] bg-[var(--white-5)] px-2 py-0.5 text-3xs font-semibold ${runtimeActionTone(action)} hover:bg-[var(--white-10)] disabled:cursor-not-allowed disabled:opacity-50"
                                     title=${action.reason}
+                                    aria-label=${action.reason}
                                     disabled=${busy}
                                     onClick=${(event: MouseEvent) => {
                                       event.stopPropagation()
@@ -1005,6 +1006,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
                               data-runtime-assist
                               class="self-start rounded border border-[var(--white-10)] bg-[var(--white-5)] px-2 py-0.5 text-3xs font-semibold text-[var(--color-accent-fg)] hover:bg-[var(--white-10)] disabled:cursor-not-allowed disabled:opacity-50"
                               title="현재 원인/증거를 keeper LLM에 보내 감독형 진단을 요청합니다"
+                              aria-label="감독형 진단 요청"
                               disabled=${assisting}
                               onClick=${(event: MouseEvent) => {
                                 event.stopPropagation()

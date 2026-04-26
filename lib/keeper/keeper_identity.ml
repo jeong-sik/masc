@@ -208,6 +208,26 @@ let strip_nickname_once name =
     | _ -> name
   else name
 
+(* #10692: persona search must consult [Config_dir_resolver] (the SSOT
+   that already handles [MASC_PERSONAS_DIR] env override + resolved
+   config root).  The legacy hardcoded path [<base_path>/.masc/personas]
+   does not exist in production deployments — personas live under the
+   repo's [config/personas/] which the resolver finds, but the legacy
+   path silently fails [check_persona] and triggers logging-only
+   fallback at every coord_join_normalize call.
+
+   Design: prefer the resolver result; fall back to the legacy path
+   only when the resolver yields no candidate (preserves test
+   ergonomics where [~base_path] is set explicitly without spinning up
+   the full resolver chain). *)
+let persona_path_for ~base_path persona_name =
+  match Config_dir_resolver.personas_dir_opt () with
+  | Some dir -> Filename.concat dir persona_name
+  | None ->
+      Filename.concat
+        (Filename.concat (Common.masc_dir_from_base_path ~base_path) "personas")
+        persona_name
+
 let normalize_all_names ~input_agent_name ?(base_path = "")
     ?(check_persona = false) ?(check_credential = false) () :
     (name_bundle, validation_error) result =
@@ -216,13 +236,12 @@ let normalize_all_names ~input_agent_name ?(base_path = "")
   else
     match canonical_keeper_name trimmed with
     | None ->
-        let masc_dir = Common.masc_dir_from_base_path ~base_path in
         Error
           (Persona_not_found
              {
                input = input_agent_name;
                resolved = trimmed;
-               searched = Filename.concat (Filename.concat masc_dir "personas") trimmed;
+               searched = persona_path_for ~base_path trimmed;
              })
     | Some keeper_first_pass ->
         let keeper_name = strip_nickname_once keeper_first_pass in
@@ -236,11 +255,10 @@ let normalize_all_names ~input_agent_name ?(base_path = "")
             credential_stem;
           }
         in
-        let masc_dir () = Common.masc_dir_from_base_path ~base_path in
         let persona_check () =
           if not check_persona then Ok ()
           else
-            let path = Filename.concat (Filename.concat (masc_dir ()) "personas") persona_name in
+            let path = persona_path_for ~base_path persona_name in
             if Sys.file_exists path then Ok ()
             else
               Error

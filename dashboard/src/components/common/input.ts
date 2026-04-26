@@ -29,6 +29,11 @@ interface TextInputProps {
   testId?: string
   /** Native autofocus — applied on initial mount. */
   autoFocus?: boolean
+  /** Forwards a Preact ref to the inner <input>. Distinct from `id` —
+      use this when callers need imperative focus control (e.g. an
+      external "edit" button that focuses this field) or when a parent
+      dialog component takes `initialFocusRef`. Pass a `useRef` result. */
+  inputRef?: { current: HTMLInputElement | null }
   onInput?: (e: Event) => void
   onKeyDown?: (e: KeyboardEvent) => void
 }
@@ -46,11 +51,13 @@ export function TextInput({
   autoComplete,
   testId,
   autoFocus,
+  inputRef,
   onInput,
   onKeyDown,
 }: TextInputProps) {
   return html`
     <input
+      ref=${inputRef}
       id=${id}
       type=${type}
       class="${INPUT_BASE} px-3 py-2 text-sm ${cx ?? ''}"
@@ -79,6 +86,10 @@ interface TextAreaProps {
   ariaLabel?: string
   disabled?: boolean
   required?: boolean
+  /** Forwards a Preact ref to the inner <textarea>. Mirrors TextInput —
+      see that component's docstring for when this is needed (imperative
+      focus, dialog `initialFocusRef`, etc.). */
+  inputRef?: { current: HTMLTextAreaElement | null }
   onInput?: (e: Event) => void
 }
 
@@ -92,10 +103,12 @@ export function TextArea({
   ariaLabel,
   disabled,
   required,
+  inputRef,
   onInput,
 }: TextAreaProps) {
   return html`
     <textarea
+      ref=${inputRef}
       id=${id}
       class="${INPUT_BASE} px-3 py-2 text-sm min-h-20 resize-y ${cx ?? ''}"
       placeholder=${placeholder}

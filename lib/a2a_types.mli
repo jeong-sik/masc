@@ -29,7 +29,7 @@ val task_type_of_string : string -> (task_type, string) result
 type delegate_result = {
   task_id : string;
   status : string;
-  result : string option;
+  result : string option [@default None];
   artifacts : artifact list;
 }
 [@@deriving yojson, show]

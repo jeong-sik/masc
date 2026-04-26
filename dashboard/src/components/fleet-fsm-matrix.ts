@@ -363,7 +363,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
           autoComplete="off"
           value=${query}
           placeholder="name / 상태 필터 (예: gen12, trying)"
-          aria-label="Keeper 필터"
+          aria-label="키퍼 필터"
           data-testid="fleet-fsm-matrix-filter"
           onInput=${(e: Event) => setQuery((e.target as HTMLInputElement).value)}
           class="min-w-40 max-w-65 rounded border border-[var(--white-10)] bg-[var(--white-5)] px-2 py-0.5 text-xs text-[var(--text-muted)] placeholder:text-[var(--text-muted)] focus:border-[var(--white-10)] focus:outline-none"

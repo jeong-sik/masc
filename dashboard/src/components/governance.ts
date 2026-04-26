@@ -495,7 +495,7 @@ function KeeperApprovalQueueSection() {
             type="search"
             value=${query.value}
             placeholder="keeper / tool / 위험도 필터"
-            aria-label="Keeper HITL 승인 필터"
+            aria-label="키퍼 HITL 승인 필터"
             autoComplete="off"
             data-testid="keeper-hitl-approval-filter"
             onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}

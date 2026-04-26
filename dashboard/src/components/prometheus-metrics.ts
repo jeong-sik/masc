@@ -292,7 +292,7 @@ export function PrometheusMetrics() {
     <div class="flex flex-col gap-4">
       <div class="flex items-center justify-between">
         <div>
-          <h2 class="text-lg font-semibold text-[var(--text-heading)]">Prometheus Metrics</h2>
+          <h2 class="text-lg font-semibold text-[var(--text-heading)]">Prometheus 메트릭</h2>
           <p class="text-xs text-[var(--text-muted)]">
             /metrics endpoint (${totalMetrics} metrics, ${totalSamples} samples, ${nonZeroSamples} active)
           </p>

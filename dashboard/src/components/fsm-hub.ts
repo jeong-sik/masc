@@ -713,14 +713,14 @@ function StatusBar({
             </span>
           ` : null}
         </div>
-        <div class="flex items-center gap-1.5 flex-wrap" role="tablist" aria-label="Keeper 선택">
+        <div class="flex items-center gap-1.5 flex-wrap" role="tablist" aria-label="키퍼 선택">
           ${keeperNames.length > 0 ? html`
             <input
               type="search"
               autoComplete="off"
               value=${keeperFilter}
               placeholder="keeper 이름 필터"
-              aria-label="Keeper 이름 필터"
+              aria-label="키퍼 이름 필터"
               onInput=${(e: Event) => onKeeperFilterChange((e.target as HTMLInputElement).value)}
               class="min-w-30 max-w-45 rounded-sm border border-[var(--white-10)] bg-[var(--white-3)] px-2.5 py-0.5 text-3xs font-mono text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent-30)]"
             />

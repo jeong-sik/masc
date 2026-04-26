@@ -690,7 +690,7 @@ export function FleetTelemetryPanel() {
   const offlineCount = value.rows.length - activeCount
 
   return html`
-    <div class="flex flex-col gap-4 p-4" role="region" aria-label="Keeper 텔레메트리">
+    <div class="flex flex-col gap-4 p-4" role="region" aria-label="키퍼 텔레메트리">
       <div class="flex items-start justify-between gap-3">
         <div class="flex items-center gap-3">
           <h2 class="text-sm font-medium">키퍼 텔레메트리</h2>
@@ -708,7 +708,7 @@ export function FleetTelemetryPanel() {
           <button type="button"
             class="rounded bg-[var(--bg-subtle)] px-2 py-0.5 text-3xs text-[var(--text-dim)] hover:text-[var(--text)]"
             onClick=${() => { void loadFleetTelemetry() }}
-            aria-label="Keeper 텔레메트리 새로고침"
+            aria-label="키퍼 텔레메트리 새로고침"
           >새로고침</button>
           <span class="text-3xs text-[var(--text-dim)]">${formatAutoRefreshLabel(TELEMETRY_AUTO_REFRESH_MS)}</span>
         </div>
@@ -765,7 +765,7 @@ export function FleetTelemetryPanel() {
             autoComplete="off"
             value=${query.value}
             placeholder="name / model / blocker 필터"
-            aria-label="Keeper 필터"
+            aria-label="키퍼 필터"
             onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
             class="min-w-40 max-w-60 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)] focus-visible:ring-2 focus-visible:ring-[var(--accent)]/50"
           />

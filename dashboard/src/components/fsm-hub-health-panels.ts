@@ -135,7 +135,7 @@ export function InvariantsPanel({
           ${badgeText}
         </span>
       </div>
-      <ul class="flex flex-col gap-1" aria-label="Keeper 불변량 목록">
+      <ul class="flex flex-col gap-1" aria-label="키퍼 불변량 목록">
         ${entries.map(entry => {
           const desc = invariantDescription(entry.key)
           const vCount = violationCounts[entry.key as keyof KeeperCompositeInvariants] ?? 0

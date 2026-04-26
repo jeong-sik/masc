@@ -1,12 +1,14 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark-fantasy">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>MASC Cockpit — Design System</title>
-  <link rel="stylesheet" href="../colors_and_type.css" />
+  <!-- Order matters: tokens.css is SSOT, type_layer.css depends on it.
+       colors_and_type.css is now a façade (kept for back-compat) and
+       intentionally omitted to avoid double-import. SPEC §7.1.4. -->
   <link rel="stylesheet" href="../source_styles/tokens.css" />
-  <link rel="stylesheet" href="../source_styles/primitives.css" />
+  <link rel="stylesheet" href="../type_layer.css" />
   <style>
     html, body { margin:0; padding:0; background: var(--color-bg-page); color: var(--color-fg-primary); font-family: var(--font-sans); min-height:100vh; }
     .hub { max-width: 1200px; margin: 0 auto; padding: 48px 32px 120px; }
@@ -107,14 +109,15 @@
       <a class="card" href="primitives.html"><span class="stripe"></span><span class="n">20+ primitives</span><span class="title">Atoms</span><span class="desc">Chip, pill, bar, spark, band, kv-row, kbd, tk, button variants, status surfaces.</span></a>
       <a class="card" href="forms.html"><span class="stripe"></span><span class="n">9 controls</span><span class="title">Forms</span><span class="desc">Text input, textarea, select, checkbox, radio, toggle, slider, number, segmented.</span></a>
       <a class="card" href="overlays.html"><span class="stripe"></span><span class="n">6 overlays</span><span class="title">Overlays</span><span class="desc">Modal, popover, tooltip, toast, context menu, command palette (⌘K).</span></a>
+      <a class="card" href="cb-group-g.html"><span class="stripe"></span><span class="n">cb-group-g · 5 patterns · 10 variants</span><span class="title">State patterns</span><span class="desc">Empty · Loading skeletons · Error (warn/fatal) · Pagination · Breadcrumb. SPEC §5 a11y compliant.</span><span class="count">new · v0.2</span></a>
       <a class="card" href="snippets.html"><span class="stripe"></span><span class="n">27 snippets</span><span class="title">Copy-paste snippets</span><span class="desc">Ready-to-use HTML for atoms · row primitives · form controls. One click to copy.</span><span class="count">live preview + clipboard</span></a>
     </div>
 
     <h2>Reference</h2>
     <div class="grid">
-      <a class="card" href="../README.md"><span class="stripe"></span><span class="n">README</span><span class="title">Full system doc</span><span class="desc">Content fundamentals, visual foundations, iconography, index.</span></a>
+      <a class="card" href="../SPEC.md"><span class="stripe"></span><span class="n">SPEC</span><span class="title">Canonical spec</span><span class="desc">Token taxonomy, surface stack, type roles, theme matrix, change rules.</span></a>
+      <a class="card" href="../CHANGELOG.md"><span class="stripe"></span><span class="n">CHANGELOG</span><span class="title">Version history</span><span class="desc">v0.2 token consolidation, motion tokens, 5-theme SSOT, cb-group-g additions.</span></a>
       <a class="card" href="../SKILL.md"><span class="stripe"></span><span class="n">SKILL</span><span class="title">Agent skill manifest</span><span class="desc">Hard rules, component vocabulary, do/don't list.</span></a>
-      <a class="card" href="../ui_kits/cockpit/index.html"><span class="stripe"></span><span class="n">UI KIT</span><span class="title">Cockpit prototype</span><span class="desc">Full single-pane cockpit, all zones wired together.</span></a>
     </div>
   </div>
 </body>

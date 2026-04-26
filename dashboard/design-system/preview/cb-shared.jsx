@@ -92,15 +92,124 @@ function SectionHeading({
   );
 }
 
-// Utility — get keeper color var name from id
-function kClass(id) {
-  return ({
-    'nick0cave': 'brass',
-    'masc-improver': 'ok',
-    'sangsu': 'info',
-    'qa-king': 'err',
-    'rama': 'stalled',
-  })[id] || 'idle';
+// v0.4: kClass() removed. Use kSlot(id) → 1..12 + <KeeperBadge> instead.
+
+// ─── v0.3 Keeper attribution ──────────────────────────────────────────
+// SPEC §3.6 v0.3: color alone never identifies a keeper. Always emit
+// color + sigil. <KeeperBadge> is the canonical attribution unit.
+//
+// kSlot(id)  → 1..12, deterministic hash → palette slot
+// kSigil(id) → 2-letter monogram for the badge face
+//
+// 12-slot mapping uses skip-3 stride so adjacent IDs in a list land on
+// hues ≥90° apart, preserving discriminability up to ~10 active keepers.
+
+const KEEPER_REGISTRY = {
+  // canonical 5 — pinned to fixed slots for brand recall.
+  // These match the legacy alias targets in tokens.css §3 so visual
+  // identity is preserved across the v0.2→v0.3 migration.
+  'nick0cave':     { slot: 3,  sigil: 'NK' },  /* amber */
+  'masc-improver': { slot: 6,  sigil: 'MS' },  /* jade  */
+  'sangsu':        { slot: 9,  sigil: 'SS' },  /* sky   */
+  'qa-king':       { slot: 2,  sigil: 'QA' },  /* clay  */
+  'rama':          { slot: 11, sigil: 'RM' },  /* violet */
+};
+
+// FNV-1a 32-bit hash → 1..12 (avoid 0)
+function _hash12(str) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return ((h >>> 0) % 12) + 1;
+}
+
+function kSlot(id) {
+  if (KEEPER_REGISTRY[id]) return KEEPER_REGISTRY[id].slot;
+  return _hash12(String(id));
+}
+
+function kSigil(id) {
+  if (KEEPER_REGISTRY[id]) return KEEPER_REGISTRY[id].sigil;
+  // Auto-derive: first letter + first letter after hyphen, else first 2.
+  const s = String(id).replace(/[^a-z0-9-]/gi, '');
+  const parts = s.split('-').filter(Boolean);
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+  return s.slice(0, 2).toUpperCase();
+}
+
+// KeeperBadge — sigil square + optional name. The single source of
+// truth for "who did this" anywhere in the dashboard.
+//
+// size: 'sm' (14px) | 'md' (18px) | 'lg' (24px)
+// variant: 'sigil' (square only) | 'full' (sigil + name) | 'name' (colored name only — discouraged, only when sigil is shown adjacent)
+// beat: optional running indicator — adds a soft glow + subtle pulse on the sigil
+//       (SPEC §3.6 v0.3: color = identity, animation = state — kept on the same
+//        element only because running keepers benefit from one glanceable cue.)
+function KeeperBadge({ id, name, size = 'md', variant = 'full', title, beat = false }) {
+  const slot = kSlot(id);
+  const sigil = kSigil(id);
+  const display = name || id;
+  const sizePx = size === 'sm' ? 14 : size === 'lg' ? 24 : 18;
+  const fontPx = size === 'sm' ? 8 : size === 'lg' ? 11 : 9;
+  const radius = size === 'lg' ? 3 : 2;
+  const sigilEl = (
+    <span
+      className={`kb-sigil k-${slot}${beat ? ' kb-beat' : ''}`}
+      style={{
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        width: sizePx, height: sizePx, fontSize: fontPx, borderRadius: radius,
+        background: `var(--k-${slot})`, color: 'var(--bg-0)',
+        fontFamily: 'var(--font-mono)', fontWeight: 700, letterSpacing: 0,
+        flex: 'none',
+        boxShadow: beat ? `0 0 6px var(--k-${slot}-glow, var(--k-${slot}))` : undefined,
+        animation: beat ? 'anim-heartbeat 1.4s var(--ease-inout) infinite' : undefined,
+      }}
+      aria-hidden={variant === 'full' ? 'true' : 'false'}
+    >{sigil}</span>
+  );
+  if (variant === 'sigil') {
+    return <span className="kb" title={title || display} aria-label={display}>{sigilEl}</span>;
+  }
+  if (variant === 'name') {
+    return <span className="kb-name" style={{ color: `var(--k-${slot})`, fontWeight: 500 }}>{display}</span>;
+  }
+  return (
+    <span className="kb" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, verticalAlign: 'middle' }} title={title}>
+      {sigilEl}
+      <span className="kb-name" style={{ color: `var(--k-${slot})`, fontFamily: 'var(--font-sans)', fontSize: 11, fontWeight: 500 }}>{display}</span>
+    </span>
+  );
+}
+
+// KeeperStack — presence/avatar stack with hard cap + "+N" overflow.
+// SPEC §3.6 v0.3: never render >4 raw sigils stacked; collapse the rest.
+function KeeperStack({ ids = [], cap = 4, size = 'md' }) {
+  const visible = ids.slice(0, cap);
+  const overflow = ids.length - visible.length;
+  const sizePx = size === 'sm' ? 14 : size === 'lg' ? 24 : 18;
+  return (
+    <span className="kb-stack" style={{ display: 'inline-flex', alignItems: 'center' }}>
+      {visible.map((id, i) => (
+        <span key={id} style={{ marginLeft: i === 0 ? 0 : -4, border: '2px solid var(--color-bg-surface)', borderRadius: 3, display: 'inline-flex' }}>
+          <KeeperBadge id={id} variant="sigil" size={size} />
+        </span>
+      ))}
+      {overflow > 0 && (
+        <span
+          aria-label={`${overflow} more`}
+          style={{
+            marginLeft: -4, width: sizePx, height: sizePx,
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            background: 'var(--color-bg-surface-2)', color: 'var(--color-fg-secondary)',
+            border: '2px solid var(--color-bg-surface)', borderRadius: 3,
+            fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 600,
+          }}
+        >+{overflow}</span>
+      )}
+    </span>
+  );
 }
 
 // Theme — read/write the active data-theme on <html>.
@@ -157,4 +266,8 @@ function useTyping(strings, cps = 18) {
   return text;
 }
 
-Object.assign(window, { Dot, Spark, Heartbeat, Chip, Pill, Vhead, SectionHeading, kClass, useTyping, getTheme, setTheme });
+Object.assign(window, {
+  Dot, Spark, Heartbeat, Chip, Pill, Vhead, SectionHeading,
+  kSlot, kSigil, KeeperBadge, KeeperStack, KEEPER_REGISTRY,
+  useTyping, getTheme, setTheme,
+});

@@ -1,159 +1,20 @@
 /* ══════════════════════════════════════════════════════════════════
-   MASC COCKPIT — Colors & Type Foundations
+   MASC COCKPIT — Colors & Type (DEPRECATED façade)
    ──────────────────────────────────────────────────────────────────
-   Extracted from styles/tokens.css + primitives.css.
-   Dark Brass aesthetic: warm near-black bg, brass ONLY for active
-   state, muted semantic statuses, mono-first type.
+   This file used to define raw + role tokens AND .masc-ds element
+   defaults. SPEC §7.1.4 collapsed it: tokens.css is now the single
+   source of truth (5 themes, full §3 alias tier, motion, trace
+   frame). Element defaults moved to type_layer.css.
+
+   This façade is kept for backward compat — any existing import
+   continues to resolve. New code should depend on:
+
+     - source_styles/tokens.css   (raw + alias tokens, all themes)
+     - type_layer.css              (.masc-ds element defaults)
+
+   Drift guard: NO token definitions allowed here. If you reach for
+   a `--*: ...;` line in this file, you're regressing the SSOT.
    ══════════════════════════════════════════════════════════════════ */
 
-:root {
-  /* ─────────── FONTS ─────────── */
-  --font-sans: ui-sans-serif, -apple-system, "SF Pro Text", "Inter", system-ui, sans-serif;
-  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
-
-  /* ─────────── SURFACE STACK (4 steps + page) ─────────── */
-  --bg-0: #0c0b08;   /* page bg */
-  --bg-1: #141210;   /* topbar / chrome */
-  --bg-2: #1a1815;   /* panel surface */
-  --bg-3: #211e1a;   /* elevated card */
-  --bg-4: #2a2621;   /* hover / active row */
-
-  /* ─────────── HAIRLINES ─────────── */
-  --line-1: #2a2520;   /* default border */
-  --line-2: #3a332c;   /* emphasized border */
-  --line-3: #4a4137;   /* divider between zones */
-
-  /* ─────────── FOREGROUND (never pure white) ─────────── */
-  --fg-1: #f0e9dc;   /* primary */
-  --fg-2: #b8ad9a;   /* secondary */
-  --fg-3: #7a7065;   /* tertiary / labels */
-  --fg-4: #4a453e;   /* disabled / placeholder */
-
-  /* ─────────── BRASS — the ONE accent ─────────── */
-  --brass-1: #d4a14a;
-  --brass-2: #b8843a;
-  --brass-3: #8a5f28;
-  --brass-glow: 212 161 74;
-
-  /* ─────────── STATUS (muted, never neon) ─────────── */
-  --ok:      #6b9e6b;
-  --warn:    #c9a24a;
-  --err:     #c46a5a;
-  --info:    #6a8eb0;
-  --idle:    #6a6a6a;
-  --stalled: #8a6aa0;
-
-  --ok-fg:     #8ebc8e;
-  --warn-fg:   #d9b764;
-  --err-fg:    #d8806f;
-  --info-fg:   #8aa6c4;
-  --stalled-fg:#a88ac0;
-
-  /* ─────────── KEEPER PALETTE (fleet attribution) ─────────── */
-  --k-nick:    #d4a14a;   /* captain — brass */
-  --k-masc:    #6b9e6b;   /* green */
-  --k-sangsu:  #6a8eb0;   /* blue */
-  --k-qa:      #c46a5a;   /* red */
-  --k-rama:    #8a6aa0;   /* purple */
-
-  /* ─────────── SEMANTIC COLOR ROLES ─────────── */
-  --color-bg:          var(--bg-0);
-  --color-surface:     var(--bg-2);
-  --color-surface-alt: var(--bg-3);
-  --color-border:      var(--line-1);
-  --color-divider:     var(--line-2);
-  --color-accent:      var(--brass-1);
-  --color-text:        var(--fg-1);
-  --color-text-mute:   var(--fg-2);
-  --color-text-dim:    var(--fg-3);
-
-  /* ─────────── TYPE SCALE (raw sizes) ─────────── */
-  --fs-9:  9px;
-  --fs-10: 10px;
-  --fs-11: 11px;
-  --fs-12: 12px;
-  --fs-13: 13px;
-  --fs-14: 14px;
-  --fs-16: 16px;
-  --fs-20: 20px;
-  --fs-28: 28px;
-  --fs-36: 36px;
-
-  --lh-tight: 1.2;
-  --lh-body:  1.45;
-  --lh-loose: 1.6;
-
-  --fw-reg:  400;
-  --fw-med:  500;
-  --fw-semi: 600;
-  --fw-bold: 700;
-
-  --track-tight:  -0.01em;
-  --track-normal:  0;
-  --track-wide:    0.04em;
-  --track-caps:    0.08em;
-
-  /* ─────────── TYPE ROLE TOKENS ─────────── */
-  --type-micro:   var(--fs-9)/var(--lh-tight) var(--font-mono);
-  --type-caption: var(--fs-10)/var(--lh-tight) var(--font-mono);
-  --type-label:   var(--fs-11)/var(--lh-tight) var(--font-sans);
-  --type-meta:    var(--fs-12)/var(--lh-tight) var(--font-mono);
-  --type-body:    var(--fs-13)/var(--lh-body)  var(--font-sans);
-  --type-code:    var(--fs-12)/var(--lh-body)  var(--font-mono);
-  --type-title:   var(--fs-14)/var(--lh-tight) var(--font-sans);
-  --type-kpi-m:   var(--fs-16)/var(--lh-tight) var(--font-mono);
-  --type-kpi-l:   var(--fs-20)/var(--lh-tight) var(--font-mono);
-  --type-hero:    var(--fs-28)/var(--lh-tight) var(--font-mono);
-  --type-display: var(--fs-36)/var(--lh-tight) var(--font-mono);
-
-  /* ─────────── SEMANTIC TYPE (element-level) ─────────── */
-  --h1: 600 var(--type-display);
-  --h2: 600 var(--type-hero);
-  --h3: 600 var(--type-kpi-l);
-  --h4: 600 var(--type-title);
-  --p:  var(--type-body);
-  --code: var(--type-code);
-  --caption: var(--type-caption);
-  --label: 600 var(--type-label);
-}
-
-/* ══════════════════════════════════════════════════════════════════
-   SEMANTIC ELEMENT DEFAULTS
-   Scoped to .masc-ds so this file is safe to import next to existing
-   styles without trampling global element selectors.
-   ══════════════════════════════════════════════════════════════════ */
-
-.masc-ds {
-  color: var(--fg-1);
-  background: var(--bg-0);
-  font: var(--type-body);
-  -webkit-font-smoothing: antialiased;
-  font-feature-settings: "cv08", "ss01";
-}
-.masc-ds code, .masc-ds kbd, .masc-ds samp, .masc-ds pre, .masc-ds .mono {
-  font-family: var(--font-mono);
-}
-
-.masc-ds h1 { font: var(--h1); color: var(--fg-1); letter-spacing: var(--track-tight); font-variant-numeric: tabular-nums; margin: 0; }
-.masc-ds h2 { font: var(--h2); color: var(--fg-1); letter-spacing: var(--track-tight); font-variant-numeric: tabular-nums; margin: 0; }
-.masc-ds h3 { font: var(--h3); color: var(--fg-1); font-variant-numeric: tabular-nums; margin: 0; }
-.masc-ds h4 { font: var(--h4); color: var(--fg-1); letter-spacing: var(--track-tight); margin: 0; }
-.masc-ds p  { font: var(--p); color: var(--fg-1); margin: 0; }
-.masc-ds .label,
-.masc-ds label {
-  font: var(--label); color: var(--fg-3);
-  letter-spacing: var(--track-caps);
-  text-transform: uppercase;
-}
-.masc-ds .caption { font: var(--caption); color: var(--fg-3); letter-spacing: var(--track-wide); }
-.masc-ds .mono    { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
-
-/* color utility classes */
-.masc-ds .t-brass   { color: var(--brass-1); }
-.masc-ds .t-ok      { color: var(--ok-fg); }
-.masc-ds .t-warn    { color: var(--warn-fg); }
-.masc-ds .t-err     { color: var(--err-fg); }
-.masc-ds .t-info    { color: var(--info-fg); }
-.masc-ds .t-stalled { color: var(--stalled-fg); }
-.masc-ds .t-dim     { color: var(--fg-3); }
-.masc-ds .t-mute    { color: var(--fg-4); }
+@import url("source_styles/tokens.css");
+@import url("type_layer.css");

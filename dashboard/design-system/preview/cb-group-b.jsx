@@ -26,7 +26,7 @@ function SidebarFleet() {
                onClick={()=>setSel(k.id)}
                onKeyDown={activateOnEnterOrSpace(()=>setSel(k.id))}
                className={`row ${sel===k.id?'sel':''} ${k.status==='idle'?'idle':''}`}>
-            <Dot kind={kClass(k.id)} size="sm" beat={k.status==='running'} />
+            <KeeperBadge id={k.id} variant="sigil" size="sm" beat={k.status==='running'} />
             <span className="name" aria-hidden="true">{k.id}</span>
             <span className="meta" aria-hidden="true">{k.task}</span>
           </div>
@@ -70,7 +70,7 @@ function SidebarGrouped() {
                onClick={()=>setSel(k.id)}
                onKeyDown={activateOnEnterOrSpace(()=>setSel(k.id))}
                className={`row ${sel===k.id?'sel':''}`}>
-            <Dot kind={kClass(k.id)} size="sm" beat={k.status==='running'} />
+            <KeeperBadge id={k.id} variant="sigil" size="sm" beat={k.status==='running'} />
             <span className="name" aria-hidden="true">{k.id}</span>
             <span className="meta" aria-hidden="true">{k.t || k.task}</span>
           </div>
@@ -106,7 +106,7 @@ function SidebarIcons() {
                onKeyDown={activateOnEnterOrSpace(()=>setSel(k.id))}
                className={`row ${sel===k.id?'sel':''} ${k.status==='idle'?'idle':''}`}>
             <span className="icon" aria-hidden="true">{k.role[0]}</span>
-            <Dot kind={kClass(k.id)} size="sm" beat={k.status==='running'} />
+            <KeeperBadge id={k.id} variant="sigil" size="sm" beat={k.status==='running'} />
             <span className="name" aria-hidden="true">{k.id}</span>
             <span className="meta" aria-hidden="true">{k.task}</span>
           </div>
@@ -137,7 +137,7 @@ function SwimlanesGlyph() {
                onKeyDown={activateOnEnterOrSpace(()=>setSel(k.id))}
                className={`lane ${sel===k.id?'sel':''}`}>
             <div className="lane-head">
-              <Dot kind={kClass(k.id)} size="sm" beat={k.status==='running'} />
+              <KeeperBadge id={k.id} variant="sigil" size="sm" beat={k.status==='running'} />
               <span className="name" aria-hidden="true">{k.id}</span>
             </div>
             <div className="lane-track" aria-hidden="true">
@@ -166,7 +166,7 @@ function SwimlanesDense() {
         {lanes.map(k => (
           <div key={k.id} role="listitem" aria-label={`${k.id} timeline`} className="lane">
             <div className="lane-head">
-              <Dot kind={kClass(k.id)} size="sm" beat={k.status==='running'} />
+              <KeeperBadge id={k.id} variant="sigil" size="sm" beat={k.status==='running'} />
               <span className="name" aria-hidden="true">{k.id}</span>
             </div>
             <div className="lane-track" aria-hidden="true">
@@ -202,7 +202,7 @@ function SwimlanesBars() {
         {lanes.map(k => (
           <div key={k.id} role="listitem" aria-label={`${k.id} aggregated timeline`} className="lane">
             <div className="lane-head">
-              <Dot kind={kClass(k.id)} size="sm" beat={k.status==='running'} />
+              <KeeperBadge id={k.id} variant="sigil" size="sm" beat={k.status==='running'} />
               <span className="name" aria-hidden="true">{k.id}</span>
             </div>
             <div className="lane-track" aria-hidden="true">
@@ -264,7 +264,7 @@ function DeckTasks() {
                   onKeyDown={activateOnEnterOrSpace(()=>setSel(t.id))}>
                 <td>{t.id}</td>
                 <td className="title">{t.title}</td>
-                <td><Dot kind={kClass(t.keeper)} size="sm" /> {t.keeper}</td>
+                <td><KeeperBadge id={t.keeper} variant="full" size="sm" /></td>
                 <td>{t.goal}</td>
                 <td><Pill kind={t.status==='running'?'running':t.status==='fail'?'err':t.status==='stalled'?'stalled':t.status==='pending'?'info':'paused'}>{t.status}</Pill></td>
                 <td>{t.t}</td>
@@ -300,7 +300,7 @@ function DeckKanban() {
                   <span className="id" aria-hidden="true">{t.id}</span>
                   <span className="title" aria-hidden="true">{t.title}</span>
                   <span className="foot" aria-hidden="true">
-                    <Dot kind={kClass(t.keeper)} size="sm" /> {t.keeper} · {t.t}
+                    <KeeperBadge id={t.keeper} variant="full" size="sm" /> · {t.t}
                   </span>
                 </div>
               ))}
@@ -354,7 +354,7 @@ function RailActivity() {
                  aria-label={`${e.t.slice(0,8)} · ${e.keeper} ${e.kind}: ${e.text}`}
                  className={`ev ${e.kind}`}>
               <span className="t" aria-hidden="true">{e.t.slice(0,8)}</span>
-              <span className="icon" aria-hidden="true"><Dot kind={kClass(e.keeper)} size="sm" /></span>
+              <span className="icon" aria-hidden="true"><KeeperBadge id={e.keeper} variant="sigil" size="sm" /></span>
               <span className="body" aria-hidden="true">
                 <span className="who">{e.keeper}</span>
                 <span className="text">{e.text}</span>
@@ -397,7 +397,7 @@ function RailCascade() {
                  aria-label={`${e.t.slice(0,8)} · ${e.keeper} ${e.kind}: ${e.text}`}
                  className={`ev ${e.kind}`}>
               <span className="t" aria-hidden="true">{e.t.slice(0,8)}</span>
-              <span className="icon" aria-hidden="true"><Dot kind={kClass(e.keeper)} size="sm" /></span>
+              <span className="icon" aria-hidden="true"><KeeperBadge id={e.keeper} variant="sigil" size="sm" /></span>
               <span className="body" aria-hidden="true">
                 <span className="who">{e.keeper}</span>
                 <span className="text">{e.text}</span>

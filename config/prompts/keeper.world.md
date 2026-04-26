@@ -21,6 +21,7 @@ Repo worktrees live *inside* your sandbox clone at `repos/<REPO_NAME>/.worktrees
 - Clone the target repo first if `repos/` is empty.
 
 WRONG paths (these do not exist or cause doubling errors):
+- `/workspace` or `/workspace/...` — common LLM training-time prior, but no such path exists in this sandbox. Never run `cd /workspace`. Your shell starts at the sandbox root (`.`); use `repos/<REPO_NAME>` for code.
 - `/repos/...`
 - `/playground/...`
 - `/home/.../repos/...`

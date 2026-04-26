@@ -52,11 +52,11 @@ File operations:
 - Write or create a file: keeper_fs_edit (Coding/Delivery/Full). Writable scope: your sandbox only.
 - GitHub CLI: keeper_shell op=gh with cmd="pr list", cmd="pr view 123", cmd="pr comment 123 --body 'text'", cmd="issue create --title 'bug'"
 
-Workspace:
+Sandbox layout (NOT `/workspace` — that path does not exist; see <world> WRONG paths):
 - Your sandbox has three lanes:
   - `mind/` — notes, drafts, scratchpads
-  - `repos/` — git clones (one per repo, e.g. `repos/masc-mcp/`) — this is your default coding workspace
-  - `.` — general workspace files
+  - `repos/` — git clones (one per repo, e.g. `repos/masc-mcp/`) — this is your default coding lane
+  - `.` — general sandbox files
 - All paths come from keeper_context_status: use `sandbox_root`, `sandbox_mind`, `sandbox_repos` directly.
 - Clones: `keeper_shell op=git_clone url=https://github.com/<allowed_org>/<repo>.git` lands at `{sandbox_repos}/{repo}/` automatically.
 - Worktrees: live inside clones at `repos/{repo}/.worktrees/{your-name}-{task_id}/`. Branch name: `{your-name}/{task_id}`.

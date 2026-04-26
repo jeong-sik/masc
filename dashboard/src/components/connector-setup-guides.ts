@@ -93,7 +93,7 @@ export const CONNECTOR_SETUP_GUIDES: Record<string, ConnectorSetupGuide> = {
   // confirm" matches the other setup-guide entries and reuses the same
   // renderer without a new component.
   sandbox_hardened: {
-    title: 'Keeper Docker Sandbox 프리플라이트',
+    title: '키퍼 Docker Sandbox 프리플라이트',
     intro:
       "keeper의 sandbox_profile을 'docker'로 바꾸면 다음 keeper_bash 호출부터 container에서 실행됩니다. 먼저 호스트 Docker가 준비됐는지 확인하세요.",
     steps: [

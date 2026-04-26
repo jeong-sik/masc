@@ -233,11 +233,11 @@ export function ConnectorKeeperMatrix({ matrix }: { matrix: MatrixData }) {
             Keeper × Connector Matrix
           </h4>
           <p class="mt-0.5 text-3xs text-[var(--text-dim)]">
-            ${matrix.totals.knownKeepers} keeper${matrix.totals.knownKeepers === 1 ? '' : 's'}
-            · ${matrix.totals.liveConnectors}/${matrix.columns.length} connector
-            · ${matrix.totals.totalBindings} binding${matrix.totals.totalBindings === 1 ? '' : 's'}
+            키퍼 ${matrix.totals.knownKeepers}명
+            · 커넥터 ${matrix.totals.liveConnectors}/${matrix.columns.length}
+            · 바인딩 ${matrix.totals.totalBindings}건
             ${matrix.totals.unknownKeepers > 0
-              ? html`· <span class="text-[var(--warn)]">${matrix.totals.unknownKeepers} unknown</span>`
+              ? html`· <span class="text-[var(--warn)]">${matrix.totals.unknownKeepers} 미확인</span>`
               : null}
           </p>
         </div>

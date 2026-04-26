@@ -718,7 +718,7 @@ export function FleetTelemetryPanel() {
 
       <div class="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
         <${SummaryCard}
-          title="Keeper 가동률"
+          title="키퍼 가동률"
           value=${`${counts.live}/${value.rows.length || 0}`}
           detail=${`${counts.toolCovered}/${value.rows.length || 0} 키퍼가 최근 도구 활동을 보고했습니다.`}
           tone=${liveTone}

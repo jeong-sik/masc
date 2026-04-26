@@ -480,7 +480,7 @@ function KeeperApprovalQueueSection() {
     : 'border-white/10 bg-[var(--white-3)] text-text-muted text-2xs px-2 py-0.5 font-bold'
   return html`
     <div id="keeper-hitl-approval" data-testid="keeper-hitl-approval">
-    <${Card} title="Keeper HITL 승인 대기" class="section mb-5" variant="compact">
+    <${Card} title="키퍼 HITL 승인 대기" class="section mb-5" variant="compact">
       <div class="mb-3 flex items-center justify-between gap-3">
         <div class="text-xs text-text-muted">
           위험도가 threshold를 넘은 keeper tool call이 여기서 대기합니다.

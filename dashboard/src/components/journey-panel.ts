@@ -767,7 +767,7 @@ export function JourneyPanel() {
       <${Card} class="flex flex-col gap-4">
         <div class="flex flex-col gap-2">
           <div class="flex flex-wrap items-center gap-2">
-            <h2 class="m-0 text-2xl font-semibold text-[var(--text-strong)]">Task → Run → Contract → Keeper → Thinking → Memory → Turn → Life → Cascade</h2>
+            <h2 class="m-0 text-2xl font-semibold text-[var(--text-strong)]">Task → Run → Contract → 키퍼 → Thinking → Memory → Turn → Life → Cascade</h2>
             <${StatusChip} tone="info">journey beta<//>
           </div>
           <div class="text-sm leading-relaxed text-[var(--text-muted)]">
@@ -816,7 +816,7 @@ export function JourneyPanel() {
             ${keeperRecords.length > 0
               ? html`
                   <div class="flex flex-col gap-3">
-                    <div class="text-2xs font-semibold uppercase tracking-3 text-[var(--text-muted)]">독립 Keeper 여정</div>
+                    <div class="text-2xs font-semibold uppercase tracking-3 text-[var(--text-muted)]">독립 키퍼 여정</div>
                     ${keeperRecords.map((record) => html`<${JourneyCard} key=${record.key} record=${record} />`)}
                   </div>
                 `

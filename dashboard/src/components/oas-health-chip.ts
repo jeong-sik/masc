@@ -179,7 +179,7 @@ export function OasHealthChip() {
               <div class="text-3xs text-[var(--text-muted)] tracking-wider uppercase font-medium mb-2">
                 활성 Keeper
               </div>
-              <ul class="space-y-1" aria-label="활성 Keeper 목록">
+              <ul class="space-y-1" aria-label="활성 키퍼 목록">
                 ${recentKeepers.value.map(snap => html`
                   <li class="flex items-baseline justify-between gap-2 text-2xs">
                     <span class="text-[var(--text-body)] truncate" title=${`${snap.keeper_name} · gen ${snap.generation} · ${Math.round(snap.context_ratio * 100)}%`}>

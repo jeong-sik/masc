@@ -517,7 +517,7 @@ function OrphanKeeperList({ orphans }: { orphans: readonly CascadeKeeperProfile[
       <div class="text-[var(--text-muted)] mb-2">
         아래 keeper 는 canonical cascade 가 현재 profile 목록에 없어 해당 cascade 로 라우팅할 수 없습니다.
       </div>
-      <ul class="flex flex-col gap-1" aria-label="연결되지 않은 Keeper">
+      <ul class="flex flex-col gap-1" aria-label="연결되지 않은 키퍼">
         ${orphans.map(o => html`
           <li class="flex gap-2">
             <span class="font-semibold text-[var(--text-strong)]">${o.keeper}</span>

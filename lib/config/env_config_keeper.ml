@@ -521,12 +521,16 @@ module DockerPlayground = struct
       local subprocess.  The container must be running and named
       [keeper-playground].  When disabled, commands run locally with
       the existing allowlist restrictions.
-      Env: [MASC_KEEPER_DOCKER_PLAYGROUND]. Default: false. *)
+      Env: [MASC_KEEPER_DOCKER_PLAYGROUND]. Default: false.
+      P2b: aliased to {!Env_config_sandbox.Runtime.docker_playground_enabled};
+      [()] call freezes the value at module init to preserve the
+      original [Feature_flag_registry.get_bool] semantics. *)
   let enabled =
-    Feature_flag_registry.get_bool "MASC_KEEPER_DOCKER_PLAYGROUND"
+    Env_config_sandbox.Runtime.docker_playground_enabled ()
 
   (** Docker container name for keeper playground execution.
-      Env: [MASC_KEEPER_DOCKER_CONTAINER]. Default: "keeper-playground". *)
+      Env: [MASC_KEEPER_DOCKER_CONTAINER]. Default: "keeper-playground".
+      Not yet in {!Env_config_sandbox} — kept here. *)
   let container_name =
     get_string ~default:"keeper-playground" "MASC_KEEPER_DOCKER_CONTAINER"
 
@@ -534,152 +538,68 @@ module DockerPlayground = struct
       Host [<base_path>/.masc/playground/<keeper>/…] maps to
       [<container_playground_root>/<keeper>/…] inside the container.
       Env: [MASC_KEEPER_DOCKER_PLAYGROUND_ROOT].
-      Default: "/home/keeper/playground". *)
+      Default: "/home/keeper/playground".
+      Not yet in {!Env_config_sandbox} — kept here. *)
   let container_playground_root =
     get_string ~default:"/home/keeper/playground"
       "MASC_KEEPER_DOCKER_PLAYGROUND_ROOT"
 end
 
 module KeeperSandbox = struct
-  (** Opt-in strict sandbox policy for Docker keepers.
+  (** P2b: this module is now a thin alias layer that delegates to
+      {!Env_config_sandbox} (#10480 P2a SSOT scaffold).  Behavior is
+      preserved byte-for-byte — same env vars, same defaults — so all
+      ~76 call sites in [lib/keeper/*] continue to work unchanged.
+      The complex [gh_token] / [For_testing] machinery stays here
+      because it manages an Atomic-backed cache that is too entangled
+      with this module's internals to lift out cleanly in P2b.
 
-      Hard mode forces rootless/userns runtime checks, disables Docker-side
-      git/gh credential dispatch, and removes host credential fallbacks. *)
-  let hard_mode () =
-    get_bool ~default:false "MASC_KEEPER_SANDBOX_HARD_MODE"
+      Doc strings live on the underlying {!Env_config_sandbox}
+      module; see {!Env_config_sandbox.Hardening} etc. for the full
+      semantics, env var names, and defaults. *)
 
-  (** Ephemeral Docker image used by sandbox_profile=docker.
-      Must contain bash and the CLI tools the keeper needs. *)
-  let docker_image () =
-    get_string
-      ~default:"masc-keeper-sandbox:local"
-      "MASC_KEEPER_SANDBOX_DOCKER_IMAGE"
+  let hard_mode = Env_config_sandbox.Hardening.hard_mode
 
-  (** Global keeper sandbox preflight switch. Enabled by default so
-      keeper_up and doctor fail fast when the Docker image/runtime is
-      unusable. Tests can disable this globally and re-enable it in
-      dedicated preflight cases. *)
-  let preflight_enabled () =
-    get_bool ~default:true "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED"
+  let docker_image = Env_config_sandbox.Runtime.docker_image
 
-  (** pids limit for hardened keeper containers. *)
-  let pids_limit () =
-    max 32 (get_int ~default:128 "MASC_KEEPER_SANDBOX_PIDS_LIMIT")
+  let preflight_enabled = Env_config_sandbox.Preflight.enabled
 
-  (** Open file descriptor limit inside keeper Docker containers. *)
-  let nofile_limit () =
-    max 1024 (get_int ~default:245_760 "MASC_KEEPER_SANDBOX_NOFILE_LIMIT")
+  let pids_limit = Env_config_sandbox.Hardening.pids_limit
 
-  (** Docker memory limit string, e.g. 2g / 512m. *)
-  let memory () =
-    get_string ~default:"2g" "MASC_KEEPER_SANDBOX_MEMORY"
+  let nofile_limit = Env_config_sandbox.Hardening.nofile_limit
 
-  (** Writable tmpfs size inside the read-only rootfs. *)
-  let tmpfs_size () =
-    get_string ~default:"256m" "MASC_KEEPER_SANDBOX_TMPFS_SIZE"
+  let memory = Env_config_sandbox.Hardening.memory
 
-  (** Relax filesystem hardening inside the Docker sandbox while still
-      keeping host isolation and the same sandbox mount topology.
+  let tmpfs_size = Env_config_sandbox.Hardening.tmpfs_size
 
-      When true:
-      - omit [--read-only] so the image rootfs is writable
-      - drop [/tmp]'s [noexec] bit so installers/runtime bootstraps can
-        execute temporary files inside the container
+  let relax_fs = Env_config_sandbox.Hardening.relax_fs
 
-      This is intentionally narrower than a full "unsafe" mode: caps,
-      no-new-privileges, memory/pids limits, and mount scoping remain. *)
-  let relax_fs () =
-    get_bool ~default:false "MASC_KEEPER_SANDBOX_RELAX_FS"
+  let read_only_rootfs_args = Env_config_sandbox.Hardening.read_only_rootfs_args
 
-  let read_only_rootfs_args () =
-    if relax_fs () then [] else [ "--read-only" ]
+  let tmpfs_mount = Env_config_sandbox.Hardening.tmpfs_mount
 
-  let tmpfs_mount () =
-    let exec_suffix =
-      if relax_fs () then "" else ",noexec"
-    in
-    Printf.sprintf "/tmp:rw,nosuid,nodev%s,size=%s"
-      exec_suffix
-      (tmpfs_size ())
+  let seccomp_profile = Env_config_sandbox.Hardening.seccomp_profile
 
-  (** Optional seccomp profile path passed to [docker run --security-opt]. *)
-  let seccomp_profile () =
-    get_string ~default:"" "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE"
+  let require_rootless = Env_config_sandbox.Hardening.require_rootless
 
-  (** Fail closed unless Docker reports rootless mode support. *)
-  let require_rootless () =
-    hard_mode ()
-    || get_bool ~default:false "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS"
+  let require_userns = Env_config_sandbox.Hardening.require_userns
 
-  (** Fail closed unless Docker reports userns support. *)
-  let require_userns () =
-    hard_mode ()
-    || get_bool ~default:false "MASC_KEEPER_SANDBOX_REQUIRE_USERNS"
+  let cleanup_enabled = Env_config_sandbox.Cleanup.enabled
 
-  (** Best-effort cleanup for stale keeper-owned Docker containers.
-      Containers are removed only when they carry the MASC keeper sandbox
-      labels, so this never prunes arbitrary operator containers. *)
-  let cleanup_enabled () =
-    get_bool ~default:true "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED"
+  let cleanup_stale_after_sec = Env_config_sandbox.Cleanup.stale_after_sec
 
-  (** Stale running containers older than this threshold are eligible for
-      cleanup even if the recorded owner pid appears alive. *)
-  let cleanup_stale_after_sec () =
-    float_of_int
-      (max 60 (get_int ~default:21600 "MASC_KEEPER_SANDBOX_CLEANUP_STALE_AFTER_SEC"))
+  let cleanup_interval_sec = Env_config_sandbox.Cleanup.interval_sec
 
-  (** Minimum interval between automatic cleanup sweeps in one server process. *)
-  let cleanup_interval_sec () =
-    float_of_int
-      (max 10 (get_int ~default:300 "MASC_KEEPER_SANDBOX_CLEANUP_INTERVAL_SEC"))
+  let with_git_dispatch_enabled = Env_config_sandbox.Runtime.git_dispatch
 
-  (** Docker git-credential dispatch: when true, keeper_bash commands
-      beginning with "git " or "gh " run in a Docker container with
-      network_mode=inherit and read-only mounts of ~/.config/gh and
-      ~/.gitconfig. Default commands stay on network_mode=none. Lets a
-      single [sandbox_profile=docker] keeper run network-bound git/gh ops
-      without granting wholesale network for all bash. *)
-  let with_git_dispatch_enabled () =
-    (not (hard_mode ()))
-    && get_bool ~default:true "MASC_KEEPER_SANDBOX_GIT_DISPATCH"
+  let gh_creds_host_path = Env_config_sandbox.Auth_paths.gh_creds
 
-  (** Host path mounted read-only at /root/.config/gh inside the docker
-      git-creds execution path. Default $HOME/.config/gh. Empty string
-      disables the mount (no gh auth). *)
-  let gh_creds_host_path () =
-    if hard_mode () then
-      ""
-    else
-      let default =
-        match Sys.getenv_opt "HOME" with
-        | Some home -> Filename.concat home ".config/gh"
-        | None -> ""
-      in
-      get_string ~default "MASC_KEEPER_SANDBOX_GH_CREDS"
+  let gitconfig_host_path = Env_config_sandbox.Auth_paths.gitconfig
 
-  (** Host path mounted read-only at /root/.gitconfig. Default $HOME/.gitconfig. *)
-  let gitconfig_host_path () =
-    if hard_mode () then
-      ""
-    else
-      let default =
-        match Sys.getenv_opt "HOME" with
-        | Some home -> Filename.concat home ".gitconfig"
-        | None -> ""
-      in
-      get_string ~default "MASC_KEEPER_SANDBOX_GITCONFIG"
+  let ssh_dir_host_path = Env_config_sandbox.Auth_paths.ssh_dir
 
-  (** SSH directory mount (~/.ssh). OFF by default — gh + HTTPS covers most
-      flows; SSH is opt-in to keep the mount surface minimal. *)
-  let ssh_dir_host_path () =
-    if hard_mode () then
-      ""
-    else
-      get_string ~default:"" "MASC_KEEPER_SANDBOX_SSH_DIR"
-
-  let gh_token_probe_timeout_sec () =
-    get_float ~default:2.0 "MASC_KEEPER_SANDBOX_GH_TOKEN_PROBE_TIMEOUT_SEC"
-    |> max 0.1 |> min 10.0
+  let gh_token_probe_timeout_sec =
+    Env_config_sandbox.Auth_paths.gh_token_probe_timeout_sec
 
   let close_fd_noerr fd =
     try Unix.close fd with

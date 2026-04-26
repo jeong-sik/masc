@@ -127,7 +127,37 @@ let handle_join (ctx : context) : tool_result option =
   let mcp_session_id = ctx.mcp_session_id in
   let sid = Option.value ~default:"-" mcp_session_id in
   let caps = arg_get_string_list ctx "capabilities" in
-  let result = Coord.join config ~agent_name ~capabilities:caps () in
+  (* RFC P3-a — preflight Keeper_identity.normalize_all_names (logging-only).
+     Reasons: (1) classify bootstrap-window silent_auth_token_resolve_error
+     bursts by normalize branch; (2) when promoted to hard-error in a
+     follow-up PR, transient-nickname joins will already use the canonical
+     keeper_name. In logging-only mode every error path emits a warn +
+     Prometheus inc and falls through with the original [agent_name]. *)
+  let resolved_agent_name =
+    match
+      Keeper_identity.normalize_all_names
+        ~input_agent_name:agent_name
+        ~base_path:config.base_path
+        ~check_persona:true ~check_credential:true ()
+    with
+    | Ok bundle ->
+        Prometheus.inc_counter Prometheus.metric_coord_join_normalize_outcome
+          ~labels:[ ("outcome", "ok") ] ();
+        bundle.keeper_name
+    | Error err ->
+        let outcome = Keeper_identity.validation_error_outcome_label err in
+        Prometheus.inc_counter Prometheus.metric_coord_join_normalize_outcome
+          ~labels:[ ("outcome", outcome) ] ();
+        Log.Misc.warn
+          "[sid=%s] [silent:coord_join_normalize] agent=%s outcome=%s detail=%s \
+           - logging-only mode, proceeding with original agent_name"
+          sid agent_name outcome
+          (Keeper_identity.show_validation_error err);
+        agent_name
+  in
+  let result =
+    Coord.join config ~agent_name:resolved_agent_name ~capabilities:caps ()
+  in
   (* GC: reap zombie agents on join. Best-effort. *)
   (try let _ = Coord.cleanup_zombies config in ()
    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->

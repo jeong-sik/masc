@@ -11,6 +11,7 @@ import { EmptyState } from './common/empty-state'
 import { InlineSpinner } from './common/inline-spinner'
 import { CytoscapeFsm } from './common/cytoscape-fsm'
 import { FilterChips } from './common/filter-chips'
+import { TextInput } from './common/input'
 import { buildCompactionSpec } from './keeper-fsm-specs'
 import { setupVisibleAutoRefresh } from '../lib/auto-refresh'
 
@@ -161,13 +162,13 @@ export function KeeperMemoryTierPanel({
       </div>
 
       <div class="flex flex-wrap items-center gap-2">
-        <input
+        <${TextInput}
           type="search"
           value=${query}
           placeholder="kind 필터"
-          aria-label="memory kind 필터"
+          ariaLabel="memory kind 필터"
           onInput=${(e: Event) => setQuery((e.target as HTMLInputElement).value)}
-          class="min-w-30 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--color-fg-primary)] placeholder:text-[var(--color-fg-disabled)] focus:outline-none focus:border-[var(--color-accent-fg)]"
+          class="min-w-30 flex-1 !px-2 !py-1 !text-2xs"
         />
         <${FilterChips}
           chips=${[

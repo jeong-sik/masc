@@ -19,7 +19,8 @@ type caller =
   | Preflight                 (** keeper_exec_preflight checks (10s) *)
   | Repo_readiness            (** keeper_repo_readiness git status (10s) *)
   | Sandbox                   (** keeper_sandbox_control / keeper_shell_docker probes (2s) *)
-  | Pr_review                 (** keeper_tool_pr_review gh CLI calls (15s) *)
+  | Pr_review                 (** keeper_tool_pr_review gh CLI reads (15s) *)
+  | Pr_review_post            (** keeper_tool_pr_review gh pr review write (30s) *)
   | Dispatch                  (** exec_dispatch routine execution (120s) *)
   | Memory_audit              (** keeper_exec_memory short audits (3s) *)
   | Alerting                  (** keeper_alerting fanout (Slack/webhook POST + gh issue create) (20s) *)
@@ -40,6 +41,7 @@ let caller_key = function
   | Repo_readiness -> "repo_readiness"
   | Sandbox -> "sandbox"
   | Pr_review -> "pr_review"
+  | Pr_review_post -> "pr_review_post"
   | Dispatch -> "dispatch"
   | Memory_audit -> "memory_audit"
   | Alerting -> "alerting"
@@ -58,6 +60,7 @@ let known_callers () =
     Repo_readiness;
     Sandbox;
     Pr_review;
+    Pr_review_post;
     Dispatch;
     Memory_audit;
     Alerting;
@@ -74,6 +77,7 @@ let known_default_sec = function
   | Sandbox | Turn_sandbox -> Some 2.0
   | Pr_review | Turn_up -> Some 15.0
   | Alerting -> Some 20.0
+  | Pr_review_post -> Some 30.0
   | Dispatch -> Some 120.0
   | Memory_audit -> Some 3.0
   | Unknown _ -> None

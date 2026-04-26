@@ -26,6 +26,7 @@ let cases =
     E.Repo_readiness, 10.0;
     E.Sandbox, 2.0;
     E.Pr_review, 15.0;
+    E.Pr_review_post, 30.0;
     E.Dispatch, 120.0;
     E.Memory_audit, 3.0;
     E.Alerting, 20.0;

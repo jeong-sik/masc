@@ -18,7 +18,7 @@ import { openAgentDetail } from './agent-detail-state'
 const REFRESH_MS = 30_000
 
 const ARCHITECTURE_FLOW = `graph LR
-    subgraph Keeper["Keeper Turn"]
+    subgraph Keeper["키퍼 턴"]
       K1[LLM 응답 생성] --> K2["[STATE] 파싱"]
       K2 --> K3{STATE 있음?}
     end
@@ -29,7 +29,7 @@ const ARCHITECTURE_FLOW = `graph LR
     M3 --> F1[(institution_episodes.jsonl)]
     F1 -->|cap 500| F1
 
-    subgraph Task["Task Completion"]
+    subgraph Task["태스크 완료"]
       T1[keeper_task_done] --> T2[transition_task_r]
       T2 --> T3[Done_action 분기]
     end

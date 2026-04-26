@@ -34,7 +34,7 @@ import { MermaidGraph } from './common/mermaid-graph'
 // Labels displayed to the operator stay bare for readability.
 const MERMAID_COMPOSITE: string = `flowchart TB
   %% ─ KSM (Lifecycle, 12 states) ──────────────────────────
-  subgraph KSM ["Lifecycle · KSM"]
+  subgraph KSM ["라이프사이클 · KSM"]
     direction LR
     ksm_offline["Offline"] --> ksm_running["Running"]
     ksm_running --> ksm_failing["Failing"]
@@ -56,7 +56,7 @@ const MERMAID_COMPOSITE: string = `flowchart TB
   end
 
   %% ─ KTC (Turn cycle, 5 states) ──────────────────────────
-  subgraph KTC ["Turn · KTC"]
+  subgraph KTC ["턴 · KTC"]
     direction LR
     ktc_idle["idle"] --> ktc_prompting["prompting"]
     ktc_prompting --> ktc_executing["executing"]
@@ -67,7 +67,7 @@ const MERMAID_COMPOSITE: string = `flowchart TB
   end
 
   %% ─ KDP (Decision pipeline, 4 states) ───────────────────
-  subgraph KDP ["Decision · KDP"]
+  subgraph KDP ["결정 · KDP"]
     direction LR
     kdp_undecided["undecided"] --> kdp_guard_ok["guard_ok"]
     kdp_undecided --> kdp_gate_rejected["gate_rejected"]
@@ -85,7 +85,7 @@ const MERMAID_COMPOSITE: string = `flowchart TB
   end
 
   %% ─ KMC (Memory compaction, 3 states) ───────────────────
-  subgraph KMC ["Compaction · KMC"]
+  subgraph KMC ["압축 · KMC"]
     direction LR
     kmc_accumulating["accumulating"] --> kmc_compacting["compacting"]
     kmc_compacting --> kmc_done["done"]

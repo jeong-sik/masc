@@ -214,7 +214,7 @@ export function Planning() {
       <section class="rounded border border-card-border/70 bg-[rgba(9,14,24,0.88)] p-5">
         <div class="flex flex-wrap items-start justify-between gap-4">
           <div class="max-w-190">
-            <div class="text-2xs font-semibold uppercase tracking-[0.18em] text-text-muted">Planning Status</div>
+            <div class="text-2xs font-semibold uppercase tracking-[0.18em] text-text-muted">계획 상태</div>
             <h3 class="mt-2 text-[22px] font-semibold tracking-[-0.02em] text-text-strong">${planStatusHeadline}</h3>
             <p class="mt-2 text-sm leading-relaxed text-text-muted whitespace-pre-wrap">${planStatusBody}</p>
           </div>
@@ -239,7 +239,7 @@ export function Planning() {
         <div class="mt-5 grid gap-4 xl:grid-cols-2">
           <section class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4">
             <div class="mb-3">
-              <div class="text-2xs font-semibold uppercase tracking-5 text-text-muted">Backlog Entry</div>
+              <div class="text-2xs font-semibold uppercase tracking-5 text-text-muted">백로그 항목</div>
               <h3 class="mt-1 text-md font-semibold text-text-strong">태스크 추가</h3>
             </div>
             <${TaskCreateForm} />
@@ -268,7 +268,7 @@ export function Planning() {
       <section class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4">
         <div class="flex items-center justify-between gap-3">
           <div>
-            <div class="text-2xs font-semibold uppercase tracking-5 text-text-muted">Goal Pipeline</div>
+            <div class="text-2xs font-semibold uppercase tracking-5 text-text-muted">목표 파이프라인</div>
             <h3 class="mt-1 text-md font-semibold text-text-strong">
               장기 목표 ${hasGoals ? `(${goals.value.length})` : ''}
             </h3>

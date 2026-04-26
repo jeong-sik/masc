@@ -404,9 +404,12 @@ export function FsmHub(props: FsmHubProps = {}) {
 
   useEffect(() => {
     if (paused) return undefined
+    // pollTick was previously a dep, but the interval body already
+    // self-triggers via setPollTick(t => t + 1) — including pollTick
+    // forced clearInterval + setInterval every 30 s for nothing.
     const id = setInterval(() => setPollTick(t => t + 1), 30_000)
     return () => clearInterval(id)
-  }, [paused, pollTick])
+  }, [paused])
 
   useEffect(() => {
     if (paused) return undefined

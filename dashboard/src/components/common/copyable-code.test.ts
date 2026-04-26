@@ -36,14 +36,14 @@ describe('CopyableCode', () => {
     expect(container.textContent).toContain('test cmd')
   })
 
-  it('default aria-label is "Copy command"; customized when label or ariaLabel provided', () => {
+  it('default aria-label is "명령 복사"; customized when label or ariaLabel provided', () => {
     render(html`<${CopyableCode} command="x" />`, container)
-    expect(container.querySelector('[data-copy-button]')!.getAttribute('aria-label')).toBe('Copy command')
+    expect(container.querySelector('[data-copy-button]')!.getAttribute('aria-label')).toBe('명령 복사')
   })
 
-  it('aria-label uses "Copy <label>" when label set but ariaLabel missing', () => {
+  it('aria-label uses "<label> 복사" when label set but ariaLabel missing', () => {
     render(html`<${CopyableCode} command="x" label="start" />`, container)
-    expect(container.querySelector('[data-copy-button]')!.getAttribute('aria-label')).toBe('Copy start')
+    expect(container.querySelector('[data-copy-button]')!.getAttribute('aria-label')).toBe('start 복사')
   })
 
   it('explicit ariaLabel overrides the default computation', () => {

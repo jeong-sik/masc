@@ -78,7 +78,7 @@ describe('SessionTraceEntry', () => {
     // Args card is always rendered via JsonViewerCard
     const cards = screen.getAllByTestId('json-viewer-card')
     expect(cards).toHaveLength(1)
-    expect(cards[0]?.getAttribute('data-title')).toBe('Args')
+    expect(cards[0]?.getAttribute('data-title')).toBe('인자')
 
     // Plain-text errors render through ResultViewer <pre>, not JsonViewerCard
     const errorPre = container.querySelector('pre')

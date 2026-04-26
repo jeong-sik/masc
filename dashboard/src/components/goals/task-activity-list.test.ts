@@ -74,7 +74,7 @@ describe('TaskActivityList', () => {
     if (!firstBlock) return
     const text = firstBlock.textContent ?? ''
     expect(text).toContain('*literal* `ticks`')
-    expect(firstBlock).toHaveAttribute('data-title', 'Args')
+    expect(firstBlock).toHaveAttribute('data-title', '인자')
   })
 
   it('passes object args into the structured viewer when expanded', async () => {

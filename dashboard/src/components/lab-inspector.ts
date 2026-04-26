@@ -21,7 +21,7 @@ interface FocusSurface {
 
 const FOCUS_SURFACES: FocusSurface[] = [
   {
-    title: 'Agents & Keepers',
+    title: 'Agent 와 Keeper',
     description: '키퍼 상태, 런타임 품질, 텔레메트리를 가장 빠르게 확인하는 핵심 운영 화면입니다.',
     action: '모니터링으로 이동',
     tab: 'monitoring',

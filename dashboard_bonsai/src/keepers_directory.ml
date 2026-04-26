@@ -416,7 +416,7 @@ let default_selected_name rows =
     match row.band with
     | `Active | `Attention -> Some row.name
     | `Paused | `Offline -> None)
-  |> Option.first_some (List.hd rows |> Option.map ~f:(fun row -> row.name))
+  |> Option.first_some (match rows with first :: _ -> Some first.name | [] -> None)
 ;;
 
 let selected_row rows selected_name =

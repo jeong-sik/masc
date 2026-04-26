@@ -19,28 +19,28 @@ describe('flagTooltip', () => {
     const result = flagTooltip('plan', true)
     expect(result).toContain('plan')
     expect(result).toContain('active')
-    expect(result).toContain('re-plan')
+    expect(result).toContain('재계획')
   })
 
   it('returns compact active tooltip', () => {
     const result = flagTooltip('compact', true)
     expect(result).toContain('compact')
     expect(result).toContain('active')
-    expect(result).toContain('compaction')
+    expect(result).toContain('압축')
   })
 
   it('returns handoff active tooltip', () => {
     const result = flagTooltip('handoff', true)
     expect(result).toContain('handoff')
     expect(result).toContain('active')
-    expect(result).toContain('new trace/generation')
+    expect(result).toContain('trace/generation')
   })
 
   it('returns guardrail active tooltip', () => {
     const result = flagTooltip('guardrail', true)
     expect(result).toContain('guardrail')
     expect(result).toContain('active')
-    expect(result).toContain('guardrail has tripped')
+    expect(result).toContain('guardrail 발동됨')
   })
 
   // ── known flags with on=false ──
@@ -49,31 +49,31 @@ describe('flagTooltip', () => {
     const result = flagTooltip('reflect', false)
     expect(result).toContain('reflect')
     expect(result).toContain('inactive')
-    expect(result).toContain('No reflection pending')
+    expect(result).toContain('예약된 reflection 없음')
   })
 
   it('returns plan inactive tooltip', () => {
     const result = flagTooltip('plan', false)
     expect(result).toContain('inactive')
-    expect(result).toContain('No re-plan scheduled')
+    expect(result).toContain('예약된 재계획 없음')
   })
 
   it('returns compact inactive tooltip', () => {
     const result = flagTooltip('compact', false)
     expect(result).toContain('inactive')
-    expect(result).toContain('No compaction pending')
+    expect(result).toContain('예약된 압축 없음')
   })
 
   it('returns handoff inactive tooltip', () => {
     const result = flagTooltip('handoff', false)
     expect(result).toContain('inactive')
-    expect(result).toContain('No handoff scheduled')
+    expect(result).toContain('예약된 handoff 없음')
   })
 
   it('returns guardrail inactive tooltip', () => {
     const result = flagTooltip('guardrail', false)
     expect(result).toContain('inactive')
-    expect(result).toContain('No guardrail active')
+    expect(result).toContain('활성 guardrail 없음')
   })
 
   // ── unknown flag ──

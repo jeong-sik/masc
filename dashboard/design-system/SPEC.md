@@ -265,6 +265,8 @@ bonsai의 5 테마는 production user에게 URL hash로 공유 가능한 자산.
 | `keeperColor()` 헬퍼 | `dashboard/design-system/preview/cb-group-i.jsx` | 12 keeper persona를 attribution token 5종으로 환원 불가 — hex extension 의도적 |
 | `rgba(... / .NN)` alpha 조합 | 어느 곳이든 | `rgb(var(--token-glow) / .12)` 형태로 raw token alpha 조합은 허용 |
 | 폰트 fallback chain | `--font-*` 정의 내 | system font name (e.g., `Inter`, `JetBrains Mono`) |
+| `--font-mono` stack divergence | dashboard `tokens.css` vs bonsai `colors_and_type.css` | dashboard는 `ui-monospace` 우선(Apple 시스템 폰트), bonsai는 `JetBrains Mono` 우선(고딕 미감 일관성). PR-S2.5 redirect 시 bonsai stub이 자기 stack 유지 — dashboard 정의를 inherit하지 않음. |
+| `--shadow-inset` 의미 차이 | dashboard `tokens.css:282` vs `--shadow-ring`(bonsai) | dashboard는 top-edge highlight, bonsai는 1px ring. PR-S3g(2026-04-26)에서 bonsai 측을 `--shadow-ring`으로 rename하여 충돌 해소. |
 
 ### 6.3 Surface 적용 의무
 

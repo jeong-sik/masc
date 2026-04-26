@@ -92,11 +92,11 @@ let string_to_action = function
   | "circuit_open" -> CircuitOpen
   | "circuit_close" -> CircuitClose
   | "search_refinement" -> SearchRefinement
-  | s when String.length s > 10 && String.sub s 0 10 = "tool_call:" ->
+  | s when String.length s > 10 && String.starts_with ~prefix:"tool_call:" s ->
       ToolCall (String.sub s 10 (String.length s - 10))
-  | s when String.length s > 20 && String.sub s 0 20 = "governance_decision:" ->
+  | s when String.length s > 20 && String.starts_with ~prefix:"governance_decision:" s ->
       GovernanceDecision (String.sub s 20 (String.length s - 20))
-  | s when String.length s > 7 && String.sub s 0 7 = "custom:" ->
+  | s when String.length s > 7 && String.starts_with ~prefix:"custom:" s ->
       Custom (String.sub s 7 (String.length s - 7))
   | s -> Custom s
 

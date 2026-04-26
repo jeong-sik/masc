@@ -294,7 +294,7 @@ type agent_profile = {
 let extract_persona_name (agent_name : string) : string =
   let s = agent_name in
   let s =
-    if String.length s > 7 && String.sub s 0 7 = "keeper-" then
+    if String.length s > 7 && String.starts_with ~prefix:"keeper-" s then
       String.sub s 7 (String.length s - 7)
     else s
   in

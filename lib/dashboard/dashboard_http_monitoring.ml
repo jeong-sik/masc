@@ -252,7 +252,7 @@ let executor_outcomes_json (config : Coord.config) : Yojson.Safe.t =
       match r.event with
       | Telemetry_eio.Tool_called { tool_name; success; _ }
         when String.length tool_name > 9
-          && String.sub tool_name 0 9 = "executor:" ->
+          && String.starts_with ~prefix:"executor:" tool_name ->
         incr total;
         if success then incr successes
       | Telemetry_eio.Tool_called _ -> ()

@@ -207,8 +207,8 @@ describe('rawConfigModeSummary', () => {
     expect(summary.primary).toContain('/tmp/config/cascade.toml')
     expect(summary.primary).toContain('cascade.toml SSOT')
     expect(summary.secondary).toContain('/tmp/config/cascade.json')
-    expect(summary.saveLabel).toBe('Save cascade.toml')
-    expect(summary.previewTitle).toBe('Generated cascade.json Preview')
+    expect(summary.saveLabel).toBe('cascade.toml 저장')
+    expect(summary.previewTitle).toBe('생성된 cascade.json 미리보기')
   })
 
   it('keeps JSON mode editable', () => {

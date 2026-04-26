@@ -850,6 +850,49 @@ let test_goal_event_source_and_summary () =
     "/api/v1/dashboard/goals"
     (json_string_field "dashboard_surface" goal_summary)
 
+let test_goal_event_missing_reports_not_yet () =
+  (* Goal_event store is created lazily by goal_fsm on the first verification.
+     A fleet that has not yet verified a goal MUST surface as a neutral
+     [not_yet] state, not the alarming [missing] state used for sources that
+     should always exist (Tool_call_io, Keeper_metric, ...).
+     Locks in the contract added by #10921. *)
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "telem_goal_event_missing" in
+  let root = masc_root dir in
+  Fs_compat.mkdir_p root;
+  (* Intentionally do NOT create goal_events.jsonl. *)
+  let summary = Telemetry_unified.summary_json ~base_path:dir ~masc_root:root () in
+  let goal_summary = source_summary "goal_event" summary in
+  Alcotest.(check int) "no goal events yet" 0
+    (json_int_field "entry_count" goal_summary);
+  Alcotest.(check string) "missing-but-optional surfaces as not_yet"
+    "not_yet"
+    (json_string_field "health" goal_summary);
+  Alcotest.(check string) "stale_reason describes the not-yet state"
+    "no_entries_yet"
+    (json_string_field "stale_reason" goal_summary)
+
+let test_tool_call_io_missing_still_reports_missing () =
+  (* Counterpart to [test_goal_event_missing_reports_not_yet]: a non-optional
+     source must NOT silently slide into [not_yet]. Tool_call_io is written by
+     every keeper turn, so absence of its store is a real write-pipeline alarm.
+     Locks in the asymmetry between the two health classifications. *)
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "telem_tool_call_io_missing" in
+  let root = masc_root dir in
+  Fs_compat.mkdir_p root;
+  (* Intentionally do NOT create tool_calls/. *)
+  let summary = Telemetry_unified.summary_json ~base_path:dir ~masc_root:root () in
+  let tool_summary = source_summary "tool_call_io" summary in
+  Alcotest.(check string) "non-optional missing source stays loud"
+    "missing"
+    (json_string_field "health" tool_summary);
+  Alcotest.(check string) "stale_reason names the missing store"
+    "store_missing"
+    (json_string_field "stale_reason" tool_summary)
+
 let test_summary_surfaces_coverage_gaps () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1016,6 +1059,10 @@ let () =
             test_summary_includes_trajectory_and_execution_receipt_sources;
           Alcotest.test_case "surfaces coverage gaps" `Quick
             test_summary_surfaces_coverage_gaps;
+          Alcotest.test_case "goal_event missing reports not_yet" `Quick
+            test_goal_event_missing_reports_not_yet;
+          Alcotest.test_case "tool_call_io missing stays missing" `Quick
+            test_tool_call_io_missing_still_reports_missing;
           Alcotest.test_case "counts all rows beyond recent cap" `Quick
             test_summary_counts_all_entries_beyond_recent_cap;
         ] );

@@ -113,12 +113,6 @@ let default_goal_horizon_max_chars = 480
 let default_drift_max_clauses = 6
 let prompt_render_max_bytes = 320
 
-(* DEPRECATED: name lied — value is bytes (drives utf8_safe_prefix_bytes),
-   not chars. Kept as alias for one release to avoid mass call-site churn;
-   removed in Layer 2 follow-up of personality SSOT unification. *)
-let default_drift_max_chars = prompt_render_max_bytes
-  [@@warning "-32"]
-
 let keeper_room_signal_prompt_enabled_override () =
   bool_of_env_opt "MASC_KEEPER_ROOM_SIGNAL_PROMPT_ENABLED"
 

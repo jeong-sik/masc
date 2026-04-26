@@ -543,7 +543,7 @@ export function SessionTraceEntry({ event, searchQuery }: { event: UnifiedTraceE
       <summary class="list-none cursor-pointer relative pr-8">
         ${row}
         <div class="absolute right-3 top-1/2 -translate-y-1/2 opacity-40 group-hover:opacity-100 transition-opacity">
-          <svg class="w-4 h-4 text-[var(--color-fg-muted)] group-open:rotate-90 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg aria-hidden="true" class="w-4 h-4 text-[var(--color-fg-muted)] group-open:rotate-90 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
           </svg>
         </div>

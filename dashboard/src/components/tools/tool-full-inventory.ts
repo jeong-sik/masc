@@ -212,7 +212,7 @@ export function FullInventoryView({
       aria-label="목록 맨 위로 이동"
       title="맨 위로"
     >
-      <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+      <svg aria-hidden="true" width="20" height="20" viewBox="0 0 20 20" fill="none">
         <path d="M10 15V5M10 5L5 10M10 5L15 10" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
       </svg>
     </button>

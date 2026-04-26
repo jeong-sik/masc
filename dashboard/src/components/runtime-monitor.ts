@@ -556,9 +556,9 @@ export function RuntimeMonitor() {
                     if (latencySeries.length < 2 || errorSeries.length < 2) return null
                     return html`<div class="flex items-center gap-4 mt-1 text-2xs text-[var(--color-fg-muted)]">
                         <span>p95 latency</span>
-                        <span dangerouslySetInnerHTML=${{ __html: sparklineSvg(latencySeries, 'var(--status-warn)', 80, 18) }}></span>
+                        <span aria-hidden="true" dangerouslySetInnerHTML=${{ __html: sparklineSvg(latencySeries, 'var(--status-warn)', 80, 18) }}></span>
                         <span>error rate</span>
-                        <span dangerouslySetInnerHTML=${{ __html: sparklineSvg(errorSeries, 'var(--status-bad)', 80, 18) }}></span>
+                        <span aria-hidden="true" dangerouslySetInnerHTML=${{ __html: sparklineSvg(errorSeries, 'var(--status-bad)', 80, 18) }}></span>
                       </div>`
                   })()}
                   ${(() => {

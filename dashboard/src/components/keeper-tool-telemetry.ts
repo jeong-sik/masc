@@ -128,7 +128,7 @@ function Sparkline({ buckets, height = 32 }: { buckets: HourlyBucket[]; height?:
   })
 
   return html`
-    <svg width=${width} height=${height + 14} class="overflow-visible">
+    <svg width=${width} height=${height + 14} class="overflow-visible" role="img" aria-label="시간대별 도구 호출 차트">
       ${bars}
       ${labels}
     </svg>

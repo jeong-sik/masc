@@ -290,6 +290,15 @@ let strip_leading_slash text =
    the running-state / owner-pid heuristics, which is the correct
    semantics for a label-less container. *)
 let parse_inspect_line line =
+  (* docker inspect --format emits a trailing empty field as either
+     ["<no value>"] (template default) or omits the trailing tab when the
+     ttl_sec label is unset on the container.  Both 4-field (ttl_sec
+     present) and 3-field (ttl_sec missing) shapes are valid; treat the
+     missing case as [ttl_sec = None] instead of failing the cleanup
+     pass with a parse error.  Without this fallback the 5-minute
+     cleanup loop emits "errors=2" on every cycle for any container
+     created without a ttl_sec label, which produced the 138 consecutive
+     parse-error cycles observed on 2026-04-26. *)
   match String.split_on_char '\t' line with
   | [ owner_pid; started_at; running; ttl_sec ] ->
       Ok

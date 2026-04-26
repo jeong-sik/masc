@@ -317,7 +317,7 @@ let post_keeper_alert_slack
     ] in
     let (status, out) =
       Process_eio.run_argv_with_stdin_and_status
-        ~timeout_sec:15.0
+        ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Alerting ())
         ~stdin_content:payload
         argv
     in
@@ -362,7 +362,7 @@ let slack_api_post_json
   ] in
   let (status, out) =
     Process_eio.run_argv_with_stdin_and_status
-      ~timeout_sec:15.0
+      ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Alerting ())
       ~stdin_content:body
       argv
   in

@@ -26,32 +26,25 @@ CONSTANTS Keepers
 
 VARIABLES
   phase,            \* keeper -> {Idle, Running, PauseHuman, StaleRunning, Resolved}
-  emitted,          \* keeper -> BOOLEAN  (broadcast already emitted)
-  ticks             \* monotonic clock for liveness fairness
+  emitted           \* keeper -> BOOLEAN  (broadcast already emitted)
 
-vars == <<phase, emitted, ticks>>
+vars == <<phase, emitted>>
 
 Phases == {"Idle", "Running", "PauseHuman", "StaleRunning", "Resolved"}
 
 TypeOK ==
   /\ phase \in [Keepers -> Phases]
   /\ emitted \in [Keepers -> BOOLEAN]
-  /\ ticks \in Nat
 
 Init ==
   /\ phase = [k \in Keepers |-> "Idle"]
   /\ emitted = [k \in Keepers |-> FALSE]
-  /\ ticks = 0
-
-Tick ==
-  /\ ticks' = ticks + 1
-  /\ UNCHANGED <<phase, emitted>>
 
 \* A keeper picks up work.
 StartTurn(k) ==
   /\ phase[k] = "Idle"
   /\ phase' = [phase EXCEPT ![k] = "Running"]
-  /\ UNCHANGED <<emitted, ticks>>
+  /\ UNCHANGED emitted
 
 \* Operator gate fails (tool_required_unsatisfied / api_error / unknown).
 \* Receipt is appended; new code path emits broadcast.
@@ -59,33 +52,31 @@ EnterPauseHuman(k) ==
   /\ phase[k] = "Running"
   /\ phase' = [phase EXCEPT ![k] = "PauseHuman"]
   /\ emitted' = [emitted EXCEPT ![k] = TRUE]      \* Step 2 emit
-  /\ UNCHANGED ticks
 
 \* Heartbeat fiber blocks; no receipt. Watchdog is the only path that
 \* rescues this from silence.
 EnterStaleRunning(k) ==
   /\ phase[k] = "Running"
   /\ phase' = [phase EXCEPT ![k] = "StaleRunning"]
-  /\ UNCHANGED <<emitted, ticks>>
+  /\ UNCHANGED emitted
 
 WatchdogEmit(k) ==
   /\ phase[k] = "StaleRunning"
   /\ ~emitted[k]
   /\ emitted' = [emitted EXCEPT ![k] = TRUE]      \* Step 3 emit
-  /\ UNCHANGED <<phase, ticks>>
+  /\ UNCHANGED phase
 
 \* Operator acts on broadcast (out of scope: just terminal sink).
 Resolve(k) ==
   /\ emitted[k]
   /\ phase[k] \in {"PauseHuman", "StaleRunning"}
   /\ phase' = [phase EXCEPT ![k] = "Resolved"]
-  /\ UNCHANGED <<emitted, ticks>>
+  /\ UNCHANGED emitted
 
 Next ==
-  \/ \E k \in Keepers : StartTurn(k) \/ EnterPauseHuman(k)
-                       \/ EnterStaleRunning(k) \/ WatchdogEmit(k)
-                       \/ Resolve(k)
-  \/ Tick
+  \E k \in Keepers : StartTurn(k) \/ EnterPauseHuman(k)
+                     \/ EnterStaleRunning(k) \/ WatchdogEmit(k)
+                     \/ Resolve(k)
 
 Spec ==
   /\ Init
@@ -100,12 +91,11 @@ Spec ==
 EnterPauseHumanBuggy(k) ==
   /\ phase[k] = "Running"
   /\ phase' = [phase EXCEPT ![k] = "PauseHuman"]
-  /\ UNCHANGED <<emitted, ticks>>           \* note: no emit
+  /\ UNCHANGED emitted                     \* note: no emit
 
 NextBuggy ==
-  \/ \E k \in Keepers : StartTurn(k) \/ EnterPauseHumanBuggy(k)
-                       \/ EnterStaleRunning(k) \/ Resolve(k)
-  \/ Tick
+  \E k \in Keepers : StartTurn(k) \/ EnterPauseHumanBuggy(k)
+                     \/ EnterStaleRunning(k) \/ Resolve(k)
 
 SpecBuggy ==
   /\ Init

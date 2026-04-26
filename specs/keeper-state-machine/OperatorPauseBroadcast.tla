@@ -73,10 +73,24 @@ Resolve(k) ==
   /\ phase' = [phase EXCEPT ![k] = "Resolved"]
   /\ UNCHANGED emitted
 
+\* After resolution, the keeper returns to the work pool to accept the
+\* next turn. Without this transition every behavior in which all
+\* keepers reach "Resolved" deadlocks (no action is enabled), which TLC
+\* reports as a spec error rather than a property failure (exit 11).
+\* The runtime models exactly this recycle: keeper_supervisor flips a
+\* keeper back to Idle after the operator broadcast is acknowledged.
+\* emitted is reset to FALSE so the leads-to property is meaningful for
+\* subsequent turns of the same keeper rather than trivially carrying
+\* over a stale TRUE.
+Recycle(k) ==
+  /\ phase[k] = "Resolved"
+  /\ phase' = [phase EXCEPT ![k] = "Idle"]
+  /\ emitted' = [emitted EXCEPT ![k] = FALSE]
+
 Next ==
   \E k \in Keepers : StartTurn(k) \/ EnterPauseHuman(k)
                      \/ EnterStaleRunning(k) \/ WatchdogEmit(k)
-                     \/ Resolve(k)
+                     \/ Resolve(k) \/ Recycle(k)
 
 Spec ==
   /\ Init

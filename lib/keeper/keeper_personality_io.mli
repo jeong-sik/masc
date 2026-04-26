@@ -125,3 +125,20 @@ val compare_normalized :
     [coerced_personality], there is no way to compare a raw value
     against a trimmed one — the type system enforces the symmetry
     Layer 1 had to enforce at runtime. *)
+
+(** {1 Render for prompt} *)
+
+val to_prompt_form :
+  max_bytes:int -> raw_personality -> raw_personality
+(** [to_prompt_form ~max_bytes p] returns a copy of [p] with each
+    field trimmed and then truncated to [max_bytes] using
+    [Keeper_config.utf8_safe_prefix_bytes] (UTF-8 boundary safe).
+    This is the only place in the harness where data is shortened —
+    parse / coerce / compare all preserve raw bytes. Callers are
+    responsible for fallback defaults when a field is empty after
+    trimming.
+
+    The output type is [raw_personality] (not [coerced_personality])
+    because the truncation may break the "trim-only" invariant —
+    after slicing on a UTF-8 boundary the trailing whitespace
+    promise no longer holds in general. *)

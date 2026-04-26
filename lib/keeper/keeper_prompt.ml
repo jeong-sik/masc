@@ -60,29 +60,29 @@ let build_keeper_system_prompt
       ~mid_goal_opt:(Some mid_goal) ~long_goal_opt:(Some long_goal)
   in
   let profile_policy = "Maintain high standard of reasoning, factual grounding, and clear communication." in
+  (* Layer 2 PR-B (commit 7): three normalize_self_model_text calls
+     consolidated through [Keeper_personality_io.to_prompt_form]. The
+     fallback strings below are the same; only the trim+truncate path
+     is centralised so a future cap change (Layer 3 RFC integration)
+     touches one location instead of three. *)
+  let rendered =
+    Keeper_personality_io.to_prompt_form
+      ~max_bytes:Keeper_config.prompt_render_max_bytes
+      { will; needs; desires; instructions = "" }
+  in
   let will =
-    let s =
-      normalize_self_model_text
-        ~max_bytes:Keeper_config.prompt_render_max_bytes will
-    in
-    if s = "" then "Maintain coherent identity and goal continuity." else s
+    if rendered.will = "" then "Maintain coherent identity and goal continuity."
+    else rendered.will
   in
   let needs =
-    let s =
-      normalize_self_model_text
-        ~max_bytes:Keeper_config.prompt_render_max_bytes needs
-    in
-    if s = "" then
+    if rendered.needs = "" then
       "Reliable context continuity, factual grounding, and explicit next steps."
-    else s
+    else rendered.needs
   in
   let desires =
-    let s =
-      normalize_self_model_text
-        ~max_bytes:Keeper_config.prompt_render_max_bytes desires
-    in
-    if s = "" then "Make progress that is observable and useful to the user."
-    else s
+    if rendered.desires = "" then
+      "Make progress that is observable and useful to the user."
+    else rendered.desires
   in
   let custom =
     let s = String.trim instructions in

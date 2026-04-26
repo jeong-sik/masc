@@ -132,3 +132,16 @@ let compare_normalized (current : coerced_personality)
       ]
   in
   match diffs with [] -> `Equal | _ :: _ -> `Drift diffs
+
+let to_prompt_form ~max_bytes (p : raw_personality) : raw_personality =
+  let render s =
+    let trimmed = String.trim s in
+    if trimmed = "" then ""
+    else Keeper_config.utf8_safe_prefix_bytes trimmed ~max_bytes
+  in
+  {
+    will = render p.will;
+    needs = render p.needs;
+    desires = render p.desires;
+    instructions = render p.instructions;
+  }

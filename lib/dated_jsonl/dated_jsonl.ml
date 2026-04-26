@@ -16,55 +16,45 @@
 
 type t = {
   base_dir : string;
-  mutex : Eio.Mutex.t;
+  mutex : Eio.Mutex.t Atomic.t;
 }
 
-(* #10372: file-scope mutex registry keyed on canonical [base_dir].
+let mutex_registry : (string, Eio.Mutex.t Atomic.t) Hashtbl.t = Hashtbl.create 16
+let mutex_registry_mu = Stdlib.Mutex.create ()
 
-   Pre-fix every [create] minted a fresh [Eio.Mutex.t]. When two
-   stores pointed at the same JSONL directory their mutexes were
-   distinct, so concurrent [append] calls did not coordinate.
-   [oas_event_bridge.ml:483] in particular re-creates the store on
-   every relay error while another fiber still holds the previous
-   instance, opening a window where 4-8 KB [oas_worker:build]
-   payloads interleave inside the same line — POSIX [O_APPEND]
-   only guarantees atomicity up to PIPE_BUF (4096 B Linux,
-   512 B macOS) and [output_string] is buffered, so the kernel
-   sees several [write(2)] calls per logical line.
+let strip_trailing_slashes path =
+  let rec loop len =
+    if len > 1 && path.[len - 1] = '/' then loop (len - 1) else len
+  in
+  let len = loop (String.length path) in
+  if len = String.length path then path else String.sub path 0 len
 
-   The registry forces every store rooted at the same directory
-   to share one mutex. An explicit [?mutex] argument still wins,
-   keeping test isolation patterns intact. *)
-let registry : (string, Eio.Mutex.t) Hashtbl.t = Hashtbl.create 16
-let registry_guard = Stdlib.Mutex.create ()
+let mutex_key base_dir =
+  let path =
+    if Filename.is_relative base_dir then
+      Filename.concat (Sys.getcwd ()) base_dir
+    else
+      base_dir
+  in
+  strip_trailing_slashes path
 
-let canonicalize_base_dir base_dir =
-  try Unix.realpath base_dir
-  with Unix.Unix_error _ ->
-    let len = String.length base_dir in
-    if len > 1 && base_dir.[len - 1] = '/' then
-      String.sub base_dir 0 (len - 1)
-    else base_dir
-
-let mutex_for_base_dir base_dir =
-  let canon = canonicalize_base_dir base_dir in
-  Stdlib.Mutex.lock registry_guard;
-  Fun.protect
-    ~finally:(fun () -> Stdlib.Mutex.unlock registry_guard)
-    (fun () ->
-      match Hashtbl.find_opt registry canon with
-      | Some m -> m
-      | None ->
-          let m = Eio.Mutex.create () in
-          Hashtbl.add registry canon m;
-          m)
+let mutex_for_base_dir ~base_dir ~injected =
+  let key = mutex_key base_dir in
+  Stdlib.Mutex.protect mutex_registry_mu (fun () ->
+    match Hashtbl.find_opt mutex_registry key with
+    | Some cell -> cell
+    | None ->
+        let mutex =
+          match injected with
+          | Some mutex -> mutex
+          | None -> Eio.Mutex.create ()
+        in
+        let cell = Atomic.make mutex in
+        Hashtbl.add mutex_registry key cell;
+        cell)
 
 let create ~base_dir ?mutex () =
-  let mutex =
-    match mutex with
-    | Some m -> m
-    | None -> mutex_for_base_dir base_dir
-  in
+  let mutex = mutex_for_base_dir ~base_dir ~injected:mutex in
   { base_dir; mutex }
 
 let base_dir t = t.base_dir
@@ -166,9 +156,11 @@ let load_tail_lines path ~max_lines =
         let chunks = ref [] in
         let total_newlines = ref 0 in
         let pos = ref file_len in
+        let truncated_prefix = ref false in
         while !pos > 0 && !total_newlines <= target_newlines do
           let read_start = max 0 (!pos - chunk_size) in
           let read_len = !pos - read_start in
+          if read_start > 0 then truncated_prefix := true;
           seek_in ic read_start;
           let chunk = Bytes.create read_len in
           really_input ic chunk 0 read_len;
@@ -192,7 +184,7 @@ let load_tail_lines path ~max_lines =
           |> String.split_on_char '\n'
         in
         let raw_lines =
-          if !pos > 0 then
+          if !truncated_prefix then
             match raw_lines with
             | _partial :: rest -> rest
             | [] -> []
@@ -201,6 +193,13 @@ let load_tail_lines path ~max_lines =
         let all_lines =
           raw_lines
           |> List.filter (fun l -> String.trim l <> "")
+        in
+        let all_lines =
+          if !pos > 0 then
+            match all_lines with
+            | _resume_overlap :: rest -> rest
+            | [] -> []
+          else all_lines
         in
         let total = List.length all_lines in
         if total <= max_lines then all_lines
@@ -211,7 +210,8 @@ let load_tail_lines path ~max_lines =
 (* ── Public API ───────────────────────────────────────── *)
 
 let append t json =
-  Eio.Mutex.use_rw ~protect:true t.mutex (fun () ->
+  let mutex = Atomic.get t.mutex in
+  Eio.Mutex.use_rw ~protect:false mutex (fun () ->
     let path = today_path t in
     Fs_compat.append_jsonl path json)
 
@@ -358,15 +358,3 @@ let prune t ~days =
   end
 
 (* Duplicate count_entries removed — canonical definition at line 225 *)
-
-module For_testing = struct
-  let mutex t = t.mutex
-
-  let mutex_for_base_dir = mutex_for_base_dir
-
-  let registry_size () =
-    Stdlib.Mutex.lock registry_guard;
-    Fun.protect
-      ~finally:(fun () -> Stdlib.Mutex.unlock registry_guard)
-      (fun () -> Hashtbl.length registry)
-end

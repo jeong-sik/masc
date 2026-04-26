@@ -37,14 +37,14 @@ export function classifyLivePulse(
   sampleIntervalMs: number,
 ): LivePulseView {
   if (lastTickMs === null) {
-    return { state: 'idle', label: 'Live polling · 샘플 대기 중' }
+    return { state: 'idle', label: '실시간 폴링 · 샘플 대기 중' }
   }
   const ageMs = nowMs - lastTickMs
   if (ageMs > sampleIntervalMs * 2) {
     const ageSec = Math.max(1, Math.floor(ageMs / 1000))
     return { state: 'stale', label: `Live polling · 샘플 멈춤 (${ageSec}s ago)` }
   }
-  return { state: 'live', label: 'Live polling · 샘플링 정상' }
+  return { state: 'live', label: '실시간 폴링 · 샘플링 정상' }
 }
 
 const DOT_BASE = 'inline-block h-2 w-2 rounded-full'

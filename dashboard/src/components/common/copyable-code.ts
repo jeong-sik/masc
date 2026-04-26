@@ -84,10 +84,10 @@ export function CopyableCode({
     const ok = await copyToClipboard(command)
     if (ok) {
       setJustCopied(true)
-      showToast(label ? `Copied: ${label}` : 'Copied to clipboard', 'success', 1800)
+      showToast(label ? `복사됨: ${label}` : '클립보드에 복사됨', 'success', 1800)
       setTimeout(() => setJustCopied(false), 1400)
     } else {
-      showToast('Copy failed — select the text manually', 'error')
+      showToast('복사 실패 — 텍스트를 직접 선택하세요', 'error')
     }
   }
 
@@ -114,7 +114,7 @@ export function CopyableCode({
         : null}
       <button type="button"
         class="shrink-0 cursor-pointer rounded border border-transparent p-1 text-[var(--text-dim)] opacity-60 transition-opacity hover:bg-[var(--white-8)] hover:text-[var(--text-body)] focus-visible:opacity-100 group-hover:opacity-100"
-        aria-label=${ariaLabel || (label ? `Copy ${label}` : 'Copy command')}
+        aria-label=${ariaLabel || (label ? `${label} 복사` : '명령어 복사')}
         data-copy-button
         onClick=${onCopy}
       >

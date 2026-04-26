@@ -345,8 +345,25 @@ let load_credential_with_aliases config agent_name : agent_credential option =
   match load_credential config agent_name with
   | Some _ as c -> c
   | None ->
-      legacy_credential_aliases agent_name
-      |> List.find_map (load_credential config)
+      let aliases = legacy_credential_aliases agent_name in
+      let result = List.find_map (load_credential config) aliases in
+      (match result with
+       | Some cred ->
+           (* Observability for RFC P2-b: every silent alias-fallback hit
+              indicates a dual-identity caller (e.g. requested
+              [keeper-sangsu-agent] while only bare [sangsu] credential
+              exists, or vice versa). The fallback preserves availability
+              by routing to the legacy credential, but [cred.agent_name]
+              reveals the file the request was served from — different
+              from the requested name. P2-a's [load_credential_of]
+              surfaces this as [Credential_mismatch]; this warn measures
+              how often the legacy fallback is still load-bearing while
+              migrations are in flight. *)
+           Log.Auth.warn
+             "[identity_drift:alias_fallback] requested=%s resolved=%s aliases_tried=[%s]"
+             agent_name cred.agent_name (String.concat ";" aliases)
+       | None -> ());
+      result
 
 type load_credential_error =
   | Credential_missing of { ctx_agent_name : string }

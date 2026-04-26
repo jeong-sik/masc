@@ -275,7 +275,7 @@ let run_docker_shell_command_with_status
           | [single_repo] ->
             (Filename.concat (Filename.concat host_root "repos") single_repo, None)
           | [] -> (cwd, None)
-          | many ->
+          | example_repo :: _ as many ->
             (* #10680: keeper-executor-agent saw 17 events / 5min in a single
                session (mcp_VHsjtow_92C_2a0o, 2026-04-26 08:00→08:06) where
                the LLM read this descriptive error and still re-issued the
@@ -287,7 +287,6 @@ let run_docker_shell_command_with_status
               let s = String.trim cmd in
               if String.length s > 120 then String.sub s 0 117 ^ "..." else s
             in
-            let example_repo = List.hd many in
             ( cwd
             , Some
                 (Printf.sprintf

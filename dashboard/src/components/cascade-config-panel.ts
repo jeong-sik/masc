@@ -897,17 +897,17 @@ function SloCard({ slo }: { slo: CascadeSloResponse }) {
       </div>
       <div class="grid grid-cols-3 gap-3">
         <${StatCell}
-          label="Ordered Ratio"
+          label="정렬 비율"
           value=${`${ratioPct}%`}
           detail=${`≥ ${targetPct}% 목표`}
         />
         <${StatCell}
-          label="Exhaustion (sample)"
+          label="소진 (샘플)"
           value=${String(exh)}
           detail=${`≤ ${exhTarget} 목표`}
         />
         <${StatCell}
-          label="Burn Rate"
+          label="소진율"
           value=${burn}
           detail=${`≤ ${slo.targets.burn_rate_max.toFixed(1)} 목표`}
         />
@@ -1240,7 +1240,7 @@ export function CascadeConfigPanel() {
         ? html`<${LoadingState}>cascade snapshot 불러오는 중...<//>`
         : null}
 
-      <${Card} title="Cascade Routing">
+      <${Card} title="캐스케이드 라우팅">
         ${config
           ? (() => {
               const keeperGroups = groupKeepersByCanonicalCascade(config.keeper_profiles)
@@ -1257,17 +1257,17 @@ export function CascadeConfigPanel() {
                 <${CascadeValidationBanner} config=${config} />
                 <div class="grid grid-cols-3 gap-3 mb-3">
                   <${StatCell}
-                    label="Profiles"
+                    label="프로파일"
                     value=${config.profiles.length}
                     detail=${catalogSourceSummary(config)}
                   />
                   <${StatCell}
-                    label="Keepers"
+                    label="키퍼"
                     value=${config.keeper_profiles.length}
                     detail="cascade_name 등록됨"
                   />
                   <${StatCell}
-                    label="Drift"
+                    label="드리프트"
                     value=${driftTotal}
                     detail="raw ≠ canonical"
                   />
@@ -1300,22 +1300,22 @@ export function CascadeConfigPanel() {
         onRefresh=${() => loadCascadeData(resource)}
       />
 
-      <${Card} title="Health Tracker">
+      <${Card} title="헬스 트래커">
         ${health
           ? html`
             <div class="grid grid-cols-3 gap-3 mb-3">
               <${StatCell}
-                label="Window"
+                label="윈도우"
                 value=${`${health.window_sec}s`}
-                detail=${`${health.providers.length} tracked`}
+                detail=${`${health.providers.length} 추적 중`}
               />
               <${StatCell}
-                label="Cooldown Threshold"
+                label="쿨다운 임계값"
                 value=${health.cooldown_threshold}
                 detail="연속 실패"
               />
               <${StatCell}
-                label="Cooldown"
+                label="쿨다운"
                 value=${`${health.cooldown_sec}s`}
                 detail="활성 시 차단 시간"
               />
@@ -1325,7 +1325,7 @@ export function CascadeConfigPanel() {
           : null}
       <//>
 
-      <${Card} title="Client Capacity">
+      <${Card} title="클라이언트 용량">
         ${capacity
           ? html`<${ClientCapacityTable} capacity=${capacity} />`
           : null}

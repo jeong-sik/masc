@@ -35,8 +35,8 @@ function Heartbeat({ height = 32, width = 320, phase = 0 }) {
   }
   return (
     <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" aria-hidden="true" focusable="false">
-      <polyline points={points.join(' ')} fill="none" stroke="var(--brass-1)" strokeWidth="1.2" />
-      <circle cx={width - 2} cy={height / 2} r="2" fill="var(--brass-1)">
+      <polyline points={points.join(' ')} fill="none" stroke="var(--color-accent-fg)" strokeWidth="1.2" />
+      <circle cx={width - 2} cy={height / 2} r="2" fill="var(--color-accent-fg)">
         <animate attributeName="r" values="2;3.5;2" dur="1.4s" repeatCount="indefinite" />
       </circle>
     </svg>

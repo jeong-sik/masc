@@ -218,7 +218,7 @@ function ResultViewer({ text, hint, isError: isErr }: { text: string; hint: Cont
         </div>
         ${needsCollapse ? html`
           <button type="button"
-            class="w-full py-1.5 text-3xs font-medium text-[var(--accent)] hover:text-[var(--text-strong)] hover:bg-[var(--white-5)] transition-colors cursor-pointer border-t border-[var(--white-6)] bg-transparent"
+            class="w-full py-1.5 text-2xs font-medium text-[var(--accent)] hover:text-[var(--text-strong)] hover:bg-[var(--white-5)] transition-colors cursor-pointer border-t border-[var(--white-6)] bg-transparent"
             aria-expanded=${expanded.value}
             aria-controls=${`rv-${titleLabel}-${text.length}`}
             onClick=${() => { expanded.value = !expanded.value }}
@@ -418,7 +418,7 @@ function OasDetail({ event }: { event: UnifiedTraceEvent }) {
         </div>
         ${responseText ? html`
           <details class="mt-1">
-            <summary class="text-3xs text-[var(--text-dim)] cursor-pointer hover:text-[var(--text-body)]">응답 텍스트</summary>
+            <summary class="text-2xs text-[var(--text-dim)] cursor-pointer hover:text-[var(--text-body)]">응답 텍스트</summary>
             <pre class="mt-1 p-2 rounded bg-[var(--white-3)] text-2xs font-mono text-[var(--text-body)] whitespace-pre-wrap break-all max-h-75 overflow-auto leading-[1.4]" tabindex="0" aria-label="응답 텍스트">${responseText}</pre>
           </details>
         ` : null}

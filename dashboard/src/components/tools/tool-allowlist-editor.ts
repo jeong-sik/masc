@@ -262,7 +262,7 @@ export function ResolvedPreview({ tools, catMap }: { tools: string[]; catMap: Ma
           ${hasHiddenContent
             ? html`
                 <button type="button"
-                  class="self-start text-3xs text-[var(--text-muted)] hover:text-[var(--text-body)] cursor-pointer transition-colors"
+                  class="self-start text-2xs text-[var(--text-muted)] hover:text-[var(--text-body)] cursor-pointer transition-colors"
                   aria-expanded=${expanded}
                   aria-controls="allowlist-expanded"
                   aria-label=${expanded ? '해석된 허용 목록 접기' : `해석된 허용 목록 전체 ${tools.length}개 보기`}
@@ -428,7 +428,7 @@ function TextModeToggle({
   if (!isText) {
     return html`
       <button type="button"
-        class="text-3xs text-[var(--text-muted)] hover:text-[var(--text-body)] cursor-pointer transition-colors"
+        class="text-2xs text-[var(--text-muted)] hover:text-[var(--text-body)] cursor-pointer transition-colors"
         onClick=${() => {
           textInputBuffer.value = listSig.value.join(', ')
           textInputSection.value = section
@@ -440,14 +440,14 @@ function TextModeToggle({
   return html`
     <div class="flex gap-2">
       <button type="button"
-        class="text-3xs text-[var(--ok)] hover:text-[var(--ok)] cursor-pointer transition-colors"
+        class="text-2xs text-[var(--ok)] hover:text-[var(--ok)] cursor-pointer transition-colors"
         onClick=${() => {
           listSig.value = parseToolList(textInputBuffer.value)
           textInputSection.value = null
         }}
       >적용</button>
       <button type="button"
-        class="text-3xs text-[var(--text-muted)] hover:text-[var(--text-body)] cursor-pointer transition-colors"
+        class="text-2xs text-[var(--text-muted)] hover:text-[var(--text-body)] cursor-pointer transition-colors"
         onClick=${() => { textInputSection.value = null }}
       >취소</button>
     </div>
@@ -546,7 +546,7 @@ export function ToolAllowlistEditor({
       <div class="flex items-center justify-between">
         <span class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">도구 정책 편집</span>
         <button type="button"
-          class="text-3xs text-[var(--text-muted)] hover:text-[var(--text-body)] cursor-pointer"
+          class="text-2xs text-[var(--text-muted)] hover:text-[var(--text-body)] cursor-pointer"
           onClick=${() => resetEditorState({
             mode: currentMode,
             preset: currentPreset,
@@ -561,7 +561,7 @@ export function ToolAllowlistEditor({
       <div class="flex gap-2">
         ${(['preset', 'custom'] as const).map(mode => html`
           <button type="button"
-            class=${`py-1 px-3 rounded text-3xs font-medium border transition-colors cursor-pointer ${
+            class=${`py-1 px-3 rounded text-2xs font-medium border transition-colors cursor-pointer ${
               policyMode.value === mode
                 ? 'border-[var(--accent-30)] bg-[var(--accent-soft)] text-[var(--accent)]'
                 : 'border-[var(--card-border)] bg-[var(--white-3)] text-[var(--text-muted)]'
@@ -627,7 +627,7 @@ export function ToolAllowlistEditor({
                   ${resolvedAllowlist.length > 0
                     ? html`
                       <button type="button"
-                        class="self-start py-1 px-3 rounded text-3xs font-medium border border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--accent)] hover:bg-[var(--accent-22)] cursor-pointer transition-colors"
+                        class="self-start py-1 px-3 rounded text-2xs font-medium border border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--accent)] hover:bg-[var(--accent-22)] cursor-pointer transition-colors"
                         onClick=${() => { customAllowItems.value = [...resolvedAllowlist] }}
                       >현재 resolved list에서 복사 (${resolvedAllowlist.length}개)</button>
                     `
@@ -684,7 +684,7 @@ export function ToolAllowlistEditor({
       <!-- Apply -->
       <div class="flex items-center gap-3">
         <button type="button"
-          class=${`py-1.5 px-4 rounded text-3xs font-medium transition-colors cursor-pointer disabled:opacity-50 ${
+          class=${`py-1.5 px-4 rounded text-2xs font-medium transition-colors cursor-pointer disabled:opacity-50 ${
             isCustomEmpty
               ? 'bg-[var(--bad-light)] text-white hover:bg-[var(--bad)]'
               : 'bg-[var(--ok)] text-[#000] hover:bg-[var(--emerald)]'

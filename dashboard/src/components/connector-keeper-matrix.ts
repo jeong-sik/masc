@@ -261,7 +261,7 @@ export function ConnectorKeeperMatrix({ matrix }: { matrix: MatrixData }) {
                 <div class="px-1 py-1 text-3xs uppercase tracking-4 text-[var(--text-dim)]">키퍼 ↓ / 커넥터 →</div>
                 ${matrix.columns.map(colId => html`
                   <button type="button"
-                    class="flex cursor-pointer items-center justify-center gap-1 rounded px-1 py-1 text-3xs uppercase tracking-3 text-[var(--text-dim)] hover:text-[var(--text-body)]"
+                    class="flex cursor-pointer items-center justify-center gap-1 rounded px-1 py-1 text-2xs uppercase tracking-3 text-[var(--text-dim)] hover:text-[var(--text-body)]"
                     onClick=${() => scrollToConnectorRow(colId)}
                     title=${`${CONNECTOR_DISPLAY_NAMES[colId] ?? colId} — 행으로 이동`}
                     aria-label=${`${CONNECTOR_DISPLAY_NAMES[colId] ?? colId} — 행으로 이동`}

@@ -108,7 +108,7 @@ export function StartupCheckBanner({ connectorId, sidecarUp }: {
         </div>
       </div>
       <button type="button"
-        class="shrink-0 cursor-pointer rounded border border-[var(--warn-20)] bg-[var(--warn-10)] px-2 py-1 text-3xs uppercase tracking-4 text-[var(--warn)] hover:bg-[var(--warn-10)]"
+        class="shrink-0 cursor-pointer rounded border border-[var(--warn-20)] bg-[var(--warn-10)] px-2 py-1 text-2xs uppercase tracking-4 text-[var(--warn)] hover:bg-[var(--warn-10)]"
         onClick=${() => {
           openSidecarLogs(connectorId)
           // Don't clear startAt yet — operator might toggle logs back closed

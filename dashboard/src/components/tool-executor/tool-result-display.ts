@@ -75,7 +75,7 @@ function StoredBlobView({
         </div>
         <div class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] overflow-hidden">
           <div class="flex items-center justify-between px-3 py-1.5 border-b border-[var(--card-border)]">
-            <button type="button" class="text-3xs py-1 text-[var(--text-muted)] cursor-pointer hover:text-[var(--text-body)]"
+            <button type="button" class="text-2xs py-1 text-[var(--text-muted)] cursor-pointer hover:text-[var(--text-body)]"
               aria-expanded="true"
               aria-controls="tool-result-full"
               onClick=${() => { expanded.value = false }}>
@@ -156,7 +156,7 @@ export function ToolResultDisplay({ success, text, toolName, timestamp }: ToolRe
       </div>
       <div class="rounded border border-[var(--card-border)] bg-[var(--bg-0)] overflow-hidden">
         <div class="flex items-center justify-between px-3 py-1.5 border-b border-[var(--card-border)]">
-          <button type="button" class="text-3xs text-[var(--text-muted)] cursor-pointer hover:text-[var(--text-body)]"
+          <button type="button" class="text-2xs text-[var(--text-muted)] cursor-pointer hover:text-[var(--text-body)]"
             aria-expanded=${expanded.value}
             aria-controls="tool-result-preview"
             onClick=${() => { expanded.value = !expanded.value }}>

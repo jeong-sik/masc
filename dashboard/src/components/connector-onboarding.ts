@@ -60,7 +60,7 @@ function OnboardingCard({ connectorId }: { connectorId: KnownConnectorId }) {
         >${onboardingStartLabel(starting)}</button>
       </div>
       <div class="text-2xs text-[var(--color-fg-disabled)]">
-        <strong>Start</strong>를 누르면 backend가 sidecar를 spawn합니다. 또는 명령을 복사해 새 터미널에서 직접 실행하세요.
+        <strong>Start</strong>를 누르면 백엔드가 사이드카를 실행합니다. 또는 명령을 복사해 새 터미널에서 직접 실행하세요.
       </div>
       <div class="mt-2 grid grid-cols-1 gap-1.5">
         <${CopyableCode} label="start" command=${cmds.start} variant="primary" />
@@ -75,10 +75,10 @@ export function ConnectorOnboardingGrid() {
   return html`
     <div>
       <div class="mb-3">
-        <h3 class="text-sm font-semibold text-[var(--color-fg-primary)]">아직 연결된 sidecar가 없습니다</h3>
+        <h3 class="text-sm font-semibold text-[var(--color-fg-primary)]">아직 연결된 사이드카가 없습니다</h3>
         <div class="mt-1 text-2xs text-[var(--color-fg-disabled)]">
-          4개의 채널 sidecar를 켤 수 있습니다. 카드의 시작 명령을 복사해 새 터미널에서 실행하거나, 아래
-          <strong>Start All</strong>로 한 번에 spawn하세요. spawn 후 이 화면이 라이브 상태로 갱신됩니다.
+          4개의 채널 사이드카를 켤 수 있습니다. 카드의 시작 명령을 복사해 새 터미널에서 실행하거나, 아래
+          <strong>Start All</strong>로 한 번에 실행하세요. 실행 후 이 화면이 라이브 상태로 갱신됩니다.
         </div>
       </div>
       <${ConnectorBulkActions} connectors=${[]} />

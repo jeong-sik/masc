@@ -105,6 +105,20 @@ val load_credential_of :
 
 val save_credential : string -> agent_credential -> unit
 
+val ensure_credential_alias :
+  string ->
+  canonical_name:string ->
+  alias_name:string ->
+  (unit, Types.masc_error) result
+(** #10440: write a short-form alias [<alias_name>.json] as a
+    redirect stub pointing at the same UUID file as the existing
+    [<canonical_name>.json] credential.  Idempotent — a stub
+    already pointing at the canonical UUID is a no-op.
+
+    Returns [Error] if the canonical credential is missing or is
+    itself a direct (non-redirect) credential, since alias
+    semantics require a UUID-backed canonical. *)
+
 val delete_credential : string -> string -> unit
 
 val list_credentials : string -> agent_credential list

@@ -904,3 +904,17 @@ button.is-active, .btn.is-active { background: var(--bg-4); color: var(--brass-1
   --font-body:    'JetBrains Mono', 'Noto Sans KR', monospace;
   --font-ui:      'JetBrains Mono', 'Noto Sans KR', monospace;
 }
+
+/* ═══════════════════════════════════════════════════════════════════
+   BONSAI STRUCTURAL TOKENS (scrollbar primitives)
+   ───────────────────────────────────────────────────────────────────
+   Theme-invariant. dashboard surface has its own ::-webkit-scrollbar-
+   thumb rule (uses --line-2/-3) and does not consume these tokens.
+   bonsai surface reads via var(--scrollbar-thumb, var(--border-main))
+   pattern with --border-main fallback when this file is the SSOT.
+   ═══════════════════════════════════════════════════════════════════ */
+
+:root {
+  --scrollbar-thumb:       #2a1f1a;
+  --scrollbar-thumb-hover: #3d2e22;
+}

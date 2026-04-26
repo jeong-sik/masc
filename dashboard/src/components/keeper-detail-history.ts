@@ -515,14 +515,14 @@ export function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
               </div>
               <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-2xs">
                 <div class="rounded border border-[var(--white-8)] bg-[var(--white-2)] px-3 py-2">
-                  <div class="text-3xs text-[var(--text-muted)] uppercase tracking-wider mb-1">Parent</div>
+                  <div class="text-3xs text-[var(--text-muted)] uppercase tracking-wider mb-1">부모</div>
                   <div class="text-[var(--text-strong)]">${manifest.parent_generation != null ? `gen ${manifest.parent_generation}` : 'root generation'}</div>
                   ${manifest.parent_trace_id
                     ? html`<div class="font-mono text-[var(--text-dim)] truncate" title=${manifest.parent_trace_id}>${compactTraceId(manifest.parent_trace_id)}</div>`
                     : null}
                 </div>
                 <div class="rounded border border-[var(--white-8)] bg-[var(--white-2)] px-3 py-2">
-                  <div class="text-3xs text-[var(--text-muted)] uppercase tracking-wider mb-1">Trigger</div>
+                  <div class="text-3xs text-[var(--text-muted)] uppercase tracking-wider mb-1">트리거</div>
                   <div class="text-[var(--text-strong)]">${manifest.trigger_reason ?? '-'}</div>
                   <div class="text-[var(--text-dim)]">context ratio ${formatLineageRatio(manifest.context_ratio)}</div>
                 </div>

@@ -204,9 +204,9 @@ export function GovernanceMonitor() {
                   <table class="w-full text-xs">
                     <thead>
                       <tr class="text-left text-[var(--text-muted)] border-b border-[var(--card-border)]">
-                        <th class="py-1.5 pr-4 font-medium">Tool</th>
-                        <th class="py-1.5 pr-4 font-medium">Reason</th>
-                        <th class="py-1.5 font-medium text-right">Count</th>
+                        <th class="py-1.5 pr-4 font-medium">도구</th>
+                        <th class="py-1.5 pr-4 font-medium">사유</th>
+                        <th class="py-1.5 font-medium text-right">횟수</th>
                       </tr>
                     </thead>
                     <tbody>

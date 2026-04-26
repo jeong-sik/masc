@@ -267,6 +267,8 @@ bonsai의 5 테마는 production user에게 URL hash로 공유 가능한 자산.
 | 폰트 fallback chain | `--font-*` 정의 내 | system font name (e.g., `Inter`, `JetBrains Mono`) |
 | 4-slot status pattern | `tokens.css`의 `--{ok\|warn\|err\|info\|idle\|stalled}-{soft\|fg\|border\|ring}` | 컴포넌트별 정교한 surface/text/border/ring 4 slot 조합. single-slot semantic alias로 환원 불가. 컴포넌트는 raw 참조 허용 (PR-M5 결정). |
 | `--brass-2` mid tone | accent palette mid-tone 사용처 | SPEC v0.1 §3.4은 accent를 fg/fg-dim 2 slot만 정의. 사용 빈도 증가 시 `--color-accent-fg-mid` 추가 검토. |
+| `--font-mono` stack divergence | dashboard `tokens.css` vs bonsai `colors_and_type.css` | dashboard는 `ui-monospace` 우선(Apple 시스템 폰트), bonsai는 `JetBrains Mono` 우선(고딕 미감 일관성). PR-S2.5 redirect 시 bonsai stub이 자기 stack 유지 — dashboard 정의를 inherit하지 않음. |
+| `--shadow-inset` 의미 차이 | dashboard `tokens.css` vs `--shadow-ring`(bonsai) | dashboard는 top-edge highlight, bonsai는 1px ring. PR-S3-rest(2026-04-26)에서 bonsai 측을 `--shadow-ring`으로 rename하여 충돌 해소. |
 
 ### 6.3 Surface 적용 의무
 

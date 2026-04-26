@@ -215,3 +215,25 @@ let tool_assigned_fn
 let task_completion_path_observed_fn
   : (path:string -> contract_state:string -> agent_name:string -> unit) Atomic.t
   = Atomic.make (fun ~path:_ ~contract_state:_ ~agent_name:_ -> ())
+
+(** task-103: Auto-provision a sandbox worktree on successful task claim.
+
+    [Coord_task.claim_task_r] flips a task to [Claimed] but does not create
+    the per-task git worktree the keeper subprocess will need (the LLM is
+    expected to invoke [masc_worktree_create] explicitly, but in practice
+    keepers often skip that step and immediately try to [cd] into the
+    worktree path inside docker, which fails with [fatal: not a git
+    repository: .../keeper-<agent>-<task>]).
+
+    This hook is called best-effort right after a successful claim. The
+    consumer (lib/keeper) decides whether to actually provision based on
+    keeper [sandbox_profile] (only [Docker] keepers benefit; local-host
+    keepers operate on the project root directly). Failures are logged but
+    do not block the claim — claim semantics stay independent of sandbox
+    state.
+
+    Wired in [lib/keeper/keeper_runtime.ml] at startup; the default no-op
+    keeps [masc_coord] free of a direct dependency on [masc_mcp]. *)
+let claim_post_provision_fn
+  : (Coord_utils_backend_setup.config -> agent_name:string -> task_id:string -> unit) Atomic.t
+  = Atomic.make (fun _ ~agent_name:_ ~task_id:_ -> ())

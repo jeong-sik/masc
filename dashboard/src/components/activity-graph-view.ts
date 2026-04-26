@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
+import { ActionButton } from './common/button'
 import { useEffect, useRef } from 'preact/hooks'
 import { Network } from 'vis-network'
 import 'vis-network/styles/vis-network.css'
@@ -267,7 +268,7 @@ export function GraphView({ data }: GraphViewProps) {
           <strong class="text-lg text-[var(--text-near-white)]">${selectedNode.label}</strong>
           <span class="py-0.5 px-2 bg-[var(--slate-gray-15)] text-2xs text-[var(--text-slate)] rounded">${kindLabel(selectedNode.kind)}</span>
           <span class="py-0.5 px-2 rounded text-2xs ${selectedNode.status === 'active' || selectedNode.status === 'done' ? 'text-[var(--color-status-ok)] bg-[var(--ok-10)]' : selectedNode.status === 'offline' || selectedNode.status === 'retired' ? 'text-[var(--text-slate)] bg-[var(--slate-gray-10)]' : 'text-[var(--text-slate-light)] bg-[var(--slate-gray-10)]'}">${statusLabel(selectedNode.status)}</span>
-          <button type="button" class="ml-auto text-[var(--color-fg-muted)] hover:text-[var(--text-slate-light)] text-sm cursor-pointer bg-transparent border-none" onClick=${() => { selectedNodeId.value = null }}>닫기</button>
+          <${ActionButton} variant="subtle" size="sm" class="ml-auto" onClick=${() => { selectedNodeId.value = null }} ariaLabel="패널 닫기">닫기<//>
         </div>
         <div class="grid grid-cols-3 gap-3 mb-3">
           <div class="text-center">

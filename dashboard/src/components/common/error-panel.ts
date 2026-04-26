@@ -9,6 +9,7 @@ import {
 } from './error-notification-state'
 import type { ErrorCode, ErrorSeverity } from '../../types/error'
 import { formatElapsedCompact } from '../../lib/format-time'
+import { ActionButton } from './button'
 
 const CODE_LABELS: Record<ErrorCode, string> = {
   validation_error: '입력',
@@ -64,10 +65,12 @@ export function ErrorPanel({ onClose }: ErrorPanelProps) {
       <div class="flex items-center justify-between px-3 py-2 border-b border-[var(--white-5)] shrink-0">
         <span class="text-xs font-medium text-[var(--color-fg-muted)]">미확인 에러 <span class="text-[var(--color-status-err)]">${items.length}</span>건</span>
         <div class="flex items-center gap-1">
-          <button type="button"
-            class="text-2xs px-2 py-0.5 rounded border border-[var(--color-border-default)] bg-[var(--white-4)] text-[var(--color-fg-muted)] hover:bg-[var(--white-10)] cursor-pointer transition-colors"
+          <${ActionButton}
+            variant="ghost"
+            size="sm"
+            class="text-2xs"
             onClick=${() => { clearAllErrors(); onClose() }}
-          >모두 확인</button>
+          >모두 확인<//>
           <button type="button" class="text-[var(--color-fg-muted)] hover:text-[var(--color-fg-primary)] cursor-pointer p-0.5" onClick=${onClose}>
             <${X} size=${14} />
           </button>

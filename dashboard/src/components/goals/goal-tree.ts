@@ -354,19 +354,19 @@ function TreeSummary({
       </div>
       <div class="rounded border border-ok/25 bg-ok/10 p-3 text-center">
         <div class="text-2xl font-bold text-ok tabular-nums">${summary.active_goals}</div>
-        <div class="mt-1 text-3xs font-semibold uppercase tracking-widest text-ok/80">On Track</div>
+        <div class="mt-1 text-3xs font-semibold uppercase tracking-widest text-ok/80">정상</div>
       </div>
       <div class="rounded border border-warn/25 bg-warn/10 p-3 text-center">
         <div class="text-2xl font-bold text-warn tabular-nums">${summary.at_risk_goals}</div>
-        <div class="mt-1 text-3xs font-semibold uppercase tracking-widest text-warn/80">At Risk</div>
+        <div class="mt-1 text-3xs font-semibold uppercase tracking-widest text-warn/80">위험</div>
       </div>
       <div class="rounded border border-bad/25 bg-bad/10 p-3 text-center">
         <div class="text-2xl font-bold text-bad tabular-nums">${summary.blocked_goals}</div>
-        <div class="mt-1 text-3xs font-semibold uppercase tracking-widest text-bad/80">Blocked</div>
+        <div class="mt-1 text-3xs font-semibold uppercase tracking-widest text-bad/80">차단</div>
       </div>
       <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-3 text-center">
         <div class="text-2xl font-bold text-text-strong tabular-nums">${summary.pending_approvals}</div>
-        <div class="mt-1 text-3xs font-semibold uppercase tracking-widest text-text-muted">Approval</div>
+        <div class="mt-1 text-3xs font-semibold uppercase tracking-widest text-text-muted">승인 대기</div>
       </div>
       ${goalVerificationCount > 0 ? html`
         <div class="rounded border border-amber-400/30 bg-amber-400/10 p-3 text-center">

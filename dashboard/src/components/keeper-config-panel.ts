@@ -460,6 +460,7 @@ function InlineNumberRow({ label, value, onChange, min, max, step, suffix }: {
       <span class="text-xs font-medium text-text-muted">${label}</span>
       <div class="flex items-center gap-1.5">
         <input type="number"
+          aria-label=${label}
           class="w-20 text-right bg-card/60 text-text-strong text-xs font-semibold border border-card-border rounded py-1 px-2 focus:outline-none focus:border-accent/50 transition-colors"
           value=${value}
           min=${min}

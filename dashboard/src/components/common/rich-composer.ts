@@ -46,12 +46,12 @@ export function RichComposer({
               disabled=${disabled}
               aria-pressed=${mode === tab}
             >
-              ${tab === 'write' ? 'Write' : 'Preview'}
+              ${tab === 'write' ? '작성' : '미리보기'}
             </button>
           `)}
         </div>
         <div class="text-3xs text-[var(--text-muted)]">
-          Markdown, code fence, URL, image link
+          Markdown, 코드 블록, URL, 이미지 링크
         </div>
       </div>
 

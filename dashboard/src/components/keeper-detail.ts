@@ -26,6 +26,7 @@ import {
 } from '../api/keeper'
 import { TimeAgo } from './common/time-ago'
 import { Checkbox } from './common/checkbox'
+import { TextArea } from './common/input'
 import type { Keeper } from '../types'
 import { invalidateDashboardCache, refreshDashboard } from '../store'
 import { hydrateKeeperStatus, selectKeeper } from '../keeper-runtime'
@@ -515,14 +516,15 @@ function KeeperClearContextDialog({
 
         <label class="flex flex-col gap-2">
           <span class="text-2xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">사유</span>
-          <textarea
-            ref=${reasonRef}
-            class="min-h-[112px] resize-y rounded border border-[var(--color-border-default)] bg-[var(--white-3)] px-3 py-2 text-sm leading-paragraph text-[var(--color-fg-primary)] outline-none focus:border-[var(--accent-45)] focus:ring-2 focus:ring-[var(--accent-18)]"
+          <${TextArea}
+            inputRef=${reasonRef}
+            class="!bg-[var(--white-3)] !min-h-[112px] !text-sm leading-paragraph"
             placeholder="예: stale continuity replay 제거"
+            ariaLabel="비우기 사유"
             disabled=${pending}
             value=${reason}
             onInput=${(event: Event) => onReasonInput((event.currentTarget as HTMLTextAreaElement).value)}
-          ></textarea>
+          />
         </label>
 
         <label class="flex items-start gap-3 rounded border border-[var(--color-border-default)] bg-[var(--white-2)] px-3 py-3 text-xs text-[var(--color-fg-primary)]">

@@ -294,6 +294,7 @@ jobs:
           bash scripts/audit-hardcoding-truth.sh --fail-on-confirmed
           bash scripts/ci/check-credential-audits.sh
           bash scripts/ci/check-accept-fd-lifecycle.sh
+          bash scripts/ci/check-actor-consumer-wired.sh
 
   health:
     name: Health

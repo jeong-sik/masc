@@ -7,6 +7,7 @@ import { requestConfirm } from './common/confirm-dialog'
 import { EmptyState } from './common/empty-state'
 import { LoadingState } from './common/feedback-state'
 import { TextInput } from './common/input'
+import { Checkbox } from './common/checkbox'
 import { RichComposer } from './common/rich-composer'
 import { RichContent } from './common/rich-content'
 import { stripStateBlocks } from '../keeper-message'
@@ -401,9 +402,9 @@ function PostCard({ post }: { post: BoardPost }) {
     >
       <!-- Select checkbox -->
       <div class="flex items-start pt-1">
-        <input type="checkbox"
-          aria-label=${`게시글 선택: ${post.id}`}
-          class="w-3.5 h-3.5 rounded cursor-pointer accent-[var(--color-accent-fg)]"
+        <${Checkbox}
+          ariaLabel=${`게시글 선택: ${post.id}`}
+          class="!w-3.5 !h-3.5"
           checked=${selectedPostIds.value.has(post.id)}
           onClick=${(e: Event) => togglePostSelection(post.id, e)}
         />

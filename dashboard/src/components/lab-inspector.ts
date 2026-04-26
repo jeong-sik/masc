@@ -79,7 +79,7 @@ function InspectorTabButton({
 function InspectorOverview() {
   return html`
     <div class="grid gap-4">
-      <${Card} title="Dashboard Focus" class="section">
+      <${Card} title="대시보드 포커스" class="section">
         <div class="grid gap-3">
           <div class="rounded border border-card-border/35 bg-[var(--white-5)]/10 px-4 py-3 text-sm leading-airy text-[var(--text-body)]">
             이제 대시보드는 <strong class="text-[var(--text-strong)]">핵심 운영 화면</strong>에 더 집중합니다.

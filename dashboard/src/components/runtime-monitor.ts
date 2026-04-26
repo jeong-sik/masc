@@ -382,7 +382,7 @@ export function RuntimeMonitor() {
         ? html`<${LoadingState}>runtime snapshot 불러오는 중...<//>`
         : null}
 
-      <${Card} title="Provider Runtime">
+      <${Card} title="공급자 런타임">
         <div class="grid grid-cols-2 gap-3 mb-4">
           <${StatCell}
             label="Providers"
@@ -430,7 +430,7 @@ export function RuntimeMonitor() {
         </div>
       <//>
 
-      <${Card} title="Model Metrics">
+      <${Card} title="모델 메트릭">
         <div class="grid grid-cols-3 gap-3 mb-4">
           <${StatCell}
             label="Telemetry Window"

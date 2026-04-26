@@ -958,7 +958,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
           <${SetupGuideCard} connectorId="sandbox_hardened" />
         ` : null}
         <${Callout}
-          title="Base Path Anchor"
+          title="베이스 경로 앵커"
           body=${sandboxAnchorText(c)}
         />
         ${rd.sandbox_profile === 'docker' ? html`
@@ -1000,7 +1000,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
         </div>
         ${c.sandbox_last_error ? html`
           <${Callout}
-            title="Sandbox Error"
+            title="샌드박스 오류"
             body=${c.sandbox_last_error}
             tone="warn"
           />

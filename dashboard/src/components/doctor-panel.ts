@@ -298,7 +298,7 @@ export function DoctorPanel() {
 
   return html`
     <div class="space-y-4">
-      <${Card} title="Doctor" class="section">
+      <${Card} title="진단" class="section">
         <${AsyncContainer}
           state=${doctorEnvelope.state}
           loadingMessage="Doctor 데이터를 불러오는 중..."

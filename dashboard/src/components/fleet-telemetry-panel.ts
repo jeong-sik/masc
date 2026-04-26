@@ -242,25 +242,25 @@ function ControlRoomPanel({ state }: { state: FleetTelemetryState }) {
     <div class="flex flex-col gap-3">
       <div class="grid grid-cols-1 gap-3 xl:grid-cols-4">
         <${SummaryCard}
-          title="Readiness"
+          title="준비도"
           value=${readiness.score.toFixed(2)}
           detail=${`${readiness.blocking_count} blockers · ${readiness.decision_required_count} decisions required.`}
           tone=${readinessTone(readiness.status)}
         />
         <${SummaryCard}
-          title="Approvals"
+          title="승인"
           value=${pendingApprovals.toString()}
           detail=${pendingApprovals > 0 ? 'Operator approval queue is non-empty.' : 'No pending approvals are visible.'}
           tone=${pendingApprovals > 0 ? 'warn' : 'ok'}
         />
         <${SummaryCard}
-          title="Attention"
+          title="주의"
           value=${attentionEvents.length.toString()}
           detail=${attentionEvents.length > 0 ? 'Critical blockers and pause-worthy states are surfaced here.' : 'No active attention events are reported.'}
           tone=${attentionEvents.length > 0 ? 'warn' : 'ok'}
         />
         <${SummaryCard}
-          title="Goal Scope"
+          title="목표 범위"
           value=${state.rows.length > 0 ? `${state.rows.filter(row => row.goal_linked).length}/${state.rows.length}` : '0/0'}
           detail=${state.rows.some(row => !row.goal_linked) ? 'Some keepers are active without a visible goal link.' : 'All surfaced keepers have a goal anchor.'}
           tone=${state.rows.length === 0 || state.rows.every(row => row.goal_linked) ? 'ok' : 'warn'}
@@ -724,13 +724,13 @@ export function FleetTelemetryPanel() {
           tone=${liveTone}
         />
         <${SummaryCard}
-          title="Runtime Pressure"
+          title="런타임 부하"
           value=${`${counts.hot} hot / ${counts.warn} warn`}
           detail=${counts.stale > 0 ? `${counts.stale} keepers are stale beyond ${Math.round(STALE_ACTIVITY_SEC / 60)}m.` : 'No stale keepers crossed the activity threshold.'}
           tone=${toneForPressure(counts.hot, counts.warn)}
         />
         <${SummaryCard}
-          title="Tool Success"
+          title="도구 성공률"
           value=${value.tool_quality.total > 0 ? formatPercent(value.tool_quality.success_rate, 1) : 'n/a'}
           detail=${value.tool_quality.total > 0
             ? `${value.tool_quality.failure.toLocaleString()} failures across ${value.tool_quality.total.toLocaleString()}${value.tool_quality.sampling_mode === 'window_hours' && value.tool_quality.window_hours != null ? ` calls in the last ${value.tool_quality.window_hours}h.` : ' recent calls.'}`
@@ -740,7 +740,7 @@ export function FleetTelemetryPanel() {
           tone=${value.tool_quality.total > 0 ? toneForToolSuccess(value.tool_quality.success_rate) : 'neutral'}
         />
         <${SummaryCard}
-          title="Telemetry Stores"
+          title="원격 측정 스토어"
           value=${value.total_telemetry_entries.toLocaleString()}
           detail=${`${sourcesWithData}/${value.telemetry_sources.length || 0} stores currently have data.`}
           tone=${sourcesWithData > 0 ? 'ok' : 'warn'}

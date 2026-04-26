@@ -98,17 +98,17 @@ function ActivityEntry({ event }: { event: UnifiedTraceEvent }) {
         <div class="px-3 pb-2 pt-1 ml-7">
           ${event.toolArgs != null ? html`
             <div class="mb-1">
-              <${JsonViewerCard} data=${parseJsonLikeData(event.toolArgs)} title="Args" />
+              <${JsonViewerCard} data=${parseJsonLikeData(event.toolArgs)} title="인자" />
             </div>
           ` : null}
           ${event.toolResult != null ? html`
             <div class="mb-1">
-              <${JsonViewerCard} data=${parseJsonLikeData(event.toolResult)} title="Result" />
+              <${JsonViewerCard} data=${parseJsonLikeData(event.toolResult)} title="결과" />
             </div>
           ` : null}
           ${event.toolArgs == null && event.toolResult == null && event.detail && Object.keys(event.detail).length > 0 ? html`
             <div class="mb-1">
-              <${JsonViewerCard} data=${event.detail} title="Detail" />
+              <${JsonViewerCard} data=${event.detail} title="상세" />
             </div>
           ` : null}
           ${event.error ? html`<div class="text-2xs text-[var(--bad-light)] mt-1" role="alert">${event.error}</div>` : null}

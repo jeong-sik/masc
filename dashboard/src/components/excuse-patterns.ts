@@ -51,7 +51,7 @@ export function ExcusePatterns() {
 
   if (s.status === 'loading') {
     return html`
-      <${Card} title="Anti-Rationalization Excuse Patterns">
+      <${Card} title="반합리화 패턴">
         <${LoadingState}>핑계 패턴 불러오는 중...<//>
       </Card>
     `
@@ -59,7 +59,7 @@ export function ExcusePatterns() {
 
   if (s.status === 'error') {
     return html`
-      <${Card} title="Anti-Rationalization Excuse Patterns">
+      <${Card} title="반합리화 패턴">
         <div class="p-4 text-[var(--bad-light)]" role="alert">Failed to load patterns: ${s.message}</div>
       </Card>
     `
@@ -69,7 +69,7 @@ export function ExcusePatterns() {
   const jsonStr = data ? JSON.stringify(data, null, 2) : '[]'
 
   return html`
-    <${Card} title="Anti-Rationalization Excuse Patterns">
+    <${Card} title="반합리화 패턴">
       <div class="p-4">
         <p class="text-sm text-[var(--text-muted)] mb-4">
           These patterns are matched against agent completion notes. If matched, the task is rejected.

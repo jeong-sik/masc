@@ -1503,7 +1503,7 @@ function GateAnalyticsSection({
 
   return html`
     <${DisclosurePanel}
-      title="Gate Analytics"
+      title="게이트 분석"
       subtitle=${subtitle}
       testId="connector-gate-analytics"
     >

@@ -1251,7 +1251,7 @@ export function CascadeConfigPanel() {
         ? html`<${LoadingState}>cascade snapshot 불러오는 중...<//>`
         : null}
 
-      <${Card} title="Cascade Routing">
+      <${Card} title="캐스케이드 라우팅">
         ${config
           ? (() => {
               const keeperGroups = groupKeepersByCanonicalCascade(config.keeper_profiles)
@@ -1311,7 +1311,7 @@ export function CascadeConfigPanel() {
         onRefresh=${() => loadCascadeData(resource)}
       />
 
-      <${Card} title="Health Tracker">
+      <${Card} title="상태 추적기">
         ${health
           ? html`
             <div class="grid grid-cols-3 gap-3 mb-3">
@@ -1336,25 +1336,25 @@ export function CascadeConfigPanel() {
           : null}
       <//>
 
-      <${Card} title="Client Capacity">
+      <${Card} title="클라이언트 용량">
         ${capacity
           ? html`<${ClientCapacityTable} capacity=${capacity} />`
           : null}
       <//>
 
-      <${Card} title="Client Capacity · 최근 이벤트">
+      <${Card} title="클라이언트 용량 · 최근 이벤트">
         ${history
           ? html`<${ClientCapacityHistoryTable} history=${history} />`
           : null}
       <//>
 
-      <${Card} title="SLO Status">
+      <${Card} title="SLO 상태">
         ${slo
           ? html`<${SloCard} slo=${slo} />`
           : html`<${EmptyState}>SLO 데이터를 불러오는 중입니다.<//>`}
       <//>
 
-      <${Card} title="Strategy Decisions · 사이클 추적">
+      <${Card} title="전략 결정 · 사이클 추적">
         ${trace
           ? html`
             <div class="flex items-center gap-3 mb-3">

@@ -179,7 +179,7 @@ let test_keeper_snapshot_envelope_agent_name () =
     ~message_count:47;
   let events = Event_bus.drain sub in
   Alcotest.(check int) "one event" 1 (List.length events);
-  match Oas_sse_bridge.native_event_to_json (List.hd events) with
+  match Oas_event_bridge.native_event_to_json (List.hd events) with
   | None -> Alcotest.fail "expected native_event_to_json to emit"
   | Some (`Assoc fields) ->
     let field_string name =
@@ -210,7 +210,7 @@ let test_keeper_lifecycle_envelope_agent_name () =
     ();
   let events = Event_bus.drain sub in
   Alcotest.(check int) "one event" 1 (List.length events);
-  match Oas_sse_bridge.native_event_to_json (List.hd events) with
+  match Oas_event_bridge.native_event_to_json (List.hd events) with
   | None -> Alcotest.fail "expected native_event_to_json to emit"
   | Some (`Assoc fields) ->
     let field_string name =
@@ -223,10 +223,10 @@ let test_keeper_lifecycle_envelope_agent_name () =
       "masc-improver" (field_string "agent_name")
   | Some _ -> Alcotest.fail "unexpected JSON shape"
 
-let test_oas_sse_bridge_persists_native_events () =
+let test_oas_event_bridge_persists_native_events () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let dir = tmpdir "oas_sse_bridge" in
+  let dir = tmpdir "oas_event_bridge" in
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
     (fun () ->
@@ -235,7 +235,7 @@ let test_oas_sse_bridge_persists_native_events () =
       Sse.set_clock (Eio.Stdenv.clock env);
       try
         Eio.Switch.run (fun sw ->
-            Oas_sse_bridge.start_with_interval ~drain_interval_s:0.1
+            Oas_event_bridge.start_with_interval ~drain_interval_s:0.1
               ~sw ~clock:(Eio.Stdenv.clock env) ~config ~bus;
             Event_bus.publish bus
               (Event_bus.mk_event
@@ -273,10 +273,10 @@ let test_oas_sse_bridge_persists_native_events () =
             raise Exit)
       with Exit -> ())
 
-let test_oas_sse_bridge_broadcasts_lifecycle_to_observers () =
+let test_oas_event_bridge_broadcasts_lifecycle_to_observers () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let dir = tmpdir "oas_sse_bridge_observer" in
+  let dir = tmpdir "oas_event_bridge_observer" in
   Fun.protect
     ~finally:(fun () ->
       ignore (Masc_mcp.Sse.close_all_clients ());
@@ -292,7 +292,7 @@ let test_oas_sse_bridge_broadcasts_lifecycle_to_observers () =
                       "observer-lifecycle" ~last_event_id:0);
             ignore (Masc_mcp.Sse.register ~kind:Masc_mcp.Sse.Coordinator
                       "coordinator-lifecycle" ~last_event_id:0);
-            Oas_sse_bridge.start_with_interval ~drain_interval_s:0.1
+            Oas_event_bridge.start_with_interval ~drain_interval_s:0.1
               ~sw ~clock:(Eio.Stdenv.clock env) ~config ~bus;
             Oas_events.publish_keeper_lifecycle bus
               ~event:(Masc_mcp.Keeper_lifecycle_events.Custom_event
@@ -311,10 +311,10 @@ let test_oas_sse_bridge_broadcasts_lifecycle_to_observers () =
             raise Exit)
       with Exit -> ())
 
-let test_oas_sse_bridge_retries_append_failure_then_recovers () =
+let test_oas_event_bridge_retries_append_failure_then_recovers () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let dir = tmpdir "oas_sse_bridge_retry" in
+  let dir = tmpdir "oas_event_bridge_retry" in
   let broken_root = Filename.concat dir "broken-root" in
   Out_channel.with_open_text broken_root (fun oc -> output_string oc "blocked");
   Fun.protect
@@ -329,7 +329,7 @@ let test_oas_sse_bridge_retries_append_failure_then_recovers () =
         Eio.Switch.run (fun sw ->
             ignore (Masc_mcp.Sse.register ~kind:Masc_mcp.Sse.Observer
                       "observer-retry" ~last_event_id:0);
-            Oas_sse_bridge.start_with_interval ~drain_interval_s:0.1
+            Oas_event_bridge.start_with_interval ~drain_interval_s:0.1
               ~sw ~clock:(Eio.Stdenv.clock env) ~config ~bus;
             Event_bus.publish bus
               (Event_bus.mk_event
@@ -356,10 +356,10 @@ let test_oas_sse_bridge_retries_append_failure_then_recovers () =
             raise Exit)
       with Exit -> ())
 
-let test_oas_sse_bridge_drop_marker_on_exhausted_append_failure () =
+let test_oas_event_bridge_drop_marker_on_exhausted_append_failure () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let dir = tmpdir "oas_sse_bridge_drop" in
+  let dir = tmpdir "oas_event_bridge_drop" in
   let broken_root = Filename.concat dir "broken-root" in
   Out_channel.with_open_text broken_root (fun oc -> output_string oc "blocked");
   Fun.protect
@@ -374,7 +374,7 @@ let test_oas_sse_bridge_drop_marker_on_exhausted_append_failure () =
         Eio.Switch.run (fun sw ->
             ignore (Masc_mcp.Sse.register ~kind:Masc_mcp.Sse.Observer
                       "observer-drop" ~last_event_id:0);
-            Oas_sse_bridge.start_with_interval ~drain_interval_s:0.1
+            Oas_event_bridge.start_with_interval ~drain_interval_s:0.1
               ~sw ~clock:(Eio.Stdenv.clock env) ~config ~bus;
             Event_bus.publish bus
               (Event_bus.mk_event
@@ -405,11 +405,11 @@ let test_oas_sse_bridge_drop_marker_on_exhausted_append_failure () =
                 raise Exit)
       with Exit -> ())
 
-let test_oas_sse_bridge_broadcast_retry_does_not_duplicate_append () =
+let test_oas_event_bridge_broadcast_retry_does_not_duplicate_append () =
   let append_count = ref 0 in
   let broadcast_count = ref 0 in
   let pending =
-    Oas_sse_bridge.For_testing.make_pending
+    Oas_event_bridge.For_testing.make_pending
       (`Assoc
          [
            ("type", `String "oas:tool_called");
@@ -419,7 +419,7 @@ let test_oas_sse_bridge_broadcast_retry_does_not_duplicate_append () =
          ])
   in
   let first =
-    Oas_sse_bridge.For_testing.deliver_pending_with
+    Oas_event_bridge.For_testing.deliver_pending_with
       ~append_json:(fun _json -> incr append_count)
       ~broadcast_json:(fun _json ->
         incr broadcast_count;
@@ -428,26 +428,26 @@ let test_oas_sse_bridge_broadcast_retry_does_not_duplicate_append () =
   in
   let pending_after_failure =
     match first with
-    | Oas_sse_bridge.For_testing.Retryable_failure
-        (pending, Oas_sse_bridge.For_testing.Broadcast, _) ->
+    | Oas_event_bridge.For_testing.Retryable_failure
+        (pending, Oas_event_bridge.For_testing.Broadcast, _) ->
         pending
-    | Oas_sse_bridge.For_testing.Retryable_failure _ ->
+    | Oas_event_bridge.For_testing.Retryable_failure _ ->
         Alcotest.fail "expected broadcast-stage retryable failure"
-    | Oas_sse_bridge.For_testing.Delivered ->
+    | Oas_event_bridge.For_testing.Delivered ->
         Alcotest.fail "expected first delivery to fail on broadcast"
   in
   Alcotest.(check int) "append happens exactly once before retry" 1 !append_count;
   Alcotest.(check bool) "pending remembers durable append" true
     pending_after_failure.appended;
   let second =
-    Oas_sse_bridge.For_testing.deliver_pending_with
+    Oas_event_bridge.For_testing.deliver_pending_with
       ~append_json:(fun _json -> incr append_count)
       ~broadcast_json:(fun _json -> incr broadcast_count)
       pending_after_failure
   in
   (match second with
-   | Oas_sse_bridge.For_testing.Delivered -> ()
-   | Oas_sse_bridge.For_testing.Retryable_failure _ ->
+   | Oas_event_bridge.For_testing.Delivered -> ()
+   | Oas_event_bridge.For_testing.Retryable_failure _ ->
        Alcotest.fail "expected retry to deliver after broadcast recovery");
   Alcotest.(check int) "retry does not duplicate durable append" 1 !append_count;
   Alcotest.(check int) "broadcast retried once" 2 !broadcast_count
@@ -565,7 +565,7 @@ let test_agent_completed_includes_usage () =
            elapsed = 1.5;
          })
   in
-  match Oas_sse_bridge.native_event_to_json evt with
+  match Oas_event_bridge.native_event_to_json evt with
   | None -> Alcotest.fail "expected Some for AgentCompleted"
   | Some (`Assoc fields) ->
       let payload_fields =
@@ -602,7 +602,7 @@ let test_agent_completed_no_usage_on_error () =
            elapsed = 0.5;
          })
   in
-  match Oas_sse_bridge.native_event_to_json evt with
+  match Oas_event_bridge.native_event_to_json evt with
   | None -> Alcotest.fail "expected Some for AgentCompleted error"
   | Some (`Assoc fields) ->
       let payload_fields =
@@ -650,7 +650,7 @@ let test_oas_log_bridge_turn_completed_summary () =
              (List.mem_assoc "turn" fields)
        | _ -> Alcotest.fail "expected structured details")
 
-let test_oas_sse_bridge_logs_turn_completed_with_agent_name () =
+let test_oas_event_bridge_logs_turn_completed_with_agent_name () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir "oas_turn_log" in
@@ -667,7 +667,7 @@ let test_oas_sse_bridge_logs_turn_completed_with_agent_name () =
       Sse.set_clock (Eio.Stdenv.clock env);
       try
         Eio.Switch.run (fun sw ->
-          Oas_sse_bridge.start ~sw ~clock:(Eio.Stdenv.clock env) ~config ~bus;
+          Oas_event_bridge.start ~sw ~clock:(Eio.Stdenv.clock env) ~config ~bus;
           Event_bus.publish bus
             (Event_bus.mk_event
                ~correlation_id:"sess-turn" ~run_id:"run-turn"
@@ -712,7 +712,7 @@ let test_oas_sse_bridge_logs_turn_completed_with_agent_name () =
           raise Exit)
       with Exit -> ())
 
-let test_oas_sse_bridge_logs_tool_completed_with_agent_name () =
+let test_oas_event_bridge_logs_tool_completed_with_agent_name () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let dir = tmpdir "oas_tool_log" in
@@ -729,7 +729,7 @@ let test_oas_sse_bridge_logs_tool_completed_with_agent_name () =
       Sse.set_clock (Eio.Stdenv.clock env);
       try
         Eio.Switch.run (fun sw ->
-          Oas_sse_bridge.start ~sw ~clock:(Eio.Stdenv.clock env) ~config ~bus;
+          Oas_event_bridge.start ~sw ~clock:(Eio.Stdenv.clock env) ~config ~bus;
           Event_bus.publish bus
             (Event_bus.mk_event
                ~correlation_id:"sess-tool" ~run_id:"run-tool"
@@ -792,15 +792,15 @@ let () =
       Alcotest.test_case "keeper lifecycle envelope carries agent_name (#7827)" `Quick
         test_keeper_lifecycle_envelope_agent_name;
       Alcotest.test_case "sse bridge persists native events" `Quick
-        test_oas_sse_bridge_persists_native_events;
+        test_oas_event_bridge_persists_native_events;
       Alcotest.test_case "sse bridge sends lifecycle to observers" `Quick
-        test_oas_sse_bridge_broadcasts_lifecycle_to_observers;
+        test_oas_event_bridge_broadcasts_lifecycle_to_observers;
       Alcotest.test_case "sse bridge retries append failure then recovers" `Quick
-        test_oas_sse_bridge_retries_append_failure_then_recovers;
+        test_oas_event_bridge_retries_append_failure_then_recovers;
       Alcotest.test_case "sse bridge emits drop marker on exhausted append failure" `Quick
-        test_oas_sse_bridge_drop_marker_on_exhausted_append_failure;
+        test_oas_event_bridge_drop_marker_on_exhausted_append_failure;
       Alcotest.test_case "sse bridge retry avoids duplicate append after broadcast failure" `Quick
-        test_oas_sse_bridge_broadcast_retry_does_not_duplicate_append;
+        test_oas_event_bridge_broadcast_retry_does_not_duplicate_append;
       Alcotest.test_case "agent_completed includes usage" `Quick
         test_agent_completed_includes_usage;
       Alcotest.test_case "agent_completed no usage on error" `Quick
@@ -808,9 +808,9 @@ let () =
       Alcotest.test_case "oas log bridge adds turn completed summary" `Quick
         test_oas_log_bridge_turn_completed_summary;
       Alcotest.test_case "sse bridge logs turn completed with agent name" `Quick
-        test_oas_sse_bridge_logs_turn_completed_with_agent_name;
+        test_oas_event_bridge_logs_turn_completed_with_agent_name;
       Alcotest.test_case "sse bridge logs tool completed with agent name" `Quick
-        test_oas_sse_bridge_logs_tool_completed_with_agent_name;
+        test_oas_event_bridge_logs_tool_completed_with_agent_name;
     ];
     "message_conversion", [
       Alcotest.test_case "message roundtrip" `Quick test_message_roundtrip;

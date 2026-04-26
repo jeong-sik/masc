@@ -166,7 +166,7 @@ function renderCategorySection(
         }} />
         <div class="text-center py-3">
           <button type="button"
-            class="px-4 py-2 rounded text-xs font-medium text-[var(--text-muted)] bg-transparent border border-[var(--border-slate-16)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)] transition-all cursor-pointer disabled:opacity-50"
+            class="px-4 py-2 rounded text-xs font-medium text-[var(--text-muted)] bg-transparent border border-[var(--border-slate-16)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)] transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] disabled:opacity-50"
             disabled=${loadingMore}
             onClick=${() => {
               expandCategory(category, limits, limit, posts.length)
@@ -189,7 +189,7 @@ function NewPostForm() {
   if (!showNewPostForm.value) {
     return html`
       <button type="button"
-        class="w-full py-2.5 rounded border border-dashed border-[var(--card-border)] text-sm text-[var(--text-muted)] cursor-pointer hover:bg-[var(--white-4)] hover:text-[var(--text-body)] transition-colors bg-transparent"
+        class="w-full py-2.5 rounded border border-dashed border-[var(--card-border)] text-sm text-[var(--text-muted)] cursor-pointer hover:bg-[var(--white-4)] hover:text-[var(--text-body)] transition-colors bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
         onClick=${() => { showNewPostForm.value = true }}
       >+ 새 글 작성</button>
     `
@@ -216,11 +216,11 @@ function NewPostForm() {
       />
       <div class="flex gap-2 justify-end">
         <button type="button"
-          class="px-3 py-1.5 rounded text-sm border border-[var(--card-border)] bg-transparent text-[var(--text-muted)] cursor-pointer hover:bg-[var(--white-6)]"
+          class="px-3 py-1.5 rounded text-sm border border-[var(--card-border)] bg-transparent text-[var(--text-muted)] cursor-pointer hover:bg-[var(--white-6)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
           onClick=${() => { showNewPostForm.value = false; newPostTitle.value = ''; newPostContent.value = '' }}
         >취소</button>
         <button type="button"
-          class="px-4 py-1.5 rounded text-sm font-medium border border-[rgba(71,184,255,0.4)] bg-[var(--accent-soft)] text-[var(--accent)] cursor-pointer hover:bg-[var(--accent-20)] disabled:opacity-50"
+          class="px-4 py-1.5 rounded text-sm font-medium border border-[rgba(71,184,255,0.4)] bg-[var(--accent-soft)] text-[var(--accent)] cursor-pointer hover:bg-[var(--accent-20)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] disabled:opacity-50"
           disabled=${newPostSubmitting.value || !newPostTitle.value.trim() || !newPostContent.value.trim()}
           onClick=${() => { void submitNewPost() }}
         >${newPostSubmitting.value ? '등록 중...' : '등록'}</button>
@@ -238,7 +238,7 @@ function SortBar() {
       <div class="flex items-center gap-1.5 flex-wrap">
         ${SORT_MODES.map(mode => html`
           <button type="button"
-            class="px-3 py-1.5 rounded text-xs font-medium transition-all duration-150 border cursor-pointer
+            class="px-3 py-1.5 rounded text-xs font-medium transition-all duration-150 border cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]
               ${current === mode.id
                 ? 'bg-[var(--ok-soft)] text-[var(--ok)] border-[var(--ok-30)]'
                 : 'bg-transparent text-[var(--text-muted)] border-transparent hover:bg-[var(--white-8)] hover:text-[var(--text-body)]'
@@ -261,7 +261,7 @@ function SortBar() {
           const isHidden = boardHiddenCategories.value.has(g.category)
           return html`
             <button type="button"
-              class="px-2.5 py-1 rounded text-2xs font-medium transition-all duration-150 border cursor-pointer
+              class="px-2.5 py-1 rounded text-2xs font-medium transition-all duration-150 border cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]
                 ${isHidden
                   ? 'bg-[var(--accent-12)] text-[var(--accent)] border-[var(--accent-18)] line-through opacity-60'
                   : 'bg-transparent text-[var(--text-muted)] border-[var(--border-slate-16)] hover:bg-[var(--white-6)]'
@@ -301,19 +301,19 @@ function SortBar() {
         <div class="ml-auto flex items-center gap-2">
           ${selectedPostIds.value.size > 0 ? html`
             <button type="button"
-              class="px-3 py-1 rounded text-2xs font-medium transition-all duration-150 border cursor-pointer bg-[var(--bad-10)] text-[var(--bad-light)] border-[var(--bad-30)] hover:bg-[var(--bad-20)] disabled:opacity-50 disabled:cursor-not-allowed"
+              class="px-3 py-1 rounded text-2xs font-medium transition-all duration-150 border cursor-pointer bg-[var(--bad-10)] text-[var(--bad-light)] border-[var(--bad-30)] hover:bg-[var(--bad-20)] disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
               onClick=${bulkDeleteSelected}
               disabled=${bulkDeleting.value}
             >
               ${bulkDeleting.value ? '삭제 중...' : `선택 삭제 (${selectedPostIds.value.size})`}
             </button>
             <button type="button"
-              class="px-2 py-1 rounded text-2xs font-medium transition-all duration-150 border cursor-pointer bg-transparent text-[var(--text-muted)] border-[var(--border-slate-16)] hover:bg-[var(--white-6)]"
+              class="px-2 py-1 rounded text-2xs font-medium transition-all duration-150 border cursor-pointer bg-transparent text-[var(--text-muted)] border-[var(--border-slate-16)] hover:bg-[var(--white-6)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
               onClick=${() => { selectedPostIds.value = new Set() }}
             >선택 해제</button>
           ` : null}
           <button type="button"
-            class="px-3 py-1 rounded text-2xs font-medium transition-all duration-150 border cursor-pointer bg-transparent text-[var(--text-muted)] border-[var(--border-slate-16)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)] disabled:opacity-50 disabled:cursor-not-allowed"
+            class="px-3 py-1 rounded text-2xs font-medium transition-all duration-150 border cursor-pointer bg-transparent text-[var(--text-muted)] border-[var(--border-slate-16)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)] disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
             onClick=${refreshBoard}
             disabled=${boardLoading.value}
           >
@@ -404,13 +404,13 @@ function PostCard({ post }: { post: BoardPost }) {
       <!-- Vote column -->
       <div class="flex flex-col items-center gap-0.5 pt-0.5 min-w-9">
         <button type="button"
-          class="vote-btn upvote w-7 h-5 flex items-center justify-center rounded text-2xs text-[var(--text-muted)] hover:text-[var(--warn-bright)] hover:bg-[var(--warn-10)] transition-colors cursor-pointer border-0 bg-transparent"
+          class="vote-btn upvote w-7 h-5 flex items-center justify-center rounded text-2xs text-[var(--text-muted)] hover:text-[var(--warn-bright)] hover:bg-[var(--warn-10)] transition-colors cursor-pointer border-0 bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
           aria-label="추천"
           onClick=${(event: Event) => handleVote('up', event)}
         ><span aria-hidden="true">▲</span></button>
         <span class="text-sm font-semibold tabular-nums text-[var(--text-strong)]">${post.votes ?? 0}</span>
         <button type="button"
-          class="vote-btn downvote w-7 h-5 flex items-center justify-center rounded text-2xs text-[var(--text-muted)] hover:text-[var(--accent)] hover:bg-[var(--accent-10)] transition-colors cursor-pointer border-0 bg-transparent"
+          class="vote-btn downvote w-7 h-5 flex items-center justify-center rounded text-2xs text-[var(--text-muted)] hover:text-[var(--accent)] hover:bg-[var(--accent-10)] transition-colors cursor-pointer border-0 bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
           aria-label="비추천"
           onClick=${(event: Event) => handleVote('down', event)}
         ><span aria-hidden="true">▼</span></button>
@@ -451,7 +451,7 @@ function PostCard({ post }: { post: BoardPost }) {
 
           <!-- Delete button -->
           <button type="button"
-            class="ml-auto px-2 py-0.5 rounded text-3xs font-semibold border border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--bad-light)] hover:bg-[var(--bad-20)] transition-all cursor-pointer opacity-0 group-hover:opacity-100 focus-visible:opacity-100 disabled:opacity-50 disabled:cursor-not-allowed"
+            class="ml-auto px-2 py-0.5 rounded text-3xs font-semibold border border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--bad-light)] hover:bg-[var(--bad-20)] transition-all cursor-pointer opacity-0 group-hover:opacity-100 focus-visible:opacity-100 disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
             onClick=${handleDelete}
             disabled=${isDeleting}
           >
@@ -495,7 +495,7 @@ export function Memory() {
           <div>
             <${MemorySummary} />
             <button type="button"
-              class="mb-4 px-3 py-1.5 rounded text-xs font-medium text-[var(--text-muted)] bg-transparent border border-[var(--border-slate-16)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)] transition-all cursor-pointer"
+              class="mb-4 px-3 py-1.5 rounded text-xs font-medium text-[var(--text-muted)] bg-transparent border border-[var(--border-slate-16)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)] transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
               onClick=${() => navigate('workspace', { section: 'board' })}
             >← 게시판으로 돌아가기</button>
             ${detailLoading.value

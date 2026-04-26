@@ -135,17 +135,17 @@ function CommentItem({
       <div class="board-comment rounded p-3 bg-[var(--white-3)] border border-[var(--border-slate-12)] ${depth > 0 ? 'border-l-2 border-l-[var(--accent-20)]' : ''}">
         <div class="flex items-center gap-2 mb-1.5">
           <span class="text-xs">${authorAvatar(comment.author)}</span>
-          <button type="button" class="text-xs font-medium text-[var(--text-body)] hover:text-[var(--accent)] transition-colors cursor-pointer bg-transparent border-none p-0" onClick=${() => navigateToAuthor(comment.author)}>${comment.author}</button>
+          <button type="button" class="text-xs font-medium text-[var(--text-body)] hover:text-[var(--accent)] transition-colors cursor-pointer bg-transparent border-none p-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]" onClick=${() => navigateToAuthor(comment.author)}>${comment.author}</button>
           <span class="text-2xs text-[var(--text-muted)] opacity-60"><${TimeAgo} timestamp=${comment.created_at} /></span>
           <button type="button"
-            class="text-2xs text-[var(--text-muted)] hover:text-[var(--accent)] cursor-pointer bg-transparent border-0 ml-auto"
+            class="text-2xs text-[var(--text-muted)] hover:text-[var(--accent)] cursor-pointer bg-transparent border-0 ml-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
             onClick=${() => { replyingTo.value = isReplying ? null : comment.id; commentText.value = '' }}
           >${isReplying ? '취소' : '답글'}</button>
         </div>
         <div class="text-sm text-[var(--text-body)] leading-paragraph" id="comment-content-${comment.id}"><${RichContent} text=${displayText} previewLimit=${1} /></div>
         ${needsTruncation ? html`
           <button type="button"
-            class="mt-1 text-2xs text-[var(--accent)] hover:underline cursor-pointer bg-transparent border-0"
+            class="mt-1 text-2xs text-[var(--accent)] hover:underline cursor-pointer bg-transparent border-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
             onClick=${() => setExpanded(!expanded)}
             aria-expanded=${expanded}
             aria-controls="comment-content-${comment.id}"
@@ -165,7 +165,7 @@ function CommentItem({
             />
             <div class="mt-2 flex justify-end">
               <button type="button"
-                class="py-1.5 px-3 rounded text-xs font-medium font-[inherit] cursor-pointer transition-all duration-150 border
+                class="py-1.5 px-3 rounded text-xs font-medium font-[inherit] cursor-pointer transition-all duration-150 border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]
                   ${commentSubmitting.value || commentText.value.trim() === ''
                     ? 'bg-[var(--white-5)] text-[var(--text-muted)] border-[var(--border-slate-12)] opacity-50 cursor-not-allowed'
                     : 'bg-[var(--ok-soft)] text-[var(--ok)] border-[var(--ok-30)] hover:bg-[var(--ok-22)]'
@@ -227,14 +227,14 @@ export function CommentThread({ comments, postId }: { comments: BoardComment[]; 
       ` : null}
       ${!expanded && hiddenCount > 0 ? html`
         <button type="button"
-          class="text-xs text-[var(--accent)] hover:underline cursor-pointer bg-transparent border-0 text-left py-1"
+          class="text-xs text-[var(--accent)] hover:underline cursor-pointer bg-transparent border-0 text-left py-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
           onClick=${() => setExpanded(true)}
         >이전 댓글 ${hiddenCount}개 더 보기</button>
       ` : null}
       ${visible.map(comment => html`<${CommentItem} key=${comment.id} comment=${comment} postId=${postId} depth=${0} childrenMap=${filteredChildrenMap} />`)}
       ${expanded && hiddenCount > 0 ? html`
         <button type="button"
-          class="text-xs text-[var(--text-muted)] hover:text-[var(--accent)] cursor-pointer bg-transparent border-0 text-left py-1"
+          class="text-xs text-[var(--text-muted)] hover:text-[var(--accent)] cursor-pointer bg-transparent border-0 text-left py-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
           onClick=${() => setExpanded(false)}
         >접기</button>
       ` : null}
@@ -258,7 +258,7 @@ function CommentForm({ postId }: { postId: string }) {
       />
       <div class="mt-2 flex justify-end">
         <button type="button"
-          class="py-2 px-4 rounded text-sm font-medium font-[inherit] cursor-pointer transition-all duration-150 border
+          class="py-2 px-4 rounded text-sm font-medium font-[inherit] cursor-pointer transition-all duration-150 border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]
             ${commentSubmitting.value || commentText.value.trim() === ''
               ? 'bg-[var(--white-5)] text-[var(--text-muted)] border-[var(--border-slate-12)] opacity-50 cursor-not-allowed'
               : 'bg-[var(--ok-soft)] text-[var(--ok)] border-[var(--ok-30)] hover:bg-[var(--ok-22)]'
@@ -294,7 +294,7 @@ export function PostDetail({ post }: { post: BoardPost }) {
   return html`
     <div role="region" aria-label="게시글 상세">
       <button type="button"
-        class="mb-4 px-3 py-1.5 rounded text-xs font-medium text-[var(--text-muted)] bg-transparent border border-[var(--border-slate-16)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)] transition-all cursor-pointer"
+        class="mb-4 px-3 py-1.5 rounded text-xs font-medium text-[var(--text-muted)] bg-transparent border border-[var(--border-slate-16)] hover:bg-[var(--white-6)] hover:text-[var(--text-body)] transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
         onClick=${() => navigate('workspace', { section: 'board' })}
         aria-label="게시판으로 돌아가기"
       >← 게시판으로 돌아가기</button>
@@ -312,7 +312,7 @@ export function PostDetail({ post }: { post: BoardPost }) {
           <!-- Author and meta -->
           <div class="flex gap-2.5 items-center flex-wrap pt-3 border-t border-[var(--border-slate-12)]">
             <span class="text-sm">${authorAvatar(post.author)}</span>
-            <button type="button" class="text-xs text-[var(--text-body)] hover:text-[var(--accent)] transition-colors cursor-pointer bg-transparent border-none p-0" onClick=${() => navigateToAuthor(post.author)}>${post.author}</button>
+            <button type="button" class="text-xs text-[var(--text-body)] hover:text-[var(--accent)] transition-colors cursor-pointer bg-transparent border-none p-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]" onClick=${() => navigateToAuthor(post.author)}>${post.author}</button>
             <span class="text-2xs text-[var(--text-muted)]"><${TimeAgo} timestamp=${post.created_at} /></span>
             <span class="text-2xs text-[var(--text-muted)]">${post.votes ?? 0} votes</span>
           </div>
@@ -352,11 +352,11 @@ export function PostDetail({ post }: { post: BoardPost }) {
           <!-- Vote buttons -->
           <div class="flex gap-2">
             <button type="button"
-              class="vote-btn upvote px-3 py-1.5 rounded text-xs font-medium border border-[var(--border-slate-16)] bg-transparent text-[var(--text-muted)] hover:text-[var(--warn-bright)] hover:border-[var(--warn-30)] hover:bg-[var(--warn-10)] transition-all cursor-pointer"
+              class="vote-btn upvote px-3 py-1.5 rounded text-xs font-medium border border-[var(--border-slate-16)] bg-transparent text-[var(--text-muted)] hover:text-[var(--warn-bright)] hover:border-[var(--warn-30)] hover:bg-[var(--warn-10)] transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
               onClick=${() => handleVote('up')}
             ><span aria-hidden="true">▲</span> 추천</button>
             <button type="button"
-              class="vote-btn downvote px-3 py-1.5 rounded text-xs font-medium border border-[var(--border-slate-16)] bg-transparent text-[var(--text-muted)] hover:text-[var(--accent)] hover:border-[var(--accent-30)] hover:bg-[var(--accent-10)] transition-all cursor-pointer"
+              class="vote-btn downvote px-3 py-1.5 rounded text-xs font-medium border border-[var(--border-slate-16)] bg-transparent text-[var(--text-muted)] hover:text-[var(--accent)] hover:border-[var(--accent-30)] hover:bg-[var(--accent-10)] transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
               onClick=${() => handleVote('down')}
             ><span aria-hidden="true">▼</span> 비추천</button>
           </div>

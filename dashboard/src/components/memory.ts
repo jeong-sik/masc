@@ -432,8 +432,11 @@ function PostCard({ post }: { post: BoardPost }) {
           <!-- Author line -->
           <span class="text-xs text-[var(--text-muted)]">${authorAvatar(post.author)}</span>
           <a
+            role="link"
+            tabindex="0"
             class="text-xs text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors cursor-pointer"
             onClick=${(e: Event) => navigateToAuthor(post.author, e)}
+            onKeyDown=${(e: KeyboardEvent) => { if (e.key === 'Enter') navigateToAuthor(post.author, e) }}
           >${post.author}</a>
           <span class="text-2xs text-[var(--text-muted)] opacity-60"><${TimeAgo} timestamp=${post.created_at} /></span>
           ${isUpdated(post) ? html`<span class="text-3xs text-[var(--text-muted)] opacity-70">(수정됨)</span>` : null}

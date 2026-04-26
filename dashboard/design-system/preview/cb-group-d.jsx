@@ -297,7 +297,7 @@ function TaskStaleAlert() {
             </div>
           ))}
         </div>
-        <div role="note" style={{marginTop:8, padding:'6px 8px', borderTop:'1px dashed var(--line-2)', fontFamily:'var(--font-mono)', fontSize:'10px', color:'var(--color-fg-disabled)'}}>
+        <div role="note" style={{marginTop:8, padding:'6px 8px', borderTop:'1px dashed var(--color-border-strong)', fontFamily:'var(--font-mono)', fontSize:'10px', color:'var(--color-fg-disabled)'}}>
           taskmaster cannot force-release others' claims · operator nudge channel: <span style={{color:'var(--brass-1)'}}>hint</span>
         </div>
       </div>
@@ -441,7 +441,7 @@ function ResponsibilityMatrix() {
         </table>
         <div role="note" aria-label="Matrix density legend" style={{marginTop:8, padding:'6px 8px', fontFamily:'var(--font-mono)', fontSize:'10px', color:'var(--color-fg-disabled)', display:'flex', gap:8, alignItems:'center'}}>
           <span aria-hidden="true">density:</span>
-          <span aria-hidden="true" style={{padding:'1px 6px', background:'var(--color-bg-page)', border:'1px solid var(--line-1)'}}>0</span>
+          <span aria-hidden="true" style={{padding:'1px 6px', background:'var(--color-bg-page)', border:'1px solid var(--color-border-default)'}}>0</span>
           <span aria-hidden="true" style={{padding:'1px 6px', background:'rgb(var(--brass-glow)/.05)', color:'var(--color-fg-secondary)'}}>1–2</span>
           <span aria-hidden="true" style={{padding:'1px 6px', background:'rgb(var(--brass-glow)/.12)', color:'var(--color-fg-primary)'}}>3–4</span>
           <span aria-hidden="true" style={{padding:'1px 6px', background:'rgb(var(--brass-glow)/.22)', color:'var(--brass-1)'}}>5–6</span>

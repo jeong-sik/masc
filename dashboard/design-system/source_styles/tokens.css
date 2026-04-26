@@ -388,6 +388,7 @@ body[data-density="comfortable"]  { --density: 1.15; }
 
   --color-border-default: var(--line-1);
   --color-border-strong:  var(--line-2);
+  --color-border-divider: var(--line-3);
 
   --color-accent-fg:      var(--brass-1);
   /* --color-accent already defined in colors_and_type.css */
@@ -424,6 +425,7 @@ body[data-density="comfortable"]  { --density: 1.15; }
 
   --color-border-default: #d8d2c4;
   --color-border-strong:  #b8b0a0;
+  --color-border-divider: #c8c0b0;
 
   --color-accent-fg:      var(--brass-3);
 
@@ -452,6 +454,7 @@ body[data-density="comfortable"]  { --density: 1.15; }
     --color-fg-disabled:    #b0a898;
     --color-border-default: #d8d2c4;
     --color-border-strong:  #b8b0a0;
+    --color-border-divider: #c8c0b0;
     --color-accent-fg:      var(--brass-3);
     --color-status-added:    #3d7a3d;
     --color-status-modified: #8a6a1a;

@@ -115,7 +115,7 @@ function BoardThread() {
             </article>
           ))}
         </div>
-        <div role="textbox" aria-label="Reply composer (placeholder)" style={{marginTop:8, padding:'6px 8px', background:'var(--color-bg-surface)', border:'1px dashed var(--line-2)', fontFamily:'var(--font-mono)', fontSize:'11px', color:'var(--color-fg-disabled)'}}>
+        <div role="textbox" aria-label="Reply composer (placeholder)" style={{marginTop:8, padding:'6px 8px', background:'var(--color-bg-surface)', border:'1px dashed var(--color-border-strong)', fontFamily:'var(--font-mono)', fontSize:'11px', color:'var(--color-fg-disabled)'}}>
           <span aria-hidden="true" style={{color:'var(--brass-1)'}}>masc&gt;</span> reply...
           <span aria-hidden="true" style={{color:'var(--brass-1)', animation:'anim-blink 1s step-end infinite'}}> ▌</span>
         </div>
@@ -252,7 +252,7 @@ function MentionInbox() {
             </article>
           ))}
         </div>
-        <div role="heading" aria-level={3} style={{fontFamily:'var(--font-mono)', fontSize:'10px', color:'var(--color-fg-disabled)', letterSpacing:'.1em', textTransform:'uppercase', padding:'8px 0 2px', borderTop:'1px dashed var(--line-2)'}}>━━ other mentions · {otherMentions.length}</div>
+        <div role="heading" aria-level={3} style={{fontFamily:'var(--font-mono)', fontSize:'10px', color:'var(--color-fg-disabled)', letterSpacing:'.1em', textTransform:'uppercase', padding:'8px 0 2px', borderTop:'1px dashed var(--color-border-strong)'}}>━━ other mentions · {otherMentions.length}</div>
         <div className="ms-inbox" role="log" aria-live="polite" aria-label={`${otherMentions.length} other mentions`}>
           {otherMentions.map(m => (
             <article key={m.seq} className="mn" aria-label={`#${m.seq} · ${m.from} in #${m.room} at ${m.at}: ${m.body}`} style={{borderLeftColor:'var(--info)', opacity:.7}}>
@@ -291,7 +291,7 @@ function StateBlockMessage() {
                      role="listitem"
                      className="ms-msg"
                      aria-label={`#${m.seq} · ${m.from} ${m.kind} → #${m.room} · ${m.at}: ${m.body} · state: ${m.state}`}
-                     style={{padding:'8px 10px', background:'var(--color-bg-surface)', border:'1px solid var(--line-1)', borderLeft:'2px solid var(--brass-2)', borderRadius:0}}>
+                     style={{padding:'8px 10px', background:'var(--color-bg-surface)', border:'1px solid var(--color-border-default)', borderLeft:'2px solid var(--brass-2)', borderRadius:0}}>
               <div className="seq" aria-hidden="true">#{m.seq}</div>
               <div className="body">
                 <div className="h" aria-hidden="true">

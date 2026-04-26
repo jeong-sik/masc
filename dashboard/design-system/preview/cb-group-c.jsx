@@ -274,7 +274,7 @@ function DrawerGoal() {
               <div key={t.id}
                    role="listitem"
                    aria-label={`${t.id} · ${t.title} · ${t.keeper} · ${t.status}`}
-                   style={{display:'flex', alignItems:'center', gap:7, padding:'4px 7px', background:'var(--color-bg-surface)', border:'1px solid var(--line-1)', borderRadius:3, fontSize:11}}>
+                   style={{display:'flex', alignItems:'center', gap:7, padding:'4px 7px', background:'var(--color-bg-surface)', border:'1px solid var(--color-border-default)', borderRadius:3, fontSize:11}}>
                 <Dot kind={kClass(t.keeper)} size="sm" />
                 <span className="cb-mono" aria-hidden="true" style={{color:'var(--color-fg-disabled)'}}>{t.id}</span>
                 <span aria-hidden="true" style={{color:'var(--color-fg-primary)', flex:1}}>{t.title}</span>
@@ -325,7 +325,7 @@ function DrawerKeeper() {
       <div className="body">
         <section aria-labelledby="drawer-keeper-heartbeat">
           <SectionHeading variant="title" title="HEARTBEAT" id="drawer-keeper-heartbeat" />
-          <div aria-label="Heartbeat trace, 60-second window" style={{background:'var(--color-bg-surface)', padding:6, border:'1px solid var(--line-1)', borderRadius:3}}>
+          <div aria-label="Heartbeat trace, 60-second window" style={{background:'var(--color-bg-surface)', padding:6, border:'1px solid var(--color-border-default)', borderRadius:3}}>
             <span aria-hidden="true"><Heartbeat width={260} height={40} /></span>
           </div>
         </section>

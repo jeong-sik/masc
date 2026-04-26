@@ -65,7 +65,7 @@ function BranchSelector() {
         </span>
       </button>
 
-      <div role="heading" aria-level={3} style={{padding:'4px 8px',background:'var(--color-bg-panel-alt)',border:'1px solid var(--line-2)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',letterSpacing:'.12em',textTransform:'uppercase',color:'var(--color-fg-disabled)',display:'flex',gap:'8px'}}>
+      <div role="heading" aria-level={3} style={{padding:'4px 8px',background:'var(--color-bg-panel-alt)',border:'1px solid var(--color-border-strong)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',letterSpacing:'.12em',textTransform:'uppercase',color:'var(--color-fg-disabled)',display:'flex',gap:'8px'}}>
         <span aria-hidden="true">switch branch · {P2i.branches.length} known</span>
         <span aria-hidden="true" style={{marginLeft:'auto',color:'var(--brass-1)'}}>active · {sel}</span>
       </div>
@@ -97,7 +97,7 @@ function BranchSelector() {
           );
         })}
       </div>
-      <div role="list" aria-label={`Active branch keepers · ${cur.keepers.length}`} style={{padding:'5px 10px',background:'var(--color-bg-surface)',border:'1px solid var(--line-1)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-10)',color:'var(--color-fg-muted)',display:'flex',gap:'8px',alignItems:'center'}}>
+      <div role="list" aria-label={`Active branch keepers · ${cur.keepers.length}`} style={{padding:'5px 10px',background:'var(--color-bg-surface)',border:'1px solid var(--color-border-default)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-10)',color:'var(--color-fg-muted)',display:'flex',gap:'8px',alignItems:'center'}}>
         <span aria-hidden="true" style={{color:'var(--color-fg-disabled)'}}>active branch keepers ·</span>
         {cur.keepers.map(k => (
           <span key={k} role="listitem" aria-label={k} style={{display:'inline-flex',alignItems:'center',gap:'4px'}}>
@@ -149,10 +149,10 @@ function KeeperMultiSelect() {
           );
         })}
       </div>
-      <div role="status" aria-live="polite" aria-label={`Filter applied to 8 zones · ${sel.size === 0 ? 'all hidden' : sel.size + '-way scope'}`} style={{padding:'5px 10px',background:'var(--color-bg-panel-alt)',border:'1px solid var(--line-2)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-10)',color:'var(--color-fg-muted)',display:'flex',flexWrap:'wrap',gap:'4px',alignItems:'center'}}>
+      <div role="status" aria-live="polite" aria-label={`Filter applied to 8 zones · ${sel.size === 0 ? 'all hidden' : sel.size + '-way scope'}`} style={{padding:'5px 10px',background:'var(--color-bg-panel-alt)',border:'1px solid var(--color-border-strong)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-10)',color:'var(--color-fg-muted)',display:'flex',flexWrap:'wrap',gap:'4px',alignItems:'center'}}>
         <span aria-hidden="true" style={{color:'var(--color-fg-disabled)'}}>filter applied to ·</span>
         {['Swimlanes','Activity','Audit','Decisions','Memory','Cost','Stress','Episodes'].map(z => (
-          <span key={z} aria-hidden="true" style={{padding:'1px 5px',background:'var(--color-bg-surface)',border:'1px solid var(--line-1)',color:'var(--color-fg-secondary)'}}>{z}</span>
+          <span key={z} aria-hidden="true" style={{padding:'1px 5px',background:'var(--color-bg-surface)',border:'1px solid var(--color-border-default)',color:'var(--color-fg-secondary)'}}>{z}</span>
         ))}
         <span aria-hidden="true" style={{marginLeft:'auto',color: sel.size === 0 ? 'var(--err-fg)' : 'var(--brass-1)'}}>
           {sel.size === 0 ? '⚠ all hidden' : `→ ${sel.size}-way scope`}
@@ -172,7 +172,7 @@ function OperatorNudgeLog() {
   const [targets] = useState(['sangsu']);
   return (
     <section aria-label={`Operator nudge log · ${P2i.nudges.length} total · ${P2i.nudges.filter(n => !n.ack).length} pending ack`} style={{display:'flex',flexDirection:'column',gap:'6px'}}>
-      <div role="heading" aria-level={3} style={{padding:'4px 8px',background:'var(--color-bg-panel-alt)',border:'1px solid var(--line-2)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',letterSpacing:'.12em',textTransform:'uppercase',color:'var(--color-fg-disabled)',display:'flex',gap:'8px'}}>
+      <div role="heading" aria-level={3} style={{padding:'4px 8px',background:'var(--color-bg-panel-alt)',border:'1px solid var(--color-border-strong)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',letterSpacing:'.12em',textTransform:'uppercase',color:'var(--color-fg-disabled)',display:'flex',gap:'8px'}}>
         <span>operator · nudge log</span>
         <span style={{marginLeft:'auto',color:'var(--brass-1)'}}>{P2i.nudges.length} nudges · {P2i.nudges.filter(n => !n.ack).length} pending ack</span>
       </div>

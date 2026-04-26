@@ -21,6 +21,7 @@ specs/keeper-state-machine/KeeperDwellMonotone.tla
 specs/keeper-state-machine/KeeperMemoryLifecycle.tla
 specs/keeper-state-machine/KeeperOutcomesConservation.tla
 specs/keeper-state-machine/KeeperReconcileLiveness.tla
+specs/keeper-state-machine/OperatorPauseBroadcast.tla
 specs/keeper-state-machine/KeeperSocialModelMagenticLedger.tla
 specs/keeper-state-machine/KeeperWorkPipeline.tla
 specs/server-state/ServerState.tla

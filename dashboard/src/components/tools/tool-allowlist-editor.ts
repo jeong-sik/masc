@@ -3,6 +3,7 @@ import { signal, computed } from '@preact/signals'
 import { useEffect, useState, useMemo } from 'preact/hooks'
 import { useCombobox } from 'downshift'
 import { editKeeperTools, type ToolEditResponse } from '../../api/keeper'
+import { TextInput } from '../common/input'
 import { Select } from '../common/select'
 import { toolsData } from './tool-state'
 
@@ -225,13 +226,13 @@ export function ResolvedPreview({ tools, catMap }: { tools: string[]; catMap: Ma
         <span class="text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">
           resolved allowlist (${tools.length}개, ${groups.length} 카테고리)
         </span>
-        <input
+        <${TextInput}
           type="search"
+          class="min-w-35 max-w-55 flex-1 !px-2 !py-1 !text-2xs"
           value=${query}
           placeholder="도구/카테고리 필터"
-          aria-label="resolved allowlist 필터"
+          ariaLabel="resolved allowlist 필터"
           onInput=${(e: Event) => setQuery((e.target as HTMLInputElement).value)}
-          class="min-w-35 max-w-55 flex-1 rounded border border-[var(--color-border-default)] bg-[var(--white-3)] px-2 py-1 text-2xs text-[var(--color-fg-primary)] placeholder:text-[var(--color-fg-muted)] focus:outline-none focus:border-[var(--color-accent-fg)]"
         />
       </div>
       ${isFiltering && visibleTools.length === 0

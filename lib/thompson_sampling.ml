@@ -605,7 +605,7 @@ let select_with_feedback ~agents ~max_n ~pending_triggers ~tick_interval_s =
     Max = ln(n_agents) for uniform selection. *)
 let selection_entropy () =
   let stats = get_all_stats () in
-  if List.length stats = 0 then 0.0
+  if stats = [] then 0.0
   else begin
     let total_selections = List.fold_left (fun acc s -> acc + s.selections) 0 stats in
     if total_selections = 0 then 0.0

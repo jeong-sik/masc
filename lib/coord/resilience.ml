@@ -82,7 +82,7 @@ module ZeroZombie = struct
       Returns list of cleaned agent names. *)
   let cleanup ~cleanup_fn =
     let cleaned = cleanup_fn () in
-    if List.length cleaned > 0 then begin
+    if cleaned <> [] then begin
       global_stats.total_cleanups <- global_stats.total_cleanups + 1;
       global_stats.last_cleanup_ts <- Time.now ();
       global_stats.last_cleaned_agents <- cleaned

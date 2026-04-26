@@ -545,7 +545,7 @@ let format_for_injection ?(include_patterns=true) ?(max_patterns=5) (inst : inst
   ) inst.succession.onboarding_steps;
 
   (* Alumni Network *)
-  if List.length inst.alumni > 0 then begin
+  if inst.alumni <> [] then begin
     let recent_alumni = List.filteri (fun i _ -> i < 3) inst.alumni in
     Buffer.add_string buf (Printf.sprintf "\n👥 Recent predecessors: %s\n"
       (String.concat ", " recent_alumni))

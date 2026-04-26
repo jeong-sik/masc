@@ -1600,7 +1600,7 @@ let run_turn
               let tool_choice =
                 if computed_surface.is_last_turn
                 then current_params.tool_choice
-                else if computed_surface.tool_gate_requested && List.length all_allowed > 0
+                else if computed_surface.tool_gate_requested && all_allowed <> []
                 then
                   Some
                     (preferred_tool_choice_for_required_turn

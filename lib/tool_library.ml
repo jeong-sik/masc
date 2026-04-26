@@ -93,7 +93,7 @@ let parse_frontmatter content =
   let lines = String.split_on_char '\n' content in
   let rec find_end acc = function
     | [] -> (List.rev acc, [])
-    | "---" :: rest when List.length acc > 0 -> (List.rev acc, rest)
+    | "---" :: rest when acc <> [] -> (List.rev acc, rest)
     | line :: rest -> find_end (line :: acc) rest
   in
   match lines with

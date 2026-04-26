@@ -1127,6 +1127,7 @@ function CascadeRawConfigEditor({
           autoComplete="off"
         <form aria-label="설정 소스 편집" class="flex flex-col gap-3" onSubmit=${handleSave}>
           <textarea
+            autoComplete="off"
             aria-label="설정 소스 편집"
             class="h-96 w-full rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-3 py-2 font-mono text-xs text-[var(--text-strong)]"
             spellcheck="false"
@@ -1198,6 +1199,7 @@ function CascadeRawConfigEditor({
                 ${raw?.config_path ?? 'unresolved'}
               </div>
               <textarea
+                autoComplete="off"
                 aria-label="원본 JSON"
                 class="h-72 w-full rounded border border-[var(--card-border)] bg-[var(--bg-0)] px-3 py-2 font-mono text-xs text-[var(--text-strong)]"
                 spellcheck="false"

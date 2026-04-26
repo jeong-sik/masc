@@ -324,7 +324,7 @@ describe('capacityKindLabel', () => {
   it('maps capacity kinds to labels', () => {
     expect(capacityKindLabel('cli')).toBe('CLI')
     expect(capacityKindLabel('ollama')).toBe('Ollama')
-    expect(capacityKindLabel('other')).toBe('Other')
+    expect(capacityKindLabel('other')).toBe('기타')
   })
 })
 

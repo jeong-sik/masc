@@ -161,8 +161,8 @@ describe('KeeperConversationPanel', () => {
     )
 
     const buttons = Array.from(container.querySelectorAll('button')).map(b => b.textContent?.trim())
-    expect(buttons).toContain('Probe')
-    expect(buttons).toContain('Recover')
+    expect(buttons).toContain('점검')
+    expect(buttons).toContain('복구')
     expect(buttons).toContain('Social sweep')
     expect(buttons).not.toContain('기동')
     expect(buttons).not.toContain('종료')

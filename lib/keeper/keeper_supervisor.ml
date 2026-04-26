@@ -623,15 +623,6 @@ let cleanup_dead_tombstone (ctx : _ context)
     the source module's exhaustive-match check, instead of breaking main
     here on first build (the recurring P0 pattern from #10490 + #10574). *)
 let cohort_key_of_reason = Keeper_registry.failure_reason_cohort_key
-    Groups failures by variant, ignoring parameters (e.g. failure count). *)
-let cohort_key_of_reason = function
-  | Some (Keeper_registry.Heartbeat_consecutive_failures _) -> "heartbeat_failures"
-  | Some (Keeper_registry.Turn_consecutive_failures _) -> "turn_failures"
-  | Some (Keeper_registry.Ambiguous_partial_commit _) -> "ambiguous_partial_commit"
-  | Some Keeper_registry.Fiber_unresolved -> "fiber_unresolved"
-  | Some (Keeper_registry.Exception _) -> "exception"
-  | Some (Keeper_registry.Stale_turn_timeout _) -> "stale_turn_timeout"
-  | None -> "unknown"
 
 (** Self-preservation gate. Suppresses restarts when a dominant failure
     cohort exceeds ratio threshold AND minimum candidate count. *)

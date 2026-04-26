@@ -94,7 +94,7 @@ const SNIPPETS = [
     title: 'Keyboard hint',
     desc: 'Inline keycap. Combine with text for shortcut docs.',
     html:
-`<span style="font-family:var(--font-mono);font-size:11px;color:var(--fg-3)">
+`<span style="font-family:var(--font-mono);font-size:11px;color:var(--color-fg-muted)">
   open palette
   <span class="kbd">⌘</span><span class="kbd">K</span>
   · run cell
@@ -106,7 +106,7 @@ const SNIPPETS = [
     title: 'Inline code token (.tk)',
     desc: 'Inline mono token for IDs / values inside body text. Brass and err variants.',
     html:
-`<p style="font-family:var(--font-sans);font-size:12px;color:var(--fg-2);line-height:1.5;max-width:320px">
+`<p style="font-family:var(--font-sans);font-size:12px;color:var(--color-fg-secondary);line-height:1.5;max-width:320px">
   Keeper <span class="tk is-brass">@nick0cave</span> claimed task
   <span class="tk">t-4012</span> on branch <span class="tk">feat/cascade-v3</span>;
   drift score <span class="tk is-err">0.84</span> exceeded threshold.
@@ -373,9 +373,9 @@ const SNIPPETS = [
 `<div style="display:flex;flex-direction:column">
   <div class="nd-row">
     <span class="ts">12:05</span>
-    <span style="font-family:var(--font-mono);font-size:11px;color:var(--brass-1)">@sangsu</span>
-    <span style="font-family:var(--font-mono);font-size:9px;padding:1px 5px;border:1px solid var(--brass-3);color:var(--brass-1);background:rgb(var(--brass-glow)/.08);text-transform:uppercase;letter-spacing:.06em">→ keeper-merge</span>
-    <span style="font-family:var(--font-mono);font-size:11px;color:var(--fg-1);line-height:1.4">extend probe window to 4s before fallback — see ar-2025-04-11/f-002</span>
+    <span style="font-family:var(--font-mono);font-size:11px;color:var(--color-accent-fg)">@sangsu</span>
+    <span style="font-family:var(--font-mono);font-size:9px;padding:1px 5px;border:1px solid var(--brass-3);color:var(--color-accent-fg);background:rgb(var(--brass-glow)/.08);text-transform:uppercase;letter-spacing:.06em">→ keeper-merge</span>
+    <span style="font-family:var(--font-mono);font-size:11px;color:var(--color-fg-primary);line-height:1.4">extend probe window to 4s before fallback — see ar-2025-04-11/f-002</span>
     <span style="font-family:var(--font-mono);font-size:9px;color:var(--fg-4);text-transform:uppercase;letter-spacing:.06em">cooldown 30s</span>
   </div>
 </div>`,

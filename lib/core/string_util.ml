@@ -89,6 +89,22 @@ let starts_with_ci ~prefix s =
     in
     match_at 0
 
+(* ASCII case-insensitive equality.  No allocation; equivalent to
+   [String.lowercase_ascii a = String.lowercase_ascii b] but
+   short-circuits on length and on first mismatching byte. *)
+let equals_ci a b =
+  let la = String.length a in
+  if la <> String.length b then false
+  else
+    let rec match_at i =
+      if i = la then true
+      else
+        let ca = Char.lowercase_ascii (String.unsafe_get a i) in
+        let cb = Char.lowercase_ascii (String.unsafe_get b i) in
+        if ca <> cb then false else match_at (i + 1)
+    in
+    match_at 0
+
 (* Byte-wise non-overlapping replace: scans [haystack] for [needle] and
    substitutes [by] for each occurrence. Empty needle is a no-op (would
    loop forever otherwise). Skips ahead by [needle_len] after a match,

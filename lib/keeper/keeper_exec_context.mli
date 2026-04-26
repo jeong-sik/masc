@@ -189,21 +189,6 @@ val load_context_from_checkpoint :
 val save_checkpoint :
   session_context -> working_context -> generation:int -> checkpoint
 
-(** {1 Deprecated Checkpoint Helpers} *)
-
-val restore_checkpoint : checkpoint -> max_tokens:int -> working_context
-[@@deprecated "Use Keeper_context_core.restore_checkpoint directly; this re-export will be removed in a future release."]
-
-val load_latest_checkpoint : session_context -> checkpoint option
-[@@deprecated "Use Keeper_context_core.load_latest_checkpoint directly; this re-export will be removed in a future release."]
-
-val context_of_legacy_checkpoint :
-  checkpoint -> primary_model_max_tokens:int -> working_context
-[@@deprecated "Use Keeper_context_core.context_of_legacy_checkpoint directly; this re-export will be removed in a future release."]
-
-val checkpoint_generation : Oas.Checkpoint.t -> fallback:int -> int
-[@@deprecated "Use Keeper_context_core.checkpoint_generation directly; this re-export will be removed in a future release."]
-
 (** {1 Compaction} *)
 
 val compaction_policy_of_keeper : keeper_meta -> float * int * int
@@ -345,35 +330,6 @@ val append_trait_clause : base:string -> clause:string -> string
 val strip_state_blocks_text : string -> string
 val trim_to_option : string -> string option
 val user_visible_reply_text : ?fallback:string -> string -> string
-
-(** {1 Deprecated Text Processing Helpers} *)
-
-val state_snapshot_reply_fallback :
-  Keeper_memory_policy.keeper_state_snapshot option -> string option
-[@@deprecated "Use Keeper_text_processing.state_snapshot_reply_fallback directly; this re-export will be removed in a future release."]
-
-val strip_internal_reply_markup : string -> string
-[@@deprecated "Use Keeper_text_processing.strip_internal_reply_markup directly; this re-export will be removed in a future release."]
-
-val normalize_proactive_text : string -> string
-[@@deprecated "Use Keeper_text_processing.normalize_proactive_text directly; this re-export will be removed in a future release."]
-
-val extract_checkin_text : string -> string option
-[@@deprecated "Use Keeper_text_processing.extract_checkin_text directly; this re-export will be removed in a future release."]
-
-(** {1 Deprecated Proactive Terminal-Ending Detection} *)
-
-val proactive_has_terminal_punct : string -> bool
-[@@deprecated "Use Keeper_text_processing.proactive_has_terminal_punct directly; this re-export will be removed in a future release."]
-
-val proactive_has_terminal_korean_ending : string -> bool
-[@@deprecated "Use Keeper_text_processing.proactive_has_terminal_korean_ending directly; this re-export will be removed in a future release."]
-
-val proactive_has_terminal_ending : string -> bool
-[@@deprecated "Use Keeper_text_processing.proactive_has_terminal_ending directly; this re-export will be removed in a future release."]
-
-val proactive_looks_fragmentary : string -> bool
-[@@deprecated "Use Keeper_text_processing.proactive_looks_fragmentary directly; this re-export will be removed in a future release."]
 
 (** {1 Fragment Detection (used by dashboard)} *)
 

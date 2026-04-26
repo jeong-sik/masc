@@ -449,7 +449,11 @@ let post_keeper_alert_github
     ]
     @ List.concat_map (fun label -> [ "--label"; label ]) labels
     in
-    let (status, out) = Process_eio.run_argv_with_status ~timeout_sec:20.0 args in
+    let (status, out) =
+      Process_eio.run_argv_with_status
+        ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Alerting ())
+        args
+    in
     match status with
     | Unix.WEXITED 0 -> (true, Some (short_preview ~max_len:200 out))
     | Unix.WEXITED n ->

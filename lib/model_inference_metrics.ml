@@ -136,6 +136,21 @@ let average_opt (arr : float array) =
 let percentile_opt (arr : float array) p =
   if Array.length arr = 0 then None else Some (percentile arr p)
 
+(* Single-pass [List.length (List.filter pred xs)] equivalent — drops
+   the intermediate list allocation. Hot in per-window aggregation
+   loops below where [entries] reaches thousands. *)
+let count_if pred xs =
+  List.fold_left (fun n x -> if pred x then n + 1 else n) 0 xs
+
+(* O(min(n, length xs)) prefix take.  Replaces the
+   [if List.length xs > n then List.filteri (fun i _ -> i < n) xs else xs]
+   pattern: that walks the list twice (length, then filter) and allocates
+   the full filtered list.  This walks once and stops at [n]. *)
+let rec take n = function
+  | _ when n <= 0 -> []
+  | [] -> []
+  | x :: xs -> x :: take (n - 1) xs
+
 let sum_int_opt values =
   match values with
   | [] -> None
@@ -882,7 +897,7 @@ let aggregate_by_model (entries : raw_entry list) : model_stats list =
     in
     Array.sort Float.compare lat_vals;
     let success_count = List.length success_entries in
-    let error_count = List.length (List.filter (fun e -> e.is_error) entries) in
+    let error_count = count_if (fun e -> e.is_error) entries in
     let total_tool_calls = List.fold_left (fun acc e -> acc + e.tool_call_count) 0 entries in
     let usage_sample_count =
       List.fold_left
@@ -931,7 +946,7 @@ let aggregate_by_model (entries : raw_entry list) : model_stats list =
       | [] -> None
       | xs ->
         let total = List.length xs in
-        let on_count = List.length (List.filter (fun x -> x) xs) in
+        let on_count = count_if (fun x -> x) xs in
         Some (float_of_int on_count /. float_of_int total)
     in
     let provider =
@@ -975,7 +990,7 @@ let aggregate_by_model (entries : raw_entry list) : model_stats list =
       primary_coverage_stage;
       primary_coverage_reason;
       coverage_reason_counts;
-      fallback_count = List.length (List.filter (fun e -> e.fallback_applied) entries);
+      fallback_count = count_if (fun e -> e.fallback_applied) entries;
       success_count;
       error_count;
       total_cost_usd =
@@ -995,11 +1010,11 @@ let aggregate_by_model (entries : raw_entry list) : model_stats list =
         in
         StringMap.fold (fun tool count acc -> (tool, count) :: acc) tool_map []
         |> List.sort (fun (_, a) (_, b) -> compare b a)
-        |> (fun l -> if List.length l > 10 then List.filteri (fun i _ -> i < 10) l else l));
+        |> take 10);
       recent_entries =
         success_entries
         |> List.sort (fun a b -> Float.compare b.ts_unix a.ts_unix)
-        |> (fun l -> if List.length l > 5 then List.filteri (fun i _ -> i < 5) l else l)
+        |> take 5
         |> List.map (fun e -> {
           re_ts_unix = e.ts_unix;
           re_provider = e.provider;
@@ -1044,8 +1059,8 @@ let bucket_entries_for_model (entries : raw_entry list) ~(bucket_sec : int)
     let n = List.length bucket_entries in
     let lat_vals = List.filter_map (fun e -> e.latency_ms) bucket_entries |> Array.of_list in
     Array.sort Float.compare lat_vals;
-    let success_count = List.length (List.filter (fun e -> not e.is_error) bucket_entries) in
-    let error_count = List.length (List.filter (fun e -> e.is_error) bucket_entries) in
+    let success_count = count_if (fun e -> not e.is_error) bucket_entries in
+    let error_count = count_if (fun e -> e.is_error) bucket_entries in
     let cache_reads = List.filter_map (fun e -> e.cache_read_tokens) bucket_entries in
     let inputs = List.filter_map (fun e -> e.input_tokens) bucket_entries in
     let cache_hit_ratio =
@@ -1095,7 +1110,7 @@ let compute ~base_path ~window_minutes : aggregate =
   let entries = read_all_entries ~base_path ~since_unix in
   let models = aggregate_by_model entries in
   let total_error_entries =
-    List.length (List.filter (fun e -> e.is_error) entries)
+    count_if (fun e -> e.is_error) entries
   in
   { window_minutes; bucket_minutes = 0; models;
     total_entries = List.length entries;
@@ -1122,7 +1137,7 @@ let compute_with_buckets ~base_path ~window_minutes ~bucket_minutes : aggregate 
     ) models
   in
   let total_error_entries =
-    List.length (List.filter (fun e -> e.is_error) entries)
+    count_if (fun e -> e.is_error) entries
   in
   { window_minutes; bucket_minutes;
     models = models_with_buckets;
@@ -1317,7 +1332,9 @@ let provider_rollup (agg : aggregate) : provider_stats list =
       | None -> ()
       | Some p ->
         let existing =
-          try Hashtbl.find by_provider p with Not_found -> []
+          match Hashtbl.find_opt by_provider p with
+          | Some v -> v
+          | None -> []
         in
         Hashtbl.replace by_provider p (m :: existing))
     agg.models;

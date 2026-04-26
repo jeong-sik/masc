@@ -65,11 +65,6 @@ let save_oas_checkpoint = Keeper_context_core.save_oas_checkpoint
 let load_context_from_checkpoint = Keeper_context_core.load_context_from_checkpoint
 let save_checkpoint = Keeper_context_core.save_checkpoint
 
-let restore_checkpoint = Keeper_context_core.restore_checkpoint
-let load_latest_checkpoint = Keeper_context_core.load_latest_checkpoint
-let context_of_legacy_checkpoint = Keeper_context_core.context_of_legacy_checkpoint
-let checkpoint_generation = Keeper_context_core.checkpoint_generation
-
 (* ================================================================ *)
 (* Re-export from Keeper_rollover                                    *)
 (* ================================================================ *)

@@ -28,7 +28,7 @@ let cases =
     E.Pr_review, 15.0;
     E.Dispatch, 120.0;
     E.Memory_audit, 3.0;
-    E.Alerting, 15.0;
+    E.Alerting, 20.0;
     E.Gh_shared, 10.0;
     E.Status_detail, 10.0;
     E.Turn_sandbox, 2.0;

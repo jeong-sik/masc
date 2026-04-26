@@ -10,23 +10,23 @@
     display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
   }
   .brand-card {
-    background: var(--bg-1);
-    border: 1px solid var(--line-1);
+    background: var(--color-bg-surface);
+    border: 1px solid var(--color-border-default);
     border-radius: 3px;
     padding: 32px;
     display: flex; flex-direction: column; gap: 20px;
     justify-content: space-between;
     min-height: 220px;
   }
-  .brand-card.alt { background: var(--bg-0); }
-  .brand-card.brass { background: var(--brass-1); border-color: var(--brass-2); }
+  .brand-card.alt { background: var(--color-bg-page); }
+  .brand-card.brass { background: var(--color-accent-fg); border-color: var(--brass-2); }
 
   .wordmark {
     display: flex; align-items: center; gap: 14px;
   }
   .wordmark-dot {
     width: 14px; height: 14px; border-radius: 50%;
-    background: var(--brass-1);
+    background: var(--color-accent-fg);
     box-shadow: 0 0 12px rgb(var(--brass-glow)/.5);
     position: relative;
   }
@@ -37,7 +37,7 @@
   .wordmark-text {
     font: 700 34px/1 var(--font-mono);
     letter-spacing: 0.1em;
-    color: var(--fg-1);
+    color: var(--color-fg-primary);
   }
   .brass .wordmark-dot { background: #0c0b08; box-shadow: none; }
   .brass .wordmark-dot::after { background: radial-gradient(circle at 35% 35%, rgb(var(--brass-glow)/.4), transparent 60%); }
@@ -45,7 +45,7 @@
 
   .brand-caption {
     font: 10px/1.4 var(--font-mono);
-    color: var(--fg-3);
+    color: var(--color-fg-muted);
     letter-spacing: var(--track-caps);
     text-transform: uppercase;
   }
@@ -57,7 +57,7 @@
   }
   .lockup .tag {
     font: 10px/1 var(--font-mono);
-    color: var(--fg-3);
+    color: var(--color-fg-muted);
     letter-spacing: var(--track-caps);
     text-transform: uppercase;
     padding-left: 28px;
@@ -70,8 +70,8 @@
     gap: 12px;
   }
   .persona {
-    background: var(--bg-1);
-    border: 1px solid var(--line-1);
+    background: var(--color-bg-surface);
+    border: 1px solid var(--color-border-default);
     border-radius: 3px;
     padding: 18px 14px;
     display: flex; flex-direction: column; gap: 10px;
@@ -82,11 +82,11 @@
   }
   .persona-avatar {
     width: 40px; height: 40px;
-    background: var(--bg-0);
-    border: 1px solid var(--line-2);
+    background: var(--color-bg-page);
+    border: 1px solid var(--color-border-strong);
     display: flex; align-items: center; justify-content: center;
     font: 700 14px/1 var(--font-mono);
-    color: var(--fg-1);
+    color: var(--color-fg-primary);
     position: relative;
     border-radius: 3px;
   }
@@ -94,28 +94,28 @@
     content: ""; position: absolute; top: -2px; right: -2px;
     width: 8px; height: 8px; border-radius: 50%;
     background: var(--dot);
-    box-shadow: 0 0 0 2px var(--bg-1), 0 0 6px var(--dot);
+    box-shadow: 0 0 0 2px var(--color-bg-surface), 0 0 6px var(--dot);
   }
   .persona-name {
     font: 600 11px/1.2 var(--font-mono);
-    color: var(--fg-1);
+    color: var(--color-fg-primary);
   }
   .persona-role {
     font: 9px/1.2 var(--font-mono);
-    color: var(--fg-3);
+    color: var(--color-fg-muted);
     letter-spacing: var(--track-caps);
     text-transform: uppercase;
   }
   .persona-bio {
     font: 10px/1.4 var(--font-sans);
-    color: var(--fg-2);
+    color: var(--color-fg-secondary);
   }
   .persona-tag {
     font: 9px/1.2 var(--font-mono);
     color: var(--dot);
     letter-spacing: var(--track-wide);
     padding-top: 8px;
-    border-top: 1px solid var(--line-1);
+    border-top: 1px solid var(--color-border-default);
     margin-top: auto;
   }
 
@@ -126,8 +126,8 @@
     gap: 16px;
   }
   .voice-card {
-    background: var(--bg-1);
-    border: 1px solid var(--line-1);
+    background: var(--color-bg-surface);
+    border: 1px solid var(--color-border-default);
     border-radius: 3px;
     padding: 16px;
     display: flex; flex-direction: column; gap: 10px;
@@ -136,23 +136,23 @@
     font: 600 9px/1 var(--font-mono);
     letter-spacing: var(--track-caps);
     text-transform: uppercase;
-    color: var(--fg-3);
+    color: var(--color-fg-muted);
   }
   .voice-text {
     font: 12px/1.5 var(--font-mono);
-    color: var(--fg-1);
+    color: var(--color-fg-primary);
   }
   .voice-label {
     font: 9px/1 var(--font-mono);
-    color: var(--fg-3);
+    color: var(--color-fg-muted);
     letter-spacing: var(--track-wide);
     font-style: italic;
   }
 
   /* Metaphor block — the NOW line */
   .meta-hero {
-    background: var(--bg-0);
-    border: 1px solid var(--line-1);
+    background: var(--color-bg-page);
+    border: 1px solid var(--color-border-default);
     border-radius: 3px;
     padding: 32px 28px;
     position: relative;
@@ -165,18 +165,18 @@
     top: 16px; bottom: 16px;
     left: 58%;
     width: 2px;
-    background: linear-gradient(to bottom, transparent, var(--brass-1) 15%, var(--brass-1) 85%, transparent);
+    background: linear-gradient(to bottom, transparent, var(--color-accent-fg) 15%, var(--color-accent-fg) 85%, transparent);
     box-shadow: 0 0 16px rgb(var(--brass-glow)/.6);
   }
   .meta-copy { flex: 1; display: flex; flex-direction: column; gap: 8px; max-width: 52%; }
   .meta-copy h3 {
     font: 600 18px/1.2 var(--font-sans);
-    color: var(--fg-1);
+    color: var(--color-fg-primary);
     letter-spacing: var(--track-tight);
   }
   .meta-copy p {
     font: var(--type-body);
-    color: var(--fg-2);
+    color: var(--color-fg-secondary);
   }
   .meta-right {
     width: 40%;
@@ -189,10 +189,10 @@
     align-items: center;
     font: 10px/1.2 var(--font-mono);
   }
-  .meta-row .nm { color: var(--fg-2); }
+  .meta-row .nm { color: var(--color-fg-secondary); }
   .meta-row .tr {
     position: relative; height: 8px;
-    background: repeating-linear-gradient(to right, var(--line-1) 0 3px, transparent 3px 6px);
+    background: repeating-linear-gradient(to right, var(--color-border-default) 0 3px, transparent 3px 6px);
   }
   .meta-row .tr i { position: absolute; top: 0; width: 4px; height: 8px; background: currentColor; }
 
@@ -201,8 +201,8 @@
     display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;
   }
   .principle {
-    background: var(--bg-1);
-    border: 1px solid var(--line-1);
+    background: var(--color-bg-surface);
+    border: 1px solid var(--color-border-default);
     border-radius: 3px;
     padding: 16px;
     display: flex; flex-direction: column; gap: 8px;
@@ -211,23 +211,23 @@
     font: 600 9px/1 var(--font-mono);
     letter-spacing: var(--track-caps);
     text-transform: uppercase;
-    color: var(--brass-1);
+    color: var(--color-accent-fg);
   }
   .principle-h {
     font: 600 14px/1.2 var(--font-sans);
-    color: var(--fg-1);
+    color: var(--color-fg-primary);
     letter-spacing: var(--track-tight);
   }
   .principle p {
     font: var(--type-caption);
     line-height: 1.6;
-    color: var(--fg-3);
+    color: var(--color-fg-muted);
   }
 
   /* Sizing scale */
   .sizes {
     display: flex; align-items: flex-end; gap: 24px;
-    background: var(--bg-1); border: 1px solid var(--line-1); border-radius: 3px;
+    background: var(--color-bg-surface); border: 1px solid var(--color-border-default); border-radius: 3px;
     padding: 28px;
   }
   .size-sample {
@@ -324,7 +324,7 @@
         <p>The brass "now" column is MASC's strongest visual element. It pierces every swimlane, every chart, every trace — everything to the left has happened, everything to the right is forecast. One accent, one moment, one direction.</p>
       </div>
       <div class="meta-right">
-        <div class="meta-row"><span class="nm" style="color:var(--brass-1)">nick0cave</span>     <span class="tr" style="color:var(--brass-1)"><i style="left:10%"></i><i style="left:28%"></i><i style="left:44%"></i><i style="left:62%"></i><i style="left:74%"></i></span></div>
+        <div class="meta-row"><span class="nm" style="color:var(--color-accent-fg)">nick0cave</span>     <span class="tr" style="color:var(--color-accent-fg)"><i style="left:10%"></i><i style="left:28%"></i><i style="left:44%"></i><i style="left:62%"></i><i style="left:74%"></i></span></div>
         <div class="meta-row"><span class="nm" style="color:var(--ok-fg)">masc-improver</span>   <span class="tr" style="color:var(--ok-fg)"><i style="left:14%"></i><i style="left:32%"></i><i style="left:50%"></i><i style="left:72%"></i></span></div>
         <div class="meta-row"><span class="nm" style="color:var(--info-fg)">sangsu</span>        <span class="tr" style="color:var(--info-fg)"><i style="left:8%"></i><i style="left:40%"></i><i style="left:56%"></i></span></div>
         <div class="meta-row"><span class="nm" style="color:var(--err-fg)">qa-king</span>        <span class="tr" style="color:var(--err-fg)"><i style="left:22%"></i><i style="left:46%"></i><i style="left:68%"></i></span></div>
@@ -338,7 +338,7 @@
   <section class="pv-sect">
     <div class="pv-sect-h"><h2>Keeper Personas</h2><span class="sub">The named fleet · each gets a status-color avatar</span></div>
     <div class="persona-grid">
-      <div class="persona" style="--dot: var(--brass-1)">
+      <div class="persona" style="--dot: var(--color-accent-fg)">
         <div class="persona-head">
           <div class="persona-avatar">N</div>
           <div><div class="persona-name">nick0cave</div><div class="persona-role">Captain</div></div>
@@ -418,17 +418,17 @@
       </div>
       <div class="voice-card">
         <span class="voice-kind">Error</span>
-        <div class="voice-text" style="color:var(--err-fg)">CASCADE FAIL · provider=openai · t-9f2a<br><span style="color:var(--fg-3)">retry@step=2 · 1.8s · see log</span></div>
+        <div class="voice-text" style="color:var(--err-fg)">CASCADE FAIL · provider=openai · t-9f2a<br><span style="color:var(--color-fg-muted)">retry@step=2 · 1.8s · see log</span></div>
         <span class="voice-label">What · where · how long · next step. No apology.</span>
       </div>
       <div class="voice-card">
         <span class="voice-kind">Success</span>
-        <div class="voice-text">APPROVED · t-9f2a<br><span style="color:var(--fg-3)">nick0cave → main · +18 −4 · CI green</span></div>
+        <div class="voice-text">APPROVED · t-9f2a<br><span style="color:var(--color-fg-muted)">nick0cave → main · +18 −4 · CI green</span></div>
         <span class="voice-label">Terminal-style past-tense receipt.</span>
       </div>
       <div class="voice-card">
         <span class="voice-kind">Pending / Bilingual</span>
-        <div class="voice-text">goal-merge-blockers<br><span style="color:var(--fg-2)">Merge-blocker 해결 및 CI 안정화</span><br><span style="color:var(--fg-3)">3/3 tasks · priority 1 · updated 3m ago</span></div>
+        <div class="voice-text">goal-merge-blockers<br><span style="color:var(--color-fg-secondary)">Merge-blocker 해결 및 CI 안정화</span><br><span style="color:var(--color-fg-muted)">3/3 tasks · priority 1 · updated 3m ago</span></div>
         <span class="voice-label">ID + KR title + EN meta. Standard goal card.</span>
       </div>
     </div>

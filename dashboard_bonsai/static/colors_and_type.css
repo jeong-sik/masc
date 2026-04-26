@@ -78,7 +78,7 @@
   --shadow-card:   0 1px 4px rgba(0, 0, 0, 0.5);
   --shadow-raised: 0 8px 24px rgba(0, 0, 0, 0.55), 0 0 0 1px var(--border-highlight);
   --shadow-glow:   0 0 20px var(--accent-glow);
-  --shadow-inset:  inset 0 0 0 1px rgba(196, 162, 101, 0.25);
+  --shadow-ring:   inset 0 0 0 1px rgba(196, 162, 101, 0.25);
 
   /* Spacing (4px grid) */
   --space-1:  4px;
@@ -93,6 +93,32 @@
   /* Scrollbar */
   --scrollbar-thumb:       #2a1f1a;
   --scrollbar-thumb-hover: #3d2e22;
+
+  /* SPEC v0.1 §3.1-3.5 — Semantic vocabulary alias to bonsai raw tier.
+     See dashboard/design-system/SPEC.md. Defined in :root only — the
+     raw tier (--bg-*, --text-*, --border-*, --accent-*, --status-*)
+     is overridden per [data-theme=*] block, so these aliases inherit
+     each theme's value automatically through the cascade. */
+  --color-bg-page:        var(--bg-deep);
+  --color-bg-surface:     var(--bg-panel);
+  --color-bg-panel-alt:   var(--bg-panel-alt);
+  --color-bg-elevated:    var(--bg-card);
+  --color-bg-hover:       var(--bg-card-hover);
+
+  --color-fg-primary:     var(--text-primary);
+  --color-fg-muted:       var(--text-dim);
+
+  --color-border-default: var(--border-main);
+  --color-border-strong:  var(--border-highlight);
+
+  --color-accent-fg:      var(--accent-brass);
+  --color-accent-fg-dim:  var(--accent-brass-dim);
+  --color-accent-glow:    var(--accent-glow);
+
+  --color-status-ok:      var(--status-ok);
+  --color-status-warn:    var(--status-warn);
+  --color-status-err:     var(--status-bad);
+  --color-status-idle:    var(--status-idle);
 }
 
 /* ── Cyberpunk ─────────────────────────────────────────── */
@@ -354,7 +380,7 @@ hr {
 .btn.primary {
   border-color: var(--accent-brass);
   color: var(--accent-brass);
-  box-shadow: var(--shadow-inset);
+  box-shadow: var(--shadow-ring);
 }
 .btn.primary:hover { background: var(--accent-glow); color: var(--text-bright); }
 .btn.ghost { background: transparent; }
@@ -424,7 +450,7 @@ hr {
 .frame-gothic {
   position: relative;
   border: 1px solid var(--border-highlight);
-  box-shadow: var(--shadow-inset), var(--shadow-panel);
+  box-shadow: var(--shadow-ring), var(--shadow-panel);
 }
 .frame-gothic::before,
 .frame-gothic::after {

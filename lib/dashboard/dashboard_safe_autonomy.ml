@@ -959,13 +959,13 @@ let domain_summary_json ~id ~(keepers : keeper_snapshot list)
     @ Option.value ~default:[] extra_evidence_refs
   in
   let pass_count =
-    List.length (List.filter (fun (domain : keeper_domain) -> domain.status = Pass) keeper_domains)
+    List_util.count_if (fun (domain : keeper_domain) -> domain.status = Pass) keeper_domains
   in
   let warn_count =
-    List.length (List.filter (fun (domain : keeper_domain) -> domain.status = Warn) keeper_domains)
+    List_util.count_if (fun (domain : keeper_domain) -> domain.status = Warn) keeper_domains
   in
   let fail_count =
-    List.length (List.filter (fun (domain : keeper_domain) -> domain.status = Fail) keeper_domains)
+    List_util.count_if (fun (domain : keeper_domain) -> domain.status = Fail) keeper_domains
   in
   `Assoc
     [

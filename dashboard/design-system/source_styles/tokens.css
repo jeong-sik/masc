@@ -756,6 +756,22 @@ button.is-active, .btn.is-active { background: var(--bg-4); color: var(--brass-1
   --ink-2:   #2E2E2C;
   --ink-3:   #515049;
   --ink-4:   #656358;
+  --ink-5:   #9A978D;
+  --ink-6:   #BCB8AC;
+
+  /* Named hue tokens (paper-only) — color/fill pairs from bonsai
+     vocabulary. Used for keeper attribution accents, swimlane categories,
+     and t-* trace frames in the light-on-paper theme. */
+  --forest:  #2D5F4E;  --forest-fill: #CFDFD7;
+  --brass:   #8C6A1E;  --brass-fill:  #E9DDB8;
+  --brick:   #8B3A3A;  --brick-fill:  #E8CFCB;
+  --ember:   #B35A1F;  --ember-fill:  #ECD5BD;
+  --slate:   #3E4A5C;  --slate-fill:  #D6DBE2;
+  --plum:    #5C3E56;  --plum-fill:   #E0D4DE;
+  --teal:    #236874;  --teal-fill:   #CEDEE2;
+
+  --status-idle: var(--ink-5);
+
   --bg-deep:      var(--paper);
   --bg-panel:     var(--paper-2);
   --bg-panel-alt: var(--paper-3);
@@ -800,4 +816,105 @@ button.is-active, .btn.is-active { background: var(--bg-4); color: var(--brass-1
   --space-6: 32px;
   --space-7: 48px;
   --space-8: 64px;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   BONSAI STRUCTURAL TOKENS (radius primitives)
+   ───────────────────────────────────────────────────────────────────
+   cyberpunk + terminal flatten xs/sm/md to 0 (sharp corners).
+   parchment + paper inherit :root values.
+   ═══════════════════════════════════════════════════════════════════ */
+
+:root {
+  --radius-xs:   2px;
+  --radius-sm:   4px;
+  --radius-md:   6px;
+  --radius-lg:   12px;
+  --radius-pill: 999px;
+}
+
+[data-theme="cyberpunk"] {
+  --radius-xs: 0;
+  --radius-sm: 0;
+  --radius-md: 0;
+}
+
+[data-theme="terminal"] {
+  --radius-xs: 0;
+  --radius-sm: 0;
+  --radius-md: 0;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   BONSAI STRUCTURAL TOKENS (shadow primitives)
+   ───────────────────────────────────────────────────────────────────
+   4 tokens with theme-specific overrides. `--shadow-inset` is NOT
+   absorbed here — dashboard tokens.css already defines it with a
+   different semantic (top-edge highlight vs bonsai's full ring).
+   Resolution deferred to a later PR.
+   ═══════════════════════════════════════════════════════════════════ */
+
+:root {
+  --shadow-card:   0 1px 4px rgba(0, 0, 0, 0.5);
+  --shadow-panel:  0 2px 12px rgba(0, 0, 0, 0.6);
+  --shadow-glow:   0 0 20px var(--accent-glow);
+  --shadow-raised: 0 8px 24px rgba(0, 0, 0, 0.55), 0 0 0 1px var(--border-highlight);
+}
+
+[data-theme="cyberpunk"] {
+  --shadow-panel: 0 0 16px rgba(106, 47, 214, 0.3);
+  --shadow-glow:  0 0 24px rgba(0, 255, 204, 0.2), 0 0 48px rgba(0, 255, 204, 0.05);
+}
+
+[data-theme="terminal"] {
+  --shadow-panel: 0 0 8px rgba(0, 255, 0, 0.1);
+  --shadow-glow:  0 0 16px rgba(0, 255, 0, 0.15);
+}
+
+[data-theme="parchment"] {
+  --shadow-panel: 0 1px 2px rgba(0,0,0,0.06), 0 0 0 1px rgba(0,0,0,0.06);
+  --shadow-card:  0 1px 0 rgba(0,0,0,0.04);
+  --shadow-glow:  none;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   BONSAI STRUCTURAL TOKENS (font stacks)
+   ───────────────────────────────────────────────────────────────────
+   bonsai's display/body/ui font stacks. dashboard already defines
+   `--font-mono` separately (line ~152) — not duplicated here.
+
+   cyberpunk + terminal collapse all stacks to monospace for
+   intentional aesthetic. parchment + paper inherit :root.
+   ═══════════════════════════════════════════════════════════════════ */
+
+:root {
+  --font-display: 'Cinzel', 'Noto Sans KR', 'EB Garamond', serif;
+  --font-body:    'EB Garamond', 'Noto Sans KR', Georgia, serif;
+  --font-ui:      'Noto Sans KR', 'IBM Plex Sans KR', -apple-system, sans-serif;
+}
+
+[data-theme="cyberpunk"] {
+  --font-display: 'Share Tech Mono', 'Noto Sans KR', monospace;
+  --font-body:    'Noto Sans KR', sans-serif;
+  --font-ui:      'Share Tech Mono', 'Noto Sans KR', monospace;
+}
+
+[data-theme="terminal"] {
+  --font-display: 'JetBrains Mono', 'Noto Sans KR', monospace;
+  --font-body:    'JetBrains Mono', 'Noto Sans KR', monospace;
+  --font-ui:      'JetBrains Mono', 'Noto Sans KR', monospace;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   BONSAI STRUCTURAL TOKENS (scrollbar primitives)
+   ───────────────────────────────────────────────────────────────────
+   Theme-invariant. dashboard surface has its own ::-webkit-scrollbar-
+   thumb rule (uses --line-2/-3) and does not consume these tokens.
+   bonsai surface reads via var(--scrollbar-thumb, var(--border-main))
+   pattern with --border-main fallback when this file is the SSOT.
+   ═══════════════════════════════════════════════════════════════════ */
+
+:root {
+  --scrollbar-thumb:       #2a1f1a;
+  --scrollbar-thumb-hover: #3d2e22;
 }

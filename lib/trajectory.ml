@@ -386,7 +386,7 @@ let detect_entropy ?(threshold = 3) ?args_json (acc : accumulator) (tool_name : 
 
 (** Count tool calls in current turn. *)
 let calls_in_current_turn (acc : accumulator) : int =
-  List.length (List.filter (fun (e : tool_call_entry) -> e.turn = acc.turn) acc.entries)
+  List_util.count_if (fun (e : tool_call_entry) -> e.turn = acc.turn) acc.entries
 
 (* ================================================================ *)
 (* Tool stats aggregation                                          *)

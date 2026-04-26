@@ -296,6 +296,48 @@ unknown_field = 1
       check bool "rejection mentions unknown field" true
         (contains_substring rendered "unknown field")
 
+let test_weight_zero_is_accepted () =
+  (* #10571: weight=0 = "configured but disabled" (cascade dispatcher
+     skips). #10097 introduced this idiom for codex_cli; pre-fix the
+     materializer rejected it and dashboard cascade.json went stale on
+     every reload. *)
+  match
+    Masc_mcp.Cascade_toml_materializer.render_toml_string_to_json_string
+      {|
+[default]
+models = [
+  { model = "codex_cli:auto", weight = 0 },
+  { model = "gemini_cli:auto", weight = 1 },
+]
+|}
+  with
+  | Error msg -> failf "weight=0 must materialize, got: %s" msg
+  | Ok _ -> ()
+
+let test_weight_negative_is_rejected () =
+  match
+    Masc_mcp.Cascade_toml_materializer.render_toml_string_to_json_string
+      {|
+[default]
+models = [
+  { model = "codex_cli:auto", weight = -1 },
+]
+|}
+  with
+  | Ok _ -> failf "negative weight must be rejected"
+  | Error msg ->
+      check bool
+        (Printf.sprintf "rejection mentions weight bound — got: %s" msg)
+        true
+        (let n = String.length msg and sub = "weight" in
+         let m = String.length sub in
+         let rec loop i =
+           if i + m > n then false
+           else if String.sub msg i m = sub then true
+           else loop (i + 1)
+         in
+         loop 0)
+
 let () =
   run "cascade_toml_materialization"
     [
@@ -320,6 +362,10 @@ let () =
             test_keeper_profile_drops_unknown_fallback_target;
           test_case "keeper profile resolves known fallback target" `Quick
             test_keeper_profile_resolves_known_fallback_target;
+          test_case "weight=0 is accepted (#10571 disabled-entry idiom)"
+            `Quick test_weight_zero_is_accepted;
+          test_case "negative weight is rejected" `Quick
+            test_weight_negative_is_rejected;
         ] );
       ( "runtime",
         [

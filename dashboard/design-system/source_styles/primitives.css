@@ -12,19 +12,19 @@
   font-family: var(--font-mono);
   font-size: var(--fs-10);
   line-height: 1;
-  color: var(--fg-2);
-  background: var(--bg-3);
-  border: 1px solid var(--line-1);
+  color: var(--color-fg-secondary);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-default);
   border-radius: var(--r-1);
   white-space: nowrap;
 }
-.chip.is-brass { color: var(--brass-1); border-color: var(--brass-3); background: rgb(var(--brass-glow) / .08); }
+.chip.is-brass { color: var(--color-accent-fg); border-color: var(--brass-3); background: rgb(var(--brass-glow) / .08); }
 .chip.is-ok    { color: var(--ok);    border-color: rgb(var(--ok-glow) / .35); background: rgb(var(--ok-glow) / .08); }
 .chip.is-warn  { color: var(--warn);  border-color: rgb(var(--warn-glow) / .35); background: rgb(var(--warn-glow) / .08); }
 .chip.is-err   { color: var(--err);   border-color: rgb(var(--err-glow) / .35); background: rgb(var(--err-glow) / .08); }
 .chip.is-info  { color: var(--info);  border-color: rgb(var(--info-glow) / .35); background: rgb(var(--info-glow) / .08); }
 .chip.is-stalled { color: var(--stalled); border-color: rgb(var(--stalled-glow) / .35); background: rgb(var(--stalled-glow) / .08); }
-.chip.is-ghost { background: transparent; border-color: var(--line-2); }
+.chip.is-ghost { background: transparent; border-color: var(--color-border-strong); }
 
 /* chip size variants */
 .chip.sm { height: 14px; padding: 0 5px; font-size: var(--fs-9); }
@@ -41,13 +41,13 @@
   font-size: var(--fs-10);
   font-weight: 500;
   letter-spacing: .04em;
-  color: var(--fg-2);
-  background: var(--bg-3);
+  color: var(--color-fg-secondary);
+  background: var(--color-bg-elevated);
   border-radius: 999px;
   white-space: nowrap;
 }
-.pill.is-running { color: var(--brass-1); background: rgb(var(--brass-glow) / .12); }
-.pill.is-paused  { color: var(--fg-3);    background: var(--bg-3); }
+.pill.is-running { color: var(--color-accent-fg); background: rgb(var(--brass-glow) / .12); }
+.pill.is-paused  { color: var(--color-fg-muted);    background: var(--color-bg-elevated); }
 .pill.is-ok      { color: var(--ok);      background: rgb(var(--ok-glow) / .12); }
 .pill.is-err     { color: var(--err);     background: rgb(var(--err-glow) / .12); }
 .pill.is-warn    { color: var(--warn);    background: rgb(var(--warn-glow) / .12); }
@@ -59,7 +59,7 @@
 .bar {
   display: inline-block;
   height: 4px; width: 100%;
-  background: var(--bg-3);
+  background: var(--color-bg-elevated);
   border-radius: 2px;
   overflow: hidden;
   vertical-align: middle;
@@ -76,7 +76,7 @@
 /* bar with segments (a/b/c split — e.g. passing/failing/skipped) */
 .bar-seg {
   display: flex; height: 4px; width: 100%;
-  background: var(--bg-3); border-radius: 2px; overflow: hidden;
+  background: var(--color-bg-elevated); border-radius: 2px; overflow: hidden;
 }
 .bar-seg > span { display: block; height: 100%; }
 .bar-seg .seg-ok { background: var(--ok); }
@@ -94,7 +94,7 @@
 .spark > i {
   display: block;
   width: 2px; min-height: 1px;
-  background: var(--fg-3);
+  background: var(--color-fg-muted);
   border-radius: 1px;
 }
 .spark.is-brass > i { background: var(--brass-2); }
@@ -102,20 +102,20 @@
 .spark.is-err > i { background: var(--err); }
 .spark.is-warn > i { background: var(--warn); }
 /* last bar brightens to signal "now" */
-.spark > i:last-child { background: var(--brass-1); box-shadow: 0 0 3px rgb(var(--brass-glow) / .5); }
+.spark > i:last-child { background: var(--color-accent-fg); box-shadow: 0 0 3px rgb(var(--brass-glow) / .5); }
 
 /* ════════ SECTION HEAD ════════
    Panel header strip — small-caps label + optional right chip. */
 .section-head {
   display: flex; align-items: center; gap: var(--sp-2);
   min-height: 28px; padding: 0 var(--sp-3);
-  border-bottom: 1px solid var(--line-1);
-  background: var(--bg-1);
+  border-bottom: 1px solid var(--color-border-default);
+  background: var(--color-bg-surface);
   font-size: var(--fs-11);
   font-weight: 600;
   letter-spacing: .08em;
   text-transform: uppercase;
-  color: var(--fg-3);
+  color: var(--color-fg-muted);
   flex-shrink: 0;
 }
 .section-head > .count { margin-left: auto; font-family: var(--font-mono); color: var(--fg-4); font-weight: 500; }
@@ -132,12 +132,12 @@
   align-items: baseline;
 }
 .kv-row > .k {
-  color: var(--fg-3);
+  color: var(--color-fg-muted);
   font-size: var(--fs-10);
   text-transform: uppercase;
   letter-spacing: .06em;
 }
-.kv-row > .v { color: var(--fg-1); font-family: var(--font-mono); font-size: var(--fs-11); }
+.kv-row > .v { color: var(--color-fg-primary); font-family: var(--font-mono); font-size: var(--fs-11); }
 
 .kv-row.is-wide { grid-template-columns: 120px 1fr; }
 
@@ -145,11 +145,11 @@
    Base button lives in tokens.css. These are semantic variants. */
 .btn.primary {
   background: var(--brass-2);
-  color: var(--bg-0);
+  color: var(--color-bg-page);
   border-color: var(--brass-3);
   font-weight: 600;
 }
-.btn.primary:hover { background: var(--brass-1); color: var(--bg-0); }
+.btn.primary:hover { background: var(--color-accent-fg); color: var(--color-bg-page); }
 
 .btn.danger {
   border-color: rgb(var(--err-glow) / .4);
@@ -157,8 +157,8 @@
 }
 .btn.danger:hover { background: rgb(var(--err-glow) / .1); color: var(--err); }
 
-.btn.ghost { border-color: transparent; color: var(--fg-3); }
-.btn.ghost:hover { background: var(--bg-2); color: var(--fg-1); }
+.btn.ghost { border-color: transparent; color: var(--color-fg-muted); }
+.btn.ghost:hover { background: var(--color-bg-panel-alt); color: var(--color-fg-primary); }
 
 .btn.sm { height: 20px; padding: 0 8px; font-size: var(--fs-10); }
 .btn.xs { height: 18px; padding: 0 6px; font-size: var(--fs-9); letter-spacing: .06em; }
@@ -175,9 +175,9 @@
   display: inline-flex; align-items: center; justify-content: center;
   min-width: 16px; height: 16px; padding: 0 4px;
   font-family: var(--font-mono); font-size: var(--fs-10);
-  color: var(--fg-3);
-  background: var(--bg-3);
-  border: 1px solid var(--line-2);
+  color: var(--color-fg-muted);
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-strong);
   border-bottom-width: 2px;
   border-radius: 3px;
 }
@@ -186,18 +186,18 @@
    Thin strip at top of cards indicating overall state. */
 .band {
   height: 2px; width: 100%;
-  background: var(--line-2);
+  background: var(--color-border-strong);
   border-radius: 1px 1px 0 0;
 }
-.band.is-running { background: var(--brass-1); box-shadow: 0 0 6px rgb(var(--brass-glow) / .5); }
+.band.is-running { background: var(--color-accent-fg); box-shadow: 0 0 6px rgb(var(--brass-glow) / .5); }
 .band.is-ok      { background: var(--ok); }
 .band.is-warn    { background: var(--warn); }
 .band.is-err     { background: var(--err); }
 .band.is-stalled { background: var(--stalled); }
 
 /* ════════ SEP ════════ */
-.sep-v { width: 1px; height: 16px; background: var(--line-2); margin: 0 var(--sp-2); }
-.sep-h { height: 1px; background: var(--line-1); margin: var(--sp-2) 0; }
+.sep-v { width: 1px; height: 16px; background: var(--color-border-strong); margin: 0 var(--sp-2); }
+.sep-h { height: 1px; background: var(--color-border-default); margin: var(--sp-2) 0; }
 
 /* ════════ TOKEN-CODE (inline mono highlight) ════════ */
 .tk {
@@ -205,10 +205,10 @@
   font-size: .92em;
   padding: 0 4px;
   border-radius: 2px;
-  background: var(--bg-3);
-  color: var(--fg-1);
+  background: var(--color-bg-elevated);
+  color: var(--color-fg-primary);
 }
-.tk.is-brass { color: var(--brass-1); background: rgb(var(--brass-glow) / .08); }
+.tk.is-brass { color: var(--color-accent-fg); background: rgb(var(--brass-glow) / .08); }
 .tk.is-err   { color: var(--err);     background: rgb(var(--err-glow) / .08); }
 
 /* ════════ SCROLL PANEL ════════
@@ -220,21 +220,21 @@
    Prefer these over raw --fs-* sizes in new styles. Role names
    match tokens.css. Each applies font shorthand + sensible color. */
 .t-micro   { font: var(--type-micro);   color: var(--fg-4); letter-spacing: var(--track-caps); text-transform: uppercase; }
-.t-caption { font: var(--type-caption); color: var(--fg-3); letter-spacing: var(--track-wide); }
-.t-label   { font: var(--type-label);   color: var(--fg-3); letter-spacing: var(--track-caps); text-transform: uppercase; font-weight: var(--fw-semi); }
-.t-meta    { font: var(--type-meta);    color: var(--fg-3); }
-.t-body    { font: var(--type-body);    color: var(--fg-1); }
-.t-code    { font: var(--type-code);    color: var(--fg-1); }
-.t-title   { font: var(--type-title);   color: var(--fg-1); font-weight: var(--fw-semi); letter-spacing: var(--track-tight); }
-.t-kpi-m   { font: var(--type-kpi-m);   color: var(--fg-1); font-variant-numeric: tabular-nums; font-weight: var(--fw-med); }
-.t-kpi-l   { font: var(--type-kpi-l);   color: var(--fg-1); font-variant-numeric: tabular-nums; font-weight: var(--fw-med); letter-spacing: var(--track-tight); }
-.t-hero    { font: var(--type-hero);    color: var(--fg-1); font-variant-numeric: tabular-nums; font-weight: var(--fw-med); letter-spacing: var(--track-tight); }
-.t-display { font: var(--type-display); color: var(--fg-1); font-variant-numeric: tabular-nums; font-weight: var(--fw-bold); letter-spacing: var(--track-tight); }
+.t-caption { font: var(--type-caption); color: var(--color-fg-muted); letter-spacing: var(--track-wide); }
+.t-label   { font: var(--type-label);   color: var(--color-fg-muted); letter-spacing: var(--track-caps); text-transform: uppercase; font-weight: var(--fw-semi); }
+.t-meta    { font: var(--type-meta);    color: var(--color-fg-muted); }
+.t-body    { font: var(--type-body);    color: var(--color-fg-primary); }
+.t-code    { font: var(--type-code);    color: var(--color-fg-primary); }
+.t-title   { font: var(--type-title);   color: var(--color-fg-primary); font-weight: var(--fw-semi); letter-spacing: var(--track-tight); }
+.t-kpi-m   { font: var(--type-kpi-m);   color: var(--color-fg-primary); font-variant-numeric: tabular-nums; font-weight: var(--fw-med); }
+.t-kpi-l   { font: var(--type-kpi-l);   color: var(--color-fg-primary); font-variant-numeric: tabular-nums; font-weight: var(--fw-med); letter-spacing: var(--track-tight); }
+.t-hero    { font: var(--type-hero);    color: var(--color-fg-primary); font-variant-numeric: tabular-nums; font-weight: var(--fw-med); letter-spacing: var(--track-tight); }
+.t-display { font: var(--type-display); color: var(--color-fg-primary); font-variant-numeric: tabular-nums; font-weight: var(--fw-bold); letter-spacing: var(--track-tight); }
 
 /* colour-modifier classes that pair with type roles */
-.t-dim { color: var(--fg-3); }
+.t-dim { color: var(--color-fg-muted); }
 .t-mute { color: var(--fg-4); }
-.t-brass { color: var(--brass-1); }
+.t-brass { color: var(--color-accent-fg); }
 .t-ok { color: var(--ok-fg); }
 .t-warn { color: var(--warn-fg); }
 .t-err { color: var(--err-fg); }
@@ -350,7 +350,7 @@ body[data-grid="1"]::before {
 /* shimmer — skeleton / loading state background */
 .anim-shimmer {
   background: linear-gradient(90deg,
-    var(--bg-2) 0%, var(--bg-3) 25%, var(--bg-2) 50%, var(--bg-3) 75%, var(--bg-2) 100%);
+    var(--color-bg-panel-alt) 0%, var(--color-bg-elevated) 25%, var(--color-bg-panel-alt) 50%, var(--color-bg-elevated) 75%, var(--color-bg-panel-alt) 100%);
   background-size: 200% 100%;
   animation: anim-shimmer 2s linear infinite;
 }
@@ -360,7 +360,7 @@ body[data-grid="1"]::before {
   content: "▌";
   display: inline-block;
   margin-left: 2px;
-  color: var(--brass-1);
+  color: var(--color-accent-fg);
   animation: anim-blink 1s steps(1) infinite;
 }
 
@@ -370,7 +370,7 @@ body[data-grid="1"]::before {
   cursor: pointer;
   transition: background var(--motion-swap), color var(--motion-swap), border-color var(--motion-swap), box-shadow var(--motion-swap);
 }
-.interactive:hover:not([aria-disabled="true"]) { background: var(--hover-overlay); color: var(--fg-1); }
+.interactive:hover:not([aria-disabled="true"]) { background: var(--hover-overlay); color: var(--color-fg-primary); }
 .interactive:active:not([aria-disabled="true"]) { background: var(--active-overlay); }
 .interactive[aria-disabled="true"] { opacity: .4; cursor: not-allowed; }
 

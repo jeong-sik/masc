@@ -610,7 +610,7 @@ let upsert_goal config ?id ?horizon ?title ?metric ?target_value ?due_date
 
 let compute_rollup goals =
   let count predicate =
-    List.length (List.filter predicate goals)
+    List_util.count_if predicate goals
   in
   {
     short_count = count (fun goal -> goal.horizon = Short);

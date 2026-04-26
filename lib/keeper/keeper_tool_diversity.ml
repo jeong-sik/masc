@@ -78,7 +78,7 @@ let compute_diversity ~(available_tools : string list)
     (stats : tool_stat list) : diversity_summary =
   let counts = List.map (fun s -> s.count) stats in
   let total_calls = List.fold_left ( + ) 0 counts in
-  let unique_tools = List.length (List.filter (fun s -> s.count > 0) stats) in
+  let unique_tools = List_util.count_if (fun s -> s.count > 0) stats in
   let n_available = List.length available_tools in
   let raw_h = shannon_entropy counts in
   let norm_h = normalized_entropy ~n_categories:n_available raw_h in

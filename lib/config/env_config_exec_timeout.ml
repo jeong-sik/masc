@@ -22,7 +22,7 @@ type caller =
   | Pr_review                 (** keeper_tool_pr_review gh CLI calls (15s) *)
   | Dispatch                  (** exec_dispatch routine execution (120s) *)
   | Memory_audit              (** keeper_exec_memory short audits (3s) *)
-  | Alerting                  (** keeper_alerting fanout commands (15s/20s) *)
+  | Alerting                  (** keeper_alerting fanout (Slack/webhook POST + gh issue create) (20s) *)
   | Gh_shared                 (** keeper_gh_shared gh CLI quick query (5s) *)
   | Status_detail             (** keeper_status_detail health probes (5/10s) *)
   | Turn_sandbox              (** keeper_turn_sandbox_runtime (2/5s) *)
@@ -72,7 +72,8 @@ let known_default_sec = function
   | Fs -> Some 30.0
   | Preflight | Repo_readiness | Gh_shared | Status_detail -> Some 10.0
   | Sandbox | Turn_sandbox -> Some 2.0
-  | Pr_review | Alerting | Turn_up -> Some 15.0
+  | Pr_review | Turn_up -> Some 15.0
+  | Alerting -> Some 20.0
   | Dispatch -> Some 120.0
   | Memory_audit -> Some 3.0
   | Unknown _ -> None

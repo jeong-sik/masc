@@ -606,14 +606,11 @@ let cleanup_dead_tombstone (ctx : _ context)
         entry.name err
 
 (** Cohort key from structured failure_reason ADT.
-    Groups failures by variant, ignoring parameters (e.g. failure count). *)
-let cohort_key_of_reason = function
-  | Some (Keeper_registry.Heartbeat_consecutive_failures _) -> "heartbeat_failures"
-  | Some (Keeper_registry.Turn_consecutive_failures _) -> "turn_failures"
-  | Some (Keeper_registry.Ambiguous_partial_commit _) -> "ambiguous_partial_commit"
-  | Some Keeper_registry.Fiber_unresolved -> "fiber_unresolved"
-  | Some (Keeper_registry.Exception _) -> "exception"
-  | None -> "unknown"
+    #10584: delegates to [Keeper_registry.failure_reason_cohort_key] so a
+    new variant in keeper_registry forces a same-PR converter update via
+    the source module's exhaustive-match check, instead of breaking main
+    here on first build (the recurring P0 pattern from #10490 + #10574). *)
+let cohort_key_of_reason = Keeper_registry.failure_reason_cohort_key
 
 (** Self-preservation gate. Suppresses restarts when a dominant failure
     cohort exceeds ratio threshold AND minimum candidate count. *)
@@ -753,9 +750,9 @@ let sweep_and_recover (ctx : _ context) =
   ) !to_mark_dead;
   List.iter (cleanup_dead_tombstone ctx) !to_cleanup_dead;
   let active_count =
-    List.length (List.filter (fun (e : Keeper_registry.registry_entry) ->
+    List_util.count_if (fun (e : Keeper_registry.registry_entry) ->
       e.phase = Keeper_state_machine.Running || e.phase = Keeper_state_machine.Crashed
-    ) entries) in
+    ) entries in
   let restart_list =
     let keepers_dir =
       Filename.concat (Coord.masc_root_dir ctx.config) "keepers" in

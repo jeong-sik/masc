@@ -29,7 +29,6 @@ import {
   observeSnapshot,
   appendCompositeObservation,
   deriveTopTransitions,
-  deriveLaneDwellHistograms,
   deriveTransitionHistory,
   derivePhaseLog,
   deriveStateEntries,
@@ -505,10 +504,10 @@ export function FsmHub(props: FsmHubProps = {}) {
     () => deriveStateEntries(view.observations),
     [view.observations],
   )
-  const dwellHistograms = useMemo(
-    () => deriveLaneDwellHistograms(view.observations, now),
-    [view.observations, now],
-  )
+  // dwellHistograms moved into DwellHistogramPanel itself — that panel
+  // owns its own 5 s clock subscription so this component stays stable
+  // on ticks. (Previously this useMemo recomputed every 5 s because of
+  // the `now` dep, dragging fsm-hub through the same render every time.)
   const { snapshot, loading, error, lastFetchAt } = view
 
   const rootGap = density === 'compact' ? 'gap-1.5' : 'gap-3'
@@ -563,20 +562,19 @@ export function FsmHub(props: FsmHubProps = {}) {
             <${CollapsibleZone} id="swimlane" title="상태 타임라인" defaultOpen=${true}>
               <${SwimlaneTimeline}
                 observations=${view.observations}
-                now=${now}
                 hoveredSegment=${hoveredSegment}
                 onHoverSegment=${setHoveredSegment}
               />
             <//>
             ${/* ── Zone 3b: Transition History ── */ ''}
             <${CollapsibleZone} id="transition-trail" title="전환 이력" defaultOpen=${true}>
-              <${TransitionTrail} history=${history} now=${now} hoveredSegment=${hoveredSegment} />
+              <${TransitionTrail} history=${history} hoveredSegment=${hoveredSegment} />
             <//>
           </div>
           <div class="flex flex-col gap-3">
             ${/* ── Zone 3c: State Dwell Time ── */ ''}
             <${CollapsibleZone} id="dwell-histogram" title="상태 체류 시간" defaultOpen=${true}>
-              <${DwellHistogramPanel} histograms=${dwellHistograms} hoveredSegment=${hoveredSegment} />
+              <${DwellHistogramPanel} observations=${view.observations} hoveredSegment=${hoveredSegment} />
             <//>
             ${/* ── Zone 3d: Top Transitions ── */ ''}
             <${CollapsibleZone} id="top-transitions" title="빈발 전환" defaultOpen=${true}>

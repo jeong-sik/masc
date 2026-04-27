@@ -3,17 +3,18 @@ import { useSignal } from '@preact/signals'
 import { useEffect, useMemo, useRef } from 'preact/hooks'
 import { DashedNotice } from './common/dashed-notice'
 import { TextInput } from './common/input'
+import { nowSecondsSignal, useNowSecondsTicker } from '../lib/now-signal'
 
 import {
   type CompositeObservation,
   type HoveredSegment,
-  type LaneDwell,
   type LaneKey,
   type TopTransition,
   fmtDuration,
   displayState,
 } from './fsm-hub-types'
 import {
+  deriveLaneDwellHistograms,
   deriveSwimlaneSegments,
   deriveTimeAxisTicks,
   inferTransitionReason,
@@ -118,15 +119,15 @@ function handleSwimlaneKey(
 
 export function SwimlaneTimeline({
   observations,
-  now,
   hoveredSegment,
   onHoverSegment,
 }: {
   observations: CompositeObservation[]
-  now: number
   hoveredSegment: HoveredSegment | null
   onHoverSegment: (seg: HoveredSegment | null) => void
 }) {
+  useNowSecondsTicker()
+  const now = nowSecondsSignal.value
   if (observations.length === 0) {
     return html`
       <${DashedNotice} borderTone="subtle">
@@ -348,13 +349,13 @@ export function filterTransitionHistory(
 
 export function TransitionTrail({
   history,
-  now,
   hoveredSegment,
 }: {
   history: TransitionHistoryEntry[]
-  now: number
   hoveredSegment: HoveredSegment | null
 }) {
+  useNowSecondsTicker()
+  const now = nowSecondsSignal.value
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const query = useSignal('')
   const visibleHistory = useMemo(
@@ -507,12 +508,23 @@ const BAR_COLOR: Record<string, string> = {
 }
 
 export function DwellHistogramPanel({
-  histograms,
+  observations,
   hoveredSegment,
 }: {
-  histograms: LaneDwell[]
+  observations: CompositeObservation[]
   hoveredSegment: HoveredSegment | null
 }) {
+  // Owns its own 5 s clock subscription + dwell-histogram derivation —
+  // previously the parent fsm-hub computed dwellHistograms in a useMemo
+  // with `now` as a dep, causing the parent to recompute every 5 s.
+  // Moving the derivation here keeps fsm-hub stable on ticks; only this
+  // panel and its render output update.
+  useNowSecondsTicker()
+  const now = nowSecondsSignal.value
+  const histograms = useMemo(
+    () => deriveLaneDwellHistograms(observations, now),
+    [observations, now],
+  )
   if (histograms.length === 0) {
     return html`
       <${DashedNotice} borderTone="subtle">

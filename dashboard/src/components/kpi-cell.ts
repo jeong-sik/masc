@@ -54,6 +54,12 @@ export interface KpiCellProps {
    *  sites preserve existing test selectors when swapping in from
    *  hand-rolled cells. */
   testId?: string
+  /** Optional 0-100 progress bar rendered below the value. The bar fill
+   *  follows `kind` (or fg-secondary when neutral). Out-of-range values
+   *  are clamped, not rejected — caller decides whether 113% is a bug
+   *  or just "saturated". `kind` mapping is the caller's job: this
+   *  component intentionally doesn't pick warn/err thresholds. */
+  progress?: number
 }
 
 /** Assemble the screen-reader announcement for one KPI cell.
@@ -73,7 +79,10 @@ export function kpiCellAriaLabel(props: KpiCellProps): string {
           ? ' (warning)'
           : ''
   const cap = props.caption ? ` ${props.caption}` : ''
-  return `${props.label}: ${props.value}${cap}${delta}${kind}${live}`
+  const prog = props.progress != null
+    ? `, progress ${Math.round(Math.min(Math.max(props.progress, 0), 100))}%`
+    : ''
+  return `${props.label}: ${props.value}${cap}${delta}${prog}${kind}${live}`
 }
 
 const VALUE_COLOR_BY_KIND: Record<KpiCellKind, string> = {
@@ -139,6 +148,31 @@ export function KpiCell(props: KpiCellProps): VNode {
     lineHeight: 1.1,
   }
 
+  const progressRow = props.progress != null
+    ? html`
+        <div
+          aria-hidden="true"
+          style=${{
+            width: '100%',
+            height: '2px',
+            background: 'var(--color-border-default)',
+            borderRadius: '1px',
+            overflow: 'hidden',
+            marginTop: '2px',
+          }}
+        >
+          <div
+            style=${{
+              height: '100%',
+              width: `${Math.min(Math.max(props.progress, 0), 100)}%`,
+              background: valueColor,
+              transition: 'width 500ms',
+            }}
+          ></div>
+        </div>
+      `
+    : null
+
   const captionRow = (variant === 'standard' || variant === 'stacked') && (props.caption || props.delta)
     ? html`
         <span
@@ -178,6 +212,7 @@ export function KpiCell(props: KpiCellProps): VNode {
       <span aria-hidden="true" style=${labelStyle}>${props.label}</span>
       <span aria-hidden="true" style=${valueStyle}>${props.value}</span>
       ${captionRow}
+      ${progressRow}
     </div>
   `
 }

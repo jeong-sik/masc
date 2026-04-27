@@ -199,19 +199,6 @@ let test_agent_status_of_string_opt_unknown () =
   | Some _ -> fail "expected None"
 
 (* ============================================================
-   agent_status_of_string Tests
-   ============================================================ *)
-
-let test_agent_status_of_string_active () =
-  let s = Types.agent_status_of_string "active" in
-  check bool "is Active" true (s = Types.Active)
-
-let test_agent_status_of_string_unknown_defaults () =
-  (* Unknown strings default to Active *)
-  let s = Types.agent_status_of_string "invalid" in
-  check bool "defaults to Active" true (s = Types.Active)
-
-(* ============================================================
    agent_status_to_yojson Tests
    ============================================================ *)
 
@@ -1563,10 +1550,6 @@ let () =
       test_case "listening" `Quick test_agent_status_of_string_opt_listening;
       test_case "inactive" `Quick test_agent_status_of_string_opt_inactive;
       test_case "unknown" `Quick test_agent_status_of_string_opt_unknown;
-    ];
-    "agent_status_of_string", [
-      test_case "active" `Quick test_agent_status_of_string_active;
-      test_case "unknown defaults" `Quick test_agent_status_of_string_unknown_defaults;
     ];
     "agent_status_to_yojson", [
       test_case "active" `Quick test_agent_status_to_yojson_active;

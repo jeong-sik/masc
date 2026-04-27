@@ -125,13 +125,6 @@ let test_agent_status_to_string () =
   check string "Listening" "listening" (Types.agent_status_to_string Types.Listening);
   check string "Inactive" "inactive" (Types.agent_status_to_string Types.Inactive)
 
-let test_agent_status_of_string () =
-  check bool "active" true (Types.agent_status_of_string "active" = Types.Active);
-  check bool "busy" true (Types.agent_status_of_string "busy" = Types.Busy);
-  check bool "listening" true (Types.agent_status_of_string "listening" = Types.Listening);
-  check bool "inactive" true (Types.agent_status_of_string "inactive" = Types.Inactive);
-  check bool "unknown defaults to Active" true (Types.agent_status_of_string "unknown" = Types.Active)
-
 let test_agent_status_of_string_opt () =
   check bool "active Some" true (Types.agent_status_of_string_opt "active" = Some Types.Active);
   check bool "unknown None" true (Types.agent_status_of_string_opt "unknown" = None)
@@ -887,7 +880,6 @@ let timestamp_tests = [
 
 let agent_status_tests = [
   "to_string all", `Quick, test_agent_status_to_string;
-  "of_string all", `Quick, test_agent_status_of_string;
   "of_string_opt", `Quick, test_agent_status_of_string_opt;
   "of_string_r (#10748)", `Quick, test_agent_status_of_string_r;
   "to_yojson", `Quick, test_agent_status_to_yojson;

@@ -84,15 +84,7 @@ let agent_status_of_string_r s : (agent_status, string) result =
   | Some status -> Ok status
   | None -> Error (Printf.sprintf "unknown agent_status: %S" s)
 
-[@@@ocaml.warning "-3"]
-let agent_status_of_string s =
-  (* #10748: legacy "permissive default" — kept for source compatibility.
-     New code should call {!agent_status_of_string_r} (Result-based) or
-     {!agent_status_of_string_opt}. *)
-  match agent_status_of_string_opt s with
-  | Some status -> status
-  | None -> Active
-[@@ocaml.warning "-3"]
+
 
 (* Custom yojson converters for lowercase JSON compatibility *)
 let agent_status_to_yojson status = `String (agent_status_to_string status)

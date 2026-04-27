@@ -269,7 +269,7 @@ function renderLogRow(entry: LogEntry) {
           ? html`<span class="rounded-sm border border-[var(--white-10)] px-2 py-0.5 text-3xs text-[var(--color-fg-muted)]">${entry.raw_level}</span>`
           : null}
         ${clientName
-          ? html`<span class="rounded-sm border border-[var(--accent-soft)] px-2 py-0.5 text-3xs text-[#dff3ff]">${clientName}</span>`
+          ? html`<span class="rounded-sm border border-[var(--color-accent-soft)] px-2 py-0.5 text-3xs text-[#dff3ff]">${clientName}</span>`
           : null}
         ${toolName
           ? html`<span class="inline-flex items-center gap-1 rounded-sm border border-[var(--white-10)] px-2 py-0.5 text-3xs"><span class="font-mono font-bold ${toolCategory(toolName).color}">${toolCategory(toolName).icon}</span><span class="text-[var(--color-fg-muted)]">${toolName}</span></span>`

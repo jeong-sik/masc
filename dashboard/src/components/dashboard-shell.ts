@@ -405,7 +405,7 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
                 <${RouteLink}
                   tab=${surface.defaultTab}
                   params=${surface.defaultParams}
-                  class="flex items-center justify-center w-full rounded border p-2 cursor-pointer transition-[background-color,border-color,color,box-shadow] duration-200 ${isSurfaceActive ? 'bg-[var(--accent-soft)] text-[var(--color-fg-secondary)] shadow-[inset_0_1px_1px_var(--white-10)] border-[var(--accent-20)]' : 'border-transparent text-[var(--color-fg-muted)] hover:bg-[var(--white-5)]'}"
+                  class="flex items-center justify-center w-full rounded border p-2 cursor-pointer transition-[background-color,border-color,color,box-shadow] duration-200 ${isSurfaceActive ? 'bg-[var(--color-accent-soft)] text-[var(--color-fg-secondary)] shadow-[inset_0_1px_1px_var(--white-10)] border-[var(--accent-20)]' : 'border-transparent text-[var(--color-fg-muted)] hover:bg-[var(--white-5)]'}"
                   title=${surface.label}
                   aria-label=${surface.label}
                   ariaCurrent=${isSurfaceActive ? 'page' : undefined}
@@ -440,7 +440,7 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
                           role="listitem"
                           tab=${surface.id}
                           params=${item.params}
-                          class="w-full rounded border px-2 py-1 text-left cursor-pointer text-sm transition-[background-color,border-color,color,box-shadow] duration-200 ${isSectionActive ? 'bg-[var(--accent-soft)] text-[var(--color-accent-fg)] font-medium shadow-[inset_0_1px_1px_var(--white-10)] border-[var(--accent-soft)]' : 'border-transparent text-[var(--color-fg-muted)] hover:bg-[var(--white-5)] hover:text-[var(--color-fg-primary)]'}"
+                          class="w-full rounded border px-2 py-1 text-left cursor-pointer text-sm transition-[background-color,border-color,color,box-shadow] duration-200 ${isSectionActive ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent-fg)] font-medium shadow-[inset_0_1px_1px_var(--white-10)] border-[var(--color-accent-soft)]' : 'border-transparent text-[var(--color-fg-muted)] hover:bg-[var(--white-5)] hover:text-[var(--color-fg-primary)]'}"
                           ariaCurrent=${isSectionActive ? 'page' : undefined}
                         >
                           <div class="truncate">${item.label}</div>

@@ -368,6 +368,154 @@ let test_max_restarts_exhaustion_emits_dead_alert () =
       check bool "keeper phase advanced to Dead"
         true (phase = Masc_mcp.Keeper_state_machine.Dead))
 
+(* ── Phase 2 (#10765): stale-termination storm auto-pause ──────── *)
+
+(* Reproduces the Mode A failure pattern from 2026-04-27 fleet observation:
+   keeper proactive turn fails (cascade dead / oas_timeout_budget) → stale
+   watchdog kills fiber → supervisor restarts → 30 min later same stale →
+   restart loop with no operator-actionable signal beyond log ERROR.
+
+   With Phase 2 latched as last_failure_reason = Stale_termination_storm,
+   sweep_and_recover must:
+   1. Skip [to_restart] enqueue (the regression we are preventing).
+   2. Persist [meta.paused = true] on disk so reconcile + future sweeps
+      respect the pause across server restarts.
+   3. Increment [masc_keeper_stale_storm_paused_total] for observability.
+   4. Leave [restart_count] unchanged (storm is not a restart attempt). *)
+let test_stale_storm_pause_skips_restart () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Reg.clear ();
+      Masc_mcp.Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
+      let name = "stale-storm-keeper" in
+      let meta = make_meta name in
+      (match KT.write_meta config meta with
+       | Ok () -> ()
+       | Error err -> fail err);
+      let reg = Reg.register ~base_path:config.base_path name meta in
+      Eio.Promise.resolve reg.done_r (`Crashed "synthetic stale storm");
+      (* [restore_supervisor_state] resets [last_failure_reason] to [None],
+         so it MUST run before [set_failure_reason] (otherwise the storm
+         latch is wiped and the supervisor sweeps the entry through the
+         default crash path).  Order matters here. *)
+      Reg.restore_supervisor_state ~base_path:config.base_path name
+        ~restart_count:0 ~last_restart_ts:0.0 ~crash_log:[];
+      Reg.set_failure_reason ~base_path:config.base_path name
+        (Some (Reg.Stale_termination_storm { count = 5 }));
+      let baseline_pause =
+        Masc_mcp.Prometheus.metric_total "masc_keeper_stale_storm_paused_total"
+      in
+      let baseline_dead =
+        Masc_mcp.Prometheus.metric_total
+          Masc_mcp.Prometheus.metric_keeper_dead_total
+      in
+      let ctx : _ KT.context =
+        {
+          config;
+          agent_name = "supervisor";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = Some (Eio.Stdenv.net env);
+        }
+      in
+      Sup.sweep_and_recover ctx;
+      let after_pause =
+        Masc_mcp.Prometheus.metric_total "masc_keeper_stale_storm_paused_total"
+      in
+      let after_dead =
+        Masc_mcp.Prometheus.metric_total
+          Masc_mcp.Prometheus.metric_keeper_dead_total
+      in
+      check (float 0.001) "stale_storm_paused counter incremented by 1"
+        (baseline_pause +. 1.0) after_pause;
+      check (float 0.001) "dead counter NOT incremented (storm is not death)"
+        baseline_dead after_dead;
+      (* meta.paused must be true on disk so reconcile + future sweeps
+         honor the pause across server restarts. *)
+      (match KT.read_meta config name with
+       | Ok (Some m) ->
+           check bool "meta.paused = true after storm pause"
+             true m.paused
+       | Ok None -> fail "meta missing after storm pause"
+       | Error err -> fail ("read_meta failed: " ^ err));
+      (* In-memory registry entry is unregistered so subsequent sweeps do
+         NOT re-fire the storm-pause path within the same server instance.
+         Reconcile_keepalive_keepers will skip this keeper on its next pass
+         because [meta.paused = true]. *)
+      check bool "registry entry unregistered after storm pause"
+        false (Reg.is_registered ~base_path:config.base_path name))
+
+(* Regression guard: a `Crashed entry whose last_failure_reason is NOT a
+   storm must still flow through the existing restart-or-mark-dead branch.
+   Verifies the new gate is variant-specific, not a blanket short-circuit. *)
+let test_non_storm_crashed_restarts_normally () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Reg.clear ();
+      Masc_mcp.Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
+      let name = "non-storm-keeper" in
+      let meta = make_meta name in
+      (match KT.write_meta config meta with
+       | Ok () -> ()
+       | Error err -> fail err);
+      let reg = Reg.register ~base_path:config.base_path name meta in
+      Eio.Promise.resolve reg.done_r (`Crashed "ordinary crash");
+      let max_restarts =
+        Masc_mcp.Runtime_params.get
+          Masc_mcp.Governance_registry.keeper_supervisor_max_restarts
+      in
+      (* Set restart_count to max_restarts so the default crash branch routes
+         to [to_mark_dead] (not [to_restart]).  The point of this regression
+         test is verifying the storm-gate is variant-specific, not exercising
+         the restart path (which would fork a heartbeat fiber and hang). *)
+      Reg.restore_supervisor_state ~base_path:config.base_path name
+        ~restart_count:max_restarts ~last_restart_ts:0.0 ~crash_log:[];
+      Reg.set_failure_reason ~base_path:config.base_path name
+        (Some (Reg.Heartbeat_consecutive_failures 3));
+      let baseline_pause =
+        Masc_mcp.Prometheus.metric_total "masc_keeper_stale_storm_paused_total"
+      in
+      let ctx : _ KT.context =
+        {
+          config;
+          agent_name = "supervisor";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = Some (Eio.Stdenv.net env);
+        }
+      in
+      Sup.sweep_and_recover ctx;
+      let after_pause =
+        Masc_mcp.Prometheus.metric_total "masc_keeper_stale_storm_paused_total"
+      in
+      check (float 0.001) "stale_storm_paused counter NOT incremented for non-storm"
+        baseline_pause after_pause;
+      (* meta.paused stays false. *)
+      (match KT.read_meta config name with
+       | Ok (Some m) ->
+           check bool "meta.paused stays false after non-storm crash"
+             false m.paused
+       | Ok None -> fail "meta missing"
+       | Error err -> fail ("read_meta failed: " ^ err)))
+
 (* ── Test runner ────────────────────────────────────────── *)
 
 let () =
@@ -411,5 +559,11 @@ let () =
     "dead_state_alert", [
       test_case "max_restarts exhaustion emits Dead alert" `Quick
         test_max_restarts_exhaustion_emits_dead_alert;
+    ];
+    "stale_storm_phase2", [
+      test_case "Stale_termination_storm skips restart, persists paused, increments counter" `Quick
+        test_stale_storm_pause_skips_restart;
+      test_case "non-storm Crashed still routes to restart (regression guard)" `Quick
+        test_non_storm_crashed_restarts_normally;
     ];
   ]

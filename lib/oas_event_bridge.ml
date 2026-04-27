@@ -80,7 +80,21 @@ let emit_native_event_log (evt : Oas.Event_bus.event) (json : Yojson.Safe.t) =
         (Printf.sprintf
            "tool completed agent=%s tool_name=%s"
            agent_name tool_name)
-  | Oas.Event_bus.TurnReady _ -> ()
+  | Oas.Event_bus.TurnReady { agent_name; turn; tool_names } ->
+      (* [substrate:tool_surface] — deterministic per-turn snapshot of the
+         tool list the LLM actually sees this turn (after guardrails,
+         operator policy, tool_filter_override).  Emitted as a single
+         grep-friendly line with a stable hash so operators can confirm
+         which tools were on the LLM's surface for a given turn without
+         enabling verbose tool dumps. *)
+      let names_hash =
+        Digest.to_hex (Digest.string (String.concat "\n" tool_names))
+      in
+      log
+        (Printf.sprintf
+           "[substrate:tool_surface] agent=%s turn=%d count=%d names_hash=%s"
+           agent_name turn (List.length tool_names)
+           (String.sub names_hash 0 16))
   | Oas.Event_bus.ContextCompacted
       { agent_name; before_tokens; after_tokens; phase } ->
       log
@@ -193,7 +207,22 @@ let native_event_to_json (evt : Oas.Event_bus.event) : Yojson.Safe.t option =
           ]
       in
       Some (wrap ~event_type:"turn_completed" ~payload ~agent_name ~turn ())
-  | Oas.Event_bus.TurnReady _ -> None
+  | Oas.Event_bus.TurnReady { agent_name; turn; tool_names } ->
+      let names_hash =
+        Digest.to_hex (Digest.string (String.concat "\n" tool_names))
+      in
+      let payload =
+        `Assoc
+          [
+            ("agent_name", `String agent_name);
+            ("turn", `Int turn);
+            ("count", `Int (List.length tool_names));
+            ("names_hash", `String (String.sub names_hash 0 16));
+            ( "tool_names",
+              `List (List.map (fun name -> `String name) tool_names) );
+          ]
+      in
+      Some (wrap ~event_type:"turn_ready" ~payload ~agent_name ~turn ())
   | Oas.Event_bus.HandoffRequested { from_agent; to_agent; reason } ->
       let payload =
         `Assoc

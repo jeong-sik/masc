@@ -401,6 +401,7 @@ Violations are blocked. Good: cmd='dune build', cmd='ls -la lib/'. \
 Bad: cmd='cd x && dune build', cmd='rg foo | wc -l'. \
 Runs in the keeper sandbox by default; use cwd to target an explicit allowed directory. \
 Paths resolve automatically — never include host storage prefixes such as '.masc/playground/your-name/' in cwd. Use 'repos/X' instead. \
+Sandbox root is NOT a git repository: git/gh calls require cwd='repos/<REPO_NAME>' (or the worktree path under it). 'not a git repository' or 'path_outside_sandbox' from the sandbox root means you forgot the cwd. \
 For read-only ops use keeper_shell, for file edits use keeper_fs_edit. \
 Set run_in_background=true for long-running tasks (returns background_task_id; \
 poll with keeper_bash_output, terminate with keeper_bash_kill).";

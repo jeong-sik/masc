@@ -356,6 +356,23 @@ let run_turn
     build_prompt_metrics ~system_prompt:turn_system_prompt ~dynamic_context
       ~user_message
   in
+  (* [substrate:system_prompt] — single grep-friendly line per turn carrying
+     the system prompt's deterministic identity (length + 16-char SHA256
+     prefix).  Operators can confirm at a glance whether a keeper's system
+     prompt drifted across turns or differs from the persona file, without
+     dumping the raw prompt text.  Companion to [substrate:tool_surface]
+     emitted from the OAS Event_bus.TurnReady arm.  Phase 2 of substrate
+     observability. *)
+  (let segment = prompt_metrics.system_prompt_segment in
+   let hash16 =
+     match segment.fingerprint with
+     | Some hex when String.length hex >= 16 -> String.sub hex 0 16
+     | Some hex -> hex
+     | None -> "empty"
+   in
+   Log.Keeper.info
+     "[substrate:system_prompt] agent=%s turn=%d length=%d hash=%s"
+     meta.agent_name (start_turn_count + 1) segment.bytes hash16);
   (* 6. Append user message and persist.
      On retry (is_retry=true), the user message was already persisted by the
      first attempt.  Checkpoint reload does not include it (checkpoint is

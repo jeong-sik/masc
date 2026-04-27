@@ -37,6 +37,9 @@
 export type RingTone =
   | 'accent'
   | 'accent-soft'
+  | 'accent-medium'
+  | 'accent-subtle'
+  | 'accent-fg'
   | 'border'
   | 'muted'
   | 'ok'
@@ -60,6 +63,21 @@ const TONE_CLASS: Record<RingTone, string> = {
   // Used by agent-detail.ts:286 anchor underline focus, where a
   // full-strength accent ring would compete with the underline.
   'accent-soft': 'ring-accent/40',
+  // `accent-medium` = `ring-[var(--accent-45)]` — accent at 45%
+  // opacity. Dominant focus-ring tone for primary form controls and
+  // buttons (8+ callsites: app/theme-switch/dashboard-shell, common
+  // helpers button/input/select/checkbox/number-input/scroll-to-top,
+  // keeper-detail, agent-detail). Pairs with `width: 2 + offset: 2`.
+  'accent-medium': 'ring-[var(--accent-45)]',
+  // `accent-subtle` = `ring-[var(--accent-30)]` — accent at 30%
+  // opacity. Used for hover-fade focus indicators on icon buttons
+  // (copy-id-button). Pairs with `width: 1 + offset: 0`.
+  'accent-subtle': 'ring-[var(--accent-30)]',
+  // `accent-fg` = `ring-[var(--color-accent-fg)]` — full-strength
+  // accent foreground token (different from `accent` which uses the
+  // bare `accent` Tailwind class). Used by fsm-hub timeline panels
+  // where the swimlane segment focus needs maximum contrast.
+  'accent-fg': 'ring-[var(--color-accent-fg)]',
   border: 'ring-[var(--color-border-strong)]',
   muted: 'ring-white/5',
   ok: 'ring-[var(--color-status-ok)]',
@@ -97,6 +115,11 @@ export interface RingFocusOpts {
    *  (keyboard-only). Set `false` to use bare `focus:` (mouse + keyboard
    *  — rare, but matches a few legacy callsites). */
   visible?: boolean
+  /** Render the ring inside the element instead of outside (`ring-inset`).
+   *  Used when the element has no padding/margin headroom for an external
+   *  ring (e.g. swimlane segments in fsm-hub-timeline-panels). Mutually
+   *  exclusive with `offset > 0` — inset rings cannot have an offset gap. */
+  inset?: boolean
 }
 
 /** Compose the canonical focus-ring class string.
@@ -123,7 +146,9 @@ export function ringFocusClasses(opts: RingFocusOpts = {}): string {
     `${prefix}${TONE_CLASS[tone]}`,
   ]
 
-  if (offset > 0) {
+  if (opts.inset) {
+    parts.push(`${prefix}ring-inset`)
+  } else if (offset > 0) {
     parts.push(`${prefix}ring-offset-${offset}`)
     const offsetSurface = opts.offsetSurface ?? 'page'
     parts.push(`${prefix}${OFFSET_SURFACE_CLASS[offsetSurface]}`)

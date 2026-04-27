@@ -382,7 +382,7 @@ let run_turn
      of substrate observability. *)
   (let user_seg = prompt_metrics.user_message_segment in
    let dyn_seg = prompt_metrics.dynamic_context_segment in
-   let pick_hash16 segment =
+   let pick_hash16 (segment : Keeper_agent_prompt_metrics.prompt_segment_metrics) =
      match segment.fingerprint with
      | Some hex when String.length hex >= 16 -> String.sub hex 0 16
      | Some hex -> hex

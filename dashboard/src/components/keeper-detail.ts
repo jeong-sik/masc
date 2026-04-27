@@ -302,12 +302,14 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
               onClick=${() => handleDirective('pause')}
             >일시정지</button>
             ${(hbStale || runtimeBlockerClass === 'oas_timeout_budget' || runtimeBlockerClass === 'cascade_exhausted' || runtimeBlockerClass === 'turn_timeout')
-              ? html`<button
-                  class="inline-flex items-center rounded px-2 py-0.5 text-2xs font-medium bg-[var(--warn-14)] hover:bg-[var(--warn-24)] text-[var(--color-status-warn)] transition-colors disabled:opacity-50"
+              ? html`<${ActionButton}
+                  variant="warn"
+                  size="sm"
+                  class="!py-0.5 inline-flex items-center"
                   disabled=${directiveLoading.value}
                   onClick=${() => handleDirective('wakeup')}
                   title="자고 있는 keeper의 sleep을 깨워 다음 turn을 시도합니다. fiber가 살아 있을 때만 효과가 있습니다."
-                >깨우기</button>`
+                >깨우기<//>`
               : null}`}
         ${keeper.paused && keeper.keepalive_running && continueGate
           ? html`<span>하트비트는 유지되지만 승인 전까지 자동 재개하지 않습니다.</span>`

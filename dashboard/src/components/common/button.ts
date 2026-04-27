@@ -12,7 +12,7 @@
 import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'
 
-type ButtonVariant = 'primary' | 'ghost' | 'danger' | 'subtle' | 'ok'
+type ButtonVariant = 'primary' | 'ghost' | 'danger' | 'subtle' | 'ok' | 'warn'
 type ButtonSize = 'sm' | 'md' | 'lg'
 type ButtonType = 'button' | 'submit' | 'reset'
 
@@ -28,6 +28,7 @@ const VARIANT_CLASSES: Record<ButtonVariant, string> = {
   danger: 'border border-solid border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--bad-light)] hover:bg-[var(--bad-20)]',
   subtle: 'border-none bg-transparent text-[var(--color-fg-muted)] hover:text-[var(--color-fg-primary)] hover:bg-[var(--white-6)]',
   ok: 'border border-solid border-[var(--ok-20)] bg-[var(--ok-10)] text-[var(--color-status-ok)] hover:bg-[var(--ok-20)]',
+  warn: 'border-none bg-[var(--warn-14)] text-[var(--color-status-warn)] hover:bg-[var(--warn-24)]',
 }
 
 // Pressed-state overrides per variant. Applied when `pressed=true` so the
@@ -41,6 +42,7 @@ const PRESSED_CLASSES: Record<ButtonVariant, string> = {
   danger: 'bg-[var(--bad-20)]',
   subtle: 'bg-[var(--white-6)] text-[var(--color-fg-primary)]',
   ok: 'bg-[var(--ok-20)]',
+  warn: 'bg-[var(--warn-24)]',
 }
 
 const BASE = 'rounded cursor-pointer transition-all duration-200 font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-bg-surface)] active:scale-[0.97] active:opacity-90'

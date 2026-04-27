@@ -181,7 +181,22 @@ let maybe_rollover_oas_handoff
         let prev_trace_id = base_meta.runtime.trace_id in
         let new_trace_id = Keeper_identity.generate_trace_id () in
         let next_generation = current_generation + 1 in
-        on_started ();
+        (* PR-J: see keeper_post_turn.ml for the rationale on
+           keep-going-on-callback-failure. The handoff path mirrors
+           the compaction path so the operator counter aggregates a
+           single fleet-wide invariant: any lifecycle callback that
+           can't reach the registry must surface as a counter+warn,
+           never silently abort the rollover. *)
+        (try on_started ()
+         with
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | exn ->
+             Prometheus.inc_counter
+               Prometheus.metric_keeper_lifecycle_callback_failures
+               ~labels:[("callback", "on_handoff_started")] ();
+             Log.Keeper.warn
+               "keeper:%s rollover on_started raised: %s"
+               base_meta.name (Printexc.to_string exn));
         (try
           let new_session =
             create_session ~session_id:new_trace_id ~base_dir

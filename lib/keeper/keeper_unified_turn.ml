@@ -1431,13 +1431,21 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             | _ -> ())
           events
       in
-      let drain_turn_event_bus () =
+      (* PR-J: [?site] labels the call-site so PromQL can attribute
+         drain pressure to background polling vs unsubscribe vs the
+         retry path. [outcome=drained] when at least one event was
+         pulled, [outcome=empty] otherwise (the latter is the no-op
+         tick that establishes the lock-acquire baseline). *)
+      let drain_turn_event_bus ?(site = "unspecified") () =
         with_turn_event_bus_lock (fun () ->
           let events =
             match event_bus_sub, Keeper_event_bus.get () with
             | Some sub, Some _bus -> Oas_bus_instrument.drain sub
             | _ -> []
           in
+          let outcome = if events = [] then "empty" else "drained" in
+          Prometheus.inc_counter Prometheus.metric_keeper_event_bus_drain
+            ~labels:[("site", site); ("outcome", outcome)] ();
           process_tool_events_for_side_effects events;
           let summary = summarize_turn_event_bus events in
           turn_event_bus :=
@@ -1455,7 +1463,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
               let rec loop () =
                 if Atomic.get event_bus_drain_active then begin
                   (try
-                     ignore (drain_turn_event_bus ())
+                     ignore (drain_turn_event_bus ~site:"background_poll" ())
                    with
                    | Eio.Cancel.Cancelled _ as e -> raise e
                    | exn ->
@@ -1485,7 +1493,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
       in
       let unsubscribe_event_bus () =
         Atomic.set event_bus_drain_active false;
-        ignore (drain_turn_event_bus ());
+        ignore (drain_turn_event_bus ~site:"unsubscribe_final" ());
         match event_bus_sub, Keeper_event_bus.get () with
         | Some sub, Some bus -> Oas_bus_instrument.unsubscribe bus sub
         | _ -> ()
@@ -1723,7 +1731,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                   reclassify_oas_timeout_for_attempt
                     ~timeout_budget:!attempt_timeout_budget err
                 in
-                let _ = drain_turn_event_bus () in
+                let _ = drain_turn_event_bus ~site:"reconcile_pre_check" () in
                 let committed_tools = committed_mutating_tools_snapshot () in
                 if committed_tools <> []
                    && Keeper_tool_registry.all_tools_reconcile_safe
@@ -1910,7 +1918,8 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                         ~is_retry:true ~overflow_retry_used
                         ~attempted_cascades
                   | No_degraded_retry when EC.is_context_overflow err ->
-                  let current_turn_event_bus = drain_turn_event_bus () in
+                  let current_turn_event_bus =
+                    drain_turn_event_bus ~site:"context_overflow_capture" () in
                   dispatch_keeper_phase_event
                     ~config
                     ~keeper_name:meta.name
@@ -2013,7 +2022,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                 timeout_sec
             in
             Log.Keeper.error "%s: %s" meta.name msg;
-            let _ = drain_turn_event_bus () in
+            let _ = drain_turn_event_bus ~site:"error_path_drain" () in
             let committed_tools = committed_mutating_tools_snapshot () in
             if committed_tools <> []
                && Keeper_tool_registry.all_tools_reconcile_safe
@@ -2082,7 +2091,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
         | result -> cleanup (); result
         | exception e -> cleanup (); raise e
       in
-      let turn_event_bus = drain_turn_event_bus () in
+      let turn_event_bus = drain_turn_event_bus ~site:"turn_finalize_capture" () in
       (match turn_event_bus.correlation_id with
        | Some correlation_id ->
            Keeper_registry.set_last_correlation_id

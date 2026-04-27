@@ -262,6 +262,23 @@ val metric_keeper_invariant_violations : string
     Cardinality is bounded by the documented edge set (≤ 8 series on
     a fleet of any size). *)
 val metric_keeper_fsm_edge_transitions : string
+
+(** PR-J: post-turn lifecycle callbacks raised exceptions that were
+    silently swallowed before this counter existed. Labels: [callback]
+    with values:
+    - [on_compaction_started] — fired from
+      [Keeper_post_turn.apply_post_turn_lifecycle]
+    - [on_handoff_started] — fired from
+      [Keeper_rollover.maybe_rollover_oas_handoff]
+    Cardinality: ≤ 2 series, fleet-independent. *)
+val metric_keeper_lifecycle_callback_failures : string
+
+(** PR-J: number of times the per-turn OAS event-bus drain helper ran,
+    labelled by call-site so operators can attribute drain pressure
+    (e.g. background poller vs. unsubscribe vs. retry path).
+    Labels: [site, outcome]. [outcome] is [drained] (events were
+    pulled) or [empty] (subscriber returned no pending events). *)
+val metric_keeper_event_bus_drain : string
 val metric_keeper_dead_total : string
 (** Total keeper transitions to [Dead] phase after restart-budget exhaustion.
     Labeled by [keeper] and [reason]. Operators should alert on any rate >0:

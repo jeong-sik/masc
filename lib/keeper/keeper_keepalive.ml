@@ -1367,6 +1367,17 @@ let run_keepalive_unified_turn
               ("reason", reason_str);
             ] ())
           verdict_strs;
+        (* #10940 follow-up — Prometheus counters aggregate skip reasons
+           across time, but operators need to see *which* reasons were
+           live just before a stale-watchdog [idle_stale=true]
+           termination.  Stamping the registry on every skip lets
+           [Keeper_stale_watchdog] surface the most recent reasons in
+           the kill warn line, distinguishing deliberate-skip dead
+           paths from genuinely stuck fibers. *)
+        Keeper_registry.record_skip_reasons
+          ~base_path:ctx.config.base_path
+          meta_after_triage.name
+          ~reasons:verdict_strs;
         let log_not_scheduled =
           match turn_decision.verdict with
           | Keeper_world_observation.Skip { reasons = (Keeper_world_observation.Scheduled_autonomous_disabled, []) } ->

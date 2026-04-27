@@ -138,17 +138,17 @@ export function CompositeFsmFlowchart(props: CompositeFsmFlowchartProps = {}) {
     <section
       data-testid="composite-fsm-flowchart"
       class="rounded border border-[var(--white-10)] bg-[var(--white-5)] ${props.class ?? ''}"
-      aria-label="Composite FSM flowchart"
+      aria-label="복합 FSM 플로우차트"
     >
       <header class="border-b border-[var(--white-10)] p-3">
         <h2 class="text-sm font-semibold text-[var(--color-fg-muted)]">
-          Composite FSM flowchart (TLA+ spec)
+          복합 FSM 플로우차트 (TLA+ spec)
         </h2>
         <p class="mt-1 text-xs text-[var(--color-fg-muted)]">
-          6 orthogonal axes rendered as Harel parallel regions. Source:
+          6 개의 직교 축을 Harel parallel region 으로 렌더링합니다. 출처:
           <code class="text-[var(--color-fg-muted)]">specs/keeper-state-machine/*.tla</code>.
-          Transitions here are the common-case edges; the TLA+
-          model-checker owns the exhaustive enumeration.
+          여기 표시된 transition 은 common-case edge 이고, exhaustive enumeration 은
+          TLA+ model checker 가 담당합니다.
         </p>
       </header>
       <div class="p-3">

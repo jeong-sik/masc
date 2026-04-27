@@ -7,6 +7,7 @@ import { Card } from './common/card'
 import { StatCard } from './common/stat-card'
 import { JsonViewerCard } from './common/json-viewer'
 import { EmptyState } from './common/empty-state'
+import { KeeperBadge } from './keeper-badge'
 import { formatTimeAgo } from '../lib/format-time'
 import {
   asBoolean,
@@ -236,7 +237,7 @@ function KeeperCard({ item }: { item: KeeperItem }) {
       <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div class="min-w-0">
           <div class="flex items-center gap-2">
-            <div class="text-sm font-semibold text-[var(--color-fg-secondary)]">${item.name}</div>
+            <${KeeperBadge} id=${item.name} variant="full" size="md" />
             <${StatusPill} status=${item.status} />
           </div>
           <div class="mt-1 text-xs text-[var(--color-fg-muted)]">
@@ -282,7 +283,7 @@ function FindingsList({ findings }: { findings: FindingItem[] }) {
               <div class="flex flex-wrap items-center gap-2">
                 <code class="text-3xs text-[var(--color-fg-muted)]">${item.reason_code}</code>
                 <${StatusPill} status=${item.severity} />
-                ${item.keeper_name ? html`<span class="text-3xs text-[var(--color-fg-muted)]">${item.keeper_name}</span>` : null}
+                ${item.keeper_name ? html`<${KeeperBadge} id=${item.keeper_name} variant="full" size="sm" />` : null}
               </div>
               <div class="mt-1 text-sm text-[var(--color-fg-secondary)]">${item.summary}</div>
               <div class="mt-1 text-xs text-[var(--color-fg-muted)]">${item.suggested_next_action}</div>
@@ -312,8 +313,12 @@ function TimelineList({ timeline }: { timeline: TimelineItem[] }) {
           <div class="flex items-start justify-between gap-3">
             <div class="min-w-0">
               <div class="text-xs text-[var(--color-fg-secondary)]">${item.summary}</div>
-              <div class="mt-1 text-3xs text-[var(--color-fg-muted)]">
-                ${item.kind}${item.keeper_name ? ` · ${item.keeper_name}` : ''}
+              <div class="mt-1 flex flex-wrap items-center gap-1 text-3xs text-[var(--color-fg-muted)]">
+                <span>${item.kind}</span>
+                ${item.keeper_name ? html`
+                  <span aria-hidden="true">·</span>
+                  <${KeeperBadge} id=${item.keeper_name} variant="full" size="sm" />
+                ` : null}
               </div>
             </div>
             <div class="shrink-0 text-3xs text-[var(--color-fg-muted)]">

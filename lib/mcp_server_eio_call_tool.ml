@@ -36,6 +36,32 @@ let contains_casefold haystack needle =
   String.length needle = 0
   || String_util.contains_substring_ci haystack needle
 
+(* #10975: tool-call failure severity classification.
+
+   Without this, every [success=false] result downstream is logged
+   at [Log.Error], including normal policy/workflow rejections like
+   [awaiting_approval] (governance critical-risk pending),
+   [Join required] (keeper called masc_transition before masc_join),
+   [egress_blocked] (network policy denial), [path_outside_sandbox]
+   (sandbox boundary), and [team memory is disabled] (config-disabled
+   scope).  Single 24h window: 41 such events at ERROR, polluting
+   alert ROC, supervisor escape-valve heuristics (#10887 SP cohort
+   detection counts ERROR rate), and the dashboard red counter that
+   operators use to triage genuine system errors.
+
+   Demote those byte-substring-matched rejection patterns to WARN.
+   Anything else stays ERROR.  Same family pattern as #10881 / #10908
+   / #10919 (single-flag split between normal and catastrophic). *)
+let classify_tool_failure_severity error_detail : Log.level =
+  let detail = Option.value ~default:"" error_detail in
+  if contains_casefold detail "awaiting_approval"
+     || contains_casefold detail "join required"
+     || contains_casefold detail "egress_blocked"
+     || contains_casefold detail "path_outside_sandbox"
+     || contains_casefold detail "team memory is disabled"
+  then Log.Warn
+  else Log.Error
+
 let parse_status_from_message ~success ~message =
   if not success then
     if
@@ -648,7 +674,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
     ~agent_id:agent_name ~tool_name:name ~success ~error_msg:error_detail
     ?trace_id:otel_trace_id ();
   if not success then
-    Log.Mcp.emit Log.Error
+    Log.Mcp.emit (classify_tool_failure_severity error_detail)
       ~details:
         (`Assoc
           [

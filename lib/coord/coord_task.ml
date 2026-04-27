@@ -1687,7 +1687,43 @@ let transition_task_r
               | exn ->
                 Log.RoomTask.error
                   "transition relation/hebbian done hook: %s"
-                  (Printexc.to_string exn))
+                  (Printexc.to_string exn));
+             (* #10899: auto-cleanup playground worktree on task done.
+                Keepers used to be expected to call
+                [masc_worktree_remove] themselves at task completion,
+                but that is a fragile contract — keeper crashes,
+                watchdog termination, and forgetfulness all leave
+                worktree directories behind. Field log: 5d / 7
+                keepers / ~3.4GB stale worktrees in
+                [.masc/playground/<keeper>/repos/.../.worktrees/].
+
+                Best-effort: if cleanup fails (uncommitted changes,
+                race with another fiber, missing worktree dir), log
+                a warn and continue. The state-change is the
+                canonical lifecycle event; filesystem GC must not
+                fail the task transition. *)
+             (match task.worktree with
+              | None -> ()
+              | Some _ ->
+                (try
+                   match
+                     Coord_worktree.worktree_remove_r config ~agent_name ~task_id
+                   with
+                   | Ok msg ->
+                     Log.RoomTask.info
+                       "task_done worktree auto-cleanup: %s" msg
+                   | Error e ->
+                     Log.RoomTask.warn
+                       "task_done worktree auto-cleanup failed \
+                        (best-effort, suppressed): %s"
+                       (Types.masc_error_to_string e)
+                 with
+                 | Eio.Cancel.Cancelled _ as e -> raise e
+                 | exn ->
+                   Log.RoomTask.warn
+                     "task_done worktree auto-cleanup raised \
+                      (best-effort, suppressed): %s"
+                     (Printexc.to_string exn)))
            | Types.Cancel ->
              (try
                 let workers = working_agents config in

@@ -118,7 +118,7 @@ export function deriveOperationalInsight(
   if (snapshot.phase === 'Failing' && snapshot.cascade.state === 'exhausted') {
     return {
       tone: 'error',
-      headline: 'Failing after cascade exhaustion',
+      headline: 'cascade exhaustion 후 실패',
       detail: 'The keeper has entered recovery with no remaining cascade path, so the turn cannot self-heal through provider failover.',
       nextStep: nextExpectedStep(snapshot),
       evidence: [
@@ -131,7 +131,7 @@ export function deriveOperationalInsight(
   if (snapshot.decision.stage === 'gate_rejected') {
     return {
       tone: 'warn',
-      headline: 'Guardrail blocked the turn',
+      headline: 'Guardrail 가 턴 차단',
       detail: 'Decision pipeline reached gate_rejected, so execution should unwind without entering provider work.',
       nextStep: nextExpectedStep(snapshot),
       evidence: [
@@ -156,7 +156,7 @@ export function deriveOperationalInsight(
   if (snapshot.phase === 'Compacting' || snapshot.compaction.stage === 'compacting') {
     return {
       tone: 'info',
-      headline: 'Compaction currently owns the turn',
+      headline: 'Compaction 가 현재 턴 소유',
       detail: 'The parent lifecycle and memory lane both indicate that post-turn compaction is the active coordination point.',
       nextStep: nextExpectedStep(snapshot),
       evidence: [
@@ -187,7 +187,7 @@ export function deriveOperationalInsight(
       : 'no completed turn yet'
     return {
       tone: 'ok',
-      headline: 'Idle snapshot is consistent',
+      headline: 'Idle 스냅샷 정상',
       detail: snapshot.last_outcome
         ? `Sub-FSMs have fallen back to idle placeholders; the last completed turn ended ${idleSince} ago.`
         : 'The observer is idle and has not captured a completed turn yet.',

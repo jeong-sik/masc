@@ -971,10 +971,10 @@ function ConnectorLivePanel({
                 ? html`<span class="text-3xs text-[var(--color-fg-disabled)]">checked ${timeAgo(connector.gate_health_checked_at)}</span>`
                 : null}
               <div class="mt-1">
-                <span class="font-medium">Cause: </span> keeper directory unavailable, manual entry only.
+                <span class="font-medium">Cause: </span> keeper 디렉토리 사용 불가, 수동 입력만 가능.
               </div>
               <div class="mt-1">
-                <span class="font-medium">Next: </span> continue with manual entry now, then restore <code class="rounded bg-[var(--white-4)] px-1">config/keepers/</code> or fix <code class="rounded bg-[var(--white-4)] px-1">/api/v1/gate/keepers</code> before relying on directory suggestions.
+                <span class="font-medium">Next: </span> 지금은 수동 입력으로 진행, 이후 <code class="rounded bg-[var(--white-4)] px-1">config/keepers/</code> 복원 또는 <code class="rounded bg-[var(--white-4)] px-1">/api/v1/gate/keepers</code> 수정 후 디렉토리 추천에 의존하세요.
               </div>
             </div>
           `

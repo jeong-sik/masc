@@ -202,7 +202,7 @@ describe('fsm-hub derived state', () => {
     )
 
     expect(result.tone).toBe('ok')
-    expect(result.headline).toContain('Idle snapshot')
+    expect(result.headline).toContain('Idle 스냅샷 정상')
     expect(result.detail).toContain('25s ago')
   })
 
@@ -236,7 +236,7 @@ describe('fsm-hub derived state', () => {
     )
 
     expect(result.tone).toBe('info')
-    expect(result.headline).toContain('Compaction currently owns the turn')
+    expect(result.headline).toContain('Compaction 가 현재 턴 소유')
   })
 })
 

@@ -137,8 +137,31 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                || now -. !last_broadcast_ts > threshold
              in
              if stale && cooldown_ok then begin
+               (* #10940 follow-up: surface the most recent skip reasons
+                  alongside [idle %.0fs] so operators can tell whether
+                  the kill targeted a *stuck* fiber or a *deliberately
+                  skipping* one.  [last_skip_observation] is stamped by
+                  the keepalive loop on every [should_run_turn=false]
+                  decision; we only quote it if it's recent enough to
+                  be the proximate cause of the idle window
+                  ([recency_window] = the same idle threshold that
+                  triggered the kill).  Older stamps are ignored to
+                  avoid surfacing labels from before the current idle
+                  window. *)
+               let recency_window = threshold in
+               let skip_reason_label =
+                 match entry.last_skip_observation with
+                 | Some (ts, reasons)
+                   when reasons <> []
+                        && now -. ts <= recency_window ->
+                   Printf.sprintf " last_skip=[%s] (%.0fs ago)"
+                     (String.concat "," reasons) (now -. ts)
+                 | _ -> ""
+               in
                let reason_desc =
-                 if idle_stale then Printf.sprintf "idle %.0fs" (now -. last_turn)
+                 if idle_stale then
+                   Printf.sprintf "idle %.0fs%s"
+                     (now -. last_turn) skip_reason_label
                  else if in_turn_stale then
                    Printf.sprintf "active turn hung %.0fs (timeout %.0fs)"
                      in_turn_age active_turn_timeout_sec

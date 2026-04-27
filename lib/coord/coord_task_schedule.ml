@@ -386,6 +386,25 @@ let claim_next_r
             log_event config (Printf.sprintf
               "{\"type\":\"task_claim_next_auto_release\",\"agent\":\"%s\",\"released_task\":\"%s\",\"from_status\":\"%s\",\"reason\":\"prev_claim_implicit_replaced\",\"ts\":\"%s\"}"
               agent_name prev.id from_status (now_iso ()));
+            (* #10421: warn-level log so dashboards see the implicit
+               release at fleet scale. [InProgress → Todo] is the
+               more concerning subset (mid-work churn) — from_status
+               surfaces that distinction in a single line. *)
+            Log.RoomTask.warn
+              "task_claim_next auto-released prev claim: agent=%s task=%s \
+               from_status=%s — keeper called claim_next without \
+               releasing/finishing the prior task (#10421)"
+              agent_name prev.id from_status;
+            (* #10421: Prometheus counter so operators can graph rate
+               and split by keeper. Hook indirection lives in
+               [coord_hooks]; emit wired in [lib/coord.ml] to avoid
+               a [masc_coord → Prometheus] dep cycle. *)
+            (try
+               (Atomic.get Coord_hooks.task_auto_release_observed_fn)
+                 ~agent_name ~from_status
+             with
+             | Eio.Cancel.Cancelled _ as e -> raise e
+             | _ -> ());
             (* No broadcast — internal state transition, log_event suffices. *)
             let updated = List.map (fun (t : Types.task) ->
               if String.equal t.id prev.id then { t with task_status = Todo }

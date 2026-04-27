@@ -57,6 +57,8 @@ val tool_assigned_fn : (agent_id:string ->
            Atomic.t
 val task_completion_path_observed_fn : (path:string -> contract_state:string -> agent_name:string -> unit)
            Atomic.t
+val task_auto_release_observed_fn :
+  (agent_name:string -> from_status:string -> unit) Atomic.t
 val claim_post_provision_fn : (Coord_utils_backend_setup.config ->
             agent_name:string ->
             task_id:string -> unit)

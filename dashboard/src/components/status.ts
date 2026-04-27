@@ -50,9 +50,9 @@ function sectionLabel(section: StatusSection): string {
     case 'runtime':
       return '런타임'
     case 'fleet-health':
-      return 'Fleet Health'
+      return '플릿 상태'
     case 'safe-autonomy':
-      return 'Safe Autonomy'
+      return '안전 자율성'
     case 'memory-subsystems':
       return '메모리 서브시스템'
     case 'attribution':

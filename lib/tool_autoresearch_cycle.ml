@@ -273,7 +273,7 @@ let handle_cycle (ctx : Tool_autoresearch_context.t) args =
               let reason =
                 Option.value ~default:"completed" (Autoresearch.completion_reason state)
               in
-              let state = Autoresearch.complete_if_finished state in
+              let state = Autoresearch.complete_if_finished ~base_path:ctx.base_path state in
               Hashtbl.replace active_loops id state;
               Autoresearch.save_state ~base_path:ctx.base_path state;
               Error ("completed:" ^ reason)
@@ -614,6 +614,7 @@ let handle_cycle (ctx : Tool_autoresearch_context.t) args =
                        Autoresearch.append_cycle ~base_path:ctx.base_path state.loop_id effective_record;
                        let state =
                          Autoresearch.complete_if_finished
+                           ~base_path:ctx.base_path
                            { state with current_cycle = state.current_cycle + 1 }
                        in
                        Autoresearch.with_loops_rw (fun () ->

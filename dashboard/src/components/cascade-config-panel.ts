@@ -315,7 +315,7 @@ export function keepersWithUnknownCanonical(
 function KeeperChip({ row }: { row: KeeperCascadeRow }) {
   const base = 'rounded border px-2 py-0.5 text-xs flex items-center gap-1'
   const borderTone = row.drift
-    ? 'border-[var(--warn)] text-[var(--text-strong)]'
+    ? 'border-[var(--color-status-warn)] text-[var(--text-strong)]'
     : 'border-[var(--color-border-default)] text-[var(--text-strong)]'
   return html`
     <span
@@ -508,7 +508,7 @@ function ProfileCard({
 function OrphanKeeperList({ orphans }: { orphans: readonly CascadeKeeperProfile[] }) {
   if (orphans.length === 0) return null
   return html`
-    <div class="rounded border border-[var(--warn)] bg-[var(--color-bg-page)] p-3 text-xs">
+    <div class="rounded border border-[var(--color-status-warn)] bg-[var(--color-bg-page)] p-3 text-xs">
       <div class="font-semibold text-[var(--text-strong)] mb-1">
         등록된 프로필 없음 (${orphans.length})
       </div>
@@ -521,7 +521,7 @@ function OrphanKeeperList({ orphans }: { orphans: readonly CascadeKeeperProfile[
             <span class="font-semibold text-[var(--text-strong)]">${o.keeper}</span>
             <code>${o.cascade_name}</code>
             <span class="text-[var(--color-fg-muted)]">→</span>
-            <code class="text-[var(--warn)]">${o.canonical}</code>
+            <code class="text-[var(--color-status-warn)]">${o.canonical}</code>
           </li>
         `)}
       </ul>
@@ -549,8 +549,8 @@ function CascadeValidationBanner({ config }: { config: CascadeConfigResponse }) 
   if (config.validation_status === 'validated') return null
   const tone = validationTone(config.validation_status)
   const boxTone = tone === 'bad'
-    ? 'border-[var(--bad)]/40 bg-[var(--bad)]/10'
-    : 'border-[var(--warn)]/40 bg-[var(--warn)]/10'
+    ? 'border-[var(--color-status-err)]/40 bg-[var(--color-status-err)]/10'
+    : 'border-[var(--color-status-warn)]/40 bg-[var(--color-status-warn)]/10'
   const visibleErrors = config.validation_errors.slice(0, 3)
   const visibleProfiles = config.invalid_profiles.slice(0, 4)
   return html`
@@ -681,9 +681,9 @@ export function filterHealthProviders(
 }
 
 const TONE_DOT: Record<string, string> = {
-  ok: 'bg-[var(--ok)]',
-  warn: 'bg-[var(--warn)]',
-  bad: 'bg-[var(--bad)]',
+  ok: 'bg-[var(--color-status-ok)]',
+  warn: 'bg-[var(--color-status-warn)]',
+  bad: 'bg-[var(--color-status-err)]',
 }
 
 function HealthTable({
@@ -765,7 +765,7 @@ function HealthTable({
                 <td class="py-1">
                   <code class="text-[var(--text-strong)]">${p.provider_key}</code>
                   ${orphaned
-                    ? html`<span class="ml-1 text-2xs text-[var(--warn)]" title="Provider 가 추적되었지만 cascade.json 에 더 이상 선언되어 있지 않음">orphan</span>`
+                    ? html`<span class="ml-1 text-2xs text-[var(--color-status-warn)]" title="Provider 가 추적되었지만 cascade.json 에 더 이상 선언되어 있지 않음">orphan</span>`
                     : null}
                 </td>
                 <td class="py-1">
@@ -778,7 +778,7 @@ function HealthTable({
                 <td class="py-1 text-right tabular-nums">${p.events_in_window}</td>
                 <td class="py-1 text-right tabular-nums">
                   ${rejected > 0
-                    ? html`<span class="text-[var(--warn)]">${rejected}</span>`
+                    ? html`<span class="text-[var(--color-status-warn)]">${rejected}</span>`
                     : html`<span class="text-[var(--color-fg-muted)]">—</span>`}
                 </td>
                 <td class="py-1 text-right tabular-nums">${fmtPerfTokPerSec(p.avg_prompt_tok_per_sec)}</td>
@@ -1134,13 +1134,13 @@ function CascadeRawConfigEditor({
           />
 
           <div class="flex items-center gap-3 flex-wrap text-xs">
-            <span class=${editorDirty.value ? 'text-[var(--warn)]' : 'text-[var(--color-fg-muted)]'}>
+            <span class=${editorDirty.value ? 'text-[var(--color-status-warn)]' : 'text-[var(--color-fg-muted)]'}>
               ${editorDirty.value ? 'unsaved changes' : 'in sync with disk'}
             </span>
             ${syntaxError
               ? html`<span class="text-[var(--bad-light)]">syntax: ${syntaxError}</span>`
               : html`
-                <span class="text-[var(--ok)]">
+                <span class="text-[var(--color-status-ok)]">
                   ${raw?.source_kind === 'toml' ? 'syntax: validated on save (TOML)' : 'syntax: valid JSON'}
                 </span>
               `}

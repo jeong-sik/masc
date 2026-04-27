@@ -97,7 +97,7 @@ export function ErrorRecoverable({
   return html`
     <section
       role="alert"
-      class="flex flex-col gap-2 rounded border border-[var(--warn-20)] border-l-[3px] border-l-[var(--warn)] bg-[var(--warn-soft)] px-4 py-3 ${cx ?? ''}"
+      class="flex flex-col gap-2 rounded border border-[var(--warn-20)] border-l-[3px] border-l-[var(--color-status-warn)] bg-[var(--warn-soft)] px-4 py-3 ${cx ?? ''}"
     >
       <div class="flex items-center gap-2">
         <${AlertTriangle} size=${16} class="shrink-0 text-[var(--warn-bright)]" aria-hidden="true" />
@@ -149,7 +149,7 @@ export function ErrorFatal({
   return html`
     <section
       role="alert"
-      class="flex flex-col gap-2 rounded border border-[var(--bad-20)] border-l-[3px] border-l-[var(--bad)] bg-[var(--bad-soft)] px-4 py-3 ${cx ?? ''}"
+      class="flex flex-col gap-2 rounded border border-[var(--bad-20)] border-l-[3px] border-l-[var(--color-status-err)] bg-[var(--bad-soft)] px-4 py-3 ${cx ?? ''}"
     >
       <div class="flex items-center gap-2">
         <${AlertOctagon} size=${16} class="shrink-0 text-[var(--bad-light)]" aria-hidden="true" />

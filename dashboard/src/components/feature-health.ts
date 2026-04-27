@@ -120,14 +120,14 @@ function statusLabel(status: FeatureStatus): string {
 function statusChipClass(status: FeatureStatus): string {
   switch (status) {
     case 'healthy':
-      return 'border-[var(--ok-30)] bg-[var(--ok-12)] text-[var(--ok)]'
+      return 'border-[var(--ok-30)] bg-[var(--ok-12)] text-[var(--color-status-ok)]'
     case 'warning':
-      return 'border-[var(--warn-30)] bg-[var(--warn-12)] text-[var(--warn)]'
+      return 'border-[var(--warn-30)] bg-[var(--warn-12)] text-[var(--color-status-warn)]'
     case 'inactive':
       return 'border-[var(--white-12)] bg-[var(--white-4)] text-[var(--color-fg-muted)]'
     case 'deprecated':
     default:
-      return 'border-[var(--bad-30)] bg-[var(--bad-12)] text-[var(--bad)]'
+      return 'border-[var(--bad-30)] bg-[var(--bad-12)] text-[var(--color-status-err)]'
   }
 }
 
@@ -148,7 +148,7 @@ function FeatureItem({ item }: { item: FeatureHealthItem }) {
             <code class="text-xs font-medium text-[var(--text-strong)]">${item.env_name}</code>
             <${StatusPill} status=${item.status} />
             ${item.is_enabled ? html`
-              <span class="inline-flex items-center rounded border border-[var(--ok-30)] bg-[var(--ok-12)] px-1.5 py-0.5 text-3xs font-semibold text-[var(--ok)]">
+              <span class="inline-flex items-center rounded border border-[var(--ok-30)] bg-[var(--ok-12)] px-1.5 py-0.5 text-3xs font-semibold text-[var(--color-status-ok)]">
                 ON
               </span>
             ` : html`

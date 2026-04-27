@@ -32,7 +32,7 @@ function KeeperToolPresetChip({ keeperName }: { keeperName: string }) {
   return html`
     <span class="inline-flex items-center py-0.5 px-2 rounded text-3xs font-semibold uppercase tracking-wide
       ${canPR
-        ? 'bg-[var(--ok-10)] text-[var(--ok)] border border-[var(--ok-20)]'
+        ? 'bg-[var(--ok-10)] text-[var(--color-status-ok)] border border-[var(--ok-20)]'
         : 'bg-[var(--white-5)] text-[var(--color-fg-muted)] border border-[var(--white-8)]'
       }"
       title=${`도구 preset: ${preset}${canPR ? ' (clone/PR 가능)' : ''}`}

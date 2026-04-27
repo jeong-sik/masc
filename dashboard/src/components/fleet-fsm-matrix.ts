@@ -442,7 +442,7 @@ function runtimeActionBusyLabel(action: FleetRuntimeAction): string {
 
 function runtimeActionTone(action: FleetRuntimeAction): string {
   if (action.action_type === 'keeper_recover') {
-    return 'text-[var(--warn)]'
+    return 'text-[var(--color-status-warn)]'
   }
   return 'text-[var(--color-accent-fg)]'
 }

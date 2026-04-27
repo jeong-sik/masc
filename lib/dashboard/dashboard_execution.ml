@@ -45,6 +45,15 @@ let messages_safe config =
 let assoc_upsert fields key value =
   (key, value) :: List.remove_assoc key fields
 
+(* #10710: bound on the per-render enrich fan-out. Code constant per
+   [feedback_no-hyperparameter-as-env-knob] — the calibrated value
+   should not be operator-tunable. 8 is empirically just past the
+   point of diminishing returns on disk-bound enrich workloads on
+   laptop-class hardware (per-keeper enrich is ~70% I/O wait), and
+   keeps the dashboard render's fd/fiber footprint within budget
+   even under fleet expansion. Raise only with a benchmark. *)
+let dashboard_enrich_max_fibers = 8
+
 (** #9766: per-render phase timing record used to surface a breakdown
     in the [slow render] WARN.  Pure values so a unit test can pin
     the formatting / per-keeper averaging without booting Eio. *)
@@ -247,7 +256,28 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
       let keepers =
         member_assoc "keepers" snapshot_json |> member_assoc "items"
         |> function
-        | `List items -> List.map (enrich_keeper_with_diagnostic ~config) items
+        | `List items ->
+            (* #10710: enrich_keeper_with_diagnostic was being run as
+               [List.map _ items] — strict N+1 against the keeper list.
+               Field log: 14 keepers * 2.4s/keeper = 33s render walltime
+               (4 of 11 slow renders had enrich at 70-99% of total).
+               [enrich_keeper_with_diagnostic] reads each keeper's meta
+               from its own file and computes per-keeper diagnostic JSON
+               with no shared mutable state, so the work is embarrassingly
+               parallel.
+
+               [Eio.Fiber.List.map ~max_fibers] runs the enrich body
+               cooperatively across a bounded fiber pool. The cap
+               ([dashboard_enrich_max_fibers]) is intentionally below
+               typical fleet size (14 today, growing) so we never burn
+               more file descriptors / scheduler slots than the dashboard
+               render strictly needs; raising it past ~8 buys little for
+               disk-bound enrich workloads on a laptop and just makes the
+               scheduler quantum thrash. *)
+            Eio.Fiber.List.map
+              ~max_fibers:dashboard_enrich_max_fibers
+              (enrich_keeper_with_diagnostic ~config)
+              items
         | _ -> []
       in
       let t_after_enrich = Time_compat.now () in

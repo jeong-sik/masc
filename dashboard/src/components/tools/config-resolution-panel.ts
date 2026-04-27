@@ -303,7 +303,7 @@ const KEEPER_RUNTIME_ROWS: Array<{
 
 function sourceTone(source: string): string {
   switch (source) {
-    case 'env': return 'border-[var(--accent-primary)]/30 bg-[var(--accent-primary)]/10 text-[var(--accent-primary)]'
+    case 'env': return 'border-[var(--color-accent-fg)]/30 bg-[var(--color-accent-fg)]/10 text-[var(--color-accent-fg)]'
     case 'toml': return 'border-[var(--emerald-28)] bg-[var(--emerald-10)] text-[#bbf7d0]'
     case 'derived': return 'border-[var(--yellow-bright-28)] bg-[var(--yellow-bright-10)] text-[var(--yellow-100)]'
     default: return 'border-[var(--color-border-default)] bg-[var(--white-6)] text-[var(--color-fg-muted)]'

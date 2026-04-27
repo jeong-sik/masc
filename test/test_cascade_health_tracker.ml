@@ -365,6 +365,122 @@ let test_terminal_failure_records_fingerprint () =
     check int "terminal failure fingerprint count" 1 count
   | _ -> failwith "expected exactly one terminal failure fingerprint"
 
+(* ── Soft_rate_limited outcome (HTTP 429) ───────────────────── *)
+
+let test_soft_rate_limit_triggers_immediate_cooldown () =
+  (* The whole point of the new outcome: a single 429 must trip cooldown
+     so the cascade's next selection tick falls over to a different
+     provider — without waiting for [cooldown_threshold] consecutive
+     failures the way [record_failure] does. *)
+  let t = H.create () in
+  H.record_soft_rate_limited t ~provider_key:"p" ();
+  check bool "single 429 trips cooldown immediately"
+    true (H.is_in_cooldown t ~provider_key:"p")
+
+let test_soft_rate_limit_default_cooldown_short () =
+  (* When no Retry-After is supplied, cooldown defaults to
+     [soft_rate_limit_cooldown_sec] (10s by default).  We only assert
+     bounds — the constant is env-tunable so an exact compare would be
+     brittle in CI.  Lower bound > 0 (cooldown active), upper bound
+     well under hard_quota_cooldown_sec to confirm we picked the soft
+     bucket, not the hard one. *)
+  let t = H.create () in
+  H.record_soft_rate_limited t ~provider_key:"p" ();
+  match H.provider_info t ~provider_key:"p" with
+  | None | Some { cooldown_expires_at = None; _ } ->
+    fail "expected cooldown_expires_at = Some _"
+  | Some { cooldown_expires_at = Some expires; _ } ->
+    let now = Unix.gettimeofday () in
+    let remaining = expires -. now in
+    check bool
+      (Printf.sprintf "soft_rl default cooldown remaining=%.1fs > 0" remaining)
+      true (remaining > 0.0);
+    check bool
+      (Printf.sprintf "soft_rl default cooldown remaining=%.1fs << hard_quota (3600s)" remaining)
+      true (remaining < 300.0)
+
+let test_soft_rate_limit_honors_retry_after () =
+  (* Retry-After=30 should produce a ~30s cooldown, materially longer
+     than the 10s default.  This is the core of the Retry-After plumbing. *)
+  let t = H.create () in
+  H.record_soft_rate_limited t ~provider_key:"p" ~retry_after_s:30.0 ();
+  match H.provider_info t ~provider_key:"p" with
+  | None | Some { cooldown_expires_at = None; _ } ->
+    fail "expected cooldown_expires_at = Some _"
+  | Some { cooldown_expires_at = Some expires; _ } ->
+    let now = Unix.gettimeofday () in
+    let remaining = expires -. now in
+    check bool
+      (Printf.sprintf "Retry-After=30 → cooldown ≈ 30s, got %.1fs" remaining)
+      true (remaining > 25.0 && remaining < 35.0)
+
+let test_soft_rate_limit_clamps_oversized_retry_after () =
+  (* A misclassified hard quota that returns Retry-After=999999 must
+     not silently produce a multi-day blackout; the implementation
+     clamps to [soft_rate_limit_max_clamp_sec] (default 120s).  Caller
+     is responsible for upgrading sustained 429 bursts to record_hard_quota. *)
+  let t = H.create () in
+  H.record_soft_rate_limited t ~provider_key:"p" ~retry_after_s:999_999.0 ();
+  match H.provider_info t ~provider_key:"p" with
+  | None | Some { cooldown_expires_at = None; _ } ->
+    fail "expected cooldown_expires_at = Some _"
+  | Some { cooldown_expires_at = Some expires; _ } ->
+    let now = Unix.gettimeofday () in
+    let remaining = expires -. now in
+    check bool
+      (Printf.sprintf "Retry-After clamped to ≤120s, got %.1fs" remaining)
+      true (remaining <= 121.0)
+
+let test_soft_rate_limit_negative_retry_after_uses_default () =
+  (* Caller plumbing bugs (negative or zero retry_after_s) must fall
+     back to the default cooldown rather than skipping cooldown entirely
+     — the 429 still happened. *)
+  let t = H.create () in
+  H.record_soft_rate_limited t ~provider_key:"p" ~retry_after_s:(-5.0) ();
+  check bool "negative retry_after still trips cooldown"
+    true (H.is_in_cooldown t ~provider_key:"p")
+
+let test_soft_rate_limit_success_clears_cooldown () =
+  (* The recovery story: as soon as the provider responds successfully,
+     it should be re-eligible.  The transient 429 is per-request, not a
+     sticky failure mode like hard_quota. *)
+  let t = H.create () in
+  H.record_soft_rate_limited t ~provider_key:"p" ();
+  H.record_success t ~provider_key:"p";
+  check bool "success after 429 clears cooldown"
+    false (H.is_in_cooldown t ~provider_key:"p")
+
+let test_soft_rate_limit_does_not_shorten_hard_quota () =
+  (* If the provider was already in a long hard_quota cooldown, a
+     subsequent 429 must not accidentally shorten that to 10s. *)
+  let t = H.create () in
+  H.record_hard_quota t ~provider_key:"p" ();
+  let expires_after_quota =
+    match H.provider_info t ~provider_key:"p" with
+    | Some { cooldown_expires_at = Some x; _ } -> x
+    | _ -> fail "no cooldown after hard_quota"
+  in
+  H.record_soft_rate_limited t ~provider_key:"p" ();
+  let expires_after_soft =
+    match H.provider_info t ~provider_key:"p" with
+    | Some { cooldown_expires_at = Some x; _ } -> x
+    | _ -> fail "cooldown unexpectedly cleared by soft 429"
+  in
+  check bool "soft 429 must not shorten existing hard_quota cooldown"
+    true (expires_after_soft >= expires_after_quota)
+
+let test_soft_rate_limit_records_fingerprint () =
+  let t = H.create () in
+  H.record_soft_rate_limited t ~provider_key:"claude-cli"
+    ~error_kind:"http_429"
+    ~error_reason:"rate limit exceeded for tier" ();
+  let info = info_or_fail t ~provider_key:"claude-cli" in
+  match info.top_fingerprints with
+  | [ (fp, count) ] ->
+    check bool "soft 429 fingerprint keeps kind"
+      true (String.starts_with ~prefix:"http_429" fp);
+    check int "soft 429 fingerprint count" 1 count
+  | _ -> failwith "expected exactly one soft 429 fingerprint"
 
 let () =
   run "cascade_health_tracker" [
@@ -441,5 +557,23 @@ let () =
         test_terminal_failure_preserves_longer_existing_cooldown;
       test_case "terminal_failure records fingerprint" `Quick
         test_terminal_failure_records_fingerprint;
+    ];
+    "soft_rate_limit", [
+      test_case "single 429 trips immediate cooldown" `Quick
+        test_soft_rate_limit_triggers_immediate_cooldown;
+      test_case "default cooldown is short (between 0 and hard_quota)" `Quick
+        test_soft_rate_limit_default_cooldown_short;
+      test_case "Retry-After honored in cooldown duration" `Quick
+        test_soft_rate_limit_honors_retry_after;
+      test_case "oversized Retry-After clamped" `Quick
+        test_soft_rate_limit_clamps_oversized_retry_after;
+      test_case "negative Retry-After falls back to default" `Quick
+        test_soft_rate_limit_negative_retry_after_uses_default;
+      test_case "success clears 429 cooldown" `Quick
+        test_soft_rate_limit_success_clears_cooldown;
+      test_case "soft 429 must not shorten longer cooldown" `Quick
+        test_soft_rate_limit_does_not_shorten_hard_quota;
+      test_case "soft 429 records fingerprint" `Quick
+        test_soft_rate_limit_records_fingerprint;
     ];
   ]

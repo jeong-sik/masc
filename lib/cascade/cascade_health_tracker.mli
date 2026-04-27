@@ -42,6 +42,26 @@ val terminal_failure_cooldown_sec : float
     Env: [MASC_CASCADE_TERMINAL_FAILURE_COOLDOWN_SEC] (with deprecated
     [OAS_CASCADE_TERMINAL_FAILURE_COOLDOWN_SEC] alias). *)
 
+val soft_rate_limit_cooldown_sec : float
+(** Default cooldown applied immediately on a transient HTTP 429 (soft
+    rate-limit) when no Retry-After hint is available.  Distinct from
+    {!cooldown_sec} because a single 429 should already deprioritize the
+    provider for the remainder of the current cascade cycle — the
+    [cooldown_threshold] count-to-three semantics are wrong for transient
+    rate limits.  Default 10.0 (10s).
+
+    Env: [MASC_CASCADE_SOFT_RATE_LIMIT_COOLDOWN_SEC]. *)
+
+val soft_rate_limit_max_clamp_sec : float
+(** Upper clamp for caller-supplied [retry_after_s] when recording a soft
+    rate-limit event.  Providers occasionally return Retry-After values
+    measured in minutes or hours; honoring those literally would silently
+    promote a transient 429 into a long blackout.  Anything that exceeds
+    this clamp should be classified as {!record_hard_quota} by the
+    caller, not as a soft rate-limit.  Default 120.0 (2 min).
+
+    Env: [MASC_CASCADE_SOFT_RATE_LIMIT_MAX_CLAMP_SEC]. *)
+
 
 (** Opaque health tracker state. *)
 type t
@@ -133,6 +153,35 @@ val record_hard_quota :
 val record_terminal_failure :
   t ->
   provider_key:string ->
+  ?error_kind:string ->
+  ?error_reason:string ->
+  unit ->
+  unit
+
+(** Record a transient HTTP 429 (rate-limit) response.
+
+    Unlike {!record_failure}, a single soft rate-limit triggers an
+    immediate short cooldown so the cascade can fall over to the next
+    candidate within the same turn instead of returning to the same
+    provider on the next selection tick.  No threshold applies.
+
+    [retry_after_s] is the value parsed from the upstream HTTP
+    [Retry-After] header (RFC 7231: integer seconds or HTTP-date).
+    When present, cooldown is set to [min retry_after_s
+    soft_rate_limit_max_clamp_sec]; otherwise cooldown defaults to
+    {!soft_rate_limit_cooldown_sec}.  Negative or zero values fall back
+    to the default.  Caller is responsible for upgrading sustained 429
+    bursts to {!record_hard_quota} when appropriate (e.g. monthly quota
+    boundaries) — this function intentionally never extends past
+    [soft_rate_limit_max_clamp_sec] regardless of header value.
+
+    Preserves an already-longer cooldown if one exists (no regression).
+
+    See {!record_failure} for [error_kind] / [error_reason] semantics. *)
+val record_soft_rate_limited :
+  t ->
+  provider_key:string ->
+  ?retry_after_s:float ->
   ?error_kind:string ->
   ?error_reason:string ->
   unit ->

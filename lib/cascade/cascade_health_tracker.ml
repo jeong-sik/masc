@@ -24,23 +24,26 @@
     key so operators can update their deployment config. *)
 let deprecation_warned : (string, unit) Hashtbl.t = Hashtbl.create 4
 
-let getenv_with_alias ~primary ~deprecated =
+let getenv_with_alias ~primary ?deprecated () =
   match Sys.getenv_opt primary with
   | Some v -> Some v
   | None ->
-    (match Sys.getenv_opt deprecated with
-     | Some _ as some ->
-       if not (Hashtbl.mem deprecation_warned deprecated) then begin
-         Hashtbl.add deprecation_warned deprecated ();
-         Printf.eprintf
-           "[warn] env var %s is deprecated; use %s (same semantics)\n%!"
-           deprecated primary
-       end;
-       some
-     | None -> None)
+    (match deprecated with
+     | None -> None
+     | Some dep ->
+       (match Sys.getenv_opt dep with
+        | Some _ as some ->
+          if not (Hashtbl.mem deprecation_warned dep) then begin
+            Hashtbl.add deprecation_warned dep ();
+            Printf.eprintf
+              "[warn] env var %s is deprecated; use %s (same semantics)\n%!"
+              dep primary
+          end;
+          some
+        | None -> None))
 
-let read_float_setting ~primary ~deprecated ~default =
-  match getenv_with_alias ~primary ~deprecated with
+let read_float_setting ~primary ?deprecated ~default () =
+  match getenv_with_alias ~primary ?deprecated () with
   | None -> default
   | Some raw ->
     let trimmed = String.trim raw in
@@ -53,8 +56,8 @@ let read_float_setting ~primary ~deprecated ~default =
           primary raw default;
         default
 
-let read_int_setting ~primary ~deprecated ~default =
-  match getenv_with_alias ~primary ~deprecated with
+let read_int_setting ~primary ?deprecated ~default () =
+  match getenv_with_alias ~primary ?deprecated () with
   | None -> default
   | Some raw ->
     let trimmed = String.trim raw in
@@ -75,6 +78,7 @@ let window_sec =
     ~primary:"MASC_CASCADE_HEALTH_WINDOW_SEC"
     ~deprecated:"OAS_CASCADE_HEALTH_WINDOW_SEC"
     ~default:300.0
+    ()
 
 (** Number of consecutive failures before cooldown activates.
     Default: 3, matching LiteLLM's [allowed_fails] concept. *)
@@ -83,6 +87,7 @@ let cooldown_threshold =
     ~primary:"MASC_CASCADE_COOLDOWN_THRESHOLD"
     ~deprecated:"OAS_CASCADE_COOLDOWN_THRESHOLD"
     ~default:3
+    ()
 
 (** Cooldown duration in seconds.  During cooldown, the provider is
     skipped (not attempted).  Default: 60s.
@@ -99,6 +104,7 @@ let cooldown_sec =
     ~primary:"MASC_CASCADE_COOLDOWN_SEC"
     ~deprecated:"OAS_CASCADE_COOLDOWN_SEC"
     ~default:60.0
+    ()
 
 (** Cooldown duration for provider calls classified as hard-quota exhaustion
     (account balance depleted, monthly quota reached, resource exhausted).
@@ -118,6 +124,7 @@ let hard_quota_cooldown_sec =
     ~primary:"MASC_CASCADE_HARD_QUOTA_COOLDOWN_SEC"
     ~deprecated:"OAS_CASCADE_HARD_QUOTA_COOLDOWN_SEC"
     ~default:3600.0
+    ()
 
 (** Cooldown duration for provider calls classified as terminal structural
     failures, where retrying the same provider on the next cascade tick is
@@ -135,6 +142,29 @@ let terminal_failure_cooldown_sec =
     ~primary:"MASC_CASCADE_TERMINAL_FAILURE_COOLDOWN_SEC"
     ~deprecated:"OAS_CASCADE_TERMINAL_FAILURE_COOLDOWN_SEC"
     ~default:3600.0
+    ()
+
+(** Default cooldown applied immediately on a transient HTTP 429.  See the
+    [.mli] for the design rationale; the short default (10s) is calibrated
+    so that a single 429 deprioritizes the provider for the remainder of
+    the current cascade cycle without locking it out long enough to disturb
+    the rolling success-rate window. *)
+let soft_rate_limit_cooldown_sec =
+  read_float_setting
+    ~primary:"MASC_CASCADE_SOFT_RATE_LIMIT_COOLDOWN_SEC"
+    ~default:10.0
+    ()
+
+(** Upper clamp for caller-supplied Retry-After.  Anything past 2 minutes
+    is "hard quota in disguise" and should be classified as such by the
+    caller — see {!record_soft_rate_limited}.  The clamp protects us from
+    silently honoring a 3600-second Retry-After that would otherwise
+    blackhole the provider for an hour under transient-error semantics. *)
+let soft_rate_limit_max_clamp_sec =
+  read_float_setting
+    ~primary:"MASC_CASCADE_SOFT_RATE_LIMIT_MAX_CLAMP_SEC"
+    ~default:120.0
+    ()
 
 
 (* ── Types ────────────────────────────────────── *)
@@ -157,7 +187,18 @@ let terminal_failure_cooldown_sec =
    conflict is the motivating case: fallback is correct for the current call,
    but repeatedly attempting Kimi first on every later call only adds latency
    and silently degrades cascade diversity. *)
-type outcome = Success | Failure | Rejected | Hard_quota | Terminal_failure
+(* [Soft_rate_limited] represents a transient HTTP 429 — provider is healthy
+   but momentarily over its rate budget.  Distinct from [Failure] so a single
+   event triggers an immediate (short) cooldown without waiting for the
+   [cooldown_threshold] consecutive-failure count.  Distinct from [Hard_quota]
+   because the provider is expected to recover within seconds, not hours. *)
+type outcome =
+  | Success
+  | Failure
+  | Rejected
+  | Hard_quota
+  | Terminal_failure
+  | Soft_rate_limited
 
 type event = {
   time: float;  (* Unix timestamp *)
@@ -264,7 +305,8 @@ let prune_old_events now events =
   let cutoff = now -. window_sec in
   List.filter (fun e -> e.time >= cutoff) events
 
-let record t ~provider_key ~outcome ?error_kind ?error_reason ~now () =
+let record t ~provider_key ~outcome ?error_kind ?error_reason ?retry_after_s
+    ~now () =
   with_lock t (fun () ->
     let state = get_or_create_state t provider_key in
     let event = { time = now; outcome } in
@@ -290,6 +332,27 @@ let record t ~provider_key ~outcome ?error_kind ?error_reason ~now () =
       bump_failure_fp ();
       if state.consecutive_failures >= cooldown_threshold then
         state.cooldown_until <- now +. cooldown_sec
+    | Soft_rate_limited ->
+      (* Transient HTTP 429.  Apply an immediate short cooldown so the
+         current cascade cycle skips this provider for the next selection
+         tick — without forcing the [cooldown_threshold] count-to-three
+         that [Failure] uses.  Honor caller-supplied Retry-After when
+         present; clamp positive values to [soft_rate_limit_max_clamp_sec]
+         to prevent a misclassified hard quota from silently producing
+         a multi-minute blackout.  Negative / zero / absent values fall
+         back to [soft_rate_limit_cooldown_sec].  As with the other
+         immediate-cooldown paths, never shorten an already-longer
+         cooldown (e.g. concurrent hard_quota + soft_rl events). *)
+      state.consecutive_failures <- state.consecutive_failures + 1;
+      bump_failure_fp ();
+      let cooldown_dur =
+        match retry_after_s with
+        | Some s when s > 0.0 -> Float.min s soft_rate_limit_max_clamp_sec
+        | _ -> soft_rate_limit_cooldown_sec
+      in
+      let new_until = now +. cooldown_dur in
+      if new_until > state.cooldown_until then
+        state.cooldown_until <- new_until
     | Hard_quota ->
       (* Hard-quota errors (balance depleted, quota exceeded, resource
          exhausted) don't recover on short-window retries — set a long
@@ -334,6 +397,11 @@ let record_hard_quota t ~provider_key ?error_kind ?error_reason () =
 let record_terminal_failure t ~provider_key ?error_kind ?error_reason () =
   record t ~provider_key ~outcome:Terminal_failure ?error_kind ?error_reason
     ~now:(Unix.gettimeofday ()) ()
+
+let record_soft_rate_limited t ~provider_key ?retry_after_s ?error_kind
+    ?error_reason () =
+  record t ~provider_key ~outcome:Soft_rate_limited ?error_kind ?error_reason
+    ?retry_after_s ~now:(Unix.gettimeofday ()) ()
 
 (* ── Queries ──────────────────────────────────── *)
 

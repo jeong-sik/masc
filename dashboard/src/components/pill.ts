@@ -5,15 +5,19 @@
 // for static labels): Pill is for *stateful* surfaces — a thing whose
 // state may transition (running → paused, ok → warn).
 //
-// Why not import design-system/source_styles/primitives.css directly:
-// - SPEC selectors expect `--{ok,warn,err,info,stalled}-glow` channels
-//   that dashboard's variables.css does not yet define. Importing
-//   would render the tinted backgrounds unstyled.
-// - Visual fidelity here is ~75% of SPEC: foreground hue carried; SPEC
-//   translucent glow background replaced with a flat elevated surface.
-//   Public API is intentionally identical so a future cycle can swap
-//   the internals to `<span class="pill is-{kind}">` once the token
-//   gap is closed.
+// SPEC fidelity: matches design-system/source_styles/primitives.css
+// `.pill.is-{kind}` selectors. Translucent kind-tinted backgrounds at
+// 0.12 alpha for the six stateful kinds (running + ok/warn/err/info/
+// stalled); paused and neutral keep the flat elevated surface (SPEC:
+// paused is a muted state with no chrome, neutral has no semantic
+// kind to tint).
+//
+// Token dependencies (added by PR-DS-Glow / #11163 + this PR):
+//   --color-status-{ok,warn,err,info,stalled}-glow   rgb-triplets
+//   --color-accent-glow                               rgb-triplet
+// The dashboard runtime triplets decompose the bright Tailwind-400/500
+// semantic colors; SPEC source tokens.css uses muted hues but the
+// dashboard prefers visual consistency with the live surface.
 //
 // Usage: `<${Pill} kind="running">RUNNING<//>` — the host DOM is a
 // span with role="status" when a stateful kind is present (so screen
@@ -52,9 +56,10 @@ interface KindStyle {
   background: string
 }
 
-// Foreground derived from dashboard tokens (see SPEC mapping note
-// above). Background stays flat-elevated where SPEC would use a
-// tinted glow — keeps pills readable while glow tokens are missing.
+// Foreground/background pairs match SPEC primitives.css `.pill.is-{kind}`
+// selectors (see header comment).  Translucent kind-tinted backgrounds
+// at 0.12 alpha; neutral and paused keep the elevated surface because
+// the SPEC defines them as chromeless states.
 const KIND_STYLE: Record<PillKind, KindStyle> = {
   neutral: {
     color: 'var(--color-fg-secondary)',
@@ -62,7 +67,7 @@ const KIND_STYLE: Record<PillKind, KindStyle> = {
   },
   running: {
     color: 'var(--color-accent-fg)',
-    background: 'var(--color-bg-elevated)',
+    background: 'rgb(var(--color-accent-glow) / 0.12)',
   },
   paused: {
     color: 'var(--color-fg-muted)',
@@ -70,23 +75,23 @@ const KIND_STYLE: Record<PillKind, KindStyle> = {
   },
   ok: {
     color: 'var(--color-status-ok)',
-    background: 'var(--color-bg-elevated)',
+    background: 'rgb(var(--color-status-ok-glow) / 0.12)',
   },
   warn: {
     color: 'var(--color-status-warn)',
-    background: 'var(--color-bg-elevated)',
+    background: 'rgb(var(--color-status-warn-glow) / 0.12)',
   },
   err: {
     color: 'var(--color-status-err)',
-    background: 'var(--color-bg-elevated)',
+    background: 'rgb(var(--color-status-err-glow) / 0.12)',
   },
   info: {
     color: 'var(--color-status-info)',
-    background: 'var(--color-bg-elevated)',
+    background: 'rgb(var(--color-status-info-glow) / 0.12)',
   },
   stalled: {
     color: 'var(--color-status-stalled)',
-    background: 'var(--color-bg-elevated)',
+    background: 'rgb(var(--color-status-stalled-glow) / 0.12)',
   },
 }
 

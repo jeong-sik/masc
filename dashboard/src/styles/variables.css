@@ -46,6 +46,10 @@
   --err-glow:    239  68  68;     /* rgb(--bad #ef4444) */
   --info-glow:    71 184 255;     /* rgb(--accent #47b8ff) */
   --stalled-glow: 167 139 250;    /* rgb(--purple #a78bfa, see line 258) */
+  --accent-glow:  71 184 255;     /* rgb(--accent) — translucent accent
+                                     surfaces (e.g. Pill running state).
+                                     Identical to --info-glow because
+                                     info ≡ accent in SPEC §3.5. */
 
   /* Semantic - Accent (Blue) */
   --accent-soft: rgba(71, 184, 255, 0.16);
@@ -324,7 +328,10 @@
   --color-accent-fg: var(--accent);
   --color-accent-fg-dim: var(--accent-30);
   --color-accent-soft: var(--accent-soft);
-  --color-accent-glow: var(--accent);
+  --color-accent-glow: var(--accent-glow);
+      /* rgb triplet form for use with rgb(var(--color-accent-glow) / 0.12)
+         alpha math.  Previously aliased --accent (hex), but had zero
+         callers; safe to repurpose as a triplet for SPEC primitives. */
 
   --color-status-ok: var(--ok);
   --color-status-warn: var(--warn);

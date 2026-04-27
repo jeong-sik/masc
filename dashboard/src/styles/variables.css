@@ -311,4 +311,46 @@
   --color-status-stalled: var(--purple);
 
   --color-focus-ring: var(--accent);
+
+  /* SPEC v0.1 §3 — Typography & spacing scale (Phase G Step 2).
+     Numeric scale matches dashboard/design-system/source_styles/tokens.css.
+     Coexists with the t-shirt --fs-xs/sm/... above; new components should
+     prefer the numeric scale, legacy callsites stay on t-shirt aliases. */
+
+  /* Typography — font-size scale */
+  --fs-9: 9px;
+  --fs-10: 10px;
+  --fs-11: 11px;
+  --fs-12: 12px;
+  --fs-13: 13px;
+  --fs-14: 14px;
+  --fs-16: 16px;
+  --fs-20: 20px;
+  --fs-28: 28px;
+  --fs-36: 36px;
+
+  /* Typography — line-height scale */
+  --lh-tight: 1.2;
+  --lh-body: 1.45;
+  --lh-loose: 1.6;
+
+  /* Typography — type role shorthands (font: shorthand). Use with `font:`
+     property: `font: var(--type-body);`. */
+  --type-caption: var(--fs-10)/var(--lh-tight) ui-monospace, "SF Mono", Menlo, monospace;
+  --type-label:   var(--fs-11)/var(--lh-tight) ui-sans-serif, -apple-system, system-ui, sans-serif;
+  --type-meta:    var(--fs-12)/var(--lh-tight) ui-monospace, "SF Mono", Menlo, monospace;
+  --type-body:    var(--fs-13)/var(--lh-body) ui-sans-serif, -apple-system, system-ui, sans-serif;
+  --type-title:   var(--fs-14)/var(--lh-tight) ui-sans-serif, -apple-system, system-ui, sans-serif;
+  --type-kpi-m:   var(--fs-16)/var(--lh-tight) ui-monospace, "SF Mono", Menlo, monospace;
+  --type-kpi-l:   var(--fs-20)/var(--lh-tight) ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* Spacing scale — 4-multiple ladder. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
 }

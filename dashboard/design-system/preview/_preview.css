@@ -4,7 +4,7 @@
    width in the asset review pane.
    ══════════════════════════════════════════════════════════════════ */
 
-@import url("../colors_and_type.css");
+@import url("../source_styles/tokens.generated.css");
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body {

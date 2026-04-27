@@ -1,11 +1,11 @@
 /* ══════════════════════════════════════════════════════════════════
    MASC Cockpit — Kit-specific styles
-   Composed on top of colors_and_type.css tokens.
+   Composed on top of generated SSOT tokens (run `pnpm tokens:build`).
    ══════════════════════════════════════════════════════════════════ */
 
-@import url("../../colors_and_type.css");
+@import url("../../source_styles/tokens.generated.css");
 
-/* -------- CSS vars that colors_and_type doesn't define -------- */
+/* -------- CSS vars that the generated SSOT doesn't define -------- */
 :root {
   --sp-1: 4px;  --sp-2: 8px;  --sp-3: 12px; --sp-4: 16px;
   --sp-5: 20px; --sp-6: 24px; --sp-7: 32px; --sp-8: 48px;

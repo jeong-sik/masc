@@ -4,11 +4,10 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>MASC Cockpit — Design System</title>
-  <!-- Order matters: tokens.css is SSOT, type_layer.css depends on it.
-       colors_and_type.css is now a façade (kept for back-compat) and
-       intentionally omitted to avoid double-import. SPEC §7.1.4. -->
-  <link rel="stylesheet" href="../source_styles/tokens.css" />
-  <link rel="stylesheet" href="../source_styles/semantic.css" />
+  <!-- tokens.generated.css is the SSOT (run `pnpm tokens:build` from
+       dashboard/ to regenerate). type_layer.css supplies .masc-ds element
+       defaults and depends on the token vars above. -->
+  <link rel="stylesheet" href="../source_styles/tokens.generated.css" />
   <link rel="stylesheet" href="../type_layer.css" />
   <style>
     html, body { margin:0; padding:0; background: var(--color-bg-page); color: var(--color-fg-primary); font-family: var(--font-sans); min-height:100vh; }

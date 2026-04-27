@@ -24,46 +24,13 @@ val shared_memory_scope_enum_strings : string list
 val tail_order_enum_strings : string list
 (** Allowed values for log-tail ordering options. *)
 
-val string_array_schema :
-  [> `Assoc of
-       (string *
-        [> `Assoc of (string * [> `String of string ]) list
-         | `String of string ])
-       list ]
+val string_array_schema : Yojson.Safe.t
 (** JSON schema fragment for a free-form [string list] field. *)
 
-val persona_axis_schema :
-  Persona_contract.archetype_axis ->
-  [> `Assoc of
-       (string *
-        [> `List of [> `String of string ] list | `String of string ])
-       list ]
+val persona_axis_schema : Persona_contract.archetype_axis -> Yojson.Safe.t
 (** Schema fragment for one archetype axis (ranged enum + description). *)
 
-val tool_access_schema :
-  string ->
-  [> `Assoc of
-       (string *
-        [> `List of
-             [> `Assoc of
-                  (string *
-                   [> `Assoc of
-                        (string *
-                         [> `Assoc of
-                              (string *
-                               [> `Assoc of
-                                    (string * [> `String of string ]) list
-                                | `List of [> `String of string ] list
-                                | `String of string ])
-                              list ])
-                        list
-                    | `Bool of bool
-                    | `List of [> `String of string ] list
-                    | `String of string ])
-                  list ]
-             list
-         | `String of string ])
-       list ]
+val tool_access_schema : string -> Yojson.Safe.t
 (** Schema fragment for [meta.tool_access] (preset + per-tool overrides);
     parameterised on the property description so create vs update tools
     can vary the surface without duplicating the body. *)

@@ -18,7 +18,7 @@ import { openAgentDetail } from './agent-detail-state'
 
 const REFRESH_MS = 30_000
 
-const ARCHITECTURE_FLOW = `graph LR
+export const ARCHITECTURE_FLOW = `graph LR
     subgraph Keeper["키퍼 턴"]
       K1[LLM 응답 생성] --> K2["[STATE] 파싱"]
       K2 --> K3{STATE 있음?}
@@ -47,9 +47,9 @@ const ARCHITECTURE_FLOW = `graph LR
     G1 --> D1
     D1 --> UI[기억 서브시스템 패널]
 
-    classDef store fill:var(--slate-800),stroke:#334155,color:#f1f5f9
+    classDef store fill:#1e293b,stroke:#334155,color:#f1f5f9
     classDef action fill:#0f766e,stroke:#14b8a6,color:#f0fdfa
-    classDef ui fill:#7c2d12,stroke:var(--warn-bright),color:#ffedd5
+    classDef ui fill:#7c2d12,stroke:#f97316,color:#ffedd5
     class F1,G1 store
     class M1,M3,H1,H2,T2 action
     class UI ui`

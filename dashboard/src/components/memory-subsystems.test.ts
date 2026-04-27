@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { MemorySubsystemsSynapse } from '../api/dashboard'
-import { filterSynapses } from './memory-subsystems'
+import { ARCHITECTURE_FLOW, filterSynapses } from './memory-subsystems'
 
 function makeSynapse(
   overrides: Partial<MemorySubsystemsSynapse> = {},
@@ -81,5 +81,19 @@ describe('filterSynapses', () => {
     expect(result).toHaveLength(2)
     expect(result.map(r => r.from_agent)).toContain('router-delta')
     expect(result.map(r => r.to_agent)).toContain('router-delta')
+  })
+})
+
+describe('ARCHITECTURE_FLOW', () => {
+  // Mermaid classDef cannot lex CSS var(--token); paren confuses the property
+  // delimiter and the whole diagram falls back to the parse error bomb SVG.
+  // Same root cause as PR #8843 (composite-fsm-flowchart) and #11141
+  // (harness-health). Keep colors as hex literals here too.
+  it('uses literal hex colors in classDef (no CSS var())', () => {
+    const classDefLines = ARCHITECTURE_FLOW.split('\n').filter(l => /^\s*classDef\s+/.test(l))
+    expect(classDefLines.length).toBeGreaterThan(0)
+    for (const line of classDefLines) {
+      expect(line).not.toMatch(/var\(--/)
+    }
   })
 })

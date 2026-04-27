@@ -687,7 +687,18 @@ let text_of_response (resp : Llm_provider.Types.api_response) : string =
 
 (* ── Model resolution: named -> "default" -> hardcoded ─── *)
 
-type cascade_source = Named | Default_fallback | Hardcoded_defaults
+type cascade_source =
+  | Named
+  | Default_fallback
+  | Hardcoded_defaults
+  | Load_failed of string
+    (** Config file load failed (parse error, IO error, missing file).
+        Returned in place of [Hardcoded_defaults] so callers and the
+        dashboard can distinguish "config absent / not found" from
+        "config present but unreadable" — the former is operator
+        intent, the latter is a fault that the surface needs to
+        expose.  The string carries the underlying error message for
+        telemetry. *)
 
 (** Weighted shuffle: pick first element by weighted random, then order
     remaining by descending weight.  This gives probabilistic distribution
@@ -794,6 +805,14 @@ let resolve_model_strings_traced_with
     ~rand_int ?config_path ~name ~defaults () =
   match config_path with
   | Some path ->
+    (* Probe load_json before delegating to load_profile_weighted so we
+       can distinguish a load failure (Load_failed source) from a
+       successful-but-empty profile (Hardcoded_defaults source).  The
+       load is cached, so the subsequent call inside
+       load_profile_weighted is a cache hit. *)
+    (match Cascade_config_loader.load_json path with
+     | Error msg -> (defaults, Load_failed msg)
+     | Ok _ ->
     let from_file_weighted =
       Cascade_config_loader.load_profile_weighted ~config_path:path ~name in
     if from_file_weighted <> [] then
@@ -811,7 +830,7 @@ let resolve_model_strings_traced_with
             (fun (e : Cascade_config_loader.weighted_entry) -> e.model)
             ordered in
         (models, Default_fallback)
-      else (defaults, Hardcoded_defaults)
+      else (defaults, Hardcoded_defaults))
   | None -> (defaults, Hardcoded_defaults)
 
 let resolve_model_strings_traced ?config_path ~name ~defaults () =

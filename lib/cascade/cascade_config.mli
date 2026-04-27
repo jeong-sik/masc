@@ -194,6 +194,11 @@ type cascade_source =
   | Named              (** Found as "{name}_models" in config *)
   | Default_fallback   (** Name not found; used "default_models" *)
   | Hardcoded_defaults (** Neither found; used hardcoded [defaults] *)
+  | Load_failed of string
+    (** Config file load failed (parse / IO / missing).  Returned in
+        place of [Hardcoded_defaults] so that the dashboard can
+        distinguish a fault from operator intent.  The string carries
+        the underlying error for telemetry. *)
 
 (** Resolve model strings for a named cascade.
 

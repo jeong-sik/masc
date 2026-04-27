@@ -804,7 +804,7 @@ function decodeRuntimeModelMetricsResponse(raw: unknown): DashboardRuntimeModelM
 export async function fetchRuntimeProviders(opts?: AbortableRequestOptions): Promise<DashboardRuntimeProvidersResponse> {
   const raw = await get<Record<string, unknown>>('/api/v1/providers', { signal: opts?.signal })
   const decoded = decodeRuntimeProvidersResponse(raw)
-  if (!decoded) throw new Error('invalid runtime providers payload')
+  if (!decoded) throw new Error('유효하지 않은 runtime providers payload')
   return decoded
 }
 
@@ -816,7 +816,7 @@ export async function fetchRuntimeModelMetrics(
   const bParam = bucketMinutes > 0 ? `&bucket_min=${bucketMinutes}` : ''
   const raw = await get<Record<string, unknown>>(`/api/v1/models/metrics?window=${windowMinutes}${bParam}`, { signal: opts?.signal })
   const decoded = decodeRuntimeModelMetricsResponse(raw)
-  if (!decoded) throw new Error('invalid runtime model metrics payload')
+  if (!decoded) throw new Error('유효하지 않은 runtime model metrics payload')
   return decoded
 }
 
@@ -1187,14 +1187,14 @@ function decodeDashboardGoalDetailResponse(raw: unknown): DashboardGoalDetailRes
 export async function fetchDashboardGoalsTree(): Promise<DashboardGoalsTreeResponse> {
   const raw = await get<unknown>('/api/v1/dashboard/goals')
   const decoded = decodeDashboardGoalsTreeResponse(raw)
-  if (!decoded) throw new Error('invalid dashboard goals payload')
+  if (!decoded) throw new Error('유효하지 않은 dashboard goals payload')
   return decoded
 }
 
 export async function fetchDashboardGoalDetail(goalId: string): Promise<DashboardGoalDetailResponse> {
   const raw = await get<unknown>(`/api/v1/dashboard/goals/detail?goal_id=${encodeURIComponent(goalId)}`)
   const decoded = decodeDashboardGoalDetailResponse(raw)
-  if (!decoded) throw new Error('invalid dashboard goal detail payload')
+  if (!decoded) throw new Error('유효하지 않은 dashboard goal detail payload')
   return decoded
 }
 
@@ -2007,7 +2007,7 @@ export function fetchKeeperToolStats(
     { signal: opts?.signal },
   ).then((raw) => {
     const decoded = decodeToolStatsResponse(raw)
-    if (!decoded) throw new Error('invalid keeper tool stats payload')
+    if (!decoded) throw new Error('유효하지 않은 keeper tool stats payload')
     return decoded
   })
 }
@@ -2119,7 +2119,7 @@ export function fetchKeeperToolCalls(
     { signal: opts?.signal },
   ).then((raw) => {
     const decoded = decodeToolCallsResponse(raw)
-    if (!decoded) throw new Error('invalid keeper tool call payload')
+    if (!decoded) throw new Error('유효하지 않은 keeper tool call payload')
     return decoded
   })
 }
@@ -2289,7 +2289,7 @@ export function fetchTelemetry(opts?: {
   return get<Record<string, unknown>>(`/api/v1/dashboard/telemetry${qs ? '?' + qs : ''}`, { signal: opts?.signal })
     .then((raw) => {
       const decoded = decodeTelemetryResponse(raw)
-      if (!decoded) throw new Error('invalid telemetry payload')
+      if (!decoded) throw new Error('유효하지 않은 telemetry payload')
       return decoded
     })
 }
@@ -2298,7 +2298,7 @@ export function fetchTelemetrySummary(opts?: AbortableRequestOptions): Promise<T
   return get<Record<string, unknown>>('/api/v1/dashboard/telemetry/summary', { signal: opts?.signal })
     .then((raw) => {
       const decoded = decodeTelemetrySummaryResponse(raw)
-      if (!decoded) throw new Error('invalid telemetry summary payload')
+      if (!decoded) throw new Error('유효하지 않은 telemetry summary payload')
       return decoded
     })
 }

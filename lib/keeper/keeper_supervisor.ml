@@ -575,9 +575,28 @@ let apply_self_preservation ~keepers_dir ~total_keepers to_restart =
       ) cohorts ("", [])
     in
     if List.length dominant_entries >= sp_min then begin
-      Log.Keeper.warn
-        "self-preservation: suppressing %d/%d restarts (ratio=%.2f, cohort=%s)"
-        (List.length dominant_entries) n_total ratio dominant_key;
+      (* #10887: when [ratio >= 0.99] every keeper in the candidate set
+         shares the same failure cohort and SP suppresses 100% of
+         restarts.  At that point the fleet has lost auto-recovery —
+         the next reconcile will re-detect the same condition and
+         re-suppress, indefinitely (125 events / 2 days observed,
+         ratio=1.00 in every event).  Promote that case to ERROR with
+         operator-actionable hint text so it stops blending into the
+         steady WARN stream of partial suppressions (which are normal
+         circuit-breaker behaviour).  Threshold uses 0.99 not 1.0 to
+         tolerate float rounding from the int division above. *)
+      if ratio >= 0.99 then
+        Log.Keeper.error
+          "self-preservation: UNIVERSAL suppression %d/%d (ratio=%.2f, \
+           cohort=%s) — auto-recovery is OFF until operator clears the \
+           shared failure mode (e.g. cascade.toml hot-reload, token \
+           rotation, or kill the dominant cohort to let SP release).  \
+           See #10887 / #10765."
+          (List.length dominant_entries) n_total ratio dominant_key
+      else
+        Log.Keeper.warn
+          "self-preservation: suppressing %d/%d restarts (ratio=%.2f, cohort=%s)"
+          (List.length dominant_entries) n_total ratio dominant_key;
       publish_lifecycle
         ~event:(Keeper_lifecycle_events.Custom_event
                   { verb = Keeper_lifecycle_events.Self_preservation;

@@ -11,10 +11,12 @@
  *
  * Run:  pnpm tokens:build  (from dashboard/)
  *
- * All outputs are ADDITIVE — no consumer is migrated yet. Originals
- * (tokens.css / colors_and_type.css / src/styles/tokens.css) stay
- * untouched. The follow-up wave swaps consumers one-by-one and finally
- * deletes originals.
+ * source.ts is the SSOT for the design-system preview surface; the
+ * legacy hand-written tokens.css / semantic.css / colors_and_type.css
+ * have been deleted (Wave 2 preview swap). The Tailwind v4 entry
+ * (dashboard/src/styles/tokens.generated.css) and the Bonsai outputs
+ * are still consumed alongside their hand-written counterparts and
+ * follow on a later wave.
  */
 
 import { writeFileSync, mkdirSync } from "node:fs";
@@ -79,7 +81,7 @@ const renderThemeBlock = (theme: Theme): string => {
   return `${sel} {\n${colorScheme}\n${body}\n}\n`;
 };
 
-// 1. Preview CSS — :root + theme overrides, mirrors source_styles/tokens.css
+// 1. Preview CSS — :root + theme overrides, sole SSOT for preview surface
 function buildPreviewCss(): string {
   const parts: string[] = [cssHeader];
   parts.push(renderRootBlock(source.raw, "Raw tokens (atomic)"));

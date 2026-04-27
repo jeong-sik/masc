@@ -1,9 +1,8 @@
-(** coord_backlog inferred mli **)
+(** Coord backlog persistence — read / write the canonical
+    [tasks/backlog.json] document with structural recovery. *)
 
 open Types
 open Coord_utils
-
-
 
 val backlog_recovery_path : Coord_utils_backend_setup.config -> string
 val decode_backlog : path:string ->

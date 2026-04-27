@@ -24,6 +24,7 @@
    auth
    auth_doctor
    auth_login
+   auth_resolve
    codex_mcp_config_doctor
    board
    board_core
@@ -292,6 +293,7 @@
    subscriptions
    telemetry_eio
    telemetry_coverage_gap
+   telemetry_observe
    telemetry_unified
    tempo
    timeout_policy

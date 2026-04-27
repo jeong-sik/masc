@@ -404,11 +404,38 @@ let runtime_mcp_policy_of_tool_names ?agent_name
             | Some agent_name -> [ ("x-masc-agent-name", agent_name) ]
             | None -> []
           in
+          Auth_resolve.emit_resolution_trace
+            ~cascade:"runtime_mcp_policy"
+            ~keeper_id:(Some keeper_name)
+            ~provider_label:"masc-mcp"
+            ~outcome:(Ok {
+              Auth_resolve.raw = token;
+              source = Auth_resolve.Internal_keeper_env;
+            });
           ("x-masc-internal-token", token)
           :: ("x-masc-keeper-name", keeper_name)
           :: agent_header
       | _ ->
-          (match first_nonempty_env [ "MASC_MCP_TOKEN" ] with
+          let env_token = first_nonempty_env [ "MASC_MCP_TOKEN" ] in
+          let outcome : (Auth_resolve.token, Auth_resolve.auth_error) result =
+            match env_token with
+            | Some raw ->
+                Ok {
+                  Auth_resolve.raw;
+                  source = Auth_resolve.Mcp_bearer_env;
+                }
+            | None ->
+                Error
+                  (Auth_resolve.Api_key_env_unset {
+                    var_name = "MASC_MCP_TOKEN";
+                  })
+          in
+          Auth_resolve.emit_resolution_trace
+            ~cascade:"runtime_mcp_policy"
+            ~keeper_id:keeper_name
+            ~provider_label:"masc-mcp"
+            ~outcome;
+          (match env_token with
            | Some token -> [ ("Authorization", "Bearer " ^ token) ]
            | None -> [])
     in

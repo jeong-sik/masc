@@ -123,6 +123,53 @@ let priority_tier_issue ~profile configured_specs raw_tiers =
     else
       None
 
+(* Catalog warn: a cascade carrying [codex_cli] with no
+   bound-actor-tolerant fallback will reject every keeper-bound
+   dispatch at runtime (oas_worker_named.ml:109).  Surface this at
+   validation time so the operator sees it before each turn pays the
+   cost.  Severity is [Catalog_warn] for now — the operator may have
+   private cascade configs that legitimately omit bound-actor support
+   (system-only profiles like [tool_rerank]).  Strict-mode
+   ([Catalog_error]) gating is left to a follow-up that knows which
+   profiles are keeper-assignable. *)
+let codex_with_bound_actor_only_issue ~profile model_specs =
+  let module PK = Llm_provider.Provider_kind in
+  let kinds =
+    model_specs
+    |> Cascade_config.expand_auto_models
+    |> List.filter_map split_provider_model
+    |> List.filter_map (fun (provider_name, _model_id) ->
+           PK.of_string provider_name)
+  in
+  let has_codex = List.exists (fun k -> k = PK.Codex_cli) kinds in
+  let has_bound_actor_tolerant_fallback =
+    List.exists
+      (fun k ->
+        match k with
+        | PK.Claude_code | PK.Gemini_cli | PK.Kimi_cli
+        | PK.Ollama | PK.Glm ->
+            true
+        | _ -> false)
+      kinds
+  in
+  if has_codex && not has_bound_actor_tolerant_fallback then
+    Some
+      {
+        profile = Some profile;
+        severity = Catalog_warn;
+        message =
+          Printf.sprintf
+            "Cascade preset %s carries codex_cli with no \
+             bound-actor-tolerant fallback \
+             (claude_code|gemini_cli|kimi_cli|ollama|glm). codex_cli \
+             cannot route keeper-bound runtime MCP tools (masc_*, \
+             decision.*); every keeper-bound dispatch on this preset \
+             will be rejected at oas_worker_named.ml. Add at least \
+             one tolerant provider or remove codex_cli."
+            profile;
+      }
+  else None
+
 let diagnose_profile ~config_path ~profile =
   let model_specs =
     Cascade_config_loader.load_profile_weighted ~config_path ~name:profile
@@ -189,7 +236,10 @@ let diagnose_profile ~config_path ~profile =
                 priority_tier_issue ~profile model_specs raw_tiers)
         | Ok _ -> None)
   in
-  [ invalid_model_issue; strategy_issue ]
+  let bound_actor_issue =
+    codex_with_bound_actor_only_issue ~profile model_specs
+  in
+  [ invalid_model_issue; strategy_issue; bound_actor_issue ]
   |> List.filter_map (fun issue -> issue)
 
 let diagnose_catalog ~config_path =

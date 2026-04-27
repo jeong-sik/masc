@@ -982,6 +982,21 @@ let ensure_keeper_credential config ~agent_name :
    | Error _ -> ());
   result
 
+type credential_status =
+  | Credential_present of agent_credential
+  | Credential_missing
+
+let audit_keeper_credentials config ~keeper_names =
+  List.map
+    (fun keeper_name ->
+      let status =
+        match load_credential config keeper_name with
+        | Some cred -> Credential_present cred
+        | None -> Credential_missing
+      in
+      (keeper_name, status))
+    keeper_names
+
 (** Refresh a token (generate new one, update credential) *)
 let refresh_token config ~agent_name ~old_token : (string * agent_credential, masc_error) result =
   match verify_token config ~agent_name ~token:old_token with

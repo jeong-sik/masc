@@ -755,7 +755,7 @@ let mk_trace_event ?(ts = 0.0) ?(cascade_name = "big_three")
     ?(strategy = "failover") ?(cycle = 0) ?(candidates_in = 3)
     ?(candidates_out = 3) ?(backoff_ms = 0) ?(kind = ST.Ordered) () =
   { ST.ts; cascade_name; strategy; cycle; candidates_in; candidates_out;
-    backoff_ms; kind }
+    backoff_ms; kind; trace_id = None }
 
 let test_trace_record_snapshot_roundtrip () =
   ST.clear ();

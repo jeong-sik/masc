@@ -592,7 +592,8 @@ module ST = Masc_mcp.Cascade_strategy_trace
 
 let mk_trace ?(ts = 0.0) ?(strategy = "failover") ~kind () =
   { ST.ts; cascade_name = "c1"; strategy; cycle = 0;
-    candidates_in = 1; candidates_out = 1; backoff_ms = 0; kind }
+    candidates_in = 1; candidates_out = 1; backoff_ms = 0; kind;
+    trace_id = None }
 
 let assert_field name fields =
   match List.assoc_opt name fields with

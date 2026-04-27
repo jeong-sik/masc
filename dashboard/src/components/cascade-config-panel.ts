@@ -103,6 +103,7 @@ export function sourceLabel(source: CascadeProfile['source']): string {
     case 'named': return 'named'
     case 'default_fallback': return 'default'
     case 'hardcoded_defaults': return 'hardcoded'
+    case 'load_failed': return 'load-failed'
   }
 }
 
@@ -111,6 +112,7 @@ export function sourceTone(source: CascadeProfile['source']): string {
     case 'named': return 'ok'
     case 'default_fallback': return 'warn'
     case 'hardcoded_defaults': return 'warn'
+    case 'load_failed': return 'bad'
   }
 }
 

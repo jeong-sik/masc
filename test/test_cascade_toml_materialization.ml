@@ -344,6 +344,65 @@ unknown_field = 1
       check bool "rejection mentions unknown field" true
         (contains_substring rendered "unknown field")
 
+(* Phase 2 regression: when load_json fails (malformed JSON, missing
+   IO, or strict-field rejection on TOML side), the resolved
+   selection_trace.source must be [Load_failed _], not the bug-prior
+   [Hardcoded_defaults].  Without this, an operator viewing the
+   dashboard cannot distinguish a config fault from an intentional
+   absence of profile.  See PR #11361. *)
+let test_load_failed_source_on_malformed_json () =
+  with_temp_dir "cascade-load-failed" @@ fun dir ->
+  let config_dir = Filename.concat dir "config" in
+  init_config_root config_dir;
+  let json_path = Filename.concat config_dir "cascade.json" in
+  write_file json_path "{ this is not valid json";
+  with_config_dir config_dir @@ fun () ->
+  let _, source =
+    Masc_mcp.Cascade_config.resolve_model_strings_traced
+      ~config_path:json_path
+      ~name:"any_profile"
+      ~defaults:[ "fallback-model" ]
+      ()
+  in
+  match source with
+  | Masc_mcp.Cascade_config.Load_failed _ -> ()
+  | Masc_mcp.Cascade_config.Hardcoded_defaults ->
+      fail
+        "regression: malformed cascade.json collapsed to \
+         Hardcoded_defaults instead of Load_failed (PR #11361)"
+  | _ -> fail "expected Load_failed source variant"
+
+let test_load_failed_source_on_unknown_toml_field () =
+  with_temp_dir "cascade-load-failed-toml" @@ fun dir ->
+  let config_dir = Filename.concat dir "config" in
+  init_config_root config_dir;
+  write_file
+    (Filename.concat config_dir "cascade.toml")
+    {|
+[big_three]
+models = ["ollama:qwen3.5:35b-a3b-nvfp4"]
+unknown_field_for_load_failed_test = "x"
+|};
+  with_config_dir config_dir @@ fun () ->
+  let json_path = Filename.concat config_dir "cascade.json" in
+  let _, source =
+    Masc_mcp.Cascade_config.resolve_model_strings_traced
+      ~config_path:json_path
+      ~name:"big_three"
+      ~defaults:[ "fallback-model" ]
+      ()
+  in
+  match source with
+  | Masc_mcp.Cascade_config.Load_failed msg ->
+      check bool
+        "Load_failed message mentions the rejected field" true
+        (contains_substring msg "unknown_field_for_load_failed_test")
+  | Masc_mcp.Cascade_config.Hardcoded_defaults ->
+      fail
+        "regression: TOML strict-field rejection collapsed to \
+         Hardcoded_defaults instead of Load_failed (PR #11361)"
+  | _ -> fail "expected Load_failed source variant"
+
 let test_weight_zero_is_accepted () =
   (* #10571: weight=0 = "configured but disabled" (cascade dispatcher
      skips). #10097 introduced this idiom for codex_cli; pre-fix the
@@ -420,6 +479,10 @@ let () =
             `Quick test_weight_zero_is_accepted;
           test_case "negative weight is rejected" `Quick
             test_weight_negative_is_rejected;
+          test_case "Load_failed source on malformed cascade.json"
+            `Quick test_load_failed_source_on_malformed_json;
+          test_case "Load_failed source on unknown toml field"
+            `Quick test_load_failed_source_on_unknown_toml_field;
         ] );
       ( "runtime",
         [

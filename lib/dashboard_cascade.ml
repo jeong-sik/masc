@@ -26,6 +26,7 @@ let source_to_string = function
   | CC.Named -> "named"
   | CC.Default_fallback -> "default_fallback"
   | CC.Hardcoded_defaults -> "hardcoded_defaults"
+  | CC.Load_failed _ -> "load_failed"
 
 let string_list_to_json values =
   `List (List.map (fun value -> `String value) values)

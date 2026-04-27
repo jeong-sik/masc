@@ -50,6 +50,7 @@
   (ppx_deriving_yojson (>= 3.6))
   (ppx_let (>= v0.17.0))
   (ppx_deriving (>= 5.2))
+  (ppxlib (>= 0.30))
   (sqlite3 (>= 5.1))
   (mirage-crypto (>= 1.0))
   (mirage-crypto-rng (>= 1.0))

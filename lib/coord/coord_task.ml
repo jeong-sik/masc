@@ -1655,6 +1655,40 @@ let transition_task_r
                  ?duration_ms
                  ~forced:force
                  ());
+          (* #10899 follow-up — extract worktree auto-cleanup so it can
+             fire on every terminal/handoff transition that orphans the
+             current keeper's worktree, not just [Done_action].  Without
+             this, [Cancel] / [Release] both leave [.masc/playground/
+             <keeper>/repos/.../.worktrees/<task>/] behind: [Cancel] kills
+             the task entirely (no future claimant), [Release] returns the
+             task to claimable for a *different* keeper that creates its
+             own worktree, leaving the original orphaned.  Best-effort
+             matches the existing Done branch: filesystem GC must not
+             fail the state transition. *)
+          let cleanup_worktree_for_transition reason_label =
+            match task.worktree with
+            | None -> ()
+            | Some _ ->
+              (try
+                 match
+                   Coord_worktree.worktree_remove_r config ~agent_name ~task_id
+                 with
+                 | Ok msg ->
+                   Log.RoomTask.info
+                     "%s worktree auto-cleanup: %s" reason_label msg
+                 | Error e ->
+                   Log.RoomTask.warn
+                     "%s worktree auto-cleanup failed \
+                      (best-effort, suppressed): %s"
+                     reason_label (Types.masc_error_to_string e)
+               with
+               | Eio.Cancel.Cancelled _ as e -> raise e
+               | exn ->
+                 Log.RoomTask.warn
+                   "%s worktree auto-cleanup raised \
+                    (best-effort, suppressed): %s"
+                   reason_label (Printexc.to_string exn))
+          in
           (match action with
            | Types.Done_action ->
              (* Completion rewards are tied to the real state-changing done path;
@@ -1702,28 +1736,7 @@ let transition_task_r
                 a warn and continue. The state-change is the
                 canonical lifecycle event; filesystem GC must not
                 fail the task transition. *)
-             (match task.worktree with
-              | None -> ()
-              | Some _ ->
-                (try
-                   match
-                     Coord_worktree.worktree_remove_r config ~agent_name ~task_id
-                   with
-                   | Ok msg ->
-                     Log.RoomTask.info
-                       "task_done worktree auto-cleanup: %s" msg
-                   | Error e ->
-                     Log.RoomTask.warn
-                       "task_done worktree auto-cleanup failed \
-                        (best-effort, suppressed): %s"
-                       (Types.masc_error_to_string e)
-                 with
-                 | Eio.Cancel.Cancelled _ as e -> raise e
-                 | exn ->
-                   Log.RoomTask.warn
-                     "task_done worktree auto-cleanup raised \
-                      (best-effort, suppressed): %s"
-                     (Printexc.to_string exn)))
+             cleanup_worktree_for_transition "task_done"
            | Types.Cancel ->
              (try
                 let workers = working_agents config in
@@ -1736,10 +1749,20 @@ let transition_task_r
               | exn ->
                 Log.RoomTask.error
                   "transition hebbian cancel hook: %s"
-                  (Printexc.to_string exn))
+                  (Printexc.to_string exn));
+             (* Cancel is terminal: no future claimant will pick up the
+                worktree, so cleanup unconditionally. *)
+             cleanup_worktree_for_transition "task_cancel"
+           | Types.Release ->
+             (* Release returns the task to claimable.  The releasing
+                keeper's worktree is orphaned because the next claimant
+                (potentially a different keeper) will create its own
+                via [claim_post_provision_fn].  Cleanup the previous
+                keeper's worktree to prevent the leak observed in
+                #10899 (5d / 7 keepers / 3.4 GB). *)
+             cleanup_worktree_for_transition "task_release"
            | Types.Claim
            | Types.Start
-           | Types.Release
            | Types.Submit_for_verification
            | Types.Approve_verification
            | Types.Reject_verification -> ());

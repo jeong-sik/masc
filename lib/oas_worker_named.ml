@@ -189,6 +189,54 @@ let classify_filter_rejection
       | Some reason -> Some (Required_tool_use reason)
       | None -> None
 
+(* #11060: cascade-empty WARN dedupe.
+
+   When the tool-use gate empties a cascade (every configured
+   provider rejected — e.g. [keeper_unified] with only [codex_cli]
+   providers under a keeper-bound runtime MCP policy), the WARN
+   fires once per filtering invocation. Field log: 18 identical
+   WARN events / 49 min for a single misconfigured cascade — the
+   genuine signal (operator must edit cascade.toml) drowns in its
+   own repeats and shares the WARN level with normal degraded-mode
+   noise.
+
+   This dedupe boosts the first occurrence per
+   [(label, rejection_signature)] to ERROR with an operator-action
+   hint, and demotes subsequent identical signatures to DEBUG. The
+   one-hour [restate_sec] period re-emits the ERROR if the
+   misconfiguration persists, so an operator who missed the first
+   alert still sees the gap. The signature is sorted so the same
+   rejection set in different argument order does not bypass the
+   cache. *)
+let cascade_empty_warn_seen : (string, float) Hashtbl.t =
+  Hashtbl.create 16
+
+let cascade_empty_warn_seen_mutex = Mutex.create ()
+
+let cascade_empty_warn_restate_sec = 3600.0
+
+let signature_of_rejected_providers rejected =
+  rejected
+  |> List.map (fun (cfg, reason) ->
+       Printf.sprintf "%s:%s"
+         (Provider_tool_support.provider_debug_label cfg)
+         (filter_rejection_reason_label reason))
+  |> List.sort String.compare
+  |> String.concat ","
+
+let cascade_empty_should_emit_first ~label ~signature =
+  let key = label ^ "|" ^ signature in
+  let now = Unix.gettimeofday () in
+  Mutex.lock cascade_empty_warn_seen_mutex;
+  let first =
+    match Hashtbl.find_opt cascade_empty_warn_seen key with
+    | None -> true
+    | Some last -> now -. last >= cascade_empty_warn_restate_sec
+  in
+  if first then Hashtbl.replace cascade_empty_warn_seen key now;
+  Mutex.unlock cascade_empty_warn_seen_mutex;
+  first
+
 let filter_candidate_providers_for_tool_support
     ~(keeper_name : string)
     ?runtime_mcp_policy
@@ -213,17 +261,21 @@ let filter_candidate_providers_for_tool_support
            | Some reason -> Either.Right (provider_cfg, reason))
         provider_cfgs
     in
-    if kept = [] && provider_cfgs <> [] then
-      Log.Misc.warn
-        "cascade %s: provider-normalized tool-use gate removed all providers (rejections=[%s])"
-        label
-        (String.concat ", "
-           (List.map
-              (fun (cfg, reason) ->
-                Printf.sprintf "%s:%s"
-                  (Provider_tool_support.provider_debug_label cfg)
-                  (filter_rejection_reason_label reason))
-              rejected));
+    if kept = [] && provider_cfgs <> [] then begin
+      let signature = signature_of_rejected_providers rejected in
+      if cascade_empty_should_emit_first ~label ~signature then
+        Log.Misc.error
+          "[#11060] cascade %s: provider-normalized tool-use gate removed all \
+           providers (rejections=[%s]) — operator action: add a fallback \
+           provider (e.g. gemini_cli, claude_cli) to this cascade in \
+           cascade.toml, or detach the keeper from this cascade. Subsequent \
+           identical-signature rejections demoted to DEBUG for the next %.0fs"
+          label signature cascade_empty_warn_restate_sec
+      else
+        Log.Misc.debug
+          "[#11060] cascade %s: repeated all-providers-rejected (rejections=[%s])"
+          label signature
+    end;
     kept
 
 type masc_internal_error =

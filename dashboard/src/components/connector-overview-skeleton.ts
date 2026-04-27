@@ -33,7 +33,7 @@ export function overviewSkeletonTileCount(): number {
   return KNOWN_CONNECTOR_IDS.length
 }
 
-const BAR = 'h-3 w-1 rounded-[1px] bg-[var(--white-4)] animate-pulse'
+const BAR = 'h-3 w-1 rounded-px bg-[var(--white-4)] animate-pulse'
 const PILL = 'h-4 flex-1 rounded-sm bg-[var(--white-4)] animate-pulse'
 const LINE = 'h-3 rounded bg-[var(--white-4)] animate-pulse'
 

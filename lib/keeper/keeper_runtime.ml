@@ -297,10 +297,45 @@ let ensure_keeper_meta config name =
       match defaults.mention_targets with [] -> meta.mention_targets | xs -> xs in
     let target_active_goal_ids =
       apply_default defaults.active_goal_ids meta.active_goal_ids in
-    (* Infrastructure fields use system defaults when TOML is silent,
-       so removing a key from TOML actually reverts the runtime value. *)
-    let target_sandbox_profile =
-      apply_default defaults.sandbox_profile Keeper_types_profile.default_sandbox_profile in
+    (* Defense-in-depth (#11080 sibling): keeper sandbox_profile MUST be
+       declared. The previous behaviour silently fell through to
+       [default_sandbox_profile = Local] when TOML omitted the key,
+       which strips docker isolation from any operator who forgets to
+       set it (or copies a stale persona JSON: persona profiles are
+       declared elsewhere as not allowed to own this field). Reject at
+       reconcile time so the keeper visibly fails to boot rather than
+       running un-sandboxed.
+
+       Persona-only keepers cannot satisfy this check today and must
+       gain a TOML wrapper that sets [sandbox_profile]. The
+       [Keeper_types_profile.default_sandbox_profile] constant is left
+       in place because other read paths (JSON parser, env override,
+       turn_up_args) still need a value when reading already-persisted
+       meta. *)
+    let target_sandbox_profile_result =
+      match defaults.sandbox_profile with
+      | Some sp -> Ok sp
+      | None ->
+        let manifest_hint =
+          match defaults.manifest_path with
+          | Some path -> Printf.sprintf " (loaded from %s)" path
+          | None -> ""
+        in
+        let msg =
+          Printf.sprintf
+            "keeper %s rejected: sandbox_profile is required (allowed: %s)%s. \
+             Add e.g. `sandbox_profile = \"docker\"` to the keeper TOML."
+            meta.name
+            (String.concat ", "
+               Keeper_types_profile.valid_sandbox_profile_strings)
+            manifest_hint
+        in
+        Log.Keeper.warn "%s" msg;
+        Error msg
+    in
+    (match target_sandbox_profile_result with
+     | Error e -> Error e
+     | Ok target_sandbox_profile ->
     let target_network_mode =
       apply_default defaults.network_mode
         (Keeper_types_profile.default_network_mode_for_profile target_sandbox_profile) in
@@ -532,7 +567,7 @@ let ensure_keeper_meta config name =
         Log.Keeper.warn "ensure_keeper_meta: write_meta re-sync failed: %s" e;
         Ok meta
     end
-    else Ok meta)
+    else Ok meta))
   | Ok None ->
     Log.Keeper.warn
       "ensure_keeper_meta: no persistent meta for %s — run keeper_up to initialize" name;

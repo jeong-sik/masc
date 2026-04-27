@@ -1389,6 +1389,10 @@ let handle_keeper_shell
                match cwd with
                | Some dir -> `String dir
                | None -> `Null );
+             (* host execution path: route discriminator must be present so
+                the dashboard / LLM cannot mistake a host-side run for a
+                docker-sandboxed run (#11080 sibling sweep). *)
+             "via", `String "host";
            ] @ insight_extra)
          ~status:st
          ~output:out
@@ -1427,6 +1431,13 @@ let handle_keeper_shell
           List.map Masc_exec.Bash_history.failure_pattern_to_json patterns)
       ]
     in
+    (* Caller-supplied [extra] may already declare ["via"] (e.g. wc docker
+       branch); only inject the default ["via", "host"] when absent so the
+       docker route's explicit ["via", "docker"] still wins. *)
+    let extra_with_via =
+      if List.exists (fun (k, _) -> k = "via") extra then extra
+      else ("via", `String "host") :: extra
+    in
     Yojson.Safe.to_string
       (Exec_core.process_result_json
          ~artifact_policy:Exec_core.Inline_only
@@ -1440,7 +1451,7 @@ let handle_keeper_shell
                match cwd with
                | Some dir -> `String dir
                | None -> `Null );
-           ] @ extra @ insight_extra)
+           ] @ extra_with_via @ insight_extra)
          ~status:st
          ~output:out
          ())
@@ -1606,6 +1617,7 @@ let handle_keeper_shell
                [ "ok", `Bool (st = Unix.WEXITED 0)
                ; "op", `String op
                ; "path", `String target
+               ; "via", `String "host"
                ; "status", Keeper_alerting_path.process_status_to_json st
                ; "entries", lines_to_json ~limit out
                ]))
@@ -1656,6 +1668,7 @@ let handle_keeper_shell
                [ "ok", `Bool (st = Unix.WEXITED 0)
                ; "op", `String op
                ; "path", `String target
+               ; "via", `String "host"
                ; "status", Keeper_alerting_path.process_status_to_json st
                ; "truncated", `Bool (String.length out > max_bytes)
                ; "content", `String body
@@ -1732,6 +1745,7 @@ let handle_keeper_shell
                   ; "op", `String op
                   ; "path", `String target
                   ; "pattern", `String pattern
+                  ; "via", `String "host"
                   ; "status", Keeper_alerting_path.process_status_to_json st
                   ; "matches", lines_to_json ~limit out
                   ]))
@@ -1873,6 +1887,7 @@ let handle_keeper_shell
                 ; "op", `String op
                 ; "path", `String target
                 ; "name", `String name_pattern
+                ; "via", `String "host"
                 ; "status", Keeper_alerting_path.process_status_to_json st
                 ; "files", lines_to_json ~limit out
                 ]))
@@ -1913,6 +1928,7 @@ let handle_keeper_shell
                ; "op", `String op
                ; "path", `String target
                ; "lines", `Int n
+               ; "via", `String "host"
                ; "status", Keeper_alerting_path.process_status_to_json st
                ; "content", `String out
                ]))
@@ -1953,6 +1969,7 @@ let handle_keeper_shell
                ; "op", `String op
                ; "path", `String target
                ; "lines", `Int n
+               ; "via", `String "host"
                ; "status", Keeper_alerting_path.process_status_to_json st
                ; "content", `String out
                ]))
@@ -2028,6 +2045,7 @@ let handle_keeper_shell
                [ "ok", `Bool (st = Unix.WEXITED 0)
                ; "op", `String op
                ; "path", `String target
+               ; "via", `String "host"
                ; "status", Keeper_alerting_path.process_status_to_json st
                ; "entries", lines_to_json ~limit out
                ]))

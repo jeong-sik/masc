@@ -107,6 +107,7 @@ let test_personality_resync () =
   write_file
     (Filename.concat keepers_toml_dir (keeper_name ^ ".toml"))
     {|[keeper]
+sandbox_profile = "docker"
 goal = "TOML goal"
 short_goal = "TOML short goal"
 mid_goal = "TOML mid goal"
@@ -164,6 +165,7 @@ let test_policy_resync () =
   write_file
     (Filename.concat keepers_toml_dir (keeper_name ^ ".toml"))
 {|[keeper]
+sandbox_profile = "docker"
 goal = "test"
 policy_voice_enabled = false
 |};
@@ -305,6 +307,7 @@ let test_tool_policy_resync () =
   write_file
     (Filename.concat keepers_toml_dir (keeper_name ^ ".toml"))
     {|[keeper]
+sandbox_profile = "docker"
 goal = "test"
 allowed_paths = ["workspace/example/project"]
 tool_preset = "social"
@@ -370,6 +373,7 @@ let test_tool_preset_source_resyncs_from_toml_without_policy_delta () =
   write_file
     (Filename.concat keepers_toml_dir (keeper_name ^ ".toml"))
     {|[keeper]
+sandbox_profile = "docker"
 goal = "test"
 tool_preset = "social"
 |};
@@ -435,6 +439,20 @@ let test_tool_preset_source_resyncs_from_persona_without_policy_delta () =
     "tool_preset": "research"
   }
 }|};
+  (* Persona-only configs cannot satisfy the sandbox_profile required-field
+     check (personas are not allowed to declare execution policy). Add a
+     minimal TOML wrapper that only sets sandbox_profile + persona_name so
+     persona overlay still drives tool_preset. *)
+  let keepers_toml_dir = Filename.concat config_dir "keepers" in
+  Unix.mkdir keepers_toml_dir 0o755;
+  write_file
+    (Filename.concat keepers_toml_dir (keeper_name ^ ".toml"))
+    (Printf.sprintf
+       {|[keeper]
+sandbox_profile = "docker"
+persona_name = "%s"
+|}
+       keeper_name);
   let config = Coord.default_config room_dir in
   let initial_meta =
     match
@@ -490,6 +508,7 @@ let test_allowed_paths_explicit_empty_clears_runtime () =
   write_file
     (Filename.concat keepers_toml_dir (keeper_name ^ ".toml"))
     {|[keeper]
+sandbox_profile = "docker"
 goal = "test"
 allowed_paths = []
 |};
@@ -535,6 +554,16 @@ let test_persona_allowed_paths_is_ignored () =
     "allowed_paths": ["workspace/example/project"]
   }
 }|};
+  let keepers_toml_dir = Filename.concat config_dir "keepers" in
+  Unix.mkdir keepers_toml_dir 0o755;
+  write_file
+    (Filename.concat keepers_toml_dir (keeper_name ^ ".toml"))
+    (Printf.sprintf
+       {|[keeper]
+sandbox_profile = "docker"
+persona_name = "%s"
+|}
+       keeper_name);
   let config = Coord.default_config room_dir in
   let initial_meta =
     match
@@ -569,6 +598,7 @@ let test_custom_tool_access_preserved_without_preset () =
   write_file
     (Filename.concat keepers_toml_dir (keeper_name ^ ".toml"))
     {|[keeper]
+sandbox_profile = "docker"
 goal = "test"
 allowed_paths = ["workspace/example/project"]
 |};
@@ -647,6 +677,7 @@ let test_persona_overlay_resync () =
   write_file
     (Filename.concat keepers_toml_dir (keeper_name ^ ".toml"))
     {|[keeper]
+sandbox_profile = "docker"
 persona_name = "scholar"
 goal = "대화에 바로 쓸 수 있는 연구 브리프를 만든다."
 tool_preset = "delivery"
@@ -716,6 +747,7 @@ let test_toml_invalid_per_provider_timeout_clears_stale_runtime () =
   write_file
     (Filename.concat keepers_toml_dir (keeper_name ^ ".toml"))
     {|[keeper]
+sandbox_profile = "docker"
 goal = "test"
 per_provider_timeout = 0
 |};
@@ -761,6 +793,16 @@ let test_persona_invalid_per_provider_timeout_clears_stale_runtime () =
     "per_provider_timeout": "oops"
   }
 }|};
+  let keepers_toml_dir = Filename.concat config_dir "keepers" in
+  Unix.mkdir keepers_toml_dir 0o755;
+  write_file
+    (Filename.concat keepers_toml_dir (keeper_name ^ ".toml"))
+    (Printf.sprintf
+       {|[keeper]
+sandbox_profile = "docker"
+persona_name = "%s"
+|}
+       keeper_name);
   let config = Coord.default_config room_dir in
   let initial_meta =
     match
@@ -813,6 +855,7 @@ let test_none_preserves_runtime () =
   write_file
     (Filename.concat keepers_toml_dir (keeper_name ^ ".toml"))
     {|[keeper]
+sandbox_profile = "docker"
 goal = "minimal TOML"
 |};
   let config = Coord.default_config room_dir in
@@ -856,6 +899,7 @@ let test_discovery_resync () =
   write_file
     (Filename.concat keepers_toml_dir (keeper_name ^ ".toml"))
     {|[keeper]
+sandbox_profile = "docker"
 goal = "test"
 work_discovery_enabled = true
 work_discovery_interval_sec = 120
@@ -903,6 +947,7 @@ let test_cascade_defaults_resync () =
   write_file
     (Filename.concat keepers_toml_dir (keeper_name ^ ".toml"))
     {|[keeper]
+sandbox_profile = "docker"
 goal = "TOML goal"
 tool_preset = "social"
 |};
@@ -942,6 +987,7 @@ let test_social_model_resynced_from_declarative_defaults () =
   write_file
     (Filename.concat keepers_toml_dir (keeper_name ^ ".toml"))
     {|[keeper]
+sandbox_profile = "docker"
 goal = "TOML goal"
 social_model = "magentic_ledger_v1"
 |};
@@ -982,6 +1028,7 @@ let test_unknown_cascade_name_rejected () =
   write_file
     (Filename.concat keepers_toml_dir (keeper_name ^ ".toml"))
     {|[keeper]
+sandbox_profile = "docker"
 goal = "TOML goal"
 cascade_name = "missing_profile"
 |};
@@ -1060,6 +1107,7 @@ let test_room_presence_syncs_capabilities () =
 (* Test: update_field_in_content replaces existing field *)
 let test_toml_update_existing () =
   let input = {|[keeper]
+sandbox_profile = "docker"
 goal = "old goal"
 cascade_name = "default"
 instructions = "keep this"
@@ -1087,6 +1135,7 @@ instructions = "keep this"
 (** Test: update_field_in_content inserts new field *)
 let test_toml_update_insert () =
   let input = {|[keeper]
+sandbox_profile = "docker"
 goal = "test"
 |} in
   match Keeper_toml_loader.update_field_in_content
@@ -1127,6 +1176,7 @@ let test_canonicalize_if_keeper () =
   write_file
     (Filename.concat keepers_dir "sangsu.toml")
     {|[keeper]
+sandbox_profile = "docker"
 goal = "test goal"
 |};
   let config = Coord.default_config room_dir in

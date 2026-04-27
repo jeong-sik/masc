@@ -315,23 +315,11 @@ let dashboard_actor_for_request ~base_path request =
             | Some s -> s
             | None -> "<none>"
           in
-          let err_kind =
-            match err with
-            | Types.Unauthorized _ -> "unauthorized"
-            | Types.Forbidden _ -> "forbidden"
-            (* InvalidToken/TokenExpired previously collapsed into [other],
-               which made up 100% (136/136) of dashboard fallback events
-               on 2026-04-27.  Use the same [token_mismatch]/[token_expired]
-               labels that [mcp_server_eio_execute.ml:26] already uses for
-               the MCP-side dispatch so dashboards can group across both
-               surfaces. *)
-            | Types.InvalidToken _ -> "token_mismatch"
-            | Types.TokenExpired _ -> "token_expired"
-            | Types.AgentNotFound _ -> "agent_not_found"
-            | Types.IoError _ -> "io_error"
-            | Types.InvalidJson _ -> "invalid_json"
-            | _ -> "other"
-          in
+          (* err_kind is a closed enum in [Auth_error_kind] — issue #11266
+             Track 2a. The inline label match here previously diverged
+             silently from the MCP-side dispatch in
+             [mcp_server_eio_execute.ml:silent_auth_token_error_kind]. *)
+          let err_kind = Auth_error_kind.to_string (Auth_error_kind.classify err) in
           Log.Auth.warn
             "[silent:dashboard_actor_fallback] outcome=error \
              token_hash_prefix=%s err_kind=%s actor_hint=%s err=%s — falling \

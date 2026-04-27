@@ -31,7 +31,7 @@
 ; Group 1: Pure synchronous tests
 ; ============================================================
 (tests
- (names test_attribution test_attribution_tagged test_autoresearch_result_bridge test_dashboard_attribution test_masc_runtime_events test_room test_room_state_recovery test_types test_exec_tap test_auth test_auth_doctor test_auth_login test_audit_log test_governance_anomaly test_http_negotiation
+ (names test_attribution test_attribution_tagged test_autoresearch_result_bridge test_dashboard_attribution test_masc_runtime_events test_room test_room_state_recovery test_types test_exec_tap test_auth test_auth_doctor test_auth_error_kind test_auth_login test_audit_log test_governance_anomaly test_http_negotiation
         test_attempt_state
         test_sse test_cancellation test_graphql_api
         test_graphql_endpoint
@@ -204,7 +204,7 @@
         test_keeper_turn_fsm_emit
         test_gh_api_classification
         test_actionable_path_action)
- (modules test_attribution test_attribution_tagged test_autoresearch_result_bridge test_dashboard_attribution test_masc_runtime_events test_room test_room_state_recovery test_types test_exec_tap test_auth test_auth_doctor test_auth_login test_audit_log test_governance_anomaly test_http_negotiation
+ (modules test_attribution test_attribution_tagged test_autoresearch_result_bridge test_dashboard_attribution test_masc_runtime_events test_room test_room_state_recovery test_types test_exec_tap test_auth test_auth_doctor test_auth_error_kind test_auth_login test_audit_log test_governance_anomaly test_http_negotiation
           test_attempt_state
           test_sse test_cancellation test_graphql_api
           test_graphql_endpoint

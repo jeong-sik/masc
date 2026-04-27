@@ -29,6 +29,11 @@ type failure_reason =
       primary_error : string;
       fallback_path : string option;
     }
+  | Failure_turn_livelock_blocked of { reason : string }
+      (** Pre-dispatch livelock guard ([Keeper_turn_livelock])
+          rejected this turn because the keeper is stuck in a
+          loop on the same task.  Distinct from [runtime_error]
+          so PromQL can chart livelock incidence on its own. *)
   | Failure_runtime_error of string
   | Failure_unexpected_exception of {
       exn : string;

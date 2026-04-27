@@ -18,8 +18,25 @@ let exact_direct_mention_present ~(targets : string list) (content : string) :
 let keeper_constitution () =
   Prompt_registry.get_prompt Keeper_prompt_names.constitution
 
-(** Format a string list for prompt rendering. Empty list -> "(none)". *)
-let format_list_for_prompt (items : string list) : string =
+(** Format an *allowlist* for prompt rendering.  An empty allowlist means
+    the gate is OFF (any account-accessible repo is permitted), so we
+    render that intent explicitly — otherwise the LLM sees the literal
+    "(none)" produced by a generic empty-list formatter and reads the
+    allowlist as "no orgs allowed", which is the inverse of the operator
+    intent behind an empty list.  Pairs with [validate_gh_command] in
+    [gh_command_validation], where an empty [allowed_orgs] argument also
+    means "skip the org check".
+
+    Replaces the earlier [format_list_for_prompt] which collapsed both
+    semantics to "(none)". *)
+let format_allowlist_for_prompt (items : string list) : string =
+  match items with
+  | [] -> "(any — allowlist gate is OFF, the operator's gh credential surface is the only repo boundary)"
+  | xs -> String.concat ", " xs
+
+(** Format a *denylist* for prompt rendering.  An empty denylist means
+    no repo is explicitly blocked, so "(none)" reads correctly here. *)
+let format_denylist_for_prompt (items : string list) : string =
   match items with
   | [] -> "(none)"
   | xs -> String.concat ", " xs
@@ -34,8 +51,8 @@ let format_list_for_prompt (items : string list) : string =
 let render_world_prompt ~allowed_orgs ~denied_repos : string =
   let vars =
     [
-      ("allowed_orgs", format_list_for_prompt allowed_orgs);
-      ("denied_repos", format_list_for_prompt denied_repos);
+      ("allowed_orgs", format_allowlist_for_prompt allowed_orgs);
+      ("denied_repos", format_denylist_for_prompt denied_repos);
     ]
   in
   match

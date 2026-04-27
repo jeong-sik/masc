@@ -1,12 +1,9 @@
 let default_threshold = 10
 
-let threshold () =
-  match Sys.getenv_opt "MASC_STAY_SILENT_LOOP_THRESHOLD" with
-  | Some v when v <> "" ->
-      (match int_of_string_opt v with
-       | Some n when n >= 1 -> n
-       | _ -> default_threshold)
-  | _ -> default_threshold
+(* Step 14(b) of the bloodflow restoration plan inlined the env knob
+   [MASC_STAY_SILENT_LOOP_THRESHOLD]: hyperparameters belong in code,
+   not in [Sys.getenv_opt]. *)
+let threshold () = default_threshold
 
 (* Per-keeper state: current streak + latched flag so the
    detected-counter only bumps once per loop episode, not on every

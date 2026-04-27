@@ -67,13 +67,10 @@ let dedup_by_key (key_of : 'a -> string) (items : 'a list) : 'a list =
 
 let jaccard_similarity = Text_similarity.jaccard_similarity
 
-let semantic_dedup_similarity_threshold () =
-  match Sys.getenv_opt "MASC_KEEPER_MEMORY_DEDUP_SIMILARITY_THRESHOLD" with
-  | None -> 0.85
-  | Some raw ->
-      (match float_of_string_opt (String.trim raw) with
-       | Some f when f >= 0.0 && f <= 1.0 -> f
-       | _ -> 0.85)
+(* Step 14(b) of the bloodflow restoration plan inlined the env knob
+   [MASC_KEEPER_MEMORY_DEDUP_SIMILARITY_THRESHOLD]: hyperparameters
+   belong in code, not in [Sys.getenv_opt]. *)
+let semantic_dedup_similarity_threshold () = 0.85
 
 let dedup_memory_candidates
     (items : (string * string * int) list) : (string * string * int) list =

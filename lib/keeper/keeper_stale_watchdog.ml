@@ -119,15 +119,11 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                 [last_turn_ts] and could fire while a turn was actively
                 running, killing the keeper mid-LLM-call.  Active turns
                 get a separate (larger) threshold so legitimately slow
-                turns aren't mistaken for hangs.  Default 600s; override
-                via [MASC_KEEPER_WATCHDOG_TURN_TIMEOUT_SEC]. *)
-             let active_turn_timeout_sec =
-               match Sys.getenv_opt "MASC_KEEPER_WATCHDOG_TURN_TIMEOUT_SEC" with
-               | Some v -> (match float_of_string_opt (String.trim v) with
-                            | Some f when f > 0.0 -> Float.max f threshold
-                            | _ -> Float.max 600.0 threshold)
-               | None -> Float.max 600.0 threshold
-             in
+                turns aren't mistaken for hangs.  Default 600s; the
+                env override [MASC_KEEPER_WATCHDOG_TURN_TIMEOUT_SEC]
+                was inlined in Step 14(b) -- hyperparameters belong
+                in code, not in [Sys.getenv_opt]. *)
+             let active_turn_timeout_sec = Float.max 600.0 threshold in
              let idle_stale, in_turn_stale, in_turn_age =
                match entry.current_turn_observation with
                | Some obs ->

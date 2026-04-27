@@ -1,0 +1,634 @@
+/**
+ * MASC Cockpit Design System — Token Source (SSOT)
+ *
+ * Authoring source for the codegen pipeline. Edit this file, then run
+ * `pnpm tokens:build` to emit the four downstream artifacts:
+ *   - dashboard/design-system/source_styles/tokens.generated.css
+ *   - dashboard/src/styles/tokens.generated.css      (Tailwind v4 @theme)
+ *   - dashboard/src/styles/tokens.generated.ts       (Preact typed const)
+ *   - dashboard_bonsai/src/tokens.ml + .mli          (OCaml polyvar)
+ *
+ * Design tier mapping (matches SPEC.md §3 Token Taxonomy):
+ *   - tier:'raw'      — atomic values; never reference another token
+ *   - tier:'semantic' — 4-slot status / role aliases derived from raw
+ *   - tier:'role'     — component-facing semantic (state, divider, etc.)
+ *
+ * Type kind:
+ *   - 'color'        — hex, rgb-triplet, or rgb()/var() expression
+ *   - 'dimension'    — px, em, %, calc()
+ *   - 'typography'   — font shorthand or stack
+ *   - 'duration'     — ms
+ *   - 'easing'       — cubic-bezier()
+ *   - 'shadow'       — box-shadow value
+ *   - 'number'       — unitless scalar
+ *
+ * Keeper 12-slot palette is generated algorithmically (OkLCH L=68 C=0.09,
+ * H stride 30°). Status 4-slot semantics are derived from raw. The status
+ * canon (--ok/--warn/--err/--info) is locked at #6b9e6b/#c9a24a/#c46a5a/
+ * #6a8eb0; check-equivalence.mjs enforces this against tokens.css.
+ */
+
+import { oklch, formatHex, type Color } from "culori";
+
+// ─────────────────────────────────────────────────────────────────────────
+// Types — discriminated union per tier × kind
+// ─────────────────────────────────────────────────────────────────────────
+
+export type Tier = "raw" | "semantic" | "role";
+export type Kind =
+  | "color"
+  | "dimension"
+  | "typography"
+  | "duration"
+  | "easing"
+  | "shadow"
+  | "number";
+
+export interface TokenBase {
+  readonly name: string; // CSS custom property name without leading --
+  readonly value: string; // CSS value text (already formatted)
+  readonly tier: Tier;
+  readonly kind: Kind;
+  readonly description?: string;
+}
+
+export interface Theme {
+  readonly id: string; // e.g. "dark-fantasy", "paper"
+  readonly mode: "dark" | "light";
+  readonly tokens: ReadonlyArray<TokenBase>;
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Helpers — keep authoring concise without sacrificing types
+// ─────────────────────────────────────────────────────────────────────────
+
+const t = (
+  name: string,
+  value: string,
+  tier: Tier,
+  kind: Kind,
+  description?: string,
+): TokenBase => ({ name, value, tier, kind, description });
+
+// rgb-triplet (space separated) for use inside `rgb(var(--x) / .35)`
+const rgbTriplet = (hex: string): string => {
+  const m = /^#([0-9a-f]{6})$/i.exec(hex);
+  if (!m) throw new Error(`bad hex: ${hex}`);
+  const n = parseInt(m[1], 16);
+  return `${(n >> 16) & 0xff} ${(n >> 8) & 0xff} ${n & 0xff}`;
+};
+
+// ─────────────────────────────────────────────────────────────────────────
+// Keeper 12-slot palette — algorithmic OkLCH (L=68, C=0.09, H=i*30)
+// ─────────────────────────────────────────────────────────────────────────
+
+const KEEPER_HUE_NAMES = [
+  "rose", "clay", "amber", "olive", "moss", "jade",
+  "teal", "cyan", "sky", "iris", "violet", "mauve",
+] as const;
+
+function generateKeeperSlot(slot: number): { hex: string; hue: number; name: string } {
+  // slot is 1..12
+  const hue = (slot - 1) * 30;
+  const c: Color = { mode: "oklch", l: 0.68, c: 0.09, h: hue };
+  const hex = formatHex(c);
+  if (!hex) throw new Error(`oklch -> hex failed for slot ${slot}`);
+  return { hex, hue, name: KEEPER_HUE_NAMES[slot - 1] };
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Raw tokens — atomic values
+// ─────────────────────────────────────────────────────────────────────────
+
+export const raw: ReadonlyArray<TokenBase> = (() => {
+  const out: TokenBase[] = [];
+
+  // Surfaces — almost-black with 2-3% warm tint
+  out.push(t("bg-0", "#0c0b08", "raw", "color", "page bg"));
+  out.push(t("bg-1", "#141210", "raw", "color", "topbar / composer"));
+  out.push(t("bg-2", "#1a1815", "raw", "color", "panel surface"));
+  out.push(t("bg-3", "#211e1a", "raw", "color", "elevated card"));
+  out.push(t("bg-4", "#2a2621", "raw", "color", "hover / active row"));
+
+  // Hairlines — warm neutral
+  out.push(t("line-1", "#2a2520", "raw", "color", "default border"));
+  out.push(t("line-2", "#3a332c", "raw", "color", "emphasized border"));
+  out.push(t("line-3", "#4a4137", "raw", "color", "divider between zones"));
+
+  // Text — 4 steps, never pure white
+  out.push(t("fg-1", "#f0e9dc", "raw", "color", "primary"));
+  out.push(t("fg-2", "#b8ad9a", "raw", "color", "secondary"));
+  out.push(t("fg-3", "#7a7065", "raw", "color", "tertiary / labels"));
+  out.push(t("fg-4", "#4a453e", "raw", "color", "disabled / placeholder"));
+
+  // Brass — the ONE accent (running state, focused row, primary button)
+  out.push(t("brass-1", "#d4a14a", "raw", "color", "primary brass"));
+  out.push(t("brass-2", "#b8843a", "raw", "color"));
+  out.push(t("brass-3", "#8a5f28", "raw", "color"));
+  out.push(t("brass-glow", rgbTriplet("#d4a14a"), "raw", "color", "rgb triplet for alpha"));
+
+  // Status — muted, desaturated. Never neon. Locked canon.
+  out.push(t("ok", "#6b9e6b", "raw", "color", "done, success"));
+  out.push(t("warn", "#c9a24a", "raw", "color", "at-risk, degraded"));
+  out.push(t("err", "#c46a5a", "raw", "color", "failed, blocker"));
+  out.push(t("info", "#6a8eb0", "raw", "color", "pending, queued"));
+  out.push(t("idle", "#6a6a6a", "raw", "color", "silent, noop"));
+  out.push(t("stalled", "#8a6aa0", "raw", "color", "stalled, drift"));
+
+  // Status glow rgb triplets
+  out.push(t("ok-glow", rgbTriplet("#6b9e6b"), "raw", "color"));
+  out.push(t("warn-glow", rgbTriplet("#c9a24a"), "raw", "color"));
+  out.push(t("err-glow", rgbTriplet("#c46a5a"), "raw", "color"));
+  out.push(t("info-glow", rgbTriplet("#6a8eb0"), "raw", "color"));
+  out.push(t("stalled-glow", rgbTriplet("#8a6aa0"), "raw", "color"));
+
+  // Keeper 12-slot OkLCH spectrum
+  for (let i = 1; i <= 12; i++) {
+    const { hex, hue, name } = generateKeeperSlot(i);
+    out.push(t(`k-${i}`, hex, "raw", "color", `H=${String(hue).padStart(3, "0")} · ${name}`));
+  }
+  for (let i = 1; i <= 12; i++) {
+    const { hex } = generateKeeperSlot(i);
+    out.push(t(`k-${i}-glow`, rgbTriplet(hex), "raw", "color"));
+  }
+
+  // Provider palette
+  out.push(t("p-anthropic", "#c9a88a", "raw", "color", "warm sand"));
+  out.push(t("p-moonshot", "#8a98c9", "raw", "color", "cool indigo"));
+  out.push(t("p-openai", "#6b9e8e", "raw", "color", "muted teal"));
+  out.push(t("p-xai", "#a896a0", "raw", "color", "mauve"));
+
+  // Type scale — tabular, compact
+  out.push(t("font-sans",
+    `ui-sans-serif, -apple-system, "SF Pro Text", "Inter", system-ui, sans-serif`,
+    "raw", "typography"));
+  out.push(t("font-mono",
+    `ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace`,
+    "raw", "typography"));
+
+  for (const px of [9, 10, 11, 12, 13, 14, 16, 20, 28, 36]) {
+    out.push(t(`fs-${px}`, `${px}px`, "raw", "dimension"));
+  }
+
+  out.push(t("lh-tight", "1.2", "raw", "number"));
+  out.push(t("lh-body", "1.45", "raw", "number"));
+  out.push(t("lh-loose", "1.6", "raw", "number"));
+
+  out.push(t("fw-reg", "400", "raw", "number"));
+  out.push(t("fw-med", "500", "raw", "number"));
+  out.push(t("fw-semi", "600", "raw", "number"));
+  out.push(t("fw-bold", "700", "raw", "number"));
+
+  out.push(t("track-tight", "-0.01em", "raw", "dimension"));
+  out.push(t("track-normal", "0", "raw", "dimension"));
+  out.push(t("track-wide", "0.04em", "raw", "dimension"));
+  out.push(t("track-caps", "0.08em", "raw", "dimension"));
+
+  // Spacing — 4px atomic scale
+  for (const [step, px] of [
+    [1, 4], [2, 8], [3, 12], [4, 16], [5, 20], [6, 24], [7, 32], [8, 40],
+  ] as const) {
+    out.push(t(`sp-${step}`, `${px}px`, "raw", "dimension"));
+  }
+  out.push(t("sp-0h", "2px", "raw", "dimension", "half-step gutter"));
+
+  // Radius
+  out.push(t("r-1", "3px", "raw", "dimension"));
+  out.push(t("r-2", "5px", "raw", "dimension"));
+  out.push(t("r-3", "8px", "raw", "dimension"));
+
+  // Motion — durations + easings
+  out.push(t("t-fast", "120ms", "raw", "duration"));
+  out.push(t("t-med", "200ms", "raw", "duration"));
+  out.push(t("t-slow", "360ms", "raw", "duration"));
+  out.push(t("t-xslow", "600ms", "raw", "duration"));
+
+  out.push(t("ease", "cubic-bezier(.2, .7, .2, 1)", "raw", "easing"));
+  out.push(t("ease-out", "cubic-bezier(.16, 1, .3, 1)", "raw", "easing"));
+  out.push(t("ease-in", "cubic-bezier(.7, 0, .84, 0)", "raw", "easing"));
+  out.push(t("ease-inout", "cubic-bezier(.65, 0, .35, 1)", "raw", "easing"));
+  out.push(t("ease-spring", "cubic-bezier(.34, 1.56, .64, 1)", "raw", "easing"));
+
+  // Bonsai 8-step structural spacing (theme-invariant, parallel to --sp-*)
+  for (const [step, px] of [
+    [1, 4], [2, 8], [3, 12], [4, 16], [5, 24], [6, 32], [7, 48], [8, 64],
+  ] as const) {
+    out.push(t(`space-${step}`, `${px}px`, "raw", "dimension"));
+  }
+
+  // Bonsai radius primitives (cyberpunk + terminal flatten xs/sm/md to 0)
+  out.push(t("radius-xs", "2px", "raw", "dimension"));
+  out.push(t("radius-sm", "4px", "raw", "dimension"));
+  out.push(t("radius-md", "6px", "raw", "dimension"));
+  out.push(t("radius-lg", "12px", "raw", "dimension"));
+  out.push(t("radius-pill", "999px", "raw", "dimension"));
+
+  // Bonsai font stacks (cyberpunk + terminal collapse to mono)
+  out.push(t("font-display",
+    `'Cinzel', 'Noto Sans KR', 'EB Garamond', serif`,
+    "raw", "typography"));
+  out.push(t("font-body",
+    `'EB Garamond', 'Noto Sans KR', Georgia, serif`,
+    "raw", "typography"));
+  out.push(t("font-ui",
+    `'Noto Sans KR', 'IBM Plex Sans KR', -apple-system, sans-serif`,
+    "raw", "typography"));
+
+  // Scrollbar primitives — bonsai surface uses these via fallback chain
+  out.push(t("scrollbar-thumb", "#2a1f1a", "raw", "color"));
+  out.push(t("scrollbar-thumb-hover", "#3d2e22", "raw", "color"));
+
+  // Density scale — body[data-density="..."] flips this scalar; role
+  // tokens (--sp-inline / --row-h / --ctrl-h*) read from it.
+  out.push(t("density", "1", "raw", "number",
+    "0.85 compact · 1 normal · 1.15 comfortable"));
+
+  // 8px baseline grid (alignment rhythm)
+  out.push(t("grid-unit", "8px", "raw", "dimension"));
+  out.push(t("grid-half", "4px", "raw", "dimension"));
+  out.push(t("grid-dbl", "16px", "raw", "dimension"));
+
+  // Zone heights (cockpit grid rows)
+  out.push(t("h-topbar", "36px", "raw", "dimension"));
+  out.push(t("h-ticker", "32px", "raw", "dimension"));
+  out.push(t("h-kpi", "56px", "raw", "dimension"));
+  out.push(t("h-lifeline", "28px", "raw", "dimension"));
+  out.push(t("h-composer", "48px", "raw", "dimension"));
+  out.push(t("h-deck", "240px", "raw", "dimension"));
+  out.push(t("w-sidebar", "168px", "raw", "dimension"));
+  out.push(t("w-rail", "300px", "raw", "dimension"));
+
+  // z-index scale — avoid magic numbers
+  out.push(t("z-base", "1", "raw", "number"));
+  out.push(t("z-sticky", "20", "raw", "number"));
+  out.push(t("z-dropdown", "30", "raw", "number"));
+  out.push(t("z-overlay", "40", "raw", "number", "comment composer, tooltips"));
+  out.push(t("z-drawer", "60", "raw", "number", "inspector / right drawer"));
+  out.push(t("z-modal", "80", "raw", "number"));
+  out.push(t("z-toast", "100", "raw", "number"));
+
+  return Object.freeze(out);
+})();
+
+// ─────────────────────────────────────────────────────────────────────────
+// Semantic tokens — 4-slot per status, derived from raw
+// ─────────────────────────────────────────────────────────────────────────
+
+const STATUS_FG_OVERRIDES: Record<string, string> = {
+  // Status -fg is a brightened variant of raw — preserved verbatim from
+  // tokens.css §1 to keep contrast pinned. NOT derivable purely from raw
+  // without a perceptual lift function; pinning is the conservative call.
+  ok: "#8ebc8e",
+  warn: "#d9b764",
+  err: "#d8806f",
+  info: "#8aa6c4",
+  idle: "#8a8a8a",
+  stalled: "#a88ac0",
+};
+
+interface SemSlotsOpts {
+  softAlpha: number;
+  borderAlpha: number;
+  ringInner: number;
+  ringOuter: number;
+  ringBlur: string;
+  fgPinned?: string;
+}
+
+function fourSlotForRgbTriplet(
+  prefix: string,
+  triplet: string,
+  opts: SemSlotsOpts,
+  description?: string,
+): TokenBase[] {
+  const arr: TokenBase[] = [];
+  arr.push(t(`${prefix}-soft`,
+    `rgb(${triplet} / .${String(Math.round(opts.softAlpha * 100)).padStart(2, "0")})`,
+    "semantic", "color", description));
+  if (opts.fgPinned) {
+    arr.push(t(`${prefix}-fg`, opts.fgPinned, "semantic", "color"));
+  }
+  arr.push(t(`${prefix}-border`,
+    `rgb(${triplet} / .${String(Math.round(opts.borderAlpha * 100)).padStart(2, "0")})`,
+    "semantic", "color"));
+  arr.push(t(`${prefix}-ring`,
+    `0 0 0 1px rgb(${triplet} / .${String(Math.round(opts.ringInner * 100)).padStart(2, "0")}), 0 0 ${opts.ringBlur} rgb(${triplet} / .${String(Math.round(opts.ringOuter * 100)).padStart(2, "0")})`,
+    "semantic", "shadow"));
+  return arr;
+}
+
+export const semantic: ReadonlyArray<TokenBase> = (() => {
+  const out: TokenBase[] = [];
+
+  // Status 4-slot — alphas pinned to source tokens.css to preserve parity
+  out.push(...fourSlotForRgbTriplet("ok", rgbTriplet("#6b9e6b"),
+    { softAlpha: 0.10, borderAlpha: 0.35, ringInner: 0.45, ringOuter: 0.35, ringBlur: "8px", fgPinned: STATUS_FG_OVERRIDES.ok }));
+  out.push(...fourSlotForRgbTriplet("warn", rgbTriplet("#c9a24a"),
+    { softAlpha: 0.12, borderAlpha: 0.35, ringInner: 0.45, ringOuter: 0.35, ringBlur: "8px", fgPinned: STATUS_FG_OVERRIDES.warn }));
+  out.push(...fourSlotForRgbTriplet("err", rgbTriplet("#c46a5a"),
+    { softAlpha: 0.12, borderAlpha: 0.40, ringInner: 0.50, ringOuter: 0.40, ringBlur: "8px", fgPinned: STATUS_FG_OVERRIDES.err }));
+  out.push(...fourSlotForRgbTriplet("info", rgbTriplet("#6a8eb0"),
+    { softAlpha: 0.12, borderAlpha: 0.35, ringInner: 0.45, ringOuter: 0.35, ringBlur: "8px", fgPinned: STATUS_FG_OVERRIDES.info }));
+
+  // idle has no -ring (intentional: silent state, no emphasis)
+  out.push(t("idle-soft", `rgb(${rgbTriplet("#6a6a6a")} / .10)`, "semantic", "color"));
+  out.push(t("idle-fg", STATUS_FG_OVERRIDES.idle, "semantic", "color"));
+  out.push(t("idle-border", `rgb(${rgbTriplet("#6a6a6a")} / .30)`, "semantic", "color"));
+
+  out.push(...fourSlotForRgbTriplet("stalled", rgbTriplet("#8a6aa0"),
+    { softAlpha: 0.12, borderAlpha: 0.35, ringInner: 0.45, ringOuter: 0.35, ringBlur: "8px", fgPinned: STATUS_FG_OVERRIDES.stalled }));
+
+  // Brass 4-slot — fg is a var() back-reference to brass-1
+  out.push(t("brass-soft", `rgb(${rgbTriplet("#d4a14a")} / .10)`, "semantic", "color"));
+  out.push(t("brass-fg", "var(--brass-1)", "semantic", "color"));
+  out.push(t("brass-border", `rgb(${rgbTriplet("#d4a14a")} / .35)`, "semantic", "color"));
+  out.push(t("brass-ring",
+    `0 0 0 1px rgb(${rgbTriplet("#d4a14a")} / .50), 0 0 10px rgb(${rgbTriplet("#d4a14a")} / .50)`,
+    "semantic", "shadow"));
+
+  // Keeper 4-slot — derived from generated palette
+  for (let i = 1; i <= 12; i++) {
+    const { hex } = generateKeeperSlot(i);
+    const triplet = rgbTriplet(hex);
+    out.push(...fourSlotForRgbTriplet(`k-${i}`, triplet,
+      { softAlpha: 0.10, borderAlpha: 0.35, ringInner: 0.45, ringOuter: 0.35, ringBlur: "8px" }));
+  }
+
+  // Provider 2-slot
+  for (const [name, hex] of [
+    ["anthropic", "#c9a88a"],
+    ["moonshot", "#8a98c9"],
+    ["openai", "#6b9e8e"],
+    ["xai", "#a896a0"],
+  ] as const) {
+    out.push(t(`p-${name}-soft`, `rgb(${rgbTriplet(hex)} / .10)`, "semantic", "color"));
+    out.push(t(`p-${name}-border`, `rgb(${rgbTriplet(hex)} / .30)`, "semantic", "color"));
+  }
+
+  // ── Color role aliases — late-binding semantic layer ────────────────
+  // These mirror tokens.css §end. Components prefer --color-* over raw bg-N.
+  out.push(t("color-bg-page", "var(--bg-0)", "role", "color"));
+  out.push(t("color-bg-surface", "var(--bg-1)", "role", "color"));
+  out.push(t("color-bg-panel-alt", "var(--bg-2)", "role", "color"));
+  out.push(t("color-bg-elevated", "var(--bg-3)", "role", "color"));
+  out.push(t("color-bg-hover", "var(--bg-4)", "role", "color"));
+
+  out.push(t("color-fg-primary", "var(--fg-1)", "role", "color"));
+  out.push(t("color-fg-secondary", "var(--fg-2)", "role", "color"));
+  out.push(t("color-fg-muted", "var(--fg-3)", "role", "color"));
+  out.push(t("color-fg-disabled", "var(--fg-4)", "role", "color"));
+
+  out.push(t("color-border-default", "var(--line-1)", "role", "color"));
+  out.push(t("color-border-strong", "var(--line-2)", "role", "color"));
+  out.push(t("color-border-divider", "var(--line-3)", "role", "color"));
+
+  out.push(t("color-accent-fg", "var(--brass-1)", "role", "color"));
+  out.push(t("color-accent-fg-dim", "var(--brass-3)", "role", "color"));
+  out.push(t("color-accent-glow", "var(--brass-glow)", "role", "color"));
+
+  out.push(t("color-status-ok", "var(--ok)", "role", "color"));
+  out.push(t("color-status-warn", "var(--warn)", "role", "color"));
+  out.push(t("color-status-err", "var(--err)", "role", "color"));
+  out.push(t("color-status-info", "var(--info)", "role", "color"));
+  out.push(t("color-status-idle", "var(--idle)", "role", "color"));
+  out.push(t("color-status-stalled", "var(--stalled)", "role", "color"));
+
+  for (let i = 1; i <= 12; i++) {
+    out.push(t(`color-keeper-${i}`, `var(--k-${i})`, "role", "color"));
+  }
+  out.push(t("color-focus-ring", "var(--brass-1)", "role", "color"));
+
+  // Diff status aliases — drives diff-add / diff-del / diff-modified surfaces
+  out.push(t("color-status-added", "var(--ok)", "role", "color"));
+  out.push(t("color-status-modified", "var(--warn)", "role", "color"));
+  out.push(t("color-status-deleted", "var(--err)", "role", "color"));
+
+  // ── Type role tokens — bundle size / line-height / family ──────────
+  // shorthand: `<size>/<lh> <family>` for use as `font: var(--type-body)`.
+  const typeRole = (
+    name: string, fs: string, lh: string, family: string, desc?: string,
+  ): TokenBase => t(name,
+    `var(--${fs})/var(--${lh}) var(--${family})`,
+    "role", "typography", desc);
+  out.push(typeRole("type-micro",   "fs-9",  "lh-tight", "font-mono"));
+  out.push(typeRole("type-caption", "fs-10", "lh-tight", "font-mono"));
+  out.push(typeRole("type-label",   "fs-11", "lh-tight", "font-sans"));
+  out.push(typeRole("type-meta",    "fs-12", "lh-tight", "font-mono"));
+  out.push(typeRole("type-body",    "fs-13", "lh-body",  "font-sans"));
+  out.push(typeRole("type-code",    "fs-12", "lh-body",  "font-mono"));
+  out.push(typeRole("type-title",   "fs-14", "lh-tight", "font-sans"));
+  out.push(typeRole("type-kpi-m",   "fs-16", "lh-tight", "font-mono"));
+  out.push(typeRole("type-kpi-l",   "fs-20", "lh-tight", "font-mono"));
+  out.push(typeRole("type-hero",    "fs-28", "lh-tight", "font-mono"));
+  out.push(typeRole("type-display", "fs-36", "lh-tight", "font-mono"));
+
+  // ── Density-aware spacing roles ────────────────────────────────────
+  out.push(t("sp-inline",  "calc(var(--density) * 4px)",  "role", "dimension", "icon-to-label gap"));
+  out.push(t("sp-gutter",  "calc(var(--density) * 8px)",  "role", "dimension", "between sibling fields"));
+  out.push(t("sp-stack",   "calc(var(--density) * 12px)", "role", "dimension", "between blocks"));
+  out.push(t("sp-section", "calc(var(--density) * 20px)", "role", "dimension", "between sections"));
+  out.push(t("sp-region",  "calc(var(--density) * 32px)", "role", "dimension", "between regions"));
+
+  // Row heights — density-aware
+  out.push(t("row-h-micro", "calc(var(--density) * 18px)", "role", "dimension"));
+  out.push(t("row-h-tight", "calc(var(--density) * 22px)", "role", "dimension"));
+  out.push(t("row-h",       "calc(var(--density) * 26px)", "role", "dimension"));
+  out.push(t("row-h-loose", "calc(var(--density) * 32px)", "role", "dimension"));
+  out.push(t("row-h-tall",  "calc(var(--density) * 40px)", "role", "dimension"));
+
+  // Control heights — density-aware
+  out.push(t("ctrl-h-xs", "calc(var(--density) * 16px)", "role", "dimension"));
+  out.push(t("ctrl-h-sm", "calc(var(--density) * 20px)", "role", "dimension"));
+  out.push(t("ctrl-h",    "calc(var(--density) * 24px)", "role", "dimension"));
+  out.push(t("ctrl-h-lg", "calc(var(--density) * 28px)", "role", "dimension"));
+
+  // Density-scope sentinel — closes the auto-var block in tokens.css so the
+  // body[data-density="..."] override below scopes cleanly. Kept for parity.
+  out.push(t("_density-scope", "1", "role", "number", "scope sentinel"));
+
+  // ── Elevation 7-step — bundle bg / border / shadow per level ───────
+  const elev = (n: number, bg: string, border: string, shadow: string, desc?: string): TokenBase[] => [
+    t(`elev-${n}-bg`,     bg,     "role", "color", desc),
+    t(`elev-${n}-border`, border, "role", "color"),
+    t(`elev-${n}-shadow`, shadow, "role", "shadow"),
+  ];
+  out.push(...elev(0, "var(--bg-0)", "transparent",  "none", "page / inset"));
+  out.push(...elev(1, "var(--bg-1)", "var(--line-1)", "0 1px 0 rgb(0 0 0 / .4)", "resting panel"));
+  out.push(...elev(2, "var(--bg-2)", "var(--line-1)",
+    "0 1px 0 rgb(0 0 0 / .4), inset 0 1px 0 rgb(255 255 255 / .02)",
+    "card / default surface"));
+  out.push(...elev(3, "var(--bg-3)", "var(--line-2)",
+    "0 2px 6px rgb(0 0 0 / .45), inset 0 1px 0 rgb(255 255 255 / .03)",
+    "hovered card"));
+  out.push(...elev(4, "var(--bg-3)", "var(--line-2)",
+    "0 6px 18px rgb(0 0 0 / .55), 0 0 0 1px var(--line-2), inset 0 1px 0 rgb(255 255 255 / .03)",
+    "floating menu / popover"));
+  out.push(...elev(5, "var(--bg-3)", "var(--line-3)",
+    "0 12px 32px rgb(0 0 0 / .6), 0 0 0 1px var(--line-3), inset 0 1px 0 rgb(255 255 255 / .04)",
+    "drawer / sheet"));
+  out.push(...elev(6, "var(--bg-3)", "var(--line-3)",
+    "0 24px 64px rgb(0 0 0 / .7), 0 0 0 1px var(--line-3), inset 0 1px 0 rgb(255 255 255 / .04)",
+    "modal overlay"));
+
+  // Shadow aliases (compat with existing styles)
+  out.push(t("shadow-1", "var(--elev-2-shadow)", "role", "shadow"));
+  out.push(t("shadow-2", "var(--elev-4-shadow)", "role", "shadow"));
+  out.push(t("shadow-3", "var(--elev-5-shadow)", "role", "shadow"));
+  out.push(t("shadow-inset", "inset 0 1px 0 rgb(255 255 255 / .03)", "role", "shadow"));
+
+  // Bonsai shadow primitives (theme-overridden in dark-fantasy / cyberpunk)
+  out.push(t("shadow-card",   "0 1px 4px rgba(0, 0, 0, 0.5)", "role", "shadow"));
+  out.push(t("shadow-panel",  "0 2px 12px rgba(0, 0, 0, 0.6)", "role", "shadow"));
+  out.push(t("shadow-glow",   "0 0 20px var(--accent-glow)",  "role", "shadow"));
+  out.push(t("shadow-raised",
+    "0 8px 24px rgba(0, 0, 0, 0.55), 0 0 0 1px var(--border-highlight)",
+    "role", "shadow"));
+
+  // Focus / interaction overlays
+  out.push(t("focus-ring",
+    `0 0 0 1px var(--brass-1), 0 0 0 3px rgb(var(--brass-glow) / .25)`,
+    "role", "shadow"));
+  out.push(t("focus-ring-err",
+    `0 0 0 1px var(--err), 0 0 0 3px rgb(var(--err-glow) / .3)`,
+    "role", "shadow"));
+  out.push(t("hover-overlay",  "rgb(255 255 255 / .03)", "role", "color"));
+  out.push(t("active-overlay", "rgb(0 0 0 / .25)",       "role", "color"));
+
+  // Interactive state roles — explicit hover/selected/pressed semantics
+  out.push(t("state-hover-bg",       "var(--bg-3)",   "role", "color"));
+  out.push(t("state-hover-fg",       "var(--fg-1)",   "role", "color"));
+  out.push(t("state-hover-border",   "var(--line-2)", "role", "color"));
+  out.push(t("state-selected-bg",    "var(--bg-4)",   "role", "color"));
+  out.push(t("state-selected-fg",    "var(--fg-1)",   "role", "color"));
+  out.push(t("state-selected-border","var(--line-3)", "role", "color"));
+  out.push(t("state-pressed-bg",     "rgb(0 0 0 / .4)", "role", "color"));
+  out.push(t("state-active-bg",      "rgb(var(--brass-glow) / .08)", "role", "color"));
+  out.push(t("state-active-fg",      "var(--brass-1)", "role", "color"));
+  out.push(t("state-active-border",  "var(--brass-3)", "role", "color"));
+  out.push(t("state-disabled-fg",    "var(--fg-4)",   "role", "color"));
+  out.push(t("state-disabled-bg",    "transparent",   "role", "color"));
+
+  // Divider roles
+  out.push(t("divider",          "var(--line-1)", "role", "color"));
+  out.push(t("divider-emphasis", "var(--line-2)", "role", "color"));
+  out.push(t("divider-zone",     "var(--line-3)", "role", "color"));
+
+  // Overlay scrims — drawer / modal / sheet backdrops
+  out.push(t("scrim-subtle", "rgb(0 0 0 / .3)", "role", "color"));
+  out.push(t("scrim",        "rgb(0 0 0 / .5)", "role", "color"));
+  out.push(t("scrim-strong", "rgb(0 0 0 / .7)", "role", "color"));
+  out.push(t("scrim-brass",  "rgb(var(--brass-glow) / .04)", "role", "color",
+    "warm wash behind active region"));
+
+  // ── Motion role tokens — bundle duration + easing ──────────────────
+  out.push(t("motion-enter",  "var(--t-med) var(--ease-out)", "role", "duration"));
+  out.push(t("motion-exit",   "var(--t-fast) var(--ease-in)", "role", "duration"));
+  out.push(t("motion-swap",   "var(--t-fast) var(--ease)", "role", "duration"));
+  out.push(t("motion-reveal", "var(--t-slow) var(--ease-out)", "role", "duration"));
+  out.push(t("motion-settle", "var(--t-xslow) var(--ease-out)", "role", "duration"));
+  out.push(t("motion-pop",    "var(--t-med) var(--ease-spring)", "role", "duration"));
+
+  // Motion-scope sentinel — parallel to _density-scope
+  out.push(t("_motion-scope", "1", "role", "number", "scope sentinel"));
+
+  // Comment kind — semantic colors distinct from raw status
+  out.push(t("cmt-question", "var(--info)",    "role", "color"));
+  out.push(t("cmt-flag",     "var(--err)",     "role", "color"));
+  out.push(t("cmt-note",     "var(--fg-2)",    "role", "color"));
+  out.push(t("cmt-approve",  "var(--ok)",      "role", "color"));
+  out.push(t("cmt-suggest",  "var(--brass-1)", "role", "color"));
+
+  // Diff overlay tints
+  out.push(t("diff-add",     "rgb(107 158 107 / .08)", "role", "color"));
+  out.push(t("diff-del",     "rgb(196 106 90 / .08)",  "role", "color"));
+  out.push(t("diff-add-bar", "rgb(107 158 107 / .35)", "role", "color"));
+  out.push(t("diff-del-bar", "rgb(196 106 90 / .35)",  "role", "color"));
+
+  // Heatmap — brass-tinted, 3 steps
+  out.push(t("heat-1", "rgb(212 161 74 / .04)", "role", "color"));
+  out.push(t("heat-2", "rgb(212 161 74 / .08)", "role", "color"));
+  out.push(t("heat-3", "rgb(212 161 74 / .14)", "role", "color"));
+
+  return Object.freeze(out);
+})();
+
+// ─────────────────────────────────────────────────────────────────────────
+// Themes — dark-fantasy (default) + paper. Other themes deferred per
+// roadmap; emit them later when consumer migration is unblocked.
+// ─────────────────────────────────────────────────────────────────────────
+
+export const themes: ReadonlyArray<Theme> = Object.freeze([
+  {
+    id: "dark-fantasy",
+    mode: "dark",
+    tokens: Object.freeze([
+      t("bg-deep", "#0a0706", "raw", "color", "pitch with red undertone"),
+      t("bg-panel", "#14100d", "raw", "color", "rotted wood"),
+      t("bg-panel-alt", "#1b1612", "raw", "color"),
+      t("bg-card", "#221815", "raw", "color"),
+      t("bg-card-hover", "#2e211c", "raw", "color"),
+      t("border-main", "#2a1a14", "raw", "color"),
+      t("border-highlight", "#5a3028", "raw", "color"),
+      t("text-bright", "#e8d8b8", "raw", "color", "clean bone"),
+      t("text-primary", "#b8a488", "raw", "color", "dirty bandage"),
+      t("text-dim", "#9a846e", "raw", "color", "WCAG AA"),
+      t("accent-blood", "#e85050", "raw", "color"),
+      t("accent-blood-dim", "#8a2828", "raw", "color"),
+      t("accent-viscera", "#c94a3a", "raw", "color"),
+      t("accent-bile", "#6a7a3a", "raw", "color"),
+      t("accent-mold", "#3a5a48", "raw", "color"),
+      t("accent-brass", "#968228", "raw", "color", "bonsai brass differs from --brass-1"),
+      t("accent-brass-dim", "#6a5620", "raw", "color"),
+      t("accent-bone", "#d8c8a0", "raw", "color"),
+      t("accent-ink", "#3a2a5a", "raw", "color"),
+      t("accent-ember", "#c4461a", "raw", "color"),
+      t("accent-glow", "rgba(232, 80, 80, 0.28)", "raw", "color"),
+      t("accent-blood-glow", "rgba(232, 80, 80, 0.32)", "raw", "color"),
+      t("status-ok", "#6a9a4a", "raw", "color"),
+      t("status-warn", "#b87828", "raw", "color"),
+      t("status-bad", "#e85050", "raw", "color"),
+      t("status-idle", "#4a3a32", "raw", "color"),
+      // Trace frame — bonsai-only swimlane / flame / tool-category bars
+      t("t-llm",   "#6a7a9c", "raw", "color", "muted blue-gray — inference"),
+      t("t-tool",  "#8a7a3a", "raw", "color", "muted brass — tool call"),
+      t("t-think", "#4a4a5a", "raw", "color", "slate — reasoning"),
+      t("t-wait",  "#2a2520", "raw", "color", "deep dusk — idle"),
+      t("t-err",   "var(--accent-blood)", "raw", "color"),
+    ]),
+  },
+  {
+    id: "paper",
+    mode: "light",
+    tokens: Object.freeze([
+      t("paper", "#F5F2EA", "raw", "color"),
+      t("paper-2", "#EFEBE0", "raw", "color"),
+      t("paper-3", "#E5E0D1", "raw", "color"),
+      t("paper-4", "#D8D2BF", "raw", "color"),
+      t("ink", "#151515", "raw", "color"),
+      t("ink-2", "#2E2E2C", "raw", "color"),
+      t("ink-3", "#515049", "raw", "color"),
+      t("ink-4", "#656358", "raw", "color"),
+      t("ink-5", "#9A978D", "raw", "color"),
+      t("ink-6", "#BCB8AC", "raw", "color"),
+      t("forest", "#2D5F4E", "raw", "color"),
+      t("brass", "#8C6A1E", "raw", "color"),
+      t("brick", "#8B3A3A", "raw", "color"),
+      t("ember", "#B35A1F", "raw", "color"),
+      t("slate", "#3E4A5C", "raw", "color"),
+      t("plum", "#5C3E56", "raw", "color"),
+      t("teal", "#236874", "raw", "color"),
+    ]),
+  },
+]);
+
+// ─────────────────────────────────────────────────────────────────────────
+// Aggregate accessor — for build.ts consumption
+// ─────────────────────────────────────────────────────────────────────────
+
+export interface TokenSource {
+  readonly raw: ReadonlyArray<TokenBase>;
+  readonly semantic: ReadonlyArray<TokenBase>;
+  readonly themes: ReadonlyArray<Theme>;
+}
+
+export const source: TokenSource = Object.freeze({ raw, semantic, themes });

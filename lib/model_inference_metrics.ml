@@ -511,11 +511,12 @@ let read_hw_decode_tok_per_sec (fields : (string * Yojson.Safe.t) list) =
   | Some _ as v -> v
   | None -> read "provider_tokens_per_second"
 
-let starts_with ~prefix s = String.starts_with ~prefix s
-
 let canonical_cost_model_id ~(provider : string option) model =
-  match provider with
-  | Some "ollama" when not (starts_with ~prefix:"ollama:" model) ->
+  let module PK = Llm_provider.Provider_kind in
+  let provider_kind = Option.bind provider PK.of_string in
+  match provider_kind with
+  | Some PK.Ollama
+    when not (String.starts_with ~prefix:"ollama:" model) ->
       "ollama:" ^ model
   | _ -> model
 

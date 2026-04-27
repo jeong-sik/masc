@@ -55,10 +55,10 @@ let failure_pattern_to_json = function
 (* --- helpers --- *)
 
 let close_out_no_err oc =
-  try close_out oc with _ -> ()
+  try close_out oc with _ -> () (* @observe-allowed: file-close cleanup *)
 
 let close_in_no_err ic =
-  try close_in ic with _ -> ()
+  try close_in ic with _ -> () (* @observe-allowed: file-close cleanup *)
 
 let mkdir_p path =
   let rec aux built = function

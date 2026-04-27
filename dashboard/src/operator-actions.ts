@@ -88,7 +88,7 @@ export async function refreshOperatorSnapshot(opts?: RefreshOptions): Promise<vo
       operatorSnapshot.value = normalizeOperatorSnapshot(raw)
       lastSnapshotRefreshAt = Date.now()
     } catch (err) {
-      const summary = extractApiError(err, 'Failed to load operator snapshot')
+      const summary = extractApiError(err, 'operator 스냅샷 로드 실패')
       operatorError.value = summary.message
       operatorErrorStatus.value = summary.status
     } finally {
@@ -111,7 +111,7 @@ export async function refreshOperatorRoomDigest(opts?: RefreshOptions): Promise<
       operatorRoomDigest.value = normalizeOperatorDigest(raw)
       lastRoomDigestRefreshAt = Date.now()
     } catch (err) {
-      const summary = extractApiError(err, 'Failed to load operator digest')
+      const summary = extractApiError(err, 'operator 다이제스트 로드 실패')
       operatorDigestError.value = summary.message
       operatorDigestErrorStatus.value = summary.status
     } finally {
@@ -140,7 +140,7 @@ export async function dispatchOperatorAction(request: OperatorActionRequest): Pr
     await refreshOperatorRoomDigest({ force: true })
     return result
   } catch (err) {
-    const summary = extractApiError(err, 'Operator action failed')
+    const summary = extractApiError(err, 'operator 액션 실패')
     const message = summary.message
     operatorError.value = message
     operatorErrorStatus.value = summary.status
@@ -179,7 +179,7 @@ export async function confirmOperatorPendingAction(
     await refreshOperatorRoomDigest({ force: true })
     return result
   } catch (err) {
-    const summary = extractApiError(err, 'Operator confirmation failed')
+    const summary = extractApiError(err, 'operator 확인 실패')
     const message = summary.message
     operatorError.value = message
     operatorErrorStatus.value = summary.status

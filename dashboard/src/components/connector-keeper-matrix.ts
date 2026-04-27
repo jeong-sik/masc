@@ -27,6 +27,7 @@ import {
 } from './connector-status'
 import { openConnectorConfig } from './connector-config-form'
 import { KeeperBadge } from './keeper-badge'
+import { Tk } from './tk'
 
 type MatrixCellState = 'bound' | 'unbound' | 'na' | 'unknown'
 
@@ -254,7 +255,7 @@ export function ConnectorKeeperMatrix({ matrix }: { matrix: MatrixData }) {
       ${!hasKeepers
         ? html`
             <div class="rounded border border-dashed border-[var(--color-border-default)] px-3 py-4 text-center text-2xs text-[var(--color-fg-disabled)]">
-              No keepers yet — add one under <code class="rounded bg-[var(--white-4)] px-1">config/keepers/</code> and restart.
+              No keepers yet — add one under <${Tk}>config/keepers/<//> and restart.
             </div>
           `
         : html`

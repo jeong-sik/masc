@@ -1,0 +1,81 @@
+# Prometheus recording rules for the keeper turn FSM.
+#
+# Recording rules pre-compute ratios so the Grafana dashboard
+# (#11380) and ad-hoc queries don't repeat the same PromQL.
+# A future SLO definition (target completion_ratio, error
+# budget) is intentionally left out -- target numbers are a
+# product/operations decision, not an infra default.
+#
+# Companion files:
+#   - infrastructure/monitoring/grafana-keeper-turn-fsm-dashboard.json
+#   - infrastructure/monitoring/keeper-turn-fsm-alerts.yml
+#   - docs/observability/keeper-turn-fsm-metrics.md
+#   - docs/keeper-turn-lifecycle.md
+#
+# Convention: rules use the [masc:keeper_turn_fsm_<facet>:rate<window>]
+# namespace, mirroring the [masc:cascade_<facet>:rate<window>] pattern
+# in cascade-slo.yml.  Operators can find recording rules by querying
+# [{__name__=~"masc:keeper_turn_fsm_.*"}].
+#
+# Cardinality: 5 records × {global, per-keeper subset} -- bounded by
+# the keeper label (~16 keepers).  Each rule's [sum by (...)] keeps
+# the cardinality cap from blowing up.
+
+groups:
+  - name: masc_keeper_turn_fsm_recording
+    interval: 30s
+    rules:
+      # Instantaneous fleet-wide completion ratio (to=done over all
+      # transitions where from=completing -- counts only successful
+      # closures, not transitive transitions).  Denominator uses
+      # clamp_min to avoid /0 when the fleet is idle.
+      - record: masc:keeper_turn_fsm_completion_ratio:rate5m
+        expr: |
+          sum(rate(masc_keeper_turn_fsm_transitions_total{to="done"}[5m]))
+          /
+          clamp_min(sum(rate(masc_keeper_turn_fsm_transitions_total{from="completing"}[5m])), 0.001)
+
+      # 28d window, used for multi-window burn-rate alerts once an
+      # SLO target lands.
+      - record: masc:keeper_turn_fsm_completion_ratio:rate28d
+        expr: |
+          sum(rate(masc_keeper_turn_fsm_transitions_total{to="done"}[28d]))
+          /
+          clamp_min(sum(rate(masc_keeper_turn_fsm_transitions_total{from="completing"}[28d])), 0.001)
+
+      # Failure ratio over all turn-terminating transitions
+      # (failed:* + cancelled:* + done).  Splits typed failure
+      # variants from cancellation so the dashboard and alerts can
+      # treat them differently (cancellation is operator-initiated,
+      # failure is not).
+      - record: masc:keeper_turn_fsm_failure_ratio:rate5m
+        expr: |
+          sum(rate(masc_keeper_turn_fsm_transitions_total{to=~"failed:.*"}[5m]))
+          /
+          clamp_min(
+            sum(rate(masc_keeper_turn_fsm_transitions_total{to=~"failed:.*|cancelled:.*|done"}[5m])),
+            0.001
+          )
+
+      # Per-keeper completion rate /5m (raw, no ratio) -- the
+      # KeeperCompletionStall alert (#11383) consumes this same
+      # numerator inline; this record makes it queryable at the
+      # dashboard level without re-summing.
+      - record: masc:keeper_turn_fsm_per_keeper_done:rate5m
+        expr: |
+          sum by (keeper) (rate(masc_keeper_turn_fsm_transitions_total{to="done"}[5m]))
+
+      # Livelock incidence /day -- Step 4f-distinct variant.
+      # Multiplied by 86400 to express "blocks per day" so the
+      # number maps directly to operator capacity ("we tolerate <N
+      # livelocks/day per keeper").
+      - record: masc:keeper_turn_fsm_livelock_rate_daily:rate1h
+        expr: |
+          sum by (keeper) (rate(masc_keeper_turn_fsm_transitions_total{to="failed:turn_livelock_blocked"}[1h])) * 86400
+
+      # Provider-error rate /hour (5m window).  Step 4j routes
+      # run_turn dispatch errors here; spikes correlate with
+      # provider regressions.
+      - record: masc:keeper_turn_fsm_provider_error_rate_hourly:rate5m
+        expr: |
+          sum by (keeper) (rate(masc_keeper_turn_fsm_transitions_total{to="failed:provider_error"}[5m])) * 3600

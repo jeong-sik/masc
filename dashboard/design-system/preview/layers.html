@@ -99,6 +99,39 @@
     .bar button { background: transparent; border: none; color: var(--color-fg-muted); padding: 5px 10px; font-family: var(--font-mono); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; font-weight:600; cursor: pointer; border-right: 1px solid var(--color-border-strong); }
     .bar button:last-child { border-right: none; }
     .bar button.on { background: rgb(var(--color-accent-glow)/.08); color: var(--color-accent-fg); box-shadow: inset 0 -1.5px 0 var(--color-accent-fg); }
+
+    /* ── W16 Z-INDEX STACK ── */
+    .zstack-canvas { position: relative; height: 320px; padding: 24px; perspective: 900px; background: var(--color-bg-page); }
+    .zstack-stage { position: relative; width: 100%; height: 100%; transform-style: preserve-3d; transform: rotateX(58deg) rotateZ(-32deg); transform-origin: 50% 50%; }
+    .zstack-plane { position: absolute; left: 50%; top: 50%; width: 240px; height: 100px; margin-left: -120px; margin-top: -50px; border: 1px solid var(--color-border-strong); border-radius: var(--r-1); background: var(--color-bg-surface); box-shadow: 0 6px 18px rgba(0,0,0,.45); padding: 8px 12px; font-family: var(--font-mono); font-size: 10px; color: var(--color-fg-secondary); display: flex; flex-direction: column; gap: 4px; }
+    .zstack-plane .pn { font-size: 11px; color: var(--color-accent-fg); font-weight: 600; letter-spacing: .04em; }
+    .zstack-plane .pv { font-size: 9px; color: var(--color-fg-disabled); letter-spacing: .04em; text-transform: uppercase; }
+    .zstack-plane .pu { font-size: 9px; color: var(--color-fg-muted); margin-top: auto; }
+    .zstack-plane.l-base    { transform: translateZ(calc(var(--z-base) * 1px));     border-left: 2px solid var(--color-fg-disabled); }
+    .zstack-plane.l-sticky  { transform: translateZ(calc(var(--z-sticky) * 1px));   border-left: 2px solid var(--info); }
+    .zstack-plane.l-dropdown{ transform: translateZ(calc(var(--z-dropdown) * 1px)); border-left: 2px solid var(--ok); }
+    .zstack-plane.l-overlay { transform: translateZ(calc(var(--z-overlay) * 1px));  border-left: 2px solid var(--brass-2); }
+    .zstack-plane.l-drawer  { transform: translateZ(calc(var(--z-drawer) * 1px));   border-left: 2px solid var(--color-accent-fg); }
+    .zstack-plane.l-modal   { transform: translateZ(calc(var(--z-modal) * 1px));    border-left: 2px solid var(--warn); }
+    .zstack-plane.l-toast   { transform: translateZ(calc(var(--z-toast) * 1px));    border-left: 2px solid var(--err); }
+
+    .zstack-flat { display: grid; grid-template-columns: 130px 60px 1fr; gap: 8px 12px; padding: 14px 18px; align-items: center; }
+    .zstack-flat .row { display: contents; }
+    .zstack-flat .tk { font-family: var(--font-mono); font-size: 11px; color: var(--color-accent-fg); letter-spacing: .04em; }
+    .zstack-flat .tv { font-family: var(--font-mono); font-size: 11px; color: var(--color-fg-primary); font-variant-numeric: tabular-nums; text-align: right; }
+    .zstack-flat .tu { font-family: var(--font-mono); font-size: 9px; color: var(--color-fg-muted); letter-spacing: .04em; }
+    .zstack-flat .tu code { color: var(--color-fg-disabled); background: var(--color-bg-panel-alt); border: 1px solid var(--color-border-default); padding: 1px 4px; border-radius: 2px; font-size: 9px; }
+    .zstack-bar { position: relative; height: 22px; background: var(--color-bg-panel-alt); border: 1px solid var(--color-border-default); border-radius: 2px; overflow: hidden; }
+    .zstack-bar .fill { position: absolute; left: 0; top: 0; bottom: 0; opacity: .55; }
+    .zstack-bar.l-base    .fill { width: calc(var(--z-base)     * 1%); background: var(--color-fg-disabled); }
+    .zstack-bar.l-sticky  .fill { width: calc(var(--z-sticky)   * 1%); background: var(--info); }
+    .zstack-bar.l-dropdown .fill{ width: calc(var(--z-dropdown) * 1%); background: var(--ok); }
+    .zstack-bar.l-overlay .fill { width: calc(var(--z-overlay)  * 1%); background: var(--brass-2); }
+    .zstack-bar.l-drawer  .fill { width: calc(var(--z-drawer)   * 1%); background: var(--color-accent-fg); }
+    .zstack-bar.l-modal   .fill { width: calc(var(--z-modal)    * 1%); background: var(--warn); }
+    .zstack-bar.l-toast   .fill { width: calc(var(--z-toast)    * 1%); background: var(--err); }
+    .zstack-bar .lbl { position: absolute; left: 8px; top: 50%; transform: translateY(-50%); font-family: var(--font-mono); font-size: 10px; color: var(--color-fg-primary); letter-spacing: .04em; }
+    .zstack-bar .val { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); font-family: var(--font-mono); font-size: 10px; color: var(--color-fg-disabled); font-variant-numeric: tabular-nums; }
   </style>
 </head>
 <body>
@@ -302,6 +335,77 @@
             <div style="font-family: var(--font-mono); font-size: 9px; color: var(--color-fg-muted); line-height: 1.5;"><b style="color:var(--color-accent-fg)">③ L3</b> inline glyph = recent tool-call site. Hover for count.</div>
             <div style="font-family: var(--font-mono); font-size: 9px; color: var(--color-fg-muted); line-height: 1.5;"><b style="color:var(--ok-fg)">④ L4</b> trailing block + stamp = approval status of the diff.</div>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <h2>Z-index Stack <span class="tag">W16 · token coverage</span></h2>
+    <div class="seg">
+      <div class="meta"><span class="n">z-stack</span>Tokens defined in <code style="color:var(--color-accent-fg); font-family:var(--font-mono); font-size:10px">tokens.generated.css</code> drive every overlay's stacking order. Lower number renders behind, higher renders on top. Dashboard surfaces (sticky tabs, dropdowns, drawers, toasts) read these via <code style="color:var(--color-accent-fg); font-family:var(--font-mono); font-size:10px">var(--z-*)</code> — never raw integers.
+        <span class="code">.toast { z-index: var(--z-toast); }<br/>.modal { z-index: var(--z-modal); }<br/>.drawer { z-index: var(--z-drawer); }</span>
+      </div>
+      <div class="canvas">
+        <div class="zstack-canvas">
+          <div class="zstack-stage">
+            <div class="zstack-plane l-base"><span class="pn">--z-base</span><span class="pv">page surface · 1</span><span class="pu">default content plane</span></div>
+            <div class="zstack-plane l-sticky"><span class="pn">--z-sticky</span><span class="pv">sticky tabs · 20</span><span class="pu">tools.css · sticky tab bar</span></div>
+            <div class="zstack-plane l-dropdown"><span class="pn">--z-dropdown</span><span class="pv">dropdown · 30</span><span class="pu">error-panel · option menus</span></div>
+            <div class="zstack-plane l-overlay"><span class="pn">--z-overlay</span><span class="pv">overlay · 40</span><span class="pu">tooltips · comment composer</span></div>
+            <div class="zstack-plane l-drawer"><span class="pn">--z-drawer</span><span class="pv">drawer · 60</span><span class="pu">inspector · right drawer</span></div>
+            <div class="zstack-plane l-modal"><span class="pn">--z-modal</span><span class="pv">modal · 80</span><span class="pu">keeper-detail overlay</span></div>
+            <div class="zstack-plane l-toast"><span class="pn">--z-toast</span><span class="pv">toast · 100</span><span class="pu">primitives.css line 306 · scroll-to-top · toast.ts</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <h2>Z-index ladder <span class="tag">flat scale + consumer trace</span></h2>
+    <div class="seg">
+      <div class="meta"><span class="n">z-ladder</span>Same seven tokens flattened to a 0–100 scale. Width = relative integer value (token / 100). Right column = traced consumer (token usage location verified by ripgrep).
+        <span class="code">rg "var(--z-" dashboard/src/styles/ dashboard/src/components/</span>
+      </div>
+      <div class="canvas" style="min-height: 0">
+        <div class="zstack-flat">
+          <div class="row">
+            <span class="tk">--z-base</span>
+            <span class="tv">1</span>
+            <div class="zstack-bar l-base"><span class="fill"></span><span class="lbl">base · default plane</span><span class="val">z=1</span></div>
+          </div>
+          <div class="row">
+            <span class="tk">--z-sticky</span>
+            <span class="tv">20</span>
+            <div class="zstack-bar l-sticky"><span class="fill"></span><span class="lbl">sticky · tools.css:25</span><span class="val">z=20</span></div>
+          </div>
+          <div class="row">
+            <span class="tk">--z-dropdown</span>
+            <span class="tv">30</span>
+            <div class="zstack-bar l-dropdown"><span class="fill"></span><span class="lbl">dropdown · error-panel.ts:49,64</span><span class="val">z=30</span></div>
+          </div>
+          <div class="row">
+            <span class="tk">--z-overlay</span>
+            <span class="tv">40</span>
+            <div class="zstack-bar l-overlay"><span class="fill"></span><span class="lbl">overlay · comment composer · tooltip</span><span class="val">z=40</span></div>
+          </div>
+          <div class="row">
+            <span class="tk">--z-drawer</span>
+            <span class="tv">60</span>
+            <div class="zstack-bar l-drawer"><span class="fill"></span><span class="lbl">drawer · inspector · right pane</span><span class="val">z=60</span></div>
+          </div>
+          <div class="row">
+            <span class="tk">--z-modal</span>
+            <span class="tv">80</span>
+            <div class="zstack-bar l-modal"><span class="fill"></span><span class="lbl">modal · keeper-detail.css:10</span><span class="val">z=80</span></div>
+          </div>
+          <div class="row">
+            <span class="tk">--z-toast</span>
+            <span class="tv">100</span>
+            <div class="zstack-bar l-toast"><span class="fill"></span><span class="lbl">toast · primitives.css:306 · toast.ts:168 · scroll-to-top.ts:73</span><span class="val">z=100</span></div>
+          </div>
+        </div>
+        <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap: 10px; padding: 10px 18px 14px; border-top: 1px dashed var(--color-border-default);">
+          <div style="font-family: var(--font-mono); font-size: 9px; color: var(--color-fg-muted); line-height: 1.5;"><b style="color:var(--color-accent-fg)">①</b> Order: base &lt; sticky &lt; dropdown &lt; overlay &lt; drawer &lt; modal &lt; toast. Toast always wins — surfaces the most ephemeral signal.</div>
+          <div style="font-family: var(--font-mono); font-size: 9px; color: var(--color-fg-muted); line-height: 1.5;"><b style="color:var(--color-accent-fg)">②</b> Gaps (20 → 30, 40 → 60) reserve room for future layers without renumbering. Avoid filling the gaps with raw integers in component CSS.</div>
+          <div style="font-family: var(--font-mono); font-size: 9px; color: var(--color-fg-muted); line-height: 1.5;"><b style="color:var(--color-accent-fg)">③</b> Component overrides (e.g. <code style="color:var(--color-fg-disabled)">--z-overlay-keeper, 3020</code>) shadow the base scale — escape hatch only, audit before adding.</div>
         </div>
       </div>
     </div>

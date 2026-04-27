@@ -284,8 +284,16 @@ export function parseWebSocketSseFrames(data: string): unknown[] {
     if (!body || body === '[DONE]') continue
     try {
       payloads.push(JSON.parse(body))
-    } catch {
-      // Non-JSON SSE frames are ignored; dashboard pushes are JSON.
+    } catch (err) {
+      // P2 silent-failure fix: dashboard pushes are JSON by contract,
+      // so a non-JSON SSE frame here is either a server-side encoding
+      // bug or network corruption.  Previously dropped silently —
+      // operators investigating "stale dashboard" had no signal that
+      // frames were being parsed-but-malformed.  Logging includes a
+      // body sample so the malformed shape is recoverable from
+      // DevTools.  body length is capped to keep the log line bounded.
+      const sample = body.length > 200 ? `${body.slice(0, 200)}…(${body.length} bytes total)` : body
+      console.warn('[dashboard-ws] non-JSON SSE frame dropped', { sample, err })
     }
   }
   return payloads

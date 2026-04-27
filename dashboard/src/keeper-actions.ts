@@ -104,7 +104,17 @@ export async function loadFullKeeperHistory(name: string): Promise<void> {
       tail_messages: KEEPER_HISTORY_TAIL_MESSAGES,
     })
     let parsed: unknown = null
-    try { parsed = JSON.parse(text) } catch { parsed = null }
+    try {
+      parsed = JSON.parse(text)
+    } catch (err) {
+      // P2 silent-failure fix: malformed status response previously
+      // produced an empty detail UI indistinguishable from "no data
+      // yet."  Logging surfaces the parse failure to DevTools while
+      // normalizeStatusDetail still degrades gracefully (uses raw
+      // text + null parsed).
+      console.warn('[keeper] masc_keeper_status response parse failed', { keeperName, err })
+      parsed = null
+    }
     const detail = normalizeStatusDetail(keeperName, text, parsed)
     setStatusDetail(keeperName, detail)
   } catch (err) {

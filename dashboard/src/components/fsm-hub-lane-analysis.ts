@@ -73,56 +73,56 @@ function laneMeaning(
     case 'turn':
       switch (value) {
         case 'idle':
-          return { tone: snapshot.is_live ? 'info' : 'ok', meaning: snapshot.is_live ? 'turn context exists but work has not advanced yet' : 'no in-flight turn is being observed' }
+          return { tone: snapshot.is_live ? 'info' : 'ok', meaning: snapshot.is_live ? 'turn context 존재하지만 work 미진행' : 'in-flight turn 관측되지 않음' }
         case 'prompting':
-          return { tone: 'info', meaning: 'prompt assembly is still preparing the turn inputs' }
+          return { tone: 'info', meaning: 'prompt assembly 가 turn input 준비 중' }
         case 'executing':
-          return { tone: 'info', meaning: 'the turn is inside model/tool execution work' }
+          return { tone: 'info', meaning: 'turn 이 model/tool execution work 안에 있음' }
         case 'compacting':
-          return { tone: 'warn', meaning: 'turn finalization is blocked on compaction finishing' }
+          return { tone: 'warn', meaning: 'turn finalization 이 compaction 종료 대기 중' }
         case 'finalizing':
-          return { tone: 'info', meaning: 'the turn is sealing results and preparing the next idle snapshot' }
+          return { tone: 'info', meaning: 'turn 이 결과 seal + 다음 idle snapshot 준비 중' }
         default:
-          return { tone: 'info', meaning: 'turn-cycle state observed' }
+          return { tone: 'info', meaning: 'turn-cycle state 관측됨' }
       }
     case 'decision':
       switch (value) {
         case 'undecided':
-          return { tone: snapshot.is_live ? 'info' : 'ok', meaning: snapshot.is_live ? 'decision work has not committed yet' : 'idle snapshots intentionally clear decision state' }
+          return { tone: snapshot.is_live ? 'info' : 'ok', meaning: snapshot.is_live ? 'decision work 미커밋' : 'idle snapshot 은 의도적으로 decision state 비움' }
         case 'guard_ok':
-          return { tone: 'info', meaning: 'guardrails allowed the turn to continue' }
+          return { tone: 'info', meaning: 'guardrail 통과 — turn 계속 진행 허용' }
         case 'gate_rejected':
-          return { tone: 'warn', meaning: 'guardrails blocked the turn before tool/model work' }
+          return { tone: 'warn', meaning: 'guardrail 이 tool/model work 전 turn 차단' }
         case 'tool_policy_selected':
-          return { tone: 'info', meaning: 'tool policy selection has committed and execution can advance' }
+          return { tone: 'info', meaning: 'tool policy selection 커밋됨 — execution 진행 가능' }
         default:
-          return { tone: 'info', meaning: 'decision state observed' }
+          return { tone: 'info', meaning: 'decision state 관측됨' }
       }
     case 'cascade':
       switch (value) {
         case 'idle':
-          return { tone: 'ok', meaning: 'no provider failover work is active' }
+          return { tone: 'ok', meaning: 'provider failover work 비활성' }
         case 'selecting':
-          return { tone: 'info', meaning: 'provider routing is selecting the next execution path' }
+          return { tone: 'info', meaning: 'provider routing 이 다음 execution path 선택 중' }
         case 'trying':
-          return { tone: 'info', meaning: 'provider execution is in flight' }
+          return { tone: 'info', meaning: 'provider execution 진행 중' }
         case 'done':
-          return { tone: 'ok', meaning: 'cascade accepted a provider result for this turn' }
+          return { tone: 'ok', meaning: 'cascade 가 이번 turn 의 provider 결과 수락' }
         case 'exhausted':
-          return { tone: 'error', meaning: 'all cascade options were consumed without a usable path' }
+          return { tone: 'error', meaning: 'cascade 옵션 모두 소진 — 사용 가능한 path 없음' }
         default:
-          return { tone: 'info', meaning: 'cascade state observed' }
+          return { tone: 'info', meaning: 'cascade state 관측됨' }
       }
     case 'compaction':
       switch (value) {
         case 'accumulating':
-          return { tone: 'ok', meaning: 'memory is collecting compaction candidates, not executing yet' }
+          return { tone: 'ok', meaning: 'memory 가 compaction 후보 수집 중 — 아직 실행 안 함' }
         case 'compacting':
-          return { tone: 'warn', meaning: 'memory compaction is actively rewriting context state' }
+          return { tone: 'warn', meaning: 'memory compaction 이 context state 를 rewrite 중' }
         case 'done':
-          return { tone: 'ok', meaning: 'compaction finished for the observed turn' }
+          return { tone: 'ok', meaning: '관측된 turn 의 compaction 완료' }
         default:
-          return { tone: 'info', meaning: 'compaction state observed' }
+          return { tone: 'info', meaning: 'compaction state 관측됨' }
       }
     case 'breaker':
       // LT-16-KCB Phase 3. Tripped is not representable here because

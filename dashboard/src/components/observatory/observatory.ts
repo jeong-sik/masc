@@ -130,7 +130,7 @@ function RangeSelector() {
           class="rounded px-2 py-0.5 font-medium transition-colors ${
             current === preset
               ? 'bg-accent/20 text-accent'
-              : 'text-text-muted hover:text-text-strong hover:bg-white/5'
+              : 'text-text-muted hover:text-text-strong hover:bg-[var(--white-5)]'
           }"
           onClick=${() => setTimeRangeFilter(preset)}
           aria-pressed=${current === preset}
@@ -160,7 +160,7 @@ function ViewSelector({
           class="rounded px-2 py-0.5 font-medium transition-colors ${
             current === view.key
               ? 'bg-accent/20 text-accent'
-              : 'text-text-muted hover:text-text-strong hover:bg-white/5'
+              : 'text-text-muted hover:text-text-strong hover:bg-[var(--white-5)]'
           }"
           onClick=${() => onSelect(view.key)}
           aria-pressed=${current === view.key}
@@ -294,7 +294,7 @@ export function Observatory() {
               class="inline-flex items-center gap-1.5 rounded border px-2.5 py-1 text-2xs font-medium transition-colors ${
                 liveMode.value
                   ? 'border-[var(--ok-20)] bg-[var(--ok-10)] text-[var(--color-status-ok)]'
-                  : 'border-card-border text-text-muted hover:text-text-strong hover:bg-white/5'
+                  : 'border-card-border text-text-muted hover:text-text-strong hover:bg-[var(--white-5)]'
               }"
               onClick=${() => {
                 liveMode.value = !liveMode.value

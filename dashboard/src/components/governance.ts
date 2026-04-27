@@ -400,7 +400,7 @@ function KeeperApprovalEmptyState() {
     ? 'border-warn/30 bg-warn/10 text-warn'
     : ctx.tone === 'ok'
       ? 'border-accent/20 bg-[var(--accent-10)] text-accent'
-      : 'border-[var(--white-10)] bg-white/5 text-text-muted'
+      : 'border-[var(--white-10)] bg-[var(--white-5)] text-text-muted'
   return html`
     <div data-testid="keeper-hitl-empty">
       <${EmptyState} message=${ctx.primary} compact />
@@ -549,15 +549,15 @@ function KeeperApprovalQueueSection() {
                       ? html`<div class="mt-2 text-xs leading-relaxed text-text-muted break-words">${item.input_preview}</div>`
                       : null}
                     <div class="mt-2 flex flex-wrap gap-1.5 text-2xs">
-                      ${item.task_id ? html`<span class="rounded border border-[var(--white-10)] bg-white/5 px-1.5 py-0.5 text-text-muted">task ${item.task_id}</span>` : null}
-                      ${item.goal_id ? html`<span class="rounded border border-[var(--white-10)] bg-white/5 px-1.5 py-0.5 text-text-muted">goal ${item.goal_id}</span>` : null}
+                      ${item.task_id ? html`<span class="rounded border border-[var(--white-10)] bg-[var(--white-5)] px-1.5 py-0.5 text-text-muted">task ${item.task_id}</span>` : null}
+                      ${item.goal_id ? html`<span class="rounded border border-[var(--white-10)] bg-[var(--white-5)] px-1.5 py-0.5 text-text-muted">goal ${item.goal_id}</span>` : null}
                       ${item.runtime_contract?.sandbox_profile
-                        ? html`<span class="rounded border border-[var(--white-10)] bg-white/5 px-1.5 py-0.5 text-text-muted">
+                        ? html`<span class="rounded border border-[var(--white-10)] bg-[var(--white-5)] px-1.5 py-0.5 text-text-muted">
                           sandbox ${item.runtime_contract.sandbox_profile}${item.runtime_contract.backend ? ` / ${item.runtime_contract.backend}` : ''}
                         </span>`
                         : null}
                       ${item.selected_model
-                        ? html`<span class="rounded border border-[var(--white-10)] bg-white/5 px-1.5 py-0.5 text-text-muted font-mono">${item.selected_model}</span>`
+                        ? html`<span class="rounded border border-[var(--white-10)] bg-[var(--white-5)] px-1.5 py-0.5 text-text-muted font-mono">${item.selected_model}</span>`
                         : null}
                       ${item.disposition
                         ? html`<span class="rounded border px-1.5 py-0.5 font-bold ${approvalDispositionToneClass(item.disposition)}">
@@ -637,10 +637,10 @@ function ApprovalRulesSection() {
                       </span>
                     </div>
                     <div class="mt-2 flex flex-wrap gap-1.5 text-2xs">
-                      ${rule.sandbox_profile ? html`<span class="rounded border border-[var(--white-10)] bg-white/5 px-1.5 py-0.5 text-text-muted">sandbox ${rule.sandbox_profile}${rule.backend ? ` / ${rule.backend}` : ''}</span>` : null}
-                      ${rule.request_fingerprint_preview ? html`<span class="rounded border border-[var(--white-10)] bg-white/5 px-1.5 py-0.5 text-text-muted font-mono">fp ${rule.request_fingerprint_preview}</span>` : null}
-                      ${typeof rule.match_count === 'number' ? html`<span class="rounded border border-[var(--white-10)] bg-white/5 px-1.5 py-0.5 text-text-muted">match ${rule.match_count}</span>` : null}
-                      ${rule.source_approval_id ? html`<span class="rounded border border-[var(--white-10)] bg-white/5 px-1.5 py-0.5 text-text-muted">from ${rule.source_approval_id}</span>` : null}
+                      ${rule.sandbox_profile ? html`<span class="rounded border border-[var(--white-10)] bg-[var(--white-5)] px-1.5 py-0.5 text-text-muted">sandbox ${rule.sandbox_profile}${rule.backend ? ` / ${rule.backend}` : ''}</span>` : null}
+                      ${rule.request_fingerprint_preview ? html`<span class="rounded border border-[var(--white-10)] bg-[var(--white-5)] px-1.5 py-0.5 text-text-muted font-mono">fp ${rule.request_fingerprint_preview}</span>` : null}
+                      ${typeof rule.match_count === 'number' ? html`<span class="rounded border border-[var(--white-10)] bg-[var(--white-5)] px-1.5 py-0.5 text-text-muted">match ${rule.match_count}</span>` : null}
+                      ${rule.source_approval_id ? html`<span class="rounded border border-[var(--white-10)] bg-[var(--white-5)] px-1.5 py-0.5 text-text-muted">from ${rule.source_approval_id}</span>` : null}
                     </div>
                     <div class="mt-3 flex justify-end">
                       <${ActionButton}

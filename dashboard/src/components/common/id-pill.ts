@@ -22,7 +22,7 @@
 //   different pill shape (name tag, not id badge). P7 rounded
 //   sweep.
 // • agent-detail:228 (unified.description) — neutral tone with
-//   drifted opacities (bg-white/5 border-white/10). Needs a
+//   drifted opacities (bg-[var(--white-5)] border-white/10). Needs a
 //   neutral tone variant which itself has drift vs line 230
 //   (mono version: reversed bg-white/10 border-white/5). Both
 //   belong in P6 color normalisation.

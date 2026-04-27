@@ -165,8 +165,8 @@ function EventRow({
 }) {
   const a = event.attribution
   const rowBg = active
-    ? 'bg-white/5'
-    : 'hover:bg-white/5'
+    ? 'bg-[var(--white-5)]'
+    : 'hover:bg-[var(--white-5)]'
   const reasonText = reasonOf(a)
   return html`
     <button

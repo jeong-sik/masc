@@ -9,7 +9,7 @@
 // across 4+ drifting class compositions:
 //
 //   <code class="rounded bg-[var(--white-4)] px-1">                — connector-{status,keeper-matrix}
-//   <code class="rounded bg-white/5 px-1 py-0.5 text-2xs ...">    — goals/goal-tree, task-create-form
+//   <code class="rounded bg-[var(--white-5)] px-1 py-0.5 text-2xs ...">    — goals/goal-tree, task-create-form
 //   <code class="text-3xs text-[var(--color-fg-muted)]">           — safe-autonomy (no bg)
 //   <code class="text-xs font-mono text-[var(--color-fg-secondary)]"> — server-config
 //

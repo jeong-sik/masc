@@ -466,7 +466,7 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
         <div class="min-w-0 flex-1">
           <div class="mb-1 flex flex-wrap items-center gap-2">
             <span
-              class="shrink-0 rounded-md border border-white/10 bg-white/5 px-2 py-0.5 text-3xs font-bold uppercase tracking-widest"
+              class="shrink-0 rounded-md border border-white/10 bg-[var(--white-5)] px-2 py-0.5 text-3xs font-bold uppercase tracking-widest"
               style="color:${horizonColor(node.horizon)}"
             >
               ${horizonLabel(node.horizon)}
@@ -777,7 +777,7 @@ function GoalDetailPanel({
             <${HealthBadge} health=${selectedNode.health} />
             <${StatusBadge} status=${selectedNode.status} />
             <${StatusBadge} status=${goalPhaseStatus(selectedNode.phase)} label=${goalPhaseLabel(selectedNode.phase)} />
-            <span class="rounded border border-white/10 bg-white/5 px-2 py-0.5 text-3xs font-semibold uppercase tracking-widest" style="color:${horizonColor(selectedNode.horizon)}">
+            <span class="rounded border border-white/10 bg-[var(--white-5)] px-2 py-0.5 text-3xs font-semibold uppercase tracking-widest" style="color:${horizonColor(selectedNode.horizon)}">
               ${horizonLabel(selectedNode.horizon)}
             </span>
           </div>
@@ -1041,7 +1041,7 @@ export function GoalTree() {
                 placeholder="목표 / 태스크 제목 필터"
                 aria-label="목표 트리 필터"
                 onInput=${(e: Event) => { filterQuery.value = (e.target as HTMLInputElement).value }}
-                class="min-w-45 max-w-65 rounded border border-white/10 bg-white/5 px-2 py-1 text-xs text-text-body placeholder:text-text-dim focus:outline-none focus:border-accent"
+                class="min-w-45 max-w-65 rounded border border-white/10 bg-[var(--white-5)] px-2 py-1 text-xs text-text-body placeholder:text-text-dim focus:outline-none focus:border-accent"
               />
               <${ActionButton} variant="ghost" size="sm" onClick=${() => expandAll(data.tree)}>
                 모두 펼치기

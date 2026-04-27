@@ -458,7 +458,7 @@ export function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
     <div class="md:col-span-2">
       <${KeeperDetailSectionCard} title="생성 계보">
         <div class="text-2xs text-[var(--color-fg-muted)] mb-3">
-          Track keeper state transfer across successful handoffs. Lineage telemetry is append-only, shows the latest rollover first, and helps explain whether the same keeper identity carried into the new trace.
+          성공한 핸드오프에서 keeper 상태 전이를 추적합니다. 계보 telemetry 는 append-only 이며 최신 rollover 가 먼저 표시되어 동일한 keeper identity 가 새 trace 로 이어졌는지 설명합니다.
         </div>
 
         ${latestEntry
@@ -565,7 +565,7 @@ export function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
 
         <div>
           <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)] mb-1">최근 핸드오프</div>
-          <div class="text-2xs text-[var(--color-fg-disabled)] mb-2">Latest recorded rollover appears first so operators can compare the current trace against recent history.</div>
+          <div class="text-2xs text-[var(--color-fg-disabled)] mb-2">최신 rollover 가 먼저 표시되어 operator 가 현재 trace 를 최근 이력과 비교할 수 있습니다.</div>
           ${recent.length > 0
             ? html`
               <div class="flex flex-col gap-2">

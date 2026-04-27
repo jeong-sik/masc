@@ -49,6 +49,34 @@ let () =
     ~labels:["keeper"]
     ()
 
+let () =
+  Prometheus.register_counter
+    ~name:"masc_mcp_audit_no_construct_path_total"
+    ~help:
+      "Boot-time provider × MCP-config-construct audit \
+       (PR-Mp3b / Leak 12): a cascade entry references a provider \
+       with no auto-construct path for the MCP config JSON. The \
+       CLI subprocess starts and the LLM responds, but every \
+       keeper_*/masc_* tool call fails with 'tool not in session's \
+       tool registry'. Labels: provider. Non-zero at boot means an \
+       operator should either remove the provider from the cascade \
+       or add an auto-construct entry."
+    ~labels:["provider"]
+    ()
+
+let () =
+  Prometheus.register_counter
+    ~name:"masc_mcp_audit_default_off_total"
+    ~help:
+      "Boot-time provider × MCP-config-construct audit \
+       (PR-Mp3b / Leak 12): a provider has an auto-construct path \
+       but its env flag defaults to off (e.g. codex_cli + \
+       MASC_SYNC_CODEX_MCP_CONFIG=false). Operator must opt in or \
+       the keeper will fail tool calls on this lane. Labels: \
+       provider, env_flag."
+    ~labels:["provider"; "env_flag"]
+    ()
+
 let requested_backend_mode () =
   Env_config_core.storage_type ()
 
@@ -635,6 +663,93 @@ let audit_keeper_egress_policies (state : Mcp_server.server_state) =
       (List.length missings) (List.length orphans)
   end
 
+let audit_provider_mcp_config_paths (_state : Mcp_server.server_state) =
+  (* PR-Mp3b (Leak 12): on every boot, walk every cascade catalog
+     entry's model strings, extract provider names, and run the SSOT
+     audit (Keeper_mcp_provider_audit) over the deduplicated set.
+
+     Read-only.  Emits one log line per audited provider with a
+     grep-friendly tag plus two Prometheus counters for the failure
+     buckets.  Fail-soft: if the cascade catalog is unloadable the
+     hook logs and returns; cascade load problems surface through
+     other validators (Cascade_catalog_validator) and are not this
+     hook's job to fix. *)
+  let cascade_names =
+    try Keeper_cascade_profile.catalog_names ()
+    with exn ->
+      Log.Misc.warn
+        "[mcp_audit:catalog_load_failed] exn=%s"
+        (Printexc.to_string exn);
+      []
+  in
+  if cascade_names = [] then
+    Log.Misc.info "[mcp_audit:skip] no cascade profiles loaded"
+  else begin
+    let providers =
+      List.concat_map
+        (fun name ->
+          try
+            Cascade_runtime.models_of_cascade_name name
+            |> List.filter_map Cascade_runtime.provider_name_of_label
+          with exn ->
+            Log.Misc.warn
+              "[mcp_audit:cascade_models_failed] cascade=%s exn=%s"
+              name (Printexc.to_string exn);
+            [])
+        cascade_names
+      |> List.sort_uniq String.compare
+    in
+    if providers = [] then
+      Log.Misc.info
+        "[mcp_audit:skip] no provider labels resolved from %d cascades"
+        (List.length cascade_names)
+    else begin
+      let results =
+        Keeper_mcp_provider_audit.audit_providers providers
+      in
+      let active, no_path, http_api =
+        Keeper_mcp_provider_audit.partition results
+      in
+      List.iter (fun r ->
+        Log.Misc.info "%s"
+          (Keeper_mcp_provider_audit.format_log_line r);
+        match r.Keeper_mcp_provider_audit.construct with
+        | Auto_construct_active
+            { default_when_unset = false; env_flag; _ } ->
+            Log.Misc.warn
+              "[mcp_audit:default_off] provider=%s env_flag=%s — \
+               operator must set %s=true for this lane to emit MCP \
+               config"
+              r.provider env_flag env_flag;
+            Prometheus.inc_counter
+              "masc_mcp_audit_default_off_total"
+              ~labels:[("provider", r.provider);
+                       ("env_flag", env_flag)] ()
+        | _ -> ())
+        active;
+      List.iter (fun r ->
+        Log.Misc.warn "%s"
+          (Keeper_mcp_provider_audit.format_log_line r);
+        Prometheus.inc_counter
+          "masc_mcp_audit_no_construct_path_total"
+          ~labels:[("provider", r.Keeper_mcp_provider_audit.provider)]
+          ())
+        no_path;
+      List.iter (fun r ->
+        Log.Misc.info "%s"
+          (Keeper_mcp_provider_audit.format_log_line r))
+        http_api;
+      Log.Misc.info
+        "[mcp_audit:summary] cascades=%d providers=%d active=%d \
+         no_construct_path=%d http_api=%d"
+        (List.length cascade_names)
+        (List.length providers)
+        (List.length active)
+        (List.length no_path)
+        (List.length http_api)
+    end
+  end
+
 let bootstrap_server_state_blocking (state : Mcp_server.server_state) =
   (* Promote legacy room/keeper state before Coord.init seeds fresh root files.
      Otherwise state.json/backlog.json can be created in the destination first
@@ -646,6 +761,7 @@ let bootstrap_server_state_blocking (state : Mcp_server.server_state) =
   migrate_legacy_keeper_dirs_blocking state;
   let (_init_msg : string) = Coord.init state.room_config ~agent_name:None in
   audit_keeper_egress_policies state;
+  audit_provider_mcp_config_paths state;
   Mcp_server.set_sse_callback state Sse.broadcast
 
 let sync_admin_token_env (state : Mcp_server.server_state) =

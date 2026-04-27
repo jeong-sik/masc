@@ -631,13 +631,10 @@
    tool_autoresearch_broadcast
    tool_autoresearch_cycle
    tool_autoresearch
-   ;; godsplit-catalog: tool_catalog decomposition (private sub-modules)
    tool_catalog_surfaces
-   ;; godsplit-misc: tool_misc decomposition (private sub-modules)
    tool_misc_transport
    tool_misc_admin
    tool_misc_web_search
-  ;; godsplit-safety: variant unification & godfile decomposition
   gate_diff_types
   gh_command_validation
   gh_exit_class
@@ -759,9 +756,7 @@
   keeper_memory_policy
   keeper_memory_bank
   keeper_memory_recall
-  ;; godsplit-phase1: file split sub-modules
   keeper_status_bridge
-  ;; godsplit-phase2: additional sub-modules
   autoresearch_codegen
   autoresearch_knowledge
   autoresearch_lineage
@@ -789,29 +784,23 @@
   tool_inline_dispatch_comm
   ;; tool_schema_dsl — shared JSON Schema builder (added by #3640)
   tool_schema_dsl
-  ;; godsplit-catalog: tool_catalog decomposition
   tool_catalog_surfaces
-  ;; godsplit-misc: tool_misc decomposition
   tool_misc_transport
   tool_misc_admin
   tool_misc_web_search
-  ;; godsplit-oas-worker: oas_worker decomposition
   oas_worker_cascade
   oas_worker_exec_agent
   oas_worker_exec
   oas_worker_exec_checkpoint
   oas_worker_exec_transport
   oas_worker_named
-  ;; godsplit-meta-cognition: meta_cognition decomposition
   meta_cognition_types
   meta_cognition_rules
   meta_cognition_snapshot
   meta_cognition_parse
   meta_cognition_interpret
   meta_cognition_digest
-  ;; godsplit-tool-task: schema extraction
   tool_task_schemas
-  ;; godsplit-board-core: board_core decomposition
   board_core_classify
   board_core_payload
   )

@@ -69,26 +69,26 @@ function nextExpectedStep(snapshot: KeeperCompositeSnapshot): string {
   }
   if (snapshot.phase === 'Stable') {
     return collapsedFrom
-      ? `The lifecycle is collapsed into Stable from raw phase ${collapsedFrom}; the next meaningful edge should clear that underlying condition before turn activity resumes.`
-      : 'The lifecycle is outside the active turn cycle; the next meaningful edge should come from a new live turn or operator action.'
+      ? `lifecycle 가 raw phase ${collapsedFrom} 에서 Stable 로 collapse 됨; 다음 meaningful edge 가 turn activity 재개 전에 그 underlying condition 을 clear 해야 함.`
+      : 'lifecycle 가 active turn cycle 밖에 있음; 다음 meaningful edge 는 새 live turn 또는 operator action 에서 시작되어야 함.'
   }
   if (snapshot.decision.stage === 'gate_rejected') {
     return 'blocked turn 은 cascade/tool execution 진입 없이 idle 로 finalize 되어야 함.'
   }
   if (snapshot.cascade.state === 'selecting' || snapshot.cascade.state === 'trying') {
-    return 'KCL should settle into done or exhausted once provider routing returns.'
+    return 'provider routing 이 반환되면 KCL 이 done 또는 exhausted 로 정착해야 함.'
   }
   switch (snapshot.turn_phase) {
     case 'prompting':
       return 'prompt assembly 완료 시 KTC 가 executing 으로 진행해야 함.'
     case 'executing':
-      return 'Execution should either finalize the turn or drive cascade/compaction transitions.'
+      return 'execution 은 turn 을 finalize 하거나 cascade/compaction transition 을 유도해야 함.'
     case 'compacting':
-      return 'Turn finalization is waiting on compaction to finish.'
+      return 'turn finalization 이 compaction 종료를 대기 중.'
     case 'finalizing':
       return '다음 stable state 는 last_outcome 갱신된 idle 이어야 함.'
     default:
-      return 'The next meaningful edge should come from the next observed lifecycle event.'
+      return '다음 meaningful edge 는 다음 관측된 lifecycle event 에서 시작되어야 함.'
   }
 }
 

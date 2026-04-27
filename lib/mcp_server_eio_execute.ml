@@ -329,6 +329,28 @@ let execute_tool_eio ~sw ~clock ?(profile = Mcp_server_eio_tool_profile.Full)
                Prometheus.metric_silent_auth_token_resolve_error
                ~labels:[ ("error_kind", error_kind); ("agent", agent_name) ]
                ();
+             (* Phase A F2 (2026-04-27): pair the silent counter with a
+                [would_reject] emission so operators can measure how many of
+                these fall-throughs would be rejected under MASC_AUTH_STRICT.
+                Behavior is unchanged: this PR only adds telemetry + a flag
+                surface so Phase B PR-2 can flip [Strict] safely. *)
+             let mode = Auth_strict_mode.current () in
+             let mode_label = Auth_strict_mode.to_label mode in
+             (match mode with
+              | Auth_strict_mode.Off -> ()
+              | Auth_strict_mode.Dry_run | Auth_strict_mode.Strict ->
+                  Log.Auth.warn
+                    "[would_reject:auth_token_resolve_error] mode=%s agent=%s \
+                     error_kind=%s - Phase B PR-2 will reject this request"
+                    mode_label agent_name error_kind;
+                  Prometheus.inc_counter
+                    Prometheus.metric_auth_strict_would_reject
+                    ~labels:
+                      [ ("mode", mode_label);
+                        ("error_kind", error_kind);
+                        ("agent", agent_name);
+                      ]
+                    ());
              agent_name)
     | _ -> agent_name
   in

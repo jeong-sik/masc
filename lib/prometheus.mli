@@ -354,6 +354,15 @@ val metric_silent_dashboard_actor_fallback : string
     token resolved to no agent ([Ok None]) or an error.
     Labels: [outcome] = "none" | "error". *)
 
+val metric_auth_strict_would_reject : string
+(** Phase A F2 (2026-04-27): paired with
+    [metric_silent_auth_token_resolve_error] to measure "how many of
+    those silent fallbacks would be rejected under Strict mode" before
+    Phase B PR-2 actually performs the rejection.  Labels:
+    [mode] = "off" | "dry_run" | "strict",
+    [error_kind] = same kinds as silent_auth,
+    [agent] = the alias the request would have kept. *)
+
 val metric_coord_join_normalize_outcome : string
 (** RFC P3-a (2026-04-26): Coord.join preflighted by
     [Keeper_identity.normalize_all_names] in logging-only mode.

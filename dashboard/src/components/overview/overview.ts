@@ -13,6 +13,7 @@ import { TimeAgo } from '../common/time-ago'
 import { StatusDot } from '../common/status-dot'
 import { RouteLink } from '../common/route-link'
 import { KpiCell, type KpiCellKind } from '../kpi-cell'
+import { KpiStrip } from '../kpi-strip'
 import { AgentAvatar } from './agent-avatar'
 import { missionSnapshot } from '../../mission-store'
 import { tasks, keepers } from '../../store'
@@ -96,17 +97,13 @@ function FunnelCard({ counts }: { counts: FunnelCounts }) {
         <h2 class="text-xs font-semibold uppercase tracking-wider text-[var(--color-fg-secondary)]">오늘 상황</h2>
         <span class="text-2xs text-[var(--color-fg-muted)]">task 기준</span>
       </header>
-      <div
-        role="list"
-        aria-label="오늘 funnel"
-        class="grid grid-cols-5 gap-4 max-[640px]:grid-cols-3 max-[640px]:gap-y-4"
-      >
-        <${KpiCell} bare variant="stacked" label="신규" value=${String(counts.created)} testId="funnel-created" />
-        <${KpiCell} bare variant="stacked" label="진행" value=${String(counts.inProgress)} testId="funnel-in-progress" />
-        <${KpiCell} bare variant="stacked" label="검증 대기" value=${String(counts.awaiting)} kind=${awaitingKind} testId="funnel-awaiting" />
-        <${KpiCell} bare variant="stacked" label="완료" value=${String(counts.completed)} kind="ok" testId="funnel-completed" />
-        <${KpiCell} bare variant="stacked" label="목표" value=${formatTargetRatio(counts)} testId="funnel-target" />
-      </div>
+      <${KpiStrip} ariaLabel="오늘 funnel" cols=${5}>
+        <${KpiCell} variant="stacked" label="신규" value=${String(counts.created)} testId="funnel-created" />
+        <${KpiCell} variant="stacked" label="진행" value=${String(counts.inProgress)} testId="funnel-in-progress" />
+        <${KpiCell} variant="stacked" label="검증 대기" value=${String(counts.awaiting)} kind=${awaitingKind} testId="funnel-awaiting" />
+        <${KpiCell} variant="stacked" label="완료" value=${String(counts.completed)} kind="ok" testId="funnel-completed" />
+        <${KpiCell} variant="stacked" label="목표" value=${formatTargetRatio(counts)} testId="funnel-target" />
+      <//>
     </section>
   `
 }

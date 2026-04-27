@@ -31,6 +31,43 @@ module KeeperBootstrap = struct
   (** Maximum concurrently active keepers. Guards keeper creation and bootstrap. *)
   let max_active_keepers =
     get_int ~default:10000 "MASC_KEEPER_BOOTSTRAP_MAX_ACTIVE_KEEPERS"
+
+  (** Polling interval (seconds) for the lazy-startup wait loop in
+      [server_bootstrap_loops.ml]. The autoboot fiber wakes up every
+      [lazy_startup_poll_interval_sec] to re-check whether all
+      registered lazy startup tasks have completed before kicking off
+      keeper bootstrap. Default 0.25s preserves the inline literal at
+      [server_bootstrap_loops.ml:157] (responsive enough for unit
+      tests while keeping the idle CPU cost negligible). Floor 0.05s
+      protects against operator typos that would burn CPU. *)
+  let lazy_startup_poll_interval_sec =
+    Float.max 0.05
+      (get_float ~default:0.25
+         "MASC_KEEPER_BOOTSTRAP_LAZY_STARTUP_POLL_INTERVAL_SEC")
+
+  (** Polling interval (seconds) for the keeper-lifecycle listener
+      retry loop in [server_bootstrap_loops.ml]. After a listener
+      iteration raises (non-cancellation) the loop sleeps for this
+      interval before retrying — keeping the spinning under control
+      when an upstream subsystem is briefly down. Default 0.25s
+      preserves the inline literal at [server_bootstrap_loops.ml:240]. *)
+  let keeper_listener_retry_interval_sec =
+    Float.max 0.05
+      (get_float ~default:0.25
+         "MASC_KEEPER_BOOTSTRAP_LISTENER_RETRY_INTERVAL_SEC")
+
+  (** Settle delay (seconds) between lazy-startup completion and the
+      keeper bootstrap fan-out. The autoboot fiber sleeps for this
+      duration so SSE/board/orchestrator subsystems get a chance to
+      finish their first tick before keeper boot competes for them.
+      Default 5.0s preserves the inline literal at
+      [server_bootstrap_loops.ml:482]. Operators on cold-start machines
+      may raise this; setting to 0 is allowed (no settle) but unwise
+      under load. *)
+  let post_startup_settle_sec =
+    Float.max 0.0
+      (get_float ~default:5.0
+         "MASC_KEEPER_BOOTSTRAP_POST_STARTUP_SETTLE_SEC")
 end
 
 (** {1 Keeper Metrics Rotation Configuration} *)

@@ -154,7 +154,8 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
             end else
               last_log_at
           in
-          Eio.Time.sleep clock 0.25;
+          Eio.Time.sleep clock
+            Env_config_keeper.KeeperBootstrap.lazy_startup_poll_interval_sec;
           loop last_log_at
         end
       end
@@ -237,7 +238,8 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
       | exn ->
         Log.Dashboard.error "keeper lifecycle listener iteration failed: %s"
           (Printexc.to_string exn));
-      Eio.Time.sleep clock 0.25;
+      Eio.Time.sleep clock
+        Env_config_keeper.KeeperBootstrap.keeper_listener_retry_interval_sec;
       loop ()
     in
     loop ());
@@ -479,7 +481,8 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
       wait_for_lazy_startup ();
       Log.Keeper.info "autoboot: lazy startup complete; keeper bootstrap will start last";
       (* Brief delay so other subsystems (SSE, board, orchestrator) settle first. *)
-      Eio.Time.sleep clock 5.0;
+      Eio.Time.sleep clock
+        Env_config_keeper.KeeperBootstrap.post_startup_settle_sec;
       let config = state.room_config in
       let masc_root = Coord.masc_root_dir config in
       let keeper_dir = Keeper_fs.keeper_dir config in

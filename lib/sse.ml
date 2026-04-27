@@ -591,6 +591,10 @@ let notify_external_subscribers event =
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->
+        (* P1 silent-failure fix: previously only logged.  Increment a
+           counter so dashboards distinguish "all subscribers healthy"
+           from "subscribers exist but every callback throws." *)
+        Transport_metrics.inc_external_subscriber_callback_failure ();
         Log.Misc.warn "External subscriber %s failed: %s"
           sub.sub_id (Printexc.to_string exn)
     end
@@ -659,6 +663,11 @@ let broadcast_impl target json =
      subscribe/unsubscribe), so we iterate it directly with [SMap.iter].
      Skipping the [(k, v) :: acc] fold trims one tuple + cons cell per
      client per broadcast on this hot fan-out path. *)
+  let target_label = match target with
+    | All -> "all"
+    | Observers -> "observers"
+    | Coordinators -> "coordinators"
+  in
   let clients_entries = (Atomic.get clients).entries in
   let failed = ref [] in
   SMap.iter (fun session_id client ->
@@ -672,6 +681,10 @@ let broadcast_impl target json =
          See TLA+ SSEBroadcastBlock spec. *)
       (let queue_len = Eio.Stream.length client.event_stream in
        if queue_len >= stream_capacity then begin
+         (* P1 silent-failure fix: previously only logged.  Counter
+            lets operators see "all clients backlogged" as a Prometheus
+            rate, distinct from successful broadcasts. *)
+         Transport_metrics.inc_broadcast_failure ~target:target_label ();
          Log.Server.warn "Broadcast skip: session %s stream full (%d/%d)"
            session_id queue_len stream_capacity;
          failed := session_id :: !failed
@@ -683,6 +696,8 @@ let broadcast_impl target json =
          with
          | Eio.Cancel.Cancelled _ as e -> raise e
          | e ->
+             (* Same P1 fix on the unexpected-exception defense path. *)
+             Transport_metrics.inc_broadcast_failure ~target:target_label ();
              Log.Server.error "Broadcast enqueue failed for session %s: %s"
                session_id (Printexc.to_string e);
              failed := session_id :: !failed)
@@ -692,11 +707,6 @@ let broadcast_impl target json =
   List.iter (fun sid -> unregister sid) !failed;
   (* Record broadcast duration for transport observability *)
   let elapsed = Time_compat.now () -. t0 in
-  let target_label = match target with
-    | All -> "all"
-    | Observers -> "observers"
-    | Coordinators -> "coordinators"
-  in
   Transport_metrics.observe_broadcast_duration ~target:target_label elapsed;
   sync_transport_snapshot ();
   (* Notify external subscribers (gRPC streams, etc.) *)

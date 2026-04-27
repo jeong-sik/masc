@@ -492,6 +492,9 @@ let metric_mcp_tool_schema_tokens_approx =
 let metric_sse_sessions = "masc_sse_sessions_total"
 let metric_sse_broadcast_duration = "masc_sse_broadcast_duration_seconds"
 let metric_sse_broadcast_events = "masc_sse_broadcast_events_total"
+let metric_sse_broadcast_failures = "masc_sse_broadcast_failures_total"
+let metric_sse_external_subscriber_callback_failures =
+  "masc_sse_external_subscriber_callback_failures_total"
 let metric_sse_stream_queue_depth = "masc_sse_stream_queue_depth"
 let metric_sse_queue_depth_avg = "masc_sse_queue_depth_avg"
 let metric_sse_queue_depth_max = "masc_sse_queue_depth_max"
@@ -1098,6 +1101,17 @@ let init () =
   register_histogram ~name:metric_sse_broadcast_duration
     ~help:"Time to fan-out a broadcast to all SSE clients" ();
   add metric_sse_broadcast_events "Total SSE broadcast events emitted" Counter;
+  add metric_sse_broadcast_failures
+    "SSE broadcast deliveries that failed (stream full or enqueue exception). \
+     Labelled by target so the failure rate can be compared against \
+     masc_sse_broadcast_events_total per target."
+    Counter;
+  add metric_sse_external_subscriber_callback_failures
+    "External SSE subscriber callback exceptions (e.g. gRPC bridge \
+     stream errors).  A non-zero rate indicates that a downstream \
+     consumer is failing to accept events even though the SSE fanout \
+     considers the broadcast successful."
+    Counter;
   add metric_sse_stream_queue_depth
     "Per-session SSE event stream queue depth" Gauge;
   add metric_sse_queue_depth_avg

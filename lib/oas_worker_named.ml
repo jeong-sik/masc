@@ -1631,7 +1631,29 @@ let run_named
                 then "[max_turns] "
                 else ""
               in
-              Log.Misc.info "[cascade-fallback] cascade %s: %s failed (%s%s), trying next" cascade_name provider_cfg.model_id class_label (Oas.Error.to_string sdk_err);
+              (* #10982: [max_turns] failures cost ~$2.74 mean per
+                 fallback (24h sample: 11 events / $30.20 sunk).  The
+                 cost is incurred but the result is unusable, so the
+                 next tier re-runs from scratch.  At INFO this signal
+                 was buried in normal cascade traffic and the cost
+                 dashboard never saw it.  Promote [max_turns] to WARN
+                 — still "expected, recoverable" (the cascade escape
+                 hatch worked) but visible enough that operators can
+                 correlate cost gauges with cascade traffic.
+                 [hard_quota] stays INFO for now: quota signals fire
+                 normally during ratelimits and warrant a different
+                 promotion threshold (separate issue). *)
+              if sdk_error_is_max_turns_exceeded sdk_err then
+                Log.Misc.warn
+                  "[cascade-fallback] cascade %s: %s failed (%s%s), trying \
+                   next [sunk cost; see #10982]"
+                  cascade_name provider_cfg.model_id class_label
+                  (Oas.Error.to_string sdk_err)
+              else
+                Log.Misc.info
+                  "[cascade-fallback] cascade %s: %s failed (%s%s), trying next"
+                  cascade_name provider_cfg.model_id class_label
+                  (Oas.Error.to_string sdk_err);
               Oas_worker_cascade.record_fallback_event capture ~candidate_cfgs
                 ~from_model:provider_cfg.model_id ~to_model:"next"
                 ~reason:(class_label ^ Oas.Error.to_string sdk_err);

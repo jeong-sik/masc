@@ -142,6 +142,19 @@ type registry_entry = {
           result": idle keepers never surface stale terminal states
           on the live sub-FSM fields, but operators can still see
           the most recent outcome in [last_outcome]. *)
+  last_skip_observation : (float * string list) option;
+      (** Most recent [keeper_cycle_decision] skip outcome captured by
+          the keepalive loop (#10940 follow-up).  The [Prometheus]
+          [proactive_skip_reason_metric] aggregates skip reasons over
+          time, but at stale-watchdog kill the operator wants to see
+          *which* reasons were active *just before* the 300s idle
+          timeout fired.  [Some (ts, reasons)] = wall clock + verdict
+          reason strings ([cooldown_pending], [no_signal],
+          [scheduled_autonomous_disabled], etc.) from the last skip;
+          [None] until the first skip is observed.  Read by
+          [Keeper_stale_watchdog] to enrich the kill warn line so an
+          [idle_stale=true] termination is no longer indistinguishable
+          from a *stuck* fiber. *)
   compaction_stage : compaction_stage;
       (** Explicit KMC projection owned by the runtime, not derived from
           parent phase on read. This lets the observer surface
@@ -263,6 +276,14 @@ val mark_turn_gate_rejected_by_name : string -> unit
     so the composite observer reverts to idle. Idempotent — safe to
     call in finally blocks even if [mark_turn_started] was not called. *)
 val mark_turn_finished : base_path:string -> string -> unit
+
+(** Record the verdict reasons from a [keeper_cycle_decision] that
+    chose to skip the next turn.  Stamps [last_skip_observation] with
+    [(now, reasons)] so the stale watchdog can surface *why* a keeper
+    was deliberately skipping turns when an [idle_stale=true]
+    termination fires.  No-op if no entry is registered for [name]. *)
+val record_skip_reasons :
+  base_path:string -> string -> reasons:string list -> unit
 
 (** Increment turn consecutive failure counter. *)
 val increment_turn_failures : base_path:string -> string -> unit

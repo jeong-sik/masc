@@ -30,6 +30,9 @@ describe('ringFocusClasses (pure)', () => {
     const tones = [
       'accent',
       'accent-soft',
+      'accent-medium',
+      'accent-subtle',
+      'accent-fg',
       'border',
       'muted',
       'ok',
@@ -39,7 +42,6 @@ describe('ringFocusClasses (pure)', () => {
     ] as const
     for (const tone of tones) {
       const cls = ringFocusClasses({ tone })
-      // each tone string must appear *exactly once* under focus-visible:
       expect(cls).toMatch(/focus-visible:ring-/)
     }
   })
@@ -47,6 +49,38 @@ describe('ringFocusClasses (pure)', () => {
   it('accent-soft uses /40 alpha', () => {
     expect(ringFocusClasses({ tone: 'accent-soft' })).toContain(
       'focus-visible:ring-accent/40',
+    )
+  })
+
+  it('accent-medium maps to ring-[var(--accent-45)] (form/button focus)', () => {
+    expect(ringFocusClasses({ tone: 'accent-medium' })).toContain(
+      'focus-visible:ring-[var(--accent-45)]',
+    )
+  })
+
+  it('accent-subtle maps to ring-[var(--accent-30)] (icon hover focus)', () => {
+    expect(ringFocusClasses({ tone: 'accent-subtle' })).toContain(
+      'focus-visible:ring-[var(--accent-30)]',
+    )
+  })
+
+  it('accent-fg maps to ring-[var(--color-accent-fg)] (high-contrast)', () => {
+    expect(ringFocusClasses({ tone: 'accent-fg' })).toContain(
+      'focus-visible:ring-[var(--color-accent-fg)]',
+    )
+  })
+
+  it('full Bucket B form-control pattern composes correctly', () => {
+    // app/theme-switch/dashboard-shell/keeper-detail and common helpers
+    // (button/input/select/checkbox) all use this exact composition.
+    const cls = ringFocusClasses({
+      tone: 'accent-medium',
+      width: 2,
+      offset: 2,
+      offsetSurface: 'surface',
+    })
+    expect(cls).toBe(
+      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-bg-surface)]',
     )
   })
 
@@ -85,6 +119,26 @@ describe('ringFocusClasses (pure)', () => {
     const cls = ringFocusClasses({ visible: false })
     expect(cls).toBe('focus:outline-none focus:ring-1 focus:ring-accent')
     expect(cls).not.toContain('focus-visible:')
+  })
+
+  it('inset=true emits ring-inset and suppresses offset', () => {
+    const cls = ringFocusClasses({ width: 2, tone: 'accent-fg', inset: true })
+    expect(cls).toContain('focus-visible:ring-inset')
+    expect(cls).not.toContain('ring-offset')
+  })
+
+  it('inset=true overrides offset opt (mutually exclusive)', () => {
+    // Even when offset > 0 is passed, inset wins. Documents the
+    // mutual-exclusion contract called out in the helper jsdoc.
+    const cls = ringFocusClasses({
+      tone: 'accent-fg',
+      width: 2,
+      offset: 2,
+      offsetSurface: 'page',
+      inset: true,
+    })
+    expect(cls).toContain('focus-visible:ring-inset')
+    expect(cls).not.toContain('ring-offset')
   })
 
   it('regression: outline-none must precede ring classes', () => {
@@ -130,6 +184,9 @@ describe('ringSelectClasses (pure)', () => {
     const tones = [
       'accent',
       'accent-soft',
+      'accent-medium',
+      'accent-subtle',
+      'accent-fg',
       'border',
       'muted',
       'ok',

@@ -11,6 +11,7 @@
 
 import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'
+import { ringFocusClasses } from './ring'
 
 type ButtonVariant = 'primary' | 'ghost' | 'danger' | 'subtle' | 'ok' | 'warn'
 type ButtonSize = 'sm' | 'md' | 'lg'
@@ -45,7 +46,7 @@ const PRESSED_CLASSES: Record<ButtonVariant, string> = {
   warn: 'bg-[var(--warn-24)]',
 }
 
-const BASE = 'rounded cursor-pointer transition-all duration-200 font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-bg-surface)] active:scale-[0.97] active:opacity-90'
+const BASE = `rounded cursor-pointer transition-all duration-200 font-medium ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'surface' })} active:scale-[0.97] active:opacity-90`
 
 interface ActionButtonProps {
   variant?: ButtonVariant

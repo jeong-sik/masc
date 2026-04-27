@@ -191,6 +191,13 @@ val save_raw_token_credential :
 (** [save_raw_token_credential config ~agent_name ~role ~raw_token] hashes the
     raw token and persists the credential. *)
 
+val load_raw_token : string -> agent_name:string -> string option
+(** [load_raw_token base_path ~agent_name] reads the raw bearer token from
+    [<base_path>/.masc/auth/<agent_name>.token] if present. Returns [None] if
+    the file is missing, empty after trim, or unreadable. Used by
+    [oas_worker_exec_transport] as a fallback for CLI subprocesses that do
+    not inherit the parent's [MASC_MCP_TOKEN] env. *)
+
 val verify_internal_keeper_token :
   string -> token:string -> bool
 

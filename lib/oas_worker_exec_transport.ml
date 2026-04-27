@@ -417,14 +417,31 @@ let runtime_mcp_policy_of_tool_names ?agent_name
           :: agent_header
       | _ ->
           let env_token = first_nonempty_env [ "MASC_MCP_TOKEN" ] in
-          let outcome : (Auth_resolve.token, Auth_resolve.auth_error) result =
-            match env_token with
-            | Some raw ->
+          (* Phase A F1: when MASC_MCP_TOKEN is unset, fall back to the
+             per-keeper raw token at <base_path>/.masc/auth/<agent_name>.token.
+             This wires CLI-spawned subprocesses (codex_cli/gemini_cli/kimi_cli)
+             that callback to masc-mcp tools but do not inherit the parent
+             process env. *)
+          let per_keeper_token =
+            match env_token, agent_name with
+            | None, Some name ->
+                let base_path = Env_config_core.base_path () in
+                Auth.load_raw_token base_path ~agent_name:name
+            | _ -> None
+          in
+          let resolved : (Auth_resolve.token, Auth_resolve.auth_error) result =
+            match env_token, per_keeper_token with
+            | Some raw, _ ->
                 Ok {
                   Auth_resolve.raw;
                   source = Auth_resolve.Mcp_bearer_env;
                 }
-            | None ->
+            | None, Some raw ->
+                Ok {
+                  Auth_resolve.raw;
+                  source = Auth_resolve.Per_keeper_token_file;
+                }
+            | None, None ->
                 Error
                   (Auth_resolve.Api_key_env_unset {
                     var_name = "MASC_MCP_TOKEN";
@@ -434,10 +451,10 @@ let runtime_mcp_policy_of_tool_names ?agent_name
             ~cascade:"runtime_mcp_policy"
             ~keeper_id:keeper_name
             ~provider_label:"masc-mcp"
-            ~outcome;
-          (match env_token with
-           | Some token -> [ ("Authorization", "Bearer " ^ token) ]
-           | None -> [])
+            ~outcome:resolved;
+          (match resolved with
+           | Ok { raw; _ } -> [ ("Authorization", "Bearer " ^ raw) ]
+           | Error _ -> [])
     in
     Some
       {

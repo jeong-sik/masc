@@ -84,12 +84,52 @@ let wait_ms_since enqueue_ts = int_of_float ((now_ts () -. enqueue_ts) *. 1000.0
 
 (* ── Public API ────────────────────────────────────────── *)
 
+(* #10745: track previous rejection per keeper so successive rejection
+   logs carry the fd-growth rate inline.  Issue evidence: fd count
+   3110 → 3157 → 3215 (+47 fd/min steady) over 22 rejections / 24h,
+   100% on [oas-governance_judge].  Without the rate, operators have
+   to scrub timestamps to confirm a leak vs. a transient burst.  Hash
+   keyed by [keeper_name]; protected by [rejection_history_mu]. *)
+let rejection_history : (string, float * int) Hashtbl.t = Hashtbl.create 16
+let rejection_history_mu = Eio.Mutex.create ()
+
+let format_fd_growth_hint ~keeper_name ~fd_count ~now =
+  Eio.Mutex.use_rw ~protect:true rejection_history_mu (fun () ->
+    let prev = Hashtbl.find_opt rejection_history keeper_name in
+    Hashtbl.replace rejection_history keeper_name (now, fd_count);
+    match prev with
+    | None -> ""
+    | Some (prev_ts, prev_fd) ->
+      let dt = now -. prev_ts in
+      let dfd = fd_count - prev_fd in
+      if dt <= 0.0 then ""
+      else
+        let rate_per_min = float_of_int dfd /. dt *. 60.0 in
+        let trend =
+          if dfd > 0 then "growing"
+          else if dfd < 0 then "shrinking"
+          else "steady"
+        in
+        Printf.sprintf
+          " [Δ%+d fd in %.0fs = %+.1f fd/min, %s; previous fd=%d at %.0fs ago]"
+          dfd dt rate_per_min trend prev_fd dt)
+
 let check_host_resources ~keeper_name =
   let fd_count = Prometheus.approximate_open_fd_count () in
   let threshold = Prometheus.fd_warn_threshold in
   if fd_count >= threshold * 9 / 10 then begin
+    (* #10745: include fd-growth rate inline so the leak signal does
+       not require log scrubbing.  Monotonic positive trend across
+       successive rejections of the same keeper points at fd leak
+       (see issue #10745 root-cause discussion: subprocess close miss,
+       sandbox docker exec residue, WS standalone handler write-after-
+       close).  The hint is empty on the first rejection and on
+       reset (clock skew). *)
+    let now = now_ts () in
+    let hint = format_fd_growth_hint ~keeper_name ~fd_count ~now in
     let msg =
-      Printf.sprintf "fd count %d >= 90%% of threshold %d" fd_count threshold
+      Printf.sprintf "fd count %d >= 90%% of threshold %d%s"
+        fd_count threshold hint
     in
     Log.Misc.warn "admission rejected for %s: %s" keeper_name msg;
     Error (`Host_resource_saturated msg)

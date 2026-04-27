@@ -138,6 +138,17 @@ type semantic =
   | `Z_drawer
   | `Z_modal
   | `Z_toast
+  | `Font_size_3xs
+  | `Font_size_2xs
+  | `Font_size_xs
+  | `Font_size_sm
+  | `Font_size_base
+  | `Font_size_md
+  | `Font_size_lg
+  | `Spacing_element
+  | `Spacing_group
+  | `Spacing_card
+  | `Radius_xl
   | `Ok_soft
   | `Ok_fg
   | `Ok_border
@@ -344,6 +355,25 @@ type semantic =
   | `Heat_1
   | `Heat_2
   | `Heat_3
+  | `Color_text_body
+  | `Color_text_muted
+  | `Color_text_dim
+  | `Color_accent_brass
+  | `Color_accent_soft
+  | `Bad_light
+  | `Warn_bright
+  | `Color_keeper_1_glow
+  | `Color_keeper_2_glow
+  | `Color_keeper_3_glow
+  | `Color_keeper_4_glow
+  | `Color_keeper_5_glow
+  | `Color_keeper_6_glow
+  | `Color_keeper_7_glow
+  | `Color_keeper_8_glow
+  | `Color_keeper_9_glow
+  | `Color_keeper_10_glow
+  | `Color_keeper_11_glow
+  | `Color_keeper_12_glow
   ]
 
 let name_of = function
@@ -483,6 +513,17 @@ let name_of = function
   | `Z_drawer -> "z-drawer"
   | `Z_modal -> "z-modal"
   | `Z_toast -> "z-toast"
+  | `Font_size_3xs -> "font-size-3xs"
+  | `Font_size_2xs -> "font-size-2xs"
+  | `Font_size_xs -> "font-size-xs"
+  | `Font_size_sm -> "font-size-sm"
+  | `Font_size_base -> "font-size-base"
+  | `Font_size_md -> "font-size-md"
+  | `Font_size_lg -> "font-size-lg"
+  | `Spacing_element -> "spacing-element"
+  | `Spacing_group -> "spacing-group"
+  | `Spacing_card -> "spacing-card"
+  | `Radius_xl -> "radius-xl"
   | `Ok_soft -> "ok-soft"
   | `Ok_fg -> "ok-fg"
   | `Ok_border -> "ok-border"
@@ -689,5 +730,24 @@ let name_of = function
   | `Heat_1 -> "heat-1"
   | `Heat_2 -> "heat-2"
   | `Heat_3 -> "heat-3"
+  | `Color_text_body -> "color-text-body"
+  | `Color_text_muted -> "color-text-muted"
+  | `Color_text_dim -> "color-text-dim"
+  | `Color_accent_brass -> "color-accent-brass"
+  | `Color_accent_soft -> "color-accent-soft"
+  | `Bad_light -> "bad-light"
+  | `Warn_bright -> "warn-bright"
+  | `Color_keeper_1_glow -> "color-keeper-1-glow"
+  | `Color_keeper_2_glow -> "color-keeper-2-glow"
+  | `Color_keeper_3_glow -> "color-keeper-3-glow"
+  | `Color_keeper_4_glow -> "color-keeper-4-glow"
+  | `Color_keeper_5_glow -> "color-keeper-5-glow"
+  | `Color_keeper_6_glow -> "color-keeper-6-glow"
+  | `Color_keeper_7_glow -> "color-keeper-7-glow"
+  | `Color_keeper_8_glow -> "color-keeper-8-glow"
+  | `Color_keeper_9_glow -> "color-keeper-9-glow"
+  | `Color_keeper_10_glow -> "color-keeper-10-glow"
+  | `Color_keeper_11_glow -> "color-keeper-11-glow"
+  | `Color_keeper_12_glow -> "color-keeper-12-glow"
 
 let var_of t = "var(--" ^ name_of t ^ ")"

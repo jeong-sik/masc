@@ -149,6 +149,17 @@ type semantic =
   | `Z_drawer
   | `Z_modal
   | `Z_toast
+  | `Font_size_3xs
+  | `Font_size_2xs
+  | `Font_size_xs
+  | `Font_size_sm
+  | `Font_size_base
+  | `Font_size_md
+  | `Font_size_lg
+  | `Spacing_element
+  | `Spacing_group
+  | `Spacing_card
+  | `Radius_xl
   | `Ok_soft
   | `Ok_fg
   | `Ok_border
@@ -355,6 +366,25 @@ type semantic =
   | `Heat_1
   | `Heat_2
   | `Heat_3
+  | `Color_text_body
+  | `Color_text_muted
+  | `Color_text_dim
+  | `Color_accent_brass
+  | `Color_accent_soft
+  | `Bad_light
+  | `Warn_bright
+  | `Color_keeper_1_glow
+  | `Color_keeper_2_glow
+  | `Color_keeper_3_glow
+  | `Color_keeper_4_glow
+  | `Color_keeper_5_glow
+  | `Color_keeper_6_glow
+  | `Color_keeper_7_glow
+  | `Color_keeper_8_glow
+  | `Color_keeper_9_glow
+  | `Color_keeper_10_glow
+  | `Color_keeper_11_glow
+  | `Color_keeper_12_glow
   ]
 
 (** Returns ["var(--name)"] for the given token. *)

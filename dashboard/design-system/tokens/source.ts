@@ -267,6 +267,28 @@ export const raw: ReadonlyArray<TokenBase> = (() => {
   out.push(t("z-modal", "80", "raw", "number"));
   out.push(t("z-toast", "100", "raw", "number"));
 
+  // ── Legacy named scales — preserved verbatim from the deleted hand-written
+  // tokens.css. Components reference these literal names (variables.css
+  // aliases --fs-* → --font-size-*; lifeline-bar / kpi-cell / chat
+  // primitives reach for --spacing-element / --spacing-group /
+  // --radius-xl directly). Parallel to the canonical fs-N / sp-N / r-N
+  // raw scale; both kept until consumers migrate.
+  out.push(t("font-size-3xs", "10px", "raw", "dimension"));
+  out.push(t("font-size-2xs", "11px", "raw", "dimension"));
+  out.push(t("font-size-xs",  "12px", "raw", "dimension"));
+  out.push(t("font-size-sm",  "13px", "raw", "dimension",
+    "intentional override: Tailwind v4 default is 14px"));
+  out.push(t("font-size-base","14px", "raw", "dimension"));
+  out.push(t("font-size-md",  "15px", "raw", "dimension",
+    "intentional addition: Tailwind v4 has no built-in md"));
+  out.push(t("font-size-lg",  "16px", "raw", "dimension"));
+
+  out.push(t("spacing-element", "8px",  "raw", "dimension", "tight element spacing"));
+  out.push(t("spacing-group",   "12px", "raw", "dimension", "grouped items"));
+  out.push(t("spacing-card",    "16px", "raw", "dimension", "card internal padding"));
+
+  out.push(t("radius-xl", "24px", "raw", "dimension"));
+
   return Object.freeze(out);
 })();
 
@@ -550,6 +572,45 @@ export const semantic: ReadonlyArray<TokenBase> = (() => {
   out.push(t("heat-1", "rgb(212 161 74 / .04)", "role", "color"));
   out.push(t("heat-2", "rgb(212 161 74 / .08)", "role", "color"));
   out.push(t("heat-3", "rgb(212 161 74 / .14)", "role", "color"));
+
+  // ── Legacy named role aliases — preserved verbatim from the deleted
+  // hand-written tokens.css. Each maps a legacy --color-* name to the
+  // canonical dark-fantasy raw/semantic so 40+ components keep working
+  // through their literal token references. Mappings collapse the old
+  // navy/cyan palette onto the new brass/warm canon (intentional —
+  // resurrecting the legacy hex would re-fork the palette).
+  //
+  // Color → tier:'role', kind:'color'.
+  // Tailwind passthrough: names already start with --color- (no re-prefix).
+  out.push(t("color-text-body",  "var(--fg-2)", "role", "color",
+    "legacy alias for body copy"));
+  out.push(t("color-text-muted", "var(--fg-3)", "role", "color",
+    "legacy alias for muted copy"));
+  out.push(t("color-text-dim",   "var(--fg-3)", "role", "color",
+    "legacy alias; collapses to fg-3 same as muted"));
+
+  // Brass aliases — legacy names for the canonical accent.
+  out.push(t("color-accent-brass", "var(--brass-1)",   "role", "color",
+    "legacy alias for the brass primary"));
+  out.push(t("color-accent-soft",  "var(--brass-soft)","role", "color",
+    "legacy alias for the brass soft tint"));
+
+  // Status tone variants — used by chat warn banners and error text.
+  // Legacy names map onto the canonical err/warn raw rather than the
+  // pinned -fg variants because consumers use them for body text on a
+  // tinted background, where raw err/warn provide the same WCAG ramp.
+  out.push(t("bad-light",    "var(--err)",  "role", "color",
+    "legacy alias for body-on-tinted error text"));
+  out.push(t("warn-bright",  "var(--warn)", "role", "color",
+    "legacy alias for body-on-tinted warn text"));
+
+  // Per-keeper glow rgb triplets — legacy --color-keeper-N-glow names
+  // referenced by keeper-badge.ts via dynamic template literal, so all
+  // 12 are required even though static grep finds zero literal matches.
+  // Each aliases the canonical --k-N-glow raw (same OkLCH palette).
+  for (let i = 1; i <= 12; i++) {
+    out.push(t(`color-keeper-${i}-glow`, `var(--k-${i}-glow)`, "role", "color"));
+  }
 
   return Object.freeze(out);
 })();

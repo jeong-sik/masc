@@ -98,6 +98,18 @@ function buildPreviewCss(): string {
 // 2. Tailwind v4 entry CSS — must use `@theme {}` at top-level (not @import-ed,
 //    not nested under :root). Tailwind v4 only treats @theme in entry CSS as
 //    Tailwind utilities. ref: tailwindlabs/tailwindcss#18966
+//
+// Legacy color names that consumers reference verbatim (e.g.
+// `var(--bad-light)`) opt out of the implicit --color- prefix that
+// the rule below applies to color-kind tokens. Without this list a
+// token named `bad-light` would emit `--color-bad-light` and the
+// 130+ component sites referencing `var(--bad-light)` would fall
+// through to CSS `initial`.
+const TAILWIND_COLOR_PREFIX_OPTOUT: ReadonlySet<string> = new Set([
+  "bad-light",
+  "warn-bright",
+]);
+
 function buildTailwindCss(): string {
   const tailwindNamed = (tok: TokenBase): string => {
     // For Tailwind v4 to expose utilities (text-*, bg-*, border-*),
@@ -106,7 +118,8 @@ function buildTailwindCss(): string {
     // pass through with their raw name.
     const isColorish = tok.kind === "color";
     const alreadyColorPrefixed = tok.name.startsWith("color-");
-    if (isColorish && !alreadyColorPrefixed) {
+    const optedOut = TAILWIND_COLOR_PREFIX_OPTOUT.has(tok.name);
+    if (isColorish && !alreadyColorPrefixed && !optedOut) {
       return `  --color-${tok.name}: ${tok.value};`;
     }
     return `  --${tok.name}: ${tok.value};`;

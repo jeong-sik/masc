@@ -102,7 +102,7 @@ export function deriveOperationalInsight(
   if (brokenInvariant) {
     return {
       tone: 'error',
-      headline: `Spec drift: ${INVARIANT_LABELS[brokenInvariant]}`,
+      headline: `Spec drift 감지: ${INVARIANT_LABELS[brokenInvariant]}`,
       detail: invariantDetail(snapshot, brokenInvariant, false),
       nextStep: 'Treat this as an observer-level contract breach before trusting downstream state transitions.',
       evidence: [
@@ -171,7 +171,7 @@ export function deriveOperationalInsight(
       : ''
     return {
       tone: 'warn',
-      headline: `${snapshot.phase} is the active lifecycle edge`,
+      headline: `${snapshot.phase} 가 활성 lifecycle edge`,
       detail: `The keeper is transitioning between stable lifecycle states, so the parent FSM matters more than sub-turn activity right now.${collapsedDetail}`,
       nextStep: nextExpectedStep(snapshot),
       evidence: [

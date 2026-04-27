@@ -4,17 +4,21 @@
 // public API but renders via inline style + Tailwind tokens that the
 // dashboard already owns.
 //
-// Why not import design-system/source_styles/primitives.css directly:
-// - The SPEC selectors expect raw status tokens (`--err`, `--info`,
-//   `--stalled`, `--idle`) and `*-glow` channels that dashboard's
-//   variables.css does not yet define. Importing primitives.css today
-//   would render the chips unstyled or partially broken.
-// - Visual fidelity here is ~75% of SPEC: foreground + border carry
-//   the kind hue, but the SPEC's translucent glow background is
-//   replaced with a flat surface. Public API is intentionally identical
-//   so a future cycle can swap the internals to `<span class="chip
-//   is-{kind}">` once the token gap is closed (issue tracked in PR
-//   description).
+// SPEC fidelity: matches design-system/source_styles/primitives.css
+// `.chip.is-{kind}` selectors for all six tinted kinds (brass + the
+// five status kinds ok/warn/err/info/stalled) — translucent kind-
+// tinted borders at 0.35 alpha and backgrounds at 0.08 alpha for
+// status; brass uses the dimmed accent border + 0.08 accent
+// background per SPEC line 21.  Ghost stays transparent and neutral
+// keeps the elevated surface (SPEC: ghost is chromeless, neutral has
+// no semantic kind to tint).
+//
+// Token dependencies (added by PR-DS-Glow / #11163 + PR-Pill-Fidelity / #11171):
+//   --color-status-{ok,warn,err,info,stalled}-glow   rgb-triplets
+//   --color-accent-glow                               rgb-triplet
+// The dashboard runtime triplets decompose the bright Tailwind-400/500
+// semantic colors; SPEC source tokens.css uses muted hues but the
+// dashboard prefers visual consistency with the live surface.
 //
 // Usage: `<${Chip} kind="ok" dot>${count} PASS<//>`. The host DOM is a
 // span with role="status" when a kind is present (so screen readers
@@ -60,9 +64,12 @@ interface KindStyle {
   background: string
 }
 
-// Foreground + border derived from dashboard tokens (see SPEC mapping
-// note above). Background stays flat where SPEC would use a translucent
-// glow — keeps chips readable while the glow tokens are still missing.
+// Foreground / border / background tuples match SPEC primitives.css
+// `.chip.is-{kind}` selectors (see header comment).  Status kinds get
+// translucent borders at 0.35 alpha + backgrounds at 0.08 alpha;
+// brass uses the dimmed accent border with a translucent accent
+// background; ghost is transparent; neutral keeps the elevated
+// surface because SPEC defines it as the baseline chromeless state.
 const KIND_STYLE: Record<ChipKind, KindStyle> = {
   neutral: {
     color: 'var(--color-fg-secondary)',
@@ -72,32 +79,32 @@ const KIND_STYLE: Record<ChipKind, KindStyle> = {
   brass: {
     color: 'var(--color-accent-fg)',
     borderColor: 'var(--color-accent-fg-dim)',
-    background: 'var(--color-bg-elevated)',
+    background: 'rgb(var(--color-accent-glow) / 0.08)',
   },
   ok: {
     color: 'var(--color-status-ok)',
-    borderColor: 'var(--color-status-ok)',
-    background: 'var(--color-bg-elevated)',
+    borderColor: 'rgb(var(--color-status-ok-glow) / 0.35)',
+    background: 'rgb(var(--color-status-ok-glow) / 0.08)',
   },
   warn: {
     color: 'var(--color-status-warn)',
-    borderColor: 'var(--color-status-warn)',
-    background: 'var(--color-bg-elevated)',
+    borderColor: 'rgb(var(--color-status-warn-glow) / 0.35)',
+    background: 'rgb(var(--color-status-warn-glow) / 0.08)',
   },
   err: {
     color: 'var(--color-status-err)',
-    borderColor: 'var(--color-status-err)',
-    background: 'var(--color-bg-elevated)',
+    borderColor: 'rgb(var(--color-status-err-glow) / 0.35)',
+    background: 'rgb(var(--color-status-err-glow) / 0.08)',
   },
   info: {
     color: 'var(--color-status-info)',
-    borderColor: 'var(--color-status-info)',
-    background: 'var(--color-bg-elevated)',
+    borderColor: 'rgb(var(--color-status-info-glow) / 0.35)',
+    background: 'rgb(var(--color-status-info-glow) / 0.08)',
   },
   stalled: {
     color: 'var(--color-status-stalled)',
-    borderColor: 'var(--color-status-stalled)',
-    background: 'var(--color-bg-elevated)',
+    borderColor: 'rgb(var(--color-status-stalled-glow) / 0.35)',
+    background: 'rgb(var(--color-status-stalled-glow) / 0.08)',
   },
   ghost: {
     color: 'var(--color-fg-disabled)',

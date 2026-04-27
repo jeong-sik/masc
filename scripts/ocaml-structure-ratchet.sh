@@ -1,0 +1,173 @@
+#!/usr/bin/env bash
+# OCaml structural-debt ratchet gate.
+#
+# Tracks 4 metrics that capture structural debt called out by external review
+# (Jane-Street-style large-OCaml expectations):
+#
+#   - keeper_mli_missing: count of lib/keeper/keeper_*.ml files without a
+#     matching .mli (interface-first design gap)
+#   - coord_mli_missing : same metric for lib/coord/
+#   - godsplit_count    : occurrences of `;; godsplit` markers in lib/dune
+#     (god-file decomposition stubs left as comments — should converge to 0
+#     by sub-library extraction)
+#   - lib_dune_lines    : raw line count of lib/dune (proxy for the
+#     monolithic-library debt; sub-library splits should reduce this)
+#
+# Policy: ratchet only — current value must be <= committed baseline. PRs
+# that reduce debt may regenerate the baseline (intentional "downward
+# ratchet"). Increases must be justified by --regenerate with a paired
+# follow-up issue (anti-pattern: silent baseline rebound after admin
+# override; see masc-mcp memory feedback_ratchet-naturalization-after-admin-merge).
+#
+# Usage:
+#   scripts/ocaml-structure-ratchet.sh              # check; exit 0 ok / 2 drift up / 1 error
+#   scripts/ocaml-structure-ratchet.sh --regenerate # rewrite baseline from current counts
+#   scripts/ocaml-structure-ratchet.sh --print      # print current counts, no compare
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+BASELINE_FILE="${REPO_ROOT}/scripts/ocaml-structure-baseline.json"
+
+count_mli_missing() {
+  local dir="$1"
+  local prefix_glob="$2"
+  local ml_count mli_count
+  ml_count=$(find "${REPO_ROOT}/${dir}" -maxdepth 1 -type f -name "${prefix_glob}.ml" 2>/dev/null | wc -l | tr -d ' ')
+  mli_count=$(find "${REPO_ROOT}/${dir}" -maxdepth 1 -type f -name "${prefix_glob}.mli" 2>/dev/null | wc -l | tr -d ' ')
+  echo $((ml_count - mli_count))
+}
+
+count_godsplit() {
+  rg -c '^\s*;;\s*godsplit' "${REPO_ROOT}/lib/dune" 2>/dev/null || echo 0
+}
+
+count_lib_dune_lines() {
+  wc -l < "${REPO_ROOT}/lib/dune" | tr -d ' '
+}
+
+# Metric definitions: name|hint
+METRICS=(
+  "keeper_mli_missing|Add .mli for the new lib/keeper/keeper_*.ml file. See planning/claude-plans/moonlit-finding-russell.md PR#2-4."
+  "coord_mli_missing|Add .mli for the new lib/coord/*.ml file."
+  "godsplit_count|Do not add new ';; godsplit' markers in lib/dune — extract a real sub-library instead. See PR#7-10."
+  "lib_dune_lines|lib/dune is growing — consider extracting modules into a sub-library (lib/keeper/dune, lib/oas/dune, lib/dashboard/dune)."
+)
+
+current_value() {
+  case "$1" in
+    keeper_mli_missing) count_mli_missing "lib/keeper" "keeper_*" ;;
+    coord_mli_missing)  count_mli_missing "lib/coord"  "*" ;;
+    godsplit_count)     count_godsplit ;;
+    lib_dune_lines)     count_lib_dune_lines ;;
+    *) echo "unknown metric: $1" >&2; exit 1 ;;
+  esac
+}
+
+baseline_value() {
+  local name="$1"
+  if [[ -f "$BASELINE_FILE" ]]; then
+    python3 -c "
+import json, sys
+with open('$BASELINE_FILE') as f:
+    data = json.load(f)
+print(data.get('$name', 0))
+"
+  else
+    echo 0
+  fi
+}
+
+print_counts() {
+  printf "%-22s %9s  %9s\n" "metric" "current" "baseline"
+  echo "------------------------------------------------"
+  for spec in "${METRICS[@]}"; do
+    local name="${spec%%|*}"
+    local current baseline
+    current=$(current_value "$name")
+    baseline=$(baseline_value "$name")
+    printf "%-22s %9d  %9d\n" "$name" "$current" "$baseline"
+  done
+}
+
+regenerate() {
+  local tmpfile
+  tmpfile=$(mktemp)
+  {
+    echo '{'
+    echo '  "_comment": "OCaml structural-debt baseline. Regenerate with scripts/ocaml-structure-ratchet.sh --regenerate.",'
+    echo '  "_metrics": "See scripts/ocaml-structure-ratchet.sh METRICS array.",'
+    local first=1
+    for spec in "${METRICS[@]}"; do
+      local name="${spec%%|*}"
+      local current
+      current=$(current_value "$name")
+      if [[ $first -eq 1 ]]; then first=0; else echo ','; fi
+      printf '  "%s": %s' "$name" "$current"
+    done
+    echo
+    echo '}'
+  } > "$tmpfile"
+  mv "$tmpfile" "$BASELINE_FILE"
+  echo "Baseline written to $BASELINE_FILE"
+  print_counts
+}
+
+check() {
+  if [[ ! -f "$BASELINE_FILE" ]]; then
+    echo "ERROR: baseline file not found: $BASELINE_FILE" >&2
+    echo "Run: $0 --regenerate" >&2
+    exit 1
+  fi
+
+  local drift_up=0
+  local drift_down=0
+
+  for spec in "${METRICS[@]}"; do
+    local name="${spec%%|*}"
+    local hint="${spec#*|}"
+    local current baseline
+    current=$(current_value "$name")
+    baseline=$(baseline_value "$name")
+
+    if [[ "$current" -gt "$baseline" ]]; then
+      echo "FAIL $name: $current > baseline $baseline" >&2
+      echo "     Fix: $hint" >&2
+      drift_up=$((drift_up + 1))
+    elif [[ "$current" -lt "$baseline" ]]; then
+      echo "OK   $name: $current < baseline $baseline (baseline can be lowered)" >&2
+      drift_down=$((drift_down + 1))
+    fi
+  done
+
+  if [[ $drift_up -gt 0 ]]; then
+    echo >&2
+    echo "OCaml structure ratchet: $drift_up metric(s) exceeded baseline." >&2
+    echo "Either fix the regression, or (if intentional) run: $0 --regenerate" >&2
+    echo "and pair the regenerate commit with a follow-up issue." >&2
+    exit 2
+  fi
+
+  if [[ $drift_down -gt 0 ]]; then
+    echo >&2
+    echo "Hint: $drift_down metric(s) dropped below baseline. Consider: $0 --regenerate" >&2
+  fi
+
+  echo "OCaml structure ratchet: OK"
+  exit 0
+}
+
+case "${1:-check}" in
+  --regenerate) regenerate ;;
+  --print)      print_counts ;;
+  check|"")     check ;;
+  -h|--help)
+    sed -n '1,28p' "$0"
+    exit 0
+    ;;
+  *)
+    echo "Unknown arg: $1" >&2
+    exit 1
+    ;;
+esac

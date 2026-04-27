@@ -155,6 +155,7 @@ let record_pre_dispatch_terminal_observation
     ~(trajectory_outcome : Trajectory.trajectory_outcome)
     ?error_kind
     ?error_message
+    ?keeper_turn_id
     () : unit =
   let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
   let started_at = now_iso () in
@@ -175,7 +176,10 @@ let record_pre_dispatch_terminal_observation
       agent_name = meta.agent_name;
       trace_id;
       generation;
-      turn_count = Some meta.runtime.usage.total_turns;
+      turn_count =
+        (match keeper_turn_id with
+         | Some _ -> keeper_turn_id
+         | None -> Some meta.runtime.usage.total_turns);
       current_task_id = Option.map Keeper_id.Task_id.to_string meta.current_task_id;
       goal_ids = meta.active_goal_ids;
       outcome;
@@ -1050,6 +1054,12 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
      phases like Overflowed. *)
   let registry_base_path = config.base_path in
   let previous_social_state = Social.previous_state_of_meta meta in
+  (* Decide turn_id at function entry so phase-gate / cascade-routing /
+     livelock skip paths can include it in the receipt and observability
+     stream.  Previously this was [let turn_id = ...] only after several
+     pre-dispatch checks (see turn_livelock guard below), leaving silent
+     skip paths without a turn correlator. *)
+  let keeper_turn_id = meta.runtime.usage.total_turns in
   match Keeper_registry.get_phase ~base_path:registry_base_path meta.name with
   | Some phase when not (Keeper_state_machine.can_execute_turn phase) ->
       let phase_string = Keeper_state_machine.phase_to_string phase in
@@ -1068,6 +1078,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
         ~terminal_reason_code
         ~activity_kind:"keeper.turn_skipped"
         ~trajectory_outcome:(Trajectory.Gated terminal_reason_code)
+        ~keeper_turn_id
         ();
       Ok meta
   | phase_opt ->
@@ -1168,6 +1179,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                 ~terminal_reason_code:"ollama_saturated"
                 ~activity_kind:"keeper.turn_skipped"
                 ~trajectory_outcome:(Trajectory.Gated "ollama_saturated")
+                ~keeper_turn_id
                 ();
               Prometheus.inc_counter
                 Prometheus.metric_keeper_ollama_saturation_skip
@@ -1250,6 +1262,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             ~trajectory_outcome:(Trajectory.Failed terminal_reason_code)
             ~error_kind:(sdk_error_kind err)
             ~error_message
+            ~keeper_turn_id
             ();
           Error err
       | Ok initial_execution ->
@@ -1282,6 +1295,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
              ~terminal_reason_code
              ~activity_kind:"keeper.turn_blocked"
              ~trajectory_outcome:(Trajectory.Gated terminal_reason_code)
+             ~keeper_turn_id
              ();
            Ok meta
        | Keeper_turn_livelock.Started _ ->

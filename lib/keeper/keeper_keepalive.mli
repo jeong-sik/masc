@@ -93,6 +93,29 @@ val record_autonomous_completion_at_for_test : keeper_name:string -> ts:float ->
 (** Test-only: clear all per-keeper completion timestamps. *)
 val reset_autonomous_completion_for_test : unit -> unit
 
+(** PR-M (Leak 9): consecutive [oas_timeout_budget] cycle FAILED strikes
+    per keeper. Promoted to [Keeper_fiber_crash] at
+    [oas_timeout_budget_strike_limit]; reset on any successful turn.
+    Counter survives within a server lifetime — restart resets it,
+    which is the desired behavior since the new fiber starts with
+    a fresh budget context. *)
+val oas_timeout_budget_strike_limit : int
+
+val bump_budget_exhaustion : keeper_name:string -> int
+(** Increment the strike count for [keeper_name] and return the new
+    count.  Thread-safe under [Eio.Mutex]. *)
+
+val reset_budget_exhaustion : keeper_name:string -> unit
+(** Drop any strike count for [keeper_name].  Idempotent. *)
+
+val peek_budget_exhaustion_for_test : keeper_name:string -> int
+(** Test-only: read current strike count without mutating. *)
+
+val set_budget_exhaustion_for_test :
+  keeper_name:string -> strikes:int -> unit
+(** Test-only: pre-load strike count.  [strikes <= 0] is equivalent
+    to [reset_budget_exhaustion]. *)
+
 (** Test-only wrapper around the keeper turn slot acquisition path. *)
 val with_keeper_turn_slot_for_test :
   keeper_name:string ->

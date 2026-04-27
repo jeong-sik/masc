@@ -601,6 +601,14 @@ let metric_cascade_capacity_events = "masc_cascade_capacity_events_total"
 let metric_keeper_invariant_violations = "masc_keeper_invariant_violations_total"
 let metric_keeper_dead_total = "masc_keeper_dead_total"
 let metric_keeper_near_exhaustion_total = "masc_keeper_near_exhaustion_total"
+(* PR-M (Leak 9): consecutive [oas_timeout_budget] cycle FAILED strikes
+   per keeper. Counter increments on each strike; a strike at
+   [outcome=promote] means [Keeper_fiber_crash] was raised so
+   [Keeper_supervisor.sweep_and_recover] will respawn the fiber. Without
+   the strike→crash promotion these failures repeated silently for
+   hours (4h+ zombie keepers observed 2026-04-26). *)
+let metric_keeper_oas_timeout_budget_strike =
+  "masc_keeper_oas_timeout_budget_strike_total"
 let metric_oas_bus_subscriber_stream_depth = "masc_oas_bus_subscriber_stream_depth"
 let metric_oas_bus_publish_block_seconds = "masc_oas_bus_publish_block_seconds_total"
 let metric_oas_bus_publish = "masc_oas_bus_publish_total"

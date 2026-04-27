@@ -50,10 +50,10 @@ function nextExpectedStep(snapshot: KeeperCompositeSnapshot): string {
   if (!snapshot.is_live) {
     return snapshot.last_outcome
       ? 'The next live turn should repopulate KTC/KDP/KCL from idle placeholders.'
-      : 'No turn has completed yet; the first live turn should populate the observer.'
+      : '아직 완료된 턴 없음 — first live turn 이 observer 를 채워야 함.'
   }
   if (snapshot.phase === 'Failing' && snapshot.cascade.state === 'exhausted') {
-    return 'A healthy provider path or explicit recovery clearance must clear Failing before Running can resume.'
+    return '정상 provider path 또는 명시적 recovery clearance 가 Failing 을 해제해야 Running 재개 가능.'
   }
   if (snapshot.phase === 'Overflowed') {
     return 'Context overflow must resolve through compaction or explicit operator clearance before the lifecycle can settle.'
@@ -73,20 +73,20 @@ function nextExpectedStep(snapshot: KeeperCompositeSnapshot): string {
       : 'The lifecycle is outside the active turn cycle; the next meaningful edge should come from a new live turn or operator action.'
   }
   if (snapshot.decision.stage === 'gate_rejected') {
-    return 'The blocked turn should finalize back to idle without entering cascade/tool execution.'
+    return 'blocked turn 은 cascade/tool execution 진입 없이 idle 로 finalize 되어야 함.'
   }
   if (snapshot.cascade.state === 'selecting' || snapshot.cascade.state === 'trying') {
     return 'KCL should settle into done or exhausted once provider routing returns.'
   }
   switch (snapshot.turn_phase) {
     case 'prompting':
-      return 'KTC should advance into executing once prompt assembly is complete.'
+      return 'prompt assembly 완료 시 KTC 가 executing 으로 진행해야 함.'
     case 'executing':
       return 'Execution should either finalize the turn or drive cascade/compaction transitions.'
     case 'compacting':
       return 'Turn finalization is waiting on compaction to finish.'
     case 'finalizing':
-      return 'The next stable state should be idle with last_outcome updated.'
+      return '다음 stable state 는 last_outcome 갱신된 idle 이어야 함.'
     default:
       return 'The next meaningful edge should come from the next observed lifecycle event.'
   }

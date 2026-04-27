@@ -2,6 +2,7 @@ import { html } from 'htm/preact'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 
 import type { KeeperCompositeSnapshot } from '../api/keeper'
+import { nowSecondsSignal, useNowSecondsTicker } from '../lib/now-signal'
 
 import {
   type CompositeObservation,
@@ -68,12 +69,12 @@ const INSIGHT_PANEL_CLS: Record<InsightTone, string> = {
 export function OperationalMeaningPanel({
   snapshot,
   observations,
-  now,
 }: {
   snapshot: KeeperCompositeSnapshot
   observations: CompositeObservation[]
-  now: number
 }) {
+  useNowSecondsTicker()
+  const now = nowSecondsSignal.value
   const lanes = deriveObservedLaneSummaries(snapshot, observations, now)
   const insight = deriveOperationalInsight(snapshot, observations, now, lanes)
   const panelCls = INSIGHT_PANEL_CLS[insight.tone]
@@ -167,11 +168,11 @@ const PHASE_BAR_FILL: Record<string, string> = {
 
 function PhaseSparkline({
   observations,
-  now,
 }: {
   observations: CompositeObservation[]
-  now: number
 }) {
+  useNowSecondsTicker()
+  const now = nowSecondsSignal.value
   const segments = useMemo(
     () => deriveSwimlaneSegments(observations, 'phase', now),
     [observations, now],
@@ -266,14 +267,14 @@ export function HeroPhase({
   snapshot,
   observations,
   phaseSince,
-  now,
 }: {
   snapshot: KeeperCompositeSnapshot
   phaseLog?: string[]
   observations: CompositeObservation[]
   phaseSince: number | null
-  now: number
 }) {
+  useNowSecondsTicker()
+  const now = nowSecondsSignal.value
   const prevRef = useRef(snapshot.phase)
   const [flash, setFlash] = useState(false)
   useEffect(() => {
@@ -334,7 +335,7 @@ export function HeroPhase({
         </div>
         ${flash ? html`<span class="text-3xs text-[var(--color-accent-fg)] animate-pulse font-mono" aria-live="assertive">상태 변경</span>` : null}
       </div>
-      <${PhaseSparkline} observations=${observations} now=${now} />
+      <${PhaseSparkline} observations=${observations} />
     </div>
   `
 }
@@ -345,7 +346,6 @@ export function PipelineStep({
   value,
   isLast,
   sinceTs,
-  now,
   limited,
 }: {
   label: string
@@ -353,11 +353,12 @@ export function PipelineStep({
   value: string
   isLast?: boolean
   sinceTs: number | null
-  now: number
   /** When true, this lane has limited observability — only a subset of
       states are derivable from the registry. Shown as a subtle indicator. */
   limited?: boolean
 }) {
+  useNowSecondsTicker()
+  const now = nowSecondsSignal.value
   const prevRef = useRef(value)
   const [flash, setFlash] = useState(false)
   useEffect(() => {
@@ -427,22 +428,23 @@ export function PipelineStep({
 export function TurnPipelineStrip({
   snapshot,
   stateEntries,
-  now,
 }: {
   snapshot: KeeperCompositeSnapshot
   stateEntries: StateEntries | null
-  now: number
 }) {
+  // Pure pass-through wrapper: each PipelineStep child subscribes to
+  // nowSecondsSignal independently, so this component itself never reads
+  // the signal and is not re-rendered by 5 s ticks.
   return html`
     <div class="rounded border border-[var(--white-8)] bg-[var(--white-2)] p-3">
       <div class="mb-2 text-3xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">
         턴 파이프라인
       </div>
       <div class="flex flex-col gap-1 md:flex-row md:gap-0 md:items-stretch" role="list" aria-label="턴 파이프라인 단계">
-        <${PipelineStep} shortLabel="KTC" label="턴 주기" value=${snapshot.turn_phase} sinceTs=${stateEntries?.turn ?? null} now=${now} />
-        <${PipelineStep} shortLabel="KDP" label="의사결정" value=${snapshot.decision.stage} sinceTs=${stateEntries?.decision ?? null} now=${now} limited />
-        <${PipelineStep} shortLabel="KCL" label="캐스케이드" value=${snapshot.cascade.state} sinceTs=${stateEntries?.cascade ?? null} now=${now} limited />
-        <${PipelineStep} shortLabel="KMC" label="컨텍스트 압축" value=${snapshot.compaction.stage} sinceTs=${stateEntries?.compaction ?? null} now=${now} isLast />
+        <${PipelineStep} shortLabel="KTC" label="턴 주기" value=${snapshot.turn_phase} sinceTs=${stateEntries?.turn ?? null} />
+        <${PipelineStep} shortLabel="KDP" label="의사결정" value=${snapshot.decision.stage} sinceTs=${stateEntries?.decision ?? null} limited />
+        <${PipelineStep} shortLabel="KCL" label="캐스케이드" value=${snapshot.cascade.state} sinceTs=${stateEntries?.cascade ?? null} limited />
+        <${PipelineStep} shortLabel="KMC" label="컨텍스트 압축" value=${snapshot.compaction.stage} sinceTs=${stateEntries?.compaction ?? null} isLast />
       </div>
     </div>
   `

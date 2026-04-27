@@ -3,6 +3,11 @@
 
 open Keeper_types
 
+(* Static patterns for [STATE] block detection, hoisted from
+   [find_state_block].  [Re.compile] runs once at module load. *)
+let state_start_re = Re.str "[STATE]" |> Re.compile
+let state_end_re = Re.str "[/STATE]" |> Re.compile
+
 type keeper_policy_observation = {
   source_kind: string;
   room_id: string option;
@@ -229,14 +234,12 @@ let strip_prefix_ci ~(prefix : string) (s : string) : string option =
       None
 
 let find_state_block (reply : string) : string option =
-  let start_re = Re.str "[STATE]" |> Re.compile in
-  let end_re = Re.str "[/STATE]" |> Re.compile in
-  match Re.exec_opt start_re reply with
+  match Re.exec_opt state_start_re reply with
   | None -> None
   | Some g ->
     let start_idx = Re.Group.start g 0 in
     let body_start = start_idx + String.length "[STATE]" in
-    (match Re.exec_opt ~pos:body_start end_re reply with
+    (match Re.exec_opt ~pos:body_start state_end_re reply with
      | None -> None
      | Some g2 ->
        let end_idx = Re.Group.start g2 0 in

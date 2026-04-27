@@ -100,10 +100,10 @@ let bool_of_env_opt name =
       else if v = "0" || v = "false" || v = "no" || v = "n" || v = "off" then Some false
       else None
 
+let valid_name_re = Re.Pcre.re "^[A-Za-z0-9._-]+$" |> Re.compile
+
 let validate_name name =
-  (* Same rule as keeper script: conservative handle chars only. *)
-  let re = Re.Pcre.re "^[A-Za-z0-9._-]+$" |> Re.compile in
-  name <> "" && Re.execp re name
+  name <> "" && Re.execp valid_name_re name
 
 let default_proactive_enabled = true
 let default_proactive_idle_sec = 120

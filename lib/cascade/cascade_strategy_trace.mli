@@ -54,6 +54,18 @@ type event = {
   candidates_out : int;
   backoff_ms : int;
   kind : event_kind;
+  trace_id : string option;
+      (** Optional outer trace identifier for cross-system correlation.
+
+          Step 0a (PR #11154) added [keeper_turn_id] propagation through
+          [log.ml] and [keeper_tool_call_log.ml]; this field carries the
+          same identifier into the cascade strategy ring so the dashboard
+          and [bin/masc_trace] can join cascade decisions to the originating
+          turn timeline.
+
+          Producers that do not yet thread the identifier should pass
+          [None]; downstream consumers must treat [None] as "unknown",
+          not as failure. *)
 }
 
 val record : event -> unit

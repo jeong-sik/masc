@@ -1952,6 +1952,11 @@ let run_named
       candidates_out;
       backoff_ms;
       kind;
+      (* trace_id is left [None] until the keeper_turn_id wired by
+         Step 0a is threaded into [try_cascade]; downstream consumers
+         (dashboard_cascade, bin/masc_trace) already render [None] as
+         a JSON [null] so producers can adopt incrementally. *)
+      trace_id = None;
     }
   in
   let rec cycle_loop n =

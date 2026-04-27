@@ -191,10 +191,10 @@ export async function sendKeeperThreadMessage(name: string, prompt: string): Pro
       finalizeAssistantEntry(keeperName, assistantId, {
         delivery: 'timeout',
         streamState: null,
-        error: 'Stream cancelled',
+        error: '스트림 취소됨',
         timestamp: new Date().toISOString(),
       })
-      setRecordValue(keeperActionErrors, keeperName, 'Stream cancelled')
+      setRecordValue(keeperActionErrors, keeperName, '스트림 취소됨')
       throw err
     }
 

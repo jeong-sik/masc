@@ -297,13 +297,14 @@ let test_approval_queue_expire_stale () =
         ~keeper_name:"test-keeper"
         ~tool_name:"masc_dangerous_tool"
         ~input:(`Assoc [])
-        ~risk_level:AQ.Critical
+        ~risk_level:AQ.High
         ()
     in
     result := Some decision
   );
   Eio.Fiber.yield ();
-  (* Expire with max_wait_s=0 → everything is stale *)
+  (* Expire with max_wait_s=0 → everything past the threshold is stale.
+     [High] (and below) is auto-expired by the periodic janitor. *)
   AQ.expire_stale ~max_wait_s:0.0;
   Eio.Fiber.yield ();
   match !result with
@@ -311,6 +312,36 @@ let test_approval_queue_expire_stale () =
     Alcotest.(check bool) "timeout reason" true
       (String.starts_with ~prefix:"approval timed out" reason)
   | _ -> Alcotest.fail "expected Reject from timeout"
+
+let test_approval_queue_expire_skips_critical () =
+  (* [Critical] entries originate from indefinite-wait operator gates
+     ([keeper_continue_after_reconcile] etc.). Auto-rejection would
+     create a 30-min expire / re-enqueue cycle and silently push the
+     keeper into a permanent paused state. The janitor must skip them. *)
+  Eio_main.run @@ fun _env ->
+  let resolution = ref None in
+  let id =
+    AQ.submit_pending
+      ~keeper_name:"test-keeper-critical"
+      ~tool_name:"keeper_continue_after_reconcile"
+      ~input:(`Assoc [])
+      ~risk_level:AQ.Critical
+      ~on_resolution:(fun decision -> resolution := Some decision)
+      ()
+  in
+  let pending_before = AQ.pending_count_for_keeper ~keeper_name:"test-keeper-critical" in
+  Alcotest.(check int) "Critical entry enqueued" 1 pending_before;
+  (* Aggressive max_wait_s=0: would expire High/Medium/Low immediately. *)
+  AQ.expire_stale ~max_wait_s:0.0;
+  let pending_after = AQ.pending_count_for_keeper ~keeper_name:"test-keeper-critical" in
+  Alcotest.(check int) "Critical NOT expired by janitor" 1 pending_after;
+  Alcotest.(check (option string)) "on_resolution NOT called" None
+    (match !resolution with
+     | None -> None
+     | Some _ -> Some "resolved");
+  (* Cleanup: manually resolve so subsequent tests don't see stray state. *)
+  match AQ.resolve ~id ~decision:(Agent_sdk.Hooks.Reject "test cleanup") with
+  | Ok () | Error _ -> ()
 
 let test_approval_resolve_nonexistent () =
   Eio_main.run @@ fun _env ->
@@ -975,6 +1006,7 @@ let () =
       Alcotest.test_case "submit and approve" `Quick test_approval_queue_submit_and_resolve;
       Alcotest.test_case "submit and reject" `Quick test_approval_queue_reject;
       Alcotest.test_case "expire stale" `Quick test_approval_queue_expire_stale;
+      Alcotest.test_case "expire skips Critical" `Quick test_approval_queue_expire_skips_critical;
       Alcotest.test_case "resolve nonexistent" `Quick test_approval_resolve_nonexistent;
       Alcotest.test_case "cancel cleans up" `Quick test_approval_queue_cancel_cleans_up;
       Alcotest.test_case "background pending callback" `Quick

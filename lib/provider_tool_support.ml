@@ -44,7 +44,6 @@ let oas_capabilities_of_config (provider_cfg : Llm_provider.Provider_config.t) =
     | Gemini_cli -> Llm_provider.Capabilities.gemini_cli_capabilities
     | Kimi_cli -> Llm_provider.Capabilities.kimi_cli_capabilities
     | Codex_cli -> Llm_provider.Capabilities.codex_cli_capabilities
-    | _ -> Llm_provider.Capabilities.openai_chat_capabilities
   in
   let caps =
     match provider_cfg.kind with

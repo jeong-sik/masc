@@ -1,2 +1,5 @@
 # Manual line-cap exceptions for generated code.
 lib/masc_pb.ml
+# Cross-cascade fallback logic (provider selection, health-aware routing).
+# Targeted extraction to a dedicated module is tracked in TODO_TECH_DEBT.md.
+lib/oas_worker_named.ml

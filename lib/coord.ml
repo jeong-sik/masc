@@ -242,6 +242,26 @@ let () =
   Atomic.set Coord_hooks.task_completion_path_observed_fn
     record_task_completion_path
 
+(* #10421: implicit auto-release rate from [task_claim_next].
+   Field log showed 43 claimed→todo vs 24 todo→claimed in one
+   day (179% release/claim ratio) with only 1/71 transitions
+   reaching done — same task hot-potatoed up to 5x.  Counter
+   gives operators a fleet-wide rate, broken down by keeper
+   and by [from_status] so [InProgress → Todo] (mid-work
+   churn) is separable from [Claimed → Todo] (just-claimed
+   churn).  Cardinality bounded at ~fleet × 2. *)
+let task_auto_release_metric = "masc_task_auto_release_total"
+
+let record_task_auto_release ~agent_name ~from_status =
+  Prometheus.inc_counter task_auto_release_metric
+    ~labels:[ ("agent_name", agent_name);
+              ("from_status", from_status) ]
+    ()
+
+let () =
+  Atomic.set Coord_hooks.task_auto_release_observed_fn
+    record_task_auto_release
+
 (* #9632: Process_eio timeout observability.
    Fleet-wide rate of subprocess timeouts, broken down by program
    (argv[0] basename) and configured budget.  Lets operators answer

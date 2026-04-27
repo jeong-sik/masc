@@ -433,7 +433,7 @@ let selected_row rows selected_name =
 let row_click_effect name =
   let select () = Bonsai.Expert.Var.set selected_name_var (Some name) in
   [ Attr.on_click (fun _ -> Effect.of_sync_fun select ())
-  ; Attr.on_key_down (fun ev ->
+  ; Attr.on_keydown (fun ev ->
       let open Virtual_dom.Vdom.Event.Keyboard in
       if Key.equal ev.key Key.Enter || Key.equal ev.key (Key.of_string " ")
       then Effect.of_sync_fun select ()

@@ -17,13 +17,21 @@ let risk_class_to_string = function
 let risk_class_to_json rc =
   `String (risk_class_to_string rc)
 
+(* Both helpers below replace [_ -> false] wildcards with explicit
+   arms.  Behaviour is identical for the four current variants
+   (locked by test_risk_classifier; Read/Write/Network/Destructive
+   each asserted directly), but adding a future variant — e.g.
+   Privileged, External_call — now triggers a non-exhaustive-match
+   compile error instead of silently inheriting the false branch.
+   Defends against the inverse of the
+   "Variant addition partial-match cascade" pattern. *)
 let is_cacheable = function
   | Read -> true
-  | _ -> false
+  | Write | Network | Destructive -> false
 
 let requires_approval = function
   | Destructive -> true
-  | _ -> false
+  | Read | Write | Network -> false
 
 let default_timeout_ms = function
   | Read -> 30_000

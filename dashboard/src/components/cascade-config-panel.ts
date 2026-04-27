@@ -1112,6 +1112,8 @@ function CascadeRawConfigEditor({
     }
   }
 
+  const materializationError = raw?.materialization_error ?? null
+
   return html`
     <${Card} title=${mode.title}>
       <div class="flex flex-col gap-3 p-4">
@@ -1119,6 +1121,21 @@ function CascadeRawConfigEditor({
         <p class="text-xs text-[var(--color-fg-muted)]">
           ${mode.secondary}
         </p>
+
+        ${materializationError
+          ? html`
+            <div
+              role="alert"
+              class="rounded border border-[var(--bad-light)] bg-[var(--bad-bg-soft, var(--color-bg-page))] px-3 py-2 text-xs text-[var(--bad-light)]"
+            >
+              <strong class="font-semibold">cascade.toml 적용 실패:</strong>
+              <span class="ml-1 font-mono break-all">${materializationError}</span>
+              <p class="mt-1 text-[var(--color-fg-muted)]">
+                아래 표시되는 raw_json 은 마지막으로 정상 머터리얼라이즈된 스냅샷입니다.
+                source_text 의 변경분은 strict-field 검증에 의해 거절되어 적용되지 않았습니다.
+              </p>
+            </div>`
+          : ''}
 
         <form class="flex flex-col gap-3" onSubmit=${handleSave}>
           <textarea

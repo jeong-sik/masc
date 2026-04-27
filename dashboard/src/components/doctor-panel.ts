@@ -14,6 +14,7 @@ import { AsyncContainer } from './common/async-container'
 import { Card } from './common/card'
 import { SectionCap } from './common/section-cap'
 import { Chip } from './chip'
+import { Pill, type PillKind } from './pill'
 
 export type DoctorKind = 'config' | 'sidecar'
 
@@ -69,6 +70,19 @@ export function severityChipClass(code: number): string {
       return 'border-[var(--warn-30)] bg-[var(--warn-12)] text-[var(--color-status-warn)]'
     case 'error':
       return 'border-[var(--bad-30)] bg-[var(--bad-12)] text-[var(--color-status-err)]'
+  }
+}
+
+// Map exit code to atomic Pill kind. Used by callers that have
+// migrated from the bespoke severityChipClass to the Pill primitive.
+export function severityPillKind(code: number): PillKind {
+  switch (severityForExitCode(code)) {
+    case 'ok':
+      return 'ok'
+    case 'warn':
+      return 'warn'
+    case 'error':
+      return 'err'
   }
 }
 
@@ -260,7 +274,7 @@ function ConfigNotesList({ notes }: { notes: ConfigNotesView }) {
 
 function DoctorEntryCard({ entry }: { entry: DoctorEntry }) {
   const label = severityLabel(entry.exit_code)
-  const chip = severityChipClass(entry.exit_code)
+  const pillKind = severityPillKind(entry.exit_code)
   const expanded = useSignal(false)
   const onToggle = () => { expanded.value = !expanded.value }
   return html`
@@ -275,9 +289,7 @@ function DoctorEntryCard({ entry }: { entry: DoctorEntry }) {
           ${doctorHeading(entry)}
           <span class="ml-2 text-[length:var(--fs-10)] text-[var(--color-fg-muted)]">${expanded.value ? '▾' : '▸'}</span>
         </div>
-        <span class="rounded-full border px-2 py-0.5 text-[length:var(--fs-10)] uppercase tracking-wider ${chip}">
-          ${label}
-        </span>
+        <${Pill} kind=${pillKind}>${label}<//>
       </button>
       <div class="mt-1 text-xs text-[var(--color-fg-muted)]">
         ${entry.kind === 'config' ? '설정 진단' : `${entry.name} sidecar`} · exit ${entry.exit_code}

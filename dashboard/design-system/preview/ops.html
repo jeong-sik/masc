@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="en" data-theme="dark-fantasy">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MASC · Ops Console</title>
+<link rel="stylesheet" href="../source_styles/tokens.generated.css">
+<link rel="stylesheet" href="_preview.css">
+<style>
+  /* ────────────────────────────────────────────────────────────
+     Ops preview-only styles.
+     Production source: dashboard/src/styles/ops.css
+     We re-implement ops-banner using design-system semantic tokens
+     (--err-soft / --warn-soft / --info-soft) so the preview uses
+     var() only, and document the raw hex/rgba drift below in the
+     Phase 2 candidate section.
+     ──────────────────────────────────────────────────────────── */
+
+  /* Source-line annotation chip on each card */
+  .src-line {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--color-fg-muted);
+    background: var(--color-bg-page);
+    border: 1px solid var(--color-border-default);
+    border-radius: 2px;
+    padding: 2px 6px;
+    letter-spacing: var(--track-wide);
+  }
+
+  /* Banner — preview re-implementation of @utility ops-banner.
+     Production literals (rgba + hex) are catalogued in the Phase 2
+     table; preview substitutes design-system --err-* / --warn-* /
+     --info-* tokens so this page itself stays var()-only. */
+  .pv-ops-banner {
+    border-radius: 3px;
+    padding: 12px 14px;
+    border: 1px solid var(--color-border-default);
+    font: var(--type-body);
+    display: grid;
+    gap: 4px;
+  }
+  .pv-ops-banner .b-eyebrow {
+    font: 600 var(--type-label);
+    text-transform: uppercase;
+    letter-spacing: var(--track-caps);
+    opacity: .85;
+  }
+  .pv-ops-banner.error {
+    background: var(--err-soft);
+    border-color: var(--err-border);
+    color: var(--err-fg);
+  }
+  .pv-ops-banner.warn {
+    background: var(--warn-soft);
+    border-color: var(--warn-border);
+    color: var(--warn-fg);
+  }
+  .pv-ops-banner.info {
+    background: var(--info-soft);
+    border-color: var(--info-border);
+    color: var(--info-fg);
+  }
+
+  /* Import banner block */
+  .import-banner {
+    background: var(--color-bg-surface);
+    border: 1px solid var(--color-border-default);
+    border-left: 2px solid var(--color-accent-fg);
+    border-radius: 3px;
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .import-banner .lbl {
+    font: 600 var(--type-label);
+    text-transform: uppercase;
+    letter-spacing: var(--track-caps);
+    color: var(--color-fg-muted);
+  }
+  .import-banner ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .import-banner code {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--color-fg-secondary);
+    letter-spacing: var(--track-wide);
+  }
+
+  /* Phase 2 candidate table */
+  .pv-cand {
+    width: 100%;
+    border-collapse: collapse;
+    font: var(--type-caption);
+  }
+  .pv-cand th, .pv-cand td {
+    text-align: left;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--color-border-default);
+    vertical-align: top;
+  }
+  .pv-cand th {
+    font: 600 var(--type-label);
+    text-transform: uppercase;
+    letter-spacing: var(--track-caps);
+    color: var(--color-fg-muted);
+    border-bottom-color: var(--color-border-strong);
+  }
+  .pv-cand td .lit {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--color-fg-secondary);
+  }
+  .pv-cand td .rec {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--color-accent-fg);
+  }
+
+  .pv-foot-note {
+    font: var(--type-caption);
+    color: var(--color-fg-muted);
+    max-width: 80ch;
+  }
+</style>
+</head>
+<body>
+  <div class="pv-root">
+
+    <header class="pv-head">
+      <div class="pv-eyebrow">Ops console preview · DS-Drift W03</div>
+      <h1 class="pv-title">Ops Console — operator-facing surfaces</h1>
+      <p class="pv-sub">
+        Visualization of <code>dashboard/src/styles/ops.css</code> selectors
+        (production utility extracted for issue #3915). Each card cites the
+        production source line. Raw hex/rgba present in ops.css that escape
+        var() are catalogued in <em>Phase 2 candidate</em> below for token
+        promotion.
+      </p>
+    </header>
+
+    <section class="pv-sect">
+      <div class="pv-sect-h">
+        <h2>Production import sites</h2>
+        <span class="sub">where ops.css enters the bundle</span>
+      </div>
+      <div class="import-banner">
+        <span class="lbl">ops.css is imported by</span>
+        <ul>
+          <li><code>dashboard/src/main.ts:30 — import './styles/ops.css'</code></li>
+          <li><code>dashboard/src/components/ops/index.ts — class consumer (ops-banner error/warn/info)</code></li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="pv-sect">
+      <div class="pv-sect-h">
+        <h2>ops-banner — error / warn / info</h2>
+        <span class="sub">production: ops.css:5–9</span>
+      </div>
+      <div class="pv-grid-3">
+
+        <div class="pv-cell">
+          <div class="pv-cell-h">
+            <span class="pv-cell-label">ops-banner.error</span>
+            <span class="src-line">production source: ops.css:L6</span>
+          </div>
+          <div class="pv-ops-banner error" role="alert">
+            <span class="b-eyebrow">error</span>
+            <span>Operator action failed — review payload and retry.</span>
+          </div>
+          <div class="pv-cell-meta">preview tokens: --err-soft / --err-border / --err-fg</div>
+          <div class="pv-cell-meta">prod literals catalogued in Phase 2 table below</div>
+        </div>
+
+        <div class="pv-cell">
+          <div class="pv-cell-h">
+            <span class="pv-cell-label">ops-banner.warn</span>
+            <span class="src-line">production source: ops.css:L7</span>
+          </div>
+          <div class="pv-ops-banner warn" role="status">
+            <span class="b-eyebrow">warn</span>
+            <span>Workflow context partial — proceed with caution.</span>
+          </div>
+          <div class="pv-cell-meta">preview tokens: --warn-soft / --warn-border / --warn-fg</div>
+          <div class="pv-cell-meta">prod literals catalogued in Phase 2 table below</div>
+        </div>
+
+        <div class="pv-cell">
+          <div class="pv-cell-h">
+            <span class="pv-cell-label">ops-banner.info</span>
+            <span class="src-line">production source: ops.css:L8</span>
+          </div>
+          <div class="pv-ops-banner info" role="status">
+            <span class="b-eyebrow">info</span>
+            <span>Workflow context ready — operator may dispatch.</span>
+          </div>
+          <div class="pv-cell-meta">preview tokens: --info-soft / --info-border / --info-fg</div>
+          <div class="pv-cell-meta">prod literals catalogued in Phase 2 table below</div>
+        </div>
+
+      </div>
+    </section>
+
+    <section class="pv-sect">
+      <div class="pv-sect-h">
+        <h2>Removed / dead surfaces</h2>
+        <span class="sub">retained as comments in ops.css for archaeology</span>
+      </div>
+      <div class="pv-grid-2">
+        <div class="pv-cell">
+          <div class="pv-cell-h">
+            <span class="pv-cell-label">ops-action-guide-item · folded</span>
+            <span class="src-line">production source: ops.css:L11</span>
+          </div>
+          <p class="pv-cell-meta">
+            Tone variants folded into the @utility ops-action-guide-item
+            block elsewhere; no live styles in ops.css. No preview
+            instance — production class lives in another stylesheet.
+          </p>
+        </div>
+        <div class="pv-cell">
+          <div class="pv-cell-h">
+            <span class="pv-cell-label">ops-priority-card · folded</span>
+            <span class="src-line">production source: ops.css:L12</span>
+          </div>
+          <p class="pv-cell-meta">
+            Same disposition as ops-action-guide-item.
+          </p>
+        </div>
+        <div class="pv-cell">
+          <div class="pv-cell-h">
+            <span class="pv-cell-label">ops-workbench / ops-actor-input · removed</span>
+            <span class="src-line">production source: ops.css:L15</span>
+          </div>
+          <p class="pv-cell-meta">
+            Dead media queries removed; classes not in use anywhere in
+            <code>dashboard/src/</code>. Listed for completeness only.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section class="pv-sect">
+      <div class="pv-sect-h">
+        <h2>Phase 2 candidate — raw color literals in ops.css</h2>
+        <span class="sub">tokens to promote so ops.css renders var()-only</span>
+      </div>
+      <table class="pv-cand">
+        <thead>
+          <tr>
+            <th>ops.css line</th>
+            <th>raw literal</th>
+            <th>role</th>
+            <th>recommended token</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="src-line">ops.css:L6</span></td>
+            <td><span class="lit">rgba(239, 68, 68, 0.34)</span></td>
+            <td>error banner border</td>
+            <td><span class="rec">--color-status-err-border</span> (alias of --err-border)</td>
+          </tr>
+          <tr>
+            <td><span class="src-line">ops.css:L6</span></td>
+            <td><span class="lit">#fecaca</span></td>
+            <td>error banner foreground</td>
+            <td><span class="rec">--color-status-err-fg-on-soft</span> (new, mirrors --err-fg)</td>
+          </tr>
+          <tr>
+            <td><span class="src-line">ops.css:L7</span></td>
+            <td><span class="lit">rgba(245, 158, 11, 0.12)</span></td>
+            <td>warn banner background</td>
+            <td><span class="rec">--color-status-warn-soft</span> (alias of --warn-soft)</td>
+          </tr>
+          <tr>
+            <td><span class="src-line">ops.css:L7</span></td>
+            <td><span class="lit">rgba(245, 158, 11, 0.28)</span></td>
+            <td>warn banner border</td>
+            <td><span class="rec">--color-status-warn-border</span> (alias of --warn-border)</td>
+          </tr>
+          <tr>
+            <td><span class="src-line">ops.css:L8</span></td>
+            <td><span class="lit">rgba(34, 211, 238, 0.26)</span></td>
+            <td>info banner border</td>
+            <td><span class="rec">--color-status-info-border</span> (alias of --info-border)</td>
+          </tr>
+          <tr>
+            <td><span class="src-line">ops.css:L8</span></td>
+            <td><span class="lit">#cffafe</span></td>
+            <td>info banner foreground</td>
+            <td><span class="rec">--color-status-info-fg-on-soft</span> (new, mirrors --info-fg)</td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="pv-foot-note">
+        Phase 2 will replace the rgba/hex literals above with the
+        recommended tokens, eliminating ops.css drift from the design
+        system. <code>--bad-12</code>, <code>--cyan-12</code>,
+        <code>--yellow-100</code> referenced in ops.css already resolve
+        from <code>dashboard/src/styles/variables.css</code> but are
+        outside the design-system <code>tokens.generated.css</code>
+        SSOT — they are W04+ migration targets.
+      </p>
+    </section>
+
+  </div>
+</body>
+</html>

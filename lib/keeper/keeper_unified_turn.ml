@@ -12,18 +12,16 @@ module Social = Keeper_social_model
 
 (* Interval (seconds) for the per-turn background fiber that drains the
    `keeper_turn` subscription on the OAS event bus.  See
-   [start_background_turn_event_bus_drain] for context.  Default 0.05s
-   (50 ms); tunable via [MASC_KEEPER_TURN_DRAIN_INTERVAL_SEC] — floats
-   parsed as seconds, invalid values fall back to the default. *)
+   [start_background_turn_event_bus_drain] for context.
+
+   Step 14(b) of the bloodflow restoration plan inlined the env knob
+   [MASC_KEEPER_TURN_DRAIN_INTERVAL_SEC]: hyperparameters belong in
+   code, not in [Sys.getenv_opt].  Calibrated values move via PR with
+   measurement evidence, not as silent operator overrides. *)
 let default_turn_event_bus_drain_interval_sec = 0.05
 
 let turn_event_bus_drain_interval_sec () =
-  match Sys.getenv_opt "MASC_KEEPER_TURN_DRAIN_INTERVAL_SEC" with
-  | Some raw ->
-    (match float_of_string_opt (String.trim raw) with
-     | Some v when v > 0. -> v
-     | _ -> default_turn_event_bus_drain_interval_sec)
-  | None -> default_turn_event_bus_drain_interval_sec
+  default_turn_event_bus_drain_interval_sec
 
 let substring_matches_at ~(needle : string) (haystack : string) start_idx =
   let needle_len = String.length needle in

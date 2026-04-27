@@ -45,6 +45,15 @@ export interface KpiCellProps {
   delta?: KpiCellDelta
   /** Optional id reference forwarded to the host listitem. */
   id?: string
+  /** Drop the cell-level surface (background + border + radius). Use when
+   *  an outer strip already owns the surface and the cells should look
+   *  like flat columns inside it. `live` styling is also suppressed
+   *  in bare mode because the live ring assumes a cell-level border. */
+  bare?: boolean
+  /** Optional `data-testid` forwarded to the host listitem. Lets call
+   *  sites preserve existing test selectors when swapping in from
+   *  hand-rolled cells. */
+  testId?: string
 }
 
 /** Assemble the screen-reader announcement for one KPI cell.
@@ -97,14 +106,19 @@ export function KpiCell(props: KpiCellProps): VNode {
   const labelColor = 'var(--color-fg-disabled)'
   const captionColor = 'var(--color-fg-muted)'
 
+  const bare = props.bare === true
   const containerStyle = {
-    ...surfaceStyle,
-    ...(props.live ? liveOverrideStyle : {}),
+    ...(bare ? {} : surfaceStyle),
+    ...(!bare && props.live ? liveOverrideStyle : {}),
     display: 'flex',
     flexDirection: variant === 'compact' ? ('row' as const) : ('column' as const),
     alignItems: variant === 'compact' ? ('baseline' as const) : ('flex-start' as const),
     gap: variant === 'compact' ? 'var(--spacing-element)' : variant === 'stacked' ? '4px' : '6px',
-    padding: variant === 'stacked' ? `14px var(--spacing-card)` : `10px var(--spacing-group)`,
+    padding: bare
+      ? '0'
+      : variant === 'stacked'
+        ? `14px var(--spacing-card)`
+        : `10px var(--spacing-group)`,
     fontFamily: MONO_STACK,
     minWidth: '0',
   }
@@ -157,6 +171,7 @@ export function KpiCell(props: KpiCellProps): VNode {
     <div
       role="listitem"
       id=${props.id}
+      data-testid=${props.testId}
       aria-label=${kpiCellAriaLabel(props)}
       style=${containerStyle}
     >

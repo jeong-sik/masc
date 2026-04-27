@@ -12,6 +12,7 @@ import { useMemo } from 'preact/hooks'
 import { TimeAgo } from '../common/time-ago'
 import { StatusDot } from '../common/status-dot'
 import { RouteLink } from '../common/route-link'
+import { KpiCell, type KpiCellKind } from '../kpi-cell'
 import { AgentAvatar } from './agent-avatar'
 import { missionSnapshot } from '../../mission-store'
 import { tasks, keepers } from '../../store'
@@ -81,25 +82,6 @@ export function computeFunnelCounts(
   return { created, inProgress, awaiting, completed, target }
 }
 
-function FunnelCell({
-  label,
-  value,
-  toneClass,
-  testId,
-}: {
-  label: string
-  value: string
-  toneClass?: string
-  testId?: string
-}) {
-  return html`
-    <div class="flex flex-col gap-1 min-w-0" data-testid=${testId}>
-      <span class="text-2xs uppercase tracking-wider text-[var(--color-fg-muted)]">${label}</span>
-      <span class=${`text-2xl font-semibold tabular-nums ${toneClass ?? 'text-[var(--color-fg-secondary)]'}`}>${value}</span>
-    </div>
-  `
-}
-
 export function formatTargetRatio(counts: FunnelCounts): string {
   if (counts.target === null) return String(counts.completed)
   const pct = Math.min(100, Math.round((counts.completed / counts.target) * 100))
@@ -107,19 +89,23 @@ export function formatTargetRatio(counts: FunnelCounts): string {
 }
 
 function FunnelCard({ counts }: { counts: FunnelCounts }) {
-  const awaitingTone = counts.awaiting > 0 ? 'text-[var(--color-status-warn)]' : undefined
+  const awaitingKind: KpiCellKind | undefined = counts.awaiting > 0 ? 'warn' : undefined
   return html`
     <section class=${CARD} aria-label="오늘 상황" data-testid="overview-funnel">
       <header class="flex items-center justify-between mb-3">
         <h2 class="text-xs font-semibold uppercase tracking-wider text-[var(--color-fg-secondary)]">오늘 상황</h2>
         <span class="text-2xs text-[var(--color-fg-muted)]">task 기준</span>
       </header>
-      <div class="grid grid-cols-5 gap-4 max-[640px]:grid-cols-3 max-[640px]:gap-y-4">
-        <${FunnelCell} label="신규" value=${String(counts.created)} testId="funnel-created" />
-        <${FunnelCell} label="진행" value=${String(counts.inProgress)} testId="funnel-in-progress" />
-        <${FunnelCell} label="검증 대기" value=${String(counts.awaiting)} toneClass=${awaitingTone} testId="funnel-awaiting" />
-        <${FunnelCell} label="완료" value=${String(counts.completed)} toneClass="text-[var(--color-status-ok)]" testId="funnel-completed" />
-        <${FunnelCell} label="목표" value=${formatTargetRatio(counts)} testId="funnel-target" />
+      <div
+        role="list"
+        aria-label="오늘 funnel"
+        class="grid grid-cols-5 gap-4 max-[640px]:grid-cols-3 max-[640px]:gap-y-4"
+      >
+        <${KpiCell} bare variant="stacked" label="신규" value=${String(counts.created)} testId="funnel-created" />
+        <${KpiCell} bare variant="stacked" label="진행" value=${String(counts.inProgress)} testId="funnel-in-progress" />
+        <${KpiCell} bare variant="stacked" label="검증 대기" value=${String(counts.awaiting)} kind=${awaitingKind} testId="funnel-awaiting" />
+        <${KpiCell} bare variant="stacked" label="완료" value=${String(counts.completed)} kind="ok" testId="funnel-completed" />
+        <${KpiCell} bare variant="stacked" label="목표" value=${formatTargetRatio(counts)} testId="funnel-target" />
       </div>
     </section>
   `

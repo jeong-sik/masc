@@ -69,17 +69,17 @@ let agent_credential_to_yojson (c : agent_credential) =
 
 let agent_credential_of_yojson json =
   let open Yojson.Safe.Util in
-  try
-    let agent_name = json |> member "agent_name" |> to_string in
-    let token = json |> member "token" |> to_string in
-    let role_str = json |> member "role" |> to_string in
-    let role = match agent_role_of_string role_str with Ok r -> r | Error e -> failwith e in
+  let agent_name = json |> member "agent_name" |> to_string in
+  let token = json |> member "token" |> to_string in
+  let role_str = json |> member "role" |> to_string in
+  match agent_role_of_string role_str with
+  | Error e -> Error e
+  | Ok role ->
     let created_at = json |> member "created_at" |> to_string in
     let expires_at = json |> member "expires_at" |> to_string_option in
     let id = json |> member "id" |> to_string_option |> Option.map Credential_id.of_string in
     let agent_id = json |> member "agent_id" |> to_string_option |> Option.map Agent_id.of_string in
     Ok { id; agent_id; agent_name; token; role; created_at; expires_at }
-  with e -> Error (Printexc.to_string e)
 
 (** Auth configuration *)
 type auth_config = {

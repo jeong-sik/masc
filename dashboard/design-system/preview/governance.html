@@ -1,0 +1,513 @@
+<!doctype html>
+<html lang="en" data-theme="dark-fantasy">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MASC — Governance tone preview (W01)</title>
+  <!--
+    W01 governance tone preview (DS-Drift Phase 1).
+    Production source files (read-only mirrors):
+      - dashboard/src/styles/governance.css        (41 lines)
+      - dashboard/src/styles/governance-agent.css  (20 lines)
+    Tokens SSOT:
+      - dashboard/design-system/source_styles/tokens.generated.css
+
+    NOTE: Production files reference legacy aliases that live in
+    dashboard/src/styles/variables.css (not the generated SSOT):
+      var(--backdrop-modal)  -> rgba(10, 18, 34, 0.95)  (legacy alias)
+      var(--ff-gold-8)       -> rgba(200, 168, 78, 0.08) (legacy alias)
+      var(--accent-14)       -> brass-tinted overlay     (legacy alias)
+    This preview rebuilds the same rendering using ONLY tokens.generated.css
+    variables (color-bg-page, brass-glow, info-glow, ...) so the visual tone
+    is comparable. Drift (legacy alias -> SSOT token) is the W01 scope; the
+    legacy aliases themselves are NOT modified by this PR.
+  -->
+  <link rel="stylesheet" href="_preview.css" />
+  <style>
+    /* ──────────────────────────────────────────────────────────────────
+       All values below come from tokens.generated.css. No raw hex.
+       Each governance-* class mirrors a production selector; comments
+       carry the source file and line pointer.
+       ────────────────────────────────────────────────────────────────── */
+
+    .pv-banner {
+      background: var(--color-bg-surface);
+      border: 1px solid var(--color-border-strong);
+      border-left: 3px solid var(--color-accent-fg);
+      border-radius: var(--r-1);
+      padding: 14px 18px;
+      display: flex; flex-direction: column; gap: 4px;
+    }
+    .pv-banner .h {
+      font: 600 var(--type-label);
+      letter-spacing: var(--track-caps);
+      text-transform: uppercase;
+      color: var(--color-fg-primary);
+    }
+    .pv-banner .l {
+      font: var(--type-micro);
+      font-family: var(--font-mono);
+      color: var(--color-fg-muted);
+      letter-spacing: var(--track-wide);
+    }
+
+    /* ── governance row demo container ───────────────────────────── */
+    .gv-row-list {
+      display: flex; flex-direction: column;
+      background: var(--color-bg-page);
+      border: 1px solid var(--color-border-default);
+      border-radius: var(--r-1);
+      overflow: hidden;
+    }
+    .gv-row {
+      display: grid;
+      grid-template-columns: 24px 1fr auto auto;
+      gap: 12px;
+      align-items: center;
+      padding: 10px 14px;
+      border: 1px solid transparent;
+      border-bottom-color: var(--color-border-default);
+      background: transparent;
+      color: var(--color-fg-primary);
+      font: var(--type-body);
+      text-align: left;
+      cursor: pointer;
+    }
+    .gv-row:last-child { border-bottom-color: transparent; }
+
+    /* mirrors production governance.css:L6-9
+       button.governance-row.selected { border-color: rgba(71,184,255,.5); background: var(--accent-14); } */
+    .gv-row.selected {
+      border-color: rgb(var(--info-glow) / 0.5);
+      background: rgb(var(--brass-glow) / 0.14);
+    }
+
+    .gv-row .dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--color-accent-fg);
+      box-shadow: 0 0 6px rgb(var(--color-accent-glow) / .55);
+    }
+    .gv-row .dot.q  { background: var(--info); box-shadow: 0 0 6px rgb(var(--info-glow) / .55); }
+    .gv-row .dot.bk { background: var(--err); box-shadow: 0 0 6px rgb(var(--err-glow) / .55); }
+    .gv-row .label { font-family: var(--font-mono); font-size: var(--fs-12, 12px); }
+    .gv-row .meta {
+      font: var(--type-micro);
+      font-family: var(--font-mono);
+      color: var(--color-fg-muted);
+      letter-spacing: var(--track-wide);
+    }
+    .gv-row .arr { color: var(--color-fg-muted); font-family: var(--font-mono); font-size: 10px; }
+
+    /* ── governance layout (responsive collapse) ─────────────────── */
+    /* mirrors production governance.css:L11-20
+       @media (max-width:1200px) .governance-layout { grid-template-columns: 1fr; } */
+    .gv-layout {
+      display: grid;
+      grid-template-columns: 1.2fr 1fr;
+      gap: 14px;
+    }
+    .gv-pane {
+      background: var(--color-bg-surface);
+      border: 1px solid var(--color-border-default);
+      border-radius: var(--r-1);
+      padding: 14px;
+      display: flex; flex-direction: column; gap: 8px;
+    }
+    .gv-pane h4 {
+      font: 600 var(--type-label);
+      letter-spacing: var(--track-caps);
+      text-transform: uppercase;
+      color: var(--color-fg-secondary);
+      font-weight: 600;
+    }
+    .gv-inbox {
+      max-height: 180px;
+      overflow: auto;
+      display: flex; flex-direction: column; gap: 6px;
+    }
+    .gv-inbox .item {
+      padding: 8px 10px;
+      border: 1px solid var(--color-border-default);
+      border-radius: 2px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--color-fg-secondary);
+      background: var(--color-bg-page);
+    }
+    @media (max-width: 1200px) {
+      .gv-layout { grid-template-columns: 1fr; }
+      .gv-inbox  { max-height: none; }
+    }
+
+    /* ── ff-plate (governance agent / character sheet) ───────────── */
+    /* mirrors production governance-agent.css:L3-13 + governance.css:L24-34
+       @utility ff-plate { background: linear-gradient(135deg, var(--backdrop-modal), rgba(16,28,52,.88));
+                           box-shadow: 0 0 20px rgba(200,168,78,.04), inset 0 1px 0 var(--ff-gold-8); }
+       Drift mapping: --backdrop-modal -> color-bg-page tint, --ff-gold-8 -> rgb(brass-glow/.08). */
+    .gv-ff-plate {
+      background: linear-gradient(
+        135deg,
+        var(--color-bg-page) 0%,
+        var(--color-bg-surface) 100%
+      );
+      box-shadow:
+        0 0 20px rgb(var(--color-accent-glow) / 0.04),
+        inset 0 1px 0 rgb(var(--color-accent-glow) / 0.08);
+      border: 1px solid var(--color-border-default);
+      border-radius: var(--r-1);
+      padding: 18px 22px;
+      display: grid;
+      grid-template-columns: 96px 1fr auto;
+      gap: 18px;
+      align-items: center;
+    }
+    .gv-ff-plate .portrait {
+      width: 96px; height: 96px;
+      border-radius: 4px;
+      background:
+        radial-gradient(circle at 30% 30%, rgb(var(--brass-glow) / 0.4), transparent 60%),
+        var(--color-bg-elevated);
+      border: 1px solid var(--color-border-strong);
+    }
+    .gv-ff-plate .id .name {
+      font: 600 var(--type-title);
+      font-family: var(--font-mono);
+      color: var(--color-fg-primary);
+      letter-spacing: var(--track-tight);
+    }
+    .gv-ff-plate .id .role {
+      font: var(--type-caption);
+      font-family: var(--font-mono);
+      letter-spacing: var(--track-caps);
+      text-transform: uppercase;
+      color: var(--color-fg-muted);
+    }
+    .gv-ff-plate .id .quip {
+      margin-top: 6px;
+      font: var(--type-body);
+      color: var(--color-fg-secondary);
+      max-width: 48ch;
+    }
+    .gv-ff-plate .status {
+      display: flex; flex-direction: column; gap: 6px; align-items: flex-end;
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--color-fg-muted);
+      letter-spacing: var(--track-wide);
+    }
+    .gv-ff-plate .status .pip {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 3px 8px;
+      border: 1px solid var(--color-border-strong);
+      border-radius: 2px;
+      background: var(--color-bg-surface);
+      color: var(--color-fg-secondary);
+    }
+    .gv-ff-plate .status .pip::before {
+      content: ""; width: 6px; height: 6px; border-radius: 50%;
+      background: var(--ok); box-shadow: 0 0 6px rgb(var(--ok-glow) / .6);
+    }
+
+    /* mirrors production governance.css:L36-40 + governance-agent.css:L15-19
+       @media (max-width:768px) .ff-plate { grid-template-columns: 1fr; text-align: center; } */
+    @media (max-width: 768px) {
+      .gv-ff-plate { grid-template-columns: 1fr; text-align: center; }
+      .gv-ff-plate .status { align-items: center; }
+    }
+
+    /* ── chip / signal variants reused in governance scope ───────── */
+    .gv-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+    .gv-chip {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 4px 10px;
+      border: 1px solid var(--color-border-strong);
+      border-radius: 999px;
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--color-fg-secondary);
+      letter-spacing: var(--track-wide);
+      background: var(--color-bg-surface);
+    }
+    .gv-chip.is-ok    { border-color: rgb(var(--ok-glow) / .55);    color: var(--ok); }
+    .gv-chip.is-warn  { border-color: rgb(var(--warn-glow) / .55);  color: var(--warn); }
+    .gv-chip.is-err   { border-color: rgb(var(--err-glow) / .55);   color: var(--err); }
+    .gv-chip.is-info  { border-color: rgb(var(--info-glow) / .55);  color: var(--info); }
+    .gv-chip.is-stall { border-color: rgb(var(--stalled-glow) / .55); color: var(--stalled); }
+    .gv-chip::before {
+      content: ""; width: 6px; height: 6px; border-radius: 50%;
+      background: currentColor;
+      box-shadow: 0 0 6px currentColor;
+    }
+
+    /* token annotation block reused in cards */
+    .gv-toks {
+      display: flex; flex-wrap: wrap; gap: 4px;
+      padding-top: 6px;
+      border-top: 1px dashed var(--color-border-default);
+      margin-top: 4px;
+    }
+  </style>
+</head>
+<body>
+  <div class="pv-root">
+
+    <header class="pv-head">
+      <div class="pv-eyebrow">DS-Drift · Phase 1 · W01</div>
+      <h1 class="pv-title">Governance tone preview</h1>
+      <p class="pv-sub">Visual mirror of <code>dashboard/src/styles/governance.css</code> and
+        <code>governance-agent.css</code>. Each card pairs the production selector with the
+        SSOT-token rendering used in the design system. Used to validate that legacy aliases
+        (<code>--backdrop-modal</code>, <code>--ff-gold-8</code>, <code>--accent-14</code>) can
+        be migrated to <code>tokens.generated.css</code> without visual drift.</p>
+    </header>
+
+    <section class="pv-banner" role="note">
+      <div class="h">Production source: src/styles/governance.css + governance-agent.css · Tokens: tokens.generated.css · Last audit: 2026-04-28</div>
+      <div class="l">read-only mirror — no production CSS modified by this preview · drift fix follows in W02+</div>
+    </section>
+
+    <!-- ═════════════════ Section 1: governance core ═════════════════ -->
+    <section class="pv-sect">
+      <div class="pv-sect-h">
+        <h2>1 · governance core</h2>
+        <span class="sub">selectors from src/styles/governance.css</span>
+      </div>
+      <div class="pv-grid-2">
+
+        <!-- mirrors production governance.css:L6-9 -->
+        <div class="pv-cell">
+          <div class="pv-cell-h">
+            <span class="pv-cell-label">button.governance-row.selected</span>
+            <span class="pv-cell-meta">governance.css:L6</span>
+          </div>
+          <!-- mirrors production governance.css:L6 selected state -->
+          <div class="gv-row-list">
+            <button class="gv-row" type="button">
+              <span class="dot"></span>
+              <span class="label">PR-11280 · oas pin bump</span>
+              <span class="meta">queued</span>
+              <span class="arr">→</span>
+            </button>
+            <button class="gv-row selected" type="button" aria-pressed="true">
+              <span class="dot q"></span>
+              <span class="label">PR-11288 · keeper FSM transition</span>
+              <span class="meta">selected</span>
+              <span class="arr">→</span>
+            </button>
+            <button class="gv-row" type="button">
+              <span class="dot bk"></span>
+              <span class="label">PR-11290 · coord_agent.mli collapse</span>
+              <span class="meta">blocked</span>
+              <span class="arr">→</span>
+            </button>
+          </div>
+          <div class="gv-toks">
+            <span class="pv-tok">var(--info-glow)</span>
+            <span class="pv-tok">var(--brass-glow)</span>
+            <span class="pv-tok">var(--color-fg-primary)</span>
+            <span class="pv-tok">var(--color-bg-page)</span>
+          </div>
+        </div>
+
+        <!-- mirrors production governance.css:L11-20 -->
+        <div class="pv-cell">
+          <div class="pv-cell-h">
+            <span class="pv-cell-label">.governance-layout (responsive 1200px)</span>
+            <span class="pv-cell-meta">governance.css:L12-20</span>
+          </div>
+          <!-- mirrors production .governance-layout 2-col → 1-col collapse -->
+          <div class="gv-layout">
+            <div class="gv-pane">
+              <h4>Inbox</h4>
+              <div class="gv-inbox">
+                <div class="item">claim · keeper-spark · 2m</div>
+                <div class="item">drift · keeper-anomaly · 4m</div>
+                <div class="item">stale · keeper-curator · 12m</div>
+                <div class="item">handoff · keeper-archivist · 18m</div>
+              </div>
+            </div>
+            <div class="gv-pane">
+              <h4>Detail</h4>
+              <div class="gv-inbox">
+                <div class="item">selected: PR-11288</div>
+                <div class="item">tasks: 3 / cascade ok</div>
+                <div class="item">last heartbeat: 12s</div>
+              </div>
+            </div>
+          </div>
+          <div class="gv-toks">
+            <span class="pv-tok">var(--color-bg-surface)</span>
+            <span class="pv-tok">var(--color-border-default)</span>
+            <span class="pv-tok">var(--r-1)</span>
+            <span class="pv-tok">@media max-width:1200px</span>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ═════════════════ Section 2: governance-agent overlay ═════════════════ -->
+    <section class="pv-sect">
+      <div class="pv-sect-h">
+        <h2>2 · governance-agent overlay (ff-plate)</h2>
+        <span class="sub">selectors shared by governance.css:L24-34 and governance-agent.css:L3-13</span>
+      </div>
+      <div class="pv-grid-2">
+
+        <!-- mirrors production governance-agent.css:L3-13 (and governance.css:L24-34 via @utility) -->
+        <div class="pv-cell" style="grid-column: span 2;">
+          <div class="pv-cell-h">
+            <span class="pv-cell-label">.ff-plate · @utility ff-plate</span>
+            <span class="pv-cell-meta">governance-agent.css:L3 · governance.css:L24</span>
+          </div>
+          <!-- mirrors production .ff-plate gradient + brass inset -->
+          <div class="gv-ff-plate">
+            <div class="portrait" aria-hidden="true"></div>
+            <div class="id">
+              <div class="name">nick0cave</div>
+              <div class="role">curator · brass-2 actor</div>
+              <div class="quip">Holds the governance ledger. Surfaces stale claims and drift signals before they cascade.</div>
+            </div>
+            <div class="status">
+              <span class="pip">heartbeat 3s</span>
+              <span>tasks · 4 active</span>
+              <span>cascade · spark→anthropic</span>
+            </div>
+          </div>
+          <div class="gv-toks">
+            <span class="pv-tok">linear-gradient(135deg, var(--color-bg-page), var(--color-bg-surface))</span>
+            <span class="pv-tok">rgb(var(--color-accent-glow) / 0.04)</span>
+            <span class="pv-tok">rgb(var(--color-accent-glow) / 0.08)</span>
+            <span class="pv-tok">var(--color-border-default)</span>
+            <span class="pv-tok">var(--ok-glow)</span>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ═════════════════ Section 3: state variants & responsive ═════════════════ -->
+    <section class="pv-sect">
+      <div class="pv-sect-h">
+        <h2>3 · state variants &amp; responsive</h2>
+        <span class="sub">signal chips reused by governance scope · responsive @media collapse</span>
+      </div>
+      <div class="pv-grid-2">
+
+        <!-- mirrors signal vocabulary used inside .governance-row meta and .ff-plate status pips -->
+        <div class="pv-cell">
+          <div class="pv-cell-h">
+            <span class="pv-cell-label">signal chip vocabulary</span>
+            <span class="pv-cell-meta">shared with governance.css rows</span>
+          </div>
+          <!-- mirrors production governance row signal mapping (ok/warn/err/info/stalled) -->
+          <div class="gv-chips">
+            <span class="gv-chip is-ok">ok · merged</span>
+            <span class="gv-chip is-warn">at-risk · drift</span>
+            <span class="gv-chip is-err">blocker · ci red</span>
+            <span class="gv-chip is-info">queued · pending</span>
+            <span class="gv-chip is-stall">stalled · 12m</span>
+          </div>
+          <div class="gv-toks">
+            <span class="pv-tok">var(--ok-glow)</span>
+            <span class="pv-tok">var(--warn-glow)</span>
+            <span class="pv-tok">var(--err-glow)</span>
+            <span class="pv-tok">var(--info-glow)</span>
+            <span class="pv-tok">var(--stalled-glow)</span>
+          </div>
+        </div>
+
+        <!-- mirrors production governance.css:L36-40 + governance-agent.css:L15-19 -->
+        <div class="pv-cell">
+          <div class="pv-cell-h">
+            <span class="pv-cell-label">.ff-plate @media max-width:768px</span>
+            <span class="pv-cell-meta">governance-agent.css:L15 · governance.css:L36</span>
+          </div>
+          <!-- mirrors production .ff-plate 1-col + center collapse below 768px -->
+          <div style="
+            background: linear-gradient(135deg, var(--color-bg-page) 0%, var(--color-bg-surface) 100%);
+            box-shadow:
+              0 0 20px rgb(var(--color-accent-glow) / 0.04),
+              inset 0 1px 0 rgb(var(--color-accent-glow) / 0.08);
+            border: 1px solid var(--color-border-default);
+            border-radius: var(--r-1);
+            padding: 14px;
+            display: grid; gap: 10px; text-align: center;
+            grid-template-columns: 1fr;
+          ">
+            <div style="
+              width: 56px; height: 56px; border-radius: 4px;
+              background: radial-gradient(circle at 30% 30%, rgb(var(--brass-glow) / 0.4), transparent 60%), var(--color-bg-elevated);
+              border: 1px solid var(--color-border-strong);
+              margin: 0 auto;
+            "></div>
+            <div style="font: 600 var(--type-title); font-family: var(--font-mono); color: var(--color-fg-primary);">narrow viewport</div>
+            <div style="font: var(--type-caption); font-family: var(--font-mono); letter-spacing: var(--track-caps); text-transform: uppercase; color: var(--color-fg-muted);">stacked · centered</div>
+          </div>
+          <div class="gv-toks">
+            <span class="pv-tok">@media max-width:768px</span>
+            <span class="pv-tok">grid-template-columns: 1fr</span>
+            <span class="pv-tok">text-align: center</span>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ═════════════════ Section 4: drift evidence ═════════════════ -->
+    <section class="pv-sect">
+      <div class="pv-sect-h">
+        <h2>4 · drift evidence (W01 audit summary)</h2>
+        <span class="sub">legacy alias → SSOT token mapping referenced by this preview</span>
+      </div>
+      <div class="pv-grid-2">
+
+        <!-- mirrors production governance.css/governance-agent.css token usage audit -->
+        <div class="pv-cell" style="grid-column: span 2;">
+          <div class="pv-cell-h">
+            <span class="pv-cell-label">legacy alias → SSOT token (visual equivalence)</span>
+            <span class="pv-cell-meta">audit · 2026-04-28</span>
+          </div>
+          <table style="
+            width: 100%; border-collapse: collapse;
+            font-family: var(--font-mono); font-size: 11px;
+            color: var(--color-fg-secondary);
+          ">
+            <thead>
+              <tr style="text-align: left; color: var(--color-fg-muted); letter-spacing: var(--track-wide);">
+                <th style="padding: 8px 10px; border-bottom: 1px solid var(--color-border-strong);">legacy alias (variables.css)</th>
+                <th style="padding: 8px 10px; border-bottom: 1px solid var(--color-border-strong);">used at</th>
+                <th style="padding: 8px 10px; border-bottom: 1px solid var(--color-border-strong);">SSOT token (this preview)</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td style="padding: 8px 10px; border-bottom: 1px solid var(--color-border-default);"><span class="pv-tok">var(--accent-14)</span></td>
+                <td style="padding: 8px 10px; border-bottom: 1px solid var(--color-border-default); color: var(--color-fg-muted);">governance.css:L8 (selected row)</td>
+                <td style="padding: 8px 10px; border-bottom: 1px solid var(--color-border-default);"><span class="pv-tok">rgb(var(--brass-glow) / 0.14)</span></td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 10px; border-bottom: 1px solid var(--color-border-default);"><span class="pv-tok">var(--backdrop-modal)</span></td>
+                <td style="padding: 8px 10px; border-bottom: 1px solid var(--color-border-default); color: var(--color-fg-muted);">governance.css:L28 · governance-agent.css:L7</td>
+                <td style="padding: 8px 10px; border-bottom: 1px solid var(--color-border-default);"><span class="pv-tok">var(--color-bg-page)</span></td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 10px; border-bottom: 1px solid var(--color-border-default);"><span class="pv-tok">var(--ff-gold-8)</span></td>
+                <td style="padding: 8px 10px; border-bottom: 1px solid var(--color-border-default); color: var(--color-fg-muted);">governance.css:L33 · governance-agent.css:L12</td>
+                <td style="padding: 8px 10px; border-bottom: 1px solid var(--color-border-default);"><span class="pv-tok">rgb(var(--color-accent-glow) / 0.08)</span></td>
+              </tr>
+              <tr>
+                <td style="padding: 8px 10px;"><span class="pv-tok">rgba(71,184,255,0.5)</span></td>
+                <td style="padding: 8px 10px; color: var(--color-fg-muted);">governance.css:L7 (selected border)</td>
+                <td style="padding: 8px 10px;"><span class="pv-tok">rgb(var(--info-glow) / 0.5)</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+      </div>
+    </section>
+
+  </div>
+</body>
+</html>

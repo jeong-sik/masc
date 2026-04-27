@@ -115,6 +115,7 @@ check_forbidden_outside "V10-provider-filter-ownership" \
   'allowed_providers' \
   "lib/" \
   "lib/keeper/keeper_types.ml" \
+  "lib/keeper/keeper_types.mli" \
   "lib/keeper/keeper_meta_json_scrub.ml" \
   "lib/keeper/keeper_meta_json_scrub.mli"
 

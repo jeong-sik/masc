@@ -49,23 +49,23 @@ function nextExpectedStep(snapshot: KeeperCompositeSnapshot): string {
   const collapsedFrom = snapshot.phase === 'Stable' ? snapshot.collapsed_from : null
   if (!snapshot.is_live) {
     return snapshot.last_outcome
-      ? 'The next live turn should repopulate KTC/KDP/KCL from idle placeholders.'
+      ? '다음 live turn 이 idle placeholder 로부터 KTC/KDP/KCL 을 repopulate 해야 함.'
       : '아직 완료된 턴 없음 — first live turn 이 observer 를 채워야 함.'
   }
   if (snapshot.phase === 'Failing' && snapshot.cascade.state === 'exhausted') {
     return '정상 provider path 또는 명시적 recovery clearance 가 Failing 을 해제해야 Running 재개 가능.'
   }
   if (snapshot.phase === 'Overflowed') {
-    return 'Context overflow must resolve through compaction or explicit operator clearance before the lifecycle can settle.'
+    return 'context overflow 은 compaction 또는 명시적 operator clearance 로 해소되어야 lifecycle 이 정착 가능.'
   }
   if (snapshot.phase === 'Compacting' || snapshot.compaction.stage === 'compacting') {
-    return 'KMC should reach done and then KSM should hand control back to Running.'
+    return 'KMC 가 done 에 도달한 뒤 KSM 이 Running 으로 control 을 반환해야 함.'
   }
   if (snapshot.phase === 'HandingOff') {
-    return 'The current keeper should stop once handoff completion is observed.'
+    return 'handoff completion 이 관측되면 현재 keeper 는 stop 해야 함.'
   }
   if (snapshot.phase === 'Draining') {
-    return 'Draining should complete before the lifecycle settles into Stopped.'
+    return 'lifecycle 가 Stopped 로 정착되기 전에 Draining 이 완료되어야 함.'
   }
   if (snapshot.phase === 'Stable') {
     return collapsedFrom

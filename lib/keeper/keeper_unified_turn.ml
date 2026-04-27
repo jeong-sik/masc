@@ -1188,6 +1188,12 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                 ~trajectory_outcome:(Trajectory.Gated "ollama_saturated")
                 ~keeper_turn_id
                 ();
+              Keeper_turn_fsm.emit_transition
+                ~keeper_name:meta.name ~turn_id:keeper_turn_id
+                ~prev:Keeper_turn_fsm.Cascade_routing
+                (Keeper_turn_fsm.Failed
+                   (Keeper_turn_fsm.Failure_cascade_unavailable
+                      { base = base_url; resolved = None }));
               Prometheus.inc_counter
                 Prometheus.metric_keeper_ollama_saturation_skip
                 ~labels:[ ("keeper", meta.name);
@@ -1271,6 +1277,11 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             ~error_message
             ~keeper_turn_id
             ();
+          Keeper_turn_fsm.emit_transition
+            ~keeper_name:meta.name ~turn_id:keeper_turn_id
+            ~prev:Keeper_turn_fsm.Cascade_routing
+            (Keeper_turn_fsm.Failed
+               (Keeper_turn_fsm.Failure_runtime_error error_message));
           Error err
       | Ok initial_execution ->
       let turn_id = meta.runtime.usage.total_turns in
@@ -1305,6 +1316,12 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
              ~trajectory_outcome:(Trajectory.Gated terminal_reason_code)
              ~keeper_turn_id
              ();
+           Keeper_turn_fsm.emit_transition
+             ~keeper_name:meta.name ~turn_id:keeper_turn_id
+             ~prev:Keeper_turn_fsm.Cascade_routing
+             (Keeper_turn_fsm.Failed
+                (Keeper_turn_fsm.Failure_runtime_error
+                   ("turn_livelock:" ^ reason_string)));
            Ok meta
        | Keeper_turn_livelock.Started _ ->
       (* Yield before CPU-bound prompt construction so the Eio scheduler

@@ -590,9 +590,9 @@ let test_declared_provider_schemes_handles_malformed_config () =
 
 module ST = Masc_mcp.Cascade_strategy_trace
 
-let mk_trace ?(ts = 0.0) ?(strategy = "failover") ~kind () =
+let mk_trace ?(ts = 0.0) ?(strategy = "failover") ?trace_id ~kind () =
   { ST.ts; cascade_name = "c1"; strategy; cycle = 0;
-    candidates_in = 1; candidates_out = 1; backoff_ms = 0; kind }
+    candidates_in = 1; candidates_out = 1; backoff_ms = 0; kind; trace_id }
 
 let assert_field name fields =
   match List.assoc_opt name fields with

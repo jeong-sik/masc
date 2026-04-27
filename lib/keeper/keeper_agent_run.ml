@@ -373,6 +373,26 @@ let run_turn
    Log.Keeper.info
      "[substrate:system_prompt] agent=%s turn=%d length=%d hash=%s"
      meta.agent_name (start_turn_count + 1) segment.bytes hash16);
+  (* [substrate:task_assignment] — turn-level fingerprint of the user
+     message (the task body the LLM actually sees this turn) plus the
+     dynamic_context that wraps it (current task, memory continuity,
+     temporal summary, route hint). Operators can confirm whether the
+     task body changed between turns ("did the keeper get a new task,
+     or replay the same prompt?") without dumping the raw text. Phase 3
+     of substrate observability. *)
+  (let user_seg = prompt_metrics.user_message_segment in
+   let dyn_seg = prompt_metrics.dynamic_context_segment in
+   let pick_hash16 segment =
+     match segment.fingerprint with
+     | Some hex when String.length hex >= 16 -> String.sub hex 0 16
+     | Some hex -> hex
+     | None -> "empty"
+   in
+   Log.Keeper.info
+     "[substrate:task_assignment] agent=%s turn=%d user_length=%d \
+      user_hash=%s dyn_length=%d dyn_hash=%s"
+     meta.agent_name (start_turn_count + 1) user_seg.bytes
+     (pick_hash16 user_seg) dyn_seg.bytes (pick_hash16 dyn_seg));
   (* 6. Append user message and persist.
      On retry (is_retry=true), the user message was already persisted by the
      first attempt.  Checkpoint reload does not include it (checkpoint is

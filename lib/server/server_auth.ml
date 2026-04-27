@@ -179,14 +179,21 @@ let verify_mcp_auth ~base_path request =
         | Some token -> (
             match resolve_agent_name_for_auth_raw ~base_path request ~token:(Some token) with
             | Error err -> Error (Types.masc_error_to_string err)
-            | Ok agent_name_opt ->
-                let agent_name = Option.value ~default:"dashboard" agent_name_opt in
-                match
-                  Auth.check_permission base_path ~agent_name ~token:(Some token)
-                    ~permission:Types.CanReadState
-                with
-                | Ok () -> Ok None
-                | Error err -> Error (Types.masc_error_to_string err))
+            | Ok None ->
+                (* Fail-closed: dead branch today (resolver:154-157 returns
+                   [Ok (Some _)] or [Error] for [Some token]) but kept
+                   explicit so a future [Anonymous] case cannot silently
+                   rewrite to "dashboard". Spec: AuthIdentityFSM.tla I2. *)
+                Error
+                  "Authentication required. Bearer token did not resolve to \
+                   any agent."
+            | Ok (Some agent_name) ->
+                (match
+                   Auth.check_permission base_path ~agent_name ~token:(Some token)
+                     ~permission:Types.CanReadState
+                 with
+                 | Ok () -> Ok None
+                 | Error err -> Error (Types.masc_error_to_string err)))
 
 let verify_mcp_observer_stream_auth ~base_path request =
   let auth_config = Auth.load_auth_config base_path in
@@ -206,14 +213,18 @@ let verify_mcp_observer_stream_auth ~base_path request =
         | Some token -> (
             match resolve_agent_name_for_auth_raw ~base_path request ~token:(Some token) with
             | Error err -> Error (Types.masc_error_to_string err)
-            | Ok agent_name_opt ->
-                let agent_name = Option.value ~default:"dashboard" agent_name_opt in
-                match
-                  Auth.check_permission base_path ~agent_name ~token:(Some token)
-                    ~permission:Types.CanReadState
-                with
-                | Ok () -> Ok None
-                | Error err -> Error (Types.masc_error_to_string err))
+            | Ok None ->
+                (* Fail-closed: see verify_mcp_auth above. *)
+                Error
+                  "Authentication required. Bearer token did not resolve to \
+                   any agent."
+            | Ok (Some agent_name) ->
+                (match
+                   Auth.check_permission base_path ~agent_name ~token:(Some token)
+                     ~permission:Types.CanReadState
+                 with
+                 | Ok () -> Ok None
+                 | Error err -> Error (Types.masc_error_to_string err)))
 
 let verify_operator_mcp_auth ~base_path request =
   let auth_config = Auth.load_auth_config base_path in
@@ -229,14 +240,18 @@ let verify_operator_mcp_auth ~base_path request =
     | Some token -> (
         match resolve_agent_name_for_auth_raw ~base_path request ~token:(Some token) with
         | Error err -> Error (Types.masc_error_to_string err)
-        | Ok agent_name_opt ->
-            let agent_name = Option.value ~default:"dashboard" agent_name_opt in
-            match
-              Auth.check_permission base_path ~agent_name ~token:(Some token)
-                ~permission:Types.CanAdmin
-            with
-            | Ok () -> Ok None
-            | Error err -> Error (Types.masc_error_to_string err))
+        | Ok None ->
+            (* Fail-closed: see verify_mcp_auth above. *)
+            Error
+              "Authentication required. Bearer token did not resolve to \
+               any agent."
+        | Ok (Some agent_name) ->
+            (match
+               Auth.check_permission base_path ~agent_name ~token:(Some token)
+                 ~permission:Types.CanAdmin
+             with
+             | Ok () -> Ok None
+             | Error err -> Error (Types.masc_error_to_string err)))
 
 let request_actor_hint request =
   match agent_from_request request with

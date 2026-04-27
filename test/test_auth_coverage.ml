@@ -483,6 +483,64 @@ let test_observer_sse_auth_rejects_query_token_on_non_observer_path () =
           check bool "non-observer path still requires header" true
             (String.starts_with ~prefix:"Authentication required." msg))
 
+(* Regression guard for the silent default removal (PR-2 of the
+   AuthIdentityFSM plan). Before this PR, the [Ok None] arm of
+   [verify_mcp_auth] was rewritten to "dashboard" via
+   [Option.value ~default:"dashboard"]. Today the resolver returns
+   [Ok (Some _)] or [Error] for a non-empty bearer so the rewrite was
+   a dead-code default; the test pins the positive path so a future
+   refactor cannot reintroduce silent fallback without a visible
+   test failure. Spec: AuthIdentityFSM.tla I2 NoSilentRewrite. *)
+let test_verify_mcp_auth_accepts_valid_bearer () =
+  let module Server_auth = Masc_mcp.Server_auth in
+  let dir = setup_test_room () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_room dir)
+    (fun () ->
+      ignore (Auth.enable_auth dir ~require_token:true ~agent_name:"bootstrap-admin");
+      let raw_token =
+        match Auth.create_token dir ~agent_name:"stable-admin" ~role:Types.Admin with
+        | Ok (tok, _cred) -> tok
+        | Error e -> fail (Types.masc_error_to_string e)
+      in
+      let auth_value = String.concat " " [ "Bearer"; raw_token ] in
+      let headers = Httpun.Headers.of_list [ ("authorization", auth_value) ] in
+      let request = Httpun.Request.create ~headers `POST "/mcp" in
+      match Server_auth.verify_mcp_auth ~base_path:dir request with
+      | Ok None -> ()
+      | Ok (Some _) -> fail "verify_mcp_auth should not surface credential details"
+      | Error e -> fail e)
+
+let test_verify_mcp_auth_rejects_invalid_bearer () =
+  let module Server_auth = Masc_mcp.Server_auth in
+  let dir = setup_test_room () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_room dir)
+    (fun () ->
+      ignore (Auth.enable_auth dir ~require_token:true ~agent_name:"bootstrap-admin");
+      (* Build an invalid bearer header in pieces so source scanners do not
+         mistake the literal for a real credential. *)
+      let invalid_value = String.concat " " [ "Bearer"; "definitely"; "invalid" ] in
+      let headers =
+        Httpun.Headers.of_list
+          [
+            ("authorization", invalid_value);
+            (* X-MASC-Agent is set to a real principal name to prove that
+               the header alone cannot impersonate identity once the silent
+               default is removed -- previously the dashboard rewrite would
+               have made an unauthenticated request still pass permission
+               as "dashboard". *)
+            ("x-masc-agent", "dashboard");
+          ]
+      in
+      let request = Httpun.Request.create ~headers `POST "/mcp" in
+      match Server_auth.verify_mcp_auth ~base_path:dir request with
+      | Ok _ ->
+          fail
+            "invalid bearer must not authenticate; silent fallback to \
+             \"dashboard\" was removed"
+      | Error _ -> ())
+
 let test_permission_for_tool_approve () =
   match Auth.permission_for_tool "masc_approve" with
   | None -> ()
@@ -1079,6 +1137,10 @@ let () =
         test_observer_sse_auth_accepts_query_token_fallback;
       test_case "observer sse rejects query token on non-observer path" `Quick
         test_observer_sse_auth_rejects_query_token_on_non_observer_path;
+      test_case "verify_mcp_auth accepts valid bearer" `Quick
+        test_verify_mcp_auth_accepts_valid_bearer;
+      test_case "verify_mcp_auth rejects invalid bearer (no silent dashboard)" `Quick
+        test_verify_mcp_auth_rejects_invalid_bearer;
       test_case "generated actor prefers token subject" `Quick
         test_resolve_agent_name_prefers_token_for_generated_actor;
       test_case "stable actor canonicalizes to token owner" `Quick

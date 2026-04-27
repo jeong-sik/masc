@@ -326,6 +326,7 @@ let native_event_to_json (evt : Oas.Event_bus.event) : Yojson.Safe.t option =
          payload aggregate. Skip the relay to avoid flooding SSE
          consumers with high-frequency low-value events. *)
       None
+
 let relay_max_attempts = 3
 let relay_max_queue_depth = 256
 

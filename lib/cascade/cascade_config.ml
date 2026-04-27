@@ -45,7 +45,7 @@ let headers_with_auth ~(kind : Llm_provider.Provider_config.provider_kind) ~api_
         :: base
     | OpenAI_compat | Ollama | Gemini | Glm | Claude_code | DashScope ->
         ("Authorization", "Bearer " ^ api_key) :: base
-    | Gemini_cli | Kimi_cli | Codex_cli | _ -> []
+    | Gemini_cli | Kimi_cli | Codex_cli -> []
 
 let trim_trailing_slash path =
   if String.length path > 1 && String.ends_with ~suffix:"/" path then

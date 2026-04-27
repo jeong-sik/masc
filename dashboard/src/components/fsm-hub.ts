@@ -248,13 +248,13 @@ export function FsmHub(props: FsmHubProps = {}) {
   const [hub, dispatch] = useReducer(reduceHubState, initialHubState)
   const [keeperFilter, setKeeperFilter] = useState('')
   const [pollTick, setPollTick] = useState(0)
-  // `now` was a per-component useState ticker (5 s setInterval calling
-  // setNow). Hoisted to the shared module-level signal so multiple
-  // components on the page share one interval — and so future cycles
-  // can migrate children to subscribe directly, isolating render scope
-  // to the leaves that actually display elapsed strings.
-  useNowSecondsTicker()
-  const now = nowSecondsSignal.value
+  // The 5 s wall-clock signal is now subscribed to by each leaf that
+  // actually displays elapsed durations — this hub component itself
+  // never reads `nowSecondsSignal.value`, so 5 s ticks no longer
+  // re-render the full FsmHub render tree.  Each leaf (StatusBar,
+  // OperationalMeaningPanel, HeroPhase + PhaseSparkline, PipelineStep,
+  // SwimlaneTimeline, TransitionTrail, DwellHistogramPanel) calls
+  // `useNowSecondsTicker` on its own and refcounts the shared interval.
   const [graphOpen, setGraphOpen] = useState(false)
   const [hoveredSegment, setHoveredSegment] = useState<HoveredSegment | null>(null)
   const [gateKeeperNames, setGateKeeperNames] = useState<string[]>([])
@@ -516,7 +516,6 @@ export function FsmHub(props: FsmHubProps = {}) {
       ${/* ── Zone 1: Status Bar ── */ ''}
       <${StatusBar}
         snapshot=${snapshot}
-        now=${now}
         lastFetchAt=${lastFetchAt}
         density=${density}
         onDensityToggle=${() => setDensity(d => d === 'comfortable' ? 'compact' : 'comfortable')}
@@ -665,7 +664,6 @@ function ShortcutsOverlay({
 
 function StatusBar({
   snapshot,
-  now,
   lastFetchAt,
   density,
   onDensityToggle,
@@ -683,7 +681,6 @@ function StatusBar({
   observationCount,
 }: {
   snapshot: KeeperCompositeSnapshot | null
-  now: number
   lastFetchAt: number
   density: 'comfortable' | 'compact'
   onDensityToggle: () => void
@@ -700,6 +697,8 @@ function StatusBar({
   transitionCount: number
   observationCount: number
 }) {
+  useNowSecondsTicker()
+  const now = nowSecondsSignal.value
   const isFilteringKeepers = keeperFilter.trim() !== ''
   const keeperFilterHasNoMatch =
     isFilteringKeepers && visibleKeeperNames.length === 0 && keeperNames.length > 0

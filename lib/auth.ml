@@ -865,6 +865,64 @@ let verify_token config ~agent_name ~token : (agent_credential, masc_error) resu
             else
               Ok cred
 
+(* Extract the bare keeper nickname from a canonical agent_name of the
+   form "keeper-<n>-agent". Returns None for non-canonical names. Kept
+   as an inline helper to avoid adding a lib/auth -> lib/keeper
+   dependency for a single string operation. *)
+let bare_keeper_name_from_canonical canonical =
+  let prefix = "keeper-" in
+  let suffix = "-agent" in
+  let plen = String.length prefix in
+  let slen = String.length suffix in
+  let len = String.length canonical in
+  if len > plen + slen
+     && String.sub canonical 0 plen = prefix
+     && String.sub canonical (len - slen) slen = suffix
+  then Some (String.sub canonical plen (len - plen - slen))
+  else None
+
+(* Archive a credential file that we want to retire without deleting.
+   Destination: auth_dir/.archive/<epoch>/<file>. Operator can review
+   and restore. *)
+let archive_credential_file config ~agent_name ~reason =
+  let src = credential_file config agent_name in
+  if not (file_exists src) then ()
+  else
+    try
+      let stamp = string_of_int (int_of_float (Unix.gettimeofday ())) in
+      let dest_dir = Filename.concat (auth_dir config) (Filename.concat ".archive" stamp) in
+      Fs_compat.mkdir_p dest_dir;
+      let dest = Filename.concat dest_dir (agent_name ^ ".json") in
+      Sys.rename src dest;
+      Log.Auth.warn
+        "archived credential %s -> %s (reason: %s)"
+        src dest reason
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn ->
+        Log.Auth.error
+          "archive_credential_file failed for %s: %s"
+          agent_name (Printexc.to_string exn)
+
+(* Self-heal of dual-identity: when the canonical credential is written
+   for [keeper-<n>-agent], if a bare [<n>.json] credential exists with
+   a *different* token hash, archive the bare file. Same-token bare
+   files are harmless (both names resolve to the same identity) and
+   left in place. Idempotent: once archived, subsequent boots see no
+   bare file and become no-ops. Spec: AuthIdentityFSM.tla I1
+   IdentityBindsToken (a token must bind to one principal). *)
+let archive_bare_if_dual_identity config ~canonical_name ~canonical_token_hash =
+  match bare_keeper_name_from_canonical canonical_name with
+  | None -> ()
+  | Some bare_name -> (
+      match load_credential config bare_name with
+      | None -> ()
+      | Some bare_cred when String.equal bare_cred.token canonical_token_hash ->
+          ()
+      | Some _ ->
+          archive_credential_file config ~agent_name:bare_name
+            ~reason:"dual-identity: bare token differs from canonical")
+
 let ensure_keeper_credential config ~agent_name :
     (string * agent_credential, masc_error) result =
   ignore (ensure_internal_keeper_token config);
@@ -893,21 +951,30 @@ let ensure_keeper_credential config ~agent_name :
     save_credential config cred;
     (raw_token, cred)
   in
-  try
-    match load_raw_token config ~agent_name with
-    | Some raw_token -> (
-        match verify_token config ~agent_name ~token:raw_token with
-        | Ok cred when String.equal cred.agent_name agent_name ->
-            Ok (raw_token, cred)
-        | Ok _ | Error _ -> Ok (create_fresh_keeper_token ()))
-    | None -> Ok (create_fresh_keeper_token ())
-  with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-    let msg =
-      Printf.sprintf "Failed to save keeper credential: %s"
-        (Printexc.to_string exn)
-    in
-    Log.Auth.error "%s" msg;
-    Error (IoError msg)
+  let result =
+    try
+      match load_raw_token config ~agent_name with
+      | Some raw_token -> (
+          match verify_token config ~agent_name ~token:raw_token with
+          | Ok cred when String.equal cred.agent_name agent_name ->
+              Ok (raw_token, cred)
+          | Ok _ | Error _ -> Ok (create_fresh_keeper_token ()))
+      | None -> Ok (create_fresh_keeper_token ())
+    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+      let msg =
+        Printf.sprintf "Failed to save keeper credential: %s"
+          (Printexc.to_string exn)
+      in
+      Log.Auth.error "%s" msg;
+      Error (IoError msg)
+  in
+  (match result with
+   | Ok (_raw, cred) ->
+       archive_bare_if_dual_identity config
+         ~canonical_name:agent_name
+         ~canonical_token_hash:cred.token
+   | Error _ -> ());
+  result
 
 (** Refresh a token (generate new one, update credential) *)
 let refresh_token config ~agent_name ~old_token : (string * agent_credential, masc_error) result =

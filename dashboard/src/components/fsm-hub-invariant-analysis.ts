@@ -28,20 +28,20 @@ function invariantDetail(
   switch (key) {
     case 'phase_turn_alignment':
       return ok
-        ? 'KSM/KTC/KMC agree on who owns compaction right now.'
-        : `KSM=${snapshot.phase}, KTC=${snapshot.turn_phase}, KMC=${snapshot.compaction.stage} do not line up.`
+        ? 'KSM/KTC/KMC agree — 지금 누가 compaction 을 소유하는지 일치.'
+        : `KSM=${snapshot.phase}, KTC=${snapshot.turn_phase}, KMC=${snapshot.compaction.stage} 가 일치하지 않음.`
     case 'no_cascade_before_measurement':
       return ok
-        ? 'Cascade work only advances after measurement is captured.'
-        : `measurement.captured=${String(snapshot.measurement.captured)} while KCL=${snapshot.cascade.state}.`
+        ? 'measurement 가 captured 된 뒤에만 cascade work 가 진행됨.'
+        : `measurement.captured=${String(snapshot.measurement.captured)} 인데 KCL=${snapshot.cascade.state}.`
     case 'compaction_atomicity':
       return ok
-        ? 'Compaction does not run outside the parent Compacting phase.'
-        : `KMC=${snapshot.compaction.stage} but KSM=${snapshot.phase}.`
+        ? 'compaction 은 parent Compacting phase 밖에서 실행되지 않음.'
+        : `KMC=${snapshot.compaction.stage} 인데 KSM=${snapshot.phase}.`
     case 'event_priority_monotone':
       return ok
-        ? 'This turn has not emitted competing measurement snapshots.'
-        : 'More than one measurement event appears to own the same turn.'
+        ? '이 turn 은 경쟁 measurement snapshot 을 emit 하지 않았음.'
+        : '동일 turn 을 소유하려는 measurement event 가 둘 이상 등장.'
   }
 }
 
@@ -167,7 +167,7 @@ export function deriveOperationalInsight(
   }
   if (snapshot.phase === 'Overflowed' || snapshot.phase === 'HandingOff' || snapshot.phase === 'Draining' || snapshot.phase === 'Stable') {
     const collapsedDetail = snapshot.phase === 'Stable' && snapshot.collapsed_from
-      ? ` The raw keeper phase is ${snapshot.collapsed_from}, so this is not just generic idleness.`
+      ? ` raw keeper phase is ${snapshot.collapsed_from} — 이건 단순한 idleness 가 아님.`
       : ''
     return {
       tone: 'warn',
@@ -189,8 +189,8 @@ export function deriveOperationalInsight(
       tone: 'ok',
       headline: 'Idle 스냅샷 정상',
       detail: snapshot.last_outcome
-        ? `Sub-FSMs have fallen back to idle placeholders; the last completed turn ended ${idleSince} ago.`
-        : 'The observer is idle and has not captured a completed turn yet.',
+        ? `sub-FSM 들이 idle placeholder 로 fallback 됨; 마지막 완료 turn 은 ${idleSince} 전 종료.`
+        : 'observer 가 idle — has not captured a completed turn yet.',
       nextStep: nextExpectedStep(snapshot),
       evidence: [
         `KSM ${snapshot.phase}`,

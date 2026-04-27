@@ -7,10 +7,12 @@
 # observed window.
 #
 # Designed to be re-runnable: each criterion is a single grep against a
-# JSONL log produced by the masc-mcp server (default
-# ~/.masc/logs/system_log_<YYYY-MM-DD>.jsonl).  No state is kept
-# between runs — re-execute after any merge or restart to refresh the
-# snapshot.
+# JSONL log produced by the masc-mcp server.  The log path is resolved
+# via scripts/lib/masc-log-path.sh, which detects the active file from
+# the running server (lsof on the listening socket) and falls back to
+# $MASC_BASE_PATH or $HOME/me when no server is running.  No state is
+# kept between runs — re-execute after any merge or restart to refresh
+# the snapshot.
 #
 # Origin: 2026-04-25 keeper docker git_clone E2E investigation
 # (memory/procedural-memory/2026-04-25-keeper-docker-clone-end-to-end-evidence-record.md).
@@ -23,13 +25,15 @@
 
 set -u
 
-# Default log path follows MASC_BASE_PATH (the server's --base-path
-# argument).  Falls back to ~/me which is the second-brain layout that
-# masc-mcp ships with, so the script "just works" for the common
-# operator on a fresh checkout.  Override with $1 or $MASC_LOG when the
-# log lives elsewhere (e.g. /tmp/masc-postmerge.log).
-DEFAULT_BASE="${MASC_BASE_PATH:-${HOME}/me}"
-LOG="${1:-${MASC_LOG:-${DEFAULT_BASE}/.masc/logs/system_log_$(date +%Y-%m-%d).jsonl}}"
+# Resolve the active log path through the SSOT helper.  When the server
+# is running, this detects the actual file via lsof on the listening
+# socket — authoritative regardless of how the server was started.
+# Otherwise falls back to MASC_BASE_PATH or $HOME/me.  Override with $1
+# or $MASC_LOG when the log lives elsewhere (e.g. /tmp/masc-postmerge.log).
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck disable=SC1091
+. "${SCRIPT_DIR}/lib/masc-log-path.sh"
+LOG="${1:-$(masc_log_path)}"
 
 if [ ! -r "${LOG}" ]; then
   echo "error: cannot read log file: ${LOG}" >&2

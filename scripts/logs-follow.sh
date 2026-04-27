@@ -21,7 +21,9 @@ Follow MASC structured server logs from <base-path>/.masc/logs/system_log_YYYY-M
 If you pass a repo or worktree path, the script resolves it to the owning repo root automatically.
 
 Options:
-  --base-path <path>    Override MASC base path (default: MASC_BASE_PATH or HOME)
+  --base-path <path>    Override MASC base path (default: detected via lsof
+                        from the running server; falls back to MASC_BASE_PATH
+                        or $HOME/me when no server is running)
   --date <YYYY-MM-DD>   Read a specific log file instead of today's rotating file
   --lines <n>           Tail last N lines before following (default: 40, use 0 for only new lines)
   --level <level>       Minimum level: debug|info|warn|error (default: debug)
@@ -185,9 +187,22 @@ require_cmd jq
 require_cmd tail
 validate_args
 
-BASE_PATH_INPUT="${BASE_PATH_OVERRIDE:-${MASC_BASE_PATH:-${HOME:-$REPO_ROOT}}}"
-BASE_PATH="$(resolve_base_path "$BASE_PATH_INPUT")"
-LOG_DIR="$BASE_PATH/.masc/logs"
+# Resolution order for the log directory (deterministic-first):
+#   1. --base-path override          (user-provided path, run through worktree-aware resolver)
+#   2. helper masc_log_dir           (detects via lsof on the running server when available;
+#                                     falls back to MASC_BASE_PATH or $HOME/me)
+# This avoids the historical drift where logs-follow defaulted to $HOME
+# while the server actually wrote under <base>/.masc/logs/, leaving
+# operators staring at an empty directory.
+if [ -n "$BASE_PATH_OVERRIDE" ]; then
+  BASE_PATH="$(resolve_base_path "$BASE_PATH_OVERRIDE")"
+  LOG_DIR="$BASE_PATH/.masc/logs"
+else
+  # shellcheck disable=SC1091
+  . "$SCRIPT_DIR/lib/masc-log-path.sh"
+  LOG_DIR="$(masc_log_dir)"
+  BASE_PATH="$(dirname "$(dirname "$LOG_DIR")")"
+fi
 
 jq_filter='
   def rank:

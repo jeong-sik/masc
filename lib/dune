@@ -25,6 +25,7 @@
    auth_doctor
    auth_login
    auth_resolve
+   auth_strict_mode
    codex_mcp_config_doctor
    board
    board_core

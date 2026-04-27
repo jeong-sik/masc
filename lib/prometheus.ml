@@ -707,6 +707,9 @@ let metric_silent_auth_token_resolve_error =
 let metric_silent_dashboard_actor_fallback =
   "masc_silent_dashboard_actor_fallback_total"
 
+let metric_auth_strict_would_reject =
+  "masc_auth_strict_would_reject_total"
+
 (** Counter for Coord.join preflight outcomes (RFC P3-a, logging-only mode).
    Labels: outcome (ok | empty_input | persona_not_found | credential_missing
    | name_ambiguous | ephemeral_suffix_rejected). Cross-reference with
@@ -1092,6 +1095,13 @@ let init () =
      from the bearer token (Ok None / Error _) and fell back to \
      request_actor_hint. Labels: outcome (none | error). Counter exposes \
      the path that masks identity drift in the HTTP transport."
+    Counter;
+  add metric_auth_strict_would_reject
+    "Phase A F2 (2026-04-27): every silent_auth_token_resolve_error fall-through \
+     in mcp_server_eio_execute also increments this counter so operators can \
+     measure how many of those would-be-rejections happen under each \
+     MASC_AUTH_STRICT mode before Phase B PR-2 promotes Strict to a typed \
+     reject. Labels: mode (off | dry_run | strict), error_kind, agent."
     Counter;
   add metric_coord_join_normalize_outcome
     "Total Coord.join calls preflighted by Keeper_identity.normalize_all_names \

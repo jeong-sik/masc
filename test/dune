@@ -198,7 +198,8 @@
         test_persona_tool_reachability
         test_cascade_strategy_labels
         test_turn_id_propagation
-        test_per_keeper_token_fallback)
+        test_per_keeper_token_fallback
+        test_auth_strict_mode)
  (modules test_attribution test_attribution_tagged test_autoresearch_result_bridge test_dashboard_attribution test_masc_runtime_events test_room test_room_state_recovery test_types test_exec_tap test_auth test_auth_doctor test_auth_login test_audit_log test_governance_anomaly test_http_negotiation
           test_attempt_state
           test_sse test_cancellation test_graphql_api
@@ -367,6 +368,7 @@
           test_cascade_strategy_labels
           test_turn_id_propagation
           test_per_keeper_token_fallback
+          test_auth_strict_mode
           )
  (libraries masc_test_deps))
 

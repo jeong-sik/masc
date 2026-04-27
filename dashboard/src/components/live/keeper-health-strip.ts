@@ -34,7 +34,7 @@ export function KeeperHealthStrip() {
   const alertCount = summary.warningCount + summary.criticalCount
 
   return html`
-    <div class="flex items-center gap-4 rounded border border-[var(--border-slate-12)] bg-[var(--white-3)] px-4 py-2.5">
+    <div class="flex items-center gap-4 rounded border border-[var(--color-border-divider)] bg-[var(--white-3)] px-4 py-2.5">
       <div class="flex items-center gap-2 min-w-0">
         <span class="text-sm font-medium text-[var(--color-fg-secondary)] whitespace-nowrap">
           Keeper

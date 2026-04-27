@@ -577,7 +577,7 @@ function KeeperCommsPanel({ keeper }: { keeper: Keeper }) {
   const isOffline = isOfflineStatus(keeper.status)
 
   return html`
-    <div class="border-t border-[var(--border-slate-12)] pt-5">
+    <div class="border-t border-[var(--color-border-divider)] pt-5">
       <h3 class="m-0 mb-3 text-sm font-semibold text-[var(--color-fg-secondary)] uppercase tracking-[0.06em]">직접 통신</h3>
 
       ${isOffline ? html`
@@ -1034,7 +1034,7 @@ export function KeeperDetailPage() {
               keeper=${keeper}
               onSocialSweep=${() => { void runSocialSweep() }}
             />
-            <div class="pt-3 border-t border-[var(--border-slate-12)]">
+            <div class="pt-3 border-t border-[var(--color-border-divider)]">
               <h4 class="m-0 mb-3 text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">호출 검사기</h4>
               ${diagOpen ? html`<${KeeperToolCallInspector} keeperName=${keeper.name} />` : null}
             </div>

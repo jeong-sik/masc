@@ -46,7 +46,7 @@ export function ActivityStream() {
 
   return html`
     <div class="grid gap-3 grid-rows-[auto_auto_1fr] min-h-0">
-      <div class="activity-stream-head flex items-center justify-between gap-3 border-b border-[var(--border-slate-12)] pb-3">
+      <div class="activity-stream-head flex items-center justify-between gap-3 border-b border-[var(--color-border-divider)] pb-3">
         <h3 class="m-0 text-[0.95rem] font-semibold text-[var(--color-fg-secondary)]">활동 스트림</h3>
         <span class="text-xs text-[var(--color-fg-muted)]">${totalEvents.value} 수신 · ${entries.length} 표시</span>
       </div>
@@ -61,7 +61,7 @@ export function ActivityStream() {
           : entries.map((entry, i) => html`
             <div
               key=${`${entry.timestamp}-${i}`}
-              class="activity-item rounded border border-[var(--border-slate-12)] border-l-2 bg-[var(--white-2)] px-3.5 py-3 ${eventKindColor(entry)} ${i === 0 ? 'activity-item-new' : ''}"
+              class="activity-item rounded border border-[var(--color-border-divider)] border-l-2 bg-[var(--white-2)] px-3.5 py-3 ${eventKindColor(entry)} ${i === 0 ? 'activity-item-new' : ''}"
             >
               <div class="activity-item-head flex items-center gap-2">
                 <span class="activity-kind-chip rounded px-2 py-0.5 text-3xs font-medium uppercase tracking-[0.04em] ${eventKindColor(entry)}">${eventKindLabel(entry)}</span>

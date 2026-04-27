@@ -339,6 +339,8 @@ val metric_coord_join_normalize_outcome : string
 val metric_sse_sessions : string
 val metric_sse_broadcast_duration : string
 val metric_sse_broadcast_events : string
+val metric_sse_broadcast_failures : string
+val metric_sse_external_subscriber_callback_failures : string
 val metric_sse_stream_queue_depth : string
 val metric_sse_queue_depth_avg : string
 val metric_sse_queue_depth_max : string

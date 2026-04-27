@@ -32,6 +32,29 @@ let observe_broadcast_duration ?target seconds =
   in
   Prometheus.inc_counter Prometheus.metric_sse_broadcast_events ~labels ()
 
+(* P1 silent-failure fix (transport scan):
+   masc_sse_broadcast_events_total only counts successes, so an operator
+   reading "0 events / sec" cannot tell whether the system is genuinely
+   idle or whether every broadcast is failing.  Pair with the success
+   counter and the same target label so health is computable as
+   `rate(failures[5m]) / (rate(events[5m]) + rate(failures[5m]))`. *)
+let inc_broadcast_failure ?target () =
+  let labels = match target with
+    | None -> []
+    | Some t -> [("target", t)]
+  in
+  Prometheus.inc_counter Prometheus.metric_sse_broadcast_failures ~labels ()
+
+(* P1 silent-failure fix (transport scan):
+   notify_external_subscribers in lib/sse.ml previously only logged
+   callback exceptions (Log.Misc.warn), leaving gRPC subscriber
+   flapping invisible to dashboards.  Counter is unlabelled because
+   the subscriber identity is high-cardinality (sub_id is gRPC stream
+   id); operators can correlate via the warn log line if needed. *)
+let inc_external_subscriber_callback_failure () =
+  Prometheus.inc_counter
+    Prometheus.metric_sse_external_subscriber_callback_failures ()
+
 let set_sse_queue_depth ~session_id depth =
   Prometheus.set_gauge Prometheus.metric_sse_stream_queue_depth
     ~labels:[("session_id", session_id)] (float_of_int depth)

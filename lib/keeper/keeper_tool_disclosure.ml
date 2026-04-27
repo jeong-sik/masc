@@ -180,12 +180,21 @@ let claim_context_tool_names : string list =
   |> List.map Tool_name.to_string
 
 let completion_tool_names : string list =
+  (* Stay_silent is the explicit "no work for me this turn" decisive no-op.
+     LLM evaluates the situation via passive reads, then signals stay_silent
+     to terminate the turn intentionally. Classifying it as Completion lets
+     the contract accept the turn as satisfied; abuse is bounded separately
+     by keeper_stay_silent_loop_detector (consecutive-stay metric + circuit
+     breaker). Without this, 4+ events/day were rejected as passive_only
+     even though the LLM had decided no fit (sangsu/janitor/taskmaster on
+     2026-04-27 00:17-00:58 UTC, idle_seconds 28-40h, claimable_count 44-46). *)
   Tool_name.
     [
       Masc Cancel_task;
       Masc Complete_task;
       Masc Deliver;
       Masc Release_task;
+      Keeper Stay_silent;
       Keeper Task_done;
       Keeper Task_force_done;
       Keeper Task_force_release;

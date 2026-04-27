@@ -2197,6 +2197,13 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
           let is_ambiguous_partial = EC.is_ambiguous_side_effect_error err in
           Prometheus.inc_counter Prometheus.metric_keeper_turns
             ~labels:[("keeper_name", meta.name); ("outcome", "failure")] ();
+          Keeper_turn_fsm.emit_transition
+            ~keeper_name:meta.name ~turn_id:keeper_turn_id
+            ~prev:Keeper_turn_fsm.Streaming
+            (Keeper_turn_fsm.Failed
+               (Keeper_turn_fsm.Failure_provider_error
+                  { kind = sdk_error_kind err;
+                    detail = short_preview e_str }));
           Log.Keeper.error
             "%s: keeper cycle FAILED cascade=%s max_context=%d context_budget=%d primary_budget=%d requested_override=%s latency=%dms%s error=%s"
             meta.name final_execution.cascade_name

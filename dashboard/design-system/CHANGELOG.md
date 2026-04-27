@@ -7,7 +7,23 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), with project-s
 
 ## [Unreleased] — v0.4 (in progress)
 
-Stage: legacy alias cleanup + KeeperBadge migration completion.
+Stage: legacy alias cleanup + KeeperBadge migration completion + token codification sweep.
+
+### Added
+
+- **4-slot fg tier — partial codification** (raw tier, forward alias / visual byte-identical) — PR #11131
+  - `--rose-fg: #fecdd3` — covers `text-[#fecdd3]` 5 callsites paired with `--rose-{10,28}`
+  - `--emerald-fg: #bbf7d0` — covers `text-[#bbf7d0]` 3 callsites paired with `--emerald-{10,12,8,30}`
+  - Codification rule: ≥3 callsites + paired context (same family) + no Semantic naming conflict.
+  - Pending: `--purple-fg`/`--violet-fg` (naming consolidation needed), `--accent-fg` (collides with Semantic `--color-accent-fg`), `--sky-fg` family.
+
+- **Family scale gap fills** (raw tier, forward alias / visual byte-identical) — PR #11131
+  - `--bad-50: rgba(239, 68, 68, 0.50)` — fills missing 0.50 step in `--bad-{6,10,15(soft),20}` family. 6 callsites swept (fsm-hub-timeline-panels prod + test).
+  - `--accent-6: rgba(71, 184, 255, 0.06)` — fills missing 0.06 step in `--accent-{8,10,12,15-soft,16,18,20,30,36}` family. 3 callsites swept (chat/primitives, keeper-detail, fsm-hub-pipeline-panels).
+
+- **Bonsai trace-frame migration** — `dashboard_bonsai/src/shell_view.ml` `.flame_{plan,exec,wait,err}` raw hex → `--t-{think,tool,wait,err}` Semantic (closes v0.3 "bonsai-side PR pending" item). `.flame_block` 2 hex retained as SPEC §2 escape hatch.
+
+- **Audit follow-up doc** — `dashboard/design-system/audits/spec-compliance-2026-04-27-followup.md` documents Stage 1 progress, codification criteria, and remaining design-decision territory.
 
 ### Removed
 
@@ -54,7 +70,7 @@ Stage: legacy alias cleanup + KeeperBadge migration completion.
   - Role tokens: `--motion-enter`, `--motion-exit`, `--motion-swap`, `--motion-reveal`, `--motion-settle`, `--motion-pop` (6)
   - `prefers-reduced-motion: reduce` block flattens all durations to `1ms` and removes spring overshoot.
 
-- **Trace-frame tokens** (`source_styles/tokens.css` §7) — `--t-llm`, `--t-tool`, `--t-think`, `--t-wait`, `--t-err`. Defined for default + 5 themes (dark-fantasy / cyberpunk / terminal / parchment / paper). Replaces the raw `.flame_*` hex values in `dashboard_bonsai/shell_view.ml` (bonsai-side PR pending).
+- **Trace-frame tokens** (`source_styles/tokens.css` §7) — `--t-llm`, `--t-tool`, `--t-think`, `--t-wait`, `--t-err`. Defined for default + 5 themes (dark-fantasy / cyberpunk / terminal / parchment / paper). Replaces the raw `.flame_*` hex values in `dashboard_bonsai/shell_view.ml` (bonsai-side migration completed in PR #11131).
 
 - **5-theme matrix** consolidated to single SSOT (`source_styles/tokens.css`).
   - Themes: `dark-fantasy` (default), `cyberpunk`, `terminal`, `parchment`, `paper`.

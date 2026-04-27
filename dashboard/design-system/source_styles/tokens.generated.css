@@ -138,6 +138,17 @@
   --z-drawer: 60;  /* inspector / right drawer */
   --z-modal: 80;
   --z-toast: 100;
+  --font-size-3xs: 10px;
+  --font-size-2xs: 11px;
+  --font-size-xs: 12px;
+  --font-size-sm: 13px;  /* intentional override: Tailwind v4 default is 14px */
+  --font-size-base: 14px;
+  --font-size-md: 15px;  /* intentional addition: Tailwind v4 has no built-in md */
+  --font-size-lg: 16px;
+  --spacing-element: 8px;  /* tight element spacing */
+  --spacing-group: 12px;  /* grouped items */
+  --spacing-card: 16px;  /* card internal padding */
+  --radius-xl: 24px;
 }
 
 :root {
@@ -348,6 +359,25 @@
   --heat-1: rgb(212 161 74 / .04);
   --heat-2: rgb(212 161 74 / .08);
   --heat-3: rgb(212 161 74 / .14);
+  --color-text-body: var(--fg-2);  /* legacy alias for body copy */
+  --color-text-muted: var(--fg-3);  /* legacy alias for muted copy */
+  --color-text-dim: var(--fg-3);  /* legacy alias; collapses to fg-3 same as muted */
+  --color-accent-brass: var(--brass-1);  /* legacy alias for the brass primary */
+  --color-accent-soft: var(--brass-soft);  /* legacy alias for the brass soft tint */
+  --bad-light: var(--err);  /* legacy alias for body-on-tinted error text */
+  --warn-bright: var(--warn);  /* legacy alias for body-on-tinted warn text */
+  --color-keeper-1-glow: var(--k-1-glow);
+  --color-keeper-2-glow: var(--k-2-glow);
+  --color-keeper-3-glow: var(--k-3-glow);
+  --color-keeper-4-glow: var(--k-4-glow);
+  --color-keeper-5-glow: var(--k-5-glow);
+  --color-keeper-6-glow: var(--k-6-glow);
+  --color-keeper-7-glow: var(--k-7-glow);
+  --color-keeper-8-glow: var(--k-8-glow);
+  --color-keeper-9-glow: var(--k-9-glow);
+  --color-keeper-10-glow: var(--k-10-glow);
+  --color-keeper-11-glow: var(--k-11-glow);
+  --color-keeper-12-glow: var(--k-12-glow);
 }
 
 :root, [data-theme="dark-fantasy"] {

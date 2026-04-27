@@ -328,6 +328,7 @@ let stop_loop ~base_path ?reason loop_id =
       status = Stopped;
       error_message = reason;
       updated_at = Time_compat.now () } in
+    cleanup_terminal_artifacts_best_effort ~base_path state;
     save_state ~base_path state;
     Hashtbl.replace active_loops loop_id state;
     state

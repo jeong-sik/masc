@@ -495,6 +495,8 @@ let metric_sse_broadcast_events = "masc_sse_broadcast_events_total"
 let metric_sse_broadcast_failures = "masc_sse_broadcast_failures_total"
 let metric_sse_external_subscriber_callback_failures =
   "masc_sse_external_subscriber_callback_failures_total"
+let metric_oas_sse_relay_drop_marker_failures =
+  "masc_oas_sse_relay_drop_marker_failures_total"
 let metric_sse_stream_queue_depth = "masc_sse_stream_queue_depth"
 let metric_sse_queue_depth_avg = "masc_sse_queue_depth_avg"
 let metric_sse_queue_depth_max = "masc_sse_queue_depth_max"
@@ -1111,6 +1113,14 @@ let init () =
      stream errors).  A non-zero rate indicates that a downstream \
      consumer is failing to accept events even though the SSE fanout \
      considers the broadcast successful."
+    Counter;
+  add metric_oas_sse_relay_drop_marker_failures
+    "OAS relay drop-marker broadcasts that themselves failed to emit. \
+     The drop marker is the operator-visible signal that an OAS event \
+     was dropped after exhausting retries; if the drop marker also \
+     fails to broadcast, operators are blind to the drop entirely. \
+     Distinct from masc_sse_broadcast_failures_total because the drop \
+     marker is the recovery path's last resort, not a normal broadcast."
     Counter;
   add metric_sse_stream_queue_depth
     "Per-session SSE event stream queue depth" Gauge;

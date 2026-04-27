@@ -55,6 +55,17 @@ let inc_external_subscriber_callback_failure () =
   Prometheus.inc_counter
     Prometheus.metric_sse_external_subscriber_callback_failures ()
 
+(* P2 silent-failure fix (transport scan):
+   The OAS relay drop-marker is the operator-visible signal that an
+   OAS event was dropped after exhausting retries.  If the drop marker
+   broadcast itself fails (oas_event_bridge.ml:430), operators get no
+   indication a drop happened.  Distinct from inc_broadcast_failure
+   so the recovery-path failure rate is isolated from normal broadcast
+   failures. *)
+let inc_relay_drop_marker_failure () =
+  Prometheus.inc_counter
+    Prometheus.metric_oas_sse_relay_drop_marker_failures ()
+
 let set_sse_queue_depth ~session_id depth =
   Prometheus.set_gauge Prometheus.metric_sse_stream_queue_depth
     ~labels:[("session_id", session_id)] (float_of_int depth)

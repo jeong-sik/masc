@@ -329,10 +329,23 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
                    ("voter_identity", Server_utils.board_actor_identity_json voter);
                    ("direction", `String dir)])
     in
-    ignore (Activity_graph.emit state.room_config
-      ~actor:activity_actor ?subject:activity_subject
-      ~kind:activity_kind ~payload:activity_payload
-      ~tags:["board"; activity_kind] ()));
+    (* P2 silent-failure fix: Activity_graph.emit failures (Discord
+       webhook, audit trail writes, etc.) were previously ignored
+       entirely.  An operator seeing board activity on the dashboard
+       had no signal that the external systems failed to receive the
+       event.  Catch + warn surfaces the failure in operator logs
+       without aborting the SSE broadcast that already succeeded. *)
+    (try
+       ignore (Activity_graph.emit state.room_config
+         ~actor:activity_actor ?subject:activity_subject
+         ~kind:activity_kind ~payload:activity_payload
+         ~tags:["board"; activity_kind] ())
+     with
+     | Eio.Cancel.Cancelled _ as e -> raise e
+     | exn ->
+         Log.Misc.warn
+           "board: Activity_graph.emit kind=%s failed: %s"
+           activity_kind (Printexc.to_string exn)));
   (* Wire broadcast → keeper wakeup: any broadcast wakes keepers so they
      can react to new tasks, mentions, or room activity immediately.
      Coord_state.on_broadcast_mention is the active path (Coord.broadcast uses

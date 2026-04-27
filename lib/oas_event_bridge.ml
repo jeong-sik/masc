@@ -427,6 +427,14 @@ let broadcast_drop_marker ~(pending : pending_relay) ~(stage_label : string)
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
+      (* P2 silent-failure fix: previously only logged.  The drop
+         marker is the operator-visible signal that an OAS event was
+         dropped after exhausting retries; if the drop marker also
+         fails to broadcast, operators are blind to the drop entirely.
+         Counter is distinct from masc_sse_broadcast_failures_total
+         (PR-C #11075) so the recovery-path failure rate is visible
+         in isolation from normal broadcast failures. *)
+      Transport_metrics.inc_relay_drop_marker_failure ();
       Log.Misc.warn "oas_event_bridge: drop marker broadcast failed: %s"
         (Printexc.to_string exn)
 

@@ -136,6 +136,16 @@ let make_health_json ?(listener = "http/1.1") request =
       ("minor_heap_size", `Int (let c = Gc.get () in c.minor_heap_size));
     ]);
     ("keeper_fibers", `Int (Keeper_registry.count_running ()));
+    (* P2 silent-failure fix: lazy_task_boot_guard fires when a keeper
+       startup task exceeds the boot timeout (server_bootstrap_loops.ml:116).
+       The Prometheus counter `masc_lazy_task_boot_guard_fired_total`
+       was already incremented but `/health` did not surface it, so an
+       operator hitting /health would see "ok" while keepers had
+       silently failed to start.  Exposing the cumulative count here
+       lets dashboards / health probes alert on a non-zero value. *)
+    ("lazy_task_boot_guard_fires_total",
+     `Int (int_of_float
+             (Prometheus.metric_total "masc_lazy_task_boot_guard_fired_total")));
   ]
 
 (** Health check handler *)

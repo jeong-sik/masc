@@ -33,7 +33,7 @@ function Chip({
       <span class="font-mono text-text-strong">${value}</span>
       <button
         type="button"
-        class="ml-0.5 rounded-sm min-w-6 min-h-6 p-1 text-text-muted hover:bg-white/10 hover:text-text-strong transition-colors inline-flex items-center justify-center"
+        class="ml-0.5 rounded-sm min-w-6 min-h-6 p-1 text-text-muted hover:bg-[var(--white-10)] hover:text-text-strong transition-colors inline-flex items-center justify-center"
         onClick=${onClear}
         aria-label=${`${label} 필터 제거`}
       >

@@ -263,7 +263,7 @@ export function AgentDetailOverlay() {
                   <${StatusBadge} status=${unified.canonical} />
                   ${unified.description !== unified.label ? html`<span class="text-3xs font-medium py-1 px-2 border border-white/10 bg-white/5 text-text-muted whitespace-nowrap rounded" title=${unified.description}>${unified.description}</span>` : null}
                   ${isArchivedParticipant ? html`<${IdPill}>이전 세션 참여자<//>` : null}
-                  ${agent?.model ? html`<span class="font-mono text-3xs font-medium bg-white/10 border border-white/5 px-2 py-1 rounded text-text-muted shadow-sm">${agent.model}</span>` : ''}
+                  ${agent?.model ? html`<span class="font-mono text-3xs font-medium bg-[var(--white-10)] border border-white/5 px-2 py-1 rounded text-text-muted shadow-sm">${agent.model}</span>` : ''}
                   ${!agent && missionBrief?.archived_reason
                     ? html`<span class="text-xs text-text-dim italic">${missionBrief.archived_reason}</span>`
                     : null}
@@ -320,7 +320,7 @@ export function AgentDetailOverlay() {
             <button
               ref=${closeButtonRef}
               type="button"
-              class="px-4 py-2 text-sm font-semibold rounded border border-transparent bg-white/10 text-text-strong hover:bg-[var(--white-20)] transition-colors duration-200 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-bg-surface)]"
+              class="px-4 py-2 text-sm font-semibold rounded border border-transparent bg-[var(--white-10)] text-text-strong hover:bg-[var(--white-20)] transition-colors duration-200 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-bg-surface)]"
               onClick=${closeAgentDetail}
             >
               닫기

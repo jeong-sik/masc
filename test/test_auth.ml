@@ -432,7 +432,19 @@ let test_verify_token_keeper_exact_match () =
            "keeper credential should verify with exact agent_name: %s"
            (Types.masc_error_to_string e))
 
-let test_verify_token_keeper_alias_accepts_stable_owner_after_bootstrap () =
+(* Was: this test validated a legacy fallback where a bare-form
+   credential ("sangsu") was accepted as a verification source for a
+   canonical lookup ("keeper-sangsu-agent"). That fallback was the
+   mechanism by which dual-identity credentials silently coexisted --
+   any path that minted a bare credential created a second valid
+   identity for the same keeper.
+
+   PR-3a self-heals dual-identity: ensure_keeper_credential archives
+   the bare-form credential when its token differs from the canonical.
+   The bare token therefore must NOT verify against the canonical
+   name after bootstrap. Spec: AuthIdentityFSM.tla I1
+   IdentityBindsToken (a token must bind to exactly one principal). *)
+let test_verify_token_keeper_alias_archives_dual_identity_bare () =
   let dir = setup_test_room () in
   Fun.protect
     ~finally:(fun () -> cleanup_test_room dir)
@@ -442,7 +454,7 @@ let test_verify_token_keeper_alias_accepts_stable_owner_after_bootstrap () =
           fail
             (Printf.sprintf "stable keeper token creation failed: %s"
                (Types.masc_error_to_string e))
-      | Ok (stable_raw_token, _) -> (
+      | Ok (stale_bare_token, _) -> (
           match
             Auth.ensure_keeper_credential dir
               ~agent_name:"keeper-sangsu-agent"
@@ -452,21 +464,22 @@ let test_verify_token_keeper_alias_accepts_stable_owner_after_bootstrap () =
                 (Printf.sprintf "keeper credential bootstrap failed: %s"
                    (Types.masc_error_to_string e))
           | Ok _ -> (
-              check bool "exact alias credential exists" true
+              check bool "canonical credential exists" true
                 (Option.is_some
                    (Auth.load_credential dir "keeper-sangsu-agent"));
+              (* PR-3a behavior: bare credential is archived, the bare
+                 token is now stale and must not authenticate. *)
               match
                 Auth.verify_token dir ~agent_name:"keeper-sangsu-agent"
-                  ~token:stable_raw_token
+                  ~token:stale_bare_token
               with
               | Ok cred ->
-                  check string "stable keeper owner accepted" "sangsu"
-                    cred.agent_name
-              | Error e ->
                   fail
                     (Printf.sprintf
-                       "keeper alias should accept stable owner token after bootstrap: %s"
-                       (Types.masc_error_to_string e)))))
+                       "stale bare token must NOT verify against canonical \
+                        after PR-3a self-heal (got cred owner=%s)"
+                       cred.agent_name)
+              | Error _ -> ())))
 
 let test_load_credential_missing_keeper_alias_stays_quiet () =
   let dir = setup_test_room () in
@@ -575,6 +588,78 @@ let test_ensure_keeper_credential_uses_per_keeper_token () =
             (Printf.sprintf
                "ensure_keeper_credential should mint a per-keeper token: %s"
                (Types.masc_error_to_string e)))
+
+(* PR-3a regression guards: ensure_keeper_credential self-heals
+   dual-identity by archiving any pre-existing bare-form credential
+   whose token differs from the canonical. Spec: AuthIdentityFSM.tla
+   I1 IdentityBindsToken. *)
+
+let archive_dir_of dir = Filename.concat (Auth.auth_dir dir) ".archive"
+
+let archive_contains dir filename =
+  let archive = archive_dir_of dir in
+  if not (Sys.file_exists archive) then false
+  else
+    let stamps = Sys.readdir archive in
+    Array.exists
+      (fun stamp ->
+        let stamp_path = Filename.concat archive stamp in
+        Sys.is_directory stamp_path
+        && Array.exists (String.equal filename) (Sys.readdir stamp_path))
+      stamps
+
+let test_ensure_keeper_credential_archives_dual_identity_bare () =
+  let dir = setup_test_room () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_room dir)
+    (fun () ->
+      ignore
+        (Auth.enable_auth dir ~require_token:true
+           ~agent_name:"bootstrap-admin");
+      (* Historical residue: a bare-form credential created by an older
+         path (e.g., pre-#10440 boot, CLI login) with its own token. *)
+      let _ =
+        match Auth.create_token dir ~agent_name:"sangsu" ~role:Types.Worker with
+        | Ok r -> r
+        | Error e -> fail (Types.masc_error_to_string e)
+      in
+      let bare_path = Auth.credential_file dir "sangsu" in
+      check bool "bare credential pre-exists" true (Sys.file_exists bare_path);
+      (* Now ensure the canonical is created — should self-heal. *)
+      (match
+         Auth.ensure_keeper_credential dir
+           ~agent_name:"keeper-sangsu-agent"
+       with
+       | Ok _ -> ()
+       | Error e -> fail (Types.masc_error_to_string e));
+      check bool "bare credential moved out of agents/" false
+        (Sys.file_exists bare_path);
+      check bool "bare credential archived" true
+        (archive_contains dir "sangsu.json");
+      let canonical_path =
+        Auth.credential_file dir "keeper-sangsu-agent"
+      in
+      check bool "canonical credential remains" true
+        (Sys.file_exists canonical_path))
+
+let test_ensure_keeper_credential_no_archive_when_no_bare () =
+  let dir = setup_test_room () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_room dir)
+    (fun () ->
+      ignore
+        (Auth.enable_auth dir ~require_token:true
+           ~agent_name:"bootstrap-admin");
+      (* Clean state: only the canonical is created. No bare residue. *)
+      (match
+         Auth.ensure_keeper_credential dir
+           ~agent_name:"keeper-sangsu-agent"
+       with
+       | Ok _ -> ()
+       | Error e -> fail (Types.masc_error_to_string e));
+      let archive = archive_dir_of dir in
+      check bool "no archive directory created on clean state" false
+        (Sys.file_exists archive))
 
 let test_ensure_keeper_credential_reuses_persisted_raw_token_when_env_mismatched () =
   let dir = setup_test_room () in
@@ -927,8 +1012,8 @@ let () =
         test_extract_agent_type_prefix_keeper_aliases;
       test_case "verify_token keeper exact match" `Quick
         test_verify_token_keeper_exact_match;
-      test_case "verify_token keeper alias accepts stable owner after bootstrap" `Quick
-        test_verify_token_keeper_alias_accepts_stable_owner_after_bootstrap;
+      test_case "verify_token keeper alias archives dual-identity bare" `Quick
+        test_verify_token_keeper_alias_archives_dual_identity_bare;
       test_case "load_credential missing keeper alias stays quiet" `Quick
         test_load_credential_missing_keeper_alias_stays_quiet;
       test_case "verify_token dashboard legacy alias fallback" `Quick
@@ -939,6 +1024,10 @@ let () =
         test_ensure_keeper_credential_uses_per_keeper_token;
       test_case "ensure_keeper_credential reuses uuid" `Quick
         test_ensure_keeper_credential_reuses_uuid;
+      test_case "ensure_keeper_credential archives dual-identity bare" `Quick
+        test_ensure_keeper_credential_archives_dual_identity_bare;
+      test_case "ensure_keeper_credential no archive on clean state" `Quick
+        test_ensure_keeper_credential_no_archive_when_no_bare;
     ];
     "permissions", [
       test_case "worker permissions" `Quick test_worker_permissions;

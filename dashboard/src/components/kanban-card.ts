@@ -37,7 +37,7 @@ const MONO_STACK = 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "L
 
 const KIND_BORDER_LEFT_BY_KIND: Record<KanbanCardKind, string> = {
   queued: 'transparent',
-  running: 'var(--color-accent-fg)',
+  running: 'var(--color-accent-brass)',
   pending: 'var(--color-status-warn)',
   blocked: 'var(--color-status-warn)',
   fail: 'var(--color-status-err)',

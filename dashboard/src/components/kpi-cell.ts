@@ -87,8 +87,8 @@ const surfaceStyle = {
 }
 
 const liveOverrideStyle = {
-  borderColor: 'var(--brass-1, var(--color-accent-fg))',
-  boxShadow: '0 0 0 1px var(--brass-1, var(--color-accent-fg)), 0 0 12px rgb(var(--color-keeper-3-glow, 195 146 89) / 0.18)',
+  borderColor: 'var(--color-accent-brass)',
+  boxShadow: '0 0 0 1px var(--color-accent-brass), 0 0 12px rgb(var(--color-keeper-3-glow, 195 146 89) / 0.18)',
 }
 
 export function KpiCell(props: KpiCellProps): VNode {

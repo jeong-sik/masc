@@ -111,7 +111,7 @@ export function SwimlaneRow(props: SwimlaneRowProps): VNode {
     gap: 'var(--spacing-element)',
     padding: `4px var(--spacing-element)`,
     borderRadius: '3px',
-    border: `1px solid ${props.selected ? 'var(--brass-1, var(--color-accent-fg))' : 'transparent'}`,
+    border: `1px solid ${props.selected ? 'var(--color-accent-brass)' : 'transparent'}`,
     background: props.selected ? 'var(--bg-panel)' : 'transparent',
     cursor: interactive ? 'pointer' : 'default',
     outline: 'none',

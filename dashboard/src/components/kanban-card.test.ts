@@ -165,14 +165,14 @@ describe('KanbanCard component', () => {
     expect(onActivate).toHaveBeenCalledTimes(1)
   })
 
-  it('running kind paints accent left border', () => {
+  it('running kind paints brass left border', () => {
     const el = mount({
       id: 'PK-1',
       title: 't',
       keeperId: 'a',
       kind: 'running',
     })
-    expect(el.style.borderLeft).toContain('var(--color-accent-fg)')
+    expect(el.style.borderLeft).toContain('var(--color-accent-brass)')
   })
 
   it('fail kind paints err-status left border', () => {

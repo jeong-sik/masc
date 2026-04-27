@@ -204,6 +204,29 @@ module Voice = struct
   (** Default Voice MCP server port *)
   let default_port =
     get_int ~default:8936 "VOICE_MCP_PORT"
+
+  (** Voice MCP HTTP request budget (seconds).
+
+      Wraps two [run_voice_status] sites at [voice_bridge.ml:82,139]
+      that drive the Voice MCP HTTP API (synthesis upload, file-form
+      POST). Both shared the literal [35.0] — a single knob keeps
+      uploaded-payload latency tunable fleet-wide for slow-network
+      deployments. Floor 1.0s — anything smaller cannot accommodate
+      even a localhost HTTP round trip with TLS handshake. *)
+  let http_request_timeout_sec =
+    Float.max 1.0
+      (get_float ~default:35.0 "VOICE_HTTP_REQUEST_TIMEOUT_SEC")
+
+  (** Audio test-tone subprocess budget (seconds).
+
+      Wraps the [run_voice_status] call at [voice_bridge.ml:892] that
+      spawns [sox play] for a 0.15s sine sweep. The 2.0s budget
+      includes [sox] startup overhead; lowering this risks cutting
+      off short tones on cold-start machines. Floor 0.2s prevents
+      operators from disabling the tone via misconfiguration. *)
+  let audio_test_tone_timeout_sec =
+    Float.max 0.2
+      (get_float ~default:2.0 "VOICE_AUDIO_TEST_TONE_TIMEOUT_SEC")
 end
 
 (** {1 Timeout Defaults} *)

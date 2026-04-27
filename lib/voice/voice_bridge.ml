@@ -79,7 +79,9 @@ let run_audio_http_request_to_file ~url ~headers ~body_json ~output_file =
         @ [ "--data-binary"; "@" ^ body_file; "-o"; output_file; "-w"; "%{http_code}" ]
       in
       let status, http_code_str =
-        run_voice_status ~timeout_sec:35.0 argv
+        run_voice_status
+          ~timeout_sec:Env_config_runtime.Voice.http_request_timeout_sec
+          argv
       in
       match status with
       | Unix.WEXITED 0 ->
@@ -136,7 +138,9 @@ let run_stt_multipart_request (req : Provider_adapter.voice_stt_request) =
     @ header_args @ form_args @ file_arg
   in
   let status, body =
-    run_voice_status ~timeout_sec:35.0 argv
+    run_voice_status
+      ~timeout_sec:Env_config_runtime.Voice.http_request_timeout_sec
+      argv
   in
   match status with
   | Unix.WEXITED 0 -> (
@@ -889,7 +893,8 @@ let health_check ~sw:_ ~clock:_ ~net () =
 let play_tone freq =
   try
     ignore
-      (run_voice_status ~timeout_sec:2.0
+      (run_voice_status
+         ~timeout_sec:Env_config_runtime.Voice.audio_test_tone_timeout_sec
          [ "play"; "-qn"; "synth"; "0.15"; "sine";
            Printf.sprintf "%.0f" freq ])
   with

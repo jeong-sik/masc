@@ -497,11 +497,11 @@ export function sourceCountClass(source: TelemetrySourceSummary): string {
 export function sourceDetail(source: TelemetrySourceSummary): string {
   const parts: string[] = []
   if (source.keeper_count != null) {
-    parts.push(`${source.keeper_count} keepers tracked`)
+    parts.push(`keeper ${source.keeper_count}개 추적 중`)
   } else if (source.exists === false) {
-    parts.push('store missing')
+    parts.push('store 없음')
   } else {
-    parts.push('store available')
+    parts.push('store 있음')
   }
 
   if (source.entry_count > 0) {

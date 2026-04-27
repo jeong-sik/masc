@@ -757,15 +757,15 @@ function ConnectorLivePanel({
     label: 'Browser → Server',
     state: connectorError ? 'down' : 'ok',
     detail: connectorError ? 'gate fetch failed' : 'live',
-    hint: connectorError ? `Check server at ${connector?.gate_base_url || 'localhost:8935'}` : '',
+    hint: connectorError ? `${connector?.gate_base_url || 'localhost:8935'} 에서 서버 확인` : '',
   }
   const serverDot: LivenessDot = (() => {
     if (!connector?.available) {
       return {
         label: 'Server → Sidecar',
         state: 'down',
-        detail: 'no status.json yet',
-        hint: `Run ./run.sh from sidecars/${connectorId}-bot/`,
+        detail: '아직 status.json 없음',
+        hint: `sidecars/${connectorId}-bot/ 에서 ./run.sh 실행`,
       }
     }
     if (connector.stale) {
@@ -788,7 +788,7 @@ function ConnectorLivePanel({
       return {
         label: `Sidecar → ${connectorName}`,
         state: 'unknown',
-        detail: 'sidecar offline',
+        detail: 'sidecar 오프라인',
         hint: '',
       }
     }
@@ -805,14 +805,14 @@ function ConnectorLivePanel({
       return {
         label: `Sidecar → ${connectorName}`,
         state: 'warn',
-        detail: 'stale heartbeat',
+        detail: 'heartbeat stale',
         hint: 'Sidecar 프로세스 중단 가능성',
       }
     }
     return {
       label: `Sidecar → ${connectorName}`,
       state: 'warn',
-      detail: 'gateway link not yet up',
+      detail: 'gateway link 미수립',
       hint: '토큰 및 네트워크 도달성 확인',
     }
   })()

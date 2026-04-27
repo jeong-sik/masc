@@ -14,6 +14,8 @@ let runtime_meta_write_sync_hook : (Coord.config -> keeper_meta -> unit) ref =
 
 let register_runtime_meta_write_sync f = runtime_meta_write_sync_hook := f
 
+let version_conflict_re = Re.Pcre.re "meta version conflict" |> Re.compile
+
 let read_meta_file_path path : (keeper_meta option, string) result =
   if not (Fs_compat.file_exists path)
   then Ok None
@@ -304,9 +306,8 @@ let write_meta ?(force = false) config (m : keeper_meta) : (unit, string) result
 ;;
 
 let is_version_conflict_error msg =
-  let re = Re.Pcre.re "meta version conflict" |> Re.compile in
   try
-    ignore (Re.exec re msg);
+    ignore (Re.exec version_conflict_re msg);
     true
   with
   | Not_found -> false

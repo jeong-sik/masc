@@ -4,6 +4,15 @@ open Keeper_types
 
 include Keeper_memory_bank
 
+(* Static string-match patterns hoisted from evaluate_memory_recall.
+   [Re.str] + [Re.compile] is pure, so a single DFA build at module
+   load replaces one per-call compile on every weather/first-question
+   recall evaluation. *)
+let re_weather_ko = Re.str "날씨" |> Re.compile
+let re_weather_en = Re.str "weather" |> Re.compile
+let re_first_ko = Re.str "첫" |> Re.compile
+let re_first_en = Re.str "first" |> Re.compile
+
 let cost_usd_of_usage (usage : Oas.Types.api_usage) ~(model_id : string) : float =
   let pricing = Llm_provider.Pricing.pricing_for_model model_id in Llm_provider.Pricing.estimate_cost ~pricing
         ~input_tokens:usage.input_tokens ~output_tokens:usage.output_tokens ()
@@ -676,8 +685,8 @@ let evaluate_memory_recall
   let expected_topic = expected_topic_hint user_message in
   let has_weather_word (s : string) =
     let q = String.lowercase_ascii s in
-    Re.execp (Re.str "날씨" |> Re.compile) s
-    || Re.execp (Re.str "weather" |> Re.compile) q
+    Re.execp re_weather_ko s
+    || Re.execp re_weather_en q
   in
   (* Similarity threshold for recall match acceptance.
      0.18 (default): Jaccard + character n-gram combined score.
@@ -747,8 +756,8 @@ let evaluate_memory_recall
           if has_weather_reply then 0.08 else -.0.08
       | Some "first_question" ->
           let has_first =
-            Re.execp (Re.str "첫" |> Re.compile) assistant_reply
-            || Re.execp (Re.str "first" |> Re.compile) (String.lowercase_ascii assistant_reply)
+            Re.execp re_first_ko assistant_reply
+            || Re.execp re_first_en (String.lowercase_ascii assistant_reply)
           in
           if has_first then 0.05 else -.0.05
       | _ -> 0.0

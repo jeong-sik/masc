@@ -41,6 +41,7 @@ import { ConnectorKeeperMatrix, deriveMatrix } from './connector-keeper-matrix'
 import { ConnectorPathsStrip } from './connector-paths-strip'
 import { createManagedAsyncResource } from '../lib/async-state'
 import { route } from '../router'
+import { Tk } from './tk'
 
 // Sub-section -> connector_id filter. `connector-status` (default) shows
 // all connectors; the per-connector sub-sections show just that one. Source
@@ -945,8 +946,8 @@ function ConnectorLivePanel({
               <div class="mt-1">
                 <span class="font-medium">Next: </span>
                 ${connectorError
-                  ? html`refresh the dashboard or check <code class="rounded bg-[var(--white-4)] px-1">/api/v1/gate/connectors</code> on ${connector?.gate_base_url || 'the Gate server'}.`
-                  : html`run the ${connectorName} status command and inspect <code class="rounded bg-[var(--white-4)] px-1">${connector?.status_path || `sidecars/${connectorId}-bot/status.json`}</code>.`}
+                  ? html`refresh the dashboard or check <${Tk}>/api/v1/gate/connectors<//> on ${connector?.gate_base_url || 'the Gate server'}.`
+                  : html`run the ${connectorName} status command and inspect <${Tk}>${connector?.status_path || `sidecars/${connectorId}-bot/status.json`}<//>.`}
               </div>
             </div>
           `
@@ -975,7 +976,7 @@ function ConnectorLivePanel({
                 <span class="font-medium">Cause: </span> keeper 디렉토리 사용 불가, 수동 입력만 가능.
               </div>
               <div class="mt-1">
-                <span class="font-medium">Next: </span> 지금은 수동 입력으로 진행, 이후 <code class="rounded bg-[var(--white-4)] px-1">config/keepers/</code> 복원 또는 <code class="rounded bg-[var(--white-4)] px-1">/api/v1/gate/keepers</code> 수정 후 디렉토리 추천에 의존하세요.
+                <span class="font-medium">Next: </span> 지금은 수동 입력으로 진행, 이후 <${Tk}>config/keepers/<//> 복원 또는 <${Tk}>/api/v1/gate/keepers<//> 수정 후 디렉토리 추천에 의존하세요.
               </div>
             </div>
           `
@@ -999,7 +1000,7 @@ function ConnectorLivePanel({
                 <span class="font-medium text-[var(--color-fg-primary)]">설정된 키퍼 없음</span>
               </div>
               <div class="text-3xs text-[var(--color-status-warn)]/80">
-                Add keeper config files under <code class="rounded bg-[var(--white-4)] px-1">config/keepers/</code> and restart the server.
+                Add keeper config files under <${Tk}>config/keepers/<//> and restart the server.
               </div>
             </div>
           `
@@ -1054,7 +1055,7 @@ function ConnectorLivePanel({
                 </div>
                 <div class="text-2xs text-[var(--color-status-warn)]/80">
                   <div>
-                    <span class="font-medium">원인: </span> 사이드카 status 파일이 <code class="rounded bg-[var(--white-4)] px-1">${connector?.status_path || `sidecars/${connectorId}-bot/status.json`}</code> 에서 관찰되지 않았습니다.
+                    <span class="font-medium">원인: </span> 사이드카 status 파일이 <${Tk}>${connector?.status_path || `sidecars/${connectorId}-bot/status.json`}<//> 에서 관찰되지 않았습니다.
                   </div>
                   <div class="mt-1">
                     <span class="font-medium">다음: </span> <strong>Start</strong> 버튼으로 백엔드를 통해 실행하거나, 아래 명령을 복사해 터미널에서 실행하세요. 오프라인이 지속되면 <strong>status</strong> 와 <strong>tail logs</strong> 를 사용하세요.

@@ -7,6 +7,92 @@ let mount_if_present ~host ~container : Credential_provider.ro_mount list =
   else if not (Sys.file_exists host) then []
   else [ { host; container } ]
 
+(* ── Skipped credential mount warn dedup ───────────────────────
+
+   [mount_if_present] silently drops mounts whose host path is empty
+   or missing.  When called for the 3 critical credential mounts
+   (gh CLI config, gitconfig, ssh dir) the keeper subprocess then
+   runs inside docker without the corresponding credential; [gh pr
+   create] returns 401 / [git push] returns permission denied; the
+   keeper turn output shows only the raw CLI error.
+
+   Symmetric to #11025 (sandbox GH_TOKEN env warn): function exists,
+   policy exists, single missing log line at the composition layer
+   leaves operators blind.  Per-keeper one-shot WARN with explicit
+   list of which paths were skipped + reason (empty/not_found), plus
+   a Prometheus counter labelled by keeper + mount + reason.
+
+   Fires at [compose_ro_mounts] (one observation point per keeper
+   sandbox launch), not inside [mount_if_present] which is exposed
+   via [For_testing] and must stay pure. *)
+let mount_skip_warn_emitted : (string, unit) Hashtbl.t = Hashtbl.create 16
+let mount_skip_warn_mu = Eio.Mutex.create ()
+
+type mount_attempt = {
+  label : string;
+  host : string;
+  status : [ `Mounted | `Empty | `Not_found ];
+}
+
+let classify_mount_attempt ~label ~host : mount_attempt =
+  let status =
+    if host = "" then `Empty
+    else if not (Sys.file_exists host) then `Not_found
+    else `Mounted
+  in
+  { label; host; status }
+
+let warn_mount_skips_if_any ~keeper_name (attempts : mount_attempt list) =
+  let skipped =
+    List.filter
+      (fun a -> match a.status with `Mounted -> false | _ -> true)
+      attempts
+  in
+  if skipped = [] then ()
+  else begin
+    let should_emit =
+      Eio.Mutex.use_rw ~protect:true mount_skip_warn_mu (fun () ->
+        if Hashtbl.mem mount_skip_warn_emitted keeper_name then false
+        else begin
+          Hashtbl.add mount_skip_warn_emitted keeper_name ();
+          true
+        end)
+    in
+    if should_emit then begin
+      List.iter
+        (fun a ->
+          let reason =
+            match a.status with
+            | `Empty -> "empty"
+            | `Not_found -> "not_found"
+            | `Mounted -> "mounted"
+          in
+          Prometheus.inc_counter
+            "masc_keeper_credential_mount_skipped_total"
+            ~labels:[ ("keeper", keeper_name); ("mount", a.label);
+                      ("reason", reason) ]
+            ())
+        skipped;
+      let pp_skip a =
+        let r = match a.status with
+          | `Empty -> "empty"
+          | `Not_found -> "not_found"
+          | `Mounted -> "mounted"
+        in
+        Printf.sprintf "%s=%s(%s)" a.label
+          (if a.host = "" then "<empty>" else a.host) r
+      in
+      Log.Keeper.warn
+        "%s: sandbox credential mount(s) skipped — keeper inside docker \
+         will be missing the corresponding host credential.  Skipped: \
+         [%s].  Resolution: ensure host paths exist or override via \
+         [Env_config_sandbox.Auth_paths] env knobs.  See \
+         [host_config_provider.ml compose_ro_mounts]."
+        keeper_name
+        (String.concat "; " (List.map pp_skip skipped))
+    end
+  end
+
 (* RFC-0008 PR-1: env composition mirrors the inline block at
    keeper_shell_docker.ml:271-329 (pre-extraction).  No new env keys
    are introduced; this is the same surface, concentrated. *)
@@ -25,7 +111,7 @@ let compose_env ~git_author_name ~git_author_email =
   ]
   @ Env_git_noninteractive.env
 
-let compose_ro_mounts (kb : Keeper_gh_env.keeper_binding) =
+let compose_ro_mounts ?keeper_name (kb : Keeper_gh_env.keeper_binding) =
   let gh_creds =
     match kb.gh_config_dir with
     | Some dir -> dir
@@ -33,6 +119,14 @@ let compose_ro_mounts (kb : Keeper_gh_env.keeper_binding) =
   in
   let gitconfig = Env_config_sandbox.Auth_paths.gitconfig () in
   let ssh_dir = Env_config_sandbox.Auth_paths.ssh_dir () in
+  let attempts = [
+    classify_mount_attempt ~label:"gh_creds" ~host:gh_creds;
+    classify_mount_attempt ~label:"gitconfig" ~host:gitconfig;
+    classify_mount_attempt ~label:"ssh_dir" ~host:ssh_dir;
+  ] in
+  Option.iter
+    (fun name -> warn_mount_skips_if_any ~keeper_name:name attempts)
+    keeper_name;
   mount_if_present ~host:gh_creds
     ~container:(Filename.concat cred_root ".config/gh")
   @ mount_if_present ~host:gitconfig
@@ -69,7 +163,7 @@ let resolve ~config ~identity:keeper_name =
         resolve_git_identity kb ~keeper_name
       in
       let env = compose_env ~git_author_name ~git_author_email in
-      let ro_mounts = compose_ro_mounts kb in
+      let ro_mounts = compose_ro_mounts ~keeper_name kb in
       let metadata = metadata_of_binding kb in
       Ok
         Credential_provider.{

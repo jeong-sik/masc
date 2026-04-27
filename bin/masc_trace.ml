@@ -186,7 +186,37 @@ let dump_fsm_transitions ~base_path ~keeper ~turn_id =
               ~default:"-"
           in
           Printf.printf "%s [fsm] %s\n" ts msg)
-        matches
+        matches;
+    (* Path summary: extract the [to_state] from each [fsm:transition]
+       line and join with arrows.  An operator scanning for "did this
+       turn reach done?" gets the answer in one line without scrolling
+       through the per-row trail above. *)
+    let extract_to_state msg =
+      let needle = "-> " in
+      let lens = String.length msg in
+      let lensub = String.length needle in
+      let rec find i =
+        if i > lens - lensub then None
+        else if String.sub msg i lensub = needle then
+          let rest = String.sub msg (i + lensub) (lens - i - lensub) in
+          Some (String.trim rest)
+        else find (i + 1)
+      in
+      find 0
+    in
+    if matches <> [] then begin
+      let states =
+        List.filter_map
+          (fun json ->
+            string_field json "message"
+            |> Option.value ~default:""
+            |> extract_to_state)
+          matches
+      in
+      if states <> [] then
+        Printf.printf "=== fsm path === %s -> %s\n" keeper
+          (String.concat " -> " states)
+    end
 
 (** Scan [.masc/tool_calls/<YYYY-MM>/<DD>.jsonl] for tool call
     rows whose [keeper] = our keeper and

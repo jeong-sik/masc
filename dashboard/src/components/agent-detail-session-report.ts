@@ -190,7 +190,7 @@ function TaskEventTimeline({ events }: { events: AgentTimelineEvent[] }) {
           const icon = taskEventIcon(evt.type)
           const color = taskEventColor(evt.type)
           return html`
-            <div key=${idx} class="flex items-center gap-2 py-1.5 px-3 rounded hover:bg-white/3 transition-colors">
+            <div key=${idx} class="flex items-center gap-2 py-1.5 px-3 rounded hover:bg-[var(--white-3)] transition-colors">
               <span class="text-3xs font-bold uppercase tracking-wider ${color} bg-white/5 px-2 py-0.5 rounded">${icon}</span>
               <span class="text-xs text-text-body flex-1 truncate">${title}</span>
               ${evt.ts ? html`<${TimeAgo} timestamp=${evt.ts} />` : null}
@@ -215,7 +215,7 @@ function BroadcastReport({ report, index }: { report: { ts: string; content: str
     <div class="border border-card-border/60 rounded bg-card/30 overflow-hidden hover:border-accent/20 transition-colors">
       <button
         type="button"
-        class="w-full flex items-center justify-between px-4 py-2.5 bg-white/3 border-b border-card-border/40 cursor-pointer select-none text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+        class="w-full flex items-center justify-between px-4 py-2.5 bg-[var(--white-3)] border-b border-card-border/40 cursor-pointer select-none text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
         onClick=${() => setExpanded(!expanded)}
         aria-expanded=${expanded}
       >

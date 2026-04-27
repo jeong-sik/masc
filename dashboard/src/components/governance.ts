@@ -170,7 +170,7 @@ function JudgeStatusBar() {
     ? 'text-warn'
     : 'text-bad/80'
   return html`
-    <div class="mb-4 flex items-center gap-3 rounded border border-white/5 bg-white/3 px-3.5 py-2 text-xs" data-testid="judge-status">
+    <div class="mb-4 flex items-center gap-3 rounded border border-white/5 bg-[var(--white-3)] px-3.5 py-2 text-xs" data-testid="judge-status">
       <span class="flex items-center gap-1.5">
         <${StatusDot} size="sm" class=${dotClass} />
         <span class="font-medium text-text-muted">평가 모델 ${label}</span>

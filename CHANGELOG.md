@@ -1,6 +1,57 @@
 # Changelog
 
 
+## [0.18.3] - 2026-04-27 — patch: leak root fixes + keeper observability + design-system progress
+
+Aggregate of 30 commits since v0.18.2 (9 feat / 6 refactor / 6 fix / 4 i18n / 3 docs / 2 perf). No breaking API changes.
+
+Follow-up to v0.18.2 stability hardening. This release closes two long-standing leak issues at the source (autoresearch + keeper-playground worktree cleanup) and continues design-system swap wave + KeeperBadge primitive adoption. All `feat` entries are additive.
+
+### Fixed (leak root cause)
+- `autoresearch`: auto-cleanup managed worktree on terminal transition (#10892, #10968) — `Switch.on_release` pattern, prevents per-job dir accumulation (~91 MB / job pre-fix).
+- `coord/task`: auto-cleanup playground worktree on task done (#10899, #10956) — `Coord_hooks` task_done pattern, closes contract gap when keeper crashes mid-task / watchdog stale-termination / SP-suppression / LLM forgets to call `masc_worktree_remove`.
+
+### Fixed (keeper / fleet hot path)
+- `server`: wire `approval_janitor` fork to break HITL death-spiral (#10973).
+- `mcp/call_tool`: demote policy/workflow rejections from ERROR to WARN (#10975, #10978).
+- `keeper/sp`: probe escape valve every 10 same-cohort suppressions (#10887, #10948).
+
+### Added (keeper observability)
+- `keeper`: surface deliberate-skip reasons on stale watchdog kill (#10962).
+- `coord/task`: Prometheus counter + warn log for `task_claim_next` implicit auto-release (#10421, #10977).
+- `masc_oas_bridge`: cancel reason bucket + inner exception (#10954) — surfaces OAS cancellation provenance.
+
+### Added (dev tooling / SSOT)
+- `keeper-bootstrap`: extract autoboot polling/settle intervals to env (SSOT) (#10957).
+- `dashboard`: `ErrorRecoverable` + `ErrorFatal` 2-tier error states (#10965).
+- `dashboard`: `KeeperBadge` primitive + adoption in safe-autonomy `FindingsList`/`KeeperCard`/`TimelineList` (#10955, #10970, #10983).
+- `docs/spec`: log severity taxonomy SSOT — anti-pattern catalog + lint rule scaffold (#10963).
+
+### Refactor
+- `dashboard`: extract `createSharedTicker` factory + dedup boilerplate (#10971) — shared ticker helper for periodic re-render across panels.
+- `design-system swap wave`: PR-CS75 ~ PR-CS82 (#10966, #10974, #10979, #10980, #10987 + others) — ActionButton variants (warn / ghost), TextArea swaps.
+
+### Perf
+- `dashboard`: migrate fsm-hub timeline + pipeline children to `nowSecondsSignal` (#10961, #10969).
+
+### i18n
+- `dashboard`: localize Idle snapshot headline (round-71), substring-safe headlines (round-73), keeper directory error panel (round-78), composite-fsm-flowchart, sectionLabel for fleet-health/safe-autonomy (#10939 / #10943 / #10964 / #10984 / #10976).
+
+### Docs
+- `docs/coord`: add `coord_gc.mli` + `coord_git.mli` (#10751 batch — #10958 / #10960).
+- `scripts`: add `cleanup-autoresearch.sh` interim TTL quarantine + help-text polish (#10913 / #10967).
+
+### Bumps
+- dune-project version 0.18.2 → 0.18.3
+- masc_mcp.opam version 0.18.2 → 0.18.3
+- CHANGELOG.md: v0.18.3 entry added (0.18.2 history preserved)
+- ROADMAP.md / docs/PRODUCT-OPERATING-PLAN.md / docs/spec/SPEC-INDEX.md: version refs synced
+
+### Out of scope (deferred)
+- 4 stale `sangsu-task-*` orphan worktrees from before #10956 land (Apr 22, dirty 1-line `network_mode` config) — operator manual sweep recommended in #10899 follow-up comment.
+- #10930 / #10871 user a11y stack PRs (`a11y-006` / `a11y-007`) — most patches already upstream via #10874; recommended cherry-pick novel only or close + restart.
+
+
 ## [0.18.2] - 2026-04-27 — patch: keeper stability hardening + observability + dev tooling
 
 Aggregate of 66 commits since v0.18.1 (18 fix / 8 feat / 14 refactor / 6 perf / 9 i18n / 8 squash / 2 chore / 1 test). No breaking API changes.

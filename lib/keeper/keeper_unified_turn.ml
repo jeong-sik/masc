@@ -2282,6 +2282,28 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             ~consecutive:count
             ~threshold
             ~err;
+          (* Stamp [last_failure_reason] on FIRST cascade_exhausted-class
+             failure (not just at threshold).  Without this, the stale
+             watchdog kills with [idle 328s] and operators see no signal
+             until the 3rd failure trips auto-pause below — by which time
+             the keeper has been silently burning cycles for ~90s on a
+             cascade with zero callable models.
+
+             Production evidence (2026-04-27 system_log): 18 events of
+             "no callable models" today on cascade=keeper_unified, but
+             [last_failure_reason] stayed None for the affected keepers
+             so the watchdog kill message read [idle 328s] with no
+             attribution.  Operators had no way to distinguish
+             "stuck=cascade_exhausted" from "stuck=genuinely idle".
+
+             Reset path is unchanged: any successful turn clears the
+             field via [reset_turn_failures] + [set_failure_reason None]
+             at line 966-967.  Auto-pause site below (line 2275) still
+             stamps the same value at threshold — idempotent overwrite. *)
+          if EC.is_cascade_exhausted_error err && count > 0 then
+            Keeper_registry.set_failure_reason ~base_path:config.base_path
+              meta.name
+              (Some (Keeper_registry.Turn_consecutive_failures count));
           (* task-074 (#fleet-stall 2026-04-26): break the supervisor restart
              loop on cascade_exhausted. Without this guard, [count >= threshold]
              below raises [Keeper_fiber_crash], the supervisor restarts the

@@ -976,7 +976,7 @@ export function KeeperDetailPage() {
                 : null}
             </div>
             ${keeper.recent_output_preview
-              ? html`<div class="py-2 px-3 rounded bg-[rgba(71,184,255,0.06)] border border-[var(--accent-12)] text-xs text-[var(--color-fg-primary)] leading-relaxed">
+              ? html`<div class="py-2 px-3 rounded bg-[var(--accent-6)] border border-[var(--accent-12)] text-xs text-[var(--color-fg-primary)] leading-relaxed">
                   <div class="line-clamp-2">${keeper.recent_output_preview}</div>
                 </div>`
               : null}

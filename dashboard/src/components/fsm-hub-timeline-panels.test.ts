@@ -10,11 +10,11 @@ import {
 
 describe('swimlaneSegmentColor', () => {
   it('returns alarm color for alarm values', () => {
-    expect(swimlaneSegmentColor('Failing')).toBe('bg-[rgba(239,68,68,0.5)]')
-    expect(swimlaneSegmentColor('gate_rejected')).toBe('bg-[rgba(239,68,68,0.5)]')
-    expect(swimlaneSegmentColor('exhausted')).toBe('bg-[rgba(239,68,68,0.5)]')
+    expect(swimlaneSegmentColor('Failing')).toBe('bg-[var(--bad-50)]')
+    expect(swimlaneSegmentColor('gate_rejected')).toBe('bg-[var(--bad-50)]')
+    expect(swimlaneSegmentColor('exhausted')).toBe('bg-[var(--bad-50)]')
     // Overflowed is in ALARM_VALUES, so it returns alarm color (line 55 matches first)
-    expect(swimlaneSegmentColor('Overflowed')).toBe('bg-[rgba(239,68,68,0.5)]')
+    expect(swimlaneSegmentColor('Overflowed')).toBe('bg-[var(--bad-50)]')
   })
 
   it('returns idle color for idle-like values', () => {

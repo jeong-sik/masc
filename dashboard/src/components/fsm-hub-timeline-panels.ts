@@ -56,7 +56,7 @@ const ALARM_VALUES = new Set([
 ])
 
 export function swimlaneSegmentColor(value: string): string {
-  if (ALARM_VALUES.has(value)) return 'bg-[rgba(239,68,68,0.5)]'
+  if (ALARM_VALUES.has(value)) return 'bg-[var(--bad-50)]'
   if (IDLE_LIKE_VALUES.has(value)) return 'bg-[var(--white-7)]'
   if (value === 'Overflowed') return 'bg-[var(--amber-bright-45)]'
   if (value === 'Compacting' || value === 'compacting') return 'bg-[var(--amber-bright-45)]'
@@ -297,7 +297,7 @@ export function SwimlaneTimeline({
         <span class="flex items-center gap-1"><span class="inline-block h-2 w-3 rounded-sm bg-[var(--indigo-45)]"></span>active</span>
         <span class="flex items-center gap-1"><span class="inline-block h-2 w-3 rounded-sm bg-[var(--amber-bright-45)]"></span>compact</span>
         <span class="flex items-center gap-1"><span class="inline-block h-2 w-3 rounded-sm bg-[var(--purple-50)]"></span>handoff</span>
-        <span class="flex items-center gap-1"><span class="inline-block h-2 w-3 rounded-sm bg-[rgba(239,68,68,0.5)]"></span>alarm</span>
+        <span class="flex items-center gap-1"><span class="inline-block h-2 w-3 rounded-sm bg-[var(--bad-50)]"></span>alarm</span>
         <span class="flex items-center gap-1"><span class="inline-block h-2 w-3 rounded-sm border border-[var(--white-8)] bg-[var(--white-3)]"></span>idle</span>
       </div>
     </div>

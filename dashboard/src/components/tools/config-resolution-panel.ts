@@ -57,11 +57,11 @@ export function filterDiagnostics(
 function toneClass(status: string): string {
   switch (status) {
     case 'ready':
-      return 'border-[var(--emerald-28)] bg-[var(--emerald-10)] text-[#bbf7d0]'
+      return 'border-[var(--emerald-28)] bg-[var(--emerald-10)] text-[var(--emerald-fg)]'
     case 'warn':
       return 'border-[var(--yellow-bright-28)] bg-[var(--yellow-bright-10)] text-[var(--yellow-100)]'
     case 'invalid_env':
-      return 'border-[var(--rose-28)] bg-[var(--rose-10)] text-[#fecdd3]'
+      return 'border-[var(--rose-28)] bg-[var(--rose-10)] text-[var(--rose-fg)]'
     default:
       return 'border-[var(--color-border-default)] bg-[var(--white-6)] text-[var(--color-fg-muted)]'
   }
@@ -256,10 +256,10 @@ function fmtBoolean(value: boolean | null | undefined): string {
 }
 
 function probeTone(signal: string | null | undefined, probeOk: boolean | null | undefined): string {
-  if (probeOk === false) return 'border-[var(--rose-28)] bg-[var(--rose-10)] text-[#fecdd3]'
+  if (probeOk === false) return 'border-[var(--rose-28)] bg-[var(--rose-10)] text-[var(--rose-fg)]'
   switch (signal) {
     case 'likely_reused':
-      return 'border-[var(--emerald-28)] bg-[var(--emerald-10)] text-[#bbf7d0]'
+      return 'border-[var(--emerald-28)] bg-[var(--emerald-10)] text-[var(--emerald-fg)]'
     case 'possible_reuse':
       return 'border-[var(--yellow-bright-28)] bg-[var(--yellow-bright-10)] text-[var(--yellow-100)]'
     case 'no_visible_reuse':
@@ -304,7 +304,7 @@ const KEEPER_RUNTIME_ROWS: Array<{
 function sourceTone(source: string): string {
   switch (source) {
     case 'env': return 'border-[var(--color-accent-fg)]/30 bg-[var(--color-accent-fg)]/10 text-[var(--color-accent-fg)]'
-    case 'toml': return 'border-[var(--emerald-28)] bg-[var(--emerald-10)] text-[#bbf7d0]'
+    case 'toml': return 'border-[var(--emerald-28)] bg-[var(--emerald-10)] text-[var(--emerald-fg)]'
     case 'derived': return 'border-[var(--yellow-bright-28)] bg-[var(--yellow-bright-10)] text-[var(--yellow-100)]'
     default: return 'border-[var(--color-border-default)] bg-[var(--white-6)] text-[var(--color-fg-muted)]'
   }
@@ -411,7 +411,7 @@ function RuntimeProbePanel() {
 
       ${state.value.error
         ? html`
-            <div class="rounded border border-[var(--rose-28)] bg-[var(--rose-10)] px-3 py-3 text-xs text-[#fecdd3]">
+            <div class="rounded border border-[var(--rose-28)] bg-[var(--rose-10)] px-3 py-3 text-xs text-[var(--rose-fg)]">
               ${state.value.error}
             </div>
           `
@@ -479,7 +479,7 @@ function RuntimeProbePanel() {
               ? html`
                   <div class="mt-3 flex flex-col gap-2">
                     ${probe.errors?.map(item => html`
-                      <div class="rounded border border-[var(--rose-28)] bg-[var(--rose-10)] px-3 py-2 text-xs text-[#fecdd3]">
+                      <div class="rounded border border-[var(--rose-28)] bg-[var(--rose-10)] px-3 py-2 text-xs text-[var(--rose-fg)]">
                         ${item}
                       </div>
                     `)}

@@ -385,7 +385,7 @@ function ToolSearchPicker({
                     ...${getItemProps({ item: name, index: idx })}
                     class=${`w-full flex items-start gap-2 text-left px-3 py-1.5 cursor-pointer transition-colors ${
                       highlightedIndex === idx
-                        ? 'bg-[var(--accent-soft)] text-[var(--color-accent-fg)]'
+                        ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent-fg)]'
                         : 'hover:bg-[var(--accent-10)]'
                     }`}
                   >
@@ -561,7 +561,7 @@ export function ToolAllowlistEditor({
           <button type="button"
             class=${`py-1 px-3 rounded text-3xs font-medium border transition-colors cursor-pointer ${
               policyMode.value === mode
-                ? 'border-[var(--accent-30)] bg-[var(--accent-soft)] text-[var(--color-accent-fg)]'
+                ? 'border-[var(--accent-30)] bg-[var(--color-accent-soft)] text-[var(--color-accent-fg)]'
                 : 'border-[var(--color-border-default)] bg-[var(--white-3)] text-[var(--color-fg-muted)]'
             }`}
             onClick=${() => { policyMode.value = mode; textInputSection.value = null }}

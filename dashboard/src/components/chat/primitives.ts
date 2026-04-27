@@ -216,7 +216,7 @@ function ChatMessageBubble({
       ${showMetadata && detailItems.length > 0
         ? html`<div class=${`flex flex-wrap gap-1.5 ${isMessenger ? 'pt-0.5' : ''}`}>
             ${detailItems.map(item => html`
-              <span class="inline-flex items-center rounded-sm border border-[var(--accent-soft)] bg-[var(--accent-10)] px-2.5 py-1 text-3xs font-medium text-[var(--color-fg-secondary)]">
+              <span class="inline-flex items-center rounded-sm border border-[var(--color-accent-soft)] bg-[var(--accent-10)] px-2.5 py-1 text-3xs font-medium text-[var(--color-fg-secondary)]">
                 ${item}
               </span>
             `)}
@@ -266,7 +266,7 @@ function ChatMessageBubble({
                       <div class="text-3xs font-semibold uppercase tracking-3 text-[var(--color-fg-muted)]">상태 스냅샷</div>
                       <div class="grid grid-cols-[repeat(auto-fit,minmax(116px,1fr))] gap-2">
                         ${state.map(item => html`
-                          <div class="rounded border border-[var(--accent-soft)] bg-[rgba(71,184,255,0.06)] px-3 py-2.5">
+                          <div class="rounded border border-[var(--color-accent-soft)] bg-[rgba(71,184,255,0.06)] px-3 py-2.5">
                             <div class="text-3xs font-semibold uppercase tracking-2 text-[var(--color-accent-fg)]">${item.label}</div>
                             <div class="mt-1 text-xs leading-paragraph text-[var(--color-fg-primary)]">${item.value}</div>
                           </div>

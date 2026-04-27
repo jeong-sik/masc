@@ -13,7 +13,7 @@ interface StatTileProps {
 const VARIANT_STYLES = {
   default: 'bg-[var(--white-4)] border-[var(--color-border-default)] text-[var(--color-fg-secondary)]',
   gold: 'bg-[rgba(200,168,78,0.05)] border-[var(--ff-gold-10)] text-[var(--color-fg-secondary)]',
-  accent: 'bg-[var(--accent-soft)] border-[var(--accent-20)] text-[var(--color-fg-secondary)]',
+  accent: 'bg-[var(--color-accent-soft)] border-[var(--accent-20)] text-[var(--color-fg-secondary)]',
   warn: 'bg-[rgba(230,167,0,0.06)] border-[rgba(230,167,0,0.2)] text-[var(--color-status-warn)]',
 } as const
 

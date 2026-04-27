@@ -61,8 +61,7 @@ val merge_keeper_trace_lines :
 (** {1 Tools route} *)
 
 val keeper_tools_response_json :
-  Keeper_types.keeper_meta ->
-  [> `Assoc of (string * Yojson.Safe.t) list ]
+  Keeper_types.keeper_meta -> Yojson.Safe.t
 (** JSON shape returned by [GET /tools]. *)
 
 val handle_keeper_tools_post :
@@ -115,9 +114,7 @@ val continuity_summary_of_messages :
 
 (** {1 Checkpoint inventory} *)
 
-val stat_json_of_path :
-  string ->
-  [> `Assoc of (string * [> `Float of float | `Int of int ]) list | `Null ]
+val stat_json_of_path : string -> Yojson.Safe.t
 (** [stat] result as JSON; [`Null] when the file is missing. *)
 
 val oas_checkpoint_summary_json :
@@ -127,15 +124,7 @@ val oas_checkpoint_summary_json :
   is_current:bool ->
   fallback_generation:int ->
   Oas.Checkpoint.t ->
-  [> `Assoc of
-       (string *
-        [> `Assoc of (string * [> `Float of float | `Int of int ]) list
-         | `Bool of bool
-         | `Float of float
-         | `Int of int
-         | `Null
-         | `String of string ])
-       list ]
+  Yojson.Safe.t
 (** JSON summary of an OAS checkpoint, used by the inventory listing. *)
 
 val keeper_checkpoint_inventory_json :

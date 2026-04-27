@@ -62,7 +62,7 @@ function EntryRow({ entry }: { entry: ConfigEntry }) {
     <div class="flex items-start gap-3 py-2 px-3 rounded hover:bg-[var(--color-bg-hover)] transition-colors">
       <div class="flex-1 min-w-0">
         <div class="flex items-center gap-2">
-          <code class="text-xs font-mono text-[var(--text-primary)]">${entry.env}</code>
+          <code class="text-xs font-mono text-[var(--color-fg-secondary)]">${entry.env}</code>
           ${isEnv ? html`
             <span class="text-3xs uppercase tracking-wider px-1.5 py-0.5 rounded bg-[var(--color-accent-fg)]/10 text-[var(--color-accent-fg)]">custom</span>
           ` : null}
@@ -109,7 +109,7 @@ function CategoryPanel({ name, entries }: { name: string; entries: ConfigEntry[]
       >
         <div class="flex items-center gap-2">
           <span class="text-xs text-[var(--color-fg-muted)]">${isExpanded ? '\u25BC' : '\u25B6'}</span>
-          <span class="text-sm font-medium text-[var(--text-primary)] capitalize">${name}</span>
+          <span class="text-sm font-medium text-[var(--color-fg-secondary)] capitalize">${name}</span>
           <span class="text-xs text-[var(--color-fg-muted)]">(${filtered.length})</span>
         </div>
         ${customCount > 0 ? html`
@@ -137,19 +137,19 @@ function ServerMeta() {
     <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
       <div class="px-3 py-2 rounded bg-[var(--bg-surface)] border border-[var(--color-border-divider)]">
         <div class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)]">버전</div>
-        <div class="text-sm font-mono text-[var(--text-primary)]">${server.version}</div>
+        <div class="text-sm font-mono text-[var(--color-fg-secondary)]">${server.version}</div>
       </div>
       <div class="px-3 py-2 rounded bg-[var(--bg-surface)] border border-[var(--color-border-divider)]">
         <div class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)]">가동시간</div>
-        <div class="text-sm font-mono text-[var(--text-primary)]">${formatUptime(server.uptime_seconds)}</div>
+        <div class="text-sm font-mono text-[var(--color-fg-secondary)]">${formatUptime(server.uptime_seconds)}</div>
       </div>
       <div class="px-3 py-2 rounded bg-[var(--bg-surface)] border border-[var(--color-border-divider)]">
         <div class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)]">OCaml</div>
-        <div class="text-sm font-mono text-[var(--text-primary)]">${server.ocaml_version}</div>
+        <div class="text-sm font-mono text-[var(--color-fg-secondary)]">${server.ocaml_version}</div>
       </div>
       <div class="px-3 py-2 rounded bg-[var(--bg-surface)] border border-[var(--color-border-divider)]">
         <div class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)]">PID</div>
-        <div class="text-sm font-mono text-[var(--text-primary)]">${server.pid}</div>
+        <div class="text-sm font-mono text-[var(--color-fg-secondary)]">${server.pid}</div>
       </div>
     </div>
   `
@@ -177,7 +177,7 @@ export function ServerConfig() {
           onInput=${(e: Event) => { searchQuery.value = (e.target as HTMLInputElement).value }}
         />
         <button
-          class="px-3 py-1.5 text-xs rounded bg-[var(--bg-surface)] border border-[var(--color-border-divider)] text-[var(--color-fg-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
+          class="px-3 py-1.5 text-xs rounded bg-[var(--bg-surface)] border border-[var(--color-border-divider)] text-[var(--color-fg-muted)] hover:text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)] transition-colors"
           onClick=${() => void refreshServerConfig()}
           disabled=${loading}
         >

@@ -1113,6 +1113,39 @@ goal = "orphan"
   | Ok _ -> fail "should have returned Error for missing table"
   | Error _ -> ()
 
+(* PR-3b1: canonicalize_if_keeper redirects bare lookup names to
+   their [keeper-<n>-agent] canonical form when the name belongs to
+   a configured keeper, leaving non-keeper credentials (dashboard,
+   admin, codex-mcp-client, ...) untouched. Spec: AuthIdentityFSM
+   I1 IdentityBindsToken. *)
+let test_canonicalize_if_keeper () =
+  with_temp_dir "canonicalize-room" @@ fun room_dir ->
+  with_config_dir @@ fun config_dir ->
+  Fs_compat.clear_fs ();
+  let keepers_dir = Filename.concat config_dir "keepers" in
+  Unix.mkdir keepers_dir 0o755;
+  write_file
+    (Filename.concat keepers_dir "sangsu.toml")
+    {|[keeper]
+goal = "test goal"
+|};
+  let config = Coord.default_config room_dir in
+  check string "bare keeper name -> canonical"
+    "keeper-sangsu-agent"
+    (Keeper_runtime.canonicalize_if_keeper config "sangsu");
+  check string "canonical keeper name -> canonical (idempotent)"
+    "keeper-sangsu-agent"
+    (Keeper_runtime.canonicalize_if_keeper config "keeper-sangsu-agent");
+  check string "non-keeper name (dashboard) passes through untouched"
+    "dashboard"
+    (Keeper_runtime.canonicalize_if_keeper config "dashboard");
+  check string "non-keeper name (admin) passes through untouched"
+    "admin"
+    (Keeper_runtime.canonicalize_if_keeper config "admin");
+  check string "non-keeper name (codex-mcp-client) passes through untouched"
+    "codex-mcp-client"
+    (Keeper_runtime.canonicalize_if_keeper config "codex-mcp-client")
+
 let () =
   run "Keeper_runtime config SSOT resync"
     [
@@ -1222,5 +1255,12 @@ let () =
             "returns Error when table is missing"
             `Quick
             test_toml_update_no_table;
+        ] );
+      ( "canonicalize",
+        [
+          test_case
+            "canonicalize_if_keeper bare->canonical, passthrough non-keeper"
+            `Quick
+            test_canonicalize_if_keeper;
         ] );
     ]

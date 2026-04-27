@@ -130,6 +130,21 @@ let bootable_keeper_names config =
               | Some true | None -> true)
          | Error _ -> true)
 
+(* PR-3b1: convert a credential lookup name to its canonical
+   keeper-<n>-agent form when it refers to a bootable keeper.
+   Non-keeper names (dashboard, admin, codex-mcp-client, ...) are
+   returned unchanged so this is safe to apply at any lookup site.
+   Spec: AuthIdentityFSM.tla I1 IdentityBindsToken (a token must
+   bind to one principal -- the bare-name lookup path that
+   scaffolded dual-identity is starved by callers always asking for
+   the canonical form). *)
+let canonicalize_if_keeper config name =
+  let stable = Keeper_types_profile.strip_keeper_prefix name in
+  if List.mem stable (configured_keeper_names config) then
+    Keeper_types_profile.keeper_agent_name stable
+  else
+    name
+
 (** Apply a TOML profile default to a runtime meta value.
     [Some v] from TOML overrides; [None] keeps the current runtime value. *)
 let apply_default opt current = match opt with Some v -> v | None -> current

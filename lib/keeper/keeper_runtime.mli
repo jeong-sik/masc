@@ -45,6 +45,15 @@ val bootable_keeper_names : Coord.config -> string list
 (** Names of every keeper whose [keepers/<name>/keeper.toml] exists and
     looks bootable on disk. *)
 
+val canonicalize_if_keeper : Coord.config -> string -> string
+(** [canonicalize_if_keeper config name] returns [keeper-<n>-agent]
+    when [name] (bare or already canonical) refers to a configured
+    keeper, else returns [name] unchanged. Safe to apply at credential
+    lookup sites: dashboard / admin / codex-mcp-client pass through
+    untouched, keeper bare names get canonicalized so the bare-stub
+    redirect path stops being load-bearing. (PR-3b1, AuthIdentityFSM
+    invariant I1 IdentityBindsToken.) *)
+
 val apply_default : 'a option -> 'a -> 'a
 (** [apply_default opt default] returns [v] when [opt = Some v], else
     [default]. *)

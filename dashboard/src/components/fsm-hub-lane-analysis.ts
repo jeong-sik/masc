@@ -129,19 +129,19 @@ function laneMeaning(
       // it is never observed at snapshot time (see display_state.mli).
       switch (value) {
         case 'clean':
-          return { tone: 'ok', meaning: 'circuit breaker is clean — no recent tool failure streak' }
+          return { tone: 'ok', meaning: 'circuit breaker clean — 최근 tool failure streak 없음' }
         case 'warning':
-          return { tone: 'warn', meaning: 'consecutive tool failures are accumulating — a trip is possible if the class stays the same' }
+          return { tone: 'warn', meaning: '연속된 tool failure 누적 중 — class 가 동일하게 유지되면 trip 가능' }
         case 'cooling':
-          return { tone: 'info', meaning: 'breaker has tripped in the past; currently reset with no active streak' }
+          return { tone: 'info', meaning: 'breaker 가 과거에 trip — 현재 reset 됐고 active streak 없음' }
         default:
-          return { tone: 'info', meaning: 'circuit breaker state observed' }
+          return { tone: 'info', meaning: 'circuit breaker state 관측됨' }
       }
     }
   })()
 
   if (base.tone !== 'error' && isObservedStall(key, value, observedForSec)) {
-    return { tone: 'warn', meaning: 'state movement looks stalled on this screen' }
+    return { tone: 'warn', meaning: 'state movement 이 이 화면에서 정체된 것으로 보임' }
   }
   return base
 }

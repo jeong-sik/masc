@@ -222,12 +222,24 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                    "masc_keeper_stale_termination_threshold_breached_total"
                    ~labels:[ ("keeper", meta.name) ]
                    ();
+                 (* Phase 2 (#10765): override the [Stale_turn_timeout] latch
+                    set above with the storm-pattern variant so the
+                    supervisor's [`Crashed] branch can route this entry to
+                    auto-pause + [meta.paused = true] persistence instead of
+                    blindly enqueuing it for restart.  This breaks the
+                    restart-loop-back-to-stale cycle observed when the
+                    underlying cascade/provider/fd issue persists across
+                    restarts (24h evidence: 116 events, single keeper 13×). *)
+                 Keeper_registry.set_failure_reason ~base_path meta.name
+                   (Some (Keeper_registry.Stale_termination_storm
+                            { count = window_count }));
                  Log.Keeper.error
                    "%s: STALE-TERMINATION THRESHOLD BREACHED — %d \
-                    terminations in last %.0fs (threshold=%d). The \
-                    supervisor will continue to restart this keeper, \
-                    but the underlying root cause (cascade dead, fd \
-                    leak, provider auth, etc.) needs operator review. \
+                    terminations in last %.0fs (threshold=%d). \
+                    Phase 2: keeper will be auto-paused; supervisor will \
+                    NOT restart until an operator investigates the \
+                    underlying root cause (cascade dead, fd leak, \
+                    provider auth, etc.) and resumes the keeper. \
                     See issue #10765."
                    meta.name window_count termination_window_sec
                    escalation_threshold

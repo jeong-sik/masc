@@ -42,6 +42,7 @@ import {
   type CascadeSloStatus,
   type CascadeValidationStatus,
 } from '../api/dashboard'
+import { Btn } from './btn'
 import { Card } from './common/card'
 import { EmptyState } from './common/empty-state'
 import { ErrorState, LoadingState } from './common/feedback-state'
@@ -1164,22 +1165,18 @@ function CascadeRawConfigEditor({
             >
               ${saving.value ? '저장 중...' : mode.saveLabel}
             </button>
-            <button
-              type="button"
-              class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-3 py-1 text-xs text-[var(--text-strong)] hover:bg-[var(--color-bg-hover)] disabled:opacity-50"
+            <${Btn}
               onClick=${handleReset}
               disabled=${saving.value || !editorDirty.value}
             >
               Reset to disk
-            </button>
-            <button
-              type="button"
-              class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-3 py-1 text-xs text-[var(--text-strong)] hover:bg-[var(--color-bg-hover)] disabled:opacity-50"
+            <//>
+            <${Btn}
               onClick=${() => void onRefresh()}
               disabled=${saving.value}
             >
               Reload snapshot
-            </button>
+            <//>
           </div>
         </form>
         ${mode.previewTitle
@@ -1230,12 +1227,9 @@ export function CascadeConfigPanel() {
   return html`
     <div class="flex flex-col gap-4">
       <div class="flex items-center gap-3 flex-wrap">
-        <button
-          class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-3 py-1 text-xs text-[var(--text-strong)] hover:bg-[var(--color-bg-hover)]"
-          onClick=${() => void loadCascadeData(resource)}
-        >
+        <${Btn} onClick=${() => void loadCascadeData(resource)}>
           새로고침
-        </button>
+        <//>
         ${current.loading ? html`<span class="text-xs text-[var(--color-fg-muted)]" role="status">로딩 중...</span>` : null}
         ${config?.updated_at
           ? html`<span class="text-xs text-[var(--color-fg-muted)]">config · ${config.updated_at}</span>`

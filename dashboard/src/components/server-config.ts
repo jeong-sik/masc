@@ -56,7 +56,7 @@ function EntryRow({ entry }: { entry: ConfigEntry }) {
     ? 'text-[var(--color-fg-muted)] italic'
     : isDefault
       ? 'text-[var(--color-fg-muted)]'
-      : 'text-[var(--accent-primary)] font-medium'
+      : 'text-[var(--color-accent-fg)] font-medium'
 
   return html`
     <div class="flex items-start gap-3 py-2 px-3 rounded hover:bg-[var(--color-bg-hover)] transition-colors">
@@ -64,7 +64,7 @@ function EntryRow({ entry }: { entry: ConfigEntry }) {
         <div class="flex items-center gap-2">
           <code class="text-xs font-mono text-[var(--text-primary)]">${entry.env}</code>
           ${isEnv ? html`
-            <span class="text-3xs uppercase tracking-wider px-1.5 py-0.5 rounded bg-[var(--accent-primary)]/10 text-[var(--accent-primary)]">custom</span>
+            <span class="text-3xs uppercase tracking-wider px-1.5 py-0.5 rounded bg-[var(--color-accent-fg)]/10 text-[var(--color-accent-fg)]">custom</span>
           ` : null}
           ${!isEnv && entry.source !== 'default' ? html`
             <span class="text-3xs uppercase tracking-wider px-1.5 py-0.5 rounded bg-[var(--color-bg-hover)] text-[var(--color-fg-muted)]">${entry.source}</span>
@@ -113,7 +113,7 @@ function CategoryPanel({ name, entries }: { name: string; entries: ConfigEntry[]
           <span class="text-xs text-[var(--color-fg-muted)]">(${filtered.length})</span>
         </div>
         ${customCount > 0 ? html`
-          <span class="text-3xs px-2 py-0.5 rounded-sm bg-[var(--accent-primary)]/10 text-[var(--accent-primary)]">
+          <span class="text-3xs px-2 py-0.5 rounded-sm bg-[var(--color-accent-fg)]/10 text-[var(--color-accent-fg)]">
             ${customCount} custom
           </span>
         ` : null}

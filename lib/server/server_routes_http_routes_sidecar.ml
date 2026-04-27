@@ -777,7 +777,8 @@ let handle_stop state request reqd =
                   (`Assoc [ ("ok", `Bool false); ("error", `String msg) ])
             | Ok desired ->
                 let (_status, stdout) =
-                  Process_eio.run_argv_with_status ~timeout_sec:5.0
+                  Process_eio.run_argv_with_status
+                    ~timeout_sec:Env_config_runtime.Sidecar.control_command_timeout_sec
                     [ script; "stop" ]
                 in
                 let trimmed = String.trim stdout in
@@ -832,7 +833,8 @@ let handle_logs state request reqd =
            ])
       else
         let (_status, stdout) =
-          Process_eio.run_argv_with_status ~timeout_sec:5.0
+          Process_eio.run_argv_with_status
+            ~timeout_sec:Env_config_runtime.Sidecar.control_command_timeout_sec
             [ "tail"; "-n"; string_of_int lines; path ]
         in
         let line_list =
@@ -879,7 +881,9 @@ let fetch_schema ?base_path id =
        | Ok sidecar_dir ->
            let argv = python_argv_for sidecar_dir in
            let (status, stdout) =
-             Process_eio.run_argv_with_status ~timeout_sec:10.0 ~cwd:sidecar_dir argv
+             Process_eio.run_argv_with_status
+               ~timeout_sec:Env_config_runtime.Sidecar.schema_generation_timeout_sec
+               ~cwd:sidecar_dir argv
            in
            (match status with
             | Unix.WEXITED 0 ->

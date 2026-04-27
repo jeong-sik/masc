@@ -785,6 +785,34 @@ module Sidecar = struct
       inline literal that landed in #8919). *)
   let reconcile_backoff_sec =
     get_float ~default:30.0 "MASC_SIDECAR_RECONCILE_BACKOFF_SEC"
+
+  (** Subprocess timeout (seconds) for sidecar control commands —
+      [stop], [tail], and similar quick housekeeping operations.
+
+      Wraps two [Process_eio.run_argv_with_status] sites at
+      [server_routes_http_routes_sidecar.ml:780,835]. Default 5s
+      preserves the inline literals; floor 1s prevents an operator
+      typo from making every control command return "timeout" before
+      the sidecar even handles the signal. *)
+  let control_command_timeout_sec =
+    Float.max 1.0
+      (get_float ~default:5.0 "MASC_SIDECAR_CONTROL_TIMEOUT_SEC")
+
+  (** Subprocess timeout (seconds) for sidecar Python schema
+      generation. Wraps [Process_eio.run_argv_with_status] at
+      [server_routes_http_routes_sidecar.ml:882]. Default 10s
+      preserves the inline literal; this path runs Python interp +
+      schema introspection so it needs more headroom than the
+      lightweight control commands. Floor 1s.
+
+      Must satisfy [schema_generation > control_command] — schema
+      gen is strictly heavier than control commands, so an operator
+      lowering schema budget below the control budget would silently
+      reorder the implicit precedence and surprise downstream
+      diagnostics. *)
+  let schema_generation_timeout_sec =
+    Float.max 1.0
+      (get_float ~default:10.0 "MASC_SIDECAR_SCHEMA_TIMEOUT_SEC")
 end
 
 (** {1 Internal Safety Configuration} *)

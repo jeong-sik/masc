@@ -1,6 +1,54 @@
 # Changelog
 
 
+## [0.18.4] - 2026-04-27 — patch: a11y completion + worktree cleanup extension + log severity ratchet
+
+Aggregate of 29 commits since v0.18.3 (12 fix / 7 i18n / 4 feat / 3 refactor / 2 a11y / 1 perf / 1 ci, includes 10 commits landed during release CI window). No breaking API changes.
+
+Follow-up patch that closes the dashboard a11y round (#10930 focus trap + aria-expanded landed), extends worktree auto-cleanup to Cancel/Release transitions building on the v0.18.3 leak root fix, and introduces the log severity anti-pattern detector ratchet baseline.
+
+### Fixed
+- `#10930` dashboard a11y — focus trap, aria-expanded, readability (final round-6 landing after rebase cycle)
+- `#11001` coord/task — extend worktree auto-cleanup to Cancel and Release transitions (continuation of v0.18.3 #10956 root fix)
+- `#10999` keeper-watchdog — emit fleet batch-termination ERROR when ≥3 keepers stop in 30s (#10765 follow-up)
+- `#11008` build — drop 5 redundant catch-all arms after provider_kind exhaustive sweep
+- `#11019` provider — exhaust provider_kind matches for lint (broader sweep)
+- `#11022` session — bound registry + mcp-store mailboxes (was max_int)
+- `#11024` keeper — include unknown_toml_keys in merge_overlay
+- `#11025` keeper — warn once when sandbox GH_TOKEN unavailable
+- `#11012` keeper-supervisor — surface persona drift at registration (#10993)
+- `#11004` admission — inline fd-growth rate in admission rejection log (#10745)
+- `#10995` approval-queue — skip Critical risk in expire_stale to break re-enqueue cycle
+- `#10992` contract — harden public tool sweep and runtime guard edges
+
+### Added
+- `#11013` dashboard — extend SPEC §3 color alias bridge in variables.css (CS87)
+- `#11011` keeper — capture unknown TOML keys on profile_defaults
+- `#10997` dashboard — adopt KeeperBadge in ConnectorKeeperMatrix row label
+
+### a11y
+- `#11017` dashboard — agent-detail role=log/region/progressbar
+- `#11021` dashboard — auth-status aria-expanded/haspopup
+
+### Performance
+- `#11002` dashboard — isolate fsm-hub render scope from 5 s tick
+
+### Changed
+- `#11016` server-bootstrap — demote 5 recoverable cleanup Errors → Warn (§ 3.3)
+- `#10994` design-system — swap connector restart button to ActionButton ok (PR-CS83)
+- `#10981` design-system — swap activity-stream FilterBar to ActionButton ghost (PR-CS81)
+
+### CI
+- `#11000` log severity anti-pattern detector — Phase 1 ratchet baselines
+
+### i18n
+- `#10990` `#10996` `#10998` localize nextExpectedStep return strings (rounds 83–85)
+- `#11003` localize 7 detail field strings (round-86)
+- `#11005` finish fsm-hub-invariant-analysis (round-87)
+- `#11006` localize "Tool telemetry unavailable" fallback (round-88)
+- `#11014` localize 2 short matrix tooltip titles (round-89)
+
+
 ## [0.18.3] - 2026-04-27 — patch: leak root fixes + keeper observability + design-system progress
 
 Aggregate of 30 commits since v0.18.2 (9 feat / 6 refactor / 6 fix / 4 i18n / 3 docs / 2 perf). No breaking API changes.

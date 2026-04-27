@@ -97,6 +97,14 @@ function App() {
         <DCArtboard id="dr-keep" label="C · Keeper inspector" width={360} height={520}><DrawerKeeper/></DCArtboard>
       </DCSection>
 
+      {/* W04 · DS-Drift Phase 1 · board feed coverage. Mirrors dashboard/src/styles/board.css. */}
+      <DCSection id="board-feed" title="11b · Board Feed (W04)" subtitle="Mirror of dashboard/src/styles/board.css — post card · vote column · comment thread · markdown preview.">
+        <DCArtboard id="bf-post" label="A · Post card (board.css:L5-11)"     width={520} height={300}><BoardPostCard/></DCArtboard>
+        <DCArtboard id="bf-vote" label="B · Vote column + Phase 2 (L13-20)" width={420} height={420}><BoardVoteColumn/></DCArtboard>
+        <DCArtboard id="bf-cmt"  label="C · Comment thread (L22-27)"        width={520} height={360}><BoardCommentThread/></DCArtboard>
+        <DCArtboard id="bf-md"   label="D · Markdown preview (L29-58)"      width={520} height={480}><BoardMarkdownPreview/></DCArtboard>
+      </DCSection>
+
       {/* ════════ PHASE 2 · I0 · IDE BACKBONE (foundation) ════════ */}
 
       <DCSection id="ide-backbone" title="I0 · IDE Backbone" subtitle="Game-changer. Operator just observes & nudges; keepers do the work. Branch + keeper multi-select + nudge log.">

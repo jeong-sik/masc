@@ -231,7 +231,7 @@ export function Ops() {
       ` : null}
 
       <${FlowControlPanel} />
-      <section class="grid grid-cols-2 gap-4 max-[1200px]:grid-cols-1">
+      <section class="grid grid-cols-2 gap-4 max-[1200px]:grid-cols-1" aria-label="운영 제어 패널">
         <div class="grid gap-4 order-1 max-[1200px]:order-2">
           <${QuickIntervene} />
           <${KeeperUtilitiesPanel} />

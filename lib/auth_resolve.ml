@@ -2,6 +2,7 @@ type token_source =
   | Internal_keeper_token
   | Internal_keeper_env
   | Mcp_bearer_env
+  | Per_keeper_token_file
   | Provider_api_key_env of { var_name : string }
 
 type token = { raw : string; source : token_source }
@@ -22,6 +23,7 @@ let token_source_label = function
   | Internal_keeper_token -> "internal_keeper_token"
   | Internal_keeper_env -> "internal_keeper_env"
   | Mcp_bearer_env -> "mcp_bearer_env"
+  | Per_keeper_token_file -> "per_keeper_token_file"
   | Provider_api_key_env { var_name } ->
       "provider_api_key_env:" ^ var_name
 

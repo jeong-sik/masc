@@ -33,6 +33,7 @@ let all_token_sources : Auth_resolve.token_source list =
     Internal_keeper_token;
     Internal_keeper_env;
     Mcp_bearer_env;
+    Per_keeper_token_file;
     Provider_api_key_env { var_name = "ANTHROPIC_API_KEY" };
   ]
 
@@ -47,6 +48,12 @@ let test_provider_api_key_env_label_carries_var_name () =
       (Provider_api_key_env { var_name = "KIMI_API_KEY" })
   in
   Alcotest.(check bool) "label embeds var_name" true (contains s "KIMI_API_KEY")
+
+let test_per_keeper_token_file_label_is_stable () =
+  Alcotest.(check string)
+    "Per_keeper_token_file label matches operator-facing trace contract"
+    "per_keeper_token_file"
+    (Auth_resolve.token_source_label Per_keeper_token_file)
 
 (* ── auth_error: show / pp surface payload ────────────────────── *)
 
@@ -115,6 +122,8 @@ let () =
             test_token_source_labels_unique;
           Alcotest.test_case "Provider_api_key_env carries var_name" `Quick
             test_provider_api_key_env_label_carries_var_name;
+          Alcotest.test_case "Per_keeper_token_file label is stable" `Quick
+            test_per_keeper_token_file_label_is_stable;
         ] );
       ( "auth_error",
         [

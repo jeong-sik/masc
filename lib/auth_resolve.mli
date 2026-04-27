@@ -19,6 +19,11 @@ type token_source =
           present; legacy / startup-bootstrap path. *)
   | Mcp_bearer_env
       (** [MASC_MCP_TOKEN] env, last-resort. *)
+  | Per_keeper_token_file
+      (** [<base_path>/.masc/auth/<agent_name>.token] raw token; used as
+          a fallback when [MASC_MCP_TOKEN] is unset (e.g. CLI subprocesses
+          like codex_cli/gemini_cli/kimi_cli that callback into masc-mcp
+          but do not inherit the parent process env). Phase A F1. *)
   | Provider_api_key_env of { var_name : string }
       (** Provider-specific HTTPS API key, e.g.
           [ANTHROPIC_API_KEY] / [KIMI_API_KEY] / [ZHIPU_API_KEY]. *)

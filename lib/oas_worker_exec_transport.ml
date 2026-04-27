@@ -1258,4 +1258,3 @@ let non_http_transport_of_provider
                         }))))
   | Anthropic | OpenAI_compat | Ollama | Gemini | Glm | Kimi | DashScope ->
       Ok None
-  | _ -> Ok None

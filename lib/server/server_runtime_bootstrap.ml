@@ -24,6 +24,31 @@ let force_jsonl_fallback_env () =
   Unix.putenv Env_config_core.storage_type_env_key "filesystem";
   clear_retired_pg_envs ()
 
+let () =
+  Prometheus.register_counter
+    ~name:"masc_egress_audit_missing_total"
+    ~help:
+      "Boot-time egress policy audit (PR-Eg2b/Leak 11): keeper has no \
+       egress.json at the expected docker-path or local-path location, \
+       so the keeper would fail-closed on every URL command. Labels: \
+       keeper. A non-zero rate at boot indicates an operator should \
+       seed the policy file before the keeper attempts network egress."
+    ~labels:["keeper"]
+    ()
+
+let () =
+  Prometheus.register_counter
+    ~name:"masc_egress_audit_stale_orphan_total"
+    ~help:
+      "Boot-time egress policy audit (PR-Eg2b/Leak 11): keeper has an \
+       egress.json at a host-direct legacy location but none at the \
+       expected docker-path location. Code reads only the expected \
+       path, so the orphan file is silently inert and the keeper \
+       fail-closes. Labels: keeper. Operator should cp the orphan into \
+       the docker-path location and remove the host-direct file."
+    ~labels:["keeper"]
+    ()
+
 let requested_backend_mode () =
   Env_config_core.storage_type ()
 
@@ -556,6 +581,60 @@ let migrate_room_to_flat (state : Mcp_server.server_state) =
 let migrate_legacy_trace_dirs (state : Mcp_server.server_state) =
   migrate_legacy_dirs_with_renames state [ ("perpetual", "traces") ]
 
+let audit_keeper_egress_policies (state : Mcp_server.server_state) =
+  (* PR-Eg2b (Leak 11): on every boot, audit each keeper's [egress.json]
+     placement.  Reads only — never writes.  Writes are deferred to the
+     opt-in seed PR (PR-Eg4).  The audit is fail-soft: any unexpected
+     exception is logged and swallowed so a misbehaving keepers/ tree
+     can't keep the server from starting. *)
+  let config = state.Mcp_server.room_config in
+  let keepers_dir = Filename.concat (Coord.masc_root_dir config) "keepers" in
+  let metas =
+    if not (Sys.file_exists keepers_dir) then []
+    else
+      try
+        Sys.readdir keepers_dir
+        |> Array.to_list
+        |> List.filter_map (fun name ->
+            match Keeper_meta_store.read_meta config name with
+            | Ok (Some meta) -> Some meta
+            | Ok None -> None
+            | Error err ->
+                Log.Misc.warn
+                  "[egress_audit:read_meta_failed] keeper=%s err=%s"
+                  name err;
+                None)
+      with exn ->
+        Log.Misc.warn
+          "[egress_audit:enumerate_failed] dir=%s exn=%s"
+          keepers_dir (Printexc.to_string exn);
+        []
+  in
+  if metas = [] then
+    Log.Misc.info
+      "[egress_audit:skip] no keeper metas found at %s" keepers_dir
+  else begin
+    let results = Keeper_egress_audit.audit_all ~config ~metas in
+    let oks, missings, orphans = Keeper_egress_audit.partition results in
+    List.iter (fun r ->
+      Log.Misc.info "%s" (Keeper_egress_audit.format_log_line r))
+      oks;
+    List.iter (fun r ->
+      Log.Misc.warn "%s" (Keeper_egress_audit.format_log_line r);
+      Prometheus.inc_counter "masc_egress_audit_missing_total"
+        ~labels:[("keeper", r.Keeper_egress_audit.keeper_name)] ())
+      missings;
+    List.iter (fun r ->
+      Log.Misc.warn "%s" (Keeper_egress_audit.format_log_line r);
+      Prometheus.inc_counter "masc_egress_audit_stale_orphan_total"
+        ~labels:[("keeper", r.Keeper_egress_audit.keeper_name)] ())
+      orphans;
+    Log.Misc.info
+      "[egress_audit:summary] total=%d ok=%d missing=%d stale_orphan=%d"
+      (List.length results) (List.length oks)
+      (List.length missings) (List.length orphans)
+  end
+
 let bootstrap_server_state_blocking (state : Mcp_server.server_state) =
   (* Promote legacy room/keeper state before Coord.init seeds fresh root files.
      Otherwise state.json/backlog.json can be created in the destination first
@@ -566,6 +645,7 @@ let bootstrap_server_state_blocking (state : Mcp_server.server_state) =
      on their first pass, not rely on a later lazy migration task. *)
   migrate_legacy_keeper_dirs_blocking state;
   let (_init_msg : string) = Coord.init state.room_config ~agent_name:None in
+  audit_keeper_egress_policies state;
   Mcp_server.set_sse_callback state Sse.broadcast
 
 let sync_admin_token_env (state : Mcp_server.server_state) =

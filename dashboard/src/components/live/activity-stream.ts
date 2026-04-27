@@ -10,6 +10,7 @@ import {
   type LiveFilterKind,
 } from '../../live-store'
 import { connected, totalEvents } from '../../sse'
+import { ActionButton } from '../common/button'
 import { EmptyState, ErrorState } from '../common/feedback-state'
 import { formatTimeAgo } from '../common/time-ago'
 
@@ -26,15 +27,15 @@ function FilterBar() {
   return html`
     <div class="flex flex-wrap gap-1.5">
       ${FILTER_OPTIONS.map(opt => html`
-        <button type="button"
+        <${ActionButton}
           key=${opt.kind}
-          class="px-3 py-1.5 text-2xs rounded-sm border cursor-pointer transition-all duration-150 ${active.has(opt.kind)
-            ? 'border-[var(--border-slate-22)] bg-[var(--accent-soft)] text-[var(--color-fg-secondary)]'
-            : 'border-[var(--white-10)] bg-[var(--white-4)] text-[var(--color-fg-disabled)] hover:bg-[var(--white-8)] hover:border-[var(--border-slate-22)] hover:text-[var(--color-fg-primary)]'}"
+          variant="ghost"
+          size="sm"
+          class="!rounded-sm !px-3 !py-1.5"
+          pressed=${active.has(opt.kind)}
+          ariaLabel=${`activity stream filter ${opt.label}`}
           onClick=${() => toggleLiveFilter(opt.kind)}
-        >
-          ${opt.label}
-        </button>
+        >${opt.label}<//>
       `)}
     </div>
   `

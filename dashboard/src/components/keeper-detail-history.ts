@@ -392,23 +392,23 @@ export function lineageVerdictMeta(verdict: string | undefined): LineageVerdictM
   switch (verdict) {
     case 'verified':
       return {
-        badgeLabel: 'state preserved',
-        detail: 'Continuity checks whether the keeper goal, instructions, and saved state summary carried across the handoff.',
+        badgeLabel: '상태 보존',
+        detail: 'keeper 목표, 지침, 저장된 상태 요약이 핸드오프를 통해 전달됐는지 continuity 가 검사합니다.',
       }
     case 'drift_detected':
       return {
-        badgeLabel: 'review drift',
-        detail: 'The handoff completed, but the saved continuity summary changed enough that an operator should review it.',
+        badgeLabel: '드리프트 검토',
+        detail: '핸드오프는 완료됐지만 저장된 continuity 요약이 충분히 변경되어 operator 의 검토가 필요합니다.',
       }
     case 'unavailable':
       return {
-        badgeLabel: 'needs evidence',
-        detail: 'The handoff completed, but there was not enough saved continuity data to compare generations.',
+        badgeLabel: '증거 필요',
+        detail: '핸드오프는 완료됐지만 generation 비교에 필요한 continuity 데이터가 충분하지 않습니다.',
       }
     default:
       return {
-        badgeLabel: 'unknown',
-        detail: 'A continuity signal exists, but this verdict is not yet mapped to an operator-facing explanation.',
+        badgeLabel: '알 수 없음',
+        detail: 'continuity 신호는 존재하지만 본 판정이 아직 operator-facing 설명에 매핑되지 않았습니다.',
       }
   }
 }

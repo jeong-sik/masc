@@ -246,22 +246,22 @@ describe('filterCheckpointHistory', () => {
 describe('lineageVerdictMeta', () => {
   it('maps verified to an operator-facing preserved-state explanation', () => {
     expect(lineageVerdictMeta('verified')).toEqual({
-      badgeLabel: 'state preserved',
-      detail: 'Continuity checks whether the keeper goal, instructions, and saved state summary carried across the handoff.',
+      badgeLabel: '상태 보존',
+      detail: 'keeper 목표, 지침, 저장된 상태 요약이 핸드오프를 통해 전달됐는지 continuity 가 검사합니다.',
     })
   })
 
   it('maps drift_detected to a review-oriented explanation', () => {
     expect(lineageVerdictMeta('drift_detected')).toEqual({
-      badgeLabel: 'review drift',
-      detail: 'The handoff completed, but the saved continuity summary changed enough that an operator should review it.',
+      badgeLabel: '드리프트 검토',
+      detail: '핸드오프는 완료됐지만 저장된 continuity 요약이 충분히 변경되어 operator 의 검토가 필요합니다.',
     })
   })
 
   it('falls back to unknown for unmapped verdicts', () => {
     expect(lineageVerdictMeta('mystery')).toEqual({
-      badgeLabel: 'unknown',
-      detail: 'A continuity signal exists, but this verdict is not yet mapped to an operator-facing explanation.',
+      badgeLabel: '알 수 없음',
+      detail: 'continuity 신호는 존재하지만 본 판정이 아직 operator-facing 설명에 매핑되지 않았습니다.',
     })
   })
 })

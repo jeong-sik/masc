@@ -35,7 +35,7 @@ function KeeperToolPresetChip({ keeperName }: { keeperName: string }) {
         ? 'bg-[var(--ok-10)] text-[var(--ok)] border border-[var(--ok-20)]'
         : 'bg-[var(--white-5)] text-[var(--text-muted)] border border-[var(--white-8)]'
       }"
-      title=${`Tool preset: ${preset}${canPR ? ' (clone/PR 가능)' : ''}`}
+      title=${`도구 preset: ${preset}${canPR ? ' (clone/PR 가능)' : ''}`}
     >${preset}</span>
   `
 }

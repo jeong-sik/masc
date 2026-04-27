@@ -63,23 +63,32 @@ let agent_credential_to_yojson (c : agent_credential) =
     ("agent_name", `String c.agent_name);
     ("token", `String c.token);
     ("role", `String (agent_role_to_string c.role));
+    ("admin", `Bool (c.role = Admin));
     ("created_at", `String c.created_at);
     ("expires_at", match c.expires_at with Some s -> `String s | None -> `Null);
   ]
 
 let agent_credential_of_yojson json =
   let open Yojson.Safe.Util in
-  let agent_name = json |> member "agent_name" |> to_string in
-  let token = json |> member "token" |> to_string in
-  let role_str = json |> member "role" |> to_string in
-  match agent_role_of_string role_str with
-  | Error e -> Error e
-  | Ok role ->
-    let created_at = json |> member "created_at" |> to_string in
-    let expires_at = json |> member "expires_at" |> to_string_option in
-    let id = json |> member "id" |> to_string_option |> Option.map Credential_id.of_string in
-    let agent_id = json |> member "agent_id" |> to_string_option |> Option.map Agent_id.of_string in
-    Ok { id; agent_id; agent_name; token; role; created_at; expires_at }
+  try
+    let agent_name = json |> member "agent_name" |> to_string in
+    let token = json |> member "token" |> to_string in
+    let role =
+      match json |> member "role" |> to_string_option with
+      | Some s -> agent_role_of_string s
+      | None ->
+        let is_admin = json |> member "admin" |> to_bool_option |> Option.value ~default:false in
+        Ok (if is_admin then Admin else Worker)
+    in
+    (match role with
+     | Error e -> Error e
+     | Ok role ->
+       let created_at = json |> member "created_at" |> to_string in
+       let expires_at = json |> member "expires_at" |> to_string_option in
+       let id = json |> member "id" |> to_string_option |> Option.map Credential_id.of_string in
+       let agent_id = json |> member "agent_id" |> to_string_option |> Option.map Agent_id.of_string in
+       Ok { id; agent_id; agent_name; token; role; created_at; expires_at })
+  with e -> Error (Printexc.to_string e)
 
 (** Auth configuration *)
 type auth_config = {

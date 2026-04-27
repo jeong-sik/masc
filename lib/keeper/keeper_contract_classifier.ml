@@ -33,3 +33,19 @@ let pp_contract_status fmt = function
       Format.fprintf fmt "tool_surface_mismatch(missing=[%s])"
         (String.concat ", " missing)
   | other -> Format.pp_print_string fmt (contract_status_label other)
+
+type world_observation = {
+  unclaimed_task_count : int;
+  board_activity_count : int;
+  has_discovered_work_section : bool;
+}
+
+let classify_actionable_signal o =
+  if o.unclaimed_task_count > 0 then Has_unclaimed_tasks
+  else if o.board_activity_count > 0 then Has_board_activity
+  else if o.has_discovered_work_section then Has_discovered_work
+  else No_actionable_signal
+
+let is_actionable = function
+  | No_actionable_signal -> false
+  | Has_unclaimed_tasks | Has_board_activity | Has_discovered_work -> true

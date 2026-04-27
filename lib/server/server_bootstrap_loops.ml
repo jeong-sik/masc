@@ -468,6 +468,48 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
       in
       loop ()
     end);
+  (* HITL approval queue death-spiral fix.
+     [Keeper_approval_queue.expire_stale] has been a complete
+     implementation (queue removal, audit event, promise [Reject]
+     resolution, on_resolution callback) with a unit test since
+     introduction, but was never invoked by any production caller.
+     Result: a HITL approval enqueued by a keeper turn would block
+     [keeper_cycle_decision] forever via the
+     [has_pending_for_keeper → Skip Approval_pending] branch in
+     [keeper_world_observation.ml:928].  At the 300s stale-watchdog
+     threshold the supervisor would respawn the fiber, the same
+     approval entry would still be in the queue, and the cycle
+     would repeat indefinitely.  Pair with #10962
+     ([last_skip_observation] surface) so operators can see
+     [last_skip=[approval_pending]] alongside the kill warn line.
+     [max_wait_s] is a code constant (policy, not calibration);
+     [interval_seconds] mirrors [Goal_janitor]'s env exposure so
+     ops can tune cadence without changing policy. *)
+  fork_subsystem "approval_janitor" (fun () ->
+    if not (Env_config_runtime.Approval_janitor.enabled ()) then
+      Log.Server.info
+        "approval_janitor: disabled via MASC_APPROVAL_JANITOR_ENABLED=false"
+    else begin
+      let interval = Env_config_runtime.Approval_janitor.interval_seconds in
+      (* 30 minutes — long enough that humans actually have time to
+         respond on dashboard / Slack / etc., short enough that the
+         keeper isn't trapped on the death-spiral kill loop after the
+         operator forgets a request.  Code constant: changes need code
+         review (policy), not a runtime knob. *)
+      let max_wait_s = 1800.0 in
+      let rec loop () =
+        Eio.Time.sleep clock interval;
+        (try
+           Keeper_approval_queue.expire_stale ~max_wait_s
+         with
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | exn ->
+           Log.Server.warn "approval_janitor: sweep failed: %s"
+             (Printexc.to_string exn));
+        loop ()
+      in
+      loop ()
+    end);
   (* Auto-boot keepers from keeper meta and start keepalive loops.
      Retries unbooted keepers up to [max_retries] times so transient
      failures (model resolution, discovery timing) don't permanently

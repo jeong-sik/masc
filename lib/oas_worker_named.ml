@@ -476,6 +476,8 @@ let masc_internal_error_to_json = function
    name in scope. *)
 let masc_oas_error_total_metric = "masc_oas_error_total"
 
+let cross_cascade_fallback_metric = "masc_cross_cascade_fallback_total"
+
 let kind_of_masc_internal_error = function
   | Cascade_exhausted _ -> "cascade_exhausted"
   | Resumable_cli_session _ -> "resumable_cli_session"
@@ -1312,6 +1314,14 @@ let run_named
                 ~exclude_cascade:cascade_name ()
          with
          | Some (source_cascade, provider_cfg) ->
+             Prometheus.inc_counter cross_cascade_fallback_metric
+               ~labels:[
+                 ("from_cascade", cascade_name);
+                 ("to_cascade", source_cascade);
+                 ("provider",
+                  Provider_tool_support.provider_debug_label provider_cfg);
+               ]
+               ();
              Log.Misc.info
                "cascade %s: cross-cascade fallback to %s from %s \
                 (original had no tool-capable providers)"

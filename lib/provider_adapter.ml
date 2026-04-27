@@ -1524,15 +1524,23 @@ let auth_env_keys_of_provider_kind (kind : Llm_provider.Provider_config.provider
   match kind with
   | Llm_provider.Provider_config.Kimi -> kimi_api_key_envs
   | Llm_provider.Provider_config.Gemini -> [ google_cloud_project_env; google_cloud_location_env ]
-  | _ ->
+  | Llm_provider.Provider_config.Anthropic
+  | Llm_provider.Provider_config.Ollama
+  | Llm_provider.Provider_config.Gemini_cli
+  | Llm_provider.Provider_config.Kimi_cli
+  | Llm_provider.Provider_config.Glm
+  | Llm_provider.Provider_config.DashScope
+  | Llm_provider.Provider_config.Claude_code
+  | Llm_provider.Provider_config.Codex_cli
+  | Llm_provider.Provider_config.OpenAI_compat ->
       let adapter_name = adapter_canonical_name_of_provider_kind kind in
-      match resolve_direct_adapter adapter_name with
+      (match resolve_direct_adapter adapter_name with
       | Some adapter -> (
           match adapter.auth_mode with
           | Api_key env_name -> [ env_name ]
           | No_auth | Cli_cached_login | Vertex_adc _ ->
               Option.to_list (Llm_provider.Provider_config.default_api_key_env kind))
-      | None -> Option.to_list (Llm_provider.Provider_config.default_api_key_env kind)
+      | None -> Option.to_list (Llm_provider.Provider_config.default_api_key_env kind))
 
 let docker_auth_env_keys_of_provider_config (cfg : Llm_provider.Provider_config.t) : string list =
   match cfg.kind with

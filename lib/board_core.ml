@@ -392,6 +392,43 @@ let get_post store ~post_id : (post, board_error) result =
         | None -> Error (Post_not_found post_id)
       )
 
+(* Reads post + comments under a single critical section. The previous
+   two-call sequence (get_post then get_comments) acquired
+   [store.mutex] twice with [maybe_sweep] dispatching to the flusher
+   actor between releases. That race window surfaces as
+   [Mutex.lock: Resource deadlock avoided] under contended
+   keeper_board_get traffic (e.g. ramarama keeper polling). Coalescing
+   keeps the read atomic, removes one [maybe_sweep] dispatch, and
+   eliminates the inter-call lock churn. *)
+let get_post_and_comments store ~post_id
+    : (post * comment list, board_error) result =
+  maybe_sweep store;
+  match Post_id.of_string post_id with
+  | Error e -> Error e
+  | Ok pid ->
+      with_lock store (fun () ->
+        let post_key = Post_id.to_string pid in
+        match Hashtbl.find_opt store.posts post_key with
+        | None -> Error (Post_not_found post_id)
+        | Some post ->
+            let comment_ids =
+              Hashtbl.find_opt store.comments_by_post post_key
+              |> Option.value ~default:[]
+            in
+            let comments =
+              List.filter_map
+                (fun cid -> Hashtbl.find_opt store.comments cid)
+                comment_ids
+            in
+            let sorted =
+              List.sort
+                (fun (a : comment) (b : comment) ->
+                  compare a.created_at b.created_at)
+                comments
+            in
+            Ok (post, sorted)
+      )
+
 let reclassify_posts store ?(limit = 5200) ?(dry_run = true) () =
   maybe_sweep store;
   with_lock store (fun () ->

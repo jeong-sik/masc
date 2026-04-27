@@ -124,7 +124,7 @@ function statusChipClass(status: FeatureStatus): string {
     case 'warning':
       return 'border-[var(--warn-30)] bg-[var(--warn-12)] text-[var(--warn)]'
     case 'inactive':
-      return 'border-[var(--white-12)] bg-[var(--white-4)] text-[var(--text-muted)]'
+      return 'border-[var(--white-12)] bg-[var(--white-4)] text-[var(--color-fg-muted)]'
     case 'deprecated':
     default:
       return 'border-[var(--bad-30)] bg-[var(--bad-12)] text-[var(--bad)]'
@@ -152,13 +152,13 @@ function FeatureItem({ item }: { item: FeatureHealthItem }) {
                 ON
               </span>
             ` : html`
-              <span class="inline-flex items-center rounded border border-[var(--white-12)] bg-[var(--white-4)] px-1.5 py-0.5 text-3xs font-semibold text-[var(--text-muted)]">
+              <span class="inline-flex items-center rounded border border-[var(--white-12)] bg-[var(--white-4)] px-1.5 py-0.5 text-3xs font-semibold text-[var(--color-fg-muted)]">
                 OFF
               </span>
             `}
           </div>
           <div class="mt-1.5 text-sm text-[var(--text-body)]">${item.description}</div>
-          <div class="mt-1 flex items-center gap-3 text-xs text-[var(--text-muted)]">
+          <div class="mt-1 flex items-center gap-3 text-xs text-[var(--color-fg-muted)]">
             <span>source: ${item.source}</span>
             <span>since: v${item.since}</span>
           </div>
@@ -177,7 +177,7 @@ function CategorySection({ category, categoryData }: { category: string; categor
       <div class="mb-3 flex items-center justify-between">
         <div>
           <div class="text-sm font-medium text-[var(--text-strong)]">${categoryLabel}</div>
-          <div class="mt-0.5 text-xs text-[var(--text-muted)]">
+          <div class="mt-0.5 text-xs text-[var(--color-fg-muted)]">
             ${categoryData.enabled} / ${categoryData.total} enabled (${enabledRatio}%)
           </div>
         </div>
@@ -222,7 +222,7 @@ export function FeatureHealth() {
                     </div>
                     <button
                       type="button"
-                      class="rounded border border-[var(--white-8)] px-2.5 py-1 text-2xs text-[var(--text-muted)] transition-colors hover:border-[var(--accent)] hover:text-[var(--text-body)]"
+                      class="rounded border border-[var(--white-8)] px-2.5 py-1 text-2xs text-[var(--color-fg-muted)] transition-colors hover:border-[var(--accent)] hover:text-[var(--text-body)]"
                       onClick=${() => { void loadFeatureHealth() }}
                     >새로고침</button>
                   </div>
@@ -236,7 +236,7 @@ export function FeatureHealth() {
                     <${StatCard} label="폐기 예정" value=${overview.deprecated_count} />
                   </div>
 
-                  <div class="mt-4 text-xs text-[var(--text-dim)]">
+                  <div class="mt-4 text-xs text-[var(--color-fg-disabled)]">
                     generated ${formatTimeAgo(data.generated_at)}
                   </div>
                 </div>
@@ -284,14 +284,14 @@ export function FeatureHealth() {
                   )
                   if (filtered.length === 0) {
                     return html`
-                      <div class="rounded border border-[var(--white-8)] bg-[var(--white-3)] p-4 text-xs text-[var(--text-dim)]">
+                      <div class="rounded border border-[var(--white-8)] bg-[var(--white-3)] p-4 text-xs text-[var(--color-fg-disabled)]">
                         조건에 맞는 기능이 없습니다.
                       </div>
                     `
                   }
                   return html`
                     <div class="rounded border border-[var(--white-8)] bg-[var(--white-3)] p-4">
-                      <div class="mb-3 text-xs text-[var(--text-muted)]">
+                      <div class="mb-3 text-xs text-[var(--color-fg-muted)]">
                         ${filtered.length} / ${data.all_features.length}개 기능
                       </div>
                       <div class="space-y-2">

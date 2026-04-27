@@ -81,7 +81,7 @@ export function EventTrack({ events, windowStart, windowEnd }: Props) {
                     selectEntity({ kind: 'event', entry, ts, bucketCount: count })
                   }}
                 >${count > 1 ? html`
-                  <span class="absolute -top-4 left-1/2 -translate-x-1/2 rounded bg-bg-0/90 px-1 py-0.5 text-4xs font-mono text-text-dim">
+                  <span class="absolute -top-4 left-1/2 -translate-x-1/2 rounded bg-bg-0/90 px-1 py-0.5 text-3xs font-mono text-text-dim">
                     ${count}
                   </span>
                 ` : null}</span>

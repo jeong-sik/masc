@@ -252,7 +252,7 @@ function TrendSparkline({ points }: { points: HourlyPoint[] }) {
         `)}
         <polyline points="${rateLine}" fill="none" stroke="${lineColor}" stroke-width="1.5"/>
       </svg>
-      <div class="flex justify-between mt-1 text-4xs text-[var(--color-fg-disabled)] font-mono">
+      <div class="flex justify-between mt-1 text-3xs text-[var(--color-fg-disabled)] font-mono">
         <span>${points[0]?.hour?.slice(5) ?? ''}</span>
         <span>${points[points.length - 1]?.hour?.slice(5) ?? ''}</span>
       </div>

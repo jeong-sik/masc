@@ -389,6 +389,7 @@ export function ChatComposer({
       <textarea
         class="control-textarea min-h-24 rounded-card border border-[var(--slate-gray-16)] bg-[var(--white-3)] px-3 py-3 text-base leading-loose"
         placeholder=${placeholder}
+        aria-label="메시지 입력"
         value=${draft}
         onInput=${(event: Event) => { onDraftChange((event.target as HTMLTextAreaElement).value) }}
         onKeyDown=${(event: KeyboardEvent) => {

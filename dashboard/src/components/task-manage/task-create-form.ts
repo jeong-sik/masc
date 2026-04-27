@@ -5,6 +5,7 @@ import { Select } from '../common/select'
 import { ActionButton } from '../common/button'
 import { RichComposer } from '../common/rich-composer'
 import { showTaskCreate, taskCreating, createTask } from './task-manage-state'
+import { Tk } from '../tk'
 
 const title = signal('')
 const description = signal('')
@@ -33,7 +34,7 @@ export function TaskCreateForm(props: { goalId?: string | null; goalTitle?: stri
               에 직접 연결된 backlog 태스크를 생성합니다.
             `
             : html`
-              이 프로젝트의 백로그에 바로 추가됩니다. 우선순위는 <code class="rounded bg-white/5 px-1 py-0.5 text-2xs text-text-strong">P1</code>이 가장 높습니다.
+              이 프로젝트의 백로그에 바로 추가됩니다. 우선순위는 <${Tk}>P1<//>이 가장 높습니다.
             `}
         </div>
         <${ActionButton}

@@ -546,14 +546,13 @@ export function FsmHub(props: FsmHubProps = {}) {
         <${OperationalMeaningPanel}
           snapshot=${snapshot}
           observations=${view.observations}
-          now=${now}
         />
 
         ${/* ── Zone 2: Hero — KSM Phase ── */ ''}
-        <${HeroPhase} snapshot=${snapshot} phaseLog=${phaseLog} observations=${view.observations} phaseSince=${stateEntries?.phase ?? null} now=${now} />
+        <${HeroPhase} snapshot=${snapshot} phaseLog=${phaseLog} observations=${view.observations} phaseSince=${stateEntries?.phase ?? null} />
 
         ${/* ── Zone 2b: Turn Pipeline Strip (always visible) ── */ ''}
-        <${TurnPipelineStrip} snapshot=${snapshot} stateEntries=${stateEntries} now=${now} />
+        <${TurnPipelineStrip} snapshot=${snapshot} stateEntries=${stateEntries} />
 
         ${/* ── Zone 3: Timeline + Analytics (2-column on wide screens) ── */ ''}
         <div class="grid gap-3 lg:grid-cols-2">

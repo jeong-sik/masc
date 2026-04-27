@@ -1,6 +1,40 @@
 # Changelog
 
 
+## [0.18.5] - 2026-04-27 — patch: design-system canonical SPEC token wave + i18n round 90-92 + env SSOT extractions
+
+Aggregate of 19 commits since v0.18.4 (10 feat-design-system / 4 fix / 3 i18n / 1 feat-typography / 1 feat-sidecar). No breaking API changes.
+
+Continuation of the design-system unification wave — converts 10 dashboard surfaces to canonical SPEC color/accent/fg tokens (CS89 onward) and finalizes localization rounds 90-92. New env-driven SSOT extraction surface for sidecar subprocess timeouts.
+
+### Added
+- `#11039` dashboard — SPEC §3 typography & spacing scale (Phase G Step 2)
+- `#11049` sidecar — extract subprocess timeouts to env (SSOT)
+
+### Changed (design-system canonical SPEC tokens)
+- `#11050` server-config fg token
+- `#11053` accent token sweep across 6 files
+- `#11048` accent token in 3 remaining files
+- `#11042` color tokens in feature-health & transport-beacon
+- `#11035` color tokens in prometheus-metrics
+- `#11033` color tokens in keeper-detail-shell
+- `#11031` color tokens in autoresearch
+- `#11028` color tokens in keeper-config-panel
+- `#11027` color tokens in telemetry-unified
+- `#11023` cascade-config-panel tokens (CS89)
+
+### Fixed
+- `#11056` dashboard — update test assertions for i18n localized strings
+- `#11038` dashboard — surface 3 P1 silent failures
+- `#11037` oas-worker-exec-transport — remove unreachable catch-all in transport_for_provider
+- `#11032` mcp/join-guard — resolve rotation alias to canonical join entry (#10699 Family A)
+
+### i18n
+- `#11034` localize 4 operator-actions extractApiError fallbacks (round-92)
+- `#11030` localize 4 user-facing strings outside components/ (round-91)
+- `#11026` localize transport-beacon + keeper-detail-shell tooltips (round-90)
+
+
 ## [0.18.4] - 2026-04-27 — patch: a11y completion + worktree cleanup extension + log severity ratchet
 
 Aggregate of 29 commits since v0.18.3 (12 fix / 7 i18n / 4 feat / 3 refactor / 2 a11y / 1 perf / 1 ci, includes 10 commits landed during release CI window). No breaking API changes.

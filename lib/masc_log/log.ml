@@ -537,32 +537,34 @@ module Make (M : sig val name : string end) = struct
     in
     level_to_int level >= threshold
 
-  let log_module level fmt =
+  let log_module level ?keeper_name ?turn_id fmt =
     Printf.ksprintf (fun msg ->
       if should_log_module level then begin
         let level_str = level_to_string level in
         let prefix = Printf.sprintf "[%s] [%s] [%s]"
           (timestamp ()) level_str M.name in
         Printf.eprintf "%s %s\n%!" prefix msg;
-        Ring.push ~raw_level:level_str ~normalized_level:level_str
+        Ring.push ?keeper_name ?turn_id
+          ~raw_level:level_str ~normalized_level:level_str
           ~module_name:M.name ~message:msg ()
       end
     ) fmt
 
-  let emit level ?(details = `Null) message =
+  let emit level ?(details = `Null) ?keeper_name ?turn_id message =
     if should_log_module level then begin
       let level_str = level_to_string level in
       let prefix = Printf.sprintf "[%s] [%s] [%s]"
         (timestamp ()) level_str M.name in
       Printf.eprintf "%s %s\n%!" prefix message;
-      Ring.push ~raw_level:level_str ~normalized_level:level_str
+      Ring.push ?keeper_name ?turn_id
+        ~raw_level:level_str ~normalized_level:level_str
         ~module_name:M.name ~message ~details ()
     end
 
-  let debug fmt = log_module Debug fmt
-  let info fmt = log_module Info fmt
-  let warn fmt = log_module Warn fmt
-  let error fmt = log_module Error fmt
+  let debug ?keeper_name ?turn_id fmt = log_module Debug ?keeper_name ?turn_id fmt
+  let info ?keeper_name ?turn_id fmt = log_module Info ?keeper_name ?turn_id fmt
+  let warn ?keeper_name ?turn_id fmt = log_module Warn ?keeper_name ?turn_id fmt
+  let error ?keeper_name ?turn_id fmt = log_module Error ?keeper_name ?turn_id fmt
 end
 
 (** Pre-defined module loggers *)

@@ -152,7 +152,7 @@ function fmtValue(value: number, type: string, name: string): string {
 
 function typeBadge(type: string): ReturnType<typeof html> {
   const colors: Record<string, string> = {
-    counter: 'bg-[var(--accent-10)] text-[var(--accent)]',
+    counter: 'bg-[var(--accent-10)] text-[var(--color-accent-fg)]',
     gauge: 'bg-[var(--ok-10)] text-[var(--ok)]',
     summary: 'bg-[var(--warn-10)] text-[var(--warn)]',
   }
@@ -165,7 +165,7 @@ function labelPills(labels: Record<string, string>): ReturnType<typeof html> | n
   return html`<span class="ml-2 inline-flex gap-1 flex-wrap">${entries.map(([k, v]) => {
     if (k === 'keeper') {
       return html`<button
-        class="rounded bg-[var(--accent-10)] px-1 py-0.5 text-3xs text-[var(--accent)] font-mono hover:bg-[var(--accent-10)] hover:text-[var(--accent)] transition-colors cursor-pointer"
+        class="rounded bg-[var(--accent-10)] px-1 py-0.5 text-3xs text-[var(--color-accent-fg)] font-mono hover:bg-[var(--accent-10)] hover:text-[var(--color-accent-fg)] transition-colors cursor-pointer"
         title="키퍼 상세 보기"
         aria-label="키퍼 상세 보기"
         onClick=${(e: Event) => {

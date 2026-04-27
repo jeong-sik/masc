@@ -87,12 +87,12 @@ const CONDENSED_CATEGORY_META: Record<TelemetryCondensedCategory, {
   heartbeat: {
     label: '하트비트',
     icon: 'H',
-    color: 'text-[var(--accent)]',
+    color: 'text-[var(--color-accent-fg)]',
   },
   polling: {
     label: '폴링 / 무동작',
     icon: 'P',
-    color: 'text-[var(--accent)]',
+    color: 'text-[var(--color-accent-fg)]',
   },
 }
 

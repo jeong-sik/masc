@@ -134,7 +134,7 @@ function KanbanCard({ task }: { task: Task }) {
           ${canExpand ? html`
             <button
               type="button"
-              class="w-fit rounded border border-card-border/70 bg-white/4 px-2 py-1 text-2xs text-text-muted transition-colors hover:text-text-strong"
+              class="w-fit rounded border border-card-border/70 bg-[var(--white-4)] px-2 py-1 text-2xs text-text-muted transition-colors hover:text-text-strong"
               onClick=${() => toggleTaskExpand(task.id)}
               aria-expanded=${isExpanded}
             >
@@ -154,14 +154,14 @@ function KanbanCard({ task }: { task: Task }) {
             : task.completed_at && task.status === 'cancelled'
               ? html`<span class="rounded border border-[var(--bad-30)] bg-[var(--bad-10)] px-2 py-1 text-[var(--bad-light)]">취소 <${TimeAgo} timestamp=${task.completed_at} /></span>`
               : task.created_at
-                ? html`<span class="rounded border border-card-border/70 bg-white/4 px-2 py-1"><${TimeAgo} timestamp=${task.created_at} /></span>`
+                ? html`<span class="rounded border border-card-border/70 bg-[var(--white-4)] px-2 py-1"><${TimeAgo} timestamp=${task.created_at} /></span>`
                 : null}
         ${task.assignee ? html`<span class="rounded border border-accent/20 bg-[var(--accent-10)] px-2 py-1 text-accent">@${task.assignee}</span>` : null}
         <a
           href=${link.href}
           target="_blank"
           rel="noreferrer"
-          class="inline-flex items-center gap-1 rounded border border-card-border/70 bg-white/4 px-2 py-1 text-text-body transition-colors hover:border-accent/35 hover:text-text-strong"
+          class="inline-flex items-center gap-1 rounded border border-card-border/70 bg-[var(--white-4)] px-2 py-1 text-text-body transition-colors hover:border-accent/35 hover:text-text-strong"
         >
           ${link.label}
           <span aria-hidden="true">\u2197</span>
@@ -291,7 +291,7 @@ export function TaskBacklog() {
         ${hasSearch ? html`
           <button
             type="button"
-            class="rounded border border-card-border/70 bg-white/4 px-3 py-2 text-xs text-text-muted transition-colors hover:border-accent/35 hover:text-text-strong"
+            class="rounded border border-card-border/70 bg-[var(--white-4)] px-3 py-2 text-xs text-text-muted transition-colors hover:border-accent/35 hover:text-text-strong"
             onClick=${() => {
               resetTaskSearch()
               searchDoneVisibleCount.value = DONE_PAGE_SIZE

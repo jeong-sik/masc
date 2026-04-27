@@ -87,7 +87,7 @@ function GuideCard({
           <div class="text-2xs font-semibold uppercase tracking-5 text-text-muted">${eyebrow}</div>
           <h3 class="mt-1 text-md font-semibold text-text-strong">${title}</h3>
         </div>
-        <span class="rounded border border-card-border/70 bg-white/4 px-2.5 py-1 text-2xs font-semibold text-text-body">
+        <span class="rounded border border-card-border/70 bg-[var(--white-4)] px-2.5 py-1 text-2xs font-semibold text-text-body">
           ${count}
         </span>
       </div>
@@ -146,7 +146,7 @@ function KeeperToolActivity() {
             keeper가 최근 사용한 도구와 활동 현황. 상세는 keeper 클릭.
           </div>
         </div>
-        <span class="ml-auto inline-flex items-center rounded border border-card-border/70 bg-white/4 px-2.5 py-1 text-3xs uppercase tracking-wider text-text-body font-semibold">
+        <span class="ml-auto inline-flex items-center rounded border border-card-border/70 bg-[var(--white-4)] px-2.5 py-1 text-3xs uppercase tracking-wider text-text-body font-semibold">
           ${totalToolTurns} calls
         </span>
       </summary>
@@ -159,7 +159,7 @@ function KeeperToolActivity() {
                 <button
                   key=${k.name}
                   type="button"
-                  class="inline-flex items-center gap-1.5 rounded border border-card-border/60 bg-white/4 px-3 py-1.5 text-xs text-text-body transition-colors hover:border-accent/35 hover:text-text-strong"
+                  class="inline-flex items-center gap-1.5 rounded border border-card-border/60 bg-[var(--white-4)] px-3 py-1.5 text-xs text-text-body transition-colors hover:border-accent/35 hover:text-text-strong"
                   onClick=${() => navigate('monitoring', { section: 'agents', keeper: k.name })}
                 >
                   ${k.emoji ?? ''} ${k.koreanName ?? k.name}

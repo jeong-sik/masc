@@ -161,7 +161,7 @@ function badgeClass(badge: string): string {
     case 'linkage_warning':
       return 'border-bad/30 bg-bad/10 text-bad'
     default:
-      return 'border-card-border/60 bg-white/4 text-text-body'
+      return 'border-card-border/60 bg-[var(--white-4)] text-text-body'
   }
 }
 
@@ -190,7 +190,7 @@ function healthClass(health: GoalTreeNode['health']): string {
     case 'blocked': return 'border-bad/35 bg-bad/10 text-bad'
     case 'at_risk': return 'border-warn/30 bg-warn/10 text-warn'
     case 'on_track': return 'border-ok/30 bg-ok/10 text-ok'
-    default: return 'border-card-border/60 bg-white/4 text-text-body'
+    default: return 'border-card-border/60 bg-[var(--white-4)] text-text-body'
   }
 }
 
@@ -219,7 +219,7 @@ function blockerSourceClass(source: GoalTreeNode['blocking_source']): string {
     case 'stalled':
       return 'border-warn/25 bg-warn/10 text-warn'
     default:
-      return 'border-card-border/60 bg-white/4 text-text-body'
+      return 'border-card-border/60 bg-[var(--white-4)] text-text-body'
   }
 }
 
@@ -232,7 +232,7 @@ function keeperTrustDispositionClass(
     return 'border-warn/25 bg-warn/10 text-warn'
   }
   if (disposition === 'Pass') return 'border-ok/25 bg-ok/10 text-ok'
-  return 'border-card-border/60 bg-white/4 text-text-body'
+  return 'border-card-border/60 bg-[var(--white-4)] text-text-body'
 }
 
 function timelineSeverityClass(severity: GoalDetailTimelineEvent['severity']): string {
@@ -423,7 +423,7 @@ function TreeTask({ task }: { task: GoalTreeTask }) {
     <div class="flex flex-wrap items-center gap-2 rounded bg-[var(--white-3)] px-2 py-1.5 text-xs">
       <span class="size-2 rounded-sm shrink-0" style="background:${task.status_color}"></span>
       <span class="min-w-0 flex-1 truncate text-text-body">${task.title}</span>
-      <span class="rounded border border-card-border/60 bg-white/4 px-1.5 py-0.5 text-3xs font-medium text-text-muted">
+      <span class="rounded border border-card-border/60 bg-[var(--white-4)] px-1.5 py-0.5 text-3xs font-medium text-text-muted">
         ${task.linkage_source === 'explicit' ? 'goal_id' : 'title tag'}
       </span>
       ${task.assignee ? html`
@@ -529,7 +529,7 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
               </span>
             ` : null}
             ${node.latest_keeper_ref ? html`
-              <span class="rounded border border-card-border/60 bg-white/4 px-2 py-0.5 text-3xs font-medium text-text-body">
+              <span class="rounded border border-card-border/60 bg-[var(--white-4)] px-2 py-0.5 text-3xs font-medium text-text-body">
                 ${node.latest_keeper_ref}${node.latest_turn_ref != null ? ` · turn ${node.latest_turn_ref}` : ''}
               </span>
             ` : null}
@@ -659,7 +659,7 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
             </span>
           ` : null}
           ${keeper.latest_execution_outcome ? html`
-            <span class="rounded border border-card-border/60 bg-white/4 px-2 py-0.5 text-3xs font-semibold text-text-body">
+            <span class="rounded border border-card-border/60 bg-[var(--white-4)] px-2 py-0.5 text-3xs font-semibold text-text-body">
               ${keeper.latest_execution_outcome}
             </span>
           ` : null}
@@ -849,7 +849,7 @@ function GoalDetailPanel({
             </div>
             <div class="mt-3 flex flex-wrap gap-1.5">
               ${verificationSummary.effective_policy.eligible_principals.map(principal => html`
-                <span key=${`${principal.kind}:${principal.id}`} class="rounded border border-card-border/60 bg-white/4 px-2 py-0.5 text-3xs font-medium text-text-body">
+                <span key=${`${principal.kind}:${principal.id}`} class="rounded border border-card-border/60 bg-[var(--white-4)] px-2 py-0.5 text-3xs font-medium text-text-body">
                   ${principal.kind}:${principal.display_name ?? principal.id}
                 </span>
               `)}

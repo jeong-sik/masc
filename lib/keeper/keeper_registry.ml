@@ -1177,7 +1177,17 @@ let prepare_fiber_launch ~base_path name =
        Atomic.set entry.fiber_stop false;
        Atomic.set entry.fiber_wakeup false;
        Atomic.set entry.waiting_for_inference false
-   | None -> ());
+   | None ->
+       (* P3 cleanup: previously this was a silent no-op when the
+          keeper was not yet registered.  The dispatch_event call
+          below still fires even in this case, which can leave a
+          Fiber_started event with no corresponding atomic-flag
+          reset.  Log so the race is at least visible — caller
+          (server_runtime_bootstrap.ml) is responsible for ensuring
+          register_with_state has happened before this point. *)
+       Log.Keeper.warn
+         "registry: prepare_fiber_launch name=%s base_path=%s: entry not registered, skipping flag reset"
+         name base_path);
   dispatch_event ~base_path name Keeper_state_machine.Fiber_started
 
 let get_phase ~base_path name =

@@ -224,7 +224,17 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
                 | Some event, Some keeper_name ->
                     Server_dashboard_http.patch_keeper_dependent_caches
                       ~keeper_name ~event
-                | None, _ | Some _, None -> ())
+                | None, _ | Some _, None ->
+                    (* P3 cleanup: previously malformed lifecycle events
+                       (missing `event` or `keeper_name` field) were
+                       silently dropped.  A systematic encoding bug
+                       could lose every cache invalidation indefinitely
+                       with no signal.  Bumping a Prometheus counter
+                       lets `rate(...)` alerts catch the regression
+                       even though the dashboard cache continues to
+                       degrade gracefully (just stale, not broken). *)
+                    Prometheus.inc_counter
+                      "masc_keeper_lifecycle_malformed_total" ())
             | _ -> Log.Dashboard.debug "ignored non-lifecycle event")
           events;
         if events <> [] then begin

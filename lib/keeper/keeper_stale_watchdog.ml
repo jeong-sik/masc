@@ -292,9 +292,14 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
            Log.Keeper.warn
              "%s: stale watchdog tick failed (suppressed): %s"
              meta.name (Printexc.to_string exn));
-        (try Eio.Time.sleep ctx.clock (watchdog_poll_sec ()) with
-         | Eio.Cancel.Cancelled _ as e -> raise e
-         | _ -> ());
+        (* P3 cleanup: previously this try/with swallowed every
+           non-Cancelled exception silently.  Eio.Time.sleep does not
+           have other failure modes worth catching here, and the outer
+           watchdog_loop's `with Eio.Cancel.Cancelled _ -> ()` already
+           handles cancellation propagation correctly.  Removing the
+           defensive wrapper makes any unexpected sleep exception
+           surface instead of being lost. *)
+        Eio.Time.sleep ctx.clock (watchdog_poll_sec ());
         watchdog_loop ()
       end
     in

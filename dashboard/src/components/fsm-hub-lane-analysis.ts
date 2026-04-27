@@ -53,22 +53,22 @@ function laneMeaning(
       switch (value) {
         case 'Running':
           return snapshot.is_live
-            ? { tone: 'info', meaning: 'parent lifecycle is healthy while the live turn advances' }
-            : { tone: 'ok', meaning: 'no live turn; waiting for the next observation cycle' }
+            ? { tone: 'info', meaning: 'parent lifecycle 정상 — live turn 진행 중' }
+            : { tone: 'ok', meaning: 'live turn 없음 — 다음 observation cycle 대기' }
         case 'Failing':
-          return { tone: 'error', meaning: 'the parent lifecycle is degraded and must clear before healthy turns resume' }
+          return { tone: 'error', meaning: 'parent lifecycle degraded — healthy turn 재개 전 해소 필요' }
         case 'Overflowed':
-          return { tone: 'warn', meaning: 'context overflow has been latched and must resolve before healthy turns resume' }
+          return { tone: 'warn', meaning: 'context overflow latched — healthy turn 재개 전 해소 필요' }
         case 'Compacting':
-          return { tone: 'warn', meaning: 'post-turn compaction currently owns the lifecycle' }
+          return { tone: 'warn', meaning: 'post-turn compaction 이 lifecycle 점유 중' }
         case 'HandingOff':
-          return { tone: 'warn', meaning: 'handoff is draining this keeper toward stop' }
+          return { tone: 'warn', meaning: 'handoff 가 keeper 를 stop 방향으로 drain 중' }
         case 'Draining':
-          return { tone: 'warn', meaning: 'the keeper is draining in-flight work before stop' }
+          return { tone: 'warn', meaning: 'keeper 가 in-flight work 를 drain 중 (stop 전)' }
         case 'Stable':
-          return { tone: 'info', meaning: 'no lifecycle activity is currently expected' }
+          return { tone: 'info', meaning: '현재 예상되는 lifecycle activity 없음' }
         default:
-          return { tone: 'info', meaning: 'lifecycle state observed' }
+          return { tone: 'info', meaning: 'lifecycle state 관측됨' }
       }
     case 'turn':
       switch (value) {

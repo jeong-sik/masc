@@ -444,7 +444,7 @@ function runtimeActionTone(action: FleetRuntimeAction): string {
   if (action.action_type === 'keeper_recover') {
     return 'text-[var(--warn)]'
   }
-  return 'text-[var(--accent)]'
+  return 'text-[var(--color-accent-fg)]'
 }
 
 function runtimeActionsForSnapshot(

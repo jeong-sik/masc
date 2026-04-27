@@ -1151,7 +1151,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
               placeholder="슬롯 이름 / source / gate 필터"
               aria-label="훅 슬롯 필터"
               onInput=${(e: Event) => { hookFilterQuery.value = (e.target as HTMLInputElement).value }}
-              class="min-w-40 max-w-65 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--color-fg-disabled)] focus:outline-none focus:border-[var(--accent)]"
+              class="min-w-40 max-w-65 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--color-fg-disabled)] focus:outline-none focus:border-[var(--color-accent-fg)]"
             />
           </div>
           ${isFiltering && visibleEntries.length === 0 && allEntries.length > 0
@@ -1167,7 +1167,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
                     ${(slot.gates ?? slot.effects ?? slot.features ?? []).length > 0 ? html`
                       <div class="flex flex-wrap gap-1 mt-1">
                         ${(slot.gates ?? slot.effects ?? slot.features ?? []).map((d: string) => html`
-                          <span class="text-3xs px-1.5 py-0.5 rounded ${d.endsWith('_off') ? 'bg-[var(--white-10)] text-[var(--color-fg-disabled)]' : 'bg-[var(--accent-10)] text-[var(--accent)] opacity-80'}">${d}</span>
+                          <span class="text-3xs px-1.5 py-0.5 rounded ${d.endsWith('_off') ? 'bg-[var(--white-10)] text-[var(--color-fg-disabled)]' : 'bg-[var(--accent-10)] text-[var(--color-accent-fg)] opacity-80'}">${d}</span>
                         `)}
                       </div>
                     ` : null}

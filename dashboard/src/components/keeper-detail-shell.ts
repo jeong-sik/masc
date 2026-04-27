@@ -19,7 +19,7 @@ function KeeperModelChip({ keeper }: { keeper: Keeper }) {
   if (!display) return null
   return html`
     <span
-      class="inline-flex items-center py-0.5 px-2 rounded text-3xs font-mono bg-[var(--accent-12)] text-[var(--accent)] border border-[var(--accent-20)]"
+      class="inline-flex items-center py-0.5 px-2 rounded text-3xs font-mono bg-[var(--accent-12)] text-[var(--color-accent-fg)] border border-[var(--accent-20)]"
       title=${`${display.label}: ${display.value}`}
     >${display.value}</span>
   `

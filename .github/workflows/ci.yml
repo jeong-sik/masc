@@ -135,7 +135,7 @@ jobs:
             build=true
           fi
 
-          if has_match '^(bin/|lib/|test/|proto/|config/|dune-project$|dune-workspace$|.*\.opam$|scripts/install\.sh$|scripts/check-eio-conventions\.sh$|scripts/check-feature-flag-consistency\.sh$|scripts/check-toml-syntax\.sh$|scripts/validate-prompt-paths\.sh$|scripts/check-boundary-guard\.sh$|scripts/check-ssot\.sh$|scripts/gen-grpc-descriptors\.sh$|scripts/lint/no-unknown-permissive-default\.sh$|scripts/lint/no-unknown-permissive-default\.allowlist$|scripts/lint/yojson-option-default\.py$|scripts/lint/yojson-option-default\.allowlist$|scripts/ci/)'; then
+          if has_match '^(bin/|lib/|test/|proto/|config/|dune-project$|dune-workspace$|.*\.opam$|scripts/install\.sh$|scripts/check-eio-conventions\.sh$|scripts/check-feature-flag-consistency\.sh$|scripts/check-toml-syntax\.sh$|scripts/validate-prompt-paths\.sh$|scripts/check-boundary-guard\.sh$|scripts/check-boundary-guard-mli-pairs\.sh$|scripts/check-ssot\.sh$|scripts/gen-grpc-descriptors\.sh$|scripts/lint/no-unknown-permissive-default\.sh$|scripts/lint/no-unknown-permissive-default\.allowlist$|scripts/lint/yojson-option-default\.py$|scripts/lint/yojson-option-default\.allowlist$|scripts/ci/)'; then
             lint=true
           fi
 
@@ -565,6 +565,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - name: Run #8605 family detector
         run: bash scripts/lint/no-unknown-permissive-default.sh
@@ -607,6 +609,13 @@ jobs:
         run: |
           chmod +x scripts/check-boundary-guard.sh
           scripts/check-boundary-guard.sh
+
+      - name: Check boundary-guard .mli pairing (sweep-miss gate)
+        env:
+          BASE_REF: origin/${{ github.base_ref || 'main' }}
+        run: |
+          chmod +x scripts/check-boundary-guard-mli-pairs.sh
+          scripts/check-boundary-guard-mli-pairs.sh
 
       - name: Check SSOT bypass ratchet (#8462)
         run: |

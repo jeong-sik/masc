@@ -16,22 +16,30 @@ let tool_result_or_error (ok, msg) = if ok then msg else error_json msg
 (** Actionable error for path resolution failures.
     Follows Samchon harness pattern: field-level diagnostics with
     exact path, expected constraint, and concrete next action.
-    Claude Code pattern: validateInput returns actionable guidance. *)
+    Claude Code pattern: validateInput returns actionable guidance.
+
+    Phase A F4 (2026-04-27): the error → action mapping now dispatches
+    on the typed [Keeper_failure_circuit_breaker.error_class] instead of
+    a parallel [contains_substring] ladder.  String-matching collapses
+    from two sites (here + circuit_breaker) to one (the SSOT).  Phase B
+    PR-5 will then push the typed class up to the caller so the final
+    site disappears. *)
 let actionable_path_error ~(op : string) ~(meta : keeper_meta)
       ~(raw_path : string) ~(error : string) =
   let playground = Keeper_sandbox.allowed_root_rel_of_meta ~meta in
-  let contains sub = String_util.contains_substring error sub in
-  let action = match () with
-    | () when String.length raw_path = 0 ->
+  let action =
+    if String.length raw_path = 0 then
       "Provide a path. Your playground root is " ^ playground
-    | () when contains "path_not_found" ->
-      Printf.sprintf "File does not exist. Run `keeper_shell op=ls path=%s` first to see available files." playground
-    | () when contains "path_not_in_allowed" ->
-      Printf.sprintf "Path is outside your allowed roots. Stay inside %s or use keeper_context_status to see allowed paths." playground
-    | () when contains "cwd_not_directory" ->
-      "The cwd is not a directory. Omit cwd to use your default playground root."
-    | () ->
-      Printf.sprintf "Check the path. Your playground: %s" playground
+    else
+      match Keeper_failure_circuit_breaker.classify_error error with
+      | Path_not_found ->
+        Printf.sprintf "File does not exist. Run `keeper_shell op=ls path=%s` first to see available files." playground
+      | Path_not_allowed ->
+        Printf.sprintf "Path is outside your allowed roots. Stay inside %s or use keeper_context_status to see allowed paths." playground
+      | Cwd_not_directory ->
+        "The cwd is not a directory. Omit cwd to use your default playground root."
+      | Shell_exit_nonzero | Other ->
+        Printf.sprintf "Check the path. Your playground: %s" playground
   in
   Yojson.Safe.to_string (`Assoc [
     "ok", `Bool false;

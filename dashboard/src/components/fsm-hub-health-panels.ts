@@ -99,7 +99,7 @@ const INVARIANT_DESCRIPTIONS: Record<string, string> = {
 }
 
 export function invariantDescription(key: string): string {
-  return INVARIANT_DESCRIPTIONS[key] ?? 'Invariant defined by the keeper composite contract.'
+  return INVARIANT_DESCRIPTIONS[key] ?? 'keeper composite contract 가 정의한 invariant.'
 }
 
 export function InvariantsPanel({

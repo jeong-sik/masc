@@ -488,10 +488,10 @@ stylesheet
     color: #b8c0e0;
   }
 
-  .flame_plan { background: #2a3a2a; color: #c4dcb0; }
-  .flame_exec { background: #3a2a2a; color: #e4b8b0; }
-  .flame_wait { background: #1a1410; color: var(--color-fg-muted); }
-  .flame_err { background: #3a1010; color: #e0b8a8; }
+  .flame_plan { background: var(--t-think); color: var(--color-fg-primary); }
+  .flame_exec { background: var(--t-tool); color: var(--color-fg-primary); }
+  .flame_wait { background: var(--t-wait); color: var(--color-fg-muted); }
+  .flame_err { background: var(--t-err); color: var(--text-bright); }
 
   .events {
     display: flex;

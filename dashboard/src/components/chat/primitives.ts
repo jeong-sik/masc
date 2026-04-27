@@ -266,7 +266,7 @@ function ChatMessageBubble({
                       <div class="text-3xs font-semibold uppercase tracking-3 text-[var(--color-fg-muted)]">상태 스냅샷</div>
                       <div class="grid grid-cols-[repeat(auto-fit,minmax(116px,1fr))] gap-2">
                         ${state.map(item => html`
-                          <div class="rounded border border-[var(--color-accent-soft)] bg-[rgba(71,184,255,0.06)] px-3 py-2.5">
+                          <div class="rounded border border-[var(--color-accent-soft)] bg-[var(--accent-6)] px-3 py-2.5">
                             <div class="text-3xs font-semibold uppercase tracking-2 text-[var(--color-accent-fg)]">${item.label}</div>
                             <div class="mt-1 text-xs leading-paragraph text-[var(--color-fg-primary)]">${item.value}</div>
                           </div>

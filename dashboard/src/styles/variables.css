@@ -30,6 +30,7 @@
 
   /* Semantic - Accent (Blue) */
   --accent-soft: rgba(71, 184, 255, 0.16);
+  --accent-6: rgba(71, 184, 255, 0.06);
   --accent-8: rgba(71, 184, 255, 0.08);
   --accent-10: rgba(71, 184, 255, 0.10);
   --accent-12: rgba(71, 184, 255, 0.12);
@@ -64,6 +65,7 @@
   --bad-6: rgba(239, 68, 68, 0.06);
   --bad-10: rgba(239, 68, 68, 0.10);
   --bad-20: rgba(239, 68, 68, 0.20);
+  --bad-50: rgba(239, 68, 68, 0.50);
 
   /* Semantic - Critical Sister (Rose). Pink-red distinct from --bad
      (which leans toward warm red); used for "this provider failed"
@@ -72,6 +74,7 @@
   --rose: #f43f5e;
   --rose-10: rgba(244, 63, 94, 0.10);
   --rose-28: rgba(244, 63, 94, 0.28);
+  --rose-fg: #fecdd3;
 
   /* Extended warn off-alpha — covers densely-stacked warning chips
      where -10/-20 buckets felt either too pale or too saturated. */
@@ -85,6 +88,7 @@
   --emerald: #22c55e;
   --emerald-10: rgba(34, 197, 94, 0.10);
   --emerald-28: rgba(34, 197, 94, 0.28);
+  --emerald-fg: #bbf7d0;
 
   /* Semantic - Plum (157,139,250 = #a78bfa = existing --purple). Used
      for FSM "considering / select" rows where the cool purple separates

@@ -311,7 +311,7 @@ export function HeroPhase({
   ].filter(Boolean).join(', ')
 
   return html`
-    <div class=${`rounded border p-5 transition-all duration-700 ${flash ? 'border-[var(--color-accent-fg)] bg-[rgba(71,184,255,0.06)] shadow-[0_0_16px_var(--accent-20)]' : 'border-[var(--white-8)] bg-[var(--white-2)]'}`}
+    <div class=${`rounded border p-5 transition-all duration-700 ${flash ? 'border-[var(--color-accent-fg)] bg-[var(--accent-6)] shadow-[0_0_16px_var(--accent-20)]' : 'border-[var(--white-8)] bg-[var(--white-2)]'}`}
       role="status" aria-live="polite" aria-label=${ariaLabel}
       title=${title}
     >

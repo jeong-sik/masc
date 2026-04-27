@@ -17,7 +17,7 @@ const COLOR: Record<HeartbeatState, string> = {
 
 const BAR_W = 'w-1'
 const BAR_H = 'h-3'
-const BAR_RADIUS = 'rounded-[1px]'
+const BAR_RADIUS = 'rounded-px'
 
 /** Pure: left-pad the history with 'unknown' so a new connector still
     renders a full-width strip (empty slots read as "no data yet" rather

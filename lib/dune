@@ -556,6 +556,7 @@
    keeper_recurring
    keeper_registry
    keeper_state_machine
+   keeper_typed
    keeper_measurement
    keeper_guard
    keeper_transition_audit

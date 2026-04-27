@@ -26,7 +26,7 @@ function SectionCard({ title, children }: { title: string; children: preact.Comp
   return html`
     <div class="p-5 rounded border border-card-border bg-card/40 backdrop-blur-sm shadow-sm transition-[border-color,box-shadow] duration-200 hover:border-accent/30 hover:shadow-sm">
       <div class="text-2xs font-semibold uppercase tracking-widest text-text-muted mb-4 flex items-center gap-2">
-        <span class="w-1.5 h-1.5 rounded-full bg-accent/50"></span>
+        <span class="w-1.5 h-1.5 rounded-full bg-accent/50" aria-hidden="true"></span>
         ${title}
       </div>
       ${children}
@@ -75,7 +75,7 @@ function CrashCohortBar({ crash_log }: { crash_log: KeeperSupervisorCrashLogEntr
       <div class="flex flex-wrap gap-x-3 gap-y-1 mt-1.5">
         ${entries.map(([key, count]) => html`
           <span class="text-3xs text-[var(--color-fg-muted)] flex items-center gap-1">
-            <span class="inline-block w-2 h-2 rounded-full" style="background: ${COHORT_COLORS[key]}"></span>
+            <span class="inline-block w-2 h-2 rounded-full" style="background: ${COHORT_COLORS[key]}" aria-hidden="true"></span>
             ${key} ${count}
           </span>
         `)}

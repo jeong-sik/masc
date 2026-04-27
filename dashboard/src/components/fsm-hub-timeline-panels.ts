@@ -283,6 +283,7 @@ export function SwimlaneTimeline({
               return html`
                 <div
                   class=${`absolute top-1/2 -translate-y-1/2 h-1.5 w-1.5 rounded-full ${dotCls} transition-all duration-200`}
+                  aria-hidden="true"
                   style=${`left: ${leftPct.toFixed(2)}%`}
                   title=${tip}
                 ></div>

@@ -211,7 +211,7 @@ function MatrixCellButton({ cell }: { cell: MatrixCell }) {
       data-matrix-cell=${`${cell.keeperName}:${cell.connectorId}`}
       data-matrix-state=${cell.state}
     >
-      <span class=${`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${tone.dot}`}></span>
+      <span class=${`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${tone.dot}`} aria-hidden="true"></span>
       <span>${CELL_GLYPH[cell.state]}</span>
       ${label ? html`<span class="hidden md:inline">${label}</span>` : null}
     </button>
@@ -243,10 +243,10 @@ export function ConnectorKeeperMatrix({ matrix }: { matrix: MatrixData }) {
           </p>
         </div>
         <div class="text-3xs text-[var(--color-fg-disabled)]">
-          <span class="mr-2"><span class="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-[var(--ok-10)]"></span>bound</span>
-          <span class="mr-2"><span class="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-[var(--white-8)]"></span>unbound</span>
-          <span class="mr-2"><span class="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-[var(--white-4)]"></span>n/a</span>
-          <span><span class="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-[var(--warn-10)]"></span>unknown</span>
+          <span class="mr-2"><span class="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-[var(--ok-10)]" aria-hidden="true"></span>bound</span>
+          <span class="mr-2"><span class="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-[var(--white-8)]" aria-hidden="true"></span>unbound</span>
+          <span class="mr-2"><span class="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-[var(--white-4)]" aria-hidden="true"></span>n/a</span>
+          <span><span class="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-[var(--warn-10)]" aria-hidden="true"></span>unknown</span>
         </div>
       </header>
 

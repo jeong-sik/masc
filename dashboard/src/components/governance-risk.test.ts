@@ -15,15 +15,15 @@ describe('approvalRiskToneClass', () => {
   })
 
   it('returns muted tone for low', () => {
-    expect(approvalRiskToneClass('low')).toBe('border-white/10 bg-[var(--white-3)] text-text-muted')
+    expect(approvalRiskToneClass('low')).toBe('border-[var(--white-10)] bg-[var(--white-3)] text-text-muted')
   })
 
   it('returns muted tone for unknown', () => {
-    expect(approvalRiskToneClass('unknown')).toBe('border-white/10 bg-[var(--white-3)] text-text-muted')
+    expect(approvalRiskToneClass('unknown')).toBe('border-[var(--white-10)] bg-[var(--white-3)] text-text-muted')
   })
 
   it('returns muted tone for empty string', () => {
-    expect(approvalRiskToneClass('')).toBe('border-white/10 bg-[var(--white-3)] text-text-muted')
+    expect(approvalRiskToneClass('')).toBe('border-[var(--white-10)] bg-[var(--white-3)] text-text-muted')
   })
 
   it('is case-insensitive', () => {

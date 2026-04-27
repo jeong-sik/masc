@@ -66,6 +66,8 @@ export function MetricTrack({ points, windowStart, windowEnd }: Props) {
       <div
         ref=${trackRef}
         class="relative flex-1 h-12 rounded bg-bg-1/40 border border-card-border/50 cursor-crosshair"
+        role="group"
+        aria-label="도구 성공률 트렌드"
         onMouseMove=${(e: MouseEvent) => {
           if (trackRef.current) setCursorFromEvent(e, trackRef.current, windowStart, windowEnd)
         }}

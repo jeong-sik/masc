@@ -112,7 +112,7 @@ function GovernanceSummaryStrip() {
         <${ActionButton}
           variant="ghost"
           size="sm"
-          class="rounded border-transparent bg-[var(--white-3)] px-2.5 py-1 text-xs font-semibold text-text-muted hover:bg-white/10 hover:text-text-strong"
+          class="rounded border-transparent bg-[var(--white-3)] px-2.5 py-1 text-xs font-semibold text-text-muted hover:bg-[var(--white-10)] hover:text-text-strong"
           onClick=${refreshGovernance}
           disabled=${governanceLoading.value}
         >

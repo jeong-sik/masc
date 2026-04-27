@@ -234,9 +234,17 @@ let handle_keeper_task_tool
       Coord.claim_next_r config ~agent_name:meta.agent_name ~agent_tool_names
         ~task_filter ()
     in
+    let auto_started_ok = ref false in
     (match result with
      | Coord.Claim_next_claimed { task_id; _ } ->
-       sync_keeper_meta_current_task ~config ~meta ~task_id
+       sync_keeper_meta_current_task ~config ~meta ~task_id;
+       let ok, _msg =
+         Tool_task.handle_transition
+           { Tool_task.config; agent_name = keeper_agent_sender ~meta;
+             sw = Eio_context.get_switch_opt () }
+           (`Assoc ["task_id", `String task_id; "action", `String "start"])
+       in
+       auto_started_ok := ok
      | Coord.Claim_next_no_unclaimed
      | Coord.Claim_next_no_eligible _
      | Coord.Claim_next_error _ -> ());
@@ -252,7 +260,9 @@ let handle_keeper_task_tool
     in
     let message =
       match result with
-      | Coord.Claim_next_claimed { message; _ } -> message
+      | Coord.Claim_next_claimed { message; _ } ->
+          if !auto_started_ok then message ^ " Task auto-started — begin work now."
+          else message
       | Coord.Claim_next_no_unclaimed -> "📋 No unclaimed tasks. ACTION: Stop task-checking — nothing to claim."
       | Coord.Claim_next_no_eligible { excluded_count; _ } ->
         let scope_suffix =
@@ -296,6 +306,7 @@ let handle_keeper_task_tool
          ([
             ("result", `String message);
             ("claim_scope", claim_scope);
+            ("auto_started", `Bool !auto_started_ok);
           ]
          @ claimed_task_fields
          @

@@ -187,7 +187,7 @@ export function deriveOperationalInsight(
       : 'no completed turn yet'
     return {
       tone: 'ok',
-      headline: 'Idle snapshot is consistent',
+      headline: 'Idle 스냅샷 정상',
       detail: snapshot.last_outcome
         ? `Sub-FSMs have fallen back to idle placeholders; the last completed turn ended ${idleSince} ago.`
         : 'The observer is idle and has not captured a completed turn yet.',

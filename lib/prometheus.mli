@@ -189,6 +189,12 @@ val metric_oas_bridge_timeout : string
 (** #10094: labelled [caller, timeout_s] so operators can
     distinguish fantasy 60s budgets from intentional 120/180s
     budgets when both fire timeouts in the same session. *)
+val metric_oas_bridge_cancel : string
+(** #10942 mirror for [masc_oas_bridge].  Labelled [caller, bucket]
+    where bucket is wall-class (fast<60s, short_tail<300s,
+    mid_tail<600s, long_mid<1800s, long_tail>=1800s) — identical
+    boundaries to [masc_keeper_oas_cancel_total] so PromQL can
+    union the two sources for a fleet-wide bimodal view. *)
 val metric_oas_sse_relay_retries : string
 val metric_oas_sse_relay_drops : string
 val metric_oas_sse_relay_queue_depth : string

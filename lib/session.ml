@@ -45,9 +45,15 @@ type registry_state = {
   rate_trackers: rate_tracker AgentMap.t;
 }
 
+(* Bound: 10x the per-session [max_notification_queue] (1000), sized to
+   absorb a keeper-fleet boot burst (16 keepers × ~30 messages each =
+   ~500) with 20x headroom. Unbounded ([max_int]) caused #10777-class
+   heap exhaustion when the consumer fiber stalled. *)
+let max_registry_mailbox = 10_000
+
 let create ?(config = default_rate_limit) () = {
   config;
-  mailbox = Eio.Stream.create max_int;
+  mailbox = Eio.Stream.create max_registry_mailbox;
 }
 
 let create_tracker now = {
@@ -442,7 +448,13 @@ module McpSessionStore = struct
     | List_all of mcp_session list Eio.Promise.u
     | Remove of string * bool Eio.Promise.u
 
-  let mailbox = Eio.Stream.create max_int
+  (* Bound: same rationale as [max_registry_mailbox] above. McpSessionStore
+     handles 4 message types (Put/Get/Cleanup_stale/List_all/Remove); 10k
+     entries is well above any realistic concurrent HTTP request burst and
+     prevents heap exhaustion if the consumer fiber stalls. *)
+  let max_mcp_session_mailbox = 10_000
+
+  let mailbox = Eio.Stream.create max_mcp_session_mailbox
 
   let max_age = ref Env_config.Session.max_age_seconds
 

@@ -759,7 +759,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
               ` : null}
 
               ${isKeeper && (monitoringEvidence?.phase || monitoringEvidence?.stage) ? html`
-                <div class="rounded-[16px] border border-[var(--color-border-divider)] bg-[linear-gradient(180deg,var(--white-3),var(--white-1))] px-3 py-2.5">
+                <div class="rounded-2xl border border-[var(--color-border-divider)] bg-[linear-gradient(180deg,var(--white-3),var(--white-1))] px-3 py-2.5">
                   <div class="flex flex-wrap items-center gap-2">
                     ${monitoringEvidence?.phase && fsmPhaseKey
                       ? html`<${KeeperPhaseBadge} phase=${fsmPhaseKey} compact />`

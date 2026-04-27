@@ -1,0 +1,83 @@
+// keeper-fsm-graph.dot — Static cross-FSM coupling graph for the
+// keeper system (KSM / KTC / KDP / KCL / KMC).
+//
+// Each labeled edge corresponds to a [edge=<label>] value emitted by
+// the Prometheus counter [masc_keeper_fsm_edge_transitions_total]
+// (declared in lib/prometheus.mli).
+//
+// Render:
+//   dot -Tsvg docs/keeper-fsm-graph.dot -o docs/keeper-fsm-graph.svg
+//
+// Validate the OCaml wiring still matches:
+//   bash scripts/validate-keeper-fsm-graph.sh
+//
+// References:
+//   - specs/keeper-state-machine/KeeperCompositeLifecycle.tla
+//   - test/test_keeper_fsm_joints.ml (PR-H, joint invariant tests)
+
+digraph keeper_fsm {
+  rankdir = LR;
+  fontname = "Helvetica";
+  node [shape=box, style=filled, fillcolor="#f5f5f5", fontname="Helvetica"];
+  edge [fontname="Helvetica", fontsize=10];
+
+  // 5 sub-FSM nodes (RFC-0002 + RFC-0003).
+  KSM [label="KSM\nKeeper State Machine\nlib/keeper/keeper_state_machine.ml"];
+  KTC [label="KTC\nTurn Cycle\nlib/keeper/keeper_unified_turn.ml"];
+  KDP [label="KDP\nDecision Pipeline\n(routing surface in keeper_cascade_routing.ml)"];
+  KCL [label="KCL\nCascade Loop\nlib/keeper/keeper_post_turn.ml"];
+  KMC [label="KMC\nMemory / Compaction\nlib/keeper/keeper_compact_policy.ml"];
+
+  // ── Instrumented edges (counter labels match the OCaml call sites) ──
+
+  KSM -> KCL [
+    label = "ksm_to_kcl_routing\n(select_cascade)",
+    color = "#1976d2",
+    tooltip = "lib/keeper/keeper_unified_turn.ml:1086"
+  ];
+
+  KSM -> KMC [
+    label = "ksm_to_kmc_compact_trigger\n(Auto_compact_triggered)",
+    color = "#1976d2",
+    tooltip = "lib/keeper/keeper_registry.ml:995"
+  ];
+
+  KMC -> KSM [
+    label = "kmc_to_ksm_compact_completed\n(Compaction_completed)",
+    color = "#388e3c",
+    tooltip = "lib/keeper/keeper_exec_context.ml:198 + lib/keeper/keeper_unified_turn.ml:1925"
+  ];
+
+  KCL -> KTC [
+    label = "kcl_to_ktc_exhaustion\n(Cascade_exhausted)",
+    color = "#d32f2f",
+    tooltip = "lib/keeper/keeper_unified_turn.ml:1647"
+  ];
+
+  // ── Documented but un-instrumented edges (follow-up trail) ──
+
+  KDP -> KCL [
+    label = "(via select_cascade phase arg)",
+    style = "dashed",
+    color = "#888888",
+    tooltip = "Currently fused into ksm_to_kcl_routing; KDP signal arrives as the phase argument"
+  ];
+
+  KSM -> KTC [
+    label = "(via can_execute_turn gate)",
+    style = "dashed",
+    color = "#888888",
+    tooltip = "Pure predicate keeper_state_machine.ml:can_execute_turn — no counter, gate read at every turn entry"
+  ];
+
+  // ── Legend ─────────────────────────────────────────────
+  subgraph cluster_legend {
+    label = "Legend";
+    style = dashed;
+    color = "#888888";
+    fontsize = 11;
+
+    legend_solid [label="solid edge = Prometheus instrumented", shape=plaintext];
+    legend_dashed [label="dashed edge = documented, not yet instrumented", shape=plaintext];
+  }
+}

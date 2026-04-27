@@ -1084,6 +1084,8 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
         let routing = Keeper_cascade_routing.select_cascade
           ~base_cascade:meta.cascade_name ~phase
         in
+        Prometheus.inc_counter Prometheus.metric_keeper_fsm_edge_transitions
+          ~labels:[("edge", "ksm_to_kcl_routing")] ();
         let routed_meta = { meta with cascade_name = routing.effective_cascade } in
         let routed_labels =
           Keeper_model_labels.configured_model_labels_of_meta routed_meta
@@ -1641,10 +1643,14 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
               ~overflow_retry_used
               ~attempted_cascades =
             let mark_terminal_error err =
-              if EC.is_cascade_exhausted_error err then
+              if EC.is_cascade_exhausted_error err then begin
                 Keeper_registry.set_turn_cascade_state
                   ~base_path:config.base_path meta.name
-                  Keeper_registry.Cascade_exhausted
+                  Keeper_registry.Cascade_exhausted;
+                Prometheus.inc_counter
+                  Prometheus.metric_keeper_fsm_edge_transitions
+                  ~labels:[("edge", "kcl_to_ktc_exhaustion")] ()
+              end
               else
                   Keeper_registry.set_turn_phase
                     ~base_path:config.base_path meta.name
@@ -1919,6 +1925,9 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                           ~config
                           ~keeper_name:meta.name
                           Keeper_state_machine.Compaction_started;
+                        Prometheus.inc_counter
+                          Prometheus.metric_keeper_fsm_edge_transitions
+                          ~labels:[("edge", "kmc_to_ksm_compact_completed")] ();
                         dispatch_keeper_phase_event
                           ~config
                           ~keeper_name:meta.name

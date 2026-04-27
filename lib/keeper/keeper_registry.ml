@@ -992,6 +992,8 @@ let followup_event_of_entry_action
   : Keeper_state_machine.event option =
   match phase, action with
   | Keeper_state_machine.Overflowed, Start_compaction ->
+      Prometheus.inc_counter Prometheus.metric_keeper_fsm_edge_transitions
+        ~labels:[("edge", "ksm_to_kmc_compact_trigger")] ();
       Some Keeper_state_machine.Auto_compact_triggered
   | _ ->
       None

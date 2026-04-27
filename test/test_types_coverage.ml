@@ -906,7 +906,7 @@ let test_agent_credential_of_yojson_admin_bool_legacy () =
   | Error e -> fail ("expected Ok, got: " ^ e)
 
 let test_agent_credential_of_yojson_unknown_role_fails_closed () =
-  (* Fail-closed: unknown role strings downgrade to Worker, never Admin. *)
+  (* Fail-closed: unknown role strings return Error, never silently downgrade. *)
   let json = `Assoc [
     ("agent_name", `String "evil");
     ("token", `String "t");
@@ -914,9 +914,8 @@ let test_agent_credential_of_yojson_unknown_role_fails_closed () =
     ("created_at", `String "2026-04-23T00:00:00Z");
   ] in
   match Types.agent_credential_of_yojson json with
-  | Ok cred ->
-    check bool "unknown role falls back to Worker" true (cred.role = Types.Worker)
-  | Error e -> fail ("expected Ok, got: " ^ e)
+  | Error _ -> ()
+  | Ok _ -> fail "expected Error for unknown role"
 
 let test_agent_credential_to_yojson_emits_role_and_admin () =
   (* Writer emits both fields during the transition so downstream readers

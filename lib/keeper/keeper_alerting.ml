@@ -232,16 +232,6 @@ let keeper_alert_signal
   end;
   let score = max 0.0 (min 1.0 !score) in
   let keywords = keyword_hits |> List.map fst |> dedup_strings in
-  let threshold = alert_emit_threshold () in
-  Heuristic_metrics.record {
-    module_name = "keeper_alerting";
-    site = "keeper_alert_signal";
-    raw_value = score;
-    threshold;
-    triggered = score >= threshold;
-    provenance = Alert_scoring (String.concat "," (List.rev !reasons));
-    timestamp = Unix.gettimeofday ();
-  };
   (score, List.rev !reasons, keywords)
 
 let keeper_alert_text

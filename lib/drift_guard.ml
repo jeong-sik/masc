@@ -208,14 +208,6 @@ let text_similarity original received =
 let verify_handoff ~original ~received ?threshold () =
   let threshold = Option.value threshold ~default:(default_threshold ()) in
   let summary, tokens_a, tokens_b = summarize ~original ~received ~threshold in
-  (* RFC-0001 Gate A: record drift guard observation *)
-  Heuristic_metrics.record {
-    module_name = "drift_guard"; site = "verify_handoff";
-    raw_value = summary.similarity; threshold;
-    triggered = summary.similarity < threshold;
-    provenance = Drift_guard "handoff";
-    timestamp = Unix.gettimeofday ();
-  };
   if summary.similarity >= threshold then Verified summary
   else
     let drift_type =

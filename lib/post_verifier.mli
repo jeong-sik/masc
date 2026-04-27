@@ -38,9 +38,7 @@ type verification_result = {
 
 (** {1 Verification} *)
 
-(** Verify [content] across Relevance, Quality, Safety. Side effect:
-    records per-dimension {!Heuristic_metrics} observations tagged with
-    provenance [Post_verifier _]. *)
+(** Verify [content] across Relevance, Quality, Safety. *)
 val verify : content:string -> verification_result
 
 (** [true] when [overall] is [Pass] or [Warn], [false] on [Fail]. *)

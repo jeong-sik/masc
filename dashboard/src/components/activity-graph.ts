@@ -95,7 +95,7 @@ function StatsRow({ data }: { data: ActivityGraphResponse }) {
 
   function statCard(label: string, value: number, series: number[], color: string, highlight = false) {
     return html`
-      <div class="rounded border border-[var(--color-border-default)] bg-[var(--card)] py-[15px] px-3.5">
+      <div class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] py-[15px] px-3.5">
         <div class="text-3xs text-[var(--color-fg-muted)] tracking-1 uppercase font-medium">${label}</div>
         <div class="mt-1.5 text-[var(--color-fg-secondary)] text-3xl font-bold leading-none tabular-nums ${highlight ? 'text-[var(--color-status-ok)]' : ''}">${value}</div>
         ${series.length >= 2 ? html`<div class="mt-2"><${Sparkline} values=${series} color=${color} /></div>` : null}
@@ -173,7 +173,7 @@ function ActionTimeline({ data }: { data: ActivityGraphResponse }) {
 
   return html`
     <div class="flex flex-col gap-3">
-      <div class="flex flex-col gap-3 rounded border border-[var(--color-border-default)] bg-[var(--card)]/50 p-4">
+      <div class="flex flex-col gap-3 rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]/50 p-4">
         <div class="flex flex-col gap-1">
           <div class="text-base font-semibold text-[var(--color-fg-secondary)]">원본 실행 이벤트를 최근 액션 단위로 묶어 보여줍니다.</div>
           <div class="text-xs text-[var(--color-fg-muted)]">
@@ -211,7 +211,7 @@ function ActionTimeline({ data }: { data: ActivityGraphResponse }) {
         : filteredGroups.map(group => {
             const expanded = expandedActionGroups.value.has(group.id)
             return html`
-              <div class="rounded border border-[var(--color-border-default)] bg-[var(--card)]/55 p-4 shadow-sm shadow-black/8" key=${group.id}>
+              <div class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]/55 p-4 shadow-sm shadow-black/8" key=${group.id}>
                 <div class="flex flex-wrap items-start justify-between gap-3">
                   <div class="min-w-0 flex-1">
                     <div class="flex flex-wrap items-center gap-2">

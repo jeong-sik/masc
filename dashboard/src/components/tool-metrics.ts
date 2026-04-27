@@ -148,23 +148,23 @@ export function ToolMetrics() {
           서버 시작 이후 메모리 기반 집계. 재시작 시 초기화됩니다.
         </div>
         <div class="grid grid-cols-[repeat(5,minmax(0,1fr))] gap-3 max-[880px]:grid-cols-[repeat(2,minmax(0,1fr))]">
-          <div class="flex flex-col items-center gap-1 rounded border border-[var(--color-border-default)] bg-[var(--card)] p-3">
+          <div class="flex flex-col items-center gap-1 rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
             <span class="mt-1.5 text-[var(--color-fg-secondary)] text-3xl font-bold leading-none tabular-nums">${data.total_calls}</span>
             <span class="text-2xs text-[var(--color-fg-muted)] font-medium">총 호출 수</span>
           </div>
-          <div class="flex flex-col items-center gap-1 rounded border border-[var(--color-border-default)] bg-[var(--card)] p-3">
+          <div class="flex flex-col items-center gap-1 rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
             <span class="mt-1.5 text-[var(--color-fg-secondary)] text-3xl font-bold leading-none tabular-nums">${data.distinct_tools_called}</span>
             <span class="text-2xs text-[var(--color-fg-muted)] font-medium">사용된 도구</span>
           </div>
-          <div class="flex flex-col items-center gap-1 rounded border border-[var(--color-border-default)] bg-[var(--card)] p-3">
+          <div class="flex flex-col items-center gap-1 rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
             <span class="mt-1.5 text-[var(--color-fg-secondary)] text-3xl font-bold leading-none tabular-nums">${data.never_called_count}</span>
             <span class="text-2xs text-[var(--color-fg-muted)] font-medium">미사용 도구</span>
           </div>
-          <div class="flex flex-col items-center gap-1 rounded border border-[var(--color-border-default)] bg-[var(--card)] p-3">
+          <div class="flex flex-col items-center gap-1 rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
             <span class="mt-1.5 text-[var(--color-fg-secondary)] text-3xl font-bold leading-none tabular-nums">${data.registered_count}</span>
             <span class="text-2xs text-[var(--color-fg-muted)] font-medium">등록됨 (v2)</span>
           </div>
-          <div class="flex flex-col items-center gap-1 rounded border border-[var(--color-border-default)] bg-[var(--card)] p-3">
+          <div class="flex flex-col items-center gap-1 rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
             <span class="mt-1.5 text-[var(--color-fg-secondary)] text-3xl font-bold leading-none tabular-nums">${data.dispatch_v2_enabled ? 'ON' : 'OFF'}</span>
             <span class="text-2xs text-[var(--color-fg-muted)] font-medium">Dispatch v2</span>
           </div>

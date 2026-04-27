@@ -263,7 +263,7 @@ export function GraphView({ data }: GraphViewProps) {
     </div>
 
     ${selectedNode ? html`
-      <div class="rounded border border-[var(--color-border-default)] bg-[var(--card)] p-4 mt-2">
+      <div class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4 mt-2">
         <div class="flex items-center gap-3 mb-3">
           <strong class="text-lg text-[var(--text-near-white)]">${selectedNode.label}</strong>
           <span class="py-0.5 px-2 bg-[var(--slate-gray-15)] text-2xs text-[var(--text-slate)] rounded">${kindLabel(selectedNode.kind)}</span>

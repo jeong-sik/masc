@@ -1,12 +1,13 @@
 /**
  * MASC Cockpit Design System — Codegen Driver
  *
- * Reads source.ts, emits five artifacts:
+ * Reads source.ts, emits six artifacts:
  *   1. dashboard/design-system/source_styles/tokens.generated.css
  *   2. dashboard/src/styles/tokens.generated.css      (Tailwind v4 @theme)
  *   3. dashboard/src/styles/tokens.generated.ts       (Preact typed)
  *   4. dashboard_bonsai/src/tokens.ml + tokens.mli    (OCaml polyvar)
  *   5. dashboard/design-system/tokens/build/tokens.json (DTCG 2025.10)
+ *   6. dashboard_bonsai/static/colors_and_type.generated.css (Bonsai naming)
  *
  * Run:  pnpm tokens:build  (from dashboard/)
  *
@@ -35,6 +36,7 @@ const OUT = {
   bonsaiMl: resolve(REPO, "dashboard_bonsai/src/tokens.ml"),
   bonsaiMli: resolve(REPO, "dashboard_bonsai/src/tokens.mli"),
   dtcgJson: resolve(REPO, "dashboard/design-system/tokens/build/tokens.json"),
+  bonsaiCss: resolve(REPO, "dashboard_bonsai/static/colors_and_type.generated.css"),
 } as const;
 
 const HEADER_TEXT =
@@ -196,6 +198,80 @@ let var_of t = "var(--" ^ name_of t ^ ")"
 `;
 }
 
+// 6. Bonsai-side colors_and_type.generated.css — uses Bonsai naming
+//    (--bg-deep / --accent-brass / --space-1 / --status-ok). Two themes
+//    only per user decision: dark-fantasy (canonical, on :root) + paper
+//    (light, on [data-theme="paper"]). cyberpunk / terminal / parchment
+//    are intentionally archived (Wave 2 Friend-2C will move them to
+//    static/themes/archive/).
+//
+//    Layout per :root block:
+//      1. Bonsai theme-invariant raw (radius, space, scrollbar)
+//      2. Bonsai-distinct font stacks (per SPEC §6 divergence)
+//      3. Bonsai theme-invariant role defaults (shadow-card, etc.)
+//      4. dark-fantasy theme tokens (bg-deep / text-* / accent-* / status-* / t-*)
+//      5. Bonsai semantic aliases (color-bg-page → var(--bg-deep), …)
+//
+//    The [data-theme="paper"] block contains the paper raw palette
+//    (paper-N / ink-N / forest / brass / brick / *-fill) followed by
+//    the Bonsai-name overrides (--bg-deep: var(--paper) etc.).
+function buildBonsaiColorsAndTypeCss(): string {
+  const rawByName = new Map(source.raw.map((tk) => [tk.name, tk] as const));
+  const semanticByName = new Map(source.semantic.map((tk) => [tk.name, tk] as const));
+
+  const lookupOrThrow = (
+    name: string, where: Map<string, TokenBase>, label: string,
+  ): TokenBase => {
+    const tk = where.get(name);
+    if (!tk) throw new Error(`bonsai codegen: ${label} token --${name} not found in source.ts`);
+    return tk;
+  };
+
+  const invariantRaw = source.bonsai.invariantRawNames.map(
+    (n) => lookupOrThrow(n, rawByName, "raw"),
+  );
+  const invariantRole = source.bonsai.invariantRoleNames.map(
+    (n) => lookupOrThrow(n, semanticByName, "role"),
+  );
+
+  const darkFantasy = source.themes.find((th) => th.id === "dark-fantasy");
+  const paper = source.themes.find((th) => th.id === "paper");
+  if (!darkFantasy) throw new Error("bonsai codegen: dark-fantasy theme missing");
+  if (!paper) throw new Error("bonsai codegen: paper theme missing");
+
+  const renderSection = (label: string, toks: ReadonlyArray<TokenBase>): string => {
+    if (toks.length === 0) return "";
+    const body = toks.map(renderTokenLine).join("\n");
+    return `  /* ── ${label} ── */\n${body}\n`;
+  };
+
+  // :root + [data-theme="dark-fantasy"] — canonical block
+  const rootSelector = `:root,\n[data-theme="dark-fantasy"]`;
+  const rootBody = [
+    "  color-scheme: dark;",
+    renderSection("Theme-invariant raw (radius, space, scrollbar)", invariantRaw),
+    renderSection("Font stacks (bonsai divergence — JetBrains Mono / Cinzel)",
+      [...source.bonsai.fontOverrides]),
+    renderSection("Theme-invariant role defaults (shadows)", invariantRole),
+    renderSection("Dark Fantasy raw (visceral · decay-forward)", [...darkFantasy.tokens]),
+    renderSection("Bonsai semantic aliases (SPEC v0.1 §3.1-3.5)",
+      [...source.bonsai.aliases]),
+  ].filter((s) => s.length > 0).join("\n");
+  const rootBlock = `${rootSelector} {\n${rootBody}}\n`;
+
+  // [data-theme="paper"] — light theme
+  const paperOverrides = source.bonsai.themeOverrides.paper ?? [];
+  const paperBody = [
+    "  color-scheme: light;",
+    renderSection("Paper / Ink raw palette", [...paper.tokens]),
+    renderSection("Bonsai-name overrides (paper colorway)",
+      [...paperOverrides]),
+  ].filter((s) => s.length > 0).join("\n");
+  const paperBlock = `[data-theme="paper"] {\n${paperBody}}\n`;
+
+  return `${cssHeader}${rootBlock}\n${paperBlock}`;
+}
+
 // 5. DTCG 2025.10 — design-tokens-format JSON
 //    spec: design-tokens.github.io/community-group/format
 function dtcgKindToType(kind: TokenBase["kind"]): string {
@@ -256,6 +332,7 @@ function main(): void {
   writeFile(OUT.bonsaiMli, buildBonsaiMli());
   writeFile(OUT.bonsaiMl, buildBonsaiMl());
   writeFile(OUT.dtcgJson, buildDtcgJson());
+  writeFile(OUT.bonsaiCss, buildBonsaiColorsAndTypeCss());
   console.log("done");
 }
 

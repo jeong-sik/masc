@@ -312,6 +312,7 @@ type semantic =
   | `Shadow_panel
   | `Shadow_glow
   | `Shadow_raised
+  | `Shadow_ring
   | `Focus_ring
   | `Focus_ring_err
   | `Hover_overlay

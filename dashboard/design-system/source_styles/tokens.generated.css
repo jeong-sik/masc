@@ -305,6 +305,7 @@
   --shadow-panel: 0 2px 12px rgba(0, 0, 0, 0.6);
   --shadow-glow: 0 0 20px var(--accent-glow);
   --shadow-raised: 0 8px 24px rgba(0, 0, 0, 0.55), 0 0 0 1px var(--border-highlight);
+  --shadow-ring: inset 0 0 0 1px rgba(196, 162, 101, 0.25);  /* bonsai-only 1px ring (distinct from --shadow-inset) */
   --focus-ring: 0 0 0 1px var(--brass-1), 0 0 0 3px rgb(var(--brass-glow) / .25);
   --focus-ring-err: 0 0 0 1px var(--err), 0 0 0 3px rgb(var(--err-glow) / .3);
   --hover-overlay: rgb(255 255 255 / .03);
@@ -397,11 +398,18 @@
   --ink-5: #9A978D;
   --ink-6: #BCB8AC;
   --forest: #2D5F4E;
+  --forest-fill: #CFDFD7;
   --brass: #8C6A1E;
+  --brass-fill: #E9DDB8;
   --brick: #8B3A3A;
+  --brick-fill: #E8CFCB;
   --ember: #B35A1F;
+  --ember-fill: #ECD5BD;
   --slate: #3E4A5C;
+  --slate-fill: #D6DBE2;
   --plum: #5C3E56;
+  --plum-fill: #E0D4DE;
   --teal: #236874;
+  --teal-fill: #CEDEE2;
 }
 

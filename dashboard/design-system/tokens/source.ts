@@ -483,6 +483,8 @@ export const semantic: ReadonlyArray<TokenBase> = (() => {
   out.push(t("shadow-raised",
     "0 8px 24px rgba(0, 0, 0, 0.55), 0 0 0 1px var(--border-highlight)",
     "role", "shadow"));
+  out.push(t("shadow-ring",   "inset 0 0 0 1px rgba(196, 162, 101, 0.25)", "role", "shadow",
+    "bonsai-only 1px ring (distinct from --shadow-inset)"));
 
   // Focus / interaction overlays
   out.push(t("focus-ring",
@@ -611,24 +613,181 @@ export const themes: ReadonlyArray<Theme> = Object.freeze([
       t("ink-5", "#9A978D", "raw", "color"),
       t("ink-6", "#BCB8AC", "raw", "color"),
       t("forest", "#2D5F4E", "raw", "color"),
+      t("forest-fill", "#CFDFD7", "raw", "color"),
       t("brass", "#8C6A1E", "raw", "color"),
+      t("brass-fill", "#E9DDB8", "raw", "color"),
       t("brick", "#8B3A3A", "raw", "color"),
+      t("brick-fill", "#E8CFCB", "raw", "color"),
       t("ember", "#B35A1F", "raw", "color"),
+      t("ember-fill", "#ECD5BD", "raw", "color"),
       t("slate", "#3E4A5C", "raw", "color"),
+      t("slate-fill", "#D6DBE2", "raw", "color"),
       t("plum", "#5C3E56", "raw", "color"),
+      t("plum-fill", "#E0D4DE", "raw", "color"),
       t("teal", "#236874", "raw", "color"),
+      t("teal-fill", "#CEDEE2", "raw", "color"),
     ]),
   },
 ]);
 
 // ─────────────────────────────────────────────────────────────────────────
+// Bonsai-side codegen — naming alias + paper override layer
+//
+// dashboard_bonsai/static/colors_and_type.css uses Bonsai-native names
+// (--bg-deep / --accent-brass / --space-1) that differ from dashboard's
+// (--bg-0 / --brass-1 / --sp-1). The bonsai output is emitted alongside
+// the Preact outputs and shares the same SSOT (this file).
+//
+// Per user decision: only 2 themes (dark-fantasy canonical + paper light).
+// cyberpunk / terminal / parchment are archived to static/themes/archive/.
+// ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * Names of [tier:'raw'] tokens that are Bonsai-side theme-invariant
+ * primitives (radius / space / scrollbar). Theme-overridable shadow
+ * primitives like --shadow-card are tier:'role' and emitted separately
+ * via [bonsaiInvariantRoleNames] below.
+ *
+ * Font stacks are intentionally excluded — Bonsai uses different stacks
+ * (JetBrains Mono first, Cinzel display) per SPEC §6 divergence list.
+ * Bonsai font values are emitted from [bonsaiFontOverrides] as :root
+ * tokens that shadow the canonical raw --font-* values.
+ */
+export const bonsaiInvariantRawNames: ReadonlyArray<string> = Object.freeze([
+  // Radius
+  "radius-xs", "radius-sm", "radius-md", "radius-lg", "radius-pill",
+  // Spacing — bonsai 8-step (parallel to --sp-*)
+  "space-1", "space-2", "space-3", "space-4",
+  "space-5", "space-6", "space-7", "space-8",
+  // Scrollbar primitives
+  "scrollbar-thumb", "scrollbar-thumb-hover",
+]);
+
+/**
+ * Names of [tier:'role'] tokens that are Bonsai-side theme-invariant
+ * defaults (overridden by paper theme).
+ */
+export const bonsaiInvariantRoleNames: ReadonlyArray<string> = Object.freeze([
+  "shadow-card", "shadow-panel", "shadow-glow", "shadow-raised", "shadow-ring",
+]);
+
+/**
+ * Bonsai font stacks — distinct from canonical raw per SPEC §6.323
+ * (dashboard uses ui-monospace first; bonsai uses JetBrains Mono first).
+ * Emitted as raw declarations inside the :root block so Bonsai-only
+ * components see Bonsai-native typography without affecting dashboard.
+ */
+export const bonsaiFontOverrides: ReadonlyArray<TokenBase> = Object.freeze([
+  t("font-display", "'Cinzel', 'Noto Sans KR', 'EB Garamond', serif", "raw", "typography"),
+  t("font-body",    "'EB Garamond', 'Noto Sans KR', Georgia, serif",   "raw", "typography"),
+  t("font-ui",      "'Noto Sans KR', 'IBM Plex Sans KR', -apple-system, sans-serif", "raw", "typography"),
+  t("font-mono",    "'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace",     "raw", "typography"),
+]);
+
+/**
+ * SPEC v0.1 §3.1-3.5 — Bonsai semantic vocabulary aliasing Bonsai raw.
+ * Mirrors the [color-bg-page / color-fg-primary / ...] role in the
+ * dashboard semantic layer, but each alias points at Bonsai-named raw
+ * (e.g. --bg-deep) rather than dashboard raw (--bg-0). The paper theme
+ * then overrides the underlying Bonsai raw so the alias inherits.
+ */
+export const bonsaiAliases: ReadonlyArray<TokenBase> = Object.freeze([
+  t("color-bg-page",        "var(--bg-deep)",      "role", "color"),
+  t("color-bg-surface",     "var(--bg-panel)",     "role", "color"),
+  t("color-bg-panel-alt",   "var(--bg-panel-alt)", "role", "color"),
+  t("color-bg-elevated",    "var(--bg-card)",      "role", "color"),
+  t("color-bg-hover",       "var(--bg-card-hover)","role", "color"),
+
+  t("color-fg-primary",     "var(--text-primary)", "role", "color"),
+  t("color-fg-muted",       "var(--text-dim)",     "role", "color"),
+
+  t("color-border-default", "var(--border-main)",      "role", "color"),
+  t("color-border-strong",  "var(--border-highlight)", "role", "color"),
+
+  t("color-accent-fg",      "var(--accent-brass)",     "role", "color"),
+  t("color-accent-fg-dim",  "var(--accent-brass-dim)", "role", "color"),
+  t("color-accent-glow",    "var(--accent-glow)",      "role", "color"),
+
+  t("color-status-ok",      "var(--status-ok)",   "role", "color"),
+  t("color-status-warn",    "var(--status-warn)", "role", "color"),
+  t("color-status-err",     "var(--status-bad)",  "role", "color"),
+  t("color-status-idle",    "var(--status-idle)", "role", "color"),
+]);
+
+/**
+ * Per-theme Bonsai-name overrides. The [paper] theme remaps Bonsai
+ * raw (--bg-deep / --text-primary / --status-ok / ...) to paper raw
+ * (--paper / --ink-2 / --forest), plus its own shadow + trace frame
+ * overrides. Emitted inside the [data-theme="paper"] block right
+ * after the paper raw declarations.
+ */
+export const bonsaiThemeOverrides: Readonly<Record<string, ReadonlyArray<TokenBase>>> = Object.freeze({
+  paper: Object.freeze([
+    // Surface remap → paper layers
+    t("bg-deep",        "var(--paper)",   "role", "color"),
+    t("bg-panel",       "var(--paper-2)", "role", "color"),
+    t("bg-panel-alt",   "var(--paper-3)", "role", "color"),
+    t("bg-card",        "var(--paper-2)", "role", "color"),
+    t("bg-card-hover",  "var(--paper-3)", "role", "color"),
+    // Border — translucent ink on paper
+    t("border-main",      "rgba(21,21,21,0.22)", "role", "color"),
+    t("border-highlight", "rgba(21,21,21,0.48)", "role", "color"),
+    // Text — ink ramp
+    t("text-bright",  "var(--ink)",   "role", "color"),
+    t("text-primary", "var(--ink-2)", "role", "color"),
+    t("text-dim",     "var(--ink-4)", "role", "color"),
+    // Accents — brass / brick / slate from paper palette
+    t("accent-brass",     "var(--brass)",      "role", "color"),
+    t("accent-brass-dim", "var(--brass-fill)", "role", "color"),
+    t("accent-blood",     "var(--brick)",      "role", "color"),
+    t("accent-ink",       "var(--slate)",      "role", "color"),
+    t("accent-glow",      "rgba(140,106,30,0.12)", "role", "color"),
+    // Status — paper colorway
+    t("status-ok",   "var(--forest)", "role", "color"),
+    t("status-warn", "var(--ember)",  "role", "color"),
+    t("status-bad",  "var(--brick)",  "role", "color"),
+    t("status-idle", "var(--ink-5)",  "role", "color"),
+    // Shadows — flat / no glow on paper
+    t("shadow-panel", "0 1px 2px rgba(0,0,0,0.06), 0 0 0 1px rgba(0,0,0,0.06)", "role", "shadow"),
+    t("shadow-card",  "0 1px 0 rgba(0,0,0,0.04)", "role", "shadow"),
+    t("shadow-glow",  "none",                     "role", "shadow"),
+    // Trace frames — ink on paper
+    t("t-llm",   "var(--slate)",   "role", "color"),
+    t("t-tool",  "var(--brass)",   "role", "color"),
+    t("t-think", "var(--plum)",    "role", "color"),
+    t("t-wait",  "var(--paper-3)", "role", "color"),
+    t("t-err",   "var(--brick)",   "role", "color"),
+  ]),
+});
+
+// ─────────────────────────────────────────────────────────────────────────
 // Aggregate accessor — for build.ts consumption
 // ─────────────────────────────────────────────────────────────────────────
+
+export interface BonsaiSource {
+  readonly invariantRawNames: ReadonlyArray<string>;
+  readonly invariantRoleNames: ReadonlyArray<string>;
+  readonly fontOverrides: ReadonlyArray<TokenBase>;
+  readonly aliases: ReadonlyArray<TokenBase>;
+  readonly themeOverrides: Readonly<Record<string, ReadonlyArray<TokenBase>>>;
+}
 
 export interface TokenSource {
   readonly raw: ReadonlyArray<TokenBase>;
   readonly semantic: ReadonlyArray<TokenBase>;
   readonly themes: ReadonlyArray<Theme>;
+  readonly bonsai: BonsaiSource;
 }
 
-export const source: TokenSource = Object.freeze({ raw, semantic, themes });
+export const source: TokenSource = Object.freeze({
+  raw,
+  semantic,
+  themes,
+  bonsai: Object.freeze({
+    invariantRawNames: bonsaiInvariantRawNames,
+    invariantRoleNames: bonsaiInvariantRoleNames,
+    fontOverrides: bonsaiFontOverrides,
+    aliases: bonsaiAliases,
+    themeOverrides: bonsaiThemeOverrides,
+  }),
+});

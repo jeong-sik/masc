@@ -301,6 +301,7 @@ type semantic =
   | `Shadow_panel
   | `Shadow_glow
   | `Shadow_raised
+  | `Shadow_ring
   | `Focus_ring
   | `Focus_ring_err
   | `Hover_overlay
@@ -645,6 +646,7 @@ let name_of = function
   | `Shadow_panel -> "shadow-panel"
   | `Shadow_glow -> "shadow-glow"
   | `Shadow_raised -> "shadow-raised"
+  | `Shadow_ring -> "shadow-ring"
   | `Focus_ring -> "focus-ring"
   | `Focus_ring_err -> "focus-ring-err"
   | `Hover_overlay -> "hover-overlay"

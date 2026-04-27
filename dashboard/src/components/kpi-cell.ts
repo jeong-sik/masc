@@ -103,14 +103,14 @@ export function KpiCell(props: KpiCellProps): VNode {
     display: 'flex',
     flexDirection: variant === 'compact' ? ('row' as const) : ('column' as const),
     alignItems: variant === 'compact' ? ('baseline' as const) : ('flex-start' as const),
-    gap: variant === 'compact' ? '8px' : variant === 'stacked' ? '4px' : '6px',
-    padding: variant === 'stacked' ? '14px 16px' : '10px 12px',
+    gap: variant === 'compact' ? 'var(--spacing-element)' : variant === 'stacked' ? '4px' : '6px',
+    padding: variant === 'stacked' ? `14px var(--spacing-card)` : `10px var(--spacing-group)`,
     fontFamily: MONO_STACK,
     minWidth: '0',
   }
 
   const labelStyle = {
-    fontSize: '10px',
+    fontSize: 'var(--font-size-3xs)',
     color: labelColor,
     letterSpacing: '0.08em',
     textTransform: 'uppercase' as const,
@@ -118,7 +118,7 @@ export function KpiCell(props: KpiCellProps): VNode {
   }
 
   const valueStyle = {
-    fontSize: variant === 'stacked' ? '24px' : variant === 'compact' ? '13px' : '17px',
+    fontSize: variant === 'stacked' ? '24px' : variant === 'compact' ? 'var(--font-size-sm)' : '17px',
     color: valueColor,
     fontVariantNumeric: 'tabular-nums' as const,
     fontWeight: variant === 'stacked' ? 700 : 600,
@@ -133,7 +133,7 @@ export function KpiCell(props: KpiCellProps): VNode {
             display: 'inline-flex',
             alignItems: 'center',
             gap: '6px',
-            fontSize: '10px',
+            fontSize: 'var(--font-size-3xs)',
             color: captionColor,
             letterSpacing: '0.06em',
             textTransform: 'uppercase',

@@ -102,7 +102,7 @@ const surfaceStyle = {
 }
 
 const labelStyle = {
-  fontSize: '10px',
+  fontSize: 'var(--font-size-3xs)',
   color: 'var(--color-fg-disabled)',
   letterSpacing: '0.08em',
   textTransform: 'uppercase' as const,
@@ -110,7 +110,7 @@ const labelStyle = {
 }
 
 const captionStyle = {
-  fontSize: '10px',
+  fontSize: 'var(--font-size-3xs)',
   color: 'var(--color-fg-muted)',
   letterSpacing: '0.06em',
   textTransform: 'uppercase' as const,
@@ -158,8 +158,8 @@ export function LifelineBar({
         ...surfaceStyle,
         display: 'inline-flex',
         alignItems: 'center',
-        gap: '12px',
-        padding: '8px 12px',
+        gap: 'var(--spacing-group)',
+        padding: `var(--spacing-element) var(--spacing-group)`,
         fontFamily: MONO_STACK,
       }}
     >

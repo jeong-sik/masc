@@ -78,7 +78,7 @@ export function TickerItem(props: TickerItemProps): VNode {
           aria-hidden="true"
           style=${{
             fontFamily: MONO_STACK,
-            fontSize: '10px',
+            fontSize: 'var(--font-size-3xs)',
             color: 'var(--color-fg-disabled)',
             fontVariantNumeric: 'tabular-nums',
             letterSpacing: '0.04em',
@@ -96,9 +96,9 @@ export function TickerItem(props: TickerItemProps): VNode {
         display: 'inline-flex',
         alignItems: 'center',
         gap: '6px',
-        padding: '2px 8px',
+        padding: `2px var(--spacing-element)`,
         fontFamily: MONO_STACK,
-        fontSize: '11px',
+        fontSize: 'var(--font-size-2xs)',
         whiteSpace: 'nowrap',
       }}
     >
@@ -149,7 +149,7 @@ export function TickerStrip({
       style=${{
         display: 'flex',
         flexDirection: orientation === 'vertical' ? 'column' : 'row',
-        gap: orientation === 'vertical' ? '4px' : '12px',
+        gap: orientation === 'vertical' ? '4px' : 'var(--spacing-group)',
         alignItems: orientation === 'vertical' ? 'stretch' : 'center',
         overflow: 'hidden',
       }}

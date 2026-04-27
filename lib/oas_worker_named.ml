@@ -278,6 +278,59 @@ let filter_candidate_providers_for_tool_support
     end;
     kept
 
+(* Cross-cascade health-aware fallback.
+   When the current cascade has no tool-capable providers after filtering,
+   search all other cascades for a healthy tool-capable provider using the
+   health tracker's success rate and cooldown state. Returns the provider
+   config and the source cascade name, or None if no suitable provider exists.
+
+   Depth: 1 level only (no cross-cascade-of-cross-cascade).
+   Scope: excludes the current cascade to avoid revisiting. *)
+let resolve_tool_capable_provider_across_cascades
+    ~sw ~net
+    ~(keeper_name : string)
+    ?runtime_mcp_policy
+    ?(tools = [])
+    ~require_tool_choice_support
+    ~require_tool_support
+    ~(exclude_cascade : string)
+    () =
+  match Cascade_catalog_runtime.known_profile_names ~sw ~net () with
+  | Error _ -> None
+  | Ok all_names ->
+      all_names
+      |> List.filter (fun name -> name <> exclude_cascade)
+      |> List.filter_map (fun cascade_name ->
+           match Cascade_catalog_runtime.resolve_named_providers ~sw ~net
+                   ~require_tool_choice_support ~require_tool_support
+                   ?runtime_mcp_policy
+                   ~cascade_name ()
+           with
+           | Error _ -> None
+           | Ok providers ->
+               let filtered =
+                 filter_candidate_providers_for_tool_support
+                   ~keeper_name ?runtime_mcp_policy ~tools
+                   ~require_tool_choice_support ~require_tool_support
+                   ~label:cascade_name providers
+               in
+               match filtered with
+               | [] -> None
+               | _ -> Some (cascade_name, filtered))
+      |> List.concat_map (fun (cascade_name, providers) ->
+           providers |> List.map (fun p -> (cascade_name, p)))
+      |> List.filter (fun (_, (p : Llm_provider.Provider_config.t)) ->
+           not (Cascade_health_tracker.is_in_cooldown
+                  Cascade_health_tracker.global ~provider_key:p.model_id))
+      |> List.sort (fun (_, (a : Llm_provider.Provider_config.t))
+                         (_, (b : Llm_provider.Provider_config.t)) ->
+           Float.compare
+             (Cascade_health_tracker.success_rate
+                Cascade_health_tracker.global ~provider_key:b.model_id)
+             (Cascade_health_tracker.success_rate
+                Cascade_health_tracker.global ~provider_key:a.model_id))
+      |> (function [] -> None | x :: _ -> Some x)
+
 type masc_internal_error =
   | Cascade_exhausted of {
       cascade_name : string;
@@ -1247,37 +1300,53 @@ let run_named
       ~label:cascade_name
       candidate_cfgs
   in
-  let capture, _metrics = Oas_worker_cascade.cascade_metrics_for_candidates ~candidate_cfgs () in
-  let cascade_strategy_name_ref = ref None in
-  let name = Printf.sprintf "oas-%s" cascade_name in
+  (* Cross-cascade health-aware fallback: when the current cascade has no
+     tool-capable providers after filtering, search all other cascades for
+     a healthy tool-capable provider. Depth 1 only (no recursive search). *)
+  let candidate_cfgs =
+    match candidate_cfgs with
+    | [] ->
+        (match resolve_tool_capable_provider_across_cascades
+                ~sw ~net ~keeper_name ?runtime_mcp_policy ~tools
+                ~require_tool_choice_support ~require_tool_support
+                ~exclude_cascade:cascade_name ()
+         with
+         | Some (source_cascade, provider_cfg) ->
+             Log.Misc.info
+               "cascade %s: cross-cascade fallback to %s from %s \
+                (original had no tool-capable providers)"
+               cascade_name
+               (Provider_tool_support.provider_debug_label provider_cfg)
+               source_cascade;
+             [provider_cfg]
+         | None ->
+             Log.Misc.error
+               "cascade %s: no callable models available (cross-cascade \
+                search also failed) — configured=[%s] \
+                require_tool_choice_support=%b require_tool_support=%b"
+               cascade_name
+               (String.concat ", " configured_labels)
+               require_tool_choice_support
+               require_tool_support;
+             [])
+    | _ -> candidate_cfgs
+  in
   match candidate_cfgs with
   | [] ->
-      (* #10528: surface rejection context inline so operators can classify
-         root cause from a single log line. Pre-fix: only the cascade name
-         was logged; the sibling WARN with the configured provider list
-         (provider_tool_support.ml:144) was a separate event requiring
-         time/level cross-search. *)
-      Log.Misc.error
-        "cascade %s: no callable models available — configured=[%s] require_tool_choice_support=%b require_tool_support=%b"
-        cascade_name
-        (String.concat ", " configured_labels)
-        require_tool_choice_support
-        require_tool_support;
       Error
-      (sdk_error_of_masc_internal_error
-         (if require_tool_choice_support then
-            No_tool_capable_provider
-              {
-                cascade_name;
-                configured_labels;
-              }
-          else
-            Cascade_exhausted
-              {
-                cascade_name;
-                reason = Keeper_types.No_providers_available;
-              }))
+        (sdk_error_of_masc_internal_error
+           (if require_tool_choice_support then
+              No_tool_capable_provider
+                { cascade_name; configured_labels }
+            else
+              Cascade_exhausted
+                { cascade_name; reason = Keeper_types.No_providers_available }))
   | _ ->
+  let capture, _metrics =
+    Oas_worker_cascade.cascade_metrics_for_candidates ~candidate_cfgs ()
+  in
+  let cascade_strategy_name_ref = ref None in
+  let name = Printf.sprintf "oas-%s" cascade_name in
   let transport_resolved = match transport with
     | Some t -> t
     | None -> Masc_grpc_transport.from_env ()

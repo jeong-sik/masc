@@ -3,7 +3,7 @@
 /* ── Board (Posts) ─────────────────────────────────────────── */
 
 @utility board-post {
-  border-color: var(--card-border);
+  border-color: var(--color-border-default);
   content-visibility: auto;
   contain-intrinsic-size: auto 120px;
   transition: border-color 0.2s, transform 0.2s, background 0.2s;

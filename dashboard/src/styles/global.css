@@ -43,7 +43,7 @@
 
 @utility card {
   background: var(--card);
-  border: 1px solid var(--card-border);
+  border: 1px solid var(--color-border-default);
   border-radius: 12px;
   padding: 16px;
   box-shadow:
@@ -65,13 +65,13 @@
 
 @utility monitor-subheadline {
   font-size: var(--fs-sm);
-  color: var(--text-muted);
+  color: var(--color-fg-muted);
   line-height: 1.5;
   margin-top: 6px;
 }
 
 @utility monitor-surface-card {
-  border: 1px solid var(--card-border);
+  border: 1px solid var(--color-border-default);
   border-radius: var(--radius-xl);
   background: var(--card);
 }
@@ -119,7 +119,7 @@
   line-height: 1.6;
   white-space: nowrap;
   background: var(--white-6);
-  color: var(--text-muted);
+  color: var(--color-fg-muted);
   &.active { background: var(--ok-22); color: var(--ok); }
   &.busy { background: var(--warn-15); color: var(--warn); }
   &.listening { background: rgba(56,189,248,0.15); color: var(--sky-400); }
@@ -162,7 +162,7 @@ thead th {
   padding: 8px 12px;
   font-size: var(--fs-xs);
   font-weight: 600;
-  color: var(--text-muted);
+  color: var(--color-fg-muted);
   text-transform: uppercase;
   letter-spacing: 0.06em;
   border-bottom: 1px solid var(--border-slate-16);

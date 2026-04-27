@@ -1,0 +1,173 @@
+{
+  "__meta": {
+    "purpose": "MASC keeper turn FSM observability — imports into Grafana 10+ via File → Import.",
+    "metrics": [
+      "masc_keeper_turn_fsm_transitions_total{from, to, keeper}"
+    ],
+    "companion_doc": "docs/observability/keeper-turn-fsm-metrics.md",
+    "companion_lifecycle": "docs/keeper-turn-lifecycle.md",
+    "code_refs": [
+      "lib/keeper/keeper_turn_fsm.ml",
+      "lib/keeper/keeper_unified_turn.ml",
+      "lib/prometheus.ml"
+    ]
+  },
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": { "type": "datasource", "uid": "grafana" },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "graphTooltip": 1,
+  "liveNow": false,
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Turn FSM transitions by to-state — rate / 5m",
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Aggregate transitions to each terminal/intermediate state. done (green) == success; failed:* (red shades) == typed failure; cancelled:* (orange) == operator/supervisor stop.",
+      "targets": [
+        {
+          "expr": "sum by (to) (rate(masc_keeper_turn_fsm_transitions_total[5m]))",
+          "legendFormat": "{{to}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "color": { "mode": "palette-classic" }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "done" },
+            "properties": [
+              { "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byRegexp", "options": "failed:.*" },
+            "properties": [
+              { "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }
+            ]
+          },
+          {
+            "matcher": { "id": "byRegexp", "options": "cancelled:.*" },
+            "properties": [
+              { "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right", "showLegend": true }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Failure breakdown by failure_reason — rate / 5m",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Step 4f split runtime_error catch-all into typed variants. After this PR, livelock_blocked and provider_error have their own series.",
+      "targets": [
+        {
+          "expr": "sum by (to) (rate(masc_keeper_turn_fsm_transitions_total{to=~\"failed:.*\"}[5m]))",
+          "legendFormat": "{{to}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "color": { "mode": "palette-classic" }
+        }
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right", "showLegend": true }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Per-keeper completion rate (to=done) — rate / 5m",
+      "gridPos": { "x": 0, "y": 8, "w": 24, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "How many turns each keeper closes per minute. A keeper line dropping to zero while others stay flat == that keeper is stuck.",
+      "targets": [
+        {
+          "expr": "sum by (keeper) (rate(masc_keeper_turn_fsm_transitions_total{to=\"done\"}[5m]))",
+          "legendFormat": "{{keeper}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "color": { "mode": "palette-classic" }
+        }
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right", "showLegend": true }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Cancellation rate by cancel_reason — rate / 5m",
+      "gridPos": { "x": 0, "y": 16, "w": 24, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "phase_gate_close == phase blocked turn entry; supervisor_stop / fleet_shutdown == externally requested halt; provider_timeout == cooperative cancel deadline crossed.",
+      "targets": [
+        {
+          "expr": "sum by (to) (rate(masc_keeper_turn_fsm_transitions_total{to=~\"cancelled:.*\"}[5m]))",
+          "legendFormat": "{{to}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "color": { "mode": "palette-classic" }
+        }
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right", "showLegend": true }
+      }
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["masc", "keeper", "fsm"],
+  "templating": {
+    "list": [
+      {
+        "current": { "selected": false, "text": "Prometheus", "value": "Prometheus" },
+        "hide": 0,
+        "includeAll": false,
+        "label": "Datasource",
+        "multi": false,
+        "name": "DS_PROMETHEUS",
+        "options": [],
+        "query": "prometheus",
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "type": "datasource"
+      }
+    ]
+  },
+  "time": { "from": "now-3h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "MASC Keeper Turn FSM",
+  "uid": "masc-keeper-turn-fsm",
+  "version": 1,
+  "weekStart": ""
+}

@@ -15,6 +15,7 @@ type failure_reason =
       primary_error : string;
       fallback_path : string option;
     }
+  | Failure_turn_livelock_blocked of { reason : string }
   | Failure_runtime_error of string
   | Failure_unexpected_exception of {
       exn : string;
@@ -44,6 +45,7 @@ let failure_reason_label = function
   | Failure_provider_error _ -> "provider_error"
   | Failure_tool_contract_violation _ -> "tool_contract_violation"
   | Failure_receipt_lost _ -> "receipt_lost"
+  | Failure_turn_livelock_blocked _ -> "turn_livelock_blocked"
   | Failure_runtime_error _ -> "runtime_error"
   | Failure_unexpected_exception _ -> "unexpected_exception"
 
@@ -77,6 +79,8 @@ let pp_failure_reason fmt = function
       Format.fprintf fmt "receipt_lost(err=%s,fallback=%s)"
         primary_error
         (Option.value fallback_path ~default:"-")
+  | Failure_turn_livelock_blocked { reason } ->
+      Format.fprintf fmt "turn_livelock_blocked(%s)" reason
   | Failure_runtime_error msg ->
       Format.fprintf fmt "runtime_error(%s)" msg
   | Failure_unexpected_exception { exn; _ } ->

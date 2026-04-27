@@ -445,25 +445,47 @@ let cascade_outcome_to_string = function
   | `Failure -> "failure"
   | `Rejected -> "rejected"
 
-let cascade_audit_json ~now ~cascade_name ~observation ~outcome =
+(* Promotes the most-recent fallback event reason as a top-level field for
+   first-class aggregation/alerting (issue #11081).  Last (not first) event
+   is chosen because for terminal Failure/Rejected outcomes the final event's
+   reason is the actual cause of exhaustion; the first event reflects only
+   the initial fallback trigger.  Empty list -> null. *)
+let top_level_reason_of_observation (observation : cascade_observation option) =
+  match observation with
+  | None -> `Null
+  | Some obs ->
+      (match List.rev obs.fallback_events with
+      | last :: _ -> `String last.reason
+      | [] -> `Null)
+
+let keeper_name_to_json keeper_name =
+  match keeper_name with
+  | Some name when String.trim name <> "" -> `String name
+  | _ -> `Null
+
+let cascade_audit_json ~now ~keeper_name ~cascade_name ~observation ~outcome =
   `Assoc
     [
       ("ts", `Float now);
+      ("keeper_name", keeper_name_to_json keeper_name);
       ("cascade_name", `String cascade_name);
       ("outcome", `String (cascade_outcome_to_string outcome));
+      ("top_level_reason", top_level_reason_of_observation observation);
       ( "observation",
         match observation with
         | Some obs -> cascade_observation_to_json obs
         | None -> `Null );
     ]
 
-let record_cascade_audit store_opt ~now ~cascade_name ~observation ~outcome =
+let record_cascade_audit store_opt ~now ~keeper_name ~cascade_name ~observation
+    ~outcome =
   match store_opt with
   | None -> ()
   | Some store ->
       (try
          Dated_jsonl.append store
-           (cascade_audit_json ~now ~cascade_name ~observation ~outcome)
+           (cascade_audit_json ~now ~keeper_name ~cascade_name ~observation
+              ~outcome)
        with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->
@@ -500,6 +522,7 @@ let attempt_model_display (attempt : cascade_attempt) =
 
 type msg =
   | Record_cascade of {
+      keeper_name : string option;
       cascade_name : string;
       observation : cascade_observation option;
       outcome : [ `Success | `Failure | `Rejected ];
@@ -515,7 +538,7 @@ type state = {
 
 let stream = Eio.Stream.create 1024
 
-let handle_record state ~now ~cascade_name ~observation ~outcome =
+let handle_record state ~now ~keeper_name ~cascade_name ~observation ~outcome =
   let counters = state.counters in
   let counter, counters, evicted =
     match StringMap.find_opt cascade_name counters with
@@ -576,7 +599,8 @@ let handle_record state ~now ~cascade_name ~observation ~outcome =
         cascade_max_keys)
     evicted;
   let audit_store_next = get_cascade_audit_store state.audit_store in
-  record_cascade_audit audit_store_next ~now ~cascade_name ~observation ~outcome;
+  record_cascade_audit audit_store_next ~now ~keeper_name ~cascade_name
+    ~observation ~outcome;
   { counters = StringMap.add cascade_name counter counters; audit_store = audit_store_next }
 
 let handle_get_metrics state p =
@@ -632,8 +656,10 @@ let handle_get_metrics state p =
 let run_actor () =
   let rec loop state =
     match Eio.Stream.take stream with
-    | Record_cascade { cascade_name; observation; outcome; now } ->
-        loop (handle_record state ~now ~cascade_name ~observation ~outcome)
+    | Record_cascade { keeper_name; cascade_name; observation; outcome; now } ->
+        loop
+          (handle_record state ~now ~keeper_name ~cascade_name ~observation
+             ~outcome)
     | Get_metrics_json p ->
         handle_get_metrics state p;
         loop state
@@ -645,9 +671,10 @@ let run_actor () =
 let start_actor_if_needed ~sw =
   Eio.Fiber.fork ~sw run_actor
 
-let record_cascade ~observation ~cascade_name ~outcome =
+let record_cascade ?keeper_name ~observation ~cascade_name ~outcome () =
   let now = Time_compat.now () in
-  Eio.Stream.add stream (Record_cascade { cascade_name; observation; outcome; now })
+  Eio.Stream.add stream
+    (Record_cascade { keeper_name; cascade_name; observation; outcome; now })
 
 let cascade_metrics_json () =
   let p, u = Eio.Promise.create () in

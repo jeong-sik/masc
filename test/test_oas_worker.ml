@@ -513,6 +513,7 @@ let test_cascade_metrics_concurrent_recording () =
                    ~cascade_name:"concurrent-cascade"
                    ~observation:None
                    ~outcome:`Success
+                   ()
                done));
       match
         find_cascade_metric_entry "concurrent-cascade"
@@ -536,30 +537,35 @@ let test_cascade_metrics_evicts_lowest_call_key () =
       Masc_mcp.Oas_worker_cascade.record_cascade
         ~cascade_name:"victim-key"
         ~observation:None
-        ~outcome:`Success;
+        ~outcome:`Success
+        ();
       for i = 1 to 254 do
         let name = Printf.sprintf "stable-%03d" i in
         Masc_mcp.Oas_worker_cascade.record_cascade
           ~cascade_name:name
           ~observation:None
-          ~outcome:`Success;
+          ~outcome:`Success
+          ();
         Masc_mcp.Oas_worker_cascade.record_cascade
           ~cascade_name:name
           ~observation:None
           ~outcome:`Success
+          ()
       done;
       for _ = 1 to 3 do
         Masc_mcp.Oas_worker_cascade.record_cascade
           ~cascade_name:"hot-key"
           ~observation:None
           ~outcome:`Success
+          ()
       done;
       let before = Yojson.Safe.Util.to_list (Oas_worker.cascade_metrics_json ()) in
       Alcotest.(check int) "table capped before admit" 256 (List.length before);
       Masc_mcp.Oas_worker_cascade.record_cascade
         ~cascade_name:"new-key"
         ~observation:None
-        ~outcome:`Success;
+        ~outcome:`Success
+        ();
       let after_json = Oas_worker.cascade_metrics_json () in
       let after = Yojson.Safe.Util.to_list after_json in
       Alcotest.(check int) "table stays capped" 256 (List.length after);
@@ -630,9 +636,11 @@ let test_cascade_audit_persists_observation () =
         }
       in
       Masc_mcp.Oas_worker_cascade.record_cascade
+        ~keeper_name:"keeper-glm-agent-test"
         ~cascade_name:"audit-cascade"
         ~observation:(Some observation)
-        ~outcome:`Failure;
+        ~outcome:`Failure
+        ();
       let store =
         Dated_jsonl.create
           ~base_dir:(Filename.concat base ".masc/cascade_audit")
@@ -642,6 +650,12 @@ let test_cascade_audit_persists_observation () =
       | [ json ] ->
           Alcotest.(check string) "cascade name persisted" "audit-cascade"
             Yojson.Safe.Util.(json |> member "cascade_name" |> to_string);
+          Alcotest.(check string) "keeper_name persisted (#11081)"
+            "keeper-glm-agent-test"
+            Yojson.Safe.Util.(json |> member "keeper_name" |> to_string);
+          Alcotest.(check string) "top_level_reason promoted (#11081)"
+            "HTTP 503"
+            Yojson.Safe.Util.(json |> member "top_level_reason" |> to_string);
           Alcotest.(check string) "outcome persisted" "failure"
             Yojson.Safe.Util.(json |> member "outcome" |> to_string);
           Alcotest.(check string) "selected model persisted"

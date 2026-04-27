@@ -1471,7 +1471,8 @@ let run_named
           ?strategy:!cascade_strategy_name_ref ~configured_labels
           ~candidate_cfgs ~selected_model_raw:None ~capture ()
       in
-      Oas_worker_cascade.record_cascade ~cascade_name ~outcome:`Failure ~observation:(Some observation);
+      Oas_worker_cascade.record_cascade ~keeper_name ~cascade_name
+        ~outcome:`Failure ~observation:(Some observation) ();
       let terminal_error =
         match last_err with
         | Some (Llm_provider.Http_client.NetworkError { message; _ })
@@ -1529,7 +1530,8 @@ let run_named
             ~capture ()
         in
         let result = { result with cascade_observation = Some observation } in
-        Oas_worker_cascade.record_cascade ~cascade_name ~outcome:`Success ~observation:(Some observation);
+        Oas_worker_cascade.record_cascade ~keeper_name ~cascade_name
+          ~outcome:`Success ~observation:(Some observation) ();
         on_success ~provider_key:provider_cfg.model_id;
         Ok result
       | Ok result ->
@@ -1557,7 +1559,8 @@ let run_named
                ~capture ()
            in
            let result = { result with cascade_observation = Some observation } in
-           Oas_worker_cascade.record_cascade ~cascade_name ~outcome:`Success ~observation:(Some observation);
+           Oas_worker_cascade.record_cascade ~keeper_name ~cascade_name
+          ~outcome:`Success ~observation:(Some observation) ();
            on_success ~provider_key:provider_cfg.model_id;
            Ok result
          | Cascade_fsm.Try_next { last_err = new_err } ->
@@ -1575,7 +1578,8 @@ let run_named
                ~candidate_cfgs ~selected_model_raw:(Some result.response.model)
                ~capture ()
            in
-           Oas_worker_cascade.record_cascade ~cascade_name ~outcome:`Rejected ~observation:(Some observation);
+           Oas_worker_cascade.record_cascade ~keeper_name ~cascade_name
+             ~outcome:`Rejected ~observation:(Some observation) ();
            Log.Misc.error "cascade %s exhausted: all tiers rejected by accept predicate (last model=%s, reason=%s)"
              cascade_name result.response.model reason;
            Error
@@ -1595,7 +1599,8 @@ let run_named
                ~candidate_cfgs ~selected_model_raw:(Some resp.model) ~capture ()
            in
            let result = { result with cascade_observation = Some observation } in
-           Oas_worker_cascade.record_cascade ~cascade_name ~outcome:`Success ~observation:(Some observation);
+           Oas_worker_cascade.record_cascade ~keeper_name ~cascade_name
+          ~outcome:`Success ~observation:(Some observation) ();
            on_success ~provider_key:provider_cfg.model_id;
            Ok result)
       | Error sdk_err ->
@@ -1716,7 +1721,8 @@ let run_named
                   ?strategy:!cascade_strategy_name_ref ~configured_labels
                   ~candidate_cfgs ~selected_model_raw:None ~capture ()
               in
-              Oas_worker_cascade.record_cascade ~cascade_name ~outcome:`Failure ~observation:(Some observation);
+              Oas_worker_cascade.record_cascade ~keeper_name ~cascade_name
+        ~outcome:`Failure ~observation:(Some observation) ();
               Log.Misc.error "cascade %s exhausted: all tiers failed (last model=%s, error=%s)"
                 cascade_name provider_cfg.model_id (Oas.Error.to_string sdk_err);
               Error sdk_err
@@ -1728,7 +1734,8 @@ let run_named
                ?strategy:!cascade_strategy_name_ref ~configured_labels
                ~candidate_cfgs ~selected_model_raw:None ~capture ()
            in
-           Oas_worker_cascade.record_cascade ~cascade_name ~outcome:`Failure ~observation:(Some observation);
+           Oas_worker_cascade.record_cascade ~keeper_name ~cascade_name
+        ~outcome:`Failure ~observation:(Some observation) ();
            Log.Misc.error "cascade %s: non-cascadable error from %s: %s"
              cascade_name provider_cfg.model_id (Oas.Error.to_string sdk_err);
            Error sdk_err))
@@ -1850,8 +1857,8 @@ let run_named
         ?strategy:!cascade_strategy_name_ref ~configured_labels
         ~candidate_cfgs ~selected_model_raw:None ~capture ()
     in
-    Oas_worker_cascade.record_cascade ~cascade_name ~outcome:`Failure
-      ~observation:(Some observation);
+    Oas_worker_cascade.record_cascade ~keeper_name ~cascade_name
+      ~outcome:`Failure ~observation:(Some observation) ();
     Error
       (sdk_error_of_masc_internal_error
          (Cascade_exhausted { cascade_name; reason = Keeper_types.Candidates_filtered_after_cycles }))

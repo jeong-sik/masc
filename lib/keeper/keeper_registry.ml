@@ -36,6 +36,13 @@ type failure_reason =
   | Heartbeat_consecutive_failures of int
   | Turn_consecutive_failures of int
   | Stale_turn_timeout of float
+  | Stale_termination_storm of { count : int }
+      (** #10765 Phase 2: latched when [record_stale_termination] returns a
+          window count >= [escalation_threshold]. The supervisor's
+          [`Crashed] branch checks this variant and skips [to_restart],
+          persisting [meta.paused = true] instead so an operator must
+          investigate the underlying cascade/provider/fd issue before
+          resuming the keeper. *)
   | Ambiguous_partial_commit of ambiguous_partial_commit
   | Fiber_unresolved
   | Exception of string
@@ -51,6 +58,8 @@ let failure_reason_to_string = function
       Printf.sprintf "turn_consecutive_failures(%d)" n
   | Stale_turn_timeout sec ->
       Printf.sprintf "stale_turn_timeout(%.0fs)" sec
+  | Stale_termination_storm { count } ->
+      Printf.sprintf "stale_termination_storm(count=%d)" count
   | Ambiguous_partial_commit { kind; detail } ->
       Printf.sprintf "ambiguous_partial_commit(%s:%s)"
         (ambiguous_partial_commit_kind_to_string kind)
@@ -71,6 +80,7 @@ let failure_reason_cohort_key = function
   | Some (Heartbeat_consecutive_failures _) -> "heartbeat_failures"
   | Some (Turn_consecutive_failures _) -> "turn_failures"
   | Some (Stale_turn_timeout _) -> "stale_turn_timeout"
+  | Some (Stale_termination_storm _) -> "stale_termination_storm"
   | Some (Ambiguous_partial_commit _) -> "ambiguous_partial_commit"
   | Some Fiber_unresolved -> "fiber_unresolved"
   | Some (Exception _) -> "exception"

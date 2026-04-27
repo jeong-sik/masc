@@ -297,7 +297,7 @@ let keeper_entries =
 
 let keeper_execution_entries =
   [
-    entry ~default:"0.5" "MASC_KEEPER_COMPACT_RATIO"
+    entry ~default:"0.85" "MASC_KEEPER_COMPACT_RATIO"
       "Context compaction trigger ratio";
     entry ~default:"12" "MASC_KEEPER_COMPACT_MAX_MESSAGES"
       "Max messages before compaction";

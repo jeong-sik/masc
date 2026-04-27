@@ -23,7 +23,8 @@ import { formatElapsedCompact, formatTimeAgoEn } from '../lib/format-time'
 import { ErrorState } from './common/feedback-state'
 import { ConnectorOverviewSkeleton } from './connector-overview-skeleton'
 import { lastEvent } from '../sse'
-import { StatCard } from './common/stat-card'
+import { KpiCell } from './kpi-cell'
+import { KpiStrip } from './kpi-strip'
 import { ActionButton } from './common/button'
 import { TextInput } from './common/input'
 import { showToast } from './common/toast'
@@ -1519,11 +1520,13 @@ function GateAnalyticsSection({
           `
         : html`
             <div>
-              <div class="mb-3 grid grid-cols-4 gap-2 max-[720px]:grid-cols-2">
-                <${StatCard} label="메시지" value=${gate.total_messages} />
-                <${StatCard} label="성공" value=${gate.total_success} />
-                <${StatCard} label="오류" value=${gate.total_errors} />
-                <${StatCard} label="중복 제거 키" value=${gate.dedup_table_size} />
+              <div class="mb-3">
+                <${KpiStrip} ariaLabel="connector gate 통계" cols=${4}>
+                  <${KpiCell} variant="stacked" label="메시지" value=${gate.total_messages} />
+                  <${KpiCell} variant="stacked" label="성공" value=${gate.total_success} />
+                  <${KpiCell} variant="stacked" label="오류" value=${gate.total_errors} />
+                  <${KpiCell} variant="stacked" label="중복 제거 키" value=${gate.dedup_table_size} />
+                <//>
               </div>
 
               <div class="mb-4 grid grid-cols-2 gap-2 text-2xs text-[var(--color-fg-disabled)] max-[720px]:grid-cols-1">

@@ -254,8 +254,11 @@ describe('HarnessHealth', () => {
     expect(mermaidSource(container)).toContain('debounced reload')
 
     const markup = container.innerHTML
-    expect(markup).toContain('text-[var(--color-accent-fg)]')
-    expect(markup).toContain('bg-[var(--ok-12)]')
+    // Shared theme tokens reach the markup. KpiCell (post-StatCard swap)
+    // emits `--color-fg-primary` via inline style; the rest of the
+    // hierarchy still wears Tailwind theme-token utilities.
+    expect(markup).toContain('var(--color-fg-primary)')
+    expect(markup).toContain('var(--color-')
     expect(markup).not.toContain('bg-slate-800')
     expect(markup).not.toContain('bg-slate-700')
     expect(markup).not.toContain('text-slate-400')

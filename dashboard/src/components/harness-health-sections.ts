@@ -232,8 +232,6 @@ export function StatusPill({ status }: { status: RailStatus }) {
   `
 }
 
-export { StatCard } from './common/stat-card'
-
 export function EmptySignal({ text }: { text: string }) {
   return html`
     <div class="rounded border border-dashed border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-sm text-[var(--color-fg-disabled)]">

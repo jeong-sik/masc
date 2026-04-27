@@ -4,10 +4,11 @@ import { createAsyncResource, type AsyncResource } from '../lib/async-state'
 import { get } from '../api/core'
 import { AsyncContainer } from './common/async-container'
 import { Card } from './common/card'
-import { StatCard } from './common/stat-card'
 import { JsonViewerCard } from './common/json-viewer'
 import { EmptyState } from './common/empty-state'
 import { KeeperBadge } from './keeper-badge'
+import { KpiCell } from './kpi-cell'
+import { KpiStrip } from './kpi-strip'
 import { formatTimeAgo } from '../lib/format-time'
 import {
   asBoolean,
@@ -257,13 +258,15 @@ function KeeperCard({ item }: { item: KeeperItem }) {
             `
             : null}
         </div>
-        <div class="grid grid-cols-2 gap-2 text-xs lg:min-w-[220px]">
-          <${StatCard} label="score" value=${item.score.toFixed(1)} />
-          <${StatCard} label="approvals" value=${item.approval_pending_count} />
-          <${StatCard} label="turns" value=${item.total_turns} />
-          <${StatCard} label="activity" value=${item.recent_activity_count} />
-          <${StatCard} label="history" value=${item.trace_history_count} />
-          <${StatCard} label="task" value=${item.current_task_id ?? 'none'} />
+        <div class="text-xs lg:min-w-[220px]">
+          <${KpiStrip} ariaLabel="domain 통계" cols=${2}>
+            <${KpiCell} variant="stacked" label="score" value=${item.score.toFixed(1)} />
+            <${KpiCell} variant="stacked" label="approvals" value=${item.approval_pending_count} />
+            <${KpiCell} variant="stacked" label="turns" value=${item.total_turns} />
+            <${KpiCell} variant="stacked" label="activity" value=${item.recent_activity_count} />
+            <${KpiCell} variant="stacked" label="history" value=${item.trace_history_count} />
+            <${KpiCell} variant="stacked" label="task" value=${item.current_task_id ?? 'none'} />
+          <//>
         </div>
       </div>
     </div>
@@ -364,14 +367,14 @@ export function SafeAutonomyPanel() {
                       generated ${data.generated_at ? formatTimeAgo(data.generated_at) : '정보 없음'}
                     </div>
                   </div>
-                  <div class="grid grid-cols-2 gap-2 xl:grid-cols-4">
-                    <${StatCard} label="keepers" value=${data.summary.keeper_count} />
-                    <${StatCard} label="active goals" value=${data.summary.active_goal_count} />
-                    <${StatCard} label="findings" value=${data.summary.findings_total} />
-                    <${StatCard} label="human queue" value=${data.summary.human_action_required_count} />
-                    <${StatCard} label="with task" value=${data.summary.keepers_with_current_task} />
-                    <${StatCard} label="approval depth" value=${data.summary.approval_queue_depth} />
-                  </div>
+                  <${KpiStrip} ariaLabel="safe-autonomy 요약" cols=${4}>
+                    <${KpiCell} variant="stacked" label="keepers" value=${data.summary.keeper_count} />
+                    <${KpiCell} variant="stacked" label="active goals" value=${data.summary.active_goal_count} />
+                    <${KpiCell} variant="stacked" label="findings" value=${data.summary.findings_total} />
+                    <${KpiCell} variant="stacked" label="human queue" value=${data.summary.human_action_required_count} />
+                    <${KpiCell} variant="stacked" label="with task" value=${data.summary.keepers_with_current_task} />
+                    <${KpiCell} variant="stacked" label="approval depth" value=${data.summary.approval_queue_depth} />
+                  <//>
                 </div>
               </div>
 

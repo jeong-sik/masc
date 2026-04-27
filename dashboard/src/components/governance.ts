@@ -102,7 +102,7 @@ function GovernanceSummaryStrip() {
     <div class="mb-2.5 flex items-center justify-between gap-3 px-0.5">
       <div class="flex items-center gap-3 min-w-0">
         <h2 class="text-lg font-bold text-text-strong tracking-wide">실시간 판정</h2>
-        <span class="rounded border border-white/5 bg-[var(--white-3)] px-2 py-0.5 text-2xs font-medium text-text-muted">
+        <span class="rounded border border-[var(--white-5)] bg-[var(--white-3)] px-2 py-0.5 text-2xs font-medium text-text-muted">
           ${judgeOnlyLabel}
         </span>
       </div>
@@ -170,7 +170,7 @@ function JudgeStatusBar() {
     ? 'text-warn'
     : 'text-bad/80'
   return html`
-    <div class="mb-4 flex items-center gap-3 rounded border border-white/5 bg-[var(--white-3)] px-3.5 py-2 text-xs" data-testid="judge-status">
+    <div class="mb-4 flex items-center gap-3 rounded border border-[var(--white-5)] bg-[var(--white-3)] px-3.5 py-2 text-xs" data-testid="judge-status">
       <span class="flex items-center gap-1.5">
         <${StatusDot} size="sm" class=${dotClass} />
         <span class="font-medium text-text-muted">평가 모델 ${label}</span>
@@ -309,7 +309,7 @@ export function approvalRiskToneClass(riskLevel: string): string {
   if (normalized === 'critical') return 'border-bad/30 bg-bad/10 text-bad'
   if (normalized === 'high') return 'border-warn/30 bg-warn/10 text-warn'
   if (normalized === 'medium') return 'border-accent/30 bg-[var(--accent-10)] text-accent'
-  return 'border-white/10 bg-[var(--white-3)] text-text-muted'
+  return 'border-[var(--white-10)] bg-[var(--white-3)] text-text-muted'
 }
 
 function approvalDispositionToneClass(disposition?: string | null): string {
@@ -317,7 +317,7 @@ function approvalDispositionToneClass(disposition?: string | null): string {
   if (normalized === 'alert') return 'border-bad/30 bg-bad/10 text-bad'
   if (normalized === 'pause') return 'border-warn/30 bg-warn/10 text-warn'
   if (normalized === 'pass') return 'border-ok/30 bg-ok/10 text-ok'
-  return 'border-white/10 bg-[var(--white-3)] text-text-muted'
+  return 'border-[var(--white-10)] bg-[var(--white-3)] text-text-muted'
 }
 
 const RISK_RANK: Record<string, number> = {
@@ -400,7 +400,7 @@ function KeeperApprovalEmptyState() {
     ? 'border-warn/30 bg-warn/10 text-warn'
     : ctx.tone === 'ok'
       ? 'border-accent/20 bg-[var(--accent-10)] text-accent'
-      : 'border-white/10 bg-white/5 text-text-muted'
+      : 'border-[var(--white-10)] bg-white/5 text-text-muted'
   return html`
     <div data-testid="keeper-hitl-empty">
       <${EmptyState} message=${ctx.primary} compact />
@@ -491,7 +491,7 @@ function KeeperApprovalQueueSection() {
     ? (maxRisk === 'critical' || maxRisk === 'high'
         ? 'border-bad/40 bg-bad/15 text-bad text-sm px-3 py-1 font-extrabold'
         : 'border-warn/40 bg-warn/15 text-warn text-sm px-3 py-1 font-extrabold')
-    : 'border-white/10 bg-[var(--white-3)] text-text-muted text-2xs px-2 py-0.5 font-bold'
+    : 'border-[var(--white-10)] bg-[var(--white-3)] text-text-muted text-2xs px-2 py-0.5 font-bold'
   return html`
     <div id="keeper-hitl-approval" data-testid="keeper-hitl-approval">
     <${Card} title="Keeper HITL 승인 대기" class="section mb-5" variant="compact">
@@ -531,7 +531,7 @@ function KeeperApprovalQueueSection() {
                 return html`
                   <div class="rounded border border-card-border bg-card/34 p-4 shadow-sm" data-testid="governance-approval-item">
                     <div class="flex flex-wrap items-start gap-2.5">
-                      <span class="inline-flex items-center rounded border border-white/10 bg-[var(--white-3)] px-2 py-0.5 text-3xs font-bold text-text-muted">
+                      <span class="inline-flex items-center rounded border border-[var(--white-10)] bg-[var(--white-3)] px-2 py-0.5 text-3xs font-bold text-text-muted">
                         keeper ${item.keeper_name}
                       </span>
                       <span class="inline-flex items-center rounded border border-accent/20 bg-[var(--accent-10)] px-2 py-0.5 text-3xs font-bold text-accent">
@@ -549,15 +549,15 @@ function KeeperApprovalQueueSection() {
                       ? html`<div class="mt-2 text-xs leading-relaxed text-text-muted break-words">${item.input_preview}</div>`
                       : null}
                     <div class="mt-2 flex flex-wrap gap-1.5 text-2xs">
-                      ${item.task_id ? html`<span class="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-text-muted">task ${item.task_id}</span>` : null}
-                      ${item.goal_id ? html`<span class="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-text-muted">goal ${item.goal_id}</span>` : null}
+                      ${item.task_id ? html`<span class="rounded border border-[var(--white-10)] bg-white/5 px-1.5 py-0.5 text-text-muted">task ${item.task_id}</span>` : null}
+                      ${item.goal_id ? html`<span class="rounded border border-[var(--white-10)] bg-white/5 px-1.5 py-0.5 text-text-muted">goal ${item.goal_id}</span>` : null}
                       ${item.runtime_contract?.sandbox_profile
-                        ? html`<span class="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-text-muted">
+                        ? html`<span class="rounded border border-[var(--white-10)] bg-white/5 px-1.5 py-0.5 text-text-muted">
                           sandbox ${item.runtime_contract.sandbox_profile}${item.runtime_contract.backend ? ` / ${item.runtime_contract.backend}` : ''}
                         </span>`
                         : null}
                       ${item.selected_model
-                        ? html`<span class="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-text-muted font-mono">${item.selected_model}</span>`
+                        ? html`<span class="rounded border border-[var(--white-10)] bg-white/5 px-1.5 py-0.5 text-text-muted font-mono">${item.selected_model}</span>`
                         : null}
                       ${item.disposition
                         ? html`<span class="rounded border px-1.5 py-0.5 font-bold ${approvalDispositionToneClass(item.disposition)}">
@@ -624,7 +624,7 @@ function ApprovalRulesSection() {
                 return html`
                   <div class="rounded border border-card-border bg-card/34 p-4 shadow-sm" data-testid="governance-approval-rule">
                     <div class="flex flex-wrap items-start gap-2.5">
-                      <span class="inline-flex items-center rounded border border-white/10 bg-[var(--white-3)] px-2 py-0.5 text-3xs font-bold text-text-muted">
+                      <span class="inline-flex items-center rounded border border-[var(--white-10)] bg-[var(--white-3)] px-2 py-0.5 text-3xs font-bold text-text-muted">
                         keeper ${rule.keeper_name}
                       </span>
                       <span class="inline-flex items-center rounded border border-accent/20 bg-[var(--accent-10)] px-2 py-0.5 text-3xs font-bold text-accent">
@@ -637,10 +637,10 @@ function ApprovalRulesSection() {
                       </span>
                     </div>
                     <div class="mt-2 flex flex-wrap gap-1.5 text-2xs">
-                      ${rule.sandbox_profile ? html`<span class="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-text-muted">sandbox ${rule.sandbox_profile}${rule.backend ? ` / ${rule.backend}` : ''}</span>` : null}
-                      ${rule.request_fingerprint_preview ? html`<span class="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-text-muted font-mono">fp ${rule.request_fingerprint_preview}</span>` : null}
-                      ${typeof rule.match_count === 'number' ? html`<span class="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-text-muted">match ${rule.match_count}</span>` : null}
-                      ${rule.source_approval_id ? html`<span class="rounded border border-white/10 bg-white/5 px-1.5 py-0.5 text-text-muted">from ${rule.source_approval_id}</span>` : null}
+                      ${rule.sandbox_profile ? html`<span class="rounded border border-[var(--white-10)] bg-white/5 px-1.5 py-0.5 text-text-muted">sandbox ${rule.sandbox_profile}${rule.backend ? ` / ${rule.backend}` : ''}</span>` : null}
+                      ${rule.request_fingerprint_preview ? html`<span class="rounded border border-[var(--white-10)] bg-white/5 px-1.5 py-0.5 text-text-muted font-mono">fp ${rule.request_fingerprint_preview}</span>` : null}
+                      ${typeof rule.match_count === 'number' ? html`<span class="rounded border border-[var(--white-10)] bg-white/5 px-1.5 py-0.5 text-text-muted">match ${rule.match_count}</span>` : null}
+                      ${rule.source_approval_id ? html`<span class="rounded border border-[var(--white-10)] bg-white/5 px-1.5 py-0.5 text-text-muted">from ${rule.source_approval_id}</span>` : null}
                     </div>
                     <div class="mt-3 flex justify-end">
                       <${ActionButton}

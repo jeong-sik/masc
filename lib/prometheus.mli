@@ -263,6 +263,26 @@ val metric_keeper_invariant_violations : string
     a fleet of any size). *)
 val metric_keeper_fsm_edge_transitions : string
 
+(** Step 4 (bloodflow plan): typed turn-FSM transition counter.
+
+    Bumped once per [Keeper_turn_fsm.emit_transition] call so
+    operators can chart turn-state distribution per keeper.
+    Labels:
+    - [from] — previous [turn_state_label] ("-" if absent)
+    - [to]   — new [turn_state_label]
+    - [keeper] — keeper name
+
+    Distinct from [metric_keeper_fsm_edge_transitions], which
+    encodes TLA+ edge names ("ksm_to_kcl_routing", etc.) as a
+    single [edge] label.  This counter exposes the typed ADT
+    states directly so downstream PromQL can filter on
+    individual states (e.g.
+    [count_over_time(masc_keeper_turn_fsm_transitions_total{to=~"failed:.*"}[5m])]).
+
+    Cardinality upper bound: 10 turn_state labels × 10 prev × ~16
+    keepers = ≤ 1600 series; reachable subset is much smaller. *)
+val metric_keeper_turn_fsm_transitions : string
+
 (** PR-J: post-turn lifecycle callbacks raised exceptions that were
     silently swallowed before this counter existed. Labels: [callback]
     with values:

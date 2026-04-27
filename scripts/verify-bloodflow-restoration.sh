@@ -126,25 +126,52 @@ echo "F3 empty_tool_universe blocker events:   $f3"
 echo "   (broken down by lane in dashboard via labels turn_lane / fallback_used)"
 
 # ----- F4: contains_substring SSOT --------------------------------------
-# Static check: scan lib/keeper for [contains_substring].  After Phase B
-# PR-5 main, this should be 0.  Currently 1 (the SSOT in
-# Keeper_failure_circuit_breaker.classify_error).
-f4_hits=$(grep -rln 'contains_substring' "$ROOT/lib/keeper/" 2>/dev/null | wc -l | tr -d ' ')
+# Static check: count call sites of [String_util.contains_substring] only
+# (function calls, not the [_ci] sibling and not doc-comments referencing
+# the symbol by name).  Pattern requires a non-word char after
+# [contains_substring] so [contains_substring_ci] does not match.
+# Phase A F4 collapsed only the SSOT consumer; PR-5 main (the producer
+# refactor) is what drives this count to 0.
+f4_files=$(grep -rlE 'String_util\.contains_substring[^_a-zA-Z]' \
+  "$ROOT/lib/keeper/" 2>/dev/null | wc -l | tr -d ' ')
 echo
-echo "F4 contains_substring sites in lib/keeper/: $f4_hits"
-if [ "$f4_hits" -le 1 ]; then
+echo "F4 contains_substring caller files in lib/keeper/: $f4_files"
+if [ "$f4_files" -eq 0 ]; then
+  echo "  -> Phase B PR-5 main complete (target 0 reached)."
+elif [ "$f4_files" -le 1 ]; then
   echo "  -> Phase A F4 SSOT collapse holds (target after PR-5: 0)."
 else
-  echo "  -> Phase A F4 SSOT regression — investigate."
+  echo "  -> Phase B PR-5 main scope: $f4_files files still call SSOT."
 fi
 
 # ----- F5: gh-api token-aware + strip_keeper_prefix helpers in use -------
-# Static check: legacy literal patterns should be 0 outside SSOT.
-prefix_literals=$(grep -rln 'String\.sub trimmed 0 [0-9]\+ = "keeper-"' "$ROOT/lib/keeper/" 2>/dev/null | wc -l | tr -d ' ')
-api_prefix=$(grep -rln 'is_prefix cmd_lower ~prefix:"api"' "$ROOT/lib/keeper/" 2>/dev/null | wc -l | tr -d ' ')
+# Static check: legacy literal slice patterns.  We count files that
+# contain the slice as **executable code**, not as prose inside a
+# doc-comment reference (e.g. [String.sub trimmed 0 7 = "keeper-"] in a
+# Phase A F5 comment that documents the now-collapsed legacy pattern).
+# Heuristic: drop lines starting with a continuation `*` (multi-line
+# OCaml comment body) before counting unique files.
+count_files_excluding_doc_prose() {
+  local pattern="$1"
+  local dir="$2"
+  # Drop two false-positive forms before counting unique files:
+  # 1. multi-line OCaml comment continuation (line starts with ` * `)
+  # 2. doc-comment bracketed pseudo-code references like `[String.sub ...]`
+  #    (the bracketed form never appears in real OCaml code paths since
+  #    OCaml lists do not wrap boolean expressions).
+  grep -rnE "$pattern" "$dir" 2>/dev/null \
+    | grep -vE ':[[:space:]]*\*[[:space:]]+' \
+    | grep -vF '[String.sub' \
+    | grep -vF '[is_prefix' \
+    | cut -d: -f1 | sort -u | wc -l | tr -d ' '
+}
+prefix_literals=$(count_files_excluding_doc_prose \
+  'String\.sub [a-z_]+ 0 [0-9]+ = "keeper-"' "$ROOT/lib/keeper/")
+api_prefix=$(count_files_excluding_doc_prose \
+  'is_prefix [a-z_]+ ~prefix:"api"' "$ROOT/lib/keeper/")
 echo
-echo "F5 legacy keeper- literal slice sites:   $prefix_literals (target 0)"
-echo "   legacy is_prefix \"api\" sites:         $api_prefix (target 0)"
+echo "F5 legacy keeper- literal slice files:   $prefix_literals (target 0)"
+echo "   legacy is_prefix \"api\" files:         $api_prefix (target 0)"
 
 # ----- Composite KPI: mutation_to_passive_ratio --------------------------
 echo

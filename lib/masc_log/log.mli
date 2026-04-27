@@ -74,6 +74,8 @@ module Ring : sig
     source : string;
     legacy_classified : bool;
     module_name : string;
+    keeper_name : string option;
+    turn_id : int option;
     message : string;
     details : Yojson.Safe.t;
   }

@@ -157,6 +157,8 @@ module Ring = struct
     source : string;
     legacy_classified : bool;
     module_name : string;
+    keeper_name : string option;
+    turn_id : int option;
     message : string;
     details : Yojson.Safe.t;
   }
@@ -175,6 +177,8 @@ module Ring = struct
       source = "";
       legacy_classified = false;
       module_name = "";
+      keeper_name = None;
+      turn_id = None;
       message = "";
       details = `Null;
     }
@@ -211,6 +215,14 @@ module Ring = struct
     file_base_dir := dir
 
   let entry_to_json e =
+    let keeper_name_json = match e.keeper_name with
+      | Some s -> `String s
+      | None -> `Null
+    in
+    let turn_id_json = match e.turn_id with
+      | Some i -> `Int i
+      | None -> `Null
+    in
     `Assoc [
       ("seq", `Int e.seq);
       ("ts", `String e.ts);
@@ -220,6 +232,8 @@ module Ring = struct
       ("source", `String e.source);
       ("legacy_classified", `Bool e.legacy_classified);
       ("module", `String e.module_name);
+      ("keeper_name", keeper_name_json);
+      ("turn_id", turn_id_json);
       ("message", `String e.message);
       ("details", e.details);
     ]
@@ -273,9 +287,18 @@ module Ring = struct
            `String raw_level, `String normalized_level,
            `String source, `Bool legacy_classified,
            `String module_name, `String message ->
+             let keeper_name = match member "keeper_name" json with
+               | `String s -> Some s
+               | _ -> None
+             in
+             let turn_id = match member "turn_id" json with
+               | `Int i -> Some i
+               | _ -> None
+             in
              Some {
                seq; ts; level; raw_level; normalized_level;
-               source; legacy_classified; module_name; message;
+               source; legacy_classified; module_name;
+               keeper_name; turn_id; message;
                details = member "details" json;
              }
          | _ -> None)
@@ -358,6 +381,8 @@ module Ring = struct
       ?(source = Structured)
       ?(legacy_classified = false)
       ?(details = `Null)
+      ?keeper_name
+      ?turn_id
       ~normalized_level
       ~module_name
       ~message
@@ -375,6 +400,8 @@ module Ring = struct
         source;
         legacy_classified;
         module_name;
+        keeper_name;
+        turn_id;
         message;
         details;
       } in

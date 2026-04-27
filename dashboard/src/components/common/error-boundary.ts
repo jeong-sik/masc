@@ -39,7 +39,7 @@ export class ErrorBoundary extends Component<Props, State> {
         return this.props.fallback(this.state.error, this.reset)
       }
       return html`
-        <div class="error-card rounded my-3 border border-[var(--color-status-err)]/30 bg-[rgba(10,22,40,0.92)] p-5 flex gap-4 items-start shadow-sm">
+        <div class="error-card rounded my-3 border border-[var(--color-status-err)]/30 bg-[rgba(10,22,40,0.92)] p-5 flex gap-4 items-start shadow-sm" role="alert">
           <div class="shrink-0 text-[var(--color-status-err)] mt-0.5">
             <${AlertOctagon} size=${24} />
           </div>

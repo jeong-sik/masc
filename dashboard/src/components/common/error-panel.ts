@@ -61,7 +61,7 @@ export function ErrorPanel({ onClose }: ErrorPanelProps) {
   }
 
   return html`
-    <div class="absolute right-0 top-full mt-1.5 z-[var(--z-overlay-dropdown,3050)] w-96 max-h-80 overflow-hidden rounded-lg border border-[var(--color-border-default)] bg-[rgba(10,18,34,0.98)] shadow-xl backdrop-blur-xl flex flex-col">
+    <div class="absolute right-0 top-full mt-1.5 z-[var(--z-overlay-dropdown,3050)] w-96 max-h-80 overflow-hidden rounded-lg border border-[var(--color-border-default)] bg-[rgba(10,18,34,0.98)] shadow-xl backdrop-blur-xl flex flex-col" role="alert">
       <div class="flex items-center justify-between px-3 py-2 border-b border-[var(--white-5)] shrink-0">
         <span class="text-xs font-medium text-[var(--color-fg-muted)]">미확인 에러 <span class="text-[var(--color-status-err)]">${items.length}</span>건</span>
         <div class="flex items-center gap-1">

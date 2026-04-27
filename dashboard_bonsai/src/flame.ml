@@ -5,7 +5,7 @@
     inline되어 있었으나 Phase 2 shell 추출에서 공용 모듈로 분리.
 
     재사용 대상: Tools · Sessions · (차후) 도구 호출 분포를 그리고 싶은
-    모든 탭. 색 토큰은 `--t-*` namespace (colors_and_type.css).
+    모든 탭. 색 토큰은 `--t-*` namespace (colors_and_type.generated.css).
 
     CSS는 ppx_css로 scope 되므로 logs_view.ml 내 옛 블록과 클래스 충돌
     없음. *)

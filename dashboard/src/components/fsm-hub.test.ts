@@ -236,7 +236,7 @@ describe('fsm-hub derived state', () => {
     )
 
     expect(result.tone).toBe('info')
-    expect(result.headline).toContain('Compaction currently owns the turn')
+    expect(result.headline).toContain('Compaction 가 현재 턴 소유')
   })
 })
 

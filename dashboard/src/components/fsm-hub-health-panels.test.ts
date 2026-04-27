@@ -137,13 +137,13 @@ describe('invariantDescription', () => {
 
   it('returns default for unknown key', () => {
     expect(invariantDescription('unknown_invariant')).toBe(
-      'Invariant defined by the keeper composite contract.',
+      'keeper composite contract 가 정의한 invariant.',
     )
   })
 
   it('returns default for empty string key', () => {
     expect(invariantDescription('')).toBe(
-      'Invariant defined by the keeper composite contract.',
+      'keeper composite contract 가 정의한 invariant.',
     )
   })
 

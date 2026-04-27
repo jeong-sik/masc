@@ -110,7 +110,7 @@ function CoordinationViolationRow({ violation }: { violation: DashboardCoordinat
         <span class="font-mono text-2xs text-text-strong">${violation.code ?? violation.axis ?? 'coordination'}</span>
         ${violation.axis ? html`<span class="text-3xs text-text-dim">${violation.axis}</span>` : null}
       </div>
-      <div class="mt-1 text-xs leading-relaxed text-text-body">${violation.message ?? 'Coordination invariant needs attention.'}</div>
+      <div class="mt-1 text-xs leading-relaxed text-text-body">${violation.message ?? 'coordination invariant 검토 필요.'}</div>
       <div class="mt-1 truncate text-3xs text-text-dim" title=${refsLabel(violation.refs)}>${refsLabel(violation.refs)}</div>
       ${evidence.length > 0 ? html`
         <ul class="mt-2 grid gap-1">

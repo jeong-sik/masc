@@ -422,7 +422,7 @@ function PromptBlock({
   return html`
     <div class="mt-2">
       <div class="flex items-center justify-between gap-2 mb-1">
-        <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">${title}</div>
+        <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">${title}</div>
         <div class="flex items-center gap-2">
           <span class="text-3xs text-text-dim">${block.key}</span>
           <${PromptSourceBadge} source=${block.source} />
@@ -726,30 +726,30 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
     <${EditTextarea} field="instructions" label="지시사항" rows=${4} />
   ` : html`
     <${SectionHeader} title="프롬프트" />
-    <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-0.5">목표</div>
+    <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)] mb-0.5">목표</div>
     <${LongText} text=${c.prompt.goal} />
     ${c.prompt.short_goal ? html`
-      <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-0.5">단기 목표</div>
+      <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)] mt-2 mb-0.5">단기 목표</div>
       <${LongText} text=${c.prompt.short_goal} />
     ` : null}
     ${c.prompt.mid_goal ? html`
-      <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-0.5">중기 목표</div>
+      <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)] mt-2 mb-0.5">중기 목표</div>
       <${LongText} text=${c.prompt.mid_goal} />
     ` : null}
     ${c.prompt.long_goal ? html`
-      <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-0.5">장기 목표</div>
+      <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)] mt-2 mb-0.5">장기 목표</div>
       <${LongText} text=${c.prompt.long_goal} />
     ` : null}
     ${c.prompt.instructions ? html`
-      <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-0.5">지시사항</div>
+      <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)] mt-2 mb-0.5">지시사항</div>
       <${LongText} text=${c.prompt.instructions} />
     ` : null}
-    <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-3 mb-0.5">시스템 프롬프트 블록</div>
+    <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)] mt-3 mb-0.5">시스템 프롬프트 블록</div>
     <${PromptBlock} title="헌법" block=${c.prompt.system_prompt_blocks.constitution} />
     <${PromptBlock} title="세계관" block=${c.prompt.system_prompt_blocks.world} />
     <${PromptBlock} title="능력" block=${c.prompt.system_prompt_blocks.capabilities} />
     <details class="mt-3">
-      <summary class="cursor-pointer py-2 px-3 text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)] list-none select-none rounded hover:bg-[var(--white-3)] transition-colors">컴파일된 시스템 프롬프트 보기</summary>
+      <summary class="cursor-pointer py-2 px-3 text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)] list-none select-none rounded hover:bg-[var(--white-3)] transition-colors">컴파일된 시스템 프롬프트 보기</summary>
       <${LongText} text=${c.prompt.effective_system_prompt} truncateAt=${null} />
     </details>
   `
@@ -823,7 +823,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
                   <option value=${profileName}>${profileName}</option>
                 `)}
               </select>
-              <span class="text-2xs text-[var(--text-dim)]">
+              <span class="text-2xs text-[var(--color-fg-disabled)]">
                 ${cascadeSaving.value
                   ? 'cascade_name 저장 중...'
                   : cascadeState.status === 'loading'
@@ -850,48 +850,48 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
         : null}
       <${ConfigRow} label="catalog source" value=${cascadeCatalogSourceLabel(c)} />
       <div class="flex items-center justify-between py-2 px-3 rounded bg-[var(--white-3)]">
-        <span class="text-xs text-[var(--text-muted)]">라이브 오버라이드</span>
+        <span class="text-xs text-[var(--color-fg-muted)]">라이브 오버라이드</span>
         <${BoolBadge} value=${c.sources.has_live_override} />
       </div>
-      <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-0.5">라이브 메타 경로</div>
+      <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)] mt-2 mb-0.5">라이브 메타 경로</div>
       <${LongText} text=${c.sources.live_meta_path} />
       ${c.sources.default_manifest_path ? html`
-        <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-0.5">기본 매니페스트 경로</div>
+        <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)] mt-2 mb-0.5">기본 매니페스트 경로</div>
         <${LongText} text=${c.sources.default_manifest_path} />
       ` : null}
       ${c.sources.cascade_catalog_source_path ? html`
-        <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-0.5">캐스케이드 카탈로그 출처</div>
+        <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)] mt-2 mb-0.5">캐스케이드 카탈로그 출처</div>
         <${LongText} text=${c.sources.cascade_catalog_source_path} />
       ` : null}
       ${c.sources.cascade_runtime_json_path ? html`
-        <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)] mt-2 mb-0.5">생성된 런타임 JSON</div>
+        <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)] mt-2 mb-0.5">생성된 런타임 JSON</div>
         <${LongText} text=${c.sources.cascade_runtime_json_path} />
       ` : null}
       <div class="flex items-center justify-between py-2 px-3 rounded bg-[var(--white-3)]">
-        <span class="text-xs text-[var(--text-muted)]">cascade.json 직접 수정 가능</span>
+        <span class="text-xs text-[var(--color-fg-muted)]">cascade.json 직접 수정 가능</span>
         <${BoolBadge} value=${c.sources.cascade_runtime_json_editable} />
       </div>
       <div class="mt-1.5">
-        <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">우선순위</div>
+        <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)] mb-1">우선순위</div>
         <${ModelList} models=${c.sources.precedence} />
       </div>
       <div class="mt-1.5">
-        <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">오버라이드 필드</div>
+        <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)] mb-1">오버라이드 필드</div>
         <${ModelList} models=${c.sources.override_fields} />
       </div>
 
       <${SectionHeader} title="실행" />
       <${ConfigRow} label="활성 모델" value=${c.execution.active_model || '--'} />
       <${ConfigRow} label="provider timeout" value=${perProviderTimeoutLabel(c.execution)} />
-      <div class="mb-1.5 rounded border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-2xs leading-relaxed text-[var(--text-muted)]">
+      <div class="mb-1.5 rounded border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-2xs leading-relaxed text-[var(--color-fg-muted)]">
         cascade fallback 중 마지막 provider를 제외한 provider들에만 적용됩니다.
       </div>
       <div class="flex items-center justify-between py-2 px-3 rounded bg-[var(--white-3)]">
-        <span class="text-xs text-[var(--text-muted)]">검증</span>
+        <span class="text-xs text-[var(--color-fg-muted)]">검증</span>
         <${BoolBadge} value=${c.execution.verify} />
       </div>
       <div class="mt-1.5">
-        <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">모델</div>
+        <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)] mb-1">모델</div>
         <${ModelList} models=${c.execution.models} />
       </div>
 
@@ -938,9 +938,9 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
         <div class="py-2 px-3 rounded bg-[var(--white-3)]">
           <div class="flex items-center justify-between mb-1">
             <span class="text-xs text-[var(--text-body)]">allowed_paths</span>
-            <span class="text-3xs text-[var(--text-muted)]">한 줄에 하나씩. 명시 경로만 허용됩니다.</span>
+            <span class="text-3xs text-[var(--color-fg-muted)]">한 줄에 하나씩. 명시 경로만 허용됩니다.</span>
           </div>
-          <textarea aria-label="allowed_paths" class="w-full text-xs font-mono bg-[var(--white-6)] border border-[var(--card-border)] rounded px-2 py-1.5 text-[var(--text-body)] resize-y"
+          <textarea aria-label="allowed_paths" class="w-full text-xs font-mono bg-[var(--white-6)] border border-[var(--color-border-default)] rounded px-2 py-1.5 text-[var(--text-body)] resize-y"
             rows=${3}
             value=${rd.allowed_paths_text}
             placeholder=".masc/keepers/<name>/"
@@ -948,7 +948,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
           ></textarea>
         </div>
         ${(c.effective_allowed_paths ?? []).length > 0 ? html`
-          <div class="py-1.5 px-3 text-3xs text-[var(--text-muted)]">
+          <div class="py-1.5 px-3 text-3xs text-[var(--color-fg-muted)]">
             effective: ${(c.effective_allowed_paths ?? []).join(', ') || '(전체 허용)'}
           </div>
         ` : null}
@@ -978,7 +978,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
         <${ConfigRow} label="config_base_path" value=${c.sandbox_environment.base_path || '--'} />
         <${ConfigRow} label="project_root" value=${c.sandbox_environment.project_root || '--'} />
         <div class="flex items-center justify-between py-2 px-3 rounded bg-[var(--white-3)]">
-          <span class="text-xs text-[var(--text-muted)]">docker_playground</span>
+          <span class="text-xs text-[var(--color-fg-muted)]">docker_playground</span>
           <${BoolBadge} value=${c.sandbox_environment.docker_playground_enabled} />
         </div>
         <${ConfigRow} label="docker_container" value=${c.sandbox_environment.docker_container_name || '--'} />
@@ -989,11 +989,11 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
         <${ConfigRow} label="sandbox_tmpfs_size" value=${c.sandbox_environment.tmpfs_size || '--'} />
         <${ConfigRow} label="sandbox_seccomp_profile" value=${c.sandbox_environment.seccomp_profile || '--'} />
         <div class="flex items-center justify-between py-2 px-3 rounded bg-[var(--white-3)]">
-          <span class="text-xs text-[var(--text-muted)]">require_rootless</span>
+          <span class="text-xs text-[var(--color-fg-muted)]">require_rootless</span>
           <${BoolBadge} value=${c.sandbox_environment.require_rootless} />
         </div>
         <div class="flex items-center justify-between py-2 px-3 rounded bg-[var(--white-3)]">
-          <span class="text-xs text-[var(--text-muted)]">require_userns</span>
+          <span class="text-xs text-[var(--color-fg-muted)]">require_userns</span>
           <${BoolBadge} value=${c.sandbox_environment.require_userns} />
         </div>
         ${c.sandbox_last_error ? html`
@@ -1017,7 +1017,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
           min=${10} max=${3600} step=${10} suffix="s" />
       ` : html`
         <div class="flex items-center justify-between py-2 px-3 rounded bg-[var(--white-3)]">
-          <span class="text-xs text-[var(--text-muted)]">활성</span>
+          <span class="text-xs text-[var(--color-fg-muted)]">활성</span>
           <${BoolBadge} value=${c.proactive.enabled} />
         </div>
         <${ConfigRow} label="유휴 트리거" value=${c.proactive.idle_sec + 's'} />
@@ -1026,21 +1026,21 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
 
       <${SectionHeader} title="런타임" />
       <div class="flex items-center justify-between py-2 px-3 rounded bg-[var(--white-3)]">
-        <span class="text-xs text-[var(--text-muted)]">일시정지</span>
+        <span class="text-xs text-[var(--color-fg-muted)]">일시정지</span>
         <${BoolBadge} value=${c.runtime.paused} />
       </div>
       <div class="flex items-center justify-between py-2 px-3 rounded bg-[var(--white-3)]">
-        <span class="text-xs text-[var(--text-muted)]">자동 부팅 등록</span>
+        <span class="text-xs text-[var(--color-fg-muted)]">자동 부팅 등록</span>
         <${BoolBadge} value=${c.runtime.registered} />
       </div>
       <div class="flex items-center justify-between py-2 px-3 rounded bg-[var(--white-3)]">
-        <span class="text-xs text-[var(--text-muted)]">킵얼라이브 실행</span>
+        <span class="text-xs text-[var(--color-fg-muted)]">킵얼라이브 실행</span>
         <${BoolBadge} value=${c.runtime.keepalive_running} />
       </div>
       <${ConfigRow} label="레지스트리 상태" value=${c.runtime.registry_state || '--'} />
       <${ConfigRow} label="파이버 상태" value=${c.runtime.fiber_health || '--'} />
       <div class="flex items-center justify-between py-2 px-3 rounded bg-[var(--white-3)]">
-        <span class="text-xs text-[var(--text-muted)]">프레즌스 킵얼라이브</span>
+        <span class="text-xs text-[var(--color-fg-muted)]">프레즌스 킵얼라이브</span>
         <${BoolBadge} value=${c.runtime.presence_keepalive} />
       </div>
       <${ConfigRow} label="프레즌스 간격" value=${c.runtime.presence_keepalive_sec + 's'} />
@@ -1049,10 +1049,10 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       <div class="py-2 px-3 rounded border border-card-border/50 bg-card/20 backdrop-blur-sm mb-1.5">
         <div class="flex items-center justify-between gap-3 mb-2">
           <span class="text-xs font-medium text-text-muted">active_goal_ids</span>
-          <span class="text-3xs text-[var(--text-muted)]">${selectedActiveGoalIds.length}개 선택</span>
+          <span class="text-3xs text-[var(--color-fg-muted)]">${selectedActiveGoalIds.length}개 선택</span>
         </div>
         ${goalState.status === 'loading' ? html`
-          <div class="text-2xs text-[var(--text-muted)]" role="status">목표 목록 로딩 중...</div>
+          <div class="text-2xs text-[var(--color-fg-muted)]" role="status">목표 목록 로딩 중...</div>
         ` : goalState.status === 'error' ? html`
           <div class="text-2xs text-[var(--bad)]">${goalState.message}</div>
         ` : goalOptions.length > 0 && rd ? html`
@@ -1068,9 +1068,9 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
                       toggleRuntimeActiveGoal(goal.id, (event.currentTarget as HTMLInputElement).checked)
                     }}
                   />
-                  <span class="min-w-[4.5rem] font-mono text-3xs text-[var(--text-muted)]">${goal.horizon}</span>
+                  <span class="min-w-[4.5rem] font-mono text-3xs text-[var(--color-fg-muted)]">${goal.horizon}</span>
                   <span class="flex-1 truncate">${goal.title}</span>
-                  <span class="font-mono text-3xs text-[var(--text-dim)]">${goal.id}</span>
+                  <span class="font-mono text-3xs text-[var(--color-fg-disabled)]">${goal.id}</span>
                 </label>
               `
             })}
@@ -1078,7 +1078,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
         ` : selectedActiveGoalIds.length > 0 ? html`
           <${ModelList} models=${selectedActiveGoalIds} />
         ` : html`
-          <div class="text-2xs text-[var(--text-muted)]">활성 목표가 연결되어 있지 않습니다.</div>
+          <div class="text-2xs text-[var(--color-fg-muted)]">활성 목표가 연결되어 있지 않습니다.</div>
         `}
         ${unknownSelectedGoalIds.length > 0 ? html`
           <div class="mt-2 text-2xs text-[var(--warn)]">
@@ -1094,12 +1094,12 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       ` : null}
       ${c.coordination.mention_targets.length > 0 ? html`
       <div class="mt-1.5">
-        <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">멘션 대상</div>
+        <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)] mb-1">멘션 대상</div>
         <${ModelList} models=${c.coordination.mention_targets} />
       </div>
       ` : null}
       <div class="mt-1.5">
-        <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-1">참여 네임스페이스</div>
+        <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)] mb-1">참여 네임스페이스</div>
         <${ModelList} models=${c.coordination.joined_room_ids} />
       </div>
 
@@ -1115,7 +1115,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
           min=${0} max=${3600} step=${30} suffix="s" />
       ` : html`
         <div class="flex items-center justify-between py-2 px-3 rounded bg-[var(--white-3)]">
-          <span class="text-xs text-[var(--text-muted)]">자동</span>
+          <span class="text-xs text-[var(--color-fg-muted)]">자동</span>
           <${BoolBadge} value=${c.handoff.auto} />
         </div>
         <${ConfigRow} label="임계값" value=${(c.handoff.threshold * 100).toFixed(0) + '%'} />
@@ -1151,14 +1151,14 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
               placeholder="슬롯 이름 / source / gate 필터"
               aria-label="훅 슬롯 필터"
               onInput=${(e: Event) => { hookFilterQuery.value = (e.target as HTMLInputElement).value }}
-              class="min-w-40 max-w-65 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--text-dim)] focus:outline-none focus:border-[var(--accent)]"
+              class="min-w-40 max-w-65 flex-1 rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-1 text-2xs text-[var(--text-body)] placeholder:text-[var(--color-fg-disabled)] focus:outline-none focus:border-[var(--accent)]"
             />
           </div>
           ${isFiltering && visibleEntries.length === 0 && allEntries.length > 0
-            ? html`<div class="py-4 text-center text-2xs text-[var(--text-dim)]">필터 결과 없음 (${allEntries.length} slots)</div>`
+            ? html`<div class="py-4 text-center text-2xs text-[var(--color-fg-disabled)]">필터 결과 없음 (${allEntries.length} slots)</div>`
             : visibleEntries.map(([name, slot]) => html`
                 <div class="flex items-start gap-2 py-2 px-3 rounded border border-card-border/50 bg-card/20 mb-1.5">
-                  <span class="mt-1 w-2 h-2 rounded-full shrink-0 ${slot.active ? 'bg-[var(--ok)] shadow-[0_0_6px_var(--ok-48)]' : 'bg-[var(--text-dim)]'}" aria-hidden="true"></span>
+                  <span class="mt-1 w-2 h-2 rounded-full shrink-0 ${slot.active ? 'bg-[var(--ok)] shadow-[0_0_6px_var(--ok-48)]' : 'bg-[var(--color-fg-disabled)]'}" aria-hidden="true"></span>
                   <div class="flex-1 min-w-0">
                     <div class="flex justify-between">
                       <span class="text-xs font-semibold text-text-strong">${name}</span>
@@ -1167,7 +1167,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
                     ${(slot.gates ?? slot.effects ?? slot.features ?? []).length > 0 ? html`
                       <div class="flex flex-wrap gap-1 mt-1">
                         ${(slot.gates ?? slot.effects ?? slot.features ?? []).map((d: string) => html`
-                          <span class="text-3xs px-1.5 py-0.5 rounded ${d.endsWith('_off') ? 'bg-[var(--white-10)] text-[var(--text-dim)]' : 'bg-[var(--accent-10)] text-[var(--accent)] opacity-80'}">${d}</span>
+                          <span class="text-3xs px-1.5 py-0.5 rounded ${d.endsWith('_off') ? 'bg-[var(--white-10)] text-[var(--color-fg-disabled)]' : 'bg-[var(--accent-10)] text-[var(--accent)] opacity-80'}">${d}</span>
                         `)}
                       </div>
                     ` : null}

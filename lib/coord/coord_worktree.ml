@@ -18,17 +18,21 @@ let run_argv_lines argv =
     ~actor:"coord/worktree"
     ~raw_source:(exec_gate_raw_source argv)
     ~summary:"coord_worktree argv"
-    ~timeout_sec:30.0
+    ~timeout_sec:Env_config_runtime.Coord_git.local_op_timeout_sec
     argv
   |> String.split_on_char '\n'
   |> List.filter (fun s -> s <> "")
 
 (** Run argv and get process status + combined output.
-    [timeout_sec] defaults to the short 30s window appropriate for
-    local-only git operations (status, branch, rev-parse).  Network-
-    bound operations like [git fetch origin] should pass an explicit
-    longer budget — see {!Env_config.git_fetch_timeout_sec}. *)
-let run_argv_with_status ?(timeout_sec = 30.0) argv =
+    [timeout_sec] defaults to
+    {!Env_config_runtime.Coord_git.local_op_timeout_sec}, the short
+    window appropriate for local-only git operations (status, branch,
+    rev-parse).  Network-bound operations like [git fetch origin]
+    should pass an explicit longer budget — see
+    {!Env_config_core.git_fetch_timeout_sec}. *)
+let run_argv_with_status
+    ?(timeout_sec = Env_config_runtime.Coord_git.local_op_timeout_sec)
+    argv =
   Masc_exec.Exec_gate.run_argv_with_status
     ~actor:"coord/worktree"
     ~raw_source:(exec_gate_raw_source argv)
@@ -865,7 +869,7 @@ let worktree_create_r ?(link_task=true) ?repo_name config ~agent_name ~task_id ~
                     ~actor:"coord/worktree"
                     ~raw_source:(exec_gate_raw_source argv)
                     ~summary:"coord_worktree worktree add"
-                    ~timeout_sec:30.0
+                    ~timeout_sec:Env_config_runtime.Coord_git.local_op_timeout_sec
                     argv
                 in
 

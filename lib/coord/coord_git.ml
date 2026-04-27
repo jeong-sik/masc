@@ -42,7 +42,7 @@ let run_argv_line (argv : string list) : string option =
       ~actor:"coord/git"
       ~raw_source:(exec_gate_raw_source argv)
       ~summary:"coord_git argv"
-      ~timeout_sec:30.0
+      ~timeout_sec:Env_config_runtime.Coord_git.local_op_timeout_sec
       argv
   in
   match String.split_on_char '\n' output |> List.map String.trim |> List.filter (fun s -> s <> "") with
@@ -50,10 +50,13 @@ let run_argv_line (argv : string list) : string option =
   | h :: _ -> Some h
 
 (** Run argv and return exit code.
-    [timeout_sec] defaults to 30s for local-only operations.  Network-
-    bound commands (git fetch / push) should pass an explicit longer
-    budget — see {!Env_config_core.git_fetch_timeout_sec}. *)
-let run_argv_exit ?(timeout_sec = 30.0) (argv : string list) : int =
+    [timeout_sec] defaults to {!Env_config_runtime.Coord_git.local_op_timeout_sec}
+    for local-only operations.  Network-bound commands (git fetch /
+    push) should pass an explicit longer budget — see
+    {!Env_config_core.git_fetch_timeout_sec}. *)
+let run_argv_exit
+    ?(timeout_sec = Env_config_runtime.Coord_git.local_op_timeout_sec)
+    (argv : string list) : int =
   match
     Masc_exec.Exec_gate.run_argv_with_status
       ~actor:"coord/git"
@@ -71,7 +74,7 @@ let run_argv_lines (argv : string list) : string list =
     ~actor:"coord/git"
     ~raw_source:(exec_gate_raw_source argv)
     ~summary:"coord_git argv"
-    ~timeout_sec:30.0
+    ~timeout_sec:Env_config_runtime.Coord_git.local_op_timeout_sec
     argv
   |> String.split_on_char '\n'
   |> List.map String.trim

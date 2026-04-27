@@ -565,7 +565,7 @@ describe('invariantDescription', () => {
     for (const key of keys) {
       const desc = invariantDescription(key)
       expect(desc.length).toBeGreaterThan(40)
-      expect(desc).not.toMatch(/^Invariant defined by/)
+      expect(desc).not.toMatch(/composite contract/)
     }
   })
 
@@ -577,7 +577,7 @@ describe('invariantDescription', () => {
   })
 
   it('falls back to generic text for unknown keys', () => {
-    expect(invariantDescription('mystery_invariant')).toMatch(/^Invariant defined by/)
+    expect(invariantDescription('mystery_invariant')).toMatch(/composite contract/)
   })
 })
 

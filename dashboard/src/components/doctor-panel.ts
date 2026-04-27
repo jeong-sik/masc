@@ -13,6 +13,7 @@ import { createAsyncResource, type AsyncResource } from '../lib/async-state'
 import { AsyncContainer } from './common/async-container'
 import { Card } from './common/card'
 import { SectionCap } from './common/section-cap'
+import { Chip } from './chip'
 
 export type DoctorKind = 'config' | 'sidecar'
 
@@ -197,14 +198,15 @@ function SidecarChecksList({ checks }: { checks: SidecarCheckView[] }) {
               <div class="flex items-center gap-1">
                 ${c.autofix_available
                   ? html`
-                      <span
-                        class="rounded-full border border-[var(--color-accent-fg)]/40 bg-[var(--color-accent-fg)]/10 px-1.5 py-0.5 text-[length:var(--fs-10)] text-[var(--color-accent-fg)]"
+                      <${Chip}
+                        kind="brass"
+                        size="sm"
                         title=${c.autofix_description
                           ? `자동 치유 시도: ${c.autofix_description} (CLI: masc-mcp doctor --fix)`
                           : '자동 치유 가능 (CLI: masc-mcp doctor --fix)'}
                       >
                         자동 치유
-                      </span>
+                      <//>
                     `
                   : ''}
                 <span class="rounded-full border px-1.5 py-0.5 text-[length:var(--fs-10)] uppercase tracking-wider ${chip}">

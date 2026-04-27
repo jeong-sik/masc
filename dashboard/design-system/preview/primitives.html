@@ -247,6 +247,223 @@
         </div>
       </div>
     </div>
+
+    <!-- ════════════════════════════════════════════════════════════════
+         Production UI Core (drift coverage W12)
+         Mirrors dashboard/src/styles/ui.css + base.css primitive surfaces
+         that ship in production but were absent from the design-system
+         preview. Cards below are append-only; they do not modify the
+         atomic primitives above.
+         ════════════════════════════════════════════════════════════════ -->
+    <style>
+      /* Local mirrors of production primitives — preview-only. var() only.
+         Tokens map to design-system equivalents in tokens.generated.css. */
+      .uic-mark { line-height: 1.55; color: var(--color-fg-secondary); font-family: var(--font-sans); max-width: 560px; }
+      .uic-mark p { margin: 6px 0; }
+      .uic-mark h1 { font-size: var(--fs-16); font-weight: 700; margin: 16px 0 8px; color: var(--color-fg-primary); }
+      .uic-mark h2 { font-size: var(--fs-14); font-weight: 600; margin: 12px 0 6px; color: var(--color-fg-primary); }
+      .uic-mark h3 { font-size: var(--fs-13); font-weight: 600; margin: 8px 0 4px; color: var(--color-fg-secondary); }
+      .uic-mark code { background: var(--color-bg-elevated); color: var(--brass-fg); padding: 1px 5px; border-radius: var(--r-1); font-size: 0.9em; font-family: var(--font-mono); }
+      .uic-mark pre { background: var(--color-bg-panel-alt); padding: 12px 14px; border-radius: var(--r-1); border: 1px solid var(--color-border-default); overflow-x: auto; font-size: var(--fs-12); font-family: var(--font-mono); line-height: 1.6; margin: 8px 0; }
+      .uic-mark pre code { background: none; color: inherit; padding: 0; font-size: inherit; border-radius: 0; }
+      .uic-mark blockquote { border-left: 3px solid var(--brass-border); padding-left: 12px; color: var(--color-fg-muted); margin: 8px 0; }
+      .uic-mark ul { list-style: disc; padding-left: 20px; margin: 6px 0; }
+      .uic-mark ol { list-style: decimal; padding-left: 20px; margin: 6px 0; }
+      .uic-mark hr { border: none; border-top: 1px solid var(--color-border-default); margin: 12px 0; }
+      .uic-mark a { color: var(--color-accent-fg); }
+      .uic-mark a:hover { text-decoration: underline; }
+
+      .uic-mermaid { border-radius: var(--r-1); padding: 16px; margin: 8px 0; background: var(--color-bg-panel-alt); border: 1px solid var(--color-border-default); overflow-x: auto; color: var(--color-fg-secondary); font: var(--type-caption); font-family: var(--font-mono); }
+
+      .uic-think { background: var(--stalled-soft); border: 1px solid var(--stalled-border); padding: 10px 14px; margin: 8px 0; border-radius: var(--r-1); }
+      .uic-think summary { cursor: pointer; color: var(--stalled-fg); font-size: var(--fs-12); font-family: var(--font-mono); }
+      .uic-think p { margin: 6px 0 0; color: var(--color-fg-muted); font-size: var(--fs-12); }
+
+      .uic-runtime-strip { background: linear-gradient(90deg, var(--color-bg-panel-alt) 0%, var(--color-bg-surface) 100%); border: 1px solid var(--color-border-default); border-radius: var(--r-1); padding: 8px 12px; min-width: 280px; display: flex; flex-direction: column; gap: 6px; }
+      .uic-runtime-strip .lbl { font: var(--type-micro); color: var(--color-fg-muted); letter-spacing: var(--track-caps); text-transform: uppercase; }
+      .uic-runtime-track { height: 4px; background: var(--color-bg-elevated); border-radius: 2px; overflow: hidden; }
+      .uic-runtime-fill { height: 100%; background: var(--color-accent-fg); transition: width 0.3s ease; }
+      .uic-runtime-fill.warn { background: var(--warn); }
+      .uic-runtime-fill.bad  { background: var(--err); }
+
+      .uic-evt { display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px; border-radius: 999px; font-family: var(--font-mono); font-size: var(--fs-10); letter-spacing: var(--track-caps); text-transform: uppercase; }
+      .uic-evt--heartbeat { background: var(--ok-soft);      color: var(--ok-fg); }
+      .uic-evt--lifecycle { background: var(--info-soft);    color: var(--info-fg); }
+      .uic-evt--keeper    { background: var(--brass-soft);   color: var(--brass-fg); }
+      .uic-evt--error     { background: var(--err-soft);     color: var(--err-fg); }
+      .uic-evt--broadcast { background: var(--stalled-soft); color: var(--stalled-fg); }
+      .uic-evt--task      { background: var(--warn-soft);    color: var(--warn-fg); }
+      .uic-evt--board     { background: var(--info-soft);    color: var(--info-fg); }
+      .uic-evt--default   { background: var(--color-bg-elevated); color: var(--color-fg-muted); }
+
+      .uic-press { display: inline-flex; align-items: center; justify-content: center; padding: 6px 12px; border-radius: var(--r-1); background: var(--color-bg-panel-alt); border: 1px solid var(--color-border-default); color: var(--color-fg-secondary); font: var(--type-caption); font-family: var(--font-mono); cursor: pointer; transition: transform 0.15s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.15s ease-out; }
+      .uic-press:active { transform: scale(0.97); opacity: 0.9; }
+      .uic-lift { display: inline-flex; align-items: center; justify-content: center; padding: 10px 14px; border-radius: var(--r-1); background: var(--color-bg-surface); border: 1px solid var(--color-border-default); color: var(--color-fg-secondary); font: var(--type-caption); font-family: var(--font-mono); transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), border-color 0.2s ease-out, background-color 0.2s ease-out; }
+      .uic-lift:hover { transform: translateY(-2px); border-color: var(--color-border-strong); background: var(--color-bg-elevated); }
+      .uic-mfade { transition: opacity 0.2s ease-in-out, color 0.2s ease-in-out, border-color 0.2s ease-in-out; padding: 6px 12px; border-radius: var(--r-1); border: 1px solid var(--color-border-default); color: var(--color-fg-muted); font-family: var(--font-mono); font-size: var(--fs-12); }
+      .uic-mfade:hover { color: var(--color-fg-primary); border-color: var(--brass-border); }
+
+      .uic-body-bg { width: 100%; height: 80px; border-radius: var(--r-1); border: 1px solid var(--color-border-default); background:
+        radial-gradient(circle at 88% 14%, var(--ok-soft), transparent 22%),
+        radial-gradient(circle at 8% 88%, var(--warn-soft), transparent 28%),
+        radial-gradient(circle at 50% 50%, var(--info-soft), transparent 40%),
+        linear-gradient(180deg, var(--color-bg-page) 0%, var(--color-bg-surface) 48%, var(--color-bg-page) 100%); }
+
+      .uic-link { color: var(--color-accent-fg); text-decoration: none; font-family: var(--font-mono); font-size: var(--fs-12); }
+      .uic-link:hover { text-decoration: underline; }
+    </style>
+
+    <h2>Production UI Core (drift coverage W12)</h2>
+
+    <!-- mirrors production ui.css:L10 (markdown-content @utility) -->
+    <div class="seg">
+      <div class="meta"><span class="n">markdown-content</span>Rendered marked GFM output. h1–h3, code, pre, blockquote, ul/ol, hr, link.
+        <span class="code">&lt;div class="markdown-content"&gt;…&lt;/div&gt;</span>
+      </div>
+      <div class="demo col">
+        <div class="uic-mark">
+          <h1>cascade hit</h1>
+          <h2>step 2 — moonshot</h2>
+          <h3>diff summary</h3>
+          <p>Provider <code>moonshot</code> resolved at <code>step=2</code> with latency 1.24s.</p>
+          <pre><code>masc_status() → claim → done</code></pre>
+          <blockquote>Total budget remaining: 47%.</blockquote>
+          <ul><li>tests: 47 PASS</li><li>flake: 1 retry</li></ul>
+          <hr />
+          <p>see <a href="#">cascade log</a> for the per-attempt trace.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- mirrors production ui.css:L72 (.mermaid-rendered) -->
+    <div class="seg">
+      <div class="meta"><span class="n">mermaid-rendered</span>Container for rendered mermaid diagrams. panel-alt bg, default border.
+        <span class="code">&lt;div class="mermaid-rendered"&gt;&lt;svg&gt;…&lt;/svg&gt;&lt;/div&gt;</span>
+      </div>
+      <div class="demo col">
+        <div class="uic-mermaid">flowchart LR · keeper → claim → run → done</div>
+      </div>
+    </div>
+
+    <!-- mirrors production ui.css:L82 (think-block @utility) -->
+    <div class="seg">
+      <div class="meta"><span class="n">think-block</span>Collapsible &lt;details&gt; — model reasoning trace. Stalled (purple) tint.
+        <span class="code">&lt;details class="think-block"&gt;&lt;summary&gt;…&lt;/summary&gt;&lt;/details&gt;</span>
+      </div>
+      <div class="demo col">
+        <details class="uic-think" open>
+          <summary>think · 4 steps · 1.8s</summary>
+          <p>read keeper.ts → diff intent → propose patch → verify against suite-merge-blockers.</p>
+        </details>
+      </div>
+    </div>
+
+    <!-- mirrors production ui.css:L115 (agent-runtime-strip) + L123 (agent-runtime-ctx-fill) -->
+    <div class="seg">
+      <div class="meta"><span class="n">agent-runtime-strip</span>Cockpit runtime header strip. Includes <code>agent-runtime-ctx-fill</code> (default · warn · bad) for context-window fill.
+        <span class="code">&lt;div class="agent-runtime-strip"&gt;…&lt;span class="agent-runtime-ctx-fill warn"&gt;&lt;/span&gt;</span>
+      </div>
+      <div class="demo col">
+        <div class="uic-runtime-strip">
+          <span class="lbl">CTX 64%</span>
+          <div class="uic-runtime-track"><span class="uic-runtime-fill" style="width:64%"></span></div>
+        </div>
+        <div class="uic-runtime-strip">
+          <span class="lbl">CTX 82% · warn</span>
+          <div class="uic-runtime-track"><span class="uic-runtime-fill warn" style="width:82%"></span></div>
+        </div>
+        <div class="uic-runtime-strip">
+          <span class="lbl">CTX 96% · bad</span>
+          <div class="uic-runtime-track"><span class="uic-runtime-fill bad" style="width:96%"></span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- mirrors production ui.css:L132–L139 (agent-event-badge--* 8 variants) -->
+    <div class="seg">
+      <div class="meta"><span class="n">agent-event-badge--*</span>Live timeline event kind badges. 8 variants: heartbeat · lifecycle · keeper · error · broadcast · task · board · default.
+        <span class="code">&lt;span class="agent-event-badge agent-event-badge--keeper"&gt;KEEPER&lt;/span&gt;</span>
+      </div>
+      <div class="demo">
+        <span class="uic-evt uic-evt--heartbeat">heartbeat</span>
+        <span class="uic-evt uic-evt--lifecycle">lifecycle</span>
+        <span class="uic-evt uic-evt--keeper">keeper</span>
+        <span class="uic-evt uic-evt--error">error</span>
+        <span class="uic-evt uic-evt--broadcast">broadcast</span>
+        <span class="uic-evt uic-evt--task">task</span>
+        <span class="uic-evt uic-evt--board">board</span>
+        <span class="uic-evt uic-evt--default">default</span>
+      </div>
+    </div>
+
+    <!-- mirrors production ui.css:L142 (pressable) + L150 (hover-lift) + L158 (micro-fade) -->
+    <div class="seg">
+      <div class="meta"><span class="n">pressable · hover-lift · micro-fade</span>Task 289 micro-interactions. <code>pressable</code> = scale(0.97) on :active. <code>hover-lift</code> = translateY(-2px). <code>micro-fade</code> = color/border tween.
+        <span class="code">&lt;button class="pressable"&gt;…&lt;/button&gt; · &lt;div class="hover-lift"&gt;…&lt;/div&gt;</span>
+      </div>
+      <div class="demo col">
+        <div class="row-demo">
+          <span class="grp-label">pressable</span>
+          <button class="uic-press">click me</button>
+          <button class="uic-press">action</button>
+        </div>
+        <div class="row-demo">
+          <span class="grp-label">hover-lift</span>
+          <div class="uic-lift">monitor card</div>
+          <div class="uic-lift">activity item</div>
+        </div>
+        <div class="row-demo">
+          <span class="grp-label">micro-fade</span>
+          <span class="uic-mfade">hover for tween</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- mirrors base.css:L16 (body background — radial+linear gradient stack) -->
+    <div class="seg">
+      <div class="meta"><span class="n">body bg</span>Global page background — 3 radial gradients (ok / warn / accent) layered over linear top-to-bottom. Fixed attachment.
+        <span class="code">background: radial-gradient(…), radial-gradient(…), linear-gradient(180deg, …);</span>
+      </div>
+      <div class="demo col">
+        <div class="uic-body-bg"></div>
+      </div>
+    </div>
+
+    <!-- mirrors base.css:L35 (a + a:hover) -->
+    <div class="seg">
+      <div class="meta"><span class="n">a · a:hover</span>Default anchor — accent color, no underline; underline on hover. Used inline in flowing text.
+        <span class="code">&lt;a href="…"&gt;link&lt;/a&gt;</span>
+      </div>
+      <div class="demo">
+        <a class="uic-link" href="#">cascade log</a>
+        <span style="width:8px"></span>
+        <a class="uic-link" href="#">keeper.ts</a>
+        <span style="width:8px"></span>
+        <a class="uic-link" href="#">suite-merge-blockers</a>
+      </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════════════════════
+         Phase 2 candidates — raw hex / rgba in production CSS that should
+         migrate to tokens. Inventoried during W12 drift sweep.
+         ════════════════════════════════════════════════════════════════ -->
+    <h2>Phase 2 candidates · raw hex / rgba in ui.css + base.css</h2>
+    <div class="seg">
+      <div class="meta"><span class="n">migration backlog</span>Each row is a literal that escapes <code>var(--*)</code>. Phase 2 should add a token (or reuse an existing one) and replace the literal.</div>
+      <div class="demo col">
+        <div class="kv-sample">
+          <div class="kv-row"><span class="k">ui.css:L104</span><span class="v">rgba(248, 113, 113, 0.34) · button.monitor.bad border</span></div>
+          <div class="kv-row"><span class="k">ui.css:L118</span><span class="v">rgba(10, 22, 40, 0.85) · runtime-strip gradient start</span></div>
+          <div class="kv-row"><span class="k">ui.css:L119</span><span class="v">rgba(16, 28, 48, 0.7) · runtime-strip gradient end</span></div>
+          <div class="kv-row"><span class="k">ui.css:L154</span><span class="v">rgba(0, 0, 0, 0.15) · hover-lift box-shadow</span></div>
+          <div class="kv-row"><span class="k">base.css:L22</span><span class="v">rgba(251, 191, 36, 0.04) · body radial warn tint</span></div>
+          <div class="kv-row"><span class="k">base.css:L23</span><span class="v">rgba(71, 184, 255, 0.03) · body radial accent tint</span></div>
+          <div class="kv-row"><span class="k">base.css:L24</span><span class="v">#07111f · body linear stop 0%</span></div>
+          <div class="kv-row"><span class="k">base.css:L24</span><span class="v">#0c1424 · body linear stop 48%</span></div>
+          <div class="kv-row"><span class="k">base.css:L24</span><span class="v">#080e1a · body linear stop 100%</span></div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <script>

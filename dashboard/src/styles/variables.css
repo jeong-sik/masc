@@ -285,6 +285,8 @@
      migrated per-screen in Stage 2+ PRs. */
   --color-bg-page: var(--bg-root);
   --color-bg-surface: var(--bg-panel);
+  --color-bg-panel-alt: var(--bg-panel);
+  --color-bg-elevated: var(--bg-panel-hover);
   --color-bg-hover: var(--bg-panel-hover);
 
   --color-fg-primary: var(--text-body);
@@ -297,8 +299,16 @@
   --color-border-divider: var(--border-subtle);
 
   --color-accent-fg: var(--accent);
+  --color-accent-fg-dim: var(--accent-30);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-glow: var(--accent);
 
   --color-status-ok: var(--ok);
   --color-status-warn: var(--warn);
   --color-status-err: var(--bad);
+  --color-status-info: var(--accent);
+  --color-status-idle: var(--text-muted);
+  --color-status-stalled: var(--purple);
+
+  --color-focus-ring: var(--accent);
 }

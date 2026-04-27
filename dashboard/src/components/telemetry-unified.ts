@@ -23,6 +23,7 @@ import { TELEMETRY_SOURCE_META, telemetrySourceMeta } from '../config/telemetry-
 import { formatTimeAgo } from '../lib/format-time'
 import { formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../lib/auto-refresh'
 import { isAbortError } from '../lib/async-state'
+import { Btn } from './btn'
 import { OasHealthChip } from './oas-health-chip'
 import { CopyIdButton } from './common/copy-id-button'
 
@@ -915,12 +916,9 @@ export function TelemetryUnified() {
           <option value="200">200</option>
           <option value="500">500</option>
         </select>
-        <button
-          class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-3 py-1 text-xs text-[var(--text-strong)] hover:bg-[var(--color-bg-hover)]"
-          onClick=${() => void load()}
-        >
+        <${Btn} onClick=${() => void load()}>
           Refresh
-        </button>
+        <//>
         <span class="text-xs text-[var(--color-fg-muted)]">${formatAutoRefreshLabel(TELEMETRY_AUTO_REFRESH_MS)}</span>
         ${loading ? html`<span class="text-xs text-[var(--color-fg-muted)]" role="status">로딩 중...</span>` : null}
       </div>

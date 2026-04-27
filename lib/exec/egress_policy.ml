@@ -91,18 +91,53 @@ let check_command policy cmd =
   | Some blocked_domain ->
       Blocked { attempted = blocked_domain; allowed = policy.allowed }
 
-(** Format a blocked result as a structured JSON string. *)
-let blocked_to_json (blocked : check_result) =
+(** Format a blocked result as a structured JSON string.
+
+    [expected_policy_path] is the on-disk path the caller resolved for
+    this keeper's [egress.json].  When supplied, the JSON includes
+    [expected_policy_path] plus a humanish [reason] aimed at the LLM
+    consumer — empty allowlist points operator at "seed this file",
+    non-empty-but-unmatched allowlist points at "extend this file".
+
+    Without [expected_policy_path], the legacy schema is preserved so
+    callers that have no path context (tests, generic utilities) keep
+    working unchanged. *)
+let blocked_to_json ?expected_policy_path (blocked : check_result) =
   let json : Yojson.Safe.t =
     match blocked with
     | Allowed -> `Assoc [ ("ok", `Bool true) ]
     | Blocked { attempted; allowed } ->
-        `Assoc [
-          ("ok", `Bool false);
-          ("error", `String "egress_blocked");
-          ("attempted", `String attempted);
-          ("allowed", `List (List.map (fun d -> `String d) allowed));
-        ]
+        let base =
+          [
+            ("ok", `Bool false);
+            ("error", `String "egress_blocked");
+            ("attempted", `String attempted);
+            ("allowed", `List (List.map (fun d -> `String d) allowed));
+          ]
+        in
+        let extras =
+          match expected_policy_path with
+          | None -> []
+          | Some path ->
+              let reason =
+                if allowed = [] then
+                  Printf.sprintf
+                    "egress allowlist empty or unreadable for this keeper; \
+                     operator should seed %s with the required domains \
+                     (e.g. \"*.github.com\", \"*.npmjs.org\") and retry"
+                    path
+                else
+                  Printf.sprintf
+                    "domain %s not in egress allowlist at %s; operator must \
+                     add it before this command can succeed"
+                    attempted path
+              in
+              [
+                ("expected_policy_path", `String path);
+                ("reason", `String reason);
+              ]
+        in
+        `Assoc (base @ extras)
   in
   Yojson.Safe.to_string json
 

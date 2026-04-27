@@ -34,10 +34,19 @@ val check_command : t -> string -> check_result
     are permitted.  Returns [Blocked] with the first non-permitted domain
     and the full allowlist otherwise. *)
 
-val blocked_to_json : check_result -> string
+val blocked_to_json : ?expected_policy_path:string -> check_result -> string
 (** Format a check result as JSON.
     [Allowed] → [{"ok": true}].
-    [Blocked] → structured error with [attempted] and [allowed]. *)
+    [Blocked] → structured error with [attempted] and [allowed].
+
+    When [expected_policy_path] is supplied, the [Blocked] payload also
+    carries [expected_policy_path] (so an operator can act on the
+    structured error without grepping the codebase) and a humanish
+    [reason] string aimed at the LLM caller — distinguishing the
+    "allowlist empty / unreadable" failure mode (operator must seed
+    the file) from the "domain not in allowlist" failure mode (operator
+    must extend the file).  Omitting [expected_policy_path] preserves
+    the legacy two-field schema for callers that have no path context. *)
 
 val of_json_string : source:string -> string -> t
 (** Parse a JSON domain array.  Returns [empty] on parse error.

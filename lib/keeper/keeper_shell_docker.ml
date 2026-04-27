@@ -64,7 +64,9 @@ let check_egress ~(config : Coord.config) ~(meta : keeper_meta) ~cmd =
   match Masc_exec.Egress_policy.check_command policy cmd with
   | Masc_exec.Egress_policy.Allowed -> None
   | Masc_exec.Egress_policy.Blocked _ as blocked ->
-      Some (Masc_exec.Egress_policy.blocked_to_json blocked)
+      Some
+        (Masc_exec.Egress_policy.blocked_to_json
+           ~expected_policy_path:path blocked)
 
 (* ── Container naming ──────────────────────────────────── *)
 

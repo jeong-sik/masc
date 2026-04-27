@@ -411,8 +411,8 @@ describe('ConnectorStatusPanel', () => {
     expect(text).toContain('stale')
     expect(text).toContain('Gate metrics unavailable')
     expect(text).toContain('게이트가 광고하는 connector runtime 은 보이지만')
-    expect(text).toContain('keeper directory unavailable, manual entry only')
-    expect(text).toContain('Next: continue with manual entry now')
+    expect(text).toContain('keeper 디렉토리 사용 불가, 수동 입력만 가능')
+    expect(text).toContain('Next: 지금은 수동 입력으로 진행')
     expect(text).toContain('config/keepers/')
     expect(text).toContain('/api/v1/gate/keepers')
 

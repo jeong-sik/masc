@@ -904,24 +904,32 @@ let archive_credential_file config ~agent_name ~reason =
           "archive_credential_file failed for %s: %s"
           agent_name (Printexc.to_string exn)
 
-(* Self-heal of dual-identity: when the canonical credential is written
-   for [keeper-<n>-agent], if a bare [<n>.json] credential exists with
-   a *different* token hash, archive the bare file. Same-token bare
-   files are harmless (both names resolve to the same identity) and
-   left in place. Idempotent: once archived, subsequent boots see no
-   bare file and become no-ops. Spec: AuthIdentityFSM.tla I1
-   IdentityBindsToken (a token must bind to one principal). *)
-let archive_bare_if_dual_identity config ~canonical_name ~canonical_token_hash =
+(* Boot self-heal of bare-form keeper credential files.
+
+   PR-3a (#11146) introduced this as a dual-identity guard, archiving
+   only the case where the bare file's token differed from the
+   canonical's. After PR-3b1 (#11152) starved the runtime caller
+   (lib/tool_coord.ml now asks for the canonical form via
+   Keeper_runtime.canonicalize_if_keeper), every bare-form file is a
+   dead reference at runtime regardless of its shape:
+
+     - direct credential, different token  -> dual-identity (3a case)
+     - direct credential, same token       -> redundant alias
+     - redirect stub to canonical's UUID   -> unused after starvation
+
+   PR-3b2 generalises the helper to archive any of those without
+   inspecting the token, because none of them can route a request now.
+   The .archive/ destination preserves the file for operator review.
+   Idempotent: once archived, subsequent boots see no bare file and
+   become no-ops. Spec: AuthIdentityFSM.tla I1 IdentityBindsToken. *)
+let archive_bare_for_canonical config ~canonical_name =
   match bare_keeper_name_from_canonical canonical_name with
   | None -> ()
-  | Some bare_name -> (
-      match load_credential config bare_name with
-      | None -> ()
-      | Some bare_cred when String.equal bare_cred.token canonical_token_hash ->
-          ()
-      | Some _ ->
-          archive_credential_file config ~agent_name:bare_name
-            ~reason:"dual-identity: bare token differs from canonical")
+  | Some bare_name ->
+      let bare_file = credential_file config bare_name in
+      if file_exists bare_file then
+        archive_credential_file config ~agent_name:bare_name
+          ~reason:"bare-form keeper credential is dead after PR-3b1 starvation"
 
 let ensure_keeper_credential config ~agent_name :
     (string * agent_credential, masc_error) result =
@@ -969,10 +977,8 @@ let ensure_keeper_credential config ~agent_name :
       Error (IoError msg)
   in
   (match result with
-   | Ok (_raw, cred) ->
-       archive_bare_if_dual_identity config
-         ~canonical_name:agent_name
-         ~canonical_token_hash:cred.token
+   | Ok _ ->
+       archive_bare_for_canonical config ~canonical_name:agent_name
    | Error _ -> ());
   result
 

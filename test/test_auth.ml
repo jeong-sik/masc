@@ -642,6 +642,36 @@ let test_ensure_keeper_credential_archives_dual_identity_bare () =
       check bool "canonical credential remains" true
         (Sys.file_exists canonical_path))
 
+(* PR-3b2: bare-form file may also be a redirect stub (PR #10440
+   pattern -- {"redirect_to": "<uuid>.json"}) rather than a direct
+   credential. After PR-3b1 starvation, even redirect stubs are dead
+   references. The generalised archive_bare_for_canonical archives
+   them too. This is the production shape for all 8 keepers in
+   ~/.masc/auth/agents/ as of 2026-04-27. *)
+let test_ensure_keeper_credential_archives_redirect_stub_bare () =
+  let dir = setup_test_room () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_room dir)
+    (fun () ->
+      ignore
+        (Auth.enable_auth dir ~require_token:true
+           ~agent_name:"bootstrap-admin");
+      let bare_path = Auth.credential_file dir "sangsu" in
+      Auth.save_private_text_file bare_path
+        {|{ "redirect_to": "some-uuid.json" }|};
+      check bool "bare redirect stub pre-exists" true
+        (Sys.file_exists bare_path);
+      (match
+         Auth.ensure_keeper_credential dir
+           ~agent_name:"keeper-sangsu-agent"
+       with
+       | Ok _ -> ()
+       | Error e -> fail (Types.masc_error_to_string e));
+      check bool "bare redirect stub moved out of agents/" false
+        (Sys.file_exists bare_path);
+      check bool "bare redirect stub archived" true
+        (archive_contains dir "sangsu.json"))
+
 let test_ensure_keeper_credential_no_archive_when_no_bare () =
   let dir = setup_test_room () in
   Fun.protect
@@ -1026,6 +1056,8 @@ let () =
         test_ensure_keeper_credential_reuses_uuid;
       test_case "ensure_keeper_credential archives dual-identity bare" `Quick
         test_ensure_keeper_credential_archives_dual_identity_bare;
+      test_case "ensure_keeper_credential archives redirect stub bare" `Quick
+        test_ensure_keeper_credential_archives_redirect_stub_bare;
       test_case "ensure_keeper_credential no archive on clean state" `Quick
         test_ensure_keeper_credential_no_archive_when_no_bare;
     ];

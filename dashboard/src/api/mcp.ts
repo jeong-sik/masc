@@ -324,11 +324,11 @@ export async function listMcpTools(cursor?: string): Promise<McpToolsListResult>
   })
   const parsed = parseMcpListResponse(text)
   if (parsed.error) {
-    const message = parsed.error.message || 'tools/list: server returned an error without a message'
+    const message = parsed.error.message || 'tools/list: 서버가 message 없이 error 반환'
     throw new Error(message)
   }
   if (!parsed.result) {
-    throw new Error('tools/list: missing result in response')
+    throw new Error('tools/list: 응답에 result 없음')
   }
   return parsed.result
 }

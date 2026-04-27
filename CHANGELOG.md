@@ -1,6 +1,63 @@
 # Changelog
 
 
+## [0.18.6] - 2026-04-27 — patch: keeper resilience (retry guard + watchdog auto-pause) + design-system token wave continuation + i18n rounds 95-101
+
+Aggregate of 37 commits since v0.18.5 (15 fix / 13 feat / 7 i18n / 1 perf / 1 chore). No breaking API changes.
+
+Operational hardening release: keeper recovery surfaces (oas_timeout retry guard relax, watchdog auto-pause on stale termination storm, zombie detection seed, cascade-filter dedup) plus continuation of canonical SPEC token wave (status/border/bg-hover/bg-surface/accent-soft/CSS-files) and 7 localization rounds.
+
+### Added
+- `#11070` dashboard — Heartbeat + LifelineBar primitives (cb-group-a)
+- `#11066` dashboard — KpiCell primitive (cb-group-a, Stage A)
+- `#11088` dashboard — TickerItem + TickerStrip primitives (cb-group-a)
+- `#11075` transport — P1 failure-path counters for SSE broadcast
+- `#11068` coord — extract local git op timeout to env (SSOT, #10426)
+
+### Changed (design-system canonical SPEC tokens)
+- `#11095` adopt canonical SPEC tokens in handwritten CSS files
+- `#11087` canonical SPEC §3.5 status tokens (10-file sweep)
+- `#11085` canonical accent-soft token in 5 remaining files (CS105)
+- `#11076` canonical accent-soft token in 5 files
+- `#11073` canonical SPEC border tokens (`--border-slate-N` sweep)
+- `#11067` canonical bg-hover token (`--bg-panel-hover` sweep)
+- `#11065` SPEC fs scale for arbitrary `text-[10px]/text-[11px]`
+- `#11064` canonical SPEC bg-surface in 5 files (`--card → --color-bg-surface`)
+
+### Fixed (keeper resilience)
+- `#11057` keeper — relax `oas_timeout` retry guard 30→15 (cycle6 band-aid)
+- `#11055` keeper-watchdog — Phase 2 auto-pause on stale termination storm (closes #10765)
+- `#11062` keeper — seed `last_turn_ts` to bootstrap time so watchdog can detect zombies
+- `#11084` cascade-filter — dedupe `all-providers-rejected` WARN, promote first to ERROR (#11060)
+- `#11080` keeper — stop leaking host playground paths to LLM tool responses
+- `#11099` keeper — surface 5 P2 silent failures (telemetry gaps)
+- `#11074` keeper — surface 2 P1 silent failures in registry
+- `#11077` keeper — resolve `unknown_toml_keys` and tidy provider match errors
+
+### Fixed (build / types / dashboard)
+- `#11092` main — restore green build broken by #11077 + #11078
+- `#11093` coord — Eio 1.0+ types in `coord_utils_backend_setup.mli`
+- `#11078` coord — add missing `.mli` files for coord_utils and worktree
+- `#11094` dashboard — surface 6 P2 silent failures (telemetry gaps)
+- `#11072` auth — add token hash prefix to dashboard fallback warn
+- `#11041` server-auth — decompose dashboard fallback `err_kind` beyond `[other]`
+- `#11061` a11y — add ARIA attributes to connector-config-form
+
+### i18n
+- `#11098` localize 4 fallback error literals (round-101)
+- `#11091` localize 10 api/ thrown Error payloads (round-100)
+- `#11086` localize 3 keeper API thrown errors (round-99)
+- `#11082` finish fsm-hub-lane-analysis (round-98)
+- `#11071` localize turn/decision/cascade/compaction lane meanings (round-97)
+- `#11069` localize 9 'phase' lane meaning fields (round-96)
+- `#11063` localize 'vs env' delta suffix (round-95)
+
+### Performance
+- `#11090` hoist per-call `Re.compile` to module-level bindings
+
+### CI / chore
+- `#11089` naturalize L1a baseline 27→28 to match main
+
 ## [0.18.5] - 2026-04-27 — patch: design-system canonical SPEC token wave + i18n round 90-92 + env SSOT extractions
 
 Aggregate of 19 commits since v0.18.4 (10 feat-design-system / 4 fix / 3 i18n / 1 feat-typography / 1 feat-sidecar). No breaking API changes.

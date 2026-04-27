@@ -127,10 +127,15 @@ let maybe_resolve_missing_relative_read_path ~(roots : string list) ~(raw_path :
        | [] -> Ok None
        | [match_path] -> Ok (Some match_path)
        | many ->
+           (* Tier A3 / Cycle 6: do not echo the resolved match paths
+              into the error string — that leaks the host filesystem
+              layout to the caller (LLM) and dashboards. The match
+              count alone is enough for the caller to course-correct. *)
            Error
              (Printf.sprintf
-                "ambiguous_relative_read_path: %s (matches: [%s])"
-                raw_path (String.concat ", " many)))
+                "ambiguous_relative_read_path: %s (%d candidate matches; \
+                 disambiguate the relative segment)"
+                raw_path (List.length many)))
 
 let allows_missing_leaf_read ~(raw : string) ~(candidate : string) : bool =
   let parts = split_relative_components raw in
@@ -157,10 +162,15 @@ let absolute_allowed_paths_result ~(config : Coord.config)
     ~(allowed_paths : string list) : (string list, string) result =
   let normalized = absolute_allowed_paths ~config ~allowed_paths in
   if allowed_paths <> [] && normalized = [] then
+    (* Tier A3 / Cycle 6: redact the raw [allowed_paths] list — those
+       strings frequently include host-absolute prefixes that should
+       not flow back to the LLM caller. The count is enough for the
+       caller to know "you provided N entries, none were valid". *)
     Error
       (Printf.sprintf
-         "allowed_paths_normalized_empty: [%s]"
-         (String.concat ", " allowed_paths))
+         "allowed_paths_normalized_empty: %d entries provided, none \
+          resolved to a valid path"
+         (List.length allowed_paths))
   else
     Ok normalized
 
@@ -233,9 +243,13 @@ let resolve_keeper_target_path ~(config : Coord.config)
       || starts_with ~prefix:(root_norm ^ "/") target_norm
     in
     if not within_root then
+      (* Tier A3 / Cycle 6: do not echo the resolved [target_norm] or
+         [root_norm] absolute paths — both reveal the host sandbox
+         layout to the caller (LLM). Echo only the caller's [raw]
+         input. The "outside_project_root" label is enough for the
+         caller to course-correct without enumerating the host. *)
       Error
-        (Printf.sprintf "path_outside_project_root: %s (root=%s)"
-           target_norm root_norm)
+        (Printf.sprintf "path_outside_project_root: %s" raw)
     else if allowed_paths = [] then
       Ok candidate
     else
@@ -332,9 +346,13 @@ let resolve_keeper_read_path ~(config : Coord.config)
       || starts_with ~prefix:(root_norm ^ "/") target_norm
     in
     if not within_root then
+      (* Tier A3 / Cycle 6: do not echo the resolved [target_norm] or
+         [root_norm] absolute paths — both reveal the host sandbox
+         layout to the caller (LLM). Echo only the caller's [raw]
+         input. The "outside_project_root" label is enough for the
+         caller to course-correct without enumerating the host. *)
       Error
-        (Printf.sprintf "path_outside_project_root: %s (root=%s)"
-           target_norm root_norm)
+        (Printf.sprintf "path_outside_project_root: %s" raw)
     else
       let allowed_norms =
         if allowed_paths = [] then []
@@ -343,10 +361,12 @@ let resolve_keeper_read_path ~(config : Coord.config)
           |> List.filter_map (normalize_allowed_path_for_check ~root:root_norm)
       in
       if allowed_paths <> [] && allowed_norms = [] then
+        (* Tier A3 / Cycle 6: redact the raw [allowed_paths] list. *)
         Error
           (Printf.sprintf
-             "allowed_paths_normalized_empty: [%s]"
-             (String.concat ", " allowed_paths))
+             "allowed_paths_normalized_empty: %d entries provided, none \
+              resolved to a valid path"
+             (List.length allowed_paths))
       else
       let within_allowed =
         allowed_norms = [] || is_within_allowed_norms ~target_norm allowed_norms

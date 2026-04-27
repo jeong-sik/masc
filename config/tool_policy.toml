@@ -208,9 +208,16 @@ masc_groups = ["essential", "dispatch", "code_observe"]
 groups = ["base", "board_core", "filesystem", "filesystem_write", "library", "shell", "coordination", "coding_shard", "coding", "github", "github_review"]
 masc_groups = ["essential", "coding"]
 
+# Step 9 (bloodflow restoration plan): the research preset is granted
+# full delivery capabilities so analyst/scholar/verifier-tier keepers
+# can do real work -- git clone, PR view/diff, PR create -- instead
+# of only sharing opinions on the board.  The risk-tiered approval
+# gate in [keeper_routine_allowlist.ml] is intentionally kept intact:
+# capability is opened, but High-risk operations (force-push, mass
+# deletion, cross-org repo writes) still queue for operator approval.
 [presets.research]
-groups = ["base", "filesystem", "library", "shell", "coordination", "board_core", "autoresearch"]
-masc_groups = ["essential"]
+groups = ["base", "filesystem", "filesystem_write", "library", "shell", "coordination", "board_core", "autoresearch", "coding_shard", "coding", "github", "github_review"]
+masc_groups = ["essential", "coordination", "coding"]
 
 # Delivery preset: research + coding for keepers that need to produce code changes.
 # Use for keepers whose goal involves PRs, issues, or code fixes.

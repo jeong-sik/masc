@@ -300,6 +300,7 @@ export const TOKENS = {
   "shadowPanel": { name: "--shadow-panel", value: "0 2px 12px rgba(0, 0, 0, 0.6)", tier: "role", kind: "shadow" },
   "shadowGlow": { name: "--shadow-glow", value: "0 0 20px var(--accent-glow)", tier: "role", kind: "shadow" },
   "shadowRaised": { name: "--shadow-raised", value: "0 8px 24px rgba(0, 0, 0, 0.55), 0 0 0 1px var(--border-highlight)", tier: "role", kind: "shadow" },
+  "shadowRing": { name: "--shadow-ring", value: "inset 0 0 0 1px rgba(196, 162, 101, 0.25)", tier: "role", kind: "shadow" },
   "focusRing": { name: "--focus-ring", value: "0 0 0 1px var(--brass-1), 0 0 0 3px rgb(var(--brass-glow) / .25)", tier: "role", kind: "shadow" },
   "focusRingErr": { name: "--focus-ring-err", value: "0 0 0 1px var(--err), 0 0 0 3px rgb(var(--err-glow) / .3)", tier: "role", kind: "shadow" },
   "hoverOverlay": { name: "--hover-overlay", value: "rgb(255 255 255 / .03)", tier: "role", kind: "color" },

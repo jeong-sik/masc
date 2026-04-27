@@ -1,0 +1,144 @@
+/* @generated DO NOT EDIT — run `pnpm tokens:build` (source: dashboard/design-system/tokens/source.ts) */
+
+:root,
+[data-theme="dark-fantasy"] {
+  color-scheme: dark;
+  /* ── Theme-invariant raw (radius, space, scrollbar) ── */
+  --radius-xs: 2px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 12px;
+  --radius-pill: 999px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+  --scrollbar-thumb: #2a1f1a;
+  --scrollbar-thumb-hover: #3d2e22;
+
+  /* ── Font stacks (bonsai divergence — JetBrains Mono / Cinzel) ── */
+  --font-display: 'Cinzel', 'Noto Sans KR', 'EB Garamond', serif;
+  --font-body: 'EB Garamond', 'Noto Sans KR', Georgia, serif;
+  --font-ui: 'Noto Sans KR', 'IBM Plex Sans KR', -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
+
+  /* ── Theme-invariant role defaults (shadows) ── */
+  --shadow-card: 0 1px 4px rgba(0, 0, 0, 0.5);
+  --shadow-panel: 0 2px 12px rgba(0, 0, 0, 0.6);
+  --shadow-glow: 0 0 20px var(--accent-glow);
+  --shadow-raised: 0 8px 24px rgba(0, 0, 0, 0.55), 0 0 0 1px var(--border-highlight);
+  --shadow-ring: inset 0 0 0 1px rgba(196, 162, 101, 0.25);  /* bonsai-only 1px ring (distinct from --shadow-inset) */
+
+  /* ── Dark Fantasy raw (visceral · decay-forward) ── */
+  --bg-deep: #0a0706;  /* pitch with red undertone */
+  --bg-panel: #14100d;  /* rotted wood */
+  --bg-panel-alt: #1b1612;
+  --bg-card: #221815;
+  --bg-card-hover: #2e211c;
+  --border-main: #2a1a14;
+  --border-highlight: #5a3028;
+  --text-bright: #e8d8b8;  /* clean bone */
+  --text-primary: #b8a488;  /* dirty bandage */
+  --text-dim: #9a846e;  /* WCAG AA */
+  --accent-blood: #e85050;
+  --accent-blood-dim: #8a2828;
+  --accent-viscera: #c94a3a;
+  --accent-bile: #6a7a3a;
+  --accent-mold: #3a5a48;
+  --accent-brass: #968228;  /* bonsai brass differs from --brass-1 */
+  --accent-brass-dim: #6a5620;
+  --accent-bone: #d8c8a0;
+  --accent-ink: #3a2a5a;
+  --accent-ember: #c4461a;
+  --accent-glow: rgba(232, 80, 80, 0.28);
+  --accent-blood-glow: rgba(232, 80, 80, 0.32);
+  --status-ok: #6a9a4a;
+  --status-warn: #b87828;
+  --status-bad: #e85050;
+  --status-idle: #4a3a32;
+  --t-llm: #6a7a9c;  /* muted blue-gray — inference */
+  --t-tool: #8a7a3a;  /* muted brass — tool call */
+  --t-think: #4a4a5a;  /* slate — reasoning */
+  --t-wait: #2a2520;  /* deep dusk — idle */
+  --t-err: var(--accent-blood);
+
+  /* ── Bonsai semantic aliases (SPEC v0.1 §3.1-3.5) ── */
+  --color-bg-page: var(--bg-deep);
+  --color-bg-surface: var(--bg-panel);
+  --color-bg-panel-alt: var(--bg-panel-alt);
+  --color-bg-elevated: var(--bg-card);
+  --color-bg-hover: var(--bg-card-hover);
+  --color-fg-primary: var(--text-primary);
+  --color-fg-muted: var(--text-dim);
+  --color-border-default: var(--border-main);
+  --color-border-strong: var(--border-highlight);
+  --color-accent-fg: var(--accent-brass);
+  --color-accent-fg-dim: var(--accent-brass-dim);
+  --color-accent-glow: var(--accent-glow);
+  --color-status-ok: var(--status-ok);
+  --color-status-warn: var(--status-warn);
+  --color-status-err: var(--status-bad);
+  --color-status-idle: var(--status-idle);
+}
+
+[data-theme="paper"] {
+  color-scheme: light;
+  /* ── Paper / Ink raw palette ── */
+  --paper: #F5F2EA;
+  --paper-2: #EFEBE0;
+  --paper-3: #E5E0D1;
+  --paper-4: #D8D2BF;
+  --ink: #151515;
+  --ink-2: #2E2E2C;
+  --ink-3: #515049;
+  --ink-4: #656358;
+  --ink-5: #9A978D;
+  --ink-6: #BCB8AC;
+  --forest: #2D5F4E;
+  --forest-fill: #CFDFD7;
+  --brass: #8C6A1E;
+  --brass-fill: #E9DDB8;
+  --brick: #8B3A3A;
+  --brick-fill: #E8CFCB;
+  --ember: #B35A1F;
+  --ember-fill: #ECD5BD;
+  --slate: #3E4A5C;
+  --slate-fill: #D6DBE2;
+  --plum: #5C3E56;
+  --plum-fill: #E0D4DE;
+  --teal: #236874;
+  --teal-fill: #CEDEE2;
+
+  /* ── Bonsai-name overrides (paper colorway) ── */
+  --bg-deep: var(--paper);
+  --bg-panel: var(--paper-2);
+  --bg-panel-alt: var(--paper-3);
+  --bg-card: var(--paper-2);
+  --bg-card-hover: var(--paper-3);
+  --border-main: rgba(21,21,21,0.22);
+  --border-highlight: rgba(21,21,21,0.48);
+  --text-bright: var(--ink);
+  --text-primary: var(--ink-2);
+  --text-dim: var(--ink-4);
+  --accent-brass: var(--brass);
+  --accent-brass-dim: var(--brass-fill);
+  --accent-blood: var(--brick);
+  --accent-ink: var(--slate);
+  --accent-glow: rgba(140,106,30,0.12);
+  --status-ok: var(--forest);
+  --status-warn: var(--ember);
+  --status-bad: var(--brick);
+  --status-idle: var(--ink-5);
+  --shadow-panel: 0 1px 2px rgba(0,0,0,0.06), 0 0 0 1px rgba(0,0,0,0.06);
+  --shadow-card: 0 1px 0 rgba(0,0,0,0.04);
+  --shadow-glow: none;
+  --t-llm: var(--slate);
+  --t-tool: var(--brass);
+  --t-think: var(--plum);
+  --t-wait: var(--paper-3);
+  --t-err: var(--brick);
+}

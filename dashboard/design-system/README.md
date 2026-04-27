@@ -24,7 +24,7 @@ The two modes can cohabit in **split mode**, sharing the topbar/ticker/KPI chrom
 
 ### The fleet
 
-Five named keeper personas show up throughout the UI with distinct colors:
+Keeper attribution runs on a **12-slot palette** (infrastructure capability — see [SPEC §3.6](SPEC.md#36-attribution-dashboard-only--phase-0-v03-revised)). 12 slots are reserved as OkLCH-distinct colors (L=68%, C=0.09, H stride 30°) so the roster can grow without remapping. The currently named subset is 5 of those 12 reserved slots:
 
 | Keeper | Role | Color |
 |---|---|---|
@@ -34,7 +34,7 @@ Five named keeper personas show up throughout the UI with distinct colors:
 | **qa-king** | QA | Red `#c46a5a` |
 | **rama** (ramarama) | Researcher | Purple `#8a6aa0` |
 
-There are also supporting roles (scholar, janitor, issue_king, taskmaster, verifier, executor, velvet-hammer, ollama-local) and providers (Anthropic, Moonshot, OpenAI, xAI) that appear in the cascade chain and provider matrix.
+There are also supporting roles (scholar, janitor, issue_king, taskmaster, verifier, executor, velvet-hammer, ollama-local) and providers (Anthropic, Moonshot, OpenAI, xAI) that appear in the cascade chain and provider matrix. Unnamed keepers hash onto the remaining slots via `kSlot(id)` (FNV-1a mod 12).
 
 ### Goals seen in the system (Korean + English mixed)
 
@@ -183,7 +183,7 @@ touching component CSS.
 │ ▼                                                            │
 │ semantic    --color-bg-page   --color-accent-fg              │
 │             --color-fg-primary  --color-status-added         │
-│             --color-keeper-1..5  --color-focus-ring          │
+│             --color-keeper-1..12 --color-focus-ring          │
 │ ▼                                                            │
 │ component   .ix-tree { background: var(--color-bg-surface) } │
 │             .chip   { color: var(--color-accent-fg) }        │
@@ -211,7 +211,7 @@ semantic alias unless you genuinely need a literal palette pick.
 | `--color-status-added` | `--ok` | diff added / created |
 | `--color-status-modified` | `--warn` | diff modified / at-risk |
 | `--color-status-deleted` | `--err` | diff deleted / failed |
-| `--color-keeper-1..5` | `--k-{nick,masc,sangsu,qa,rama}` | fleet attribution |
+| `--color-keeper-1..12` | `--k-1..12` (12-slot OkLCH palette; named subset 1–5, see [SPEC §3.6](SPEC.md#36-attribution-dashboard-only--phase-0-v03-revised)) | fleet attribution |
 | `--color-focus-ring` | `--brass-1` | `:focus-visible` outline color |
 
 **Component tier** — the actual component CSS. References semantic

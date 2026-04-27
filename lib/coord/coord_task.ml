@@ -1421,20 +1421,46 @@ let transition_task_r
        | Types.Release, Types.Claimed _ | Types.Release, Types.InProgress _
        | Types.Release, Types.AwaitingVerification _ | Types.Release, Types.Done _
        | Types.Release, Types.Cancelled _ -> ());
-        (* #10719: surface tasks that have crossed the oscillation
-           threshold (5 release cycles) so dashboards/triage can pick
-           them up before they reach 20+ cycles with zero progress
-           (task-049 hit cycle 20 still in [todo]).  Pure observation:
-           does not block the release.  Fires once per crossing
-           (cycle_count = 4 → 5) to avoid log amplification on
-           subsequent releases of the same task. *)
+        (* #10719: surface tasks that have crossed oscillation thresholds
+           so dashboards/triage can pick them up before they reach 20+
+           cycles with zero progress.  Production observation
+           (2026-04-26 backlog scan): task-049 hit cycle 20 still in
+           [todo] — the previous single threshold at 5 fires once and
+           then stays silent through the rest of the death-loop.
+
+           Add additional crossings at 10 and 20 plus a Prometheus
+           counter so each oscillation event is countable in PromQL.
+           Fires only on the exact cycle_count transition (4->5, 9->10,
+           19->20) to avoid log amplification on every subsequent
+           release of the same task.  Pure observation: does not block
+           the release. *)
         (match action with
-         | Types.Release when task.cycle_count = 4 ->
-           Log.RoomTask.warn
-             "task_oscillation_threshold task=%s agent=%s cycle_count=%d \
-              threshold=5 (sustained claim->release loop, candidate for triage)"
-             task_id agent_name (task.cycle_count + 1)
-         | Types.Release | Types.Claim | Types.Start
+         | Types.Release ->
+           let cc = task.cycle_count + 1 in
+           let escalation =
+             if task.cycle_count = 19 then Some ("severe", 20)
+             else if task.cycle_count = 9 then Some ("major", 10)
+             else if task.cycle_count = 4 then Some ("threshold", 5)
+             else None
+           in
+           (match escalation with
+            | None -> ()
+            | Some (level, threshold) ->
+              (* WARN line is the observability surface: structured
+                 [level=] label lets operators grep [task_oscillation_severe]
+                 to find the worst cases without scanning every release.
+                 We avoid Prometheus here because [masc_coord] doesn't
+                 depend on the Prometheus module (and adding it would
+                 create a circular dep with [masc_mcp]); future metric
+                 wiring belongs in a callback pattern like
+                 [Coord_hooks]. *)
+              Log.RoomTask.warn
+                "task_oscillation_%s task=%s agent=%s cycle_count=%d \
+                 threshold=%d (sustained claim->release loop, candidate \
+                 for triage; consider reformulation or human escalation \
+                 if level=severe)"
+                level task_id agent_name cc threshold)
+         | Types.Claim | Types.Start
          | Types.Done_action | Types.Cancel
          | Types.Submit_for_verification | Types.Approve_verification
          | Types.Reject_verification -> ());

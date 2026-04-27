@@ -1,6 +1,28 @@
 # Changelog
 
 
+## [0.18.8] - 2026-04-28 — patch: keeper fleet reliability (goal repair + auto-task-start + preset coordination)
+
+Aggregate of 8 commits since v0.18.7 (3 feat / 2 fix / 2 test / 1 chore). No breaking API changes.
+
+Keeper fleet reliability release: empty `active_goal_ids` now auto-repairs via persona audit (PR1 #11351), claimed tasks auto-start immediately (PR2 #11364), and social/dispatch presets gained coordination tool access (PR3 #11345).
+
+### Added (keeper reliability)
+
+- **keeper_goal_repair**: detect and repair keepers with empty `active_goal_ids` by creating goals from persona purpose statements. New module `Keeper_goal_repair` with dry-run and execute modes.
+- **auto-task-start**: `keeper_task_claim` now automatically calls `masc_transition(action=start)` after successful claim, eliminating the claim-without-start pattern that caused task abandonment.
+- **preset coordination tools**: social and dispatch tool presets now include `masc.coordination` group, granting access to `masc_transition`, `masc_claim_next` and related coordination tools.
+
+### Fixed
+
+- Keeper audit now reports `empty_active_goal_ids` as an actionable issue with repair guidance.
+- Keeper meta reconciliation detects goal-less keepers and surfaces them in audit output.
+
+### Changed
+
+- `scripts/ocaml-structure-baseline.json` updated: `keeper_mli_missing: 21`, `lib_dune_lines: 954`.
+
+
 ## [0.18.7] - 2026-04-27 — patch: keeper contract fix (require_tool_use stay_silent) + dashboard KpiStrip canonical sweep + observability + auth fail-closed
 
 Aggregate of 17 commits since v0.18.6 (11 feat / 4 fix / 1 test / 1 chore). No breaking API changes.

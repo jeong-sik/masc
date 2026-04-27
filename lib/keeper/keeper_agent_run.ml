@@ -2286,34 +2286,46 @@ let run_turn
            in
            search 0
          in
-         let actionable_signal_context =
+         (* Classify the most-specific actionable signal observed in the
+            prompt body, applying the P1 affordance-tool intersection so
+            keepers without the corresponding action tool degrade to
+            [No_actionable_signal] (cf. [keeper_contract_classifier.mli]
+            precedence: unclaimed > board > discovered).
+
+            The boolean [actionable_signal_context] is derived from the
+            kind for backward compatibility with downstream callers; the
+            kind itself flows into violation log/metric labels so
+            operators can see *which* signal class the LLM failed on
+            (issue #11266 Track 2c, Step 6b caller rewrite). *)
+         let actionable_signal_kind : Keeper_contract_classifier.actionable_signal =
            let haystack = user_message ^ "\n" ^ dynamic_context in
            let has_any_tool tools =
              List.exists (fun t -> List.mem t all_tool_names) tools
            in
-           (* P1 affordance-tool intersection: an actionable signal only
-              counts when the keeper actually has a tool that can act on
-              it.  Without this filter, presets like [social] see
-              "Unclaimed tasks=N" or board activity but lack the
-              corresponding action tools, so [Require_tool_use] becomes
-              unwinnable and the turn fails as [Failure_run_error]. *)
+           if has_positive_count_after_marker haystack "Unclaimed tasks"
+              && has_any_tool
+                   [ "keeper_task_claim"; "masc_claim_next";
+                     "masc_claim_task" ]
+           then Has_unclaimed_tasks
+           else if has_positive_count_after_marker haystack "### Board Activity"
+                   && has_any_tool
+                        [ "keeper_board_post"; "keeper_board_comment";
+                          "masc_broadcast"; "masc_keeper_msg" ]
+           then Has_board_activity
+           else if String_util.contains_substring_ci haystack "## Discovered Work"
+                   && has_any_tool
+                        [ "keeper_task_claim"; "masc_claim_next";
+                          "masc_claim_task";
+                          "keeper_board_post"; "masc_add_task";
+                          "keeper_tasks_audit" ]
+           then Has_discovered_work
+           else No_actionable_signal
+         in
+         let actionable_signal_context =
            Keeper_agent_tool_surface
              .turn_affordances_require_tool_gate_with_allowed
              ~allowed_tool_names:all_tool_names turn_affordances
-           || (String_util.contains_substring_ci haystack "## Discovered Work"
-               && has_any_tool
-                    [ "keeper_task_claim"; "masc_claim_next";
-                      "masc_claim_task";
-                      "keeper_board_post"; "masc_add_task";
-                      "keeper_tasks_audit" ])
-           || (has_positive_count_after_marker haystack "### Board Activity"
-               && has_any_tool
-                    [ "keeper_board_post"; "keeper_board_comment";
-                      "masc_broadcast"; "masc_keeper_msg" ])
-           || (has_positive_count_after_marker haystack "Unclaimed tasks"
-               && has_any_tool
-                    [ "keeper_task_claim"; "masc_claim_next";
-                      "masc_claim_task" ])
+           || Keeper_contract_classifier.is_actionable actionable_signal_kind
          in
          let actionable_tool_contract_violation_reason =
            Keeper_tool_disclosure.actionable_tool_contract_violation_reason
@@ -2403,16 +2415,22 @@ let run_turn
                  ~keeper_name:meta.name
                  ~has_current_task:(keeper_has_owned_active_task ())
                  ~contract_status;
+               let signal_label =
+                 Keeper_contract_classifier.actionable_signal_label
+                   actionable_signal_kind
+               in
                Log.Keeper.error
                  "keeper:%s required tool contract violated \
-                  (turn=%d, tools=%d). Rejecting no-op/passive actionable turn. \
+                  (turn=%d, tools=%d, signal=%s). Rejecting no-op/passive actionable turn. \
                  Reason: %s"
                  meta.name result.turns
                  (List.length actual_keeper_tool_names)
+                 signal_label
                  reason;
                Prometheus.inc_counter
                  Prometheus.metric_keeper_contract_violations
-                 ~labels:[ ("keeper_name", meta.name); ("kind", "passive") ]
+                 ~labels:[ ("keeper_name", meta.name); ("kind", "passive");
+                           ("signal", signal_label) ]
                  ();
                Error (contract_violation_error reason)
            | Ok (), None ->
@@ -2433,16 +2451,21 @@ let run_turn
                  | Keeper_tool_disclosure.Allow_text_or_tool -> "Allow_text_or_tool"
                  | Keeper_tool_disclosure.Require_tool_use -> "Require_tool_use"
                in
+               let signal_label =
+                 Keeper_contract_classifier.actionable_signal_label
+                   actionable_signal_kind
+               in
                Log.Keeper.error
                  "keeper:%s required tool contract violated \
-                  (turn=%d, tools=%d, contract=%s). \
+                  (turn=%d, tools=%d, contract=%s, signal=%s). \
                   Rejecting text-only response. Reason: %s"
                  meta.name result.turns
                  (List.length actual_keeper_tool_names)
-                 contract_str reason;
+                 contract_str signal_label reason;
                Prometheus.inc_counter
                  Prometheus.metric_keeper_contract_violations
-                 ~labels:[ ("keeper_name", meta.name); ("kind", "text_only") ]
+                 ~labels:[ ("keeper_name", meta.name); ("kind", "text_only");
+                           ("signal", signal_label) ]
                  ();
                Error (contract_violation_error reason)
          in

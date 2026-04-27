@@ -33,7 +33,6 @@ let () =
        so the keeper would fail-closed on every URL command. Labels: \
        keeper. A non-zero rate at boot indicates an operator should \
        seed the policy file before the keeper attempts network egress."
-    ~labels:["keeper"]
     ()
 
 let () =
@@ -46,7 +45,6 @@ let () =
        path, so the orphan file is silently inert and the keeper \
        fail-closes. Labels: keeper. Operator should cp the orphan into \
        the docker-path location and remove the host-direct file."
-    ~labels:["keeper"]
     ()
 
 let () =
@@ -61,7 +59,6 @@ let () =
        tool registry'. Labels: provider. Non-zero at boot means an \
        operator should either remove the provider from the cascade \
        or add an auto-construct entry."
-    ~labels:["provider"]
     ()
 
 let () =
@@ -74,7 +71,6 @@ let () =
        MASC_SYNC_CODEX_MCP_CONFIG=false). Operator must opt in or \
        the keeper will fail tool calls on this lane. Labels: \
        provider, env_flag."
-    ~labels:["provider"; "env_flag"]
     ()
 
 let requested_backend_mode () =
@@ -624,7 +620,7 @@ let audit_keeper_egress_policies (state : Mcp_server.server_state) =
         Sys.readdir keepers_dir
         |> Array.to_list
         |> List.filter_map (fun name ->
-            match Keeper_meta_store.read_meta config name with
+            match Keeper_types.read_meta config name with
             | Ok (Some meta) -> Some meta
             | Ok None -> None
             | Error err ->

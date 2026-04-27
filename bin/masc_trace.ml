@@ -50,6 +50,9 @@ let receipts_dir ~base_path ~keeper =
 let logs_dir ~base_path =
   List.fold_left Filename.concat base_path [ ".masc"; "logs" ]
 
+let tool_calls_dir ~base_path =
+  List.fold_left Filename.concat base_path [ ".masc"; "tool_calls" ]
+
 (** Naive substring check — avoids pulling in [Str] for one call. *)
 let contains_substring s sub =
   let lens = String.length s in
@@ -185,13 +188,107 @@ let dump_fsm_transitions ~base_path ~keeper ~turn_id =
           Printf.printf "%s [fsm] %s\n" ts msg)
         matches
 
+(** Scan [.masc/tool_calls/<YYYY-MM>/<DD>.jsonl] for tool call
+    rows whose [keeper] = our keeper and
+    [runtime_contract.keeper_turn_id] = our turn_id.
+
+    Schema (post Step 0a):
+    - top-level [keeper], [tool], [success], [duration_ms], [ts] (epoch float)
+    - nested [runtime_contract.keeper_turn_id] (int option)
+
+    Records pre Step 0a have [keeper_turn_id = null]; those are
+    skipped silently because there's nothing to correlate them
+    with. *)
+let dump_tool_calls ~base_path ~keeper ~turn_id =
+  let root = tool_calls_dir ~base_path in
+  if not (Sys.file_exists root) then ()
+  else
+    (* tool_calls/YYYY-MM/DD.jsonl — recurse one level. *)
+    let month_dirs =
+      Sys.readdir root
+      |> Array.to_list
+      |> List.filter (fun d ->
+             Sys.is_directory (Filename.concat root d))
+      |> List.sort compare
+    in
+    let files =
+      List.concat_map
+        (fun mdir ->
+          let mpath = Filename.concat root mdir in
+          Sys.readdir mpath
+          |> Array.to_list
+          |> List.filter (fun f -> Filename.check_suffix f ".jsonl")
+          |> List.sort compare
+          |> List.map (fun f -> Filename.concat mpath f))
+        month_dirs
+    in
+    let runtime_contract_int_field json key =
+      match Yojson.Safe.Util.member "runtime_contract" json with
+      | `Assoc _ as rc -> int_field rc key
+      | _ -> None
+    in
+    let matches =
+      List.concat_map
+        (fun path ->
+          read_lines path
+          |> List.filter_map (fun line ->
+                 try
+                   let json = Yojson.Safe.from_string line in
+                   let keeper_match =
+                     string_field json "keeper" = Some keeper
+                   in
+                   let turn_match =
+                     runtime_contract_int_field json
+                       "keeper_turn_id"
+                     = Some turn_id
+                   in
+                   if keeper_match && turn_match then Some json
+                   else None
+                 with _ -> None))
+        files
+    in
+    if matches = [] then
+      Printf.eprintf
+        "[masc-trace] no tool_calls for keeper=%s turn_id=%d \
+         (note: pre-Step-0a rows have keeper_turn_id=null and \
+         are unreachable by id)\n"
+        keeper turn_id
+    else
+      List.iter
+        (fun json ->
+          let tool =
+            Option.value (string_field json "tool") ~default:"-"
+          in
+          let success =
+            match Yojson.Safe.Util.member "success" json with
+            | `Bool b -> if b then "ok" else "fail"
+            | _ -> "-"
+          in
+          let duration_ms =
+            match Yojson.Safe.Util.member "duration_ms" json with
+            | `Float f -> Printf.sprintf "%.0f" f
+            | `Int n -> string_of_int n
+            | _ -> "-"
+          in
+          let ts =
+            match Yojson.Safe.Util.member "ts" json with
+            | `Float f -> Printf.sprintf "%.3f" f
+            | `Int n -> string_of_int n
+            | _ -> "-"
+          in
+          Printf.printf
+            "%s [tool %s] %s duration_ms=%s\n"
+            ts tool success duration_ms)
+        matches
+
 let () =
   match Array.to_list Sys.argv with
   | _ :: base_path :: keeper :: turn_id_str :: _ -> (
       match int_of_string_opt turn_id_str with
       | Some turn_id ->
           dump_receipts ~base_path ~keeper ~turn_id;
-          dump_fsm_transitions ~base_path ~keeper ~turn_id
+          dump_fsm_transitions ~base_path ~keeper ~turn_id;
+          dump_tool_calls ~base_path ~keeper ~turn_id
       | None ->
           prerr_endline "turn_id must be an integer";
           usage_and_exit ())

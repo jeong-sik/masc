@@ -1675,6 +1675,10 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                 (Option.map Keeper_id.Task_id.to_string
                    run_meta.current_task_id)
               (fun () ->
+                Keeper_turn_fsm.emit_transition
+                  ~keeper_name:meta.name ~turn_id:keeper_turn_id
+                  ~prev:Keeper_turn_fsm.Awaiting_provider
+                  Keeper_turn_fsm.Streaming;
                 Keeper_agent_run.run_turn ~config ~meta:run_meta ~base_dir
                   ~max_context:execution.max_context ~build_turn_prompt
                   ~user_message ~cascade_name:execution.cascade_name

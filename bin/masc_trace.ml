@@ -47,6 +47,23 @@ let receipts_dir ~base_path ~keeper =
   List.fold_left Filename.concat base_path
     [ ".masc"; "keepers"; keeper; "execution-receipts" ]
 
+let logs_dir ~base_path =
+  List.fold_left Filename.concat base_path [ ".masc"; "logs" ]
+
+(** Naive substring check — avoids pulling in [Str] for one call. *)
+let contains_substring s sub =
+  let lens = String.length s in
+  let lensub = String.length sub in
+  if lensub = 0 then true
+  else if lensub > lens then false
+  else
+    let rec loop i =
+      if i > lens - lensub then false
+      else if String.sub s i lensub = sub then true
+      else loop (i + 1)
+    in
+    loop 0
+
 let dump_receipts ~base_path ~keeper ~turn_id =
   let dir = receipts_dir ~base_path ~keeper in
   if not (Sys.file_exists dir) then begin
@@ -100,11 +117,81 @@ let dump_receipts ~base_path ~keeper ~turn_id =
             ended f cascade outcome reason)
         matches
 
+(** Scan [.masc/logs/system_log_*.jsonl] for [\[fsm:transition\]]
+    lines that match the given (keeper, turn_id).
+
+    Step 4b/c/d/g/i/j wired [Keeper_turn_fsm.emit_transition] at
+    every state transition in [run_keeper_cycle].  This widens
+    the [bin/masc-trace] source set so the timeline shows the
+    typed FSM steps next to the receipt rows. *)
+let dump_fsm_transitions ~base_path ~keeper ~turn_id =
+  let dir = logs_dir ~base_path in
+  if not (Sys.file_exists dir) then ()
+  else
+    let files =
+      Sys.readdir dir
+      |> Array.to_list
+      |> List.filter (fun f ->
+             Filename.check_suffix f ".jsonl"
+             && String.length f >= String.length "system_log_"
+             && String.sub f 0 (String.length "system_log_")
+                = "system_log_")
+      |> List.sort compare
+    in
+    let matches =
+      List.concat_map
+        (fun f ->
+          let path = Filename.concat dir f in
+          read_lines path
+          |> List.filter_map (fun line ->
+                 try
+                   let json = Yojson.Safe.from_string line in
+                   let keeper_match =
+                     string_field json "keeper_name" = Some keeper
+                   in
+                   let turn_match =
+                     int_field json "turn_id" = Some turn_id
+                   in
+                   let msg =
+                     Option.value
+                       (string_field json "message")
+                       ~default:""
+                   in
+                   let is_fsm =
+                     contains_substring msg "[fsm:transition]"
+                   in
+                   if keeper_match && turn_match && is_fsm then
+                     Some json
+                   else None
+                 with _ -> None))
+        files
+    in
+    if matches = [] then
+      Printf.eprintf
+        "[masc-trace] no [fsm:transition] lines for keeper=%s \
+         turn_id=%d\n"
+        keeper turn_id
+    else
+      List.iter
+        (fun json ->
+          let ts =
+            Option.value (string_field json "ts") ~default:"-"
+          in
+          let msg =
+            Option.value
+              (string_field json "message")
+              ~default:"-"
+          in
+          Printf.printf "%s [fsm] %s\n" ts msg)
+        matches
+
 let () =
   match Array.to_list Sys.argv with
   | _ :: base_path :: keeper :: turn_id_str :: _ -> (
       match int_of_string_opt turn_id_str with
-      | Some turn_id -> dump_receipts ~base_path ~keeper ~turn_id
+      | Some turn_id ->
+          dump_receipts ~base_path ~keeper ~turn_id;
+          dump_fsm_transitions ~base_path ~keeper ~turn_id
       | None ->
           prerr_endline "turn_id must be an integer";
           usage_and_exit ())

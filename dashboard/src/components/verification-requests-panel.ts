@@ -22,6 +22,7 @@ import {
   type VerificationRequestVerdict,
   type VerificationRequestsResponse,
 } from '../api/dashboard'
+import { Btn } from './btn'
 import { Card } from './common/card'
 import { EmptyState } from './common/empty-state'
 import { ErrorState, LoadingState } from './common/feedback-state'
@@ -570,12 +571,9 @@ export function VerificationRequestsPanel() {
   return html`
     <div class="flex flex-col gap-4">
       <div class="flex items-center gap-3 flex-wrap">
-        <button
-          class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-3 py-1 text-xs text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)]"
-          onClick=${() => void loadData(resource)}
-        >
+        <${Btn} onClick=${() => void loadData(resource)}>
           새로고침
-        </button>
+        <//>
         ${current.loading
           ? html`<span class="text-xs text-[var(--color-fg-muted)]" role="status">로딩 중...</span>`
           : null}

@@ -72,12 +72,6 @@ let help_doc_refs name =
 let help_prompt_hints name =
   if String.equal name "masc_tool_help" then
     [ "Use prompt 'tool_help' when the caller needs a guided explanation." ]
-  else if
-    String.starts_with ~prefix:"masc_operation_" name
-    || String.starts_with ~prefix:"masc_dispatch_" name
-    || String.starts_with ~prefix:"masc_observe_" name
-  then
-    [ "Use prompt 'command_truth' for managed execution evidence." ]
   else
     []
 
@@ -157,7 +151,7 @@ let manual_help_entry name =
               "docs/COMMAND-PLANE-RUNBOOK.md";
               "docs/BENCHMARK-RUNBOOK.md";
             ];
-          prompt_hints = [ "Use prompt 'command_truth' to inspect resulting execution evidence." ];
+          prompt_hints = [];
         }
   | "masc_tool_admin_snapshot" ->
       Some

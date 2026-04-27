@@ -251,7 +251,6 @@ let adapter_canonical_name_of_provider_kind
   | Glm -> cn_glm
   | Claude_code -> cn_claude
   | Codex_cli -> cn_codex
-  | _ -> cn_codex_api
 
 (** Single source of truth for all provider/runtime adapters.
     Simple names ([claude], [codex], [gemini]) are CLI runtimes.
@@ -1419,8 +1418,6 @@ let adapter_of_provider_config (cfg : Llm_provider.Provider_config.t) =
   | Glm
   | OpenAI_compat ->
       resolve_adapter_by_cascade_prefix (provider_label_from_registry cfg)
-  | _ ->
-      resolve_adapter_by_cascade_prefix (provider_label_from_registry cfg)
 
 let provider_label_of_config (cfg : Llm_provider.Provider_config.t) =
   match adapter_of_provider_config cfg with
@@ -1552,8 +1549,7 @@ let docker_auth_env_keys_of_provider_config (cfg : Llm_provider.Provider_config.
   | Llm_provider.Provider_config.Glm
   | Llm_provider.Provider_config.DashScope
   | Llm_provider.Provider_config.Claude_code
-  | Llm_provider.Provider_config.Codex_cli
-  | _ ->
+  | Llm_provider.Provider_config.Codex_cli ->
       auth_env_keys_of_provider_kind cfg.kind
 
 let all_auth_env_keys () : string list =

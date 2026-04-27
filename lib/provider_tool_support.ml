@@ -38,13 +38,12 @@ let oas_capabilities_of_config (provider_cfg : Llm_provider.Provider_config.t) =
     | Kimi -> Llm_provider.Capabilities.kimi_capabilities
     | Glm -> Llm_provider.Capabilities.glm_capabilities
     | Gemini -> Llm_provider.Capabilities.gemini_capabilities
-    | DashScope -> Llm_provider.Capabilities.dashscope_capabilities
     | OpenAI_compat -> Llm_provider.Capabilities.openai_chat_capabilities
     | Claude_code -> Llm_provider.Capabilities.claude_code_capabilities
     | Gemini_cli -> Llm_provider.Capabilities.gemini_cli_capabilities
     | Kimi_cli -> Llm_provider.Capabilities.kimi_cli_capabilities
     | Codex_cli -> Llm_provider.Capabilities.codex_cli_capabilities
-    | _ -> Llm_provider.Capabilities.openai_chat_capabilities
+    | DashScope -> Llm_provider.Capabilities.dashscope_capabilities
   in
   let caps =
     match provider_cfg.kind with

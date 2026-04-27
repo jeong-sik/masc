@@ -109,11 +109,14 @@ check "V9-masc-llama-envvar" 4 \
   "lib/"
 
 # V10: OAS-owned provider filters must not be re-owned outside compatibility loaders/scrubbers.
+# The .mli of keeper_meta_json_scrub is the public interface for the already-allowed
+# .ml; the doc-comment legitimately surfaces the legacy key name in its API contract.
 check_forbidden_outside "V10-provider-filter-ownership" \
   'allowed_providers' \
   "lib/" \
   "lib/keeper/keeper_types.ml" \
-  "lib/keeper/keeper_meta_json_scrub.ml"
+  "lib/keeper/keeper_meta_json_scrub.ml" \
+  "lib/keeper/keeper_meta_json_scrub.mli"
 
 # V11: proof-store layout knowledge must stay inside the proof reader adapter.
 check_forbidden_outside "V11-proof-store-layout" \

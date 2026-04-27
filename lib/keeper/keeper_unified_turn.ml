@@ -1058,6 +1058,10 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
      pre-dispatch checks (see turn_livelock guard below), leaving silent
      skip paths without a turn correlator. *)
   let keeper_turn_id = meta.runtime.usage.total_turns in
+  Keeper_turn_fsm.emit_transition
+    ~keeper_name:meta.name ~turn_id:keeper_turn_id
+    ~prev:Keeper_turn_fsm.Idle
+    Keeper_turn_fsm.Phase_gating;
   match Keeper_registry.get_phase ~base_path:registry_base_path meta.name with
   | Some phase when not (Keeper_state_machine.can_execute_turn phase) ->
       let phase_string = Keeper_state_machine.phase_to_string phase in
@@ -2793,6 +2797,10 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
            | Oas_worker.Completed ->
              Keeper_registry.reset_turn_failures ~base_path:config.base_path
                updated_meta.name);
+          Keeper_turn_fsm.emit_transition
+            ~keeper_name:meta.name ~turn_id:keeper_turn_id
+            ~prev:Keeper_turn_fsm.Completing
+            Keeper_turn_fsm.Done;
           Ok updated_meta))
 
 let run_unified_turn = run_keeper_cycle

@@ -144,6 +144,54 @@ fallback_cascade = "big_three"
         "big_three"
         (json |> member "ollama_only_fallback_cascade" |> to_string)
 
+let test_keep_alive_field_is_parsed () =
+  match
+    Masc_mcp.Cascade_toml_materializer.render_toml_string_to_json_string
+      {|
+[ollama_only]
+models = ["ollama:qwen3.6:27b-coding-nvfp4"]
+keep_alive = "-1"
+|}
+  with
+  | Error msg -> failf "expected keep_alive to parse, got: %s" msg
+  | Ok json_str ->
+      let json = Yojson.Safe.from_string json_str in
+      check string "keep_alive key is rendered"
+        "-1"
+        (json |> member "ollama_only_keep_alive" |> to_string)
+
+let test_keep_alive_duration_string_is_parsed () =
+  match
+    Masc_mcp.Cascade_toml_materializer.render_toml_string_to_json_string
+      {|
+[ollama_only]
+models = ["ollama:qwen3.6:27b-coding-nvfp4"]
+keep_alive = "30m"
+|}
+  with
+  | Error msg -> failf "expected keep_alive duration string to parse, got: %s" msg
+  | Ok json_str ->
+      let json = Yojson.Safe.from_string json_str in
+      check string "keep_alive duration is rendered as-is"
+        "30m"
+        (json |> member "ollama_only_keep_alive" |> to_string)
+
+let test_keep_alive_absent_is_backward_compatible () =
+  match
+    Masc_mcp.Cascade_toml_materializer.render_toml_string_to_json_string
+      {|
+[ollama_only]
+models = ["ollama:qwen3.6:27b-coding-nvfp4"]
+|}
+  with
+  | Error msg -> failf "minimal profile must parse, got: %s" msg
+  | Ok json_str ->
+      let json = Yojson.Safe.from_string json_str in
+      check bool "keep_alive key absent when not declared" true
+        (match json |> member "ollama_only_keep_alive" with
+         | `Null -> true
+         | _ -> false)
+
 let test_fallback_cascade_absent_is_backward_compatible () =
   match
     Masc_mcp.Cascade_toml_materializer.render_toml_string_to_json_string
@@ -356,6 +404,12 @@ let () =
             test_fallback_cascade_field_is_parsed;
           test_case "fallback_cascade absent is backward compatible" `Quick
             test_fallback_cascade_absent_is_backward_compatible;
+          test_case "keep_alive field is parsed" `Quick
+            test_keep_alive_field_is_parsed;
+          test_case "keep_alive duration string is parsed" `Quick
+            test_keep_alive_duration_string_is_parsed;
+          test_case "keep_alive absent is backward compatible" `Quick
+            test_keep_alive_absent_is_backward_compatible;
           test_case "loader catalog exposes fallback_cascade" `Quick
             test_loader_catalog_exposes_fallback_cascade;
           test_case "keeper profile drops unknown fallback target" `Quick

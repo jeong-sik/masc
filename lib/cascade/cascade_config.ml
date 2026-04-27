@@ -38,7 +38,7 @@ let default_registry = Llm_provider.Provider_registry.default ()
 let headers_with_auth ~(kind : Llm_provider.Provider_config.provider_kind) ~api_key =
   let base = [("Content-Type", "application/json")] in
   if api_key = "" then base
-  else match kind with
+    else match kind with
     | Anthropic | Kimi ->
         ("x-api-key", api_key)
         :: ("anthropic-version", "2023-06-01")

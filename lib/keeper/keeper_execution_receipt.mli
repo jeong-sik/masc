@@ -1,3 +1,25 @@
+(** Receipt outcome classification. Tri-state matches the TLA+ spec
+    [ReceiptOutcomeSet = {"receipt_done", "receipt_failed", "receipt_cancelled"}]
+    rather than the previous binary string. Cancelled turns must be
+    distinguished from errors so that dashboards and replay decoders do
+    not silently fold cancellations into failures. See [Spec:
+    KeeperOutcomesConservation.tla], invariant [ReceiptMatchesState]. *)
+type outcome_kind = [ `Ok | `Error | `Cancelled ]
+
+val outcome_kind_to_string : outcome_kind -> string
+(** Stable serialisation: [`Ok -> "ok"], [`Error -> "error"],
+    [`Cancelled -> "cancelled"]. Used at the JSON boundary while the
+    receipt record still stores the legacy string form. *)
+
+val outcome_kind_of_string : string -> outcome_kind option
+(** Parse the legacy string form. Returns [None] for unknown values so
+    callers can decide whether to fail-closed or surface as [`Error]. *)
+
+val outcome_kind_is_terminal_success : outcome_kind -> bool
+(** [true] only for [`Ok]. Cancelled turns are NOT successful for the
+    purpose of dashboard "healthy" classification or action_radius
+    success accounting. *)
+
 type tool_surface =
   { turn_lane : string
   ; tool_surface_class : string

@@ -1079,6 +1079,11 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
         ~trajectory_outcome:(Trajectory.Gated terminal_reason_code)
         ~keeper_turn_id
         ();
+      Keeper_turn_fsm.emit_transition
+        ~keeper_name:meta.name ~turn_id:keeper_turn_id
+        ~prev:Keeper_turn_fsm.Phase_gating
+        (Keeper_turn_fsm.Cancelled
+           Keeper_turn_fsm.Cancelled_phase_gate_close);
       Ok meta
   | phase_opt ->
       (* State-aware cascade routing (TLA+ KeeperCoreTriad.SelectCascade).

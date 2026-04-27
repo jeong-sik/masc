@@ -58,3 +58,24 @@ val turn_state_label : turn_state -> string
 val pp_cancel_reason : Format.formatter -> cancel_reason -> unit
 val pp_failure_reason : Format.formatter -> failure_reason -> unit
 val pp_turn_state : Format.formatter -> turn_state -> unit
+
+val emit_transition :
+  keeper_name:string ->
+  turn_id:int ->
+  ?prev:turn_state ->
+  turn_state ->
+  unit
+(** Emit a structured FSM transition log line.
+
+    Step 4b kicks off the call-site adoption stack: this is an
+    observe-only secondary emit alongside the existing receipt
+    path.  The runtime branch shape is unchanged; the line
+    surfaces in [bin/masc-trace] via the [turn_id] correlator
+    wired in Step 0a (#11154 / #11156 / #11159) so an operator
+    can see the state the runtime *intended* without parsing
+    the receipt JSON.
+
+    The line format is [\[fsm:transition\] <prev> -> <state>];
+    a missing [?prev] renders as ["-"].  Stable for operator
+    regex parsing and pinned by the [test_keeper_turn_fsm_emit]
+    sentinel so a future signature drift fails the build. *)

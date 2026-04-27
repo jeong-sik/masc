@@ -84,3 +84,13 @@ let pp_failure_reason fmt = function
 
 let pp_turn_state fmt s =
   Format.pp_print_string fmt (turn_state_label s)
+
+let emit_transition ~keeper_name ~turn_id ?prev state =
+  let prev_label =
+    match prev with
+    | Some s -> turn_state_label s
+    | None -> "-"
+  in
+  let state_label = turn_state_label state in
+  Log.Keeper.info ~keeper_name ~turn_id
+    "[fsm:transition] %s -> %s" prev_label state_label

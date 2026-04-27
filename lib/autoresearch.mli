@@ -176,6 +176,20 @@ val prepare_managed_worktree :
   base_path:string -> source_workdir:string -> loop_id:string ->
   (string * string * string list, string) result
 
+(** [cleanup_managed_worktree ~base_path ~source_workdir ~loop_id]
+    removes the managed worktree directory under
+    [.masc/autoresearch/<loop_id>/] and its [autoresearch/<loop_id>]
+    branch. Idempotent — missing dir or branch returns [Ok] without
+    invoking git. Returns [(workdir_removed, branch_removed)].
+
+    #10892: hooked into terminal-state transitions so
+    [.masc/autoresearch/] does not leak ~91MB per completed loop. *)
+val cleanup_managed_worktree :
+  base_path:string -> source_workdir:string -> loop_id:string ->
+  (bool * bool, string) result
+
+val local_branch_exists : repo_root:string -> string -> bool
+
 (** {1 File} *)
 
 val has_path_traversal : string -> bool
@@ -215,7 +229,11 @@ val record_cycle :
   loop_state * cycle_record
 val target_reached : loop_state -> bool
 val completion_reason : loop_state -> string option
-val complete_if_finished : loop_state -> loop_state
+(** Transition a [Running] state to [Completed] when the cycle
+    budget is exhausted or the target score is reached. Best-effort
+    cleanup of the managed worktree directory and branch runs on
+    the terminal transition (#10892). *)
+val complete_if_finished : base_path:string -> loop_state -> loop_state
 val should_continue : loop_state -> bool
 val stop_loop : base_path:string -> ?reason:string -> string -> loop_state option
 val linked_status_json : base_path:string -> execution_link -> Yojson.Safe.t

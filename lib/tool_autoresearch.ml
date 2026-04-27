@@ -208,6 +208,7 @@ let setup_running_loop (ctx : context) (params : start_params) =
           | Ok baseline ->
               let state =
                 Autoresearch.complete_if_finished
+                  ~base_path:ctx.base_path
                   { state with baseline; best_score = baseline; source_workdir }
               in
               Ok (register_loop ctx state))

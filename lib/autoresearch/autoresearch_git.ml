@@ -221,3 +221,47 @@ let prepare_managed_worktree ~base_path ~source_workdir ~loop_id =
               (Printf.sprintf "failed to create managed worktree: %s"
                  (String.concat "\n" lines))
       end
+
+(** Check whether [branch] exists as a local ref under [repo_root].
+    Used by [cleanup_managed_worktree] before invoking
+    [git branch -D] so the no-op case stays silent. *)
+let local_branch_exists ~repo_root branch =
+  match
+    run_capture_lines ~workdir:repo_root
+      [ "show-ref"; "--verify"; "--quiet"; "refs/heads/" ^ branch ]
+  with
+  | Unix.WEXITED 0, _ -> true
+  | _ -> false
+
+(** Remove the managed worktree directory and its branch.
+    Idempotent — missing dir or missing branch returns [Ok] without
+    invoking git.  Returns [(workdir_removed, branch_removed)] so
+    callers can decide whether to emit a noop log line.
+
+    #10892: invoked from autoresearch loop terminal-state hooks
+    ([Completed], [Error]) so the 91MB-per-run worktree directories
+    in [.masc/autoresearch/<loop>/] do not leak. The dashboard
+    [delete_loop] HTTP path also uses this helper (DRY). *)
+let cleanup_managed_worktree ~base_path ~source_workdir ~loop_id =
+  match git_top_level ~workdir:source_workdir with
+  | Error _ as err -> err
+  | Ok repo_root ->
+    let workdir = Autoresearch_storage.managed_worktree_dir ~base_path loop_id in
+    let branch = managed_branch_name loop_id in
+    let workdir_removed =
+      if Sys.file_exists workdir then begin
+        ignore
+          (run_capture_lines ~workdir:repo_root
+             [ "worktree"; "remove"; "--force"; workdir ]);
+        true
+      end else false
+    in
+    let branch_removed =
+      if local_branch_exists ~repo_root branch then begin
+        ignore
+          (run_capture_lines ~workdir:repo_root
+             [ "branch"; "-D"; branch ]);
+        true
+      end else false
+    in
+    Result.ok (workdir_removed, branch_removed)

@@ -115,6 +115,8 @@ let git_current_branch = Autoresearch_git.git_current_branch
 let git_is_dirty = Autoresearch_git.git_is_dirty
 let managed_branch_name = Autoresearch_git.managed_branch_name
 let prepare_managed_worktree = Autoresearch_git.prepare_managed_worktree
+let cleanup_managed_worktree = Autoresearch_git.cleanup_managed_worktree
+let local_branch_exists = Autoresearch_git.local_branch_exists
 
 (* ================================================================ *)
 (* Re-exports: File                                                  *)
@@ -261,7 +263,34 @@ let completion_reason (state : loop_state) =
   else
     None
 
-let complete_if_finished (state : loop_state) =
+(** #10892: best-effort cleanup of managed worktree on terminal
+    transition.  Idempotent and never raises — failure logs a warn
+    and returns unit so the caller's state machine progresses
+    regardless.  Uses the loop's [source_workdir] to discover the
+    repo root via [git_top_level]. *)
+let cleanup_terminal_artifacts_best_effort ~base_path (state : loop_state) =
+  try
+    match
+      Autoresearch_git.cleanup_managed_worktree
+        ~base_path
+        ~source_workdir:state.source_workdir
+        ~loop_id:state.loop_id
+    with
+    | Ok (workdir_removed, branch_removed) when workdir_removed || branch_removed ->
+      Log.Autoresearch.info
+        "loop %s terminal cleanup: workdir=%b branch=%b"
+        state.loop_id workdir_removed branch_removed
+    | Ok _ -> ()  (* nothing to clean — already gone *)
+    | Error msg ->
+      Log.Autoresearch.warn
+        "loop %s terminal cleanup skipped (best-effort, suppressed): %s"
+        state.loop_id msg
+  with exn ->
+    Log.Autoresearch.warn
+      "loop %s terminal cleanup raised (best-effort, suppressed): %s"
+      state.loop_id (Printexc.to_string exn)
+
+let complete_if_finished ~base_path (state : loop_state) =
   match state.status, completion_reason state with
   | Running, Some "target_score reached" ->
       let target =
@@ -269,14 +298,22 @@ let complete_if_finished (state : loop_state) =
         | Some value -> Printf.sprintf "%.4f" value
         | None -> "n/a"
       in
-      add_insight
-        { state with status = Completed; updated_at = Time_compat.now () }
-        (Printf.sprintf "Target reached at cycle %d (target=%s, best=%.4f)"
-           state.current_cycle target state.best_score)
+      let new_state =
+        add_insight
+          { state with status = Completed; updated_at = Time_compat.now () }
+          (Printf.sprintf "Target reached at cycle %d (target=%s, best=%.4f)"
+             state.current_cycle target state.best_score)
+      in
+      cleanup_terminal_artifacts_best_effort ~base_path new_state;
+      new_state
   | Running, Some reason ->
-      add_insight
-        { state with status = Completed; updated_at = Time_compat.now () }
-        (Printf.sprintf "Autoresearch completed: %s" reason)
+      let new_state =
+        add_insight
+          { state with status = Completed; updated_at = Time_compat.now () }
+          (Printf.sprintf "Autoresearch completed: %s" reason)
+      in
+      cleanup_terminal_artifacts_best_effort ~base_path new_state;
+      new_state
   | _ -> state
 
 (** Check if the loop should continue. *)

@@ -604,22 +604,18 @@ let delete_loop_json ~(base_path : string) ~(loop_id : string) ~(requester_agent
           Hashtbl.remove Tool_autoresearch_registry.pending_hypotheses loop_id;
           Hashtbl.remove Tool_autoresearch_registry.custom_generators loop_id;
           delete_session_link ~base_path loop_id;
+          (* #10892: shared cleanup helper. The auto-cleanup hook in
+             [Autoresearch.complete_if_finished] uses the same path
+             so the explicit delete is now idempotent w.r.t. the
+             auto path — both safe to call on already-cleaned
+             workdirs. *)
           (match
-             Autoresearch.git_top_level ~workdir:state.source_workdir
+             Autoresearch.cleanup_managed_worktree
+               ~base_path
+               ~source_workdir:state.source_workdir
+               ~loop_id
            with
-           | Ok repo_root ->
-              let workdir =
-                Autoresearch.managed_worktree_dir ~base_path loop_id
-              in
-              if Sys.file_exists workdir then
-                ignore
-                  (Autoresearch.run_capture_lines ~workdir:repo_root
-                     [ "worktree"; "remove"; "--force"; workdir ]);
-              let branch = Autoresearch.managed_branch_name loop_id in
-              if git_branch_exists ~repo_root branch then
-                ignore
-                  (Autoresearch.run_capture_lines ~workdir:repo_root
-                     [ "branch"; "-D"; branch ])
+           | Ok _ -> ()
            | Error msg ->
                Log.Autoresearch.warn
                  "delete loop git cleanup skipped for %s: %s" loop_id msg);

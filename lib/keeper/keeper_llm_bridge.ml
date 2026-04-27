@@ -32,11 +32,28 @@ let run_with_timeout_and_fallback ~timeout_s fn =
   with
   | Eio.Time.Timeout ->
     let wall = elapsed () in
-    (* #9639/#9662: Eio cancel is cooperative. When the fiber blocks inside
-       an uncancellable region (native HTTP bulk read, syscall, non-yielding
-       loop), [with_timeout_exn] fires but the fiber continues until the
-       next yield. Surface that overshoot as a structured warn so the
-       condition is observable instead of silently inflating wall time. *)
+    (* #9639/#9662: Eio cancel is cooperative — [with_timeout_exn] fires
+       but the fiber must reach a cancel point (single_read, yield, etc.)
+       to actually interrupt. Surface overshoot as a structured warn so
+       stalls remain observable instead of silently inflating wall time.
+
+       2026-04-27 correction: the original "uncancellable region (native
+       HTTP bulk read, syscall, non-yielding loop)" diagnosis was a
+       guess and has been *falsified* by four raw-TCP reproducers ported
+       to the OAS regression guard (jeong-sik/oas#1210,
+       test/test_eio_cancellability.ml).  Buf_read.line + slow drip and
+       read_sse + fast stream with trivial / sleeping / CPU-bound on_data
+       callbacks all exit Eio.Time.with_timeout_exn within 1-2ms.  The
+       layer producing prod hangs (>=1170s) is *not* yet identified;
+       remaining suspects are caller on_event handlers, post_sync
+       take_all + connection-not-closed, Switch cleanup, or TLS.
+
+       Action: do NOT add yield points to OAS read_sse / Buf_read based
+       on the original guess — that wrong-layer fix was almost shipped.
+       During the next overshoot, run
+       ~/me/scripts/oas-hung-keeper-dump.sh to capture the fiber stack
+       and identify the real layer.  Cross-ref:
+       jeong-sik/me planning/claude-plans/oas-execution-cancellability.md *)
     let deadline =
       Timeout_policy.Deadline.make
         ~layer:Timeout_policy.Layer.Oas_bridge

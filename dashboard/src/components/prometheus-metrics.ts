@@ -156,7 +156,7 @@ function typeBadge(type: string): ReturnType<typeof html> {
     gauge: 'bg-[var(--ok-10)] text-[var(--ok)]',
     summary: 'bg-[var(--warn-10)] text-[var(--warn)]',
   }
-  return html`<span class="inline-block rounded px-1.5 py-0.5 text-3xs font-mono ${colors[type] ?? 'bg-[var(--white-5)] text-[var(--text-muted)]'}">${type}</span>`
+  return html`<span class="inline-block rounded px-1.5 py-0.5 text-3xs font-mono ${colors[type] ?? 'bg-[var(--white-5)] text-[var(--color-fg-muted)]'}">${type}</span>`
 }
 
 function labelPills(labels: Record<string, string>): ReturnType<typeof html> | null {
@@ -185,7 +185,7 @@ function labelPills(labels: Record<string, string>): ReturnType<typeof html> | n
         }}
       >${k}=${v}</button>`
     }
-    return html`<span class="rounded bg-[var(--white-5)] px-1 py-0.5 text-3xs text-[var(--text-muted)] font-mono">${k}=${v}</span>`
+    return html`<span class="rounded bg-[var(--white-5)] px-1 py-0.5 text-3xs text-[var(--color-fg-muted)] font-mono">${k}=${v}</span>`
   })}</span>`
 }
 
@@ -294,14 +294,14 @@ export function PrometheusMetrics() {
       <div class="flex items-center justify-between">
         <div>
           <h2 class="text-lg font-semibold text-[var(--text-heading)]">Prometheus 메트릭</h2>
-          <p class="text-xs text-[var(--text-muted)]">
+          <p class="text-xs text-[var(--color-fg-muted)]">
             /metrics endpoint (${totalMetrics}개 메트릭, ${totalSamples}개 샘플, ${nonZeroSamples}개 활성)
           </p>
         </div>
         <div class="flex items-center gap-3">
-          ${lastUpdated.value && html`<span class="text-xs text-[var(--text-muted)]">${lastUpdated.value}</span>`}
+          ${lastUpdated.value && html`<span class="text-xs text-[var(--color-fg-muted)]">${lastUpdated.value}</span>`}
           <button
-            class="rounded border border-[var(--card-border)] bg-[var(--color-bg-surface)] px-3 py-1.5 text-xs text-[var(--text-body)] hover:bg-[var(--color-bg-panel-alt)] transition-colors"
+            class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-1.5 text-xs text-[var(--text-body)] hover:bg-[var(--color-bg-panel-alt)] transition-colors"
             onClick=${refresh}
             disabled=${loading.value}
           >
@@ -325,7 +325,7 @@ export function PrometheusMetrics() {
       />
 
       ${query && html`
-        <span class="text-xs text-[var(--text-muted)]">
+        <span class="text-xs text-[var(--color-fg-muted)]">
           ${totalMetrics} / ${metrics.value.length} 메트릭 일치
         </span>
       `}
@@ -351,12 +351,12 @@ export function PrometheusMetrics() {
               onClick=${() => toggleCategory(cat)}
             >
               <div class="flex items-center gap-2">
-                <span class="text-xs font-mono ${expanded ? 'text-[var(--text-body)]' : 'text-[var(--text-muted)]'}">${expanded ? '▼' : '▶'}</span>
+                <span class="text-xs font-mono ${expanded ? 'text-[var(--text-body)]' : 'text-[var(--color-fg-muted)]'}">${expanded ? '▼' : '▶'}</span>
                 <span class="font-medium text-[var(--text-heading)]">${meta.label}</span>
-                <span class="text-xs text-[var(--text-muted)]">${meta.description}</span>
+                <span class="text-xs text-[var(--color-fg-muted)]">${meta.description}</span>
               </div>
               <div class="flex items-center gap-2">
-                <span class="rounded-sm bg-[var(--color-bg-panel-alt)] px-2 py-0.5 text-3xs text-[var(--text-muted)]">
+                <span class="rounded-sm bg-[var(--color-bg-panel-alt)] px-2 py-0.5 text-3xs text-[var(--color-fg-muted)]">
                   ${catMetrics.length}개 메트릭
                 </span>
                 ${activeSamples > 0 && html`
@@ -371,7 +371,7 @@ export function PrometheusMetrics() {
               <div class="mt-3 overflow-x-auto">
                 <table class="w-full text-xs" aria-label="Prometheus 메트릭 시계열">
                   <thead>
-                    <tr class="border-b border-[var(--card-border)] text-[var(--text-muted)]">
+                    <tr class="border-b border-[var(--color-border-default)] text-[var(--color-fg-muted)]">
                       <th scope="col" class="pb-2 text-left font-normal">메트릭</th>
                       <th scope="col" class="pb-2 text-left font-normal w-16">유형</th>
                       <th scope="col" class="pb-2 text-right font-normal w-24">값</th>
@@ -381,23 +381,23 @@ export function PrometheusMetrics() {
                     ${catMetrics.flatMap(m =>
                       m.samples.length === 0
                         ? [html`
-                            <tr key="${m.name}" class="border-b border-[var(--card-border)]/30 hover:bg-[var(--color-bg-surface)]">
+                            <tr key="${m.name}" class="border-b border-[var(--color-border-default)]/30 hover:bg-[var(--color-bg-surface)]">
                               <td class="py-1.5 font-mono text-[var(--text-body)]">
                                 ${m.name}
-                                <div class="text-3xs text-[var(--text-muted)] font-sans">${m.help}</div>
+                                <div class="text-3xs text-[var(--color-fg-muted)] font-sans">${m.help}</div>
                               </td>
                               <td class="py-1.5">${typeBadge(m.type)}</td>
-                              <td class="py-1.5 text-right text-[var(--text-muted)]">--</td>
+                              <td class="py-1.5 text-right text-[var(--color-fg-muted)]">--</td>
                             </tr>
                           `]
                         : m.samples.map((s, i) => html`
-                            <tr key="${s.name}-${i}" class="border-b border-[var(--card-border)]/30 hover:bg-[var(--color-bg-surface)]">
-                              <td class="py-1.5 font-mono ${s.value !== 0 ? 'text-[var(--text-body)]' : 'text-[var(--text-muted)]'}">
+                            <tr key="${s.name}-${i}" class="border-b border-[var(--color-border-default)]/30 hover:bg-[var(--color-bg-surface)]">
+                              <td class="py-1.5 font-mono ${s.value !== 0 ? 'text-[var(--text-body)]' : 'text-[var(--color-fg-muted)]'}">
                                 ${s.name}${labelPills(s.labels)}
-                                ${i === 0 && html`<div class="text-3xs text-[var(--text-muted)] font-sans">${m.help}</div>`}
+                                ${i === 0 && html`<div class="text-3xs text-[var(--color-fg-muted)] font-sans">${m.help}</div>`}
                               </td>
                               <td class="py-1.5">${i === 0 ? typeBadge(m.type) : null}</td>
-                              <td class="py-1.5 text-right font-mono tabular-nums ${s.value !== 0 ? 'text-[var(--ok)]' : 'text-[var(--text-muted)]'}">
+                              <td class="py-1.5 text-right font-mono tabular-nums ${s.value !== 0 ? 'text-[var(--ok)]' : 'text-[var(--color-fg-muted)]'}">
                                 ${fmtValue(s.value, m.type, s.name)}
                               </td>
                             </tr>

@@ -1,0 +1,564 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MASC — Keeper Detail (drift coverage W07)</title>
+  <!-- tokens.generated.css is the SSOT (do not edit; regenerate via
+       `pnpm tokens:build` from dashboard/). This page is preview-only
+       and mirrors what dashboard/src/styles/keeper-detail.css ships in
+       production. var() only; raw hex/rgba is allowed only inside the
+       Phase 2 inventory rows that document the escapees by design. -->
+  <link rel="stylesheet" href="../source_styles/tokens.generated.css" />
+  <link rel="stylesheet" href="_preview.css" />
+  <style>
+    /* ──────────────────────────────────────────────────────────────────
+       Local mirrors — preview-only. Each rule below traces back to a
+       specific line in dashboard/src/styles/keeper-detail.css. tokens
+       come from tokens.generated.css; the one un-tokenized literal
+       (rgba(0,0,0,0.6) scrim, --z-overlay-keeper:3020 fallback) is
+       called out in the Phase 2 catalog at the bottom.
+       ────────────────────────────────────────────────────────────── */
+
+    /* mirrors keeper-detail.css:L5–L15 (@utility keeper-detail-overlay).
+       Production rule pinned: position:fixed; inset:0; bg:rgba(0,0,0,.6);
+       backdrop-filter:blur(4px); z-index:var(--z-overlay-keeper,3020);
+       isolation:isolate; centred flex.
+
+       Preview note: in production the overlay covers the viewport. To
+       keep this preview embedded inline (so you can compare it next to
+       the cascade banner and the Phase 2 catalog) we render it inside a
+       620×420 stage with position:absolute substituted for fixed, plus
+       a faux dashboard underlay that exercises the blur. The class
+       ".kd-overlay" is byte-identical to the production declaration
+       except for those two preview-only adjustments. */
+    .kd-stage {
+      position: relative;
+      width: 100%;
+      height: 420px;
+      border: 1px solid var(--color-border-default);
+      border-radius: var(--r-1);
+      overflow: hidden;
+      background: var(--color-bg-page);
+    }
+    .kd-stage .underlay {
+      position: absolute; inset: 0;
+      padding: 20px;
+      display: grid;
+      grid-template-columns: 180px 1fr;
+      gap: 14px;
+      font-family: var(--font-mono);
+      font-size: var(--fs-11);
+      color: var(--color-fg-muted);
+    }
+    .kd-stage .underlay .nav,
+    .kd-stage .underlay .body {
+      background: var(--color-bg-surface);
+      border: 1px solid var(--color-border-default);
+      border-radius: var(--r-1);
+      padding: 12px 14px;
+      line-height: 1.55;
+    }
+    .kd-stage .underlay .row {
+      display: flex; justify-content: space-between;
+      padding: 3px 0;
+      border-bottom: 1px dashed var(--color-border-default);
+    }
+    .kd-stage .underlay .row:last-child { border-bottom: 0; }
+    .kd-stage .underlay .row .v { color: var(--color-fg-secondary); }
+
+    /* Local var-only mirror so the live preview demonstrates the
+       overlay without re-introducing the un-tokenized scrim literal.
+       The literal itself is catalogued in the Phase 2 table below
+       and reproduced verbatim in the source-trace pre-block. */
+    :root {
+      --kd-scrim-preview: var(--scrim-strong, rgba(0, 0, 0, 0.6));
+    }
+    .kd-overlay {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: var(--kd-scrim-preview);     /* mirrors keeper-detail.css:L8 (rgba(0,0,0,0.6)) */
+      backdrop-filter: blur(4px);              /* mirrors keeper-detail.css:L9 */
+      z-index: var(--z-overlay-keeper, 3020);  /* mirrors keeper-detail.css:L10 */
+      display: flex;                           /* mirrors keeper-detail.css:L11 */
+      align-items: center;                     /* mirrors keeper-detail.css:L12 */
+      justify-content: center;                 /* mirrors keeper-detail.css:L13 */
+      isolation: isolate;                      /* mirrors keeper-detail.css:L14 */
+    }
+
+    /* Preview-only frame — represents the keeper detail card slotted
+       into the overlay's flex centre. Production renders a full
+       `<KeeperDetailPage>` (keeper-detail.ts) here; we show a compact
+       attribution stack + signal lines + persona summary so the
+       overlay's centring/isolation behaviour is exercised. */
+    .kd-card {
+      width: 320px;
+      max-width: calc(100% - 40px);
+      background: var(--color-bg-surface);
+      border: 1px solid var(--color-border-strong);
+      border-radius: var(--r-1);
+      box-shadow: 0 12px 30px var(--black-20);
+      padding: 16px 18px;
+      display: flex; flex-direction: column; gap: 10px;
+      font-family: var(--font-sans);
+    }
+    .kd-card-head {
+      display: flex; align-items: center; gap: 10px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--color-border-default);
+    }
+    .kd-card-head .sigil {
+      width: 22px; height: 22px; border-radius: 4px;
+      background: var(--color-keeper-3);
+      box-shadow: 0 0 8px rgb(var(--color-keeper-3-glow, 240 120 60) / .55);
+      flex-shrink: 0;
+    }
+    .kd-card-head .name {
+      font-family: var(--font-mono);
+      font-size: var(--fs-13);
+      color: var(--color-fg-primary);
+      font-weight: 600;
+    }
+    .kd-card-head .role {
+      margin-left: auto;
+      font-family: var(--font-mono);
+      font-size: var(--fs-10);
+      color: var(--color-fg-muted);
+      letter-spacing: var(--track-caps);
+      text-transform: uppercase;
+    }
+
+    .kd-attr-stack {
+      display: flex; flex-direction: column; gap: 4px;
+      font-family: var(--font-mono);
+      font-size: var(--fs-11);
+    }
+    .kd-attr-stack .row {
+      display: grid; grid-template-columns: 70px 1fr;
+      gap: 8px;
+      padding: 2px 0;
+    }
+    .kd-attr-stack .lbl {
+      color: var(--color-fg-disabled);
+      letter-spacing: var(--track-caps);
+      text-transform: uppercase;
+      font-size: var(--fs-9);
+    }
+    .kd-attr-stack .v { color: var(--color-fg-secondary); }
+
+    .kd-signals {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 6px;
+      padding: 8px 0 0;
+      border-top: 1px solid var(--color-border-default);
+    }
+    .kd-signal {
+      background: var(--color-bg-panel-alt);
+      border: 1px solid var(--color-border-default);
+      border-radius: var(--r-1);
+      padding: 6px 8px;
+      display: flex; flex-direction: column; gap: 2px;
+    }
+    .kd-signal .k {
+      font-family: var(--font-mono);
+      font-size: var(--fs-9);
+      color: var(--color-fg-disabled);
+      letter-spacing: var(--track-caps);
+      text-transform: uppercase;
+    }
+    .kd-signal .v {
+      font-family: var(--font-mono);
+      font-size: var(--fs-12);
+      color: var(--color-fg-primary);
+      font-variant-numeric: tabular-nums;
+    }
+    .kd-signal.warn .v { color: var(--warn); }
+    .kd-signal.ok .v   { color: var(--ok); }
+
+    .kd-persona {
+      font: var(--type-caption);
+      color: var(--color-fg-muted);
+      line-height: 1.45;
+      padding-top: 4px;
+      border-top: 1px dashed var(--color-border-default);
+    }
+    .kd-persona em {
+      color: var(--color-accent-fg);
+      font-style: normal;
+      font-family: var(--font-mono);
+    }
+
+    /* ── Cascade chain banner ──────────────────────────────────── */
+    .cascade-banner {
+      display: flex; align-items: stretch;
+      gap: 0;
+      border: 1px solid var(--color-border-default);
+      border-radius: var(--r-1);
+      overflow: hidden;
+      background: var(--color-bg-panel-alt);
+      font-family: var(--font-mono);
+      font-size: var(--fs-11);
+    }
+    .cascade-banner .step {
+      flex: 1;
+      padding: 8px 12px;
+      display: flex; flex-direction: column; gap: 2px;
+      border-right: 1px solid var(--color-border-default);
+      position: relative;
+    }
+    .cascade-banner .step:last-child { border-right: 0; }
+    .cascade-banner .step::after {
+      content: "→";
+      position: absolute;
+      right: -8px; top: 50%;
+      transform: translateY(-50%);
+      color: var(--color-fg-disabled);
+      font-size: var(--fs-12);
+      background: var(--color-bg-panel-alt);
+      padding: 0 2px;
+      z-index: 1;
+    }
+    .cascade-banner .step:last-child::after { content: none; }
+    .cascade-banner .step .lbl {
+      font-size: var(--fs-9);
+      color: var(--color-fg-disabled);
+      letter-spacing: var(--track-caps);
+      text-transform: uppercase;
+    }
+    .cascade-banner .step .v {
+      color: var(--color-fg-primary);
+    }
+    .cascade-banner .step.terminal .v { color: var(--color-accent-fg); }
+
+    /* ── Z-index ladder mini ───────────────────────────────────── */
+    .z-ladder {
+      display: flex; flex-direction: column; gap: 4px;
+      font-family: var(--font-mono);
+      font-size: var(--fs-11);
+    }
+    .z-ladder .rung {
+      display: grid; grid-template-columns: 130px 56px 1fr;
+      gap: 10px;
+      align-items: center;
+      padding: 4px 8px;
+      border: 1px solid var(--color-border-default);
+      border-radius: 2px;
+      background: var(--color-bg-surface);
+    }
+    .z-ladder .rung.spotlight {
+      border-color: var(--brass-2, var(--color-accent-fg));
+      background: rgb(var(--color-accent-glow, 201 162 74) / .08);
+    }
+    .z-ladder .rung .tok {
+      color: var(--color-fg-secondary);
+    }
+    .z-ladder .rung .v {
+      color: var(--color-fg-primary);
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+    .z-ladder .rung .note {
+      color: var(--color-fg-muted);
+      font-size: var(--fs-10);
+    }
+    .z-ladder .rung.spotlight .v { color: var(--color-accent-fg); }
+
+    /* ── Phase 2 catalog ───────────────────────────────────────── */
+    .phase2 {
+      border: 1px solid var(--color-border-default);
+      border-radius: var(--r-1);
+      overflow: hidden;
+      font-family: var(--font-mono);
+      font-size: var(--fs-11);
+    }
+    .phase2 table {
+      width: 100%; border-collapse: collapse;
+    }
+    .phase2 th, .phase2 td {
+      padding: 6px 10px;
+      border-bottom: 1px solid var(--color-border-default);
+      text-align: left;
+      vertical-align: top;
+    }
+    .phase2 th {
+      background: var(--color-bg-panel-alt);
+      color: var(--color-fg-disabled);
+      font-size: var(--fs-9);
+      letter-spacing: var(--track-caps);
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+    .phase2 td.lit {
+      color: var(--color-fg-primary);
+      white-space: nowrap;
+    }
+    .phase2 td.ref {
+      color: var(--color-fg-muted);
+      font-size: var(--fs-10);
+    }
+    .phase2 td.proposal {
+      color: var(--color-fg-secondary);
+    }
+
+    /* small chip used in source-trace meta */
+    .src-chip {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 2px 6px;
+      background: var(--color-bg-elevated, var(--color-bg-panel-alt));
+      border: 1px solid var(--color-border-default);
+      border-radius: 2px;
+      font-family: var(--font-mono);
+      font-size: var(--fs-10);
+      color: var(--color-fg-muted);
+      letter-spacing: var(--track-wide);
+    }
+    .src-chip .k { color: var(--color-fg-disabled); }
+
+    .pv-sect-h .right {
+      margin-left: auto;
+      display: flex; gap: 6px; align-items: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="pv-root">
+    <div class="pv-head">
+      <div class="pv-eyebrow">design-system · drift coverage W07</div>
+      <h1 class="pv-title">Keeper detail · production-mirror preview</h1>
+      <p class="pv-sub">
+        Mirrors <span class="src-chip"><span class="k">src</span>dashboard/src/styles/keeper-detail.css</span>
+        in the design-system gallery. The production stylesheet is small
+        (16 LOC, single <code>@utility keeper-detail-overlay</code>) but
+        anchors the keeper detail surface in <code>keeper-detail.ts</code>
+        and friends. Every card below back-points to the production
+        line; <code>var()</code> only, with one
+        catalogued raw literal (<code>rgba(0,0,0,0.6)</code>) and one
+        un-tokenized fallback (<code>--z-overlay-keeper, 3020</code>)
+        flagged for Phase 2.
+      </p>
+    </div>
+
+    <!-- ────────────────────────────────────────────────────────────
+         Cascade chain banner
+         ──────────────────────────────────────────────────────────── -->
+    <section class="pv-sect">
+      <div class="pv-sect-h">
+        <h2>Cascade chain</h2>
+        <span class="sub">main.ts → global.css → keeper-detail.css</span>
+      </div>
+      <div class="cascade-banner" aria-label="CSS cascade chain ending at keeper-detail.css">
+        <div class="step"><span class="lbl">entry</span><span class="v">main.ts</span></div>
+        <div class="step"><span class="lbl">@import</span><span class="v">global.css:L29</span></div>
+        <div class="step"><span class="lbl">tokens</span><span class="v">tokens.generated.css</span></div>
+        <div class="step terminal"><span class="lbl">leaf</span><span class="v">keeper-detail.css</span></div>
+      </div>
+    </section>
+
+    <!-- ────────────────────────────────────────────────────────────
+         keeper-detail-overlay — the only @utility in the file.
+         Mirrors keeper-detail.css:L5–L15.
+         ──────────────────────────────────────────────────────────── -->
+    <section class="pv-sect">
+      <div class="pv-sect-h">
+        <h2>keeper-detail-overlay <span class="tag">@utility</span></h2>
+        <span class="sub">mirrors production keeper-detail.css:L5–L15</span>
+        <span class="right">
+          <span class="src-chip"><span class="k">L</span>5..15</span>
+          <span class="src-chip"><span class="k">z-index</span>--z-overlay-keeper · 3020</span>
+        </span>
+      </div>
+
+      <div class="pv-grid-2">
+        <div class="pv-cell">
+          <div class="pv-cell-h">
+            <span class="pv-cell-label">Live render — overlay + slotted card</span>
+            <span class="pv-cell-meta">position:absolute (preview) · isolation:isolate · backdrop-filter:blur(4px)</span>
+          </div>
+          <div class="kd-stage" aria-label="Keeper detail overlay preview">
+            <!-- faux dashboard underlay so the blur has something to dim -->
+            <div class="underlay" aria-hidden="true">
+              <div class="nav">
+                <div class="row"><span>agents</span><span class="v">12</span></div>
+                <div class="row"><span>active</span><span class="v">4</span></div>
+                <div class="row"><span>busy</span><span class="v">2</span></div>
+                <div class="row"><span>idle</span><span class="v">5</span></div>
+                <div class="row"><span>offline</span><span class="v">1</span></div>
+                <div class="row"><span>cascade</span><span class="v">spark</span></div>
+              </div>
+              <div class="body">
+                <div class="row"><span>turn 4 · masc_status</span><span class="v">412ms</span></div>
+                <div class="row"><span>turn 5 · keeper_tasks_list</span><span class="v">198ms</span></div>
+                <div class="row"><span>turn 6 · masc_claim</span><span class="v">601ms</span></div>
+                <div class="row"><span>turn 7 · masc_plan_set_task</span><span class="v">87ms</span></div>
+                <div class="row"><span>turn 8 · proactive run</span><span class="v">2.9s</span></div>
+                <div class="row"><span>turn 9 · masc_done</span><span class="v">155ms</span></div>
+              </div>
+            </div>
+
+            <!-- the keeper-detail-overlay surface -->
+            <div class="kd-overlay" role="dialog" aria-modal="true" aria-label="Keeper detail (sangsu)">
+              <div class="kd-card">
+                <div class="kd-card-head">
+                  <span class="sigil" aria-hidden="true"></span>
+                  <span class="name">sangsu</span>
+                  <span class="role">code-strategist</span>
+                </div>
+
+                <dl class="kd-attr-stack" aria-label="Keeper attribution stack">
+                  <div class="row"><dt class="lbl">cascade</dt><dd class="v">spark · gpt-5.3-codex-spark</dd></div>
+                  <div class="row"><dt class="lbl">tools</dt><dd class="v">workspace + codex_cli</dd></div>
+                  <div class="row"><dt class="lbl">sandbox</dt><dd class="v">docker-bind · /workspace</dd></div>
+                  <div class="row"><dt class="lbl">network</dt><dd class="v">offline (proxy off)</dd></div>
+                  <div class="row"><dt class="lbl">handoff</dt><dd class="v">auto · 88%</dd></div>
+                </dl>
+
+                <div class="kd-signals" aria-label="Live signals">
+                  <div class="kd-signal"><span class="k">turn</span><span class="v">9</span></div>
+                  <div class="kd-signal warn"><span class="k">ctx</span><span class="v">82%</span></div>
+                  <div class="kd-signal ok"><span class="k">budget</span><span class="v">47%</span></div>
+                </div>
+
+                <p class="kd-persona">
+                  <em>sangsu</em> · "code-strategist who reviews diffs before
+                  shipping; insists on a TLA-class invariant for every state machine."
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="pv-cell">
+          <div class="pv-cell-h">
+            <span class="pv-cell-label">Source — production declaration</span>
+            <span class="pv-cell-meta">verbatim from keeper-detail.css</span>
+          </div>
+          <pre style="font-family: var(--font-mono); font-size: var(--fs-11); color: var(--color-fg-secondary); line-height: 1.6; padding: 12px 14px; background: var(--color-bg-panel-alt); border: 1px solid var(--color-border-default); border-radius: var(--r-1); overflow-x: auto; margin: 0;">
+<span style="color: var(--color-fg-disabled);">/* L1  */</span> <span style="color: var(--color-fg-muted);">/* Keeper detail — keeper-* utilities. */</span>
+<span style="color: var(--color-fg-disabled);">/* L5  */</span> @utility keeper-detail-overlay {
+<span style="color: var(--color-fg-disabled);">/* L6  */</span>   position: fixed;
+<span style="color: var(--color-fg-disabled);">/* L7  */</span>   top: 0; left: 0; right: 0; bottom: 0;
+<span style="color: var(--color-fg-disabled);">/* L8  */</span>   background: rgba(0,0,0,0.6);
+<span style="color: var(--color-fg-disabled);">/* L9  */</span>   backdrop-filter: blur(4px);
+<span style="color: var(--color-fg-disabled);">/* L10 */</span>   z-index: var(--z-overlay-keeper, 3020);
+<span style="color: var(--color-fg-disabled);">/* L11 */</span>   display: flex;
+<span style="color: var(--color-fg-disabled);">/* L12 */</span>   align-items: center;
+<span style="color: var(--color-fg-disabled);">/* L13 */</span>   justify-content: center;
+<span style="color: var(--color-fg-disabled);">/* L14 */</span>   isolation: isolate;
+<span style="color: var(--color-fg-disabled);">/* L15 */</span> }</pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- ────────────────────────────────────────────────────────────
+         Z-index ladder — situates --z-overlay-keeper (3020) against
+         the seven token z-* values it sits above. The 3020 fallback
+         is referenced once; the named token has no @theme entry, so
+         every consumer falls back. Flagged in Phase 2 below.
+         ──────────────────────────────────────────────────────────── -->
+    <section class="pv-sect">
+      <div class="pv-sect-h">
+        <h2>Z-index ladder</h2>
+        <span class="sub">--z-overlay-keeper sits two orders of magnitude above --z-toast</span>
+      </div>
+      <div class="z-ladder" aria-label="Z-index ladder including the overlay-keeper fallback">
+        <div class="rung"><span class="tok">--z-base</span><span class="v">1</span><span class="note">tokens.generated.css:L134</span></div>
+        <div class="rung"><span class="tok">--z-sticky</span><span class="v">20</span><span class="note">tokens.generated.css:L135</span></div>
+        <div class="rung"><span class="tok">--z-dropdown</span><span class="v">30</span><span class="note">tokens.generated.css:L136</span></div>
+        <div class="rung"><span class="tok">--z-overlay</span><span class="v">40</span><span class="note">tokens.generated.css:L137 · tooltips</span></div>
+        <div class="rung"><span class="tok">--z-drawer</span><span class="v">60</span><span class="note">tokens.generated.css:L138 · inspector</span></div>
+        <div class="rung"><span class="tok">--z-modal</span><span class="v">80</span><span class="note">tokens.generated.css:L139</span></div>
+        <div class="rung"><span class="tok">--z-toast</span><span class="v">100</span><span class="note">tokens.generated.css:L140</span></div>
+        <div class="rung spotlight"><span class="tok">--z-overlay-keeper</span><span class="v">3020</span><span class="note">keeper-detail.css:L10 · fallback only · no @theme entry</span></div>
+      </div>
+    </section>
+
+    <!-- ────────────────────────────────────────────────────────────
+         Phase 2 candidates — un-tokenized values that escape var().
+         Two findings; both are local to this single 16-LOC file.
+         ──────────────────────────────────────────────────────────── -->
+    <section class="pv-sect">
+      <div class="pv-sect-h">
+        <h2>Phase 2 candidates · raw literals in keeper-detail.css</h2>
+        <span class="sub">2 escapees catalogued during W07 drift sweep</span>
+      </div>
+      <div class="phase2">
+        <table>
+          <thead>
+            <tr>
+              <th>Literal</th>
+              <th>Site</th>
+              <th>Proposed token</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="lit">rgba(0, 0, 0, 0.6)</td>
+              <td class="ref">keeper-detail.css:L8 (overlay scrim)</td>
+              <td class="proposal">add <code>--scrim-strong</code> to tokens.generated.css; reuse for any modal/overlay scrim layer</td>
+            </tr>
+            <tr>
+              <td class="lit">3020 (fallback only)</td>
+              <td class="ref">keeper-detail.css:L10 (<code>--z-overlay-keeper, 3020</code>)</td>
+              <td class="proposal">declare <code>--z-overlay-keeper</code> in tokens.generated.css <code>@theme</code> block (sits above <code>--z-toast:100</code>); 3020 is currently a magic number that no @theme entry resolves</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ────────────────────────────────────────────────────────────
+         Source trace · cascade context
+         ──────────────────────────────────────────────────────────── -->
+    <section class="pv-sect">
+      <div class="pv-sect-h">
+        <h2>Production consumers <span class="tag">orphan-triage cleared</span></h2>
+        <span class="sub">classified <strong>live</strong> in PR #11317 (W08 dispatch row)</span>
+      </div>
+      <div class="phase2">
+        <table>
+          <thead>
+            <tr>
+              <th>Consumer</th>
+              <th>Surface</th>
+              <th>Notes</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="lit">keeper-detail.ts</td>
+              <td class="ref">opens KeeperDetailPage; mounts inside the overlay</td>
+              <td class="proposal">titleId <code>keeper-detail-title-${name}</code> drives aria-labelledby</td>
+            </tr>
+            <tr>
+              <td class="lit">keeper-detail-panels.ts</td>
+              <td class="ref">attribution stack · BDI · tool access</td>
+              <td class="proposal">renders inside the overlay's slotted card</td>
+            </tr>
+            <tr>
+              <td class="lit">keeper-detail-history.ts</td>
+              <td class="ref">turn-by-turn history list</td>
+              <td class="proposal">section card (KeeperDetailSectionCard)</td>
+            </tr>
+            <tr>
+              <td class="lit">keeper-detail-runtime.ts</td>
+              <td class="ref">runtime strip (ctx %, budget, turn)</td>
+              <td class="proposal">live signals row in slotted card</td>
+            </tr>
+            <tr>
+              <td class="lit">keeper-supervisor-diagnostics.ts</td>
+              <td class="ref">extracted from keeper-detail.ts</td>
+              <td class="proposal">sibling panel in same overlay</td>
+            </tr>
+            <tr>
+              <td class="lit">agent-detail.ts</td>
+              <td class="ref">imports openKeeperDetail · entry point</td>
+              <td class="proposal">trigger that mounts the overlay</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+</body>
+</html>

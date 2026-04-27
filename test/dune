@@ -1134,6 +1134,11 @@
  (libraries masc_test_deps))
 
 (test
+ (name test_cascade_inventory)
+ (modules test_cascade_inventory)
+ (libraries masc_test_deps))
+
+(test
  (name test_cascade_strategy)
  (modules test_cascade_strategy)
  (libraries masc_test_deps))

@@ -151,12 +151,17 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
               crash recovery instead of a clean stop. When the stale
               watchdog sets fiber_stop + Stale_turn_timeout, the heartbeat
               loop exits normally but the supervisor must treat this as a
-              crash so sweep_and_recover restarts the keeper. *)
+              crash so sweep_and_recover restarts the keeper.
+              #10765 Phase 2: [Stale_termination_storm] also funnels through
+              the crash path, but [sweep_and_recover]'s [`Crashed] branch
+              detects this variant and routes to auto-pause instead of
+              [to_restart], breaking the restart-loop-back-to-stale cycle. *)
            let watchdog_triggered =
              match Keeper_registry.get ~base_path meta.name with
              | Some e -> (
                  match e.last_failure_reason with
-                 | Some (Keeper_registry.Stale_turn_timeout _) -> true
+                 | Some (Keeper_registry.Stale_turn_timeout _)
+                 | Some (Keeper_registry.Stale_termination_storm _) -> true
                  | _ -> false)
              | None -> false
            in
@@ -765,6 +770,56 @@ let apply_self_preservation ~keepers_dir ~total_keepers to_restart =
     to_restart
   end
 
+(** #10765 Phase 2: persist [meta.paused = true] for a keeper whose stale
+    watchdog detected a termination storm (window count >= threshold).  The
+    caller must skip enqueuing the entry into [to_restart] so the supervisor
+    no longer auto-restarts the keeper into the same dead-cascade environment.
+
+    Ordering rationale: write meta first, then publish lifecycle + counter.
+    A failed meta write is logged but does not abort the pause path — the
+    in-memory [last_failure_reason] still routes the next sweep through this
+    branch, so the supervisor remains correct even if the disk write loses
+    a CAS race.  The keeper would re-resume on a server restart in that
+    edge case, but that is strictly less bad than the pre-Phase-2 baseline
+    (continuous restart loop). *)
+let handle_stale_storm_pause (ctx : _ context)
+    (entry : Keeper_registry.registry_entry) ~count =
+  (match read_meta ctx.config entry.name with
+   | Ok (Some meta) ->
+       (match
+          write_meta_with_merge
+            ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
+            ctx.config { meta with paused = true }
+        with
+        | Ok () -> ()
+        | Error err ->
+            Log.Keeper.warn
+              "%s: stale_storm pause meta write failed (in-memory \
+               failure_reason still gates restart, but persisted state \
+               will not survive server restart): %s"
+              entry.name err)
+   | Ok None ->
+       Log.Keeper.warn
+         "%s: stale_storm pause: meta missing, cannot persist paused=true"
+         entry.name
+   | Error err ->
+       Log.Keeper.warn
+         "%s: stale_storm pause read_meta failed: %s"
+         entry.name err);
+  Prometheus.inc_counter
+    "masc_keeper_stale_storm_paused_total"
+    ~labels:[ ("keeper", entry.name) ]
+    ();
+  publish_phase_lifecycle
+    ~phase:Keeper_state_machine.Paused
+    entry.name
+    (Printf.sprintf "stale_termination_storm count=%d" count) ();
+  Log.Keeper.error
+    "%s: STALE STORM AUTO-PAUSED (count=%d in 6h window). \
+     Operator must investigate cascade/provider/fd issue and \
+     resume the keeper manually. See issue #10765."
+    entry.name count
+
 let sweep_and_recover (ctx : _ context) =
   let now = Time_compat.now () in
   let max_restarts = Runtime_params.get Governance_registry.keeper_supervisor_max_restarts in
@@ -800,13 +855,27 @@ let sweep_and_recover (ctx : _ context) =
       | Some `Stopped ->
           to_unregister := entry :: !to_unregister
       | Some (`Crashed msg) ->
-          if entry.restart_count >= max_restarts then
-            to_mark_dead := (entry, msg) :: !to_mark_dead
-          else begin
-            let delay = backoff_delay entry.restart_count in
-            if now -. entry.last_restart_ts >= delay then
-              to_restart := (entry, msg) :: !to_restart
-          end)
+          (match entry.last_failure_reason with
+           | Some (Keeper_registry.Stale_termination_storm { count }) ->
+               (* #10765 Phase 2: skip [to_restart] AND in-memory unregister.
+                  The watchdog detected a termination storm (>= escalation_
+                  threshold within the 6h window).  [handle_stale_storm_pause]
+                  persists [meta.paused = true] so reconcile + future sweeps
+                  honor the pause across server restarts; we then add the
+                  entry to [to_unregister] so the in-memory registry slot is
+                  cleared and subsequent sweep ticks within the same server
+                  do NOT re-fire the storm-pause path (counter must increment
+                  once per storm, not once per sweep tick). *)
+               handle_stale_storm_pause ctx entry ~count;
+               to_unregister := entry :: !to_unregister
+           | _ ->
+               if entry.restart_count >= max_restarts then
+                 to_mark_dead := (entry, msg) :: !to_mark_dead
+               else begin
+                 let delay = backoff_delay entry.restart_count in
+                 if now -. entry.last_restart_ts >= delay then
+                   to_restart := (entry, msg) :: !to_restart
+               end))
   ) entries;
   List.iter (fun (entry : Keeper_registry.registry_entry) ->
     Keeper_registry.unregister ~base_path entry.name

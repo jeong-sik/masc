@@ -2900,37 +2900,65 @@ let run_turn
         ended_at = receipt_ended_at;
       }
     in
-    (try
-       Keeper_execution_receipt.append config receipt
-     with
-     | Eio.Cancel.Cancelled _ as e -> raise e
-     | exn ->
-       Log.Keeper.warn
-         "keeper:%s execution_receipt append failed: %s"
-         meta.name
-         (Printexc.to_string exn);
-       (try
-          let masc_root = Coord.masc_root_dir config in
-          Telemetry_coverage_gap.record
-            ~masc_root
-            ~source:"execution_receipt"
-            ~producer:"keeper_agent_run.execution_receipt"
-            ~durable_store:
-              (Filename.concat
-                 (Filename.concat (Filename.concat masc_root "keepers") meta.name)
-                 "execution-receipts")
-            ~dashboard_surface:"/api/v1/dashboard/execution-trust"
-            ~stale_reason:"execution_receipt_append_failed"
-            ~keeper_name:meta.name
-            ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-            ~error:(Printexc.to_string exn)
-            ()
-        with
-        | Eio.Cancel.Cancelled _ as e -> raise e
-        | gap_exn ->
-          Log.Keeper.warn
-            "keeper:%s execution_receipt coverage gap append failed: %s"
-            meta.name
-            (Printexc.to_string gap_exn)));
-    turn_result
+    (* Tier A2 / Cycle 5: receipt append failure escalates to a
+       turn-level Error.
+
+       Pre-Cycle 5 the catch arm logged a WARN, recorded a coverage-gap
+       and let [turn_result] fall through unchanged. That violates the
+       [EveryTurnHasTerminalReceipt] safety property (KeeperTurnFSM
+       and KeeperOutcomesConservation specs): a turn whose authoritative
+       receipt is silently dropped cannot be reported as Ok. The
+       coverage-gap helper is still called so the gap surface keeps
+       working; the difference is the caller now sees the failure too. *)
+    let receipt_append_outcome : (unit, string) result =
+      try
+        Keeper_execution_receipt.append config receipt;
+        Ok ()
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn ->
+        let err_msg = Printexc.to_string exn in
+        Log.Keeper.warn
+          "keeper:%s execution_receipt append failed: %s"
+          meta.name err_msg;
+        (try
+           let masc_root = Coord.masc_root_dir config in
+           Telemetry_coverage_gap.record
+             ~masc_root
+             ~source:"execution_receipt"
+             ~producer:"keeper_agent_run.execution_receipt"
+             ~durable_store:
+               (Filename.concat
+                  (Filename.concat (Filename.concat masc_root "keepers") meta.name)
+                  "execution-receipts")
+             ~dashboard_surface:"/api/v1/dashboard/execution-trust"
+             ~stale_reason:"execution_receipt_append_failed"
+             ~keeper_name:meta.name
+             ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+             ~error:err_msg
+             ()
+         with
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | gap_exn ->
+           Log.Keeper.warn
+             "keeper:%s execution_receipt coverage gap append failed: %s"
+             meta.name
+             (Printexc.to_string gap_exn));
+        Error err_msg
+    in
+    match turn_result, receipt_append_outcome with
+    | Error _, _ ->
+      (* Turn already failed; preserve the original error rather than
+         masking it with a receipt-lost wrapper. The coverage-gap record
+         above keeps the receipt-store side observable. *)
+      turn_result
+    | Ok _, Ok () -> turn_result
+    | Ok _, Error err_msg ->
+      (* Safety escalation: turn-body succeeded but the authoritative
+         receipt could not be persisted. Surface a structured internal
+         error so the caller's [match turn_result with Ok _ | Error _]
+         no longer sees a fictitious success. *)
+      Error
+        (Oas.Error.Internal
+           (Printf.sprintf "execution_receipt_append_failed: %s" err_msg))
 ;;

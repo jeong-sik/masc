@@ -161,6 +161,8 @@ run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperCoreTriad.tla"
 run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperCircuitBreaker.tla"
 run_tlc "$REPO_ROOT/specs/keeper-state-machine" "OperatorPauseBroadcast.tla"
 run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "OperatorPauseBroadcast.tla"
+run_tlc "$REPO_ROOT/specs/keeper-turn-fsm" "KeeperTurnFSM.tla"
+run_tlc_buggy "$REPO_ROOT/specs/keeper-turn-fsm" "KeeperTurnFSM.tla"
 run_tlc "$REPO_ROOT/specs/boundary" "KeeperContinueGate.tla"
 run_tlc_buggy "$REPO_ROOT/specs/boundary" "KeeperContinueGate.tla"
 run_tlc "$REPO_ROOT/specs/boundary" "ToolCallContract.tla"
@@ -171,6 +173,8 @@ run_tlc "$REPO_ROOT/specs/state-product" "CoordinationProduct.tla"
 run_tlc_buggy "$REPO_ROOT/specs/state-product" "CoordinationProduct.tla"
 run_tlc "$REPO_ROOT/specs/task-lifecycle" "TaskLifecycle.tla"
 run_tlc_buggy "$REPO_ROOT/specs/task-lifecycle" "TaskLifecycle.tla"
+run_tlc "$REPO_ROOT/specs/keeper-turn-fsm" "KeeperTurnFSM.tla"
+run_tlc_buggy "$REPO_ROOT/specs/keeper-turn-fsm" "KeeperTurnFSM.tla"
 
 # Optional: run TraceSpec if --trace flag provided
 if [ "${1:-}" = "--trace" ]; then

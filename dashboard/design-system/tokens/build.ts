@@ -1,0 +1,262 @@
+/**
+ * MASC Cockpit Design System — Codegen Driver
+ *
+ * Reads source.ts, emits five artifacts:
+ *   1. dashboard/design-system/source_styles/tokens.generated.css
+ *   2. dashboard/src/styles/tokens.generated.css      (Tailwind v4 @theme)
+ *   3. dashboard/src/styles/tokens.generated.ts       (Preact typed)
+ *   4. dashboard_bonsai/src/tokens.ml + tokens.mli    (OCaml polyvar)
+ *   5. dashboard/design-system/tokens/build/tokens.json (DTCG 2025.10)
+ *
+ * Run:  pnpm tokens:build  (from dashboard/)
+ *
+ * All outputs are ADDITIVE — no consumer is migrated yet. Originals
+ * (tokens.css / colors_and_type.css / src/styles/tokens.css) stay
+ * untouched. The follow-up wave swaps consumers one-by-one and finally
+ * deletes originals.
+ */
+
+import { writeFileSync, mkdirSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { source, type TokenBase, type Theme } from "./source.js";
+
+// ─────────────────────────────────────────────────────────────────────────
+// Path resolution — relative to this file, walk up to repo root
+// ─────────────────────────────────────────────────────────────────────────
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const REPO = resolve(HERE, "..", "..", ".."); // <repo>/dashboard/design-system/tokens -> <repo>
+
+const OUT = {
+  previewCss: resolve(REPO, "dashboard/design-system/source_styles/tokens.generated.css"),
+  tailwindCss: resolve(REPO, "dashboard/src/styles/tokens.generated.css"),
+  preactTs: resolve(REPO, "dashboard/src/styles/tokens.generated.ts"),
+  bonsaiMl: resolve(REPO, "dashboard_bonsai/src/tokens.ml"),
+  bonsaiMli: resolve(REPO, "dashboard_bonsai/src/tokens.mli"),
+  dtcgJson: resolve(REPO, "dashboard/design-system/tokens/build/tokens.json"),
+} as const;
+
+const HEADER_TEXT =
+  "@generated DO NOT EDIT — run `pnpm tokens:build` (source: dashboard/design-system/tokens/source.ts)";
+
+const cssHeader = `/* ${HEADER_TEXT} */\n\n`;
+const tsHeader = `// ${HEADER_TEXT}\n\n`;
+const mlHeader = `(* ${HEADER_TEXT} *)\n\n`;
+
+function ensureDir(path: string): void {
+  mkdirSync(dirname(path), { recursive: true });
+}
+
+function writeFile(path: string, content: string): void {
+  ensureDir(path);
+  writeFileSync(path, content, "utf8");
+  console.log(`  wrote ${path.replace(REPO + "/", "")}`);
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Renderers
+// ─────────────────────────────────────────────────────────────────────────
+
+const renderTokenLine = (tok: TokenBase): string => {
+  const cmt = tok.description ? `  /* ${tok.description} */` : "";
+  return `  --${tok.name}: ${tok.value};${cmt}`;
+};
+
+const renderRootBlock = (toks: ReadonlyArray<TokenBase>, label: string): string => {
+  const body = toks.map(renderTokenLine).join("\n");
+  return `:root {\n  /* ── ${label} ── */\n${body}\n}\n`;
+};
+
+const renderThemeBlock = (theme: Theme): string => {
+  const sel = theme.id === "dark-fantasy"
+    ? `:root, [data-theme="dark-fantasy"]`
+    : `[data-theme="${theme.id}"]`;
+  const colorScheme = `  color-scheme: ${theme.mode};`;
+  const body = theme.tokens.map(renderTokenLine).join("\n");
+  return `${sel} {\n${colorScheme}\n${body}\n}\n`;
+};
+
+// 1. Preview CSS — :root + theme overrides, mirrors source_styles/tokens.css
+function buildPreviewCss(): string {
+  const parts: string[] = [cssHeader];
+  parts.push(renderRootBlock(source.raw, "Raw tokens (atomic)"));
+  parts.push("\n");
+  parts.push(renderRootBlock(source.semantic, "Semantic tokens (4-slot + role aliases)"));
+  parts.push("\n");
+  for (const theme of source.themes) {
+    parts.push(renderThemeBlock(theme));
+    parts.push("\n");
+  }
+  return parts.join("");
+}
+
+// 2. Tailwind v4 entry CSS — must use `@theme {}` at top-level (not @import-ed,
+//    not nested under :root). Tailwind v4 only treats @theme in entry CSS as
+//    Tailwind utilities. ref: tailwindlabs/tailwindcss#18966
+function buildTailwindCss(): string {
+  const tailwindNamed = (tok: TokenBase): string => {
+    // For Tailwind v4 to expose utilities (text-*, bg-*, border-*),
+    // color tokens must be prefixed with --color-. We re-prefix only
+    // those that aren't already in --color-* form. Non-color tokens
+    // pass through with their raw name.
+    const isColorish = tok.kind === "color";
+    const alreadyColorPrefixed = tok.name.startsWith("color-");
+    if (isColorish && !alreadyColorPrefixed) {
+      return `  --color-${tok.name}: ${tok.value};`;
+    }
+    return `  --${tok.name}: ${tok.value};`;
+  };
+  const all = [...source.raw, ...source.semantic];
+  const body = all.map(tailwindNamed).join("\n");
+  return `${cssHeader}@theme {\n${body}\n}\n`;
+}
+
+// 3. Preact typed const + literal-string union
+function buildPreactTs(): string {
+  const all: TokenBase[] = [...source.raw, ...source.semantic];
+  // De-dupe by name (semantic and raw must not collide; this is a guard).
+  const seen = new Set<string>();
+  const dedup = all.filter((tk) => {
+    if (seen.has(tk.name)) return false;
+    seen.add(tk.name);
+    return true;
+  });
+  const entries = dedup.map((tk) => {
+    const camel = tk.name.replace(/-(.)/g, (_, c: string) => c.toUpperCase());
+    return `  ${JSON.stringify(camel)}: { name: ${JSON.stringify(`--${tk.name}`)}, value: ${JSON.stringify(tk.value)}, tier: ${JSON.stringify(tk.tier)}, kind: ${JSON.stringify(tk.kind)} }`;
+  });
+  return `${tsHeader}export const TOKENS = {\n${entries.join(",\n")},\n} as const;\n\nexport type TokenName = keyof typeof TOKENS;\nexport type TokenVar = typeof TOKENS[TokenName]["name"];\n\n/** \`var(--token-name)\` for the given token. */\nexport const tokenVar = (k: TokenName): string => \`var(\${TOKENS[k].name})\`;\n`;
+}
+
+// 4. OCaml polyvar — tokens.ml + tokens.mli
+//    Pattern: `type semantic = [\`Color_bg_page | ...]` plus `var_of`
+//    returning the `var(--name)` string.
+//    polyvar tag rules: identifier-like, must start with [A-Z]; we
+//    transform `bg-0` -> `Bg_0` and `color-bg-page` -> `Color_bg_page`.
+function tokenToPolyvarTag(name: string): string {
+  return name
+    .replace(/[^a-zA-Z0-9]/g, "_")
+    .replace(/^([a-z])/, (_, c: string) => c.toUpperCase())
+    .replace(/^([0-9])/, "_$1"); // start with letter; if name starts with digit, prepend _
+}
+
+function buildBonsaiMli(): string {
+  const all: TokenBase[] = [...source.raw, ...source.semantic];
+  const seen = new Set<string>();
+  const dedup = all.filter((tk) => {
+    if (seen.has(tk.name)) return false;
+    seen.add(tk.name);
+    return true;
+  });
+  const constructors = dedup.map((tk) => `  | \`${tokenToPolyvarTag(tk.name)}`);
+  return `${mlHeader}(** MASC Cockpit design tokens — strongly-typed accessors for ppx_css.
+
+    Use [var_of] to obtain a CSS [var(--...)] reference:
+    {[
+      let style = [%css {|
+        background: %{Tokens.var_of \`Color_bg_page};
+        color:      %{Tokens.var_of \`Color_fg_primary};
+      |}]
+    ]}
+*)
+
+type semantic =
+  [
+${constructors.join("\n")}
+  ]
+
+(** Returns ["var(--name)"] for the given token. *)
+val var_of : semantic -> string
+
+(** Raw CSS variable name without the leading [--]. *)
+val name_of : semantic -> string
+`;
+}
+
+function buildBonsaiMl(): string {
+  const all: TokenBase[] = [...source.raw, ...source.semantic];
+  const seen = new Set<string>();
+  const dedup = all.filter((tk) => {
+    if (seen.has(tk.name)) return false;
+    seen.add(tk.name);
+    return true;
+  });
+  const constructors = dedup.map((tk) => `  | \`${tokenToPolyvarTag(tk.name)}`);
+  const arms = dedup.map((tk) => `  | \`${tokenToPolyvarTag(tk.name)} -> ${JSON.stringify(tk.name)}`);
+  return `${mlHeader}type semantic =
+  [
+${constructors.join("\n")}
+  ]
+
+let name_of = function
+${arms.join("\n")}
+
+let var_of t = "var(--" ^ name_of t ^ ")"
+`;
+}
+
+// 5. DTCG 2025.10 — design-tokens-format JSON
+//    spec: design-tokens.github.io/community-group/format
+function dtcgKindToType(kind: TokenBase["kind"]): string {
+  switch (kind) {
+    case "color": return "color";
+    case "dimension": return "dimension";
+    case "duration": return "duration";
+    case "easing": return "cubicBezier"; // DTCG uses cubicBezier; we pass through string for cubic-bezier()
+    case "shadow": return "shadow";
+    case "typography": return "fontFamily";
+    case "number": return "number";
+  }
+}
+
+function buildDtcgJson(): string {
+  type DtcgGroup = Record<string, unknown>;
+  const root: DtcgGroup = {};
+  const tiersToEmit = [
+    { tier: "raw", group: "raw", toks: source.raw },
+    { tier: "semantic", group: "semantic", toks: source.semantic },
+  ] as const;
+  for (const { group, toks } of tiersToEmit) {
+    const g: DtcgGroup = {};
+    for (const tk of toks) {
+      g[tk.name] = {
+        $type: dtcgKindToType(tk.kind),
+        $value: tk.value,
+        $description: tk.description ?? undefined,
+      };
+    }
+    root[group] = g;
+  }
+  const themes: DtcgGroup = {};
+  for (const theme of source.themes) {
+    const g: DtcgGroup = {};
+    for (const tk of theme.tokens) {
+      g[tk.name] = {
+        $type: dtcgKindToType(tk.kind),
+        $value: tk.value,
+        $description: tk.description ?? undefined,
+      };
+    }
+    themes[theme.id] = { $extensions: { mode: theme.mode }, ...g };
+  }
+  root.themes = themes;
+  return JSON.stringify(root, null, 2) + "\n";
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Main
+// ─────────────────────────────────────────────────────────────────────────
+
+function main(): void {
+  console.log("MASC tokens codegen");
+  writeFile(OUT.previewCss, buildPreviewCss());
+  writeFile(OUT.tailwindCss, buildTailwindCss());
+  writeFile(OUT.preactTs, buildPreactTs());
+  writeFile(OUT.bonsaiMli, buildBonsaiMli());
+  writeFile(OUT.bonsaiMl, buildBonsaiMl());
+  writeFile(OUT.dtcgJson, buildDtcgJson());
+  console.log("done");
+}
+
+main();

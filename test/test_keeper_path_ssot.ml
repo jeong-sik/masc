@@ -27,6 +27,7 @@
 module Coord = Masc_mcp.Coord
 module Keeper_types = Masc_mcp.Keeper_types
 module Keeper_sandbox = Masc_mcp.Keeper_sandbox
+module Keeper_shell_docker = Masc_mcp.Keeper_shell_docker
 
 let temp_dir () =
   let path = Filename.temp_file "masc-path-ssot-" "" in
@@ -124,6 +125,70 @@ let test_ssot_idempotent () =
   let r2 = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   Alcotest.(check string) "host_root_abs_of_meta is pure / idempotent" r1 r2
 
+(* ── Egress policy file path SSOT ─────────────────────────────────────────
+
+   Leak 11 (2026-04-27): keeper "executor" had its egress.json placed at
+   the host-direct path [playground/<name>/egress.json] while the docker
+   keeper code looked at [playground/docker/<name>/egress.json].  This
+   silently fail-closed every URL command for 24+ hours because the
+   policy file lookup used a path system that disagreed with where the
+   file had been seeded.
+
+   These tests pin the invariant that
+   [Keeper_shell_docker.egress_policy_path] composes from the same
+   [host_root_abs_of_meta] SSOT — any future helper that resolves a
+   policy file under a separate path system will fail at build time
+   rather than producing another silent block in production. *)
+
+let assert_egress_path_ssot ~name ~sandbox =
+  let config = make_config () in
+  let meta = make_meta ~name ~sandbox in
+  let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
+  let expected = Filename.concat host_root "egress.json" in
+  let actual = Keeper_shell_docker.egress_policy_path ~config ~meta in
+  Alcotest.(check string)
+    (Printf.sprintf
+       "[%s/%s] egress_policy_path must equal host_root_abs_of_meta / \
+        egress.json"
+       name
+       (Keeper_types.sandbox_profile_to_string sandbox))
+    expected actual
+
+let test_egress_path_docker () =
+  assert_egress_path_ssot ~name:"sangsu" ~sandbox:Keeper_types.Docker
+
+let test_egress_path_local () =
+  assert_egress_path_ssot ~name:"ramarama" ~sandbox:Keeper_types.Local
+
+let test_egress_path_dashed () =
+  assert_egress_path_ssot ~name:"masc-improver" ~sandbox:Keeper_types.Docker
+
+let test_egress_path_distinct_per_keeper () =
+  let config = make_config () in
+  let m1 = make_meta ~name:"executor" ~sandbox:Keeper_types.Docker in
+  let m2 = make_meta ~name:"analyst" ~sandbox:Keeper_types.Docker in
+  let p1 = Keeper_shell_docker.egress_policy_path ~config ~meta:m1 in
+  let p2 = Keeper_shell_docker.egress_policy_path ~config ~meta:m2 in
+  Alcotest.(check bool)
+    "distinct keepers must yield distinct egress policy paths" true
+    (not (String.equal p1 p2))
+
+let test_egress_path_distinct_per_profile () =
+  let config = make_config () in
+  let m_docker = make_meta ~name:"executor" ~sandbox:Keeper_types.Docker in
+  let m_local = make_meta ~name:"executor" ~sandbox:Keeper_types.Local in
+  let p_docker =
+    Keeper_shell_docker.egress_policy_path ~config ~meta:m_docker
+  in
+  let p_local =
+    Keeper_shell_docker.egress_policy_path ~config ~meta:m_local
+  in
+  Alcotest.(check bool)
+    "same keeper across docker/local profiles must yield distinct egress \
+     policy paths"
+    true
+    (not (String.equal p_docker p_local))
+
 let () =
   Alcotest.run "Keeper Path SSOT" [
     ( "host_root_abs invariant",
@@ -144,5 +209,15 @@ let () =
       [
         Alcotest.test_case "same meta twice => same root" `Quick
           test_ssot_idempotent;
+      ] );
+    ( "egress_policy_path SSOT",
+      [
+        Alcotest.test_case "docker keeper" `Quick test_egress_path_docker;
+        Alcotest.test_case "local keeper" `Quick test_egress_path_local;
+        Alcotest.test_case "dashed-name keeper" `Quick test_egress_path_dashed;
+        Alcotest.test_case "distinct keepers => distinct paths" `Quick
+          test_egress_path_distinct_per_keeper;
+        Alcotest.test_case "profile-distinct => distinct paths" `Quick
+          test_egress_path_distinct_per_profile;
       ] );
   ]

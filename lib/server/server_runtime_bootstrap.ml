@@ -1051,7 +1051,7 @@ let warm_tool_registry_from_telemetry (state : Mcp_server.server_state) =
    with
    | Eio.Cancel.Cancelled _ as e -> raise e
    | exn ->
-     Log.Misc.error "tool registry warm-up failed: %s"
+     Log.Misc.warn "tool registry warm-up failed: %s (lazy init on first call)"
        (Printexc.to_string exn))
 
 let restore_tool_metrics_from_disk (state : Mcp_server.server_state) =
@@ -1063,7 +1063,7 @@ let restore_tool_metrics_from_disk (state : Mcp_server.server_state) =
    with
    | Eio.Cancel.Cancelled _ as e -> raise e
    | exn ->
-     Log.Misc.error "tool metrics restore failed: %s"
+     Log.Misc.warn "tool metrics restore failed: %s (metrics empty until next emission)"
        (Printexc.to_string exn))
 
 let startup_prune_jsonl (state : Mcp_server.server_state) =
@@ -1103,7 +1103,7 @@ let startup_prune_jsonl (state : Mcp_server.server_state) =
          total days
    with
    | Eio.Cancel.Cancelled _ as e -> raise e
-   | exn -> Log.Misc.error "startup prune failed: %s" (Printexc.to_string exn))
+   | exn -> Log.Misc.warn "startup prune failed: %s (next boot retries; disk impact bounded by retention)" (Printexc.to_string exn))
 
 let startup_prune_keeper_checkpoints (state : Mcp_server.server_state) =
   (try
@@ -1140,7 +1140,7 @@ let startup_prune_keeper_checkpoints (state : Mcp_server.server_state) =
    with
    | Eio.Cancel.Cancelled _ as e -> raise e
    | exn ->
-     Log.Misc.error "startup checkpoint prune failed: %s"
+     Log.Misc.warn "startup checkpoint prune failed: %s (next boot retries)"
        (Printexc.to_string exn))
 
 let startup_migrate_keeper_histories (state : Mcp_server.server_state) =
@@ -1183,7 +1183,7 @@ let startup_migrate_keeper_histories (state : Mcp_server.server_state) =
    with
    | Eio.Cancel.Cancelled _ as e -> raise e
    | exn ->
-       Log.Misc.error "startup history migration failed: %s"
+       Log.Misc.warn "startup history migration failed: %s (next boot retries; legacy format readable)"
          (Printexc.to_string exn))
 
 (* bootstrap_keepers removed: the keeper_autoboot subsystem in

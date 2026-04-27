@@ -48,6 +48,7 @@
   (domain-name (>= 0.4))
   (ca-certs (>= 0.2))
   (ppx_deriving_yojson (>= 3.6))
+  (ppx_let (>= v0.17.0))
   (ppx_deriving (>= 5.2))
   (sqlite3 (>= 5.1))
   (mirage-crypto (>= 1.0))

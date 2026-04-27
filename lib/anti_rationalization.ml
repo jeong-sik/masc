@@ -602,12 +602,49 @@ let review
           same Prometheus counter so monitoring sees the fallback rate
           regardless of the chosen policy. *)
        let msg = Oas.Error.to_string err in
+       (* #10474: discriminate "permanent cascade configuration issue"
+          from "transient verifier failure".  [No_tool_capable_provider]
+          means every provider in the [evaluator_cascade] failed the
+          tool-use gate at filter time — there are zero callable
+          models, and there will not be any until the cascade config
+          (or provider capabilities) changes.  Treating that as a
+          fail-closed safety-net reject blocks every keeper trying to
+          finish a task with a perfectly legitimate "out of scope"
+          phrase, which is the cascade's bug, not the keeper's
+          purview.  Promote to operator-actionable ERROR and approve
+          by liveness — the operator must fix the cascade definition
+          before the safety net can do useful work. *)
+       let cascade_permanently_dead =
+         match Oas_worker_named.classify_masc_internal_error err with
+         | Some (Oas_worker_named.No_tool_capable_provider _) -> true
+         | _ -> false
+       in
        let mode = Env_config.AntiRationalization.fail_mode in
        let mode_str = Env_config.AntiRationalization.fail_mode_to_string mode in
        Prometheus.inc_counter
          Prometheus.metric_anti_rationalization_fallback
          ~labels:[ ("mode", mode_str); ("cascade", evaluator_cascade) ]
          ();
+       if cascade_permanently_dead then begin
+         Log.Task.error
+           "[anti-rationalization] cascade %s has zero callable \
+            providers — ALL keepers using this evaluator are blocked \
+            from task completion.  Approving by liveness; OPERATOR \
+            ACTION REQUIRED: fix the cascade definition (provider \
+            capabilities, MCP policy, or tool requirements).  See \
+            #10474.  err=%s"
+           evaluator_cascade msg;
+         emit
+           { verdict = Approve
+           ; evaluator_cascade
+           ; generator_cascade
+           ; gate = Fallback
+           ; fallback_reason =
+               Some (sprintf "cascade %s has no callable providers (#10474)"
+                       evaluator_cascade)
+           }
+       end
+       else
        (* #10113: when an excuse pattern was detected at gate 2 AND
           the LLM evaluator is unavailable, the advisory is upgraded
           to a Reject regardless of [fail_mode].  The advisory mode

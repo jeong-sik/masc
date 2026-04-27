@@ -457,6 +457,7 @@
    keeper_memory_recall
    keeper_skill_routing
    keeper_sandbox
+   keeper_cwd_response
    keeper_sandbox_control
    keeper_repo_readiness
    keeper_alerting

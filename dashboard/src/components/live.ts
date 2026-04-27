@@ -29,7 +29,7 @@ export function Live({ variant = 'full' }: LiveProps) {
       ` : null}
 
       ${!observatoryMode ? html`
-        <section class="rounded-[var(--radius-xl)] border border-[var(--border-slate-12)] bg-[var(--white-3)] p-4" aria-label="이벤트 펄스 현황">
+        <section class="rounded-[var(--radius-xl)] border border-[var(--color-border-divider)] bg-[var(--white-3)] p-4" aria-label="이벤트 펄스 현황">
           <${PulseStrip} />
         </section>
       ` : null}

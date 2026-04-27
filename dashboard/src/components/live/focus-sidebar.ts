@@ -34,7 +34,7 @@ function FocusSidebarContent({ compact = false }: FocusSidebarProps) {
       ${compact
         ? null
         : html`
-            <div class="focus-sidebar-head flex items-center justify-between gap-3 border-b border-[var(--border-slate-12)] pb-3">
+            <div class="focus-sidebar-head flex items-center justify-between gap-3 border-b border-[var(--color-border-divider)] pb-3">
               <h3 class="m-0 text-[0.95rem] font-semibold text-[var(--color-fg-secondary)]">에이전트</h3>
               <span class="text-xs text-[var(--color-fg-muted)]">${list.length}명 활성</span>
             </div>
@@ -46,7 +46,7 @@ function FocusSidebarContent({ compact = false }: FocusSidebarProps) {
             <button
               type="button"
               key=${agent.name}
-              class="focus-agent-card w-full rounded border border-[var(--border-slate-12)] bg-[var(--white-3)] p-3.5 transition-colors duration-200 text-left cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent ${selected === agent.name ? 'focus-agent-selected' : ''}"
+              class="focus-agent-card w-full rounded border border-[var(--color-border-divider)] bg-[var(--white-3)] p-3.5 transition-colors duration-200 text-left cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent ${selected === agent.name ? 'focus-agent-selected' : ''}"
               onClick=${() => openAgentDetail(agent.name)}
             >
               <div class="focus-agent-header">
@@ -60,7 +60,7 @@ function FocusSidebarContent({ compact = false }: FocusSidebarProps) {
                 </span>
               </div>
               ${agent.currentTask
-                ? html`<div class="text-[0.75rem] text-[var(--color-fg-primary)] py-[3px] px-2 bg-[var(--white-2)] border border-[var(--border-slate-12)] whitespace-nowrap overflow-hidden text-ellipsis rounded">${agent.currentTask}</div>`
+                ? html`<div class="text-[0.75rem] text-[var(--color-fg-primary)] py-[3px] px-2 bg-[var(--white-2)] border border-[var(--color-border-divider)] whitespace-nowrap overflow-hidden text-ellipsis rounded">${agent.currentTask}</div>`
                 : null}
               <div class="flex items-center gap-2 mt-1">
                 ${agent.lastActivityText

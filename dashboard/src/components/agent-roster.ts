@@ -576,7 +576,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
             <div class="flex min-w-0 flex-col gap-2">
               <div class="flex flex-wrap items-center gap-3">
                 <span class="text-2xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">디렉터리 필터</span>
-                <span class="inline-flex items-center rounded-sm border border-[var(--border-slate-22)] bg-[var(--accent-soft)] px-2.5 py-1 text-2xs font-medium text-[var(--color-fg-secondary)]">${resultCountLabel}</span>
+                <span class="inline-flex items-center rounded-sm border border-[var(--color-border-default)] bg-[var(--accent-soft)] px-2.5 py-1 text-2xs font-medium text-[var(--color-fg-secondary)]">${resultCountLabel}</span>
               </div>
               <p class="m-0 max-w-180 text-sm leading-loose text-[var(--color-fg-primary)]">${pageDescription}</p>
             </div>
@@ -705,7 +705,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
 
           return html`
             <button type="button"
-              class="monitor-surface-card monitor-surface-card-medium group flex w-full flex-col gap-3.5 rounded-card p-4 text-left transition-all duration-200 cursor-pointer hover:border-[var(--border-slate-22)] hover:bg-[var(--color-bg-surface)] hover:-translate-y-0.5"
+              class="monitor-surface-card monitor-surface-card-medium group flex w-full flex-col gap-3.5 rounded-card p-4 text-left transition-all duration-200 cursor-pointer hover:border-[var(--color-border-default)] hover:bg-[var(--color-bg-surface)] hover:-translate-y-0.5"
               key=${agent.name}
               aria-label=${detailLabel}
               onClick=${openDetail}
@@ -759,7 +759,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
               ` : null}
 
               ${isKeeper && (monitoringEvidence?.phase || monitoringEvidence?.stage) ? html`
-                <div class="rounded-[16px] border border-[var(--border-slate-12)] bg-[linear-gradient(180deg,var(--white-3),var(--white-1))] px-3 py-2.5">
+                <div class="rounded-[16px] border border-[var(--color-border-divider)] bg-[linear-gradient(180deg,var(--white-3),var(--white-1))] px-3 py-2.5">
                   <div class="flex flex-wrap items-center gap-2">
                     ${monitoringEvidence?.phase && fsmPhaseKey
                       ? html`<${KeeperPhaseBadge} phase=${fsmPhaseKey} compact />`

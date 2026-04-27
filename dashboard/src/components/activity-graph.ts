@@ -194,7 +194,7 @@ function ActionTimeline({ data }: { data: ActivityGraphResponse }) {
           <button
             type="button"
             class="inline-flex items-center gap-1.5 rounded border px-2.5 py-1.5 text-2xs transition-all duration-150 ${showLifecycle.value
-              ? 'border-[var(--border-slate-22)] bg-[var(--accent-soft)] text-[var(--color-fg-secondary)]'
+              ? 'border-[var(--color-border-default)] bg-[var(--accent-soft)] text-[var(--color-fg-secondary)]'
               : 'border-[var(--white-10)] bg-[var(--white-4)] text-[var(--color-fg-disabled)] hover:bg-[var(--white-8)]'}"
             onClick=${() => { showLifecycle.value = !showLifecycle.value }}
           >

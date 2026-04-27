@@ -156,7 +156,7 @@ function renderCategorySection(
   if (posts.length === 0 && hidden === 0) return null
   if (posts.length === 0 && hidden > 0) {
     return html`
-      <div class="mb-3 px-3 py-2 rounded border border-dashed border-[var(--border-slate-16)] text-xs text-[var(--color-fg-muted)]">
+      <div class="mb-3 px-3 py-2 rounded border border-dashed border-[var(--color-border-default)] text-xs text-[var(--color-fg-muted)]">
         ${label} — ${hidden}건 숨김
       </div>
     `
@@ -174,7 +174,7 @@ function renderCategorySection(
         }} />
         <div class="text-center py-3">
           <button type="button"
-            class="px-4 py-2 rounded text-xs font-medium text-[var(--color-fg-muted)] bg-transparent border border-[var(--border-slate-16)] hover:bg-[var(--white-6)] hover:text-[var(--color-fg-primary)] transition-all cursor-pointer disabled:opacity-50"
+            class="px-4 py-2 rounded text-xs font-medium text-[var(--color-fg-muted)] bg-transparent border border-[var(--color-border-default)] hover:bg-[var(--white-6)] hover:text-[var(--color-fg-primary)] transition-all cursor-pointer disabled:opacity-50"
             disabled=${loadingMore}
             onClick=${() => {
               expandCategory(category, limits, limit, posts.length)
@@ -271,7 +271,7 @@ function SortBar() {
               class="px-2.5 py-1 rounded text-2xs font-medium transition-all duration-150 border cursor-pointer
                 ${isHidden
                   ? 'bg-[var(--accent-12)] text-[var(--color-accent-fg)] border-[var(--accent-18)] line-through opacity-60'
-                  : 'bg-transparent text-[var(--color-fg-muted)] border-[var(--border-slate-16)] hover:bg-[var(--white-6)]'
+                  : 'bg-transparent text-[var(--color-fg-muted)] border-[var(--color-border-default)] hover:bg-[var(--white-6)]'
                 }"
               onClick=${() => {
                 const next = new Set(boardHiddenCategories.value)
@@ -318,12 +318,12 @@ function SortBar() {
               ${bulkDeleting.value ? '삭제 중...' : `선택 삭제 (${selectedPostIds.value.size})`}
             <//>
             <button type="button"
-              class="px-2 py-1 rounded text-2xs font-medium transition-all duration-150 border cursor-pointer bg-transparent text-[var(--color-fg-muted)] border-[var(--border-slate-16)] hover:bg-[var(--white-6)]"
+              class="px-2 py-1 rounded text-2xs font-medium transition-all duration-150 border cursor-pointer bg-transparent text-[var(--color-fg-muted)] border-[var(--color-border-default)] hover:bg-[var(--white-6)]"
               onClick=${() => { selectedPostIds.value = new Set() }}
             >선택 해제</button>
           ` : null}
           <button type="button"
-            class="px-3 py-1 rounded text-2xs font-medium transition-all duration-150 border cursor-pointer bg-transparent text-[var(--color-fg-muted)] border-[var(--border-slate-16)] hover:bg-[var(--white-6)] hover:text-[var(--color-fg-primary)] disabled:opacity-50 disabled:cursor-not-allowed"
+            class="px-3 py-1 rounded text-2xs font-medium transition-all duration-150 border cursor-pointer bg-transparent text-[var(--color-fg-muted)] border-[var(--color-border-default)] hover:bg-[var(--white-6)] hover:text-[var(--color-fg-primary)] disabled:opacity-50 disabled:cursor-not-allowed"
             onClick=${refreshBoard}
             disabled=${boardLoading.value}
           >
@@ -514,7 +514,7 @@ export function Memory() {
           <div>
             <${MemorySummary} />
             <button type="button"
-              class="mb-4 px-3 py-1.5 rounded text-xs font-medium text-[var(--color-fg-muted)] bg-transparent border border-[var(--border-slate-16)] hover:bg-[var(--white-6)] hover:text-[var(--color-fg-primary)] transition-all cursor-pointer"
+              class="mb-4 px-3 py-1.5 rounded text-xs font-medium text-[var(--color-fg-muted)] bg-transparent border border-[var(--color-border-default)] hover:bg-[var(--white-6)] hover:text-[var(--color-fg-primary)] transition-all cursor-pointer"
               onClick=${() => navigate('workspace', { section: 'board' })}
             >← 게시판으로 돌아가기</button>
             ${detailLoading.value
@@ -529,7 +529,7 @@ export function Memory() {
       <${MemorySummary} />
       <${SortBar} />
       ${hint ? html`
-        <div class="mb-4 px-3 py-2 rounded border border-[var(--border-slate-16)] bg-[var(--white-3)] text-xs text-[var(--color-fg-muted)]">
+        <div class="mb-4 px-3 py-2 rounded border border-[var(--color-border-default)] bg-[var(--white-3)] text-xs text-[var(--color-fg-muted)]">
           ${hint}
         </div>
       ` : null}

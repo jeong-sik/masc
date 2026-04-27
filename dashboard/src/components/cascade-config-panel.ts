@@ -482,11 +482,11 @@ function ProfileCard({
                       : null}
                   </div>
                   ${c.model !== displayModel
-                    ? html`<div class="text-[11px] text-[var(--color-fg-muted)] mt-0.5">config: <code>${c.model}</code></div>`
+                    ? html`<div class="text-[length:var(--fs-11)] text-[var(--color-fg-muted)] mt-0.5">config: <code>${c.model}</code></div>`
                     : null}
                   ${expanded.length > 1
                     ? html`
-                      <ol class="mt-1 flex flex-col gap-0.5 text-[11px] text-[var(--color-fg-muted)]">
+                      <ol class="mt-1 flex flex-col gap-0.5 text-[length:var(--fs-11)] text-[var(--color-fg-muted)]">
                         ${expanded.map((model, expandedIdx) => html`
                           <li><span class="tabular-nums">${expandedIdx + 1}.</span> <code>${model}</code></li>
                         `)}

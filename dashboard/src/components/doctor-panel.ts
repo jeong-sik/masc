@@ -198,7 +198,7 @@ function SidecarChecksList({ checks }: { checks: SidecarCheckView[] }) {
                 ${c.autofix_available
                   ? html`
                       <span
-                        class="rounded-full border border-[var(--color-accent-fg)]/40 bg-[var(--color-accent-fg)]/10 px-1.5 py-0.5 text-[10px] text-[var(--color-accent-fg)]"
+                        class="rounded-full border border-[var(--color-accent-fg)]/40 bg-[var(--color-accent-fg)]/10 px-1.5 py-0.5 text-[length:var(--fs-10)] text-[var(--color-accent-fg)]"
                         title=${c.autofix_description
                           ? `자동 치유 시도: ${c.autofix_description} (CLI: masc-mcp doctor --fix)`
                           : '자동 치유 가능 (CLI: masc-mcp doctor --fix)'}
@@ -207,16 +207,16 @@ function SidecarChecksList({ checks }: { checks: SidecarCheckView[] }) {
                       </span>
                     `
                   : ''}
-                <span class="rounded-full border px-1.5 py-0.5 text-[10px] uppercase tracking-wider ${chip}">
+                <span class="rounded-full border px-1.5 py-0.5 text-[length:var(--fs-10)] uppercase tracking-wider ${chip}">
                   ${c.severity}
                 </span>
               </div>
             </div>
-            ${c.detail ? html`<div class="mt-1 text-[11px] text-[var(--color-fg-muted)]">${c.detail}</div>` : ''}
-            ${c.message ? html`<div class="mt-1 text-[11px] text-[var(--color-fg-primary)]">↳ ${c.message}</div>` : ''}
-            ${c.hint ? html`<div class="mt-1 text-[11px] text-[var(--color-fg-muted)]">hint: ${c.hint}</div>` : ''}
+            ${c.detail ? html`<div class="mt-1 text-[length:var(--fs-11)] text-[var(--color-fg-muted)]">${c.detail}</div>` : ''}
+            ${c.message ? html`<div class="mt-1 text-[length:var(--fs-11)] text-[var(--color-fg-primary)]">↳ ${c.message}</div>` : ''}
+            ${c.hint ? html`<div class="mt-1 text-[length:var(--fs-11)] text-[var(--color-fg-muted)]">hint: ${c.hint}</div>` : ''}
             ${c.autofix_available && c.autofix_description
-              ? html`<div class="mt-1 text-[11px] text-[var(--color-accent-fg)]">fix: ${c.autofix_description}</div>`
+              ? html`<div class="mt-1 text-[length:var(--fs-11)] text-[var(--color-accent-fg)]">fix: ${c.autofix_description}</div>`
               : ''}
           </li>
         `
@@ -235,8 +235,8 @@ function ConfigNotesList({ notes }: { notes: ConfigNotesView }) {
       ${warnings.length > 0
         ? html`
             <div>
-              <div class="text-[11px] uppercase tracking-wider text-[var(--color-fg-muted)]">경고</div>
-              <ul class="mt-1 list-disc space-y-1 pl-5 text-[11px] text-[var(--color-fg-primary)]">
+              <div class="text-[length:var(--fs-11)] uppercase tracking-wider text-[var(--color-fg-muted)]">경고</div>
+              <ul class="mt-1 list-disc space-y-1 pl-5 text-[length:var(--fs-11)] text-[var(--color-fg-primary)]">
                 ${warnings.map((w) => html`<li>${w}</li>`)}
               </ul>
             </div>
@@ -245,8 +245,8 @@ function ConfigNotesList({ notes }: { notes: ConfigNotesView }) {
       ${next_actions.length > 0
         ? html`
             <div>
-              <div class="text-[11px] uppercase tracking-wider text-[var(--color-fg-muted)]">다음 조치</div>
-              <ul class="mt-1 list-disc space-y-1 pl-5 text-[11px] text-[var(--color-fg-primary)]">
+              <div class="text-[length:var(--fs-11)] uppercase tracking-wider text-[var(--color-fg-muted)]">다음 조치</div>
+              <ul class="mt-1 list-disc space-y-1 pl-5 text-[length:var(--fs-11)] text-[var(--color-fg-primary)]">
                 ${next_actions.map((a) => html`<li>${a}</li>`)}
               </ul>
             </div>
@@ -271,9 +271,9 @@ function DoctorEntryCard({ entry }: { entry: DoctorEntry }) {
       >
         <div class="text-sm font-semibold text-[var(--color-fg-secondary)]">
           ${doctorHeading(entry)}
-          <span class="ml-2 text-[10px] text-[var(--color-fg-muted)]">${expanded.value ? '▾' : '▸'}</span>
+          <span class="ml-2 text-[length:var(--fs-10)] text-[var(--color-fg-muted)]">${expanded.value ? '▾' : '▸'}</span>
         </div>
-        <span class="rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-wider ${chip}">
+        <span class="rounded-full border px-2 py-0.5 text-[length:var(--fs-10)] uppercase tracking-wider ${chip}">
           ${label}
         </span>
       </button>

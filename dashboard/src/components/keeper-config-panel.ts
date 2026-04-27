@@ -372,7 +372,7 @@ function Callout({
 function BoolBadge({ value }: { value: boolean }) {
   return value
     ? html`<span class="text-2xs font-bold px-2 py-0.5 rounded bg-ok/10 text-ok border border-ok/20 shadow-sm shadow-ok/5">ON</span>`
-    : html`<span class="text-2xs font-bold px-2 py-0.5 rounded bg-white/5 text-text-dim border border-white/10 shadow-sm">OFF</span>`
+    : html`<span class="text-2xs font-bold px-2 py-0.5 rounded bg-white/5 text-text-dim border border-[var(--white-10)] shadow-sm">OFF</span>`
 }
 
 function formatHookDestructiveTools(value: string[] | string): string {
@@ -408,7 +408,7 @@ function PromptSourceBadge({ source }: { source: string }) {
       ? 'bg-[var(--warn-10)] text-[var(--color-status-warn)] border-[var(--warn-20)]'
       : source === 'file'
         ? 'bg-[var(--ok-10)] text-[var(--color-status-ok)] border-[var(--ok-20)]'
-        : 'bg-white/5 text-text-dim border-white/10'
+        : 'bg-white/5 text-text-dim border-[var(--white-10)]'
   return html`<span class="text-3xs font-bold px-2 py-0.5 rounded border ${tone} shadow-sm">${source.toUpperCase()}</span>`
 }
 

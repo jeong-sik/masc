@@ -122,7 +122,8 @@ check_forbidden_outside "V10-provider-filter-ownership" \
 check_forbidden_outside "V11-proof-store-layout" \
   'Filename\.concat .*"proofs"' \
   "lib/" \
-  "lib/proof_artifact_reader.ml"
+  "lib/proof_artifact_reader.ml" \
+  "lib/proof_artifact_reader.mli"
 
 # V12: oas-runtime session root literal must stay inside the runtime path adapter.
 check_forbidden_outside "V12-oas-runtime-layout" \

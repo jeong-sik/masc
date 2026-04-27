@@ -32,10 +32,29 @@ type ambiguous_partial_commit = {
   detail : string;
 }
 
+(** Phase B PR-6 (2026-04-28): typed sub-class of stale-watchdog kills.
+    See keeper_registry.mli for rationale. *)
+type stale_kill_class =
+  | Idle_turn of { stall_seconds : float }
+  | In_turn_hung of {
+      active_seconds : float;
+      timeout_threshold : float;
+    }
+  | Noop_failure_loop of { noop_count : int }
+
+let stale_kill_class_to_string = function
+  | Idle_turn { stall_seconds } ->
+      Printf.sprintf "idle_turn(%.0fs)" stall_seconds
+  | In_turn_hung { active_seconds; timeout_threshold } ->
+      Printf.sprintf "in_turn_hung(active=%.0fs threshold=%.0fs)"
+        active_seconds timeout_threshold
+  | Noop_failure_loop { noop_count } ->
+      Printf.sprintf "noop_failure_loop(noop=%d)" noop_count
+
 type failure_reason =
   | Heartbeat_consecutive_failures of int
   | Turn_consecutive_failures of int
-  | Stale_turn_timeout of float
+  | Stale_turn_timeout of stale_kill_class
   | Stale_termination_storm of { count : int }
       (** #10765 Phase 2: latched when [record_stale_termination] returns a
           window count >= [escalation_threshold]. The supervisor's
@@ -56,8 +75,9 @@ let failure_reason_to_string = function
       Printf.sprintf "heartbeat_consecutive_failures(%d)" n
   | Turn_consecutive_failures n ->
       Printf.sprintf "turn_consecutive_failures(%d)" n
-  | Stale_turn_timeout sec ->
-      Printf.sprintf "stale_turn_timeout(%.0fs)" sec
+  | Stale_turn_timeout cls ->
+      Printf.sprintf "stale_turn_timeout(%s)"
+        (stale_kill_class_to_string cls)
   | Stale_termination_storm { count } ->
       Printf.sprintf "stale_termination_storm(count=%d)" count
   | Ambiguous_partial_commit { kind; detail } ->

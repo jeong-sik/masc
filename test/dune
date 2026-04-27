@@ -203,7 +203,8 @@
         test_auth_strict_mode
         test_keeper_turn_fsm_emit
         test_gh_api_classification
-        test_actionable_path_action)
+        test_actionable_path_action
+        test_stale_kill_class)
  (modules test_attribution test_attribution_tagged test_autoresearch_result_bridge test_dashboard_attribution test_masc_runtime_events test_room test_room_state_recovery test_types test_exec_tap test_auth test_auth_doctor test_auth_error_kind test_auth_login test_audit_log test_governance_anomaly test_http_negotiation
           test_attempt_state
           test_sse test_cancellation test_graphql_api
@@ -377,6 +378,7 @@
           test_keeper_turn_fsm_emit
           test_gh_api_classification
           test_actionable_path_action
+          test_stale_kill_class
           )
  (libraries masc_test_deps))
 

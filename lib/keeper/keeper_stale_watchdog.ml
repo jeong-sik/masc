@@ -190,20 +190,42 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                      (String.concat "," reasons) (now -. ts)
                  | _ -> ""
                in
+               (* Phase B PR-6 (2026-04-28): the kill reason now carries
+                  a typed [stale_kill_class] so dashboards can attribute
+                  the kill to the correct root cause (idle stall vs
+                  active turn hang vs no-op loop) instead of every kill
+                  collapsing to a single [stale_turn_timeout(<seconds>)]
+                  string.  The three sub-causes need different operator
+                  actions, so they need different typed labels.  The
+                  surrounding [reason_desc] log line still embeds the
+                  same human-readable text via [stale_kill_class_to_string]. *)
+               let kill_class : Keeper_registry.stale_kill_class =
+                 if in_turn_stale then
+                   In_turn_hung
+                     { active_seconds = in_turn_age;
+                       timeout_threshold = active_turn_timeout_sec;
+                     }
+                 else if idle_stale then
+                   Idle_turn { stall_seconds = now -. last_turn }
+                 else
+                   Noop_failure_loop { noop_count }
+               in
                let reason_desc =
-                 if idle_stale then
+                 match kill_class with
+                 | Idle_turn { stall_seconds } ->
                    Printf.sprintf "idle %.0fs%s"
-                     (now -. last_turn) skip_reason_label
-                 else if in_turn_stale then
+                     stall_seconds skip_reason_label
+                 | In_turn_hung { active_seconds; timeout_threshold } ->
                    Printf.sprintf "active turn hung %.0fs (timeout %.0fs)"
-                     in_turn_age active_turn_timeout_sec
-                 else Printf.sprintf "failure-loop noop=%d" noop_count
+                     active_seconds timeout_threshold
+                 | Noop_failure_loop { noop_count = n } ->
+                   Printf.sprintf "failure-loop noop=%d" n
                in
                let stall_seconds =
                  if in_turn_stale then in_turn_age else now -. last_turn
                in
                Keeper_registry.set_failure_reason ~base_path meta.name
-                 (Some (Keeper_registry.Stale_turn_timeout stall_seconds));
+                 (Some (Keeper_registry.Stale_turn_timeout kill_class));
                Atomic.set reg.fiber_stop true;
                let window_count = record_stale_termination meta.name now in
                Prometheus.inc_counter

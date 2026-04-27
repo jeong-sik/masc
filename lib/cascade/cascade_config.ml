@@ -959,6 +959,18 @@ let selection_trace_of_weighted_entries
 let resolve_model_strings_with_trace ?config_path ~name ~defaults () =
   match config_path with
   | Some path ->
+    (* Phase 2b: same probe pattern as resolve_model_strings_traced_with —
+       distinguish a load fault from operator-intended absence. *)
+    (match Cascade_config_loader.load_json path with
+     | Error msg ->
+       let candidates =
+         List.map (fun m ->
+           candidate_info_of_weighted
+             { Cascade_config_loader.model = m; weight = 1; supports_tool_choice = None })
+           defaults
+       in
+       (defaults, { candidates; source = Load_failed msg })
+     | Ok _ ->
     let from_file_weighted =
       Cascade_config_loader.load_profile_weighted ~config_path:path ~name in
     if from_file_weighted <> [] then
@@ -984,7 +996,7 @@ let resolve_model_strings_with_trace ?config_path ~name ~defaults () =
               { Cascade_config_loader.model = m; weight = 1; supports_tool_choice = None })
             defaults
         in
-        (defaults, { candidates; source = Hardcoded_defaults })
+        (defaults, { candidates; source = Hardcoded_defaults }))
   | None ->
     let candidates =
       List.map (fun m ->

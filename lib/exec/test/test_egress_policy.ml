@@ -204,9 +204,8 @@ let test_blocked_json_with_path_empty_allowlist () =
   assert (json_field_string "expected_policy_path" parsed = Some path);
   match json_field_string "reason" parsed with
   | Some reason ->
-      assert (
-        string_contains"empty or unreadable" reason);
-      assert (string_containspath reason)
+      assert (string_contains reason "empty or unreadable");
+      assert (string_contains reason path)
   | None -> assert false
 
 let test_blocked_json_with_path_unmatched_domain () =
@@ -226,8 +225,8 @@ let test_blocked_json_with_path_unmatched_domain () =
   assert (json_field_string "expected_policy_path" parsed = Some path);
   match json_field_string "reason" parsed with
   | Some reason ->
-      assert (string_contains"evil.com" reason);
-      assert (string_contains"not in egress allowlist" reason)
+      assert (string_contains reason "evil.com");
+      assert (string_contains reason "not in egress allowlist")
   | None -> assert false
 
 let test_blocked_json_without_path_preserves_legacy_schema () =

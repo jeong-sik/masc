@@ -194,7 +194,7 @@ function ActionTimeline({ data }: { data: ActivityGraphResponse }) {
           <button
             type="button"
             class="inline-flex items-center gap-1.5 rounded border px-2.5 py-1.5 text-2xs transition-all duration-150 ${showLifecycle.value
-              ? 'border-[var(--color-border-default)] bg-[var(--accent-soft)] text-[var(--color-fg-secondary)]'
+              ? 'border-[var(--color-border-default)] bg-[var(--color-accent-soft)] text-[var(--color-fg-secondary)]'
               : 'border-[var(--white-10)] bg-[var(--white-4)] text-[var(--color-fg-disabled)] hover:bg-[var(--white-8)]'}"
             onClick=${() => { showLifecycle.value = !showLifecycle.value }}
           >
@@ -241,7 +241,7 @@ function ActionTimeline({ data }: { data: ActivityGraphResponse }) {
                   <div class="flex items-center gap-2">
                     ${group.actor ? html`
                       <a
-                        class="rounded border border-[var(--accent-20)] bg-[var(--accent-soft)] px-3 py-1.5 text-2xs text-[var(--color-accent-fg)] no-underline transition-all duration-150 hover:bg-[var(--accent-10)]"
+                        class="rounded border border-[var(--accent-20)] bg-[var(--color-accent-soft)] px-3 py-1.5 text-2xs text-[var(--color-accent-fg)] no-underline transition-all duration-150 hover:bg-[var(--accent-10)]"
                         href=${hashForRoute('monitoring', { section: 'observatory', keeper: group.actor, range: activityRange() })}
                       >이 keeper로 보기</a>
                     ` : null}

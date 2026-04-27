@@ -576,7 +576,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
             <div class="flex min-w-0 flex-col gap-2">
               <div class="flex flex-wrap items-center gap-3">
                 <span class="text-2xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">디렉터리 필터</span>
-                <span class="inline-flex items-center rounded-sm border border-[var(--color-border-default)] bg-[var(--accent-soft)] px-2.5 py-1 text-2xs font-medium text-[var(--color-fg-secondary)]">${resultCountLabel}</span>
+                <span class="inline-flex items-center rounded-sm border border-[var(--color-border-default)] bg-[var(--color-accent-soft)] px-2.5 py-1 text-2xs font-medium text-[var(--color-fg-secondary)]">${resultCountLabel}</span>
               </div>
               <p class="m-0 max-w-180 text-sm leading-loose text-[var(--color-fg-primary)]">${pageDescription}</p>
             </div>
@@ -584,7 +584,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
             <label class="flex w-full flex-col gap-2 text-2xs font-semibold tracking-1 text-[var(--color-fg-muted)] uppercase">
               <span>이름 / model / 작업</span>
               <${TextInput}
-                class="rounded bg-[var(--white-3)] px-4 py-3 text-base text-[var(--color-fg-primary)] shadow-[inset_0_1px_0_var(--white-3)] focus:border-[var(--color-accent-fg)] focus:shadow-[0_0_0_2px_var(--accent-soft)]"
+                class="rounded bg-[var(--white-3)] px-4 py-3 text-base text-[var(--color-fg-primary)] shadow-[inset_0_1px_0_var(--white-3)] focus:border-[var(--color-accent-fg)] focus:shadow-[0_0_0_2px_var(--color-accent-soft)]"
                 name="agent_search"
                 ariaLabel="에이전트 이름 · 모델 · 작업 검색"
                 autoComplete="off"

@@ -373,7 +373,6 @@ let view_meta_panel (r : Overview_types.response) =
                         ~attrs:[ Style.stag_fill; stag_color m.stagnation_score; bar_style ]
                         []
                     ]
-                    ]
                 ]
             ]
         ; Node.div

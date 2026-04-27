@@ -236,7 +236,6 @@ let view ?(keepers : Keepers_types.response = Keepers_types.fixture) () =
         ]
       (hairlines @ guides @ polylines)
   in
-  in
   Node.div
     ~attrs:[ Swim.Style.swim ]
     [ Node.div

@@ -1,6 +1,61 @@
 # Changelog
 
 
+## [0.18.2] - 2026-04-27 — patch: keeper stability hardening + observability + dev tooling
+
+Aggregate of 66 commits since v0.18.1 (18 fix / 8 feat / 14 refactor / 6 perf / 9 i18n / 8 squash / 2 chore / 1 test). No breaking API changes.
+
+Follow-up to v0.18.1 ProviderTerminal rescue. This release collects a wave of keeper-watchdog / cascade rotation / autoboot / sandbox-docker fixes that landed after a focused diagnostic cycle, plus dashboard-side observability and dev-tooling SSOT cleanup. All `feat` entries are additive (env knobs, lint detector, telemetry semantic refinement, dev scripts, design-system sync) — no behavioural defaults changed for runtime keepers.
+
+### Fixed (keeper / fleet hot path)
+- `keeper-watchdog`: suppress idle-stale events during an active turn; add a separate turn-timeout (default 600s) so watchdog stops misclassifying mid-turn LLM waits as stalls (#10940).
+- `keeper`: cap cascade rotation at 1 for `required_tool_contract_violation` so a single proactive contract miss can't cycle through every provider (#10851).
+- `coord/task`: emit warn when a task crosses the 5-cycle oscillation threshold so operators see escalation candidates (#10719, #10920).
+- `server/autoboot`: per-task boot guard so a single hung lazy task can't block keeper boot — restore_sessions now degrades gracefully instead of hanging the boot pipeline (#10857).
+- `boot`: start `Oas_worker_cascade` actor consumer fiber that was dropped in a refactor and left the cascade actor without a reader (#10895).
+- `cascade-filter`: per-provider rejection diagnostics for #10681 so cascade-skip reasons are visible per provider, not aggregate (#10852).
+- `keeper-shell-docker`: detect `gh --repo X api Y` LLM-hallucinated form and self-correct (108 events / day pre-fix, #10855, #10900).
+- `keeper-shell-docker`: replace `List.hd` with pattern match (Health ratchet, #10905).
+- `auth`: stop classifying `keeper-<id>-agent` as a transient alias so per-keeper credentials don't churn (#10867).
+- `auth`: surface `error_kind` + `actor_hint` in `dashboard_actor_fallback` warn payload for easier triage (#10933).
+- `post_verifier`: add Korean filler phrases (filler detector previously English-only, #10882, #10938).
+- `coord/config`: memoize `default_config` to drop 1745 redundant inits / 2 days (#10919, #10937).
+
+### Fixed (dashboard / health / hygiene)
+- `health`: replace `List.hd` with pattern match in `keepers_directory` (#10926).
+- `dashboard`: a11y restore `role=status`/`role=alert` on loading/error indicators (#10874).
+- `dashboard`: update test expectations for i18n-localized flag tooltips (#10929).
+- `coord/backend`: demote per-call backend init logs to DEBUG (1745 events / 2d, #10919, #10928).
+- `keeper/watchdog`: demote all-default tick log to DEBUG (1638 events / 2d, 92% all-healthy, #10908, #10910).
+- `ws-transport`: downgrade per-session lifecycle log to DEBUG (4029 events / 31min, #10875, #10881).
+
+### Added (feat — additive, env-gated where applicable)
+- `dashboard`: extract mission/shell/render timeouts to env (SSOT, #10880).
+- `dashboard`: extract execution-surface timeouts to env (SSOT, #10886).
+- `process`: consolidate 11 hardcoded subprocess timeout defaults to env (SSOT, #10889).
+- `lint`: detect Eio actor consumer fibers that are never wired up (covers the #10895 class of bugs at the lint layer, #10904).
+- `scripts`: add `cleanup-autoresearch.sh` — TTL-based quarantine for stale autoresearch dirs (#10913).
+- `telemetry`: mark `Goal_event` as `optional_when_missing` — show `not_yet` instead of `missing` for keepers that haven't emitted yet (#10921).
+- `design-system`: sync v0.4.3 — extract `semantic.css` + 6 preview pages (#10898).
+- `dashboard`: localize Cascade profile tooltip + reveal aria (round-52, #10811).
+
+### Changed (perf — dashboard re-render reduction)
+- `dashboard/fsm-hub`: drop 1 Hz tick to 5 s for re-render reduction (#10894).
+- `dashboard/fsm-hub`: drop self-triggering `pollTick` from interval deps (#10914).
+- `dashboard`: hoist 5 s wall-clock tick to a shared module signal (#10918).
+- `dashboard`: hide `sourceMappingURL` to stop browser map auto-fetch (#10907).
+- `dashboard`: add opt-in bundle visualizer (`BUNDLE_REPORT=1`, #10897).
+- `transport`: label `sse_broadcast_events_total` by `target` for per-target broadcast attribution (#10916).
+
+### Changed (refactor / i18n / squash)
+- 14 refactor PRs (design-system migration across multiple panels, dashboard utility consolidation).
+- 9 i18n rounds (rounds 52, 68, 69, 70, 72, 74) covering ~25 chips/labels/empty-state strings.
+- 8 squash merges (autocoder dedup + small-PR rollups).
+
+### Notes
+- Diagnostic chain that drove this batch: `#10474` cascade dead → `#10745` fd leak (separate fix wave, partially captured) → `#10765` keeper stale watchdog terminating fleet → `#10872`/`#10940` keeper-watchdog suppress + turn timeout. Diagnostic comments → autocoder fix loop closed end-to-end within 6 hours.
+- Out of scope (deferred to follow-up release): `#10828` no process-level supervisor (awaiting operator policy decision; conflicts with `<launchd>` guidance), `#10887` keeper self_preservation `ratio=1.00` permanent lock (FSM circuit-breaker design review needed), `#10719` task-049 cycle=20 hard-stop escalation (this release adds the warn signal at threshold 5; threshold ≥15 hard-stop is a separate proposal).
+
 ## [0.18.1] - 2026-04-26 — patch: rescue v0.18.0 release (ProviderTerminal partial-match fix-forward)
 
 Aggregate of 37 commits since v0.18.0 (14 feat / 10 fix / 9 refactor / 2 chore / 2 diag). No breaking API changes.

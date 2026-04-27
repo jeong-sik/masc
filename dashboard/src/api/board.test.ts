@@ -65,9 +65,9 @@ describe('derivePostTitle expanded', () => {
     expect(derivePostTitle('1. First item')).toBe('First item')
   })
 
-  it('returns "Untitled post" for empty content', () => {
-    expect(derivePostTitle('')).toBe('Untitled post')
-    expect(derivePostTitle('   ')).toBe('Untitled post')
+  it('returns "제목 없음" for empty content', () => {
+    expect(derivePostTitle('')).toBe('제목 없음')
+    expect(derivePostTitle('   ')).toBe('제목 없음')
   })
 
   it('truncates long titles', () => {

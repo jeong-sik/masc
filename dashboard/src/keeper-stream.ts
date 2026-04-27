@@ -25,7 +25,7 @@ export function abortKeeperThreadMessage(name: string): void {
     finalizeAssistantEntry(keeperName, entryId, {
       delivery: 'timeout',
       streamState: null,
-      error: 'Stream cancelled',
+      error: '스트림 취소됨',
       timestamp: new Date().toISOString(),
     })
   }

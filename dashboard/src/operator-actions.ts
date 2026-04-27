@@ -64,7 +64,7 @@ function appendLog(entry: Omit<OperatorActionLogEntry, 'id' | 'at'>): void {
 
 function logMessageFromResult(result: OperatorActionResult): string {
   if (result.confirm_required) {
-    return stringifyUnknown(result.preview) || 'Confirmation required'
+    return stringifyUnknown(result.preview) || '확인 필요'
   }
   return stringifyUnknown(result.result)
     || stringifyUnknown(result.delegated_tool_result)

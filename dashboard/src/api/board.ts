@@ -278,7 +278,7 @@ export function derivePostTitle(content: string): string {
     if (title) return truncatePostTitle(title)
   }
 
-  return 'Untitled post'
+  return '제목 없음'
 }
 
 export function sanitizeBoardTitle(title: string, fallbackBody = ''): string {

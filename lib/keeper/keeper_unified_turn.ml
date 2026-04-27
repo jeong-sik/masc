@@ -1064,6 +1064,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
   | Some phase when not (Keeper_state_machine.can_execute_turn phase) ->
       let phase_string = Keeper_state_machine.phase_to_string phase in
       Log.Keeper.info
+        ~keeper_name:meta.name ~turn_id:keeper_turn_id
         "%s: keeper cycle skipped in non-executable phase=%s"
         meta.name phase_string;
       let terminal_reason_code =
@@ -1088,7 +1089,9 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
         let phase = match phase_opt with
           | Some p -> p
           | None ->
-              Log.Keeper.warn "%s: registry phase lookup returned None, defaulting to Failing"
+              Log.Keeper.warn
+                ~keeper_name:meta.name ~turn_id:keeper_turn_id
+                "%s: registry phase lookup returned None, defaulting to Failing"
                 meta.name;
               Keeper_state_machine.Failing
         in
@@ -1166,6 +1169,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                 | None -> 0
               in
               Log.Keeper.info
+                ~keeper_name:meta.name ~turn_id:keeper_turn_id
                 "%s: ollama saturated for keeper=%s cascade=%s queue=%d \
                  available=%d \xe2\x80\x94 skipping turn"
                 meta.name meta.name effective_cascade_name queue_len
@@ -1283,6 +1287,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
              Printf.sprintf "turn_livelock:%s" reason_string
            in
            Log.Keeper.error
+             ~keeper_name:meta.name ~turn_id:keeper_turn_id
              "%s: keeper turn livelock guard blocked dispatch turn=%d: %s"
              meta.name turn_id
              reason_string;

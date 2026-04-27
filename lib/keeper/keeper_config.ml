@@ -426,10 +426,15 @@ let _rp_bool ~key ~default ~description () =
 let keeper_status_fast_default () : bool =
   bool_of_env_default "MASC_KEEPER_STATUS_FAST_DEFAULT" ~default:false
 
+(* #11111: was 0.5, which fired ContextOverflowImminent at half-window
+   on every keeper turn (18 events / 2d, all in 0.50–0.55 band).
+   OAS pipeline applies a hard floor of 0.9 when this is unset; we
+   stay just below that so compaction has room to run before the
+   upstream guard triggers. *)
 let keeper_compact_ratio_rp =
   _rp_float ~key:"keeper.compaction.ratio"
     ~default:(fun () -> float_of_env_default "MASC_KEEPER_COMPACT_RATIO"
-                          ~default:0.5 ~min_v:0.1 ~max_v:0.98)
+                          ~default:0.85 ~min_v:0.1 ~max_v:0.98)
     ~min_v:0.1 ~max_v:0.98
     ~description:"Compaction ratio gate" ()
 let keeper_compact_ratio () : float =

@@ -8,6 +8,50 @@
 open Keeper_types
 open Keeper_exec_shared
 
+(* ── Sandbox GH_TOKEN warn dedup ───────────────────────────
+
+   When [git_creds_enabled = true] but [Env_config_keeper.KeeperSandbox.gh_token]
+   returns the empty string, the keeper subprocess inside docker has *no*
+   GitHub credential — every [gh pr create]/[git push] inside the sandbox
+   returns 401, which operators only see as an unstructured CLI error from
+   the keeper turn output.  The 3-tier resolution chain
+   ([env_config_keeper.ml:700-748]: MASC_KEEPER_SANDBOX_GH_TOKEN env →
+   host GH_TOKEN env → cached `gh auth token` keychain probe) silently
+   collapses to "" and the [-e GH_TOKEN=...] argv slot is omitted.
+
+   Symmetric to #10973's expire_stale-never-called dead-end: function and
+   policy exist, single missing log line leaves the operator blind.  The
+   per-keeper dedup keeps log noise bounded — the resolution chain is
+   process-global cached, so the warn only needs to fire once per keeper
+   per server lifetime. *)
+let gh_token_warn_emitted : (string, unit) Hashtbl.t = Hashtbl.create 16
+let gh_token_warn_mu = Eio.Mutex.create ()
+
+let warn_sandbox_gh_token_missing keeper_name =
+  let should_emit =
+    Eio.Mutex.use_rw ~protect:true gh_token_warn_mu (fun () ->
+      if Hashtbl.mem gh_token_warn_emitted keeper_name then false
+      else begin
+        Hashtbl.add gh_token_warn_emitted keeper_name ();
+        true
+      end)
+  in
+  if should_emit then begin
+    Prometheus.inc_counter
+      "masc_keeper_sandbox_gh_token_missing_total"
+      ~labels:[ ("keeper", keeper_name) ]
+      ();
+    Log.Keeper.warn
+      "%s: sandbox GH_TOKEN unavailable — gh/git HTTPS calls inside the \
+       container will return 401.  Resolution chain (env_config_keeper.ml \
+       KeeperSandbox.gh_token): 1) MASC_KEEPER_SANDBOX_GH_TOKEN env, \
+       2) host GH_TOKEN env, 3) cached `gh auth token` keychain probe.  \
+       On macOS the keychain probe is permanently cached at server start; \
+       run `gh auth status` to verify credentials, then restart masc-mcp \
+       so the probe re-runs."
+      keeper_name
+  end
+
 (* ── P12: Network egress policy ───────────────────────── *)
 
 let egress_policy_path ~(config : Coord.config) ~(meta : keeper_meta) =
@@ -388,6 +432,8 @@ let run_docker_shell_command_with_status
           else
             ""
         in
+        if git_creds_enabled && gh_token = "" then
+          warn_sandbox_gh_token_missing meta.name;
         if (not git_creds_enabled) || gh_token = "" then
           []
         else

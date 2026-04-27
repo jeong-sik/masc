@@ -97,4 +97,35 @@
   --spacing-group: 12px;       /* gap-3  — grouped items */
   --spacing-element: 8px;      /* gap-2  — tight element spacing */
   --spacing-overlay-inset: 24px; /* p-6  — overlay viewport inset */
+
+  /* Keeper attribution — 12-slot hue spectrum (design-system v0.3+ SPEC §3.6).
+     Slots are deterministic via kSlot(id) hash; the canonical 5 ids in
+     KEEPER_REGISTRY (keeper-badge.ts) are pinned for brand recall.
+     Hue stride 30°, perceptually balanced for ≥4.5:1 contrast against bg-0.
+     -glow variants are rgb triplets (space-separated) for box-shadow
+     usage like `rgb(var(--color-keeper-N-glow) / 0.7)`. */
+  --color-keeper-1:  #c8869b;  /* H=000 · rose   */
+  --color-keeper-2:  #cc8a7b;  /* H=030 · clay   */
+  --color-keeper-3:  #c39259;  /* H=060 · amber  */
+  --color-keeper-4:  #b09c4d;  /* H=090 · olive  */
+  --color-keeper-5:  #93a85c;  /* H=120 · moss   */
+  --color-keeper-6:  #6cad7d;  /* H=150 · jade   */
+  --color-keeper-7:  #45b09a;  /* H=180 · teal   */
+  --color-keeper-8:  #3aacba;  /* H=210 · cyan   */
+  --color-keeper-9:  #65a0cc;  /* H=240 · sky    */
+  --color-keeper-10: #8b96cf;  /* H=270 · iris   */
+  --color-keeper-11: #a98dca;  /* H=300 · violet */
+  --color-keeper-12: #c08aaf;  /* H=330 · mauve  */
+  --color-keeper-1-glow:  200 134 155;
+  --color-keeper-2-glow:  204 138 123;
+  --color-keeper-3-glow:  195 146  89;
+  --color-keeper-4-glow:  176 156  77;
+  --color-keeper-5-glow:  147 168  92;
+  --color-keeper-6-glow:  108 173 125;
+  --color-keeper-7-glow:   69 176 154;
+  --color-keeper-8-glow:   58 172 186;
+  --color-keeper-9-glow:  101 160 204;
+  --color-keeper-10-glow: 139 150 207;
+  --color-keeper-11-glow: 169 141 202;
+  --color-keeper-12-glow: 192 138 175;
 }

@@ -117,3 +117,9 @@
   from { transform: translateX(100%); opacity: 0; }
   to { transform: translateX(0); opacity: 1; }
 }
+
+@keyframes keeper-heartbeat {
+  0%, 100% { transform: scale(1); }
+  14%, 42% { transform: scale(1.08); }
+  28% { transform: scale(1); }
+}

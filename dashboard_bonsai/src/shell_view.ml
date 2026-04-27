@@ -980,7 +980,7 @@ let watch_feed () =
             [ Node.text "Old two-column placeholder shell retired from active tabs." ]
         ; event "t-03"
             [ Node.text "Design tokens loaded from "
-            ; Node.code [ Node.text "colors_and_type.css" ]
+            ; Node.code [ Node.text "colors_and_type.generated.css" ]
             ; Node.text "."
             ]
         ]

@@ -11,6 +11,7 @@ type event = {
   candidates_out : int;
   backoff_ms : int;
   kind : event_kind;
+  trace_id : string option;
 }
 
 let kind_to_string = function

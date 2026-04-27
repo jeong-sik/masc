@@ -772,6 +772,11 @@ let client_capacity_history_json ?limit ?kind ?since_ts () =
 
 let strategy_trace_event_to_json (ev : Cascade_strategy_trace.event)
   : Yojson.Safe.t =
+  let trace_id_json =
+    match ev.trace_id with
+    | None -> `Null
+    | Some id -> `String id
+  in
   `Assoc [
     ("ts", `Float ev.ts);
     ("cascade_name", `String ev.cascade_name);
@@ -781,6 +786,7 @@ let strategy_trace_event_to_json (ev : Cascade_strategy_trace.event)
     ("candidates_out", `Int ev.candidates_out);
     ("backoff_ms", `Int ev.backoff_ms);
     ("kind", `String (Cascade_strategy_trace.kind_to_string ev.kind));
+    ("trace_id", trace_id_json);
   ]
 
 let strategy_trace_json ?limit ?cascade () =

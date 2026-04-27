@@ -241,7 +241,7 @@ function SortBar() {
   const current = boardSortMode.value
   const grouped = splitVisiblePosts(boardPosts.value)
   return html`
-    <div class="flex flex-col gap-3 mb-4 p-3 rounded border border-[var(--color-border-default)] bg-[var(--card)]">
+    <div class="flex flex-col gap-3 mb-4 p-3 rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]">
       <div class="flex items-center gap-1.5 flex-wrap">
         ${SORT_MODES.map(mode => html`
           <button type="button"
@@ -340,7 +340,7 @@ function MemorySummary() {
   const grouped = splitVisiblePosts(boardPosts.value)
   const visibleCount = grouped.groups.reduce((sum, g) => sum + g.posts.length, 0)
   return html`
-    <div class="flex flex-wrap items-center gap-2 mb-4 px-3 py-2.5 rounded border border-[var(--color-border-default)] bg-[var(--card)] text-xs text-[var(--color-fg-muted)]">
+    <div class="flex flex-wrap items-center gap-2 mb-4 px-3 py-2.5 rounded border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-xs text-[var(--color-fg-muted)]">
       <span class="font-semibold text-[var(--color-fg-secondary)] tabular-nums text-md">${visibleCount}</span>
       <span>개 표시 중</span>
       ${grouped.groups.map(g => {
@@ -402,7 +402,7 @@ function PostCard({ post }: { post: BoardPost }) {
   return html`
     <button
       type="button"
-      class="board-post group w-full flex gap-3 rounded p-4 border border-[var(--color-border-default)] bg-[var(--card)] hover:bg-[var(--white-6)] hover:border-[var(--accent-20)] transition-all duration-200 cursor-pointer text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+      class="board-post group w-full flex gap-3 rounded p-4 border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] hover:bg-[var(--white-6)] hover:border-[var(--accent-20)] transition-all duration-200 cursor-pointer text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
       onClick=${() => navigateToPost(post.id)}
     >
       <!-- Select checkbox -->
@@ -438,7 +438,7 @@ function PostCard({ post }: { post: BoardPost }) {
         <!-- Content preview: rendered markdown, height-capped -->
         <div class="board-post-preview text-sm text-[var(--color-fg-primary)] leading-paragraph mb-2.5 overflow-hidden relative ${richPreview ? 'max-h-[12rem]' : 'max-h-[4.8em]'}">
           <${RichContent} text=${previewBody} class="board-post-preview__content" previewLimit=${1} />
-          <div class="absolute bottom-0 left-0 right-0 ${richPreview ? 'h-10' : 'h-6'} bg-gradient-to-t from-[var(--card)] to-transparent pointer-events-none" />
+          <div class="absolute bottom-0 left-0 right-0 ${richPreview ? 'h-10' : 'h-6'} bg-gradient-to-t from-[var(--color-bg-surface)] to-transparent pointer-events-none" />
         </div>
 
         <!-- Footer: author + meta + badges -->

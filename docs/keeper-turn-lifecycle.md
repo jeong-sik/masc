@@ -46,6 +46,38 @@ sequenceDiagram
     end
 ```
 
+## State machine
+
+The typed FSM ADT in `lib/keeper/keeper_turn_fsm.mli` (Step 4a, #11184)
+fixes the vocabulary; the diagram below mirrors the variants verbatim.
+Step 4b will adopt these transitions at the implicit edges currently
+spread across `keeper_unified_turn.ml` and `keeper_agent_run.ml`.
+
+```mermaid
+stateDiagram-v2
+    direction LR
+    [*] --> Idle
+    Idle --> Phase_gating: heartbeat tick
+    Phase_gating --> Cancelled: phase blocks turn (Cancelled_phase_gate_close)
+    Phase_gating --> Cascade_routing: phase allows turn
+    Cascade_routing --> Failed: cascade unavailable (Failure_cascade_unavailable)
+    Cascade_routing --> Awaiting_provider: provider selected
+    Awaiting_provider --> Streaming: first token / tool call
+    Awaiting_provider --> Failed: provider error (Failure_provider_error)
+    Streaming --> Awaiting_tool_result: tool call dispatched
+    Awaiting_tool_result --> Streaming: tool result returned
+    Streaming --> Completing: stop_reason received
+    Completing --> Done: receipt ok
+    Completing --> Failed: contract violation (Failure_tool_contract_violation)
+    Completing --> Failed: receipt write failed (Failure_receipt_lost)
+    Streaming --> Cancelled: supervisor stop (Cancelled_supervisor_stop)
+    Streaming --> Cancelled: provider timeout (Cancelled_provider_timeout)
+    Awaiting_tool_result --> Cancelled: fleet shutdown (Cancelled_fleet_shutdown)
+    Done --> [*]
+    Failed --> [*]
+    Cancelled --> [*]
+```
+
 ## State table
 
 | State | Entered when | Receipt outcome | turn_id carried |
@@ -100,10 +132,12 @@ correlator the receipt does.
 
 | Plan step | Adds | Status |
 |---|---|---|
-| Step 4 | Explicit `Keeper_turn_fsm.transition` at every edge | pending |
-| Step 5 | `Cancelled` reason variant + `Switch.on_release` cleanup | pending |
-| Step 7 | TLA+ spec mirroring this diagram | pending |
-| Step 6b | Replace `String_util.contains_substring_ci` heuristic with `Keeper_contract_classifier` (#11172 added types, caller rewrite pending) | partial |
+| Step 4a | `Keeper_turn_fsm` ADT (state / cancel_reason / failure_reason) | merged (#11184) |
+| Step 4b | Explicit `Keeper_turn_fsm.transition` at every edge | pending |
+| Step 5 | Replace `safe_emit_turn_end` catch-all with `Switch.on_release` so `Cancelled_*` reaches the FSM | pending |
+| Step 7 | TLA+ spec mirroring this diagram | merged (#11190, #11198, #11199, #11225) |
+| Step 6b-1 | `Keeper_contract_classifier.classify_actionable_signal` helper (additive) | merged (#11217) |
+| Step 6b-2 | Replace `String_util.contains_substring_ci` heuristic at `keeper_agent_run.ml:2285-2298` with the typed helper (RISKY — turn-accept distribution change, needs dual-emit window) | pending |
 
 ## References
 

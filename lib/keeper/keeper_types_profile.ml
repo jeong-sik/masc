@@ -309,7 +309,6 @@ type keeper_profile_defaults = {
   social_model : string option;
   cascade_name : string option;
   models : string list option;
-  unknown_toml_keys : string list;
   (* Turn budget overrides. None = inherit env default
      (MASC_KEEPER_OAS_MAX_TURNS_PER_CALL / ..._SCHEDULED_AUTONOMOUS). *)
   max_turns_per_call : int option;
@@ -1135,7 +1134,6 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
                   (match Safe_ops.json_string_list "models" keeper_json with
                    | [] -> None
                    | xs -> Some xs);
-                unknown_toml_keys = [];
                 (* oas_env lives only in keeper TOML, not persona JSON —
                    persona profiles are a design-time artifact whereas
                    transport env is an ops-time toggle. *)
@@ -1266,7 +1264,6 @@ let merge_keeper_profile_defaults
     social_model = prefer overlay.social_model base.social_model;
     cascade_name = prefer overlay.cascade_name base.cascade_name;
     models = prefer overlay.models base.models;
-    unknown_toml_keys = overlay.unknown_toml_keys;
     max_turns_per_call = prefer overlay.max_turns_per_call base.max_turns_per_call;
     max_turns_per_call_scheduled_autonomous =
       prefer overlay.max_turns_per_call_scheduled_autonomous

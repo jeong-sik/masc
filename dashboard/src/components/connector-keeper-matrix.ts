@@ -26,6 +26,7 @@ import {
   type KnownConnectorId,
 } from './connector-status'
 import { openConnectorConfig } from './connector-config-form'
+import { KeeperBadge } from './keeper-badge'
 
 type MatrixCellState = 'bound' | 'unbound' | 'na' | 'unknown'
 
@@ -359,7 +360,7 @@ function MatrixRowRender({ row }: { row: MatrixRow }) {
       aria-label=${row.known ? row.keeperName : `${row.keeperName} — directory 밖 keeper`}
     >
       ${row.known ? null : html`<span class="text-[var(--color-status-warn)]" aria-hidden="true">⚠</span>`}
-      <span class="truncate">${row.keeperName}</span>
+      <${KeeperBadge} id=${row.keeperName} variant="full" size="sm" />
     </button>
     ${row.cells.map(cell => html`<${MatrixCellButton} cell=${cell} />`)}
     <${RowCoverageChip} keeperName=${row.keeperName} counts=${counts} />

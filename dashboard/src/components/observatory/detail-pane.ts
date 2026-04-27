@@ -66,7 +66,7 @@ export function DetailPane() {
   const source = typeof selection.entry.source === 'string' ? selection.entry.source : null
 
   return html`
-    <div class="rounded border border-accent/30 bg-bg-0/60 shadow-sm">
+    <div class="rounded border border-accent/30 bg-bg-0/60 shadow-sm" role="region" aria-label="선택 항목 상세">
       <div class="flex items-center justify-between border-b border-card-border px-3 py-2">
         <div class="flex items-center gap-2">
           <span class="text-3xs uppercase tracking-widest text-accent font-semibold">상세</span>

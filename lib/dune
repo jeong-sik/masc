@@ -476,6 +476,7 @@
    keeper_exec_fs
    keeper_shell_docker
    keeper_egress_audit
+   keeper_mcp_provider_audit
    keeper_shell_gh_context
    keeper_shell_bg_task
    keeper_exec_shell
@@ -695,6 +696,7 @@
    keeper_exec_fs
    keeper_shell_docker
    keeper_egress_audit
+   keeper_mcp_provider_audit
    keeper_shell_gh_context
    keeper_shell_bg_task
    keeper_exec_shell

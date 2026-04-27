@@ -461,6 +461,15 @@ let metric_telemetry_coverage_gap =
 let metric_oas_bridge_timeout =
   "masc_oas_bridge_timeout_total"
 
+(* #10942 mirror for masc_oas_bridge cancel branch.  Same bucket
+   semantics as [masc_keeper_oas_cancel_total] (fast/short_tail/
+   mid_tail/long_mid/long_tail) so PromQL can union the two
+   sources by [bucket] for a fleet-wide bimodal view of cancels.
+   [caller] preserves the timeout-counter pairing so each caller's
+   timeout vs cancel populations stay separable. *)
+let metric_oas_bridge_cancel =
+  "masc_oas_bridge_cancel_total"
+
 
 (* OAS event relay (oas_event_bridge.ml).  Metric strings keep the
    historical [oas_sse_*] prefix for Grafana/alert continuity; renaming

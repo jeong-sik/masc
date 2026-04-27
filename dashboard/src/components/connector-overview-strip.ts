@@ -16,6 +16,7 @@ import { ConnectorReadinessRail, deriveRail, getRailInflight, withRailInflight }
 import { CONNECTOR_DISPLAY_NAMES, KNOWN_CONNECTOR_IDS, channelIcon, connectorAccentStyle, connectorStateLabel, startSidecar, stopSidecar, type KnownConnectorId } from './connector-status'
 import { openConnectorConfig } from './connector-config-form'
 import { formatElapsedCompact } from '../lib/format-time'
+import { ActionButton } from './common/button'
 import { HeartbeatStrip } from './common/heartbeat-strip'
 import { HeartbeatStreakChip } from './common/heartbeat-streak-chip'
 import { HeartbeatUptimeChip } from './common/heartbeat-uptime-chip'
@@ -523,28 +524,30 @@ function BulkActions({ connectors }: { connectors: GateConnectorInfo[] }) {
   const stopBusy = bulkInflight.value.stop
   return html`
     <div class="flex items-center gap-2 text-2xs text-[var(--color-fg-disabled)]">
-      <button
-        type="button"
-        class="cursor-pointer rounded border border-[var(--ok-20)] bg-[var(--ok-10)] px-2 py-1 text-2xs text-[var(--color-status-ok)] hover:bg-[var(--ok-10)] disabled:cursor-not-allowed disabled:opacity-40"
+      <${ActionButton}
+        variant="ok"
+        size="sm"
         disabled=${startBusy || downCount === 0}
         title=${downCount === 0 ? '모두 이미 실행 중' : `${downCount} 개 sidecar 시작`}
-        aria-label=${`모든 sidecar 시작 (${downCount}개)`}
+        ariaLabel=${`모든 sidecar 시작 (${downCount}개)`}
+        ariaBusy=${startBusy}
+        testId="bulk-action-start"
         onClick=${() => { void runBulk('start', c => c?.available !== true, connectors) }}
-        data-bulk-action="start"
       >
         ${startBusy ? '시작 중...' : `▶ Start All (${downCount})`}
-      </button>
-      <button
-        type="button"
-        class="cursor-pointer rounded border border-[var(--bad-20)] bg-[var(--bad-10)] px-2 py-1 text-2xs text-[var(--bad-light)] hover:bg-[var(--bad-10)] disabled:cursor-not-allowed disabled:opacity-40"
+      <//>
+      <${ActionButton}
+        variant="danger"
+        size="sm"
         disabled=${stopBusy || upCount === 0}
         title=${upCount === 0 ? '실행 중인 sidecar 없음' : `${upCount} 개 sidecar 정지`}
-        aria-label=${`모든 sidecar 정지 (${upCount}개)`}
+        ariaLabel=${`모든 sidecar 정지 (${upCount}개)`}
+        ariaBusy=${stopBusy}
+        testId="bulk-action-stop"
         onClick=${() => { void runBulk('stop', c => c?.available === true, connectors) }}
-        data-bulk-action="stop"
       >
         ${stopBusy ? '정지 중...' : `■ Stop All (${upCount})`}
-      </button>
+      <//>
     </div>
   `
 }

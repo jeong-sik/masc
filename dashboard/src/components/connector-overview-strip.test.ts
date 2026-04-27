@@ -84,8 +84,8 @@ describe('ConnectorOverviewStrip', () => {
       />`,
       container,
     )
-    const startBtn = container.querySelector('[data-bulk-action="start"]') as HTMLButtonElement
-    const stopBtn = container.querySelector('[data-bulk-action="stop"]') as HTMLButtonElement
+    const startBtn = container.querySelector('[data-testid="bulk-action-start"]') as HTMLButtonElement
+    const stopBtn = container.querySelector('[data-testid="bulk-action-stop"]') as HTMLButtonElement
     // 2 of 4 are up → 2 down → Start All shows (2). 2 up → Stop All (2).
     expect(startBtn.textContent).toContain('(2)')
     expect(stopBtn.textContent).toContain('(2)')
@@ -100,7 +100,7 @@ describe('ConnectorOverviewStrip', () => {
       html`<${ConnectorOverviewStrip} connectors=${allUp} keeperCount=${0} />`,
       container,
     )
-    const startBtn = container.querySelector('[data-bulk-action="start"]') as HTMLButtonElement
+    const startBtn = container.querySelector('[data-testid="bulk-action-start"]') as HTMLButtonElement
     expect(startBtn.disabled).toBe(true)
     expect(startBtn.title).toContain('이미 실행')
   })
@@ -111,7 +111,7 @@ describe('ConnectorOverviewStrip', () => {
       html`<${ConnectorOverviewStrip} connectors=${[]} keeperCount=${0} />`,
       container,
     )
-    const stopBtn = container.querySelector('[data-bulk-action="stop"]') as HTMLButtonElement
+    const stopBtn = container.querySelector('[data-testid="bulk-action-stop"]') as HTMLButtonElement
     expect(stopBtn.disabled).toBe(true)
     expect(stopBtn.title).toContain('실행 중인 sidecar 없음')
   })

@@ -469,16 +469,18 @@ export function ConnectorConfigForm({ connectorId }: { connectorId: string }) {
           ${entry.lastSavedAt
             ? html`
                 <span class="ml-2 text-[var(--color-status-ok)]">· 저장됨 ${new Date(entry.lastSavedAt).toLocaleTimeString()}</span>
-                <button
-                  type="button"
-                  class="ml-2 cursor-pointer rounded border border-[var(--ok-20)] bg-[var(--ok-10)] px-1.5 py-0.5 text-3xs text-[var(--color-status-ok)] hover:bg-[var(--ok-10)] disabled:cursor-not-allowed disabled:opacity-50"
+                <${ActionButton}
+                  variant="ok"
+                  size="sm"
+                  class="ml-2 !px-1.5 !py-0.5 !text-3xs"
                   disabled=${entry.restarting}
+                  ariaBusy=${entry.restarting}
                   title="POST /sidecar/stop → 800ms → POST /sidecar/start"
-                  aria-label="sidecar 재시작"
+                  ariaLabel="sidecar 재시작"
                   onClick=${() => { void restartSidecar(connectorId) }}
                 >
                   ${entry.restarting ? '재시작 중...' : '🔄 재시작'}
-                </button>
+                <//>
               `
             : null}
         </div>

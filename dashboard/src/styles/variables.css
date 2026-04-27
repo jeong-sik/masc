@@ -50,6 +50,9 @@
                                      surfaces (e.g. Pill running state).
                                      Identical to --info-glow because
                                      info ≡ accent in SPEC §3.5. */
+  --brass-glow:  212 161  74;     /* rgb(--color-accent-brass #d4a14a) —
+                                     translucent brass for SPEC v0.4 atom
+                                     13/14 `.focusable` double-ring. */
 
   /* Semantic - Accent (Blue) */
   --accent-soft: rgba(71, 184, 255, 0.16);

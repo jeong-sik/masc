@@ -1,0 +1,60 @@
+(** Typed FSM vocabulary for keeper turn lifecycle.
+
+    Step 4a of the bloodflow restoration plan introduces the
+    state / failure / cancel-reason ADTs only.  The transition
+    function with telemetry emission is left to a follow-up
+    stack so the type surface lands additively first.
+
+    Cross-reference: [docs/keeper-turn-lifecycle.md] (Step 8 diagram). *)
+
+type cancel_reason =
+  | Cancelled_supervisor_stop
+      (** Operator/supervisor requested keeper shutdown. *)
+  | Cancelled_phase_gate_close
+      (** Phase transition closed an in-flight turn. *)
+  | Cancelled_provider_timeout
+      (** Underlying provider (CLI subprocess or HTTP) timed out
+          past the cooperative-cancel deadline. *)
+  | Cancelled_fleet_shutdown
+      (** Process is exiting; no more turns will be dispatched. *)
+
+type failure_reason =
+  | Failure_cascade_unavailable of {
+      base : string;
+      resolved : string option;
+    }
+  | Failure_provider_error of { kind : string; detail : string }
+  | Failure_tool_contract_violation of { reason_code : string }
+  | Failure_receipt_lost of {
+      primary_error : string;
+      fallback_path : string option;
+    }
+  | Failure_runtime_error of string
+  | Failure_unexpected_exception of {
+      exn : string;
+      backtrace : string option;
+    }
+
+(** Turn FSM states.  Mirrors the lanes in
+    [docs/keeper-turn-lifecycle.md]; the runtime [run_keeper_cycle]
+    is currently implicit across multiple files and Step 4b will
+    introduce explicit transitions. *)
+type turn_state =
+  | Idle
+  | Phase_gating
+  | Cascade_routing
+  | Awaiting_provider
+  | Streaming
+  | Awaiting_tool_result
+  | Completing
+  | Done
+  | Failed of failure_reason
+  | Cancelled of cancel_reason
+
+val cancel_reason_label : cancel_reason -> string
+val failure_reason_label : failure_reason -> string
+val turn_state_label : turn_state -> string
+
+val pp_cancel_reason : Format.formatter -> cancel_reason -> unit
+val pp_failure_reason : Format.formatter -> failure_reason -> unit
+val pp_turn_state : Format.formatter -> turn_state -> unit

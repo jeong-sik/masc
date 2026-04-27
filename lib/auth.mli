@@ -205,6 +205,20 @@ val ensure_keeper_credential :
     keeper MCP token remains separate and is only used for the
     [x-masc-internal-token] trust path. *)
 
+type credential_status =
+  | Credential_present of agent_credential
+  | Credential_missing
+
+val audit_keeper_credentials :
+  string -> keeper_names:string list ->
+  (string * credential_status) list
+(** Read-only audit: for each [keeper_name] in [keeper_names], report
+    whether a credential file exists at [.masc/auth/agents/<n>.json].
+    Used at boot to emit one structured summary instead of
+    enumerating individual fail logs.  Does NOT mutate any state;
+    [ensure_keeper_credential] / [ensure_credential_alias] remain
+    the write paths. *)
+
 (** {1 Token Lifecycle} *)
 
 val create_token :

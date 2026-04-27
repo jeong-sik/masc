@@ -31,7 +31,7 @@ APPLY=0
 for arg in "$@"; do
   case "$arg" in
     --apply) APPLY=1 ;;
-    -h|--help) sed -n '1,30p' "$0"; exit 0 ;;
+    -h|--help) awk '/^[^#]/ && NF { exit } { print }' "$0"; exit 0 ;;
     *) echo "unknown arg: $arg" >&2; exit 2 ;;
   esac
 done

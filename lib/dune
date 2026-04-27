@@ -293,6 +293,7 @@
    subscriptions
    telemetry_eio
    telemetry_coverage_gap
+   telemetry_observe
    telemetry_unified
    tempo
    timeout_policy

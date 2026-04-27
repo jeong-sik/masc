@@ -1397,7 +1397,23 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                 { tool_name; output = Ok _; _ } ->
                 let input_opt = pop_pending_input tool_name in
                 let input =
-                  match input_opt with Some i -> i | None -> `Null
+                  match input_opt with
+                  | Some i -> i
+                  | None ->
+                      (* P2 silent-failure fix: pop_pending_input returns
+                         None either when there's no queue for this tool
+                         name, or when the queue is empty.  Either case
+                         means a ToolCompleted arrived without a matching
+                         ToolCalled — likely a race or an OAS event-bus
+                         ordering bug.  Falling back to `Null` lets
+                         downstream `has_mutating_side_effect_with_input`
+                         continue, but it can undercount mutations.
+                         Logging surfaces the mismatch so it can be
+                         diagnosed instead of silently skewing audit data. *)
+                      Log.Keeper.debug
+                        "keeper:%s tool=%s ToolCompleted without matching ToolCalled — using Null input"
+                        meta.name tool_name;
+                      `Null
                 in
                 if
                   Keeper_exec_tools.has_mutating_side_effect_with_input

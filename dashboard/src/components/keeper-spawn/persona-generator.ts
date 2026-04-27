@@ -4,7 +4,7 @@ import { signal } from '@preact/signals'
 import { ActionButton } from '../common/button'
 import { Select } from '../common/select'
 import { Checkbox } from '../common/checkbox'
-import { TextInput } from '../common/input'
+import { TextArea, TextInput } from '../common/input'
 import { showToast } from '../common/toast'
 import {
   generatePersonaDraft,
@@ -97,13 +97,14 @@ export function PersonaGenerator() {
       <div class="space-y-3">
         <div class="grid gap-2">
           <label class="text-3xs text-[var(--color-fg-muted)]" for="persona-concept">컨셉</label>
-          <textarea
+          <${TextArea}
             id="persona-concept"
             rows=${5}
             value=${concept.value}
             placeholder="good evil chaos research keeper"
+            ariaLabel="persona concept"
             onInput=${(e: Event) => { concept.value = (e.target as HTMLTextAreaElement).value }}
-            class="w-full rounded border border-[var(--white-10)] bg-[var(--white-4)] px-2 py-2 text-2xs text-[var(--color-fg-primary)] placeholder:text-[var(--color-fg-disabled)] focus:outline-none focus:border-[var(--color-accent-fg)]"
+            class="!px-2 !py-2 !text-2xs"
           />
         </div>
 
@@ -223,13 +224,14 @@ export function PersonaGenerator() {
             <label class="text-3xs text-[var(--color-fg-muted)]" for="persona-profile-json">profile.json</label>
             ${draft ? html`<span class="text-3xs text-[var(--color-fg-muted)]">${draft.handle}</span>` : null}
           </div>
-          <textarea
+          <${TextArea}
             id="persona-profile-json"
             rows=${18}
             value=${profileText.value}
             placeholder="초안을 생성하면 profile.json이 표시됩니다"
+            ariaLabel="persona profile.json"
             onInput=${(e: Event) => { profileText.value = (e.target as HTMLTextAreaElement).value }}
-            class="w-full rounded border border-[var(--white-10)] bg-[var(--color-bg-page)] px-2 py-2 font-mono text-3xs leading-5 text-[var(--color-fg-primary)] placeholder:text-[var(--color-fg-disabled)] focus:outline-none focus:border-[var(--color-accent-fg)]"
+            class="!bg-[var(--color-bg-page)] !px-2 !py-2 !text-3xs font-mono leading-5"
           />
         </div>
 

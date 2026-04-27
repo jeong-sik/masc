@@ -169,7 +169,7 @@ function SessionMeta({ agentName }: { agentName: string }) {
   return html`
     <div class="flex flex-wrap gap-2 mb-4">
       ${meta.map(m => html`
-        <span key=${m.label} class="inline-flex items-center gap-1.5 text-2xs font-medium py-1 px-2.5 bg-white/5 border border-white/10 rounded text-text-muted">
+        <span key=${m.label} class="inline-flex items-center gap-1.5 text-2xs font-medium py-1 px-2.5 bg-white/5 border border-[var(--white-10)] rounded text-text-muted">
           <span class="text-text-dim">${m.label}</span>
           <span class="text-text-strong font-mono text-3xs">${m.value}</span>
         </span>
@@ -277,7 +277,7 @@ export function AgentSessionReport({ agentName }: { agentName: string }) {
             </div>
           ` : null}
           ${summary.messages_sent > 0 ? html`
-            <div class="flex items-center gap-1.5 text-xs font-medium text-text-muted bg-white/5 border border-white/10 px-3 py-1.5 rounded">
+            <div class="flex items-center gap-1.5 text-xs font-medium text-text-muted bg-white/5 border border-[var(--white-10)] px-3 py-1.5 rounded">
               <span class="font-bold">${summary.messages_sent}</span> 메시지
             </div>
           ` : null}

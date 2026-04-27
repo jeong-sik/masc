@@ -1,27 +1,38 @@
 // Kbd — keyboard-shortcut pill. The <kbd> element with consistent styling.
 //
-// Reference UIs (GitHub command palette hint, Linear shortcut menu,
-// Vercel keyboard help sheet, Notion / Stripe tooltip chips): keyboard
-// shortcuts should render as small beveled-edge pills so the reader
-// instantly recognizes "this is a key to press", not inline prose. A
-// single primitive keeps every kbd pill in the dashboard pixel-perfect
-// identical — the alternative (inline Tailwind strings scattered across
-// 4 call sites) always drifts within weeks.
+// Atom 9/14 (design-system v0.4 SPEC alignment). Aligns Tailwind utility
+// values with `dashboard/design-system/source_styles/primitives.css .kbd`
+// so the keyboard primitive matches the rest of the cockpit token set.
 //
-// Two sizes for the two usage contexts we already have in the repo:
+// SPEC mapping (primitives.css `.kbd`, lines 174–183):
+//   min-width        16px            → md: min-w-4
+//   height           16px            → md: h-4
+//   padding          0 4px           → px-1
+//   font-family      var(--font-mono)→ font-mono
+//   font-size        var(--fs-10)    → text-3xs (= --font-size-3xs = 10px)
+//   color            var(--color-fg-muted)        → text-[var(--color-fg-muted)]
+//   background       var(--color-bg-elevated)     → bg-[var(--color-bg-elevated)]
+//   border           1px solid var(--color-border-strong)
+//                                     → border border-[var(--color-border-strong)]
+//   border-bottom-width 2px (chiclet) → border-b-2
+//   border-radius    3px              → rounded-xs (--radius-xs token)
+//
+// Two sizes — SPEC defines md only; sm is a Tailwind-only tightening
+// for inline contexts that don't need fixed 16×16 dimensions:
 //  - `md` (default) — shortcut-sheet rows, inline hints beside actions.
-//                     16-18px tall pill, matches 13px body text baseline.
-//  - `sm`           — dense inline hints (\"press ?\" micro-badge, status
-//                     bar). Same 10px text as `md` (P5 density sweep
-//                     upgraded `sm` from 9px → 10px for legibility),
-//                     but tighter padding (px-1 py-0 vs px-1.5 py-px).
+//                     SPEC pixel-exact 16×16 chiclet.
+//  - `sm`           — dense inline hints ("press ?" micro-badge, status
+//                     bar). Same 10px text as `md`, tighter padding,
+//                     no fixed dimensions, dimmed color.
 
 import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'
 
 type KbdSize = 'sm' | 'md'
 
-const BASE = 'inline-flex items-center justify-center rounded border font-mono text-center'
+const BASE =
+  'inline-flex items-center justify-center rounded-xs border border-b-2 font-mono text-center text-3xs ' +
+  'border-[var(--color-border-strong)] bg-[var(--color-bg-elevated)]'
 
 /** Pure: class string for a given size. Exposed so callers that wrap
     their own `<kbd>` (e.g. a native `<kbd>` inside a `<details>` without
@@ -29,8 +40,8 @@ const BASE = 'inline-flex items-center justify-center rounded border font-mono t
 export function kbdClasses(size: KbdSize = 'md', extra?: string): string {
   const sized =
     size === 'sm'
-      ? 'text-3xs px-1 py-0 border-[var(--white-10)] bg-[var(--white-3)] text-[var(--color-fg-disabled)]'
-      : 'text-3xs px-1.5 py-px border-[var(--white-10)] bg-[var(--color-bg-page)] text-[var(--color-fg-primary)]'
+      ? 'px-1 py-0 text-[var(--color-fg-disabled)]'
+      : 'h-4 min-w-4 px-1 text-[var(--color-fg-muted)]'
   return extra === undefined || extra === ''
     ? `${BASE} ${sized}`
     : `${BASE} ${sized} ${extra}`

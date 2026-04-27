@@ -649,9 +649,7 @@ function ShortcutsOverlay({
       <div class="flex flex-col gap-1.5">
         ${rows.map(r => html`
           <div class="flex items-center gap-3 text-2xs">
-            <kbd class="font-mono px-1.5 py-0.5 rounded border border-[var(--white-10)] bg-[var(--white-3)] text-[var(--color-fg-primary)] min-w-16 text-center">
-              ${r.keys}
-            </kbd>
+            <${Kbd} size="md" class="min-w-16">${r.keys}<//>
             <span class="text-[var(--color-fg-primary)]">${r.desc}</span>
           </div>
         `)}

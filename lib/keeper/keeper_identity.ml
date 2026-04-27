@@ -115,33 +115,42 @@ let canonical_keeper_name_from_agent_name agent_name =
       else
         None
 
-let canonical_keeper_name raw_name =
-  let trimmed = String.trim raw_name in
+(** Phase A F5 (2026-04-27): single source of truth for the
+    ["keeper-<name>"] prefix pattern.  Two call sites used to embed
+    [String.sub trimmed 0 7 = "keeper-"] manually; both now go through
+    this helper. *)
+let strip_keeper_prefix (s : string) : string option =
   let prefix = "keeper-" in
   let plen = String.length prefix in
-  let alen = String.length trimmed in
+  let slen = String.length s in
+  if slen > plen && String.sub s 0 plen = prefix then
+    Some (String.sub s plen (slen - plen))
+  else None
+
+let canonical_keeper_name raw_name =
+  let trimmed = String.trim raw_name in
   if trimmed = "" then None
   else if is_keeper_agent_alias trimmed then
     canonical_keeper_name_from_agent_name trimmed
-  else if alen > plen && String.sub trimmed 0 plen = prefix then
-    let candidate = String.sub trimmed plen (alen - plen) in
-    if Keeper_config.validate_name candidate then Some candidate else None
-  else if Keeper_config.validate_name trimmed then
-    Some trimmed
   else
-    canonical_keeper_name_from_agent_name trimmed
+    match strip_keeper_prefix trimmed with
+    | Some candidate when Keeper_config.validate_name candidate ->
+      Some candidate
+    | Some _ -> None
+    | None ->
+      if Keeper_config.validate_name trimmed then Some trimmed
+      else canonical_keeper_name_from_agent_name trimmed
 
 let explicit_keeper_name raw_name =
   let trimmed = String.trim raw_name in
-  let prefix = "keeper-" in
-  let plen = String.length prefix in
-  let alen = String.length trimmed in
   if trimmed = "" then None
-  else if alen > plen && String.sub trimmed 0 plen = prefix then
-    let candidate = String.sub trimmed plen (alen - plen) in
-    if Keeper_config.validate_name candidate then Some candidate else None
-  else if Keeper_config.validate_name trimmed then Some trimmed
-  else None
+  else
+    match strip_keeper_prefix trimmed with
+    | Some candidate when Keeper_config.validate_name candidate ->
+      Some candidate
+    | Some _ -> None
+    | None ->
+      if Keeper_config.validate_name trimmed then Some trimmed else None
 
 type name_bundle = {
   persona_name : string;

@@ -10,6 +10,13 @@ val keeper_name_from_agent_name : string -> string option
 val canonical_keeper_name_from_agent_name : string -> string option
 val canonical_keeper_name : string -> string option
 
+val strip_keeper_prefix : string -> string option
+(** [strip_keeper_prefix s] returns [Some suffix] if [s] starts with the
+    literal ["keeper-"] prefix and the suffix after the prefix is non-empty;
+    [None] otherwise.  Centralises the repeated [String.sub trimmed 0 7 =
+    "keeper-"] check so callers no longer embed the literal — Phase A F5
+    of the bloodflow restoration plan. *)
+
 type parsed_identity = {
   keeper_name : string;
   agent_name : string;

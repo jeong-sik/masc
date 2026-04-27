@@ -157,15 +157,28 @@ let gh_read_only_prefixes =
     - `-X`/`--method` specifies POST/PUT/PATCH/DELETE
     - `-f`/`-F`/`--field`/`--raw-field` is present (implies POST)
     - The subcommand is `graphql` (always POST)
-    The input [cmd_lower] must already be lowercased and trimmed. *)
+    The input [cmd_lower] must already be lowercased and trimmed.
+
+    Phase A F5 (2026-04-27): tokenize first, then match on the typed
+    structure.  Pre-fix used [String.is_prefix] which silently classified
+    [api2 ...] (a hypothetical sibling subcommand) as a gh-api call and
+    [graphqlx ...] as the graphql subcommand.  User hard rule: "no
+    string matching for classification". *)
 let is_gh_api_read_only (cmd_lower : string) : bool =
-  if not (Base.String.is_prefix cmd_lower ~prefix:"api") then false
-  else
-    let rest = String.trim (String.sub cmd_lower 3 (String.length cmd_lower - 3)) in
-    (* graphql subcommand is always POST *)
-    if Base.String.is_prefix rest ~prefix:"graphql" then false
+  let tokens =
+    cmd_lower
+    |> String.split_on_char ' '
+    |> List.filter (fun token -> token <> "")
+  in
+  match tokens with
+  | "api" :: rest_after_api ->
+    let is_graphql_subcommand =
+      match rest_after_api with
+      | "graphql" :: _ -> true
+      | _ -> false
+    in
+    if is_graphql_subcommand then false
     else
-      let tokens = String.split_on_char ' ' cmd_lower in
       let has_method_flag =
         let rec check = function
           | [] -> false
@@ -197,6 +210,7 @@ let is_gh_api_read_only (cmd_lower : string) : bool =
         ) tokens
       in
       not has_method_flag && not has_field_flag
+  | _ -> false
 
 (** Extract the effective gh command string from keeper_shell op=gh input.
     [keeper_exec_shell] uses the [cmd] field. *)

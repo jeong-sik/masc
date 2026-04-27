@@ -122,19 +122,18 @@ let post_sync ?clock ?timeout_sec ~net ?(https = None) ~url ~headers ~body () =
     in
     let body_str =
       let max_size = 8 * 1024 * 1024 in
-      let reader = Eio.Buf_read.of_flow resp_body ~max_size in
       let buf = Buffer.create 4096 in
+      let chunk = Cstruct.create 4096 in
       let rec read_chunks () =
         if Buffer.length buf > max_size then
           raise (Failure (Printf.sprintf "masc_http_client: body size exceeds %d MB" (max_size / 1024 / 1024)))
         else
-          match Eio.Buf_read.peek_char reader with
-          | None -> Buffer.contents buf
-          | Some _ ->
-            let chunk = Eio.Buf_read.take_at_most 4096 reader in
-            Buffer.add_string buf chunk;
+          match Eio.Flow.single_read resp_body chunk with
+          | n ->
+            Buffer.add_string buf (Cstruct.to_string ~off:0 ~len:n chunk);
             Eio.Fiber.yield ();
             read_chunks ()
+          | exception End_of_file -> Buffer.contents buf
       in
       read_chunks ()
     in
@@ -164,19 +163,18 @@ let get_response_sync ?clock ?timeout_sec ~net ?(https = None) ~url ~headers () 
     in
     let body_str =
       let max_size = 8 * 1024 * 1024 in
-      let reader = Eio.Buf_read.of_flow resp_body ~max_size in
       let buf = Buffer.create 4096 in
+      let chunk = Cstruct.create 4096 in
       let rec read_chunks () =
         if Buffer.length buf > max_size then
           raise (Failure (Printf.sprintf "masc_http_client: body size exceeds %d MB" (max_size / 1024 / 1024)))
         else
-          match Eio.Buf_read.peek_char reader with
-          | None -> Buffer.contents buf
-          | Some _ ->
-            let chunk = Eio.Buf_read.take_at_most 4096 reader in
-            Buffer.add_string buf chunk;
+          match Eio.Flow.single_read resp_body chunk with
+          | n ->
+            Buffer.add_string buf (Cstruct.to_string ~off:0 ~len:n chunk);
             Eio.Fiber.yield ();
             read_chunks ()
+          | exception End_of_file -> Buffer.contents buf
       in
       read_chunks ()
     in

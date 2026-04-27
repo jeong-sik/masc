@@ -473,7 +473,7 @@ function SummaryCard({ src }: { src: TelemetrySourceSummary }) {
 }
 
 function DiagnosisCard({ title, value, detail, tone }: { title: string; value: string; detail: string; tone: 'ok' | 'warn' | 'neutral' }) {
-  const toneColor = tone === 'ok' ? 'text-[var(--ok)]' : tone === 'warn' ? 'text-[var(--warn)]' : 'text-[var(--color-fg-muted)]'
+  const toneColor = tone === 'ok' ? 'text-[var(--color-status-ok)]' : tone === 'warn' ? 'text-[var(--color-status-warn)]' : 'text-[var(--color-fg-muted)]'
   return html`
     <div class="rounded border border-[var(--color-border-default)] bg-[var(--white-1)] p-3 min-w-35">
       <div class="text-xs font-medium text-[var(--color-fg-muted)] mb-1">${title}</div>
@@ -508,7 +508,7 @@ function EntryRow({ entry }: { entry: TelemetryEntry }) {
             ${timeAgoSafe(ts)}
           </span>
           ${success != null ? html`
-            <span class="flex-shrink-0 w-4 ${success ? 'text-[var(--ok)]' : 'text-[var(--bad-light)]'}">
+            <span class="flex-shrink-0 w-4 ${success ? 'text-[var(--color-status-ok)]' : 'text-[var(--bad-light)]'}">
               ${success ? 'O' : 'X'}
             </span>
           ` : html`<span class="w-4"></span>`}

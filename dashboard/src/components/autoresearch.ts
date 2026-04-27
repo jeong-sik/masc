@@ -58,10 +58,10 @@ export function resetAutoresearchState(): void {
 
 function statusColor(status: string): string {
   switch (status) {
-    case 'running': return 'text-[var(--ok)]'
+    case 'running': return 'text-[var(--color-status-ok)]'
     case 'completed': return 'text-[var(--color-accent-fg)]'
-    case 'stopped': return 'text-[var(--warn)]'
-    case 'error': return 'text-[var(--bad)]'
+    case 'stopped': return 'text-[var(--color-status-warn)]'
+    case 'error': return 'text-[var(--color-status-err)]'
     default: return 'text-[var(--color-fg-muted)]'
   }
 }
@@ -210,15 +210,15 @@ function LoopOverview({ loop }: { loop: AutoresearchLoopSummary }) {
           </div>
           <div>
             <div class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)] mb-0.5">최고 점수</div>
-            <div class="text-[var(--ok)] text-sm font-mono font-semibold">${loop.best_score.toFixed(4)}</div>
+            <div class="text-[var(--color-status-ok)] text-sm font-mono font-semibold">${loop.best_score.toFixed(4)}</div>
           </div>
         </div>
         <div>
           <div class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)] mb-1">유지 / 삭제</div>
           <div class="flex items-center gap-2">
-            <span class="text-[var(--ok)] text-sm font-mono font-semibold">${loop.total_keeps}</span>
+            <span class="text-[var(--color-status-ok)] text-sm font-mono font-semibold">${loop.total_keeps}</span>
             <span class="text-[var(--color-fg-muted)] text-xs">/</span>
-            <span class="text-[var(--bad)] text-sm font-mono font-semibold">${loop.total_discards}</span>
+            <span class="text-[var(--color-status-err)] text-sm font-mono font-semibold">${loop.total_discards}</span>
             <span class="text-[var(--color-fg-muted)] text-xs ml-1">(${keepPct}% keep)</span>
           </div>
           ${totalCycles > 0 ? html`
@@ -246,7 +246,7 @@ function LoopOverview({ loop }: { loop: AutoresearchLoopSummary }) {
     </div>
 
     ${loop.error ? html`
-      <div class="mt-3 px-3 py-2 rounded bg-[var(--bad-10)] border border-[var(--bad-20)] text-[var(--bad)] text-xs">
+      <div class="mt-3 px-3 py-2 rounded bg-[var(--bad-10)] border border-[var(--bad-20)] text-[var(--color-status-err)] text-xs">
         ${loop.error}
       </div>
     ` : null}
@@ -300,12 +300,12 @@ function CycleHistoryTable({ cycles }: { cycles: AutoresearchCycleRecord[] }) {
                     <td class="py-2 px-3 text-[var(--text-body)] max-w-50 truncate" title=${c.hypothesis}>${c.hypothesis}</td>
                     <td class="py-2 px-3 text-right font-mono text-[var(--text-body)]">${c.score_before.toFixed(4)}</td>
                     <td class="py-2 px-3 text-right font-mono text-[var(--text-body)]">${c.score_after.toFixed(4)}</td>
-                    <td class="py-2 px-3 text-right font-mono ${c.delta >= 0 ? 'text-[var(--ok)]' : 'text-[var(--bad)]'}">${formatDelta(c.delta)}</td>
+                    <td class="py-2 px-3 text-right font-mono ${c.delta >= 0 ? 'text-[var(--color-status-ok)]' : 'text-[var(--color-status-err)]'}">${formatDelta(c.delta)}</td>
                     <td class="py-2 px-3 text-center">
                       <span class="px-1.5 py-0.5 rounded text-3xs font-semibold ${
                         c.decision === 'keep'
-                          ? 'bg-[var(--ok-soft)] text-[var(--ok)] border border-[var(--ok-20)]'
-                          : 'bg-[var(--bad-soft)] text-[var(--bad)] border border-[var(--bad-20)]'
+                          ? 'bg-[var(--ok-soft)] text-[var(--color-status-ok)] border border-[var(--ok-20)]'
+                          : 'bg-[var(--bad-soft)] text-[var(--color-status-err)] border border-[var(--bad-20)]'
                       }">${decisionLabel(c.decision)}</span>
                     </td>
                     <td class="py-2 px-3 text-right text-[var(--color-fg-muted)] font-mono">${formatTimestampKo(c.timestamp)}</td>
@@ -342,7 +342,7 @@ function WarningsList({ warnings }: { warnings: string[] }) {
   return html`
     <div class="flex flex-col gap-1.5">
       ${warnings.map((w, i) => html`
-        <div key=${i} class="px-3 py-1.5 rounded bg-[var(--warn-10)] border border-[var(--warn-20)] text-[var(--warn)] text-xs">
+        <div key=${i} class="px-3 py-1.5 rounded bg-[var(--warn-10)] border border-[var(--warn-20)] text-[var(--color-status-warn)] text-xs">
           ${w}
         </div>
       `)}
@@ -449,7 +449,7 @@ function LoopDetailView() {
 
   if (detailError.value) {
     return html`
-      <div class="px-3 py-2 rounded bg-[var(--bad-10)] border border-[var(--bad-20)] text-[var(--bad)] text-xs">
+      <div class="px-3 py-2 rounded bg-[var(--bad-10)] border border-[var(--bad-20)] text-[var(--color-status-err)] text-xs">
         ${detailError.value}
       </div>
     `
@@ -491,7 +491,7 @@ function LoopDetailView() {
         </div>
         <${LoopOverview} loop=${loop} />
         ${loopActionError.value ? html`
-          <div class="mt-3 px-3 py-2 rounded bg-[var(--bad-10)] border border-[var(--bad-20)] text-[var(--bad)] text-xs">
+          <div class="mt-3 px-3 py-2 rounded bg-[var(--bad-10)] border border-[var(--bad-20)] text-[var(--color-status-err)] text-xs">
             ${loopActionError.value}
           </div>
         ` : null}
@@ -499,7 +499,7 @@ function LoopDetailView() {
 
       ${warnings.length > 0 ? html`
         <${SurfaceCard} variant="compact">
-          <div class="text-3xs uppercase tracking-wider text-[var(--warn)]/80 mb-3 font-medium">경고</div>
+          <div class="text-3xs uppercase tracking-wider text-[var(--color-status-warn)]/80 mb-3 font-medium">경고</div>
           <${WarningsList} warnings=${warnings} />
         <//>
       ` : null}
@@ -538,7 +538,7 @@ export function Autoresearch() {
   if (state.status === 'error') {
     return html`
       <div class="flex flex-col gap-4">
-        <div class="px-4 py-3 rounded bg-[var(--bad-10)] border border-[var(--bad-20)] text-[var(--bad)] text-sm">
+        <div class="px-4 py-3 rounded bg-[var(--bad-10)] border border-[var(--bad-20)] text-[var(--color-status-err)] text-sm">
           ${state.message}
         </div>
         <${ActionButton}

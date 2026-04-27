@@ -153,8 +153,8 @@ function fmtValue(value: number, type: string, name: string): string {
 function typeBadge(type: string): ReturnType<typeof html> {
   const colors: Record<string, string> = {
     counter: 'bg-[var(--accent-10)] text-[var(--color-accent-fg)]',
-    gauge: 'bg-[var(--ok-10)] text-[var(--ok)]',
-    summary: 'bg-[var(--warn-10)] text-[var(--warn)]',
+    gauge: 'bg-[var(--ok-10)] text-[var(--color-status-ok)]',
+    summary: 'bg-[var(--warn-10)] text-[var(--color-status-warn)]',
   }
   return html`<span class="inline-block rounded px-1.5 py-0.5 text-3xs font-mono ${colors[type] ?? 'bg-[var(--white-5)] text-[var(--color-fg-muted)]'}">${type}</span>`
 }
@@ -176,7 +176,7 @@ function labelPills(labels: Record<string, string>): ReturnType<typeof html> | n
     }
     if (k === 'tool_name' || k === 'tool') {
       return html`<button
-        class="rounded bg-[var(--warn-10)] px-1 py-0.5 text-3xs text-[var(--warn)] font-mono hover:bg-[var(--warn-10)] hover:text-[var(--warn)] transition-colors cursor-pointer"
+        class="rounded bg-[var(--warn-10)] px-1 py-0.5 text-3xs text-[var(--color-status-warn)] font-mono hover:bg-[var(--warn-10)] hover:text-[var(--color-status-warn)] transition-colors cursor-pointer"
         title="도구 품질 보기"
         aria-label="도구 품질 보기"
         onClick=${(e: Event) => {
@@ -360,7 +360,7 @@ export function PrometheusMetrics() {
                   ${catMetrics.length}개 메트릭
                 </span>
                 ${activeSamples > 0 && html`
-                  <span class="rounded-sm bg-[var(--ok-10)] px-2 py-0.5 text-3xs text-[var(--ok)]">
+                  <span class="rounded-sm bg-[var(--ok-10)] px-2 py-0.5 text-3xs text-[var(--color-status-ok)]">
                     ${activeSamples}개 활성
                   </span>
                 `}
@@ -397,7 +397,7 @@ export function PrometheusMetrics() {
                                 ${i === 0 && html`<div class="text-3xs text-[var(--color-fg-muted)] font-sans">${m.help}</div>`}
                               </td>
                               <td class="py-1.5">${i === 0 ? typeBadge(m.type) : null}</td>
-                              <td class="py-1.5 text-right font-mono tabular-nums ${s.value !== 0 ? 'text-[var(--ok)]' : 'text-[var(--color-fg-muted)]'}">
+                              <td class="py-1.5 text-right font-mono tabular-nums ${s.value !== 0 ? 'text-[var(--color-status-ok)]' : 'text-[var(--color-fg-muted)]'}">
                                 ${fmtValue(s.value, m.type, s.name)}
                               </td>
                             </tr>

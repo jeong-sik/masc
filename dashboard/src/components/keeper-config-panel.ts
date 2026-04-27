@@ -359,7 +359,7 @@ function Callout({
 }) {
   const toneClass =
     tone === 'warn'
-      ? 'border-[var(--warn-20)] bg-[var(--warn-10)] text-[var(--warn)]'
+      ? 'border-[var(--warn-20)] bg-[var(--warn-10)] text-[var(--color-status-warn)]'
       : 'border-card-border/60 bg-card/35 text-text-body'
   return html`
     <div class="rounded border px-3 py-3 shadow-sm ${toneClass}">
@@ -405,9 +405,9 @@ function LongText({ text, truncateAt = 200 }: { text: string; truncateAt?: numbe
 function PromptSourceBadge({ source }: { source: string }) {
   const tone =
     source === 'override'
-      ? 'bg-[var(--warn-10)] text-[var(--warn)] border-[var(--warn-20)]'
+      ? 'bg-[var(--warn-10)] text-[var(--color-status-warn)] border-[var(--warn-20)]'
       : source === 'file'
-        ? 'bg-[var(--ok-10)] text-[var(--ok)] border-[var(--ok-20)]'
+        ? 'bg-[var(--ok-10)] text-[var(--color-status-ok)] border-[var(--ok-20)]'
         : 'bg-white/5 text-text-dim border-white/10'
   return html`<span class="text-3xs font-bold px-2 py-0.5 rounded border ${tone} shadow-sm">${source.toUpperCase()}</span>`
 }
@@ -694,7 +694,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
     <div class="flex gap-2 items-center mb-3">
       ${isEditing ? html`
         <button type="button"
-          class="${btnBase} bg-[var(--ok)] text-[#000]"
+          class="${btnBase} bg-[var(--color-status-ok)] text-[#000]"
           onClick=${saveConfig}
           disabled=${isSaving}
         >${isSaving ? '저장 중...' : '저장'}</button>
@@ -709,7 +709,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
           onClick=${enterEditMode}
         >편집</button>
       `}
-      ${saveError.value ? html`<span class="text-xs text-[var(--bad)]" role="alert">${saveError.value}</span>` : null}
+      ${saveError.value ? html`<span class="text-xs text-[var(--color-status-err)]" role="alert">${saveError.value}</span>` : null}
     </div>
   `
 
@@ -831,10 +831,10 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
                     : '변경 시 keeper manifest의 cascade_name 이 즉시 갱신됩니다.'}
               </span>
               ${cascadeSaveError.value
-                ? html`<span class="text-2xs text-[var(--bad)]" role="alert">${cascadeSaveError.value}</span>`
+                ? html`<span class="text-2xs text-[var(--color-status-err)]" role="alert">${cascadeSaveError.value}</span>`
                 : null}
               ${invalidCascadeProfiles.length > 0
-                ? html`<span class="text-2xs text-[var(--warn)]">invalid profile ${invalidCascadeProfiles.length}개: ${invalidCascadeSummary}</span>`
+                ? html`<span class="text-2xs text-[var(--color-status-warn)]">invalid profile ${invalidCascadeProfiles.length}개: ${invalidCascadeSummary}</span>`
                 : null}
             </label>
           `
@@ -1054,7 +1054,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
         ${goalState.status === 'loading' ? html`
           <div class="text-2xs text-[var(--color-fg-muted)]" role="status">목표 목록 로딩 중...</div>
         ` : goalState.status === 'error' ? html`
-          <div class="text-2xs text-[var(--bad)]">${goalState.message}</div>
+          <div class="text-2xs text-[var(--color-status-err)]">${goalState.message}</div>
         ` : goalOptions.length > 0 && rd ? html`
           <div class="grid gap-1.5">
             ${goalOptions.map((goal) => {
@@ -1081,7 +1081,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
           <div class="text-2xs text-[var(--color-fg-muted)]">활성 목표가 연결되어 있지 않습니다.</div>
         `}
         ${unknownSelectedGoalIds.length > 0 ? html`
-          <div class="mt-2 text-2xs text-[var(--warn)]">
+          <div class="mt-2 text-2xs text-[var(--color-status-warn)]">
             Goal Store에서 찾을 수 없는 연결: ${unknownSelectedGoalIds.join(', ')}
           </div>
         ` : null}
@@ -1125,7 +1125,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       ${runtimeHasChanges ? html`
         <div class="flex gap-2 items-center mt-4 mb-2 p-3 rounded border border-accent/30 bg-accent/5">
           <button type="button"
-            class="${btnBase} bg-[var(--ok)] text-[#000]"
+            class="${btnBase} bg-[var(--color-status-ok)] text-[#000]"
             onClick=${saveRuntimeConfig}
             disabled=${runtimeSaving.value}
           >${runtimeSaving.value ? '저장 중...' : '런타임 설정 저장'}</button>
@@ -1158,7 +1158,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
             ? html`<div class="py-4 text-center text-2xs text-[var(--color-fg-disabled)]">필터 결과 없음 (${allEntries.length} slots)</div>`
             : visibleEntries.map(([name, slot]) => html`
                 <div class="flex items-start gap-2 py-2 px-3 rounded border border-card-border/50 bg-card/20 mb-1.5">
-                  <span class="mt-1 w-2 h-2 rounded-full shrink-0 ${slot.active ? 'bg-[var(--ok)] shadow-[0_0_6px_var(--ok-48)]' : 'bg-[var(--color-fg-disabled)]'}" aria-hidden="true"></span>
+                  <span class="mt-1 w-2 h-2 rounded-full shrink-0 ${slot.active ? 'bg-[var(--color-status-ok)] shadow-[0_0_6px_var(--ok-48)]' : 'bg-[var(--color-fg-disabled)]'}" aria-hidden="true"></span>
                   <div class="flex-1 min-w-0">
                     <div class="flex justify-between">
                       <span class="text-xs font-semibold text-text-strong">${name}</span>

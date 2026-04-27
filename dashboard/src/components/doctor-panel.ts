@@ -15,6 +15,7 @@ import { Card } from './common/card'
 import { SectionCap } from './common/section-cap'
 import { Chip } from './chip'
 import { Pill, type PillKind } from './pill'
+import { Band, type BandKind } from './band'
 
 export type DoctorKind = 'config' | 'sidecar'
 
@@ -76,6 +77,21 @@ export function severityChipClass(code: number): string {
 // Map exit code to atomic Pill kind. Used by callers that have
 // migrated from the bespoke severityChipClass to the Pill primitive.
 export function severityPillKind(code: number): PillKind {
+  switch (severityForExitCode(code)) {
+    case 'ok':
+      return 'ok'
+    case 'warn':
+      return 'warn'
+    case 'error':
+      return 'err'
+  }
+}
+
+// Map exit code to atomic Band kind for the card's top status strip.
+// Mirrors severityPillKind so the band tone and the pill tone always
+// match — the SPEC pattern is "card-level state strip + body status
+// pill" reading the same severity.
+export function severityBandKind(code: number): BandKind {
   switch (severityForExitCode(code)) {
     case 'ok':
       return 'ok'
@@ -275,10 +291,13 @@ function ConfigNotesList({ notes }: { notes: ConfigNotesView }) {
 function DoctorEntryCard({ entry }: { entry: DoctorEntry }) {
   const label = severityLabel(entry.exit_code)
   const pillKind = severityPillKind(entry.exit_code)
+  const bandKind = severityBandKind(entry.exit_code)
   const expanded = useSignal(false)
   const onToggle = () => { expanded.value = !expanded.value }
   return html`
-    <div class="rounded border border-[var(--white-8)] bg-[var(--white-4)] p-3">
+    <div class="overflow-hidden rounded border border-[var(--white-8)] bg-[var(--white-4)]">
+      <${Band} kind=${bandKind} />
+      <div class="p-3">
       <button
         type="button"
         class="flex w-full items-baseline justify-between gap-2 text-left"
@@ -299,6 +318,7 @@ function DoctorEntryCard({ entry }: { entry: DoctorEntry }) {
           ? html`<${SidecarChecksList} checks=${extractSidecarChecks(entry.payload)} />`
           : html`<${ConfigNotesList} notes=${extractConfigNotes(entry.payload)} />`
         : ''}
+      </div>
     </div>
   `
 }

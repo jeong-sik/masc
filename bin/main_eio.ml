@@ -120,23 +120,22 @@ module Server_routes_http = Masc_mcp.Server_routes_http
 
 open Server_routes_http
 
-(** Extended router to handle OPTIONS *)
-let make_extended_handler routes =
-  fun client_addr gluten_reqd ->
-    let reqd = gluten_reqd.Gluten.Reqd.reqd in
-    let request = Httpun.Reqd.request reqd in
-    (* Rate limiting: enforce before any auth or routing.
-       Health-check endpoints are exempt so load-balancer probes never block. *)
-    let path = Http.Request.path request in
-    let skip_rate_limit =
-      String.equal path "/health"
-      (* Issue #8403: derive probe exemptions from Server_health_paths SSOT
-         so a renamed probe stays exempt from rate limits without a
-         separate manual edit here. *)
-      || Masc_mcp.Server_health_paths.is_public path
-    in
+(* Issue #8403: derive probe exemptions from Server_health_paths SSOT
+   so a renamed probe stays exempt from rate limits without a separate
+   manual edit here. *)
+let is_rate_limit_exempt path =
+  String.equal path "/health"
+  || Masc_mcp.Server_health_paths.is_public path
+
+(** Returns true if the request was rate-limited and a 429 response was
+    sent on [reqd]. Caller should short-circuit further handling in that
+    case. Health-probe paths are always allowed through. *)
+let try_rate_limit_block ~path ~client_addr reqd =
+  if is_rate_limit_exempt path then false
+  else
     let rl_key = Masc_mcp.Rate_limit.key_of_sockaddr client_addr in
-    if (not skip_rate_limit) && not (Masc_mcp.Rate_limit.check_global ~key:rl_key) then
+    if Masc_mcp.Rate_limit.check_global ~key:rl_key then false
+    else begin
       let body = Masc_mcp.Rate_limit.too_many_requests_body () in
       let rl_headers = Masc_mcp.Rate_limit.headers_global ~key:rl_key in
       let headers = Httpun.Headers.of_list (
@@ -145,121 +144,152 @@ let make_extended_handler routes =
         rl_headers
       ) in
       Httpun.Reqd.respond_with_string reqd
-        (Httpun.Response.create ~headers `Too_many_requests) body
+        (Httpun.Response.create ~headers `Too_many_requests) body;
+      true
+    end
+
+(** Path predicate: requests that go through the MCP transport surface
+    (HTTP-based sessions, SSE, JSON-RPC messages) and therefore must pass
+    origin and protocol-version checks. *)
+let is_mcp_like_path path =
+  String.equal path "/mcp"
+  || String.equal path "/mcp/managed"
+  || String.equal path "/mcp/operator"
+  || String.equal path "/sse"
+  || String.equal path "/messages"
+
+(** Returns true if the request failed origin or protocol-version
+    validation and the corresponding error response was sent on [reqd].
+    Caller should short-circuit further handling in that case. *)
+let try_mcp_validation_block ~is_mcp_like ~request ~protocol_version ~origin reqd =
+  if is_mcp_like && not (validate_origin request) then begin
+    let body = json_rpc_error (-32600) "Invalid origin" in
+    let headers = Httpun.Headers.of_list (
+      ("content-length", string_of_int (String.length body))
+      :: json_headers "-" protocol_version origin
+    ) in
+    let response = Httpun.Response.create ~headers `Forbidden in
+    Httpun.Reqd.respond_with_string reqd response body;
+    true
+  end
+  else if is_mcp_like && request.Httpun.Request.meth <> `OPTIONS &&
+          not (is_valid_protocol_version protocol_version) then begin
+    let body = json_rpc_error (-32600) "Unsupported protocol version" in
+    let headers = Httpun.Headers.of_list (
+      ("content-length", string_of_int (String.length body))
+      :: json_headers "-" protocol_version origin
+    ) in
+    let response = Httpun.Response.create ~headers `Bad_request in
+    Httpun.Reqd.respond_with_string reqd response body;
+    true
+  end
+  else false
+
+(** Method/path dispatcher for MCP-validated requests. Caller is
+    responsible for rate limiting and origin/protocol-version checks
+    before invoking this function. *)
+let dispatch_route ~routes ~request ~path reqd =
+  match request.Httpun.Request.meth, path with
+  | `OPTIONS, _ -> options_handler request reqd
+  | `GET, "/ws" ->
+    let body =
+      Server_routes_http_runtime.websocket_discovery_json request
+      |> Yojson.Safe.to_string
+    in
+    let headers = Httpun.Headers.of_list [
+      ("content-type", "application/json");
+      ("content-length", string_of_int (String.length body));
+    ] in
+    let response = Httpun.Response.create ~headers `OK in
+    Httpun.Reqd.respond_with_string reqd response body
+  | `POST, "/webrtc/offer" when Masc_mcp.Server_webrtc_transport.is_enabled () ->
+    Http.Request.read_body_async reqd (fun body ->
+      match Masc_mcp.Server_webrtc_transport.handle_offer_request body with
+      | Ok json -> Http.Response.json json reqd
+      | Error msg ->
+        Http.Response.json ~status:`Bad_request
+          (Printf.sprintf {|{"error":"%s"}|} msg) reqd)
+  | `POST, "/webrtc/answer" when Masc_mcp.Server_webrtc_transport.is_enabled () ->
+    Http.Request.read_body_async reqd (fun body ->
+      match Masc_mcp.Server_webrtc_transport.handle_answer_request body with
+      | Ok json -> Http.Response.json json reqd
+      | Error msg ->
+        Http.Response.json ~status:`Bad_request
+          (Printf.sprintf {|{"error":"%s"}|} msg) reqd)
+  | `POST, "/v1/chat/completions" when Server_openai_compat.is_enabled () ->
+    Http.Request.read_body_async reqd (fun body ->
+      match !server_state with
+      | None ->
+        let origin = get_origin request in
+        Http.Response.json ~status:`Internal_server_error
+          ~extra_headers:(cors_headers origin)
+          (Server_openai_compat.error_response
+             ~status:"server_error" ~message:"Server not initialized")
+          reqd
+      | Some state ->
+        let config = state.Mcp_server.room_config in
+        (match state.Mcp_server.sw, state.Mcp_server.clock with
+        | Some sw, Some clock ->
+            let (status, resp_body) =
+              Server_openai_compat.handle_chat_completions
+                ~config ~sw ~clock body
+            in
+            let origin = get_origin request in
+            Http.Response.json ~status
+              ~extra_headers:(cors_headers origin)
+              resp_body reqd
+        | _ ->
+            let origin = get_origin request in
+            Http.Response.json ~status:`Internal_server_error
+              ~extra_headers:(cors_headers origin)
+              (Server_openai_compat.error_response
+                 ~status:"server_error"
+                 ~message:"Server runtime not fully initialized")
+              reqd))
+  | `DELETE, "/mcp" -> handle_delete_mcp request reqd
+  | `DELETE, "/mcp/managed" ->
+      handle_delete_mcp
+        ~profile:Server_mcp_transport_http.Managed_agent request reqd
+  | `DELETE, "/mcp/operator" ->
+      handle_delete_mcp
+        ~profile:Server_mcp_transport_http.Operator_remote request reqd
+  | `GET, "/api/v1/board/flairs" ->
+      let flairs = List.map Board.flair_to_yojson Board.available_flairs in
+      let json = `Assoc [("flairs", `List flairs)] in
+      Http.Response.json (Yojson.Safe.to_string json) reqd
+  | `GET, "/api/v1/board/hearths" ->
+      let hearths = Board_dispatch.list_hearths () in
+      let json = `Assoc [
+        ("hearths", `List (List.map (fun (name, count) ->
+          `Assoc [("name", `String name); ("count", `Int count)]
+        ) hearths));
+      ] in
+      Http.Response.json (Yojson.Safe.to_string json) reqd
+  | `GET, p when String.length p > 14 && String.sub p 0 14 = "/api/v1/board/" ->
+      let post_id = String.sub p 14 (String.length p - 14) in
+      let format = Option.value ~default:"nested" (query_param request "format") in
+      let (status, body) = board_post_detail_json ~response_format:format ~post_id in
+      Http.Response.json ~status body reqd
+  | _ -> Http.Router.dispatch routes request reqd
+
+(** Extended router to handle OPTIONS *)
+let make_extended_handler routes =
+  fun client_addr gluten_reqd ->
+    let reqd = gluten_reqd.Gluten.Reqd.reqd in
+    let request = Httpun.Reqd.request reqd in
+    (* Rate limiting: enforce before any auth or routing. *)
+    let path = Http.Request.path request in
+    if try_rate_limit_block ~path ~client_addr reqd then ()
     else
     try
-      let is_mcp_like =
-        String.equal path "/mcp"
-        || String.equal path "/mcp/managed"
-        || String.equal path "/mcp/operator"
-        || String.equal path "/sse"
-        || String.equal path "/messages"
-      in
+      let is_mcp_like = is_mcp_like_path path in
       let session_id_for_version = get_session_id_any request in
       let protocol_version =
         get_protocol_version_for_session ?session_id:session_id_for_version request
       in
       let origin = get_origin request in
-      if is_mcp_like && not (validate_origin request) then
-        let body = json_rpc_error (-32600) "Invalid origin" in
-        let headers = Httpun.Headers.of_list (
-          ("content-length", string_of_int (String.length body))
-          :: json_headers "-" protocol_version origin
-        ) in
-        let response = Httpun.Response.create ~headers `Forbidden in
-        Httpun.Reqd.respond_with_string reqd response body
-      else if is_mcp_like && request.meth <> `OPTIONS &&
-              not (is_valid_protocol_version protocol_version) then
-        let body = json_rpc_error (-32600) "Unsupported protocol version" in
-        let headers = Httpun.Headers.of_list (
-          ("content-length", string_of_int (String.length body))
-          :: json_headers "-" protocol_version origin
-        ) in
-        let response = Httpun.Response.create ~headers `Bad_request in
-        Httpun.Reqd.respond_with_string reqd response body
-      else
-        match request.meth, path with
-        | `OPTIONS, _ -> options_handler request reqd
-        | `GET, "/ws" ->
-          let body =
-            Server_routes_http_runtime.websocket_discovery_json request
-            |> Yojson.Safe.to_string
-          in
-          let headers = Httpun.Headers.of_list [
-            ("content-type", "application/json");
-            ("content-length", string_of_int (String.length body));
-          ] in
-          let response = Httpun.Response.create ~headers `OK in
-          Httpun.Reqd.respond_with_string reqd response body
-        | `POST, "/webrtc/offer" when Masc_mcp.Server_webrtc_transport.is_enabled () ->
-          Http.Request.read_body_async reqd (fun body ->
-            match Masc_mcp.Server_webrtc_transport.handle_offer_request body with
-            | Ok json -> Http.Response.json json reqd
-            | Error msg ->
-              Http.Response.json ~status:`Bad_request
-                (Printf.sprintf {|{"error":"%s"}|} msg) reqd)
-        | `POST, "/webrtc/answer" when Masc_mcp.Server_webrtc_transport.is_enabled () ->
-          Http.Request.read_body_async reqd (fun body ->
-            match Masc_mcp.Server_webrtc_transport.handle_answer_request body with
-            | Ok json -> Http.Response.json json reqd
-            | Error msg ->
-              Http.Response.json ~status:`Bad_request
-                (Printf.sprintf {|{"error":"%s"}|} msg) reqd)
-        | `POST, "/v1/chat/completions" when Server_openai_compat.is_enabled () ->
-          Http.Request.read_body_async reqd (fun body ->
-            match !server_state with
-            | None ->
-              let origin = get_origin request in
-              Http.Response.json ~status:`Internal_server_error
-                ~extra_headers:(cors_headers origin)
-                (Server_openai_compat.error_response
-                   ~status:"server_error" ~message:"Server not initialized")
-                reqd
-            | Some state ->
-              let config = state.Mcp_server.room_config in
-              (match state.Mcp_server.sw, state.Mcp_server.clock with
-              | Some sw, Some clock ->
-                  let (status, resp_body) =
-                    Server_openai_compat.handle_chat_completions
-                      ~config ~sw ~clock body
-                  in
-                  let origin = get_origin request in
-                  Http.Response.json ~status
-                    ~extra_headers:(cors_headers origin)
-                    resp_body reqd
-              | _ ->
-                  let origin = get_origin request in
-                  Http.Response.json ~status:`Internal_server_error
-                    ~extra_headers:(cors_headers origin)
-                    (Server_openai_compat.error_response
-                       ~status:"server_error"
-                       ~message:"Server runtime not fully initialized")
-                    reqd))
-        | `DELETE, "/mcp" -> handle_delete_mcp request reqd
-        | `DELETE, "/mcp/managed" ->
-            handle_delete_mcp
-              ~profile:Server_mcp_transport_http.Managed_agent request reqd
-        | `DELETE, "/mcp/operator" ->
-            handle_delete_mcp
-              ~profile:Server_mcp_transport_http.Operator_remote request reqd
-        | `GET, "/api/v1/board/flairs" ->
-            let flairs = List.map Board.flair_to_yojson Board.available_flairs in
-            let json = `Assoc [("flairs", `List flairs)] in
-            Http.Response.json (Yojson.Safe.to_string json) reqd
-        | `GET, "/api/v1/board/hearths" ->
-            let hearths = Board_dispatch.list_hearths () in
-            let json = `Assoc [
-              ("hearths", `List (List.map (fun (name, count) ->
-                `Assoc [("name", `String name); ("count", `Int count)]
-              ) hearths));
-            ] in
-            Http.Response.json (Yojson.Safe.to_string json) reqd
-        | `GET, p when String.length p > 14 && String.sub p 0 14 = "/api/v1/board/" ->
-            let post_id = String.sub p 14 (String.length p - 14) in
-            let format = Option.value ~default:"nested" (query_param request "format") in
-            let (status, body) = board_post_detail_json ~response_format:format ~post_id in
-            Http.Response.json ~status body reqd
-        | _ -> Http.Router.dispatch routes request reqd
+      if try_mcp_validation_block ~is_mcp_like ~request ~protocol_version ~origin reqd then ()
+      else dispatch_route ~routes ~request ~path reqd
     with exn ->
       let msg = Printexc.to_string exn in
       Http.Response.internal_error msg reqd

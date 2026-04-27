@@ -68,7 +68,7 @@ describe('ConnectorOnboardingGrid', () => {
 
   it('includes bulk Start All action for cold-start spawn of all 4 at once', () => {
     render(html`<${ConnectorOnboardingGrid} />`, container)
-    const startAll = container.querySelector('[data-bulk-action="start"]') as HTMLButtonElement
+    const startAll = container.querySelector('[data-testid="bulk-action-start"]') as HTMLButtonElement
     expect(startAll).toBeTruthy()
     // With zero registered connectors, all 4 count as "down".
     expect(startAll.textContent).toContain('(4)')

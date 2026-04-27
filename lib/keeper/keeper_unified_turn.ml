@@ -542,9 +542,22 @@ let record_turn_failure_stress
     timestamp = Unix.gettimeofday ();
   }
 
-let oas_timeout_guard_sec = 30.0
+(* Retry guard floor: relaxed 30→15 (2026-04-27).
+   Original 60s threshold (guard 30 + min 30) caused keeper cycle FAILED when
+   remaining turn budget fell into the 30-60s band, increasing noop count and
+   eventually fleet auto-pause. Field evidence (post v0.18.4): keepers hung on
+   cohttp-eio bulk read for ~600s and arrived at the retry branch with <60s
+   remaining → guarded out → cycle terminal.
 
-let min_oas_timeout_budget_sec = 30.0
+   New threshold (15+15=30s) accommodates small-tail retries:
+   - cohttp connect 1s + first-token 2-5s = ~6s baseline
+   - 30s leaves ~9-12s headroom for actual response
+
+   Root cause is OAS HTTP body lacking timeout (`http_client.ml take_all`);
+   this is a band-aid until that lands. *)
+let oas_timeout_guard_sec = 15.0
+
+let min_oas_timeout_budget_sec = 15.0
 
 type oas_timeout_budget_resolution = {
   effective_timeout_sec : float;

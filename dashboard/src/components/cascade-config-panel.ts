@@ -1166,7 +1166,7 @@ function CascadeRawConfigEditor({
             </button>
             <button
               type="button"
-              class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-3 py-1 text-xs text-[var(--text-strong)] hover:bg-[var(--bg-panel-hover)] disabled:opacity-50"
+              class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-3 py-1 text-xs text-[var(--text-strong)] hover:bg-[var(--color-bg-hover)] disabled:opacity-50"
               onClick=${handleReset}
               disabled=${saving.value || !editorDirty.value}
             >
@@ -1174,7 +1174,7 @@ function CascadeRawConfigEditor({
             </button>
             <button
               type="button"
-              class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-3 py-1 text-xs text-[var(--text-strong)] hover:bg-[var(--bg-panel-hover)] disabled:opacity-50"
+              class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-3 py-1 text-xs text-[var(--text-strong)] hover:bg-[var(--color-bg-hover)] disabled:opacity-50"
               onClick=${() => void onRefresh()}
               disabled=${saving.value}
             >
@@ -1231,7 +1231,7 @@ export function CascadeConfigPanel() {
     <div class="flex flex-col gap-4">
       <div class="flex items-center gap-3 flex-wrap">
         <button
-          class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-3 py-1 text-xs text-[var(--text-strong)] hover:bg-[var(--bg-panel-hover)]"
+          class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-3 py-1 text-xs text-[var(--text-strong)] hover:bg-[var(--color-bg-hover)]"
           onClick=${() => void loadCascadeData(resource)}
         >
           새로고침

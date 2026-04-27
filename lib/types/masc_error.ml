@@ -1,0 +1,162 @@
+(** Unified error type for MASC MCP *)
+
+include Rate_limit_types
+
+let default_rate_limit = {
+  per_minute = 10;
+  burst_allowed = 5;
+  priority_agents = [];
+  worker_multiplier = 1.0;
+  admin_multiplier = 2.0;
+  broadcast_per_minute = 15;
+  task_ops_per_minute = 30;
+}
+
+let rate_limit_config_to_yojson c =
+  `Assoc [
+    ("per_minute", `Int c.per_minute);
+    ("burst_allowed", `Int c.burst_allowed);
+    ("priority_agents", `List (List.map (fun s -> `String s) c.priority_agents));
+    ("worker_multiplier", `Float c.worker_multiplier);
+    ("admin_multiplier", `Float c.admin_multiplier);
+    ("broadcast_per_minute", `Int c.broadcast_per_minute);
+    ("task_ops_per_minute", `Int c.task_ops_per_minute);
+  ]
+
+let rate_limit_config_of_yojson json =
+  let open Yojson.Safe.Util in
+  try
+    let per_minute = json |> member "per_minute" |> to_int in
+    let burst_allowed = json |> member "burst_allowed" |> to_int in
+    let priority_agents = json |> member "priority_agents" |> to_list |> filter_string in
+    let worker_multiplier = json |> member "worker_multiplier" |> to_float in
+    let admin_multiplier = json |> member "admin_multiplier" |> to_float in
+    let broadcast_per_minute = json |> member "broadcast_per_minute" |> to_int in
+    let task_ops_per_minute = json |> member "task_ops_per_minute" |> to_int in
+    Ok { per_minute; burst_allowed; priority_agents; worker_multiplier;
+         admin_multiplier; broadcast_per_minute; task_ops_per_minute }
+  with e -> Error (Printexc.to_string e)
+
+let show_rate_limit_category = show_rate_limit_category
+let show_rate_limit_error = show_rate_limit_error
+
+let limit_for_category config = function
+  | GeneralLimit -> config.per_minute
+  | BroadcastLimit -> config.broadcast_per_minute
+  | TaskOpsLimit -> config.task_ops_per_minute
+
+let category_for_tool_opt = function
+  | "masc_broadcast" -> Some BroadcastLimit
+  | "masc_add_task"
+  | "masc_claim_next"
+  | "masc_claim_task"
+  | "masc_set_current_task"
+  | "masc_complete_task"
+  | "masc_release_task"
+  | "masc_cancel_task"
+  | "masc_update_priority"
+  | "masc_plan_set_task"
+  | "masc_plan_clear_task"
+  | "masc_transition" -> Some TaskOpsLimit
+  | _ -> None
+
+let category_for_tool tool =
+  match category_for_tool_opt tool with
+  | Some category -> category
+  | None -> GeneralLimit
+
+type cache_error =
+  | CacheReadFailed of string
+  | CacheWriteFailed of string
+  | CacheExpired of { key: string; age_hours: float }
+  | CacheCorrupted of string
+
+type t =
+  | NotInitialized
+  | AlreadyInitialized
+  | AgentNotFound of string
+  | AgentNotJoined of string
+  | AgentAlreadyJoined of string
+  | TaskNotFound of string
+  | TaskAlreadyClaimed of { task_id: string; by: string }
+  | TaskNotClaimed of string
+  | TaskInvalidState of string
+  | PortalNotOpen of string
+  | PortalAlreadyOpen of { agent: string; target: string }
+  | PortalClosed of string
+  | InvalidJson of string
+  | IoError of string
+  | InvalidAgentName of string
+  | InvalidTaskId of string
+  | InvalidFilePath of string
+  | Unauthorized of string
+  | Forbidden of { agent: string; action: string }
+  | TokenExpired of string
+  | InvalidToken of string
+  | RateLimitExceeded of rate_limit_error
+  | CacheError of cache_error
+  | StorageError of string
+  | ValidationError of string
+  | GeneralError of string
+  | ExnError of exn
+  | WithCode of { code : int; msg : string }
+
+let rec to_string = function
+  | NotInitialized -> "❌ MASC not initialized. Use masc_init first."
+  | AlreadyInitialized -> "MASC already initialized."
+  | AgentNotFound name -> Printf.sprintf "❌ Agent not found: %s" name
+  | AgentNotJoined name -> Printf.sprintf "❌ Agent not joined: %s. Use masc_join first." name
+  | AgentAlreadyJoined name -> Printf.sprintf "⚠ %s is already in the room" name
+  | TaskNotFound id -> Printf.sprintf "❌ Task not found: %s. Call masc_status to refresh your task list." id
+  | TaskAlreadyClaimed { task_id; by } ->
+      Printf.sprintf
+        "❌ Task %s is currently owned by %s. Ask that agent to finish it, or claim a different task."
+        task_id by
+  | TaskNotClaimed id ->
+      Printf.sprintf
+        "❌ Task %s is still todo. Claim/start it first, then mark it done."
+        id
+  | TaskInvalidState msg -> Printf.sprintf "❌ Invalid task state: %s" msg
+  | PortalNotOpen agent -> Printf.sprintf "❌ No portal open for %s. Use masc_portal_open first." agent
+  | PortalAlreadyOpen { agent; target } -> Printf.sprintf "⚠ Portal already open: %s ↔ %s" agent target
+  | PortalClosed agent -> Printf.sprintf "❌ Portal is closed for %s. Use masc_portal_open to reopen." agent
+  | InvalidJson msg -> Printf.sprintf "❌ Invalid JSON: %s" msg
+  | IoError msg -> Printf.sprintf "❌ IO error: %s" msg
+  | InvalidAgentName reason -> Printf.sprintf "❌ Invalid agent name: %s" reason
+  | InvalidTaskId reason -> Printf.sprintf "❌ Invalid task ID: %s" reason
+  | InvalidFilePath reason -> Printf.sprintf "❌ Invalid file path: %s" reason
+  | Unauthorized reason -> Printf.sprintf "🔐 Unauthorized: %s" reason
+  | Forbidden { agent; action } -> Printf.sprintf "🚫 Forbidden: %s cannot %s" agent action
+  | TokenExpired agent -> Printf.sprintf "⏰ Token expired for %s. Use masc_auth_refresh." agent
+  | InvalidToken reason -> Printf.sprintf "🔑 Invalid token: %s" reason
+  | RateLimitExceeded e ->
+      Printf.sprintf "⏳ Rate limit exceeded (%s): %d/%d requests. Wait %d seconds."
+        (show_rate_limit_category e.category) e.current e.limit e.wait_seconds
+  | CacheError e -> (match e with
+      | CacheReadFailed path -> Printf.sprintf "❌ Cache: Read failed [path=%s]" path
+      | CacheWriteFailed path -> Printf.sprintf "❌ Cache: Write failed [path=%s]" path
+      | CacheExpired { key; age_hours } -> Printf.sprintf "❌ Cache: Expired [key=%s, age=%.1fh]" key age_hours
+      | CacheCorrupted path -> Printf.sprintf "❌ Cache: Corrupted [path=%s]" path)
+  | StorageError msg -> Printf.sprintf "Storage error: %s" msg
+  | ValidationError msg -> Printf.sprintf "Validation error: %s" msg
+  | GeneralError msg -> msg
+  | ExnError e -> Printexc.to_string e
+  | WithCode { code; msg } -> Printf.sprintf "HTTP %d: %s" code msg
+
+let show = to_string
+
+let to_yojson err =
+  `String (to_string err)
+
+let of_string s = GeneralError s
+let of_exn e = ExnError e
+let with_code ~code msg = WithCode { code; msg }
+
+let code = function
+  | Unauthorized _ | TokenExpired _ | InvalidToken _ -> 401
+  | Forbidden _ -> 403
+  | AgentNotFound _ | TaskNotFound _ -> 404
+  | RateLimitExceeded _ -> 429
+  | InvalidJson _ | InvalidAgentName _ | InvalidTaskId _ | InvalidFilePath _ | ValidationError _ -> 400
+  | WithCode { code; _ } -> code
+  | _ -> 500

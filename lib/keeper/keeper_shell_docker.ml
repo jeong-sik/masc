@@ -8,6 +8,24 @@
 open Keeper_types
 open Keeper_exec_shared
 
+(* docker exec 실패 시 진단성 보강용 helper. 이전 message format
+   `failed (image): <output>` 에서 output 이 empty 면 진단 불가
+   (cycle22 fleet log: 30분간 5건 발생, detail 모두 empty).
+   exit/signal status + output empty placeholder 로 root cause 식별
+   가능하게 한다. *)
+let docker_exec_status_label = function
+  | Unix.WEXITED n -> Printf.sprintf "exit=%d" n
+  | Unix.WSIGNALED n -> Printf.sprintf "signal=%d" n
+  | Unix.WSTOPPED n -> Printf.sprintf "stopped=%d" n
+
+let docker_exec_failure_message ~image ~status ~output =
+  let truncated = Worker_dev_tools.truncate_for_log output in
+  let output_label =
+    if String.trim truncated = "" then "<no output>" else truncated
+  in
+  Printf.sprintf "sandbox docker exec failed (%s, %s): %s"
+    image (docker_exec_status_label status) output_label
+
 (* ── Sandbox GH_TOKEN warn dedup ───────────────────────────
 
    When [git_creds_enabled = true] but [Env_config_keeper.KeeperSandbox.gh_token]
@@ -495,9 +513,7 @@ let run_docker_shell_command_with_status
          in
          if status <> Unix.WEXITED 0 then
            Keeper_registry.record_error ~base_path:config.base_path meta.name
-             (Printf.sprintf "sandbox docker exec failed (%s): %s"
-                image
-                (Worker_dev_tools.truncate_for_log output))
+             (docker_exec_failure_message ~image ~status ~output)
          else
            Keeper_registry.clear_error ~base_path:config.base_path meta.name;
          Ok { status; output; image; network_label }
@@ -539,9 +555,7 @@ let run_docker_with_git_bash
        | Ok (st, out) ->
          if st <> Unix.WEXITED 0 then
            Keeper_registry.record_error ~base_path:config.base_path meta.name
-             (Printf.sprintf "sandbox docker exec failed (%s): %s"
-                image
-                (Worker_dev_tools.truncate_for_log out))
+             (docker_exec_failure_message ~image ~status:st ~output:out)
          else
            Keeper_registry.clear_error ~base_path:config.base_path meta.name;
          Yojson.Safe.to_string
@@ -608,9 +622,7 @@ let run_docker_hardened_bash
        | Ok (st, out) ->
          if st <> Unix.WEXITED 0 then
            Keeper_registry.record_error ~base_path:config.base_path meta.name
-             (Printf.sprintf "sandbox docker exec failed (%s): %s"
-                image
-                (Worker_dev_tools.truncate_for_log out))
+             (docker_exec_failure_message ~image ~status:st ~output:out)
          else
            Keeper_registry.clear_error ~base_path:config.base_path meta.name;
          Yojson.Safe.to_string

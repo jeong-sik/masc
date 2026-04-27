@@ -72,7 +72,7 @@
 @utility activity-dot--live { background: var(--agent-working); }
 @utility activity-dot--stale { background: var(--agent-busy); }
 @utility activity-dot--inactive { background: rgba(138, 163, 211, 0.4); }
-@utility activity-dot--unknown { background: var(--card-border); }
+@utility activity-dot--unknown { background: var(--color-border-default); }
 
 /* Speech bubble */
 @utility pixel-avatar__speech-bubble {

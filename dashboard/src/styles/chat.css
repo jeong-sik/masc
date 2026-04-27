@@ -33,7 +33,7 @@
 @utility chat-avatar {
   &.user {
     border-color: rgba(71, 184, 255, 0.28);
-    background: var(--accent-soft);
+    background: var(--color-accent-soft);
     color: #d8f0ff;
   }
   &.assistant {

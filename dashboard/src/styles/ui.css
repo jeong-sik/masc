@@ -48,7 +48,7 @@
   & blockquote {
     border-left: 3px solid var(--ff-gold-40);
     padding-left: 12px;
-    color: var(--text-muted);
+    color: var(--color-fg-muted);
     margin: 8px 0;
   }
 
@@ -61,7 +61,7 @@
 
   & a { color: var(--accent); &:hover { text-decoration: underline; } }
   & strong { font-weight: 600; }
-  & del { color: var(--text-muted); }
+  & del { color: var(--color-fg-muted); }
 
   & table { margin: 8px 0; }
 
@@ -136,7 +136,7 @@ button.monitor-row {
 @utility agent-event-badge--broadcast { background: var(--purple-12); color: var(--purple); }
 @utility agent-event-badge--task { background: var(--warn-12); color: var(--warn); }
 @utility agent-event-badge--board { background: var(--cyan-12); color: var(--cyan); }
-@utility agent-event-badge--default { background: var(--border-slate-12); color: var(--text-muted); }
+@utility agent-event-badge--default { background: var(--border-slate-12); color: var(--color-fg-muted); }
 
 /* ── Micro-Interactions (Task 289) ── */
 @utility pressable {

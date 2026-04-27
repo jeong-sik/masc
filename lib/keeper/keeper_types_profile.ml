@@ -309,6 +309,7 @@ type keeper_profile_defaults = {
   social_model : string option;
   cascade_name : string option;
   models : string list option;
+  unknown_toml_keys : string list;
   (* Turn budget overrides. None = inherit env default
      (MASC_KEEPER_OAS_MAX_TURNS_PER_CALL / ..._SCHEDULED_AUTONOMOUS). *)
   max_turns_per_call : int option;
@@ -388,8 +389,8 @@ let empty_keeper_profile_defaults = {
   max_turns_per_call_scheduled_autonomous = None;
   cascade_name = None;
   models = None;
-  oas_env = [];
   unknown_toml_keys = [];
+  oas_env = [];
 }
 
 let normalize_per_provider_timeout_opt ~(source : string)
@@ -798,8 +799,6 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         cascade_name = normalize_cascade_name_opt (str "cascade_name");
         models = None;
         oas_env = extract_oas_env_from_doc doc;
-        (* unknown_toml_keys is populated by [load_keeper_toml] which
-           runs after [detect_unknown_keeper_toml_keys] is in scope. *)
         unknown_toml_keys = [];
       })
     result
@@ -947,8 +946,9 @@ let load_keeper_toml (path : string)
       match profile_defaults_of_toml doc with
       | Error e -> Error (Printf.sprintf "%s: %s" path e)
       | Ok defaults ->
+        let unknown_toml_keys = detect_unknown_keeper_toml_keys doc in
         warn_unknown_keeper_toml_keys ~path doc;
-        let unknown = detect_unknown_keeper_toml_keys doc in
+        let defaults = { defaults with unknown_toml_keys } in
         let name =
           match Keeper_toml_loader.toml_string_opt doc "keeper.name" with
           | Some n when n <> "" -> n
@@ -962,8 +962,7 @@ let load_keeper_toml (path : string)
           let id = Ids.Keeper_id.generate ~name ~path in
           Ok (name,
               { defaults with manifest_path = Some path
-                            ; id = Some id
-                            ; unknown_toml_keys = unknown })
+                            ; id = Some id })
 
 (* #10259: every reconcile cycle calls [discover_keepers_toml], so a
    persistent fail mode (4 keepers stuck on cascade_name "ollama_only"
@@ -1136,6 +1135,7 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
                   (match Safe_ops.json_string_list "models" keeper_json with
                    | [] -> None
                    | xs -> Some xs);
+                unknown_toml_keys = [];
                 (* oas_env lives only in keeper TOML, not persona JSON —
                    persona profiles are a design-time artifact whereas
                    transport env is an ops-time toggle. *)
@@ -1266,6 +1266,7 @@ let merge_keeper_profile_defaults
     social_model = prefer overlay.social_model base.social_model;
     cascade_name = prefer overlay.cascade_name base.cascade_name;
     models = prefer overlay.models base.models;
+    unknown_toml_keys = overlay.unknown_toml_keys;
     max_turns_per_call = prefer overlay.max_turns_per_call base.max_turns_per_call;
     max_turns_per_call_scheduled_autonomous =
       prefer overlay.max_turns_per_call_scheduled_autonomous

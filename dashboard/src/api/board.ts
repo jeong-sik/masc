@@ -439,7 +439,7 @@ export async function fetchBoardPost(postId: string): Promise<BoardPost & { comm
       author: 'unknown',
       post_kind: 'direct',
       classification_reason: null,
-      title: 'Post',
+      title: '게시물',
       body: '',
       content: '',
       meta: null,

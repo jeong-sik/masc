@@ -148,6 +148,7 @@ type registry_entry = {
   pending_turn_measurement : turn_measurement option;
   current_turn_observation : turn_observation option;
   last_completed_turn : completed_turn_observation option;
+  last_skip_observation : (float * string list) option;
   compaction_stage : compaction_stage;
 }
 
@@ -275,6 +276,7 @@ let register_with_state ~base_path name meta
     pending_turn_measurement = None;
     current_turn_observation = None;
     last_completed_turn = None;
+    last_skip_observation = None;
     compaction_stage = Compaction_accumulating;
   } in
   put_entry key entry;
@@ -582,6 +584,16 @@ let mark_turn_finished ~base_path name =
     (Keeper_transition_audit.record_completed_turn ~keeper_name:name)
     !completed_turn_to_record;
   if !changed then broadcast_composite_changed ~name ~ts_unix:now
+
+let record_skip_reasons ~base_path name ~reasons =
+  (* Only stamp when there's at least one reason — empty lists from a
+     [Run] verdict path would otherwise overwrite the last legitimate
+     skip stamp with a no-op. *)
+  if reasons <> [] then begin
+    let now = Time_compat.now () in
+    update_entry ~base_path name (fun e ->
+      { e with last_skip_observation = Some (now, reasons) })
+  end
 
 let increment_turn_failures ~base_path name =
   update_entry ~base_path name (fun e ->

@@ -95,6 +95,66 @@ List.filter_map (function Ok t -> Some t | Error _ -> None)
 
 **PR 체크:** `rg '\| Error _ -> \(\)' lib/` 로 새 `| Error _ -> ()` 확인.
 
+### 5.1. Naked Callback Invocation (PR #11134, 2026-04-27)
+
+`~on_compaction_started` / `~on_handoff_started` 같은 lifecycle callback closure를 `try/with` 없이 호출하면 callback 내부(예: SSE/Prometheus dispatch) 실패가 caller(KCL/Rollover) 본체를 abort.
+
+**❌ DON'T:**
+```ocaml
+let () = on_compaction_started () in
+proceed_with_compaction ()
+```
+
+**✅ DO:**
+```ocaml
+(try on_compaction_started ()
+ with
+ | Eio.Cancel.Cancelled _ as e -> raise e
+ | exn ->
+     Prometheus.inc_counter
+       Prometheus.metric_keeper_lifecycle_callback_failures
+       ~labels:[("callback", "on_compaction_started")] ();
+     Log.Keeper.warn "callback on_compaction_started raised: %s"
+       (Printexc.to_string exn));
+proceed_with_compaction ()
+```
+
+**PR 체크:** `rg -nP '^\s+(let \(\) = )?on_[a-z_]+ \(\)' lib/keeper/` — match 발견 시 try/with wrap 검토.
+
+### 5.2. Cancel.Cancelled Swallow (관련: §2)
+
+`with _ -> ...` 또는 `with exn -> ...` 가 `Eio.Cancel.Cancelled`도 함께 잡으면 fiber teardown이 멎고 parent switch가 영원히 닫히지 않음.
+
+**규칙:** 모든 `with exn ->`는 첫 arm에 Cancel re-raise.
+
+```ocaml
+try ... with
+| Eio.Cancel.Cancelled _ as e -> raise e   (* 항상 첫 arm *)
+| exn -> ...
+```
+
+**PR 체크:** `rg -n 'with exn ->' lib/` 결과를 검토해 Cancel re-raise 누락 정렬.
+
+### 5.3. Drain Fire-and-Forget Without Attribution (PR #11134, 2026-04-27)
+
+`let _ = drain_turn_event_bus () in` 자체는 의도적 fire-and-forget이지만, site/outcome label 없이 drain하면 overflow 신호(burst frequency, drain miss)를 잃음.
+
+**규칙:** 의도적 ignore는 유지하되, site label과 outcome counter를 동시 emission.
+
+**❌ DON'T:**
+```ocaml
+let _ = drain_turn_event_bus () in
+```
+
+**✅ DO:**
+```ocaml
+let _ = drain_turn_event_bus ~site:"background_poll" () in
+(* drain helper가 Prometheus.metric_keeper_event_bus_drain_total
+   {site, outcome} 자동 emit *)
+```
+
+**PR 체크:** `rg -n 'let _ = drain_turn_event_bus' lib/` — `~site:` 인자 없는 호출 발견 시 site label 추가.
+
 ## 6. Version String Drift (2 occurrences)
 
 `dune-project` version and `sdk_version.ml` (or equivalent) must match.
@@ -369,6 +429,73 @@ cd dashboard && pnpm run build  # TypeScript type check
 
 ---
 
+## 14. Cross-FSM Coupling Discipline (PR #11120/#11127/#11134)
+
+5 sub-FSM(KSM/KTC/KDP/KCL/KMC)이 직접 호출로 결합된 구조 — silent failure가 cross-FSM boundary에서 가장 쉽게 발생함. PR-H/I/J에서 도입된 invariants와 reviewer rule.
+
+### 14.1. Pure Function 불변량
+
+`Keeper_state_machine.apply_event`와 `Keeper_cascade_routing.select_cascade`는 mli에 "Pure function — no I/O" 명시. 안에 `Prometheus.inc_counter` 추가하면:
+- property test의 idempotency 가 false로 깨짐
+- counter label 결정이 함수 내부로 들어가 caller-context를 잃음 (edge label 결정 사이트가 흩어짐)
+
+**규칙:** counter는 caller site에서만 emit. pure function은 transition/decision 만 반환.
+
+**예외:** observability-only `Log.*` 호출은 mli에 documented exception이면 허용 (예: `keeper_state_machine.ml` no-savings warn). counter는 예외 없음.
+
+**PR 체크:**
+```bash
+rg -nP 'inc_counter' lib/keeper/keeper_state_machine.ml lib/keeper/keeper_cascade_routing.ml
+# 기대: 0 매치
+```
+
+### 14.2. Variant 추가 시 Sweep 강제
+
+ADT variant 추가 PR이 모든 매치 사이트를 sweep 안 하면 strict mode partial-match로 cascade. 실제 사례: masc-mcp #10574 (Stale_turn_timeout), #10510/#10511 (InferenceTelemetry), #10516/#10521 (OperatorPauseBroadcast).
+
+**규칙:** variant 정의 변경 commit과 같은 PR에 모든 match arm 업데이트.
+
+**PR 체크:**
+```bash
+# variant 추가 PR이라면, diff에 정의 파일 + ≥1 match arm 추가가 함께 있어야 함
+git diff origin/main..HEAD -- '*.ml' | rg -B 2 -A 2 '\| <NewVariant>'
+# 위 명령이 1개 이상의 match arm을 보여야 정상 (정의만 추가됐다면 sweep 누락)
+```
+
+### 14.3. TLA+ BugAction 규율 (PR #11120)
+
+SafetyInvariant 추가 시 같은 spec에 `BugAction`도 짝으로 추가, clean cfg(invariant pass) + buggy cfg(invariant violation) 양쪽 검증.
+
+- clean cfg가 통과만 하고 buggy cfg가 없으면: invariant가 진짜 버그를 잡는지 검증 0
+- buggy cfg도 통과하면: invariant가 너무 약함 (모든 상태 허용)
+- clean cfg가 fail하면: spec/invariant 모순 — 모델이 잘못됨
+
+**규칙:** `*.tla` 추가/수정 PR은 `*-buggy.cfg` 가 invariant violation으로 fail해야 정상.
+
+**PR 체크:**
+```bash
+# specs/<topic>/<Name>.tla 와 sibling -buggy*.cfg 짝 매핑 확인
+# (variant cfg 지원: -buggy.cfg, -buggy-cascade.cfg, -buggy-compaction.cfg 모두 매치)
+comm -23 \
+  <(find specs -name "*.tla" | sed 's|.tla$||' | sort) \
+  <(find specs -name "*-buggy*.cfg" | sed -E 's|-buggy[^.]*\.cfg$||' | sort -u)
+# bug-model 누락된 spec 출력. 새 spec PR이라면 0줄 기대 (기존 미커버 spec은 별도 backlog)
+```
+
+### 14.4. Per-edge Counter 일치성 (PR #11127)
+
+`docs/keeper-fsm-graph.dot`에 명시된 edge와 코드에 wire된 `masc_keeper_fsm_edge_transitions_total{edge}` label이 1:1 일치해야 함. 한쪽만 추가/제거하면 graph가 거짓이거나 counter가 drift함.
+
+**규칙:** edge 추가/제거 시 graph + counter + validator script 동시 업데이트.
+
+**PR 체크:**
+```bash
+bash scripts/validate-keeper-fsm-graph.sh
+# 기대: "OK: all N documented edges are instrumented and vice versa."
+```
+
+---
+
 ## Related Architecture Decision Records (ADRs)
 
 이 문서의 pitfall들은 다음 ADR에서 더 깊이 다룬다:
@@ -402,12 +529,18 @@ cd dashboard && pnpm run build  # TypeScript type check
 
 **PR 체크리스트 with this doc:**
 - [ ] 새 모듈 삭제했는가? → Section #1 체크
-- [ ] Eio context에서 작업하는가? → Section #2 체크
+- [ ] Eio context에서 작업하는가? → Section #2, #5.2 체크
 - [ ] Dashboard 변경했는가? → Section #3, #11 체크
 - [ ] 테스트 추가/변경했는가? → Section #4, #10 체크
+- [ ] Lifecycle callback closure 호출했는가? → Section #5.1 체크
+- [ ] `drain_turn_event_bus` 호출 추가했는가? → Section #5.3 체크
 - [ ] Feature flag 추가했는가? → Section #8 체크
 - [ ] Config 추가/변경했는가? → Section #9 체크
 - [ ] Partial function 사용했는가? → Section #12 체크
 - [ ] Registry-like file 수정했는가? → Section #13 체크
+- [ ] `keeper_state_machine` 또는 `keeper_cascade_routing` 수정했는가? → Section #14.1 체크
+- [ ] ADT variant 추가했는가? → Section #14.2 체크
+- [ ] `*.tla` 추가/수정했는가? → Section #14.3 체크
+- [ ] FSM edge counter 추가/제거했는가? → Section #14.4 체크
 
-**마지막 업데이트**: 2026-03-30 (ADR-003 추가, Section #8-#13 신규)
+**마지막 업데이트**: 2026-04-27 (Section #5.1-#5.3, #14 신규 — PR-H/I/J cross-FSM coupling rules)

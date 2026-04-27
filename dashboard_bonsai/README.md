@@ -65,7 +65,7 @@ dune build --root .
 
 - `lib/server/server_routes_http_pages.ml` — `/dashboard/b/*` 라우트 등록
 - `lib/server/server_routes_http_routes_frontend.ml` — `assets/dashboard_bonsai/*` 정적
-- 번들 캐시 버스트: `main.bc.js?v=<mtime>` · `colors_and_type.css?v=<mtime>`
+- 번들 캐시 버스트: `main.bc.js?v=<mtime>` · `colors_and_type.generated.css?v=<mtime>`
 
 ## 레이아웃
 
@@ -84,18 +84,21 @@ dashboard_bonsai/
 │   ├── sse.ml            # EventSource helper (Phase 0.4)
 │   └── dune
 ├── static/
-│   └── colors_and_type.css   # DS token SSOT (5 테마)
+│   ├── colors_and_type.generated.css   # DS token SSOT (generated, dark-fantasy + paper)
+│   └── themes/archive/                 # cyberpunk · terminal · parchment (보존 only)
 └── dune-project
 ```
 
 ## 스타일
 
 - **ppx_css 블록** inline (각 view 파일 내부)
-- **`static/colors_and_type.css`**: DS token SSOT — `--bg-*` / `--text-*` / `--accent-*` / `--status-*` / `--t-*`
+- **`static/colors_and_type.generated.css`**: DS token SSOT — `dashboard/design-system/tokens/source.ts`에서 `pnpm tokens:build`로 emit (`--bg-*` / `--text-*` / `--accent-*` / `--status-*` / `--t-*`). 수기 편집 금지.
+- `static/themes/archive/`: cyberpunk · terminal · parchment 보존 사본. Wave 2 swap 후 셸이 로드하지 않음 — 복원하려면 source.ts에 병합하거나 server에서 추가 link 발행.
 - Tailwind는 Preact 잔존 탭에서만 사용 (`../dashboard/`)
 
 테마 전환:
-- URL hash: `#cyberpunk` / `#terminal` / `#parchment` / `#paper`
+- URL hash: `#dark-fantasy` / `#paper` (generated SSOT 기준)
+- archived: `#cyberpunk` / `#terminal` / `#parchment` chip 은 셸에 남아있으나 토큰 미로드 — `themes/archive/*.css` 참조
 - localStorage: `masc.bonsai.theme` 키로 영속화
 - 하단 theme chip 클릭 → `<html data-theme>` 속성 교체
 

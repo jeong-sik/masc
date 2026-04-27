@@ -299,11 +299,12 @@ let bonsai_asset_mtime filename =
   | _ -> "0"
 
 let bonsai_bundle_version () = bonsai_asset_mtime "main.bc.js"
-let bonsai_tokens_version () = bonsai_asset_mtime "colors_and_type.css"
+let bonsai_tokens_version () = bonsai_asset_mtime "colors_and_type.generated.css"
 
 let bonsai_index_html () =
-  (* [colors_and_type.css] is the MASC Design System SSOT — :root palette,
-     font stacks, and utility primitives. Served from assets/dashboard_bonsai/
+  (* [colors_and_type.generated.css] is the MASC Design System SSOT — :root
+     palette and font stacks emitted from [dashboard/design-system/tokens/
+     source.ts] via `pnpm tokens:build`. Served from assets/dashboard_bonsai/
      (copied there by `make bonsai-dashboard`). If the file isn't present,
      the <link> 404s and the inline <style> fallback keeps the page readable. *)
   Printf.sprintf
@@ -316,9 +317,9 @@ let bonsai_index_html () =
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500;600;700&family=EB+Garamond:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono:wght@400;500;700&family=Noto+Sans+KR:wght@300;400;500;700&display=swap">
-<link rel="stylesheet" href="/dashboard/b/assets/colors_and_type.css?v=%s">
+<link rel="stylesheet" href="/dashboard/b/assets/colors_and_type.generated.css?v=%s">
 <style>
-  /* Shell defaults — Design System SSOT lives in colors_and_type.css.
+  /* Shell defaults — Design System SSOT lives in colors_and_type.generated.css.
      The grain overlay is a fixed, non-interactive pseudo-element on body.
      Taken from MASC Design System ui_kits/dashboard_v2 — creates the
      "oil-painting" Disco-Elysium feel by multiply-blending fractalNoise

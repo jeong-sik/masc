@@ -1,0 +1,30 @@
+/* Archived theme — preserved for brand voice reference.
+   Originally lived in dashboard_bonsai/static/colors_and_type.css before
+   the Wave 2 generated-token swap. Not loaded by the Bonsai shell;
+   restore by linking this file from server_routes_http_pages.ml or
+   merging the block into dashboard/design-system/tokens/source.ts. */
+
+[data-theme="parchment"] {
+  color-scheme: dark;
+  --bg-deep:      #1a1610;
+  --bg-panel:     #241f18;
+  --bg-panel-alt: #2e2820;
+  --bg-card:      #332d24;
+  --bg-card-hover:#3d362c;
+  --border-main:      #4a3f30;
+  --border-highlight: #6a5d48;
+  --text-bright:  #f0e4cc;
+  --text-primary: #d4c4a0;
+  --text-dim:     #9c8f7a;
+  --accent-brass: #c4a050;
+  --accent-brass-dim: #8a7035;
+  --accent-blood: #8b4513;
+  --accent-ink:   #556b2f;
+  --accent-glow:  rgba(196, 160, 80, 0.1);
+  /* Trace frames — warm parchment */
+  --t-llm:   #6a5d48;
+  --t-tool:  #c4a050;
+  --t-think: #4a3f30;
+  --t-wait:  #1a1610;
+  --t-err:   #8b4513;
+}

@@ -1,0 +1,134 @@
+# Prometheus alerting rules for the keeper turn FSM.
+#
+# Companion metric (exposed via /metrics):
+#   - masc_keeper_turn_fsm_transitions_total{from, to, keeper}
+#       from / to ∈ Keeper_turn_fsm.turn_state_label outputs
+#       keeper   ∈ keeper name
+#       See lib/keeper/keeper_turn_fsm.ml + lib/prometheus.ml
+#       Doc:  docs/observability/keeper-turn-fsm-metrics.md
+#
+# Companion files:
+#   - infrastructure/monitoring/grafana-keeper-turn-fsm-dashboard.json
+#   - docs/observability/keeper-turn-fsm-metrics.md
+#   - docs/keeper-turn-lifecycle.md
+#
+# Alert philosophy: noisy alerts get muted, missed alerts cause
+# silent fleet degradation.  These rules pick the four signals
+# that map to operator action; the per-(from,to,keeper) cross-
+# product is left unchecked because the dashboard already shows
+# it and the cardinality would page on every turn class.
+#
+# Label cardinality (alert series, not metric series):
+#   - 4 alert names × ≤ ~16 keepers (per-keeper alerts) ≈ 64 series
+
+groups:
+  - name: masc_keeper_turn_fsm
+    interval: 30s
+    rules:
+
+      # turn_livelock_blocked is a Step 4f-distinct variant that
+      # used to hide inside Failure_runtime_error.  Even one
+      # incident means a keeper got stuck in a same-task loop
+      # for long enough that the livelock guard rejected a
+      # turn -- worth surfacing immediately.
+      - alert: KeeperTurnLivelockBurst
+        expr: |
+          rate(masc_keeper_turn_fsm_transitions_total{to="failed:turn_livelock_blocked"}[5m]) > 0.0167
+        for: 10m
+        labels:
+          severity: warning
+          component: keeper
+          subsystem: turn_fsm
+        annotations:
+          summary: "Keeper turn livelock blocks > 1/min for 10m"
+          description: |
+            Turn livelock guard ({{ $labels.keeper }}) rejected dispatch
+            at {{ $value }}/s sustained for 10m.  Pre-Step-4f this
+            counted as Failure_runtime_error and was invisible.
+            Inspect bin/masc-trace <base> {{ $labels.keeper }} <turn_id>
+            for the most recent occurrence and review the keeper's
+            current_task_id -- the guard typically fires when the
+            same task_id has been claimed across many cycles without
+            progress.
+
+      # Step 4f redirect: cascade_build error + run_turn errors
+      # (Step 4j) both land here.  A spike means either a
+      # provider regression or a cascade_catalog mis-config.
+      - alert: KeeperTurnProviderErrorSurge
+        expr: |
+          sum by (keeper) (
+            rate(masc_keeper_turn_fsm_transitions_total{to="failed:provider_error"}[5m])
+          ) > 0.0833
+        for: 15m
+        labels:
+          severity: warning
+          component: keeper
+          subsystem: turn_fsm
+        annotations:
+          summary: "Keeper provider_error rate > 5/min for 15m on {{ $labels.keeper }}"
+          description: |
+            Keeper {{ $labels.keeper }} is producing failed:provider_error
+            transitions at {{ $value }}/s for 15m.  Possible causes:
+              - upstream LLM provider degraded (check
+                masc_keeper_oas_timeout_classifications)
+              - cascade catalog includes an unreachable provider
+                (check Cascade_catalog_validator boot diagnostics)
+              - subprocess auth fallback regressed (check
+                Auth_resolve trace for Per_keeper_token_file
+                source)
+            Drill: bin/masc-trace <base> {{ $labels.keeper }} <turn_id>
+            on the most recent failed turn shows the typed FSM trail.
+
+      # Catch-all that should never fire after Step 4f.
+      # If it does, a new emit site landed without picking a
+      # specific failure_reason variant -- flag it for code
+      # review.
+      - alert: KeeperTurnRuntimeErrorRegression
+        expr: |
+          rate(masc_keeper_turn_fsm_transitions_total{to="failed:runtime_error"}[5m]) > 0
+        for: 30m
+        labels:
+          severity: warning
+          component: keeper
+          subsystem: turn_fsm
+        annotations:
+          summary: "Keeper FSM emit hit runtime_error catch-all (Step 4f-regression?) for 30m"
+          description: |
+            After Step 4f (#11340), the runtime callsites no longer
+            emit Failure_runtime_error -- cascade_build redirects to
+            Failure_provider_error and livelock to
+            Failure_turn_livelock_blocked.  A non-zero rate here for
+            30m suggests a new emit site landed without picking a
+            specific variant.  Find it via:
+              git log --since='30d ago' --oneline lib/keeper/ \
+                | xargs -I{} git show {} | grep Failure_runtime_error
+
+      # Per-keeper completion stall: a keeper that hasn't closed
+      # any turn in 10m while at least one peer keeps closing
+      # turns is stuck.  Compares per-keeper rate against the
+      # max across keepers so a quiet fleet doesn't page.
+      - alert: KeeperCompletionStall
+        expr: |
+          (
+            sum by (keeper) (rate(masc_keeper_turn_fsm_transitions_total{to="done"}[10m])) == 0
+          )
+          and on()
+          (
+            max(rate(masc_keeper_turn_fsm_transitions_total{to="done"}[10m])) > 0
+          )
+        for: 10m
+        labels:
+          severity: warning
+          component: keeper
+          subsystem: turn_fsm
+        annotations:
+          summary: "Keeper {{ $labels.keeper }} closed no turns in 10m while peers did"
+          description: |
+            Keeper {{ $labels.keeper }} produced zero done transitions
+            in 10m while at least one peer keeper did.  Common causes:
+              - phase gate stuck (check
+                masc_keeper_turn_fsm_transitions_total{from="phase_gating",
+                to="cancelled:phase_gate_close",keeper="{{ $labels.keeper }}"})
+              - cascade exhaustion specific to this keeper's cascade
+              - livelock guard re-rejecting (see KeeperTurnLivelockBurst)
+            Drill: bin/masc-trace <base> {{ $labels.keeper }} <recent_turn_id>

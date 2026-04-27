@@ -604,6 +604,8 @@ let metric_board_truncated_posts = "masc_board_truncated_posts_total"
 let metric_cascade_strategy_decisions = "masc_cascade_strategy_decisions_total"
 let metric_cascade_capacity_events = "masc_cascade_capacity_events_total"
 let metric_keeper_invariant_violations = "masc_keeper_invariant_violations_total"
+let metric_keeper_fsm_edge_transitions =
+  "masc_keeper_fsm_edge_transitions_total"
 let metric_keeper_dead_total = "masc_keeper_dead_total"
 let metric_keeper_near_exhaustion_total = "masc_keeper_near_exhaustion_total"
 (* PR-M (Leak 9): consecutive [oas_timeout_budget] cycle FAILED strikes

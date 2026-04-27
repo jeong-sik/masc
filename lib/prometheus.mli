@@ -248,6 +248,20 @@ val metric_anti_rationalization_excuse_pattern : string
 val metric_cascade_strategy_decisions : string
 val metric_cascade_capacity_events : string
 val metric_keeper_invariant_violations : string
+
+(** PR-I: cross-FSM edge transition counter. Labels: [edge] with values
+    drawn from the static coupling graph documented in
+    [docs/keeper-fsm-graph.dot]. Allowed values:
+    - [ksm_to_kcl_routing] — phase decides cascade routing
+      (Keeper_cascade_routing.select_cascade caller)
+    - [ksm_to_kmc_compact_trigger] — Auto_compact_triggered dispatch
+      (Keeper_registry compaction entry path)
+    - [kmc_to_ksm_compact_completed] — Compaction_completed dispatch
+    - [kcl_to_ktc_exhaustion] — cascade exhaustion observed during
+      a turn, recorded into the registry's cascade_state
+    Cardinality is bounded by the documented edge set (≤ 8 series on
+    a fleet of any size). *)
+val metric_keeper_fsm_edge_transitions : string
 val metric_keeper_dead_total : string
 (** Total keeper transitions to [Dead] phase after restart-budget exhaustion.
     Labeled by [keeper] and [reason]. Operators should alert on any rate >0:

@@ -291,16 +291,20 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
         ${keeper.paused
           ? html`<span class="inline-flex items-center rounded-sm px-2 py-0.5 text-2xs font-semibold bg-[var(--warn-14)] text-[var(--color-status-warn)]">일시정지</span>
             ${hasActivitySignal ? html`<span class="text-[var(--color-fg-muted)]">${renderActivitySignal()}</span>` : null}
-            <button
-              class="inline-flex items-center rounded px-2 py-0.5 text-2xs font-medium bg-[var(--white-6)] hover:bg-[var(--white-8)] text-[var(--color-fg-secondary)] transition-colors disabled:opacity-50"
+            <${ActionButton}
+              variant="ghost"
+              size="sm"
+              class="!py-0.5 !bg-[var(--white-6)] !text-[var(--color-fg-secondary)] inline-flex items-center"
               disabled=${directiveLoading.value}
               onClick=${() => handleDirective('resume')}
-            >재개</button>`
-          : html`<button
-              class="inline-flex items-center rounded px-2 py-0.5 text-2xs font-medium bg-[var(--white-6)] hover:bg-[var(--white-8)] text-[var(--color-fg-secondary)] transition-colors disabled:opacity-50"
+            >재개<//>`
+          : html`<${ActionButton}
+              variant="ghost"
+              size="sm"
+              class="!py-0.5 !bg-[var(--white-6)] !text-[var(--color-fg-secondary)] inline-flex items-center"
               disabled=${directiveLoading.value}
               onClick=${() => handleDirective('pause')}
-            >일시정지</button>
+            >일시정지<//>
             ${(hbStale || runtimeBlockerClass === 'oas_timeout_budget' || runtimeBlockerClass === 'cascade_exhausted' || runtimeBlockerClass === 'turn_timeout')
               ? html`<${ActionButton}
                   variant="warn"

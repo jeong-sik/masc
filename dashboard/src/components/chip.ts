@@ -5,17 +5,17 @@
 // dashboard already owns.
 //
 // SPEC fidelity: matches design-system/source_styles/primitives.css
-// `.chip.is-{kind}` selectors for the five status kinds (ok/warn/err/
-// info/stalled) — translucent kind-tinted borders at 0.35 alpha +
-// backgrounds at 0.08 alpha.  Ghost stays transparent and neutral
+// `.chip.is-{kind}` selectors for all six tinted kinds (brass + the
+// five status kinds ok/warn/err/info/stalled) — translucent kind-
+// tinted borders at 0.35 alpha and backgrounds at 0.08 alpha for
+// status; brass uses the dimmed accent border + 0.08 accent
+// background per SPEC line 21.  Ghost stays transparent and neutral
 // keeps the elevated surface (SPEC: ghost is chromeless, neutral has
-// no semantic kind to tint).  Brass currently keeps the elevated
-// background — its SPEC translucent form depends on
-// --color-accent-glow being a triplet, which is an in-flight change
-// in PR-Pill-Fidelity (#11171).  Brass will swap in a follow-up.
+// no semantic kind to tint).
 //
-// Token dependencies (added by PR-DS-Glow / #11163):
+// Token dependencies (added by PR-DS-Glow / #11163 + PR-Pill-Fidelity / #11171):
 //   --color-status-{ok,warn,err,info,stalled}-glow   rgb-triplets
+//   --color-accent-glow                               rgb-triplet
 // The dashboard runtime triplets decompose the bright Tailwind-400/500
 // semantic colors; SPEC source tokens.css uses muted hues but the
 // dashboard prefers visual consistency with the live surface.
@@ -79,13 +79,7 @@ const KIND_STYLE: Record<ChipKind, KindStyle> = {
   brass: {
     color: 'var(--color-accent-fg)',
     borderColor: 'var(--color-accent-fg-dim)',
-    // SPEC: rgb(var(--color-accent-glow) / 0.08) — but the runtime
-    // --color-accent-glow alias is currently a hex form (var(--accent)),
-    // not a triplet, so the rgb()/alpha math would not parse. PR-Pill-
-    // Fidelity (#11171) repurposes the alias to a triplet; the brass
-    // background will swap to translucent in a follow-up after that
-    // dependency lands.
-    background: 'var(--color-bg-elevated)',
+    background: 'rgb(var(--color-accent-glow) / 0.08)',
   },
   ok: {
     color: 'var(--color-status-ok)',

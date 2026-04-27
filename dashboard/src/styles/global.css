@@ -14,7 +14,7 @@
  */
 
 /* ── Foundation imports ──────────────────────────────────────── */
-@import "./tokens.css";
+@import "./tokens.generated.css";
 @import "./variables.css";
 @import "./base.css";
 @import "./keyframes.css";

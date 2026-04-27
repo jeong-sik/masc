@@ -2,7 +2,12 @@
 // Mounts the root <App /> component into the DOM
 
 // Foundation styles (load first)
-import './styles/tokens.css'
+// Generated SSOT: design-system/tokens/source.ts → pnpm tokens:build.
+// tokens.generated.css emits the canonical @theme block consumed by
+// Tailwind v4 utilities (`bg-bg-0`, `text-fg-1`, …) and the 14 atom
+// components in dashboard/src/components/{chip,band,bar,btn,elev,
+// focusable,kv-row,motion,section-head,sep,spark,surf,tk}.ts.
+import './styles/tokens.generated.css'
 import './styles/variables.css'
 import './styles/base.css'
 import './styles/keyframes.css'

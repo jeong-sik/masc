@@ -8,10 +8,13 @@ The MASC Dashboard CSS has been refactored from a single 2199-line `global.css` 
 
 ### Foundation Files (Load Order)
 
-1. **tokens.css** (51 lines)
+1. **tokens.generated.css** (generated SSOT)
    - Tailwind v4 `@theme` design tokens
+   - Source: `dashboard/design-system/tokens/source.ts` → `pnpm tokens:build`
    - Colors, typography scale, spacing, radii
-   - Used by Tailwind's utility classes
+   - Consumed by Tailwind utility classes and the 14 atom components
+     (`chip`, `band`, `bar`, `btn`, `elev`, `focusable`, `kv-row`,
+     `motion`, `section-head`, `sep`, `spark`, `surf`, `tk`)
 
 2. **variables.css** (156 lines)
    - CSS custom properties (`:root`)
@@ -51,7 +54,7 @@ The MASC Dashboard CSS has been refactored from a single 2199-line `global.css` 
 
 ```typescript
 // Foundation styles (load first)
-import './styles/tokens.css'
+import './styles/tokens.generated.css'
 import './styles/variables.css'
 import './styles/base.css'
 import './styles/keyframes.css'

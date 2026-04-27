@@ -121,7 +121,22 @@ let post_sync ?clock ?timeout_sec ~net ?(https = None) ~url ~headers ~body () =
       Cohttp.Response.status resp |> Cohttp.Code.code_of_status
     in
     let body_str =
-      Eio.Buf_read.(parse_exn take_all) resp_body ~max_size:(8 * 1024 * 1024)
+      let max_size = 8 * 1024 * 1024 in
+      let reader = Eio.Buf_read.of_flow resp_body ~max_size in
+      let buf = Buffer.create 4096 in
+      let rec read_chunks () =
+        if Buffer.length buf > max_size then
+          raise (Failure (Printf.sprintf "masc_http_client: body size exceeds %d MB" (max_size / 1024 / 1024)))
+        else
+          match Eio.Buf_read.peek_char reader with
+          | None -> Buffer.contents buf
+          | Some _ ->
+            let chunk = Eio.Buf_read.take_at_most 4096 reader in
+            Buffer.add_string buf chunk;
+            Eio.Fiber.yield ();
+            read_chunks ()
+      in
+      read_chunks ()
     in
     Ok (code, body_str)
   with
@@ -148,7 +163,22 @@ let get_response_sync ?clock ?timeout_sec ~net ?(https = None) ~url ~headers () 
       Cohttp.Response.headers resp |> Cohttp.Header.to_list
     in
     let body_str =
-      Eio.Buf_read.(parse_exn take_all) resp_body ~max_size:(8 * 1024 * 1024)
+      let max_size = 8 * 1024 * 1024 in
+      let reader = Eio.Buf_read.of_flow resp_body ~max_size in
+      let buf = Buffer.create 4096 in
+      let rec read_chunks () =
+        if Buffer.length buf > max_size then
+          raise (Failure (Printf.sprintf "masc_http_client: body size exceeds %d MB" (max_size / 1024 / 1024)))
+        else
+          match Eio.Buf_read.peek_char reader with
+          | None -> Buffer.contents buf
+          | Some _ ->
+            let chunk = Eio.Buf_read.take_at_most 4096 reader in
+            Buffer.add_string buf chunk;
+            Eio.Fiber.yield ();
+            read_chunks ()
+      in
+      read_chunks ()
     in
     Ok { status = code; headers = response_headers; body = body_str }
   with

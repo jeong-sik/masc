@@ -1495,6 +1495,17 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
          block clears the field, preventing stale state on idle keepers. *)
       Keeper_registry.mark_turn_started
         ~base_path:config.base_path meta.name;
+      let meta =
+        match Keeper_registry.get ~base_path:config.base_path meta.name with
+        | Some entry ->
+          let _ =
+            write_meta_with_merge
+              ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
+              config entry.meta
+          in
+          entry.meta
+        | None -> meta
+      in
       Keeper_registry.mark_turn_measurement
         ~base_path:config.base_path meta.name;
       (match Keeper_registry.get ~base_path:config.base_path meta.name with

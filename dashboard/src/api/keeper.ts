@@ -433,7 +433,7 @@ export async function fetchKeeperCheckpoints(
   )
   if (!resp.ok) {
     const text = await resp.text().catch(() => resp.statusText)
-    throw new Error(`Failed to load checkpoints for ${name} (${resp.status}): ${text}`)
+    throw new Error(`${name} 의 checkpoint 로드 실패 (${resp.status}): ${text}`)
   }
   return resp.json() as Promise<KeeperCheckpointInventory>
 }
@@ -455,7 +455,7 @@ export async function deleteKeeperHistorySnapshots(
   )
   if (!resp.ok) {
     const text = await resp.text().catch(() => resp.statusText)
-    throw new Error(`Failed to delete checkpoint history for ${name} (${resp.status}): ${text}`)
+    throw new Error(`${name} 의 checkpoint history 삭제 실패 (${resp.status}): ${text}`)
   }
   return resp.json() as Promise<KeeperCheckpointDeleteResponse>
 }
@@ -539,7 +539,7 @@ export async function editKeeperTools(
   )
   if (!resp.ok) {
     const text = await resp.text().catch(() => resp.statusText)
-    throw new Error(`Tool edit failed (${resp.status}): ${text}`)
+    throw new Error(`도구 편집 실패 (${resp.status}): ${text}`)
   }
   return resp.json() as Promise<ToolEditResponse>
 }

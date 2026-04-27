@@ -226,18 +226,7 @@ let verify ~content =
     | (_, _, Warn r) -> Warn (Printf.sprintf "safety: %s" r)
     | (Pass, Pass, Pass) -> Pass
   in
-  let result = { relevance; quality; safety; overall } in
-  (* RFC-0001 Gate A: record per-dimension heuristic observations *)
-  let verdict_score = function Pass -> 1.0 | Warn _ -> 0.5 | Fail _ -> 0.0 in
-  List.iter (fun (dim, v) ->
-    Heuristic_metrics.record {
-      module_name = "post_verifier"; site = "verify";
-      raw_value = verdict_score v; threshold = 0.5;
-      triggered = (match v with Fail _ -> true | Pass | Warn _ -> false);
-      provenance = Post_verifier (match dim with Relevance -> "relevance" | Quality -> "quality" | Safety -> "safety");
-      timestamp = Unix.gettimeofday ();
-    }) [(Relevance, relevance); (Quality, quality); (Safety, safety)];
-  result
+  { relevance; quality; safety; overall }
 
 (** Check if content passes verification (Pass or Warn). *)
 let is_acceptable result =

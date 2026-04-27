@@ -155,9 +155,6 @@ let resolve_max_context model =
     Provenance: initial values set during v2.100 development (2026-01) based
     on informal observation of Claude/local model conversations.
     No formal benchmark has validated these specific numbers.
-
-    TODO(RFC-0001 Phase 0): Replace with empirical calibration once
-    heuristic_metrics.jsonl collects actual token counts per message type.
     Governable via [Governance_registry.relay_tokens_per_*]. *)
 let tokens_per_user_msg () = Runtime_params.get Governance_registry.relay_tokens_per_user_msg
 let tokens_per_assistant_msg () = Runtime_params.get Governance_registry.relay_tokens_per_assistant_msg

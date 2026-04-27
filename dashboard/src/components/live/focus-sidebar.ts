@@ -4,6 +4,7 @@ import { html } from 'htm/preact'
 import { focusAgents } from '../../live-store'
 import { openAgentDetail, selectedAgentName } from '../agent-detail-state'
 import { TimeAgo } from '../common/time-ago'
+import { ringFocusClasses } from '../common/ring'
 
 function pressureClass(pressure: 'calm' | 'normal' | 'hot'): string {
   switch (pressure) {
@@ -46,7 +47,7 @@ function FocusSidebarContent({ compact = false }: FocusSidebarProps) {
             <button
               type="button"
               key=${agent.name}
-              class="focus-agent-card w-full rounded border border-[var(--color-border-divider)] bg-[var(--white-3)] p-3.5 transition-colors duration-200 text-left cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent ${selected === agent.name ? 'focus-agent-selected' : ''}"
+              class=${`focus-agent-card w-full rounded border border-[var(--color-border-divider)] bg-[var(--white-3)] p-3.5 transition-colors duration-200 text-left cursor-pointer ${ringFocusClasses()} ${selected === agent.name ? 'focus-agent-selected' : ''}`}
               onClick=${() => openAgentDetail(agent.name)}
             >
               <div class="focus-agent-header">

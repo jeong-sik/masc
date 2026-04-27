@@ -7,6 +7,7 @@ import { Card } from './common/card'
 import { TimeAgo } from './common/time-ago'
 import { Markdown } from './common/markdown'
 import { TextInput } from './common/input'
+import { ringFocusClasses } from './common/ring'
 import {
   agentTimeline,
   selectedAgent,
@@ -215,7 +216,7 @@ function BroadcastReport({ report, index }: { report: { ts: string; content: str
     <div class="border border-card-border/60 rounded bg-card/30 overflow-hidden hover:border-accent/20 transition-colors">
       <button
         type="button"
-        class="w-full flex items-center justify-between px-4 py-2.5 bg-[var(--white-3)] border-b border-card-border/40 cursor-pointer select-none text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+        class=${`w-full flex items-center justify-between px-4 py-2.5 bg-[var(--white-3)] border-b border-card-border/40 cursor-pointer select-none text-left ${ringFocusClasses()}`}
         onClick=${() => setExpanded(!expanded)}
         aria-expanded=${expanded}
       >

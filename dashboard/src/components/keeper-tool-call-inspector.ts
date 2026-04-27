@@ -14,6 +14,7 @@ import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
 import { parseToolBlobMarker } from '../lib/tool-blob-marker'
 import { CopyIdButton } from './common/copy-id-button'
 import { TextInput } from './common/input'
+import { ringFocusClasses } from './common/ring'
 
 // Delegated to lib/format-time (SSOT)
 const formatTimestamp = formatTimeHms
@@ -140,7 +141,7 @@ function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
     >
       <button
         type="button"
-        class="w-full flex items-center gap-2 px-3 py-2 text-xs cursor-pointer text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+        class=${`w-full flex items-center gap-2 px-3 py-2 text-xs cursor-pointer text-left ${ringFocusClasses()}`}
         aria-expanded=${expanded.value}
         onClick=${() => { expanded.value = !expanded.value }}
       >

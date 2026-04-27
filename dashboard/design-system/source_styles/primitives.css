@@ -162,6 +162,7 @@
 
 .btn.sm { height: 20px; padding: 0 8px; font-size: var(--fs-10); }
 .btn.xs { height: 18px; padding: 0 6px; font-size: var(--fs-9); letter-spacing: .06em; }
+.btn.lg { height: 28px; padding: 0 14px; font-size: var(--fs-12); }
 
 /* icon-only button — square */
 .btn.icon {

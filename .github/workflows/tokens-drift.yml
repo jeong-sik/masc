@@ -144,17 +144,23 @@ jobs:
       # not, the artifacts were hand-edited. That breaks the SSOT
       # invariant. Reject.
       #
-      # We use `git diff --name-only base...head` (three-dot) so the
-      # comparison is "what does this PR add" rather than "what has
-      # main moved past us on".
+      # We use `git diff --name-only base..head` (two-dot) — it only
+      # needs both commits present in the local clone, not a reachable
+      # merge base. Three-dot would be more precise ("what this PR
+      # adds since branching") but it failed in practice with
+      # `actions/checkout@v5`'s default `refs/pull/N/merge` ref where
+      # the literal base SHA was not always reachable.
       - name: Gate 3 - generated changed without source.ts
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
-          git fetch --no-tags --depth=1 origin "$BASE_SHA" || true
-          changed="$(git diff --name-only "$BASE_SHA"..."$HEAD_SHA")"
+          # Ensure both SHAs are present locally. fetch-depth: 0 on
+          # checkout usually suffices, but a targeted re-fetch shields
+          # against force-pushed heads and the pull/N/merge layout.
+          git fetch --no-tags origin "$BASE_SHA" "$HEAD_SHA" 2>/dev/null || true
+          changed="$(git diff --name-only "$BASE_SHA".."$HEAD_SHA")"
           echo "Changed files in PR:"
           printf '%s\n' "$changed" | sed 's/^/  /'
 

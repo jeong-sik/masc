@@ -11,6 +11,12 @@
   --color-text-muted: #a8bfdf;
   --color-accent: #47b8ff;
   --color-accent-soft: rgba(71, 184, 255, 0.16);
+  /* Brass accent — primary identity color for live / running fleet
+     states. Matches design-system v0.4 source_styles/tokens.css
+     --brass-1 (#d4a14a). The pre-existing --color-ff-gold (#c8a84e)
+     is a near-match used in legacy sites; new primitives should reach
+     for --color-accent-brass for SPEC alignment. */
+  --color-accent-brass: #d4a14a;
   --color-ok: #4ade80;
   --color-warn: #fbbf24;
   --color-bad: #ef4444;

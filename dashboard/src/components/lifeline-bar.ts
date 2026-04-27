@@ -64,7 +64,7 @@ export function Heartbeat({
   phase = 0,
   width = HEARTBEAT_DEFAULT_WIDTH,
   height = HEARTBEAT_DEFAULT_HEIGHT,
-  color = 'var(--color-accent-fg)',
+  color = 'var(--color-accent-brass)',
   withoutPulseDot = false,
 }: HeartbeatProps): VNode {
   const points = heartbeatPoints(phase, width, height)

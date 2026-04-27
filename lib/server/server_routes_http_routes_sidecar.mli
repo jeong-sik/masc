@@ -182,18 +182,10 @@ val desired_state_of_string : string -> desired_state option
 val observed_state_to_string : observed_state -> string
 val reconcile_result_to_string : reconcile_result -> string
 
-val attempt_record_json :
-  attempt_record ->
-  [> `Assoc of (string * [> `Int of int | `Null | `String of string ]) list ]
-val attempt_record_of_json :
-  [> `Assoc of (string * [> `Int of int | `Null | `String of string ]) list ] ->
-  attempt_record option
-val desired_record_json :
-  desired_record ->
-  [> `Assoc of (string * [> `Int of int | `String of string ]) list ]
-val desired_record_of_json :
-  [> `Assoc of (string * [> `Int of int | `String of string ]) list ] ->
-  desired_record option
+val attempt_record_json : attempt_record -> Yojson.Safe.t
+val attempt_record_of_json : Yojson.Safe.t -> attempt_record option
+val desired_record_json : desired_record -> Yojson.Safe.t
+val desired_record_of_json : Yojson.Safe.t -> desired_record option
 
 val sidecar_desired_path : base_path:string -> string -> string
 val sidecar_attempt_path : base_path:string -> string -> string
@@ -220,8 +212,7 @@ val write_desired_record :
 val write_attempt_record :
   base_path:string -> id:string -> attempt_record -> (unit, string) result
 
-val observed_state_of_status_json :
-  [> `Assoc of (string * [> `Bool of bool ]) list ] -> observed_state
+val observed_state_of_status_json : Yojson.Safe.t -> observed_state
 (** Project [status.json] into the reconciler's observed-state. *)
 
 val retry_backoff_seconds : unit -> float
@@ -257,14 +248,14 @@ val reconcile_preview :
 (** Dry-run preview suitable for a dashboard tooltip. *)
 
 val attempt_fields :
-  attempt_record option -> (string * [> `Null | `String of string ]) list
+  attempt_record option -> (string * Yojson.Safe.t) list
 (** Render attempt fields as JSON-friendly assoc list (possibly empty). *)
 
 val lifecycle_json :
   base_path:string ->
   string ->
-  [> `Assoc of (string * [> `Bool of bool ]) list ] ->
-  [> `Assoc of (string * [> `Int of int | `Null | `String of string ]) list ]
+  Yojson.Safe.t ->
+  Yojson.Safe.t
 (** Combined lifecycle JSON: status fields + desired/attempt projection. *)
 
 val append_assoc : 'a -> 'b -> ([> `Assoc of ('a * 'b) list ] as 'c) -> 'c
@@ -279,8 +270,7 @@ val respond_json :
   Httpun.Request.t ->
   Httpun.Reqd.t -> status:Httpun.Status.t -> Yojson.Safe.t -> unit
 val bad_request : Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
-val read_status_json :
-  base_path:string -> string -> [> `Assoc of (string * Yojson.Safe.t) list ]
+val read_status_json : base_path:string -> string -> Yojson.Safe.t
 
 val handle_status :
   Mcp_server.server_state ->

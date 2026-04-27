@@ -124,7 +124,13 @@ let credential_state (ctx : context) ~actual_name =
          (fun name ->
            is_initial_admin name
            || internal_keeper_credential_available name
-           || Option.is_some (Auth.load_credential ctx.config.base_path name))
+           (* PR-3b1: ask Auth for the canonical [keeper-<n>-agent]
+              form so a configured keeper's credential is never
+              resolved through the bare-name redirect stub. Non-keeper
+              names pass through unchanged. Spec: AuthIdentityFSM I1. *)
+           || Option.is_some
+                (Auth.load_credential ctx.config.base_path
+                   (Keeper_runtime.canonicalize_if_keeper ctx.config name)))
          credential_candidates
   in
   { credential_required; credential_available; credential_candidates }

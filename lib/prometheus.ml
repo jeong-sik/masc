@@ -710,6 +710,9 @@ let metric_silent_dashboard_actor_fallback =
 let metric_auth_strict_would_reject =
   "masc_auth_strict_would_reject_total"
 
+let metric_empty_tool_universe_observed =
+  "masc_empty_tool_universe_observed_total"
+
 (** Counter for Coord.join preflight outcomes (RFC P3-a, logging-only mode).
    Labels: outcome (ok | empty_input | persona_not_found | credential_missing
    | name_ambiguous | ephemeral_suffix_rejected). Cross-reference with
@@ -1102,6 +1105,16 @@ let init () =
      measure how many of those would-be-rejections happen under each \
      MASC_AUTH_STRICT mode before Phase B PR-2 promotes Strict to a typed \
      reject. Labels: mode (off | dry_run | strict), error_kind, agent."
+    Counter;
+  add metric_empty_tool_universe_observed
+    "Phase A F3 (2026-04-28): increments every time the keeper turn enters \
+     the [Keeper_tool_surface_empty] blocker branch in keeper_agent_run \
+     (i.e. tool_gate_requested && all_allowed = []). Pre-fix the blocker \
+     fired silently with no operator-visible counter; this surfaces the \
+     volume so Phase B PR-4 can promote it to a typed terminal state with \
+     LLM-visible feedback. Labels: keeper_name, turn_lane (text_only \
+     | tool_optional | tool_required | retry | tool_disabled), \
+     fallback_used (true | false)."
     Counter;
   add metric_coord_join_normalize_outcome
     "Total Coord.join calls preflighted by Keeper_identity.normalize_all_names \

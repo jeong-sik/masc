@@ -1235,6 +1235,21 @@ let run_turn
             && initial_tool_surface.all_allowed = []
     then (
       receipt_tool_contract_result_ref := "no_tool_capable_provider";
+      (* Phase A F3 (2026-04-28): surface the empty-tool-universe
+         blocker volume so operators can attribute the silent
+         "tools_used_count=0" pattern (janitor / verifier connect
+         turns ≤ 5) before Phase B PR-4 promotes this to a typed
+         terminal state with LLM-visible feedback. Behavior is
+         unchanged: the blocker is still set below. *)
+      Prometheus.inc_counter
+        Prometheus.metric_empty_tool_universe_observed
+        ~labels:
+          [ ("keeper_name", meta.name);
+            ("turn_lane", initial_tool_surface.lane);
+            ( "fallback_used",
+              string_of_bool initial_tool_surface.tool_surface_fallback_used );
+          ]
+        ();
       initial_tool_surface_blocker_ref :=
         Some
           (sdk_error_of_keeper_internal_error

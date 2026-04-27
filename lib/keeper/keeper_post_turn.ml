@@ -183,7 +183,29 @@ let apply_post_turn_lifecycle
       let effective_compaction_applied, compaction_failure_reason, effective_ctx, checkpoint =
         if not compaction_decided then (false, None, ctx, Some cp)
         else
-          let () = on_compaction_started () in
+          (* PR-J: lifecycle callbacks fire dispatch_keeper_phase_event,
+             which can raise on transient registry contention or stale
+             entry mismatches. The naked invocation here used to abort
+             the whole post-turn lifecycle on any callback exception
+             without surfacing the cause; failures now increment the
+             [callback=on_compaction_started] counter and log a warn,
+             but the lifecycle continues so a downstream save error
+             still wins the failure_reason field. See
+             docs/architecture/actor-mailbox-pattern.md for the
+             reasoning behind the keep-going-on-callback-failure
+             policy. *)
+          let () =
+            try on_compaction_started ()
+            with
+            | Eio.Cancel.Cancelled _ as e -> raise e
+            | exn ->
+                Prometheus.inc_counter
+                  Prometheus.metric_keeper_lifecycle_callback_failures
+                  ~labels:[("callback", "on_compaction_started")] ();
+                Log.Keeper.warn
+                  "keeper:%s post-turn on_compaction_started raised: %s"
+                  base_meta.name (Printexc.to_string exn)
+          in
           let session =
             create_session ~session_id:(Keeper_id.Trace_id.to_string base_meta.runtime.trace_id) ~base_dir
           in

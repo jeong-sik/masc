@@ -105,6 +105,7 @@
         test_decision_pipeline_observer
         test_keeper_composite_observer
         test_keeper_fsm_edges
+        test_keeper_callback_hardening
         test_keeper_behavioral_regime
         test_keeper_toml
         test_keeper_runtime_toml
@@ -262,6 +263,7 @@
           test_decision_pipeline_observer
           test_keeper_composite_observer
           test_keeper_fsm_edges
+          test_keeper_callback_hardening
           test_keeper_behavioral_regime
           test_keeper_toml
           test_keeper_runtime_toml

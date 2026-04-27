@@ -49,6 +49,7 @@ import { requestConfirm } from './common/confirm-dialog'
 import { showToast } from './common/toast'
 import { invalidateDashboardCache, refreshDashboard } from '../store'
 import { purgeAgent } from '../api/actions'
+import { ringFocusClasses } from './common/ring'
 
 // Re-export public API for external consumers
 export { selectedAgentName, openAgentDetail, closeAgentDetail } from './agent-detail-state'
@@ -283,7 +284,7 @@ export function AgentDetailOverlay() {
                       ? html`<span class="flex items-center gap-1.5">연결된 키퍼:
                           <button
                             type="button"
-                            class="text-text-strong font-semibold hover:text-accent underline underline-offset-2 decoration-dotted transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 rounded"
+                            class=${`text-text-strong font-semibold hover:text-accent underline underline-offset-2 decoration-dotted transition-colors ${ringFocusClasses({ tone: 'accent-soft', width: 2 })} rounded`}
                             onClick=${() => { closeAgentDetail(); openKeeperDetail(keeper) }}
                             title="키퍼 상세 페이지 열기"
                             aria-label="${keeper.name} 키퍼 상세 보기"
@@ -320,7 +321,7 @@ export function AgentDetailOverlay() {
             <button
               ref=${closeButtonRef}
               type="button"
-              class="px-4 py-2 text-sm font-semibold rounded border border-transparent bg-[var(--white-10)] text-text-strong hover:bg-[var(--white-20)] transition-colors duration-200 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-bg-surface)]"
+              class=${`px-4 py-2 text-sm font-semibold rounded border border-transparent bg-[var(--white-10)] text-text-strong hover:bg-[var(--white-20)] transition-colors duration-200 shadow-sm ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'surface' })}`}
               onClick=${closeAgentDetail}
             >
               닫기

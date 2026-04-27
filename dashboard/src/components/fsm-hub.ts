@@ -36,6 +36,7 @@ import {
 import { OperationalMeaningPanel, HeroPhase, TurnPipelineStrip, CompositeGraphPanel } from './fsm-hub-pipeline-panels'
 import { DwellHistogramPanel, SwimlaneTimeline, TopTransitionsPanel, TransitionTrail } from './fsm-hub-timeline-panels'
 import { MeasurementCard, InvariantsPanel } from './fsm-hub-health-panels'
+import { ringFocusClasses } from './common/ring'
 
 // ── Backward-compatible re-exports ─────────────────────
 // External consumers (agents-unified.ts, fsm-hub.test.ts)
@@ -806,7 +807,7 @@ function StatusBar({
                 role="tab"
                 aria-selected=${active}
                 tabindex=${active ? 0 : -1}
-                class=${`rounded-sm border px-2.5 py-0.5 text-3xs font-mono transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-fg)] focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--color-bg-page)] ${cls}`}
+                class=${`rounded-sm border px-2.5 py-0.5 text-3xs font-mono transition-colors cursor-pointer ${ringFocusClasses({ tone: 'accent-fg', width: 2, offset: 1, offsetSurface: 'page' })} ${cls}`}
                 onClick=${() => onSelect(name)}
                 title=${i < 9 ? `${name} — 단축키 ${i + 1}` : name}
                 onKeyDown=${(e: KeyboardEvent) => {

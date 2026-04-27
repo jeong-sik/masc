@@ -10,8 +10,9 @@
 // (Pattern mirrors input.ts / button.ts / checkbox.ts / number-input.ts.)
 
 import { html } from 'htm/preact'
+import { ringFocusClasses } from './ring'
 
-const SELECT_BASE = 'w-full rounded bg-[var(--white-4)] border border-[var(--color-border-default)] text-[var(--color-fg-primary)] transition-colors hover:bg-[var(--white-6)] focus-visible:bg-[var(--color-bg-page)] focus-visible:outline-none focus-visible:border-[rgba(71,184,255,0.6)] focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-bg-surface)] appearance-none cursor-pointer'
+const SELECT_BASE = `w-full rounded bg-[var(--white-4)] border border-[var(--color-border-default)] text-[var(--color-fg-primary)] transition-colors hover:bg-[var(--white-6)] focus-visible:bg-[var(--color-bg-page)] focus-visible:border-[rgba(71,184,255,0.6)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'surface' })} appearance-none cursor-pointer`
 
 interface SelectOption { value: string; label: string }
 

@@ -6,6 +6,7 @@ import { useEffect } from 'preact/hooks'
 import { lazy, Suspense } from 'preact/compat'
 import { signal } from '@preact/signals'
 import { persistentSignal } from './lib/persistent-signal'
+import { ringFocusClasses } from './components/common/ring'
 import { route, initRouter } from './router'
 import {
   connectSSE,
@@ -180,7 +181,7 @@ export function App() {
           <div class="min-w-0 flex items-center gap-3">
             <div class="flex shrink-0 items-center gap-2">
               <button type="button"
-                class="hidden max-[768px]:flex size-9 items-center justify-center rounded border border-[var(--white-10)] bg-[var(--white-4)] text-[var(--text-body)] cursor-pointer transition-colors hover:bg-[rgba(255,255,255,0.1)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-bg-page)]"
+                class=${`hidden max-[768px]:flex size-9 items-center justify-center rounded border border-[var(--white-10)] bg-[var(--white-4)] text-[var(--text-body)] cursor-pointer transition-colors hover:bg-[rgba(255,255,255,0.1)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'page' })}`}
                 aria-expanded=${mobileMenuOpen.value}
                 aria-label=${mobileMenuOpen.value ? '탐색 메뉴 닫기' : '탐색 메뉴 열기'}
                 aria-controls="dashboard-side-rail"

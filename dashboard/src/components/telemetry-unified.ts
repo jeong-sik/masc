@@ -493,7 +493,7 @@ function EntryRow({ entry }: { entry: TelemetryEntry }) {
 
   return html`
     <div
-      class="border-b border-[var(--color-border-default)] hover:bg-[var(--bg-panel-hover)] transition-colors"
+      class="border-b border-[var(--color-border-default)] hover:bg-[var(--color-bg-hover)] transition-colors"
       style="content-visibility:auto;contain-intrinsic-size:36px"
     >
       <div class="flex items-center gap-1">
@@ -567,7 +567,7 @@ function GroupRow({ item }: { item: Extract<TelemetryDisplayItem, { kind: 'group
 
   return html`
     <div
-      class="border-b border-[var(--color-border-default)] bg-[rgba(255,255,255,0.015)] hover:bg-[var(--bg-panel-hover)] transition-colors"
+      class="border-b border-[var(--color-border-default)] bg-[rgba(255,255,255,0.015)] hover:bg-[var(--color-bg-hover)] transition-colors"
       style="content-visibility:auto;contain-intrinsic-size:36px"
     >
       <div class="flex items-center gap-1">
@@ -916,7 +916,7 @@ export function TelemetryUnified() {
           <option value="500">500</option>
         </select>
         <button
-          class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-3 py-1 text-xs text-[var(--text-strong)] hover:bg-[var(--bg-panel-hover)]"
+          class="rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-3 py-1 text-xs text-[var(--text-strong)] hover:bg-[var(--color-bg-hover)]"
           onClick=${() => void load()}
         >
           Refresh

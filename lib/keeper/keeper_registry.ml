@@ -224,7 +224,16 @@ let update_entry ~base_path name f =
   let rec loop () =
     let current = Atomic.get registry in
     match StringMap.find_opt key current with
-    | None -> ()
+    | None ->
+        (* P1 silent-failure fix: previously this returned () silently,
+           hiding the case where a caller (e.g. a turn-state setter)
+           raced with keeper deregistration and the update was lost.
+           29 callers funnel through here; logging once at the helper
+           makes every such race observable in operator logs without
+           changing any caller's signature. *)
+        Log.Keeper.warn
+          "registry: update_entry name=%s base_path=%s: entry not found, update dropped"
+          name base_path
     | Some entry ->
         let updated = StringMap.add key (f entry) current in
         if not (Atomic.compare_and_set registry current updated) then loop ()
@@ -414,10 +423,22 @@ let broadcast_composite_changed ~name ~ts_unix =
 
 let completed_turn_outcome_of_observation
     (obs : turn_observation) : Keeper_transition_audit.completed_turn_outcome =
-  match obs.decision_stage, obs.cascade_state with
-  | Decision_gate_rejected, _ -> Keeper_transition_audit.Turn_gate_rejected
-  | _, Cascade_done -> Keeper_transition_audit.Turn_substantive
-  | _ -> Keeper_transition_audit.Turn_failed
+  (* P1 silent-failure fix: the previous wildcard `| _ -> Turn_failed`
+     meant that adding a new variant to either ADT (decision_stage or
+     cascade_state) would silently fall through to Turn_failed without
+     a compile error.  Spelling out every variant lets the OCaml
+     exhaustiveness checker catch missing cases at build time. *)
+  match obs.decision_stage with
+  | Decision_gate_rejected -> Keeper_transition_audit.Turn_gate_rejected
+  | Decision_undecided
+  | Decision_guard_ok
+  | Decision_tool_policy_selected ->
+      (match obs.cascade_state with
+       | Cascade_done -> Keeper_transition_audit.Turn_substantive
+       | Cascade_idle
+       | Cascade_selecting
+       | Cascade_trying
+       | Cascade_exhausted -> Keeper_transition_audit.Turn_failed)
 
 let update_current_turn e f =
   let current_turn_observation =

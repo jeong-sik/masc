@@ -231,23 +231,26 @@ export async function streamKeeperMessage(
 export async function fetchKeeperChatHistory(
   name: string,
 ): Promise<KeeperChatHistoryMessage[]> {
-  try {
-    const resp = await fetch(
-      `/api/v1/keepers/${encodeURIComponent(name)}/chat/history`,
-      { headers: jsonHeaders() },
-    )
-    if (!resp.ok) return []
-    const data: unknown = await resp.json()
-    if (!Array.isArray(data)) return []
-    // Per-item safeParse: drop invalid entries silently to match the prior
-    // hand-rolled type guard. Individual failures are non-fatal; operators
-    // keep seeing a clean transcript during backend drift windows.
-    return data
-      .map(safeParseKeeperChatHistoryMessage)
-      .filter((m): m is KeeperChatHistoryMessage => m !== null)
-  } catch {
-    return []
+  // P1 silent-failure fix: previously HTTP non-2xx and network/parse
+  // errors both mapped to `return []`, leaving the caller unable to
+  // distinguish "no chat history yet" from "fetch failed."  Now both
+  // throw, and the caller (keeper-chat-panel.ts) is responsible for
+  // surfacing via chatError.value.  Per-item safeParse drift remains
+  // tolerant — only network / HTTP / shape errors throw.
+  const resp = await fetch(
+    `/api/v1/keepers/${encodeURIComponent(name)}/chat/history`,
+    { headers: jsonHeaders() },
+  )
+  if (!resp.ok) {
+    throw new Error(`fetchKeeperChatHistory: HTTP ${resp.status} ${resp.statusText}`)
   }
+  const data: unknown = await resp.json()
+  if (!Array.isArray(data)) {
+    throw new Error('fetchKeeperChatHistory: response is not an array')
+  }
+  return data
+    .map(safeParseKeeperChatHistoryMessage)
+    .filter((m): m is KeeperChatHistoryMessage => m !== null)
 }
 
 // --- Keeper lifecycle (boot / shutdown) ---

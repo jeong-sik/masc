@@ -15,6 +15,7 @@
 
 import { html } from 'htm/preact'
 import type { VNode } from 'preact'
+import { Bar, type BarKind } from './bar'
 
 export type KpiCellVariant = 'standard' | 'compact' | 'stacked'
 
@@ -148,27 +149,15 @@ export function KpiCell(props: KpiCellProps): VNode {
     lineHeight: 1.1,
   }
 
+  // Progress bar swapped to atomic <Bar> primitive (#bar atom). Kind
+  // mapping: KpiCellKind ('ok' | 'warn' | 'err') is a strict subset of
+  // BarKind so it forwards directly; absent kind → 'default' (brass-2
+  // accent fill, matches SPEC `.bar > .fill` default rule).
+  const barKind: BarKind = props.kind ?? 'default'
   const progressRow = props.progress != null
     ? html`
-        <div
-          aria-hidden="true"
-          style=${{
-            width: '100%',
-            height: '2px',
-            background: 'var(--color-border-default)',
-            borderRadius: '1px',
-            overflow: 'hidden',
-            marginTop: '2px',
-          }}
-        >
-          <div
-            style=${{
-              height: '100%',
-              width: `${Math.min(Math.max(props.progress, 0), 100)}%`,
-              background: valueColor,
-              transition: 'width 500ms',
-            }}
-          ></div>
+        <div style=${{ marginTop: '2px' }}>
+          <${Bar} value=${props.progress} kind=${barKind} />
         </div>
       `
     : null

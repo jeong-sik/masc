@@ -38,7 +38,12 @@ export interface CascadeCandidate {
 
 export interface CascadeProfile {
   name: string
-  source: 'named' | 'default_fallback' | 'hardcoded_defaults'
+  /** [load_failed] is emitted when the cascade.toml/json file failed
+   *  to load (parse / IO / unknown field).  Distinguishes a fault
+   *  from operator-intended absence of a profile, so the UI can render
+   *  a `bad`-tone badge instead of the `warn` chip used for the
+   *  benign hardcoded_defaults path. */
+  source: 'named' | 'default_fallback' | 'hardcoded_defaults' | 'load_failed'
   keeper_assignable: boolean
   candidates: CascadeCandidate[]
 }

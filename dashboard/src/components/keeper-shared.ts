@@ -309,6 +309,7 @@ export function KeeperConversationPanel({
               type="button"
               class="rounded border border-[var(--color-border-default)] bg-[var(--white-3)] px-3 py-1.5 text-2xs text-[var(--color-fg-muted)] transition-colors hover:bg-[var(--white-6)] hover:text-[var(--color-fg-primary)]"
               onClick=${toggleMetadata}
+              aria-expanded=${showMetadata}
             >
               ${showMetadata ? '메타데이터 숨김' : '메타데이터 표시'}
             </button>
@@ -316,6 +317,7 @@ export function KeeperConversationPanel({
               type="button"
               class="rounded border border-[var(--color-border-default)] bg-[var(--white-3)] px-3 py-1.5 text-2xs text-[var(--color-fg-muted)] transition-colors hover:bg-[var(--white-6)] hover:text-[var(--color-fg-primary)] ${showInternal ? 'border-[rgba(167,139,250,0.3)] text-[var(--purple)]' : ''}"
               onClick=${toggleInternal}
+              aria-expanded=${showInternal}
             >
               ${showInternal ? '내부 메시지 숨김' : '내부 메시지 표시'}
             </button>

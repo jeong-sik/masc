@@ -48,12 +48,12 @@ function FreshnessLine({ data }: { data: TelemetryFreshnessMetadata }) {
   return html`
     <div class="text-3xs text-[var(--color-fg-disabled)]">
       <span class="font-mono">${data.source ?? 'trajectory_tool_call'}</span>
-      <span class="mx-1">·</span>
+      <span class="mx-1" aria-hidden="true">·</span>
       <span class="font-mono ${sourceHealthClass(data.health)}">${data.health ?? 'unknown'}</span>
-      <span class="mx-1">·</span>
+      <span class="mx-1" aria-hidden="true">·</span>
       <span>${freshnessText(data)}</span>
       ${typeof data.entry_count === 'number' ? html`
-        <span class="mx-1">·</span>
+        <span class="mx-1" aria-hidden="true">·</span>
         <span>${data.entry_count.toLocaleString()} rows</span>
       ` : null}
     </div>
@@ -238,7 +238,7 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
   return html`
     <div class="p-5 rounded border border-card-border bg-card/40 backdrop-blur-sm shadow-sm transition-[border-color,box-shadow] duration-200 hover:border-accent/30 hover:shadow-sm">
       <div class="text-2xs font-semibold uppercase tracking-widest text-text-muted mb-4 flex items-center gap-2">
-        <span class="w-1.5 h-1.5 rounded-full bg-accent/50"></span>
+        <span class="w-1.5 h-1.5 rounded-full bg-accent/50" aria-hidden="true"></span>
         도구 텔레메트리
       </div>
       <div class="flex flex-col gap-4">

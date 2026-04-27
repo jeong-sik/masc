@@ -342,7 +342,7 @@ function perProviderTimeoutLabel(execution: KeeperConfig['execution']): string {
 function SectionHeader({ title }: { title: string }) {
   return html`
     <div class="text-2xs font-bold uppercase tracking-widest text-accent mt-6 mb-3 pb-1.5 border-b border-accent/20 flex items-center gap-2">
-      <span class="w-1.5 h-1.5 rounded-full bg-accent/50 shadow-[0_0_8px_rgba(71,184,255,0.6)]"></span>
+      <span class="w-1.5 h-1.5 rounded-full bg-accent/50 shadow-[0_0_8px_rgba(71,184,255,0.6)]" aria-hidden="true"></span>
       ${title}
     </div>
   `
@@ -521,6 +521,7 @@ function EditTextarea({ field, label, rows = 3 }: { field: keyof EditDraft; labe
     <div class="mt-3">
       <div class="text-2xs font-semibold uppercase tracking-wider text-text-muted mb-1.5">${label}</div>
       <textarea
+        aria-label=${label}
         class="${fieldStyle} resize-y custom-scrollbar"
         rows=${rows}
         value=${val}
@@ -939,7 +940,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
             <span class="text-xs text-[var(--text-body)]">allowed_paths</span>
             <span class="text-3xs text-[var(--text-muted)]">한 줄에 하나씩. 명시 경로만 허용됩니다.</span>
           </div>
-          <textarea class="w-full text-xs font-mono bg-[var(--white-6)] border border-[var(--card-border)] rounded px-2 py-1.5 text-[var(--text-body)] resize-y"
+          <textarea aria-label="allowed_paths" class="w-full text-xs font-mono bg-[var(--white-6)] border border-[var(--card-border)] rounded px-2 py-1.5 text-[var(--text-body)] resize-y"
             rows=${3}
             value=${rd.allowed_paths_text}
             placeholder=".masc/keepers/<name>/"
@@ -1157,7 +1158,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
             ? html`<div class="py-4 text-center text-2xs text-[var(--text-dim)]">필터 결과 없음 (${allEntries.length} slots)</div>`
             : visibleEntries.map(([name, slot]) => html`
                 <div class="flex items-start gap-2 py-2 px-3 rounded border border-card-border/50 bg-card/20 mb-1.5">
-                  <span class="mt-1 w-2 h-2 rounded-full shrink-0 ${slot.active ? 'bg-[var(--ok)] shadow-[0_0_6px_var(--ok-48)]' : 'bg-[var(--text-dim)]'}"></span>
+                  <span class="mt-1 w-2 h-2 rounded-full shrink-0 ${slot.active ? 'bg-[var(--ok)] shadow-[0_0_6px_var(--ok-48)]' : 'bg-[var(--text-dim)]'}" aria-hidden="true"></span>
                   <div class="flex-1 min-w-0">
                     <div class="flex justify-between">
                       <span class="text-xs font-semibold text-text-strong">${name}</span>

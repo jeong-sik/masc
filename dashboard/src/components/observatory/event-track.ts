@@ -55,6 +55,8 @@ export function EventTrack({ events, windowStart, windowEnd }: Props) {
       <div
         ref=${trackRef}
         class="relative flex-1 h-8 rounded bg-bg-1/40 border border-card-border/50 cursor-crosshair"
+        role="group"
+        aria-label="이벤트 타임라인 마커"
         onMouseMove=${(e: MouseEvent) => {
           if (trackRef.current) setCursorFromEvent(e, trackRef.current, windowStart, windowEnd)
         }}
@@ -81,7 +83,7 @@ export function EventTrack({ events, windowStart, windowEnd }: Props) {
                     selectEntity({ kind: 'event', entry, ts, bucketCount: count })
                   }}
                 >${count > 1 ? html`
-                  <span class="absolute -top-4 left-1/2 -translate-x-1/2 rounded bg-bg-0/90 px-1 py-0.5 text-4xs font-mono text-text-dim">
+                  <span class="absolute -top-4 left-1/2 -translate-x-1/2 rounded bg-bg-0/90 px-1 py-0.5 text-3xs font-mono text-text-dim" aria-hidden="true">
                     ${count}
                   </span>
                 ` : null}</span>

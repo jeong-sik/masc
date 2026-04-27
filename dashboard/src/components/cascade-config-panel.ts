@@ -1121,6 +1121,7 @@ function CascadeRawConfigEditor({
 
         <form class="flex flex-col gap-3" onSubmit=${handleSave}>
           <textarea
+            aria-label="설정 편집기"
             class="h-96 w-full rounded border border-[var(--card-border)] bg-[var(--color-bg-page)] px-3 py-2 font-mono text-xs text-[var(--text-strong)]"
             spellcheck="false"
             readonly=${!sourceEditable}
@@ -1191,6 +1192,7 @@ function CascadeRawConfigEditor({
                 ${raw?.config_path ?? 'unresolved'}
               </div>
               <textarea
+                aria-label="설정 미리보기"
                 class="h-72 w-full rounded border border-[var(--card-border)] bg-[var(--color-bg-page)] px-3 py-2 font-mono text-xs text-[var(--text-strong)]"
                 spellcheck="false"
                 readonly

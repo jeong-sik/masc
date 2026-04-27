@@ -136,6 +136,7 @@ function KanbanCard({ task }: { task: Task }) {
               type="button"
               class="w-fit rounded border border-card-border/70 bg-white/4 px-2 py-1 text-2xs text-text-muted transition-colors hover:text-text-strong"
               onClick=${() => toggleTaskExpand(task.id)}
+              aria-expanded=${isExpanded}
             >
               ${isExpanded ? '설명 접기' : '설명 더 보기'}
             </button>

@@ -138,14 +138,14 @@ export function OperationalMeaningPanel({
               <div class="rounded border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2">
                 <div class="flex items-center justify-between gap-2">
                   <span class="text-3xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">${lane.field}</span>
-                  <span class=${`rounded-sm border px-1.5 py-0.5 text-4xs font-mono ${INSIGHT_BADGE_CLS[lane.tone]}`}>
+                  <span class=${`rounded-sm border px-1.5 py-0.5 text-3xs font-mono ${INSIGHT_BADGE_CLS[lane.tone]}`}>
                     ${fmtDuration(lane.observedForSec)}
                   </span>
                 </div>
                 <div class="mt-1 font-mono text-sm font-semibold text-[var(--color-fg-secondary)]">${lane.value}</div>
                 <div class="mt-0.5 text-3xs text-[var(--color-fg-disabled)]">${lane.label}</div>
                 <div class="mt-1.5 text-3xs leading-relaxed text-[var(--color-fg-primary)]">${lane.meaning}</div>
-                <div class="mt-1 text-4xs font-mono text-[var(--color-fg-disabled)]">
+                <div class="mt-1 text-3xs font-mono text-[var(--color-fg-disabled)]">
                   ${lane.transitionCount} observed edge${lane.transitionCount === 1 ? '' : 's'}
                 </div>
               </div>
@@ -198,7 +198,7 @@ function PhaseSparkline({
 
   return html`
     <div class="mt-2 flex items-center gap-2">
-      <span class="text-4xs text-[var(--color-fg-disabled)]">phase</span>
+      <span class="text-3xs text-[var(--color-fg-disabled)]">phase</span>
       <svg
         width=${W} height=${H}
         viewBox=${`0 0 ${W} ${H}`}
@@ -317,7 +317,7 @@ export function HeroPhase({
     >
       <div class="flex items-baseline justify-between">
         <div>
-          <div class="text-3xs font-semibold tracking-[0.06em] text-[var(--color-fg-muted)]" id="ksm-label">Keeper 생명주기 <span class="font-mono text-4xs text-[var(--color-fg-disabled)]">KSM</span></div>
+          <div class="text-3xs font-semibold tracking-[0.06em] text-[var(--color-fg-muted)]" id="ksm-label">Keeper 생명주기 <span class="font-mono text-3xs text-[var(--color-fg-disabled)]">KSM</span></div>
           <div class=${`mt-1 font-mono text-[32px] font-bold tracking-tight ${color}`} aria-labelledby="ksm-label">
             ${displayState(snapshot.phase)}
           </div>
@@ -418,7 +418,7 @@ export function PipelineStep({
         <div class=${`mt-0.5 font-mono text-sm font-semibold ${isActive ? 'text-[var(--color-fg-secondary)]' : 'text-[var(--color-fg-muted)]'} ${flash ? 'animate-pulse' : ''}`}>
           ${displayState(value)}
         </div>
-        <div class="text-4xs font-mono text-[var(--color-fg-disabled)] mt-0.5">${shortLabel} · ${value}</div>
+        <div class="text-3xs font-mono text-[var(--color-fg-disabled)] mt-0.5">${shortLabel} · ${value}</div>
       </div>
       ${!isLast ? html`<div class=${`hidden md:block w-5 shrink-0 ${connectorCls}`}></div>` : null}
     </div>

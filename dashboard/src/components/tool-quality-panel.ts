@@ -246,13 +246,13 @@ function TrendSparkline({ points }: { points: HourlyPoint[] }) {
         <span class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)]">성공률 추이</span>
         <span class="text-xs font-mono" style="color:${lineColor}">${lastRate.toFixed(1)}%</span>
       </div>
-      <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" role="img" style="background:var(--bg-deepest);">
+      <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" role="img" aria-label="성공률 추이 차트" style="background:var(--bg-deepest);">
         ${bars.map(b => html`
           <rect x="${b.x.toFixed(1)}" y="${b.y.toFixed(1)}" width="${b.w.toFixed(1)}" height="${b.h.toFixed(1)}" fill="${b.failures > 0 ? 'rgba(239,68,68,0.3)' : 'var(--ok-soft)'}" rx="0.5" />
         `)}
         <polyline points="${rateLine}" fill="none" stroke="${lineColor}" stroke-width="1.5"/>
       </svg>
-      <div class="flex justify-between mt-1 text-4xs text-[var(--color-fg-disabled)] font-mono">
+      <div class="flex justify-between mt-1 text-3xs text-[var(--color-fg-disabled)] font-mono">
         <span>${points[0]?.hour?.slice(5) ?? ''}</span>
         <span>${points[points.length - 1]?.hour?.slice(5) ?? ''}</span>
       </div>
@@ -336,11 +336,11 @@ export function ToolQualityPanel() {
           </div>
           <div class="mt-0.5 text-3xs text-[var(--color-fg-disabled)]">
             <span class="font-mono">${d.source ?? 'tool_call_io'}</span>
-            <span class="mx-1">·</span>
+            <span class="mx-1" aria-hidden="true">·</span>
             <span class="font-mono ${sourceHealthClass(d.health)}">${d.health ?? 'unknown'}</span>
-            <span class="mx-1">·</span>
+            <span class="mx-1" aria-hidden="true">·</span>
             <span>${freshnessText(d)}</span>
-            <span class="mx-1">·</span>
+            <span class="mx-1" aria-hidden="true">·</span>
             <span>${(d.entry_count ?? d.total).toLocaleString()} rows</span>
           </div>
         </div>

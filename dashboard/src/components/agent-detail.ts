@@ -289,7 +289,7 @@ export function AgentDetailOverlay() {
                             aria-label="${keeper.name} 키퍼 상세 보기"
                           >${keeper.name}</button>
                           <${KeeperPhaseBadge} phase=${keeper.phase} compact=${true} />
-                          ${keeperIdentity ? html`<span class="text-text-dim text-xs">· ${keeperIdentity}</span>` : ''}
+                          ${keeperIdentity ? html`<span class="text-text-dim text-xs"><span aria-hidden="true">· </span>${keeperIdentity}</span>` : ''}
                         </span>`
                       : null}
                     ${missionBrief?.related_session_id ? html`<span class="flex items-center gap-1.5">세션: <strong class="font-mono text-text-strong text-xs bg-white/5 px-1.5 rounded">${missionBrief.related_session_id}</strong></span>` : null}

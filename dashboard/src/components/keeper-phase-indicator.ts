@@ -117,7 +117,7 @@ export function KeeperPhaseAndStage({
     <div class="flex items-center gap-2">
       <${KeeperPhaseBadge} phase=${phase} />
       ${dwellText ? html`
-        <span class="text-3xs text-[var(--color-fg-muted)] font-mono tracking-tight" title="현재 phase에 머문 시간">· ${dwellText}</span>
+        <span class="text-3xs text-[var(--color-fg-muted)] font-mono tracking-tight" title="현재 phase에 머문 시간"><span aria-hidden="true">· </span>${dwellText}</span>
       ` : null}
       ${stageLabel ? html`
         <span class="text-3xs text-[var(--color-fg-disabled)] font-mono tracking-tight opacity-80">${stageLabel}</span>

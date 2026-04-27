@@ -538,14 +538,14 @@ describe('flagTooltip', () => {
   it('returns the off-description when the flag is inactive', () => {
     const tip = flagTooltip('reflect', false)
     expect(tip).toContain('reflect (inactive)')
-    expect(tip).toMatch(/예약된 reflection 없음/)
+    expect(tip).toContain('예약된 reflection 없음')
   })
 
   it('swaps description for guardrail based on state', () => {
     const on = flagTooltip('guardrail', true)
     const off = flagTooltip('guardrail', false)
-    expect(on).toMatch(/발동됨/)
-    expect(off).toMatch(/활성 guardrail 없음/)
+    expect(on).toContain('발동됨')
+    expect(off).toContain('활성 guardrail 없음')
   })
 
   it('falls back to a generic tooltip for unknown labels', () => {

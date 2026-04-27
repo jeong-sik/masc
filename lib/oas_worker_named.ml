@@ -1154,6 +1154,26 @@ let sdk_error_is_hard_quota (err : Oas.Error.sdk_error) : bool =
        false)
   | _ -> false
 
+(* When the SDK surfaces a transient HTTP 429 that is *not* a hard-quota
+   in disguise, expose the [retry_after] hint that [Llm_provider.Retry]
+   already extracted from the response body.  Used by the cascade error
+   classifier to feed [Cascade_health_tracker.record_soft_rate_limited]
+   so a single 429 trips an immediate short cooldown instead of waiting
+   for [cooldown_threshold] consecutive [record_failure] events.
+
+   Returns [None] when the error is not a non-quota [RateLimited], or
+   when [retry_after] is absent.  A [Some 0.] / [Some <0.] is preserved
+   here and clamped/defaulted at the tracker boundary so the caller's
+   semantics ("the 429 still happened, so cool down at least the
+   default") are maintained centrally. *)
+let sdk_error_soft_rate_limited (err : Oas.Error.sdk_error)
+  : float option option =
+  match err with
+  | Oas.Error.Api (Llm_provider.Retry.RateLimited { retry_after; _ } as api_err)
+    when not (Llm_provider.Retry.is_hard_quota api_err) ->
+    Some retry_after
+  | _ -> None
+
 let sdk_error_is_max_turns_exceeded (err : Oas.Error.sdk_error) : bool =
   match classify_masc_internal_error err with
   | Some
@@ -1704,7 +1724,21 @@ let run_named
           Cascade_health_tracker.(
             record_terminal_failure global ~provider_key:provider_cfg.model_id
               ~error_kind:"resumable_cli_session" ~error_reason:err_str ())
-        else (
+        else (match sdk_error_soft_rate_limited sdk_err with
+        | Some retry_after_opt ->
+          (* Transient 429 (not a hard quota in disguise).  Trip an
+             immediate short cooldown so the next selection tick falls
+             over to a different provider; honor [retry_after] when the
+             upstream parsed one out of the response body, otherwise let
+             the tracker apply [soft_rate_limit_cooldown_sec] (10s default).
+             Caller is responsible for upgrading sustained 429 bursts to
+             hard_quota; the tracker's max-clamp guards against a
+             misclassified hard quota silently producing a long blackout. *)
+          Cascade_health_tracker.(
+            record_soft_rate_limited global ~provider_key:provider_cfg.model_id
+              ?retry_after_s:retry_after_opt
+              ~error_kind:"http_429" ~error_reason:err_str ())
+        | None -> (
           (* Classify the err_str into named buckets so Cascade_health_tracker
              fingerprint groups separate codex internal-state corruption
              (transient_codex_rollout — auto-recovers on next call) from
@@ -1740,7 +1774,7 @@ let run_named
           in
           Cascade_health_tracker.(
             record_failure global ~provider_key:provider_cfg.model_id
-              ~error_kind ~error_reason:err_str ()));
+              ~error_kind ~error_reason:err_str ())));
         (* FSM: Call_err → decide *)
         (match sdk_error_to_cascade_outcome sdk_err with
          | Some outcome ->

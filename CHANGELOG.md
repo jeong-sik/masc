@@ -1,6 +1,37 @@
 # Changelog
 
 
+## [0.18.7] - 2026-04-27 — patch: keeper contract fix (require_tool_use stay_silent) + dashboard KpiStrip canonical sweep + observability + auth fail-closed
+
+Aggregate of 17 commits since v0.18.6 (11 feat / 4 fix / 1 test / 1 chore). No breaking API changes.
+
+Operational keeper-contract correctness release: `require_tool_use` contract now accepts `keeper_stay_silent` as a satisfied turn (decisive no-op), eliminating a contract-vs-prompt mismatch that rejected ~40% of post-cascade-fix turns. Plus dashboard StatCard retirement (3-sweep migration into KpiStrip) and observability surface emissions for substrate visibility.
+
+### Added (observability + structural)
+- `#11125` observability — emit `[substrate:tool_surface]` log + SSE on TurnReady (per-turn tool surface visibility)
+- `#11133` observability — emit `[substrate:system_prompt]` per keeper turn (operator visibility into per-turn prompt content)
+- `#11121` keeper — high-priority `.mli` files for keeper modules (interface contract surfacing)
+- `#11120` test — cross-FSM joint behavior tests mirroring TLA+ SafetyInvariant
+- `#11126` specs — AuthIdentityFSM bug-model for silent identity fallback
+
+### Changed (dashboard KpiStrip canonical sweep)
+- `#11135` retire StatCard, migrate 27 callsites to KpiStrip+KpiCell (sweep #3)
+- `#11130` migrate feature-health overview into KpiStrip (sweep #2)
+- `#11128` migrate overview funnel into KpiStrip (sweep #1)
+- `#11122` add KpiStrip composite (cb-group-a SPEC alignment)
+- `#11118` adopt KpiCell in feature-health overview (apply cycle 2)
+- `#11116` adopt KpiCell in overview funnel (apply cycle 1)
+- `#11131` design-system — add 4 raw tokens + migrate bonsai flame_*
+
+### Fixed (keeper contract correctness)
+- `#11124` keeper — classify `keeper_stay_silent` as `Completion` to satisfy `require_tool_use` contract (decisive no-op recognition; abuse defence retained via `keeper_stay_silent_loop_detector`)
+- `#11132` server-auth — fail-closed on `Ok None` instead of silent dashboard rewrite (security hardening)
+- `#11117` scripts — resolve log path via lsof on running server, eliminate $HOME drift
+- `#11123` keeper — raise compact_ratio default 0.5 → 0.85 (#11111 follow-up, fewer premature compactions)
+
+### Removed
+- `#11119` mcp — drop deprecated prompt stubs (`execution_session_proof`, `command_truth`)
+
 ## [0.18.6] - 2026-04-27 — patch: keeper resilience (retry guard + watchdog auto-pause) + design-system token wave continuation + i18n rounds 95-101
 
 Aggregate of 37 commits since v0.18.5 (15 fix / 13 feat / 7 i18n / 1 perf / 1 chore). No breaking API changes.

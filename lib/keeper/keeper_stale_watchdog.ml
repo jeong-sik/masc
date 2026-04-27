@@ -45,6 +45,42 @@ let record_stale_termination keeper_name now : int =
     Hashtbl.replace termination_history keeper_name pruned;
     List.length pruned)
 
+(* #10765 phase 2: fleet-wide batch termination detection.
+
+   Each keeper runs its watchdog as an independent fiber, so the
+   per-keeper [record_stale_termination] above never sees the
+   cross-keeper pattern.  Issue evidence: 8 keepers terminated
+   within the same second at 12:54:13Z (analyst, executor,
+   issue_king, janitor, masc-improver, nick0cave, ollama-local,
+   qa-king).  That shape is a *systemic* signal — typically cascade
+   dead (#10474), provider auth failure, or fd exhaustion (#10745) —
+   not 8 independent stuck fibers.  The supervisor will keep
+   restarting each one individually unless an operator notices.
+
+   Track recent terminations across all keepers in a small bounded
+   window.  When the number of distinct keepers in the window
+   reaches the threshold we emit a fleet-tier ERROR pointing at the
+   systemic root-cause issue list, plus a Prometheus counter.  No
+   state-machine change: the per-keeper restart still proceeds.  The
+   point is to make the batch event visible at all. *)
+let batch_window_sec = 30.0
+let batch_threshold = 3
+let batch_terminations : (string * float) list Atomic.t = Atomic.make []
+
+let record_batch_termination keeper_name now : string list =
+  let rec atomic_update () =
+    let prev = Atomic.get batch_terminations in
+    let pruned =
+      List.filter (fun (_, ts) -> now -. ts <= batch_window_sec) prev
+    in
+    let next = (keeper_name, now) :: pruned in
+    if Atomic.compare_and_set batch_terminations prev next
+    then next
+    else atomic_update ()
+  in
+  let entries = atomic_update () in
+  List.sort_uniq compare (List.map fst entries)
+
 let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
     (reg : Keeper_registry.registry_entry) =
   let base_path = ctx.config.base_path in
@@ -195,6 +231,22 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                     See issue #10765."
                    meta.name window_count termination_window_sec
                    escalation_threshold
+               end;
+               (* #10765 phase 2: fleet batch detection.  See module-level
+                  comment on [batch_terminations] for rationale. *)
+               let batch = record_batch_termination meta.name now in
+               if List.length batch >= batch_threshold then begin
+                 Prometheus.inc_counter
+                   "masc_keeper_stale_termination_batch_total"
+                   ();
+                 Log.Keeper.error
+                   "FLEET BATCH TERMINATION: %d distinct keepers \
+                    terminated in last %.0fs [%s] — systemic signal \
+                    (cascade dead, provider auth, fd leak).  \
+                    Per-keeper restarts will loop without operator \
+                    intervention.  See #10765, #10474, #10745."
+                   (List.length batch) batch_window_sec
+                   (String.concat ", " batch)
                end;
                (try
                   Keeper_execution_receipt.emit_stale_keeper_broadcast

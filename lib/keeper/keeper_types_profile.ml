@@ -1280,6 +1280,8 @@ let merge_keeper_profile_defaults
          List.filter (fun (k, _) -> not (List.mem k overlay_keys)) base.oas_env
        in
        surviving_base @ overlay.oas_env);
+    unknown_toml_keys =
+      merge_string_list ~base:base.unknown_toml_keys overlay.unknown_toml_keys;
   }
 
 (* Derived transport guards for combinations that are otherwise easy to

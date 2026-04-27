@@ -326,11 +326,20 @@ let recover_latest_checkpoint_for_overflow_retry
     Keeper_checkpoint_store.load_oas ~session_dir:session.session_dir
       ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
   in
+  (* P2 silent-failure fix (mirrors keeper_context_core.ml:1264 fix):
+     splitting `Error Not_found | Ok _` into two arms lets a debug log
+     mark when the overflow-retry path falls back from "OAS checkpoint
+     missing" to a fresh start.  Operators investigating "why did
+     overflow recovery use defaults?" now have the signal. *)
   (match oas_result with
    | Error (Parse_error d | Store_error d | Io_error d | Sdk_other_error d) ->
        Log.Keeper.error "keeper:%s overflow retry OAS load error: %s"
          (Keeper_id.Trace_id.to_string meta.runtime.trace_id) d
-   | Error Not_found | Ok _ -> ());
+   | Error Not_found ->
+       Log.Keeper.debug
+         "keeper:%s overflow-retry OAS checkpoint not found, starting fresh"
+         (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+   | Ok _ -> ());
   let oas_checkpoint =
     Result.to_option oas_result
     |> Option.map (fun checkpoint ->

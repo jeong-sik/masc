@@ -1095,7 +1095,21 @@ let make_hooks
                  ("total_turns", `Int meta.runtime.usage.total_turns);
                  ("ts_unix", `Float (Unix.gettimeofday ()));
                ])
-         with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
+         with
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | exn ->
+             (* P2 silent-failure fix: turn-complete event was previously
+                dropped without trace.  Dashboard's per-turn marker would
+                go missing intermittently and operators had no signal that
+                the broadcast itself failed.  PR-C (#11075) added a
+                broadcast-failures counter on the SSE side, but it only
+                catches per-client failures inside broadcast_impl —
+                exceptions thrown from Sse.broadcast at the call boundary
+                bypass that counter.  Logging here makes the loss visible
+                at the producer site. *)
+             Log.Keeper.warn
+               "keeper:%s turn=%d sse_turn_complete broadcast failed: %s"
+               meta.name turn (Printexc.to_string exn));
         (* Reset same-name streak at turn boundary so it doesn't
            carry across turns (e.g., 4 calls in turn N + 1 in turn N+1
            should not hit threshold 5). *)
@@ -1183,7 +1197,17 @@ let make_hooks
              ?sandbox_profile ?network_mode
              ?shared_memory_scope ?approval_mode
              ~result_bytes ?truncated_to ()
-         with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ());
+         with
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | exn ->
+             (* P2 silent-failure fix (same pattern as the broadcast site
+                above at line ~1098): tool-call audit log write failures
+                were dropped without trace.  Loss of these rows leaves
+                downstream replay / debugging tools with gaps that look
+                identical to "no tool calls in this turn." *)
+             Log.Keeper.warn
+               "keeper:%s tool=%s log_call write failed: %s"
+               (!meta_ref).name tool_name (Printexc.to_string exn));
         (match trajectory_acc with
          | None -> ()
          | Some acc ->

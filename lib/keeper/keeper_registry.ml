@@ -429,7 +429,19 @@ let broadcast_composite_changed ~name ~ts_unix =
        ])
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
-  | _exn -> ()
+  | exn ->
+      (* P2 silent-failure fix: previously this discarded the exception
+         silently, hiding the case where the SSE broadcast pipe is dead
+         (subscriber cleanup race, transport tear-down).  Operators
+         investigating "dashboard stopped updating" had no signal that
+         the broadcast itself was failing.  PR-C (#11075) added a
+         counter on the SSE side, but only for per-client failures
+         inside broadcast_impl — exceptions thrown out of
+         Sse.broadcast itself bypass that counter.  Logging here
+         makes the exception visible at the call site. *)
+      Log.Keeper.warn
+        "registry: broadcast_composite_changed name=%s failed: %s"
+        name (Printexc.to_string exn)
 
 let completed_turn_outcome_of_observation
     (obs : turn_observation) : Keeper_transition_audit.completed_turn_outcome =

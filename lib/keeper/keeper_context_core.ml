@@ -1251,7 +1251,13 @@ let load_context_from_checkpoint ~max_checkpoint_messages ~trace_id ~primary_mod
     Keeper_checkpoint_store.load_oas ~session_dir:session.session_dir
       ~session_id:trace_id
   in
-  (* Log non-trivial load errors (Not_found is normal on first boot) *)
+  (* P2 silent-failure fix: previously `Error Not_found | Ok _ -> ()`
+     coalesced two semantically distinct outcomes — Not_found means
+     "no prior checkpoint, expected on first boot" while Ok means
+     "checkpoint loaded successfully."  Splitting the cases lets a
+     `debug` log mark when the legacy fallback path is being taken,
+     which is the signal an operator wants when investigating "why
+     did this restart use defaults instead of the OAS checkpoint?" *)
   (match oas_result with
    | Error (Parse_error detail) ->
        Log.Keeper.error "keeper:%s OAS checkpoint parse error: %s" trace_id detail
@@ -1261,7 +1267,9 @@ let load_context_from_checkpoint ~max_checkpoint_messages ~trace_id ~primary_mod
        Log.Keeper.error "keeper:%s OAS checkpoint I/O error: %s" trace_id detail
    | Error (Sdk_other_error detail) ->
        Log.Keeper.error "keeper:%s OAS checkpoint SDK error: %s" trace_id detail
-   | Error Not_found | Ok _ -> ());
+   | Error Not_found ->
+       Log.Keeper.debug "keeper:%s OAS checkpoint not found, falling back to legacy loader" trace_id
+   | Ok _ -> ());
   let oas_checkpoint = Result.to_option oas_result in
   let legacy_checkpoint =
     try load_latest_checkpoint session

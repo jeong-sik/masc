@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # OCaml structural-debt ratchet gate.
 #
-# Tracks 4 metrics that capture structural debt called out by external review
+# Tracks 5 metrics that capture structural debt called out by external review
 # (Jane-Street-style large-OCaml expectations):
 #
 #   - keeper_mli_missing: count of lib/keeper/keeper_*.ml files without a
@@ -12,6 +12,11 @@
 #     by sub-library extraction)
 #   - lib_dune_lines    : raw line count of lib/dune (proxy for the
 #     monolithic-library debt; sub-library splits should reduce this)
+#   - inferred_dump_headers: count of .mli files in lib/ carrying an
+#     auto-generated `(** X inferred mli **)` self-incriminating header.
+#     Each such header signals a never-curated interface dump; the .mli
+#     content is verbatim inferred-type output that should be normalized
+#     to a real one-line docstring.
 #
 # Policy: ratchet only — current value must be <= committed baseline. PRs
 # that reduce debt may regenerate the baseline (intentional "downward
@@ -47,20 +52,28 @@ count_lib_dune_lines() {
   wc -l < "${REPO_ROOT}/lib/dune" | tr -d ' '
 }
 
+count_inferred_dump_headers() {
+  # rg exits 1 with no matches; pipe to wc -l so an empty stream still
+  # prints 0. Using -l (file count) — one self-incriminating header per file.
+  rg -l "inferred mli" "${REPO_ROOT}/lib" 2>/dev/null | wc -l | tr -d ' '
+}
+
 # Metric definitions: name|hint
 METRICS=(
   "keeper_mli_missing|Add .mli for the new lib/keeper/keeper_*.ml file. See planning/claude-plans/moonlit-finding-russell.md PR#2-4."
   "coord_mli_missing|Add .mli for the new lib/coord/*.ml file."
   "godsplit_count|Do not add new ';; godsplit' markers in lib/dune — extract a real sub-library instead. See PR#7-10."
   "lib_dune_lines|lib/dune is growing — consider extracting modules into a sub-library (lib/keeper/dune, lib/oas/dune, lib/dashboard/dune)."
+  "inferred_dump_headers|Replace the '(** X inferred mli **)' header with a real one-line docstring. See PR#11286/11290/11296/11303/11309/11321/11401 for the closure series."
 )
 
 current_value() {
   case "$1" in
-    keeper_mli_missing) count_mli_missing "lib/keeper" "keeper_*" ;;
-    coord_mli_missing)  count_mli_missing "lib/coord"  "*" ;;
-    godsplit_count)     count_godsplit ;;
-    lib_dune_lines)     count_lib_dune_lines ;;
+    keeper_mli_missing)    count_mli_missing "lib/keeper" "keeper_*" ;;
+    coord_mli_missing)     count_mli_missing "lib/coord"  "*" ;;
+    godsplit_count)        count_godsplit ;;
+    lib_dune_lines)        count_lib_dune_lines ;;
+    inferred_dump_headers) count_inferred_dump_headers ;;
     *) echo "unknown metric: $1" >&2; exit 1 ;;
   esac
 }

@@ -7,10 +7,12 @@
 # observed window.
 #
 # Designed to be re-runnable: each criterion is a single grep against a
-# JSONL log produced by the masc-mcp server (default
-# ~/.masc/logs/system_log_<YYYY-MM-DD>.jsonl).  No state is kept
-# between runs — re-execute after any merge or restart to refresh the
-# snapshot.
+# JSONL log produced by the masc-mcp server.  The log path is resolved
+# via scripts/lib/masc-log-path.sh, which detects the active file from
+# the running server (lsof on the listening socket) and falls back to
+# $MASC_BASE_PATH or $HOME/me when no server is running.  No state is
+# kept between runs — re-execute after any merge or restart to refresh
+# the snapshot.
 #
 # Origin: 2026-04-25 keeper docker git_clone E2E investigation
 # (memory/procedural-memory/2026-04-25-keeper-docker-clone-end-to-end-evidence-record.md).

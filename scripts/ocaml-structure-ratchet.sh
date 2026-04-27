@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # OCaml structural-debt ratchet gate.
 #
-# Tracks 5 metrics that capture structural debt called out by external review
+# Tracks 6 metrics that capture structural debt called out by external review
 # (Jane-Street-style large-OCaml expectations):
 #
 #   - keeper_mli_missing: count of lib/keeper/keeper_*.ml files without a
@@ -17,6 +17,10 @@
 #     Each such header signals a never-curated interface dump; the .mli
 #     content is verbatim inferred-type output that should be normalized
 #     to a real one-line docstring.
+#   - lib_other_mli_missing: long-tail .mli coverage — every lib/*/*.ml
+#     file outside lib/keeper/ and lib/coord/ that lacks a sibling .mli.
+#     Captures lib/server/, lib/dashboard/, lib/config/, lib/local/,
+#     lib/types/, lib/voice/, etc.
 #
 # Policy: ratchet only — current value must be <= committed baseline. PRs
 # that reduce debt may regenerate the baseline (intentional "downward
@@ -58,6 +62,25 @@ count_inferred_dump_headers() {
   rg -l "inferred mli" "${REPO_ROOT}/lib" 2>/dev/null | wc -l | tr -d ' '
 }
 
+count_lib_other_mli_missing() {
+  # All lib/*/*.ml files without a sibling .mli, EXCLUDING lib/keeper/
+  # and lib/coord/ which have dedicated metrics. Captures the long
+  # tail (lib/server/, lib/dashboard/, lib/config/, lib/local/, etc.).
+  python3 - <<'EOF' "${REPO_ROOT}"
+import os, sys, glob
+repo_root = sys.argv[1]
+total = 0
+for d in glob.glob(os.path.join(repo_root, 'lib', '*') + '/'):
+    name = d.rstrip('/').rsplit('/', 1)[-1]
+    if name in ('keeper', 'coord'):
+        continue
+    for ml in glob.glob(d + '*.ml'):
+        if not os.path.exists(ml + 'i'):
+            total += 1
+print(total)
+EOF
+}
+
 # Metric definitions: name|hint
 METRICS=(
   "keeper_mli_missing|Add .mli for the new lib/keeper/keeper_*.ml file. See planning/claude-plans/moonlit-finding-russell.md PR#2-4."
@@ -65,15 +88,17 @@ METRICS=(
   "godsplit_count|Do not add new ';; godsplit' markers in lib/dune — extract a real sub-library instead. See PR#7-10."
   "lib_dune_lines|lib/dune is growing — consider extracting modules into a sub-library (lib/keeper/dune, lib/oas/dune, lib/dashboard/dune)."
   "inferred_dump_headers|Replace the '(** X inferred mli **)' header with a real one-line docstring. See PR#11286/11290/11296/11303/11309/11321/11401 for the closure series."
+  "lib_other_mli_missing|Add .mli for the new lib/*/*.ml file (covers every dir except keeper/coord which have their own metrics)."
 )
 
 current_value() {
   case "$1" in
-    keeper_mli_missing)    count_mli_missing "lib/keeper" "keeper_*" ;;
-    coord_mli_missing)     count_mli_missing "lib/coord"  "*" ;;
-    godsplit_count)        count_godsplit ;;
-    lib_dune_lines)        count_lib_dune_lines ;;
-    inferred_dump_headers) count_inferred_dump_headers ;;
+    keeper_mli_missing)     count_mli_missing "lib/keeper" "keeper_*" ;;
+    coord_mli_missing)      count_mli_missing "lib/coord"  "*" ;;
+    godsplit_count)         count_godsplit ;;
+    lib_dune_lines)         count_lib_dune_lines ;;
+    inferred_dump_headers)  count_inferred_dump_headers ;;
+    lib_other_mli_missing)  count_lib_other_mli_missing ;;
     *) echo "unknown metric: $1" >&2; exit 1 ;;
   esac
 }
@@ -176,7 +201,7 @@ case "${1:-check}" in
   --print)      print_counts ;;
   check|"")     check ;;
   -h|--help)
-    sed -n '1,28p' "$0"
+    sed -n '1,38p' "$0"
     exit 0
     ;;
   *)

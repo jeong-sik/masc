@@ -93,4 +93,11 @@ let emit_transition ~keeper_name ~turn_id ?prev state =
   in
   let state_label = turn_state_label state in
   Log.Keeper.info ~keeper_name ~turn_id
-    "[fsm:transition] %s -> %s" prev_label state_label
+    "[fsm:transition] %s -> %s" prev_label state_label;
+  Prometheus.inc_counter Prometheus.metric_keeper_turn_fsm_transitions
+    ~labels:
+      [ ("from", prev_label);
+        ("to", state_label);
+        ("keeper", keeper_name);
+      ]
+    ()

@@ -221,9 +221,10 @@ async function submitResolve(
 
 // ── Row actions (approve/reject UI) ───────────────────
 
-const BTN_PRIMARY =
-  'rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 text-2xs text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)] disabled:opacity-50 disabled:cursor-not-allowed'
-
+// BTN_SECONDARY uses fg-primary (more emphasis) — the naming inverts
+// the convention but is preserved since it's a deliberate visual choice
+// for the cancel/reject actions in this panel. Btn default variant uses
+// fg-secondary, so this constant stays until a tone variant ships.
 const BTN_SECONDARY =
   'rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] px-2 py-1 text-2xs text-[var(--color-fg-primary)] hover:bg-[var(--color-bg-hover)] disabled:opacity-50 disabled:cursor-not-allowed'
 
@@ -250,10 +251,10 @@ function RowActions({
     return html`
       <div class="flex items-center gap-1 flex-wrap">
         <span class="text-2xs text-[var(--color-fg-secondary)]">승인 확정?</span>
-        <button
-          class=${BTN_PRIMARY}
+        <${Btn}
+          size="sm"
           onClick=${() => void submitResolve(row, 'approve', '', refresh)}
-        >예</button>
+        >예<//>
         <button
           class=${BTN_SECONDARY}
           onClick=${() => setRowAction(requestId, { kind: 'idle' })}
@@ -286,11 +287,11 @@ function RowActions({
             }
           }}
         />
-        <button
-          class=${BTN_PRIMARY}
+        <${Btn}
+          size="sm"
           disabled=${!canSubmit}
           onClick=${() => void submitResolve(row, 'reject', reason.trim(), refresh)}
-        >확정</button>
+        >확정<//>
         <button
           class=${BTN_SECONDARY}
           onClick=${() => setRowAction(requestId, { kind: 'idle' })}
@@ -302,10 +303,10 @@ function RowActions({
   // idle or error — show primary action buttons; error surfaces retry hint
   return html`
     <div class="flex items-center gap-1 flex-wrap">
-      <button
-        class=${BTN_PRIMARY}
+      <${Btn}
+        size="sm"
         onClick=${() => setRowAction(requestId, { kind: 'confirm-approve' })}
-      >승인</button>
+      >승인<//>
       <button
         class=${BTN_SECONDARY}
         onClick=${() => setRowAction(requestId, { kind: 'compose-reject', reason: '' })}

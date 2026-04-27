@@ -3,7 +3,7 @@
 
 import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'
-import { SectionHeader } from './section-header'
+import { SectionHead } from '../section-head'
 
 // ── Class constants (CARD_STANDARD exported for inline section usage) ──
 const CARD_BASE = 'card'
@@ -53,13 +53,24 @@ export function SectionCard({
   variant = 'light',
   children,
 }: SectionCardProps) {
+  // SPEC `.section-head` upgrade — SectionHead atom replaces the
+  // legacy SectionHeader. The strip wants to sit flush against the
+  // card's top edge, so the outer SurfaceCard padding is forced to 0
+  // (overflow-hidden lets the strip clip into the rounded corner) and
+  // the body padding moves into a dedicated wrapper. The `light`
+  // variant deliberately keeps the bg-transparent override — the
+  // SectionHead's bg-surface still reads as a strip because it sits
+  // above transparent body. Variant `compact` had p-3.5 in the legacy
+  // path; the new wrapper uses p-3.5 to preserve that visual.
+  const bodyPadding = variant === 'compact' ? 'p-3.5' : 'p-4'
   return html`
-    <${SurfaceCard} variant=${variant} class="flex flex-col gap-4 ${cx ?? ''}">
-      <${SectionHeader}>${label}<//>
-      ${children}
+    <${SurfaceCard} variant=${variant} class="flex flex-col !p-0 overflow-hidden ${cx ?? ''}">
+      <${SectionHead}>${label}<//>
+      <div class="${bodyPadding} flex flex-col gap-4">${children}</div>
     <//>
   `
 }
+
 
 // ── Legacy Card (backward compat — accepts title prop) ──
 interface CardProps {

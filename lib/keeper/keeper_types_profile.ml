@@ -320,6 +320,13 @@ type keeper_profile_defaults = {
      Applied via Unix.putenv right before each turn so OAS transport
      build_args picks them up.  Empty list = no overrides. *)
   oas_env : (string * string) list;
+  (* Keys present under [keeper] (or other tables) that are NOT in
+     [canonical_keeper_toml_key_names].  Captured at load time so
+     downstream surfaces (keeper_status_detail, dashboards) can show
+     drift instead of silently ignoring legacy / typo'd keys.
+     Today this is also logged via [warn_unknown_keeper_toml_keys];
+     the field is purely additive. *)
+  unknown_toml_keys : string list;
 }
 
 and per_provider_timeout_state =
@@ -382,6 +389,7 @@ let empty_keeper_profile_defaults = {
   cascade_name = None;
   models = None;
   oas_env = [];
+  unknown_toml_keys = [];
 }
 
 let normalize_per_provider_timeout_opt ~(source : string)
@@ -790,6 +798,9 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         cascade_name = normalize_cascade_name_opt (str "cascade_name");
         models = None;
         oas_env = extract_oas_env_from_doc doc;
+        (* unknown_toml_keys is populated by [load_keeper_toml] which
+           runs after [detect_unknown_keeper_toml_keys] is in scope. *)
+        unknown_toml_keys = [];
       })
     result
 
@@ -937,6 +948,7 @@ let load_keeper_toml (path : string)
       | Error e -> Error (Printf.sprintf "%s: %s" path e)
       | Ok defaults ->
         warn_unknown_keeper_toml_keys ~path doc;
+        let unknown = detect_unknown_keeper_toml_keys doc in
         let name =
           match Keeper_toml_loader.toml_string_opt doc "keeper.name" with
           | Some n when n <> "" -> n
@@ -948,7 +960,10 @@ let load_keeper_toml (path : string)
           Error (Printf.sprintf "%s: invalid keeper name '%s'" path name)
         else
           let id = Ids.Keeper_id.generate ~name ~path in
-          Ok (name, { defaults with manifest_path = Some path; id = Some id })
+          Ok (name,
+              { defaults with manifest_path = Some path
+                            ; id = Some id
+                            ; unknown_toml_keys = unknown })
 
 (* #10259: every reconcile cycle calls [discover_keepers_toml], so a
    persistent fail mode (4 keepers stuck on cascade_name "ollama_only"
@@ -1125,6 +1140,8 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
                    persona profiles are a design-time artifact whereas
                    transport env is an ops-time toggle. *)
                 oas_env = [];
+                (* Persona JSON has no [keeper] TOML; nothing to flag. *)
+                unknown_toml_keys = [];
               }
           | _ -> { empty_keeper_profile_defaults with manifest_path = Some path })
 

@@ -218,8 +218,8 @@ function BudgetRow({ label, slot, manifest, clamp }: {
   const deltaText = delta === 0
     ? null
     : delta > 0
-      ? `+${delta} vs env`
-      : `${delta} vs env`
+      ? `+${delta} (env 기준)`
+      : `${delta} (env 기준)`
 
   let valueClass: string
   let pill

@@ -815,4 +815,45 @@ module Sidecar = struct
       (get_float ~default:10.0 "MASC_SIDECAR_SCHEMA_TIMEOUT_SEC")
 end
 
+(** {1 Coord local git operation timeouts}
+
+    Inline literals extracted from {!Coord_git} and
+    {!Coord_worktree} (#10426 audit):
+
+    - [coord_git.ml:45]        30.0  → run_argv_line  helper default
+    - [coord_git.ml:74]        30.0  → run_argv_lines helper default
+    - [coord_worktree.ml:21]   30.0  → run_argv_lines helper default
+    - [coord_worktree.ml:868]  30.0  → direct [worktree add -B] call
+
+    All four sites share the same semantic bucket: "local-only git
+    operations" (rev-parse, status, branch, worktree add — no
+    network IO).  Network-bound git ops (fetch, push) already use
+    {!Env_config_core.git_fetch_timeout_sec}, which is the long
+    counterpart and is intentionally a separate knob.
+
+    The two budgets must remain separable: bundling local + network
+    under one knob would force an operator who needs to extend a
+    flaky [git fetch] over a slow proxy to also extend every
+    [git rev-parse] subprocess on hot paths, padding tail latency
+    needlessly.  Conversely, an operator narrowing local ops on a
+    fast workstation would not expect to also narrow network ops. *)
+
+module Coord_git = struct
+  (** Budget (seconds) for local-only git operations under
+      [Masc_exec.Exec_gate.run_argv*] in {!Coord_git} and
+      {!Coord_worktree}: [rev-parse], [status], [branch],
+      [worktree add], etc.
+
+      Default 30.0 preserves the four inline literals.  Floor 5.0
+      keeps the budget above subprocess startup + small index
+      reads even on a busy system; misconfiguring lower than that
+      would silently kill perfectly healthy commands.
+
+      Network-bound ops (fetch, push) intentionally use a separate
+      knob — see {!Env_config_core.git_fetch_timeout_sec}. *)
+  let local_op_timeout_sec =
+    Float.max 5.0
+      (get_float ~default:30.0 "MASC_COORD_GIT_LOCAL_OP_TIMEOUT_SEC")
+end
+
 (** {1 Internal Safety Configuration} *)

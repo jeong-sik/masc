@@ -2155,14 +2155,21 @@ let test_keeper_config_uses_backend_scoped_private_workspace_root () =
       let status_json = parse_json_exn status_body in
       let open Yojson.Safe.Util in
       let execution_context = status_json |> member "execution_context" in
-      Alcotest.(check string) "status playground path"
-        docker_rel
-        (execution_context |> member "playground_path" |> to_string);
-      (* #10650: for a Docker keeper, private_workspace_root in the
-         keeper-LLM-facing status response is the in-container path
-         ([/home/keeper/playground/<sanitized>]), NOT the host abs path.
-         The host path is inaccessible inside the container; surfacing
-         it caused ~890/day [cd: No such file or directory] errors. *)
+      (* #10650 + B1 follow-up: keeper-LLM-facing execution_context must
+         not surface host paths.  The host path is inaccessible inside the
+         container; surfacing it caused ~890/day [cd: No such file or
+         directory] errors.  default_cwd / private_workspace_root carry
+         the in-container path; host-only fields (playground_path,
+         sandbox_host_root) are intentionally omitted from the JSON
+         response.  docker_rel / docker_abs remain used for the
+         assert_config_root call above (admin-only dashboard surface). *)
+      let _ = docker_rel and _ = docker_abs in
+      Alcotest.(check bool) "status playground_path omitted (no host leak)"
+        true
+        (execution_context |> member "playground_path" = `Null);
+      Alcotest.(check bool) "status sandbox_host_root omitted (no host leak)"
+        true
+        (execution_context |> member "sandbox_host_root" = `Null);
       let docker_container_root =
         Masc_mcp.Keeper_sandbox.container_root keeper_name
       in
@@ -2171,10 +2178,7 @@ let test_keeper_config_uses_backend_scoped_private_workspace_root () =
         (execution_context |> member "private_workspace_root" |> to_string);
       Alcotest.(check string) "status default cwd"
         docker_container_root
-        (execution_context |> member "default_cwd" |> to_string);
-      Alcotest.(check string) "status sandbox host root preserved"
-        docker_abs
-        (execution_context |> member "sandbox_host_root" |> to_string))
+        (execution_context |> member "default_cwd" |> to_string))
 
 let test_snapshot_keeper_tool_audit_fallback () =
   Eio_main.run @@ fun env ->

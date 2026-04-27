@@ -156,12 +156,15 @@ max_output_bytes = 8192
 # URLs not matching any org here are rejected.
 
 [git_clone]
-# Two GitHub identity surfaces for the operator:
-#   jeong-sik    — current canonical user (commit author, gh CLI default)
-#   yousleepwhen — personal namespace used in workspace/yousleepwhen/*
-# Both are explicitly listed so the keeper can clone repos referenced by
-# the workspace tree (#9783).
-allowed_orgs = ["jeong-sik", "yousleepwhen"]
+# Org allowlist for `masc_code_git clone`.  Empty list = skip check; the
+# keeper may clone any repo reachable through the operator's gh credential
+# (subject to denied_repos below).  This matches the operator intent that
+# repo/org gating is a soft secondary control — the primary boundary is
+# the gh credential surface itself plus denied_repos.  Earlier values
+# (#9783: ["jeong-sik", "yousleepwhen"]) only listed the operator's two
+# self-owned namespaces and blocked clones referenced from upstream
+# workspace trees.
+allowed_orgs = []
 # Repos blocked even if org is allowed. Format: "org/repo" (lowercase).
 denied_repos = ["jeong-sik/me"]
 # Clone depth: 0 = full clone, N = shallow --depth N.

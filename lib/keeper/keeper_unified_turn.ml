@@ -1092,6 +1092,10 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
   | phase_opt ->
       (* State-aware cascade routing (TLA+ KeeperCoreTriad.SelectCascade).
          At this point [phase] is executable; blocked phases returned above. *)
+      Keeper_turn_fsm.emit_transition
+        ~keeper_name:meta.name ~turn_id:keeper_turn_id
+        ~prev:Keeper_turn_fsm.Phase_gating
+        Keeper_turn_fsm.Cascade_routing;
       let effective_cascade_name =
         let phase = match phase_opt with
           | Some p -> p
@@ -1330,6 +1334,10 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                    { reason = reason_string }));
            Ok meta
        | Keeper_turn_livelock.Started _ ->
+      Keeper_turn_fsm.emit_transition
+        ~keeper_name:meta.name ~turn_id:keeper_turn_id
+        ~prev:Keeper_turn_fsm.Cascade_routing
+        Keeper_turn_fsm.Awaiting_provider;
       (* Yield before CPU-bound prompt construction so the Eio scheduler
          can service HTTP handlers between keeper turn setups. *)
       Eio.Fiber.yield ();

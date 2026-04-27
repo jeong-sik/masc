@@ -486,7 +486,8 @@ let test_provider_status_transitions () =
     { provider_key = "x"; success_rate = 0.0; consecutive_failures = 3
     ; in_cooldown = true; cooldown_expires_at = Some 1.0
     ; events_in_window = 5; rejected_in_window = 5
-    ; top_fingerprints = []; last_failure_at = None }
+    ; top_fingerprints = []; last_failure_at = None
+    ; p50_latency_ms = None; p95_latency_ms = None; latency_samples = 0 }
   in
   let info_active : Masc_mcp.Cascade_health_tracker.provider_info =
     { info_cooldown with in_cooldown = false; consecutive_failures = 0
@@ -789,6 +790,7 @@ let mk_info ?(success_rate = 1.0) ?(consecutive_failures = 0)
     ?(in_cooldown = false) ?(cooldown_expires_at = None)
     ?(events_in_window = 0) ?(rejected_in_window = 0)
     ?(top_fingerprints = []) ?(last_failure_at = None)
+    ?(p50_latency_ms = None) ?(p95_latency_ms = None) ?(latency_samples = 0)
     ?(trust_score = 1.0) ?(same_fingerprint_count = 0) provider_key
   : Masc_mcp.Cascade_health_tracker.provider_info =
   let _ = trust_score in
@@ -802,6 +804,9 @@ let mk_info ?(success_rate = 1.0) ?(consecutive_failures = 0)
   ; rejected_in_window
   ; top_fingerprints
   ; last_failure_at
+  ; p50_latency_ms
+  ; p95_latency_ms
+  ; latency_samples
   }
 
 let test_recommendation_healthy_returns_none () =

@@ -409,6 +409,9 @@ let zero_provider_info (key : string) : Health.provider_info =
   ; rejected_in_window = 0
   ; top_fingerprints = []
   ; last_failure_at = None
+  ; p50_latency_ms = None
+  ; p95_latency_ms = None
+  ; latency_samples = 0
   }
 
 (** [provider_entry_to_json ~declared info] serialises a provider_info

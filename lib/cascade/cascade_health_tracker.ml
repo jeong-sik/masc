@@ -136,6 +136,33 @@ let terminal_failure_cooldown_sec =
     ~deprecated:"OAS_CASCADE_TERMINAL_FAILURE_COOLDOWN_SEC"
     ~default:3600.0
 
+(** Per-provider ring buffer size for recent successful-call latency.
+    Default 100 — strategy decisions only need a "recent" sense of
+    response speed, not the full distribution.  Sort cost on every
+    [provider_info] read is O(n log n) on the populated portion of the
+    ring, which at n=100 is trivially small.
+
+    Negative or zero disables latency tracking entirely: the ring is
+    treated as size 0 (no allocation, no samples retained, [p50_latency_ms]
+    and [p95_latency_ms] always [None]).  Useful as an env-level kill
+    switch if downstream metric pressure ever surfaces.
+
+    Env: [MASC_CASCADE_LATENCY_RING_SIZE]. *)
+let latency_ring_size =
+  match Sys.getenv_opt "MASC_CASCADE_LATENCY_RING_SIZE" with
+  | None -> 100
+  | Some raw ->
+    let trimmed = String.trim raw in
+    if trimmed = "" then 100
+    else
+      match Safe_ops.int_of_string_safe trimmed with
+      | Some n -> n
+      | None ->
+        Log.Misc.warn
+          "Invalid int for MASC_CASCADE_LATENCY_RING_SIZE=%S, using default 100"
+          raw;
+        100
+
 
 (* ── Types ────────────────────────────────────── *)
 
@@ -173,6 +200,14 @@ type provider_state = {
      Phase 0 observability anchor for "which error keeps recurring".
      Updated under [t.mu]. *)
   mutable last_failure_at: float;  (* 0.0 = none *)
+  (* Latency ring buffer for recent successful-call durations (ms).
+     Allocated lazily on first sample to avoid an empty array per
+     never-tracked provider.  Capacity is bounded by [latency_ring_size]
+     at module-load time.  When [latency_ring_size <= 0] the ring stays
+     [None] forever and percentile reads return [None]. *)
+  mutable latency_ring: float array option;
+  mutable latency_count: int;     (* slots filled, capped at array length *)
+  mutable latency_cursor: int;    (* next insertion index, wraps mod length *)
 }
 
 type t = {
@@ -223,9 +258,35 @@ let get_or_create_state t key =
       cooldown_until = 0.0;
       fingerprint_counts = Hashtbl.create 4;
       last_failure_at = 0.0;
+      latency_ring = None;
+      latency_count = 0;
+      latency_cursor = 0;
     } in
     Hashtbl.replace t.providers key s;
     s
+
+(* Append [latency_ms] to the per-provider ring buffer.  Allocates the
+   array lazily on first valid sample so providers that never report
+   timing never pay for the slot.  Drops samples that are non-finite or
+   non-positive — a successful-call duration of 0 or NaN is a caller bug
+   we don't want polluting the percentile. *)
+let push_latency state lat_ms =
+  if latency_ring_size <= 0 then ()
+  else if not (Float.is_finite lat_ms) || lat_ms <= 0.0 then ()
+  else begin
+    let ring =
+      match state.latency_ring with
+      | Some r -> r
+      | None ->
+        let r = Array.make latency_ring_size 0.0 in
+        state.latency_ring <- Some r;
+        r
+    in
+    ring.(state.latency_cursor) <- lat_ms;
+    state.latency_cursor <- (state.latency_cursor + 1) mod latency_ring_size;
+    if state.latency_count < latency_ring_size then
+      state.latency_count <- state.latency_count + 1
+  end
 
 (* Build a stable fingerprint from caller-provided classification.
    Format: "kind|hash8(reason)" — kind defaults to "unclassified",
@@ -264,7 +325,8 @@ let prune_old_events now events =
   let cutoff = now -. window_sec in
   List.filter (fun e -> e.time >= cutoff) events
 
-let record t ~provider_key ~outcome ?error_kind ?error_reason ~now () =
+let record t ~provider_key ~outcome ?error_kind ?error_reason ?latency_ms
+    ~now () =
   with_lock t (fun () ->
     let state = get_or_create_state t provider_key in
     let event = { time = now; outcome } in
@@ -278,7 +340,13 @@ let record t ~provider_key ~outcome ?error_kind ?error_reason ~now () =
     | Success ->
       state.consecutive_failures <- 0;
       (* Clear cooldown on success — provider recovered *)
-      state.cooldown_until <- 0.0
+      state.cooldown_until <- 0.0;
+      (* Append latency sample when caller provided one.  Non-success
+         outcomes don't contribute to the percentile — a 200ms timeout
+         and a 200ms successful response are not the same signal. *)
+      (match latency_ms with
+       | Some ms -> push_latency state ms
+       | None -> ())
     | Failure | Rejected ->
       (* Rejected responses indicate unusable output (gate reject, empty
          body, schema miss).  Treat identically to Failure for cooldown
@@ -316,8 +384,9 @@ let record t ~provider_key ~outcome ?error_kind ?error_reason ~now () =
       if new_until > state.cooldown_until then
         state.cooldown_until <- new_until)
 
-let record_success t ~provider_key =
-  record t ~provider_key ~outcome:Success ~now:(Unix.gettimeofday ()) ()
+let record_success t ~provider_key ?latency_ms () =
+  record t ~provider_key ~outcome:Success ?latency_ms
+    ~now:(Unix.gettimeofday ()) ()
 
 let record_failure t ~provider_key ?error_kind ?error_reason () =
   record t ~provider_key ~outcome:Failure ?error_kind ?error_reason
@@ -412,7 +481,37 @@ type provider_info = {
   rejected_in_window : int;
   top_fingerprints : (string * int) list;
   last_failure_at : float option;
+  p50_latency_ms : float option;
+  p95_latency_ms : float option;
+  latency_samples : int;
 }
+
+(* Compute the [pct]-th percentile (0.0–1.0) of the populated portion of
+   the latency ring.  [None] when no samples have been recorded.
+
+   Method: copy the populated slice into a fresh array, sort ascending,
+   pick by linear-interpolation between adjacent ranks (NIST H.7 / type
+   7 — same convention numpy / pandas use).  The full distribution is
+   only needed for monitoring, not for high-frequency strategy reads,
+   so the O(n log n) sort on n≤[latency_ring_size] (default 100) is
+   intentionally simple and bounded. *)
+let percentile_locked state pct =
+  match state.latency_ring with
+  | None -> None
+  | Some ring when state.latency_count = 0 -> ignore ring; None
+  | Some ring ->
+    let n = state.latency_count in
+    let buf = Array.sub ring 0 n in
+    Array.sort Float.compare buf;
+    if n = 1 then Some buf.(0)
+    else
+      let rank = pct *. float_of_int (n - 1) in
+      let lo = int_of_float (Float.floor rank) in
+      let hi = int_of_float (Float.ceil rank) in
+      if lo = hi then Some buf.(lo)
+      else
+        let frac = rank -. float_of_int lo in
+        Some (buf.(lo) *. (1.0 -. frac) +. buf.(hi) *. frac)
 
 let take_first_n n lst =
   let rec loop k acc = function
@@ -443,6 +542,8 @@ let build_info_locked ~now ~key state =
   let last_failure_at =
     if state.last_failure_at > 0.0 then Some state.last_failure_at else None
   in
+  let p50_latency_ms = percentile_locked state 0.50 in
+  let p95_latency_ms = percentile_locked state 0.95 in
   {
     provider_key = key;
     success_rate = rate;
@@ -453,6 +554,9 @@ let build_info_locked ~now ~key state =
     rejected_in_window = rejected;
     top_fingerprints;
     last_failure_at;
+    p50_latency_ms;
+    p95_latency_ms;
+    latency_samples = state.latency_count;
   }
 
 let provider_info t ~provider_key =

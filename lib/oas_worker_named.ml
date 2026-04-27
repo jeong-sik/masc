@@ -1586,7 +1586,11 @@ let run_named
       let is_last = rest = [] in
       Log.Misc.debug "cascade %s: trying %s (is_last=%b)" cascade_name provider_cfg.model_id is_last;
       let pp_timeout = if is_last then None else per_provider_timeout_s in
+      let attempt_started_at = Unix.gettimeofday () in
       let (result, checkpoint_after) = try_provider ?resume_checkpoint ?per_provider_timeout_s:pp_timeout provider_cfg in
+      let attempt_latency_ms =
+        (Unix.gettimeofday () -. attempt_started_at) *. 1000.0
+      in
       (* Thread checkpoint forward: if this provider made progress,
          the next provider can resume from where this one left off. *)
       let next_resume = match checkpoint_after with
@@ -1597,10 +1601,20 @@ let run_named
          Semantics: response arrived = provider healthy (even if accept
          logic later rejects); error = provider unhealthy.  The
          cascade-decision branches (Accept_on_exhaustion / Try_next /
-         Exhausted) are orthogonal to provider health. *)
+         Exhausted) are orthogonal to provider health.
+
+         [attempt_latency_ms] is wall-clock from the moment we entered
+         [try_provider] to the moment it returned, measured even if the
+         response is later rejected by [accept] — but only the Ok+accept
+         branch feeds it to the tracker, so unhealthy providers do not
+         pollute the per-provider p50/p95.  The 200ms-timeout / 200ms-
+         success conflation that would otherwise occur is intentional
+         to avoid: a fast failure looks identical to a fast success in
+         a single number, which would mislead strategy ranking. *)
       (match result with
       | Ok result when accept result.response ->
-        Cascade_health_tracker.(record_success global ~provider_key:provider_cfg.model_id);
+        Cascade_health_tracker.(record_success global ~provider_key:provider_cfg.model_id
+          ~latency_ms:attempt_latency_ms ());
         (* FSM: Call_ok → Accept *)
         let observation =
           Oas_worker_cascade.cascade_observation_with_metrics ~cascade_name

@@ -9,7 +9,7 @@ module H = Masc_mcp.Cascade_health_tracker
 
 let test_record_success_keeps_rate_1 () =
   let t = H.create () in
-  H.record_success t ~provider_key:"p";
+  H.record_success t ~provider_key:"p" ();
   check (float 0.001) "success rate 1.0 after 1 success"
     1.0 (H.success_rate t ~provider_key:"p")
 
@@ -32,7 +32,7 @@ let test_success_resets_streak () =
   let t = H.create () in
   H.record_failure t ~provider_key:"p" ();
   H.record_failure t ~provider_key:"p" ();
-  H.record_success t ~provider_key:"p";
+  H.record_success t ~provider_key:"p" ();
   H.record_failure t ~provider_key:"p" ();
   H.record_failure t ~provider_key:"p" ();
   check bool "success resets consecutive_failures"
@@ -53,7 +53,7 @@ let test_effective_weight_unknown_full () =
 
 let test_provider_info_reflects_events () =
   let t = H.create () in
-  H.record_success t ~provider_key:"p";
+  H.record_success t ~provider_key:"p" ();
   H.record_failure t ~provider_key:"p" ();
   match H.provider_info t ~provider_key:"p" with
   | None -> fail "provider_info returned None after record calls"
@@ -87,7 +87,7 @@ let test_rejected_counts_against_success_rate () =
 
 let test_rejected_separately_counted_in_provider_info () =
   let t = H.create () in
-  H.record_success t ~provider_key:"p";
+  H.record_success t ~provider_key:"p" ();
   H.record_rejected t ~provider_key:"p" ();
   H.record_rejected t ~provider_key:"p" ();
   H.record_failure t ~provider_key:"p" ();
@@ -102,7 +102,7 @@ let test_success_after_rejected_clears_streak () =
   let t = H.create () in
   H.record_rejected t ~provider_key:"p" ();
   H.record_rejected t ~provider_key:"p" ();
-  H.record_success t ~provider_key:"p";
+  H.record_success t ~provider_key:"p" ();
   H.record_rejected t ~provider_key:"p" ();
   H.record_rejected t ~provider_key:"p" ();
   check bool "success resets rejected streak"
@@ -122,7 +122,7 @@ let test_evict_idle_drops_no_event_providers () =
      all_providers transparently removes entries whose rolling
      window is empty (no events) and whose cooldown is not active. *)
   let t = H.create () in
-  H.record_success t ~provider_key:"live";
+  H.record_success t ~provider_key:"live" ();
   (* A provider with zero recorded events is simply not in the
      tracker.  But we can exercise the post-cooldown empty-window
      path by recording then relying on window_sec elapse — not
@@ -136,7 +136,7 @@ let test_evict_idle_drops_no_event_providers () =
 
 let test_evict_idle_returns_zero_when_all_active () =
   let t = H.create () in
-  H.record_success t ~provider_key:"a";
+  H.record_success t ~provider_key:"a" ();
   H.record_failure t ~provider_key:"b" ();
   check int "no eviction when all providers have recent events"
     0 (H.evict_idle t)
@@ -182,7 +182,7 @@ let test_hard_quota_success_clears_cooldown () =
      let us re-select the provider on the next tick. *)
   let t = H.create () in
   H.record_hard_quota t ~provider_key:"p" ();
-  H.record_success t ~provider_key:"p";
+  H.record_success t ~provider_key:"p" ();
   check bool "success after hard_quota clears cooldown"
     false (H.is_in_cooldown t ~provider_key:"p")
 
@@ -271,8 +271,8 @@ let test_last_failure_at_set_on_failure () =
 
 let test_last_failure_at_none_for_pure_success () =
   let t = H.create () in
-  H.record_success t ~provider_key:"p";
-  H.record_success t ~provider_key:"p";
+  H.record_success t ~provider_key:"p" ();
+  H.record_success t ~provider_key:"p" ();
   let info = info_or_fail t ~provider_key:"p" in
   check bool "last_failure_at stays None after success-only events"
     true (info.last_failure_at = None)
@@ -331,7 +331,7 @@ let test_terminal_failure_effective_weight_zero () =
 let test_terminal_failure_success_clears_cooldown () =
   let t = H.create () in
   H.record_terminal_failure t ~provider_key:"kimi-for-coding" ();
-  H.record_success t ~provider_key:"kimi-for-coding";
+  H.record_success t ~provider_key:"kimi-for-coding" ();
   check bool "success after terminal_failure clears cooldown"
     false (H.is_in_cooldown t ~provider_key:"kimi-for-coding")
 
@@ -365,6 +365,107 @@ let test_terminal_failure_records_fingerprint () =
     check int "terminal failure fingerprint count" 1 count
   | _ -> failwith "expected exactly one terminal failure fingerprint"
 
+(* ── Latency ring buffer / p50 / p95 ───────────────────────── *)
+
+let test_latency_unrecorded_yields_none () =
+  let t = H.create () in
+  H.record_success t ~provider_key:"p" ();
+  let info = info_or_fail t ~provider_key:"p" in
+  check (option (float 0.001)) "p50 None when no latency recorded"
+    None info.p50_latency_ms;
+  check (option (float 0.001)) "p95 None when no latency recorded"
+    None info.p95_latency_ms;
+  check int "latency_samples 0 when no latency recorded"
+    0 info.latency_samples
+
+let test_latency_single_sample_p50_eq_p95 () =
+  let t = H.create () in
+  H.record_success t ~provider_key:"p" ~latency_ms:42.0 ();
+  let info = info_or_fail t ~provider_key:"p" in
+  check (option (float 0.001)) "p50 = single sample"
+    (Some 42.0) info.p50_latency_ms;
+  check (option (float 0.001)) "p95 = single sample"
+    (Some 42.0) info.p95_latency_ms;
+  check int "latency_samples 1" 1 info.latency_samples
+
+let test_latency_p50_is_median () =
+  let t = H.create () in
+  List.iter
+    (fun ms -> H.record_success t ~provider_key:"p" ~latency_ms:ms ())
+    [10.0; 20.0; 30.0; 40.0; 50.0];
+  let info = info_or_fail t ~provider_key:"p" in
+  (* 5 samples sorted: 10 20 30 40 50; rank 0.50 * 4 = 2.0 → buf.(2) = 30 *)
+  check (option (float 0.001)) "p50 of 5 evenly spaced = median"
+    (Some 30.0) info.p50_latency_ms;
+  check int "latency_samples 5" 5 info.latency_samples
+
+let test_latency_p95_above_p50 () =
+  (* Monotonicity property: with non-degenerate samples, p95 >= p50. *)
+  let t = H.create () in
+  List.iter
+    (fun ms -> H.record_success t ~provider_key:"p" ~latency_ms:ms ())
+    [50.0; 100.0; 150.0; 200.0; 250.0; 300.0; 1000.0];
+  let info = info_or_fail t ~provider_key:"p" in
+  let p50 = match info.p50_latency_ms with Some x -> x | None -> 0.0 in
+  let p95 = match info.p95_latency_ms with Some x -> x | None -> 0.0 in
+  check bool
+    (Printf.sprintf "p95=%.1f >= p50=%.1f" p95 p50)
+    true (p95 >= p50)
+
+let test_latency_ring_drops_oldest () =
+  (* When the ring overflows, the oldest sample must be evicted.  Push
+     [latency_ring_size + 5] samples; the populated count saturates at
+     the ring size and the smallest 5 (which were pushed first) must be
+     gone, so the median shifts. *)
+  let t = H.create () in
+  let ring = H.latency_ring_size in
+  if ring <= 0 then
+    skip ()
+  else begin
+    (* Push small first (would-be oldest), then the bulk of larger
+       samples that will dominate the populated ring. *)
+    for i = 1 to 5 do
+      H.record_success t ~provider_key:"p" ~latency_ms:(float_of_int i) ()
+    done;
+    for _ = 1 to ring do
+      H.record_success t ~provider_key:"p" ~latency_ms:1000.0 ()
+    done;
+    let info = info_or_fail t ~provider_key:"p" in
+    (* The first 5 (1..5 ms) should have been overwritten, leaving only
+       1000.0 samples in the ring. *)
+    check int
+      (Printf.sprintf "ring saturates at latency_ring_size=%d" ring)
+      ring info.latency_samples;
+    check (option (float 0.001))
+      "p50 = 1000 once oldest were evicted"
+      (Some 1000.0) info.p50_latency_ms
+  end
+
+let test_latency_drops_invalid_samples () =
+  let t = H.create () in
+  H.record_success t ~provider_key:"p" ~latency_ms:0.0 ();
+  H.record_success t ~provider_key:"p" ~latency_ms:(-5.0) ();
+  H.record_success t ~provider_key:"p" ~latency_ms:Float.nan ();
+  H.record_success t ~provider_key:"p" ~latency_ms:Float.infinity ();
+  let info = info_or_fail t ~provider_key:"p" in
+  (* All four are invalid; tracker should retain nothing. *)
+  check int "invalid latency samples dropped" 0 info.latency_samples;
+  check (option (float 0.001)) "p50 None after only invalid samples"
+    None info.p50_latency_ms
+
+let test_latency_only_recorded_on_success () =
+  (* Failures must not contribute to the percentile.  A 200ms successful
+     call and a 200ms timeout are not the same signal. *)
+  let t = H.create () in
+  H.record_failure t ~provider_key:"p" ();
+  H.record_rejected t ~provider_key:"p" ();
+  H.record_hard_quota t ~provider_key:"p" ();
+  H.record_success t ~provider_key:"p" ~latency_ms:99.0 ();
+  let info = info_or_fail t ~provider_key:"p" in
+  check int "only 1 latency sample (from the success)"
+    1 info.latency_samples;
+  check (option (float 0.001)) "p50 = the single success sample"
+    (Some 99.0) info.p50_latency_ms
 
 let () =
   run "cascade_health_tracker" [
@@ -441,5 +542,21 @@ let () =
         test_terminal_failure_preserves_longer_existing_cooldown;
       test_case "terminal_failure records fingerprint" `Quick
         test_terminal_failure_records_fingerprint;
+    ];
+    "latency", [
+      test_case "no latency recorded → percentiles None" `Quick
+        test_latency_unrecorded_yields_none;
+      test_case "single sample → p50 = p95 = sample" `Quick
+        test_latency_single_sample_p50_eq_p95;
+      test_case "p50 of evenly spaced samples is median" `Quick
+        test_latency_p50_is_median;
+      test_case "p95 ≥ p50 (monotonicity)" `Quick
+        test_latency_p95_above_p50;
+      test_case "ring drops oldest on overflow" `Quick
+        test_latency_ring_drops_oldest;
+      test_case "invalid samples (NaN, ≤0, inf) are dropped" `Quick
+        test_latency_drops_invalid_samples;
+      test_case "latency only recorded on Success" `Quick
+        test_latency_only_recorded_on_success;
     ];
   ]

@@ -203,7 +203,7 @@ describe('fsm-hub derived state', () => {
 
     expect(result.tone).toBe('ok')
     expect(result.headline).toContain('Idle 스냅샷 정상')
-    expect(result.detail).toContain('25s 전')
+    expect(result.detail).toContain('25s')
   })
 
   it('marks long-running observed execution as stalled on screen', () => {

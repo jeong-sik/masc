@@ -1,0 +1,40 @@
+/* Archived brand-voice theme — preserved for reference only.
+   Not linked by bonsai_index_html. Active themes live in the codegen
+   SSOT: dashboard/design-system/tokens/source.ts (emitted to
+   dashboard_bonsai/static/colors_and_type.generated.css).
+   Wave 2 Bonsai swap (Friend-2C). */
+
+/* ── Cyberpunk ─────────────────────────────────────────── */
+[data-theme="cyberpunk"] {
+  color-scheme: dark;
+  --bg-deep:      #05000f;
+  --bg-panel:     #0d0821;
+  --bg-panel-alt: #130e2a;
+  --bg-card:      #1a1235;
+  --bg-card-hover:#221a42;
+  --border-main:      #2a1a4a;
+  --border-highlight: #6a2fd6;
+  --text-bright:  #f5f0ff;
+  --text-primary: #e0d4ff;
+  --text-dim:     #9082b5;
+  --accent-brass: #00ffcc;
+  --accent-brass-dim: #008866;
+  --accent-blood: #ff2266;
+  --accent-ink:   #6a2fd6;
+  --accent-glow:  rgba(0, 255, 204, 0.12);
+  --status-ok:   #00ffcc;
+  --status-warn: #ffaa00;
+  --status-bad:  #ff2266;
+  --font-display: 'Share Tech Mono', 'Noto Sans KR', monospace;
+  --font-body:    'Noto Sans KR', sans-serif;
+  --font-ui:      'Share Tech Mono', 'Noto Sans KR', monospace;
+  --radius-xs: 0; --radius-sm: 0; --radius-md: 0;
+  --shadow-panel: 0 0 16px rgba(106, 47, 214, 0.3);
+  --shadow-glow:  0 0 24px rgba(0, 255, 204, 0.2), 0 0 48px rgba(0, 255, 204, 0.05);
+  /* Trace frames — neon */
+  --t-llm:   #6a2fd6;
+  --t-tool:  #00ffcc;
+  --t-think: #3a2555;
+  --t-wait:  #0d0821;
+  --t-err:   #ff2266;
+}

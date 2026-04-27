@@ -192,17 +192,17 @@ masc_tools = ["masc_status", "masc_tool_help"]
 # ~15 tools. Optimal for 9B tool selection accuracy.
 [presets.social]
 groups = ["base", "board_core", "coordination_core", "filesystem", "voice"]
-masc_groups = ["essential"]
+masc_groups = ["essential", "coordination"]
 
 # Messaging: social + shell, library, github for broader interaction.
 # ~25 tools.
 [presets.messaging]
 groups = ["base", "board_core", "coordination_core", "shell", "filesystem", "library", "voice"]
-masc_groups = ["essential"]
+masc_groups = ["essential", "coordination"]
 
 [presets.dispatch]
 groups = ["base", "board_core", "filesystem", "library", "shell"]
-masc_groups = ["essential", "dispatch", "code_observe"]
+masc_groups = ["essential", "dispatch", "code_observe", "coordination"]
 
 [presets.coding]
 groups = ["base", "board_core", "filesystem", "filesystem_write", "library", "shell", "coordination", "coding_shard", "coding", "github", "github_review"]

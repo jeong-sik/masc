@@ -23,6 +23,7 @@
    auto_responder
    auth
    auth_doctor
+   auth_error_kind
    auth_login
    auth_resolve
    auth_strict_mode

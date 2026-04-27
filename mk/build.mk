@@ -27,10 +27,10 @@ bonsai-dashboard:
 	rm -f assets/dashboard_bonsai/main.bc.js
 	cp dashboard_bonsai/_build/default/bin/main.bc.js assets/dashboard_bonsai/main.bc.js
 	# MASC Design System 토큰을 정적 자원으로 함께 배포.
-	# 서버는 /dashboard/b/assets/colors_and_type.css로 이 파일을 서빙하고,
-	# bonsai_index_html은 이 경로를 <link>로 참조한다. 추후 ppx_css 리터럴
-	# 값을 var(--bg-deep) 등으로 점진 교체할 때 :root가 준비되어 있어야 한다.
-	cp dashboard_bonsai/static/colors_and_type.css assets/dashboard_bonsai/colors_and_type.css
+	# 서버는 /dashboard/b/assets/colors_and_type.generated.css로 서빙하고,
+	# bonsai_index_html은 이 경로를 <link>로 참조한다. 토큰 SSOT는
+	# dashboard/design-system/tokens/source.ts → `pnpm tokens:build` 산출물.
+	cp dashboard_bonsai/static/colors_and_type.generated.css assets/dashboard_bonsai/colors_and_type.generated.css
 
 # Build Bonsai only if the OxCaml switch exists. Used by `build-all` so a
 # single `make` run builds both main masc-mcp and the Bonsai island when
@@ -58,7 +58,7 @@ clean-bonsai-dashboard:
 # where the bundle itself hasn't changed but the :root palette did.
 bonsai-dashboard-tokens:
 	mkdir -p assets/dashboard_bonsai
-	cp dashboard_bonsai/static/colors_and_type.css assets/dashboard_bonsai/colors_and_type.css
+	cp dashboard_bonsai/static/colors_and_type.generated.css assets/dashboard_bonsai/colors_and_type.generated.css
 
 # Build everything: main masc-mcp + Preact dashboard + Bonsai (if available).
 # Note: `dune build` at the repo root only compiles the main OCaml — the

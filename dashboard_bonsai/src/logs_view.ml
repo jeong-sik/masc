@@ -8,7 +8,7 @@
     UI per the system's type stack.
 
     Tokens are inlined as literals because ppx_css has no access to the
-    design system's [:root] variables yet. When [colors_and_type.css] is
+    design system's [:root] variables yet. When [colors_and_type.generated.css] is
     served from [assets/dashboard_bonsai/], the inline values become
     [var(--color-bg-page)] etc. *)
 

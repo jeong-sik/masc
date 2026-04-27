@@ -1,0 +1,571 @@
+<!doctype html>
+<html lang="en" data-theme="dark-fantasy">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MASC Cockpit — A11y drift coverage (W14)</title>
+  <!-- Cascade chain (read-only mirror, do NOT edit production CSS):
+         dashboard/src/main.ts -> imports global.css
+         dashboard/src/styles/global.css:37 -> @import "./a11y.css"
+         dashboard/src/styles/a11y.css -> 99 LOC, last touched in masc-mcp PR #11224
+       This preview reflects production a11y.css verbatim. Tokens come from
+       dashboard/design-system/source_styles/tokens.generated.css via _preview.css. -->
+  <link rel="stylesheet" href="_preview.css" />
+  <style>
+    /* ──────────────────────────────────────────────────────────────
+       Local preview-only styles. Mirror a11y.css behavior using
+       design-system tokens. No hex literals. var() only.
+       ────────────────────────────────────────────────────────────── */
+
+    /* Skip-link demo target — visible only when keyboard-focused.
+       Mirrors production a11y.css:50 (.skip-link:focus). */
+    .a11y-skip-link {
+      position: absolute;
+      width: 1px; height: 1px;
+      padding: 0; margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border-width: 0;
+      color: var(--color-fg-primary);
+      background: var(--color-bg-page);
+      text-decoration: none;
+    }
+    .a11y-skip-link:focus {
+      position: fixed;
+      top: 8px; left: 8px;
+      z-index: 9999;
+      width: auto; height: auto;
+      padding: 8px 16px;
+      margin: 0;
+      overflow: visible;
+      clip: auto;
+      white-space: normal;
+      border: 1px solid var(--color-accent-fg);
+      border-radius: var(--r-1);
+      outline: 2px solid var(--color-accent-fg);
+      outline-offset: 2px;
+      background: var(--color-bg-page);
+      color: var(--color-fg-primary);
+      font: var(--type-body);
+    }
+
+    /* Cascade banner */
+    .a11y-banner {
+      border: 1px solid var(--color-border-strong);
+      border-radius: var(--r-1);
+      background: var(--color-bg-surface);
+      padding: 14px 18px;
+      display: flex; flex-direction: column; gap: 6px;
+    }
+    .a11y-banner code {
+      font-family: var(--font-mono);
+      font-size: var(--fs-12);
+      color: var(--color-fg-primary);
+    }
+    .a11y-banner .lbl {
+      font: var(--type-label);
+      letter-spacing: var(--track-caps);
+      text-transform: uppercase;
+      color: var(--color-fg-muted);
+    }
+
+    /* Toggle row */
+    .a11y-toggle-row {
+      display: flex; align-items: center; gap: 18px;
+      padding: 14px 18px;
+      border: 1px solid var(--color-border-default);
+      border-radius: var(--r-1);
+      background: var(--color-bg-surface);
+    }
+    .a11y-toggle-row .label {
+      font: var(--type-label);
+      letter-spacing: var(--track-caps);
+      text-transform: uppercase;
+      color: var(--color-fg-muted);
+    }
+    .a11y-toggle {
+      display: inline-flex; gap: 6px;
+    }
+    .a11y-toggle input { position: absolute; opacity: 0; pointer-events: none; }
+    .a11y-toggle label {
+      font-family: var(--font-mono);
+      font-size: var(--fs-11);
+      letter-spacing: var(--track-wide);
+      padding: 6px 12px;
+      border: 1px solid var(--color-border-default);
+      border-radius: var(--r-1);
+      color: var(--color-fg-secondary);
+      background: var(--color-bg-page);
+      cursor: pointer;
+    }
+    .a11y-toggle label:hover { border-color: var(--color-border-strong); }
+    .a11y-toggle input:checked + label {
+      border-color: var(--color-accent-fg);
+      color: var(--color-fg-primary);
+      background: var(--color-bg-panel-alt);
+    }
+    .a11y-toggle input:focus-visible + label {
+      outline: 2px solid var(--color-accent-fg);
+      outline-offset: 2px;
+    }
+
+    /* CSS-only motion-toggle: when #motion-reduce is checked anywhere
+       in the page, reduce-motion overrides apply to the demo nodes
+       inside .a11y-demo-scope. This mirrors @media (prefers-reduced-motion: reduce)
+       behavior from a11y.css:73-99 visually, without needing JS. */
+    .a11y-demo-scope .pulse-dot,
+    .a11y-demo-scope .spin-ring,
+    .a11y-demo-scope .ping-dot {
+      animation-duration: 1.6s;
+      animation-iteration-count: infinite;
+      animation-timing-function: ease-in-out;
+    }
+    .a11y-demo-scope .pulse-dot { animation-name: a11y-pulse; }
+    .a11y-demo-scope .spin-ring { animation-name: a11y-spin; animation-timing-function: linear; }
+    .a11y-demo-scope .ping-dot { animation-name: a11y-ping; animation-duration: 1.2s; }
+
+    @keyframes a11y-pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50%      { opacity: .35; transform: scale(.85); }
+    }
+    @keyframes a11y-spin {
+      from { transform: rotate(0deg); }
+      to   { transform: rotate(360deg); }
+    }
+    @keyframes a11y-ping {
+      0%   { box-shadow: 0 0 0 0 rgb(var(--color-accent-glow) / .6); }
+      100% { box-shadow: 0 0 0 14px rgb(var(--color-accent-glow) / 0); }
+    }
+
+    /* The motion toggle uses a sibling-combinator hack: the radios are
+       siblings of .a11y-demo-scope. When `motion-reduce` is checked,
+       all animations stop in scope. Mirrors a11y.css:98 universal
+       transition-duration: 0s !important reset. */
+    body:has(#motion-reduce:checked) .a11y-demo-scope .pulse-dot,
+    body:has(#motion-reduce:checked) .a11y-demo-scope .spin-ring,
+    body:has(#motion-reduce:checked) .a11y-demo-scope .ping-dot {
+      animation: none !important;
+    }
+    body:has(#motion-reduce:checked) .a11y-demo-scope * {
+      transition-duration: 0s !important;
+      animation-duration: 0s !important;
+    }
+    body:has(#motion-reduce:checked) .a11y-demo-scope .reduce-marker {
+      display: inline;
+    }
+    .a11y-demo-scope .reduce-marker { display: none; }
+
+    /* Demo cells */
+    .a11y-card {
+      border: 1px solid var(--color-border-default);
+      border-radius: var(--r-1);
+      background: var(--color-bg-surface);
+      padding: 16px;
+      display: flex; flex-direction: column; gap: 12px;
+    }
+    .a11y-card .src-ref {
+      font-family: var(--font-mono);
+      font-size: var(--fs-9);
+      color: var(--color-fg-disabled);
+      letter-spacing: var(--track-wide);
+    }
+    .a11y-card h3 {
+      font: 600 var(--type-title);
+      letter-spacing: var(--track-caps);
+      text-transform: uppercase;
+      color: var(--color-fg-secondary);
+    }
+    .a11y-card p {
+      font: var(--type-body);
+      color: var(--color-fg-secondary);
+      max-width: 64ch;
+    }
+
+    .a11y-stage {
+      display: flex; align-items: center; gap: 14px;
+      flex-wrap: wrap;
+      padding: 12px;
+      background: var(--color-bg-page);
+      border: 1px dashed var(--color-border-default);
+      border-radius: var(--r-1);
+    }
+
+    /* Focus-ring demo elements. Mirror a11y.css:5-13 global :focus-visible. */
+    .demo-button {
+      font-family: var(--font-sans);
+      font-size: var(--fs-12);
+      padding: 8px 16px;
+      border: 1px solid var(--color-border-strong);
+      border-radius: var(--r-1);
+      background: var(--color-bg-panel-alt);
+      color: var(--color-fg-primary);
+      cursor: pointer;
+    }
+    .demo-button:focus-visible {
+      outline: 2px solid var(--color-accent-fg);
+      outline-offset: 2px;
+    }
+    .demo-button:focus:not(:focus-visible) { outline: none; }
+
+    .demo-link {
+      font-family: var(--font-sans);
+      font-size: var(--fs-12);
+      color: var(--color-accent-fg);
+      text-decoration: underline;
+      text-underline-offset: 3px;
+    }
+    .demo-link:focus-visible {
+      outline: 2px solid var(--color-accent-fg);
+      outline-offset: 2px;
+      border-radius: var(--r-1);
+    }
+
+    .demo-input {
+      font-family: var(--font-mono);
+      font-size: var(--fs-12);
+      padding: 6px 10px;
+      border: 1px solid var(--color-border-default);
+      border-radius: var(--r-1);
+      background: var(--color-bg-page);
+      color: var(--color-fg-primary);
+      min-width: 180px;
+    }
+    .demo-input:focus-visible {
+      outline: 2px solid var(--color-accent-fg);
+      outline-offset: 2px;
+    }
+
+    /* .focusable opt-in (a11y.css:22-34) — brass double-ring via box-shadow.
+       Re-uses --focus-ring token from tokens.generated.css. */
+    .demo-focusable {
+      font-family: var(--font-mono);
+      font-size: var(--fs-12);
+      padding: 8px 16px;
+      border: 1px solid var(--color-border-default);
+      border-radius: var(--r-1);
+      background: var(--color-bg-surface);
+      color: var(--color-fg-primary);
+      cursor: pointer;
+    }
+    .demo-focusable:focus-visible {
+      outline: none;
+      box-shadow: var(--focus-ring);
+    }
+    .demo-focusable.is-err:focus-visible {
+      outline: none;
+      box-shadow: var(--focus-ring-err);
+    }
+
+    /* sr-only utility (a11y.css:37-47) — visualized via a "peek" wrapper
+       that reveals the hidden element on hover so reviewers can confirm
+       the live element is there. */
+    .sr-peek {
+      position: relative;
+      display: inline-flex;
+      padding: 4px 10px;
+      border: 1px dashed var(--color-border-default);
+      border-radius: var(--r-1);
+      font: var(--type-caption);
+      color: var(--color-fg-muted);
+    }
+    .sr-peek .sr-only {
+      position: absolute;
+      width: 1px; height: 1px;
+      padding: 0; margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border-width: 0;
+    }
+    .sr-peek:hover .sr-only,
+    .sr-peek:focus-within .sr-only {
+      position: static;
+      width: auto; height: auto;
+      padding: 2px 6px;
+      margin: 0 0 0 8px;
+      overflow: visible;
+      clip: auto;
+      white-space: normal;
+      background: var(--color-bg-panel-alt);
+      color: var(--color-fg-primary);
+      border-radius: var(--r-1);
+    }
+
+    /* Animated demo nodes for reduced-motion toggle.
+       Each mirrors a class enumerated in a11y.css:74-95. */
+    .pulse-dot {
+      width: 14px; height: 14px;
+      border-radius: 50%;
+      background: var(--color-accent-fg);
+    }
+    .spin-ring {
+      width: 18px; height: 18px;
+      border-radius: 50%;
+      border: 2px solid var(--color-border-default);
+      border-top-color: var(--color-accent-fg);
+    }
+    .ping-dot {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      background: var(--color-accent-fg);
+    }
+    .reduce-marker {
+      font-family: var(--font-mono);
+      font-size: var(--fs-10);
+      color: var(--color-fg-muted);
+      letter-spacing: var(--track-wide);
+    }
+
+    /* Catalog — Phase 2 candidate. Read from a11y.css with rg.
+       Captures any non-token color literals for future tokenization. */
+    .a11y-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-family: var(--font-mono);
+      font-size: var(--fs-11);
+    }
+    .a11y-table th, .a11y-table td {
+      text-align: left;
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--color-border-default);
+      color: var(--color-fg-secondary);
+    }
+    .a11y-table th {
+      font: 600 var(--type-label);
+      letter-spacing: var(--track-caps);
+      text-transform: uppercase;
+      color: var(--color-fg-muted);
+    }
+    .a11y-table td.fix { color: var(--color-fg-primary); }
+
+    /* Footer attribution */
+    .a11y-foot {
+      font-family: var(--font-mono);
+      font-size: var(--fs-10);
+      color: var(--color-fg-disabled);
+      letter-spacing: var(--track-wide);
+    }
+    .a11y-foot a { color: var(--color-accent-fg); }
+  </style>
+</head>
+<body>
+  <!-- Skip-link target: tab once into the page to reveal it. -->
+  <a class="a11y-skip-link" href="#main">Skip to main content</a>
+
+  <div class="pv-root">
+    <header class="pv-head">
+      <div class="pv-eyebrow">DS-Drift · W14 · a11y.css</div>
+      <h1 class="pv-title">A11y drift coverage</h1>
+      <p class="pv-sub">
+        Visual mirror of <code style="font-family:var(--font-mono);font-size:var(--fs-12);color:var(--color-fg-primary)">dashboard/src/styles/a11y.css</code>.
+        Read-only; production CSS is the SSOT. Phase 1 / W14 of the design-system drift
+        workstream (Plan: <code style="font-family:var(--font-mono);font-size:var(--fs-12);color:var(--color-fg-primary)">20m-me-workspace-yousleepwhen-masc-mcp-h-curious-dusk.md</code>).
+      </p>
+    </header>
+
+    <!-- ============================================================
+         CASCADE CHAIN BANNER — proves a11y.css is LIVE in production.
+         ============================================================ -->
+    <section class="pv-sect">
+      <header class="pv-sect-h"><h2>Cascade chain</h2><span class="sub">how this file reaches runtime</span></header>
+      <div class="a11y-banner">
+        <div class="lbl">Import path</div>
+        <code>dashboard/src/main.ts &nbsp;→&nbsp; dashboard/src/styles/global.css:37 &nbsp;→&nbsp; dashboard/src/styles/a11y.css</code>
+        <div class="lbl" style="margin-top:8px">Verified by</div>
+        <code>PR <a href="https://github.com/jeong-sik/masc-mcp/pull/11317" style="color:var(--color-accent-fg)">orphan-triage</a> · classification = LIVE · masc-mcp</code>
+        <div class="lbl" style="margin-top:8px">Phase 0 reference</div>
+        <code>PR Phase 0 production-css audit (orphan triage cleared the false negative)</code>
+      </div>
+    </section>
+
+    <!-- ============================================================
+         REDUCED-MOTION TOGGLE — CSS-only, sibling-combinator hack.
+         ============================================================ -->
+    <section class="pv-sect" id="main">
+      <header class="pv-sect-h"><h2>prefers-reduced-motion toggle</h2><span class="sub">CSS-only :has(:checked) override; mirrors a11y.css:73-99</span></header>
+      <div class="a11y-toggle-row">
+        <span class="label">Motion</span>
+        <span class="a11y-toggle">
+          <input id="motion-default" type="radio" name="motion" checked />
+          <label for="motion-default">no-preference</label>
+          <input id="motion-reduce" type="radio" name="motion" />
+          <label for="motion-reduce">reduce</label>
+        </span>
+        <span class="a11y-foot">
+          Toggling "reduce" stops all keyframe animations and zeroes
+          transition-duration in the demo scope below.
+        </span>
+      </div>
+
+      <div class="a11y-demo-scope">
+        <div class="a11y-card">
+          <div class="src-ref">mirrors production a11y.css:74-95 (animation: none under prefers-reduced-motion)</div>
+          <h3>Animation classes neutralized under reduce</h3>
+          <p>Each animated dot below corresponds to a selector enumerated in a11y.css. With "reduce" selected, all of them halt in place.</p>
+          <div class="a11y-stage">
+            <span class="pulse-dot" title=".pulse-working / .activity-dot--live-pulse"></span>
+            <span class="spin-ring" title=".animate-spin"></span>
+            <span class="ping-dot" title=".animate-ping"></span>
+            <span class="reduce-marker">reduce active · animation: none</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================
+         FOCUS RING DEMO — keyboard-focusable elements.
+         ============================================================ -->
+    <section class="pv-sect">
+      <header class="pv-sect-h"><h2>Focus ring (WCAG 2.4.7)</h2><span class="sub">Tab through the controls below to see the keyboard ring</span></header>
+
+      <div class="pv-grid-2">
+        <div class="a11y-card">
+          <div class="src-ref">mirrors production a11y.css:5-8 (:focus-visible — global accent ring)</div>
+          <h3>Global :focus-visible — button</h3>
+          <p>Default for every interactive element. Outline 2px <code style="font-family:var(--font-mono);font-size:var(--fs-11);color:var(--color-fg-primary)">var(--color-accent-fg)</code> with 2px offset.</p>
+          <div class="a11y-stage">
+            <button class="demo-button" type="button">Trigger action</button>
+            <button class="demo-button" type="button">Secondary</button>
+          </div>
+        </div>
+
+        <div class="a11y-card">
+          <div class="src-ref">mirrors production a11y.css:5-8 + 11-13 (:focus-visible vs :focus-not-visible)</div>
+          <h3>Global :focus-visible — link &amp; input</h3>
+          <p>Mouse clicks suppress the ring; keyboard focus shows it. Click vs Tab — the production guard at a11y.css:11-13 strips browser default outline on pointer focus.</p>
+          <div class="a11y-stage">
+            <a class="demo-link" href="#main">Skip to top</a>
+            <input class="demo-input" type="text" placeholder="tab into me" />
+          </div>
+        </div>
+
+        <div class="a11y-card">
+          <div class="src-ref">mirrors production a11y.css:22-27 (.focusable — brass double-ring opt-in)</div>
+          <h3>.focusable opt-in — brass double-ring</h3>
+          <p>SPEC v0.4 atom 13. Layered on top of the global ring: 1px solid brass + 3px translucent brass glow. Token: <code style="font-family:var(--font-mono);font-size:var(--fs-11);color:var(--color-fg-primary)">var(--focus-ring)</code>.</p>
+          <div class="a11y-stage">
+            <button class="demo-focusable" type="button">.focusable</button>
+          </div>
+        </div>
+
+        <div class="a11y-card">
+          <div class="src-ref">mirrors production a11y.css:29-34 (.focusable.is-err — error swap)</div>
+          <h3>.focusable.is-err — error swap</h3>
+          <p>Brass swapped for status-err. Token: <code style="font-family:var(--font-mono);font-size:var(--fs-11);color:var(--color-fg-primary)">var(--focus-ring-err)</code>.</p>
+          <div class="a11y-stage">
+            <button class="demo-focusable is-err" type="button">.focusable.is-err</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================
+         SCREEN-READER ONLY + SKIP-LINK PATTERNS.
+         ============================================================ -->
+    <section class="pv-sect">
+      <header class="pv-sect-h"><h2>sr-only &amp; skip-link patterns</h2><span class="sub">visually hidden, AT-discoverable</span></header>
+
+      <div class="pv-grid-2">
+        <div class="a11y-card">
+          <div class="src-ref">mirrors production a11y.css:37-47 (.sr-only)</div>
+          <h3>.sr-only — visually hidden text</h3>
+          <p>Hover the chip to reveal what assistive tech reads. The text exists in the DOM, just clipped to a 1×1 pixel.</p>
+          <div class="a11y-stage">
+            <span class="sr-peek">
+              16 keepers online
+              <span class="sr-only">(announced to screen readers: 16 keepers currently online)</span>
+            </span>
+          </div>
+        </div>
+
+        <div class="a11y-card">
+          <div class="src-ref">mirrors production a11y.css:50-71 (.skip-link:focus)</div>
+          <h3>.skip-link — visible on focus only</h3>
+          <p>The very first Tab-stop on this page exposes a fixed-position skip link in the upper-left corner. Press <code style="font-family:var(--font-mono);font-size:var(--fs-11);color:var(--color-fg-primary)">Tab</code> at the top of the page — or click the chip below and Shift+Tab back — to see it.</p>
+          <div class="a11y-stage">
+            <span class="a11y-foot">WCAG 2.4.1 — bypass blocks of repeated content</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================
+         PHASE 2 CATALOG — non-token color literals in a11y.css.
+         ============================================================ -->
+    <section class="pv-sect">
+      <header class="pv-sect-h"><h2>Phase 2 candidate · raw color audit</h2><span class="sub">non-token literals inside a11y.css fallbacks</span></header>
+      <div class="a11y-card">
+        <p>
+          a11y.css uses <code style="font-family:var(--font-mono);font-size:var(--fs-11);color:var(--color-fg-primary)">var(--token, fallback)</code> patterns. The fallbacks below are
+          raw rgba/hex literals embedded in the production CSS as a defensive
+          measure when tokens aren't loaded. Phase 2 should promote each to a
+          dedicated token (or remove the fallback if SSOT load order is guaranteed).
+        </p>
+        <table class="a11y-table">
+          <thead>
+            <tr>
+              <th>a11y.css line</th>
+              <th>selector</th>
+              <th>property</th>
+              <th>raw fallback</th>
+              <th class="fix">Phase 2 action</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>L6</td>
+              <td>:focus-visible</td>
+              <td>outline</td>
+              <td>rgba accent-45 fallback</td>
+              <td class="fix">drop fallback; require --accent-45 from tokens</td>
+            </tr>
+            <tr>
+              <td>L26</td>
+              <td>.focusable:focus-visible</td>
+              <td>box-shadow</td>
+              <td>rgb-from-triplet (brass-glow)</td>
+              <td class="fix">replace with --focus-ring token (already exists)</td>
+            </tr>
+            <tr>
+              <td>L33</td>
+              <td>.focusable.is-err:focus-visible</td>
+              <td>box-shadow</td>
+              <td>rgb-from-triplet (status-err-glow)</td>
+              <td class="fix">replace with --focus-ring-err token (already exists)</td>
+            </tr>
+            <tr>
+              <td>L63</td>
+              <td>.skip-link:focus</td>
+              <td>background</td>
+              <td>page-bg hex fallback</td>
+              <td class="fix">drop fallback; --color-bg-page is always loaded</td>
+            </tr>
+            <tr>
+              <td>L64</td>
+              <td>.skip-link:focus</td>
+              <td>color</td>
+              <td>fg-primary hex fallback</td>
+              <td class="fix">drop fallback</td>
+            </tr>
+            <tr>
+              <td>L77</td>
+              <td>.pixel-avatar--has-blocker (reduce)</td>
+              <td>box-shadow</td>
+              <td>rgba red literal</td>
+              <td class="fix">promote to --color-status-blocker-glow</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <footer class="pv-sect">
+      <div class="a11y-foot">
+        Source: dashboard/src/styles/a11y.css (99 LOC) · last touched in masc-mcp PR for #3915 ·
+        cascade verified by orphan-triage · Plan: 20m-me-workspace-yousleepwhen-masc-mcp-h-curious-dusk.md
+      </div>
+    </footer>
+  </div>
+</body>
+</html>

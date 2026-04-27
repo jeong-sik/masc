@@ -1,0 +1,823 @@
+<!doctype html>
+<html lang="en" data-theme="dark-fantasy">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MASC — Chat preview (W08)</title>
+  <!--
+    W08 chat preview (DS-Drift Phase 1).
+    Production source file (read-only mirror):
+      - dashboard/src/styles/chat.css (85 lines, 6 @utility selectors)
+    Tokens SSOT:
+      - dashboard/design-system/source_styles/tokens.generated.css
+
+    chat.css load chain (Loaded via main.ts → global.css @import → chat.css):
+      - dashboard/src/main.ts                  imports './styles/global.css'
+      - dashboard/src/styles/global.css:25     @import "./chat.css";
+
+    Phase 0 audit (#11300) classified chat.css as "orphan". The W08 triage
+    PR (#11317) falsified that — chat.css is LIVE through the global.css
+    @import cascade and powers the production chat surface in
+    dashboard/src/components/chat/primitives.ts (chat-transcript / -bubble
+    / -avatar / -role-chip / -detail-panel / -detail-callout). This page
+    visualises every production selector and @utility variant so the
+    drift catalog is auditable from the design-system gallery.
+
+    chat.css references three legacy aliases that live in
+    dashboard/src/styles/variables.css (NOT in the generated SSOT):
+      var(--accent-8)            -> rgba(71,184,255,0.08)  (variables.css:60)
+      var(--accent-14)           -> rgba(71,184,255,0.14)  (alias scale)
+      var(--color-accent-soft)   -> var(--brass-soft)      (variables.css:333)
+      var(--fs-xs)               -> var(--font-size-xs)    (legacy alias)
+    plus eight raw rgba literals (Phase 2 candidates):
+      L8   rgba(5, 14, 31, 0.74)        -> chat-transcript bg
+      L15  rgba(30, 83, 138, 0.72)      -> chat-bubble.user gradient stop
+      L15  rgba(18, 48, 86, 0.82)       -> chat-bubble.user gradient stop
+      L16  rgba(71, 184, 255, 0.24)     -> chat-bubble.user border
+      L20  rgba(34, 22, 82, 0.72)       -> chat-bubble.assistant gradient stop
+      L21  rgba(167, 139, 250, 0.24)    -> chat-bubble.assistant border
+      L29  rgba(86, 24, 24, 0.72)       -> chat-bubble.error gradient stop
+      L70  rgba(7, 17, 37, 0.9)         -> chat-detail-panel gradient stop
+
+    This preview rebuilds the same tone using ONLY tokens.generated.css
+    variables. Drift catalog is in section 5 below. The legacy aliases
+    and raw rgba are NOT modified by this PR — that is Phase 2 scope.
+  -->
+  <link rel="stylesheet" href="_preview.css" />
+  <style>
+    /* ──────────────────────────────────────────────────────────────────
+       All values below come from tokens.generated.css. No raw hex.
+       Each ch-* class mirrors a production chat.css selector; comments
+       carry the source file and line pointer.
+       ────────────────────────────────────────────────────────────────── */
+
+    .pv-banner {
+      background: var(--color-bg-surface);
+      border: 1px solid var(--color-border-strong);
+      border-left: 3px solid var(--color-accent-fg);
+      border-radius: var(--r-1);
+      padding: 14px 18px;
+      display: flex; flex-direction: column; gap: 4px;
+    }
+    .pv-banner .h {
+      font: 600 var(--type-label);
+      letter-spacing: var(--track-caps);
+      text-transform: uppercase;
+      color: var(--color-fg-primary);
+    }
+    .pv-banner .l {
+      font: var(--type-micro);
+      font-family: var(--font-mono);
+      color: var(--color-fg-muted);
+      letter-spacing: var(--track-wide);
+    }
+
+    /* ── chat-transcript stage ─────────────────────────────────────
+       mirrors production chat.css:L5-9
+       @utility chat-transcript {
+         background:
+           radial-gradient(circle at top left, var(--accent-8), transparent 38%),
+           rgba(5, 14, 31, 0.74);
+       }
+       Drift mapping in this preview:
+         var(--accent-8)              -> rgb(var(--color-accent-glow) / .12)
+         rgba(5, 14, 31, 0.74)        -> var(--color-bg-page)
+       Production selector also gets sizing from primitives.ts:326
+       (min-h-75 max-h-130 flex flex-col overflow-y-auto border …); we
+       reproduce the geometry inline so the bubbles flow as in production. */
+    .ch-transcript {
+      display: flex; flex-direction: column; gap: 10px;
+      min-height: 280px;
+      max-height: 360px;
+      padding: 14px;
+      overflow-y: auto;
+      border: 1px solid var(--color-border-default);
+      border-radius: var(--r-1);
+      background:
+        radial-gradient(circle at top left, rgb(var(--color-accent-glow) / .12), transparent 38%),
+        var(--color-bg-page);
+      box-shadow: inset 0 1px 0 var(--color-border-default);
+    }
+
+    /* ── chat-bubble base + role variants ──────────────────────────
+       mirrors production chat.css:L11-31
+       @utility chat-bubble {
+         box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
+         &.user      { align-self: flex-end;   background: linear-gradient(180deg, rgba(30,83,138,.72), rgba(18,48,86,.82));  border-color: rgba(71,184,255,.24); }
+         &.assistant { align-self: flex-start; background: linear-gradient(180deg, rgba(34,22,82,.72), rgba(18,12,44,.86));   border-color: rgba(167,139,250,.24); }
+         &.system, &.error { align-self: flex-start; }
+         &.error     { border-color: rgba(239,68,68,.3); background: linear-gradient(180deg, rgba(86,24,24,.72), rgba(52,13,13,.82)); }
+       }
+       Drift mapping in this preview:
+         box-shadow rgba(0,0,0,.18)   -> var(--color-shadow) family (using elevation 10/30 ramp)
+         user gradient                -> blend over var(--color-bg-elevated)
+         assistant gradient           -> blend over var(--color-bg-panel-alt)
+         error gradient               -> blend over var(--color-bg-elevated) + status-err border
+       Production sizing comes from primitives.ts:131 (flex w-full flex-col
+       border backdrop-blur-sm + per-tone padding); we reproduce locally. */
+    .ch-bubble {
+      display: flex; flex-direction: column; gap: 6px;
+      max-width: 76%;
+      padding: 12px 14px;
+      border: 1px solid var(--color-border-default);
+      border-radius: var(--r-3);
+      box-shadow: 0 10px 30px rgb(0 0 0 / 0.18);
+      backdrop-filter: blur(6px);
+      font-size: var(--fs-13);
+      line-height: 1.55;
+      color: var(--color-fg-primary);
+    }
+    .ch-bubble.user {
+      align-self: flex-end;
+      background:
+        linear-gradient(180deg, rgb(var(--color-accent-glow) / .28), rgb(var(--color-accent-glow) / .14)),
+        var(--color-bg-elevated);
+      border-color: var(--color-border-strong);
+    }
+    .ch-bubble.assistant {
+      align-self: flex-start;
+      background:
+        linear-gradient(180deg, rgb(var(--color-accent-glow) / .18), rgb(var(--color-accent-glow) / .08)),
+        var(--color-bg-panel-alt);
+      border-color: var(--color-border-strong);
+    }
+    .ch-bubble.system {
+      align-self: flex-start;
+      background: var(--color-bg-surface);
+      border-color: var(--color-border-divider);
+      color: var(--color-fg-secondary);
+    }
+    .ch-bubble.error {
+      align-self: flex-start;
+      background: var(--color-bg-elevated);
+      border-color: var(--color-status-err);
+      color: var(--color-fg-primary);
+    }
+
+    /* ── chat-avatar role variants ─────────────────────────────────
+       mirrors production chat.css:L33-49
+       @utility chat-avatar {
+         &.user      { border-color: rgba(71,184,255,.28);  background: var(--color-accent-soft); color: #d8f0ff; }
+         &.assistant { border-color: rgba(167,139,250,.3);  background: rgba(167,139,250,.18);    color: #efe6ff; }
+         &.error     { border-color: rgba(239,68,68,.32);   background: rgba(239,68,68,.18);      color: #ffe1e1; }
+       }
+       Drift mapping in this preview:
+         var(--color-accent-soft) is the brass-soft alias (tokens.generated.css:366)
+         all role-tinted backgrounds → status / accent token wrappers
+         #d8f0ff / #efe6ff / #ffe1e1  → var(--color-fg-primary) (tone preserved by border) */
+    .ch-avatar {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 32px; height: 32px;
+      border-radius: 50%;
+      border: 1px solid var(--color-border-default);
+      background: var(--color-bg-surface);
+      font-family: var(--font-mono);
+      font-size: var(--fs-10);
+      font-weight: 600;
+      letter-spacing: var(--track-caps);
+      text-transform: uppercase;
+    }
+    .ch-avatar.user {
+      border-color: var(--color-accent-fg-dim);
+      background: var(--color-accent-soft);
+      color: var(--color-fg-primary);
+    }
+    .ch-avatar.assistant {
+      border-color: var(--color-status-info);
+      background: rgb(var(--color-accent-glow) / .18);
+      color: var(--color-fg-primary);
+    }
+    .ch-avatar.error {
+      border-color: var(--color-status-err);
+      background: rgb(var(--color-accent-glow) / .12);
+      color: var(--color-fg-primary);
+    }
+
+    /* ── chat-role-chip role variants ──────────────────────────────
+       mirrors production chat.css:L51-67
+       @utility chat-role-chip {
+         &.user      { border-color: rgba(71,184,255,.32);  color: #c9ebff; background: var(--accent-14); }
+         &.assistant { border-color: rgba(167,139,250,.32); color: #ded0ff; background: rgba(167,139,250,.14); }
+         &.error     { border-color: rgba(239,68,68,.35);   color: #ffb4b4; background: rgba(239,68,68,.14); }
+       }
+       Drift mapping in this preview:
+         var(--accent-14)   -> rgb(var(--color-accent-glow) / .14) (alias scale)
+         per-role text hex  -> var(--color-fg-primary) / -secondary
+       Production geometry comes from primitives.ts:172 (rounded-sm border
+       px-2.5 py-1 text-3xs font-semibold uppercase tracking-3). */
+    .ch-role-chip {
+      display: inline-flex; align-items: center;
+      padding: 3px 9px;
+      border: 1px solid var(--color-border-default);
+      border-radius: 2px;
+      background: var(--color-bg-surface);
+      font-family: var(--font-mono);
+      font-size: var(--fs-10);
+      font-weight: 600;
+      letter-spacing: var(--track-caps);
+      text-transform: uppercase;
+      color: var(--color-fg-secondary);
+    }
+    .ch-role-chip.user {
+      border-color: var(--color-accent-fg-dim);
+      color: var(--color-fg-primary);
+      background: rgb(var(--color-accent-glow) / .14);
+    }
+    .ch-role-chip.assistant {
+      border-color: var(--color-status-info);
+      color: var(--color-fg-primary);
+      background: rgb(var(--color-accent-glow) / .10);
+    }
+    .ch-role-chip.error {
+      border-color: var(--color-status-err);
+      color: var(--color-fg-primary);
+      background: rgb(var(--color-accent-glow) / .10);
+    }
+
+    /* ── chat-detail-panel + nested <pre> ──────────────────────────
+       mirrors production chat.css:L69-81
+       @utility chat-detail-panel {
+         background:
+           linear-gradient(180deg, rgba(7,17,37,.9), rgba(4,12,28,.82));
+         & pre {
+           margin: 0;
+           white-space: pre-wrap;
+           word-break: break-word;
+           font-family: "Fira Code", monospace;
+           font-size: var(--fs-xs);
+           line-height: 1.55;
+           color: #95f3bc;
+         }
+       }
+       Drift mapping in this preview:
+         dual rgba gradient    -> var(--color-bg-page) blend
+         "Fira Code" stack     -> var(--font-mono)
+         var(--fs-xs)          -> var(--fs-12)  (legacy alias, see section 5)
+         #95f3bc literal       -> var(--color-status-ok)
+       Production geometry from primitives.ts:239 (rounded-card border
+       border-[var(--slate-gray-14)] px-3 py-3). */
+    .ch-detail-panel {
+      background:
+        linear-gradient(180deg, var(--color-bg-page), var(--color-bg-elevated));
+      border: 1px solid var(--color-border-default);
+      border-radius: var(--r-1);
+      padding: 12px 14px;
+    }
+    .ch-detail-panel pre {
+      margin: 0;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: var(--font-mono);
+      font-size: var(--fs-12);
+      line-height: 1.55;
+      color: var(--color-status-ok);
+    }
+
+    /* ── chat-detail-callout ──────────────────────────────────────
+       mirrors production chat.css:L83-85
+       @utility chat-detail-callout {
+         background: linear-gradient(180deg, rgba(18,42,33,.55), rgba(10,25,20,.48));
+       }
+       Drift mapping in this preview:
+         dual rgba gradient    -> var(--color-bg-surface) tinted with --color-status-ok
+       Production geometry from primitives.ts:254 (rounded border
+       border-[rgba(76,181,137,0.18)] px-3 py-3). */
+    .ch-detail-callout {
+      background:
+        linear-gradient(180deg,
+          rgb(var(--color-accent-glow) / .10),
+          var(--color-bg-surface));
+      border: 1px solid var(--color-border-default);
+      border-left: 2px solid var(--color-status-ok);
+      border-radius: var(--r-1);
+      padding: 10px 12px;
+      font-size: var(--fs-12);
+      color: var(--color-fg-secondary);
+    }
+
+    /* ── small layout helpers (preview-only, no production analogue) ── */
+    .ch-row {
+      display: flex; align-items: flex-start; gap: 10px;
+      width: 100%;
+    }
+    .ch-row.right { flex-direction: row-reverse; }
+    .ch-meta {
+      display: flex; align-items: center; gap: 8px;
+      font-family: var(--font-mono);
+      font-size: var(--fs-10);
+      color: var(--color-fg-muted);
+      letter-spacing: var(--track-wide);
+    }
+    .ch-meta .name { color: var(--color-fg-secondary); font-weight: 600; }
+    .ch-meta .ts { color: var(--color-fg-disabled); }
+
+    /* token annotation block reused in cards */
+    .ch-toks {
+      display: flex; flex-wrap: wrap; gap: 4px;
+      padding-top: 6px;
+      border-top: 1px dashed var(--color-border-default);
+      margin-top: 4px;
+    }
+
+    /* drift evidence table (section 5) */
+    .ch-drift {
+      width: 100%; border-collapse: collapse;
+      font-family: var(--font-mono); font-size: var(--fs-11);
+      color: var(--color-fg-secondary);
+    }
+    .ch-drift thead th {
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--color-border-strong);
+      color: var(--color-fg-muted);
+      letter-spacing: var(--track-wide);
+      text-align: left;
+    }
+    .ch-drift tbody td {
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--color-border-default);
+      vertical-align: top;
+    }
+    .ch-drift tbody tr:last-child td { border-bottom: 0; }
+    .ch-drift td.use { color: var(--color-fg-muted); }
+
+    /* cascade chain banner (W08-specific) */
+    .ch-cascade {
+      display: flex; align-items: center; gap: 8px;
+      flex-wrap: wrap;
+      font-family: var(--font-mono);
+      font-size: var(--fs-11);
+      color: var(--color-fg-secondary);
+      letter-spacing: var(--track-wide);
+    }
+    .ch-cascade .step {
+      padding: 4px 8px;
+      border: 1px solid var(--color-border-default);
+      border-radius: 2px;
+      background: var(--color-bg-page);
+      color: var(--color-fg-primary);
+    }
+    .ch-cascade .arrow { color: var(--color-fg-disabled); }
+    .ch-cascade .target {
+      border-color: var(--color-accent-fg-dim);
+      background: rgb(var(--color-accent-glow) / .14);
+      color: var(--color-fg-primary);
+    }
+
+    /* role legend swatches in section 1 (no raw hex — preview decoration only) */
+    .ch-legend {
+      display: flex; flex-wrap: wrap; gap: 8px;
+      font-family: var(--font-mono);
+      font-size: var(--fs-10);
+      color: var(--color-fg-muted);
+      letter-spacing: var(--track-wide);
+    }
+    .ch-legend .item {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 2px 6px;
+      border: 1px solid var(--color-border-default);
+      border-radius: 2px;
+      background: var(--color-bg-page);
+    }
+  </style>
+</head>
+<body>
+  <div class="pv-root">
+
+    <header class="pv-head">
+      <div class="pv-eyebrow">DS-Drift · Phase 1 · W08</div>
+      <h1 class="pv-title">Chat preview</h1>
+      <p class="pv-sub">Visual mirror of <code>dashboard/src/styles/chat.css</code>
+        — six Tailwind v4 <code>@utility</code> selectors that drive the
+        live chat surface (transcript, role-tinted bubbles, role chips,
+        avatars, detail panel, inline callout). The Phase 0 audit
+        (<code>#11300</code>) classified <code>chat.css</code> as orphan;
+        the W08 triage pass (<code>#11317</code>) falsified that — the file is
+        loaded through <code>global.css</code>'s <code>@import</code>
+        cascade and is consumed by
+        <code>dashboard/src/components/chat/primitives.ts</code>. This
+        preview reproduces every production selector with SSOT tokens so
+        the drift catalog is auditable from the design-system gallery.</p>
+    </header>
+
+    <section class="pv-banner" role="note">
+      <div class="h">Production source: src/styles/chat.css · Tokens: tokens.generated.css · Last audit: 2026-04-28</div>
+      <div class="l">
+        Loaded via <strong>main.ts → global.css @import → chat.css</strong> · cascade chain confirmed by W08 triage (#11317), correcting Phase 0 orphan classification (#11300) · read-only mirror, no production CSS modified by this preview · drift fix follows in Phase 2
+      </div>
+      <div class="ch-cascade" aria-label="chat.css load chain">
+        <span class="step">dashboard/src/main.ts</span>
+        <span class="arrow">→</span>
+        <span class="step">styles/global.css</span>
+        <span class="arrow">@import L25 →</span>
+        <span class="step target">styles/chat.css</span>
+        <span class="arrow">·</span>
+        <span class="step">consumed by components/chat/primitives.ts</span>
+      </div>
+    </section>
+
+    <!-- ═════════════════ Section 1: chat-transcript ═════════════════ -->
+    <section class="pv-sect">
+      <div class="pv-sect-h">
+        <h2>1 · chat-transcript stage</h2>
+        <span class="sub">selector from src/styles/chat.css:L5-9</span>
+      </div>
+      <div class="pv-grid-2">
+
+        <!-- mirrors production chat.css:L5-9 -->
+        <div class="pv-cell" style="grid-column: span 2;">
+          <div class="pv-cell-h">
+            <span class="pv-cell-label">@utility chat-transcript</span>
+            <span class="pv-cell-meta">chat.css:L5-9</span>
+          </div>
+          <!-- mirrors production .chat-transcript radial-gradient + base bg, populated with all four role bubbles -->
+          <div class="ch-transcript" role="log" aria-label="Chat transcript demo">
+            <div class="ch-row">
+              <div class="ch-avatar assistant" aria-hidden="true">A</div>
+              <div style="display: flex; flex-direction: column; gap: 6px; min-width: 0;">
+                <div class="ch-meta"><span class="name">@masc-improver</span> <span class="ch-role-chip assistant">Assistant</span> <span class="ts">10:32:14</span></div>
+                <div class="ch-bubble assistant">
+                  Picked up <code>OAS-1132</code>: cascade fail-closed for unknown→permissive default. Drafting boundary patch + property test sweep.
+                </div>
+              </div>
+            </div>
+            <div class="ch-row right">
+              <div class="ch-avatar user" aria-hidden="true">V</div>
+              <div style="display: flex; flex-direction: column; gap: 6px; align-items: flex-end; min-width: 0;">
+                <div class="ch-meta"><span class="name">vincent</span> <span class="ch-role-chip user">User</span> <span class="ts">10:32:48</span></div>
+                <div class="ch-bubble user">머지 전에 fixture 한 번만 더 갱신해줘. 새 helper default 깔린거 반영되어야 함.</div>
+              </div>
+            </div>
+            <div class="ch-row">
+              <div class="ch-avatar" aria-hidden="true">S</div>
+              <div style="display: flex; flex-direction: column; gap: 6px; min-width: 0;">
+                <div class="ch-meta"><span class="name">system</span> <span class="ch-role-chip">System</span> <span class="ts">10:33:02</span></div>
+                <div class="ch-bubble system">cascade.toml hot-reload picked up at 10:33:01 · 6 keepers signalled.</div>
+              </div>
+            </div>
+            <div class="ch-row">
+              <div class="ch-avatar error" aria-hidden="true">!</div>
+              <div style="display: flex; flex-direction: column; gap: 6px; min-width: 0;">
+                <div class="ch-meta"><span class="name">@codex_cli</span> <span class="ch-role-chip error">Error</span> <span class="ts">10:33:18</span></div>
+                <div class="ch-bubble error">rollout-thread-not-found · cascade fallback triggered (5/5 internal models tried) · escalated to keeper-bound spark.</div>
+              </div>
+            </div>
+          </div>
+          <div class="ch-toks">
+            <span class="pv-tok">background: radial-gradient(circle at top left, var(--accent-8), transparent 38%)</span>
+            <span class="pv-tok">+ rgba(5,14,31,0.74) base</span>
+            <span class="pv-tok">→ preview: rgb(--color-accent-glow / .12)</span>
+            <span class="pv-tok">→ preview base: var(--color-bg-page)</span>
+          </div>
+          <div class="ch-legend" aria-hidden="true">
+            <span class="item">user</span>
+            <span class="item">assistant</span>
+            <span class="item">system</span>
+            <span class="item">error</span>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ═════════════════ Section 2: chat-bubble role variants ═════════════════ -->
+    <section class="pv-sect">
+      <div class="pv-sect-h">
+        <h2>2 · chat-bubble · 4 role variants</h2>
+        <span class="sub">selectors from src/styles/chat.css:L11-31</span>
+      </div>
+      <div class="pv-grid-2">
+
+        <!-- mirrors production chat.css:L13-17 -->
+        <div class="pv-cell">
+          <div class="pv-cell-h">
+            <span class="pv-cell-label">.chat-bubble.user</span>
+            <span class="pv-cell-meta">chat.css:L13-17</span>
+          </div>
+          <!-- mirrors production .chat-bubble.user (right-aligned, accent gradient) -->
+          <div style="display: flex; justify-content: flex-end;">
+            <div class="ch-bubble user">
+              cascade narrow 적용 후 oas_timeout_budget 11/h → 0/h. 측정 데이터 첨부했어요. 머지 가능?
+            </div>
+          </div>
+          <div class="ch-toks">
+            <span class="pv-tok">align-self: flex-end</span>
+            <span class="pv-tok">linear-gradient(180deg, rgba(30,83,138,.72), rgba(18,48,86,.82))</span>
+            <span class="pv-tok">border-color: rgba(71,184,255,.24)</span>
+            <span class="pv-tok">box-shadow: 0 10px 30px rgba(0,0,0,.18)</span>
+          </div>
+        </div>
+
+        <!-- mirrors production chat.css:L18-22 -->
+        <div class="pv-cell">
+          <div class="pv-cell-h">
+            <span class="pv-cell-label">.chat-bubble.assistant</span>
+            <span class="pv-cell-meta">chat.css:L18-22</span>
+          </div>
+          <!-- mirrors production .chat-bubble.assistant (left-aligned, violet gradient) -->
+          <div style="display: flex; justify-content: flex-start;">
+            <div class="ch-bubble assistant">
+              근거 충분. property test 1 round-trip 추가하고 fixture sweep 하나만 돌리면 fail-closed 회귀 방어 끝납니다. <code>helper default + caller override</code> 패턴 적용 완료.
+            </div>
+          </div>
+          <div class="ch-toks">
+            <span class="pv-tok">align-self: flex-start</span>
+            <span class="pv-tok">linear-gradient(180deg, rgba(34,22,82,.72), rgba(18,12,44,.86))</span>
+            <span class="pv-tok">border-color: rgba(167,139,250,.24)</span>
+          </div>
+        </div>
+
+        <!-- mirrors production chat.css:L23-26 -->
+        <div class="pv-cell">
+          <div class="pv-cell-h">
+            <span class="pv-cell-label">.chat-bubble.system</span>
+            <span class="pv-cell-meta">chat.css:L23-26</span>
+          </div>
+          <!-- mirrors production .chat-bubble.system (left-aligned, no per-tone bg/border override) -->
+          <div style="display: flex; justify-content: flex-start;">
+            <div class="ch-bubble system">
+              cascade.toml hot-reload at 10:33:01 · 6 keepers signalled. governance_judge weight 0 → 0.5.
+            </div>
+          </div>
+          <div class="ch-toks">
+            <span class="pv-tok">align-self: flex-start</span>
+            <span class="pv-tok">(inherits base bubble bg/border)</span>
+            <span class="pv-tok">no per-tone gradient — system is the default tone</span>
+          </div>
+        </div>
+
+        <!-- mirrors production chat.css:L27-30 -->
+        <div class="pv-cell">
+          <div class="pv-cell-h">
+            <span class="pv-cell-label">.chat-bubble.error</span>
+            <span class="pv-cell-meta">chat.css:L27-30</span>
+          </div>
+          <!-- mirrors production .chat-bubble.error (left-aligned, deep red gradient) -->
+          <div style="display: flex; justify-content: flex-start;">
+            <div class="ch-bubble error">
+              rollout-thread-not-found · cascade fallback triggered (5/5 internal models tried) · escalated to keeper-bound spark · operator approval required.
+            </div>
+          </div>
+          <div class="ch-toks">
+            <span class="pv-tok">border-color: rgba(239,68,68,.3)</span>
+            <span class="pv-tok">linear-gradient(180deg, rgba(86,24,24,.72), rgba(52,13,13,.82))</span>
+            <span class="pv-tok">→ preview border: var(--color-status-err)</span>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ═════════════════ Section 3: chat-avatar + chat-role-chip ═════════════════ -->
+    <section class="pv-sect">
+      <div class="pv-sect-h">
+        <h2>3 · chat-avatar + chat-role-chip · role tints</h2>
+        <span class="sub">selectors from src/styles/chat.css:L33-67</span>
+      </div>
+      <div class="pv-grid-2">
+
+        <!-- mirrors production chat.css:L33-49 (chat-avatar) -->
+        <div class="pv-cell">
+          <div class="pv-cell-h">
+            <span class="pv-cell-label">@utility chat-avatar</span>
+            <span class="pv-cell-meta">chat.css:L33-49</span>
+          </div>
+          <!-- mirrors production .chat-avatar.user / .assistant / .error tinted swatches -->
+          <div style="display: flex; align-items: center; gap: 14px; padding: 10px 0;">
+            <div style="display: flex; flex-direction: column; align-items: center; gap: 4px;">
+              <div class="ch-avatar user" aria-hidden="true">V</div>
+              <span class="pv-tok">.user</span>
+            </div>
+            <div style="display: flex; flex-direction: column; align-items: center; gap: 4px;">
+              <div class="ch-avatar assistant" aria-hidden="true">A</div>
+              <span class="pv-tok">.assistant</span>
+            </div>
+            <div style="display: flex; flex-direction: column; align-items: center; gap: 4px;">
+              <div class="ch-avatar" aria-hidden="true">S</div>
+              <span class="pv-tok">(default)</span>
+            </div>
+            <div style="display: flex; flex-direction: column; align-items: center; gap: 4px;">
+              <div class="ch-avatar error" aria-hidden="true">!</div>
+              <span class="pv-tok">.error</span>
+            </div>
+          </div>
+          <div class="ch-toks">
+            <span class="pv-tok">.user → background: var(--color-accent-soft)</span>
+            <span class="pv-tok">.user → color: #d8f0ff (legacy)</span>
+            <span class="pv-tok">.assistant → background: rgba(167,139,250,.18)</span>
+            <span class="pv-tok">.error → background: rgba(239,68,68,.18)</span>
+          </div>
+        </div>
+
+        <!-- mirrors production chat.css:L51-67 (chat-role-chip) -->
+        <div class="pv-cell">
+          <div class="pv-cell-h">
+            <span class="pv-cell-label">@utility chat-role-chip</span>
+            <span class="pv-cell-meta">chat.css:L51-67</span>
+          </div>
+          <!-- mirrors production .chat-role-chip.user / .assistant / .error chips -->
+          <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 0;">
+            <span class="ch-role-chip user">User</span>
+            <span class="ch-role-chip assistant">Assistant</span>
+            <span class="ch-role-chip">System</span>
+            <span class="ch-role-chip error">Error</span>
+          </div>
+          <div class="ch-toks">
+            <span class="pv-tok">.user bg → var(--accent-14) (legacy alias)</span>
+            <span class="pv-tok">.assistant bg → rgba(167,139,250,.14)</span>
+            <span class="pv-tok">.error bg → rgba(239,68,68,.14)</span>
+            <span class="pv-tok">color tints: #c9ebff / #ded0ff / #ffb4b4 (legacy)</span>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ═════════════════ Section 4: chat-detail-panel + callout ═════════════════ -->
+    <section class="pv-sect">
+      <div class="pv-sect-h">
+        <h2>4 · chat-detail-panel + chat-detail-callout</h2>
+        <span class="sub">selectors from src/styles/chat.css:L69-85</span>
+      </div>
+      <div class="pv-grid-2">
+
+        <!-- mirrors production chat.css:L69-81 (chat-detail-panel + nested pre) -->
+        <div class="pv-cell">
+          <div class="pv-cell-h">
+            <span class="pv-cell-label">@utility chat-detail-panel · &amp; pre</span>
+            <span class="pv-cell-meta">chat.css:L69-81</span>
+          </div>
+          <!-- mirrors production .chat-detail-panel hosting <pre> tool-call detail -->
+          <div class="ch-detail-panel">
+            <pre>{
+  "tool": "masc_keeper_status",
+  "args": { "id": "nick0cave" },
+  "result": {
+    "status": "running",
+    "task": "OAS-1132 fail-closed sweep",
+    "heartbeat": "2026-04-28T10:32:48+09:00",
+    "cascade_pin": "gpt-5.3-codex-spark"
+  }
+}</pre>
+          </div>
+          <div class="ch-toks">
+            <span class="pv-tok">background: linear-gradient(180deg, rgba(7,17,37,.9), rgba(4,12,28,.82))</span>
+            <span class="pv-tok">pre font: "Fira Code", monospace</span>
+            <span class="pv-tok">pre font-size: var(--fs-xs) (legacy alias)</span>
+            <span class="pv-tok">pre color: #95f3bc (legacy literal)</span>
+            <span class="pv-tok">white-space: pre-wrap; word-break: break-word</span>
+          </div>
+        </div>
+
+        <!-- mirrors production chat.css:L83-85 (chat-detail-callout) -->
+        <div class="pv-cell">
+          <div class="pv-cell-h">
+            <span class="pv-cell-label">@utility chat-detail-callout</span>
+            <span class="pv-cell-meta">chat.css:L83-85</span>
+          </div>
+          <!-- mirrors production .chat-detail-callout (deep-green diagnostic strip) -->
+          <div class="ch-detail-callout">
+            <strong>verified</strong> · 6 fixtures regenerated, 1 round-trip property test added, lint+test green. Helper default lands at boundary; caller override preserved via List.exists guard.
+          </div>
+          <div style="height: 6px;"></div>
+          <div class="ch-detail-callout">
+            <strong>note</strong> · cascade chain: main.ts → global.css @import → chat.css. orphan classification falsified by W08 triage (#11317).
+          </div>
+          <div class="ch-toks">
+            <span class="pv-tok">background: linear-gradient(180deg, rgba(18,42,33,.55), rgba(10,25,20,.48))</span>
+            <span class="pv-tok">no border in production — preview adds left rule for diagnostic legibility</span>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ═════════════════ Section 5: drift evidence (Phase 2 candidate) ═════════════════ -->
+    <section class="pv-sect">
+      <div class="pv-sect-h">
+        <h2>5 · drift evidence (W08 audit summary)</h2>
+        <span class="sub">legacy aliases + raw rgba referenced by chat.css — Phase 2 candidates</span>
+      </div>
+      <div class="pv-grid-2">
+
+        <!-- mirrors production chat.css token usage audit -->
+        <div class="pv-cell" style="grid-column: span 2;">
+          <div class="pv-cell-h">
+            <span class="pv-cell-label">legacy alias / raw value → SSOT token (Phase 2 candidate)</span>
+            <span class="pv-cell-meta">audit · 2026-04-28</span>
+          </div>
+          <table class="ch-drift">
+            <thead>
+              <tr>
+                <th>chat.css site</th>
+                <th>used at</th>
+                <th>current value</th>
+                <th>SSOT replacement (this preview)</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><span class="pv-tok">var(--accent-8)</span></td>
+                <td class="use">chat.css:L7 (.chat-transcript radial-gradient)</td>
+                <td><span class="pv-tok">rgba(71,184,255,0.08) (variables.css:60)</span></td>
+                <td><span class="pv-tok">rgb(var(--color-accent-glow) / .12)</span></td>
+              </tr>
+              <tr>
+                <td><span class="pv-tok">rgba(5, 14, 31, 0.74)</span></td>
+                <td class="use">chat.css:L8 (.chat-transcript bg base)</td>
+                <td><span class="pv-tok">raw rgba (no alias)</span></td>
+                <td><span class="pv-tok">var(--color-bg-page)</span></td>
+              </tr>
+              <tr>
+                <td><span class="pv-tok">rgba(30, 83, 138, 0.72)</span></td>
+                <td class="use">chat.css:L15 (.chat-bubble.user gradient stop A)</td>
+                <td><span class="pv-tok">raw rgba (no alias)</span></td>
+                <td><span class="pv-tok">rgb(var(--color-accent-glow) / .28) over var(--color-bg-elevated)</span></td>
+              </tr>
+              <tr>
+                <td><span class="pv-tok">rgba(18, 48, 86, 0.82)</span></td>
+                <td class="use">chat.css:L15 (.chat-bubble.user gradient stop B)</td>
+                <td><span class="pv-tok">raw rgba (no alias)</span></td>
+                <td><span class="pv-tok">rgb(var(--color-accent-glow) / .14) over var(--color-bg-elevated)</span></td>
+              </tr>
+              <tr>
+                <td><span class="pv-tok">rgba(71, 184, 255, 0.24)</span></td>
+                <td class="use">chat.css:L16 (.chat-bubble.user border)</td>
+                <td><span class="pv-tok">raw rgba (no alias)</span></td>
+                <td><span class="pv-tok">var(--color-border-strong)</span></td>
+              </tr>
+              <tr>
+                <td><span class="pv-tok">rgba(34, 22, 82, 0.72)</span></td>
+                <td class="use">chat.css:L20 (.chat-bubble.assistant gradient stop)</td>
+                <td><span class="pv-tok">raw rgba (no alias)</span></td>
+                <td><span class="pv-tok">rgb(var(--color-accent-glow) / .18) over var(--color-bg-panel-alt)</span></td>
+              </tr>
+              <tr>
+                <td><span class="pv-tok">rgba(167, 139, 250, 0.24)</span></td>
+                <td class="use">chat.css:L21 (.chat-bubble.assistant border)</td>
+                <td><span class="pv-tok">raw rgba (no alias)</span></td>
+                <td><span class="pv-tok">var(--color-status-info)</span></td>
+              </tr>
+              <tr>
+                <td><span class="pv-tok">rgba(239, 68, 68, 0.3)</span></td>
+                <td class="use">chat.css:L28 (.chat-bubble.error border)</td>
+                <td><span class="pv-tok">raw rgba (no alias)</span></td>
+                <td><span class="pv-tok">var(--color-status-err)</span></td>
+              </tr>
+              <tr>
+                <td><span class="pv-tok">rgba(86, 24, 24, 0.72)</span></td>
+                <td class="use">chat.css:L29 (.chat-bubble.error gradient stop A)</td>
+                <td><span class="pv-tok">raw rgba (no alias)</span></td>
+                <td><span class="pv-tok">var(--color-bg-elevated) tinted by --color-status-err</span></td>
+              </tr>
+              <tr>
+                <td><span class="pv-tok">var(--color-accent-soft)</span></td>
+                <td class="use">chat.css:L36 (.chat-avatar.user bg)</td>
+                <td><span class="pv-tok">var(--brass-soft) (tokens.generated.css:366 alias)</span></td>
+                <td><span class="pv-tok">var(--color-accent-soft) (already SSOT, alias kept for compat)</span></td>
+              </tr>
+              <tr>
+                <td><span class="pv-tok">var(--accent-14)</span></td>
+                <td class="use">chat.css:L55 (.chat-role-chip.user bg)</td>
+                <td><span class="pv-tok">rgba(71,184,255,0.14) (legacy alias scale)</span></td>
+                <td><span class="pv-tok">rgb(var(--color-accent-glow) / .14)</span></td>
+              </tr>
+              <tr>
+                <td><span class="pv-tok">rgba(7, 17, 37, 0.9)</span></td>
+                <td class="use">chat.css:L70-71 (.chat-detail-panel gradient stops)</td>
+                <td><span class="pv-tok">raw rgba (no alias)</span></td>
+                <td><span class="pv-tok">var(--color-bg-page) → var(--color-bg-elevated)</span></td>
+              </tr>
+              <tr>
+                <td><span class="pv-tok">"Fira Code", monospace</span></td>
+                <td class="use">chat.css:L76 (.chat-detail-panel pre font-family)</td>
+                <td><span class="pv-tok">unscoped font stack</span></td>
+                <td><span class="pv-tok">var(--font-mono) (tokens.generated.css:61)</span></td>
+              </tr>
+              <tr>
+                <td><span class="pv-tok">var(--fs-xs)</span></td>
+                <td class="use">chat.css:L77 (.chat-detail-panel pre font-size)</td>
+                <td><span class="pv-tok">var(--font-size-xs) → 12px (legacy alias)</span></td>
+                <td><span class="pv-tok">var(--fs-12) (tokens.generated.css:65)</span></td>
+              </tr>
+              <tr>
+                <td><span class="pv-tok">color #95f3bc</span></td>
+                <td class="use">chat.css:L79 (.chat-detail-panel pre color)</td>
+                <td><span class="pv-tok">raw hex (mint-green)</span></td>
+                <td><span class="pv-tok">var(--color-status-ok)</span></td>
+              </tr>
+              <tr>
+                <td><span class="pv-tok">linear-gradient rgba(18,42,33,.55) → rgba(10,25,20,.48)</span></td>
+                <td class="use">chat.css:L84 (.chat-detail-callout bg)</td>
+                <td><span class="pv-tok">raw rgba (no alias)</span></td>
+                <td><span class="pv-tok">var(--color-bg-surface) tinted by --color-status-ok</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+      </div>
+    </section>
+
+  </div>
+</body>
+</html>

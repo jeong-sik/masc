@@ -1092,6 +1092,10 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
   | phase_opt ->
       (* State-aware cascade routing (TLA+ KeeperCoreTriad.SelectCascade).
          At this point [phase] is executable; blocked phases returned above. *)
+      Keeper_turn_fsm.emit_transition
+        ~keeper_name:meta.name ~turn_id:keeper_turn_id
+        ~prev:Keeper_turn_fsm.Phase_gating
+        Keeper_turn_fsm.Cascade_routing;
       let effective_cascade_name =
         let phase = match phase_opt with
           | Some p -> p
@@ -1285,7 +1289,9 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             ~keeper_name:meta.name ~turn_id:keeper_turn_id
             ~prev:Keeper_turn_fsm.Cascade_routing
             (Keeper_turn_fsm.Failed
-               (Keeper_turn_fsm.Failure_runtime_error error_message));
+               (Keeper_turn_fsm.Failure_provider_error
+                  { kind = sdk_error_kind err;
+                    detail = error_message }));
           Error err
       | Ok initial_execution ->
       let turn_id = meta.runtime.usage.total_turns in
@@ -1324,10 +1330,14 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
              ~keeper_name:meta.name ~turn_id:keeper_turn_id
              ~prev:Keeper_turn_fsm.Cascade_routing
              (Keeper_turn_fsm.Failed
-                (Keeper_turn_fsm.Failure_runtime_error
-                   ("turn_livelock:" ^ reason_string)));
+                (Keeper_turn_fsm.Failure_turn_livelock_blocked
+                   { reason = reason_string }));
            Ok meta
        | Keeper_turn_livelock.Started _ ->
+      Keeper_turn_fsm.emit_transition
+        ~keeper_name:meta.name ~turn_id:keeper_turn_id
+        ~prev:Keeper_turn_fsm.Cascade_routing
+        Keeper_turn_fsm.Awaiting_provider;
       (* Yield before CPU-bound prompt construction so the Eio scheduler
          can service HTTP handlers between keeper turn setups. *)
       Eio.Fiber.yield ();

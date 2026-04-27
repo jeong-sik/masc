@@ -1,0 +1,40 @@
+/* Archived brand-voice theme — preserved for reference only.
+   Not linked by bonsai_index_html. Active themes live in the codegen
+   SSOT: dashboard/design-system/tokens/source.ts (emitted to
+   dashboard_bonsai/static/colors_and_type.generated.css).
+   Wave 2 Bonsai swap (Friend-2C). */
+
+/* ── Terminal ──────────────────────────────────────────── */
+[data-theme="terminal"] {
+  color-scheme: dark;
+  --bg-deep:      #000800;
+  --bg-panel:     #001200;
+  --bg-panel-alt: #001a00;
+  --bg-card:      #002200;
+  --bg-card-hover:#003000;
+  --border-main:      #0a3a0a;
+  --border-highlight: #00aa00;
+  --text-bright:  #00ff00;
+  --text-primary: #00cc00;
+  --text-dim:     #009900;
+  --accent-brass: #00ff00;
+  --accent-brass-dim: #009900;
+  --accent-blood: #ffcc00;
+  --accent-ink:   #00aaaa;
+  --accent-glow:  rgba(0, 255, 0, 0.08);
+  --status-ok:   #00ff00;
+  --status-warn: #ffcc00;
+  --status-bad:  #ff4400;
+  --font-display: 'JetBrains Mono', 'Noto Sans KR', monospace;
+  --font-body:    'JetBrains Mono', 'Noto Sans KR', monospace;
+  --font-ui:      'JetBrains Mono', 'Noto Sans KR', monospace;
+  --radius-xs: 0; --radius-sm: 0; --radius-md: 0;
+  --shadow-panel: 0 0 8px rgba(0, 255, 0, 0.1);
+  --shadow-glow:  0 0 16px rgba(0, 255, 0, 0.15);
+  /* Trace frames — phosphor */
+  --t-llm:   #00aa00;
+  --t-tool:  #ffcc00;
+  --t-think: #006633;
+  --t-wait:  #000800;
+  --t-err:   #ff4400;
+}

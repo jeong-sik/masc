@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>MASC · Motion & Keyframes</title>
+<link rel="stylesheet" href="_preview.css">
+<style>
+  /* ── Banner ───────────────────────────────────────────── */
+  .pv-banner {
+    font: var(--type-caption);
+    font-family: var(--font-mono);
+    color: var(--color-fg-muted);
+    border: 1px solid var(--color-border-default);
+    background: var(--color-bg-surface);
+    padding: 8px 12px;
+    border-radius: 3px;
+    letter-spacing: var(--track-wide);
+  }
+  .pv-banner b { color: var(--color-fg-secondary); font-weight: 600; }
+
+  /* ── Motion token cards ───────────────────────────────── */
+  .mot-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+
+  .mot-card {
+    background: var(--color-bg-surface);
+    border: 1px solid var(--color-border-default);
+    border-radius: 3px;
+    padding: 16px;
+    display: flex; flex-direction: column; gap: 12px;
+    position: relative; overflow: hidden;
+  }
+  .mot-card-h {
+    display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+  }
+  .mot-name {
+    font: 600 var(--type-label);
+    letter-spacing: var(--track-caps);
+    text-transform: uppercase;
+    color: var(--color-fg-secondary);
+    font-family: var(--font-mono);
+  }
+  .mot-def {
+    font: 11px/1.3 var(--font-mono);
+    color: var(--color-fg-muted);
+    letter-spacing: var(--track-wide);
+  }
+  .mot-stage {
+    height: 80px;
+    border: 1px dashed var(--color-border-default);
+    border-radius: 3px;
+    background: var(--color-bg-page);
+    display: flex; align-items: center; justify-content: center;
+    position: relative;
+    cursor: pointer;
+    user-select: none;
+  }
+  .mot-hint {
+    position: absolute; top: 6px; right: 8px;
+    font: 9px/1 var(--font-mono);
+    color: var(--color-fg-disabled);
+    letter-spacing: var(--track-caps);
+    text-transform: uppercase;
+  }
+  .mot-blob {
+    width: 36px; height: 36px;
+    background: var(--color-accent-fg);
+    border: 1px solid var(--brass-2);
+    border-radius: 4px;
+    box-shadow: 0 0 8px rgb(var(--color-accent-glow) / .35);
+    will-change: transform, opacity;
+  }
+
+  /* Each motion token applied to .mot-stage:hover .mot-blob */
+  .mot-enter   .mot-stage:hover .mot-blob { transition: transform var(--motion-enter), opacity var(--motion-enter); transform: translateX(120px) scale(1.1); }
+  .mot-exit    .mot-stage:hover .mot-blob { transition: transform var(--motion-exit), opacity var(--motion-exit); transform: scale(.4); opacity: 0; }
+  .mot-swap    .mot-stage:hover .mot-blob { transition: background var(--motion-swap), border-color var(--motion-swap), box-shadow var(--motion-swap); background: var(--ok-fg); border-color: var(--ok-fg); box-shadow: 0 0 10px rgb(var(--ok-glow) / .55); }
+  .mot-reveal  .mot-stage:hover .mot-blob { transition: transform var(--motion-reveal), opacity var(--motion-reveal); transform: translateY(-12px) scale(1.4); opacity: .85; }
+  .mot-settle  .mot-stage:hover .mot-blob { transition: transform var(--motion-settle), border-radius var(--motion-settle); transform: rotate(45deg); border-radius: 50%; }
+  .mot-pop     .mot-stage:hover .mot-blob { transition: transform var(--motion-pop); transform: scale(1.6); }
+
+  /* ── Keyframes catalogue ──────────────────────────────── */
+  .kf-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  .kf-cell {
+    background: var(--color-bg-surface);
+    border: 1px solid var(--color-border-default);
+    border-radius: 3px;
+    padding: 12px;
+    display: flex; flex-direction: column; gap: 8px;
+    min-height: 110px;
+  }
+  .kf-name {
+    font: 600 10px/1.2 var(--font-mono);
+    letter-spacing: var(--track-caps);
+    text-transform: uppercase;
+    color: var(--color-fg-secondary);
+  }
+  .kf-stage {
+    flex: 1;
+    border: 1px dashed var(--color-border-default);
+    border-radius: 3px;
+    background: var(--color-bg-page);
+    display: flex; align-items: center; justify-content: center;
+    overflow: hidden;
+    position: relative;
+  }
+  .kf-dot {
+    width: 22px; height: 22px;
+    background: var(--color-accent-fg);
+    border: 1px solid var(--brass-2);
+    border-radius: 3px;
+  }
+  .kf-bar {
+    height: 6px; width: 60%;
+    background: linear-gradient(90deg,
+      var(--color-bg-elevated) 0%,
+      var(--color-bg-hover) 50%,
+      var(--color-bg-elevated) 100%);
+    background-size: 200% 100%;
+    border-radius: 2px;
+  }
+
+  /* keyframes.css demos — duration tuned for visibility, not production */
+  .kf-avatar-bounce      .kf-dot { animation: avatar-bounce      0.9s ease-in-out infinite; }
+  .kf-avatar-vibrate     .kf-dot { animation: avatar-vibrate     0.5s linear infinite; }
+  .kf-avatar-breathe     .kf-dot { animation: avatar-breathe     1.6s ease-in-out infinite; }
+  .kf-avatar-pulse-glow  .kf-dot { animation: avatar-pulse-glow  1.6s ease-in-out infinite; }
+  .kf-avatar-particle    .kf-dot { animation: avatar-particle    1.2s ease-out infinite; }
+  .kf-workingPulse       .kf-dot { animation: workingPulse       1.4s ease-in-out infinite; }
+  .kf-warnBlink          .kf-dot { animation: warnBlink          1.2s ease-in-out infinite; }
+  .kf-blocker-pulse      .kf-dot { animation: blocker-pulse      1.4s ease-in-out infinite; }
+  .kf-fadeSlide          .kf-dot { animation: fadeSlide          1.6s ease-out infinite alternate; }
+  .kf-pulse              .kf-dot { animation: pulse              1.6s ease-in-out infinite; }
+  .kf-orchestraFlow      .kf-dot {
+    border: 1px dashed var(--color-accent-fg); background: transparent;
+    border-radius: 50%; width: 26px; height: 26px;
+    animation: orchestraFlow 1.6s linear infinite;
+    /* dashoffset effect via stroke not visible on div; use border-dashed + rotate fallback */
+  }
+  .kf-orchestraFlow      .kf-stage { animation: spin 4s linear infinite; }
+  .kf-orchestraPulse     .kf-dot { animation: orchestraPulse     1.6s ease-in-out infinite; border-radius: 50%; }
+  .kf-livePulse          .kf-dot { animation: livePulse          1.6s ease-in-out infinite; }
+  .kf-activityFadeIn     .kf-dot { animation: activityFadeIn     1.4s ease-out infinite alternate; }
+  .kf-keeper-blink       .kf-dot { animation: keeper-blink       1.0s steps(1) infinite; }
+  .kf-pulse-ring         .kf-dot { animation: pulse-ring         1.4s ease-in-out infinite; border-radius: 50%; }
+  .kf-pipeline-pulse     .kf-dot { animation: pipeline-pulse     1.6s ease-in-out infinite; }
+  .kf-pipeline-badge-pulse .kf-dot { animation: pipeline-badge-pulse 1.4s ease-in-out infinite; }
+  .kf-keeperPulse        .kf-dot { animation: keeperPulse        1.6s ease-in-out infinite; border-radius: 50%; }
+  .kf-loadingPulse       .kf-dot { animation: loadingPulse       1.2s ease-in-out infinite; }
+  .kf-spin               .kf-dot { animation: spin               1.4s linear infinite; border-radius: 50%; border-right-color: transparent; border-top: 2px solid var(--color-fg-muted); }
+  .kf-slideInRight       .kf-dot { animation: slideInRight       1.8s ease-out infinite; }
+  .kf-keeper-heartbeat   .kf-dot { animation: keeper-heartbeat   1.4s ease-in-out infinite; }
+  .kf-anim-heartbeat     .kf-dot { animation: anim-heartbeat     1.4s ease-in-out infinite; }
+  .kf-anim-pulse-glow    .kf-dot { animation: anim-pulse-glow    2.4s ease-in-out infinite; }
+  .kf-anim-blink         .kf-dot { animation: anim-blink         1.0s steps(1) infinite; }
+  .kf-anim-shimmer       .kf-bar { animation: anim-shimmer       1.5s linear infinite; }
+
+  /* ── Token ↔ keyframe mapping table ───────────────────── */
+  .pv-tab {
+    width: 100%;
+    border-collapse: collapse;
+    font: 11px/1.4 var(--font-mono);
+    color: var(--color-fg-secondary);
+  }
+  .pv-tab th, .pv-tab td {
+    text-align: left;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--color-border-default);
+    letter-spacing: var(--track-wide);
+  }
+  .pv-tab th {
+    font: 600 10px/1.2 var(--font-mono);
+    letter-spacing: var(--track-caps);
+    text-transform: uppercase;
+    color: var(--color-fg-muted);
+    background: var(--color-bg-surface);
+  }
+  .pv-tab td.tok { color: var(--color-accent-fg); }
+  .pv-tab td.tag { color: var(--color-fg-muted); font-size: 10px; }
+</style>
+</head>
+<body>
+<div class="pv-root">
+
+  <header class="pv-head">
+    <div class="pv-eyebrow">Foundation · 14 / Motion</div>
+    <h1 class="pv-title">Motion &amp; Keyframes</h1>
+    <p class="pv-sub">
+      6 motion tokens (transition shorthands) + 27 named <code>@keyframes</code>
+      shipped from the production stylesheet. Hover the token cards to fire
+      the transition; keyframe demos run on loop.
+    </p>
+    <div class="pv-banner" style="margin-top:10px;">
+      <b>Production source:</b> <code>src/styles/keyframes.css</code>
+      &nbsp;·&nbsp;
+      <b>Token source:</b> <code>tokens.generated.css --motion-*</code>
+    </div>
+  </header>
+
+  <!-- ─────────────── Section 1: Motion tokens ─────────────── -->
+  <section class="pv-sect">
+    <div class="pv-sect-h">
+      <h2>Motion tokens · transition shorthand</h2>
+      <span class="sub">6 tokens · tokens.generated.css source · hover stage to fire</span>
+    </div>
+
+    <div class="mot-grid">
+      <div class="mot-card mot-enter">
+        <div class="mot-card-h">
+          <span class="mot-name">--motion-enter</span>
+          <span class="mot-def">var(--t-med) var(--ease-out) · 200ms</span>
+        </div>
+        <div class="mot-stage"><span class="mot-hint">hover</span><span class="mot-blob"></span></div>
+        <span class="mot-def">surface entering viewport · slide + fade</span>
+      </div>
+
+      <div class="mot-card mot-exit">
+        <div class="mot-card-h">
+          <span class="mot-name">--motion-exit</span>
+          <span class="mot-def">var(--t-fast) var(--ease-in) · 120ms</span>
+        </div>
+        <div class="mot-stage"><span class="mot-hint">hover</span><span class="mot-blob"></span></div>
+        <span class="mot-def">surface leaving · quick collapse</span>
+      </div>
+
+      <div class="mot-card mot-swap">
+        <div class="mot-card-h">
+          <span class="mot-name">--motion-swap</span>
+          <span class="mot-def">var(--t-fast) var(--ease) · 120ms</span>
+        </div>
+        <div class="mot-stage"><span class="mot-hint">hover</span><span class="mot-blob"></span></div>
+        <span class="mot-def">color / state swap · KPI tile, badge</span>
+      </div>
+
+      <div class="mot-card mot-reveal">
+        <div class="mot-card-h">
+          <span class="mot-name">--motion-reveal</span>
+          <span class="mot-def">var(--t-slow) var(--ease-out) · 360ms</span>
+        </div>
+        <div class="mot-stage"><span class="mot-hint">hover</span><span class="mot-blob"></span></div>
+        <span class="mot-def">drawer / overlay reveal · slow lift</span>
+      </div>
+
+      <div class="mot-card mot-settle">
+        <div class="mot-card-h">
+          <span class="mot-name">--motion-settle</span>
+          <span class="mot-def">var(--t-xslow) var(--ease-out) · 600ms</span>
+        </div>
+        <div class="mot-stage"><span class="mot-hint">hover</span><span class="mot-blob"></span></div>
+        <span class="mot-def">layout reflow · post-action settle</span>
+      </div>
+
+      <div class="mot-card mot-pop">
+        <div class="mot-card-h">
+          <span class="mot-name">--motion-pop</span>
+          <span class="mot-def">var(--t-med) var(--ease-spring) · 200ms spring</span>
+        </div>
+        <div class="mot-stage"><span class="mot-hint">hover</span><span class="mot-blob"></span></div>
+        <span class="mot-def">command-palette · success acknowledge</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─────────────── Section 2: Keyframes catalogue ─────────────── -->
+  <section class="pv-sect">
+    <div class="pv-sect-h">
+      <h2>Keyframes catalogue · src/styles/keyframes.css</h2>
+      <span class="sub">27 named animations · production source · live demo</span>
+    </div>
+
+    <div class="kf-grid">
+      <!-- Avatar group (5) -->
+      <div class="kf-cell kf-avatar-bounce"><span class="kf-name">avatar-bounce</span><div class="kf-stage"><span class="kf-dot"></span></div></div>
+      <div class="kf-cell kf-avatar-vibrate"><span class="kf-name">avatar-vibrate</span><div class="kf-stage"><span class="kf-dot"></span></div></div>
+      <div class="kf-cell kf-avatar-breathe"><span class="kf-name">avatar-breathe</span><div class="kf-stage"><span class="kf-dot"></span></div></div>
+      <div class="kf-cell kf-avatar-pulse-glow"><span class="kf-name">avatar-pulse-glow</span><div class="kf-stage"><span class="kf-dot"></span></div></div>
+      <div class="kf-cell kf-avatar-particle"><span class="kf-name">avatar-particle</span><div class="kf-stage"><span class="kf-dot"></span></div></div>
+
+      <!-- Agent state (3) -->
+      <div class="kf-cell kf-workingPulse"><span class="kf-name">workingPulse</span><div class="kf-stage"><span class="kf-dot"></span></div></div>
+      <div class="kf-cell kf-warnBlink"><span class="kf-name">warnBlink</span><div class="kf-stage"><span class="kf-dot" style="border:2px solid var(--warn-28);"></span></div></div>
+      <div class="kf-cell kf-blocker-pulse"><span class="kf-name">blocker-pulse</span><div class="kf-stage"><span class="kf-dot"></span></div></div>
+
+      <!-- Component group (15) -->
+      <div class="kf-cell kf-fadeSlide"><span class="kf-name">fadeSlide</span><div class="kf-stage"><span class="kf-dot"></span></div></div>
+      <div class="kf-cell kf-pulse"><span class="kf-name">pulse</span><div class="kf-stage"><span class="kf-dot"></span></div></div>
+      <div class="kf-cell kf-orchestraFlow"><span class="kf-name">orchestraFlow</span><div class="kf-stage"><span class="kf-dot"></span></div></div>
+      <div class="kf-cell kf-orchestraPulse"><span class="kf-name">orchestraPulse</span><div class="kf-stage"><span class="kf-dot"></span></div></div>
+      <div class="kf-cell kf-livePulse"><span class="kf-name">livePulse</span><div class="kf-stage"><span class="kf-dot"></span></div></div>
+      <div class="kf-cell kf-activityFadeIn"><span class="kf-name">activityFadeIn</span><div class="kf-stage"><span class="kf-dot"></span></div></div>
+      <div class="kf-cell kf-keeper-blink"><span class="kf-name">keeper-blink</span><div class="kf-stage"><span class="kf-dot"></span></div></div>
+      <div class="kf-cell kf-pulse-ring"><span class="kf-name">pulse-ring</span><div class="kf-stage"><span class="kf-dot"></span></div></div>
+      <div class="kf-cell kf-pipeline-pulse"><span class="kf-name">pipeline-pulse</span><div class="kf-stage"><span class="kf-dot"></span></div></div>
+      <div class="kf-cell kf-pipeline-badge-pulse"><span class="kf-name">pipeline-badge-pulse</span><div class="kf-stage"><span class="kf-dot"></span></div></div>
+      <div class="kf-cell kf-keeperPulse"><span class="kf-name">keeperPulse</span><div class="kf-stage"><span class="kf-dot"></span></div></div>
+      <div class="kf-cell kf-loadingPulse"><span class="kf-name">loadingPulse</span><div class="kf-stage"><span class="kf-dot"></span></div></div>
+      <div class="kf-cell kf-spin"><span class="kf-name">spin</span><div class="kf-stage"><span class="kf-dot"></span></div></div>
+      <div class="kf-cell kf-slideInRight"><span class="kf-name">slideInRight</span><div class="kf-stage"><span class="kf-dot"></span></div></div>
+      <div class="kf-cell kf-keeper-heartbeat"><span class="kf-name">keeper-heartbeat</span><div class="kf-stage"><span class="kf-dot"></span></div></div>
+
+      <!-- SPEC v0.4 atoms (4 unique anim-* + shimmer uses bar) — 'pulse' atom ships in primitives.css; here we cover keyframes.css -->
+      <div class="kf-cell kf-anim-heartbeat"><span class="kf-name">anim-heartbeat</span><div class="kf-stage"><span class="kf-dot"></span></div></div>
+      <div class="kf-cell kf-anim-pulse-glow"><span class="kf-name">anim-pulse-glow</span><div class="kf-stage"><span class="kf-dot"></span></div></div>
+      <div class="kf-cell kf-anim-shimmer"><span class="kf-name">anim-shimmer</span><div class="kf-stage"><span class="kf-bar"></span></div></div>
+      <div class="kf-cell kf-anim-blink"><span class="kf-name">anim-blink</span><div class="kf-stage"><span class="kf-dot"></span></div></div>
+    </div>
+  </section>
+
+  <!-- ─────────────── Section 3: Token ↔ keyframe mapping ─────────────── -->
+  <section class="pv-sect">
+    <div class="pv-sect-h">
+      <h2>Token ↔ keyframe coupling</h2>
+      <span class="sub">how production CSS composes shorthand + named animation</span>
+    </div>
+
+    <table class="pv-tab">
+      <thead>
+        <tr>
+          <th>Motion token</th>
+          <th>Resolved value</th>
+          <th>Used with keyframes (rg evidence)</th>
+          <th>Surface</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="tok">--motion-enter</td>
+          <td>var(--t-med) var(--ease-out)</td>
+          <td>anim-fade-in · anim-slide-up · anim-slide-down · anim-slide-left · anim-slide-right</td>
+          <td class="tag">primitives.css L334-338</td>
+        </tr>
+        <tr>
+          <td class="tok">--motion-exit</td>
+          <td>var(--t-fast) var(--ease-in)</td>
+          <td>(transition-out only · no @keyframes pairing)</td>
+          <td class="tag">overlay teardown</td>
+        </tr>
+        <tr>
+          <td class="tok">--motion-swap</td>
+          <td>var(--t-fast) var(--ease)</td>
+          <td>(pure transition · color / box-shadow swap)</td>
+          <td class="tag">primitives.css L372 · kpi.css L29,68,94</td>
+        </tr>
+        <tr>
+          <td class="tok">--motion-reveal</td>
+          <td>var(--t-slow) var(--ease-out)</td>
+          <td>(reserved · drawer / overlay reveal)</td>
+          <td class="tag">SPEC §motion</td>
+        </tr>
+        <tr>
+          <td class="tok">--motion-settle</td>
+          <td>var(--t-xslow) var(--ease-out)</td>
+          <td>(reserved · post-action layout reflow)</td>
+          <td class="tag">SPEC §motion</td>
+        </tr>
+        <tr>
+          <td class="tok">--motion-pop</td>
+          <td>var(--t-med) var(--ease-spring)</td>
+          <td>anim-pop</td>
+          <td class="tag">primitives.css L339</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p class="mot-def" style="margin-top:8px;">
+      Note: <code>keyframes.css</code> ships 27 named animations; primitives.css
+      ships an additional 18 <code>anim-*</code> keyframes. Motion tokens
+      compose with both. <code>--motion-exit / --motion-swap / --motion-reveal /
+      --motion-settle</code> currently have no <code>@keyframes</code> pairing
+      in production — they are transition-only or reserved.
+    </p>
+  </section>
+
+</div>
+</body>
+</html>

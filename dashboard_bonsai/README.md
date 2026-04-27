@@ -65,7 +65,7 @@ dune build --root .
 
 - `lib/server/server_routes_http_pages.ml` — `/dashboard/b/*` 라우트 등록
 - `lib/server/server_routes_http_routes_frontend.ml` — `assets/dashboard_bonsai/*` 정적
-- 번들 캐시 버스트: `main.bc.js?v=<mtime>` · `colors_and_type.css?v=<mtime>`
+- 번들 캐시 버스트: `main.bc.js?v=<mtime>` · `colors_and_type.generated.css?v=<mtime>`
 
 ## 레이아웃
 
@@ -84,20 +84,24 @@ dashboard_bonsai/
 │   ├── sse.ml            # EventSource helper (Phase 0.4)
 │   └── dune
 ├── static/
-│   └── colors_and_type.css   # DS token SSOT (5 테마)
+│   ├── colors_and_type.generated.css   # DS token SSOT — codegen 출력
+│   │                                    # (dashboard/design-system/tokens/source.ts)
+│   └── themes/archive/                  # 보존된 brand-voice 테마 (cyberpunk/terminal/parchment, link 안 됨)
 └── dune-project
 ```
 
 ## 스타일
 
 - **ppx_css 블록** inline (각 view 파일 내부)
-- **`static/colors_and_type.css`**: DS token SSOT — `--bg-*` / `--text-*` / `--accent-*` / `--status-*` / `--t-*`
+- **`static/colors_and_type.generated.css`**: DS token SSOT — `--bg-*` / `--text-*` / `--accent-*` / `--status-*` / `--t-*`. 편집 금지 (`pnpm tokens:build` 산출물, source: `dashboard/design-system/tokens/source.ts`).
 - Tailwind는 Preact 잔존 탭에서만 사용 (`../dashboard/`)
 
 테마 전환:
-- URL hash: `#cyberpunk` / `#terminal` / `#parchment` / `#paper`
+- 활성 테마: `dark-fantasy` (default) / `paper` (light surface)
+- URL hash: `#paper` (또는 `#dark-fantasy`)
 - localStorage: `masc.bonsai.theme` 키로 영속화
 - 하단 theme chip 클릭 → `<html data-theme>` 속성 교체
+- 보존된 brand-voice 테마(`cyberpunk` / `terminal` / `parchment`)는 `static/themes/archive/`에 reference 로 남김. codegen SSOT 에 포함되지 않으므로 hash 로 전환해도 fallback 됨.
 
 ## 아직 mock (pending 표시)
 

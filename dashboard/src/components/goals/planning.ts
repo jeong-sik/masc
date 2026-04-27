@@ -53,7 +53,7 @@ function ExternalDocLink({ href, label }: { href: string; label: string }) {
       href=${href}
       target="_blank"
       rel="noreferrer"
-      class="inline-flex items-center gap-1 rounded border border-card-border/70 bg-white/3 px-2.5 py-1.5 text-2xs font-medium text-text-body transition-colors hover:border-accent/35 hover:text-text-strong"
+      class="inline-flex items-center gap-1 rounded border border-card-border/70 bg-[var(--white-3)] px-2.5 py-1.5 text-2xs font-medium text-text-body transition-colors hover:border-accent/35 hover:text-text-strong"
     >
       ${label}
       <span aria-hidden="true">\u2197</span>
@@ -93,7 +93,7 @@ function GuideCard({
       </div>
       <p class="text-sm leading-relaxed text-text-muted whitespace-pre-wrap">${summary}</p>
       ${command ? html`
-        <div class="rounded border border-card-border/60 bg-white/3 px-3 py-2 text-xs leading-relaxed text-text-body">
+        <div class="rounded border border-card-border/60 bg-[var(--white-3)] px-3 py-2 text-xs leading-relaxed text-text-body">
           <code class="text-2xs text-text-strong">${command}</code>
         </div>
       ` : null}
@@ -139,7 +139,7 @@ function KeeperToolActivity() {
 
   return html`
     <details class="overview-section-collapsible group overflow-hidden rounded border border-card-border/60 bg-[var(--backdrop-deep)]" open=${true}>
-      <summary class="flex items-center gap-3 border-b border-card-border/60 px-4 py-3.5 cursor-pointer text-base font-bold text-text-strong transition-colors hover:bg-white/3">
+      <summary class="flex items-center gap-3 border-b border-card-border/60 px-4 py-3.5 cursor-pointer text-base font-bold text-text-strong transition-colors hover:bg-[var(--white-3)]">
         <div class="min-w-0">
           <div>도구 활동 요약</div>
           <div class="mt-1 text-xs font-normal text-text-muted">
@@ -175,7 +175,7 @@ function KeeperToolActivity() {
             <div class="text-2xs font-semibold uppercase tracking-5 text-text-muted mb-2">최근 자주 사용된 도구</div>
             <div class="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-1.5">
               ${topTools.map(([name, count]) => html`
-                <div key=${name} class="flex items-center justify-between rounded bg-white/3 px-3 py-1.5 text-xs">
+                <div key=${name} class="flex items-center justify-between rounded bg-[var(--white-3)] px-3 py-1.5 text-xs">
                   <span class="font-mono text-text-body truncate">${name.replace(/^(keeper_|masc_)/, '')}</span>
                   <span class="ml-2 flex-shrink-0 font-mono text-text-dim">${count}</span>
                 </div>

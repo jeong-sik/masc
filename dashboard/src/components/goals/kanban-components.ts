@@ -343,7 +343,7 @@ export function TaskBacklog() {
           ${hasMoreDone ? html`
             <button
               type="button"
-              class="w-full rounded border border-card-border/60 bg-white/3 px-3 py-2 text-xs font-medium text-text-muted transition-colors hover:border-accent/35 hover:text-text-strong"
+              class="w-full rounded border border-card-border/60 bg-[var(--white-3)] px-3 py-2 text-xs font-medium text-text-muted transition-colors hover:border-accent/35 hover:text-text-strong"
               onClick=${() => {
                 if (hasSearch) searchDoneVisibleCount.value += DONE_PAGE_SIZE
                 else doneVisibleCount.value += DONE_PAGE_SIZE

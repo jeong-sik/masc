@@ -239,7 +239,7 @@ function timelineSeverityClass(severity: GoalDetailTimelineEvent['severity']): s
   switch (severity) {
     case 'bad': return 'border-bad/25 bg-bad/10 text-bad'
     case 'warn': return 'border-warn/25 bg-warn/10 text-warn'
-    default: return 'border-card-border/50 bg-white/3 text-text-body'
+    default: return 'border-card-border/50 bg-[var(--white-3)] text-text-body'
   }
 }
 
@@ -420,7 +420,7 @@ function coordinationViolationsForGoal(goalId: string): DashboardCoordinationFsm
 
 function TreeTask({ task }: { task: GoalTreeTask }) {
   return html`
-    <div class="flex flex-wrap items-center gap-2 rounded bg-white/3 px-2 py-1.5 text-xs">
+    <div class="flex flex-wrap items-center gap-2 rounded bg-[var(--white-3)] px-2 py-1.5 text-xs">
       <span class="size-2 rounded-sm shrink-0" style="background:${task.status_color}"></span>
       <span class="min-w-0 flex-1 truncate text-text-body">${task.title}</span>
       <span class="rounded border border-card-border/60 bg-white/4 px-1.5 py-0.5 text-3xs font-medium text-text-muted">
@@ -625,7 +625,7 @@ function DetailTabs({ active }: { active: GoalDetailTab }) {
           type="button"
           class="rounded border px-3 py-1.5 text-xs font-semibold uppercase tracking-wider transition-colors ${active === tab
             ? 'border-accent/35 bg-[var(--accent-10)] text-accent'
-            : 'border-card-border/60 bg-white/3 text-text-body hover:border-card-border/90'}"
+            : 'border-card-border/60 bg-[var(--white-3)] text-text-body hover:border-card-border/90'}"
           onClick=${() => { detailTab.value = tab }}
         >
           ${tab}
@@ -676,7 +676,7 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
         <div class="text-right text-text-body">${keeper.cascade_outcome ?? '-'}</div>
       </div>
       ${trustSummary || trust?.approval_state?.state || trust?.next_human_action ? html`
-        <div class="mt-3 rounded border border-card-border/50 bg-white/3 p-3">
+        <div class="mt-3 rounded border border-card-border/50 bg-[var(--white-3)] p-3">
           <div class="text-3xs font-semibold uppercase tracking-widest text-text-muted">검증 요약</div>
           ${trustSummary ? html`
             <div class="mt-2 text-xs leading-relaxed text-text-body">${trustSummary}</div>
@@ -695,7 +695,7 @@ function KeeperCard({ keeper }: { keeper: GoalDetailKeeper }) {
         </div>
       ` : null}
       ${latestEvent ? html`
-        <div class="mt-3 rounded border border-card-border/50 bg-white/3 p-3">
+        <div class="mt-3 rounded border border-card-border/50 bg-[var(--white-3)] p-3">
           <div class="flex flex-wrap items-center justify-between gap-2">
             <div class="text-3xs font-semibold uppercase tracking-widest text-text-muted">최근 키퍼 이벤트</div>
             <div class="text-3xs text-text-dim">

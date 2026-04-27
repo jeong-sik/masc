@@ -75,16 +75,44 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
              let last_turn = entry.meta.runtime.usage.last_turn_ts in
              let fiber_age = now -. entry.started_at in
              let grace_remaining = grace_period_sec () -. fiber_age in
-             let idle_stale =
-               last_turn > 0.0
-               && now -. last_turn > threshold
-               && fiber_age >= grace_period_sec ()
+             (* #10765-followup: separate idle-stale (no turn running) from
+                in-turn-stale (turn running too long).  Production
+                observation (2026-04-26): 9 keepers killed at idle
+                305–329s while masc-improver showed legitimate turn
+                latency=278s.  The previous code looked only at
+                [last_turn_ts] and could fire while a turn was actively
+                running, killing the keeper mid-LLM-call.  Active turns
+                get a separate (larger) threshold so legitimately slow
+                turns aren't mistaken for hangs.  Default 600s; override
+                via [MASC_KEEPER_WATCHDOG_TURN_TIMEOUT_SEC]. *)
+             let active_turn_timeout_sec =
+               match Sys.getenv_opt "MASC_KEEPER_WATCHDOG_TURN_TIMEOUT_SEC" with
+               | Some v -> (match float_of_string_opt (String.trim v) with
+                            | Some f when f > 0.0 -> Float.max f threshold
+                            | _ -> Float.max 600.0 threshold)
+               | None -> Float.max 600.0 threshold
+             in
+             let idle_stale, in_turn_stale, in_turn_age =
+               match entry.current_turn_observation with
+               | Some obs ->
+                 let elapsed = now -. obs.started_at in
+                 ( false
+                 , elapsed > active_turn_timeout_sec
+                   && fiber_age >= grace_period_sec ()
+                 , elapsed )
+               | None ->
+                 let stale =
+                   last_turn > 0.0
+                   && now -. last_turn > threshold
+                   && fiber_age >= grace_period_sec ()
+                 in
+                 (stale, false, 0.0)
              in
              let noop_count =
                entry.meta.runtime.proactive_rt.consecutive_noop_count
              in
              let failure_loop = noop_count >= noop_threshold () in
-             let stale = idle_stale || failure_loop in
+             let stale = idle_stale || in_turn_stale || failure_loop in
              (* #10908: 92% of ticks are
                 [noop=0 idle_stale=false failure_loop=false stale=false]
                 — every health bool at default.  Logging at INFO drowns
@@ -97,9 +125,9 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
              let actionable = stale || noop_count > 0 in
              let log_line =
                Printf.sprintf
-                 "%s: watchdog tick noop=%d idle_stale=%b failure_loop=%b stale=%b last_turn=%.0f fiber_age=%.0f grace_rem=%.0f"
-                 meta.name noop_count idle_stale failure_loop stale last_turn
-                 fiber_age grace_remaining
+                 "%s: watchdog tick noop=%d idle_stale=%b in_turn_stale=%b in_turn_age=%.0f failure_loop=%b stale=%b last_turn=%.0f fiber_age=%.0f grace_rem=%.0f"
+                 meta.name noop_count idle_stale in_turn_stale in_turn_age
+                 failure_loop stale last_turn fiber_age grace_remaining
              in
              if actionable
              then Log.Keeper.info "%s" log_line
@@ -110,13 +138,17 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
              in
              if stale && cooldown_ok then begin
                let reason_desc =
-                 if idle_stale
-                 then Printf.sprintf "idle %.0fs" (now -. last_turn)
+                 if idle_stale then Printf.sprintf "idle %.0fs" (now -. last_turn)
+                 else if in_turn_stale then
+                   Printf.sprintf "active turn hung %.0fs (timeout %.0fs)"
+                     in_turn_age active_turn_timeout_sec
                  else Printf.sprintf "failure-loop noop=%d" noop_count
                in
+               let stall_seconds =
+                 if in_turn_stale then in_turn_age else now -. last_turn
+               in
                Keeper_registry.set_failure_reason ~base_path meta.name
-                 (Some (Keeper_registry.Stale_turn_timeout
-                          (now -. last_turn)));
+                 (Some (Keeper_registry.Stale_turn_timeout stall_seconds));
                Atomic.set reg.fiber_stop true;
                let window_count = record_stale_termination meta.name now in
                Prometheus.inc_counter
@@ -150,7 +182,7 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                       (Keeper_id.Trace_id.to_string
                          entry.meta.runtime.trace_id)
                     ~generation:entry.meta.runtime.generation
-                    ~stale_seconds:(now -. last_turn)
+                    ~stale_seconds:stall_seconds
                     ~last_turn_ts:last_turn;
                   last_broadcast_ts := now
                 with

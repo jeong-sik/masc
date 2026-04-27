@@ -697,6 +697,20 @@ jobs:
       - name: Run OCaml structure ratchet
         run: scripts/ocaml-structure-ratchet.sh
 
+  keeper-cwd-leak-gate:
+    name: Keeper Cwd Leak Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    needs: [pr-sync-check]
+    if: ${{ !cancelled() && (needs.pr-sync-check.result == 'success' || needs.pr-sync-check.result == 'skipped') }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Run keeper cwd leak gate
+        run: scripts/keeper-cwd-leak-gate.sh
+
   tla-specs:
     name: TLA+ Model Checking
     runs-on: ubuntu-latest

@@ -576,28 +576,24 @@ let handle_post_list args =
 
 let handle_post_get args =
   let post_id = get_string args "post_id" "" in
-
-  match Board_dispatch.get_post ~post_id with
+  match Board_dispatch.get_post_and_comments ~post_id with
   | Error (Board.Post_not_found _) ->
       (* Idempotent: post no longer exists (deleted/expired/TTL).
          Return success so keeper tool metrics don't count this as failure.
          The LLM still sees a clear message that the post is gone. *)
       (true, Printf.sprintf "📭 Post %s no longer exists (deleted or expired)." post_id)
   | Error e -> (false, Printf.sprintf "❌ %s" (board_error_to_string e))
-  | Ok post ->
-      match Board_dispatch.get_comments ~post_id with
-      | Error e -> (false, Printf.sprintf "❌ %s" (board_error_to_string e))
-      | Ok comments ->
-          let post_str = format_post post in
-          let comments_str = if comments = [] then
-            "\n\n💬 No comments."
-          else
-            let formatted = format_comment_tree comments in
-            Printf.sprintf "\n\n💬 **Comments (%d)**:\n%s"
-              (List.length comments)
-              (String.concat "\n" formatted)
-          in
-          (true, post_str ^ comments_str)
+  | Ok (post, comments) ->
+      let post_str = format_post post in
+      let comments_str = if comments = [] then
+        "\n\n💬 No comments."
+      else
+        let formatted = format_comment_tree comments in
+        Printf.sprintf "\n\n💬 **Comments (%d)**:\n%s"
+          (List.length comments)
+          (String.concat "\n" formatted)
+      in
+      (true, post_str ^ comments_str)
 
 let handle_comment_add args =
   let post_id = get_string args "post_id" "" in

@@ -313,6 +313,42 @@ let test_add_and_get_comments () =
       | Ok comments ->
           Alcotest.(check bool) "has comment" true (List.length comments >= 1)
 
+let test_get_post_and_comments_atomic () =
+  match
+    Board_dispatch.create_post ~author:"atomic-author"
+      ~content:"atomic read body" ~post_kind:Board.Human_post ()
+  with
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Ok post ->
+      let pid = Board.Post_id.to_string post.id in
+      (match
+         Board_dispatch.add_comment ~post_id:pid ~author:"first"
+           ~content:"first comment" ()
+       with
+       | Error e -> Alcotest.fail (Board.show_board_error e)
+       | Ok _ -> ());
+      (match
+         Board_dispatch.add_comment ~post_id:pid ~author:"second"
+           ~content:"second comment" ()
+       with
+       | Error e -> Alcotest.fail (Board.show_board_error e)
+       | Ok _ -> ());
+      match Board_dispatch.get_post_and_comments ~post_id:pid with
+      | Error e -> Alcotest.fail (Board.show_board_error e)
+      | Ok (fetched, comments) ->
+          Alcotest.(check string) "post content matches"
+            "atomic read body" fetched.content;
+          Alcotest.(check int) "comment count" 2 (List.length comments)
+
+let test_get_post_and_comments_missing_post () =
+  match Board_dispatch.get_post_and_comments ~post_id:"never-existed" with
+  | Ok _ -> Alcotest.fail "expected Post_not_found"
+  | Error (Board.Post_not_found _) -> ()
+  | Error e ->
+      Alcotest.fail
+        (Printf.sprintf "expected Post_not_found, got %s"
+           (Board.show_board_error e))
+
 (** {1 Vote Operations} *)
 
 let test_vote_post () =
@@ -513,6 +549,10 @@ let () =
     ];
     "comments", [
       Alcotest.test_case "add and get" `Quick (with_eio test_add_and_get_comments);
+      Alcotest.test_case "get_post_and_comments atomic" `Quick
+        (with_eio test_get_post_and_comments_atomic);
+      Alcotest.test_case "get_post_and_comments missing post" `Quick
+        (with_eio test_get_post_and_comments_missing_post);
     ];
     "votes", [
       Alcotest.test_case "upvote" `Quick (with_eio test_vote_post);

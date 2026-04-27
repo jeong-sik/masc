@@ -2770,6 +2770,10 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                  Log.Keeper.error
                    "write_meta failed after keeper cycle: %s" msg);
           (* 8. Handle stop reason *)
+          Keeper_turn_fsm.emit_transition
+            ~keeper_name:meta.name ~turn_id:keeper_turn_id
+            ~prev:Keeper_turn_fsm.Streaming
+            Keeper_turn_fsm.Completing;
           (match result.stop_reason with
            | Oas_worker.TurnBudgetExhausted { turns_used; limit } ->
              (* INFO, not WARN: mirrors MutationBoundaryReached below.

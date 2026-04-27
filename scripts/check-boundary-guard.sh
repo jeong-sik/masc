@@ -113,7 +113,8 @@ check_forbidden_outside "V10-provider-filter-ownership" \
   'allowed_providers' \
   "lib/" \
   "lib/keeper/keeper_types.ml" \
-  "lib/keeper/keeper_meta_json_scrub.ml"
+  "lib/keeper/keeper_meta_json_scrub.ml" \
+  "lib/keeper/keeper_meta_json_scrub.mli"
 
 # V11: proof-store layout knowledge must stay inside the proof reader adapter.
 check_forbidden_outside "V11-proof-store-layout" \

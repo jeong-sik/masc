@@ -89,13 +89,13 @@ function Flag({ label, on, tone = 'ok' }: { label: string; on: boolean; tone?: '
 /** Plain-english safety-property descriptions per invariant key. */
 const INVARIANT_DESCRIPTIONS: Record<string, string> = {
   phase_turn_alignment:
-    'The KSM phase (Running / Compacting / HandingOff / …) must match what the KTC turn lane is doing. A drift means the two state machines disagree on which mode the keeper is in.',
+    'KSM phase (Running / Compacting / HandingOff / …) 와 KTC turn lane 이 일치해야 함. drift 가 발생하면 두 state machine 이 keeper mode 에 대해 의견 불일치.',
   no_cascade_before_measurement:
-    'Cascade selection must not begin before the measurement phase captures auto-rules. A violation usually means a provider call fired without the guardrail/drift checks that gate it.',
+    'Cascade selection 은 measurement phase 가 auto-rule 을 capture 하기 전에 시작되면 안 됨. violation 은 보통 guardrail/drift check 없이 provider call 이 발사된 경우.',
   compaction_atomicity:
-    'Compaction must be atomic — a turn either sees the old context or the new one, never a half-compacted state. A break corrupts message ordering or duplicates content.',
+    'Compaction 은 atomic 해야 함 — turn 이 old context 또는 new context 만 보고 half-compacted state 는 안 봄. break 시 message ordering 손상 또는 content 중복.',
   event_priority_monotone:
-    'Event_bus priorities must be monotone (higher priority delivered first). A break means a critical event was delivered after a lower-priority one, which can skew keeper decisions.',
+    'Event_bus priority 는 monotone 해야 함 (higher priority 먼저 delivered). break 시 critical event 가 lower priority 뒤에 도착해 keeper decision 왜곡.',
 }
 
 export function invariantDescription(key: string): string {

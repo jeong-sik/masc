@@ -107,7 +107,7 @@ async function fetchLogs(id: string, lines: number) {
   } catch (err) {
     setEntry(id, {
       loading: false,
-      error: err instanceof Error ? err.message : 'log fetch failed',
+      error: err instanceof Error ? err.message : 'log fetch 실패',
     })
   }
 }

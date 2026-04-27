@@ -202,7 +202,7 @@ export async function refreshAgentDetail(): Promise<void> {
           const text = await fetchTaskHistory(task.id, 25)
           return { taskId: task.id, text: text.trim() }
         } catch (err) {
-          const message = err instanceof Error ? err.message : 'history load failed'
+          const message = err instanceof Error ? err.message : 'history 로드 실패'
           return { taskId: task.id, text: `이력 로드 실패: ${message}` }
         }
       }),

@@ -17,7 +17,8 @@
     "test": "vitest run --no-file-parallelism --maxWorkers=1",
     "test:serial": "pnpm test",
     "test:watch": "vitest",
-    "tokens:build": "tsx design-system/tokens/build.ts"
+    "tokens:build": "tsx design-system/tokens/build.ts",
+    "tokens:check": "node design-system/tokens/scripts/check-equivalence.mjs"
   },
   "dependencies": {
     "@formkit/auto-animate": "^0.9.0",

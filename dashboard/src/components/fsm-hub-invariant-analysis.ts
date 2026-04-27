@@ -201,7 +201,7 @@ export function deriveOperationalInsight(
   if (snapshot.cascade.state === 'selecting' || snapshot.cascade.state === 'trying') {
     return {
       tone: 'info',
-      headline: 'Provider work is the active frontier',
+      headline: 'Provider 작업이 활성 frontier',
       detail: 'Cascade has taken ownership of the live turn, so the important next edge is provider completion or exhaustion.',
       nextStep: nextExpectedStep(snapshot),
       evidence: [
@@ -212,7 +212,7 @@ export function deriveOperationalInsight(
   }
   return {
     tone: 'info',
-    headline: 'Live turn is progressing normally',
+    headline: '라이브 턴 progressing normally',
     detail: 'No invariant drift is visible; the sub-FSMs look aligned for the current live turn.',
     nextStep: nextExpectedStep(snapshot),
     evidence: [

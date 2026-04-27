@@ -134,9 +134,9 @@ export function PromptRegistryPanel() {
     try {
       const response = await savePromptOverride(selectedPrompt.key, draft)
       if (!response.ok) {
-        throw new Error(response.error ?? 'prompt override failed')
+        throw new Error(response.error ?? 'prompt override 실패')
       }
-      setStatus(response.message ?? 'override set')
+      setStatus(response.message ?? 'override 설정됨')
       await loadPrompts(selectedPrompt.key)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))

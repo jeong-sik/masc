@@ -123,3 +123,54 @@
   14%, 42% { transform: scale(1.08); }
   28% { transform: scale(1); }
 }
+
+/* ── SPEC v0.4 atom 14/14 — Motion primitives ────────────────────────
+   Four named animations from design-system primitives.html "Motion"
+   section. The dashboard's existing keyframes (above) are scoped to
+   specific surfaces (avatar, keeper, pipeline); these `anim-*` names
+   are general-purpose tokens callers reach for via the `motion()`
+   helper in components/motion.ts.
+
+   reduced-motion: a11y.css line 77 already enforces
+   `* { animation-duration: 0s !important; }` under
+   prefers-reduced-motion: reduce — these atoms inherit that gate, so
+   no per-atom motion-safe wrapper is needed. */
+
+@keyframes anim-heartbeat {
+  0%, 100% { transform: scale(1);   opacity: 1; }
+  50%      { transform: scale(1.1); opacity: 0.85; }
+}
+
+@keyframes anim-pulse-glow {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.4; }
+}
+
+@keyframes anim-shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@keyframes anim-blink {
+  0%, 50%  { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}
+
+.anim-heartbeat  { animation: anim-heartbeat  1.4s ease-in-out infinite; }
+.anim-pulse-glow { animation: anim-pulse-glow 2.4s ease-in-out infinite; }
+.anim-blink      { animation: anim-blink      1s steps(1)      infinite; }
+
+/* Shimmer ships its own background gradient since the animation is
+   driven by `background-position` over a striped surface — callers
+   that need a different base color can override `background` after
+   composing the class. */
+.anim-shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--color-bg-elevated) 0%,
+    var(--color-bg-hover) 50%,
+    var(--color-bg-elevated) 100%
+  );
+  background-size: 200% 100%;
+  animation: anim-shimmer 1.5s linear infinite;
+}

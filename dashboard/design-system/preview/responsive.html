@@ -1,0 +1,811 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MASC · Responsive (drift coverage W13b)</title>
+<link rel="stylesheet" href="_preview.css">
+<style>
+  /* ════════════════════════════════════════════════════════════
+     W13b — responsive.css drift coverage.
+     Mirrors production responsive overrides from
+     dashboard/src/styles/responsive.css. Read-only preview;
+     responsive.css itself is not edited.
+
+     Cascade chain (live):
+       global.css :36  @import "./responsive.css"
+       (orphan-triage PR #11317 confirmed responsive.css = LIVE)
+
+     Token discipline: only var(--*) for color / spacing / type /
+     border. Numeric pixel breakpoints (1024 / 768 / 480) are
+     surfaced raw — no breakpoint token exists yet. Breakpoint
+     catalogue at the bottom flags this as Phase 2 candidate.
+     ══════════════════════════════════════════════════════════ */
+
+  /* Banner / source-of-truth strip */
+  .pv-banner {
+    display: flex; flex-wrap: wrap; gap: 10px 18px;
+    align-items: center;
+    padding: 10px 14px;
+    background: var(--color-bg-elevated);
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--r-1);
+    font: var(--type-caption);
+    color: var(--color-fg-muted);
+  }
+  .pv-banner code {
+    font-family: var(--font-mono);
+    font-size: var(--fs-10);
+    color: var(--color-fg-secondary);
+  }
+  .pv-banner .lbl {
+    font-weight: 600;
+    letter-spacing: var(--track-caps);
+    text-transform: uppercase;
+    color: var(--color-fg-secondary);
+  }
+
+  /* Source pointer footer (every cell) */
+  .pv-cell .pv-src {
+    margin-top: auto;
+    padding-top: 8px;
+    border-top: 1px dashed var(--color-border-default);
+    font-family: var(--font-mono);
+    font-size: var(--fs-9);
+    color: var(--color-fg-muted);
+    letter-spacing: var(--track-wide);
+  }
+  .pv-cell .pv-src b { color: var(--color-fg-secondary); font-weight: 600; }
+
+  /* ── Viewport switcher ───────────────────────────────────── */
+  .vp-switch {
+    display: flex; flex-wrap: wrap; gap: 6px;
+    padding: 8px;
+    background: var(--color-bg-surface);
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--r-1);
+    margin-bottom: 12px;
+  }
+  .vp-switch label {
+    cursor: pointer;
+    font: 600 var(--type-label);
+    letter-spacing: var(--track-caps);
+    text-transform: uppercase;
+    color: var(--color-fg-muted);
+    padding: 6px 10px;
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--r-0);
+    background: var(--color-bg-page);
+    user-select: none;
+    transition: all .12s;
+  }
+  .vp-switch input[type="radio"] { display: none; }
+  .vp-switch label:hover { color: var(--color-fg-secondary); border-color: var(--color-border-strong); }
+  .vp-switch label .px {
+    font-family: var(--font-mono);
+    font-size: var(--fs-9);
+    color: var(--color-fg-disabled);
+    margin-left: 6px;
+    letter-spacing: var(--track-wide);
+  }
+  /* Selected highlight: state-driven via :has() */
+  .vp-switch label:has(input:checked) {
+    background: var(--color-bg-elevated);
+    border-color: var(--color-accent-fg);
+    color: var(--color-accent-fg);
+  }
+  .vp-switch label:has(input:checked) .px { color: var(--color-accent-fg-dim); }
+
+  .vp-readout {
+    display: flex; align-items: center; gap: 12px;
+    padding: 8px 14px;
+    background: var(--color-bg-page);
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--r-0);
+    font-family: var(--font-mono);
+    font-size: var(--fs-10);
+    color: var(--color-fg-secondary);
+    margin-bottom: 16px;
+  }
+  .vp-readout b { color: var(--color-accent-fg); font-weight: 600; }
+  .vp-readout .ramp {
+    display: inline-flex; gap: 3px;
+  }
+  .vp-readout .ramp i {
+    width: 8px; height: 8px;
+    background: var(--color-bg-panel-alt);
+    border: 1px solid var(--color-border-default);
+    display: inline-block;
+  }
+
+  /* Stage = bounded width container; container queries drive demos */
+  .vp-stage {
+    container-type: inline-size;
+    container-name: vp;
+    border: 1px dashed var(--color-border-strong);
+    background: var(--color-bg-page);
+    padding: 14px;
+    border-radius: var(--r-1);
+    margin: 0 auto;
+    transition: max-width .25s ease;
+  }
+  /* Sizing classes (toggled by radio :has()) — cap content width */
+  .vp-frame[data-vp="desktop"] .vp-stage { max-width: 100%; }
+  .vp-frame[data-vp="laptop"]  .vp-stage { max-width: 1024px; }
+  .vp-frame[data-vp="tablet"]  .vp-stage { max-width: 768px; }
+  .vp-frame[data-vp="mobile"]  .vp-stage { max-width: 480px; }
+
+  /* Hook the radios so checking flips the data-vp attribute via CSS only.
+     We use distinct stage variants per radio rather than JS. */
+  .vp-frame { display: contents; }
+  .vp-frame .vp-stage-mobile,
+  .vp-frame .vp-stage-tablet,
+  .vp-frame .vp-stage-laptop,
+  .vp-frame .vp-stage-desktop { display: none; }
+  .vp-frame:has(#vp-mobile:checked) .vp-stage-mobile,
+  .vp-frame:has(#vp-tablet:checked) .vp-stage-tablet,
+  .vp-frame:has(#vp-laptop:checked) .vp-stage-laptop,
+  .vp-frame:has(#vp-desktop:checked) .vp-stage-desktop { display: block; }
+
+  /* ── Production-mirror demos ─────────────────────────────── */
+  /* Each .demo-* block uses container queries that mirror the
+     responsive.css max-width thresholds (1024 / 768 / 480) at the
+     stage level. So when the user picks "tablet", the .vp-stage
+     is constrained to 768px and every container-query rule fires. */
+
+  /* Demo: app-shell + dashboard-header */
+  .demo-shell {
+    background: var(--color-bg-surface);
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--r-1);
+    padding: 8px;
+  }
+  .demo-shell .hdr {
+    display: flex; align-items: center; gap: 16px;
+    padding: 16px;
+    background: var(--color-bg-elevated);
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--r-0);
+    min-height: 56px;
+  }
+  .demo-shell .hdr .ttl {
+    font: 600 var(--type-title);
+    color: var(--color-fg-primary);
+    flex: 1;
+  }
+  .demo-shell .hdr .hr {
+    display: flex; align-items: center; gap: 8px;
+  }
+  .demo-shell .hdr .hr .pill {
+    font: var(--type-caption);
+    color: var(--color-fg-muted);
+    border: 1px solid var(--color-border-default);
+    padding: 3px 8px;
+    border-radius: var(--r-0);
+    font-family: var(--font-mono);
+    font-size: var(--fs-9);
+  }
+  /* Container query mirrors @media (max-width: 1024px) */
+  @container vp (max-width: 1024px) {
+    .demo-shell { padding: 4px; }
+    .demo-shell .hdr {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 16px;
+      padding: 16px;
+      min-height: auto;
+    }
+    .demo-shell .hdr .hr {
+      width: 100%;
+      justify-content: space-between;
+      flex-wrap: wrap;
+    }
+  }
+
+  /* Demo: grid-stack (5 production grids collapsing to 1fr) */
+  .demo-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+  }
+  .demo-grid .blk {
+    background: var(--color-bg-elevated);
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--r-0);
+    padding: 14px;
+    min-height: 64px;
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  .demo-grid .blk .lbl {
+    font: 600 var(--type-label);
+    letter-spacing: var(--track-caps);
+    text-transform: uppercase;
+    color: var(--color-fg-secondary);
+  }
+  .demo-grid .blk .meta {
+    font-family: var(--font-mono);
+    font-size: var(--fs-9);
+    color: var(--color-fg-muted);
+  }
+  /* Container query mirrors @media (max-width: 768px) — collapse to 1fr */
+  @container vp (max-width: 768px) {
+    .demo-grid {
+      grid-template-columns: 1fr;
+      gap: 12px;
+    }
+    .demo-card-mock { min-height: auto; padding: 16px; }
+    .demo-panel-mock { padding: 12px; }
+  }
+
+  /* Demo: type ramp (root override at 768) */
+  .demo-type {
+    display: flex; flex-direction: column; gap: 6px;
+    padding: 14px;
+    background: var(--color-bg-elevated);
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--r-0);
+    /* Local copies of the canonical font-size vars; container-query
+       overrides reassign the *local* names so the demo is isolated
+       from page chrome. */
+    --demo-font-size-base: var(--font-size-base);
+    --demo-font-size-sm: var(--font-size-sm);
+    --demo-font-size-xs: var(--font-size-xs);
+    --demo-font-size-2xs: var(--font-size-2xs);
+  }
+  .demo-type .row {
+    display: flex; justify-content: space-between; align-items: baseline;
+    border-bottom: 1px dashed var(--color-border-default);
+    padding-bottom: 4px;
+  }
+  .demo-type .row .name {
+    font-family: var(--font-mono);
+    font-size: var(--fs-9);
+    color: var(--color-fg-muted);
+    letter-spacing: var(--track-wide);
+  }
+  .demo-type .row .v.base { font-size: var(--demo-font-size-base); color: var(--color-fg-primary); }
+  .demo-type .row .v.sm   { font-size: var(--demo-font-size-sm);   color: var(--color-fg-secondary); }
+  .demo-type .row .v.xs   { font-size: var(--demo-font-size-xs);   color: var(--color-fg-muted); }
+  .demo-type .row .v.x2   { font-size: var(--demo-font-size-2xs);  color: var(--color-fg-muted); font-family: var(--font-mono); }
+  /* Mirror the production root override at <= 768 */
+  @container vp (max-width: 768px) {
+    .demo-type {
+      --demo-font-size-base: 13px;
+      --demo-font-size-sm: 12px;
+      --demo-font-size-xs: 11px;
+      --demo-font-size-2xs: 10px;
+    }
+  }
+
+  /* Demo: tab-pill-bar overflow scroll at <= 480 */
+  .demo-pillbar-wrap {
+    background: var(--color-bg-elevated);
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--r-0);
+    padding: 12px;
+  }
+  .demo-pillbar {
+    display: flex; gap: 6px;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+  .demo-pillbar .pill {
+    font: 600 var(--type-label);
+    letter-spacing: var(--track-caps);
+    text-transform: uppercase;
+    color: var(--color-fg-muted);
+    padding: 6px 10px;
+    border: 1px solid var(--color-border-default);
+    border-radius: 999px;
+    background: var(--color-bg-page);
+    white-space: nowrap;
+  }
+  .demo-pillbar .pill.on {
+    color: var(--color-accent-fg);
+    border-color: var(--color-accent-fg);
+  }
+  /* Mobile breakpoint: scrollable horizontal pill bar */
+  @container vp (max-width: 480px) {
+    .demo-pillbar {
+      overflow-x: auto;
+      justify-content: flex-start;
+      padding-bottom: 4px;
+      flex-wrap: nowrap;
+      scrollbar-width: none;
+    }
+    .demo-pillbar::-webkit-scrollbar { display: none; }
+    .demo-shell .hdr { padding: 12px; }
+    .demo-shell .hdr .ttl { font-size: 18px; }
+  }
+
+  /* Breakpoint catalogue table */
+  .bp-cat {
+    width: 100%;
+    border-collapse: collapse;
+    font: var(--type-caption);
+  }
+  .bp-cat th, .bp-cat td {
+    text-align: left;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--color-border-default);
+    vertical-align: top;
+  }
+  .bp-cat th {
+    font: 600 var(--type-label);
+    letter-spacing: var(--track-caps);
+    text-transform: uppercase;
+    color: var(--color-fg-secondary);
+    background: var(--color-bg-elevated);
+  }
+  .bp-cat td.px {
+    font-family: var(--font-mono);
+    color: var(--color-accent-fg);
+    font-size: var(--fs-10);
+  }
+  .bp-cat td.tok {
+    font-family: var(--font-mono);
+    color: var(--color-fg-muted);
+    font-size: var(--fs-9);
+  }
+  .bp-cat td.tok b { color: var(--color-warn-fg); font-weight: 600; }
+  .bp-cat td.affects {
+    font-family: var(--font-mono);
+    font-size: var(--fs-9);
+    color: var(--color-fg-secondary);
+  }
+
+  .legend {
+    font: var(--type-caption);
+    color: var(--color-fg-muted);
+    line-height: 1.55;
+  }
+  .legend code {
+    font-family: var(--font-mono);
+    font-size: var(--fs-9);
+    color: var(--color-fg-secondary);
+    background: var(--color-bg-elevated);
+    padding: 1px 4px;
+    border-radius: var(--r-0);
+  }
+
+  /* Note strip: container-queries fire at stage width, NOT real viewport.
+     Production responsive.css uses real @media — this preview maps each
+     stage size to the equivalent breakpoint, faithful one-for-one. */
+  .pv-note {
+    padding: 8px 12px;
+    background: var(--color-bg-page);
+    border: 1px solid var(--color-border-default);
+    border-radius: var(--r-0);
+    font: var(--type-caption);
+    color: var(--color-fg-muted);
+    font-style: italic;
+  }
+</style>
+</head>
+<body>
+<div class="pv-root">
+
+  <!-- ── Page head ─────────────────────────────────────────── -->
+  <div class="pv-head">
+    <div class="pv-eyebrow">design-system · drift-coverage · w13b</div>
+    <div class="pv-title">Responsive overrides</div>
+    <div class="pv-sub">
+      Production <code style="font-family:var(--font-mono);font-size:var(--fs-10);color:var(--color-fg-secondary);">dashboard/src/styles/responsive.css</code>
+      ships three <code style="font-family:var(--font-mono);font-size:var(--fs-10);color:var(--color-fg-secondary);">@media</code>
+      breakpoints (1024 / 768 / 480) that reflow the app shell, fold five
+      multi-column grids to a single column, downshift the global
+      font-size ramp, and turn the tab pill bar into a horizontal
+      scroller. This preview mirrors every rule using container
+      queries against a viewport stage you can resize below — no
+      real device required.
+    </div>
+  </div>
+
+  <!-- ── Cascade banner ────────────────────────────────────── -->
+  <div class="pv-banner">
+    <span class="lbl">cascade</span>
+    <code>global.css:L36</code>
+    <span>→</span>
+    <code>@import "./responsive.css"</code>
+    <span class="lbl">live</span>
+    <code>orphan-triage #11317</code>
+    <span class="lbl">paired</span>
+    <code>W13a · layout · #11320</code>
+  </div>
+
+  <!-- ── Section 1 · Viewport switcher ─────────────────────── -->
+  <section class="pv-sect">
+    <div class="pv-sect-h">
+      <h2>1 · Viewport switcher</h2>
+      <span class="sub">stage container queries · 4 sizes</span>
+    </div>
+
+    <div class="vp-frame" id="vp-frame">
+      <form class="vp-switch" id="vp-form">
+        <label><input type="radio" name="vp" id="vp-desktop" checked>desktop<span class="px">≥1025px</span></label>
+        <label><input type="radio" name="vp" id="vp-laptop">laptop<span class="px">≤1024px</span></label>
+        <label><input type="radio" name="vp" id="vp-tablet">tablet<span class="px">≤768px</span></label>
+        <label><input type="radio" name="vp" id="vp-mobile">mobile<span class="px">≤480px</span></label>
+      </form>
+
+      <div class="vp-readout">
+        <span>active stage:</span>
+        <b id="vp-readout-name" style="color:var(--color-accent-fg)">desktop</b>
+        <span>·</span>
+        <span id="vp-readout-px" style="color:var(--color-fg-muted)">100% wrapper · no responsive.css rules fire</span>
+        <span class="ramp" style="margin-left:auto">
+          <i></i><i></i><i></i><i></i>
+        </span>
+      </div>
+
+      <!-- Four stages — only the matching one is displayed -->
+      <div class="vp-stage vp-stage-desktop" data-vp="desktop">
+        <div class="demo-shell">
+          <div class="hdr">
+            <div class="ttl">MASC Dashboard · Cockpit</div>
+            <div class="hr">
+              <span class="pill">cascade · ok</span>
+              <span class="pill">14/14 keepers</span>
+              <span class="pill">v0.42.1</span>
+            </div>
+          </div>
+        </div>
+        <p class="legend" style="margin-top:14px">
+          Desktop ≥1025px · base layer. None of responsive.css’s
+          three <code>@media</code> queries fire; layout uses the
+          declarations from <code>dashboard.css</code> directly.
+        </p>
+      </div>
+
+      <div class="vp-stage vp-stage-laptop" data-vp="laptop">
+        <div class="demo-shell">
+          <div class="hdr">
+            <div class="ttl">MASC Dashboard · Cockpit</div>
+            <div class="hr">
+              <span class="pill">cascade · ok</span>
+              <span class="pill">14/14 keepers</span>
+              <span class="pill">v0.42.1</span>
+            </div>
+          </div>
+        </div>
+        <p class="legend" style="margin-top:14px">
+          Laptop ≤1024px · the <code>@media (max-width: 1024px)</code>
+          block fires. <code>.app-shell</code> shrinks to
+          <code>calc(100% − 16px)</code>; <code>.dashboard-header</code>
+          stacks vertically; <code>.header-right</code> spans full
+          width and wraps.
+        </p>
+      </div>
+
+      <div class="vp-stage vp-stage-tablet" data-vp="tablet">
+        <div class="demo-shell">
+          <div class="hdr">
+            <div class="ttl">MASC Dashboard · Cockpit</div>
+            <div class="hr">
+              <span class="pill">cascade · ok</span>
+              <span class="pill">14/14 keepers</span>
+            </div>
+          </div>
+        </div>
+        <p class="legend" style="margin-top:14px">
+          Tablet ≤768px · the <code>@media (max-width: 768px)</code>
+          block fires. The five production grids
+          (<code>.monitor-grid</code>, <code>.control-row</code>,
+          <code>.dashboard-main-grid</code>,
+          <code>.agent-monitor-layout</code>,
+          <code>.ops-triple-column</code>) collapse to <code>1fr</code>
+          with <code>!important</code>; the canonical
+          <code>--font-size-*</code> ramp downshifts so both Tailwind
+          utilities and legacy <code>var(--fs-*)</code> consumers
+          shrink in lockstep.
+        </p>
+      </div>
+
+      <div class="vp-stage vp-stage-mobile" data-vp="mobile">
+        <div class="demo-shell">
+          <div class="hdr">
+            <div class="ttl" style="font-size:18px">Dashboard</div>
+            <div class="hr">
+              <span class="pill">cascade · ok</span>
+            </div>
+          </div>
+        </div>
+        <p class="legend" style="margin-top:14px">
+          Mobile ≤480px · the <code>@media (max-width: 480px)</code>
+          block fires. <code>.dashboard-header</code> tightens to
+          12px padding; <code>h1</code> downshifts to 18px; the
+          <code>.tab-pill-bar</code> turns into a horizontal scroller
+          with hidden webkit scrollbar.
+        </p>
+      </div>
+    </div>
+
+    <div class="pv-note">
+      Stage uses CSS <code>container-type: inline-size</code> + container
+      queries to fire the demos at 1024 / 768 / 480 stage widths —
+      one-for-one with production <code>@media</code> thresholds.
+      Switcher is pure CSS (<code>:has()</code> on radios); no JS in
+      the hot path. The readout label is updated by a small inline
+      script for clarity only.
+    </div>
+
+    <div class="pv-src" style="border-top:1px dashed var(--color-border-default); margin-top:14px; padding-top:8px;">
+      mirrors production <b>responsive.css:L1–L82</b> · all three
+      <b>@media</b> blocks
+    </div>
+  </section>
+
+  <!-- ── Section 2 · 1024 break — header reflow ───────────── -->
+  <section class="pv-sect">
+    <div class="pv-sect-h">
+      <h2>2 · ≤1024px · app shell + header reflow</h2>
+      <span class="sub">.app-shell · .dashboard-header · .header-right</span>
+    </div>
+    <div class="vp-frame">
+      <p class="legend" style="margin-bottom:8px">
+        The same demo as section 1 — included in isolation so the
+        ≤1024 fold is visible regardless of the global stage selection.
+        Width is fixed at 1000px to force the rule to fire.
+      </p>
+      <div class="vp-stage" style="max-width:1000px">
+        <div class="demo-shell">
+          <div class="hdr">
+            <div class="ttl">MASC Dashboard · Cockpit</div>
+            <div class="hr">
+              <span class="pill">cascade · ok</span>
+              <span class="pill">14/14 keepers</span>
+              <span class="pill">v0.42.1</span>
+              <span class="pill">density · cosy</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="pv-src" style="margin-top:10px">
+        mirrors production <b>responsive.css:L3–L22</b>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Section 3 · 768 break — grid-collapse ─────────────── -->
+  <section class="pv-sect">
+    <div class="pv-sect-h">
+      <h2>3 · ≤768px · grid collapse + type downshift</h2>
+      <span class="sub">.monitor-grid · .control-row · .dashboard-main-grid · .agent-monitor-layout · .ops-triple-column</span>
+    </div>
+    <div class="pv-grid-2">
+
+      <div class="pv-cell">
+        <div class="pv-cell-h">
+          <span class="pv-cell-label">grid · 3-col → 1fr</span>
+          <span class="pv-cell-meta">stage · 720px</span>
+        </div>
+        <div class="vp-stage demo-card-mock" style="max-width:720px">
+          <div class="demo-grid">
+            <div class="blk demo-card-mock"><span class="lbl">monitor</span><span class="meta">7 lanes · 14 keepers</span></div>
+            <div class="blk demo-card-mock"><span class="lbl">control</span><span class="meta">cascade · drift · ratchet</span></div>
+            <div class="blk demo-card-mock"><span class="lbl">ops</span><span class="meta">triple · column</span></div>
+          </div>
+        </div>
+        <p class="legend">
+          At <code>≤768px</code> all five production grids collapse to
+          a single column with <code>!important</code> to defeat any
+          local <code>grid-template-columns</code> in the feature
+          stylesheets.
+        </p>
+        <div class="pv-src">mirrors production <b>responsive.css:L42–L49</b></div>
+      </div>
+
+      <div class="pv-cell">
+        <div class="pv-cell-h">
+          <span class="pv-cell-label">type · ramp downshift</span>
+          <span class="pv-cell-meta">stage · 720px</span>
+        </div>
+        <div class="vp-stage" style="max-width:720px">
+          <div class="demo-type">
+            <div class="row"><span class="name">--font-size-base</span><span class="v base">The quick brown fox · base 14→13</span></div>
+            <div class="row"><span class="name">--font-size-sm</span>  <span class="v sm">The quick brown fox · sm 13→12</span></div>
+            <div class="row"><span class="name">--font-size-xs</span>  <span class="v xs">The quick brown fox · xs 12→11</span></div>
+            <div class="row"><span class="name">--font-size-2xs</span> <span class="v x2">The quick brown fox · 2xs 11→10</span></div>
+          </div>
+        </div>
+        <p class="legend">
+          Pre-consolidation the ramp shrunk only <code>--fs-*</code>
+          custom props, so Tailwind utilities (<code>text-sm</code>
+          …) skipped the override. Post-consolidation
+          <code>--font-size-*</code> is the canonical name and
+          <code>--fs-*</code> aliases to it — overriding
+          <code>--font-size-*</code> at the root catches both
+          consumers in one shot.
+        </p>
+        <div class="pv-src">mirrors production <b>responsive.css:L24–L39</b></div>
+      </div>
+
+      <div class="pv-cell">
+        <div class="pv-cell-h">
+          <span class="pv-cell-label">monitor-surface · padding</span>
+          <span class="pv-cell-meta">stage · 720px</span>
+        </div>
+        <div class="vp-stage" style="max-width:720px">
+          <div class="demo-card-mock blk" style="background:var(--color-bg-elevated); border:1px solid var(--color-border-default); padding:16px; border-radius:var(--r-0);">
+            <div style="font:600 var(--type-label); letter-spacing:var(--track-caps); text-transform:uppercase; color:var(--color-fg-secondary)">monitor-surface-card</div>
+            <div style="font-family:var(--font-mono); font-size:var(--fs-9); color:var(--color-fg-muted); margin-top:6px">
+              <code>min-height:auto !important · padding:16px !important</code>
+            </div>
+          </div>
+        </div>
+        <p class="legend">
+          Mobile/tablet sized monitor cards drop the desktop
+          <code>min-height</code> floor so dense grids do not
+          waste vertical space when stacked.
+        </p>
+        <div class="pv-src">mirrors production <b>responsive.css:L52–L55</b></div>
+      </div>
+
+      <div class="pv-cell">
+        <div class="pv-cell-h">
+          <span class="pv-cell-label">dashboard-panel · padding</span>
+          <span class="pv-cell-meta">stage · 720px</span>
+        </div>
+        <div class="vp-stage" style="max-width:720px">
+          <div class="demo-panel-mock" style="background:var(--color-bg-elevated); border:1px solid var(--color-border-default); padding:12px; border-radius:var(--r-0);">
+            <div style="font:600 var(--type-label); letter-spacing:var(--track-caps); text-transform:uppercase; color:var(--color-fg-secondary)">dashboard-panel</div>
+            <div style="font-family:var(--font-mono); font-size:var(--fs-9); color:var(--color-fg-muted); margin-top:6px">
+              <code>padding:12px !important</code>
+            </div>
+          </div>
+        </div>
+        <p class="legend">
+          Generic <code>.dashboard-panel</code> tightens its inset
+          from the desktop default to a flat 12px so nested cards
+          read evenly on narrow viewports.
+        </p>
+        <div class="pv-src">mirrors production <b>responsive.css:L57–L59</b></div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ── Section 4 · 480 break — mobile pill bar + header tighten ─ -->
+  <section class="pv-sect">
+    <div class="pv-sect-h">
+      <h2>4 · ≤480px · header tighten + pill-bar scroller</h2>
+      <span class="sub">.dashboard-header · .header-title-wrap h1 · .header-subtitle · .tab-pill-bar</span>
+    </div>
+    <div class="pv-cell">
+      <div class="pv-cell-h">
+        <span class="pv-cell-label">tab-pill-bar · overflow-x</span>
+        <span class="pv-cell-meta">stage · 460px</span>
+      </div>
+      <div class="vp-stage" style="max-width:460px">
+        <div class="demo-pillbar-wrap">
+          <div class="demo-pillbar">
+            <span class="pill on">monitor</span>
+            <span class="pill">control</span>
+            <span class="pill">cascade</span>
+            <span class="pill">audit</span>
+            <span class="pill">cost</span>
+            <span class="pill">heuristic</span>
+            <span class="pill">decisions</span>
+            <span class="pill">episodes</span>
+            <span class="pill">autoresearch</span>
+          </div>
+        </div>
+      </div>
+      <p class="legend">
+        Below 480px the pill bar drops <code>flex-wrap</code> in
+        favour of <code>overflow-x:auto</code> + left-aligned
+        scrolling. Webkit scrollbar is hidden via
+        <code>::-webkit-scrollbar { display:none; }</code> nested
+        in the <code>&amp;</code> selector — Firefox uses
+        <code>scrollbar-width:none</code>.
+      </p>
+      <div class="pv-src">
+        mirrors production <b>responsive.css:L62–L80</b>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Section 5 · Breakpoint catalogue ──────────────────── -->
+  <section class="pv-sect">
+    <div class="pv-sect-h">
+      <h2>5 · Breakpoint catalogue</h2>
+      <span class="sub">raw-px values · token mapping audit</span>
+    </div>
+    <table class="bp-cat">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>predicate</th>
+          <th>token mapping</th>
+          <th>production rules</th>
+          <th>scope</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="px">1</td>
+          <td class="px">@media (max-width: 1024px)</td>
+          <td class="tok"><b>NONE</b> — no <code>--bp-*</code> in tokens.generated.css</td>
+          <td class="affects">.app-shell · .dashboard-header · .header-right</td>
+          <td>laptop fold</td>
+        </tr>
+        <tr>
+          <td class="px">2</td>
+          <td class="px">@media (max-width: 768px)</td>
+          <td class="tok"><b>NONE</b> — raw 768px literal</td>
+          <td class="affects">5 grids → 1fr · --font-size-* ramp · .monitor-surface-card · .dashboard-panel</td>
+          <td>tablet · primary fold</td>
+        </tr>
+        <tr>
+          <td class="px">3</td>
+          <td class="px">@media (max-width: 480px)</td>
+          <td class="tok"><b>NONE</b> — raw 480px literal</td>
+          <td class="affects">.dashboard-header · h1 · .header-subtitle · .tab-pill-bar</td>
+          <td>mobile · narrow phone</td>
+        </tr>
+      </tbody>
+    </table>
+    <p class="legend" style="margin-top:10px">
+      <strong style="color:var(--color-warn-fg)">Phase 2 candidate:</strong>
+      none of the three breakpoints are bound to design tokens.
+      A future <code>--bp-laptop / --bp-tablet / --bp-mobile</code>
+      family would let other stylesheets reference the same fold
+      points without duplicating literals (e.g.
+      <code>@media (max-width: var(--bp-tablet))</code> once
+      browser support is general). Until then this catalogue is
+      the SSOT.
+    </p>
+  </section>
+
+  <!-- ── Page footer ───────────────────────────────────────── -->
+  <div class="pv-banner" style="margin-top:24px">
+    <span class="lbl">drift</span>
+    <code>responsive.css · 82 LOC · 3 @media · 0 hex</code>
+    <span class="lbl">paired</span>
+    <code>W13a layout · #11320</code>
+    <span class="lbl">phase 0</span>
+    <code>orphan column refresh · #11300</code>
+    <span class="lbl">triage</span>
+    <code>#11317</code>
+    <a href="index.html" style="margin-left:auto;color:var(--color-accent-fg);text-decoration:none;font-family:var(--font-mono);font-size:var(--fs-10)">← back to hub</a>
+  </div>
+
+</div>
+
+<script>
+  // Update the stage readout text on radio change. The actual
+  // sizing is driven by CSS :has() — this is for the user-visible
+  // px label only.
+  (function () {
+    var form = document.getElementById('vp-form');
+    var nameEl = document.getElementById('vp-readout-name');
+    var pxEl = document.getElementById('vp-readout-px');
+    var labels = {
+      desktop: ['desktop', '100% wrapper · no responsive.css rules fire'],
+      laptop:  ['laptop',  '≤1024px · header reflow + app-shell margin'],
+      tablet:  ['tablet',  '≤768px · 5 grids → 1fr + type ramp downshift'],
+      mobile:  ['mobile',  '≤480px · header tighten + pill-bar scroller']
+    };
+    function update() {
+      var checked = form.querySelector('input[name="vp"]:checked');
+      if (!checked) return;
+      var key = checked.id.replace('vp-', '');
+      var frame = document.getElementById('vp-frame');
+      // mirror the data-vp attribute so the section-1 stage matches
+      var stages = frame.querySelectorAll('.vp-stage');
+      // find the stage that matches and propagate data-vp on the frame for the .vp-frame[data-vp=...] selectors
+      frame.setAttribute('data-vp', key);
+      var section1Stage = frame.querySelector('.vp-stage-' + key);
+      if (section1Stage) section1Stage.setAttribute('data-vp', key);
+      var meta = labels[key];
+      if (meta) {
+        nameEl.textContent = meta[0];
+        pxEl.textContent = meta[1];
+      }
+    }
+    form.addEventListener('change', update);
+    update();
+  })();
+</script>
+</body>
+</html>

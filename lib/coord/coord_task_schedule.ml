@@ -171,7 +171,9 @@ let last_nonempty_line path =
            | exception End_of_file -> last
          in
          loop None)
-  with _ -> None
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | Sys_error _ -> None
 
 let latest_json_in_receipt_dir base_dir =
   jsonl_files_under base_dir

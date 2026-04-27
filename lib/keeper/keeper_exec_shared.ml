@@ -13,34 +13,50 @@ let error_json ?(fields = []) (message : string) =
 
 let tool_result_or_error (ok, msg) = if ok then msg else error_json msg
 
+(** Phase B PR-5 precursor (2026-04-28): the action mapping itself,
+    parameterised by the typed [Keeper_failure_circuit_breaker.error_class].
+    Callers that already hold a typed class (sandbox / shell typed
+    error paths in Phase B PR-5) call this directly and skip the
+    string → class round-trip entirely.  String-only callers go through
+    [actionable_path_error] below, which classifies once and delegates. *)
+let actionable_path_action_for_class
+      ~(playground : string)
+      ~(raw_path : string)
+      (cls : Keeper_failure_circuit_breaker.error_class) : string =
+  if String.length raw_path = 0 then
+    "Provide a path. Your playground root is " ^ playground
+  else
+    match cls with
+    | Path_not_found ->
+      Printf.sprintf "File does not exist. Run `keeper_shell op=ls path=%s` first to see available files." playground
+    | Path_not_allowed ->
+      Printf.sprintf "Path is outside your allowed roots. Stay inside %s or use keeper_context_status to see allowed paths." playground
+    | Cwd_not_directory ->
+      "The cwd is not a directory. Omit cwd to use your default playground root."
+    | Shell_exit_nonzero | Other ->
+      Printf.sprintf "Check the path. Your playground: %s" playground
+
 (** Actionable error for path resolution failures.
     Follows Samchon harness pattern: field-level diagnostics with
     exact path, expected constraint, and concrete next action.
     Claude Code pattern: validateInput returns actionable guidance.
 
-    Phase A F4 (2026-04-27): the error → action mapping now dispatches
-    on the typed [Keeper_failure_circuit_breaker.error_class] instead of
-    a parallel [contains_substring] ladder.  String-matching collapses
-    from two sites (here + circuit_breaker) to one (the SSOT).  Phase B
-    PR-5 will then push the typed class up to the caller so the final
-    site disappears. *)
+    Phase A F4 (2026-04-27): the error → action mapping dispatches on
+    the typed [Keeper_failure_circuit_breaker.error_class] instead of a
+    parallel [contains_substring] ladder.  String-matching collapses
+    from two sites (here + circuit_breaker) to one (the SSOT).
+
+    Phase B PR-5 precursor (2026-04-28): the action mapping is now
+    parameterised on the typed class via
+    [actionable_path_action_for_class].  This keeps the string-input
+    entry point (for callers that only have a raw error message) but
+    exposes the typed mapping so Phase B PR-5 can route typed callers
+    directly without a redundant classify pass. *)
 let actionable_path_error ~(op : string) ~(meta : keeper_meta)
       ~(raw_path : string) ~(error : string) =
   let playground = Keeper_sandbox.allowed_root_rel_of_meta ~meta in
-  let action =
-    if String.length raw_path = 0 then
-      "Provide a path. Your playground root is " ^ playground
-    else
-      match Keeper_failure_circuit_breaker.classify_error error with
-      | Path_not_found ->
-        Printf.sprintf "File does not exist. Run `keeper_shell op=ls path=%s` first to see available files." playground
-      | Path_not_allowed ->
-        Printf.sprintf "Path is outside your allowed roots. Stay inside %s or use keeper_context_status to see allowed paths." playground
-      | Cwd_not_directory ->
-        "The cwd is not a directory. Omit cwd to use your default playground root."
-      | Shell_exit_nonzero | Other ->
-        Printf.sprintf "Check the path. Your playground: %s" playground
-  in
+  let cls = Keeper_failure_circuit_breaker.classify_error error in
+  let action = actionable_path_action_for_class ~playground ~raw_path cls in
   Yojson.Safe.to_string (`Assoc [
     "ok", `Bool false;
     "op", `String op;

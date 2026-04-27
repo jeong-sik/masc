@@ -44,7 +44,7 @@ function priorityToneClass(priority: number): string {
     case 1: return 'border-l-[var(--rose-light)] bg-[var(--color-status-err)]/10 text-[var(--rose-fg)]'
     case 2: return 'border-l-[var(--color-status-warn)] bg-[var(--color-status-warn)]/10 text-[var(--yellow-100)]'
     case 3: return 'border-l-[var(--blue-400)] bg-[var(--blue-400)]/10 text-[#bfdbfe]'
-    default: return 'border-l-[rgba(148,163,184,0.45)] bg-white/5 text-text-muted'
+    default: return 'border-l-[rgba(148,163,184,0.45)] bg-[var(--white-5)] text-text-muted'
   }
 }
 
@@ -106,7 +106,7 @@ function KanbanCard({ task }: { task: Task }) {
       <div class="flex items-start justify-between gap-3">
         <div class="flex flex-wrap items-center gap-2">
           <span class="rounded border border-current/20 px-2 py-0.5 text-2xs font-semibold">${priorityLabel(p)}</span>
-          ${scope ? html`<span class="rounded border border-card-border/70 bg-white/5 px-2 py-0.5 text-2xs font-medium text-text-body">${scope}</span>` : null}
+          ${scope ? html`<span class="rounded border border-card-border/70 bg-[var(--white-5)] px-2 py-0.5 text-2xs font-medium text-text-body">${scope}</span>` : null}
         </div>
         <${ActionButton}
           variant="danger"

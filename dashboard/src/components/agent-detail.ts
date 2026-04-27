@@ -252,16 +252,16 @@ export function AgentDetailOverlay() {
         <div class="flex justify-between items-start gap-4">
           <div class="flex flex-col gap-3 flex-1">
             <div class="flex items-center gap-4">
-              ${agentEmoji ? html`<div class="size-12 rounded bg-white/5 border border-[var(--white-10)] flex items-center justify-center text-3xl shadow-inner">${agentEmoji}</div>` : ''}
+              ${agentEmoji ? html`<div class="size-12 rounded bg-[var(--white-5)] border border-[var(--white-10)] flex items-center justify-center text-3xl shadow-inner">${agentEmoji}</div>` : ''}
               <div>
                 <h2 id=${titleId} class="m-0 flex items-baseline gap-3 text-text-strong text-2xl font-bold tracking-tight">
                   ${displayName}
                   ${koreanName ? html`<span class="text-sm text-text-dim font-medium tracking-normal">(${koreanName})</span>` : ''}
-                  ${showSecondaryLabel ? html`<span class="font-mono text-xs text-text-dim bg-white/5 px-2 py-0.5 rounded">${secondaryLabel}</span>` : ''}
+                  ${showSecondaryLabel ? html`<span class="font-mono text-xs text-text-dim bg-[var(--white-5)] px-2 py-0.5 rounded">${secondaryLabel}</span>` : ''}
                 </h2>
                 <div class="flex items-center gap-2 mt-2 flex-wrap">
                   <${StatusBadge} status=${unified.canonical} />
-                  ${unified.description !== unified.label ? html`<span class="text-3xs font-medium py-1 px-2 border border-[var(--white-10)] bg-white/5 text-text-muted whitespace-nowrap rounded" title=${unified.description}>${unified.description}</span>` : null}
+                  ${unified.description !== unified.label ? html`<span class="text-3xs font-medium py-1 px-2 border border-[var(--white-10)] bg-[var(--white-5)] text-text-muted whitespace-nowrap rounded" title=${unified.description}>${unified.description}</span>` : null}
                   ${isArchivedParticipant ? html`<${IdPill}>이전 세션 참여자<//>` : null}
                   ${agent?.model ? html`<span class="font-mono text-3xs font-medium bg-[var(--white-10)] border border-[var(--white-5)] px-2 py-1 rounded text-text-muted shadow-sm">${agent.model}</span>` : ''}
                   ${!agent && missionBrief?.archived_reason
@@ -292,7 +292,7 @@ export function AgentDetailOverlay() {
                           ${keeperIdentity ? html`<span class="text-text-dim text-xs"><span aria-hidden="true">· </span>${keeperIdentity}</span>` : ''}
                         </span>`
                       : null}
-                    ${missionBrief?.related_session_id ? html`<span class="flex items-center gap-1.5">세션: <strong class="font-mono text-text-strong text-xs bg-white/5 px-1.5 rounded">${missionBrief.related_session_id}</strong></span>` : null}
+                    ${missionBrief?.related_session_id ? html`<span class="flex items-center gap-1.5">세션: <strong class="font-mono text-text-strong text-xs bg-[var(--white-5)] px-1.5 rounded">${missionBrief.related_session_id}</strong></span>` : null}
                     ${continuitySummary ? html`<span class="text-accent/90 bg-[var(--accent-10)] px-2 py-0.5 rounded border border-accent/10">${continuitySummary}</span>` : null}
                   </div>
                 `

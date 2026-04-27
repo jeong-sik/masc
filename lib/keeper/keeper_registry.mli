@@ -22,10 +22,39 @@ type ambiguous_partial_commit = {
   detail : string;
 }
 
+(** Phase B PR-6 (2026-04-28): the stale watchdog's three distinct kill
+    causes used to collapse into a single [Stale_turn_timeout of float]
+    variant.  Operators / dashboards could not tell whether a kill was an
+    idle stall (turn never started), an active turn hang (turn running
+    too long), or a no-op failure loop (turn fired but produced no tool
+    calls) — three different root causes that need different operator
+    actions.  Splitting the payload preserves the [Stale_turn_timeout]
+    cohort key so existing dashboards keep working, while exposing the
+    typed sub-class to anything that wants to discriminate. *)
+type stale_kill_class =
+  | Idle_turn of { stall_seconds : float }
+      (** [last_turn_ts] older than the idle threshold while the keeper
+          phase is [Running] but no [current_turn_observation] is
+          recorded. *)
+  | In_turn_hung of {
+      active_seconds : float;
+      timeout_threshold : float;
+    }
+      (** A turn started ([current_turn_observation = Some]) and ran past
+          [timeout_threshold] seconds. *)
+  | Noop_failure_loop of { noop_count : int }
+      (** Turns kept firing but produced no tool calls; the keepalive's
+          [consecutive_noop_count] reached the watchdog threshold. *)
+
+val stale_kill_class_to_string : stale_kill_class -> string
+(** Operator-facing label.  Used in [failure_reason_to_string] for the
+    [Stale_turn_timeout] arm and exposed for dashboards / metrics that
+    want to attribute kills by class. *)
+
 type failure_reason =
   | Heartbeat_consecutive_failures of int
   | Turn_consecutive_failures of int
-  | Stale_turn_timeout of float
+  | Stale_turn_timeout of stale_kill_class
   | Stale_termination_storm of { count : int }
       (** #10765 Phase 2: latched when [record_stale_termination] returns a
           window count >= [escalation_threshold]. The supervisor's

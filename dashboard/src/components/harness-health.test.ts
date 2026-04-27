@@ -317,6 +317,8 @@ describe('HarnessHealth', () => {
     expect(source).toContain('class evaluator activeRail;')
     expect(source).toContain('교체 신호')
     expect(source).toContain('/api/v1/dashboard/harness-health')
+    // Mermaid classDef parser cannot lex CSS var(--token) — colors must stay as hex literals.
+    expect(source).not.toMatch(/classDef[^\n]*var\(/)
   })
 
   it('updates the handoff rail immediately on keeper_handoff SSE events', async () => {

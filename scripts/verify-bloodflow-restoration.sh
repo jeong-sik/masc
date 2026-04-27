@@ -1,0 +1,192 @@
+#!/usr/bin/env bash
+# verify-bloodflow-restoration.sh
+#
+# Phase A bloodflow-restoration verification helper.  Reads operator-side
+# JSONL logs and grep counters for the five Phase A signals defined in
+# planning/claude-plans/me-workspace-yousleepwhen-masc-mcp-sunny-starfish.md
+# section 10:
+#
+#   F1 — per-keeper raw token fallback fired
+#   F2 — silent_auth_token_resolve_error volume + would_reject mode mix
+#   F3 — empty_tool_universe blocker observed by lane
+#   F4 — string-match SSOT collapse (no contains_substring outside SSOT)
+#   F5 — typed gh-api / strip_keeper_prefix helpers in use (compile-only;
+#        dynamic check by scanning for legacy literal patterns)
+#
+# This script does NOT change state.  It prints a punch list of what each
+# Phase B promotion gate (PR-2 strict reject, PR-4 typed terminal state)
+# needs from the soak window, and a single composite KPI line:
+#
+#   mutation_to_passive_ratio = mutating_calls / passive_calls
+#
+# The plan target is 1:8 -> 1:3 within seven days post-deploy.  The
+# script just reports the current ratio; the operator decides whether
+# the gate is met.
+#
+# Usage:
+#   scripts/verify-bloodflow-restoration.sh
+#   scripts/verify-bloodflow-restoration.sh --since 24h     # last 24 hours of logs
+#   scripts/verify-bloodflow-restoration.sh --logs <dir>    # override log dir
+#
+# Exits 0 if all five signals are reachable in the log set.  The metric
+# values themselves never trigger non-zero exit — that is a soak-policy
+# decision, not a build-gate one.
+
+# Verification script: every count is best-effort.  Empty grep results
+# (exit 1) and missing log files are valid signals, not errors, so we
+# do NOT use set -e here.  Real fatal errors (find missing, dir
+# missing) are checked explicitly below.
+set -o pipefail
+
+LOG_DIR="${MASC_LOG_DIR:-$HOME/.masc/logs}"
+SINCE=""
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --logs) LOG_DIR="$2"; shift 2 ;;
+    --since) SINCE="$2"; shift 2 ;;
+    -h|--help)
+      sed -n '2,/^set -euo/p' "$0" | sed 's/^# \{0,1\}//'
+      exit 0
+      ;;
+    *) echo "Unknown flag: $1" >&2; exit 2 ;;
+  esac
+done
+
+if [ ! -d "$LOG_DIR" ]; then
+  echo "verify-bloodflow: log dir $LOG_DIR not found"
+  echo "  hint: server has not started since deploy, or logs are elsewhere."
+  echo "  set MASC_LOG_DIR or pass --logs <path>."
+  exit 1
+fi
+
+# Build a list of log files honoring --since via mtime when present.
+collect_logs() {
+  local glob="$1"
+  if [ -n "$SINCE" ]; then
+    # find -mtime takes days; convert hours/days suffix.  If the user
+    # passed a value find can't handle, fall back to all-time.
+    local mtime_arg=""
+    case "$SINCE" in
+      *h) mtime_arg="-mmin -$(( ${SINCE%h} * 60 ))" ;;
+      *d) mtime_arg="-mtime -${SINCE%d}" ;;
+      *)  mtime_arg="" ;;
+    esac
+    find "$LOG_DIR" -maxdepth 1 -type f -name "$glob" $mtime_arg 2>/dev/null | sort
+  else
+    find "$LOG_DIR" -maxdepth 1 -type f -name "$glob" 2>/dev/null | sort
+  fi
+}
+
+count_pattern_in() {
+  local pattern="$1"; shift
+  # Bash 3.2 + set -u: "${arr[@]}" on an empty array unbound-errors.
+  # Tolerate the empty case explicitly.
+  if [ "$#" -eq 0 ]; then echo 0; return; fi
+  grep -F -- "$pattern" "$@" 2>/dev/null | wc -l | tr -d ' '
+}
+
+# macOS ships with bash 3.2 which lacks mapfile.  Use a portable read loop.
+auth_logs=()
+while IFS= read -r line; do auth_logs+=("$line"); done < <(collect_logs 'auth_resolve_*.jsonl')
+sys_logs=()
+while IFS= read -r line; do sys_logs+=("$line"); done < <(collect_logs 'system_log_*.jsonl')
+kp_logs=()
+while IFS= read -r line; do kp_logs+=("$line"); done < <(collect_logs 'keeper_*.jsonl')
+
+echo "=== Phase A bloodflow-restoration verification ==="
+echo "log dir: $LOG_DIR"
+echo "since:   ${SINCE:-all time}"
+echo
+
+# ----- F1: per-keeper raw token fallback fired ----------------------------
+f1=$(count_pattern_in '"source":"per_keeper_token_file"' "${auth_logs[@]}")
+echo "F1 per_keeper_token_file source events: $f1"
+if [ "$f1" -lt 1 ] && [ "${#auth_logs[@]}" -gt 0 ]; then
+  echo "  NOTE: F1 fallback never fired in this log window — either no"
+  echo "  subprocess MCP calls happened, or MASC_MCP_TOKEN was always set."
+fi
+
+# ----- F2: silent_auth + would_reject mode mix ----------------------------
+silent=$(count_pattern_in '[silent:auth_token_resolve_error]' "${sys_logs[@]}")
+would=$(count_pattern_in   '[would_reject:auth_token_resolve_error]' "${sys_logs[@]}")
+echo
+echo "F2 silent_auth_token_resolve_error events: $silent"
+echo "   would_reject companion events:          $would"
+if [ "$silent" -gt 0 ] && [ "$would" -lt "$silent" ]; then
+  echo "  NOTE: silent count > would_reject count — Auth_strict_mode might"
+  echo "  be Off in part of the window.  Check MASC_AUTH_STRICT env."
+fi
+
+# ----- F3: empty_tool_universe blocker observed --------------------------
+f3=$(count_pattern_in 'masc_empty_tool_universe_observed_total' "${kp_logs[@]}")
+echo
+echo "F3 empty_tool_universe blocker events:   $f3"
+echo "   (broken down by lane in dashboard via labels turn_lane / fallback_used)"
+
+# ----- F4: contains_substring SSOT --------------------------------------
+# Static check: scan lib/keeper for [contains_substring].  After Phase B
+# PR-5 main, this should be 0.  Currently 1 (the SSOT in
+# Keeper_failure_circuit_breaker.classify_error).
+f4_hits=$(grep -rln 'contains_substring' "$ROOT/lib/keeper/" 2>/dev/null | wc -l | tr -d ' ')
+echo
+echo "F4 contains_substring sites in lib/keeper/: $f4_hits"
+if [ "$f4_hits" -le 1 ]; then
+  echo "  -> Phase A F4 SSOT collapse holds (target after PR-5: 0)."
+else
+  echo "  -> Phase A F4 SSOT regression — investigate."
+fi
+
+# ----- F5: gh-api token-aware + strip_keeper_prefix helpers in use -------
+# Static check: legacy literal patterns should be 0 outside SSOT.
+prefix_literals=$(grep -rln 'String\.sub trimmed 0 [0-9]\+ = "keeper-"' "$ROOT/lib/keeper/" 2>/dev/null | wc -l | tr -d ' ')
+api_prefix=$(grep -rln 'is_prefix cmd_lower ~prefix:"api"' "$ROOT/lib/keeper/" 2>/dev/null | wc -l | tr -d ' ')
+echo
+echo "F5 legacy keeper- literal slice sites:   $prefix_literals (target 0)"
+echo "   legacy is_prefix \"api\" sites:         $api_prefix (target 0)"
+
+# ----- Composite KPI: mutation_to_passive_ratio --------------------------
+echo
+mutating=$(count_pattern_in '"tool":"keeper_bash"' "${kp_logs[@]}")
+mutating=$(( mutating + $(count_pattern_in '"tool":"keeper_shell"'   "${kp_logs[@]}") ))
+mutating=$(( mutating + $(count_pattern_in '"tool":"keeper_fs_edit"' "${kp_logs[@]}") ))
+mutating=$(( mutating + $(count_pattern_in '"tool":"keeper_git"'     "${kp_logs[@]}") ))
+
+passive=$(count_pattern_in '"tool":"masc_status"'       "${kp_logs[@]}")
+passive=$(( passive + $(count_pattern_in '"tool":"keeper_tasks_list"' "${kp_logs[@]}") ))
+passive=$(( passive + $(count_pattern_in '"tool":"keeper_board_get"'  "${kp_logs[@]}") ))
+passive=$(( passive + $(count_pattern_in '"tool":"keeper_board_list"' "${kp_logs[@]}") ))
+
+echo "=== Composite KPI ==="
+echo "mutating tool calls (bash/shell/fs_edit/git): $mutating"
+echo "passive tool calls (status/tasks_list/board): $passive"
+if [ "$passive" -gt 0 ]; then
+  ratio_x100=$(( mutating * 100 / passive ))
+  echo "mutation_to_passive_ratio: ${ratio_x100}/100  (plan target 7d post-deploy: 33/100 i.e. 1:3)"
+else
+  echo "mutation_to_passive_ratio: undefined (no passive calls observed)"
+fi
+
+# ----- Reachability summary ---------------------------------------------
+echo
+echo "=== Phase B promotion-gate readiness ==="
+if [ "$silent" -eq 0 ] && [ "$would" -eq 0 ]; then
+  echo "PR-2 (Strict reject): no F2 traffic in window — soak inconclusive."
+elif [ "$would" -ge "$silent" ]; then
+  echo "PR-2 (Strict reject): would_reject mode covers all silent events ($would >= $silent)."
+  echo "  -> Drill into 'agent' label to identify legitimate internal callers"
+  echo "     before promoting Auth_strict_mode default to Strict."
+else
+  echo "PR-2 (Strict reject): would_reject lags silent ($would < $silent) — investigate."
+fi
+
+if [ "$f3" -gt 0 ]; then
+  echo "PR-4 (Typed terminal state): empty_tool_universe blocker firing ($f3 events)."
+  echo "  -> Group by 'turn_lane' / 'fallback_used' label to design Tool_universe.t variant."
+else
+  echo "PR-4 (Typed terminal state): no empty_tool_universe events — soak inconclusive."
+fi
+
+echo
+echo "verify-bloodflow: done"

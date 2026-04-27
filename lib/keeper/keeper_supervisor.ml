@@ -277,12 +277,59 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
             "%s: supervisor finally cleanup failed (suppressed to avoid Fun.Finally_raised): %s"
             meta.name (Printexc.to_string exn)))
 
+(* #10993: persona drift visibility.
+
+   [Keeper_identity.normalize_all_names ~check_persona:true] runs on
+   every dispatch via [Tool_inline_dispatch_coord] (RFC P3-a
+   logging-only mode), but its [Persona_not_found] branch emits a
+   Log.Misc.warn that is hard to triage:
+
+   - WARN level (alert ROC blends with normal degradation noise).
+   - Per-event (24h sample: 11 events × 5 keepers vs the underlying
+     truth of 9 keepers permanently mis-configured), so operators can
+     not tell whether the gap is widening or stable.
+   - Lacks the per-keeper startup snapshot that would let an operator
+     run a quick \[ls personas/\] and reconcile.
+
+   Surface the gap once at supervise_keepalive entry — the code path
+   that actually puts the keeper into the registry. Behaviour is
+   unchanged (still proceeds with fallback) so the boot path stays
+   compatible with the current 9-missing-personas fleet; the value is
+   in turning a silent runtime drift into a single ERROR per keeper
+   per supervisor restart.
+
+   The visibility ERROR is bounded by fleet size (~14 keepers) and
+   only fires on first registration — the [is_registered] guard above
+   skips repeat calls. *)
+let log_persona_drift_if_missing ~base_path (meta : keeper_meta) =
+  match
+    Keeper_identity.normalize_all_names
+      ~input_agent_name:meta.name
+      ~base_path
+      ~check_persona:true
+      ~check_credential:false
+      ()
+  with
+  | Ok _ -> ()
+  | Error (Keeper_identity.Persona_not_found { resolved; searched; _ }) ->
+      Log.Keeper.error
+        "[#10993][persona_drift] keeper=%s resolved=%s persona file missing at %s \
+         — runtime falls through to logging-only RFC P3-a path; \
+         operator action: create persona file or remove keeper from registry"
+        meta.name resolved searched
+  | Error _ ->
+      (* Other validation errors (Empty_input, Credential_missing — but
+         we passed check_credential:false) are not the silent-drift
+         class this hook is documenting. Stay silent to avoid noise. *)
+      ()
+
 let supervise_keepalive ~proactive_warmup_sec (ctx : _ context)
     (meta : keeper_meta) =
   if Keeper_registry.is_registered ~base_path:ctx.config.base_path meta.name
   then ()
   else if not (Keeper_registry.spawn_slots_available ()) then ()
   else begin
+    log_persona_drift_if_missing ~base_path:ctx.config.base_path meta;
     (* Register in Keeper_registry — single source of truth. *)
     let reg =
       Keeper_registry.register_offline ~base_path:ctx.config.base_path meta.name meta

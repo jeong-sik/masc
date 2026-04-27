@@ -373,6 +373,37 @@ module Goal_janitor = struct
     get_float ~default:3600.0 "MASC_GOAL_JANITOR_INTERVAL_SEC"
 end
 
+(** {1 Approval Janitor}
+
+    HITL approval queue dead-end fix.  [Keeper_approval_queue.expire_stale]
+    has full implementation (queue removal, audit event, promise reject,
+    on_resolution callback) and a unit test, but was never invoked
+    anywhere in production code.  Result: any HITL approval enqueued
+    by a keeper turn would block [keeper_cycle_decision] forever via
+    [has_pending_for_keeper → Skip Approval_pending].  Once the 300s
+    stale watchdog fired, the supervisor would respawn the fiber, the
+    same approval would still be in the queue, and the cycle would
+    repeat indefinitely.  This fork makes the existing timeout policy
+    actually fire.  See #10765 for the death-spiral observability that
+    surfaced this and #10962 for the [last_skip_observation]
+    instrumentation that distinguishes deliberate-skip from stuck. *)
+module Approval_janitor = struct
+  (** Enable the periodic approval_janitor sweep fiber.  Default: true.
+      Set MASC_APPROVAL_JANITOR_ENABLED=false to disable when
+      debugging — pre-fix behaviour leaves the queue entries immortal
+      until manual resolution or server restart. *)
+  let enabled () =
+    get_bool ~default:true "MASC_APPROVAL_JANITOR_ENABLED"
+
+  (** Sweep interval in seconds.  Default: 60s (every minute).
+      Operators tolerate up to a minute of "approval still pending"
+      after the policy timeout has elapsed; a tighter cadence buys
+      nothing but log churn.  Mirrors [Goal_janitor]'s exposure
+      pattern (interval is operational cadence, not policy). *)
+  let interval_seconds =
+    get_float ~default:60.0 "MASC_APPROVAL_JANITOR_INTERVAL_SEC"
+end
+
 (** {1 Slot Scheduling} *)
 
 module Slot = struct

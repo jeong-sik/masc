@@ -119,7 +119,7 @@ export function deriveOperationalInsight(
     return {
       tone: 'error',
       headline: 'cascade exhaustion 후 실패',
-      detail: 'The keeper has entered recovery with no remaining cascade path, so the turn cannot self-heal through provider failover.',
+      detail: 'keeper 가 남은 cascade path 없이 recovery 에 진입 — turn 이 provider failover 로 self-heal 불가능.',
       nextStep: nextExpectedStep(snapshot),
       evidence: [
         `KSM ${snapshot.phase}`,
@@ -132,7 +132,7 @@ export function deriveOperationalInsight(
     return {
       tone: 'warn',
       headline: 'Guardrail 가 턴 차단',
-      detail: 'Decision pipeline reached gate_rejected, so execution should unwind without entering provider work.',
+      detail: 'decision pipeline 이 gate_rejected 에 도달 — execution 은 provider work 진입 없이 unwind 되어야 함.',
       nextStep: nextExpectedStep(snapshot),
       evidence: [
         `KDP ${snapshot.decision.stage}`,
@@ -145,7 +145,7 @@ export function deriveOperationalInsight(
     return {
       tone: 'warn',
       headline: `${stalledLane.field} 정체 — not moving`,
-      detail: `${stalledLane.value} has been observed for ${fmtDuration(stalledLane.observedForSec)} on this screen without a new edge.`,
+      detail: `${stalledLane.value} 가 ${fmtDuration(stalledLane.observedForSec)} 동안 새 edge 없이 이 화면에서 관측됨.`,
       nextStep: nextExpectedStep(snapshot),
       evidence: [
         `${stalledLane.field} ${stalledLane.value}`,
@@ -157,7 +157,7 @@ export function deriveOperationalInsight(
     return {
       tone: 'info',
       headline: 'Compaction 가 현재 턴 소유',
-      detail: 'The parent lifecycle and memory lane both indicate that post-turn compaction is the active coordination point.',
+      detail: 'parent lifecycle 과 memory lane 모두 post-turn compaction 이 active coordination point 임을 가리킴.',
       nextStep: nextExpectedStep(snapshot),
       evidence: [
         `KSM ${snapshot.phase}`,
@@ -172,7 +172,7 @@ export function deriveOperationalInsight(
     return {
       tone: 'warn',
       headline: `${snapshot.phase} 가 활성 lifecycle edge`,
-      detail: `The keeper is transitioning between stable lifecycle states, so the parent FSM matters more than sub-turn activity right now.${collapsedDetail}`,
+      detail: `keeper 가 stable lifecycle state 사이를 transitioning 중 — 지금은 parent FSM 이 sub-turn activity 보다 우선.${collapsedDetail}`,
       nextStep: nextExpectedStep(snapshot),
       evidence: [
         `KSM ${snapshot.phase}`,
@@ -202,7 +202,7 @@ export function deriveOperationalInsight(
     return {
       tone: 'info',
       headline: 'Provider 작업이 활성 frontier',
-      detail: 'Cascade has taken ownership of the live turn, so the important next edge is provider completion or exhaustion.',
+      detail: 'cascade 가 live turn 의 ownership 을 가져감 — 중요한 next edge 는 provider completion 또는 exhaustion.',
       nextStep: nextExpectedStep(snapshot),
       evidence: [
         `KTC ${snapshot.turn_phase}`,
@@ -213,7 +213,7 @@ export function deriveOperationalInsight(
   return {
     tone: 'info',
     headline: '라이브 턴 progressing normally',
-    detail: 'No invariant drift is visible; the sub-FSMs look aligned for the current live turn.',
+    detail: 'invariant drift 보이지 않음 — sub-FSM 들이 현재 live turn 에 대해 aligned.',
     nextStep: nextExpectedStep(snapshot),
     evidence: [
       `KSM ${snapshot.phase}`,

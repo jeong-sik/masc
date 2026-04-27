@@ -89,6 +89,6 @@ describe('computeBeaconView', () => {
       eventCount60s: 3,
       now: NOW,
     })
-    expect(view.title).toContain('7s ago')
+    expect(view.title).toContain('7s 전')
   })
 })

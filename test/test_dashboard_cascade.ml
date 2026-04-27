@@ -315,6 +315,55 @@ let test_raw_config_defaults_when_file_missing () =
         "{}\n"
         Yojson.Safe.Util.(j |> member "raw_json" |> to_string))
 
+(* Regression test for the silent-stale-fallback hole this PR closes:
+   when cascade.toml carries an unknown field (rejected by the strict
+   field whitelist in cascade_toml_materializer), the dashboard
+   response must surface a non-null [materialization_error] so the
+   operator can see that their last edit was rejected.  Previously the
+   error was logged-only and the response served the prior good
+   [raw_json] file as if nothing had failed. *)
+let test_raw_config_materialization_error_surfaces_unknown_field () =
+  let toml =
+    {|
+comment = "test"
+
+[big_three]
+models = ["ollama:qwen3.5:35b-a3b-nvfp4"]
+bogus_field_for_regression_test = "any"
+|}
+  in
+  with_temp_config_root_setup
+    (fun dir -> write_file (Filename.concat dir "cascade.toml") toml)
+    (fun _dir ->
+      let j = Masc_mcp.Dashboard_cascade.raw_config_json () in
+      let materialization_error =
+        Yojson.Safe.Util.(j |> member "materialization_error" |> to_string_option)
+      in
+      check bool "materialization_error is present and non-null" true
+        (Option.is_some materialization_error);
+      check bool "materialization_error mentions the rejected field"
+        true
+        (match materialization_error with
+         | Some msg -> contains_substring msg "bogus_field_for_regression_test"
+         | None -> false))
+
+let test_raw_config_materialization_error_null_on_success () =
+  let toml =
+    {|
+comment = "test"
+
+[big_three]
+models = ["ollama:qwen3.5:35b-a3b-nvfp4"]
+|}
+  in
+  with_temp_config_root_setup
+    (fun dir -> write_file (Filename.concat dir "cascade.toml") toml)
+    (fun _dir ->
+      let j = Masc_mcp.Dashboard_cascade.raw_config_json () in
+      check (option string) "materialization_error is null on a clean toml"
+        None
+        Yojson.Safe.Util.(j |> member "materialization_error" |> to_string_option))
+
 let test_raw_config_toml_source_exposes_editable_source_and_preview () =
   let toml =
     {|
@@ -913,6 +962,12 @@ let () =
         test_raw_config_defaults_when_file_missing;
       test_case "toml source exposes editable source + preview" `Quick
         test_raw_config_toml_source_exposes_editable_source_and_preview;
+      test_case "materialization_error surfaces strict-field rejection"
+        `Quick
+        test_raw_config_materialization_error_surfaces_unknown_field;
+      test_case "materialization_error is null on clean toml"
+        `Quick
+        test_raw_config_materialization_error_null_on_success;
       test_case "invalid JSON is rejected" `Quick
         test_save_raw_config_json_rejects_invalid_json;
       test_case "invalid TOML is rejected" `Quick

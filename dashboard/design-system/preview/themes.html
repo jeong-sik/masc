@@ -1,0 +1,466 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>MASC · Themes (paper-theme matrix)</title>
+<link rel="stylesheet" href="_preview.css">
+<style>
+  /* ────────────────────────────────────────────────────────────
+     Themes preview — W02 first cut.
+     Goal: surface the production paper-theme.css palette next to
+     the canonical dark-fantasy tokens, and stage Phase 2 token
+     candidates. All page chrome uses var() tokens; raw hex is
+     allowed only inside the catalogue cells (where the literal
+     value is the data being displayed).
+     ──────────────────────────────────────────────────────────── */
+
+  .banner {
+    display: flex; flex-wrap: wrap; gap: 12px 24px;
+    padding: 12px 16px;
+    background: var(--color-bg-surface);
+    border: 1px solid var(--color-border-default);
+    border-left: 2px solid var(--color-accent-fg);
+    border-radius: 3px;
+    font: var(--type-caption);
+    color: var(--color-fg-secondary);
+  }
+  .banner code { font: 11px/1.3 var(--font-mono); color: var(--color-fg-primary); }
+  .banner .pill {
+    font: 600 10px/1 var(--font-mono);
+    letter-spacing: var(--track-caps);
+    text-transform: uppercase;
+    padding: 3px 8px;
+    border: 1px solid var(--color-border-strong);
+    border-radius: 2px;
+    color: var(--color-fg-muted);
+  }
+
+  /* Two-column matrix: left = dark-fantasy, right = paper-theme */
+  .matrix {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+    border: 1px solid var(--color-border-default);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .col {
+    display: flex; flex-direction: column;
+  }
+  .col + .col { border-left: 1px solid var(--color-border-default); }
+  .col-head {
+    padding: 12px 14px;
+    background: var(--color-bg-panel-alt);
+    border-bottom: 1px solid var(--color-border-default);
+    display: flex; flex-direction: column; gap: 2px;
+  }
+  .col-title {
+    font: 600 11px/1.2 var(--font-mono);
+    letter-spacing: var(--track-caps);
+    text-transform: uppercase;
+    color: var(--color-fg-primary);
+  }
+  .col-meta {
+    font: 9px/1.2 var(--font-mono);
+    letter-spacing: var(--track-wide);
+    color: var(--color-fg-muted);
+  }
+
+  .row-grid { display: grid; grid-template-columns: 110px 1fr; gap: 10px; padding: 10px 12px; align-items: center; border-bottom: 1px solid var(--color-border-default); }
+  .row-grid:last-child { border-bottom: none; }
+  .row-name {
+    font: 600 10px/1.2 var(--font-mono);
+    letter-spacing: var(--track-caps);
+    text-transform: uppercase;
+    color: var(--color-fg-secondary);
+  }
+  .swatches { display: flex; gap: 6px; flex-wrap: wrap; }
+  .swatch {
+    height: 38px; min-width: 56px; flex: 1 1 56px;
+    border-radius: 2px;
+    border: 1px solid var(--color-border-default);
+    padding: 4px 6px;
+    display: flex; flex-direction: column; justify-content: space-between;
+  }
+  .swatch .lbl { font: 8px/1 var(--font-mono); letter-spacing: var(--track-caps); text-transform: uppercase; opacity: .85; }
+  .swatch .val { font: 9px/1 var(--font-mono); opacity: .75; }
+
+  /* Catalogue table — paper hex registry */
+  .cat {
+    width: 100%;
+    border-collapse: collapse;
+    font: 11px/1.4 var(--font-mono);
+  }
+  .cat thead th {
+    text-align: left;
+    padding: 10px 12px;
+    font: 600 10px/1.2 var(--font-mono);
+    letter-spacing: var(--track-caps);
+    text-transform: uppercase;
+    color: var(--color-fg-muted);
+    background: var(--color-bg-panel-alt);
+    border-bottom: 1px solid var(--color-border-strong);
+  }
+  .cat tbody td {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--color-border-default);
+    vertical-align: middle;
+    color: var(--color-fg-secondary);
+  }
+  .cat tbody tr:last-child td { border-bottom: none; }
+  .cat .var-cell { color: var(--color-fg-primary); }
+  .cat .hex-cell {
+    font: 11px/1 var(--font-mono);
+    color: var(--color-fg-primary);
+    letter-spacing: var(--track-wide);
+    white-space: nowrap;
+  }
+  .cat .chip {
+    display: inline-block;
+    width: 14px; height: 14px;
+    border-radius: 2px;
+    border: 1px solid var(--color-border-default);
+    margin-right: 8px;
+    vertical-align: -3px;
+  }
+  .cat .ln {
+    font: 9px/1 var(--font-mono);
+    color: var(--color-fg-muted);
+    letter-spacing: var(--track-wide);
+  }
+  .cat .map {
+    font: 10px/1.3 var(--font-mono);
+    color: var(--color-fg-muted);
+  }
+
+  .legend {
+    display: flex; gap: 16px; flex-wrap: wrap;
+    font: var(--type-caption);
+    color: var(--color-fg-muted);
+  }
+  .legend code { color: var(--color-fg-primary); font: 10px/1 var(--font-mono); }
+
+  .nav-back {
+    font: 10px/1.2 var(--font-mono);
+    letter-spacing: var(--track-caps);
+    text-transform: uppercase;
+    color: var(--color-fg-muted);
+    text-decoration: none;
+  }
+  .nav-back:hover { color: var(--color-fg-primary); }
+</style>
+</head>
+<body class="masc-ds">
+<div class="pv-root">
+
+  <header class="pv-head">
+    <a class="nav-back" href="index.html">← back to index</a>
+    <div class="pv-eyebrow">MASC Cockpit · Themes</div>
+    <h1 class="pv-title">Paper-theme matrix · W02 first cut</h1>
+    <p class="pv-sub">SPEC §4.2 의 5-theme matrix 중 두 번째 항목 <code>[data-theme="paper"]</code> 의 native 정의를 preview 에 노출. 좌측은 canonical dark-fantasy(`tokens.generated.css`), 우측은 production 의 <code>src/styles/paper-theme.css</code>. Phase 2 토큰화 후보는 페이지 하단 카탈로그 표 하단에 staging.</p>
+  </header>
+
+  <div class="banner">
+    <span class="pill">W02</span>
+    <span>Production source: <code>dashboard/src/styles/paper-theme.css</code></span>
+    <span>Hex catalog: <code>32 entries</code></span>
+    <span>Phase 2 candidate</span>
+  </div>
+
+  <!-- ────────────────────────────────────────────────────────────
+       SECTION 1 — Side-by-side matrix
+       ──────────────────────────────────────────────────────────── -->
+  <section class="pv-sect">
+    <div class="pv-sect-h">
+      <h2>Theme matrix · category-by-category</h2>
+      <span class="sub">left = dark-fantasy (default) · right = paper-theme override</span>
+    </div>
+
+    <div class="matrix">
+      <!-- LEFT: dark-fantasy -->
+      <div class="col">
+        <div class="col-head">
+          <div class="col-title">dark-fantasy · default</div>
+          <div class="col-meta">source: tokens.generated.css · :root</div>
+        </div>
+
+        <div class="row-grid">
+          <div class="row-name">--bg-*</div>
+          <div class="swatches">
+            <div class="swatch" style="background:#0c0b08; color:#f0e9dc"><span class="lbl">bg-0</span><span class="val">#0C0B08</span></div>
+            <div class="swatch" style="background:#141210; color:#f0e9dc"><span class="lbl">bg-1</span><span class="val">#141210</span></div>
+            <div class="swatch" style="background:#1a1815; color:#f0e9dc"><span class="lbl">bg-2</span><span class="val">#1A1815</span></div>
+            <div class="swatch" style="background:#211e1a; color:#f0e9dc"><span class="lbl">bg-3</span><span class="val">#211E1A</span></div>
+            <div class="swatch" style="background:#2a2621; color:#f0e9dc"><span class="lbl">bg-4</span><span class="val">#2A2621</span></div>
+          </div>
+        </div>
+
+        <div class="row-grid">
+          <div class="row-name">--fg-*</div>
+          <div class="swatches">
+            <div class="swatch" style="background:#f0e9dc; color:#0c0b08"><span class="lbl">fg-1</span><span class="val">#F0E9DC</span></div>
+            <div class="swatch" style="background:#b8ad9a; color:#0c0b08"><span class="lbl">fg-2</span><span class="val">#B8AD9A</span></div>
+            <div class="swatch" style="background:#7a7065; color:#f0e9dc"><span class="lbl">fg-3</span><span class="val">#7A7065</span></div>
+            <div class="swatch" style="background:#4a453e; color:#f0e9dc"><span class="lbl">fg-4</span><span class="val">#4A453E</span></div>
+          </div>
+        </div>
+
+        <div class="row-grid">
+          <div class="row-name">--brass-*</div>
+          <div class="swatches">
+            <div class="swatch" style="background:#d4a14a; color:#0c0b08"><span class="lbl">brass-1</span><span class="val">#D4A14A</span></div>
+            <div class="swatch" style="background:#b8843a; color:#0c0b08"><span class="lbl">brass-2</span><span class="val">#B8843A</span></div>
+            <div class="swatch" style="background:#8a5f28; color:#f0e9dc"><span class="lbl">brass-3</span><span class="val">#8A5F28</span></div>
+          </div>
+        </div>
+
+        <div class="row-grid">
+          <div class="row-name">--line-*</div>
+          <div class="swatches">
+            <div class="swatch" style="background:#2a2520; color:#f0e9dc"><span class="lbl">line-1</span><span class="val">#2A2520</span></div>
+            <div class="swatch" style="background:#3a332c; color:#f0e9dc"><span class="lbl">line-2</span><span class="val">#3A332C</span></div>
+            <div class="swatch" style="background:#4a4137; color:#f0e9dc"><span class="lbl">line-3</span><span class="val">#4A4137</span></div>
+          </div>
+        </div>
+
+        <div class="row-grid">
+          <div class="row-name">status</div>
+          <div class="swatches">
+            <div class="swatch" style="background:#6b9e6b; color:#0c0b08"><span class="lbl">ok</span><span class="val">#6B9E6B</span></div>
+            <div class="swatch" style="background:#c9a24a; color:#0c0b08"><span class="lbl">warn</span><span class="val">#C9A24A</span></div>
+            <div class="swatch" style="background:#c46a5a; color:#0c0b08"><span class="lbl">err</span><span class="val">#C46A5A</span></div>
+            <div class="swatch" style="background:#6a8eb0; color:#0c0b08"><span class="lbl">info</span><span class="val">#6A8EB0</span></div>
+            <div class="swatch" style="background:#8a6aa0; color:#0c0b08"><span class="lbl">stalled</span><span class="val">#8A6AA0</span></div>
+          </div>
+        </div>
+
+        <div class="row-grid">
+          <div class="row-name">accent (paper-mapped)</div>
+          <div class="swatches">
+            <div class="swatch" style="background:#6b9e6b; color:#0c0b08"><span class="lbl">forest≈ok</span><span class="val">#6B9E6B</span></div>
+            <div class="swatch" style="background:#d4a14a; color:#0c0b08"><span class="lbl">brass≈brass-1</span><span class="val">#D4A14A</span></div>
+            <div class="swatch" style="background:#c46a5a; color:#0c0b08"><span class="lbl">brick≈err</span><span class="val">#C46A5A</span></div>
+            <div class="swatch" style="background:#c9a24a; color:#0c0b08"><span class="lbl">ember≈warn</span><span class="val">#C9A24A</span></div>
+            <div class="swatch" style="background:#6a8eb0; color:#0c0b08"><span class="lbl">slate≈info</span><span class="val">#6A8EB0</span></div>
+            <div class="swatch" style="background:#8a6aa0; color:#0c0b08"><span class="lbl">plum≈stalled</span><span class="val">#8A6AA0</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- RIGHT: paper-theme -->
+      <div class="col">
+        <div class="col-head">
+          <div class="col-title">paper-theme · override</div>
+          <div class="col-meta">source: src/styles/paper-theme.css · [data-theme="paper"]</div>
+        </div>
+
+        <div class="row-grid">
+          <div class="row-name">--paper-*</div>
+          <div class="swatches">
+            <div class="swatch" style="background:#F5F2EA; color:#151515"><span class="lbl">paper</span><span class="val">#F5F2EA</span></div>
+            <div class="swatch" style="background:#EFEBE0; color:#151515"><span class="lbl">paper-2</span><span class="val">#EFEBE0</span></div>
+            <div class="swatch" style="background:#E5E0D1; color:#151515"><span class="lbl">paper-3</span><span class="val">#E5E0D1</span></div>
+            <div class="swatch" style="background:#D8D2BF; color:#151515"><span class="lbl">paper-4</span><span class="val">#D8D2BF</span></div>
+          </div>
+        </div>
+
+        <div class="row-grid">
+          <div class="row-name">--ink-*</div>
+          <div class="swatches">
+            <div class="swatch" style="background:#151515; color:#F5F2EA"><span class="lbl">ink</span><span class="val">#151515</span></div>
+            <div class="swatch" style="background:#2E2E2C; color:#F5F2EA"><span class="lbl">ink-2</span><span class="val">#2E2E2C</span></div>
+            <div class="swatch" style="background:#515049; color:#F5F2EA"><span class="lbl">ink-3</span><span class="val">#515049</span></div>
+            <div class="swatch" style="background:#68655C; color:#F5F2EA"><span class="lbl">ink-4</span><span class="val">#68655C</span></div>
+            <div class="swatch" style="background:#878379; color:#F5F2EA"><span class="lbl">ink-5</span><span class="val">#878379</span></div>
+            <div class="swatch" style="background:#BCB8AC; color:#151515"><span class="lbl">ink-6</span><span class="val">#BCB8AC</span></div>
+          </div>
+        </div>
+
+        <div class="row-grid">
+          <div class="row-name">--brass (paper)</div>
+          <div class="swatches">
+            <div class="swatch" style="background:#8C6A1E; color:#F5F2EA"><span class="lbl">brass</span><span class="val">#8C6A1E</span></div>
+            <div class="swatch" style="background:#B8933A; color:#151515"><span class="lbl">brass-line</span><span class="val">#B8933A</span></div>
+            <div class="swatch" style="background:#E9DDB8; color:#151515"><span class="lbl">brass-fill</span><span class="val">#E9DDB8</span></div>
+          </div>
+        </div>
+
+        <div class="row-grid">
+          <div class="row-name">--border-*-paper</div>
+          <div class="swatches">
+            <div class="swatch" style="background:#1A1A1A; color:#F5F2EA"><span class="lbl">border-1</span><span class="val">#1A1A1A</span></div>
+            <div class="swatch" style="background:rgba(21,21,21,0.48); color:#F5F2EA"><span class="lbl">border-2</span><span class="val">.48 α</span></div>
+            <div class="swatch" style="background:rgba(21,21,21,0.22); color:#151515"><span class="lbl">border-3</span><span class="val">.22 α</span></div>
+            <div class="swatch" style="background:rgba(21,21,21,0.12); color:#151515"><span class="lbl">border-4</span><span class="val">.12 α</span></div>
+            <div class="swatch" style="background:rgba(21,21,21,0.06); color:#151515"><span class="lbl">border-5</span><span class="val">.06 α</span></div>
+          </div>
+        </div>
+
+        <div class="row-grid">
+          <div class="row-name">status (paper)</div>
+          <div class="swatches">
+            <div class="swatch" style="background:#2D5F4E; color:#F5F2EA"><span class="lbl">forest=ok</span><span class="val">#2D5F4E</span></div>
+            <div class="swatch" style="background:#B35A1F; color:#F5F2EA"><span class="lbl">ember=warn</span><span class="val">#B35A1F</span></div>
+            <div class="swatch" style="background:#8B3A3A; color:#F5F2EA"><span class="lbl">brick=bad</span><span class="val">#8B3A3A</span></div>
+            <div class="swatch" style="background:#3E4A5C; color:#F5F2EA"><span class="lbl">slate=accent</span><span class="val">#3E4A5C</span></div>
+            <div class="swatch" style="background:#5C3E56; color:#F5F2EA"><span class="lbl">plum=paused</span><span class="val">#5C3E56</span></div>
+          </div>
+        </div>
+
+        <div class="row-grid">
+          <div class="row-name">accent extras</div>
+          <div class="swatches">
+            <div class="swatch" style="background:#4E8773; color:#F5F2EA"><span class="lbl">forest-line</span><span class="val">#4E8773</span></div>
+            <div class="swatch" style="background:#CFDFD7; color:#151515"><span class="lbl">forest-fill</span><span class="val">#CFDFD7</span></div>
+            <div class="swatch" style="background:#B45C5C; color:#F5F2EA"><span class="lbl">brick-line</span><span class="val">#B45C5C</span></div>
+            <div class="swatch" style="background:#E8CFCB; color:#151515"><span class="lbl">brick-fill</span><span class="val">#E8CFCB</span></div>
+            <div class="swatch" style="background:#D07A3A; color:#151515"><span class="lbl">ember-line</span><span class="val">#D07A3A</span></div>
+            <div class="swatch" style="background:#ECD5BD; color:#151515"><span class="lbl">ember-fill</span><span class="val">#ECD5BD</span></div>
+            <div class="swatch" style="background:#6B7A8E; color:#F5F2EA"><span class="lbl">slate-line</span><span class="val">#6B7A8E</span></div>
+            <div class="swatch" style="background:#D6DBE2; color:#151515"><span class="lbl">slate-fill</span><span class="val">#D6DBE2</span></div>
+            <div class="swatch" style="background:#855E7D; color:#F5F2EA"><span class="lbl">plum-line</span><span class="val">#855E7D</span></div>
+            <div class="swatch" style="background:#E0D4DE; color:#151515"><span class="lbl">plum-fill</span><span class="val">#E0D4DE</span></div>
+            <div class="swatch" style="background:#236874; color:#F5F2EA"><span class="lbl">teal</span><span class="val">#236874</span></div>
+            <div class="swatch" style="background:#4C94A3; color:#F5F2EA"><span class="lbl">teal-line</span><span class="val">#4C94A3</span></div>
+            <div class="swatch" style="background:#CEDEE2; color:#151515"><span class="lbl">teal-fill</span><span class="val">#CEDEE2</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="legend">
+      <span><code>border-2..5</code> are <code>rgba(21,21,21, α)</code> — alpha-only ink overlay.</span>
+      <span>paper-theme bridges <code>--ok / --warn / --bad / --accent / --paused</code> via design-system accent group.</span>
+    </div>
+  </section>
+
+  <!-- ────────────────────────────────────────────────────────────
+       SECTION 2 — Hex catalogue (all 32 entries)
+       ──────────────────────────────────────────────────────────── -->
+  <section class="pv-sect">
+    <div class="pv-sect-h">
+      <h2>Hex catalogue · paper-theme.css</h2>
+      <span class="sub">32 unique hex · CSS variable · line · nearest dark-fantasy token</span>
+    </div>
+
+    <div class="pv-cell" style="padding:0">
+      <table class="cat">
+        <thead>
+          <tr>
+            <th style="width:44px"></th>
+            <th style="width:200px">CSS variable</th>
+            <th style="width:110px">Hex</th>
+            <th style="width:60px">Line</th>
+            <th>Selector / role</th>
+            <th>Nearest dark-fantasy token</th>
+          </tr>
+        </thead>
+        <tbody>
+          <!-- Paper surface stack -->
+          <tr><td><span class="chip" style="background:#F5F2EA"></span></td><td class="var-cell">--paper</td><td class="hex-cell">#F5F2EA</td><td class="ln">23</td><td>page surface (bridges --color-ff-navy)</td><td class="map">inverse of --bg-0 (#0C0B08)</td></tr>
+          <tr><td><span class="chip" style="background:#EFEBE0"></span></td><td class="var-cell">--paper-2</td><td class="hex-cell">#EFEBE0</td><td class="ln">24</td><td>card / panel (--color-card, --color-ff-panel)</td><td class="map">inverse of --bg-2 (#1A1815)</td></tr>
+          <tr><td><span class="chip" style="background:#E5E0D1"></span></td><td class="var-cell">--paper-3</td><td class="hex-cell">#E5E0D1</td><td class="ln">25</td><td>elevated surface (unused bridge)</td><td class="map">inverse of --bg-3 (#211E1A)</td></tr>
+          <tr><td><span class="chip" style="background:#D8D2BF"></span></td><td class="var-cell">--paper-4</td><td class="hex-cell">#D8D2BF</td><td class="ln">26</td><td>hover / active row (unused bridge)</td><td class="map">inverse of --bg-4 (#2A2621)</td></tr>
+
+          <!-- Ink scale -->
+          <tr><td><span class="chip" style="background:#151515"></span></td><td class="var-cell">--ink</td><td class="hex-cell">#151515</td><td class="ln">28</td><td>--color-text-strong, html body fg</td><td class="map">inverse of --fg-1 (#F0E9DC)</td></tr>
+          <tr><td><span class="chip" style="background:#2E2E2C"></span></td><td class="var-cell">--ink-2</td><td class="hex-cell">#2E2E2C</td><td class="ln">29</td><td>--color-text-body</td><td class="map">inverse of --fg-2 (#B8AD9A)</td></tr>
+          <tr><td><span class="chip" style="background:#515049"></span></td><td class="var-cell">--ink-3</td><td class="hex-cell">#515049</td><td class="ln">30</td><td>(declared, not bridged yet)</td><td class="map">inverse of --fg-3 (#7A7065)</td></tr>
+          <tr><td><span class="chip" style="background:#68655C"></span></td><td class="var-cell">--ink-4</td><td class="hex-cell">#68655C</td><td class="ln">31</td><td>--color-text-muted, --color-agent-idle</td><td class="map">≈ --fg-3 inverse</td></tr>
+          <tr><td><span class="chip" style="background:#878379"></span></td><td class="var-cell">--ink-5</td><td class="hex-cell">#878379</td><td class="ln">32</td><td>--color-agent-offline</td><td class="map">≈ --idle (#6A6A6A)</td></tr>
+          <tr><td><span class="chip" style="background:#BCB8AC"></span></td><td class="var-cell">--ink-6</td><td class="hex-cell">#BCB8AC</td><td class="ln">33</td><td>(declared, not bridged yet)</td><td class="map">inverse of --fg-4 (#4A453E)</td></tr>
+
+          <!-- Forest -->
+          <tr><td><span class="chip" style="background:#2D5F4E"></span></td><td class="var-cell">--forest</td><td class="hex-cell">#2D5F4E</td><td class="ln">36</td><td>--ok, --color-ok, --color-agent-working</td><td class="map">darker tone of --ok (#6B9E6B)</td></tr>
+          <tr><td><span class="chip" style="background:#CFDFD7"></span></td><td class="var-cell">--forest-fill</td><td class="hex-cell">#CFDFD7</td><td class="ln">36</td><td>--ok-10, --ok-20</td><td class="map">analog of --ok-soft (.10α)</td></tr>
+          <tr><td><span class="chip" style="background:#4E8773"></span></td><td class="var-cell">--forest-line</td><td class="hex-cell">#4E8773</td><td class="ln">36</td><td>(declared; ok ring/border)</td><td class="map">analog of --ok-border</td></tr>
+
+          <!-- Brass -->
+          <tr><td><span class="chip" style="background:#8C6A1E"></span></td><td class="var-cell">--brass</td><td class="hex-cell">#8C6A1E</td><td class="ln">37</td><td>--select, --color-ff-gold, --color-agent-busy</td><td class="map">darker tone of --brass-1 (#D4A14A)</td></tr>
+          <tr><td><span class="chip" style="background:#E9DDB8"></span></td><td class="var-cell">--brass-fill</td><td class="hex-cell">#E9DDB8</td><td class="ln">37</td><td>--select-10, --select-20, --color-ff-gold-dim</td><td class="map">analog of --brass-soft</td></tr>
+          <tr><td><span class="chip" style="background:#B8933A"></span></td><td class="var-cell">--brass-line</td><td class="hex-cell">#B8933A</td><td class="ln">37</td><td>--color-ff-gold-bright</td><td class="map">≈ --brass-2 (#B8843A)</td></tr>
+
+          <!-- Brick -->
+          <tr><td><span class="chip" style="background:#8B3A3A"></span></td><td class="var-cell">--brick</td><td class="hex-cell">#8B3A3A</td><td class="ln">38</td><td>--bad, --bad-light, --color-bad</td><td class="map">darker tone of --err (#C46A5A)</td></tr>
+          <tr><td><span class="chip" style="background:#E8CFCB"></span></td><td class="var-cell">--brick-fill</td><td class="hex-cell">#E8CFCB</td><td class="ln">38</td><td>--bad-10, --bad-20, --bad-soft</td><td class="map">analog of --err-soft</td></tr>
+          <tr><td><span class="chip" style="background:#B45C5C"></span></td><td class="var-cell">--brick-line</td><td class="hex-cell">#B45C5C</td><td class="ln">38</td><td>(declared; bad border)</td><td class="map">analog of --err-border</td></tr>
+
+          <!-- Ember -->
+          <tr><td><span class="chip" style="background:#B35A1F"></span></td><td class="var-cell">--ember</td><td class="hex-cell">#B35A1F</td><td class="ln">39</td><td>--warn, --color-warn</td><td class="map">analog of --warn (#C9A24A)</td></tr>
+          <tr><td><span class="chip" style="background:#ECD5BD"></span></td><td class="var-cell">--ember-fill</td><td class="hex-cell">#ECD5BD</td><td class="ln">39</td><td>--warn-10, --warn-20</td><td class="map">analog of --warn-soft</td></tr>
+          <tr><td><span class="chip" style="background:#D07A3A"></span></td><td class="var-cell">--ember-line</td><td class="hex-cell">#D07A3A</td><td class="ln">39</td><td>--warn-bright</td><td class="map">analog of --warn-fg (#D9B764)</td></tr>
+
+          <!-- Slate -->
+          <tr><td><span class="chip" style="background:#3E4A5C"></span></td><td class="var-cell">--slate</td><td class="hex-cell">#3E4A5C</td><td class="ln">40</td><td>--accent, --color-accent, --color-ff-crystal</td><td class="map">darker tone of --info (#6A8EB0)</td></tr>
+          <tr><td><span class="chip" style="background:#D6DBE2"></span></td><td class="var-cell">--slate-fill</td><td class="hex-cell">#D6DBE2</td><td class="ln">40</td><td>--accent-10, --accent-20, --accent-soft</td><td class="map">analog of --info-soft</td></tr>
+          <tr><td><span class="chip" style="background:#6B7A8E"></span></td><td class="var-cell">--slate-line</td><td class="hex-cell">#6B7A8E</td><td class="ln">40</td><td>(declared; accent border)</td><td class="map">analog of --info-border</td></tr>
+
+          <!-- Plum -->
+          <tr><td><span class="chip" style="background:#5C3E56"></span></td><td class="var-cell">--plum</td><td class="hex-cell">#5C3E56</td><td class="ln">41</td><td>--paused</td><td class="map">darker tone of --stalled (#8A6AA0)</td></tr>
+          <tr><td><span class="chip" style="background:#E0D4DE"></span></td><td class="var-cell">--plum-fill</td><td class="hex-cell">#E0D4DE</td><td class="ln">41</td><td>--paused-10, --paused-20</td><td class="map">analog of --stalled-soft</td></tr>
+          <tr><td><span class="chip" style="background:#855E7D"></span></td><td class="var-cell">--plum-line</td><td class="hex-cell">#855E7D</td><td class="ln">41</td><td>(declared; paused border)</td><td class="map">analog of --stalled-border</td></tr>
+
+          <!-- Teal -->
+          <tr><td><span class="chip" style="background:#236874"></span></td><td class="var-cell">--teal</td><td class="hex-cell">#236874</td><td class="ln">42</td><td>(declared; no current bridge)</td><td class="map">no direct dark-fantasy analog</td></tr>
+          <tr><td><span class="chip" style="background:#CEDEE2"></span></td><td class="var-cell">--teal-fill</td><td class="hex-cell">#CEDEE2</td><td class="ln">42</td><td>(declared; soft surface)</td><td class="map">no direct dark-fantasy analog</td></tr>
+          <tr><td><span class="chip" style="background:#4C94A3"></span></td><td class="var-cell">--teal-line</td><td class="hex-cell">#4C94A3</td><td class="ln">42</td><td>(declared; teal border)</td><td class="map">no direct dark-fantasy analog</td></tr>
+
+          <!-- Border base -->
+          <tr><td><span class="chip" style="background:#1A1A1A"></span></td><td class="var-cell">--border-1-paper</td><td class="hex-cell">#1A1A1A</td><td class="ln">45</td><td>--color-ff-border-hover</td><td class="map">≈ inverse of --line-1 (#2A2520)</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ────────────────────────────────────────────────────────────
+       SECTION 3 — Phase 2 token candidates
+       ──────────────────────────────────────────────────────────── -->
+  <section class="pv-sect">
+    <div class="pv-sect-h">
+      <h2>Phase 2 · token candidates</h2>
+      <span class="sub">staging only — actual addition lives in source.ts under W03</span>
+    </div>
+
+    <div class="pv-cell" style="padding:0">
+      <table class="cat">
+        <thead>
+          <tr>
+            <th style="width:44px"></th>
+            <th style="width:200px">Candidate token</th>
+            <th style="width:110px">Hex</th>
+            <th>Maps to (paper-theme.css)</th>
+            <th>Suggested role</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><span class="chip" style="background:#F5F2EA"></span></td><td class="var-cell">--paper-bg-0</td><td class="hex-cell">#F5F2EA</td><td>--paper</td><td class="map">page surface (light family bg-0)</td></tr>
+          <tr><td><span class="chip" style="background:#EFEBE0"></span></td><td class="var-cell">--paper-bg-1</td><td class="hex-cell">#EFEBE0</td><td>--paper-2</td><td class="map">panel / card (light family bg-2)</td></tr>
+          <tr><td><span class="chip" style="background:#E5E0D1"></span></td><td class="var-cell">--paper-bg-2</td><td class="hex-cell">#E5E0D1</td><td>--paper-3</td><td class="map">elevated surface (light family bg-3)</td></tr>
+          <tr><td><span class="chip" style="background:#D8D2BF"></span></td><td class="var-cell">--paper-bg-3</td><td class="hex-cell">#D8D2BF</td><td>--paper-4</td><td class="map">hover / active row (light family bg-4)</td></tr>
+          <tr><td><span class="chip" style="background:#151515"></span></td><td class="var-cell">--paper-fg-1</td><td class="hex-cell">#151515</td><td>--ink</td><td class="map">primary text (light family fg-1)</td></tr>
+          <tr><td><span class="chip" style="background:#2E2E2C"></span></td><td class="var-cell">--paper-fg-2</td><td class="hex-cell">#2E2E2C</td><td>--ink-2</td><td class="map">body text (light family fg-2)</td></tr>
+          <tr><td><span class="chip" style="background:#68655C"></span></td><td class="var-cell">--paper-fg-3</td><td class="hex-cell">#68655C</td><td>--ink-4</td><td class="map">muted / labels (light family fg-3)</td></tr>
+          <tr><td><span class="chip" style="background:#BCB8AC"></span></td><td class="var-cell">--paper-fg-4</td><td class="hex-cell">#BCB8AC</td><td>--ink-6</td><td class="map">disabled / placeholder (light family fg-4)</td></tr>
+          <tr><td><span class="chip" style="background:#8C6A1E"></span></td><td class="var-cell">--paper-brass-1</td><td class="hex-cell">#8C6A1E</td><td>--brass</td><td class="map">primary accent (light family brass-1)</td></tr>
+          <tr><td><span class="chip" style="background:#B8933A"></span></td><td class="var-cell">--paper-brass-2</td><td class="hex-cell">#B8933A</td><td>--brass-line</td><td class="map">pressed / border accent (light family brass-2)</td></tr>
+          <tr><td><span class="chip" style="background:#E9DDB8"></span></td><td class="var-cell">--paper-brass-soft</td><td class="hex-cell">#E9DDB8</td><td>--brass-fill</td><td class="map">selection wash (.10–.20 analog)</td></tr>
+          <tr><td><span class="chip" style="background:#2D5F4E"></span></td><td class="var-cell">--paper-ok</td><td class="hex-cell">#2D5F4E</td><td>--forest</td><td class="map">running / success (light family ok)</td></tr>
+          <tr><td><span class="chip" style="background:#B35A1F"></span></td><td class="var-cell">--paper-warn</td><td class="hex-cell">#B35A1F</td><td>--ember</td><td class="map">at-risk / degraded (light family warn)</td></tr>
+          <tr><td><span class="chip" style="background:#8B3A3A"></span></td><td class="var-cell">--paper-err</td><td class="hex-cell">#8B3A3A</td><td>--brick</td><td class="map">failed / blocker (light family err)</td></tr>
+          <tr><td><span class="chip" style="background:#3E4A5C"></span></td><td class="var-cell">--paper-info</td><td class="hex-cell">#3E4A5C</td><td>--slate</td><td class="map">queued / info (light family info)</td></tr>
+          <tr><td><span class="chip" style="background:#5C3E56"></span></td><td class="var-cell">--paper-stalled</td><td class="hex-cell">#5C3E56</td><td>--plum</td><td class="map">paused / drift (light family stalled)</td></tr>
+          <tr><td><span class="chip" style="background:#236874"></span></td><td class="var-cell">--paper-teal</td><td class="hex-cell">#236874</td><td>--teal</td><td class="map">unmapped — teal channel for future use</td></tr>
+          <tr><td><span class="chip" style="background:#1A1A1A"></span></td><td class="var-cell">--paper-line-strong</td><td class="hex-cell">#1A1A1A</td><td>--border-1-paper</td><td class="map">strong divider (light family line-1)</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="legend">
+      <span>Naming convention follows SPEC §4.3 raw-token category buckets (<code>bg/fg/line/brass/status</code>).</span>
+      <span>Status tokens (`--paper-ok/warn/err/info/stalled`) intentionally darker than dark-fantasy counterparts — paper-on-light needs deeper saturation for AA contrast.</span>
+    </div>
+  </section>
+
+</div>
+</body>
+</html>

@@ -1,4 +1,4 @@
-(** MCP prompt surface for canonical help and proof views. *)
+(** MCP prompt surface for canonical help. *)
 
 type prompt_argument = {
   name : string;
@@ -25,28 +25,6 @@ let prompt_defs =
         [
           { name = "tool_name"; description = "Exact MCP tool name"; required = true };
           { name = "focus"; description = "Optional question or emphasis"; required = false };
-        ];
-    };
-    {
-      name = "execution_session_proof";
-      title = "Execution Session Proof";
-      description = "Summarize auditable collaboration evidence for an execution session (deprecated: team session layer removed).";
-      icons = [ Mcp_server.themed_icon ~label:"TP" ~bg:"#7C3AED" ~fg:"#F5F3FF" ];
-      arguments =
-        [
-          { name = "session_id"; description = "Team session identifier"; required = true };
-          { name = "operation_id"; description = "Optional managed operation identifier"; required = false };
-        ];
-    };
-    {
-      name = "command_truth";
-      title = "Command Truth";
-      description = "Summarize managed command-plane evidence for an operation or run (deprecated: command plane layer removed).";
-      icons = [ Mcp_server.themed_icon ~label:"CT" ~bg:"#9A3412" ~fg:"#FFF7ED" ];
-      arguments =
-        [
-          { name = "operation_id"; description = "Managed operation or trace identifier"; required = false };
-          { name = "run_id"; description = "Optional swarm-live run identifier"; required = false };
         ];
     };
   ]
@@ -83,31 +61,6 @@ let assoc_string args key =
       let trimmed = String.trim value in
       if trimmed = "" then None else Some trimmed
   | _ -> None
-
-let string_contains = Dashboard_utils.string_contains
-let string_contains_ci = Dashboard_utils.string_contains_ci
-
-let run_tokens run_id =
-  let safe = Coord_utils.safe_filename run_id |> String.lowercase_ascii in
-  [ run_id; safe; "run_id=" ^ run_id; "run_id=" ^ safe; "swarm-live:" ^ run_id; "swarm-live:" ^ safe ]
-
-let rec json_contains_run_tokens tokens = function
-  | `String value -> List.exists (fun token -> string_contains_ci ~needle:token value) tokens
-  | `Assoc fields -> List.exists (fun (_, value) -> json_contains_run_tokens tokens value) fields
-  | `List items -> List.exists (json_contains_run_tokens tokens) items
-  | _ -> false
-
-let filter_traces_json_by_run_id run_id = function
-  | `Assoc fields as json -> (
-      match List.assoc_opt "events" fields with
-      | Some (`List events) ->
-          let filtered =
-            events
-            |> List.filter (json_contains_run_tokens (run_tokens run_id))
-          in
-          `Assoc (("events", `List filtered) :: List.remove_assoc "events" fields)
-      | _ -> json)
-  | json -> json
 
 let message_json text =
   `Assoc
@@ -150,51 +103,7 @@ let tool_help_text ~tool_name ~focus schemas =
            @
            (if entry.doc_refs = [] then [] else "" :: "Docs:" :: List.map (fun item -> "- " ^ item) entry.doc_refs)))
 
-let execution_session_proof_text ~config:_ ~session_id ~operation_id:_ =
-  (* Dashboard_proof removed *)
-  String.concat "\n"
-    [
-      "Execution session proof is not available (execution session layer removed).";
-      Printf.sprintf "Session: %s" session_id;
-    ]
-
-let command_truth_text ~config:_ ?operation_id ?run_id () =
-  let summary_json =
-    match run_id with
-    | Some value ->
-        `Assoc
-          [
-            ("scope", `String "run");
-            ("run_id", `String value);
-            ("operation_id", Json_util.string_opt_to_json operation_id);
-            ("traces_filtered", `Bool true);
-          ]
-    | None -> `Assoc []
-  in
-  let summary = summary_json |> Yojson.Safe.pretty_to_string in
-  let _ = operation_id in
-  let traces_json = `Assoc [("events", `List [])] in
-  let traces =
-    (match run_id with
-    | Some value -> filter_traces_json_by_run_id value traces_json
-    | None -> traces_json)
-    |> Yojson.Safe.pretty_to_string
-  in
-  String.concat "\n"
-    [
-      "Command plane evidence is not available (command plane layer removed).";
-      "The summary and traces below reflect the stub state retained for";
-      "backward compatibility with pre-purge MCP clients; they carry no live data.";
-      (match run_id with Some value -> "Focus run_id: " ^ value | None -> "");
-      "";
-      "Summary:";
-      summary;
-      "";
-      "Recent traces:";
-      traces;
-    ]
-
-let get_json ~config ~name ~arguments schemas =
+let get_json ~config:_ ~name ~arguments schemas =
   match lookup name with
   | None -> Error (Printf.sprintf "unknown prompt: %s" name)
   | Some prompt -> (
@@ -206,16 +115,6 @@ let get_json ~config ~name ~arguments schemas =
                 let focus = assoc_string arguments "focus" in
                 tool_help_text ~tool_name ~focus schemas
             | None -> Error "tool_name is required")
-        | "execution_session_proof" -> (
-            match assoc_string arguments "session_id" with
-            | Some session_id ->
-                let operation_id = assoc_string arguments "operation_id" in
-                Ok (execution_session_proof_text ~config ~session_id ~operation_id)
-            | None -> Error "session_id is required")
-        | "command_truth" ->
-            let operation_id = assoc_string arguments "operation_id" in
-            let run_id = assoc_string arguments "run_id" in
-            Ok (command_truth_text ~config ?operation_id ?run_id ())
         | _ -> Error (Printf.sprintf "unsupported prompt: %s" name)
       in
       match text_result with

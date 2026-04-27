@@ -2542,7 +2542,7 @@ let test_handle_request_prompts_list_non_empty () =
     | _ -> Alcotest.fail "response not an object"
   in
   Alcotest.(check bool) "prompt inventory is non-empty" true
-    (List.length prompts >= 3);
+    (List.length prompts >= 1);
   cleanup_dir base_path
 
 let test_handle_request_prompts_list_cursor () =
@@ -2575,7 +2575,7 @@ let test_handle_request_prompts_list_cursor () =
         | _ -> Alcotest.fail "result not an object")
     | _ -> Alcotest.fail "response not an object"
   in
-  Alcotest.(check int) "cursor trims first prompt" 2 (List.length prompts);
+  Alcotest.(check int) "cursor trims first prompt" 0 (List.length prompts);
   cleanup_dir base_path
 
 let test_handle_request_prompts_get_tool_help () =

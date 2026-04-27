@@ -257,6 +257,17 @@ val metric_keeper_near_exhaustion_total : string
 (** Total times a keeper restart attempt landed at
     [restart_count = max_restarts - 1], i.e. one attempt away from Dead.
     Soft pre-warning; labeled by [keeper]. *)
+
+val metric_keeper_oas_timeout_budget_strike : string
+(** PR-M (Leak 9): consecutive [oas_timeout_budget] cycle FAILED strikes.
+    Labeled by [keeper] and [outcome]:
+    - [outcome=warn]: strike below [oas_timeout_budget_strike_limit];
+      cycle continues, supervisor not yet involved.
+    - [outcome=promote]: strike at or above limit; [Keeper_fiber_crash]
+      raised so [Keeper_supervisor.sweep_and_recover] respawns the
+      fiber with a fresh context budget. Counter reset on any
+      successful turn. *)
+
 val metric_oas_bus_subscriber_stream_depth : string
 val metric_oas_bus_publish_block_seconds : string
 val metric_oas_bus_publish : string

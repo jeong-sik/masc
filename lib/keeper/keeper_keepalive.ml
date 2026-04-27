@@ -295,6 +295,60 @@ let reset_autonomous_completion_for_test () : unit =
   with_completion_table (fun () ->
     Hashtbl.reset last_autonomous_completion)
 
+(* PR-M (Leak 9): consecutive [oas_timeout_budget] cycle FAILED strikes
+   per keeper.
+
+   [oas_timeout_budget] means the keeper cycle hit its structural budget
+   (see [Keeper_unified_turn.resolve_bounded_oas_timeout_budget_with_turn_budget]).
+   Re-running on the same fiber gives the same context and the same
+   shape of failure repeats — the budget does not magically grow
+   between cycles. Pre-fix the only escape was
+   [Keeper_supervisor.sweep_and_recover], which only triggers on
+   [Keeper_fiber_crash]; with the fiber alive but cycle-failing, the
+   sweep reports ["Alive — skip"] (see [keeper_supervisor.ml:599-602])
+   and the keeper stays zombie for hours. Real evidence 2026-04-26:
+   5 keepers were 4h+ silent post-budget-exhaustion in a 15-minute
+   window with 0 restart.
+
+   Promote to [Keeper_fiber_crash] after [oas_timeout_budget_strike_limit]
+   consecutive strikes so a fresh fiber retries with a clean context.
+   Counter is reset on any successful turn (see [Ok updated] branch). *)
+let consecutive_budget_exhaustions : (string, int) Hashtbl.t =
+  Hashtbl.create 16
+let consecutive_budget_exhaustions_mutex = Eio.Mutex.create ()
+let oas_timeout_budget_strike_limit = 3
+
+let with_budget_exhaustions f =
+  Eio.Mutex.use_rw ~protect:true consecutive_budget_exhaustions_mutex f
+
+let bump_budget_exhaustion ~keeper_name : int =
+  with_budget_exhaustions (fun () ->
+    let prior =
+      Hashtbl.find_opt consecutive_budget_exhaustions keeper_name
+      |> Option.value ~default:0
+    in
+    let next = prior + 1 in
+    Hashtbl.replace consecutive_budget_exhaustions keeper_name next;
+    next)
+
+let reset_budget_exhaustion ~keeper_name : unit =
+  with_budget_exhaustions (fun () ->
+    Hashtbl.remove consecutive_budget_exhaustions keeper_name)
+
+(* Test-only seam so unit tests can pre-load strike counts and exercise
+   the promote/reset branches without driving a full keeper cycle. *)
+let peek_budget_exhaustion_for_test ~keeper_name : int =
+  with_budget_exhaustions (fun () ->
+    Hashtbl.find_opt consecutive_budget_exhaustions keeper_name
+    |> Option.value ~default:0)
+
+let set_budget_exhaustion_for_test ~keeper_name ~strikes : unit =
+  with_budget_exhaustions (fun () ->
+    if strikes <= 0 then
+      Hashtbl.remove consecutive_budget_exhaustions keeper_name
+    else
+      Hashtbl.replace consecutive_budget_exhaustions keeper_name strikes)
+
 (** Test-only: stamp a completion time directly without going through
     [Time_compat.now].  Allows deterministic fairness-cooldown scenarios. *)
 let record_autonomous_completion_at_for_test ~(keeper_name : string) ~(ts : float) : unit =
@@ -1487,6 +1541,51 @@ let run_keepalive_unified_turn
                     (Printf.sprintf "fatal environment error: %s" e_str)));
                 raise Keeper_registry.Keeper_fiber_crash
               end;
+              (* PR-M (Leak 9): N-strike promotion for repeated
+                 [oas_timeout_budget]. See the comment block above
+                 [consecutive_budget_exhaustions] for why a single
+                 strike must not trip the crash but
+                 [oas_timeout_budget_strike_limit] in a row should —
+                 same-fiber retry has the same context budget, so a
+                 budget exhaustion is unrecoverable in place and only
+                 [sweep_and_recover] can clear it. *)
+              if String_util.contains_substring e_str "oas_timeout_budget"
+              then begin
+                let keeper_name = meta_after_observe.name in
+                let strikes = bump_budget_exhaustion ~keeper_name in
+                if strikes >= oas_timeout_budget_strike_limit then begin
+                  Log.Keeper.error
+                    "%s: %d consecutive oas_timeout_budget strikes \
+                     (>= %d) — promoting to Keeper_fiber_crash for \
+                     sweep_and_recover restart"
+                    keeper_name strikes oas_timeout_budget_strike_limit;
+                  Prometheus.inc_counter
+                    Prometheus.metric_keeper_oas_timeout_budget_strike
+                    ~labels:[
+                      ("keeper", keeper_name);
+                      ("outcome", "promote");
+                    ] ();
+                  reset_budget_exhaustion ~keeper_name;
+                  Keeper_registry.set_failure_reason
+                    ~base_path:ctx.config.base_path keeper_name
+                    (Some (Keeper_registry.Exception
+                      (Printf.sprintf
+                        "%d consecutive oas_timeout_budget strikes"
+                        strikes)));
+                  raise Keeper_registry.Keeper_fiber_crash
+                end else begin
+                  Log.Keeper.warn
+                    "%s: oas_timeout_budget strike %d/%d \
+                     (next strike will trigger fiber crash + restart)"
+                    keeper_name strikes oas_timeout_budget_strike_limit;
+                  Prometheus.inc_counter
+                    Prometheus.metric_keeper_oas_timeout_budget_strike
+                    ~labels:[
+                      ("keeper", keeper_name);
+                      ("outcome", "warn");
+                    ] ()
+                end
+              end;
               (match read_meta ctx.config meta_after_observe.name with
                | Ok (Some latest) -> latest
                | Ok None ->
@@ -1498,6 +1597,10 @@ let run_keepalive_unified_turn
                    meta_after_observe.name e;
                  meta_after_observe)
             | Ok updated ->
+              (* PR-M: success clears the strike counter so a single
+                 transient budget exhaustion does not trickle into the
+                 next 4h-window's strike limit. *)
+              reset_budget_exhaustion ~keeper_name:meta_after_observe.name;
               updated)
         with
         | Ok meta -> meta

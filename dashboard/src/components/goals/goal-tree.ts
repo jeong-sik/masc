@@ -17,6 +17,7 @@ import { FilterChips } from '../common/filter-chips'
 import { StatusBadge } from '../common/status-badge'
 import { TimeAgo } from '../common/time-ago'
 import { TaskCreateForm } from '../task-manage/task-create-form'
+import { Tk } from '../tk'
 import type {
   DashboardGoalDetailResponse,
   DashboardCoordinationFsmViolation,
@@ -1029,7 +1030,7 @@ export function GoalTree() {
             <h3 class="mt-1 text-2xl font-semibold tracking-[-0.02em] text-text-strong">목표 중심 계획 뷰</h3>
             <p class="mt-1.5 text-sm leading-relaxed text-text-muted">
               goal-task 연결, keeper evidence, approval 대기, sandbox/cascade 신호를 한 표면에서 봅니다.
-              신규 태스크는 <code class="rounded bg-white/5 px-1 py-0.5 text-2xs text-text-strong">goal_id</code>로 직접 연결됩니다.
+              신규 태스크는 <${Tk}>goal_id<//>로 직접 연결됩니다.
             </p>
           </div>
           <div class="flex flex-wrap items-center gap-2">

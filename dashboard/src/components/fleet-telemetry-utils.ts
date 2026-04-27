@@ -600,8 +600,8 @@ export function toolSummary(row: FleetRow): { label: string; title: string } {
     }
   }
   return {
-    label: 'Tool telemetry unavailable',
-    title: 'Tool telemetry unavailable',
+    label: '도구 telemetry 없음',
+    title: '도구 telemetry 없음',
   }
 }
 

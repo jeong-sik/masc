@@ -73,6 +73,7 @@
         test_keeper_wake_telemetry
         test_keeper_memory
         test_keeper_accountability
+        test_keeper_goal_repair
         test_accountability_emit_skip_10314
         test_keeper_exec_status
         test_keeper_pause_broadcast
@@ -247,6 +248,7 @@
           test_keeper_wake_telemetry
           test_keeper_memory
           test_keeper_accountability
+          test_keeper_goal_repair
           test_accountability_emit_skip_10314
           test_keeper_exec_status
           test_keeper_pause_broadcast

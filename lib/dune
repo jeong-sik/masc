@@ -449,6 +449,7 @@
    keeper_meta_store
    keeper_types
    keeper_meta_merge
+   keeper_goal_repair
    keeper_memory
    keeper_accountability
    keeper_memory_policy

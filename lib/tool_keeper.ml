@@ -898,6 +898,8 @@ let keeper_persona_audit_item ctx requested_name =
     |> add (match autoboot_enabled with Some false -> true | _ -> false)
          "autoboot_disabled"
     |> add (match paused with Some true -> true | _ -> false) "keeper_paused"
+    |> add (match runtime_meta with Some meta when meta.active_goal_ids = [] -> true | _ -> false)
+         "empty_active_goal_ids"
     |> add
          (match runtime_meta, autoboot_enabled, paused, keepalive_running with
           | Some _, (Some true | None), (Some false | None), Some false -> true
@@ -978,6 +980,7 @@ let keeper_persona_audit_summary items =
       ("autoboot_disabled", `Int (count_issue "autoboot_disabled"));
       ("keeper_paused", `Int (count_issue "keeper_paused"));
       ("keepalive_not_running", `Int (count_issue "keepalive_not_running"));
+      ("empty_active_goal_ids", `Int (count_issue "empty_active_goal_ids"));
     ]
 
 let handle_keeper_persona_audit ctx args : tool_result =
@@ -990,6 +993,8 @@ let handle_keeper_persona_audit ctx args : tool_result =
   else
     let limit = get_int args "limit" 100 |> max 0 |> min 500 in
     let include_ok = get_bool args "include_ok" true in
+    let repair = get_bool args "repair" false in
+    let dry_run_repair = get_bool args "dry_run_repair" false in
     let audited_items =
       names
       |> take limit
@@ -1005,6 +1010,13 @@ let handle_keeper_persona_audit ctx args : tool_result =
             | _ -> true)
           audited_items
     in
+    let repair_result =
+      if repair || dry_run_repair then
+        Some
+          (if dry_run_repair then Keeper_goal_repair.dry_run ctx.config
+           else Keeper_goal_repair.run ctx.config)
+      else None
+    in
     let resolution = Config_dir_resolver.resolve () in
     let roots =
       `Assoc
@@ -1019,17 +1031,23 @@ let handle_keeper_persona_audit ctx args : tool_result =
                  (Config_dir_resolver.personas_dirs ())) );
         ]
     in
+    let base_response =
+      [
+        ("status", `String "ok");
+        ("tool", `String "masc_keeper_persona_audit");
+        ("roots", roots);
+        ("summary", keeper_persona_audit_summary audited_items);
+        ("returned_count", `Int (List.length returned_items));
+        ("items", `List returned_items);
+      ]
+    in
+    let response_with_repair =
+      match repair_result with
+      | Some r -> ("goal_repair", Keeper_goal_repair.repair_result_to_yojson r) :: base_response
+      | None -> base_response
+    in
     ( true,
-      Yojson.Safe.pretty_to_string
-        (`Assoc
-           [
-             ("status", `String "ok");
-             ("tool", `String "masc_keeper_persona_audit");
-             ("roots", roots);
-             ("summary", keeper_persona_audit_summary audited_items);
-             ("returned_count", `Int (List.length returned_items));
-             ("items", `List returned_items);
-           ]) )
+      Yojson.Safe.pretty_to_string (`Assoc response_with_repair) )
 
 let parse_network_mode_or_error raw =
   match network_mode_of_string raw with

@@ -7,6 +7,7 @@ import { Card } from './common/card'
 import { StatCard } from './common/stat-card'
 import { JsonViewerCard } from './common/json-viewer'
 import { EmptyState } from './common/empty-state'
+import { KeeperBadge } from './keeper-badge'
 import { formatTimeAgo } from '../lib/format-time'
 import {
   asBoolean,
@@ -282,7 +283,7 @@ function FindingsList({ findings }: { findings: FindingItem[] }) {
               <div class="flex flex-wrap items-center gap-2">
                 <code class="text-3xs text-[var(--color-fg-muted)]">${item.reason_code}</code>
                 <${StatusPill} status=${item.severity} />
-                ${item.keeper_name ? html`<span class="text-3xs text-[var(--color-fg-muted)]">${item.keeper_name}</span>` : null}
+                ${item.keeper_name ? html`<${KeeperBadge} id=${item.keeper_name} variant="full" size="sm" />` : null}
               </div>
               <div class="mt-1 text-sm text-[var(--color-fg-secondary)]">${item.summary}</div>
               <div class="mt-1 text-xs text-[var(--color-fg-muted)]">${item.suggested_next_action}</div>

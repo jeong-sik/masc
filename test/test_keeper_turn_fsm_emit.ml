@@ -88,6 +88,8 @@ let test_failure_reason_labels_documented () =
       ( F.Failure_receipt_lost
           { primary_error = "e"; fallback_path = None },
         "receipt_lost" );
+      ( F.Failure_turn_livelock_blocked { reason = "stuck_after_sec" },
+        "turn_livelock_blocked" );
       (F.Failure_runtime_error "msg", "runtime_error");
       ( F.Failure_unexpected_exception
           { exn = "Boom"; backtrace = None },

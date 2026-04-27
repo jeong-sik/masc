@@ -1,0 +1,600 @@
+<!doctype html>
+<html lang="en" data-theme="dark-fantasy">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MASC — Tools preview (W11)</title>
+  <!--
+    W11 tools preview (DS-Drift Phase 1).
+    Production source file (read-only mirror):
+      - dashboard/src/styles/tools.css (64 lines, 6 selectors)
+    Tokens SSOT:
+      - dashboard/design-system/source_styles/tokens.generated.css
+
+    tools.css import locations (rg -l 'tools\.css' src/):
+      - dashboard/src/main.ts:31              import './styles/tools.css'
+      - dashboard/src/styles/global.css:34    @import "./tools.css";
+
+    tools.css references three legacy aliases that live in
+    dashboard/src/styles/variables.css (NOT in the generated SSOT):
+      var(--z-tab-sticky)    -> 30                          (variables.css:309)
+      var(--text-near-white) -> raw near-white literal      (variables.css:287)
+      var(--fs-sm)           -> var(--font-size-sm)         (variables.css:275)
+    plus one raw rgba literal:
+      tools.css:L35 background: rgba(30, 41, 59, 0.95)      (Phase 2 candidate)
+
+    This preview rebuilds the same tone using ONLY tokens.generated.css
+    variables (color-bg-elevated, color-fg-primary, fs-12, ...) so the
+    visual result is comparable. Drift catalog is in section 4 below.
+    The legacy aliases / raw hex are NOT modified by this PR — that is
+    Phase 2 scope.
+  -->
+  <link rel="stylesheet" href="_preview.css" />
+  <style>
+    /* ──────────────────────────────────────────────────────────────────
+       All values below come from tokens.generated.css. No raw hex.
+       Each tl-* class mirrors a production tools.css selector; comments
+       carry the source file and line pointer.
+       ────────────────────────────────────────────────────────────────── */
+
+    .pv-banner {
+      background: var(--color-bg-surface);
+      border: 1px solid var(--color-border-strong);
+      border-left: 3px solid var(--color-accent-fg);
+      border-radius: var(--r-1);
+      padding: 14px 18px;
+      display: flex; flex-direction: column; gap: 4px;
+    }
+    .pv-banner .h {
+      font: 600 var(--type-label);
+      letter-spacing: var(--track-caps);
+      text-transform: uppercase;
+      color: var(--color-fg-primary);
+    }
+    .pv-banner .l {
+      font: var(--type-micro);
+      font-family: var(--font-mono);
+      color: var(--color-fg-muted);
+      letter-spacing: var(--track-wide);
+    }
+
+    /* ── tool-inventory row demo container ───────────────────────── */
+    .tl-inv-list {
+      display: flex; flex-direction: column; gap: 6px;
+      background: var(--color-bg-page);
+      border: 1px solid var(--color-border-default);
+      border-radius: var(--r-1);
+      padding: 10px;
+      max-height: 260px;
+      overflow: auto;
+    }
+    .tl-inv-row {
+      padding: 8px 10px;
+      border: 1px solid var(--color-border-default);
+      border-radius: 2px;
+      background: var(--color-bg-surface);
+      display: flex; flex-direction: column; gap: 4px;
+    }
+    .tl-inv-row .name {
+      font-family: var(--font-mono);
+      font-size: var(--fs-12);
+      color: var(--color-fg-primary);
+    }
+
+    /* mirrors production tools.css:L5-11
+       @utility tool-inventory-desc {
+         display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+         &:hover { -webkit-line-clamp: unset; }
+       } */
+    .tl-inventory-desc {
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      font-family: var(--font-mono);
+      font-size: var(--fs-11);
+      color: var(--color-fg-muted);
+    }
+    .tl-inventory-desc:hover { -webkit-line-clamp: unset; }
+
+    /* mirrors production tools.css:L13-19
+       @utility tool-inventory-reason {
+         display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+         &:hover { -webkit-line-clamp: unset; }
+       } */
+    .tl-inventory-reason {
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      font-family: var(--font-mono);
+      font-size: var(--fs-11);
+      color: var(--color-fg-secondary);
+      margin-top: 6px;
+      padding-top: 6px;
+      border-top: 1px dashed var(--color-border-default);
+    }
+    .tl-inventory-reason:hover { -webkit-line-clamp: unset; }
+
+    /* ── back-to-top FAB demo ─────────────────────────────────────── */
+    .tl-fab-stage {
+      position: relative;
+      height: 220px;
+      background: var(--color-bg-page);
+      border: 1px solid var(--color-border-default);
+      border-radius: var(--r-1);
+      overflow: hidden;
+    }
+    .tl-fab-stage .scroll-hint {
+      position: absolute;
+      top: 12px; left: 14px;
+      font-family: var(--font-mono);
+      font-size: var(--fs-10);
+      color: var(--color-fg-disabled);
+      letter-spacing: var(--track-wide);
+    }
+    /* mirrors production tools.css:L21-38
+       @utility tool-back-to-top {
+         position: fixed; bottom: 24px; right: 24px;
+         z-index: var(--z-tab-sticky);
+         backdrop-filter: blur(8px);
+         opacity: 0;
+         transition: opacity 0.2s, background 0.15s;
+         pointer-events: none;
+         &.visible { opacity: 1; pointer-events: auto; }
+         &:hover { background: rgba(30, 41, 59, 0.95); color: var(--text-near-white); }
+       }
+       Drift mapping in this preview:
+         var(--z-tab-sticky)    -> literal 30 (legacy alias, see section 4)
+         rgba(30, 41, 59, 0.95) -> var(--color-bg-elevated) (Phase 2 candidate, section 4)
+         var(--text-near-white) -> var(--color-fg-primary)  (legacy alias, see section 4)
+       NOTE: position: fixed -> absolute inside the preview stage so the
+       FAB is scoped to the demo card. Geometry (bottom/right/blur) preserved. */
+    .tl-back-to-top {
+      position: absolute;
+      bottom: 24px; right: 24px;
+      z-index: 30;
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 44px; height: 44px;
+      border-radius: 50%;
+      border: 1px solid var(--color-border-strong);
+      background: var(--color-bg-surface);
+      color: var(--color-fg-secondary);
+      font-family: var(--font-mono);
+      font-size: var(--fs-13);
+      backdrop-filter: blur(8px);
+      opacity: 0;
+      transition: opacity 0.2s, background 0.15s;
+      pointer-events: none;
+      cursor: pointer;
+    }
+    .tl-back-to-top.visible {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    .tl-back-to-top:hover {
+      background: var(--color-bg-elevated);
+      color: var(--color-fg-primary);
+    }
+
+    /* ── tool-metrics-sections (1fr / 2fr asymmetric grid) ───────── */
+    /* mirrors production tools.css:L41-45
+       @utility tool-metrics-sections {
+         display: grid;
+         grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+         gap: 16px;
+       } */
+    .tl-metrics-sections {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+      gap: 16px;
+    }
+    .tl-metric-pane {
+      background: var(--color-bg-surface);
+      border: 1px solid var(--color-border-default);
+      border-radius: var(--r-1);
+      padding: 12px;
+      display: flex; flex-direction: column; gap: 8px;
+    }
+    .tl-metric-pane h4 {
+      font: 600 var(--type-label);
+      letter-spacing: var(--track-caps);
+      text-transform: uppercase;
+      color: var(--color-fg-secondary);
+      font-weight: 600;
+    }
+    .tl-metric-kv {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 4px 8px;
+      font-family: var(--font-mono);
+      font-size: var(--fs-11);
+      color: var(--color-fg-secondary);
+    }
+    .tl-metric-kv .k { color: var(--color-fg-muted); letter-spacing: var(--track-wide); }
+    .tl-metric-kv .v { color: var(--color-fg-primary); }
+
+    /* ── tool-bar-row (140 / 68 / 1fr / 48 4-column) ──────────────── */
+    /* mirrors production tools.css:L47-53
+       @utility tool-bar-row {
+         display: grid;
+         grid-template-columns: minmax(140px, 0.8fr) 68px minmax(0, 1fr) 48px;
+         gap: 8px;
+         align-items: center;
+         font-size: var(--fs-sm);
+       }
+       Drift mapping: var(--fs-sm) -> var(--fs-13) (legacy alias, see section 4) */
+    .tl-bar-list {
+      display: flex; flex-direction: column;
+      background: var(--color-bg-page);
+      border: 1px solid var(--color-border-default);
+      border-radius: var(--r-1);
+      overflow: hidden;
+    }
+    .tl-bar-row {
+      display: grid;
+      grid-template-columns: minmax(140px, 0.8fr) 68px minmax(0, 1fr) 48px;
+      gap: 8px;
+      align-items: center;
+      font-size: var(--fs-13);
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--color-border-default);
+      font-family: var(--font-mono);
+      color: var(--color-fg-primary);
+    }
+    .tl-bar-row:last-child { border-bottom: 0; }
+    .tl-bar-row .name { color: var(--color-fg-primary); }
+    .tl-bar-row .num  { color: var(--color-fg-secondary); text-align: right; font-variant-numeric: tabular-nums; }
+    .tl-bar-row .bar  {
+      height: 6px; border-radius: 999px;
+      background: var(--color-bg-surface);
+      border: 1px solid var(--color-border-default);
+      position: relative; overflow: hidden;
+    }
+    .tl-bar-row .bar::after {
+      content: ""; position: absolute; inset: 0;
+      width: var(--w, 50%);
+      background: linear-gradient(90deg, var(--color-accent-fg-dim), var(--color-accent-fg));
+      box-shadow: 0 0 6px rgb(var(--color-accent-glow) / 0.5);
+    }
+    .tl-bar-row .pct { color: var(--color-fg-muted); text-align: right; font-size: var(--fs-10); letter-spacing: var(--track-wide); }
+
+    /* ── responsive collapse (matches @media max-width: 880px in tools.css:L55-63) ── */
+    /* mirrors production tools.css:L55-63
+       @media (max-width: 880px) {
+         .tool-metrics-sections { grid-template-columns: 1fr; }
+         .tool-bar-row {
+           grid-template-columns: minmax(100px, 0.6fr) 56px minmax(0, 1fr) 36px;
+         }
+       } */
+    @media (max-width: 880px) {
+      .tl-metrics-sections { grid-template-columns: 1fr; }
+      .tl-bar-row { grid-template-columns: minmax(100px, 0.6fr) 56px minmax(0, 1fr) 36px; }
+    }
+
+    /* token annotation block reused in cards */
+    .tl-toks {
+      display: flex; flex-wrap: wrap; gap: 4px;
+      padding-top: 6px;
+      border-top: 1px dashed var(--color-border-default);
+      margin-top: 4px;
+    }
+
+    /* drift evidence table (section 4) */
+    .tl-drift {
+      width: 100%; border-collapse: collapse;
+      font-family: var(--font-mono); font-size: var(--fs-11);
+      color: var(--color-fg-secondary);
+    }
+    .tl-drift thead th {
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--color-border-strong);
+      color: var(--color-fg-muted);
+      letter-spacing: var(--track-wide);
+      text-align: left;
+    }
+    .tl-drift tbody td {
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--color-border-default);
+    }
+    .tl-drift tbody tr:last-child td { border-bottom: 0; }
+    .tl-drift td.use { color: var(--color-fg-muted); }
+
+    /* Phase 2 candidate raw-color swatch */
+    .tl-swatch {
+      display: inline-block;
+      width: 14px; height: 14px;
+      border-radius: 2px;
+      border: 1px solid var(--color-border-strong);
+      vertical-align: middle;
+      margin-right: 6px;
+    }
+  </style>
+</head>
+<body>
+  <div class="pv-root">
+
+    <header class="pv-head">
+      <div class="pv-eyebrow">DS-Drift · Phase 1 · W11</div>
+      <h1 class="pv-title">Tools preview</h1>
+      <p class="pv-sub">Visual mirror of <code>dashboard/src/styles/tools.css</code>
+        — the 6 utility classes that drive the operator/dev tooling palette
+        (<code>tool-detail</code>, <code>tool-param</code>, <code>tool-portal-card</code>,
+        and the inventory / metrics / back-to-top primitives extracted in issue 3915).
+        Each card pairs a production selector with the SSOT-token rendering used by
+        the design system. Drift catalog (legacy aliases + raw rgba) lives in
+        section 4 as Phase 2 candidates.</p>
+    </header>
+
+    <section class="pv-banner" role="note">
+      <div class="h">Production source: src/styles/tools.css · Tokens: tokens.generated.css · Last audit: 2026-04-28</div>
+      <div class="l">
+        import locations: dashboard/src/main.ts:31 · dashboard/src/styles/global.css:34
+        — read-only mirror, no production CSS modified by this preview · drift fix follows in Phase 2
+      </div>
+    </section>
+
+    <!-- ═════════════════ Section 1: tool-inventory ═════════════════ -->
+    <section class="pv-sect">
+      <div class="pv-sect-h">
+        <h2>1 · tool-inventory line clamp</h2>
+        <span class="sub">selectors from src/styles/tools.css:L5-19</span>
+      </div>
+      <div class="pv-grid-2">
+
+        <!-- mirrors production tools.css:L5-11 -->
+        <div class="pv-cell">
+          <div class="pv-cell-h">
+            <span class="pv-cell-label">@utility tool-inventory-desc</span>
+            <span class="pv-cell-meta">tools.css:L5-11</span>
+          </div>
+          <!-- mirrors production .tool-inventory-desc 2-line clamp + hover-expand -->
+          <div class="tl-inv-list">
+            <div class="tl-inv-row">
+              <div class="name">masc_keeper_status</div>
+              <div class="tl-inventory-desc">
+                Returns lifecycle state for a single keeper including last heartbeat,
+                claimed task id, current cascade pin, autonomy posture, and any
+                pending operator approvals. Hover the line to expand the full
+                description; collapsed view caps at two lines via -webkit-line-clamp.
+              </div>
+            </div>
+            <div class="tl-inv-row">
+              <div class="name">masc_broadcast</div>
+              <div class="tl-inventory-desc">
+                Sends a structured broadcast to a MASC room. Body supports @mentions
+                and a [STATE] block; receivers route by mention rules.
+              </div>
+            </div>
+          </div>
+          <div class="tl-toks">
+            <span class="pv-tok">-webkit-line-clamp: 2</span>
+            <span class="pv-tok">:hover → unset</span>
+            <span class="pv-tok">var(--color-fg-muted)</span>
+          </div>
+        </div>
+
+        <!-- mirrors production tools.css:L13-19 -->
+        <div class="pv-cell">
+          <div class="pv-cell-h">
+            <span class="pv-cell-label">@utility tool-inventory-reason</span>
+            <span class="pv-cell-meta">tools.css:L13-19</span>
+          </div>
+          <!-- mirrors production .tool-inventory-reason 2-line clamp + hover-expand -->
+          <div class="tl-inv-list">
+            <div class="tl-inv-row">
+              <div class="name">masc_keeper_repair</div>
+              <div class="tl-inventory-desc">Repairs a wedged keeper subprocess.</div>
+              <div class="tl-inventory-reason">
+                Reason: keeper-spark heartbeat stalled 14m, sandbox docker container
+                failed to attach, last broadcast referenced a host path leak — repair
+                attempt requested by supervisor at wake 1.1.
+              </div>
+            </div>
+            <div class="tl-inv-row">
+              <div class="name">masc_keeper_reset</div>
+              <div class="tl-inventory-desc">Hard reset including credential rotation.</div>
+              <div class="tl-inventory-reason">
+                Reason: per-keeper drift detected on alias path; storage-only dual
+                identity, no runtime drift; cleanup deferred per memory note.
+              </div>
+            </div>
+          </div>
+          <div class="tl-toks">
+            <span class="pv-tok">-webkit-line-clamp: 2</span>
+            <span class="pv-tok">:hover → unset</span>
+            <span class="pv-tok">var(--color-fg-secondary)</span>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ═════════════════ Section 2: back-to-top FAB ═════════════════ -->
+    <section class="pv-sect">
+      <div class="pv-sect-h">
+        <h2>2 · tool-back-to-top FAB</h2>
+        <span class="sub">selector from src/styles/tools.css:L21-38</span>
+      </div>
+      <div class="pv-grid-2">
+
+        <!-- mirrors production tools.css:L21-38 -->
+        <div class="pv-cell">
+          <div class="pv-cell-h">
+            <span class="pv-cell-label">@utility tool-back-to-top (idle)</span>
+            <span class="pv-cell-meta">tools.css:L21-33</span>
+          </div>
+          <!-- mirrors production .tool-back-to-top idle state (opacity:0, pointer-events:none) -->
+          <div class="tl-fab-stage">
+            <span class="scroll-hint">scroll &lt; threshold · FAB hidden</span>
+            <button class="tl-back-to-top" aria-hidden="true" tabindex="-1">↑</button>
+          </div>
+          <div class="tl-toks">
+            <span class="pv-tok">position: fixed</span>
+            <span class="pv-tok">z-index: var(--z-tab-sticky)</span>
+            <span class="pv-tok">backdrop-filter: blur(8px)</span>
+            <span class="pv-tok">opacity: 0</span>
+            <span class="pv-tok">pointer-events: none</span>
+          </div>
+        </div>
+
+        <!-- mirrors production tools.css:L30-37 (.visible + :hover) -->
+        <div class="pv-cell">
+          <div class="pv-cell-h">
+            <span class="pv-cell-label">.tool-back-to-top.visible:hover</span>
+            <span class="pv-cell-meta">tools.css:L30-37</span>
+          </div>
+          <!-- mirrors production .tool-back-to-top.visible state -->
+          <div class="tl-fab-stage">
+            <span class="scroll-hint">scroll ≥ threshold · FAB visible (hovered)</span>
+            <button class="tl-back-to-top visible" style="background: var(--color-bg-elevated); color: var(--color-fg-primary);" aria-label="back to top">↑</button>
+          </div>
+          <div class="tl-toks">
+            <span class="pv-tok">.visible → opacity: 1</span>
+            <span class="pv-tok">:hover bg → rgba(30,41,59,.95)</span>
+            <span class="pv-tok">:hover color → var(--text-near-white)</span>
+            <span class="pv-tok">transition: opacity .2s, background .15s</span>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ═════════════════ Section 3: tool-metrics + tool-bar ═════════════════ -->
+    <section class="pv-sect">
+      <div class="pv-sect-h">
+        <h2>3 · tool-metrics-sections + tool-bar-row</h2>
+        <span class="sub">selectors from src/styles/tools.css:L41-63</span>
+      </div>
+
+      <div class="pv-grid-2">
+        <!-- mirrors production tools.css:L41-45 + L55-58 -->
+        <div class="pv-cell" style="grid-column: span 2;">
+          <div class="pv-cell-h">
+            <span class="pv-cell-label">@utility tool-metrics-sections (1fr / 2fr)</span>
+            <span class="pv-cell-meta">tools.css:L41-45 · responsive L55-58</span>
+          </div>
+          <!-- mirrors production .tool-metrics-sections 2-col grid (collapses below 880px) -->
+          <div class="tl-metrics-sections">
+            <div class="tl-metric-pane">
+              <h4>Summary</h4>
+              <div class="tl-metric-kv">
+                <span class="k">total tools</span><span class="v">142</span>
+                <span class="k">active 24h</span><span class="v">48</span>
+                <span class="k">cascade pinned</span><span class="v">12</span>
+                <span class="k">errors 24h</span><span class="v">3</span>
+              </div>
+            </div>
+            <div class="tl-metric-pane">
+              <h4>Top tools by call count (24h)</h4>
+              <div class="tl-bar-list">
+                <!-- mirrors production tools.css:L47-53 (@utility tool-bar-row) -->
+                <div class="tl-bar-row">
+                  <span class="name">masc_status</span>
+                  <span class="num">2,418</span>
+                  <span class="bar" style="--w: 92%;"></span>
+                  <span class="pct">92%</span>
+                </div>
+                <div class="tl-bar-row">
+                  <span class="name">masc_heartbeat</span>
+                  <span class="num">1,732</span>
+                  <span class="bar" style="--w: 66%;"></span>
+                  <span class="pct">66%</span>
+                </div>
+                <div class="tl-bar-row">
+                  <span class="name">masc_broadcast</span>
+                  <span class="num">874</span>
+                  <span class="bar" style="--w: 33%;"></span>
+                  <span class="pct">33%</span>
+                </div>
+                <div class="tl-bar-row">
+                  <span class="name">masc_transition</span>
+                  <span class="num">311</span>
+                  <span class="bar" style="--w: 12%;"></span>
+                  <span class="pct">12%</span>
+                </div>
+                <div class="tl-bar-row">
+                  <span class="name">masc_tasks</span>
+                  <span class="num">128</span>
+                  <span class="bar" style="--w: 5%;"></span>
+                  <span class="pct">5%</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="tl-toks">
+            <span class="pv-tok">grid-template-columns: minmax(0,1fr) minmax(0,2fr)</span>
+            <span class="pv-tok">gap: 16px</span>
+            <span class="pv-tok">@media max-width:880px → 1fr</span>
+            <span class="pv-tok">tool-bar-row: 140 / 68 / 1fr / 48 (≥880px)</span>
+            <span class="pv-tok">tool-bar-row: 100 / 56 / 1fr / 36 (&lt;880px)</span>
+            <span class="pv-tok">font-size: var(--fs-sm)</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═════════════════ Section 4: drift evidence (Phase 2 candidate) ═════════════════ -->
+    <section class="pv-sect">
+      <div class="pv-sect-h">
+        <h2>4 · drift evidence (W11 audit summary)</h2>
+        <span class="sub">legacy aliases + raw rgba referenced by tools.css — Phase 2 candidates</span>
+      </div>
+      <div class="pv-grid-2">
+
+        <!-- mirrors production tools.css token usage audit -->
+        <div class="pv-cell" style="grid-column: span 2;">
+          <div class="pv-cell-h">
+            <span class="pv-cell-label">legacy alias / raw value → SSOT token (Phase 2 candidate)</span>
+            <span class="pv-cell-meta">audit · 2026-04-28</span>
+          </div>
+          <table class="tl-drift">
+            <thead>
+              <tr>
+                <th>tools.css site</th>
+                <th>used at</th>
+                <th>current value</th>
+                <th>SSOT replacement (this preview)</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><span class="pv-tok">var(--z-tab-sticky)</span></td>
+                <td class="use">tools.css:L25 (.tool-back-to-top z-index)</td>
+                <td><span class="pv-tok">30 (variables.css:309)</span></td>
+                <td><span class="pv-tok">tokens/source.ts → --z-sticky / --z-tab-sticky</span></td>
+              </tr>
+              <tr>
+                <td><span class="pv-tok">rgba(30, 41, 59, 0.95)</span></td>
+                <td class="use">tools.css:L35 (.tool-back-to-top:hover bg)</td>
+                <td>
+                  <span class="tl-swatch" style="background: rgba(30, 41, 59, 0.95);" aria-hidden="true"></span>
+                  <span class="pv-tok">raw rgba (no alias)</span>
+                </td>
+                <td><span class="pv-tok">var(--color-bg-elevated)</span></td>
+              </tr>
+              <tr>
+                <td><span class="pv-tok">var(--text-near-white)</span></td>
+                <td class="use">tools.css:L36 (.tool-back-to-top:hover color)</td>
+                <td>
+                  <span class="tl-swatch" style="background: #f8fafc;" aria-hidden="true"></span>
+                  <span class="pv-tok">#f8fafc (variables.css:287)</span>
+                </td>
+                <td><span class="pv-tok">var(--color-fg-primary)</span></td>
+              </tr>
+              <tr>
+                <td><span class="pv-tok">var(--fs-sm)</span></td>
+                <td class="use">tools.css:L53 (.tool-bar-row font-size)</td>
+                <td><span class="pv-tok">var(--font-size-sm) (variables.css:275)</span></td>
+                <td><span class="pv-tok">var(--fs-13)</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+      </div>
+    </section>
+
+  </div>
+</body>
+</html>

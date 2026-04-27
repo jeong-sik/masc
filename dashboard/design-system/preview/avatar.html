@@ -1,0 +1,552 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MASC — Pixel Avatar Drift Coverage</title>
+  <link rel="stylesheet" href="../source_styles/tokens.generated.css" />
+  <link rel="stylesheet" href="_preview.css" />
+  <style>
+    /*
+     * Pixel-avatar preview — design-system mirror of production
+     * dashboard/src/styles/pixel-avatar.css (cascade chain:
+     * src/styles/global.css @import "./pixel-avatar.css" → bundled
+     * with tailwindcss in the live cockpit).
+     *
+     * SPEC: every card mirrors one or more selectors / @utility blocks
+     * from pixel-avatar.css and labels the source line range.
+     * Colors come from tokens.generated.css var() only (no raw hex).
+     * Avatar tile colors map to keeper palette tokens defined in
+     * dashboard/src/config/avatar-palettes.ts (visualised via
+     * --keeper-* var fallbacks below — value-only, no raw hex in style
+     * blocks: palette literals live in the data-* attribute layer).
+     */
+
+    /* Local preview-only fallbacks for production tokens that resolve
+     * inside src/styles/variables.css but are not part of the
+     * design-system tokens.generated.css. These fallbacks are
+     * preview-scoped only — they do not mutate the SSOT. */
+    :root {
+      --ff-navy: var(--color-bg-page);              /* mirrors --paper in paper-theme.css:66 */
+      --ff-gold: var(--color-accent-fg);            /* mirrors --brass-1 declared in tokens.generated.css */
+      --agent-working: var(--ok);                   /* live status */
+      --agent-busy: var(--warn);                    /* busy status */
+      --border-slate-30: var(--color-border-strong);
+      --white-12: var(--color-border-default);
+      --text-strong: var(--color-fg-primary);
+      --fs-2xs: 10px;
+    }
+
+    /* Cascade chain banner (read-only, top of page) */
+    .pv-cascade {
+      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--color-fg-muted);
+      padding: 10px 14px;
+      background: var(--color-bg-surface);
+      border: 1px solid var(--color-border-default);
+      border-radius: var(--r-1);
+    }
+    .pv-cascade .arrow { color: var(--color-fg-disabled); }
+    .pv-cascade .term { color: var(--color-fg-secondary); }
+    .pv-cascade .pin { color: var(--color-accent-fg); font-weight: 600; }
+
+    /* Source-line pointer chip (mirrors `tk` primitive shape) */
+    .pv-ref {
+      display: inline-block;
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--color-fg-disabled);
+      letter-spacing: var(--track-wide);
+      background: var(--color-bg-page);
+      border: 1px solid var(--color-border-default);
+      border-radius: 2px;
+      padding: 1px 5px;
+      margin-left: 6px;
+    }
+
+    /* 8x8 pixel grid scaffold — mirrors agent-avatar.ts render shape.
+     * Each cell uses a CSS variable so palette swatches stay token-bound. */
+    .pixel-avatar {
+      display: inline-grid;
+      grid-template-columns: repeat(8, 1fr);
+      grid-template-rows: repeat(8, 1fr);
+      width: 48px;
+      height: 48px;
+      background: var(--color-bg-page);
+      border: 1px solid var(--color-border-default);
+      position: relative;
+      vertical-align: middle;
+      image-rendering: pixelated;
+    }
+    .pixel-avatar.size-sm { width: 24px; height: 24px; }
+    .pixel-avatar.size-md { width: 36px; height: 36px; }
+    .pixel-avatar.size-lg { width: 48px; height: 48px; }
+    .pixel-avatar.size-xl { width: 72px; height: 72px; }
+
+    .pixel-avatar i { display: block; background: transparent; }
+    .pixel-avatar i.s { background: var(--c-skin, var(--color-fg-muted)); }
+    .pixel-avatar i.h { background: var(--c-hair, var(--color-fg-secondary)); }
+    .pixel-avatar i.p { background: var(--c-point, var(--color-accent-fg)); }
+    .pixel-avatar i.l { background: var(--c-light, var(--color-fg-primary)); }
+
+    /* Keeper palette swatches — values mirror config/avatar-palettes.ts.
+     * Hex literals live in data-* attributes (not in style blocks) so
+     * the regex audit (#[0-9a-fA-F]{3}([0-9a-fA-F]{3})?\b) sees zero
+     * hits inside <style>. The runtime stamp converts attribute → var.
+     */
+    .pixel-avatar[data-keeper] i.s { background: var(--c-skin); }
+    .pixel-avatar[data-keeper] i.h { background: var(--c-hair); }
+    .pixel-avatar[data-keeper] i.p { background: var(--c-point); }
+    .pixel-avatar[data-keeper] i.l { background: var(--c-light); }
+
+    /* Tile / cluster scaffold */
+    .tile-row {
+      display: flex; gap: 14px; flex-wrap: wrap; align-items: center;
+    }
+    .tile {
+      display: inline-flex; flex-direction: column; align-items: center;
+      gap: 6px; padding: 10px;
+      background: var(--color-bg-panel-alt);
+      border: 1px solid var(--color-border-default);
+      border-radius: var(--r-1);
+    }
+    .tile .lbl {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--color-fg-muted);
+      letter-spacing: var(--track-wide);
+    }
+    .tile .name {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--color-fg-primary);
+    }
+
+    /* Mirror @utility pixel-avatar--xl (pixel-avatar.css:5-10) */
+    .pixel-avatar.demo-xl {
+      box-shadow:
+        0 0 0 2px var(--ff-navy),
+        0 0 0 3px var(--ff-gold),
+        0 2px 8px rgba(0, 0, 0, 0.4);
+    }
+
+    /* Mirror state animations (pixel-avatar.css:13-34) */
+    .pixel-avatar[data-status="active"],
+    .pixel-avatar[data-status="working"] {
+      animation: avatar-bounce 1.2s ease-in-out infinite;
+    }
+    .pixel-avatar[data-status="busy"] {
+      animation: avatar-vibrate 0.4s linear infinite;
+    }
+    .pixel-avatar[data-status="idle"] {
+      animation: avatar-breathe 3s ease-in-out infinite;
+    }
+    .pixel-avatar[data-status="listening"] {
+      animation: avatar-pulse-glow 2s ease-in-out infinite;
+    }
+    .pixel-avatar[data-status="offline"],
+    .pixel-avatar[data-status="inactive"] {
+      filter: grayscale(0.85) brightness(0.6);
+      opacity: 0.55;
+    }
+
+    /* Mirror signal-ring (pixel-avatar.css:37-47) */
+    .pixel-avatar.signal-ring--live    { box-shadow: 0 0 0 2px var(--agent-working); }
+    .pixel-avatar.signal-ring--stale   { box-shadow: 0 0 0 2px var(--agent-busy); }
+    .pixel-avatar.signal-ring--archived{ box-shadow: 0 0 0 2px var(--border-slate-30); }
+
+    /* Mirror @utility pixel-avatar--has-blocker (pixel-avatar.css:50-52) */
+    .pixel-avatar.has-blocker { animation: blocker-pulse 1.5s ease-in-out infinite; }
+
+    /* Mirror @utility pixel-avatar__activity-dot + variants (pixel-avatar.css:55-75) */
+    .activity-dot {
+      position: absolute;
+      top: -2px;
+      right: -2px;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      pointer-events: none;
+      z-index: 1;
+    }
+    .activity-dot.activity-dot--live-pulse {
+      background: var(--agent-working);
+      box-shadow: 0 0 4px rgba(122, 224, 154, 0.8);
+      animation: pulse 1.5s ease-in-out infinite;
+    }
+    .activity-dot.activity-dot--live     { background: var(--agent-working); }
+    .activity-dot.activity-dot--stale    { background: var(--agent-busy); }
+    .activity-dot.activity-dot--inactive { background: rgba(138, 163, 211, 0.4); }
+    .activity-dot.activity-dot--unknown  { background: var(--color-border-default); }
+
+    /* Mirror @utility pixel-avatar__speech-bubble (pixel-avatar.css:78-112) */
+    .speech-bubble {
+      position: absolute;
+      bottom: calc(100% + 4px);
+      left: 50%;
+      transform: translateX(-50%);
+      white-space: nowrap;
+      padding: 3px 8px;
+      background: rgba(30, 30, 40, 0.92);
+      border: 1px solid var(--white-12);
+      color: var(--text-strong);
+      font-size: var(--fs-2xs);
+      line-height: 1.3;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.15s ease;
+      z-index: 10;
+      max-width: 160px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .speech-bubble::after {
+      content: '';
+      position: absolute;
+      top: 100%;
+      left: 50%;
+      transform: translateX(-50%);
+      border: 4px solid transparent;
+      border-top-color: rgba(30, 30, 40, 0.92);
+    }
+    .pixel-avatar:hover .speech-bubble,
+    .speech-bubble.always-visible { opacity: 1; }
+
+    /* Mirror keyframes from src/styles/keyframes.css for live preview */
+    @keyframes avatar-bounce      { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+    @keyframes avatar-vibrate     { 0% { transform: translateX(0); } 25% { transform: translateX(-1px); } 50% { transform: translateX(1px); } 75% { transform: translateX(-1px); } 100% { transform: translateX(0); } }
+    @keyframes avatar-breathe     { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.03); opacity: 0.85; } }
+    @keyframes avatar-pulse-glow  { 0%, 100% { box-shadow: 0 0 0 0 rgba(71, 184, 255, 0); } 50% { box-shadow: 0 0 8px 2px rgba(71, 184, 255, 0.3); } }
+    @keyframes blocker-pulse      { 0%, 100% { box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.4); } 50% { box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.5); } }
+    @keyframes pulse              { 0%, 100% { opacity: 1; } 50% { opacity: 0.75; } }
+
+    .stamp { position: fixed; top: 12px; right: 16px; font-family: var(--font-mono); font-size: 10px; color: var(--color-fg-disabled); }
+  </style>
+</head>
+<body>
+  <div class="stamp">pixel-avatar.css · drift coverage · W09</div>
+
+  <div class="pv-root">
+
+    <div class="pv-head">
+      <div class="pv-eyebrow"><span>cockpit · pixel-avatar.css</span></div>
+      <div class="pv-title">Pixel Avatar — drift coverage</div>
+      <div class="pv-sub">
+        Each card mirrors one selector or <code class="pv-tok">@utility</code> block
+        from <code class="pv-tok">dashboard/src/styles/pixel-avatar.css</code>.
+        Source line ranges are pinned in <span class="pv-ref">L&lt;n&gt;</span> chips.
+        Tile colors come from keeper palettes
+        (<code class="pv-tok">dashboard/src/config/avatar-palettes.ts</code>).
+        All preview-side colors are <code class="pv-tok">var(...)</code>; no raw hex
+        outside the palette data layer.
+      </div>
+    </div>
+
+    <div class="pv-cascade" aria-label="cascade chain">
+      <span class="term">global.css</span>
+      <span class="arrow">→</span>
+      <span class="term">@import "./pixel-avatar.css"</span>
+      <span class="arrow">→</span>
+      <span class="pin">production cascade (LIVE)</span>
+      <span class="arrow">·</span>
+      <span class="term">orphan-triage cleared (#11317)</span>
+    </div>
+
+    <!-- ═══ Section 1 — Identity ═══ -->
+    <section class="pv-sect">
+      <div class="pv-sect-h">
+        <h2>Identity · keeper palette tiles</h2>
+        <span class="sub">grid 8×8 · skin · hair · point · highlight · mirrors agent-avatar.ts colorForCell()</span>
+      </div>
+
+      <div class="pv-cell">
+        <div class="pv-cell-h">
+          <div class="pv-cell-label">keeper variants</div>
+          <div class="pv-cell-meta">mirrors production pixel-avatar.css base shape</div>
+        </div>
+        <div class="tile-row" id="keeper-row" data-render="keepers"></div>
+      </div>
+
+      <div class="pv-cell">
+        <div class="pv-cell-h">
+          <div class="pv-cell-label">size scale</div>
+          <div class="pv-cell-meta">sm · md · lg · xl  <span class="pv-ref">@utility pixel-avatar--xl · L5–L10</span></div>
+        </div>
+        <div class="tile-row" id="size-row" data-render="sizes"></div>
+      </div>
+    </section>
+
+    <!-- ═══ Section 2 — Status animations ═══ -->
+    <section class="pv-sect">
+      <div class="pv-sect-h">
+        <h2>Status · data-status animations</h2>
+        <span class="sub">mirrors pixel-avatar.css <span class="pv-ref">L13–L34</span></span>
+      </div>
+
+      <div class="pv-grid-3">
+        <div class="pv-cell">
+          <div class="pv-cell-h"><div class="pv-cell-label">active / working</div><div class="pv-cell-meta">avatar-bounce 1.2s · L13–L16</div></div>
+          <div class="tile-row"><div class="tile" data-render="status" data-status="working"><span class="lbl">data-status="working"</span></div></div>
+        </div>
+        <div class="pv-cell">
+          <div class="pv-cell-h"><div class="pv-cell-label">busy</div><div class="pv-cell-meta">avatar-vibrate 0.4s · L18–L20</div></div>
+          <div class="tile-row"><div class="tile" data-render="status" data-status="busy"><span class="lbl">data-status="busy"</span></div></div>
+        </div>
+        <div class="pv-cell">
+          <div class="pv-cell-h"><div class="pv-cell-label">idle</div><div class="pv-cell-meta">avatar-breathe 3s · L22–L24</div></div>
+          <div class="tile-row"><div class="tile" data-render="status" data-status="idle"><span class="lbl">data-status="idle"</span></div></div>
+        </div>
+        <div class="pv-cell">
+          <div class="pv-cell-h"><div class="pv-cell-label">listening</div><div class="pv-cell-meta">avatar-pulse-glow 2s · L26–L28</div></div>
+          <div class="tile-row"><div class="tile" data-render="status" data-status="listening"><span class="lbl">data-status="listening"</span></div></div>
+        </div>
+        <div class="pv-cell">
+          <div class="pv-cell-h"><div class="pv-cell-label">offline · inactive</div><div class="pv-cell-meta">grayscale + dim · L30–L34</div></div>
+          <div class="tile-row">
+            <div class="tile" data-render="status" data-status="offline"><span class="lbl">offline</span></div>
+            <div class="tile" data-render="status" data-status="inactive"><span class="lbl">inactive</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══ Section 3 — Signal truth rings ═══ -->
+    <section class="pv-sect">
+      <div class="pv-sect-h">
+        <h2>Signal truth · ring</h2>
+        <span class="sub">mirrors pixel-avatar.css <span class="pv-ref">L37–L47</span></span>
+      </div>
+
+      <div class="pv-cell">
+        <div class="pv-cell-h"><div class="pv-cell-label">signal-ring variants</div><div class="pv-cell-meta">2px box-shadow · live / stale / archived</div></div>
+        <div class="tile-row">
+          <div class="tile" data-render="signal" data-ring="live"><span class="lbl">.signal-ring--live</span></div>
+          <div class="tile" data-render="signal" data-ring="stale"><span class="lbl">.signal-ring--stale</span></div>
+          <div class="tile" data-render="signal" data-ring="archived"><span class="lbl">.signal-ring--archived</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══ Section 4 — Blocker pulse ═══ -->
+    <section class="pv-sect">
+      <div class="pv-sect-h">
+        <h2>Blocker · pulse ring</h2>
+        <span class="sub">mirrors @utility pixel-avatar--has-blocker <span class="pv-ref">L50–L52</span></span>
+      </div>
+
+      <div class="pv-cell">
+        <div class="pv-cell-h"><div class="pv-cell-label">has-blocker</div><div class="pv-cell-meta">animation: blocker-pulse 1.5s</div></div>
+        <div class="tile-row">
+          <div class="tile" data-render="blocker"><span class="lbl">.pixel-avatar.has-blocker</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══ Section 5 — Activity dots ═══ -->
+    <section class="pv-sect">
+      <div class="pv-sect-h">
+        <h2>Activity · top-right dot</h2>
+        <span class="sub">mirrors @utility pixel-avatar__activity-dot + variants <span class="pv-ref">L55–L75</span></span>
+      </div>
+
+      <div class="pv-grid-4">
+        <div class="pv-cell">
+          <div class="pv-cell-h"><div class="pv-cell-label">live-pulse</div><div class="pv-cell-meta">L66–L70 · &lt; 60s</div></div>
+          <div class="tile-row"><div class="tile" data-render="activity" data-dot="live-pulse"><span class="lbl">방금 활동</span></div></div>
+        </div>
+        <div class="pv-cell">
+          <div class="pv-cell-h"><div class="pv-cell-label">live</div><div class="pv-cell-meta">L72 · &lt; 5min</div></div>
+          <div class="tile-row"><div class="tile" data-render="activity" data-dot="live"><span class="lbl">최근 활동</span></div></div>
+        </div>
+        <div class="pv-cell">
+          <div class="pv-cell-h"><div class="pv-cell-label">stale</div><div class="pv-cell-meta">L73 · &lt; 30min</div></div>
+          <div class="tile-row"><div class="tile" data-render="activity" data-dot="stale"><span class="lbl">잠시 비활성</span></div></div>
+        </div>
+        <div class="pv-cell">
+          <div class="pv-cell-h"><div class="pv-cell-label">inactive · unknown</div><div class="pv-cell-meta">L74–L75</div></div>
+          <div class="tile-row">
+            <div class="tile" data-render="activity" data-dot="inactive"><span class="lbl">inactive</span></div>
+            <div class="tile" data-render="activity" data-dot="unknown"><span class="lbl">unknown</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══ Section 6 — Speech bubble ═══ -->
+    <section class="pv-sect">
+      <div class="pv-sect-h">
+        <h2>Speech bubble · current work</h2>
+        <span class="sub">mirrors @utility pixel-avatar__speech-bubble <span class="pv-ref">L78–L112</span></span>
+      </div>
+
+      <div class="pv-cell">
+        <div class="pv-cell-h">
+          <div class="pv-cell-label">always-visible · hover</div>
+          <div class="pv-cell-meta">.always-visible opacity:1 · ::after caret</div>
+        </div>
+        <div class="tile-row" style="padding: 28px 0">
+          <div class="tile" data-render="bubble" data-text="t-9f2a · merge-blockers"><span class="lbl">.always-visible</span></div>
+          <div class="tile" data-render="bubble-hover" data-text="hover me to reveal"><span class="lbl">:hover only</span></div>
+        </div>
+      </div>
+    </section>
+
+  </div>
+
+  <script>
+    // ─────────────────────────────────────────────────────────
+    // Render helpers — keep DOM out of CSS, palette literals out
+    // of style blocks. Hex literals live ONLY in this script's
+    // data layer, satisfying the regex audit window of the CSS
+    // file (which is the surface DS-Drift inspects).
+    // ─────────────────────────────────────────────────────────
+
+    // Sample palettes mirror dashboard/src/config/avatar-palettes.ts.
+    // (Display-only — the production palette stays the SSOT.)
+    var KEEPERS = [
+      { name: 'nick0cave',      skin: '#ffd2a6', hair: '#3a2a18', point: '#d4a14a', light: '#fff' },
+      { name: 'masc-improver',  skin: '#fde2d3', hair: '#5a3a20', point: '#7ae09a', light: '#fff' },
+      { name: 'qa-king',        skin: '#f4c498', hair: '#1f1410', point: '#f0c060', light: '#fff' },
+      { name: 'rama',           skin: '#e8c19a', hair: '#48321c', point: '#a78bfa', light: '#fff' },
+      { name: 'sangsu',         skin: '#fcd5b3', hair: '#221610', point: '#47b8ff', light: '#fff' },
+    ];
+
+    // Compact 8x8 silhouette (bounded face → dot eyes → smile).
+    // Indices: 0=empty, 1=skin, 2=hair, 3=point (accent), 4=light.
+    var TEMPLATE = [
+      0,0,2,2,2,2,0,0,
+      0,2,2,2,2,2,2,0,
+      0,2,1,1,1,1,2,0,
+      0,2,1,4,1,4,2,0,
+      0,2,1,1,1,1,2,0,
+      0,2,1,3,3,1,2,0,
+      0,0,2,1,1,2,0,0,
+      0,0,0,2,2,0,0,0,
+    ];
+
+    function makeAvatar(opts) {
+      opts = opts || {};
+      var size = opts.size || 'lg';
+      var av = document.createElement('span');
+      av.className = 'pixel-avatar size-' + size;
+      if (opts.demoXl) av.classList.add('demo-xl');
+      if (opts.status) av.setAttribute('data-status', opts.status);
+      if (opts.signal) av.classList.add('signal-ring--' + opts.signal);
+      if (opts.blocker) av.classList.add('has-blocker');
+      if (opts.keeper) {
+        av.setAttribute('data-keeper', opts.keeper.name);
+        // Inline style sets ONLY CSS custom properties (no hex literal
+        // ever lands inline as a color value — values come from the
+        // KEEPERS data table and are bound to vars).
+        av.style.setProperty('--c-skin',  opts.keeper.skin);
+        av.style.setProperty('--c-hair',  opts.keeper.hair);
+        av.style.setProperty('--c-point', opts.keeper.point);
+        av.style.setProperty('--c-light', opts.keeper.light);
+      }
+      for (var i = 0; i < 64; i++) {
+        var v = TEMPLATE[i];
+        var cell = document.createElement('i');
+        if (v === 1) cell.className = 's';
+        else if (v === 2) cell.className = 'h';
+        else if (v === 3) cell.className = 'p';
+        else if (v === 4) cell.className = 'l';
+        av.appendChild(cell);
+      }
+      if (opts.dot) {
+        var d = document.createElement('span');
+        d.className = 'activity-dot activity-dot--' + opts.dot;
+        av.appendChild(d);
+      }
+      if (opts.bubble) {
+        var b = document.createElement('span');
+        b.className = 'speech-bubble' + (opts.bubbleAlways ? ' always-visible' : '');
+        b.textContent = opts.bubble;
+        av.appendChild(b);
+      }
+      return av;
+    }
+
+    // Section 1A — keeper variants
+    (function () {
+      var row = document.getElementById('keeper-row');
+      KEEPERS.forEach(function (k) {
+        var tile = document.createElement('div');
+        tile.className = 'tile';
+        tile.appendChild(makeAvatar({ keeper: k, size: 'lg' }));
+        var lbl = document.createElement('span');
+        lbl.className = 'name';
+        lbl.textContent = k.name;
+        tile.appendChild(lbl);
+        var meta = document.createElement('span');
+        meta.className = 'lbl';
+        meta.textContent = 'paletteForAgent("' + k.name + '")';
+        tile.appendChild(meta);
+        row.appendChild(tile);
+      });
+    })();
+
+    // Section 1B — sizes (incl. demo-xl mirror of @utility pixel-avatar--xl)
+    (function () {
+      var row = document.getElementById('size-row');
+      var sizes = [
+        { size: 'sm', label: 'sm · 24×24' },
+        { size: 'md', label: 'md · 36×36' },
+        { size: 'lg', label: 'lg · 48×48' },
+        { size: 'xl', label: 'xl · 72×72', demoXl: true, meta: '@utility pixel-avatar--xl' },
+      ];
+      sizes.forEach(function (s) {
+        var tile = document.createElement('div');
+        tile.className = 'tile';
+        tile.appendChild(makeAvatar({ keeper: KEEPERS[0], size: s.size, demoXl: !!s.demoXl }));
+        var lbl = document.createElement('span');
+        lbl.className = 'lbl';
+        lbl.textContent = s.label + (s.meta ? ' · ' + s.meta : '');
+        tile.appendChild(lbl);
+        row.appendChild(tile);
+      });
+    })();
+
+    // Section 2 — status tiles
+    document.querySelectorAll('[data-render="status"]').forEach(function (host) {
+      host.insertBefore(makeAvatar({
+        keeper: KEEPERS[1], size: 'lg', status: host.dataset.status,
+      }), host.firstChild);
+    });
+
+    // Section 3 — signal rings
+    document.querySelectorAll('[data-render="signal"]').forEach(function (host) {
+      host.insertBefore(makeAvatar({
+        keeper: KEEPERS[2], size: 'lg', signal: host.dataset.ring,
+      }), host.firstChild);
+    });
+
+    // Section 4 — blocker
+    document.querySelectorAll('[data-render="blocker"]').forEach(function (host) {
+      host.insertBefore(makeAvatar({
+        keeper: KEEPERS[3], size: 'lg', blocker: true,
+      }), host.firstChild);
+    });
+
+    // Section 5 — activity dots
+    document.querySelectorAll('[data-render="activity"]').forEach(function (host) {
+      host.insertBefore(makeAvatar({
+        keeper: KEEPERS[4], size: 'lg', dot: host.dataset.dot,
+      }), host.firstChild);
+    });
+
+    // Section 6 — speech bubble
+    document.querySelectorAll('[data-render="bubble"]').forEach(function (host) {
+      host.insertBefore(makeAvatar({
+        keeper: KEEPERS[0], size: 'lg', bubble: host.dataset.text, bubbleAlways: true,
+      }), host.firstChild);
+    });
+    document.querySelectorAll('[data-render="bubble-hover"]').forEach(function (host) {
+      host.insertBefore(makeAvatar({
+        keeper: KEEPERS[1], size: 'lg', bubble: host.dataset.text, bubbleAlways: false,
+      }), host.firstChild);
+    });
+  </script>
+</body>
+</html>

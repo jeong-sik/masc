@@ -47,6 +47,13 @@
       <a class="card" href="spacing.html"><span class="stripe"></span><span class="n">03</span><span class="title">Spacing & shape</span><span class="desc">4px base, tiny radii, density switch, 7-step elevation.</span></a>
       <a class="card" href="brand.html"><span class="stripe"></span><span class="n">04</span><span class="title">Brand</span><span class="desc">Wordmark, fleet colors, cascade chain, glyph vocabulary.</span></a>
       <a class="card" href="themes.html"><span class="stripe"></span><span class="n">05</span><span class="title">Themes</span><span class="desc">5-theme matrix entry · paper-theme override side-by-side · Phase 2 token candidates.</span><span class="count">W02 · paper first cut</span></a>
+      <a class="card" href="motion.html"><span class="stripe"></span><span class="n">06</span><span class="title">Motion</span><span class="desc">6 motion tokens · 27 keyframes from src/styles/keyframes.css. Hover demos + token×keyframe map.</span></a>
+      <a class="card" href="layout.html"><span class="stripe"></span><span class="n">07 · drift W13a</span><span class="title">Layout</span><span class="desc">dashboard.css layout primitives — collapsible · card grid · board feed · swimlane · scroll chrome.</span><span class="count">production mirror</span></a>
+    </div>
+
+    <h2>DS-Drift · Phase 1</h2>
+    <div class="grid">
+      <a class="card" href="chat.html"><span class="stripe"></span><span class="n">W08 · 6 selectors · 4 role variants</span><span class="title">Chat</span><span class="desc">Mirror of src/styles/chat.css — transcript, role-tinted bubbles, avatars, role-chips, detail panel, callout. Loaded via main.ts → global.css @import → chat.css (LIVE, orphan-triage cleared by #11317).</span><span class="count">drift catalog · 16 Phase 2 candidates</span></a>
     </div>
 
     <h2>Cockpit zones</h2>
@@ -85,7 +92,7 @@
     <div class="grid">
       <a class="card" href="components.html#board-zone"><span class="stripe"></span><span class="n">C1 · 3 variants</span><span class="title">Board Zone</span><span class="desc">Hearth-grouped feed · single post + thread · direct/automation toggle.</span></a>
       <a class="card" href="components.html#msgs"><span class="stripe"></span><span class="n">C2 · 3 variants</span><span class="title">Messages / Broadcast</span><span class="desc">Room timeline · mention inbox (@nick0cave) · [STATE] block focus.</span></a>
-      <a class="card" href="components.html#composer-v2"><span class="stripe"></span><span class="n">C3 · 3 variants</span><span class="title">Composer v2</span><span class="desc">Broadcast · mention autocomplete · structured [STATE] payload.</span></a>
+      <a class="card" href="components.html#composer-v2"><span class="stripe"></span><span class="n">C3 · 3 variants</span><span class="title">Composer v2</span><span class="desc">Broadcast · mention autocomplete · structured [STATE] payload. + board feed coverage (W04).</span></a>
     </div>
 
     <h2>Phase 2 · Observability plane</h2>
@@ -103,21 +110,27 @@
       <a class="card" href="components.html#decisions"><span class="stripe"></span><span class="n">K2 · 2 variants</span><span class="title">Decisions / Memory</span><span class="desc">decisions.jsonl stream · memory.jsonl tagged entries (verified/learned/plan).</span></a>
       <a class="card" href="components.html#episodes"><span class="stripe"></span><span class="n">K3 · 2 variants</span><span class="title">Institution Episodes</span><span class="desc">Per-turn cards · learnings extraction grouped by episode.</span></a>
       <a class="card" href="components.html#autoresearch"><span class="stripe"></span><span class="n">K4 · 3 variants</span><span class="title">Autoresearch</span><span class="desc">Loop list (6 ar-*) · finding card (f-001/002/003) · hypothesis → evidence → conclusion flow.</span></a>
+      <a class="card" href="keeper-detail.html"><span class="stripe"></span><span class="n">W07 · drift coverage</span><span class="title">Keeper Detail (production mirror)</span><span class="desc">Mirrors src/styles/keeper-detail.css — overlay + slotted card · cascade chain · z-index ladder · Phase 2 catalog.</span><span class="count">drift coverage · #11317</span></a>
     </div>
 
     <h2>Common patterns</h2>
     <div class="grid">
       <a class="card" href="primitives.html"><span class="stripe"></span><span class="n">20+ primitives</span><span class="title">Atoms</span><span class="desc">Chip, pill, bar, spark, band, kv-row, kbd, tk, button variants, status surfaces.</span></a>
+      <a class="card" href="avatar.html"><span class="stripe"></span><span class="n">9 utilities · 17 selectors</span><span class="title">Pixel Avatar</span><span class="desc">8×8 keeper tiles · status animations · signal ring · activity dot · speech bubble.</span><span class="count">DS-Drift W09 · pixel-avatar.css</span></a>
       <a class="card" href="forms.html"><span class="stripe"></span><span class="n">9 controls</span><span class="title">Forms</span><span class="desc">Text input, textarea, select, checkbox, radio, toggle, slider, number, segmented.</span></a>
       <a class="card" href="overlays.html"><span class="stripe"></span><span class="n">6 overlays</span><span class="title">Overlays</span><span class="desc">Modal, popover, tooltip, toast, context menu, command palette (⌘K).</span></a>
       <a class="card" href="cb-group-g.html"><span class="stripe"></span><span class="n">cb-group-g · 5 patterns · 10 variants</span><span class="title">State patterns</span><span class="desc">Empty · Loading skeletons · Error (warn/fatal) · Pagination · Breadcrumb. SPEC §5 a11y compliant.</span><span class="count">new · v0.2</span></a>
       <a class="card" href="snippets.html"><span class="stripe"></span><span class="n">27 snippets</span><span class="title">Copy-paste snippets</span><span class="desc">Ready-to-use HTML for atoms · row primitives · form controls. One click to copy.</span><span class="count">live preview + clipboard</span></a>
+      <a class="card" href="a11y.html"><span class="stripe"></span><span class="n">DS-Drift · W14 · a11y.css</span><span class="title">A11y</span><span class="desc">Focus ring · skip-link · sr-only · prefers-reduced-motion toggle. Mirrors production a11y.css.</span><span class="count">drift coverage · WCAG 2.4.1 / 2.4.7</span></a>
     </div>
 
     <h2>DS-Drift · Phase 1</h2>
     <div class="grid">
       <a class="card" href="governance.html"><span class="stripe"></span><span class="n">W01 · 4 sections</span><span class="title">Governance</span><span class="desc">Tone preview for src/styles/governance.css + governance-agent.css. Legacy alias → SSOT token mapping audit.</span><span class="count">2026-04-28 audit</span></a>
+      <a class="card" href="tools.html"><span class="stripe"></span><span class="n">W11 · 6 selectors</span><span class="title">Tools</span><span class="desc">tool-inventory clamp · back-to-top FAB · tool-metrics-sections · tool-bar-row. Mirrors src/styles/tools.css.</span><span class="count">ds-drift · w11</span></a>
+      <a class="card" href="live-monitor.html"><span class="stripe"></span><span class="n">W06 · 7 @utility blocks + 1 @media</span><span class="title">Live Monitor</span><span class="desc">pulse-bubble · activity-item · activity-kind-chip · focus-agent-card · live-panels responsive. Mirrors src/styles/live-monitor.css.</span><span class="count">ds-drift · w06</span></a>
     </div>
+
 
     <h2>Reference</h2>
     <div class="grid">

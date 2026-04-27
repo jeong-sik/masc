@@ -1,0 +1,892 @@
+<!doctype html>
+<html lang="en" data-theme="dark-fantasy">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MASC — Live Monitor preview (W06)</title>
+  <!--
+    W06 live-monitor preview (DS-Drift Phase 1).
+    Production source file (read-only mirror):
+      - dashboard/src/styles/live-monitor.css (56 lines, 7 @utility blocks + 1 @media)
+    Tokens SSOT:
+      - dashboard/design-system/source_styles/tokens.generated.css
+
+    cascade chain (W05 orphan-triage cleared in PR #11317 — LIVE):
+      dashboard/src/main.ts -> dashboard/src/styles/global.css:30
+        @import "./live-monitor.css";
+      live-monitor.css depends on @keyframes livePulse + activityFadeIn
+      defined in dashboard/src/styles/keyframes.css:71-79.
+
+    live-monitor.css references the following legacy aliases that live in
+    dashboard/src/styles/variables.css (NOT in the generated SSOT) plus
+    several raw rgba() literals:
+      var(--white-8)        -> var(--white-10) alias       (variables.css:250)
+      var(--white-4)        -> var(--white-5) alias        (variables.css:248)
+      var(--white-10)       -> rgba(255,255,255,0.11)      (variables.css:209)
+      var(--white-6)        -> var(--white-5) alias        (variables.css:249)
+      var(--ok-35)          -> NOT DEFINED (broken ref)    (live-monitor.css:11)
+      var(--ok-soft)        -> rgba(74,222,128,0.15)       (variables.css:78)
+      var(--ok)             -> #4ade80                     (variables.css:27)
+      var(--accent)         -> #47b8ff                     (variables.css:26)
+      var(--blue-400-8)     -> rgba(96,165,250,0.08)       (variables.css:300)
+      var(--blue-400-15)    -> rgba(96,165,250,0.15)       (variables.css:301)
+      var(--color-fg-muted) -> already SSOT (tokens.generated.css:234)
+    plus raw rgba / hex literals (Phase 2 candidates, drift catalog §4):
+      live-monitor.css:L15  rgba(96,165,250,0.6)
+      live-monitor.css:L24  rgba(96,165,250,0.5)
+      live-monitor.css:L25  rgba(74,222,128,0.5)
+      live-monitor.css:L26  rgba(168,85,247,0.5)
+      live-monitor.css:L27  rgba(255,255,255,0.15)
+      live-monitor.css:L37  rgba(168,85,247,0.15) + #a855f7 (raw hex)
+      live-monitor.css:L43  border-color uses var(--white-10) — alias
+      live-monitor.css:L47  rgba(96,165,250,0.4)
+      live-monitor.css:L48  rgba(96,165,250,0.05)
+
+    This preview rebuilds the same monitoring tone using ONLY tokens
+    from tokens.generated.css. No production CSS is modified by this PR
+    (drift fix is Phase 2 scope). Drift catalog appears in section 5.
+  -->
+  <link rel="stylesheet" href="_preview.css" />
+  <style>
+    /* ──────────────────────────────────────────────────────────────────
+       All values below come from tokens.generated.css. No raw hex.
+       Each lm-* class mirrors a production live-monitor.css selector;
+       comments carry the source file + line pointer.
+       ────────────────────────────────────────────────────────────────── */
+
+    .pv-banner {
+      background: var(--color-bg-surface);
+      border: 1px solid var(--color-border-strong);
+      border-left: 3px solid var(--color-accent-fg);
+      border-radius: var(--r-1);
+      padding: 14px 18px;
+      display: flex; flex-direction: column; gap: 4px;
+    }
+    .pv-banner .h {
+      font: 600 var(--type-label);
+      letter-spacing: var(--track-caps);
+      text-transform: uppercase;
+      color: var(--color-fg-primary);
+    }
+    .pv-banner .l {
+      font: var(--type-micro);
+      font-family: var(--font-mono);
+      color: var(--color-fg-muted);
+      letter-spacing: var(--track-wide);
+    }
+
+    /* ── pulse-bubble base + states (.live-panels parent grid) ───────── */
+    .lm-fleet-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+      gap: 10px;
+      background: var(--color-bg-page);
+      border: 1px solid var(--color-border-default);
+      border-radius: var(--r-1);
+      padding: 12px;
+    }
+
+    /* mirrors production live-monitor.css:L5-8
+       @utility pulse-bubble {
+         transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
+         &:hover { background: var(--white-8); }
+       } */
+    .lm-pulse-bubble {
+      display: flex; flex-direction: column; gap: 4px;
+      padding: 10px 12px;
+      border: 1px solid var(--color-border-default);
+      border-radius: var(--r-1);
+      background: var(--color-bg-surface);
+      transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
+      font-family: var(--font-mono);
+      font-size: var(--fs-11);
+      color: var(--color-fg-primary);
+    }
+    .lm-pulse-bubble:hover {
+      background: var(--color-bg-hover);
+    }
+    .lm-pulse-bubble .nm { font-size: var(--fs-12); color: var(--color-fg-primary); }
+    .lm-pulse-bubble .st { font-size: var(--fs-10); color: var(--color-fg-muted); letter-spacing: var(--track-wide); }
+
+    /* mirrors production live-monitor.css:L10-13
+       @utility pulse-working {
+         border-color: var(--ok-35);
+         animation: livePulse 2s ease-in-out infinite;
+       }
+       Drift mapping: var(--ok-35) — UNDEFINED in variables.css
+                      → fallback to var(--color-status-ok) in this preview.
+                      keyframes.css:71-74 livePulse uses var(--ok-25) + var(--ok-12). */
+    .lm-pulse-working {
+      border-color: var(--color-status-ok);
+      animation: lmLivePulse 2s ease-in-out infinite;
+    }
+    @keyframes lmLivePulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgb(var(--color-status-ok-rgb, 74 222 128) / 0.25); }
+      50%      { box-shadow: 0 0 6px 1px rgb(var(--color-status-ok-rgb, 74 222 128) / 0.12); }
+    }
+
+    /* mirrors production live-monitor.css:L15-19
+       @utility pulse-selected {
+         border-color: rgba(96,165,250,0.6);
+         background: var(--blue-400-8);
+         box-shadow: 0 0 8px var(--blue-400-15);
+       }
+       Drift mapping: rgba(96,165,250,*) -> sky-blue ring (raw).
+                      var(--blue-400-8/15) -> legacy aliases. */
+    .lm-pulse-selected {
+      border-color: var(--color-accent-fg);
+      background: var(--color-bg-elevated);
+      box-shadow: 0 0 8px rgb(var(--color-accent-glow) / 0.3);
+    }
+
+    /* ── activity feed (event row + chip) ───────────────────────────── */
+    .lm-activity-list {
+      display: flex; flex-direction: column;
+      background: var(--color-bg-page);
+      border: 1px solid var(--color-border-default);
+      border-radius: var(--r-1);
+      overflow: hidden;
+    }
+
+    /* mirrors production live-monitor.css:L21-28
+       @utility activity-item {
+         transition: background 0.15s;
+         &:hover { background: var(--white-4); }
+         &.live-event-broadcast { border-left-color: rgba(96,165,250,0.5); }
+         &.live-event-task      { border-left-color: rgba(74,222,128,0.5); }
+         &.live-event-keeper    { border-left-color: rgba(168,85,247,0.5); }
+         &.live-event-system    { border-left-color: rgba(255,255,255,0.15); }
+       } */
+    .lm-activity-item {
+      display: grid;
+      grid-template-columns: 80px 110px 1fr;
+      gap: 10px;
+      padding: 8px 12px;
+      border-left: 3px solid var(--color-border-default);
+      border-bottom: 1px solid var(--color-border-default);
+      transition: background 0.15s;
+      font-family: var(--font-mono);
+      font-size: var(--fs-11);
+      color: var(--color-fg-secondary);
+    }
+    .lm-activity-item:last-child { border-bottom: 0; }
+    .lm-activity-item:hover { background: var(--color-bg-hover); }
+    .lm-activity-item .ts   { color: var(--color-fg-muted); letter-spacing: var(--track-wide); }
+    .lm-activity-item .body { color: var(--color-fg-primary); }
+    .lm-activity-item.lm-event-broadcast { border-left-color: var(--color-accent-fg); }
+    .lm-activity-item.lm-event-task      { border-left-color: var(--color-status-ok); }
+    .lm-activity-item.lm-event-keeper    { border-left-color: var(--color-status-warn); }
+    .lm-activity-item.lm-event-system    { border-left-color: var(--color-border-strong); }
+
+    /* mirrors production live-monitor.css:L30-32
+       @utility activity-item-new {
+         animation: activityFadeIn 0.3s ease-out;
+       }
+       keyframes.css:76-79 activityFadeIn opacity 0->1 + translateY -4px->0. */
+    .lm-activity-item-new {
+      animation: lmActivityFadeIn 0.3s ease-out;
+    }
+    @keyframes lmActivityFadeIn {
+      from { opacity: 0; transform: translateY(-4px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* mirrors production live-monitor.css:L34-39
+       @utility activity-kind-chip {
+         &.live-event-broadcast { background: var(--blue-400-15); color: var(--accent); }
+         &.live-event-task      { background: var(--ok-soft);    color: var(--ok); }
+         &.live-event-keeper    { background: rgba(168,85,247,0.15); color: #a855f7; }
+         &.live-event-system    { background: var(--white-6); color: var(--color-fg-muted); }
+       }
+       Drift mapping:
+         var(--blue-400-15) -> legacy alias  (Phase 2)
+         var(--ok-soft) / var(--ok) / var(--accent) -> legacy aliases (Phase 2)
+         rgba(168,85,247,*) + #a855f7 -> raw purple (Phase 2)
+         var(--white-6) -> legacy alias (Phase 2)
+       This preview substitutes the closest SSOT analog. */
+    .lm-kind-chip {
+      display: inline-flex; align-items: center;
+      padding: 1px 6px;
+      border-radius: 999px;
+      font-family: var(--font-mono);
+      font-size: var(--fs-10);
+      letter-spacing: var(--track-wide);
+      text-transform: uppercase;
+    }
+    .lm-kind-chip.lm-event-broadcast {
+      background: var(--color-bg-elevated);
+      color: var(--color-accent-fg);
+      border: 1px solid var(--color-accent-fg-dim);
+    }
+    .lm-kind-chip.lm-event-task {
+      background: var(--color-bg-elevated);
+      color: var(--color-status-ok);
+      border: 1px solid var(--color-border-strong);
+    }
+    .lm-kind-chip.lm-event-keeper {
+      background: var(--color-bg-elevated);
+      color: var(--color-status-warn);
+      border: 1px solid var(--color-border-strong);
+    }
+    .lm-kind-chip.lm-event-system {
+      background: var(--color-bg-surface);
+      color: var(--color-fg-muted);
+      border: 1px solid var(--color-border-default);
+    }
+
+    /* ── focus-agent-card + selected (right rail) ───────────────────── */
+    /* mirrors production live-monitor.css:L41-44
+       @utility focus-agent-card {
+         transition: background 0.15s, border-color 0.15s;
+         &:hover { background: var(--white-4); border-color: var(--white-10); }
+       } */
+    .lm-focus-card {
+      padding: 10px 12px;
+      border: 1px solid var(--color-border-default);
+      border-radius: var(--r-1);
+      background: var(--color-bg-surface);
+      transition: background 0.15s, border-color 0.15s;
+      display: flex; flex-direction: column; gap: 6px;
+      cursor: pointer;
+    }
+    .lm-focus-card:hover {
+      background: var(--color-bg-hover);
+      border-color: var(--color-border-strong);
+    }
+    .lm-focus-card .name {
+      font-family: var(--font-mono);
+      font-size: var(--fs-12);
+      color: var(--color-fg-primary);
+    }
+    .lm-focus-card .meta {
+      font-family: var(--font-mono);
+      font-size: var(--fs-10);
+      color: var(--color-fg-muted);
+      letter-spacing: var(--track-wide);
+      display: flex; gap: 10px;
+    }
+
+    /* mirrors production live-monitor.css:L46-49
+       @utility focus-agent-selected {
+         border-color: rgba(96,165,250,0.4);
+         background: rgba(96,165,250,0.05);
+       }
+       Drift mapping: raw rgba(96,165,250,*) -> accent ring + tinted bg. */
+    .lm-focus-selected {
+      border-color: var(--color-accent-fg-dim);
+      background: var(--color-bg-elevated);
+      box-shadow: inset 2px 0 0 var(--color-accent-fg);
+    }
+
+    /* ── responsive: live-panels stack <1100px ───────────────────────── */
+    /* mirrors production live-monitor.css:L51-55
+       @media (max-width: 1100px) {
+         .live-panels { grid-template-columns: 1fr; }
+       } */
+    .lm-live-panels {
+      display: grid;
+      grid-template-columns: 1.4fr 1fr;
+      gap: 16px;
+    }
+    @media (max-width: 1100px) {
+      .lm-live-panels { grid-template-columns: 1fr; }
+    }
+
+    /* ── latency badge (composite vocabulary, not in css but called by callers) ── */
+    .lm-lat {
+      display: inline-flex; align-items: baseline; gap: 4px;
+      font-family: var(--font-mono);
+      font-size: var(--fs-10);
+      letter-spacing: var(--track-wide);
+      color: var(--color-fg-muted);
+    }
+    .lm-lat .v { color: var(--color-fg-primary); font-variant-numeric: tabular-nums; }
+
+    /* ── signal bar (composite vocabulary) ─────────────────────────── */
+    .lm-signal-bar {
+      display: flex; gap: 2px;
+      align-items: flex-end;
+    }
+    .lm-signal-bar .seg {
+      width: 4px; background: var(--color-border-default);
+      border-radius: 1px;
+    }
+    .lm-signal-bar .seg.on { background: var(--color-status-ok); }
+
+    /* ── timeline strip (composite) ────────────────────────────────── */
+    .lm-timeline {
+      display: flex; gap: 1px;
+      padding: 6px;
+      background: var(--color-bg-page);
+      border: 1px solid var(--color-border-default);
+      border-radius: var(--r-1);
+      height: 24px;
+      align-items: stretch;
+    }
+    .lm-timeline .tick { flex: 1; background: var(--color-bg-surface); }
+    .lm-timeline .tick.b { background: var(--color-accent-fg-dim); }
+    .lm-timeline .tick.t { background: var(--color-status-ok); }
+    .lm-timeline .tick.k { background: var(--color-status-warn); }
+    .lm-timeline .tick.s { background: var(--color-border-strong); }
+
+    /* token annotation block reused inside cells */
+    .lm-toks {
+      display: flex; flex-wrap: wrap; gap: 4px;
+      padding-top: 6px;
+      border-top: 1px dashed var(--color-border-default);
+      margin-top: 4px;
+    }
+
+    /* drift evidence table (section 5) */
+    .lm-drift {
+      width: 100%; border-collapse: collapse;
+      font-family: var(--font-mono); font-size: var(--fs-11);
+      color: var(--color-fg-secondary);
+    }
+    .lm-drift thead th {
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--color-border-strong);
+      color: var(--color-fg-muted);
+      letter-spacing: var(--track-wide);
+      text-align: left;
+    }
+    .lm-drift tbody td {
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--color-border-default);
+    }
+    .lm-drift tbody tr:last-child td { border-bottom: 0; }
+    .lm-drift td.use { color: var(--color-fg-muted); }
+    .lm-drift td.broken { color: var(--color-status-err); }
+
+    .lm-swatch {
+      display: inline-block;
+      width: 14px; height: 14px;
+      border-radius: 2px;
+      border: 1px solid var(--color-border-strong);
+      vertical-align: middle;
+      margin-right: 6px;
+    }
+  </style>
+</head>
+<body>
+  <div class="pv-root">
+
+    <header class="pv-head">
+      <div class="pv-eyebrow">DS-Drift · Phase 1 · W06</div>
+      <h1 class="pv-title">Live Monitor preview</h1>
+      <p class="pv-sub">Visual mirror of <code>dashboard/src/styles/live-monitor.css</code>
+        — the 7 <code>@utility</code> blocks that drive the fleet pulse grid,
+        activity feed, focus-agent rail, and the responsive collapse below 1100px.
+        Each card pairs a production selector with the SSOT-token rendering used
+        by the design system. Drift catalog (legacy aliases + raw rgba + the
+        <code>--ok-35</code> broken reference) lives in section 5 as Phase 2 candidates.</p>
+    </header>
+
+    <section class="pv-banner" role="note">
+      <div class="h">Production source: src/styles/live-monitor.css · Tokens: tokens.generated.css · Last audit: 2026-04-28</div>
+      <div class="l">
+        cascade chain (LIVE per orphan-triage PR #11317):
+        dashboard/src/main.ts → dashboard/src/styles/global.css:30 → @import "./live-monitor.css"
+        — depends on @keyframes livePulse + activityFadeIn (keyframes.css:71-79).
+        Read-only mirror — no production CSS modified by this preview · Phase 0 audit PR #11300.
+      </div>
+    </section>
+
+    <!-- ═════════════════ Section 1: pulse-bubble fleet ═════════════════ -->
+    <section class="pv-sect">
+      <div class="pv-sect-h">
+        <h2>1 · pulse-bubble (fleet pulse grid)</h2>
+        <span class="sub">selectors from src/styles/live-monitor.css:L5-19</span>
+      </div>
+      <div class="pv-grid-2">
+
+        <!-- mirrors production live-monitor.css:L5-8 -->
+        <div class="pv-cell">
+          <div class="pv-cell-h">
+            <span class="pv-cell-label">@utility pulse-bubble (idle / hover)</span>
+            <span class="pv-cell-meta">live-monitor.css:L5-8</span>
+          </div>
+          <!-- mirrors production .pulse-bubble idle + hover state -->
+          <div class="lm-fleet-grid">
+            <div class="lm-pulse-bubble">
+              <span class="nm">spark</span>
+              <span class="st">idle · 12s</span>
+            </div>
+            <div class="lm-pulse-bubble">
+              <span class="nm">nick0cave</span>
+              <span class="st">idle · 47s</span>
+            </div>
+            <div class="lm-pulse-bubble" style="background: var(--color-bg-hover);">
+              <span class="nm">analyst</span>
+              <span class="st">hover · 03s</span>
+            </div>
+            <div class="lm-pulse-bubble">
+              <span class="nm">curator</span>
+              <span class="st">idle · 21s</span>
+            </div>
+          </div>
+          <div class="lm-toks">
+            <span class="pv-tok">transition: border-color/bg/shadow 0.2s</span>
+            <span class="pv-tok">:hover bg → var(--white-8)</span>
+            <span class="pv-tok">→ var(--color-bg-hover)</span>
+          </div>
+        </div>
+
+        <!-- mirrors production live-monitor.css:L10-13 + L15-19 -->
+        <div class="pv-cell">
+          <div class="pv-cell-h">
+            <span class="pv-cell-label">@utility pulse-working / pulse-selected</span>
+            <span class="pv-cell-meta">live-monitor.css:L10-19</span>
+          </div>
+          <!-- mirrors production .pulse-working (animated) + .pulse-selected states -->
+          <div class="lm-fleet-grid">
+            <div class="lm-pulse-bubble lm-pulse-working">
+              <span class="nm">dreamer</span>
+              <span class="st">working · turn 14</span>
+            </div>
+            <div class="lm-pulse-bubble lm-pulse-working">
+              <span class="nm">archivist</span>
+              <span class="st">working · turn 03</span>
+            </div>
+            <div class="lm-pulse-bubble lm-pulse-selected">
+              <span class="nm">sangsu</span>
+              <span class="st">selected</span>
+            </div>
+            <div class="lm-pulse-bubble">
+              <span class="nm">harbinger</span>
+              <span class="st">idle · 09s</span>
+            </div>
+          </div>
+          <div class="lm-toks">
+            <span class="pv-tok">animation: livePulse 2s infinite</span>
+            <span class="pv-tok">border: var(--ok-35) · BROKEN</span>
+            <span class="pv-tok">selected bg: var(--blue-400-8)</span>
+            <span class="pv-tok">selected shadow: 8px var(--blue-400-15)</span>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ═════════════════ Section 2: activity feed ═════════════════ -->
+    <section class="pv-sect">
+      <div class="pv-sect-h">
+        <h2>2 · activity-item + activity-kind-chip (live event feed)</h2>
+        <span class="sub">selectors from src/styles/live-monitor.css:L21-39</span>
+      </div>
+
+      <div class="pv-grid-2">
+        <!-- mirrors production live-monitor.css:L21-32 -->
+        <div class="pv-cell" style="grid-column: span 2;">
+          <div class="pv-cell-h">
+            <span class="pv-cell-label">@utility activity-item (4 event kinds + activity-item-new)</span>
+            <span class="pv-cell-meta">live-monitor.css:L21-32</span>
+          </div>
+          <!-- mirrors production .activity-item rows: broadcast / task / keeper / system + .activity-item-new fade-in -->
+          <div class="lm-activity-list">
+            <div class="lm-activity-item lm-event-broadcast lm-activity-item-new">
+              <span class="ts">10:42:13</span>
+              <span><span class="lm-kind-chip lm-event-broadcast">broadcast</span></span>
+              <span class="body">@sangsu fixing OAS pin bump cascade — keeper-coord W06 freeze in 5m</span>
+            </div>
+            <div class="lm-activity-item lm-event-task">
+              <span class="ts">10:42:01</span>
+              <span><span class="lm-kind-chip lm-event-task">task</span></span>
+              <span class="body">claim PK-12345 W06 live-monitor preview · branch feature/ds-drift-w06-live-monitor</span>
+            </div>
+            <div class="lm-activity-item lm-event-keeper">
+              <span class="ts">10:41:48</span>
+              <span><span class="lm-kind-chip lm-event-keeper">keeper</span></span>
+              <span class="body">spark heartbeat resumed · last gap 18s · cascade pin spark-only</span>
+            </div>
+            <div class="lm-activity-item lm-event-system">
+              <span class="ts">10:41:30</span>
+              <span><span class="lm-kind-chip lm-event-system">system</span></span>
+              <span class="body">cascade.toml hot-reload · 3 keepers re-pinned · weights 2/4/1</span>
+            </div>
+            <div class="lm-activity-item lm-event-broadcast">
+              <span class="ts">10:41:12</span>
+              <span><span class="lm-kind-chip lm-event-broadcast">broadcast</span></span>
+              <span class="body">@nick0cave hand-off ack · session-state.md flushed · taking turn 14</span>
+            </div>
+          </div>
+          <div class="lm-toks">
+            <span class="pv-tok">transition: background 0.15s</span>
+            <span class="pv-tok">:hover bg → var(--white-4)</span>
+            <span class="pv-tok">border-left rgba(96,165,250,0.5) — broadcast</span>
+            <span class="pv-tok">border-left rgba(74,222,128,0.5) — task</span>
+            <span class="pv-tok">border-left rgba(168,85,247,0.5) — keeper</span>
+            <span class="pv-tok">border-left rgba(255,255,255,0.15) — system</span>
+            <span class="pv-tok">animation: activityFadeIn 0.3s ease-out — new row</span>
+          </div>
+        </div>
+
+        <!-- mirrors production live-monitor.css:L34-39 -->
+        <div class="pv-cell" style="grid-column: span 2;">
+          <div class="pv-cell-h">
+            <span class="pv-cell-label">@utility activity-kind-chip (4 variants)</span>
+            <span class="pv-cell-meta">live-monitor.css:L34-39</span>
+          </div>
+          <!-- mirrors production .activity-kind-chip variants: broadcast / task / keeper / system -->
+          <div style="display:flex; gap: 8px; flex-wrap: wrap;">
+            <span class="lm-kind-chip lm-event-broadcast">broadcast</span>
+            <span class="lm-kind-chip lm-event-task">task</span>
+            <span class="lm-kind-chip lm-event-keeper">keeper</span>
+            <span class="lm-kind-chip lm-event-system">system</span>
+          </div>
+          <div class="lm-toks">
+            <span class="pv-tok">broadcast: var(--blue-400-15) / var(--accent)</span>
+            <span class="pv-tok">task: var(--ok-soft) / var(--ok)</span>
+            <span class="pv-tok">keeper: rgba(168,85,247,0.15) / #a855f7</span>
+            <span class="pv-tok">system: var(--white-6) / var(--color-fg-muted)</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═════════════════ Section 3: focus-agent rail ═════════════════ -->
+    <section class="pv-sect">
+      <div class="pv-sect-h">
+        <h2>3 · focus-agent-card + focus-agent-selected (right rail)</h2>
+        <span class="sub">selectors from src/styles/live-monitor.css:L41-49</span>
+      </div>
+
+      <div class="pv-grid-2">
+        <!-- mirrors production live-monitor.css:L41-44 -->
+        <div class="pv-cell">
+          <div class="pv-cell-h">
+            <span class="pv-cell-label">@utility focus-agent-card (idle / hover)</span>
+            <span class="pv-cell-meta">live-monitor.css:L41-44</span>
+          </div>
+          <!-- mirrors production .focus-agent-card list (idle + hover state) -->
+          <div style="display:flex; flex-direction: column; gap: 6px;">
+            <div class="lm-focus-card">
+              <span class="name">sangsu</span>
+              <span class="meta">
+                <span class="lm-lat">lat <span class="v">142ms</span></span>
+                <span>· cascade spark</span>
+                <span>· turn 14</span>
+              </span>
+              <div class="lm-signal-bar">
+                <span class="seg on" style="height: 4px;"></span>
+                <span class="seg on" style="height: 6px;"></span>
+                <span class="seg on" style="height: 8px;"></span>
+                <span class="seg on" style="height: 10px;"></span>
+                <span class="seg" style="height: 12px;"></span>
+              </div>
+            </div>
+            <div class="lm-focus-card" style="background: var(--color-bg-hover); border-color: var(--color-border-strong);">
+              <span class="name">nick0cave (hover)</span>
+              <span class="meta">
+                <span class="lm-lat">lat <span class="v">98ms</span></span>
+                <span>· cascade gemini_cli</span>
+              </span>
+              <div class="lm-signal-bar">
+                <span class="seg on" style="height: 4px;"></span>
+                <span class="seg on" style="height: 6px;"></span>
+                <span class="seg on" style="height: 8px;"></span>
+                <span class="seg" style="height: 10px;"></span>
+                <span class="seg" style="height: 12px;"></span>
+              </div>
+            </div>
+            <div class="lm-focus-card">
+              <span class="name">archivist</span>
+              <span class="meta">
+                <span class="lm-lat">lat <span class="v">311ms</span></span>
+                <span>· cascade ollama</span>
+              </span>
+              <div class="lm-signal-bar">
+                <span class="seg on" style="height: 4px;"></span>
+                <span class="seg on" style="height: 6px;"></span>
+                <span class="seg" style="height: 8px;"></span>
+                <span class="seg" style="height: 10px;"></span>
+                <span class="seg" style="height: 12px;"></span>
+              </div>
+            </div>
+          </div>
+          <div class="lm-toks">
+            <span class="pv-tok">transition: background/border-color 0.15s</span>
+            <span class="pv-tok">:hover bg → var(--white-4)</span>
+            <span class="pv-tok">:hover border → var(--white-10)</span>
+          </div>
+        </div>
+
+        <!-- mirrors production live-monitor.css:L46-49 -->
+        <div class="pv-cell">
+          <div class="pv-cell-h">
+            <span class="pv-cell-label">@utility focus-agent-selected</span>
+            <span class="pv-cell-meta">live-monitor.css:L46-49</span>
+          </div>
+          <!-- mirrors production .focus-agent-card.focus-agent-selected combined state -->
+          <div style="display:flex; flex-direction: column; gap: 6px;">
+            <div class="lm-focus-card lm-focus-selected">
+              <span class="name">sangsu (selected)</span>
+              <span class="meta">
+                <span class="lm-lat">lat <span class="v">142ms</span></span>
+                <span>· cascade spark</span>
+                <span>· turn 14</span>
+              </span>
+              <div class="lm-signal-bar">
+                <span class="seg on" style="height: 4px;"></span>
+                <span class="seg on" style="height: 6px;"></span>
+                <span class="seg on" style="height: 8px;"></span>
+                <span class="seg on" style="height: 10px;"></span>
+                <span class="seg" style="height: 12px;"></span>
+              </div>
+            </div>
+            <div class="lm-focus-card">
+              <span class="name">curator</span>
+              <span class="meta">
+                <span class="lm-lat">lat <span class="v">208ms</span></span>
+                <span>· cascade kimi_cli</span>
+              </span>
+              <div class="lm-signal-bar">
+                <span class="seg on" style="height: 4px;"></span>
+                <span class="seg on" style="height: 6px;"></span>
+                <span class="seg on" style="height: 8px;"></span>
+                <span class="seg" style="height: 10px;"></span>
+                <span class="seg" style="height: 12px;"></span>
+              </div>
+            </div>
+          </div>
+          <div class="lm-toks">
+            <span class="pv-tok">border: rgba(96,165,250,0.4)</span>
+            <span class="pv-tok">background: rgba(96,165,250,0.05)</span>
+            <span class="pv-tok">→ var(--color-accent-fg-dim) / elevated bg</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═════════════════ Section 4: live-panels responsive + timeline composite ═════════════════ -->
+    <section class="pv-sect">
+      <div class="pv-sect-h">
+        <h2>4 · .live-panels responsive + fleet timeline composite</h2>
+        <span class="sub">@media from src/styles/live-monitor.css:L51-55 + caller composition</span>
+      </div>
+
+      <div class="pv-grid-2">
+        <!-- mirrors production live-monitor.css:L51-55 -->
+        <div class="pv-cell" style="grid-column: span 2;">
+          <div class="pv-cell-h">
+            <span class="pv-cell-label">.live-panels grid (≥1100px) → 1.4fr / 1fr · collapses to 1fr below</span>
+            <span class="pv-cell-meta">live-monitor.css:L51-55 · @media max-width:1100px</span>
+          </div>
+          <!-- mirrors production .live-panels two-column layout (activity left, focus rail right) -->
+          <div class="lm-live-panels">
+            <div class="lm-activity-list">
+              <div class="lm-activity-item lm-event-broadcast">
+                <span class="ts">10:42:13</span>
+                <span><span class="lm-kind-chip lm-event-broadcast">broadcast</span></span>
+                <span class="body">@sangsu W06 preview ready for review</span>
+              </div>
+              <div class="lm-activity-item lm-event-keeper">
+                <span class="ts">10:42:08</span>
+                <span><span class="lm-kind-chip lm-event-keeper">keeper</span></span>
+                <span class="body">analyst heartbeat resumed</span>
+              </div>
+              <div class="lm-activity-item lm-event-task">
+                <span class="ts">10:41:55</span>
+                <span><span class="lm-kind-chip lm-event-task">task</span></span>
+                <span class="body">PK-12345 done · merged to develop</span>
+              </div>
+            </div>
+            <div style="display:flex; flex-direction: column; gap: 6px;">
+              <div class="lm-focus-card lm-focus-selected">
+                <span class="name">sangsu</span>
+                <span class="meta"><span class="lm-lat">lat <span class="v">142ms</span></span><span>· spark</span></span>
+              </div>
+              <div class="lm-focus-card">
+                <span class="name">nick0cave</span>
+                <span class="meta"><span class="lm-lat">lat <span class="v">98ms</span></span><span>· gemini_cli</span></span>
+              </div>
+            </div>
+          </div>
+          <div class="lm-toks">
+            <span class="pv-tok">grid-template-columns: 1.4fr 1fr (≥1100px)</span>
+            <span class="pv-tok">grid-template-columns: 1fr (&lt;1100px)</span>
+          </div>
+        </div>
+
+        <!-- composite vocabulary: fleet timeline strip -->
+        <div class="pv-cell" style="grid-column: span 2;">
+          <div class="pv-cell-h">
+            <span class="pv-cell-label">fleet timeline strip (composite, callers compose .live-event-* tones)</span>
+            <span class="pv-cell-meta">caller composition · 60-tick window</span>
+          </div>
+          <!-- composite: 60-tick rolling timeline using border-left tones from activity-item -->
+          <div class="lm-timeline">
+            <span class="tick"></span><span class="tick"></span><span class="tick s"></span>
+            <span class="tick"></span><span class="tick t"></span><span class="tick"></span>
+            <span class="tick b"></span><span class="tick"></span><span class="tick"></span>
+            <span class="tick k"></span><span class="tick"></span><span class="tick"></span>
+            <span class="tick"></span><span class="tick t"></span><span class="tick"></span>
+            <span class="tick b"></span><span class="tick"></span><span class="tick"></span>
+            <span class="tick"></span><span class="tick s"></span><span class="tick"></span>
+            <span class="tick t"></span><span class="tick"></span><span class="tick b"></span>
+            <span class="tick"></span><span class="tick k"></span><span class="tick"></span>
+            <span class="tick"></span><span class="tick t"></span><span class="tick"></span>
+            <span class="tick b"></span><span class="tick"></span><span class="tick"></span>
+            <span class="tick"></span><span class="tick"></span><span class="tick s"></span>
+            <span class="tick"></span><span class="tick t"></span><span class="tick"></span>
+            <span class="tick k"></span><span class="tick"></span><span class="tick"></span>
+            <span class="tick b"></span><span class="tick"></span><span class="tick"></span>
+            <span class="tick"></span><span class="tick t"></span><span class="tick"></span>
+            <span class="tick"></span><span class="tick"></span><span class="tick b"></span>
+            <span class="tick"></span><span class="tick"></span><span class="tick t"></span>
+            <span class="tick"></span><span class="tick"></span><span class="tick"></span>
+            <span class="tick"></span><span class="tick k"></span><span class="tick"></span>
+          </div>
+          <div class="lm-toks">
+            <span class="pv-tok">tone vocab → border-left-color from .activity-item arms</span>
+            <span class="pv-tok">b broadcast · t task · k keeper · s system</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═════════════════ Section 5: drift evidence (Phase 2 candidate) ═════════════════ -->
+    <section class="pv-sect">
+      <div class="pv-sect-h">
+        <h2>5 · drift evidence (W06 audit summary)</h2>
+        <span class="sub">legacy aliases + raw rgba + 1 broken reference — Phase 2 candidates</span>
+      </div>
+      <div class="pv-grid-2">
+
+        <!-- mirrors production live-monitor.css token usage audit -->
+        <div class="pv-cell" style="grid-column: span 2;">
+          <div class="pv-cell-h">
+            <span class="pv-cell-label">live-monitor.css site → SSOT replacement (Phase 2 candidate)</span>
+            <span class="pv-cell-meta">audit · 2026-04-28 · 13 drift sites</span>
+          </div>
+          <table class="lm-drift">
+            <thead>
+              <tr>
+                <th>live-monitor.css site</th>
+                <th>used at</th>
+                <th>current value</th>
+                <th>SSOT replacement (this preview)</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><span class="pv-tok">var(--white-8)</span></td>
+                <td class="use">L7 (.pulse-bubble:hover bg)</td>
+                <td><span class="pv-tok">var(--white-10) alias (variables.css:250)</span></td>
+                <td><span class="pv-tok">var(--color-bg-hover)</span></td>
+              </tr>
+              <tr>
+                <td class="broken"><span class="pv-tok">var(--ok-35)</span></td>
+                <td class="broken use">L11 (.pulse-working border-color)</td>
+                <td class="broken">UNDEFINED in variables.css — broken ref</td>
+                <td><span class="pv-tok">var(--color-status-ok)</span></td>
+              </tr>
+              <tr>
+                <td><span class="pv-tok">rgba(96,165,250,0.6)</span></td>
+                <td class="use">L16 (.pulse-selected border)</td>
+                <td>
+                  <span class="lm-swatch" style="background: rgba(96,165,250,0.6);" aria-hidden="true"></span>
+                  <span class="pv-tok">raw rgba (sky-blue)</span>
+                </td>
+                <td><span class="pv-tok">var(--color-accent-fg)</span></td>
+              </tr>
+              <tr>
+                <td><span class="pv-tok">var(--blue-400-8)</span></td>
+                <td class="use">L17 (.pulse-selected bg)</td>
+                <td><span class="pv-tok">rgba(96,165,250,0.08) (variables.css:300)</span></td>
+                <td><span class="pv-tok">var(--color-bg-elevated)</span></td>
+              </tr>
+              <tr>
+                <td><span class="pv-tok">var(--blue-400-15)</span></td>
+                <td class="use">L18 (.pulse-selected box-shadow)</td>
+                <td><span class="pv-tok">rgba(96,165,250,0.15) (variables.css:301)</span></td>
+                <td><span class="pv-tok">rgb(var(--color-accent-glow) / 0.3)</span></td>
+              </tr>
+              <tr>
+                <td><span class="pv-tok">var(--white-4)</span></td>
+                <td class="use">L23, L43 (.activity-item, .focus-agent-card hover)</td>
+                <td><span class="pv-tok">var(--white-5) alias (variables.css:248)</span></td>
+                <td><span class="pv-tok">var(--color-bg-hover)</span></td>
+              </tr>
+              <tr>
+                <td><span class="pv-tok">rgba(96,165,250,0.5)</span></td>
+                <td class="use">L24 (activity .live-event-broadcast border-left)</td>
+                <td>
+                  <span class="lm-swatch" style="background: rgba(96,165,250,0.5);" aria-hidden="true"></span>
+                  <span class="pv-tok">raw rgba (sky-blue)</span>
+                </td>
+                <td><span class="pv-tok">var(--color-accent-fg)</span></td>
+              </tr>
+              <tr>
+                <td><span class="pv-tok">rgba(74,222,128,0.5)</span></td>
+                <td class="use">L25 (activity .live-event-task border-left)</td>
+                <td>
+                  <span class="lm-swatch" style="background: rgba(74,222,128,0.5);" aria-hidden="true"></span>
+                  <span class="pv-tok">raw rgba (green)</span>
+                </td>
+                <td><span class="pv-tok">var(--color-status-ok)</span></td>
+              </tr>
+              <tr>
+                <td><span class="pv-tok">rgba(168,85,247,0.5)</span></td>
+                <td class="use">L26 (activity .live-event-keeper border-left)</td>
+                <td>
+                  <span class="lm-swatch" style="background: rgba(168,85,247,0.5);" aria-hidden="true"></span>
+                  <span class="pv-tok">raw rgba (purple) — no SSOT purple token</span>
+                </td>
+                <td><span class="pv-tok">var(--color-status-warn) (closest SSOT)</span></td>
+              </tr>
+              <tr>
+                <td><span class="pv-tok">rgba(255,255,255,0.15)</span></td>
+                <td class="use">L27 (activity .live-event-system border-left)</td>
+                <td>
+                  <span class="lm-swatch" style="background: rgba(255,255,255,0.15);" aria-hidden="true"></span>
+                  <span class="pv-tok">raw rgba (white-15)</span>
+                </td>
+                <td><span class="pv-tok">var(--color-border-strong)</span></td>
+              </tr>
+              <tr>
+                <td><span class="pv-tok">var(--ok-soft) + var(--ok)</span></td>
+                <td class="use">L36 (chip task bg + color)</td>
+                <td><span class="pv-tok">rgba(74,222,128,0.15) + #4ade80 (variables.css:78,27)</span></td>
+                <td><span class="pv-tok">var(--color-bg-elevated) + var(--color-status-ok)</span></td>
+              </tr>
+              <tr>
+                <td><span class="pv-tok">rgba(168,85,247,0.15) + #a855f7</span></td>
+                <td class="use">L37 (chip keeper bg + color)</td>
+                <td>
+                  <span class="lm-swatch" style="background: #a855f7;" aria-hidden="true"></span>
+                  <span class="pv-tok">raw hex (#a855f7) — Phase 2 candidate</span>
+                </td>
+                <td><span class="pv-tok">var(--color-bg-elevated) + var(--color-status-warn)</span></td>
+              </tr>
+              <tr>
+                <td><span class="pv-tok">var(--white-6) + var(--accent)</span></td>
+                <td class="use">L35, L38 (chip system bg / broadcast color)</td>
+                <td><span class="pv-tok">var(--white-5) alias / #47b8ff (variables.css:249,26)</span></td>
+                <td><span class="pv-tok">var(--color-bg-surface) / var(--color-accent-fg)</span></td>
+              </tr>
+              <tr>
+                <td><span class="pv-tok">var(--white-10)</span></td>
+                <td class="use">L43 (.focus-agent-card:hover border)</td>
+                <td><span class="pv-tok">rgba(255,255,255,0.11) (variables.css:209)</span></td>
+                <td><span class="pv-tok">var(--color-border-strong)</span></td>
+              </tr>
+              <tr>
+                <td><span class="pv-tok">rgba(96,165,250,0.4) / 0.05</span></td>
+                <td class="use">L47-48 (.focus-agent-selected border / bg)</td>
+                <td>
+                  <span class="lm-swatch" style="background: rgba(96,165,250,0.4);" aria-hidden="true"></span>
+                  <span class="pv-tok">raw rgba (sky-blue)</span>
+                </td>
+                <td><span class="pv-tok">var(--color-accent-fg-dim) / var(--color-bg-elevated)</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+      </div>
+    </section>
+
+  </div>
+</body>
+</html>

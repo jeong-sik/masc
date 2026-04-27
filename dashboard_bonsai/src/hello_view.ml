@@ -1,7 +1,9 @@
 (** Landing view — placeholder at [/dashboard/b] until a real home page lands.
 
     Styling follows the MASC Design System (dark-fantasy theme). Tokens
-    reference CSS variables from [colors_and_type.css] via [var] tokens. *)
+    reference CSS variables from [colors_and_type.generated.css] via [var]
+    tokens. The token file is the codegen output of
+    [dashboard/design-system/tokens/source.ts]. *)
 
 open! Core
 open! Bonsai_web

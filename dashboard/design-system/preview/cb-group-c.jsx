@@ -363,8 +363,276 @@ function DrawerKeeper() {
   );
 }
 
+// ─── BOARD ZONE variants (W04 · DS-Drift Phase 1) ──────────────────
+// Mirrors production board.css (dashboard/src/styles/board.css, 59 lines).
+// Consumers of board.css in production:
+//   - dashboard/src/main.ts            (entry import)
+//   - dashboard/src/styles/global.css  (cascade root)
+//   - dashboard/src/styles/ui.css      (.board-comment / .vote-btn typography)
+// Append-only: existing cb-group-c artboards above are unmodified.
+
+function BoardPostCard() {
+  // mirrors production board.css:L5-11
+  // @utility board-post { border-color: var(--color-border-default);
+  //   transition: border-color, transform, background;
+  //   &:hover { border-color: var(--accent-30); background: var(--white-6); transform: translateY(-1px); } }
+  // SSOT-token rendering: --accent-30 (legacy alias) → rgb(--color-accent-glow / .30),
+  // --white-6 (legacy alias) → rgb(--color-fg-primary / .06).
+  const posts = [
+    { id: 'p-841', author: 'nick0cave',     t: '2m',  title: 'Cascade weight=0 trial: codex_cli regression?', votes: 12, replies: 4 },
+    { id: 'p-842', author: 'masc-improver', t: '14m', title: 'Persona TOML reconcile drift — 2880 redundant writes/day',  votes: 7,  replies: 2 },
+    { id: 'p-843', author: 'sangsu',        t: '38m', title: 'OAS pin SHA vs cap range drift checklist', votes: 5,  replies: 1 },
+  ];
+  return (
+    <div className="cb-board" style={{padding:14, gap:8, overflow:'auto'}}>
+      <div role="group" aria-label="Board feed · 3 posts" style={{display:'flex', flexDirection:'column', gap:8}}>
+        {posts.map(p => (
+          <article key={p.id}
+            role="article"
+            aria-label={`Post ${p.id} by ${p.author}, ${p.t} ago: ${p.title} · ${p.votes} votes · ${p.replies} replies`}
+            className="board-post-preview"
+            style={{
+              display:'grid', gridTemplateColumns:'28px 1fr auto', gap:10,
+              padding:'10px 12px',
+              background:'var(--color-bg-surface)',
+              border:'1px solid var(--color-border-default)',
+              borderRadius:3,
+              transition:'border-color 0.2s, transform 0.2s, background 0.2s',
+              cursor:'pointer',
+            }}>
+            <div role="group" aria-label={`${p.votes} votes`} style={{display:'flex', flexDirection:'column', alignItems:'center', gap:2, fontFamily:'var(--font-mono)', fontSize:10, color:'var(--color-fg-muted)'}}>
+              <span aria-hidden="true">▲</span>
+              <span aria-hidden="true" style={{color:'var(--color-fg-secondary)'}}>{p.votes}</span>
+              <span aria-hidden="true">▼</span>
+            </div>
+            <div style={{display:'flex', flexDirection:'column', gap:4, minWidth:0}}>
+              <div role="heading" aria-level={3} style={{color:'var(--color-fg-primary)', fontSize:13, fontWeight:500, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap'}}>{p.title}</div>
+              <div className="cb-mono" aria-hidden="true" style={{fontSize:10, color:'var(--color-fg-muted)', display:'flex', gap:8}}>
+                <KeeperBadge id={p.author} variant="full" size="sm" />
+                <span>·</span>
+                <span>{p.t} ago</span>
+                <span>·</span>
+                <span>{p.replies} replies</span>
+              </div>
+            </div>
+            <Chip kind="ghost">{p.id}</Chip>
+          </article>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function BoardVoteColumn() {
+  // mirrors production board.css:L13-20
+  // @utility vote-btn { transition: color 0.2s;
+  //   &:hover { color: #ccc; }
+  //   &.upvote:hover, &.upvote.active { color: #ff4500; }
+  //   &.downvote:hover, &.downvote.active { color: #7193ff; }
+  //   &.animate { animation: votePop 0.3s ease; } }
+  // NOTE: production currently hardcodes 3 hex literals (#ccc, #ff4500, #7193ff).
+  // Phase 2 candidate table below tracks the drift-to-token migration.
+  const items = [
+    { state:'idle',     up:'idle',   down:'idle',   label:'idle row' },
+    { state:'up-hover', up:'hover',  down:'idle',   label:'upvote hovering' },
+    { state:'up-on',    up:'active', down:'idle',   label:'upvote active' },
+    { state:'dn-on',    up:'idle',   down:'active', label:'downvote active' },
+  ];
+  const colorFor = (slot) => slot === 'idle'
+    ? 'var(--color-fg-muted)'
+    : slot === 'hover'
+      ? 'var(--color-fg-secondary)'   // currently #ccc in board.css
+      : 'var(--color-accent-fg)';      // currently #ff4500 / #7193ff in board.css
+  return (
+    <div className="cb-board" style={{padding:14, gap:10, overflow:'auto'}}>
+      <SectionHeading variant="title" title="VOTE STATES · 4" />
+      <div role="group" aria-label="Vote column states" style={{display:'flex', flexDirection:'column', gap:6}}>
+        {items.map((it, i) => (
+          <div key={i}
+            role="group"
+            aria-label={it.label}
+            style={{
+              display:'grid', gridTemplateColumns:'80px 1fr', gap:12, alignItems:'center',
+              padding:'8px 10px',
+              background:'var(--color-bg-surface)',
+              border:'1px solid var(--color-border-default)',
+              borderRadius:3,
+            }}>
+            <div role="group" aria-label="upvote/downvote pair" style={{display:'flex', flexDirection:'column', alignItems:'center', gap:2, fontFamily:'var(--font-mono)', fontSize:14}}>
+              <span aria-hidden="true" style={{color: colorFor(it.up), transition:'color 0.2s'}}>▲</span>
+              <span aria-hidden="true" style={{color: colorFor(it.down), transition:'color 0.2s'}}>▼</span>
+            </div>
+            <span aria-hidden="true" style={{fontFamily:'var(--font-mono)', fontSize:11, color:'var(--color-fg-secondary)'}}>{it.label}</span>
+          </div>
+        ))}
+      </div>
+      {/* Phase 2 candidate · raw hex still in board.css that should migrate to tokens */}
+      <SectionHeading variant="title" title="PHASE 2 CANDIDATES · 3" />
+      <div role="table" aria-label="board.css raw hex tracked for tokenization in Phase 2"
+        style={{
+          display:'grid', gridTemplateColumns:'auto 1fr auto', gap:'4px 12px',
+          padding:'8px 10px',
+          background:'var(--color-bg-surface)',
+          border:'1px dashed var(--color-border-default)',
+          borderRadius:3,
+          fontFamily:'var(--font-mono)', fontSize:10,
+          color:'var(--color-fg-muted)',
+        }}>
+        <span role="columnheader" aria-hidden="true" style={{color:'var(--color-fg-secondary)'}}>RAW</span>
+        <span role="columnheader" aria-hidden="true" style={{color:'var(--color-fg-secondary)'}}>SELECTOR</span>
+        <span role="columnheader" aria-hidden="true" style={{color:'var(--color-fg-secondary)'}}>SUGGESTED TOKEN</span>
+        <span role="cell">#ccc</span>
+        <span role="cell">vote-btn:hover</span>
+        <span role="cell">--color-fg-secondary</span>
+        <span role="cell">#ff4500</span>
+        <span role="cell">vote-btn.upvote.active</span>
+        <span role="cell">--color-accent-fg</span>
+        <span role="cell">#7193ff</span>
+        <span role="cell">vote-btn.downvote.active</span>
+        <span role="cell">--info</span>
+      </div>
+    </div>
+  );
+}
+
+function BoardCommentThread() {
+  // mirrors production board.css:L22-27
+  // .board-comment .comment-text { transition: max-height 0.3s ease; }
+  // .board-comment .comment-text.expanded { max-height: none; }
+  // .board-comment .comment-expand-btn:hover { text-decoration: underline; }
+  const comments = [
+    { id:'c-1', author:'qa-king',  t:'4m', body:'Re-running suite-merge-blockers locally — 1 of 47 still red on cascade.run.', expanded:true },
+    { id:'c-2', author:'sangsu',   t:'3m', body:'Drift detected at pipeline.ts L187 — signature mismatch. Truncated below.', expanded:false },
+    { id:'c-3', author:'nick0cave', t:'1m', body:'Rebased on release-0.42 · re-running CI.', expanded:true },
+  ];
+  return (
+    <div className="cb-board" style={{padding:14, gap:8, overflow:'auto'}}>
+      <SectionHeading variant="title" title="THREAD · 3" />
+      <div className="board-comment" role="log" aria-label="Comment thread, 3 entries"
+        style={{display:'flex', flexDirection:'column', gap:6}}>
+        {comments.map(c => (
+          <div key={c.id}
+            role="article"
+            aria-label={`Comment by ${c.author}, ${c.t} ago${c.expanded ? '' : ', collapsed'}`}
+            style={{
+              padding:'8px 10px',
+              background:'var(--color-bg-surface)',
+              border:'1px solid var(--color-border-default)',
+              borderRadius:3,
+              display:'flex', flexDirection:'column', gap:4,
+            }}>
+            <div className="cb-mono" aria-hidden="true" style={{fontSize:10, display:'flex', gap:6, alignItems:'center', color:'var(--color-fg-muted)'}}>
+              <KeeperBadge id={c.author} variant="full" size="sm" />
+              <span>·</span>
+              <span>{c.t} ago</span>
+            </div>
+            <div
+              className={`comment-text${c.expanded ? ' expanded' : ''}`}
+              style={{
+                fontSize:12, color:'var(--color-fg-primary)', lineHeight:1.5,
+                maxHeight: c.expanded ? 'none' : 32, overflow:'hidden',
+                transition:'max-height 0.3s ease',
+              }}>
+              {c.body}
+            </div>
+            {!c.expanded && (
+              <button type="button"
+                className="comment-expand-btn"
+                aria-label={`Expand comment ${c.id}`}
+                style={{
+                  alignSelf:'flex-start',
+                  background:'transparent', border:'none', padding:0, cursor:'pointer',
+                  fontFamily:'var(--font-mono)', fontSize:10,
+                  color:'var(--color-accent-fg)',
+                }}>
+                expand ▾
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function BoardMarkdownPreview() {
+  // mirrors production board.css:L29-58
+  // .board-post-preview .markdown-content { overflow-wrap: anywhere; }
+  // .board-post-preview .markdown-content > :first-child { margin-top: 0; }
+  // .board-post-preview .markdown-content > :last-child { margin-bottom: 0; }
+  // .board-post-preview .markdown-content p,ul,ol,blockquote,pre { margin: 0.35rem 0; }
+  // .board-post-preview .markdown-content h1,h2,h3 { margin-top: 0; margin-bottom: 0.35rem; }
+  // .board-post-preview .markdown-content pre { max-height: 8rem; }
+  return (
+    <div className="cb-board" style={{padding:14, gap:8, overflow:'auto'}}>
+      <SectionHeading variant="title" title="POST · MARKDOWN" />
+      <article
+        className="board-post-preview"
+        role="article"
+        aria-label="Markdown preview · cascade weight=0 trial proposal"
+        style={{
+          padding:'10px 14px',
+          background:'var(--color-bg-surface)',
+          border:'1px solid var(--color-border-default)',
+          borderRadius:3,
+          color:'var(--color-fg-primary)',
+        }}>
+        <div className="markdown-content" style={{overflowWrap:'anywhere', fontSize:12, lineHeight:1.55}}>
+          <h3 style={{marginTop:0, marginBottom:'0.35rem', fontFamily:'var(--font-mono)', fontSize:13, color:'var(--color-fg-primary)'}}>
+            cascade weight=0 trial · proposal
+          </h3>
+          <p style={{margin:'0.35rem 0', color:'var(--color-fg-secondary)'}}>
+            Drop <code style={{fontFamily:'var(--font-mono)', color:'var(--color-accent-fg)'}}>codex_cli</code>
+            from the cascade for 2 hours; measure rollout-thread-not-found rate against
+            yesterday&apos;s baseline.
+          </p>
+          <ul style={{margin:'0.35rem 0', paddingLeft:18, color:'var(--color-fg-secondary)'}}>
+            <li>Hypothesis: codex internal 5-model rotation accounts for ~33% of cascade-fallback events.</li>
+            <li>Counter-hypothesis: removing it surfaces fallback elsewhere (gemini_cli ReDoS).</li>
+          </ul>
+          <blockquote
+            style={{
+              margin:'0.35rem 0',
+              paddingLeft:10,
+              borderLeft:'2px solid var(--color-border-strong)',
+              color:'var(--color-fg-muted)',
+              fontStyle:'italic',
+            }}>
+            "Greedy 하게 빠르게 답을 구하고 만족하지 말자." — manifest.md
+          </blockquote>
+          <pre
+            style={{
+              margin:'0.35rem 0',
+              maxHeight:'8rem',
+              overflow:'auto',
+              padding:8,
+              background:'var(--color-bg-page)',
+              border:'1px solid var(--color-border-default)',
+              borderRadius:2,
+              fontFamily:'var(--font-mono)', fontSize:10,
+              color:'var(--color-fg-secondary)',
+            }}>
+{`# trial cascade
+cascade.run(
+  goal="goal-merge-blockers",
+  providers=[anthropic, moonshot],   # codex_cli omitted
+  dry_run=false,
+)
+# expected: rollout-thread-not-found  ↓ 30%
+# expected: proactive_turn_violation  ↑ TBD`}
+          </pre>
+          <p style={{margin:'0.35rem 0', marginBottom:0, color:'var(--color-fg-muted)', fontSize:11}}>
+            Trial window 2h · roll back if proactive turn rate &gt; baseline + 20%.
+          </p>
+        </div>
+      </article>
+    </div>
+  );
+}
+
 Object.assign(window, {
   ComposerPrompt, ComposerSuggest, ComposerMultiLine,
   StatusStandard, StatusCompact, StatusVerbose,
   DrawerTask, DrawerGoal, DrawerKeeper,
+  BoardPostCard, BoardVoteColumn, BoardCommentThread, BoardMarkdownPreview,
 });

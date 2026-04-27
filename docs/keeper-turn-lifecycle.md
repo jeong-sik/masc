@@ -61,6 +61,8 @@ stateDiagram-v2
     Phase_gating --> Cancelled: phase blocks turn (Cancelled_phase_gate_close)
     Phase_gating --> Cascade_routing: phase allows turn
     Cascade_routing --> Failed: cascade unavailable (Failure_cascade_unavailable)
+    Cascade_routing --> Failed: cascade build error (Failure_provider_error)
+    Cascade_routing --> Failed: livelock blocked (Failure_turn_livelock_blocked)
     Cascade_routing --> Awaiting_provider: provider selected
     Awaiting_provider --> Streaming: first token / tool call
     Awaiting_provider --> Failed: provider error (Failure_provider_error)
@@ -128,13 +130,28 @@ correlator the receipt does.
   bound-actor-tolerant fallback.  Surfaces the misconfiguration once
   instead of paying per-turn `no_tool_capable_provider` events.
 
+- **`masc_keeper_turn_fsm_transitions_total`** (#11326) — Prometheus
+  counter bumped inside `Keeper_turn_fsm.emit_transition`.  Labels
+  `from`/`to`/`keeper` carry the typed ADT vocabulary (e.g.
+  `to=failed:turn_livelock_blocked`) so PromQL can chart turn-state
+  distribution per keeper without ETL on the log line.  Distinct from
+  `masc_keeper_fsm_edge_transitions_total`, which encodes the cross
+  sub-FSM edges (`ksm_to_kcl_routing`, etc.) used by
+  `docs/keeper-fsm-graph.dot`.
+
 ## Open work
 
 | Plan step | Adds | Status |
 |---|---|---|
 | Step 4a | `Keeper_turn_fsm` ADT (state / cancel_reason / failure_reason) | merged (#11184) |
-| Step 4b | Explicit `Keeper_turn_fsm.transition` at every edge | pending |
-| Step 5 | Replace `safe_emit_turn_end` catch-all with `Switch.on_release` so `Cancelled_*` reaches the FSM | pending |
+| Step 4b | `emit_transition` wired at the 4 pre-dispatch silent-skip sites | merged (#11269) |
+| Step 4c | `emit_transition` at run_keeper_cycle entry + success exit (`Idle → Phase_gating`, `Completing → Done`) | merged (#11288) |
+| Step 4d | `emit_transition` `Streaming → Completing` on stop_reason | merged (#11308) |
+| Step 4e | Prometheus counter `masc_keeper_turn_fsm_transitions_total` for typed turn-state aggregation | merged (#11326) |
+| Step 4f | `Failure_turn_livelock_blocked` variant + cascade-build redirect to `Failure_provider_error` | merged (#11340) |
+| Step 4g | `emit_transition` `Phase_gating → Cascade_routing → Awaiting_provider` middle of dispatch lane | merged (#11347) |
+| Step 4 (run_turn side) | `Awaiting_provider → Streaming` + `Streaming ⇄ Awaiting_tool_result` from inside `keeper_agent_run.run_turn` | pending |
+| Step 5 | Replace `safe_emit_turn_end` catch-all with `Switch.on_release` so `Cancelled_*` reaches the FSM | pending (RISKY) |
 | Step 7 | TLA+ spec mirroring this diagram | merged (#11190, #11198, #11199, #11225) |
 | Step 6b-1 | `Keeper_contract_classifier.classify_actionable_signal` helper (additive) | merged (#11217) |
 | Step 6b-2 | Replace `String_util.contains_substring_ci` heuristic at `keeper_agent_run.ml:2285-2298` with the typed helper (RISKY — turn-accept distribution change, needs dual-emit window) | pending |

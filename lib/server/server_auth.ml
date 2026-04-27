@@ -291,6 +291,14 @@ let dashboard_actor_for_request ~base_path request =
             match err with
             | Types.Unauthorized _ -> "unauthorized"
             | Types.Forbidden _ -> "forbidden"
+            (* InvalidToken/TokenExpired previously collapsed into [other],
+               which made up 100% (136/136) of dashboard fallback events
+               on 2026-04-27.  Use the same [token_mismatch]/[token_expired]
+               labels that [mcp_server_eio_execute.ml:26] already uses for
+               the MCP-side dispatch so dashboards can group across both
+               surfaces. *)
+            | Types.InvalidToken _ -> "token_mismatch"
+            | Types.TokenExpired _ -> "token_expired"
             | Types.AgentNotFound _ -> "agent_not_found"
             | Types.IoError _ -> "io_error"
             | Types.InvalidJson _ -> "invalid_json"

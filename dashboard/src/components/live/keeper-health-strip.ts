@@ -12,7 +12,7 @@ function pressureColor(ratio: number): string {
 }
 
 function stageIndicator(stage: string): string {
-  if (stage === 'thinking') return 'border-[var(--accent-soft)]'
+  if (stage === 'thinking') return 'border-[var(--color-accent-soft)]'
   return 'border-transparent'
 }
 

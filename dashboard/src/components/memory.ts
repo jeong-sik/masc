@@ -227,7 +227,7 @@ function NewPostForm() {
           onClick=${() => { showNewPostForm.value = false; newPostTitle.value = ''; newPostContent.value = '' }}
         >취소</button>
         <button type="button"
-          class="px-4 py-1.5 rounded text-sm font-medium border border-[rgba(71,184,255,0.4)] bg-[var(--accent-soft)] text-[var(--color-accent-fg)] cursor-pointer hover:bg-[var(--accent-20)] disabled:opacity-50"
+          class="px-4 py-1.5 rounded text-sm font-medium border border-[rgba(71,184,255,0.4)] bg-[var(--color-accent-soft)] text-[var(--color-accent-fg)] cursor-pointer hover:bg-[var(--accent-20)] disabled:opacity-50"
           disabled=${newPostSubmitting.value || !newPostTitle.value.trim() || !newPostContent.value.trim()}
           onClick=${() => { void submitNewPost() }}
         >${newPostSubmitting.value ? '등록 중...' : '등록'}</button>

@@ -895,7 +895,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
                     <span
                       data-invariant=${k}
                       class="rounded border px-2 py-0.5 text-xs ${tone}"
-                      title=${`Violating keepers: ${count}`}
+                      title=${`위반 keeper: ${count}`}
                     >
                       ${INVARIANT_LABELS[k]}: ${count}
                     </span>

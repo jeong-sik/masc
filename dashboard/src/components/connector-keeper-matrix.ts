@@ -315,7 +315,7 @@ function MatrixColumnTotalsRow({ matrix }: { matrix: MatrixData }) {
     `)}
     <div
       class=${`flex items-center justify-end gap-1 px-1 py-1 text-3xs tabular-nums ${totalBound > 0 ? 'text-[var(--color-status-ok)]' : 'text-[var(--color-fg-disabled)]'}`}
-      title=${`Grand total: ${totalBound} bound cells across all keepers × connectors`}
+      title=${`전체 합계: 모든 keeper × connector 의 bound cell ${totalBound}개`}
       data-matrix-grand-total
       data-matrix-grand-total-bound=${totalBound}
     >

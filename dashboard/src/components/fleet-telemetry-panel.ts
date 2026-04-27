@@ -244,7 +244,7 @@ function ControlRoomPanel({ state }: { state: FleetTelemetryState }) {
         <${SummaryCard}
           title="준비 상태"
           value=${readiness.score.toFixed(2)}
-          detail=${`${readiness.blocking_count} blockers · ${readiness.decision_required_count} decisions required.`}
+          detail=${`차단 ${readiness.blocking_count} · 결정 필요 ${readiness.decision_required_count}.`}
           tone=${readinessTone(readiness.status)}
         />
         <${SummaryCard}

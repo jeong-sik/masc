@@ -558,8 +558,8 @@ function CascadeValidationBanner({ config }: { config: CascadeConfigResponse }) 
       <div class="flex items-center gap-2 flex-wrap mb-2">
         <${StatusChip} tone=${tone}>${validationLabel(config.validation_status)}<//>
         <span class="text-[var(--color-fg-muted)]">
-          ${config.invalid_profiles.length} invalid profile${config.invalid_profiles.length === 1 ? '' : 's'}
-          · ${config.validation_errors.length} error${config.validation_errors.length === 1 ? '' : 's'}
+          invalid profile ${config.invalid_profiles.length}개
+          · 에러 ${config.validation_errors.length}개
         </span>
       </div>
       <div class="text-[var(--text-strong)] mb-2">
@@ -585,7 +585,7 @@ function CascadeValidationBanner({ config }: { config: CascadeConfigResponse }) 
       ${config.invalid_profiles.length > visibleProfiles.length
         ? html`
           <div class="mt-2 text-[var(--color-fg-muted)]">
-            + ${config.invalid_profiles.length - visibleProfiles.length} more invalid profiles
+            + invalid profile ${config.invalid_profiles.length - visibleProfiles.length}개 더
           </div>
         `
         : null}

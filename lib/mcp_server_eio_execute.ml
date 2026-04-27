@@ -8,12 +8,57 @@
 let log_mcp_exn = Mcp_server_eio_helpers.log_mcp_exn
 let wait_for_message_eio = Mcp_server_eio_helpers.wait_for_message_eio
 
-let resolve_join_state ~room_initialized ~join_required ~agent_name ~check_join =
-  if room_initialized && join_required && agent_name <> "unknown" then
-    try check_join ()
-    with Sys_error _ | Yojson.Json_error _ -> false
+(* #10699 Family A — "Join required" surfaces 28 / 24h events for
+   masc_transition + masc_claim_next while the underlying keeper had
+   joined under its canonical name at boot via
+   [ensure_keeper_room_presence]. Rotation aliases (e.g.
+   [nick0cave-happy-shark] vs canonical [keeper-nick0cave-agent])
+   carry the join entry under the canonical name only;
+   [Coord.is_agent_joined] does prefix matching against on-disk agent
+   files but cannot project an alias back to the canonical without
+   the [Keeper_identity] vocabulary that owns that mapping.
+
+   When the raw [agent_name] check fails, retry once using the
+   canonical [keeper_name] from
+   [Keeper_identity.normalize_all_names]. The normalisation is gated
+   by [canonical_keeper_name] inside [Keeper_identity], so an
+   unrelated external caller ("alice-fake-bear") returns
+   [Persona_not_found] and falls through to the original [false] —
+   the alias-bridge only fires when the input is recognisably a
+   keeper-form name.
+
+   [check_join] is now parameterised on the candidate name so we can
+   re-issue the lookup against the canonical form without rebuilding
+   the closure environment. *)
+let resolve_join_state ~room_initialized ~join_required ~agent_name
+    ~base_path ~check_join =
+  if not (room_initialized && join_required) then false
+  else if agent_name = "unknown" then false
   else
-    false
+    let try_candidate name = name <> agent_name && check_join name in
+    try
+      if check_join agent_name then true
+      else
+        match
+          Keeper_identity.normalize_all_names
+            ~input_agent_name:agent_name
+            ~base_path
+            ~check_persona:false
+            ~check_credential:false
+            ()
+        with
+        | Ok bundle ->
+            (* Try the persona-level [keeper_name] first (e.g.
+               [nick0cave]), then the canonical agent-form alias
+               that [ensure_keeper_room_presence] writes to disk
+               (e.g. [keeper-nick0cave-agent]). [check_join]'s own
+               prefix-matching in [Coord.is_agent_joined] handles
+               the file-on-disk lookup. *)
+            try_candidate bundle.keeper_name
+            || try_candidate
+                 (Printf.sprintf "keeper-%s-agent" bundle.keeper_name)
+        | Error _ -> false
+    with Sys_error _ | Yojson.Json_error _ -> false
 
 let is_ephemeral_agent_name name =
   Base.String.is_prefix name ~prefix:"agent-"
@@ -607,7 +652,9 @@ let execute_tool_eio ~sw ~clock ?(profile = Mcp_server_eio_tool_profile.Full)
       ~room_initialized
       ~join_required
       ~agent_name
-      ~check_join:(fun () -> Coord.is_agent_joined config ~agent_name)
+      ~base_path:config.base_path
+      ~check_join:(fun candidate ->
+        Coord.is_agent_joined config ~agent_name:candidate)
   in
 
   (* Debug: log join check *)

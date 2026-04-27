@@ -283,12 +283,19 @@ let raw_config_json () =
   Config_dir_resolver.log_warnings ~context:"DashboardCascade" ();
   let source : Cascade_toml_materializer.source_info = source_info () in
   let config_path = Some source.json_path in
-  (match
-     Cascade_toml_materializer.ensure_materialized_json ~config_path:source.json_path
-   with
-   | Ok _ -> ()
-   | Error msg ->
-       Log.Keeper.warn "DashboardCascade: materialization failed for %s: %s" source.json_path msg);
+  (* Capture the materialization error so the dashboard response can
+     surface it.  Previously the failure was logged and the response
+     silently served the stale [raw_json] file, hiding cascade.toml
+     parse failures from operators viewing the dashboard. *)
+  let materialization_error =
+    match
+      Cascade_toml_materializer.ensure_materialized_json ~config_path:source.json_path
+    with
+    | Ok _ -> None
+    | Error msg ->
+        Log.Keeper.warn "DashboardCascade: materialization failed for %s: %s" source.json_path msg;
+        Some msg
+  in
   let source_text =
     try load_raw_config_string source.source_path with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -322,6 +329,8 @@ let raw_config_json () =
       ("source_text", `String source_text);
       ("raw_json_editable", `Bool source.raw_json_editable);
       ("raw_json", `String raw_json);
+      ("materialization_error",
+        Json_util.string_opt_to_json materialization_error);
     ]
 
 let save_raw_config_json raw_json =

@@ -2369,12 +2369,30 @@ let bootstrap_live_keeper_meta ~(ctx : _ context) (m : keeper_meta) : keeper_met
     in
     let synced = ensure_keeper_room_presence ctx.config m in
     (* Reset stale timestamp from previous server lifecycle.
-       Without this, the stale watchdog reads the old last_turn_ts
-       and immediately terminates the fiber on server restart. *)
+
+       Use [Time_compat.now ()] (not [0.0]). The original intent was to
+       prevent the stale watchdog from immediately terminating the fiber
+       on server restart by clearing an old [last_turn_ts]. Setting it
+       to [0.0] worked for that — but [keeper_stale_watchdog.ml:141]
+       gates the stall check on [last_turn > 0.0], so [0.0] permanently
+       blinds the watchdog: a keeper that never runs a real turn (auth
+       failure, OAS budget exhaustion, no work signal) stays in a
+       zombie state the watchdog cannot detect.
+
+       Resetting to [now_ts] preserves the original goal — grace_period
+       (180s default) covers the bootstrap window so the watchdog still
+       doesn't fire prematurely — while restoring detection for a
+       truly idle keeper after grace elapses. Real turns continue to
+       overwrite this with the actual turn time as before.
+
+       Production evidence (2026-04-27): 7 of 11 keepers had
+       [last_turn_ts = 0.0] for 50-65 min after server restart with no
+       watchdog stall fired despite obvious silence. *)
+    let bootstrap_ts = Time_compat.now () in
     let synced =
       { synced with
         runtime = { synced.runtime with
-          usage = { synced.runtime.usage with last_turn_ts = 0.0 };
+          usage = { synced.runtime.usage with last_turn_ts = bootstrap_ts };
         };
       }
     in

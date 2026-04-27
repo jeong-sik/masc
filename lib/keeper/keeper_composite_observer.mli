@@ -118,6 +118,40 @@ type invariants_check = {
 val bump_invariant_violations :
   keeper_name:string -> invariants_check -> unit
 
+(** {2 Pure invariant predicates}
+
+    The four [check_*] functions below are the OCaml mirror of the
+    [SafetyInvariant] conjuncts in
+    [specs/keeper-state-machine/KeeperCompositeLifecycle.tla] (lines
+    354-377). They are exposed so cross-FSM joint tests
+    ([test/test_keeper_fsm_joints.ml]) can drive realistic state
+    combinations through the same predicates that production
+    [compute_invariants] uses, without having to construct a full
+    {!Keeper_registry.registry_entry} value.
+
+    Pure: no side effects, no clock, no I/O. *)
+
+(** Mirror of TLA+ I1 [PhaseTurnAlignment] (KeeperCompositeLifecycle.tla:354):
+    when KSM is in [Compacting], the turn phase must also be
+    [Turn_compacting]; conversely no other KSM phase may carry a live
+    [Turn_compacting]. *)
+val check_phase_turn_alignment : ksm_phase -> turn_phase -> bool
+
+(** Mirror of TLA+ I3 [CompactionAtomicity] (KeeperCompositeLifecycle.tla:368):
+    [(kmc_compaction = compacting) <=> (ksm_phase = Compacting)]. *)
+val check_compaction_atomicity : ksm_phase -> compaction_stage -> bool
+
+(** Mirror of TLA+ I2 [NoCascadeBeforeMeasurement]
+    (KeeperCompositeLifecycle.tla:361): cascade selection past [idle]
+    requires a captured measurement. *)
+val check_no_cascade_before_measurement :
+  cascade_state:cascade_state -> measurement_captured:bool -> bool
+
+(** Project the 12-state {!Keeper_state_machine.phase} into the 7-state
+    composite {!ksm_phase} per the 12->7 mapping documented in
+    [KeeperCompositeLifecycle.tla] (Comment A, lines 94-105). Pure. *)
+val derive_ksm_phase : Keeper_state_machine.phase -> ksm_phase
+
 (** Frozen outcome of the most recently completed turn (RFC-0003
     Phase 2). Surfaces terminal data ([Done]/[Guard_ok]/...) without
     polluting the live sub-FSM fields. [None] until the first turn

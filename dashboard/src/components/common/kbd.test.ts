@@ -9,18 +9,27 @@ describe('kbdClasses (pure)', () => {
     expect(kbdClasses()).toBe(kbdClasses('md'))
   })
 
-  it('md variant: 10px text + 1.5 horizontal padding + body-text color', () => {
+  it('md variant: SPEC 16×16 chiclet + muted fg + 4px horizontal padding', () => {
+    // SPEC primitives.css `.kbd`: min-width:16px height:16px padding:0 4px,
+    // color: var(--color-fg-muted).
     const cls = kbdClasses('md')
     expect(cls).toContain('text-3xs')
-    expect(cls).toContain('px-1.5')
-    expect(cls).toContain('text-[var(--color-fg-primary)]')
+    expect(cls).toContain('h-4')
+    expect(cls).toContain('min-w-4')
+    expect(cls).toContain('px-1')
+    expect(cls).toContain('text-[var(--color-fg-muted)]')
   })
 
-  it('sm variant: 10px text + tight padding (px-1 py-0) + dimmed color', () => {
+  it('sm variant: 10px text + tight padding (px-1 py-0) + dimmed fg', () => {
+    // sm is a Tailwind-only tightening (SPEC defines md only) — same
+    // chiclet visuals, no fixed dimensions, dimmed color for inline use.
     const cls = kbdClasses('sm')
     expect(cls).toContain('text-3xs')
     expect(cls).toContain('px-1')
+    expect(cls).toContain('py-0')
     expect(cls).toContain('text-[var(--color-fg-disabled)]')
+    expect(cls).not.toContain('h-4')
+    expect(cls).not.toContain('min-w-4')
   })
 
   it('extra class is appended (caller composition)', () => {
@@ -32,12 +41,21 @@ describe('kbdClasses (pure)', () => {
     expect(kbdClasses('md', undefined)).not.toMatch(/\s$/)
   })
 
-  it('both variants share the common base (inline-flex, rounded, border, font-mono)', () => {
-    // Regression guard: drifting the base class breaks visual
-    // consistency across the 4 call sites the primitive unifies.
+  it('both variants share SPEC chiclet base (border-strong, bg-elevated, border-b-2 chiclet, rounded-xs)', () => {
+    // Regression guard: drifting the chiclet base breaks visual
+    // consistency across every call site the primitive unifies and
+    // diverges from primitives.css `.kbd`.
     const md = kbdClasses('md')
     const sm = kbdClasses('sm')
-    for (const token of ['inline-flex', 'rounded', 'border', 'font-mono']) {
+    for (const token of [
+      'inline-flex',
+      'rounded-xs',
+      'border-b-2',
+      'font-mono',
+      'border-[var(--color-border-strong)]',
+      'bg-[var(--color-bg-elevated)]',
+      'text-3xs',
+    ]) {
       expect(md).toContain(token)
       expect(sm).toContain(token)
     }

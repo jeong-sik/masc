@@ -363,6 +363,18 @@ val metric_auth_strict_would_reject : string
     [error_kind] = same kinds as silent_auth,
     [agent] = the alias the request would have kept. *)
 
+val metric_empty_tool_universe_observed : string
+(** Phase A F3 (2026-04-28): increments every time
+    [keeper_agent_run] enters the [Keeper_tool_surface_empty] blocker
+    branch — tool gate is required but the visible tool surface is
+    empty.  Phase B PR-4 will promote this from "blocker emit" to a
+    typed terminal state with LLM-visible feedback; this counter is
+    the soak-window measurement that motivates the promotion.  Labels:
+    [keeper_name],
+    [turn_lane] = "text_only" | "tool_optional" | "tool_required"
+                | "retry" | "tool_disabled",
+    [fallback_used] = "true" | "false". *)
+
 val metric_coord_join_normalize_outcome : string
 (** RFC P3-a (2026-04-26): Coord.join preflighted by
     [Keeper_identity.normalize_all_names] in logging-only mode.

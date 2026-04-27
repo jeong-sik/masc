@@ -917,15 +917,38 @@ let has_pending_for_keeper ~keeper_name : bool =
 (* ── Timeout cleanup ──────────────────────────────────────── *)
 
 (** Reject all approvals that have been waiting longer than [max_wait_s].
-    Call periodically from a health loop. *)
+    Call periodically from a health loop.
+
+    [Critical] risk-level entries are NEVER auto-expired.  They originate
+    from indefinite-wait operator gates ([keeper_continue_after_reconcile],
+    [keeper_continue_after_partial_commit] — see callers in
+    [Keeper_supervisor] and [Keeper_unified_turn]) where:
+
+    - Auto-rejecting would cause the supervisor's Phase-2 sweep to
+      re-enqueue the same approval on the next tick (since the
+      paused-meta blocker class is unchanged), creating a 30-min
+      expire / re-enqueue / expire cycle that flooded the audit log
+      and starved the operator of agency.
+    - Critical decisions (auto-compact retry exhaustion, partial-commit
+      ambiguity) are exactly the cases where a human MUST decide; a
+      stale 30-min default would silently push the keeper into a
+      permanent [paused = true] state that no autonomous logic can
+      recover from.
+
+    Operators escalate a stuck Critical entry by manual resolve via
+    dashboard / mcp / CLI — the timeout policy applies to
+    [Low / Medium / High] tool approvals only. *)
 let expire_stale ~max_wait_s =
   let now = Unix.gettimeofday () in
   let stale_ref = ref [] in
   atomic_update pending (fun map ->
     let stale = SMap.fold (fun id entry acc ->
-      if now -. entry.requested_at > max_wait_s
-      then (id, entry) :: acc
-      else acc
+      match entry.risk_level with
+      | Critical -> acc
+      | Low | Medium | High ->
+        if now -. entry.requested_at > max_wait_s
+        then (id, entry) :: acc
+        else acc
     ) map [] in
     stale_ref := stale;
     List.fold_left (fun acc (id, _) -> SMap.remove id acc) map stale

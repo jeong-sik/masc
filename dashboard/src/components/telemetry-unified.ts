@@ -26,6 +26,7 @@ import { isAbortError } from '../lib/async-state'
 import { Btn } from './btn'
 import { OasHealthChip } from './oas-health-chip'
 import { CopyIdButton } from './common/copy-id-button'
+import { ringFocusClasses } from './common/ring'
 
 interface StoreSnapshot {
   keepers: number
@@ -500,7 +501,7 @@ function EntryRow({ entry }: { entry: TelemetryEntry }) {
       <div class="flex items-center gap-1">
         <button
           type="button"
-          class="min-w-0 flex-1 flex items-center gap-2 px-3 py-1.5 text-xs cursor-pointer select-none text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+          class=${`min-w-0 flex-1 flex items-center gap-2 px-3 py-1.5 text-xs cursor-pointer select-none text-left ${ringFocusClasses()}`}
           onClick=${() => { expanded.value = !expanded.value }}
           aria-expanded=${expanded.value}
         >
@@ -574,7 +575,7 @@ function GroupRow({ item }: { item: Extract<TelemetryDisplayItem, { kind: 'group
       <div class="flex items-center gap-1">
         <button
           type="button"
-          class="min-w-0 flex-1 flex items-center gap-2 px-3 py-1.5 text-xs cursor-pointer select-none text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+          class=${`min-w-0 flex-1 flex items-center gap-2 px-3 py-1.5 text-xs cursor-pointer select-none text-left ${ringFocusClasses()}`}
           aria-expanded=${expanded.value}
           aria-controls=${contentId}
           onClick=${() => { expanded.value = !expanded.value }}

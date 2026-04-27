@@ -29,6 +29,7 @@ import { html } from 'htm/preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { fetchTelemetry, type TelemetryEntry } from '../api/dashboard'
 import { useSavedSignal } from '../lib/saved-signal'
+import { ringFocusClasses } from './common/ring'
 
 type A2aEventKind = 'lifecycle' | 'failure' | 'tool' | 'handoff' | 'context' | 'unknown'
 
@@ -356,7 +357,7 @@ export function HandoffTimeline({
                   const rowLabelCls =
                     `w-32 shrink-0 truncate text-2xs font-mono rounded px-1 text-left ${labelCls}` +
                     (clickable
-                      ? ' cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent'
+                      ? ` cursor-pointer ${ringFocusClasses()}`
                       : '')
                   return html`
                   <div class="flex items-center gap-3">

@@ -15,6 +15,7 @@ import { formatTimeAgo } from '../lib/format-time'
 import { isAbortError } from '../lib/async-state'
 import { setupVisibleAutoRefresh } from '../lib/auto-refresh'
 import { openAgentDetail } from './agent-detail-state'
+import { ringFocusClasses } from './common/ring'
 
 const REFRESH_MS = 30_000
 
@@ -343,19 +344,19 @@ function HebbianTopLinks({ synapses }: { synapses: MemorySubsystemsSynapse[] }) 
             <div class="flex items-center gap-2 text-xs font-mono px-1 py-0.5 rounded ${active ? 'ring-1 ring-[var(--white-10)] bg-[var(--white-5)]' : 'hover:bg-[var(--white-5)]'}">
               <button
                 type="button"
-                class="text-[var(--color-fg-muted)] hover:text-[var(--color-accent-fg)] truncate w-32 text-right focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+                class=${`text-[var(--color-fg-muted)] hover:text-[var(--color-accent-fg)] truncate w-32 text-right ${ringFocusClasses()}`}
                 onClick=${() => openAgentDetail(s.from_agent)}
               >${shortAgentLabel(s.from_agent)}</button>
               <button
                 type="button"
                 aria-pressed=${active ? 'true' : 'false'}
                 title="이 쌍의 에피소드만 필터"
-                class="text-[var(--color-fg-muted)] hover:text-[var(--color-accent-fg)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent ${active ? 'text-[var(--color-accent-fg)]' : ''}"
+                class=${`text-[var(--color-fg-muted)] hover:text-[var(--color-accent-fg)] ${ringFocusClasses()} ${active ? 'text-[var(--color-accent-fg)]' : ''}`}
                 onClick=${() => toggleSynapsePairFilter(s.from_agent, s.to_agent)}
               >→</button>
               <button
                 type="button"
-                class="text-[var(--color-fg-muted)] hover:text-[var(--color-accent-fg)] truncate w-32 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+                class=${`text-[var(--color-fg-muted)] hover:text-[var(--color-accent-fg)] truncate w-32 text-left ${ringFocusClasses()}`}
                 onClick=${() => openAgentDetail(s.to_agent)}
               >${shortAgentLabel(s.to_agent)}</button>
               <div class="flex-1 bg-[var(--white-5)] rounded h-1.5 min-w-15">

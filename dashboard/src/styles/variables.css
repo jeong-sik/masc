@@ -28,6 +28,25 @@
   --warn: #fbbf24;
   --bad: #ef4444;
 
+  /* Status glow triplets (rgb space-separated) — for box-shadow alpha
+     and translucent state-glow backgrounds (e.g. Pill atomic primitive
+     SPEC selectors). Triplets decompose the corresponding hex semantic
+     color (--accent / --ok / --warn / --bad / --purple) so callers
+     compose the alpha at use site:
+       box-shadow: 0 0 8px rgb(var(--ok-glow) / 0.35)
+       background: rgb(var(--err-glow) / 0.08)
+     SPEC source: dashboard/design-system/source_styles/tokens.css §
+     "Status glow triplets". The dashboard runtime uses brighter hues
+     than the SPEC source (Tailwind 400/500 vs muted), so the rgb
+     decomposition matches the dashboard's existing semantic colors
+     above; visual fidelity prefers consistency with the live surface
+     over the SPEC source's muted palette. */
+  --ok-glow:      74 222 128;     /* rgb(--ok #4ade80) */
+  --warn-glow:   251 191  36;     /* rgb(--warn #fbbf24) */
+  --err-glow:    239  68  68;     /* rgb(--bad #ef4444) */
+  --info-glow:    71 184 255;     /* rgb(--accent #47b8ff) */
+  --stalled-glow: 167 139 250;    /* rgb(--purple #a78bfa, see line 258) */
+
   /* Semantic - Accent (Blue) */
   --accent-soft: rgba(71, 184, 255, 0.16);
   --accent-6: rgba(71, 184, 255, 0.06);
@@ -313,6 +332,16 @@
   --color-status-info: var(--accent);
   --color-status-idle: var(--text-muted);
   --color-status-stalled: var(--purple);
+
+  /* Status glow channel aliases (canonical SPEC §3.5).  Use these in
+     atomic primitives (Pill, future stateful tokens) so callers don't
+     reach into the raw --{kind}-glow triplet directly.  Idle has no
+     glow (silent state, no chrome). */
+  --color-status-ok-glow:      var(--ok-glow);
+  --color-status-warn-glow:    var(--warn-glow);
+  --color-status-err-glow:     var(--err-glow);
+  --color-status-info-glow:    var(--info-glow);
+  --color-status-stalled-glow: var(--stalled-glow);
 
   --color-focus-ring: var(--accent);
 

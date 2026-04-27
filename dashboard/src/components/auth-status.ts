@@ -17,6 +17,7 @@ import {
 import { refreshShell, shellAuthSummary } from '../store'
 import { showToast } from './common/toast'
 import { TextInput } from './common/input'
+import { KvRow } from './kv-row'
 
 const popoverOpen = signal(false)
 const tokenInput = signal('')
@@ -129,15 +130,6 @@ function openPopover(): void {
   popoverOpen.value = true
 }
 
-function AuthRow({ label, value }: { label: string; value: string }) {
-  return html`
-    <div class="contents">
-      <div class="text-[var(--color-fg-muted)]">${label}</div>
-      <div class="text-[var(--color-fg-primary)] break-all">${value}</div>
-    </div>
-  `
-}
-
 export function AuthStatus() {
   const { dotColor, label } = authBadgeSummary()
 
@@ -174,13 +166,13 @@ function AuthPopover() {
   return html`
     <div class="absolute right-0 top-full mt-1.5 w-80 rounded border border-[var(--color-border-default)] bg-[rgba(10,18,34,0.97)] shadow-sm backdrop-blur-sm p-3 z-50">
       <div class="flex flex-col gap-3">
-        <div class="grid grid-cols-[auto,1fr] gap-x-2 gap-y-1 text-2xs">
-          <${AuthRow} label="stored actor" value=${storedActor ? `@${storedActor}` : '-'} />
-          <${AuthRow} label="token owner" value=${summary?.token_agent ? `@${summary.token_agent}` : '-'} />
-          <${AuthRow} label="effective actor" value=${effectiveActor ? `@${effectiveActor}` : '-'} />
-          <${AuthRow} label="effective role" value=${effectiveRole} />
-          <${AuthRow} label="mutation" value=${mutationStatusLabel(mutationAccess.allowed)} />
-          <${AuthRow} label="block reason" value=${blockReason} />
+        <div class="flex flex-col text-2xs">
+          <${KvRow} label="stored actor" value=${storedActor ? `@${storedActor}` : '-'} wrap=${true} />
+          <${KvRow} label="token owner" value=${summary?.token_agent ? `@${summary.token_agent}` : '-'} wrap=${true} />
+          <${KvRow} label="effective actor" value=${effectiveActor ? `@${effectiveActor}` : '-'} wrap=${true} />
+          <${KvRow} label="effective role" value=${effectiveRole} />
+          <${KvRow} label="mutation" value=${mutationStatusLabel(mutationAccess.allowed)} />
+          <${KvRow} label="block reason" value=${blockReason} wrap=${true} />
         </div>
 
         <div class="flex flex-col gap-2">

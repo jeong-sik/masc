@@ -126,6 +126,7 @@
         test_keeper_transition_audit
         test_keeper_shell_containment
         test_keeper_shell_docker_route
+        test_keeper_shell_via_field
         test_env_git_noninteractive
         test_gh_exit_class
         test_gh_exit_class_wiring
@@ -291,6 +292,7 @@
           test_keeper_transition_audit
           test_keeper_shell_containment
           test_keeper_shell_docker_route
+          test_keeper_shell_via_field
           test_env_git_noninteractive
           test_gh_exit_class
           test_gh_exit_class_wiring

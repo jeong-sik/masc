@@ -336,11 +336,11 @@ export function ToolQualityPanel() {
           </div>
           <div class="mt-0.5 text-3xs text-[var(--color-fg-disabled)]">
             <span class="font-mono">${d.source ?? 'tool_call_io'}</span>
-            <span class="mx-1">·</span>
+            <span class="mx-1" aria-hidden="true">·</span>
             <span class="font-mono ${sourceHealthClass(d.health)}">${d.health ?? 'unknown'}</span>
-            <span class="mx-1">·</span>
+            <span class="mx-1" aria-hidden="true">·</span>
             <span>${freshnessText(d)}</span>
-            <span class="mx-1">·</span>
+            <span class="mx-1" aria-hidden="true">·</span>
             <span>${(d.entry_count ?? d.total).toLocaleString()} rows</span>
           </div>
         </div>

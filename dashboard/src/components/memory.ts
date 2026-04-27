@@ -346,7 +346,7 @@ function MemorySummary() {
       ${grouped.groups.map(g => {
         const meta = CONTENT_CATEGORIES.find(c => c.id === g.category)
         return html`
-          <span class="text-[var(--color-fg-muted)]">·</span>
+          <span class="text-[var(--color-fg-muted)]" aria-hidden="true">·</span>
           <span>${meta?.icon ?? ''} ${g.posts.length}</span>
         `
       })}

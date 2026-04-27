@@ -831,19 +831,19 @@ function ConnectorLivePanel({
         <span class="text-base leading-none" aria-hidden="true">${headerIcon}</span>
         <span class="text-sm font-semibold text-[var(--color-fg-primary)]">${connectorName}</span>
         ${connector?.bot_user_name
-          ? html`<span class="text-[var(--color-fg-disabled)]">· ${connector.bot_user_name}</span>`
+          ? html`<span class="text-[var(--color-fg-disabled)]"><span aria-hidden="true">· </span>${connector.bot_user_name}</span>`
           : null}
-        <span class="text-[var(--color-fg-disabled)]">·</span>
+        <span class="text-[var(--color-fg-disabled)]" aria-hidden="true">·</span>
         <span class=${`inline-flex items-center gap-1.5 rounded-sm border px-2 py-0.5 text-3xs uppercase tracking-4 ${directTone}`}>
           <span class=${`inline-block h-2 w-2 rounded-full ${dotClassForLabel(directLabel)}`}></span>
           <span>${directLabel}</span>
         </span>
-        <span class="text-[var(--color-fg-disabled)]">· hb ${timeAgo(connector?.updated_at ?? '')}</span>
+        <span class="text-[var(--color-fg-disabled)]"><span aria-hidden="true">· </span>hb ${timeAgo(connector?.updated_at ?? '')}</span>
         ${connector?.reply_mode
-          ? html`<span class="text-[var(--color-fg-disabled)]">· reply ${connector.reply_mode}</span>`
+          ? html`<span class="text-[var(--color-fg-disabled)]"><span aria-hidden="true">· </span>reply ${connector.reply_mode}</span>`
           : null}
         ${connector?.self_chat_guid
-          ? html`<span class="text-[var(--color-fg-disabled)]">· self-chat ${truncateMiddle(connector.self_chat_guid, 28)}</span>`
+          ? html`<span class="text-[var(--color-fg-disabled)]"><span aria-hidden="true">· </span>self-chat ${truncateMiddle(connector.self_chat_guid, 28)}</span>`
           : null}
         <span class="ml-auto flex items-center gap-2">
           ${connector?.available
@@ -860,7 +860,7 @@ function ConnectorLivePanel({
           <${SidecarLogToggle} connectorId=${connectorId} />
           <${ConnectorConfigToggle} connectorId=${connectorId} />
           ${sidecarLogPath
-            ? html`<span class="cursor-help text-3xs text-[var(--color-fg-disabled)]" title=${sidecarLogPath}>↗</span>`
+            ? html`<span class="cursor-help text-3xs text-[var(--color-fg-disabled)]" title=${sidecarLogPath} aria-hidden="true">↗</span>`
             : null}
           <button
             type="button"
@@ -1152,7 +1152,7 @@ function ConnectorLivePanel({
                               return html`
                                 <div class="flex items-center justify-between gap-3 text-xs" data-channel-id=${binding.channel_id}>
                                   <div class="min-w-0 text-[var(--color-fg-primary)]">
-                                    <span class="mr-1 text-[var(--color-fg-disabled)]">·</span>
+                                    <span class="mr-1 text-[var(--color-fg-disabled)]" aria-hidden="true">·</span>
                                     ${humanized
                                       ? html`<span>${humanized}</span>`
                                       : html`<span class="text-[var(--color-fg-disabled)]" title="sidecar has not sent names yet">names pending</span>`}
@@ -1211,7 +1211,7 @@ function ConnectorLivePanel({
                                                 ariaLabel=${humanized ? `select ${humanized}` : `select ${truncateMiddle(roomId, 22)}`}
                                                 onClick=${() => { patchConnectorUiState(connectorId, { channelDraft: roomId }) }}
                                               >${humanized
-                                                ? html`<span>${humanized}</span><span class="ml-1 text-[var(--color-fg-disabled)]">· ${truncateMiddle(roomId, 10)}</span>`
+                                                ? html`<span>${humanized}</span><span class="ml-1 text-[var(--color-fg-disabled)]"><span aria-hidden="true">· </span>${truncateMiddle(roomId, 10)}</span>`
                                                 : truncateMiddle(roomId, 22)}<//>
                                             `
                                           })}
@@ -1256,7 +1256,7 @@ function ConnectorLivePanel({
                       return html`
                         <div class="flex items-center justify-between gap-3 text-xs" data-channel-id=${binding.channel_id}>
                           <div class="min-w-0 text-[var(--color-fg-primary)]">
-                            <span class="mr-1 text-[var(--color-fg-disabled)]">·</span>
+                            <span class="mr-1 text-[var(--color-fg-disabled)]" aria-hidden="true">·</span>
                             ${humanized
                               ? html`<span>${humanized}</span>`
                               : html`<span class="text-[var(--color-fg-disabled)]">names pending</span>`}

@@ -254,8 +254,14 @@ let load_profile_weighted ~config_path ~name =
   let key = name ^ "_models" in
   match load_json config_path with
   | Error msg ->
-      Eio.traceln
-        "[CascadeConfig] load_profile_weighted: %s (profile=%s, path=%s)"
+      (* Surface the load failure on the standard logging channel so
+         operators see it without tailing stderr.  Returning the empty
+         list still lets callers fall back to "default" / hardcoded
+         defaults (see [Cascade_config.resolve_model_strings_traced_with]),
+         but the elevated WARN gives observability into what would
+         otherwise be a silent permissive-default cascade. *)
+      Log.warn ~ctx:"CascadeConfig"
+        "load_profile_weighted: %s (profile=%s, path=%s)"
         msg name config_path;
       []
   | Ok json ->

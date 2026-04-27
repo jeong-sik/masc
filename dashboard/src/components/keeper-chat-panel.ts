@@ -13,6 +13,7 @@ import { asString, isRecord } from './common/normalize'
 import { showToast } from './common/toast'
 import { TextInput } from './common/input'
 import { ChatComposer, ChatTranscript } from './chat/primitives'
+import { Surf } from './surf'
 import type { KeeperConversationEntry } from '../types'
 import { shellAuthSummary } from '../store'
 import { keeperDirectChatAccess } from '../lib/keeper-chat-access'
@@ -243,7 +244,7 @@ export function KeeperChatPanel({ name }: { name: string }) {
       </div>
 
       ${chatError.value
-        ? html`<div class="mx-4 mb-4 rounded-card border border-[rgba(239,68,68,0.24)] bg-[rgba(127,29,29,0.24)] px-3 py-2.5 text-xs leading-loose text-[var(--bad-light)]" role="alert">${chatError.value}</div>`
+        ? html`<${Surf} kind="err" role="alert" padding="tight" class="mx-4 mb-4 text-xs leading-loose">${chatError.value}<//>`
         : null}
 
       <div class="border-t border-[var(--slate-gray-12)] bg-[var(--white-3)] px-4 py-4">

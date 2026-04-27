@@ -260,6 +260,17 @@ let sanitize_dashboard_actor_name raw =
 let dashboard_actor_for_request ~base_path request =
   match auth_token_from_request request with
   | Some token -> (
+      (* First 8 hex chars of the bearer token's SHA-256. Lets operators
+         correlate a token-mismatch fallback with the keeper credential
+         that holds the matching hash (see [auth.ml:677] credential
+         storage). The hash itself is one-way; the prefix alone is
+         insufficient to reconstruct the token but unique enough to
+         pinpoint a specific credential rotation event in production
+         logs (2026-04-27 incident: same hash prefix observed firing
+         twice in the same second, masking which keeper was affected). *)
+      let token_hash_prefix =
+        String.sub (Auth.sha256_hash token) 0 8
+      in
       match resolve_agent_name_for_auth_raw ~base_path request ~token:(Some token) with
       | Ok (Some agent_name) -> Some agent_name
       | Ok None ->
@@ -267,8 +278,10 @@ let dashboard_actor_for_request ~base_path request =
              agent, so we drop to the request actor hint (header / query
              param), masking identity drift in the HTTP transport. *)
           Log.Auth.warn
-            "[silent:dashboard_actor_fallback] outcome=none - bearer token \
-             resolved to no agent, falling back to request actor hint";
+            "[silent:dashboard_actor_fallback] outcome=none token_hash_prefix=%s \
+             — bearer token resolved to no agent, falling back to request \
+             actor hint"
+            token_hash_prefix;
           Prometheus.inc_counter
             Prometheus.metric_silent_dashboard_actor_fallback
             ~labels:[ ("outcome", "none") ]
@@ -306,9 +319,9 @@ let dashboard_actor_for_request ~base_path request =
           in
           Log.Auth.warn
             "[silent:dashboard_actor_fallback] outcome=error \
-             err_kind=%s actor_hint=%s err=%s — falling back to request \
-             actor hint"
-            err_kind hint err_str;
+             token_hash_prefix=%s err_kind=%s actor_hint=%s err=%s — falling \
+             back to request actor hint"
+            token_hash_prefix err_kind hint err_str;
           Prometheus.inc_counter
             Prometheus.metric_silent_dashboard_actor_fallback
             ~labels:[ ("outcome", "error"); ("err_kind", err_kind) ]

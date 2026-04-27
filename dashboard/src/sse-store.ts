@@ -222,13 +222,31 @@ function handleOperatorDigest(payload: unknown): void {
   }
 }
 
+// P2 silent-failure fix: previously the dynamic import retried on every
+// SSE transport-health event with only console.debug on failure (hidden
+// from default DevTools view).  Two improvements:
+//   1. Cache the imported module so failure is signalled exactly once
+//      per session, not on every SSE tick.
+//   2. Promote the failure log to console.warn so operators see it
+//      when investigating "transport health widget is missing/stale."
+let transportHealthModule: Promise<typeof import('./components/transport-health')> | null = null
+let transportHealthImportFailed = false
+
 function handleTransportHealth(payload: unknown): void {
-  void import('./components/transport-health')
+  if (transportHealthImportFailed) return
+  if (transportHealthModule === null) {
+    transportHealthModule = import('./components/transport-health')
+  }
+  void transportHealthModule
     .then(({ hydrateTransportHealthFromSSE }) => {
       hydrateTransportHealthFromSSE(payload)
     })
-    .catch(err => {
-      console.debug('[SSE] transport health hydration failed', err instanceof Error ? err.message : '')
+    .catch((err: unknown) => {
+      transportHealthImportFailed = true
+      console.warn(
+        '[SSE] transport health module import failed — widget hydration disabled for this session',
+        err,
+      )
     })
 }
 

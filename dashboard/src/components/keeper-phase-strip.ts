@@ -50,8 +50,19 @@ async function loadAll() {
   if (names.length === 0) return
   loading.value = true
   try {
+    // P2 silent-failure fix: a partial fleet outage previously produced
+    // a phase-strip with random keepers missing — visually identical to
+    // "those keepers have no transitions yet" — and operators had no way
+    // to tell.  Per-name catch now logs which keeper's fetch failed so
+    // the gap pattern is diagnosable from DevTools, while the strip
+    // still degrades gracefully for the keepers that did succeed.
     const results = await Promise.all(
-      names.map(name => fetchKeeperTransitions(name, 30).catch(() => null)),
+      names.map(name =>
+        fetchKeeperTransitions(name, 30).catch((err: unknown) => {
+          console.warn('[keeper-phase-strip] fetchKeeperTransitions failed', { name, err })
+          return null
+        }),
+      ),
     )
     const next = new Map<string, KeeperTransitionsResponse>()
     for (let i = 0; i < names.length; i++) {

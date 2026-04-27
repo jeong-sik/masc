@@ -140,15 +140,31 @@ const REFRESHERS: Record<RefreshTask, (routeState: Pick<RouteState, 'tab' | 'par
 
 const VISIT_COUNTER_KEY = 'masc_dashboard_tab_visits'
 
+// In-memory fallback when localStorage is unavailable (private mode,
+// quota exceeded, etc.) — keeps visit counters useful for the duration
+// of the tab session even when persistence is broken.
+let inMemoryVisitCounts: Record<string, number> | null = null
+
 function recordTabVisit(tab: string, section?: string): void {
+  const key = section ? `${tab}/${section}` : tab
   try {
     const raw = localStorage.getItem(VISIT_COUNTER_KEY)
     const counts: Record<string, number> = raw ? JSON.parse(raw) : {}
-    const key = section ? `${tab}/${section}` : tab
     counts[key] = (counts[key] ?? 0) + 1
     localStorage.setItem(VISIT_COUNTER_KEY, JSON.stringify(counts))
-  } catch {
-    // localStorage unavailable or quota exceeded — skip silently
+    inMemoryVisitCounts = null
+  } catch (err) {
+    // P2 silent-failure fix: localStorage unavailable (private mode,
+    // quota exceeded, sandboxed iframe).  Previously the visit counter
+    // froze entirely for the rest of the tab session and analytics
+    // lost the navigation pattern.  Now: log once on the first
+    // failure, then maintain an in-memory counter so the data is at
+    // least available within the session even if not persisted.
+    if (inMemoryVisitCounts === null) {
+      console.warn('[tab-refresh] localStorage unavailable, falling back to in-memory visit counter', err)
+      inMemoryVisitCounts = {}
+    }
+    inMemoryVisitCounts[key] = (inMemoryVisitCounts[key] ?? 0) + 1
   }
 }
 

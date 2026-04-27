@@ -159,13 +159,26 @@ export async function refreshAgentDetail(): Promise<void> {
   agentFitness.value = null
 
   try {
-    // Fetch namespace (room) messages, task histories, timeline, and fitness in parallel
+    // Fetch namespace (room) messages, task histories, timeline, and fitness in parallel.
+    //
+    // P2 silent-failure fix: previously both .catch(() => null) calls
+    // silently coerced fetch failures into null, indistinguishable from
+    // "agent has no timeline / no fitness data" — operator saw blank
+    // panels with no signal that the underlying fetch had failed.  Now
+    // each catch logs the error so DevTools surfaces the failure even
+    // though the UI still degrades gracefully (other data still shows).
     const [lines, timelineResult, fitnessResult] = await Promise.all([
       fetchRoomMessages(80),
-      fetchAgentTimeline(agentName, 24, 50).catch(() => null),
+      fetchAgentTimeline(agentName, 24, 50).catch((err: unknown) => {
+        console.warn('[agent-detail-state] fetchAgentTimeline failed', { agentName, err })
+        return null
+      }),
       callMcpTool('masc_agent_fitness', { agent_name: agentName, days: 7 })
         .then(raw => JSON.parse(raw) as AgentFitness)
-        .catch(() => null),
+        .catch((err: unknown) => {
+          console.warn('[agent-detail-state] masc_agent_fitness fetch/parse failed', { agentName, err })
+          return null
+        }),
     ])
 
     const matchNames = agentMatchNames(agentName)

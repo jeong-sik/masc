@@ -54,7 +54,16 @@ function KeeperCascadeSelector({ keeper }: { keeper: Keeper }) {
       .then((next) => {
         if (!cancelled) setCascadeProfiles(next)
       })
-      .catch(() => {})
+      .catch((err) => {
+        // P1 silent-failure fix: an empty selector previously rendered
+        // identically to "no profiles to switch between" (line 69 returns
+        // null when profiles + invalid_profiles <= 1).  Surfacing the
+        // failure to the console lets an operator distinguish "fetch
+        // failed" from "no profiles configured" via DevTools.
+        if (!cancelled) {
+          console.warn('[keeper-cascade-selector] fetchCascadeProfiles failed', err)
+        }
+      })
     return () => {
       cancelled = true
     }

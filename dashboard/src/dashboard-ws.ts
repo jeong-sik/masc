@@ -167,8 +167,14 @@ function sendNotification(method: string, params: JsonObject): void {
   const currentSocket = socket
   try {
     currentSocket.send(JSON.stringify({ jsonrpc: '2.0', method, params }))
-  } catch {
+  } catch (err) {
     // Best-effort telemetry; the close/error path owns reconnect decisions.
+    // P1 silent-failure fix: previously the catch was empty, so a flood
+    // of dropped notifications (e.g. socket transitioning to closing
+    // mid-send, or readyState lying) was completely invisible.  At least
+    // surface to the console so operators can see the drop pattern in
+    // DevTools when investigating "server keeps re-sending stale deltas."
+    console.warn('[dashboard-ws] sendNotification failed', { method, err })
   }
 }
 

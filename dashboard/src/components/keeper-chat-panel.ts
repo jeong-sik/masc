@@ -153,16 +153,26 @@ export function KeeperChatPanel({ name }: { name: string }) {
     chatMessages.value = []
     searchQuery.value = ''
     let stale = false
-    void fetchKeeperChatHistory(name).then((history) => {
-      if (stale) return
-      if (history.length > 0) {
-        chatMessages.value = history.map((m) => ({
-          role: m.role === 'assistant' ? 'assistant' as const : 'user' as const,
-          content: m.content,
-          timestamp: m.ts * 1000,
-        }))
-      }
-    })
+    void fetchKeeperChatHistory(name)
+      .then((history) => {
+        if (stale) return
+        if (history.length > 0) {
+          chatMessages.value = history.map((m) => ({
+            role: m.role === 'assistant' ? 'assistant' as const : 'user' as const,
+            content: m.content,
+            timestamp: m.ts * 1000,
+          }))
+        }
+      })
+      .catch((err: unknown) => {
+        // P1 silent-failure fix: fetchKeeperChatHistory now throws on
+        // HTTP non-2xx / network / shape errors instead of returning [].
+        // Surface via chatError so the operator distinguishes "no
+        // history yet" from "load failed" in the UI.
+        if (stale) return
+        const msg = err instanceof Error ? err.message : String(err)
+        chatError.value = `이전 대화 불러오기 실패: ${msg}`
+      })
     return () => { stale = true }
   }, [name])
 

@@ -1,5 +1,10 @@
-import { vi } from 'vitest'
+import { expect, vi } from 'vitest'
 import { html } from 'htm/preact'
+import { toHaveNoViolations } from 'jest-axe'
+
+// Wire jest-axe's `toHaveNoViolations` matcher into Vitest's `expect`.
+// Lets `*.a11y.test.ts` files call `expect(await axe(node)).toHaveNoViolations()`.
+expect.extend(toHaveNoViolations)
 
 type StorageLike = Pick<Storage, 'getItem' | 'setItem' | 'removeItem' | 'clear' | 'key' | 'length'>
 

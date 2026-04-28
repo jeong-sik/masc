@@ -579,6 +579,50 @@ let format_since_last_scheduled_autonomous = function
   | Some s -> string_of_int s
   | None -> "-"
 
+(* ── KeeperHeartbeat.tla spec-action runtime guards (Cycle 43) ────────
+
+   Identity helpers carrying [@@fsm_guard] payloads that mirror the
+   honest actions of [specs/keeper-state-machine/KeeperHeartbeat.tla].
+   Each helper is wrapped at the call site by
+   [Keeper_fsm_guard_runtime.wrap_unit], so an [Assert_failure] from a
+   PPX-injected guard becomes a Prometheus counter increment by default
+   (counter mode) and a re-raise when [MASC_FSM_GUARD_ASSERT=1]
+   (assert mode for tests / CI). The bug-action [MissedWakeup] is
+   intentionally NOT instrumented — it is the failure mode these guards
+   are designed to detect, not to enforce. *)
+
+(* Heartbeat turn lifecycle flag, mirroring KeeperHeartbeat.tla's
+   [turn_state] in the {"idle", "running"} alphabet. Read inside
+   identity helpers; written by the caller around [run_heartbeat_loop]
+   and the dispatch sites. Single-fiber by construction — only the
+   keeper's own heartbeat loop touches its [turn_running] ref. *)
+let pre_turn_complete_heartbeat ~(turn_running : bool ref) = ignore turn_running
+  [@@fsm_guard "!turn_running = true"]
+
+let post_turn_complete_heartbeat ~(turn_running : bool ref) = ignore turn_running
+  [@@fsm_guard "!turn_running = false"]
+
+(* WakeupSignal: external code sets the wakeup atomic to TRUE. Spec
+   says the post-condition is [wakeup_signaled = TRUE]. The OCaml
+   [Atomic.set] is idempotent so the assert is trivially true on the
+   honest path; the guard catches a regression where someone replaces
+   [Atomic.set ... true] with [Atomic.set ... false] or forgets the
+   set entirely. *)
+let post_wakeup_signal ~(wakeup : bool Atomic.t) = ignore wakeup
+  [@@fsm_guard "Atomic.get wakeup = true"]
+
+(* HeartbeatTick: the [compare_and_set wakeup true false] in
+   [interruptible_sleep] succeeded — wakeup transitioned TRUE -> FALSE
+   and the sleep returned so the loop can dispatch. Spec post-condition
+   is [wakeup_signaled = FALSE]. False-positive risk: a producer that
+   re-sets the atomic to TRUE between the CAS and this read would make
+   the guard fire. The [interruptible_sleep] body is single-fiber and
+   the only producer is external, so the window is one tick and the
+   counter signal is operationally meaningful — a non-zero count means
+   producers are racing the consumer, which is itself a bug class. *)
+let post_heartbeat_tick ~(wakeup : bool Atomic.t) = ignore wakeup
+  [@@fsm_guard "Atomic.get wakeup = false"]
+
 (** Sleep in short chunks so [stop_keepalive] or [wakeup_keeper] takes
     effect within ~chunk_sec instead of waiting for the full interval. *)
 let interruptible_sleep ~clock ~stop ~wakeup duration =
@@ -593,7 +637,12 @@ let interruptible_sleep ~clock ~stop ~wakeup duration =
               that this branch returns immediately so the surrounding
               loop can re-enter and dispatch on next tick. *)
             Atomic.compare_and_set wakeup true false
-    then ()
+    then
+      (* Cycle 43: post-action guard mirrors the spec's [wakeup_signaled =
+         FALSE] postcondition. Counter-mode by default. *)
+      Keeper_fsm_guard_runtime.wrap_unit
+        ~action:"HeartbeatTick" ~stage:"post"
+        (fun () -> post_heartbeat_tick ~wakeup)
     else if remaining <= 0.0
     then ()
     else (
@@ -1875,6 +1924,9 @@ let run_heartbeat_loop
   in
   let last_snapshot_ts = ref 0.0 in
   let consecutive_failures = ref 0 in
+  (* Cycle 43: KeeperHeartbeat.tla [turn_state] mirror. Single-fiber by
+     construction — only this loop body reads/writes the ref. *)
+  let turn_running = ref false in
   (* Phase 0: per-stage timing ring buffer.
      ring_size is read once at fiber start — mid-flight resize requires
      ring buffer reallocation, so new values apply on next fiber restart. *)
@@ -2018,13 +2070,28 @@ let run_heartbeat_loop
         let t_board_end = Time_compat.now () in
         let t_turn_start = t_board_end in
         let meta_after_proactive =
-          run_keepalive_unified_turn
-            ~ctx
-            ~meta_after_triage
-            ~pending_board_events
-            ~stop
-            ~proactive_warmup_elapsed
-            ~shared_context
+          (* Cycle 43: KeeperHeartbeat.tla TurnComplete bracket — the
+             [turn_running] flag toggles around the dispatch and the
+             pre/post guards mirror the spec's [turn_state] transition
+             "running" -> "idle". *)
+          turn_running := true;
+          let r =
+            run_keepalive_unified_turn
+              ~ctx
+              ~meta_after_triage
+              ~pending_board_events
+              ~stop
+              ~proactive_warmup_elapsed
+              ~shared_context
+          in
+          Keeper_fsm_guard_runtime.wrap_unit
+            ~action:"TurnComplete" ~stage:"pre"
+            (fun () -> pre_turn_complete_heartbeat ~turn_running);
+          turn_running := false;
+          Keeper_fsm_guard_runtime.wrap_unit
+            ~action:"TurnComplete" ~stage:"post"
+            (fun () -> post_turn_complete_heartbeat ~turn_running);
+          r
         in
         (* Turn failure threshold: registry tracks count (via unified_turn),
                  keepalive raises to terminate the fiber for supervisor restart. *)
@@ -2180,7 +2247,13 @@ let set_keeper_paused_state ~agent_name paused =
             (if paused
              then Keeper_state_machine.Operator_pause
              else Keeper_state_machine.Operator_resume));
-       if not paused then Atomic.set entry.fiber_wakeup true)
+       if not paused then begin
+         Atomic.set entry.fiber_wakeup true;
+         (* Cycle 43: KeeperHeartbeat.tla WakeupSignal post-condition. *)
+         Keeper_fsm_guard_runtime.wrap_unit
+           ~action:"WakeupSignal" ~stage:"post"
+           (fun () -> post_wakeup_signal ~wakeup:entry.fiber_wakeup)
+       end)
 ;;
 
 let wakeup_keeper_by_agent_name ~agent_name =
@@ -2682,6 +2755,13 @@ let stop_keepalive ?base_path name =
     (fun (entry : Keeper_registry.registry_entry) ->
        Atomic.set entry.fiber_stop true;
        Atomic.set entry.fiber_wakeup true;
+       (* Cycle 43: KeeperHeartbeat.tla WakeupSignal post-condition fires
+          even on stop_keepalive — the wakeup atomic must be observable
+          as TRUE before the heartbeat fiber consumes its termination
+          signal. *)
+       Keeper_fsm_guard_runtime.wrap_unit
+         ~action:"WakeupSignal" ~stage:"post"
+         (fun () -> post_wakeup_signal ~wakeup:entry.fiber_wakeup);
        (match Atomic.get entry.grpc_close with
        | Some close_fn ->
           (try close_fn () with

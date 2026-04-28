@@ -1,6 +1,55 @@
 # Changelog
 
 
+## [0.18.9] - 2026-04-28 — patch: spec ↔ code bidirectional identity infrastructure (Cycle 24-44 autonomous series) + 234 operational commits
+
+Aggregate of 254 commits since v0.18.8 (109 feat / 33 fix / 37 docs+spec / 36 chore / 34 refactor / 3 test / 1 quality / 1 ci). No breaking API changes. Patch bump (per #11388 narrow-scope precedent); a minor bump (`0.19.0`) is also defensible given the 109 `feat` commits and is a release-manager call.
+
+The headline thread for this release is the autonomous **Cycle 24-44 spec ↔ code identity series** (20 PRs, all spec/docs only, behavior-change 0). The series closes the discoverability gap users observed as "lifecycle 30-40% black-box": OCaml subsystems whose specs already cited them but had no reverse anchor. Two patterns:
+
+1. **Anchor addition** (Cycle 24-39, 16 PRs) — adds a `(* Spec navigation (OCaml -> TLA+) ... *)` block plus inline anchors to OCaml modules so code search lands on the authoritative spec module.
+2. **Citation refresh** (Cycle 40-43, 4 PRs) — verifies and corrects stale OCaml line citations in 5 specs (`KeeperTurnCycle`, `KeeperCascadeLifecycle`, `KeeperDecisionPipeline`, `KeeperHeartbeat`, `KeeperSocialModelMagenticLedger`, `KeeperEmptyToolUniverse`) and adds a forward-stability disclaimer ("function names are stable identifiers; lines drift across edits") that converts future drift into metadata-only refreshes.
+
+### Added (spec ↔ code navigation infrastructure — autonomous Cycle 24-44)
+
+- `#11565` derive_phase navigation block (`keeper_state_machine.ml`) — Tier C1 Phase 0 anchor with 4-way Drift/Refinement classification per priority branch.
+- `#11583` `specs/keeper-state-machine/KeeperLaunchPending.tla` — new 3-phase pre-launch spec (Offline/Running/Dead) with `FiberStartedWithoutClearing` bug action; resolves the previous "Note A drift candidate" entry in derive_phase navigation block (#11584).
+- `#11596` `keeper_keepalive.ml` — Heartbeat anchor (B1, 3 transitions: WakeupSignal/HeartbeatTick/MissedWakeup).
+- `#11597` `keeper_unified_turn.ml` — TaskAcquisition anchor (B2, AssignTask/EmptyQueueSleep/TaskRejected).
+- `#11599` `keeper_approval_queue.ml` — ApprovalQueue anchor (B3, Submit/Resolve/ExpireAndForceResolve + BoundedSuspension invariant).
+- `#11608` `keeper_failure_circuit_breaker.ml` — CircuitBreaker anchor with Refinement classification (5 OCaml classes vs 3 spec abstract classes, by-design).
+- `#11612` `keeper_rollover.ml`, `#11614` `keeper_post_turn.ml`, `#11615` `keeper_types.mli` — KeeperGenerationLineage 3/3 closure.
+- `#11617` `keeper_memory_policy.ml`, `#11622` `keeper_memory_bank.ml` — KeeperMemoryLifecycle 2/2.
+- `#11618` `keeper_execution_receipt.ml` — multi-spec anchor first (ReceiptOutcomeSet + OperatorPauseBroadcast).
+- `#11625` `keeper_stale_watchdog.ml` — OperatorPauseBroadcast 2/2 with module-relocation drift correction.
+- `#11626` `keeper_social_model_magentic_ledger_fsm.ml` — SocialModelMagenticLedger anchor with issue #8949 topology drift record.
+- `#11634` `keeper_guards.ml` — KeeperTurnCycle anchor (single-action `GateRejected` ownership).
+
+### Changed (spec citation refresh — autonomous Cycle 40-43)
+
+- `#11641` `KeeperTurnCycle.tla` — 22 stale line citations across 4 OCaml files refreshed to current main; forward-stability disclaimer added.
+- `#11645` `KeeperCascadeLifecycle.tla` + `KeeperDecisionPipeline.tla` — sibling refresh of the same `keeper_registry.ml` setter family (`mark_turn_started` 386→493, `mark_turn_finished` 472→614, etc.; 8 setters total).
+- `#11647` `KeeperHeartbeat.tla` — 3 stale `keeper_keepalive.ml` citations refreshed (uniform +13 drift; matches Cycle 27 anchor's inline drift note).
+- `#11649` `KeeperSocialModelMagenticLedger.tla` + `KeeperEmptyToolUniverse.tla` — narrow batch (2 specs, 1 line each + adjacent anchors).
+
+### Other operational changes (234 commits)
+
+This release also rolls up substantial operational and infrastructure work merged since v0.18.8 — see `git log bff6a28b..HEAD` for the full set. Notable themes (without exhaustive PR-by-PR enumeration):
+
+- **PPX `tla_derive`** (`#11377`, `#11384`, `#11430`, `#11450`) — PPX deriver scaffold + `keeper_turn_fsm.mli` first application + `module type TLA_STATE_MACHINE` + `[@fsm_guard]` runtime injection (Tier I1/I2/I3 of the Kimi keeper FSM review plan).
+- **Receipt outcome quad-state** (`#11360`, `#11491`, `#11499`, `#11500`) — `outcome_kind = [`Ok | `Error | `Cancelled | `Skipped]` polymorphic variant + outer Cancel handler producer + spec parity (Tier S1 + Cycle 1b A/i/ii/iv).
+- **`AuthIdentityFSM.tla` integration** (`#11391`) — `specs/auth/` directory + clean+buggy cfg (Tier S2).
+- **Receipt append failure escalation** (`#11398`) — silent `Log.warn` → `Result.Error \`Receipt_lost` (Tier A2).
+- **Path leak removal** (`#11403`) — relative paths or hashes in `keeper_alerting_path.ml` error strings (Tier A3).
+- **Heartbeat / TaskAcquisition / ApprovalQueue specs** (`#11408`, `#11412`, `#11417`) — 3 new spec modules with bug-action contracts (Tier B1/B2/B3).
+- **`tools/tlc_test_gen/`** (`#11525`, `#11539`, `#11553`, `#11563`) — TLC counterexample → OCaml regression test scaffold + nested record fixture + PPX-free test runner + multi-spec self-validation (Tier C2).
+- **234 other operational commits** across feat/fix/refactor/chore — feature work in cascade routing, dashboard, MCP transport, design-system token migration, PPX adoption, type SSOT extractions, OAS pin bumps, etc.
+
+### Notes
+
+- The autonomous Cycle 24-44 series is documented in `~/me/planning/claude-plans/30m-users-dancer-downloads-kimi-agent-ke-wobbly-shell.md` §19.
+- All 20 spec/docs PRs in the Cycle 24-44 series are behavior-change 0; they affect only TLA+ and OCaml comments. The release boundary is largely a marker for the broader 254-commit corpus.
+
 ## [0.18.8] - 2026-04-28 — patch: keeper fleet reliability (goal repair + auto-task-start + preset coordination)
 
 Aggregate of 8 commits since v0.18.7 (3 feat / 2 fix / 2 test / 1 chore). No breaking API changes.

@@ -353,15 +353,20 @@ export const raw: ReadonlyArray<TokenBase> = (() => {
   out.push(t("text-muted",      "#a8bfdf", "raw", "color", "Secondary/labels"));
   out.push(t("text-dim",        "#a0a8b4", "raw", "color", "Tertiary/captions"));
 
+  // Iter 2c-7: state + agent domain colors. Dashboard-tuned shades, NOT
+  // Tailwind palette aliases (state-idle #b8c0cc sits between slate-300
+  // and slate-400; agent-working #7ae09a is warmer than green-300).
+  out.push(t("state-idle",      "#b8c0cc", "raw", "color", "Keeper idle / no signal"));
+  out.push(t("state-offline",   "#7a8494", "raw", "color", "Keeper offline / unreachable"));
+  out.push(t("agent-working",   "#7ae09a", "raw", "color", "Agent actively running"));
+  out.push(t("agent-busy",      "#f0c060", "raw", "color", "Agent busy / queued"));
+
   // Iter 2c-9: vote button Reddit-pattern colors. Used identically by
   // board.css and dashboard.css; hex values are CANONICAL (Reddit
-  // upvote = #ff4500) and intentionally preserved exactly. Tokenizing
-  // here removes the cross-file duplication that the original
-  // variables.css comment flagged.
+  // upvote = #ff4500) and intentionally preserved exactly.
   out.push(t("vote-up",         "#ff4500", "raw", "color", "Reddit-canonical upvote orange-red"));
   out.push(t("vote-down",       "#7193ff", "raw", "color", "Reddit-canonical downvote blue-violet"));
   out.push(t("vote-hover",      "#ccc",    "raw", "color", "Vote button hover (3-digit short hex)"));
-
   return Object.freeze(out);
 })();
 

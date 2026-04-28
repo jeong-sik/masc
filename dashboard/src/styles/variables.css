@@ -99,9 +99,8 @@
 
   /* State chip text — keeper status pills (idle/offline/todo).
      idle and todo intentionally share the same shade (visual rest).
-     offline is darker to signal hard inactivity. */
-  --state-idle: #b8c0cc;
-  --state-offline: #7a8494;
+     offline is darker to signal hard inactivity.
+     Lifted to source.ts (Iter 2c-7); see semantic role binding below. */
 
   /* Semantic - Critical (Red) */
   --bad-light: #f87171;
@@ -320,8 +319,7 @@
   --blue-400-15: rgba(96, 165, 250, 0.15);
   --frost-72: rgba(226, 232, 240, 0.72);
   --panel-dark-60: rgba(15, 23, 42, 0.6);
-  --agent-working: #7ae09a;
-  --agent-busy: #f0c060;
+  /* --agent-working, --agent-busy lifted to source.ts (Iter 2c-7) */
 
   /* Stacking layers */
   --z-layout: 1;

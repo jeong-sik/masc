@@ -188,6 +188,10 @@ type semantic =
   | `Text_body
   | `Text_muted
   | `Text_dim
+  | `State_idle
+  | `State_offline
+  | `Agent_working
+  | `Agent_busy
   | `Vote_up
   | `Vote_down
   | `Vote_hover

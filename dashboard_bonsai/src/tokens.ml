@@ -177,6 +177,10 @@ type semantic =
   | `Text_body
   | `Text_muted
   | `Text_dim
+  | `State_idle
+  | `State_offline
+  | `Agent_working
+  | `Agent_busy
   | `Vote_up
   | `Vote_down
   | `Vote_hover
@@ -584,6 +588,10 @@ let name_of = function
   | `Text_body -> "text-body"
   | `Text_muted -> "text-muted"
   | `Text_dim -> "text-dim"
+  | `State_idle -> "state-idle"
+  | `State_offline -> "state-offline"
+  | `Agent_working -> "agent-working"
+  | `Agent_busy -> "agent-busy"
   | `Vote_up -> "vote-up"
   | `Vote_down -> "vote-down"
   | `Vote_hover -> "vote-hover"

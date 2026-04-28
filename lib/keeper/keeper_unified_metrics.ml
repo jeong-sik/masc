@@ -1482,7 +1482,8 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
             | Oas_worker_named.Turn_timeout _
             | Oas_worker_named.Admission_queue_timeout _
             | Oas_worker_named.Admission_queue_rejected _
-            | Oas_worker_named.Resumable_cli_session _) ->
+            | Oas_worker_named.Resumable_cli_session _
+            | Oas_worker_named.No_tool_capable_provider _) ->
             true
         | Some _ | None -> false)
     | None -> false

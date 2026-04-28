@@ -2218,7 +2218,7 @@ let run_turn
              (String.concat ", " unexpected_tool_names)
          in
          receipt_tool_contract_result_ref := "violated";
-         Log.Keeper.error "keeper:%s %s" meta.name reason;
+         Log.Keeper.error "keeper:%s cascade=%s %s" meta.name meta.cascade_name reason;
          Error (Oas.Error.Internal reason)
        else (
          let should_log_unexpected_tool_partial =
@@ -2552,10 +2552,10 @@ let run_turn
                 with
                 | Ok () -> ()
                 | Error e ->
-                  Log.Keeper.error "keeper:%s OAS checkpoint save failed: %s" meta.name e);
+                  Log.Keeper.error "keeper:%s cascade=%s OAS checkpoint save failed: %s" meta.name meta.cascade_name e);
                Some patched
              | None ->
-               Log.Keeper.error "keeper:%s missing OAS checkpoint after run" meta.name;
+               Log.Keeper.error "keeper:%s cascade=%s missing OAS checkpoint after run" meta.name meta.cascade_name;
                None
            in
            (match result.proof with
@@ -2676,8 +2676,8 @@ let run_turn
             with
             | Eio.Cancel.Cancelled _ as e -> raise e
             | exn ->
-                Log.Keeper.warn "keeper:%s compaction failed: %s" meta.name
-                  (Printexc.to_string exn));
+                Log.Keeper.warn "keeper:%s cascade=%s compaction failed: %s" meta.name
+                  meta.cascade_name (Printexc.to_string exn));
            (* Post-turn quality metrics — goal alignment + memory recall.
              Logged to decisions.jsonl for feedback loop analysis. *)
            (try

@@ -1609,9 +1609,22 @@ let run_keepalive_unified_turn
              keeper failure. Skip this cycle and let the next heartbeat retry
              once a slot opens up. Meta is left untouched so failure counters
              do not tick. *)
+          (* #11446 follow-up: include slot availability snapshot so operators
+             can distinguish "all slots full" (provider contention) from
+             "autonomous starved while turn slots free" (autonomous-only cap
+             hit).  Same fields already emitted at DEBUG by [semaphore_acquire]
+             on line ~466; mirroring them at WARN here makes the skip event
+             self-contained for diagnosis without log re-correlation.  Values
+             are read post-timeout so they reflect the current pool state, not
+             the moment of acquire-attempt — but for fleet contention (74/day
+             skips, 2026-04-28) the persistent-saturation pattern is what
+             matters and that survives the read-time gap. *)
+          let auto_avail = Eio.Semaphore.get_value autonomous_turn_semaphore in
+          let turn_avail = Eio.Semaphore.get_value turn_semaphore in
           Log.Keeper.warn
-            "%s: skipping turn (semaphore wait > %.0fs, peers holding slot, cascade=%s)"
-            meta_after_triage.name wait_sec meta_after_triage.cascade_name;
+            "%s: skipping turn (semaphore wait > %.0fs, peers holding slot, cascade=%s, autonomous_available=%d turn_available=%d)"
+            meta_after_triage.name wait_sec meta_after_triage.cascade_name
+            auto_avail turn_avail;
           meta_after_triage)
       else if (not has_message_signal) && obs.message_cursor_updates <> [] then
         meta_after_observe

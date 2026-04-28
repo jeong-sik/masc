@@ -15,6 +15,50 @@
 
     @since PR #10670 — extracted from Keeper_supervisor. *)
 
+(* Spec navigation (OCaml -> TLA+) — plan §19 anchor pattern.  Sibling
+   to PR 11618 (Cycle 35, keeper_execution_receipt.ml).  Authoritative
+   spec mirror is
+   specs/keeper-state-machine/OperatorPauseBroadcast.tla.
+
+   Spec line 20-21 cite "lib/keeper/keeper_supervisor.ml: stale
+   watchdog fiber forks under ctx.sw and calls
+   emit_stale_keeper_broadcast".  That citation pre-dates PR 10670
+   which extracted this module from Keeper_supervisor to break a
+   circular dependency.  After the extraction:
+
+     keeper_supervisor.ml line ~118    fork_stale_watchdog wrapper
+                                       (re-exports the function below)
+     keeper_stale_watchdog.ml          actual fiber logic + emit
+                                       (this file)
+     keeper_execution_receipt.ml       emit_stale_keeper_broadcast
+                                       definition (called at line 287
+                                       of this file)
+
+   Spec citation drift: the spec module string still says
+   "keeper_supervisor.ml" but the true post-extraction location of
+   the watchdog logic is here.  Spec-side cleanup is deferred — when
+   the spec is next regenerated it should point at this module
+   directly.
+
+   Spec semantics modelled (TLA+ -> OCaml):
+     phase = StaleRunning      reached when this watchdog detects a
+                               stall (idle or failure-loop) and sets
+                               fiber_stop.
+     OperatorBroadcast emit    line 287 below calls
+                               Keeper_execution_receipt.emit_stale_keeper_broadcast
+                               unconditionally on detection (inside a
+                               try block — clean Spec model).
+     Eventually-emit liveness  satisfied because every detection path
+                               feeds into the same emit call;
+                               last_broadcast_ts (line 99) only
+                               throttles repeated emissions, it does
+                               not silently skip.
+
+   Bug model the spec catches: a refactor that wrapped the line 287
+   emit in a conditional that could silently skip would re-create
+   the original fleet-stall regression class.  The spec's bug-action
+   would silently drop emits and violate the leads-to property. *)
+
 open Keeper_types
 
 (* Process-global termination history per keeper.  Survives keeper

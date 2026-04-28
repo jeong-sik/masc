@@ -54,8 +54,8 @@ val assert_receipt_authoritative :
     further check; pairing them with the right turn_state is the
     responsibility of [ReceiptMatchesState] (a separate invariant).
 
-    [turn_state] is the canonical TLA+ symbol form ([\"done\"],
-    [\"failed\"], [\"cancelled\"], ...). Callers that hold a
+    [turn_state] is the canonical TLA+ symbol form (e.g. [done],
+    [failed], [cancelled], ...). Callers that hold a
     [Keeper_turn_fsm.turn_state] should pass
     [Keeper_turn_fsm.to_tla_symbol s].
 

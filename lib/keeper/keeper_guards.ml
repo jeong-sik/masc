@@ -22,6 +22,44 @@
 
     @since T1-A — pre_tool_use guard decomposition *)
 
+(* ─────────────────────────────────────────────────────────────────── *)
+(* Spec navigation (OCaml -> TLA+) — KeeperTurnCycle composite anchor. *)
+(* ─────────────────────────────────────────────────────────────────── *)
+(*                                                                     *)
+(* Authoritative spec mirror is                                        *)
+(*   specs/keeper-state-machine/KeeperTurnCycle.tla                    *)
+(* (3-axis composite — turn_phase x decision_stage x cascade_state).   *)
+(*                                                                     *)
+(* This module is one of FOUR cooperating write points; siblings are   *)
+(* keeper_registry.ml (raw setters), keeper_unified_turn.ml (top-level *)
+(* orchestration), and keeper_agent_run.ml (policy selection).         *)
+(* keeper_guards.ml owns a SINGLE spec action:                         *)
+(*                                                                     *)
+(*   GateRejected — spec line 192-200                                  *)
+(*     pre_tool_use override / approval_required short-circuit.        *)
+(*     turn_phase: executing -> finalizing                             *)
+(*     decision_stage: tool_policy_selected -> gate_rejected           *)
+(*     cascade_state preserved at "trying" (UNCHANGED in spec).        *)
+(*                                                                     *)
+(* Spec inline citation at KeeperTurnCycle.tla:58 says "line 120" —    *)
+(* current actual call site of                                         *)
+(*   Keeper_registry.mark_turn_gate_rejected_by_name                   *)
+(* is line 143 inside [emit_gate_event] (drift +23 since spec was      *)
+(* written; spec citation list is module-coarse and survives line      *)
+(* shifts within the same function).                                   *)
+(*                                                                     *)
+(* Cross-axis invariants (KeeperTurnCycle.tla:115-123) most relevant   *)
+(* to this file:                                                       *)
+(*   - GateRejectedRequiresFinalizing                                  *)
+(*       (decision_stage = "gate_rejected" => turn_phase = "finalizing")*)
+(*   - TerminalCascadeRequiresFinalizing                               *)
+(*                                                                     *)
+(* These cross-axis invariants are why KeeperTurnCycle exists          *)
+(* alongside the single-axis siblings (KeeperDecisionPipeline,         *)
+(* KeeperCascadeLifecycle, KeeperConditionsGovernPhase): no single     *)
+(* axis can express the conjunction across phase x decision x cascade. *)
+(* ─────────────────────────────────────────────────────────────────── *)
+
 (* -------------------------------------------------------------- *)
 (* Shared utilities previously inline in [keeper_hooks_oas]        *)
 (* -------------------------------------------------------------- *)
@@ -134,6 +172,12 @@ let notify_gate_decision on_gate_decision (event : gate_decision_event) =
     - [stage_latency_ms]    measured duration of this guard
     - [reason_text]         human-readable detail
     - [source]              "hook" (distinguishes from legacy paths) *)
+(* Spec mapping: GateRejected action — KeeperTurnCycle.tla lines 189-200.
+   The two-arm match below routes "override" | "approval_required" to
+   Keeper_registry.mark_turn_gate_rejected_by_name, which fires the
+   decision_stage = "gate_rejected" / turn_phase = "finalizing" transition.
+   The "continue" branch (and any unknown decision string) skips the spec
+   action entirely and only emits the Event_bus Custom event below. *)
 let emit_gate_event
     ~stage ~decision ~reason_code
     ~tool_name ~agent_name ~turn

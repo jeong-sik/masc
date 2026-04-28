@@ -250,7 +250,7 @@ let read_backlog_counts ~allowed_tool_names ~(config : Coord.config)
     let backlog = Coord.read_backlog config in
     let unclaimed_tasks =
       List.filter
-        (fun (t : Types.task) -> t.task_status = Types.Todo)
+        (fun (t : Types_core.task) -> t.task_status = Types_core.Todo)
         backlog.tasks
     in
     let unclaimed = List.length unclaimed_tasks in

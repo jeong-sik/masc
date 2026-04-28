@@ -81,7 +81,9 @@ val command_uses_nested_container_runtime : string -> bool
 
 (** Re-export of [Keeper_sandbox_runtime.ensure_keeper_sandbox_runtime]. *)
 val ensure_keeper_sandbox_runtime :
-  timeout_sec:float -> (unit, string) result
+  timeout_sec:float -> (string list, string) result
+(** Direct alias of [Keeper_sandbox_runtime.ensure_keeper_sandbox_runtime];
+    returns the [--security-opt seccomp=...] argv fragment on success. *)
 
 val cmd_targets_git_or_gh : string -> bool
 val cmd_targets_gh : string -> bool

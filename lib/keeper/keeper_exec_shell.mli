@@ -90,4 +90,4 @@ val handle_keeper_shell :
     [Keeper_docker_read] (RFC-0006 Phase B-2) which reuses the same
     preflight before spawning a one-shot container for fs reads. *)
 val ensure_keeper_sandbox_runtime :
-  timeout_sec:float -> (unit, string) result
+  timeout_sec:float -> (string list, string) result

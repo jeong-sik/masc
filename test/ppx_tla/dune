@@ -1,4 +1,4 @@
-(test
- (name test_basic)
+(tests
+ (names test_basic test_records)
  (preprocess
   (pps ppx_tla)))

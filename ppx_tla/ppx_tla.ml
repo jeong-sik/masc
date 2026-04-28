@@ -132,15 +132,53 @@ let derive_impl_for_variant ~loc cds =
   else
     [ to_tla; all_symbols ]
 
+(* ── Record-type implementation generators (Cycle 20 / Tier I7) ────
+
+   For record types we emit:
+   - [field_names : string list]   — every field's source name
+   - [field_count : int]           — [List.length field_names]
+
+   These two helpers let TLA+ specs assert structural shape without the
+   deriver having to know how to render arbitrary field values. Future
+   tiers may add a [to_tla_record] combinator that delegates field-value
+   rendering to user-supplied per-field [to_tla] functions. *)
+
+let make_field_names_impl ~loc lds =
+  let exprs =
+    List.map
+      (fun (ld : label_declaration) ->
+        Ast_builder.Default.estring ~loc ld.pld_name.txt)
+      lds
+  in
+  let list_expr = Ast_builder.Default.elist ~loc exprs in
+  let pat = Ast_builder.Default.ppat_var ~loc (Loc.make ~loc "field_names") in
+  let binding =
+    Ast_builder.Default.value_binding ~loc ~pat ~expr:list_expr
+  in
+  Ast_builder.Default.pstr_value ~loc Nonrecursive [ binding ]
+
+let make_field_count_impl ~loc lds =
+  let count = List.length lds in
+  let int_expr = Ast_builder.Default.eint ~loc count in
+  let pat = Ast_builder.Default.ppat_var ~loc (Loc.make ~loc "field_count") in
+  let binding =
+    Ast_builder.Default.value_binding ~loc ~pat ~expr:int_expr
+  in
+  Ast_builder.Default.pstr_value ~loc Nonrecursive [ binding ]
+
+let derive_impl_for_record ~loc lds =
+  [ make_field_names_impl ~loc lds; make_field_count_impl ~loc lds ]
+
 let str_type_decl ~ctxt (_rec_flag, type_decls) =
   let loc = Expansion_context.Deriver.derived_item_loc ctxt in
   match type_decls with
   | [ td ] -> (
       match td.ptype_kind with
       | Ptype_variant cds -> derive_impl_for_variant ~loc cds
-      | Ptype_abstract | Ptype_record _ | Ptype_open ->
+      | Ptype_record lds -> derive_impl_for_record ~loc lds
+      | Ptype_abstract | Ptype_open ->
           Location.raise_errorf ~loc
-            "[@@deriving tla]: only variant types are supported")
+            "[@@deriving tla]: only variant and record types are supported")
   | _ ->
       Location.raise_errorf ~loc
         "[@@deriving tla]: a single type declaration is supported per \
@@ -188,6 +226,22 @@ let derive_sig_for_variant ~loc ~type_name cds =
   in
   to_tla_sig :: all_symbols_sig :: all_states_sig_opt
 
+let int_t ~loc =
+  Ast_builder.Default.ptyp_constr ~loc
+    (Loc.make ~loc (Longident.Lident "int"))
+    []
+
+let derive_sig_for_record ~loc lds =
+  let _ = lds in
+  let field_names_sig =
+    make_value_sig ~loc ~name:"field_names"
+      ~type_:(list_t ~loc (string_t ~loc))
+  in
+  let field_count_sig =
+    make_value_sig ~loc ~name:"field_count" ~type_:(int_t ~loc)
+  in
+  [ field_names_sig; field_count_sig ]
+
 let sig_type_decl ~ctxt (_rec_flag, type_decls) =
   let loc = Expansion_context.Deriver.derived_item_loc ctxt in
   match type_decls with
@@ -195,9 +249,11 @@ let sig_type_decl ~ctxt (_rec_flag, type_decls) =
       match td.ptype_kind with
       | Ptype_variant cds ->
           derive_sig_for_variant ~loc ~type_name:td.ptype_name.txt cds
-      | Ptype_abstract | Ptype_record _ | Ptype_open ->
+      | Ptype_record lds ->
+          derive_sig_for_record ~loc lds
+      | Ptype_abstract | Ptype_open ->
           Location.raise_errorf ~loc
-            "[@@deriving tla]: only variant types are supported")
+            "[@@deriving tla]: only variant and record types are supported")
   | _ ->
       Location.raise_errorf ~loc
         "[@@deriving tla]: a single type declaration is supported per \

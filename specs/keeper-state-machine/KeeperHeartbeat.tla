@@ -1,8 +1,12 @@
 ---- MODULE KeeperHeartbeat ----
 \* Heartbeat loop control flow for [lib/keeper/keeper_keepalive.ml].
 \*
-\* Runtime entities modelled (see [run_heartbeat_loop] at line 1815,
-\* and [Atomic.set entry.fiber_wakeup true] at lines 2130 and 2631):
+\* Function names are stable identifiers; lines drift across edits.
+\* Verified against main as of 2026-04-28 (sibling refresh to #11641,
+\* #11645; see Cycle 27 PR #11596 for the OCaml-side anchor).
+\*
+\* Runtime entities modelled (see [run_heartbeat_loop] at line 1828,
+\* and [Atomic.set entry.fiber_wakeup true] at lines 2143 and 2644):
 \*
 \*   wakeup_signaled  : bool Atomic.t — set by external supervisor /
 \*                      operator code when a keeper should service a

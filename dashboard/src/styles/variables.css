@@ -121,11 +121,11 @@
   /* Semantic - Critical Sister (Rose). Pink-red distinct from --bad
      (which leans toward warm red); used for "this provider failed"
      diff badges where the brand-style rose differentiates from the
-     generic critical signal. */
-  --rose: #f43f5e;
+     generic critical signal.
+     Base hex (--rose, --rose-fg) lifted to source.ts in Iter 2c-3;
+     alpha variants (--rose-10, --rose-28) remain hand-authored. */
   --rose-10: rgba(244, 63, 94, 0.10);
   --rose-28: rgba(244, 63, 94, 0.28);
-  --rose-fg: #fecdd3;
 
   /* Extended warn off-alpha — covers densely-stacked warning chips
      where -10/-20 buckets felt either too pale or too saturated. */
@@ -254,10 +254,9 @@
      the tailwindcss palette so callers can grep both ways
      (e.g. "slate-400" → --slate-400 token or Tailwind class).
      Phase G entries slate-{400,500,800}, sky-400, blue-400 lifted to
-     source.ts in Iter 2c-1 — see dashboard/design-system/tokens/source.ts
-     §"Tailwind palette aliases". The remaining three (rose-light,
-     frost-100, white-pure) are queued for the next wave. */
-  --rose-light: #fb7185;
+     source.ts in Iter 2c-1; rose-light lifted to source.ts in Iter 2c-3
+     (see source.ts §"Tailwind palette aliases"). The remaining two
+     (frost-100, white-pure) are queued for the next wave. */
   --frost-100: #e2e8f0;
   --white-pure: #ffffff;
 

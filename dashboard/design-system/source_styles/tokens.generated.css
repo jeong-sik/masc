@@ -164,6 +164,9 @@
   --indigo: #818cf8;  /* Tailwind indigo-400 alias (kept short name) */
   --yellow-bright: #facc15;  /* Tailwind yellow-400 alias (kept short name) */
   --amber-bright: #f59e0b;  /* Tailwind amber-500 alias (kept short name) */
+  --rose: #f43f5e;  /* Tailwind rose-500 alias */
+  --rose-fg: #fecdd3;  /* Tailwind rose-200 alias */
+  --rose-light: #fb7185;  /* Tailwind rose-400 alias */
 }
 
 :root {

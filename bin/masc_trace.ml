@@ -205,17 +205,30 @@ let dump_fsm_transitions ~base_path ~keeper ~turn_id =
       find 0
     in
     if matches <> [] then begin
-      let states =
+      (* Pair each transition's [to_state] with its [ts] field so the
+         summary line carries timestamps the operator can eyeball for
+         per-state duration.  No OCaml-side mutable accumulation: the
+         emit calls are stateless, and any duration derivation is a
+         pure projection of the already-emitted [ts] timeline.  PromQL
+         and this CLI are the right boundary for time-series math. *)
+      let state_with_ts =
         List.filter_map
           (fun json ->
-            string_field json "message"
-            |> Option.value ~default:""
-            |> extract_to_state)
+            let msg =
+              string_field json "message" |> Option.value ~default:""
+            in
+            let ts =
+              string_field json "ts" |> Option.value ~default:"-"
+            in
+            extract_to_state msg
+            |> Option.map (fun s -> (s, ts)))
           matches
       in
-      if states <> [] then
+      if state_with_ts <> [] then
+        let render (state, ts) = Printf.sprintf "%s @%s" state ts in
         Printf.printf "=== fsm path === %s -> %s\n" keeper
-          (String.concat " -> " states)
+          (String.concat " -> "
+             (List.map render state_with_ts))
     end
 
 (** Scan [.masc/tool_calls/<YYYY-MM>/<DD>.jsonl] for tool call

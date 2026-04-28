@@ -691,6 +691,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
+      - name: Install ripgrep
+        run: sudo apt-get install -y -qq ripgrep
+
       - name: Run OCaml structure ratchet
         run: scripts/ocaml-structure-ratchet.sh
 

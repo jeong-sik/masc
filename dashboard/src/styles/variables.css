@@ -135,11 +135,12 @@
 
   /* Semantic - Emerald. Brighter green than --ok (4ade80); used for
      "all healthy" diff badges in the config resolution panel where
-     emerald reads as a more confident pass-state. */
-  --emerald: #22c55e;
+     emerald reads as a more confident pass-state.
+     Base hex (--emerald, --emerald-fg) lifted to source.ts in Iter 2c-2;
+     alpha variants (--emerald-10, --emerald-28) remain hand-authored
+     because they encode usage-specific opacity. */
   --emerald-10: rgba(34, 197, 94, 0.10);
   --emerald-28: rgba(34, 197, 94, 0.28);
-  --emerald-fg: #bbf7d0;
 
   /* Semantic - Plum (157,139,250 = #a78bfa = existing --purple). Used
      for FSM "considering / select" rows where the cool purple separates
@@ -181,21 +182,21 @@
 
   /* Semantic - Yellow Bright. Pure spectrum yellow (#facc15), distinct
      from --warn (251,191,36 = #fbbf24, slightly muted gold). Used for
-     "highlighted attention" badges in the config resolution panel. */
-  --yellow-bright: #facc15;
+     "highlighted attention" badges in the config resolution panel.
+     Base hex (--yellow-bright) lifted to source.ts in Iter 2c-2. */
   --yellow-bright-10: rgba(250, 204, 21, 0.10);
   --yellow-bright-28: rgba(250, 204, 21, 0.28);
 
   /* Semantic - Amber Bright. Pure orange (#f59e0b), distinct from
      --warn-bright (#f97316, redder orange). Used for FSM "Compacting"
-     swimlane segments where amber reads as cautionary-but-not-critical. */
-  --amber-bright: #f59e0b;
+     swimlane segments where amber reads as cautionary-but-not-critical.
+     Base hex (--amber-bright) lifted to source.ts in Iter 2c-2. */
   --amber-bright-45: rgba(245, 158, 11, 0.45);
 
   /* Semantic - Indigo. Cool blue-violet (#818cf8), distinct from
      --accent (#47b8ff, cyan-leaning) and --purple (#a78bfa, plum-leaning).
-     Used for FSM "Awaiting" / dependency-blocked indicators. */
-  --indigo: #818cf8;
+     Used for FSM "Awaiting" / dependency-blocked indicators.
+     Base hex (--indigo) lifted to source.ts in Iter 2c-2. */
   --indigo-4: rgba(129, 140, 248, 0.04);
   --indigo-40: rgba(129, 140, 248, 0.40);
   --indigo-45: rgba(129, 140, 248, 0.45);

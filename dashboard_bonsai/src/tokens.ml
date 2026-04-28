@@ -159,6 +159,11 @@ type semantic =
   | `Yellow_100
   | `Red_100
   | `Cyan_100
+  | `Emerald
+  | `Emerald_fg
+  | `Indigo
+  | `Yellow_bright
+  | `Amber_bright
   | `Ok_soft
   | `Ok_fg
   | `Ok_border
@@ -545,6 +550,11 @@ let name_of = function
   | `Yellow_100 -> "yellow-100"
   | `Red_100 -> "red-100"
   | `Cyan_100 -> "cyan-100"
+  | `Emerald -> "emerald"
+  | `Emerald_fg -> "emerald-fg"
+  | `Indigo -> "indigo"
+  | `Yellow_bright -> "yellow-bright"
+  | `Amber_bright -> "amber-bright"
   | `Ok_soft -> "ok-soft"
   | `Ok_fg -> "ok-fg"
   | `Ok_border -> "ok-border"

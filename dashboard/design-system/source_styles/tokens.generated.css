@@ -159,6 +159,11 @@
   --yellow-100: #fde68a;  /* Tailwind yellow-100 alias */
   --red-100: #fecaca;  /* Tailwind red-100 alias */
   --cyan-100: #cffafe;  /* Tailwind cyan-100 alias */
+  --emerald: #22c55e;  /* Tailwind emerald-500 alias (kept short name) */
+  --emerald-fg: #bbf7d0;  /* Tailwind emerald-200 alias (kept short name) */
+  --indigo: #818cf8;  /* Tailwind indigo-400 alias (kept short name) */
+  --yellow-bright: #facc15;  /* Tailwind yellow-400 alias (kept short name) */
+  --amber-bright: #f59e0b;  /* Tailwind amber-500 alias (kept short name) */
 }
 
 :root {

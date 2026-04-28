@@ -158,6 +158,11 @@
   --color-yellow-100: #fde68a;
   --color-red-100: #fecaca;
   --color-cyan-100: #cffafe;
+  --color-emerald: #22c55e;
+  --color-emerald-fg: #bbf7d0;
+  --color-indigo: #818cf8;
+  --color-yellow-bright: #facc15;
+  --color-amber-bright: #f59e0b;
   --color-ok-soft: rgb(107 158 107 / .10);
   --color-ok-fg: #8ebc8e;
   --color-ok-border: rgb(107 158 107 / .35);

@@ -47,6 +47,37 @@ let symbol_of_constructor (cd : constructor_declaration) =
   | Some s -> s
   | None -> String.lowercase_ascii cd.pcd_name.txt
 
+(* [@@tla.phantom_param] flag on type declarations (Cycle 20 / Tier I9).
+
+   Marks every type parameter of the annotated type as phantom — i.e.
+   not specialised in any constructor body — so that the deriver can
+   emit [to_tla_symbol] / [all_symbols] for a 1+ type-parameter GADT
+   existential as if it had no type parameters at all.
+
+   Motivating use case: phase-encoded state machines such as
+     type 'a perceiving =
+       | P_observe : 'a perceiving
+       | P_wait    : 'a perceiving
+     [@@deriving tla] [@@tla.phantom_param]
+   where 'a is used purely as a type-level tag and never narrowed by a
+   constructor's payload.
+
+   Type safety: if the user lies about phantom-ness (a constructor
+   does specialise 'a, e.g. [P_count : int -> int perceiving]), the
+   emitted match desugars to a regular [match e with ...] without the
+   locally-abstract-type wrapper, and OCaml's type-checker rejects the
+   pattern with an unambiguous error. The attribute is therefore an
+   advisory contract — the deriver trusts it but the compiler enforces
+   the underlying invariant. *)
+let phantom_param_attr =
+  Attribute.declare "tla.phantom_param"
+    Attribute.Context.type_declaration
+    Ast_pattern.(pstr nil)
+    ()
+
+let has_phantom_param_attr (td : type_declaration) =
+  Attribute.get phantom_param_attr td <> None
+
 let lid_of_constructor ~loc (cd : constructor_declaration) =
   Loc.make ~loc (Longident.Lident cd.pcd_name.txt)
 
@@ -272,30 +303,39 @@ let make_to_tla_symbol_impl_gadt_one_param ~loc ~type_name cds =
   in
   Ast_builder.Default.pstr_value ~loc Nonrecursive [ binding ]
 
-let derive_impl_for_gadt ~loc ~type_name ~type_params cds =
+let derive_impl_for_gadt ~loc ~type_name ~type_params ~is_phantom cds =
   let _ = type_name in
   let all_symbols = make_all_symbols_impl ~loc cds in
-  match type_params with
-  | [] ->
+  match (type_params, is_phantom) with
+  | [], _ ->
     (* GADT with no type params: structurally like ordinary variant but
        all_states is suppressed because GADT constructors with explicit
        result types may not list-construct cleanly without payload. *)
     let to_tla = make_to_tla_symbol_impl ~loc cds in
     [ to_tla; all_symbols ]
-  | _ :: _ ->
-    (* Deferred: 1+ type parameter GADT existentials require emitting
-       [let foo : type a. a t -> string = function ...] which has a
-       three-piece AST (ptyp_poly + pexp_newtype + inner pexp_constraint)
-       whose ppxlib-builder reproduction empirically conflicts with the
-       OCaml 5.4 type-checker's scoped-type rules. Tracked for follow-up
-       Tier (I8b / I9) — for now, hand-write [to_tla_symbol_any] for the
-       few known GADT existentials in lib/autonomous/ rather than rely
-       on the deriver. *)
+  | _ :: _, true ->
+    (* Phantom-parameter GADT (Tier I9): the user has asserted via
+       [@@tla.phantom_param] that no constructor specialises any type
+       parameter. The emitted [to_tla_symbol] is structurally identical
+       to the regular-variant case — OCaml's type checker accepts the
+       match because every arm returns the same uniform type [string],
+       so no locally-abstract-type scoping is required. The compiler
+       enforces the phantom contract: a constructor that specialises
+       a parameter triggers a clean type error at the user's call site. *)
+    let to_tla = make_to_tla_symbol_impl ~loc cds in
+    [ to_tla; all_symbols ]
+  | _ :: _, false ->
+    (* Non-phantom 1+ parameter GADT existentials still require the
+       three-piece AST trick (ptyp_poly + pexp_newtype + inner
+       pexp_constraint) whose ppxlib-builder reproduction empirically
+       conflicts with OCaml 5.4 scoped-type rules. Workaround paths:
+       - If parameters are phantom, add [@@tla.phantom_param] (Tier I9).
+       - Otherwise, hand-write [to_tla_symbol_any] for this type. *)
     Location.raise_errorf ~loc
       "[@@deriving tla]: GADT existential with type parameters is not \
-       yet supported. Tier I8 lands GADT detection + 0-param emission; \
-       1+ parameter GADT existentials are deferred to a follow-up tier. \
-       Workaround: hand-write to_tla_symbol_any for this type."
+       yet supported. Add [@@tla.phantom_param] if the type parameters \
+       are phantom (not specialised in constructor bodies). Otherwise, \
+       hand-write to_tla_symbol_any for this type."
 
 let str_type_decl ~ctxt (_rec_flag, type_decls) =
   let loc = Expansion_context.Deriver.derived_item_loc ctxt in
@@ -307,6 +347,7 @@ let str_type_decl ~ctxt (_rec_flag, type_decls) =
             derive_impl_for_gadt ~loc
               ~type_name:td.ptype_name.txt
               ~type_params:td.ptype_params
+              ~is_phantom:(has_phantom_param_attr td)
               cds
           else
             derive_impl_for_variant ~loc cds
@@ -341,16 +382,29 @@ let make_value_sig ~loc ~name ~type_ =
     (Ast_builder.Default.value_description ~loc
        ~name:(Loc.make ~loc name) ~type_ ~prim:[])
 
-let derive_sig_for_variant ~loc ~type_name ~type_params cds =
+let derive_sig_for_variant ~loc ~type_name ~type_params ~is_phantom cds =
   let is_gadt = any_gadt_constructor cds in
   let arg_t =
     if is_gadt then
-      match type_params with
-      | [] -> type_t ~loc ~type_name
-      | _ :: _ ->
+      match (type_params, is_phantom) with
+      | [], _ -> type_t ~loc ~type_name
+      | _ :: _, true ->
+        (* Phantom GADT (Tier I9): apply the original type parameters so
+           the emitted signature reads e.g. [val to_tla_symbol :
+           'a perceiving -> string]. Free type variables in a value
+           description are implicitly universally quantified, which is
+           the correct semantics here — the function works for any
+           instantiation of the phantom parameters. *)
+        let type_args = List.map (fun (ct, _vi) -> ct) type_params in
+        Ast_builder.Default.ptyp_constr ~loc
+          (Loc.make ~loc (Longident.Lident type_name))
+          type_args
+      | _ :: _, false ->
         Location.raise_errorf ~loc
           "[@@deriving tla]: GADT existential with type parameters is \
-           not yet supported in signatures (Tier I8 covers 0-param GADT)."
+           not yet supported in signatures. Add [@@tla.phantom_param] if \
+           the type parameters are phantom (not specialised in \
+           constructor bodies)."
     else
       type_t ~loc ~type_name
   in
@@ -398,6 +452,7 @@ let sig_type_decl ~ctxt (_rec_flag, type_decls) =
           derive_sig_for_variant ~loc
             ~type_name:td.ptype_name.txt
             ~type_params:td.ptype_params
+            ~is_phantom:(has_phantom_param_attr td)
             cds
       | Ptype_record lds ->
           derive_sig_for_record ~loc lds

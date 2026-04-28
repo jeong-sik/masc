@@ -289,6 +289,28 @@ val metric_keeper_fsm_edge_transitions : string
     keepers = ≤ 1600 series; reachable subset is much smaller. *)
 val metric_keeper_turn_fsm_transitions : string
 
+(** Cycle 43 (Tier I3 follow-up to fsm_guard smoke at
+    [keeper_turn_fsm.ml:118]): runtime [@@fsm_guard] assert violations
+    that the [Keeper_fsm_guard_runtime.wrap_unit] caught and recovered
+    from. Bumped by the wrap helper before swallowing
+    [Assert_failure] in counter mode (default), and also bumped before
+    re-raising in assert mode ([MASC_FSM_GUARD_ASSERT=1]).
+
+    Labels: [action, stage]. [action] is the spec-action name
+    ([WakeupSignal], [HeartbeatTick], [TurnComplete],
+    [SubmitTask], [AssignTask], [EmptyQueueSleep]). [stage] is
+    [pre] or [post].
+
+    Operator signal: a non-zero value on any [action,stage] pair
+    indicates the OCaml runtime drifted from the
+    [specs/keeper-state-machine/Keeper{Heartbeat,TaskAcquisition}.tla]
+    contract. The first violation per pair should trigger spec/code
+    reconciliation review.
+
+    Cardinality upper bound: ~7 actions × 2 stages × ~16 keepers
+    ≤ 224 series; fleet-bounded. *)
+val metric_fsm_guard_violation : string
+
 (** PR-J: post-turn lifecycle callbacks raised exceptions that were
     silently swallowed before this counter existed. Labels: [callback]
     with values:

@@ -619,6 +619,7 @@ let metric_keeper_fsm_edge_transitions =
   "masc_keeper_fsm_edge_transitions_total"
 let metric_keeper_turn_fsm_transitions =
   "masc_keeper_turn_fsm_transitions_total"
+let metric_fsm_guard_violation = "masc_fsm_guard_violation_total"
 let metric_keeper_lifecycle_callback_failures =
   "masc_keeper_lifecycle_callback_failures_total"
 let metric_keeper_event_bus_drain = "masc_keeper_event_bus_drain_total"

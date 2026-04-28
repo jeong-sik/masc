@@ -550,6 +550,7 @@
    keeper_unified_metrics
    keeper_spec_intf
    keeper_turn_fsm
+   keeper_fsm_guard_runtime
    keeper_turn_livelock
    keeper_stay_silent_loop_detector
    keeper_error_classify

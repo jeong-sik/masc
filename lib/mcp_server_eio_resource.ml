@@ -96,8 +96,8 @@ let handle_read_resource_eio state id params =
               ("text/markdown", text_opt)
           | "status" -> ("text/markdown", Some (Coord.status config))
           | "status.json" ->
-              let state_json = Types.room_state_to_yojson (Coord.read_state config) in
-              let backlog_json = Types.backlog_to_yojson (Coord.read_backlog config) in
+              let state_json = Types_core.room_state_to_yojson (Coord.read_state config) in
+              let backlog_json = Types_core.backlog_to_yojson (Coord.read_backlog config) in
               let connected_agents = Session.get_agent_statuses registry in
               let json = `Assoc [
                 ("base_path", `String config.base_path);
@@ -108,7 +108,7 @@ let handle_read_resource_eio state id params =
               ("application/json", Some (Yojson.Safe.pretty_to_string json))
           | "tasks" -> ("text/markdown", Some (Coord.list_tasks config))
           | "tasks.json" ->
-              let backlog_json = Types.backlog_to_yojson (Coord.read_backlog config) in
+              let backlog_json = Types_core.backlog_to_yojson (Coord.read_backlog config) in
               ("application/json", Some (Yojson.Safe.pretty_to_string backlog_json))
           | "who" -> ("text/markdown", Some (Session.status_string registry))
           | "who.json" ->

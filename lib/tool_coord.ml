@@ -341,25 +341,25 @@ let status_summary_string (ctx : context) =
     List.fold_left
       (fun
          (active, todo_cnt, claimed_cnt, in_progress_cnt, done_cnt, cancelled_cnt)
-         (task : Types.task) ->
+         (task : Types_core.task) ->
         Coord_query.safe_yield ();
         match task.task_status with
-        | Types.Todo ->
+        | Types_core.Todo ->
             (task :: active, todo_cnt + 1, claimed_cnt, in_progress_cnt,
              done_cnt, cancelled_cnt)
-        | Types.Claimed _ ->
+        | Types_core.Claimed _ ->
             (task :: active, todo_cnt, claimed_cnt + 1, in_progress_cnt,
              done_cnt, cancelled_cnt)
-        | Types.InProgress _ ->
+        | Types_core.InProgress _ ->
             (task :: active, todo_cnt, claimed_cnt, in_progress_cnt + 1,
              done_cnt, cancelled_cnt)
-        | Types.Done _ ->
+        | Types_core.Done _ ->
             (active, todo_cnt, claimed_cnt, in_progress_cnt, done_cnt + 1,
              cancelled_cnt)
-        | Types.AwaitingVerification _ ->
+        | Types_core.AwaitingVerification _ ->
             (task :: active, todo_cnt, claimed_cnt, in_progress_cnt + 1,
              done_cnt, cancelled_cnt)
-        | Types.Cancelled _ ->
+        | Types_core.Cancelled _ ->
             (active, todo_cnt, claimed_cnt, in_progress_cnt, done_cnt,
              cancelled_cnt + 1))
       ([], 0, 0, 0, 0, 0)

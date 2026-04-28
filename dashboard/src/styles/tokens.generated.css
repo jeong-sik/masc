@@ -172,6 +172,10 @@
   --color-white-pure: #ffffff;
   --color-text-near-white: #f8fafc;
   --color-text-slate-light: #cbd5e1;
+  --color-text-strong: #eaf1ff;
+  --color-text-body: #c0d2f2;
+  --color-text-muted: #a8bfdf;
+  --color-text-dim: #a0a8b4;
   --color-ok-soft: rgb(107 158 107 / .10);
   --color-ok-fg: #8ebc8e;
   --color-ok-border: rgb(107 158 107 / .35);

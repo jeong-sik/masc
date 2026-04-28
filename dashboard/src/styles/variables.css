@@ -12,11 +12,8 @@
   --bg-panel-hover: rgba(32, 44, 64, 0.96);
 
   /* Text & Typography */
-  --text-strong: #eaf1ff;
-  --text-body: #c0d2f2;
-  --text-muted: #a8bfdf;
-  --text-dim: #a0a8b4;
-  
+  /* --text-strong, --text-body, --text-muted, --text-dim lifted to source.ts (Iter 2c-6) */
+
   /* Borders */
   --border-subtle: rgba(138, 163, 211, 0.12);
   --border-base: rgba(138, 163, 211, 0.2);

@@ -173,6 +173,10 @@
   --white-pure: #ffffff;  /* Pure white #ffffff (canon constant, distinct from --text-strong tints) */
   --text-near-white: #f8fafc;  /* Tailwind slate-50 alias */
   --text-slate-light: #cbd5e1;  /* Tailwind slate-300 alias */
+  --text-strong: #eaf1ff;  /* Brightest text on dark surfaces */
+  --text-body: #c0d2f2;  /* Default body copy on dark surfaces */
+  --text-muted: #a8bfdf;  /* Secondary/labels */
+  --text-dim: #a0a8b4;  /* Tertiary/captions */
 }
 
 :root {

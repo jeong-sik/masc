@@ -178,16 +178,16 @@ let pause_info config =
 (* Re-exports: Zombie Detection (Resilience)    *)
 (* ============================================ *)
 
-let heartbeat_timeout_seconds = Resilience.default_zombie_threshold
-let parse_iso_time_opt = Resilience.Time.parse_iso8601_opt
+let heartbeat_timeout_seconds = Coord_resilience.default_zombie_threshold
+let parse_iso_time_opt = Coord_resilience.Time.parse_iso8601_opt
 
 let parse_iso_time iso_str =
   match parse_iso_time_opt iso_str with
   | Some t -> t
-  | None -> Resilience.Time.now ()
+  | None -> Coord_resilience.Time.now ()
 
 let is_zombie_agent ~agent_name last_seen_iso =
-  Resilience.Zombie.is_zombie_for_agent ~agent_name last_seen_iso
+  Coord_resilience.Zombie.is_zombie_for_agent ~agent_name last_seen_iso
 
 let take n xs =
   if n <= 0 then []

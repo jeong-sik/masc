@@ -61,11 +61,11 @@ let cleanup_zombies
           | Ok agent
             when (not (List.exists (fun (n, _) -> n = agent.name) !zombie_entries)) &&
                  (let threshold =
-                    if Resilience.Zombie.is_keeper ~name:agent.name ~agent_type:agent.agent_type
+                    if Coord_resilience.Zombie.is_keeper ~name:agent.name ~agent_type:agent.agent_type
                     then keeper_threshold_sec
                     else agent_threshold_sec
                   in
-                  Resilience.Zombie.is_zombie ~threshold agent.last_seen) ->
+                  Coord_resilience.Zombie.is_zombie ~threshold agent.last_seen) ->
               zombie_entries := (agent.name, path) :: !zombie_entries
           | Ok _ -> () (* not a zombie, skip *)
           | Error err ->

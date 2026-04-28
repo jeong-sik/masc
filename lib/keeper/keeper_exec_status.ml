@@ -128,11 +128,11 @@ let parse_agent_status (config : Coord.config) ~(agent_name : string) : Yojson.S
         | Ok (agent : Types.agent) ->
             let now_ts = Time_compat.now () in
             let joined_ts =
-              Resilience.Time.parse_iso8601_opt agent.joined_at
+              Coord_resilience.Time.parse_iso8601_opt agent.joined_at
               |> Option.value ~default:0.0
             in
             let last_seen_ts =
-              Resilience.Time.parse_iso8601_opt agent.last_seen
+              Coord_resilience.Time.parse_iso8601_opt agent.last_seen
               |> Option.value ~default:0.0
             in
             let age_s = if joined_ts <= 0.0 then 0.0 else now_ts -. joined_ts in
@@ -175,7 +175,7 @@ let agent_status_text agent_status =
 
 let agent_last_seen_ts_opt agent_status =
   match json_string_opt "last_seen" agent_status with
-  | Some value -> Resilience.Time.parse_iso8601_opt value
+  | Some value -> Coord_resilience.Time.parse_iso8601_opt value
   | None -> None
 
 let agent_last_seen_ago_s agent_status =
@@ -322,7 +322,7 @@ let classify_keeper_quiet_reason ~meta ~keepalive_running ~agent_status ~now_ts 
   then Some "agent_missing"
   else if meta.runtime.usage.total_turns = 0 && meta.runtime.proactive_rt.count_total = 0 then
     let keeper_age_s =
-      match Resilience.Time.parse_iso8601_opt meta.created_at with
+      match Coord_resilience.Time.parse_iso8601_opt meta.created_at with
       | Some created_ts when created_ts > 0.0 -> max 0.0 (now_ts -. created_ts)
       | _ -> 0.0
     in

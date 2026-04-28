@@ -38,7 +38,7 @@ let handle_keeper_list ctx args : tool_result =
         | Ok None -> None
         | Ok (Some m) ->
           let created_ts =
-            Resilience.Time.parse_iso8601_opt m.created_at |> Option.value ~default:0.0
+            Coord_resilience.Time.parse_iso8601_opt m.created_at |> Option.value ~default:0.0
           in
           let keeper_age_s = if created_ts <= 0.0 then 0.0 else now_ts -. created_ts in
           let last_turn_ago_s = if m.runtime.usage.last_turn_ts <= 0.0 then 0.0 else now_ts -. m.runtime.usage.last_turn_ts in

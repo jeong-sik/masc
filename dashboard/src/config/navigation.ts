@@ -9,6 +9,7 @@ type SurfaceSectionId =
   | 'runtime'
   | 'fleet-health'   // Phase 1: absorbs telemetry + fleet + tool-quality + monitoring governance
   | 'safe-autonomy'
+  | 'cost'           // O4 cost/latency dashboard zone (#11542); use-site existed without type entry
   | 'memory-subsystems'
   | 'attribution'     // Layer 4 gate-chain observation (per-gate outcome + recent events)
   // command

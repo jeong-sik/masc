@@ -284,7 +284,17 @@ function EpisodeLearnings() {
 }
 
 // ═════════════════════════════════════════════════════════════════
-// K4 · AUTORESEARCH
+// K4 · AUTORESEARCH — DEPRECATED 2026-04-29 (audit PR #11523)
+//
+// This spec describes a research-finding model (hypothesis/evidence/
+// conclusion + confidence). Production uses a self-improvement loop
+// schema (cycle/keep/discard/best_score) — see:
+//   dashboard/src/api/schemas/autoresearch.ts
+//   dashboard/src/components/autoresearch.ts
+//
+// Different products. Reconciliation decision: production schema is
+// canonical; this preview spec is archived. Mockup retained for design
+// reference only (do not consume as implementation guidance).
 // ═════════════════════════════════════════════════════════════════
 
 function ARLoopList() {

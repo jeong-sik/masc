@@ -528,7 +528,7 @@ let test_keeper_shell_gh_without_current_task_uses_sandbox_context () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
   let meta = make_meta ~sandbox_profile:Keeper_types.Docker () in
   let raw =
-    Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_runtime:None ~exec_cache:None ~config ~meta
+    Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_factory:None ~exec_cache:None ~config ~meta
       ~args:
         (`Assoc
           [

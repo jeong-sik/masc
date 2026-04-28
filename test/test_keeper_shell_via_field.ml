@@ -88,7 +88,7 @@ let assert_via_host ~op raw =
         "op=%s missing [via] discriminator in host-branch JSON; raw=%s" op raw
 
 let invoke ~config ~meta args =
-  Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_runtime:None
+  Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_factory:None
     ~exec_cache:None ~config ~meta ~args
 
 let test_ls_host_includes_via () =

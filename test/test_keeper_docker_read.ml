@@ -9,6 +9,7 @@
 module Coord = Masc_mcp.Coord
 module Keeper_docker_read = Masc_mcp.Keeper_docker_read
 module Keeper_turn_sandbox_runtime = Masc_mcp.Keeper_turn_sandbox_runtime
+module Keeper_sandbox_factory = Masc_mcp.Keeper_sandbox_factory
 module Keeper_types = Masc_mcp.Keeper_types
 module Keeper_alerting_path = Masc_mcp.Keeper_alerting_path
 module Keeper_sandbox = Masc_mcp.Keeper_sandbox
@@ -629,14 +630,14 @@ let test_turn_runtime_reuses_single_container () =
   let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   ensure_dir host_root;
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
-  let runtime = Keeper_turn_sandbox_runtime.create ~config ~meta () in
+  let factory = Keeper_sandbox_factory.create ~config ~meta () in
   Fun.protect ~finally:(fun () ->
-    Keeper_turn_sandbox_runtime.cleanup runtime;
+    Keeper_sandbox_factory.cleanup factory;
     cleanup_dir base) @@ fun () ->
   let run_once () =
     match
       Keeper_docker_read.run_command_in_container_with_status
-        ~turn_sandbox_runtime:runtime
+        ~turn_sandbox_factory:factory
         ~config ~meta
         ~command_argv:[ "cat"; "/home/keeper/playground/minjae/mind/demo.txt" ]
         ~max_bytes:4096 ~timeout_sec:5.0 ()
@@ -653,7 +654,7 @@ let test_turn_runtime_reuses_single_container () =
   in
   run_once ();
   run_once ();
-  Keeper_turn_sandbox_runtime.cleanup runtime;
+  Keeper_sandbox_factory.cleanup factory;
   let lines =
     read_file log_path
     |> String.split_on_char '\n'
@@ -814,20 +815,20 @@ let test_turn_runtime_relaxed_fs_omits_readonly_and_noexec () =
   let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   ensure_dir host_root;
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
-  let runtime = Keeper_turn_sandbox_runtime.create ~config ~meta () in
+  let factory = Keeper_sandbox_factory.create ~config ~meta () in
   Fun.protect ~finally:(fun () ->
-    Keeper_turn_sandbox_runtime.cleanup runtime;
+    Keeper_sandbox_factory.cleanup factory;
     cleanup_dir base) @@ fun () ->
   (match
      Keeper_docker_read.run_command_in_container_with_status
-       ~turn_sandbox_runtime:runtime
+       ~turn_sandbox_factory:factory
        ~config ~meta
        ~command_argv:[ "cat"; "/home/keeper/playground/minjae/mind/demo.txt" ]
        ~max_bytes:4096 ~timeout_sec:5.0 ()
    with
    | Error msg -> Alcotest.failf "expected turn runtime command success, got %s" msg
    | Ok _ -> ());
-  Keeper_turn_sandbox_runtime.cleanup runtime;
+  Keeper_sandbox_factory.cleanup factory;
   let run_line =
     read_file log_path
     |> String.split_on_char '\n'

@@ -117,7 +117,7 @@ let test_git_log_runtime_branch_uses_cwd_response () =
     (* The git_log runtime branch builds its own cwd_response.
        Verify at least 2 distinct [cwd_response = Keeper_cwd_response.docker]
        constructions in the file (render_docker + git_log; the
-       op="bash" arm uses [match turn_sandbox_runtime] form
+       op="bash" arm uses [match turn_sandbox_factory] form
        which differs). *)
     let docker_ctor_uses =
       count_substring src "Keeper_cwd_response.docker ~host_cwd:cwd"

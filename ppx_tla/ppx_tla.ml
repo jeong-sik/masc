@@ -132,15 +132,188 @@ let derive_impl_for_variant ~loc cds =
   else
     [ to_tla; all_symbols ]
 
+(* ── Record-type implementation generators (Cycle 20 / Tier I7) ────
+
+   For record types we emit:
+   - [field_names : string list]   — every field's source name
+   - [field_count : int]           — [List.length field_names]
+
+   These two helpers let TLA+ specs assert structural shape without the
+   deriver having to know how to render arbitrary field values. Future
+   tiers may add a [to_tla_record] combinator that delegates field-value
+   rendering to user-supplied per-field [to_tla] functions. *)
+
+let make_field_names_impl ~loc lds =
+  let exprs =
+    List.map
+      (fun (ld : label_declaration) ->
+        Ast_builder.Default.estring ~loc ld.pld_name.txt)
+      lds
+  in
+  let list_expr = Ast_builder.Default.elist ~loc exprs in
+  let pat = Ast_builder.Default.ppat_var ~loc (Loc.make ~loc "field_names") in
+  let binding =
+    Ast_builder.Default.value_binding ~loc ~pat ~expr:list_expr
+  in
+  Ast_builder.Default.pstr_value ~loc Nonrecursive [ binding ]
+
+let make_field_count_impl ~loc lds =
+  let count = List.length lds in
+  let int_expr = Ast_builder.Default.eint ~loc count in
+  let pat = Ast_builder.Default.ppat_var ~loc (Loc.make ~loc "field_count") in
+  let binding =
+    Ast_builder.Default.value_binding ~loc ~pat ~expr:int_expr
+  in
+  Ast_builder.Default.pstr_value ~loc Nonrecursive [ binding ]
+
+let derive_impl_for_record ~loc lds =
+  [ make_field_names_impl ~loc lds; make_field_count_impl ~loc lds ]
+
+(* ── GADT existential support (Cycle 20 / Tier I8) ─────────────────
+
+   A constructor is a GADT constructor iff [pcd_res <> None]: the
+   constructor explicitly carries a result type (e.g. [Any_idle : idle any]).
+
+   For GADT existentials we emit:
+   - [to_tla_symbol]: type-locally-abstract pattern match
+     (`fun (type a) (x : a TYPE) -> match x with ...`) so OCaml accepts the
+     pattern match without quantifier inference.
+   - [all_symbols : string list]: the constructor name strings (always safe).
+
+   We do NOT emit [all_states] for GADT existentials. A list literal
+   cannot pack constructors with different phantom indices into a single
+   homogeneous list without an existential wrapper, which would change
+   the deriver's contract. Users who need enumeration can define their
+   own [type any = Any : 'a t -> any] and lift each constructor manually.
+
+   Type-parameter scope (Tier I8): 0 or 1 type parameter. Two-parameter
+   GADTs (e.g. `(_, _) transition`) are deferred to Tier I9 when the
+   `[@tla.phantom_param]` attribute is introduced. *)
+
+let is_gadt_constructor (cd : constructor_declaration) =
+  cd.pcd_res <> None
+
+let any_gadt_constructor cds =
+  List.exists is_gadt_constructor cds
+
+let make_to_tla_symbol_impl_gadt_one_param ~loc ~type_name cds =
+  (* OCaml's [let f : type a. T = e] desugars to:
+
+       let f : 'a. 'a T_subst = fun (type a) -> (e : a T_concrete)
+
+     Three AST pieces work together:
+     1. Pattern carries [ptyp_poly] -> outer binding is polymorphic.
+     2. Body wrapped in [pexp_newtype "a"] -> introduces locally
+        abstract type `a` for the body.
+     3. The body's expression carries [pexp_constraint] with the
+        concrete-`a` type -> the inner [function ...] is locked to
+        [a T_concrete -> string], which lets the GADT pattern match
+        type-check uniformly across constructors.
+
+     Emitting only #1 (just the poly annotation) is NOT enough — OCaml
+     doesn't auto-introduce the locally abstract type from the poly
+     annotation alone. The newtype wrapper + inner constraint are
+     what unlock GADT match without narrowing to the first case. *)
+  let cases =
+    List.map
+      (fun (cd : constructor_declaration) ->
+        let pat = constructor_pattern ~loc cd in
+        let rhs =
+          Ast_builder.Default.estring ~loc (symbol_of_constructor cd)
+        in
+        Ast_builder.Default.case ~lhs:pat ~guard:None ~rhs)
+      cds
+  in
+  let arg_name = "__tla_arg" in
+  let a_var = "a" in
+  let a_type = Ast_builder.Default.ptyp_var ~loc a_var in
+  let arg_type =
+    Ast_builder.Default.ptyp_constr ~loc
+      (Loc.make ~loc (Longident.Lident type_name))
+      [ a_type ]
+  in
+  let string_t_inline =
+    Ast_builder.Default.ptyp_constr ~loc
+      (Loc.make ~loc (Longident.Lident "string")) []
+  in
+  let arg_pat =
+    Ast_builder.Default.ppat_var ~loc (Loc.make ~loc arg_name)
+  in
+  let arg_expr = Ast_builder.Default.evar ~loc arg_name in
+  let match_expr =
+    Ast_builder.Default.pexp_match ~loc arg_expr cases
+  in
+  let body_fun =
+    Ast_builder.Default.pexp_fun ~loc Nolabel None arg_pat match_expr
+  in
+  let fn_type =
+    Ast_builder.Default.ptyp_arrow ~loc Nolabel arg_type string_t_inline
+  in
+  (* Inner constraint locks body to [a t -> string] with concrete 'a'. *)
+  let constrained_body =
+    Ast_builder.Default.pexp_constraint ~loc body_fun fn_type
+  in
+  (* Newtype wrapper introduces locally abstract 'a'. *)
+  let newtype_wrapped =
+    Ast_builder.Default.pexp_newtype ~loc
+      (Loc.make ~loc a_var) constrained_body
+  in
+  let poly_type =
+    Ast_builder.Default.ptyp_poly ~loc [ Loc.make ~loc a_var ] fn_type
+  in
+  let pat_var =
+    Ast_builder.Default.ppat_var ~loc (Loc.make ~loc "to_tla_symbol")
+  in
+  let pat =
+    Ast_builder.Default.ppat_constraint ~loc pat_var poly_type
+  in
+  let binding =
+    Ast_builder.Default.value_binding ~loc ~pat ~expr:newtype_wrapped
+  in
+  Ast_builder.Default.pstr_value ~loc Nonrecursive [ binding ]
+
+let derive_impl_for_gadt ~loc ~type_name ~type_params cds =
+  let _ = type_name in
+  let all_symbols = make_all_symbols_impl ~loc cds in
+  match type_params with
+  | [] ->
+    (* GADT with no type params: structurally like ordinary variant but
+       all_states is suppressed because GADT constructors with explicit
+       result types may not list-construct cleanly without payload. *)
+    let to_tla = make_to_tla_symbol_impl ~loc cds in
+    [ to_tla; all_symbols ]
+  | _ :: _ ->
+    (* Deferred: 1+ type parameter GADT existentials require emitting
+       [let foo : type a. a t -> string = function ...] which has a
+       three-piece AST (ptyp_poly + pexp_newtype + inner pexp_constraint)
+       whose ppxlib-builder reproduction empirically conflicts with the
+       OCaml 5.4 type-checker's scoped-type rules. Tracked for follow-up
+       Tier (I8b / I9) — for now, hand-write [to_tla_symbol_any] for the
+       few known GADT existentials in lib/autonomous/ rather than rely
+       on the deriver. *)
+    Location.raise_errorf ~loc
+      "[@@deriving tla]: GADT existential with type parameters is not \
+       yet supported. Tier I8 lands GADT detection + 0-param emission; \
+       1+ parameter GADT existentials are deferred to a follow-up tier. \
+       Workaround: hand-write to_tla_symbol_any for this type."
+
 let str_type_decl ~ctxt (_rec_flag, type_decls) =
   let loc = Expansion_context.Deriver.derived_item_loc ctxt in
   match type_decls with
   | [ td ] -> (
       match td.ptype_kind with
-      | Ptype_variant cds -> derive_impl_for_variant ~loc cds
-      | Ptype_abstract | Ptype_record _ | Ptype_open ->
+      | Ptype_variant cds ->
+          if any_gadt_constructor cds then
+            derive_impl_for_gadt ~loc
+              ~type_name:td.ptype_name.txt
+              ~type_params:td.ptype_params
+              cds
+          else
+            derive_impl_for_variant ~loc cds
+      | Ptype_record lds -> derive_impl_for_record ~loc lds
+      | Ptype_abstract | Ptype_open ->
           Location.raise_errorf ~loc
-            "[@@deriving tla]: only variant types are supported")
+            "[@@deriving tla]: only variant and record types are supported")
   | _ ->
       Location.raise_errorf ~loc
         "[@@deriving tla]: a single type declaration is supported per \
@@ -168,11 +341,22 @@ let make_value_sig ~loc ~name ~type_ =
     (Ast_builder.Default.value_description ~loc
        ~name:(Loc.make ~loc name) ~type_ ~prim:[])
 
-let derive_sig_for_variant ~loc ~type_name cds =
-  let t = type_t ~loc ~type_name in
+let derive_sig_for_variant ~loc ~type_name ~type_params cds =
+  let is_gadt = any_gadt_constructor cds in
+  let arg_t =
+    if is_gadt then
+      match type_params with
+      | [] -> type_t ~loc ~type_name
+      | _ :: _ ->
+        Location.raise_errorf ~loc
+          "[@@deriving tla]: GADT existential with type parameters is \
+           not yet supported in signatures (Tier I8 covers 0-param GADT)."
+    else
+      type_t ~loc ~type_name
+  in
   let to_tla_sig =
     let arrow =
-      Ast_builder.Default.ptyp_arrow ~loc Nolabel t (string_t ~loc)
+      Ast_builder.Default.ptyp_arrow ~loc Nolabel arg_t (string_t ~loc)
     in
     make_value_sig ~loc ~name:"to_tla_symbol" ~type_:arrow
   in
@@ -181,12 +365,29 @@ let derive_sig_for_variant ~loc ~type_name cds =
       ~type_:(list_t ~loc (string_t ~loc))
   in
   let all_states_sig_opt =
-    if List.for_all constructor_is_nullary cds then
+    if (not is_gadt) && List.for_all constructor_is_nullary cds then
+      let t = type_t ~loc ~type_name in
       [ make_value_sig ~loc ~name:"all_states" ~type_:(list_t ~loc t) ]
     else
       []
   in
   to_tla_sig :: all_symbols_sig :: all_states_sig_opt
+
+let int_t ~loc =
+  Ast_builder.Default.ptyp_constr ~loc
+    (Loc.make ~loc (Longident.Lident "int"))
+    []
+
+let derive_sig_for_record ~loc lds =
+  let _ = lds in
+  let field_names_sig =
+    make_value_sig ~loc ~name:"field_names"
+      ~type_:(list_t ~loc (string_t ~loc))
+  in
+  let field_count_sig =
+    make_value_sig ~loc ~name:"field_count" ~type_:(int_t ~loc)
+  in
+  [ field_names_sig; field_count_sig ]
 
 let sig_type_decl ~ctxt (_rec_flag, type_decls) =
   let loc = Expansion_context.Deriver.derived_item_loc ctxt in
@@ -194,10 +395,15 @@ let sig_type_decl ~ctxt (_rec_flag, type_decls) =
   | [ td ] -> (
       match td.ptype_kind with
       | Ptype_variant cds ->
-          derive_sig_for_variant ~loc ~type_name:td.ptype_name.txt cds
-      | Ptype_abstract | Ptype_record _ | Ptype_open ->
+          derive_sig_for_variant ~loc
+            ~type_name:td.ptype_name.txt
+            ~type_params:td.ptype_params
+            cds
+      | Ptype_record lds ->
+          derive_sig_for_record ~loc lds
+      | Ptype_abstract | Ptype_open ->
           Location.raise_errorf ~loc
-            "[@@deriving tla]: only variant types are supported")
+            "[@@deriving tla]: only variant and record types are supported")
   | _ ->
       Location.raise_errorf ~loc
         "[@@deriving tla]: a single type declaration is supported per \

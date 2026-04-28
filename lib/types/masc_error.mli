@@ -42,13 +42,6 @@ type t =
   | CacheError of cache_error
   | StorageError of string
   | ValidationError of string
-  | GeneralError of string
-  | ExnError of exn
-  | WithCode of { code : int; msg : string }
-
-val of_string : string -> t
-val of_exn : exn -> t
-val with_code : code:int -> string -> t
 
 val to_string : t -> string
 val show : t -> string

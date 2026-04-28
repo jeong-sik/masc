@@ -20,7 +20,7 @@ val to_string : t -> string
 
 val of_string : string -> (t, string) result
 (** Parse a severity name. Aliases recognized:
-    [\"warn\" → Warning], [\"bad\" → Error], [\"fatal\" → Critical].
+    ["warn"] -> Warning, ["bad"] -> Error, ["fatal"] -> Critical.
     Returns [Error msg] for unknown inputs. *)
 
 val of_string_default : default:t -> string -> t

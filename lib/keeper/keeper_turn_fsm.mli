@@ -73,6 +73,16 @@ val pp_cancel_reason : Format.formatter -> cancel_reason -> unit
 val pp_failure_reason : Format.formatter -> failure_reason -> unit
 val pp_turn_state : Format.formatter -> turn_state -> unit
 
+val require_active_state : turn_state -> turn_state
+(** Identity on [s]; runtime-asserts that [s] is not a terminal state
+    ([Done], [Failed _], [Cancelled _]).
+
+    Cycle 12 / Tier I3 smoke test for the [@@fsm_guard "..."] PPX:
+    this is the first real-module use that the rewriter operates on.
+    The assert lands in the function body via [ppx_tla] so the runtime
+    cost is one match per call. Adopt at sites that enter execution
+    paths assuming the turn is still in flight. *)
+
 val emit_transition :
   keeper_name:string ->
   turn_id:int ->

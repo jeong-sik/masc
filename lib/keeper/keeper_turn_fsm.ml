@@ -106,3 +106,15 @@ let emit_transition ~keeper_name ~turn_id ?prev state =
         ("keeper", keeper_name);
       ]
     ()
+
+(* Cycle 12 / Tier I3 smoke test: first real-module use of [@@fsm_guard].
+
+   [require_active_state] is the identity on its argument; the [@@fsm_guard]
+   payload is parsed by [ppx_tla] and injected as a runtime [assert] at
+   the function body entry. The invariant — turn states that have
+   already terminated must not re-enter execution paths — was previously
+   only guarded by reviewer-eye inspection of call sites. *)
+
+let require_active_state s = s
+[@@fsm_guard
+  "match s with Done | Failed _ | Cancelled _ -> false | _ -> true"]

@@ -90,6 +90,49 @@ let test_mixed_all_symbols () =
     Mixed.all_symbols
     = [ "awaiting_provider"; "awaiting_tool"; "failed"; "cancelled" ])
 
+(* Cycle 12 (PR #11450): [@@fsm_guard "expr"] runtime assertion injection.
+   The guard is parsed as an OCaml boolean expression at PPX time and
+   injected as [assert (...)] into the function body. For curried
+   bindings the assert lands in the innermost lambda so it fires per
+   application, not per partial application. *)
+
+let f_with_guard x = x + 1
+[@@fsm_guard "x >= 0"]
+
+let test_fsm_guard_pass () =
+  assert (f_with_guard 5 = 6);
+  assert (f_with_guard 0 = 1)
+
+let test_fsm_guard_fail () =
+  let raised =
+    try
+      ignore (f_with_guard (-1));
+      false
+    with Assert_failure _ -> true
+  in
+  assert raised
+
+(* Curried form: assert lands in the innermost lambda body so it fires
+   only when the second argument is applied, not when [g_curried 100] is
+   partially evaluated. *)
+
+let g_curried a b = a + b
+[@@fsm_guard "a + b >= 0"]
+
+let test_fsm_guard_curried_pass () =
+  assert (g_curried 2 3 = 5);
+  let _partial = g_curried 100 in
+  ()
+
+let test_fsm_guard_curried_fail () =
+  let raised =
+    try
+      ignore (g_curried 1 (-5));
+      false
+    with Assert_failure _ -> true
+  in
+  assert raised
+
 let () =
   test_color_to_tla_symbol ();
   test_color_all_states ();
@@ -100,4 +143,8 @@ let () =
   test_mixed_to_tla_symbol_override ();
   test_mixed_to_tla_symbol_parameterised ();
   test_mixed_all_symbols ();
-  print_endline "ppx_tla cycle 2 + 3 tests: PASS"
+  test_fsm_guard_pass ();
+  test_fsm_guard_fail ();
+  test_fsm_guard_curried_pass ();
+  test_fsm_guard_curried_fail ();
+  print_endline "ppx_tla cycle 2 + 3 + 12 tests: PASS"

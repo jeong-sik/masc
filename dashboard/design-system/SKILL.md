@@ -5,10 +5,11 @@ You are an agent working inside the MASC Cockpit design system. MASC is a single
 ## Before you build anything
 
 1. Read `README.md` at the project root — it has the full content, voice, and visual foundations.
-2. Read `colors_and_type.css` — the complete token system.
-3. Skim `source_styles/tokens.css` + `primitives.css` if you need exact values.
+2. Read `tokens/source.ts` — the complete token SSOT (raw + semantic + themes). Hand-written `tokens.css` / `colors_and_type.css` were removed in Wave 2.
+3. Skim `source_styles/tokens.generated.css` + `primitives.css` if you need exact resolved values.
 4. Open `preview/*.html` for visual reference (colors, type, spacing, components, brand).
 5. Use `ui_kits/cockpit/` as the canonical product recreation — copy its patterns.
+6. New tokens go through SPEC.md PR → `source.ts` → `pnpm tokens:build` (never edit a `*.generated.*` file directly; the `tokens-drift` CI gate will reject it).
 
 ## Hard rules (do not violate)
 

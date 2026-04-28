@@ -7,9 +7,67 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), with project-s
 
 ## [Unreleased] — v0.4 (in progress)
 
-Stage: legacy alias cleanup + KeeperBadge migration completion + token codification sweep.
+Stage: legacy alias cleanup + KeeperBadge migration completion + token codification sweep + **SSOT codegen migration** (3-stack token unification, drift-prevention CI, 14-atom + W## roadmap support).
 
-### Added
+### Added — SSOT codegen migration (2026-04)
+
+- **Codegen scaffold** — PR #11189
+  - `dashboard/design-system/tokens/source.ts` (typed authoring SSOT, raw + semantic + role + 2 themes)
+  - `dashboard/design-system/tokens/build.ts` (~265L codegen driver, `culori` for OkLCH 12-slot keeper palette)
+  - 4 generated outputs side-by-side with originals (suffix `.generated.*`)
+  - `dashboard/design-system/tokens/build/tokens.json` (DTCG 2025.10, committed)
+
+- **Bonsai colors_and_type CSS output (artifact 7/7)** — PR #11235
+  - `build.ts` extended to emit `dashboard_bonsai/static/colors_and_type.generated.css` (Bonsai naming: `--bg-deep` / `--accent-brass` / `--space-*` / `--status-*`)
+  - 2 themes only (per user decision): dark-fantasy canonical on `:root`, paper light on `[data-theme="paper"]`
+  - cyberpunk / terminal / parchment archived to `dashboard_bonsai/static/themes/archive/`
+
+- **source.ts superset extension** — PR #11275
+  - +32 tokens (raw 11, role 21) covering Preact components 40+ that referenced legacy hand-written tokens
+  - 51 dead tokens explicitly skipped (Unknown→Permissive Default anti-pattern avoided)
+  - Includes per-keeper `--color-keeper-N-glow` (1..12), `--color-text-{strong,body,muted,dim}`, font-size scale, tracking, paper theme `*-fill` variants
+
+- **`tokens-drift` CI workflow** — PR #11293
+  - 4 gates active on main as required PR checks:
+    1. **Idempotent build** — `pnpm tokens:build` followed by `git diff --exit-code` (source.ts ↔ generated sync structural enforcement)
+    2. **Status canon pin** — `--ok/--warn/--err/--info` hex values frozen at `#6b9e6b/#c9a24a/#c46a5a/#6a8eb0` (warm dim per SPEC §3.5)
+    3. **Keeper OkLCH ΔE < 2** — algorithmic check vs `OkLCH(L=0.68, C=0.09, H=(i-1)*30)`, catches `culori` regressions
+    4. **Tier integrity** — generated files cannot be modified without corresponding source.ts change (no hand-edit of generated)
+
+- **`check-equivalence.mjs` restoration** — PR #11330
+  - Restored after PR #11250 collateral deletion. Simplified to single-axis (status canon + keeper ΔE), removed legacy hand-written reference. Idempotent build subsumes name-set superset.
+
+- **SPEC.md §12 audit section + outdated sweep** — PR #11433
+  - SPEC §1 stylesheet system table updated (2 active themes, 3 archived locations)
+  - SPEC §6 process replaced ("source.ts SSOT → `pnpm tokens:build` → 7 generated artifacts → CI idempotency")
+  - SPEC §10-11 historical PR-S/M tables consolidated into §12 audit
+  - README.md tier definitions + directory tree refreshed
+
+### Removed — Hand-written CSS purge across all surfaces
+
+- **Preview surface** — PR #11250
+  - `dashboard/design-system/source_styles/tokens.css` (880L)
+  - `dashboard/design-system/source_styles/semantic.css` (117L)
+  - `dashboard/design-system/colors_and_type.css` (20L façade)
+  - preview/index.html `<link>` repointed to `tokens.generated.css`
+
+- **Preact surface** — PR #11255
+  - `dashboard/src/styles/tokens.css` (137L)
+  - Tailwind v4 `@theme` directive verified in entry CSS (issue #18966 mitigation)
+  - paper theme already URL-param + localStorage controlled (no hardcoded changes needed)
+
+- **Bonsai surface** — PR #11301
+  - `dashboard_bonsai/static/colors_and_type.css` (566L hand-written)
+  - HTML `<link>` repointed via `lib/server/server_routes_http_pages.ml:319` + `mk/build.mk` copy target updated
+  - 3 themes (cyberpunk / terminal / parchment) archived to `dashboard_bonsai/static/themes/archive/` (brand voice preserved, not deleted)
+
+### Migration impact (codegen migration sub-stage)
+
+- **~1720L hand-written CSS deleted** across 3 surfaces; replaced by 7 codegen artifacts emitted from a single TypeScript SSOT.
+- **0 cross-surface drift possible** — `tokens-drift` workflow rejects any PR that diverges generated from source.ts.
+- **3-stack vocabulary unified** at the SSOT level while preserving per-stack naming conventions (Preact `--bg-0` / Bonsai `--bg-deep` / preview shared) via codegen translation rules.
+
+### Added — earlier v0.4 work
 
 - **4-slot fg tier — partial codification** (raw tier, forward alias / visual byte-identical) — PR #11131
   - `--rose-fg: #fecdd3` — covers `text-[#fecdd3]` 5 callsites paired with `--rose-{10,28}`

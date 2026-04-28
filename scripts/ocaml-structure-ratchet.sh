@@ -69,9 +69,13 @@ count_lib_dune_lines() {
 }
 
 count_inferred_dump_headers() {
-  # rg exits 1 with no matches; pipe to wc -l so an empty stream still
-  # prints 0. Using -l (file count) — one self-incriminating header per file.
-  rg -l "inferred mli" "${REPO_ROOT}/lib" 2>/dev/null | wc -l | tr -d ' '
+  # rg exits 1 with no matches; under `set -o pipefail` that aborts the
+  # whole pipeline before wc/tr can normalize the empty stream to 0.
+  # Force the rg side to succeed via `|| true` inside a subshell so the
+  # zero-match case is observable as `current=0` instead of a silent
+  # script abort. (count_godsplit uses `rg -c` whose 0-match returns "0"
+  # not exit-1, so it is not affected.)
+  (rg -l "inferred mli" "${REPO_ROOT}/lib" 2>/dev/null || true) | wc -l | tr -d ' '
 }
 
 count_lib_other_mli_missing() {

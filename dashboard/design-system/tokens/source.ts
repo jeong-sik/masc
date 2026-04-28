@@ -289,6 +289,24 @@ export const raw: ReadonlyArray<TokenBase> = (() => {
 
   out.push(t("radius-xl", "24px", "raw", "dimension"));
 
+  // ── Tailwind palette aliases (Iter 2c-1, v2 design-system pivot)
+  // Lifted from dashboard/src/styles/variables.css. Component code
+  // references these by Tailwind-canonical name (e.g. --slate-500) and
+  // they should originate from source.ts so the codegen owns the hex
+  // and tokens-drift Gate 2 enforces consistency. Theme-scoped names
+  // like the paper-theme `slate` raw (line ~686) are unrelated and
+  // unaffected — these aliases are global Tailwind palette references.
+  out.push(t("slate-400",   "#94a3b8", "raw", "color", "Tailwind slate-400 alias"));
+  out.push(t("slate-500",   "#64748b", "raw", "color", "Tailwind slate-500 alias"));
+  out.push(t("slate-600",   "#475569", "raw", "color", "Tailwind slate-600 alias"));
+  out.push(t("slate-800",   "#1e293b", "raw", "color", "Tailwind slate-800 alias"));
+  out.push(t("blue-400",    "#60a5fa", "raw", "color", "Tailwind blue-400 alias"));
+  out.push(t("sky-400",     "#38bdf8", "raw", "color", "Tailwind sky-400 alias"));
+  out.push(t("purple-500",  "#a855f7", "raw", "color", "Tailwind purple-500 alias"));
+  out.push(t("yellow-100",  "#fde68a", "raw", "color", "Tailwind yellow-100 alias"));
+  out.push(t("red-100",     "#fecaca", "raw", "color", "Tailwind red-100 alias"));
+  out.push(t("cyan-100",    "#cffafe", "raw", "color", "Tailwind cyan-100 alias"));
+
   return Object.freeze(out);
 })();
 

@@ -172,6 +172,17 @@
   /* Additional Tailwind-aligned base tokens (Phase H): */
   --slate-600: #475569;
   --yellow-100: #fde68a;
+  /* Tailwind 100-shade text colors for ops-banner siblings of yellow-100.
+     Used in ops.css for error/info banner text against soft fill. */
+  --red-100: #fecaca;
+  --cyan-100: #cffafe;
+  /* Tailwind purple-500 (distinct from --purple = purple-400 #a78bfa).
+     Used in live-monitor.css for keeper-event chip text. */
+  --purple-500: #a855f7;
+  /* Background gradient stops for the dashboard page bg (base.css).
+     #0c1424 mid-stop is the existing --bg-root; deep + dim flank it. */
+  --bg-root-deep: #07111f;
+  --bg-root-dim: #080e1a;
 
   /* Semantic - Yellow Bright. Pure spectrum yellow (#facc15), distinct
      from --warn (251,191,36 = #fbbf24, slightly muted gold). Used for

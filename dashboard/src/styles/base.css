@@ -21,7 +21,7 @@ body {
     radial-gradient(circle at 88% 14%, var(--ok-10), transparent 22%),
     radial-gradient(circle at 8% 88%, rgba(251, 191, 36, 0.04), transparent 28%),
     radial-gradient(circle at 50% 50%, rgba(71, 184, 255, 0.03), transparent 40%),
-    linear-gradient(180deg, #07111f 0%, #0c1424 48%, #080e1a 100%);
+    linear-gradient(180deg, var(--bg-root-deep) 0%, var(--bg-root) 48%, var(--bg-root-dim) 100%);
   background-attachment: fixed;
   position: relative;
 }

@@ -191,6 +191,7 @@
         test_memory_hooks
         test_agent_stress_timeout_wire_10341
         test_institution_episodes_failure_learnings_10325
+        test_institution_of_string_fail_closed
         test_mid_turn_resume
         test_lockfree_atomic
         test_telemetry_observe
@@ -369,6 +370,7 @@
           test_memory_hooks
           test_agent_stress_timeout_wire_10341
           test_institution_episodes_failure_learnings_10325
+          test_institution_of_string_fail_closed
           test_mid_turn_resume
           test_lockfree_atomic
           test_telemetry_observe

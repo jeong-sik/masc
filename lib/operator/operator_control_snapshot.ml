@@ -622,7 +622,7 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                  in
                  let now_ts = Time_compat.now () in
                  let created_ts =
-                   Resilience.Time.parse_iso8601_opt meta.created_at
+                   Coord_resilience.Time.parse_iso8601_opt meta.created_at
                    |> Option.value ~default:0.0
                  in
                  let last_turn_ago_s =

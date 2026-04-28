@@ -414,7 +414,7 @@ let reconcile_active_agents_gauge (state : Mcp_server.server_state) =
     except keeper meta files where a fresher valid legacy record may replace a
     stale or invalid current record. *)
 let keeper_meta_updated_ts (meta : Keeper_types.keeper_meta) =
-  Resilience.Time.parse_iso8601_opt meta.updated_at
+  Coord_resilience.Time.parse_iso8601_opt meta.updated_at
   |> Option.value ~default:0.0
 
 let should_promote_legacy_keeper_meta ~legacy_path ~current_path =

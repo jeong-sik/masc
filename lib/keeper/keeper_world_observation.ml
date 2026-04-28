@@ -238,7 +238,7 @@ let backlog_updated_since_last_scheduled_autonomous
   let last_ts = meta.runtime.proactive_rt.last_ts in
   if last_ts <= 0.0 then backlog.tasks <> []
   else
-    match Resilience.Time.parse_iso8601_opt backlog.last_updated with
+    match Coord_resilience.Time.parse_iso8601_opt backlog.last_updated with
     | Some updated_at -> updated_at > last_ts
     | None -> false
 
@@ -318,7 +318,7 @@ let count_active_agents ~(config : Coord.config) : int =
 let compute_idle_seconds ~(meta : keeper_meta) : int =
   let now_ts = Time_compat.now () in
   let created_ts =
-    Resilience.Time.parse_iso8601_opt meta.created_at
+    Coord_resilience.Time.parse_iso8601_opt meta.created_at
     |> Option.value ~default:0.0
   in
   let activity_ts =

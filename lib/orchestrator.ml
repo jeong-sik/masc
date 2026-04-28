@@ -49,7 +49,7 @@ let should_orchestrate ~min_priority room_config =
       (* Get active (non-zombie) agents *)
       let agents = Coord.get_agents_raw room_config in
       let active_agents = List.filter (fun (agent: Types.agent) ->
-        not (Resilience.Zombie.is_zombie agent.last_seen)
+        not (Coord_resilience.Zombie.is_zombie agent.last_seen)
       ) agents in
 
       (* Need orchestration if: important tasks exist AND no active agents *)
@@ -208,7 +208,7 @@ let make_zero_zombie_consumer ~sw ~room_config
           with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
             Log.Orchestrator.warn "[stale-claims] error: %s" (Printexc.to_string exn))
         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-          if not (Resilience.ZeroZombie.is_benign_error exn) then
+          if not (Coord_resilience.ZeroZombie.is_benign_error exn) then
             Log.Orchestrator.warn "[zombie] error: %s" (Printexc.to_string exn));
       Ok ()
   end)

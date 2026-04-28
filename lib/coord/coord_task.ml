@@ -52,7 +52,7 @@ let task_actor_kind agent_name =
   let normalized = String.lowercase_ascii (String.trim agent_name) in
   if normalized = "" || normalized = "system"
   then "system"
-  else if Resilience.Zombie.is_keeper_name normalized
+  else if Coord_resilience.Zombie.is_keeper_name normalized
   then "keeper"
   else "agent"
 ;;

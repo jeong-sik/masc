@@ -91,7 +91,7 @@ val increment_turn : t -> agent_id:string -> unit
 
 val cleanup_zombies : t -> ?timeout:float -> unit -> int
 (** Removes sessions whose [last_activity] is older than [timeout]
-    (default {!Resilience.default_zombie_threshold}). Returns the
+    (default {!Coord_resilience.default_zombie_threshold}). Returns the
     number of evicted sessions. *)
 
 (** {1 Persistence} *)

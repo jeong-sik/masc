@@ -69,9 +69,15 @@ count_lib_dune_lines() {
 }
 
 count_inferred_dump_headers() {
-  # rg exits 1 with no matches; pipe to wc -l so an empty stream still
-  # prints 0. Using -l (file count) — one self-incriminating header per file.
-  rg -l "inferred mli" "${REPO_ROOT}/lib" 2>/dev/null | wc -l | tr -d ' '
+  # rg exits 1 with zero matches. `wc -l` on the empty pipe still prints 0,
+  # but `set -o pipefail` (set at script start) propagates rg's exit-1
+  # through the pipeline, killing the script under `set -e`. Scope the
+  # pipefail relaxation to this subshell so the rest of the script keeps
+  # the strict pipeline behavior. Using -l (file count) — one self-
+  # incriminating header per file.
+  ( set +o pipefail
+    rg -l "inferred mli" "${REPO_ROOT}/lib" 2>/dev/null | wc -l | tr -d ' '
+  )
 }
 
 count_lib_other_mli_missing() {

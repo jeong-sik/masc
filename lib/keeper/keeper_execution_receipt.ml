@@ -438,13 +438,14 @@ let append (config : Coord.config) (receipt : t) =
    "KSM=Running but no live turn" failure mode where the heartbeat fiber is
    blocked on a long call and would otherwise never produce a receipt. *)
 let emit_stale_keeper_broadcast config
-    ~keeper_name ~agent_name ~trace_id ~generation
+    ~keeper_name ~agent_name ~cascade_name ~trace_id ~generation
     ~stale_seconds ~last_turn_ts =
   let payload =
     `Assoc
       [ "schema", `String "keeper.operator_broadcast_required.v1"
       ; "keeper_name", `String keeper_name
       ; "agent_name", `String agent_name
+      ; "cascade_name", `String cascade_name
       ; "trace_id", `String trace_id
       ; "generation", `Int generation
       ; "disposition", `String "stalled"
@@ -463,8 +464,8 @@ let emit_stale_keeper_broadcast config
       ()
   in
   Log.Keeper.error
-    "%s: stale_keeper_broadcast emitted last_turn=%.0fs ago seq=%d"
-    keeper_name stale_seconds event.seq
+    "%s: stale_keeper_broadcast emitted last_turn=%.0fs ago cascade=%s seq=%d"
+    keeper_name stale_seconds cascade_name event.seq
 
 let latest_json (config : Coord.config) keeper_name =
   let store =

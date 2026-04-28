@@ -108,6 +108,7 @@ val emit_stale_keeper_broadcast :
   Coord.config ->
   keeper_name:string ->
   agent_name:string ->
+  cascade_name:string ->
   trace_id:string ->
   generation:int ->
   stale_seconds:float ->

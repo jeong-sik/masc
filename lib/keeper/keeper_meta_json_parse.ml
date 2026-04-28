@@ -157,6 +157,63 @@ let parse_keeper_identity (json : Yojson.Safe.t) : (parsed_keeper_identity, stri
       }
 ;;
 
+(* Fail-loud sandbox policy field parsing.
+
+   Prior to 2026-04-28 a missing [sandbox_profile] / [network_mode] in
+   keeper_meta.json silently fell back to [default_sandbox_profile = Local]
+   even when the keeper TOML declared [sandbox_profile = "docker"]. The
+   silent fallback hid the divergence and routed Docker-intended keepers
+   to host fork/exec. We now require both fields explicitly and direct the
+   operator to the migration script for legacy meta files.
+
+   Cross-validation of (profile, mode) is intentionally omitted: an
+   operator that writes [sandbox_profile = "local"] with
+   [network_mode = "none"] is in scope. The point of this gate is to
+   refuse the *missing* and *unparseable* cases, not to second-guess
+   legal combinations. *)
+let parse_sandbox_policy_fields (json : Yojson.Safe.t)
+  : (sandbox_profile * network_mode, string) result
+  =
+  let ( let* ) = Result.bind in
+  let* sp_raw =
+    match Safe_ops.json_string_opt "sandbox_profile" json with
+    | Some s -> Ok s
+    | None ->
+      Error
+        "sandbox_profile required in keeper_meta.json (run \
+         scripts/migrate-keeper-meta-sandbox.sh to normalize legacy meta files)"
+  in
+  let* sp =
+    match sandbox_profile_of_string sp_raw with
+    | Some p -> Ok p
+    | None ->
+      Error
+        (Printf.sprintf
+           "sandbox_profile %S is not a valid value (expected one of: %s)"
+           sp_raw
+           (String.concat ", " valid_sandbox_profile_strings))
+  in
+  let* nm_raw =
+    match Safe_ops.json_string_opt "network_mode" json with
+    | Some s -> Ok s
+    | None ->
+      Error
+        "network_mode required in keeper_meta.json (run \
+         scripts/migrate-keeper-meta-sandbox.sh to normalize legacy meta files)"
+  in
+  let* nm =
+    match network_mode_of_string nm_raw with
+    | Some m -> Ok m
+    | None ->
+      Error
+        (Printf.sprintf
+           "network_mode %S is not a valid value (expected one of: %s)"
+           nm_raw
+           (String.concat ", " valid_network_mode_strings))
+  in
+  Ok (sp, nm)
+;;
+
 let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
   : (parsed_keeper_policy, string) result
   =
@@ -164,27 +221,11 @@ let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
   match tool_access_of_meta_json json with
   | Error msg -> Error ("meta parse error: " ^ msg)
   | Ok pp_tool_access ->
+    (match parse_sandbox_policy_fields json with
+     | Error msg -> Error ("meta parse error: " ^ msg)
+     | Ok (pp_sandbox_profile, pp_network_mode) ->
     let pp_policy_voice_enabled =
       Safe_ops.json_bool ~default:voice_enabled_default "policy_voice_enabled" json
-    in
-    let pp_sandbox_profile =
-      let raw =
-        Safe_ops.json_string
-          ~default:(sandbox_profile_to_string default_sandbox_profile)
-          "sandbox_profile"
-          json
-      in
-      Option.value ~default:default_sandbox_profile (sandbox_profile_of_string raw)
-    in
-    let pp_network_mode =
-      let fallback = default_network_mode_for_profile pp_sandbox_profile in
-      let raw =
-        Safe_ops.json_string
-          ~default:(network_mode_to_string fallback)
-          "network_mode"
-          json
-      in
-      Option.value ~default:fallback (network_mode_of_string raw)
     in
     let pp_shared_memory_scope =
       let raw =
@@ -321,7 +362,7 @@ let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
       ; pp_voice_agent_id
       ; pp_per_provider_timeout_s
       ; pp_always_approve
-      }
+      })
 ;;
 
 let parse_usage_metrics (json : Yojson.Safe.t) : usage_metrics =

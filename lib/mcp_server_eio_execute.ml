@@ -850,32 +850,24 @@ let execute_tool_eio ~sw ~clock ?(profile = Mcp_server_eio_tool_profile.Full)
               Keeper_exec_context.create ~system_prompt:""
                 ~max_tokens:(Keeper_config.keeper_unified_max_tokens ())
             in
-            let turn_sandbox_runtime =
-              match meta.Keeper_types.sandbox_profile with
-              | Keeper_types.Docker ->
-                  Some
-                    (Keeper_turn_sandbox_runtime.create ~config ~meta
-                       ~network_mode:meta.network_mode ())
-              | Keeper_types.Local -> None
+            (* PR-3b (#11611 part 1): factory replaces eager
+               Keeper_turn_sandbox_runtime here too. *)
+            let turn_sandbox_factory =
+              Some (Keeper_sandbox_factory.create ~config ~meta ())
             in
-            let turn_sandbox_runtime_git =
-              match meta.Keeper_types.sandbox_profile with
-              | Keeper_types.Docker ->
-                  if Env_config_keeper.KeeperSandbox.hard_mode () then
-                    None
-                  else
-                    Some
-                      (Keeper_turn_sandbox_runtime.create ~config ~meta
-                         ~network_mode:Keeper_types.Network_inherit ())
-              | Keeper_types.Local -> None
+            let turn_sandbox_factory_git =
+              if Env_config_keeper.KeeperSandbox.hard_mode () then
+                None
+              else
+                Some
+                  (Keeper_sandbox_factory.create
+                     ~default_network_override:Keeper_types.Network_inherit
+                     ~config ~meta ())
             in
             let cleanup () =
-              (match turn_sandbox_runtime with
-               | Some runtime -> Keeper_turn_sandbox_runtime.cleanup runtime
-               | None -> ());
-              match turn_sandbox_runtime_git with
-              | Some runtime -> Keeper_turn_sandbox_runtime.cleanup runtime
-              | None -> ()
+              Option.iter Keeper_sandbox_factory.cleanup turn_sandbox_factory;
+              Option.iter
+                Keeper_sandbox_factory.cleanup turn_sandbox_factory_git
             in
             let exec_cache = Some (Masc_exec.Exec_cache.create ()) in
             let result =
@@ -883,8 +875,8 @@ let execute_tool_eio ~sw ~clock ?(profile = Mcp_server_eio_tool_profile.Full)
                 ~finally:cleanup
                 (fun () ->
                   Keeper_exec_tools.execute_keeper_tool_call_with_outcome
-                    ~config ~meta ~ctx_work ?turn_sandbox_runtime
-                    ?turn_sandbox_runtime_git ~exec_cache ~name
+                    ~config ~meta ~ctx_work ?turn_sandbox_factory
+                    ?turn_sandbox_factory_git ~exec_cache ~name
                     ~input:coerced_args ())
             in
             let success =

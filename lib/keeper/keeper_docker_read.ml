@@ -95,20 +95,23 @@ let container_name_of meta =
     (Unix.getpid ())
     (int_of_float (Unix.gettimeofday () *. 1000.0))
 
-let run_command_in_container_with_status ?turn_sandbox_runtime
+let run_command_in_container_with_status ?turn_sandbox_factory
     ?(ok_exit_codes = [ 0 ])
     ~config ~(meta : keeper_meta)
     ~(command_argv : string list) ~(max_bytes : int)
     ~(timeout_sec : float) () : (Unix.process_status * string, string) result =
+  let cwd = host_playground_root ~config ~meta in
+  let runtime_opt =
+    Keeper_sandbox_factory.resolve_opt turn_sandbox_factory ~cwd
+  in
   let image = Env_config_keeper.KeeperSandbox.docker_image () in
-  if Option.is_none turn_sandbox_runtime && String.trim image = "" then
+  if Option.is_none runtime_opt && String.trim image = "" then
     Error "keeper sandbox docker image is not configured"
   else if command_argv = [] then
     Error "run_command_in_container_with_status: command_argv is empty"
   else
-    match turn_sandbox_runtime with
+    match runtime_opt with
     | Some runtime ->
-      let cwd = host_playground_root ~config ~meta in
       Keeper_turn_sandbox_runtime.run_command_with_status
         ~ok_exit_codes runtime ~cwd ~command_argv ~max_bytes ~timeout_sec ()
     | None ->
@@ -153,21 +156,21 @@ let run_command_in_container_with_status ?turn_sandbox_runtime
            Error
              (Printf.sprintf "docker_%s_stopped: signal=%d" head_program n))
 
-let run_command_in_container ?turn_sandbox_runtime ?(ok_exit_codes = [ 0 ]) ~config ~meta
+let run_command_in_container ?turn_sandbox_factory ?(ok_exit_codes = [ 0 ]) ~config ~meta
     ~command_argv ~max_bytes ~timeout_sec () =
   match
-    run_command_in_container_with_status ?turn_sandbox_runtime
+    run_command_in_container_with_status ?turn_sandbox_factory
       ~ok_exit_codes ~config ~meta
       ~command_argv ~max_bytes ~timeout_sec ()
   with
   | Error _ as err -> err
   | Ok (_st, out) -> Ok out
 
-let read_file_in_container ?turn_sandbox_runtime ~config ~(meta : keeper_meta) ~host_path
+let read_file_in_container ?turn_sandbox_factory ~config ~(meta : keeper_meta) ~host_path
     ~(max_bytes : int) ~(timeout_sec : float) () : (string, string) result =
   match container_path_of_host ~config ~meta ~host_path with
   | Error _ as e -> e
   | Ok container_path ->
-    run_command_in_container ?turn_sandbox_runtime ~config ~meta
+    run_command_in_container ?turn_sandbox_factory ~config ~meta
       ~command_argv:[ "cat"; container_path ]
       ~max_bytes ~timeout_sec ()

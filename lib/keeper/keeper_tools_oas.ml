@@ -157,8 +157,8 @@ let make_keeper_tool_handler
     ~(config : Coord.config)
     ~(meta : Keeper_types.keeper_meta)
     ~(ctx_snapshot : Keeper_types.working_context)
-    ?turn_sandbox_runtime
-    ?turn_sandbox_runtime_git
+    ?turn_sandbox_factory
+    ?turn_sandbox_factory_git
     ~(exec_cache : Masc_exec.Exec_cache.t option)
     ?search_fn
     ?on_tool_called
@@ -191,8 +191,8 @@ let make_keeper_tool_handler
           Inference_utils.timed (fun () ->
             Keeper_exec_tools.execute_keeper_tool_call_with_outcome
               ~config ~meta ~ctx_work:ctx_snapshot
-              ?turn_sandbox_runtime
-              ?turn_sandbox_runtime_git
+              ?turn_sandbox_factory
+              ?turn_sandbox_factory_git
               ~exec_cache
               ?search_fn
               ~name ~input ())
@@ -428,20 +428,25 @@ let make_tool_bundle
     ?on_tool_called
     ()
   : tool_bundle =
-  let turn_sandbox_runtime =
-    match meta.sandbox_profile with
-    | Keeper_types.Docker ->
-      Some (Keeper_turn_sandbox_runtime.create ~config ~meta ~network_mode:meta.network_mode ())
-    | Keeper_types.Local -> None
+  (* PR-3b (#11611 part 1): replace eager [Keeper_turn_sandbox_runtime]
+     instances with a factory.  in_playground/cwd are unknown at
+     turn-start, so the factory defers
+     [Keeper_shell_docker.effective_sandbox_profile] resolution until
+     each tool call site that already knows its [cwd].  The git variant
+     stays gated by [hard_mode]; when off, it carries a
+     [default_network_override] so resolved runtimes always inherit the
+     host network. *)
+  let turn_sandbox_factory =
+    Some (Keeper_sandbox_factory.create ~config ~meta ())
   in
-  let turn_sandbox_runtime_git =
-    match meta.sandbox_profile with
-    | Keeper_types.Docker ->
-      if Env_config_keeper.KeeperSandbox.hard_mode () then
-        None
-      else
-        Some (Keeper_turn_sandbox_runtime.create ~config ~meta ~network_mode:Network_inherit ())
-    | Keeper_types.Local -> None
+  let turn_sandbox_factory_git =
+    if Env_config_keeper.KeeperSandbox.hard_mode () then
+      None
+    else
+      Some
+        (Keeper_sandbox_factory.create
+           ~default_network_override:Network_inherit
+           ~config ~meta ())
   in
   let exec_cache = Some (Masc_exec.Exec_cache.create ()) in
   (* Build Tool.t for the full universe so BM25 and Tool_op can
@@ -483,8 +488,8 @@ let make_tool_bundle
           ~description:td.description
           ~input_schema:td.input_schema
           (make_keeper_tool_handler ~name:td.name ~config ~meta ~ctx_snapshot
-             ?turn_sandbox_runtime
-             ?turn_sandbox_runtime_git
+             ?turn_sandbox_factory
+             ?turn_sandbox_factory_git
              ~exec_cache
              ?search_fn ?on_tool_called ~failure_counts ()))
       else None
@@ -515,8 +520,8 @@ let make_tool_bundle
             ~description:internal_def.description
             ~input_schema
             (make_keeper_tool_handler ~name:internal ~config ~meta ~ctx_snapshot
-               ?turn_sandbox_runtime
-               ?turn_sandbox_runtime_git
+               ?turn_sandbox_factory
+               ?turn_sandbox_factory_git
                ~exec_cache
                ?search_fn ?on_tool_called
                ~translate_input:(fun j ->
@@ -528,12 +533,8 @@ let make_tool_bundle
     tools = internal_tools @ alias_tools;
     cleanup =
       (fun () ->
-        (match turn_sandbox_runtime with
-        | Some runtime -> Keeper_turn_sandbox_runtime.cleanup runtime
-        | None -> ());
-        (match turn_sandbox_runtime_git with
-        | Some runtime -> Keeper_turn_sandbox_runtime.cleanup runtime
-        | None -> ()));
+        Option.iter Keeper_sandbox_factory.cleanup turn_sandbox_factory;
+        Option.iter Keeper_sandbox_factory.cleanup turn_sandbox_factory_git);
   }
 
 let make_tools

@@ -51,7 +51,7 @@ let is_missing_read_path_error (e : string) =
   || String.starts_with ~prefix:"path_not_found_under_allowed_roots:" e
 
 let handle_keeper_fs_read
-      ~(turn_sandbox_runtime : Keeper_turn_sandbox_runtime.t option)
+      ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
       ~(config : Coord.config)
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
@@ -87,7 +87,7 @@ let handle_keeper_fs_read
     if Keeper_docker_read.should_route_read ~meta then
       let timeout_sec = 30.0 in
       match
-        Keeper_docker_read.read_file_in_container ?turn_sandbox_runtime ~config ~meta
+        Keeper_docker_read.read_file_in_container ?turn_sandbox_factory ~config ~meta
           ~host_path:target ~max_bytes ~timeout_sec ()
       with
       | Error msg ->
@@ -184,13 +184,13 @@ let validate_write_target ~config ~meta ~target =
   | Error e -> Error (error_json ~fields:[ "path", `String target ] e)
 
 let handle_keeper_fs_edit
-      ~(turn_sandbox_runtime : Keeper_turn_sandbox_runtime.t option)
+      ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
       ~(config : Coord.config)
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
   =
   let via_field =
-    match turn_sandbox_runtime with
+    match turn_sandbox_factory with
     | Some _ -> [ ("via", `String "docker") ]
     | None -> []
   in
@@ -242,7 +242,10 @@ let handle_keeper_fs_edit
                 error_json ~fields:[ "path", `String target ] msg
               | Ok (updated, occurrences) ->
                 let write_result =
-                  match turn_sandbox_runtime with
+                  match
+                    Keeper_sandbox_factory.resolve_opt
+                      turn_sandbox_factory ~cwd:target
+                  with
                   | Some runtime ->
                     Keeper_turn_sandbox_runtime.overwrite_file runtime
                       ~host_path:target ~content:updated
@@ -290,7 +293,10 @@ let handle_keeper_fs_edit
      | Ok () ->
     (try
        let write_result =
-         match turn_sandbox_runtime with
+         match
+           Keeper_sandbox_factory.resolve_opt
+             turn_sandbox_factory ~cwd:target
+         with
          | Some runtime ->
            (match mode with
             | Append ->

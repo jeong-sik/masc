@@ -61,8 +61,8 @@ val make_keeper_tool_handler :
   config:Coord.config ->
   meta:Keeper_types.keeper_meta ->
   ctx_snapshot:Keeper_types.working_context ->
-  ?turn_sandbox_runtime:Keeper_turn_sandbox_runtime.t ->
-  ?turn_sandbox_runtime_git:Keeper_turn_sandbox_runtime.t ->
+  ?turn_sandbox_factory:Keeper_sandbox_factory.t ->
+  ?turn_sandbox_factory_git:Keeper_sandbox_factory.t ->
   exec_cache:Masc_exec.Exec_cache.t option ->
   ?search_fn:(query:string -> max_results:int -> Yojson.Safe.t) ->
   ?on_tool_called:(string -> unit) ->

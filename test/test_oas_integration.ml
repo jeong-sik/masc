@@ -773,6 +773,67 @@ let test_oas_event_bridge_logs_tool_completed_with_agent_name () =
           raise Exit)
       with Exit -> ())
 
+(* #10584 — kind-only fallback regression pins.
+
+   The catch-all [other -> ...] arm in [native_event_to_json] sits AFTER
+   the explicit [InferenceTelemetry _ -> None].  Variant ordering matters:
+   moving the catch-all above [InferenceTelemetry] would silently start
+   relaying per-token telemetry over SSE (high-frequency flood path that
+   was deliberately suppressed in #10590).  Pin both invariants. *)
+
+let test_inference_telemetry_stays_none_after_fallback () =
+  let evt : Event_bus.event =
+    Event_bus.mk_event
+      ~correlation_id:"test-corr"
+      ~run_id:"test-run"
+      (Event_bus.InferenceTelemetry
+         {
+           agent_name = "test-agent";
+           turn = 1;
+           provider = "test-provider";
+           model = "test-model";
+           prompt_tokens = Some 10;
+           completion_tokens = Some 20;
+           prompt_ms = Some 5.0;
+           decode_ms = Some 50.0;
+           decode_tok_s = Some 100.0;
+         })
+  in
+  match Oas_event_bridge.native_event_to_json evt with
+  | None -> ()
+  | Some _ ->
+      Alcotest.fail
+        "InferenceTelemetry must remain None — catch-all fallback \
+         must not absorb the high-frequency suppression case"
+
+let test_payload_kind_labels_match_envelope_event_type () =
+  (* For the explicit-arm path, the [event_type] embedded in the wrap
+     envelope must remain a valid [Event_bus.payload_kind] result so
+     dashboards can union explicit-arm and fallback events on a single
+     [event_type] axis.  Probe one representative variant. *)
+  let evt : Event_bus.event =
+    Event_bus.mk_event
+      ~correlation_id:"test-corr"
+      ~run_id:"test-run"
+      (Event_bus.AgentStarted
+         { agent_name = "probe-agent"; task_id = "probe-task" })
+  in
+  let kind = Event_bus.payload_kind evt.payload in
+  Alcotest.(check string) "kind label" "agent_started" kind;
+  match Oas_event_bridge.native_event_to_json evt with
+  | Some (`Assoc fields) ->
+      let event_type =
+        match List.assoc_opt "event_type" fields with
+        | Some (`String value) -> value
+        | _ -> ""
+      in
+      Alcotest.(check string)
+        "envelope event_type matches payload_kind"
+        kind event_type
+  | _ ->
+      Alcotest.fail
+        "expected Some `Assoc — explicit-arm AgentStarted serialization"
+
 (* Runner                                                            *)
 (* ================================================================ *)
 
@@ -811,6 +872,10 @@ let () =
         test_oas_event_bridge_logs_turn_completed_with_agent_name;
       Alcotest.test_case "sse bridge logs tool completed with agent name" `Quick
         test_oas_event_bridge_logs_tool_completed_with_agent_name;
+      Alcotest.test_case "inference telemetry stays None after fallback added (#10584)" `Quick
+        test_inference_telemetry_stays_none_after_fallback;
+      Alcotest.test_case "payload_kind labels match wrap envelope event_type" `Quick
+        test_payload_kind_labels_match_envelope_event_type;
     ];
     "message_conversion", [
       Alcotest.test_case "message roundtrip" `Quick test_message_roundtrip;

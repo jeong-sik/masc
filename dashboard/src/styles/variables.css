@@ -86,6 +86,13 @@
   --warn-10: rgba(251, 191, 36, 0.10);
   --warn-20: rgba(251, 191, 36, 0.20);
 
+  /* Vote button — Reddit-pattern colors used identically in board.css
+     and dashboard.css. Tokenized to remove the cross-file duplication;
+     hex values preserved exactly (Reddit upvote = #ff4500). */
+  --vote-hover: #ccc;
+  --vote-up: #ff4500;
+  --vote-down: #7193ff;
+
   /* Semantic - Critical (Red) */
   --bad-light: #f87171;
   --bad-soft: rgba(239, 68, 68, 0.15);

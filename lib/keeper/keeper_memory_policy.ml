@@ -923,8 +923,8 @@ let synthesize_state_from_run_result
   in
   let decisions =
     match response_hint with
-    | Some hint -> [Printf.sprintf "[SYNTHETIC] Last output: %s" hint]
-    | None -> ["[SYNTHETIC] No visible output this generation"]
+    | Some hint -> [Keeper_synthetic_marker.tag (Printf.sprintf "Last output: %s" hint)]
+    | None -> [Keeper_synthetic_marker.tag "No visible output this generation"]
   in
   { goal = (let g = String.trim goal in if g = "" then None else Some g);
     progress;

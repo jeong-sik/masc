@@ -5076,6 +5076,35 @@ let test_actionable_tool_contract_allows_execution_tools () =
        ~actionable_signal_context:false
        ~tool_names:[])
 
+let test_stay_silent_satisfies_required_contract_despite_read_only_effect () =
+  (* keeper_stay_silent has effect_domain=Read_only in tool_catalog but is
+     classified as Completion in completion_tool_names.  When the LLM
+     correctly signals "no work for me" via stay_silent alongside status
+     reads, the contract must not fire a false violation.  Observed
+     2026-04-28: analyst/janitor cycles rejected with "passive status/read
+     tools: keeper_stay_silent, keeper_task_list". *)
+  check bool "stay_silent satisfies required contract" true
+    (KTD.tool_name_can_satisfy_required_contract "keeper_stay_silent");
+  check bool "completion tool set includes stay_silent" true
+    (KTD.is_completion_tool_name "keeper_stay_silent");
+  check (option string) "stay_silent + passive tools = no violation" None
+    (KTD.actionable_tool_contract_violation_reason
+       ~claim_context_allowed:true
+       ~actionable_signal_context:true
+       ~tool_names:[ "keeper_stay_silent"; "keeper_tasks_list" ]);
+  check (option string) "stay_silent alone = no violation" None
+    (KTD.actionable_tool_contract_violation_reason
+       ~claim_context_allowed:true
+       ~actionable_signal_context:true
+       ~tool_names:[ "keeper_stay_silent" ]);
+  (* Without stay_silent, passive-only still violates *)
+  check bool "passive-only still violates" true
+    (Option.is_some
+       (KTD.actionable_tool_contract_violation_reason
+          ~claim_context_allowed:true
+          ~actionable_signal_context:true
+          ~tool_names:[ "keeper_tasks_list"; "masc_status" ]))
+
 let required_tool_call name input
   : Agent_sdk.Completion_contract.tool_call
   =
@@ -5090,7 +5119,10 @@ let test_required_tool_satisfaction_rejects_passive_tools () =
     (satisfies_required_tool "masc_status" (`Assoc []));
   check bool "keeper_tasks_list is passive" false
     (satisfies_required_tool "keeper_tasks_list" (`Assoc []));
-  check bool "keeper_stay_silent is passive" false
+  (* keeper_stay_silent is a Completion tool and intentionally satisfies
+     the required-tool contract despite its Read_only effect_domain.
+     See keeper_tool_disclosure.ml is_completion_tool_name exemption. *)
+  check bool "keeper_stay_silent satisfies as completion" true
     (satisfies_required_tool "keeper_stay_silent" (`Assoc []));
   check bool "Read alias is passive" false
     (satisfies_required_tool "Read" (`Assoc []));
@@ -6394,6 +6426,8 @@ let () =
             test_claim_tool_classification_covers_masc_claim_task;
           test_case "actionable signal allows execution tools" `Quick
             test_actionable_tool_contract_allows_execution_tools;
+          test_case "stay_silent satisfies required contract despite read-only effect" `Quick
+            test_stay_silent_satisfies_required_contract_despite_read_only_effect;
           test_case "required tool predicate rejects passive tools" `Quick
             test_required_tool_satisfaction_rejects_passive_tools;
           test_case "required tool predicate accepts mutating tools" `Quick

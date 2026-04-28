@@ -1187,6 +1187,19 @@ let model_ids_of_specs (specs : string list) : string list =
   |> List.sort_uniq String.compare
 
 let normalize_priority_tiers ~config_path ~name raw_tiers =
+  (* Phase 2c: probe load_json before delegating so that an unreadable
+     cascade.toml/json surfaces as a load-failure error instead of the
+     generic "no configured models" message — the latter mis-leads
+     operators into thinking the profile is empty when the file is
+     actually broken.  Mirrors the probe pattern in
+     resolve_model_strings_traced_with / _with_trace (PR #11361). *)
+  match Cascade_config_loader.load_json config_path with
+  | Error msg ->
+      Error
+        (Printf.sprintf
+           "priority_tier validation skipped: cascade config load failed: %s"
+           msg)
+  | Ok _ ->
   let configured_model_ids =
     Cascade_config_loader.load_profile_weighted ~config_path ~name
     |> List.map (fun (entry : Cascade_config_loader.weighted_entry) -> entry.model)

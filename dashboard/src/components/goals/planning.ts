@@ -17,6 +17,8 @@ import {
   groupedByHorizon,
 } from './goal-helpers'
 import { TaskBacklog } from './kanban-components'
+import { TaskStaleAlert } from './task-stale-alert'
+import { TaskWall } from './task-wall'
 import { TaskCreateForm } from '../task-manage/task-create-form'
 
 const QUICK_START_DOC_URL = 'https://github.com/jeong-sik/masc-mcp/blob/main/docs/QUICK-START.md'
@@ -261,7 +263,11 @@ export function Planning() {
         </div>
       </section>
 
+      <${TaskStaleAlert} />
+
       <${TaskBacklog} />
+
+      <${TaskWall} />
 
       <${KeeperToolActivity} />
 

@@ -344,6 +344,15 @@
   --z-layout: 1;
   --z-tab-sticky: 30;
   --z-header: 40;
+  /* Keeper detail overlay sits above modal layer (>3000). 3020 was the
+     historical magic number used as fallback in keeper-detail.css; lift
+     to a named token for explicit ordering. */
+  --z-overlay-keeper: 3020;
+
+  /* Strong scrim for keeper-detail overlay backdrop (60% black).
+     Distinct from --backdrop-* (subtle navy tint); this is opaque-
+     adjacent for blocking interaction with content beneath. */
+  --scrim-strong: rgba(0, 0, 0, 0.6);
 
   /* SPEC v0.1 §3.1-3.5 — Semantic vocabulary alias to dashboard raw tier.
      See dashboard/design-system/SPEC.md. New components should prefer

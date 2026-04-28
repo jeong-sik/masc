@@ -1679,36 +1679,70 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                   ~keeper_name:meta.name ~turn_id:keeper_turn_id
                   ~prev:Keeper_turn_fsm.Awaiting_provider
                   Keeper_turn_fsm.Streaming;
-                Keeper_agent_run.run_turn ~config ~meta:run_meta ~base_dir
-                  ~max_context:execution.max_context ~build_turn_prompt
-                  ~user_message ~cascade_name:execution.cascade_name
-                  ~turn_affordances
-                  ?provider_filter:(Env_config_keeper.KeeperCascade.provider_allowlist ())
-                  ~generation:run_generation
-                  ~max_turns
-                  ~max_idle_turns
-                  ~history_user_source:"world_state_prompt"
-                  ~history_assistant_source:"internal_assistant"
-                  ~degraded_retry_applied:(Option.is_some !degraded_retry_info)
-                  ?degraded_retry_cascade:
-                    (Option.map
-                       (fun (retry : EC.degraded_retry) -> retry.next_cascade)
-                       !degraded_retry_info)
-                  ?fallback_reason:
-                    (Option.map
-                       (fun (retry : EC.degraded_retry) -> retry.fallback_reason)
-                       !degraded_retry_info)
-                  ~cascade_rotation_attempts:
-                    (List.rev !cascade_rotation_attempts)
-                  ~temperature:execution.temperature
-                  ~max_tokens:execution.max_tokens
-                  ~oas_timeout_s
-                  ?max_cost_usd
-                  ~trajectory_acc
-                  ~is_retry
-                  ?shared_context
-                  ?event_bus:(Keeper_event_bus.get ())
-                  ())
+                try
+                  Keeper_agent_run.run_turn ~config ~meta:run_meta ~base_dir
+                    ~max_context:execution.max_context ~build_turn_prompt
+                    ~user_message ~cascade_name:execution.cascade_name
+                    ~turn_affordances
+                    ?provider_filter:(Env_config_keeper.KeeperCascade.provider_allowlist ())
+                    ~generation:run_generation
+                    ~max_turns
+                    ~max_idle_turns
+                    ~history_user_source:"world_state_prompt"
+                    ~history_assistant_source:"internal_assistant"
+                    ~degraded_retry_applied:(Option.is_some !degraded_retry_info)
+                    ?degraded_retry_cascade:
+                      (Option.map
+                         (fun (retry : EC.degraded_retry) -> retry.next_cascade)
+                         !degraded_retry_info)
+                    ?fallback_reason:
+                      (Option.map
+                         (fun (retry : EC.degraded_retry) -> retry.fallback_reason)
+                         !degraded_retry_info)
+                    ~cascade_rotation_attempts:
+                      (List.rev !cascade_rotation_attempts)
+                    ~temperature:execution.temperature
+                    ~max_tokens:execution.max_tokens
+                    ~oas_timeout_s
+                    ?max_cost_usd
+                    ~trajectory_acc
+                    ~is_retry
+                    ?shared_context
+                    ?event_bus:(Keeper_event_bus.get ())
+                    ()
+                with Eio.Cancel.Cancelled _ as e ->
+                  (* Cycle 1b-iv: external cancellation that escapes the
+                     in-band receipt builder in [Keeper_agent_run.run_turn].
+                     The 14 inner Cancel handlers all re-raise; without an
+                     outer catch the receipt for this turn is silently
+                     dropped (FSM emits Streaming then nothing — the turn
+                     just disappears from the operator's timeline).
+
+                     Emit a minimal cancelled receipt + matching FSM
+                     Cancelled transition before re-raising. The cancel
+                     reason is conservatively classified as
+                     [Cancelled_supervisor_stop] because Eio.Cancel does
+                     not expose the originating cancel context here;
+                     refining this via supervisor / fleet flag inspection
+                     is a follow-up. *)
+                  record_pre_dispatch_terminal_observation
+                    ~config
+                    ~meta:run_meta
+                    ~generation:run_generation
+                    ~cascade_name:execution.cascade_name
+                    ~outcome:"cancelled"
+                    ~terminal_reason_code:"external_cancel"
+                    ~activity_kind:"keeper.turn_cancelled"
+                    ~trajectory_outcome:
+                      (Trajectory.Gated "external_cancel")
+                    ~keeper_turn_id
+                    ();
+                  Keeper_turn_fsm.emit_transition
+                    ~keeper_name:meta.name ~turn_id:keeper_turn_id
+                    ~prev:Keeper_turn_fsm.Streaming
+                    (Keeper_turn_fsm.Cancelled
+                       Keeper_turn_fsm.Cancelled_supervisor_stop);
+                  raise e)
           in
           let fail_open_rotation_cascades =
             active_fail_open_rotation_cascades ()

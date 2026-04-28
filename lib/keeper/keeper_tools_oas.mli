@@ -64,8 +64,8 @@ val make_keeper_tool_handler :
   ?turn_sandbox_runtime:Keeper_turn_sandbox_runtime.t ->
   ?turn_sandbox_runtime_git:Keeper_turn_sandbox_runtime.t ->
   exec_cache:Masc_exec.Exec_cache.t option ->
-  ?search_fn:Keeper_types.tool_search_fn ->
-  ?on_tool_called:(string -> Yojson.Safe.t -> unit) ->
+  ?search_fn:(query:string -> max_results:int -> Yojson.Safe.t) ->
+  ?on_tool_called:(string -> unit) ->
   ?translate_input:(Yojson.Safe.t -> Yojson.Safe.t) ->
   failure_counts:(string, int) Hashtbl.t ->
   unit ->
@@ -79,8 +79,8 @@ val make_tool_bundle :
   config:Coord.config ->
   meta:Keeper_types.keeper_meta ->
   ctx_snapshot:Keeper_types.working_context ->
-  ?search_fn:Keeper_types.tool_search_fn ->
-  ?on_tool_called:(string -> Yojson.Safe.t -> unit) ->
+  ?search_fn:(query:string -> max_results:int -> Yojson.Safe.t) ->
+  ?on_tool_called:(string -> unit) ->
   unit ->
   tool_bundle
 
@@ -89,7 +89,7 @@ val make_tools :
   config:Coord.config ->
   meta:Keeper_types.keeper_meta ->
   ctx_snapshot:Keeper_types.working_context ->
-  ?search_fn:Keeper_types.tool_search_fn ->
-  ?on_tool_called:(string -> Yojson.Safe.t -> unit) ->
+  ?search_fn:(query:string -> max_results:int -> Yojson.Safe.t) ->
+  ?on_tool_called:(string -> unit) ->
   unit ->
   Oas.Tool.t list

@@ -127,11 +127,11 @@ val persist_message :
 
 (** {1 Re-exports from Inference_utils} *)
 
-val timed : (unit -> 'a) -> 'a * float
-val zero_usage : Oas.Types.usage
+val timed : (unit -> 'a) -> 'a * int
+val zero_usage : Agent_sdk.Types.api_usage
 val usage_of_response :
-  ?prior:Oas.Types.usage -> Oas.Types.run_result -> Oas.Types.usage
-val total_tokens : Oas.Types.usage -> int
+  Oas_response.api_response -> Agent_sdk.Types.api_usage
+val total_tokens : Agent_sdk.Types.api_usage -> int
 
 (** {1 Checkpoint store delegation} *)
 
@@ -149,14 +149,54 @@ val save_oas_checkpoint :
   (Oas.Checkpoint.t, string) result
 
 (** Wrap [create_checkpoint] + [save_session_checkpoint] for the
-    legacy on-disk checkpoint store. *)
+    legacy on-disk checkpoint store; returns the persisted
+    checkpoint so callers can use it without re-reading from disk. *)
 val save_checkpoint :
-  session_context -> working_context -> generation:int -> unit
+  session_context -> working_context -> generation:int -> checkpoint
 
 (** {1 OAS checkpoint inspection} *)
 
 val checkpoint_generation : Oas.Checkpoint.t -> fallback:int -> int
 val checkpoint_max_tokens : Oas.Checkpoint.t -> fallback:int -> int
+
+(** Drop orphan [tool_result] blocks (those without a matching
+    preceding [tool_use]) so a checkpoint payload satisfies the
+    Anthropic API invariant that every tool_result references a known
+    tool_use. Public so [Keeper_rollover] / [Keeper_post_turn] can
+    reuse it before persisting a checkpoint. *)
+val repair_orphan_tool_result_messages :
+  Oas.Types.message list -> Oas.Types.message list
+
+type checkpoint_sanitize_stats = {
+  dropped_messages : int;
+  dropped_blocks : int;
+  dropped_chars : int;
+  truncated_blocks : int;
+  truncated_chars : int;
+}
+
+(** Apply [sanitize_checkpoint_messages] (cap blocks / drop oversize
+    payloads) and, when [repair_orphans] is [true] (default), also
+    drop orphan tool_use/tool_result pairs so the resulting checkpoint
+    is safe to persist. Returns the cleaned checkpoint plus
+    aggregated stats. *)
+val sanitize_oas_checkpoint :
+  ?repair_orphans:bool ->
+  Oas.Checkpoint.t ->
+  Oas.Checkpoint.t * checkpoint_sanitize_stats
+
+val checkpoint_sanitize_changed : checkpoint_sanitize_stats -> bool
+(** [true] iff any of the counters in [stats] is non-zero. *)
+
+(** Load the newest legacy checkpoint persisted under
+    [session.session_dir]; returns [None] when nothing has been
+    persisted yet. *)
+val load_latest_checkpoint : session_context -> checkpoint option
+
+(** Recover a [working_context] from the legacy on-disk checkpoint
+    shape, capping by [primary_model_max_tokens]. *)
+val context_of_legacy_checkpoint :
+  checkpoint -> primary_model_max_tokens:int -> working_context
 
 (** Pick the keeper's preferred model for checkpointing —
     canonical cascade name first, then a fallback list of

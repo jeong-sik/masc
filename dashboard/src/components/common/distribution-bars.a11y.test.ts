@@ -11,6 +11,7 @@ import { html } from 'htm/preact'
 import { axe } from 'jest-axe'
 import {
   DistributionBars,
+  SegmentedBar,
   type DistributionItem,
 } from './distribution-bars'
 
@@ -55,19 +56,55 @@ describe('DistributionBars a11y', () => {
   })
 })
 
-// SegmentedBar a11y test deliberately omitted from this PR.
-//
-// First-run revealed a real production violation: distribution-bars.ts
-// renders `<div aria-label="...">` without a `role`. axe rule
-// `aria-prohibited-attr` rejects this — aria-label requires a valid
-// role on non-semantic elements. Same pattern at lines 152-156 (bar
-// segments) and 164-170 (chip pills).
-//
-// Treating it under Issue Discovery Protocol (instructions/workflow.md):
-// scope of this PR is *adding* a11y coverage, not fixing components.
-// Mixing the fix in would silently expand surgical change scope.
-//
-// Followup: SegmentedBar should either add role="img" + aria-label OR
-// drop aria-label and rely on the visible label rendered alongside.
-// Tracking via PR description (this PR's body); upgrade to GitHub issue
-// if the fix doesn't land in the next iter.
+// SegmentedBar a11y suite — enabled in this PR. The original violation
+// noted in #11720 (aria-label on <div>/<span> without role) was fixed
+// in this same commit:
+//   - bar segments: now aria-hidden=true (purely decorative, info is
+//     in the chip pills)
+//   - chip pills: aria-label dropped (visible text content carries
+//     the accessible name)
+describe('SegmentedBar a11y', () => {
+  let container: HTMLElement
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+  })
+  afterEach(() => {
+    render(null, container)
+    document.body.removeChild(container)
+  })
+
+  it('renders accessibly with mixed tones', async () => {
+    render(html`<${SegmentedBar} items=${items} />`, container)
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it('with title + subtitle passes axe', async () => {
+    render(
+      html`<${SegmentedBar}
+        title="Keeper status"
+        subtitle="last 60 minutes"
+        items=${items}
+      />`,
+      container,
+    )
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it('with empty items shows the empty-state message accessibly', async () => {
+    render(html`<${SegmentedBar} title="Empty" items=${[]} />`, container)
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it('full 5-tone palette in a SegmentedBar passes axe', async () => {
+    const allTones: DistributionItem[] = [
+      { label: 'A', value: 1, tone: 'accent' },
+      { label: 'O', value: 2, tone: 'ok' },
+      { label: 'W', value: 3, tone: 'warn' },
+      { label: 'B', value: 4, tone: 'bad' },
+      { label: 'M', value: 5, tone: 'muted' },
+    ]
+    render(html`<${SegmentedBar} items=${allTones} />`, container)
+    expect(await axe(container)).toHaveNoViolations()
+  })
+})

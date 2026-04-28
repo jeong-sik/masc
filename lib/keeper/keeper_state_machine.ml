@@ -345,10 +345,14 @@ let can_execute_turn = function
      bug-models/KeeperPhaseRace.tla:7-10 cites this function entry
 
    Classification (plan §1 4-way):
-     Note A — Drift candidate. Priority 2 Offline (launch_pending AND
-       ~fiber_alive) has no phase-derivation spec model. C1 follow-up:
-       either add KeeperLaunchPending.tla or document the pre-FSM
-       lifecycle as intentional scope projection. Until then: drift.
+     Note A — Resolved. Priority 2 Offline (launch_pending AND
+       ~fiber_alive) is mirrored by
+       specs/keeper-state-machine/KeeperLaunchPending.tla, a 3-phase
+       projection (Offline / Running / Dead) with bug-action
+       FiberStartedWithoutClearing. The lifecycle audit cites
+       keeper_registry.ml:340 (set), this file:520 (clear in FSM),
+       keeper_registry.ml:407 (clear on death) — all three sources
+       are anchored in the spec's source-citation block.
      Note B — Refinement (acknowledged). Priority 6 OCaml clause
        `context_overflow AND compact_retry_exhausted -> Paused` is
        stricter than spec line 96 (operator_paused only). Without it

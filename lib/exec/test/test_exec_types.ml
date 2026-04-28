@@ -64,7 +64,13 @@ let test_verdict_trusted_argv_smart_ctor () =
   | Error _ -> assert false
   | Ok bin ->
       let simple : Shell_ir.simple =
-        { bin; args = []; env = []; cwd = None; redirects = [] }
+        { bin
+        ; args = []
+        ; env = []
+        ; cwd = None
+        ; redirects = []
+        ; sandbox = Sandbox_target.host ()
+        }
       in
       let t = Verdict.trust ~caps:[] simple in
       assert (Verdict.Trusted_argv.bin t = bin);
@@ -82,7 +88,13 @@ let test_verdict_four_way () =
   in
   let bin = match Bin.of_string "ls" with Ok b -> b | Error _ -> assert false in
   let simple : Shell_ir.simple =
-    { bin; args = []; env = []; cwd = None; redirects = [] }
+    { bin
+    ; args = []
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Sandbox_target.host ()
+    }
   in
   let _ =
     Verdict.Suggest_confirm

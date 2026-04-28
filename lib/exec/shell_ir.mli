@@ -16,6 +16,10 @@ type simple = {
   env : (string * arg) list;      (** [FOO=bar] env prefix on the command *)
   cwd : Path_scope.t option;
   redirects : Redirect_scope.t list;
+  sandbox : Sandbox_target.t;
+  (** Dispatch target — defaults to [Sandbox_target.host ()].  Keeper
+      callers override with a Docker runner closure built from
+      [Keeper_turn_sandbox_runtime]. *)
 }
 
 type t =

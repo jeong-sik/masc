@@ -50,7 +50,16 @@ let () =
   with_eio @@ fun () ->
   let open Masc_exec.Shell_ir in
   let bin = Masc_exec.Bin.of_string "echo" |> Result.get_ok in
-  let ir = Simple { bin; args = [Lit "hello"; Lit "world"]; env = []; cwd = None; redirects = [] } in
+  let ir =
+    Simple
+      { bin
+      ; args = [ Lit "hello"; Lit "world" ]
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Masc_exec.Sandbox_target.host ()
+      }
+  in
   let result = Masc_exec.Exec_dispatch.dispatch ir in
   let stdout = String.trim result.stdout in
   assert (stdout = "hello world");
@@ -62,7 +71,16 @@ let () =
   with_eio @@ fun () ->
   let open Masc_exec.Shell_ir in
   let bin = Masc_exec.Bin.of_string "cat" |> Result.get_ok in
-  let ir = Simple { bin; args = [Lit "/nonexistent_file_p7_test"]; env = []; cwd = None; redirects = [] } in
+  let ir =
+    Simple
+      { bin
+      ; args = [ Lit "/nonexistent_file_p7_test" ]
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Masc_exec.Sandbox_target.host ()
+      }
+  in
   let result = Masc_exec.Exec_dispatch.dispatch ir in
   assert (result.status <> Unix.WEXITED 0);
   assert (String.length result.stderr > 0)
@@ -74,9 +92,10 @@ let () =
   let open Masc_exec.Shell_ir in
   let echo_bin = Masc_exec.Bin.of_string "echo" |> Result.get_ok in
   let tr_bin = Masc_exec.Bin.of_string "tr" |> Result.get_ok in
+  let host_sandbox = Masc_exec.Sandbox_target.host () in
   let stages = [
-    Simple { bin = echo_bin; args = [Lit "hello world"]; env = []; cwd = None; redirects = [] };
-    Simple { bin = tr_bin; args = [Lit "a-z"; Lit "A-Z"]; env = []; cwd = None; redirects = [] };
+    Simple { bin = echo_bin; args = [Lit "hello world"]; env = []; cwd = None; redirects = []; sandbox = host_sandbox };
+    Simple { bin = tr_bin; args = [Lit "a-z"; Lit "A-Z"]; env = []; cwd = None; redirects = []; sandbox = host_sandbox };
   ] in
   let result = Masc_exec.Exec_dispatch.dispatch (Pipeline stages) in
   let stdout = String.trim result.stdout in
@@ -90,9 +109,10 @@ let () =
   let open Masc_exec.Shell_ir in
   let echo_bin = Masc_exec.Bin.of_string "echo" |> Result.get_ok in
   let false_bin = Masc_exec.Bin.of_string "false" |> Result.get_ok in
+  let host_sandbox = Masc_exec.Sandbox_target.host () in
   let stages = [
-    Simple { bin = echo_bin; args = [Lit "ok"]; env = []; cwd = None; redirects = [] };
-    Simple { bin = false_bin; args = []; env = []; cwd = None; redirects = [] };
+    Simple { bin = echo_bin; args = [Lit "ok"]; env = []; cwd = None; redirects = []; sandbox = host_sandbox };
+    Simple { bin = false_bin; args = []; env = []; cwd = None; redirects = []; sandbox = host_sandbox };
   ] in
   let result = Masc_exec.Exec_dispatch.dispatch (Pipeline stages) in
   assert (result.status = Unix.WEXITED 1)

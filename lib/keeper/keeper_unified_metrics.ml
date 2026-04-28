@@ -1008,6 +1008,18 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
             delivery_surface = Social.Visible_reply;
           }
   in
+  (* #10474: proactive outcome counter for successful cycles. *)
+  if update_proactive_rt && is_scheduled_autonomous_cycle then begin
+    let outcome =
+      if has_substantive_tools then "tool_called"
+      else if is_noop_cycle ~has_text ~tools_used:result.tools_used
+      then "noop"
+      else "tool_called"
+    in
+    Prometheus.inc_counter Prometheus.metric_keeper_proactive_outcome
+      ~labels:[ ("keeper", meta.name); ("outcome", outcome) ]
+      ()
+  end;
   {
     meta with
     updated_at = now_iso ();
@@ -1488,6 +1500,26 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
         | Some _ | None -> false)
     | None -> false
   in
+  (* #10474: emit Prometheus counters for no_tool_provider and proactive
+     cycle outcomes so Grafana can surface fleet-wide health ratios. *)
+  (match sdk_error with
+   | Some err ->
+       (match Oas_worker_named.classify_masc_internal_error err with
+        | Some (Oas_worker_named.No_tool_capable_provider
+                  { cascade_name; _ }) ->
+            Prometheus.inc_counter
+              Prometheus.metric_keeper_no_tool_provider
+              ~labels:
+                [ ("keeper", meta.name)
+                ; ("cascade", cascade_name)
+                ]
+              ()
+        | _ -> ())
+   | None -> ());
+  if is_scheduled_autonomous_cycle then
+    Prometheus.inc_counter Prometheus.metric_keeper_proactive_outcome
+      ~labels:[ ("keeper", meta.name); ("outcome", "error") ]
+      ();
   let preview =
     let trimmed = String.trim public_reason in
     if trimmed = "" then "keeper cycle failed"

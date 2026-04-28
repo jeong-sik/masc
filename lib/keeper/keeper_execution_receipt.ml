@@ -1,24 +1,29 @@
-(* Receipt outcome classification. Tri-state mirrors the TLA+ spec
-   [ReceiptOutcomeSet] (see [specs/keeper-state-machine/
-   KeeperOutcomesConservation.tla]). The receipt record still stores
-   the legacy string for JSON compatibility; consumers and producers
-   that care about Cancelled vs Error must use these helpers to avoid
-   silently folding a cancellation into a failure. *)
-type outcome_kind = [ `Ok | `Error | `Cancelled ]
+(* Receipt outcome classification. Mirrors the TLA+ spec
+   [ReceiptOutcomeSet] (see [specs/keeper-turn-fsm/KeeperTurnFSM.tla] and
+   [specs/keeper-state-machine/KeeperOutcomesConservation.tla]).
+   [`Skipped] corresponds to TLA+ "receipt_skipped" produced by the
+   [PhaseGateSkip] action: the turn reached terminal [Done] without
+   dispatching, so it is a successful no-op rather than a failure or
+   cancellation. The receipt record still stores the legacy string for
+   JSON compatibility; consumers must go through these helpers so that
+   Skipped/Cancelled/Error are not silently folded into one another. *)
+type outcome_kind = [ `Ok | `Skipped | `Error | `Cancelled ]
 
 let outcome_kind_to_string = function
   | `Ok -> "ok"
+  | `Skipped -> "skipped"
   | `Error -> "error"
   | `Cancelled -> "cancelled"
 
 let outcome_kind_of_string = function
   | "ok" -> Some `Ok
+  | "skipped" -> Some `Skipped
   | "error" -> Some `Error
   | "cancelled" -> Some `Cancelled
   | _ -> None
 
 let outcome_kind_is_terminal_success = function
-  | `Ok -> true
+  | `Ok | `Skipped -> true
   | `Error | `Cancelled -> false
 
 type tool_surface =
@@ -194,11 +199,15 @@ let operator_disposition (receipt : t) =
 
      Cancelled is split out from the legacy binary outcome so dashboards
      and replay decoders can distinguish a user-initiated cancellation
-     from a true failure. Spec parity with [ReceiptOutcomeSet] in
-     [specs/keeper-state-machine/KeeperOutcomesConservation.tla]. *)
+     from a true failure. Skipped corresponds to the TLA+ [PhaseGateSkip]
+     action: a turn that intentionally never dispatched, so cascade
+     never engaged. It is a successful no-op rather than a failure or
+     an unmapped state. Spec parity with [ReceiptOutcomeSet] in
+     [specs/keeper-turn-fsm/KeeperTurnFSM.tla]. *)
   else
     match outcome_kind_of_string receipt.outcome with
     | Some `Cancelled -> ("user_cancelled", "cancelled")
+    | Some `Skipped -> ("skipped", "phase_skipped")
     | Some `Ok when String.equal cascade_outcome "completed" ->
       ("pass", "healthy")
     | _ -> ("unknown", "unmapped_cascade_state")

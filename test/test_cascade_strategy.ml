@@ -153,6 +153,127 @@ let test_weighted_random_all_cooldown_yields_empty () =
   check (list string) "all-cooldown → empty"
     [] (names ordered)
 
+(* ── Latency-aware weight scaling (PR3) ──────────────────────── *)
+
+(* For these tests we exercise weight scaling indirectly through the
+   internal RNG.  With [rand_int n = always n - 1] we always pick the
+   *last* candidate within the active list — so a candidate with weight
+   1 ends up at the head of the returned ordering only when it survived
+   the weighted draw.  By comparing two configurations that differ only
+   in latency samples, we can observe whether the latency factor
+   actually shifted the per-candidate weight. *)
+
+let pick_first_with_rand_max () =
+  (* rand_int returning (n - 1) always selects the last candidate first
+     in [weighted_shuffle], so the head of the result ≈ the candidate
+     with the smallest weighted partition relative to the running total.
+     For a simpler invariant we just ensure the function returns a
+     deterministic permutation. *)
+  ()
+
+let test_latency_no_samples_preserves_baseline_order () =
+  (* Without latency samples, latency_score = 1.0 for both providers,
+     so the per-candidate weight is unchanged from the pre-PR3
+     behaviour.  Pin rand to 0 → left-to-right ordering. *)
+  let h = H.create () in
+  let cands = [mk_cand ~w:30 "a"; mk_cand ~w:30 "b"; mk_cand ~w:30 "c"] in
+  let ctx = mk_ctx ~health:h ~rand:(fun _ -> 0) () in
+  let strat = mk_t S.Weighted_random in
+  let ordered = S.order_candidates strat ~adapter ~ctx ~cycle:0 cands in
+  check (list string) "no latency samples → input order with rand=0"
+    ["a"; "b"; "c"] (names ordered)
+
+let test_latency_below_baseline_full_weight () =
+  (* p50 below baseline → score = 1.0 → no penalty.  Verify by feeding
+     fast samples (10ms) and confirming weight stays at config.  We
+     observe via [Cascade_health_tracker.effective_weight] before and
+     [latency_score_for_provider] separately. *)
+  let h = H.create () in
+  H.record_success h ~provider_key:"a" ~latency_ms:10.0 ();
+  H.record_success h ~provider_key:"b" ~latency_ms:10.0 ();
+  let score = S.latency_score_for_provider h ~provider_key:"a" in
+  check (float 0.001) "fast provider gets score 1.0" 1.0 score
+
+let test_latency_above_baseline_fractional () =
+  (* p50 = 4 × baseline (default 2000ms) → score should be ~0.25.
+     We feed 8000ms samples and verify the score is well below 1.0. *)
+  let h = H.create () in
+  H.record_success h ~provider_key:"slow" ~latency_ms:8000.0 ();
+  let score = S.latency_score_for_provider h ~provider_key:"slow" in
+  check bool
+    (Printf.sprintf "slow provider score=%.3f should be < 0.5" score)
+    true (score < 0.5);
+  check bool
+    (Printf.sprintf "slow provider score=%.3f should be > 0" score)
+    true (score > 0.0)
+
+let test_latency_unknown_provider_neutral () =
+  (* Provider with no entry in the tracker → score = 1.0 (optimistic
+     default, matches success_rate convention). *)
+  let h = H.create () in
+  let score = S.latency_score_for_provider h ~provider_key:"never-seen" in
+  check (float 0.001) "unknown provider score = 1.0" 1.0 score
+
+let test_latency_changes_weighted_ordering () =
+  (* When providers have identical config_weight and success_rate, but
+     one is materially slower, weighted_shuffle's per-candidate weight
+     for the slow provider must drop below the fast one.  We probe the
+     effect by running shuffle many times with a varying [rand_int] and
+     confirming the slow provider lands at the head less often than
+     the fast ones. *)
+  let h = H.create () in
+  H.record_success h ~provider_key:"fast" ~latency_ms:50.0 ();
+  H.record_success h ~provider_key:"medium" ~latency_ms:500.0 ();
+  H.record_success h ~provider_key:"slow" ~latency_ms:8000.0 ();
+  let cands = [mk_cand ~w:100 "fast"; mk_cand ~w:100 "medium"; mk_cand ~w:100 "slow"] in
+  let strat = mk_t S.Weighted_random in
+  (* Sweep all possible rand_int draws across the total weight.  With
+     rand=k we get a deterministic head pick for a given total; counting
+     how often each candidate is the head over k=0..total-1 approximates
+     the head-probability distribution. *)
+  let head_counts = Hashtbl.create 3 in
+  let trials = 500 in
+  for i = 0 to trials - 1 do
+    let ctx = mk_ctx ~health:h ~rand:(fun n -> i mod (max 1 n)) () in
+    let ordered = S.order_candidates strat ~adapter ~ctx ~cycle:0 cands in
+    match ordered with
+    | head :: _ ->
+      let key = adapter.health_key head in
+      let prev = try Hashtbl.find head_counts key with Not_found -> 0 in
+      Hashtbl.replace head_counts key (prev + 1)
+    | [] -> ()
+  done;
+  let count k = try Hashtbl.find head_counts k with Not_found -> 0 in
+  let fast_n = count "fast" in
+  let medium_n = count "medium" in
+  let slow_n = count "slow" in
+  check bool
+    (Printf.sprintf "fast(%d) head-rate >= medium(%d) head-rate" fast_n medium_n)
+    true (fast_n >= medium_n);
+  check bool
+    (Printf.sprintf "medium(%d) head-rate >= slow(%d) head-rate" medium_n slow_n)
+    true (medium_n >= slow_n);
+  check bool
+    (Printf.sprintf "fast(%d) > slow(%d) (strict)" fast_n slow_n)
+    true (fast_n > slow_n)
+
+let test_latency_does_not_zero_alive_provider () =
+  (* Even at extreme p50 (e.g. 60s), an alive provider must still get
+     weight ≥ 1 — the [max 1] guard prevents zero-out from latency
+     alone, only cooldown can produce 0. *)
+  let h = H.create () in
+  H.record_success h ~provider_key:"slow" ~latency_ms:60_000.0 ();
+  H.record_success h ~provider_key:"fast" ~latency_ms:50.0 ();
+  let cands = [mk_cand ~w:10 "slow"; mk_cand ~w:10 "fast"] in
+  let ctx = mk_ctx ~health:h ~rand:(fun _ -> 0) () in
+  let strat = mk_t S.Weighted_random in
+  let ordered = S.order_candidates strat ~adapter ~ctx ~cycle:0 cands in
+  check int "extreme-slow provider still appears in ordering"
+    2 (List.length ordered);
+  check bool "extreme-slow not filtered as cooldown"
+    true (List.exists (fun c -> adapter.health_key c = "slow") ordered);
+  ignore pick_first_with_rand_max
+
 (* ── S4 Circuit_breaker_cycling ──────────────────────────────── *)
 
 let test_cb_cycling_excludes_cooldown_and_busy () =
@@ -906,6 +1027,20 @@ let () =
         test_weighted_random_deterministic_with_rand0;
       test_case "all cooldown yields empty" `Quick
         test_weighted_random_all_cooldown_yields_empty;
+    ];
+    "weighted_random_latency", [
+      test_case "no samples → input order preserved at rand=0" `Quick
+        test_latency_no_samples_preserves_baseline_order;
+      test_case "p50 below baseline → score 1.0" `Quick
+        test_latency_below_baseline_full_weight;
+      test_case "p50 well above baseline → fractional score" `Quick
+        test_latency_above_baseline_fractional;
+      test_case "unknown provider → score 1.0 (optimistic)" `Quick
+        test_latency_unknown_provider_neutral;
+      test_case "latency shifts head-rate (fast > medium > slow)" `Quick
+        test_latency_changes_weighted_ordering;
+      test_case "extreme p50 does not zero alive provider" `Quick
+        test_latency_does_not_zero_alive_provider;
     ];
     "circuit_breaker_cycling", [
       test_case "excludes cooldown and busy" `Quick

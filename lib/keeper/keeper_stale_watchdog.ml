@@ -238,8 +238,8 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                  ~labels:[ ("keeper", meta.name) ]
                  ();
                Log.Keeper.error
-                 "%s: stale watchdog terminating fiber (%s) [window_count=%d/6h]"
-                 meta.name reason_desc window_count;
+                 "%s: stale watchdog terminating fiber (%s) [cascade=%s window_count=%d/6h]"
+                 meta.name reason_desc meta.cascade_name window_count;
                if window_count >= escalation_threshold then begin
                  Prometheus.inc_counter
                    "masc_keeper_stale_termination_threshold_breached_total"
@@ -288,6 +288,7 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                     ctx.config
                     ~keeper_name:meta.name
                     ~agent_name:meta.agent_name
+                    ~cascade_name:meta.cascade_name
                     ~trace_id:
                       (Keeper_id.Trace_id.to_string
                          entry.meta.runtime.trace_id)

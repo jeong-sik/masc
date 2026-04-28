@@ -169,6 +169,10 @@ type semantic =
   | `Rose_light
   | `Cyan
   | `Purple
+  | `Frost_100
+  | `White_pure
+  | `Text_near_white
+  | `Text_slate_light
   | `Ok_soft
   | `Ok_fg
   | `Ok_border
@@ -565,6 +569,10 @@ let name_of = function
   | `Rose_light -> "rose-light"
   | `Cyan -> "cyan"
   | `Purple -> "purple"
+  | `Frost_100 -> "frost-100"
+  | `White_pure -> "white-pure"
+  | `Text_near_white -> "text-near-white"
+  | `Text_slate_light -> "text-slate-light"
   | `Ok_soft -> "ok-soft"
   | `Ok_fg -> "ok-fg"
   | `Ok_border -> "ok-border"

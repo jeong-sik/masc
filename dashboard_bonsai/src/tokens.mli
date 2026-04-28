@@ -180,6 +180,10 @@ type semantic =
   | `Rose_light
   | `Cyan
   | `Purple
+  | `Frost_100
+  | `White_pure
+  | `Text_near_white
+  | `Text_slate_light
   | `Ok_soft
   | `Ok_fg
   | `Ok_border

@@ -1,0 +1,6 @@
+(include_subdirs no)
+
+(library
+ (name resilience)
+ (public_name masc_mcp.resilience)
+ (libraries shared_types))

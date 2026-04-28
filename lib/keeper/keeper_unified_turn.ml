@@ -1077,9 +1077,9 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
         ~meta
         ~generation
         ~cascade_name:meta.cascade_name
-        ~outcome:"skipped"
+        ~outcome:"cancelled"
         ~terminal_reason_code
-        ~activity_kind:"keeper.turn_skipped"
+        ~activity_kind:"keeper.turn_cancelled"
         ~trajectory_outcome:(Trajectory.Gated terminal_reason_code)
         ~keeper_turn_id
         ();

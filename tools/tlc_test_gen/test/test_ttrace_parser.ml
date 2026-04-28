@@ -111,4 +111,66 @@ let () =
       must_contain ~ctx:"emit_reachability"
         reach "List.assoc_opt \"turn_phase\" last = Some (Tlc_test_gen.Ttrace_parser.V_string \"failed\")";
 
+      (* ---- Nested record fixture (Cycle 21 follow-up) ---- *)
+      (match parse_file (fixture "nested_record.tla") with
+       | Error msg ->
+           Printf.eprintf "FAIL [nested parse_file]: %s\n" msg; exit 1
+       | Ok nst ->
+           assert_eq ~ctx:"nested module name"
+             "NestedSample_TTrace_1700000001" nst.spec_module;
+
+           (* The _inv body uses simple bindings; record-typed bindings fall
+              outside the regex narrower so should not pollute. *)
+           assert_eq ~ctx:"nested binding count"
+             "2" (string_of_int (List.length nst.bindings));
+
+           (* Step sequence has 3 records; each contains a nested record
+              [host |-> ..., port |-> ...] preserved as V_raw. *)
+           assert_eq ~ctx:"nested step count"
+             "3" (string_of_int (List.length nst.steps));
+           let nstep i name =
+             try List.assoc name (List.nth nst.steps i)
+             with Not_found ->
+               Printf.eprintf "FAIL [nested step %d field]: %s\n" i name;
+               exit 1
+           in
+           assert_eq ~ctx:"nested step 0 active"
+             "bool(false)" (value_to_str (nstep 0 "active"));
+           assert_eq ~ctx:"nested step 0 retries"
+             "int(0)" (value_to_str (nstep 0 "retries"));
+
+           (* Critical: nested record value is preserved as V_raw with inner
+              brackets and the embedded "init" string verbatim. *)
+           (match nstep 0 "config" with
+            | V_raw r ->
+                let needle = "host |-> \"init\"" in
+                let len_r = String.length r in
+                let len_n = String.length needle in
+                let rec scan i =
+                  if i + len_n > len_r then begin
+                    Printf.eprintf
+                      "FAIL [nested step 0 config V_raw missing %S, got %S]\n"
+                      needle r;
+                    exit 1
+                  end else if String.sub r i len_n = needle then ()
+                  else scan (i + 1)
+                in
+                scan 0
+            | other ->
+                Printf.eprintf
+                  "FAIL [nested step 0 config not V_raw]: %s\n"
+                  (value_to_str other);
+                exit 1);
+
+           assert_eq ~ctx:"nested step 2 retries"
+             "int(3)" (value_to_str (nstep 2 "retries"));
+
+           (* Emitter quotes the V_raw payload so the embedded "init" stays
+              valid OCaml after generation. *)
+           let nemit = Tlc_test_gen.Ocaml_emit.emit_trace nst in
+           must_contain ~ctx:"nested emit_trace V_raw"
+             nemit "Tlc_test_gen.Ttrace_parser.V_raw";
+           must_contain ~ctx:"nested emit_trace escaped init"
+             nemit "host |-> \\\"init\\\"");
+
       print_endline "PASS"

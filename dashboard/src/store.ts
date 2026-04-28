@@ -92,6 +92,27 @@ export const executionContinuityBriefs = signal<DashboardExecutionContinuityBrie
 
 export const keeperHeartbeats = signal<Map<string, number>>(new Map())
 
+// --- Cross-zone keeper filter (Phase 2 · I0-B) ---
+// Empty set means "all keepers". Components that consume the filter
+// should treat `size === 0` as the unconstrained case so the default
+// route stays the broadest view. Adding a keeper id narrows the scope.
+export const selectedKeeperFilter = signal<Set<string>>(new Set())
+
+export function toggleKeeperInFilter(name: string): void {
+  const next = new Set(selectedKeeperFilter.value)
+  if (next.has(name)) next.delete(name)
+  else next.add(name)
+  selectedKeeperFilter.value = next
+}
+
+export function clearKeeperFilter(): void {
+  selectedKeeperFilter.value = new Set()
+}
+
+export function setKeeperFilterToAll(allNames: readonly string[]): void {
+  selectedKeeperFilter.value = new Set(allNames)
+}
+
 // --- Board state ---
 
 export const boardPosts = signal<BoardPost[]>([])

@@ -15,6 +15,7 @@ import { namespaceTruth } from '../namespace-truth-store'
 import { resolveRuntimeCounts } from '../runtime-counts'
 import { KeeperSpawnPanel } from './keeper-spawn/keeper-spawn-panel'
 import { KeeperTokenStats } from './keeper-token-stats'
+import { KeeperMultiSelect } from './keeper-multi-select'
 import { FsmHub } from './fsm-hub'
 import { FleetFsmMatrix } from './fleet-fsm-matrix'
 import { HandoffTimeline } from './handoff-timeline'
@@ -111,7 +112,12 @@ export function AgentsUnified() {
         : html`
           ${currentView !== 'agents' ? html`<${KeeperSpawnPanel} />` : null}
 
-          ${currentView === 'keepers' ? html`<${KeeperTokenStats} />` : null}
+          ${currentView === 'keepers' ? html`
+            <${KeeperMultiSelect}
+              hint="필터를 적용하면 아래 토큰 집계가 선택한 keeper 만 합산합니다. 비어 있으면 전체 합산입니다."
+            />
+            <${KeeperTokenStats} />
+          ` : null}
 
           <${AgentRoster}
             keeperFilter=${currentView === 'keepers' ? 'keeper-only'

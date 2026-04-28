@@ -97,9 +97,6 @@ type t =
   | CacheError of cache_error
   | StorageError of string
   | ValidationError of string
-  | GeneralError of string
-  | ExnError of exn
-  | WithCode of { code : int; msg : string }
 
 let rec to_string = function
   | NotInitialized -> "❌ MASC not initialized. Use masc_init first."
@@ -139,18 +136,11 @@ let rec to_string = function
       | CacheCorrupted path -> Printf.sprintf "❌ Cache: Corrupted [path=%s]" path)
   | StorageError msg -> Printf.sprintf "Storage error: %s" msg
   | ValidationError msg -> Printf.sprintf "Validation error: %s" msg
-  | GeneralError msg -> msg
-  | ExnError e -> Printexc.to_string e
-  | WithCode { code; msg } -> Printf.sprintf "HTTP %d: %s" code msg
 
 let show = to_string
 
 let to_yojson err =
   `String (to_string err)
-
-let of_string s = GeneralError s
-let of_exn e = ExnError e
-let with_code ~code msg = WithCode { code; msg }
 
 let code = function
   | Unauthorized _ | TokenExpired _ | InvalidToken _ -> 401
@@ -158,5 +148,4 @@ let code = function
   | AgentNotFound _ | TaskNotFound _ -> 404
   | RateLimitExceeded _ -> 429
   | InvalidJson _ | InvalidAgentName _ | InvalidTaskId _ | InvalidFilePath _ | ValidationError _ -> 400
-  | WithCode { code; _ } -> code
   | _ -> 500

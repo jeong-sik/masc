@@ -85,14 +85,14 @@ let test_classify_invalid_json () =
         (Aek.to_string other)
 
 let test_classify_unmodelled_falls_to_other () =
-  (* GeneralError is not auth-relevant and intentionally falls through
+  (* IoError is not auth-relevant and intentionally falls through
      to [Other]. If a future PR moves it under an explicit arm, this
      test is the breakpoint. *)
-  match Aek.classify (Types.GeneralError "x") with
+  match Aek.classify (Types.IoError "disk") with
   | Aek.Other -> ()
   | other ->
       Alcotest.failf
-        "GeneralError should classify as Other, got %s"
+        "IoError should classify as Other, got %s"
         (Aek.to_string other)
 
 let test_label_set_stable () =

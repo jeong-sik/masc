@@ -353,6 +353,15 @@ export const raw: ReadonlyArray<TokenBase> = (() => {
   out.push(t("text-muted",      "#a8bfdf", "raw", "color", "Secondary/labels"));
   out.push(t("text-dim",        "#a0a8b4", "raw", "color", "Tertiary/captions"));
 
+  // Iter 2c-9: vote button Reddit-pattern colors. Used identically by
+  // board.css and dashboard.css; hex values are CANONICAL (Reddit
+  // upvote = #ff4500) and intentionally preserved exactly. Tokenizing
+  // here removes the cross-file duplication that the original
+  // variables.css comment flagged.
+  out.push(t("vote-up",         "#ff4500", "raw", "color", "Reddit-canonical upvote orange-red"));
+  out.push(t("vote-down",       "#7193ff", "raw", "color", "Reddit-canonical downvote blue-violet"));
+  out.push(t("vote-hover",      "#ccc",    "raw", "color", "Vote button hover (3-digit short hex)"));
+
   return Object.freeze(out);
 })();
 

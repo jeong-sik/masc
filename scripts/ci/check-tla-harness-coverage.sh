@@ -7,13 +7,7 @@ set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
 known_unchecked_specs() {
-  # AUDIT NOTE — AdmissionQueue.tla added 2026-04-28: clean spec fails at
-  # State 38 (SubmitRequest "raw_a") with release_count=acquire_count=12
-  # invariant violation. PR #11582 attempted to fix the cumulative-counter
-  # deadlock but a different invariant violation surfaced. Follow-up issue
-  # tracks the spec semantic deep fix.
   cat <<'EOF'
-specs/admission-queue/AdmissionQueue.tla
 specs/boundary/CascadeKeeperRecovery.tla
 specs/boundary/CascadeStrategy.tla
 specs/boundary/CascadeStrategyStateful.tla

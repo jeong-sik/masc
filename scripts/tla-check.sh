@@ -171,13 +171,8 @@ run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperLaunchPending.tla"
 run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperLaunchPending.tla"
 run_tlc "$REPO_ROOT/specs/keeper-turn-fsm" "KeeperTurnFSM.tla"
 run_tlc_buggy "$REPO_ROOT/specs/keeper-turn-fsm" "KeeperTurnFSM.tla"
-# AdmissionQueue temporarily removed from active checking — clean spec fails
-# at State 38 (SubmitRequest "raw_a") with release_count=acquire_count=12 invariant
-# violation despite #11582 cumulative-counter deadlock fix attempt. Tracked as
-# known-unchecked debt in scripts/ci/check-tla-harness-coverage.sh; spec semantic
-# deep fix is a follow-up issue.
-# run_tlc "$REPO_ROOT/specs/admission-queue" "AdmissionQueue.tla"
-# run_tlc_buggy "$REPO_ROOT/specs/admission-queue" "AdmissionQueue.tla"
+run_tlc "$REPO_ROOT/specs/admission-queue" "AdmissionQueue.tla"
+run_tlc_buggy "$REPO_ROOT/specs/admission-queue" "AdmissionQueue.tla"
 run_tlc "$REPO_ROOT/specs/boundary" "KeeperContinueGate.tla"
 run_tlc_buggy "$REPO_ROOT/specs/boundary" "KeeperContinueGate.tla"
 run_tlc "$REPO_ROOT/specs/boundary" "ToolCallContract.tla"

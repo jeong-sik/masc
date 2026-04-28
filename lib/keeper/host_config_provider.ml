@@ -164,15 +164,29 @@ let resolve ~config ~identity:keeper_name =
       in
       let env = compose_env ~git_author_name ~git_author_email in
       let ro_mounts = compose_ro_mounts ~keeper_name kb in
-      let metadata = metadata_of_binding kb in
-      Ok
-        Credential_provider.{
-          identity = keeper_name;
-          env;
-          ro_mounts;
-          bootstrap = None;
-          metadata;
-        }
+      (* β7 fail-closed: resolve is called only when git_creds_enabled
+         (caller at keeper_shell_docker.ml:398-400).  If ALL credential
+         host paths are empty or missing, ro_mounts will be [].  Returning
+         Ok with empty mounts lets the keeper start in Docker with no
+         credential files — gh/git commands then fail with confusing 401
+         or "permission denied" errors.  Return Error so the caller
+         reports the real cause at sandbox creation time. *)
+      if ro_mounts = [] then
+        Error
+          (Credential_provider.Missing_bundle
+            { identity = keeper_name
+            ; path = "all credential host paths empty or missing"
+            })
+      else
+        let metadata = metadata_of_binding kb in
+        Ok
+          Credential_provider.{
+            identity = keeper_name;
+            env;
+            ro_mounts;
+            bootstrap = None;
+            metadata;
+          }
 
 let finalize (_b : Credential_provider.binding) ~container_id:_ =
   (* PR-1: noop.  PR-3 will rewrite hosts.yml:user inside the

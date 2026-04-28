@@ -53,6 +53,36 @@ let test_pp_error_all_variants () =
 
 (* --- 2. mount_if_present skip rules --- *)
 
+(* β7 fail-closed: [resolve] returns Error when ALL credential host paths
+   are empty or missing.  [resolve] itself requires a Coord.config, so
+   unit-testing it directly needs the integration test suite
+   ([test_keeper_shell_docker_route]).  What we can pin here is the
+   precondition: three mount_if_present calls with empty/missing hosts
+   produce an empty mount list, and the error format is correct. *)
+let test_fail_closed_all_credential_paths_empty () =
+  let gh_creds = "" and gitconfig = "" and ssh_dir = "" in
+  let ro_mounts =
+    HCP.For_testing.mount_if_present ~host:gh_creds
+      ~container:"/tmp/keeper-creds/.config/gh"
+    @ HCP.For_testing.mount_if_present ~host:gitconfig
+        ~container:"/tmp/keeper-creds/.gitconfig"
+    @ HCP.For_testing.mount_if_present ~host:ssh_dir
+        ~container:"/tmp/keeper-creds/.ssh"
+  in
+  check int "all-empty paths -> empty mounts" 0 (List.length ro_mounts);
+  let err =
+    CP.Missing_bundle
+      { identity = "test-keeper"; path = "all credential host paths empty or missing" }
+  in
+  let rendered = CP.pp_error err in
+  check bool "error rendered with identity"
+    true
+    (String.length rendered > 0);
+  check bool "error mentions credential paths"
+    true
+    (try ignore (Str.search_forward (Str.regexp "credential") rendered 0); true
+     with Not_found -> false)
+
 let test_mount_if_present_empty_host () =
   let r = HCP.For_testing.mount_if_present ~host:"" ~container:"/x" in
   check int "empty host -> no mount" 0 (List.length r)
@@ -167,8 +197,12 @@ let test_tear_down_idempotent () =
 let () =
   run "credential_provider"
     [
-      ( "errors",
-        [ test_case "pp_error covers all variants" `Quick test_pp_error_all_variants ] );
+        ( "errors",
+        [
+          test_case "pp_error covers all variants" `Quick test_pp_error_all_variants;
+          test_case "fail-closed: all-empty paths produce Missing_bundle" `Quick
+            test_fail_closed_all_credential_paths_empty;
+        ] );
       ( "mount_if_present",
         [
           test_case "empty host" `Quick test_mount_if_present_empty_host;

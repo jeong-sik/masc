@@ -3,9 +3,9 @@
 /* ── Ops Tab (merged from ops.css) ─────────────────────── */
 
 @utility ops-banner {
-  &.error { background: var(--bad-12); border-color: rgba(239, 68, 68, 0.34); color: #fecaca; }
+  &.error { background: var(--bad-12); border-color: rgba(239, 68, 68, 0.34); color: var(--red-100); }
   &.warn { background: rgba(245, 158, 11, 0.12); border-color: rgba(245, 158, 11, 0.28); color: var(--yellow-100); }
-  &.info { background: var(--cyan-12); border-color: rgba(34, 211, 238, 0.26); color: #cffafe; }
+  &.info { background: var(--cyan-12); border-color: rgba(34, 211, 238, 0.26); color: var(--cyan-100); }
 }
 
 /* ops-action-guide-item hover/tone variants: folded into @utility ops-action-guide-item above */

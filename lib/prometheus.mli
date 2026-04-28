@@ -171,7 +171,7 @@ val metric_keeper_no_tool_provider : string
     tool-capable providers.  Labels: keeper, cascade. *)
 val metric_keeper_proactive_outcome : string
 (** #10474: counter classifying each scheduled autonomous cycle outcome.
-    Labels: keeper, outcome={tool_called|noop|error}. *)
+    Labels: keeper, outcome=[tool_called|noop|error]. *)
 val metric_keeper_ollama_saturation_skip : string
 (** PR-B: counter incremented when [run_keeper_cycle] skips a turn
     because the keeper's resolved cascade is ollama-only and the

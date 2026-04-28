@@ -363,6 +363,10 @@
   --focus-ring-err: 0 0 0 1px var(--err), 0 0 0 3px rgb(var(--err-glow) / .3);
   --hover-overlay: rgb(255 255 255 / .03);
   --active-overlay: rgb(0 0 0 / .25);
+  --pressed-scale: 0.97;  /* scale factor while [data-pressed] */
+  --hover-lift: -1px;  /* translateY offset while [data-hover] */
+  --focus-ring-width: 2px;
+  --focus-ring-offset: 2px;
   --state-hover-bg: var(--bg-3);
   --state-hover-fg: var(--fg-1);
   --state-hover-border: var(--line-2);

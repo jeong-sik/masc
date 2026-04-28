@@ -74,7 +74,7 @@ val backend_extend_lock :
   (bool, Backend_types.error) result
 
 val backend_health_check :
-  config -> (Backend_types.health_status, Backend_types.error) result
+  config -> (Backend_types.health_result, Backend_types.error) result
 
 val backend_publish :
   config -> channel:string -> message:string ->

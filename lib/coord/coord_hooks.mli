@@ -44,7 +44,7 @@ val observe_agent_lifecycle_fn : (Coord_utils_backend_setup.config ->
 val observe_task_transition_fn : (Coord_utils_backend_setup.config ->
             agent_name:string ->
             task_id:string ->
-            transition:Types_core.task_action ->
+            transition:Types.task_action ->
             details:Yojson.Safe.t -> unit)
            Atomic.t
 val cleanup_board_artifacts_fn : (unit -> int) Atomic.t

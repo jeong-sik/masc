@@ -52,7 +52,7 @@ let make_meta name =
       ; "sandbox_profile", `String "docker"
       ]
   in
-  match Keeper_types.meta_of_json json with
+  match Masc_test_deps.meta_of_json_fixture json with
   | Ok meta -> meta
   | Error e -> Alcotest.fail e
 ;;

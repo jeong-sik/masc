@@ -25,7 +25,7 @@ let make_meta_ref (name : string) : Masc_mcp.Keeper_types.keeper_meta ref =
         (Masc_mcp.Keeper_types.Preset
            { preset = Masc_mcp.Keeper_types.Full; also_allow = [] }));
   ] in
-  match Masc_mcp.Keeper_types.meta_of_json json with
+  match Masc_test_deps.meta_of_json_fixture json with
   | Ok meta -> ref meta
   | Error e -> failwith ("make_meta_ref: " ^ e)
 

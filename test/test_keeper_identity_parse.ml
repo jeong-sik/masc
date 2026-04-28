@@ -15,7 +15,7 @@ let minimal_keeper_json ~trace_id =
     ]
 
 let test_valid_trace_id () =
-  match Keeper_types.meta_of_json (minimal_keeper_json ~trace_id:"alice-001") with
+  match Masc_test_deps.meta_of_json_fixture (minimal_keeper_json ~trace_id:"alice-001") with
   | Ok meta ->
       check string "name" "alice" meta.name;
       check string "agent_name" "keeper-alice-agent" meta.agent_name
@@ -30,7 +30,7 @@ let test_explicit_keeper_name_is_not_nickname_canonicalized () =
       ; ("goal", `String "test")
       ]
   in
-  match Keeper_types.meta_of_json json with
+  match Masc_test_deps.meta_of_json_fixture json with
   | Ok meta ->
       check string "explicit keeper name"
         "personality-resync-test" meta.name
@@ -52,7 +52,7 @@ let test_legacy_keeper_cascade_alias_preserved_raw () =
         ("cascade_name", `String "oas-keeper_unified");
       ]
   in
-  match Keeper_types.meta_of_json json with
+  match Masc_test_deps.meta_of_json_fixture json with
   | Ok meta ->
       check string "legacy alias preserved raw"
         "oas-keeper_unified" meta.cascade_name;
@@ -77,7 +77,7 @@ let test_unknown_cascade_name_preserved_raw () =
         ("cascade_name", `String "playground_experiment_xyz");
       ]
   in
-  match Keeper_types.meta_of_json json with
+  match Masc_test_deps.meta_of_json_fixture json with
   | Ok meta ->
       check string "raw user-declared cascade preserved"
         "playground_experiment_xyz" meta.cascade_name;
@@ -95,7 +95,7 @@ let test_missing_trace_id () =
       ; ("goal", `String "test")
       ]
   in
-  match Keeper_types.meta_of_json json with
+  match Masc_test_deps.meta_of_json_fixture json with
   | Error msg ->
       check bool "error mentions trace_id"
         true
@@ -105,7 +105,7 @@ let test_missing_trace_id () =
   | Ok _ -> fail "expected Error for missing trace_id"
 
 let test_empty_trace_id () =
-  match Keeper_types.meta_of_json (minimal_keeper_json ~trace_id:"") with
+  match Masc_test_deps.meta_of_json_fixture (minimal_keeper_json ~trace_id:"") with
   | Error msg ->
       check bool "error mentions missing trace_id"
         true
@@ -115,7 +115,7 @@ let test_empty_trace_id () =
   | Ok _ -> fail "expected Error for empty trace_id"
 
 let test_invalid_trace_id () =
-  match Keeper_types.meta_of_json (minimal_keeper_json ~trace_id:"..") with
+  match Masc_test_deps.meta_of_json_fixture (minimal_keeper_json ~trace_id:"..") with
   | Error msg ->
       check bool "error mentions invalid trace_id"
         true

@@ -30,7 +30,7 @@ let iso_of_unix ts =
 
 let make_test_meta ?(name = "keeper-sangsu") ?(agent_name = "keeper-sangsu-agent") ()
     : Keeper_types.keeper_meta =
-  match Keeper_types.meta_of_json
+  match Masc_test_deps.meta_of_json_fixture
           (`Assoc
              [
                ("name", `String name);

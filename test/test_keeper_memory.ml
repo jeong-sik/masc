@@ -22,7 +22,7 @@ let keeper_meta ?(trace_id = "trace-1") ?(trace_history = []) ~name ~mention_tar
         ("trace_history", `List (List.map (fun s -> `String s) trace_history));
       ]
   in
-  match Keeper_types.meta_of_json json with
+  match Masc_test_deps.meta_of_json_fixture json with
   | Ok meta -> meta
   | Error err -> fail ("failed to build keeper meta: " ^ err)
 

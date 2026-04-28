@@ -83,7 +83,7 @@ let write_team_memory_keeper_meta ~config ~name ~shared_memory_scope =
       ]
   in
   let meta =
-    match Keeper_types.meta_of_json meta_json with
+    match Masc_test_deps.meta_of_json_fixture meta_json with
     | Ok meta -> meta
     | Error err -> failwith ("meta_of_json failed: " ^ err)
   in

@@ -37,7 +37,7 @@ let test_meta_of_json_survives_deleted_cwd () =
             ("goal", `String "respond to direct messages");
           ]
       in
-      match Keeper_types.meta_of_json json with
+      match Masc_test_deps.meta_of_json_fixture json with
       | Ok meta -> check string "keeper name" "sangsu" meta.name
       | Error err -> fail ("meta_of_json failed under deleted cwd: " ^ err))
 

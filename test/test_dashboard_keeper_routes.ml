@@ -516,7 +516,7 @@ let keeper_profile_cascade_name body keeper_name =
 
 let make_keeper_meta_json ?(name = "route_shadow_demo") () =
   match
-    Masc_mcp.Keeper_types.meta_of_json
+    Masc_test_deps.meta_of_json_fixture
       (`Assoc
           [ "name", `String name
           ; "agent_name", `String ("keeper-" ^ name ^ "-agent")

@@ -36,7 +36,7 @@ let make_meta
     
     ("tool_access", Keeper_types.tool_access_to_json tool_access);
   ] in
-  match Keeper_types.meta_of_json json with
+  match Masc_test_deps.meta_of_json_fixture json with
   | Ok meta -> meta
   | Error e -> failwith (Printf.sprintf "make_meta failed: %s" e)
 

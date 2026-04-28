@@ -897,7 +897,7 @@ let () = test "handle_claim_next_ignores_keeper_preset_for_open_claims" (fun () 
   ignore (Result.get_ok (Keeper_tool_policy.init_policy_config ~base_path));
   let initial_meta =
     match
-      Keeper_types.meta_of_json
+      Masc_test_deps.meta_of_json_fixture
         (`Assoc
           [
             ("name", `String keeper_name);

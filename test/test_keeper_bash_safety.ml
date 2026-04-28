@@ -290,7 +290,7 @@ let make_docker_meta name =
         ("network_mode", `String "none");
       ]
   in
-  match Keeper_types.meta_of_json json with
+  match Masc_test_deps.meta_of_json_fixture json with
   | Ok meta -> meta
   | Error err -> Alcotest.fail ("make_docker_meta failed: " ^ err)
 
@@ -409,7 +409,7 @@ let make_readonly_meta name =
         ("goal", `String "readonly hint test");
       ]
   in
-  match Keeper_types.meta_of_json json with
+  match Masc_test_deps.meta_of_json_fixture json with
   | Ok meta -> meta
   | Error err -> Alcotest.fail ("make_readonly_meta failed: " ^ err)
 

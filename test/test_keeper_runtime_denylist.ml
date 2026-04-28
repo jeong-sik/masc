@@ -66,7 +66,7 @@ tool_denylist = ["toml-tool-x", "toml-tool-y"]
   let config = Coord.default_config room_dir in
   let initial_meta =
     match
-      Keeper_types.meta_of_json
+      Masc_test_deps.meta_of_json_fixture
         (`Assoc
           [
             ("name", `String keeper_name);

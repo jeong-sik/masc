@@ -52,7 +52,7 @@ let make_meta ?(sandbox = Keeper_types.Local) name =
           `String (Keeper_types.sandbox_profile_to_string sandbox) );
       ]
   in
-  match Keeper_types.meta_of_json json with
+  match Masc_test_deps.meta_of_json_fixture json with
   | Ok m -> m
   | Error e -> Alcotest.fail e
 

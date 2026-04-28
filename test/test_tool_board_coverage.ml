@@ -45,7 +45,7 @@ let parse_create_response_json body =
 
 let make_keeper_meta ?(name = "judge-keeper") () : Keeper_types.keeper_meta =
   match
-    Keeper_types.meta_of_json
+    Masc_test_deps.meta_of_json_fixture
       (`Assoc
          [
            ("name", `String name);

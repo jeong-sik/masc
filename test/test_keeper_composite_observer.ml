@@ -34,7 +34,7 @@ let all_violated : Obs.invariants_check = {
 }
 
 let make_meta name =
-  match Keeper_types.meta_of_json
+  match Masc_test_deps.meta_of_json_fixture
           (`Assoc
              [
                ("name", `String name);

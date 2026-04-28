@@ -133,7 +133,7 @@ let write_keeper_meta_exn ?(autoboot_enabled = true)
       ]
   in
   let meta =
-    match Keeper_types.meta_of_json json with
+    match Masc_test_deps.meta_of_json_fixture json with
     | Ok meta -> meta
     | Error e -> fail ("meta_of_json failed: " ^ e)
   in

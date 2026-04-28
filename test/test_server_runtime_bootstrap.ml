@@ -812,7 +812,7 @@ let make_keeper_meta_json ?(name = "sangsu")
     ?(trace_id = "trace-sangsu-live")
     ?(updated_at = "2026-03-29T10:36:57Z") () =
   match
-    Keeper_types.meta_of_json
+    Masc_test_deps.meta_of_json_fixture
       (`Assoc
         [
           ("name", `String name);

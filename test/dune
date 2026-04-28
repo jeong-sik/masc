@@ -1619,7 +1619,7 @@
 (test
  (name test_keeper_shell_docker_cwd_response)
  (modules test_keeper_shell_docker_cwd_response)
- (libraries masc_mcp astring alcotest yojson unix))
+ (libraries masc_mcp masc_test_deps astring alcotest yojson unix))
 
 (test
  (name test_keeper_memory_bank_consensus_re_10399)
@@ -1670,12 +1670,12 @@
 (test
  (name test_keeper_meta_heartbeat_retain_9733)
  (modules test_keeper_meta_heartbeat_retain_9733)
- (libraries masc_mcp fs_compat alcotest eio eio_main unix))
+ (libraries masc_mcp masc_test_deps fs_compat alcotest eio eio_main unix))
 
 (test
  (name test_keeper_paused_cas_retain_9733)
  (modules test_keeper_paused_cas_retain_9733)
- (libraries masc_mcp fs_compat alcotest eio eio_main unix))
+ (libraries masc_mcp masc_test_deps fs_compat alcotest eio eio_main unix))
 
 (test
  (name test_keeper_compaction_noop_counter_9943)

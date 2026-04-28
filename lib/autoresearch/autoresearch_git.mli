@@ -2,10 +2,11 @@
     loop's managed worktree.
 
     Wraps the small subset of git commands the autoresearch driver
-    needs (commit/restore/reset/tag/branch/worktree). Internal
-    [run_git_with_status] / [run_capture_lines] / [is_in_git_repo]
-    helpers are hidden — callers interact with the per-action
-    functions only.
+    needs (commit/restore/reset/tag/branch/worktree). Most callers
+    interact with the per-action functions and the
+    {!is_in_git_repo} predicate; {!run_git_with_status} and
+    {!run_capture_lines} are exposed because {!Autoresearch}
+    re-exports them as part of its public surface.
 
     Functions returning [unit] (e.g. {!git_reset_last},
     {!git_restore_head}, {!git_tag_best}) silently no-op when [workdir]
@@ -13,6 +14,26 @@
     fails. The [Result]-returning variants surface errors verbatim. *)
 
 (** {1 Status / introspection} *)
+
+val is_in_git_repo : string -> bool
+(** [true] iff [<dir>] (or any ancestor) contains a [.git] entry.
+    Pure filesystem walk; does not invoke [git]. *)
+
+val run_git_with_status :
+  ?timeout_sec:float ->
+  workdir:string ->
+  string list ->
+  Unix.process_status * string
+(** Run [git -C <workdir> <argv>] through the exec gate; returns the
+    raw exit status and combined stdout/stderr. Default timeout 30s. *)
+
+val run_capture_lines :
+  workdir:string ->
+  ?timeout_sec:float ->
+  string list ->
+  Unix.process_status * string list
+(** Run [git -C <workdir> <argv>] and split stdout into non-empty
+    lines. Default timeout 30s. *)
 
 val git_top_level : workdir:string -> (string, string) result
 (** [git rev-parse --show-toplevel] in [workdir]. *)
@@ -61,6 +82,23 @@ val git_tag_best :
     Silently swallows tag-creation errors. *)
 
 (** {1 Managed worktree lifecycle} *)
+
+val managed_branch_name : string -> string
+(** [autoresearch/<loop_id>] — branch name used by
+    {!prepare_managed_worktree}. *)
+
+val prepare_managed_worktree :
+  base_path:string ->
+  source_workdir:string ->
+  loop_id:string ->
+  (string * string * string list, string) result
+(** [Ok (workdir, repo_root, warnings)] on success; [Error msg] when
+    [git_top_level] fails or the target [workdir] already exists.
+    [warnings] flags [source_workdir_dirty] and non-trunk source
+    branches. *)
+
+val local_branch_exists : repo_root:string -> string -> bool
+(** [true] iff [refs/heads/<branch>] exists under [repo_root]. *)
 
 val cleanup_managed_worktree :
   base_path:string ->

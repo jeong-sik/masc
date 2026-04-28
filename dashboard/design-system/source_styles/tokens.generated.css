@@ -340,6 +340,7 @@
   --scrim: rgb(0 0 0 / .5);
   --scrim-strong: rgb(0 0 0 / .7);
   --scrim-brass: rgb(var(--brass-glow) / .04);  /* warm wash behind active region */
+  --bg-tab-sticky-hover: rgb(30 41 59 / .95);  /* sticky tab hover backdrop (slate-800 / 95%) */
   --motion-enter: var(--t-med) var(--ease-out);
   --motion-exit: var(--t-fast) var(--ease-in);
   --motion-swap: var(--t-fast) var(--ease);

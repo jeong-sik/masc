@@ -336,6 +336,7 @@ type semantic =
   | `Scrim
   | `Scrim_strong
   | `Scrim_brass
+  | `Bg_tab_sticky_hover
   | `Motion_enter
   | `Motion_exit
   | `Motion_swap
@@ -711,6 +712,7 @@ let name_of = function
   | `Scrim -> "scrim"
   | `Scrim_strong -> "scrim-strong"
   | `Scrim_brass -> "scrim-brass"
+  | `Bg_tab_sticky_hover -> "bg-tab-sticky-hover"
   | `Motion_enter -> "motion-enter"
   | `Motion_exit -> "motion-exit"
   | `Motion_swap -> "motion-swap"

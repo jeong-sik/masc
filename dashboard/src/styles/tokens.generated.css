@@ -335,6 +335,7 @@
   --color-scrim: rgb(0 0 0 / .5);
   --color-scrim-strong: rgb(0 0 0 / .7);
   --color-scrim-brass: rgb(var(--brass-glow) / .04);
+  --color-bg-tab-sticky-hover: rgb(30 41 59 / .95);
   --motion-enter: var(--t-med) var(--ease-out);
   --motion-exit: var(--t-fast) var(--ease-in);
   --motion-swap: var(--t-fast) var(--ease);

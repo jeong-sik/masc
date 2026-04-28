@@ -335,6 +335,7 @@ export const TOKENS = {
   "scrim": { name: "--scrim", value: "rgb(0 0 0 / .5)", tier: "role", kind: "color" },
   "scrimStrong": { name: "--scrim-strong", value: "rgb(0 0 0 / .7)", tier: "role", kind: "color" },
   "scrimBrass": { name: "--scrim-brass", value: "rgb(var(--brass-glow) / .04)", tier: "role", kind: "color" },
+  "bgTabStickyHover": { name: "--bg-tab-sticky-hover", value: "rgb(30 41 59 / .95)", tier: "role", kind: "color" },
   "motionEnter": { name: "--motion-enter", value: "var(--t-med) var(--ease-out)", tier: "role", kind: "duration" },
   "motionExit": { name: "--motion-exit", value: "var(--t-fast) var(--ease-in)", tier: "role", kind: "duration" },
   "motionSwap": { name: "--motion-swap", value: "var(--t-fast) var(--ease)", tier: "role", kind: "duration" },

@@ -347,6 +347,7 @@ type semantic =
   | `Scrim
   | `Scrim_strong
   | `Scrim_brass
+  | `Bg_tab_sticky_hover
   | `Motion_enter
   | `Motion_exit
   | `Motion_swap

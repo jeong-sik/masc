@@ -114,7 +114,7 @@ let test_docker_write_blocks_project_root_even_if_allowlisted () =
   let path = Filename.concat config.base_path "root-write.txt" in
   let raw =
     Keeper_exec_fs.handle_keeper_fs_edit
-      ~turn_sandbox_runtime:None
+      ~turn_sandbox_factory:None
       ~config
       ~meta
       ~args:
@@ -142,7 +142,7 @@ let test_docker_write_allows_playground () =
   ensure_dir (Filename.dirname path);
   let raw =
     Keeper_exec_fs.handle_keeper_fs_edit
-      ~turn_sandbox_runtime:None
+      ~turn_sandbox_factory:None
       ~config
       ~meta
       ~args:

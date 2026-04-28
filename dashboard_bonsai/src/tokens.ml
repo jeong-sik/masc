@@ -177,6 +177,9 @@ type semantic =
   | `Text_body
   | `Text_muted
   | `Text_dim
+  | `Vote_up
+  | `Vote_down
+  | `Vote_hover
   | `Ok_soft
   | `Ok_fg
   | `Ok_border
@@ -581,6 +584,9 @@ let name_of = function
   | `Text_body -> "text-body"
   | `Text_muted -> "text-muted"
   | `Text_dim -> "text-dim"
+  | `Vote_up -> "vote-up"
+  | `Vote_down -> "vote-down"
+  | `Vote_hover -> "vote-hover"
   | `Ok_soft -> "ok-soft"
   | `Ok_fg -> "ok-fg"
   | `Ok_border -> "ok-border"

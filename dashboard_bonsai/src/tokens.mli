@@ -188,6 +188,9 @@ type semantic =
   | `Text_body
   | `Text_muted
   | `Text_dim
+  | `Vote_up
+  | `Vote_down
+  | `Vote_hover
   | `Ok_soft
   | `Ok_fg
   | `Ok_border

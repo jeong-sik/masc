@@ -176,6 +176,9 @@
   --color-text-body: #c0d2f2;
   --color-text-muted: #a8bfdf;
   --color-text-dim: #a0a8b4;
+  --color-vote-up: #ff4500;
+  --color-vote-down: #7193ff;
+  --color-vote-hover: #ccc;
   --color-ok-soft: rgb(107 158 107 / .10);
   --color-ok-fg: #8ebc8e;
   --color-ok-border: rgb(107 158 107 / .35);

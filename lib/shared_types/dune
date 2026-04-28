@@ -1,0 +1,6 @@
+(include_subdirs no)
+
+(library
+ (name shared_types)
+ (public_name masc_mcp.shared_types)
+ (libraries unix yojson))

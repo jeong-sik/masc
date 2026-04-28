@@ -308,6 +308,66 @@ let can_execute_turn = function
 
 (* ── derive_phase ──────────────────────────────────────── *)
 
+(* Spec navigation (OCaml priority -> TLA+ line) — plan §3 Tier C1 Phase 0
+   anchor. Authoritative spec mirror is KeeperReconcileLiveness.tla:88-101
+   (DerivePhase operator). The priority cascade below is preserved
+   verbatim; this block adds OCaml -> spec citations so drift is
+   grep-discoverable from this side too.
+
+     Priority | Spec citation
+     ---------+----------------------------------------------------------
+       1      | KeeperReconcileLiveness.tla:89-90 (Stopped: drain_complete
+              |   AND ~compaction_active AND ~handoff_active)
+       2      | (no spec — see Note A: launch_pending is pre-FSM)
+       3a-c   | KeeperReconcileLiveness.tla:91-93 (Dead/Restarting/Crashed)
+              |   boundary/KeeperRecoveryOrchestration.tla:53-57 (recovery)
+       4      | KeeperReconcileLiveness.tla:94 (Draining)
+       5      | KeeperReconcileLiveness.tla:95 (Failing — guardrail)
+       6      | KeeperReconcileLiveness.tla:96 (Paused — operator_paused;
+              |   compact_retry_exhausted clause is OCaml-stricter, see
+              |   Note B below — refinement, not drift)
+       7a     | KeeperReconcileLiveness.tla:97 (HandingOff)
+              |   KeeperConditionsGovernPhase.tla:96-100 (Transition action)
+       7b     | KeeperReconcileLiveness.tla:98 (Compacting)
+              |   KeeperCompactionLifecycle.tla:171-184 (Compacting cycle)
+       7c     | KeeperCompactionLifecycle.tla:154 (Overflowed) — partition
+              |   (KeeperReconcileLiveness omits Overflowed; coverage by
+              |    sibling spec is intentional, see Note C)
+       8      | KeeperReconcileLiveness.tla:99 (Failing — health degraded)
+       9      | KeeperReconcileLiveness.tla:100 (Running)
+              |   KeeperCoreTriad.tla:147,316 (turn_healthy=true -> Running)
+      10      | KeeperReconcileLiveness.tla:101 (Offline fallback)
+
+   Reverse direction (spec -> this function) anchors:
+     KeeperReconcileLiveness.tla:86      "matching OCaml derive_phase"
+     KeeperConditionsGovernPhase.tla:44  cites line 351 (HandingOff)
+     KeeperCoreTriad.tla:147,316         cites Running mirror
+     bug-models/KeeperPhaseRace.tla:7-10 cites this function entry
+
+   Classification (plan §1 4-way):
+     Note A — Drift candidate. Priority 2 Offline (launch_pending AND
+       ~fiber_alive) has no phase-derivation spec model. C1 follow-up:
+       either add KeeperLaunchPending.tla or document the pre-FSM
+       lifecycle as intentional scope projection. Until then: drift.
+     Note B — Refinement (acknowledged). Priority 6 OCaml clause
+       `context_overflow AND compact_retry_exhausted -> Paused` is
+       stricter than spec line 96 (operator_paused only). Without it
+       Overflowed -> Compacting loops indefinitely when retries are
+       exhausted; KeeperReconcileLiveness scope deliberately excludes
+       compact retry semantics, which live in KeeperCompactionLifecycle.
+     Note C — Partition (acknowledged). Overflowed phase derivation
+       lives in KeeperCompactionLifecycle.tla; KeeperReconcileLiveness
+       omits it because reconcile liveness is independent of overflow.
+       Multi-spec coverage by design, not drift.
+
+   C1 follow-up scope (plan §3, sequenced):
+     - Phase 1 (per-priority): convert each branch to `let try_<action>
+       state` mirroring the corresponding TLA+ Next-action enablement.
+     - Phase 2 (compile-time): exhaustiveness ratchet — every spec
+       action has exactly one OCaml try_ counterpart.
+     - Phase 3 (optional, plan §11.1 not adopted by default): runtime
+       gate `emit_phase_transition` — review hook only, not production. *)
+
 let derive_phase (c : conditions) : phase =
   (* Priority order: first match wins.
 

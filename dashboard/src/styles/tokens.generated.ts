@@ -166,6 +166,8 @@ export const TOKENS = {
   "rose": { name: "--rose", value: "#f43f5e", tier: "raw", kind: "color" },
   "roseFg": { name: "--rose-fg", value: "#fecdd3", tier: "raw", kind: "color" },
   "roseLight": { name: "--rose-light", value: "#fb7185", tier: "raw", kind: "color" },
+  "cyan": { name: "--cyan", value: "#22d3ee", tier: "raw", kind: "color" },
+  "purple": { name: "--purple", value: "#a78bfa", tier: "raw", kind: "color" },
   "okSoft": { name: "--ok-soft", value: "rgb(107 158 107 / .10)", tier: "semantic", kind: "color" },
   "okFg": { name: "--ok-fg", value: "#8ebc8e", tier: "semantic", kind: "color" },
   "okBorder": { name: "--ok-border", value: "rgb(107 158 107 / .35)", tier: "semantic", kind: "color" },

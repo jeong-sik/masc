@@ -178,6 +178,8 @@ type semantic =
   | `Rose
   | `Rose_fg
   | `Rose_light
+  | `Cyan
+  | `Purple
   | `Ok_soft
   | `Ok_fg
   | `Ok_border

@@ -167,6 +167,8 @@ type semantic =
   | `Rose
   | `Rose_fg
   | `Rose_light
+  | `Cyan
+  | `Purple
   | `Ok_soft
   | `Ok_fg
   | `Ok_border
@@ -561,6 +563,8 @@ let name_of = function
   | `Rose -> "rose"
   | `Rose_fg -> "rose-fg"
   | `Rose_light -> "rose-light"
+  | `Cyan -> "cyan"
+  | `Purple -> "purple"
   | `Ok_soft -> "ok-soft"
   | `Ok_fg -> "ok-fg"
   | `Ok_border -> "ok-border"

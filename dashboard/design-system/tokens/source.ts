@@ -327,6 +327,12 @@ export const raw: ReadonlyArray<TokenBase> = (() => {
   out.push(t("rose-fg",        "#fecdd3", "raw", "color", "Tailwind rose-200 alias"));
   out.push(t("rose-light",     "#fb7185", "raw", "color", "Tailwind rose-400 alias"));
 
+  // Iter 2c-4: cyan/purple short names. Companion alpha variants
+  // (--cyan-12, --cyan-16, --purple-12, --purple-24, --purple-50) stay
+  // hand-authored in variables.css per the companion alpha policy.
+  out.push(t("cyan",           "#22d3ee", "raw", "color", "Tailwind cyan-400 alias (kept short name)"));
+  out.push(t("purple",         "#a78bfa", "raw", "color", "Tailwind purple-400 alias (kept short name)"));
+
   return Object.freeze(out);
 })();
 

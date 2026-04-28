@@ -147,7 +147,7 @@ val clear_soft_do_not_reclaim_reason : Types.task -> Types.task
 (** {1 Task transitions} *)
 
 val transition_task_r :
-  config -> agent_name:string -> task_id:string -> action:Types_core.task_action ->
+  config -> agent_name:string -> task_id:string -> action:Types.task_action ->
   ?agent_tool_names:string list ->
   ?prepare_verification_request:
     (task:Types.task ->

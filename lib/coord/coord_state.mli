@@ -4,7 +4,7 @@ open Types
 open Coord_utils
 
 val default_room_state :
-  Coord_utils_backend_setup.config -> Types_core.room_state
+  Coord_utils_backend_setup.config -> Types.room_state
 
 val ensure_room_bootstrap : Coord_utils_backend_setup.config -> unit
 val generate_session_id : unit -> string
@@ -19,7 +19,7 @@ val task_id_to_int : string -> int option
 val read_archive_task_ids : Coord_utils_backend_setup.config -> int list
 
 val append_archive_tasks :
-  Coord_utils_backend_setup.config -> Types_core.task list -> unit
+  Coord_utils_backend_setup.config -> Types.task list -> unit
 
 val next_task_number :
   Coord_utils_backend_setup.config -> Types.backlog -> int
@@ -43,17 +43,17 @@ val recover_active_agent_name : Yojson.Safe.t -> string option
 
 val recover_room_state :
   Coord_utils_backend_setup.config ->
-  Yojson.Safe.t -> Types_core.room_state
+  Yojson.Safe.t -> Types.room_state
 
 val write_state :
-  Coord_utils_backend_setup.config -> Types_core.room_state -> unit
+  Coord_utils_backend_setup.config -> Types.room_state -> unit
 
-val read_state : Coord_utils_backend_setup.config -> Types_core.room_state
+val read_state : Coord_utils_backend_setup.config -> Types.room_state
 
 val update_state :
   Coord_utils_backend_setup.config ->
-  (Types_core.room_state -> Types_core.room_state) ->
-  Types_core.room_state
+  (Types.room_state -> Types.room_state) ->
+  Types.room_state
 
 val next_seq : Coord_utils_backend_setup.config -> int
 val is_paused : Coord_utils_backend_setup.config -> bool

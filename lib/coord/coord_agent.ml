@@ -60,11 +60,11 @@ let register_capabilities config ~agent_name ~capabilities =
           write_json config agent_file (agent_to_yojson updated);
 
           (* Log event *)
-          log_event config (Printf.sprintf
+          log_event config (Yojson.Safe.from_string (Printf.sprintf
             "{\"type\":\"capabilities_registered\",\"agent\":\"%s\",\"capabilities\":%s,\"ts\":\"%s\"}"
             actual_name
             (Yojson.Safe.to_string (`List (List.map (fun s -> `String s) capabilities)))
-            (now_iso ()));
+            (now_iso ())));
 
           Printf.sprintf "📡 %s capabilities: %s" actual_name (String.concat ", " capabilities)
       | Error _ ->
@@ -131,12 +131,12 @@ let update_agent_r config ~agent_name ?status ?capabilities () : string Types.ma
                               last_seen = now_iso ();
                             } in
                             write_json config agent_file (agent_to_yojson updated);
-                            log_event config (Printf.sprintf
+                            log_event config (Yojson.Safe.from_string (Printf.sprintf
                               "{\"type\":\"agent_update\",\"agent\":\"%s\",\"status\":\"%s\",\"capabilities\":%s,\"ts\":\"%s\"}"
                               actual_name
                               (Types.agent_status_to_string updated_status)
                               (Yojson.Safe.to_string (`List (List.map (fun s -> `String s) updated_caps)))
-                              (now_iso ()));
+                              (now_iso ())));
                             Ok (Printf.sprintf "✅ %s updated" actual_name)
                        ))
             )

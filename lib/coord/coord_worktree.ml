@@ -884,7 +884,7 @@ let worktree_create_r ?(link_task=true) ?repo_name config ~agent_name ~task_id ~
                   let event = Printf.sprintf
                     "{\"type\":\"worktree_create\",\"agent\":\"%s\",\"branch\":\"%s\",\"path\":\"%s\",\"repo\":\"%s\",\"task_id\":\"%s\",\"ts\":\"%s\"}"
                     agent_name branch_name worktree_path repo_name task_id (now_iso ()) in
-                  log_event config event;
+                  log_event config (Yojson.Safe.from_string event);
 
                   Ok (Printf.sprintf "✅ Worktree created:\n  Path: %s\n  Branch: %s\n  Repo: %s%s%s\n\nNext: cd %s && work && gh pr create --draft"
                       worktree_path branch_name repo_name note
@@ -978,7 +978,7 @@ let worktree_remove_r config ~agent_name ~task_id : string masc_result =
                 let event = Printf.sprintf
                   "{\"type\":\"worktree_remove\",\"agent\":\"%s\",\"branch\":\"%s\",\"branch_delete\":\"%s\",\"prune\":\"%s\",\"ts\":\"%s\"}"
                   agent_name branch_name branch_status prune_status (now_iso ()) in
-                log_event config event;
+                log_event config (Yojson.Safe.from_string event);
 
                 (* Return result with post-processing status *)
                 let msg = Printf.sprintf "✅ Worktree removed: %s\n   Branch: %s (delete: %s)\n   Prune: %s"

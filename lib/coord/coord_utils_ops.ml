@@ -5,12 +5,14 @@ open Coord_utils_paths_backend
 let contains_substring = String_util.contains_substring
 
 let validate_agent_name name =
-  (* Delegate to Validation module for consistent security checks *)
-  Validation.Agent_id.validate name
+  match Validation.Agent_id.validate name with
+  | Ok _ -> Ok name
+  | Error msg -> Error msg
 
 let validate_task_id id =
-  (* Delegate to Validation module for consistent security checks *)
-  Validation.Task_id.validate id
+  match Validation.Task_id.validate id with
+  | Ok _ -> Ok id
+  | Error msg -> Error msg
 
 (* Allowed character class for room ids: [A-Za-z0-9._-]+, anchored.
    Hoisted to module load so room-id validation (called per MCP
@@ -577,4 +579,4 @@ let log_event config event_json =
   in
   let log_file = Filename.concat month_dir day in
 
-  Fs_compat.append_file log_file (event_json ^ "\n")
+  Fs_compat.append_file log_file (Yojson.Safe.to_string event_json ^ "\n")

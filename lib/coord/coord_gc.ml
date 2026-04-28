@@ -139,9 +139,9 @@ let cleanup_zombies
              | Error e ->
                  if not (List.mem assignee !release_failed_agents) then
                    release_failed_agents := assignee :: !release_failed_agents;
-                 log_event config (Printf.sprintf
+                 log_event config (Yojson.Safe.from_string (Printf.sprintf
                    "{\"type\":\"zombie_cascade_error\",\"task_id\":\"%s\",\"agent\":\"%s\",\"error\":\"%s\",\"ts\":\"%s\"}"
-                   task.id assignee (Types.masc_error_to_string e) (now_iso ())))
+                   task.id assignee (Types.masc_error_to_string e) (now_iso ()))))
         | Types.Claimed _ | Types.InProgress _
         | Todo | AwaitingVerification _ | Done _ | Cancelled _ -> ()
       ) backlog.tasks;
@@ -165,12 +165,12 @@ let cleanup_zombies
           { s with active_agents =
               List.filter (fun a -> not (List.mem a !successfully_cleaned)) s.active_agents }
         ) in
-        log_event config (Printf.sprintf
+        log_event config (Yojson.Safe.from_string (Printf.sprintf
           "{\"type\":\"zombie_cleanup\",\"agents\":%s,\"released_tasks\":%d,\"skipped\":%d,\"ts\":\"%s\"}"
           (Yojson.Safe.to_string (`List (List.map (fun s -> `String s) !successfully_cleaned)))
           (List.length !released_tasks)
           (List.length !zombie_entries - List.length !successfully_cleaned)
-          (now_iso ()))
+          (now_iso ())))
       end;
 
       let total = List.length !zombie_entries in
@@ -425,10 +425,10 @@ let gc config ?(days=7) () =
      Startup migration (migrate_room_to_flat) moves active room to root. *)
   results := "✅ Rooms flattened (no room archival needed)" :: !results;
 
-  log_event config (Printf.sprintf
+  log_event config (Yojson.Safe.from_string (Printf.sprintf
     "{\"type\":\"gc\",\"stale_tasks\":%d,\"old_messages\":%d,\"preserved\":%d,\"pubsub_cleaned\":%d,\"keeper_orphans\":%d,\"sessions_archived\":%d,\"board_artifacts\":%d,\"rooms_archived\":%d,\"cp_cleanup\":%s,\"days\":%d,\"ts\":\"%s\"}"
     !stale_count !old_msg_count !preserved_count !pubsub_cleanup_count !keeper_orphan_count !session_archive_count
     board_artifact_count
-    0 cp_json days (now_iso ()));
+    0 cp_json days (now_iso ())));
 
   String.concat "\n" (List.rev !results)

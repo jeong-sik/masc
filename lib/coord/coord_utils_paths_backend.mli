@@ -34,6 +34,18 @@ val state_path : config -> string
 val backlog_path : config -> string
 val archive_path : config -> string
 
+(** Cluster-root state.json path. Used by bootstrap/init to gate
+    one-time root setup. *)
+val root_state_path : config -> string
+
+(** Pre-rename cluster-root state path (legacy [.masc/state.json]).
+    Kept exposed for fallback existence checks during migration. *)
+val legacy_root_state_path : config -> string
+
+(** Project-scoped key prefix for backend keys (e.g.
+    ["proj:default"]). Used by broadcast/pubsub channel naming. *)
+val project_prefix : config -> string
+
 (** {1 Backend dispatch} *)
 
 (** Always [false] — postgres backend was removed. *)
@@ -49,8 +61,10 @@ val backend_set :
 val backend_delete :
   config -> key:string -> (bool, Backend_types.error) result
 
+(** Plain [bool] (not [result]); the underlying backend implementations
+    do not return errors here, and call sites compose with [||]. *)
 val backend_exists :
-  config -> key:string -> (bool, Backend_types.error) result
+  config -> key:string -> bool
 
 val backend_list_keys :
   config -> prefix:string -> (string list, Backend_types.error) result
@@ -76,9 +90,11 @@ val backend_extend_lock :
 val backend_health_check :
   config -> (Backend_types.health_result, Backend_types.error) result
 
+(** Returns [Ok n] where [n] is the number of subscribers notified
+    (forwarded from [Pubsub_mem.publish]). *)
 val backend_publish :
   config -> channel:string -> message:string ->
-  (unit, Backend_types.error) result
+  (int, Backend_types.error) result
 
 val backend_subscribe :
   config -> channel:string -> callback:(string -> unit) ->

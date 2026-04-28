@@ -39,6 +39,8 @@ Neutral diff between TLA+ specs, OCaml types, and the composite observer project
 
 **Note**: `KeeperCompactionLifecycle.tla:30` declares `TurnPhaseSet` without `"finalizing"` (4 states), using the cascade spec's 5-state set via `EXTENDS`. Confirmed consistent at model-check time; the spec simply doesn't need `finalizing` for compaction reasoning.
 
+**Sub-axis (Step 4, 2026-04-28)**: `Keeper_turn_fsm.turn_state` (`lib/keeper/keeper_turn_fsm.mli`) introduces a 10-state typed ADT *inside* a single KTC turn — `Idle / Phase_gating / Cascade_routing / Awaiting_provider / Streaming / Awaiting_tool_result / Completing / Done / Failed of failure_reason / Cancelled of cancel_reason`. This is a finer-grained projection than the 5-state KTC vocabulary above; the two coexist (KTC tracks the registry-visible turn cycle, `turn_state` tracks the in-process FSM emit chain). The ADT pairs with `specs/keeper-turn-fsm/KeeperTurnFSM.tla` at the abstraction level the TLA+ spec uses (`{"failed", "cancelled"}` collapsed; reasons abstracted), so spec-code drift on the ADT side stays bounded to the reason variants and is checked by the `test_keeper_turn_fsm_emit` sentinel. Operator counter / dashboard / alerts use the `turn_state` labels, not the KTC ones — see `docs/observability/keeper-turn-fsm-metrics.md`.
+
 ---
 
 ### KDP — Keeper Decision Pipeline

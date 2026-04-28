@@ -15,7 +15,7 @@
 
 import { html } from 'htm/preact'
 import { computed } from '@preact/signals'
-import { keepers } from '../store'
+import { keepers, selectedKeeperFilter } from '../store'
 
 interface KeeperTokenRow {
   name: string
@@ -26,7 +26,10 @@ interface KeeperTokenRow {
 }
 
 const rows = computed<KeeperTokenRow[]>(() => {
+  const filter = selectedKeeperFilter.value
+  const isAll = filter.size === 0
   return keepers.value
+    .filter(k => isAll || filter.has(k.name))
     .map(k => ({
       name: k.name,
       displayName: k.koreanName ?? k.name,

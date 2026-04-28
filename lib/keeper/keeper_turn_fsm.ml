@@ -28,11 +28,12 @@ type turn_state =
   | Cascade_routing
   | Awaiting_provider
   | Streaming
-  | Awaiting_tool_result
+  | Awaiting_tool_result [@tla.symbol "awaiting_tool"]
   | Completing
   | Done
   | Failed of failure_reason
   | Cancelled of cancel_reason
+[@@deriving tla]
 
 let cancel_reason_label = function
   | Cancelled_supervisor_stop -> "supervisor_stop"

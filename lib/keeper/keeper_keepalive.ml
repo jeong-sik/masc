@@ -1610,8 +1610,8 @@ let run_keepalive_unified_turn
              once a slot opens up. Meta is left untouched so failure counters
              do not tick. *)
           Log.Keeper.warn
-            "%s: skipping turn (semaphore wait > %.0fs, peers holding slot)"
-            meta_after_triage.name wait_sec;
+            "%s: skipping turn (semaphore wait > %.0fs, peers holding slot, cascade=%s)"
+            meta_after_triage.name wait_sec meta_after_triage.cascade_name;
           meta_after_triage)
       else if (not has_message_signal) && obs.message_cursor_updates <> [] then
         meta_after_observe

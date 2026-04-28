@@ -206,7 +206,8 @@
         test_gh_api_classification
         test_actionable_path_action
         test_stale_kill_class
-        test_provider_capability_matrix)
+        test_provider_capability_matrix
+        test_keeper_synthetic_marker)
  (modules test_attribution test_attribution_tagged test_autoresearch_result_bridge test_dashboard_attribution test_masc_runtime_events test_room test_room_state_recovery test_types test_exec_tap test_auth test_auth_doctor test_auth_error_kind test_auth_login test_audit_log test_governance_anomaly test_http_negotiation
           test_attempt_state
           test_sse test_cancellation test_graphql_api
@@ -383,6 +384,7 @@
           test_actionable_path_action
           test_stale_kill_class
           test_provider_capability_matrix
+          test_keeper_synthetic_marker
           )
  (libraries masc_test_deps))
 
@@ -406,6 +408,11 @@
 (test
  (name test_meta_cognition_snapshot)
  (modules test_meta_cognition_snapshot)
+ (libraries masc_test_deps))
+
+(test
+ (name test_keeper_turn_fsm_tla_parity)
+ (modules test_keeper_turn_fsm_tla_parity)
  (libraries masc_test_deps))
 
 (test
@@ -1140,6 +1147,11 @@
  (libraries masc_test_deps))
 
 (test
+ (name test_cascade_inventory)
+ (modules test_cascade_inventory)
+ (libraries masc_test_deps))
+
+(test
  (name test_cascade_strategy)
  (modules test_cascade_strategy)
  (libraries masc_test_deps))
@@ -1586,6 +1598,11 @@
  (name test_keeper_exec_shell_cwd_response)
  (modules test_keeper_exec_shell_cwd_response)
  (libraries astring alcotest))
+
+(test
+ (name test_keeper_shell_docker_cwd_response)
+ (modules test_keeper_shell_docker_cwd_response)
+ (libraries masc_mcp astring alcotest yojson unix))
 
 (test
  (name test_keeper_memory_bank_consensus_re_10399)

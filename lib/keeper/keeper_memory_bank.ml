@@ -194,7 +194,7 @@ let is_meaningful_memory_text (s : string) : bool =
   let key = normalize_memory_text_key s in
   let placeholders = memory_placeholders () in
   not (List.mem key placeholders)
-  && not (String_util.contains_substring s "[SYNTHETIC]")
+  && not (Keeper_synthetic_marker.contains_marker s)
   && not (String.equal (String.trim s) "No tools used this generation")
   && not (has_inflated_consensus_marker s)
   && not (String_util.contains_substring s "[turn budget exhausted")

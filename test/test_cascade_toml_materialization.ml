@@ -403,6 +403,31 @@ unknown_field_for_load_failed_test = "x"
          Hardcoded_defaults instead of Load_failed (PR #11361)"
   | _ -> fail "expected Load_failed source variant"
 
+(* Phase 2c regression: when cascade.json fails to load,
+   normalize_priority_tiers must surface the underlying load failure
+   instead of returning the misleading "no configured models"
+   message.  Without this, an operator sees an empty-profile error
+   while the real problem is an unreadable config file. *)
+let test_priority_tiers_load_failure_message () =
+  with_temp_dir "cascade-priority-tiers-load-failed" @@ fun dir ->
+  let config_dir = Filename.concat dir "config" in
+  init_config_root config_dir;
+  let json_path = Filename.concat config_dir "cascade.json" in
+  write_file json_path "{ malformed";
+  with_config_dir config_dir @@ fun () ->
+  match
+    Masc_mcp.Cascade_config.normalize_priority_tiers
+      ~config_path:json_path
+      ~name:"any_profile"
+      [ [ "ollama:any-model" ] ]
+  with
+  | Ok _ -> fail "expected Error, got Ok"
+  | Error msg ->
+      check bool
+        "Error message must mention the load failure, not the generic \
+         'no configured models' fallback (PR Phase 2c)" true
+        (contains_substring msg "cascade config load failed")
+
 let test_weight_zero_is_accepted () =
   (* #10571: weight=0 = "configured but disabled" (cascade dispatcher
      skips). #10097 introduced this idiom for codex_cli; pre-fix the
@@ -483,6 +508,9 @@ let () =
             `Quick test_load_failed_source_on_malformed_json;
           test_case "Load_failed source on unknown toml field"
             `Quick test_load_failed_source_on_unknown_toml_field;
+          test_case
+            "normalize_priority_tiers surfaces load failure (Phase 2c)"
+            `Quick test_priority_tiers_load_failure_message;
         ] );
       ( "runtime",
         [

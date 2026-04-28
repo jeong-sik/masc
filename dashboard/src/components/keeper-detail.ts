@@ -607,6 +607,29 @@ function ProfileField({ label, value, color }: { label: string; value: string; c
   `
 }
 
+// ── BDI panel (will / needs / desires) ──────────────────
+// Preview spec K1 BDI variant — extraction of inline fragments.
+// Returns null when all three identity fields are absent so callers
+// can place this unconditionally without an outer guard.
+function BdiSection({
+  will,
+  needs,
+  desires,
+}: {
+  will: string | null | undefined
+  needs: string | null | undefined
+  desires: string | null | undefined
+}) {
+  if (!will && !needs && !desires) return null
+  return html`
+    <div class="mt-3 flex flex-col gap-1.5">
+      ${will ? html`<${ProfileField} label="의지" value=${will} color="var(--cyan)" />` : null}
+      ${needs ? html`<${ProfileField} label="필요" value=${needs} color="var(--color-status-warn)" />` : null}
+      ${desires ? html`<${ProfileField} label="열망" value=${desires} color="var(--purple)" />` : null}
+    </div>
+  `
+}
+
 // ── Playground Repos Panel ──────────────────────────────
 
 interface PlaygroundRepo {
@@ -1076,16 +1099,8 @@ export function KeeperDetailPage() {
               ? html`<div class="text-2xs text-[var(--color-fg-muted)] mt-1 leading-relaxed">${keeper.skill_reason}</div>`
               : null}
 
-            ${'' /* ── Identity: will / needs / desires ── */}
-            ${keeper.will || keeper.needs || keeper.desires
-              ? html`
-                <div class="mt-3 flex flex-col gap-1.5">
-                  ${keeper.will ? html`<${ProfileField} label="의지" value=${keeper.will} color="var(--cyan)" />` : null}
-                  ${keeper.needs ? html`<${ProfileField} label="필요" value=${keeper.needs} color="var(--color-status-warn)" />` : null}
-                  ${keeper.desires ? html`<${ProfileField} label="열망" value=${keeper.desires} color="var(--purple)" />` : null}
-                </div>
-              `
-              : null}
+            ${'' /* ── Identity: will / needs / desires (extracted to BdiSection) ── */}
+            <${BdiSection} will=${keeper.will} needs=${keeper.needs} desires=${keeper.desires} />
               <//>
 
           ${keeper.inventory && keeper.inventory.length > 0

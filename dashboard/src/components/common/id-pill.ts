@@ -22,10 +22,10 @@
 //   different pill shape (name tag, not id badge). P7 rounded
 //   sweep.
 // • agent-detail:228 (unified.description) — neutral tone with
-//   drifted opacities (bg-[var(--white-5)] border-white/10). Needs a
+//   drifted opacities (bg-[var(--white-N)] border-white/N). Needs a
 //   neutral tone variant which itself has drift vs line 230
-//   (mono version: reversed bg-white/10 border-white/5). Both
-//   belong in P6 color normalisation.
+//   (mono version: reversed bg/border alpha pair). Both belong
+//   in P6 color normalisation.
 // • agent-detail:230 (agent.model) — mono neutral pill with
 //   reversed opacities to 228. P6.
 // • agent-detail-worker:45 (signal_truth) — `rounded-sm` with

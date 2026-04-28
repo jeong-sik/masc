@@ -1,8 +1,8 @@
 {
   "_comment": "Dashboard styling-drift baseline. Regenerate with scripts/dashboard-drift-check.sh --regenerate.",
   "_patterns": "See scripts/dashboard-drift-check.sh PATTERNS array.",
-  "bg-white-alpha": 1,
-  "border-white-alpha": 2,
+  "bg-white-alpha": 0,
+  "border-white-alpha": 0,
   "text-zinc": 0,
   "bg-zinc": 0,
   "border-zinc": 0,

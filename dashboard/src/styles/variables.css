@@ -78,6 +78,7 @@
   --ok-soft: rgba(74, 222, 128, 0.15);
   --ok-10: rgba(74, 222, 128, 0.10);
   --ok-20: rgba(74, 222, 128, 0.20);
+  --ok-35: rgba(74, 222, 128, 0.35);
 
   /* Semantic - Warning (Yellow) */
   --warn-bright: #f97316;

@@ -229,33 +229,45 @@ let is_completion_tool_name name =
 
 let tool_name_can_satisfy_required_contract name =
   let name = canonical_tool_name name in
-  match Tool_catalog.effect_domain name with
-  | Some Tool_catalog.Read_only -> false
-  | Some
-      ( Tool_catalog.Masc_coordination
-      | Tool_catalog.Playground_write
-      | Tool_catalog.Main_worktree_write ) ->
-      true
-  | None -> not (Tool_dispatch.is_read_only name)
+  (* Completion tools (stay_silent, release, done, etc.) intentionally
+     satisfy the contract even though their effect_domain is Read_only.
+     Without this exemption, analyst/janitor keepers that correctly
+     call keeper_stay_silent alongside status reads trigger false
+     contract violations — observed 2026-04-28 when codex-spark
+     returned stay_silent + keeper_task_list on an actionable signal. *)
+  if is_completion_tool_name name then true
+  else
+    match Tool_catalog.effect_domain name with
+    | Some Tool_catalog.Read_only -> false
+    | Some
+        ( Tool_catalog.Masc_coordination
+        | Tool_catalog.Playground_write
+        | Tool_catalog.Main_worktree_write ) ->
+        true
+    | None -> not (Tool_dispatch.is_read_only name)
 
 let required_tool_satisfaction
       (call : Oas.Completion_contract.tool_call)
   : (unit, string) result
   =
   let tool_name = canonical_tool_name call.name in
-  let mutates =
-    match Tool_catalog.effect_domain tool_name with
-    | Some Tool_catalog.Read_only -> false
-    | _ ->
-      Keeper_exec_tools.has_mutating_side_effect_with_input
-        ~tool_name ~input:call.input
-  in
-  if mutates then Ok ()
+  (* Completion tools intentionally satisfy the contract.  See
+     tool_name_can_satisfy_required_contract for the same exemption. *)
+  if is_completion_tool_name tool_name then Ok ()
   else
-    Error
-      (Printf.sprintf
-         "tool '%s' is read-only/passive and cannot satisfy a required-tool contract"
-         tool_name)
+    let mutates =
+      match Tool_catalog.effect_domain tool_name with
+      | Some Tool_catalog.Read_only -> false
+      | _ ->
+        Keeper_exec_tools.has_mutating_side_effect_with_input
+          ~tool_name ~input:call.input
+    in
+    if mutates then Ok ()
+    else
+      Error
+        (Printf.sprintf
+           "tool '%s' is read-only/passive and cannot satisfy a required-tool contract"
+           tool_name)
 
 let classify_tool_progress name =
   let name = canonical_tool_name name in

@@ -1,12 +1,18 @@
 ; Self-validating sample outputs.
 ;
-; The (rule) below regenerates sample_inv_runner.ml every time tlc_test_gen
-; or the source fixture changes. The (tests) target then compiles + runs
-; the generated module, so any drift between the tool and the fixture
+; The (rule) blocks regenerate the *_runner.ml files every time tlc_test_gen
+; or the source fixtures change. The (tests) target then compiles + runs
+; each generated module, so any drift between the tool and a fixture
 ; surfaces immediately as a build or test failure.
 ;
 ; This closes the round-trip cycle described in plan §16: TLA+ trace →
 ; tlc_test_gen → OCaml runner → dune test → PASS / FAIL.
+;
+; Coverage:
+;   - sample_inv_runner:    int / string / bool round-trip
+;   - nested_sample_runner: V_raw nested record round-trip
+;       (validates that parser / emitter / runner all preserve embedded
+;        [host |-> "..."] without escaping or de-quoting drift)
 
 (rule
  (target sample_inv_runner.ml)
@@ -14,6 +20,12 @@
        (:gen ../bin/main.exe))
  (action (with-stdout-to %{target} (run %{gen} --runner %{fixture}))))
 
+(rule
+ (target nested_sample_runner.ml)
+ (deps (:fixture ../test/fixtures/nested_record.tla)
+       (:gen ../bin/main.exe))
+ (action (with-stdout-to %{target} (run %{gen} --runner %{fixture}))))
+
 (tests
- (names sample_inv_runner)
+ (names sample_inv_runner nested_sample_runner)
  (libraries tlc_test_gen))

@@ -152,6 +152,59 @@ let apply_autonomous_wirein
             lifecycle.updated_meta.name (Printexc.to_string exn);
           lifecycle)
 
+(* ── Tier A6: resilience post-turn wire-in (Cycle 23) ──────────────
+   Feature-flag-gated layer that runs IMMEDIATELY AFTER the A5
+   autonomous wire-in. The strict ordering [autonomous → resilience]
+   is hard-coded at the call site below — do not reorder.
+
+   When [MASC_RESILIENCE] is off (default), this is a pure pass-
+   through. When on, [Recovery.classify_string] runs against any
+   error signal surfaced by the turn's compaction or handoff steps,
+   and a [`Assoc] meta tree is upserted into
+   [working_context["resilience_meta"]] alongside any A5
+   ["autonomous_meta"] entry.
+
+   Failures inside the wire-in do not propagate — they are logged
+   and the unmodified lifecycle result is returned, preserving the
+   keeper's primary turn outcome. *)
+
+let apply_resilience_wirein
+    ~(now : float)
+    (lifecycle : post_turn_lifecycle) : post_turn_lifecycle =
+  if not (Resilience.Keeper_bridge.masc_resilience_enabled ()) then lifecycle
+  else
+    match lifecycle.checkpoint with
+    | None ->
+        (* No checkpoint to enrich; resilience_meta has no host. *)
+        lifecycle
+    | Some cp -> (
+        try
+          let maybe_error =
+            (* First non-None error signal from this turn's
+               compaction or handoff steps. *)
+            match lifecycle.compaction.failure_reason with
+            | Some _ as r -> r
+            | None -> lifecycle.handoff_failure_reason
+          in
+          let witness = Resilience.Keeper_bridge.running_witness in
+          let outcome =
+            Resilience.Keeper_bridge.apply_post_turn_resilience
+              witness ~now
+              ~working_context:cp.Oas.Checkpoint.working_context
+              ~maybe_error ()
+          in
+          let new_cp =
+            { cp with
+              Oas.Checkpoint.working_context = outcome.working_context
+            }
+          in
+          { lifecycle with checkpoint = Some new_cp }
+        with exn ->
+          Log.Keeper.warn
+            "keeper:%s resilience wire-in failed: %s"
+            lifecycle.updated_meta.name (Printexc.to_string exn);
+          lifecycle)
+
 let apply_post_turn_lifecycle
     ~(on_compaction_started : unit -> unit)
     ~(on_handoff_started : unit -> unit)
@@ -405,7 +458,10 @@ let apply_post_turn_lifecycle
         message_count = rollover.message_count;
       }
   in
-  apply_autonomous_wirein ~now:now_ts body
+  (* Strict ordering: autonomous tick → resilience classification.
+     Do not reorder — A6 PR pinned this sequence. *)
+  let body = apply_autonomous_wirein ~now:now_ts body in
+  apply_resilience_wirein ~now:now_ts body
 
 let forced_overflow_retry_meta
     (meta : keeper_meta)

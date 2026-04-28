@@ -958,6 +958,8 @@
    masc_mcp.shared_types
    ;; Resilience sub-library (Tier B6-B7) used by Keeper post-turn wire-in (Tier A6)
    masc_mcp.resilience
+   ;; Multimodal artifact GADT sub-library (Tier B8) — Code/Image/Audio/Doc + Payload + Provenance
+   masc_mcp.multimodal
    )
  (preprocess (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq ppx_let ppx_tla))
  (instrumentation (backend bisect_ppx)))

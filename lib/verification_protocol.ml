@@ -321,9 +321,9 @@ let check_timeouts ~(config : Coord.config) =
     try
       let backlog = Coord.read_backlog config in
       let now = Time_compat.now () in
-      List.iter (fun (task : Types_core.task) ->
+      List.iter (fun (task : Types.task) ->
         match task.task_status with
-        | Types_core.AwaitingVerification { assignee; verification_id; deadline = Some dl; _ } ->
+        | Types.AwaitingVerification { assignee; verification_id; deadline = Some dl; _ } ->
           (match Types.parse_iso8601_opt dl with
            | Some deadline_ts when now > deadline_ts ->
              let () =

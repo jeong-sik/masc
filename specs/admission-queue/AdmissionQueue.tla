@@ -84,17 +84,22 @@ FdMax == FdThreshold + 1
 \* branch without simulating C-style truncation.
 GuardFires == fd_count * FdGuardDen >= FdGuardNum * FdThreshold
 
-\* Counter bound. Strictly larger than [active] so the model can
-\* exercise long-running acquire/release sequences without TypeOK
-\* clipping, while still keeping the state space finite.
+\* Concurrent-slot bound. Limits [active] (the running count of
+\* in-flight work). Small enough to keep the state space manageable.
 CounterMax == 6
+
+\* Cumulative-counter bound. [acquire_count] and [release_count] are
+\* monotonic and can grow without bound if the model runs long enough.
+\* A separate, larger ceiling prevents TypeOK from clipping them while
+\* still bounding the state space.
+CumulativeMax == CounterMax * 2
 
 TypeOK ==
     /\ fd_count \in 0..FdMax
     /\ admission_state \in AdmissionStateSet
     /\ active \in 0..CounterMax
-    /\ acquire_count \in 0..CounterMax
-    /\ release_count \in 0..CounterMax
+    /\ acquire_count \in 0..CumulativeMax
+    /\ release_count \in 0..CumulativeMax
     /\ cascade_input \in CascadeNameSet
     /\ cascade_recorded \in CascadeNameSet
 
@@ -139,7 +144,8 @@ RejectByFdGuard ==
 AcceptAndAcquire ==
     /\ admission_state = "checking"
     /\ ~ GuardFires
-    /\ acquire_count < CounterMax
+    /\ active < CounterMax
+    /\ acquire_count < CumulativeMax
     /\ admission_state' = "accepted"
     /\ active' = active + 1
     /\ acquire_count' = acquire_count + 1
@@ -150,6 +156,7 @@ AcceptAndAcquire ==
 Release ==
     /\ admission_state = "accepted"
     /\ active > 0
+    /\ release_count < CumulativeMax
     /\ admission_state' = "idle"
     /\ active' = active - 1
     /\ release_count' = release_count + 1
@@ -216,7 +223,8 @@ ActiveCounterConsistent ==
 FdGuardSkip ==
     /\ admission_state = "checking"
     /\ GuardFires
-    /\ acquire_count < CounterMax
+    /\ active < CounterMax
+    /\ acquire_count < CumulativeMax
     /\ admission_state' = "accepted"
     /\ active' = active + 1
     /\ acquire_count' = acquire_count + 1

@@ -1,0 +1,184 @@
+name: tokens-drift
+
+# Wave 5 Friend-5-CI — Design-system tokens drift gate.
+#
+# Guards the codegen SSOT pipeline rooted at
+#   dashboard/design-system/tokens/source.ts
+# against three failure modes:
+#
+#   Gate 1 (idempotent build) - PR author edited source.ts but forgot
+#       to commit the regenerated artifacts (or edited an artifact by
+#       hand and the source.ts re-emit no longer matches).
+#   Gate 2 (reference equivalence) - generated CSS lost a token name
+#       the legacy hand-written stylesheets exposed, or the keeper
+#       OkLCH triple drifted past the perceptual threshold.
+#       (Conditional: skipped when the equivalence script is absent.)
+#   Gate 3 (tier integrity) - generated artifacts changed without the
+#       authoring SSOT (source.ts) changing in the same PR. This is a
+#       structural lock against direct edits of @generated files.
+#
+# Branch protection registration is the user's call. Until then this
+# workflow advises only; it does NOT block merges automatically.
+
+on:
+  pull_request:
+    paths:
+      - 'dashboard/design-system/tokens/**'
+      - 'dashboard/design-system/source_styles/tokens.generated.css'
+      - 'dashboard/src/styles/tokens.generated.css'
+      - 'dashboard/src/styles/tokens.generated.ts'
+      - 'dashboard_bonsai/src/tokens.ml'
+      - 'dashboard_bonsai/src/tokens.mli'
+      - 'dashboard_bonsai/static/colors_and_type.generated.css'
+      - 'dashboard/package.json'
+      - 'dashboard/pnpm-lock.yaml'
+      - '.github/workflows/tokens-drift.yml'
+
+permissions:
+  contents: read
+  pull-requests: read
+
+# Generated artifact paths kept here as a single list for re-use across
+# the diff and tier-integrity gates. Update this list together with
+# build.ts OUT entries.
+env:
+  GENERATED_PATHS: |
+    dashboard/design-system/source_styles/tokens.generated.css
+    dashboard/src/styles/tokens.generated.css
+    dashboard/src/styles/tokens.generated.ts
+    dashboard_bonsai/src/tokens.ml
+    dashboard_bonsai/src/tokens.mli
+    dashboard_bonsai/static/colors_and_type.generated.css
+    dashboard/design-system/tokens/build/tokens.json
+
+jobs:
+  drift:
+    name: Tokens drift (build + equivalence)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Enable corepack and install pnpm
+        run: corepack enable && corepack prepare pnpm@10.31.0 --activate
+
+      - name: Resolve pnpm store path
+        id: pnpm-store
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache pnpm store
+        uses: actions/cache@v5
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-${{ runner.os }}-${{ hashFiles('dashboard/pnpm-lock.yaml') }}
+          restore-keys: |
+            pnpm-${{ runner.os }}-
+
+      - name: Install dashboard dependencies
+        working-directory: dashboard
+        run: pnpm install --frozen-lockfile
+
+      # ── Gate 1 ──────────────────────────────────────────────────────
+      # Run codegen, then assert that no generated artifact moved.
+      # If git diff is non-empty, the PR shipped stale or hand-edited
+      # generated files. Both failure modes look the same here.
+      - name: Gate 1 - codegen
+        working-directory: dashboard
+        run: pnpm tokens:build
+
+      - name: Gate 1 - idempotent (no drift after build)
+        run: |
+          set -euo pipefail
+          paths=()
+          while IFS= read -r p; do
+            [ -n "$p" ] && paths+=("$p")
+          done <<< "$GENERATED_PATHS"
+          if ! git diff --exit-code -- "${paths[@]}"; then
+            echo "::error::tokens drift detected. Run 'pnpm --dir dashboard tokens:build' and commit the regenerated artifacts."
+            exit 1
+          fi
+          echo "ok: generated artifacts match source.ts emission"
+
+      # ── Gate 2 ──────────────────────────────────────────────────────
+      # Equivalence check. The script
+      #   dashboard/design-system/tokens/scripts/check-equivalence.mjs
+      # is referenced in the Wave 2 design notes but currently does
+      # not exist in main (it was removed by #11250). Until it lands,
+      # this step is conditional and only runs when the script + the
+      # `tokens:check` package script are both present.
+      - name: Gate 2 - reference equivalence (conditional)
+        working-directory: dashboard
+        run: |
+          set -euo pipefail
+          script="design-system/tokens/scripts/check-equivalence.mjs"
+          if [ ! -f "$script" ]; then
+            echo "::notice::skipping Gate 2: $script not present in tree"
+            exit 0
+          fi
+          if ! node -e "const p=require('./package.json');process.exit(p.scripts && p.scripts['tokens:check']?0:1)"; then
+            echo "::notice::skipping Gate 2: package.json has no 'tokens:check' script"
+            exit 0
+          fi
+          pnpm tokens:check
+
+  tier-integrity:
+    name: Tier integrity (no hand-edit of generated)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      # ── Gate 3 ──────────────────────────────────────────────────────
+      # If any generated artifact changed in this PR but source.ts did
+      # not, the artifacts were hand-edited. That breaks the SSOT
+      # invariant. Reject.
+      #
+      # We use `git diff --name-only base..head` (two-dot) — it only
+      # needs both commits present in the local clone, not a reachable
+      # merge base. Three-dot would be more precise ("what this PR
+      # adds since branching") but it failed in practice with
+      # `actions/checkout@v5`'s default `refs/pull/N/merge` ref where
+      # the literal base SHA was not always reachable.
+      - name: Gate 3 - generated changed without source.ts
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          # Ensure both SHAs are present locally. fetch-depth: 0 on
+          # checkout usually suffices, but a targeted re-fetch shields
+          # against force-pushed heads and the pull/N/merge layout.
+          git fetch --no-tags origin "$BASE_SHA" "$HEAD_SHA" 2>/dev/null || true
+          changed="$(git diff --name-only "$BASE_SHA".."$HEAD_SHA")"
+          echo "Changed files in PR:"
+          printf '%s\n' "$changed" | sed 's/^/  /'
+
+          generated_re='^(dashboard/design-system/source_styles/tokens\.generated\.css|dashboard/src/styles/tokens\.generated\.(css|ts)|dashboard_bonsai/src/tokens\.(ml|mli)|dashboard_bonsai/static/colors_and_type\.generated\.css|dashboard/design-system/tokens/build/tokens\.json)$'
+          source_re='^dashboard/design-system/tokens/(source\.ts|build\.ts)$'
+
+          gen_hits="$(printf '%s\n' "$changed" | grep -E "$generated_re" || true)"
+          src_hits="$(printf '%s\n' "$changed" | grep -E "$source_re" || true)"
+
+          if [ -n "$gen_hits" ] && [ -z "$src_hits" ]; then
+            echo "::error::generated artifacts changed without dashboard/design-system/tokens/source.ts (or build.ts) changing. Generated files are @generated; edit source.ts and run 'pnpm --dir dashboard tokens:build'."
+            echo "Generated files touched:"
+            printf '%s\n' "$gen_hits" | sed 's/^/  /'
+            exit 1
+          fi
+
+          if [ -z "$gen_hits" ] && [ -z "$src_hits" ]; then
+            echo "ok: no token files changed in this PR (workflow triggered by adjacent path)"
+          else
+            echo "ok: source.ts/build.ts changed alongside generated artifacts (or no generated changes)"
+          fi

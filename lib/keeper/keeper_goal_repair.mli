@@ -8,9 +8,11 @@
     3. Assigns the new goal id to [active_goal_ids].
 
     Two entry points: {!dry_run} (no side effects, returns the audit
-    only) and {!run} (actually creates goals + writes meta).  Internal
-    helpers (find / repair / title-derivation / empty-result constant)
-    stay private.
+    only) and {!run} (actually creates goals + writes meta).  The
+    title-derivation helper {!goal_title_of_purpose} is exposed for
+    targeted unit-test coverage of its truncation/empty/long
+    branches; other internal helpers (find / repair / empty-result
+    constant) stay private.
 
     @since 2.237.0 *)
 
@@ -38,6 +40,17 @@ type repair_result = {
     when projecting to the dashboard JSON.  Lists are returned in
     keeper-name order (stable scan order from the [.json] directory
     listing reversed back). *)
+
+val goal_title_of_purpose : string -> string
+(** [goal_title_of_purpose purpose] derives the goal title from a
+    keeper's purpose statement:
+    - empty / whitespace-only purpose → ["(unnamed keeper)"]
+    - purpose ≤ 115 chars → ["<purpose> (auto)"]
+    - purpose > 115 chars → first 115 chars + ["… (auto)"]
+
+    The returned string never exceeds 130 chars.  Exposed for direct
+    unit testing of the truncation contract; production code should
+    prefer {!run}/{!dry_run}. *)
 
 val repair_result_to_yojson : repair_result -> Yojson.Safe.t
 (** [repair_result_to_yojson r] renders the result as

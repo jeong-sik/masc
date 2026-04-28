@@ -423,6 +423,17 @@ let metric_keeper_profile_config_conflicts =
   "masc_keeper_profile_config_conflicts_total"
 let metric_keeper_oas_timeout_classifications =
   "masc_keeper_oas_timeout_classifications_total"
+(* #10474: no_tool_capable_provider and proactive cycle outcome counters.
+   [metric_keeper_no_tool_provider_total] fires every time a keeper's
+   cascade has zero tool-capable providers, labelled by cascade so
+   the operator sees which cascade definition needs fixing.
+   [metric_keeper_proactive_outcome_total] classifies every scheduled
+   autonomous cycle into tool_called | noop | error, giving a fleet-wide
+   health ratio in Grafana. *)
+let metric_keeper_no_tool_provider =
+  "masc_keeper_no_tool_provider_total"
+let metric_keeper_proactive_outcome =
+  "masc_keeper_proactive_outcome_total"
 (* PR-B: keeper turn skipped due to ollama saturation pre-check.
    Labelled by [keeper] and [cascade]. *)
 let metric_keeper_ollama_saturation_skip =
@@ -924,6 +935,13 @@ let init () =
   add metric_keeper_oas_timeout_classifications
     "Total keeper OAS timeout classifications. Labeled by \
      classification=transient_network|structural_budget|other_timeout."
+    Counter;
+  add metric_keeper_no_tool_provider
+    "Total no_tool_capable_provider errors. Labeled by keeper and cascade."
+    Counter;
+  add metric_keeper_proactive_outcome
+    "Total proactive cycle outcomes. Labeled by keeper and \
+     outcome=tool_called|noop|error."
     Counter;
   add metric_keeper_ollama_saturation_skip
     "Total keeper turns skipped because the resolved cascade is \

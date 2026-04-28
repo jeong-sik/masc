@@ -32,3 +32,17 @@ val emit_let_test_reachability : Ttrace_parser.state -> string
     the violating state. A runtime that diverges from the spec — fewer
     steps, different final field values — flips the assertion to [false],
     surfacing the divergence as a unit-test failure. *)
+
+val emit_test_runner : Ttrace_parser.state -> string
+(** [emit_test_runner state] returns a fully self-contained OCaml module
+    source as a string: a [trace] literal binding plus a [let () = ...]
+    body that asserts the recorded trace ends in the violating state and
+    prints either [PASS [<spec>]] on stdout or [FAIL [<spec>.<field>]]
+    on stderr.
+
+    Unlike [emit_let_test] / [emit_let_test_reachability], the runner has
+    **no PPX dependency** (no [let%test]). Build it as a plain
+    dune [(executable)] or [(test)] target with only [tlc_test_gen] as
+    a library and run via [dune test]. This is the recommended emission
+    when round-tripping a TTrace into the dune build graph as a regression
+    artefact (see [tools/tlc_test_gen/sample_outputs/]). *)

@@ -1,0 +1,19 @@
+; Self-validating sample outputs.
+;
+; The (rule) below regenerates sample_inv_runner.ml every time tlc_test_gen
+; or the source fixture changes. The (tests) target then compiles + runs
+; the generated module, so any drift between the tool and the fixture
+; surfaces immediately as a build or test failure.
+;
+; This closes the round-trip cycle described in plan §16: TLA+ trace →
+; tlc_test_gen → OCaml runner → dune test → PASS / FAIL.
+
+(rule
+ (target sample_inv_runner.ml)
+ (deps (:fixture ../test/fixtures/sample_inv.tla)
+       (:gen ../bin/main.exe))
+ (action (with-stdout-to %{target} (run %{gen} --runner %{fixture}))))
+
+(tests
+ (names sample_inv_runner)
+ (libraries tlc_test_gen))

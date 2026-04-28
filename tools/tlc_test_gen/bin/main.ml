@@ -2,6 +2,7 @@ let usage () =
   prerr_endline "usage:";
   prerr_endline "  tlc_test_gen <path-to-TTrace.tla>";
   prerr_endline "  tlc_test_gen --batch <out-dir> <path-to-TTrace.tla>...";
+  prerr_endline "  tlc_test_gen --runner <path-to-TTrace.tla>";
   exit 2
 
 let render state =
@@ -64,10 +65,19 @@ let run_batch out_dir paths =
     paths;
   not !any_error
 
+let run_runner path =
+  match parse path with
+  | None -> false
+  | Some state ->
+      print_string (Tlc_test_gen.Ocaml_emit.emit_test_runner state);
+      true
+
 let () =
   match Array.to_list Sys.argv with
   | _ :: "--batch" :: out_dir :: paths ->
       if run_batch out_dir paths then () else exit 1
+  | _ :: "--runner" :: path :: _ ->
+      if run_runner path then () else exit 1
   | _ :: ("-h" | "--help") :: _ -> usage ()
   | _ :: path :: _ ->
       if run_one path then () else exit 1

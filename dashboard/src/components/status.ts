@@ -11,6 +11,7 @@ type StatusSection =
   | 'observatory' | 'journey' | 'agents' | 'runtime' | 'fleet-health'
   | 'safe-autonomy'
   | 'memory-subsystems' | 'attribution'
+  | 'cost'
 
 const LazyAgentsUnified = lazy(async () => ({
   default: (await import('./agents-unified')).AgentsUnified,
@@ -36,6 +37,9 @@ const LazyJourneyPanel = lazy(async () => ({
 const LazySafeAutonomyPanel = lazy(async () => ({
   default: (await import('./safe-autonomy')).SafeAutonomyPanel,
 }))
+const LazyCostDashboard = lazy(async () => ({
+  default: (await import('./cost-dashboard')).CostDashboard,
+}))
 
 function sectionFallback(label: string) {
   return html`<${LoadingState}>${label} 불러오는 중...<//>`
@@ -59,6 +63,8 @@ function sectionLabel(section: StatusSection): string {
       return '기여 분석'
     case 'agents':
       return '에이전트 상태'
+    case 'cost':
+      return '비용 / 지연'
   }
 }
 
@@ -80,6 +86,8 @@ function renderSection(section: StatusSection) {
       return html`<${LazyAttributionPanel} />`
     case 'agents':
       return html`<${LazyAgentsUnified} />`
+    case 'cost':
+      return html`<${LazyCostDashboard} />`
   }
 }
 
@@ -93,6 +101,7 @@ function currentSection(): StatusSection {
     || section === 'safe-autonomy'
     || section === 'memory-subsystems'
     || section === 'attribution'
+    || section === 'cost'
   ) return section
   return 'agents'
 }

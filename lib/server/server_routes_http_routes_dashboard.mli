@@ -9,7 +9,7 @@
 
 val add_routes :
   sw:Eio.Switch.t ->
-  clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  clock:float Eio.Time.clock_ty Eio.Resource.t ->
   Http_server_eio.Router.t -> Http_server_eio.Router.t
 
 val available_cascade_profiles : unit -> string list

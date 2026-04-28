@@ -288,6 +288,7 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                     ctx.config
                     ~keeper_name:meta.name
                     ~agent_name:meta.agent_name
+                    ~cascade_name:meta.cascade_name
                     ~trace_id:
                       (Keeper_id.Trace_id.to_string
                          entry.meta.runtime.trace_id)

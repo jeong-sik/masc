@@ -134,11 +134,26 @@ let wrap_event ~ts ~correlation_id ~run_id ~event_type ~payload
 
 (** Serialize an OAS event to JSON for SSE relay + durable storage.
     Reads envelope metadata ([correlation_id], [run_id], [ts]) from
-    [evt.meta] and includes them in every emitted JSON object. *)
+    [evt.meta] and includes them in every emitted JSON object.
+
+    The match below intentionally combines explicit per-variant arms
+    with a final [other] catch-all that produces a kind-only fallback
+    via [Oas.Event_bus.payload_kind].  The catch-all is "redundant" at
+    every individual snapshot of the OAS variant set (warning 11), but
+    it is a deliberate future-proof against the OAS pin-bump P0 class
+    (#10490, #10574, #10584).  Without the catch-all, every new
+    upstream variant breaks main with [-warn-error +8] until the
+    consumer is migrated; with it, the relay degrades to a
+    kind-labelled placeholder + a warn log signal until an explicit
+    arm is added.
+
+    Suppressing warning 11 ([@warning "-11"]) is therefore the entire
+    point of this function's shape — do not remove it without also
+    removing the catch-all. *)
 let native_event_to_json (evt : Oas.Event_bus.event) : Yojson.Safe.t option =
   let { Oas.Event_bus.correlation_id; run_id; ts; _ } = evt.meta in
   let wrap = wrap_event ~ts ~correlation_id ~run_id in
-  match evt.payload with
+  match[@warning "-11"] evt.payload with
   | Oas.Event_bus.AgentStarted { agent_name; task_id } ->
       let payload =
         `Assoc
@@ -355,6 +370,38 @@ let native_event_to_json (evt : Oas.Event_bus.event) : Yojson.Safe.t option =
          payload aggregate. Skip the relay to avoid flooding SSE
          consumers with high-frequency low-value events. *)
       None
+  | other ->
+      (* Graceful fallback for OAS variants that ship before this consumer
+         is migrated to an explicit shape (#10584).  Pre-fix, the match
+         above was exhaustive and the OAS pin bump that introduced
+         [InferenceTelemetry] (#10490) and [Stale_turn_timeout] (#10574)
+         broke main with [-warn-error +8] partial-match errors.
+
+         [Oas.Event_bus.payload_kind] is co-located with the [payload]
+         variant in OAS — adding a new variant upstream forces an
+         entry there in the same patch, so the snake_case label is
+         always accurate.  Emit a kind-only SSE event so subscribers
+         see *something happened* (with stable [event_type] for
+         filtering) instead of having the whole stream fail to parse.
+
+         [note] flags the partial-data shape so dashboards can render
+         it as a placeholder rather than treating it as a complete
+         payload.  The warn log gives operators a per-process signal
+         that an OAS variant has shipped without a masc-mcp consumer
+         migration; downstream PRs should then move the variant out
+         of this catch-all into an explicit arm. *)
+      let kind = Oas.Event_bus.payload_kind other in
+      Log.Misc.warn
+        "oas_event_bridge: kind-only fallback for unmigrated payload \
+         variant kind=%s correlation_id=%s run_id=%s"
+        kind correlation_id run_id;
+      let payload =
+        `Assoc [
+          ("kind", `String kind);
+          ("note", `String "kind-only fallback; consumer not yet migrated");
+        ]
+      in
+      Some (wrap ~event_type:kind ~payload ())
 
 let relay_max_attempts = 3
 let relay_max_queue_depth = 256

@@ -5,9 +5,9 @@
 @utility keeper-detail-overlay {
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(0,0,0,0.6);
+  background: var(--scrim-strong);
   backdrop-filter: blur(4px);
-  z-index: var(--z-overlay-keeper, 3020);
+  z-index: var(--z-overlay-keeper);
   display: flex;
   align-items: center;
   justify-content: center;

@@ -543,6 +543,8 @@ export const semantic: ReadonlyArray<TokenBase> = (() => {
   out.push(t("scrim-strong", "rgb(0 0 0 / .7)", "role", "color"));
   out.push(t("scrim-brass",  "rgb(var(--brass-glow) / .04)", "role", "color",
     "warm wash behind active region"));
+  out.push(t("bg-tab-sticky-hover", "rgb(30 41 59 / .95)", "role", "color",
+    "sticky tab hover backdrop (slate-800 / 95%)"));
 
   // ── Motion role tokens — bundle duration + easing ──────────────────
   out.push(t("motion-enter",  "var(--t-med) var(--ease-out)", "role", "duration"));

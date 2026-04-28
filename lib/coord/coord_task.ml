@@ -180,32 +180,30 @@ let required_tool_claim_guard config ~agent_name ?agent_tool_names task =
   | [], _ -> Ok ()
   | _ :: _, None ->
     log_event config
-      (Yojson.Safe.to_string
-         (`Assoc
-             [ "type", `String "task_claim_required_tools_unknown_surface"
-             ; "agent", `String agent_name
-             ; "task", `String task.id
-             ; ( "required_tools",
-                 `List (List.map (fun name -> `String name) required_tools) )
-             ; "ts", `String (now_iso ())
-             ]));
+      (`Assoc
+         [ "type", `String "task_claim_required_tools_unknown_surface"
+         ; "agent", `String agent_name
+         ; "task", `String task.id
+         ; ( "required_tools",
+             `List (List.map (fun name -> `String name) required_tools) )
+         ; "ts", `String (now_iso ())
+         ]);
     Ok ()
   | _ :: _, Some allowed ->
     let missing = missing_required_tools ~allowed required_tools in
     if missing = [] then Ok ()
     else (
       log_event config
-        (Yojson.Safe.to_string
-           (`Assoc
-               [ "type", `String "task_claim_required_tools_blocked"
-               ; "agent", `String agent_name
-               ; "task", `String task.id
-               ; ( "required_tools",
-                   `List (List.map (fun name -> `String name) required_tools) )
-               ; ( "missing_tools",
-                   `List (List.map (fun name -> `String name) missing) )
-               ; "ts", `String (now_iso ())
-               ]));
+        (`Assoc
+           [ "type", `String "task_claim_required_tools_blocked"
+           ; "agent", `String agent_name
+           ; "task", `String task.id
+           ; ( "required_tools",
+               `List (List.map (fun name -> `String name) required_tools) )
+           ; ( "missing_tools",
+               `List (List.map (fun name -> `String name) missing) )
+           ; "ts", `String (now_iso ())
+           ]);
       Error
         (Types.TaskInvalidState
            (Printf.sprintf
@@ -838,14 +836,13 @@ let claim_task config ~agent_name ~task_id =
                     ~payload:(`Assoc [ "task_id", `String task_id ]);
                   log_event
                     config
-                    (Yojson.Safe.to_string
-                       (`Assoc
+                    (`Assoc
                            [ "type", `String "task_claim"
                            ; "agent", `String agent_name
                            ; "actor_kind", `String (task_actor_kind agent_name)
                            ; "task", `String task_id
                            ; "ts", `String (now_iso ())
-                           ]));
+                           ]);
                   observe_task_transition
                     config
                     ~agent_name
@@ -972,14 +969,13 @@ let claim_task_r config ~agent_name ~task_id ?agent_tool_names ()
              ~payload:(`Assoc [ "task_id", `String task_id ]);
            log_event
              config
-             (Yojson.Safe.to_string
-                (`Assoc
+             (`Assoc
                     [ "type", `String "task_claim"
                     ; "agent", `String agent_name
                     ; "actor_kind", `String (task_actor_kind agent_name)
                     ; "task", `String task_id
                     ; "ts", `String (now_iso ())
-                    ]));
+                    ]);
            observe_task_transition
              config
              ~agent_name
@@ -1536,8 +1532,7 @@ let transition_task_r
               else agent);
           log_event
             config
-            (Yojson.Safe.to_string
-               (transition_log_event
+            (transition_log_event
                   ~event_type:Task_transition
                   ~agent_name
                   ~task_id
@@ -1551,7 +1546,7 @@ let transition_task_r
                     (match handoff_context with
                      | Some _ when action = Types.Release -> handoff_context
                      | _ -> None)
-                  ()));
+                  ());
           (match action with
            | Types.Claim ->
              emit_task_activity
@@ -1916,8 +1911,7 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Types.masc_result
                        ]);
                log_event
                  config
-                 (Yojson.Safe.to_string
-                    (transition_log_event
+                 (transition_log_event
                        ~event_type:Task_cancelled
                        ~agent_name
                        ~task_id
@@ -1929,7 +1923,7 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Types.masc_result
                             ; reason = (if reason = "" then None else Some reason)
                             })
                        ?reason:(if reason = "" then None else Some reason)
-                       ()));
+                       ());
                observe_task_transition
                  config
                  ~agent_name
@@ -2062,8 +2056,7 @@ let link_task_execution_artifacts_r
                       | None -> []));
              log_event
                config
-               (Yojson.Safe.to_string
-                  (`Assoc
+               (`Assoc
                       ([ "type", `String "task_linked"
                        ; "agent", `String "system"
                        ; "actor_kind", `String "system"
@@ -2080,7 +2073,7 @@ let link_task_execution_artifacts_r
                        match trim_opt autoresearch_loop_id with
                        | Some autoresearch_loop_id ->
                          [ "autoresearch_loop_id", `String autoresearch_loop_id ]
-                       | None -> [])));
+                       | None -> []));
              Ok (Printf.sprintf "✅ Linked execution artifacts for %s" task_id))
       with
       | Eio.Cancel.Cancelled _ as e -> raise e

@@ -10,10 +10,10 @@ include module type of Coord_state
 type verification_claim_state =
   [ `Pending | `Assigned | `Passed | `Rejected ]
 
-val task_status_label : Types_core.task_status -> string
-val task_is_claim_pool_candidate : Types_core.task -> bool
-val task_is_primary_claim_pool_candidate : Types_core.task -> bool
-val task_is_soft_reclaim_candidate : Types_core.task -> bool
+val task_status_label : Types.task_status -> string
+val task_is_claim_pool_candidate : Types.task -> bool
+val task_is_primary_claim_pool_candidate : Types.task -> bool
+val task_is_soft_reclaim_candidate : Types.task -> bool
 
 val verification_claim_state_of_status :
   Coord_verification_store.request_status -> verification_claim_state
@@ -23,9 +23,9 @@ val latest_verification_status_by_task :
 
 val verification_blocks_claim :
   (string, 'a * verification_claim_state) Hashtbl.t ->
-  Types_core.task -> bool
+  Types.task -> bool
 
-val task_required_tools : Types_core.task -> string list
+val task_required_tools : Types.task -> string list
 val string_list_contains : string list -> string -> bool
 
 val required_tools_allowed :
@@ -62,19 +62,19 @@ val latest_receipt_blocks_required_tool_claim :
   config -> agent_name:string -> required_tools:string list -> bool
 
 val agent_current_task_matches_backlog :
-  Types_core.backlog -> agent_name:string -> string -> bool
+  Types.backlog -> agent_name:string -> string -> bool
 
 val reconcile_agent_current_task_with_backlog :
-  config -> agent_name:string -> Types_core.backlog -> unit
+  config -> agent_name:string -> Types.backlog -> unit
 
 val claim_next_r :
   config ->
   agent_name:string ->
   ?agent_tool_names:string list ->
   ?exclude_task_ids:string list ->
-  ?task_filter:(Types_core.task -> bool) ->
+  ?task_filter:(Types.task -> bool) ->
   unit ->
-  Types_core.claim_next_result
+  Types.claim_next_result
 
 val claim_next : config -> agent_name:string -> string
 

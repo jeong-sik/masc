@@ -3,5 +3,6 @@
 (library
  (name autonomous)
  (public_name masc_mcp.autonomous)
+ (libraries shared_types yojson)
  (preprocess
   (pps ppx_tla)))

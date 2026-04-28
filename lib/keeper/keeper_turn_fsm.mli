@@ -50,11 +50,20 @@ type turn_state =
   | Cascade_routing
   | Awaiting_provider
   | Streaming
-  | Awaiting_tool_result
+  | Awaiting_tool_result [@tla.symbol "awaiting_tool"]
   | Completing
   | Done
   | Failed of failure_reason
   | Cancelled of cancel_reason
+[@@deriving tla]
+(** TLA+ symbol mapping derived by [ppx_tla].
+
+    [to_tla_symbol] / [all_symbols] match [TurnStateSet] in
+    [specs/keeper-turn-fsm/KeeperTurnFSM.tla] (verified by
+    [test_keeper_turn_fsm_tla_parity]).
+
+    [@tla.symbol "awaiting_tool"] on [Awaiting_tool_result] covers the
+    OCaml-vs-TLA+ naming difference without renaming either side. *)
 
 val cancel_reason_label : cancel_reason -> string
 val failure_reason_label : failure_reason -> string

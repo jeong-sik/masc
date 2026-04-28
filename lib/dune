@@ -48,6 +48,7 @@
    cascade_fsm
    cascade_health_filter
    cascade_health_tracker
+   cascade_inventory
    cascade_model_resolve
    cascade_ollama_probe
    cascade_runtime
@@ -950,7 +951,7 @@
    ambient-context
    ambient-context-eio
    )
- (preprocess (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq ppx_let))
+ (preprocess (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq ppx_let ppx_tla))
  (instrumentation (backend bisect_ppx)))
  
 ; Core library for MASC MCP

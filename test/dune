@@ -411,6 +411,11 @@
  (libraries masc_test_deps))
 
 (test
+ (name test_keeper_turn_fsm_tla_parity)
+ (modules test_keeper_turn_fsm_tla_parity)
+ (libraries masc_test_deps))
+
+(test
  (name test_telemetry_task_transition_10358)
  (modules test_telemetry_task_transition_10358)
  (libraries masc_test_deps))
@@ -1139,6 +1144,11 @@
 (test
  (name test_cascade_health_tracker)
  (modules test_cascade_health_tracker)
+ (libraries masc_test_deps))
+
+(test
+ (name test_cascade_inventory)
+ (modules test_cascade_inventory)
  (libraries masc_test_deps))
 
 (test

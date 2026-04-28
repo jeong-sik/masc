@@ -173,6 +173,10 @@ type semantic =
   | `White_pure
   | `Text_near_white
   | `Text_slate_light
+  | `Text_strong
+  | `Text_body
+  | `Text_muted
+  | `Text_dim
   | `Ok_soft
   | `Ok_fg
   | `Ok_border
@@ -573,6 +577,10 @@ let name_of = function
   | `White_pure -> "white-pure"
   | `Text_near_white -> "text-near-white"
   | `Text_slate_light -> "text-slate-light"
+  | `Text_strong -> "text-strong"
+  | `Text_body -> "text-body"
+  | `Text_muted -> "text-muted"
+  | `Text_dim -> "text-dim"
   | `Ok_soft -> "ok-soft"
   | `Ok_fg -> "ok-fg"
   | `Ok_border -> "ok-border"

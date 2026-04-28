@@ -343,6 +343,16 @@ export const raw: ReadonlyArray<TokenBase> = (() => {
   out.push(t("text-near-white", "#f8fafc", "raw", "color", "Tailwind slate-50 alias"));
   out.push(t("text-slate-light","#cbd5e1", "raw", "color", "Tailwind slate-300 alias"));
 
+  // Iter 2c-6: text body family. Custom dashboard-tuned shades that do
+  // not map to standard Tailwind slate stops; semantic role is the
+  // primary identity (strong > body > muted > dim luminance ladder).
+  // Lifted as raw because they are direct color values consumed by the
+  // semantic text-* role layer.
+  out.push(t("text-strong",     "#eaf1ff", "raw", "color", "Brightest text on dark surfaces"));
+  out.push(t("text-body",       "#c0d2f2", "raw", "color", "Default body copy on dark surfaces"));
+  out.push(t("text-muted",      "#a8bfdf", "raw", "color", "Secondary/labels"));
+  out.push(t("text-dim",        "#a0a8b4", "raw", "color", "Tertiary/captions"));
+
   return Object.freeze(out);
 })();
 

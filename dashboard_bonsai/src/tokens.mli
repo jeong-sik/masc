@@ -184,6 +184,10 @@ type semantic =
   | `White_pure
   | `Text_near_white
   | `Text_slate_light
+  | `Text_strong
+  | `Text_body
+  | `Text_muted
+  | `Text_dim
   | `Ok_soft
   | `Ok_fg
   | `Ok_border

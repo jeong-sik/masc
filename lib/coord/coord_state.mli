@@ -22,16 +22,16 @@ val append_archive_tasks :
   Coord_utils_backend_setup.config -> Types_core.task list -> unit
 
 val next_task_number :
-  Coord_utils_backend_setup.config -> Types_core.backlog -> int
+  Coord_utils_backend_setup.config -> Types.backlog -> int
 
 val read_backlog_r :
   Coord_utils_backend_setup.config ->
-  (Types_core.backlog, string) result
+  (Types.backlog, string) result
 
-val read_backlog : Coord_utils_backend_setup.config -> Types_core.backlog
+val read_backlog : Coord_utils_backend_setup.config -> Types.backlog
 
 val write_backlog :
-  Coord_utils_backend_setup.config -> Types_core.backlog -> unit
+  Coord_utils_backend_setup.config -> Types.backlog -> unit
 
 val non_empty_string_opt : string option -> string option
 val normalized_string_list : string list -> string list

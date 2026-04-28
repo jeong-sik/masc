@@ -19,6 +19,7 @@ import { formatTokens } from '../lib/format-number'
 import { isVerifierRoleKeeper } from '../lib/keeper-utils'
 import { showToast } from './common/toast'
 import { ErrorState, LoadingState } from './common/feedback-state'
+import { KeeperToolAccessSummary } from './keeper-tool-access'
 import { createAsyncResource, loaded } from '../lib/async-state'
 import { SetupGuideCard } from './setup-guide-card'
 
@@ -781,6 +782,8 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
   return html`
     <div class="flex flex-col gap-1.5">
       ${toolbar}
+
+      <${KeeperToolAccessSummary} config=${c} />
 
       <${Callout}
         title="편집 가능 범위"

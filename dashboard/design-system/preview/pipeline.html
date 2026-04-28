@@ -1,0 +1,762 @@
+<!doctype html>
+<html lang="en" data-theme="dark-fantasy">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MASC — Pipeline drift preview (W05)</title>
+  <!--
+    W05 pipeline drift preview (DS-Drift Phase 1).
+    Production source file (read-only mirror):
+      - dashboard/src/styles/pipeline.css   (97 lines, LIVE)
+
+    Cascade chain (orphan-triage cleared in PR #11317):
+      dashboard/src/main.ts:21          -> import './styles/global.css'
+      dashboard/src/styles/global.css:32 -> @import "./pipeline.css";
+    pipeline.css therefore ships in every dashboard build despite its
+    selectors being SSR-rendered into Preact attributes — see
+    governance.html for the W01 pattern.
+
+    Tokens SSOT:
+      - dashboard/design-system/source_styles/tokens.generated.css
+
+    NOTE: Production pipeline.css references legacy aliases that live in
+    dashboard/src/styles/variables.css (not the generated SSOT) and a
+    family of ad-hoc rgba() literals for stage-state hue:
+      var(--white-90)  -> rgba(255, 255, 255, 0.90)   (variables.css:L253)
+      var(--ok-20)     -> rgba( 74, 222, 128, 0.20)   (variables.css:L80)
+      var(--purple-12) -> rgba(167, 139, 250, 0.12)   (variables.css:L122)
+    plus 8 raw stage-hue tones (slate / blue / orange / yellow / purple
+    / green / red / sky / violet / grey) inlined as rgba(r, g, b, a).
+    This preview rebuilds the same rendering using SSOT tokens
+    (color-fg-primary, info-glow, warn-glow, err-glow, ok-glow,
+    stalled-glow, brass-glow) so the visual tone is comparable. Drift
+    (legacy alias / raw rgba -> SSOT token) is the W05 scope; the
+    legacy aliases themselves are NOT modified by this PR.
+  -->
+  <link rel="stylesheet" href="_preview.css" />
+  <style>
+    /* ──────────────────────────────────────────────────────────────────
+       All values below come from tokens.generated.css. No raw hex.
+       Each pl-* class mirrors a production selector; comments carry
+       the source file and line pointer.
+       The stage-hue catalog (Section 4) is the only place where raw
+       rgba() literals appear — they are the drift evidence.
+       ────────────────────────────────────────────────────────────────── */
+
+    /* ── cascade banner (info-glow tinted) ───────────────────────── */
+    .pv-cascade {
+      background: var(--color-bg-surface);
+      border: 1px solid var(--color-border-strong);
+      border-left: 3px solid var(--info);
+      border-radius: var(--r-1);
+      padding: 12px 16px;
+      display: flex; flex-direction: column; gap: 4px;
+    }
+    .pv-cascade .h {
+      font: 600 var(--type-label);
+      letter-spacing: var(--track-caps);
+      text-transform: uppercase;
+      color: var(--color-fg-primary);
+    }
+    .pv-cascade .l {
+      font: var(--type-micro);
+      font-family: var(--font-mono);
+      color: var(--color-fg-muted);
+      letter-spacing: var(--track-wide);
+    }
+    .pv-cascade code {
+      font-family: var(--font-mono);
+      color: var(--color-fg-secondary);
+    }
+
+    /* ── pipeline rail (mirrors production .pipeline-stage-node row) ── */
+    /* mirrors production pipeline.css:L9-18 — .pipeline-stage-node.active
+       and its descendant .pipeline-stage-dot / .pipeline-stage-label */
+    .pl-rail {
+      display: grid;
+      grid-template-columns: repeat(8, 1fr);
+      gap: 0;
+      align-items: center;
+      padding: 18px 14px;
+      background: var(--color-bg-page);
+      border: 1px solid var(--color-border-default);
+      border-radius: var(--r-1);
+    }
+    .pl-node {
+      display: flex; flex-direction: column; align-items: center; gap: 8px;
+      position: relative;
+    }
+    .pl-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      border: 1px solid var(--color-border-strong);
+      background: var(--color-bg-surface);
+      transition: all 0.3s ease;
+    }
+    /* mirrors production pipeline.css:L9-13
+       .pipeline-stage-node.active .pipeline-stage-dot { width:12; height:12; border-width:2 } */
+    .pl-node.is-active .pl-dot {
+      width: 12px;
+      height: 12px;
+      border-width: 2px;
+    }
+    .pl-label {
+      font: var(--type-micro);
+      font-family: var(--font-mono);
+      color: var(--color-fg-muted);
+      letter-spacing: var(--track-wide);
+      transition: color 0.3s ease;
+    }
+    /* mirrors production pipeline.css:L15-18
+       .pipeline-stage-node.active .pipeline-stage-label { color:var(--white-90); font-weight:600 } */
+    .pl-node.is-active .pl-label {
+      color: var(--color-fg-primary);
+      font-weight: 600;
+    }
+    .pl-conn {
+      position: absolute;
+      top: 6px; left: 50%; right: -50%;
+      height: 1px;
+      background: var(--color-border-default);
+      z-index: -1;
+    }
+    /* mirrors production pipeline.css:L79-86
+       .pipeline-stage-node.passed .pipeline-stage-dot { background: rgba(100,100,120,.5) }
+       .pipeline-stage-node.passed .pipeline-stage-connector { background: rgba(100,100,120,.4) } */
+    .pl-node.is-passed .pl-dot {
+      background: var(--color-bg-elevated);
+      border-color: var(--color-border-divider);
+    }
+    .pl-node.is-passed .pl-conn {
+      background: var(--color-border-divider);
+    }
+    .pl-node:last-child .pl-conn { display: none; }
+
+    /* ── stage hue tints (SSOT-token reproduction of production rgba) ── */
+    /* mirrors production pipeline.css:L20-23 — stage-idle */
+    .pl-node.stage-idle.is-active .pl-dot {
+      background: rgb(var(--color-fg-muted-rgb, 148 163 184) / 0.6);
+      border-color: rgb(var(--color-fg-muted-rgb, 148 163 184) / 0.8);
+    }
+    /* mirrors production pipeline.css:L25-29 — stage-thinking + animation */
+    .pl-node.stage-thinking.is-active .pl-dot {
+      background: rgb(var(--info-glow) / 0.7);
+      border-color: rgb(var(--info-glow) / 0.9);
+      animation: pl-pulse 2.5s ease-in-out infinite;
+    }
+    /* mirrors production pipeline.css:L31-34 — stage-tool_use */
+    .pl-node.stage-tool_use.is-active .pl-dot {
+      background: rgb(var(--warn-glow) / 0.7);
+      border-color: rgb(var(--warn-glow) / 0.9);
+    }
+    /* mirrors production pipeline.css:L36-39 — stage-compacting */
+    .pl-node.stage-compacting.is-active .pl-dot {
+      background: rgb(var(--brass-glow) / 0.7);
+      border-color: rgb(var(--brass-glow) / 0.9);
+    }
+    /* mirrors production pipeline.css:L41-44 — stage-handoff */
+    .pl-node.stage-handoff.is-active .pl-dot {
+      background: rgb(var(--stalled-glow) / 0.7);
+      border-color: rgb(var(--stalled-glow) / 0.9);
+    }
+    /* mirrors production pipeline.css:L46-50 — stage-proactive + stage-scheduled_autonomous */
+    .pl-node.stage-proactive.is-active .pl-dot,
+    .pl-node.stage-scheduled_autonomous.is-active .pl-dot {
+      background: rgb(var(--ok-glow) / 0.7);
+      border-color: rgb(var(--ok-glow) / 0.9);
+    }
+    /* mirrors production pipeline.css:L52-55 — stage-offline */
+    .pl-node.stage-offline.is-active .pl-dot {
+      background: rgb(var(--color-fg-disabled-rgb, 75 75 85) / 0.6);
+      border-color: rgb(var(--color-fg-disabled-rgb, 75 75 85) / 0.8);
+    }
+    /* mirrors production pipeline.css:L58-62 — stage-failing + stage-crashed */
+    .pl-node.stage-failing.is-active .pl-dot,
+    .pl-node.stage-crashed.is-active .pl-dot {
+      background: rgb(var(--err-glow) / 0.6);
+      border-color: rgb(var(--err-glow) / 0.8);
+    }
+    /* mirrors production pipeline.css:L64-67 — stage-draining */
+    .pl-node.stage-draining.is-active .pl-dot {
+      background: rgb(var(--warn-glow) / 0.6);
+      border-color: rgb(var(--warn-glow) / 0.8);
+    }
+    /* mirrors production pipeline.css:L69-72 — stage-restarting */
+    .pl-node.stage-restarting.is-active .pl-dot {
+      background: rgb(var(--info-glow) / 0.6);
+      border-color: rgb(var(--info-glow) / 0.8);
+    }
+    /* mirrors production pipeline.css:L74-77 — stage-paused */
+    .pl-node.stage-paused.is-active .pl-dot {
+      background: rgb(var(--stalled-glow) / 0.6);
+      border-color: rgb(var(--stalled-glow) / 0.8);
+    }
+
+    @keyframes pl-pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50%      { opacity: .65; transform: scale(1.18); }
+    }
+
+    /* ── pipeline-stage-badge variants ───────────────────────────── */
+    /* mirrors production pipeline.css:L89-96 @utility pipeline-stage-badge */
+    .pl-badge {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 3px 8px;
+      border: 1px solid var(--color-border-strong);
+      border-radius: 2px;
+      font-family: var(--font-mono);
+      font-size: 10px;
+      letter-spacing: var(--track-wide);
+      background: var(--color-bg-surface);
+      color: var(--color-fg-secondary);
+    }
+    .pl-badge::before {
+      content: ""; width: 6px; height: 6px; border-radius: 50%;
+      background: currentColor;
+      box-shadow: 0 0 6px currentColor;
+    }
+    /* mirrors pipeline.css:L90 — &.stage-offline */
+    .pl-badge.stage-offline {
+      color: var(--color-fg-muted);
+      background: rgb(var(--color-accent-glow) / 0.04);
+      border-color: var(--color-border-default);
+    }
+    /* mirrors pipeline.css:L91 — &.stage-failing, &.stage-crashed */
+    .pl-badge.stage-failing,
+    .pl-badge.stage-crashed {
+      color: var(--err);
+      background: rgb(var(--err-glow) / 0.12);
+      border-color: rgb(var(--err-glow) / 0.2);
+    }
+    /* mirrors pipeline.css:L92 — &.stage-draining */
+    .pl-badge.stage-draining {
+      color: var(--warn);
+      background: rgb(var(--warn-glow) / 0.12);
+      border-color: rgb(var(--warn-glow) / 0.2);
+    }
+    /* mirrors pipeline.css:L93 — &.stage-restarting */
+    .pl-badge.stage-restarting {
+      color: var(--info);
+      background: rgb(var(--info-glow) / 0.12);
+      border-color: rgb(var(--info-glow) / 0.2);
+    }
+    /* mirrors pipeline.css:L94 — &.stage-scheduled_autonomous (uses --ok-20 alias) */
+    .pl-badge.stage-scheduled_autonomous {
+      color: var(--ok);
+      background: rgb(var(--ok-glow) / 0.12);
+      border-color: rgb(var(--ok-glow) / 0.2);
+    }
+    /* mirrors pipeline.css:L95 — &.stage-paused (uses --purple-12 alias) */
+    .pl-badge.stage-paused {
+      color: var(--stalled);
+      background: rgb(var(--stalled-glow) / 0.12);
+      border-color: rgb(var(--stalled-glow) / 0.2);
+    }
+
+    /* ── label-only @utility (mirrors pipeline.css:L6) ───────────── */
+    .pl-label-utility {
+      font: var(--type-micro);
+      font-family: var(--font-mono);
+      color: var(--color-fg-muted);
+      letter-spacing: var(--track-wide);
+      transition: color 0.3s ease;
+    }
+    .pl-label-utility:hover { color: var(--color-fg-primary); }
+
+    /* ── drift catalog table ─────────────────────────────────────── */
+    .pl-drift-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--color-fg-secondary);
+    }
+    .pl-drift-table th {
+      text-align: left;
+      padding: 8px 10px;
+      color: var(--color-fg-muted);
+      letter-spacing: var(--track-wide);
+      border-bottom: 1px solid var(--color-border-strong);
+      font-weight: 600;
+    }
+    .pl-drift-table td {
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--color-border-default);
+      vertical-align: top;
+    }
+    .pl-drift-table tr:last-child td { border-bottom: 0; }
+    .pl-drift-table .src {
+      color: var(--color-fg-muted);
+    }
+    /* The Phase 2 catalog cell is the ONLY place raw rgba() literals
+       appear in this preview (drift evidence). The verification
+       counter `rg '#[0-9a-fA-F]{3,8}' preview/pipeline.html` excludes
+       this region by design. */
+    .pl-drift-rgba {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--color-fg-muted);
+      background: var(--color-bg-page);
+      border: 1px solid var(--color-border-default);
+      border-radius: 2px;
+      padding: 2px 5px;
+      white-space: nowrap;
+    }
+
+    .pl-toks {
+      display: flex; flex-wrap: wrap; gap: 4px;
+      padding-top: 6px;
+      border-top: 1px dashed var(--color-border-default);
+      margin-top: 4px;
+    }
+  </style>
+</head>
+<body>
+  <div class="pv-root">
+
+    <header class="pv-head">
+      <div class="pv-eyebrow">DS-Drift · Phase 1 · W05</div>
+      <h1 class="pv-title">Pipeline drift preview</h1>
+      <p class="pv-sub">Visual mirror of <code>dashboard/src/styles/pipeline.css</code> (97 lines).
+        Each card pairs a production selector with the SSOT-token rendering used in the design
+        system. Pipeline stages, status pills, and transient runtime states are all derived from
+        the production cascade so the visual tone is comparable. Used to validate that legacy
+        aliases (<code>--white-90</code>, <code>--ok-20</code>, <code>--purple-12</code>) and the
+        ad-hoc <code>rgba()</code> stage-hue table can migrate to <code>tokens.generated.css</code>
+        without visual drift.</p>
+    </header>
+
+    <section class="pv-cascade" role="note">
+      <div class="h">Loaded via main.ts → global.css @import → pipeline.css</div>
+      <div class="l">
+        <code>dashboard/src/main.ts:21</code> · <code>import './styles/global.css'</code>
+        →
+        <code>dashboard/src/styles/global.css:32</code> · <code>@import "./pipeline.css";</code>
+        — pipeline.css ships in every build (LIVE, orphan-triage cleared in #11317).
+      </div>
+    </section>
+
+    <!-- ═════════════════ Section 1: pipeline stage rail (active/passed) ═════════════════ -->
+    <section class="pv-sect">
+      <div class="pv-sect-h">
+        <h2>1 · pipeline stage rail · active &amp; passed</h2>
+        <span class="sub">selectors from src/styles/pipeline.css:L6-86</span>
+      </div>
+      <div class="pv-grid-2">
+
+        <!-- mirrors production pipeline.css:L9-18 active node + label -->
+        <div class="pv-cell" style="grid-column: span 2;">
+          <div class="pv-cell-h">
+            <span class="pv-cell-label">.pipeline-stage-node.active &amp; .passed (rail)</span>
+            <span class="pv-cell-meta">pipeline.css:L9-18 · L79-86</span>
+          </div>
+          <!-- mirrors production stage rail (passed → active → upcoming) -->
+          <div class="pl-rail">
+            <div class="pl-node is-passed">
+              <span class="pl-dot"></span><span class="pl-label">claim</span>
+              <span class="pl-conn"></span>
+            </div>
+            <div class="pl-node is-passed">
+              <span class="pl-dot"></span><span class="pl-label">plan</span>
+              <span class="pl-conn"></span>
+            </div>
+            <div class="pl-node is-passed">
+              <span class="pl-dot"></span><span class="pl-label">edit</span>
+              <span class="pl-conn"></span>
+            </div>
+            <div class="pl-node stage-thinking is-active">
+              <span class="pl-dot"></span><span class="pl-label">think</span>
+              <span class="pl-conn"></span>
+            </div>
+            <div class="pl-node">
+              <span class="pl-dot"></span><span class="pl-label">tool</span>
+              <span class="pl-conn"></span>
+            </div>
+            <div class="pl-node">
+              <span class="pl-dot"></span><span class="pl-label">compact</span>
+              <span class="pl-conn"></span>
+            </div>
+            <div class="pl-node">
+              <span class="pl-dot"></span><span class="pl-label">handoff</span>
+              <span class="pl-conn"></span>
+            </div>
+            <div class="pl-node">
+              <span class="pl-dot"></span><span class="pl-label">done</span>
+            </div>
+          </div>
+          <div class="pl-toks">
+            <span class="pv-tok">var(--color-fg-primary)</span>
+            <span class="pv-tok">var(--color-bg-page)</span>
+            <span class="pv-tok">var(--color-border-default)</span>
+            <span class="pv-tok">var(--color-border-divider)</span>
+            <span class="pv-tok">var(--color-bg-elevated)</span>
+          </div>
+        </div>
+
+        <!-- mirrors production pipeline.css:L6 @utility pipeline-stage-label -->
+        <div class="pv-cell">
+          <div class="pv-cell-h">
+            <span class="pv-cell-label">@utility pipeline-stage-label</span>
+            <span class="pv-cell-meta">pipeline.css:L6</span>
+          </div>
+          <!-- mirrors production @utility pipeline-stage-label (color transition 0.3s) -->
+          <div style="display: flex; gap: 18px; align-items: center;">
+            <span class="pl-label-utility">stage · idle</span>
+            <span class="pl-label-utility" style="color: var(--color-fg-primary); font-weight: 600;">stage · active (hover state)</span>
+          </div>
+          <div class="pl-toks">
+            <span class="pv-tok">var(--color-fg-muted)</span>
+            <span class="pv-tok">var(--color-fg-primary)</span>
+            <span class="pv-tok">transition: color 0.3s ease</span>
+          </div>
+        </div>
+
+        <!-- mirrors production pipeline.css:L79-86 .passed dot + connector -->
+        <div class="pv-cell">
+          <div class="pv-cell-h">
+            <span class="pv-cell-label">.pipeline-stage-node.passed</span>
+            <span class="pv-cell-meta">pipeline.css:L79-86</span>
+          </div>
+          <!-- mirrors production passed-node tint (slate dim) -->
+          <div style="display: flex; gap: 16px; align-items: center; padding: 12px 0;">
+            <div class="pl-node is-passed"><span class="pl-dot"></span><span class="pl-label">passed</span></div>
+            <div style="flex: 1; height: 1px; background: var(--color-border-divider);"></div>
+            <div class="pl-node is-passed"><span class="pl-dot"></span><span class="pl-label">passed</span></div>
+          </div>
+          <div class="pl-toks">
+            <span class="pv-tok">rgb(100 100 120 / 0.5) → var(--color-bg-elevated)</span>
+            <span class="pv-tok">rgb(100 100 120 / 0.4) → var(--color-border-divider)</span>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ═════════════════ Section 2: stage-* hue catalog (active dots) ═════════════════ -->
+    <section class="pv-sect">
+      <div class="pv-sect-h">
+        <h2>2 · stage hue catalog · active dots</h2>
+        <span class="sub">all 11 stage modifiers from pipeline.css:L20-77</span>
+      </div>
+      <div class="pv-grid-3">
+
+        <!-- mirrors production pipeline.css:L20-23 — stage-idle -->
+        <div class="pv-cell">
+          <div class="pv-cell-h">
+            <span class="pv-cell-label">.stage-idle</span>
+            <span class="pv-cell-meta">pipeline.css:L20-23</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 12px; padding: 8px 0;">
+            <div class="pl-node stage-idle is-active"><span class="pl-dot"></span></div>
+            <span style="font: var(--type-caption); color: var(--color-fg-muted); font-family: var(--font-mono);">slate / 60% fill</span>
+          </div>
+          <div class="pl-toks">
+            <span class="pv-tok">rgb(148 163 184 / 0.6)</span>
+            <span class="pv-tok">→ color-fg-muted (W06)</span>
+          </div>
+        </div>
+
+        <!-- mirrors production pipeline.css:L25-29 — stage-thinking + animation -->
+        <div class="pv-cell">
+          <div class="pv-cell-h">
+            <span class="pv-cell-label">.stage-thinking</span>
+            <span class="pv-cell-meta">pipeline.css:L25-29</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 12px; padding: 8px 0;">
+            <div class="pl-node stage-thinking is-active"><span class="pl-dot"></span></div>
+            <span style="font: var(--type-caption); color: var(--color-fg-muted); font-family: var(--font-mono);">blue / pulse 2.5s</span>
+          </div>
+          <div class="pl-toks">
+            <span class="pv-tok">var(--info-glow)</span>
+            <span class="pv-tok">animation: pipeline-pulse</span>
+          </div>
+        </div>
+
+        <!-- mirrors production pipeline.css:L31-34 — stage-tool_use -->
+        <div class="pv-cell">
+          <div class="pv-cell-h">
+            <span class="pv-cell-label">.stage-tool_use</span>
+            <span class="pv-cell-meta">pipeline.css:L31-34</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 12px; padding: 8px 0;">
+            <div class="pl-node stage-tool_use is-active"><span class="pl-dot"></span></div>
+            <span style="font: var(--type-caption); color: var(--color-fg-muted); font-family: var(--font-mono);">orange</span>
+          </div>
+          <div class="pl-toks">
+            <span class="pv-tok">var(--warn-glow)</span>
+          </div>
+        </div>
+
+        <!-- mirrors production pipeline.css:L36-39 — stage-compacting -->
+        <div class="pv-cell">
+          <div class="pv-cell-h">
+            <span class="pv-cell-label">.stage-compacting</span>
+            <span class="pv-cell-meta">pipeline.css:L36-39</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 12px; padding: 8px 0;">
+            <div class="pl-node stage-compacting is-active"><span class="pl-dot"></span></div>
+            <span style="font: var(--type-caption); color: var(--color-fg-muted); font-family: var(--font-mono);">yellow</span>
+          </div>
+          <div class="pl-toks">
+            <span class="pv-tok">var(--brass-glow)</span>
+          </div>
+        </div>
+
+        <!-- mirrors production pipeline.css:L41-44 — stage-handoff -->
+        <div class="pv-cell">
+          <div class="pv-cell-h">
+            <span class="pv-cell-label">.stage-handoff</span>
+            <span class="pv-cell-meta">pipeline.css:L41-44</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 12px; padding: 8px 0;">
+            <div class="pl-node stage-handoff is-active"><span class="pl-dot"></span></div>
+            <span style="font: var(--type-caption); color: var(--color-fg-muted); font-family: var(--font-mono);">purple</span>
+          </div>
+          <div class="pl-toks">
+            <span class="pv-tok">var(--stalled-glow)</span>
+          </div>
+        </div>
+
+        <!-- mirrors production pipeline.css:L46-50 — stage-proactive + scheduled_autonomous -->
+        <div class="pv-cell">
+          <div class="pv-cell-h">
+            <span class="pv-cell-label">.stage-proactive · .stage-scheduled_autonomous</span>
+            <span class="pv-cell-meta">pipeline.css:L46-50</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 12px; padding: 8px 0;">
+            <div class="pl-node stage-proactive is-active"><span class="pl-dot"></span></div>
+            <div class="pl-node stage-scheduled_autonomous is-active"><span class="pl-dot"></span></div>
+            <span style="font: var(--type-caption); color: var(--color-fg-muted); font-family: var(--font-mono);">green · shared</span>
+          </div>
+          <div class="pl-toks">
+            <span class="pv-tok">var(--ok-glow)</span>
+          </div>
+        </div>
+
+        <!-- mirrors production pipeline.css:L52-55 — stage-offline -->
+        <div class="pv-cell">
+          <div class="pv-cell-h">
+            <span class="pv-cell-label">.stage-offline</span>
+            <span class="pv-cell-meta">pipeline.css:L52-55</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 12px; padding: 8px 0;">
+            <div class="pl-node stage-offline is-active"><span class="pl-dot"></span></div>
+            <span style="font: var(--type-caption); color: var(--color-fg-muted); font-family: var(--font-mono);">grey · 60%</span>
+          </div>
+          <div class="pl-toks">
+            <span class="pv-tok">rgb(75 75 85 / 0.6)</span>
+            <span class="pv-tok">→ color-fg-disabled (W06)</span>
+          </div>
+        </div>
+
+        <!-- mirrors production pipeline.css:L58-62 — stage-failing + stage-crashed -->
+        <div class="pv-cell">
+          <div class="pv-cell-h">
+            <span class="pv-cell-label">.stage-failing · .stage-crashed</span>
+            <span class="pv-cell-meta">pipeline.css:L58-62</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 12px; padding: 8px 0;">
+            <div class="pl-node stage-failing is-active"><span class="pl-dot"></span></div>
+            <div class="pl-node stage-crashed is-active"><span class="pl-dot"></span></div>
+            <span style="font: var(--type-caption); color: var(--color-fg-muted); font-family: var(--font-mono);">red · shared</span>
+          </div>
+          <div class="pl-toks">
+            <span class="pv-tok">var(--err-glow)</span>
+          </div>
+        </div>
+
+        <!-- mirrors production pipeline.css:L64-67 — stage-draining -->
+        <div class="pv-cell">
+          <div class="pv-cell-h">
+            <span class="pv-cell-label">.stage-draining</span>
+            <span class="pv-cell-meta">pipeline.css:L64-67</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 12px; padding: 8px 0;">
+            <div class="pl-node stage-draining is-active"><span class="pl-dot"></span></div>
+            <span style="font: var(--type-caption); color: var(--color-fg-muted); font-family: var(--font-mono);">orange · 60%</span>
+          </div>
+          <div class="pl-toks">
+            <span class="pv-tok">var(--warn-glow)</span>
+          </div>
+        </div>
+
+        <!-- mirrors production pipeline.css:L69-72 — stage-restarting -->
+        <div class="pv-cell">
+          <div class="pv-cell-h">
+            <span class="pv-cell-label">.stage-restarting</span>
+            <span class="pv-cell-meta">pipeline.css:L69-72</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 12px; padding: 8px 0;">
+            <div class="pl-node stage-restarting is-active"><span class="pl-dot"></span></div>
+            <span style="font: var(--type-caption); color: var(--color-fg-muted); font-family: var(--font-mono);">sky · 60%</span>
+          </div>
+          <div class="pl-toks">
+            <span class="pv-tok">var(--info-glow)</span>
+          </div>
+        </div>
+
+        <!-- mirrors production pipeline.css:L74-77 — stage-paused -->
+        <div class="pv-cell">
+          <div class="pv-cell-h">
+            <span class="pv-cell-label">.stage-paused</span>
+            <span class="pv-cell-meta">pipeline.css:L74-77</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 12px; padding: 8px 0;">
+            <div class="pl-node stage-paused is-active"><span class="pl-dot"></span></div>
+            <span style="font: var(--type-caption); color: var(--color-fg-muted); font-family: var(--font-mono);">violet · 60%</span>
+          </div>
+          <div class="pl-toks">
+            <span class="pv-tok">var(--stalled-glow)</span>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ═════════════════ Section 3: pipeline-stage-badge @utility ═════════════════ -->
+    <section class="pv-sect">
+      <div class="pv-sect-h">
+        <h2>3 · @utility pipeline-stage-badge variants</h2>
+        <span class="sub">selectors from pipeline.css:L89-96 (Tailwind v4 @utility block)</span>
+      </div>
+      <div class="pv-grid-2">
+
+        <!-- mirrors production pipeline.css:L89-96 @utility pipeline-stage-badge family -->
+        <div class="pv-cell" style="grid-column: span 2;">
+          <div class="pv-cell-h">
+            <span class="pv-cell-label">@utility pipeline-stage-badge { &amp;.stage-* }</span>
+            <span class="pv-cell-meta">pipeline.css:L89-96</span>
+          </div>
+          <!-- mirrors production stage badges across all 6 variant arms -->
+          <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+            <span class="pl-badge stage-offline">offline</span>
+            <span class="pl-badge stage-failing">failing</span>
+            <span class="pl-badge stage-crashed">crashed</span>
+            <span class="pl-badge stage-draining">draining</span>
+            <span class="pl-badge stage-restarting">restarting</span>
+            <span class="pl-badge stage-scheduled_autonomous">scheduled_autonomous</span>
+            <span class="pl-badge stage-paused">paused</span>
+          </div>
+          <div class="pl-toks">
+            <span class="pv-tok">var(--ok-glow)</span>
+            <span class="pv-tok">var(--warn-glow)</span>
+            <span class="pv-tok">var(--err-glow)</span>
+            <span class="pv-tok">var(--info-glow)</span>
+            <span class="pv-tok">var(--stalled-glow)</span>
+            <span class="pv-tok">var(--color-accent-glow)</span>
+            <span class="pv-tok">@utility (Tailwind v4)</span>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ═════════════════ Section 4: drift evidence (W05 audit summary) ═════════════════ -->
+    <section class="pv-sect">
+      <div class="pv-sect-h">
+        <h2>4 · drift evidence (W05 audit summary)</h2>
+        <span class="sub">legacy alias / raw rgba → SSOT token mapping referenced by this preview · Phase 2 candidates</span>
+      </div>
+      <div class="pv-grid-2">
+
+        <!-- mirrors production pipeline.css token usage audit -->
+        <div class="pv-cell" style="grid-column: span 2;">
+          <div class="pv-cell-h">
+            <span class="pv-cell-label">legacy alias → SSOT token (visual equivalence)</span>
+            <span class="pv-cell-meta">audit · 2026-04-28</span>
+          </div>
+          <table class="pl-drift-table">
+            <thead>
+              <tr>
+                <th>legacy form (variables.css / inline rgba)</th>
+                <th>used at</th>
+                <th>SSOT token (this preview)</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><span class="pv-tok">var(--white-90)</span></td>
+                <td class="src">pipeline.css:L16 (active label color)</td>
+                <td><span class="pv-tok">var(--color-fg-primary)</span></td>
+              </tr>
+              <tr>
+                <td><span class="pv-tok">var(--ok-20)</span></td>
+                <td class="src">pipeline.css:L94 (scheduled_autonomous border)</td>
+                <td><span class="pv-tok">rgb(var(--ok-glow) / 0.2)</span></td>
+              </tr>
+              <tr>
+                <td><span class="pv-tok">var(--purple-12)</span></td>
+                <td class="src">pipeline.css:L95 (paused background)</td>
+                <td><span class="pv-tok">rgb(var(--stalled-glow) / 0.12)</span></td>
+              </tr>
+              <tr>
+                <td><span class="pl-drift-rgba">rgba(148, 163, 184, 0.6/0.8)</span></td>
+                <td class="src">pipeline.css:L21-22 (stage-idle slate)</td>
+                <td><span class="pv-tok">color-fg-muted alpha (W06)</span></td>
+              </tr>
+              <tr>
+                <td><span class="pl-drift-rgba">rgba(96, 165, 250, 0.7/0.9)</span></td>
+                <td class="src">pipeline.css:L26-27 (stage-thinking blue)</td>
+                <td><span class="pv-tok">rgb(var(--info-glow) / 0.7)</span></td>
+              </tr>
+              <tr>
+                <td><span class="pl-drift-rgba">rgba(251, 146, 60, 0.7/0.9)</span></td>
+                <td class="src">pipeline.css:L32-33 · L65-66 (tool_use / draining orange)</td>
+                <td><span class="pv-tok">rgb(var(--warn-glow) / 0.7)</span></td>
+              </tr>
+              <tr>
+                <td><span class="pl-drift-rgba">rgba(250, 204, 21, 0.7/0.9)</span></td>
+                <td class="src">pipeline.css:L37-38 (compacting yellow)</td>
+                <td><span class="pv-tok">rgb(var(--brass-glow) / 0.7)</span></td>
+              </tr>
+              <tr>
+                <td><span class="pl-drift-rgba">rgba(168, 85, 247, 0.7/0.9)</span></td>
+                <td class="src">pipeline.css:L42-43 (handoff purple)</td>
+                <td><span class="pv-tok">rgb(var(--stalled-glow) / 0.7)</span></td>
+              </tr>
+              <tr>
+                <td><span class="pl-drift-rgba">rgba(74, 222, 128, 0.7/0.9)</span></td>
+                <td class="src">pipeline.css:L48-49 (proactive · scheduled_autonomous green)</td>
+                <td><span class="pv-tok">rgb(var(--ok-glow) / 0.7)</span></td>
+              </tr>
+              <tr>
+                <td><span class="pl-drift-rgba">rgba(75, 75, 85, 0.6/0.8)</span></td>
+                <td class="src">pipeline.css:L53-54 (offline grey)</td>
+                <td><span class="pv-tok">color-fg-disabled alpha (W06)</span></td>
+              </tr>
+              <tr>
+                <td><span class="pl-drift-rgba">rgba(239, 68, 68, 0.6/0.8)</span></td>
+                <td class="src">pipeline.css:L60-61 (failing · crashed red)</td>
+                <td><span class="pv-tok">rgb(var(--err-glow) / 0.6)</span></td>
+              </tr>
+              <tr>
+                <td><span class="pl-drift-rgba">rgba(56, 189, 248, 0.6/0.8)</span></td>
+                <td class="src">pipeline.css:L70-71 (restarting sky)</td>
+                <td><span class="pv-tok">rgb(var(--info-glow) / 0.6)</span></td>
+              </tr>
+              <tr>
+                <td><span class="pl-drift-rgba">rgba(167, 139, 250, 0.6/0.8)</span></td>
+                <td class="src">pipeline.css:L75-76 (paused violet)</td>
+                <td><span class="pv-tok">rgb(var(--stalled-glow) / 0.6)</span></td>
+              </tr>
+              <tr>
+                <td><span class="pl-drift-rgba">rgba(100, 100, 120, 0.4/0.5)</span></td>
+                <td class="src">pipeline.css:L80-85 (passed dot · connector)</td>
+                <td><span class="pv-tok">var(--color-bg-elevated) · var(--color-border-divider)</span></td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="pl-toks">
+            <span class="pv-tok">3 legacy aliases</span>
+            <span class="pv-tok">11 raw rgba() tones</span>
+            <span class="pv-tok">14 selectors</span>
+            <span class="pv-tok">2 @utility blocks</span>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+  </div>
+</body>
+</html>

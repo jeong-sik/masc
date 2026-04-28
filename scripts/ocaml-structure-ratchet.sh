@@ -35,6 +35,18 @@
 
 set -euo pipefail
 
+# Required tools — fail fast with an actionable message rather than the
+# silent exit-127 that bites a pipefail-protected `rg | wc | tr` when
+# ripgrep is absent (regression that broke every PR's ratchet for ~2h
+# after PR #11402 added count_inferred_dump_headers).
+for tool in rg python3; do
+  if ! command -v "$tool" >/dev/null 2>&1; then
+    echo "ERROR: required tool '$tool' not found on PATH." >&2
+    echo "  On Debian/Ubuntu: sudo apt-get install -y -qq ripgrep python3" >&2
+    exit 1
+  fi
+done
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 BASELINE_FILE="${REPO_ROOT}/scripts/ocaml-structure-baseline.json"

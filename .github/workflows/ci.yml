@@ -135,7 +135,7 @@ jobs:
             build=true
           fi
 
-          if has_match '^(bin/|lib/|test/|proto/|config/|dune-project$|dune-workspace$|.*\.opam$|scripts/install\.sh$|scripts/check-eio-conventions\.sh$|scripts/check-feature-flag-consistency\.sh$|scripts/check-toml-syntax\.sh$|scripts/validate-prompt-paths\.sh$|scripts/check-boundary-guard\.sh$|scripts/check-boundary-guard-mli-pairs\.sh$|scripts/check-ssot\.sh$|scripts/gen-grpc-descriptors\.sh$|scripts/lint/no-unknown-permissive-default\.sh$|scripts/lint/no-unknown-permissive-default\.allowlist$|scripts/lint/yojson-option-default\.py$|scripts/lint/yojson-option-default\.allowlist$|scripts/ci/)'; then
+          if has_match '^(bin/|lib/|test/|proto/|config/|dune-project$|dune-workspace$|.*\.opam$|scripts/install\.sh$|scripts/check-eio-conventions\.sh$|scripts/check-feature-flag-consistency\.sh$|scripts/check-toml-syntax\.sh$|scripts/validate-prompt-paths\.sh$|scripts/check-boundary-guard\.sh$|scripts/check-boundary-guard-mli-pairs\.sh$|scripts/check-ssot\.sh$|scripts/gen-grpc-descriptors\.sh$|scripts/lint/no-unknown-permissive-default\.sh$|scripts/lint/no-unknown-permissive-default\.allowlist$|scripts/lint/yojson-option-default\.py$|scripts/lint/yojson-option-default\.allowlist$|scripts/lint/no-docstring-escape-quote\.sh$|scripts/ci/)'; then
             lint=true
           fi
 
@@ -574,6 +574,9 @@ jobs:
       - name: Run yojson option-field [@default None] lint
         run: python3 scripts/lint/yojson-option-default.py
 
+      - name: Run OCaml docstring bare escape-quote lint
+        run: bash scripts/lint/no-docstring-escape-quote.sh
+
       - name: Setup OCaml toolchain
         uses: ./.github/actions/setup-ocaml-toolchain
 
@@ -696,6 +699,20 @@ jobs:
 
       - name: Run OCaml structure ratchet
         run: scripts/ocaml-structure-ratchet.sh
+
+  keeper-cwd-leak-gate:
+    name: Keeper Cwd Leak Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    needs: [pr-sync-check]
+    if: ${{ !cancelled() && (needs.pr-sync-check.result == 'success' || needs.pr-sync-check.result == 'skipped') }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Run keeper cwd leak gate
+        run: scripts/keeper-cwd-leak-gate.sh
 
   tla-specs:
     name: TLA+ Model Checking

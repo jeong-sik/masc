@@ -135,7 +135,7 @@ let search_memory_bank
            | _ -> 0.0
          in
          let synthetic_penalty =
-           if contains_ci m.text "[SYNTHETIC]" then -0.1 else 0.0
+           if Keeper_synthetic_marker.contains_marker m.text then -0.1 else 0.0
          in
          let score =
            ((float_of_int m.priority /. 100.0) *. recency_weight *. horizon_weight)

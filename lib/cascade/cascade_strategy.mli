@@ -79,6 +79,23 @@ val backoff_ms : cycle_policy -> cycle:int -> int
     before the next cascade attempt.  [cycle] is 1-indexed: the first
     retry after cycle 0 uses [backoff_ms ~cycle:1]. *)
 
+val latency_score_for_provider :
+  Cascade_health_tracker.t -> provider_key:string -> float
+(** [latency_score_for_provider health ~provider_key] returns a
+    [0.0–1.0] multiplier reflecting how the provider's recent p50
+    response time compares to {!latency_baseline_ms}.
+
+    - p50 ≤ baseline → [1.0] (no penalty).
+    - p50 > baseline → fractional score, decaying as [baseline / p50].
+    - Unknown provider, no latency samples, or latency tracking disabled
+      ([latency_ring_size <= 0]) → [1.0] (optimistic default).
+
+    Used internally by {!Weighted_random} to prefer faster providers
+    when success rates are comparable.  Exposed for inspection /
+    testability — strategies do not need to call this directly.
+
+    @since 0.181.0 (PR3 of cascade resilience track) *)
+
 (** {1 Strategy kind} *)
 
 type kind =

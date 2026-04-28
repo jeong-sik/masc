@@ -41,3 +41,24 @@ val caller_key : caller -> string
 val timeout_sec : caller:caller -> unit -> float
 (** Resolve the OAS bridge timeout (seconds) for [caller] using the
     five-step lookup order documented above. *)
+
+val global_env_var : string
+(** [MASC_OAS_BRIDGE_TIMEOUT_DEFAULT_SEC] — env var consulted in
+    step 4 of {!timeout_sec}'s lookup order. Exposed for tests
+    (#9629 / #10094) that need to twiddle it via [Unix.putenv]. *)
+
+val per_caller_env_var : caller:caller -> string
+(** [MASC_OAS_BRIDGE_TIMEOUT_<CALLER>_SEC] — env var consulted in
+    step 1 of {!timeout_sec}'s lookup order. Exposed for tests. *)
+
+val known_callers : unit -> caller list
+(** The typed-default caller table exposed for tests that want to
+    walk every caller (e.g. assert that the legacy alias map covers
+    them all). *)
+
+val global_default_sec : float
+(** Hardcoded final fallback (seconds) — also reused as the typed
+    default for compute-heavy callers ({!Auto_responder} /
+    {!Dashboard_provider_runs} / {!Governance_judge} /
+    {!Operator_judge}). Exposed so tests can pin the per-caller
+    table without hardcoding the literal. *)

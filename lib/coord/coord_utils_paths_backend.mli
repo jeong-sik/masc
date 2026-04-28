@@ -121,6 +121,12 @@ val key_of_path : config -> string -> string option
     cluster-root-rooted lookups explicit at the call site. *)
 val root_key_of_path : config -> string -> string option
 
+val strip_prefix : string -> string -> string
+(** [strip_prefix prefix s] removes the first [String.length prefix]
+    characters from [s] without verifying that they actually equal
+    [prefix] (callers must check separately). Returns [s] unchanged
+    when it is shorter than [prefix]. *)
+
 (** List directory entries either via [Sys.readdir] (when the
     backend supports a local dir mirror) or via [backend_list_keys]
     over the synthesized prefix. *)

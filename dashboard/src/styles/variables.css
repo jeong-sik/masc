@@ -254,11 +254,9 @@
      the tailwindcss palette so callers can grep both ways
      (e.g. "slate-400" → --slate-400 token or Tailwind class).
      Phase G entries slate-{400,500,800}, sky-400, blue-400 lifted to
-     source.ts in Iter 2c-1; rose-light lifted to source.ts in Iter 2c-3
-     (see source.ts §"Tailwind palette aliases"). The remaining two
-     (frost-100, white-pure) are queued for the next wave. */
-  --frost-100: #e2e8f0;
-  --white-pure: #ffffff;
+     source.ts in Iter 2c-1; rose-light lifted to source.ts in Iter 2c-3;
+     cyan/purple short names lifted in Iter 2c-4; frost-100/white-pure
+     lifted in Iter 2c-5 (this section now intentionally empty). */
 
   /* Surface bases — distinct from --bg-root (#0c1424) which is the
      primary panel background; these are deeper navy used for hero
@@ -312,8 +310,7 @@
   --cyan-12: rgba(34, 211, 238, 0.12);
   --cyan-16: rgba(34, 211, 238, 0.16);
   --text-slate: #b0bfd4;
-  --text-slate-light: #cbd5e1;
-  --text-near-white: #f8fafc;
+  /* --text-slate-light, --text-near-white lifted to source.ts (Iter 2c-5) */
   
   --ff-gold-8: rgba(200, 168, 78, 0.08);
   --ff-gold-10: rgba(200, 168, 78, 0.1);

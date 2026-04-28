@@ -333,6 +333,16 @@ export const raw: ReadonlyArray<TokenBase> = (() => {
   out.push(t("cyan",           "#22d3ee", "raw", "color", "Tailwind cyan-400 alias (kept short name)"));
   out.push(t("purple",         "#a78bfa", "raw", "color", "Tailwind purple-400 alias (kept short name)"));
 
+  // Iter 2c-5: neutral scale. The "frost-100, white-pure queued for the
+  // next wave" comment in variables.css (post-Iter 2c-1) explicitly
+  // anchored these. text-near-white and text-slate-light join because
+  // they map cleanly to Tailwind slate shades and have no companion
+  // alpha variants.
+  out.push(t("frost-100",       "#e2e8f0", "raw", "color", "Tailwind slate-200 alias (kept legacy frost name)"));
+  out.push(t("white-pure",      "#ffffff", "raw", "color", "Pure white #ffffff (canon constant, distinct from --text-strong tints)"));
+  out.push(t("text-near-white", "#f8fafc", "raw", "color", "Tailwind slate-50 alias"));
+  out.push(t("text-slate-light","#cbd5e1", "raw", "color", "Tailwind slate-300 alias"));
+
   return Object.freeze(out);
 })();
 

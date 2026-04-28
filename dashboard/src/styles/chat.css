@@ -34,34 +34,34 @@
   &.user {
     border-color: rgba(71, 184, 255, 0.28);
     background: var(--color-accent-soft);
-    color: #d8f0ff;
+    color: var(--chat-user-avatar);
   }
   &.assistant {
     border-color: rgba(167, 139, 250, 0.3);
     background: rgba(167, 139, 250, 0.18);
-    color: #efe6ff;
+    color: var(--chat-assistant-avatar);
   }
   &.error {
     border-color: rgba(239, 68, 68, 0.32);
     background: rgba(239, 68, 68, 0.18);
-    color: #ffe1e1;
+    color: var(--chat-error-avatar);
   }
 }
 
 @utility chat-role-chip {
   &.user {
     border-color: rgba(71, 184, 255, 0.32);
-    color: #c9ebff;
+    color: var(--chat-user-chip);
     background: var(--accent-14);
   }
   &.assistant {
     border-color: rgba(167, 139, 250, 0.32);
-    color: #ded0ff;
+    color: var(--chat-assistant-chip);
     background: rgba(167, 139, 250, 0.14);
   }
   &.error {
     border-color: rgba(239, 68, 68, 0.35);
-    color: #ffb4b4;
+    color: var(--chat-error-chip);
     background: rgba(239, 68, 68, 0.14);
   }
 }
@@ -76,7 +76,7 @@
     font-family: "Fira Code", monospace;
     font-size: var(--fs-xs);
     line-height: 1.55;
-    color: #95f3bc;
+    color: var(--chat-code-callout);
   }
 }
 

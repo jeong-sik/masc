@@ -71,7 +71,7 @@ let test_max_turns_override_source_accepts_raised_ceiling () =
 let test_compute_context_ratio_uses_resolved_cli_context_budget () =
   let base =
     match
-      Keeper_types.meta_of_json
+      Masc_test_deps.meta_of_json_fixture
         (`Assoc
           [
             ("name", `String "ctx-ratio-demo");

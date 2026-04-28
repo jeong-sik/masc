@@ -25,6 +25,36 @@ let init_keeper_tool_registry () =
     let _ = Masc_mcp.Mcp_server_eio.governance_defaults in
     ()
 
+(** Test fixture parser for [keeper_meta] JSON.
+
+    The production parser at [Masc_mcp.Keeper_types.meta_of_json] requires
+    explicit [sandbox_profile] / [network_mode] fields (see fail-loud change
+    in keeper_meta_json_parse.ml). Test fixtures historically built minimal
+    [`Assoc] payloads that omitted those fields and depended on the silent
+    Local fallback. Rather than thread two new fields through every fixture,
+    this helper auto-fills the sandbox policy fields with conservative
+    defaults (Local / Inherit) when absent, then delegates to the strict
+    production parser.
+
+    Production code MUST NOT use this helper — the strict parser exists to
+    catch missing fields at the boundary. *)
+let meta_of_json_fixture (json : Yojson.Safe.t) =
+  let augment fields =
+    let has key = List.exists (fun (k, _) -> String.equal k key) fields in
+    let add_if_missing key v fs =
+      if has key then fs else fs @ [ (key, v) ]
+    in
+    fields
+    |> add_if_missing "sandbox_profile" (`String "local")
+    |> add_if_missing "network_mode"    (`String "inherit")
+  in
+  let json' =
+    match json with
+    | `Assoc fields -> `Assoc (augment fields)
+    | other -> other
+  in
+  Masc_mcp.Keeper_types.meta_of_json json'
+
 (** Walk up the directory tree from [Sys.getcwd()] until
     [config/tool_policy.toml] is found, then return that directory.
     Raises [Failure] with a descriptive message if the marker file

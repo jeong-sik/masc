@@ -97,7 +97,7 @@ let init_keeper_bridge () =
 
 let make_meta ?(name = "keeper-tool-matrix") () =
   match
-    Masc_mcp.Keeper_types.meta_of_json
+    Masc_test_deps.meta_of_json_fixture
       (`Assoc
         [
           ("name", `String name);

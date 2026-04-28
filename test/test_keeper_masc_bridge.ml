@@ -71,7 +71,7 @@ let make_meta ?(name = "keeper-bridge-test") ?tool_access ?(tool_denylist = [])
         Masc_mcp.Keeper_types.Preset
           { preset = Masc_mcp.Keeper_types.Full; also_allow = [] }
   in
-  match Masc_mcp.Keeper_types.meta_of_json
+  match Masc_test_deps.meta_of_json_fixture
     (`Assoc
       [
         ("name", `String name);
@@ -90,7 +90,7 @@ let make_meta ?(name = "keeper-bridge-test") ?tool_access ?(tool_denylist = [])
 
 let allowed_names_of_json json =
   prime_keeper_bridge ();
-  match Masc_mcp.Keeper_types.meta_of_json json with
+  match Masc_test_deps.meta_of_json_fixture json with
   | Ok meta -> KET.keeper_allowed_tool_names meta
   | Error e -> failwith e
 
@@ -397,7 +397,7 @@ let test_read_meta_file_scrubs_missing_tool_access_default () =
             (Yojson.Safe.Util.member "tool_access" scrubbed <> `Null))
 
 let test_meta_of_json_rejects_legacy_tool_policy_keys () =
-  match Masc_mcp.Keeper_types.meta_of_json
+  match Masc_test_deps.meta_of_json_fixture
     (`Assoc
       [
         ("name", `String "compat-preset");
@@ -415,7 +415,7 @@ let test_meta_of_json_rejects_legacy_tool_policy_keys () =
 
 let test_tool_access_preset_empty_json_preserved () =
   let meta =
-    match Masc_mcp.Keeper_types.meta_of_json
+    match Masc_test_deps.meta_of_json_fixture
       (`Assoc
         [
           ("name", `String "preset-json");
@@ -441,7 +441,7 @@ let test_tool_access_preset_empty_json_preserved () =
 
 let test_tool_access_custom_empty_json_preserved () =
   let meta =
-    match Masc_mcp.Keeper_types.meta_of_json
+    match Masc_test_deps.meta_of_json_fixture
       (`Assoc
         [
           ("name", `String "custom-json");
@@ -464,7 +464,7 @@ let test_tool_access_custom_empty_json_preserved () =
   | _ -> Alcotest.fail "expected Custom []"
 
 let test_tool_access_invalid_kind_rejected () =
-  match Masc_mcp.Keeper_types.meta_of_json
+  match Masc_test_deps.meta_of_json_fixture
     (`Assoc
       [
         ("name", `String "invalid-kind");
@@ -481,7 +481,7 @@ let test_tool_access_invalid_kind_rejected () =
         e
 
 let test_tool_access_missing_kind_rejected () =
-  match Masc_mcp.Keeper_types.meta_of_json
+  match Masc_test_deps.meta_of_json_fixture
     (`Assoc
       [
         ("name", `String "missing-kind");
@@ -498,7 +498,7 @@ let test_tool_access_missing_kind_rejected () =
         e
 
 let test_tool_access_missing_preset_rejected () =
-  match Masc_mcp.Keeper_types.meta_of_json
+  match Masc_test_deps.meta_of_json_fixture
     (`Assoc
       [
         ("name", `String "missing-preset");
@@ -515,7 +515,7 @@ let test_tool_access_missing_preset_rejected () =
         e
 
 let test_tool_access_invalid_preset_rejected () =
-  match Masc_mcp.Keeper_types.meta_of_json
+  match Masc_test_deps.meta_of_json_fixture
     (`Assoc
       [
         ("name", `String "invalid-preset");
@@ -537,7 +537,7 @@ let test_tool_access_invalid_preset_rejected () =
         e
 
 let test_tool_access_missing_tools_rejected () =
-  match Masc_mcp.Keeper_types.meta_of_json
+  match Masc_test_deps.meta_of_json_fixture
     (`Assoc
       [
         ("name", `String "missing-tools");
@@ -554,7 +554,7 @@ let test_tool_access_missing_tools_rejected () =
         e
 
 let test_tool_access_invalid_tool_member_rejected () =
-  match Masc_mcp.Keeper_types.meta_of_json
+  match Masc_test_deps.meta_of_json_fixture
     (`Assoc
       [
         ("name", `String "invalid-tool-member");

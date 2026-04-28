@@ -18,7 +18,7 @@ let make_meta () =
     ("agent_name", `String "eval-keeper");
     ("trace_id", `String "trace-eval");
   ] in
-  match Keeper_types.meta_of_json json with
+  match Masc_test_deps.meta_of_json_fixture json with
   | Ok meta -> meta
   | Error e -> failwith ("make_meta: " ^ e)
 

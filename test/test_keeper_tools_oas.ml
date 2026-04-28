@@ -19,7 +19,7 @@ let make_test_meta ?(name = "test-keeper") ?(preset = Keeper_types.Full)
     | Some access -> access
     | None -> Keeper_types.Preset { preset; also_allow }
   in
-  match Keeper_types.meta_of_json
+  match Masc_test_deps.meta_of_json_fixture
     (`Assoc [("name", `String name); ("agent_name", `String name);
              ("trace_id", `String "test-trace-001");
              ("allowed_paths", `List [`String "*"]);
@@ -353,7 +353,7 @@ let make_research_meta ?tool_access ()
     | Some access -> access
     | None -> Keeper_types.Preset { preset = Keeper_types.Research; also_allow = [] }
   in
-  match Keeper_types.meta_of_json
+  match Masc_test_deps.meta_of_json_fixture
     (`Assoc [("name", `String "test-researcher");
              ("agent_name", `String "test-researcher");
              ("trace_id", `String "test-trace-research");
@@ -392,7 +392,7 @@ let test_research_model_tools_include_autoresearch () =
   check bool "model tools have cycle" true has_cycle
 
 let make_learned_meta () : Keeper_types.keeper_meta =
-  match Keeper_types.meta_of_json
+  match Masc_test_deps.meta_of_json_fixture
     (`Assoc [("name", `String "test-learned");
              ("agent_name", `String "test-learned");
              ("trace_id", `String "test-trace-learned");

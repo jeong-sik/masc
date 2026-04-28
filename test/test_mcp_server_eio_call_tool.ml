@@ -45,7 +45,7 @@ let make_keeper_meta ?agent_name ?current_task_id ?(goal_ids = []) name =
              `List (List.map (fun goal_id -> `String goal_id) goal_ids) );
          ])
   in
-  match Masc_mcp.Keeper_types.meta_of_json (`Assoc fields) with
+  match Masc_test_deps.meta_of_json_fixture (`Assoc fields) with
   | Ok meta -> meta
   | Error err -> fail ("make_keeper_meta failed: " ^ err)
 

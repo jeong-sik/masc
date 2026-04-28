@@ -233,7 +233,7 @@ let test_keeper_meta_deliberation_fields_roundtrip () =
         ("last_triage_triggers", `String "direct_mention");
       ]
   in
-  match Keeper_types.meta_of_json json with
+  match Masc_test_deps.meta_of_json_fixture json with
   | Error err -> fail ("meta parse failed: " ^ err)
   | Ok meta ->
       check string "name preserved" "test-keeper" meta.name
@@ -247,7 +247,7 @@ let test_keeper_meta_deliberation_fields_default () =
         ("goal", `String "test defaults");
       ]
   in
-  match Keeper_types.meta_of_json json with
+  match Masc_test_deps.meta_of_json_fixture json with
   | Error err -> fail ("meta parse failed: " ^ err)
   | Ok meta ->
       check string "name preserved" "test-keeper-2" meta.name
@@ -832,7 +832,7 @@ let test_prompt_always_includes_multi_step () =
 let test_removed_initiative_field_rejected () =
   let json_str = {|{"name":"test","initiative_enabled":true,"trace_id":"t1","goal":"g","cascade_name":"local","proactive_enabled":true,"proactive_idle_sec":300,"proactive_cooldown_sec":60}|} in
   let json = Yojson.Safe.from_string json_str in
-  match Keeper_types.meta_of_json json with
+  match Masc_test_deps.meta_of_json_fixture json with
   | Ok _ -> fail "initiative_enabled should be rejected"
   | Error e ->
       check bool "removed initiative field mentioned" true
@@ -841,7 +841,7 @@ let test_removed_initiative_field_rejected () =
 let test_removed_persona_profile_path_rejected () =
   let json_str = {|{"name":"test","persona_profile_path":"config/personas/test/profile.json","trace_id":"t2","goal":"g","cascade_name":"local","proactive_enabled":true,"proactive_idle_sec":300,"proactive_cooldown_sec":60}|} in
   let json = Yojson.Safe.from_string json_str in
-  match Keeper_types.meta_of_json json with
+  match Masc_test_deps.meta_of_json_fixture json with
   | Ok _ -> fail "persona_profile_path should be rejected"
   | Error e ->
       check bool "removed persona field mentioned" true

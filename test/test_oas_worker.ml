@@ -2859,7 +2859,7 @@ let test_oas_worker_exec_run_exit_condition_result_returns_partial_success () =
 let make_keeper_meta ?(name = "keeper-checkpoint-test")
     ?(trace_id = "trace-keeper-checkpoint") () =
   match
-    Keeper_types.meta_of_json
+    Masc_test_deps.meta_of_json_fixture
       (`Assoc
         [
           ("name", `String name);

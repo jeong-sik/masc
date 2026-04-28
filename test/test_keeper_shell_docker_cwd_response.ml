@@ -50,7 +50,7 @@ let make_docker_meta ~name : Keeper_types.keeper_meta =
             (Keeper_types.sandbox_profile_to_string Keeper_types.Docker) );
       ]
   in
-  match Keeper_types.meta_of_json json with
+  match Masc_test_deps.meta_of_json_fixture json with
   | Ok meta -> meta
   | Error e -> Alcotest.fail e
 

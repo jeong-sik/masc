@@ -44,7 +44,7 @@ let cleanup_dir dir =
 
 let make_meta ~name =
   match
-    Keeper_types.meta_of_json
+    Masc_test_deps.meta_of_json_fixture
       (`Assoc
         [
           ("name", `String name);

@@ -202,7 +202,7 @@ let make_meta name : Masc_mcp.Keeper_types.keeper_meta =
     ("trace_id", `String ("test-trace-" ^ name));
     ("goal", `String "test goal");
   ] in
-  match Masc_mcp.Keeper_types.meta_of_json json with
+  match Masc_test_deps.meta_of_json_fixture json with
   | Ok m -> m
   | Error e -> failwith ("meta_of_json failed: " ^ e)
 
@@ -2234,7 +2234,7 @@ let test_meta_migration_does_not_infer_visible_proactive_fields () =
         ("last_proactive_ts", `Float 1234.0);
       ]
   in
-  match Masc_mcp.Keeper_types.meta_of_json legacy_json with
+  match Masc_test_deps.meta_of_json_fixture legacy_json with
   | Error e -> fail ("legacy meta_of_json failed: " ^ e)
   | Ok meta ->
       check int "legacy visible count stays unknown->0" 0

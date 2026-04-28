@@ -448,7 +448,7 @@ let test_dashboard_mission_keeper_brief_registry_lookup_scoped_to_base_path () =
   let keeper_name = "shared-dashboard-keeper" in
   let make_meta ~also_allow name =
     match
-      Lib.Keeper_types.meta_of_json
+      Masc_test_deps.meta_of_json_fixture
         (`Assoc
           [
             ("name", `String name);

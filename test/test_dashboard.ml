@@ -139,7 +139,7 @@ let test_worktrees_section_empty () =
 
 let make_test_meta name =
   match
-    Lib.Keeper_types.meta_of_json
+    Masc_test_deps.meta_of_json_fixture
       (`Assoc
         [
           ("name", `String name);

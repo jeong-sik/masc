@@ -31,7 +31,7 @@ let with_room f =
 
 let make_keeper_meta ~name ~goal_id =
   match
-    Keeper_types.meta_of_json
+    Masc_test_deps.meta_of_json_fixture
       (`Assoc
         [
           ("name", `String name);

@@ -471,7 +471,7 @@ let test_diff_in_policy_deny () =
 (* ================================================================ *)
 
 let make_gate_test_meta ?(name = "test-gate") () : Keeper_types.keeper_meta =
-  match Keeper_types.meta_of_json
+  match Masc_test_deps.meta_of_json_fixture
     (`Assoc [("name", `String name); ("agent_name", `String name);
              ("trace_id", `String "test-trace-gate")]) with
   | Ok meta -> meta

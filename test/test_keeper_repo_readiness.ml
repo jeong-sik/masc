@@ -16,7 +16,7 @@ let make_meta ?(sandbox = Keeper_types.Docker) name =
           `String (Keeper_types.sandbox_profile_to_string sandbox) );
       ]
   in
-  match Keeper_types.meta_of_json json with
+  match Masc_test_deps.meta_of_json_fixture json with
   | Ok meta -> meta
   | Error err -> fail ("meta_of_json failed: " ^ err)
 

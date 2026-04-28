@@ -37,7 +37,7 @@ let with_env key value f =
 
 let keeper_meta name =
   match
-    Masc_mcp.Keeper_types.meta_of_json
+    Masc_test_deps.meta_of_json_fixture
       (`Assoc
         [
           ("name", `String name);

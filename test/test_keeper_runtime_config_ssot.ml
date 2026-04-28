@@ -120,7 +120,7 @@ instructions = "TOML instructions"
   let config = Coord.default_config room_dir in
   let initial_meta =
     match
-      Keeper_types.meta_of_json
+      Masc_test_deps.meta_of_json_fixture
         (`Assoc
           [
             ("name", `String keeper_name);
@@ -172,7 +172,7 @@ policy_voice_enabled = false
   let config = Coord.default_config room_dir in
   let initial_meta =
     match
-      Keeper_types.meta_of_json
+      Masc_test_deps.meta_of_json_fixture
         (`Assoc
           [
             ("name", `String keeper_name);
@@ -210,7 +210,7 @@ shared_memory_scope = "room"
   let config = Coord.default_config room_dir in
   let initial_meta =
     match
-      Keeper_types.meta_of_json
+      Masc_test_deps.meta_of_json_fixture
         (`Assoc
           [
             ("name", `String keeper_name);
@@ -316,7 +316,7 @@ tool_also_allow = ["keeper_bash", "keeper_shell"]
   let config = Coord.default_config room_dir in
   let initial_meta =
     match
-      Keeper_types.meta_of_json
+      Masc_test_deps.meta_of_json_fixture
         (`Assoc
           [
             ("name", `String keeper_name);
@@ -380,7 +380,7 @@ tool_preset = "social"
   let config = Coord.default_config room_dir in
   let initial_meta =
     match
-      Keeper_types.meta_of_json
+      Masc_test_deps.meta_of_json_fixture
         (`Assoc
           [
             ("name", `String keeper_name);
@@ -456,7 +456,7 @@ persona_name = "%s"
   let config = Coord.default_config room_dir in
   let initial_meta =
     match
-      Keeper_types.meta_of_json
+      Masc_test_deps.meta_of_json_fixture
         (`Assoc
           [
             ("name", `String keeper_name);
@@ -515,7 +515,7 @@ allowed_paths = []
   let config = Coord.default_config room_dir in
   let initial_meta =
     match
-      Keeper_types.meta_of_json
+      Masc_test_deps.meta_of_json_fixture
         (`Assoc
           [
             ("name", `String keeper_name);
@@ -567,7 +567,7 @@ persona_name = "%s"
   let config = Coord.default_config room_dir in
   let initial_meta =
     match
-      Keeper_types.meta_of_json
+      Masc_test_deps.meta_of_json_fixture
         (`Assoc
           [
             ("name", `String keeper_name);
@@ -605,7 +605,7 @@ allowed_paths = ["workspace/example/project"]
   let config = Coord.default_config room_dir in
   let initial_meta =
     match
-      Keeper_types.meta_of_json
+      Masc_test_deps.meta_of_json_fixture
         (`Assoc
           [
             ("name", `String keeper_name);
@@ -685,7 +685,7 @@ tool_preset = "delivery"
   let config = Coord.default_config room_dir in
   let initial_meta =
     match
-      Keeper_types.meta_of_json
+      Masc_test_deps.meta_of_json_fixture
         (`Assoc
           [
             ("name", `String keeper_name);
@@ -754,7 +754,7 @@ per_provider_timeout = 0
   let config = Coord.default_config room_dir in
   let initial_meta =
     match
-      Keeper_types.meta_of_json
+      Masc_test_deps.meta_of_json_fixture
         (`Assoc
           [
             ("name", `String keeper_name);
@@ -806,7 +806,7 @@ persona_name = "%s"
   let config = Coord.default_config room_dir in
   let initial_meta =
     match
-      Keeper_types.meta_of_json
+      Masc_test_deps.meta_of_json_fixture
         (`Assoc
           [
             ("name", `String keeper_name);
@@ -827,7 +827,7 @@ persona_name = "%s"
 
 let test_meta_of_json_invalid_per_provider_timeout_is_ignored () =
   match
-    Keeper_types.meta_of_json
+    Masc_test_deps.meta_of_json_fixture
       (`Assoc
         [
           ("name", `String "meta-timeout-invalid-test");
@@ -861,7 +861,7 @@ goal = "minimal TOML"
   let config = Coord.default_config room_dir in
   let initial_meta =
     match
-      Keeper_types.meta_of_json
+      Masc_test_deps.meta_of_json_fixture
         (`Assoc
           [
             ("name", `String keeper_name);
@@ -908,7 +908,7 @@ work_discovery_guidance = "TOML guidance"
   let config = Coord.default_config room_dir in
   let initial_meta =
     match
-      Keeper_types.meta_of_json
+      Masc_test_deps.meta_of_json_fixture
         (`Assoc
           [
             ("name", `String keeper_name);
@@ -954,7 +954,7 @@ tool_preset = "social"
   let config = Coord.default_config room_dir in
   let initial_meta =
     match
-      Keeper_types.meta_of_json
+      Masc_test_deps.meta_of_json_fixture
         (`Assoc
           [
             ("name", `String keeper_name);
@@ -994,7 +994,7 @@ social_model = "magentic_ledger_v1"
   let config = Coord.default_config room_dir in
   let initial_meta =
     match
-      Keeper_types.meta_of_json
+      Masc_test_deps.meta_of_json_fixture
         (`Assoc
           [
             ("name", `String keeper_name);
@@ -1035,7 +1035,7 @@ cascade_name = "missing_profile"
   let config = Coord.default_config room_dir in
   let initial_meta =
     match
-      Keeper_types.meta_of_json
+      Masc_test_deps.meta_of_json_fixture
         (`Assoc
           [
             ("name", `String keeper_name);
@@ -1070,7 +1070,7 @@ let test_room_presence_syncs_capabilities () =
   let _ = Coord.init config ~agent_name:None in
   let initial_meta =
     match
-      Keeper_types.meta_of_json
+      Masc_test_deps.meta_of_json_fixture
         (`Assoc
           [
             ("name", `String keeper_name);

@@ -26,7 +26,7 @@ let make_meta name : Keeper_types.keeper_meta =
     ("trace_id", `String ("test-trace-" ^ name));
     ("goal", `String "test goal");
   ] in
-  match Keeper_types.meta_of_json json with
+  match Masc_test_deps.meta_of_json_fixture json with
   | Ok m -> m
   | Error e -> failwith ("meta_of_json failed: " ^ e)
 

@@ -79,7 +79,7 @@ let make_keeper_meta ?agent_name ?tool_access name =
        ]
        @ tool_access_fields)
   in
-  match Keeper_types.meta_of_json json with
+  match Masc_test_deps.meta_of_json_fixture json with
   | Ok meta -> meta
   | Error err -> Alcotest.fail ("make_keeper_meta failed: " ^ err)
 

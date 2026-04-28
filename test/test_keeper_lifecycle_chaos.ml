@@ -25,7 +25,7 @@ let make_meta name =
       ; ("goal", `String "chaos test goal")
       ]
   in
-  match Keeper_types.meta_of_json json with
+  match Masc_test_deps.meta_of_json_fixture json with
   | Ok meta -> meta
   | Error err -> Alcotest.fail ("make_meta failed: " ^ err)
 

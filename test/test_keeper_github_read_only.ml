@@ -141,7 +141,7 @@ let make_meta ?current_task_id ?(sandbox_profile = Keeper_types.Local) () =
     | None -> base_fields
     | Some task_id -> ("current_task_id", `String task_id) :: base_fields
   in
-  match Keeper_types.meta_of_json (`Assoc fields) with
+  match Masc_test_deps.meta_of_json_fixture (`Assoc fields) with
   | Ok meta -> meta
   | Error err -> Alcotest.fail err
 

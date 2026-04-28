@@ -466,6 +466,7 @@
    keeper_alerting_path
    keeper_sandbox_containment
    keeper_sandbox_runtime
+   keeper_sandbox_factory
    keeper_turn_sandbox_runtime
    keeper_docker_read
    keeper_timing

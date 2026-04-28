@@ -26,8 +26,6 @@ Use this before any real work:
 4. `masc_plan_set_task` after `masc_transition(action=claim)`
 5. `masc_heartbeat`
 
-`masc_set_room` remains callable as a compatibility alias, but it only selects project scope and should not be treated as the primary onboarding path.
-
 ### 2. Keeper runtime
 
 Use this when long-running autonomous execution is needed:

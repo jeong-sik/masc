@@ -17,8 +17,8 @@
 
 ## Rules
 
-- Treat `masc_set_room` as a compatibility alias only; prefer `masc_start` for onboarding.
+- Use `masc_start` for onboarding; it is the canonical entry point.
 - Treat `Social Board`, `TRPG`, and `RISC` as secondary surfaces unless the task explicitly needs them.
-- Team-session, operator, and command-plane compatibility surfaces are retired from the supported front door.
+- Team-session and command-plane compatibility surfaces are retired. The operator surface (`/mcp/operator`) is in supporting status — see README for current surface map.
 
 See `llms-full.txt` for the expanded contract.

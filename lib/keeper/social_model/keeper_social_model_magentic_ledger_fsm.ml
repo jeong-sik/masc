@@ -1,3 +1,52 @@
+(* Spec navigation (OCaml -> TLA+) — plan §19 anchor pattern.
+   Authoritative spec mirror is
+   specs/keeper-state-machine/KeeperSocialModelMagenticLedger.tla.
+
+   Spec line 4-5 already cites this module:
+     "Mirrors: lib/keeper/social_model/keeper_social_model_magentic_ledger_fsm.ml".
+   This block is the reverse-direction citation so code search for
+   "KeeperSocialModelMagenticLedger" lands here.
+
+   FSM mapping (TLA+ -> OCaml):
+     phase set {Advancing, Reactive, Stalled, Quiet}
+                          -> type phase below (matches verbatim).
+     event set {Progress_observed, Signals_pending,
+                Goal_idle_timeout, All_quiet, Failure_observed}
+                          -> type event below (matches verbatim).
+     ClassifyEvent action -> classify_event helper in this module.
+     Failure_observed     -> NOT produced by classify_event in OCaml.
+                             See drift note below.
+
+   Known topology drift (spec line 13-32, issue #8949):
+     The spec routes the failure signal through ClassifyEvent
+     (where "failure dominates progress").  The OCaml impl splits
+     this into two call paths:
+
+       1. Normal path: classify_event (no failure parameter)
+          handles progress / signals / idle / quiet.
+       2. Failure path: derive_failure_state in
+          keeper_social_model_magentic_ledger_v1.ml line ~202
+          constructs the Failure_observed event directly and
+          bypasses classify_event.
+
+     Both topologies reach Stalled on failure, so end-state
+     behaviour matches.  However, the spec's "failure dominates
+     progress" property is trivially satisfied in OCaml because
+     failure never reaches the dominance branch.
+
+     A future change that adds has_failure to the OCaml input
+     record without re-checking dominance ordering would
+     re-introduce the question with the OPPOSITE answer (OCaml's
+     progress-first ordering would override failure).
+
+     See issue #8949 for proposed alignment options (preferred:
+     re-shape spec to mirror OCaml's two-path topology).
+
+   Classification (plan §1 4-way): this is Drift, acknowledged.
+   The spec and OCaml agree on end states but disagree on the
+   internal route taken.  Until #8949 is resolved one way or the
+   other, this comment is the authoritative drift record. *)
+
 module Types = Keeper_social_model_types
 
 type phase =

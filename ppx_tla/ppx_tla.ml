@@ -252,16 +252,29 @@ let parse_guard_expression ~loc s =
       "[@@fsm_guard]: payload is not a valid OCaml boolean expression: %S"
       s
 
-let rec inject_into_body assert_expr expr =
+(* OCaml 5.4 / ppxlib 0.37 unified function representation:
+   [Pexp_function (params, constraint_, body)] where [body] is either
+   [Pfunction_body expr] (right-hand expression of [let f x y = expr])
+   or [Pfunction_cases cases] (pattern-matching [function]).
+
+   For [Pfunction_body], inject the assert at the head of [expr] so the
+   guard fires per application of the innermost lambda — partial
+   applications do not trigger.
+
+   For [Pfunction_cases] and non-function expressions, sequence the
+   assert before the expression itself; the timing differs (per
+   binding-creation rather than per call) but no equivalent injection
+   point is portable across the unified representation. *)
+let inject_into_body assert_expr expr =
   match expr.pexp_desc with
-  | Pexp_fun (label, default, pat, body) ->
-      let new_body = inject_into_body assert_expr body in
-      { expr with pexp_desc = Pexp_fun (label, default, pat, new_body) }
-  | Pexp_function _ ->
-      (* OCaml 5.4 pexp_function with parameter list — wrap whole expr
-         since unwrapping the parameter list is non-portable. The runtime
-         semantics are the same as for non-function bindings. *)
-      Ast_builder.Default.pexp_sequence ~loc:expr.pexp_loc assert_expr expr
+  | Pexp_function (params, constraint_, Pfunction_body body) ->
+      let new_body =
+        Ast_builder.Default.pexp_sequence ~loc:body.pexp_loc
+          assert_expr body
+      in
+      { expr with
+        pexp_desc =
+          Pexp_function (params, constraint_, Pfunction_body new_body); }
   | _ ->
       Ast_builder.Default.pexp_sequence ~loc:expr.pexp_loc assert_expr expr
 

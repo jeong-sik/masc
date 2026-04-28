@@ -35,6 +35,16 @@ let resolve_env env_bindings =
 
 (* --- simple command execution --- *)
 
+(* Dispatch a simple command via the IR-carried Sandbox_target runner.
+
+   Prior to PR-2 (2026-04-28 root-fix family 3/3) this function called
+   [Process_eio.run_argv_with_status_split] directly, which short-
+   circuited every command to a host fork/exec regardless of the
+   keeper's [sandbox_profile]. The runner closure on the Shell_ir node
+   now carries the sandbox decision: the host case forwards to the
+   same Process_eio call (no behavior change for non-keeper callers),
+   the Docker case is wired up by [lib/keeper] using a closure over
+   [Keeper_turn_sandbox_runtime]. *)
 let dispatch_simple (s : Shell_ir.simple) =
   let bin = Bin.to_string s.bin in
   let argv = bin :: List.map resolve_arg s.args in
@@ -44,8 +54,7 @@ let dispatch_simple (s : Shell_ir.simple) =
     | None -> None
     | Some scope -> Some (Path_scope.raw scope)
   in
-  match Process_eio.run_argv_with_status_split ~timeout_sec:120.0
-          ~env ?cwd argv with
+  match s.sandbox.runner ~argv ~env ~cwd ~timeout_sec:120.0 with
   | exception exn ->
       { status = Unix.WEXITED 1;
         stdout = "";

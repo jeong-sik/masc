@@ -17,7 +17,14 @@ let raw_to_simple (bin_str, args_str) : (Shell_ir.simple, Parsed.parse_error) re
     Error { Parsed.pos = Lexing.dummy_pos; token = bin_str; expected = [] }
   | Ok bin ->
     let args = List.map (fun s -> Shell_ir.Lit s) args_str in
-    Ok { Shell_ir.bin; args; env = []; cwd = None; redirects = [] }
+    Ok
+      { Shell_ir.bin
+      ; args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }
 
 let rec map_stages = function
   | [] -> Ok []

@@ -101,7 +101,14 @@ let simple_of_argv ?env ?cwd (argv : string list) =
           (fun dir -> Path_scope.classify ~raw:dir ~cwd:dir)
           cwd
       in
-      Ok { Shell_ir.bin; args; env; cwd; redirects = [] })
+      Ok
+        { Shell_ir.bin
+        ; args
+        ; env
+        ; cwd
+        ; redirects = []
+        ; sandbox = Sandbox_target.host ()
+        })
 
 let verdict_to_string = function
   | Verdict.Allow _ -> "allow"

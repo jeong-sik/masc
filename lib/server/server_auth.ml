@@ -183,7 +183,9 @@ let verify_mcp_auth ~base_path request =
                 (* Fail-closed: dead branch today (resolver:154-157 returns
                    [Ok (Some _)] or [Error] for [Some token]) but kept
                    explicit so a future [Anonymous] case cannot silently
-                   rewrite to "dashboard". Spec: AuthIdentityFSM.tla I2. *)
+                   rewrite to "dashboard". Spec:
+                   [specs/auth/AuthIdentityFSM.tla] invariant
+                   [NoSilentRewrite] (I2). *)
                 Error
                   "Authentication required. Bearer token did not resolve to \
                    any agent."

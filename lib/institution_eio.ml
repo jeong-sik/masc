@@ -123,9 +123,38 @@ let create_institution ~name ~mission () : institution =
 (** {1 Serialization (Helpers)} *)
 
 let outcome_to_string = function `Success -> "success" | `Failure -> "failure" | `Partial -> "partial"
-let outcome_of_string = function "success" -> `Success | "failure" -> `Failure | _ -> `Partial
+
+(* Fail-closed: unknown outcome string surfaces a [Type_error] so a
+   garbage / future-variant payload is rejected at the parse boundary
+   rather than silently coerced to [`Partial].  Callers ([episode_of_json],
+   [load_recent_episodes_jsonl], [load_institution]) already absorb
+   [Yojson.Safe.Util.Type_error] — corrupted entries drop with a warn
+   instead of being treated as healthy [`Partial] data.  Matches the
+   "Unknown -> Permissive Default" anti-pattern flagged across the repo
+   ([agent_status_of_string_r] #10748, fail-closed sweep #11256). *)
+let outcome_of_string = function
+  | "success" -> `Success
+  | "failure" -> `Failure
+  | "partial" -> `Partial
+  | other ->
+      raise
+        (Yojson.Safe.Util.Type_error
+           (Printf.sprintf "unknown institution outcome: %S" other, `String other))
+
 let mentor_to_string = function `Random -> "random" | `Best_fit -> "best_fit" | `Round_robin -> "round_robin"
-let mentor_of_string = function "random" -> `Random | "best_fit" -> `Best_fit | "round_robin" -> `Round_robin | _ -> `Best_fit
+
+(* Fail-closed: see [outcome_of_string] above.  Unknown mentor assignment
+   used to silently collapse to [`Best_fit], merging typo / garbage /
+   future-variant inputs into a single bucket and erasing the diagnostic
+   trail. *)
+let mentor_of_string = function
+  | "random" -> `Random
+  | "best_fit" -> `Best_fit
+  | "round_robin" -> `Round_robin
+  | other ->
+      raise
+        (Yojson.Safe.Util.Type_error
+           (Printf.sprintf "unknown mentor assignment: %S" other, `String other))
 
 (** JSON number → float (handles both JSON Int and Float) *)
 let json_to_float = function

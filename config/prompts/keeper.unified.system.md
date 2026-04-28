@@ -41,6 +41,15 @@ Your shell starts at the sandbox root, which is **not** a git repository.
 - Common error: a tool returns `not a git repository` or `path_outside_sandbox`. That is the sandbox root rejecting a git/gh call. Re-issue the call with the repo path in `cwd`.
 - Do not invent host paths like `/Users/...` or `/workspace/`; relative paths under the sandbox root are the only valid form.
 
+### What the `cwd` field in tool responses means
+
+Tool responses include a `cwd` field that reflects where the command actually ran. The exact path you see depends on your sandbox backend:
+
+- **Docker keepers** (sandbox_profile=docker, or Local-meta inside an enabled docker playground): `cwd` is the in-container path, e.g. `/home/keeper/playground/<your-name>/repos/<REPO>`. This is where commands actually executed inside your container. Pass that path back as a `cwd` argument on the next turn — relative form (`repos/<REPO>`) also works because the tool resolves both.
+- **Local keepers** (sandbox_profile=local, no docker upgrade): `cwd` is a host abs path under the operator's filesystem, e.g. `/Users/.../.masc/playground/<your-name>/repos/<REPO>`. This is the only form the tool accepts here.
+
+Older turns in your context may show host paths (`/Users/...`) for what is now a Docker-effective keeper — that history is stale. Ignore the absolute form and re-issue using the relative path (`repos/<REPO>`); the response from the next call will surface the correct in-container `cwd`.
+
 ## Behavior
 
 You have tools. Prefer tool calls over text-only responses.

@@ -308,10 +308,9 @@
   --fs-lg: var(--font-size-lg);
 
   /* Extended palette */
-  --cyan: #22d3ee;
+  /* --cyan, --purple base hex lifted to source.ts (Iter 2c-4); alpha companions retained */
   --cyan-12: rgba(34, 211, 238, 0.12);
   --cyan-16: rgba(34, 211, 238, 0.16);
-  --purple: #a78bfa;
   --text-slate: #b0bfd4;
   --text-slate-light: #cbd5e1;
   --text-near-white: #f8fafc;

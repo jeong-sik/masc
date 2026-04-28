@@ -167,6 +167,8 @@
   --rose: #f43f5e;  /* Tailwind rose-500 alias */
   --rose-fg: #fecdd3;  /* Tailwind rose-200 alias */
   --rose-light: #fb7185;  /* Tailwind rose-400 alias */
+  --cyan: #22d3ee;  /* Tailwind cyan-400 alias (kept short name) */
+  --purple: #a78bfa;  /* Tailwind purple-400 alias (kept short name) */
 }
 
 :root {

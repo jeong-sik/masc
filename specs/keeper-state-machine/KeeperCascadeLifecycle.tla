@@ -6,15 +6,17 @@
 \* than provider-level routing: the runtime persists only the keeper-facing
 \* turn projection, not the full candidate/provider attempt graph.
 \*
-\* Authoritative write points (lib/keeper/keeper_registry.ml):
-\*   - mark_turn_started                       line 386
-\*   - mark_turn_measurement                   line 404
-\*   - set_turn_decision_stage                 line 420
-\*   - set_turn_cascade_state                  line 424
-\*   - set_turn_selected_model                 line 437
-\*   - prepare_turn_retry_after_compaction     line 441
-\*   - mark_turn_gate_rejected_by_name         line 452
-\*   - mark_turn_finished                      line 472
+\* Authoritative write points (lib/keeper/keeper_registry.ml).
+\* Function names are stable identifiers; lines drift across edits.
+\* Verified against main as of 2026-04-28 (see #11641 sibling refresh).
+\*   - mark_turn_started                       line 493
+\*   - mark_turn_measurement                   line 515
+\*   - set_turn_decision_stage                 line 535
+\*   - set_turn_cascade_state                  line 544
+\*   - set_turn_selected_model                 line 566
+\*   - prepare_turn_retry_after_compaction     line 575
+\*   - mark_turn_gate_rejected_by_name         line 590
+\*   - mark_turn_finished                      line 614
 \*
 \* OCaml ↔ TLA+ mapping (see #8642 family):
 \*

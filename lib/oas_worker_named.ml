@@ -265,10 +265,15 @@ let filter_candidate_providers_for_tool_support
       let signature = signature_of_rejected_providers rejected in
       if cascade_empty_should_emit_first ~label ~signature then
         Log.Misc.error
-          "[#11060] cascade %s: provider-normalized tool-use gate removed all \
-           providers (rejections=[%s]) — operator action: add a fallback \
-           provider (e.g. gemini_cli, claude_cli) to this cascade in \
-           cascade.toml, or detach the keeper from this cascade. Subsequent \
+          "[#11060/#11356] cascade %s: provider-normalized tool-use gate \
+           removed all providers (rejections=[%s]) — operator action: add a \
+           runtime-MCP-capable fallback provider to this cascade in \
+           cascade.toml. Verified-capable providers: claude_code, kimi_cli, \
+           anthropic, glm, openrouter (any non-cli direct API). Note: \
+           gemini_cli and codex_cli reject request-scoped runtime MCP HTTP \
+           headers (gemini-cli upstream lacks --mcp-config flag; codex_cli \
+           strips most per-request headers) — they cannot satisfy this gate. \
+           Alternatively detach the keeper from this cascade. Subsequent \
            identical-signature rejections demoted to DEBUG for the next %.0fs"
           label signature cascade_empty_warn_restate_sec
       else

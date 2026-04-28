@@ -3,6 +3,7 @@
 import { signal, computed } from '@preact/signals'
 import {
   goals,
+  tasks,
 } from '../../store'
 import type { Goal, Task } from '../../types'
 
@@ -83,6 +84,91 @@ export const groupedByHorizon = computed(() => {
 
 export function goalById(id: string): Goal | undefined {
   return goals.value.find(g => g.id === id)
+}
+
+// -- Derived progress (Phase F-G1) -------------------------------
+// Phase 2 spec (`design-system/preview/cb-group-d.jsx:GoalHorizonTrack`)
+// expects per-goal `progress` / `total`. Backend `Goal` does not surface
+// these — we derive them from linked tasks. `cancelled` tasks are excluded
+// from the denominator so cancelling a task moves the ratio up rather than
+// counting it as failed work.
+
+export interface GoalProgress {
+  done: number
+  total: number
+  ratio: number
+}
+
+const ZERO_PROGRESS: GoalProgress = { done: 0, total: 0, ratio: 0 }
+
+function isCountedTask(t: Task): boolean {
+  return t.status !== 'cancelled'
+}
+
+function isDoneTask(t: Task): boolean {
+  return t.status === 'done'
+}
+
+export const goalProgressMap = computed<Map<string, GoalProgress>>(() => {
+  const map = new Map<string, GoalProgress>()
+  for (const g of goals.value) {
+    map.set(g.id, { done: 0, total: 0, ratio: 0 })
+  }
+  for (const t of tasks.value) {
+    const gid = t.goal_id
+    if (!gid) continue
+    const entry = map.get(gid)
+    if (!entry) continue
+    if (!isCountedTask(t)) continue
+    entry.total += 1
+    if (isDoneTask(t)) entry.done += 1
+  }
+  for (const v of map.values()) {
+    v.ratio = v.total > 0 ? v.done / v.total : 0
+  }
+  return map
+})
+
+export function goalProgressFor(goalId: string): GoalProgress {
+  return goalProgressMap.value.get(goalId) ?? ZERO_PROGRESS
+}
+
+export const horizonProgress = computed<Record<'short' | 'mid' | 'long', GoalProgress>>(() => {
+  const goalsByHorizon: Record<'short' | 'mid' | 'long', Set<string>> = {
+    short: new Set(),
+    mid: new Set(),
+    long: new Set(),
+  }
+  for (const g of goals.value) {
+    const bucket = goalsByHorizon[g.horizon as 'short' | 'mid' | 'long']
+    if (bucket) bucket.add(g.id)
+  }
+  const acc: Record<'short' | 'mid' | 'long', GoalProgress> = {
+    short: { done: 0, total: 0, ratio: 0 },
+    mid: { done: 0, total: 0, ratio: 0 },
+    long: { done: 0, total: 0, ratio: 0 },
+  }
+  for (const t of tasks.value) {
+    const gid = t.goal_id
+    if (!gid || !isCountedTask(t)) continue
+    for (const h of ['short', 'mid', 'long'] as const) {
+      if (goalsByHorizon[h].has(gid)) {
+        acc[h].total += 1
+        if (isDoneTask(t)) acc[h].done += 1
+        break
+      }
+    }
+  }
+  for (const h of ['short', 'mid', 'long'] as const) {
+    const bucket = acc[h]
+    bucket.ratio = bucket.total > 0 ? bucket.done / bucket.total : 0
+  }
+  return acc
+})
+
+export function formatProgressPct(p: GoalProgress): string {
+  if (p.total === 0) return '0%'
+  return `${Math.round(p.ratio * 100)}%`
 }
 
 // -- Helpers -----------------------------------------------------

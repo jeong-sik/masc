@@ -149,6 +149,16 @@
   --spacing-group: 12px;  /* grouped items */
   --spacing-card: 16px;  /* card internal padding */
   --radius-xl: 24px;
+  --slate-400: #94a3b8;  /* Tailwind slate-400 alias */
+  --slate-500: #64748b;  /* Tailwind slate-500 alias */
+  --slate-600: #475569;  /* Tailwind slate-600 alias */
+  --slate-800: #1e293b;  /* Tailwind slate-800 alias */
+  --blue-400: #60a5fa;  /* Tailwind blue-400 alias */
+  --sky-400: #38bdf8;  /* Tailwind sky-400 alias */
+  --purple-500: #a855f7;  /* Tailwind purple-500 alias */
+  --yellow-100: #fde68a;  /* Tailwind yellow-100 alias */
+  --red-100: #fecaca;  /* Tailwind red-100 alias */
+  --cyan-100: #cffafe;  /* Tailwind cyan-100 alias */
 }
 
 :root {

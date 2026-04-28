@@ -160,6 +160,16 @@ type semantic =
   | `Spacing_group
   | `Spacing_card
   | `Radius_xl
+  | `Slate_400
+  | `Slate_500
+  | `Slate_600
+  | `Slate_800
+  | `Blue_400
+  | `Sky_400
+  | `Purple_500
+  | `Yellow_100
+  | `Red_100
+  | `Cyan_100
   | `Ok_soft
   | `Ok_fg
   | `Ok_border

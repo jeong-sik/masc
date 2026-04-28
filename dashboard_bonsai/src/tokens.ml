@@ -149,6 +149,16 @@ type semantic =
   | `Spacing_group
   | `Spacing_card
   | `Radius_xl
+  | `Slate_400
+  | `Slate_500
+  | `Slate_600
+  | `Slate_800
+  | `Blue_400
+  | `Sky_400
+  | `Purple_500
+  | `Yellow_100
+  | `Red_100
+  | `Cyan_100
   | `Ok_soft
   | `Ok_fg
   | `Ok_border
@@ -525,6 +535,16 @@ let name_of = function
   | `Spacing_group -> "spacing-group"
   | `Spacing_card -> "spacing-card"
   | `Radius_xl -> "radius-xl"
+  | `Slate_400 -> "slate-400"
+  | `Slate_500 -> "slate-500"
+  | `Slate_600 -> "slate-600"
+  | `Slate_800 -> "slate-800"
+  | `Blue_400 -> "blue-400"
+  | `Sky_400 -> "sky-400"
+  | `Purple_500 -> "purple-500"
+  | `Yellow_100 -> "yellow-100"
+  | `Red_100 -> "red-100"
+  | `Cyan_100 -> "cyan-100"
   | `Ok_soft -> "ok-soft"
   | `Ok_fg -> "ok-fg"
   | `Ok_border -> "ok-border"

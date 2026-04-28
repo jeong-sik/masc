@@ -148,6 +148,16 @@
   --spacing-group: 12px;
   --spacing-card: 16px;
   --radius-xl: 24px;
+  --color-slate-400: #94a3b8;
+  --color-slate-500: #64748b;
+  --color-slate-600: #475569;
+  --color-slate-800: #1e293b;
+  --color-blue-400: #60a5fa;
+  --color-sky-400: #38bdf8;
+  --color-purple-500: #a855f7;
+  --color-yellow-100: #fde68a;
+  --color-red-100: #fecaca;
+  --color-cyan-100: #cffafe;
   --color-ok-soft: rgb(107 158 107 / .10);
   --color-ok-fg: #8ebc8e;
   --color-ok-border: rgb(107 158 107 / .35);

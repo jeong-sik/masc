@@ -115,7 +115,7 @@ let observe_task_transition_fn
   : (Coord_utils_backend_setup.config ->
      agent_name:string ->
      task_id:string ->
-     transition:task_action ->
+     transition:Types_core.task_action ->
      details:Yojson.Safe.t ->
      unit) Atomic.t
   = Atomic.make

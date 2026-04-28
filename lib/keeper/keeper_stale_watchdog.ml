@@ -89,6 +89,42 @@ let record_stale_termination keeper_name now : int =
     Hashtbl.replace termination_history keeper_name pruned;
     List.length pruned)
 
+(* Cycle 50 observability: kill-class-dimensioned counter.
+
+   The pre-existing [masc_keeper_stale_termination_total] counter has
+   only the [keeper] label, so a dashboard cannot attribute kills to
+   the typed [stale_kill_class] root cause without re-parsing the
+   reason_desc text.  PR #11292 already typed the class as
+   [Keeper_registry.stale_kill_class] (idle_turn / in_turn_hung /
+   noop_failure_loop); this PR surfaces that class as a Prometheus
+   label so operators can chart "which root cause is dominant?".
+
+   The existing termination counter is preserved unchanged (no label
+   changes, no removal) so existing dashboards / alerts continue to
+   work.  This counter is purely additive. *)
+
+(** Map a [stale_kill_class] to a low-cardinality Prometheus label
+    value.  Keep this distinct from [Keeper_registry.stale_kill_class_to_string]
+    which embeds variable counts (seconds, noop_count) — those would
+    explode counter cardinality. *)
+let stale_kill_class_label (cls : Keeper_registry.stale_kill_class) : string =
+  match cls with
+  | Idle_turn _ -> "idle_turn"
+  | In_turn_hung _ -> "in_turn_hung"
+  | Noop_failure_loop _ -> "noop_failure_loop"
+
+let () =
+  Prometheus.register_counter
+    ~name:"masc_keeper_stale_termination_by_class_total"
+    ~help:
+      "Total stale watchdog terminations broken down by typed kill \
+       class (idle_turn | in_turn_hung | noop_failure_loop).  \
+       Companion to masc_keeper_stale_termination_total which has \
+       only the keeper label — this counter adds the class dimension \
+       so dashboards can attribute kills to root cause without \
+       re-parsing the reason_desc string.  Labels: keeper, class."
+    ()
+
 (* #10765 phase 2: fleet-wide batch termination detection.
 
    Each keeper runs its watchdog as an independent fiber, so the
@@ -280,6 +316,13 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                Prometheus.inc_counter
                  "masc_keeper_stale_termination_total"
                  ~labels:[ ("keeper", meta.name) ]
+                 ();
+               Prometheus.inc_counter
+                 "masc_keeper_stale_termination_by_class_total"
+                 ~labels:[
+                   ("keeper", meta.name);
+                   ("class", stale_kill_class_label kill_class);
+                 ]
                  ();
                Log.Keeper.error
                  "%s: stale watchdog terminating fiber (%s) [cascade=%s window_count=%d/6h]"

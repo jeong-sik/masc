@@ -33,6 +33,9 @@ PATTERNS=(
   "rounded-px-literal|rounded-\\[[0-9]+px\\]|ratchet|Use rounded-{xs,sm,md,lg,xl,card} (tokens.css)"
   "text-9px|text-\\[9px\\]|zero|Use text-3xs (10px) or text-2xs (11px)"
   "text-px-literal|text-\\[[0-9]+px\\]|ratchet|Use text-{4xs,3xs,2xs,xs,sm,base,md,lg} (tokens.css)"
+  "ring-accent-raw|focus-visible:ring-\\[var\\(--accent-[0-9]+\\)\\]|ratchet|Use ringFocusClasses tone (accent-medium=45, accent-subtle=30) from common/ring.ts"
+  "ring-accent-fg-raw|focus-visible:ring-\\[var\\(--color-accent-fg\\)\\]|ratchet|Use ringFocusClasses({tone: 'accent-fg'}) from common/ring.ts"
+  "ring-accent-soft-raw|focus-visible:ring-accent/40|ratchet|Use ringFocusClasses({tone: 'accent-soft'}) from common/ring.ts"
 )
 
 count_pattern() {

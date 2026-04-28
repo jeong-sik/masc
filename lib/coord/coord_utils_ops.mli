@@ -159,6 +159,9 @@ val with_file_lock_r :
 
 (** {1 Event logging} *)
 
-(** Append [event_json] to the YYYY-MM/DD.jsonl event log under
-    [.masc/events/]. *)
-val log_event : config -> Yojson.Safe.t -> unit
+(** Append [event_line] (a JSON-shaped string, callers hand-build via
+    [Printf.sprintf]) to the YYYY-MM/DD.jsonl event log under
+    [.masc/events/]. The implementation appends a literal "\n" via
+    string concatenation; passing a [Yojson.Safe.t] would not match
+    that interface and would also break every existing caller. *)
+val log_event : config -> string -> unit

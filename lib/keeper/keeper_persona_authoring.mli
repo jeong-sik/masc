@@ -118,7 +118,7 @@ val selected_archetype_effects_to_json :
 val generation_tool_preset :
   Yojson.Safe.t ->
   archetype_axes ->
-  (Keeper_types.tool_preset, string) result
+  (string, string) result
 
 (** Tool-handler entry for [keeper_persona_generate]. *)
 val handle_persona_generate :

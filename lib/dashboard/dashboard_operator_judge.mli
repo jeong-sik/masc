@@ -34,7 +34,7 @@ val start :
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   config:Coord.config ->
-  masc_tools:Types_core.tool_schema list ->
+  masc_tools:Types.tool_schema list ->
   dispatch:(name:string -> args:Yojson.Safe.t -> bool * string) ->
   build_facts:(unit -> Yojson.Safe.t) ->
   unit ->

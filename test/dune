@@ -423,6 +423,11 @@
  (libraries masc_test_deps))
 
 (test
+ (name test_keeper_receipt_authoritative)
+ (modules test_keeper_receipt_authoritative)
+ (libraries masc_test_deps))
+
+(test
  (name test_telemetry_task_transition_10358)
  (modules test_telemetry_task_transition_10358)
  (libraries masc_test_deps))

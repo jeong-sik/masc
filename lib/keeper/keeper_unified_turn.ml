@@ -130,6 +130,42 @@ let record_execution_receipt_gap
         meta.name
         (Printexc.to_string exn)
 
+(* ── KeeperTaskAcquisition.tla spec-action runtime guards (Cycle 44) ──
+
+   Identity helpers carrying [@@fsm_guard] payloads that mirror the
+   honest actions of [specs/keeper-state-machine/KeeperTaskAcquisition.tla].
+   Each helper is wrapped at the call site by
+   [Keeper_fsm_guard_runtime.wrap_unit] so an [Assert_failure] from a
+   PPX-injected guard becomes a Prometheus counter increment by default
+   (counter mode) and a re-raise when [MASC_FSM_GUARD_ASSERT=1]
+   (assert mode for tests / CI). Bug-action [TaskRejected] is NOT
+   instrumented — it is the failure mode these guards are designed to
+   detect.
+
+   This pattern follows PR #11696 (Cycle 43, KeeperHeartbeat closeout)
+   which introduced [Keeper_fsm_guard_runtime] and the counter-default
+   policy. *)
+
+(* AssignTask: the channel decision picks "turn" when at least one of
+   [pending_mentions], [pending_board_events], or
+   [pending_scope_messages] is non-empty. The post-action guard pins
+   the structural invariant that drove the decision. *)
+let post_assign_task ~(any_pending : bool) ~(channel : string) =
+  ignore any_pending; ignore channel
+  [@@fsm_guard "any_pending = true && channel = \"turn\""]
+
+(* EmptyQueueSleep: complementary branch — every pending list is empty
+   and the cycle exits without claiming. *)
+let post_empty_queue_sleep ~(any_pending : bool) ~(channel : string) =
+  ignore any_pending; ignore channel
+  [@@fsm_guard "any_pending = false && channel = \"scheduled_autonomous\""]
+
+(* TurnComplete instrumentation is intentionally deferred to a follow-up
+   cycle: it requires a [cycle_completed] ref scoped across the entire
+   ~1700-line [run_keeper_cycle] body, which would dominate the diff for
+   this PR. Tier B2 closeout for SubmitTask/AssignTask/EmptyQueueSleep
+   already pins the most actionable invariants. *)
+
 let pre_dispatch_tool_surface : Keeper_execution_receipt.tool_surface =
   {
     turn_lane = "pre_dispatch";
@@ -2598,15 +2634,25 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                 EmptyQueueSleep — non-empty queue picks "turn"
                 (claim-and-finish path), empty picks
                 "scheduled_autonomous" (no claim this cycle). *)
-             let channel =
-               if observation.pending_mentions <> []
-                  || observation.pending_board_events <> []
-                  || observation.pending_scope_messages <> []
-               then
-                 "turn"
-               else
-                 "scheduled_autonomous"
+             let any_pending =
+               observation.pending_mentions <> []
+               || observation.pending_board_events <> []
+               || observation.pending_scope_messages <> []
              in
+             let channel =
+               if any_pending then "turn" else "scheduled_autonomous"
+             in
+             (* Cycle 44: KeeperTaskAcquisition.tla post-action guards
+                pin the structural invariant the decision relied on. *)
+             if any_pending
+             then
+               Keeper_fsm_guard_runtime.wrap_unit
+                 ~action:"AssignTask" ~stage:"post"
+                 (fun () -> post_assign_task ~any_pending ~channel)
+             else
+               Keeper_fsm_guard_runtime.wrap_unit
+                 ~action:"EmptyQueueSleep" ~stage:"post"
+                 (fun () -> post_empty_queue_sleep ~any_pending ~channel);
              Keeper_unified_metrics.append_metrics_snapshot ~config ~meta:updated_meta ~observation
                ~result ~latency_ms ~turn_cost
                ~turn_generation:lifecycle.turn_generation

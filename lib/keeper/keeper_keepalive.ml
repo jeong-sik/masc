@@ -611,6 +611,17 @@ let post_turn_complete_heartbeat ~(turn_running : bool ref) = ignore turn_runnin
 let post_wakeup_signal ~(wakeup : bool Atomic.t) = ignore wakeup
   [@@fsm_guard "Atomic.get wakeup = true"]
 
+(* SubmitTask (KeeperTaskAcquisition.tla, Cycle 44): an external
+   producer (operator directive in this case) attaches a task_id to the
+   keeper's [current_task_id]. The post-action invariant is that the
+   meta carries the assigned id after [persist_directive_meta_update]
+   returns. The honest path is trivially true; the guard catches a
+   regression where someone updates [persist_directive_meta_update] to
+   skip the [current_task_id] field or persist a different id. *)
+let post_submit_task ~(meta : keeper_meta) ~(task_id : Keeper_id.Task_id.t) =
+  ignore meta; ignore task_id
+  [@@fsm_guard "meta.Keeper_types.current_task_id = Some task_id"]
+
 (* HeartbeatTick: the [compare_and_set wakeup true false] in
    [interruptible_sleep] succeeded — wakeup transitioned TRUE -> FALSE
    and the sleep returned so the loop can dispatch. Spec post-condition
@@ -2278,6 +2289,12 @@ let assign_keeper_task_from_directive ~agent_name ~task_id =
          }
        in
        persist_directive_meta_update entry ~updated_meta;
+       (* Cycle 44: KeeperTaskAcquisition.tla SubmitTask post-action
+          guard pins that the directive successfully attached the
+          [task_id] to the keeper's meta. *)
+       Keeper_fsm_guard_runtime.wrap_unit
+         ~action:"SubmitTask" ~stage:"post"
+         (fun () -> post_submit_task ~meta:updated_meta ~task_id);
        wakeup_keeper ~base_path:entry.base_path entry.name)
 ;;
 

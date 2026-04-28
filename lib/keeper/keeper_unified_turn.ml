@@ -1190,9 +1190,9 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                 ~meta
                 ~generation
                 ~cascade_name:effective_cascade_name
-                ~outcome:"skipped"
+                ~outcome:"error"
                 ~terminal_reason_code:"ollama_saturated"
-                ~activity_kind:"keeper.turn_skipped"
+                ~activity_kind:"keeper.turn_failed"
                 ~trajectory_outcome:(Trajectory.Gated "ollama_saturated")
                 ~keeper_turn_id
                 ();

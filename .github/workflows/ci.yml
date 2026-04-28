@@ -401,7 +401,12 @@ jobs:
 
       - name: Build
         id: build_step
-        continue-on-error: true
+        # NO continue-on-error: dune build is deterministic and must hard-fail.
+        # Test execution steps below remain continue-on-error (flake-tolerant).
+        # Why: PR #11709 merged with Build and Test = IN_PROGRESS / failing,
+        # because all steps had continue-on-error. CI Gate only saw the job
+        # as "success" and never blocked. Build break propagated to main.
+        # See: PR #11721 followup, memory feedback_admin_merge_can_bypass_build_ci.md.
         run: |
           opam exec -- dune build
 
@@ -507,14 +512,13 @@ jobs:
       - name: Verification matrix summary
         if: ${{ always() }}
         run: |
-          echo "::notice::Required CI gates live in CI Gate; Build and Test is advisory and summarizes failures below"
+          echo "::notice::dune build is hard-required (blocks merge via CI Gate); test execution failures are advisory and summarized below"
           echo "::notice::Optional env-gated suites not run here: PostgreSQL tests, live ICE/STUN/TURN/browser interop, viewer-local-e2e-check, swarm/team-session workload harnesses"
 
       - name: Summarize advisory build status
         if: ${{ always() }}
         id: build_advisory_status
         env:
-          BUILD_OUTCOME: ${{ steps.build_step.outcome }}
           QUICK_SUITE_OUTCOME: ${{ steps.quick_suite.outcome }}
           OPERATOR_CONTROL_OUTCOME: ${{ steps.operator_control_suite.outcome }}
           SSE_RECONNECT_OUTCOME: ${{ steps.sse_reconnect_e2e.outcome }}
@@ -531,7 +535,10 @@ jobs:
             fi
           }
 
-          add_failure "build" "$BUILD_OUTCOME"
+          # Build outcome is no longer reported here: dune build is hard-required
+          # at the job level (no continue-on-error on the Build step), so a
+          # compile failure already fails the job and CI Gate. This step only
+          # tracks advisory test-execution failures.
           add_failure "quick-suite" "$QUICK_SUITE_OUTCOME"
           add_failure "operator-control" "$OPERATOR_CONTROL_OUTCOME"
           add_failure "sse-reconnect-e2e" "$SSE_RECONNECT_OUTCOME"
@@ -806,12 +813,18 @@ jobs:
           # mode=required (default): fail → block merge
           # mode=advisory: fail → log a WARN line, do not block
           #
-          # Why `build` is advisory: of 80 PRs merged 2026-04-18..04-20,
-          # 22 (27%) landed with CI Gate FAILURE via manual admin merge,
-          # and 22/22 had Build and Test as the sole culprit (quick-suite
-          # Eio isolation flakes). CI Gate had stopped carrying signal.
-          # Build and Test now self-reports warning-only failures while CI Gate
-          # blocks only on deterministic lanes.
+          # Build job policy (revised 2026-04-29 after PR #11709 → #11721 cascade):
+          #   - dune build (compile-only) is HARD REQUIRED — Build step now lacks
+          #     continue-on-error, so a compile failure makes the job result =
+          #     failure → check "build" required = block merge. This catches
+          #     module-rename sweep misses, type errors, .mli/.ml mismatches.
+          #   - Test execution (quick-suite, operator-control, sse, transport,
+          #     contract harness) keeps continue-on-error and surfaces only via
+          #     BUILD_ADVISORY_STATUS = "warning" (warn_if_advisory below).
+          #   - Rationale: 22/80 admin-bypass merges over 2026-04-18..04-20 were
+          #     Eio quick-suite flakes — those stay advisory. But PR #11709 was
+          #     a deterministic compile break that the old "build advisory"
+          #     policy let through. We separate the two failure classes.
           check() {
             local name=$1
             local result=$2

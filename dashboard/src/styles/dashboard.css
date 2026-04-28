@@ -94,9 +94,9 @@
 /* Vote column */
 @utility vote-btn {
   transition: color 0.2s;
-  &:hover { color: #ccc; }
-  &.upvote:hover, &.upvote.active { color: #ff4500; }
-  &.downvote:hover, &.downvote.active { color: #7193ff; }
+  &:hover { color: var(--vote-hover); }
+  &.upvote:hover, &.upvote.active { color: var(--vote-up); }
+  &.downvote:hover, &.downvote.active { color: var(--vote-down); }
   &.animate { animation: votePop 0.3s ease; }
 }
 

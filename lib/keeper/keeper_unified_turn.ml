@@ -1354,7 +1354,12 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
              ~meta
              ~generation
              ~cascade_name:initial_execution.cascade_name
-             ~outcome:"blocked"
+             (* β6: "blocked" was not in outcome_kind quad-state
+                (ok/skipped/error/cancelled), causing operator_disposition
+                to classify livelock-blocked turns as "unknown".  Map to
+                "error" — livelock IS a turn failure; the specific reason
+                is captured in terminal_reason_code. *)
+             ~outcome:"error"
              ~terminal_reason_code
              ~activity_kind:"keeper.turn_blocked"
              ~trajectory_outcome:(Trajectory.Gated terminal_reason_code)

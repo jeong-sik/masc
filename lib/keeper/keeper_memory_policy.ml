@@ -1,5 +1,44 @@
 (** Keeper_memory — memory-bank paths, reward-model evaluation,
-    state snapshots, recall scoring, and metrics summaries. *)
+    state snapshots, recall scoring, and metrics summaries.
+
+    Spec navigation (OCaml -> TLA+) — plan §19 anchor pattern.
+    Authoritative spec mirror is
+    [specs/keeper-state-machine/KeeperMemoryLifecycle.tla] (#8642 family).
+
+    Spec lines 17-35 already cite this module field-by-field:
+      short_mem / mid_mem / long_mem  -> rows with [horizon] in
+                                         {"short_term", "mid_term",
+                                          "long_term"}, see the
+                                         constants
+                                           [short_term_horizon] (~line 165)
+                                           [mid_term_horizon]   (next)
+                                           [long_term_horizon]  (next)
+      provenanced  -> rows with non-empty trace_id / source
+                      (lives in keeper_memory_bank, not this file).
+      producer     -> [memory_horizon_of_kind_opt] (~line 171, strict)
+                      and [memory_horizon_of_kind] (~line 182,
+                      back-compat wrapper that defaults unknown kinds
+                      to mid_term with a warn — see #8826 drift note).
+
+    This block is the reverse-direction citation so code search for
+    "KeeperMemoryLifecycle" lands here.
+
+    Spec line drift correction:
+      Spec line 19-21 cites "ml:155 / ml:156 / ml:157" for the three
+      horizon constants; current actual line is 165 (+10 drift).  The
+      shift is because new `compaction_outcome` record fields were
+      inserted between the spec citation and the constants.  The
+      function-name citations ([memory_horizon_of_kind_opt],
+      [memory_horizon_of_kind]) remain stable.
+
+    Spec safety goals (line 9-13):
+      - every persisted note has provenance
+      - overflow / handoff do not silently drop retained notes
+      - handoff clears stale short-term notes
+      - each tier stays within its configured bound
+
+    Sibling spec anchors deferred:
+      - keeper_memory_bank.ml (open_short / provenanced semantics) *)
 
 open Keeper_types
 

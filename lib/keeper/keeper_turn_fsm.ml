@@ -63,6 +63,33 @@ let turn_state_label = function
   | Cancelled reason ->
       "cancelled:" ^ cancel_reason_label reason
 
+let tla_state_symbol = function
+  | Idle -> "idle"
+  | Phase_gating -> "phase_gating"
+  | Cascade_routing -> "cascade_routing"
+  | Awaiting_provider -> "awaiting_provider"
+  | Streaming -> "streaming"
+  | Awaiting_tool_result -> "awaiting_tool"
+  | Completing -> "completing"
+  | Done -> "done"
+  | Failed _ -> "failed"
+  | Cancelled _ -> "cancelled"
+
+let all_turn_state_symbols =
+  [
+    tla_state_symbol Idle;
+    tla_state_symbol Phase_gating;
+    tla_state_symbol Cascade_routing;
+    tla_state_symbol Awaiting_provider;
+    tla_state_symbol Streaming;
+    tla_state_symbol Awaiting_tool_result;
+    tla_state_symbol Completing;
+    tla_state_symbol Done;
+    tla_state_symbol (Failed (Failure_runtime_error ""));
+    tla_state_symbol (Cancelled Cancelled_phase_gate_close);
+  ]
+  |> List.sort_uniq String.compare
+
 let pp_cancel_reason fmt r =
   Format.pp_print_string fmt (cancel_reason_label r)
 

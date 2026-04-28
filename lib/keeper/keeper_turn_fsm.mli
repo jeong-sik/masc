@@ -60,6 +60,26 @@ val cancel_reason_label : cancel_reason -> string
 val failure_reason_label : failure_reason -> string
 val turn_state_label : turn_state -> string
 
+val tla_state_symbol : turn_state -> string
+(** Project [turn_state] to the symbol used in the TLA+
+    [TurnStateSet] of [specs/keeper-turn-fsm/KeeperTurnFSM.tla].
+
+    Distinct from [turn_state_label]: the runtime label
+    ([Awaiting_tool_result -> "awaiting_tool_result"]) is operator-
+    facing and stable for trace regex; the TLA+ symbol
+    ([Awaiting_tool_result -> "awaiting_tool"]) follows the spec's
+    abbreviated naming.  The mapping was previously documented only
+    in a TLA+ comment (KeeperTurnFSM.tla:32) and not enforceable.
+
+    Pinned by [test_keeper_turn_fsm_tla_alignment]: the set of
+    symbols produced by this function must equal [TurnStateSet],
+    so a spec rename or constructor addition fails the build. *)
+
+val all_turn_state_symbols : string list
+(** Sorted set of TLA+ symbols emitted by [tla_state_symbol] over
+    every [turn_state] constructor.  Used by the alignment test to
+    cross-check against [TurnStateSet] in the spec file. *)
+
 val pp_cancel_reason : Format.formatter -> cancel_reason -> unit
 val pp_failure_reason : Format.formatter -> failure_reason -> unit
 val pp_turn_state : Format.formatter -> turn_state -> unit

@@ -667,6 +667,48 @@ let all_providers t =
       []
     |> List.sort (fun a b -> String.compare a.provider_key b.provider_key))
 
+(* ── Outcome window queries ────────────────────── *)
+
+type outcome_kind =
+  | Outcome_success
+  | Outcome_failure
+  | Outcome_rejected
+  | Outcome_hard_quota
+  | Outcome_terminal_failure
+  | Outcome_soft_rate_limited
+
+let outcome_matches kind ev =
+  match kind, ev.outcome with
+  | Outcome_success, Success
+  | Outcome_failure, Failure
+  | Outcome_rejected, Rejected
+  | Outcome_hard_quota, Hard_quota
+  | Outcome_terminal_failure, Terminal_failure
+  | Outcome_soft_rate_limited, Soft_rate_limited -> true
+  | _, _ -> false
+
+(* Count [outcome] events recorded for [provider_key] within the last
+   [window_s] seconds.  We piggyback on the same event ring used by
+   [success_rate]; older events have already been pruned to
+   [window_sec], so a caller-supplied [window_s] larger than that is
+   silently truncated by the storage layer.  Returns 0 for unknown
+   providers, non-positive [window_s], or no in-window matches. *)
+let recent_outcome_count t ~provider_key ~outcome ~window_s =
+  if window_s <= 0.0 then 0
+  else
+    with_lock t (fun () ->
+      match Hashtbl.find_opt t.providers provider_key with
+      | None -> 0
+      | Some state ->
+        let now = Unix.gettimeofday () in
+        let cutoff = now -. window_s in
+        List.fold_left
+          (fun acc ev ->
+             if ev.time >= cutoff && outcome_matches outcome ev then acc + 1
+             else acc)
+          0
+          state.events)
+
 (* ── Global singleton ─────────────────────────── *)
 
 (** Global health tracker shared across all cascade calls in this process.

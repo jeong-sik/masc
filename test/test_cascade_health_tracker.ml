@@ -584,6 +584,69 @@ let test_latency_only_recorded_on_success () =
   check (option (float 0.001)) "p50 = the single success sample"
     (Some 99.0) info.p50_latency_ms
 
+(* ── recent_outcome_count window queries ─────────────────────── *)
+
+let test_recent_outcome_count_unknown_provider_zero () =
+  (* Untracked providers carry no events — count must be 0 even with a
+     generous window.  Used by [rate_limit_score_for_provider] to
+     return the optimistic 1.0 default for never-seen providers. *)
+  let t = H.create () in
+  let n = H.recent_outcome_count t
+            ~provider_key:"never-seen"
+            ~outcome:H.Outcome_soft_rate_limited
+            ~window_s:60.0
+  in
+  check int "unknown provider → 0" 0 n
+
+let test_recent_outcome_count_zero_window_returns_zero () =
+  (* Non-positive window is a sentinel for "feature off" — the helper
+     must short-circuit before touching the storage so a kill-switch
+     env (RECENCY_WINDOW_S=0) is genuinely a no-op. *)
+  let t = H.create () in
+  H.record_soft_rate_limited t ~provider_key:"p" ();
+  check int "window=0 → 0"
+    0 (H.recent_outcome_count t
+         ~provider_key:"p"
+         ~outcome:H.Outcome_soft_rate_limited
+         ~window_s:0.0)
+
+let test_recent_outcome_count_filters_by_outcome () =
+  (* Per-outcome filter: a provider with both Failure and
+     Soft_rate_limited events must surface only the requested kind. *)
+  let t = H.create () in
+  H.record_failure t ~provider_key:"p" ();
+  H.record_soft_rate_limited t ~provider_key:"p" ();
+  H.record_soft_rate_limited t ~provider_key:"p" ();
+  check int "soft_rate_limited count = 2"
+    2 (H.recent_outcome_count t
+         ~provider_key:"p"
+         ~outcome:H.Outcome_soft_rate_limited
+         ~window_s:60.0);
+  check int "failure count = 1"
+    1 (H.recent_outcome_count t
+         ~provider_key:"p"
+         ~outcome:H.Outcome_failure
+         ~window_s:60.0)
+
+let test_recent_outcome_count_success_separate () =
+  (* Success path is its own bucket — recording one success and three
+     soft 429s must show 1 success and 3 rate-limit hits. *)
+  let t = H.create () in
+  H.record_success t ~provider_key:"p" ();
+  H.record_soft_rate_limited t ~provider_key:"p" ();
+  H.record_soft_rate_limited t ~provider_key:"p" ();
+  H.record_soft_rate_limited t ~provider_key:"p" ();
+  check int "success counts independently"
+    1 (H.recent_outcome_count t
+         ~provider_key:"p"
+         ~outcome:H.Outcome_success
+         ~window_s:60.0);
+  check int "rate_limit counts independently"
+    3 (H.recent_outcome_count t
+         ~provider_key:"p"
+         ~outcome:H.Outcome_soft_rate_limited
+         ~window_s:60.0)
+
 let () =
   run "cascade_health_tracker" [
     "record", [
@@ -693,5 +756,15 @@ let () =
         test_latency_drops_invalid_samples;
       test_case "latency only recorded on Success" `Quick
         test_latency_only_recorded_on_success;
+    ];
+    "recent_outcome_count", [
+      test_case "unknown provider returns 0" `Quick
+        test_recent_outcome_count_unknown_provider_zero;
+      test_case "non-positive window returns 0" `Quick
+        test_recent_outcome_count_zero_window_returns_zero;
+      test_case "filters by outcome kind" `Quick
+        test_recent_outcome_count_filters_by_outcome;
+      test_case "success counts independently" `Quick
+        test_recent_outcome_count_success_separate;
     ];
   ]

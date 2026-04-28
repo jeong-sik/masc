@@ -291,6 +291,42 @@ val provider_info : t -> provider_key:string -> provider_info option
     @since 0.139.0 *)
 val all_providers : t -> provider_info list
 
+(** Outcome variant exposed for {!recent_outcome_count} window queries.
+    Mirrors the internal classification — kept abstract elsewhere to
+    keep the recording surface narrow.
+
+    @since 0.183.0 *)
+type outcome_kind =
+  | Outcome_success
+  | Outcome_failure
+  | Outcome_rejected
+  | Outcome_hard_quota
+  | Outcome_terminal_failure
+  | Outcome_soft_rate_limited
+
+(** [recent_outcome_count t ~provider_key ~outcome ~window_s] returns the
+    number of events of [outcome] recorded for [provider_key] within the
+    last [window_s] seconds.
+
+    Useful as a recency signal for adaptive weighting — e.g. counting
+    [Outcome_soft_rate_limited] events in a 60s window so the strategy
+    can de-prioritise providers that just hit a 429 burst, even after
+    their cooldown expires.
+
+    Returns 0 for unknown providers, when no matching event is in
+    window, or when [window_s] is non-positive.  The window is
+    silently clamped to the rolling event-retention window of the
+    tracker (see {!window_sec}) — events older than that have already
+    been pruned and cannot be counted.
+
+    @since 0.183.0 *)
+val recent_outcome_count :
+  t ->
+  provider_key:string ->
+  outcome:outcome_kind ->
+  window_s:float ->
+  int
+
 (** Global singleton tracker shared across all cascade calls.
     Use this for production; use {!create} for isolated tests. *)
 val global : t

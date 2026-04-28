@@ -65,6 +65,71 @@ let latency_score_for_provider health ~provider_key =
      | None -> 1.0
      | Some p50 -> latency_score_of_p50 p50)
 
+(* ── Rate-limit recency factor (PR3b of cascade resilience) ──────────
+
+   PR1 (#11341) introduced [Soft_rate_limited] outcomes that fire a
+   short cooldown on every HTTP 429.  Once that cooldown expires the
+   provider is back at full weight even if it has been hammering us
+   with 429s — there is no signal carried forward.  This factor adds
+   that signal: every recent [Soft_rate_limited] event in the
+   {!rate_limit_recency_window_s} window decays the provider's weight
+   by [rate_limit_decay_base] (default 0.5 → halve).
+
+   The window is intentionally narrow (default 60s — short enough that
+   a recovered provider is back at full weight within a minute, long
+   enough to span more than one cascade attempt cycle, see
+   {!default_cycle_policy}).
+
+   Set [MASC_CASCADE_RATE_LIMIT_RECENCY_WINDOW_S=0] to disable the
+   factor entirely — it is the kill switch for this PR if the
+   weighting turns out to be too aggressive. *)
+let rate_limit_recency_window_s =
+  match Sys.getenv_opt "MASC_CASCADE_RATE_LIMIT_RECENCY_WINDOW_S" with
+  | None -> 60.0
+  | Some raw ->
+    let trimmed = String.trim raw in
+    if trimmed = "" then 60.0
+    else
+      match Safe_ops.float_of_string_safe trimmed with
+      | Some n -> n
+      | None ->
+        Log.Misc.warn
+          "Invalid float for MASC_CASCADE_RATE_LIMIT_RECENCY_WINDOW_S=%S, \
+           using default 60.0" raw;
+        60.0
+
+(* Decay base in (0.0, 1.0).  At default 0.5, score = 0.5^count so 1
+   recent 429 halves the weight, 2 quarters it, etc.  Out-of-range
+   values fail closed to the default rather than silently disabling
+   the signal. *)
+let rate_limit_decay_base =
+  match Sys.getenv_opt "MASC_CASCADE_RATE_LIMIT_DECAY_BASE" with
+  | None -> 0.5
+  | Some raw ->
+    let trimmed = String.trim raw in
+    if trimmed = "" then 0.5
+    else
+      match Safe_ops.float_of_string_safe trimmed with
+      | Some n when n > 0.0 && n < 1.0 -> n
+      | _ ->
+        Log.Misc.warn
+          "Invalid decay base for MASC_CASCADE_RATE_LIMIT_DECAY_BASE=%S \
+           (must be in (0.0, 1.0)), using default 0.5" raw;
+        0.5
+
+let rate_limit_score_for_provider health ~provider_key =
+  if rate_limit_recency_window_s <= 0.0 then 1.0
+  else
+    let count =
+      Cascade_health_tracker.recent_outcome_count
+        health
+        ~provider_key
+        ~outcome:Cascade_health_tracker.Outcome_soft_rate_limited
+        ~window_s:rate_limit_recency_window_s
+    in
+    if count <= 0 then 1.0
+    else Float.pow rate_limit_decay_base (float_of_int count)
+
 type cycle_policy = {
   max_cycles : int;
   backoff_base_ms : int;
@@ -182,15 +247,24 @@ let filter_cooldown adapter ctx cands =
    filtered-empty state instead of reviving a provider that was
    intentionally put into cooldown (e.g. hard quota exhausted). *)
 let weighted_shuffle adapter ctx cands =
-  (* Compute health-adjusted weight per candidate.  The base weight from
-     the tracker reflects [config_weight * success_rate], with [0] for
-     cooled-down providers.  We multiply in a [0.0–1.0] latency factor
-     when the tracker has accumulated p50 samples; cooled-down providers
-     stay at 0 (the multiplication preserves zero), and providers
-     without latency samples get factor 1.0 (no change vs prior behavior).
-     The [max 1] guard prevents a slow-but-alive provider from getting
-     zeroed out purely from latency — strategy still gives it a chance
-     each cycle, just with less probability than its peers. *)
+  (* Compute health-adjusted weight per candidate.
+
+     Base weight is [config_weight × success_rate] (cooldown → 0).  Two
+     [0.0–1.0] adaptive factors are multiplied in before the random
+     pick:
+
+       - [lat] — latency score, decays as p50 climbs above
+         {!latency_baseline_ms}.  Providers without samples get 1.0.
+       - [rl]  — rate-limit recency score, decays as
+         [decay_base ^ count] for [Soft_rate_limited] events in the
+         {!rate_limit_recency_window_s} window.  Providers with no
+         recent 429 hit get 1.0.
+
+     Cooled-down providers stay at 0 (multiplication preserves zero),
+     and the [max 1] guard prevents a slow-or-throttled-but-alive
+     provider from being zeroed out purely by these factors —
+     strategy gives it a chance each cycle, just with less probability
+     than its healthier peers. *)
   let weighted = List.map
       (fun c ->
          let provider_key = adapter.health_key c in
@@ -202,7 +276,8 @@ let weighted_shuffle adapter ctx cands =
            if ew <= 0 then 0
            else
              let lat = latency_score_for_provider ctx.health ~provider_key in
-             max 1 (int_of_float (float_of_int ew *. lat))
+             let rl  = rate_limit_score_for_provider ctx.health ~provider_key in
+             max 1 (int_of_float (float_of_int ew *. lat *. rl))
          in
          (c, final))
       cands

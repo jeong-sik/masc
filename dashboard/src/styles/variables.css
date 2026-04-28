@@ -104,6 +104,12 @@
   --chat-error-chip: #ffb4b4;
   --chat-code-callout: #95f3bc;
 
+  /* State chip text — keeper status pills (idle/offline/todo).
+     idle and todo intentionally share the same shade (visual rest).
+     offline is darker to signal hard inactivity. */
+  --state-idle: #b8c0cc;
+  --state-offline: #7a8494;
+
   /* Semantic - Critical (Red) */
   --bad-light: #f87171;
   --bad-soft: rgba(239, 68, 68, 0.15);

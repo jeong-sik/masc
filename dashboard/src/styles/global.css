@@ -123,9 +123,9 @@
   &.active { background: var(--ok-22); color: var(--ok); }
   &.busy { background: var(--warn-15); color: var(--warn); }
   &.listening { background: rgba(56,189,248,0.15); color: var(--sky-400); }
-  &.idle { background: rgba(136,136,136,0.22); color: #b8c0cc; }
-  &.offline { background: rgba(85,85,85,0.22); color: #7a8494; }
-  &.todo { background: rgba(136,136,136,0.22); color: #b8c0cc; }
+  &.idle { background: rgba(136,136,136,0.22); color: var(--state-idle); }
+  &.offline { background: rgba(85,85,85,0.22); color: var(--state-offline); }
+  &.todo { background: rgba(136,136,136,0.22); color: var(--state-idle); }
   &.in-progress, &.in_progress { background: var(--warn-15); color: var(--warn); }
   &.done, &.completed { background: var(--ok-22); color: var(--ok); }
   &.running { background: var(--warn-15); color: var(--warn); }

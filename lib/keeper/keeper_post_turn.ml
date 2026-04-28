@@ -11,7 +11,42 @@
     - memory bank / episodes: [Keeper_agent_run] tail after [Agent.run]
     - hebbian: task lifecycle in [Coord_task]
 
-    Extracted from Keeper_exec_context as part of #4955 god-file split. *)
+    Extracted from Keeper_exec_context as part of #4955 god-file split.
+
+    Spec navigation (OCaml -> TLA+) — plan §19 anchor pattern.  Sibling
+    to #11612 (Cycle 31, [keeper_rollover.ml]).  Authoritative spec
+    mirror is [specs/keeper-state-machine/KeeperGenerationLineage.tla].
+
+    Spec lines 10-13 already cite this module as one of three modeled
+    OCaml sources:
+      - lib/keeper/keeper_post_turn.ml   (this file — post-turn pipeline)
+      - lib/keeper/keeper_rollover.ml    (rollover semantics — anchored
+                                          in #11612)
+      - lib/keeper/keeper_types.mli      (type lineage — anchor deferred)
+
+    This block is the reverse-direction citation so code search for
+    "KeeperGenerationLineage" lands here.
+
+    Post-turn -> spec mapping:
+      Compaction phase    feeds into [keeper_phase] = "running" while
+                          the in-flight turn is still resolving.
+      Handoff rollover    delegates to [Keeper_rollover.attempt] and
+                          increments [meta.generation] — spec's
+                          generation variable.  The new trace_id and
+                          trace_history append happen there.
+      Continuity summary  refreshes the [meta.continuity_summary] /
+                          checkpoint pair after rollover, preserving
+                          the spec's [ckpt_valid] / [ckpt_generation]
+                          parity invariant.
+
+    Spec scope (line 4-8): same identity across generations,
+    trace_id replacement, append-only ancestry, checkpoint lineage
+    parity once back to idle.
+
+    Spec out-of-scope (line 15-18 in spec): compaction strategy
+    selection (KeeperCompactionLifecycle), Agent.run turn loop,
+    long-term memory recall.  This module *triggers* compaction but
+    does not *select* the strategy. *)
 
 open Keeper_types
 open Keeper_memory

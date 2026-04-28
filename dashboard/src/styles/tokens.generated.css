@@ -190,6 +190,9 @@
   --color-vote-up: #ff4500;
   --color-vote-down: #7193ff;
   --color-vote-hover: #ccc;
+  --color-text-slate: #b0bfd4;
+  --warn-bright: #f97316;
+  --bad-light: #f87171;
   --color-ok-soft: rgb(107 158 107 / .10);
   --color-ok-fg: #8ebc8e;
   --color-ok-border: rgb(107 158 107 / .35);

@@ -307,6 +307,16 @@ let keeper_schemas : tool_schema list = [
           ("default", `Bool true);
           ("description", `String "If false, return only keepers with audit issues while keeping summary counts over all audited keepers.");
         ]);
+        ("repair", `Assoc [
+          ("type", `String "boolean");
+          ("default", `Bool false);
+          ("description", `String "If true, run Keeper_goal_repair.run after audit: create goals from keeper purpose statements and assign to keepers with empty active_goal_ids.");
+        ]);
+        ("dry_run_repair", `Assoc [
+          ("type", `String "boolean");
+          ("default", `Bool false);
+          ("description", `String "If true, run Keeper_goal_repair.dry_run after audit: preview what repair would do without making changes.");
+        ]);
       ]);
     ];
   };

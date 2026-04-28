@@ -558,12 +558,24 @@ let run_docker_with_git_bash
              (docker_exec_failure_message ~image ~status:st ~output:out)
          else
            Keeper_registry.clear_error ~base_path:config.base_path meta.name;
+         (* PR #11080 sibling fix: emit the in-container cwd so the
+            keeper LLM does not [cd] back to the host abs path on the
+            next turn (which fails inside the container). The runtime
+            already exposes its host→container translation via
+            [container_cwd_of_host]. *)
+         let cwd_response =
+           Keeper_cwd_response.docker
+             ~host_cwd:cwd
+             ~container_cwd:
+               (Keeper_turn_sandbox_runtime.container_cwd_of_host runtime
+                  ~host_cwd:cwd)
+         in
          Yojson.Safe.to_string
            (`Assoc
               ([
                 ("ok", `Bool (st = Unix.WEXITED 0));
                 ("via", `String "docker");
-                ("cwd", `String cwd);
+                ("cwd", Keeper_cwd_response.to_yojson_response cwd_response);
                 ("sandbox_profile", `String "docker");
                 ("git_creds_enabled", `Bool true);
                 ("network_mode", `String (network_mode_to_string Network_inherit));
@@ -578,12 +590,17 @@ let run_docker_with_git_bash
       with
       | Error message -> error_json message
       | Ok result ->
+        let cwd_response =
+          Keeper_cwd_response.docker
+            ~host_cwd:cwd
+            ~container_cwd:(docker_private_workspace_cwd ~config ~meta cwd)
+        in
         Yojson.Safe.to_string
           (`Assoc
              ([
                ("ok", `Bool (result.status = Unix.WEXITED 0));
                ("via", `String "docker");
-               ("cwd", `String cwd);
+               ("cwd", Keeper_cwd_response.to_yojson_response cwd_response);
                ("sandbox_profile", `String "docker");
                ("git_creds_enabled", `Bool true);
                ("network_mode", `String result.network_label);
@@ -625,12 +642,19 @@ let run_docker_hardened_bash
              (docker_exec_failure_message ~image ~status:st ~output:out)
          else
            Keeper_registry.clear_error ~base_path:config.base_path meta.name;
+         let cwd_response =
+           Keeper_cwd_response.docker
+             ~host_cwd:cwd
+             ~container_cwd:
+               (Keeper_turn_sandbox_runtime.container_cwd_of_host runtime
+                  ~host_cwd:cwd)
+         in
          Yojson.Safe.to_string
            (`Assoc
               ([
                 ("ok", `Bool (st = Unix.WEXITED 0));
                 ("via", `String "docker");
-                ("cwd", `String cwd);
+                ("cwd", Keeper_cwd_response.to_yojson_response cwd_response);
                 ("sandbox_profile", `String "docker");
                 ("git_creds_enabled", `Bool false);
                 ("network_mode", `String (network_mode_to_string network_mode));
@@ -649,12 +673,17 @@ let run_docker_hardened_bash
       with
       | Error message -> error_json message
       | Ok result ->
+        let cwd_response =
+          Keeper_cwd_response.docker
+            ~host_cwd:cwd
+            ~container_cwd:(docker_private_workspace_cwd ~config ~meta cwd)
+        in
         Yojson.Safe.to_string
           (`Assoc
              ([
                ("ok", `Bool (result.status = Unix.WEXITED 0));
                ("via", `String "docker");
-               ("cwd", `String cwd);
+               ("cwd", Keeper_cwd_response.to_yojson_response cwd_response);
                ("sandbox_profile", `String "docker");
                ("git_creds_enabled", `Bool false);
                ("network_mode", `String result.network_label);

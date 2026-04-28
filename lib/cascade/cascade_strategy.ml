@@ -9,6 +9,62 @@ type signal_ctx = {
   cascade_name : string;
 }
 
+(* ── Latency-aware weight scaling (Phase: PR3 of cascade resilience) ──
+
+   The cascade's effective weight has historically been
+   [config_weight × success_rate], so two providers with comparable
+   reliability rank identically even if one is 10× slower than the other.
+   When latency samples are available (post-PR2 ring buffer), the
+   weighted_random strategy multiplies in a [0.0–1.0] latency factor so
+   the faster provider wins ties without zeroing out the slow one
+   (which would create a thrashing single-provider cascade).
+
+   Formula (intentionally simple, easy to predict):
+
+     [latency_score = min 1.0 (latency_baseline_ms / max(p50, 1.0))]
+
+   - p50 ≤ baseline → score = 1.0 (no penalty).
+   - p50 = 2 × baseline → score = 0.5.
+   - p50 = 10 × baseline → score = 0.1.
+   - Unknown / no samples / [latency_ring_size <= 0] → score = 1.0
+     (optimistic default — same convention as success_rate for unknown
+     providers).
+   - p50 < 1 ms is clamped at 1 ms in the denominator to avoid
+     overflowing the score above 1.0 on extremely fast local providers
+     (ollama on warm cache).
+
+   The baseline (default 2000 ms) is tuned for cloud LLM tiers — claude
+   / gpt / gemini typical p50 lands in the 1–3 second range.  Local
+   providers (ollama) are typically far below baseline, so they get full
+   weight; slow tail tiers (kimi cli, gemini cli) get fractional weight
+   when their p50 drifts above baseline. *)
+let latency_baseline_ms =
+  match Sys.getenv_opt "MASC_CASCADE_LATENCY_BASELINE_MS" with
+  | None -> 2000.0
+  | Some raw ->
+    let trimmed = String.trim raw in
+    if trimmed = "" then 2000.0
+    else
+      match Safe_ops.float_of_string_safe trimmed with
+      | Some n when n > 0.0 -> n
+      | _ ->
+        Log.Misc.warn
+          "Invalid float for MASC_CASCADE_LATENCY_BASELINE_MS=%S, using default 2000.0"
+          raw;
+        2000.0
+
+let latency_score_of_p50 p50 =
+  let denom = Float.max p50 1.0 in
+  Float.min 1.0 (latency_baseline_ms /. denom)
+
+let latency_score_for_provider health ~provider_key =
+  match Cascade_health_tracker.provider_info health ~provider_key with
+  | None -> 1.0
+  | Some info ->
+    (match info.p50_latency_ms with
+     | None -> 1.0
+     | Some p50 -> latency_score_of_p50 p50)
+
 type cycle_policy = {
   max_cycles : int;
   backoff_base_ms : int;
@@ -126,14 +182,29 @@ let filter_cooldown adapter ctx cands =
    filtered-empty state instead of reviving a provider that was
    intentionally put into cooldown (e.g. hard quota exhausted). *)
 let weighted_shuffle adapter ctx cands =
-  (* Compute health-adjusted weight per candidate. *)
+  (* Compute health-adjusted weight per candidate.  The base weight from
+     the tracker reflects [config_weight * success_rate], with [0] for
+     cooled-down providers.  We multiply in a [0.0–1.0] latency factor
+     when the tracker has accumulated p50 samples; cooled-down providers
+     stay at 0 (the multiplication preserves zero), and providers
+     without latency samples get factor 1.0 (no change vs prior behavior).
+     The [max 1] guard prevents a slow-but-alive provider from getting
+     zeroed out purely from latency — strategy still gives it a chance
+     each cycle, just with less probability than its peers. *)
   let weighted = List.map
       (fun c ->
+         let provider_key = adapter.health_key c in
          let ew = Cascade_health_tracker.effective_weight ctx.health
-             ~provider_key:(adapter.health_key c)
+             ~provider_key
              ~config_weight:(adapter.weight c)
          in
-         (c, max 0 ew))
+         let final =
+           if ew <= 0 then 0
+           else
+             let lat = latency_score_for_provider ctx.health ~provider_key in
+             max 1 (int_of_float (float_of_int ew *. lat))
+         in
+         (c, final))
       cands
   in
   let active = List.filter (fun (_, w) -> w > 0) weighted in

@@ -62,6 +62,21 @@ val soft_rate_limit_max_clamp_sec : float
 
     Env: [MASC_CASCADE_SOFT_RATE_LIMIT_MAX_CLAMP_SEC]. *)
 
+val latency_ring_size : int
+(** Number of recent successful-call latencies retained per provider for
+    percentile observation.  The ring buffer is per-provider; older
+    samples are silently overwritten as new successes arrive.
+
+    A small ring is intentional — strategy decisions only need a
+    "recent" sense of how fast the provider has been responding, not a
+    full distribution.  100 samples cover ~5–15 minutes of activity for
+    a busy provider while staying small enough to sort cheaply on every
+    [provider_info] read.
+
+    Default 100, env [MASC_CASCADE_LATENCY_RING_SIZE].  Values [<= 0]
+    disable latency tracking entirely (the ring is treated as empty and
+    [p50_latency_ms] / [p95_latency_ms] always return [None]). *)
+
 
 (** Opaque health tracker state. *)
 type t
@@ -70,8 +85,21 @@ type t
 val create : unit -> t
 
 (** Record a successful provider call. Clears cooldown and resets
-    consecutive failure counter. *)
-val record_success : t -> provider_key:string -> unit
+    consecutive failure counter.
+
+    Optional [latency_ms] is the wall-clock duration of the provider
+    call in milliseconds.  When supplied, it is appended to a small
+    per-provider ring buffer and surfaced as [p50_latency_ms] /
+    [p95_latency_ms] on {!provider_info}.  Strategies can use the
+    p50/p95 to prefer faster providers when success rates are
+    comparable.  Negative or non-finite values are silently dropped
+    (the success itself is still recorded). *)
+val record_success :
+  t ->
+  provider_key:string ->
+  ?latency_ms:float ->
+  unit ->
+  unit
 
 (** Record a failed provider call. Increments consecutive failure
     counter; triggers cooldown when threshold is reached.
@@ -235,6 +263,23 @@ type provider_info = {
   (** Unix timestamp of the most recent non-success event, or [None] if
       none.  Phase 0 observability anchor for "did this provider fail
       recently".  @since 0.174.0 *)
+  p50_latency_ms : float option;
+  (** 50th-percentile (median) of recent successful-call latencies in
+      milliseconds, computed from the per-provider ring buffer
+      (see {!latency_ring_size}).  [None] when no latency samples have
+      been recorded — either because [record_success] was never called
+      with [~latency_ms], or because [latency_ring_size <= 0].  Strategies
+      may use this to prefer faster providers when success rates and
+      cooldown state are comparable.  @since 0.180.0 *)
+  p95_latency_ms : float option;
+  (** 95th-percentile of recent successful-call latencies in milliseconds.
+      Same source and [None] semantics as {!p50_latency_ms}.  Useful for
+      flagging tail-latency regressions in observability dashboards.
+      @since 0.180.0 *)
+  latency_samples : int;
+  (** Number of latency samples currently retained in the ring buffer.
+      [0] iff both percentile fields are [None].  Bounded by
+      {!latency_ring_size}.  @since 0.180.0 *)
 }
 
 (** Structured info for a single provider. Returns [None] if untracked.

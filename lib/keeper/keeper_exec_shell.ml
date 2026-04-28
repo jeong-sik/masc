@@ -1510,6 +1510,16 @@ let handle_keeper_shell
     with
     | Error msg -> error_json ~fields:[ "op", `String op; "cwd", `String cwd ] msg
     | Ok result ->
+      (* PR #11080 sibling sweep: this helper always routes through
+         docker exec, so the LLM-facing [cwd] field must hold the
+         in-container path.  Operator-side log fields above keep the
+         host path. *)
+      let cwd_response =
+        Keeper_cwd_response.docker ~host_cwd:cwd
+          ~container_cwd:
+            (Keeper_shell_docker.docker_private_workspace_cwd ~config
+               ~meta cwd)
+      in
       Yojson.Safe.to_string
         (Exec_core.process_result_json
            ~artifact_policy:Exec_core.Inline_only
@@ -1520,7 +1530,7 @@ let handle_keeper_shell
              [
                "op", `String op;
                "cmd", `String cmd;
-               "cwd", `String cwd;
+               "cwd", Keeper_cwd_response.to_yojson_response cwd_response;
                "via", `String "docker";
              ]
            ~status:result.status
@@ -1817,11 +1827,20 @@ let handle_keeper_shell
                error_json
                  ~fields:[ "op", `String op; "cwd", `String cwd ] msg
              | Ok (st, out) ->
+               (* PR #11080 sibling sweep: docker-route response — use
+                  the in-container cwd to keep the LLM aligned with the
+                  actual exec environment. *)
+               let cwd_response =
+                 Keeper_cwd_response.docker ~host_cwd:cwd
+                   ~container_cwd:
+                     (Keeper_turn_sandbox_runtime.container_cwd_of_host
+                        runtime ~host_cwd:cwd)
+               in
                Yojson.Safe.to_string
                  (`Assoc
                      [ "ok", `Bool true
                      ; "op", `String op
-                     ; "cwd", `String cwd
+                     ; "cwd", Keeper_cwd_response.to_yojson_response cwd_response
                      ; "count", `Int count
                      ; "via", `String "docker"
                      ; "status", Keeper_alerting_path.process_status_to_json st
@@ -2184,6 +2203,26 @@ let handle_keeper_shell
            (match Worker_dev_tools.validate_command_paths ~workdir:cwd cmd_str with
             | Error e -> path_error e
             | Ok () ->
+              (* PR #11080 sibling sweep: when [turn_sandbox_runtime]
+                 is bound the bash exec runs inside the keeper's
+                 container, so the LLM-facing [cwd] field must hold
+                 the in-container path.  When the runtime is absent
+                 (Local-effective keepers) the host path is what the
+                 keeper sees and the [Local] variant passes it
+                 through unchanged. *)
+              let cwd_response =
+                match turn_sandbox_runtime with
+                | Some runtime ->
+                  Keeper_cwd_response.docker ~host_cwd:cwd
+                    ~container_cwd:
+                      (Keeper_turn_sandbox_runtime.container_cwd_of_host
+                         runtime ~host_cwd:cwd)
+                | None ->
+                  Keeper_cwd_response.local ~host_cwd:cwd
+              in
+              let cwd_field =
+                Keeper_cwd_response.to_yojson_response cwd_response
+              in
               (* P21: exec cache — skip execution on hit, store on miss *)
               (match exec_cache with
                | Some cache ->
@@ -2198,7 +2237,7 @@ let handle_keeper_shell
                          ~cmd:cmd_str
                          ~extra:
                            [ "op", `String op
-                           ; "cwd", `String cwd
+                           ; "cwd", cwd_field
                            ; "command", `String cmd_str
                            ; "cached", `Bool true
                            ; "cache_age_ms",
@@ -2244,7 +2283,7 @@ let handle_keeper_shell
                            ~cmd:cmd_str
                            ~extra:
                              [ "op", `String op
-                             ; "cwd", `String cwd
+                             ; "cwd", cwd_field
                              ; "command", `String cmd_str
                              ; "error", `String "command_timed_out"
                              ; "timeout_sec", `Float timeout_sec
@@ -2261,7 +2300,7 @@ let handle_keeper_shell
                            ~cmd:cmd_str
                            ~extra:
                              [ "op", `String op
-                             ; "cwd", `String cwd
+                             ; "cwd", cwd_field
                              ; "command", `String cmd_str
                              ]
                            ~status:st
@@ -2290,7 +2329,7 @@ let handle_keeper_shell
                         ~cmd:cmd_str
                         ~extra:
                           [ "op", `String op
-                          ; "cwd", `String cwd
+                          ; "cwd", cwd_field
                           ; "command", `String cmd_str
                           ; "error", `String "command_timed_out"
                           ; "timeout_sec", `Float timeout_sec
@@ -2307,7 +2346,7 @@ let handle_keeper_shell
                         ~cmd:cmd_str
                         ~extra:
                           [ "op", `String op
-                          ; "cwd", `String cwd
+                          ; "cwd", cwd_field
                           ; "command", `String cmd_str
                           ]
                         ~status:st

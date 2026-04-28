@@ -96,6 +96,32 @@ val latency_score_for_provider :
 
     @since 0.181.0 (PR3 of cascade resilience track) *)
 
+val rate_limit_score_for_provider :
+  Cascade_health_tracker.t -> provider_key:string -> float
+(** [rate_limit_score_for_provider health ~provider_key] returns a
+    [0.0–1.0] multiplier that decays with the count of recent
+    [Soft_rate_limited] events for [provider_key].
+
+    Formula: [score = decay_base ^ count] where [count] is the number
+    of soft rate-limit events recorded in the last 60 seconds (default
+    window — env [MASC_CASCADE_RATE_LIMIT_RECENCY_WINDOW_S]).  Default
+    decay base 0.5 (env [MASC_CASCADE_RATE_LIMIT_DECAY_BASE]) — 1
+    recent 429 halves the weight, 2 quarters it, 3 hits → 0.125.
+
+    - Unknown provider, no recent events, or window disabled
+      ([RECENCY_WINDOW_S <= 0]) → [1.0] (optimistic default).
+    - Cooled-down provider → still scored normally; [effective_weight]
+      already returns 0 when in cooldown, and multiplying that by any
+      fractional score preserves zero.
+
+    Used internally by {!Weighted_random} so a provider that just hit
+    a 429 burst gets de-prioritised even after its short cooldown
+    expires — the 429 leaves a recency footprint that biases selection
+    toward peers for the rest of the window.  Exposed for inspection /
+    testability — strategies do not need to call this directly.
+
+    @since 0.183.0 (PR3b of cascade resilience track) *)
+
 (** {1 Strategy kind} *)
 
 type kind =

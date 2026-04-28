@@ -177,15 +177,65 @@ let notify_gate_decision on_gate_decision (event : gate_decision_event) =
    Keeper_registry.mark_turn_gate_rejected_by_name, which fires the
    decision_stage = "gate_rejected" / turn_phase = "finalizing" transition.
    The "continue" branch (and any unknown decision string) skips the spec
-   action entirely and only emits the Event_bus Custom event below. *)
+   action entirely and only emits the Event_bus Custom event below.
+
+   Cycle 49 observability addition: when the gate rejects, the turn
+   becomes terminal WITHOUT any cascade tier ever being attempted.  A
+   dashboard reading only the final outcome ("Turn_gate_rejected") cannot
+   distinguish "all gates rejected, cascade=none" from "all cascades
+   exhausted" — both surface as terminal failure.  We add a Prometheus
+   counter, an INFO log line, and a [cascade_attempted] payload field so
+   the narrative is observable. *)
+
+(** Prometheus metric: turns terminated by a pre_tool_use gate rejection
+    (Override or ApprovalRequired) without ever attempting a cascade
+    tier.  See [emit_gate_event] for the firing site.
+
+    Labels stay bounded:
+    - [keeper]   ∈ keeper agent names (finite per fleet)
+    - [tool]     ∈ tool names (finite, registry-controlled)
+    - [reason]   ∈ guard reason_code strings (finite, defined by guards)
+    - [decision] ∈ {override, approval_required} *)
+let gate_rejected_terminal_metric =
+  "masc_keeper_turn_gate_rejected_terminal_total"
+
+let () =
+  Prometheus.register_counter
+    ~name:gate_rejected_terminal_metric
+    ~help:
+      "Total turns terminated by a pre_tool_use gate rejection \
+       (Override or ApprovalRequired) without ever attempting a \
+       cascade tier.  A non-zero rate on a keeper indicates \
+       pre_tool_use guards short-circuit before the cascade ever \
+       runs — useful for distinguishing 'all gates rejected, \
+       cascade=none' from 'all cascades exhausted' in the keeper \
+       terminal taxonomy.  Emitted with labels: keeper, tool, reason, \
+       decision."
+    ()
+
 let emit_gate_event
     ~stage ~decision ~reason_code
     ~tool_name ~agent_name ~turn
     ~accumulated_cost_usd ~stage_latency_ms ~reason_text =
-  (match decision with
-   | "override" | "approval_required" ->
-       Keeper_registry.mark_turn_gate_rejected_by_name agent_name
-   | _ -> ());
+  let is_gate_rejection =
+    match decision with
+    | "override" | "approval_required" -> true
+    | _ -> false
+  in
+  if is_gate_rejection then begin
+    Keeper_registry.mark_turn_gate_rejected_by_name agent_name;
+    Prometheus.inc_counter gate_rejected_terminal_metric
+      ~labels:[
+        ("keeper", agent_name);
+        ("tool", tool_name);
+        ("reason", reason_code);
+        ("decision", decision);
+      ] ();
+    Log.Keeper.info
+      "keeper:%s tool:%s decision=%s reason_code=%s cascade=none \
+       (gate rejected before cascade attempt)"
+      agent_name tool_name decision reason_code
+  end;
   match Masc_event_bus.get () with
   | None -> ()
   | Some bus ->
@@ -200,6 +250,7 @@ let emit_gate_event
       ("stage_latency_ms", `Float stage_latency_ms);
       ("reason_text", `String reason_text);
       ("source", `String "hook");
+      ("cascade_attempted", `Bool (not is_gate_rejection));
     ] in
     (try
       Oas_bus_instrument.publish bus

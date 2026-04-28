@@ -255,12 +255,19 @@ let fallback_canonical_keeper_meta_key_names =
   ]
 ;;
 
+(* Seed must satisfy every fail-loud field in [meta_of_json]; otherwise the
+   canonical key list silently degrades to [fallback_canonical_keeper_meta_key_names]
+   and [warn_unknown_keeper_meta_keys] floods on every keeper read.
+   #11594 added [parse_sandbox_policy_fields] requiring sandbox_profile +
+   network_mode; keep this seed in sync when adding more required fields. *)
 let canonical_keeper_meta_key_names =
   let seed_json =
     `Assoc
       [ "name", `String "__keeper-meta-key-seed__"
       ; "agent_name", `String "__keeper-meta-key-seed__"
       ; "trace_id", `String "__keeper-meta-key-seed__"
+      ; "sandbox_profile", `String "local"
+      ; "network_mode", `String "none"
       ]
   in
   match meta_of_json seed_json with

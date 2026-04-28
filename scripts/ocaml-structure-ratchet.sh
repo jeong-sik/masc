@@ -69,9 +69,13 @@ count_lib_dune_lines() {
 }
 
 count_inferred_dump_headers() {
-  # rg exits 1 with no matches; pipe to wc -l so an empty stream still
-  # prints 0. Using -l (file count) — one self-incriminating header per file.
-  rg -l "inferred mli" "${REPO_ROOT}/lib" 2>/dev/null | wc -l | tr -d ' '
+  # rg exits 1 with no matches. Under `set -euo pipefail`, that exit
+  # propagates through the pipe and dies the surrounding `current=$(...)`
+  # capture before lib_other_mli_missing is reached. After the
+  # 7-PR closure series (#11286/.../#11401) eliminated every header,
+  # this metric measures 0, so the bug emerged silently. Force exit 0
+  # at the pipe boundary so wc -l always sees a clean stream.
+  { rg -l "inferred mli" "${REPO_ROOT}/lib" 2>/dev/null || true; } | wc -l | tr -d ' '
 }
 
 count_lib_other_mli_missing() {

@@ -403,7 +403,45 @@ let to_json (receipt : t) =
    verdict therefore had no transition out: dashboard turned a chip red, but
    no event reached operators and no supervisor handoff fired. We now emit a
    structured "keeper.operator_broadcast_required" activity event so the gate
-   verdict becomes addressable instead of cosmetic. *)
+   verdict becomes addressable instead of cosmetic.
+
+   Spec navigation (OCaml -> TLA+) — plan §19 anchor pattern.
+   Authoritative spec mirror is
+   [specs/keeper-state-machine/OperatorPauseBroadcast.tla].
+
+   Spec lines 17-21 already cite this module:
+     "lib/keeper/keeper_execution_receipt.ml: needs_operator_broadcast +
+      emit_operator_broadcast called from append".
+
+   This block is the reverse-direction citation so code search for
+   "OperatorPauseBroadcast" lands at this hook.
+
+   Spec property under audit (line 11-15):
+     For every keeper that enters PauseHuman or StaleRunning, an
+     OperatorBroadcast event is eventually emitted (leads-to).  The
+     clean Spec satisfies this; the bug model where emit is silently
+     dropped MUST violate it.
+
+   OCaml mapping:
+     PauseHuman / StaleRunning  -> [needs_operator_broadcast]
+                                  returns [true] for "pause_human",
+                                  "alert_exhausted", "unknown".
+     OperatorBroadcast event    -> [emit_operator_broadcast]
+                                  emits "keeper.operator_broadcast_required.v1"
+                                  with structured payload.
+     Eventually-emit liveness   -> [append] (~line 455) calls the
+                                  emit unconditionally when
+                                  [needs_operator_broadcast] is true,
+                                  inside a [try] so a single failure
+                                  does not cascade — the spec's clean
+                                  model.
+
+   Bug model (would be violated if a future refactor wrapped emit
+   in a conditional that could silently skip): an OperatorBroadcast
+   path that requires manual operator dispatch instead of automatic
+   emit would re-create the original #fleet-stall bug.  Sibling
+   anchor in [keeper_supervisor.ml] (StaleRunning watchdog +
+   emit_stale_keeper_broadcast) is deferred to a separate cycle. *)
 let needs_operator_broadcast = function
   | "pause_human" | "alert_exhausted" | "unknown" -> true
   | _ -> false

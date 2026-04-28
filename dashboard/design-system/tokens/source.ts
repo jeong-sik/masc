@@ -307,6 +307,17 @@ export const raw: ReadonlyArray<TokenBase> = (() => {
   out.push(t("red-100",     "#fecaca", "raw", "color", "Tailwind red-100 alias"));
   out.push(t("cyan-100",    "#cffafe", "raw", "color", "Tailwind cyan-100 alias"));
 
+  // Iter 2c-2: Tailwind palette aliases retaining the original short
+  // names from variables.css (no -N suffix). The hex matches a specific
+  // Tailwind shade per token (emerald-500, emerald-200, indigo-400,
+  // yellow-400, amber-500); names mirror existing call-site usage so
+  // no consumer rename is required.
+  out.push(t("emerald",        "#22c55e", "raw", "color", "Tailwind emerald-500 alias (kept short name)"));
+  out.push(t("emerald-fg",     "#bbf7d0", "raw", "color", "Tailwind emerald-200 alias (kept short name)"));
+  out.push(t("indigo",         "#818cf8", "raw", "color", "Tailwind indigo-400 alias (kept short name)"));
+  out.push(t("yellow-bright",  "#facc15", "raw", "color", "Tailwind yellow-400 alias (kept short name)"));
+  out.push(t("amber-bright",   "#f59e0b", "raw", "color", "Tailwind amber-500 alias (kept short name)"));
+
   return Object.freeze(out);
 })();
 

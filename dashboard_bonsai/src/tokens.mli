@@ -170,6 +170,11 @@ type semantic =
   | `Yellow_100
   | `Red_100
   | `Cyan_100
+  | `Emerald
+  | `Emerald_fg
+  | `Indigo
+  | `Yellow_bright
+  | `Amber_bright
   | `Ok_soft
   | `Ok_fg
   | `Ok_border

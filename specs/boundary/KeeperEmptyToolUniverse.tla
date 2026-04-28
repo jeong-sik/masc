@@ -4,7 +4,11 @@
 \* Phase A F3 of the bloodflow restoration plan introduced the
 \* observability counter [masc_empty_tool_universe_observed_total] to
 \* surface the volume of the existing [Keeper_tool_surface_empty]
-\* blocker branch in keeper_agent_run (~line 1234) — the keeper turn
+\* blocker branch in keeper_agent_run.ml (line 1235 — entry condition
+\* `tool_gate_requested && all_allowed = []`; the actual blocker raise
+\* is at line 1256, the Phase A F3 counter at line 1245).
+\* Function name [Keeper_tool_surface_empty] is the stable identifier;
+\* lines verified against main 2026-04-28. The keeper turn
 \* enters a tool-required gate but the visible tool surface is empty.
 \* Pre-fix runtime reality: janitor / verifier keepers exhibit
 \* tools_used_count=0 streaks of 14+ turns; a fraction of those land in

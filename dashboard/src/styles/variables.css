@@ -93,6 +93,17 @@
   --vote-up: #ff4500;
   --vote-down: #7193ff;
 
+  /* Chat role tinting — light text shades for avatar + role-chip per role.
+     avatar vs chip use deliberately distinct shades (not a typo); preserve
+     hex exactly. Source-of-truth lives here (chat.css consumes via var()). */
+  --chat-user-avatar: #d8f0ff;
+  --chat-user-chip: #c9ebff;
+  --chat-assistant-avatar: #efe6ff;
+  --chat-assistant-chip: #ded0ff;
+  --chat-error-avatar: #ffe1e1;
+  --chat-error-chip: #ffb4b4;
+  --chat-code-callout: #95f3bc;
+
   /* Semantic - Critical (Red) */
   --bad-light: #f87171;
   --bad-soft: rgba(239, 68, 68, 0.15);

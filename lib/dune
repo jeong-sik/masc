@@ -951,6 +951,9 @@
    opentelemetry.client
    ambient-context
    ambient-context-eio
+   ;; Autonomous engine sub-library (Tier B3-A4) used by Keeper post-turn wire-in (Tier A5)
+   masc_mcp.autonomous
+   masc_mcp.shared_types
    )
  (preprocess (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq ppx_let ppx_tla))
  (instrumentation (backend bisect_ppx)))

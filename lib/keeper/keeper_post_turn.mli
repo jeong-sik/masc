@@ -58,7 +58,14 @@ type overflow_retry_recovery =
 (** End-of-turn pipeline. Decides compaction, rolls over generations
     when the handoff gate fires, refreshes the continuity summary
     from the latest state snapshot, and persists the result to the
-    keeper meta + dashboard surface. *)
+    keeper meta + dashboard surface.
+
+    {b Tier A5} (Cycle 22): when the [MASC_AUTONOMOUS] environment
+    variable is on (see {!Autonomous.Wirein_helpers.masc_autonomous_enabled}),
+    the resulting [post_turn_lifecycle.checkpoint]'s working_context
+    is enriched with an ["autonomous_meta"] sub-tree carrying the
+    suspended {!Autonomous_bridge} state. Off-mode behaviour is
+    unchanged (zero impact). *)
 val apply_post_turn_lifecycle :
   on_compaction_started:(unit -> unit) ->
   on_handoff_started:(unit -> unit) ->

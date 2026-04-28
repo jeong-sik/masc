@@ -83,6 +83,75 @@ type overflow_retry_recovery = {
   turn_generation : int;
 } [@@warning "-69"]
 
+(* ── Tier A5: autonomous post-turn wire-in (Cycle 22) ──────────────
+   Feature-flag-gated, non-invasive layer. When [MASC_AUTONOMOUS] is
+   off (default), this is a pure pass-through — zero impact on the
+   existing post-turn lifecycle. When on, an [Autonomous_bridge] tick
+   is taken at the tail and the suspended state is upserted into
+   [working_context["autonomous_meta"]] of the OAS Checkpoint.
+
+   Failures inside the wire-in (resume parse error, tick exception)
+   do not propagate — they are logged and the unmodified lifecycle
+   result is returned, preserving the keeper's primary turn outcome. *)
+
+(* The two pure helpers ([masc_autonomous_enabled] / [upsert_autonomous_meta])
+   live in [lib/autonomous/wirein_helpers.{mli,ml}] so unit tests can
+   call them without depending on the full [masc_mcp] library. The
+   wire-in below dispatches through [Autonomous.Wirein_helpers]. *)
+
+let bridge_after_tick (bridge : Autonomous.Autonomous_bridge.t) ~now :
+    Autonomous.Autonomous_bridge.t =
+  match Autonomous.Autonomous_bridge.tick bridge ~now with
+  | Shared_types.Resilience_outcome.FullSuccess { value; _ } -> value
+  | Shared_types.Resilience_outcome.PartialSuccess { value; _ } -> value
+  | Shared_types.Resilience_outcome.GracefulFailure _ -> bridge
+
+let apply_autonomous_wirein
+    ~(now : float)
+    (lifecycle : post_turn_lifecycle) : post_turn_lifecycle =
+  if not (Autonomous.Wirein_helpers.masc_autonomous_enabled ()) then lifecycle
+  else
+    match lifecycle.checkpoint with
+    | None ->
+        (* No checkpoint to enrich; autonomous_meta has no host. *)
+        lifecycle
+    | Some cp -> (
+        try
+          let prev_meta_opt =
+            match cp.Oas.Checkpoint.working_context with
+            | Some (`Assoc kv) -> List.assoc_opt "autonomous_meta" kv
+            | _ -> None
+          in
+          let witness =
+            Autonomous.Autonomous_bridge.Witness.running_witness
+          in
+          let bridge =
+            match prev_meta_opt with
+            | Some prev_json -> (
+                match
+                  Autonomous.Autonomous_bridge.resume witness prev_json ~now
+                with
+                | Ok b -> b
+                | Error _ ->
+                    Autonomous.Autonomous_bridge.create witness ~now ())
+            | None -> Autonomous.Autonomous_bridge.create witness ~now ()
+          in
+          let bridge' = bridge_after_tick bridge ~now in
+          let suspended = Autonomous.Autonomous_bridge.suspend bridge' in
+          let new_wc =
+            Autonomous.Wirein_helpers.upsert_autonomous_meta
+              cp.Oas.Checkpoint.working_context suspended
+          in
+          let new_cp =
+            { cp with Oas.Checkpoint.working_context = new_wc }
+          in
+          { lifecycle with checkpoint = Some new_cp }
+        with exn ->
+          Log.Keeper.warn
+            "keeper:%s autonomous wire-in failed: %s"
+            lifecycle.updated_meta.name (Printexc.to_string exn);
+          lifecycle)
+
 let apply_post_turn_lifecycle
     ~(on_compaction_started : unit -> unit)
     ~(on_handoff_started : unit -> unit)
@@ -150,7 +219,7 @@ let apply_post_turn_lifecycle
             };
         }
   in
-  match checkpoint with
+  let body = match checkpoint with
   | None ->
       let updated_meta =
         map_runtime
@@ -335,6 +404,8 @@ let apply_post_turn_lifecycle
         context_max = rollover.context_max;
         message_count = rollover.message_count;
       }
+  in
+  apply_autonomous_wirein ~now:now_ts body
 
 let forced_overflow_retry_meta
     (meta : keeper_meta)

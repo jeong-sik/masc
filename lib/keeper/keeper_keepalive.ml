@@ -586,7 +586,13 @@ let interruptible_sleep ~clock ~stop ~wakeup duration =
   let rec wait remaining =
     if Atomic.get stop
     then ()
-    else if Atomic.compare_and_set wakeup true false
+    else if (* Spec: KeeperHeartbeat.tla HeartbeatTick action — wakeup is
+              consumed (TRUE -> FALSE) and the caller proceeds to dispatch.
+              MissedWakeup bug-action would have this compare_and_set
+              succeed without a follow-up turn; structural invariant is
+              that this branch returns immediately so the surrounding
+              loop can re-enter and dispatch on next tick. *)
+            Atomic.compare_and_set wakeup true false
     then ()
     else if remaining <= 0.0
     then ()
@@ -1824,6 +1830,36 @@ let record_keepalive_stage_timing
   timing_cursor := (!timing_cursor + 1) mod ring_sz;
   if !timing_filled < ring_sz then incr timing_filled
 ;;
+
+(* Spec navigation (OCaml -> TLA+) — plan §19 Cycle 27 anchor for
+   B1 (Heartbeat).  Authoritative spec mirror is
+   specs/keeper-state-machine/KeeperHeartbeat.tla (Cycle 7 / Tier B1,
+   PR #11408).
+
+   Spec line 4 cites this function "at line 1815"; the actual current
+   line is 1828 (drift of +13 since spec was authored, due to upstream
+   changes in this module).  Future spec PRs may re-anchor; until
+   then this comment is the authoritative reverse-direction citation.
+
+   Action mapping (TLA+ -> OCaml):
+     WakeupSignal     external code sets [wakeup] Atomic to true
+                      (e.g., wakeup_keeper / operator_resume).
+     HeartbeatTick    [interruptible_sleep] consumes the wakeup via
+                      [Atomic.compare_and_set wakeup true false] at
+                      this file line 589, then the loop body services
+                      the pending event.
+     TurnComplete     turn body finishes; loop returns to next sleep
+                      cycle.
+     MissedWakeup     bug action — the wakeup is observed and cleared
+                      but the loop fails to start a turn.  In OCaml
+                      this would be a regression where the
+                      compare_and_set succeeds but the surrounding
+                      branch returns early without dispatching.  The
+                      spec's NoMissedSignals invariant catches that
+                      drift; in code, the structural invariant is
+                      that every successful compare_and_set is
+                      followed by the dispatch path on the same loop
+                      iteration. *)
 
 let run_heartbeat_loop
       ~proactive_warmup_sec

@@ -1,3 +1,26 @@
+(* Receipt outcome classification. Tri-state mirrors the TLA+ spec
+   [ReceiptOutcomeSet] (see [specs/keeper-state-machine/
+   KeeperOutcomesConservation.tla]). The receipt record still stores
+   the legacy string for JSON compatibility; consumers and producers
+   that care about Cancelled vs Error must use these helpers to avoid
+   silently folding a cancellation into a failure. *)
+type outcome_kind = [ `Ok | `Error | `Cancelled ]
+
+let outcome_kind_to_string = function
+  | `Ok -> "ok"
+  | `Error -> "error"
+  | `Cancelled -> "cancelled"
+
+let outcome_kind_of_string = function
+  | "ok" -> Some `Ok
+  | "error" -> Some `Error
+  | "cancelled" -> Some `Cancelled
+  | _ -> None
+
+let outcome_kind_is_terminal_success = function
+  | `Ok -> true
+  | `Error | `Cancelled -> false
+
 type tool_surface =
   { turn_lane : string
   ; tool_surface_class : string
@@ -167,12 +190,18 @@ let operator_disposition (receipt : t) =
      error AND cascade reached the configured terminal. Any other fallthrough
      is an unmapped state — surface it as "unknown" so a new cascade_outcome
      or terminal_reason_code does not silently display as "healthy" on the
-     dashboard. See #9900 and CLAUDE.md anti-pattern #2. *)
-  else if
-    String.equal receipt.outcome "ok"
-    && String.equal cascade_outcome "completed"
-  then ("pass", "healthy")
-  else ("unknown", "unmapped_cascade_state")
+     dashboard. See #9900 and CLAUDE.md anti-pattern #2.
+
+     Cancelled is split out from the legacy binary outcome so dashboards
+     and replay decoders can distinguish a user-initiated cancellation
+     from a true failure. Spec parity with [ReceiptOutcomeSet] in
+     [specs/keeper-state-machine/KeeperOutcomesConservation.tla]. *)
+  else
+    match outcome_kind_of_string receipt.outcome with
+    | Some `Cancelled -> ("user_cancelled", "cancelled")
+    | Some `Ok when String.equal cascade_outcome "completed" ->
+      ("pass", "healthy")
+    | _ -> ("unknown", "unmapped_cascade_state")
 
 let to_json (receipt : t) =
   let operator_disposition, operator_disposition_reason =
@@ -226,7 +255,10 @@ let to_json (receipt : t) =
              ("target_kind", `String "keeper");
              ("target_path", string_opt_json receipt.sandbox_root);
            ])
-      ~success:(String.equal receipt.outcome "ok")
+      ~success:
+        (match outcome_kind_of_string receipt.outcome with
+         | Some kind -> outcome_kind_is_terminal_success kind
+         | None -> false (* unknown outcome: fail-closed *))
       ~duration_ms:(receipt_duration_ms receipt)
       ?error:receipt.error_message
       ~sandbox_target:receipt.sandbox_kind

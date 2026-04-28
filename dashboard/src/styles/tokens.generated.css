@@ -176,6 +176,10 @@
   --color-text-body: #c0d2f2;
   --color-text-muted: #a8bfdf;
   --color-text-dim: #a0a8b4;
+  --color-state-idle: #b8c0cc;
+  --color-state-offline: #7a8494;
+  --color-agent-working: #7ae09a;
+  --color-agent-busy: #f0c060;
   --color-vote-up: #ff4500;
   --color-vote-down: #7193ff;
   --color-vote-hover: #ccc;

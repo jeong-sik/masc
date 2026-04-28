@@ -10,6 +10,12 @@
     files land for those modules, this facade automatically picks up
     the tightened contract. *)
 
-include module type of Ids
-include module type of Types_core
-include module type of Types_auth
+(** Strengthened re-export: [module type of struct include M end]
+    forces manifest type identity through the facade
+    ([Types.task = Types_core.task = { ... }]), preventing nominal
+    drift when callers mix [open Types] with direct
+    [Types_core.<symbol>] references in [.mli] signatures. *)
+
+include module type of struct include Ids end
+include module type of struct include Types_core end
+include module type of struct include Types_auth end

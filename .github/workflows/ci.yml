@@ -691,6 +691,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
+      - name: Diagnose ratchet env (temporary)
+        run: |
+          echo "pwd=$(pwd)"
+          echo "which bash=$(which bash || echo MISSING)"
+          echo "ls scripts/ratchet-related:"
+          ls -la scripts/ocaml-structure-ratchet.sh scripts/ocaml-structure-baseline.json 2>&1 || true
+          echo "head scripts/ocaml-structure-ratchet.sh:"
+          head -3 scripts/ocaml-structure-ratchet.sh 2>&1 || true
+          echo "file scripts/ocaml-structure-ratchet.sh:"
+          file scripts/ocaml-structure-ratchet.sh 2>&1 || true
+
       - name: Run OCaml structure ratchet
         run: bash scripts/ocaml-structure-ratchet.sh
 

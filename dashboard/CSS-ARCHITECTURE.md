@@ -112,8 +112,81 @@ These are intentionally kept as raw CSS in their respective section files.
 
 The increase reflects better organization with headers, comments, and logical separation.
 
+## Two-tier palette governance (DS-Drift Phase 2 finding, 2026-04-28)
+
+DS-Drift Phase 1 audit (PR #11300, #11317) and Track C-β investigation
+(closed without commit) established that the dashboard runs **two
+intentionally separate color SSOTs**, not one SSOT with drift.
+
+### SSOT-1: `tokens/source.ts` -> `tokens.generated.css` (muted canon)
+
+- Codegen-driven, Tailwind v4 `@theme` form
+- "Status — muted, desaturated. Never neon. Locked canon." (source.ts)
+- Brass/warm-led palette; muted greens/ambers/reds for status
+- 79 named hex tokens, governed by `pnpm tokens:build`
+
+### SSOT-2: `dashboard/src/styles/variables.css` (live-surface bright)
+
+- Hand-written, loads **after** tokens.generated.css (cascades over)
+- Tailwind 400/500 family: `--ok: #4ade80`, `--warn: #fbbf24`, `--bad: #ef4444`, `--accent: #47b8ff`
+- variables.css comment confirms: "visual fidelity prefers consistency
+  with the live surface over the SPEC source's muted palette"
+- 40 hex defs; alpha ladders (`--accent-6/-8/-10/-12/-15/-18/-20/-30/-36/-45`),
+  RGB triplets for `rgb()/.alpha` syntax, semantic alias (`--bg-root`,
+  `--text-strong`, `--accent-soft` etc.)
+- Consumed by 30+ production CSS files via `var(--accent)` etc.
+
+**Naive `var()` substitution from variables.css to source.ts tokens
+shifts rendered colors** (RGB distance 7-96 between namesakes). This is
+a feature, not drift. Track C-beta was closed as no-op for this reason.
+
+### SSOT-3: `dashboard/src/styles/paper-theme.css` (paper theme variant)
+
+- Activated via `?theme=paper` or `localStorage.dashboardTheme = "paper"`
+- Scoped under `[data-theme="paper"]`
+- Source: "Anyang Sleepers Design System (colors_and_type.css)" — the
+  paper inversion of MASC. Maps every semantic role to warm-paper tokens
+- 32 unique hex (paper/ink/forest/brass/brick/ember/slate/plum/teal
+  family x 4 stop)
+- Currently bridges to the existing `--color-*` semantic vars so enabling
+  the theme swaps the palette with **zero component edits**
+- Lift to `tokens/source.ts` (as a "paper" theme chapter via codegen) is
+  a valid Phase 2 follow-up but not required — the file is already the
+  paper-theme SSOT in its own right
+
+### Phase 2 work classification matrix
+
+| Hex source | Action | Reason |
+|------------|--------|--------|
+| `tokens.generated.css` | none (codegen output) | source.ts is the SSOT |
+| `variables.css` | preserve as bright SSOT, document | intentional two-tier |
+| `paper-theme.css` | preserve OR lift-to-codegen (valid both) | paper variant SSOT |
+| `chat.css`, `board.css`, `ops.css`, `dashboard.css`, `global.css`, `a11y.css`, `base.css`, `live-monitor.css` raw hex (~22 total) | individual review per hex — `var()` if mapping exists, otherwise leave with TODO | true drift candidates |
+
+## Preview gallery — SPA hash routing (2026-04-28)
+
+`dashboard/design-system/preview/components.html` is a React 18 SPA
+loaded by `cb-root.jsx` + 12 `cb-group-*.jsx` modules. Native anchor
+scroll silently no-ops because the canvas (`DCViewport`) uses
+`transform: pan/zoom` inside `overflow:hidden`.
+
+`cb-root.jsx` includes a `HashBridge` component (lines 10-29) that
+listens for `hashchange` events and routes the hash into `setFocus`
+on the design canvas context. As a result, all `components.html#xxx`
+anchor links from `preview/index.html` work correctly — they focus
+the first artboard slot of the matched section.
+
+Audited 21 anchor IDs (`ide-backbone, ide-tree, ide-edit, ide-pr,
+ide-graph, ide-term, goal-zone, task-zone, account, board-zone, msgs,
+composer-v2, cascade, audit, safe-auto, cost, heur, keeper-v2,
+decisions, episodes, autoresearch`) — all present in cb-*.jsx and
+functional via HashBridge. **Do not assume "SPA = anchors broken"
+without checking HashBridge first.**
+
 ## Related
 
 - Issue #3915 - CSS refactoring
 - Issue #3912 - Duplicate CSS removal (predecessor)
 - Tailwind v4 documentation: https://tailwindcss.com/docs/v4-beta
+- DS-Drift Phase 0 audit: `dashboard/design-system/audits/2026-04-28-production-css-drift.md`
+- DS-Drift orphan triage: `dashboard/design-system/audits/2026-04-28-orphan-triage.md`

@@ -397,6 +397,18 @@ let direct_adapters =
           expand_auto = true;
           family = Generic;
         };
+      (* gemini-cli reads MCP servers only from ~/.gemini/settings.json or
+         project .gemini/settings.json (no --mcp-config flag — see
+         google-gemini/gemini-cli#3470 closed via PR #5481 which added
+         the [gemini mcp add] subcommand for the global file, and #4674
+         duplicate request for runtime override still unimplemented).
+         Even though the settings.json mcpServers schema accepts httpUrl
+         + headers (https://github.com/google-gemini/gemini-cli/blob/main/docs/tools/mcp-server.md),
+         masc-mcp emits per-keeper request-scoped policies that gemini-cli
+         cannot consume. OAS reflects this with a hardcoded reject in
+         lib/llm_provider/transport_gemini_cli.ml (runtime_mcp_policy = Some
+         _ branch). Keep this false until upstream adds per-invocation
+         MCP config injection. See masc-mcp#11356 for full analysis. *)
       tool_policy = no_tool_http_headers;
       telemetry_policy = telemetry_usage_missing_runtime_reported;
     };

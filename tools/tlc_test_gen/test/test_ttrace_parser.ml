@@ -111,6 +111,21 @@ let () =
       must_contain ~ctx:"emit_reachability"
         reach "List.assoc_opt \"turn_phase\" last = Some (Tlc_test_gen.Ttrace_parser.V_string \"failed\")";
 
+      (* emit_test_runner — self-contained PPX-free module (Cycle 22). *)
+      let runner = Tlc_test_gen.Ocaml_emit.emit_test_runner st in
+      must_contain ~ctx:"emit_test_runner module alias"
+        runner "module T = Tlc_test_gen.Ttrace_parser";
+      must_contain ~ctx:"emit_test_runner trace literal type"
+        runner "let trace : (string * T.value) list list";
+      must_contain ~ctx:"emit_test_runner short value ctor"
+        runner "T.V_string \"failed\"";
+      must_contain ~ctx:"emit_test_runner ok call"
+        runner "ok \"turn_phase\" (T.V_string \"failed\")";
+      must_contain ~ctx:"emit_test_runner exit 1"
+        runner "exit 1";
+      must_contain ~ctx:"emit_test_runner PASS print"
+        runner "print_endline \"PASS [SampleInv_TTrace_1700000000]\"";
+
       (* ---- Nested record fixture (Cycle 21 follow-up) ---- *)
       (match parse_file (fixture "nested_record.tla") with
        | Error msg ->

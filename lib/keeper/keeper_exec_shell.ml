@@ -593,8 +593,8 @@ let run_docker_with_git_bash = Keeper_shell_docker.run_docker_with_git_bash
 let run_docker_hardened_bash = Keeper_shell_docker.run_docker_hardened_bash
 
 let handle_keeper_bash
-      ~(turn_sandbox_runtime : Keeper_turn_sandbox_runtime.t option)
-      ~(turn_sandbox_runtime_git : Keeper_turn_sandbox_runtime.t option)
+      ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
+      ~(turn_sandbox_factory_git : Keeper_sandbox_factory.t option)
       ~(exec_cache : Masc_exec.Exec_cache.t option)
       ~(config : Coord.config)
       ~(meta : keeper_meta)
@@ -774,14 +774,18 @@ let handle_keeper_bash
         ~labels:[ ("keeper", meta.name); ("detected_tool", detected_tool) ]
         ();
       run_docker_with_git_bash
-        ~turn_sandbox_runtime:turn_sandbox_runtime_git
+        ~turn_sandbox_runtime:
+          (Keeper_sandbox_factory.resolve_opt
+             turn_sandbox_factory_git ~cwd)
         ~config ~meta ~cwd ~timeout_sec ~cmd ())
     else if sandbox_profile = Docker then (
       Log.Keeper.info
         "DOCKER_EXEC: keeper=%s cwd=%s cmd=%s network=%s"
         meta.name cwd cmd_for_log (network_mode_to_string sandbox_network_mode);
       run_docker_hardened_bash
-        ~turn_sandbox_runtime
+        ~turn_sandbox_runtime:
+          (Keeper_sandbox_factory.resolve_opt
+             turn_sandbox_factory ~cwd)
         ~config ~meta ~cwd ~timeout_sec ~cmd
         ~network_mode:sandbox_network_mode)
     else
@@ -1296,7 +1300,7 @@ let gh_repo_context_error_json = Keeper_shell_gh_context.gh_repo_context_error_j
 let resolve_gh_repo_context = Keeper_shell_gh_context.resolve_gh_repo_context
 
 let handle_keeper_shell
-      ~(turn_sandbox_runtime : Keeper_turn_sandbox_runtime.t option)
+      ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
       ~(exec_cache : Masc_exec.Exec_cache.t option)
       ~(config : Coord.config)
       ~(meta : keeper_meta)
@@ -1473,7 +1477,7 @@ let handle_keeper_shell
       | Ok cpath -> (
           match
             Keeper_docker_read.run_command_in_container_with_status
-              ?turn_sandbox_runtime
+              ?turn_sandbox_factory
               ~ok_exit_codes ~config ~meta ~command_argv:(command_argv cpath)
               ~max_bytes ~timeout_sec ()
           with
@@ -1489,7 +1493,7 @@ let handle_keeper_shell
   in
   let run_in_turn_runtime ?(ok_exit_codes = [ 0 ]) ~cwd ~cmd ~command_argv
       ~max_bytes ~timeout_sec ?(map_output = fun out -> out) ?(extra = []) () =
-    match turn_sandbox_runtime with
+    match Keeper_sandbox_factory.resolve_opt turn_sandbox_factory ~cwd with
     | Some runtime ->
       (match
          Keeper_turn_sandbox_runtime.run_command_with_status
@@ -1598,7 +1602,7 @@ let handle_keeper_shell
           | Ok cpath ->
             (match
                Keeper_docker_read.run_command_in_container
-                 ?turn_sandbox_runtime ~config ~meta
+                 ?turn_sandbox_factory ~config ~meta
                  ~command_argv:[ "ls"; "-la"; cpath ]
                  ~max_bytes:1_000_000
                  ~timeout_sec:io_timeout_sec
@@ -1643,7 +1647,7 @@ let handle_keeper_shell
        if Keeper_docker_read.should_route_read ~meta then
          (match
             Keeper_docker_read.read_file_in_container
-              ?turn_sandbox_runtime ~config ~meta
+              ?turn_sandbox_factory ~config ~meta
               ~host_path:target ~max_bytes
               ~timeout_sec:read_timeout_sec
               ()
@@ -1793,7 +1797,7 @@ let handle_keeper_shell
              Printf.sprintf "-%d" count ]
          in
          let argv = if file_path <> "" then base_argv @ [ "--"; file_path ] else base_argv in
-         (match turn_sandbox_runtime with
+         (match Keeper_sandbox_factory.resolve_opt turn_sandbox_factory ~cwd with
           | Some runtime ->
             let argv =
               let base_argv =
@@ -2100,7 +2104,7 @@ let handle_keeper_shell
         | Error e -> path_error e
         | Ok cwd ->
           let wt_out_result =
-            match turn_sandbox_runtime with
+            match Keeper_sandbox_factory.resolve_opt turn_sandbox_factory ~cwd with
             | Some runtime ->
               Keeper_turn_sandbox_runtime.run_command runtime
                 ~cwd
@@ -2203,7 +2207,7 @@ let handle_keeper_shell
            (match Worker_dev_tools.validate_command_paths ~workdir:cwd cmd_str with
             | Error e -> path_error e
             | Ok () ->
-              (* PR #11080 sibling sweep: when [turn_sandbox_runtime]
+              (* PR #11080 sibling sweep: when [turn_sandbox_factory]
                  is bound the bash exec runs inside the keeper's
                  container, so the LLM-facing [cwd] field must hold
                  the in-container path.  When the runtime is absent
@@ -2211,7 +2215,7 @@ let handle_keeper_shell
                  keeper sees and the [Local] variant passes it
                  through unchanged. *)
               let cwd_response =
-                match turn_sandbox_runtime with
+                match Keeper_sandbox_factory.resolve_opt turn_sandbox_factory ~cwd with
                 | Some runtime ->
                   Keeper_cwd_response.docker ~host_cwd:cwd
                     ~container_cwd:
@@ -2250,7 +2254,7 @@ let handle_keeper_shell
                   | None ->
                     let t0 = Unix.gettimeofday () in
                     let st, out =
-                      match turn_sandbox_runtime with
+                      match Keeper_sandbox_factory.resolve_opt turn_sandbox_factory ~cwd with
                       | Some runtime ->
                         (match
                            Keeper_turn_sandbox_runtime.run_bash_with_status runtime
@@ -2308,7 +2312,7 @@ let handle_keeper_shell
                            ()))
                | None ->
                  let st, out =
-                   match turn_sandbox_runtime with
+                   match Keeper_sandbox_factory.resolve_opt turn_sandbox_factory ~cwd with
                    | Some runtime ->
                      (match
                         Keeper_turn_sandbox_runtime.run_bash_with_status runtime

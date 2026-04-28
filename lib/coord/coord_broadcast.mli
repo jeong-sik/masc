@@ -1,9 +1,8 @@
-(** coord_broadcast inferred mli **)
+(** Coord broadcast — emit room-wide messages and the
+    accompanying message-activity event. *)
 
 open Types
 open Coord_utils
-
-
 
 val emit_message_activity : Coord_utils_backend_setup.config ->
            from_agent:string ->

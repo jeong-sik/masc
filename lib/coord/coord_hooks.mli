@@ -1,4 +1,10 @@
-(** coord_hooks inferred mli **)
+(** Coord lifecycle hook registry.
+
+    Atomic refs filled at boot by the runtime so the coord layer
+    can call back into keeper / agent / economy / relation
+    subsystems without a static dependency. Default values are
+    no-ops; the runtime overrides each ref via the wiring in
+    [lib/coord.ml]. *)
 
 open Types
 

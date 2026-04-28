@@ -1,8 +1,7 @@
-(** coord_identity inferred mli **)
+(** Coord identity helpers — session id, hostname, tty, and
+    agent-name resolution. *)
 
 open Coord_utils
-
-
 
 val generate_session_id : unit -> string
 val get_hostname : unit -> string option

@@ -181,6 +181,13 @@
   --state-offline: #7a8494;  /* Keeper offline / unreachable */
   --agent-working: #7ae09a;  /* Agent actively running */
   --agent-busy: #f0c060;  /* Agent busy / queued */
+  --chat-user-avatar: #d8f0ff;  /* Chat user avatar tint */
+  --chat-user-chip: #c9ebff;  /* Chat user message chip */
+  --chat-assistant-avatar: #efe6ff;  /* Chat assistant avatar tint */
+  --chat-assistant-chip: #ded0ff;  /* Chat assistant message chip */
+  --chat-error-avatar: #ffe1e1;  /* Chat error avatar tint */
+  --chat-error-chip: #ffb4b4;  /* Chat error message chip */
+  --chat-code-callout: #95f3bc;  /* Chat inline code callout (bright mint) */
   --vote-up: #ff4500;  /* Reddit-canonical upvote orange-red */
   --vote-down: #7193ff;  /* Reddit-canonical downvote blue-violet */
   --vote-hover: #ccc;  /* Vote button hover (3-digit short hex) */

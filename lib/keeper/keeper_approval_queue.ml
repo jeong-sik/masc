@@ -9,6 +9,38 @@
     This replaces the manual "pending_approval" state machine with
     actual execution-level suspension using Eio structured concurrency.
 
+    Spec navigation (OCaml -> TLA+) — plan §19 Cycle 29 anchor for
+    B3 (Approval Queue).  Authoritative spec mirror is
+    [specs/keeper-state-machine/KeeperApprovalQueue.tla] (Cycle 9 /
+    Tier B3, PR #11417).
+
+    Spec lines 5-6 already cite this module:
+    "[submit_and_await] at line 751, [submit_pending] at line 772,
+    [expire_stale] at line 941".  This block is the reverse-direction
+    citation so code search for "KeeperApprovalQueue" lands here.
+
+    Action mapping (TLA+ -> OCaml):
+      Submit                 [submit_and_await] (~line 751) /
+                             [submit_pending] (~line 772) record a
+                             new pending entry and suspend the fiber
+                             on [Eio.Promise.await].
+      Resolve                operator approves/rejects via the HTTP
+                             handler in [server_dashboard_http.ml],
+                             which calls [resolve] on the queue and
+                             wakes the suspended fiber.
+      ExpireStale            [expire_stale] (~line 941) sweeps
+                             timed-out entries and forces
+                             [Eio.Promise.resolve resolver (Reject ...)]
+                             so no fiber is left blocked indefinitely.
+      ExpireStaleNoResolve   bug action — entries are removed from
+                             [pending] without resolving the promise.
+                             Spec invariants SuspensionMatchesPending
+                             and QuiescentImpliesResolved catch this;
+                             in code, the structural invariant is
+                             that every removal from [pending] is
+                             paired with an [Eio.Promise.resolve]
+                             on the same control-flow path.
+
     @since 2.262.0 (#5907) *)
 
 (* ── Types ────────────────────────────────────────────────── *)

@@ -1046,6 +1046,40 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
     ?(semaphore_wait_ms = 0)
     ?shared_context
     () : (keeper_meta, Oas.Error.sdk_error) result =
+  (* Spec navigation (OCaml -> TLA+) — plan §19 Cycle 28 anchor for
+     B2 (Task Acquisition).  Authoritative spec mirror is
+     specs/keeper-state-machine/KeeperTaskAcquisition.tla (Cycle 8 /
+     Tier B2, PR #11412).
+
+     Spec line 3 already cites this function: "[run_keeper_cycle]
+     (line 1042+)".  This block is the reverse-direction citation
+     so code search for "KeeperTaskAcquisition" lands here.
+
+     Action mapping (TLA+ -> OCaml):
+       SubmitTask        external producers (operator, supervisor,
+                         autoresearch, board) populate
+                         [observation.pending_*] before this function
+                         is called.
+       AssignTask        below (~line 2559) the channel decision —
+                         [observation.pending_mentions <> []] OR
+                         [pending_board_events <> []] OR
+                         [pending_scope_messages <> []] picks
+                         channel = "turn", which is the OCaml form of
+                         spec's AssignTask.
+       EmptyQueueSleep   the [else] branch picks
+                         "scheduled_autonomous", which exits the
+                         claim-and-finish path for this cycle.
+       TurnComplete      the [run_turn] body finishes and returns a
+                         [keeper_meta] result; control falls through
+                         to the next observation cycle.
+       TaskRejected      bug action — claimed task is dropped without
+                         a finish.  Spec invariant NoTaskOrphan
+                         catches this; in code, the invariant is
+                         that every "turn" channel claim eventually
+                         reaches one of [Ok updated_meta] /
+                         [Error sdk_error].  Silent-drop regressions
+                         (early return without recording the turn
+                         outcome) would violate the spec. *)
   (* 0. Phase gate + state-aware cascade routing.
      The gate owns turn executability; select_cascade remains a total helper
      so dashboards/tests can inspect the same routing contract for blocked
@@ -2555,6 +2589,10 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             ~keeper_name:updated_meta.Keeper_types.name
             ~speech_act:updated_meta.Keeper_types.runtime.last_speech_act;
           (try
+             (* Spec: KeeperTaskAcquisition.tla AssignTask vs
+                EmptyQueueSleep — non-empty queue picks "turn"
+                (claim-and-finish path), empty picks
+                "scheduled_autonomous" (no claim this cycle). *)
              let channel =
                if observation.pending_mentions <> []
                   || observation.pending_board_events <> []

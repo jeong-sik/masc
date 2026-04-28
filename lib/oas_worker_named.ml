@@ -298,38 +298,60 @@ let resolve_tool_capable_provider_across_cascades
   match Cascade_catalog_runtime.known_profile_names ~sw ~net () with
   | Error _ -> None
   | Ok all_names ->
-      all_names
-      |> List.filter (fun name -> name <> exclude_cascade)
-      |> List.filter_map (fun cascade_name ->
-           match Cascade_catalog_runtime.resolve_named_providers ~sw ~net
-                   ~require_tool_choice_support ~require_tool_support
-                   ?runtime_mcp_policy
-                   ~cascade_name ()
-           with
-           | Error _ -> None
-           | Ok providers ->
-               let filtered =
-                 filter_candidate_providers_for_tool_support
-                   ~keeper_name ?runtime_mcp_policy ~tools
-                   ~require_tool_choice_support ~require_tool_support
-                   ~label:cascade_name providers
-               in
-               match filtered with
-               | [] -> None
-               | _ -> Some (cascade_name, filtered))
-      |> List.concat_map (fun (cascade_name, providers) ->
-           providers |> List.map (fun p -> (cascade_name, p)))
-      |> List.filter (fun (_, (p : Llm_provider.Provider_config.t)) ->
-           not (Cascade_health_tracker.is_in_cooldown
-                  Cascade_health_tracker.global ~provider_key:p.model_id))
-      |> List.sort (fun (_, (a : Llm_provider.Provider_config.t))
-                         (_, (b : Llm_provider.Provider_config.t)) ->
-           Float.compare
-             (Cascade_health_tracker.success_rate
-                Cascade_health_tracker.global ~provider_key:b.model_id)
-             (Cascade_health_tracker.success_rate
-                Cascade_health_tracker.global ~provider_key:a.model_id))
-      |> (function [] -> None | x :: _ -> Some x)
+      let assignable_names =
+        Keeper_cascade_profile.keeper_catalog_names ()
+      in
+      let assignable_set =
+        List.fold_left (fun acc n -> n :: acc) [] assignable_names
+      in
+      let is_keeper_assignable name = List.mem name assignable_set in
+      let scored_candidates =
+        all_names
+        |> List.filter (fun name -> name <> exclude_cascade)
+        |> List.filter_map (fun cascade_name ->
+             match Cascade_catalog_runtime.resolve_named_providers ~sw ~net
+                     ~require_tool_choice_support ~require_tool_support
+                     ?runtime_mcp_policy
+                     ~cascade_name ()
+             with
+             | Error _ -> None
+             | Ok providers ->
+                 let filtered =
+                   filter_candidate_providers_for_tool_support
+                     ~keeper_name ?runtime_mcp_policy ~tools
+                     ~require_tool_choice_support ~require_tool_support
+                     ~label:cascade_name providers
+                 in
+                 match filtered with
+                 | [] -> None
+                 | _ -> Some (cascade_name, filtered))
+        |> List.concat_map (fun (cascade_name, providers) ->
+             let keeper_assignable = is_keeper_assignable cascade_name in
+             providers
+             |> List.map (fun (provider : Llm_provider.Provider_config.t) ->
+                  let score =
+                    Cascade_inventory.score_provider
+                      Cascade_health_tracker.global
+                      ~exclude:[]
+                      ~keeper_assignable
+                      provider
+                  in
+                  Cascade_inventory.{ cascade_name; provider; score }))
+      in
+      (* The score_provider helper already collapses cooldown,
+         keeper_assignable, and the success × latency composition into a
+         single [0.0–1.0] number; best_runner_among picks the strict
+         positive max with deterministic tie-break.  This replaces the
+         pre-PR4 sort that ranked solely by success_rate (which left
+         slow-but-alive providers indistinguishable from fast ones, and
+         did not exclude non-keeper-assignable cascades like
+         [governance_judge] from a regular keeper's fallback pool). *)
+      Cascade_inventory.best_runner_among
+        ~health:Cascade_health_tracker.global
+        ~exclude:[]
+        scored_candidates
+      |> Option.map (fun (sp : Cascade_inventory.scored_provider) ->
+           (sp.cascade_name, sp.provider))
 
 type masc_internal_error =
   | Cascade_exhausted of {

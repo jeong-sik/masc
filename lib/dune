@@ -48,6 +48,7 @@
    cascade_fsm
    cascade_health_filter
    cascade_health_tracker
+   cascade_inventory
    cascade_model_resolve
    cascade_ollama_probe
    cascade_runtime

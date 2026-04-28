@@ -213,3 +213,82 @@ let _ : Deriving.t =
     Deriving.Generator.V2.make_noarg sig_type_decl
   in
   Deriving.add "tla" ~str_type_decl ~sig_type_decl
+
+(* ── [@fsm_guard "<OCaml-bool-expr>"] (Cycle 12 / Tier I3) ──────────────
+
+   Marks an OCaml [let]-binding (typically a state-machine transition
+   function) with a TLA+-style enablement guard. The PPX rewrites the
+   binding so that, whenever the function body is *invoked*, the guard
+   is asserted before the original body runs.
+
+   Example:
+     let start_turn state input = body
+       [@@fsm_guard "state.phase = `Idle && not state.stop_signaled"]
+
+   becomes (conceptually):
+     let start_turn state input =
+       assert (state.phase = `Idle && not state.stop_signaled);
+       body
+
+   For curried definitions ([let f x y = body]) the assert is injected
+   into the innermost lambda body, so it fires per-application rather
+   than per-partial-application.
+
+   Constant ([non-lambda]) bindings get the assert evaluated at
+   binding-creation time (rare in practice for FSM transition tables).
+
+   Honest about scope: this is a lightweight runtime check that only
+   fires when execution reaches the function. It is NOT TLC's exhaustive
+   model check — for that, use the TLA+ spec under [specs/]. The two
+   are complementary: TLC proves the spec, [@fsm_guard] catches a
+   runtime divergence between OCaml caller and OCaml callee. *)
+
+let parse_guard_expression ~loc s =
+  let lexbuf = Lexing.from_string s in
+  Lexing.set_position lexbuf loc.Location.loc_start;
+  try Parse.expression lexbuf
+  with _exn ->
+    Location.raise_errorf ~loc
+      "[@@fsm_guard]: payload is not a valid OCaml boolean expression: %S"
+      s
+
+let rec inject_into_body assert_expr expr =
+  match expr.pexp_desc with
+  | Pexp_fun (label, default, pat, body) ->
+      let new_body = inject_into_body assert_expr body in
+      { expr with pexp_desc = Pexp_fun (label, default, pat, new_body) }
+  | Pexp_function _ ->
+      (* OCaml 5.4 pexp_function with parameter list — wrap whole expr
+         since unwrapping the parameter list is non-portable. The runtime
+         semantics are the same as for non-function bindings. *)
+      Ast_builder.Default.pexp_sequence ~loc:expr.pexp_loc assert_expr expr
+  | _ ->
+      Ast_builder.Default.pexp_sequence ~loc:expr.pexp_loc assert_expr expr
+
+let fsm_guard_attr =
+  Attribute.declare "ppx_tla.fsm_guard"
+    Attribute.Context.value_binding
+    Ast_pattern.(single_expr_payload (estring __))
+    (fun s -> s)
+
+class fsm_guard_mapper =
+  object (_self)
+    inherit Ast_traverse.map as super
+
+    method! value_binding vb =
+      let vb = super#value_binding vb in
+      match Attribute.get fsm_guard_attr vb with
+      | None -> vb
+      | Some expr_str ->
+          let loc = vb.pvb_loc in
+          let parsed = parse_guard_expression ~loc expr_str in
+          let assert_expr =
+            Ast_builder.Default.pexp_assert ~loc parsed
+          in
+          let new_expr = inject_into_body assert_expr vb.pvb_expr in
+          { vb with pvb_expr = new_expr }
+  end
+
+let () =
+  Driver.register_transformation "ppx_tla.fsm_guard"
+    ~impl:(new fsm_guard_mapper)#structure

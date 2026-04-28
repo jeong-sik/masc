@@ -159,9 +159,8 @@ val with_file_lock_r :
 
 (** {1 Event logging} *)
 
-(** Append [event_line] (a JSON-shaped string, callers hand-build via
-    [Printf.sprintf]) to the YYYY-MM/DD.jsonl event log under
-    [.masc/events/]. The implementation appends a literal "\n" via
-    string concatenation; passing a [Yojson.Safe.t] would not match
-    that interface and would also break every existing caller. *)
-val log_event : config -> string -> unit
+(** Append [event_json], serialized via [Yojson.Safe.to_string], to the
+    YYYY-MM/DD.jsonl event log under [.masc/events/]. PR #11507 migrated
+    the implementation and every caller to typed JSON; the .mli must
+    track. *)
+val log_event : config -> Yojson.Safe.t -> unit

@@ -10,5 +10,9 @@ let () =
            prerr_endline ("tlc_test_gen: " ^ msg);
            exit 1
        | Ok state ->
-           print_string (Tlc_test_gen.Ocaml_emit.emit_let_test state))
+           print_string (Tlc_test_gen.Ocaml_emit.emit_let_test state);
+           print_newline ();
+           print_string (Tlc_test_gen.Ocaml_emit.emit_trace state);
+           print_newline ();
+           print_string (Tlc_test_gen.Ocaml_emit.emit_let_test_reachability state))
   | _ -> usage ()

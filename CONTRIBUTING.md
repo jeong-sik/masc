@@ -207,7 +207,8 @@ Cross-model review evidence should use direct `sb glm-text` when available. If a
 
 ### MODEL Cascade
 
-- Slots tried in order: GLM → Gemini → Claude
+- Runtime order is controlled by `Provider_registry` and `config/cascade.json` (hot-reloaded)
+- The hardcoded fallback order when `cascade.json` is absent: ollama → GLM → anthropic → gemini → openai_compat → claude_code → …
 - If a slot returns empty or errors, the next slot is tried
 - Claude API keys are rotated round-robin per heartbeat tick
 - Configuration in `config/cascade.json`, hot-reloaded by mtime check

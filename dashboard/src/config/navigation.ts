@@ -168,6 +168,12 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       params: { section: 'safe-autonomy' },
     },
     {
+      id: 'cost',
+      label: '비용 / 지연',
+      description: '모델별 토큰·비용·latency 를 한 화면에서 봅니다. 어디에 돈이 들고 어디가 느린지 빠르게 스캔합니다.',
+      params: { section: 'cost' },
+    },
+    {
       id: 'memory-subsystems',
       label: '기억 서브시스템',
       description: 'Hebbian 시냅스 그래프, 에피소드 기록, compaction 상태.',

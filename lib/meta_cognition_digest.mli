@@ -9,17 +9,35 @@
     [Meta_cognition.latest_digest_json] (the dashboard's
     namespace-truth path) or directly via this module.
 
-    Internal helpers ([digest_hearth] / [digest_source] string
-    constants, the [post_digest_key] meta extractor, and the
+    The [digest_hearth] / [digest_source] string constants and the
+    [post_digest_key] meta extractor are exposed because
+    {!Meta_cognition} (which does [include Meta_cognition_digest])
+    re-exports them at the dashboard's namespace-truth path; the
     [latest_digest_post] intermediate that returns
-    [(post * digest_key)] tuples) are hidden — callers consume
-    only the typed reference accessor and the JSON projection.
+    [(post * digest_key)] tuples stays hidden — callers consume the
+    typed reference accessor and the JSON projection.
 
     @since God file decomposition — extracted from
     meta_cognition.ml *)
 
+val digest_hearth : string
+(** Pinned to ["meta-cognition"] — the board hearth namespace
+    digest posts live under. Operator runbooks grep on the literal
+    string. *)
+
+val digest_source : string
+(** Pinned to ["meta_cognition_digest"] — the [meta.source] field
+    value used to identify digest posts on the board. *)
+
+val post_digest_key : Board.post -> string option
+(** [post_digest_key post] returns [Some key] when the post has a
+    [meta.source] equal (case-insensitive trim) to
+    {!digest_source} and a [meta.digest_key] string field; [None]
+    otherwise. Used by {!latest_digest_ref} to pick the most recent
+    post-with-key on the digest hearth. *)
+
 val latest_digest_ref :
-  ?summary:Meta_cognition_types.summary ->
+  ?summary:Meta_cognition_types.summary_input ->
   unit ->
   Meta_cognition_types.digest_ref option
 (** Look up the most recent digest post on the
@@ -34,7 +52,7 @@ val latest_digest_ref :
     summary; otherwise [matches_summary] is [false]. *)
 
 val latest_digest_json :
-  ?summary:Meta_cognition_types.summary ->
+  ?summary:Meta_cognition_types.summary_input ->
   unit ->
   Yojson.Safe.t
 (** {!latest_digest_ref} projected to a JSON object with the

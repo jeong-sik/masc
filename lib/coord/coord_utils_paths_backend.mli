@@ -49,8 +49,13 @@ val backend_set :
 val backend_delete :
   config -> key:string -> (bool, Backend_types.error) result
 
+(** [backend_exists config ~key] returns whether [key] is present in
+    the configured backend. The implementation delegates to
+    [Backend.{Memory,FileSystem}.exists], both of which return [bool]
+    (validation errors are mapped to [false]); no [Result] wrapper is
+    propagated. *)
 val backend_exists :
-  config -> key:string -> (bool, Backend_types.error) result
+  config -> key:string -> bool
 
 val backend_list_keys :
   config -> prefix:string -> (string list, Backend_types.error) result
@@ -111,6 +116,15 @@ val root_key_of_path : config -> string -> string option
 val list_dir : config -> string -> string list
 
 (** {1 Initialization check} *)
+
+(** Path to the canonical cluster-root state file
+    ([<masc_root>/root-state.json]). Callers (coord_init,
+    coord_bootstrap) need this to gate one-time initialization. *)
+val root_state_path : config -> string
+
+(** Backend-key prefix for the current room's broadcast/lock namespace.
+    Used by coord_broadcast and Memory-backend-aware key composition. *)
+val project_prefix : config -> string
 
 (** [true] iff the cluster-root state file exists (independent of
     the current room). Used by room/cluster management features. *)

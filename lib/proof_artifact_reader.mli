@@ -12,9 +12,6 @@ val resolve_path :
   Agent_sdk.Cdal_proof.artifact_ref ->
   (string, string) result
 
-(** Root directory for proof-store artifacts under the configured store. *)
-val proofs_root : Agent_sdk.Proof_store.config -> string
-
 (** Resolve a relative artifact path under a run directory.
     Returns [Error] when the run id or relative path attempts traversal. *)
 val run_artifact_path :

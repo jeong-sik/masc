@@ -175,6 +175,9 @@ type semantic =
   | `Indigo
   | `Yellow_bright
   | `Amber_bright
+  | `Rose
+  | `Rose_fg
+  | `Rose_light
   | `Ok_soft
   | `Ok_fg
   | `Ok_border

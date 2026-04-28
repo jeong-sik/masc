@@ -318,6 +318,15 @@ export const raw: ReadonlyArray<TokenBase> = (() => {
   out.push(t("yellow-bright",  "#facc15", "raw", "color", "Tailwind yellow-400 alias (kept short name)"));
   out.push(t("amber-bright",   "#f59e0b", "raw", "color", "Tailwind amber-500 alias (kept short name)"));
 
+  // Iter 2c-3: rose family. Pink-red shades distinct from the bright/
+  // muted status canon (--bad / --bad-light). Use-sites call them by
+  // existing short names; companion alpha variants (--rose-10,
+  // --rose-28) stay hand-authored in variables.css per the lift policy
+  // introduced in Iter 2c-2.
+  out.push(t("rose",           "#f43f5e", "raw", "color", "Tailwind rose-500 alias"));
+  out.push(t("rose-fg",        "#fecdd3", "raw", "color", "Tailwind rose-200 alias"));
+  out.push(t("rose-light",     "#fb7185", "raw", "color", "Tailwind rose-400 alias"));
+
   return Object.freeze(out);
 })();
 

@@ -164,6 +164,9 @@ type semantic =
   | `Indigo
   | `Yellow_bright
   | `Amber_bright
+  | `Rose
+  | `Rose_fg
+  | `Rose_light
   | `Ok_soft
   | `Ok_fg
   | `Ok_border
@@ -555,6 +558,9 @@ let name_of = function
   | `Indigo -> "indigo"
   | `Yellow_bright -> "yellow-bright"
   | `Amber_bright -> "amber-bright"
+  | `Rose -> "rose"
+  | `Rose_fg -> "rose-fg"
+  | `Rose_light -> "rose-light"
   | `Ok_soft -> "ok-soft"
   | `Ok_fg -> "ok-fg"
   | `Ok_border -> "ok-border"

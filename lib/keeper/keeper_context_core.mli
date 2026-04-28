@@ -198,6 +198,36 @@ val load_latest_checkpoint : session_context -> checkpoint option
 val context_of_legacy_checkpoint :
   checkpoint -> primary_model_max_tokens:int -> working_context
 
+val default_max_checkpoint_tool_result_chars : int
+(** Per-tool-result text cap (in chars) applied when projecting
+    Anthropic [tool_result] blocks into a checkpoint. Beyond this
+    threshold the payload collapses to a stub so a single
+    orphan-repair pass cannot inflate one block to multi-MB. *)
+
+val tool_result_text_of_block :
+  tool_use_id:string ->
+  content:string ->
+  json:Yojson.Safe.t option ->
+  string
+(** Project a [tool_result] block to its on-checkpoint string form,
+    applying {!default_max_checkpoint_tool_result_chars}. Exposed so
+    [test_keeper_context_core_dedup] can pin the dedup contract
+    without re-implementing the projection. *)
+
+val sanitize_checkpoint_message :
+  Oas.Types.message -> Oas.Types.message option * checkpoint_sanitize_stats
+(** Apply the per-message portion of {!sanitize_oas_checkpoint}: cap
+    Text and tool_result blocks, drop empties, return the cleaned
+    message (or [None] if every block was dropped) plus its stats.
+    Exposed so [test_keeper_lifecycle] can pin the sanitization
+    contract block-by-block. *)
+
+val checkpoint_text_cap_marker : string
+(** Sentinel suffix appended to a Text or tool_result block when the
+    sanitizer truncates it (newline followed by the [capped] marker).
+    Tests assert against this literal so the marker is part of the
+    public contract. *)
+
 (** Pick the keeper's preferred model for checkpointing —
     canonical cascade name first, then a fallback list of
     provider-default labels. *)

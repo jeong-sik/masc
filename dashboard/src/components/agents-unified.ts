@@ -14,6 +14,7 @@ import { RouteLink } from './common/route-link'
 import { namespaceTruth } from '../namespace-truth-store'
 import { resolveRuntimeCounts } from '../runtime-counts'
 import { KeeperSpawnPanel } from './keeper-spawn/keeper-spawn-panel'
+import { KeeperTokenStats } from './keeper-token-stats'
 import { FsmHub } from './fsm-hub'
 import { FleetFsmMatrix } from './fleet-fsm-matrix'
 import { HandoffTimeline } from './handoff-timeline'
@@ -109,6 +110,8 @@ export function AgentsUnified() {
         ? html`<${FleetAndFsmHubPanel} />`
         : html`
           ${currentView !== 'agents' ? html`<${KeeperSpawnPanel} />` : null}
+
+          ${currentView === 'keepers' ? html`<${KeeperTokenStats} />` : null}
 
           <${AgentRoster}
             keeperFilter=${currentView === 'keepers' ? 'keeper-only'

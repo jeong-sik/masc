@@ -15,8 +15,12 @@ import {
 import { navigate } from '../../router'
 import {
   groupedByHorizon,
+  horizonProgress,
+  formatProgressPct,
 } from './goal-helpers'
 import { TaskBacklog } from './kanban-components'
+import { TaskStaleAlert } from './task-stale-alert'
+import { TaskWall } from './task-wall'
 import { TaskCreateForm } from '../task-manage/task-create-form'
 
 const QUICK_START_DOC_URL = 'https://github.com/jeong-sik/masc-mcp/blob/main/docs/QUICK-START.md'
@@ -196,6 +200,7 @@ export function Planning() {
   const highPriority = [...todo, ...inProgress].filter(t => (t.priority ?? 4) <= 2).length
 
   const grouped = groupedByHorizon.value
+  const hp = horizonProgress.value
   const hasGoals = goals.value.length > 0
   const onlyBacklogActive = totalTasks > 0 && !hasGoals
   const planStatusHeadline = onlyBacklogActive
@@ -261,7 +266,11 @@ export function Planning() {
         </div>
       </section>
 
+      <${TaskStaleAlert} />
+
       <${TaskBacklog} />
+
+      <${TaskWall} />
 
       <${KeeperToolActivity} />
 
@@ -283,21 +292,81 @@ export function Planning() {
           </button>
         </div>
         ${hasGoals ? html`
-          <div class="mt-3 flex flex-wrap gap-2">
-            ${(grouped.short ?? []).length > 0 ? html`
-              <span class="rounded border border-ok/25 bg-ok/10 px-2 py-0.5 text-2xs text-ok">
-                단기 ${(grouped.short ?? []).length}
-              </span>
-            ` : null}
-            ${(grouped.mid ?? []).length > 0 ? html`
-              <span class="rounded border border-warn/25 bg-warn/10 px-2 py-0.5 text-2xs text-warn">
-                중기 ${(grouped.mid ?? []).length}
-              </span>
-            ` : null}
-            ${(grouped.long ?? []).length > 0 ? html`
-              <span class="rounded border border-accent/25 bg-[var(--accent-10)] px-2 py-0.5 text-2xs text-accent">
-                장기 ${(grouped.long ?? []).length}
-              </span>
+          <div class="mt-3 flex flex-col gap-2">
+            <div class="flex flex-wrap gap-2">
+              ${(grouped.short ?? []).length > 0 ? html`
+                <span class="rounded border border-ok/25 bg-ok/10 px-2 py-0.5 text-2xs text-ok">
+                  단기 ${(grouped.short ?? []).length}${hp.short.total > 0 ? ` · ${hp.short.done}/${hp.short.total} (${formatProgressPct(hp.short)})` : ''}
+                </span>
+              ` : null}
+              ${(grouped.mid ?? []).length > 0 ? html`
+                <span class="rounded border border-warn/25 bg-warn/10 px-2 py-0.5 text-2xs text-warn">
+                  중기 ${(grouped.mid ?? []).length}${hp.mid.total > 0 ? ` · ${hp.mid.done}/${hp.mid.total} (${formatProgressPct(hp.mid)})` : ''}
+                </span>
+              ` : null}
+              ${(grouped.long ?? []).length > 0 ? html`
+                <span class="rounded border border-accent/25 bg-[var(--accent-10)] px-2 py-0.5 text-2xs text-accent">
+                  장기 ${(grouped.long ?? []).length}${hp.long.total > 0 ? ` · ${hp.long.done}/${hp.long.total} (${formatProgressPct(hp.long)})` : ''}
+                </span>
+              ` : null}
+            </div>
+            ${(hp.short.total + hp.mid.total + hp.long.total) > 0 ? html`
+              <div class="flex flex-col gap-1">
+                ${hp.short.total > 0 ? html`
+                  <div class="flex items-center gap-2 text-2xs">
+                    <span class="w-8 shrink-0 text-text-muted">단기</span>
+                    <div
+                      class="relative h-1.5 grow overflow-hidden rounded-sm bg-[var(--color-bg-surface)]"
+                      role="progressbar"
+                      aria-valuenow=${Math.round(hp.short.ratio * 100)}
+                      aria-valuemin="0"
+                      aria-valuemax="100"
+                      aria-label=${`단기 목표 진행 ${hp.short.done}/${hp.short.total}`}
+                    >
+                      <div
+                        class="absolute inset-y-0 left-0 bg-ok"
+                        style=${`width: ${(hp.short.ratio * 100).toFixed(1)}%`}
+                      ></div>
+                    </div>
+                  </div>
+                ` : null}
+                ${hp.mid.total > 0 ? html`
+                  <div class="flex items-center gap-2 text-2xs">
+                    <span class="w-8 shrink-0 text-text-muted">중기</span>
+                    <div
+                      class="relative h-1.5 grow overflow-hidden rounded-sm bg-[var(--color-bg-surface)]"
+                      role="progressbar"
+                      aria-valuenow=${Math.round(hp.mid.ratio * 100)}
+                      aria-valuemin="0"
+                      aria-valuemax="100"
+                      aria-label=${`중기 목표 진행 ${hp.mid.done}/${hp.mid.total}`}
+                    >
+                      <div
+                        class="absolute inset-y-0 left-0 bg-warn"
+                        style=${`width: ${(hp.mid.ratio * 100).toFixed(1)}%`}
+                      ></div>
+                    </div>
+                  </div>
+                ` : null}
+                ${hp.long.total > 0 ? html`
+                  <div class="flex items-center gap-2 text-2xs">
+                    <span class="w-8 shrink-0 text-text-muted">장기</span>
+                    <div
+                      class="relative h-1.5 grow overflow-hidden rounded-sm bg-[var(--color-bg-surface)]"
+                      role="progressbar"
+                      aria-valuenow=${Math.round(hp.long.ratio * 100)}
+                      aria-valuemin="0"
+                      aria-valuemax="100"
+                      aria-label=${`장기 목표 진행 ${hp.long.done}/${hp.long.total}`}
+                    >
+                      <div
+                        class="absolute inset-y-0 left-0 bg-accent"
+                        style=${`width: ${(hp.long.ratio * 100).toFixed(1)}%`}
+                      ></div>
+                    </div>
+                  </div>
+                ` : null}
+              </div>
             ` : null}
           </div>
         ` : html`

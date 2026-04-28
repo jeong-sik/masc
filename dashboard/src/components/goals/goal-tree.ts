@@ -481,6 +481,14 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
             <${HealthBadge} health=${node.health} />
             <${StatusBadge} status=${node.status} />
             ${node.task_count > 0 ? html`<span>${node.task_done_count}/${node.task_count} 태스크</span>` : null}
+            ${node.metric ? html`
+              <span
+                class="rounded-sm border border-[var(--white-10)] bg-[var(--white-3)] px-1.5 py-0.5 font-mono text-3xs text-text-secondary"
+                title=${`metric · ${node.metric}${node.target_value ? ` → ${node.target_value}` : ''}`}
+              >
+                <span aria-hidden="true">↗ </span>${node.metric}${node.target_value ? html`<span class="ml-1 text-text-strong"> · ${node.target_value}</span>` : null}
+              </span>
+            ` : null}
             ${(() => {
               const awaiting = countAwaitingVerificationTasks(node.tasks)
               return awaiting > 0 ? html`
@@ -781,6 +789,19 @@ function GoalDetailPanel({
             <span class="rounded border border-[var(--white-10)] bg-[var(--white-5)] px-2 py-0.5 text-3xs font-semibold uppercase tracking-widest" style="color:${horizonColor(selectedNode.horizon)}">
               ${horizonLabel(selectedNode.horizon)}
             </span>
+            ${selectedNode.metric ? html`
+              <span
+                class="rounded border border-[var(--white-10)] bg-[var(--white-5)] px-2 py-0.5 font-mono text-3xs text-text-secondary"
+                title="이 목표가 추적하는 metric"
+              >
+                <span class="text-text-muted">metric</span>
+                <span class="ml-1.5">${selectedNode.metric}</span>
+                ${selectedNode.target_value ? html`
+                  <span class="text-text-muted">·</span>
+                  <span class="ml-1 text-text-strong">${selectedNode.target_value}</span>
+                ` : null}
+              </span>
+            ` : null}
           </div>
         </div>
         <div class="flex items-center gap-2">

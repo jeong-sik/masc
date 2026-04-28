@@ -6,9 +6,31 @@
     The cascade-failure classification itself lives in
     [Oas_compat.Http_client] so the exhaustive match over the
     [http_error] variants exists in exactly one place; this module
-    only re-exposes the {b decision} predicates needed by the cascade
-    runtime. Internal helpers ([classify_failure],
-    [has_required_api_key], [filter_healthy_internal]) are hidden. *)
+    re-exposes the {b decision} predicates needed by the cascade
+    runtime plus {!classify_failure} for telemetry / tests. Internal
+    helpers ([has_required_api_key], [filter_healthy_internal]) stay
+    hidden. *)
+
+(** Mirror of [Oas_compat.Http_client.cascade_failure_class] so callers
+    can pattern-match without having to depend on the OAS surface. *)
+type cascade_failure_class =
+  Oas_compat.Http_client.cascade_failure_class =
+  | Local_resource_exhaustion
+  | Context_overflow
+  | Provider_parse_error
+  | Transient_http of int
+  | Terminal_http of int
+  | Accept_rejected_capability_mismatch
+  | Accept_rejected_terminal
+  | Cli_transport_required
+  | Network_error
+  | Provider_terminal
+
+val classify_failure :
+  Llm_provider.Http_client.http_error -> cascade_failure_class
+(** Classify [err] into one of the cascade-failure buckets used by the
+    runtime to decide whether to retry, advance, or terminate. Pure
+    delegate to [Oas_compat.Http_client.classify]. *)
 
 val should_cascade_to_next :
   Llm_provider.Http_client.http_error -> bool

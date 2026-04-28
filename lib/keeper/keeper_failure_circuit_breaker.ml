@@ -8,7 +8,33 @@
 
     Error classes are coarse categories (path_not_found, cwd_not_directory,
     path_not_in_allowed_paths/path_outside_sandbox) — not exact error strings. This prevents
-    near-miss variants from resetting the counter. *)
+    near-miss variants from resetting the counter.
+
+    Spec navigation (OCaml -> TLA+) — plan §19 anchor pattern applied
+    to circuit breaker.  Authoritative spec mirror is
+    [specs/keeper-state-machine/KeeperCircuitBreaker.tla] (#8642 family).
+
+    Spec lines 9-13 already cite this module field-by-field:
+      Threshold     -> [let threshold = 3]
+      count         -> [mutable consecutive_count : int]
+      currentClass  -> [mutable consecutive_class : error_class]
+      tripped       -> [record_failure] return value
+      ErrorClasses  -> [type error_class] (this file, ~line 17)
+
+    This block is the reverse-direction citation so code search for
+    "KeeperCircuitBreaker" lands in this module.
+
+    Scope projection (already documented in spec lines 15-22):
+      OCaml has 5 error classes (Path_not_found, Path_not_allowed,
+      Cwd_not_directory, Shell_exit_nonzero, Other); spec models 3
+      (path_not_found, path_not_allowed, other).  The two extra OCaml
+      classes fold into the spec's "other" partition.  This is
+      Refinement (acknowledged), not Drift — adding a new OCaml class
+      does NOT require spec update unless it violates ClassIsolation.
+
+    Bug-Model contract: clean cfg verifies SafetyInvariant +
+    ClassIsolation; buggy cfg removes the per-class reset and the
+    ClassIsolation property is violated. *)
 
 (* ================================================================ *)
 (* Error classification                                             *)

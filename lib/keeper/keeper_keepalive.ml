@@ -1990,6 +1990,10 @@ let run_heartbeat_loop
         end;
         let t_presence_end = Time_compat.now () in
         let now_ts = t_presence_end in
+        (* IR-4 fix: expire stale approval-queue entries every heartbeat cycle.
+           max_wait_s = 600 (10 min) — Critical entries are excluded by
+           expire_stale itself, so only Low/Medium/High are swept. *)
+        Keeper_approval_queue.expire_stale ~max_wait_s:600.0;
         let t_snapshot_start = now_ts in
         maybe_write_heartbeat_snapshot
           ~ctx

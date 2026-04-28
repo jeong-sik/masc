@@ -43,20 +43,20 @@ type event =
       tool_name : string;
       success : bool;
       duration_ms : int;
-      agent_id : string option;
-      source : string option;
-      session_id : string option;
-      operation_id : string option;
-      worker_run_id : string option;
-      error_kind : string option;
-      error_message : string option;
-      exit_code : int option;
-      stderr_excerpt : string option;
+      agent_id : string option; [@default None]
+      source : string option; [@default None]
+      session_id : string option; [@default None]
+      operation_id : string option; [@default None]
+      worker_run_id : string option; [@default None]
+      error_kind : string option; [@default None]
+      error_message : string option; [@default None]
+      exit_code : int option; [@default None]
+      stderr_excerpt : string option; [@default None]
     }
   | Tool_assigned of {
       agent_id : string;
       profile : string;
-      preset : string option;
+      preset : string option; [@default None]
       tool_count : int;
       assignment_id : string;
     }

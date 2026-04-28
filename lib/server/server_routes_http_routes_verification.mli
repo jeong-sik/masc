@@ -13,8 +13,8 @@ val add_routes :
 
 val verifier_of_request :
   base_path:string -> Httpun.Request.t -> string
-(** Derive the [\"operator:<actor>\"] verifier identity for a resolve
-    request. Falls back to [\"operator:dashboard\"] when no
+(** Derive the ["operator:<actor>"] verifier identity for a resolve
+    request. Falls back to ["operator:dashboard"] when no
     sanitizable actor hint is present. Tested directly by
     [test_dashboard_http_core] for the token-owner canonicalization
     path. *)

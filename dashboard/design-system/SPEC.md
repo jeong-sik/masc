@@ -10,10 +10,15 @@
 
 masc-mcp 레포는 두 dashboard surface가 같은 서버에서 병존 서빙된다. 같은 design intent를 표현하는데 vocabulary가 분기되어 있어, surface 간 이동 시 색·간격·타이포가 미묘하게 달라진다. 이 spec은 두 surface가 공유하는 canonical vocabulary와 design rule을 정의한다.
 
-| Surface | 경로 | 스타일 시스템 | 테마 |
+| Surface | 경로 | 스타일 시스템 | Active 테마 |
 |---------|------|----------------|------|
-| `dashboard/` | `/dashboard/*` | Preact + Tailwind utility + raw CSS | dark / light |
-| `dashboard_bonsai/` | `/dashboard/b/*` | Bonsai + ppx_css inline + `colors_and_type.css` | dark-fantasy / cyberpunk / terminal / parchment / paper |
+| `dashboard/` | `/dashboard/*` | Preact + Tailwind utility (`src/styles/tokens.generated.css`) + handwritten component CSS | dark / light |
+| `dashboard_bonsai/` | `/dashboard/b/*` | Bonsai + ppx_css inline + `static/colors_and_type.generated.css` | dark-fantasy (default) / paper |
+| `dashboard/design-system/preview/` | `/dashboard/design-system/preview/*` | preview surface, generated tokens (`source_styles/tokens.generated.css`) | dark / light |
+
+Archived themes (cyberpunk · terminal · parchment) live in `dashboard_bonsai/static/themes/archive/` — 보존만 하고 default rotation 에서는 제외 (Wave 2 #11301).
+
+모든 토큰 정의는 `dashboard/design-system/tokens/source.ts` SSOT 에서 codegen 으로 7 개 artifact 가 emit 된다. hand-written `tokens.css` / `semantic.css` / `colors_and_type.css` 는 모든 surface 에서 삭제되었다 (Wave 2). 자세한 이행 기록은 §12 audit 참조.
 
 이 spec이 **변경되기 전에 코드가 변경되어선 안 된다.** 새 token, 새 컴포넌트 패턴, 테마 추가는 모두 SPEC PR이 선행해야 한다.
 
@@ -192,31 +197,33 @@ bonsai의 timeline view 전용. dashboard에서 timeline 도입 시 동일 vocab
 
 `prefers-color-scheme: light` 미디어 쿼리는 `:root:not([data-theme])` 가드로 OS 설정을 따른다. URL hash 또는 toggle UI가 `data-theme`를 명시하면 그게 우선.
 
-### 4.2 Named variants (bonsai 자산, canonical 화)
+### 4.2 Named variants (bonsai 자산)
 
-bonsai의 5 테마는 production user에게 URL hash로 공유 가능한 자산. canonical theme matrix에 등재되지만 dashboard와 bonsai 모두에서 활성화될 수 있어야 한다.
+bonsai 의 active 테마는 **dark-fantasy + paper** 두 종. 옛 5 테마 (cyberpunk · terminal · parchment) 는 source.ts SSOT 에 포함되지 않으며 `dashboard_bonsai/static/themes/archive/` 에 보존 (Wave 2 #11301). 부활시키려면 source.ts theme array 에 재정의 + Bonsai theme listener 등록 + SPEC PR 이 모두 선행되어야 한다.
 
 | Theme | data-theme | 의도 | Status |
 |-------|------------|------|--------|
-| **dark-fantasy** | `[data-theme="dark-fantasy"]` | bonsai 기본 — visceral horror palette ("rotted wood / bruised meat / dried clot") | canonical variant |
-| **cyberpunk** | `[data-theme="cyberpunk"]` | neon edge | canonical variant |
-| **terminal** | `[data-theme="terminal"]` | green-on-black classic terminal | canonical variant |
-| **parchment** | `[data-theme="parchment"]` | warm light, aged paper | canonical variant (light family) |
-| **paper** | `[data-theme="paper"]` | clean light | canonical variant (light family) |
+| **dark-fantasy** | `:root, [data-theme="dark-fantasy"]` | bonsai 기본 — visceral horror palette ("rotted wood / bruised meat / dried clot") | active (canonical) |
+| **paper** | `[data-theme="paper"]` | clean light | active (canonical, light family) |
+| **cyberpunk** | `[data-theme="cyberpunk"]` | neon edge | archived (`static/themes/archive/cyberpunk.css`) |
+| **terminal** | `[data-theme="terminal"]` | green-on-black classic terminal | archived (`static/themes/archive/terminal.css`) |
+| **parchment** | `[data-theme="parchment"]` | warm light, aged paper | archived (`static/themes/archive/parchment.css`) |
 
-**규칙**: 새 theme은 SPEC PR에서 추가하고, 모든 raw token category(surface/text/border/accent/status)를 override해야 등재 자격. partial override는 `:root` 기본값에 fallback되어 hybrid가 발생하므로 금지.
+**규칙**: 새 theme 은 source.ts theme array 추가 + SPEC PR 이 동시에 진행되어야 한다. 모든 raw token category(surface/text/border/accent/status)를 override 해야 등재 자격. partial override 는 `:root` 기본값에 fallback 되어 hybrid 가 발생하므로 금지.
 
 ### 4.3 테마별 토큰 override 의무 카테고리
 
-| 카테고리 | dark | light | dark-fantasy | cyberpunk | terminal | parchment | paper |
-|----------|------|-------|--------------|-----------|----------|-----------|-------|
-| Surface stack (`--bg-*`) | 필수 | 필수 | 필수 | 필수 | 필수 | 필수 | 필수 |
-| Text (`--fg-*`/`--text-*`) | 필수 | 필수 | 필수 | 필수 | 필수 | 필수 | 필수 |
-| Border (`--line-*`/`--border-*`) | 필수 | 필수 | 필수 | 필수 | 필수 | 필수 | 필수 |
-| Accent (`--brass-*`/`--accent-brass`) | 필수 | 필수 | 필수 | 필수 | 필수 | 필수 | 필수 |
-| Status | 권장 | 권장 | 권장 | 권장 | 권장 | 권장 | 권장 |
-| Attribution (`--k-*`/`--p-*`) | 선택 | 선택 | 선택 | 선택 | 선택 | 선택 | 선택 |
-| Trace (`--t-*`) | 선택 | 선택 | 권장 | 권장 | 권장 | 권장 | 권장 |
+| 카테고리 | dark | light | dark-fantasy | paper |
+|----------|------|-------|--------------|-------|
+| Surface stack (`--bg-*`) | 필수 | 필수 | 필수 | 필수 |
+| Text (`--fg-*`/`--text-*`) | 필수 | 필수 | 필수 | 필수 |
+| Border (`--line-*`/`--border-*`) | 필수 | 필수 | 필수 | 필수 |
+| Accent (`--brass-*`/`--accent-brass`) | 필수 | 필수 | 필수 | 필수 |
+| Status | 권장 | 권장 | 권장 | 권장 |
+| Attribution (`--k-*`/`--p-*`) | 선택 | 선택 | 선택 | 선택 |
+| Trace (`--t-*`) | 선택 | 선택 | 권장 | 권장 |
+
+archived 테마 (cyberpunk · terminal · parchment) 는 본 의무 매트릭스 적용 대상이 아니다 — 보존 자료.
 
 ### 4.4 Theme switching mechanism
 
@@ -306,9 +313,17 @@ bonsai의 5 테마는 production user에게 URL hash로 공유 가능한 자산.
 
 ### 6.1 새 token 추가 절차
 
-1. 본 SPEC.md에 token 항목 추가 PR 선행
-2. SPEC PR 머지 후 `tokens.css`에 정의 (또는 기존 PR rebase로 정합화)
-3. tier 결정: 같은 의미를 가진 raw가 이미 있으면 Semantic만 추가. 새 raw 추가는 테마 모두에서 override 가능해야 함
+1. 본 SPEC.md 에 token 항목 추가 PR 선행
+2. SPEC PR 머지 후 `dashboard/design-system/tokens/source.ts` 에 정의 (raw 또는 semantic 배열)
+3. `pnpm tokens:build` (`dashboard/` 에서) 실행 → 7 generated artifact emit:
+   - `dashboard/design-system/source_styles/tokens.generated.css` (preview)
+   - `dashboard/src/styles/tokens.generated.css` (Tailwind v4 `@theme`)
+   - `dashboard/src/styles/tokens.generated.ts` (Preact typed)
+   - `dashboard_bonsai/src/tokens.ml` + `tokens.mli` (OCaml polyvar)
+   - `dashboard/design-system/tokens/build/tokens.json` (DTCG 2025.10)
+   - `dashboard_bonsai/static/colors_and_type.generated.css` (Bonsai naming)
+4. tier 결정: 같은 의미를 가진 raw 가 이미 있으면 Semantic 만 추가. 새 raw 추가는 active 테마 모두에서 override 가능해야 함
+5. CI 강제: `tokens-drift` workflow 가 idempotent build (재실행 후 git diff = ∅), tier integrity (generated artifact 직접 수정 차단), keeper OkLCH ΔE < 2, status canon pin 4 gate 검증
 
 ### 6.2 Hardcoded color/spacing 금지
 
@@ -318,10 +333,8 @@ bonsai의 5 테마는 production user에게 URL hash로 공유 가능한 자산.
 |------|------|------|
 | `rgba(... / .NN)` alpha 조합 | 어느 곳이든 | `rgb(var(--token-glow) / .12)` 형태로 raw token alpha 조합은 허용 |
 | 폰트 fallback chain | `--font-*` 정의 내 | system font name (e.g., `Inter`, `JetBrains Mono`) |
-| 4-slot status pattern | `tokens.css`의 `--{ok\|warn\|err\|info\|idle\|stalled}-{soft\|fg\|border\|ring}` | 컴포넌트별 정교한 surface/text/border/ring 4 slot 조합. single-slot semantic alias로 환원 불가. 컴포넌트는 raw 참조 허용 (PR-M5 결정). |
-| `--brass-2` mid tone | accent palette mid-tone 사용처 | SPEC v0.1 §3.4은 accent를 fg/fg-dim 2 slot만 정의. 사용 빈도 증가 시 `--color-accent-fg-mid` 추가 검토. |
-| `--font-mono` stack divergence | dashboard `tokens.css` vs bonsai `colors_and_type.css` | dashboard `ui-monospace` 우선 (Apple 시스템) / bonsai `JetBrains Mono` 우선 (고딕 일관성). PR-S2.5 redirect 시 bonsai stub이 자기 stack 유지. |
-| `--shadow-inset` vs `--shadow-ring` 의미 차이 | dashboard `tokens.css` (top-edge highlight) vs bonsai `colors_and_type.css` (1px ring) | 이름은 같았으나 의미가 달라 PR-S3g에서 bonsai 측을 `--shadow-ring`으로 rename. dashboard `--shadow-inset`(top-edge highlight)는 보존. |
+| 4-slot status pattern | `source.ts` 의 `--{ok\|warn\|err\|info\|idle\|stalled}-{soft\|fg\|border\|ring}` | 컴포넌트별 정교한 surface/text/border/ring 4 slot 조합. single-slot semantic alias 로 환원 불가. 컴포넌트는 raw 참조 허용. |
+| `--brass-2` mid tone | accent palette mid-tone 사용처 | §3.4 는 accent 를 fg/fg-dim 2 slot 만 정의. 사용 빈도 증가 시 `--color-accent-fg-mid` 추가 검토. |
 
 ### 6.3 Surface 적용 의무
 
@@ -345,19 +358,20 @@ bonsai의 5 테마는 production user에게 URL hash로 공유 가능한 자산.
 
 ## 7. Migration map (현재 코드 → canonical)
 
+> **historical note**: §7.1 / §7.2 의 옛 PR-S 시리즈 (PR-S2, PR-S2.5, PR-S3, PR-M5, PR #10427, PR #10437 등) 진행 표시는 모두 머지/완료되었다. 자세한 이행 결과는 §12 audit 참조. 이 절은 현재 진행 중 작업이 아니라 점진적 컴포넌트 마이그레이션의 가이드 역할만 한다.
+
 ### 7.1 dashboard/ 마이그레이션 우선순위
 
-1. **PR #10427** (이미 진행 중): `tokens.css`에 19 semantic alias 등재. 본 SPEC §3.1~3.8과 1:1 일치.
-2. **PR #10437** (이미 진행 중): preview cb-group-a~i에 ARIA 281건 추가. 본 SPEC §5와 1:1 일치.
-3. (후속 plan) `source_styles/components.css` 등 component CSS의 raw token 직접 참조를 Semantic으로 점진 치환.
-4. ✅ **완료** `colors_and_type.css` 정합화 — 토큰 정의를 `tokens.css` SSOT로 단일화하고, `.masc-ds` 스코프 element/utility 정의는 `type_layer.css`로 분리. 기존 파일은 두 파일을 `@import`만 하는 façade로 축소(외부 참조 호환).
+1. ✅ semantic alias matrix 등재 + ARIA 패턴 — Wave 0/1 머지 완료
+2. ✅ `colors_and_type.css` / `tokens.css` 삭제, source.ts SSOT 단일화 — Wave 2 머지 완료
+3. (지속) `source_styles/components.css` 등 component CSS 의 raw token 직접 참조를 Semantic 으로 점진 치환
 
 ### 7.2 dashboard_bonsai/ 마이그레이션 우선순위
 
-1. (PR-S2) `static/colors_and_type.css`에 Semantic alias tier 도입 — bonsai의 5 테마 각각이 SPEC §3 canonical alias를 정의하도록 확장.
-2. (PR-S2) bonsai와 dashboard가 같은 raw token SSOT를 공유하도록 build/import 통합.
-3. (후속 plan) `src/*.ml`의 ppx_css 인라인 블록에서 raw token 직접 참조를 Semantic으로 점진 치환.
-4. (후속 plan) 누락 production view에 SPEC §5 ARIA 패턴 추가.
+1. ✅ Bonsai 측 `colors_and_type.css` 삭제 + `colors_and_type.generated.css` 로 전환 — Wave 2 #11301
+2. ✅ source.ts 가 dashboard / bonsai 양쪽 raw token SSOT — Wave 2 머지 완료
+3. (지속) `src/*.ml` 의 ppx_css 인라인 블록에서 raw token 직접 참조를 Semantic / Tokens module 로 점진 치환
+4. (지속) 누락 production view 에 SPEC §5 ARIA 패턴 추가
 
 ### 7.3 Vocabulary alignment summary
 
@@ -381,11 +395,12 @@ bonsai의 5 테마는 production user에게 URL hash로 공유 가능한 자산.
 - 본 spec이 통합하는 두 surface의 README:
   - `dashboard/design-system/README.md` (dashboard design intent + token tier 다이어그램)
   - `dashboard_bonsai/README.md` (bonsai phase 상태 + 5 테마 설명)
-- ARIA pattern catalog 상세: `dashboard/design-system/patterns/a11y/<pattern>.md` (PR-S3에서 추가)
-- 진행 중 PR:
-  - #10427 — dashboard semantic alias matrix (SPEC §3 구현)
-  - #10437 — dashboard preview cb-group-a~i ARIA (SPEC §5 구현)
-  - #10394 — dashboard preview cb-group-j/k + Planes.jsx ARIA (SPEC §5 구현, 머지됨)
+- ARIA pattern catalog 상세: `dashboard/design-system/patterns/a11y/<pattern>.md`
+- Token SSOT: `dashboard/design-system/tokens/source.ts`
+- Codegen driver: `dashboard/design-system/tokens/build.ts`
+- Equivalence checker: `dashboard/design-system/tokens/scripts/check-equivalence.mjs`
+- CI workflow: `.github/workflows/tokens-drift.yml`
+- 2026-04 SSOT 이행 PR 시리즈: §12 audit
 
 ---
 
@@ -394,3 +409,30 @@ bonsai의 5 테마는 production user에게 URL hash로 공유 가능한 자산.
 | Version | Date | 변경 |
 |---------|------|------|
 | v0.1 | 2026-04-26 | 초안. dashboard PR #10427 alias matrix와 bonsai 5 테마를 canonical 형태로 통합. |
+| v0.2 | 2026-04-27 | Wave 5 docs sweep. source.ts SSOT 이행 반영, archived 테마 (cyberpunk · terminal · parchment) 분리, hand-written `tokens.css` / `colors_and_type.css` 참조 제거, §12 audit 섹션 신규. |
+
+---
+
+## 12. 2026-04 SSOT 이행 완료 (audit)
+
+다음 PR 시리즈로 디자인 시스템이 codegen SSOT 로 통일되었다. 이전 §6 / §7 의 옛 PR-S 진행 표시 (PR-S2, PR-S2.5, PR-S3, PR-S3g, PR-M5 등) 는 모두 머지/완료되어 archived.
+
+| Wave | PR | 내용 |
+|------|----|------|
+| 1b | #11189 | codegen scaffold (`source.ts` → 4 generated outputs) |
+| 1b | #11235 | build.ts artifact 7/7 (Bonsai `colors_and_type.generated.css`) |
+| 2 | #11250 | preview swap (`tokens.css` 880L + `semantic.css` 117L + façade 20L 삭제) |
+| 2 | #11255 | Preact swap (`dashboard/src/styles/tokens.css` 137L 삭제) |
+| 2 | #11275 | source.ts superset extension (+32 토큰, Preact 컴포넌트 호환) |
+| 2 | #11301 | Bonsai swap (`dashboard_bonsai/static/colors_and_type.css` 566L 삭제 + 3 archived themes 보존) |
+| 5 | #11330 | `check-equivalence.mjs` 복원 (status canon + keeper ΔE 단순화) |
+| 5 | #11293 | `tokens-drift` CI workflow (Tokens drift + Tier integrity 게이트) |
+
+이행 결과:
+
+- hand-written CSS 모든 surface 에서 삭제 (preview, Preact, Bonsai)
+- 2 themes (dark-fantasy + paper) 만 active, 3 archived themes (cyberpunk, terminal, parchment) 는 `dashboard_bonsai/static/themes/archive/` 보존
+- drift 방지 CI 4 gate 활성화: idempotent build, status canon pin, keeper OkLCH ΔE < 2, tier integrity (generated 직접 수정 차단)
+- §6.1 새 token 추가 절차가 SSOT 단일 경로 (source.ts → `pnpm tokens:build` → 7 artifact emit) 로 단순화됨
+
+historical note: 본 audit 섹션 머지 이전, SPEC 본문 §6.2 governance 예외 목록에는 `--font-mono` stack divergence (PR-S2.5) 와 `--shadow-inset` vs `--shadow-ring` rename (PR-S3g) 항목이 active exception 으로 등재되어 있었다. 두 divergence 모두 source.ts 단일 SSOT 도입 후 해소되어 예외 목록에서 제거.

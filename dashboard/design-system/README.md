@@ -49,12 +49,13 @@ MASC is **bilingual Korean/English** under the hood — titles, goals and some c
 
 ## Sources used
 
-- **`styles/`** (read-only mount) — 14 CSS files defining the entire visual system. Copied into `source_styles/` as reference.
-  - `tokens.css` — colors, type, spacing, elevation, motion, z-index, density
+- **`tokens/source.ts`** — single source of truth for all design tokens (raw + semantic + themes). Codegen via `pnpm tokens:build` emits 7 artifacts (preview / Tailwind v4 / Preact TS / Bonsai OCaml / DTCG JSON / Bonsai CSS). See `tokens/build.ts`.
+- **`source_styles/`** — generated `tokens.generated.css` (preview surface) plus reference copies of zone-specific stylesheets:
   - `primitives.css` — chip, pill, bar, spark, kv-row, btn variants, elevation helpers, status surfaces, animations
   - `layout.css` — the 3-col × 7-row cockpit grid
   - `sidebar.css` · `ticker.css` · `kpi.css` · `lifeline.css` · `center.css` · `swimlanes.css` · `deck.css` · `drawer.css` · `rail.css` — zone-specific styles
   - `code.css` · `layers.css` — code mode + stacked overlays
+  - The hand-written `tokens.css` was deleted (Wave 2); the generated counterpart now ships in its place.
 - **`.masc/`** (read-only mount) — runtime state/config directory: agent manifests, goals, tasks, activity events, auth, trajectories, trash. Used to derive copy, keeper names, and real goal/task strings. Not source of visuals.
 - No Figma provided.
 - No slide template provided — `slides/` is omitted per instructions.
@@ -190,9 +191,10 @@ touching component CSS.
 └──────────────────────────────────────────────────────────────┘
 ```
 
-**Raw tier** — palette anchors. Defined in `source_styles/tokens.css` and
-mirrored in `colors_and_type.css`. Treat as private-ish: prefer the
-semantic alias unless you genuinely need a literal palette pick.
+**Raw tier** — palette anchors. Defined in `tokens/source.ts` (the SSOT)
+and emitted to every surface via `pnpm tokens:build` (preview, Tailwind,
+Preact, Bonsai). Treat as private-ish: prefer the semantic alias unless
+you genuinely need a literal palette pick.
 
 **Semantic tier** — meaning over hex. The full alias matrix:
 
@@ -269,21 +271,39 @@ If new icons are genuinely needed (they usually aren't), **use Lucide at 12–14
 
 ```
 /
-├─ README.md                    ← this file
-├─ SKILL.md                     ← agent-skill manifest
-├─ colors_and_type.css          ← CSS vars (base + semantic) + element defaults
-├─ source_styles/               ← verbatim copies of the app's CSS (reference)
-│   ├─ tokens.css  primitives.css  layout.css
+├─ README.md                          ← this file
+├─ SKILL.md                           ← agent-skill manifest
+├─ SPEC.md                            ← canonical design system specification
+├─ type_layer.css                     ← `.masc-ds` scope element/utility definitions
+├─ tokens/
+│   ├─ source.ts                      ← SSOT: raw + semantic + themes
+│   ├─ build.ts                       ← codegen driver (`pnpm tokens:build`)
+│   ├─ build/tokens.json              ← generated DTCG 2025.10
+│   └─ scripts/check-equivalence.mjs  ← status canon + keeper ΔE check
+├─ source_styles/                     ← preview surface stylesheets
+│   ├─ tokens.generated.css           ← @generated, do not edit
+│   ├─ primitives.css  layout.css
 │   ├─ sidebar.css  ticker.css  kpi.css  lifeline.css
 │   ├─ center.css  swimlanes.css  deck.css  drawer.css
 │   ├─ rail.css    code.css     layers.css
-├─ preview/                     ← design-system cards (Colors / Type / Spacing / Components / Brand)
+├─ preview/                           ← design-system cards (Colors / Type / Spacing / Components / Brand)
+├─ patterns/a11y/                     ← ARIA pattern catalog
 └─ ui_kits/
-    └─ cockpit/                 ← the one product surface
+    └─ cockpit/                       ← the one product surface
         ├─ README.md
-        ├─ index.html           ← interactive recreation of the MASC cockpit
-        └─ *.jsx                ← Topbar, Ticker, KPIStrip, Lifeline, Sidebar,
-                                  Swimlanes, Deck, Rail, Composer, Drawer, CodeMode
+        ├─ index.html                 ← interactive recreation of the MASC cockpit
+        └─ *.jsx                      ← Topbar, Ticker, KPIStrip, Lifeline, Sidebar,
+                                        Swimlanes, Deck, Rail, Composer, Drawer, CodeMode
 ```
+
+The hand-written `colors_and_type.css` was removed in Wave 2 (#11250) and is no
+longer part of the layout — the preview surface now consumes
+`source_styles/tokens.generated.css` directly. Sibling generated artifacts live
+in their consuming surfaces:
+
+- `dashboard/src/styles/tokens.generated.css` (Tailwind v4 `@theme`)
+- `dashboard/src/styles/tokens.generated.ts`  (Preact typed)
+- `dashboard_bonsai/static/colors_and_type.generated.css` (Bonsai naming)
+- `dashboard_bonsai/src/tokens.ml` + `tokens.mli` (OCaml polyvar)
 
 No `slides/` directory — no slide template was provided.

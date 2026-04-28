@@ -19,7 +19,7 @@
     meta_cognition.ml *)
 
 val latest_digest_ref :
-  ?summary:Meta_cognition_types.summary ->
+  ?summary:Meta_cognition_types.summary_input ->
   unit ->
   Meta_cognition_types.digest_ref option
 (** Look up the most recent digest post on the
@@ -34,7 +34,7 @@ val latest_digest_ref :
     summary; otherwise [matches_summary] is [false]. *)
 
 val latest_digest_json :
-  ?summary:Meta_cognition_types.summary ->
+  ?summary:Meta_cognition_types.summary_input ->
   unit ->
   Yojson.Safe.t
 (** {!latest_digest_ref} projected to a JSON object with the

@@ -1,0 +1,4 @@
+(test
+ (name test_ttrace_parser)
+ (libraries tlc_test_gen)
+ (deps (glob_files fixtures/*.tla)))

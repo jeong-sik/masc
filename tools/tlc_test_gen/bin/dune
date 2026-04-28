@@ -1,0 +1,3 @@
+(executable
+ (name main)
+ (libraries tlc_test_gen))

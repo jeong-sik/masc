@@ -361,6 +361,19 @@ export const raw: ReadonlyArray<TokenBase> = (() => {
   out.push(t("agent-working",   "#7ae09a", "raw", "color", "Agent actively running"));
   out.push(t("agent-busy",      "#f0c060", "raw", "color", "Agent busy / queued"));
 
+  // Iter 2c-8: chat domain colors. Conversation surface palette —
+  // 3 role pairs (user/assistant/error) each with avatar (deeper) +
+  // chip (paler) tints, plus a single bright code-callout green.
+  // Custom dashboard hues, not Tailwind aliases. Pair structure is
+  // intentional: avatar reads on light bg, chip reads on dark bg.
+  out.push(t("chat-user-avatar",      "#d8f0ff", "raw", "color", "Chat user avatar tint"));
+  out.push(t("chat-user-chip",        "#c9ebff", "raw", "color", "Chat user message chip"));
+  out.push(t("chat-assistant-avatar", "#efe6ff", "raw", "color", "Chat assistant avatar tint"));
+  out.push(t("chat-assistant-chip",   "#ded0ff", "raw", "color", "Chat assistant message chip"));
+  out.push(t("chat-error-avatar",     "#ffe1e1", "raw", "color", "Chat error avatar tint"));
+  out.push(t("chat-error-chip",       "#ffb4b4", "raw", "color", "Chat error message chip"));
+  out.push(t("chat-code-callout",     "#95f3bc", "raw", "color", "Chat inline code callout (bright mint)"));
+
   // Iter 2c-9: vote button Reddit-pattern colors. Used identically by
   // board.css and dashboard.css; hex values are CANONICAL (Reddit
   // upvote = #ff4500) and intentionally preserved exactly.

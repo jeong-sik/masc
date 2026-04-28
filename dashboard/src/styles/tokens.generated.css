@@ -180,6 +180,13 @@
   --color-state-offline: #7a8494;
   --color-agent-working: #7ae09a;
   --color-agent-busy: #f0c060;
+  --color-chat-user-avatar: #d8f0ff;
+  --color-chat-user-chip: #c9ebff;
+  --color-chat-assistant-avatar: #efe6ff;
+  --color-chat-assistant-chip: #ded0ff;
+  --color-chat-error-avatar: #ffe1e1;
+  --color-chat-error-chip: #ffb4b4;
+  --color-chat-code-callout: #95f3bc;
   --color-vote-up: #ff4500;
   --color-vote-down: #7193ff;
   --color-vote-hover: #ccc;

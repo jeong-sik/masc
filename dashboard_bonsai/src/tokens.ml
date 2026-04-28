@@ -181,6 +181,13 @@ type semantic =
   | `State_offline
   | `Agent_working
   | `Agent_busy
+  | `Chat_user_avatar
+  | `Chat_user_chip
+  | `Chat_assistant_avatar
+  | `Chat_assistant_chip
+  | `Chat_error_avatar
+  | `Chat_error_chip
+  | `Chat_code_callout
   | `Vote_up
   | `Vote_down
   | `Vote_hover
@@ -592,6 +599,13 @@ let name_of = function
   | `State_offline -> "state-offline"
   | `Agent_working -> "agent-working"
   | `Agent_busy -> "agent-busy"
+  | `Chat_user_avatar -> "chat-user-avatar"
+  | `Chat_user_chip -> "chat-user-chip"
+  | `Chat_assistant_avatar -> "chat-assistant-avatar"
+  | `Chat_assistant_chip -> "chat-assistant-chip"
+  | `Chat_error_avatar -> "chat-error-avatar"
+  | `Chat_error_chip -> "chat-error-chip"
+  | `Chat_code_callout -> "chat-code-callout"
   | `Vote_up -> "vote-up"
   | `Vote_down -> "vote-down"
   | `Vote_hover -> "vote-hover"

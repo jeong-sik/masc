@@ -86,16 +86,8 @@
   /* Vote button Reddit-pattern colors lifted to source.ts (Iter 2c-9).
      Reddit upvote = #ff4500 remains canonical; see source.ts. */
 
-  /* Chat role tinting — light text shades for avatar + role-chip per role.
-     avatar vs chip use deliberately distinct shades (not a typo); preserve
-     hex exactly. Source-of-truth lives here (chat.css consumes via var()). */
-  --chat-user-avatar: #d8f0ff;
-  --chat-user-chip: #c9ebff;
-  --chat-assistant-avatar: #efe6ff;
-  --chat-assistant-chip: #ded0ff;
-  --chat-error-avatar: #ffe1e1;
-  --chat-error-chip: #ffb4b4;
-  --chat-code-callout: #95f3bc;
+  /* Chat role tinting — lifted to source.ts (Iter 2c-8); see semantic
+     role binding below. avatar vs chip distinct-shade pair preserved. */
 
   /* State chip text — keeper status pills (idle/offline/todo).
      idle and todo intentionally share the same shade (visual rest).

@@ -192,6 +192,13 @@ type semantic =
   | `State_offline
   | `Agent_working
   | `Agent_busy
+  | `Chat_user_avatar
+  | `Chat_user_chip
+  | `Chat_assistant_avatar
+  | `Chat_assistant_chip
+  | `Chat_error_avatar
+  | `Chat_error_chip
+  | `Chat_code_callout
   | `Vote_up
   | `Vote_down
   | `Vote_hover

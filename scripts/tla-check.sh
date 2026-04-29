@@ -203,6 +203,9 @@ run_tlc_buggy "$REPO_ROOT/specs/task-lifecycle" "TaskLifecycle.tla"
 # Cycle 24 — Multimodal artifact GADT well-formedness (Tier B8 catch-up).
 run_tlc "$REPO_ROOT/specs/multimodal" "MultimodalArtifact.tla"
 
+# Cycle 19 — Resilience_outcome ternary lattice (Tier I5 catch-up).
+run_tlc "$REPO_ROOT/specs/resilience" "ResilienceOutcome.tla"
+
 # Optional: run TraceSpec if --trace flag provided
 if [ "${1:-}" = "--trace" ]; then
   TRACE_SPEC="$REPO_ROOT/specs/keeper-state-machine/KeeperTraceSpec.tla"

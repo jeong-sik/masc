@@ -1465,15 +1465,15 @@ let test_zombie_cleanup_transitions_to_inactive () =
 (** BUG-5: Keeper detection uses agent_type, not just name *)
 let test_keeper_detection_by_agent_type () =
   (* A non-keeper-named agent with agent_type="keeper" should get keeper threshold *)
-  let is_keeper_by_type = Resilience.Zombie.is_keeper ~name:"regular-bot" ~agent_type:"keeper" in
+  let is_keeper_by_type = Coord_resilience.Zombie.is_keeper ~name:"regular-bot" ~agent_type:"keeper" in
   Alcotest.(check bool) "agent_type=keeper detected" true is_keeper_by_type;
 
   (* A keeper-named agent should still be detected *)
-  let is_keeper_by_name = Resilience.Zombie.is_keeper ~name:"keeper-test-agent" ~agent_type:"test" in
+  let is_keeper_by_name = Coord_resilience.Zombie.is_keeper ~name:"keeper-test-agent" ~agent_type:"test" in
   Alcotest.(check bool) "keeper-*-agent name detected" true is_keeper_by_name;
 
   (* Neither name nor type matches *)
-  let not_keeper = Resilience.Zombie.is_keeper ~name:"regular-bot" ~agent_type:"claude" in
+  let not_keeper = Coord_resilience.Zombie.is_keeper ~name:"regular-bot" ~agent_type:"claude" in
   Alcotest.(check bool) "non-keeper correctly rejected" false not_keeper
 
 (** BUG-6: Heartbeat Mutex protects concurrent access *)

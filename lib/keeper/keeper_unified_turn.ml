@@ -160,11 +160,18 @@ let post_empty_queue_sleep ~(any_pending : bool) ~(channel : string) =
   ignore any_pending; ignore channel
   [@@fsm_guard "any_pending = false && channel = \"scheduled_autonomous\""]
 
-(* TurnComplete instrumentation is intentionally deferred to a follow-up
-   cycle: it requires a [cycle_completed] ref scoped across the entire
-   ~1700-line [run_keeper_cycle] body, which would dominate the diff for
-   this PR. Tier B2 closeout for SubmitTask/AssignTask/EmptyQueueSleep
-   already pins the most actionable invariants. *)
+(* TurnComplete (KeeperTaskAcquisition.tla, Cycle 45 follow-up to
+   PR #11716): the [run_keeper_cycle] body has produced an [Ok meta]
+   for this cycle. The post-action invariant pins that the
+   [cycle_completed] ref was actually toggled before the result is
+   returned — catches a regression where a future refactor splits
+   the bottom of [run_keeper_cycle] into branches that forget to
+   record completion. The ref is single-fiber by construction: each
+   [run_keeper_cycle] invocation runs in its own fiber, and the ref
+   is allocated fresh inside the function. *)
+let post_turn_complete_task ~(cycle_completed : bool ref) =
+  ignore cycle_completed
+  [@@fsm_guard "!cycle_completed = true"]
 
 let pre_dispatch_tool_surface : Keeper_execution_receipt.tool_surface =
   {
@@ -1116,6 +1123,11 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                          [Error sdk_error].  Silent-drop regressions
                          (early return without recording the turn
                          outcome) would violate the spec. *)
+  (* Cycle 45: KeeperTaskAcquisition.tla TurnComplete bracket — the
+     ref is set to true on the [Ok updated_meta] return at the end of
+     this function; an [Error _] branch leaves it false and skips the
+     wrap, mirroring the spec's "completed-on-success" semantics. *)
+  let cycle_completed = ref false in
   (* 0. Phase gate + state-aware cascade routing.
      The gate owns turn executability; select_cascade remains a total helper
      so dashboards/tests can inspect the same routing contract for blocked
@@ -2971,6 +2983,13 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             ~keeper_name:meta.name ~turn_id:keeper_turn_id
             ~prev:Keeper_turn_fsm.Completing
             Keeper_turn_fsm.Done;
+          (* Cycle 45: KeeperTaskAcquisition.tla TurnComplete post-action
+             — the cycle ran to completion and is about to return an
+             [Ok] result. *)
+          cycle_completed := true;
+          Keeper_fsm_guard_runtime.wrap_unit
+            ~action:"TurnComplete" ~stage:"post"
+            (fun () -> post_turn_complete_task ~cycle_completed);
           Ok updated_meta))
 
 let run_unified_turn = run_keeper_cycle

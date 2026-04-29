@@ -34,7 +34,8 @@ function binarySearchOffset(offsets: number[], target: number): number {
   let hi = offsets.length - 1
   while (lo < hi) {
     const mid = Math.floor((lo + hi) / 2)
-    if (offsets[mid] < target) {
+    const midOffset = offsets[mid] ?? 0
+    if (midOffset < target) {
       lo = mid + 1
     } else {
       hi = mid
@@ -77,8 +78,10 @@ export function VirtualList<T>({
     const acc: number[] = new Array(items.length + 1)
     acc[0] = 0
     for (let i = 0; i < items.length; i++) {
-      const h = heightsRef.current.get(getKey(items[i])) ?? estimatedItemHeight
-      acc[i + 1] = acc[i] + h
+      const item = items[i]
+      if (item === undefined) continue
+      const h = heightsRef.current.get(getKey(item)) ?? estimatedItemHeight
+      acc[i + 1] = (acc[i] ?? 0) + h
     }
     return acc
     // eslint-disable-next-line react-hooks/exhaustive-deps

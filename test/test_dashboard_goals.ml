@@ -29,6 +29,43 @@ let with_room f =
       ignore (Coord.init config ~agent_name:(Some "planner"));
       f config)
 
+let coord_ctx config : Tool_coord.context =
+  { Tool_coord.config; agent_name = "planner" }
+
+let parse_json_result = function
+  | true, body -> Yojson.Safe.from_string body
+  | false, body -> fail body
+
+let principal_json ~kind ~id =
+  `Assoc [ ("kind", `String kind); ("id", `String id) ]
+
+let create_done_task config ~goal_id ~title =
+  ignore
+    (Coord_task.add_task ~goal_id config ~title ~priority:3
+       ~description:"done task fixture");
+  let task_id =
+    Coord.get_tasks_raw config
+    |> List.find_map (fun (task : Types.task) ->
+           if String.equal task.title title then Some task.id else None)
+    |> function
+    | Some task_id -> task_id
+    | None -> fail ("task not found: " ^ title)
+  in
+  let step action notes =
+    match
+      Coord.transition_task_r config ~agent_name:"planner" ~task_id ~action
+        ~notes ()
+    with
+    | Ok _ -> ()
+    | Error err -> fail (Types.masc_error_to_string err)
+  in
+  step Types.Claim "test fixture claim";
+  step Types.Start "test fixture start";
+  step Types.Done_action "test fixture done"
+
+let string_list_field json field =
+  json |> member field |> to_list |> List.map to_string
+
 let make_keeper_meta ~name ~goal_id =
   match
     Masc_test_deps.meta_of_json_fixture
@@ -118,6 +155,101 @@ let root_node json =
   match json |> member "tree" |> to_list with
   | node :: _ -> node
   | [] -> fail "expected one goal in tree"
+
+let test_goal_tree_surfaces_resolved_verification_evidence () =
+  with_room @@ fun config ->
+  let verifier_policy =
+    {
+      Goal_verification.inherit_mode = Goal_verification.Extend;
+      principals =
+        [
+          {
+            kind = Goal_verification.Keeper;
+            id = "keeper-alpha";
+            display_name = Some "keeper-alpha";
+          };
+        ];
+      required_verdicts = Some 1;
+    }
+  in
+  let goal, _kind =
+    match
+      Goal_store.upsert_goal config ~title:"Resolved verification evidence"
+        ~verifier_policy ()
+    with
+    | Ok payload -> payload
+    | Error msg -> fail msg
+  in
+  create_done_task config ~goal_id:goal.id ~title:"Resolved done task";
+  let transitioned =
+    Tool_coord.dispatch (coord_ctx config) ~name:"masc_goal_transition"
+      ~args:
+        (`Assoc
+          [
+            ("goal_id", `String goal.id);
+            ("action", `String "request_complete");
+            ("actor", principal_json ~kind:"operator" ~id:"planner");
+          ])
+  in
+  let request_id =
+    match transitioned with
+    | Some result ->
+        parse_json_result result
+        |> member "verification_request"
+        |> fun json -> json |> member "id" |> to_string
+    | None -> fail "masc_goal_transition not handled"
+  in
+  let verified =
+    Tool_coord.dispatch (coord_ctx config) ~name:"masc_goal_verify"
+      ~args:
+        (`Assoc
+          [
+            ("goal_id", `String goal.id);
+            ("request_id", `String request_id);
+            ("principal", principal_json ~kind:"keeper" ~id:"keeper-alpha");
+            ("decision", `String "approve");
+            ("note", `String "checked receipt and tests");
+            ( "evidence_refs",
+              `List
+                [
+                  `String "receipt:keeper-alpha:turn-7";
+                  `String "test:test_dashboard_goals";
+                ] );
+          ])
+  in
+  (match verified with
+  | Some result -> ignore (parse_json_result result)
+  | None -> fail "masc_goal_verify not handled");
+  let node = Dashboard_goals.dashboard_goals_tree_json ~config |> root_node in
+  let summary = node |> member "verification_summary" in
+  check bool "open request cleared in dashboard tree" true
+    (summary |> member "open_request" = `Null);
+  let latest_request = summary |> member "latest_request" in
+  check string "latest request id retained in dashboard tree" request_id
+    (latest_request |> member "id" |> to_string);
+  check string "latest request approved in dashboard tree" "approved"
+    (latest_request |> member "status" |> to_string);
+  let vote =
+    match latest_request |> member "votes" |> to_list with
+    | vote :: _ -> vote
+    | [] -> fail "expected dashboard verification vote"
+  in
+  check string "vote note surfaced in dashboard tree" "checked receipt and tests"
+    (vote |> member "note" |> to_string);
+  check (list string) "vote evidence surfaced in dashboard tree"
+    [ "receipt:keeper-alpha:turn-7"; "test:test_dashboard_goals" ]
+    (string_list_field vote "evidence_refs");
+  match Dashboard_goals.goal_detail_json ~config ~goal_id:goal.id with
+  | Error msg -> fail msg
+  | Ok detail_json ->
+      let detail_latest =
+        detail_json
+        |> member "goal"
+        |> member "verification_summary"
+        |> member "latest_request"
+      in
+      check string "latest request retained in goal detail" request_id
+        (detail_latest |> member "id" |> to_string)
 
 let test_empty_executing_goal_is_at_risk () =
   with_room @@ fun config ->
@@ -367,6 +499,8 @@ let () =
     [
       ( "tree",
         [
+          test_case "resolved goal verification evidence is surfaced" `Quick
+            test_goal_tree_surfaces_resolved_verification_evidence;
           test_case "empty executing goal is at risk" `Quick
             test_empty_executing_goal_is_at_risk;
           test_case "open task without keeper is at risk" `Quick

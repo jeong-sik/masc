@@ -563,6 +563,7 @@ export interface GoalVerificationRequest {
 export interface GoalVerificationSummary {
   effective_policy?: GoalVerificationRequest['policy_snapshot'] | null
   open_request?: GoalVerificationRequest | null
+  latest_request?: GoalVerificationRequest | null
   approve_count: number
   reject_count: number
   remaining_possible: number

@@ -45,6 +45,15 @@ let get_string_field json field =
   | `String value -> value
   | _ -> fail (field ^ " missing")
 
+let get_string_list_field json field =
+  Yojson.Safe.Util.member field json
+  |> Yojson.Safe.Util.to_list
+  |> List.map Yojson.Safe.Util.to_string
+
+let json_is_null = function
+  | `Null -> true
+  | _ -> false
+
 let contains_substring s needle =
   let s_len = String.length s in
   let n_len = String.length needle in
@@ -283,6 +292,13 @@ let test_goal_transition_verification_to_completion () =
     Yojson.Safe.Util.member "verification_request" transitioned_json
   in
   let request_id = get_string_field request_json "id" in
+  let transitioned_summary =
+    Yojson.Safe.Util.member "verification_summary" transitioned_json
+  in
+  check string "latest request visible while open" request_id
+    (transitioned_summary
+    |> Yojson.Safe.Util.member "latest_request"
+    |> fun json -> get_string_field json "id");
   let verified =
     Tool_coord.dispatch (coord_ctx config) ~name:"masc_goal_verify"
       ~args:
@@ -292,6 +308,13 @@ let test_goal_transition_verification_to_completion () =
             ("request_id", `String request_id);
             ("principal", principal_json ~kind:"keeper" ~id:"keeper-alpha");
             ("decision", `String "approve");
+            ("note", `String "checked receipt and tests");
+            ( "evidence_refs",
+              `List
+                [
+                  `String "receipt:keeper-alpha:turn-7";
+                  `String "test:test_goal_tools";
+                ] );
           ])
   in
   let verified_json =
@@ -301,7 +324,118 @@ let test_goal_transition_verification_to_completion () =
   in
   let verified_goal = Yojson.Safe.Util.member "goal" verified_json in
   check string "phase moved to completed" "completed"
-    (get_string_field verified_goal "phase")
+    (get_string_field verified_goal "phase");
+  let verified_summary =
+    Yojson.Safe.Util.member "verification_summary" verified_json
+  in
+  check bool "open request cleared after approve" true
+    (verified_summary |> Yojson.Safe.Util.member "open_request" |> json_is_null);
+  check int "approve count follows latest request" 1
+    (verified_summary |> Yojson.Safe.Util.member "approve_count"
+    |> Yojson.Safe.Util.to_int);
+  let latest_request =
+    Yojson.Safe.Util.member "latest_request" verified_summary
+  in
+  check string "approved latest request retained" request_id
+    (get_string_field latest_request "id");
+  check string "latest request status approved" "approved"
+    (get_string_field latest_request "status");
+  let vote =
+    match latest_request |> Yojson.Safe.Util.member "votes" |> Yojson.Safe.Util.to_list with
+    | vote :: _ -> vote
+    | [] -> fail "expected verification vote"
+  in
+  check string "vote note retained" "checked receipt and tests"
+    (get_string_field vote "note");
+  check (list string) "vote evidence refs retained"
+    [ "receipt:keeper-alpha:turn-7"; "test:test_goal_tools" ]
+    (get_string_list_field vote "evidence_refs")
+
+let test_goal_transition_rejected_verification_retains_evidence () =
+  with_room @@ fun config ->
+  let verifier_policy =
+    {
+      Goal_verification.inherit_mode = Goal_verification.Extend;
+      principals =
+        [
+          {
+            kind = Goal_verification.Keeper;
+            id = "keeper-alpha";
+            display_name = Some "keeper-alpha";
+          };
+        ];
+      required_verdicts = Some 1;
+    }
+  in
+  let goal, _kind =
+    match Goal_store.upsert_goal config ~title:"Reject me" ~verifier_policy () with
+    | Ok payload -> payload
+    | Error msg -> fail msg
+  in
+  create_done_task config ~goal_id:goal.id ~title:"Reject done task";
+  let transitioned =
+    Tool_coord.dispatch (coord_ctx config) ~name:"masc_goal_transition"
+      ~args:
+        (`Assoc
+          [
+            ("goal_id", `String goal.id);
+            ("action", `String "request_complete");
+            ("actor", principal_json ~kind:"operator" ~id:"planner");
+          ])
+  in
+  let transitioned_json =
+    match transitioned with
+    | Some result -> parse_json_result result
+    | None -> fail "masc_goal_transition not handled"
+  in
+  let request_id =
+    transitioned_json
+    |> Yojson.Safe.Util.member "verification_request"
+    |> fun json -> get_string_field json "id"
+  in
+  let rejected =
+    Tool_coord.dispatch (coord_ctx config) ~name:"masc_goal_verify"
+      ~args:
+        (`Assoc
+          [
+            ("goal_id", `String goal.id);
+            ("request_id", `String request_id);
+            ("principal", principal_json ~kind:"keeper" ~id:"keeper-alpha");
+            ("decision", `String "reject");
+            ("note", `String "receipt did not prove completion");
+            ("evidence_refs", `List [ `String "receipt:keeper-alpha:turn-7" ]);
+          ])
+  in
+  let rejected_json =
+    match rejected with
+    | Some result -> parse_json_result result
+    | None -> fail "masc_goal_verify not handled"
+  in
+  check string "phase moved back to executing" "executing"
+    (rejected_json |> Yojson.Safe.Util.member "goal" |> fun json ->
+     get_string_field json "phase");
+  let latest_request =
+    rejected_json
+    |> Yojson.Safe.Util.member "verification_summary"
+    |> Yojson.Safe.Util.member "latest_request"
+  in
+  check int "reject count follows latest request" 1
+    (rejected_json
+    |> Yojson.Safe.Util.member "verification_summary"
+    |> Yojson.Safe.Util.member "reject_count"
+    |> Yojson.Safe.Util.to_int);
+  check string "latest request status rejected" "rejected"
+    (get_string_field latest_request "status");
+  let vote =
+    match latest_request |> Yojson.Safe.Util.member "votes" |> Yojson.Safe.Util.to_list with
+    | vote :: _ -> vote
+    | [] -> fail "expected reject vote"
+  in
+  check string "reject note retained" "receipt did not prove completion"
+    (get_string_field vote "note");
+  check (list string) "reject evidence retained"
+    [ "receipt:keeper-alpha:turn-7" ]
+    (get_string_list_field vote "evidence_refs")
 
 let test_goal_transition_approval_gate () =
   with_room @@ fun config ->
@@ -574,6 +708,8 @@ let () =
           test_case "review updates status" `Quick test_goal_review_updates_status;
           test_case "transition verify complete" `Quick
             test_goal_transition_verification_to_completion;
+          test_case "rejected verification retains evidence" `Quick
+            test_goal_transition_rejected_verification_retains_evidence;
           test_case "approval gate" `Quick
             test_goal_transition_approval_gate;
           test_case "review done compatibility" `Quick

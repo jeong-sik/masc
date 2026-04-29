@@ -45,6 +45,7 @@ function makeNode(overrides: Partial<GoalTreeNode> = {}): GoalTreeNode {
     verification_summary: {
       effective_policy: null,
       open_request: null,
+      latest_request: null,
       approve_count: 0,
       reject_count: 0,
       remaining_possible: 0,

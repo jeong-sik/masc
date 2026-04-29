@@ -27,6 +27,7 @@ import type {
   GoalTreeNode,
   GoalTreeTask,
   GoalTreeSummary,
+  GoalVerificationRequest,
   GoalVerificationSummary,
 } from '../../types'
 import {
@@ -257,9 +258,127 @@ let detailRequestSeq = 0
 const EMPTY_GOAL_VERIFICATION_SUMMARY: GoalVerificationSummary = {
   effective_policy: null,
   open_request: null,
+  latest_request: null,
   approve_count: 0,
   reject_count: 0,
   remaining_possible: 0,
+}
+
+function verificationPrincipalLabel(principal: GoalVerificationRequest['requested_by']) {
+  return `${principal.kind}:${principal.display_name ?? principal.id}`
+}
+
+function verificationStatusLabel(
+  request: GoalVerificationRequest | null,
+  isOpen: boolean,
+) {
+  if (!request) return '정책 설정됨'
+  if (isOpen) return '확인 대기'
+  switch (request.status) {
+    case 'approved': return '확인됨'
+    case 'rejected': return '반려됨'
+    case 'cancelled': return '취소됨'
+    default: return request.status
+  }
+}
+
+function verificationStatusClass(
+  request: GoalVerificationRequest | null,
+  isOpen: boolean,
+) {
+  if (!request) return 'border-card-border/60 bg-[var(--white-4)] text-text-muted'
+  if (isOpen) return 'border-amber-400/25 bg-amber-400/10 text-amber-100'
+  switch (request.status) {
+    case 'approved': return 'border-ok/25 bg-ok/10 text-ok'
+    case 'rejected': return 'border-bad/25 bg-bad/10 text-bad'
+    case 'cancelled': return 'border-warn/25 bg-warn/10 text-warn'
+    default: return 'border-card-border/60 bg-[var(--white-4)] text-text-body'
+  }
+}
+
+function GoalVerificationEvidencePanel({
+  summary,
+  compact = false,
+}: {
+  summary: GoalVerificationSummary
+  compact?: boolean
+}) {
+  const request = summary.open_request ?? summary.latest_request ?? null
+  const isOpen = Boolean(summary.open_request)
+  const policy = request?.policy_snapshot ?? summary.effective_policy ?? null
+  if (!policy && !request) return null
+
+  const requiredVerdicts = policy?.required_verdicts ?? 0
+  const statusClass = verificationStatusClass(request, isOpen)
+  const votes = request?.votes ?? []
+  const panelClass = compact
+    ? 'ml-6 rounded border border-amber-400/20 bg-amber-400/8 p-2 text-xs text-amber-100'
+    : 'rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4'
+
+  return html`
+    <div class=${panelClass}>
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <div class="text-2xs font-semibold uppercase tracking-widest text-text-muted">AI 확인</div>
+        <span class="rounded border px-2 py-0.5 text-3xs font-semibold ${statusClass}">
+          ${verificationStatusLabel(request, isOpen)}
+        </span>
+      </div>
+      <div class="mt-2 flex flex-wrap items-center gap-2 text-xs text-text-body">
+        <span class="rounded border border-amber-400/20 bg-amber-400/8 px-2 py-1 text-amber-100">
+          quorum ${summary.approve_count}/${requiredVerdicts}
+        </span>
+        <span>reject ${summary.reject_count}</span>
+        <span>remaining ${summary.remaining_possible}</span>
+      </div>
+      ${request ? html`
+        <div class="mt-2 flex flex-wrap gap-2 text-3xs text-text-muted">
+          <span>request ${request.id}</span>
+          <span>target ${request.target_phase}</span>
+          <span>opened <${TimeAgo} timestamp=${request.created_at} /></span>
+          ${request.resolved_at ? html`
+            <span>resolved <${TimeAgo} timestamp=${request.resolved_at} /></span>
+          ` : null}
+        </div>
+      ` : null}
+      ${policy && policy.eligible_principals.length > 0 ? html`
+        <div class="mt-3 flex flex-wrap gap-1.5">
+          ${policy.eligible_principals.map(principal => html`
+            <span key=${`${principal.kind}:${principal.id}`} class="rounded border border-card-border/60 bg-[var(--white-4)] px-2 py-0.5 text-3xs font-medium text-text-body">
+              ${verificationPrincipalLabel(principal)}
+            </span>
+          `)}
+        </div>
+      ` : null}
+      ${votes.length > 0 ? html`
+        <div class="mt-3 flex flex-col gap-2">
+          ${votes.map(vote => {
+            const evidenceRefs = vote.evidence_refs ?? []
+            return html`
+              <div key=${`${vote.principal.kind}:${vote.principal.id}:${vote.submitted_at}`} class="rounded border border-card-border/50 bg-[var(--white-3)] p-2 text-xs text-text-body">
+                <div class="flex flex-wrap items-center gap-2">
+                  <span class="font-semibold text-text-strong">${verificationPrincipalLabel(vote.principal)}</span>
+                  <span class="rounded border border-card-border/60 bg-[var(--white-4)] px-1.5 py-0.5 text-3xs uppercase tracking-wider text-text-muted">${vote.decision}</span>
+                  <span class="text-3xs text-text-dim"><${TimeAgo} timestamp=${vote.submitted_at} /></span>
+                </div>
+                ${vote.note ? html`
+                  <div class="mt-1 leading-relaxed text-text-muted">${vote.note}</div>
+                ` : null}
+                ${evidenceRefs.length > 0 ? html`
+                  <div class="mt-2 flex flex-wrap gap-1">
+                    ${evidenceRefs.map(ref => html`
+                      <code key=${ref} class="rounded border border-card-border/60 bg-[var(--white-4)] px-1.5 py-0.5 text-3xs text-text-secondary">${ref}</code>
+                    `)}
+                  </div>
+                ` : null}
+              </div>
+            `
+          })}
+        </div>
+      ` : request ? html`
+        <div class="mt-3 text-xs text-text-muted">verifier vote 없음</div>
+      ` : null}
+    </div>
+  `
 }
 
 function toggleNode(id: string) {
@@ -573,17 +692,7 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
 
       ${isExpanded ? html`
         <div class="mt-1.5 flex flex-col gap-1.5">
-          ${verificationSummary.open_request ? html`
-            <div class="ml-6 rounded border border-amber-400/20 bg-amber-400/8 p-2 text-xs text-amber-100">
-              <div class="mb-1 text-3xs font-semibold uppercase tracking-widest text-amber-200/80">목표 검증</div>
-              <div>request ${verificationSummary.open_request.id}</div>
-              <div>
-                quorum ${verificationSummary.approve_count}/${verificationSummary.open_request.policy_snapshot.required_verdicts},
-                reject ${verificationSummary.reject_count},
-                remaining ${verificationSummary.remaining_possible}
-              </div>
-            </div>
-          ` : null}
+          <${GoalVerificationEvidencePanel} summary=${verificationSummary} compact />
           ${node.tasks.length > 0 ? html`
             <div class="ml-6 flex flex-col gap-1 rounded border border-card-border/40 bg-[rgba(5,9,16,0.6)] p-2">
               <div class="mb-1 text-3xs font-semibold uppercase tracking-widest text-text-dim">연결된 태스크</div>
@@ -859,31 +968,7 @@ function GoalDetailPanel({
           <${DetailMetric} label="최근 활동" value=${selectedNode.stagnation_seconds > 0 ? `${Math.floor(selectedNode.stagnation_seconds / 3600)}h idle` : 'now'} tone=${selectedNode.badges.includes('stalled') ? 'warn' : 'default'} />
         </div>
 
-        ${verificationSummary.effective_policy ? html`
-          <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4">
-            <div class="mb-2 text-2xs font-semibold uppercase tracking-widest text-text-muted">목표 검증</div>
-            <div class="flex flex-wrap items-center gap-2 text-xs text-text-body">
-              <span class="rounded border border-amber-400/20 bg-amber-400/8 px-2 py-1 text-amber-100">
-                quorum ${verificationSummary.approve_count}/${verificationSummary.effective_policy.required_verdicts}
-              </span>
-              <span>reject ${verificationSummary.reject_count}</span>
-              <span>remaining ${verificationSummary.remaining_possible}</span>
-            </div>
-            <div class="mt-3 flex flex-wrap gap-1.5">
-              ${verificationSummary.effective_policy.eligible_principals.map(principal => html`
-                <span key=${`${principal.kind}:${principal.id}`} class="rounded border border-card-border/60 bg-[var(--white-4)] px-2 py-0.5 text-3xs font-medium text-text-body">
-                  ${principal.kind}:${principal.display_name ?? principal.id}
-                </span>
-              `)}
-            </div>
-            ${verificationSummary.open_request ? html`
-              <div class="mt-3 rounded border border-amber-400/20 bg-amber-400/8 p-3 text-xs text-amber-100">
-                <div>request ${verificationSummary.open_request.id}</div>
-                <div class="mt-1">status ${verificationSummary.open_request.status}</div>
-              </div>
-            ` : null}
-          </div>
-        ` : null}
+        <${GoalVerificationEvidencePanel} summary=${verificationSummary} />
 
         ${selectedNode.badges.length > 0 ? html`
           <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4">
@@ -918,6 +1003,8 @@ function GoalDetailPanel({
       ${activeTab === 'evidence' ? html`
         <div class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
           <div class="flex flex-col gap-4">
+            <${GoalVerificationEvidencePanel} summary=${verificationSummary} />
+
             <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4">
               <div class="mb-3 text-2xs font-semibold uppercase tracking-widest text-text-muted">키퍼 준비 상태</div>
               ${detail ? (

@@ -920,6 +920,7 @@ function decodeGoalVerificationSummary(raw: unknown): GoalVerificationSummary {
     return {
       effective_policy: null,
       open_request: null,
+      latest_request: null,
       approve_count: 0,
       reject_count: 0,
       remaining_possible: 0,
@@ -928,6 +929,7 @@ function decodeGoalVerificationSummary(raw: unknown): GoalVerificationSummary {
   return {
     effective_policy: decodeGoalVerificationPolicySnapshot(raw.effective_policy),
     open_request: decodeGoalVerificationRequest(raw.open_request),
+    latest_request: decodeGoalVerificationRequest(raw.latest_request),
     approve_count: asInt(raw.approve_count) ?? 0,
     reject_count: asInt(raw.reject_count) ?? 0,
     remaining_possible: asInt(raw.remaining_possible) ?? 0,

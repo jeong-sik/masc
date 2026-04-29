@@ -59,6 +59,25 @@ describe('resolveRuntimeCounts', () => {
     })
   })
 
+  it('prefers visible runtime rows over configured fallback counts while execution is still warming', () => {
+    expect(resolveRuntimeCounts({
+      executionLoaded: false,
+      agentsCount: 0,
+      keepersCount: 12,
+      namespaceTruthCounts: { agents: 0, keepers: 14, tasks: 103 },
+      namespaceTruthConfiguredKeepers: 14,
+      shellCounts: { agents: 13, keepers: 12, tasks: 103, total_runtimes: 25 },
+      shellConfiguredKeepers: 14,
+    })).toEqual({
+      agents: 0,
+      keepers: 12,
+      tasks: 0,
+      totalRuntimes: 12,
+      configuredKeepers: 14,
+      source: 'partial',
+    })
+  })
+
   it('keeps fallback truth when execution says loaded but runtime rows are still empty', () => {
     expect(resolveRuntimeCounts({
       executionLoaded: true,

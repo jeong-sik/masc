@@ -67,6 +67,7 @@ export function AgentsUnified() {
   const totalCount = runtimeCounts.totalRuntimes
   const keeperCount = runtimeCounts.keepers
   const agentOnlyCount = runtimeCounts.agents
+  const configuredKeeperDelta = Math.max(0, runtimeCounts.configuredKeepers - keeperCount)
   function chipCount(id: AgentsView): number | null {
     if (id === 'all') return totalCount
     if (id === 'agents') return agentOnlyCount
@@ -92,6 +93,13 @@ export function AgentsUnified() {
         tone="accent"
         class="monitor-muted-panel w-fit p-1.5 shadow-[inset_0_1px_0_var(--white-3)]"
       />
+
+      ${configuredKeeperDelta > 0 ? html`
+        <div class="monitor-muted-panel flex w-fit flex-wrap items-center gap-2 px-3 py-2 text-xs text-[var(--color-fg-muted)]">
+          <span class="text-2xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">runtime truth</span>
+          <span>live runtime ${keeperCount} · configured keeper ${runtimeCounts.configuredKeepers} · 일시정지/미기동 ${configuredKeeperDelta}</span>
+        </div>
+      ` : null}
 
       ${currentView !== 'fsm' ? html`
         <div class="monitor-muted-panel flex flex-wrap items-center gap-2 px-4 py-3 text-xs text-[var(--color-fg-muted)]">

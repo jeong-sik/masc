@@ -5,7 +5,9 @@
     this shared implementation.
 
     Two stall detection modes:
-    1. Idle stall: [last_turn_ts] older than 300s while [Running].
+    1. Idle stall: [last_turn_ts] older than 300s while [Running],
+       with no recent keepalive skip verdict proving the fiber is still
+       evaluating work.
     2. Failure loop: [consecutive_noop_count >= 3] — catches keepers in
        LLM timeout loops where [last_turn_ts] stays fresh because each
        failed turn updates it.
@@ -113,6 +115,13 @@ let stale_kill_class_label (cls : Keeper_registry.stale_kill_class) : string =
   | In_turn_hung _ -> "in_turn_hung"
   | Noop_failure_loop _ -> "noop_failure_loop"
 
+let has_recent_skip_observation ~now ~threshold
+    (entry : Keeper_registry.registry_entry) : bool =
+  match entry.last_skip_observation with
+  | Some (ts, reasons) ->
+      reasons <> [] && now -. ts <= threshold
+  | None -> false
+
 let () =
   Prometheus.register_counter
     ~name:"masc_keeper_stale_termination_by_class_total"
@@ -209,21 +218,27 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                let turn_timeout = Keeper_runtime_resolved.turn_timeout_sec () in
                Float.max turn_timeout threshold
              in
-             let idle_stale, in_turn_stale, in_turn_age =
+             let idle_stale, in_turn_stale, in_turn_age,
+                 idle_skip_suppressed =
                match entry.current_turn_observation with
                | Some obs ->
                  let elapsed = now -. obs.started_at in
                  ( false
                  , elapsed > active_turn_timeout_sec
                    && fiber_age >= grace_period_sec ()
-                 , elapsed )
+                 , elapsed
+                 , false )
                | None ->
+                 let skip_observed =
+                   has_recent_skip_observation ~now ~threshold entry
+                 in
                  let stale =
                    last_turn > 0.0
                    && now -. last_turn > threshold
                    && fiber_age >= grace_period_sec ()
+                   && not skip_observed
                  in
-                 (stale, false, 0.0)
+                 (stale, false, 0.0, skip_observed)
              in
              let noop_count =
                entry.meta.runtime.proactive_rt.consecutive_noop_count
@@ -231,7 +246,7 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
              let failure_loop = noop_count >= noop_threshold () in
              let stale = idle_stale || in_turn_stale || failure_loop in
              (* #10908: 92% of ticks are
-                [noop=0 idle_stale=false failure_loop=false stale=false]
+               [noop=0 idle_stale=false failure_loop=false stale=false]
                 — every health bool at default.  Logging at INFO drowns
                 actionable ticks (and competing real signals) under
                 ~800 lines/day of identical heartbeat noise.  Same fix
@@ -239,12 +254,13 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                 anything an operator should see (any flag set or any
                 noop accumulated), demote the all-default heartbeat to
                 DEBUG. *)
-             let actionable = stale || noop_count > 0 in
+             let actionable = stale || noop_count > 0 || idle_skip_suppressed in
              let log_line =
                Printf.sprintf
-                 "%s: watchdog tick noop=%d idle_stale=%b in_turn_stale=%b in_turn_age=%.0f failure_loop=%b stale=%b last_turn=%.0f fiber_age=%.0f grace_rem=%.0f"
-                 meta.name noop_count idle_stale in_turn_stale in_turn_age
-                 failure_loop stale last_turn fiber_age grace_remaining
+                 "%s: watchdog tick noop=%d idle_stale=%b idle_skip_suppressed=%b in_turn_stale=%b in_turn_age=%.0f failure_loop=%b stale=%b last_turn=%.0f fiber_age=%.0f grace_rem=%.0f"
+                 meta.name noop_count idle_stale idle_skip_suppressed
+                 in_turn_stale in_turn_age failure_loop stale last_turn
+                 fiber_age grace_remaining
              in
              if actionable
              then Log.Keeper.info "%s" log_line

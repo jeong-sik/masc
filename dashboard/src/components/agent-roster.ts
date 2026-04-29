@@ -179,6 +179,16 @@ function findKeeperRuntimeForAgent(
 
 type KeeperFilterMode = 'all' | 'agent-only' | 'keeper-only'
 
+export function isRuntimeBackedKeeper(keeper: Pick<Keeper, 'paused' | 'registered' | 'keepalive_running'>): boolean {
+  if (keeper.registered === false && keeper.keepalive_running === false) return false
+  if (keeper.paused === true && keeper.registered !== true && keeper.keepalive_running !== true) return false
+  return true
+}
+
+function runtimeBackedKeepers(keeperList: Keeper[]): Keeper[] {
+  return keeperList.filter(isRuntimeBackedKeeper)
+}
+
 function expectedCountForKeeperFilter(
   keeperFilter: KeeperFilterMode,
   counts: ReturnType<typeof resolveRuntimeCounts>,
@@ -397,10 +407,11 @@ export function countRuntimeKinds(
   agentList: Agent[],
   keeperList: Keeper[],
 ): { agents: number; keepers: number; totalRuntimes: number } {
-  const rosterAgents = buildAgentRoster(agentList, keeperList)
-  const keeperLookup = buildKeeperRuntimeLookup(keeperList)
-  const keeperCount = scopeAgentsByKeeperFilter(rosterAgents, keeperList, 'keeper-only', keeperLookup).length
-  const agentCount = scopeAgentsByKeeperFilter(rosterAgents, keeperList, 'agent-only', keeperLookup).length
+  const runtimeKeepers = runtimeBackedKeepers(keeperList)
+  const rosterAgents = buildAgentRoster(agentList, runtimeKeepers)
+  const keeperLookup = buildKeeperRuntimeLookup(runtimeKeepers)
+  const keeperCount = scopeAgentsByKeeperFilter(rosterAgents, runtimeKeepers, 'keeper-only', keeperLookup).length
+  const agentCount = scopeAgentsByKeeperFilter(rosterAgents, runtimeKeepers, 'agent-only', keeperLookup).length
 
   return {
     agents: agentCount,
@@ -415,25 +426,29 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
 
   const agentList = agents.value
   const keeperList = keepers.value
+  const runtimeKeeperList = useMemo(
+    () => runtimeBackedKeepers(keeperList),
+    [keeperList],
+  )
 
   // Memoize roster and lookup Maps — these iterate full keeper/agent arrays.
   // Directory cards are live-only: cached mission briefs are intentionally
   // excluded so one card never mixes multiple freshness levels.
   const rosterAgents = useMemo(
-    () => buildAgentRoster(agentList, keeperList),
-    [agentList, keeperList],
+    () => buildAgentRoster(agentList, runtimeKeeperList),
+    [agentList, runtimeKeeperList],
   )
   const keeperRuntimeLookup = useMemo(
-    () => buildKeeperRuntimeLookup(keeperList),
-    [keeperList],
+    () => buildKeeperRuntimeLookup(runtimeKeeperList),
+    [runtimeKeeperList],
   )
 
   // Derive runtime kind counts from memoized roster (avoids duplicate buildAgentRoster call)
   const liveRuntimeCounts = useMemo(() => {
-    const keeperCount = scopeAgentsByKeeperFilter(rosterAgents, keeperList, 'keeper-only', keeperRuntimeLookup).length
-    const agentCount = scopeAgentsByKeeperFilter(rosterAgents, keeperList, 'agent-only', keeperRuntimeLookup).length
+    const keeperCount = scopeAgentsByKeeperFilter(rosterAgents, runtimeKeeperList, 'keeper-only', keeperRuntimeLookup).length
+    const agentCount = scopeAgentsByKeeperFilter(rosterAgents, runtimeKeeperList, 'agent-only', keeperRuntimeLookup).length
     return { agents: agentCount, keepers: keeperCount, totalRuntimes: rosterAgents.length }
-  }, [rosterAgents, keeperList, keeperRuntimeLookup])
+  }, [rosterAgents, runtimeKeeperList, keeperRuntimeLookup])
 
   const runtimeCounts = resolveRuntimeCounts({
     executionLoaded: executionLoaded.value,
@@ -450,22 +465,22 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
   const namespaceName = namespaceStatus?.project ?? 'default'
 
   const scopedAgents = useMemo(
-    () => scopeAgentsByKeeperFilter(rosterAgents, keeperList, keeperFilter, keeperRuntimeLookup),
-    [rosterAgents, keeperList, keeperFilter, keeperRuntimeLookup],
+    () => scopeAgentsByKeeperFilter(rosterAgents, runtimeKeeperList, keeperFilter, keeperRuntimeLookup),
+    [rosterAgents, runtimeKeeperList, keeperFilter, keeperRuntimeLookup],
   )
   const bandByAgent = useMemo(
     () => new Map(
       scopedAgents.map(agent => [
         agent.name,
         runtimeBandMetaForAgent(
-        agent,
+          agent,
           keeperRuntimeLookup.get(agent.name)
             ?? findKeeperRuntimeForAgent(agent, keeperRuntimeLookup)
-            ?? findKeeperRuntime(agent.name, keeperList),
+            ?? findKeeperRuntime(agent.name, runtimeKeeperList),
         ),
       ] as const),
     ),
-    [scopedAgents, keeperRuntimeLookup, keeperList],
+    [scopedAgents, keeperRuntimeLookup, runtimeKeeperList],
   )
   const normalizedSearch = search.trim().toLowerCase()
   const searchTermsByAgent = useMemo(
@@ -474,7 +489,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
         const keeper =
           keeperRuntimeLookup.get(agent.name)
           ?? findKeeperRuntimeForAgent(agent, keeperRuntimeLookup)
-          ?? findKeeperRuntime(agent.name, keeperList)
+          ?? findKeeperRuntime(agent.name, runtimeKeeperList)
         return [
           agent.name,
           keeperIdentitySearchTerms(
@@ -484,7 +499,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
         ] as const
       }),
     ),
-    [scopedAgents, keeperRuntimeLookup, keeperList],
+    [scopedAgents, keeperRuntimeLookup, runtimeKeeperList],
   )
   const pageDescription = keeperFilter === 'keeper-only'
     ? 'live runtime 기준으로 주 이름과 현재 상태를 먼저 훑습니다.'
@@ -520,7 +535,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
       return a.name.localeCompare(b.name)
     })
 
-  const counts = countAgentsByStatus(scopedAgents, keeperList)
+  const counts = countAgentsByStatus(scopedAgents, runtimeKeeperList)
   const showExecutionFallbackState = shouldShowExecutionFallbackState({
     executionLoaded: executionLoaded.value,
     executionLoading: executionLoading.value,
@@ -554,7 +569,9 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
   const configuredKeeperHint =
     keeperFilter === 'agent-only' || runtimeCounts.configuredKeepers <= 0
       ? null
-      : `설정된 keeper ${runtimeCounts.configuredKeepers}개`
+      : runtimeCounts.configuredKeepers > runtimeCounts.keepers
+        ? `설정된 keeper ${runtimeCounts.configuredKeepers}개 · runtime ${runtimeCounts.keepers}개 · 일시정지/미기동 ${runtimeCounts.configuredKeepers - runtimeCounts.keepers}개`
+        : `설정된 keeper ${runtimeCounts.configuredKeepers}개`
   const fallbackStateTitle =
     executionError.value
       ? '상세 상태 불러오기 실패'
@@ -636,7 +653,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
           const keeperRuntime =
             keeperRuntimeLookup.get(agent.name)
             ?? findKeeperRuntimeForAgent(agent, keeperRuntimeLookup)
-            ?? findKeeperRuntime(agent.name, keeperList)
+            ?? findKeeperRuntime(agent.name, runtimeKeeperList)
           const band = bandByAgent.get(agent.name) ?? runtimeBandMeta('attention')
           const keeperMonitoring = keeperRuntime ? summarizeKeeperMonitoring(keeperRuntime) : null
           const monitoringEvidence = keeperMonitoring ? summarizeMonitoringEvidence(keeperMonitoring) : null

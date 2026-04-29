@@ -47,7 +47,8 @@ let payload_agent_name payload =
      keeper-specific key (e.g. [masc:keeper:snapshot],
      [masc:keeper:lifecycle]).  Without this fallback the top-level
      envelope [agent_name] is Null for 9%+ of daily events, breaking
-     per-agent filters on [.masc/oas-events/*.jsonl].  See #7827. *)
+     per-agent filters over the Dated_jsonl store under [.masc/oas-events/].
+     See #7827. *)
   match payload_string_opt "agent_name" payload with
   | Some _ as value -> value
   | None ->

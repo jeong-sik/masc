@@ -207,14 +207,20 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
         | exception exn ->
           (match exn with
            | Compute_timeout _ -> ()
-           | _ when is_internal_race_cancel exn -> ()
+           | _ when is_internal_race_cancel exn ->
+               Log.Dashboard.debug "cache bg-revalidate race-cancel for %s, scheduling early retry" key
            | _ -> Log.Dashboard.warn "cache bg-revalidate failed (%s): %s" key (Printexc.to_string exn));
           atomic_update table (fun map ->
             match SMap.find_opt key map with
             | Some (Computing { token = c; _ }) when c = token ->
               let ts = now () in
               let backoff_grace = stale_grace *. bg_revalidate_backoff_factor in
-              ((), SMap.add key (Ready { value = stale_value; expires_at = ts; stale_until = ts +. backoff_grace }) map)
+              (* After race-cancel, set expires_at = ts so the next lookup
+                 immediately triggers recompute instead of returning stale. *)
+              let expires_at =
+                if is_internal_race_cancel exn then ts else ts +. backoff_grace
+              in
+              ((), SMap.add key (Ready { value = stale_value; expires_at; stale_until = ts +. backoff_grace }) map)
             | _ -> ((), map)
           )
       and restore_stale_ready () =

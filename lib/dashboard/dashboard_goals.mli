@@ -84,12 +84,14 @@ val tree_node_to_json :
     (string -> Goal_verification.policy_snapshot option) ->
   ?open_request_for_goal:
     (string -> Goal_verification.goal_verification_request option) ->
+  ?latest_request_for_goal:
+    (string -> Goal_verification.goal_verification_request option) ->
   ?events_for_goal:(string -> Yojson.Safe.t list) ->
   tree_node ->
   Yojson.Safe.t
 (** Renders a single {!tree_node} as JSON.  Optional
     callbacks supply per-goal verification policy /
-    open-request / event-timeline projections; defaults
+    open-request / latest-request / event-timeline projections; defaults
     return [None] / [\[\]] so callers that don't need
     verification context can pass the bare node. *)
 

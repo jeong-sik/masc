@@ -747,6 +747,10 @@ let build_goal_verification_projection ~(config : Coord.config) goals =
   in
   let effective_policy_table = Hashtbl.create (max 16 (List.length goals)) in
   let request_table = Hashtbl.create (max 16 (List.length requests)) in
+  let latest_request_table :
+      (string, Goal_verification.goal_verification_request) Hashtbl.t =
+    Hashtbl.create (max 16 (List.length requests))
+  in
   let goal_events =
     let path = Goal_verification.events_path config in
     if Coord.path_exists config path then
@@ -767,6 +771,13 @@ let build_goal_verification_projection ~(config : Coord.config) goals =
     goals;
   List.iter
     (fun (request : Goal_verification.goal_verification_request) ->
+      let should_replace_latest =
+        match Hashtbl.find_opt latest_request_table request.goal_id with
+        | None -> true
+        | Some existing -> String.compare request.created_at existing.created_at >= 0
+      in
+      if should_replace_latest then
+        Hashtbl.replace latest_request_table request.goal_id request;
       if request.status = Goal_verification.Open then
         Hashtbl.replace request_table request.goal_id request)
     requests;
@@ -784,17 +795,25 @@ let build_goal_verification_projection ~(config : Coord.config) goals =
       Option.value (Hashtbl.find_opt effective_policy_table goal_id)
         ~default:None),
     (fun goal_id -> Hashtbl.find_opt request_table goal_id),
+    (fun goal_id -> Hashtbl.find_opt latest_request_table goal_id),
     (fun goal_id ->
       Option.value (Hashtbl.find_opt events_table goal_id) ~default:[]) )
 
 let rec tree_node_to_json ?(effective_policy_for_goal = fun _ -> None)
-    ?(open_request_for_goal = fun _ -> None) ?(events_for_goal = fun _ -> [])
+    ?(open_request_for_goal = fun _ -> None)
+    ?(latest_request_for_goal = fun _ -> None) ?(events_for_goal = fun _ -> [])
     node =
   let goal = node.goal in
   let effective_policy = effective_policy_for_goal goal.id in
   let open_request = open_request_for_goal goal.id in
-  let approve_count, reject_count, remaining_possible =
+  let latest_request = latest_request_for_goal goal.id in
+  let summary_request =
     match open_request with
+    | Some request -> Some request
+    | None -> latest_request
+  in
+  let approve_count, reject_count, remaining_possible =
+    match summary_request with
     | None -> (0, 0, 0)
     | Some request ->
         ( Goal_verification.count_votes ~decision:Goal_verification.Approve request,
@@ -847,6 +866,11 @@ let rec tree_node_to_json ?(effective_policy_for_goal = fun _ -> None)
               | Some request ->
                   Goal_verification.goal_verification_request_to_yojson request
               | None -> `Null );
+            ( "latest_request",
+              match latest_request with
+              | Some request ->
+                  Goal_verification.goal_verification_request_to_yojson request
+              | None -> `Null );
             ("approve_count", `Int approve_count);
             ("reject_count", `Int reject_count);
             ("remaining_possible", `Int remaining_possible);
@@ -865,7 +889,7 @@ let rec tree_node_to_json ?(effective_policy_for_goal = fun _ -> None)
         `List
           (List.map
              (tree_node_to_json ~effective_policy_for_goal ~open_request_for_goal
-                ~events_for_goal)
+                ~latest_request_for_goal ~events_for_goal)
              node.children) );
       ("child_count", `Int (List.length node.children));
       ("last_activity_at", `String node.last_activity_at);
@@ -963,22 +987,27 @@ let timeline_event_json ~ts ~kind ~lane ~title ~summary ~severity =
       ("severity", `String severity);
     ]
 
+let json_member_or_null field = function
+  | `Assoc _ as json -> member field json
+  | _ -> `Null
+
 let goal_event_timeline_json event =
   let event_type =
     event |> member "event_type" |> to_string_option
     |> Option.value ~default:"goal_event"
   in
   let payload = event |> member "payload" in
+  let payload_field field = json_member_or_null field payload in
   let ts = event |> member "ts" |> to_string_option |> Option.value ~default:"" in
   let title, summary, severity =
     match event_type with
     | "goal_phase" ->
         let phase =
-          payload |> member "phase" |> to_string_option
+          payload_field "phase" |> to_string_option
           |> Option.value ~default:"unknown"
         in
         let actor =
-          payload |> member "actor" |> member "id" |> to_string_option
+          payload_field "actor" |> json_member_or_null "id" |> to_string_option
         in
         ( "Goal Phase",
           (match actor with
@@ -989,13 +1018,14 @@ let goal_event_timeline_json event =
           | "awaiting_verification" | "awaiting_approval" | "paused" -> "warn"
           | _ -> "ok") )
     | "goal_verification_opened" ->
+        let request = payload_field "request" in
         let request_id =
-          payload |> member "request" |> member "id" |> to_string_option
+          request |> json_member_or_null "id" |> to_string_option
           |> Option.value ~default:"request"
         in
         let required =
-          payload |> member "request" |> member "policy_snapshot"
-          |> member "required_verdicts" |> to_int_option
+          request |> json_member_or_null "policy_snapshot"
+          |> json_member_or_null "required_verdicts" |> to_int_option
         in
         ( "Goal Verification Opened",
           (match required with
@@ -1003,13 +1033,14 @@ let goal_event_timeline_json event =
           | None -> Printf.sprintf "request %s opened" request_id),
           "warn" )
     | "goal_vote" ->
-        let vote = payload |> member "vote" in
+        let vote = payload_field "vote" in
         let decision =
-          vote |> member "decision" |> to_string_option
+          vote |> json_member_or_null "decision" |> to_string_option
           |> Option.value ~default:"unknown"
         in
         let principal =
-          vote |> member "principal" |> member "id" |> to_string_option
+          vote |> json_member_or_null "principal" |> json_member_or_null "id"
+          |> to_string_option
           |> Option.value ~default:"principal"
         in
         ( "Goal Vote",
@@ -1017,7 +1048,7 @@ let goal_event_timeline_json event =
           if String.equal decision "reject" then "bad" else "ok" )
     | "goal_verification_resolved" ->
         let status =
-          payload |> member "status" |> to_string_option
+          payload_field "status" |> to_string_option
           |> Option.value ~default:"unknown"
         in
         ( "Goal Verification Resolved",
@@ -1027,7 +1058,7 @@ let goal_event_timeline_json event =
           | "rejected" -> "bad"
           | _ -> "warn") )
     | "goal_approval_opened" ->
-        let request_id = payload |> member "request_id" |> to_string_option in
+        let request_id = payload_field "request_id" |> to_string_option in
         ( "Goal Approval Opened",
           (match request_id with
           | Some id -> Printf.sprintf "request %s is awaiting operator approval" id
@@ -1035,7 +1066,7 @@ let goal_event_timeline_json event =
           "warn" )
     | "goal_approval_resolved" ->
         let decision =
-          payload |> member "decision" |> to_string_option
+          payload_field "decision" |> to_string_option
           |> Option.value ~default:"unknown"
         in
         ( "Goal Approval Resolved",
@@ -1151,7 +1182,10 @@ let goal_detail_json ~(config : Coord.config) ~goal_id :
     (Yojson.Safe.t, string) result =
   let goals = Goal_store.list_goals config () in
   let tasks = Coord.get_tasks_safe config in
-  let effective_policy_for_goal, open_request_for_goal, events_for_goal =
+  let ( effective_policy_for_goal,
+        open_request_for_goal,
+        latest_request_for_goal,
+        events_for_goal ) =
     build_goal_verification_projection ~config goals
   in
   let forest = build_forest ~config ~goals ~tasks in
@@ -1195,7 +1229,7 @@ let goal_detail_json ~(config : Coord.config) ~goal_id :
             ("generated_at", `String (Types.now_iso ()));
             ( "goal",
               tree_node_to_json ~effective_policy_for_goal ~open_request_for_goal
-                ~events_for_goal node );
+                ~latest_request_for_goal ~events_for_goal node );
             ("linked_tasks", `List (List.map task_to_tree_json node.tasks));
             ("linked_keepers", `List (List.map goal_detail_keeper_json keeper_details));
             ("approvals", `List approvals);
@@ -1208,7 +1242,10 @@ let goal_detail_json ~(config : Coord.config) ~goal_id :
 let dashboard_goals_tree_json ~(config : Coord.config) : Yojson.Safe.t =
   let goals = Goal_store.list_goals config () in
   let tasks = Coord.get_tasks_safe config in
-  let effective_policy_for_goal, open_request_for_goal, events_for_goal =
+  let ( effective_policy_for_goal,
+        open_request_for_goal,
+        latest_request_for_goal,
+        events_for_goal ) =
     build_goal_verification_projection ~config goals
   in
   let forest = build_forest ~config ~goals ~tasks in
@@ -1260,7 +1297,7 @@ let dashboard_goals_tree_json ~(config : Coord.config) : Yojson.Safe.t =
         `List
           (List.map
              (tree_node_to_json ~effective_policy_for_goal ~open_request_for_goal
-                ~events_for_goal)
+                ~latest_request_for_goal ~events_for_goal)
              forest) );
       ( "summary",
         `Assoc

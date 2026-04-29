@@ -258,6 +258,7 @@ describe('dashboard goals decoding', () => {
     expect(result.tree[0]?.verification_summary).toEqual({
       effective_policy: null,
       open_request: null,
+      latest_request: null,
       approve_count: 0,
       reject_count: 0,
       remaining_possible: 0,
@@ -287,9 +288,72 @@ describe('dashboard goals decoding', () => {
     expect(result.goal.verification_summary).toEqual({
       effective_policy: null,
       open_request: null,
+      latest_request: null,
       approve_count: 0,
       reject_count: 0,
       remaining_possible: 0,
+    })
+  })
+
+  it('decodes resolved goal verification evidence on tree payloads', async () => {
+    const rawResponse = {
+      tree: [
+        makeRawGoalNode({
+          verification_summary: {
+            effective_policy: null,
+            open_request: null,
+            latest_request: {
+              id: 'gvr-1',
+              goal_id: 'goal-1',
+              target_phase: 'completed',
+              requested_by: { kind: 'operator', id: 'planner' },
+              policy_snapshot: {
+                principals: [{ kind: 'keeper', id: 'keeper-alpha' }],
+                eligible_principals: [{ kind: 'keeper', id: 'keeper-alpha' }],
+                required_verdicts: 1,
+              },
+              votes: [
+                {
+                  principal: { kind: 'keeper', id: 'keeper-alpha', display_name: 'keeper-alpha' },
+                  decision: 'approve',
+                  note: 'checked receipt and tests',
+                  evidence_refs: ['receipt:keeper-alpha:turn-7', 'test:test_goal_tools'],
+                  submitted_at: '2026-04-23T01:00:00Z',
+                },
+              ],
+              status: 'approved',
+              created_at: '2026-04-23T00:55:00Z',
+              resolved_at: '2026-04-23T01:00:00Z',
+            },
+            approve_count: 1,
+            reject_count: 0,
+            remaining_possible: 0,
+          },
+        }),
+      ],
+      summary: {},
+    }
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(rawResponse), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchDashboardGoalsTree()
+
+    expect(result.tree[0]?.verification_summary.latest_request).toMatchObject({
+      id: 'gvr-1',
+      status: 'approved',
+      votes: [
+        {
+          decision: 'approve',
+          note: 'checked receipt and tests',
+          evidence_refs: ['receipt:keeper-alpha:turn-7', 'test:test_goal_tools'],
+        },
+      ],
     })
   })
 

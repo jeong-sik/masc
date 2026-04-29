@@ -10,13 +10,15 @@ export const LEFT_MARGIN = 28
 export const TOP_PAD = 20
 export const LEGEND_HEIGHT = 32
 
-const COLORS = [
+const COLORS: readonly [string, string, string, string, string] = [
   'var(--slate-800)',
   '#0e4a5c',
   '#0e6e7e',
   '#14919b',
   'var(--cyan)',
 ]
+
+type HeatmapCanvasContext = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D
 
 export function intensityColor(count: number, max: number): string {
   if (count === 0) return COLORS[0]
@@ -43,7 +45,7 @@ export interface HeatmapCell {
 }
 
 export function drawHeatmap(
-  ctx: CanvasRenderingContext2D,
+  ctx: HeatmapCanvasContext,
   matrix: number[][],
   max: number,
 ) {
@@ -93,7 +95,7 @@ export function drawHeatmap(
   const legendStartX = LEFT_MARGIN + 28
   for (let i = 0; i < COLORS.length; i++) {
     const lx = legendStartX + i * (CELL + 2)
-    ctx.fillStyle = COLORS[i]!
+    ctx.fillStyle = COLORS[i] ?? COLORS[0]
     ctx.beginPath()
     ctx.roundRect(lx, legendY, CELL, 12, 2)
     ctx.fill()

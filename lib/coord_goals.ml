@@ -295,9 +295,14 @@ let goal_policy_nodes goals =
       })
     goals
 
-let verification_summary_json (goal : Goal_store.goal)
+let verification_summary_json ?latest_request (goal : Goal_store.goal)
     (effective_policy : Goal_verification.policy_snapshot option)
     (open_request : Goal_verification.goal_verification_request option) =
+  let latest_request =
+    match latest_request with
+    | Some request -> Some request
+    | None -> open_request
+  in
   let effective_policy_json =
     match effective_policy with
     | None -> `Null
@@ -308,8 +313,18 @@ let verification_summary_json (goal : Goal_store.goal)
     | None -> `Null
     | Some request -> Goal_verification.goal_verification_request_to_yojson request
   in
+  let latest_request_json =
+    match latest_request with
+    | None -> `Null
+    | Some request -> Goal_verification.goal_verification_request_to_yojson request
+  in
   let approve_count, reject_count, remaining_possible =
-    match open_request with
+    let summary_request =
+      match open_request with
+      | Some request -> Some request
+      | None -> latest_request
+    in
+    match summary_request with
     | None -> (0, 0, 0)
     | Some request ->
         ( Goal_verification.count_votes ~decision:Goal_verification.Approve request,
@@ -321,6 +336,7 @@ let verification_summary_json (goal : Goal_store.goal)
       ("phase", Goal_phase.to_yojson goal.phase);
       ("effective_policy", effective_policy_json);
       ("open_request", open_request_json);
+      ("latest_request", latest_request_json);
       ("approve_count", `Int approve_count);
       ("reject_count", `Int reject_count);
       ("remaining_possible", `Int remaining_possible);
@@ -754,7 +770,8 @@ let handle_goal_verify (ctx : context) args =
                               Goal_verification.goal_verification_request_to_yojson
                                 request );
                             ( "verification_summary",
-                              verification_summary_json updated_goal
+                              verification_summary_json ~latest_request:request
+                                updated_goal
                                 effective_policy
                                 (if updated_goal.phase = Goal_phase.Awaiting_verification then
                                    Some request

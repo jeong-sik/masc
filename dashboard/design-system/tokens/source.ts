@@ -689,6 +689,20 @@ export const semantic: ReadonlyArray<TokenBase> = (() => {
   out.push(t("button-danger-bg-pressed", "var(--bad-20)",       "role", "color",
     "ActionButton variant=danger [data-pressed] bg"));
 
+  // Fourth slot — button-ok. Affirmative non-destructive actions (mark
+  // resolved, accept, approve). Uses the ok-* status family. Aliases
+  // match button.ts VARIANT_CLASSES.ok.
+  out.push(t("button-ok-bg",         "var(--ok-10)",                  "role", "color",
+    "ActionButton variant=ok surface bg"));
+  out.push(t("button-ok-fg",         "var(--color-status-ok)",        "role", "color",
+    "ActionButton variant=ok text fg"));
+  out.push(t("button-ok-border",     "var(--ok-20)",                  "role", "color",
+    "ActionButton variant=ok border"));
+  out.push(t("button-ok-bg-hover",   "var(--ok-20)",                  "role", "color",
+    "ActionButton variant=ok hover bg"));
+  out.push(t("button-ok-bg-pressed", "var(--ok-20)",                  "role", "color",
+    "ActionButton variant=ok [data-pressed] bg"));
+
   // Interactive state roles — explicit hover/selected/pressed semantics
   out.push(t("state-hover-bg",       "var(--bg-3)",   "role", "color"));
   out.push(t("state-hover-fg",       "var(--fg-1)",   "role", "color"));

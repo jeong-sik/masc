@@ -380,6 +380,11 @@
   --color-button-danger-border: var(--bad-30);
   --color-button-danger-bg-hover: var(--bad-20);
   --color-button-danger-bg-pressed: var(--bad-20);
+  --color-button-ok-bg: var(--ok-10);
+  --color-button-ok-fg: var(--color-status-ok);
+  --color-button-ok-border: var(--ok-20);
+  --color-button-ok-bg-hover: var(--ok-20);
+  --color-button-ok-bg-pressed: var(--ok-20);
   --color-state-hover-bg: var(--bg-3);
   --color-state-hover-fg: var(--fg-1);
   --color-state-hover-border: var(--line-2);

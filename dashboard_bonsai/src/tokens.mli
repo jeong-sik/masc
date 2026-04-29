@@ -392,6 +392,11 @@ type semantic =
   | `Button_danger_border
   | `Button_danger_bg_hover
   | `Button_danger_bg_pressed
+  | `Button_ok_bg
+  | `Button_ok_fg
+  | `Button_ok_border
+  | `Button_ok_bg_hover
+  | `Button_ok_bg_pressed
   | `State_hover_bg
   | `State_hover_fg
   | `State_hover_border

@@ -38,26 +38,30 @@ NoSelfLoop ==
     \A e \in edges : e[1] /= e[2]
 
 \* Reachability via 1, 2, 3, ... step paths.
-Reaches1(a, b) == <<a, b>> \in edges
-Reaches2(a, b) == \E m \in Nodes :
-    <<a, m>> \in edges /\ <<m, b>> \in edges
-Reaches3(a, b) == \E m1, m2 \in Nodes :
-    <<a, m1>> \in edges /\ <<m1, m2>> \in edges /\ <<m2, b>> \in edges
-Reaches4(a, b) == \E m1, m2, m3 \in Nodes :
-    /\ <<a, m1>> \in edges
-    /\ <<m1, m2>> \in edges
-    /\ <<m2, m3>> \in edges
-    /\ <<m3, b>> \in edges
+Reaches1In(edge_set, a, b) == <<a, b>> \in edge_set
+Reaches2In(edge_set, a, b) == \E m \in Nodes :
+    <<a, m>> \in edge_set /\ <<m, b>> \in edge_set
+Reaches3In(edge_set, a, b) == \E m1, m2 \in Nodes :
+    <<a, m1>> \in edge_set /\
+    <<m1, m2>> \in edge_set /\
+    <<m2, b>> \in edge_set
+Reaches4In(edge_set, a, b) == \E m1, m2, m3 \in Nodes :
+    /\ <<a, m1>> \in edge_set
+    /\ <<m1, m2>> \in edge_set
+    /\ <<m2, m3>> \in edge_set
+    /\ <<m3, b>> \in edge_set
 
 \* No path from a back to itself within the bounded depth. With
 \* MaxEdges <= 3 and Cardinality(Nodes) <= 4 we cover all cycles
 \* expressible in the state space.
-NoCycleBounded ==
+NoCycleIn(edge_set) ==
     \A a \in Nodes :
-        ~ Reaches1(a, a) /\
-        ~ Reaches2(a, a) /\
-        ~ Reaches3(a, a) /\
-        ~ Reaches4(a, a)
+        /\ ~Reaches1In(edge_set, a, a)
+        /\ ~Reaches2In(edge_set, a, a)
+        /\ ~Reaches3In(edge_set, a, a)
+        /\ ~Reaches4In(edge_set, a, a)
+
+NoCycleBounded == NoCycleIn(edges)
 
 \* The DAG dedupe property: adding an existing edge is a no-op.
 \* edges is a set, so this is automatic in the model.
@@ -73,26 +77,26 @@ Init ==
 \* The hydrator's actual add_edge is more permissive (it would
 \* accept a self-loop if both endpoints exist), but the spec
 \* forbids them as an invariant — production code must reject.
-AddEdge(from_id, to_id) ==
+EdgeAllowed(edge_set, from_id, to_id) ==
     /\ from_id /= to_id
-    /\ <<from_id, to_id>> \notin edges
-    /\ \* no cycle introduced
-       LET edges_after == edges \cup { <<from_id, to_id>> }
-       IN \A a \in Nodes :
-            \* Re-evaluate Reaches with edges_after via inlined
-            \* expansion (1-3 hops since we bound Cardinality).
-            ~ (<<a, a>> \in edges_after)
-            /\ ~ (\E m \in Nodes :
-                   <<a, m>> \in edges_after /\
-                   <<m, a>> \in edges_after)
-            /\ ~ (\E m1, m2 \in Nodes :
-                   /\ <<a, m1>> \in edges_after
-                   /\ <<m1, m2>> \in edges_after
-                   /\ <<m2, a>> \in edges_after)
+    /\ <<from_id, to_id>> \notin edge_set
+    /\ Cardinality(edge_set) < MaxEdges
+    /\ NoCycleIn(edge_set \cup { <<from_id, to_id>> })
+
+AddEdge(from_id, to_id) ==
+    /\ EdgeAllowed(edges, from_id, to_id)
     /\ edges' = edges \cup { <<from_id, to_id>> }
 
+CanAddEdge ==
+    \E from_id, to_id \in Nodes : EdgeAllowed(edges, from_id, to_id)
+
+TerminalStutter ==
+    /\ ~CanAddEdge
+    /\ UNCHANGED edges
+
 Next ==
-    \E from_id, to_id \in Nodes : AddEdge(from_id, to_id)
+    \/ \E from_id, to_id \in Nodes : AddEdge(from_id, to_id)
+    \/ TerminalStutter
 
 Spec == Init /\ [][Next]_vars
 

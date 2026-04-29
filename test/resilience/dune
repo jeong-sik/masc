@@ -1,3 +1,3 @@
 (tests
- (names test_confidence test_recovery test_keeper_bridge test_degradation test_speculative)
+ (names test_confidence test_recovery test_keeper_bridge test_degradation test_speculative test_audit)
  (libraries resilience shared_types shared_audit yojson unix))

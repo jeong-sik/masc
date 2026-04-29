@@ -1846,12 +1846,34 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                   Keeper_registry.Cascade_exhausted;
                 Prometheus.inc_counter
                   Prometheus.metric_keeper_fsm_edge_transitions
-                  ~labels:[("edge", "kcl_to_ktc_exhaustion")] ()
+                  ~labels:[("edge", "kcl_to_ktc_exhaustion")] ();
+                (* Cycle 52 narrative: cascade exhaustion is a silent
+                   failure on dashboards reading only Turn_failed.  The
+                   fsm_edge counter records the transition, but operators
+                   forensically investigating "why is this keeper stuck?"
+                   benefit from a structured WARN line distinguishing
+                   'all cascades exhausted' from 'single transient error'.
+                   Companion to PR #11708 (gate rejection narrative) and
+                   PR #11717 (unmapped regression alert). *)
+                Log.Keeper.warn
+                  "%s: all cascades exhausted (terminal) — last_err=%s \
+                   attempt=%d attempted_cascades=[%s]"
+                  meta.name (Printexc.to_string err) attempt
+                  (String.concat ", " attempted_cascades)
               end
-              else
-                  Keeper_registry.set_turn_phase
-                    ~base_path:config.base_path meta.name
-                    Keeper_registry.Turn_finalizing
+              else begin
+                Keeper_registry.set_turn_phase
+                  ~base_path:config.base_path meta.name
+                  Keeper_registry.Turn_finalizing;
+                (* Cycle 52 narrative companion: non-exhaustion terminal
+                   errors (transient).  Logged so dashboard readers can
+                   distinguish exhaustion from transient failure without
+                   re-parsing Turn_finalizing reason fields. *)
+                Log.Keeper.warn
+                  "%s: turn terminal (non-exhaustion error) — err=%s \
+                   attempt=%d"
+                  meta.name (Printexc.to_string err) attempt
+              end
             in
             let attempt_timeout_budget = ref None in
             let max_turns =

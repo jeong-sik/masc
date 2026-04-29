@@ -121,6 +121,31 @@ function buildElements(spec: FsmGraphSpec) {
   return [...nodes, ...edges]
 }
 
+// Width/height sizing for label-fit nodes. Replaces the deprecated
+// `width: 'label'` / `height: 'label'` (cytoscape 3.33+ emits a
+// per-render warning). Estimates from label length using the node's
+// monospace 11px font and respecting the 120px text-max-width cap.
+const NODE_FONT_PX_PER_CHAR = 7   // 11px ui-monospace ≈ 7px wide
+const NODE_PADDING_PX = 10
+const NODE_TEXT_MAX_WIDTH_PX = 120
+const NODE_LINE_HEIGHT_PX = 16
+const NODE_MIN_WIDTH = 64
+const NODE_MIN_HEIGHT = 36
+
+function nodeWidth(ele: { data: (key: string) => unknown }): number {
+  const label = String(ele.data('label') ?? '')
+  const text = label.length * NODE_FONT_PX_PER_CHAR
+  const fit = Math.min(NODE_TEXT_MAX_WIDTH_PX, text)
+  return Math.max(NODE_MIN_WIDTH, fit + NODE_PADDING_PX * 2)
+}
+
+function nodeHeight(ele: { data: (key: string) => unknown }): number {
+  const label = String(ele.data('label') ?? '')
+  const text = label.length * NODE_FONT_PX_PER_CHAR
+  const lines = Math.max(1, Math.ceil(text / NODE_TEXT_MAX_WIDTH_PX))
+  return Math.max(NODE_MIN_HEIGHT, lines * NODE_LINE_HEIGHT_PX + NODE_PADDING_PX * 2)
+}
+
 function buildStylesheet() {
   const styles: Array<{ selector: string; style: Record<string, unknown> }> = [
     {
@@ -136,11 +161,11 @@ function buildStylesheet() {
         'border-width': 2,
         'border-color': resolveCssVar('--slate-600'),
         shape: 'roundrectangle',
-        width: 'label',
-        height: 'label',
-        padding: '10px',
+        width: nodeWidth,
+        height: nodeHeight,
+        padding: `${NODE_PADDING_PX}px`,
         'text-wrap': 'wrap',
-        'text-max-width': '120px',
+        'text-max-width': `${NODE_TEXT_MAX_WIDTH_PX}px`,
       },
     },
     {
@@ -249,7 +274,11 @@ export function CytoscapeFsm({ spec, height = '280px', class: className = '' }: 
           } as cytoscape.LayoutOptions,
           minZoom: 0.3,
           maxZoom: 3,
-          wheelSensitivity: 0.3,
+          // wheelSensitivity is intentionally left at the cytoscape
+          // default (1). Cytoscape warns against custom values because
+          // the natural zoom feel depends on hardware (mouse vs.
+          // trackpad) and OS scroll settings — the previous 0.3 made
+          // trackpads feel sluggish.
           boxSelectionEnabled: false,
           selectionType: 'single',
           userPanningEnabled: true,

@@ -1,0 +1,77 @@
+name: PR-0.2.G — Dashboard WS Load (k6)
+
+# k6 100-VU WebSocket load harness against the masc-mcp dashboard endpoint.
+# Sibling of:
+#   - .github/workflows/perf-baseline.yml          (PR-0.2.F)
+#   - lib/transport_metrics.ml WS histogram        (PR-0.2.B, #12015 MERGED)
+#   - scripts/oas-hung-keeper-dump.sh              (#11071, ops sibling)
+#
+# CI mode: smoke. The script targets a live server at :8937; in CI no
+# server is running, so the WS connect fails fast and the harness exits
+# with a non-zero status. We mark the run as continue-on-error so the
+# job does not fail the PR — the captured summary is still useful for
+# verifying:
+#   - k6 binary present, script parses
+#   - workflow YAML syntax valid
+#   - PR-0.2.G threshold definitions in scope
+#
+# This continue-on-error is scoped to the harness *test* step; build /
+# typecheck steps in this repo never use continue-on-error
+# (memory: feedback_ci_build_step_continue_on_error_masks_compile_break).
+#
+# Real 100-VU measurement runs on a dedicated runner with the dashboard
+# server live, scoped to a separate operations PR (PR-0.2.H or runbook).
+# Until then this workflow is intentionally a syntax + smoke check only.
+#
+# References:
+#   - dashboard/test/load/ws-100vu.js
+#   - .github/workflows/perf-baseline.yml          (mirror schedule pattern)
+#   - knowledge/research/2026-04-masc-ide-strategy/IMPLEMENTATION-QUEUE.md Q-P1-7
+
+on:
+  pull_request:
+    paths:
+      - 'dashboard/test/load/**'
+      - '.github/workflows/dashboard-ws-load.yml'
+  workflow_dispatch:
+    inputs:
+      vus:
+        description: 'Virtual users (default 100; CI smoke uses 5)'
+        default: '100'
+      duration:
+        description: 'Scenario duration (default 30s; CI smoke uses 5s)'
+        default: '30s'
+      target_url:
+        description: 'WS URL (default ws://127.0.0.1:8937/dashboard/ws)'
+        default: 'ws://127.0.0.1:8937/dashboard/ws'
+
+permissions:
+  contents: read
+
+jobs:
+  k6-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run k6 smoke (server unreachable in CI is expected)
+        uses: grafana/k6-action@v0.3.1
+        continue-on-error: true
+        with:
+          filename: dashboard/test/load/ws-100vu.js
+          flags: --summary-export=k6-summary.json
+        env:
+          MASC_DASHBOARD_WS_URL: ${{ inputs.target_url || 'ws://127.0.0.1:8937/dashboard/ws' }}
+          K6_VUS: ${{ inputs.vus || '5' }}
+          K6_DURATION: ${{ inputs.duration || '5s' }}
+          K6_HOLD_MS: '3000'
+
+      - name: Upload k6 summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: k6-summary-${{ github.run_id }}
+          path: k6-summary.json
+          retention-days: 30
+          if-no-files-found: ignore

@@ -13,8 +13,8 @@ import type { FsmGraphSpec } from './cytoscape-fsm'
 
 const trivialSpec: FsmGraphSpec = {
   nodes: [
-    { id: 'idle', label: 'idle' },
-    { id: 'busy', label: 'busy' },
+    { id: 'idle', label: 'idle', type: 'state' },
+    { id: 'busy', label: 'busy', type: 'active' },
   ],
   edges: [
     { source: 'idle', target: 'busy', label: 'start' },
@@ -53,9 +53,9 @@ describe('CytoscapeFsm a11y', () => {
   it('with cascade + error edge types passes axe', async () => {
     const withTypes: FsmGraphSpec = {
       nodes: [
-        { id: 'a', label: 'a' },
-        { id: 'b', label: 'b' },
-        { id: 'c', label: 'c' },
+        { id: 'a', label: 'a', type: 'start' },
+        { id: 'b', label: 'b', type: 'state' },
+        { id: 'c', label: 'c', type: 'end' },
       ],
       edges: [
         { source: 'a', target: 'b', type: 'cascade' },

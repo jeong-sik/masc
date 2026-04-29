@@ -400,6 +400,8 @@ export const TOKENS = {
   "inputBorder": { name: "--input-border", value: "var(--color-border-default)", tier: "role", kind: "color" },
   "inputBgHover": { name: "--input-bg-hover", value: "var(--white-6)", tier: "role", kind: "color" },
   "inputBgFocus": { name: "--input-bg-focus", value: "var(--color-bg-page)", tier: "role", kind: "color" },
+  "inputPlaceholder": { name: "--input-placeholder", value: "var(--color-fg-muted)", tier: "role", kind: "color" },
+  "inputBorderFocus": { name: "--input-border-focus", value: "rgba(71,184,255,0.6)", tier: "role", kind: "color" },
   "dialogPanelBg": { name: "--dialog-panel-bg", value: "rgba(13,21,38,0.98)", tier: "role", kind: "color" },
   "dialogPanelBorder": { name: "--dialog-panel-border", value: "var(--color-border-default)", tier: "role", kind: "color" },
   "dialogOverlayBg": { name: "--dialog-overlay-bg", value: "var(--white-5)", tier: "role", kind: "color" },

@@ -400,6 +400,8 @@
   --color-input-border: var(--color-border-default);
   --color-input-bg-hover: var(--white-6);
   --color-input-bg-focus: var(--color-bg-page);
+  --color-input-placeholder: var(--color-fg-muted);
+  --color-input-border-focus: rgba(71,184,255,0.6);
   --color-dialog-panel-bg: rgba(13,21,38,0.98);
   --color-dialog-panel-border: var(--color-border-default);
   --color-dialog-overlay-bg: var(--white-5);

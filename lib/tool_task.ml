@@ -674,6 +674,25 @@ and handle_transition ?agent_tool_names ctx args =
         else
           List.filter (fun (k, _) -> not (String.equal k "to") || not (has "action")) kvs
       in
+      let kvs =
+        match List.find_opt (fun (k, _) -> String.equal k "pr_url") kvs with
+        | Some (_, `String pr_url) when pr_url <> "" ->
+            let kvs = List.filter (fun (k, _) -> not (String.equal k "pr_url")) kvs in
+            let kvs =
+              match List.find_opt (fun (k, _) -> String.equal k "notes") kvs with
+              | Some (_, `String notes) ->
+                  List.map
+                    (fun (k, v) ->
+                      if String.equal k "notes"
+                      then ("notes", `String (notes ^ "\nPR: " ^ pr_url))
+                      else (k, v))
+                    kvs
+              | _ -> kvs @ [ ("notes", `String ("PR: " ^ pr_url)) ]
+            in
+            kvs
+        | Some _ -> List.filter (fun (k, _) -> not (String.equal k "pr_url")) kvs
+        | None -> kvs
+      in
       `Assoc kvs
     | other -> other
   in

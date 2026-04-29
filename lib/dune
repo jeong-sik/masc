@@ -185,6 +185,7 @@
 
    inference_utils
    ;; WebRTC modules removed — use ocaml-webrtc library directly
+   gc_sampler
    graphql_client
    graphql_endpoint
    graphql_api

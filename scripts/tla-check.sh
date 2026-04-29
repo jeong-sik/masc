@@ -203,11 +203,23 @@ run_tlc_buggy "$REPO_ROOT/specs/task-lifecycle" "TaskLifecycle.tla"
 # Cycle 24 — Multimodal artifact GADT well-formedness (Tier B8 catch-up).
 run_tlc "$REPO_ROOT/specs/multimodal" "MultimodalArtifact.tla"
 
+# Cycle 27 — Multimodal hydrator provenance DAG (Tier B9 catch-up).
+run_tlc "$REPO_ROOT/specs/multimodal" "MultimodalHydrator.tla"
+
 # Cycle 19 — Resilience_outcome ternary lattice (Tier I5 catch-up).
 run_tlc "$REPO_ROOT/specs/resilience" "ResilienceOutcome.tla"
 
+# Cycle 27 — Resilience degradation lattice + safety (Tier A11 catch-up).
+run_tlc "$REPO_ROOT/specs/resilience" "ResilienceDegradation.tla"
+
 # Cycle 19 — Shared_audit Merkle chain integrity (Tier I6 catch-up).
 run_tlc "$REPO_ROOT/specs/shared" "SharedAudit.tla"
+
+# Cycle 27 — Autonomous phase taxonomy + 19 transitions (Tier B5 catch-up).
+run_tlc "$REPO_ROOT/specs/autonomous" "AutonomousPhase.tla"
+
+# Cycle 27 — Autonomous loop wirein non-invasive contract (Tier A5 catch-up).
+run_tlc "$REPO_ROOT/specs/autonomous" "AutonomousLoop.tla"
 
 # Optional: run TraceSpec if --trace flag provided
 if [ "${1:-}" = "--trace" ]; then

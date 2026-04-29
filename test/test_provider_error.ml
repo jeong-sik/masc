@@ -2,6 +2,7 @@ open Alcotest
 
 module P = Provider_error
 module Oas = Agent_sdk
+module Prom = Masc_mcp.Prometheus
 module Retry = Llm_provider.Retry
 module OWN = Masc_mcp.Oas_worker_named
 
@@ -11,6 +12,17 @@ let check_json name expected error =
 let expect_some = function
   | Some value -> value
   | None -> fail "expected provider_error"
+
+let counter_for ~kind ~provider ~cascade_name ~capacity_scope =
+  Prom.metric_value_or_zero OWN.provider_error_total_metric
+    ~labels:
+      [
+        ("kind", kind);
+        ("provider", provider);
+        ("cascade_name", cascade_name);
+        ("capacity_scope", capacity_scope);
+      ]
+    ()
 
 let test_rate_limit_maps_retry_after () =
   let error =
@@ -98,6 +110,64 @@ let test_non_capacity_invalid_request_preserves_reason () =
       check bool "not capacity" false (P.is_capacity_exhausted error)
   | _ -> fail "expected InvalidRequest"
 
+let test_provider_error_metric_name_stable () =
+  check string "metric name" "masc_provider_error_total"
+    OWN.provider_error_total_metric
+
+let test_emit_sdk_provider_error_metric_rate_limit () =
+  let before =
+    counter_for ~kind:"rate_limit" ~provider:"anthropic"
+      ~cascade_name:"big_three" ~capacity_scope:"none"
+  in
+  let emitted =
+    Oas.Error.Api
+      (Retry.RateLimited { retry_after = Some 2.0; message = "too many" })
+    |> OWN.emit_sdk_provider_error_metric ~cascade_name:"big_three"
+         ~provider:"anthropic"
+    |> expect_some
+  in
+  check string "emitted kind" "rate_limit" (P.to_error_kind emitted);
+  check (float 0.0001) "counter +1" (before +. 1.0)
+    (counter_for ~kind:"rate_limit" ~provider:"anthropic"
+       ~cascade_name:"big_three" ~capacity_scope:"none")
+
+let test_emit_sdk_provider_error_metric_capacity_scope () =
+  let before =
+    counter_for ~kind:"capacity_exhausted" ~provider:"anthropic"
+      ~cascade_name:"big_three" ~capacity_scope:"provider"
+  in
+  let emitted =
+    Oas.Error.Api
+      (Retry.InvalidRequest
+         {
+           message =
+             "You have reached your specified API usage limits. You will \
+              regain access on 2026-05-01 at 00:00 UTC.";
+         })
+    |> OWN.emit_sdk_provider_error_metric ~cascade_name:"big_three"
+         ~provider:"anthropic"
+    |> expect_some
+  in
+  check string "emitted kind" "capacity_exhausted" (P.to_error_kind emitted);
+  check (float 0.0001) "counter +1" (before +. 1.0)
+    (counter_for ~kind:"capacity_exhausted" ~provider:"anthropic"
+       ~cascade_name:"big_three" ~capacity_scope:"provider")
+
+let test_emit_sdk_provider_error_metric_skips_non_api () =
+  let before =
+    counter_for ~kind:"invalid_request" ~provider:"anthropic"
+      ~cascade_name:"big_three" ~capacity_scope:"none"
+  in
+  let emitted =
+    Oas.Error.Internal "structural failure"
+    |> OWN.emit_sdk_provider_error_metric ~cascade_name:"big_three"
+         ~provider:"anthropic"
+  in
+  check bool "no provider error emitted" true (Option.is_none emitted);
+  check (float 0.0001) "counter unchanged" before
+    (counter_for ~kind:"invalid_request" ~provider:"anthropic"
+       ~cascade_name:"big_three" ~capacity_scope:"none")
+
 let () =
   Alcotest.run "provider_error"
     [
@@ -113,5 +183,13 @@ let () =
             test_server_and_auth_errors_are_closed_variants;
           test_case "invalid request preserves reason" `Quick
             test_non_capacity_invalid_request_preserves_reason;
+          test_case "metric name stable" `Quick
+            test_provider_error_metric_name_stable;
+          test_case "emit metric for rate limit" `Quick
+            test_emit_sdk_provider_error_metric_rate_limit;
+          test_case "emit metric for capacity" `Quick
+            test_emit_sdk_provider_error_metric_capacity_scope;
+          test_case "skip metric for non-api" `Quick
+            test_emit_sdk_provider_error_metric_skips_non_api;
         ] );
     ]

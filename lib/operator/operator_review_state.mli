@@ -7,10 +7,15 @@
 
 (** {1 Types} *)
 
+type review_decision_value = Review_decision_value of string
+
+val review_decision_value_to_string : review_decision_value -> string
+val review_decision_value_of_string : string -> review_decision_value
+
 type review_decision = {
   item_id : string;
   fingerprint : string;
-  decision : string;
+  decision : review_decision_value;
   actor : string;
   reason : string;
   at : string;

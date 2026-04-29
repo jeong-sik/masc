@@ -2,10 +2,15 @@ module U = Yojson.Safe.Util
 
 open Operator_pending_confirm
 
+type review_decision_value = Review_decision_value of string
+
+let review_decision_value_to_string (Review_decision_value value) = value
+let review_decision_value_of_string value = Review_decision_value value
+
 type review_decision = {
   item_id : string;
   fingerprint : string;
-  decision : string;
+  decision : review_decision_value;
   actor : string;
   reason : string;
   at : string;
@@ -22,7 +27,7 @@ let review_decision_to_yojson (entry : review_decision) =
     [
       ("item_id", `String entry.item_id);
       ("fingerprint", `String entry.fingerprint);
-      ("decision", `String entry.decision);
+      ("decision", `String (review_decision_value_to_string entry.decision));
       ("actor", `String entry.actor);
       ("reason", `String entry.reason);
       ("at", `String entry.at);
@@ -38,7 +43,9 @@ let review_decision_of_yojson json =
       {
         item_id = json |> U.member "item_id" |> U.to_string;
         fingerprint = json |> U.member "fingerprint" |> U.to_string;
-        decision = json |> U.member "decision" |> U.to_string;
+        decision =
+          json |> U.member "decision" |> U.to_string
+          |> review_decision_value_of_string;
         actor = json |> U.member "actor" |> U.to_string;
         reason = json |> U.member "reason" |> U.to_string;
         at = json |> U.member "at" |> U.to_string;

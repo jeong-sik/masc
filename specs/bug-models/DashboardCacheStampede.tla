@@ -11,7 +11,7 @@
 \* Actual code (verified 2026-04-20):
 \*   lib/dashboard/dashboard_cache.ml:60   let maybe_evict map
 \*   lib/dashboard/dashboard_cache.ml:149  let get_or_compute_eio
-\*   lib/dashboard/dashboard_cache.ml:238  | Eio.Cancel.Cancelled _ as e -> ...
+\*   lib/dashboard/dashboard_cache.ml:244  | Eio.Cancel.Cancelled _ as e -> ...
 \*
 \* (Path drift: lib/dashboard_cache.ml -> lib/dashboard/dashboard_cache.ml.
 \*  Line drift: 265 -> 216. Recorded for cross-reference.)

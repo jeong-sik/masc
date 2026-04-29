@@ -1,0 +1,490 @@
+(** Coord_task_classify — State classification, task actor kind, working agents,
+    event helpers.
+
+    Extracted from Coord_task to separate classification/observability helpers
+    from task CRUD, claiming, and transitions.  All bindings are re-exported
+    by [Coord_task] via [include Coord_task_classify]. *)
+
+open Types
+include Coord_utils
+include Coord_state
+include Coord_broadcast
+
+(* activity_room_id removed — namespace retired (#unify-namespace). *)
+
+(* #9795: FSM drift observability. [masc_coord] sits below the
+   [masc_mcp] library in the dep graph, so it cannot call
+   [Prometheus.inc_counter] directly. The variant→label mapping
+   stays here (pattern-matches the sealed drift enum), and the
+   emit runs through a [Coord_hooks] callback wired by
+   [lib/coord.ml] at startup.  Exhaustive pattern-match forces
+   any new drift variant to be named alongside existing
+   dashboards. *)
+let drift_variant_label = function
+  | Coord_task_lifecycle.Claimed_to_done_skip -> "claimed_to_done_skip"
+
+(* #10449: classify a task's contract surface so the completion-path
+   metric can split bypass-rate by creation-side data presence.
+   Three states: missing field, present-but-empty, populated. *)
+let classify_contract_state (contract : Types.task_contract option) =
+  match contract with
+  | None -> "no_contract"
+  | Some c when c.completion_contract = [] && c.required_evidence = [] ->
+    "empty_contract"
+  | Some _ -> "with_contract"
+;;
+
+(* #10449: classify which FSM path produced a [Done] new_status.
+   Approve_verification trumps drift inspection because the verifier
+   redirect already cleared the drift signal upstream.  [forced_done]
+   only fires when [force=true] short-circuited the same-agent guard;
+   the lifecycle module emits the same drift variant for both forced
+   and consensual claimed→done jumps, so the [force] flag is the
+   only distinguisher. *)
+let classify_completion_path
+    ~(action : Types.task_action)
+    ~(drift : Coord_task_lifecycle.drift option)
+    ~(force : bool) =
+  match action, drift, force with
+  | Types.Approve_verification, _, _ -> "via_verification"
+  | _, _, true -> "forced_done"
+  | _, Some Coord_task_lifecycle.Claimed_to_done_skip, false ->
+    "claimed_to_done_skip"
+  | _, None, false -> "in_progress_to_done"
+;;
+
+let task_actor_kind agent_name =
+  let normalized = String.lowercase_ascii (String.trim agent_name) in
+  if normalized = "" || normalized = "system"
+  then "system"
+  else if Coord_resilience.Zombie.is_keeper_name normalized
+  then "keeper"
+  else "agent"
+;;
+
+let trim_opt = function
+  | Some value ->
+    let trimmed = String.trim value in
+    if trimmed = "" then None else Some trimmed
+  | None -> None
+;;
+
+(* Agents who currently hold a Claimed or InProgress task.
+    Used by the Hebbian hook to strengthen only against agents who are
+    actively working, not everyone who happens to be joined.
+    Falls back to active_agents if the backlog cannot be read. *)
+let working_agents config =
+  match read_backlog_r config with
+  | Error _ -> (Coord_state.read_state config).active_agents
+  | Ok backlog ->
+    List.filter_map
+      (fun (t : task) ->
+         match t.task_status with
+         | Claimed { assignee; _ } | InProgress { assignee; _ } -> Some assignee
+         | Todo | Done _ | Cancelled _ | AwaitingVerification _ -> None)
+      backlog.tasks
+    |> List.sort_uniq String.compare
+;;
+
+(** Update the on-disk agent state record under its own file lock.
+
+    Task transitions ([claim], [complete], [cancel], …) need to
+    reflect the new task assignment on the agent record at
+    [<agents_dir>/<name>.json].  Every pre-existing call site in this
+    module did the read→modify→write inline without holding any lock
+    on that file — the enclosing [with_file_lock config backlog_path]
+    only serializes backlog writers, not agent-state writers.  Sibling
+    writers in [Coord_agent.update_agent_r] correctly take
+    [with_file_lock_r config agent_file], so concurrent
+    [update_agent_r] or concurrent room_task transitions can race and
+    lose each other's updates.
+
+    This helper centralises the pattern, takes [with_file_lock] on the
+    agent file, and silently skips the write when the file is missing
+    (matching the pre-existing [if Sys.file_exists agent_file]
+    guards).  It never blocks the caller on a missing/corrupt agent
+    record — the backlog transition is the source of truth and the
+    agent mirror is best-effort telemetry.  On JSON parse failure the
+    error is logged with the agent name for diagnostic context. *)
+let update_local_agent_state config ~agent_name f =
+  let agent_file =
+    Filename.concat (agents_dir config) (safe_filename agent_name ^ ".json")
+  in
+  if Sys.file_exists agent_file
+  then
+    with_file_lock config agent_file (fun () ->
+      let json = read_json config agent_file in
+      match agent_of_yojson json with
+      | Ok agent -> write_json config agent_file (agent_to_yojson (f agent))
+      | Error msg ->
+        Log.Misc.error "update_local_agent_state: parse failed for %s: %s" agent_name msg)
+;;
+
+(** Tighter variant of [resolve_agent_name] for task ownership guards.
+    Only accepts the resolved identity when it is the exact [-agent] suffix
+    form of the normalised input (e.g. "keeper-coder" -> "keeper-coder-agent").
+    Arbitrary prefix matches from [resolve_agent_name] that do not conform to
+    this pattern are silently discarded and the normalised input is returned
+    unchanged, preventing one caller from being mistakenly mapped to a
+    different agent's identity. *)
+let resolve_agent_name_strict config agent_name =
+  let normalized = String.lowercase_ascii (String.trim agent_name) in
+  let resolved = resolve_agent_name config normalized in
+  if resolved = normalized
+  then normalized
+  else if resolved = normalized ^ "-agent"
+  then resolved
+  else normalized
+;;
+
+let normalize_execution_links (links : Types.task_execution_links) =
+  { operation_id = trim_opt links.operation_id
+  ; session_id = trim_opt links.session_id
+  ; autoresearch_loop_id = trim_opt links.autoresearch_loop_id
+  }
+;;
+
+let normalize_task_contract (contract : Types.task_contract) =
+  { contract with
+    completion_contract = normalized_string_list contract.completion_contract
+  ; required_tools = normalized_string_list contract.required_tools
+  ; required_evidence = normalized_string_list contract.required_evidence
+  ; inspect_gate_evidence = normalized_string_list contract.inspect_gate_evidence
+  ; verify_gate_evidence = normalized_string_list contract.verify_gate_evidence
+  ; links = normalize_execution_links contract.links
+  }
+;;
+
+let empty_task_contract =
+  { strict = false
+  ; completion_contract = []
+  ; required_tools = []
+  ; required_evidence = []
+  ; inspect_gate_evidence = []
+  ; verify_gate_evidence = []
+  ; links = { operation_id = None; session_id = None; autoresearch_loop_id = None }
+  }
+;;
+
+let task_required_tools (task : Types.task) =
+  match task.contract with
+  | Some contract -> normalized_string_list contract.required_tools
+  | None -> []
+;;
+
+let missing_required_tools ~allowed required =
+  List.filter
+    (fun required_name ->
+       not (List.exists (String.equal required_name) allowed))
+    required
+;;
+
+let required_tool_claim_guard config ~agent_name ?agent_tool_names task =
+  let required_tools = task_required_tools task in
+  match required_tools, agent_tool_names with
+  | [], _ -> Ok ()
+  | _ :: _, None ->
+    log_event config
+      (`Assoc
+         [ "type", `String "task_claim_required_tools_unknown_surface"
+         ; "agent", `String agent_name
+         ; "task", `String task.id
+         ; ( "required_tools",
+             `List (List.map (fun name -> `String name) required_tools) )
+         ; "ts", `String (now_iso ())
+         ]);
+    Ok ()
+  | _ :: _, Some allowed ->
+    let missing = missing_required_tools ~allowed required_tools in
+    if missing = [] then Ok ()
+    else (
+      log_event config
+        (`Assoc
+           [ "type", `String "task_claim_required_tools_blocked"
+           ; "agent", `String agent_name
+           ; "task", `String task.id
+           ; ( "required_tools",
+               `List (List.map (fun name -> `String name) required_tools) )
+           ; ( "missing_tools",
+               `List (List.map (fun name -> `String name) missing) )
+           ; "ts", `String (now_iso ())
+           ]);
+      Error
+        (Types.TaskInvalidState
+           (Printf.sprintf
+              "Task %s requires tool(s) unavailable to %s: %s"
+              task.id
+              agent_name
+              (String.concat ", " missing))))
+;;
+
+let default_verification_evidence_refs =
+  [ "completion_notes"; "pr_url_or_artifact_ref" ]
+;;
+
+let first_line text =
+  match String.index_opt text '\n' with
+  | Some idx -> String.sub text 0 idx
+  | None -> text
+;;
+
+let truncate ~max_len text =
+  if String.length text <= max_len then text
+  else String.sub text 0 max_len ^ "..."
+;;
+
+let default_completion_contract_text ~title ~description =
+  let title = String.trim title in
+  let description = description |> String.trim |> first_line in
+  if description = ""
+  then Printf.sprintf "Task scope satisfied: %s" title
+  else
+    truncate ~max_len:220
+      (Printf.sprintf "Task scope satisfied: %s - %s" title description)
+;;
+
+let ensure_task_contract_for_verification ?contract ~title ~description () =
+  let base =
+    match contract with
+    | Some contract -> normalize_task_contract contract
+    | None -> empty_task_contract
+  in
+  let completion_contract =
+    if base.completion_contract <> []
+    then base.completion_contract
+    else [ default_completion_contract_text ~title ~description ]
+  in
+  let required_evidence =
+    if base.required_evidence <> []
+    then base.required_evidence
+    else default_verification_evidence_refs
+  in
+  let verify_gate_evidence =
+    if base.verify_gate_evidence <> []
+    then base.verify_gate_evidence
+    else default_verification_evidence_refs
+  in
+  normalize_task_contract
+    { base with completion_contract; required_evidence; verify_gate_evidence }
+;;
+
+let merge_execution_links
+      (existing : Types.task_execution_links)
+      ?session_id
+      ?operation_id
+      ?autoresearch_loop_id
+      ()
+  =
+  { session_id =
+      (match trim_opt session_id with
+       | Some _ as value -> value
+       | None -> trim_opt existing.session_id)
+  ; operation_id =
+      (match trim_opt operation_id with
+       | Some _ as value -> value
+       | None -> trim_opt existing.operation_id)
+  ; autoresearch_loop_id =
+      (match trim_opt autoresearch_loop_id with
+       | Some _ as value -> value
+       | None -> trim_opt existing.autoresearch_loop_id)
+  }
+;;
+
+(** Merge optional OAS event_bus envelope identifiers (correlation_id,
+    run_id) into the task activity payload. When both ids are absent the
+    original payload is returned untouched, so existing callers compile
+    and behave identically. *)
+let merge_envelope_into_payload ?correlation_id ?run_id payload =
+  let optional name = function
+    | Some v -> [ name, `String v ]
+    | None -> []
+  in
+  let extras = optional "correlation_id" correlation_id @ optional "run_id" run_id in
+  if extras = []
+  then payload
+  else (
+    match payload with
+    | `Assoc fields -> `Assoc (fields @ extras)
+    | _ ->
+      Log.Misc.warn "emit_task_activity: non-Assoc payload, envelope fields skipped";
+      payload)
+;;
+
+let emit_task_activity ?correlation_id ?run_id config ~agent_name ~task_id ~kind ~payload =
+  let payload = merge_envelope_into_payload ?correlation_id ?run_id payload in
+  try
+    (Atomic.get Coord_hooks.activity_emit_fn)
+      config
+      ~actor:Coord_hooks.{ kind = task_actor_kind agent_name; id = agent_name }
+      ~subject:Coord_hooks.{ kind = "task"; id = task_id }
+      ~kind
+      ~payload
+      ~tags:[ "task"; kind ]
+      ()
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+    Log.Misc.warn
+      "task activity emit failed (%s %s): %s"
+      kind
+      task_id
+      (Printexc.to_string exn)
+;;
+
+(* Issue #8354: was a verbatim duplicate of [Types.task_status_to_string].
+   Folded to a single-line alias so adding a 7th task_status constructor
+   only requires updating [Types]. The local name is kept so caller
+   sites (224, 269, 863, 870, 1019, 1020) need no churn. *)
+let task_status_to_string = Types.task_status_to_string
+
+(** Current assignee from the task status, for error messages.
+    LLMs that see "Invalid transition: claimed -> release" have no way
+    to tell whether they're trying to release someone else's task vs
+    using the wrong action name. Surfacing the current assignee in the
+    failure lets the LLM see the ownership mismatch and stop retrying.
+
+    Evidence: 2026-04-16 /loop iter 4 — 12+/15 masc_transition failures
+    are "Invalid transition: claimed -> release" from keepers trying to
+    release tasks owned by a different keeper. *)
+let task_assignee_of_status = Types.task_assignee_of_status
+
+(** Issue #7646: symmetric to [task_assignee_of_status]. When a transition
+    fails for a reason other than ownership mismatch, surface what
+    actions ARE legal from the current state so the LLM stops
+    guess-retrying.
+
+    Exhaustive [match] over [Types.task_status]: adding a 7th constructor
+    will fail to compile. Each branch lists actions that
+    [transition_task_r]'s match-arms accept for that status — keep this
+    in sync if you add new transitions there. Verifier-FSM transitions
+    require [MASC_VERIFICATION_FSM_ENABLED=true] but are listed
+    unconditionally so the hint stays accurate when the flag is on; the
+    flag-off case still rejects them and produces a more specific error. *)
+let valid_next_actions_for_status : Types.task_status -> Types.task_action list = function
+  | Types.Todo -> [ Types.Claim; Types.Cancel ]
+  | Types.Claimed _ ->
+    [ Types.Start
+    ; Types.Done_action
+    ; Types.Submit_for_verification
+    ; Types.Release
+    ; Types.Cancel
+    ]
+  | Types.InProgress _ ->
+    [ Types.Done_action; Types.Submit_for_verification; Types.Release; Types.Cancel ]
+  | Types.AwaitingVerification _ ->
+    [ Types.Approve_verification; Types.Reject_verification ]
+  | Types.Done _ | Types.Cancelled _ -> [] (* terminal *)
+;;
+
+let next_actions_hint status =
+  match valid_next_actions_for_status status with
+  | [] -> ""
+  | xs ->
+    Printf.sprintf
+      ", valid_next_actions=[%s]"
+      (String.concat ";" (List.map Types.task_action_to_string xs))
+;;
+
+let task_started_at_unix status =
+  let default_time = Time_compat.now () in
+  match status with
+  | Types.Claimed { claimed_at; _ } -> Types.parse_iso8601 ~default_time claimed_at
+  | Types.InProgress { started_at; _ } -> Types.parse_iso8601 ~default_time started_at
+  | Types.Todo | Types.AwaitingVerification _ | Types.Done _ | Types.Cancelled _ ->
+    default_time
+;;
+
+let task_transition_details
+      ~from_status
+      ~to_status
+      ?notes
+      ?reason
+      ?duration_ms
+      ?(forced = false)
+      ()
+  =
+  let optional_field name = function
+    | Some value -> [ name, value ]
+    | None -> []
+  in
+  `Assoc
+    ([ "from_status", `String (task_status_to_string from_status)
+     ; "to_status", `String (task_status_to_string to_status)
+     ; "forced", `Bool forced
+     ]
+     @ optional_field "notes" (Option.map (fun value -> `String value) notes)
+     @ optional_field "reason" (Option.map (fun value -> `String value) reason)
+     @ optional_field "duration_ms" (Option.map (fun value -> `Int value) duration_ms))
+;;
+
+let observe_task_transition
+      config
+      ~agent_name
+      ~task_id
+      ~(transition : Types.task_action)
+      ~details
+  =
+  (Atomic.get Coord_hooks.observe_task_transition_fn)
+    config
+    ~agent_name
+    ~task_id
+    ~transition
+    ~details
+;;
+
+(** Transition log event taxonomy. Variant instead of free-form string
+    (#7520 Step 4) so typos at call-sites fail to compile. The two
+    values correspond to the current fire points in this module — add
+    a variant when a new transition event is introduced. *)
+type transition_event_type =
+  | Task_transition
+  | Task_cancelled
+
+let transition_event_type_to_string = function
+  | Task_transition -> "task_transition"
+  | Task_cancelled -> "task_cancelled"
+;;
+
+(** SSOT structured event for [log_event] sink. Wraps [task_transition_details]
+    with an envelope (type/agent/actor_kind/task/from_status/to_status/ts) so
+    every transition log line carries the same schema. Optional [?action]
+    preserves the legacy "action" field used by the unified transition path
+    so existing dashboard readers do not break. *)
+let transition_log_event
+      ~(event_type : transition_event_type)
+      ~agent_name
+      ~task_id
+      ~from_status
+      ~to_status
+      ?action
+      ?notes
+      ?reason
+      ?duration_ms
+      ?handoff_context
+      ?(forced = false)
+      ?(now = now_iso ())
+      ()
+  : Yojson.Safe.t
+  =
+  let optional_field name = function
+    | Some value -> [ name, value ]
+    | None -> []
+  in
+  `Assoc
+    ([ "type", `String (transition_event_type_to_string event_type)
+     ; "agent", `String agent_name
+     ; "actor_kind", `String (task_actor_kind agent_name)
+     ; "task", `String task_id
+     ; "from_status", `String (task_status_to_string from_status)
+     ; "to_status", `String (task_status_to_string to_status)
+     ; "forced", `Bool forced
+     ; "ts", `String now
+     ]
+     @ optional_field "action" (Option.map (fun v -> `String v) action)
+     @ optional_field "notes" (Option.map (fun v -> `String v) notes)
+     @ optional_field "reason" (Option.map (fun v -> `String v) reason)
+     @ optional_field "duration_ms" (Option.map (fun v -> `Int v) duration_ms)
+     @ optional_field
+         "handoff_context"
+         (Option.map Types.task_handoff_context_to_yojson handoff_context))
+;;

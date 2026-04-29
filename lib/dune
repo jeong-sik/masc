@@ -489,6 +489,9 @@
    keeper_mcp_provider_audit
    keeper_shell_gh_context
    keeper_shell_bg_task
+   keeper_shell_shared
+   keeper_shell_bash
+   keeper_shell_ops
    keeper_exec_shell
    keeper_gh_env
    credential_provider
@@ -541,6 +544,7 @@
    keeper_agent_error
    keeper_agent_memory_episode
    keeper_agent_run
+   keeper_agent_checkpoint_hygiene
    keeper_contract_classifier
    keeper_world_observation
    keeper_decision_audit
@@ -556,6 +560,9 @@
    keeper_stay_silent_loop_detector
    keeper_error_classify
    keeper_unified_turn
+   keeper_turn_helpers
+   keeper_turn_liveness
+   keeper_turn_cascade_budget
 
    keeper_prompt_names
    keeper_prompt
@@ -565,6 +572,10 @@
    keeper_event_bus
    masc_event_bus
    keeper_keepalive
+   keeper_turn_slot
+   keeper_keepalive_signal
+   keeper_heartbeat_snapshot
+   keeper_heartbeat_loop
    keeper_lifecycle_events
    heartbeat_smart
    keeper_crash_persistence
@@ -615,6 +626,9 @@
    oas_worker_exec_checkpoint
    oas_worker_exec_transport
    oas_worker_named
+   oas_worker_named_cascade
+   oas_worker_named_error
+   oas_worker_named_fsm
    masc_oas_bridge
    oas_bus_instrument
    oas_event_bridge
@@ -710,6 +724,9 @@
    keeper_mcp_provider_audit
    keeper_shell_gh_context
    keeper_shell_bg_task
+   keeper_shell_shared
+   keeper_shell_bash
+   keeper_shell_ops
    keeper_exec_shell
    keeper_gh_env
    credential_provider
@@ -804,6 +821,9 @@
   oas_worker_exec_checkpoint
   oas_worker_exec_transport
   oas_worker_named
+  oas_worker_named_cascade
+  oas_worker_named_error
+  oas_worker_named_fsm
   meta_cognition_types
   meta_cognition_rules
   meta_cognition_snapshot

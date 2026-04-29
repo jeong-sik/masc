@@ -1,0 +1,352 @@
+(** Oas_worker_named_cascade — Eio context, cascade resolution, runtime MCP policy.
+
+    Extracted from oas_worker_named.ml (God file decomposition).
+    Provides cascade profile defaults, Eio context validation,
+    provider resolution, tool-support filtering, and cross-cascade fallback.
+
+    @since God file decomposition *)
+
+(* Cascade profile defaults (moved from Cascade module) *)
+
+let default_config_path = Cascade_runtime.cascade_config_path
+let default_model_strings = Cascade_runtime.default_model_strings
+
+(* Named model execution *)
+
+let require_eio ?sw ?net () =
+  let sw = match sw with Some s -> Some s | None -> Eio_context.get_switch_opt () in
+  let net = match net with Some n -> Some n | None -> Eio_context.get_net_opt () in
+  match sw, net with
+  | Some sw, Some net -> Ok (sw, net)
+  | None, _ -> Error "Eio switch not available (running outside server context)"
+  | _, None -> Error "Eio net not available (running outside server context)"
+
+let eio_context_error_to_sdk_error detail =
+  Oas.Error.Config
+    (Oas.Error.InvalidConfig { field = "eio_context"; detail })
+
+let cascade_catalog_error_to_sdk_error detail =
+  Oas.Error.Config
+    (Oas.Error.InvalidConfig { field = "cascade_name"; detail })
+
+(** Resolve cascade provider configs via MASC Cascade_config.
+    Returns Provider_config.t list for the downstream OAS runtime,
+    bypassing the old Model_spec facade. *)
+let resolve_cascade_providers ?provider_filter
+    ?(require_tool_choice_support = false)
+    ?(require_tool_support = false)
+    ?runtime_mcp_policy
+    ~cascade_name () =
+  Cascade_runtime.resolve_named_providers_result ?provider_filter
+    ?runtime_mcp_policy
+    ~require_tool_choice_support ~require_tool_support ~cascade_name ()
+
+(** Resolve from an explicit model string list (user-declared in keeper TOML).
+    MASC parses the strings via its local [Cascade_config] and passes the
+    resulting provider configs into OAS execution. *)
+let resolve_providers_from_model_strings ?provider_filter
+    ?(require_tool_choice_support = false)
+    ?(require_tool_support = false)
+    ?runtime_mcp_policy
+    model_strings =
+  Cascade_runtime.resolve_providers_from_model_strings ?provider_filter
+    ?runtime_mcp_policy
+    ~require_tool_choice_support ~require_tool_support model_strings
+
+let keeper_agent_name_opt (keeper_name : string) =
+  let keeper_name = String.trim keeper_name in
+  if keeper_name = "" then None
+  else Some (Keeper_types.keeper_agent_name keeper_name)
+
+let runtime_mcp_policy_for_tools ~(keeper_name : string) (tools : Oas.Tool.t list)
+    =
+  let agent_name = keeper_agent_name_opt keeper_name in
+  let runtime_tool_names =
+    tools
+    |> List.filter (fun (tool : Oas.Tool.t) ->
+           Tool_catalog.is_public_mcp tool.schema.name
+           ||
+           (Option.is_some agent_name
+            && Tool_catalog.is_on_surface Tool_catalog.Keeper_internal
+                 tool.schema.name))
+    |> List.map (fun (tool : Oas.Tool.t) -> tool.schema.name)
+  in
+  let has_keeper_internal =
+    List.exists
+      (Tool_catalog.is_on_surface Tool_catalog.Keeper_internal)
+      runtime_tool_names
+  in
+  match
+    Oas_worker_exec.runtime_mcp_policy_of_tool_names
+      ?agent_name
+      ~allow_keeper_internal:has_keeper_internal runtime_tool_names,
+    agent_name
+  with
+  | Some policy, Some agent_name ->
+      Some
+        (Oas_worker_exec.runtime_mcp_policy_with_masc_agent_name
+           ~agent_name policy)
+  | Some policy, None -> Some policy
+  | None, _ -> None
+
+let runtime_mcp_policy_for_provider
+    ~(keeper_name : string)
+    ~(provider_cfg : Llm_provider.Provider_config.t)
+    (policy_opt : Llm_provider.Llm_transport.runtime_mcp_policy option) =
+  let agent_name =
+    keeper_agent_name_opt keeper_name |> Option.value ~default:""
+  in
+  Oas_worker_exec.runtime_mcp_policy_for_provider
+    ~provider_cfg ~agent_name policy_opt
+
+let codex_cli_cannot_carry_keeper_bound_runtime_mcp
+    ~(keeper_name : string)
+    ~(provider_cfg : Llm_provider.Provider_config.t)
+    (policy_opt : Llm_provider.Llm_transport.runtime_mcp_policy option) =
+  match provider_cfg.kind, keeper_agent_name_opt keeper_name, policy_opt with
+  | Llm_provider.Provider_config.Codex_cli, Some agent_name, Some policy
+    when Option.is_some (Keeper_identity.keeper_name_from_agent_name agent_name)
+    ->
+      List.exists Oas_worker_exec.runtime_mcp_tool_requires_bound_actor
+        policy.allowed_tool_names
+  | _ -> false
+
+(* #10681: per-provider rejection reason produced by the cascade filter.
+   When the filter empties the cascade, operators previously saw only a
+   flat list of provider names; root-cause classification required
+   re-running each predicate by hand. The reason is now attached to the
+   provider in the WARN log so the next [no_tool_capable_provider] event
+   pinpoints the failing check on the first read.
+
+   Order of preference (mirrors the filter's short-circuit):
+   1. [Codex_keeper_bound_actor_required] — codex_cli cannot carry a
+      runtime MCP policy that requires bound-actor tools (keeper-scoped).
+   2. [Tool_lane_unsupported] — [resolve_tool_lane_for_oas_tools]
+      returned [Error], typically transport/auth/capability mismatch
+      surfaced by [Oas_worker_exec].
+   3. [Required_tool_use { reason }] — the inline-tool-choice / runtime
+      MCP capability gate from [Provider_tool_support]. Re-uses the
+      existing [rejection_reason] so dashboards stay consistent with
+      [masc_cascade_filter_rejection_total]. *)
+type filter_rejection_reason =
+  | Codex_keeper_bound_actor_required
+  | Tool_lane_unsupported
+  | Required_tool_use of Provider_tool_support.rejection_reason
+
+let filter_rejection_reason_label = function
+  | Codex_keeper_bound_actor_required -> "codex_keeper_bound_actor_required"
+  | Tool_lane_unsupported -> "tool_lane_unsupported"
+  | Required_tool_use r ->
+      Provider_tool_support.rejection_reason_label r
+
+let classify_filter_rejection
+    ~(keeper_name : string)
+    ?runtime_mcp_policy
+    ?(tools = [])
+    ~require_tool_choice_support
+    ~require_tool_support
+    (provider_cfg : Llm_provider.Provider_config.t)
+  : filter_rejection_reason option =
+  let normalized_runtime_mcp_policy =
+    runtime_mcp_policy_for_provider
+      ~keeper_name ~provider_cfg runtime_mcp_policy
+  in
+  if codex_cli_cannot_carry_keeper_bound_runtime_mcp
+       ~keeper_name ~provider_cfg normalized_runtime_mcp_policy
+  then Some Codex_keeper_bound_actor_required
+  else
+    let tool_lane_supported =
+      match tools with
+      | [] -> true
+      | _ -> (
+          match
+            Oas_worker_exec.resolve_tool_lane_for_oas_tools
+              ?agent_name:(keeper_agent_name_opt keeper_name)
+              ~tool_requirement:
+                (if require_tool_choice_support || require_tool_support
+                 then `Required
+                 else `Optional)
+              ~provider_cfg ~tools ()
+          with
+          | Ok _ -> true
+          | Error _ -> false)
+    in
+    if not tool_lane_supported then Some Tool_lane_unsupported
+    else
+      match
+        Provider_tool_support.classify_rejection
+          ?runtime_mcp_policy:normalized_runtime_mcp_policy
+          ~require_tool_choice_support ~require_tool_support
+          provider_cfg
+      with
+      | Some reason -> Some (Required_tool_use reason)
+      | None -> None
+
+(* #11060: cascade-empty WARN dedupe.
+
+   When the tool-use gate empties a cascade (every configured
+   provider rejected — e.g. [keeper_unified] with only [codex_cli]
+   providers under a keeper-bound runtime MCP policy), the WARN
+   fires once per filtering invocation. Field log: 18 identical
+   WARN events / 49 min for a single misconfigured cascade — the
+   genuine signal (operator must edit cascade.toml) drowns in its
+   own repeats and shares the WARN level with normal degraded-mode
+   noise.
+
+   This dedupe boosts the first occurrence per
+   [(label, rejection_signature)] to ERROR with an operator-action
+   hint, and demotes subsequent identical signatures to DEBUG. The
+   one-hour [restate_sec] period re-emits the ERROR if the
+   misconfiguration persists, so an operator who missed the first
+   alert still sees the gap. The signature is sorted so the same
+   rejection set in different argument order does not bypass the
+   cache. *)
+let cascade_empty_warn_seen : (string, float) Hashtbl.t =
+  Hashtbl.create 16
+
+let cascade_empty_warn_seen_mutex = Mutex.create ()
+
+let cascade_empty_warn_restate_sec = 3600.0
+
+let signature_of_rejected_providers rejected =
+  rejected
+  |> List.map (fun (cfg, reason) ->
+       Printf.sprintf "%s:%s"
+         (Provider_tool_support.provider_debug_label cfg)
+         (filter_rejection_reason_label reason))
+  |> List.sort String.compare
+  |> String.concat ","
+
+let cascade_empty_should_emit_first ~label ~signature =
+  let key = label ^ "|" ^ signature in
+  let now = Unix.gettimeofday () in
+  Mutex.lock cascade_empty_warn_seen_mutex;
+  let first =
+    match Hashtbl.find_opt cascade_empty_warn_seen key with
+    | None -> true
+    | Some last -> now -. last >= cascade_empty_warn_restate_sec
+  in
+  if first then Hashtbl.replace cascade_empty_warn_seen key now;
+  Mutex.unlock cascade_empty_warn_seen_mutex;
+  first
+
+let filter_candidate_providers_for_tool_support
+    ~(keeper_name : string)
+    ?runtime_mcp_policy
+    ?(tools = [])
+    ~require_tool_choice_support
+    ~require_tool_support
+    ~label
+    (provider_cfgs : Llm_provider.Provider_config.t list) =
+  if not require_tool_choice_support && not require_tool_support then
+    provider_cfgs
+  else
+    let kept, rejected =
+      List.partition_map
+        (fun provider_cfg ->
+           match
+             classify_filter_rejection
+               ~keeper_name ?runtime_mcp_policy ~tools
+               ~require_tool_choice_support ~require_tool_support
+               provider_cfg
+           with
+           | None -> Either.Left provider_cfg
+           | Some reason -> Either.Right (provider_cfg, reason))
+        provider_cfgs
+    in
+    if kept = [] && provider_cfgs <> [] then begin
+      let signature = signature_of_rejected_providers rejected in
+      if cascade_empty_should_emit_first ~label ~signature then
+        Log.Misc.error
+          "[#11060/#11356] cascade %s: provider-normalized tool-use gate \
+           removed all providers (rejections=[%s]) — operator action: add a \
+           runtime-MCP-capable fallback provider to this cascade in \
+           cascade.toml. Verified-capable providers: claude_code, kimi_cli, \
+           anthropic, glm, openrouter (any non-cli direct API). Note: \
+           gemini_cli and codex_cli reject request-scoped runtime MCP HTTP \
+           headers (gemini-cli upstream lacks --mcp-config flag; codex_cli \
+           strips most per-request headers) — they cannot satisfy this gate. \
+           Alternatively detach the keeper from this cascade. Subsequent \
+           identical-signature rejections demoted to DEBUG for the next %.0fs"
+          label signature cascade_empty_warn_restate_sec
+      else
+        Log.Misc.debug
+          "[#11060] cascade %s: repeated all-providers-rejected (rejections=[%s])"
+          label signature
+    end;
+    kept
+
+(* Cross-cascade health-aware fallback.
+   When the current cascade has no tool-capable providers after filtering,
+   search all other cascades for a healthy tool-capable provider using the
+   health tracker's success rate and cooldown state. Returns the provider
+   config and the source cascade name, or None if no suitable provider exists.
+
+   Depth: 1 level only (no cross-cascade-of-cross-cascade).
+   Scope: excludes the current cascade to avoid revisiting. *)
+let resolve_tool_capable_provider_across_cascades
+    ~sw ~net
+    ~(keeper_name : string)
+    ?runtime_mcp_policy
+    ?(tools = [])
+    ~require_tool_choice_support
+    ~require_tool_support
+    ~(exclude_cascade : string)
+    () =
+  match Cascade_catalog_runtime.known_profile_names ~sw ~net () with
+  | Error _ -> None
+  | Ok all_names ->
+      let assignable_names =
+        Keeper_cascade_profile.keeper_catalog_names ()
+      in
+      let assignable_set =
+        List.fold_left (fun acc n -> n :: acc) [] assignable_names
+      in
+      let is_keeper_assignable name = List.mem name assignable_set in
+      let scored_candidates =
+        all_names
+        |> List.filter (fun name -> name <> exclude_cascade)
+        |> List.filter_map (fun cascade_name ->
+             match Cascade_catalog_runtime.resolve_named_providers ~sw ~net
+                     ~require_tool_choice_support ~require_tool_support
+                     ?runtime_mcp_policy
+                     ~cascade_name ()
+             with
+             | Error _ -> None
+             | Ok providers ->
+                 let filtered =
+                   filter_candidate_providers_for_tool_support
+                     ~keeper_name ?runtime_mcp_policy ~tools
+                     ~require_tool_choice_support ~require_tool_support
+                     ~label:cascade_name providers
+                 in
+                 match filtered with
+                 | [] -> None
+                 | _ -> Some (cascade_name, filtered))
+        |> List.concat_map (fun (cascade_name, providers) ->
+             let keeper_assignable = is_keeper_assignable cascade_name in
+             providers
+             |> List.map (fun (provider : Llm_provider.Provider_config.t) ->
+                  let score =
+                    Cascade_inventory.score_provider
+                      Cascade_health_tracker.global
+                      ~exclude:[]
+                      ~keeper_assignable
+                      provider
+                  in
+                  Cascade_inventory.{ cascade_name; provider; score }))
+      in
+      (* The score_provider helper already collapses cooldown,
+         keeper_assignable, and the success × latency composition into a
+         single [0.0–1.0] number; best_runner_among picks the strict
+         positive max with deterministic tie-break.  This replaces the
+         pre-PR4 sort that ranked solely by success_rate (which left
+         slow-but-alive providers indistinguishable from fast ones, and
+         did not exclude non-keeper-assignable cascades like
+         [governance_judge] from a regular keeper's fallback pool). *)
+      Cascade_inventory.best_runner_among
+        ~health:Cascade_health_tracker.global
+        ~exclude:[]
+        scored_candidates
+      |> Option.map (fun (sp : Cascade_inventory.scored_provider) ->
+           (sp.cascade_name, sp.provider))

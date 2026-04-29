@@ -24,6 +24,9 @@
   coord_query
   coord_status
   coord_task
+  coord_task_classify
+  coord_task_claim
+  coord_task_create
   coord_task_lifecycle
   coord_task_schedule
   coord_verification_store

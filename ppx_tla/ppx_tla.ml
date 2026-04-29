@@ -27,10 +27,11 @@
      declarations so the type can carry [@@deriving tla] in its public
      interface as well as its implementation.
 
-   Classification attributes ([@tla.terminal] / [@tla.idle] / [@tla.active])
-   that derive [terminal_states] / [idle_states] / [active_states] subsets
-   are intentionally deferred to a follow-up cycle to keep this commit
-   focused on the parity test for the existing TurnStateSet. *)
+   Cycle 21 closes the deferred classification slice:
+   - [@tla.terminal] / [@tla.active] / [@tla.idle] per constructor.
+   - [terminal_symbols] / [active_symbols] / [idle_symbols].
+   - [is_terminal] / [is_active] / [is_idle] predicates that work even
+     when constructors carry payloads. *)
 
 open Ppxlib
 
@@ -46,6 +47,34 @@ let symbol_of_constructor (cd : constructor_declaration) =
   match Attribute.get symbol_attr cd with
   | Some s -> s
   | None -> String.lowercase_ascii cd.pcd_name.txt
+
+(* Constructor classification attributes.
+
+   These mirror TLA+ sets such as [TerminalStateSet] and
+   [ActiveStateSet] without requiring payload-bearing constructors to
+   be enumerated as values. The deriver emits symbol subsets plus
+   predicates, so [Failed _] can still be classified as terminal. *)
+let terminal_attr =
+  Attribute.declare "tla.terminal"
+    Attribute.Context.constructor_declaration
+    Ast_pattern.(pstr nil)
+    ()
+
+let active_attr =
+  Attribute.declare "tla.active"
+    Attribute.Context.constructor_declaration
+    Ast_pattern.(pstr nil)
+    ()
+
+let idle_attr =
+  Attribute.declare "tla.idle"
+    Attribute.Context.constructor_declaration
+    Ast_pattern.(pstr nil)
+    ()
+
+let constructor_is_terminal cd = Attribute.get terminal_attr cd <> None
+let constructor_is_active cd = Attribute.get active_attr cd <> None
+let constructor_is_idle cd = Attribute.get idle_attr cd <> None
 
 (* [@@tla.phantom_param] flag on type declarations (Cycle 20 / Tier I9).
 
@@ -155,13 +184,71 @@ let make_all_states_impl ~loc cds =
   in
   Ast_builder.Default.pstr_value ~loc Nonrecursive [ binding ]
 
+let bool_expr ~loc value =
+  Ast_builder.Default.pexp_construct ~loc
+    (Loc.make ~loc (Longident.Lident (if value then "true" else "false")))
+    None
+
+let make_symbol_subset_impl ~loc ~name ~pred cds =
+  let exprs =
+    cds
+    |> List.filter pred
+    |> List.map (fun cd ->
+           Ast_builder.Default.estring ~loc (symbol_of_constructor cd))
+  in
+  let list_expr = Ast_builder.Default.elist ~loc exprs in
+  let pat = Ast_builder.Default.ppat_var ~loc (Loc.make ~loc name) in
+  let binding =
+    Ast_builder.Default.value_binding ~loc ~pat ~expr:list_expr
+  in
+  Ast_builder.Default.pstr_value ~loc Nonrecursive [ binding ]
+
+let make_constructor_predicate_impl ~loc ~name ~pred cds =
+  let cases =
+    List.map
+      (fun (cd : constructor_declaration) ->
+        let pat = constructor_pattern ~loc cd in
+        let rhs = bool_expr ~loc (pred cd) in
+        Ast_builder.Default.case ~lhs:pat ~guard:None ~rhs)
+      cds
+  in
+  let arg_name = "__tla_arg" in
+  let arg_pat =
+    Ast_builder.Default.ppat_var ~loc (Loc.make ~loc arg_name)
+  in
+  let arg_expr = Ast_builder.Default.evar ~loc arg_name in
+  let match_expr = Ast_builder.Default.pexp_match ~loc arg_expr cases in
+  let func =
+    Ast_builder.Default.pexp_fun ~loc Nolabel None arg_pat match_expr
+  in
+  let pat = Ast_builder.Default.ppat_var ~loc (Loc.make ~loc name) in
+  let binding = Ast_builder.Default.value_binding ~loc ~pat ~expr:func in
+  Ast_builder.Default.pstr_value ~loc Nonrecursive [ binding ]
+
+let make_classification_impls ~loc cds =
+  [
+    make_symbol_subset_impl ~loc ~name:"terminal_symbols"
+      ~pred:constructor_is_terminal cds;
+    make_symbol_subset_impl ~loc ~name:"active_symbols"
+      ~pred:constructor_is_active cds;
+    make_symbol_subset_impl ~loc ~name:"idle_symbols"
+      ~pred:constructor_is_idle cds;
+    make_constructor_predicate_impl ~loc ~name:"is_terminal"
+      ~pred:constructor_is_terminal cds;
+    make_constructor_predicate_impl ~loc ~name:"is_active"
+      ~pred:constructor_is_active cds;
+    make_constructor_predicate_impl ~loc ~name:"is_idle"
+      ~pred:constructor_is_idle cds;
+  ]
+
 let derive_impl_for_variant ~loc cds =
   let to_tla = make_to_tla_symbol_impl ~loc cds in
   let all_symbols = make_all_symbols_impl ~loc cds in
+  let classification = make_classification_impls ~loc cds in
   if List.for_all constructor_is_nullary cds then
-    [ to_tla; all_symbols; make_all_states_impl ~loc cds ]
+    [ to_tla; all_symbols; make_all_states_impl ~loc cds ] @ classification
   else
-    [ to_tla; all_symbols ]
+    [ to_tla; all_symbols ] @ classification
 
 (* ── Record-type implementation generators (Cycle 20 / Tier I7) ────
 
@@ -306,13 +393,14 @@ let make_to_tla_symbol_impl_gadt_one_param ~loc ~type_name cds =
 let derive_impl_for_gadt ~loc ~type_name ~type_params ~is_phantom cds =
   let _ = type_name in
   let all_symbols = make_all_symbols_impl ~loc cds in
+  let classification = make_classification_impls ~loc cds in
   match (type_params, is_phantom) with
   | [], _ ->
     (* GADT with no type params: structurally like ordinary variant but
        all_states is suppressed because GADT constructors with explicit
        result types may not list-construct cleanly without payload. *)
     let to_tla = make_to_tla_symbol_impl ~loc cds in
-    [ to_tla; all_symbols ]
+    [ to_tla; all_symbols ] @ classification
   | _ :: _, true ->
     (* Phantom-parameter GADT (Tier I9): the user has asserted via
        [@@tla.phantom_param] that no constructor specialises any type
@@ -323,7 +411,7 @@ let derive_impl_for_gadt ~loc ~type_name ~type_params ~is_phantom cds =
        enforces the phantom contract: a constructor that specialises
        a parameter triggers a clean type error at the user's call site. *)
     let to_tla = make_to_tla_symbol_impl ~loc cds in
-    [ to_tla; all_symbols ]
+    [ to_tla; all_symbols ] @ classification
   | _ :: _, false ->
     (* Non-phantom 1+ parameter GADT existentials still require the
        three-piece AST trick (ptyp_poly + pexp_newtype + inner
@@ -377,6 +465,11 @@ let list_t ~loc element_t =
     (Loc.make ~loc (Longident.Lident "list"))
     [ element_t ]
 
+let bool_t ~loc =
+  Ast_builder.Default.ptyp_constr ~loc
+    (Loc.make ~loc (Longident.Lident "bool"))
+    []
+
 let make_value_sig ~loc ~name ~type_ =
   Ast_builder.Default.psig_value ~loc
     (Ast_builder.Default.value_description ~loc
@@ -425,7 +518,21 @@ let derive_sig_for_variant ~loc ~type_name ~type_params ~is_phantom cds =
     else
       []
   in
-  to_tla_sig :: all_symbols_sig :: all_states_sig_opt
+  let symbol_list_t = list_t ~loc (string_t ~loc) in
+  let bool_arrow =
+    Ast_builder.Default.ptyp_arrow ~loc Nolabel arg_t (bool_t ~loc)
+  in
+  let classification_sigs =
+    [
+      make_value_sig ~loc ~name:"terminal_symbols" ~type_:symbol_list_t;
+      make_value_sig ~loc ~name:"active_symbols" ~type_:symbol_list_t;
+      make_value_sig ~loc ~name:"idle_symbols" ~type_:symbol_list_t;
+      make_value_sig ~loc ~name:"is_terminal" ~type_:bool_arrow;
+      make_value_sig ~loc ~name:"is_active" ~type_:bool_arrow;
+      make_value_sig ~loc ~name:"is_idle" ~type_:bool_arrow;
+    ]
+  in
+  to_tla_sig :: all_symbols_sig :: all_states_sig_opt @ classification_sigs
 
 let int_t ~loc =
   Ast_builder.Default.ptyp_constr ~loc

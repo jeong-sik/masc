@@ -415,8 +415,8 @@ export function TaskDetailOverlay() {
       labelledBy=${titleId}
       onClose=${closeTaskDetail}
       initialFocusRef=${closeButtonRef}
-      overlayClass="fixed inset-0 z-[60] bg-[var(--white-5)]/60 backdrop-blur-sm isolate flex items-center justify-center p-6 animate-in fade-in duration-200"
-      panelClass="w-full max-w-[900px] max-h-[90vh] overflow-y-auto bg-[var(--color-bg-surface)] rounded border border-[var(--color-border-default)] shadow-[0_24px_64px_var(--black-50)]"
+      overlayClass="fixed inset-0 z-[60] bg-[var(--dialog-overlay-bg)]/60 backdrop-blur-sm isolate flex items-center justify-center p-6 animate-in fade-in duration-[var(--t-med)]"
+      panelClass="w-full max-w-[900px] max-h-[90vh] overflow-y-auto bg-[var(--color-bg-surface)] rounded border border-[var(--dialog-panel-border)] shadow-[0_24px_64px_var(--black-50)]"
     >
       ${'' /* Sticky Header */}
       <div class="sticky top-0 z-10 flex items-center justify-between gap-4 px-6 py-4 border-b border-[var(--color-border-default)] bg-[rgba(13,21,38,0.97)] backdrop-blur-sm rounded-t-2xl">

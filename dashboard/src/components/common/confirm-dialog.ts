@@ -89,7 +89,7 @@ export function ConfirmDialogOverlay() {
       labelledBy="confirm-dialog-title"
       onClose=${handleClose}
       overlayClass="fixed inset-0 z-[100] flex items-center justify-center p-4"
-      panelClass="w-full max-w-100 bg-[rgba(13,21,38,0.98)] rounded-md border border-[var(--color-border-default)] shadow-[0_24px_64px_rgba(0,0,0,0.6)] overflow-hidden"
+      panelClass="w-full max-w-100 bg-[var(--dialog-panel-bg)] rounded-md border border-[var(--dialog-panel-border)] shadow-[0_24px_64px_rgba(0,0,0,0.6)] overflow-hidden"
     >
       <div class="p-5">
         <div class="flex items-start gap-4">

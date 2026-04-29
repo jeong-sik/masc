@@ -510,8 +510,8 @@ function KeeperClearContextDialog({
       describedBy=${descId}
       onClose=${pending ? () => {} : onClose}
       initialFocusRef=${reasonRef}
-      overlayClass="fixed inset-0 z-[80] bg-[var(--white-5)]/70 backdrop-blur-sm isolate flex items-center justify-center p-4"
-      panelClass="w-full max-w-130 rounded border border-[var(--bad-30)] bg-[rgba(13,21,38,0.98)] shadow-[0_24px_64px_rgba(0,0,0,0.6)]"
+      overlayClass="fixed inset-0 z-[80] bg-[var(--dialog-overlay-bg)]/70 backdrop-blur-sm isolate flex items-center justify-center p-4"
+      panelClass="w-full max-w-130 rounded border border-[var(--bad-30)] bg-[var(--dialog-panel-bg)] shadow-[0_24px_64px_rgba(0,0,0,0.6)]"
     >
       <div class="p-5 flex flex-col gap-4">
         <div class="flex flex-col gap-1">

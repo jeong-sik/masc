@@ -675,6 +675,20 @@ export const semantic: ReadonlyArray<TokenBase> = (() => {
   out.push(t("button-ghost-bg-pressed", "var(--accent-12)",              "role", "color",
     "ActionButton variant=ghost [data-pressed] bg (swaps to accent for selection clarity)"));
 
+  // Third slot — button-danger. Destructive actions (delete, remove,
+  // revoke). Uses the bad-* status family for unmistakable signaling.
+  // Aliases match button.ts VARIANT_CLASSES.danger.
+  out.push(t("button-danger-bg",         "var(--bad-10)",       "role", "color",
+    "ActionButton variant=danger surface bg"));
+  out.push(t("button-danger-fg",         "var(--bad-light)",    "role", "color",
+    "ActionButton variant=danger text fg"));
+  out.push(t("button-danger-border",     "var(--bad-30)",       "role", "color",
+    "ActionButton variant=danger border"));
+  out.push(t("button-danger-bg-hover",   "var(--bad-20)",       "role", "color",
+    "ActionButton variant=danger hover bg"));
+  out.push(t("button-danger-bg-pressed", "var(--bad-20)",       "role", "color",
+    "ActionButton variant=danger [data-pressed] bg"));
+
   // Interactive state roles — explicit hover/selected/pressed semantics
   out.push(t("state-hover-bg",       "var(--bg-3)",   "role", "color"));
   out.push(t("state-hover-fg",       "var(--fg-1)",   "role", "color"));

@@ -376,6 +376,11 @@ type semantic =
   | `Button_ghost_border
   | `Button_ghost_bg_hover
   | `Button_ghost_bg_pressed
+  | `Button_danger_bg
+  | `Button_danger_fg
+  | `Button_danger_border
+  | `Button_danger_bg_hover
+  | `Button_danger_bg_pressed
   | `State_hover_bg
   | `State_hover_fg
   | `State_hover_border
@@ -813,6 +818,11 @@ let name_of = function
   | `Button_ghost_border -> "button-ghost-border"
   | `Button_ghost_bg_hover -> "button-ghost-bg-hover"
   | `Button_ghost_bg_pressed -> "button-ghost-bg-pressed"
+  | `Button_danger_bg -> "button-danger-bg"
+  | `Button_danger_fg -> "button-danger-fg"
+  | `Button_danger_border -> "button-danger-border"
+  | `Button_danger_bg_hover -> "button-danger-bg-hover"
+  | `Button_danger_bg_pressed -> "button-danger-bg-pressed"
   | `State_hover_bg -> "state-hover-bg"
   | `State_hover_fg -> "state-hover-fg"
   | `State_hover_border -> "state-hover-border"

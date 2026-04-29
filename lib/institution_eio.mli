@@ -45,6 +45,12 @@ type episode = {
     so corrupted entries drop with a warn instead of being
     silently coerced to [`Partial]. *)
 
+val outcome_to_string :
+  [ `Success | `Failure | `Partial ] -> string
+(** Wire encoder for [outcome] values.  Returns the
+    lower-cased canonical label
+    ([success] / [failure] / [partial]). *)
+
 val outcome_of_string : string -> [ `Success | `Failure | `Partial ]
 (** Parses an outcome wire string (the lower-cased
     [success] / [failure] / [partial]).  {b Raises}
@@ -54,6 +60,21 @@ val outcome_of_string : string -> [ `Success | `Failure | `Partial ]
     garbage / future-variant payload drops the entry instead
     of being mis-classified.  Matches the fail-closed sweep
     in #11256 (rejection of "Unknown → Permissive Default"). *)
+
+val mentor_to_string :
+  [ `Random | `Best_fit | `Round_robin ] -> string
+(** Wire encoder for [mentor_assignment] strategy values.
+    Returns the lower-cased canonical label
+    ([random] / [best_fit] / [round_robin]). *)
+
+val mentor_of_string :
+  string -> [ `Random | `Best_fit | `Round_robin ]
+(** Parses a mentor-assignment wire string
+    ([random] / [best_fit] / [round_robin]).  {b Raises}
+    [Yojson.Safe.Util.Type_error] on unknown input — same
+    fail-closed contract as {!outcome_of_string} (#11675).
+    Pinned for behaviour-tests under
+    {!test/test_institution_of_string_fail_closed}. *)
 
 val episode_to_json : episode -> Yojson.Safe.t
 (** Wire encoder.  Field names mirror the record exactly;

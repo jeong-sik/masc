@@ -156,6 +156,18 @@ val inc_ws_bytes_sent : bytes:int -> unit
     [masc_ws_bytes_sent_total] by [bytes].  No-op when
     [bytes <= 0]. *)
 
+val observe_ws_message_bytes_sent : int -> unit
+(** [observe_ws_message_bytes_sent n] records [n] (clamped to
+    [max 0 n]) into [masc_ws_message_bytes{direction="send"}].
+    Paired with {!inc_ws_bytes_sent}: counter for total volume,
+    histogram for per-message distribution. *)
+
+val observe_ws_message_bytes_recv : int -> unit
+(** [observe_ws_message_bytes_recv n] records [n] (clamped to
+    [max 0 n]) into [masc_ws_message_bytes{direction="recv"}].
+    Observed at the inbound frame boundary before message
+    re-assembly. *)
+
 val inc_ws_delta_built : unit -> unit
 (** Increments [masc_ws_delta_built]. *)
 

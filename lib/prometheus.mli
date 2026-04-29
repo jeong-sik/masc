@@ -464,6 +464,13 @@ val metric_ws_bytes_sent : string
 val metric_grpc_bytes_sent : string
 val metric_ws_delta_built : string
 
+val metric_ws_message_bytes : string
+(** Histogram of WebSocket message payload size in bytes, observed at
+    the wire boundary. Labels: [direction = send | recv]. Complements
+    the [masc_ws_bytes_sent_total] counter by exposing per-message
+    distribution (p50/p95/p99) so operators can distinguish a few
+    large frames from many small frames. *)
+
 val metric_grpc_backlog_replay_lines_scanned : string
 (** Lines walked while replaying [.masc/backlog.jsonl] on a gRPC
     Subscribe RPC, including those filtered out by [since_seq]. *)

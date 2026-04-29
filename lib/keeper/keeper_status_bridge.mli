@@ -36,7 +36,7 @@ val runtime_blocker_surface_opt :
 
 val string_list_to_json : string list -> Yojson.Safe.t
 
-val drift_surface_json : unit -> Yojson.Safe.t
+val drift_surface_json : unknown_toml_keys:string list -> Yojson.Safe.t
 
 val auto_execution_session_surface_json : unit -> Yojson.Safe.t
 

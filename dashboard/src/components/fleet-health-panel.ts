@@ -61,7 +61,7 @@ export function FleetHealthPanel() {
   const view = activeView.value
 
   return html`
-    <div class="flex flex-col gap-4">
+    <div class="contain-content flex flex-col gap-4">
         <div class="flex flex-col gap-1">
           <div class="text-2xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">운영 신호 묶음</div>
           <p class="m-0 text-xs leading-paragraph text-[var(--color-fg-muted)]">

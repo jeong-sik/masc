@@ -586,7 +586,13 @@ let seed_agent_file ?(agent_type = "worker") ?(capabilities = []) config agent_n
 ;;
 
 let append_execution_receipt ?(tool_contract_result = "satisfied")
-    ?(tools_used = [ "keeper_fs_read" ]) config ~keeper_name =
+    ?(tools_used = [ "keeper_fs_read" ])
+    ?(cascade_fallback_applied = true)
+    ?(cascade_outcome = "passed_to_next_model")
+    ?(degraded_retry_applied = true)
+    ?(degraded_retry_cascade =
+      Some Masc_mcp.Keeper_config.local_recovery_cascade_name)
+    ?(fallback_reason = Some "turn_timeout") config ~keeper_name =
   let meta =
     match Masc_mcp.Keeper_types.read_meta config keeper_name with
     | Ok (Some meta) -> meta
@@ -636,24 +642,26 @@ let append_execution_receipt ?(tool_contract_result = "satisfied")
       cascade_name = meta.cascade_name;
       cascade_selected_model = Some "custom:mock";
       cascade_attempt_count = 2;
-      cascade_fallback_applied = true;
-      cascade_outcome = "passed_to_next_model";
-      degraded_retry_applied = true;
-      degraded_retry_cascade =
-        Some Masc_mcp.Keeper_config.local_recovery_cascade_name;
-      fallback_reason = Some "turn_timeout";
+      cascade_fallback_applied;
+      cascade_outcome;
+      degraded_retry_applied;
+      degraded_retry_cascade;
+      fallback_reason;
       cascade_rotation_attempts =
-        [
-          {
-            from_cascade = meta.cascade_name;
-            to_cascade = Masc_mcp.Keeper_config.local_recovery_cascade_name;
-            reason = "turn_timeout";
-            outcome = "retry_scheduled";
-            error_kind = Some "internal";
-            error_message = Some "turn timeout";
-            recorded_at = ended_at;
-          };
-        ];
+        (match degraded_retry_cascade, fallback_reason with
+         | Some retry_cascade, Some reason ->
+           [
+             {
+               from_cascade = meta.cascade_name;
+               to_cascade = retry_cascade;
+               reason;
+               outcome = "retry_scheduled";
+               error_kind = Some "internal";
+               error_message = Some "turn timeout";
+               recorded_at = ended_at;
+             };
+           ]
+         | _ -> []);
       stop_reason = Some "completed";
       error_kind = None;
       error_message = None;
@@ -1298,6 +1306,35 @@ let test_composite_routes_surface_runtime_recommended_actions () =
        actions)
 ;;
 
+let test_composite_routes_skip_recent_successful_idle_recovery () =
+  with_seeded_server
+  @@ fun ~port ~config ~admin_token ~keeper_name ->
+  let boot_path = Printf.sprintf "/api/v1/keepers/%s/boot" keeper_name in
+  let boot_result =
+    run_curl_post ~body:"{}" ~token:admin_token ~port ~path:boot_path ()
+  in
+  require_status "boot route registers keeper before composite read" 200 boot_result;
+  append_execution_receipt ~tool_contract_result:"satisfied_execution"
+    ~tools_used:[ "keeper_fs_read" ]
+    ~cascade_fallback_applied:false
+    ~cascade_outcome:"completed"
+    ~degraded_retry_applied:false
+    ~degraded_retry_cascade:None
+    ~fallback_reason:None config ~keeper_name;
+  let path = Printf.sprintf "/api/v1/keepers/%s/composite" keeper_name in
+  let result = run_curl_get ~port ~path () in
+  require_status "per-keeper composite GET returns 200" 200 result;
+  let open Yojson.Safe.Util in
+  let json = Yojson.Safe.from_string result.body in
+  check bool "seeded keeper is not in a live turn" false
+    (json |> member "is_live" |> to_bool);
+  let execution = json |> member "execution" in
+  check string "receipt is healthy" "healthy"
+    (execution |> member "operator_disposition_reason" |> to_string);
+  check int "recent successful idle keeper has no runtime action" 0
+    (json |> member "recommended_actions" |> to_list |> List.length)
+;;
+
 let test_tool_calls_route_surfaces_coverage_gap_health () =
   with_seeded_server
   @@ fun ~port ~config ~admin_token:_ ~keeper_name ->
@@ -1519,6 +1556,10 @@ let () =
             "composite routes surface runtime recommended actions"
             `Slow
             test_composite_routes_surface_runtime_recommended_actions
+        ; test_case
+            "composite routes skip recent successful idle recovery"
+            `Slow
+            test_composite_routes_skip_recent_successful_idle_recovery
         ; test_case
             "tool calls route surfaces coverage gap health"
             `Slow

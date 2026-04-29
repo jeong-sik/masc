@@ -697,7 +697,8 @@ let composite_recommended_actions_json ~keeper_name ~snapshot ~execution =
     is_live && composite_snapshot_is_idle snapshot && stale_long_enough
   in
   let blocked = composite_execution_blocked execution in
-  let needs_attention = blocked || (not is_live) || idle_attention in
+  let stale_without_live_turn = (not is_live) && stale_long_enough in
+  let needs_attention = blocked || stale_without_live_turn || idle_attention in
   let reason =
     match json_string "operator_disposition_reason" execution with
     | Some value when String.trim value <> "" -> value
@@ -705,7 +706,7 @@ let composite_recommended_actions_json ~keeper_name ~snapshot ~execution =
         match json_string "terminal_reason_code" execution with
         | Some value when String.trim value <> "" -> value
         | _ when idle_attention -> "idle_composite"
-        | _ when not is_live -> "not_live"
+        | _ when stale_without_live_turn -> "not_live"
         | _ -> "runtime_attention" )
   in
   let make action_type severity reason suggested_payload =

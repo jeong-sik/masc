@@ -190,6 +190,9 @@
   --color-vote-up: #ff4500;
   --color-vote-down: #7193ff;
   --color-vote-hover: #ccc;
+  --color-text-slate: #b0bfd4;
+  --warn-bright: #f97316;
+  --bad-light: #f87171;
   --color-ok-soft: rgb(107 158 107 / .10);
   --color-ok-fg: #8ebc8e;
   --color-ok-border: rgb(107 158 107 / .35);
@@ -358,6 +361,10 @@
   --focus-ring-err: 0 0 0 1px var(--err), 0 0 0 3px rgb(var(--err-glow) / .3);
   --color-hover-overlay: rgb(255 255 255 / .03);
   --color-active-overlay: rgb(0 0 0 / .25);
+  --pressed-scale: 0.97;
+  --hover-lift: -1px;
+  --focus-ring-width: 2px;
+  --focus-ring-offset: 2px;
   --color-state-hover-bg: var(--bg-3);
   --color-state-hover-fg: var(--fg-1);
   --color-state-hover-border: var(--line-2);

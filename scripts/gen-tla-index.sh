@@ -155,18 +155,20 @@ while IFS= read -r tla; do
   TOTAL_CFG=$((TOTAL_CFG + cfg_count))
   buggy_count=0
   inv_summary=""
-  for c in "${cfgs[@]}"; do
-    cb="$(basename "$c" .cfg)"
-    if [[ "$cb" == *-buggy* ]]; then
-      buggy_count=$((buggy_count + 1))
-    fi
-    inv="$(extract_invariants "$c")"
-    if [[ -n "$inv" ]]; then
-      label="${cb#"${base}"}"; label="${label#-}"
-      [[ -z "$label" ]] && label="clean"
-      inv_summary+="${label}={${inv}} "
-    fi
-  done
+  if (( cfg_count > 0 )); then
+    for c in "${cfgs[@]}"; do
+      cb="$(basename "$c" .cfg)"
+      if [[ "$cb" == *-buggy* ]]; then
+        buggy_count=$((buggy_count + 1))
+      fi
+      inv="$(extract_invariants "$c")"
+      if [[ -n "$inv" ]]; then
+        label="${cb#"${base}"}"; label="${label#-}"
+        [[ -z "$label" ]] && label="clean"
+        inv_summary+="${label}={${inv}} "
+      fi
+    done
+  fi
   TOTAL_CFG_BUGGY=$((TOTAL_CFG_BUGGY + buggy_count))
   inv_summary="${inv_summary% }"
   [[ -z "$inv_summary" ]] && inv_summary="-"

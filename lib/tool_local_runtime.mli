@@ -78,7 +78,8 @@ val run_bench :
   (Yojson.Safe.t, string) result
 (** Re-export of {!Tool_local_runtime_bench.run_bench}. *)
 
-val provider_health_reachable : status:int option -> body:_ -> bool
+val provider_health_reachable :
+  status:int option -> body:string option -> bool
 (** Re-export of {!Tool_local_runtime_verify.provider_health_reachable}.
     [body] is unused; required for caller-shape compat. *)
 

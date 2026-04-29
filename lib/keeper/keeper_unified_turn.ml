@@ -1858,7 +1858,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                 Log.Keeper.warn
                   "%s: all cascades exhausted (terminal) — last_err=%s \
                    attempt=%d attempted_cascades=[%s]"
-                  meta.name (Printexc.to_string err) attempt
+                  meta.name (Oas.Error.to_string err) attempt
                   (String.concat ", " attempted_cascades)
               end
               else begin
@@ -1872,7 +1872,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                 Log.Keeper.warn
                   "%s: turn terminal (non-exhaustion error) — err=%s \
                    attempt=%d"
-                  meta.name (Printexc.to_string err) attempt
+                  meta.name (Oas.Error.to_string err) attempt
               end
             in
             let attempt_timeout_budget = ref None in

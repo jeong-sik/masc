@@ -873,8 +873,16 @@ let init () =
     "Total provider prefix cache read tokens (Anthropic)" Counter;
   add metric_tool_call
     "Total keeper tool calls labeled by provider, tool, and outcome" Counter;
+  (* PR-0.2.C: pre-register cold/warm phase rows so /metrics shows a
+     zero-value baseline before the first observation. The phase label
+     is decided at observe-site in [Otel_dispatch_hook] based on a
+     module-level startup time threshold. *)
   register_histogram ~name:metric_tool_call_duration
-    ~help:"Tool call latency in seconds" ();
+    ~help:"Tool call latency in seconds (phase=cold|warm)"
+    ~labels:[("phase", "cold")] ();
+  register_histogram ~name:metric_tool_call_duration
+    ~help:"Tool call latency in seconds (phase=cold|warm)"
+    ~labels:[("phase", "warm")] ();
   (* Inference admission queue metrics *)
   add metric_inference_queue_inflight
     "Concurrent inference calls holding an admission permit" Gauge;

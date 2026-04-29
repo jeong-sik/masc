@@ -37,11 +37,12 @@ val persist_checkpoint :
   dir:string ->
   session_id:string ->
   Oas.Checkpoint.t ->
-  unit
+  (unit, string) result
 (** Serialise [ckpt] via [Oas.Checkpoint.to_string] and write it
-    atomically to [<dir>/<session_id>.json]. The parent [dir]
-    is created via [Fs_compat.mkdir_p] before the write — the
-    function never raises on a missing directory. *)
+    atomically (tmp → fsync → rename) to [<dir>/<session_id>.json].
+    Returns [Error msg] on I/O failure instead of raising.
+    The parent [dir] is created via [Fs_compat.mkdir_p] before
+    the write. *)
 
 val build_checkpoint :
   session_id:string ->

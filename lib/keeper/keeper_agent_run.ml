@@ -1732,7 +1732,8 @@ let run_turn
                 ~goal_ids:meta.active_goal_ids
                 ~sandbox_profile:
                   (Keeper_types.sandbox_profile_to_string meta.sandbox_profile)
-                ~sandbox_root:(Keeper_sandbox.host_root_abs_of_meta ~config meta)
+                ~sandbox_root:
+                  (Keeper_sandbox.keeper_visible_root_abs_of_meta ~config meta)
                 ~allowed_paths:(Keeper_alerting_path.effective_allowed_paths ~meta)
                 ~network_mode:
                   (Keeper_types.network_mode_to_string meta.network_mode)

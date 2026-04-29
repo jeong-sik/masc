@@ -751,6 +751,19 @@ export const semantic: ReadonlyArray<TokenBase> = (() => {
   out.push(t("input-bg-focus",   "var(--color-bg-page)",            "role", "color",
     "Form input :focus-visible bg"));
 
+  // Dialog primitive component-level slots. Existing consumers
+  // (confirm-dialog, agent-detail, keeper-detail, task-detail-overlay)
+  // each pass a different panel bg literal — `rgba(13,21,38,0.98)`,
+  // `bg-bg-1/95`, `#0d1526`. These slots converge them on a single
+  // source of truth so a future surface-color retune ripples to all
+  // dialogs at once.
+  out.push(t("dialog-panel-bg",     "rgba(13,21,38,0.98)",          "role", "color",
+    "DialogOverlay panel surface bg (most-common consumer literal)"));
+  out.push(t("dialog-panel-border", "var(--color-border-default)",  "role", "color",
+    "DialogOverlay panel border"));
+  out.push(t("dialog-overlay-bg",   "var(--white-5)",               "role", "color",
+    "DialogOverlay scrim base color (pair with /60 or /70 opacity)"));
+
   // Interactive state roles — explicit hover/selected/pressed semantics
   out.push(t("state-hover-bg",       "var(--bg-3)",   "role", "color"));
   out.push(t("state-hover-fg",       "var(--fg-1)",   "role", "color"));

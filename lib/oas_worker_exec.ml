@@ -258,6 +258,32 @@ let build
 let enrich_idle_detail =
   Oas_worker_exec_checkpoint.enrich_idle_detail
 
+let run_duration_ms_since started_at =
+  Float.max 0.0 ((Unix.gettimeofday () -. started_at) *. 1000.0)
+
+let dashboard_status_of_stop_reason = function
+  | Completed -> Dashboard_oas_bridge.Success
+  | TurnBudgetExhausted _ -> Dashboard_oas_bridge.Timeout
+  | MutationBoundaryReached _ ->
+      Dashboard_oas_bridge.Cancelled { reason = "mutation_boundary_reached" }
+
+let record_dashboard_oas_response ~config ~total_duration_ms ~status
+    (response : Oas.Types.api_response) =
+  try
+    let provider_id = Provider_adapter.provider_label_of_config config.provider_cfg in
+    let model_id =
+      let response_model = String.trim response.model in
+      if response_model = "" then config.model_id else response_model
+    in
+    Dashboard_oas_bridge.record_response ~provider_id ~model_id
+      ~total_duration_ms ~status response
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+      Log.Misc.warn
+        "oas_worker %s: dashboard_oas_bridge record failed: %s"
+        config.name (Printexc.to_string exn)
+
 (* ================================================================ *)
 (* Resume from checkpoint                                            *)
 (* ================================================================ *)
@@ -368,6 +394,7 @@ let run
   | Ok agent ->
   (match agent_ref with Some r -> r := Some agent | None -> ());
   let effective_contract = match contract with Some c -> Some c | None -> config.contract in
+  let run_started_at = Unix.gettimeofday () in
   (try
     let result, proof = match effective_contract with
       | Some c ->
@@ -380,6 +407,7 @@ let run
         in
         (r, None)
     in
+    let run_total_duration_ms = run_duration_ms_since run_started_at in
     (match proof_ref with Some ref_ -> ref_ := proof | None -> ());
     let checkpoint =
       let ckpt =
@@ -425,6 +453,9 @@ let run
     in
     (match result with
     | Ok response ->
+      record_dashboard_oas_response ~config
+        ~total_duration_ms:run_total_duration_ms
+        ~status:Dashboard_oas_bridge.Success response;
       Ok
         {
           response;
@@ -445,6 +476,9 @@ let run
           ~text:(Printf.sprintf
             "[turn budget exhausted: %d/%d turns used]" r.turns r.limit)
       in
+      record_dashboard_oas_response ~config
+        ~total_duration_ms:run_total_duration_ms
+        ~status:Dashboard_oas_bridge.Timeout partial_response;
       Ok
         {
           response = partial_response;
@@ -472,6 +506,10 @@ let run
             ~model_id:config.model_id
             ~text:response_text
         in
+        record_dashboard_oas_response ~config
+          ~total_duration_ms:run_total_duration_ms
+          ~status:(dashboard_status_of_stop_reason stop_reason)
+          partial_response;
         Ok
           {
             response = partial_response;
@@ -491,6 +529,14 @@ let run
       let detail =
         enrich_idle_detail detail (Oas.Agent.state agent).messages
       in
+      let error_response =
+        partial_response_of_stop ~session_id ~model_id:config.model_id
+          ~text:detail
+      in
+      record_dashboard_oas_response ~config
+        ~total_duration_ms:run_total_duration_ms
+        ~status:(Dashboard_oas_bridge.Error { transient = false })
+        error_response;
       (* Demoted from WARN to DEBUG (task-239): this fires once per tier,
          but a cascade caller (Oas_worker_named.run_named) retries on the
          next provider.  Emitting WARN/ERROR here creates noise on
@@ -511,6 +557,17 @@ let run
     let bt = Printexc.get_backtrace () in
     (try Oas.Agent.close agent with close_exn ->
       Log.Misc.warn "agent close failed during cleanup: %s" (Printexc.to_string close_exn));
+    let detail =
+      Printf.sprintf "execution exception: %s" (Printexc.to_string exn)
+    in
+    let error_response =
+      partial_response_of_stop ~session_id ~model_id:config.model_id
+        ~text:detail
+    in
+    record_dashboard_oas_response ~config
+      ~total_duration_ms:(run_duration_ms_since run_started_at)
+      ~status:(Dashboard_oas_bridge.Error { transient = false })
+      error_response;
     Log.Misc.error "oas_worker %s: execution exception: %s\nBacktrace: %s"
       config.name (Printexc.to_string exn) bt;
     Error (Oas.Error.Internal (Printf.sprintf "execution exception: %s" (Printexc.to_string exn))))

@@ -5,6 +5,7 @@
     the nearest-rank percentile in {!Dashboard_oas_bridge.summary}. *)
 
 module DOB = Masc_mcp.Dashboard_oas_bridge
+module Oas = Masc_mcp.Oas
 
 let make_sample
     ?(provider = "anthropic")
@@ -36,6 +37,42 @@ let make_sample
   }
 
 let setup () = DOB.clear ()
+
+let make_usage ?cost ?(cache_creation = 0) ?(cache_read = 0) ~input
+    ~output () : Oas.Types.api_usage =
+  {
+    input_tokens = input;
+    output_tokens = output;
+    cache_creation_input_tokens = cache_creation;
+    cache_read_input_tokens = cache_read;
+    cost_usd = cost;
+  }
+
+let make_telemetry ?timings ?(request_latency_ms = 0) ()
+    : Oas.Types.inference_telemetry =
+  {
+    system_fingerprint = None;
+    timings;
+    reasoning_tokens = None;
+    request_latency_ms;
+    peak_memory_gb = None;
+    provider_kind = None;
+    reasoning_effort = None;
+    canonical_model_id = None;
+    effective_context_window = None;
+    provider_internal_action_count = None;
+  }
+
+let make_response ?usage ?telemetry ?(model = "claude-opus-4-7") ()
+    : Oas.Types.api_response =
+  {
+    id = "resp-1";
+    model;
+    stop_reason = Oas.Types.EndTurn;
+    content = [];
+    usage;
+    telemetry;
+  }
 
 (* --- record + recent --- *)
 
@@ -117,6 +154,72 @@ let test_clear_provider () =
   Alcotest.(check int) "ollama remains" 1
     (List.length (DOB.recent ~provider:"ollama" ()))
 
+(* --- OAS response projection --- *)
+
+let test_sample_of_response_uses_usage_and_native_telemetry () =
+  let usage =
+    make_usage ~input:11 ~output:5 ~cache_read:7 ~cost:0.12 ()
+  in
+  let timings : Oas.Types.inference_timings =
+    {
+      prompt_n = Some 11;
+      prompt_ms = Some 510.0;
+      prompt_per_second = Some 21.55;
+      predicted_n = Some 5;
+      predicted_ms = Some 61.3;
+      predicted_per_second = Some 81.56;
+      cache_n = Some 7;
+    }
+  in
+  let telemetry = make_telemetry ~timings ~request_latency_ms:620 () in
+  let response = make_response ~usage ~telemetry ~model:"gpt-4" () in
+  let sample =
+    DOB.sample_of_response ~provider_id:"openai_compat" ~model_id:"gpt-4"
+      ~status:DOB.Success response
+  in
+  Alcotest.(check string) "provider" "openai_compat" sample.provider_id;
+  Alcotest.(check string) "model" "gpt-4" sample.model_id;
+  Alcotest.(check int) "input tokens" 11 sample.input_tokens;
+  Alcotest.(check int) "output tokens" 5 sample.output_tokens;
+  Alcotest.(check (float 1e-9)) "ttfb" 510.0 sample.ttfb_ms;
+  Alcotest.(check (float 1e-9)) "duration" 620.0
+    sample.total_duration_ms;
+  Alcotest.(check (float 1e-9)) "native throughput" 81.56
+    sample.throughput_tokens_per_s;
+  Alcotest.(check (float 1e-9)) "cost" 0.12 sample.cost_usd;
+  Alcotest.(check bool) "cache hit" true sample.cache_hit
+
+let test_sample_of_response_derives_wall_throughput () =
+  let usage = make_usage ~input:100 ~output:50 () in
+  let telemetry = make_telemetry ~request_latency_ms:250 () in
+  let response = make_response ~usage ~telemetry ~model:"ollama:qwen" () in
+  let sample =
+    DOB.sample_of_response ~provider_id:"ollama" ~model_id:"ollama:qwen"
+      ~status:DOB.Success response
+  in
+  Alcotest.(check (float 1e-9)) "duration" 250.0
+    sample.total_duration_ms;
+  Alcotest.(check (float 1e-9)) "wall throughput" 200.0
+    sample.throughput_tokens_per_s
+
+let test_record_response_records_missing_usage_as_zero_sample () =
+  setup ();
+  let response =
+    make_response ~telemetry:(make_telemetry ~request_latency_ms:33 ())
+      ~model:"kimi-for-coding" ()
+  in
+  DOB.record_response ~provider_id:"kimi_cli" ~model_id:"kimi-for-coding"
+    ~status:(DOB.Error { transient = false }) response;
+  match DOB.recent ~provider:"kimi_cli" () with
+  | [ (sample, _) ] ->
+      Alcotest.(check int) "input tokens" 0 sample.input_tokens;
+      Alcotest.(check int) "output tokens" 0 sample.output_tokens;
+      Alcotest.(check (float 1e-9)) "duration" 33.0
+        sample.total_duration_ms;
+      Alcotest.(check bool) "cache hit" false sample.cache_hit
+  | xs ->
+      Alcotest.failf "expected one sample, got %d" (List.length xs)
+
 let () =
   Alcotest.run "Dashboard_oas_bridge"
     [
@@ -139,4 +242,13 @@ let () =
         ] );
       ( "clear",
         [ Alcotest.test_case "clear provider" `Quick test_clear_provider ] );
+      ( "oas_response",
+        [
+          Alcotest.test_case "usage + native telemetry" `Quick
+            test_sample_of_response_uses_usage_and_native_telemetry;
+          Alcotest.test_case "wall throughput fallback" `Quick
+            test_sample_of_response_derives_wall_throughput;
+          Alcotest.test_case "missing usage records zero sample" `Quick
+            test_record_response_records_missing_usage_as_zero_sample;
+        ] );
     ]

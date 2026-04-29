@@ -12,49 +12,48 @@
 
 open Alcotest
 
-module Resilience = Resilience
 
 (* ============================================================
    Constants Tests
    ============================================================ *)
 
 let test_default_zombie_threshold_positive () =
-  check bool "positive" true (Resilience.default_zombie_threshold > 0.0)
+  check bool "positive" true (Coord_resilience.default_zombie_threshold > 0.0)
 
 let test_default_zombie_threshold_matches_env_config () =
   check (float 0.01) "matches env config"
     Env_config.Zombie.threshold_seconds
-    Resilience.default_zombie_threshold
+    Coord_resilience.default_zombie_threshold
 
 let test_default_zombie_threshold_reasonable () =
   (* Should be between 30 seconds and 24 hours *)
   check bool "reasonable" true
-    (Resilience.default_zombie_threshold >= 30.0 &&
-     Resilience.default_zombie_threshold <= 86400.0)
+    (Coord_resilience.default_zombie_threshold >= 30.0 &&
+     Coord_resilience.default_zombie_threshold <= 86400.0)
 
 let test_default_warning_threshold_positive () =
-  check bool "positive" true (Resilience.default_warning_threshold > 0.0)
+  check bool "positive" true (Coord_resilience.default_warning_threshold > 0.0)
 
 let test_default_warning_less_than_zombie () =
   check bool "warning < zombie" true
-    (Resilience.default_warning_threshold <= Resilience.default_zombie_threshold)
+    (Coord_resilience.default_warning_threshold <= Coord_resilience.default_zombie_threshold)
 
 (* ============================================================
    Time.now Tests
    ============================================================ *)
 
 let test_time_now_positive () =
-  let t = Resilience.Time.now () in
+  let t = Coord_resilience.Time.now () in
   check bool "positive" true (t > 0.0)
 
 let test_time_now_reasonable () =
   (* Should be after year 2024 (timestamp > 1704067200) *)
-  let t = Resilience.Time.now () in
+  let t = Coord_resilience.Time.now () in
   check bool "after 2024" true (t > 1704067200.0)
 
 let test_time_now_not_future () =
   (* Should not be in year 2100+ (timestamp < 4102444800) *)
-  let t = Resilience.Time.now () in
+  let t = Coord_resilience.Time.now () in
   check bool "not future" true (t < 4102444800.0)
 
 (* ============================================================
@@ -62,37 +61,37 @@ let test_time_now_not_future () =
    ============================================================ *)
 
 let test_parse_iso8601_valid () =
-  match Resilience.Time.parse_iso8601_opt "2024-01-15T10:30:00Z" with
+  match Coord_resilience.Time.parse_iso8601_opt "2024-01-15T10:30:00Z" with
   | Some _ -> ()
   | None -> fail "expected Some"
 
 let test_parse_iso8601_invalid () =
-  match Resilience.Time.parse_iso8601_opt "not a timestamp" with
+  match Coord_resilience.Time.parse_iso8601_opt "not a timestamp" with
   | None -> ()
   | Some _ -> fail "expected None"
 
 let test_parse_iso8601_empty () =
-  match Resilience.Time.parse_iso8601_opt "" with
+  match Coord_resilience.Time.parse_iso8601_opt "" with
   | None -> ()
   | Some _ -> fail "expected None"
 
 let test_parse_iso8601_partial () =
-  match Resilience.Time.parse_iso8601_opt "2024-01-15" with
+  match Coord_resilience.Time.parse_iso8601_opt "2024-01-15" with
   | None -> ()
   | Some _ -> fail "expected None"
 
 let test_parse_iso8601_no_z () =
-  match Resilience.Time.parse_iso8601_opt "2024-01-15T10:30:00" with
+  match Coord_resilience.Time.parse_iso8601_opt "2024-01-15T10:30:00" with
   | None -> ()
   | Some _ -> fail "expected None"
 
 let test_parse_iso8601_midnight () =
-  match Resilience.Time.parse_iso8601_opt "2024-01-01T00:00:00Z" with
+  match Coord_resilience.Time.parse_iso8601_opt "2024-01-01T00:00:00Z" with
   | Some _ -> ()
   | None -> fail "expected Some"
 
 let test_parse_iso8601_end_of_day () =
-  match Resilience.Time.parse_iso8601_opt "2024-12-31T23:59:59Z" with
+  match Coord_resilience.Time.parse_iso8601_opt "2024-12-31T23:59:59Z" with
   | Some _ -> ()
   | None -> fail "expected Some"
 
@@ -102,18 +101,18 @@ let test_parse_iso8601_end_of_day () =
 
 let test_is_stale_old_timestamp () =
   let old_ts = "2020-01-01T00:00:00Z" in
-  check bool "old is stale" true (Resilience.Time.is_stale old_ts)
+  check bool "old is stale" true (Coord_resilience.Time.is_stale old_ts)
 
 let test_is_stale_invalid_timestamp () =
-  check bool "invalid is stale" true (Resilience.Time.is_stale "invalid")
+  check bool "invalid is stale" true (Coord_resilience.Time.is_stale "invalid")
 
 let test_is_stale_empty_timestamp () =
-  check bool "empty is stale" true (Resilience.Time.is_stale "")
+  check bool "empty is stale" true (Coord_resilience.Time.is_stale "")
 
 let test_is_stale_custom_threshold () =
   let old_ts = "2020-01-01T00:00:00Z" in
   check bool "stale with threshold" true
-    (Resilience.Time.is_stale ~threshold:1.0 old_ts)
+    (Coord_resilience.Time.is_stale ~threshold:1.0 old_ts)
 
 (* ============================================================
    Zombie.is_zombie Tests
@@ -121,40 +120,40 @@ let test_is_stale_custom_threshold () =
 
 let test_zombie_old_agent () =
   let old_ts = "2020-01-01T00:00:00Z" in
-  check bool "old agent is zombie" true (Resilience.Zombie.is_zombie old_ts)
+  check bool "old agent is zombie" true (Coord_resilience.Zombie.is_zombie old_ts)
 
 let test_zombie_invalid_timestamp () =
-  check bool "invalid is zombie" true (Resilience.Zombie.is_zombie "invalid")
+  check bool "invalid is zombie" true (Coord_resilience.Zombie.is_zombie "invalid")
 
 let test_zombie_custom_threshold () =
   let old_ts = "2020-01-01T00:00:00Z" in
   check bool "zombie with threshold" true
-    (Resilience.Zombie.is_zombie ~threshold:1.0 old_ts)
+    (Coord_resilience.Zombie.is_zombie ~threshold:1.0 old_ts)
 
 let test_keeper_zombie_threshold_matches_env_config () =
   let old_ts = "2020-01-01T00:00:00Z" in
   let expected =
-    Resilience.Zombie.is_zombie
+    Coord_resilience.Zombie.is_zombie
       ~threshold:Env_config.Zombie.keeper_threshold_seconds
       old_ts
   in
   check bool "keeper threshold uses env config" expected
-    (Resilience.Zombie.is_zombie_for_agent ~agent_name:"keeper-demo-agent" old_ts)
+    (Coord_resilience.Zombie.is_zombie_for_agent ~agent_name:"keeper-demo-agent" old_ts)
 
 (* ============================================================
    ZeroZombie.global_stats Tests
    ============================================================ *)
 
 let test_global_stats_total_cleanups () =
-  let stats = Resilience.ZeroZombie.global_stats in
+  let stats = Coord_resilience.ZeroZombie.global_stats in
   check bool "total_cleanups nonnegative" true (stats.total_cleanups >= 0)
 
 let test_global_stats_last_cleanup_ts () =
-  let stats = Resilience.ZeroZombie.global_stats in
+  let stats = Coord_resilience.ZeroZombie.global_stats in
   check bool "last_cleanup_ts nonnegative" true (stats.last_cleanup_ts >= 0.0)
 
 let test_global_stats_last_cleaned_agents () =
-  let stats = Resilience.ZeroZombie.global_stats in
+  let stats = Coord_resilience.ZeroZombie.global_stats in
   check bool "last_cleaned_agents is list" true
     (List.length stats.last_cleaned_agents >= 0)
 

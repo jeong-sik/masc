@@ -8,7 +8,6 @@
 open Alcotest
 
 module Dashboard = Masc_mcp.Dashboard
-module Resilience = Resilience
 
 (* ============================================================
    Dashboard Constants Tests
@@ -117,40 +116,40 @@ let test_parse_iso_timestamp_partial () =
    ============================================================ *)
 
 let test_resilience_default_zombie_threshold () =
-  check bool "positive threshold" true (Resilience.default_zombie_threshold > 0.0)
+  check bool "positive threshold" true (Coord_resilience.default_zombie_threshold > 0.0)
 
 let test_resilience_default_warning_threshold () =
-  check bool "warning threshold" true (abs_float (Resilience.default_warning_threshold -. 120.0) < 0.001)
+  check bool "warning threshold" true (abs_float (Coord_resilience.default_warning_threshold -. 120.0) < 0.001)
 
 (* ============================================================
-   Resilience.Time Tests
+   Coord_resilience.Time Tests
    ============================================================ *)
 
 let test_time_now () =
-  let t = Resilience.Time.now () in
+  let t = Coord_resilience.Time.now () in
   check bool "positive time" true (t > 0.0);
   (* Should be after Jan 1, 2020 *)
   check bool "reasonable time" true (t > 1577836800.0)
 
 let test_time_parse_iso8601_valid () =
-  match Resilience.Time.parse_iso8601_opt "2025-01-09T12:30:45Z" with
+  match Coord_resilience.Time.parse_iso8601_opt "2025-01-09T12:30:45Z" with
   | Some ts -> check bool "positive" true (ts > 0.0)
   | None -> fail "should parse valid ISO8601"
 
 let test_time_parse_iso8601_invalid () =
-  match Resilience.Time.parse_iso8601_opt "not-a-date" with
+  match Coord_resilience.Time.parse_iso8601_opt "not-a-date" with
   | Some _ -> fail "should reject invalid"
   | None -> ()
 
 let test_time_parse_iso8601_empty () =
-  match Resilience.Time.parse_iso8601_opt "" with
+  match Coord_resilience.Time.parse_iso8601_opt "" with
   | Some _ -> fail "should reject empty"
   | None -> ()
 
 let test_time_is_stale_old () =
   (* Timestamp from 2020 should be stale *)
   let old = "2020-01-01T00:00:00Z" in
-  check bool "old is stale" true (Resilience.Time.is_stale old)
+  check bool "old is stale" true (Coord_resilience.Time.is_stale old)
 
 let test_time_is_stale_recent () =
   (* Generate a recent timestamp *)
@@ -160,25 +159,25 @@ let test_time_is_stale_recent () =
     (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
     tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec in
   (* Give a large threshold so recent timestamp is not stale *)
-  check bool "recent not stale" false (Resilience.Time.is_stale ~threshold:3600.0 recent)
+  check bool "recent not stale" false (Coord_resilience.Time.is_stale ~threshold:3600.0 recent)
 
 let test_time_is_stale_invalid () =
   (* Invalid timestamps should be treated as stale *)
-  check bool "invalid is stale" true (Resilience.Time.is_stale "garbage")
+  check bool "invalid is stale" true (Coord_resilience.Time.is_stale "garbage")
 
 let test_time_is_stale_custom_threshold () =
   let old = "2020-01-01T00:00:00Z" in
   (* Even with a very large threshold, 2020 is still old *)
   check bool "2020 stale with 1 year threshold" true
-    (Resilience.Time.is_stale ~threshold:31536000.0 old)
+    (Coord_resilience.Time.is_stale ~threshold:31536000.0 old)
 
 (* ============================================================
-   Resilience.Zombie Tests
+   Coord_resilience.Zombie Tests
    ============================================================ *)
 
 let test_zombie_is_zombie_old () =
   let old = "2020-01-01T00:00:00Z" in
-  check bool "old agent is zombie" true (Resilience.Zombie.is_zombie old)
+  check bool "old agent is zombie" true (Coord_resilience.Zombie.is_zombie old)
 
 let test_zombie_is_zombie_recent () =
   let now = Unix.gettimeofday () in
@@ -186,41 +185,41 @@ let test_zombie_is_zombie_recent () =
   let recent = Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
     (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
     tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec in
-  check bool "recent not zombie" false (Resilience.Zombie.is_zombie ~threshold:3600.0 recent)
+  check bool "recent not zombie" false (Coord_resilience.Zombie.is_zombie ~threshold:3600.0 recent)
 
 let test_zombie_is_zombie_custom_threshold () =
   (* With a very short threshold, even "recent" could be stale *)
   let old = "2020-01-01T00:00:00Z" in
   check bool "zombie with short threshold" true
-    (Resilience.Zombie.is_zombie ~threshold:1.0 old)
+    (Coord_resilience.Zombie.is_zombie ~threshold:1.0 old)
 
 (* ============================================================
-   Resilience.ZeroZombie Tests
+   Coord_resilience.ZeroZombie Tests
    ============================================================ *)
 
 let test_zero_zombie_global_stats () =
-  let stats = Resilience.ZeroZombie.global_stats in
+  let stats = Coord_resilience.ZeroZombie.global_stats in
   check bool "total_cleanups non-negative" true (stats.total_cleanups >= 0)
 
 let test_zero_zombie_cleanup () =
   (* Mock cleanup function that returns empty list *)
   let cleanup_fn () = [] in
-  let cleaned = Resilience.ZeroZombie.cleanup ~cleanup_fn in
+  let cleaned = Coord_resilience.ZeroZombie.cleanup ~cleanup_fn in
   check int "no cleaned agents" 0 (List.length cleaned)
 
 let test_zero_zombie_cleanup_with_agents () =
   (* Mock cleanup function that returns some agents *)
   let cleanup_fn () = ["zombie1"; "zombie2"] in
-  let cleaned = Resilience.ZeroZombie.cleanup ~cleanup_fn in
+  let cleaned = Coord_resilience.ZeroZombie.cleanup ~cleanup_fn in
   check int "2 cleaned agents" 2 (List.length cleaned)
 
 let test_zero_zombie_stats_update () =
-  let initial_cleanups = Resilience.ZeroZombie.global_stats.total_cleanups in
+  let initial_cleanups = Coord_resilience.ZeroZombie.global_stats.total_cleanups in
   let cleanup_fn () = ["agent1"] in
-  ignore (Resilience.ZeroZombie.cleanup ~cleanup_fn);
+  ignore (Coord_resilience.ZeroZombie.cleanup ~cleanup_fn);
   check bool "cleanups incremented" true
-    (Resilience.ZeroZombie.global_stats.total_cleanups > initial_cleanups ||
-     Resilience.ZeroZombie.global_stats.total_cleanups = initial_cleanups + 1)
+    (Coord_resilience.ZeroZombie.global_stats.total_cleanups > initial_cleanups ||
+     Coord_resilience.ZeroZombie.global_stats.total_cleanups = initial_cleanups + 1)
 
 (* ============================================================
    Test Runners

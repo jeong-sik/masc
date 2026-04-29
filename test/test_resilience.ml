@@ -7,38 +7,38 @@ open Alcotest
    ================================================================ *)
 
 let test_parse_iso8601_valid () =
-  let result = Resilience.Time.parse_iso8601_opt "2025-06-15T12:30:00Z" in
+  let result = Coord_resilience.Time.parse_iso8601_opt "2025-06-15T12:30:00Z" in
   check bool "Some on valid ISO" true (Option.is_some result)
 
 let test_parse_iso8601_valid_value () =
   (* Verify parsed value is a reasonable Unix timestamp (after year 2000) *)
-  match Resilience.Time.parse_iso8601_opt "2025-01-01T00:00:00Z" with
+  match Coord_resilience.Time.parse_iso8601_opt "2025-01-01T00:00:00Z" with
   | Some ts -> check bool "timestamp > 2000-01-01" true (ts > 946684800.0)
   | None -> fail "should parse valid ISO8601"
 
 let test_parse_iso8601_epoch () =
-  let result = Resilience.Time.parse_iso8601_opt "1970-01-01T00:00:00Z" in
+  let result = Coord_resilience.Time.parse_iso8601_opt "1970-01-01T00:00:00Z" in
   check bool "Some on epoch" true (Option.is_some result)
 
 let test_parse_iso8601_invalid_garbage () =
-  let result = Resilience.Time.parse_iso8601_opt "not a date" in
+  let result = Coord_resilience.Time.parse_iso8601_opt "not a date" in
   check (option (float 0.001)) "None on garbage" None result
 
 let test_parse_iso8601_invalid_partial () =
-  let result = Resilience.Time.parse_iso8601_opt "2025-06-15" in
+  let result = Coord_resilience.Time.parse_iso8601_opt "2025-06-15" in
   check (option (float 0.001)) "None on partial" None result
 
 let test_parse_iso8601_empty () =
-  let result = Resilience.Time.parse_iso8601_opt "" in
+  let result = Coord_resilience.Time.parse_iso8601_opt "" in
   check (option (float 0.001)) "None on empty" None result
 
 let test_parse_iso8601_wrong_format () =
-  let result = Resilience.Time.parse_iso8601_opt "15/06/2025 12:30:00" in
+  let result = Coord_resilience.Time.parse_iso8601_opt "15/06/2025 12:30:00" in
   check (option (float 0.001)) "None on wrong format" None result
 
 let test_parse_iso8601_no_z_suffix () =
   (* Missing Z suffix — Scanf format requires Z *)
-  let result = Resilience.Time.parse_iso8601_opt "2025-06-15T12:30:00" in
+  let result = Coord_resilience.Time.parse_iso8601_opt "2025-06-15T12:30:00" in
   check (option (float 0.001)) "None without Z" None result
 
 (* ================================================================
@@ -48,21 +48,21 @@ let test_parse_iso8601_no_z_suffix () =
 let test_is_stale_old_timestamp () =
   (* 2020-01-01 is definitely stale with default 300s threshold *)
   check bool "old timestamp is stale" true
-    (Resilience.Time.is_stale "2020-01-01T00:00:00Z")
+    (Coord_resilience.Time.is_stale "2020-01-01T00:00:00Z")
 
 let test_is_stale_invalid_timestamp () =
   (* Invalid timestamps are treated as stale *)
   check bool "invalid is stale" true
-    (Resilience.Time.is_stale "garbage")
+    (Coord_resilience.Time.is_stale "garbage")
 
 let test_is_stale_empty () =
   check bool "empty is stale" true
-    (Resilience.Time.is_stale "")
+    (Coord_resilience.Time.is_stale "")
 
 let test_is_stale_custom_threshold () =
   (* Very large threshold — even old timestamps not stale *)
   check bool "not stale with huge threshold" false
-    (Resilience.Time.is_stale ~threshold:999999999999.0 "2020-01-01T00:00:00Z")
+    (Coord_resilience.Time.is_stale ~threshold:999999999999.0 "2020-01-01T00:00:00Z")
 
 let test_is_stale_recent () =
   (* Generate a timestamp for "now" in ISO8601 format *)
@@ -72,7 +72,7 @@ let test_is_stale_recent () =
     (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
     tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec in
   check bool "recent timestamp not stale" false
-    (Resilience.Time.is_stale ~threshold:300.0 iso)
+    (Coord_resilience.Time.is_stale ~threshold:300.0 iso)
 
 (* ================================================================
    Zombie.is_zombie
@@ -80,11 +80,11 @@ let test_is_stale_recent () =
 
 let test_zombie_old () =
   check bool "old last_seen is zombie" true
-    (Resilience.Zombie.is_zombie "2020-01-01T00:00:00Z")
+    (Coord_resilience.Zombie.is_zombie "2020-01-01T00:00:00Z")
 
 let test_zombie_invalid () =
   check bool "invalid last_seen is zombie" true
-    (Resilience.Zombie.is_zombie "invalid")
+    (Coord_resilience.Zombie.is_zombie "invalid")
 
 let test_zombie_recent () =
   let now = Unix.gettimeofday () in
@@ -93,29 +93,29 @@ let test_zombie_recent () =
     (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
     tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec in
   check bool "recent last_seen not zombie" false
-    (Resilience.Zombie.is_zombie ~threshold:300.0 iso)
+    (Coord_resilience.Zombie.is_zombie ~threshold:300.0 iso)
 
 let test_zombie_custom_threshold () =
   check bool "not zombie with huge threshold" false
-    (Resilience.Zombie.is_zombie ~threshold:999999999999.0 "2020-01-01T00:00:00Z")
+    (Coord_resilience.Zombie.is_zombie ~threshold:999999999999.0 "2020-01-01T00:00:00Z")
 
 (* ================================================================
    ZeroZombie.cleanup (pure stats tracking)
    ================================================================ *)
 
 let test_zero_zombie_cleanup_with_results () =
-  let cleaned = Resilience.ZeroZombie.cleanup ~cleanup_fn:(fun () -> ["agent-a"; "agent-b"]) in
+  let cleaned = Coord_resilience.ZeroZombie.cleanup ~cleanup_fn:(fun () -> ["agent-a"; "agent-b"]) in
   check (list string) "returns cleaned list" ["agent-a"; "agent-b"] cleaned;
   check bool "total_cleanups > 0" true
-    (Resilience.ZeroZombie.global_stats.total_cleanups > 0)
+    (Coord_resilience.ZeroZombie.global_stats.total_cleanups > 0)
 
 let test_zero_zombie_cleanup_empty () =
-  let prev = Resilience.ZeroZombie.global_stats.total_cleanups in
-  let cleaned = Resilience.ZeroZombie.cleanup ~cleanup_fn:(fun () -> []) in
+  let prev = Coord_resilience.ZeroZombie.global_stats.total_cleanups in
+  let cleaned = Coord_resilience.ZeroZombie.cleanup ~cleanup_fn:(fun () -> []) in
   check (list string) "returns empty" [] cleaned;
   (* total_cleanups should NOT increment on empty cleanup *)
   check int "total_cleanups unchanged" prev
-    Resilience.ZeroZombie.global_stats.total_cleanups
+    Coord_resilience.ZeroZombie.global_stats.total_cleanups
 
 (* ================================================================
    ZeroZombie.is_benign_error
@@ -124,22 +124,22 @@ let test_zero_zombie_cleanup_empty () =
 let test_is_benign_error_masc_not_init () =
   let exn = Invalid_argument "MASC not initialized" in
   check bool "MASC not initialized is benign" true
-    (Resilience.ZeroZombie.is_benign_error exn)
+    (Coord_resilience.ZeroZombie.is_benign_error exn)
 
 let test_is_benign_error_no_such_file () =
   let exn = Sys_error "No such file or directory" in
   check bool "Sys_error 'No such file' is benign" true
-    (Resilience.ZeroZombie.is_benign_error exn)
+    (Coord_resilience.ZeroZombie.is_benign_error exn)
 
 let test_is_benign_error_other () =
   let exn = Failure "something bad" in
   check bool "other error is not benign" false
-    (Resilience.ZeroZombie.is_benign_error exn)
+    (Coord_resilience.ZeroZombie.is_benign_error exn)
 
 let test_is_benign_error_short_msg () =
   let exn = Failure "short" in
   check bool "short message not benign" false
-    (Resilience.ZeroZombie.is_benign_error exn)
+    (Coord_resilience.ZeroZombie.is_benign_error exn)
 
 (* ================================================================
    Zombie.is_keeper_name
@@ -147,27 +147,27 @@ let test_is_benign_error_short_msg () =
 
 let test_keeper_name_valid () =
   check bool "keeper-abc-agent is keeper" true
-    (Resilience.Zombie.is_keeper_name "keeper-abc-agent")
+    (Coord_resilience.Zombie.is_keeper_name "keeper-abc-agent")
 
 let test_keeper_name_case_insensitive () =
   check bool "Keeper-ABC-Agent is keeper" true
-    (Resilience.Zombie.is_keeper_name "Keeper-ABC-Agent")
+    (Coord_resilience.Zombie.is_keeper_name "Keeper-ABC-Agent")
 
 let test_keeper_name_with_spaces () =
   check bool "trimmed keeper name" true
-    (Resilience.Zombie.is_keeper_name "  keeper-test-agent  ")
+    (Coord_resilience.Zombie.is_keeper_name "  keeper-test-agent  ")
 
 let test_keeper_name_regular_agent () =
   check bool "claude is not keeper" false
-    (Resilience.Zombie.is_keeper_name "claude")
+    (Coord_resilience.Zombie.is_keeper_name "claude")
 
 let test_keeper_name_partial_match () =
   check bool "keeper-only prefix not keeper" false
-    (Resilience.Zombie.is_keeper_name "keeper-")
+    (Coord_resilience.Zombie.is_keeper_name "keeper-")
 
 let test_keeper_name_empty () =
   check bool "empty not keeper" false
-    (Resilience.Zombie.is_keeper_name "")
+    (Coord_resilience.Zombie.is_keeper_name "")
 
 (* ================================================================
    Zombie.is_zombie_for_agent
@@ -184,25 +184,25 @@ let test_zombie_for_agent_regular_600s () =
   (* 600s old regular agent: should be zombie (default threshold 300s) *)
   let ts = make_iso_seconds_ago 600.0 in
   check bool "600s old regular agent is zombie" true
-    (Resilience.Zombie.is_zombie_for_agent ~agent_name:"claude" ts)
+    (Coord_resilience.Zombie.is_zombie_for_agent ~agent_name:"claude" ts)
 
 let test_zombie_for_agent_keeper_600s () =
   (* 600s old keeper agent: should NOT be zombie (keeper threshold 3600s) *)
   let ts = make_iso_seconds_ago 600.0 in
   check bool "600s old keeper agent is not zombie" false
-    (Resilience.Zombie.is_zombie_for_agent ~agent_name:"keeper-eval-agent" ts)
+    (Coord_resilience.Zombie.is_zombie_for_agent ~agent_name:"keeper-eval-agent" ts)
 
 let test_zombie_for_agent_keeper_4000s () =
   (* 4000s old keeper agent: should be zombie (exceeds keeper threshold 3600s) *)
   let ts = make_iso_seconds_ago 4000.0 in
   check bool "4000s old keeper agent is zombie" true
-    (Resilience.Zombie.is_zombie_for_agent ~agent_name:"keeper-eval-agent" ts)
+    (Coord_resilience.Zombie.is_zombie_for_agent ~agent_name:"keeper-eval-agent" ts)
 
 let test_zombie_for_agent_keeper_recent () =
   (* Recent keeper agent: not zombie *)
   let ts = make_iso_seconds_ago 10.0 in
   check bool "recent keeper agent not zombie" false
-    (Resilience.Zombie.is_zombie_for_agent ~agent_name:"keeper-eval-agent" ts)
+    (Coord_resilience.Zombie.is_zombie_for_agent ~agent_name:"keeper-eval-agent" ts)
 
 (* ================================================================
    Runner

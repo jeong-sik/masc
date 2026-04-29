@@ -246,7 +246,7 @@ export function AgentDetailOverlay() {
       labelledBy=${titleId}
       onClose=${closeAgentDetail}
       initialFocusRef=${closeButtonRef}
-      overlayClass="agent-detail-overlay fixed inset-0 z-[60] bg-[var(--white-5)]/60 backdrop-blur-sm isolate flex items-center justify-center p-6 animate-in fade-in duration-200"
+      overlayClass="agent-detail-overlay fixed inset-0 z-[60] bg-[var(--white-5)]/60 backdrop-blur-sm isolate flex items-center justify-center p-6 animate-in fade-in duration-[var(--t-med)]"
       panelClass="w-[min(1080px,100%)] max-h-[90vh] overflow-y-auto rounded border border-card-border bg-bg-1/95 backdrop-blur-sm shadow-sm shadow-black/50 ring-1 ring-white/5"
     >
       <div class="p-6 flex flex-col gap-5">
@@ -321,7 +321,7 @@ export function AgentDetailOverlay() {
             <button
               ref=${closeButtonRef}
               type="button"
-              class=${`px-4 py-2 text-sm font-semibold rounded border border-transparent bg-[var(--white-10)] text-text-strong hover:bg-[var(--white-20)] transition-colors duration-200 shadow-sm ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'surface' })}`}
+              class=${`px-4 py-2 text-sm font-semibold rounded border border-transparent bg-[var(--white-10)] text-text-strong hover:bg-[var(--white-20)] transition-colors duration-[var(--t-med)] shadow-sm ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'surface' })}`}
               onClick=${closeAgentDetail}
             >
               닫기

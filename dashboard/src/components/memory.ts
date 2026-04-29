@@ -403,7 +403,7 @@ function PostCard({ post }: { post: BoardPost }) {
   return html`
     <button
       type="button"
-      class=${`board-post group w-full flex gap-3 rounded p-4 border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] hover:bg-[var(--white-6)] hover:border-[var(--accent-20)] transition-all duration-200 cursor-pointer text-left ${ringFocusClasses()}`}
+      class=${`board-post group w-full flex gap-3 rounded p-4 border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] hover:bg-[var(--white-6)] hover:border-[var(--accent-20)] transition-all duration-[var(--t-med)] cursor-pointer text-left ${ringFocusClasses()}`}
       onClick=${() => navigateToPost(post.id)}
     >
       <!-- Select checkbox -->

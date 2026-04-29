@@ -396,6 +396,11 @@ type semantic =
   | `Button_subtle_border
   | `Button_subtle_bg_hover
   | `Button_subtle_bg_pressed
+  | `Input_bg
+  | `Input_fg
+  | `Input_border
+  | `Input_bg_hover
+  | `Input_bg_focus
   | `State_hover_bg
   | `State_hover_fg
   | `State_hover_border
@@ -853,6 +858,11 @@ let name_of = function
   | `Button_subtle_border -> "button-subtle-border"
   | `Button_subtle_bg_hover -> "button-subtle-bg-hover"
   | `Button_subtle_bg_pressed -> "button-subtle-bg-pressed"
+  | `Input_bg -> "input-bg"
+  | `Input_fg -> "input-fg"
+  | `Input_border -> "input-border"
+  | `Input_bg_hover -> "input-bg-hover"
+  | `Input_bg_focus -> "input-bg-focus"
   | `State_hover_bg -> "state-hover-bg"
   | `State_hover_fg -> "state-hover-fg"
   | `State_hover_border -> "state-hover-border"

@@ -62,6 +62,11 @@ type failure_reason =
           persisting [meta.paused = true] instead so an operator must
           investigate the underlying cascade/provider/fd issue before
           resuming the keeper. *)
+  | Oas_timeout_budget_loop of { count : int }
+      (** Latched when the same keeper exhausts the OAS turn budget on
+          consecutive cycles. This is a provider/cascade/runtime throughput
+          failure, so the supervisor pauses instead of restarting into the
+          same slow model and burning another multi-minute budget. *)
   | Ambiguous_partial_commit of ambiguous_partial_commit
   | Fiber_unresolved
   | Exception of string
@@ -80,6 +85,8 @@ let failure_reason_to_string = function
         (stale_kill_class_to_string cls)
   | Stale_termination_storm { count } ->
       Printf.sprintf "stale_termination_storm(count=%d)" count
+  | Oas_timeout_budget_loop { count } ->
+      Printf.sprintf "oas_timeout_budget_loop(count=%d)" count
   | Ambiguous_partial_commit { kind; detail } ->
       Printf.sprintf "ambiguous_partial_commit(%s:%s)"
         (ambiguous_partial_commit_kind_to_string kind)
@@ -101,6 +108,7 @@ let failure_reason_cohort_key = function
   | Some (Turn_consecutive_failures _) -> "turn_failures"
   | Some (Stale_turn_timeout _) -> "stale_turn_timeout"
   | Some (Stale_termination_storm _) -> "stale_termination_storm"
+  | Some (Oas_timeout_budget_loop _) -> "oas_timeout_budget_loop"
   | Some (Ambiguous_partial_commit _) -> "ambiguous_partial_commit"
   | Some Fiber_unresolved -> "fiber_unresolved"
   | Some (Exception _) -> "exception"

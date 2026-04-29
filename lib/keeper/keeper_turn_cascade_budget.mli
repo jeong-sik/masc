@@ -48,6 +48,8 @@ val oas_timeout_guard_sec : float
 val min_oas_timeout_budget_sec : float
 (** Minimum OAS timeout budget (seconds). *)
 
+val sdk_error_kind : Oas.Error.sdk_error -> string
+
 type oas_timeout_budget_resolution = {
   effective_timeout_sec : float;
   adaptive_timeout_sec : float;

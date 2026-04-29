@@ -161,7 +161,8 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
              | Some e -> (
                  match e.last_failure_reason with
                  | Some (Keeper_registry.Stale_turn_timeout _)
-                 | Some (Keeper_registry.Stale_termination_storm _) -> true
+                 | Some (Keeper_registry.Stale_termination_storm _)
+                 | Some (Keeper_registry.Oas_timeout_budget_loop _) -> true
                  | _ -> false)
              | None -> false
            in
@@ -782,8 +783,9 @@ let apply_self_preservation ~keepers_dir ~total_keepers to_restart =
     a CAS race.  The keeper would re-resume on a server restart in that
     edge case, but that is strictly less bad than the pre-Phase-2 baseline
     (continuous restart loop). *)
-let handle_stale_storm_pause (ctx : _ context)
-    (entry : Keeper_registry.registry_entry) ~count =
+let handle_crash_auto_pause (ctx : _ context)
+    (entry : Keeper_registry.registry_entry) ~reason_tag ~metric_name
+    ~lifecycle_detail ~log_message =
   (match read_meta ctx.config entry.name with
    | Ok (Some meta) ->
        (match
@@ -794,31 +796,53 @@ let handle_stale_storm_pause (ctx : _ context)
         | Ok () -> ()
         | Error err ->
             Log.Keeper.warn
-              "%s: stale_storm pause meta write failed (in-memory \
+              "%s: %s pause meta write failed (in-memory \
                failure_reason still gates restart, but persisted state \
                will not survive server restart): %s"
-              entry.name err)
+              entry.name reason_tag err)
    | Ok None ->
        Log.Keeper.warn
-         "%s: stale_storm pause: meta missing, cannot persist paused=true"
-         entry.name
+         "%s: %s pause: meta missing, cannot persist paused=true"
+         entry.name reason_tag
    | Error err ->
        Log.Keeper.warn
-         "%s: stale_storm pause read_meta failed: %s"
-         entry.name err);
+         "%s: %s pause read_meta failed: %s"
+         entry.name reason_tag err);
   Prometheus.inc_counter
-    "masc_keeper_stale_storm_paused_total"
+    metric_name
     ~labels:[ ("keeper", entry.name) ]
     ();
   publish_phase_lifecycle
     ~phase:Keeper_state_machine.Paused
     entry.name
-    (Printf.sprintf "stale_termination_storm count=%d" count) ();
-  Log.Keeper.error
-    "%s: STALE STORM AUTO-PAUSED (count=%d in 6h window). \
-     Operator must investigate cascade/provider/fd issue and \
-     resume the keeper manually. See issue #10765."
-    entry.name count
+    lifecycle_detail ();
+  Log.Keeper.error "%s: %s" entry.name log_message
+
+let handle_stale_storm_pause (ctx : _ context)
+    (entry : Keeper_registry.registry_entry) ~count =
+  handle_crash_auto_pause ctx entry
+    ~reason_tag:"stale_storm"
+    ~metric_name:"masc_keeper_stale_storm_paused_total"
+    ~lifecycle_detail:(Printf.sprintf "stale_termination_storm count=%d" count)
+    ~log_message:
+      (Printf.sprintf
+         "STALE STORM AUTO-PAUSED (count=%d in 6h window). \
+          Operator must investigate cascade/provider/fd issue and \
+          resume the keeper manually. See issue #10765."
+         count)
+
+let handle_oas_timeout_budget_pause (ctx : _ context)
+    (entry : Keeper_registry.registry_entry) ~count =
+  handle_crash_auto_pause ctx entry
+    ~reason_tag:"oas_timeout_budget_loop"
+    ~metric_name:"masc_keeper_oas_timeout_budget_loop_paused_total"
+    ~lifecycle_detail:(Printf.sprintf "oas_timeout_budget_loop count=%d" count)
+    ~log_message:
+      (Printf.sprintf
+         "OAS TIMEOUT BUDGET LOOP AUTO-PAUSED (count=%d). \
+          Operator must tune or reroute the cascade/model before resuming; \
+          restarting would re-enter the same slow-provider budget loop."
+         count)
 
 let sweep_and_recover (ctx : _ context) =
   let now = Time_compat.now () in
@@ -867,6 +891,13 @@ let sweep_and_recover (ctx : _ context) =
                   do NOT re-fire the storm-pause path (counter must increment
                   once per storm, not once per sweep tick). *)
                handle_stale_storm_pause ctx entry ~count;
+               to_unregister := entry :: !to_unregister
+           | Some (Keeper_registry.Oas_timeout_budget_loop { count }) ->
+               (* Repeated OAS budget exhaustion means the active
+                  cascade/model is not producing within the turn budget.
+                  Restarting the same keeper preserves that bad routing and
+                  burns another multi-minute budget, so pause instead. *)
+               handle_oas_timeout_budget_pause ctx entry ~count;
                to_unregister := entry :: !to_unregister
            | _ ->
                if entry.restart_count >= max_restarts then

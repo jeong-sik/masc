@@ -60,12 +60,14 @@ max_tokens = 8192
 keeper_assignable = false
 
 [ollama_only]
-comment = "Keeper-assignable ollama-only profile for local-only agents like ramarama."
+comment = "Keeper-assignable ollama-only profile for local-only agents. Conservative output/context defaults avoid qwen3.6 27B timeout loops on local runtimes."
 models = [
   "ollama:auto",
 ]
 temperature = 0.7
-max_tokens = 32768
+max_tokens = 4096
+keep_alive = "-1"
+num_ctx = 32768
 keeper_assignable = true
 
 [tool_rerank]

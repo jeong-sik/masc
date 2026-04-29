@@ -180,9 +180,21 @@ let extract_github_org url =
 
 let validate_clone_origin_url ~base_path url =
   let allowed_orgs, denied_repos = load_git_clone_policy ~base_path in
+  let denied_check () =
+    match extract_github_org_repo url with
+    | Some org_repo when List.mem org_repo denied_repos ->
+        Error (Printf.sprintf "Repository '%s' is in the denied list" org_repo)
+    | _ -> Ok ()
+  in
   if allowed_orgs = [] then
-    Error
-      "No allowed orgs configured for git clone (git_clone.allowed_orgs in tool_policy.toml)"
+    (* Empty allowed_orgs = skip org check. Per config/tool_policy.toml,
+       this matches operator intent: the keeper may clone any repo
+       reachable through the operator's gh credential, subject to
+       denied_repos. SSOT alignment with [Tool_code_write.validate_clone_url]
+       (#11951) and [Gh_command_validation.validate_gh_command] which
+       both treat [allowed_orgs = []] as "policy not configured / skip".
+       Follow-up to #11830 — second site that PR #11951 missed. *)
+    denied_check ()
   else
     match extract_github_org url with
     | None ->
@@ -192,11 +204,7 @@ let validate_clone_origin_url ~base_path url =
           (Printf.sprintf
              "GitHub org '%s' not in allowed list: %s. Use the actual GitHub owner from the clone URL; do not infer an org from local workspace path segments."
              org (String.concat ", " allowed_orgs))
-    | Some _ -> (
-        match extract_github_org_repo url with
-        | Some org_repo when List.mem org_repo denied_repos ->
-            Error (Printf.sprintf "Repository '%s' is in the denied list" org_repo)
-        | _ -> Ok ())
+    | Some _ -> denied_check ()
 
 (** Check if directory is a git repository - delegates to Coord_git *)
 let is_git_repo config =

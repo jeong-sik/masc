@@ -401,15 +401,15 @@ module KeeperKeepalive = struct
   (** Wall-clock timeout in seconds for a single unified turn (including all
       retries and cascade fallbacks). Prevents indefinite blocking when an
       upstream LLM hangs at the TCP level.
-      Env: [MASC_KEEPER_TURN_TIMEOUT_SEC]. Default: 3600. Range: [60, 7200].
-      Raised from 1200 to 3600 (issue #9637): production fleet observed
-      "turn wall-clock timeout after 1200s" with sangsu/qa-king keepers
-      stalling on multi-turn research cycles using GLM-5.1 + local 27B
-      cascade. The new floor matches the budgeted ceiling and gives
-      operators headroom; range upper bumped to 7200 for the same reason. *)
+      Env: [MASC_KEEPER_TURN_TIMEOUT_SEC]. Default: 1800. Range: [60, 7200].
+      Raised from 1200 to 3600 (issue #9637), then lowered to 1800
+      (issue #10716): production fleet observed hung LLM provider
+      executions in the 2700-2900s range (long_tail bucket), wasting
+      45+ minutes before cancellation. 1800s (30 min) caps the loss
+      while still covering multi-turn research cycles. *)
   let turn_timeout_sec =
     Float.max 60.0 (Float.min 7200.0
-      (get_float ~default:3600.0 "MASC_KEEPER_TURN_TIMEOUT_SEC"))
+      (get_float ~default:1800.0 "MASC_KEEPER_TURN_TIMEOUT_SEC"))
 
   (** Maximum time a proactive keeper will wait in the MASC admission queue
       before abandoning the current OAS attempt.

@@ -13,6 +13,7 @@ export function RichComposer({
   disabled,
   helpText,
   previewLimit = 2,
+  ariaLabel,
 }: {
   value: string
   onValueChange: (next: string) => void
@@ -21,6 +22,9 @@ export function RichComposer({
   disabled?: boolean
   helpText?: string
   previewLimit?: number
+  /** Accessible name for the underlying TextArea. Required for AT —
+      without it the editor reads as an unlabeled form control. */
+  ariaLabel?: string
 }) {
   const [mode, setMode] = useState<ComposerMode>('write')
 
@@ -57,6 +61,7 @@ export function RichComposer({
                 placeholder=${placeholder}
                 rows=${rows}
                 disabled=${disabled}
+                ariaLabel=${ariaLabel}
                 class="min-h-35"
                 onInput=${(event: Event) => onValueChange((event.target as HTMLTextAreaElement).value)}
               />

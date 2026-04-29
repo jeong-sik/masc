@@ -1,0 +1,27 @@
+/* migration-bridge.css — Strangler Fig migration bridge.
+ *
+ * Appended to per iter (RFC 0002 §"Per-iter PR shape" §5). Bridges
+ * legacy CSS hooks (e.g. .is-open) to the new data-attributes (e.g.
+ * data-state="open") so consumers can migrate one at a time without
+ * breaking the visual contract. Removed entirely in the cleanup PR
+ * once every consumer has migrated.
+ *
+ * Status (2026-04-29): owns Iter 2 (AuthPopover). Iter 1 (DialogOverlay,
+ * PR #11827) used Tailwind v4 data-[state=…]: variants directly and
+ * did not require a bridge entry.
+ */
+
+/* Iter 2 — AuthPopover (auth-status.ts)
+ *
+ * AuthPopover is conditionally mounted by Preact (the consumer renders
+ * `${popoverOpen.value ? html`<${AuthPopover} … />` : null}`), so the
+ * `data-state="open"` selector exists today as a stable anchor for the
+ * cleanup PR's eventual transition rules. Visual contract preserved:
+ * the panel is a native <div> with default `display: block`, so this
+ * declaration is a no-op today and a hook for future CSS-driven
+ * visibility (e.g. animated open/close without conditional mount).
+ */
+.auth-popover[data-state='open'],
+.auth-popover.is-open {
+  display: block;
+}

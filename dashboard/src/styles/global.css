@@ -36,6 +36,12 @@
 @import "./responsive.css";
 @import "./a11y.css"; /* after feature styles so reduced-motion overrides win */
 
+/* Strangler Fig migration bridge — bridges legacy CSS hooks to
+ * data-attributes during in-progress component migrations. Per-iter
+ * blocks are appended here; the entire file is removed in the cleanup
+ * PR once every consumer has migrated. RFC 0002 §"Per-iter PR shape" §5. */
+@import "../../design-system/migration-bridge.css";
+
 /* ── Card / Section / Headline base styles ─────────────────────
    Shared across the dashboard. Every card, title, headline, and
    badge gets consistent depth, 8px-grid spacing, and hierarchy.

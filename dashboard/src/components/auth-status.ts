@@ -1,5 +1,8 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
+import { useEffect, useRef } from 'preact/hooks'
+import { useFocusScope } from '../../design-system/headless-preact/use-focus-scope'
+import { useId } from '../../design-system/headless-preact/use-id'
 import {
   clearStoredToken,
   currentDashboardActor,
@@ -23,6 +26,15 @@ const popoverOpen = signal(false)
 const tokenInput = signal('')
 const actorInput = signal('')
 const bannerDismissed = signal(false)
+
+// Test-only helper. Resets module-level signals so *.test.ts files can
+// guarantee isolation in `beforeEach`. Mirrors use-id.ts:50 pattern.
+export function __resetForTests(): void {
+  popoverOpen.value = false
+  tokenInput.value = ''
+  actorInput.value = ''
+  bannerDismissed.value = false
+}
 
 function cleanErrorMessage(value: string | null | undefined): string | null {
   if (!value) return null
@@ -131,6 +143,8 @@ function openPopover(): void {
 }
 
 export function AuthStatus() {
+  const popoverId = useId()
+  const labelId = useId()
   const { dotColor, label } = authBadgeSummary()
 
   return html`
@@ -139,6 +153,7 @@ export function AuthStatus() {
         class="flex items-center gap-1.5 text-2xs py-1 px-2 rounded border border-solid border-[var(--color-border-default)] bg-[var(--white-4)] cursor-pointer font-[inherit] transition-colors duration-150 hover:bg-[var(--white-8)] text-[var(--color-fg-muted)]"
         aria-expanded=${popoverOpen.value}
         aria-haspopup="true"
+        aria-controls=${popoverId}
         onClick=${() => { popoverOpen.value ? (popoverOpen.value = false) : openPopover() }}
         title="인증 상태"
         aria-label="인증 상태"
@@ -146,12 +161,45 @@ export function AuthStatus() {
         <span class="size-[7px] rounded-sm inline-block ${dotColor}"></span>
         <span>${label}</span>
       </button>
-      ${popoverOpen.value ? html`<${AuthPopover} />` : null}
+      ${popoverOpen.value ? html`<${AuthPopover} popoverId=${popoverId} labelId=${labelId} />` : null}
     </div>
   `
 }
 
-function AuthPopover() {
+interface AuthPopoverProps {
+  popoverId: string
+  labelId: string
+}
+
+function AuthPopover({ popoverId, labelId }: AuthPopoverProps) {
+  const panelRef = useRef<HTMLDivElement>(null)
+
+  // Focus trap + restore: delegated to headless-core via useFocusScope.
+  // RFC 0002 Iter 2 — Iter 1 (DialogOverlay PR #11827) is the canonical
+  // reference; same shape as dialog.ts:48-55. AuthPopover is conditionally
+  // mounted, so `active: true` while the component lives is sufficient —
+  // unmount triggers the hook's cleanup which restores focus to the
+  // element that was focused before the popover opened (the trigger button).
+  useFocusScope({
+    containerRef: panelRef,
+    active: true,
+    initialFocus: 'first',
+  })
+
+  // ESC closes the popover. Out of useFocusScope's scope per RFC 0001
+  // §"out of scope" — handled inline so each popover can opt in/out of
+  // close-on-ESC behavior independently.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        popoverOpen.value = false
+      }
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [])
+
   const summary = shellAuthSummary.value
   const storedActor = readStoredDashboardActorName()
   const requestedActor = summary?.requested_agent ?? resolveDashboardActorName() ?? 'dashboard'
@@ -164,7 +212,15 @@ function AuthPopover() {
   const actorOverrideLocked = authenticated
 
   return html`
-    <div class="absolute right-0 top-full mt-1.5 w-80 rounded border border-[var(--color-border-default)] bg-[rgba(10,18,34,0.97)] shadow-sm backdrop-blur-sm p-3 z-50">
+    <div
+      ref=${panelRef}
+      id=${popoverId}
+      role="dialog"
+      aria-labelledby=${labelId}
+      data-state="open"
+      class="auth-popover absolute right-0 top-full mt-1.5 w-80 rounded border border-[var(--color-border-default)] bg-[rgba(10,18,34,0.97)] shadow-sm backdrop-blur-sm p-3 z-50"
+    >
+      <h2 id=${labelId} class="sr-only">인증 상태 패널</h2>
       <div class="flex flex-col gap-3">
         <div class="flex flex-col text-2xs">
           <${KvRow} label="stored actor" value=${storedActor ? `@${storedActor}` : '-'} wrap=${true} />
@@ -259,9 +315,9 @@ export function RemoteWarningBanner() {
         >인증 열기</button>
         <button type="button"
           class="text-[var(--color-fg-muted)] hover:text-[var(--color-fg-primary)] cursor-pointer text-2xs transition-colors"
-          aria-label="\uc778\uc99d \ubc30\ub108 \ub2eb\uae30"
+          aria-label="인증 배너 닫기"
           onClick=${() => { bannerDismissed.value = true }}
-        >\u2715</button>
+        >✕</button>
       </div>
     </div>
   `

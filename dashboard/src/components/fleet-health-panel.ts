@@ -75,7 +75,7 @@ export function FleetHealthPanel() {
         size="sm"
         tone="accent"
       />
-      <div class="transition-opacity duration-200">
+      <div class="transition-opacity duration-[var(--t-med)]">
         ${view === 'default'
           ? html`<${DefaultDualPanel} />`
         : view === 'event-log'

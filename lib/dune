@@ -143,6 +143,7 @@
    server_routes_http_routes_attribution
    server_routes_http_routes_activity
    server_routes_http_routes_artifacts
+   server_routes_http_routes_multimodal
    server_routes_http_routes_legendary_bash
    server_routes_http_routes_channel_gate
    server_routes_http_routes_sidecar

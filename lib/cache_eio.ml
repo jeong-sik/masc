@@ -345,19 +345,27 @@ let get config ~key : (cache_entry option, string) result =
           | Some entry -> Some (legacy_path, entry, true)
           | None -> None
   in
+  (* PR-0.2.A: cache hit/miss observation only (no logic change). *)
+  let cache_label = [("cache", "eio")] in
   match located with
   | None ->
+    Prometheus.inc_counter Prometheus.metric_cache_misses_total
+      ~labels:cache_label ();
     (* Trigger batch eviction check even on miss *)
     let _evicted = maybe_evict_expired config in
     Ok None
   | Some (path, entry, from_legacy) ->
       try
         if is_expired entry then begin
+          Prometheus.inc_counter Prometheus.metric_cache_misses_total
+            ~labels:cache_label ();
           (* Auto-delete expired entries *)
           if remove_file_if_exists path then decrement_cached_entry_count ();
           let _evicted = maybe_evict_expired config in
           Ok None
         end else begin
+          Prometheus.inc_counter Prometheus.metric_cache_hits_total
+            ~labels:cache_label ();
           if from_legacy then maybe_migrate_legacy_entry config ~key entry;
           let _evicted = maybe_evict_expired config in
           Ok (Some entry)

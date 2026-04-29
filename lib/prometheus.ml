@@ -522,6 +522,13 @@ let metric_ws_parse_cache_hits = "masc_ws_parse_cache_hits_total"
 let metric_ws_parse_cache_misses = "masc_ws_parse_cache_misses_total"
 let metric_ws_bytes_cache_hits = "masc_ws_bytes_cache_hits_total"
 let metric_ws_bytes_cache_misses = "masc_ws_bytes_cache_misses_total"
+(* PR-0.2.A (RFC 2026-04-masc-ide-strategy): generic cache hit/miss
+   counters, labelled by [cache] = "eio" | "dashboard".  Distinct from
+   the WS-specific parse/bytes cache counters above; these track the
+   filesystem-backed [Cache_eio] and the dashboard in-memory
+   stale-while-revalidate cache. *)
+let metric_cache_hits_total = "masc_cache_hits_total"
+let metric_cache_misses_total = "masc_cache_misses_total"
 let metric_ws_client_buffered_bytes = "masc_ws_client_buffered_bytes"
 let metric_ws_client_acks = "masc_ws_client_acks_total"
 let metric_ws_throttled_deliveries = "masc_ws_throttled_deliveries_total"
@@ -1209,6 +1216,16 @@ let init () =
     Counter;
   add metric_ws_bytes_cache_misses
     "WS raw-SSE-forward Bytes cache misses (fresh allocation required)"
+    Counter;
+  (* PR-0.2.A: generic cache hit/miss counters.  Labels: cache=eio|dashboard.
+     [eio] tracks Cache_eio.get; [dashboard] tracks Dashboard_cache.get_or_compute.
+     Per-label series are auto-created on first inc_counter call. *)
+  add metric_cache_hits_total
+    "Cache lookup hits. Labels: cache=eio|dashboard. \
+     hit_ratio = hits / (hits + misses) per cache label."
+    Counter;
+  add metric_cache_misses_total
+    "Cache lookup misses (compute required). Labels: cache=eio|dashboard."
     Counter;
   register_histogram ~name:metric_ws_client_buffered_bytes
     ~help:"Dashboard client WebSocket.bufferedAmount reported on each ack" ();

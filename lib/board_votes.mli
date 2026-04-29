@@ -51,6 +51,18 @@ val valid_vote_direction_strings : string list
     JSON Schema generator for the [direction] enum field
     in the vote MCP tool. *)
 
+val all_vote_directions : vote_direction list
+(** Witness list — one entry per {!vote_direction}
+    constructor, in declaration order. *)
+
+val vote_direction_of_string_opt : string -> vote_direction option
+(** Sound partial parser: case-insensitive, trims whitespace.
+    [""] is accepted as [Some Up] for back-compat with
+    [tool_board.ml] which defaults to ["up"] when the field
+    is missing.  Unknown input returns [None] (no silent
+    permissive fallback).  Pinned for behaviour-tests under
+    {!test/test_types}. *)
+
 (** {1 Vote log path} *)
 
 val vote_log_path : unit -> string
@@ -198,3 +210,21 @@ val post_to_yojson_with_karma :
     [classification_reason], extracted [flair], and a
     pre-computed [score = votes_up - votes_down] so the
     client does not have to derive it. *)
+
+(** {1 Fixture-voter quarantine (#9886)} *)
+
+val is_fixture_voter_target : string -> bool
+(** Returns [true] when [target] (a [room:agent] tuple or bare
+    agent name) refers to a fixture / synthetic / test voter.
+    Matches the [hot-voter-] / [synthetic-voter-] /
+    [test-voter-] prefixes that production traffic never uses.
+    Pinned for behaviour-tests under
+    {!test/test_board_fixture_detector}. *)
+
+val quarantine_enabled : unit -> bool
+(** Reads [MASC_BOARD_VOTE_QUARANTINE] (default [true] —
+    production-ledger #9886 measured 100% fixture-pattern votes
+    orphaning ranking).  Returns [false] only when the env is
+    explicitly set to [0] / [false] / [off] / empty.  Pinned
+    for behaviour-tests under
+    {!test/test_board_vote_quarantine}. *)

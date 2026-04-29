@@ -27,13 +27,7 @@ let minimal_config_json ~session_endpoints =
 
 let parse json_str =
   let json = Yojson.Safe.from_string json_str in
-  let open Result in
-  let ( let* ) = bind in
-  let* tts = Vc.parse_tts json in
-  let* stt = Vc.parse_stt json in
-  let* session = Vc.parse_session json in
-  let* local_playback = Vc.parse_local_playback json in
-  Ok { Vc.tts; stt; session; local_playback }
+  Vc.parse_json json
 
 let test_session_empty_endpoints_ok () =
   let json = minimal_config_json ~session_endpoints:"[]" in

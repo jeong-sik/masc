@@ -5,7 +5,7 @@ Edit the generator, not this file. Re-run: scripts/gen-tla-index.sh > specs/INDE
 
 # TLA+ Spec Index
 
-Generated: 2026-04-29T14:30:08Z (HEAD: bc92df748e)
+Generated: 2026-04-29T14:36:30Z (HEAD: c4d4a7b26f)
 
 Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to refresh.
 
@@ -90,9 +90,9 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | KeeperWorktreeContainment.tla | KeeperWorktreeContainment | manual | 3 | 2 | clean={inv:KeeperWorktreeKind, inv:KeeperWorktreeOwner, inv:TypeOK} other-playground-buggy={inv:KeeperWorktreeKind, inv:KeeperWorktreeOwner, inv:TypeOK} server-root-buggy={inv:KeeperWorktreeKind, inv:KeeperWorktreeOwner, inv:TypeOK} | 2026-04-11 |
 | MemoryCompaction.tla | MemoryCompaction | manual | 2 | 1 | clean={inv:ConstraintsPreserved NeverEmpty ResultBounded LongTermProtected RecentFloorRespected} buggy={inv:ConstraintsPreserved NeverEmpty ResultBounded LongTermProtected RecentFloorRespected} | 2026-04-20 |
 | OllamaBodyIntegrity.tla | OllamaBodyIntegrity | manual | 2 | 1 | clean={inv:BalancedNeverFails, inv:ParseErrorImpliesUnbalanced} buggy={inv:BalancedNeverFails} | 2026-04-20 |
+| SSEBroadcastBlock.tla | SSEBroadcastBlock | manual | 2 | 1 | clean={inv:TypeOK, inv:NoPermanentBlock} buggy={inv:TypeOK, inv:NoPermanentBlock} | 2026-04-20 |
 | SessionRegistryGhost.tla | SessionRegistryGhost | manual | 2 | 1 | clean={inv:TypeOK, inv:ConsistencyInvariant} buggy={inv:TypeOK, inv:ConsistencyInvariant} | 2026-04-20 |
 | SlotScheduler.tla | SlotScheduler | manual | 2 | 1 | clean={inv:TypeOK, inv:MutualExclusion, inv:NeverStuck} buggy={inv:TypeOK, inv:NeverStuck} | 2026-04-08 |
-| SSEBroadcastBlock.tla | SSEBroadcastBlock | manual | 2 | 1 | clean={inv:TypeOK, inv:NoPermanentBlock} buggy={inv:TypeOK, inv:NoPermanentBlock} | 2026-04-20 |
 
 ### specs/checkpoint-trim (1 specs)
 

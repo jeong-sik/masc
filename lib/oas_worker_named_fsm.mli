@@ -1,0 +1,85 @@
+(** Oas_worker_named_fsm — SDK error to FSM outcome, session/resumption analysis.
+
+    Extracted from oas_worker_named.ml (God file decomposition).
+    Converts OAS SDK errors into Cascade_fsm provider outcomes,
+    classifies CLI-wrapped error patterns (hard quota, max turns,
+    resumable sessions), and enriches errors with provider-specific hints.
+
+    This module is [include]d by {!Oas_worker_named}; all bindings are
+    re-exported by the facade.  @since God file decomposition *)
+
+(** {1 Cascade outcome classification} *)
+
+val sdk_error_to_cascade_outcome :
+  Oas.Error.sdk_error -> Cascade_fsm.provider_outcome option
+(** Convert an SDK error into a cascade FSM provider outcome.
+    API-level errors and model-capability-dependent agent errors are
+    cascadeable.  Structural agent errors (budget, idle, exit) are not. *)
+
+(** {1 Error enrichment} *)
+
+val enrich_sdk_error :
+  cascade_name:string ->
+  provider_cfg:Llm_provider.Provider_config.t ->
+  Oas.Error.sdk_error -> Oas.Error.sdk_error
+(** Enrich an SDK error with provider-specific diagnostic hints
+    (e.g. Moonshot auth, OpenAI-compat 404). *)
+
+(** {1 CLI-wrapped error pattern classification} *)
+
+val message_looks_like_cli_wrapped_hard_quota : string -> bool
+(** Detect hard-quota indicators in CLI-wrapped error messages. *)
+
+val message_looks_like_cli_wrapped_max_turns : string -> bool
+(** Detect max-turns indicators in CLI-wrapped error messages. *)
+
+val message_looks_like_resumable_cli_session : string -> bool
+(** Detect resumable-session indicators in CLI-wrapped error messages. *)
+
+val cli_wrapped_hard_quota_indicators : string list
+(** List of substring indicators for CLI-wrapped hard quota. *)
+
+val cli_wrapped_max_turns_indicators : string list
+(** List of substring indicators for CLI-wrapped max turns. *)
+
+(** {1 Resumable CLI session helpers} *)
+
+val resumable_cli_session_detail : string -> string
+
+val resumable_cli_session_exit_code : string -> int option
+
+val exit_code_of_message : string -> int option
+(** Extract an exit code from a CLI error message string. *)
+
+val retry_message_looks_like_not_found : string -> bool
+(** Detect "not found" / 404 patterns in retry error messages. *)
+
+(** {1 SDK error predicates} *)
+
+val sdk_error_to_resumable_cli_session :
+  cascade_name:string -> Oas.Error.sdk_error -> Oas.Error.sdk_error option
+(** If the error looks like a resumable CLI session, convert it into the
+    structured [Resumable_cli_session] form. *)
+
+val sdk_error_is_resumable_cli_session : Oas.Error.sdk_error -> bool
+
+val sdk_error_is_hard_quota : Oas.Error.sdk_error -> bool
+(** [true] when the error represents a hard usage quota that will not
+    recover within the cascade turn budget. *)
+
+val sdk_error_soft_rate_limited :
+  Oas.Error.sdk_error -> float option option
+(** [Some (Some retry_after)] for non-quota 429 responses with a parsed
+    [retry_after].  [Some None] when [retry_after] is absent.
+    [None] for non-429 or hard-quota-429 errors. *)
+
+val sdk_error_is_max_turns_exceeded : Oas.Error.sdk_error -> bool
+
+(** {1 Moonshot / Kimi helpers} *)
+
+val is_moonshot_provider : Llm_provider.Provider_config.t -> bool
+
+val resolve_kimi_api_key_env_name : cascade_name:string -> string
+
+val moonshot_auth_hint_marker : string
+val openai_compat_not_found_hint_marker : string

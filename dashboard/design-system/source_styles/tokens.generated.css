@@ -405,6 +405,8 @@
   --input-border: var(--color-border-default);  /* Form input border */
   --input-bg-hover: var(--white-6);  /* Form input hover bg */
   --input-bg-focus: var(--color-bg-page);  /* Form input :focus-visible bg */
+  --input-placeholder: var(--color-fg-muted);  /* Form input :placeholder text color */
+  --input-border-focus: rgba(71,184,255,0.6);  /* Form input :focus-visible border (accent-tinted, slightly translucent) */
   --dialog-panel-bg: rgba(13,21,38,0.98);  /* DialogOverlay panel surface bg (most-common consumer literal) */
   --dialog-panel-border: var(--color-border-default);  /* DialogOverlay panel border */
   --dialog-overlay-bg: var(--white-5);  /* DialogOverlay scrim base color (pair with /60 or /70 opacity) */

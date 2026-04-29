@@ -401,6 +401,8 @@ type semantic =
   | `Input_border
   | `Input_bg_hover
   | `Input_bg_focus
+  | `Input_placeholder
+  | `Input_border_focus
   | `Dialog_panel_bg
   | `Dialog_panel_border
   | `Dialog_overlay_bg
@@ -892,6 +894,8 @@ let name_of = function
   | `Input_border -> "input-border"
   | `Input_bg_hover -> "input-bg-hover"
   | `Input_bg_focus -> "input-bg-focus"
+  | `Input_placeholder -> "input-placeholder"
+  | `Input_border_focus -> "input-border-focus"
   | `Dialog_panel_bg -> "dialog-panel-bg"
   | `Dialog_panel_border -> "dialog-panel-border"
   | `Dialog_overlay_bg -> "dialog-overlay-bg"

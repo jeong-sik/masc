@@ -751,6 +751,15 @@ export const semantic: ReadonlyArray<TokenBase> = (() => {
   out.push(t("input-bg-focus",   "var(--color-bg-page)",            "role", "color",
     "Form input :focus-visible bg"));
 
+  // Input family extension — placeholder + focus-visible border. These
+  // are the two remaining inline literals in input.ts INPUT_BASE that
+  // weren't part of the canonical 5-slot shape (#11917). Adding them
+  // closes the input-* family for full consumer migration.
+  out.push(t("input-placeholder", "var(--color-fg-muted)",          "role", "color",
+    "Form input :placeholder text color"));
+  out.push(t("input-border-focus", "rgba(71,184,255,0.6)",          "role", "color",
+    "Form input :focus-visible border (accent-tinted, slightly translucent)"));
+
   // Dialog primitive component-level slots. Existing consumers
   // (confirm-dialog, agent-detail, keeper-detail, task-detail-overlay)
   // each pass a different panel bg literal — `rgba(13,21,38,0.98)`,
@@ -770,6 +779,7 @@ export const semantic: ReadonlyArray<TokenBase> = (() => {
   // retuneable surface (mirror of dialog-* / button-* families).
   out.push(t("toast-bg",         "rgba(10,18,34,0.96)",                "role", "color",
     "ToastContainer surface bg (deep navy with slight transparency for backdrop blend)"));
+
 
 
   // Interactive state roles — explicit hover/selected/pressed semantics

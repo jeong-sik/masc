@@ -412,6 +412,8 @@ type semantic =
   | `Input_border
   | `Input_bg_hover
   | `Input_bg_focus
+  | `Input_placeholder
+  | `Input_border_focus
   | `Dialog_panel_bg
   | `Dialog_panel_border
   | `Dialog_overlay_bg

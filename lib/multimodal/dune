@@ -3,5 +3,5 @@
 (library
  (name multimodal)
  (public_name masc_mcp.multimodal)
- (libraries shared_types yojson)
+ (libraries shared_types unix yojson)
  (preprocess (pps ppx_tla)))

@@ -68,6 +68,8 @@ let build_docker_argv ~image ~container_name ~host_root ~croot
       "-i";
       "--user";
       Printf.sprintf "%d:%d" uid gid;
+      "--env";
+      "HOME=/tmp";
     ]
   @ Keeper_sandbox_runtime.docker_nofile_args ()
   @ Env_config_keeper.KeeperSandbox.read_only_rootfs_args ()

@@ -132,6 +132,8 @@ let start_managed_container
                     @ [
                       "--user";
                       Printf.sprintf "%d:%d" uid gid;
+                      "--env";
+                      "HOME=/tmp";
                     ]
                     @ Env_config_keeper.KeeperSandbox.read_only_rootfs_args ()
                     @ [

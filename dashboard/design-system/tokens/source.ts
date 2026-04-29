@@ -870,6 +870,61 @@ export const semantic: ReadonlyArray<TokenBase> = (() => {
   out.push(t("terminal-selection-bg", "rgb(var(--brass-glow) / .15)", "role", "color",
     "terminal text selection bg (brass-tinted — same family as state-active-bg)"));
 
+  // ── Menu / Tooltip / Toast chrome role tokens ───────────────────────
+  // Stage 1.4 follow-up to RFC 0005 (Menu), RFC 0006 (Tooltip), RFC 0007
+  // (Toast). All values resolve through the brass canon (bg-N, fg-N,
+  // line-N, brass-glow, status semantic 4-slot soft tints) so SKILL.md's
+  // brass-only "active state" rule applies — only --menuitem-active-bg
+  // pulls --brass-glow tint. Toast severity bgs use the existing
+  // --(ok|warn|err|info)-soft semantic tokens for cross-surface canon
+  // consistency. No new dependency on variables.css (SSOT-2).
+
+  // Menu chrome — Menu / ContextMenu / SubMenu surfaces
+  out.push(t("menu-bg",              "var(--bg-3)",                  "role", "color",
+    "menu surface bg (elevated card; sits above editor / chrome)"));
+  out.push(t("menu-border",          "var(--line-2)",                "role", "color",
+    "menu border (emphasized — overlay surface needs definition)"));
+  out.push(t("menu-shadow",          "var(--shadow-2)",              "role", "shadow",
+    "menu drop shadow (elev-4 — overlay layer above chrome)"));
+  out.push(t("menu-separator",       "var(--line-1)",                "role", "color",
+    "menu role=separator divider (subtle hairline between groups)"));
+  out.push(t("menuitem-fg",          "var(--fg-1)",                  "role", "color",
+    "menuitem label fg (primary — high-affordance choice)"));
+  out.push(t("menuitem-hover-bg",    "var(--bg-4)",                  "role", "color",
+    "menuitem hover bg (rover-position visual)"));
+  out.push(t("menuitem-active-bg",   "rgb(var(--brass-glow) / .08)", "role", "color",
+    "menuitem [data-active] / [data-pressed] bg (brass — selection mark)"));
+  out.push(t("menuitem-disabled-fg", "var(--fg-4)",                  "role", "color",
+    "menuitem [aria-disabled] fg"));
+  out.push(t("menu-shortcut-fg",     "var(--fg-3)",                  "role", "color",
+    "aria-keyshortcuts trailing label fg (muted mono — secondary signal)"));
+
+  // Tooltip chrome — transient hover hint surface
+  out.push(t("tooltip-bg",     "var(--bg-3)",     "role", "color",
+    "tooltip surface bg (matches menu elevation)"));
+  out.push(t("tooltip-fg",     "var(--fg-1)",     "role", "color",
+    "tooltip label fg"));
+  out.push(t("tooltip-border", "var(--line-2)",   "role", "color",
+    "tooltip border"));
+  out.push(t("tooltip-shadow", "var(--shadow-1)", "role", "shadow",
+    "tooltip drop shadow (elev-2 — lighter than menu, transient)"));
+
+  // Toast chrome — severity-keyed notification surface
+  out.push(t("toast-bg-info",    "var(--info-soft)",  "role", "color",
+    "toast surface bg for severity=info (info-soft semantic)"));
+  out.push(t("toast-bg-success", "var(--ok-soft)",    "role", "color",
+    "toast surface bg for severity=success (ok-soft semantic)"));
+  out.push(t("toast-bg-warning", "var(--warn-soft)",  "role", "color",
+    "toast surface bg for severity=warning (warn-soft semantic)"));
+  out.push(t("toast-bg-error",   "var(--err-soft)",   "role", "color",
+    "toast surface bg for severity=error (err-soft semantic)"));
+  out.push(t("toast-fg",         "var(--fg-1)",       "role", "color",
+    "toast text fg (primary — same across severities; tint in bg)"));
+  out.push(t("toast-border",     "var(--line-2)",     "role", "color",
+    "toast border (severity-neutral; tint comes from -bg)"));
+  out.push(t("toast-shadow",     "var(--shadow-3)",   "role", "shadow",
+    "toast drop shadow (elev-5 — floats above modals at z-toast)"));
+
   // ── Motion role tokens — bundle duration + easing ──────────────────
   out.push(t("motion-enter",  "var(--t-med) var(--ease-out)", "role", "duration"));
   out.push(t("motion-exit",   "var(--t-fast) var(--ease-in)", "role", "duration"));

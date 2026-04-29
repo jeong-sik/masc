@@ -33,6 +33,8 @@ import './styles/tools.css'
 import { render } from 'preact'
 import { html } from 'htm/preact'
 import { App } from './app'
+import { performanceMonitor } from './lib/performance-monitor'
+import { startWebVitalsCapture } from './utils/performance-metrics'
 
 // Theme resolution precedence: ?theme= URL param (session scoped) >
 // localStorage.dashboardTheme (persistent) > default (unset).
@@ -64,3 +66,11 @@ const root = document.getElementById('app')
 if (root) {
   render(html`<${App} />`, root)
 }
+
+// Begin collecting long-animation-frame telemetry.
+// No-op on browsers that do not support LoAF.
+performanceMonitor.start()
+
+// Begin capturing synthetic web-vitals (TTFB, FCP, LCP, CLS, FID).
+// Snapshot available on window.__MASC_WEB_VITALS__ for test/playwright inspection.
+startWebVitalsCapture()

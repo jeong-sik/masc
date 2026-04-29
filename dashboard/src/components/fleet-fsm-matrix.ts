@@ -839,7 +839,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
   return html`
     <section
       data-testid="fleet-fsm-matrix"
-      class="rounded border border-[var(--white-10)] bg-[var(--white-5)]"
+      class="contain-content rounded border border-[var(--white-10)] bg-[var(--white-5)]"
       aria-label="Fleet FSM 통합 상태"
     >
       <header class="flex flex-wrap items-baseline gap-3 border-b border-[var(--white-10)] p-3">

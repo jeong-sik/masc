@@ -89,4 +89,43 @@ describe('VirtualList a11y', () => {
     )
     expect(await axe(container)).toHaveNoViolations()
   })
+
+  describe('dynamic height mode', () => {
+    const dynamicRenderItem = (item: string, _i: number) => html`
+      <div role="listitem" style=${{ height: `${item.length * 10}px` }}>${item}</div>
+    `
+
+    it('below-threshold dynamic mode passes axe', async () => {
+      const items = Array.from({ length: 10 }, (_, i) => `item-${i}`)
+      render(
+        html`<div role="list">
+          <${VirtualList}
+            items=${items}
+            estimatedItemHeight=${24}
+            renderItem=${dynamicRenderItem}
+            getKey=${(x: string) => x}
+          />
+        </div>`,
+        container,
+      )
+      expect(await axe(container)).toHaveNoViolations()
+    })
+
+    it('above-threshold dynamic mode passes axe', async () => {
+      const items = Array.from({ length: 200 }, (_, i) => `entry-${i}`)
+      render(
+        html`<div role="list">
+          <${VirtualList}
+            items=${items}
+            estimatedItemHeight=${20}
+            overscan=${3}
+            renderItem=${dynamicRenderItem}
+            getKey=${(x: string) => x}
+          />
+        </div>`,
+        container,
+      )
+      expect(await axe(container)).toHaveNoViolations()
+    })
+  })
 })

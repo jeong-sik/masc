@@ -513,7 +513,7 @@ export function FsmHub(props: FsmHubProps = {}) {
 
   const rootGap = density === 'compact' ? 'gap-1.5' : 'gap-3'
   return html`
-    <div class=${`flex flex-col ${rootGap}`} data-density=${density}>
+    <div class=${`contain-content flex flex-col ${rootGap}`} data-density=${density}>
       ${/* ── Zone 1: Status Bar ── */ ''}
       <${StatusBar}
         snapshot=${snapshot}

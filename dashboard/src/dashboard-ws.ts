@@ -1,6 +1,11 @@
 import type { RouteState, SSEEvent } from './types'
 import { parseSSEMessage } from './schemas/sse'
 import { hydrateDashboardSlice, routeServerPushEvent } from './sse-store'
+import { batch } from '@preact/signals'
+import { parseWebSocketSseFrames as parseWebSocketSseFramesImpl } from './dashboard-ws-parse'
+
+// Re-export for test consumers that assert on frame parsing.
+export const parseWebSocketSseFrames = parseWebSocketSseFramesImpl
 import {
   dashboardWsConnected,
   dashboardWsLastError,
@@ -39,6 +44,98 @@ let desiredRouteState: DashboardRouteState | null = null
 let shouldReconnect = true
 let connectGeneration = 0
 const pending = new Map<number, PendingRpc>()
+
+// Phase 2 (PR-4.6): rAF accumulator for inbound WS messages.
+// Instead of processing every WS frame immediately (which can trigger
+// multiple signal writes / renders), we buffer them and flush on the
+// next animation frame.  This bounds update frequency to 60 Hz and
+// lets batch() coalesce all signal mutations in a single frame.
+const pendingInbound: Array<string | unknown> = []
+let flushHandle = 0
+
+// Phase 2 (PR-4.5): Offload JSON/SSE parsing to a Web Worker so the
+// main thread never blocks on large payloads.
+let parseWorker: Worker | null = null
+let workerJobId = 0
+const workerJobs = new Map<number, (payloads: unknown[]) => void>()
+
+function initParseWorker(): Worker | null {
+  if (parseWorker) return parseWorker
+  if (typeof Worker === 'undefined') return null
+  try {
+    parseWorker = new Worker(
+      new URL('./workers/dashboard-ws.worker.ts', import.meta.url),
+    )
+    parseWorker.onmessage = (event) => {
+      const { id, payloads } = event.data as {
+        id: number
+        payloads: unknown[]
+      }
+      const cb = workerJobs.get(id)
+      if (cb) {
+        cb(payloads)
+        workerJobs.delete(id)
+      }
+    }
+    return parseWorker
+  } catch {
+    return null
+  }
+}
+
+function scheduleFlush(): void {
+  if (flushHandle) return
+  if (typeof requestAnimationFrame === 'undefined') {
+    // Fallback for non-browser environments (e.g. vitest with happy-dom).
+    flushHandle = setTimeout(() => {
+      flushHandle = 0
+      flushPending()
+    }, 0) as unknown as number
+    return
+  }
+  flushHandle = requestAnimationFrame(() => {
+    flushHandle = 0
+    flushPending()
+  })
+}
+
+function flushPending(): void {
+  const batchData = pendingInbound.slice()
+  pendingInbound.length = 0
+  for (const data of batchData) {
+    if (typeof data === 'string') {
+      processInboundMessage(data)
+    } else {
+      processInboundParsedMessage(data)
+    }
+  }
+}
+
+function clearPendingInbound(): void {
+  pendingInbound.length = 0
+  if (flushHandle) {
+    if (typeof cancelAnimationFrame !== 'undefined') {
+      cancelAnimationFrame(flushHandle)
+    } else {
+      clearTimeout(flushHandle)
+    }
+    flushHandle = 0
+  }
+}
+
+/** Test-only helper: synchronously flush any pending inbound messages.
+ *  Production code should never call this — the rAF loop owns timing. */
+export function flushPendingInbound(): void {
+  if (flushHandle) {
+    if (typeof cancelAnimationFrame !== 'undefined') {
+      cancelAnimationFrame(flushHandle)
+    } else {
+      clearTimeout(flushHandle)
+    }
+    flushHandle = 0
+  }
+  flushPending()
+}
 
 function rememberRouteState(routeState: DashboardRouteState): DashboardRouteState {
   desiredRouteState = {
@@ -123,6 +220,7 @@ function closeSocket(): void {
     socket.close()
     socket = null
   }
+  clearPendingInbound()
   rejectPendingRpcs(new Error('dashboard websocket closed'))
 }
 
@@ -194,15 +292,17 @@ function handleRpcResponse(raw: JsonObject): boolean {
 }
 
 function applySnapshot(raw: unknown): void {
-  const snapshot = raw as { slices?: unknown; seq?: unknown }
-  if (typeof snapshot.seq === 'number') {
-    dashboardWsLastSeq.value = snapshot.seq
-  }
-  const slices = snapshot.slices as Record<string, unknown> | undefined
-  if (!slices || typeof slices !== 'object') return
-  for (const [slice, payload] of Object.entries(slices)) {
-    hydrateRouteDashboardSlice(slice, payload)
-  }
+  batch(() => {
+    const snapshot = raw as { slices?: unknown; seq?: unknown }
+    if (typeof snapshot.seq === 'number') {
+      dashboardWsLastSeq.value = snapshot.seq
+    }
+    const slices = snapshot.slices as Record<string, unknown> | undefined
+    if (!slices || typeof slices !== 'object') return
+    for (const [slice, payload] of Object.entries(slices)) {
+      hydrateRouteDashboardSlice(slice, payload)
+    }
+  })
 }
 
 function applySubscribeResult(raw: unknown): void {
@@ -211,26 +311,28 @@ function applySubscribeResult(raw: unknown): void {
 }
 
 function applyDelta(raw: unknown): void {
-  const delta = raw as {
-    seq?: unknown
-    slice?: unknown
-    event_type?: unknown
-    payload?: unknown
-  }
-  if (typeof delta.seq === 'number') {
-    dashboardWsLastSeq.value = delta.seq
-    sendNotification('dashboard/ack', {
-      seq: delta.seq,
-      bufferedAmount: socket?.bufferedAmount ?? 0,
-    })
-  }
-  noteDashboardWsEvent()
-  if (typeof delta.slice !== 'string') return
-  hydrateRouteDashboardSlice(
-    delta.slice,
-    delta.payload,
-    typeof delta.event_type === 'string' ? delta.event_type : undefined,
-  )
+  batch(() => {
+    const delta = raw as {
+      seq?: unknown
+      slice?: unknown
+      event_type?: unknown
+      payload?: unknown
+    }
+    if (typeof delta.seq === 'number') {
+      dashboardWsLastSeq.value = delta.seq
+      sendNotification('dashboard/ack', {
+        seq: delta.seq,
+        bufferedAmount: socket?.bufferedAmount ?? 0,
+      })
+    }
+    noteDashboardWsEvent()
+    if (typeof delta.slice !== 'string') return
+    hydrateRouteDashboardSlice(
+      delta.slice,
+      delta.payload,
+      typeof delta.event_type === 'string' ? delta.event_type : undefined,
+    )
+  })
 }
 
 function activeRouteWantsDashboardSlice(slice: string): boolean {
@@ -262,66 +364,69 @@ function unwrapSseCandidate(raw: JsonObject): unknown {
 }
 
 function handleRawPush(raw: unknown): void {
-  if (!raw || typeof raw !== 'object') return
-  const candidate = unwrapSseCandidate(raw as JsonObject)
-  const parsed = parseSSEMessage(candidate)
-  if (!parsed) return
-  routeServerPushEvent(parsed as unknown as SSEEvent)
+  batch(() => {
+    if (!raw || typeof raw !== 'object') return
+    const candidate = unwrapSseCandidate(raw as JsonObject)
+    const parsed = parseSSEMessage(candidate)
+    if (!parsed) return
+    routeServerPushEvent(parsed as unknown as SSEEvent)
+  })
 }
 
-export function parseWebSocketSseFrames(data: string): unknown[] {
-  const payloads: unknown[] = []
-  const frames = data.split(/\r?\n\r?\n/)
-  for (const frame of frames) {
-    const dataLines: string[] = []
-    for (const line of frame.split(/\r?\n/)) {
-      if (!line.startsWith('data:')) continue
-      const value = line.slice('data:'.length)
-      dataLines.push(value.startsWith(' ') ? value.slice(1) : value)
-    }
-    if (dataLines.length === 0) continue
-    const body = dataLines.join('\n').trim()
-    if (!body || body === '[DONE]') continue
+function processInboundParsedMessage(raw: unknown): void {
+  batch(() => {
+    if (!raw || typeof raw !== 'object') return
+    const record = raw as JsonObject
+    if (handleRpcResponse(record)) return
+    if (handleNotification(record)) return
+    handleRawPush(record)
+  })
+}
+
+function processInboundMessage(data: string): void {
+  batch(() => {
+    let raw: unknown
     try {
-      payloads.push(JSON.parse(body))
-    } catch (err) {
-      // P2 silent-failure fix: dashboard pushes are JSON by contract,
-      // so a non-JSON SSE frame here is either a server-side encoding
-      // bug or network corruption.  Previously dropped silently —
-      // operators investigating "stale dashboard" had no signal that
-      // frames were being parsed-but-malformed.  Logging includes a
-      // body sample so the malformed shape is recoverable from
-      // DevTools.  body length is capped to keep the log line bounded.
-      const sample = body.length > 200 ? `${body.slice(0, 200)}…(${body.length} bytes total)` : body
-      console.warn('[dashboard-ws] non-JSON SSE frame dropped', { sample, err })
+      raw = JSON.parse(data)
+    } catch {
+      for (const payload of parseWebSocketSseFramesImpl(data)) {
+        handleRawPush(payload)
+      }
+      return
     }
-  }
-  return payloads
+    if (!raw || typeof raw !== 'object') return
+    const record = raw as JsonObject
+    if (handleRpcResponse(record)) return
+    if (handleNotification(record)) return
+    handleRawPush(record)
+  })
 }
 
 function handleMessage(data: unknown): void {
   if (typeof data !== 'string') return
-  let raw: unknown
-  try {
-    raw = JSON.parse(data)
-  } catch {
-    for (const payload of parseWebSocketSseFrames(data)) {
-      handleRawPush(payload)
-    }
+  const worker = initParseWorker()
+  if (worker) {
+    const id = ++workerJobId
+    workerJobs.set(id, (payloads) => {
+      for (const p of payloads) {
+        pendingInbound.push(p)
+      }
+      scheduleFlush()
+    })
+    worker.postMessage({ id, data })
     return
   }
-  if (!raw || typeof raw !== 'object') return
-  const record = raw as JsonObject
-  if (handleRpcResponse(record)) return
-  if (handleNotification(record)) return
-  handleRawPush(record)
+  pendingInbound.push(data)
+  scheduleFlush()
 }
 
 function reconnectAfterCurrentSocketFailure(ws: WebSocket, err: unknown): void {
   if (socket !== ws) return
-  dashboardWsConnected.value = false
-  dashboardWsReady.value = false
-  dashboardWsLastError.value = err instanceof Error ? err.message : String(err)
+  batch(() => {
+    dashboardWsConnected.value = false
+    dashboardWsReady.value = false
+    dashboardWsLastError.value = err instanceof Error ? err.message : String(err)
+  })
   lastSubscribeKey = ''
   closeSocket()
   scheduleReconnect()
@@ -362,7 +467,9 @@ export async function connectDashboardWS(routeState?: DashboardRouteState): Prom
     discovery = await discoverWsUrl()
   } catch (err) {
     if (generation === connectGeneration && shouldReconnect) {
-      dashboardWsLastError.value = err instanceof Error ? err.message : String(err)
+      batch(() => {
+        dashboardWsLastError.value = err instanceof Error ? err.message : String(err)
+      })
       scheduleReconnect()
     }
     return
@@ -370,7 +477,9 @@ export async function connectDashboardWS(routeState?: DashboardRouteState): Prom
   const wsUrl = discovery.wsUrl
   if (!wsUrl) {
     if (generation === connectGeneration && shouldReconnect && discovery.retry) {
-      dashboardWsLastError.value = 'dashboard websocket unavailable'
+      batch(() => {
+        dashboardWsLastError.value = 'dashboard websocket unavailable'
+      })
       scheduleReconnect()
     }
     return
@@ -392,8 +501,10 @@ export async function connectDashboardWS(routeState?: DashboardRouteState): Prom
     })
       .then(() => {
         if (socket !== ws) return
-        dashboardWsReady.value = true
-        dashboardWsLastError.value = null
+        batch(() => {
+          dashboardWsReady.value = true
+          dashboardWsLastError.value = null
+        })
         if (desiredRouteState) {
           void subscribeDashboardRoute(desiredRouteState)
             .catch(err => reconnectAfterCurrentSocketFailure(ws, err))
@@ -407,12 +518,16 @@ export async function connectDashboardWS(routeState?: DashboardRouteState): Prom
   }
   ws.onerror = () => {
     if (socket !== ws) return
-    dashboardWsLastError.value = 'dashboard websocket error'
+    batch(() => {
+      dashboardWsLastError.value = 'dashboard websocket error'
+    })
   }
   ws.onclose = () => {
     if (socket !== ws) return
-    dashboardWsConnected.value = false
-    dashboardWsReady.value = false
+    batch(() => {
+      dashboardWsConnected.value = false
+      dashboardWsReady.value = false
+    })
     lastSubscribeKey = ''
     socket = null
     rejectPendingRpcs(new Error('dashboard websocket closed'))
@@ -424,8 +539,10 @@ export function disconnectDashboardWS(): void {
   shouldReconnect = false
   connectGeneration += 1
   clearReconnectTimer()
-  dashboardWsConnected.value = false
-  dashboardWsReady.value = false
+  batch(() => {
+    dashboardWsConnected.value = false
+    dashboardWsReady.value = false
+  })
   lastSubscribeKey = ''
   desiredRouteState = null
   closeSocket()

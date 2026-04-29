@@ -1647,7 +1647,7 @@ export function ConnectorStatusPanel() {
     : findKnownConnector(allConnectors, focusedConnectorId) ?? placeholderConnector(focusedConnectorId)
 
   return html`
-    <div>
+    <div class="contain-content">
       <div class="mb-3 flex items-start justify-between gap-3">
         <div>
           <h3 class="text-sm font-semibold text-[var(--color-fg-primary)]">${filterId ? CONNECTOR_DISPLAY_NAMES[filterId as KnownConnectorId] ?? '커넥터' : '커넥터'}</h3>

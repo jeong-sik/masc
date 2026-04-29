@@ -1,6 +1,6 @@
 import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'
-import { useEffect, useRef } from 'preact/hooks'
+import { useEffect, useRef, useState } from 'preact/hooks'
 import { useFocusScope } from '../../../design-system/headless-preact/use-focus-scope'
 
 interface DialogOverlayProps {
@@ -13,6 +13,19 @@ interface DialogOverlayProps {
   children: ComponentChildren
 }
 
+// Animation tokens (#11747) wired through Tailwind arbitrary values.
+// `data-state` toggles closed→open on the first animation frame after
+// mount so the transition triggers on every open (otherwise dialogs
+// mount as `open` and the transition fires zero times).
+const OVERLAY_BASE =
+  'transition-opacity duration-[var(--enter-duration)] ease-[var(--enter-easing)] ' +
+  'data-[state=closed]:opacity-0 data-[state=open]:opacity-100'
+
+const PANEL_BASE =
+  'transition-[opacity,transform] duration-[var(--enter-duration)] ease-[var(--enter-easing)] ' +
+  'data-[state=closed]:opacity-0 data-[state=closed]:scale-95 ' +
+  'data-[state=open]:opacity-100 data-[state=open]:scale-100'
+
 export function DialogOverlay({
   labelledBy,
   describedBy,
@@ -23,6 +36,14 @@ export function DialogOverlay({
   children,
 }: DialogOverlayProps) {
   const panelRef = useRef<HTMLDivElement>(null)
+
+  // closed→open transition on mount. Without this dance the dialog
+  // mounts at `open` and the consumer's transition has no `from` state.
+  const [state, setState] = useState<'closed' | 'open'>('closed')
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setState('open'))
+    return () => cancelAnimationFrame(id)
+  }, [])
 
   // Focus trap + restore: delegated to headless-core via useFocusScope.
   // Replaces the inline FOCUSABLE_SELECTOR + focusableElements + trapFocus
@@ -56,9 +77,13 @@ export function DialogOverlay({
     }
   }, [onClose])
 
+  const overlayCls = `${OVERLAY_BASE}${overlayClass ? ` ${overlayClass}` : ''}`
+  const panelCls = `${PANEL_BASE}${panelClass ? ` ${panelClass}` : ''}`
+
   return html`
     <div
-      class=${overlayClass}
+      class=${overlayCls}
+      data-state=${state}
       onClick=${(event: Event) => {
         if (event.target === event.currentTarget) {
           onClose()
@@ -67,13 +92,13 @@ export function DialogOverlay({
     >
       <div
         ref=${panelRef}
-        class=${panelClass}
+        class=${panelCls}
         role="dialog"
         aria-modal="true"
         aria-labelledby=${labelledBy}
         aria-describedby=${describedBy}
         tabIndex=${-1}
-        data-state="open"
+        data-state=${state}
       >
         ${children}
       </div>

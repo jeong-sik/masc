@@ -107,12 +107,6 @@ let live_override_details (meta : keeper_meta)
        meta.instructions
   |> nonempty_string_list_override "coordination.mention_targets"
        defaults.mention_targets meta.mention_targets
-  |> maybe_string_option_override "tools.tool_preset" defaults.tool_preset
-       (Keeper_types.tool_access_preset meta.tool_access
-        |> Option.map Keeper_types.tool_preset_to_string)
-  |> maybe_string_list_override "tools.tool_also_allow"
-       defaults.tool_also_allow
-       (Keeper_types.tool_access_also_allowlist meta.tool_access)
   |> maybe_string_list_override "tools.tool_denylist" defaults.tool_denylist
        meta.tool_denylist
   |> (fun acc ->

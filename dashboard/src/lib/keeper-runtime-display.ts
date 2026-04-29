@@ -209,10 +209,10 @@ function socialModelFallbackHint(keeper: Keeper): string | null {
   if (keeper.social_model_recognized !== false) return null
   const configured = keeper.configured_social_model?.trim()
   const fallback = keeper.social_model_fallback?.trim()
-  if (configured && fallback) return `소셜 모델 ${configured} 미인식 · ${fallback}로 대체 중`
-  if (configured) return `소셜 모델 ${configured} 미인식`
-  if (fallback) return `소셜 모델 fallback · ${fallback}`
-  return '미인식 소셜 모델 설정'
+  if (configured && fallback) return `대화 모델 ${configured} 미인식 · ${fallback}로 대체 중`
+  if (configured) return `대화 모델 ${configured} 미인식`
+  if (fallback) return `대화 모델 fallback · ${fallback}`
+  return '미인식 대화 모델 설정'
 }
 
 function continueGateHint(keeper: Keeper): string {

@@ -69,6 +69,7 @@ let write_keeper_toml_exn ?autoboot_enabled config ~name =
     (Printf.sprintf
        "[keeper]\n\
         goal = \"test keeper\"\n\
+        sandbox_profile = \"local\"\n\
         %s\
         proactive_enabled = false\n"
        autoboot_line)
@@ -89,6 +90,7 @@ let write_keeper_persona_toml_exn ?autoboot_enabled config ~name ~persona_name =
        "[keeper]\n\
         persona_name = %S\n\
         goal = \"test persona keeper\"\n\
+        sandbox_profile = \"local\"\n\
         %s\
         proactive_enabled = false\n"
        persona_name autoboot_line)
@@ -108,10 +110,9 @@ let write_persona_profile_exn config ~name =
          ("role", `String "test persona");
          ( "keeper",
            `Assoc
-             [
-               ("goal", `String "test persona keeper");
-               ("tool_preset", `String "research");
-             ] );
+	             [
+	               ("goal", `String "test persona keeper");
+	             ] );
        ])
 
 let write_corrupt_keeper_meta_exn config ~name =
@@ -130,6 +131,7 @@ let write_keeper_meta_exn ?(autoboot_enabled = true)
         ("social_model", `String social_model);
         ("last_social_transition_reason", `String last_social_transition_reason);
         ("autoboot_enabled", `Bool autoboot_enabled);
+        ("active_goal_ids", `List [ `String ("goal-" ^ name) ]);
       ]
   in
   let meta =

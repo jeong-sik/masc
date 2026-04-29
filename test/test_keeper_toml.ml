@@ -860,7 +860,7 @@ cascade_name = "oas-coding_first"
          (Some Masc_mcp.Keeper_config.default_cascade_name)
          d.cascade_name)
 
-let test_persona_resolver_defaults_to_research_tool_preset () =
+let test_persona_resolver_defaults_to_research_tool_access () =
   with_personas_dir @@ fun personas_dir ->
   let persona_dir = Filename.concat personas_dir "probe" in
   mkdir_p persona_dir;
@@ -880,9 +880,15 @@ let test_persona_resolver_defaults_to_research_tool_preset () =
   with
   | Error e -> fail ("resolver failed: " ^ e)
   | Ok (_, resolved) ->
-      let tool_preset = Yojson.Safe.Util.member "tool_preset" resolved in
-      check string "persona default tool_preset" "research"
-        (Yojson.Safe.Util.to_string tool_preset)
+      let tool_access = Yojson.Safe.Util.member "tool_access" resolved in
+      check string "persona default tool_access kind" "preset"
+        (Yojson.Safe.Util.member "kind" tool_access |> Yojson.Safe.Util.to_string);
+      check string "persona default tool_access preset" "research"
+        (Yojson.Safe.Util.member "preset" tool_access |> Yojson.Safe.Util.to_string);
+      check bool "legacy tool_preset omitted" false
+        (match Yojson.Safe.Util.member "tool_preset" resolved with
+         | `String _ -> true
+         | _ -> false)
 
 let test_persona_resolver_ignores_non_public_social_model_arg () =
   with_personas_dir @@ fun personas_dir ->
@@ -1007,8 +1013,13 @@ let test_persona_resolver_renders_durable_keeper_toml () =
         ("mention_targets", `List [ `String "probe"; `String "@probe" ]);
         ("proactive_enabled", `Bool true);
         ("allowed_paths", `List [ `String "/tmp/probe" ]);
-        ("tool_preset", `String "research");
-        ("tool_also_allow", `List [ `String "masc_status" ]);
+        ( "tool_access",
+          `Assoc
+            [
+              ("kind", `String "preset");
+              ("preset", `String "research");
+              ("also_allow", `List [ `String "masc_status" ]);
+            ] );
         ("tool_denylist", `List [ `String "masc_keeper_reset" ]);
       ]
   in
@@ -1082,7 +1093,7 @@ let test_persona_authoring_schema_explains_effects () =
   let rendered = Yojson.Safe.to_string json in
   check bool "documents keeper.goal" true
     (contains_substring rendered "keeper.goal");
-  check bool "documents tool presets" true
+  check bool "omits legacy tool_preset" false
     (contains_substring rendered "tool_preset");
   check bool "documents archetype axes" true
     (contains_substring rendered "archetype_axes");
@@ -1139,12 +1150,11 @@ let test_persona_authoring_allowed_keeper_fields_follow_catalog () =
   check (list string) "allowed keeper fields follow schema catalog" keeper_fields
     (List.sort String.compare KPA.allowed_keeper_fields)
 
-let test_persona_authoring_axes_validate_and_default_preset () =
+let test_persona_authoring_axes_validate () =
   let args =
     `Assoc
       [
         ("alignment", `String "Chaotic");
-        ("operating_style", `String "coding");
         ("risk_posture", `String "high-autonomy");
       ]
   in
@@ -1154,23 +1164,11 @@ let test_persona_authoring_axes_validate_and_default_preset () =
       check string "alignment normalized" "chaotic"
         (Yojson.Safe.Util.member "alignment" (KPA.archetype_axes_to_json axes)
          |> Yojson.Safe.Util.to_string);
-      check string "operating style default preset" "coding"
-        (match KPA.generation_tool_preset (`Assoc []) axes with
-         | Ok value -> value
-         | Error e -> fail e);
-      check string "explicit preset overrides style" "research"
-        (match
-           KPA.generation_tool_preset
-             (`Assoc [ ("tool_preset", `String "research") ])
-             axes
-         with
-         | Ok value -> value
-         | Error e -> fail e);
       let selected_effects = KPA.selected_archetype_effects_to_json axes in
       let rendered_effects = Yojson.Safe.to_string selected_effects in
-      check bool "selected effects include axes" true
-        (contains_substring rendered_effects "operating_style");
-      check bool "selected effects expose default preset" true
+      check bool "selected effects include alignment" true
+        (contains_substring rendered_effects "alignment");
+      check bool "selected effects omit default preset" false
         (contains_substring rendered_effects "default_tool_preset");
       check bool "selected effects expose generated fields" true
         (contains_substring rendered_effects "keeper.instructions")
@@ -1204,9 +1202,10 @@ let test_persona_authoring_normalizes_keeper_defaults () =
         (Yojson.Safe.Util.member "mention_targets" keeper
          |> Yojson.Safe.Util.to_list
          |> List.map Yojson.Safe.Util.to_string);
-      check string "tool preset defaults to research" "research"
-        (Yojson.Safe.Util.member "tool_preset" keeper
-         |> Yojson.Safe.Util.to_string)
+      check bool "legacy tool_preset omitted" false
+        (match Yojson.Safe.Util.member "tool_preset" keeper with
+         | `String _ -> true
+         | _ -> false)
 
 let test_persona_authoring_rejects_unknown_keeper_fields () =
   let profile =
@@ -1258,13 +1257,16 @@ let test_detect_unknown_keys_empty_when_all_canonical () =
 [keeper]
 goal = "canonical"
 mention_targets = ["a", "b"]
-tool_preset = "coding"
-tool_also_allow = ["x"]
 autoboot_enabled = false
 cascade_name = "big_three"
 github_identity = "anyang-keepers"
 git_identity_mode = "keeper_alias"
 active_goal_ids = ["goal-runtime"]
+
+[keeper.tool_access]
+kind = "preset"
+preset = "coding"
+also_allow = ["x"]
 |} in
   match TL.parse_toml input with
   | Error e -> fail e
@@ -1287,7 +1289,7 @@ mention_targets = ["a"]
     check (list string) "surfaces dead config"
       ["keeper.legacy_scope"; "keeper.scope_kind"] unknown
 
-let test_detect_unknown_keys_flags_unparsed_tool_access_table () =
+let test_detect_unknown_keys_accepts_tool_access_table () =
   let input = {|
 [keeper]
 goal = "g"
@@ -1300,8 +1302,7 @@ preset = "coding"
   | Error e -> fail e
   | Ok doc ->
     let unknown = KTP.detect_unknown_keeper_toml_keys doc in
-    check (list string) "tool_access TOML table is not silently accepted"
-      ["keeper.tool_access.kind"; "keeper.tool_access.preset"] unknown
+    check (list string) "tool_access TOML table is canonical" [] unknown
 
 let test_oas_env_parses_allowed_keys () =
   let input = {|
@@ -1452,7 +1453,7 @@ typo_field = 42
     Sys.remove tmp;
     check (slist string String.compare)
       "unknown keys captured on profile defaults"
-      [ "legacy_scope"; "typo_field" ]
+      [ "keeper.legacy_scope"; "keeper.typo_field" ]
       defaults.KTP.unknown_toml_keys
 
 (* ================================================================ *)
@@ -1550,8 +1551,8 @@ let () =
             test_detect_unknown_keys_empty_when_all_canonical;
           test_case "flags legacy dead config" `Quick
             test_detect_unknown_keys_flags_legacy_dead_config;
-          test_case "flags unparsed tool_access table" `Quick
-            test_detect_unknown_keys_flags_unparsed_tool_access_table;
+          test_case "accepts tool_access table" `Quick
+            test_detect_unknown_keys_accepts_tool_access_table;
           test_case "also_allow alias flagged" `Quick
             test_detect_unknown_keys_flags_also_allow_alias;
           test_case "oas_env keys not flagged as unknown" `Quick
@@ -1586,8 +1587,8 @@ let () =
           test_case "with files" `Quick test_discover_with_files;
           test_case "nonexistent dir" `Quick test_discover_nonexistent_dir;
           test_case "skips bad files" `Quick test_discover_skips_bad_files;
-          test_case "persona profile canonicalizes soul_profile" `Quick
-            test_persona_resolver_defaults_to_research_tool_preset;
+          test_case "persona resolver defaults to research tool_access" `Quick
+            test_persona_resolver_defaults_to_research_tool_access;
           test_case "persona resolver ignores non-public social_model arg" `Quick
             test_persona_resolver_ignores_non_public_social_model_arg;
           test_case "persona resolver preserves autoboot_enabled arg" `Quick
@@ -1604,8 +1605,8 @@ let () =
             test_persona_authoring_social_model_choices_follow_variant_ssot;
           test_case "persona authoring allowed keeper fields follow catalog" `Quick
             test_persona_authoring_allowed_keeper_fields_follow_catalog;
-          test_case "persona authoring axes validate and default preset" `Quick
-            test_persona_authoring_axes_validate_and_default_preset;
+          test_case "persona authoring axes validate" `Quick
+            test_persona_authoring_axes_validate;
           test_case "persona authoring axes reject unknown choices" `Quick
             test_persona_authoring_axes_reject_unknown_choices;
           test_case "persona authoring normalizes defaults" `Quick

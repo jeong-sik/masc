@@ -3,7 +3,6 @@ import type {
   DashboardMissionKeeperBrief,
   Keeper,
   KeeperConfig,
-  KeeperConfigTools,
 } from '../types'
 
 export type KeeperConfigLoadStatus = 'idle' | 'loading' | 'loaded' | 'error' | 'other'
@@ -19,11 +18,6 @@ export function resolveKeeperMissionBrief(
 
 interface KeeperToolPolicySnapshot {
   source: 'keeper_config' | 'loading' | 'error' | 'none'
-  mode: 'preset' | 'custom' | string
-  preset: KeeperConfigTools['tool_preset']
-  alsoAllow: string[]
-  customAllowlist: string[]
-  denylist: string[]
   resolvedAllowlist: string[]
 }
 
@@ -35,11 +29,6 @@ export function resolveKeeperToolPolicy(
   if (tools) {
     return {
       source: 'keeper_config',
-      mode: tools.tool_policy_mode,
-      preset: tools.tool_preset ?? null,
-      alsoAllow: tools.tool_also_allow ?? [],
-      customAllowlist: tools.tool_custom_allowlist ?? [],
-      denylist: tools.tool_denylist ?? [],
       resolvedAllowlist: tools.resolved_allowlist ?? [],
     }
   }
@@ -47,11 +36,6 @@ export function resolveKeeperToolPolicy(
   if (loadStatus === 'idle' || loadStatus === 'loading') {
     return {
       source: 'loading',
-      mode: 'preset',
-      preset: null,
-      alsoAllow: [],
-      customAllowlist: [],
-      denylist: [],
       resolvedAllowlist: [],
     }
   }
@@ -59,22 +43,12 @@ export function resolveKeeperToolPolicy(
   if (loadStatus === 'error') {
     return {
       source: 'error',
-      mode: 'preset',
-      preset: null,
-      alsoAllow: [],
-      customAllowlist: [],
-      denylist: [],
       resolvedAllowlist: [],
     }
   }
 
   return {
     source: 'none',
-    mode: 'preset',
-    preset: null,
-    alsoAllow: [],
-    customAllowlist: [],
-    denylist: [],
     resolvedAllowlist: [],
   }
 }

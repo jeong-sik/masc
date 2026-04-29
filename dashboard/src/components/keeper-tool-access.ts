@@ -1,8 +1,8 @@
 // MASC Dashboard — K1 · ToolAccess summary variant (read-only)
 //
 // Phase 2 spec (`design-system/preview/cb-group-h.jsx:KeeperToolAccess`)
-// expects a compact <dl> of cascade / tools_preset / sandbox / network /
-// auto_handoff / handoff_threshold / proactive_idle / mention targets,
+// expects a compact <dl> of cascade / sandbox / network / auto_handoff /
+// handoff_threshold / proactive_idle / mention targets,
 // rendered as a quick-scan summary before the operator dives into the
 // editable form. Production has all the data on `KeeperConfig` but only
 // surfaces it through the editable `KeeperConfigPanel` form.
@@ -30,12 +30,6 @@ function ToolAccessRow({
   `
 }
 
-function presetLabel(c: KeeperConfig): string {
-  const tools = c.tools
-  if (tools.tool_policy_mode === 'custom') return 'custom'
-  return tools.tool_preset ?? 'unset'
-}
-
 function mentionsLabel(targets: readonly string[]): string {
   if (targets.length === 0) return '—'
   return targets.map(t => `@${t}`).join(' · ')
@@ -43,7 +37,6 @@ function mentionsLabel(targets: readonly string[]): string {
 
 export function KeeperToolAccessSummary({ config }: { config: KeeperConfig }) {
   const cascade = config.execution.selected_cascade_name || '—'
-  const preset = presetLabel(config)
   const sandbox = config.sandbox_profile ?? 'local'
   const network = config.network_mode ?? 'inherit'
   const handoff = `${config.handoff.auto ? 'on' : 'off'} · threshold ${config.handoff.threshold}`
@@ -65,7 +58,6 @@ export function KeeperToolAccessSummary({ config }: { config: KeeperConfig }) {
       </header>
       <dl class="grid grid-cols-1 gap-x-6 md:grid-cols-2">
         <${ToolAccessRow} label="cascade" value=${cascade} />
-        <${ToolAccessRow} label="tools preset" value=${preset} />
         <${ToolAccessRow} label="sandbox" value=${sandbox} />
         <${ToolAccessRow} label="network" value=${network} />
         <${ToolAccessRow} label="auto handoff" value=${handoff} />

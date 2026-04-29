@@ -3,7 +3,6 @@
 // clean tool chip badges, proper section spacing.
 
 import { html } from 'htm/preact'
-import { signal } from '@preact/signals'
 import { useEffect, useState } from 'preact/hooks'
 import { ActionButton } from './common/button'
 import { DistributionBars, type DistributionItem } from './common/distribution-bars'
@@ -21,8 +20,6 @@ import {
   openToolsInventory,
   toolAuditStateLabel,
 } from './common/tool-audit'
-import { ToolAllowlistEditor } from './tools/tool-allowlist-editor'
-import { loadTools } from './tools/tool-state'
 import {
   resolveKeeperMissionBrief,
   resolveKeeperObservedToolAudit,
@@ -34,7 +31,6 @@ import {
   peekLoadedKeeperConfig,
 } from './keeper-config-panel'
 
-const showAllowlistEditor = signal(false)
 const DEFAULT_ALLOWLIST_PREVIEW_LIMIT = 12
 
 // ── Utility functions ────────────────────────────────────
@@ -547,7 +543,6 @@ function topListDistribution(
 
 export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
   useEffect(() => {
-    showAllowlistEditor.value = false
     void loadKeeperConfig(keeper.name)
   }, [keeper.name])
 
@@ -577,22 +572,14 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
     ?? (runtimeState === 'offline' ? 'offline' : 'not_collected')
   const policyLoading = toolPolicy.source === 'loading'
   const policyError = toolPolicy.source === 'error'
-  const policyEditable = toolPolicy.source === 'keeper_config'
-  const toolPolicyLabel =
-    policyLoading
-      ? 'loading'
-      : policyError
-        ? 'error'
-      : toolPolicy.mode === 'custom'
-        ? 'custom'
-        : toolPolicy.preset ?? 'unset'
+  const policyLoaded = toolPolicy.source === 'keeper_config'
   const unavailablePolicyLabel = policyError ? 'config_error' : 'config_unavailable'
   const allowedToolCountLabel =
     allowedTools.length > 0
       ? String(allowedTools.length)
       : policyLoading
         ? 'loading'
-        : policyEditable
+        : policyLoaded
           ? allowlistFallback
           : unavailablePolicyLabel
   const openToolsQuery = allowedTools[0] ?? observedTools[0] ?? null
@@ -605,8 +592,6 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
       <${SignalRow} label="현재 태스크" value=${currentTaskLabel} />
       <${SignalRow} label="스킬 경로" value=${skillRouteLabel} />
       <${SignalRow} label="컨텍스트 출처" value=${keeper.context_source ?? keeper.context?.source ?? '-'} />
-      <${SignalRow} label="도구 정책" value=${toolPolicyLabel} />
-      <${SignalRow} label="정책 소스" value=${toolPolicy.source} />
       <${SignalRow} label="허용 도구 수" value=${allowedToolCountLabel} />
 
       <div class="flex justify-end mt-1">
@@ -623,46 +608,22 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
 
       <div class="flex items-center justify-between mt-3">
         <span class="text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">허용된 도구</span>
-        <button type="button"
-          class="text-3xs text-[var(--color-fg-muted)] hover:text-[var(--color-fg-primary)] cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-default"
-          disabled=${!policyEditable}
-          onClick=${() => {
-            showAllowlistEditor.value = !showAllowlistEditor.value
-            if (showAllowlistEditor.value) loadTools()
-          }}
-        >${policyLoading ? '로딩 중' : policyEditable ? (showAllowlistEditor.value ? '닫기' : '편집') : policyError ? '설정 오류' : '설정 필요'}</button>
+        <span class="text-3xs text-[var(--color-fg-muted)]">${policyLoading ? '로딩 중' : policyError ? '설정 오류' : 'read-only'}</span>
       </div>
 
-      ${showAllowlistEditor.value && policyEditable
-        ? html`<${ToolAllowlistEditor}
-            keeperName=${keeper.name}
-            currentMode=${toolPolicy.mode}
-            currentPreset=${toolPolicy.preset ?? 'full'}
-            currentAlsoAllow=${toolPolicy.alsoAllow}
-            currentCustomAllowlist=${toolPolicy.customAllowlist}
-            currentDenylist=${toolPolicy.denylist}
-            resolvedAllowlist=${allowedTools}
-            onUpdated=${() => {
-              showAllowlistEditor.value = false
-              void loadKeeperConfig(keeper.name, { force: true })
-              loadTools()
-            }}
-          />`
-        : html`
-          <span class="text-2xs text-[var(--color-fg-muted)] leading-snug">
-            ${policyLoading
-              ? '정적 도구 정책을 불러오는 중입니다.'
-              : policyEditable
-                ? '이 키퍼 정책에서 해석된 allowlist입니다.'
-                : policyError
-                  ? '정적 도구 정책 로드에 실패했습니다.'
-                  : '정적 도구 정책을 아직 확인할 수 없습니다.'}
-          </span>
-          <${AllowlistPreview}
-            tools=${allowedTools}
-            emptyLabel=${policyLoading ? 'loading' : policyEditable ? allowlistFallback : unavailablePolicyLabel}
-          />
-        `}
+      <span class="text-2xs text-[var(--color-fg-muted)] leading-snug">
+        ${policyLoading
+          ? '허용 도구 목록을 불러오는 중입니다.'
+          : policyLoaded
+            ? '이 키퍼가 현재 사용할 수 있는 도구 목록입니다.'
+            : policyError
+              ? '허용 도구 목록 로드에 실패했습니다.'
+              : '허용 도구 목록을 아직 확인할 수 없습니다.'}
+      </span>
+      <${AllowlistPreview}
+        tools=${allowedTools}
+        emptyLabel=${policyLoading ? 'loading' : policyLoaded ? allowlistFallback : unavailablePolicyLabel}
+      />
 
       <${ToolSection}
         title="관측된 도구"

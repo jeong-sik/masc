@@ -139,19 +139,7 @@ let keeper_schemas : tool_schema list = [
           ("description", `String "Preferred language for generated text.");
         ]);
         ("alignment", persona_axis_schema Persona_contract.alignment_axis);
-        ("operating_style", persona_axis_schema Persona_contract.operating_style_axis);
         ("risk_posture", persona_axis_schema Persona_contract.risk_posture_axis);
-        ("tool_preset", `Assoc [
-          ("type", `String "string");
-          ("default", `String Persona_contract.default_tool_preset);
-          ("enum", `List (List.map (fun s -> `String s) tool_preset_enum_strings));
-          ( "description"
-          , `String
-              (Printf.sprintf
-                 "Default keeper.tool_preset for the draft. When omitted, \
-                  operating_style is used if present, otherwise %s."
-                 Persona_contract.default_tool_preset) );
-        ]);
         ("proactive_enabled", `Assoc [
           ("type", `String "boolean");
           ("default", `Bool Persona_contract.default_proactive_enabled);
@@ -251,28 +239,7 @@ let keeper_schemas : tool_schema list = [
         ]);
         ("tool_access",
           tool_access_schema
-            "Canonical tool policy. Prefer this over tool_preset/tool_also_allow. Example preset: {kind: 'preset', preset: 'research', also_allow: ['masc_status']}. Example custom: {kind: 'custom', tools: ['masc_status']}.");
-        ("tool_preset", `Assoc [
-          ("type", `String "string");
-          ("description", `String "Compatibility field. Use tool_access.kind='preset' for new callers.");
-          (* Issue #8430: mirrors [Keeper_types.valid_tool_preset_strings].
-             Direct dependency would create a cycle
-             (Keeper_schema -> Keeper_types -> Keeper_types_profile ->
-             Keeper_schema). Test [test_types.ml :: tool_preset_ssot]
-             asserts the two stay in sync — if either side adds a value
-             the other diverges. Used to drop Social and Delivery. *)
-          ("enum", `List (List.map (fun s -> `String s) tool_preset_enum_strings));
-        ]);
-        ("tool_custom_allowlist", `Assoc [
-          ("type", `String "array");
-          ("items", `Assoc [("type", `String "string")]);
-          ("description", `String "Compatibility field for custom allowlists. Use tool_access.kind='custom' for new callers.");
-        ]);
-        ("tool_also_allow", `Assoc [
-          ("type", `String "array");
-          ("items", `Assoc [("type", `String "string")]);
-          ("description", `String "Compatibility field. Adds tools on top of tool_preset.");
-        ]);
+            "Canonical tool policy. Example preset: {kind: 'preset', preset: 'research', also_allow: ['masc_status']}. Example custom: {kind: 'custom', tools: ['masc_status']}.");
         ("tool_denylist", `Assoc [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);
@@ -447,28 +414,7 @@ let keeper_schemas : tool_schema list = [
         ]);
         ("tool_access",
           tool_access_schema
-            "Canonical tool policy. Prefer this over tool_preset/tool_also_allow. Example preset: {kind: 'preset', preset: 'research', also_allow: ['masc_status']}. Example custom: {kind: 'custom', tools: ['masc_status']}.");
-        ("tool_preset", `Assoc [
-          ("type", `String "string");
-          (* Issue #8430: mirrors [Keeper_types.valid_tool_preset_strings].
-             Direct dependency would create a cycle
-             (Keeper_schema -> Keeper_types -> Keeper_types_profile ->
-             Keeper_schema). Test [test_types.ml :: tool_preset_ssot]
-             asserts the two stay in sync — if either side adds a value
-             the other diverges. Used to drop Social and Delivery. *)
-          ("enum", `List (List.map (fun s -> `String s) tool_preset_enum_strings));
-          ("description", `String "Compatibility field. Use tool_access.kind='preset' for new callers.");
-        ]);
-        ("tool_custom_allowlist", `Assoc [
-          ("type", `String "array");
-          ("items", `Assoc [("type", `String "string")]);
-          ("description", `String "Compatibility field for custom allowlists. Use tool_access.kind='custom' for new callers.");
-        ]);
-        ("tool_also_allow", `Assoc [
-          ("type", `String "array");
-          ("items", `Assoc [("type", `String "string")]);
-          ("description", `String "Compatibility field. Adds tools on top of tool_preset.");
-        ]);
+            "Canonical tool policy. Example preset: {kind: 'preset', preset: 'research', also_allow: ['masc_status']}. Example custom: {kind: 'custom', tools: ['masc_status']}.");
         ("tool_denylist", `Assoc [
           ("type", `String "array");
           ("items", `Assoc [("type", `String "string")]);

@@ -90,7 +90,7 @@ describe('mission keeper runtime helpers', () => {
     )
   })
 
-  it('renders social-model fallback hints when the configured model is unknown', () => {
+  it('renders dialogue-model fallback hints when the configured model is unknown', () => {
     const keeper = {
       name: 'uranium666',
       status: 'busy',
@@ -101,7 +101,7 @@ describe('mission keeper runtime helpers', () => {
     } as Keeper
 
     expect(keeperRuntimeHint(keeper)).toBe(
-      '소셜 모델 experimental_v99 미인식 · bdi_speech_v1로 대체 중',
+      '대화 모델 experimental_v99 미인식 · bdi_speech_v1로 대체 중',
     )
   })
 })

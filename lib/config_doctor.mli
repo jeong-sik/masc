@@ -17,10 +17,6 @@
     \[repo_config_seed_path] (path resolvers), \[option_field],
     \[diagnose_cascade_catalog] /
     \[cascade_catalog_next_actions] (cascade catalog scanner),
-    \[normalize_tool_preset_opt] / \[non_empty_trimmed_opt]
-    (string normalization), \[persona_tool_preset_conflict_*]
-    helpers (yojson encoder + warning/action message builders),
-    \[discover_persona_tool_preset_conflicts],
     \[current_inputs] (Eio-aware inputs builder), the [Live_catalog_*]
     enum used in {!analyze_live}'s status grading, and pure
     \[analyze] (the lower-level entry behind {!analyze_with} +
@@ -82,24 +78,12 @@ type t = {
   keeper_runtime_toml_present : bool;
   warnings : string list;
   next_actions : string list;
-  persona_tool_preset_conflicts : persona_tool_preset_conflict list;
   catalog_validation : Yojson.Safe.t option;
   sandbox_preflight : Yojson.Safe.t option;
 }
 (** Aggregate report.  Concrete record — callers (CLI rendering,
     tests, dashboard JSON) destructure fields directly.
-    19 fields; new fields go through this contract. *)
-
-and persona_tool_preset_conflict = {
-  keeper_name : string;
-  persona_name : string;
-  toml_path : string;
-  persona_path : string;
-  toml_tool_preset : string;
-  persona_tool_preset : string;
-}
-(** Per-conflict snapshot when keeper config and persona file
-    disagree on the [tool_preset] selector. *)
+    18 fields; new fields go through this contract. *)
 
 (** {1 Catalog issue re-exports} *)
 

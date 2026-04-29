@@ -25,10 +25,6 @@ describe('resolveKeeperToolPolicy', () => {
     const keeperConfig = {
       tools: {
         tool_access: {},
-        tool_policy_mode: 'custom',
-        tool_preset: null,
-        tool_also_allow: ['mcp__masc__masc_join'],
-        tool_custom_allowlist: ['mcp__masc__masc_board_post'],
         resolved_allowlist: ['mcp__masc__masc_board_post'],
         tool_denylist: ['mcp__masc__masc_board_delete'],
         active_masc_tool_count: 1,
@@ -39,11 +35,6 @@ describe('resolveKeeperToolPolicy', () => {
 
     expect(resolveKeeperToolPolicy(keeperConfig, 'loaded')).toEqual({
       source: 'keeper_config',
-      mode: 'custom',
-      preset: null,
-      alsoAllow: ['mcp__masc__masc_join'],
-      customAllowlist: ['mcp__masc__masc_board_post'],
-      denylist: ['mcp__masc__masc_board_delete'],
       resolvedAllowlist: ['mcp__masc__masc_board_post'],
     })
   })
@@ -51,11 +42,6 @@ describe('resolveKeeperToolPolicy', () => {
   it('reports loading instead of inventing defaults before config arrives', () => {
     expect(resolveKeeperToolPolicy(null, 'loading')).toEqual({
       source: 'loading',
-      mode: 'preset',
-      preset: null,
-      alsoAllow: [],
-      customAllowlist: [],
-      denylist: [],
       resolvedAllowlist: [],
     })
   })
@@ -63,11 +49,6 @@ describe('resolveKeeperToolPolicy', () => {
   it('reports none after config load when no policy payload is available', () => {
     expect(resolveKeeperToolPolicy(null, 'loaded')).toEqual({
       source: 'none',
-      mode: 'preset',
-      preset: null,
-      alsoAllow: [],
-      customAllowlist: [],
-      denylist: [],
       resolvedAllowlist: [],
     })
   })
@@ -75,11 +56,6 @@ describe('resolveKeeperToolPolicy', () => {
   it('preserves an explicit config error state', () => {
     expect(resolveKeeperToolPolicy(null, 'error')).toEqual({
       source: 'error',
-      mode: 'preset',
-      preset: null,
-      alsoAllow: [],
-      customAllowlist: [],
-      denylist: [],
       resolvedAllowlist: [],
     })
   })

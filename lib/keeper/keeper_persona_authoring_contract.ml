@@ -9,7 +9,6 @@ type archetype_choice_effect =
   { value : string
   ; effect_text : string
   ; generated_fields : string list
-  ; default_tool_preset : string option
   }
 
 type archetype_axis =
@@ -22,7 +21,6 @@ type archetype_axis =
 
 let default_generation_language = "ko"
 let default_generation_cascade_name = "operator_judge"
-let default_tool_preset = "research"
 let default_temperature = 0.7
 let default_max_tokens = 2500
 let default_proactive_enabled = false
@@ -34,8 +32,8 @@ let option_field name value =
   | None -> []
 ;;
 
-let choice_effect ?default_tool_preset ~value ~effect_text ~generated_fields () =
-  { value; effect_text; generated_fields; default_tool_preset }
+let choice_effect ~value ~effect_text ~generated_fields () =
+  { value; effect_text; generated_fields }
 ;;
 
 let choice_effect_fields choice =
@@ -43,9 +41,6 @@ let choice_effect_fields choice =
   ; "effect", `String choice.effect_text
   ; "generated_fields", string_list_to_json choice.generated_fields
   ]
-  @ option_field
-      "default_tool_preset"
-      (Option.map (fun value -> `String value) choice.default_tool_preset)
 ;;
 
 let choice_effect_to_json choice = `Assoc (choice_effect_fields choice)
@@ -93,43 +88,6 @@ let alignment_choice_effects =
   ]
 ;;
 
-let operating_style_choice_effects =
-  [ choice_effect
-      ~value:"research"
-      ~effect_text:"Favors evidence gathering, synthesis, and source-grounded analysis."
-      ~generated_fields:[ "keeper.tool_preset"; "keeper.goal"; "keeper.instructions" ]
-      ~default_tool_preset:"research"
-      ()
-  ; choice_effect
-      ~value:"coding"
-      ~effect_text:"Favors repo-local implementation, test repair, and code review loops."
-      ~generated_fields:[ "keeper.tool_preset"; "keeper.goal"; "keeper.instructions" ]
-      ~default_tool_preset:"coding"
-      ()
-  ; choice_effect
-      ~value:"dispatch"
-      ~effect_text:
-        "Favors triage, routing, task assignment, and operational follow-through."
-      ~generated_fields:[ "keeper.tool_preset"; "keeper.goal"; "keeper.instructions" ]
-      ~default_tool_preset:"dispatch"
-      ()
-  ; choice_effect
-      ~value:"social"
-      ~effect_text:
-        "Favors conversation tracking, replies, coordination, and social context."
-      ~generated_fields:[ "keeper.tool_preset"; "keeper.goal"; "keeper.instructions" ]
-      ~default_tool_preset:"social"
-      ()
-  ; choice_effect
-      ~value:"delivery"
-      ~effect_text:
-        "Favors milestone tracking, completion pressure, and release readiness."
-      ~generated_fields:[ "keeper.tool_preset"; "keeper.goal"; "keeper.instructions" ]
-      ~default_tool_preset:"delivery"
-      ()
-  ]
-;;
-
 let risk_posture_choice_effects =
   [ choice_effect
       ~value:"cautious"
@@ -154,7 +112,6 @@ let risk_posture_choice_effects =
 ;;
 
 let alignment_choices = choice_values alignment_choice_effects
-let operating_style_choices = choice_values operating_style_choice_effects
 let risk_posture_choices = choice_values risk_posture_choice_effects
 
 let alignment_axis =
@@ -167,18 +124,6 @@ let alignment_axis =
   ; schema_description =
       "Optional archetype axis. Influences generated role, trait, goals, and \
        instructions. Call masc_persona_schema for per-choice effects."
-  }
-;;
-
-let operating_style_axis =
-  { name = "operating_style"
-  ; choices = operating_style_choices
-  ; choice_effects = operating_style_choice_effects
-  ; effect_text =
-      "Maps naturally to keeper.tool_preset and instructions when drafting a persona."
-  ; schema_description =
-      "Optional archetype axis. If tool_preset is omitted, this also selects the default \
-       keeper.tool_preset. Call masc_persona_schema for per-choice effects."
   }
 ;;
 
@@ -195,7 +140,7 @@ let risk_posture_axis =
   }
 ;;
 
-let axes = [ alignment_axis; operating_style_axis; risk_posture_axis ]
+let axes = [ alignment_axis; risk_posture_axis ]
 
 let axis_to_json axis =
   `Assoc

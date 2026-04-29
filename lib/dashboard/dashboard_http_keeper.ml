@@ -1525,15 +1525,6 @@ let keeper_config_json (config : Coord.config) (name : string)
         let recovery_floor_count =
           List.length (Keeper_tool_policy.failing_minimum_tool_names ())
         in
-        let tool_policy_mode : [`Preset of string | `Custom] option =
-          match Keeper_types.tool_access_custom_allowlist m.tool_access with
-          | Some _ -> Some `Custom
-          | None ->
-            (match Keeper_types.tool_access_preset m.tool_access with
-             | Some preset ->
-               Some (`Preset (Keeper_types.tool_preset_to_string preset))
-             | None -> None)
-        in
         let turn_outcome : [`Ok | `Failed] option =
           match Keeper_registry.get ~base_path:config.base_path m.name with
           | Some entry when entry.turn_consecutive_failures > 0 ->
@@ -1542,7 +1533,6 @@ let keeper_config_json (config : Coord.config) (name : string)
           | None -> None
         in
         Keeper_decision_audit.decision_pipeline_to_mermaid
-          ?tool_policy_mode
           ?turn_outcome
           ~guard_penalty_total:stats.guard_penalties_total
           ~phase
@@ -1557,29 +1547,8 @@ let keeper_config_json (config : Coord.config) (name : string)
         let masc_tool_count =
           List.length (Keeper_exec_tools.keeper_masc_tool_names m)
         in
-        let tool_preset = Keeper_types.tool_access_preset m.tool_access in
-        let tool_also_allow = Keeper_types.tool_access_also_allowlist m.tool_access in
-        let custom_allowlist = Keeper_types.tool_access_custom_allowlist m.tool_access in
         `Assoc [
           ("tool_access", Keeper_types.tool_access_to_json m.tool_access);
-          ("tool_policy_mode",
-            `String
-              (match custom_allowlist with
-               | Some _ -> "custom"
-               | None -> "preset"));
-          ("tool_preset",
-            match tool_preset with
-            | Some preset -> `String (Keeper_types.tool_preset_to_string preset)
-            | None -> `Null);
-          ("tool_preset_source",
-            match m.tool_preset_source with
-            | Some src -> `String src
-            | None -> `Null);
-          ("tool_also_allow", `List (List.map (fun s -> `String s) tool_also_allow));
-          ("tool_custom_allowlist",
-            `List
-              (List.map (fun s -> `String s)
-                 (Option.value ~default:[] custom_allowlist)));
           ("resolved_allowlist", `List (List.map (fun s -> `String s) allowed));
           ("tool_denylist", `List (List.map (fun s -> `String s) m.tool_denylist));
           ("active_masc_tool_count", `Int masc_tool_count);

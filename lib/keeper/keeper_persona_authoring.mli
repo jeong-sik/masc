@@ -24,7 +24,6 @@ type save_result =
 (** Selected archetype axis values extracted from tool arguments. *)
 type archetype_axes =
   { alignment : string option
-  ; operating_style : string option
   ; risk_posture : string option
   }
 
@@ -111,14 +110,6 @@ val archetype_axes_to_json : archetype_axes -> Yojson.Safe.t
     chosen archetype values. *)
 val selected_archetype_effects_to_json :
   archetype_axes -> Yojson.Safe.t
-
-(** Pick the LLM generation tool_preset: explicit
-    [tool_preset] arg first, then operating_style fallback, then
-    [Archetypes.default_tool_preset]. *)
-val generation_tool_preset :
-  Yojson.Safe.t ->
-  archetype_axes ->
-  (string, string) result
 
 (** Tool-handler entry for [keeper_persona_generate]. *)
 val handle_persona_generate :

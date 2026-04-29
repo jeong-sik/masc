@@ -1,21 +1,16 @@
 import { html } from 'htm/preact'
-import { useEffect } from 'preact/hooks'
 import { signal } from '@preact/signals'
 import { ActionButton } from '../common/button'
-import { Select } from '../common/select'
 import { Checkbox } from '../common/checkbox'
 import { TextArea, TextInput } from '../common/input'
 import { showToast } from '../common/toast'
 import {
   generatePersonaDraft,
-  loadPersonaSchema,
   personaAuthoringResult,
   personaDraft,
   personaGenerating,
   personaSaveResult,
   personaSaving,
-  personaSchema,
-  personaSchemaLoading,
   savePersonaDraft,
   spawnKeeperFromPersona,
   spawning,
@@ -24,7 +19,6 @@ import {
 const concept = signal('')
 const handle = signal('')
 const displayName = signal('')
-const toolPreset = signal('research')
 const proactiveEnabled = signal(false)
 const overwrite = signal(false)
 const profileText = signal('')
@@ -32,11 +26,6 @@ const profileText = signal('')
 function syncProfileText() {
   const draft = personaDraft.value
   profileText.value = draft ? JSON.stringify(draft.profile, null, 2) : ''
-}
-
-function appendConceptToken(token: string) {
-  const current = concept.value.trim()
-  concept.value = current ? `${current}, ${token}` : token
 }
 
 function applyProfileText(): boolean {
@@ -60,7 +49,6 @@ async function generateDraft() {
     concept: concept.value,
     handle: handle.value,
     displayName: displayName.value,
-    toolPreset: toolPreset.value,
     proactiveEnabled: proactiveEnabled.value,
   })
   syncProfileText()
@@ -78,19 +66,9 @@ function prettyValue(value: unknown): string {
 }
 
 export function PersonaGenerator() {
-  useEffect(() => {
-    if (!personaSchema.value && !personaSchemaLoading.value) void loadPersonaSchema()
-  }, [])
-  const schema = personaSchema.value
   const draft = personaDraft.value
   const saveResult = personaSaveResult.value
   const savedForDraft = Boolean(draft && saveResult?.handle === draft.handle && saveResult.saved)
-  const presets = schema?.fieldCatalog
-    .find(field => field.path === 'keeper.tool_preset')
-    ?.choices
-  const presetChoices = Array.isArray(presets)
-    ? presets.filter((item): item is string => typeof item === 'string')
-    : ['minimal', 'social', 'messaging', 'dispatch', 'coding', 'research', 'delivery', 'full']
 
   return html`
     <div class="grid gap-4 lg:grid-cols-[minmax(260px,0.9fr)_minmax(360px,1.2fr)]">
@@ -107,20 +85,6 @@ export function PersonaGenerator() {
             class="!px-2 !py-2 !text-2xs"
           />
         </div>
-
-        ${schema?.archetypeAxes.length ? html`
-          <div class="flex flex-wrap gap-1.5">
-            ${schema.archetypeAxes.flatMap(axis => axis.choices.slice(0, 5).map(choice => html`
-              <${ActionButton}
-                key=${`${axis.name}:${choice}`}
-                variant="ghost"
-                size="sm"
-                title=${axis.effect}
-                onClick=${() => appendConceptToken(choice)}
-              >${choice}<//>
-            `))}
-          </div>
-        ` : null}
 
         <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
           <label class="grid gap-1 text-3xs text-[var(--color-fg-muted)]">
@@ -143,16 +107,6 @@ export function PersonaGenerator() {
               ariaLabel="persona display name"
               onInput=${(e: Event) => { displayName.value = (e.target as HTMLInputElement).value }}
               class="!px-2 !py-1.5 !text-2xs"
-            />
-          </label>
-          <label class="grid gap-1 text-3xs text-[var(--color-fg-muted)]">
-            preset
-            <${Select}
-              class="px-2 py-1.5 text-2xs"
-              ariaLabel="tool preset"
-              value=${toolPreset.value}
-              options=${presetChoices.map(choice => choice)}
-              onInput=${(v: string) => { toolPreset.value = v }}
             />
           </label>
           <label class="flex items-center gap-2 pt-5 text-2xs text-[var(--color-fg-primary)]">
@@ -195,27 +149,6 @@ export function PersonaGenerator() {
             overwrite
           </label>
         </div>
-
-        ${schema ? html`
-          <div class="rounded border border-[var(--white-10)] bg-[var(--white-4)]">
-            <div class="border-b border-[var(--white-10)] px-2 py-1.5 text-3xs text-[var(--color-fg-muted)]">
-              ${schema.personasRoot ?? ''} · ${schema.handleRules ?? ''}
-            </div>
-            <div class="max-h-56 overflow-auto">
-              <table class="w-full text-left text-3xs" aria-label="페르소나 스키마 규칙">
-                <tbody>
-                  ${schema.fieldCatalog.map(field => html`
-                    <tr key=${field.path} class="border-b border-[var(--white-6)] align-top">
-                      <td class="px-2 py-1.5 font-mono text-[var(--color-accent-fg)] whitespace-nowrap">${field.path}</td>
-                      <td class="px-2 py-1.5 text-[var(--color-fg-muted)]">${field.type ?? ''}${field.required ? ' *' : ''}</td>
-                      <td class="px-2 py-1.5 text-[var(--color-fg-primary)]">${field.effect ?? ''}</td>
-                    </tr>
-                  `)}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        ` : null}
       </div>
 
       <div class="space-y-3">

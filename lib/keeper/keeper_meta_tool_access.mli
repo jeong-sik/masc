@@ -1,7 +1,7 @@
-(** Keeper tool-access policy types and JSON migration helpers.
+(** Keeper tool-access policy types and JSON helpers.
 
     Defines the canonical [tool_preset] and [tool_access] ADTs and
-    parsers that translate persisted/legacy keeper meta JSON into them. *)
+    parsers for persisted keeper meta JSON. *)
 
 type tool_preset =
   | Minimal
@@ -80,24 +80,9 @@ val string_list_field_opt_result :
   Yojson.Safe.t ->
   (string list, string) result
 
-(** Read [tool_preset] field from a JSON record. Returns the preset or
-    a descriptive error. *)
-val parse_tool_preset_projection :
-  Yojson.Safe.t -> (tool_preset, string) result
-
 (** Default [tool_access] for missing/null fields:
     [migrate_legacy_restricted_tools legacy_session_min_tool_names]. *)
 val default_tool_access_of_meta_json : unit -> tool_access
-
-(** Project legacy fields (tool_custom_allowlist / tool_preset +
-    tool_also_allow / tool_allowlist) into a [tool_access]. *)
-val legacy_tool_access_projection_of_meta_json :
-  Yojson.Safe.t -> (tool_access, string) result
-
-(** Parse [tool_access] from persisted meta JSON, accepting legacy
-    "restricted" / "unrestricted" / "preset" / "custom" kinds. *)
-val legacy_tool_access_of_meta_json :
-  Yojson.Safe.t -> (tool_access, string) result
 
 (** Parse [tool_access] from persisted meta JSON, accepting only the
     canonical "preset" / "custom" kinds (legacy kinds rejected). *)

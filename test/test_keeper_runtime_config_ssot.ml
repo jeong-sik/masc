@@ -310,8 +310,11 @@ let test_tool_policy_resync () =
 sandbox_profile = "docker"
 goal = "test"
 allowed_paths = ["workspace/example/project"]
-tool_preset = "social"
-tool_also_allow = ["keeper_bash", "keeper_shell"]
+
+[keeper.tool_access]
+kind = "preset"
+preset = "social"
+also_allow = ["keeper_bash", "keeper_shell"]
 |};
   let config = Coord.default_config room_dir in
   let initial_meta =
@@ -375,7 +378,10 @@ let test_tool_preset_source_resyncs_from_toml_without_policy_delta () =
     {|[keeper]
 sandbox_profile = "docker"
 goal = "test"
-tool_preset = "social"
+
+[keeper.tool_access]
+kind = "preset"
+preset = "social"
 |};
   let config = Coord.default_config room_dir in
   let initial_meta =
@@ -419,7 +425,7 @@ tool_preset = "social"
         (Some "toml")
         updated.Keeper_types.tool_preset_source
 
-let test_tool_preset_source_resyncs_from_persona_without_policy_delta () =
+let test_persona_no_longer_drives_tool_preset_source () =
   with_temp_dir "keeper-config-ssot-room" @@ fun room_dir ->
   with_config_dir @@ fun config_dir ->
   Fs_compat.clear_fs ();
@@ -435,14 +441,12 @@ let test_tool_preset_source_resyncs_from_persona_without_policy_delta () =
     {|{
   "name": "source persona",
   "keeper": {
-    "goal": "test",
-    "tool_preset": "research"
+    "goal": "test"
   }
 }|};
   (* Persona-only configs cannot satisfy the sandbox_profile required-field
      check (personas are not allowed to declare execution policy). Add a
-     minimal TOML wrapper that only sets sandbox_profile + persona_name so
-     persona overlay still drives tool_preset. *)
+     minimal TOML wrapper that only sets sandbox_profile + persona_name. *)
   let keepers_toml_dir = Filename.concat config_dir "keepers" in
   Unix.mkdir keepers_toml_dir 0o755;
   write_file
@@ -491,8 +495,8 @@ persona_name = "%s"
   | Ok updated ->
       check
         (option string)
-        "tool_preset_source resynced from persona"
-        (Some "persona")
+        "persona does not drive tool_preset_source"
+        None
         updated.Keeper_types.tool_preset_source
 
 (** Test: explicit empty allowed_paths in TOML clears stale runtime JSON values. *)
@@ -670,7 +674,6 @@ let test_persona_overlay_resync () =
     "needs": "원문 자료, 논문, 긴 문맥",
     "instructions": "먼저 읽고 구조를 잡은 뒤 요약한다.",
     "mention_targets": ["scholar", "학자"],
-    "tool_preset": "research",
     "proactive_enabled": true
   }
 }|};
@@ -680,7 +683,10 @@ let test_persona_overlay_resync () =
 sandbox_profile = "docker"
 persona_name = "scholar"
 goal = "대화에 바로 쓸 수 있는 연구 브리프를 만든다."
-tool_preset = "delivery"
+
+[keeper.tool_access]
+kind = "preset"
+preset = "delivery"
 |};
   let config = Coord.default_config room_dir in
   let initial_meta =
@@ -949,7 +955,10 @@ let test_cascade_defaults_resync () =
     {|[keeper]
 sandbox_profile = "docker"
 goal = "TOML goal"
-tool_preset = "social"
+
+[keeper.tool_access]
+kind = "preset"
+preset = "social"
 |};
   let config = Coord.default_config room_dir in
   let initial_meta =
@@ -1229,9 +1238,9 @@ let () =
             `Quick
             test_tool_preset_source_resyncs_from_toml_without_policy_delta;
           test_case
-            "persona tool_preset_source resyncs without policy delta"
+            "persona no longer drives tool_preset_source"
             `Quick
-            test_tool_preset_source_resyncs_from_persona_without_policy_delta;
+            test_persona_no_longer_drives_tool_preset_source;
           test_case
             "custom tool_access is preserved when TOML omits preset"
             `Quick

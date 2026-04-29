@@ -53,7 +53,6 @@ async function doFetchNamespaceTruth(): Promise<void> {
 
 function scheduleNamespaceWarmRetry(): void {
   warmRetryAttempt++
-  console.debug(`[project-snapshot] warm-up retry ${warmRetryAttempt}/${WARM_MAX_RETRIES}`)
   if (warmRetryAttempt > WARM_MAX_RETRIES) {
     namespaceTruthInitializing.value = false
     namespaceTruthError.value = 'Server warm-up timed out. Try refreshing.'
@@ -61,6 +60,7 @@ function scheduleNamespaceWarmRetry(): void {
     warmRetryAttempt = 0
     return
   }
+  console.debug(`[project-snapshot] warm-up retry ${warmRetryAttempt}/${WARM_MAX_RETRIES}`)
   if (warmRetryTimer) clearTimeout(warmRetryTimer)
   warmRetryTimer = setTimeout(() => {
     warmRetryTimer = null

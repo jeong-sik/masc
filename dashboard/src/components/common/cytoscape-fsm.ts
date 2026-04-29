@@ -29,25 +29,55 @@ export interface FsmGraphSpec {
   direction?: 'TB' | 'LR'
 }
 
-// Color palette matching dashboard dark theme
-const NODE_COLORS: Record<FsmNode['type'], { bg: string; border: string; text: string }> = {
-  state:    { bg: 'var(--slate-800)', border: 'var(--slate-600)', text: 'var(--frost-100)' },
-  active:   { bg: '#065f46', border: 'var(--emerald)', text: 'var(--white-pure)' },
-  buffer:   { bg: '#78350f', border: 'var(--amber-bright)', text: 'var(--white-pure)' },
-  terminal: { bg: '#7f1d1d', border: 'var(--color-status-err)', text: 'var(--white-pure)' },
-  start:    { bg: 'var(--slate-800)', border: '#6366f1', text: '#c7d2fe' },
-  end:      { bg: 'var(--slate-800)', border: '#6b7280', text: '#9ca3af' },
-  ok:       { bg: '#065f46', border: 'var(--emerald)', text: 'var(--white-pure)' },
-  warn:     { bg: '#78350f', border: 'var(--amber-bright)', text: 'var(--white-pure)' },
-  err:      { bg: '#7f1d1d', border: 'var(--color-status-err)', text: 'var(--white-pure)' },
-  dim:      { bg: 'var(--slate-800)', border: '#374151', text: '#6b7280' },
+// Cytoscape's style parser does not resolve CSS variables — `var(--x)`
+// strings are rejected. Resolve once per render against `:root` and
+// pass literal hex/rgb values into the stylesheet.
+const TOKEN_FALLBACKS: Record<string, string> = {
+  '--slate-800': '#1e293b',
+  '--slate-600': '#475569',
+  '--slate-500': '#64748b',
+  '--slate-400': '#94a3b8',
+  '--frost-100': '#e2e8f0',
+  '--emerald': '#22c55e',
+  '--amber-bright': '#f59e0b',
+  '--color-status-err': '#ef4444',
+  '--white-pure': '#ffffff',
+  '--panel-dark': '#0f172a',
 }
 
-const EDGE_COLORS: Record<string, string> = {
-  normal: 'var(--slate-500)',
-  error: 'var(--color-status-err)',
-  recovery: 'var(--emerald)',
-  cascade: 'var(--amber-bright)',
+function resolveCssVar(token: string): string {
+  // token may be the bare name "--frost-100" or a "var(--frost-100)" wrapper.
+  const m = token.match(/^var\((--[a-z0-9-]+)\)$/i)
+  const name = m ? m[1] : token.startsWith('--') ? token : null
+  if (!name) return token
+  if (typeof window === 'undefined' || typeof document === 'undefined') {
+    return TOKEN_FALLBACKS[name] ?? token
+  }
+  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+  return v || TOKEN_FALLBACKS[name] || token
+}
+
+// Color palette matching dashboard dark theme. Values are resolved
+// lazily inside buildStylesheet/buildNodeColors so that token changes
+// (theme switch) propagate on next render.
+const NODE_COLOR_TOKENS: Record<FsmNode['type'], { bg: string; border: string; text: string }> = {
+  state:    { bg: '--slate-800', border: '--slate-600', text: '--frost-100' },
+  active:   { bg: '#065f46',     border: '--emerald',   text: '--white-pure' },
+  buffer:   { bg: '#78350f',     border: '--amber-bright', text: '--white-pure' },
+  terminal: { bg: '#7f1d1d',     border: '--color-status-err', text: '--white-pure' },
+  start:    { bg: '--slate-800', border: '#6366f1',     text: '#c7d2fe' },
+  end:      { bg: '--slate-800', border: '#6b7280',     text: '#9ca3af' },
+  ok:       { bg: '#065f46',     border: '--emerald',   text: '--white-pure' },
+  warn:     { bg: '#78350f',     border: '--amber-bright', text: '--white-pure' },
+  err:      { bg: '#7f1d1d',     border: '--color-status-err', text: '--white-pure' },
+  dim:      { bg: '--slate-800', border: '#374151',     text: '#6b7280' },
+}
+
+const EDGE_COLOR_TOKENS: Record<string, string> = {
+  normal: '--slate-500',
+  error: '--color-status-err',
+  recovery: '--emerald',
+  cascade: '--amber-bright',
 }
 
 interface CytoscapeFsmProps {
@@ -101,10 +131,10 @@ function buildStylesheet() {
         'text-halign': 'center',
         'font-size': '11px',
         'font-family': 'ui-monospace, SFMono-Regular, Menlo, monospace',
-        color: 'var(--frost-100)',
-        'background-color': 'var(--slate-800)',
+        color: resolveCssVar('--frost-100'),
+        'background-color': resolveCssVar('--slate-800'),
         'border-width': 2,
-        'border-color': 'var(--slate-600)',
+        'border-color': resolveCssVar('--slate-600'),
         shape: 'roundrectangle',
         width: 'label',
         height: 'label',
@@ -118,16 +148,16 @@ function buildStylesheet() {
       style: {
         'curve-style': 'bezier',
         'target-arrow-shape': 'triangle',
-        'target-arrow-color': 'var(--slate-500)',
-        'line-color': 'var(--slate-500)',
+        'target-arrow-color': resolveCssVar('--slate-500'),
+        'line-color': resolveCssVar('--slate-500'),
         width: 1.5,
         label: 'data(label)',
         'font-size': '9px',
         'font-family': 'ui-monospace, SFMono-Regular, Menlo, monospace',
-        color: 'var(--slate-400)',
+        color: resolveCssVar('--slate-400'),
         'text-rotation': 'autorotate',
         'text-margin-y': -8,
-        'text-background-color': 'var(--panel-dark)',
+        'text-background-color': resolveCssVar('--panel-dark'),
         'text-background-opacity': 0.85,
         'text-background-padding': '2px',
         'text-background-shape': 'roundrectangle',
@@ -136,7 +166,7 @@ function buildStylesheet() {
     {
       selector: ':parent',
       style: {
-        'background-color': 'var(--panel-dark)',
+        'background-color': resolveCssVar('--panel-dark'),
         'border-color': '#334155',
         'border-width': 1,
         'border-style': 'dashed',
@@ -144,38 +174,39 @@ function buildStylesheet() {
         'text-halign': 'center',
         padding: '16px',
         'font-size': '10px',
-        color: 'var(--slate-500)',
+        color: resolveCssVar('--slate-500'),
       },
     },
   ]
 
   // Node type-specific styles
-  for (const [type, colors] of Object.entries(NODE_COLORS)) {
+  for (const [type, tokens] of Object.entries(NODE_COLOR_TOKENS)) {
     styles.push({
       selector: `node[nodeType="${type}"]`,
       style: {
-        'background-color': colors.bg,
-        'border-color': colors.border,
-        color: colors.text,
+        'background-color': resolveCssVar(tokens.bg),
+        'border-color': resolveCssVar(tokens.border),
+        color: resolveCssVar(tokens.text),
       },
     })
   }
 
-  // Active node glow effect
+  // Active node emphasis. Cytoscape has no `shadow-*` node properties
+  // (only `text-shadow-*`); use the supported `overlay-*` family plus
+  // a thicker border to convey "active" without warnings.
   styles.push({
     selector: 'node[nodeType="active"]',
     style: {
-      'border-width': 3,
-      'shadow-blur': 12,
-      'shadow-color': 'var(--emerald)',
-      'shadow-opacity': 0.6,
-      'shadow-offset-x': 0,
-      'shadow-offset-y': 0,
+      'border-width': 4,
+      'overlay-color': resolveCssVar('--emerald'),
+      'overlay-opacity': 0.18,
+      'overlay-padding': 6,
     },
   })
 
   // Edge type styles
-  for (const [type, color] of Object.entries(EDGE_COLORS)) {
+  for (const [type, token] of Object.entries(EDGE_COLOR_TOKENS)) {
+    const color = resolveCssVar(token)
     styles.push({
       selector: `edge[edgeType="${type}"]`,
       style: {

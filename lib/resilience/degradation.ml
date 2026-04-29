@@ -108,3 +108,18 @@ let apply_level_to_strategy : type a.
               (error_mode_kind_label mode);
           cleanup = (fun () -> ());
         }
+
+(* ── Recovery → Degradation bridge ────────────────────────────── *)
+
+let of_recovery_recommended_level (mode : Recovery.error_mode) :
+    any_level option =
+  match mode with
+  | Recovery.DegradationRequired { recommended_level; _ } ->
+      of_int_opt recommended_level
+  | _ -> None
+
+let strategy_for_error_mode (mode : Recovery.error_mode) :
+    [ `Retry | `Fallback | `Handoff | `Abort ] Recovery.strategy =
+  match of_recovery_recommended_level mode with
+  | Some (Any_level level) -> apply_level_to_strategy level mode
+  | None -> Recovery.default_strategy mode

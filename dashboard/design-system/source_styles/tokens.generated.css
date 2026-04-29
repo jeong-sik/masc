@@ -389,6 +389,10 @@
   --motion-reveal: var(--t-slow) var(--ease-out);
   --motion-settle: var(--t-xslow) var(--ease-out);
   --motion-pop: var(--t-med) var(--ease-spring);
+  --enter-duration: var(--t-med);  /* duration for [data-state=open] / [data-state=entering] */
+  --exit-duration: var(--t-fast);  /* duration for [data-state=closed] / [data-state=leaving] */
+  --enter-easing: var(--ease-out);  /* cubic-bezier on enter — decelerate-into-rest */
+  --exit-easing: var(--ease-in);  /* cubic-bezier on exit — accelerate-out */
   --_motion-scope: 1;  /* scope sentinel */
   --cmt-question: var(--info);
   --cmt-flag: var(--err);

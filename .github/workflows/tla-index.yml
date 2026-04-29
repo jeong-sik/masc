@@ -1,0 +1,68 @@
+name: tla-spec-index
+
+# Refreshes specs/INDEX.md from the spec tree and surfaces drift.
+#
+# Modes:
+#   - schedule (weekly): drift-check only. Fails the job when INDEX.md is stale,
+#     so a maintainer notices in the Actions tab. Does NOT auto-commit.
+#   - workflow_dispatch: same drift-check, plus emits the regenerated file as
+#     an artifact for manual review.
+#   - pull_request (paths-filter): drift-check on PRs that touch specs/ or the
+#     generator. Stops a PR from landing with a stale index.
+#
+# Auto-commit is intentionally out of scope until the team agrees on a bot
+# identity and a base branch policy. Until then the workflow only reports.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 6 * * 1'  # Mon 06:17 UTC
+  pull_request:
+    paths:
+      - 'specs/**'
+      - 'scripts/gen-tla-index.sh'
+      - '.github/workflows/tla-index.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  drift-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # need git log dates per file
+
+      - name: Regenerate specs/INDEX.md
+        run: |
+          bash scripts/gen-tla-index.sh > /tmp/INDEX.new.md
+
+      - name: Compare against committed INDEX.md
+        id: diff
+        run: |
+          if [[ ! -f specs/INDEX.md ]]; then
+            echo "specs/INDEX.md is missing" >&2
+            exit 1
+          fi
+          # The "Generated:" header line embeds a timestamp/HEAD; ignore it.
+          if diff -u \
+              <(grep -v '^Generated: ' specs/INDEX.md) \
+              <(grep -v '^Generated: ' /tmp/INDEX.new.md) \
+              > /tmp/index.diff; then
+            echo "drift=clean" >>"$GITHUB_OUTPUT"
+            echo "INDEX.md is up to date."
+          else
+            echo "drift=stale" >>"$GITHUB_OUTPUT"
+            echo "INDEX.md is stale. Diff:"
+            cat /tmp/index.diff
+            exit 1
+          fi
+
+      - name: Upload regenerated INDEX (workflow_dispatch only)
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: tla-spec-index
+          path: /tmp/INDEX.new.md
+          retention-days: 14

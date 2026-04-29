@@ -524,13 +524,20 @@ done\n\
 printf 'docker-gh-ok workdir=%s cmd=%s\\n' \"$workdir\" \"$*\"\n"
 
 let test_keeper_shell_gh_without_current_task_uses_sandbox_context () =
-  with_repo_context_test_env @@ fun ~base:_ ~config ~repo_dir ->
+  with_repo_context_test_env @@ fun ~base:_ ~config ~repo_dir:_ ->
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
   let meta = make_meta ~sandbox_profile:Keeper_types.Docker () in
   let factory = Keeper_sandbox_factory.create ~config ~meta () in
   Fun.protect
     ~finally:(fun () -> Keeper_sandbox_factory.cleanup factory)
   @@ fun () ->
+  (* PR #11679 (sandbox factory closure) 이후 path validation 이
+     docker image 검사보다 먼저 실행됨. test 의 의도(`docker image
+     미설정 시 sandbox context 로 fallback`) 를 보존하려면 cwd 를
+     빈 문자열로 두어 [resolve_keeper_shell_read_cwd] 가
+     [keeper_default_read_root] 로 fallback 하게 한다.  외부
+     fixture path([base]/repo) 를 그대로 넘기면 path_outside_sandbox
+     로 cut 되어 docker image 검사에 도달 못 함.  #11710 follow-up. *)
   let raw =
     Keeper_exec_shell.handle_keeper_shell
       ~turn_sandbox_factory:(Some factory)
@@ -539,7 +546,7 @@ let test_keeper_shell_gh_without_current_task_uses_sandbox_context () =
         (`Assoc
           [
             ("op", `String "gh");
-            ("cwd", `String repo_dir);
+            ("cwd", `String "");
             ("cmd", `String "pr list --repo example/project");
           ])
   in
@@ -549,8 +556,6 @@ let test_keeper_shell_gh_without_current_task_uses_sandbox_context () =
     (json |> member "ok" |> to_bool);
   Alcotest.(check string) "sandbox task marker" "(sandbox)"
     (json |> member "task_id" |> to_string);
-  Alcotest.(check string) "cwd preserved" repo_dir
-    (json |> member "cwd" |> to_string);
   Alcotest.(check bool) "repo omitted when sandbox fallback has none" true
     (json |> member "repo" = `Null);
   Alcotest.(check string) "docker image error surfaced"

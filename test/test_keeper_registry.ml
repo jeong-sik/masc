@@ -317,6 +317,21 @@ let test_mark_turn_finished_records_completed_turn_outcome_once () =
         (Printf.sprintf "expected exactly one completed turn, got %d"
            (List.length turns))
 
+(* IR-1: mark_turn_finished resets fiber_wakeup as belt-and-suspenders.
+   The primary consumer is interruptible_sleep's CAS, but an explicit
+   reset in mark_turn_finished guarantees the flag is clean even when
+   the heartbeat loop's sleep path was not the one that consumed it. *)
+let test_mark_turn_finished_resets_wakeup () =
+  R.clear ();
+  let keeper_name = "k-wakeup-reset-ir1" in
+  let entry = R.register ~base_path:bp keeper_name (make_meta keeper_name) in
+  R.mark_turn_started ~base_path:bp keeper_name;
+  Atomic.set entry.R.fiber_wakeup true;
+  check bool "wakeup set before finish" true (Atomic.get entry.R.fiber_wakeup);
+  R.mark_turn_finished ~base_path:bp keeper_name;
+  check bool "IR-1: wakeup reset after mark_turn_finished" false
+    (Atomic.get entry.R.fiber_wakeup)
+
 let test_completed_turns_replay_from_default_store () =
   let base_path = temp_base_path "completed-turn-replay" in
   Fun.protect
@@ -1159,6 +1174,8 @@ let () =
             test_dispatch_event_with_audit_preserves_snapshot;
           eio_test "mark_turn_finished records completed turn outcome once"
             test_mark_turn_finished_records_completed_turn_outcome_once;
+          eio_test "mark_turn_finished resets fiber_wakeup (IR-1)"
+            test_mark_turn_finished_resets_wakeup;
           eio_test "completed turns replay from default store"
             test_completed_turns_replay_from_default_store;
           eio_test "unregister" test_unregister;

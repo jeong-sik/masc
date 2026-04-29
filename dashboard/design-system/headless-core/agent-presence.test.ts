@@ -246,9 +246,9 @@ describe('createAgentPresenceManager — high-throughput correctness', () => {
     // 'working' and 'idle' for the agent — every call genuinely
     // changes state, so every call should emit.
     const states = ['working', 'idle', 'working', 'idle', 'working'] as const
-    for (let pass = 0; pass < states.length; pass += 1) {
+    for (const next of states) {
       for (let agent = 0; agent < 12; agent += 1) {
-        m.updateState(`k${agent}`, states[pass])
+        m.updateState(`k${agent}`, next)
       }
     }
     expect(fires).toBe(12 * states.length)

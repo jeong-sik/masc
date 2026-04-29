@@ -507,6 +507,33 @@ val metric_inference_queue_max_concurrent : string
 val metric_agent_heartbeat_age_seconds : string
 val metric_agent_stale_total : string
 
+(** {1 OCaml GC sampler gauges (PR-0.2.D)}
+
+    Populated by {!module:Gc_sampler} once per sampling interval from
+    [Gc.quick_stat]. The cumulative word counters are exposed as
+    [Gauge] (not [Counter]) because they are read from the OCaml
+    runtime as point-in-time snapshots; PromQL [rate()] still works on
+    monotonic-by-construction gauges. [heap_words] and [live_words]
+    are point-in-time heap structure values, naturally a gauge. *)
+
+val metric_gc_minor_words : string
+(** Cumulative words allocated in the minor heap since program start. *)
+
+val metric_gc_major_words : string
+(** Cumulative words allocated in the major heap since program start. *)
+
+val metric_gc_heap_words : string
+(** Current size of the major heap, in words. *)
+
+val metric_gc_live_words : string
+(** Number of live words in the major heap at last sample. *)
+
+val metric_gc_compactions : string
+(** Number of major-heap compactions since program start. *)
+
+val metric_gc_promoted_words : string
+(** Cumulative words promoted from minor to major heap since program start. *)
+
 (** {1 Process monitoring} *)
 
 val approximate_open_fd_count : unit -> int

@@ -585,6 +585,21 @@ let metric_error_events = "masc_error_events_total"
 let metric_active_agents = "masc_active_agents"
 let metric_pending_tasks = "masc_pending_tasks"
 let metric_uptime_seconds = "masc_uptime_seconds"
+
+(* PR-0.2.D: OCaml GC quick_stat sampler gauges.  Populated by
+   [Gc_sampler.run] from the runtime [Gc.quick_stat ()] once per
+   sampling interval.  Names follow the [masc_gc_*_words] /
+   [masc_gc_*] convention so PromQL queries can group on the
+   [masc_gc_] prefix.  Cumulative counters are exposed as Gauge
+   because they are read as point-in-time runtime snapshots; PromQL
+   [rate()] still works on monotonic-by-construction gauges. *)
+let metric_gc_minor_words = "masc_gc_minor_words"
+let metric_gc_major_words = "masc_gc_major_words"
+let metric_gc_heap_words = "masc_gc_heap_words"
+let metric_gc_live_words = "masc_gc_live_words"
+let metric_gc_compactions = "masc_gc_compactions"
+let metric_gc_promoted_words = "masc_gc_promoted_words"
+
 let metric_sse_connections_active = "masc_sse_connections_active"
 let metric_sse_reconnects = "masc_sse_reconnects_total"
 let metric_sse_idle_evictions = "masc_sse_idle_evictions_total"
@@ -782,6 +797,23 @@ let init () =
   add metric_active_agents "Currently active agents" Gauge;
   add metric_pending_tasks "Tasks waiting to be claimed" Gauge;
   add metric_uptime_seconds "Server uptime in seconds" Gauge;
+  (* PR-0.2.D: OCaml runtime GC sampler gauges.  See [Gc_sampler]. *)
+  add metric_gc_minor_words
+    "Cumulative words allocated in the minor heap since program start \
+     (from Gc.quick_stat)" Gauge;
+  add metric_gc_major_words
+    "Cumulative words allocated in the major heap since program start \
+     (from Gc.quick_stat)" Gauge;
+  add metric_gc_heap_words
+    "Current size of the major heap in words (from Gc.quick_stat)" Gauge;
+  add metric_gc_live_words
+    "Live words in the major heap at last sample (from Gc.quick_stat)" Gauge;
+  add metric_gc_compactions
+    "Number of major-heap compactions since program start \
+     (from Gc.quick_stat)" Gauge;
+  add metric_gc_promoted_words
+    "Cumulative words promoted from minor to major heap since program \
+     start (from Gc.quick_stat)" Gauge;
   add metric_sse_connections_active "Active SSE connections" Gauge;
   add metric_sse_reconnects "Total SSE reconnects (same session reattached)" Counter;
   add metric_sse_idle_evictions "Total SSE clients evicted by idle reaper" Counter;

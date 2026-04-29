@@ -452,6 +452,26 @@ type semantic =
   | `Terminal_prompt
   | `Terminal_cursor
   | `Terminal_selection_bg
+  | `Menu_bg
+  | `Menu_border
+  | `Menu_shadow
+  | `Menu_separator
+  | `Menuitem_fg
+  | `Menuitem_hover_bg
+  | `Menuitem_active_bg
+  | `Menuitem_disabled_fg
+  | `Menu_shortcut_fg
+  | `Tooltip_bg
+  | `Tooltip_fg
+  | `Tooltip_border
+  | `Tooltip_shadow
+  | `Toast_bg_info
+  | `Toast_bg_success
+  | `Toast_bg_warning
+  | `Toast_bg_error
+  | `Toast_fg
+  | `Toast_border
+  | `Toast_shadow
   | `Motion_enter
   | `Motion_exit
   | `Motion_swap
@@ -945,6 +965,26 @@ let name_of = function
   | `Terminal_prompt -> "terminal-prompt"
   | `Terminal_cursor -> "terminal-cursor"
   | `Terminal_selection_bg -> "terminal-selection-bg"
+  | `Menu_bg -> "menu-bg"
+  | `Menu_border -> "menu-border"
+  | `Menu_shadow -> "menu-shadow"
+  | `Menu_separator -> "menu-separator"
+  | `Menuitem_fg -> "menuitem-fg"
+  | `Menuitem_hover_bg -> "menuitem-hover-bg"
+  | `Menuitem_active_bg -> "menuitem-active-bg"
+  | `Menuitem_disabled_fg -> "menuitem-disabled-fg"
+  | `Menu_shortcut_fg -> "menu-shortcut-fg"
+  | `Tooltip_bg -> "tooltip-bg"
+  | `Tooltip_fg -> "tooltip-fg"
+  | `Tooltip_border -> "tooltip-border"
+  | `Tooltip_shadow -> "tooltip-shadow"
+  | `Toast_bg_info -> "toast-bg-info"
+  | `Toast_bg_success -> "toast-bg-success"
+  | `Toast_bg_warning -> "toast-bg-warning"
+  | `Toast_bg_error -> "toast-bg-error"
+  | `Toast_fg -> "toast-fg"
+  | `Toast_border -> "toast-border"
+  | `Toast_shadow -> "toast-shadow"
   | `Motion_enter -> "motion-enter"
   | `Motion_exit -> "motion-exit"
   | `Motion_swap -> "motion-swap"

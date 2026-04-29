@@ -456,6 +456,26 @@
   --terminal-prompt: var(--brass-1);  /* shell prompt sigil fg (brass — active input cursor anchor) */
   --terminal-cursor: var(--brass-1);  /* block cursor fill (matches prompt for visual cohesion) */
   --terminal-selection-bg: rgb(var(--brass-glow) / .15);  /* terminal text selection bg (brass-tinted — same family as state-active-bg) */
+  --menu-bg: var(--bg-3);  /* menu surface bg (elevated card; sits above editor / chrome) */
+  --menu-border: var(--line-2);  /* menu border (emphasized — overlay surface needs definition) */
+  --menu-shadow: var(--shadow-2);  /* menu drop shadow (elev-4 — overlay layer above chrome) */
+  --menu-separator: var(--line-1);  /* menu role=separator divider (subtle hairline between groups) */
+  --menuitem-fg: var(--fg-1);  /* menuitem label fg (primary — high-affordance choice) */
+  --menuitem-hover-bg: var(--bg-4);  /* menuitem hover bg (rover-position visual) */
+  --menuitem-active-bg: rgb(var(--brass-glow) / .08);  /* menuitem [data-active] / [data-pressed] bg (brass — selection mark) */
+  --menuitem-disabled-fg: var(--fg-4);  /* menuitem [aria-disabled] fg */
+  --menu-shortcut-fg: var(--fg-3);  /* aria-keyshortcuts trailing label fg (muted mono — secondary signal) */
+  --tooltip-bg: var(--bg-3);  /* tooltip surface bg (matches menu elevation) */
+  --tooltip-fg: var(--fg-1);  /* tooltip label fg */
+  --tooltip-border: var(--line-2);  /* tooltip border */
+  --tooltip-shadow: var(--shadow-1);  /* tooltip drop shadow (elev-2 — lighter than menu, transient) */
+  --toast-bg-info: var(--info-soft);  /* toast surface bg for severity=info (info-soft semantic) */
+  --toast-bg-success: var(--ok-soft);  /* toast surface bg for severity=success (ok-soft semantic) */
+  --toast-bg-warning: var(--warn-soft);  /* toast surface bg for severity=warning (warn-soft semantic) */
+  --toast-bg-error: var(--err-soft);  /* toast surface bg for severity=error (err-soft semantic) */
+  --toast-fg: var(--fg-1);  /* toast text fg (primary — same across severities; tint in bg) */
+  --toast-border: var(--line-2);  /* toast border (severity-neutral; tint comes from -bg) */
+  --toast-shadow: var(--shadow-3);  /* toast drop shadow (elev-5 — floats above modals at z-toast) */
   --motion-enter: var(--t-med) var(--ease-out);
   --motion-exit: var(--t-fast) var(--ease-in);
   --motion-swap: var(--t-fast) var(--ease);

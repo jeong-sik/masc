@@ -188,3 +188,15 @@ val pipeline_stage_of_lifecycle_event :
   string -> string option
 
 val paused_of_lifecycle_event : string -> bool option
+
+val seed_execution_cache_for_test : unit -> unit
+
+val patch_surface_json_for_running_keepers :
+  Coord.config -> Yojson.Safe.t -> Yojson.Safe.t
+
+val patch_keeper_row :
+  keeper_name:string ->
+  event:string ->
+  keepalive_running:bool ->
+  Yojson.Safe.t ->
+  Yojson.Safe.t

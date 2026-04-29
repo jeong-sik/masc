@@ -41,6 +41,11 @@ permissions:
   contents: read
   pull-requests: read
 
+# Cancel in-flight runs when a new commit is pushed to the same PR.
+concurrency:
+  group: tokens-drift-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 # Generated artifact paths kept here as a single list for re-use across
 # the diff and tier-integrity gates. Update this list together with
 # build.ts OUT entries.

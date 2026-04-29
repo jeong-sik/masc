@@ -1,168 +1,55 @@
 // Activity heatmap — Canvas 2D day-of-week x hour-of-day density grid.
-// Uses server-projected density from the full filtered event set.
+// PR-4.8: Offloads the static heatmap render to a Web Worker using
+// OffscreenCanvas. The main thread only does a lightweight drawImage()
+// and HTML tooltip overlay. Falls back to main-thread rendering when
+// Worker or OffscreenCanvas are unavailable.
 
 import { html } from 'htm/preact'
-import { useEffect, useRef } from 'preact/hooks'
+import { useEffect, useRef, useState } from 'preact/hooks'
 import { Card } from './common/card'
 import { EmptyState } from './common/feedback-state'
-import { HEATMAP_COLORS } from '../config/constants'
 import type { ActivityGraphResponse } from '../types'
+import {
+  intensityColor,
+  canvasWidth,
+  canvasHeight,
+  drawHeatmap,
+  hitTest,
+  DAY_LABELS,
+} from './activity-heatmap-draw'
 
-const DAY_LABELS = ['월', '화', '수', '목', '금', '토', '일'] as const
-const HOUR_LABELS = [0, 3, 6, 9, 12, 15, 18, 21] as const
-
-const CELL = 20
-const GAP = 2
-const LEFT_MARGIN = 28
-const TOP_PAD = 20
-const LEGEND_HEIGHT = 32
-
-const COLORS = HEATMAP_COLORS
-
-interface HeatmapCell {
-  day: number
-  hour: number
-  count: number
-}
-
-interface TooltipInfo {
-  x: number
-  y: number
-  cell: HeatmapCell
-}
+// Re-export for test consumers that assert on pure functions.
+export { intensityColor, canvasWidth, canvasHeight, hitTest }
 
 interface HeatmapProps {
   data: ActivityGraphResponse
 }
 
-export function intensityColor(count: number, max: number): string {
-  if (count === 0) return COLORS[0]
-  if (max === 0) return COLORS[0]
-  const ratio = count / max
-  if (ratio <= 0.25) return COLORS[1]
-  if (ratio <= 0.50) return COLORS[2]
-  if (ratio <= 0.75) return COLORS[3]
-  return COLORS[4]
+interface TooltipState {
+  x: number
+  y: number
+  text: string
 }
 
-export function canvasWidth(): number {
-  return LEFT_MARGIN + 24 * (CELL + GAP) - GAP
-}
-
-export function canvasHeight(): number {
-  return TOP_PAD + 7 * (CELL + GAP) - GAP + LEGEND_HEIGHT
-}
-
-function drawHeatmap(
-  ctx: CanvasRenderingContext2D,
-  matrix: number[][],
-  max: number,
-  tooltip: TooltipInfo | null,
-) {
-  const w = canvasWidth()
-  const h = canvasHeight()
-
-  // Background
-  ctx.fillStyle = '#0f1117'
-  ctx.fillRect(0, 0, w, h)
-
-  // Hour labels (top)
-  ctx.font = '10px system-ui, sans-serif'
-  ctx.fillStyle = 'var(--slate-500)'
-  ctx.textAlign = 'center'
-  for (const hour of HOUR_LABELS) {
-    const x = LEFT_MARGIN + hour * (CELL + GAP) + CELL / 2
-    ctx.fillText(String(hour), x, TOP_PAD - 6)
+let workerInstance: Worker | null = null
+function getHeatmapWorker(): Worker | null {
+  if (workerInstance) return workerInstance
+  if (typeof Worker === 'undefined' || typeof OffscreenCanvas === 'undefined') return null
+  try {
+    workerInstance = new Worker(
+      new URL('../workers/activity-heatmap.worker.ts', import.meta.url),
+    )
+    return workerInstance
+  } catch {
+    return null
   }
-
-  // Day labels (left) + cells
-  ctx.textAlign = 'right'
-  for (let day = 0; day < 7; day++) {
-    const y = TOP_PAD + day * (CELL + GAP)
-    const label = DAY_LABELS[day]!
-
-    ctx.fillStyle = 'var(--slate-400)'
-    ctx.font = '11px system-ui, sans-serif'
-    ctx.fillText(label, LEFT_MARGIN - 6, y + CELL / 2 + 4)
-
-    for (let hour = 0; hour < 24; hour++) {
-      const count = matrix[day]![hour]!
-      const x = LEFT_MARGIN + hour * (CELL + GAP)
-      ctx.fillStyle = intensityColor(count, max)
-      ctx.beginPath()
-      ctx.roundRect(x, y, CELL, CELL, 3)
-      ctx.fill()
-    }
-  }
-
-  // Legend
-  const legendY = TOP_PAD + 7 * (CELL + GAP) + 8
-  ctx.font = '10px system-ui, sans-serif'
-  ctx.fillStyle = 'var(--slate-500)'
-  ctx.textAlign = 'left'
-  ctx.fillText('적음', LEFT_MARGIN, legendY + 10)
-
-  const legendStartX = LEFT_MARGIN + 28
-  for (let i = 0; i < COLORS.length; i++) {
-    const lx = legendStartX + i * (CELL + 2)
-    ctx.fillStyle = COLORS[i]!
-    ctx.beginPath()
-    ctx.roundRect(lx, legendY, CELL, 12, 2)
-    ctx.fill()
-  }
-
-  ctx.fillStyle = 'var(--slate-500)'
-  ctx.textAlign = 'left'
-  ctx.fillText('많음', legendStartX + COLORS.length * (CELL + 2) + 4, legendY + 10)
-
-  // Tooltip
-  if (tooltip) {
-    const { x, y, cell } = tooltip
-    const dayName = DAY_LABELS[cell.day] ?? '?'
-    const text = `${dayName}요일 ${cell.hour}시 — ${cell.count}건`
-
-    ctx.font = '11px system-ui, sans-serif'
-    const metrics = ctx.measureText(text)
-    const padX = 10
-    const padY = 6
-    const boxW = metrics.width + padX * 2
-    const boxH = 24
-
-    const tx = Math.min(x + 12, w - boxW - 4)
-    const ty = Math.max(y - boxH - 4, 4)
-
-    ctx.fillStyle = 'rgba(15, 23, 42, 0.95)'
-    ctx.beginPath()
-    ctx.roundRect(tx, ty, boxW, boxH, 6)
-    ctx.fill()
-    ctx.strokeStyle = 'rgba(100, 116, 139, 0.3)'
-    ctx.lineWidth = 1
-    ctx.stroke()
-
-    ctx.fillStyle = 'var(--frost-100)'
-    ctx.textAlign = 'left'
-    ctx.fillText(text, tx + padX, ty + padY + 11)
-  }
-}
-
-export function hitTest(mx: number, my: number): HeatmapCell | null {
-  for (let day = 0; day < 7; day++) {
-    const cy = TOP_PAD + day * (CELL + GAP)
-    if (my < cy || my > cy + CELL) continue
-    for (let hour = 0; hour < 24; hour++) {
-      const cx = LEFT_MARGIN + hour * (CELL + GAP)
-      if (mx >= cx && mx <= cx + CELL) {
-        return { day, hour, count: 0 }
-      }
-    }
-  }
-  return null
 }
 
 export function ActivityHeatmap({ data }: HeatmapProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
-  const tooltipRef = useRef<TooltipInfo | null>(null)
+  const [tooltip, setTooltip] = useState<TooltipState | null>(null)
+  const pendingJobRef = useRef(false)
 
   const matrix = data.heatmap.matrix
   const max = data.heatmap.max
@@ -184,9 +71,33 @@ export function ActivityHeatmap({ data }: HeatmapProps) {
 
     const ctx = canvas.getContext('2d')
     if (!ctx) return
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
 
-    drawHeatmap(ctx, matrix, max, tooltipRef.current)
+    const worker = getHeatmapWorker()
+    if (worker && !pendingJobRef.current) {
+      pendingJobRef.current = true
+      const onMessage = (event: MessageEvent<{ bitmap: ImageBitmap | null }>) => {
+        pendingJobRef.current = false
+        const { bitmap } = event.data
+        if (bitmap) {
+          ctx.save()
+          ctx.setTransform(1, 0, 0, 1, 0, 0)
+          ctx.clearRect(0, 0, canvas.width, canvas.height)
+          ctx.drawImage(bitmap, 0, 0)
+          ctx.restore()
+          bitmap.close()
+        } else {
+          // Worker failed — fallback to main-thread render.
+          ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+          drawHeatmap(ctx, matrix, max)
+        }
+      }
+      worker.addEventListener('message', onMessage, { once: true })
+      worker.postMessage({ matrix, max, dpr })
+    } else {
+      // Worker unavailable or job already in flight — main-thread fallback.
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+      drawHeatmap(ctx, matrix, max)
+    }
 
     function handleMouse(event: MouseEvent) {
       const canvasEl = canvasRef.current
@@ -199,40 +110,25 @@ export function ActivityHeatmap({ data }: HeatmapProps) {
       const my = (event.clientY - rect.top) * scaleY
 
       const hit = hitTest(mx, my)
-      const prev = tooltipRef.current
-
       if (hit) {
         hit.count = matrix[hit.day]![hit.hour]!
-        tooltipRef.current = { x: mx, y: my, cell: hit }
+        const dayName = DAY_LABELS[hit.day] ?? '?'
+        setTooltip({
+          x: event.clientX - rect.left,
+          y: event.clientY - rect.top,
+          text: `${dayName}요일 ${hit.hour}시 — ${hit.count}건`,
+        })
         canvasEl.style.cursor = 'pointer'
       } else {
-        tooltipRef.current = null
+        setTooltip(null)
         canvasEl.style.cursor = 'default'
-      }
-
-      const changed = (hit !== null) !== (prev !== null)
-        || (hit && prev && (hit.day !== prev.cell.day || hit.hour !== prev.cell.hour))
-      if (changed) {
-        const ctx2 = canvasEl.getContext('2d')
-        if (ctx2) {
-          const dpr2 = window.devicePixelRatio || 1
-          ctx2.setTransform(dpr2, 0, 0, dpr2, 0, 0)
-          drawHeatmap(ctx2, matrix, max, tooltipRef.current)
-        }
       }
     }
 
     function handleLeave() {
+      setTooltip(null)
       const canvasEl = canvasRef.current
-      if (!canvasEl) return
-      tooltipRef.current = null
-      const ctx2 = canvasEl.getContext('2d')
-      if (ctx2) {
-        const dpr2 = window.devicePixelRatio || 1
-        ctx2.setTransform(dpr2, 0, 0, dpr2, 0, 0)
-        drawHeatmap(ctx2, matrix, max, null)
-      }
-      canvasEl.style.cursor = 'default'
+      if (canvasEl) canvasEl.style.cursor = 'default'
     }
 
     canvas.addEventListener('mousemove', handleMouse)
@@ -259,6 +155,22 @@ export function ActivityHeatmap({ data }: HeatmapProps) {
       </div>
       <div ref=${containerRef} class="relative overflow-x-auto bg-[#0f1117] rounded p-3 contain-content">
         <canvas ref=${canvasRef} class="block" role="img" aria-label="요일별 시간대별 활동 밀도 히트맵" />
+        ${tooltip
+          ? html`
+            <div
+              class="absolute pointer-events-none z-10 px-2.5 py-1.5 rounded-md text-xs whitespace-nowrap"
+              style=${{
+                left: `${Math.min(tooltip.x + 12, canvasWidth() - 140)}px`,
+                top: `${Math.max(tooltip.y - 32, 4)}px`,
+                background: 'rgba(15, 23, 42, 0.95)',
+                border: '1px solid rgba(100, 116, 139, 0.3)',
+                color: 'var(--frost-100)',
+              }}
+            >
+              ${tooltip.text}
+            </div>
+          `
+          : null}
       </div>
     <//>
   `

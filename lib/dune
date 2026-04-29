@@ -112,6 +112,7 @@
    dashboard_feature_health
    dashboard_provider_runs
    dashboard_cascade
+   dashboard_oas_bridge
    dashboard_verification
    dashboard_tla_specs
    proactive_refresh

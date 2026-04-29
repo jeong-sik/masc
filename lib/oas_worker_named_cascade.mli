@@ -12,14 +12,14 @@
 val default_config_path : unit -> string option
 (** Alias for [Cascade_runtime.cascade_config_path]. *)
 
-val default_model_strings : string list
+val default_model_strings : cascade_name:string -> string list
 (** Alias for [Cascade_runtime.default_model_strings]. *)
 
 (** {1 Eio context validation} *)
 
 val require_eio :
-  ?sw:Eio.Switch.t -> ?net:Eio.Net.t -> unit ->
-  (Eio.Switch.t * Eio.Net.t, string) result
+  ?sw:Eio.Switch.t -> ?net:Eio_context.eio_net -> unit ->
+  (Eio.Switch.t * Eio_context.eio_net, string) result
 (** Validate that an Eio switch and network are available in the current
     context.  Returns [Ok (sw, net)] when both are present, or [Error msg]
     when running outside a server context. *)
@@ -35,7 +35,7 @@ val cascade_catalog_error_to_sdk_error : string -> Oas.Error.sdk_error
 (** {1 Provider resolution} *)
 
 val resolve_cascade_providers :
-  ?provider_filter:(Llm_provider.Provider_config.t -> bool) ->
+  ?provider_filter:string list ->
   ?require_tool_choice_support:bool ->
   ?require_tool_support:bool ->
   ?runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy ->
@@ -44,12 +44,12 @@ val resolve_cascade_providers :
 (** Resolve cascade provider configs via MASC Cascade_config. *)
 
 val resolve_providers_from_model_strings :
-  ?provider_filter:(Llm_provider.Provider_config.t -> bool) ->
+  ?provider_filter:string list ->
   ?require_tool_choice_support:bool ->
   ?require_tool_support:bool ->
   ?runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy ->
   string list ->
-  (Llm_provider.Provider_config.t list, string) result
+  Llm_provider.Provider_config.t list
 (** Resolve from an explicit model string list (user-declared in keeper TOML). *)
 
 val keeper_agent_name_opt : string -> string option
@@ -116,7 +116,7 @@ val filter_candidate_providers_for_tool_support :
 
 val resolve_tool_capable_provider_across_cascades :
   sw:Eio.Switch.t ->
-  net:Eio.Net.t ->
+  net:Eio_context.eio_net ->
   keeper_name:string ->
   ?runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy ->
   ?tools:Oas.Tool.t list ->

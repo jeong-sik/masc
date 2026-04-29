@@ -3,8 +3,8 @@ exception Semaphore_wait_timeout of float
 (** Global turn slot cap. Safety ceiling for ALL keeper turns. *)
 val keeper_turn_throttle_limit : int
 
-val turn_semaphore : int Eio.Semaphore.t
-val autonomous_turn_semaphore : int Eio.Semaphore.t
+val turn_semaphore : Eio.Semaphore.t
+val autonomous_turn_semaphore : Eio.Semaphore.t
 
 (** Wall-clock cap on [Eio.Semaphore.acquire] when waiting for a keeper
     turn slot. Derived from [MASC_KEEPER_SEMAPHORE_WAIT_TIMEOUT_SEC]. *)

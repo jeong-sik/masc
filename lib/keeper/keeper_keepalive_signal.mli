@@ -50,7 +50,13 @@ val stage_timing_ring_size : unit -> int
 val percentile : float array -> float -> float
 
 val stage_timing_to_json :
-  ring:stage_timing array -> count:int -> [> `Null | `Assoc of (string * [> `Assoc of (string * [> `Float | `Int ]) list ]) list ]
+  ring:stage_timing array -> count:int ->
+  [> `Null
+  | `Assoc of
+      (string *
+       [> `Assoc of (string * [> `Float of float | `Int of int ]) list ])
+      list
+  ]
 
 val format_since_last_scheduled_autonomous : int option -> string
 
@@ -63,7 +69,7 @@ val dispatch_keepalive_event :
 
 val dispatch_keepalive_event_with_audit :
   ctx:'a context -> keeper_name:string ->
-  snapshot:Keeper_measurement.measurement ->
-  events_fired:Keeper_guard.event list ->
-  selected_event:Keeper_guard.event option ->
+  snapshot:Keeper_measurement.measurement_snapshot ->
+  events_fired:Keeper_state_machine.event list ->
+  selected_event:Keeper_state_machine.event ->
   Keeper_state_machine.event -> unit

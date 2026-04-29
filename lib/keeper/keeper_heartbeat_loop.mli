@@ -6,6 +6,9 @@ val effective_keepalive_meta :
   disk_meta_opt:keeper_meta option ->
   keeper_meta
 
+val repair_identity_drift_for_keepalive :
+  ctx:'a context -> keeper_meta -> keeper_meta option
+
 val keeper_agent_status : keeper_meta -> Types.agent_status
 
 val sync_keeper_presence :
@@ -22,7 +25,7 @@ val collect_keepalive_board_events :
   ctx:'a context ->
   meta_current:keeper_meta ->
   proactive_warmup_elapsed:bool ->
-  Keeper_world_observation.keepalive_event list * keeper_meta
+  Keeper_world_observation.pending_board_event list * keeper_meta
 
 val in_turn_liveness_pulse_interval_sec : unit -> float
 
@@ -46,7 +49,7 @@ val with_in_turn_liveness_pulse :
 val run_keepalive_unified_turn :
   ctx:'a context ->
   meta_after_triage:keeper_meta ->
-  pending_board_events:Keeper_world_observation.keepalive_event list ->
+  pending_board_events:Keeper_world_observation.pending_board_event list ->
   stop:bool Atomic.t ->
   proactive_warmup_elapsed:bool ->
   shared_context:Oas.Context.t ->

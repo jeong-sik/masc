@@ -32,6 +32,8 @@ val next_fail_open_cascade_for_turn :
   Oas.Error.sdk_error ->
   EC.degraded_retry option
 
+val sdk_error_kind : Oas.Error.sdk_error -> string
+
 val record_turn_failure_stress :
   meta:keeper_meta ->
   is_auto_recoverable:bool ->
@@ -60,6 +62,7 @@ val oas_timeout_budget_resolution_to_yojson :
   oas_timeout_budget_resolution -> Yojson.Safe.t
 
 val resolve_bounded_oas_timeout_budget_with_turn_budget :
+  reserve_degraded_retry_budget:bool ->
   estimated_input_tokens:int ->
   max_turns:int ->
   remaining_turn_budget_s:float ->

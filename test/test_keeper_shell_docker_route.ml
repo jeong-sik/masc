@@ -12,6 +12,7 @@ module Coord = Masc_mcp.Coord
 module Keeper_exec_shell = Masc_mcp.Keeper_exec_shell
 module Keeper_registry = Masc_mcp.Keeper_registry
 module Keeper_sandbox = Masc_mcp.Keeper_sandbox
+module Keeper_sandbox_factory = Masc_mcp.Keeper_sandbox_factory
 module Keeper_shell_docker = Masc_mcp.Keeper_shell_docker
 module Keeper_types = Masc_mcp.Keeper_types
 module Keeper_alerting_path = Masc_mcp.Keeper_alerting_path
@@ -347,8 +348,14 @@ let test_git_clone_routes_through_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
   setup ~sandbox:Keeper_types.Docker
   @@ fun ~config ~meta ~playground ->
+  let factory = Keeper_sandbox_factory.create ~config ~meta () in
+  Fun.protect
+    ~finally:(fun () -> Keeper_sandbox_factory.cleanup factory)
+  @@ fun () ->
   let raw =
-    Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_factory:None ~exec_cache:None ~config ~meta
+    Keeper_exec_shell.handle_keeper_shell
+      ~turn_sandbox_factory:(Some factory)
+      ~exec_cache:None ~config ~meta
       ~args:
         (`Assoc
           [
@@ -372,8 +379,14 @@ let test_hard_mode_git_clone_uses_brokered_route () =
   with_env "MASC_KEEPER_SANDBOX_RELAX_FS" "false" @@ fun () ->
   setup ~sandbox:Keeper_types.Docker
   @@ fun ~config ~meta ~playground ->
+  let factory = Keeper_sandbox_factory.create ~config ~meta () in
+  Fun.protect
+    ~finally:(fun () -> Keeper_sandbox_factory.cleanup factory)
+  @@ fun () ->
   let raw =
-    Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_factory:None ~exec_cache:None ~config ~meta
+    Keeper_exec_shell.handle_keeper_shell
+      ~turn_sandbox_factory:(Some factory)
+      ~exec_cache:None ~config ~meta
       ~args:
         (`Assoc
           [
@@ -607,8 +620,14 @@ let test_git_clone_repairs_existing_docker_clone_checkout () =
   clear_checkout_but_keep_git_dir clone_path;
   Alcotest.(check bool) "checkout file removed before repair" false
     (Sys.file_exists restored_readme);
+  let factory = Keeper_sandbox_factory.create ~config ~meta () in
+  Fun.protect
+    ~finally:(fun () -> Keeper_sandbox_factory.cleanup factory)
+  @@ fun () ->
   let raw =
-    Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_factory:None ~exec_cache:None ~config ~meta
+    Keeper_exec_shell.handle_keeper_shell
+      ~turn_sandbox_factory:(Some factory)
+      ~exec_cache:None ~config ~meta
       ~args:
         (`Assoc
           [

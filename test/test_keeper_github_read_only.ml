@@ -527,8 +527,14 @@ let test_keeper_shell_gh_without_current_task_uses_sandbox_context () =
   with_repo_context_test_env @@ fun ~base:_ ~config ~repo_dir ->
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
   let meta = make_meta ~sandbox_profile:Keeper_types.Docker () in
+  let factory = Keeper_sandbox_factory.create ~config ~meta () in
+  Fun.protect
+    ~finally:(fun () -> Keeper_sandbox_factory.cleanup factory)
+  @@ fun () ->
   let raw =
-    Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_factory:None ~exec_cache:None ~config ~meta
+    Keeper_exec_shell.handle_keeper_shell
+      ~turn_sandbox_factory:(Some factory)
+      ~exec_cache:None ~config ~meta
       ~args:
         (`Assoc
           [

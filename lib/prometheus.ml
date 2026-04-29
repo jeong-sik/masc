@@ -529,6 +529,7 @@ let metric_ws_slice_fanout_skipped = "masc_ws_slice_fanout_skipped_total"
 let metric_ws_bytes_sent = "masc_ws_bytes_sent_total"
 let metric_grpc_bytes_sent = "masc_grpc_bytes_sent_total"
 let metric_ws_delta_built = "masc_ws_delta_built_total"
+let metric_ws_message_bytes = "masc_ws_message_bytes"
 (* Backlog-replay attribution: every gRPC Subscribe RPC reads
    [.masc/backlog.jsonl] from disk before the live broadcast hook
    takes over.  These two counters separate replay cost from live
@@ -1230,6 +1231,16 @@ let init () =
      allocation + jsonrpc_notification wrap per delta). Divide by \
      broadcast count to estimate fanout amplification."
     Counter;
+  register_histogram ~name:metric_ws_message_bytes
+    ~help:"WebSocket message payload size in bytes (per-frame, wire \
+           boundary). Labelled by direction so send vs recv \
+           distributions can be compared independently."
+    ~labels:[("direction", "send")] ();
+  register_histogram ~name:metric_ws_message_bytes
+    ~help:"WebSocket message payload size in bytes (per-frame, wire \
+           boundary). Labelled by direction so send vs recv \
+           distributions can be compared independently."
+    ~labels:[("direction", "recv")] ();
   add metric_grpc_backlog_replay_lines_scanned
     "Lines walked while replaying .masc/backlog.jsonl on a gRPC \
      Subscribe RPC (every line, including those filtered by \

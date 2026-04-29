@@ -1766,6 +1766,11 @@
  (modules test_a12_e2e_demo)
  (libraries masc_test_deps multimodal resilience shared_audit shared_types))
 
+(test
+ (name test_k2_pipeline_e2e)
+ (modules test_k2_pipeline_e2e)
+ (libraries masc_test_deps multimodal shared_types yojson))
+
 (executable
  (name test_concurrent_distributed)
  (modules test_concurrent_distributed)

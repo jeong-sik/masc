@@ -60,6 +60,7 @@ mission_json="$out_dir/dashboard-mission.json"
 namespace_headers="$out_dir/namespace-truth.headers"
 namespace_body="$out_dir/namespace-truth.body"
 namespace_json="$out_dir/namespace-truth.json"
+dev_token_json="$out_dir/dashboard-dev-token.json"
 
 cleanup() {
   if [[ -n "${SERVER_PID:-}" ]]; then
@@ -143,7 +144,8 @@ wait_for_initialize_ready() {
     : >"$initialize_headers"
     : >"$initialize_body"
     if post_json "$MCP_URL" "$payload" "$initialize_headers" "$initialize_body" \
-      -H 'Accept: application/json, text/event-stream'; then
+      -H 'Accept: application/json, text/event-stream' \
+      -H "Authorization: Bearer ${auth_token}"; then
       local code
       code="$(status_code "$initialize_headers")"
       if [[ "$code" == "200" ]]; then
@@ -168,6 +170,34 @@ post_json() {
     -d "$body"
 }
 
+extract_dev_token() {
+  python3 - "$dev_token_json" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as fh:
+    token = json.load(fh).get("token", "")
+if not token:
+    raise SystemExit(1)
+print(token)
+PY
+}
+
+wait_for_loopback_dev_token() {
+  local deadline=$(( $(date +%s) + BOOT_WAIT_SEC ))
+  local token
+  while [[ "$(date +%s)" -lt "$deadline" ]]; do
+    if curl -fsS -H 'Accept: application/json' \
+      "${BASE_URL}/api/v1/dashboard/dev-token" >"$dev_token_json" 2>/dev/null \
+      && token="$(extract_dev_token)"; then
+      printf '%s\n' "$token"
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
 copy_install_smoke() {
   mkdir -p "$prefix_dir" "$base_path/.masc/config"
   cp "$BINARY" "$installed_bin"
@@ -183,6 +213,9 @@ copy_install_smoke
 installed_version="$("$installed_bin" --version 2>/dev/null | tail -n1)"
 
 env \
+  MASC_ADMIN_TOKEN= \
+  MASC_INTERNAL_MCP_TOKEN= \
+  MASC_MCP_TOKEN= \
   MASC_GRPC_ENABLED=0 \
   MASC_WS_ENABLED=0 \
   MASC_WEBRTC_ENABLED=0 \
@@ -194,6 +227,16 @@ if ! wait_for_http "${BASE_URL}/health"; then
   echo "release-evidence: server did not become healthy at ${BASE_URL}" >&2
   tail -n 40 "$server_log" >&2 || true
   exit 1
+fi
+
+auth_token="${MASC_RELEASE_EVIDENCE_TOKEN:-}"
+if [[ -z "$auth_token" ]]; then
+  if ! auth_token="$(wait_for_loopback_dev_token)"; then
+    echo "release-evidence: failed to fetch loopback dashboard dev-token" >&2
+    cat "$dev_token_json" >&2 || true
+    tail -n 40 "$server_log" >&2 || true
+    exit 1
+  fi
 fi
 
 init_payload='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"release-evidence","version":"1.0"}}}'
@@ -214,6 +257,7 @@ protocol_version="$(header_value "$initialize_headers" "Mcp-Protocol-Version")"
 tools_payload='{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
 post_json "$MCP_URL" "$tools_payload" "$tools_headers" "$tools_body" \
   -H 'Accept: application/json, text/event-stream' \
+  -H "Authorization: Bearer ${auth_token}" \
   -H "Mcp-Session-Id: ${session_id}" \
   -H "Mcp-Protocol-Version: ${protocol_version}"
 normalize_json "$tools_body" "$tools_json"
@@ -221,6 +265,7 @@ normalize_json "$tools_body" "$tools_json"
 status_payload='{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"masc_status","arguments":{}}}'
 post_json "$MCP_URL" "$status_payload" "$status_headers" "$status_body" \
   -H 'Accept: application/json, text/event-stream' \
+  -H "Authorization: Bearer ${auth_token}" \
   -H "Mcp-Session-Id: ${session_id}" \
   -H "Mcp-Protocol-Version: ${protocol_version}"
 normalize_json "$status_body" "$status_json"

@@ -163,6 +163,8 @@ let start_container (t : t) ~(timeout_sec : float) =
           @ [
             "--user";
             Printf.sprintf "%d:%d" t.uid t.gid;
+            "--env";
+            "HOME=/tmp";
           ]
           @ Keeper_sandbox_runtime.docker_nofile_args ()
           @ Env_config_keeper.KeeperSandbox.read_only_rootfs_args ()
@@ -223,6 +225,8 @@ let run_exec_with_status_once
             "exec";
             "--user";
             Printf.sprintf "%d:%d" t.uid t.gid;
+            "--env";
+            "HOME=/tmp";
             "-w";
             container_cwd;
           ]

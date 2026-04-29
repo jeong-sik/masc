@@ -75,6 +75,12 @@ let container_root name =
     Env_config_keeper.DockerPlayground.container_playground_root
     (Playground_paths.sanitize_keeper_name name)
 
+let keeper_visible_root_abs_of_meta ~(config : Coord.config)
+    (meta : Keeper_types.keeper_meta) =
+  match backend_of_profile meta.sandbox_profile with
+  | Local -> host_root_abs_of_meta ~config meta
+  | Docker -> container_root meta.name
+
 let of_meta ~(config : Coord.config) ~(meta : Keeper_types.keeper_meta) : t =
   let backend = backend_of_profile meta.sandbox_profile in
   { keeper_name = meta.name

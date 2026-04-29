@@ -60,6 +60,21 @@ val host_root_abs_of_meta :
     hardened Docker backend. *)
 val container_root : string -> string
 
+(** [keeper_visible_root_abs_of_meta ~config meta] is the absolute
+    sandbox root the keeper LLM should treat as its working root,
+    derived directly from [meta] without building the full record.
+    For Docker keepers this is the in-container path
+    ({!container_root}); for Local keepers this is the host path
+    ({!host_root_abs_of_meta}). Use this in runtime_contract and
+    other LLM-facing surfaces; surfacing the host path to a Docker
+    keeper makes the LLM emit [cd /Users/.../.masc/playground/...]
+    inside the container, which fails because that path does not
+    exist there. *)
+val keeper_visible_root_abs_of_meta :
+  config:Coord.config ->
+  Keeper_types.keeper_meta ->
+  string
+
 (** {1 Construction} *)
 
 (** [of_meta ~config ~meta] derives the full sandbox record from a

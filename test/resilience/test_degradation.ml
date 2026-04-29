@@ -95,6 +95,57 @@ let test_l4_forces_abort_regardless () =
   | R.Abort _ -> ()
   | _ -> assert false
 
+(* ─── Recovery → Degradation bridge (A11b) ────────────────────── *)
+
+let test_of_recovery_recommended_level_for_degradation_required () =
+  let mode = R.degradation_required ~detail:"target=2" ~recommended_level:2 in
+  match D.of_recovery_recommended_level mode with
+  | Some (D.Any_level level) -> assert (D.to_int level = 2)
+  | None -> assert false
+
+let test_of_recovery_recommended_level_returns_none_for_other_modes () =
+  assert (D.of_recovery_recommended_level (transient_mode ()) = None);
+  assert (D.of_recovery_recommended_level (permanent_handoff_mode ()) = None);
+  assert (D.of_recovery_recommended_level (resource_mode ()) = None)
+
+let test_of_recovery_recommended_level_returns_none_for_out_of_range () =
+  let mode = R.degradation_required ~detail:"bad" ~recommended_level:0 in
+  assert (D.of_recovery_recommended_level mode = None);
+  let mode2 = R.degradation_required ~detail:"bad" ~recommended_level:5 in
+  assert (D.of_recovery_recommended_level mode2 = None)
+
+let test_strategy_for_error_mode_uses_level_when_present () =
+  (* L1 → canonical (Recovery.default_strategy of DegradationRequired
+     is Handoff per B6 mapping). Verifying L1 path still returns
+     Handoff confirms the mode→level→strategy round-trip. *)
+  let mode_l1 = R.degradation_required ~detail:"x" ~recommended_level:1 in
+  (match D.strategy_for_error_mode mode_l1 with
+   | R.Handoff _ -> ()
+   | _ -> assert false);
+  (* L4 forces Abort regardless of mode. *)
+  let mode_l4 = R.degradation_required ~detail:"x" ~recommended_level:4 in
+  match D.strategy_for_error_mode mode_l4 with
+  | R.Abort _ -> ()
+  | _ -> assert false
+
+let test_strategy_for_error_mode_falls_back_to_default_for_other_modes () =
+  (* Transient → Recovery.default_strategy → Retry. *)
+  (match D.strategy_for_error_mode (transient_mode ()) with
+   | R.Retry _ -> ()
+   | _ -> assert false);
+  (* Permanent handoff → Handoff via canonical default. *)
+  match D.strategy_for_error_mode (permanent_handoff_mode ()) with
+  | R.Handoff _ -> ()
+  | _ -> assert false
+
+let test_strategy_for_error_mode_falls_back_when_level_out_of_range () =
+  (* recommended_level = 99 → of_recovery_recommended_level = None
+     → falls back to canonical default (Handoff for DegradationRequired). *)
+  let mode = R.degradation_required ~detail:"x" ~recommended_level:99 in
+  match D.strategy_for_error_mode mode with
+  | R.Handoff _ -> ()
+  | _ -> assert false
+
 let () =
   test_all_level_tags ();
   test_level_to_tag_round_trip ();
@@ -109,4 +160,10 @@ let () =
   test_l2_preserves_handoff_for_permanent ();
   test_l3_forces_handoff_regardless ();
   test_l4_forces_abort_regardless ();
+  test_of_recovery_recommended_level_for_degradation_required ();
+  test_of_recovery_recommended_level_returns_none_for_other_modes ();
+  test_of_recovery_recommended_level_returns_none_for_out_of_range ();
+  test_strategy_for_error_mode_uses_level_when_present ();
+  test_strategy_for_error_mode_falls_back_to_default_for_other_modes ();
+  test_strategy_for_error_mode_falls_back_when_level_out_of_range ();
   print_endline "test_degradation: all assertions passed"

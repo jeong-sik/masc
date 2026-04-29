@@ -111,3 +111,41 @@ val apply_level_to_strategy :
     Higher levels are progressively more conservative — once
     skeleton or fallback is required, retrying or substituting
     is no longer appropriate. *)
+
+(** {1 Recovery → Degradation bridge}
+
+    The B6 [Recovery.error_mode.DegradationRequired] constructor
+    carries [recommended_level : int] (per the I5 stub note
+    pending Tier A11). A direct retype to [Degradation.level]
+    on the B6 side would create a circular dependency:
+    [Recovery → Degradation → Recovery]. Instead the conversion
+    lives here, where [Degradation] already imports
+    [Recovery.error_mode].
+
+    {!of_recovery_recommended_level} interprets the integer as
+    the lattice ordinal ([1..4]); other modes return [None].
+    {!strategy_for_error_mode} composes that lookup with
+    {!apply_level_to_strategy} so callers obtain the level-
+    adjusted strategy in one call. *)
+
+val of_recovery_recommended_level :
+  Recovery.error_mode -> any_level option
+(** [of_recovery_recommended_level mode] returns the
+    {!any_level} encoded by [mode]'s [recommended_level] field
+    when [mode] is [Recovery.DegradationRequired { recommended_level; _ }]
+    and [recommended_level] is in [\[1, 4\]]. Returns [None] for
+    any other failure mode and for out-of-range integers. *)
+
+val strategy_for_error_mode :
+  Recovery.error_mode ->
+  [ `Retry | `Fallback | `Handoff | `Abort ] Recovery.strategy
+(** [strategy_for_error_mode mode] returns:
+    - {!apply_level_to_strategy} of the encoded level when [mode]
+      is [DegradationRequired] with a level in [\[1, 4\]].
+    - {!Recovery.default_strategy} of [mode] otherwise (other
+      failure kinds, and [DegradationRequired] with an
+      out-of-range integer).
+
+    This is the canonical entrypoint for callers that have an
+    [error_mode] in hand and want a strategy without first
+    extracting the level. *)

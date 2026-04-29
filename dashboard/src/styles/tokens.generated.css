@@ -365,6 +365,11 @@
   --hover-lift: -1px;
   --focus-ring-width: 2px;
   --focus-ring-offset: 2px;
+  --color-button-primary-bg: var(--accent-12);
+  --color-button-primary-fg: var(--color-fg-secondary);
+  --color-button-primary-border: var(--accent-30);
+  --color-button-primary-bg-hover: var(--accent-20);
+  --color-button-primary-bg-pressed: var(--accent-20);
   --color-state-hover-bg: var(--bg-3);
   --color-state-hover-fg: var(--fg-1);
   --color-state-hover-border: var(--line-2);

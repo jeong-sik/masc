@@ -639,6 +639,28 @@ export const semantic: ReadonlyArray<TokenBase> = (() => {
   out.push(t("focus-ring-width",   "2px",  "role", "dimension"));
   out.push(t("focus-ring-offset",  "2px",  "role", "dimension"));
 
+  // Component-level role tokens (v2 spec §4.3.3) — Primitive→Semantic→
+  // Component 3-tier. These name the *component slot* (button-primary-bg)
+  // rather than the underlying palette (accent-12). Future Headless Button
+  // primitive consumes via `bg-[var(--button-primary-bg)]` so the same
+  // component slot can swap palette without touching the consumer.
+  //
+  // First slot — button-primary. Aliases to the existing accent-* family
+  // that ActionButton already uses inline (src/components/common/button.ts).
+  // No value drift: the alias resolves to exactly the same hex via the
+  // var() chain. Future button-secondary / button-ghost / button-danger
+  // slots will follow this pattern in subsequent PRs.
+  out.push(t("button-primary-bg",         "var(--accent-12)",         "role", "color",
+    "ActionButton variant=primary surface bg"));
+  out.push(t("button-primary-fg",         "var(--color-fg-secondary)","role", "color",
+    "ActionButton variant=primary text fg"));
+  out.push(t("button-primary-border",     "var(--accent-30)",         "role", "color",
+    "ActionButton variant=primary border"));
+  out.push(t("button-primary-bg-hover",   "var(--accent-20)",         "role", "color",
+    "ActionButton variant=primary hover bg (Tailwind hover: + data-[hover])"));
+  out.push(t("button-primary-bg-pressed", "var(--accent-20)",         "role", "color",
+    "ActionButton variant=primary [data-pressed] / [aria-pressed=true] bg"));
+
   // Interactive state roles — explicit hover/selected/pressed semantics
   out.push(t("state-hover-bg",       "var(--bg-3)",   "role", "color"));
   out.push(t("state-hover-fg",       "var(--fg-1)",   "role", "color"));

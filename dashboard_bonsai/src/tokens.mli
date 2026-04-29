@@ -377,6 +377,11 @@ type semantic =
   | `Hover_lift
   | `Focus_ring_width
   | `Focus_ring_offset
+  | `Button_primary_bg
+  | `Button_primary_fg
+  | `Button_primary_border
+  | `Button_primary_bg_hover
+  | `Button_primary_bg_pressed
   | `State_hover_bg
   | `State_hover_fg
   | `State_hover_border

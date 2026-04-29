@@ -370,6 +370,11 @@
   --hover-lift: -1px;  /* translateY offset while [data-hover] */
   --focus-ring-width: 2px;
   --focus-ring-offset: 2px;
+  --button-primary-bg: var(--accent-12);  /* ActionButton variant=primary surface bg */
+  --button-primary-fg: var(--color-fg-secondary);  /* ActionButton variant=primary text fg */
+  --button-primary-border: var(--accent-30);  /* ActionButton variant=primary border */
+  --button-primary-bg-hover: var(--accent-20);  /* ActionButton variant=primary hover bg (Tailwind hover: + data-[hover]) */
+  --button-primary-bg-pressed: var(--accent-20);  /* ActionButton variant=primary [data-pressed] / [aria-pressed=true] bg */
   --state-hover-bg: var(--bg-3);
   --state-hover-fg: var(--fg-1);
   --state-hover-border: var(--line-2);

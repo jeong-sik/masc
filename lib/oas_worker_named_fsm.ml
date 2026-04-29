@@ -297,6 +297,50 @@ let sdk_error_is_hard_quota (err : Oas.Error.sdk_error) : bool =
        false)
   | _ -> false
 
+let provider_label provider =
+  match String.trim provider with
+  | "" -> "unknown"
+  | value -> value
+
+let transient_http_status code =
+  code = 408 || code = 409 || code = 425 || code = 429 || code >= 500
+
+let provider_capacity ?(scope = `Provider) provider =
+  Some (Provider_error.CapacityExhausted { scope; affected = [ provider ] })
+
+let retry_api_error_to_provider_error ~provider ~capacity_exhausted api_error =
+  let provider = provider_label provider in
+  match api_error with
+  | Llm_provider.Retry.RateLimited { retry_after; _ } ->
+      if capacity_exhausted then provider_capacity provider
+      else Some (Provider_error.RateLimit { retry_after; provider })
+  | Llm_provider.Retry.Overloaded _ ->
+      provider_capacity provider
+  | Llm_provider.Retry.ServerError { status; _ } ->
+      Some
+        (Provider_error.ServerError
+           { code = status; transient = transient_http_status status })
+  | Llm_provider.Retry.AuthError _ ->
+      Some (Provider_error.AuthError { provider })
+  | Llm_provider.Retry.InvalidRequest { message } ->
+      if capacity_exhausted then provider_capacity provider
+      else Some (Provider_error.InvalidRequest { provider; reason = message })
+  | Llm_provider.Retry.NotFound { message } ->
+      Some (Provider_error.InvalidRequest { provider; reason = message })
+  | Llm_provider.Retry.ContextOverflow _ ->
+      provider_capacity ~scope:`Model provider
+  | Llm_provider.Retry.NetworkError _
+  | Llm_provider.Retry.Timeout _ ->
+      None
+
+let sdk_error_to_provider_error ~provider err =
+  match err with
+  | Oas.Error.Api api_err ->
+      retry_api_error_to_provider_error ~provider
+        ~capacity_exhausted:(sdk_error_is_hard_quota err)
+        api_err
+  | _ -> None
+
 (* When the SDK surfaces a transient HTTP 429 that is *not* a hard-quota
    in disguise, expose the [retry_after] hint that [Llm_provider.Retry]
    already extracted from the response body.  Used by the cascade error

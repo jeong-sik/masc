@@ -1,0 +1,9 @@
+[keeper]
+persona_name = "ramarama"
+sandbox_profile = "docker"
+network_mode = "inherit"
+tool_preset = "social"
+work_discovery_enabled = true
+work_discovery_sources = ["board_posts"]
+github_identity = "anyang-keepers"
+git_identity_mode = "github_identity"

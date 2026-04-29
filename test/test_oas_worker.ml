@@ -709,6 +709,42 @@ let test_sdk_error_is_hard_quota_detects_claude_org_monthly_limit_wrapper () =
   Alcotest.(check bool) "Claude org monthly usage limit counts as hard quota" true
     (Oas_worker_named.sdk_error_is_hard_quota err)
 
+(* 2026-04-29: Anthropic console started returning the user-set monthly cap
+   as HTTP 400 [invalid_request_error] instead of a 429.  The CLI wrapper
+   message and the direct API path both surface the new phrasing
+   ("reached your specified API usage limits ... regain access on ...").
+   Without these tests the [cli_wrapped_hard_quota_indicators] list and
+   the [InvalidRequest] branch silently drift back to false-negative,
+   re-burning the full OAS turn budget the next time the cap fires. *)
+let test_sdk_error_is_hard_quota_detects_claude_specified_limit_cli_wrapper () =
+  let err =
+    Oas.Error.Api
+      (Llm_provider.Retry.NetworkError
+         {
+           message =
+             "claude exited with code 1: API Error: 400 \
+              {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"You have reached your specified API usage limits. You will regain access on 2026-05-01 at 00:00 UTC.\"}}";
+           kind = Llm_provider.Http_client.Unknown;
+         })
+  in
+  Alcotest.(check bool)
+    "Claude CLI 400-wrapped specified-limit counts as hard quota" true
+    (Oas_worker_named.sdk_error_is_hard_quota err)
+
+let test_sdk_error_is_hard_quota_detects_anthropic_invalid_request_specified_limit () =
+  let err =
+    Oas.Error.Api
+      (Llm_provider.Retry.InvalidRequest
+         {
+           message =
+             "You have reached your specified API usage limits. You will \
+              regain access on 2026-05-01 at 00:00 UTC.";
+         })
+  in
+  Alcotest.(check bool)
+    "Direct Anthropic InvalidRequest specified-limit counts as hard quota" true
+    (Oas_worker_named.sdk_error_is_hard_quota err)
+
 let test_sdk_error_is_max_turns_detects_claude_cli_wrapper () =
   let err =
     Oas.Error.Api
@@ -3754,6 +3790,10 @@ let () =
         test_sdk_error_is_hard_quota_detects_claude_cli_limit_wrapper;
       Alcotest.test_case "sdk_error_is_hard_quota detects Claude org monthly limit wrapper" `Quick
         test_sdk_error_is_hard_quota_detects_claude_org_monthly_limit_wrapper;
+      Alcotest.test_case "sdk_error_is_hard_quota detects Claude 400 specified-limit CLI wrapper" `Quick
+        test_sdk_error_is_hard_quota_detects_claude_specified_limit_cli_wrapper;
+      Alcotest.test_case "sdk_error_is_hard_quota detects Anthropic direct InvalidRequest specified-limit" `Quick
+        test_sdk_error_is_hard_quota_detects_anthropic_invalid_request_specified_limit;
       Alcotest.test_case "sdk_error_is_max_turns detects Claude CLI wrapper" `Quick
         test_sdk_error_is_max_turns_detects_claude_cli_wrapper;
       Alcotest.test_case "sdk_error_is_hard_quota keeps transient network errors false" `Quick

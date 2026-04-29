@@ -182,6 +182,7 @@
         test_run_local_script
         test_tool_prefilter
         test_keeper_state_machine
+        test_keeper_state_machine_correspondence
         test_keeper_social_model_magentic_ledger_fsm
         test_keeper_overflow_recovery
         test_team_memory
@@ -362,6 +363,7 @@
           test_run_local_script
           test_tool_prefilter
           test_keeper_state_machine
+          test_keeper_state_machine_correspondence
           test_keeper_social_model_magentic_ledger_fsm
           test_keeper_overflow_recovery
           test_team_memory

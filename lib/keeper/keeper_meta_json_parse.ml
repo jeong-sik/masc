@@ -388,6 +388,7 @@ let parse_compaction_runtime (json : Yojson.Safe.t) : compaction_runtime =
   ; last_check_ts = Safe_ops.json_float ~default:0.0 "last_compaction_check_ts" json
   ; last_decision =
       Safe_ops.json_string ~default:"uninitialized" "last_compaction_decision" json
+      |> compaction_runtime_decision_of_string
   }
 ;;
 

@@ -98,13 +98,21 @@ val tool_access_default_room_signal_prompt_enabled :
 
 (** {1 Runtime types (embedded in agent_runtime_state)} *)
 
+type compaction_runtime_decision = Compaction_runtime_decision of string
+
+val compaction_runtime_decision_to_string :
+  compaction_runtime_decision -> string
+
+val compaction_runtime_decision_of_string :
+  string -> compaction_runtime_decision
+
 type compaction_runtime = {
   count: int;
   last_ts: float;
   last_before_tokens: int;
   last_after_tokens: int;
   last_check_ts: float;
-  last_decision: string;
+  last_decision: compaction_runtime_decision;
 }
 
 type proactive_runtime = {

@@ -364,7 +364,8 @@ let apply_post_turn_lifecycle
                   last_check_ts = now_ts;
                   last_decision =
                     Keeper_compact_policy.compaction_decision_to_string
-                      no_checkpoint_decision;
+                      no_checkpoint_decision
+                    |> compaction_runtime_decision_of_string;
                 };
             })
           meta
@@ -496,7 +497,8 @@ let apply_post_turn_lifecycle
                   last_check_ts = now_ts;
                   last_decision =
                     Keeper_compact_policy.compaction_decision_to_string
-                      decision;
+                      decision
+                    |> compaction_runtime_decision_of_string;
                 };
             })
           base_meta

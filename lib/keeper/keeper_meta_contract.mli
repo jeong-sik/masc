@@ -69,13 +69,24 @@ type scheduled_autonomous_cycle_outcome = proactive_cycle_outcome
 
 (** {1 Runtime state types} *)
 
+type compaction_runtime_decision = Compaction_runtime_decision of string
+(** Last compaction gate result as persisted in keeper meta.  JSON and
+    dashboard boundaries still use the historical string value via
+    {!compaction_runtime_decision_to_string}. *)
+
+val compaction_runtime_decision_to_string :
+  compaction_runtime_decision -> string
+
+val compaction_runtime_decision_of_string :
+  string -> compaction_runtime_decision
+
 type compaction_runtime = {
   count : int;
   last_ts : float;
   last_before_tokens : int;
   last_after_tokens : int;
   last_check_ts : float;
-  last_decision : string;
+  last_decision : compaction_runtime_decision;
 }
 
 type proactive_runtime = {

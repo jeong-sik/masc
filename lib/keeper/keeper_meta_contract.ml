@@ -39,13 +39,18 @@ type scheduled_autonomous_cycle_outcome = proactive_cycle_outcome
 
 (* -- Runtime types (moved into agent_runtime_state) -- *)
 
+type compaction_runtime_decision = Compaction_runtime_decision of string
+
+let compaction_runtime_decision_to_string (Compaction_runtime_decision value) = value
+let compaction_runtime_decision_of_string value = Compaction_runtime_decision value
+
 type compaction_runtime =
   { count : int
   ; last_ts : float
   ; last_before_tokens : int
   ; last_after_tokens : int
   ; last_check_ts : float
-  ; last_decision : string
+  ; last_decision : compaction_runtime_decision
   }
 
 type proactive_runtime =

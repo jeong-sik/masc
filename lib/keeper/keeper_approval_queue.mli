@@ -17,6 +17,10 @@ type risk_level =
 (** [Oas.Hooks.approval_decision] alias used as the resolver type. *)
 type decision = Oas.Hooks.approval_decision
 
+type approval_audit_decision =
+  | Approval_resolved of decision
+  | Approval_expired of string
+
 (** Pending approval entry — the suspended-fiber side of the
     Eio.Promise rendez-vous. *)
 type pending_approval =
@@ -81,6 +85,8 @@ val resolve_error_to_string : resolve_error -> string
 val risk_level_to_string : risk_level -> string
 val risk_level_to_int : risk_level -> int
 val risk_level_of_string : string -> risk_level option
+val approval_decision_to_string : decision -> string
+val approval_audit_decision_to_string : approval_audit_decision -> string
 
 (** {1 Rule store (persisted)} *)
 
@@ -147,7 +153,7 @@ val audit_approval_event :
   ?rule_match:rule_match ->
   ?source_approval_id:string ->
   ?auto_approved:bool ->
-  ?decision:string ->
+  ?decision:approval_audit_decision ->
   unit ->
   unit
 

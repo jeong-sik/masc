@@ -75,6 +75,10 @@ type pending_approval = {
 
 type decision = Oas.Hooks.approval_decision
 
+type approval_audit_decision =
+  | Approval_resolved of decision
+  | Approval_expired of string
+
 type approval_rule = {
   id : string;
   keeper_name : string;
@@ -118,6 +122,15 @@ let risk_level_of_string = function
   | "high" -> Some High
   | "critical" -> Some Critical
   | _ -> None
+
+let approval_decision_to_string = function
+  | Oas.Hooks.Approve -> "approve"
+  | Oas.Hooks.Reject reason -> "reject:" ^ reason
+  | Oas.Hooks.Edit _ -> "edit"
+
+let approval_audit_decision_to_string = function
+  | Approval_resolved decision -> approval_decision_to_string decision
+  | Approval_expired reason -> "reject:" ^ reason
 
 let string_opt_of_json = function
   | `String value ->
@@ -456,7 +469,12 @@ let get_audit_store ?base_path () =
 let audit_approval_event ?base_path ~event_type ~id ~keeper_name ~tool_name
     ~risk_level ?turn_id ?task_id ?goal_id ?(goal_ids = [])
     ?runtime_contract ?selected_model ?disposition ?disposition_reason
-    ?rule_match ?source_approval_id ?auto_approved ?(decision = "") () =
+    ?rule_match ?source_approval_id ?auto_approved ?decision () =
+  let decision =
+    decision
+    |> Option.map approval_audit_decision_to_string
+    |> Option.value ~default:""
+  in
   match get_audit_store ?base_path () with
   | None -> ()
   | Some store ->
@@ -696,11 +714,7 @@ let record_pending (entry : pending_approval) =
   broadcast_pending entry
 
 let resolve_entry ?base_path (entry : pending_approval) (decision : decision) =
-  let decision_str = match decision with
-    | Oas.Hooks.Approve -> "approve"
-    | Oas.Hooks.Reject reason -> "reject:" ^ reason
-    | Oas.Hooks.Edit _ -> "edit"
-  in
+  let decision_str = approval_decision_to_string decision in
   Log.Keeper.info
     "HITL_APPROVAL_RESOLVED: id=%s keeper=%s tool=%s decision=%s"
     entry.id entry.keeper_name entry.tool_name decision_str;
@@ -710,7 +724,8 @@ let resolve_entry ?base_path (entry : pending_approval) (decision : decision) =
     ?goal_id:entry.goal_id ~goal_ids:entry.goal_ids
     ?runtime_contract:entry.runtime_contract
     ?selected_model:entry.selected_model ?disposition:entry.disposition
-    ?disposition_reason:entry.disposition_reason ~decision:decision_str ();
+    ?disposition_reason:entry.disposition_reason
+    ~decision:(Approval_resolved decision) ();
   (match entry.resolver with
    | Some resolver -> Eio.Promise.resolve resolver decision
    | None -> ());
@@ -998,7 +1013,7 @@ let expire_stale ~max_wait_s =
       ~goal_ids:entry.goal_ids ?runtime_contract:entry.runtime_contract
       ?selected_model:entry.selected_model ?disposition:entry.disposition
       ?disposition_reason:entry.disposition_reason
-      ~decision:("reject:" ^ reason) ();
+      ~decision:(Approval_expired reason) ();
     (match entry.resolver with
      | Some resolver ->
        Eio.Promise.resolve resolver (Oas.Hooks.Reject reason)

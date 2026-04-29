@@ -18,6 +18,15 @@ type outcome =
   | Success
   | Failure of string
 
+type governance_audit_decision =
+  | Governance_allow
+  | Governance_require_confirm
+  | Governance_deny
+  | Governance_confirm
+  | Governance_expired
+  | Governance_unauthorized
+  | Governance_other of string
+
 type action =
   | Join
   | Leave
@@ -34,7 +43,7 @@ type action =
   | CircuitOpen
   | CircuitClose
   | SearchRefinement
-  | GovernanceDecision of string
+  | GovernanceDecision of governance_audit_decision
   | Custom of string
 
 type audit_entry = {
@@ -58,6 +67,24 @@ let preview ?(max_len = 200) (value : string) =
 
 (** {1 Serialization} *)
 
+let governance_audit_decision_to_string = function
+  | Governance_allow -> "allow"
+  | Governance_require_confirm -> "require_confirm"
+  | Governance_deny -> "deny"
+  | Governance_confirm -> "confirm"
+  | Governance_expired -> "expired"
+  | Governance_unauthorized -> "unauthorized"
+  | Governance_other value -> value
+
+let governance_audit_decision_of_string = function
+  | "allow" -> Governance_allow
+  | "require_confirm" -> Governance_require_confirm
+  | "deny" -> Governance_deny
+  | "confirm" -> Governance_confirm
+  | "expired" -> Governance_expired
+  | "unauthorized" -> Governance_unauthorized
+  | value -> Governance_other value
+
 let action_to_string = function
   | Join -> "join"
   | Leave -> "leave"
@@ -74,7 +101,8 @@ let action_to_string = function
   | CircuitOpen -> "circuit_open"
   | CircuitClose -> "circuit_close"
   | SearchRefinement -> "search_refinement"
-  | GovernanceDecision decision -> "governance_decision:" ^ decision
+  | GovernanceDecision decision ->
+      "governance_decision:" ^ governance_audit_decision_to_string decision
   | Custom name -> "custom:" ^ name
 
 let string_to_action = function
@@ -95,7 +123,8 @@ let string_to_action = function
   | s when String.length s > 10 && String.starts_with ~prefix:"tool_call:" s ->
       ToolCall (String.sub s 10 (String.length s - 10))
   | s when String.length s > 20 && String.starts_with ~prefix:"governance_decision:" s ->
-      GovernanceDecision (String.sub s 20 (String.length s - 20))
+      let raw = String.sub s 20 (String.length s - 20) in
+      GovernanceDecision (governance_audit_decision_of_string raw)
   | s when String.length s > 7 && String.starts_with ~prefix:"custom:" s ->
       Custom (String.sub s 7 (String.length s - 7))
   | s -> Custom s

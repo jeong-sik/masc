@@ -30,6 +30,15 @@ type outcome =
   | Success
   | Failure of string
 
+type governance_audit_decision =
+  | Governance_allow
+  | Governance_require_confirm
+  | Governance_deny
+  | Governance_confirm
+  | Governance_expired
+  | Governance_unauthorized
+  | Governance_other of string
+
 type action =
   | Join
   | Leave
@@ -46,7 +55,7 @@ type action =
   | CircuitOpen
   | CircuitClose
   | SearchRefinement
-  | GovernanceDecision of string
+  | GovernanceDecision of governance_audit_decision
   | Custom of string
 
 type audit_entry = {
@@ -67,6 +76,12 @@ val action_to_string : action -> string
 (** Stable serialisation; round-tripped by the legacy reader. The
     parametric variants ([ToolCall] / [GovernanceDecision] /
     [Custom]) are encoded as ["<tag>:<arg>"]. *)
+
+val governance_audit_decision_to_string :
+  governance_audit_decision -> string
+
+val governance_audit_decision_of_string :
+  string -> governance_audit_decision
 
 val entry_to_json : audit_entry -> Yojson.Safe.t
 
@@ -232,7 +247,7 @@ val log_governance_decision :
   config ->
   agent_id:string ->
   trace_id:string ->
-  decision:string ->
+  decision:governance_audit_decision ->
   action_type:string ->
   confirmation_state:string ->
   unit -> unit

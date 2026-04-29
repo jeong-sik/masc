@@ -966,13 +966,13 @@ let test_read_recent_audit_filters_after_wide_scan () =
   let keeper_name = "audit-target-keeper" in
   AQ.audit_approval_event ~event_type:"resolved" ~id:"target-audit"
     ~keeper_name ~tool_name:"keeper_shell" ~risk_level:AQ.Medium
-    ~decision:"approve" ();
+    ~decision:(AQ.Approval_resolved Agent_sdk.Hooks.Approve) ();
   for i = 1 to 32 do
     AQ.audit_approval_event ~event_type:"resolved"
       ~id:(Printf.sprintf "other-audit-%02d" i)
       ~keeper_name:(Printf.sprintf "busy-keeper-%02d" i)
       ~tool_name:"keeper_shell" ~risk_level:AQ.Medium
-      ~decision:"approve" ()
+      ~decision:(AQ.Approval_resolved Agent_sdk.Hooks.Approve) ()
   done;
   match AQ.read_recent_audit ~keeper_name ~n:1 () with
   | [ json ] ->

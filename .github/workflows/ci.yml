@@ -515,6 +515,17 @@ jobs:
           echo "::notice::dune build is hard-required (blocks merge via CI Gate); test execution failures are advisory and summarized below"
           echo "::notice::Optional env-gated suites not run here: PostgreSQL tests, live ICE/STUN/TURN/browser interop, viewer-local-e2e-check, swarm/team-session workload harnesses"
 
+      - name: Config doctor drift report
+        if: ${{ always() && steps.build_step.outcome == 'success' }}
+        continue-on-error: true
+        run: |
+          if [ -f _build/default/bin/main_eio.exe ]; then
+            echo "::group::Config doctor report"
+            _build/default/bin/main_eio.exe doctor config --json || true
+            echo "::endgroup::"
+          else
+            echo "::notice::main_eio.exe not found, skipping config-doctor"
+          fi
       - name: Summarize advisory build status
         if: ${{ always() }}
         id: build_advisory_status

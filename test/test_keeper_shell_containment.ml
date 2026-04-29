@@ -11,6 +11,7 @@ module Keeper_exec_shell = Masc_mcp.Keeper_exec_shell
 module Keeper_id = Masc_mcp.Keeper_id
 module Keeper_registry = Masc_mcp.Keeper_registry
 module Keeper_sandbox = Masc_mcp.Keeper_sandbox
+module Keeper_sandbox_factory = Masc_mcp.Keeper_sandbox_factory
 module Keeper_types = Masc_mcp.Keeper_types
 module Keeper_alerting_path = Masc_mcp.Keeper_alerting_path
 module Fs_compat = Fs_compat
@@ -204,6 +205,31 @@ let blocked_by_symmetric_sandbox raw =
       let len = String.length needle in
       String.length err >= len && String.sub err 0 len = needle
 
+(* Docker-keeper boundary enforcement landed in two phases:
+   - B-1.5 (early): [symmetric_sandbox_blocked], emitted by
+     [Keeper_sandbox_containment.check_read_target] AFTER the resolver
+     allowed the host path through.
+   - PR-3b (2026-04-28+): the resolver itself rejects out-of-sandbox
+     reads with [path_outside_sandbox], so the symmetric check is not
+     reached for the canonical "outside playground" case.  Both labels
+     observably mean "Docker keeper read blocked by playground
+     boundary".  Use this looser predicate for Docker-keeper tests so
+     the semantic stays "is it blocked" instead of pinning to the
+     1st-stage label.  Legacy [blocked_by_symmetric_sandbox] stays
+     strict so [test_legacy_keeper_unaffected] continues to assert
+     "this code path didn't fire" rather than the broader "blocked or
+     not". *)
+let blocked_by_sandbox_boundary raw =
+  match parse_field raw "error" with
+  | None -> false
+  | Some err ->
+      let starts_with prefix s =
+        let pl = String.length prefix in
+        String.length s >= pl && String.sub s 0 pl = prefix
+      in
+      starts_with "symmetric_sandbox_blocked" err
+      || starts_with "path_outside_sandbox" err
+
 let test_legacy_keeper_unaffected () =
   setup ~keeper_name:"alice" ~sandbox:Keeper_types.Local
   @@ fun ~base ~config ~meta ~playground:_ ->
@@ -212,6 +238,11 @@ let test_legacy_keeper_unaffected () =
     Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_factory:None ~exec_cache:None ~config ~meta
       ~args:(`Assoc [ ("op", `String "cat"); ("path", `String outside) ])
   in
+  (* Strict predicate: this test specifically asserts the symmetric
+     containment layer doesn't fire for Local keepers.  PR-3b's resolver
+     tightening also blocks Local with [path_outside_sandbox], but that
+     is the resolver layer, not the symmetric containment layer this
+     test was written to characterise. *)
   Alcotest.(check bool) "legacy bypasses symmetric containment" false
     (blocked_by_symmetric_sandbox raw)
 
@@ -220,24 +251,36 @@ let test_docker_keeper_blocks_ls_outside () =
   @@ fun ~base ~config ~meta ~playground:_ ->
   let outside_dir = Filename.concat base "outside_playground" in
   ensure_dir outside_dir;
+  let factory = Keeper_sandbox_factory.create ~config ~meta () in
+  Fun.protect
+    ~finally:(fun () -> Keeper_sandbox_factory.cleanup factory)
+  @@ fun () ->
   let raw =
-    Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_factory:None ~exec_cache:None ~config ~meta
+    Keeper_exec_shell.handle_keeper_shell
+      ~turn_sandbox_factory:(Some factory)
+      ~exec_cache:None ~config ~meta
       ~args:
         (`Assoc [ ("op", `String "ls"); ("path", `String outside_dir) ])
   in
   Alcotest.(check bool) "ls outside playground blocked" true
-    (blocked_by_symmetric_sandbox raw)
+    (blocked_by_sandbox_boundary raw)
 
 let test_docker_keeper_blocks_cat_outside () =
   setup ~keeper_name:"minjae" ~sandbox:Keeper_types.Docker
   @@ fun ~base ~config ~meta ~playground:_ ->
   let outside = outside_in_root ~base "host_secret.txt" in
+  let factory = Keeper_sandbox_factory.create ~config ~meta () in
+  Fun.protect
+    ~finally:(fun () -> Keeper_sandbox_factory.cleanup factory)
+  @@ fun () ->
   let raw =
-    Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_factory:None ~exec_cache:None ~config ~meta
+    Keeper_exec_shell.handle_keeper_shell
+      ~turn_sandbox_factory:(Some factory)
+      ~exec_cache:None ~config ~meta
       ~args:(`Assoc [ ("op", `String "cat"); ("path", `String outside) ])
   in
   Alcotest.(check bool) "cat outside playground blocked" true
-    (blocked_by_symmetric_sandbox raw)
+    (blocked_by_sandbox_boundary raw)
 
 let test_docker_keeper_blocks_rg_outside () =
   setup ~keeper_name:"minjae" ~sandbox:Keeper_types.Docker
@@ -248,8 +291,14 @@ let test_docker_keeper_blocks_rg_outside () =
     (Fs_compat.save_file_atomic
        (Filename.concat outside_dir "leak.txt")
        "secret-token");
+  let factory = Keeper_sandbox_factory.create ~config ~meta () in
+  Fun.protect
+    ~finally:(fun () -> Keeper_sandbox_factory.cleanup factory)
+  @@ fun () ->
   let raw =
-    Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_factory:None ~exec_cache:None ~config ~meta
+    Keeper_exec_shell.handle_keeper_shell
+      ~turn_sandbox_factory:(Some factory)
+      ~exec_cache:None ~config ~meta
       ~args:
         (`Assoc
           [
@@ -259,15 +308,21 @@ let test_docker_keeper_blocks_rg_outside () =
           ])
   in
   Alcotest.(check bool) "rg outside playground blocked" true
-    (blocked_by_symmetric_sandbox raw)
+    (blocked_by_sandbox_boundary raw)
 
 let test_docker_keeper_blocks_find_outside () =
   setup ~keeper_name:"minjae" ~sandbox:Keeper_types.Docker
   @@ fun ~base ~config ~meta ~playground:_ ->
   let outside_dir = Filename.concat base "outside_playground" in
   ensure_dir outside_dir;
+  let factory = Keeper_sandbox_factory.create ~config ~meta () in
+  Fun.protect
+    ~finally:(fun () -> Keeper_sandbox_factory.cleanup factory)
+  @@ fun () ->
   let raw =
-    Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_factory:None ~exec_cache:None ~config ~meta
+    Keeper_exec_shell.handle_keeper_shell
+      ~turn_sandbox_factory:(Some factory)
+      ~exec_cache:None ~config ~meta
       ~args:
         (`Assoc
           [
@@ -277,7 +332,7 @@ let test_docker_keeper_blocks_find_outside () =
           ])
   in
   Alcotest.(check bool) "find outside playground blocked" true
-    (blocked_by_symmetric_sandbox raw)
+    (blocked_by_sandbox_boundary raw)
 
 let test_docker_keeper_allows_inside_playground () =
   setup ~keeper_name:"minjae" ~sandbox:Keeper_types.Docker
@@ -292,18 +347,24 @@ let test_docker_keeper_allows_inside_playground () =
      /bin/cat availability; we only assert the symmetric_sandbox guard
      is silent. *)
   Alcotest.(check bool) "playground-internal cat not blocked" false
-    (blocked_by_symmetric_sandbox raw)
+    (blocked_by_sandbox_boundary raw)
 
 let test_docker_git_creds_contained () =
   setup ~keeper_name:"poe" ~sandbox:Keeper_types.Docker
   @@ fun ~base ~config ~meta ~playground:_ ->
   let outside = outside_in_root ~base "git_secret.txt" in
+  let factory = Keeper_sandbox_factory.create ~config ~meta () in
+  Fun.protect
+    ~finally:(fun () -> Keeper_sandbox_factory.cleanup factory)
+  @@ fun () ->
   let raw =
-    Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_factory:None ~exec_cache:None ~config ~meta
+    Keeper_exec_shell.handle_keeper_shell
+      ~turn_sandbox_factory:(Some factory)
+      ~exec_cache:None ~config ~meta
       ~args:(`Assoc [ ("op", `String "cat"); ("path", `String outside) ])
   in
   Alcotest.(check bool) "docker git-creds also contained" true
-    (blocked_by_symmetric_sandbox raw)
+    (blocked_by_sandbox_boundary raw)
 
 let test_gh_binds_repo_from_active_task_worktree () =
   setup ~keeper_name:"minjae" ~sandbox:Keeper_types.Local

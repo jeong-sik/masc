@@ -14,7 +14,7 @@
     [drop_importance_threshold], [summarize_keep_recent]),
     \[tool_output_prune_limit\] env constant, 4 dynamic-context
     thresholds, [first_sentence] / [tool_names_by_id] /
-    [summarize_chunk] / [mask_tool_*] / [score_messages] /
+    [summarize_chunk] / [mask_tool_*] /
     [oas_strategy_of] / [summarize_old_messages] helpers — all
     consumed only inside {!compact}'s pipeline. *)
 
@@ -103,6 +103,27 @@ val observation_summary : observation_context option -> string
     - [None] returns the literal [obs=none].
     - [Some _] returns formatted key=value pairs covering every
       record field. *)
+
+val score_messages :
+  Oas.Types.message list -> (int * float) list
+(** [score_messages msgs] is the SSOT importance scorer used by
+    {!DropLowImportance} and {!SummarizeOld}. Returns a list of
+    [(index, score)] pairs in the same order as [msgs] with
+    [score \in [0.0, 1.0]].
+
+    Composite of recency (quadratic position weight), role
+    (system / user / assistant / tool weights), tool-call
+    presence, and an anchor boost for messages prefixed with
+    \[MEMORY_SUMMARY\] / \[GOAL\] (current + legacy markers).
+    Pure — reads only the cached env-derived weights. *)
+
+val small_local_ctx_floor : int
+(** Context-window threshold below which {!default_dynamic_selector}
+    classifies a local model as "small" and switches to a
+    lightweight strategy set. Mirrors
+    [Env_config.ContextCompact.small_local_floor]; exposed so
+    boundary tests can pin the threshold without duplicating the
+    env lookup. *)
 
 val default_dynamic_selector :
   observation_context -> strategy list

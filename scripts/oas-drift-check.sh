@@ -148,13 +148,28 @@ extract_metrics_fields() {
   local file="${src}/lib/llm_provider/metrics.mli"
   [[ -f "${file}" ]] || { echo "missing ${file}" >&2; return 1; }
   awk '
-    /^type t = \{/ { inblock=1; next }
-    inblock && /^\}/ { inblock=0 }
-    inblock && /^  [a-z_]+:/ {
-      sub(/:.*/, ""); sub(/^[[:space:]]+/, "");
-      print
+    /^type[[:space:]]+t[[:space:]]*=/ {
+      seen=1
+      if ($0 ~ /\{/) {
+        inblock=1
+        sub(/^.*\{/, "")
+        print
+      }
+      next
     }
-  ' "${file}" | sort -u
+    seen && !inblock && /^[[:space:]]*\{/ {
+      inblock=1
+      sub(/^[^{]*\{/, "")
+      print
+      next
+    }
+    inblock && /^[[:space:]]*\}/ { exit }
+    inblock { print }
+  ' "${file}" \
+  | sed -n \
+      -e 's/^[[:space:]]*;[[:space:]]*\([a-z_][a-zA-Z0-9_]*\)[[:space:]]*:.*/\1/p' \
+      -e 's/^[[:space:]]*\([a-z_][a-zA-Z0-9_]*\)[[:space:]]*:.*/\1/p' \
+  | sort -u
 }
 
 lines_to_json_array() {

@@ -145,6 +145,7 @@
    server_routes_http_routes_artifacts
    server_routes_http_routes_multimodal
    server_routes_http_routes_autonomous
+   server_routes_http_routes_resilience
    server_routes_http_routes_legendary_bash
    server_routes_http_routes_channel_gate
    server_routes_http_routes_sidecar

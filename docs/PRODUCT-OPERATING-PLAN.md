@@ -9,8 +9,8 @@ code_refs:
 
 # Product Operating Plan
 
-> Current package version: v0.18.8
-> Latest release: v0.18.8 (2026-04-28)
+> Current package version: v0.18.9
+> Latest release: v0.18.9 (2026-04-28)
 > Updated: 2026-04-28
 > Release line: pre-1.0 (`0.y.z`); legacy `v2.*` tags are frozen history
 

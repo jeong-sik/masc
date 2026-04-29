@@ -946,7 +946,12 @@ let handle_keeper_status ctx args : tool_result =
            if m.sandbox_profile = Docker
               || (m.sandbox_profile = Local
                   && Env_config_keeper.DockerPlayground.enabled)
-           then Some (Env_config_keeper.KeeperSandbox.docker_image ())
+           then
+             Some (
+               match m.sandbox_image with
+               | Some img when String.trim img <> "" -> img
+               | _ -> Env_config_keeper.KeeperSandbox.docker_image ()
+             )
            else None
          in
          let sandbox_preflight =

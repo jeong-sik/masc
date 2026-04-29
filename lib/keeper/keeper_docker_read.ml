@@ -106,7 +106,11 @@ let run_command_in_container_with_status ?turn_sandbox_factory
   let runtime_opt =
     Keeper_sandbox_factory.resolve_opt turn_sandbox_factory ~cwd
   in
-  let image = Env_config_keeper.KeeperSandbox.docker_image () in
+  let image =
+    match meta.sandbox_image with
+    | Some img when String.trim img <> "" -> img
+    | _ -> Env_config_keeper.KeeperSandbox.docker_image ()
+  in
   if Option.is_none runtime_opt && String.trim image = "" then
     Error "keeper sandbox docker image is not configured"
   else if command_argv = [] then

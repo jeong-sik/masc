@@ -21,7 +21,7 @@
  * only need lifecycle wiring can ignore the return value.
  */
 
-import type { Ref } from 'preact'
+import type { RefObject } from 'preact'
 import { useEffect, useRef } from 'preact/hooks'
 import {
   createFocusScope,
@@ -35,7 +35,7 @@ export interface UseFocusScopeOptions {
    * `.current` lazily so an as-yet-unmounted ref returns null and the
    * scope safely no-ops until the next render.
    */
-  containerRef: Ref<HTMLElement | null>
+  containerRef: RefObject<HTMLElement | null>
   /**
    * Activate the scope. Default true. Flip to false when the wrapping
    * dialog/popover closes — the hook will deactivate and restore

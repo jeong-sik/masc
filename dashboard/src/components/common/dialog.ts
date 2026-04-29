@@ -1,49 +1,7 @@
 import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'
 import { useEffect, useRef } from 'preact/hooks'
-
-const FOCUSABLE_SELECTOR = [
-  'a[href]',
-  'button:not([disabled])',
-  'input:not([disabled])',
-  'select:not([disabled])',
-  'textarea:not([disabled])',
-  '[tabindex]:not([tabindex="-1"])',
-].join(',')
-
-function focusableElements(root: HTMLElement): HTMLElement[] {
-  return Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR))
-    .filter(element => !element.hasAttribute('hidden') && element.getAttribute('aria-hidden') !== 'true')
-}
-
-function trapFocus(event: KeyboardEvent, root: HTMLElement): void {
-  if (event.key !== 'Tab') return
-
-  const elements = focusableElements(root)
-  if (elements.length === 0) {
-    event.preventDefault()
-    root.focus()
-    return
-  }
-
-  const first = elements[0]
-  const last = elements[elements.length - 1]
-  const active = document.activeElement as HTMLElement | null
-  if (!first || !last) return
-
-  if (event.shiftKey) {
-    if (active === first || active === root) {
-      event.preventDefault()
-      last.focus()
-    }
-    return
-  }
-
-  if (active === last) {
-    event.preventDefault()
-    first.focus()
-  }
-}
+import { useFocusScope } from '../../../design-system/headless-preact/use-focus-scope'
 
 interface DialogOverlayProps {
   labelledBy: string
@@ -66,25 +24,27 @@ export function DialogOverlay({
 }: DialogOverlayProps) {
   const panelRef = useRef<HTMLDivElement>(null)
 
+  // Focus trap + restore: delegated to headless-core via useFocusScope.
+  // Replaces the inline FOCUSABLE_SELECTOR + focusableElements + trapFocus
+  // helpers that lived here pre-migration (RFC 0002 Iter 1).
+  useFocusScope({
+    containerRef: panelRef,
+    active: true,
+    initialFocus: () => initialFocusRef?.current ?? panelRef.current,
+  })
+
+  // Scroll lock + ESC-to-close are out of scope for FocusScope (RFC 0001
+  // §"out of scope" — only focus management). Kept inline in the
+  // consumer so each dialog can opt in/out of body-overflow behavior
+  // independently in the future.
   useEffect(() => {
-    const restoreTarget = document.activeElement instanceof HTMLElement ? document.activeElement : null
     const previousOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'
-
-    const focusTarget = initialFocusRef?.current ?? panelRef.current
-    window.requestAnimationFrame(() => {
-      focusTarget?.focus()
-    })
 
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault()
         onClose()
-        return
-      }
-
-      if (panelRef.current) {
-        trapFocus(event, panelRef.current)
       }
     }
 
@@ -93,9 +53,8 @@ export function DialogOverlay({
     return () => {
       document.removeEventListener('keydown', onKeyDown)
       document.body.style.overflow = previousOverflow
-      restoreTarget?.focus()
     }
-  }, [initialFocusRef, onClose])
+  }, [onClose])
 
   return html`
     <div
@@ -114,6 +73,7 @@ export function DialogOverlay({
         aria-labelledby=${labelledBy}
         aria-describedby=${describedBy}
         tabIndex=${-1}
+        data-state="open"
       >
         ${children}
       </div>

@@ -296,8 +296,21 @@ let load_clone_denied_repos ~base_path =
 
 let validate_clone_url ~base_path url =
   let allowed = load_clone_allowed_orgs ~base_path in
+  let denied = load_clone_denied_repos ~base_path in
+  let denied_lc = List.map String.lowercase_ascii denied in
+  let denied_check () =
+    match extract_github_org_repo url with
+    | Some org_repo when List.mem org_repo denied_lc ->
+      Error (Printf.sprintf "Repository '%s' is in the denied list" org_repo)
+    | _ -> Ok ()
+  in
   if allowed = [] then
-    Error "No allowed orgs configured for git clone (git_clone.allowed_orgs in tool_policy.toml)"
+    (* Empty allowed_orgs = skip org check. Per config/tool_policy.toml,
+       this matches operator intent: the keeper may clone any repo reachable
+       through the operator's gh credential, subject to denied_repos. SSOT
+       alignment with [Gh_command_validation.validate_gh_command], which
+       treats [allowed_orgs = []] as "policy not configured / skip". #11830. *)
+    denied_check ()
   else
     match extract_github_org url with
     | None ->
@@ -310,13 +323,7 @@ let validate_clone_url ~base_path url =
              "GitHub org '%s' not in allowed list: %s. Use the actual GitHub owner from the clone URL; do not infer an org from local workspace path segments."
              org (String.concat ", " allowed))
       else
-        (* Check repo-level deny list *)
-        let denied = load_clone_denied_repos ~base_path in
-        let denied_lc = List.map String.lowercase_ascii denied in
-        match extract_github_org_repo url with
-        | Some org_repo when List.mem org_repo denied_lc ->
-          Error (Printf.sprintf "Repository '%s' is in the denied list" org_repo)
-        | _ -> Ok ()
+        denied_check ()
 
 (** Validate cwd for clone: allows .worktrees/ itself (not just subdirs)
     and THIS agent's own .masc/playground/<agent_name>/repos/ directory.

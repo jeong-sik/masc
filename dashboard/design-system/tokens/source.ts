@@ -703,6 +703,38 @@ export const semantic: ReadonlyArray<TokenBase> = (() => {
   out.push(t("button-ok-bg-pressed", "var(--ok-20)",                  "role", "color",
     "ActionButton variant=ok [data-pressed] bg"));
 
+  // Fifth slot — button-warn. Notification/escalation actions
+  // (acknowledge, retry, soft-fail). Uses the warn-* status family.
+  // Aliases match button.ts VARIANT_CLASSES.warn. border slot is
+  // `transparent` because the warn variant renders border-none — the
+  // slot exists for future variants that may want a border without
+  // changing the alias graph.
+  out.push(t("button-warn-bg",         "var(--warn-14)",                "role", "color",
+    "ActionButton variant=warn surface bg"));
+  out.push(t("button-warn-fg",         "var(--color-status-warn)",      "role", "color",
+    "ActionButton variant=warn text fg"));
+  out.push(t("button-warn-border",     "transparent",                    "role", "color",
+    "ActionButton variant=warn border (rendered as border-none)"));
+  out.push(t("button-warn-bg-hover",   "var(--warn-24)",                "role", "color",
+    "ActionButton variant=warn hover bg"));
+  out.push(t("button-warn-bg-pressed", "var(--warn-24)",                "role", "color",
+    "ActionButton variant=warn [data-pressed] bg"));
+
+  // Sixth slot — button-subtle. Lowest-affordance secondary action
+  // (bare-text dismiss, inline link buttons). Uses fg/bg from neutral
+  // palette; border + bg both transparent so the variant is visually
+  // a tinted text link until hover/pressed.
+  out.push(t("button-subtle-bg",         "transparent",                  "role", "color",
+    "ActionButton variant=subtle surface bg"));
+  out.push(t("button-subtle-fg",         "var(--color-fg-muted)",        "role", "color",
+    "ActionButton variant=subtle text fg"));
+  out.push(t("button-subtle-border",     "transparent",                  "role", "color",
+    "ActionButton variant=subtle border (rendered as border-none)"));
+  out.push(t("button-subtle-bg-hover",   "var(--white-6)",               "role", "color",
+    "ActionButton variant=subtle hover bg"));
+  out.push(t("button-subtle-bg-pressed", "var(--white-6)",               "role", "color",
+    "ActionButton variant=subtle [data-pressed] bg"));
+
   // Interactive state roles — explicit hover/selected/pressed semantics
   out.push(t("state-hover-bg",       "var(--bg-3)",   "role", "color"));
   out.push(t("state-hover-fg",       "var(--fg-1)",   "role", "color"));

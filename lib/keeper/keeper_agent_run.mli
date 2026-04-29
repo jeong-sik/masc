@@ -106,7 +106,7 @@ type pre_dispatch_checkpoint_hygiene_result =
   ; before_tokens : int
   ; after_tokens : int
   ; trigger : string option
-  ; decision : string
+  ; decision : Keeper_compact_policy.compaction_decision
   ; save_error : string option
   }
 

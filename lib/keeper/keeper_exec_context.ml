@@ -94,6 +94,23 @@ let classify_rollover_gate = Keeper_rollover.classify_rollover_gate
 (* ================================================================ *)
 
 let compaction_policy_of_keeper = Keeper_compact_policy.compaction_policy_of_keeper
+
+type compaction_decision = Keeper_compact_policy.compaction_decision =
+  | Applied of string
+  | Blocked_below_thresholds
+  | Skipped_no_checkpoint
+  | Skipped_continuity_reflection of {
+      hold_s : float;
+      cooldown_sec : int;
+    }
+
+let compaction_decision_to_string =
+  Keeper_compact_policy.compaction_decision_to_string
+
+let compaction_decision_applied =
+  Keeper_compact_policy.compaction_decision_applied
+
+let compact_if_needed_typed = Keeper_compact_policy.compact_if_needed_typed
 let compact_if_needed = Keeper_compact_policy.compact_if_needed
 
 (* ================================================================ *)
@@ -105,7 +122,7 @@ type compaction_event = Keeper_post_turn.compaction_event = {
   applied : bool;
   failure_reason : string option;
   trigger : string option;
-  decision : string;
+  decision : Keeper_compact_policy.compaction_decision;
   before_tokens : int;
   after_tokens : int;
   saved_tokens : int;
@@ -216,7 +233,9 @@ let dispatch_post_turn_lifecycle_events
            {
              reason =
                Option.value lifecycle.compaction.failure_reason
-                 ~default:lifecycle.compaction.decision;
+                 ~default:
+                   (compaction_decision_to_string
+                      lifecycle.compaction.decision);
            });
   match lifecycle.handoff_attempted, lifecycle.handoff_json with
   | true, Some _json ->

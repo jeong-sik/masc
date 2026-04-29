@@ -13,7 +13,7 @@ type pre_dispatch_checkpoint_hygiene_result =
   ; before_tokens : int
   ; after_tokens : int
   ; trigger : string option
-  ; decision : string
+  ; decision : Keeper_compact_policy.compaction_decision
   ; save_error : string option
   }
 
@@ -38,7 +38,7 @@ let prepare_resume_checkpoint_for_dispatch
     }
   in
   let compacted_ctx, trigger, decision =
-    Keeper_compact_policy.compact_if_needed
+    Keeper_compact_policy.compact_if_needed_typed
       ~meta:pre_dispatch_meta
       ~now_ts
       ctx_work

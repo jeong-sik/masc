@@ -21,9 +21,10 @@ type pre_dispatch_checkpoint_hygiene_result = {
   trigger : string option;
   (** [Some _] when {!Keeper_compact_policy.compact_if_needed}
       identified a trigger; [None] when no compaction fired. *)
-  decision : string;
-  (** Human-readable decision tag from the policy ([no_op],
-      [hard_cap], etc.) for telemetry. *)
+  decision : Keeper_compact_policy.compaction_decision;
+  (** Typed decision tag from the policy. Render with
+      {!Keeper_compact_policy.compaction_decision_to_string} at telemetry
+      boundaries. *)
   save_error : string option;
   (** [Some err] when the checkpoint save attempt failed.  The
       working context is still populated from the compacted one. *)
@@ -43,7 +44,7 @@ val prepare_resume_checkpoint_for_dispatch :
 
     1. Forces a fresh compaction evaluation by overriding
        [meta.compaction.cooldown_sec] to [0].
-    2. Calls {!Keeper_compact_policy.compact_if_needed}; populates
+    2. Calls {!Keeper_compact_policy.compact_if_needed_typed}; populates
        [before_tokens] / [after_tokens] / [trigger] / [decision] from
        the result.
     3. When [loaded_checkpoint_present] is [false], skips checkpoint

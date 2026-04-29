@@ -176,7 +176,11 @@ let prepare_run_context
        "%s: pre-dispatch compaction %s trigger=%s tokens=%d->%d max_context=%d"
        meta.name
        (if checkpoint_hygiene.meaningful_reduction then "applied" else "attempted")
-       (Option.value ~default:checkpoint_hygiene.decision checkpoint_hygiene.trigger)
+       (Option.value
+          ~default:
+            (Keeper_compact_policy.compaction_decision_to_string
+               checkpoint_hygiene.decision)
+          checkpoint_hygiene.trigger)
        checkpoint_hygiene.before_tokens checkpoint_hygiene.after_tokens max_context);
   let start_turn_count =
     match resume_oas_checkpoint with

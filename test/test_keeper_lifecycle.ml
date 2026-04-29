@@ -41,7 +41,7 @@ let base_lifecycle ~(meta : KT.keeper_meta) : KEC.post_turn_lifecycle =
         applied = false;
         failure_reason = None;
         trigger = None;
-        decision = "skipped:test";
+        decision = KEC.Blocked_below_thresholds;
         before_tokens = 0;
         after_tokens = 0;
         saved_tokens = 0;
@@ -194,7 +194,7 @@ let test_apply_post_turn_lifecycle_without_checkpoint_records_skip () =
       check bool "handoff not attempted" false lifecycle.handoff_attempted;
       check bool "compaction not applied" false lifecycle.compaction.applied;
       check string "skip decision" "skipped:no_checkpoint"
-        lifecycle.compaction.decision;
+        (KEC.compaction_decision_to_string lifecycle.compaction.decision);
       check string "runtime decision persisted" "skipped:no_checkpoint"
         lifecycle.updated_meta.runtime.compaction_rt.last_decision;
       check bool "last check ts recorded" true
@@ -358,7 +358,7 @@ let test_apply_post_turn_lifecycle_keeps_checkpoint_when_compaction_skips () =
       check bool "compaction not attempted" false lifecycle.compaction.attempted;
       check bool "compaction skipped" false lifecycle.compaction.applied;
       check string "skip decision recorded" "blocked:below_thresholds"
-        lifecycle.compaction.decision;
+        (KEC.compaction_decision_to_string lifecycle.compaction.decision);
       match
         load_context ~base_dir ~trace_id:(Masc_mcp.Keeper_id.Trace_id.to_string lifecycle.updated_meta.runtime.trace_id)
           ~max_tokens:4096
@@ -1966,7 +1966,7 @@ let test_dispatch_post_turn_lifecycle_events_uses_room_base_path () =
               applied = true;
               failure_reason = None;
               trigger = Some "test";
-              decision = "applied:test";
+              decision = KEC.Applied "test";
               before_tokens = 42;
               after_tokens = 21;
               saved_tokens = 21;

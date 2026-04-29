@@ -21,7 +21,7 @@ type compaction_event =
   ; applied : bool
   ; failure_reason : string option
   ; trigger : string option
-  ; decision : string
+  ; decision : Keeper_compact_policy.compaction_decision
   ; before_tokens : int
   ; after_tokens : int
   ; saved_tokens : int

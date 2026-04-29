@@ -41,6 +41,64 @@ let shouldReconnect = true
 let connectGeneration = 0
 const pending = new Map<number, PendingRpc>()
 
+// Phase 2 (PR-4.6): rAF accumulator for inbound WS messages.
+// Instead of processing every WS frame immediately (which can trigger
+// multiple signal writes / renders), we buffer them and flush on the
+// next animation frame.  This bounds update frequency to 60 Hz and
+// lets batch() coalesce all signal mutations in a single frame.
+const pendingInbound: string[] = []
+let flushHandle = 0
+
+function scheduleFlush(): void {
+  if (flushHandle) return
+  if (typeof requestAnimationFrame === 'undefined') {
+    // Fallback for non-browser environments (e.g. vitest with happy-dom).
+    flushHandle = setTimeout(() => {
+      flushHandle = 0
+      flushPending()
+    }, 0) as unknown as number
+    return
+  }
+  flushHandle = requestAnimationFrame(() => {
+    flushHandle = 0
+    flushPending()
+  })
+}
+
+function flushPending(): void {
+  const batchData = pendingInbound.slice()
+  pendingInbound.length = 0
+  for (const data of batchData) {
+    processInboundMessage(data)
+  }
+}
+
+function clearPendingInbound(): void {
+  pendingInbound.length = 0
+  if (flushHandle) {
+    if (typeof cancelAnimationFrame !== 'undefined') {
+      cancelAnimationFrame(flushHandle)
+    } else {
+      clearTimeout(flushHandle)
+    }
+    flushHandle = 0
+  }
+}
+
+/** Test-only helper: synchronously flush any pending inbound messages.
+ *  Production code should never call this — the rAF loop owns timing. */
+export function flushPendingInbound(): void {
+  if (flushHandle) {
+    if (typeof cancelAnimationFrame !== 'undefined') {
+      cancelAnimationFrame(flushHandle)
+    } else {
+      clearTimeout(flushHandle)
+    }
+    flushHandle = 0
+  }
+  flushPending()
+}
+
 function rememberRouteState(routeState: DashboardRouteState): DashboardRouteState {
   desiredRouteState = {
     tab: routeState.tab,
@@ -124,6 +182,7 @@ function closeSocket(): void {
     socket.close()
     socket = null
   }
+  clearPendingInbound()
   rejectPendingRpcs(new Error('dashboard websocket closed'))
 }
 
@@ -306,9 +365,8 @@ export function parseWebSocketSseFrames(data: string): unknown[] {
   return payloads
 }
 
-function handleMessage(data: unknown): void {
+function processInboundMessage(data: string): void {
   batch(() => {
-    if (typeof data !== 'string') return
     let raw: unknown
     try {
       raw = JSON.parse(data)
@@ -324,6 +382,12 @@ function handleMessage(data: unknown): void {
     if (handleNotification(record)) return
     handleRawPush(record)
   })
+}
+
+function handleMessage(data: unknown): void {
+  if (typeof data !== 'string') return
+  pendingInbound.push(data)
+  scheduleFlush()
 }
 
 function reconnectAfterCurrentSocketFailure(ws: WebSocket, err: unknown): void {

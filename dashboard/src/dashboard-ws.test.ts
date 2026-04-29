@@ -11,6 +11,7 @@ import {
   connectDashboardWS,
   dashboardSlicesForRoute,
   disconnectDashboardWS,
+  flushPendingInbound,
   parseWebSocketSseFrames,
   subscribeDashboardRoute,
 } from './dashboard-ws'
@@ -63,6 +64,7 @@ class MockWebSocket {
 
   receive(payload: unknown): void {
     this.onmessage?.({ data: JSON.stringify(payload) } as MessageEvent)
+    flushPendingInbound()
   }
 }
 
@@ -108,6 +110,17 @@ async function flushPromises(): Promise<void> {
   await Promise.resolve()
   await Promise.resolve()
 }
+
+beforeEach(() => {
+  // Make requestAnimationFrame synchronous so the rAF accumulator
+  // flushes immediately inside the same task.  Tests remain
+  // unchanged and do not need to await microtasks.
+  vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
+    cb(0)
+    return 0
+  })
+  vi.stubGlobal('cancelAnimationFrame', vi.fn())
+})
 
 afterEach(() => {
   disconnectDashboardWS()

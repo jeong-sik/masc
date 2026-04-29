@@ -624,6 +624,11 @@ let mark_turn_finished ~base_path name =
   let changed = ref false in
   let now = Time_compat.now () in
   update_entry ~base_path name (fun e ->
+    let had_live_turn =
+      match e.current_turn_observation with
+      | Some _ -> true
+      | None -> false
+    in
     let last_completed_turn =
       match e.current_turn_observation with
       | Some obs ->
@@ -648,7 +653,21 @@ let mark_turn_finished ~base_path name =
             }
       | None -> e.last_completed_turn  (* no live turn → preserve previous *)
     in
+    let meta =
+      if had_live_turn then
+        {
+          e.meta with
+          runtime =
+            {
+              e.meta.runtime with
+              usage =
+                { e.meta.runtime.usage with last_turn_ts = now };
+            };
+        }
+      else e.meta
+    in
     { e with
+      meta;
       current_turn_observation = None;
       last_completed_turn });
   Option.iter

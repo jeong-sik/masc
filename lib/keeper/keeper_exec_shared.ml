@@ -32,7 +32,7 @@ let actionable_path_action_for_class
     | Path_not_allowed ->
       Printf.sprintf "Path is outside your allowed roots. Stay inside %s or use keeper_context_status to see allowed paths." playground
     | Cwd_not_directory ->
-      "The cwd is not a directory. Omit cwd to use your default playground root."
+      "The cwd is not a directory. Omit cwd to use your default playground root, or create/repair the repo worktree first (keeper_shell op=git_clone, then git_worktree/masc_worktree_create for repos/<repo>/.worktrees/<task>)."
     | Shell_exit_nonzero | Other ->
       Printf.sprintf "Check the path. Your playground: %s" playground
 

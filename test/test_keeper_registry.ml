@@ -332,6 +332,18 @@ let test_mark_turn_finished_resets_wakeup () =
   check bool "IR-1: wakeup reset after mark_turn_finished" false
     (Atomic.get entry.R.fiber_wakeup)
 
+let test_mark_turn_finished_updates_last_turn_ts () =
+  R.clear ();
+  let keeper_name = "k-last-turn-finish" in
+  ignore (R.register ~base_path:bp keeper_name (make_meta keeper_name));
+  R.mark_turn_started ~base_path:bp keeper_name;
+  R.mark_turn_finished ~base_path:bp keeper_name;
+  match R.get ~base_path:bp keeper_name with
+  | None -> fail "entry missing after mark_turn_finished"
+  | Some entry ->
+      check bool "last_turn_ts stamped on completed turn" true
+        (entry.R.meta.runtime.usage.last_turn_ts > 0.0)
+
 let test_completed_turns_replay_from_default_store () =
   let base_path = temp_base_path "completed-turn-replay" in
   Fun.protect
@@ -1176,6 +1188,8 @@ let () =
             test_mark_turn_finished_records_completed_turn_outcome_once;
           eio_test "mark_turn_finished resets fiber_wakeup (IR-1)"
             test_mark_turn_finished_resets_wakeup;
+          eio_test "mark_turn_finished updates last_turn_ts"
+            test_mark_turn_finished_updates_last_turn_ts;
           eio_test "completed turns replay from default store"
             test_completed_turns_replay_from_default_store;
           eio_test "unregister" test_unregister;

@@ -661,6 +661,21 @@ export const semantic: ReadonlyArray<TokenBase> = (() => {
   out.push(t("motion-settle", "var(--t-xslow) var(--ease-out)", "role", "duration"));
   out.push(t("motion-pop",    "var(--t-med) var(--ease-spring)", "role", "duration"));
 
+  // Headless animation tokens (v2 spec §4.2.2) — split duration/easing
+  // pair so headless primitives can compose `transition: <prop>
+  // var(--enter-duration) var(--enter-easing)` for [data-state="open"]
+  // and the inverse for [data-state="closed"]. Coexist with the
+  // composite `motion-*` shorthands above; the split form is the
+  // canonical consumer for Drawer/Dialog/Popover transitions.
+  out.push(t("enter-duration", "var(--t-med)",   "role", "duration",
+    "duration for [data-state=open] / [data-state=entering]"));
+  out.push(t("exit-duration",  "var(--t-fast)",  "role", "duration",
+    "duration for [data-state=closed] / [data-state=leaving]"));
+  out.push(t("enter-easing",   "var(--ease-out)","role", "easing",
+    "cubic-bezier on enter — decelerate-into-rest"));
+  out.push(t("exit-easing",    "var(--ease-in)", "role", "easing",
+    "cubic-bezier on exit — accelerate-out"));
+
   // Motion-scope sentinel — parallel to _density-scope
   out.push(t("_motion-scope", "1", "role", "number", "scope sentinel"));
 

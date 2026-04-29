@@ -388,6 +388,10 @@
   --motion-reveal: var(--t-slow) var(--ease-out);
   --motion-settle: var(--t-xslow) var(--ease-out);
   --motion-pop: var(--t-med) var(--ease-spring);
+  --enter-duration: var(--t-med);
+  --exit-duration: var(--t-fast);
+  --enter-easing: var(--ease-out);
+  --exit-easing: var(--ease-in);
   --_motion-scope: 1;
   --color-cmt-question: var(--info);
   --color-cmt-flag: var(--err);

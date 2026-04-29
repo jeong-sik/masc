@@ -400,6 +400,10 @@ type semantic =
   | `Motion_reveal
   | `Motion_settle
   | `Motion_pop
+  | `Enter_duration
+  | `Exit_duration
+  | `Enter_easing
+  | `Exit_easing
   | `_motion_scope
   | `Cmt_question
   | `Cmt_flag

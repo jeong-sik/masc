@@ -609,6 +609,22 @@ export const semantic: ReadonlyArray<TokenBase> = (() => {
   out.push(t("hover-overlay",  "rgb(255 255 255 / .03)", "role", "color"));
   out.push(t("active-overlay", "rgb(0 0 0 / .25)",       "role", "color"));
 
+  // Headless interaction tokens (v2 spec §4.2.1) — primitives bind
+  // these to data-* states via Tailwind utilities, e.g.
+  //   data-[pressed]:scale-[var(--pressed-scale)]
+  //   data-[hover]:translate-y-[var(--hover-lift)]
+  //   focus-visible:ring-[length:var(--focus-ring-width)]
+  //                 ring-offset-[length:var(--focus-ring-offset)]
+  // Kept separate from the existing --focus-ring shadow token: that one
+  // is the pre-baked composite box-shadow; these are the dimensional
+  // building blocks consumers can recompose.
+  out.push(t("pressed-scale",      "0.97", "role", "number",
+    "scale factor while [data-pressed]"));
+  out.push(t("hover-lift",         "-1px", "role", "dimension",
+    "translateY offset while [data-hover]"));
+  out.push(t("focus-ring-width",   "2px",  "role", "dimension"));
+  out.push(t("focus-ring-offset",  "2px",  "role", "dimension"));
+
   // Interactive state roles — explicit hover/selected/pressed semantics
   out.push(t("state-hover-bg",       "var(--bg-3)",   "role", "color"));
   out.push(t("state-hover-fg",       "var(--fg-1)",   "role", "color"));

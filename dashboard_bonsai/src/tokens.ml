@@ -359,6 +359,10 @@ type semantic =
   | `Focus_ring_err
   | `Hover_overlay
   | `Active_overlay
+  | `Pressed_scale
+  | `Hover_lift
+  | `Focus_ring_width
+  | `Focus_ring_offset
   | `State_hover_bg
   | `State_hover_fg
   | `State_hover_border
@@ -781,6 +785,10 @@ let name_of = function
   | `Focus_ring_err -> "focus-ring-err"
   | `Hover_overlay -> "hover-overlay"
   | `Active_overlay -> "active-overlay"
+  | `Pressed_scale -> "pressed-scale"
+  | `Hover_lift -> "hover-lift"
+  | `Focus_ring_width -> "focus-ring-width"
+  | `Focus_ring_offset -> "focus-ring-offset"
   | `State_hover_bg -> "state-hover-bg"
   | `State_hover_fg -> "state-hover-fg"
   | `State_hover_border -> "state-hover-border"

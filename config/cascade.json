@@ -46,7 +46,7 @@
   "_comment_ollama_only": "Keeper-assignable ollama-only profile for local-only agents. Conservative output/context defaults avoid qwen3.6 27B timeout loops on local runtimes.",
   "ollama_only_models": [ "ollama:auto" ],
   "ollama_only_temperature": 0.7,
-  "ollama_only_max_tokens": 4096,
+  "ollama_only_max_tokens": 8192,
   "ollama_only_keep_alive": "-1",
   "ollama_only_num_ctx": 32768,
   "ollama_only_keeper_assignable": true,

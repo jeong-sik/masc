@@ -125,6 +125,7 @@ export function AgentAvatar({
       ${cells}
       <span
         class="pixel-avatar__activity-dot ${dotClass}"
+        role=${activityDotLabel(activityAge ?? null) ? 'img' : undefined}
         aria-label=${activityDotLabel(activityAge ?? null)}
       />
       ${bubbleText ? html`

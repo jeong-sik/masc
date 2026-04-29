@@ -38,10 +38,22 @@ val broadcast_tool_skipped :
     [command]/[cmd]/[content] string for screening guards. *)
 val extract_command_from_input : Yojson.Safe.t -> string
 
+(** Typed gate decision vocabulary. JSON/log/metric labels must pass
+    through {!gate_decision_to_string}; internal branching should match this
+    variant exhaustively. *)
+type gate_decision =
+  | Gate_override
+  | Gate_continue
+  | Gate_approval_required
+
+val gate_decision_to_string : gate_decision -> string
+
+val gate_decision_is_rejection : gate_decision -> bool
+
 (** Telemetry payload reported to the gate observer. *)
 type gate_decision_event =
   { stage : string
-  ; decision : string
+  ; decision : gate_decision
   ; reason_code : string
   ; reason_text : string
   ; tool_name : string
@@ -64,7 +76,7 @@ val notify_gate_decision :
     [override] / [approval_required] decisions. *)
 val emit_gate_event :
   stage:string ->
-  decision:string ->
+  decision:gate_decision ->
   reason_code:string ->
   tool_name:string ->
   agent_name:string ->
@@ -79,7 +91,7 @@ val emit_gate_event :
 val report_gate_decision :
   (gate_decision_event -> unit) ->
   stage:string ->
-  decision:string ->
+  decision:gate_decision ->
   reason_code:string ->
   reason_text:string ->
   tool_name:string ->

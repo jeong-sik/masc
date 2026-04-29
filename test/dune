@@ -1760,6 +1760,11 @@
  (libraries masc_test_deps))
 
 (executable
+ (name test_a12_e2e_demo)
+ (modules test_a12_e2e_demo)
+ (libraries masc_test_deps multimodal resilience shared_audit shared_types))
+
+(executable
  (name test_concurrent_distributed)
  (modules test_concurrent_distributed)
  (libraries masc_test_deps))

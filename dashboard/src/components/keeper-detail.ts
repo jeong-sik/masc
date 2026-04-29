@@ -215,6 +215,56 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
   const providerFallback = executionSummary?.provider_fallback_applied
   const providerSelectedModel = executionSummary?.provider_selected_model?.trim() || null
   const cascadeOutcome = executionSummary?.cascade_outcome?.trim() || null
+  const runtimeModel = keeperDisplayModel(keeper)
+  const cascadeName = keeper.cascade_name?.trim() || null
+  const cascadeCanonical =
+    keeper.cascade_canonical?.trim()
+    || keeper.selected_cascade_canonical?.trim()
+    || null
+  const cascadeLabel =
+    cascadeName && cascadeCanonical && cascadeName !== cascadeCanonical
+      ? `${cascadeName} -> ${cascadeCanonical}`
+      : cascadeName ?? cascadeCanonical
+  const latestCascadeMetric = (() => {
+    const series = keeper.metrics_series ?? []
+    for (let index = series.length - 1; index >= 0; index -= 1) {
+      const point = series[index]
+      if (!point) continue
+      if (
+        point.fallback_applied
+        || point.cascade_selected_model?.trim()
+        || point.cascade_outcome?.trim()
+        || point.cascade_name?.trim()
+        || typeof point.cascade_attempt_count === 'number'
+      ) return point
+    }
+    return null
+  })()
+  const observedProviderModel =
+    providerSelectedModel
+    || latestCascadeMetric?.cascade_selected_model?.trim()
+    || latestCascadeMetric?.model_used?.trim()
+    || null
+  const observedProviderAttempts =
+    typeof providerAttempts === 'number'
+      ? providerAttempts
+      : latestCascadeMetric?.cascade_attempt_count ?? null
+  const observedProviderFallback =
+    typeof providerFallback === 'boolean'
+      ? providerFallback
+      : latestCascadeMetric?.fallback_applied ?? null
+  const observedCascadeOutcome =
+    cascadeOutcome || latestCascadeMetric?.cascade_outcome?.trim() || null
+  const fallbackFrom = latestCascadeMetric?.fallback_from?.trim() || null
+  const fallbackTo =
+    latestCascadeMetric?.fallback_to?.trim()
+    || latestCascadeMetric?.model_used?.trim()
+    || null
+  const fallbackReason = latestCascadeMetric?.fallback_reason?.trim() || null
+  const fallbackHops =
+    typeof latestCascadeMetric?.fallback_hops === 'number'
+      ? latestCascadeMetric.fallback_hops
+      : 0
   const trustLatestEvent = keeper.trust?.latest_causal_event ?? null
   const hbTs = keeper.last_heartbeat ? Date.parse(keeper.last_heartbeat) : null
   const hbAgeMs = hbTs != null && !Number.isNaN(hbTs) ? Date.now() - hbTs : null
@@ -222,12 +272,20 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
   const needsAttention = keeperNeedsDiagnosticAttention(keeper)
   const activity = keeperActivityDisplay(keeper, keeper.agent?.last_seen)
   const hasActivitySignal = activity.timestamp != null || activity.ageSeconds != null
+  const hasRuntimeIdentitySignal =
+    Boolean(runtimeModel)
+    || Boolean(cascadeLabel)
+    || Boolean(observedProviderModel)
+    || Boolean(observedCascadeOutcome)
+    || typeof observedProviderAttempts === 'number'
+    || observedProviderFallback === true
+    || (latestCascadeMetric?.fallback_applied === true && Boolean(fallbackFrom || fallbackTo))
   const renderActivitySignal = () => activity.timestamp
     ? html`${activity.label} <${TimeAgo} timestamp=${activity.timestamp} />`
     : activity.ageSeconds != null
       ? html`${activity.label} ${formatDuration(activity.ageSeconds)} 전`
       : null
-  if (!needsAttention && !hasActivitySignal) return null
+  if (!needsAttention && !hasActivitySignal && !hasRuntimeIdentitySignal) return null
 
   const directiveLoading = signal(false)
   const handleDirective = async (action: 'pause' | 'resume' | 'wakeup') => {
@@ -383,13 +441,29 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
         ${missingRequiredTools.length > 0
           ? html`<span class="text-[var(--color-status-err)]"><strong>누락</strong> · ${missingRequiredTools.join(', ')}</span>`
           : null}
-        ${providerSelectedModel || cascadeOutcome || typeof providerAttempts === 'number'
+        ${cascadeLabel
+          ? html`<span><strong class="text-[var(--color-fg-secondary)]">캐스케이드</strong> · ${cascadeLabel}</span>`
+          : null}
+        ${runtimeModel
+          ? html`<span><strong class="text-[var(--color-fg-secondary)]">${runtimeModel.label}</strong> · ${runtimeModel.value}</span>`
+          : null}
+        ${observedProviderModel || observedCascadeOutcome || typeof observedProviderAttempts === 'number'
           ? html`
               <span>
                 <strong class="text-[var(--color-fg-secondary)]">프로바이더</strong>
-                · ${providerSelectedModel ?? cascadeOutcome ?? 'observed'}
-                ${typeof providerAttempts === 'number' ? ` · ${providerAttempts}회 시도` : ''}
-                ${providerFallback === true ? ' · 폴백' : ''}
+                · ${observedProviderModel ?? observedCascadeOutcome ?? 'observed'}
+                ${typeof observedProviderAttempts === 'number' ? ` · ${observedProviderAttempts}회 시도` : ''}
+                ${observedProviderFallback === true ? ' · 폴백' : ''}
+              </span>
+            `
+          : null}
+        ${latestCascadeMetric?.fallback_applied === true && (fallbackFrom || fallbackTo)
+          ? html`
+              <span class="text-[var(--color-status-warn)]">
+                <strong>폴백 경로</strong>
+                · ${fallbackFrom && fallbackTo ? `${fallbackFrom} -> ${fallbackTo}` : (fallbackTo ?? fallbackFrom)}
+                ${fallbackReason ? ` · ${fallbackReason}` : ''}
+                ${fallbackHops > 0 ? ` · ${fallbackHops} hops` : ''}
               </span>
             `
           : null}

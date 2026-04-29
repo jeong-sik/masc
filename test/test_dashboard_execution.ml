@@ -629,7 +629,17 @@ let test_dashboard_execution_surfaces_keeper_diagnostic () =
             check bool "diagnostic health state surfaced" true
               (row |> member "diagnostic" |> member "health_state" <> `Null);
             check bool "diagnostic next action surfaced" true
-              (row |> member "diagnostic" |> member "next_action_path" <> `Null))))
+              (row |> member "diagnostic" |> member "next_action_path" <> `Null);
+            check string "raw cascade surfaced on execution keeper row"
+              Lib.Keeper_config.default_cascade_name
+              (row |> member "cascade_name" |> to_string);
+            check string "canonical cascade surfaced on execution keeper row"
+              Lib.Keeper_config.default_cascade_name
+              (row |> member "cascade_canonical" |> to_string);
+            check bool "primary model surfaced on execution keeper row" true
+              (row |> member "primary_model" <> `Null);
+            check bool "active model label surfaced on execution keeper row" true
+              (row |> member "active_model_label" <> `Null))))
 
 let test_execution_trust_surfaces_latest_receipt () =
   let dir = test_dir () in
@@ -721,7 +731,34 @@ let test_execution_trust_surfaces_latest_receipt () =
             check (list string) "execution trust row preserves unexpected tools"
               [ "WebSearch" ]
               (trust_row |> member "trust" |> member "unexpected_tools"
-             |> to_list |> List.map to_string))))
+             |> to_list |> List.map to_string);
+            let execution_json =
+              Lib.Dashboard_execution.json
+                ~config
+                ~sw
+                ~clock:(Eio.Stdenv.clock env)
+                ~proc_mgr:None
+                ()
+            in
+            let execution_row =
+              execution_json |> member "keepers" |> to_list
+              |> List.find (fun keeper ->
+                     keeper |> member "name" |> to_string = "sangsu")
+            in
+            check int "execution row exposes provider attempt count" 2
+              (execution_row |> member "trust" |> member "execution_summary"
+             |> member "provider_attempt_count" |> to_int);
+            check string "execution row exposes provider selected model"
+              "custom:mock"
+              (execution_row |> member "trust" |> member "execution_summary"
+             |> member "provider_selected_model" |> to_string);
+            check bool "execution row exposes provider fallback" true
+              (execution_row |> member "trust" |> member "execution_summary"
+             |> member "provider_fallback_applied" |> to_bool);
+            check string "execution row exposes cascade outcome"
+              "passed_to_next_model"
+              (execution_row |> member "trust" |> member "execution_summary"
+             |> member "cascade_outcome" |> to_string))))
 
 let test_execution_trust_surfaces_coverage_gap_health () =
   let dir = test_dir () in

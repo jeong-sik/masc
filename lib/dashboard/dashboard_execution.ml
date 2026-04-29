@@ -45,6 +45,23 @@ let messages_safe config =
 let assoc_upsert fields key value =
   (key, value) :: List.remove_assoc key fields
 
+let compact_keeper_trust_json ~(config : Coord.config) ~(meta : Keeper_types.keeper_meta) =
+  let runtime_trust =
+    Keeper_runtime_trust_snapshot.snapshot_json ~config ~meta
+  in
+  let member key = Yojson.Safe.Util.member key runtime_trust in
+  `Assoc
+    [
+      ("disposition", member "disposition");
+      ("disposition_reason", member "disposition_reason");
+      ("needs_attention", member "needs_attention");
+      ("attention_reason", member "attention_reason");
+      ("next_human_action", member "next_human_action");
+      ("approval_state", member "approval");
+      ("execution_summary", member "execution");
+      ("latest_causal_event", member "latest_causal_event");
+    ]
+
 (* #10710: bound on the per-render enrich fan-out. Code constant per
    [feedback_no-hyperparameter-as-env-knob] — the calibrated value
    should not be operator-tunable. 8 is empirically just past the
@@ -111,7 +128,17 @@ let enrich_keeper_with_diagnostic ~(config : Coord.config) (keeper_json : Yojson
                        (Keeper_status_bridge.runtime_keepalive_started_at config meta)
                      ~now_ts
               in
-              `Assoc (assoc_upsert fields "diagnostic" diagnostic)
+              let trust =
+                try compact_keeper_trust_json ~config ~meta
+                with exn ->
+                  Log.Dashboard.warn
+                    "dashboard_execution trust enrich failed for keeper %s: %s"
+                    meta.name (Printexc.to_string exn);
+                  `Null
+              in
+              let fields = assoc_upsert fields "diagnostic" diagnostic in
+              let fields = assoc_upsert fields "trust" trust in
+              `Assoc fields
           | Ok None | Error _ -> keeper_json)
       | _ -> keeper_json)
   | _ -> keeper_json

@@ -348,6 +348,13 @@ function normalizeMetricsSeries(raw: unknown): KeeperMetricPoint[] {
         total_tokens: totalTokens,
         wall_tokens_per_second: wallTokensPerSecond,
         inference_telemetry,
+        cascade_name: cascadeObj ? (asString(cascadeObj.cascade_name) ?? asString(cascadeObj.name) ?? null) : null,
+        cascade_outcome: cascadeObj ? (asString(cascadeObj.outcome) ?? null) : null,
+        cascade_selected_model:
+          cascadeObj
+            ? (asString(cascadeObj.selected_model) ?? asString(cascadeObj.selected_model_id) ?? null)
+            : null,
+        cascade_attempt_count: cascadeObj ? (asNumber(cascadeObj.attempt_count) ?? null) : null,
         cascade_strategy: cascadeObj && typeof cascadeObj.strategy === 'string' ? cascadeObj.strategy : null,
         fallback_applied: cascadeObj ? cascadeObj.fallback_applied === true : false,
         fallback_hops: cascadeObj ? (asNumber(cascadeObj.fallback_hops) ?? 0) : 0,
@@ -479,6 +486,9 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
         last_model_used: asString(row.last_model_used),
         last_model_used_label: asString(row.last_model_used_label) ?? null,
         next_model_hint: asString(row.next_model_hint) ?? null,
+        cascade_name: asString(row.cascade_name) ?? null,
+        cascade_canonical: asString(row.cascade_canonical) ?? asString(row.selected_cascade_canonical) ?? null,
+        selected_cascade_canonical: asString(row.selected_cascade_canonical) ?? null,
         status: normalizeKeeperAgentStatus(statusRaw),
         presence_keepalive:
           typeof row.presence_keepalive === 'boolean' ? row.presence_keepalive : undefined,

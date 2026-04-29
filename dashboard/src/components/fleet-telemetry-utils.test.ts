@@ -26,6 +26,7 @@ import {
   toolSummary,
   summaryCounts,
   buildToolQualityMap,
+  buildFleetRows,
   buildRuntimeWarnings,
   emptyState,
   type FleetRow,
@@ -47,6 +48,9 @@ function makeRow(overrides: Partial<FleetRow> = {}): FleetRow {
     activity_label: '최근 활동',
     activity_source: 'last_activity',
     model: 'test-model',
+    cascade_label: null,
+    provider_label: null,
+    fallback_label: null,
     tool_calls: 5,
     tool_success_pct: 95,
     tool_activity_known: true,
@@ -90,11 +94,14 @@ describe('isPlaceholderModel', () => {
     expect(isPlaceholderModel('none')).toBe(true)
     expect(isPlaceholderModel('-')).toBe(true)
     expect(isPlaceholderModel('n/a')).toBe(true)
+    expect(isPlaceholderModel('default')).toBe(true)
+    expect(isPlaceholderModel('auto')).toBe(true)
   })
 
   it('returns false for real model names', () => {
     expect(isPlaceholderModel('claude-sonnet-4-6')).toBe(false)
     expect(isPlaceholderModel('gpt-4o')).toBe(false)
+    expect(isPlaceholderModel('claude_code:auto')).toBe(false)
   })
 
   it('is case-insensitive', () => {
@@ -113,6 +120,83 @@ describe('normalizeModelText', () => {
 
   it('returns trimmed text for valid models', () => {
     expect(normalizeModelText(' claude-sonnet-4-6 ')).toBe('claude-sonnet-4-6')
+  })
+})
+
+describe('buildFleetRows runtime labels', () => {
+  it('surfaces cascade, provider, and fallback labels from keeper telemetry', () => {
+    const [row] = buildFleetRows([
+      {
+        name: 'cascade-keeper',
+        status: 'active',
+        keepalive_running: true,
+        cascade_name: 'oas-keeper_unified',
+        cascade_canonical: 'big_three',
+        active_model_label: 'codex_cli:auto',
+        trust: {
+          execution_summary: {
+            provider_selected_model: 'anthropic:claude-sonnet-4-6',
+            provider_attempt_count: 2,
+            provider_fallback_applied: true,
+            cascade_outcome: 'passed_to_next_model',
+          },
+        },
+        metrics_series: [
+          {
+            ts: 10,
+            context_ratio: 0.42,
+            context_tokens: 420,
+            context_max: 1000,
+            latency_ms: 100,
+            generation: 1,
+            channel: 'turn',
+            is_handoff: false,
+            is_compaction: false,
+            compaction_saved_tokens: 0,
+            compaction_trigger: null,
+            model_used: 'anthropic:claude-sonnet-4-6',
+            cost_usd: 0,
+            handoff_to_model: null,
+            handoff_new_generation: null,
+            prompt_fingerprint: null,
+            prompt_metrics: null,
+            timeout_budget: null,
+            ctx_composition: null,
+            input_tokens: null,
+            output_tokens: null,
+            total_tokens: null,
+            wall_tokens_per_second: null,
+            inference_telemetry: null,
+            cascade_name: 'big_three',
+            cascade_selected_model: 'anthropic:claude-sonnet-4-6',
+            cascade_attempt_count: 2,
+            cascade_outcome: 'passed_to_next_model',
+            cascade_strategy: 'round_robin',
+            fallback_applied: true,
+            fallback_hops: 1,
+            fallback_from: 'openai:gpt-5.4',
+            fallback_to: 'anthropic:claude-sonnet-4-6',
+            fallback_reason: 'turn_timeout',
+          },
+        ],
+      },
+    ], {
+      total: 0,
+      success: 0,
+      failure: 0,
+      success_rate: 0,
+      by_tool: [],
+      by_keeper: [],
+      failure_categories: [],
+      hourly_trend: [],
+    })
+
+    expect(row).toMatchObject({
+      model: 'codex_cli:auto',
+      cascade_label: 'oas-keeper_unified -> big_three',
+      provider_label: 'anthropic:claude-sonnet-4-6 · 2 attempts · fallback',
+      fallback_label: 'openai:gpt-5.4 -> anthropic:claude-sonnet-4-6 · turn_timeout · 1 hops',
+    })
   })
 })
 

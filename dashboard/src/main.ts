@@ -33,6 +33,7 @@ import './styles/tools.css'
 import { render } from 'preact'
 import { html } from 'htm/preact'
 import { App } from './app'
+import { performanceMonitor } from './lib/performance-monitor'
 
 // Theme resolution precedence: ?theme= URL param (session scoped) >
 // localStorage.dashboardTheme (persistent) > default (unset).
@@ -64,3 +65,7 @@ const root = document.getElementById('app')
 if (root) {
   render(html`<${App} />`, root)
 }
+
+// Begin collecting long-animation-frame telemetry.
+// No-op on browsers that do not support LoAF.
+performanceMonitor.start()

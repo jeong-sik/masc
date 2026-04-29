@@ -294,11 +294,29 @@ function dtcgKindToType(kind: TokenBase["kind"]): string {
     case "color": return "color";
     case "dimension": return "dimension";
     case "duration": return "duration";
-    case "easing": return "cubicBezier"; // DTCG uses cubicBezier; we pass through string for cubic-bezier()
+    case "easing": return "cubicBezier";
     case "shadow": return "shadow";
     case "typography": return "fontFamily";
     case "number": return "number";
   }
+}
+
+/**
+ * DTCG cubicBezier $value is required to be a 4-number array (P1x, P1y,
+ * P2x, P2y). For raw easing tokens defined as `cubic-bezier(a,b,c,d)`
+ * we parse the args and emit `[a, b, c, d]`. For role-tier easing
+ * tokens whose value is a `var(--…)` reference (e.g.
+ * `--enter-easing` → `var(--ease-out)`), we pass the string through:
+ * DTCG references are still strings, just resolved to arrays at the
+ * raw-tier definition site.
+ */
+function dtcgValue(tk: TokenBase): unknown {
+  if (tk.kind !== "easing") return tk.value;
+  const m = tk.value.trim().match(
+    /^cubic-bezier\(\s*(-?\d*\.?\d+)\s*,\s*(-?\d*\.?\d+)\s*,\s*(-?\d*\.?\d+)\s*,\s*(-?\d*\.?\d+)\s*\)$/,
+  );
+  if (m === null) return tk.value;
+  return [Number(m[1]), Number(m[2]), Number(m[3]), Number(m[4])];
 }
 
 function buildDtcgJson(): string {
@@ -313,7 +331,7 @@ function buildDtcgJson(): string {
     for (const tk of toks) {
       g[tk.name] = {
         $type: dtcgKindToType(tk.kind),
-        $value: tk.value,
+        $value: dtcgValue(tk),
         $description: tk.description ?? undefined,
       };
     }
@@ -325,7 +343,7 @@ function buildDtcgJson(): string {
     for (const tk of theme.tokens) {
       g[tk.name] = {
         $type: dtcgKindToType(tk.kind),
-        $value: tk.value,
+        $value: dtcgValue(tk),
         $description: tk.description ?? undefined,
       };
     }

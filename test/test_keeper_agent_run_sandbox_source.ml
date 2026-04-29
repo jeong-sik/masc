@@ -71,6 +71,32 @@ let test_execution_receipt_reports_same_sandbox_root () =
     (contains ~needle:"sandbox_root = Some keeper_sandbox_root" src)
 ;;
 
+let test_runtime_contract_sandbox_root_is_keeper_visible () =
+  (* Runtime_contract.sandbox_root is consumed by the keeper LLM. Surfacing
+     the host abs path there leaks the abstraction that the keeper lives
+     entirely inside its sandbox; the LLM then emits host-path commands
+     like [cd /Users/.../playground/<keeper>/...] on the next turn, which
+     fail with No such file or directory inside the container.
+     The fix routes the sandbox_root field through
+     [Keeper_sandbox.keeper_visible_root_abs_of_meta] so Docker keepers see
+     [container_root] and Local keepers keep the host path. *)
+  let src = load_source target_file in
+  check
+    bool
+    "runtime_contract sandbox_root routes through keeper_visible_root_abs_of_meta"
+    true
+    (contains
+       ~needle:"Keeper_sandbox.keeper_visible_root_abs_of_meta ~config meta"
+       src);
+  check
+    int
+    "runtime_contract sandbox_root no longer calls host_root_abs_of_meta directly"
+    0
+    (count_occurrences
+       ~needle:"~sandbox_root:(Keeper_sandbox.host_root_abs_of_meta"
+       src)
+;;
+
 let () =
   run
     "keeper_agent_run_sandbox_source"
@@ -83,6 +109,10 @@ let () =
             "receipt reports same sandbox root"
             `Quick
             test_execution_receipt_reports_same_sandbox_root
+        ; test_case
+            "runtime_contract sandbox_root is keeper-visible"
+            `Quick
+            test_runtime_contract_sandbox_root_is_keeper_visible
         ] )
     ]
 ;;

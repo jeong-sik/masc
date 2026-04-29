@@ -22,7 +22,7 @@ val run_named :
   ?keeper_name:string ->
   ?model_strings:string list ->
   goal:string ->
-  ?provider_filter:(Llm_provider.Provider_config.t -> bool) ->
+  ?provider_filter:string list ->
   ?require_tool_choice_support:bool ->
   ?require_tool_support:bool ->
   ?priority:Llm_provider.Request_priority.t ->
@@ -35,43 +35,43 @@ val run_named :
   ?stream_idle_timeout_s:float ->
   ?temperature:float ->
   ?max_tokens:int ->
-  ?max_input_tokens:int option ->
-  ?max_cost_usd:float option ->
+  ?max_input_tokens:int ->
+  ?max_cost_usd:float ->
   ?wait_timeout_sec:float ->
   ?accept:(Oas_response.api_response -> bool) ->
   ?guardrails:Oas.Guardrails.t ->
-  ?hooks:Oas.Hooks.t ->
+  ?hooks:Oas.Hooks.hooks ->
   ?context_reducer:Oas.Context_reducer.t ->
   ?memory:Oas.Memory.t ->
-  ?tool_retry_policy:Oas.Tool_retry.t ->
-  ?required_tool_satisfaction:Oas.Completion_contract.tool_satisfaction ->
-  ?raw_trace:Oas.Types.raw_trace ->
-  ?on_event:(Oas.Types.event -> unit) ->
-  ?on_yield:(Oas_response.api_response -> unit) ->
+  ?tool_retry_policy:Oas.Tool_retry_policy.t ->
+  ?required_tool_satisfaction:Oas.Completion_contract.required_tool_satisfaction ->
+  ?raw_trace:Oas.Raw_trace.t ->
+  ?on_event:(Oas.Types.sse_event -> unit) ->
+  ?on_yield:(unit -> unit) ->
   ?on_resume:(unit -> unit) ->
   ?agent_ref:Oas.Agent.t option ref ->
-  ?proof_ref:string option ref ->
-  ?contract:Oas.Completion_contract.t ->
+  ?proof_ref:Oas.Cdal_proof.t option ref ->
+  ?contract:Oas.Risk_contract.t ->
   ?transport:Masc_grpc_transport.t ->
   ?cli_transport_overrides:Oas_worker_exec.cli_transport_overrides ->
   ?allowed_paths:string list ->
-  ?checkpoint_sidecar:string option ref ->
+  ?checkpoint_sidecar:Yojson.Safe.t ->
   ?cache_system_prompt:bool ->
   ?yield_on_tool:bool ->
   ?compact_ratio:float ->
   ?checkpoint_dir:string ->
-  ?context_injector:Oas.Context_injector.t ->
-  ?context:Oas.Types.context ->
-  ?slot_id:string ->
+  ?context_injector:Oas.Hooks.context_injector ->
+  ?context:Oas.Context.t ->
+  ?slot_id:int ->
   ?enable_thinking:bool ->
-  ?approval:Oas.Approval.t ->
-  ?exit_condition:Oas.Types.exit_condition ->
-  ?exit_condition_result:(Oas_response.api_response -> Oas.Types.exit_condition_result option) ->
+  ?approval:Oas.Hooks.approval_callback ->
+  ?exit_condition:(int -> bool) ->
+  ?exit_condition_result:(int -> Oas_worker_exec.stop_reason * string option) ->
   ?summarizer:(Oas.Types.message list -> string) ->
   ?oas_checkpoint:Oas.Checkpoint.t ->
   ?event_bus:Oas.Event_bus.t ->
   ?sw:Eio.Switch.t ->
-  ?net:Eio.Net.t ->
+  ?net:Eio_context.eio_net ->
   ?per_provider_timeout_s:float ->
   unit ->
   (Oas_worker_exec.run_result, Oas.Error.sdk_error) result
@@ -92,22 +92,22 @@ val run_model_by_label :
   ?stream_idle_timeout_s:float ->
   ?temperature:float ->
   ?max_tokens:int ->
-  ?max_input_tokens:int option ->
-  ?max_cost_usd:float option ->
+  ?max_input_tokens:int ->
+  ?max_cost_usd:float ->
   ?wait_timeout_sec:float ->
   ?accept:(Oas_response.api_response -> bool) ->
   ?guardrails:Oas.Guardrails.t ->
-  ?hooks:Oas.Hooks.t ->
+  ?hooks:Oas.Hooks.hooks ->
   ?context_reducer:Oas.Context_reducer.t ->
   ?memory:Oas.Memory.t ->
-  ?tool_retry_policy:Oas.Tool_retry.t ->
+  ?tool_retry_policy:Oas.Tool_retry_policy.t ->
   ?enable_thinking:bool ->
   ?compact_ratio:float ->
-  ?contract:Oas.Completion_contract.t ->
-  ?on_event:(Oas.Types.event -> unit) ->
+  ?contract:Oas.Risk_contract.t ->
+  ?on_event:(Oas.Types.sse_event -> unit) ->
   ?transport:Masc_grpc_transport.t ->
   ?sw:Eio.Switch.t ->
-  ?net:Eio.Net.t ->
+  ?net:Eio_context.eio_net ->
   unit ->
   (Oas_worker_exec.run_result, Oas.Error.sdk_error) result
 (** Run a single [Agent.run] using a model label string
@@ -126,26 +126,26 @@ val run_named_with_masc_tools :
   ?stream_idle_timeout_s:float ->
   ?temperature:float ->
   ?max_tokens:int ->
-  ?max_input_tokens:int option ->
-  ?max_cost_usd:float option ->
+  ?max_input_tokens:int ->
+  ?max_cost_usd:float ->
   ?wait_timeout_sec:float ->
   ?guardrails:Oas.Guardrails.t ->
-  ?hooks:Oas.Hooks.t ->
+  ?hooks:Oas.Hooks.hooks ->
   ?memory:Oas.Memory.t ->
-  ?tool_retry_policy:Oas.Tool_retry.t ->
-  ?required_tool_satisfaction:Oas.Completion_contract.tool_satisfaction ->
-  ?raw_trace:Oas.Types.raw_trace ->
-  ?on_event:(Oas.Types.event -> unit) ->
-  ?on_yield:(Oas_response.api_response -> unit) ->
+  ?tool_retry_policy:Oas.Tool_retry_policy.t ->
+  ?required_tool_satisfaction:Oas.Completion_contract.required_tool_satisfaction ->
+  ?raw_trace:Oas.Raw_trace.t ->
+  ?on_event:(Oas.Types.sse_event -> unit) ->
+  ?on_yield:(unit -> unit) ->
   ?on_resume:(unit -> unit) ->
-  ?proof_ref:string option ref ->
-  ?contract:Oas.Completion_contract.t ->
+  ?proof_ref:Oas.Cdal_proof.t option ref ->
+  ?contract:Oas.Risk_contract.t ->
   ?transport:Masc_grpc_transport.t ->
   ?yield_on_tool:bool ->
   ?compact_ratio:float ->
-  ?approval:Oas.Approval.t ->
+  ?approval:Oas.Hooks.approval_callback ->
   ?sw:Eio.Switch.t ->
-  ?net:Eio.Net.t ->
+  ?net:Eio_context.eio_net ->
   unit ->
   (Oas_worker_exec.run_result, Oas.Error.sdk_error) result
 (** [run_named] variant that bridges MASC tool schemas into OAS tools
@@ -161,21 +161,21 @@ val run_model_with_masc_tools :
   ?stream_idle_timeout_s:float ->
   ?temperature:float ->
   ?max_tokens:int ->
-  ?max_input_tokens:int option ->
-  ?max_cost_usd:float option ->
+  ?max_input_tokens:int ->
+  ?max_cost_usd:float ->
   ?wait_timeout_sec:float ->
   ?guardrails:Oas.Guardrails.t ->
-  ?hooks:Oas.Hooks.t ->
+  ?hooks:Oas.Hooks.hooks ->
   ?memory:Oas.Memory.t ->
-  ?tool_retry_policy:Oas.Tool_retry.t ->
+  ?tool_retry_policy:Oas.Tool_retry_policy.t ->
   ?enable_thinking:bool ->
   ?compact_ratio:float ->
-  ?contract:Oas.Completion_contract.t ->
-  ?raw_trace:Oas.Types.raw_trace ->
-  ?on_event:(Oas.Types.event -> unit) ->
+  ?contract:Oas.Risk_contract.t ->
+  ?raw_trace:Oas.Raw_trace.t ->
+  ?on_event:(Oas.Types.sse_event -> unit) ->
   ?transport:Masc_grpc_transport.t ->
   ?sw:Eio.Switch.t ->
-  ?net:Eio.Net.t ->
+  ?net:Eio_context.eio_net ->
   unit ->
   (Oas_worker_exec.run_result, Oas.Error.sdk_error) result
 (** [run_model_by_label] variant that bridges MASC tool schemas into OAS tools. *)

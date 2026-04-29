@@ -26,7 +26,7 @@ val report_keeper_cycle_side_effect_issue :
   config:Coord.config ->
   keeper_name:string ->
   side_effect:string ->
-  ?severity:[> `Warn | `Error ] ->
+  ?severity:[< `Warn | `Error > `Warn ] ->
   string -> unit
 (** Log and record a side-effect failure for a keeper cycle. *)
 
@@ -76,7 +76,7 @@ val record_pre_dispatch_terminal_observation :
   trajectory_outcome:Trajectory.trajectory_outcome ->
   ?error_kind:string ->
   ?error_message:string ->
-  ?keeper_turn_id:string ->
+  ?keeper_turn_id:int ->
   unit -> unit
 (** Record a terminal observation (receipt + activity graph event) for a
     pre-dispatch failure or early exit. *)

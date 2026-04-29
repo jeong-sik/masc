@@ -81,6 +81,8 @@ val admission_wait_timeout_error :
   (string, Oas.Error.sdk_error) result
 (** Build an [Admission_queue_timeout] error from a wait duration in ms. *)
 
+val cross_cascade_fallback_metric : string
+
 (** {1 Config construction} *)
 
 val config_for_label :
@@ -90,20 +92,20 @@ val config_for_label :
   tools:Oas.Tool.t list ->
   max_turns:int ->
   max_tokens:int ->
-  ?max_input_tokens:int option ->
-  ?max_cost_usd:float option ->
+  ?max_input_tokens:int ->
+  ?max_cost_usd:float ->
   temperature:float ->
   ?max_idle_turns:int ->
   ?stream_idle_timeout_s:float ->
   ?guardrails:Oas.Guardrails.t ->
-  ?hooks:Oas.Hooks.t ->
+  ?hooks:Oas.Hooks.hooks ->
   ?context_reducer:Oas.Context_reducer.t ->
   ?memory:Oas.Memory.t ->
-  ?tool_retry_policy:Oas.Tool_retry.t ->
+  ?tool_retry_policy:Oas.Tool_retry_policy.t ->
   ?enable_thinking:bool ->
   ?compact_ratio:float ->
-  ?contract:Oas.Completion_contract.t ->
-  ?approval:Oas.Approval.t ->
+  ?contract:Oas.Risk_contract.t ->
+  ?approval:Oas.Hooks.approval_callback ->
   description:string option ->
   unit ->
   (Oas_worker_exec.config, Oas.Error.sdk_error) result

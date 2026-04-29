@@ -366,6 +366,11 @@ type semantic =
   | `Hover_lift
   | `Focus_ring_width
   | `Focus_ring_offset
+  | `Button_primary_bg
+  | `Button_primary_fg
+  | `Button_primary_border
+  | `Button_primary_bg_hover
+  | `Button_primary_bg_pressed
   | `State_hover_bg
   | `State_hover_fg
   | `State_hover_border
@@ -793,6 +798,11 @@ let name_of = function
   | `Hover_lift -> "hover-lift"
   | `Focus_ring_width -> "focus-ring-width"
   | `Focus_ring_offset -> "focus-ring-offset"
+  | `Button_primary_bg -> "button-primary-bg"
+  | `Button_primary_fg -> "button-primary-fg"
+  | `Button_primary_border -> "button-primary-border"
+  | `Button_primary_bg_hover -> "button-primary-bg-hover"
+  | `Button_primary_bg_pressed -> "button-primary-bg-pressed"
   | `State_hover_bg -> "state-hover-bg"
   | `State_hover_fg -> "state-hover-fg"
   | `State_hover_border -> "state-hover-border"

@@ -1,6 +1,34 @@
 # Changelog
 
 
+## [0.18.13] - 2026-04-30
+
+Aggregate of 389 commits since v0.18.9 (147 feat / 74 chore / 54 fix / 26 docs / 25 test / 20 refactor / 8 spec / 3 ci, plus filename-scoped surface pins). No breaking API changes.
+
+This is a release-truth catch-up for the 0.18.10-0.18.13 stabilization train. The headline thread is keeper/OAS boundary hardening after budget-loop and local Ollama timeout failures, plus dashboard/runtime visibility cleanup and CI/release hygiene.
+
+### Added
+
+- OAS provider error variant contract, metric export, and dashboard telemetry samples for provider/cascade diagnosis.
+- Resolved-goal verification evidence and expanded dashboard/runtime surfaces for operator truth.
+- Performance and reliability instrumentation, including dashboard WS load harness, cache hit/miss counters, GC quick-stat sampling, and cold/warm tool-call labels.
+
+### Fixed
+
+- Keeper OAS timeout behavior: fallback budget reservation, repeated `oas_timeout_budget` auto-pause, hard-quota fail-fast handling, and local Ollama token-cap tuning.
+- Docker-backed keeper execution: `HOME=/tmp` coverage for run/exec/shell paths and runtime contract visibility fixes.
+- Dashboard CI/typecheck stability, provider cascade clarity, fleet idle recovery false positives, and stale TLA/spec-line references.
+
+### Changed
+
+- OAS pin metadata refreshed through the reachable `0.184.0` SDK line and downstream version truth synced to `0.18.13`.
+- Keeper tool preset UI compatibility removed after the runtime-facing preset model moved to typed gate decisions.
+- TLA deadlock checking narrowed for `AutonomousLoop` terminal-state behavior so CI tracks the intended invariant surface.
+
+### Deprecated
+
+- None.
+
 ## [0.18.9] - 2026-04-28 — patch: spec ↔ code bidirectional identity infrastructure (Cycle 24-44 autonomous series) + 234 operational commits
 
 Aggregate of 254 commits since v0.18.8 (109 feat / 33 fix / 37 docs+spec / 36 chore / 34 refactor / 3 test / 1 quality / 1 ci). No breaking API changes. Patch bump (per #11388 narrow-scope precedent); a minor bump (`0.19.0`) is also defensible given the 109 `feat` commits and is a release-manager call.

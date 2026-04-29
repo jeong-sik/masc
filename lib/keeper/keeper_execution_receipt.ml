@@ -168,6 +168,37 @@ let string_contains_ci haystack needle =
   in
   loop 0
 
+(* Cycle 51 observability: alert when [operator_disposition] cannot
+   classify a receipt and falls through to the catch-all
+   [("unknown", "unmapped_cascade_state")].
+
+   PR #11651 fixed the historical "blocked" -> "unknown" silent path
+   (livelock turns emitted [outcome="blocked"] which was not in
+   [outcome_kind] and therefore mapped to the unknown bucket; the fix
+   was to map livelock terminations to [outcome="error"] with
+   [terminal_reason_code] carrying the specific reason).  After that
+   fix the unmapped fall-through SHOULD be unreachable in production.
+
+   This counter alerts operators if a future refactor reintroduces a
+   silent path — a non-zero rate is a regression signal.  Companion
+   to the existing PR #11651 narrative documented at the fall-through
+   case below ([match outcome_kind_of_string ...] catch-all). *)
+let () =
+  Prometheus.register_counter
+    ~name:"masc_keeper_receipt_unmapped_disposition_total"
+    ~help:
+      "Total receipts whose (outcome, cascade_outcome) tuple did not \
+       match any branch of operator_disposition and fell through to \
+       (\"unknown\", \"unmapped_cascade_state\").  PR #11651 fixed the \
+       historical 'blocked' -> 'unknown' silent path; this counter \
+       alerts operators if a future refactor reintroduces such a path. \
+       A non-zero rate is a regression signal — investigate which \
+       receipt.outcome / cascade_outcome / terminal_reason_code \
+       combination is unclassified.  Labels are intentionally omitted: \
+       receipt fields are high-cardinality free-form strings; \
+       structured detail goes to the WARN log line at the firing site."
+    ()
+
 let operator_disposition (receipt : t) =
   let cascade_outcome = String.lowercase_ascii receipt.cascade_outcome in
   let terminal_reason = String.lowercase_ascii receipt.terminal_reason_code in
@@ -233,7 +264,16 @@ let operator_disposition (receipt : t) =
     | Some `Skipped -> ("skipped", "phase_skipped")
     | Some `Ok when String.equal cascade_outcome "completed" ->
       ("pass", "healthy")
-    | _ -> ("unknown", "unmapped_cascade_state")
+    | _ ->
+      Prometheus.inc_counter
+        "masc_keeper_receipt_unmapped_disposition_total" ();
+      Log.Keeper.warn
+        "operator_disposition: unmapped (outcome=%s cascade_outcome=%s \
+         terminal_reason=%s tool_contract_result=%s error_kind=%s) \
+         — investigate regression of #11651 silent-path fix"
+        receipt.outcome cascade_outcome terminal_reason tool_contract_result
+        (Option.value error_kind ~default:"<none>");
+      ("unknown", "unmapped_cascade_state")
 
 let to_json (receipt : t) =
   let operator_disposition, operator_disposition_reason =
@@ -403,7 +443,45 @@ let to_json (receipt : t) =
    verdict therefore had no transition out: dashboard turned a chip red, but
    no event reached operators and no supervisor handoff fired. We now emit a
    structured "keeper.operator_broadcast_required" activity event so the gate
-   verdict becomes addressable instead of cosmetic. *)
+   verdict becomes addressable instead of cosmetic.
+
+   Spec navigation (OCaml -> TLA+) — plan §19 anchor pattern.
+   Authoritative spec mirror is
+   [specs/keeper-state-machine/OperatorPauseBroadcast.tla].
+
+   Spec lines 17-21 already cite this module:
+     "lib/keeper/keeper_execution_receipt.ml: needs_operator_broadcast +
+      emit_operator_broadcast called from append".
+
+   This block is the reverse-direction citation so code search for
+   "OperatorPauseBroadcast" lands at this hook.
+
+   Spec property under audit (line 11-15):
+     For every keeper that enters PauseHuman or StaleRunning, an
+     OperatorBroadcast event is eventually emitted (leads-to).  The
+     clean Spec satisfies this; the bug model where emit is silently
+     dropped MUST violate it.
+
+   OCaml mapping:
+     PauseHuman / StaleRunning  -> [needs_operator_broadcast]
+                                  returns [true] for "pause_human",
+                                  "alert_exhausted", "unknown".
+     OperatorBroadcast event    -> [emit_operator_broadcast]
+                                  emits "keeper.operator_broadcast_required.v1"
+                                  with structured payload.
+     Eventually-emit liveness   -> [append] (~line 455) calls the
+                                  emit unconditionally when
+                                  [needs_operator_broadcast] is true,
+                                  inside a [try] so a single failure
+                                  does not cascade — the spec's clean
+                                  model.
+
+   Bug model (would be violated if a future refactor wrapped emit
+   in a conditional that could silently skip): an OperatorBroadcast
+   path that requires manual operator dispatch instead of automatic
+   emit would re-create the original #fleet-stall bug.  Sibling
+   anchor in [keeper_supervisor.ml] (StaleRunning watchdog +
+   emit_stale_keeper_broadcast) is deferred to a separate cycle. *)
 let needs_operator_broadcast = function
   | "pause_human" | "alert_exhausted" | "unknown" -> true
   | _ -> false

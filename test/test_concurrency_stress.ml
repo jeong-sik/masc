@@ -157,7 +157,6 @@ let test_cancellation_cleanup_under_load () =
 
 (** {1 Zombie Detection Under Load} *)
 
-module Resilience = Resilience
 
 let test_zombie_detection_concurrent () =
   Eio_main.run @@ fun _ ->
@@ -178,9 +177,9 @@ let test_zombie_detection_concurrent () =
   (* Concurrent zombie/fresh checks *)
   let checker () =
     for _ = 1 to 100 do
-      if Resilience.Zombie.is_zombie stale_time then
+      if Coord_resilience.Zombie.is_zombie stale_time then
         Atomic.incr zombie_checks;
-      if not (Resilience.Zombie.is_zombie fresh_time) then
+      if not (Coord_resilience.Zombie.is_zombie fresh_time) then
         Atomic.incr fresh_checks
     done
   in

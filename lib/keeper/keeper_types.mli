@@ -3,7 +3,46 @@
 
     Re-exports everything from {!Keeper_types_profile} (context, schemas,
     profile defaults, path helpers) and {!Keeper_types_support}
-    (model selection, JSONL helpers, metrics store). *)
+    (model selection, JSONL helpers, metrics store).
+
+    Spec navigation (OCaml -> TLA+) — plan §19 anchor pattern.  Sibling
+    to #11612 (rollover) and #11614 (post_turn).  Authoritative spec
+    mirror is [specs/keeper-state-machine/KeeperGenerationLineage.tla].
+
+    Spec lines 10-13 already cite this module among three modeled
+    OCaml sources:
+      - lib/keeper/keeper_post_turn.ml   (post-turn pipeline,
+                                          anchored in #11614)
+      - lib/keeper/keeper_rollover.ml    (rollover semantics,
+                                          anchored in #11612)
+      - lib/keeper/keeper_types.mli      (this file — type lineage)
+
+    This block is the reverse-direction citation so code search for
+    "KeeperGenerationLineage" lands here too.
+
+    Type lineage covered (TLA+ -> OCaml):
+      generation                 [keeper_meta.generation : int] —
+                                 incremented on rollover.  See
+                                 [Keeper_types_profile] and
+                                 [Keeper_rollover.attempt].
+      current_trace_id           [keeper_meta.trace_id : string] —
+                                 replaced on successful handoff.
+      trace_history              [keeper_meta.trace_history : string list] —
+                                 append-only; most recent is at head
+                                 or tail per the OCaml convention used
+                                 in Keeper_rollover.
+      ckpt_valid / ckpt_generation
+                                 derived from [keeper_meta.checkpoint]
+                                 fields, the parity check
+                                 [keeper_phase = idle => ckpt is
+                                 consistent with current generation]
+                                 lives in [Keeper_post_turn] when the
+                                 turn returns to idle.
+
+    Spec out-of-scope (line 15-18 in spec): compaction strategy
+    selection (KeeperCompactionLifecycle), Agent.run turn loop,
+    long-term memory recall.  This module re-exports policy types
+    only — no behavior. *)
 
 include module type of Keeper_types_profile
 

@@ -78,8 +78,5 @@ val interpret : summary_input -> interpretation
 val interpretation_to_json : interpretation -> Yojson.Safe.t
 val salience_to_string : salience -> string
 val summary_signature : summary_input -> string
-val digest_hearth : string
-val digest_source : string
-val post_digest_key : Board.post -> string option
 val latest_digest_ref : ?summary:summary_input -> unit -> digest_ref option
 val latest_digest_json : ?summary:summary_input -> unit -> Yojson.Safe.t

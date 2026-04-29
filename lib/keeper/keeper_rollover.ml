@@ -4,7 +4,43 @@
     cooldown has elapsed, creates a new session with the current context
     carried forward to the next generation.
 
-    Extracted from Keeper_exec_context as part of #4955 god-file split. *)
+    Extracted from Keeper_exec_context as part of #4955 god-file split.
+
+    Spec navigation (OCaml -> TLA+) — plan §19 anchor pattern.
+    Authoritative spec mirror is
+    [specs/keeper-state-machine/KeeperGenerationLineage.tla].
+
+    Spec lines 10-13 already cite this module:
+    "Modeled from: lib/keeper/keeper_post_turn.ml, lib/keeper/keeper_rollover.ml,
+    lib/keeper/keeper_types.mli".  This block is the reverse-direction
+    citation so code search for "KeeperGenerationLineage" lands here.
+
+    Spec semantics modelled (TLA+ -> OCaml):
+      keeper_phase                 [meta] phase as observed during
+                                   handoff (idle / running / handing_off).
+      generation                   [meta.generation] field — incremented
+                                   on every successful rollover here.
+      current_trace_id             new trace allocated by the rollover
+                                   path; replaces the previous trace on
+                                   successful handoff.
+      trace_history                append-only ancestry recorded into
+                                   meta when rollover commits.
+      ckpt_valid / ckpt_generation [Keeper_types]'s checkpoint lineage
+                                   parity that the handoff must preserve.
+
+    Spec scope (line 4-8):
+      - same keeper identity across generations
+      - trace_id replacement on successful handoff
+      - trace_history append-only ancestry
+      - checkpoint lineage parity once the keeper returns to idle
+
+    Out of scope (line 15-18):
+      - compaction strategy selection (KeeperCompactionLifecycle)
+      - tool execution / Agent.run turn loop
+      - long-term memory recall semantics
+
+    The spec models "same keeper, new trace" rather than a new child
+    runtime — this is the generation contract the rollover enforces. *)
 
 open Keeper_types
 open Keeper_context_core

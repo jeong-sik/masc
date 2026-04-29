@@ -1,5 +1,47 @@
 (** Keeper_memory_bank — memory bank persistence, compaction, and summarization. *)
 
+(* Spec navigation (OCaml -> TLA+) — plan §19 anchor pattern.  Sibling
+   to PR 11617 (Cycle 34, keeper_memory_policy.ml).  Authoritative
+   spec mirror is
+   specs/keeper-state-machine/KeeperMemoryLifecycle.tla.
+
+   Spec lines 22-23 cite this module specifically for two semantic
+   aspects:
+
+     open_short    rows: unresolved short-term notes
+                   (open_question kind).  This module's compaction
+                   and summarization paths must preserve open_short
+                   until they are answered or roll over with the
+                   keeper generation.
+     provenanced   rows: non-empty trace_id and source.  Persistence
+                   here is the authoritative producer of provenance:
+                   no row reaches mid_term or long_term without it.
+
+   This block is the reverse-direction citation so code search for
+   "KeeperMemoryLifecycle" lands in this module too — completing the
+   sibling pair with keeper_memory_policy.ml which carries the
+   horizon-tier and producer anchors (memory_horizon_of_kind_opt
+   and memory_horizon_of_kind).
+
+   Sibling division of labor:
+     keeper_memory_policy.ml   tier vocabulary, producer,
+                               classification.
+     keeper_memory_bank.ml     persistence, compaction,
+                               summarization, provenance enforcement.
+
+   Spec safety goals (line 9-13 in spec):
+     - every persisted note has provenance.  Enforced here by
+       rejecting rows with empty trace_id or source.
+     - overflow and handoff do not silently drop retained notes.
+       Compaction selection paths preserve open_short and
+       provenanced rows; the spec verifies the bound.
+     - handoff clears stale short-term notes.  The generation-handoff
+       path here explicitly clears short_mem that has not been
+       promoted to mid_mem.
+     - each tier stays within its configured bound.
+       select_memory_candidates (this file) walks rows under the
+       tier-specific cap from Keeper_memory_policy.kind_caps. *)
+
 open Keeper_types
 
 include Keeper_memory_policy

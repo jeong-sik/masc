@@ -149,6 +149,51 @@
   --spacing-group: 12px;  /* grouped items */
   --spacing-card: 16px;  /* card internal padding */
   --radius-xl: 24px;
+  --slate-400: #94a3b8;  /* Tailwind slate-400 alias */
+  --slate-500: #64748b;  /* Tailwind slate-500 alias */
+  --slate-600: #475569;  /* Tailwind slate-600 alias */
+  --slate-800: #1e293b;  /* Tailwind slate-800 alias */
+  --blue-400: #60a5fa;  /* Tailwind blue-400 alias */
+  --sky-400: #38bdf8;  /* Tailwind sky-400 alias */
+  --purple-500: #a855f7;  /* Tailwind purple-500 alias */
+  --yellow-100: #fde68a;  /* Tailwind yellow-100 alias */
+  --red-100: #fecaca;  /* Tailwind red-100 alias */
+  --cyan-100: #cffafe;  /* Tailwind cyan-100 alias */
+  --emerald: #22c55e;  /* Tailwind emerald-500 alias (kept short name) */
+  --emerald-fg: #bbf7d0;  /* Tailwind emerald-200 alias (kept short name) */
+  --indigo: #818cf8;  /* Tailwind indigo-400 alias (kept short name) */
+  --yellow-bright: #facc15;  /* Tailwind yellow-400 alias (kept short name) */
+  --amber-bright: #f59e0b;  /* Tailwind amber-500 alias (kept short name) */
+  --rose: #f43f5e;  /* Tailwind rose-500 alias */
+  --rose-fg: #fecdd3;  /* Tailwind rose-200 alias */
+  --rose-light: #fb7185;  /* Tailwind rose-400 alias */
+  --cyan: #22d3ee;  /* Tailwind cyan-400 alias (kept short name) */
+  --purple: #a78bfa;  /* Tailwind purple-400 alias (kept short name) */
+  --frost-100: #e2e8f0;  /* Tailwind slate-200 alias (kept legacy frost name) */
+  --white-pure: #ffffff;  /* Pure white #ffffff (canon constant, distinct from --text-strong tints) */
+  --text-near-white: #f8fafc;  /* Tailwind slate-50 alias */
+  --text-slate-light: #cbd5e1;  /* Tailwind slate-300 alias */
+  --text-strong: #eaf1ff;  /* Brightest text on dark surfaces */
+  --text-body: #c0d2f2;  /* Default body copy on dark surfaces */
+  --text-muted: #a8bfdf;  /* Secondary/labels */
+  --text-dim: #a0a8b4;  /* Tertiary/captions */
+  --state-idle: #b8c0cc;  /* Keeper idle / no signal */
+  --state-offline: #7a8494;  /* Keeper offline / unreachable */
+  --agent-working: #7ae09a;  /* Agent actively running */
+  --agent-busy: #f0c060;  /* Agent busy / queued */
+  --chat-user-avatar: #d8f0ff;  /* Chat user avatar tint */
+  --chat-user-chip: #c9ebff;  /* Chat user message chip */
+  --chat-assistant-avatar: #efe6ff;  /* Chat assistant avatar tint */
+  --chat-assistant-chip: #ded0ff;  /* Chat assistant message chip */
+  --chat-error-avatar: #ffe1e1;  /* Chat error avatar tint */
+  --chat-error-chip: #ffb4b4;  /* Chat error message chip */
+  --chat-code-callout: #95f3bc;  /* Chat inline code callout (bright mint) */
+  --vote-up: #ff4500;  /* Reddit-canonical upvote orange-red */
+  --vote-down: #7193ff;  /* Reddit-canonical downvote blue-violet */
+  --vote-hover: #ccc;  /* Vote button hover (3-digit short hex) */
+  --text-slate: #b0bfd4;  /* Custom cool gray (no Tailwind exact match) */
+  --warn-bright: #f97316;  /* Tailwind orange-500 (FSM Compacting) */
+  --bad-light: #f87171;  /* Tailwind red-400 (softer than --bad) */
 }
 
 :root {
@@ -321,6 +366,10 @@
   --focus-ring-err: 0 0 0 1px var(--err), 0 0 0 3px rgb(var(--err-glow) / .3);
   --hover-overlay: rgb(255 255 255 / .03);
   --active-overlay: rgb(0 0 0 / .25);
+  --pressed-scale: 0.97;  /* scale factor while [data-pressed] */
+  --hover-lift: -1px;  /* translateY offset while [data-hover] */
+  --focus-ring-width: 2px;
+  --focus-ring-offset: 2px;
   --state-hover-bg: var(--bg-3);
   --state-hover-fg: var(--fg-1);
   --state-hover-border: var(--line-2);
@@ -347,6 +396,10 @@
   --motion-reveal: var(--t-slow) var(--ease-out);
   --motion-settle: var(--t-xslow) var(--ease-out);
   --motion-pop: var(--t-med) var(--ease-spring);
+  --enter-duration: var(--t-med);  /* duration for [data-state=open] / [data-state=entering] */
+  --exit-duration: var(--t-fast);  /* duration for [data-state=closed] / [data-state=leaving] */
+  --enter-easing: var(--ease-out);  /* cubic-bezier on enter — decelerate-into-rest */
+  --exit-easing: var(--ease-in);  /* cubic-bezier on exit — accelerate-out */
   --_motion-scope: 1;  /* scope sentinel */
   --cmt-question: var(--info);
   --cmt-flag: var(--err);

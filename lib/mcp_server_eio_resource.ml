@@ -156,7 +156,8 @@ let handle_read_resource_eio state id params =
                   let inst = Institution_eio.institution_of_json json in
                   ("text/markdown", Some (Institution_eio.format_for_injection inst))
                 with
-                | Yojson.Json_error _ | Sys_error _ ->
+                | Yojson.Json_error _ | Sys_error _
+                | Yojson.Safe.Util.Type_error _ ->
                   let content = Fs_compat.load_file file in
                   ("application/json", Some content)
               else

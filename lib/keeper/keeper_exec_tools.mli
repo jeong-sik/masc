@@ -156,8 +156,8 @@ val execute_keeper_tool_call_with_outcome :
   config:Coord.config ->
   meta:keeper_meta ->
   ctx_work:working_context ->
-  ?turn_sandbox_runtime:Keeper_turn_sandbox_runtime.t ->
-  ?turn_sandbox_runtime_git:Keeper_turn_sandbox_runtime.t ->
+  ?turn_sandbox_factory:Keeper_sandbox_factory.t ->
+  ?turn_sandbox_factory_git:Keeper_sandbox_factory.t ->
   exec_cache:Masc_exec.Exec_cache.t option ->
   ?search_fn:(query:string -> max_results:int -> Yojson.Safe.t) ->
   name:string ->
@@ -169,8 +169,8 @@ val execute_keeper_tool_call :
   config:Coord.config ->
   meta:keeper_meta ->
   ctx_work:working_context ->
-  ?turn_sandbox_runtime:Keeper_turn_sandbox_runtime.t ->
-  ?turn_sandbox_runtime_git:Keeper_turn_sandbox_runtime.t ->
+  ?turn_sandbox_factory:Keeper_sandbox_factory.t ->
+  ?turn_sandbox_factory_git:Keeper_sandbox_factory.t ->
   exec_cache:Masc_exec.Exec_cache.t option ->
   ?search_fn:(query:string -> max_results:int -> Yojson.Safe.t) ->
   name:string ->

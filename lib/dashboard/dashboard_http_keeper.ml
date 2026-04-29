@@ -530,7 +530,7 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
           let agent = Keeper_exec_status.parse_agent_status config ~agent_name:m.agent_name in
 
           let created_ts =
-            Resilience.Time.parse_iso8601_opt m.created_at
+            Coord_resilience.Time.parse_iso8601_opt m.created_at
             |> Option.value ~default:0.0
           in
           let keeper_age_s = if created_ts <= 0.0 then 0.0 else now_ts -. created_ts in

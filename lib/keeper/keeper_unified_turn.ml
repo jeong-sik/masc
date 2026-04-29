@@ -130,6 +130,49 @@ let record_execution_receipt_gap
         meta.name
         (Printexc.to_string exn)
 
+(* ── KeeperTaskAcquisition.tla spec-action runtime guards (Cycle 44) ──
+
+   Identity helpers carrying [@@fsm_guard] payloads that mirror the
+   honest actions of [specs/keeper-state-machine/KeeperTaskAcquisition.tla].
+   Each helper is wrapped at the call site by
+   [Keeper_fsm_guard_runtime.wrap_unit] so an [Assert_failure] from a
+   PPX-injected guard becomes a Prometheus counter increment by default
+   (counter mode) and a re-raise when [MASC_FSM_GUARD_ASSERT=1]
+   (assert mode for tests / CI). Bug-action [TaskRejected] is NOT
+   instrumented — it is the failure mode these guards are designed to
+   detect.
+
+   This pattern follows PR #11696 (Cycle 43, KeeperHeartbeat closeout)
+   which introduced [Keeper_fsm_guard_runtime] and the counter-default
+   policy. *)
+
+(* AssignTask: the channel decision picks "turn" when at least one of
+   [pending_mentions], [pending_board_events], or
+   [pending_scope_messages] is non-empty. The post-action guard pins
+   the structural invariant that drove the decision. *)
+let post_assign_task ~(any_pending : bool) ~(channel : string) =
+  ignore any_pending; ignore channel
+  [@@fsm_guard "any_pending = true && channel = \"turn\""]
+
+(* EmptyQueueSleep: complementary branch — every pending list is empty
+   and the cycle exits without claiming. *)
+let post_empty_queue_sleep ~(any_pending : bool) ~(channel : string) =
+  ignore any_pending; ignore channel
+  [@@fsm_guard "any_pending = false && channel = \"scheduled_autonomous\""]
+
+(* TurnComplete (KeeperTaskAcquisition.tla, Cycle 45 follow-up to
+   PR #11716): the [run_keeper_cycle] body has produced an [Ok meta]
+   for this cycle. The post-action invariant pins that the
+   [cycle_completed] ref was actually toggled before the result is
+   returned — catches a regression where a future refactor splits
+   the bottom of [run_keeper_cycle] into branches that forget to
+   record completion. The ref is single-fiber by construction: each
+   [run_keeper_cycle] invocation runs in its own fiber, and the ref
+   is allocated fresh inside the function. *)
+let post_turn_complete_task ~(cycle_completed : bool ref) =
+  ignore cycle_completed
+  [@@fsm_guard "!cycle_completed = true"]
+
 let pre_dispatch_tool_surface : Keeper_execution_receipt.tool_surface =
   {
     turn_lane = "pre_dispatch";
@@ -1080,6 +1123,11 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                          [Error sdk_error].  Silent-drop regressions
                          (early return without recording the turn
                          outcome) would violate the spec. *)
+  (* Cycle 45: KeeperTaskAcquisition.tla TurnComplete bracket — the
+     ref is set to true on the [Ok updated_meta] return at the end of
+     this function; an [Error _] branch leaves it false and skips the
+     wrap, mirroring the spec's "completed-on-success" semantics. *)
+  let cycle_completed = ref false in
   (* 0. Phase gate + state-aware cascade routing.
      The gate owns turn executability; select_cascade remains a total helper
      so dashboards/tests can inspect the same routing contract for blocked
@@ -1354,7 +1402,12 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
              ~meta
              ~generation
              ~cascade_name:initial_execution.cascade_name
-             ~outcome:"blocked"
+             (* β6: "blocked" was not in outcome_kind quad-state
+                (ok/skipped/error/cancelled), causing operator_disposition
+                to classify livelock-blocked turns as "unknown".  Map to
+                "error" — livelock IS a turn failure; the specific reason
+                is captured in terminal_reason_code. *)
+             ~outcome:"error"
              ~terminal_reason_code
              ~activity_kind:"keeper.turn_blocked"
              ~trajectory_outcome:(Trajectory.Gated terminal_reason_code)
@@ -1793,12 +1846,34 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                   Keeper_registry.Cascade_exhausted;
                 Prometheus.inc_counter
                   Prometheus.metric_keeper_fsm_edge_transitions
-                  ~labels:[("edge", "kcl_to_ktc_exhaustion")] ()
+                  ~labels:[("edge", "kcl_to_ktc_exhaustion")] ();
+                (* Cycle 52 narrative: cascade exhaustion is a silent
+                   failure on dashboards reading only Turn_failed.  The
+                   fsm_edge counter records the transition, but operators
+                   forensically investigating "why is this keeper stuck?"
+                   benefit from a structured WARN line distinguishing
+                   'all cascades exhausted' from 'single transient error'.
+                   Companion to PR #11708 (gate rejection narrative) and
+                   PR #11717 (unmapped regression alert). *)
+                Log.Keeper.warn
+                  "%s: all cascades exhausted (terminal) — last_err=%s \
+                   attempt=%d attempted_cascades=[%s]"
+                  meta.name (Printexc.to_string err) attempt
+                  (String.concat ", " attempted_cascades)
               end
-              else
-                  Keeper_registry.set_turn_phase
-                    ~base_path:config.base_path meta.name
-                    Keeper_registry.Turn_finalizing
+              else begin
+                Keeper_registry.set_turn_phase
+                  ~base_path:config.base_path meta.name
+                  Keeper_registry.Turn_finalizing;
+                (* Cycle 52 narrative companion: non-exhaustion terminal
+                   errors (transient).  Logged so dashboard readers can
+                   distinguish exhaustion from transient failure without
+                   re-parsing Turn_finalizing reason fields. *)
+                Log.Keeper.warn
+                  "%s: turn terminal (non-exhaustion error) — err=%s \
+                   attempt=%d"
+                  meta.name (Printexc.to_string err) attempt
+              end
             in
             let attempt_timeout_budget = ref None in
             let max_turns =
@@ -2593,15 +2668,25 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                 EmptyQueueSleep — non-empty queue picks "turn"
                 (claim-and-finish path), empty picks
                 "scheduled_autonomous" (no claim this cycle). *)
-             let channel =
-               if observation.pending_mentions <> []
-                  || observation.pending_board_events <> []
-                  || observation.pending_scope_messages <> []
-               then
-                 "turn"
-               else
-                 "scheduled_autonomous"
+             let any_pending =
+               observation.pending_mentions <> []
+               || observation.pending_board_events <> []
+               || observation.pending_scope_messages <> []
              in
+             let channel =
+               if any_pending then "turn" else "scheduled_autonomous"
+             in
+             (* Cycle 44: KeeperTaskAcquisition.tla post-action guards
+                pin the structural invariant the decision relied on. *)
+             if any_pending
+             then
+               Keeper_fsm_guard_runtime.wrap_unit
+                 ~action:"AssignTask" ~stage:"post"
+                 (fun () -> post_assign_task ~any_pending ~channel)
+             else
+               Keeper_fsm_guard_runtime.wrap_unit
+                 ~action:"EmptyQueueSleep" ~stage:"post"
+                 (fun () -> post_empty_queue_sleep ~any_pending ~channel);
              Keeper_unified_metrics.append_metrics_snapshot ~config ~meta:updated_meta ~observation
                ~result ~latency_ms ~turn_cost
                ~turn_generation:lifecycle.turn_generation
@@ -2898,6 +2983,13 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             ~keeper_name:meta.name ~turn_id:keeper_turn_id
             ~prev:Keeper_turn_fsm.Completing
             Keeper_turn_fsm.Done;
+          (* Cycle 45: KeeperTaskAcquisition.tla TurnComplete post-action
+             — the cycle ran to completion and is about to return an
+             [Ok] result. *)
+          cycle_completed := true;
+          Keeper_fsm_guard_runtime.wrap_unit
+            ~action:"TurnComplete" ~stage:"post"
+            (fun () -> post_turn_complete_task ~cycle_completed);
           Ok updated_meta))
 
 let run_unified_turn = run_keeper_cycle

@@ -10,9 +10,10 @@ let bin_ok name =
   (* bin must classify *)
   | Error _ -> assert false
 
-let simple ?(args = []) ?(env = []) ?(cwd = None) ?(redirects = []) bin
+let simple ?(args = []) ?(env = []) ?(cwd = None) ?(redirects = [])
+    ?(sandbox = Sandbox_target.host ()) bin
     : Shell_ir.simple =
-  { bin; args; env; cwd; redirects }
+  { bin; args; env; cwd; redirects; sandbox }
 
 let lit s = Shell_ir.Lit s
 

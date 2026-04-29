@@ -9,6 +9,13 @@ type simple = {
   env : (string * arg) list;
   cwd : Path_scope.t option;
   redirects : Redirect_scope.t list;
+  (* PR-2 root-fix family 3/3 (2026-04-28):
+     [sandbox] carries the dispatch decision through the IR so
+     [Exec_dispatch.dispatch_simple] can route to host or Docker
+     without a separate keeper-only code path. The default
+     [Sandbox_target.host ()] preserves the historical behavior; the
+     keeper layer overrides it when a Docker runtime is available. *)
+  sandbox : Sandbox_target.t;
 }
 
 type t =

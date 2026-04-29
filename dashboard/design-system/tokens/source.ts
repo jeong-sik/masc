@@ -289,6 +289,111 @@ export const raw: ReadonlyArray<TokenBase> = (() => {
 
   out.push(t("radius-xl", "24px", "raw", "dimension"));
 
+  // ── Tailwind palette aliases (Iter 2c-1, v2 design-system pivot)
+  // Lifted from dashboard/src/styles/variables.css. Component code
+  // references these by Tailwind-canonical name (e.g. --slate-500) and
+  // they should originate from source.ts so the codegen owns the hex
+  // and tokens-drift Gate 2 enforces consistency. Theme-scoped names
+  // like the paper-theme `slate` raw (line ~686) are unrelated and
+  // unaffected — these aliases are global Tailwind palette references.
+  out.push(t("slate-400",   "#94a3b8", "raw", "color", "Tailwind slate-400 alias"));
+  out.push(t("slate-500",   "#64748b", "raw", "color", "Tailwind slate-500 alias"));
+  out.push(t("slate-600",   "#475569", "raw", "color", "Tailwind slate-600 alias"));
+  out.push(t("slate-800",   "#1e293b", "raw", "color", "Tailwind slate-800 alias"));
+  out.push(t("blue-400",    "#60a5fa", "raw", "color", "Tailwind blue-400 alias"));
+  out.push(t("sky-400",     "#38bdf8", "raw", "color", "Tailwind sky-400 alias"));
+  out.push(t("purple-500",  "#a855f7", "raw", "color", "Tailwind purple-500 alias"));
+  out.push(t("yellow-100",  "#fde68a", "raw", "color", "Tailwind yellow-100 alias"));
+  out.push(t("red-100",     "#fecaca", "raw", "color", "Tailwind red-100 alias"));
+  out.push(t("cyan-100",    "#cffafe", "raw", "color", "Tailwind cyan-100 alias"));
+
+  // Iter 2c-2: Tailwind palette aliases retaining the original short
+  // names from variables.css (no -N suffix). The hex matches a specific
+  // Tailwind shade per token (emerald-500, emerald-200, indigo-400,
+  // yellow-400, amber-500); names mirror existing call-site usage so
+  // no consumer rename is required.
+  out.push(t("emerald",        "#22c55e", "raw", "color", "Tailwind emerald-500 alias (kept short name)"));
+  out.push(t("emerald-fg",     "#bbf7d0", "raw", "color", "Tailwind emerald-200 alias (kept short name)"));
+  out.push(t("indigo",         "#818cf8", "raw", "color", "Tailwind indigo-400 alias (kept short name)"));
+  out.push(t("yellow-bright",  "#facc15", "raw", "color", "Tailwind yellow-400 alias (kept short name)"));
+  out.push(t("amber-bright",   "#f59e0b", "raw", "color", "Tailwind amber-500 alias (kept short name)"));
+
+  // Iter 2c-3: rose family. Pink-red shades distinct from the bright/
+  // muted status canon (--bad / --bad-light). Use-sites call them by
+  // existing short names; companion alpha variants (--rose-10,
+  // --rose-28) stay hand-authored in variables.css per the lift policy
+  // introduced in Iter 2c-2.
+  out.push(t("rose",           "#f43f5e", "raw", "color", "Tailwind rose-500 alias"));
+  out.push(t("rose-fg",        "#fecdd3", "raw", "color", "Tailwind rose-200 alias"));
+  out.push(t("rose-light",     "#fb7185", "raw", "color", "Tailwind rose-400 alias"));
+
+  // Iter 2c-4: cyan/purple short names. Companion alpha variants
+  // (--cyan-12, --cyan-16, --purple-12, --purple-24, --purple-50) stay
+  // hand-authored in variables.css per the companion alpha policy.
+  out.push(t("cyan",           "#22d3ee", "raw", "color", "Tailwind cyan-400 alias (kept short name)"));
+  out.push(t("purple",         "#a78bfa", "raw", "color", "Tailwind purple-400 alias (kept short name)"));
+
+  // Iter 2c-5: neutral scale. The "frost-100, white-pure queued for the
+  // next wave" comment in variables.css (post-Iter 2c-1) explicitly
+  // anchored these. text-near-white and text-slate-light join because
+  // they map cleanly to Tailwind slate shades and have no companion
+  // alpha variants.
+  out.push(t("frost-100",       "#e2e8f0", "raw", "color", "Tailwind slate-200 alias (kept legacy frost name)"));
+  out.push(t("white-pure",      "#ffffff", "raw", "color", "Pure white #ffffff (canon constant, distinct from --text-strong tints)"));
+  out.push(t("text-near-white", "#f8fafc", "raw", "color", "Tailwind slate-50 alias"));
+  out.push(t("text-slate-light","#cbd5e1", "raw", "color", "Tailwind slate-300 alias"));
+
+  // Iter 2c-6: text body family. Custom dashboard-tuned shades that do
+  // not map to standard Tailwind slate stops; semantic role is the
+  // primary identity (strong > body > muted > dim luminance ladder).
+  // Lifted as raw because they are direct color values consumed by the
+  // semantic text-* role layer.
+  out.push(t("text-strong",     "#eaf1ff", "raw", "color", "Brightest text on dark surfaces"));
+  out.push(t("text-body",       "#c0d2f2", "raw", "color", "Default body copy on dark surfaces"));
+  out.push(t("text-muted",      "#a8bfdf", "raw", "color", "Secondary/labels"));
+  out.push(t("text-dim",        "#a0a8b4", "raw", "color", "Tertiary/captions"));
+
+  // Iter 2c-7: state + agent domain colors. Dashboard-tuned shades, NOT
+  // Tailwind palette aliases (state-idle #b8c0cc sits between slate-300
+  // and slate-400; agent-working #7ae09a is warmer than green-300).
+  out.push(t("state-idle",      "#b8c0cc", "raw", "color", "Keeper idle / no signal"));
+  out.push(t("state-offline",   "#7a8494", "raw", "color", "Keeper offline / unreachable"));
+  out.push(t("agent-working",   "#7ae09a", "raw", "color", "Agent actively running"));
+  out.push(t("agent-busy",      "#f0c060", "raw", "color", "Agent busy / queued"));
+
+  // Iter 2c-8: chat domain colors. Conversation surface palette —
+  // 3 role pairs (user/assistant/error) each with avatar (deeper) +
+  // chip (paler) tints, plus a single bright code-callout green.
+  // Custom dashboard hues, not Tailwind aliases. Pair structure is
+  // intentional: avatar reads on light bg, chip reads on dark bg.
+  out.push(t("chat-user-avatar",      "#d8f0ff", "raw", "color", "Chat user avatar tint"));
+  out.push(t("chat-user-chip",        "#c9ebff", "raw", "color", "Chat user message chip"));
+  out.push(t("chat-assistant-avatar", "#efe6ff", "raw", "color", "Chat assistant avatar tint"));
+  out.push(t("chat-assistant-chip",   "#ded0ff", "raw", "color", "Chat assistant message chip"));
+  out.push(t("chat-error-avatar",     "#ffe1e1", "raw", "color", "Chat error avatar tint"));
+  out.push(t("chat-error-chip",       "#ffb4b4", "raw", "color", "Chat error message chip"));
+  out.push(t("chat-code-callout",     "#95f3bc", "raw", "color", "Chat inline code callout (bright mint)"));
+
+  // Iter 2c-9: vote button Reddit-pattern colors. Used identically by
+  // board.css and dashboard.css; hex values are CANONICAL (Reddit
+  // upvote = #ff4500) and intentionally preserved exactly.
+  out.push(t("vote-up",         "#ff4500", "raw", "color", "Reddit-canonical upvote orange-red"));
+  out.push(t("vote-down",       "#7193ff", "raw", "color", "Reddit-canonical downvote blue-violet"));
+  out.push(t("vote-hover",      "#ccc",    "raw", "color", "Vote button hover (3-digit short hex)"));
+  // Iter 2c-10: canon-adjacent but distinct semantic shades.
+  //   text-slate (#b0bfd4) — custom dashboard cool gray, between the
+  //     text-* family above and the slate-* Tailwind aliases. Custom hue.
+  //   warn-bright (#f97316) — Tailwind orange-500. Distinct from --warn
+  //     (#fbbf24, slightly muted gold); used for FSM "Compacting" state
+  //     where a hotter orange reads as "actively churning" vs --warn's
+  //     "needs attention".
+  //   bad-light (#f87171) — Tailwind red-400. Lighter than --bad
+  //     (#ef4444, red-500) but a separate hex value, NOT algorithmically
+  //     derived. Used where a softer red is needed (toasts, empty states).
+  out.push(t("text-slate",      "#b0bfd4", "raw", "color", "Custom cool gray (no Tailwind exact match)"));
+  out.push(t("warn-bright",     "#f97316", "raw", "color", "Tailwind orange-500 (FSM Compacting)"));
+  out.push(t("bad-light",       "#f87171", "raw", "color", "Tailwind red-400 (softer than --bad)"));
+
   return Object.freeze(out);
 })();
 
@@ -518,6 +623,22 @@ export const semantic: ReadonlyArray<TokenBase> = (() => {
   out.push(t("hover-overlay",  "rgb(255 255 255 / .03)", "role", "color"));
   out.push(t("active-overlay", "rgb(0 0 0 / .25)",       "role", "color"));
 
+  // Headless interaction tokens (v2 spec §4.2.1) — primitives bind
+  // these to data-* states via Tailwind utilities, e.g.
+  //   data-[pressed]:scale-[var(--pressed-scale)]
+  //   data-[hover]:translate-y-[var(--hover-lift)]
+  //   focus-visible:ring-[length:var(--focus-ring-width)]
+  //                 ring-offset-[length:var(--focus-ring-offset)]
+  // Kept separate from the existing --focus-ring shadow token: that one
+  // is the pre-baked composite box-shadow; these are the dimensional
+  // building blocks consumers can recompose.
+  out.push(t("pressed-scale",      "0.97", "role", "number",
+    "scale factor while [data-pressed]"));
+  out.push(t("hover-lift",         "-1px", "role", "dimension",
+    "translateY offset while [data-hover]"));
+  out.push(t("focus-ring-width",   "2px",  "role", "dimension"));
+  out.push(t("focus-ring-offset",  "2px",  "role", "dimension"));
+
   // Interactive state roles — explicit hover/selected/pressed semantics
   out.push(t("state-hover-bg",       "var(--bg-3)",   "role", "color"));
   out.push(t("state-hover-fg",       "var(--fg-1)",   "role", "color"));
@@ -553,6 +674,21 @@ export const semantic: ReadonlyArray<TokenBase> = (() => {
   out.push(t("motion-reveal", "var(--t-slow) var(--ease-out)", "role", "duration"));
   out.push(t("motion-settle", "var(--t-xslow) var(--ease-out)", "role", "duration"));
   out.push(t("motion-pop",    "var(--t-med) var(--ease-spring)", "role", "duration"));
+
+  // Headless animation tokens (v2 spec §4.2.2) — split duration/easing
+  // pair so headless primitives can compose `transition: <prop>
+  // var(--enter-duration) var(--enter-easing)` for [data-state="open"]
+  // and the inverse for [data-state="closed"]. Coexist with the
+  // composite `motion-*` shorthands above; the split form is the
+  // canonical consumer for Drawer/Dialog/Popover transitions.
+  out.push(t("enter-duration", "var(--t-med)",   "role", "duration",
+    "duration for [data-state=open] / [data-state=entering]"));
+  out.push(t("exit-duration",  "var(--t-fast)",  "role", "duration",
+    "duration for [data-state=closed] / [data-state=leaving]"));
+  out.push(t("enter-easing",   "var(--ease-out)","role", "easing",
+    "cubic-bezier on enter — decelerate-into-rest"));
+  out.push(t("exit-easing",    "var(--ease-in)", "role", "easing",
+    "cubic-bezier on exit — accelerate-out"));
 
   // Motion-scope sentinel — parallel to _density-scope
   out.push(t("_motion-scope", "1", "role", "number", "scope sentinel"));

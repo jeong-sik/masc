@@ -407,7 +407,7 @@ let status_string registry =
     Buffer.add_string buf "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n";
     Buffer.add_string buf "🎧=리스닝 🔨=작업중 💤=졸고있음(60s+)";
 
-    let inactive = get_inactive_agents registry ~threshold:Resilience.default_warning_threshold in
+    let inactive = get_inactive_agents registry ~threshold:Coord_resilience.default_warning_threshold in
     if inactive <> [] then begin
       Buffer.add_string buf "\n\n⚠️ **INACTIVE AGENTS**: ";
       Buffer.add_string buf (String.concat ", " inactive);

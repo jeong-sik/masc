@@ -56,6 +56,25 @@ let test_path_scope_classify () =
   let ps = Path_scope.classify ~raw:"/etc/passwd" ~cwd:"/tmp" in
   assert (Path_scope.raw ps = "/etc/passwd");
   match Path_scope.scope ps with
+  | Outside_worktree _ -> ()
+  | _ -> assert false
+
+let test_path_scope_classify_sandbox () =
+  let ps =
+    Path_scope.classify ~raw:"/tmp/masc-keeper-xyz/foo" ~cwd:"/tmp"
+  in
+  match Path_scope.scope ps with
+  | Inside_sandbox _ -> ()
+  | _ -> assert false
+
+let test_path_scope_classify_unresolvable () =
+  (* parent dir does not exist on disk → fail-closed. *)
+  let ps =
+    Path_scope.classify
+      ~raw:"/__nonexistent_root_xyz_42/foo"
+      ~cwd:"/tmp"
+  in
+  match Path_scope.scope ps with
   | Absolute_unknown _ -> ()
   | _ -> assert false
 
@@ -64,7 +83,13 @@ let test_verdict_trusted_argv_smart_ctor () =
   | Error _ -> assert false
   | Ok bin ->
       let simple : Shell_ir.simple =
-        { bin; args = []; env = []; cwd = None; redirects = [] }
+        { bin
+        ; args = []
+        ; env = []
+        ; cwd = None
+        ; redirects = []
+        ; sandbox = Sandbox_target.host ()
+        }
       in
       let t = Verdict.trust ~caps:[] simple in
       assert (Verdict.Trusted_argv.bin t = bin);
@@ -82,7 +107,13 @@ let test_verdict_four_way () =
   in
   let bin = match Bin.of_string "ls" with Ok b -> b | Error _ -> assert false in
   let simple : Shell_ir.simple =
-    { bin; args = []; env = []; cwd = None; redirects = [] }
+    { bin
+    ; args = []
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Sandbox_target.host ()
+    }
   in
   let _ =
     Verdict.Suggest_confirm
@@ -101,6 +132,8 @@ let () =
   test_git_op_unknown ();
   test_parsed_polymorphic ();
   test_path_scope_classify ();
+  test_path_scope_classify_sandbox ();
+  test_path_scope_classify_unresolvable ();
   test_verdict_trusted_argv_smart_ctor ();
   test_verdict_four_way ();
   print_endline "[test_exec_types] all tests passed"

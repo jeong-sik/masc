@@ -12,13 +12,16 @@ name: tokens-drift
 #   Gate 2 (reference equivalence) - generated CSS lost a token name
 #       the legacy hand-written stylesheets exposed, or the keeper
 #       OkLCH triple drifted past the perceptual threshold.
-#       (Conditional: skipped when the equivalence script is absent.)
 #   Gate 3 (tier integrity) - generated artifacts changed without the
 #       authoring SSOT (source.ts) changing in the same PR. This is a
 #       structural lock against direct edits of @generated files.
 #
-# Branch protection registration is the user's call. Until then this
-# workflow advises only; it does NOT block merges automatically.
+# All three gates are mandatory. If the equivalence script or its
+# package.json entry are missing, Gate 2 fails — that is the point of a
+# required check. The script was removed by #11250 and restored by
+# #11330; this gate ensures any future regression is loud, not silent.
+# Branch protection registration to mark this workflow required is the
+# user's separate admin step.
 
 on:
   pull_request:
@@ -109,22 +112,22 @@ jobs:
       # ── Gate 2 ──────────────────────────────────────────────────────
       # Equivalence check. The script
       #   dashboard/design-system/tokens/scripts/check-equivalence.mjs
-      # is referenced in the Wave 2 design notes but currently does
-      # not exist in main (it was removed by #11250). Until it lands,
-      # this step is conditional and only runs when the script + the
-      # `tokens:check` package script are both present.
-      - name: Gate 2 - reference equivalence (conditional)
+      # was restored by #11330 (status canon + keeper ΔE) after #11250
+      # had removed it. The gate is now mandatory: a missing script or
+      # missing `tokens:check` package script is a regression that must
+      # block merge, not be silently skipped.
+      - name: Gate 2 - reference equivalence (mandatory)
         working-directory: dashboard
         run: |
           set -euo pipefail
           script="design-system/tokens/scripts/check-equivalence.mjs"
           if [ ! -f "$script" ]; then
-            echo "::notice::skipping Gate 2: $script not present in tree"
-            exit 0
+            echo "::error::Gate 2 prerequisite missing: $script. Restore the script (see #11330) or revert the change that removed it."
+            exit 1
           fi
           if ! node -e "const p=require('./package.json');process.exit(p.scripts && p.scripts['tokens:check']?0:1)"; then
-            echo "::notice::skipping Gate 2: package.json has no 'tokens:check' script"
-            exit 0
+            echo "::error::Gate 2 prerequisite missing: dashboard/package.json has no 'tokens:check' script. Restore the entry (see #11330)."
+            exit 1
           fi
           pnpm tokens:check
 

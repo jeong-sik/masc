@@ -125,8 +125,23 @@ FdCountObserved(n) ==
 
 \* Operator submits an admission request with a raw cascade name. The
 \* canonicalisation invariant lives in cascade_recorded' = Canonicalize.
+\*
+\* Modelling note: [acquire_count < CumulativeMax] is a model-only guard
+\* added 2026-04-28 to avoid a TLC deadlock when both counters saturate
+\* at CumulativeMax. In production [acquire_count] is unbounded, so the
+\* situation never arises; the bound exists only to keep the model
+\* state space finite. Without this guard, a state where
+\* admission_state = "checking" and fd_count = 0 (so [GuardFires] is
+\* false) and [acquire_count = CumulativeMax] (so [AcceptAndAcquire] is
+\* disabled) and [release_count = acquire_count] (no Release to drain)
+\* admits no enabled action -- TLC reports it as a deadlock. Disabling
+\* SubmitRequest at counter saturation is the smallest model fix that
+\* preserves the invariants we care about. PR #11582 attempted a
+\* different fix path (cumulative-counter rebase); this one targets
+\* the actual enabling-condition gap.
 SubmitRequest(raw) ==
     /\ admission_state = "idle"
+    /\ acquire_count < CumulativeMax
     /\ admission_state' = "checking"
     /\ cascade_input' = raw
     /\ cascade_recorded' = Canonicalize(raw)

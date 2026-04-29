@@ -466,6 +466,7 @@
    keeper_alerting_path
    keeper_sandbox_containment
    keeper_sandbox_runtime
+   keeper_sandbox_factory
    keeper_turn_sandbox_runtime
    keeper_docker_read
    keeper_timing
@@ -549,6 +550,7 @@
    keeper_unified_metrics
    keeper_spec_intf
    keeper_turn_fsm
+   keeper_fsm_guard_runtime
    keeper_turn_livelock
    keeper_stay_silent_loop_detector
    keeper_error_classify
@@ -951,6 +953,13 @@
    opentelemetry.client
    ambient-context
    ambient-context-eio
+   ;; Autonomous engine sub-library (Tier B3-A4) used by Keeper post-turn wire-in (Tier A5)
+   masc_mcp.autonomous
+   masc_mcp.shared_types
+   ;; Resilience sub-library (Tier B6-B7) used by Keeper post-turn wire-in (Tier A6)
+   masc_mcp.resilience
+   ;; Multimodal artifact GADT sub-library (Tier B8) — Code/Image/Audio/Doc + Payload + Provenance
+   masc_mcp.multimodal
    )
  (preprocess (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq ppx_let ppx_tla))
  (instrumentation (backend bisect_ppx)))

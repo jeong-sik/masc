@@ -106,6 +106,7 @@
         test_decision_pipeline_observer
         test_keeper_composite_observer
         test_keeper_fsm_edges
+        test_keeper_fsm_guard_actions
         test_keeper_callback_hardening
         test_keeper_behavioral_regime
         test_keeper_toml
@@ -191,6 +192,7 @@
         test_memory_hooks
         test_agent_stress_timeout_wire_10341
         test_institution_episodes_failure_learnings_10325
+        test_institution_of_string_fail_closed
         test_mid_turn_resume
         test_lockfree_atomic
         test_telemetry_observe
@@ -284,6 +286,7 @@
           test_decision_pipeline_observer
           test_keeper_composite_observer
           test_keeper_fsm_edges
+          test_keeper_fsm_guard_actions
           test_keeper_callback_hardening
           test_keeper_behavioral_regime
           test_keeper_toml
@@ -369,6 +372,7 @@
           test_memory_hooks
           test_agent_stress_timeout_wire_10341
           test_institution_episodes_failure_learnings_10325
+          test_institution_of_string_fail_closed
           test_mid_turn_resume
           test_lockfree_atomic
           test_telemetry_observe
@@ -1671,6 +1675,11 @@
  (name test_keeper_meta_heartbeat_retain_9733)
  (modules test_keeper_meta_heartbeat_retain_9733)
  (libraries masc_mcp masc_test_deps fs_compat alcotest eio eio_main unix))
+
+(test
+ (name test_keeper_meta_canonical_seed)
+ (modules test_keeper_meta_canonical_seed)
+ (libraries masc_mcp alcotest))
 
 (test
  (name test_keeper_paused_cas_retain_9733)

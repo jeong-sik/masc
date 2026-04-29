@@ -160,6 +160,51 @@ type semantic =
   | `Spacing_group
   | `Spacing_card
   | `Radius_xl
+  | `Slate_400
+  | `Slate_500
+  | `Slate_600
+  | `Slate_800
+  | `Blue_400
+  | `Sky_400
+  | `Purple_500
+  | `Yellow_100
+  | `Red_100
+  | `Cyan_100
+  | `Emerald
+  | `Emerald_fg
+  | `Indigo
+  | `Yellow_bright
+  | `Amber_bright
+  | `Rose
+  | `Rose_fg
+  | `Rose_light
+  | `Cyan
+  | `Purple
+  | `Frost_100
+  | `White_pure
+  | `Text_near_white
+  | `Text_slate_light
+  | `Text_strong
+  | `Text_body
+  | `Text_muted
+  | `Text_dim
+  | `State_idle
+  | `State_offline
+  | `Agent_working
+  | `Agent_busy
+  | `Chat_user_avatar
+  | `Chat_user_chip
+  | `Chat_assistant_avatar
+  | `Chat_assistant_chip
+  | `Chat_error_avatar
+  | `Chat_error_chip
+  | `Chat_code_callout
+  | `Vote_up
+  | `Vote_down
+  | `Vote_hover
+  | `Text_slate
+  | `Warn_bright
+  | `Bad_light
   | `Ok_soft
   | `Ok_fg
   | `Ok_border
@@ -328,6 +373,10 @@ type semantic =
   | `Focus_ring_err
   | `Hover_overlay
   | `Active_overlay
+  | `Pressed_scale
+  | `Hover_lift
+  | `Focus_ring_width
+  | `Focus_ring_offset
   | `State_hover_bg
   | `State_hover_fg
   | `State_hover_border
@@ -354,6 +403,10 @@ type semantic =
   | `Motion_reveal
   | `Motion_settle
   | `Motion_pop
+  | `Enter_duration
+  | `Exit_duration
+  | `Enter_easing
+  | `Exit_easing
   | `_motion_scope
   | `Cmt_question
   | `Cmt_flag
@@ -372,8 +425,6 @@ type semantic =
   | `Color_text_dim
   | `Color_accent_brass
   | `Color_accent_soft
-  | `Bad_light
-  | `Warn_bright
   | `Color_keeper_1_glow
   | `Color_keeper_2_glow
   | `Color_keeper_3_glow

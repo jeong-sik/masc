@@ -31,7 +31,7 @@
   coord_git
   coord_worktree
   mention
-  resilience
+  coord_resilience
   heartbeat
   nickname)
  (libraries

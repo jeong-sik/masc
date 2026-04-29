@@ -320,8 +320,8 @@ let test_docker_blocks_nested_docker_command () =
   let meta = make_docker_meta "docker-nested" in
   let raw =
     Keeper_exec_shell.handle_keeper_bash
-      ~turn_sandbox_runtime:None
-      ~turn_sandbox_runtime_git:None ~exec_cache:None
+      ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None ~exec_cache:None
       ~config ~meta
       ~args:(`Assoc [ ("cmd", `String "docker run --rm alpine true") ]) ()
   in
@@ -341,8 +341,8 @@ let test_docker_blocks_docker_socket_reference () =
   let meta = make_docker_meta "docker-sock" in
   let raw =
     Keeper_exec_shell.handle_keeper_bash
-      ~turn_sandbox_runtime:None
-      ~turn_sandbox_runtime_git:None ~exec_cache:None
+      ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None ~exec_cache:None
       ~config ~meta
       ~args:(`Assoc [ ("cmd", `String "cat /var/run/docker.sock") ]) ()
   in
@@ -365,8 +365,8 @@ let test_docker_missing_seccomp_profile_fails_closed () =
     (fun () ->
       let raw =
         Keeper_exec_shell.handle_keeper_bash
-          ~turn_sandbox_runtime:None
-          ~turn_sandbox_runtime_git:None ~exec_cache:None
+          ~turn_sandbox_factory:None
+          ~turn_sandbox_factory_git:None ~exec_cache:None
           ~config ~meta
           ~args:(`Assoc [ ("cmd", `String "pwd") ]) ()
       in
@@ -440,7 +440,7 @@ let test_keeper_shell_ls_recovers_doubled_playground_prefix () =
   in
   let raw =
     Keeper_exec_shell.handle_keeper_shell
-      ~turn_sandbox_runtime:None ~exec_cache:None
+      ~turn_sandbox_factory:None ~exec_cache:None
       ~config ~meta
       ~args:(`Assoc [
         ("op", `String "ls");
@@ -463,7 +463,7 @@ let test_readonly_chaining_hint_lists_subops () =
   let meta = make_readonly_meta "chain-hint" in
   let raw =
     Keeper_exec_shell.handle_keeper_shell
-      ~turn_sandbox_runtime:None ~exec_cache:None
+      ~turn_sandbox_factory:None ~exec_cache:None
       ~config ~meta
       ~args:(`Assoc [
         ("op", `String "bash");
@@ -492,7 +492,7 @@ let test_readonly_redirect_hint_points_at_fs_edit () =
   let meta = make_readonly_meta "redirect-hint" in
   let raw =
     Keeper_exec_shell.handle_keeper_shell
-      ~turn_sandbox_runtime:None ~exec_cache:None
+      ~turn_sandbox_factory:None ~exec_cache:None
       ~config ~meta
       ~args:(`Assoc [
         ("op", `String "bash");
@@ -563,8 +563,8 @@ let test_bash_missing_cmd_field () =
   let meta = make_docker_meta "missing-cmd" in
   let raw =
     Keeper_exec_shell.handle_keeper_bash
-      ~turn_sandbox_runtime:None
-      ~turn_sandbox_runtime_git:None ~exec_cache:None
+      ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None ~exec_cache:None
       ~config ~meta
       ~args:(`Assoc [ ("run_in_background", `Bool false) ]) ()
   in
@@ -583,7 +583,7 @@ let test_shell_missing_op_field () =
   let meta = make_readonly_meta "missing-op" in
   let raw =
     Keeper_exec_shell.handle_keeper_shell
-      ~turn_sandbox_runtime:None ~exec_cache:None
+      ~turn_sandbox_factory:None ~exec_cache:None
       ~config ~meta
       ~args:(`Assoc [ ("path", `String "/some/path") ])
   in
@@ -602,7 +602,7 @@ let test_shell_unsupported_op () =
   let meta = make_readonly_meta "bad-op" in
   let raw =
     Keeper_exec_shell.handle_keeper_shell
-      ~turn_sandbox_runtime:None ~exec_cache:None
+      ~turn_sandbox_factory:None ~exec_cache:None
       ~config ~meta
       ~args:(`Assoc [
         ("op", `String "definitely_not_a_real_op");

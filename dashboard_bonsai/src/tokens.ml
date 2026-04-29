@@ -149,6 +149,51 @@ type semantic =
   | `Spacing_group
   | `Spacing_card
   | `Radius_xl
+  | `Slate_400
+  | `Slate_500
+  | `Slate_600
+  | `Slate_800
+  | `Blue_400
+  | `Sky_400
+  | `Purple_500
+  | `Yellow_100
+  | `Red_100
+  | `Cyan_100
+  | `Emerald
+  | `Emerald_fg
+  | `Indigo
+  | `Yellow_bright
+  | `Amber_bright
+  | `Rose
+  | `Rose_fg
+  | `Rose_light
+  | `Cyan
+  | `Purple
+  | `Frost_100
+  | `White_pure
+  | `Text_near_white
+  | `Text_slate_light
+  | `Text_strong
+  | `Text_body
+  | `Text_muted
+  | `Text_dim
+  | `State_idle
+  | `State_offline
+  | `Agent_working
+  | `Agent_busy
+  | `Chat_user_avatar
+  | `Chat_user_chip
+  | `Chat_assistant_avatar
+  | `Chat_assistant_chip
+  | `Chat_error_avatar
+  | `Chat_error_chip
+  | `Chat_code_callout
+  | `Vote_up
+  | `Vote_down
+  | `Vote_hover
+  | `Text_slate
+  | `Warn_bright
+  | `Bad_light
   | `Ok_soft
   | `Ok_fg
   | `Ok_border
@@ -317,6 +362,10 @@ type semantic =
   | `Focus_ring_err
   | `Hover_overlay
   | `Active_overlay
+  | `Pressed_scale
+  | `Hover_lift
+  | `Focus_ring_width
+  | `Focus_ring_offset
   | `State_hover_bg
   | `State_hover_fg
   | `State_hover_border
@@ -343,6 +392,10 @@ type semantic =
   | `Motion_reveal
   | `Motion_settle
   | `Motion_pop
+  | `Enter_duration
+  | `Exit_duration
+  | `Enter_easing
+  | `Exit_easing
   | `_motion_scope
   | `Cmt_question
   | `Cmt_flag
@@ -361,8 +414,6 @@ type semantic =
   | `Color_text_dim
   | `Color_accent_brass
   | `Color_accent_soft
-  | `Bad_light
-  | `Warn_bright
   | `Color_keeper_1_glow
   | `Color_keeper_2_glow
   | `Color_keeper_3_glow
@@ -525,6 +576,51 @@ let name_of = function
   | `Spacing_group -> "spacing-group"
   | `Spacing_card -> "spacing-card"
   | `Radius_xl -> "radius-xl"
+  | `Slate_400 -> "slate-400"
+  | `Slate_500 -> "slate-500"
+  | `Slate_600 -> "slate-600"
+  | `Slate_800 -> "slate-800"
+  | `Blue_400 -> "blue-400"
+  | `Sky_400 -> "sky-400"
+  | `Purple_500 -> "purple-500"
+  | `Yellow_100 -> "yellow-100"
+  | `Red_100 -> "red-100"
+  | `Cyan_100 -> "cyan-100"
+  | `Emerald -> "emerald"
+  | `Emerald_fg -> "emerald-fg"
+  | `Indigo -> "indigo"
+  | `Yellow_bright -> "yellow-bright"
+  | `Amber_bright -> "amber-bright"
+  | `Rose -> "rose"
+  | `Rose_fg -> "rose-fg"
+  | `Rose_light -> "rose-light"
+  | `Cyan -> "cyan"
+  | `Purple -> "purple"
+  | `Frost_100 -> "frost-100"
+  | `White_pure -> "white-pure"
+  | `Text_near_white -> "text-near-white"
+  | `Text_slate_light -> "text-slate-light"
+  | `Text_strong -> "text-strong"
+  | `Text_body -> "text-body"
+  | `Text_muted -> "text-muted"
+  | `Text_dim -> "text-dim"
+  | `State_idle -> "state-idle"
+  | `State_offline -> "state-offline"
+  | `Agent_working -> "agent-working"
+  | `Agent_busy -> "agent-busy"
+  | `Chat_user_avatar -> "chat-user-avatar"
+  | `Chat_user_chip -> "chat-user-chip"
+  | `Chat_assistant_avatar -> "chat-assistant-avatar"
+  | `Chat_assistant_chip -> "chat-assistant-chip"
+  | `Chat_error_avatar -> "chat-error-avatar"
+  | `Chat_error_chip -> "chat-error-chip"
+  | `Chat_code_callout -> "chat-code-callout"
+  | `Vote_up -> "vote-up"
+  | `Vote_down -> "vote-down"
+  | `Vote_hover -> "vote-hover"
+  | `Text_slate -> "text-slate"
+  | `Warn_bright -> "warn-bright"
+  | `Bad_light -> "bad-light"
   | `Ok_soft -> "ok-soft"
   | `Ok_fg -> "ok-fg"
   | `Ok_border -> "ok-border"
@@ -693,6 +789,10 @@ let name_of = function
   | `Focus_ring_err -> "focus-ring-err"
   | `Hover_overlay -> "hover-overlay"
   | `Active_overlay -> "active-overlay"
+  | `Pressed_scale -> "pressed-scale"
+  | `Hover_lift -> "hover-lift"
+  | `Focus_ring_width -> "focus-ring-width"
+  | `Focus_ring_offset -> "focus-ring-offset"
   | `State_hover_bg -> "state-hover-bg"
   | `State_hover_fg -> "state-hover-fg"
   | `State_hover_border -> "state-hover-border"
@@ -719,6 +819,10 @@ let name_of = function
   | `Motion_reveal -> "motion-reveal"
   | `Motion_settle -> "motion-settle"
   | `Motion_pop -> "motion-pop"
+  | `Enter_duration -> "enter-duration"
+  | `Exit_duration -> "exit-duration"
+  | `Enter_easing -> "enter-easing"
+  | `Exit_easing -> "exit-easing"
   | `_motion_scope -> "_motion-scope"
   | `Cmt_question -> "cmt-question"
   | `Cmt_flag -> "cmt-flag"
@@ -737,8 +841,6 @@ let name_of = function
   | `Color_text_dim -> "color-text-dim"
   | `Color_accent_brass -> "color-accent-brass"
   | `Color_accent_soft -> "color-accent-soft"
-  | `Bad_light -> "bad-light"
-  | `Warn_bright -> "warn-bright"
   | `Color_keeper_1_glow -> "color-keeper-1-glow"
   | `Color_keeper_2_glow -> "color-keeper-2-glow"
   | `Color_keeper_3_glow -> "color-keeper-3-glow"

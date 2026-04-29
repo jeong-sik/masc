@@ -58,7 +58,10 @@ const PRESSED_CLASSES: Record<ButtonVariant, string> = {
   warn: 'bg-[var(--warn-24)]',
 }
 
-const BASE = `rounded cursor-pointer transition-all duration-200 font-medium ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'surface' })} active:scale-[0.97] active:opacity-90`
+// `duration-[var(--t-med)]` reads from the design-token duration scale
+// (--t-med = 200ms by default). Token retune (e.g. dampening interaction
+// motion for accessibility) propagates without callsite edits.
+const BASE = `rounded cursor-pointer transition-all duration-[var(--t-med)] font-medium ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'surface' })} active:scale-[0.97] active:opacity-90`
 
 interface ActionButtonProps {
   variant?: ButtonVariant

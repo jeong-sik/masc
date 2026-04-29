@@ -11,7 +11,13 @@
 import { html } from 'htm/preact'
 import { ringFocusClasses } from './ring'
 
-const INPUT_BASE = `w-full rounded bg-[var(--white-4)] border border-[var(--color-border-default)] text-[var(--color-fg-primary)] placeholder:text-[var(--color-fg-muted)] transition-colors hover:bg-[var(--white-6)] focus-visible:bg-[var(--color-bg-page)] focus-visible:border-[rgba(71,184,255,0.6)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'surface' })}`
+// Form input surface — bg/fg/border + hover/focus state slots resolve
+// from the input-* component-level token family (#11917). Future field
+// retune (e.g. brand re-skin, dark/light) ripples to all 4 form
+// primitives (TextInput/TextArea/NumberInput/Select) via these aliases.
+// `placeholder` color and `focus-visible` border color remain inline
+// pending follow-up token slots (input-placeholder, input-border-focus).
+const INPUT_BASE = `w-full rounded bg-[var(--input-bg)] border border-[var(--input-border)] text-[var(--input-fg)] placeholder:text-[var(--color-fg-muted)] transition-colors hover:bg-[var(--input-bg-hover)] focus-visible:bg-[var(--input-bg-focus)] focus-visible:border-[rgba(71,184,255,0.6)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'surface' })}`
 
 interface TextInputProps {
   id?: string

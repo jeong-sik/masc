@@ -819,8 +819,18 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                     keeper_profile
             in
             let attempt_result =
+              let reserve_degraded_retry_budget =
+                match
+                  Keeper_cascade_profile.fallback_cascade_for
+                    execution.cascade_name
+                with
+                | Some fallback_cascade ->
+                    not (String.equal fallback_cascade execution.cascade_name)
+                | None -> false
+              in
               match
                 resolve_bounded_oas_timeout_budget_with_turn_budget
+                  ~reserve_degraded_retry_budget
                   ~max_turns
                   ~estimated_input_tokens:prompt_timeout_estimate_tokens
                   ~remaining_turn_budget_s:(remaining_turn_budget_s ())

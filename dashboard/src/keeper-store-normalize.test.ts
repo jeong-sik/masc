@@ -385,6 +385,71 @@ describe('normalizeKeepers lifecycle metrics', () => {
     })
   })
 
+  it('preserves runtime cascade identity and metric provider observations', () => {
+    const [keeper] = normalizeKeepers([
+      {
+        name: 'cascade-keeper',
+        status: 'active',
+        cascade_name: 'oas-keeper_unified',
+        selected_cascade_canonical: 'big_three',
+        primary_model: 'openai:gpt-5.4',
+        active_model: 'gpt-5.4',
+        active_model_label: 'openai:gpt-5.4',
+        last_model_used: 'gpt-5.4',
+        last_model_used_label: 'openai:gpt-5.4',
+        metrics_series: [
+          {
+            ts_unix: 10,
+            context_ratio: 0.42,
+            context_tokens: 420,
+            context_max: 1000,
+            latency_ms: 100,
+            generation: 1,
+            channel: 'turn',
+            model_used: 'anthropic:claude-sonnet-4-6',
+            cascade: {
+              cascade_name: 'big_three',
+              selected_model: 'anthropic:claude-sonnet-4-6',
+              attempt_count: 2,
+              outcome: 'passed_to_next_model',
+              strategy: 'round_robin',
+              fallback_applied: true,
+              fallback_hops: 1,
+              fallback_events: [
+                {
+                  from_model_id: 'openai:gpt-5.4',
+                  to_model_id: 'anthropic:claude-sonnet-4-6',
+                  reason: 'turn_timeout',
+                },
+              ],
+            },
+          },
+        ],
+      },
+    ])
+
+    expect(keeper).toMatchObject({
+      cascade_name: 'oas-keeper_unified',
+      cascade_canonical: 'big_three',
+      selected_cascade_canonical: 'big_three',
+      primary_model: 'openai:gpt-5.4',
+      active_model_label: 'openai:gpt-5.4',
+      last_model_used_label: 'openai:gpt-5.4',
+    })
+    expect(keeper?.metrics_series?.[0]).toMatchObject({
+      cascade_name: 'big_three',
+      cascade_selected_model: 'anthropic:claude-sonnet-4-6',
+      cascade_attempt_count: 2,
+      cascade_outcome: 'passed_to_next_model',
+      cascade_strategy: 'round_robin',
+      fallback_applied: true,
+      fallback_hops: 1,
+      fallback_from: 'openai:gpt-5.4',
+      fallback_to: 'anthropic:claude-sonnet-4-6',
+      fallback_reason: 'turn_timeout',
+    })
+  })
+
   it('normalizes ctx composition telemetry from keeper metric points', () => {
     const [keeper] = normalizeKeepers([
       {

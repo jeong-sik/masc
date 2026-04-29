@@ -22,6 +22,9 @@ function makeRow(overrides: Partial<FleetRow> = {}): FleetRow {
     activity_label: '최근 활동',
     activity_source: 'none',
     model: '',
+    cascade_label: null,
+    provider_label: null,
+    fallback_label: null,
     tool_calls: 0,
     tool_success_pct: null,
     tool_activity_known: false,
@@ -46,6 +49,13 @@ describe('filterFleetRows', () => {
     makeRow({ name: 'keeper-alpha', model: 'gpt-5.4' }),
     makeRow({ name: 'keeper-beta', model: 'claude-sonnet-4-6' }),
     makeRow({ name: 'watcher-gamma', model: 'gpt-5.4', runtime_blocker_class: 'turn_timeout' }),
+    makeRow({
+      name: 'keeper-delta',
+      model: 'codex_cli:auto',
+      cascade_label: 'oas-keeper_unified -> big_three',
+      provider_label: 'anthropic:claude-sonnet-4-6 · 2 attempts · fallback',
+      fallback_label: 'openai:gpt-5.4 -> anthropic:claude-sonnet-4-6 · turn_timeout · 1 hops',
+    }),
   ]
 
   it('returns the input reference when query is empty', () => {
@@ -58,18 +68,27 @@ describe('filterFleetRows', () => {
 
   it('matches by name substring (case-insensitive)', () => {
     const result = filterFleetRows(rows, 'KEEPER')
-    expect(result).toHaveLength(2)
-    expect(result.map(r => r.name)).toEqual(['keeper-alpha', 'keeper-beta'])
+    expect(result).toHaveLength(3)
+    expect(result.map(r => r.name)).toEqual(['keeper-alpha', 'keeper-beta', 'keeper-delta'])
   })
 
   it('matches by model substring', () => {
     const result = filterFleetRows(rows, 'claude')
-    expect(result.map(r => r.name)).toEqual(['keeper-beta'])
+    expect(result.map(r => r.name)).toEqual(['keeper-beta', 'keeper-delta'])
   })
 
   it('matches by runtime_blocker_class substring', () => {
     const result = filterFleetRows(rows, 'turn_timeout')
-    expect(result.map(r => r.name)).toEqual(['watcher-gamma'])
+    expect(result.map(r => r.name)).toEqual(['watcher-gamma', 'keeper-delta'])
+  })
+
+  it('matches by cascade, provider, and fallback runtime labels', () => {
+    expect(filterFleetRows(rows, 'keeper_unified').map(r => r.name)).toEqual(['keeper-delta'])
+    expect(filterFleetRows(rows, 'claude-sonnet').map(r => r.name)).toEqual([
+      'keeper-beta',
+      'keeper-delta',
+    ])
+    expect(filterFleetRows(rows, 'gpt-5.4 -> anthropic').map(r => r.name)).toEqual(['keeper-delta'])
   })
 
   it('returns empty when no field matches', () => {

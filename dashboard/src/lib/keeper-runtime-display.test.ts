@@ -129,6 +129,17 @@ describe('keeperDisplayModel', () => {
     ).toEqual({ label: '현재 모델', value: 'claude_code:auto' })
   })
 
+  it('skips expanded exact placeholders without hiding provider auto labels', () => {
+    expect(
+      keeperDisplayModel({
+        last_model_used_label: 'default',
+        last_model_used: 'auto',
+        active_model_label: 'codex_cli:auto',
+        primary_model: 'openai:gpt-5.4',
+      }),
+    ).toEqual({ label: '현재 모델', value: 'codex_cli:auto' })
+  })
+
   it('uses the latest metrics model when structured runtime model is absent', () => {
     expect(
       keeperDisplayModel({

@@ -29,6 +29,9 @@ export interface FleetRow {
   activity_label: string
   activity_source: KeeperActivitySource
   model: string
+  cascade_label: string | null
+  provider_label: string | null
+  fallback_label: string | null
   tool_calls: number
   tool_success_pct: number | null
   tool_activity_known: boolean
@@ -96,7 +99,7 @@ export function normalizeText(value: string | null | undefined): string | null {
   return trimmed === '' ? null : trimmed
 }
 
-const MODEL_PLACEHOLDERS = new Set(['unknown', 'none', '-', 'n/a'])
+const MODEL_PLACEHOLDERS = new Set(['unknown', 'none', '-', 'n/a', 'null', 'undefined', 'default', 'auto'])
 
 export function isPlaceholderModel(value: string): boolean {
   return MODEL_PLACEHOLDERS.has(value.toLowerCase())
@@ -136,6 +139,65 @@ function keeperModel(keeper: Keeper): string {
   return normalizeModelText(keeperDisplayModel(keeper)?.value)
     ?? keeperMetricsWindowModel(keeper)
     ?? 'unknown'
+}
+
+function latestCascadeMetric(keeper: Keeper) {
+  const series = keeper.metrics_series ?? []
+  for (let index = series.length - 1; index >= 0; index -= 1) {
+    const point = series[index]
+    if (!point) continue
+    if (
+      normalizeText(point.cascade_name)
+      || normalizeText(point.cascade_selected_model)
+      || normalizeText(point.cascade_outcome)
+      || typeof point.cascade_attempt_count === 'number'
+      || point.fallback_applied
+      || normalizeText(point.fallback_from)
+      || normalizeText(point.fallback_to)
+    ) {
+      return point
+    }
+  }
+  return null
+}
+
+function keeperCascadeLabel(keeper: Keeper): string | null {
+  const raw = normalizeText(keeper.cascade_name)
+  const canonical = normalizeText(keeper.cascade_canonical ?? keeper.selected_cascade_canonical)
+  if (raw && canonical && raw !== canonical) return `${raw} -> ${canonical}`
+  return raw ?? canonical
+}
+
+function keeperProviderLabel(keeper: Keeper): string | null {
+  const summary = keeper.trust?.execution_summary ?? null
+  const latest = latestCascadeMetric(keeper)
+  const selected =
+    normalizeModelText(summary?.provider_selected_model)
+    ?? normalizeModelText(latest?.cascade_selected_model)
+    ?? normalizeModelText(latest?.model_used)
+  const outcome = normalizeText(summary?.cascade_outcome) ?? normalizeText(latest?.cascade_outcome)
+  const attempts = summary?.provider_attempt_count ?? latest?.cascade_attempt_count ?? null
+  const fallback = summary?.provider_fallback_applied ?? latest?.fallback_applied ?? null
+  const parts = [
+    selected ?? outcome,
+    typeof attempts === 'number' ? `${attempts} attempts` : null,
+    fallback === true ? 'fallback' : null,
+  ].filter((part): part is string => part != null && part.trim() !== '')
+  return parts.length > 0 ? parts.join(' · ') : null
+}
+
+function keeperFallbackLabel(keeper: Keeper): string | null {
+  const latest = latestCascadeMetric(keeper)
+  if (!latest || latest.fallback_applied !== true) return null
+  const from = normalizeModelText(latest.fallback_from)
+  const to = normalizeModelText(latest.fallback_to) ?? normalizeModelText(latest.model_used)
+  const reason = normalizeText(latest.fallback_reason)
+  const hops =
+    typeof latest.fallback_hops === 'number' && latest.fallback_hops > 0
+      ? `${latest.fallback_hops} hops`
+      : null
+  const route = from && to ? `${from} -> ${to}` : to ?? from ?? 'observed'
+  return [route, reason, hops].filter((part): part is string => part != null).join(' · ')
 }
 
 function keeperLastLatencyMs(keeper: Keeper): number {
@@ -341,6 +403,9 @@ export function buildFleetRows(keepers: Keeper[], toolQuality: ToolQualityRespon
             activity_label: activity.label,
             activity_source: activity.source,
             model: keeperModel(keeper),
+            cascade_label: keeperCascadeLabel(keeper),
+            provider_label: keeperProviderLabel(keeper),
+            fallback_label: keeperFallbackLabel(keeper),
             tool_calls: toolCalls,
             tool_success_pct: toolQualityForKeeper?.success_pct ?? null,
             tool_activity_known: keeperHasToolTelemetry(keeper, toolCalls, recentTools),
@@ -381,6 +446,9 @@ export function buildFleetRows(keepers: Keeper[], toolQuality: ToolQualityRespon
           activity_label: '최근 활동',
           activity_source: 'none',
           model: 'unknown',
+          cascade_label: null,
+          provider_label: null,
+          fallback_label: null,
           tool_calls: keeper.calls,
           tool_success_pct: keeper.success_pct,
           tool_activity_known: keeper.calls > 0,

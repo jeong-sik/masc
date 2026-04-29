@@ -107,6 +107,41 @@ let keeper_context_snapshot_fields (snapshot : keeper_context_snapshot) =
     ("context_source", string_option_to_json snapshot.context_source);
   ]
 
+let non_empty_trimmed_string_opt value =
+  let trimmed = String.trim value in
+  if trimmed = "" then None else Some trimmed
+
+let keeper_runtime_identity_fields (meta : Keeper_types.keeper_meta) =
+  let effective_cascade =
+    Keeper_cascade_profile.resolve_live meta.cascade_name
+  in
+  let primary_model =
+    match Cascade_runtime.models_of_cascade_name effective_cascade with
+    | model :: _ -> Some model
+    | [] -> None
+  in
+  let active_model =
+    Keeper_exec_status.active_model_of_meta meta
+    |> non_empty_trimmed_string_opt
+  in
+  let active_model_label =
+    Keeper_exec_status.active_model_label_of_meta meta
+    |> non_empty_trimmed_string_opt
+  in
+  let last_model_used_label =
+    if String.trim meta.runtime.usage.last_model_used = "" then None
+    else active_model_label
+  in
+  [
+    ("cascade_name", string_option_to_json (non_empty_trimmed_string_opt meta.cascade_name));
+    ("cascade_canonical", `String effective_cascade);
+    ("selected_cascade_canonical", `String effective_cascade);
+    ("primary_model", string_option_to_json primary_model);
+    ("active_model", string_option_to_json active_model);
+    ("active_model_label", string_option_to_json active_model_label);
+    ("last_model_used_label", string_option_to_json last_model_used_label);
+  ]
+
 type action_result_status = ActionOk | ActionError
 
 let action_result_status_to_string = function
@@ -587,7 +622,7 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                    emit_timing_log (Time_compat.now () -. t_work_start);
                    Some
                      (`Assoc
-                       [
+                       ([
                          ("runtime_class", `String "keeper");
                          ("pipeline_stage", `String "paused");
                          ("phase", phase_str);
@@ -600,7 +635,8 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                          ("turn_count", `Int meta.runtime.usage.total_turns);
                          ("updated_at", `String meta.updated_at);
                          ("created_at", `String meta.created_at);
-                       ])
+                       ]
+                       @ keeper_runtime_identity_fields meta))
                  ) else begin
                  let t_agent = Time_compat.now () in
                  let agent_json =
@@ -757,7 +793,9 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                        ("last_proactive_ago_s", `Float last_proactive_ago_s);
                        ("last_activity_ago_s", `Float last_activity_ago_s);
                        ("last_model_used", `String meta.runtime.usage.last_model_used);
-                       ("active_model", `String (Keeper_exec_status.active_model_of_meta meta));
+                     ]
+                     @ keeper_runtime_identity_fields meta
+                     @ [
                        ("keepalive_running", `Bool keepalive_running);
                        ( "next_model_hint",
                          string_option_to_json (Keeper_exec_status.next_model_hint_of_meta meta)
@@ -965,6 +1003,12 @@ let persistent_agents_json ?keeper_names ?keeper_rows config =
                        ("context_source", field_or_null "context_source");
                        ("last_model_used", field_or_null "last_model_used");
                        ("active_model", field_or_null "active_model");
+                       ("active_model_label", field_or_null "active_model_label");
+                       ("last_model_used_label", field_or_null "last_model_used_label");
+                       ("cascade_name", field_or_null "cascade_name");
+                       ("cascade_canonical", field_or_null "cascade_canonical");
+                       ("selected_cascade_canonical", field_or_null "selected_cascade_canonical");
+                       ("primary_model", field_or_null "primary_model");
                        ("next_model_hint", field_or_null "next_model_hint");
                        ("active_goal_ids", field_or_null "active_goal_ids");
                        ("last_autonomous_action_at", field_or_null "last_autonomous_action_at");

@@ -50,7 +50,7 @@ type ActivityCandidate = {
   ageSeconds: number
 }
 
-const MODEL_PLACEHOLDERS = new Set(['unknown', 'none', '-', 'n/a'])
+const MODEL_PLACEHOLDERS = new Set(['unknown', 'none', '-', 'n/a', 'null', 'undefined', 'default', 'auto'])
 
 function trimmed(value: string | null | undefined): string | null {
   const text = value?.trim()

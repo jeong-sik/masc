@@ -56,9 +56,8 @@ export { buildFleetRows }
 /**
  * Pure filter for fleet rows.
  *
- * Case-insensitive substring match on `row.name`, `row.model`, and
- * `row.runtime_blocker_class` so operators can locate a keeper by
- * partial name, by the model it is running, or by its current blocker.
+ * Case-insensitive substring match on keeper identity, runtime model,
+ * cascade/provider/fallback labels, and runtime blocker.
  *
  * Empty/whitespace query returns the input reference unchanged (no
  * new array allocation, preserves referential equality for memoisation).
@@ -74,6 +73,9 @@ export function filterFleetRows(
   return rows.filter(row => {
     if (row.name.toLowerCase().includes(needle)) return true
     if (row.model && row.model.toLowerCase().includes(needle)) return true
+    if (row.cascade_label && row.cascade_label.toLowerCase().includes(needle)) return true
+    if (row.provider_label && row.provider_label.toLowerCase().includes(needle)) return true
+    if (row.fallback_label && row.fallback_label.toLowerCase().includes(needle)) return true
     if (row.runtime_blocker_class && row.runtime_blocker_class.toLowerCase().includes(needle)) return true
     return false
   })
@@ -366,7 +368,7 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
             <th scope="col" class="py-1 text-right font-normal">성공</th>
             <th scope="col" class="py-1 text-right font-normal">Ctx</th>
             <th scope="col" class="py-1 text-right font-normal">지연</th>
-            <th scope="col" class="py-1 text-right font-normal">모델</th>
+            <th scope="col" class="py-1 text-right font-normal">런타임</th>
             <th scope="col" class="py-1 text-center font-normal">예산</th>
             <th scope="col" class="w-8 py-1"></th>
           </tr>
@@ -461,7 +463,18 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
                 value=${formatLatency(row.last_latency_ms)}
                 valueClass="text-[var(--color-fg-disabled)]"
               />
-              <td class="py-1.5 text-right text-3xs text-[var(--color-fg-disabled)]">${row.model}</td>
+              <td class="py-1.5 text-right text-3xs text-[var(--color-fg-disabled)]">
+                <div class="font-mono text-[var(--color-fg-secondary)]">${row.model}</div>
+                ${row.cascade_label
+                  ? html`<div class="max-w-56 truncate" title=${row.cascade_label}>cascade ${row.cascade_label}</div>`
+                  : null}
+                ${row.provider_label
+                  ? html`<div class="max-w-56 truncate" title=${row.provider_label}>provider ${row.provider_label}</div>`
+                  : null}
+                ${row.fallback_label
+                  ? html`<div class="max-w-56 truncate text-[var(--color-status-warn)]" title=${row.fallback_label}>fallback ${row.fallback_label}</div>`
+                  : null}
+              </td>
               <td class="py-1.5 text-center">
                 ${row.budget_source === 'override_invalid'
                   ? html`<span class="rounded bg-[var(--bad-10)] px-1.5 py-0.5 text-3xs font-semibold text-[var(--bad-light)]" title="TOML override가 범위를 벗어남">ERR</span>`

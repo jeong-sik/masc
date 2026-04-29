@@ -112,11 +112,66 @@ let zero_summary =
     cancelled_count = 0;
   }
 
-(* Cycle 2 skeleton: percentile and aggregation logic arrives in the next
-   cycle of #11924 once the call-site wiring lands and produces shapes the
-   reduce step can be benchmarked against. Pinning the signature here
-   keeps callers stable across the upcoming change. *)
-let summary ?provider:_ ?limit:_ () = zero_summary
+(* Nearest-rank percentile (no interpolation) keeps the dashboard
+   deterministic with very small windows: for [n] sorted samples and
+   probability [p], idx = ceil(p*n) - 1, clamped to [0, n-1]. Matches
+   the .mli contract documented for callers. *)
+let percentile (sorted : float array) (p : float) =
+  let n = Array.length sorted in
+  if n = 0 then 0.0
+  else
+    let idx = int_of_float (Float.ceil (p *. float_of_int n)) - 1 in
+    let idx = max 0 (min idx (n - 1)) in
+    sorted.(idx)
+
+let summary ?provider ?limit () =
+  let xs = recent ?provider ?limit () in
+  match xs with
+  | [] -> zero_summary
+  | _ ->
+      let n = List.length xs in
+      let ttfbs =
+        List.map (fun (s, _) -> s.ttfb_ms) xs |> Array.of_list
+      in
+      Array.sort Float.compare ttfbs;
+      let durs =
+        List.map (fun (s, _) -> s.total_duration_ms) xs |> Array.of_list
+      in
+      Array.sort Float.compare durs;
+      let cache_hits =
+        List.fold_left
+          (fun acc (s, _) -> if s.cache_hit then acc + 1 else acc)
+          0 xs
+      in
+      let total_cost =
+        List.fold_left (fun acc (s, _) -> acc +. s.cost_usd) 0.0 xs
+      in
+      let errors =
+        List.fold_left
+          (fun acc (s, _) ->
+            match s.status with
+            | Error _ | Timeout -> acc + 1
+            | Success | Cancelled _ -> acc)
+          0 xs
+      in
+      let cancels =
+        List.fold_left
+          (fun acc (s, _) ->
+            match s.status with Cancelled _ -> acc + 1 | _ -> acc)
+          0 xs
+      in
+      {
+        sample_count = n;
+        ttfb_p50_ms = percentile ttfbs 0.50;
+        ttfb_p95_ms = percentile ttfbs 0.95;
+        total_duration_p50_ms = percentile durs 0.50;
+        total_duration_p95_ms = percentile durs 0.95;
+        total_duration_p99_ms = percentile durs 0.99;
+        cache_hit_ratio = float_of_int cache_hits /. float_of_int n;
+        total_cost_usd = total_cost;
+        error_ratio = float_of_int errors /. float_of_int n;
+        cancelled_count = cancels;
+      }
 
 let clear ?provider () =
   with_lock (fun () ->

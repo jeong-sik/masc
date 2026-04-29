@@ -104,10 +104,12 @@ val summary : ?provider:string -> ?limit:int -> unit -> summary
 (** [summary ?provider ?limit ()] aggregates over the same window as
     {!recent}.
 
-    {b Cycle 2 stub}: returns [zero_summary] until percentile and reduce
-    logic land in the next cycle (#11924 follow-up). The signature is
-    pinned now so call sites can be wired in I1's later cycles without
-    breaking changes. *)
+    Returns a zero-valued summary (all fields [0]) when no samples match
+    the filter. Otherwise the percentile fields use the nearest-rank
+    method (no interpolation): for [n] sorted samples and probability
+    [p], the percentile is the value at index [ceil(p*n) - 1], clamped
+    to [\[0, n-1\]]. The choice keeps the dashboard deterministic with
+    very small windows (e.g. one sample → p50 = p95 = the only value). *)
 
 val clear : ?provider:string -> unit -> unit
 (** [clear ?provider ()] drops samples. With [provider] only that ring is

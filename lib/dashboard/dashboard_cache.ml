@@ -130,6 +130,18 @@ let timeout_json ~key ~timeout_sec ~timeout_kind =
 let max_wait_sec = 130.0
 let wait_poll_interval_sec = 0.25
 
+(** PR-0.2.A: dashboard cache hit/miss observation labels.  Pure
+    instrumentation — never branches on these counters. *)
+let cache_metric_label = [("cache", "dashboard")]
+
+let inc_cache_hit () =
+  Prometheus.inc_counter Prometheus.metric_cache_hits_total
+    ~labels:cache_metric_label ()
+
+let inc_cache_miss () =
+  Prometheus.inc_counter Prometheus.metric_cache_misses_total
+    ~labels:cache_metric_label ()
+
 (** Eio path: per-key locking with stampede protection + stale-while-revalidate.
 
     Three cases on cache lookup:
@@ -186,12 +198,18 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
         (`Compute token, SMap.add key (Computing { token; started_at = now (); stale = None }) map)
     ) in
     match action with
-    | `Hit v -> v
+    | `Hit v ->
+      (* PR-0.2.A: cache hit observation (no logic change). *)
+      inc_cache_hit ();
+      v
     | `Timed_out -> raise (Compute_timeout (key, true))
     | `Wait token ->
       Time_compat.sleep wait_poll_interval_sec;
       try_get ~waited:(waited +. wait_poll_interval_sec) ~watching_token:(Some token)
     | `Stale (stale_value, token) ->
+      (* PR-0.2.A: stale-served-from-cache counts as a hit (caller gets
+         data without blocking on compute; bg recompute is incidental). *)
+      inc_cache_hit ();
       let do_bg_compute () =
         match compute () with
         | value ->
@@ -253,6 +271,8 @@ let get_or_compute_eio ?wait_timeout_sec key ~ttl compute =
            do_bg_compute ());
       stale_value
     | `Compute token ->
+      (* PR-0.2.A: cache miss observation (this fiber must compute). *)
+      inc_cache_miss ();
       let result_ref = ref None in
       let run_compute () =
         try result_ref := Some (Ok (compute ()))
@@ -348,8 +368,13 @@ let get_or_compute_simple key ~ttl compute =
       let token = next_token () in
       (`Compute token, SMap.add key (Computing { token; started_at = ts; stale = None }) map)
   ) with
-  | `Hit v -> v
+  | `Hit v ->
+    (* PR-0.2.A: cache hit observation. *)
+    inc_cache_hit ();
+    v
   | `Compute token ->
+    (* PR-0.2.A: cache miss observation. *)
+    inc_cache_miss ();
     (match compute () with
      | value ->
        let ts_after = now () in

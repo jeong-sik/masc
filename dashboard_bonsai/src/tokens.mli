@@ -202,6 +202,9 @@ type semantic =
   | `Vote_up
   | `Vote_down
   | `Vote_hover
+  | `Text_slate
+  | `Warn_bright
+  | `Bad_light
   | `Ok_soft
   | `Ok_fg
   | `Ok_border
@@ -370,6 +373,10 @@ type semantic =
   | `Focus_ring_err
   | `Hover_overlay
   | `Active_overlay
+  | `Pressed_scale
+  | `Hover_lift
+  | `Focus_ring_width
+  | `Focus_ring_offset
   | `State_hover_bg
   | `State_hover_fg
   | `State_hover_border
@@ -418,8 +425,6 @@ type semantic =
   | `Color_text_dim
   | `Color_accent_brass
   | `Color_accent_soft
-  | `Bad_light
-  | `Warn_bright
   | `Color_keeper_1_glow
   | `Color_keeper_2_glow
   | `Color_keeper_3_glow

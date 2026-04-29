@@ -46,6 +46,12 @@ Components are migrated bottom-up (atom → molecule → organism → page). Ear
 
 Iter 1 is the canonical reference. Each later iter follows the same shape.
 
+> **Reality-check (2026-04-29)**: Production-Preact migrations diverge
+> from the table above, which targets `ui_kits/cockpit` (React reference
+> UI Kit, not a Preact migration target). Actual: Iter 1 = DialogOverlay
+> (PR #11827, merged), Iter 2 = AuthPopover (`auth-status.ts`, in
+> progress). Table refresh follows in a separate RFC update.
+
 ## Per-iter PR shape
 
 Every migration PR must include exactly these parts:

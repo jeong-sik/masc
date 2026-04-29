@@ -746,7 +746,12 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
             if m.sandbox_profile = Keeper_types.Docker
                || (m.sandbox_profile = Keeper_types.Local
                    && Env_config_keeper.DockerPlayground.enabled)
-            then Some (Env_config_keeper.KeeperSandbox.docker_image ())
+            then
+              Some (
+                match m.sandbox_image with
+                | Some img when String.trim img <> "" -> img
+                | _ -> Env_config_keeper.KeeperSandbox.docker_image ()
+              )
             else None
           in
           let sandbox_preflight =
@@ -1610,7 +1615,9 @@ let keeper_config_json (config : Coord.config) (name : string)
           ("credential_fallbacks_disabled",
             `Bool (Env_config_keeper.KeeperSandbox.hard_mode ()));
           ("docker_image",
-            string_or_null (Env_config_keeper.KeeperSandbox.docker_image ()));
+            match effective_sandbox_image with
+            | Some img -> string_or_null img
+            | None -> `Null);
           ("pids_limit", `Int (Env_config_keeper.KeeperSandbox.pids_limit ()));
           ("memory",
             string_or_null (Env_config_keeper.KeeperSandbox.memory ()));

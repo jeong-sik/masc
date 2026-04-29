@@ -129,7 +129,11 @@ let run_argv_with_stdin_and_status_retry_eintr ~timeout_sec ~stdin_content argv 
   loop max_eintr_retries
 
 let start_container (t : t) ~(timeout_sec : float) =
-  let image = Env_config_keeper.KeeperSandbox.docker_image () in
+  let image =
+    match t.meta.sandbox_image with
+    | Some img when String.trim img <> "" -> img
+    | _ -> Env_config_keeper.KeeperSandbox.docker_image ()
+  in
   if String.trim image = "" then
     Error "keeper sandbox docker image is not configured"
   else

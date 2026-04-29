@@ -336,6 +336,8 @@ let ensure_keeper_meta config name =
     (match target_sandbox_profile_result with
      | Error e -> Error e
      | Ok target_sandbox_profile ->
+    let target_sandbox_image =
+      apply_default_opt defaults.sandbox_image meta.sandbox_image in
     let target_network_mode =
       apply_default defaults.network_mode
         (Keeper_types_profile.default_network_mode_for_profile target_sandbox_profile) in
@@ -547,6 +549,7 @@ let ensure_keeper_meta config name =
         tool_access = target_tool_access;
         tool_preset_source = target_tool_preset_source;
         sandbox_profile = target_sandbox_profile;
+        sandbox_image = target_sandbox_image;
         network_mode = target_network_mode;
         shared_memory_scope = target_shared_memory_scope;
         allowed_paths = target_allowed_paths;

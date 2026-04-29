@@ -30,6 +30,7 @@ type parsed_keeper_identity =
 type parsed_keeper_policy =
   { pp_policy_voice_enabled : bool
   ; pp_sandbox_profile : sandbox_profile
+  ; pp_sandbox_image : string option
   ; pp_network_mode : network_mode
   ; pp_shared_memory_scope : shared_memory_scope
   ; pp_allowed_paths : string list

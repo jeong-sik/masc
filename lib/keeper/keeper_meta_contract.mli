@@ -219,6 +219,7 @@ type keeper_meta = {
   (* Policy *)
   policy_voice_enabled : bool;
   sandbox_profile : Keeper_types_profile.sandbox_profile;
+  sandbox_image : string option;
   network_mode : Keeper_types_profile.network_mode;
   shared_memory_scope : Keeper_types_profile.shared_memory_scope;
   allowed_paths : string list;

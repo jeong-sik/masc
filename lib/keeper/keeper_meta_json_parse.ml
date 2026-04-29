@@ -29,6 +29,7 @@ type parsed_keeper_identity =
 type parsed_keeper_policy =
   { pp_policy_voice_enabled : bool
   ; pp_sandbox_profile : sandbox_profile
+  ; pp_sandbox_image : string option
   ; pp_network_mode : network_mode
   ; pp_shared_memory_scope : shared_memory_scope
   ; pp_allowed_paths : string list
@@ -172,7 +173,7 @@ let parse_keeper_identity (json : Yojson.Safe.t) : (parsed_keeper_identity, stri
    refuse the *missing* and *unparseable* cases, not to second-guess
    legal combinations. *)
 let parse_sandbox_policy_fields (json : Yojson.Safe.t)
-  : (sandbox_profile * network_mode, string) result
+  : (sandbox_profile * string option * network_mode, string) result
   =
   let ( let* ) = Result.bind in
   let* sp_raw =
@@ -193,6 +194,7 @@ let parse_sandbox_policy_fields (json : Yojson.Safe.t)
            sp_raw
            (String.concat ", " valid_sandbox_profile_strings))
   in
+  let si = Safe_ops.json_string_opt "sandbox_image" json in
   let* nm_raw =
     match Safe_ops.json_string_opt "network_mode" json with
     | Some s -> Ok s
@@ -211,7 +213,7 @@ let parse_sandbox_policy_fields (json : Yojson.Safe.t)
            nm_raw
            (String.concat ", " valid_network_mode_strings))
   in
-  Ok (sp, nm)
+  Ok (sp, si, nm)
 ;;
 
 let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
@@ -223,7 +225,7 @@ let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
   | Ok pp_tool_access ->
     (match parse_sandbox_policy_fields json with
      | Error msg -> Error ("meta parse error: " ^ msg)
-     | Ok (pp_sandbox_profile, pp_network_mode) ->
+     | Ok (pp_sandbox_profile, pp_sandbox_image, pp_network_mode) ->
     let pp_policy_voice_enabled =
       Safe_ops.json_bool ~default:voice_enabled_default "policy_voice_enabled" json
     in
@@ -331,6 +333,7 @@ let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
     Ok
       { pp_policy_voice_enabled
       ; pp_sandbox_profile
+      ; pp_sandbox_image
       ; pp_network_mode
       ; pp_shared_memory_scope
       ; pp_allowed_paths
@@ -588,6 +591,7 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
                    ; instructions = identity.pk_instructions
                    ; policy_voice_enabled = policy.pp_policy_voice_enabled
                    ; sandbox_profile = policy.pp_sandbox_profile
+                   ; sandbox_image = policy.pp_sandbox_image
                    ; network_mode = policy.pp_network_mode
                    ; shared_memory_scope = policy.pp_shared_memory_scope
                    ; allowed_paths = policy.pp_allowed_paths

@@ -84,7 +84,11 @@ let start_managed_container
                     Keeper_sandbox_runtime.live_container_to_yojson container);
                  ])
         | None ->
-            let image = Env_config_keeper.KeeperSandbox.docker_image () in
+            let image =
+              match meta.sandbox_image with
+              | Some img when String.trim img <> "" -> img
+              | _ -> Env_config_keeper.KeeperSandbox.docker_image ()
+            in
             if String.trim image = "" then
               Error "keeper sandbox docker image is not configured"
             else

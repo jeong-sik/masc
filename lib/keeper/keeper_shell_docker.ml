@@ -313,7 +313,11 @@ let run_docker_shell_command_with_status
     ~(network_mode : network_mode)
   =
   let timeout_sec = max timeout_sec docker_run_min_timeout_sec in
-  let image = Env_config_keeper.KeeperSandbox.docker_image () in
+  let image =
+    match meta.sandbox_image with
+    | Some img when String.trim img <> "" -> img
+    | _ -> Env_config_keeper.KeeperSandbox.docker_image ()
+  in
   let network_mode =
     if Env_config_keeper.KeeperSandbox.hard_mode () then
       Network_none
@@ -578,7 +582,11 @@ let run_docker_with_git_bash
     ~(cwd : string)
     ~(timeout_sec : float)
     ~(cmd : string) () =
-  let image = Env_config_keeper.KeeperSandbox.docker_image () in
+  let image =
+    match meta.sandbox_image with
+    | Some img when String.trim img <> "" -> img
+    | _ -> Env_config_keeper.KeeperSandbox.docker_image ()
+  in
   let sandbox_error_json message =
     Keeper_registry.record_error ~base_path:config.base_path meta.name message;
     error_json message
@@ -669,7 +677,11 @@ let run_docker_hardened_bash
     ~(timeout_sec : float)
     ~(cmd : string)
     ~(network_mode : network_mode) =
-  let image = Env_config_keeper.KeeperSandbox.docker_image () in
+  let image =
+    match meta.sandbox_image with
+    | Some img when String.trim img <> "" -> img
+    | _ -> Env_config_keeper.KeeperSandbox.docker_image ()
+  in
   let sandbox_error_json message =
     Keeper_registry.record_error ~base_path:config.base_path meta.name message;
     error_json message

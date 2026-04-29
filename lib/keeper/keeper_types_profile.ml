@@ -285,6 +285,7 @@ type keeper_profile_defaults = {
   shards : string list option;
   allowed_paths : string list option;
   sandbox_profile : sandbox_profile option;
+  sandbox_image : string option;
   network_mode : network_mode option;
   shared_memory_scope : shared_memory_scope option;
   github_identity : string option;
@@ -365,6 +366,7 @@ let empty_keeper_profile_defaults = {
   shards = None;
   allowed_paths = None;
   sandbox_profile = None;
+  sandbox_image = None;
   network_mode = None;
   shared_memory_scope = None;
   github_identity = None;
@@ -786,6 +788,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
           else None;
         sandbox_profile =
           Option.bind (str "sandbox_profile") sandbox_profile_of_string;
+        sandbox_image = str "sandbox_image";
         network_mode =
           Option.bind (str "network_mode") network_mode_of_string;
         shared_memory_scope =
@@ -849,6 +852,7 @@ let parsed_field_key_names =
   ; "shards"
   ; "allowed_paths"
   ; "sandbox_profile"
+  ; "sandbox_image"
   ; "network_mode"
   ; "shared_memory_scope"
   ; "github_identity"
@@ -903,6 +907,7 @@ let canonical_keeper_toml_key_names =
   ; "shards"
   ; "allowed_paths"
   ; "sandbox_profile"
+  ; "sandbox_image"
   ; "network_mode"
   ; "shared_memory_scope"
   ; "github_identity"
@@ -1086,6 +1091,7 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
                    Keep these in keeper TOML / runtime config only. *)
                 allowed_paths = None;
                 sandbox_profile = None;
+                sandbox_image = None;
                 network_mode = None;
                 shared_memory_scope = None;
                 github_identity = None;
@@ -1198,6 +1204,7 @@ let merge_keeper_profile_defaults
     shards = prefer overlay.shards base.shards;
     allowed_paths = prefer overlay.allowed_paths base.allowed_paths;
     sandbox_profile = prefer overlay.sandbox_profile base.sandbox_profile;
+    sandbox_image = prefer overlay.sandbox_image base.sandbox_image;
     network_mode = prefer overlay.network_mode base.network_mode;
     shared_memory_scope =
       prefer overlay.shared_memory_scope base.shared_memory_scope;

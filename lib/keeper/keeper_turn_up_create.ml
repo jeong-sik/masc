@@ -396,6 +396,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         instructions;
         policy_voice_enabled;
         sandbox_profile;
+        sandbox_image = None;
         network_mode;
         shared_memory_scope;
         allowed_paths;

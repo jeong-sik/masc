@@ -128,27 +128,42 @@ let test_trigger_reason_task_complete () =
   | _ -> fail "expected TaskComplete"
 
 (* ============================================================
-   trigger_reason_to_string Tests
+   trigger_reason → handover_reason Tests
+
+   Verifies the [trigger_reason → string] mapping observed via the
+   public [create_handover] API. The internal helper
+   [Handover_eio.trigger_reason_to_string] (intentionally hidden by
+   the [handover_eio.mli] typed surface, cycle 134) is exercised
+   transitively: [create_handover] sets [handover_reason] to that
+   helper's output, so the resulting record's [handover_reason]
+   field is the canonical observation point for callers.
    ============================================================ *)
 
+let reason_string_for reason =
+  let r =
+    Handover_eio.create_handover
+      ~from_agent:"" ~task_id:"" ~session_id:"" ~reason
+  in
+  r.handover_reason
+
 let test_trigger_reason_to_string_context_limit () =
-  let s = Handover_eio.trigger_reason_to_string (Handover_eio.ContextLimit 85) in
+  let s = reason_string_for (Handover_eio.ContextLimit 85) in
   check string "context_limit" "context_limit_85" s
 
 let test_trigger_reason_to_string_timeout () =
-  let s = Handover_eio.trigger_reason_to_string (Handover_eio.Timeout 600) in
+  let s = reason_string_for (Handover_eio.Timeout 600) in
   check string "timeout" "timeout_600s" s
 
 let test_trigger_reason_to_string_explicit () =
-  let s = Handover_eio.trigger_reason_to_string Handover_eio.Explicit in
+  let s = reason_string_for Handover_eio.Explicit in
   check string "explicit" "explicit" s
 
 let test_trigger_reason_to_string_fatal_error () =
-  let s = Handover_eio.trigger_reason_to_string (Handover_eio.FatalError "Crash") in
+  let s = reason_string_for (Handover_eio.FatalError "Crash") in
   check string "fatal_error" "error: Crash" s
 
 let test_trigger_reason_to_string_task_complete () =
-  let s = Handover_eio.trigger_reason_to_string Handover_eio.TaskComplete in
+  let s = reason_string_for Handover_eio.TaskComplete in
   check string "task_complete" "task_complete" s
 
 (* ============================================================

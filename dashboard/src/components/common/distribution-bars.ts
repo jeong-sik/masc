@@ -104,7 +104,7 @@ export function DistributionBars({
                     </div>
                     <div class="h-2 overflow-hidden rounded-sm bg-[var(--white-5)]">
                       <div
-                        class="h-full rounded-sm transition-[width] duration-300"
+                        class="h-full rounded-sm transition-[width] duration-[var(--t-slow)]"
                         style=${`width:${Math.min(width, 100)}%;background:${palette.fill};opacity:0.8;`}
                       ></div>
                     </div>

@@ -92,7 +92,7 @@ interface ProgressBarProps {
 }
 
 const TRACK_BASE = 'w-full overflow-hidden rounded-sm'
-const FILL_BASE = 'h-full rounded-sm transition-[width] duration-300 ease-in-out'
+const FILL_BASE = 'h-full rounded-sm transition-[width] duration-[var(--t-slow)] ease-in-out'
 
 export function ProgressBar({
   pct,

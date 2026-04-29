@@ -407,8 +407,16 @@ jobs:
         # because all steps had continue-on-error. CI Gate only saw the job
         # as "success" and never blocked. Build break propagated to main.
         # See: PR #11721 followup, memory feedback_admin_merge_can_bypass_build_ci.md.
+        env:
+          # Reduce parallelism to minimize Eio fiber scheduling flakes in tests.
+          # See: https://github.com/jeong-sik/masc-mcp/issues/2957
+          DUNE_JOBS: 1
         run: |
           opam exec -- dune build
+
+      - name: Install eio-trace
+        run: |
+          opam install -y eio-trace || echo "eio-trace install skipped"
 
       - name: Run tests (quick suite)
         id: quick_suite
@@ -422,10 +430,34 @@ jobs:
           MASC_LOCAL_RUNTIMES_JSON: '[{"base_url":"http://127.0.0.1:8085","max_concurrency":4}]'
           MASC_KEEPER_MSG_TIMEOUT_MAX_SEC: "10"
           MASC_E2E_TESTS: "true"
+          # Reduce parallelism to minimize Eio fiber scheduling flakes.
+          # See: https://github.com/jeong-sik/masc-mcp/issues/2957
+          DUNE_JOBS: 1
         run: |
           mkdir -p /tmp/me
           chmod +x scripts/ci-run-tests.sh
           scripts/ci-run-tests.sh "opam exec -- dune test"
+
+      - name: Upload test diagnostics on failure
+        if: ${{ failure() && steps.quick_suite.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-diagnostics-quick-suite-${{ github.run_id }}
+          path: |
+            _build/log
+            _build/default/test/_build/_tests/**/*.output
+            /tmp/ci-run-tests.*.log
+          retention-days: 7
+
+      - name: Upload eio-trace on failure
+        if: ${{ failure() && steps.quick_suite.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: eio-trace-quick-suite-${{ github.run_id }}
+          path: |
+            _build/default/**/*.trace
+            /tmp/eio-trace-*
+          retention-days: 7
 
       - name: Run operator control suite
         id: operator_control_suite
@@ -438,6 +470,7 @@ jobs:
           MASC_LOCAL_RUNTIMES_JSON: '[{"base_url":"http://127.0.0.1:8085","max_concurrency":4}]'
           MASC_KEEPER_MSG_TIMEOUT_MAX_SEC: "10"
           MASC_E2E_TESTS: "true"
+          DUNE_JOBS: 1
         run: |
           mkdir -p /tmp/me
           chmod +x scripts/ci-run-tests.sh
@@ -450,6 +483,7 @@ jobs:
           ME_ROOT: /tmp/me
           CI_TEST_TIMEOUT_SEC: 900
           CI_TEST_HEARTBEAT_SEC: 15
+          DUNE_JOBS: 1
         run: |
           mkdir -p /tmp/me
           chmod +x scripts/ci-run-tests.sh
@@ -462,6 +496,7 @@ jobs:
           ME_ROOT: /tmp/me
           CI_TEST_TIMEOUT_SEC: 900
           CI_TEST_HEARTBEAT_SEC: 15
+          DUNE_JOBS: 1
         run: |
           mkdir -p /tmp/me
           chmod +x scripts/ci-run-tests.sh
@@ -486,6 +521,7 @@ jobs:
           ME_ROOT: /tmp/me
           CI_TEST_TIMEOUT_SEC: 900
           CI_TEST_HEARTBEAT_SEC: 15
+          DUNE_JOBS: 1
         run: |
           mkdir -p /tmp/me
           chmod +x scripts/ci-run-tests.sh

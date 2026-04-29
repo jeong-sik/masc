@@ -1,6 +1,19 @@
 # Changelog
 
 
+## [0.18.14] - 2026-04-30
+
+Release train metadata bump immediately after publishing the v0.18.13 catch-up boundary. No runtime behavior changes.
+
+### Changed
+
+- Package and release metadata advanced from `0.18.13` to `0.18.14` so new post-release work lands on the next patch line.
+- Roadmap, product operating plan, opam metadata, and spec baseline version references synced to `0.18.14`.
+
+### Deprecated
+
+- None.
+
 ## [0.18.13] - 2026-04-30
 
 Aggregate of 389 commits since v0.18.9 (147 feat / 74 chore / 54 fix / 26 docs / 25 test / 20 refactor / 8 spec / 3 ci, plus filename-scoped surface pins). No breaking API changes.

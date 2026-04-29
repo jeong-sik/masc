@@ -1,10 +1,10 @@
 {
   "_comment": "OCaml structural-debt baseline. Regenerate with scripts/ocaml-structure-ratchet.sh --regenerate.",
   "_metrics": "See scripts/ocaml-structure-ratchet.sh METRICS array.",
-  "keeper_mli_missing": 3,
+  "keeper_mli_missing": 2,
   "coord_mli_missing": 1,
   "godsplit_count": 0,
-  "lib_dune_lines": 962,
+  "lib_dune_lines": 965,
   "inferred_dump_headers": 0,
-  "lib_other_mli_missing": 61
+  "lib_other_mli_missing": 56
 }

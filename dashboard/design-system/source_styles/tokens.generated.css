@@ -429,6 +429,31 @@
   --scrim-strong: rgb(0 0 0 / .7);
   --scrim-brass: rgb(var(--brass-glow) / .04);  /* warm wash behind active region */
   --bg-tab-sticky-hover: rgb(30 41 59 / .95);  /* sticky tab hover backdrop (slate-800 / 95%) */
+  --tab-bg: var(--bg-1);  /* inactive tab surface bg */
+  --tab-bg-active: var(--bg-2);  /* active tab surface bg (one selection at a time) */
+  --tab-bg-hover: var(--bg-2);  /* tab hover surface bg (preview of active affordance) */
+  --tab-fg: var(--fg-3);  /* inactive tab text */
+  --tab-fg-active: var(--fg-1);  /* active tab text */
+  --tab-border: var(--line-1);  /* vertical divider hairline between tabs */
+  --tab-indicator: var(--brass-1);  /* 1px bottom stripe under active tab (brass — single selection) */
+  --tab-close-hover: var(--err);  /* tab close (×) icon hover/active fg */
+  --sidebar-bg: var(--bg-1);  /* sidebar surface bg (chrome — same elevation as topbar) */
+  --sidebar-fg: var(--fg-2);  /* sidebar item label fg (secondary text) */
+  --sidebar-item-hover-bg: var(--bg-2);  /* sidebar row hover bg */
+  --sidebar-item-active-bg: var(--bg-3);  /* sidebar row selected bg */
+  --sidebar-icon-fg: var(--fg-3);  /* sidebar icon resting fg (muted — keeps text primary) */
+  --sidebar-icon-active-fg: var(--brass-1);  /* sidebar icon active fg (brass — selected nav) */
+  --sidebar-section-header-fg: var(--fg-3);  /* sidebar group header label fg (uppercase mono meta) */
+  --sidebar-border: var(--line-1);  /* sidebar right edge divider */
+  --panel-header-bg: var(--bg-1);  /* split-pane header bar bg (terminal/output/problems strip) */
+  --panel-header-fg: var(--fg-2);  /* split-pane header label fg */
+  --panel-resize-handle: var(--line-1);  /* splitter divider hairline (resting) */
+  --panel-resize-handle-hover: var(--brass-3);  /* splitter on hover/drag (brass — affordance, not decoration) */
+  --terminal-bg: var(--bg-0);  /* terminal pane bg (deepest surface — distinct from chrome) */
+  --terminal-fg: var(--fg-1);  /* terminal default mono text fg */
+  --terminal-prompt: var(--brass-1);  /* shell prompt sigil fg (brass — active input cursor anchor) */
+  --terminal-cursor: var(--brass-1);  /* block cursor fill (matches prompt for visual cohesion) */
+  --terminal-selection-bg: rgb(var(--brass-glow) / .15);  /* terminal text selection bg (brass-tinted — same family as state-active-bg) */
   --motion-enter: var(--t-med) var(--ease-out);
   --motion-exit: var(--t-fast) var(--ease-in);
   --motion-swap: var(--t-fast) var(--ease);

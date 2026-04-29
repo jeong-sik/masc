@@ -436,6 +436,31 @@ type semantic =
   | `Scrim_strong
   | `Scrim_brass
   | `Bg_tab_sticky_hover
+  | `Tab_bg
+  | `Tab_bg_active
+  | `Tab_bg_hover
+  | `Tab_fg
+  | `Tab_fg_active
+  | `Tab_border
+  | `Tab_indicator
+  | `Tab_close_hover
+  | `Sidebar_bg
+  | `Sidebar_fg
+  | `Sidebar_item_hover_bg
+  | `Sidebar_item_active_bg
+  | `Sidebar_icon_fg
+  | `Sidebar_icon_active_fg
+  | `Sidebar_section_header_fg
+  | `Sidebar_border
+  | `Panel_header_bg
+  | `Panel_header_fg
+  | `Panel_resize_handle
+  | `Panel_resize_handle_hover
+  | `Terminal_bg
+  | `Terminal_fg
+  | `Terminal_prompt
+  | `Terminal_cursor
+  | `Terminal_selection_bg
   | `Motion_enter
   | `Motion_exit
   | `Motion_swap

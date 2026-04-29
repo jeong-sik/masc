@@ -800,6 +800,76 @@ export const semantic: ReadonlyArray<TokenBase> = (() => {
   out.push(t("bg-tab-sticky-hover", "rgb(30 41 59 / .95)", "role", "color",
     "sticky tab hover backdrop (slate-800 / 95%)"));
 
+  // ── IDE Chrome role tokens (spec §5.1.2 Stage 1) ────────────────────
+  // Token surface for the IDE-like multi-pane layout: editor tab bar,
+  // sidebar (file explorer / nav), panel (terminal/output split),
+  // terminal (mono-text shell). All values resolve through the brass
+  // canon (bg-N, fg-N, line-N, brass-N) so the brass-only "active state"
+  // rule in SKILL.md applies uniformly across IDE chrome — only the
+  // active tab/icon/prompt accents pull `--brass-1`. New chrome adds
+  // no Tailwind 400/500 saturated palette dependency (variables.css
+  // bright-live-surface tier stays orthogonal). Consumers reach these
+  // via `bg-[var(--tab-bg-active)]` etc. once headless Tabs / TreeView /
+  // SplitPane primitives land in subsequent v2 iters.
+
+  // Tab bar — editor tab strip and panel header tabs
+  out.push(t("tab-bg",          "var(--bg-1)",   "role", "color",
+    "inactive tab surface bg"));
+  out.push(t("tab-bg-active",   "var(--bg-2)",   "role", "color",
+    "active tab surface bg (one selection at a time)"));
+  out.push(t("tab-bg-hover",    "var(--bg-2)",   "role", "color",
+    "tab hover surface bg (preview of active affordance)"));
+  out.push(t("tab-fg",          "var(--fg-3)",   "role", "color",
+    "inactive tab text"));
+  out.push(t("tab-fg-active",   "var(--fg-1)",   "role", "color",
+    "active tab text"));
+  out.push(t("tab-border",      "var(--line-1)", "role", "color",
+    "vertical divider hairline between tabs"));
+  out.push(t("tab-indicator",   "var(--brass-1)","role", "color",
+    "1px bottom stripe under active tab (brass — single selection)"));
+  out.push(t("tab-close-hover", "var(--err)",    "role", "color",
+    "tab close (×) icon hover/active fg"));
+
+  // Sidebar — file explorer / TreeView / nav rail
+  out.push(t("sidebar-bg",                "var(--bg-1)",   "role", "color",
+    "sidebar surface bg (chrome — same elevation as topbar)"));
+  out.push(t("sidebar-fg",                "var(--fg-2)",   "role", "color",
+    "sidebar item label fg (secondary text)"));
+  out.push(t("sidebar-item-hover-bg",     "var(--bg-2)",   "role", "color",
+    "sidebar row hover bg"));
+  out.push(t("sidebar-item-active-bg",    "var(--bg-3)",   "role", "color",
+    "sidebar row selected bg"));
+  out.push(t("sidebar-icon-fg",           "var(--fg-3)",   "role", "color",
+    "sidebar icon resting fg (muted — keeps text primary)"));
+  out.push(t("sidebar-icon-active-fg",    "var(--brass-1)","role", "color",
+    "sidebar icon active fg (brass — selected nav)"));
+  out.push(t("sidebar-section-header-fg", "var(--fg-3)",   "role", "color",
+    "sidebar group header label fg (uppercase mono meta)"));
+  out.push(t("sidebar-border",            "var(--line-1)", "role", "color",
+    "sidebar right edge divider"));
+
+  // Panel — split-pane header bar, resize handle
+  out.push(t("panel-header-bg",          "var(--bg-1)",   "role", "color",
+    "split-pane header bar bg (terminal/output/problems strip)"));
+  out.push(t("panel-header-fg",          "var(--fg-2)",   "role", "color",
+    "split-pane header label fg"));
+  out.push(t("panel-resize-handle",      "var(--line-1)", "role", "color",
+    "splitter divider hairline (resting)"));
+  out.push(t("panel-resize-handle-hover","var(--brass-3)","role", "color",
+    "splitter on hover/drag (brass — affordance, not decoration)"));
+
+  // Terminal — mono shell pane (16-color ANSI palette deferred to Stage 5)
+  out.push(t("terminal-bg",           "var(--bg-0)",  "role", "color",
+    "terminal pane bg (deepest surface — distinct from chrome)"));
+  out.push(t("terminal-fg",           "var(--fg-1)",  "role", "color",
+    "terminal default mono text fg"));
+  out.push(t("terminal-prompt",       "var(--brass-1)","role", "color",
+    "shell prompt sigil fg (brass — active input cursor anchor)"));
+  out.push(t("terminal-cursor",       "var(--brass-1)","role", "color",
+    "block cursor fill (matches prompt for visual cohesion)"));
+  out.push(t("terminal-selection-bg", "rgb(var(--brass-glow) / .15)", "role", "color",
+    "terminal text selection bg (brass-tinted — same family as state-active-bg)"));
+
   // ── Motion role tokens — bundle duration + easing ──────────────────
   out.push(t("motion-enter",  "var(--t-med) var(--ease-out)", "role", "duration"));
   out.push(t("motion-exit",   "var(--t-fast) var(--ease-in)", "role", "duration"));

@@ -425,6 +425,31 @@ type semantic =
   | `Scrim_strong
   | `Scrim_brass
   | `Bg_tab_sticky_hover
+  | `Tab_bg
+  | `Tab_bg_active
+  | `Tab_bg_hover
+  | `Tab_fg
+  | `Tab_fg_active
+  | `Tab_border
+  | `Tab_indicator
+  | `Tab_close_hover
+  | `Sidebar_bg
+  | `Sidebar_fg
+  | `Sidebar_item_hover_bg
+  | `Sidebar_item_active_bg
+  | `Sidebar_icon_fg
+  | `Sidebar_icon_active_fg
+  | `Sidebar_section_header_fg
+  | `Sidebar_border
+  | `Panel_header_bg
+  | `Panel_header_fg
+  | `Panel_resize_handle
+  | `Panel_resize_handle_hover
+  | `Terminal_bg
+  | `Terminal_fg
+  | `Terminal_prompt
+  | `Terminal_cursor
+  | `Terminal_selection_bg
   | `Motion_enter
   | `Motion_exit
   | `Motion_swap
@@ -891,6 +916,31 @@ let name_of = function
   | `Scrim_strong -> "scrim-strong"
   | `Scrim_brass -> "scrim-brass"
   | `Bg_tab_sticky_hover -> "bg-tab-sticky-hover"
+  | `Tab_bg -> "tab-bg"
+  | `Tab_bg_active -> "tab-bg-active"
+  | `Tab_bg_hover -> "tab-bg-hover"
+  | `Tab_fg -> "tab-fg"
+  | `Tab_fg_active -> "tab-fg-active"
+  | `Tab_border -> "tab-border"
+  | `Tab_indicator -> "tab-indicator"
+  | `Tab_close_hover -> "tab-close-hover"
+  | `Sidebar_bg -> "sidebar-bg"
+  | `Sidebar_fg -> "sidebar-fg"
+  | `Sidebar_item_hover_bg -> "sidebar-item-hover-bg"
+  | `Sidebar_item_active_bg -> "sidebar-item-active-bg"
+  | `Sidebar_icon_fg -> "sidebar-icon-fg"
+  | `Sidebar_icon_active_fg -> "sidebar-icon-active-fg"
+  | `Sidebar_section_header_fg -> "sidebar-section-header-fg"
+  | `Sidebar_border -> "sidebar-border"
+  | `Panel_header_bg -> "panel-header-bg"
+  | `Panel_header_fg -> "panel-header-fg"
+  | `Panel_resize_handle -> "panel-resize-handle"
+  | `Panel_resize_handle_hover -> "panel-resize-handle-hover"
+  | `Terminal_bg -> "terminal-bg"
+  | `Terminal_fg -> "terminal-fg"
+  | `Terminal_prompt -> "terminal-prompt"
+  | `Terminal_cursor -> "terminal-cursor"
+  | `Terminal_selection_bg -> "terminal-selection-bg"
   | `Motion_enter -> "motion-enter"
   | `Motion_exit -> "motion-exit"
   | `Motion_swap -> "motion-swap"

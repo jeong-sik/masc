@@ -386,6 +386,16 @@ type semantic =
   | `Button_ok_border
   | `Button_ok_bg_hover
   | `Button_ok_bg_pressed
+  | `Button_warn_bg
+  | `Button_warn_fg
+  | `Button_warn_border
+  | `Button_warn_bg_hover
+  | `Button_warn_bg_pressed
+  | `Button_subtle_bg
+  | `Button_subtle_fg
+  | `Button_subtle_border
+  | `Button_subtle_bg_hover
+  | `Button_subtle_bg_pressed
   | `State_hover_bg
   | `State_hover_fg
   | `State_hover_border
@@ -833,6 +843,16 @@ let name_of = function
   | `Button_ok_border -> "button-ok-border"
   | `Button_ok_bg_hover -> "button-ok-bg-hover"
   | `Button_ok_bg_pressed -> "button-ok-bg-pressed"
+  | `Button_warn_bg -> "button-warn-bg"
+  | `Button_warn_fg -> "button-warn-fg"
+  | `Button_warn_border -> "button-warn-border"
+  | `Button_warn_bg_hover -> "button-warn-bg-hover"
+  | `Button_warn_bg_pressed -> "button-warn-bg-pressed"
+  | `Button_subtle_bg -> "button-subtle-bg"
+  | `Button_subtle_fg -> "button-subtle-fg"
+  | `Button_subtle_border -> "button-subtle-border"
+  | `Button_subtle_bg_hover -> "button-subtle-bg-hover"
+  | `Button_subtle_bg_pressed -> "button-subtle-bg-pressed"
   | `State_hover_bg -> "state-hover-bg"
   | `State_hover_fg -> "state-hover-fg"
   | `State_hover_border -> "state-hover-border"

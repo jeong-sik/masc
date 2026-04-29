@@ -390,6 +390,16 @@
   --button-ok-border: var(--ok-20);  /* ActionButton variant=ok border */
   --button-ok-bg-hover: var(--ok-20);  /* ActionButton variant=ok hover bg */
   --button-ok-bg-pressed: var(--ok-20);  /* ActionButton variant=ok [data-pressed] bg */
+  --button-warn-bg: var(--warn-14);  /* ActionButton variant=warn surface bg */
+  --button-warn-fg: var(--color-status-warn);  /* ActionButton variant=warn text fg */
+  --button-warn-border: transparent;  /* ActionButton variant=warn border (rendered as border-none) */
+  --button-warn-bg-hover: var(--warn-24);  /* ActionButton variant=warn hover bg */
+  --button-warn-bg-pressed: var(--warn-24);  /* ActionButton variant=warn [data-pressed] bg */
+  --button-subtle-bg: transparent;  /* ActionButton variant=subtle surface bg */
+  --button-subtle-fg: var(--color-fg-muted);  /* ActionButton variant=subtle text fg */
+  --button-subtle-border: transparent;  /* ActionButton variant=subtle border (rendered as border-none) */
+  --button-subtle-bg-hover: var(--white-6);  /* ActionButton variant=subtle hover bg */
+  --button-subtle-bg-pressed: var(--white-6);  /* ActionButton variant=subtle [data-pressed] bg */
   --state-hover-bg: var(--bg-3);
   --state-hover-fg: var(--fg-1);
   --state-hover-border: var(--line-2);

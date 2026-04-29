@@ -385,6 +385,16 @@
   --color-button-ok-border: var(--ok-20);
   --color-button-ok-bg-hover: var(--ok-20);
   --color-button-ok-bg-pressed: var(--ok-20);
+  --color-button-warn-bg: var(--warn-14);
+  --color-button-warn-fg: var(--color-status-warn);
+  --color-button-warn-border: transparent;
+  --color-button-warn-bg-hover: var(--warn-24);
+  --color-button-warn-bg-pressed: var(--warn-24);
+  --color-button-subtle-bg: transparent;
+  --color-button-subtle-fg: var(--color-fg-muted);
+  --color-button-subtle-border: transparent;
+  --color-button-subtle-bg-hover: var(--white-6);
+  --color-button-subtle-bg-pressed: var(--white-6);
   --color-state-hover-bg: var(--bg-3);
   --color-state-hover-fg: var(--fg-1);
   --color-state-hover-border: var(--line-2);

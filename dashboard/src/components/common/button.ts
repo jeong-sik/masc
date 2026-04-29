@@ -29,15 +29,17 @@ const SIZE_CLASSES: Record<ButtonSize, string> = {
 // the slot at the token layer (e.g. shipping a brand re-skin) propagates
 // here without touching this file.
 //
-// subtle/warn keep inline literals — their token slots haven't been
-// authored yet (see #11876 follow-up). When they land, swap inline.
+// All 6 variants now map to component-level aliases (#11898 added the
+// remaining warn/subtle slots). border-none is preserved as an explicit
+// utility for the variants whose `--button-{warn,subtle}-border` slot
+// is `transparent` (rendering-as-none for layout-grid stability).
 const VARIANT_CLASSES: Record<ButtonVariant, string> = {
   primary: 'border border-solid border-[var(--button-primary-border)] bg-[var(--button-primary-bg)] text-[var(--button-primary-fg)] hover:bg-[var(--button-primary-bg-hover)]',
   ghost: 'border border-solid border-[var(--button-ghost-border)] bg-[var(--button-ghost-bg)] text-[var(--button-ghost-fg)] hover:bg-[var(--button-ghost-bg-hover)]',
   danger: 'border border-solid border-[var(--button-danger-border)] bg-[var(--button-danger-bg)] text-[var(--button-danger-fg)] hover:bg-[var(--button-danger-bg-hover)]',
-  subtle: 'border-none bg-transparent text-[var(--color-fg-muted)] hover:text-[var(--color-fg-primary)] hover:bg-[var(--white-6)]',
+  subtle: 'border-none bg-[var(--button-subtle-bg)] text-[var(--button-subtle-fg)] hover:text-[var(--color-fg-primary)] hover:bg-[var(--button-subtle-bg-hover)]',
   ok: 'border border-solid border-[var(--button-ok-border)] bg-[var(--button-ok-bg)] text-[var(--button-ok-fg)] hover:bg-[var(--button-ok-bg-hover)]',
-  warn: 'border-none bg-[var(--warn-14)] text-[var(--color-status-warn)] hover:bg-[var(--warn-24)]',
+  warn: 'border-none bg-[var(--button-warn-bg)] text-[var(--button-warn-fg)] hover:bg-[var(--button-warn-bg-hover)]',
 }
 
 // Pressed-state overrides per variant. Applied when `pressed=true` so the
@@ -53,9 +55,9 @@ const PRESSED_CLASSES: Record<ButtonVariant, string> = {
   primary: 'bg-[var(--button-primary-bg-pressed)]',
   ghost: 'bg-[var(--button-ghost-bg-pressed)] border-[var(--button-primary-border)] text-[var(--button-primary-fg)]',
   danger: 'bg-[var(--button-danger-bg-pressed)]',
-  subtle: 'bg-[var(--white-6)] text-[var(--color-fg-primary)]',
+  subtle: 'bg-[var(--button-subtle-bg-pressed)] text-[var(--color-fg-primary)]',
   ok: 'bg-[var(--button-ok-bg-pressed)]',
-  warn: 'bg-[var(--warn-24)]',
+  warn: 'bg-[var(--button-warn-bg-pressed)]',
 }
 
 // `duration-[var(--t-med)]` reads from the design-token duration scale

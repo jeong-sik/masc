@@ -23,16 +23,16 @@ type failure_reason =
     }
 
 type turn_state =
-  | Idle
-  | Phase_gating
-  | Cascade_routing
-  | Awaiting_provider
-  | Streaming
-  | Awaiting_tool_result [@tla.symbol "awaiting_tool"]
-  | Completing
-  | Done
-  | Failed of failure_reason
-  | Cancelled of cancel_reason
+  | Idle [@tla.idle]
+  | Phase_gating [@tla.active]
+  | Cascade_routing [@tla.active]
+  | Awaiting_provider [@tla.active]
+  | Streaming [@tla.active]
+  | Awaiting_tool_result [@tla.symbol "awaiting_tool"] [@tla.active]
+  | Completing [@tla.active]
+  | Done [@tla.terminal]
+  | Failed of failure_reason [@tla.terminal]
+  | Cancelled of cancel_reason [@tla.terminal]
 [@@deriving tla]
 
 let cancel_reason_label = function

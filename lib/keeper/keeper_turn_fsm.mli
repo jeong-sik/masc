@@ -45,22 +45,24 @@ type failure_reason =
     is currently implicit across multiple files and Step 4b will
     introduce explicit transitions. *)
 type turn_state =
-  | Idle
-  | Phase_gating
-  | Cascade_routing
-  | Awaiting_provider
-  | Streaming
-  | Awaiting_tool_result [@tla.symbol "awaiting_tool"]
-  | Completing
-  | Done
-  | Failed of failure_reason
-  | Cancelled of cancel_reason
+  | Idle [@tla.idle]
+  | Phase_gating [@tla.active]
+  | Cascade_routing [@tla.active]
+  | Awaiting_provider [@tla.active]
+  | Streaming [@tla.active]
+  | Awaiting_tool_result [@tla.symbol "awaiting_tool"] [@tla.active]
+  | Completing [@tla.active]
+  | Done [@tla.terminal]
+  | Failed of failure_reason [@tla.terminal]
+  | Cancelled of cancel_reason [@tla.terminal]
 [@@deriving tla]
 (** TLA+ symbol mapping derived by [ppx_tla].
 
-    [to_tla_symbol] / [all_symbols] match [TurnStateSet] in
-    [specs/keeper-turn-fsm/KeeperTurnFSM.tla] (verified by
-    [test_keeper_turn_fsm_tla_parity]).
+    [to_tla_symbol] / [all_symbols] match [TurnStateSet], while
+    [active_symbols] / [terminal_symbols] and the generated
+    [is_active] / [is_terminal] predicates match [ActiveStateSet] and
+    [TerminalStateSet] in [specs/keeper-turn-fsm/KeeperTurnFSM.tla]
+    (verified by [test_keeper_turn_fsm_tla_parity]).
 
     [@tla.symbol "awaiting_tool"] on [Awaiting_tool_result] covers the
     OCaml-vs-TLA+ naming difference without renaming either side. *)

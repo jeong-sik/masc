@@ -1,6 +1,8 @@
 (* Parity test: [Keeper_turn_fsm.all_symbols] (derived by [ppx_tla])
    must match the [TurnStateSet] enumerated in
-   [specs/keeper-turn-fsm/KeeperTurnFSM.tla].
+   [specs/keeper-turn-fsm/KeeperTurnFSM.tla]. The same generated
+   classification contract must also match [ActiveStateSet] and
+   [TerminalStateSet].
 
    This test makes the spec-implementation drift visible at build time.
    When a constructor is added, removed, or renamed in either side, the
@@ -97,6 +99,24 @@ let spec_turn_state_set : string list =
          have moved or been renamed."
   | Some states -> states
 
+let spec_quoted_set symbol : string list =
+  let path =
+    Filename.concat
+      (project_root ())
+      "specs/keeper-turn-fsm/KeeperTurnFSM.tla"
+  in
+  let content = read_file path in
+  match find_quoted_set ~symbol content with
+  | None ->
+      failwith
+        (symbol
+        ^ " not found in specs/keeper-turn-fsm/KeeperTurnFSM.tla — set \
+           definition may have moved or been renamed.")
+  | Some states -> states
+
+let spec_active_state_set = spec_quoted_set "ActiveStateSet"
+let spec_terminal_state_set = spec_quoted_set "TerminalStateSet"
+
 let sort = List.sort String.compare
 
 let test_all_symbols_match_spec () =
@@ -118,6 +138,26 @@ let test_all_symbols_match_spec () =
        update either the OCaml type, the [@tla.symbol] override, or the \
        spec."
   end
+
+let check_symbol_set ~label ~ocaml ~spec =
+  let ocaml = sort ocaml in
+  let spec = sort spec in
+  if ocaml <> spec then begin
+    Printf.printf "OCaml %s : [%s]\n" label (String.concat "; " ocaml);
+    Printf.printf "Spec  %s : [%s]\n" label (String.concat "; " spec);
+    failwith ("Keeper_turn_fsm " ^ label ^ " differs from TLA+ spec")
+  end
+
+let test_classified_symbols_match_spec () =
+  check_symbol_set ~label:"active_symbols"
+    ~ocaml:Masc_mcp.Keeper_turn_fsm.active_symbols
+    ~spec:spec_active_state_set;
+  check_symbol_set ~label:"terminal_symbols"
+    ~ocaml:Masc_mcp.Keeper_turn_fsm.terminal_symbols
+    ~spec:spec_terminal_state_set;
+  check_symbol_set ~label:"idle_symbols"
+    ~ocaml:Masc_mcp.Keeper_turn_fsm.idle_symbols
+    ~spec:[ "idle" ]
 
 let test_to_tla_symbol_for_each_constructor () =
   (* Sanity: every nullary constructor round-trips through to_tla_symbol
@@ -151,7 +191,24 @@ let test_to_tla_symbol_for_each_constructor () =
       (Masc_mcp.Keeper_turn_fsm.Cancelled dummy_cancel)
     = "cancelled")
 
+let test_classification_predicates () =
+  let open Masc_mcp.Keeper_turn_fsm in
+  assert (is_idle Idle);
+  assert (not (is_active Idle));
+  assert (not (is_terminal Idle));
+  assert (is_active Phase_gating);
+  assert (is_active Cascade_routing);
+  assert (is_active Awaiting_provider);
+  assert (is_active Streaming);
+  assert (is_active Awaiting_tool_result);
+  assert (is_active Completing);
+  assert (is_terminal Done);
+  assert (is_terminal (Failed (Failure_runtime_error "probe")));
+  assert (is_terminal (Cancelled Cancelled_supervisor_stop))
+
 let () =
   test_all_symbols_match_spec ();
+  test_classified_symbols_match_spec ();
   test_to_tla_symbol_for_each_constructor ();
+  test_classification_predicates ();
   print_endline "keeper_turn_fsm TLA+ parity test: PASS"

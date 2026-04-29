@@ -6,6 +6,8 @@
    - [@tla.symbol "explicit"] override
    - [all_symbols] always generated
    - [all_states] generated only when every constructor is nullary
+   - [@tla.terminal] / [@tla.active] / [@tla.idle] classification
+     emits symbol subsets and payload-safe predicates
 
    Each type is wrapped in its own module because [@@deriving tla]
    generates [to_tla_symbol] / [all_symbols] / [all_states] in the
@@ -38,6 +40,16 @@ module Mixed = struct
     | Awaiting_tool_result [@tla.symbol "awaiting_tool"]
     | Failed of Reason.t
     | Cancelled of Reason.t
+  [@@deriving tla]
+end
+
+module Classified = struct
+  type t =
+    | Idle [@tla.idle]
+    | Running [@tla.active]
+    | Awaiting_tool [@tla.symbol "awaiting_tool"] [@tla.active]
+    | Done [@tla.terminal]
+    | Failed of Reason.t [@tla.terminal]
   [@@deriving tla]
 end
 
@@ -89,6 +101,21 @@ let test_mixed_all_symbols () =
   assert (
     Mixed.all_symbols
     = [ "awaiting_provider"; "awaiting_tool"; "failed"; "cancelled" ])
+
+let test_classified_symbol_subsets () =
+  assert (Classified.idle_symbols = [ "idle" ]);
+  assert (Classified.active_symbols = [ "running"; "awaiting_tool" ]);
+  assert (Classified.terminal_symbols = [ "done"; "failed" ])
+
+let test_classified_predicates () =
+  assert (Classified.is_idle Classified.Idle);
+  assert (not (Classified.is_idle Classified.Running));
+  assert (Classified.is_active Classified.Running);
+  assert (Classified.is_active Classified.Awaiting_tool);
+  assert (not (Classified.is_active Classified.Done));
+  assert (Classified.is_terminal Classified.Done);
+  assert (Classified.is_terminal (Classified.Failed "boom"));
+  assert (not (Classified.is_terminal Classified.Idle))
 
 (* Cycle 12 (PR #11450): [@@fsm_guard "expr"] runtime assertion injection.
    The guard is parsed as an OCaml boolean expression at PPX time and
@@ -143,6 +170,8 @@ let () =
   test_mixed_to_tla_symbol_override ();
   test_mixed_to_tla_symbol_parameterised ();
   test_mixed_all_symbols ();
+  test_classified_symbol_subsets ();
+  test_classified_predicates ();
   test_fsm_guard_pass ();
   test_fsm_guard_fail ();
   test_fsm_guard_curried_pass ();

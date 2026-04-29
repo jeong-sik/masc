@@ -123,7 +123,12 @@ describe('ErrorFatal', () => {
   it('uses the danger variant button (background tint)', () => {
     render(html`<${ErrorFatal} title="t" onReload=${() => {}} />`, container)
     const btn = container.querySelector('button')!
-    // ActionButton danger variant maps to bg-[var(--bad-10)] in button.ts.
-    expect(btn.className).toContain('bg-[var(--bad-10)]')
+    // ActionButton danger variant uses the component-level alias
+    // --button-danger-bg, which tokens.generated.ts resolves to
+    // var(--bad-10). Asserting on the literal classname keeps the
+    // test honest about what the component actually outputs (was
+    // missed in the cycle-34 migration to component-level aliases,
+    // commit c8011e3).
+    expect(btn.className).toContain('bg-[var(--button-danger-bg)]')
   })
 })

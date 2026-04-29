@@ -4596,11 +4596,11 @@ let test_bounded_oas_timeout_uses_adaptive_when_budget_is_large () =
       ~estimated_input_tokens ~remaining_turn_budget_s:1200.0
   with
   | Some timeout_s ->
-      (* The bounded variant subtracts a ~30s finalization guard
+      (* The bounded variant subtracts a 15s finalization guard
          from [remaining_turn_budget_s] and caps at the adaptive
          raw.  With #10008 fm2 the adaptive raw equals
          [turn_timeout_sec] (1200), so the finalization guard path
-         dominates: returned value is [remaining - 30]. *)
+         dominates: returned value is [remaining - 15]. *)
       check bool "bounded timeout at or below adaptive raw"
         true (timeout_s <= expected);
       check bool "bounded leaves positive finalization guard"
@@ -4631,7 +4631,8 @@ let test_bounded_oas_timeout_caps_to_remaining_turn_budget () =
       ~estimated_input_tokens:2_000 ~remaining_turn_budget_s:235.7
   with
   | Some timeout_s ->
-      check (float 0.01) "remaining budget cap leaves finalization guard" 205.7 timeout_s
+      check (float 0.01) "remaining budget cap leaves finalization guard"
+        220.7 timeout_s
   | None -> fail "expected bounded timeout"
 
 let test_bounded_oas_timeout_uses_channel_turn_budget_override () =
@@ -4650,7 +4651,7 @@ let test_bounded_oas_timeout_uses_channel_turn_budget_override () =
   with
   | Some timeout_s ->
       (* #10008 fm2: raw formula no longer depends on max_turns;
-         bounded variant still subtracts the ~30s finalization
+         bounded variant still subtracts the 15s finalization
          guard from [remaining_turn_budget_s] and caps at the
          raw.  Verify the cap was applied ([<=] raw) and the
          guard reserved a positive amount. *)
@@ -4658,6 +4659,23 @@ let test_bounded_oas_timeout_uses_channel_turn_budget_override () =
         true (timeout_s <= raw);
       check bool "finalization guard reserves positive delta"
         true (timeout_s <= 1200.0 && timeout_s > 1100.0)
+  | None -> fail "expected bounded timeout"
+
+let test_bounded_oas_timeout_reserves_degraded_retry_budget () =
+  match
+    UT.resolve_bounded_oas_timeout_budget_with_turn_budget
+      ~reserve_degraded_retry_budget:true ~estimated_input_tokens:2_000
+      ~max_turns:4 ~remaining_turn_budget_s:1200.0
+  with
+  | Some budget ->
+      check (float 0.01)
+        "first attempt keeps half the usable turn budget for fallback"
+        592.5 budget.effective_timeout_sec;
+      check (float 0.01) "remaining budget records post-guard usable budget"
+        1185.0 budget.remaining_turn_budget_sec;
+      check string "source records retry reserve"
+        "adaptive_estimated_input_tokens_capped_by_turn_budget_and_degraded_retry_budget"
+        budget.source
   | None -> fail "expected bounded timeout"
 
 let test_bounded_oas_timeout_refuses_too_little_budget () =
@@ -4672,7 +4690,8 @@ let test_oas_timeout_reclassifies_only_current_attempt_budget () =
   in
   match
     UT.resolve_bounded_oas_timeout_budget_with_turn_budget
-      ~estimated_input_tokens:2_000 ~max_turns:4
+      ~reserve_degraded_retry_budget:false ~estimated_input_tokens:2_000
+      ~max_turns:4
       ~remaining_turn_budget_s:1200.0
   with
   | None -> fail "expected timeout budget"
@@ -6624,6 +6643,8 @@ let () =
             test_bounded_oas_timeout_caps_to_remaining_turn_budget;
           test_case "bounded OAS timeout respects channel turn budget override" `Quick
             test_bounded_oas_timeout_uses_channel_turn_budget_override;
+          test_case "bounded OAS timeout reserves degraded retry budget" `Quick
+            test_bounded_oas_timeout_reserves_degraded_retry_budget;
           test_case "bounded OAS timeout refuses too little remaining budget" `Quick
             test_bounded_oas_timeout_refuses_too_little_budget;
           test_case "OAS timeout classification uses current attempt budget" `Quick

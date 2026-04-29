@@ -112,6 +112,10 @@ let oas_timeout_guard_sec = 15.0
 
 let min_oas_timeout_budget_sec = 15.0
 
+(* Profiles with a declared fallback must not spend the whole turn on the
+   first provider. Keep half of the usable budget for the degraded retry. *)
+let degraded_retry_budget_reserve_fraction = 0.5
+
 type oas_timeout_budget_resolution = {
   effective_timeout_sec : float;
   adaptive_timeout_sec : float;
@@ -136,6 +140,7 @@ let oas_timeout_budget_resolution_to_yojson
     ]
 
 let resolve_bounded_oas_timeout_budget_with_turn_budget
+    ~(reserve_degraded_retry_budget : bool)
     ~(estimated_input_tokens : int) ~(max_turns : int)
     ~(remaining_turn_budget_s : float) : oas_timeout_budget_resolution option =
   let usable_budget = remaining_turn_budget_s -. oas_timeout_guard_sec in
@@ -148,17 +153,43 @@ let resolve_bounded_oas_timeout_budget_with_turn_budget
       .oas_timeout_for_estimated_input_tokens_with_turn_budget
         ~estimated_input_tokens ~max_turns
     in
-    let effective_timeout_sec =
+    let turn_capped_timeout_sec =
       Float.min adaptive_timeout_sec usable_budget
     in
+    let retry_capped_timeout_sec =
+      if reserve_degraded_retry_budget then
+        let retry_reserved_cap =
+          usable_budget *. degraded_retry_budget_reserve_fraction
+        in
+        if retry_reserved_cap >= min_oas_timeout_budget_sec
+        then Float.min turn_capped_timeout_sec retry_reserved_cap
+        else turn_capped_timeout_sec
+      else turn_capped_timeout_sec
+    in
+    let effective_timeout_sec = retry_capped_timeout_sec in
+    let capped_by_turn_budget =
+      turn_capped_timeout_sec < adaptive_timeout_sec
+    in
+    let capped_by_degraded_retry_budget =
+      retry_capped_timeout_sec < turn_capped_timeout_sec
+    in
     let source =
-      match runtime.oas_timeout_override_sec.value with
-      | Some _ when effective_timeout_sec < adaptive_timeout_sec ->
+      match
+        ( runtime.oas_timeout_override_sec.value,
+          capped_by_turn_budget,
+          capped_by_degraded_retry_budget )
+      with
+      | Some _, _, true -> "override_capped_by_degraded_retry_budget"
+      | Some _, true, false ->
           "override_capped_by_turn_budget"
-      | Some _ -> "override"
-      | None when effective_timeout_sec < adaptive_timeout_sec ->
+      | Some _, false, false -> "override"
+      | None, true, true ->
+          "adaptive_estimated_input_tokens_capped_by_turn_budget_and_degraded_retry_budget"
+      | None, false, true ->
+          "adaptive_estimated_input_tokens_capped_by_degraded_retry_budget"
+      | None, true, false ->
           "adaptive_estimated_input_tokens_capped_by_turn_budget"
-      | None -> "adaptive_estimated_input_tokens"
+      | None, false, false -> "adaptive_estimated_input_tokens"
     in
     Some
       {
@@ -177,7 +208,8 @@ let bounded_oas_timeout_for_turn_budget_with_turn_budget
   Option.map
     (fun (budget : oas_timeout_budget_resolution) -> budget.effective_timeout_sec)
     (resolve_bounded_oas_timeout_budget_with_turn_budget
-       ~estimated_input_tokens ~max_turns ~remaining_turn_budget_s)
+       ~reserve_degraded_retry_budget:false ~estimated_input_tokens ~max_turns
+       ~remaining_turn_budget_s)
 
 let bounded_oas_timeout_for_turn_budget ~(estimated_input_tokens : int)
     ~(remaining_turn_budget_s : float) : float option =
@@ -189,7 +221,8 @@ let oas_retry_budget_available_for_turn ~(estimated_input_tokens : int)
     ~(max_turns : int) ~(remaining_turn_budget_s : float) : bool =
   Option.is_some
     (resolve_bounded_oas_timeout_budget_with_turn_budget
-       ~estimated_input_tokens ~max_turns ~remaining_turn_budget_s)
+       ~reserve_degraded_retry_budget:false ~estimated_input_tokens ~max_turns
+       ~remaining_turn_budget_s)
 
 let reclassify_oas_timeout_for_attempt
     ~(timeout_budget : oas_timeout_budget_resolution option)

@@ -50,6 +50,7 @@ type oas_timeout_budget_resolution = {
 }
 
 val resolve_bounded_oas_timeout_budget_with_turn_budget :
+  reserve_degraded_retry_budget:bool ->
   estimated_input_tokens:int ->
   max_turns:int ->
   remaining_turn_budget_s:float ->

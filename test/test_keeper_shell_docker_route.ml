@@ -563,6 +563,30 @@ let test_git_creds_inherit_network_omits_invalid_network_flag () =
   Alcotest.(check bool) "network inherit never uses invalid flag value" false
     (contains_substring line "--network inherit")
 
+let test_git_creds_mounts_numeric_user_identity () =
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup ~sandbox:Keeper_types.Docker
+  @@ fun ~config ~meta ~playground ->
+  let log_path = Filename.concat config.Coord.base_path "docker.log" in
+  let line =
+    run_git_creds_docker_shell ~config ~meta ~playground ~log_path
+  in
+  let identity_dir = Filename.concat playground ".docker-identity" in
+  let passwd_path = Filename.concat identity_dir "passwd" in
+  let group_path = Filename.concat identity_dir "group" in
+  Alcotest.(check bool) "passwd file mounted" true
+    (contains_substring line (passwd_path ^ ":/etc/passwd:ro"));
+  Alcotest.(check bool) "group file mounted" true
+    (contains_substring line (group_path ^ ":/etc/group:ro"));
+  Alcotest.(check bool) "USER env forwarded" true
+    (contains_substring line "USER=keeper");
+  Alcotest.(check bool) "passwd maps host uid" true
+    (contains_substring (read_file passwd_path)
+       (Printf.sprintf "keeper:x:%d:%d:" (Unix.getuid ()) (Unix.getgid ())));
+  Alcotest.(check bool) "group maps host gid" true
+    (contains_substring (read_file group_path)
+       (Printf.sprintf "keeper:x:%d:" (Unix.getgid ())))
+
 let test_git_creds_respects_keeper_alias_identity_mode () =
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup ~sandbox:Keeper_types.Docker
@@ -663,6 +687,34 @@ let test_bash_fake_docker_executes () =
   Alcotest.(check bool) "bash output includes fake docker stdout" true
     (response_mentions raw "output" "stdout:")
 
+let test_bash_rewrites_host_path_command_for_docker () =
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup ~sandbox:Keeper_types.Docker
+  @@ fun ~config ~meta ~playground ->
+  let container_root = Keeper_sandbox.container_root meta.name in
+  let raw =
+    Keeper_exec_shell.handle_keeper_bash ~turn_sandbox_factory:None
+      ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
+      ~args:
+        (`Assoc
+          [
+            ( "cmd",
+              `String
+                (Printf.sprintf "cd %s/repos/masc-mcp && pwd"
+                   (Keeper_alerting_path.strip_trailing_slashes playground)) );
+            ("cwd", `String playground);
+          ])
+      ()
+  in
+  Alcotest.(check (option bool)) "bash via fake docker is ok" (Some true)
+    (parse_bool_field raw "ok");
+  Alcotest.(check bool) "command uses container path" true
+    (response_mentions raw "output"
+       (Filename.concat container_root "repos/masc-mcp"));
+  Alcotest.(check bool) "command no longer leaks host playground path" false
+    (response_mentions raw "output" playground)
+
 let () =
   Alcotest.run "Keeper_shell_docker_route"
     [
@@ -683,6 +735,9 @@ let () =
           Alcotest.test_case
             "docker keeper bash executes through fake docker"
             `Quick test_bash_fake_docker_executes;
+          Alcotest.test_case
+            "docker keeper bash rewrites host paths before exec"
+            `Quick test_bash_rewrites_host_path_command_for_docker;
         ] );
       ( "docker_route_skipped",
         [
@@ -703,6 +758,9 @@ let () =
           Alcotest.test_case
             "git-creds inherit network omits invalid docker flag"
             `Quick test_git_creds_inherit_network_omits_invalid_network_flag;
+          Alcotest.test_case
+            "git-creds mounts passwd entry for numeric uid"
+            `Quick test_git_creds_mounts_numeric_user_identity;
           Alcotest.test_case
             "git-creds respects keeper_alias git identity mode"
             `Quick test_git_creds_respects_keeper_alias_identity_mode;

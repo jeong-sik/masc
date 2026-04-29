@@ -146,6 +146,12 @@ let start_container (t : t) ~(timeout_sec : float) =
         let network_args, network_label =
           Keeper_sandbox_runtime.docker_network_args t.network_mode
         in
+        match
+          Keeper_sandbox_runtime.docker_user_identity_mount_args
+            ~host_root:t.host_root ~uid:t.uid ~gid:t.gid
+        with
+        | Error _ as err -> err
+        | Ok identity_mounts ->
         let argv =
           Keeper_sandbox_runtime.docker_command_argv ()
           @ [
@@ -163,9 +169,8 @@ let start_container (t : t) ~(timeout_sec : float) =
           @ [
             "--user";
             Printf.sprintf "%d:%d" t.uid t.gid;
-            "--env";
-            "HOME=/tmp";
           ]
+          @ Keeper_sandbox_runtime.docker_user_env_args ()
           @ Keeper_sandbox_runtime.docker_nofile_args ()
           @ Env_config_keeper.KeeperSandbox.read_only_rootfs_args ()
           @ [
@@ -186,6 +191,7 @@ let start_container (t : t) ~(timeout_sec : float) =
               "--workdir";
               t.container_root;
             ]
+          @ identity_mounts
           @ network_args
           @ [
               image;
@@ -225,11 +231,10 @@ let run_exec_with_status_once
             "exec";
             "--user";
             Printf.sprintf "%d:%d" t.uid t.gid;
-            "--env";
-            "HOME=/tmp";
             "-w";
             container_cwd;
           ]
+        @ Keeper_sandbox_runtime.docker_user_env_args ()
         @ (match stdin_content with Some _ -> [ "-i" ] | None -> [])
         @ (container_name :: command_argv)
       in
@@ -288,6 +293,10 @@ let run_command ?(ok_exit_codes = [ 0 ]) t ~cwd ~command_argv
 
 let run_bash_with_status (t : t) ~(cwd : string) ~(cmd : string)
     ~(timeout_sec : float) () =
+  let cmd =
+    Keeper_sandbox_runtime.rewrite_host_root_to_container_root
+      ~host_root:t.host_root ~container_root:t.container_root cmd
+  in
   run_exec_with_status t ~timeout_sec ~cwd
     ~command_argv:[ "bash"; "-lc"; cmd ^ " 2>&1" ]
 

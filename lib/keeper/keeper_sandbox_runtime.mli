@@ -95,6 +95,20 @@ val docker_nofile_args : unit -> string list
 (** Docker [--ulimit nofile=<soft>:<hard>] argv fragment for keeper
     sandbox containers. *)
 
+val docker_user_env_args : unit -> string list
+(** Docker [--env ...] argv fragment for the numeric keeper user. *)
+
+val docker_user_identity_mount_args :
+  host_root:string -> uid:int -> gid:int -> (string list, string) result
+(** Docker [-v ...] argv fragment that supplies passwd/group entries for
+    the numeric host uid/gid used inside the keeper container. *)
+
+val rewrite_host_root_to_container_root :
+  host_root:string -> container_root:string -> string -> string
+(** Rewrite occurrences of [host_root] as a path prefix to
+    [container_root]. This is intentionally path-boundary aware so
+    sibling paths such as [/root2] are left untouched. *)
+
 val list_containers :
   ?keeper_name:string ->
   ?container_kind:string ->

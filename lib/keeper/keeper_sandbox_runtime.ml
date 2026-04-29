@@ -214,6 +214,81 @@ let docker_nofile_args () =
   let limit = Env_config_keeper.KeeperSandbox.nofile_limit () in
   [ "--ulimit"; Printf.sprintf "nofile=%d:%d" limit limit ]
 
+let docker_user_env_args () =
+  [
+    "--env"; "HOME=/tmp";
+    "--env"; "USER=keeper";
+    "--env"; "LOGNAME=keeper";
+    "--env"; "SHELL=/bin/sh";
+  ]
+
+let docker_identity_dir ~host_root =
+  Filename.concat host_root ".docker-identity"
+
+let docker_user_identity_mount_args ~host_root ~uid ~gid =
+  let dir = docker_identity_dir ~host_root in
+  let passwd_path = Filename.concat dir "passwd" in
+  let group_path = Filename.concat dir "group" in
+  let passwd =
+    Printf.sprintf
+      "root:x:0:0:root:/root:/bin/sh\nkeeper:x:%d:%d:MASC Keeper:/tmp:/bin/sh\n"
+      uid gid
+  in
+  let group =
+    Printf.sprintf "root:x:0:\nkeeper:x:%d:\n" gid
+  in
+  try
+    Fs_compat.mkdir_p dir;
+    match Fs_compat.save_file_atomic passwd_path passwd with
+    | Error err ->
+        Error (Printf.sprintf "failed to write docker passwd file: %s" err)
+    | Ok () ->
+      (match Fs_compat.save_file_atomic group_path group with
+       | Error err ->
+           Error (Printf.sprintf "failed to write docker group file: %s" err)
+       | Ok () ->
+           Ok
+             [
+               "-v"; passwd_path ^ ":/etc/passwd:ro";
+               "-v"; group_path ^ ":/etc/group:ro";
+             ])
+  with
+  | Sys_error err | Unix.Unix_error (_, _, err) ->
+      Error (Printf.sprintf "failed to prepare docker user identity: %s" err)
+
+let is_path_boundary_after text idx =
+  idx >= String.length text
+  ||
+  match text.[idx] with
+  | '/' | '\'' | '"' | ' ' | '\t' | '\n' | '\r' | ';' | '&' | '|'
+  | ')' | '(' | ':' ->
+      true
+  | _ -> false
+
+let rewrite_host_root_to_container_root ~host_root ~container_root text =
+  let host_root = strip_trailing_slashes host_root in
+  let container_root = strip_trailing_slashes container_root in
+  let needle_len = String.length host_root in
+  if needle_len = 0 || not (String_util.contains_substring text host_root)
+  then text
+  else
+    let text_len = String.length text in
+    let buf = Buffer.create text_len in
+    let rec loop i =
+      if i >= text_len then ()
+      else if i + needle_len <= text_len
+              && String.sub text i needle_len = host_root
+              && is_path_boundary_after text (i + needle_len)
+      then (
+        Buffer.add_string buf container_root;
+        loop (i + needle_len))
+      else (
+        Buffer.add_char buf text.[i];
+        loop (i + 1))
+    in
+    loop 0;
+    Buffer.contents buf
+
 type inspected_container =
   {
     owner_pid : int option;

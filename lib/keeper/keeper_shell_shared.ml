@@ -312,8 +312,37 @@ let rewrite_turn_runtime_paths_to_host
   =
   replace_all_substrings
     ~needle:(Keeper_sandbox.container_root meta.name)
-    ~replacement:(Keeper_sandbox.host_root_abs_of_meta ~config meta)
+    ~replacement:
+      (Keeper_sandbox.host_root_abs_of_meta ~config meta
+       |> Keeper_alerting_path.strip_trailing_slashes)
     text
+
+let rewrite_docker_host_paths_to_container
+      ~(config : Coord.config)
+      ~(meta : keeper_meta)
+      text
+  =
+  let raw_host_root =
+    Keeper_sandbox.host_root_abs_of_meta ~config meta
+    |> Keeper_alerting_path.strip_trailing_slashes
+  in
+  let normalized_host_root =
+    raw_host_root
+    |> Keeper_alerting_path.normalize_path_for_check
+    |> Keeper_alerting_path.strip_trailing_slashes
+  in
+  let container_root =
+    Keeper_sandbox.container_root meta.name
+    |> Keeper_alerting_path.strip_trailing_slashes
+  in
+  let rewritten =
+    Keeper_sandbox_runtime.rewrite_host_root_to_container_root
+      ~host_root:raw_host_root ~container_root text
+  in
+  if String.equal raw_host_root normalized_host_root then rewritten
+  else
+    Keeper_sandbox_runtime.rewrite_host_root_to_container_root
+      ~host_root:normalized_host_root ~container_root rewritten
 
 let run_argv_with_status_retry_eintr ?cwd ~timeout_sec argv =
   let max_eintr_retries = 8 in

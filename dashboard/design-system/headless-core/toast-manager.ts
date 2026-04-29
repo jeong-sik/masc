@@ -248,20 +248,24 @@ export function createToastManager(opts?: ToastManagerOptions): ToastManager {
     if (descriptor.dedupKey !== undefined) {
       const existing = findByDedupKey(descriptor.dedupKey)
       if (existing !== null) {
-        existing.severity = descriptor.severity
-        existing.message = descriptor.message
-        existing.description = descriptor.description
-        existing.action = descriptor.action
-        existing.priority = SEVERITY_PRIORITY[descriptor.severity]
-        existing.duration =
-          descriptor.duration ?? SEVERITY_DEFAULT_DURATION_MS[descriptor.severity]
+        const replacement: InternalToast = {
+          ...existing,
+          severity: descriptor.severity,
+          message: descriptor.message,
+          description: descriptor.description,
+          action: descriptor.action,
+          priority: SEVERITY_PRIORITY[descriptor.severity],
+          duration:
+            descriptor.duration ?? SEVERITY_DEFAULT_DURATION_MS[descriptor.severity],
+          pausedRemaining: null,
+        }
+        toasts.set(existing.id, replacement)
         if (existing.state === 'visible') {
           clearTimer(existing)
-          if (existing.duration > 0) startTimer(existing, existing.duration)
+          if (replacement.duration > 0) startTimer(replacement, replacement.duration)
         }
-        existing.pausedRemaining = null
         emit()
-        return existing.id
+        return replacement.id
       }
     }
 

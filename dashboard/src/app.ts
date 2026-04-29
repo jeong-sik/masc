@@ -164,7 +164,12 @@ export function App() {
     // Cancel any pending SSE-triggered refreshes from the previous tab
     // to prevent stale fetch results arriving after navigation (C-4/M-12).
     cancelPendingSSERefreshes()
-    void subscribeDashboardRoute(route.value)
+    // Swallow + log subscribe rejections (timeout / closed socket) here so
+    // they do not surface as Uncaught (in promise) noise in DevTools.  The
+    // ws layer owns reconnect on failure (see dashboard-ws.ts onopen path).
+    subscribeDashboardRoute(route.value).catch(err => {
+      console.warn('[dashboard] subscribeDashboardRoute failed', err)
+    })
     refreshCurrentRoute({ recordVisit: true })
   }, [route.value.tab, route.value.params.section, route.value.params.view, route.value.params.q])
 

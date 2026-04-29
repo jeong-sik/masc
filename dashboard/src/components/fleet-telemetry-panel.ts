@@ -685,7 +685,7 @@ export function FleetTelemetryPanel() {
   const offlineCount = value.rows.length - activeCount
 
   return html`
-    <div class="flex flex-col gap-4 p-4">
+    <div class="contain-content flex flex-col gap-4 p-4">
       <div class="flex items-start justify-between gap-3">
         <div class="flex items-center gap-3">
           <h2 class="text-sm font-medium">Keeper 텔레메트리</h2>

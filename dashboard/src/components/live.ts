@@ -18,7 +18,7 @@ export function Live({ variant = 'full' }: LiveProps) {
   return html`
     <div class="flex flex-col gap-5">
       ${!observatoryMode ? html`
-        <section class="monitor-surface-card monitor-surface-card-strong px-5 py-4" aria-label="라이브 모니터 소개">
+        <section class="contain-content monitor-surface-card monitor-surface-card-strong px-5 py-4" aria-label="라이브 모니터 소개">
           <div class="flex flex-col gap-2">
             <div class="flex flex-col gap-2">
               <h2 class="m-0 text-[1.25rem] font-semibold text-[var(--color-fg-secondary)]">라이브 모니터</h2>
@@ -29,7 +29,7 @@ export function Live({ variant = 'full' }: LiveProps) {
       ` : null}
 
       ${!observatoryMode ? html`
-        <section class="rounded-[var(--radius-xl)] border border-[var(--color-border-divider)] bg-[var(--white-3)] p-4" aria-label="이벤트 펄스 현황">
+        <section class="contain-content rounded-[var(--radius-xl)] border border-[var(--color-border-divider)] bg-[var(--white-3)] p-4" aria-label="이벤트 펄스 현황">
           <${PulseStrip} />
         </section>
       ` : null}
@@ -37,7 +37,7 @@ export function Live({ variant = 'full' }: LiveProps) {
       ${!observatoryMode ? html`<${KeeperHealthStrip} />` : null}
 
       ${observatoryMode ? html`
-        <section class="live-panel-main monitor-surface-card monitor-surface-card-medium p-4" aria-label="활동 스트림">
+        <section class="contain-content live-panel-main monitor-surface-card monitor-surface-card-medium p-4" aria-label="활동 스트림">
           <${ActivityStream} />
         </section>
 
@@ -46,10 +46,10 @@ export function Live({ variant = 'full' }: LiveProps) {
         <//>
       ` : html`
         <div class="live-panels grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.9fr)]">
-          <section class="live-panel-main monitor-surface-card monitor-surface-card-medium min-h-[420px] xl:min-h-130 p-4" aria-label="활동 스트림">
+          <section class="contain-content live-panel-main monitor-surface-card monitor-surface-card-medium min-h-[420px] xl:min-h-130 p-4" aria-label="활동 스트림">
             <${ActivityStream} />
           </section>
-          <section class="live-panel-side monitor-surface-card monitor-surface-card-medium min-h-[420px] xl:min-h-130 p-4" aria-label="에이전트 상태 사이드바">
+          <section class="contain-content live-panel-side monitor-surface-card monitor-surface-card-medium min-h-[420px] xl:min-h-130 p-4" aria-label="에이전트 상태 사이드바">
             <${FocusSidebar} />
           </section>
         </div>

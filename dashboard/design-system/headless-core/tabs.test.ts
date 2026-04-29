@@ -1,5 +1,5 @@
 // Pure TS unit tests for Tabs. No DOM.
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import { createTabs, type TabsKeyEvent, type TabDescriptor } from './tabs'
 
 function makeKey(

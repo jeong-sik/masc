@@ -236,6 +236,17 @@ val safe_text_for_followup : string -> string
     bytes after [String.trim] and appends ["...[truncated]"]
     when the input is longer.  Never raises. *)
 
+val parse_text_tool_calls :
+  string -> Oas.Types.content_block list
+(** [parse_text_tool_calls content] extracts inline
+    [mcp__masc__*(...)] tool-call invocations from a free-form
+    text fragment and returns them as [Oas.Types.ToolUse]
+    content blocks.  Returns [\[\]] when no invocations are
+    found.  Pinned for behaviour-tests under
+    {!test/test_worker_container_coverage} — used by the local
+    worker runtime to recover tool calls embedded in model
+    text output. *)
+
 val worker_auth_token :
   base_path:string ->
   worker_name:string ->

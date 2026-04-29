@@ -44,6 +44,12 @@ val source_to_string : library_source -> string
     ["direct_experience"] / ["research"] / ["experiment"] /
     ["observation"]. *)
 
+val all_sources : library_source list
+(** [all_sources] is the canonical witness list — one entry per
+    {!library_source} constructor (in declaration order).  Used
+    by {!valid_source_strings} and by behaviour-tests under
+    {!test/test_types}. *)
+
 val valid_source_strings : string list
 (** [valid_source_strings] is [List.map source_to_string
     all_sources] computed at module init.  Used by handler

@@ -30,6 +30,23 @@ val ensure_board_post_author :
     same contract, [tool = "masc_board_post"] and
     [field = "author"] pinned. *)
 
+val enforce_caller_identity :
+  tool:string ->
+  field:string ->
+  agent_name:string ->
+  Yojson.Safe.t ->
+  Yojson.Safe.t
+(** [enforce_caller_identity ~tool ~field ~agent_name args]
+    enforces caller-identity contract for arbitrary
+    [(tool, field)] pairs.  When [args.<field>] (after
+    canonicalization) differs from [agent_name]'s canonical form,
+    records the spoof attempt and rewrites the field.  Pinned for
+    behaviour-tests under
+    {!test/test_board_author_identity_10297} which cover all four
+    board entries ([keeper_board_post] / [_comment] / [_vote] /
+    [_comment_vote]).  Prefer {!ensure_board_post_author} for the
+    [masc_board_post]/[author] specialisation. *)
+
 (** {1 Inline dispatch fallback} *)
 
 val dispatch :

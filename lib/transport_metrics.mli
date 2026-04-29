@@ -203,6 +203,20 @@ val ws_listening : unit -> bool
     [ws_enabled () && Atomic.get ws_runtime_listening] —
     AND of env-config and runtime state. *)
 
+(** {1 Agent health gauges (test-visible)} *)
+
+val set_agent_heartbeat_age :
+  agent_name:string -> float -> unit
+(** [set_agent_heartbeat_age ~agent_name age_seconds] writes
+    [age_seconds] to the [masc_agent_heartbeat_age_seconds] gauge
+    labelled by [agent_name].  Pinned for behaviour-tests under
+    {!test/test_transport_metrics}. *)
+
+val inc_agent_stale : unit -> unit
+(** [inc_agent_stale ()] increments the [masc_agent_stale_total]
+    counter.  Pinned for behaviour-tests under
+    {!test/test_transport_metrics}. *)
+
 (** {1 Transport health snapshot} *)
 
 val transport_health_json : config:Coord.config -> Yojson.Safe.t

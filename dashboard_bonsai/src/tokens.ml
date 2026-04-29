@@ -385,6 +385,10 @@ type semantic =
   | `Motion_reveal
   | `Motion_settle
   | `Motion_pop
+  | `Enter_duration
+  | `Exit_duration
+  | `Enter_easing
+  | `Exit_easing
   | `_motion_scope
   | `Cmt_question
   | `Cmt_flag
@@ -803,6 +807,10 @@ let name_of = function
   | `Motion_reveal -> "motion-reveal"
   | `Motion_settle -> "motion-settle"
   | `Motion_pop -> "motion-pop"
+  | `Enter_duration -> "enter-duration"
+  | `Exit_duration -> "exit-duration"
+  | `Enter_easing -> "enter-easing"
+  | `Exit_easing -> "exit-easing"
   | `_motion_scope -> "_motion-scope"
   | `Cmt_question -> "cmt-question"
   | `Cmt_flag -> "cmt-flag"

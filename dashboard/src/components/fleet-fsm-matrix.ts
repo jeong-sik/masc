@@ -40,6 +40,7 @@ import {
 
 const POLL_INTERVAL_MS = 10_000
 const LONG_IDLE_SECONDS = 10 * 60
+const STALE_RUNTIME_SECONDS = 30 * 60
 
 /**
  * Time-axis window (LT-16c). 30 snapshots × 10s poll = 5-minute
@@ -287,6 +288,29 @@ function hasBlockingExecutionEvidence(snapshot: KeeperCompositeSnapshot): boolea
   return false
 }
 
+function hasHealthyExecutionEvidence(snapshot: KeeperCompositeSnapshot): boolean {
+  const execution = snapshot.execution
+  if (!execution || hasBlockingExecutionEvidence(snapshot)) return false
+  if (execution.latest_receipt_present !== true) return false
+  if (execution.outcome === 'ok') return true
+  if (execution.terminal_reason_code === 'completed') return true
+  if (execution.tool_contract_result?.startsWith('satisfied')) return true
+  return false
+}
+
+function requiredToolText(snapshot: KeeperCompositeSnapshot): string | null {
+  const surface = snapshot.execution?.tool_surface
+  const missing = surface?.missing_required_tools ?? []
+  const required = surface?.required_tools ?? []
+  const names = missing.length > 0 ? missing : required
+  return names.length > 0 ? names.join(', ') : null
+}
+
+function hasRequireToolUseViolation(snapshot: KeeperCompositeSnapshot): boolean {
+  const code = snapshot.execution?.terminal_reason_code ?? ''
+  return code.includes('require_tool_use')
+}
+
 function blockingCause(snapshot: KeeperCompositeSnapshot): string {
   const execution = snapshot.execution
   if (!execution) return 'blocking execution evidence present'
@@ -299,7 +323,10 @@ function blockingCause(snapshot: KeeperCompositeSnapshot): string {
     )
   }
   if (execution.tool_contract_result === 'missing_required_tool_use') {
-    parts.push('tool contract: missing_required_tool_use')
+    const tools = requiredToolText(snapshot)
+    parts.push(tools ? `tool contract: missing_required_tool_use (${tools})` : 'tool contract: missing_required_tool_use')
+  } else if (hasRequireToolUseViolation(snapshot)) {
+    parts.push('tool contract: actionable signal without keeper tool')
   } else if (execution.tool_contract_result === 'unknown' && execution.error != null) {
     parts.push('tool contract unknown with execution error')
   }
@@ -319,7 +346,19 @@ function blockingNextStep(snapshot: KeeperCompositeSnapshot): string {
   const execution = snapshot.execution
   if (!execution) return 'latest execution receipt 확인'
   if (execution.tool_contract_result === 'missing_required_tool_use') {
-    return '필수 tool contract를 만족시키거나 task/tool 설정 조정'
+    const tools = requiredToolText(snapshot)
+    return tools
+      ? `필수 tool 호출 경로 확인: ${tools}`
+      : '필수 tool contract를 만족시키거나 task/tool 설정 조정'
+  }
+  if (hasRequireToolUseViolation(snapshot)) {
+    return '모델이 keeper tool을 호출하도록 prompt/tool-choice 경로 확인'
+  }
+  if (execution.terminal_reason_code === 'api_error_invalid_request') {
+    return 'provider auth/model/config receipt 확인'
+  }
+  if (execution.terminal_reason_code === 'api_error_timeout') {
+    return 'provider timeout budget/cascade lane 확인'
   }
   if (execution.operator_disposition === 'pause_human') {
     return 'operator gate/approval 상태와 최신 receipt 확인'
@@ -365,6 +404,8 @@ export function buildRuntimeAssistPrompt(
       operator_disposition: snapshot.execution.operator_disposition,
       operator_disposition_reason: snapshot.execution.operator_disposition_reason,
       tool_contract_result: snapshot.execution.tool_contract_result,
+      required_tools: snapshot.execution.tool_surface?.required_tools ?? [],
+      missing_required_tools: snapshot.execution.tool_surface?.missing_required_tools ?? [],
       error_kind: snapshot.execution.error?.kind ?? null,
       error_preview: snapshot.execution.error?.message_preview ?? null,
     })
@@ -484,6 +525,20 @@ export function runtimeAttentionForSnapshot(
     }
   }
   if (!snapshot.is_live) {
+    if (hasHealthyExecutionEvidence(snapshot) && ageSec != null && ageSec < STALE_RUNTIME_SECONDS) {
+      const idleLong = idleComposite && ageSec >= LONG_IDLE_SECONDS
+      const cause = `healthy receipt 이후 live turn 없음 · latest ${ageText}`
+      const nextStep = idleLong ? 'backlog, admission, trigger가 없는지 확인' : '조치 불필요'
+      return {
+        level: idleLong ? 'idle' : 'ok',
+        label: idleLong ? '무전환' : '대기',
+        reason: `healthy idle · latest activity ${ageText}`,
+        cause,
+        nextStep,
+        title: `원인: ${cause} · 다음: ${nextStep} · 증거: ${evidenceText}`,
+        ageSec,
+      }
+    }
     const cause = staleCause(snapshot, ageText)
     const nextStep = staleNextStep(snapshot, latest)
     return {

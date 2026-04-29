@@ -84,6 +84,15 @@ export function resolveRuntimeCounts({
     }
   }
 
+  if (liveTotalRuntimes > 0) {
+    return {
+      ...live,
+      totalRuntimes: liveTotalRuntimes,
+      configuredKeepers,
+      source: 'partial',
+    }
+  }
+
   if (namespaceTotalRuntimes > 0) {
     return {
       ...namespace!,

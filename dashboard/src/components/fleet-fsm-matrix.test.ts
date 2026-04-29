@@ -222,11 +222,26 @@ describe('runtimeAttentionForSnapshot', () => {
     expect(attention.title).toContain('latest activity 10m ago')
   })
 
+  it('keeps recent healthy non-live keepers waiting instead of stale', () => {
+    const snap = snapshot({
+      is_live: false,
+      phase: 'Running',
+      execution: execution({
+        recorded_at: '2026-04-25T07:38:30Z',
+      }),
+    })
+
+    const attention = runtimeAttentionForSnapshot(snap, generatedAt)
+    expect(snap.phase).toBe('Running')
+    expect(attention.level).toBe('ok')
+    expect(attention.label).toBe('대기')
+    expect(attention.reason).toContain('healthy idle')
+  })
+
   it('keeps raw lifecycle separate by flagging stale liveness without changing phase', () => {
     const snap = snapshot({
       is_live: false,
       phase: 'Running',
-      execution: execution(),
     })
 
     const attention = runtimeAttentionForSnapshot(snap, generatedAt)
@@ -268,7 +283,6 @@ describe('runtimeAttentionForSnapshot', () => {
     const stale = snapshot({
       name: 'stale',
       is_live: false,
-      execution: execution(),
     })
     const idle = snapshot({
       name: 'idle',
@@ -300,6 +314,52 @@ describe('runtimeAttentionForSnapshot', () => {
     })
 
     expect(latestRuntimeActivityEpoch(snap)).toBe(generatedAt - 300)
+  })
+
+  it('names missing required keeper tools in blocker cause and next step', () => {
+    const snap = snapshot({
+      is_live: false,
+      execution: execution({
+        outcome: 'error',
+        terminal_reason_code: 'completion_contract_violation:require_tool_use',
+        operator_disposition: 'pause_human',
+        operator_disposition_reason: 'tool_required_unsatisfied',
+        tool_contract_result: 'missing_required_tool_use',
+        tool_surface: {
+          tool_requirement: 'required',
+          tool_gate_enabled: true,
+          missing_required_tools: ['keeper_bash'],
+          required_tools: ['keeper_bash'],
+        },
+      }),
+    })
+
+    const attention = runtimeAttentionForSnapshot(snap, generatedAt)
+    expect(attention.level).toBe('blocked')
+    expect(attention.cause).toContain('missing_required_tool_use (keeper_bash)')
+    expect(attention.nextStep).toContain('keeper_bash')
+  })
+
+  it('routes provider timeout blockers away from generic approval guidance', () => {
+    const snap = snapshot({
+      is_live: true,
+      execution: execution({
+        outcome: 'error',
+        terminal_reason_code: 'api_error_timeout',
+        operator_disposition: 'pause_human',
+        operator_disposition_reason: 'tool_required_unsatisfied',
+        tool_contract_result: 'unknown',
+        error: {
+          kind: 'api',
+          message_preview: 'Timeout after 1785s',
+          message_truncated: false,
+        },
+      }),
+    })
+
+    const attention = runtimeAttentionForSnapshot(snap, generatedAt)
+    expect(attention.level).toBe('blocked')
+    expect(attention.nextStep).toBe('provider timeout budget/cascade lane 확인')
   })
 })
 

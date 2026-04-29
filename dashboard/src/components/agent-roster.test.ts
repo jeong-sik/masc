@@ -12,6 +12,7 @@ import {
   rosterStateNote,
   uniqueToolNames,
   keeperRuntimeName,
+  isRuntimeBackedKeeper,
   mergeRosterAgent,
   filterAgentRoster,
   countRuntimeKinds,
@@ -328,6 +329,33 @@ describe('keeperRuntimeName', () => {
 })
 
 describe('countRuntimeKinds', () => {
+  it('excludes configured-only paused keepers from live runtime counts', () => {
+    const result = countRuntimeKinds(
+      [],
+      [
+        {
+          name: 'taskmaster',
+          status: 'active',
+          registered: true,
+          keepalive_running: true,
+        } as Keeper,
+        {
+          name: 'verifier',
+          status: 'paused',
+          paused: true,
+          registered: false,
+          keepalive_running: false,
+        } as Keeper,
+      ],
+    )
+
+    expect(result).toEqual({
+      agents: 0,
+      keepers: 1,
+      totalRuntimes: 1,
+    })
+  })
+
   it('collapses keeper-owned generated sub-op aliases when agent meta carries keeper identity', () => {
     const result = countRuntimeKinds(
       [
@@ -405,6 +433,24 @@ describe('countRuntimeKinds', () => {
       keepers: 1,
       totalRuntimes: 2,
     })
+  })
+})
+
+describe('isRuntimeBackedKeeper', () => {
+  it('keeps paused keepers when the supervisor still reports a runtime', () => {
+    expect(isRuntimeBackedKeeper({
+      paused: true,
+      registered: true,
+      keepalive_running: false,
+    })).toBe(true)
+  })
+
+  it('drops paused metas with no registered or keepalive runtime', () => {
+    expect(isRuntimeBackedKeeper({
+      paused: true,
+      registered: false,
+      keepalive_running: false,
+    })).toBe(false)
   })
 })
 

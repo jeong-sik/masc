@@ -115,6 +115,20 @@ let test_render_inline_skip_reason () =
   check bool "contains source=keeper_hook" true
     (contains_substring s "source=keeper_hook")
 
+let test_gate_decision_vocabulary () =
+  check string "override" "override"
+    (KG.gate_decision_to_string KG.Gate_override);
+  check string "continue" "continue"
+    (KG.gate_decision_to_string KG.Gate_continue);
+  check string "approval_required" "approval_required"
+    (KG.gate_decision_to_string KG.Gate_approval_required);
+  check bool "override rejects" true
+    (KG.gate_decision_is_rejection KG.Gate_override);
+  check bool "continue does not reject" false
+    (KG.gate_decision_is_rejection KG.Gate_continue);
+  check bool "approval rejects" true
+    (KG.gate_decision_is_rejection KG.Gate_approval_required)
+
 (* ----------------------------------------------------------------- *)
 (* Individual guard tests                                              *)
 (* ----------------------------------------------------------------- *)
@@ -148,7 +162,8 @@ let test_deny_guard_notifies_gate_observer () =
   match !observed with
   | [ event ] ->
     check string "stage" "keeper_deny" event.KG.stage;
-    check string "decision" "override" event.KG.decision;
+    check string "decision" "override"
+      (KG.gate_decision_to_string event.KG.decision);
     check string "reason_code" "keeper_deny" event.KG.reason_code;
     check string "tool_name" "dangerous_tool" event.KG.tool_name;
     check int "turn" 4 event.KG.turn;
@@ -300,7 +315,8 @@ let test_governance_approval_notifies_gate_observer () =
     match !observed with
     | [ event ] ->
       check string "stage" "governance_approval" event.KG.stage;
-      check string "decision" "approval_required" event.KG.decision;
+      check string "decision" "approval_required"
+        (KG.gate_decision_to_string event.KG.decision);
       check string "reason_code" "governance_approval" event.KG.reason_code;
       check string "tool_name" "keeper_fs_edit" event.KG.tool_name
     | events ->
@@ -396,6 +412,7 @@ let () = run "Keeper_guards" [
   "utilities", [
     test_case "extract_command_from_input" `Quick test_extract_command_from_input;
     test_case "render_inline_skip_reason" `Quick test_render_inline_skip_reason;
+    test_case "gate decision vocabulary" `Quick test_gate_decision_vocabulary;
   ];
   "deny_guard", [
     test_case "blocks denied tool" `Quick test_deny_guard_blocks;

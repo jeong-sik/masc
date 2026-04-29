@@ -65,7 +65,7 @@ let current_keeper_model meta =
   if m = "" then meta.Keeper_types.cascade_name else m
 
 let render_pre_tool_gate_output (event : Keeper_guards.gate_decision_event) =
-  if String.equal event.decision "approval_required" then
+  if event.decision = Keeper_guards.Gate_approval_required then
     Printf.sprintf
       "[tool_approval_required] tool=%s source=keeper_hook code=%s reason=%s"
       (Keeper_guards.escape_field event.tool_name)
@@ -78,8 +78,9 @@ let render_pre_tool_gate_output (event : Keeper_guards.gate_decision_event) =
       ~reason_text:event.reason_text
 
 let pre_tool_gate_error (event : Keeper_guards.gate_decision_event) =
+  let decision = Keeper_guards.gate_decision_to_string event.decision in
   Printf.sprintf "%s:%s: %s"
-    event.decision event.reason_code event.reason_text
+    decision event.reason_code event.reason_text
 
 let record_pre_tool_gate_attempt
     ~(meta_ref : Keeper_types.keeper_meta ref)

@@ -136,9 +136,23 @@ let extract_command_from_input (input : Yojson.Safe.t) : string =
 (* Telemetry                                                       *)
 (* -------------------------------------------------------------- *)
 
+type gate_decision =
+  | Gate_override
+  | Gate_continue
+  | Gate_approval_required
+
+let gate_decision_to_string = function
+  | Gate_override -> "override"
+  | Gate_continue -> "continue"
+  | Gate_approval_required -> "approval_required"
+
+let gate_decision_is_rejection = function
+  | Gate_override | Gate_approval_required -> true
+  | Gate_continue -> false
+
 type gate_decision_event = {
   stage : string;
-  decision : string;
+  decision : gate_decision;
   reason_code : string;
   reason_text : string;
   tool_name : string;
@@ -173,11 +187,11 @@ let notify_gate_decision on_gate_decision (event : gate_decision_event) =
     - [reason_text]         human-readable detail
     - [source]              "hook" (distinguishes from legacy paths) *)
 (* Spec mapping: GateRejected action — KeeperTurnCycle.tla lines 189-200.
-   The two-arm match below routes "override" | "approval_required" to
+   The two-arm match below routes Gate_override | Gate_approval_required to
    Keeper_registry.mark_turn_gate_rejected_by_name, which fires the
    decision_stage = "gate_rejected" / turn_phase = "finalizing" transition.
-   The "continue" branch (and any unknown decision string) skips the spec
-   action entirely and only emits the Event_bus Custom event below.
+   The Gate_continue branch skips the spec action entirely and only emits
+   the Event_bus Custom event below.
 
    Cycle 49 observability addition: when the gate rejects, the turn
    becomes terminal WITHOUT any cascade tier ever being attempted.  A
@@ -217,11 +231,8 @@ let emit_gate_event
     ~stage ~decision ~reason_code
     ~tool_name ~agent_name ~turn
     ~accumulated_cost_usd ~stage_latency_ms ~reason_text =
-  let is_gate_rejection =
-    match decision with
-    | "override" | "approval_required" -> true
-    | _ -> false
-  in
+  let decision_label = gate_decision_to_string decision in
+  let is_gate_rejection = gate_decision_is_rejection decision in
   if is_gate_rejection then begin
     Keeper_registry.mark_turn_gate_rejected_by_name agent_name;
     Prometheus.inc_counter gate_rejected_terminal_metric
@@ -229,19 +240,19 @@ let emit_gate_event
         ("keeper", agent_name);
         ("tool", tool_name);
         ("reason", reason_code);
-        ("decision", decision);
+        ("decision", decision_label);
       ] ();
     Log.Keeper.info
       "keeper:%s tool:%s decision=%s reason_code=%s cascade=none \
        (gate rejected before cascade attempt)"
-      agent_name tool_name decision reason_code
+      agent_name tool_name decision_label reason_code
   end;
   match Masc_event_bus.get () with
   | None -> ()
   | Some bus ->
     let payload = `Assoc [
       ("stage", `String stage);
-      ("decision", `String decision);
+      ("decision", `String decision_label);
       ("reason_code", `String reason_code);
       ("tool_name", `String tool_name);
       ("agent_name", `String agent_name);
@@ -344,7 +355,7 @@ let custom_guard
          broadcast_tool_skipped
            ~keeper_name ~tool_name ~reason_code:"pre_tool_use_guard";
          report_gate_decision on_gate_decision
-           ~stage:"pre_tool_use_guard" ~decision:"override"
+           ~stage:"pre_tool_use_guard" ~decision:Gate_override
            ~reason_code:"pre_tool_use_guard" ~reason_text:reason
            ~tool_name ~keeper_name ~input ~turn ~accumulated_cost_usd
            ~stage_latency_ms:latency_ms;
@@ -390,7 +401,7 @@ let streak_guard
         broadcast_tool_skipped
           ~keeper_name ~tool_name ~reason_code:"streak_gate";
         report_gate_decision on_gate_decision
-          ~stage:"streak_gate" ~decision:"override"
+          ~stage:"streak_gate" ~decision:Gate_override
           ~reason_code:"streak_gate" ~reason_text
           ~tool_name ~keeper_name ~input ~turn ~accumulated_cost_usd
           ~stage_latency_ms:latency_ms;
@@ -422,7 +433,7 @@ let deny_guard
         broadcast_tool_skipped
           ~keeper_name ~tool_name ~reason_code:"keeper_deny";
         report_gate_decision on_gate_decision
-          ~stage:"keeper_deny" ~decision:"override"
+          ~stage:"keeper_deny" ~decision:Gate_override
           ~reason_code:"keeper_deny" ~reason_text
           ~tool_name ~keeper_name ~input ~turn ~accumulated_cost_usd
           ~stage_latency_ms:latency_ms;
@@ -460,7 +471,7 @@ let cost_guard
          broadcast_tool_skipped
            ~keeper_name ~tool_name ~reason_code:"cost_gate";
          report_gate_decision on_gate_decision
-           ~stage:"cost_gate" ~decision:"override"
+           ~stage:"cost_gate" ~decision:Gate_override
            ~reason_code:"cost_gate" ~reason_text
            ~tool_name ~keeper_name ~input ~turn ~accumulated_cost_usd
            ~stage_latency_ms:latency_ms;
@@ -502,7 +513,7 @@ let destructive_guard
            broadcast_tool_skipped
              ~keeper_name ~tool_name ~reason_code:"destructive_guard";
            report_gate_decision on_gate_decision
-             ~stage:"destructive_guard" ~decision:"override"
+             ~stage:"destructive_guard" ~decision:Gate_override
              ~reason_code:"destructive_guard" ~reason_text
              ~tool_name ~keeper_name ~input ~turn ~accumulated_cost_usd
              ~stage_latency_ms:latency_ms;
@@ -538,7 +549,7 @@ let governance_approval_guard
       if needs_approval then begin
         let latency_ms = (Time_compat.now () -. t0) *. 1000.0 in
         report_gate_decision on_gate_decision
-          ~stage:"governance_approval" ~decision:"approval_required"
+          ~stage:"governance_approval" ~decision:Gate_approval_required
           ~reason_code:"governance_approval"
           ~reason_text:"risk threshold reached; operator approval required"
           ~tool_name ~keeper_name ~input ~turn ~accumulated_cost_usd

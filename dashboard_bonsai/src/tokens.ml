@@ -472,6 +472,22 @@ type semantic =
   | `Toast_fg
   | `Toast_border
   | `Toast_shadow
+  | `Terminal_ansi_black
+  | `Terminal_ansi_red
+  | `Terminal_ansi_green
+  | `Terminal_ansi_yellow
+  | `Terminal_ansi_blue
+  | `Terminal_ansi_magenta
+  | `Terminal_ansi_cyan
+  | `Terminal_ansi_white
+  | `Terminal_ansi_bright_black
+  | `Terminal_ansi_bright_red
+  | `Terminal_ansi_bright_green
+  | `Terminal_ansi_bright_yellow
+  | `Terminal_ansi_bright_blue
+  | `Terminal_ansi_bright_magenta
+  | `Terminal_ansi_bright_cyan
+  | `Terminal_ansi_bright_white
   | `Motion_enter
   | `Motion_exit
   | `Motion_swap
@@ -985,6 +1001,22 @@ let name_of = function
   | `Toast_fg -> "toast-fg"
   | `Toast_border -> "toast-border"
   | `Toast_shadow -> "toast-shadow"
+  | `Terminal_ansi_black -> "terminal-ansi-black"
+  | `Terminal_ansi_red -> "terminal-ansi-red"
+  | `Terminal_ansi_green -> "terminal-ansi-green"
+  | `Terminal_ansi_yellow -> "terminal-ansi-yellow"
+  | `Terminal_ansi_blue -> "terminal-ansi-blue"
+  | `Terminal_ansi_magenta -> "terminal-ansi-magenta"
+  | `Terminal_ansi_cyan -> "terminal-ansi-cyan"
+  | `Terminal_ansi_white -> "terminal-ansi-white"
+  | `Terminal_ansi_bright_black -> "terminal-ansi-bright-black"
+  | `Terminal_ansi_bright_red -> "terminal-ansi-bright-red"
+  | `Terminal_ansi_bright_green -> "terminal-ansi-bright-green"
+  | `Terminal_ansi_bright_yellow -> "terminal-ansi-bright-yellow"
+  | `Terminal_ansi_bright_blue -> "terminal-ansi-bright-blue"
+  | `Terminal_ansi_bright_magenta -> "terminal-ansi-bright-magenta"
+  | `Terminal_ansi_bright_cyan -> "terminal-ansi-bright-cyan"
+  | `Terminal_ansi_bright_white -> "terminal-ansi-bright-white"
   | `Motion_enter -> "motion-enter"
   | `Motion_exit -> "motion-exit"
   | `Motion_swap -> "motion-swap"

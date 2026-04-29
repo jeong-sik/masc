@@ -483,6 +483,22 @@ type semantic =
   | `Toast_fg
   | `Toast_border
   | `Toast_shadow
+  | `Terminal_ansi_black
+  | `Terminal_ansi_red
+  | `Terminal_ansi_green
+  | `Terminal_ansi_yellow
+  | `Terminal_ansi_blue
+  | `Terminal_ansi_magenta
+  | `Terminal_ansi_cyan
+  | `Terminal_ansi_white
+  | `Terminal_ansi_bright_black
+  | `Terminal_ansi_bright_red
+  | `Terminal_ansi_bright_green
+  | `Terminal_ansi_bright_yellow
+  | `Terminal_ansi_bright_blue
+  | `Terminal_ansi_bright_magenta
+  | `Terminal_ansi_bright_cyan
+  | `Terminal_ansi_bright_white
   | `Motion_enter
   | `Motion_exit
   | `Motion_swap

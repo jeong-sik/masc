@@ -6,6 +6,28 @@ import { useEffect, useRef, useState } from 'preact/hooks'
 import type cytoscape from 'cytoscape'
 import { InlineSpinner } from './inline-spinner'
 
+// Cytoscape's style language doesn't accept CSS custom properties directly —
+// it parses `var(--x)` as an unknown literal and silently drops the property.
+// Resolve to the actual computed color at stylesheet-build time.
+function resolveCssVar(value: string, fallback: string): string {
+  if (typeof window === 'undefined') return fallback
+  const match = /^var\((--[^)]+)\)$/.exec(value.trim())
+  const name = match?.[1]
+  if (!name) return value
+  const computed = getComputedStyle(document.documentElement)
+    .getPropertyValue(name)
+    .trim()
+  return computed || fallback
+}
+
+function resolveNodeColor(c: { bg: string; border: string; text: string }) {
+  return {
+    bg: resolveCssVar(c.bg, '#1e293b'),
+    border: resolveCssVar(c.border, '#475569'),
+    text: resolveCssVar(c.text, '#f1f5f9'),
+  }
+}
+
 // Types for graph spec (consumed by all 3 FSM builders)
 export interface FsmNode {
   id: string
@@ -101,13 +123,14 @@ function buildStylesheet() {
         'text-halign': 'center',
         'font-size': '11px',
         'font-family': 'ui-monospace, SFMono-Regular, Menlo, monospace',
-        color: 'var(--frost-100)',
-        'background-color': 'var(--slate-800)',
+        color: resolveCssVar('var(--frost-100)', '#cbd5e1'),
+        'background-color': resolveCssVar('var(--slate-800)', '#1e293b'),
         'border-width': 2,
-        'border-color': 'var(--slate-600)',
+        'border-color': resolveCssVar('var(--slate-600)', '#475569'),
         shape: 'roundrectangle',
-        width: 'label',
-        height: 'label',
+        // 'auto' sizes the node to its label bbox; 'label' was deprecated.
+        width: 'auto',
+        height: 'auto',
         padding: '10px',
         'text-wrap': 'wrap',
         'text-max-width': '120px',
@@ -118,16 +141,16 @@ function buildStylesheet() {
       style: {
         'curve-style': 'bezier',
         'target-arrow-shape': 'triangle',
-        'target-arrow-color': 'var(--slate-500)',
-        'line-color': 'var(--slate-500)',
+        'target-arrow-color': resolveCssVar('var(--slate-500)', '#64748b'),
+        'line-color': resolveCssVar('var(--slate-500)', '#64748b'),
         width: 1.5,
         label: 'data(label)',
         'font-size': '9px',
         'font-family': 'ui-monospace, SFMono-Regular, Menlo, monospace',
-        color: 'var(--slate-400)',
+        color: resolveCssVar('var(--slate-400)', '#94a3b8'),
         'text-rotation': 'autorotate',
         'text-margin-y': -8,
-        'text-background-color': 'var(--panel-dark)',
+        'text-background-color': resolveCssVar('var(--panel-dark)', '#0f172a'),
         'text-background-opacity': 0.85,
         'text-background-padding': '2px',
         'text-background-shape': 'roundrectangle',
@@ -136,7 +159,7 @@ function buildStylesheet() {
     {
       selector: ':parent',
       style: {
-        'background-color': 'var(--panel-dark)',
+        'background-color': resolveCssVar('var(--panel-dark)', '#0f172a'),
         'border-color': '#334155',
         'border-width': 1,
         'border-style': 'dashed',
@@ -144,13 +167,14 @@ function buildStylesheet() {
         'text-halign': 'center',
         padding: '16px',
         'font-size': '10px',
-        color: 'var(--slate-500)',
+        color: resolveCssVar('var(--slate-500)', '#64748b'),
       },
     },
   ]
 
   // Node type-specific styles
-  for (const [type, colors] of Object.entries(NODE_COLORS)) {
+  for (const [type, raw] of Object.entries(NODE_COLORS)) {
+    const colors = resolveNodeColor(raw)
     styles.push({
       selector: `node[nodeType="${type}"]`,
       style: {
@@ -161,21 +185,19 @@ function buildStylesheet() {
     })
   }
 
-  // Active node glow effect
+  // Active node emphasis. Cytoscape core has no `shadow-*` properties — they
+  // were silently dropped before. Use a thicker border instead, which is
+  // visually unambiguous and survives layout/zoom without canvas overhead.
   styles.push({
     selector: 'node[nodeType="active"]',
     style: {
-      'border-width': 3,
-      'shadow-blur': 12,
-      'shadow-color': 'var(--emerald)',
-      'shadow-opacity': 0.6,
-      'shadow-offset-x': 0,
-      'shadow-offset-y': 0,
+      'border-width': 4,
     },
   })
 
   // Edge type styles
-  for (const [type, color] of Object.entries(EDGE_COLORS)) {
+  for (const [type, raw] of Object.entries(EDGE_COLORS)) {
+    const color = resolveCssVar(raw, '#64748b')
     styles.push({
       selector: `edge[edgeType="${type}"]`,
       style: {
@@ -218,7 +240,10 @@ export function CytoscapeFsm({ spec, height = '280px', class: className = '' }: 
           } as cytoscape.LayoutOptions,
           minZoom: 0.3,
           maxZoom: 3,
-          wheelSensitivity: 0.3,
+          // wheelSensitivity intentionally left at default (1).
+          // Cytoscape warns against custom values because zoom feel
+          // depends on hardware (mouse vs trackpad) and OS scroll
+          // settings; the previous 0.3 made trackpads feel sluggish.
           boxSelectionEnabled: false,
           selectionType: 'single',
           userPanningEnabled: true,

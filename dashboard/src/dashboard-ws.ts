@@ -2,6 +2,10 @@ import type { RouteState, SSEEvent } from './types'
 import { parseSSEMessage } from './schemas/sse'
 import { hydrateDashboardSlice, routeServerPushEvent } from './sse-store'
 import { batch } from '@preact/signals'
+import { parseWebSocketSseFrames as parseWebSocketSseFramesImpl } from './dashboard-ws-parse'
+
+// Re-export for test consumers that assert on frame parsing.
+export const parseWebSocketSseFrames = parseWebSocketSseFramesImpl
 import {
   dashboardWsConnected,
   dashboardWsLastError,
@@ -46,8 +50,38 @@ const pending = new Map<number, PendingRpc>()
 // multiple signal writes / renders), we buffer them and flush on the
 // next animation frame.  This bounds update frequency to 60 Hz and
 // lets batch() coalesce all signal mutations in a single frame.
-const pendingInbound: string[] = []
+const pendingInbound: Array<string | unknown> = []
 let flushHandle = 0
+
+// Phase 2 (PR-4.5): Offload JSON/SSE parsing to a Web Worker so the
+// main thread never blocks on large payloads.
+let parseWorker: Worker | null = null
+let workerJobId = 0
+const workerJobs = new Map<number, (payloads: unknown[]) => void>()
+
+function initParseWorker(): Worker | null {
+  if (parseWorker) return parseWorker
+  if (typeof Worker === 'undefined') return null
+  try {
+    parseWorker = new Worker(
+      new URL('./workers/dashboard-ws.worker.ts', import.meta.url),
+    )
+    parseWorker.onmessage = (event) => {
+      const { id, payloads } = event.data as {
+        id: number
+        payloads: unknown[]
+      }
+      const cb = workerJobs.get(id)
+      if (cb) {
+        cb(payloads)
+        workerJobs.delete(id)
+      }
+    }
+    return parseWorker
+  } catch {
+    return null
+  }
+}
 
 function scheduleFlush(): void {
   if (flushHandle) return
@@ -69,7 +103,11 @@ function flushPending(): void {
   const batchData = pendingInbound.slice()
   pendingInbound.length = 0
   for (const data of batchData) {
-    processInboundMessage(data)
+    if (typeof data === 'string') {
+      processInboundMessage(data)
+    } else {
+      processInboundParsedMessage(data)
+    }
   }
 }
 
@@ -335,34 +373,14 @@ function handleRawPush(raw: unknown): void {
   })
 }
 
-export function parseWebSocketSseFrames(data: string): unknown[] {
-  const payloads: unknown[] = []
-  const frames = data.split(/\r?\n\r?\n/)
-  for (const frame of frames) {
-    const dataLines: string[] = []
-    for (const line of frame.split(/\r?\n/)) {
-      if (!line.startsWith('data:')) continue
-      const value = line.slice('data:'.length)
-      dataLines.push(value.startsWith(' ') ? value.slice(1) : value)
-    }
-    if (dataLines.length === 0) continue
-    const body = dataLines.join('\n').trim()
-    if (!body || body === '[DONE]') continue
-    try {
-      payloads.push(JSON.parse(body))
-    } catch (err) {
-      // P2 silent-failure fix: dashboard pushes are JSON by contract,
-      // so a non-JSON SSE frame here is either a server-side encoding
-      // bug or network corruption.  Previously dropped silently —
-      // operators investigating "stale dashboard" had no signal that
-      // frames were being parsed-but-malformed.  Logging includes a
-      // body sample so the malformed shape is recoverable from
-      // DevTools.  body length is capped to keep the log line bounded.
-      const sample = body.length > 200 ? `${body.slice(0, 200)}…(${body.length} bytes total)` : body
-      console.warn('[dashboard-ws] non-JSON SSE frame dropped', { sample, err })
-    }
-  }
-  return payloads
+function processInboundParsedMessage(raw: unknown): void {
+  batch(() => {
+    if (!raw || typeof raw !== 'object') return
+    const record = raw as JsonObject
+    if (handleRpcResponse(record)) return
+    if (handleNotification(record)) return
+    handleRawPush(record)
+  })
 }
 
 function processInboundMessage(data: string): void {
@@ -371,7 +389,7 @@ function processInboundMessage(data: string): void {
     try {
       raw = JSON.parse(data)
     } catch {
-      for (const payload of parseWebSocketSseFrames(data)) {
+      for (const payload of parseWebSocketSseFramesImpl(data)) {
         handleRawPush(payload)
       }
       return
@@ -386,6 +404,18 @@ function processInboundMessage(data: string): void {
 
 function handleMessage(data: unknown): void {
   if (typeof data !== 'string') return
+  const worker = initParseWorker()
+  if (worker) {
+    const id = ++workerJobId
+    workerJobs.set(id, (payloads) => {
+      for (const p of payloads) {
+        pendingInbound.push(p)
+      }
+      scheduleFlush()
+    })
+    worker.postMessage({ id, data })
+    return
+  }
   pendingInbound.push(data)
   scheduleFlush()
 }

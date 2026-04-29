@@ -68,6 +68,32 @@ describe('PerformanceMonitor', () => {
     monitor.start()
     expect(monitor['observer']).toBe(obs)
   })
+
+  it('buffers long tasks up to maxBufferSize', () => {
+    const lt = { name: 'longtask', duration: 120, startTime: 0 } as PerformanceEntry
+    for (let i = 0; i < 10; i++) {
+      monitor['longTaskBuffer'].push(lt)
+      if (monitor['longTaskBuffer'].length > monitor['maxBufferSize']) {
+        monitor['longTaskBuffer'].shift()
+      }
+    }
+    expect(monitor.longTaskCount).toBe(5)
+    expect(monitor.getRecentLongTasks(1)[0]!).toBe(lt)
+  })
+
+  it('returns FPS metrics from history', () => {
+    monitor['fpsHistory'].push(30, 60, 45)
+    expect(monitor.getCurrentFps()).toBe(45)
+    expect(monitor.getAverageFps(3)).toBeCloseTo(45, 1)
+    expect(monitor.getAverageFps(10)).toBeCloseTo(45, 1)
+    expect(monitor.getFpsHistory()).toEqual([30, 60, 45])
+  })
+
+  it('returns zero for empty FPS history', () => {
+    expect(monitor.getCurrentFps()).toBe(0)
+    expect(monitor.getAverageFps()).toBe(0)
+    expect(monitor.getFpsHistory()).toEqual([])
+  })
 })
 
 function makeEntry(startTime: number, duration: number): LoAFEntry {

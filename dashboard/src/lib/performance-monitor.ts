@@ -35,6 +35,10 @@ export interface PerformanceMonitorOptions {
   slowThresholdMs?: number
   /** Optional callback invoked for every slow frame. */
   onSlowFrame?: (entry: LoAFEntry) => void
+  /** Enable Long Tasks API observer (default true). */
+  enableLongTasks?: boolean
+  /** Enable FPS monitoring via requestAnimationFrame (default true). */
+  enableFps?: boolean
 }
 
 export class PerformanceMonitor {
@@ -42,16 +46,35 @@ export class PerformanceMonitor {
   private readonly maxBufferSize: number
   private readonly slowThresholdMs: number
   private readonly onSlowFrame?: (entry: LoAFEntry) => void
+  private readonly enableLongTasks: boolean
+  private readonly enableFps: boolean
   private observer?: PerformanceObserver
+  private longTaskObserver?: PerformanceObserver
+  private longTaskBuffer: PerformanceEntry[] = []
+  private fpsHistory: number[] = []
+  private fpsRafId?: number
+  private fpsLastTime?: number
+  private fpsFrameCount = 0
+  private running = false
 
   constructor(options: PerformanceMonitorOptions = {}) {
     this.maxBufferSize = options.maxBufferSize ?? 100
     this.slowThresholdMs = options.slowThresholdMs ?? 100
     this.onSlowFrame = options.onSlowFrame
+    this.enableLongTasks = options.enableLongTasks ?? true
+    this.enableFps = options.enableFps ?? true
   }
 
-  /** Start observing long-animation-frame entries. Idempotent. */
+  /** Start observing performance entries. Idempotent. */
   start(): void {
+    if (this.running) return
+    this.running = true
+    this.startLoAF()
+    if (this.enableLongTasks) this.startLongTasks()
+    if (this.enableFps) this.startFps()
+  }
+
+  private startLoAF(): void {
     if (this.observer) return
     if (typeof PerformanceObserver === 'undefined') return
 
@@ -72,10 +95,63 @@ export class PerformanceMonitor {
     }
   }
 
-  /** Stop observing and clear the internal observer reference. */
+  private startLongTasks(): void {
+    if (this.longTaskObserver) return
+    if (typeof PerformanceObserver === 'undefined') return
+
+    try {
+      this.longTaskObserver = new PerformanceObserver((list) => {
+        for (const entry of list.getEntries()) {
+          this.longTaskBuffer.push(entry)
+          if (this.longTaskBuffer.length > this.maxBufferSize) {
+            this.longTaskBuffer.shift()
+          }
+        }
+      })
+      this.longTaskObserver.observe({ entryTypes: ['longtask'] } as PerformanceObserverInit)
+    } catch {
+      // Long Tasks API unsupported — silently no-op.
+    }
+  }
+
+  private startFps(): void {
+    if (this.fpsRafId) return
+    if (typeof requestAnimationFrame === 'undefined') return
+
+    const tick = (time: number) => {
+      if (!this.running) return
+      if (this.fpsLastTime == null) {
+        this.fpsLastTime = time
+      }
+      const elapsed = time - this.fpsLastTime
+      this.fpsFrameCount++
+      if (elapsed >= 1000) {
+        const fps = Math.round((this.fpsFrameCount * 1000) / elapsed)
+        this.fpsHistory.push(fps)
+        if (this.fpsHistory.length > this.maxBufferSize) {
+          this.fpsHistory.shift()
+        }
+        this.fpsFrameCount = 0
+        this.fpsLastTime = time
+      }
+      this.fpsRafId = requestAnimationFrame(tick)
+    }
+    this.fpsRafId = requestAnimationFrame(tick)
+  }
+
+  /** Stop observing and clear internal observers. */
   stop(): void {
+    this.running = false
     this.observer?.disconnect()
     this.observer = undefined
+    this.longTaskObserver?.disconnect()
+    this.longTaskObserver = undefined
+    if (this.fpsRafId) {
+      cancelAnimationFrame(this.fpsRafId)
+      this.fpsRafId = undefined
+    }
+    this.fpsLastTime = undefined
+    this.fpsFrameCount = 0
   }
 
   /** Return the N most recent frames, oldest first. */
@@ -100,6 +176,34 @@ export class PerformanceMonitor {
   /** Total number of buffered frames. */
   get frameCount(): number {
     return this.buffer.length
+  }
+
+  /** Return the N most recent long-task entries, oldest first. */
+  getRecentLongTasks(count = 10): readonly PerformanceEntry[] {
+    return this.longTaskBuffer.slice(-count)
+  }
+
+  /** Total number of buffered long tasks. */
+  get longTaskCount(): number {
+    return this.longTaskBuffer.length
+  }
+
+  /** Most recent FPS reading, or 0 if none yet. */
+  getCurrentFps(): number {
+    if (this.fpsHistory.length === 0) return 0
+    return this.fpsHistory[this.fpsHistory.length - 1]!
+  }
+
+  /** Average FPS over the last `window` readings. */
+  getAverageFps(window = 10): number {
+    const recent = this.fpsHistory.slice(-window)
+    if (recent.length === 0) return 0
+    return recent.reduce((sum, fps) => sum + fps, 0) / recent.length
+  }
+
+  /** Full FPS history (copy), oldest first. */
+  getFpsHistory(): readonly number[] {
+    return [...this.fpsHistory]
   }
 
   private push(entry: LoAFEntry): void {

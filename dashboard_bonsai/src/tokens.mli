@@ -382,6 +382,11 @@ type semantic =
   | `Button_primary_border
   | `Button_primary_bg_hover
   | `Button_primary_bg_pressed
+  | `Button_ghost_bg
+  | `Button_ghost_fg
+  | `Button_ghost_border
+  | `Button_ghost_bg_hover
+  | `Button_ghost_bg_pressed
   | `State_hover_bg
   | `State_hover_fg
   | `State_hover_border

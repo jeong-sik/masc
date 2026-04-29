@@ -138,3 +138,13 @@ val get_context_markdown : planning_context -> string
 (** [get_context_markdown ctx] renders [ctx] as the Markdown
     document that round-trips through {!load}.  Sections in PDCA
     order with the canonical headings expected by the parser. *)
+
+(** {1 Test-visible helpers}
+    Pinned for behaviour-tests under {!test/test_planning_eio}. *)
+
+val find_substring_from :
+  string -> needle:string -> from:int -> int option
+(** [find_substring_from haystack ~needle ~from] returns
+    [Some i] for the first occurrence of [needle] at offset
+    [i >= from] in [haystack], or [None] when not found.  Returns
+    [None] when [from] exceeds [String.length haystack]. *)

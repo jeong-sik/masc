@@ -131,3 +131,21 @@ val get_agent_identity : string -> string * string
     each row.  Kept here so the cascade consumer can call it
     bare via include without opening
     [Dashboard_execution_helpers] separately. *)
+
+(** {1 Test-visible helpers}
+    Pinned for behaviour-tests under {!test/test_dashboard_keeper_metrics_10286}. *)
+
+val contains_ci : string -> string -> bool
+(** [contains_ci haystack needle] is a case-insensitive substring
+    check.  Returns [false] when [needle] is empty or longer than
+    [haystack]. *)
+
+val normalize_similarity_text : string -> string
+(** [normalize_similarity_text s] lowercases ASCII, replaces
+    non-word characters with spaces, collapses whitespace and
+    trims.  Used as the input normaliser for Jaccard similarity. *)
+
+val jaccard_similarity_text : string -> string -> float
+(** [jaccard_similarity_text a b] is the Jaccard index over the
+    token sets of {!normalize_similarity_text} [a] / [b].  Returns
+    [0.0] when either side has no tokens. *)

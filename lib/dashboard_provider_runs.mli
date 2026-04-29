@@ -87,3 +87,37 @@ val run_status_json :
     completed runs.  Pinned at the contract seam: drift to
     silent fallbacks would break operator-visible "run
     expired" feedback. *)
+
+(** {1 Provider snapshot inspection (test-visible)}
+    Pinned for behaviour-tests under
+    {!test/test_observability_provider_contracts}. *)
+
+type discovery_info = {
+  discovered_model : string option;
+  ctx_size : int option;
+  total_slots : int option;
+  busy_slots : int option;
+  idle_slots : int option;
+  healthy : bool;
+}
+
+type provider_snapshot = {
+  provider : string;
+  kind : string;
+  runtime_kind : string;
+  auth_kind : string;
+  status : string;
+  available : bool;
+  supports_single_agent_run : bool;
+  default_model : string option;
+  models : string list;
+  source : string;
+  endpoint_url : string option;
+  note : string option;
+  discovery : discovery_info option;
+}
+
+val provider_snapshot_by_name : string -> provider_snapshot option
+(** [provider_snapshot_by_name name] returns the snapshot for the
+    provider with [provider = name], or [None] when no matching
+    provider is registered. *)

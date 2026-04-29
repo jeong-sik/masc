@@ -93,3 +93,25 @@ val broadcast_namespace_truth_snapshot :
     96/min in fresh-server logs).
 
     Safe to call from any fiber — reads cached refs only. *)
+
+(** {1 Test-visible dedup state}
+    Pinned for behaviour-tests under
+    {!test/test_dashboard_namespace_truth} which need to reset the
+    dedup cache between scenarios. *)
+
+val _last_namespace_truth_snapshot_hash :
+  Digestif.SHA256.t option ref
+(** [_last_namespace_truth_snapshot_hash] is the dedup state for
+    {!broadcast_namespace_truth_snapshot}.  Holds the SHA-256 of
+    the most recently broadcast snapshot (with [generated_at]
+    stripped) or [None] when nothing has been broadcast yet.
+    Tests reset to [None] to force re-broadcast in scenarios
+    that exercise the dedup path. *)
+
+val should_broadcast_namespace_truth_snapshot :
+  Yojson.Safe.t -> bool
+(** [should_broadcast_namespace_truth_snapshot snapshot] computes
+    the SHA-256 of the [generated_at]-stripped form of [snapshot]
+    and returns [true] iff it differs from the previously
+    broadcast hash; updates {!_last_namespace_truth_snapshot_hash}
+    as a side effect.  Pinned at the dedup-contract seam. *)

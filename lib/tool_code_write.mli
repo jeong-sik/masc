@@ -73,6 +73,17 @@ type git_action =
   | Fetch
   | Clone
 
+val git_action_to_string : git_action -> string
+(** [git_action_to_string a] returns the canonical lowercase label
+    for [a] (matches one of {!valid_git_action_strings}).  Pinned
+    for behaviour-tests under {!test/test_types}. *)
+
+val git_action_of_string_opt : string -> git_action option
+(** [git_action_of_string_opt raw] is the inverse of
+    {!git_action_to_string}: trims and lowercases [raw] then
+    matches against the canonical labels.  Returns [None] when
+    [raw] doesn't match a known constructor. *)
+
 val valid_git_action_strings : string list
 (** [valid_git_action_strings] is the canonical lowercase label
     list (one per {!git_action} constructor: ["add"], ["commit"],

@@ -118,3 +118,20 @@ val default_dynamic_selector :
     - Low utilization on small local model -> minimal
       ([\[MergeContiguous\]]).
     - Default -> [\[PruneToolOutputs; MergeContiguous\]]. *)
+
+(** {1 Test-visible scoring helper} *)
+
+val score_messages :
+  Oas.Types.message list -> (int * float) list
+(** [score_messages msgs] returns
+    [(message_index, importance_score)] pairs for the input
+    message list.  Importance combines recency (quadratic ramp
+    over the message list) with role / tool weights.  Pinned for
+    behaviour-tests under {!test/test_context_compact_oas_coverage}. *)
+
+val small_local_ctx_floor : int
+(** [small_local_ctx_floor] is the env-driven context-window
+    floor (read once at module init) below which a local-model
+    keeper is treated as "small local" by
+    {!default_dynamic_selector}.  Pinned for behaviour-tests
+    under {!test/test_context_compact_oas_coverage}. *)

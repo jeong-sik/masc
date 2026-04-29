@@ -60,6 +60,18 @@ type assertion_kind = Coord_assertions.assertion_kind =
   | Current_task_set
   | Worktree_active
 
+val assertion_kind_to_string : assertion_kind -> string
+(** [assertion_kind_to_string k] returns the canonical lowercase
+    label for [k].  Re-export of
+    {!Coord_assertions.assertion_kind_to_string}; pinned for
+    behaviour-tests under {!test/test_types}. *)
+
+val all_assertion_kinds : assertion_kind list
+(** [all_assertion_kinds] is the canonical witness list — one
+    entry per {!assertion_kind} constructor.  Re-export of
+    {!Coord_assertions.all_assertion_kinds}; pinned for
+    behaviour-tests under {!test/test_types}. *)
+
 val valid_assertion_strings : string list
 (** [valid_assertion_strings] is the canonical list of
     assertion kind labels (one per constructor).  Used by error

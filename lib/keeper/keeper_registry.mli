@@ -314,8 +314,10 @@ val prepare_turn_retry_after_compaction :
 val mark_turn_gate_rejected_by_name : string -> unit
 
 (** Mark the end of a keeper turn. Clears [current_turn_observation]
-    so the composite observer reverts to idle. Idempotent — safe to
-    call in finally blocks even if [mark_turn_started] was not called. *)
+    so the composite observer reverts to idle and stamps
+    [runtime.usage.last_turn_ts] for the completed turn. Idempotent —
+    safe to call in finally blocks even if [mark_turn_started] was not
+    called. *)
 val mark_turn_finished : base_path:string -> string -> unit
 
 (** Record the verdict reasons from a [keeper_cycle_decision] that

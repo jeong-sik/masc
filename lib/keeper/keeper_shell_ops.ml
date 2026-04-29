@@ -1,6 +1,58 @@
 open Keeper_types
 open Keeper_exec_shared
 
+let split_once_on_substring s sep =
+  let len = String.length s in
+  let sep_len = String.length sep in
+  if sep_len = 0 then None
+  else
+    let rec loop i =
+      if i + sep_len > len then None
+      else if String.sub s i sep_len = sep then
+        Some
+          ( String.sub s 0 i,
+            String.sub s (i + sep_len) (len - i - sep_len) )
+      else loop (i + 1)
+    in
+    loop 0
+
+let split_shell_chain_for_retry cmd =
+  let rec split_all sep acc s =
+    match split_once_on_substring s sep with
+    | None -> List.rev (String.trim s :: acc)
+    | Some (left, right) -> split_all sep (String.trim left :: acc) right
+  in
+  let commands =
+    if String_util.contains_substring cmd "&&" then split_all "&&" [] cmd
+    else if String_util.contains_substring cmd "||" then split_all "||" [] cmd
+    else if String_util.contains_substring cmd ";" then split_all ";" [] cmd
+    else [ cmd ]
+  in
+  let commands = List.filter (fun s -> String.trim s <> "") commands in
+  match commands with
+  | _ :: _ :: _ when List.length commands <= 8 -> Some commands
+  | _ -> None
+
+let readonly_chain_rewrite_extra ~category cmd =
+  if not (String.equal category "chaining") then []
+  else
+    match split_shell_chain_for_retry cmd with
+    | None -> []
+    | Some commands ->
+        [
+          "rewrite_kind", `String "split_shell_chain";
+          ( "rewrite_hint",
+            `String
+              "Retry each split command as a separate keeper_shell op=bash call in order; keep the same cwd." );
+          "split_commands", `List (List.map (fun c -> `String c) commands);
+          ( "suggested_calls",
+            `List
+              (List.map
+                 (fun c ->
+                   `Assoc [ "op", `String "bash"; "cmd", `String c ])
+                 commands) );
+        ]
+
 let handle_keeper_shell
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
       ~(exec_cache : Masc_exec.Exec_cache.t option)
@@ -896,11 +948,12 @@ let handle_keeper_shell
              ~hint
              ~diag:(Keeper_shell_shared.diagnosis_of_readonly_category category)
              ~extra:
-               [
-                 "op", `String op;
-                 "blocked_pattern", `String pat;
-                 "category", `String category;
-               ]
+               ([
+                  "op", `String op;
+                  "blocked_pattern", `String pat;
+                  "category", `String category;
+                ]
+                @ readonly_chain_rewrite_extra ~category cmd_str)
              ())
       | None ->
         (match cwd_target () with

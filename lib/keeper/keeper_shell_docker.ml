@@ -23,8 +23,15 @@ let docker_exec_failure_message ~image ~status ~output =
   let output_label =
     if String.trim truncated = "" then "<no output>" else truncated
   in
-  Printf.sprintf "sandbox docker exec failed (%s, %s): %s"
-    image (docker_exec_status_label status) output_label
+  let missing_cwd_hint =
+    if String_util.contains_substring output "cd:"
+       && String_util.contains_substring output "No such file or directory"
+    then
+      " hint=cwd_not_directory: create or repair the sandbox repo/worktree first (keeper_shell op=git_clone, then git_worktree/masc_worktree_create for repos/<repo>/.worktrees/<task>)."
+    else ""
+  in
+  Printf.sprintf "sandbox docker exec failed (%s, %s): %s%s"
+    image (docker_exec_status_label status) output_label missing_cwd_hint
 
 (* ── Sandbox GH_TOKEN warn dedup ───────────────────────────
 

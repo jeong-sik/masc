@@ -1,0 +1,198 @@
+(** Governance_registry — Governable parameter declarations.
+
+    Each parameter is registered with {!Runtime_params.register} at
+    module load.  Public params expose the [_ Runtime_params.param]
+    handle so callers reach values via [Runtime_params.get
+    Governance_registry.<param>].
+
+    Surfaces (groups of related params published as a single
+    governance unit, see {!surface}):
+
+    - [board_policy] — message retention cap (low risk)
+    - [inference_config] — default model + timeout (high risk)
+    - [cost_policy] — per-session cost ceiling (medium risk)
+    - [keeper_lifecycle] — heartbeat / supervisor / restart limits
+      (medium risk)
+    - [keeper_handoff] — handoff threshold / cooldown / pressure
+      (medium risk)
+    - [keeper_diagnostics] — snapshot / hb tuning / profiling ring
+      (medium risk)
+    - [relay_heuristic] — token + cost estimates (low risk, not
+      empirically calibrated)
+    - [drift_guard] — handoff drift classification thresholds
+      (low risk, initial estimates)
+    - [keeper_turn] / [keeper_compaction] / [keeper_proactive] /
+      [keeper_rules] — keeper LLM tuning surfaces
+    - [dashboard] — display-only thresholds + truncation lengths
+
+    Internal: 6 deserialization / validation helpers stay
+    private — \[validate_float_range], \[validate_int_range],
+    \[deserialize_float], \[deserialize_int],
+    \[deserialize_string], \[deserialize_bool].  Plus 25+
+    keeper.turn / keeper.compaction / keeper.proactive /
+    keeper.rule param handles + \[message_max_count] +
+    \[_cost_max_session_usd] + \[inference_timeout] are
+    intentionally unexported — these are reachable only via
+    {!Runtime_params.get_by_key} (governance UI) and are pinned
+    in the {!surfaces} catalog by string key. *)
+
+(** {1 Inference} *)
+
+val inference_default_model : string Runtime_params.param
+(** Default LLM model label.  Validation: 1-100 chars. *)
+
+(** {1 Keeper lifecycle} *)
+
+val keeper_max_hb_failures : int Runtime_params.param
+(** Heartbeat consecutive-failure budget.  Range \[2, 50]. *)
+
+val keeper_max_turn_failures : int Runtime_params.param
+(** Turn consecutive-failure budget.  Range \[3, 100]. *)
+
+val keeper_supervisor_sweep_sec : float Runtime_params.param
+(** Supervisor sweep interval (seconds).  Range \[10.0, 120.0]. *)
+
+val keeper_supervisor_max_restarts : int Runtime_params.param
+(** Crash restart budget.  Range \[1, 50]. *)
+
+val keeper_keepalive_interval_sec : int Runtime_params.param
+(** Heartbeat interval (seconds).  Range \[5, 300]. *)
+
+val keeper_dead_ttl_sec : float Runtime_params.param
+(** Dead-state retention (seconds).  Range \[60.0, 1 day]. *)
+
+(** {1 Keeper handoff} *)
+
+val keeper_handoff_threshold : float Runtime_params.param
+(** Default handoff context-ratio threshold.
+    Range \[0.5, 0.99].  Default 0.85. *)
+
+val keeper_handoff_cooldown_sec : int Runtime_params.param
+(** Post-handoff suppression window (seconds).
+    Range \[30, 3600].  Default 300. *)
+
+val keeper_handoff_pressure_threshold : float Runtime_params.param
+(** Context ratio above which handoff-pressure alert fires.
+    Range \[0.5, 0.99].  Default 0.88. *)
+
+(** {1 Keeper diagnostics} *)
+
+val keeper_snapshot_sec : int Runtime_params.param
+(** Snapshot capture interval (seconds).  Range \[15, 3600]. *)
+
+val keeper_work_as_hb_enabled : bool Runtime_params.param
+(** Enable work-as-heartbeat fallback. *)
+
+val keeper_work_as_hb_max_silence_sec : float Runtime_params.param
+(** Maximum silence allowed in work-as-heartbeat mode (seconds).
+    Range \[10.0, 600.0]. *)
+
+val keeper_smart_hb_enabled : bool Runtime_params.param
+(** Enable adaptive smart-heartbeat scheduling. *)
+
+val keeper_stage_timing_ring_size : int Runtime_params.param
+(** Stage-timing ring buffer size.  Applied on fiber restart only —
+    runtime mutation requires keeper restart.  Range \[10, 1000]. *)
+
+(** {1 Relay heuristic (uncalibrated)} *)
+
+val relay_tokens_per_user_msg : int Runtime_params.param
+(** Token estimate for a user message.  Default 150.
+    Order-of-magnitude guess, no formal benchmark. *)
+
+val relay_tokens_per_assistant_msg : int Runtime_params.param
+(** Token estimate for an assistant message.  Default 500. *)
+
+val relay_tokens_per_tool_call : int Runtime_params.param
+(** Token estimate for a tool call.  Default 200. *)
+
+val relay_tokens_per_tool_result : int Runtime_params.param
+(** Token estimate for a tool result.  Default 300. *)
+
+val relay_cost_large_file_read : int Runtime_params.param
+(** Token cost estimate for a large-file read task.  Default 10000. *)
+
+val relay_cost_per_file_edit : int Runtime_params.param
+(** Token cost estimate per file edit.  Default 3000. *)
+
+val relay_cost_long_running : int Runtime_params.param
+(** Token cost estimate for a long-running task.  Default 20000. *)
+
+val relay_cost_exploration : int Runtime_params.param
+(** Token cost estimate for an exploration task.  Default 15000. *)
+
+val relay_cost_simple : int Runtime_params.param
+(** Token cost estimate for a simple task.  Default 1000. *)
+
+(** {1 Drift guard (uncalibrated)} *)
+
+val drift_factual_coverage_floor : float Runtime_params.param
+(** Token-coverage floor — handoffs below this are flagged as
+    factual drift.  Range \[0.0, 1.0].  Default 0.55.  Initial
+    estimate; not corpus-calibrated. *)
+
+val drift_factual_size_ratio_floor : float Runtime_params.param
+(** Size-ratio floor (handoff/original) — captures
+    "content replaced" vs "content edited".  Range \[0.0, 1.0].
+    Default 0.6. *)
+
+val drift_structural_divergence_threshold : float Runtime_params.param
+(** Cosine-jaccard divergence threshold for structural drift.
+    Range \[0.0, 1.0].  Default 0.18. *)
+
+(** {1 Dashboard rendering} *)
+
+val dashboard_max_path_length : int Runtime_params.param
+(** Path truncation cap (chars).  Range \[10, 200].  Default 30. *)
+
+val dashboard_max_message_length : int Runtime_params.param
+(** Message-body truncation cap (chars).  Range \[10, 500].
+    Default 35. *)
+
+val dashboard_max_pending_tasks : int Runtime_params.param
+(** Pending-task display cap.  Range \[1, 50].  Default 5. *)
+
+val dashboard_max_recent_messages : int Runtime_params.param
+(** Recent-message display cap.  Range \[1, 50].  Default 5. *)
+
+val dashboard_min_border_length : int Runtime_params.param
+(** Section-border minimum length.  Range \[20, 200].  Default 45. *)
+
+val dashboard_agent_quiet_threshold_sec : float Runtime_params.param
+(** Quiet-agent-warning threshold (seconds).
+    Range \[30.0, 1 day]. *)
+
+val dashboard_agent_stuck_threshold_sec : float Runtime_params.param
+(** Stuck-agent-warning threshold (seconds).
+    Range \[60.0, 7 days]. *)
+
+(** {1 Surface catalog} *)
+
+type surface = {
+  id : string;
+  description : string;
+  risk : string;
+  param_keys : string list;
+}
+(** Group of related params published as a single governance unit.
+    [risk] is one of ["low"] / ["medium"] / ["high"] (not enforced
+    by the type system — pinned at the data table). *)
+
+val surfaces : surface list
+(** [surfaces] is the catalog of governance surfaces in
+    registration order.  Used by the dashboard surfaces panel
+    via {!surfaces_json} and by tests for invariant checks
+    (every published key has a registered param). *)
+
+(** {1 Initialization + JSON} *)
+
+val ensure_init : unit -> unit
+(** [ensure_init ()] forces module-load side effects so every
+    param is registered before
+    {!Runtime_params.restore} runs.  Called from server bootstrap.
+    Touches each param via [Runtime_params.get] — drift here would
+    leave some params unregistered, breaking restore. *)
+
+val surfaces_json : unit -> Yojson.Safe.t
+(** [surfaces_json ()] renders {!surfaces} as a JSON array for
+    the dashboard surfaces endpoint. *)

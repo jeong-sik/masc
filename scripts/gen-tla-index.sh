@@ -151,11 +151,12 @@ while IFS= read -r tla; do
   done < <(find "$dir" -maxdepth 1 -type f -name "${base}-*.cfg" 2>/dev/null | sort)
 
   # Aggregate cfg invariants.
-  cfg_count=${#cfgs[@]}
-  TOTAL_CFG=$((TOTAL_CFG + cfg_count))
+  cfg_count=0
   buggy_count=0
   inv_summary=""
-  for c in "${cfgs[@]}"; do
+  for c in "${cfgs[@]:-}"; do
+    [[ -z "$c" ]] && continue
+    cfg_count=$((cfg_count + 1))
     cb="$(basename "$c" .cfg)"
     if [[ "$cb" == *-buggy* ]]; then
       buggy_count=$((buggy_count + 1))
@@ -167,6 +168,7 @@ while IFS= read -r tla; do
       inv_summary+="${label}={${inv}} "
     fi
   done
+  TOTAL_CFG=$((TOTAL_CFG + cfg_count))
   TOTAL_CFG_BUGGY=$((TOTAL_CFG_BUGGY + buggy_count))
   inv_summary="${inv_summary% }"
   [[ -z "$inv_summary" ]] && inv_summary="-"

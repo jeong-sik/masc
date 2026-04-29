@@ -149,7 +149,7 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 
 | File | Module | Kind | cfg | buggy | Invariants / Properties | Last Modified |
 |------|--------|------|-----|-------|-------------------------|---------------|
-| MultimodalArtifact.tla | MultimodalArtifact | manual | 1 | 0 | clean={inv:TypeOK, inv:ArtifactIdMatchesKey, inv:DAGRefIntegrity, inv:NoSelfLoops, inv:ProvenanceOriginsLive} | 2026-04-29 |
+| MultimodalArtifact.tla | MultimodalArtifact | manual | 1 | 0 | clean={inv:TypeOK, inv:ArtifactIdMatchesKey, inv:DAGRefIntegrity, inv:NoSelfLoops, inv:DAGAcyclic, inv:ProvenanceOriginsLive} | 2026-04-29 |
 | MultimodalHydrator.tla | MultimodalHydrator | manual | 1 | 0 | clean={inv:TypeOK, inv:NoSelfLoop, inv:NoCycleBounded, inv:DedupeIdempotent} | 2026-04-29 |
 
 ### specs/resilience (2 specs)

@@ -1413,7 +1413,10 @@ let broadcast_lifecycle_events ~(name : string)
              ( "trigger",
                match compaction.trigger with
                | Some reason -> `String reason
-               | None -> `String compaction.decision );
+               | None ->
+                   `String
+                     (Keeper_exec_context.compaction_decision_to_string
+                        compaction.decision) );
              ("ts_unix", `Float now_ts);
            ])
      with

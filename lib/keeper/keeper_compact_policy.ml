@@ -23,14 +23,38 @@ let emergency_compact_ratio_threshold = 0.8
 let tool_heavy_msg_threshold = 40
 let tool_heavy_ratio_floor = 0.15
 
+type compaction_decision =
+  | Applied of string
+  | Blocked_below_thresholds
+  | Skipped_no_checkpoint
+  | Skipped_continuity_reflection of {
+      hold_s : float;
+      cooldown_sec : int;
+    }
+
+let compaction_decision_to_string = function
+  | Applied reason -> "applied:" ^ reason
+  | Blocked_below_thresholds -> "blocked:below_thresholds"
+  | Skipped_no_checkpoint -> "skipped:no_checkpoint"
+  | Skipped_continuity_reflection { hold_s; cooldown_sec } ->
+      Printf.sprintf
+        "skipped:continuity_reflection(%0.0fs<%ds)"
+        hold_s cooldown_sec
+
+let compaction_decision_applied = function
+  | Applied _ -> true
+  | Blocked_below_thresholds
+  | Skipped_no_checkpoint
+  | Skipped_continuity_reflection _ -> false
+
 let compaction_policy_of_keeper (meta : keeper_meta) : float * int * int =
   (meta.compaction.ratio_gate, meta.compaction.message_gate, meta.compaction.token_gate)
 
-let compact_if_needed
+let compact_if_needed_typed
     ~(meta : keeper_meta)
     ~(now_ts : float)
     (ctx : working_context) :
-    working_context * string option * string =
+    working_context * string option * compaction_decision =
   let ratio = context_ratio ctx in
   let msg_count = message_count ctx in
   (* NOTE(boundary): tok_count is raw infrastructure — ideally ratio alone
@@ -68,29 +92,26 @@ let compact_if_needed
     && msg_count > tool_heavy_msg_threshold
     && ratio > tool_heavy_ratio_floor
   in
-  let trigger_reason =
+  let decision =
     if not reflection_ready then
-      Some
-        (Printf.sprintf
-           "skipped:continuity_reflection(%0.0fs<%ds)"
-           hold_s meta.compaction.cooldown_sec)
+      Skipped_continuity_reflection
+        { hold_s; cooldown_sec = meta.compaction.cooldown_sec }
     else if ratio >= ratio_gate then
-      Some (Printf.sprintf "ratio(%.4f>=%.4f)" ratio ratio_gate)
+      Applied (Printf.sprintf "ratio(%.4f>=%.4f)" ratio ratio_gate)
     else if message_gate > 0 && msg_count >= message_gate then
-      Some (Printf.sprintf "messages(%d>=%d)" msg_count message_gate)
+      Applied (Printf.sprintf "messages(%d>=%d)" msg_count message_gate)
     else if token_gate > 0 && tok_count >= token_gate then
-      Some (Printf.sprintf "tokens(%d>=%d)" tok_count token_gate)
+      Applied (Printf.sprintf "tokens(%d>=%d)" tok_count token_gate)
     else if tool_heavy then
-      Some (Printf.sprintf "tool_heavy(msgs=%d,ratio=%.4f)" msg_count ratio)
-    else None
+      Applied (Printf.sprintf "tool_heavy(msgs=%d,ratio=%.4f)" msg_count ratio)
+    else Blocked_below_thresholds
   in
-  match trigger_reason with
-  | None -> (ctx, None, "blocked:below_thresholds")
-  | Some reason ->
-      if String.starts_with ~prefix:"skipped:" reason then
-        (ctx, None, reason)
-      else
-        (* PreCompact observability: log strategy and context state (#3165) *)
+  match decision with
+  | Blocked_below_thresholds
+  | Skipped_no_checkpoint
+  | Skipped_continuity_reflection _ -> (ctx, None, decision)
+  | Applied reason ->
+      (* PreCompact observability: log strategy and context state (#3165) *)
       let strategies = Context_compact_oas.[
         PruneToolOutputs; MergeContiguous;
         DropLowImportance]
@@ -205,4 +226,8 @@ let compact_if_needed
           (Printf.sprintf
              "post_compact keeper=%s trigger=%s saved_tokens=%d"
              meta.name reason saved_tokens);
-        (compacted_ctx, Some reason, "applied:" ^ reason)
+        (compacted_ctx, Some reason, decision)
+
+let compact_if_needed ~meta ~now_ts ctx =
+  let ctx, trigger, decision = compact_if_needed_typed ~meta ~now_ts ctx in
+  (ctx, trigger, compaction_decision_to_string decision)

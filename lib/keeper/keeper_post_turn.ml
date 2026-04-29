@@ -57,7 +57,7 @@ type compaction_event = {
   applied : bool;
   failure_reason : string option;
   trigger : string option;
-  decision : string;
+  decision : Keeper_compact_policy.compaction_decision;
   before_tokens : int;
   after_tokens : int;
   saved_tokens : int;
@@ -294,7 +294,7 @@ let apply_post_turn_lifecycle
     ~(current_turn_overflow_blocker : string option)
     ~(checkpoint : Oas.Checkpoint.t option) : post_turn_lifecycle =
   let now_ts = Time_compat.now () in
-  let no_checkpoint_decision = "skipped:no_checkpoint" in
+  let no_checkpoint_decision = Keeper_compact_policy.Skipped_no_checkpoint in
   let apply_continuity_summary
       ~(meta : keeper_meta)
       ~(ctx : working_context)
@@ -362,7 +362,9 @@ let apply_post_turn_lifecycle
                 {
                   rt.compaction_rt with
                   last_check_ts = now_ts;
-                  last_decision = no_checkpoint_decision;
+                  last_decision =
+                    Keeper_compact_policy.compaction_decision_to_string
+                      no_checkpoint_decision;
                 };
             })
           meta
@@ -409,10 +411,10 @@ let apply_post_turn_lifecycle
       in
       let before_tokens = token_count ctx in
       let compacted_ctx, trigger, decision =
-        Keeper_compact_policy.compact_if_needed ~meta:base_meta ~now_ts ctx
+        Keeper_compact_policy.compact_if_needed_typed ~meta:base_meta ~now_ts ctx
       in
       let compaction_decided =
-        String.starts_with ~prefix:"applied:" decision
+        Keeper_compact_policy.compaction_decision_applied decision
       in
       (* Attempt save before updating meta so that a save failure is treated as
          compaction not applied — keeping ctx/checkpoint/metrics consistent. *)
@@ -492,7 +494,9 @@ let apply_post_turn_lifecycle
                     if effective_compaction_applied then after_tokens
                     else rt.compaction_rt.last_after_tokens;
                   last_check_ts = now_ts;
-                  last_decision = decision;
+                  last_decision =
+                    Keeper_compact_policy.compaction_decision_to_string
+                      decision;
                 };
             })
           base_meta
@@ -703,11 +707,11 @@ let recover_latest_checkpoint_for_overflow_retry
         forced_overflow_retry_meta meta ~turn_generation ~now_ts
       in
       let compacted_ctx, trigger, base_decision =
-        Keeper_compact_policy.compact_if_needed ~meta:retry_meta ~now_ts ctx
+        Keeper_compact_policy.compact_if_needed_typed ~meta:retry_meta ~now_ts ctx
       in
       let after_tokens = token_count compacted_ctx in
       let compaction_applied =
-        String.starts_with ~prefix:"applied:" base_decision
+        Keeper_compact_policy.compaction_decision_applied base_decision
       in
       let meaningful_reduction = after_tokens < before_tokens in
       if not (compaction_applied && meaningful_reduction) then None

@@ -16,7 +16,7 @@ const COLORS: readonly [string, string, string, string, string] = [
   '#0e6e7e',
   '#14919b',
   'var(--cyan)',
-]
+] as const
 
 type HeatmapCanvasContext = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D
 

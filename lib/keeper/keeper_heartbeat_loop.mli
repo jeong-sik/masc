@@ -11,6 +11,9 @@ val repair_identity_drift_for_keepalive :
 
 val keeper_agent_status : keeper_meta -> Types.agent_status
 
+val repair_identity_drift_for_keepalive :
+  ctx:'a context -> keeper_meta -> keeper_meta option
+
 val sync_keeper_presence :
   ctx:'a context ->
   meta_current:keeper_meta ->

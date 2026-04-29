@@ -62,6 +62,11 @@ type failure_reason =
           persisting [meta.paused = true] instead so an operator must
           investigate the underlying cascade/provider/fd issue before
           resuming the keeper. *)
+  | Oas_timeout_budget_loop of { count : int }
+      (** Latched when the same keeper exhausts the OAS turn budget on
+          consecutive cycles. This is a provider/cascade/runtime throughput
+          failure, so the supervisor pauses instead of restarting into the
+          same slow model and burning another multi-minute budget. *)
   | Ambiguous_partial_commit of ambiguous_partial_commit
   | Fiber_unresolved
   | Exception of string

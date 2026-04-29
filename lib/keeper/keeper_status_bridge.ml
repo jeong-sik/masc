@@ -255,6 +255,14 @@ let runtime_blocker_surface_of_legacy_string reason cls =
 let runtime_blocker_surface_of_failure_reason
     (reason : Keeper_registry.failure_reason) =
   match reason with
+  | Keeper_registry.Oas_timeout_budget_loop { count } ->
+      Some
+        (runtime_blocker_surface_of_typed_class
+           ~summary:
+             (Printf.sprintf
+                "OAS budget timeout repeated %d consecutive cycle(s); keeper was auto-paused before restart loop."
+                count)
+           Oas_timeout_budget)
   | Keeper_registry.Ambiguous_partial_commit { kind; detail } ->
       let blocker_class =
         match kind with

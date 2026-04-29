@@ -49,6 +49,11 @@ let test_failure_reason_to_string_noop () =
        (Stale_turn_timeout
           (Noop_failure_loop { noop_count = 4 })))
 
+let test_failure_reason_to_string_oas_timeout_budget_loop () =
+  r "Oas_timeout_budget_loop includes count"
+    "oas_timeout_budget_loop(count=3)"
+    (failure_reason_to_string (Oas_timeout_budget_loop { count = 3 }))
+
 let test_cohort_key_collapses_subclasses () =
   (* The cohort key intentionally ignores the sub-class — every stale
      kill is one cohort for dashboard rate computation.  Operators
@@ -66,6 +71,11 @@ let test_cohort_key_collapses_subclasses () =
   r "Noop_failure_loop cohort_key" "stale_turn_timeout"
     (failure_reason_cohort_key
        (Some (Stale_turn_timeout (Noop_failure_loop { noop_count = 1 }))))
+
+let test_oas_timeout_budget_loop_cohort_key () =
+  r "Oas_timeout_budget_loop cohort_key" "oas_timeout_budget_loop"
+    (failure_reason_cohort_key
+       (Some (Oas_timeout_budget_loop { count = 3 })))
 
 let () =
   Alcotest.run "stale_kill_class"
@@ -86,10 +96,14 @@ let () =
             test_failure_reason_to_string_in_turn;
           Alcotest.test_case "Stale_turn_timeout(Noop_failure_loop) wraps"
             `Quick test_failure_reason_to_string_noop;
+          Alcotest.test_case "Oas_timeout_budget_loop wraps" `Quick
+            test_failure_reason_to_string_oas_timeout_budget_loop;
         ] );
       ( "failure_reason_cohort_key",
         [
           Alcotest.test_case "all sub-classes collapse to one cohort"
             `Quick test_cohort_key_collapses_subclasses;
+          Alcotest.test_case "Oas_timeout_budget_loop cohort" `Quick
+            test_oas_timeout_budget_loop_cohort_key;
         ] );
     ]

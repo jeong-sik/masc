@@ -11,12 +11,11 @@
 #
 # What it sets:
 #   OLLAMA_KEEP_ALIVE   -1     persistent model load (no 5-minute unload race)
-#   OLLAMA_NUM_PARALLEL 4      allow 4 concurrent inference requests instead
-#                              of serializing the keeper fleet through one
-#                              slot (the symptom in #10828 fleet-batch
-#                              termination logs: 11 keepers stalling on the
-#                              same turn because the lone 27B runner queued
-#                              all of them)
+#   OLLAMA_NUM_PARALLEL 1      keep the 27B nvfp4 runner single-flight by
+#                              default. qwen3.6 with 262k context can stall
+#                              tiny probes under parallel=2; use a higher
+#                              OLLAMA_NUM_PARALLEL_TARGET only after a local
+#                              runtime probe proves the machine can absorb it.
 #
 # What it does NOT do:
 #   - install ollama (assumed already present at /Applications/Ollama.app)
@@ -32,8 +31,8 @@
 
 set -euo pipefail
 
-KEEP_ALIVE_TARGET="-1"
-NUM_PARALLEL_TARGET="4"
+KEEP_ALIVE_TARGET="${OLLAMA_KEEP_ALIVE_TARGET:--1}"
+NUM_PARALLEL_TARGET="${OLLAMA_NUM_PARALLEL_TARGET:-1}"
 
 usage() {
   sed -n '1,32p' "$0"

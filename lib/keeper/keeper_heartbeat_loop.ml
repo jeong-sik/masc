@@ -488,7 +488,7 @@ let run_keepalive_unified_turn
                   Log.Keeper.error
                     "%s: %d consecutive oas_timeout_budget strikes \
                      (>= %d) — promoting to Keeper_fiber_crash for \
-                     sweep_and_recover restart"
+                     supervisor auto-pause"
                     keeper_name strikes Keeper_turn_slot.oas_timeout_budget_strike_limit;
                   Prometheus.inc_counter
                     Prometheus.metric_keeper_oas_timeout_budget_strike
@@ -499,15 +499,13 @@ let run_keepalive_unified_turn
                   Keeper_turn_slot.reset_budget_exhaustion ~keeper_name;
                   Keeper_registry.set_failure_reason
                     ~base_path:ctx.config.base_path keeper_name
-                    (Some (Keeper_registry.Exception
-                      (Printf.sprintf
-                        "%d consecutive oas_timeout_budget strikes"
-                        strikes)));
+                    (Some (Keeper_registry.Oas_timeout_budget_loop
+                             { count = strikes }));
                   raise Keeper_registry.Keeper_fiber_crash
                 end else begin
                   Log.Keeper.warn
                     "%s: oas_timeout_budget strike %d/%d \
-                     (next strike will trigger fiber crash + restart)"
+                     (next strike will trigger fiber crash + auto-pause)"
                     keeper_name strikes Keeper_turn_slot.oas_timeout_budget_strike_limit;
                   Prometheus.inc_counter
                     Prometheus.metric_keeper_oas_timeout_budget_strike

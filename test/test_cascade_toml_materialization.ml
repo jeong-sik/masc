@@ -176,6 +176,22 @@ keep_alive = "30m"
         "30m"
         (json |> member "ollama_only_keep_alive" |> to_string)
 
+let test_num_ctx_field_is_parsed () =
+  match
+    Masc_mcp.Cascade_toml_materializer.render_toml_string_to_json_string
+      {|
+[ollama_only]
+models = ["ollama:qwen3.6:27b-coding-nvfp4"]
+num_ctx = 32768
+|}
+  with
+  | Error msg -> failf "expected num_ctx to parse, got: %s" msg
+  | Ok json_str ->
+      let json = Yojson.Safe.from_string json_str in
+      check int "num_ctx key is rendered"
+        32768
+        (json |> member "ollama_only_num_ctx" |> to_int)
+
 let test_keep_alive_absent_is_backward_compatible () =
   match
     Masc_mcp.Cascade_toml_materializer.render_toml_string_to_json_string
@@ -492,6 +508,8 @@ let () =
             test_keep_alive_field_is_parsed;
           test_case "keep_alive duration string is parsed" `Quick
             test_keep_alive_duration_string_is_parsed;
+          test_case "num_ctx field is parsed" `Quick
+            test_num_ctx_field_is_parsed;
           test_case "keep_alive absent is backward compatible" `Quick
             test_keep_alive_absent_is_backward_compatible;
           test_case "loader catalog exposes fallback_cascade" `Quick

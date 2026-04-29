@@ -143,6 +143,31 @@ let test_applies_turn_execution_overrides () =
     (Some "8192")
     (List.assoc_opt "MASC_KEEPER_UNIFIED_MAX_TOKENS" overrides)
 
+let test_applies_watchdog_overrides () =
+  let doc = parse_or_fail
+    "[watchdog]\n\
+     stale_sec = 600\n\
+     poll_sec = 15\n\
+     noop_threshold = 4\n\
+     grace_sec = 900\n"
+  in
+  let count, overrides =
+    Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
+  in
+  check int "applied 4" 4 count;
+  check (option string) "watchdog stale threshold"
+    (Some "600")
+    (List.assoc_opt "MASC_KEEPER_WATCHDOG_STALE_SEC" overrides);
+  check (option string) "watchdog poll"
+    (Some "15")
+    (List.assoc_opt "MASC_KEEPER_WATCHDOG_POLL_SEC" overrides);
+  check (option string) "watchdog noop threshold"
+    (Some "4")
+    (List.assoc_opt "MASC_KEEPER_WATCHDOG_NOOP_THRESHOLD" overrides);
+  check (option string) "watchdog grace"
+    (Some "900")
+    (List.assoc_opt "MASC_KEEPER_WATCHDOG_GRACE_SEC" overrides)
+
 let test_caller_env_wins_over_toml () =
   let doc = parse_or_fail "[autonomous]\nmax_turns_per_call = 7\n" in
   let fake_env =
@@ -318,6 +343,7 @@ let () =
         ; test_case "applies autonomous max_turns_per_call" `Quick test_applies_autonomous_max_turns
         ; test_case "applies multiple overrides" `Quick test_applies_multiple_overrides
         ; test_case "applies turn execution overrides" `Quick test_applies_turn_execution_overrides
+        ; test_case "applies watchdog overrides" `Quick test_applies_watchdog_overrides
         ; test_case "caller env wins over TOML" `Quick test_caller_env_wins_over_toml
         ; test_case "unknown keys ignored" `Quick test_unknown_keys_ignored
         ; test_case "parse error returns Error" `Quick test_parse_error_returns_error

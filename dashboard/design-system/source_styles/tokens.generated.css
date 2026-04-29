@@ -191,6 +191,9 @@
   --vote-up: #ff4500;  /* Reddit-canonical upvote orange-red */
   --vote-down: #7193ff;  /* Reddit-canonical downvote blue-violet */
   --vote-hover: #ccc;  /* Vote button hover (3-digit short hex) */
+  --text-slate: #b0bfd4;  /* Custom cool gray (no Tailwind exact match) */
+  --warn-bright: #f97316;  /* Tailwind orange-500 (FSM Compacting) */
+  --bad-light: #f87171;  /* Tailwind red-400 (softer than --bad) */
 }
 
 :root {

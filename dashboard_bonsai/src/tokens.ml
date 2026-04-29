@@ -191,6 +191,9 @@ type semantic =
   | `Vote_up
   | `Vote_down
   | `Vote_hover
+  | `Text_slate
+  | `Warn_bright
+  | `Bad_light
   | `Ok_soft
   | `Ok_fg
   | `Ok_border
@@ -411,8 +414,6 @@ type semantic =
   | `Color_text_dim
   | `Color_accent_brass
   | `Color_accent_soft
-  | `Bad_light
-  | `Warn_bright
   | `Color_keeper_1_glow
   | `Color_keeper_2_glow
   | `Color_keeper_3_glow
@@ -617,6 +618,9 @@ let name_of = function
   | `Vote_up -> "vote-up"
   | `Vote_down -> "vote-down"
   | `Vote_hover -> "vote-hover"
+  | `Text_slate -> "text-slate"
+  | `Warn_bright -> "warn-bright"
+  | `Bad_light -> "bad-light"
   | `Ok_soft -> "ok-soft"
   | `Ok_fg -> "ok-fg"
   | `Ok_border -> "ok-border"
@@ -837,8 +841,6 @@ let name_of = function
   | `Color_text_dim -> "color-text-dim"
   | `Color_accent_brass -> "color-accent-brass"
   | `Color_accent_soft -> "color-accent-soft"
-  | `Bad_light -> "bad-light"
-  | `Warn_bright -> "warn-bright"
   | `Color_keeper_1_glow -> "color-keeper-1-glow"
   | `Color_keeper_2_glow -> "color-keeper-2-glow"
   | `Color_keeper_3_glow -> "color-keeper-3-glow"

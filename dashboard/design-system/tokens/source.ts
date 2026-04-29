@@ -380,6 +380,20 @@ export const raw: ReadonlyArray<TokenBase> = (() => {
   out.push(t("vote-up",         "#ff4500", "raw", "color", "Reddit-canonical upvote orange-red"));
   out.push(t("vote-down",       "#7193ff", "raw", "color", "Reddit-canonical downvote blue-violet"));
   out.push(t("vote-hover",      "#ccc",    "raw", "color", "Vote button hover (3-digit short hex)"));
+  // Iter 2c-10: canon-adjacent but distinct semantic shades.
+  //   text-slate (#b0bfd4) — custom dashboard cool gray, between the
+  //     text-* family above and the slate-* Tailwind aliases. Custom hue.
+  //   warn-bright (#f97316) — Tailwind orange-500. Distinct from --warn
+  //     (#fbbf24, slightly muted gold); used for FSM "Compacting" state
+  //     where a hotter orange reads as "actively churning" vs --warn's
+  //     "needs attention".
+  //   bad-light (#f87171) — Tailwind red-400. Lighter than --bad
+  //     (#ef4444, red-500) but a separate hex value, NOT algorithmically
+  //     derived. Used where a softer red is needed (toasts, empty states).
+  out.push(t("text-slate",      "#b0bfd4", "raw", "color", "Custom cool gray (no Tailwind exact match)"));
+  out.push(t("warn-bright",     "#f97316", "raw", "color", "Tailwind orange-500 (FSM Compacting)"));
+  out.push(t("bad-light",       "#f87171", "raw", "color", "Tailwind red-400 (softer than --bad)"));
+
   return Object.freeze(out);
 })();
 

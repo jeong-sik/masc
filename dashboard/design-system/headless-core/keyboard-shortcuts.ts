@@ -91,27 +91,12 @@ function modKeyForPlatform(platform: Platform): 'meta' | 'ctrl' {
   return platform === 'mac' ? 'meta' : 'ctrl'
 }
 
-function eventModSet(event: ShortcutKeyEvent): ReadonlySet<Modifier> {
-  const out = new Set<Modifier>()
-  if (event.metaKey === true) out.add('Mod')
-  if (event.ctrlKey === true) {
-    // ctrlKey on mac is Ctrl, not Mod. On other platforms it is Mod.
-    // We can't infer platform from event alone; assume both — chord
-    // matching below normalizes Mod against the active platform.
-    out.add('Ctrl')
-  }
-  if (event.shiftKey === true) out.add('Shift')
-  if (event.altKey === true) out.add('Alt')
-  return out
-}
-
 function chordMatches(
   chord: Chord,
   event: ShortcutKeyEvent,
   platform: Platform,
 ): boolean {
   if (chord.key.toLowerCase() !== event.key.toLowerCase()) return false
-  const eventMods = eventModSet(event)
   const wantsMod = chord.modifiers.includes('Mod')
   const wantsShift = chord.modifiers.includes('Shift')
   const wantsAlt = chord.modifiers.includes('Alt')

@@ -12,7 +12,7 @@
 \* cannot race a `phase` write.
 \*
 \* The closest live analog — and what this spec now models — is the
-\* fail-cascade contract in lib/keeper/keeper_keepalive.ml:max_consecutive_turn_failures
+\* fail-cascade contract in lib/keeper/keeper_heartbeat_snapshot.ml:max_consecutive_turn_failures
 \* (call site inside run_heartbeat_loop, see `start_keepalive`):
 \*
 \*   let turn_fail_count = (* read consecutive turn failures *) in
@@ -42,7 +42,7 @@
 \*   spec variable          <-> OCaml site
 \*   ----------------------+---------------------------------------------
 \*   turn_fail_count        <-> keeper_keepalive.ml:1566 (let turn_fail_count)
-\*   threshold              <-> keeper_keepalive.ml:510 (max_consecutive_turn_failures)
+\*   threshold              <-> keeper_heartbeat_snapshot.ml:44 (max_consecutive_turn_failures)
 \*   crashed                <-> keeper_keepalive.ml:1584 (raise Keeper_fiber_crash)
 \*   recorded_failure_n     <-> keeper_keepalive.ml:1583 (Turn_consecutive_failures n)
 \*

@@ -173,7 +173,7 @@ export function ToastContainer() {
         <div
           key=${t.id}
           role=${t.type === 'error' ? 'alert' : 'status'}
-          class="pointer-events-auto flex items-center gap-2.5 py-2 px-3 min-w-55 max-w-90 rounded border-l-[3px] border-l-solid border border-solid border-[var(--color-border-default)] bg-[rgba(10,18,34,0.96)] shadow-sm animate-[slideInRight_0.2s_ease-out] ${BORDER_COLOR[t.type]}"
+          class="pointer-events-auto flex items-center gap-2.5 py-2 px-3 min-w-55 max-w-90 rounded border-l-[3px] border-l-solid border border-solid border-[var(--color-border-default)] bg-[rgba(10,18,34,0.96)] shadow-sm animate-[slideInRight_var(--enter-duration)_var(--enter-easing)] ${BORDER_COLOR[t.type]}"
           onMouseEnter=${() => pauseToastTimer(t.id)}
           onMouseLeave=${() => resumeToastTimer(t.id)}
           onFocusIn=${() => pauseToastTimer(t.id)}

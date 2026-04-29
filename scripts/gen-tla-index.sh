@@ -19,6 +19,9 @@
 
 set -euo pipefail
 
+# Keep generated row ordering identical across macOS and Linux runners.
+export LC_ALL=C
+
 # --- Resolve repo root --------------------------------------------------------
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 cd "$REPO_ROOT"

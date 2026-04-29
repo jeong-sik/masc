@@ -54,6 +54,68 @@ let record_with_time ~now (s : sample) =
 
 let record (s : sample) = record_with_time ~now:(Unix.gettimeofday ()) s
 
+let duration_from_response ?total_duration_ms
+    (response : Oas.Types.api_response) =
+  match total_duration_ms, response.telemetry with
+  | Some ms, _ when ms > 0.0 -> ms
+  | _, Some telemetry when telemetry.request_latency_ms > 0 ->
+      Float.of_int telemetry.request_latency_ms
+  | _ -> 0.0
+
+let ttfb_from_response (response : Oas.Types.api_response) =
+  match response.telemetry with
+  | Some { timings = Some { prompt_ms = Some ms; _ }; _ } when ms > 0.0 ->
+      ms
+  | _ -> 0.0
+
+let cache_hit_from_response ~(usage : Oas.Types.api_usage)
+    (response : Oas.Types.api_response) =
+  usage.cache_read_input_tokens > 0
+  ||
+  match response.telemetry with
+  | Some { timings = Some { cache_n = Some n; _ }; _ } -> n > 0
+  | _ -> false
+
+let throughput_from_response ~(usage : Oas.Types.api_usage) ~ttfb_ms
+    ~total_duration_ms (response : Oas.Types.api_response) =
+  match response.telemetry with
+  | Some { timings = Some { predicted_per_second = Some v; _ }; _ }
+    when v > 0.0 -> v
+  | _ ->
+      if usage.output_tokens <= 0 then 0.0
+      else
+        let decode_ms = Float.max 1.0 (total_duration_ms -. ttfb_ms) in
+        Float.of_int usage.output_tokens /. (decode_ms /. 1000.0)
+
+let sample_of_response ~provider_id ~model_id ?total_duration_ms
+    ?(retry_count = 0) ~status (response : Oas.Types.api_response) =
+  let usage = Oas_response.usage_or_zero response in
+  let total_duration_ms =
+    duration_from_response ?total_duration_ms response
+  in
+  let ttfb_ms = ttfb_from_response response in
+  {
+    provider_id;
+    model_id;
+    ttfb_ms;
+    total_duration_ms;
+    serialization_ms = 0.0;
+    input_tokens = usage.input_tokens;
+    output_tokens = usage.output_tokens;
+    throughput_tokens_per_s =
+      throughput_from_response ~usage ~ttfb_ms ~total_duration_ms response;
+    cost_usd = Option.value ~default:0.0 usage.cost_usd;
+    cache_hit = cache_hit_from_response ~usage response;
+    status;
+    retry_count;
+  }
+
+let record_response ~provider_id ~model_id ?total_duration_ms ?retry_count
+    ~status response =
+  record
+    (sample_of_response ~provider_id ~model_id ?total_duration_ms
+       ?retry_count ~status response)
+
 let snapshot_provider provider =
   with_lock (fun () ->
       match Hashtbl.find_opt table provider with

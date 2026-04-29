@@ -549,6 +549,8 @@
    keeper_agent_memory_episode
    keeper_agent_run
    keeper_agent_checkpoint_hygiene
+   keeper_run_context
+   keeper_run_tools
    keeper_contract_classifier
    keeper_world_observation
    keeper_decision_audit

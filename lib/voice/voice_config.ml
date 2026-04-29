@@ -345,6 +345,14 @@ let parse_local_playback json =
   | `Null -> Ok { enabled = false; agents = [] }
   | _ -> Error "root.local_playback must be an object"
 
+let parse_json json =
+  let open Result in
+  let* tts = parse_tts json in
+  let* stt = parse_stt json in
+  let* session = parse_session json in
+  let* local_playback = parse_local_playback json in
+  Ok { tts; stt; session; local_playback }
+
 let load () =
   let path = config_path () in
   if not (Sys.file_exists path) then
@@ -352,12 +360,7 @@ let load () =
   else
     try
       let json = Safe_ops.read_json_eio path in
-      let open Result in
-      let* tts = parse_tts json in
-      let* stt = parse_stt json in
-      let* session = parse_session json in
-      let* local_playback = parse_local_playback json in
-      Ok { tts; stt; session; local_playback }
+      parse_json json
     with
     | Yojson.Json_error error ->
         Error (Printf.sprintf "invalid voice config json: %s" error)

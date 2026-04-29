@@ -106,6 +106,13 @@ val config_path : unit -> string
 
 (** {1 Loading} *)
 
+val parse_json : Yojson.Safe.t -> (t, string) result
+(** [parse_json json] parses an in-memory JSON value into a [t].
+    Composes the per-section parsers (tts, stt, session,
+    local_playback). Pure — no filesystem access. Used by [load]
+    after IO and by tests that exercise edge cases without a
+    file. *)
+
 val load : unit -> (t, string) result
 (** [load ()] reads + parses the voice config from the first
     existing path in:

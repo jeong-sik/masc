@@ -412,6 +412,9 @@ type semantic =
   | `Input_border
   | `Input_bg_hover
   | `Input_bg_focus
+  | `Dialog_panel_bg
+  | `Dialog_panel_border
+  | `Dialog_overlay_bg
   | `State_hover_bg
   | `State_hover_fg
   | `State_hover_border

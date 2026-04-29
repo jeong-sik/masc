@@ -132,7 +132,9 @@ let removed_keeper_input_key_names =
     "initiative_cooldown_sec";
     "policy_mode";
     "policy_shell_mode";
-    
+    "tool_preset";
+    "tool_also_allow";
+    "tool_custom_allowlist";
   ]
 
 let non_public_keeper_input_key_names =

@@ -234,7 +234,7 @@ const STATE_DESCRIPTIONS: Record<string, string> = {
   undecided: '아직 결정 없음 — 턴 시작 대기 중',
   guard_ok: '모든 safety guard 통과, 도구 실행으로 진행',
   gate_rejected: 'safety gate 가 행동 차단 (비용, deny list 등)',
-  tool_policy_selected: '도구 정책 적용됨, 도구 필터링 완료',
+  tool_policy_selected: '도구 목록 적용됨, 도구 필터링 완료',
   // KCL (Cascade)
   selecting: 'cascade 목록에서 최적 provider 선택 중',
   trying: '선택된 provider 로 inference 시도 중',

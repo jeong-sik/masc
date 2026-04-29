@@ -977,7 +977,7 @@ export function KeeperDetailPage() {
                 : null}
               ${keeper.social_model_recognized === false
                 ? html`<span class="inline-flex items-center gap-1.5 text-2xs text-[var(--color-status-warn)] px-2.5 py-1 rounded border border-[var(--warn-24)] bg-[var(--warn-8)]">
-                    소셜 모델
+                    대화 모델
                     ${keeper.configured_social_model
                       ? html`<span class="font-mono text-[var(--color-fg-primary)]">${keeper.configured_social_model}</span>`
                       : null}
@@ -1140,13 +1140,13 @@ export function KeeperDetailPage() {
             id="keeper-config"
             eyebrow="설정"
             title="설정 / 작업 방식"
-            description="분산되어 있던 tool policy, 작업 budget, playground repo, keeper config를 한 섹션으로 모았습니다."
+            description="분산되어 있던 허용 도구 목록, 작업 budget, playground repo, keeper config를 한 섹션으로 모았습니다."
           >
             <${TurnBudgetSection} keeper=${keeper} />
             <details class="p-5 rounded border border-card-border bg-card/40 backdrop-blur-sm shadow-sm">
               <summary class="cursor-pointer text-2xs font-semibold uppercase tracking-widest text-text-muted list-none select-none flex items-center gap-2">
                 <span class="w-1.5 h-1.5 rounded-full bg-accent/50" aria-hidden="true"></span>
-                도구 정책
+                허용 도구
               </summary>
               <div class="mt-3">
                 <${KeeperNeighborhood} keeper=${keeper} />

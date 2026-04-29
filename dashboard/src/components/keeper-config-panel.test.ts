@@ -140,10 +140,6 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
     },
     tools: {
       tool_access: { kind: 'preset', preset: 'coding' },
-      tool_policy_mode: 'preset',
-      tool_preset: 'coding',
-      tool_also_allow: ['keeper_board_post'],
-      tool_custom_allowlist: [],
       resolved_allowlist: ['keeper_fs_read'],
       tool_denylist: ['keeper_bash'],
       active_masc_tool_count: 1,

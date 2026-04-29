@@ -289,10 +289,10 @@ keeper_assignable = false
                 accepted: %s"
                e))
 
-let test_tool_preset_accepts_dispatch () =
+let test_tool_access_accepts_dispatch () =
   let result =
     with_temp_toml
-      "[keeper]\nname = \"taskmaster\"\ntool_preset = \"dispatch\"\n"
+      "[keeper]\nname = \"taskmaster\"\n\n[keeper.tool_access]\nkind = \"preset\"\npreset = \"dispatch\"\n"
       KTP.load_keeper_toml
   in
   match result with
@@ -384,8 +384,8 @@ let () =
             `Quick test_cascade_name_rejects_system_only;
           test_case "accepts assignable when system-only sibling exists"
             `Quick test_cascade_name_accepts_assignable_after_system_only_added;
-          test_case "accepts dispatch tool_preset" `Quick
-            test_tool_preset_accepts_dispatch;
+          test_case "accepts dispatch tool_access preset" `Quick
+            test_tool_access_accepts_dispatch;
         ] );
       ( "network_mode validation",
         [

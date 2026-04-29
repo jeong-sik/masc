@@ -94,7 +94,7 @@ function laneMeaning(
         case 'gate_rejected':
           return { tone: 'warn', meaning: 'guardrail 이 tool/model work 전 turn 차단' }
         case 'tool_policy_selected':
-          return { tone: 'info', meaning: 'tool policy selection 커밋됨 — execution 진행 가능' }
+          return { tone: 'info', meaning: '도구 목록 선택 커밋됨 — execution 진행 가능' }
         default:
           return { tone: 'info', meaning: 'decision state 관측됨' }
       }

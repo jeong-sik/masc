@@ -937,12 +937,6 @@ let handle_keeper_status ctx args : tool_result =
           all_internal_tools
           |> List.filter (fun name -> not (List.mem name allowed_tools))
         in
-        let tool_preset = Keeper_types.tool_access_preset m.tool_access in
-        let tool_also_allow = Keeper_types.tool_access_also_allowlist m.tool_access in
-        let tool_custom_allowlist =
-          Keeper_types.tool_access_custom_allowlist m.tool_access
-          |> Option.value ~default:[]
-        in
          let sandbox_last_error =
            match Keeper_registry.get ~base_path:ctx.config.base_path m.name with
            | Some entry -> entry.last_error
@@ -1057,17 +1051,6 @@ let handle_keeper_status ctx args : tool_result =
            ("sandbox_live", sandbox_live);
            ("effective_sandbox_image",
              Json_util.string_opt_to_json effective_sandbox_image);
-           ("tool_policy_mode",
-             `String
-               (match Keeper_types.tool_access_custom_allowlist m.tool_access with
-                | Some _ -> "custom"
-                | None -> "preset"));
-           ("tool_preset",
-             match tool_preset with
-             | Some preset -> `String (Keeper_types.tool_preset_to_string preset)
-             | None -> `Null);
-           ("tool_also_allow", string_list_to_json tool_also_allow);
-           ("tool_custom_allowlist", string_list_to_json tool_custom_allowlist);
            ("tool_denylist", string_list_to_json m.tool_denylist);
            ("allowed_tool_names", string_list_to_json allowed_tools);
            ("allowed_tool_preview", string_list_to_json allowed_tool_preview);

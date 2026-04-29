@@ -149,7 +149,7 @@ export const STATE_DISPLAY_NAMES: Record<string, string> = {
   undecided: '대기',
   guard_ok: '가드 통과',
   gate_rejected: '게이트 거부',
-  tool_policy_selected: '도구 정책 적용',
+  tool_policy_selected: '도구 목록 적용',
   // KCL
   selecting: '선택 중',
   trying: '시도 중',

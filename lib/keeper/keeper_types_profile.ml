@@ -538,6 +538,47 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
   let int_ key = Keeper_toml_loader.toml_int_opt doc (k key) in
   let strs key = Keeper_toml_loader.toml_string_list doc (k key) in
   let has key = List.mem_assoc (k key) doc in
+  let has_raw key = List.mem_assoc key doc in
+  let tool_access_key key = k ("tool_access." ^ key) in
+  let tool_access_defaults_result =
+    let kind_key = tool_access_key "kind" in
+    let preset_key = tool_access_key "preset" in
+    let also_allow_key = tool_access_key "also_allow" in
+    let tools_key = tool_access_key "tools" in
+    match Keeper_toml_loader.toml_string_opt doc kind_key with
+    | None
+      when has_raw preset_key || has_raw also_allow_key || has_raw tools_key ->
+        Error
+          "keeper.tool_access.kind is required when keeper.tool_access.* keys are present"
+    | None -> Ok (None, None, None)
+    | Some "preset" -> (
+        match Keeper_toml_loader.toml_string_opt doc preset_key with
+        | None ->
+            Error
+              "keeper.tool_access.preset is required when keeper.tool_access.kind = \"preset\""
+        | Some raw -> (
+            match normalize_tool_preset_raw raw with
+            | Some normalized ->
+                Ok
+                  ( Some normalized,
+                    normalize_name_list_opt
+                      (Keeper_toml_loader.toml_string_list doc also_allow_key),
+                    Some "toml" )
+            | None ->
+                Error
+                  (Printf.sprintf
+                     "invalid keeper.tool_access.preset '%s' (allowed: %s)"
+                     raw
+                     (String.concat ", " valid_tool_preset_raw_strings))))
+    | Some "custom" ->
+        Error
+          "keeper.tool_access.kind=\"custom\" cannot be used in keeper TOML defaults yet; use masc_keeper_up tool_access for runtime custom policies"
+    | Some raw ->
+        Error
+          (Printf.sprintf
+             "invalid keeper.tool_access.kind '%s' (allowed: preset)"
+             raw)
+  in
   let per_provider_timeout_state, per_provider_timeout =
     per_provider_timeout_of_toml
       ~source:"keeper TOML"
@@ -583,20 +624,6 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
                   (Printf.sprintf
                      "invalid git_identity_mode '%s' (allowed: keeper_alias, github_identity)"
                      raw))
-        | None -> Ok ())
-  in
-  let result =
-    Result.bind result (fun () ->
-        match str "tool_preset" with
-        | Some raw -> (
-            match normalize_tool_preset_raw raw with
-            | Some _ -> Ok ()
-            | _ ->
-                Error
-                  (Printf.sprintf
-                     "invalid tool_preset '%s' (allowed: %s)"
-                     raw
-                     (String.concat ", " valid_tool_preset_raw_strings)))
         | None -> Ok ())
   in
   let result =
@@ -720,8 +747,11 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
                        (String.concat ", " reserved_cascade_names)
                        fallback_error))
   in
+  let result =
+    Result.bind result (fun () -> tool_access_defaults_result)
+  in
   Result.map
-    (fun () ->
+    (fun (tool_preset, tool_also_allow, tool_preset_source) ->
       {
         id = None;
         manifest_path = None;
@@ -764,16 +794,9 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         github_identity = str "github_identity";
         git_identity_mode =
           normalize_git_identity_mode_opt (str "git_identity_mode");
-        tool_preset =
-          (match str "tool_preset" with
-           | None -> None
-           | Some raw -> normalize_tool_preset_raw raw);
-        tool_preset_source =
-          Option.bind (str "tool_preset") (fun raw ->
-              match normalize_tool_preset_raw raw with
-              | Some _ -> Some "toml"
-              | None -> None);
-        tool_also_allow = normalize_name_list_opt (strs "tool_also_allow");
+        tool_preset;
+        tool_preset_source;
+        tool_also_allow;
         tool_denylist = normalize_name_list_opt (strs "tool_denylist");
         active_goal_ids =
           if has "active_goal_ids" then
@@ -830,8 +853,10 @@ let parsed_field_key_names =
   ; "shared_memory_scope"
   ; "github_identity"
   ; "git_identity_mode"
-  ; "tool_preset"
-  ; "tool_also_allow"
+  ; "tool_access.kind"
+  ; "tool_access.preset"
+  ; "tool_access.also_allow"
+  ; "tool_access.tools"
   ; "tool_denylist"
   ; "active_goal_ids"
   ; "work_discovery_enabled"
@@ -882,8 +907,10 @@ let canonical_keeper_toml_key_names =
   ; "shared_memory_scope"
   ; "github_identity"
   ; "git_identity_mode"
-  ; "tool_preset"
-  ; "tool_also_allow"
+  ; "tool_access.kind"
+  ; "tool_access.preset"
+  ; "tool_access.also_allow"
+  ; "tool_access.tools"
   ; "tool_denylist"
   ; "active_goal_ids"
   ; "work_discovery_enabled"
@@ -1063,27 +1090,9 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
                 shared_memory_scope = None;
                 github_identity = None;
                 git_identity_mode = None;
-                tool_preset =
-                  (match Safe_ops.json_string_opt "tool_preset" keeper_json with
-                  | None -> None
-                  | Some raw -> (
-                      match normalize_tool_preset_raw raw with
-                      | Some normalized -> Some normalized
-                      | None ->
-                          Log.Keeper.warn
-                            "persona profile %s has invalid tool_preset '%s'; ignoring"
-                            path raw;
-                          None));
-                tool_preset_source =
-                  (match Safe_ops.json_string_opt "tool_preset" keeper_json with
-                  | None -> None
-                  | Some raw -> (
-                      match normalize_tool_preset_raw raw with
-                      | Some _ -> Some "persona"
-                      | None -> None));
-                tool_also_allow =
-                  normalize_name_list_opt
-                    (Safe_ops.json_string_list "tool_also_allow" keeper_json);
+                tool_preset = None;
+                tool_preset_source = None;
+                tool_also_allow = None;
                 tool_denylist =
                   normalize_name_list_opt
                     (Safe_ops.json_string_list "tool_denylist" keeper_json);
@@ -1146,53 +1155,14 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
 let merge_string_list ~base overlay =
   match overlay with [] -> base | xs -> xs
 
-let profile_conflict_warned : (string, unit) Hashtbl.t = Hashtbl.create 32
-let profile_conflict_warn_mu = Eio.Mutex.create ()
-
-let should_log_profile_conflict_once ~agent_name ~field ~base_value
-    ~overlay_value =
-  let key =
-    String.concat "\000" [ agent_name; field; base_value; overlay_value ]
-  in
-  Eio_guard.with_mutex profile_conflict_warn_mu (fun () ->
-      if Hashtbl.mem profile_conflict_warned key then
-        false
-      else (
-        Hashtbl.replace profile_conflict_warned key ();
-        true))
-
 let merge_keeper_profile_defaults
     ~agent_name
     ~(base : keeper_profile_defaults)
     ~(overlay : keeper_profile_defaults) : keeper_profile_defaults =
+  ignore agent_name;
   let prefer overlay_value base_value =
     match overlay_value with Some _ -> overlay_value | None -> base_value
   in
-  let warn_on_conflict ~field ~base_value ~overlay_value =
-    match base_value, overlay_value with
-    | Some b, Some o when b <> o ->
-        let should_log =
-          should_log_profile_conflict_once ~agent_name ~field ~base_value:b
-            ~overlay_value:o
-        in
-        Prometheus.inc_counter Prometheus.metric_keeper_profile_config_conflicts
-          ~labels:
-            [
-              ("field", field);
-              ("resolution", "toml_wins");
-              ("logged", string_of_bool should_log);
-            ]
-          ();
-        if should_log then
-          Log.Keeper.warn
-            "keeper %s config conflict: %s differs between persona (%S) and TOML (%S). \
-             TOML wins."
-            agent_name field b o
-    | _ -> ()
-  in
-  warn_on_conflict ~field:"tool_preset"
-    ~base_value:base.tool_preset ~overlay_value:overlay.tool_preset;
-
   let per_provider_timeout_state, per_provider_timeout =
     match overlay.per_provider_timeout_state with
     | Per_provider_timeout_unset ->
@@ -1236,7 +1206,10 @@ let merge_keeper_profile_defaults
       prefer overlay.git_identity_mode base.git_identity_mode;
     tool_preset = prefer overlay.tool_preset base.tool_preset;
     tool_preset_source =
-      (match overlay.tool_preset with
+      (match overlay.tool_preset_source with
+       | Some _ as source -> source
+       | None ->
+         match overlay.tool_preset with
        | Some _ -> Some "toml"
        | None ->
            match base.tool_preset with

@@ -17,7 +17,6 @@ type save_result =
 
 type archetype_axes =
   { alignment : string option
-  ; operating_style : string option
   ; risk_posture : string option
   }
 
@@ -79,19 +78,13 @@ let field_catalog_entry_to_json entry =
      @ option_field "choices" entry.choices)
 ;;
 
-let tool_preset_choices_json =
-  string_list_to_json Keeper_types_profile.valid_tool_preset_raw_strings
-;;
-
 let social_model_choices_json =
   string_list_to_json Keeper_types_profile.valid_social_model_strings
 ;;
 
 let alignment_choices = Archetypes.alignment_choices
-let operating_style_choices = Archetypes.operating_style_choices
 let risk_posture_choices = Archetypes.risk_posture_choices
 let alignment_choice_effects = Archetypes.alignment_choice_effects
-let operating_style_choice_effects = Archetypes.operating_style_choice_effects
 let risk_posture_choice_effects = Archetypes.risk_posture_choice_effects
 let choice_effect_fields = Archetypes.choice_effect_fields
 let choice_effect_for = Archetypes.choice_effect_for
@@ -175,18 +168,6 @@ let field_catalog_entries =
       ~typ:"string[]"
       ~default:(`String "[<handle>]")
         ~field_effect:"Names that wake or target this persona-backed keeper."
-        ()
-    ; field_catalog_entry
-        ~path:"keeper.tool_preset"
-        ~typ:"enum"
-        ~default:(`String Archetypes.default_tool_preset)
-        ~choices:tool_preset_choices_json
-        ~field_effect:"Preset used to derive the keeper tool policy during creation."
-        ()
-    ; field_catalog_entry
-        ~path:"keeper.tool_also_allow"
-        ~typ:"string[]"
-        ~field_effect:"Extra tools added on top of keeper.tool_preset."
         ()
     ; field_catalog_entry
         ~path:"keeper.tool_denylist"
@@ -335,7 +316,6 @@ let schema_json ?(include_examples = false) () =
                           , `String
                               "Find weak assumptions and turn them into actionable tasks."
                           )
-                        ; "tool_preset", `String Archetypes.default_tool_preset
                         ; "mention_targets", string_list_to_json [ "sharp-researcher" ]
                         ] )
                   ] )
@@ -353,8 +333,7 @@ let schema_json ?(include_examples = false) () =
      ; "field_catalog", field_catalog_json ()
      ; ( "choice_sets"
        , `Assoc
-           [ "tool_preset", tool_preset_choices_json
-           ; "social_model", social_model_choices_json
+           [ "social_model", social_model_choices_json
            ; ( "proactive_enabled"
              , `Assoc
                  [ "false", `String "Keeper stays passive unless called."
@@ -372,9 +351,7 @@ let schema_json ?(include_examples = false) () =
              , `Assoc
                  [ "concept", `String "<natural-language persona concept>"
                  ; "alignment", `String "<optional archetype axis>"
-                 ; "operating_style", `String "<optional archetype axis>"
                  ; "risk_posture", `String "<optional archetype axis>"
-                 ; "tool_preset", `String "<optional preset>"
                  ] )
            ; ( "save_args"
              , `Assoc
@@ -404,17 +381,6 @@ let handle_persona_schema _ctx args =
 let validate_unknown_keeper_fields keeper_json =
   assoc_keys keeper_json
   |> List.filter (fun key -> not (List.mem key allowed_keeper_fields))
-;;
-
-let normalize_tool_preset raw =
-  match Keeper_types_profile.normalize_tool_preset_raw raw with
-  | Some value -> Ok value
-  | None ->
-    Error
-      (Printf.sprintf
-         "invalid keeper.tool_preset '%s' (allowed: %s)"
-         raw
-         (String.concat ", " Keeper_types_profile.valid_tool_preset_raw_strings))
 ;;
 
 let normalize_social_model raw =
@@ -498,12 +464,6 @@ let normalize_keeper_json ~handle keeper_json =
         | Some goal -> Ok goal
       in
       Result.bind result (fun goal ->
-        let tool_preset_result =
-          match json_trimmed_string_opt "tool_preset" keeper_json with
-          | None -> Ok Archetypes.default_tool_preset
-          | Some raw -> normalize_tool_preset raw
-        in
-        Result.bind tool_preset_result (fun tool_preset ->
           let social_model_result =
             match json_trimmed_string_opt "social_model" keeper_json with
             | None -> Ok None
@@ -533,7 +493,6 @@ let normalize_keeper_json ~handle keeper_json =
                    ; "mid_goal", `String (get_goal_horizon "mid_goal")
                    ; "long_goal", `String (get_goal_horizon "long_goal")
                    ; "mention_targets", string_list_to_json mention_targets
-                   ; "tool_preset", `String tool_preset
                    ; ( "proactive_enabled"
                      , `Bool
                          (Safe_ops.json_bool
@@ -580,8 +539,7 @@ let normalize_keeper_json ~handle keeper_json =
                    add_optional_float "per_provider_timeout" fields keeper_json
                  in
                  let fields =
-                   [ "tool_also_allow"
-                   ; "tool_denylist"
+                   [ "tool_denylist"
                    ; "shards"
                    ; "work_discovery_sources"
                    ]
@@ -600,7 +558,7 @@ let normalize_keeper_json ~handle keeper_json =
                    | None -> assoc_without "cascade_name" fields
                  in
                  `Assoc (List.rev fields))
-              cascade_name_result))))
+              cascade_name_result)))
   | _ -> Error "profile.keeper must be an object"
 ;;
 
@@ -784,27 +742,18 @@ let selected_archetype_axes_from_args args =
   Result.bind
     (optional_choice_arg ~field:"alignment" ~choices:alignment_choices args)
     (fun alignment ->
-       Result.bind
+       Result.map
+         (fun risk_posture -> { alignment; risk_posture })
          (optional_choice_arg
-            ~field:"operating_style"
-            ~choices:operating_style_choices
-            args)
-         (fun operating_style ->
-            Result.map
-              (fun risk_posture -> { alignment; operating_style; risk_posture })
-              (optional_choice_arg
-                 ~field:"risk_posture"
-                 ~choices:risk_posture_choices
-                 args)))
+            ~field:"risk_posture"
+            ~choices:risk_posture_choices
+            args))
 ;;
 
 let archetype_axes_to_json axes =
   `Assoc
     ([]
      @ option_field "alignment" (Option.map (fun value -> `String value) axes.alignment)
-     @ option_field
-         "operating_style"
-         (Option.map (fun value -> `String value) axes.operating_style)
      @ option_field
          "risk_posture"
          (Option.map (fun value -> `String value) axes.risk_posture))
@@ -826,13 +775,6 @@ let selected_archetype_effects_to_json axes =
              value
              alignment_choice_effects)
     ; Option.bind
-        axes.operating_style
-        (fun value ->
-           selected_axis_effect_to_json
-             ~axis:"operating_style"
-             value
-             operating_style_choice_effects)
-    ; Option.bind
         axes.risk_posture
         (fun value ->
            selected_axis_effect_to_json
@@ -848,19 +790,9 @@ let selected_archetype_effects_to_json axes =
 let archetype_axes_prompt axes =
   let value = Option.value ~default:"(unspecified)" in
   Printf.sprintf
-    "- alignment: %s\n- operating_style: %s\n- risk_posture: %s"
+    "- alignment: %s\n- risk_posture: %s"
     (value axes.alignment)
-    (value axes.operating_style)
     (value axes.risk_posture)
-;;
-
-let generation_tool_preset args axes =
-  match get_string_opt args "tool_preset" |> trim_nonempty_opt with
-  | Some raw -> normalize_tool_preset raw
-  | None ->
-    (match axes.operating_style with
-     | Some style -> normalize_tool_preset style
-     | None -> Ok Archetypes.default_tool_preset)
 ;;
 
 let generation_prompt
@@ -868,7 +800,6 @@ let generation_prompt
       ~handle
       ~display_name_opt
       ~archetype_axes
-      ~tool_preset
       ~proactive_enabled
       ~language
   =
@@ -894,7 +825,6 @@ The JSON shape must be:
       "needs": "...",
       "desires": "...",
       "mention_targets": ["%s"],
-      "tool_preset": "%s",
       "proactive_enabled": %b
     }
   },
@@ -930,7 +860,6 @@ Constraints:
 |}
     handle
     handle
-    tool_preset
     proactive_enabled
     concept
     (archetype_axes_prompt archetype_axes)
@@ -986,9 +915,6 @@ let handle_persona_generate ctx args =
       match selected_archetype_axes_from_args args with
       | Error msg -> false, error_response_typed ~code:Validation_error msg
       | Ok archetype_axes ->
-        (match generation_tool_preset args archetype_axes with
-         | Error msg -> false, error_response_typed ~code:Validation_error msg
-         | Ok tool_preset ->
            let cascade_name =
              get_string args "cascade_name" Archetypes.default_generation_cascade_name
              |> String.trim
@@ -1020,7 +946,6 @@ let handle_persona_generate ctx args =
                ~handle:fallback_handle
                ~display_name_opt
                ~archetype_axes
-               ~tool_preset
                ~proactive_enabled
                ~language
            in
@@ -1085,5 +1010,5 @@ let handle_persona_generate ctx args =
                 ( false
                 , error_response_typed
                     ~code:Validation_error
-                    (Printf.sprintf "generation did not return parseable JSON: %s" msg) ))))
+                    (Printf.sprintf "generation did not return parseable JSON: %s" msg) )))
 ;;

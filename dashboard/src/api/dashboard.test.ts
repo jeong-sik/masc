@@ -673,10 +673,6 @@ describe('fetchKeeperConfig', () => {
       },
       tools: {
         tool_access: { kind: 'preset', preset: 'coding' },
-        tool_policy_mode: 'preset',
-        tool_preset: 'coding',
-        tool_also_allow: 'keeper_board_post',
-        tool_custom_allowlist: [],
         resolved_allowlist: 'keeper_fs_read',
         tool_denylist: 'keeper_bash',
         active_masc_tool_count: '1',
@@ -750,7 +746,6 @@ describe('fetchKeeperConfig', () => {
     expect(result.execution.per_provider_timeout_mode).toBe('override')
     expect(result.hooks?.destructive_check_tools).toEqual(['dynamic_boundary (Tool_dispatch.is_destructive)'])
     expect(result.hooks?.slots.pre_tool_use?.gates).toEqual(['keeper_deny_list'])
-    expect(result.tools.tool_also_allow).toEqual(['keeper_board_post'])
     expect(result.sources.precedence).toEqual(['live_meta'])
     expect(result.sources.cascade_catalog_source_kind).toBe('toml')
     expect(result.sources.cascade_catalog_source_path).toBe('/tmp/config/cascade.toml')

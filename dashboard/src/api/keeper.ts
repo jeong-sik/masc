@@ -484,66 +484,6 @@ export function wakeKeeper(name: string): Promise<KeeperLifecycleResponse> {
   )
 }
 
-// --- Keeper tool policy editing ---
-
-interface KeeperToolPolicyInput {
-  action: 'set_policy'
-  mode: 'preset' | 'custom' | 'full'
-  preset?:
-    | 'minimal'
-    | 'social'
-    | 'messaging'
-    | 'dispatch'
-    | 'coding'
-    | 'research'
-    | 'delivery'
-    | 'full'
-  allow?: string[]
-  also_allow?: string[]
-  deny?: string[]
-}
-
-export interface ToolEditResponse {
-  ok: boolean
-  tool_policy_mode: 'preset' | 'custom' | string
-  tool_preset?:
-    | 'minimal'
-    | 'social'
-    | 'messaging'
-    | 'dispatch'
-    | 'coding'
-    | 'research'
-    | 'delivery'
-    | 'full'
-    | null
-  tool_also_allow: string[]
-  tool_custom_allowlist: string[]
-  resolved_allowlist: string[]
-  tool_denylist: string[]
-  active_masc_tool_count: number
-  total_active: number
-  error?: string
-}
-
-export async function editKeeperTools(
-  name: string,
-  payload: KeeperToolPolicyInput,
-): Promise<ToolEditResponse> {
-  const resp = await fetch(
-    `/api/v1/keepers/${encodeURIComponent(name)}/tools`,
-    {
-      method: 'POST',
-      headers: jsonHeaders(),
-      body: JSON.stringify(payload),
-    },
-  )
-  if (!resp.ok) {
-    const text = await resp.text().catch(() => resp.statusText)
-    throw new Error(`도구 편집 실패 (${resp.status}): ${text}`)
-  }
-  return resp.json() as Promise<ToolEditResponse>
-}
-
 // --- Keeper observability API ---
 
 export interface MemoryKindUsageEntry {

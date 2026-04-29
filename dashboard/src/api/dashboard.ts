@@ -1520,20 +1520,6 @@ function normalizePromptBlock(raw: unknown, fallbackKey: string): { key: string;
   }
 }
 
-function normalizeToolPreset(value: unknown): KeeperConfig['tools']['tool_preset'] {
-  const preset = asNullableString(value)
-  switch (preset) {
-    case 'minimal':
-    case 'messaging':
-    case 'coding':
-    case 'research':
-    case 'full':
-      return preset
-    default:
-      return null
-  }
-}
-
 function normalizeDefaultSourceKind(value: unknown): KeeperConfig['sources']['default_source_kind'] {
   const sourceKind = asNullableString(value)
   switch (sourceKind) {
@@ -1732,10 +1718,6 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
     },
     tools: {
       tool_access: tools.tool_access ?? {},
-      tool_policy_mode: asNullableString(tools.tool_policy_mode) ?? 'preset',
-      tool_preset: normalizeToolPreset(tools.tool_preset),
-      tool_also_allow: normalizeStringList(tools.tool_also_allow),
-      tool_custom_allowlist: normalizeStringList(tools.tool_custom_allowlist),
       resolved_allowlist: normalizeStringList(tools.resolved_allowlist),
       tool_denylist: normalizeStringList(tools.tool_denylist),
       active_masc_tool_count: asInt(tools.active_masc_tool_count) ?? 0,

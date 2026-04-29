@@ -207,7 +207,6 @@ let flush_if_needed ~base_path ~keeper_name =
 
 let decision_pipeline_to_mermaid
     ?(guard_penalty_total : int option)
-    ?(tool_policy_mode : [`Preset of string | `Custom] option)
     ?(turn_outcome : [`Ok | `Failed] option)
     ~(phase : Keeper_state_machine.phase)
     ~(thompson_alpha : float)
@@ -258,11 +257,6 @@ let decision_pipeline_to_mermaid
     | Some n -> string_of_int n
     | None -> "n/a"
   in
-  let policy_str = match tool_policy_mode with
-    | Some (`Preset name) -> Printf.sprintf "preset:%s" name
-    | Some `Custom -> "custom"
-    | None -> "n/a"
-  in
   let outcome_str = match turn_outcome with
     | Some `Ok -> "ok"
     | Some `Failed -> "failed"
@@ -273,7 +267,6 @@ let decision_pipeline_to_mermaid
   p "      Tools: %d / floor %d\n" tool_count recovery_floor_count;
   p "      Level: %d\n" level;
   p "      Guard pen this cycle: %s\n" penalty_str;
-  p "      Tool policy: %s\n" policy_str;
   p "      Turn outcome: %s\n" outcome_str;
   p "    end note\n";
   Buffer.contents b

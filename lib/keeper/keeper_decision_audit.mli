@@ -63,7 +63,6 @@ val ring_capacity : unit -> int
     When omitted, the note block shows "n/a". *)
 val decision_pipeline_to_mermaid :
   ?guard_penalty_total:int ->
-  ?tool_policy_mode:[`Preset of string | `Custom] ->
   ?turn_outcome:[`Ok | `Failed] ->
   phase:Keeper_state_machine.phase ->
   thompson_alpha:float ->

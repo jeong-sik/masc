@@ -85,7 +85,7 @@ function quietReasonLabel(reason?: string | null): string {
 function nextActionLabel(path: string): string {
   switch (path) {
     case 'manual_social_sweep':
-      return 'social sweep'
+      return '대화 동기화'
     case 'probe':
       return 'probe'
     case 'recover':

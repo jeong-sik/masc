@@ -122,18 +122,16 @@ let reject_legacy_tool_access_kind access_json =
 
 let parse_tool_access_input (args : Yojson.Safe.t) :
     (tool_access option * tool_preset option * string list option, string) result =
-  let tool_access_present = json_non_null_member_present "tool_access" args in
-  let tool_preset_present = json_non_null_member_present "tool_preset" args in
-  let tool_also_allow_present = json_non_null_member_present "tool_also_allow" args in
-  let tool_custom_allowlist_present = json_non_null_member_present "tool_custom_allowlist" args in
-  if tool_access_present
-     && (tool_preset_present || tool_also_allow_present || tool_custom_allowlist_present)
-  then
+  let removed_tool_policy_keys =
+    present_json_keys
+      [ "tool_preset"; "tool_also_allow"; "tool_custom_allowlist" ]
+      args
+  in
+  if removed_tool_policy_keys <> [] then
     Error
-      "tool_access cannot be combined with tool_preset, tool_also_allow, or tool_custom_allowlist"
-  else if tool_custom_allowlist_present && (tool_preset_present || tool_also_allow_present) then
-    Error
-      "tool_custom_allowlist cannot be combined with tool_preset or tool_also_allow"
+      (Printf.sprintf
+         "removed keeper tool policy args: %s. Use canonical tool_access."
+         (String.concat ", " removed_tool_policy_keys))
   else
     let tool_access_opt =
       match json_assoc_member_opt "tool_access" args with
@@ -146,38 +144,11 @@ let parse_tool_access_input (args : Yojson.Safe.t) :
               | Error msg -> Error msg))
       | Some `Null -> Ok None
       | Some _ -> Error "tool_access must be an object"
-      | None when json_assoc_member_opt "tool_custom_allowlist" args <> None -> (
-          match parse_present_tool_name_list_opt args "tool_custom_allowlist" with
-          | Ok (Some names) -> Ok (Some (Custom names))
-          | Ok None -> Ok None
-          | Error msg -> Error msg)
       | None -> Ok None
     in
     match tool_access_opt with
     | Error msg -> Error msg
-    | Ok tool_access_opt ->
-        let tool_preset_opt =
-          match json_assoc_member_opt "tool_preset" args with
-          | None -> Ok None
-          | Some (`String raw) -> (
-              match tool_preset_of_string raw with
-              | Some preset -> Ok (Some preset)
-              | None ->
-                  Error
-                    (Printf.sprintf
-                       "invalid tool_preset '%s' (allowed: %s)"
-                       raw
-                       (String.concat ", " valid_tool_preset_strings)))
-          | Some `Null -> Error "tool_preset must not be null"
-          | Some _ -> Error "tool_preset must be a string"
-        in
-        let tool_also_allow_opt =
-          parse_present_tool_name_list_opt args "tool_also_allow"
-        in
-        (match tool_preset_opt, tool_also_allow_opt with
-        | Error msg, _ | _, Error msg -> Error msg
-        | Ok tool_preset_opt, Ok tool_also_allow_opt ->
-            Ok (tool_access_opt, tool_preset_opt, tool_also_allow_opt))
+    | Ok tool_access_opt -> Ok (tool_access_opt, None, None)
 
 let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) result =
   let name = get_string args "name" "" in

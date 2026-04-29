@@ -9,7 +9,6 @@ type archetype_choice_effect =
   { value : string
   ; effect_text : string
   ; generated_fields : string list
-  ; default_tool_preset : string option
   }
 
 type archetype_axis =
@@ -24,7 +23,6 @@ type archetype_axis =
 
 val default_generation_language : string
 val default_generation_cascade_name : string
-val default_tool_preset : string
 val default_temperature : float
 val default_max_tokens : int
 val default_proactive_enabled : bool
@@ -42,7 +40,6 @@ val option_field :
 (** {1 Archetype choice effects} *)
 
 val choice_effect :
-  ?default_tool_preset:string ->
   value:string ->
   effect_text:string ->
   generated_fields:string list ->
@@ -62,17 +59,14 @@ val choice_effect_for :
 (** {1 Per-axis choice effects (SSOT)} *)
 
 val alignment_choice_effects : archetype_choice_effect list
-val operating_style_choice_effects : archetype_choice_effect list
 val risk_posture_choice_effects : archetype_choice_effect list
 
 val alignment_choices : string list
-val operating_style_choices : string list
 val risk_posture_choices : string list
 
 (** {1 Archetype axes} *)
 
 val alignment_axis : archetype_axis
-val operating_style_axis : archetype_axis
 val risk_posture_axis : archetype_axis
 
 (** All archetype axes in declaration order. *)

@@ -1,7 +1,7 @@
-(** Keeper meta JSON legacy scrub helpers.
+(** Keeper meta JSON removed-field scrub helpers.
 
     Kept below the codec/parser facade so persisted runtime JSON can be
-    migrated before strict [keeper_meta] decoding. *)
+    normalized before strict [keeper_meta] decoding. *)
 
 open Keeper_types_profile
 open Keeper_meta_contract
@@ -35,59 +35,11 @@ let reject_legacy_keeper_meta_fields (json : Yojson.Safe.t) =
   | fields ->
     Error
       (Printf.sprintf
-         "legacy keeper meta fields require scrub via read_meta_file_path: %s"
+         "legacy keeper meta fields are no longer supported: %s"
          (String.concat ", " fields))
 ;;
 
-let legacy_tool_access_kind_needs_scrub (json : Yojson.Safe.t) =
-  match Yojson.Safe.Util.member "tool_access" json with
-  | `Assoc _ as access_json ->
-    (match
-       Yojson.Safe.Util.member "kind" access_json |> Yojson.Safe.Util.to_string_option
-     with
-     | Some "restricted" | Some "unrestricted" -> true
-     | _ -> false)
-  | _ -> false
-;;
-
-let scrub_legacy_tool_policy_meta_json (json : Yojson.Safe.t)
-  : Yojson.Safe.t * string list
-  =
-  let present = present_json_keys legacy_keeper_meta_key_names json in
-  let missing_tool_access = not (json_member_present "tool_access" json) in
-  let legacy_tool_access_kind = legacy_tool_access_kind_needs_scrub json in
-  let needs_tool_access_rewrite =
-    present <> [] || missing_tool_access || legacy_tool_access_kind
-  in
-  if not needs_tool_access_rewrite
-  then json, []
-  else (
-    match legacy_tool_access_of_meta_json json with
-    | Error _ ->
-      let dropped =
-        present |> List.filter (fun key -> String.equal key "allowed_providers")
-      in
-      if dropped = [] then json, [] else drop_assoc_keys dropped json, dropped
-    | Ok tool_access ->
-      let rewrite_reasons =
-        (if missing_tool_access then [ "tool_access(defaulted)" ] else [])
-        @ (if legacy_tool_access_kind then [ "tool_access(legacy-kind)" ] else [])
-        @ present
-      in
-      let base = drop_assoc_keys legacy_keeper_meta_key_names json in
-      let scrubbed =
-        match base with
-        | `Assoc fields ->
-          `Assoc
-            (("tool_access", tool_access_to_json tool_access)
-             :: List.remove_assoc "tool_access" fields)
-        | _ -> base
-      in
-      scrubbed, rewrite_reasons)
-;;
-
 let scrub_persisted_keeper_meta_json ~path (json : Yojson.Safe.t) : Yojson.Safe.t * bool =
-  let json, legacy_tool_policy_rewrites = scrub_legacy_tool_policy_meta_json json in
   match json with
   | `Assoc fields ->
     let removed_present =
@@ -95,7 +47,11 @@ let scrub_persisted_keeper_meta_json ~path (json : Yojson.Safe.t) : Yojson.Safe.
       |> List.filter_map (fun (key, _) ->
         if List.mem key removed_keeper_meta_key_names then Some key else None)
     in
-    if removed_present = [] && legacy_tool_policy_rewrites = []
+    let removed_to_scrub =
+      removed_present
+      |> List.filter (fun key -> not (List.mem key legacy_keeper_meta_key_names))
+    in
+    if removed_to_scrub = []
     then json, false
     else (
       let migrate_legacy_disabled_keepalive =
@@ -105,7 +61,7 @@ let scrub_persisted_keeper_meta_json ~path (json : Yojson.Safe.t) : Yojson.Safe.
         && not (List.mem_assoc "paused" fields)
       in
       let scrubbed =
-        let base = drop_assoc_keys removed_keeper_meta_key_names json in
+        let base = drop_assoc_keys removed_to_scrub json in
         match base with
         | `Assoc base_fields when migrate_legacy_disabled_keepalive ->
           `Assoc (("paused", `Bool true) :: List.remove_assoc "paused" base_fields)
@@ -117,7 +73,7 @@ let scrub_persisted_keeper_meta_json ~path (json : Yojson.Safe.t) : Yojson.Safe.
          Log.Keeper.info
            "scrubbed legacy keeper meta fields for %s: %s%s"
            path
-           (String.concat ", " (legacy_tool_policy_rewrites @ removed_present))
+           (String.concat ", " removed_to_scrub)
            (if migrate_legacy_disabled_keepalive
             then " (migrated presence_keepalive=false to paused=true)"
             else "")

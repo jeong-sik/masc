@@ -6,7 +6,6 @@ import { TimeAgo } from './common/time-ago'
 import { showToast } from './common/toast'
 import type { Keeper } from '../types'
 import { refreshDashboard } from '../store'
-import { peekLoadedKeeperConfig } from './keeper-config-panel'
 import { KeeperPhaseAndStage } from './keeper-phase-indicator'
 import { formatDuration } from '../lib/format-time'
 import {
@@ -22,21 +21,6 @@ function KeeperModelChip({ keeper }: { keeper: Keeper }) {
       class="inline-flex items-center py-0.5 px-2 rounded text-3xs font-mono bg-[var(--accent-12)] text-[var(--color-accent-fg)] border border-[var(--accent-20)]"
       title=${`${display.label}: ${display.value}`}
     >${display.value}</span>
-  `
-}
-
-function KeeperToolPresetChip({ keeperName }: { keeperName: string }) {
-  const preset = peekLoadedKeeperConfig(keeperName)?.tools?.tool_preset
-  if (!preset) return null
-  const canPR = ['coding', 'delivery', 'full'].includes(preset)
-  return html`
-    <span class="inline-flex items-center py-0.5 px-2 rounded text-3xs font-semibold uppercase tracking-wide
-      ${canPR
-        ? 'bg-[var(--ok-10)] text-[var(--color-status-ok)] border border-[var(--ok-20)]'
-        : 'bg-[var(--white-5)] text-[var(--color-fg-muted)] border border-[var(--white-8)]'
-      }"
-      title=${`도구 preset: ${preset}${canPR ? ' (clone/PR 가능)' : ''}`}
-    >${preset}</span>
   `
 }
 
@@ -91,7 +75,7 @@ function KeeperCascadeSelector({ keeper }: { keeper: Keeper }) {
         aria-label="Cascade 프로필 선택"
         class="py-0.5 px-1 rounded text-3xs font-mono bg-[var(--white-5)] text-[var(--color-fg-muted)] border border-[var(--white-8)] cursor-pointer"
         title=${invalidProfiles.length > 0
-          ? `Cascade 프로필\n\n비활성화된 잘못된 preset:\n${invalidSummary}`
+          ? `Cascade 프로필\n\n비활성화된 잘못된 프로필:\n${invalidSummary}`
           : 'Cascade 프로필'}
         value=${currentCascade}
         onChange=${(e: Event) => {
@@ -193,7 +177,6 @@ export function KeeperDetailHeaderInfo({
           <h2 id=${titleId} class="m-0 text-lg font-semibold text-[var(--text-strong)]">${keeper.name}</h2>
           <${KeeperPhaseAndStage} phase=${keeper.phase} pipelineStage=${keeper.pipeline_stage} phaseEnteredAtSec=${phaseEnteredAtSec} />
           <${KeeperModelChip} keeper=${keeper} />
-          <${KeeperToolPresetChip} keeperName=${keeper.name} />
           <${KeeperCascadeSelector} keeper=${keeper} />
         </div>
         ${keeper.koreanName || keeper.created_at ? html`
@@ -243,7 +226,7 @@ const KEEPER_DETAIL_SECTIONS: Array<{
   {
     id: 'keeper-config',
     label: '설정 / 작업 방식',
-    summary: 'tool policy, repos, config를 한 곳에서 조정합니다.',
+    summary: '허용 도구, repos, config를 한 곳에서 조정합니다.',
   },
   {
     id: 'keeper-debug',

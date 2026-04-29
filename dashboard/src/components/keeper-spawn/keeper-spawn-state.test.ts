@@ -176,14 +176,12 @@ describe('persona authoring actions', () => {
     await generatePersonaDraft({
       concept: 'good evil chaos',
       handle: 'chaos-researcher',
-      toolPreset: 'research',
       proactiveEnabled: true,
     })
 
     expect(callMcpTool).toHaveBeenCalledWith('masc_persona_generate', {
       concept: 'good evil chaos',
       language: 'ko',
-      tool_preset: 'research',
       proactive_enabled: true,
       handle: 'chaos-researcher',
     })

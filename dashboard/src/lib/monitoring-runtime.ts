@@ -240,10 +240,10 @@ function keeperHint(keeper: Keeper, band: RuntimeBand, stage: StageMeta): string
   if (keeper.social_model_recognized === false) {
     const configured = keeper.configured_social_model?.trim()
     const fallback = keeper.social_model_fallback?.trim()
-    if (configured && fallback) return `소셜 모델 ${configured} 미인식 · ${fallback}로 대체 중입니다.`
-    if (configured) return `소셜 모델 ${configured} 미인식입니다.`
-    if (fallback) return `소셜 모델 fallback이 ${fallback}로 설정돼 있습니다.`
-    return '미인식 소셜 모델 설정이 감지됐습니다.'
+    if (configured && fallback) return `대화 모델 ${configured} 미인식 · ${fallback}로 대체 중입니다.`
+    if (configured) return `대화 모델 ${configured} 미인식입니다.`
+    if (fallback) return `대화 모델 fallback이 ${fallback}로 설정돼 있습니다.`
+    return '미인식 대화 모델 설정이 감지됐습니다.'
   }
   if (band === 'paused') return '운영자가 멈춰 둔 상태입니다.'
   if (isHeartbeatStale(keeper)) return '오래 응답이 없어 실제 상태 확인이 필요합니다.'

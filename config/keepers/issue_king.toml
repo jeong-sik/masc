@@ -2,8 +2,11 @@
 persona_name = "issue_king"
 sandbox_profile = "docker"
 network_mode = "inherit"
-tool_preset = "delivery"
 work_discovery_enabled = true
 work_discovery_sources = ["unclaimed_tasks", "stale_tasks"]
 github_identity = "anyang-keepers"
 git_identity_mode = "github_identity"
+
+[keeper.tool_access]
+kind = "preset"
+preset = "delivery"

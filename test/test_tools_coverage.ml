@@ -519,11 +519,11 @@ let test_masc_persona_authoring_schemas () =
       | Some props ->
           Alcotest.(check bool) "generate has concept" true
             (List.mem_assoc "concept" props);
-          Alcotest.(check bool) "generate has tool_preset" true
+          Alcotest.(check bool) "generate omits tool_preset" false
             (List.mem_assoc "tool_preset" props);
           Alcotest.(check bool) "generate has alignment axis" true
             (List.mem_assoc "alignment" props);
-          Alcotest.(check bool) "generate has operating_style axis" true
+          Alcotest.(check bool) "generate omits operating_style axis" false
             (List.mem_assoc "operating_style" props);
           Alcotest.(check bool) "generate has risk_posture axis" true
             (List.mem_assoc "risk_posture" props);
@@ -554,14 +554,10 @@ let test_masc_persona_authoring_schemas () =
           let module Contract = Masc_mcp.Keeper_persona_authoring_contract in
           Alcotest.(check (list string)) "alignment enum follows contract"
             Contract.alignment_choices (enum_strings "alignment");
-          Alcotest.(check (list string)) "operating_style enum follows contract"
-            Contract.operating_style_choices (enum_strings "operating_style");
           Alcotest.(check (list string)) "risk_posture enum follows contract"
             Contract.risk_posture_choices (enum_strings "risk_posture");
           Alcotest.(check string) "language default follows contract"
             Contract.default_generation_language (default_string "language");
-          Alcotest.(check string) "tool_preset default follows contract"
-            Contract.default_tool_preset (default_string "tool_preset");
           Alcotest.(check string) "cascade default follows contract"
             Contract.default_generation_cascade_name (default_string "cascade_name");
           Alcotest.(check bool) "proactive default follows contract"
@@ -588,6 +584,14 @@ let test_masc_keeper_create_from_persona_schema () =
       | Some props ->
           Alcotest.(check bool) "has persona_name" true
             (List.mem_assoc "persona_name" props);
+          Alcotest.(check bool) "has canonical tool_access" true
+            (List.mem_assoc "tool_access" props);
+          Alcotest.(check bool) "omits tool_preset" false
+            (List.mem_assoc "tool_preset" props);
+          Alcotest.(check bool) "omits tool_also_allow" false
+            (List.mem_assoc "tool_also_allow" props);
+          Alcotest.(check bool) "omits tool_custom_allowlist" false
+            (List.mem_assoc "tool_custom_allowlist" props);
           Alcotest.(check bool) "omits social_model" false
             (List.mem_assoc "social_model" props)
       | None -> Alcotest.fail "masc_keeper_create_from_persona missing properties"
@@ -614,6 +618,14 @@ let test_masc_keeper_up_schema () =
             (List.mem_assoc "social_model" props);
           Alcotest.(check bool) "has autoboot_enabled" true
             (List.mem_assoc "autoboot_enabled" props);
+          Alcotest.(check bool) "has canonical tool_access" true
+            (List.mem_assoc "tool_access" props);
+          Alcotest.(check bool) "omits tool_preset" false
+            (List.mem_assoc "tool_preset" props);
+          Alcotest.(check bool) "omits tool_also_allow" false
+            (List.mem_assoc "tool_also_allow" props);
+          Alcotest.(check bool) "omits tool_custom_allowlist" false
+            (List.mem_assoc "tool_custom_allowlist" props);
           Alcotest.(check bool) "omits models" false
             (List.mem_assoc "models" props);
           Alcotest.(check bool) "omits allowed_models" false

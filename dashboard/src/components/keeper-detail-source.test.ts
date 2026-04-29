@@ -10,20 +10,12 @@ describe('resolveKeeperToolPolicy', () => {
   it('returns keeper_config source when tools present', () => {
     const config = {
       tools: {
-        tool_policy_mode: 'preset',
-        tool_preset: 'standard',
-        tool_also_allow: ['custom_tool'],
-        tool_custom_allowlist: [],
         tool_denylist: ['dangerous'],
         resolved_allowlist: ['bash', 'read', 'custom_tool'],
       },
     } as unknown as Pick<KeeperConfig, 'tools'>
     const result = resolveKeeperToolPolicy(config, 'loaded')
     expect(result.source).toBe('keeper_config')
-    expect(result.mode).toBe('preset')
-    expect(result.preset).toBe('standard')
-    expect(result.alsoAllow).toEqual(['custom_tool'])
-    expect(result.denylist).toEqual(['dangerous'])
     expect(result.resolvedAllowlist).toEqual(['bash', 'read', 'custom_tool'])
   })
 
@@ -52,24 +44,20 @@ describe('resolveKeeperToolPolicy', () => {
     expect(result.source).toBe('none')
   })
 
-  it('defaults to empty arrays for missing tool fields', () => {
+  it('defaults resolved allowlist to an empty array when missing', () => {
     const config = {
       tools: {
-        tool_policy_mode: 'custom',
+        tool_access: {},
       },
     } as unknown as Pick<KeeperConfig, 'tools'>
     const result = resolveKeeperToolPolicy(config, 'loaded')
-    expect(result.alsoAllow).toEqual([])
-    expect(result.customAllowlist).toEqual([])
-    expect(result.denylist).toEqual([])
     expect(result.resolvedAllowlist).toEqual([])
   })
 
   it('prefers tools over load status', () => {
     const config = {
       tools: {
-        tool_policy_mode: 'preset',
-        tool_preset: 'standard',
+        tool_access: {},
       },
     } as unknown as Pick<KeeperConfig, 'tools'>
     // Even with error status, tools present means keeper_config

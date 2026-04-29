@@ -580,14 +580,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           ("voice_agent_id", `String meta.voice_agent_id);
           ("social_model", `String meta.social_model);
           ("tool_access", tool_access_to_json meta.tool_access);
-          ("tool_preset",
-            match tool_access_preset meta.tool_access with
-            | Some preset -> `String (tool_preset_to_string preset)
-            | None -> `Null);
-          ("tool_also_allow",
-            `List
-              (List.map (fun value -> `String value)
-                 (tool_access_also_allowlist meta.tool_access)));
           ("tool_denylist",
             `List (List.map (fun value -> `String value) meta.tool_denylist));
           ("proactive_enabled", `Bool meta.proactive.enabled);

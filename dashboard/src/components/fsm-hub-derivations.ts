@@ -144,7 +144,7 @@ export function inferTransitionReason(field: string, from: string, to: string): 
   if (field === 'KDP') {
     if (from === 'undecided' && to === 'guard_ok') return '안전 가드 모두 통과 — 도구 실행 단계로 진행'
     if (to === 'gate_rejected') return '게이트 차단 (cost/deny/streak/tripwire) — 도구 실행 거부됨'
-    if (to === 'tool_policy_selected') return '도구 정책이 적용되어 호출 가능한 도구 셋이 정해짐'
+    if (to === 'tool_policy_selected') return '호출 가능한 도구 목록이 정해짐'
   }
   if (field === 'KCL') {
     if (to === 'trying') return 'cascade 의 provider 호출 진행 중'

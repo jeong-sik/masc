@@ -91,9 +91,9 @@ val resolve_tool_name_list :
 val reject_legacy_tool_access_kind :
   Yojson.Safe.t -> (unit, string) result
 
-(** Parse the [tool_access] / [tool_preset] / [tool_also_allow] /
-    [tool_custom_allowlist] field cluster, enforcing mutual
-    exclusivity per the dashboard contract. *)
+(** Parse the canonical [tool_access] field. The tuple shape is kept
+    for the create/update resolver, but legacy top-level tool-policy
+    args are rejected before returning. *)
 val parse_tool_access_input :
   Yojson.Safe.t ->
   ( tool_access option * tool_preset option * string list option

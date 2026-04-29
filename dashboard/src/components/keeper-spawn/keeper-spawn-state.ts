@@ -239,7 +239,6 @@ export interface GeneratePersonaDraftInput {
   handle?: string
   displayName?: string
   language?: string
-  toolPreset?: string
   proactiveEnabled?: boolean
 }
 
@@ -263,7 +262,6 @@ export async function generatePersonaDraft(input: GeneratePersonaDraftInput): Pr
     const args: Record<string, unknown> = {
       concept,
       language: input.language?.trim() || 'ko',
-      tool_preset: input.toolPreset || 'research',
       proactive_enabled: input.proactiveEnabled === true,
     }
     if (input.handle?.trim()) args.handle = input.handle.trim()

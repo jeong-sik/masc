@@ -273,7 +273,7 @@ let test_dashboard_tool_count_uses_schema_ssot () =
       in
       Alcotest.(check int) "dashboard counts schema-derived masc tools" 1 count)
 
-let test_tool_access_missing_migrates_legacy_standard_policy () =
+let test_tool_access_missing_defaults_standard_policy () =
   let names =
     allowed_names_of_json
       (`Assoc
@@ -303,12 +303,12 @@ let test_tool_access_missing_migrates_legacy_standard_policy () =
     (List.mem "keeper_time_now" names);
   Alcotest.(check bool) "keeps legacy standard masc tool" true
     (List.mem "masc_status" names);
-  Alcotest.(check (list string)) "legacy migration keeps expected masc set"
+  Alcotest.(check (list string)) "default keeps expected masc set"
     expected_legacy_masc_names legacy_masc_names;
   Alcotest.(check bool) "does not silently expand to full" false
     (List.mem "masc_autoresearch_cycle" names)
 
-let test_read_meta_file_scrubs_compat_tool_keys () =
+let test_read_meta_file_rejects_legacy_tool_keys () =
   let dir = temp_dir () in
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
@@ -325,27 +325,18 @@ let test_read_meta_file_scrubs_compat_tool_keys () =
             ("allowed_providers", `List [ `String "glm" ]);
           ]);
       match Masc_mcp.Keeper_types.read_meta_file_path path with
-      | Error e -> Alcotest.fail e
-      | Ok None -> Alcotest.fail "expected keeper meta"
-      | Ok (Some meta) ->
-          (match meta.Masc_mcp.Keeper_types.tool_access with
-           | Masc_mcp.Keeper_types.Preset
-               { preset = Masc_mcp.Keeper_types.Coding; also_allow } ->
-               Alcotest.(check (list string))
-                 "compat preset scrub keeps also_allow"
-                 [ "masc_governance_status" ] also_allow
-           | _ -> Alcotest.fail "expected coding preset after scrub");
-          let scrubbed = read_json_file path in
-          Alcotest.(check bool) "tool_access persisted" true
-            (Yojson.Safe.Util.member "tool_access" scrubbed <> `Null);
-          Alcotest.(check bool) "tool_preset removed" true
-            (Yojson.Safe.Util.member "tool_preset" scrubbed = `Null);
-          Alcotest.(check bool) "tool_also_allow removed" true
-            (Yojson.Safe.Util.member "tool_also_allow" scrubbed = `Null);
-          Alcotest.(check bool) "allowed_providers removed" true
-            (Yojson.Safe.Util.member "allowed_providers" scrubbed = `Null))
+      | Ok _ -> Alcotest.fail "expected legacy tool policy rejection"
+      | Error e ->
+          Alcotest.(check string)
+            "legacy top-level keys rejected"
+            "removed keeper meta fields: tool_preset, tool_also_allow"
+            e;
+          let persisted = read_json_file path in
+          Alcotest.(check string) "legacy tool_preset left untouched" "coding"
+            (Yojson.Safe.Util.member "tool_preset" persisted
+             |> Yojson.Safe.Util.to_string))
 
-let test_read_meta_file_scrubs_legacy_tool_access_kind () =
+let test_read_meta_file_rejects_legacy_tool_access_kind () =
   let dir = temp_dir () in
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
@@ -360,22 +351,14 @@ let test_read_meta_file_scrubs_legacy_tool_access_kind () =
             ("tool_access", `Assoc [ ("kind", `String "unrestricted") ]);
           ]);
       match Masc_mcp.Keeper_types.read_meta_file_path path with
-      | Error e -> Alcotest.fail e
-      | Ok None -> Alcotest.fail "expected keeper meta"
-      | Ok (Some meta) ->
-          let names = KET.keeper_allowed_tool_names meta in
-          Alcotest.(check bool) "full keeps keeper internal tool" true
-            (List.mem "keeper_fs_edit" names);
-          Alcotest.(check bool) "full keeps autoresearch tool" true
-            (List.mem "masc_autoresearch_cycle" names);
-          let scrubbed = read_json_file path in
-          Alcotest.(check string) "legacy kind rewritten"
-            "preset"
-            (Yojson.Safe.Util.member "tool_access" scrubbed
-             |> Yojson.Safe.Util.member "kind"
-             |> Yojson.Safe.Util.to_string))
+      | Ok _ -> Alcotest.fail "expected legacy tool_access kind rejection"
+      | Error e ->
+          Alcotest.(check string)
+            "legacy tool_access kind rejected"
+            "meta parse error: invalid keeper tool_access.kind: unrestricted"
+            e)
 
-let test_read_meta_file_scrubs_missing_tool_access_default () =
+let test_read_meta_file_defaults_missing_tool_access_without_rewrite () =
   let dir = temp_dir () in
   Fun.protect
     ~finally:(fun () -> cleanup_dir dir)
@@ -387,14 +370,19 @@ let test_read_meta_file_scrubs_missing_tool_access_default () =
             ("name", `String "legacy-standard");
             ("agent_name", `String "legacy-standard");
             ("trace_id", `String "legacy-standard-trace");
+            ("sandbox_profile", `String "local");
+            ("network_mode", `String "inherit");
           ]);
       match Masc_mcp.Keeper_types.read_meta_file_path path with
       | Error e -> Alcotest.fail e
       | Ok None -> Alcotest.fail "expected keeper meta"
-      | Ok (Some _meta) ->
-          let scrubbed = read_json_file path in
-          Alcotest.(check bool) "default tool_access persisted" true
-            (Yojson.Safe.Util.member "tool_access" scrubbed <> `Null))
+      | Ok (Some meta) ->
+          let names = KET.keeper_allowed_tool_names meta in
+          Alcotest.(check bool) "default keeps keeper internal tool" true
+            (List.mem "keeper_time_now" names);
+          let persisted = read_json_file path in
+          Alcotest.(check bool) "missing tool_access not rewritten" true
+            (Yojson.Safe.Util.member "tool_access" persisted = `Null))
 
 let test_meta_of_json_rejects_legacy_tool_policy_keys () =
   match Masc_test_deps.meta_of_json_fixture
@@ -410,7 +398,7 @@ let test_meta_of_json_rejects_legacy_tool_policy_keys () =
   | Error e ->
       Alcotest.(check string)
         "legacy direct parse rejected"
-        "legacy keeper meta fields require scrub via read_meta_file_path: tool_preset"
+        "removed keeper meta fields: tool_preset"
         e
 
 let test_tool_access_preset_empty_json_preserved () =
@@ -748,13 +736,13 @@ let () =
       ( "meta_json",
         [
           Alcotest.test_case "missing tool_access defaults standard policy" `Quick
-            test_tool_access_missing_migrates_legacy_standard_policy;
-          Alcotest.test_case "read_meta scrub compat keys to tool_access" `Quick
-            test_read_meta_file_scrubs_compat_tool_keys;
-          Alcotest.test_case "read_meta scrub legacy tool_access kind" `Quick
-            test_read_meta_file_scrubs_legacy_tool_access_kind;
-          Alcotest.test_case "read_meta scrub missing tool_access" `Quick
-            test_read_meta_file_scrubs_missing_tool_access_default;
+            test_tool_access_missing_defaults_standard_policy;
+          Alcotest.test_case "read_meta rejects legacy tool keys" `Quick
+            test_read_meta_file_rejects_legacy_tool_keys;
+          Alcotest.test_case "read_meta rejects legacy tool_access kind" `Quick
+            test_read_meta_file_rejects_legacy_tool_access_kind;
+          Alcotest.test_case "read_meta defaults missing tool_access without rewrite" `Quick
+            test_read_meta_file_defaults_missing_tool_access_without_rewrite;
           Alcotest.test_case "direct meta_of_json rejects legacy tool keys" `Quick
             test_meta_of_json_rejects_legacy_tool_policy_keys;
           Alcotest.test_case "preset empty json preserved" `Quick

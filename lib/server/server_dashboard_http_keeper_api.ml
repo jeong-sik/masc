@@ -101,27 +101,10 @@ let merge_keeper_trace_lines ~(config : Coord.config) ~(trace_id : string)
 let keeper_tools_response_json (meta : Keeper_types.keeper_meta) =
   let allowed = Keeper_exec_tools.keeper_allowed_tool_names meta in
   let masc_count = List.length (Keeper_exec_tools.keeper_masc_tool_names meta) in
-  let tool_preset = Keeper_types.tool_access_preset meta.tool_access in
-  let tool_also_allow = Keeper_types.tool_access_also_allowlist meta.tool_access in
-  let tool_custom_allowlist =
-    Keeper_types.tool_access_custom_allowlist meta.tool_access
-    |> Option.value ~default:[]
-  in
   `Assoc
     [
       ("ok", `Bool true);
       ("tool_access", Keeper_types.tool_access_to_json meta.tool_access);
-      ( "tool_policy_mode",
-        `String
-          (match Keeper_types.tool_access_custom_allowlist meta.tool_access with
-           | Some _ -> "custom"
-           | None -> "preset") );
-      ( "tool_preset",
-        match tool_preset with
-        | Some preset -> `String (Keeper_types.tool_preset_to_string preset)
-        | None -> `Null );
-      ("tool_also_allow", `List (List.map (fun s -> `String s) tool_also_allow));
-      ("tool_custom_allowlist", `List (List.map (fun s -> `String s) tool_custom_allowlist));
       ("resolved_allowlist", `List (List.map (fun s -> `String s) allowed));
       ("tool_denylist", `List (List.map (fun s -> `String s) meta.tool_denylist));
       ("active_masc_tool_count", `Int masc_count);
@@ -158,52 +141,16 @@ let handle_keeper_tools_post state req reqd =
              let updated_meta =
                match action with
                | "set_policy" ->
-                   let mode = Safe_ops.json_string ~default:"" "mode" args in
-                   let preset_raw = Safe_ops.json_string_opt "preset" args in
-                   let allow_present =
-                     match Yojson.Safe.Util.member "allow" args with
-                     | `Null -> false
-                     | _ -> true
-                   in
-                   let allow = Safe_ops.json_string_list "allow" args |> dedupe_tool_names in
-                   let also_allow =
-                     Safe_ops.json_string_list "also_allow" args |> dedupe_tool_names
-                   in
                    let deny =
                      Safe_ops.json_string_list "deny" args |> dedupe_tool_names
                    in
                    let tool_access_result =
-                     match mode with
-                     | "preset" -> (
-                         match preset_raw with
-                         | None -> Error "preset required when mode=preset"
-                         | Some raw -> (
-                             match Keeper_types.tool_preset_of_string raw with
-                             | None ->
-                                 Error
-                                   (Printf.sprintf
-                                      "invalid tool_preset '%s' (allowed: %s)"
-                                      raw
-                                      (String.concat
-                                         ", "
-                                         Keeper_types.valid_tool_preset_strings))
-                             | Some preset ->
-                                 Ok
-                                   (Keeper_types.Preset
-                                      { preset; also_allow })))
-                    | "custom" ->
-                        if not allow_present then
-                          Error "allow required when mode=custom"
-                        else
-                        Ok (Keeper_types.Custom allow)
-                     | "full" ->
-                         Ok
-                           (Keeper_types.Preset
-                              { preset = Keeper_types.Full; also_allow = [] })
-                     | "" ->
-                         Error "mode required (preset|custom|full)"
-                     | other ->
-                         Error (Printf.sprintf "unknown mode: %s" other)
+                     match Yojson.Safe.Util.member "tool_access" args with
+                     | `Assoc _ as access_json ->
+                         Keeper_types.tool_access_of_meta_json
+                           (`Assoc [ ("tool_access", access_json) ])
+                     | `Null -> Error "tool_access required"
+                     | _ -> Error "tool_access must be an object"
                    in
                    Result.map
                      (fun tool_access ->
@@ -1414,18 +1361,6 @@ let handle_keeper_get_subroutes state req request reqd =
       let recovery_floor_count =
         List.length (Keeper_tool_policy.failing_minimum_tool_names ())
       in
-      let tool_policy_mode : [`Preset of string | `Custom] option =
-        match meta with
-        | Ok (Some m) ->
-          (match Keeper_types.tool_access_custom_allowlist m.tool_access with
-           | Some _ -> Some `Custom
-           | None ->
-             (match Keeper_types.tool_access_preset m.tool_access with
-              | Some preset ->
-                Some (`Preset (Keeper_types.tool_preset_to_string preset))
-              | None -> None))
-        | _ -> None
-      in
       let turn_outcome : [`Ok | `Failed] option =
         match Keeper_registry.get ~base_path:state.Mcp_server.room_config.base_path name with
         | Some entry when entry.turn_consecutive_failures > 0 ->
@@ -1435,7 +1370,6 @@ let handle_keeper_get_subroutes state req request reqd =
       in
       let decision_pipeline_mermaid =
         Keeper_decision_audit.decision_pipeline_to_mermaid
-          ?tool_policy_mode
           ?turn_outcome
           ~guard_penalty_total:stats.guard_penalties_total
           ~phase:current

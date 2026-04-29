@@ -23,12 +23,20 @@ const SIZE_CLASSES: Record<ButtonSize, string> = {
   lg: 'py-2 px-4 text-sm',
 }
 
+// Component-level token slots (button-{variant}-bg/fg/border/bg-hover/bg-pressed).
+// Defined in dashboard/design-system/tokens/source.ts §"Component-level role
+// tokens". Each alias resolves to the same hex via var() chain; swapping
+// the slot at the token layer (e.g. shipping a brand re-skin) propagates
+// here without touching this file.
+//
+// subtle/warn keep inline literals — their token slots haven't been
+// authored yet (see #11876 follow-up). When they land, swap inline.
 const VARIANT_CLASSES: Record<ButtonVariant, string> = {
-  primary: 'border border-solid border-[var(--accent-30)] bg-[var(--accent-12)] text-[var(--color-fg-secondary)] hover:bg-[var(--accent-20)]',
-  ghost: 'border border-solid border-[var(--color-border-default)] bg-[var(--white-4)] text-[var(--color-fg-primary)] hover:bg-[var(--white-8)]',
-  danger: 'border border-solid border-[var(--bad-30)] bg-[var(--bad-10)] text-[var(--bad-light)] hover:bg-[var(--bad-20)]',
+  primary: 'border border-solid border-[var(--button-primary-border)] bg-[var(--button-primary-bg)] text-[var(--button-primary-fg)] hover:bg-[var(--button-primary-bg-hover)]',
+  ghost: 'border border-solid border-[var(--button-ghost-border)] bg-[var(--button-ghost-bg)] text-[var(--button-ghost-fg)] hover:bg-[var(--button-ghost-bg-hover)]',
+  danger: 'border border-solid border-[var(--button-danger-border)] bg-[var(--button-danger-bg)] text-[var(--button-danger-fg)] hover:bg-[var(--button-danger-bg-hover)]',
   subtle: 'border-none bg-transparent text-[var(--color-fg-muted)] hover:text-[var(--color-fg-primary)] hover:bg-[var(--white-6)]',
-  ok: 'border border-solid border-[var(--ok-20)] bg-[var(--ok-10)] text-[var(--color-status-ok)] hover:bg-[var(--ok-20)]',
+  ok: 'border border-solid border-[var(--button-ok-border)] bg-[var(--button-ok-bg)] text-[var(--button-ok-fg)] hover:bg-[var(--button-ok-bg-hover)]',
   warn: 'border-none bg-[var(--warn-14)] text-[var(--color-status-warn)] hover:bg-[var(--warn-24)]',
 }
 
@@ -37,12 +45,16 @@ const VARIANT_CLASSES: Record<ButtonVariant, string> = {
 // state that aria-pressed announces to assistive tech. Without this the
 // button can be aria-pressed but visually identical to unpressed, which
 // is a confusing mismatch.
+//
+// ghost pressed deliberately swaps its border/fg to the primary slots —
+// the active state borrows primary's affordance so the user reads it
+// as "selected" instead of "still neutral".
 const PRESSED_CLASSES: Record<ButtonVariant, string> = {
-  primary: 'bg-[var(--accent-20)]',
-  ghost: 'bg-[var(--accent-12)] border-[var(--accent-30)] text-[var(--color-fg-secondary)]',
-  danger: 'bg-[var(--bad-20)]',
+  primary: 'bg-[var(--button-primary-bg-pressed)]',
+  ghost: 'bg-[var(--button-ghost-bg-pressed)] border-[var(--button-primary-border)] text-[var(--button-primary-fg)]',
+  danger: 'bg-[var(--button-danger-bg-pressed)]',
   subtle: 'bg-[var(--white-6)] text-[var(--color-fg-primary)]',
-  ok: 'bg-[var(--ok-20)]',
+  ok: 'bg-[var(--button-ok-bg-pressed)]',
   warn: 'bg-[var(--warn-24)]',
 }
 

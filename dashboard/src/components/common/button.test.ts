@@ -34,9 +34,12 @@ describe('ActionButton', () => {
     expect(cn).toContain('accent')
   })
 
-  it('variant=danger includes the bad-state token classes', () => {
+  it('variant=danger includes the danger token classes', () => {
     render(html`<${ActionButton} variant="danger">x<//>`, container)
-    expect(container.querySelector('button')!.className).toContain('bad')
+    // After cycle 34 the inline `bad-*` literals were swapped for the
+    // `--button-danger-*` component-level aliases; var() chain resolves
+    // to the same hex (zero visual drift).
+    expect(container.querySelector('button')!.className).toContain('button-danger')
   })
 
   it('size=sm uses the smaller padding tier', () => {
@@ -119,8 +122,11 @@ describe('ActionButton', () => {
     expect(container.querySelector('button')!.hasAttribute('aria-pressed')).toBe(false)
   })
 
-  it('pressed=true with ghost variant overrides bg to accent-12 (visual selected state)', () => {
+  it('pressed=true with ghost variant swaps bg to ghost-pressed slot (visual selected state)', () => {
     render(html`<${ActionButton} variant="ghost" pressed=${true}>Active<//>`, container)
-    expect(container.querySelector('button')!.className).toContain('bg-[var(--accent-12)]')
+    // After cycle 34 the inline accent-12 literal moved into the
+    // --button-ghost-bg-pressed component slot (which itself resolves
+    // to var(--accent-12) via the token chain).
+    expect(container.querySelector('button')!.className).toContain('button-ghost-bg-pressed')
   })
 })

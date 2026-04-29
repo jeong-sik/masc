@@ -531,7 +531,10 @@ let test_rewrite_turn_runtime_paths_to_host () =
   Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
   let meta = make_docker_meta "minjae" in
   let container_root = Keeper_sandbox.container_root meta.name in
-  let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
+  let host_root =
+    Keeper_sandbox.host_root_abs_of_meta ~config meta
+    |> Masc_mcp.Keeper_alerting_path.strip_trailing_slashes
+  in
   let input =
     Printf.sprintf "worktree %s/repos/masc-mcp\npwd=%s/repos/masc-mcp\n"
       container_root container_root
@@ -552,6 +555,29 @@ let test_rewrite_turn_runtime_paths_to_host_is_noop_without_container_path () =
   let input = "worktree /tmp/other\n" in
   Alcotest.(check string) "unrelated paths untouched" input
     (Keeper_exec_shell.rewrite_turn_runtime_paths_to_host ~config ~meta input)
+
+let test_rewrite_docker_host_paths_to_container () =
+  with_eio_fs @@ fun () ->
+  let base_path, config = make_config () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  let meta = make_docker_meta "minjae" in
+  let host_root =
+    Keeper_sandbox.host_root_abs_of_meta ~config meta
+    |> Masc_mcp.Keeper_alerting_path.strip_trailing_slashes
+  in
+  let container_root = Keeper_sandbox.container_root meta.name in
+  let input =
+    Printf.sprintf "cd %s/repos/masc-mcp && test -d %s2\n"
+      host_root host_root
+  in
+  let rewritten =
+    Keeper_exec_shell.rewrite_docker_host_paths_to_container
+      ~config ~meta input
+  in
+  Alcotest.(check string) "host root rewritten only on path boundary"
+    (Printf.sprintf "cd %s/repos/masc-mcp && test -d %s2\n"
+       container_root host_root)
+    rewritten
 
 (* ── Negative / error-path tests (task-034) ──────────────────────── *)
 
@@ -669,6 +695,8 @@ let () =
         test_rewrite_turn_runtime_paths_to_host;
       Alcotest.test_case "unrelated paths remain unchanged" `Quick
         test_rewrite_turn_runtime_paths_to_host_is_noop_without_container_path;
+      Alcotest.test_case "docker commands rewrite host paths to container paths" `Quick
+        test_rewrite_docker_host_paths_to_container;
     ]);
     ("negative_path", [
       Alcotest.test_case "missing cmd field" `Quick test_bash_missing_cmd_field;

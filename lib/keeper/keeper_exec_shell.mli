@@ -38,6 +38,15 @@ val rewrite_turn_runtime_paths_to_host :
     turn-scoped sandbox responses that must preserve host-path contracts
     for follow-up tool calls. *)
 
+val rewrite_docker_host_paths_to_container :
+  config:Coord.config ->
+  meta:Keeper_types.keeper_meta ->
+  string ->
+  string
+(** Rewrites host playground root occurrences in keeper-issued Docker
+    commands to the corresponding in-container playground root before
+    execution. *)
+
 val cmd_targets_git_or_gh : string -> bool
 (** Docker git-credentials per-command dispatch predicate. True when
     the trimmed command's first whitespace-separated word is exactly

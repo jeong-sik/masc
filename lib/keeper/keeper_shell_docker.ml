@@ -120,6 +120,27 @@ let docker_private_workspace_cwd ~(config : Coord.config) ~(meta : keeper_meta)
   else
     container_root
 
+let rewrite_docker_command_paths ~(config : Coord.config) ~(meta : keeper_meta)
+    cmd =
+  let raw_host_root =
+    Keeper_sandbox.host_root_abs_of_meta ~config meta
+    |> Keeper_alerting_path.strip_trailing_slashes
+  in
+  let normalized_host_root =
+    raw_host_root
+    |> Keeper_alerting_path.normalize_path_for_check
+    |> Keeper_alerting_path.strip_trailing_slashes
+  in
+  let container_root = keeper_private_container_root meta in
+  let rewritten =
+    Keeper_sandbox_runtime.rewrite_host_root_to_container_root
+      ~host_root:raw_host_root ~container_root cmd
+  in
+  if String.equal raw_host_root normalized_host_root then rewritten
+  else
+    Keeper_sandbox_runtime.rewrite_host_root_to_container_root
+      ~host_root:normalized_host_root ~container_root rewritten
+
 (* ── Profile resolution ────────────────────────────────── *)
 
 (* Invariant (root-fix family 2/3, 2026-04-28):
@@ -301,7 +322,9 @@ let run_docker_shell_command_with_status
   else if git_creds_enabled && Env_config_keeper.KeeperSandbox.hard_mode () then
     sandbox_error
       "sandbox hard mode forbids Docker git credential dispatch; use keeper_shell op=git_clone or op=gh so git/gh egress is brokered outside the container"
-  else if command_uses_nested_container_runtime cmd then
+  else
+    let cmd = rewrite_docker_command_paths ~config ~meta cmd in
+  if command_uses_nested_container_runtime cmd then
     sandbox_error
       (if git_creds_enabled then
          "sandbox_profile=docker+git_creds blocks nested container runtimes and host socket references"
@@ -401,6 +424,12 @@ let run_docker_shell_command_with_status
       let container_cwd = docker_private_workspace_cwd ~config ~meta cwd in
       let uid = Unix.getuid () in
       let gid = Unix.getgid () in
+      match
+        Keeper_sandbox_runtime.docker_user_identity_mount_args
+          ~host_root ~uid ~gid
+      with
+      | Error err -> sandbox_error err
+      | Ok identity_mounts ->
       let network_args, network_label =
         if git_creds_enabled then
           ([ "--network"; "bridge" ], "bridge")
@@ -489,9 +518,8 @@ let run_docker_shell_command_with_status
           "-i";
           "--user";
           Printf.sprintf "%d:%d" uid gid;
-          "--env";
-          "HOME=/tmp";
         ]
+        @ Keeper_sandbox_runtime.docker_user_env_args ()
         @ Keeper_sandbox_runtime.docker_nofile_args ()
         @ Env_config_keeper.KeeperSandbox.read_only_rootfs_args ()
         @ [
@@ -518,6 +546,7 @@ let run_docker_shell_command_with_status
         @ ssh_auth_mount
         @ ssh_auth_env
         @ token_env
+        @ identity_mounts
         @ [ image; "bash"; "-lc"; cmd ]
       in
       (try

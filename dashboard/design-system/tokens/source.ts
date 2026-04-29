@@ -764,6 +764,14 @@ export const semantic: ReadonlyArray<TokenBase> = (() => {
   out.push(t("dialog-overlay-bg",   "var(--white-5)",               "role", "color",
     "DialogOverlay scrim base color (pair with /60 or /70 opacity)"));
 
+  // Toast primitive component-level slot. ToastContainer inlines
+  // `rgba(10,18,34,0.96)` for its surface bg — converging it on a
+  // single token slot makes the ~5 visible toast types share a
+  // retuneable surface (mirror of dialog-* / button-* families).
+  out.push(t("toast-bg",         "rgba(10,18,34,0.96)",                "role", "color",
+    "ToastContainer surface bg (deep navy with slight transparency for backdrop blend)"));
+
+
   // Interactive state roles — explicit hover/selected/pressed semantics
   out.push(t("state-hover-bg",       "var(--bg-3)",   "role", "color"));
   out.push(t("state-hover-fg",       "var(--fg-1)",   "role", "color"));

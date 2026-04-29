@@ -415,6 +415,7 @@ type semantic =
   | `Dialog_panel_bg
   | `Dialog_panel_border
   | `Dialog_overlay_bg
+  | `Toast_bg
   | `State_hover_bg
   | `State_hover_fg
   | `State_hover_border

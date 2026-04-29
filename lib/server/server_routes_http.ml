@@ -10,6 +10,12 @@ let make_routes ~port ~host ~sw ~clock =
   (* Register connectors before routes are wired up *)
   Channel_gate_connector.register (module Channel_gate_discord_state);
   Channel_gate_connector.register (module Channel_gate_imessage_state);
+  (* Tier K1: bind the multimodal workspace getter so the dashboard
+     reads the live keeper-side workspace instead of [Workspace.empty].
+     Idempotent — calling [bind_workspace_getter] twice just replaces
+     the callback. *)
+  Server_routes_http_routes_multimodal.bind_workspace_getter
+    Multimodal.Workspace_holder.get;
   Http.Router.empty
   |> Server_routes_http_routes_frontend.add_routes ~port ~host
   |> Server_routes_http_routes_room.add_routes

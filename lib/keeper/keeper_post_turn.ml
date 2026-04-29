@@ -205,6 +205,85 @@ let apply_resilience_wirein
             lifecycle.updated_meta.name (Printexc.to_string exn);
           lifecycle)
 
+(* ── Tier K1: multimodal post-turn wire-in (Cycle 27) ─────────────
+   Feature-flag-gated wire-in that runs after the A5/A6 pair. Reads
+   raw multimodal artifacts the keeper agent dropped into
+   [working_context["multimodal_artifacts"]], hydrates them via
+   [Multimodal_keeper_bridge.hydrate_one], and accumulates them into
+   the process-wide [Multimodal.Workspace_holder].
+
+   When [MASC_MULTIMODAL] is off (default), the wire-in is a pure
+   pass-through. When on, it consumes the artifact bag and replaces
+   it with a [workspace_meta] summary so the next turn does not
+   re-process the same entries.
+
+   Failures inside the wire-in do not propagate — they are logged
+   and the unmodified lifecycle result is returned, preserving the
+   keeper's primary turn outcome. *)
+
+let apply_multimodal_wirein
+    ~(now : float)
+    (lifecycle : post_turn_lifecycle) : post_turn_lifecycle =
+  if not (Multimodal.Wirein_helpers.masc_multimodal_enabled ()) then
+    lifecycle
+  else
+    match lifecycle.checkpoint with
+    | None -> lifecycle
+    | Some cp -> (
+        try
+          let raws, wc_rest =
+            Multimodal.Wirein_helpers.extract_raw_artifacts
+              cp.Oas.Checkpoint.working_context
+          in
+          let added_count = ref 0 in
+          let last_id = ref None in
+          Multimodal.Workspace_holder.update (fun ws ->
+              let ws', added =
+                Multimodal.Multimodal_keeper_bridge
+                .hydrate_with_workspace ws raws
+                  ~now
+                  ~created_by:lifecycle.updated_meta.name
+              in
+              added_count := List.length added;
+              (match List.rev added with
+               | [] -> ()
+               | last :: _ ->
+                   last_id :=
+                     Some
+                       (Shared_types.Artifact_id.to_string
+                          (Multimodal.Artifact.any_id last)));
+              ws')
+          ;
+          let workspace_size =
+            Multimodal.Workspace.size
+              (Multimodal.Workspace_holder.get ())
+          in
+          let meta =
+            `Assoc
+              [
+                ("added_this_turn", `Int !added_count);
+                ("workspace_size", `Int workspace_size);
+                ( "last_artifact_id",
+                  match !last_id with
+                  | Some s -> `String s
+                  | None -> `Null );
+                ("at", `Float now);
+              ]
+          in
+          let new_wc =
+            Multimodal.Wirein_helpers.upsert_workspace_meta wc_rest
+              meta
+          in
+          let new_cp =
+            { cp with Oas.Checkpoint.working_context = new_wc }
+          in
+          { lifecycle with checkpoint = Some new_cp }
+        with exn ->
+          Log.Keeper.warn
+            "keeper:%s multimodal wire-in failed: %s"
+            lifecycle.updated_meta.name (Printexc.to_string exn);
+          lifecycle)
+
 let apply_post_turn_lifecycle
     ~(on_compaction_started : unit -> unit)
     ~(on_handoff_started : unit -> unit)
@@ -458,10 +537,14 @@ let apply_post_turn_lifecycle
         message_count = rollover.message_count;
       }
   in
-  (* Strict ordering: autonomous tick → resilience classification.
-     Do not reorder — A6 PR pinned this sequence. *)
+  (* Strict ordering: autonomous tick → resilience classification
+     → multimodal hydration. Do not reorder — A6/K1 pinned this
+     sequence. The multimodal pass runs last because it persists a
+     [workspace_meta] summary that depends on whether prior passes
+     have already mutated [working_context]. *)
   let body = apply_autonomous_wirein ~now:now_ts body in
-  apply_resilience_wirein ~now:now_ts body
+  let body = apply_resilience_wirein ~now:now_ts body in
+  apply_multimodal_wirein ~now:now_ts body
 
 let forced_overflow_retry_meta
     (meta : keeper_meta)

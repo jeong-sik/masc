@@ -17,10 +17,22 @@ permissions:
   issues: write
   pull-requests: write
 
+# Cancel superseded PR-Automation runs for the same PR. Multiple
+# labeled/unlabeled/synchronize events on the same PR otherwise stack
+# into duplicate runs (observed 2026-04-29: feature/board-core-mli,
+# feature/ds-v2-dialog-anim-wiring, fix/ir3-checkpoint-error).
+concurrency:
+  group: pr-automation-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   draft-automerge-guard:
     name: Draft Auto-Merge Guard
     runs-on: ubuntu-latest
+    # Skip when the PR is already closed/merged. labeled/unlabeled
+    # events on pull_request_target can fire after merge (post-merge
+    # automation removing labels), causing wasted runs.
+    if: ${{ github.event.pull_request.state != 'closed' && github.event.pull_request.merged != true }}
     steps:
       - name: Keep draft PRs draft-only unless explicitly approved
         uses: actions/github-script@v9
@@ -342,7 +354,7 @@ jobs:
   label-and-review:
     runs-on: ubuntu-latest
     needs: draft-automerge-guard
-    if: ${{ !cancelled() && needs.draft-automerge-guard.result == 'success' && contains(fromJSON('["opened","reopened","synchronize","ready_for_review"]'), github.event.action) }}
+    if: ${{ !cancelled() && needs.draft-automerge-guard.result == 'success' && contains(fromJSON('["opened","reopened","synchronize","ready_for_review"]'), github.event.action) && github.event.pull_request.state != 'closed' && github.event.pull_request.merged != true }}
     steps:
       - name: Auto label and optional reviewer request
         uses: actions/github-script@v9

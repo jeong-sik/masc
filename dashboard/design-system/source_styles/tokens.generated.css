@@ -385,6 +385,11 @@
   --button-danger-border: var(--bad-30);  /* ActionButton variant=danger border */
   --button-danger-bg-hover: var(--bad-20);  /* ActionButton variant=danger hover bg */
   --button-danger-bg-pressed: var(--bad-20);  /* ActionButton variant=danger [data-pressed] bg */
+  --button-ok-bg: var(--ok-10);  /* ActionButton variant=ok surface bg */
+  --button-ok-fg: var(--color-status-ok);  /* ActionButton variant=ok text fg */
+  --button-ok-border: var(--ok-20);  /* ActionButton variant=ok border */
+  --button-ok-bg-hover: var(--ok-20);  /* ActionButton variant=ok hover bg */
+  --button-ok-bg-pressed: var(--ok-20);  /* ActionButton variant=ok [data-pressed] bg */
   --state-hover-bg: var(--bg-3);
   --state-hover-fg: var(--fg-1);
   --state-hover-border: var(--line-2);

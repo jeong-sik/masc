@@ -536,6 +536,10 @@ let run_named
            cascade turns on a provider that is terminal for the current runtime
            state. *)
         let err_str = Oas.Error.to_string sdk_err in
+        let (_ : Provider_error.t option) =
+          emit_sdk_provider_error_metric ~cascade_name
+            ~provider:provider_cfg.model_id sdk_err
+        in
         if sdk_error_is_hard_quota sdk_err then
           Cascade_health_tracker.(
             record_hard_quota global ~provider_key:provider_cfg.model_id

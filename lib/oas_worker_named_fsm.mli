@@ -81,6 +81,25 @@ val sdk_error_to_provider_error :
 (** Convert API-level SDK errors into provider errors. Non-API structural
     errors return [None]. *)
 
+val provider_error_total_metric : string
+(** Prometheus counter for additive provider-error variant emission. *)
+
+val emit_provider_error_metric :
+  cascade_name:string ->
+  provider:string ->
+  Provider_error.t ->
+  unit
+(** Emit one provider-error variant event while preserving existing
+    string-based health tracker labels. *)
+
+val emit_sdk_provider_error_metric :
+  cascade_name:string ->
+  provider:string ->
+  Oas.Error.sdk_error ->
+  Provider_error.t option
+(** Convert and emit an SDK provider error. Returns the converted variant
+    so callers/tests can assert the same decision without reparsing metrics. *)
+
 val sdk_error_soft_rate_limited :
   Oas.Error.sdk_error -> float option option
 (** [Some (Some retry_after)] for non-quota 429 responses with a parsed

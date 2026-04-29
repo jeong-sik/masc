@@ -341,6 +341,37 @@ let sdk_error_to_provider_error ~provider err =
         api_err
   | _ -> None
 
+let provider_error_total_metric = "masc_provider_error_total"
+
+let provider_error_capacity_scope_label = function
+  | Provider_error.CapacityExhausted { scope; _ } ->
+      Provider_error.scope_to_string scope
+  | Provider_error.RateLimit _
+  | Provider_error.AuthError _
+  | Provider_error.ServerError _
+  | Provider_error.InvalidRequest _ ->
+      "none"
+
+let emit_provider_error_metric ~cascade_name ~provider error =
+  let cascade_name = provider_label cascade_name in
+  let provider = provider_label provider in
+  Prometheus.inc_counter provider_error_total_metric
+    ~labels:
+      [
+        ("kind", Provider_error.to_error_kind error);
+        ("provider", provider);
+        ("cascade_name", cascade_name);
+        ("capacity_scope", provider_error_capacity_scope_label error);
+      ]
+    ()
+
+let emit_sdk_provider_error_metric ~cascade_name ~provider err =
+  match sdk_error_to_provider_error ~provider err with
+  | None -> None
+  | Some provider_error ->
+      emit_provider_error_metric ~cascade_name ~provider provider_error;
+      Some provider_error
+
 (* When the SDK surfaces a transient HTTP 429 that is *not* a hard-quota
    in disguise, expose the [retry_after] hint that [Llm_provider.Retry]
    already extracted from the response body.  Used by the cascade error

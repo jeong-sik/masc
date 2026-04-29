@@ -27,6 +27,15 @@ const tokenInput = signal('')
 const actorInput = signal('')
 const bannerDismissed = signal(false)
 
+// Test-only helper. Resets module-level signals so *.test.ts files can
+// guarantee isolation in `beforeEach`. Mirrors use-id.ts:50 pattern.
+export function __resetForTests(): void {
+  popoverOpen.value = false
+  tokenInput.value = ''
+  actorInput.value = ''
+  bannerDismissed.value = false
+}
+
 function cleanErrorMessage(value: string | null | undefined): string | null {
   if (!value) return null
   return value.replace(/^[^\w가-힣@]+/u, '').trim() || null

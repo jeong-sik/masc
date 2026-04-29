@@ -73,6 +73,9 @@ val cascade_name_of_masc_internal_error : masc_internal_error -> string
 (** Cascade name from the error payload, or ["unknown"] for variants that
     fire outside cascade context. *)
 
+val masc_oas_error_total_metric : string
+(** Prometheus counter metric name for structured MASC OAS errors. *)
+
 val admission_wait_timeout_error :
   keeper_name:string ->
   cascade_name:string ->

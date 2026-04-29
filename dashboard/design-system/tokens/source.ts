@@ -735,6 +735,22 @@ export const semantic: ReadonlyArray<TokenBase> = (() => {
   out.push(t("button-subtle-bg-pressed", "var(--white-6)",               "role", "color",
     "ActionButton variant=subtle [data-pressed] bg"));
 
+  // Input primitive component-level slots. TextInput / TextArea /
+  // NumberInput / Select all share the same surface palette inline
+  // in input.ts INPUT_BASE — these slots converge them on a single
+  // source of truth so a future field-color retune ripples to all
+  // form atoms at once. Mirror of the button-* family pattern.
+  out.push(t("input-bg",         "var(--white-4)",                  "role", "color",
+    "Form input surface bg (Input/TextArea/NumberInput/Select)"));
+  out.push(t("input-fg",         "var(--color-fg-primary)",         "role", "color",
+    "Form input text fg"));
+  out.push(t("input-border",     "var(--color-border-default)",     "role", "color",
+    "Form input border"));
+  out.push(t("input-bg-hover",   "var(--white-6)",                  "role", "color",
+    "Form input hover bg"));
+  out.push(t("input-bg-focus",   "var(--color-bg-page)",            "role", "color",
+    "Form input :focus-visible bg"));
+
   // Interactive state roles — explicit hover/selected/pressed semantics
   out.push(t("state-hover-bg",       "var(--bg-3)",   "role", "color"));
   out.push(t("state-hover-fg",       "var(--fg-1)",   "role", "color"));

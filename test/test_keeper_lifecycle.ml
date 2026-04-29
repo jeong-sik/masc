@@ -196,7 +196,8 @@ let test_apply_post_turn_lifecycle_without_checkpoint_records_skip () =
       check string "skip decision" "skipped:no_checkpoint"
         (KEC.compaction_decision_to_string lifecycle.compaction.decision);
       check string "runtime decision persisted" "skipped:no_checkpoint"
-        lifecycle.updated_meta.runtime.compaction_rt.last_decision;
+        (KT.compaction_runtime_decision_to_string
+           lifecycle.updated_meta.runtime.compaction_rt.last_decision);
       check bool "last check ts recorded" true
         (lifecycle.updated_meta.runtime.compaction_rt.last_check_ts > 0.0);
       check int "turn generation unchanged" meta.runtime.generation

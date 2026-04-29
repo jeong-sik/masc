@@ -99,7 +99,9 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ; "work_discovery_count", `Int rt.proactive_rt.work_discovery_count
     ; "consecutive_noop_count", `Int rt.proactive_rt.consecutive_noop_count
     ; "last_compaction_check_ts", `Float rt.compaction_rt.last_check_ts
-    ; "last_compaction_decision", `String rt.compaction_rt.last_decision
+    ; ( "last_compaction_decision"
+      , `String (compaction_runtime_decision_to_string rt.compaction_rt.last_decision)
+      )
     ; "last_continuity_update_ts", `Float rt.last_continuity_update_ts
     ; "continuity_summary", `String m.continuity_summary
     ; "active_goal_ids", `List (List.map (fun s -> `String s) m.active_goal_ids)

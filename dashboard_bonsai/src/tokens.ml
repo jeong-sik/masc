@@ -191,6 +191,9 @@ type semantic =
   | `Vote_up
   | `Vote_down
   | `Vote_hover
+  | `Text_slate
+  | `Warn_bright
+  | `Bad_light
   | `Ok_soft
   | `Ok_fg
   | `Ok_border
@@ -359,6 +362,10 @@ type semantic =
   | `Focus_ring_err
   | `Hover_overlay
   | `Active_overlay
+  | `Pressed_scale
+  | `Hover_lift
+  | `Focus_ring_width
+  | `Focus_ring_offset
   | `State_hover_bg
   | `State_hover_fg
   | `State_hover_border
@@ -407,8 +414,6 @@ type semantic =
   | `Color_text_dim
   | `Color_accent_brass
   | `Color_accent_soft
-  | `Bad_light
-  | `Warn_bright
   | `Color_keeper_1_glow
   | `Color_keeper_2_glow
   | `Color_keeper_3_glow
@@ -613,6 +618,9 @@ let name_of = function
   | `Vote_up -> "vote-up"
   | `Vote_down -> "vote-down"
   | `Vote_hover -> "vote-hover"
+  | `Text_slate -> "text-slate"
+  | `Warn_bright -> "warn-bright"
+  | `Bad_light -> "bad-light"
   | `Ok_soft -> "ok-soft"
   | `Ok_fg -> "ok-fg"
   | `Ok_border -> "ok-border"
@@ -781,6 +789,10 @@ let name_of = function
   | `Focus_ring_err -> "focus-ring-err"
   | `Hover_overlay -> "hover-overlay"
   | `Active_overlay -> "active-overlay"
+  | `Pressed_scale -> "pressed-scale"
+  | `Hover_lift -> "hover-lift"
+  | `Focus_ring_width -> "focus-ring-width"
+  | `Focus_ring_offset -> "focus-ring-offset"
   | `State_hover_bg -> "state-hover-bg"
   | `State_hover_fg -> "state-hover-fg"
   | `State_hover_border -> "state-hover-border"
@@ -829,8 +841,6 @@ let name_of = function
   | `Color_text_dim -> "color-text-dim"
   | `Color_accent_brass -> "color-accent-brass"
   | `Color_accent_soft -> "color-accent-soft"
-  | `Bad_light -> "bad-light"
-  | `Warn_bright -> "warn-bright"
   | `Color_keeper_1_glow -> "color-keeper-1-glow"
   | `Color_keeper_2_glow -> "color-keeper-2-glow"
   | `Color_keeper_3_glow -> "color-keeper-3-glow"

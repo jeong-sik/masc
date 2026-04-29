@@ -78,7 +78,7 @@
   --ok-35: rgba(74, 222, 128, 0.35);
 
   /* Semantic - Warning (Yellow) */
-  --warn-bright: #f97316;
+  /* --warn-bright lifted to source.ts (Iter 2c-10); FSM Compacting tint */
   --warn-soft: rgba(251, 191, 36, 0.15);
   --warn-10: rgba(251, 191, 36, 0.10);
   --warn-20: rgba(251, 191, 36, 0.20);
@@ -95,7 +95,7 @@
      Lifted to source.ts (Iter 2c-7); see semantic role binding below. */
 
   /* Semantic - Critical (Red) */
-  --bad-light: #f87171;
+  /* --bad-light lifted to source.ts (Iter 2c-10); softer red for toasts */
   --bad-soft: rgba(239, 68, 68, 0.15);
   --bad-6: rgba(239, 68, 68, 0.06);
   --bad-10: rgba(239, 68, 68, 0.10);
@@ -293,7 +293,7 @@
   /* --cyan, --purple base hex lifted to source.ts (Iter 2c-4); alpha companions retained */
   --cyan-12: rgba(34, 211, 238, 0.12);
   --cyan-16: rgba(34, 211, 238, 0.16);
-  --text-slate: #b0bfd4;
+  /* --text-slate lifted to source.ts (Iter 2c-10) */
   /* --text-slate-light, --text-near-white lifted to source.ts (Iter 2c-5) */
   
   --ff-gold-8: rgba(200, 168, 78, 0.08);

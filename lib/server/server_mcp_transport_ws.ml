@@ -157,6 +157,7 @@ let send_frame_bytes session bytes ~len =
       Httpun_ws.Wsd.send_bytes session.wsd
         ~kind:`Text bytes ~off:0 ~len;
       Transport_metrics.inc_ws_bytes_sent ~bytes:len;
+      Transport_metrics.observe_ws_message_bytes_sent len;
       true
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
@@ -760,6 +761,7 @@ let handle_inbound_text session ~on_message ~is_fin text =
       end
 
 let read_inbound_message_frame session ~on_message ~is_fin ~len payload =
+  Transport_metrics.observe_ws_message_bytes_recv len;
   read_payload_string payload ~len ~on_complete:(fun text ->
       handle_inbound_text session ~on_message ~is_fin text)
 

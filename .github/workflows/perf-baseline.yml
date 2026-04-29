@@ -1,0 +1,43 @@
+name: Perf Baseline (Daily)
+
+# Runs scripts/perf-baseline.sh on a daily schedule and records the
+# raw output as an artifact. The script targets a live masc-mcp server
+# at :8935; in CI no server is running, so the run is expected to exit
+# with code 3 ("server unreachable"). The captured artifact is still
+# useful as an audit trail of attempted runs and dependency presence
+# (curl, awk, date, mkdir, tee) on the runner.
+#
+# Real 14-day baseline collection happens on the Railway production
+# host per docs/design/perf-baseline-protocol.md section 3.3. This
+# workflow documents the schedule and leaves a paper trail; the daily
+# production cron is the source of truth for actual numbers.
+#
+# References:
+#   - scripts/perf-baseline.sh        (#11984)
+#   - docs/design/perf-baseline-protocol.md (#11984, section 3.3)
+#   - knowledge/research/2026-04-masc-ide-strategy/IMPLEMENTATION-PLAN.md PR-0.2.F
+
+on:
+  schedule:
+    - cron: '0 8 * * *'  # daily 08:00 UTC
+  workflow_dispatch:
+
+jobs:
+  baseline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run perf baseline
+        run: |
+          chmod +x scripts/perf-baseline.sh
+          ./scripts/perf-baseline.sh > baseline-output.txt 2>&1 || echo "exit=$?" >> baseline-output.txt
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-baseline-${{ github.run_id }}
+          path: baseline-output.txt
+          retention-days: 90

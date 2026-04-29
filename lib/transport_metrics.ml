@@ -129,6 +129,16 @@ let inc_ws_bytes_sent ~bytes =
     Prometheus.inc_counter Prometheus.metric_ws_bytes_sent
       ~delta:(float_of_int bytes) ()
 
+let observe_ws_message_bytes_sent n =
+  let bytes = float_of_int (max 0 n) in
+  Prometheus.observe_histogram Prometheus.metric_ws_message_bytes
+    ~labels:[("direction", "send")] bytes
+
+let observe_ws_message_bytes_recv n =
+  let bytes = float_of_int (max 0 n) in
+  Prometheus.observe_histogram Prometheus.metric_ws_message_bytes
+    ~labels:[("direction", "recv")] bytes
+
 let inc_grpc_bytes_sent ~bytes =
   if bytes > 0 then
     Prometheus.inc_counter Prometheus.metric_grpc_bytes_sent

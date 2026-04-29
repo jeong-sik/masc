@@ -18,11 +18,24 @@
 
 module OT = Opentelemetry
 
+(** PR-0.2.C: process startup timestamp captured at module load. Used to
+    classify tool calls into [phase=cold] (within first
+    [cold_phase_seconds] after startup) or [phase=warm] (after).
+    Cold/warm split lets dashboards distinguish first-call overhead
+    (provider warmup, JIT, prefix-cache miss) from steady-state cost
+    without changing the histogram's underlying observation. *)
+let startup_time = Unix.gettimeofday ()
+let cold_phase_seconds = 60.0
+let cold_warm_phase () =
+  if Unix.gettimeofday () -. startup_time < cold_phase_seconds then "cold"
+  else "warm"
+
 (** Record a tool call as an OTel span and Prometheus histogram observation. *)
 let on_tool_result (result : Tool_result.t) : Tool_result.t =
   (* Prometheus histogram: always active regardless of MASC_OTEL_ENABLED *)
   Prometheus.observe_histogram "masc_tool_call_duration_seconds"
-    ~labels:[("tool_name", result.tool_name)]
+    ~labels:[("tool_name", result.tool_name);
+             ("phase", cold_warm_phase ())]
     (result.duration_ms /. 1000.0);
   (* OTel span: only when enabled *)
   if Otel_config.enabled then begin

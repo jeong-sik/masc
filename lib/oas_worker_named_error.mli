@@ -83,6 +83,10 @@ val admission_wait_timeout_error :
 
 val cross_cascade_fallback_metric : string
 
+val masc_oas_error_total_metric : string
+(** Canonical Prometheus counter name used by
+    [sdk_error_of_masc_internal_error]. *)
+
 (** {1 Config construction} *)
 
 val config_for_label :

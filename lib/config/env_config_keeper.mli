@@ -1,0 +1,270 @@
+(** Env_config_keeper — keeper runtime parameters from environment.
+
+    All [MASC_KEEPER_*] env vars in this module can also be set
+    declaratively in [<resolved config root>/keeper_runtime.toml].
+    Precedence: process env > TOML > hardcoded default.
+
+    Surface flows through [include Env_config_keeper] in
+    {!Env_config}, so callers reach values either as
+    [Env_config.<Module>.<field>] or as [Env_config.<top_level>] for
+    the few unscoped lets at this boundary. *)
+
+(** {1 Keeper bootstrap} *)
+
+module KeeperBootstrap : sig
+  val enabled : bool
+  val stale_turn_seconds : float
+  val max_scan : int
+  val max_active_keepers : int
+  val lazy_startup_poll_interval_sec : float
+  val keeper_listener_retry_interval_sec : float
+  val post_startup_settle_sec : float
+end
+
+(** {1 Keeper metrics rotation} *)
+
+module KeeperMetrics : sig
+  val max_file_bytes : int
+  val max_rotated_files : int
+end
+
+(** {1 Keeper interesting-alert fanout} *)
+
+module KeeperAlert : sig
+  val enabled : bool
+  val min_score : float
+  val max_body_chars : int
+  val max_retries : int
+  val retry_base_delay_ms : int
+  val board_enabled : bool
+  val board_author : string
+  val board_hearth : string
+  val board_visibility : string
+  val slack_enabled : bool
+  val slack_webhook_url : string
+  val slack_dm_enabled : bool
+  val slack_dm_user_id : string
+  val github_enabled : bool
+  val github_repo : string
+  val github_label : string
+  val github_min_score : float
+end
+
+(** {1 Keeper supervisor} *)
+
+module KeeperSupervisor : sig
+  val max_restarts : int
+  val backoff_base_s : float
+  val backoff_max_s : float
+  val sweep_interval_sec : float
+  val self_preservation_ratio : float
+  val self_preservation_min_candidates : int
+  val dead_ttl_sec : float
+  val paused_cleanup_ttl_sec : float
+end
+
+(** {1 Stale-turn watchdog} *)
+
+module KeeperWatchdog : sig
+  val stale_threshold_sec : float
+  val poll_sec : float
+  val noop_threshold : int
+  val grace_period_sec : float
+end
+
+(** {1 Keeper poll intervals} *)
+
+module KeeperPollIntervals : sig
+  val crash_persistence_drain_sec : float
+  val autonomous_queue_poll_sec : float
+end
+
+(** {1 Keeper runtime} *)
+
+module KeeperRuntime : sig
+  val debug : bool
+  val deliberation_daily_budget_usd : unit -> float
+  val snapshot_sec : int
+end
+
+(** {1 Keeper context reducer} *)
+
+module KeeperReducer : sig
+  val cap_message_tokens : int
+  val cap_message_keep_recent : int
+end
+
+(** {1 Alert dedup} *)
+
+module AlertDedup : sig
+  val window_sec : float
+end
+
+(** {1 Work-as-Heartbeat (Phase 1)} *)
+
+module WorkAsHeartbeat : sig
+  val enabled : bool
+  val max_silence_sec : float
+end
+
+(** {1 Smart heartbeat (Phase 2)} *)
+
+module SmartHeartbeat : sig
+  val enabled : bool
+end
+
+(** {1 Keeper keepalive loop} *)
+
+module KeeperKeepalive : sig
+  val interval_sec : int
+  val max_consecutive_failures : int
+  val max_consecutive_turn_failures : int
+  val board_debounce_sec : float
+  val sleep_chunk_sec : float
+  val jitter_factor : float
+  val max_idle_turns_autonomous : int
+  val max_idle_turns_reactive : int
+  val turn_timeout_sec : float
+  val admission_wait_timeout_sec : float
+  val autonomous_slot_wait_timeout_sec : float
+  val oas_timeout_sec_override : float option
+  val oas_max_turns_per_call : int
+  val oas_max_turns_per_call_scheduled_autonomous : int
+
+  val oas_timeout_for_estimated_input_tokens_with_turn_budget :
+    estimated_input_tokens:int -> max_turns:int -> float
+
+  val oas_timeout_for_estimated_input_tokens :
+    estimated_input_tokens:int -> float
+
+  val oas_timeout_sec : float
+  val idle_skip_threshold : int
+end
+
+(** {1 gRPC heartbeat reconnect} *)
+
+module KeeperGrpc : sig
+  val max_reconnect_attempts : int
+  val reconnect_backoff_sec : float
+end
+
+(** {1 Proactive generation} *)
+
+module KeeperProactive : sig
+  val max_attempts : int
+  val stage_timing_ring_size : int
+end
+
+(** {1 Tool execution} *)
+
+module KeeperToolExec : sig
+  val max_consecutive_tool_failures : int
+end
+
+(** {1 Context ratio hard cap} *)
+
+val context_ratio_hard_cap : float
+(** Absolute ceiling for compaction ratio_gate / handoff threshold
+    after multiplier adjustment.  Range: [\[0.80, 0.99\]].  Reached
+    qualified ([Env_config_keeper.context_ratio_hard_cap]) by
+    {!Keeper_memory_recall} guard sites. *)
+
+(** {1 Context compaction (OAS)} *)
+
+module ContextCompact : sig
+  val w_recency : float
+  val w_role : float
+  val w_tool : float
+  val role_system : float
+  val role_tool : float
+  val role_user : float
+  val role_assistant : float
+  val tool_present : float
+  val tool_absent : float
+  val anchor_boost : float
+  val drop_importance_threshold : float
+  val summarize_keep_recent : int
+  val tool_output_prune_limit : int
+  val dynamic_multi_agent_ratio : float
+  val dynamic_focused_ratio : float
+  val small_local_floor : int
+  val large_cloud_floor : int
+end
+
+(** {1 Docker playground} *)
+
+module DockerPlayground : sig
+  val enabled : bool
+  val container_name : string
+  val container_playground_root : string
+end
+
+(** {1 Keeper sandbox (alias layer over {!Env_config_sandbox})} *)
+
+module KeeperSandbox : sig
+  val hard_mode : unit -> bool
+  val docker_image : unit -> string
+  val preflight_enabled : unit -> bool
+  val pids_limit : unit -> int
+  val nofile_limit : unit -> int
+  val memory : unit -> string
+  val tmpfs_size : unit -> string
+  val relax_fs : unit -> bool
+  val read_only_rootfs_args : unit -> string list
+  val tmpfs_mount : unit -> string
+  val seccomp_profile : unit -> string
+  val require_rootless : unit -> bool
+  val require_userns : unit -> bool
+  val cleanup_enabled : unit -> bool
+  val cleanup_stale_after_sec : unit -> float
+  val cleanup_interval_sec : unit -> float
+  val with_git_dispatch_enabled : unit -> bool
+  val gh_creds_host_path : unit -> string
+  val gitconfig_host_path : unit -> string
+  val ssh_dir_host_path : unit -> string
+  val gh_token_probe_timeout_sec : unit -> float
+
+  val gh_token : unit -> string
+  (** GitHub token forwarded as GH_TOKEN env into the docker
+      git-creds execution path.  Resolution order:
+      1. [MASC_KEEPER_SANDBOX_GH_TOKEN] env override.
+      2. host [GH_TOKEN] env.
+      3. host [gh auth token] keychain fallback (cached after first
+         successful probe).
+      Returns [""] when no token is configured. *)
+
+  module For_testing : sig
+    val reset_gh_token_probe_cache : unit -> unit
+
+    val with_gh_token_probe :
+      (unit -> string option) -> (unit -> 'a) -> 'a
+    (** Swap the [gh auth token] probe for [probe] inside [f] and
+        reset the cache around the call.  Restores the prior probe
+        + clears the cache on exit. *)
+  end
+
+  val symmetric_read_containment : unit -> bool
+  val docker_read_routing : unit -> bool
+end
+
+(** {1 Dashboard health thresholds} *)
+
+module DashboardHealth : sig
+  val ctx_critical : float
+  val ctx_warn : float
+  val penalty_critical : float
+  val penalty_warn : float
+  val runtime_warning_ctx_ratio : float
+end
+
+(** {1 Wake-time payload telemetry} *)
+
+module KeeperTelemetry : sig
+  val payload_telemetry_enabled : unit -> bool
+end
+
+(** {1 Cascade runtime overrides} *)
+
+module KeeperCascade : sig
+  val provider_allowlist : unit -> string list option
+end

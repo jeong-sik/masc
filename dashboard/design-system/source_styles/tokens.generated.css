@@ -380,6 +380,11 @@
   --button-ghost-border: var(--color-border-default);  /* ActionButton variant=ghost border */
   --button-ghost-bg-hover: var(--white-8);  /* ActionButton variant=ghost hover bg */
   --button-ghost-bg-pressed: var(--accent-12);  /* ActionButton variant=ghost [data-pressed] bg (swaps to accent for selection clarity) */
+  --button-danger-bg: var(--bad-10);  /* ActionButton variant=danger surface bg */
+  --button-danger-fg: var(--bad-light);  /* ActionButton variant=danger text fg */
+  --button-danger-border: var(--bad-30);  /* ActionButton variant=danger border */
+  --button-danger-bg-hover: var(--bad-20);  /* ActionButton variant=danger hover bg */
+  --button-danger-bg-pressed: var(--bad-20);  /* ActionButton variant=danger [data-pressed] bg */
   --state-hover-bg: var(--bg-3);
   --state-hover-fg: var(--fg-1);
   --state-hover-border: var(--line-2);

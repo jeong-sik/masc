@@ -935,6 +935,47 @@ export const semantic: ReadonlyArray<TokenBase> = (() => {
   out.push(t("toast-shadow",     "var(--shadow-3)",   "role", "shadow",
     "toast drop shadow (elev-5 — floats above modals at z-toast)"));
 
+  // Terminal ANSI 16-color palette (Stage 5 follow-up to IDE Chrome
+  // tokens). xterm-style 8 standard + 8 bright slots. Values resolve
+  // through the brass canon: status semantic 4-slot for red/green/
+  // yellow/blue, keeper palette for magenta/cyan, fg-N for greys/
+  // whites. Avoids the saturated VT100 default palette so terminal
+  // output matches the muted Cockpit aesthetic. Bright variants
+  // pull -fg semantic (already pinned brighter) or higher-luma
+  // keeper slots so contrast stays WCAG AA on --terminal-bg.
+  out.push(t("terminal-ansi-black",          "var(--bg-0)",   "role", "color",
+    "ANSI 0 — true black (matches deepest surface)"));
+  out.push(t("terminal-ansi-red",            "var(--err)",    "role", "color",
+    "ANSI 1 — red (status err canon: #c46a5a)"));
+  out.push(t("terminal-ansi-green",          "var(--ok)",     "role", "color",
+    "ANSI 2 — green (status ok canon: #6b9e6b)"));
+  out.push(t("terminal-ansi-yellow",         "var(--warn)",   "role", "color",
+    "ANSI 3 — yellow (status warn canon: #c9a24a)"));
+  out.push(t("terminal-ansi-blue",           "var(--info)",   "role", "color",
+    "ANSI 4 — blue (status info canon: #6a8eb0)"));
+  out.push(t("terminal-ansi-magenta",        "var(--k-12)",   "role", "color",
+    "ANSI 5 — magenta (keeper-12 mauve: #b884b3)"));
+  out.push(t("terminal-ansi-cyan",           "var(--k-8)",    "role", "color",
+    "ANSI 6 — cyan (keeper-8: #4aa7b7)"));
+  out.push(t("terminal-ansi-white",          "var(--fg-2)",   "role", "color",
+    "ANSI 7 — white (secondary fg — softer than primary)"));
+  out.push(t("terminal-ansi-bright-black",   "var(--fg-3)",   "role", "color",
+    "ANSI 8 — bright black / gray (muted fg)"));
+  out.push(t("terminal-ansi-bright-red",     "var(--err-fg)", "role", "color",
+    "ANSI 9 — bright red (err-fg pinned: #d8806f, WCAG AA on bg-0)"));
+  out.push(t("terminal-ansi-bright-green",   "var(--ok-fg)",  "role", "color",
+    "ANSI 10 — bright green (ok-fg pinned: #8ebc8e)"));
+  out.push(t("terminal-ansi-bright-yellow",  "var(--warn-fg)","role", "color",
+    "ANSI 11 — bright yellow (warn-fg pinned: #d9b764)"));
+  out.push(t("terminal-ansi-bright-blue",    "var(--info-fg)","role", "color",
+    "ANSI 12 — bright blue (info-fg pinned: #8aa6c4)"));
+  out.push(t("terminal-ansi-bright-magenta", "var(--k-11)",   "role", "color",
+    "ANSI 13 — bright magenta (keeper-11 violet: #a18cc8)"));
+  out.push(t("terminal-ansi-bright-cyan",    "var(--k-9)",    "role", "color",
+    "ANSI 14 — bright cyan (keeper-9 sky: #62a0ca — sky lifts cyan)"));
+  out.push(t("terminal-ansi-bright-white",   "var(--fg-1)",   "role", "color",
+    "ANSI 15 — bright white (primary fg: #f0e9dc — never pure white)"));
+
   // ── Motion role tokens — bundle duration + easing ──────────────────
   out.push(t("motion-enter",  "var(--t-med) var(--ease-out)", "role", "duration"));
   out.push(t("motion-exit",   "var(--t-fast) var(--ease-in)", "role", "duration"));

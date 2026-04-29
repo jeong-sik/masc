@@ -634,7 +634,7 @@ let confirm_json ?actor_hint (ctx : _ context) args :
             };
           Audit_log.log_governance_decision ctx.config
             ~agent_id:actor ~trace_id:entry.trace_id
-            ~decision:"expired" ~action_type:entry.action_type
+            ~decision:Audit_log.Governance_expired ~action_type:entry.action_type
             ~confirmation_state:(confirmation_state_to_string Expired) ();
           Error "pending confirmation expired"
       | Some entry when not (String.equal actor entry.actor) ->
@@ -655,7 +655,7 @@ let confirm_json ?actor_hint (ctx : _ context) args :
             };
           Audit_log.log_governance_decision ctx.config
             ~agent_id:actor ~trace_id:entry.trace_id
-            ~decision:"unauthorized" ~action_type:entry.action_type
+            ~decision:Audit_log.Governance_unauthorized ~action_type:entry.action_type
             ~confirmation_state:(confirmation_state_to_string Denied) ();
           Error "actor is not allowed to confirm this action"
       | Some entry ->
@@ -678,7 +678,7 @@ let confirm_json ?actor_hint (ctx : _ context) args :
               };
             Audit_log.log_governance_decision ctx.config
               ~agent_id:actor ~trace_id:entry.trace_id
-              ~decision:"deny" ~action_type:entry.action_type
+              ~decision:Audit_log.Governance_deny ~action_type:entry.action_type
               ~confirmation_state:(confirmation_state_to_string Denied) ();
             Ok
               (json_ok
@@ -719,7 +719,7 @@ let confirm_json ?actor_hint (ctx : _ context) args :
               };
             Audit_log.log_governance_decision ctx.config
               ~agent_id:entry.actor ~trace_id:entry.trace_id
-              ~decision:"confirm" ~action_type:entry.action_type
+              ~decision:Audit_log.Governance_confirm ~action_type:entry.action_type
               ~confirmation_state:(confirmation_state_to_string Confirmed) ();
             Ok
               (json_ok

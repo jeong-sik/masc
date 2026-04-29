@@ -90,16 +90,16 @@ let should_audit ~governance_level risk =
   | None -> false
 
 let audit_decision (config : Coord.config) (decision : governance_decision) =
-  let action_str =
+  let audit_decision, action_str =
     match decision.action with
-    | `Allow -> "allow"
-    | `Require_confirm _ -> "require_confirm"
-    | `Deny _ -> "deny"
+    | `Allow -> Audit_log.Governance_allow, "allow"
+    | `Require_confirm _ -> Audit_log.Governance_require_confirm, "require_confirm"
+    | `Deny _ -> Audit_log.Governance_deny, "deny"
   in
   Audit_log.log_governance_decision config
     ~agent_id:"governance-pipeline"
     ~trace_id:decision.trace_id
-    ~decision:action_str
+    ~decision:audit_decision
     ~action_type:(risk_level_to_string decision.risk)
     ~confirmation_state:action_str
     ()

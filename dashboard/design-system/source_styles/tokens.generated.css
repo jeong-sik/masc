@@ -400,6 +400,14 @@
   --button-subtle-border: transparent;  /* ActionButton variant=subtle border (rendered as border-none) */
   --button-subtle-bg-hover: var(--white-6);  /* ActionButton variant=subtle hover bg */
   --button-subtle-bg-pressed: var(--white-6);  /* ActionButton variant=subtle [data-pressed] bg */
+  --input-bg: var(--white-4);  /* Form input surface bg (Input/TextArea/NumberInput/Select) */
+  --input-fg: var(--color-fg-primary);  /* Form input text fg */
+  --input-border: var(--color-border-default);  /* Form input border */
+  --input-bg-hover: var(--white-6);  /* Form input hover bg */
+  --input-bg-focus: var(--color-bg-page);  /* Form input :focus-visible bg */
+  --dialog-panel-bg: rgba(13,21,38,0.98);  /* DialogOverlay panel surface bg (most-common consumer literal) */
+  --dialog-panel-border: var(--color-border-default);  /* DialogOverlay panel border */
+  --dialog-overlay-bg: var(--white-5);  /* DialogOverlay scrim base color (pair with /60 or /70 opacity) */
   --state-hover-bg: var(--bg-3);
   --state-hover-fg: var(--fg-1);
   --state-hover-border: var(--line-2);

@@ -72,7 +72,7 @@ export function JsonViewer({ data, label, initialCollapsed = false, level = 0, a
         aria-expanded=${!collapsed}
         aria-label=${`${collapsed ? 'Expand' : 'Collapse'} ${toggleLabel}`}
       >
-        <span aria-hidden="true" class="text-[var(--color-fg-muted)] shrink-0 w-4 inline-flex justify-center transition-transform duration-150 ${collapsed ? '-rotate-90' : ''}">▼</span>
+        <span aria-hidden="true" class="text-[var(--color-fg-muted)] shrink-0 w-4 inline-flex justify-center transition-transform duration-[var(--t-fast)] ${collapsed ? '-rotate-90' : ''}">▼</span>
         ${label ? html`<span class="text-[var(--color-fg-primary)] font-medium truncate">${label}</span>` : null}
         <span class="text-[var(--color-fg-muted)] text-2xs ml-1 shrink-0">
           ${isArray ? `[${(data as unknown[]).length}]` : `{${entries.length}}`}

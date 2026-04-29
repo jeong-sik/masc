@@ -50,7 +50,7 @@ export function FilterChips<T extends string>({
           title=${chip.title}
           role="tab"
           aria-selected=${activeKey === chip.key}
-          class="${chipClass} cursor-pointer transition-all duration-150 ${activeKey === chip.key
+          class="${chipClass} cursor-pointer transition-all duration-[var(--t-fast)] ${activeKey === chip.key
             ? activeToneClass
             : idleToneClass}"
           onClick=${() => {

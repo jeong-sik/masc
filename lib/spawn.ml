@@ -178,7 +178,7 @@ let spawn_config_of_key key =
   | "gemini" ->
       Some {
         agent_name = "gemini";
-        command = "gemini --yolo --output-format json";
+        command = "gemini --output-format json";
         timeout_seconds;
         working_dir = None;
         mcp_tools = masc_mcp_tools;

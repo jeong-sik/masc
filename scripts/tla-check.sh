@@ -200,6 +200,9 @@ run_tlc_buggy "$REPO_ROOT/specs/state-product" "CoordinationProduct.tla"
 run_tlc "$REPO_ROOT/specs/task-lifecycle" "TaskLifecycle.tla"
 run_tlc_buggy "$REPO_ROOT/specs/task-lifecycle" "TaskLifecycle.tla"
 
+# Cycle 24 — Multimodal artifact GADT well-formedness (Tier B8 catch-up).
+run_tlc "$REPO_ROOT/specs/multimodal" "MultimodalArtifact.tla"
+
 # Optional: run TraceSpec if --trace flag provided
 if [ "${1:-}" = "--trace" ]; then
   TRACE_SPEC="$REPO_ROOT/specs/keeper-state-machine/KeeperTraceSpec.tla"

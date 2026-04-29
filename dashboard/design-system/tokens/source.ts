@@ -661,6 +661,20 @@ export const semantic: ReadonlyArray<TokenBase> = (() => {
   out.push(t("button-primary-bg-pressed", "var(--accent-20)",         "role", "color",
     "ActionButton variant=primary [data-pressed] / [aria-pressed=true] bg"));
 
+  // Second slot — button-ghost. Neutral surface for secondary/cancel
+  // actions; pairs with button-primary in two-button confirm/cancel
+  // dialogs. Aliases match button.ts VARIANT_CLASSES.ghost.
+  out.push(t("button-ghost-bg",         "var(--white-4)",                "role", "color",
+    "ActionButton variant=ghost surface bg"));
+  out.push(t("button-ghost-fg",         "var(--color-fg-primary)",       "role", "color",
+    "ActionButton variant=ghost text fg"));
+  out.push(t("button-ghost-border",     "var(--color-border-default)",   "role", "color",
+    "ActionButton variant=ghost border"));
+  out.push(t("button-ghost-bg-hover",   "var(--white-8)",                "role", "color",
+    "ActionButton variant=ghost hover bg"));
+  out.push(t("button-ghost-bg-pressed", "var(--accent-12)",              "role", "color",
+    "ActionButton variant=ghost [data-pressed] bg (swaps to accent for selection clarity)"));
+
   // Interactive state roles — explicit hover/selected/pressed semantics
   out.push(t("state-hover-bg",       "var(--bg-3)",   "role", "color"));
   out.push(t("state-hover-fg",       "var(--fg-1)",   "role", "color"));

@@ -370,6 +370,11 @@
   --color-button-primary-border: var(--accent-30);
   --color-button-primary-bg-hover: var(--accent-20);
   --color-button-primary-bg-pressed: var(--accent-20);
+  --color-button-ghost-bg: var(--white-4);
+  --color-button-ghost-fg: var(--color-fg-primary);
+  --color-button-ghost-border: var(--color-border-default);
+  --color-button-ghost-bg-hover: var(--white-8);
+  --color-button-ghost-bg-pressed: var(--accent-12);
   --color-state-hover-bg: var(--bg-3);
   --color-state-hover-fg: var(--fg-1);
   --color-state-hover-border: var(--line-2);

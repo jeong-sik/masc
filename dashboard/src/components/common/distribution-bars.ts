@@ -148,9 +148,14 @@ export function SegmentedBar({
                   const palette = paletteFor(item.tone)
                   const width = (item.value / total) * 100
                   const formattedValue = valueFormatter(item.value)
+                  // Bar segment is purely decorative — the same data is
+                  // exposed accessibly via the chip pills below. Mark
+                  // aria-hidden so axe's `aria-prohibited-attr` doesn't
+                  // flag the missing role and screen readers skip the
+                  // visual-only fill. `title` stays for sighted hover.
                   return html`
                     <div
-                      aria-label=${`${item.label}: ${formattedValue}`}
+                      aria-hidden="true"
                       title=${`${item.label}: ${formattedValue}`}
                       style=${`width:${width}%;background:${palette.fill};opacity:0.82;`}
                     ></div>
@@ -161,9 +166,13 @@ export function SegmentedBar({
                 ${visibleItems.map(item => {
                   const palette = paletteFor(item.tone)
                   const formattedValue = valueFormatter(item.value)
+                  // Chip pill carries the visible label + value as
+                  // children — duplicate aria-label was an
+                  // aria-prohibited-attr violation (no role on the span).
+                  // Drop aria-label; the visible text content is the
+                  // accessible name. `title` stays for sighted hover.
                   return html`
                     <span
-                      aria-label=${`${item.label}: ${formattedValue}`}
                       title=${`${item.label}: ${formattedValue}`}
                       class="inline-flex items-center gap-1.5 rounded-sm border px-2 py-0.5 text-3xs font-medium"
                       style=${`color:${palette.text};background:${palette.chipBg};border-color:${palette.chipBorder};`}

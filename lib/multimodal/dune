@@ -1,0 +1,7 @@
+(include_subdirs no)
+
+(library
+ (name multimodal)
+ (public_name masc_mcp.multimodal)
+ (libraries shared_types yojson)
+ (preprocess (pps ppx_tla)))

@@ -388,10 +388,10 @@ let run
       in
       (match config.checkpoint_dir with
        | Some dir ->
-         (try persist_checkpoint ~dir ~session_id ckpt
-          with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-            Log.Misc.error "oas_worker: Checkpoint save failed: %s"
-              (Printexc.to_string exn))
+         (match persist_checkpoint ~dir ~session_id ckpt with
+          | Ok () -> ()
+          | Error err ->
+            Log.Misc.error "oas_worker: %s" err)
        | None -> ());
       Some ckpt
     in

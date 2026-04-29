@@ -25,10 +25,20 @@ let publish_lifecycle _bus ~name ~event ~detail ?error ?session_id ?status () =
                    @ optional_string_field "session_id" session_id
                    @ optional_string_field "status" status) )))
 
-let persist_checkpoint ~dir ~session_id (ckpt : Oas.Checkpoint.t) =
+let persist_checkpoint ~dir ~session_id (ckpt : Oas.Checkpoint.t)
+    : (unit, string) result =
   let path = Filename.concat dir (session_id ^ ".json") in
-  Fs_compat.mkdir_p dir;
-  Fs_compat.save_file path (Oas.Checkpoint.to_string ckpt)
+  try
+    Fs_compat.mkdir_p dir;
+    Result.map_error
+      (fun err ->
+         Printf.sprintf "checkpoint persist failed for %s: %s" session_id err)
+      (Fs_compat.save_file_atomic path (Oas.Checkpoint.to_string ckpt))
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+    Error (Printf.sprintf "checkpoint persist failed for %s: %s"
+             session_id (Printexc.to_string exn))
 
 let build_checkpoint ~session_id ?checkpoint_sidecar (agent : Oas.Agent.t) =
   match checkpoint_sidecar with

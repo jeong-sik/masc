@@ -166,8 +166,9 @@ let test_keeper_snapshot_envelope_agent_name () =
   (* #7827: publish_keeper_snapshot stores the keeper's identity as
      [keeper_name] inside the Custom payload.  native_event_to_json must
      still populate the top-level envelope [agent_name] so that
-     [.masc/oas-events/*.jsonl] consumers can filter/group by agent
-     instead of silently dropping 9%+ of daily events. *)
+     consumers of the Dated_jsonl store under [.masc/oas-events/] can
+     filter/group by agent instead of silently dropping 9%+ of daily
+     events. *)
   Eio_main.run @@ fun _env ->
   let bus = Event_bus.create () in
   Masc_event_bus.set bus;

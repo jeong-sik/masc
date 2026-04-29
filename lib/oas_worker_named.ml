@@ -1061,6 +1061,17 @@ let cli_wrapped_hard_quota_indicators = [
   "monthly usage limit";
   "org's monthly usage limit";
   "resets apr ";
+  (* Anthropic console usage-limit error (HTTP 400 invalid_request_error,
+     observed 2026-04-29 with 2-day reset window).  Body shape:
+       {"type":"error","error":{"type":"invalid_request_error",
+        "message":"You have reached your specified API usage limits.
+        You will regain access on YYYY-MM-DD at HH:MM UTC."}}
+     Earlier 429-based indicators don't match because Anthropic now
+     returns 400 with the user-set monthly cap.  Without these markers
+     [sdk_error_is_hard_quota] returns false → cascade keeps retrying
+     claude_code:auto for the full OAS turn budget (~60min). *)
+  "reached your specified api usage limits";
+  "you will regain access on";
 ]
 
 let message_looks_like_cli_wrapped_hard_quota (message : string) : bool =
@@ -1170,12 +1181,18 @@ let sdk_error_is_hard_quota (err : Oas.Error.sdk_error) : bool =
     (match[@warning "-8"] api_err with
      | Llm_provider.Retry.NetworkError { message; _ }
      | Llm_provider.Retry.Overloaded { message }
-     | Llm_provider.Retry.ServerError { message; _ } ->
+     | Llm_provider.Retry.ServerError { message; _ }
+     (* InvalidRequest covers Anthropic's HTTP 400 user-set monthly cap
+        ("You have reached your specified API usage limits...").  Without
+        this branch, direct (non-CLI) API calls treat the cap as a
+        retryable client error and the cascade burns its full turn budget
+        on a permanent failure.  Observed 2026-04-29.  CLI-wrapped form
+        already lands in [NetworkError] above. *)
+     | Llm_provider.Retry.InvalidRequest { message } ->
        message_looks_like_cli_wrapped_hard_quota message
      | Llm_provider.Retry.RateLimited _
      | Llm_provider.Retry.AuthError _
      | Llm_provider.Retry.NotFound _
-     | Llm_provider.Retry.InvalidRequest _
      | Llm_provider.Retry.ContextOverflow _
      | Llm_provider.Retry.Timeout _ ->
        false)
@@ -1816,10 +1833,29 @@ let run_named
           Cascade_health_tracker.(
             record_failure global ~provider_key:provider_cfg.model_id
               ~error_kind ~error_reason:err_str ())));
-        (* FSM: Call_err → decide *)
+        (* FSM: Call_err → decide.
+           Hard-quota fast-path: a hard quota is permanent for this turn —
+           every remaining tier in this cascade (and any cross-cascade
+           borrow) will hit the same account-level limit, so retrying
+           burns the full OAS turn budget (~60min) for nothing.  Force
+           [Exhausted] regardless of [is_last] so the agent loop sees the
+           terminal error immediately.  The hard-quota cooldown recorded
+           above (line ~1760) keeps this provider deselected for future
+           turns; the fast-path only short-circuits the within-turn
+           retry. *)
         (match sdk_error_to_cascade_outcome sdk_err with
          | Some outcome ->
-           (match Cascade_fsm.decide ~accept_on_exhaustion:false ~is_last outcome with
+           let decision =
+             if sdk_error_is_hard_quota sdk_err then
+               let last_err = match outcome with
+                 | Cascade_fsm.Call_err e -> Some e
+                 | _ -> None
+               in
+               Cascade_fsm.Exhausted { last_err }
+             else
+               Cascade_fsm.decide ~accept_on_exhaustion:false ~is_last outcome
+           in
+           (match decision with
             | Cascade_fsm.Try_next { last_err = new_err } ->
               (* Demoted from WARN to INFO (task-239): cascade will retry
                  the next tier.  Tagged [cascade-fallback] so dashboards

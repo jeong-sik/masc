@@ -403,6 +403,7 @@ export const TOKENS = {
   "dialogPanelBg": { name: "--dialog-panel-bg", value: "rgba(13,21,38,0.98)", tier: "role", kind: "color" },
   "dialogPanelBorder": { name: "--dialog-panel-border", value: "var(--color-border-default)", tier: "role", kind: "color" },
   "dialogOverlayBg": { name: "--dialog-overlay-bg", value: "var(--white-5)", tier: "role", kind: "color" },
+  "toastBg": { name: "--toast-bg", value: "rgba(10,18,34,0.96)", tier: "role", kind: "color" },
   "stateHoverBg": { name: "--state-hover-bg", value: "var(--bg-3)", tier: "role", kind: "color" },
   "stateHoverFg": { name: "--state-hover-fg", value: "var(--fg-1)", tier: "role", kind: "color" },
   "stateHoverBorder": { name: "--state-hover-border", value: "var(--line-2)", tier: "role", kind: "color" },

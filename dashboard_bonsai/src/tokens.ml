@@ -404,6 +404,7 @@ type semantic =
   | `Dialog_panel_bg
   | `Dialog_panel_border
   | `Dialog_overlay_bg
+  | `Toast_bg
   | `State_hover_bg
   | `State_hover_fg
   | `State_hover_border
@@ -869,6 +870,7 @@ let name_of = function
   | `Dialog_panel_bg -> "dialog-panel-bg"
   | `Dialog_panel_border -> "dialog-panel-border"
   | `Dialog_overlay_bg -> "dialog-overlay-bg"
+  | `Toast_bg -> "toast-bg"
   | `State_hover_bg -> "state-hover-bg"
   | `State_hover_fg -> "state-hover-fg"
   | `State_hover_border -> "state-hover-border"

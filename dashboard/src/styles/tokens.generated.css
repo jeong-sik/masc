@@ -403,6 +403,7 @@
   --color-dialog-panel-bg: rgba(13,21,38,0.98);
   --color-dialog-panel-border: var(--color-border-default);
   --color-dialog-overlay-bg: var(--white-5);
+  --color-toast-bg: rgba(10,18,34,0.96);
   --color-state-hover-bg: var(--bg-3);
   --color-state-hover-fg: var(--fg-1);
   --color-state-hover-border: var(--line-2);

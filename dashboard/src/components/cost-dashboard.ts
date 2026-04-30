@@ -19,6 +19,8 @@ import {
   fetchHeuristics,
   fetchHeuristicCoverage,
   fetchStress,
+  fetchCascadeHealth,
+  fetchCascadeConfig,
   type DashboardRuntimeModelMetric,
   type KeeperCostMetric,
   type LatencyBucket,
@@ -26,6 +28,8 @@ import {
   type HeuristicCoverage,
   type CoverageSite,
   type StressEvent,
+  type CascadeHealthResponse,
+  type CascadeConfigResponse,
 } from '../api/dashboard'
 import { LoadingState, ErrorState } from './common/feedback-state'
 
@@ -61,12 +65,26 @@ type CoverageLoadState =
   | { status: 'loaded'; data: HeuristicCoverage }
   | { status: 'error'; message: string }
 
+type CascadeHealthLoadState =
+  | { status: 'idle' }
+  | { status: 'loading' }
+  | { status: 'loaded'; data: CascadeHealthResponse }
+  | { status: 'error'; message: string }
+
+type CascadeConfigLoadState =
+  | { status: 'idle' }
+  | { status: 'loading' }
+  | { status: 'loaded'; data: CascadeConfigResponse }
+  | { status: 'error'; message: string }
+
 const viewMode = signal<ViewMode>('model')
 const modelState = signal<ModelLoadState>({ status: 'idle' })
 const keeperState = signal<KeeperLoadState>({ status: 'idle' })
 const heuristicState = signal<HeuristicLoadState>({ status: 'idle' })
 const stressState = signal<StressLoadState>({ status: 'idle' })
 const coverageState = signal<CoverageLoadState>({ status: 'idle' })
+const cascadeHealthState = signal<CascadeHealthLoadState>({ status: 'idle' })
+const cascadeConfigState = signal<CascadeConfigLoadState>({ status: 'idle' })
 
 const WINDOW_OPTIONS: Array<{ key: number; label: string }> = [
   { key: 30, label: '30분' },
@@ -141,6 +159,28 @@ async function loadHeuristicCoverage(limit = 100) {
   }
 }
 
+async function loadCascadeHealth() {
+  cascadeHealthState.value = { status: 'loading' }
+  try {
+    const resp = await fetchCascadeHealth()
+    cascadeHealthState.value = { status: 'loaded', data: resp }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'cascade health 불러오기 실패'
+    cascadeHealthState.value = { status: 'error', message }
+  }
+}
+
+async function loadCascadeConfig() {
+  cascadeConfigState.value = { status: 'loading' }
+  try {
+    const resp = await fetchCascadeConfig()
+    cascadeConfigState.value = { status: 'loaded', data: resp }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'cascade config 불러오기 실패'
+    cascadeConfigState.value = { status: 'error', message }
+  }
+}
+
 function loadActiveView(window: number) {
   if (viewMode.value === 'model') {
     void loadModelMetrics(window)
@@ -150,6 +190,8 @@ function loadActiveView(window: number) {
   void loadHeuristics()
   void loadStress()
   void loadHeuristicCoverage()
+  void loadCascadeHealth()
+  void loadCascadeConfig()
 }
 
 const modelTotals = computed(() => {
@@ -646,6 +688,111 @@ function HeuristicByModule({ coverage }: { coverage: HeuristicCoverage }) {
   `
 }
 
+function CascadeBoard({ health, config }: { health: CascadeHealthResponse; config: CascadeConfigResponse }) {
+  const fmtTime = (iso: string): string => {
+    const d = new Date(iso)
+    return d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
+  }
+
+  const sortedProviders = [...health.providers].sort((a, b) => b.success_rate - a.success_rate)
+
+  return html`
+    <section class="flex flex-col gap-4" aria-label="Cascade inspector">
+      <div class="flex items-center justify-between rounded border border-card-border/60 bg-[var(--backdrop-deep)] px-3 py-2">
+        <span class="font-mono text-2xs uppercase tracking-1 text-text-muted">cascade inspector · ${health.providers.length} providers · updated ${fmtTime(health.updated_at)}</span>
+        <span class="font-mono text-2xs text-text-muted">window ${health.window_sec}s · cooldown ${health.cooldown_threshold} failures / ${health.cooldown_sec}s</span>
+      </div>
+
+      <div class="overflow-x-auto rounded border border-card-border/60 bg-[var(--backdrop-deep)]">
+        <table class="w-full" aria-label="Provider health">
+          <thead>
+            <tr class="border-b border-[var(--color-border-default)] text-2xs uppercase tracking-1 text-text-muted">
+              <th scope="col" class="px-2 py-1.5 text-left">provider</th>
+              <th scope="col" class="px-2 py-1.5 text-right">success</th>
+              <th scope="col" class="px-2 py-1.5 text-right">events</th>
+              <th scope="col" class="px-2 py-1.5 text-right">rejected</th>
+              <th scope="col" class="px-2 py-1.5 text-right">latency</th>
+              <th scope="col" class="px-2 py-1.5 text-center">status</th>
+              <th scope="col" class="px-2 py-1.5 text-center">cooldown</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${sortedProviders.map((p, i) => {
+              const successPct = Math.round(p.success_rate * 100)
+              const status = p.status ?? 'configured'
+              const statusClass =
+                status === 'active' ? 'bg-[var(--color-status-ok)]/15 text-[var(--color-status-ok)]'
+                  : status === 'cooldown' ? 'bg-[var(--color-status-warn)]/15 text-[var(--color-status-warn)]'
+                  : 'bg-[var(--color-text-muted)]/15 text-[var(--color-text-muted)]'
+              const latency = p.p50_latency_ms ?? p.avg_latency_ms ?? null
+              const rejected = p.rejected_in_window ?? 0
+              return html`
+                <tr key=${i} class="border-b border-[var(--color-border-default)]/50 text-2xs">
+                  <td class="px-2 py-1.5 text-left font-mono text-xs text-[var(--color-accent-fg)]">${p.provider_key}</td>
+                  <td class="px-2 py-1.5 text-right font-mono ${successPct >= 95 ? 'text-[var(--color-status-ok)]' : successPct >= 80 ? 'text-[var(--color-status-warn)]' : 'text-[var(--color-status-err)]'}">${successPct}%</td>
+                  <td class="px-2 py-1.5 text-right font-mono text-text-muted">${p.events_in_window}</td>
+                  <td class="px-2 py-1.5 text-right font-mono ${rejected > 0 ? 'text-[var(--color-status-err)]' : 'text-text-muted'}">${rejected}</td>
+                  <td class="px-2 py-1.5 text-right font-mono text-text-muted">${latency == null ? '—' : `${Math.round(latency)}ms`}</td>
+                  <td class="px-2 py-1.5 text-center">
+                    <span class="inline-block rounded px-1.5 py-0.5 text-2xs font-semibold ${statusClass}">${status}</span>
+                  </td>
+                  <td class="px-2 py-1.5 text-center">
+                    <span class="inline-block rounded px-1.5 py-0.5 text-2xs font-semibold ${p.in_cooldown ? 'bg-[var(--color-status-err)]/15 text-[var(--color-status-err)]' : 'bg-[var(--color-status-ok)]/15 text-[var(--color-status-ok)]'}">
+                      ${p.in_cooldown ? 'YES' : 'no'}
+                    </span>
+                  </td>
+                </tr>
+              `
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      ${config.profiles.length > 0 ? html`
+        <div class="flex flex-col gap-2">
+          <span class="font-mono text-2xs uppercase tracking-1 text-text-muted">cascade profiles · ${config.profiles.length} profiles · ${config.keeper_profiles.length} keeper assignments</span>
+          <div class="flex flex-col gap-2">
+            ${config.profiles.map((prof, i) => html`
+              <div key=${i} class="rounded border border-card-border/60 bg-[var(--backdrop-deep)]">
+                <div class="flex items-center justify-between border-b border-[var(--color-border-default)]/50 px-3 py-1.5">
+                  <span class="text-xs font-semibold text-text-strong">${prof.name}</span>
+                  <span class="font-mono text-2xs text-text-muted">${prof.candidates.length} candidates · ${prof.source}</span>
+                </div>
+                <div class="overflow-x-auto">
+                  <table class="w-full" aria-label=${`Candidates for ${prof.name}`}>
+                    <thead>
+                      <tr class="border-b border-[var(--color-border-default)]/30 text-2xs uppercase tracking-1 text-text-muted">
+                        <th scope="col" class="px-2 py-1 text-left">model</th>
+                        <th scope="col" class="px-2 py-1 text-right">weight</th>
+                        <th scope="col" class="px-2 py-1 text-right">success</th>
+                        <th scope="col" class="px-2 py-1 text-center">cooldown</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${prof.candidates.map((c, j) => html`
+                        <tr key=${j} class="border-b border-[var(--color-border-default)]/20 text-2xs">
+                          <td class="px-2 py-1 text-left font-mono text-text-strong">${c.model}</td>
+                          <td class="px-2 py-1 text-right font-mono text-text-muted">${c.effective_weight.toFixed(2)}</td>
+                          <td class="px-2 py-1 text-right font-mono ${Math.round(c.success_rate * 100) >= 95 ? 'text-[var(--color-status-ok)]' : 'text-[var(--color-status-warn)]'}">${Math.round(c.success_rate * 100)}%</td>
+                          <td class="px-2 py-1 text-center">
+                            <span class="inline-block rounded px-1.5 py-0.5 text-2xs font-semibold ${c.in_cooldown ? 'bg-[var(--color-status-err)]/15 text-[var(--color-status-err)]' : 'bg-[var(--color-status-ok)]/15 text-[var(--color-status-ok)]'}">
+                              ${c.in_cooldown ? 'YES' : 'no'}
+                            </span>
+                          </td>
+                        </tr>
+                      `)}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            `)}
+          </div>
+        </div>
+      ` : null}
+    </section>
+  `
+}
+
 export function CostDashboard() {
   const activeState = viewMode.value === 'model' ? modelState.value : keeperState.value
 
@@ -809,6 +956,23 @@ export function CostDashboard() {
         : coverageState.value.status === 'error'
           ? html`<${ErrorState} message=${coverageState.value.message} onRetry=${() => void loadHeuristicCoverage()} />`
           : html`<${LoadingState} />`}
+
+      ${cascadeHealthState.value.status === 'loaded' && cascadeConfigState.value.status === 'loaded'
+        ? html`<${CascadeBoard}
+            health=${cascadeHealthState.value.data}
+            config=${cascadeConfigState.value.data}
+          />`
+        : cascadeHealthState.value.status === 'error'
+          ? html`<${ErrorState}
+              message=${cascadeHealthState.value.message}
+              onRetry=${() => void loadCascadeHealth()}
+            />`
+          : cascadeConfigState.value.status === 'error'
+            ? html`<${ErrorState}
+                message=${cascadeConfigState.value.message}
+                onRetry=${() => void loadCascadeConfig()}
+              />`
+            : html`<${LoadingState} />`}
     </section>
   `
 }

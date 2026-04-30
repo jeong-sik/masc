@@ -152,6 +152,7 @@ export interface CascadeHealthResponse {
   window_sec: number
   cooldown_threshold: number
   cooldown_sec: number
+  hard_quota_cooldown_sec: number
   providers: CascadeHealthProvider[]
   /** Window used by the per-provider perf aggregate.  `null` when the
    *  backend did not compute perf (no `base_path`, matches every

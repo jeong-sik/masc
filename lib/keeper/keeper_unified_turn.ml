@@ -294,7 +294,9 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             ~terminal_reason_code
             ~activity_kind:"keeper.turn_blocked"
             ~trajectory_outcome:(Trajectory.Failed terminal_reason_code)
-            ~error_kind:(sdk_error_kind err)
+            ~error_kind:
+              (Keeper_execution_receipt.error_kind_of_string
+                 (sdk_error_kind err))
             ~error_message
             ~keeper_turn_id
             ();
@@ -610,7 +612,10 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             to_cascade = retry.next_cascade;
             reason = retry.fallback_reason;
             outcome;
-            error_kind = Some (sdk_error_kind err);
+            error_kind =
+              Some
+                (Keeper_execution_receipt.error_kind_of_string
+                   (sdk_error_kind err));
             error_message = Some (Oas.Error.to_string err);
             recorded_at = now_iso ();
           }

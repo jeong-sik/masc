@@ -656,7 +656,10 @@ let append_execution_receipt ?(tool_contract_result = "satisfied")
                to_cascade = retry_cascade;
                reason;
                outcome = "retry_scheduled";
-               error_kind = Some "internal";
+               error_kind =
+                 Some
+                   (Masc_mcp.Keeper_execution_receipt.error_kind_of_string
+                      "internal");
                error_message = Some "turn timeout";
                recorded_at = ended_at;
              };
@@ -1177,7 +1180,13 @@ let test_keeper_cascade_assignment_updates_dashboard_projection () =
 let test_execution_trust_route_surfaces_trust_summary_fields () =
   with_seeded_server
   @@ fun ~port ~config ~admin_token:_ ~keeper_name ->
-  append_execution_receipt config ~keeper_name;
+  append_execution_receipt
+    ~cascade_fallback_applied:false
+    ~cascade_outcome:"completed"
+    ~degraded_retry_applied:false
+    ~degraded_retry_cascade:None
+    ~fallback_reason:None
+    config ~keeper_name;
   let result =
     run_curl_get ~port ~path:"/api/v1/dashboard/execution-trust" ()
   in

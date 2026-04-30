@@ -480,7 +480,8 @@ let append_execution_receipt config ~keeper_name =
             to_cascade = Lib.Keeper_config.local_recovery_cascade_name;
             reason = "turn_timeout";
             outcome = "retry_scheduled";
-            error_kind = Some "internal";
+            error_kind =
+              Some (Lib.Keeper_execution_receipt.error_kind_of_string "internal");
             error_message = Some "turn timeout";
             recorded_at = ended_at;
           };

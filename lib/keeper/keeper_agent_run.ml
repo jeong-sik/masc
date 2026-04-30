@@ -1190,7 +1190,11 @@ let run_turn
     let error_kind, error_message =
       match turn_result with
       | Ok _ -> None, None
-      | Error err -> Some (sdk_error_kind err), Some (Oas.Error.to_string err)
+      | Error err ->
+        ( Some
+            (Keeper_execution_receipt.error_kind_of_string
+               (sdk_error_kind err)),
+          Some (Oas.Error.to_string err) )
     in
     let tool_contract_result =
       match turn_result with

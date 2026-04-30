@@ -34,6 +34,11 @@ val outcome_kind_is_terminal_success : outcome_kind -> bool
     Used by dashboard "healthy" classification and action_radius
     success accounting. *)
 
+type error_kind = private Error_kind of string
+
+val error_kind_of_string : string -> error_kind
+val error_kind_to_string : error_kind -> string
+
 type receipt_authority_violation = {
   outcome : string;
   turn_state : string;
@@ -84,7 +89,7 @@ type cascade_rotation_attempt =
   ; to_cascade : string
   ; reason : string
   ; outcome : string
-  ; error_kind : string option
+  ; error_kind : error_kind option
   ; error_message : string option
   ; recorded_at : string
   }
@@ -124,7 +129,7 @@ type t =
   ; fallback_reason : string option
   ; cascade_rotation_attempts : cascade_rotation_attempt list
   ; stop_reason : string option
-  ; error_kind : string option
+  ; error_kind : error_kind option
   ; error_message : string option
   ; started_at : string
   ; ended_at : string

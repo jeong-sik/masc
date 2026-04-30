@@ -32,6 +32,11 @@ let outcome_kind_is_terminal_success = function
   | `Ok | `Skipped -> true
   | `Error | `Cancelled -> false
 
+type error_kind = Error_kind of string
+
+let error_kind_of_string value = Error_kind value
+let error_kind_to_string (Error_kind value) = value
+
 (* TLA+ ReceiptIsAuthoritative invariant
    (specs/keeper-turn-fsm/KeeperTurnFSM.tla:336):
      receipt_outcome = "receipt_done" => turn_state = "done"
@@ -71,7 +76,7 @@ type cascade_rotation_attempt =
   ; to_cascade : string
   ; reason : string
   ; outcome : string
-  ; error_kind : string option
+  ; error_kind : error_kind option
   ; error_message : string option
   ; recorded_at : string
   }
@@ -111,7 +116,7 @@ type t =
   ; fallback_reason : string option
   ; cascade_rotation_attempts : cascade_rotation_attempt list
   ; stop_reason : string option
-  ; error_kind : string option
+  ; error_kind : error_kind option
   ; error_message : string option
   ; started_at : string
   ; ended_at : string
@@ -170,7 +175,8 @@ let cascade_rotation_attempt_to_json attempt =
       ("to_cascade", `String attempt.to_cascade);
       ("reason", `String attempt.reason);
       ("outcome", `String attempt.outcome);
-      ("error_kind", string_opt_json attempt.error_kind);
+      ( "error_kind",
+        string_opt_json (Option.map error_kind_to_string attempt.error_kind) );
       ("error_message", string_opt_json attempt.error_message);
       ("recorded_at", `String attempt.recorded_at);
     ]
@@ -235,7 +241,9 @@ let operator_disposition (receipt : t) =
     String.lowercase_ascii receipt.tool_contract_result
   in
   let error_kind =
-    Option.map String.lowercase_ascii receipt.error_kind
+    Option.map
+      (fun kind -> String.lowercase_ascii (error_kind_to_string kind))
+      receipt.error_kind
   in
   let provider_runtime_failure =
     String.starts_with ~prefix:"api_error_" terminal_reason
@@ -329,7 +337,9 @@ let operator_disposition (receipt : t) =
          terminal_reason=%s tool_contract_result=%s error_kind=%s) \
          — investigate regression of #11651 silent-path fix"
         receipt.outcome cascade_outcome terminal_reason tool_contract_result
-        (Option.value error_kind ~default:"<none>");
+        (Option.value
+           (Option.map error_kind_to_string receipt.error_kind)
+           ~default:"<none>");
       ("unknown", "unmapped_cascade_state")
 
 let to_json (receipt : t) =
@@ -344,7 +354,7 @@ let to_json (receipt : t) =
         [
           ( "kind",
             match error_kind with
-            | Some value -> `String value
+            | Some value -> `String (error_kind_to_string value)
             | None -> `Null );
           ( "message",
             match error_message with
@@ -599,7 +609,7 @@ let operator_broadcast_payload (receipt : t) ~disposition ~reason =
         | None -> `Null )
     ; ( "error_kind",
         match receipt.error_kind with
-        | Some v -> `String v
+        | Some v -> `String (error_kind_to_string v)
         | None -> `Null )
     ; ( "error_message",
         match receipt.error_message with

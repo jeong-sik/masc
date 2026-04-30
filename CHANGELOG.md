@@ -1,6 +1,34 @@
 # Changelog
 
 
+## [0.18.23] - 2026-05-01
+
+Post-v0.18.22 merge train for keeper silent-failure visibility, sandbox dispatch regression coverage, TLA/FSM naming cleanup, cascade-name typing, RFC-0019 keeper repo access control, and release-truth baseline cleanup. No breaking API changes.
+
+### Added
+
+- Keeper event queue TLA+ coverage now includes a buggy bug-model for layer-separation checks (#12386).
+- Receipt outcome JSON boundaries now use the TLA+ spec names consistently across the FSM-01 path (#12385).
+- SND-05 regression coverage verifies `dispatch_simple` preserves Docker sandbox runner metadata instead of falling back to host execution (#12376).
+- Keeper turn queue depth is now exposed as an operator metric (#12379).
+- RFC-0019 keeper GitHub shell context now enforces repo access against the repo store mapping (#12387).
+
+### Changed
+
+- Cascade record names now use typed cascade-name boundaries instead of raw string propagation (#12374).
+- Turn execution cascade routing now carries typed cascade names through keeper turn budget and unified-turn boundaries (#12394).
+- Package and release metadata advanced from `0.18.22` to `0.18.23`.
+- Roadmap, product operating plan, opam metadata, and spec baseline version references synced to `0.18.23`.
+
+### Fixed
+
+- Keeper compact-audit dispatch paths now use structured keeper logging instead of raw `Printf.eprintf` output (#12389).
+- SSE keepalive and cascade health paths now use structured server logging instead of raw `Printf.eprintf` output (#12390).
+- Non-relative read errors redact resolved host paths so sandbox/path leaks do not reach operator-visible failures (#12388).
+- Keepalive dispatch rejections now surface instead of disappearing behind silent control-flow paths (#12375).
+- Profile-defaults validation keeps the intermediate result `unit`-typed until tool-access defaults are bound, preserving the #12378 compile fix after the latest FSM merge train.
+- Spec index release baseline now matches the current package version after the `0.18.22` bump left it at `0.18.21`.
+
 ## [0.18.22] - 2026-05-01
 
 Post-v0.18.21 merge train for routine release boundary advancement. No breaking API changes.

@@ -362,6 +362,22 @@ let handle_sync_repository state _agent_name req reqd =
                   Http.Response.json ~request:req (Yojson.Safe.to_string json)
                     reqd)))
 
+let handle_discover_repositories state _agent_name req reqd =
+  let base_path = base_path_of_state state in
+  match Repo_store.discover_repositories ~base_path with
+  | Error msg ->
+      json_response ~status:`Internal_server_error req reqd (json_error msg)
+  | Ok repos ->
+      let json =
+        `Assoc
+          [
+            ("repositories", `List (List.map repository_json repos));
+            ("total", `Int (List.length repos));
+            ("discovered", `Bool true);
+          ]
+      in
+      Http.Response.json ~request:req (Yojson.Safe.to_string json) reqd
+
 let add_routes router =
   router
   |> Http.Router.get "/api/v1/repositories" (fun request reqd ->

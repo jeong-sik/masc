@@ -55,6 +55,11 @@ let write_file path content =
     ~finally:(fun () -> close_out_noerr oc)
     (fun () -> output_string oc content)
 
+let init_empty_store base_path =
+  let toml_path = Filename.concat (Filename.concat base_path ".masc") "config" in
+  let toml_file = Filename.concat toml_path "repositories.toml" in
+  write_file toml_file "repositories = []\n"
+
 let test_load_all_backward_compat () =
   with_temp_base_path (fun base_path ->
       match Repo_store.load_all ~base_path with
@@ -81,6 +86,7 @@ let test_save_and_load_roundtrip () =
 
 let test_add_new_repo () =
   with_temp_base_path (fun base_path ->
+      init_empty_store base_path;
       let repo = sample_repo "new-repo" in
       match Repo_store.add ~base_path repo with
       | Error e -> Alcotest.fail ("add failed: " ^ e)
@@ -121,6 +127,7 @@ let test_find_missing () =
 
 let test_remove_existing () =
   with_temp_base_path (fun base_path ->
+      init_empty_store base_path;
       let repo = sample_repo "to-remove" in
       match Repo_store.add ~base_path repo with
       | Error e -> Alcotest.fail ("add failed: " ^ e)

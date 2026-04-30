@@ -18,6 +18,7 @@ import {
   fetchKeeperCostMetrics,
   type DashboardRuntimeModelMetric,
   type KeeperCostMetric,
+  type LatencyBucket,
 } from '../api/dashboard'
 import { LoadingState, ErrorState } from './common/feedback-state'
 
@@ -26,7 +27,7 @@ type ViewMode = 'model' | 'keeper'
 type ModelLoadState =
   | { status: 'idle' }
   | { status: 'loading' }
-  | { status: 'loaded'; data: DashboardRuntimeModelMetric[]; windowMinutes: number }
+  | { status: 'loaded'; data: DashboardRuntimeModelMetric[]; latencyBuckets: LatencyBucket[]; windowMinutes: number }
   | { status: 'error'; message: string }
 
 type KeeperLoadState =
@@ -55,6 +56,7 @@ async function loadModelMetrics(window: number) {
     modelState.value = {
       status: 'loaded',
       data: resp.models,
+      latencyBuckets: resp.latency_buckets ?? [],
       windowMinutes: resp.window_minutes ?? window,
     }
   } catch (err) {
@@ -336,6 +338,78 @@ function CostMatrix({ models }: { models: DashboardRuntimeModelMetric[] }) {
   `
 }
 
+function CostLatency({ buckets, p50, p95 }: {
+  buckets: LatencyBucket[]
+  p50: number | null
+  p95: number | null
+}) {
+  const max = Math.max(1, ...buckets.map(b => b.count))
+  const total = buckets.reduce((s, b) => s + b.count, 0)
+
+  const fmtLo = (lo: number): string => {
+    if (lo < 1000) return `${lo}`
+    if (lo < 60000) return `${(lo / 1000).toFixed(0)}k`
+    return `${Math.floor(lo / 60000)}m`
+  }
+
+  const bands = [
+    {
+      label: '< 1s',
+      count: buckets.filter(b => b.hi_ms != null && b.hi_ms <= 1000).reduce((s, b) => s + b.count, 0),
+      color: 'text-[var(--color-status-ok)]',
+    },
+    {
+      label: '1–4s',
+      count: buckets.filter(b => b.lo_ms >= 1000 && b.hi_ms != null && b.hi_ms <= 4000).reduce((s, b) => s + b.count, 0),
+      color: 'text-[var(--color-accent-fg)]',
+    },
+    {
+      label: '4–16s',
+      count: buckets.filter(b => b.lo_ms >= 4000 && b.hi_ms != null && b.hi_ms <= 16000).reduce((s, b) => s + b.count, 0),
+      color: 'text-[var(--color-status-warn)]',
+    },
+    {
+      label: '> 16s',
+      count: buckets.filter(b => b.lo_ms >= 16000).reduce((s, b) => s + b.count, 0),
+      color: 'text-[var(--color-status-err)]',
+    },
+  ]
+
+  return html`
+    <section class="flex flex-col gap-2" aria-label=${`Latency distribution · ${total} calls`}>
+      <div class="flex items-center justify-between rounded border border-card-border/60 bg-[var(--backdrop-deep)] px-3 py-2">
+        <span class="font-mono text-2xs uppercase tracking-1 text-text-muted">latency distribution · ${total} calls</span>
+        <div class="flex gap-3 font-mono text-2xs">
+          <span class="text-text-muted">p50 · <span class="text-[var(--color-accent-fg)]">${p50 == null ? '—' : `${Math.round(p50)}ms`}</span></span>
+          <span class="text-text-muted">p95 · <span class="text-[var(--color-status-err)]">${p95 == null ? '—' : `${Math.round(p95)}ms`}</span></span>
+        </div>
+      </div>
+      <div class="flex items-end gap-1 rounded border border-card-border/60 bg-[var(--backdrop-deep)] px-3 py-3" role="img" aria-label=${`Latency histogram · ${buckets.length} buckets`}>
+        ${buckets.map((b, i) => {
+          const pct = (b.count / max) * 100
+          const bad = b.lo_ms >= 8000
+          return html`
+            <div key=${i} class="flex flex-1 flex-col items-center gap-1">
+              <div class="w-full rounded-sm ${bad ? 'bg-[var(--color-status-err)]' : 'bg-[var(--color-accent-fg)]'}" style=${`height: ${Math.max(4, pct * 1.5).toFixed(1)}px`}></div>
+              <span class="font-mono text-2xs text-text-muted">${fmtLo(b.lo_ms)}</span>
+            </div>
+          `
+        })}
+      </div>
+      <div class="grid grid-cols-4 gap-px rounded border border-card-border/60 bg-[var(--color-border-default)]" role="list" aria-label="Latency band totals">
+        ${bands.map(b => html`
+          <div key=${b.label} class="flex flex-col gap-0.5 bg-[var(--backdrop-deep)] p-2" role="listitem" aria-label=${`${b.label}: ${b.count} calls (${total > 0 ? ((b.count / total) * 100).toFixed(0) : 0}%)`}>
+            <span class="font-mono text-2xs uppercase tracking-1 text-text-muted">${b.label}</span>
+            <span class="font-mono text-sm font-semibold ${b.color}">
+              ${b.count}<span class="ml-1 text-2xs font-normal text-text-muted">· ${total > 0 ? ((b.count / total) * 100).toFixed(0) : 0}%</span>
+            </span>
+          </div>
+        `)}
+      </div>
+    </section>
+  `
+}
+
 export function CostDashboard() {
   const activeState = viewMode.value === 'model' ? modelState.value : keeperState.value
 
@@ -443,7 +517,14 @@ export function CostDashboard() {
       ` : null}
 
       ${viewMode.value === 'model' && activeState.status === 'loaded'
-        ? html`<${CostMatrix} models=${activeState.data as DashboardRuntimeModelMetric[]} />`
+        ? html`
+          <${CostMatrix} models=${activeState.data as DashboardRuntimeModelMetric[]} />
+          <${CostLatency}
+            buckets=${(activeState as Extract<ModelLoadState, { status: 'loaded' }>).latencyBuckets}
+            p50=${t?.p50Avg ?? null}
+            p95=${t?.p95Max ?? null}
+          />
+        `
         : null}
 
       ${data.length === 0 ? html`

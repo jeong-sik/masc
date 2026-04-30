@@ -633,11 +633,18 @@ export interface DashboardRuntimeModelMetric {
   buckets?: BucketMetric[] | null
 }
 
+export interface LatencyBucket {
+  lo_ms: number
+  hi_ms: number | null
+  count: number
+}
+
 export interface DashboardRuntimeModelMetricsResponse {
   window_minutes?: number
   bucket_minutes?: number
   total_entries?: number
   total_error_entries?: number
+  latency_buckets?: LatencyBucket[] | null
   models: DashboardRuntimeModelMetric[]
 }
 
@@ -797,6 +804,15 @@ function decodeRuntimeModelMetricsResponse(raw: unknown): DashboardRuntimeModelM
     bucket_minutes: asNumber(raw.bucket_minutes),
     total_entries: asNumber(raw.total_entries),
     total_error_entries: asNumber(raw.total_error_entries),
+    latency_buckets: Array.isArray(raw.latency_buckets)
+      ? (raw.latency_buckets as unknown[])
+          .filter(isRecord)
+          .map(b => ({
+            lo_ms: asNumber(b.lo) ?? 0,
+            hi_ms: b.hi == null ? null : (asNumber(b.hi) ?? null),
+            count: asNumber(b.n) ?? 0,
+          }))
+      : null,
     models: asRecordArray(raw.models)
       .map(decodeRuntimeModelMetric)
       .filter((metric): metric is DashboardRuntimeModelMetric => metric !== null),

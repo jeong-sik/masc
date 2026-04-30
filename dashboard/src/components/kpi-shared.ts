@@ -110,4 +110,4 @@ export const DELTA_COLOR_BY_DIRECTION: Record<'pos' | 'neg', string> = {
   neg: 'var(--color-status-err)',
 }
 
-export const MONO_STACK = 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace'
+export { MONO_STACK } from './common/font-stacks'

@@ -25,6 +25,7 @@
 
 import { html } from 'htm/preact'
 import type { ComponentChildren, VNode } from 'preact'
+import { MONO_STACK } from './common/font-stacks'
 
 export type PillKind =
   | 'neutral'
@@ -95,8 +96,6 @@ const KIND_STYLE: Record<PillKind, KindStyle> = {
   },
 }
 
-const MONO_STACK =
-  'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace'
 
 const KIND_ANNOUNCE: Record<Exclude<PillKind, 'neutral'>, string> = {
   running: 'running',

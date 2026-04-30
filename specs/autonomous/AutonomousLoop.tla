@@ -18,6 +18,7 @@
 \*   keeper_phase      | Keeper_state_machine.t.phase
 \*   autonomous_phase  | Autonomous_state.t.current_phase
 \*   meta_present      | working_context contains "autonomous_meta"
+\*   auto_phase_writes | bug-model witness for invasive keeper phase writes
 
 EXTENDS TLC, Naturals, Sequences, FiniteSets
 
@@ -35,10 +36,11 @@ VARIABLES
     autonomous_phase,
     meta_present,
     keeper_steps,    \* count of keeper transitions
-    auto_ticks       \* count of autonomous ticks
+    auto_ticks,      \* count of autonomous ticks
+    auto_phase_writes \* keeper phase writes performed by autonomous tick
 
 vars == <<keeper_phase, autonomous_phase, meta_present,
-          keeper_steps, auto_ticks>>
+          keeper_steps, auto_ticks, auto_phase_writes>>
 
 \* ── Type invariant ───────────────────────────────────────────────
 TypeOK ==
@@ -47,6 +49,7 @@ TypeOK ==
     /\ meta_present \in BOOLEAN
     /\ keeper_steps \in Nat
     /\ auto_ticks \in Nat
+    /\ auto_phase_writes \in Nat
 
 \* If the Keeper is running and at least one autonomous tick has
 \* fired, working_context["autonomous_meta"] must be present.
@@ -64,6 +67,9 @@ TickOnlyDuringRunning ==
     auto_ticks > 0 => keeper_phase \in { "running", "draining",
                                           "terminated" }
 
+AutoTickReadOnly ==
+    auto_phase_writes = 0
+
 \* ── Init / Next ──────────────────────────────────────────────────
 Init ==
     /\ keeper_phase = "spawned"
@@ -71,24 +77,28 @@ Init ==
     /\ meta_present = FALSE
     /\ keeper_steps = 0
     /\ auto_ticks = 0
+    /\ auto_phase_writes = 0
 
 KeeperToRunning ==
     /\ keeper_phase = "spawned"
     /\ keeper_phase' = "running"
     /\ keeper_steps' = keeper_steps + 1
-    /\ UNCHANGED <<autonomous_phase, meta_present, auto_ticks>>
+    /\ UNCHANGED <<autonomous_phase, meta_present, auto_ticks,
+                   auto_phase_writes>>
 
 KeeperToDraining ==
     /\ keeper_phase = "running"
     /\ keeper_phase' = "draining"
     /\ keeper_steps' = keeper_steps + 1
-    /\ UNCHANGED <<autonomous_phase, meta_present, auto_ticks>>
+    /\ UNCHANGED <<autonomous_phase, meta_present, auto_ticks,
+                   auto_phase_writes>>
 
 KeeperToTerminated ==
     /\ keeper_phase = "draining"
     /\ keeper_phase' = "terminated"
     /\ keeper_steps' = keeper_steps + 1
-    /\ UNCHANGED <<autonomous_phase, meta_present, auto_ticks>>
+    /\ UNCHANGED <<autonomous_phase, meta_present, auto_ticks,
+                   auto_phase_writes>>
 
 \* CRITICAL: AutoTick preserves keeper_phase. This is the
 \* non-invasive wirein contract.
@@ -99,6 +109,7 @@ AutoTick ==
     /\ auto_ticks' = auto_ticks + 1
     /\ keeper_phase' = keeper_phase            \* PRESERVED
     /\ keeper_steps' = keeper_steps            \* PRESERVED
+    /\ auto_phase_writes' = auto_phase_writes  \* PRESERVED
 
 Next ==
     \/ KeeperToRunning
@@ -111,6 +122,7 @@ Spec == Init /\ [][Next]_vars
 BoundedSteps ==
     /\ keeper_steps <= MaxKeeperSteps
     /\ auto_ticks <= MaxAutoTicks
+    /\ auto_phase_writes <= MaxAutoTicks
 
 \* ── Bug model (RFC-Q2-1) ────────────────────────────────────────
 \*
@@ -120,8 +132,7 @@ BoundedSteps ==
 \* [Keeper_post_turn.apply_autonomous_wirein] enforces read-only
 \* access to the keeper FSM; the spec verifies that even if that
 \* constraint were bypassed (e.g. via Obj.magic or a refactor
-\* that loses the guard), TickOnlyDuringRunning catches the next
-\* tick after the keeper has been pushed to draining.
+\* that loses the guard), AutoTickReadOnly catches the invasive write.
 
 AutoTickFlipsKeeperPhase ==
     /\ keeper_phase = "running"
@@ -130,6 +141,7 @@ AutoTickFlipsKeeperPhase ==
     /\ auto_ticks' = auto_ticks + 1
     /\ keeper_phase' = "draining"   \* INVASIVE: must be preserved
     /\ keeper_steps' = keeper_steps + 1
+    /\ auto_phase_writes' = auto_phase_writes + 1
 
 NextBuggy ==
     \/ Next
@@ -140,5 +152,6 @@ SpecBuggy == Init /\ [][NextBuggy]_vars
 THEOREM Spec => []TypeOK
 THEOREM Spec => []MetaPersistedAfterTick
 THEOREM Spec => []TickOnlyDuringRunning
+THEOREM Spec => []AutoTickReadOnly
 
 ====

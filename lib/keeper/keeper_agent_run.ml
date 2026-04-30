@@ -50,7 +50,7 @@ let run_turn
          base_system_prompt:string -> messages:Oas.Types.message list -> turn_prompt)
       ~(user_message : string)
       ~(cascade_name : string)
-      ?structured_world_observation
+      ?world_observation
       ?(turn_affordances = [])
       ?provider_filter
       ~(generation : int)
@@ -672,22 +672,18 @@ let run_turn
              ~history_messages
              ~actual_input_tokens:usage.input_tokens
          in
-         (* Classify the most-specific actionable signal observed in the
-            structured world snapshot, applying the P1 affordance-tool intersection so
-            keepers without the corresponding action tool degrade to
-            [No_actionable_signal] (cf. [keeper_contract_classifier.mli]
-            precedence: unclaimed > board > discovered).
-
-            The boolean [actionable_signal_context] is derived from the
-            kind for backward compatibility with downstream callers; the
-            kind itself flows into violation log/metric labels so
-            operators can see *which* signal class the LLM failed on. *)
+         (* Classify the most-specific actionable signal from the structured
+            keeper world snapshot. This deliberately avoids re-parsing the
+            rendered prompt text; prompt copy may change without changing the
+            deterministic contract gate. *)
          let actionable_signal_kind : Keeper_contract_classifier.actionable_signal =
-           match structured_world_observation with
-           | Some observation ->
-             Keeper_contract_classifier.classify_actionable_signal_with_allowed_tools
-               ~allowed_tool_names:all_tool_names observation
+           match world_observation with
            | None -> No_actionable_signal
+           | Some observation ->
+               observation
+               |> Keeper_contract_classifier.of_keeper_world_observation
+               |> Keeper_contract_classifier.classify_actionable_signal_for_tools
+                    ~allowed_tool_names:all_tool_names
          in
          let actionable_signal_context =
            Keeper_agent_tool_surface

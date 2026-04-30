@@ -506,6 +506,9 @@ let source_provenance_json config (meta : keeper_meta) =
   let live_meta_path = keeper_meta_path config meta.name in
   let default_manifest_path = snapshot.defaults.manifest_path in
   let default_source_kind = snapshot.source_kind in
+  let default_config_error =
+    Keeper_types_profile.keeper_toml_config_error_for_name meta.name
+  in
   `Assoc
     ([
       ("live_meta_path", `String live_meta_path);
@@ -514,6 +517,10 @@ let source_provenance_json config (meta : keeper_meta) =
       ( "default_manifest",
         optional_existing_path_json ?source:default_source_kind default_manifest_path );
       ("default_source_kind", Json_util.string_opt_to_json default_source_kind);
+      ( "default_config_error",
+        Json_util.option_to_yojson
+          Keeper_types_profile.keeper_toml_config_error_to_json
+          default_config_error );
       ("active_config_root", `String resolution.config_root.path);
       ( "active_config_root_source",
         `String (Config_dir_resolver.source_to_string resolution.config_root.source) );

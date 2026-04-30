@@ -342,6 +342,11 @@ let actionable_tool_contract_violation_reason
         (Printf.sprintf
            "actionable keeper signal was present for an owned active task, but the model only used passive/claim/stay_silent tools without execution progress: %s"
            (String.concat ", " names))
+    | names when List.exists is_stay_silent_tool_name names ->
+      Some
+        (Printf.sprintf
+           "actionable keeper signal was present, but the model used keeper_stay_silent without typed no-work proof: %s"
+           (String.concat ", " names))
     | names
       when List.for_all
              (fun name ->

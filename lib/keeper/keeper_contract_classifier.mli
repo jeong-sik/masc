@@ -22,9 +22,9 @@ val contract_status_label : contract_status -> string
 val pp_contract_status : Format.formatter -> contract_status -> unit
 
 (** Structured per-turn world snapshot consumed by
-    [classify_actionable_signal].  These values are observed before prompt
-    rendering so the completion-contract gate does not infer world state
-    from rendered prose. *)
+    [classify_actionable_signal]. This is intentionally smaller than
+    {!Keeper_world_observation.world_observation}: it carries only the
+    signals needed by the required-tool contract gate. *)
 type world_observation = {
   unclaimed_task_count : int;
       (** Number of unclaimed tasks in the keeper's queue.
@@ -38,6 +38,13 @@ type world_observation = {
       (** True iff the prompt build emitted a
           ["## Discovered Work (auto, Ns interval)"] section. *)
 }
+
+(** Project the full keeper heartbeat observation into the compact contract
+    snapshot. The task count uses [claimable_task_count], not global backlog
+    size, so keepers without a matching claim surface do not get forced into
+    an impossible required-tool contract. *)
+val of_keeper_world_observation :
+  Keeper_world_observation.world_observation -> world_observation
 
 (** [classify_actionable_signal o] returns the most-specific
     actionable signal observed in [o], following the precedence
@@ -64,6 +71,10 @@ val classify_actionable_signal : world_observation -> actionable_signal
     contract violations. Example: if unclaimed tasks exist but the keeper
     cannot see a claim tool, board activity can still become the selected
     actionable signal when board tools are visible. *)
+val classify_actionable_signal_for_tools :
+  allowed_tool_names:string list -> world_observation -> actionable_signal
+
+(** Backward-compatible alias for [classify_actionable_signal_for_tools]. *)
 val classify_actionable_signal_with_allowed_tools :
   allowed_tool_names:string list -> world_observation -> actionable_signal
 

@@ -357,7 +357,37 @@ let test_classify_toml_failure_reason_buckets () =
     (f "unknown field 'legacy_scope'");
   check string "parse error" "parse_error"
     (f "parse error at line 3");
+  check string "expected key parse error" "parse_error"
+    (f "line 62: expected key = value");
   check string "uncategorized" "other" (f "completely novel problem")
+
+let test_keeper_toml_config_errors_are_typed () =
+  let dir = Filename.temp_file "keeper_config_errors_" "" in
+  Sys.remove dir;
+  Unix.mkdir dir 0o755;
+  let invalid_path = Filename.concat dir "broken.toml" in
+  let valid_path = Filename.concat dir "valid.toml" in
+  Fun.protect
+    ~finally:(fun () ->
+      (try Sys.remove invalid_path with _ -> ());
+      (try Sys.remove valid_path with _ -> ());
+      try Unix.rmdir dir with _ -> ())
+    (fun () ->
+      write_file invalid_path "[keeper]\nname = \"broken\"\n\"dangling\"\n";
+      write_file valid_path "[keeper]\nname = \"valid\"\n";
+      match KTP.keeper_toml_config_errors_in_dir dir with
+      | [ err ] ->
+          check string "keeper name" "broken" err.keeper_name;
+          check string "path" invalid_path err.path;
+          check string "reason" "parse_error" err.reason;
+          let json = KTP.keeper_toml_config_error_to_json err in
+          check string "terminal reason" "config_parse_failed"
+            (Yojson.Safe.Util.member "terminal_reason" json
+             |> Yojson.Safe.Util.to_string)
+      | errors ->
+          fail
+            (Printf.sprintf "expected one typed config error, got %d"
+               (List.length errors)))
 
 let () =
   run "Keeper TOML Config Validation"
@@ -395,5 +425,7 @@ let () =
             test_network_mode_accepts_host_alias;
           test_case "classifies failures into bounded label set" `Quick
             test_classify_toml_failure_reason_buckets;
+          test_case "surfaces typed config parse errors" `Quick
+            test_keeper_toml_config_errors_are_typed;
         ] );
     ]

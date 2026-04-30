@@ -412,6 +412,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                     ~build_turn_prompt
                     ~user_message:message
                     ~cascade_name:turn_cascade_name
+                    ~world_observation:(direct_turn_observation meta)
                     ?provider_filter:(Env_config_keeper.KeeperCascade.provider_allowlist ())
                     ~generation:meta.runtime.generation
                     ?on_event

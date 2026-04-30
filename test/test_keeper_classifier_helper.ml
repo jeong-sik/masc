@@ -121,6 +121,28 @@ let test_is_actionable_matches_classify () =
         expected (C.is_actionable sig_))
     observations
 
+let test_tool_filtered_classifier_uses_visible_capability () =
+  Alcotest.check s "claim tool permits task signal"
+    C.Has_unclaimed_tasks
+    (C.classify_actionable_signal_for_tools
+       ~allowed_tool_names:[ "keeper_task_claim" ]
+       (obs ~tasks:1 ()));
+  Alcotest.check s "missing claim tool downgrades task signal"
+    C.No_actionable_signal
+    (C.classify_actionable_signal_for_tools
+       ~allowed_tool_names:[ "keeper_tasks_list" ]
+       (obs ~tasks:1 ()));
+  Alcotest.check s "falls through to board when task tool missing"
+    C.Has_board_activity
+    (C.classify_actionable_signal_for_tools
+       ~allowed_tool_names:[ "keeper_board_comment" ]
+       (obs ~tasks:1 ~board:1 ()));
+  Alcotest.check s "worktree tool permits discovery signal"
+    C.Has_discovered_work
+    (C.classify_actionable_signal_for_tools
+       ~allowed_tool_names:[ "keeper_shell" ]
+       (obs ~discovered:true ()))
+
 let () =
   Alcotest.run "keeper_classifier_helper"
     [
@@ -142,6 +164,8 @@ let () =
             test_zero_counts_are_inactive;
           Alcotest.test_case "negative counts are inactive" `Quick
             test_negative_counts_are_inactive;
+          Alcotest.test_case "visible tools gate signals" `Quick
+            test_tool_filtered_classifier_uses_visible_capability;
         ] );
       ( "is_actionable",
         [

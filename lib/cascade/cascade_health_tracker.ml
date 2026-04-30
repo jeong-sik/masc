@@ -35,8 +35,8 @@ let getenv_with_alias ~primary ?deprecated () =
         | Some _ as some ->
           if not (Hashtbl.mem deprecation_warned dep) then begin
             Hashtbl.add deprecation_warned dep ();
-            Printf.eprintf
-              "[warn] env var %s is deprecated; use %s (same semantics)\n%!"
+            Log.Misc.warn
+              "env var %s is deprecated; use %s (same semantics)"
               dep primary
           end;
           some

@@ -10,9 +10,14 @@
 open Alcotest
 
 module KAE = Masc_mcp.Keeper_agent_error
+module KT = Masc_mcp.Keeper_turn_terminal
 
 let mk_api err = Agent_sdk.Error.Api err
 let code = KAE.terminal_reason_code_of_sdk_error
+
+let terminal_code (reason : KT.t) = reason.code
+let terminal_next_action (reason : KT.t) = reason.next_action
+let terminal_severity (reason : KT.t) = reason.severity
 
 let test_rate_limited () =
   check string "rate_limited" "api_error_rate_limited"
@@ -129,6 +134,61 @@ let test_all_api_codes_distinct () =
   in
   check int "9 variants -> 9 distinct codes" 9 unique
 
+let test_structured_required_tool_no_tool_call () =
+  let err =
+    Agent_sdk.Error.Agent
+      (Agent_sdk.Error.CompletionContractViolation
+         {
+           contract = Agent_sdk.Completion_contract_id.Require_tool_use;
+           reason =
+             "required tool contract unsatisfied: tool_choice requested tool use, but the model returned no ToolUse block";
+         })
+  in
+  let terminal =
+    KT.of_failure ~raw_error:(Agent_sdk.Error.to_string err) err
+  in
+  check string "code" "required_tool_use_no_tool_call"
+    (terminal_code terminal);
+  check (option string) "next action" (Some "inspect_provider_tool_contract")
+    (terminal_next_action terminal)
+
+let test_structured_oas_timeout_budget () =
+  let err =
+    Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
+      (Masc_mcp.Oas_worker_named.Oas_timeout_budget
+         {
+           budget_sec = 90.0;
+           keeper_turn_timeout_sec = 1200.0;
+           estimated_input_tokens = 10_000;
+           source = "test";
+         })
+  in
+  let terminal =
+    KT.of_failure ~raw_error:(Agent_sdk.Error.to_string err) err
+  in
+  check string "code" "oas_timeout_budget" (terminal_code terminal);
+  check string "severity" "warn" (KT.severity_to_string (terminal_severity terminal))
+
+let test_structured_turn_wall_clock_timeout () =
+  let err =
+    Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
+      (Masc_mcp.Oas_worker_named.Turn_timeout { elapsed_sec = 1200.0 })
+  in
+  let terminal =
+    KT.of_failure ~raw_error:(Agent_sdk.Error.to_string err) err
+  in
+  check string "code" "turn_wall_clock_timeout" (terminal_code terminal)
+
+let test_legacy_gh_worktree_text () =
+  let terminal =
+    KT.of_legacy_error_text
+      "keeper_shell failed: gh_repo_context_missing_worktree: active task has no linked worktree"
+  in
+  check string "code" "gh_repo_context_missing_worktree"
+    (terminal_code terminal);
+  check (option string) "next action" (Some "create_or_link_worktree")
+    (terminal_next_action terminal)
+
 let () =
   run "keeper_terminal_reason"
     [
@@ -145,8 +205,8 @@ let () =
           test_case "NetworkError" `Quick test_network_error;
           test_case "Timeout" `Quick test_timeout;
         ] );
-      ( "regression",
-        [
+	      ( "regression",
+	        [
           test_case "provider timeout receipt outcome -> cancelled" `Quick
             test_timeout_receipt_outcome_is_cancelled;
           test_case "non-timeout receipt outcome -> error" `Quick
@@ -155,7 +215,18 @@ let () =
             test_checkpoint_persistence_error_is_internal_error;
           test_case "non-Api variants unchanged" `Quick
             test_other_variants_unchanged;
-          test_case "all 9 api codes are pairwise distinct" `Quick
-            test_all_api_codes_distinct;
-        ] );
-    ]
+	          test_case "all 9 api codes are pairwise distinct" `Quick
+	            test_all_api_codes_distinct;
+	        ] );
+	      ( "structured terminal reason",
+	        [
+	          test_case "required tool no tool call" `Quick
+	            test_structured_required_tool_no_tool_call;
+	          test_case "oas timeout budget" `Quick
+	            test_structured_oas_timeout_budget;
+	          test_case "turn wall-clock timeout" `Quick
+	            test_structured_turn_wall_clock_timeout;
+	          test_case "legacy gh missing worktree text" `Quick
+	            test_legacy_gh_worktree_text;
+	        ] );
+	    ]

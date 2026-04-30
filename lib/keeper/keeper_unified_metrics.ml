@@ -497,6 +497,59 @@ let tool_call_detail_to_json
     ; ("latency_ms", `Float detail.latency_ms)
     ]
 
+let provider_context_json ~(meta : keeper_meta)
+    (result : Keeper_agent_run.run_result option) =
+  match result with
+  | Some r ->
+      let cascade_name, selected_model, candidate_models =
+        match r.cascade_observation with
+        | Some observation ->
+            ( observation.cascade_name,
+              observation.selected_model,
+              observation.candidate_models )
+        | None ->
+            ( meta.cascade_name,
+              Some (Keeper_agent_run.surface_model_used r),
+              [] )
+      in
+      `Assoc
+        [ ("cascade_name", `String cascade_name)
+        ; ( "selected_model",
+            Json_util.string_opt_to_json selected_model )
+        ; ( "candidate_models",
+            `List (List.map (fun value -> `String value) candidate_models) )
+        ]
+  | None ->
+      `Assoc
+        [ ("cascade_name", `String meta.cascade_name)
+        ; ("selected_model", `Null)
+        ; ( "candidate_models",
+            `List
+              (List.map
+                 (fun value -> `String value)
+                 (Keeper_model_labels.configured_model_labels_of_meta meta)) )
+        ]
+
+let tool_contract_json ~(tool_call_count : int) ~(tools_used : string list)
+    (result : Keeper_agent_run.run_result option) =
+  let requirement, required_tool_names, missing_required_tool_names =
+    match result with
+    | Some r ->
+        ( r.tool_surface.tool_requirement,
+          r.tool_surface.required_tool_names,
+          r.tool_surface.missing_required_tool_names )
+    | None -> ("unknown", [], [])
+  in
+  `Assoc
+    [ ("requirement", `String requirement)
+    ; ( "required_tool_names",
+        `List (List.map (fun value -> `String value) required_tool_names) )
+    ; ( "missing_required_tool_names",
+        `List (List.map (fun value -> `String value) missing_required_tool_names) )
+    ; ("tool_call_count", `Int tool_call_count)
+    ; ("tools_used", `List (List.map (fun value -> `String value) tools_used))
+    ]
+
 let append_decision_record
     ~(config : Coord.config)
     ~(meta : keeper_meta)
@@ -512,6 +565,7 @@ let append_decision_record
     ?deliberation_execution
     ?(result : Keeper_agent_run.run_result option = None)
     ?error
+    ?terminal_reason
     () : unit =
   let now_ts = Time_compat.now () in
   let trigger_signals = observed_triggers_of_observation ~meta observation in
@@ -615,6 +669,15 @@ let append_decision_record
     | None, Some err -> err
     | None, None -> Option.value ~default:outcome turn_mode_label
   in
+  let terminal_reason =
+    match terminal_reason with
+    | Some reason -> reason
+    | None -> (
+        match outcome, error with
+        | "success", _ -> Keeper_turn_terminal.success ()
+        | _, Some err -> Keeper_turn_terminal.of_legacy_error_text err
+        | _ -> Keeper_turn_terminal.of_code "unknown_error")
+  in
   let json =
     `Assoc
       ([
@@ -631,6 +694,9 @@ let append_decision_record
         ("goal_id", Json_util.string_opt_to_json goal_id);
         ("goal_ids", `List (List.map (fun goal_id -> `String goal_id) goal_ids));
         ("runtime_contract", runtime_contract);
+        ("terminal_reason", Keeper_turn_terminal.to_json terminal_reason);
+        ("provider_context", provider_context_json ~meta result);
+        ("tool_contract", tool_contract_json ~tool_call_count ~tools_used result);
         ("pending_approval_count", `Int pending_approval_count);
         ("approval_mode", Json_util.string_opt_to_json approval_mode);
         ("channel", `String (decision_channel_of_observation observation));

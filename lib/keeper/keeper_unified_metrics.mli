@@ -197,6 +197,7 @@ val append_decision_record :
   ?deliberation_execution:Keeper_deliberation.execution_result ->
   ?result:Keeper_agent_run.run_result option ->
   ?error:string ->
+  ?terminal_reason:Keeper_turn_terminal.t ->
   unit ->
   unit
 

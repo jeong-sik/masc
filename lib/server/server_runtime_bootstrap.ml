@@ -885,7 +885,7 @@ let codex_mcp_headers_line indent =
 let codex_mcp_bearer_env_line indent =
   Printf.sprintf "%sbearer_token_env_var = \"MASC_MCP_TOKEN\"" indent
 
-let sync_codex_mcp_auth_header_content ~raw_token:_ content =
+let sync_codex_mcp_auth_header_content content =
   let lines, has_trailing_newline =
     split_lines_with_trailing_newline content
   in
@@ -987,7 +987,7 @@ let codex_config_path_opt () =
         (fun home -> Filename.concat home ".codex/config.toml")
         (Env_config_core.home_dir_opt ())
 
-let sync_codex_mcp_config ~base_path ~agent_name =
+let sync_codex_mcp_config ~agent_name =
   if
     not
       (Env_config_core.get_bool ~default:false sync_codex_mcp_config_env_key)
@@ -1004,38 +1004,27 @@ let sync_codex_mcp_config ~base_path ~agent_name =
             "startup skipped Codex MCP config sync: %s does not exist"
             config_path
         else
-          let token_file =
-            Filename.concat (Auth.auth_dir base_path) (agent_name ^ ".token")
-          in
           try
-            let raw_token = String.trim (Fs_compat.load_file token_file) in
-            if String.equal raw_token "" then
-              Log.Server.warn
-                "startup skipped Codex MCP config sync: raw token file is empty at %s"
-                token_file
-            else
-              let content = Fs_compat.load_file config_path in
-              let updated, status =
-                sync_codex_mcp_auth_header_content ~raw_token content
-              in
-              (match status with
-               | Codex_mcp_config_updated ->
-                   Auth.save_private_text_file config_path updated;
-                   Log.Server.warn
-                     "startup synced Codex MCP bearer-token env config for %s in %s"
-                     agent_name config_path
-               | Codex_mcp_config_unchanged ->
-                   Log.Server.info
-                     "startup Codex MCP bearer-token env config already current for %s"
-                     agent_name
-               | Codex_mcp_config_server_missing ->
-                   Log.Server.info
-                     "startup skipped Codex MCP config sync: [mcp_servers.masc] missing in %s"
-                     config_path
-               | Codex_mcp_config_header_missing ->
-                   Log.Server.info
-                     "startup skipped Codex MCP config sync: masc http_headers missing in %s"
-                     config_path)
+            let content = Fs_compat.load_file config_path in
+            let updated, status = sync_codex_mcp_auth_header_content content in
+            (match status with
+             | Codex_mcp_config_updated ->
+                 Auth.save_private_text_file config_path updated;
+                 Log.Server.warn
+                   "startup synced Codex MCP bearer-token env config for %s in %s"
+                   agent_name config_path
+             | Codex_mcp_config_unchanged ->
+                 Log.Server.info
+                   "startup Codex MCP bearer-token env config already current for %s"
+                   agent_name
+             | Codex_mcp_config_server_missing ->
+                 Log.Server.info
+                   "startup skipped Codex MCP config sync: [mcp_servers.masc] missing in %s"
+                   config_path
+             | Codex_mcp_config_header_missing ->
+                 Log.Server.info
+                   "startup skipped Codex MCP config sync: masc http_headers missing in %s"
+                   config_path)
           with
           | Eio.Cancel.Cancelled _ as e -> raise e
           | exn ->
@@ -1047,17 +1036,19 @@ let sync_client_token_file ~base_path ~agent_name ~role =
   let token_file =
     Filename.concat (Auth.auth_dir base_path) (agent_name ^ ".token")
   in
+  let existing_credential = Auth.load_credential base_path agent_name in
   let existing_role =
-    match Auth.load_credential base_path agent_name with
-    | Some cred -> cred.role
-    | None -> role
+    match existing_credential with Some cred -> cred.role | None -> role
   in
   let persist_raw_token raw_token =
     Fs_compat.mkdir_p (Auth.auth_dir base_path);
     Auth.save_private_text_file token_file raw_token
   in
   let create_and_persist ~reason =
-    match Auth.create_token base_path ~agent_name ~role:existing_role with
+    match
+      Auth.create_token_without_expiry base_path ~agent_name
+        ~role:existing_role
+    with
     | Ok (raw_token, _cred) ->
         (try
            persist_raw_token raw_token;
@@ -1075,8 +1066,15 @@ let sync_client_token_file ~base_path ~agent_name ~role =
           "startup failed to mint raw bearer token for %s: %s"
           agent_name (Types.masc_error_to_string err)
   in
-  let normalize_existing raw_token =
+  let normalize_existing raw_token (cred : Types.agent_credential) =
     try
+      (match cred.expires_at with
+       | None -> ()
+       | Some _ ->
+           Auth.save_credential base_path { cred with expires_at = None };
+           Log.Server.warn
+             "startup removed expiry from MCP client bearer credential for %s"
+             agent_name);
       persist_raw_token raw_token;
       Log.Server.info
         "startup verified raw bearer token file for %s at %s"
@@ -1106,10 +1104,25 @@ let sync_client_token_file ~base_path ~agent_name ~role =
   (match current_raw with
    | Some raw_token -> (
        match Auth.verify_token base_path ~agent_name ~token:raw_token with
-       | Ok _ -> normalize_existing raw_token
-       | Error _ -> create_and_persist ~reason:"repaired")
+       | Ok cred -> normalize_existing raw_token cred
+       | Error _ -> (
+           match Auth.load_credential base_path agent_name with
+           | Some (cred : Types.agent_credential)
+             when String.equal cred.token (Auth.sha256_hash raw_token) ->
+               normalize_existing raw_token cred
+           | _ -> create_and_persist ~reason:"repaired"))
    | None -> create_and_persist ~reason:"created");
-  sync_codex_mcp_config ~base_path ~agent_name
+  if String.equal agent_name "codex-mcp-client" then
+    sync_codex_mcp_config ~agent_name
+
+let sync_mcp_client_token_files ~base_path =
+  [
+    ("codex-mcp-client", Types.Worker);
+    ("claude", Types.Worker);
+    ("gemini", Types.Worker);
+  ]
+  |> List.iter (fun (agent_name, role) ->
+         sync_client_token_file ~base_path ~agent_name ~role)
 
 let sync_bootable_keeper_credentials (state : Mcp_server.server_state) =
   let base_path = state.Mcp_server.room_config.base_path in
@@ -1512,8 +1525,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       sync_admin_token_env state;
       sync_internal_keeper_token_env state;
       sync_bootable_keeper_credentials state;
-      sync_client_token_file ~base_path ~agent_name:"codex-mcp-client"
-        ~role:Types.Worker;
+      sync_mcp_client_token_files ~base_path;
       let path_diagnostics =
         runtime_path_diagnostics ~input_base_path:base_path state
       in

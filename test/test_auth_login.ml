@@ -60,7 +60,9 @@ let test_login_enables_bearer_auth_and_prints_codex_exports () =
        with
        | Ok cred ->
            check string "token owner" "codex-mcp-client"
-             cred.agent_name
+             cred.agent_name;
+           check (option string) "mcp token does not expire" None
+             cred.expires_at
        | Error err ->
            failf "minted token did not verify: %s"
              (Types.masc_error_to_string err));
@@ -90,6 +92,16 @@ let test_login_prints_claude_client_env () =
       check string "agent" "claude" report.agent_name;
       check string "client env" "MASC_CLAUDE_MCP_TOKEN"
         report.mcp_token_env_var;
+      (match
+         Auth.find_credential_by_token base_path
+           ~token:report.bearer_token
+       with
+       | Ok cred ->
+           check (option string) "claude mcp token does not expire" None
+             cred.expires_at
+       | Error err ->
+           failf "minted claude token did not verify: %s"
+             (Types.masc_error_to_string err));
       check string "codex env remains pinned" "MASC_MCP_TOKEN"
         report.codex_token_env_var;
       let shell = Auth_login.render_shell report in

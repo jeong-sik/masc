@@ -69,7 +69,7 @@ type codex_mcp_config_sync_status =
   | Codex_mcp_config_header_missing
 
 val sync_codex_mcp_auth_header_content :
-  raw_token:string -> string -> string * codex_mcp_config_sync_status
+  string -> string * codex_mcp_config_sync_status
 
 (** {1 Main Entry Point} *)
 

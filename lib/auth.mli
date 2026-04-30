@@ -191,6 +191,14 @@ val save_raw_token_credential :
 (** [save_raw_token_credential config ~agent_name ~role ~raw_token] hashes the
     raw token and persists the credential. *)
 
+val save_raw_token_credential_without_expiry :
+  string -> agent_name:string -> role:agent_role -> raw_token:string ->
+  (agent_credential, masc_error) result
+(** [save_raw_token_credential_without_expiry config ~agent_name ~role
+    ~raw_token] persists a credential with [expires_at = None].  Use this for
+    local MCP client bearers backed by private token files, not for
+    operator-issued session tokens. *)
+
 val load_raw_token : string -> agent_name:string -> string option
 (** [load_raw_token base_path ~agent_name] reads the raw bearer token from
     [<base_path>/.masc/auth/<agent_name>.token] if present. Returns [None] if
@@ -232,6 +240,12 @@ val create_token :
   string -> agent_name:string -> role:agent_role ->
   (string * agent_credential, masc_error) result
 (** [create_token config ~agent_name ~role] returns [(raw_token, credential)]. *)
+
+val create_token_without_expiry :
+  string -> agent_name:string -> role:agent_role ->
+  (string * agent_credential, masc_error) result
+(** [create_token_without_expiry config ~agent_name ~role] returns a fresh raw
+    token and non-expiring credential for local MCP client identity sync. *)
 
 val verify_token :
   string -> agent_name:string -> token:string ->

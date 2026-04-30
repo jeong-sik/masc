@@ -646,6 +646,7 @@ module Make (M : sig val name : string end) = struct
   let debug ?keeper_name ?turn_id fmt = log_module Debug ?keeper_name ?turn_id fmt
   let info ?keeper_name ?turn_id fmt = log_module Info ?keeper_name ?turn_id fmt
   let warn ?keeper_name ?turn_id fmt = log_module Warn ?keeper_name ?turn_id fmt
+  let warning = warn
   let error ?keeper_name ?turn_id fmt = log_module Error ?keeper_name ?turn_id fmt
 end
 

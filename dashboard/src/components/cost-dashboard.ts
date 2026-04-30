@@ -17,10 +17,12 @@ import {
   fetchRuntimeModelMetrics,
   fetchKeeperCostMetrics,
   fetchHeuristics,
+  fetchStress,
   type DashboardRuntimeModelMetric,
   type KeeperCostMetric,
   type LatencyBucket,
   type HeuristicEvent,
+  type StressEvent,
 } from '../api/dashboard'
 import { LoadingState, ErrorState } from './common/feedback-state'
 
@@ -44,10 +46,17 @@ type HeuristicLoadState =
   | { status: 'loaded'; data: HeuristicEvent[]; limit: number }
   | { status: 'error'; message: string }
 
+type StressLoadState =
+  | { status: 'idle' }
+  | { status: 'loading' }
+  | { status: 'loaded'; data: StressEvent[]; limit: number }
+  | { status: 'error'; message: string }
+
 const viewMode = signal<ViewMode>('model')
 const modelState = signal<ModelLoadState>({ status: 'idle' })
 const keeperState = signal<KeeperLoadState>({ status: 'idle' })
 const heuristicState = signal<HeuristicLoadState>({ status: 'idle' })
+const stressState = signal<StressLoadState>({ status: 'idle' })
 
 const WINDOW_OPTIONS: Array<{ key: number; label: string }> = [
   { key: 30, label: '30분' },
@@ -100,6 +109,17 @@ async function loadHeuristics(limit = 100) {
   }
 }
 
+async function loadStress(limit = 100) {
+  stressState.value = { status: 'loading' }
+  try {
+    const resp = await fetchStress(limit)
+    stressState.value = { status: 'loaded', data: resp.events, limit: resp.limit }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'stress events 불러오기 실패'
+    stressState.value = { status: 'error', message }
+  }
+}
+
 function loadActiveView(window: number) {
   if (viewMode.value === 'model') {
     void loadModelMetrics(window)
@@ -107,6 +127,7 @@ function loadActiveView(window: number) {
     void loadKeeperMetrics(window)
   }
   void loadHeuristics()
+  void loadStress()
 }
 
 const modelTotals = computed(() => {
@@ -481,6 +502,73 @@ function HeuristicLog({ events, limit }: { events: HeuristicEvent[]; limit: numb
   `
 }
 
+function StressBoard({ events, limit }: { events: StressEvent[]; limit: number }) {
+  const fmtTime = (ts: number): string => {
+    const d = new Date(ts * 1000)
+    return d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
+  }
+
+  const fmtKind = (kind: StressEvent['kind']): string => {
+    switch (kind.type) {
+      case 'failure_streak': return `failure_streak · ${kind.count ?? '?'}`
+      case 'turn_failure': return `turn_failure · c=${kind.consecutive ?? '?'} t=${kind.threshold ?? '?'}`
+      case 'fallback_approval': return 'fallback_approval'
+      case 'timeout': return 'timeout'
+      case 'parse_degraded': return 'parse_degraded'
+      case 'task_released': return 'task_released'
+      default: return kind.type
+    }
+  }
+
+  const severityClass = (kind: StressEvent['kind']): string => {
+    switch (kind.type) {
+      case 'failure_streak':
+      case 'turn_failure':
+        return 'bg-[var(--color-status-err)]/15 text-[var(--color-status-err)]'
+      case 'timeout':
+      case 'parse_degraded':
+        return 'bg-[var(--color-status-warn)]/15 text-[var(--color-status-warn)]'
+      default:
+        return 'bg-[var(--color-status-ok)]/15 text-[var(--color-status-ok)]'
+    }
+  }
+
+  return html`
+    <section class="flex flex-col gap-2" aria-label=${`Stress board · ${events.length} events`}>
+      <div class="flex items-center justify-between rounded border border-card-border/60 bg-[var(--backdrop-deep)] px-3 py-2">
+        <span class="font-mono text-2xs uppercase tracking-1 text-text-muted">stress board · ${events.length} events</span>
+        <span class="font-mono text-2xs text-text-muted">limit ${limit}</span>
+      </div>
+      <div class="overflow-x-auto rounded border border-card-border/60 bg-[var(--backdrop-deep)]">
+        <table class="w-full" aria-label="Stress events">
+          <thead>
+            <tr class="border-b border-[var(--color-border-default)] text-2xs uppercase tracking-1 text-text-muted">
+              <th scope="col" class="px-2 py-1.5 text-left">time</th>
+              <th scope="col" class="px-2 py-1.5 text-left">agent</th>
+              <th scope="col" class="px-2 py-1.5 text-left">room</th>
+              <th scope="col" class="px-2 py-1.5 text-left">kind</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${events.map((e, i) => html`
+              <tr key=${i} class="border-b border-[var(--color-border-default)]/50 text-2xs">
+                <td class="px-2 py-1.5 font-mono text-text-muted">${fmtTime(e.timestamp)}</td>
+                <td class="px-2 py-1.5 text-text-strong">${e.agent_name}</td>
+                <td class="px-2 py-1.5 font-mono text-text-muted">${e.room_id}</td>
+                <td class="px-2 py-1.5">
+                  <span class="inline-block rounded px-1.5 py-0.5 text-2xs font-semibold ${severityClass(e.kind)}">
+                    ${fmtKind(e.kind)}
+                  </span>
+                </td>
+              </tr>
+            `)}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  `
+}
+
 export function CostDashboard() {
   const activeState = viewMode.value === 'model' ? modelState.value : keeperState.value
 
@@ -631,6 +719,12 @@ export function CostDashboard() {
         ? html`<${HeuristicLog} events=${heuristicState.value.data} limit=${heuristicState.value.limit} />`
         : heuristicState.value.status === 'error'
           ? html`<${ErrorState} message=${heuristicState.value.message} onRetry=${() => void loadHeuristics()} />`
+          : html`<${LoadingState} />`}
+
+      ${stressState.value.status === 'loaded'
+        ? html`<${StressBoard} events=${stressState.value.data} limit=${stressState.value.limit} />`
+        : stressState.value.status === 'error'
+          ? html`<${ErrorState} message=${stressState.value.message} onRetry=${() => void loadStress()} />`
           : html`<${LoadingState} />`}
     </section>
   `

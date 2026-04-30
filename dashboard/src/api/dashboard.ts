@@ -988,7 +988,7 @@ function decodeHeuristicEvent(raw: unknown): HeuristicEvent | null {
     site: asString(raw.site) ?? '',
     raw_value: asNumber(raw.raw_value) ?? 0,
     threshold: asNumber(raw.threshold) ?? 0,
-    triggered: asBoolean(raw.triggered),
+    triggered: asBoolean(raw.triggered) ?? false,
     provenance: prov
       ? { type: asString(prov.type) ?? '', detail: asString(prov.detail) ?? '' }
       : { type: '', detail: '' },
@@ -1015,6 +1015,75 @@ export async function fetchHeuristics(
   const raw = await get<Record<string, unknown>>(`/api/v1/dashboard/heuristics?limit=${limit}`, { signal: opts?.signal })
   const decoded = decodeHeuristicsResponse(raw)
   if (!decoded) throw new Error('유효하지 않은 heuristics payload')
+  return decoded
+}
+
+export interface StressKind {
+  type: string
+  count?: number
+  consecutive?: number
+  threshold?: number
+  counted_toward_crash?: boolean
+  recoverable?: boolean
+  error_kind?: string
+}
+
+export interface StressEvent {
+  agent_name: string
+  room_id: string
+  kind: StressKind
+  timestamp: number
+}
+
+export interface StressResponse {
+  limit: number
+  count: number
+  events: StressEvent[]
+}
+
+function decodeStressKind(raw: unknown): StressKind | null {
+  if (!isRecord(raw)) return null
+  return {
+    type: asString(raw.type) ?? '',
+    count: asInt(raw.count) ?? undefined,
+    consecutive: asInt(raw.consecutive) ?? undefined,
+    threshold: asInt(raw.threshold) ?? undefined,
+    counted_toward_crash: raw.counted_toward_crash === undefined ? undefined : (asBoolean(raw.counted_toward_crash) ?? false),
+    recoverable: raw.recoverable === undefined ? undefined : (asBoolean(raw.recoverable) ?? false),
+    error_kind: asNullableString(raw.error_kind) ?? undefined,
+  }
+}
+
+function decodeStressEvent(raw: unknown): StressEvent | null {
+  if (!isRecord(raw)) return null
+  const kind = decodeStressKind(raw.kind)
+  if (!kind) return null
+  return {
+    agent_name: asString(raw.agent_name) ?? '',
+    room_id: asString(raw.room_id) ?? '',
+    kind,
+    timestamp: asNumber(raw.timestamp) ?? 0,
+  }
+}
+
+function decodeStressResponse(raw: unknown): StressResponse | null {
+  if (!isRecord(raw)) return null
+  return {
+    limit: asInt(raw.limit) ?? 0,
+    count: asInt(raw.count) ?? 0,
+    events: asRecordArray(raw.events)
+      .map(decodeStressEvent)
+      .filter((e): e is StressEvent => e !== null),
+  }
+}
+
+export async function fetchStress(
+  limit = 100,
+  opts?: AbortableRequestOptions,
+): Promise<StressResponse> {
+  const raw = await get<Record<string, unknown>>(`/api/v1/dashboard/stress?limit=${limit}`, { signal: opts?.signal })
+  const decoded = decodeStressResponse(raw)
+  if (!decoded) throw new Error('유효하지 않은 stress payload')
   return decoded
 }
 

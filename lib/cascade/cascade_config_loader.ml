@@ -165,6 +165,8 @@ let catalog_key_specs =
     ("_sticky_ttl_ms", Schema_field);
     ("_keep_alive", Schema_field);
     ("_num_ctx", Schema_field);
+    ("_thinking_enabled", Schema_field);
+    ("_thinking_budget", Schema_field);
     ("_keeper_assignable", Keeper_assignable_field);
     ("_fallback_cascade", Fallback_cascade_field);
   ]
@@ -286,6 +288,13 @@ type inference_params = {
   num_ctx: int option;
   (** Ollama [num_ctx] override: per-request KV cache allocation in
       tokens. Honored only when the resolved provider is Ollama. *)
+  thinking_enabled: bool option;
+  thinking_budget: int option;
+  (** [thinking_budget] is a per-turn thinking token budget seed.
+      Keeper adaptive logic may adjust this per turn based on intent
+      classification and error/retry signals.  Provider-specific
+      mapping (e.g. to Anthropic [budget_tokens] or DeepSeek
+      [reasoning_effort]) happens downstream in OAS. *)
 }
 
 let read_float_field json key =
@@ -308,6 +317,12 @@ let read_string_field json key =
   | `String s when String.trim s <> "" -> Some (String.trim s)
   | _ -> None
 
+let read_bool_field json key =
+  let open Yojson.Safe.Util in
+  match json |> member key with
+  | `Bool b -> Some b
+  | _ -> None
+
 let resolve_inference_params ~config_path ~name =
   match load_json config_path with
   | Error msg ->
@@ -315,7 +330,8 @@ let resolve_inference_params ~config_path ~name =
         "[CascadeConfig] resolve_inference_params: %s (name=%s, path=%s)"
         msg name config_path;
       { temperature = None; max_tokens = None;
-        keep_alive = None; num_ctx = None }
+        keep_alive = None; num_ctx = None;
+        thinking_enabled = None; thinking_budget = None }
   | Ok json ->
     let temp =
       match read_float_field json (name ^ "_temperature") with
@@ -340,7 +356,21 @@ let resolve_inference_params ~config_path ~name =
          | Some n when n > 0 -> Some n
          | _ -> None)
     in
-    { temperature = temp; max_tokens = max_tok; keep_alive; num_ctx }
+    let thinking_enabled =
+      match read_bool_field json (name ^ "_thinking_enabled") with
+      | Some _ as v -> v
+      | None -> read_bool_field json "default_thinking_enabled"
+    in
+    let thinking_budget =
+      match read_int_field json (name ^ "_thinking_budget") with
+      | Some n when n > 0 -> Some n
+      | _ ->
+        (match read_int_field json "default_thinking_budget" with
+         | Some n when n > 0 -> Some n
+         | _ -> None)
+    in
+    { temperature = temp; max_tokens = max_tok; keep_alive; num_ctx;
+      thinking_enabled; thinking_budget }
 
 (* ── Per-cascade API key env override ────────────────── *)
 

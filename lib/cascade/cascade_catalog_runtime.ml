@@ -122,7 +122,8 @@ let install_snapshot_for_tests ~source_path ~profile_names =
              name;
              weighted_entries = [];
              inference_params = { temperature = None; max_tokens = None;
-                                  keep_alive = None; num_ctx = None };
+                                  keep_alive = None; num_ctx = None;
+                                  thinking_enabled = None; thinking_budget = None };
              api_key_env_overrides = [];
              strategy = Cascade_strategy.failover;
              ollama_max_concurrent = None;

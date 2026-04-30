@@ -15,6 +15,8 @@
 type t = {
   temperature : float option;
   max_tokens : int option;
+  thinking_enabled : bool option;
+  thinking_budget : int option;
 }
 
 (** No inference parameters specified. *)

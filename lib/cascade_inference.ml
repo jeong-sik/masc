@@ -15,13 +15,17 @@
 type t = {
   temperature : float option;
   max_tokens : int option;
+  thinking_enabled : bool option;
+  thinking_budget : int option;
 }
 
-let empty = { temperature = None; max_tokens = None }
+let empty = { temperature = None; max_tokens = None;
+              thinking_enabled = None; thinking_budget = None }
 
 (** Convert OAS inference_params to MASC t. *)
 let of_oas (p : Cascade_config.inference_params) : t =
-  { temperature = p.temperature; max_tokens = p.max_tokens }
+  { temperature = p.temperature; max_tokens = p.max_tokens;
+    thinking_enabled = p.thinking_enabled; thinking_budget = p.thinking_budget }
 
 (** Extract inference parameters from a parsed JSON value for a named cascade.
     Exposed for testing without filesystem dependency. *)
@@ -45,7 +49,7 @@ let for_json ~(name : string) (json : Yojson.Safe.t) : t =
     | Some _ as v -> v
     | None -> read_int "default_max_tokens"
   in
-  { temperature; max_tokens }
+  { temperature; max_tokens; thinking_enabled = None; thinking_budget = None }
 
 (** Load inference parameters for a named cascade profile.
     Delegates to MASC [Cascade_config.resolve_inference_params].
@@ -54,7 +58,9 @@ let for_cascade ~(name : string) : t =
   let name = Keeper_cascade_profile.normalize_declared_name name in
   match Cascade_catalog_runtime.resolve_inference_params ~name () with
   | Ok params ->
-      { temperature = params.temperature; max_tokens = params.max_tokens }
+      { temperature = params.temperature; max_tokens = params.max_tokens;
+        thinking_enabled = params.thinking_enabled;
+        thinking_budget = params.thinking_budget }
   | Error detail ->
       Log.warn ~ctx:"cascade"
         "%s: runtime catalog inference lookup failed (%s), using empty defaults"

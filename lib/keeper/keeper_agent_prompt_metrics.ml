@@ -7,34 +7,43 @@ let adaptive_thinking_budget
       ~user_message
       ~dynamic_context
       ~current_budget
+      ~intent
   =
   if not enabled
   then current_budget
   else (
-    (* 1) Structured tool errors in last tools -> High thinking *)
-    let had_error =
-      List.exists
-        (fun (r : Oas.Types.tool_result) ->
-           match r with
-           | Error _ -> true
-           | Ok _ -> false)
-        last_tool_results
-    in
-    if is_retry || had_error
-    then Some 1500
-    else (
-      (* 2) Task complexity keywords -> Max thinking *)
-      let haystack = user_message ^ " " ^ dynamic_context in
-      let complex_task =
-        List.exists
-          (fun needle -> String_util.contains_substring_ci haystack needle)
-          [ "분석"; "설계"; "plan"; "architecture"; "complex"; "investigate" ]
-      in
-      if complex_task
-      then Some 2000
-      else
-        (* Otherwise fallback to default or OFF (None) *)
-        current_budget))
+    match intent with
+    | Some Keeper_turn_intent.Mechanical ->
+        (* Mechanical turns do not benefit from structured thinking. *)
+        Some 0
+    | Some Keeper_turn_intent.Cognitive ->
+        (* Cognitive turns use the full cascade seed budget. *)
+        current_budget
+    | None ->
+        (* 1) Structured tool errors in last tools -> High thinking *)
+        let had_error =
+          List.exists
+            (fun (r : Oas.Types.tool_result) ->
+               match r with
+               | Error _ -> true
+               | Ok _ -> false)
+            last_tool_results
+        in
+        if is_retry || had_error
+        then Some 1500
+        else (
+          (* 2) Task complexity keywords -> Max thinking *)
+          let haystack = user_message ^ " " ^ dynamic_context in
+          let complex_task =
+            List.exists
+              (fun needle -> String_util.contains_substring_ci haystack needle)
+              [ "분석"; "설계"; "plan"; "architecture"; "complex"; "investigate" ]
+          in
+          if complex_task
+          then Some 2000
+          else
+            (* Otherwise fallback to default or OFF (None) *)
+            current_budget))
 ;;
 
 (** Structured prompt result from [build_turn_prompt] callback.

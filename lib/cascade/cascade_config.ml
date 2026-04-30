@@ -24,6 +24,8 @@ type inference_params = Cascade_config_loader.inference_params = {
   max_tokens: int option;
   keep_alive: string option;
   num_ctx: int option;
+  thinking_enabled: bool option;
+  thinking_budget: int option;
 }
 
 let resolve_inference_params = Cascade_config_loader.resolve_inference_params

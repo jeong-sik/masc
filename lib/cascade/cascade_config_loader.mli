@@ -110,15 +110,23 @@ type inference_params = {
   num_ctx: int option;
   (** Ollama [num_ctx] override: per-request KV cache allocation in
       tokens. Honored only when the resolved provider is Ollama. *)
+  thinking_enabled: bool option;
+  thinking_budget: int option;
+  (** [thinking_budget] is a per-turn thinking token budget seed.
+      Keeper adaptive logic may adjust this per turn based on intent
+      classification and error/retry signals.  Provider-specific
+      mapping happens downstream in OAS. *)
 }
 
 (** Resolve inference parameters from cascade.json.
 
     Resolution order:
     1. ["{name}_temperature"] / ["{name}_max_tokens"] /
-       ["{name}_keep_alive"] / ["{name}_num_ctx"]
+       ["{name}_keep_alive"] / ["{name}_num_ctx"] /
+       ["{name}_thinking_enabled"] / ["{name}_thinking_budget"]
     2. ["default_temperature"] / ["default_max_tokens"] /
-       ["default_keep_alive"] / ["default_num_ctx"]
+       ["default_keep_alive"] / ["default_num_ctx"] /
+       ["default_thinking_enabled"] / ["default_thinking_budget"]
     3. [None] (caller uses own defaults) *)
 val resolve_inference_params :
   config_path:string -> name:string -> inference_params

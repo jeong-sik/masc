@@ -15,11 +15,23 @@
 #   2. Pexp_setfield (record-field assign)         X.f <- v   /   X.f := v
 #   3. Pexp_apply  ( := ) for ref cells           X := v
 #
-# Escape: a line whose previous non-blank source line contains the
-# tag [tla-lint: allow-mutation:] is excluded from the count. Example:
+# Escapes (two granularities):
 #
-#   (* tla-lint: allow-mutation: heartbeat counter, not FSM state *)
-#   Atomic.set tick_count (n + 1)
+#   1. Per-line: a line whose previous non-blank source line (within
+#      5 lines) contains the tag [tla-lint: allow-mutation:] is
+#      excluded. Example:
+#
+#        (* tla-lint: allow-mutation: heartbeat counter, not FSM state *)
+#        Atomic.set tick_count (n + 1)
+#
+#   2. Per-file: a file whose first 30 lines contain the tag
+#      [tla-lint: file-scope:] is treated as entirely non-FSM, so
+#      every mutation in it is exempt. Use this for parsers,
+#      remappers, and config loaders where 40+ local-accumulator
+#      mutations make per-line annotation noise. Example:
+#
+#        (* tla-lint: file-scope: parser local state — TOML lexer
+#           accumulators are not keeper FSM state *)
 #
 # The intent is to make the audit budget visible: every unmasked
 # mutation in lib/keeper/ is potentially a TLA+ Next-set drift
@@ -66,7 +78,8 @@ PATTERNS=(
 
 VIOLATIONS=0
 TMPFILE="$(mktemp)"
-trap 'rm -f "$TMPFILE"' EXIT
+FILESCOPED_FILES="$(mktemp)"
+trap 'rm -f "$TMPFILE" "$FILESCOPED_FILES"' EXIT
 
 # Scan lib/keeper/ recursively. Skip .mli (declarations only,
 # no mutations). Skip generated files under _build/.
@@ -76,8 +89,31 @@ rg --no-heading --line-number --type ocaml "${PATTERNS[@]}" \
    --glob '!_build/**' \
    2>/dev/null > "$TMPFILE" || true
 
+# Pre-scan for file-scope exemption pragma. A file whose first 30
+# lines contain [tla-lint: file-scope: <reason>] is treated as
+# entirely non-FSM (e.g. a parser, a remapper, a config loader).
+# Use this when per-line annotation would be noisy (40+ sites in a
+# single utility file).
+#
+# The 30-line limit prevents accidentally exempting a file by
+# embedding the pragma deep in the body — a documentation comment
+# next to a mutation would still need the per-line tag.
+while IFS= read -r ml_file; do
+  [ -z "$ml_file" ] && continue
+  if head -n 30 "$ml_file" 2>/dev/null \
+     | grep -q 'tla-lint:[[:space:]]*file-scope:'; then
+    echo "$ml_file" >> "$FILESCOPED_FILES"
+  fi
+done < <(find "$KEEPER_DIR" -name '*.ml' -type f \
+           -not -path '*/_build/*' 2>/dev/null)
+
 while IFS=: read -r file lineno line; do
   [ -z "$file" ] && continue
+
+  # File-scope pragma exempts the whole file.
+  if grep -qFx "$file" "$FILESCOPED_FILES" 2>/dev/null; then
+    continue
+  fi
 
   # Strip leading whitespace from the matched line for false-positive
   # filtering. We exclude:

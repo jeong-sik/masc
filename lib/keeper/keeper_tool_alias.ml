@@ -5,6 +5,11 @@
     total (every internal name has a defined behavior) and
     [to_internal] partial (only Anthropic-Code cognates resolve). *)
 
+(* tla-lint: file-scope: parser local state — argument-key remappers
+   (e.g. file_path -> path, command -> cmd) all build a fresh assoc
+   list via local [out] refs scoped to the function body. None of
+   these mutations escape; none observe or mutate keeper FSM state. *)
+
 (* (public_name, internal_name).
    Keep alphabetical by public name to make diffs reviewable. *)
 let aliases : (string * string) list =

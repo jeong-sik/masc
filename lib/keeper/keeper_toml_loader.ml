@@ -5,6 +5,12 @@
     multi-line).
     Enough to express all keeper_profile_defaults fields. *)
 
+(* tla-lint: file-scope: parser local state — TOML lexer accumulators
+   (line buffer, multiline-string buffer, current_table, key/value list)
+   are confined to a single parse_lines call and never observed as
+   keeper FSM state. Every [:=] / [<-] in this file mutates parser-
+   internal scaffolding, not state-machine state. *)
+
 type toml_value =
   | Toml_string of string
   | Toml_int of int

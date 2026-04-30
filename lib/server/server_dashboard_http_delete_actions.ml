@@ -233,7 +233,7 @@ let add_delete_action_routes router =
              | Error err ->
                  Http.Response.json ~status:`Not_found ~request:req
                    (Printf.sprintf {|{"ok":false,"error":"%s"}|}
-                      (String.escaped (Board_types.pp_board_error err)))
+                      (String.escaped (Format.asprintf "%a" Board_types.pp_board_error err)))
                    reqd
            with Yojson.Json_error _ ->
              Http.Response.json ~status:`Bad_request ~request:req

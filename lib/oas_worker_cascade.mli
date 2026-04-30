@@ -187,7 +187,7 @@ val start_actor_if_needed : sw:Eio.Switch.t -> unit
 val record_cascade :
   ?keeper_name:string ->
   observation:cascade_observation option ->
-  cascade_name:string ->
+  cascade_name:Keeper_cascade_profile.runtime_name ->
   outcome:[ `Success | `Failure | `Rejected ] ->
   unit ->
   unit

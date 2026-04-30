@@ -23,6 +23,7 @@ type SurfaceSectionId =
   // workspace
   | 'board'
   | 'planning'       // Phase 1: absorbs goals
+  | 'collab-mvp'     // Track 1: CRDT/editor/git graph/claim queue contract
   | 'verification'   // CDAL follow-up (#7531): Mission detail verification table
   // lab
   | 'tools'
@@ -239,6 +240,12 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       label: '계획 & 목표',
       description: '실행 단위 칸반과 상위 의도 구조(목표 트리)를 함께 봅니다.',
       params: { section: 'planning' },
+    },
+    {
+      id: 'collab-mvp',
+      label: '협업 MVP',
+      description: 'Yjs/CodeMirror substrate, Git graph, TODO claim, turn queue, telemetry contract를 한 화면에서 봅니다.',
+      params: { section: 'collab-mvp' },
     },
     {
       id: 'verification',

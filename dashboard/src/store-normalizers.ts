@@ -83,6 +83,14 @@ export function normalizeTask(raw: unknown): Task | null {
   const id = asString(raw.id)
   const title = asString(raw.title)
   if (!id || !title) return null
+  const worktree = isRecord(raw.worktree)
+    ? {
+        branch: asString(raw.worktree.branch, ''),
+        path: asString(raw.worktree.path, ''),
+        git_root: asString(raw.worktree.git_root, ''),
+        repo_name: asString(raw.worktree.repo_name, ''),
+      }
+    : null
   const contract = isRecord(raw.contract)
     ? {
         strict: asBoolean(raw.contract.strict),
@@ -126,6 +134,7 @@ export function normalizeTask(raw: unknown): Task | null {
     assignee: asString(raw.assignee),
     assignee_kind: asString(raw.assignee_kind) ?? null,
     description: asString(raw.description),
+    worktree,
     created_at: asString(raw.created_at),
     updated_at: asString(raw.updated_at),
     completed_at: asString(raw.completed_at),

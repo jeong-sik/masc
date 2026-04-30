@@ -37,6 +37,7 @@
    (re_export masc_mcp.masc_compression)
    (re_export masc_mcp.mcp_session)
    (re_export masc_mcp.mcp_transport_protocol)
+   (re_export masc_mcp.multimodal)
    (re_export masc_mcp.prompt_registry)
    (re_export masc_mcp.pulse)
    (re_export masc_mcp.response)

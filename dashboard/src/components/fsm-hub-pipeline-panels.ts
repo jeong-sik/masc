@@ -409,7 +409,7 @@ export function PipelineStep({
           <div class="flex items-center gap-1.5 min-w-0">
             ${isActive ? html`<span class="h-1.5 w-1.5 rounded-full bg-[var(--indigo)] ${activePulse} shrink-0"></span>` : null}
             <span class="text-3xs font-semibold tracking-[0.04em] text-[var(--color-fg-muted)]">${label}</span>
-            ${limited ? html`<span class="text-[7px] font-mono text-[var(--color-fg-disabled)] border border-[var(--white-10)] rounded px-1" title="Event_bus 구독 미구현으로 일부 상태만 관찰 가능">제한</span>` : null}
+            ${limited ? html`<span class="text-3xs font-mono text-[var(--color-fg-disabled)] border border-[var(--white-10)] rounded px-1" title="Event_bus 구독 미구현으로 일부 상태만 관찰 가능">제한</span>` : null}
           </div>
           ${heldFor ? html`
             <span class=${`text-3xs font-mono tabular-nums ${stalenessCls}`} aria-hidden="true">${heldFor}</span>

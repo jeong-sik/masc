@@ -9,23 +9,65 @@ open Keeper_agent_result
 open Keeper_agent_error
 open Keeper_agent_prompt_metrics
 
+(** Mutable accumulator for OAS hook callbacks.
+
+    OAS hooks (before_turn, on_tool_executed) cannot return values, so
+    they write into this single mutable record during Agent.run execution.
+    After execution completes, {!freeze} produces an immutable snapshot. *)
+type hook_accumulator =
+  { mutable meta : Keeper_types.keeper_meta
+  ; mutable tool_calls : tool_call_detail list
+  ; mutable current_turn : int
+  ; mutable completion_contract : Keeper_tool_disclosure.completion_contract
+  ; mutable required_tool_use_seen : bool
+  ; mutable keeper_surface_tool_used : bool
+  ; mutable discovered : Keeper_discovered_tools.t
+  ; mutable tool_overlay : Oas.Tool_op.t
+  ; mutable tool_surface : tool_surface_metrics
+  ; mutable requested_tool_names : string list
+  ; mutable receipt_tool_contract_result : string
+  }
+
+(** Immutable snapshot of hook outputs after OAS execution completes. *)
+type hook_outputs =
+  { out_meta : Keeper_types.keeper_meta
+  ; out_tool_calls : tool_call_detail list
+  ; out_completion_contract : Keeper_tool_disclosure.completion_contract
+  ; out_required_tool_use_seen : bool
+  ; out_keeper_surface_tool_used : bool
+  ; out_discovered : Keeper_discovered_tools.t
+  ; out_tool_overlay : Oas.Tool_op.t
+  ; out_tool_surface : tool_surface_metrics
+  ; out_requested_tool_names : string list
+  ; out_receipt_tool_contract_result : string
+  }
+
+let freeze (acc : hook_accumulator) : hook_outputs =
+  { out_meta = acc.meta
+  ; out_tool_calls = acc.tool_calls
+  ; out_completion_contract = acc.completion_contract
+  ; out_required_tool_use_seen = acc.required_tool_use_seen
+  ; out_keeper_surface_tool_used = acc.keeper_surface_tool_used
+  ; out_discovered = acc.discovered
+  ; out_tool_overlay = acc.tool_overlay
+  ; out_tool_surface = acc.tool_surface
+  ; out_requested_tool_names = acc.requested_tool_names
+  ; out_receipt_tool_contract_result = acc.receipt_tool_contract_result
+  }
+
+(** Agent setup produced by Step 7.
+
+    Hook mutations flow through {!acc}, receipt refs are kept for
+    facade post-processing writes, and [agent_ref] is created locally
+    at the OAS call site. *)
 type agent_setup =
   { tools : Oas.Tool.t list
   ; hooks : Oas.Hooks.hooks
   ; reducer : Oas.Context_reducer.t
   ; memory : Oas.Memory.t
-  ; meta_ref : Keeper_types.keeper_meta ref
-  ; agent_ref : Oas.Agent.t option ref
+  ; acc : hook_accumulator
   ; initial_tool_surface : computed_tool_surface
-  ; initial_tool_surface_blocker_ref : Oas.Error.sdk_error option ref
-  ; tool_surface_ref : tool_surface_metrics ref
-  ; tool_calls_ref : tool_call_detail list ref
-  ; completion_contract_ref : Keeper_tool_disclosure.completion_contract ref
-  ; required_tool_use_seen_ref : bool ref
-  ; keeper_surface_tool_used_ref : bool ref
-  ; discovered_ref : Keeper_discovered_tools.t ref
-  ; tool_overlay_ref : Oas.Tool_op.t ref
-  ; current_turn_ref : int ref
+  ; initial_tool_surface_blocker : Oas.Error.sdk_error option ref
   ; all_tool_names : string list
   ; tool_usage_before : (string * int) list
   ; receipt_turn_count_ref : int option ref
@@ -33,8 +75,6 @@ type agent_setup =
   ; receipt_stop_reason_ref : string option ref
   ; receipt_cascade_observation_ref : Oas_worker.cascade_observation option ref
   ; receipt_response_text_present_ref : bool ref
-  ; receipt_tool_contract_result_ref : string ref
-  ; requested_tool_names_ref : string list ref
   ; reported_tool_names_ref : string list ref
   ; observed_tool_names_ref : string list ref
   ; canonical_tool_names_ref : string list ref
@@ -74,30 +114,49 @@ let prepare_agent_setup
   =
   let ctx_snapshot = ctx_work in
   let agent_name = meta.agent_name in
-  let meta_ref = ref meta in
+  let acc : hook_accumulator =
+    { meta
+    ; tool_calls = []
+    ; current_turn = 0
+    ; completion_contract = Keeper_tool_disclosure.Allow_text_or_tool
+    ; required_tool_use_seen = false
+    ; keeper_surface_tool_used = false
+    ; discovered = Keeper_discovered_tools.create ~decay_turns:(begin
+        match Sys.getenv_opt "MASC_KEEPER_TOOL_DECAY_TURNS" with
+        | Some s ->
+          (match int_of_string_opt s with
+           | Some n -> max 1 n
+           | None ->
+             Log.Keeper.warn
+               "keeper: MASC_KEEPER_TOOL_DECAY_TURNS=%S is not a valid integer, using default 5"
+               s;
+             5)
+        | None -> 5
+      end)
+    ; tool_overlay = (match tool_overlay with Some r -> !r | None -> Oas.Tool_op.Keep_all)
+    ; tool_surface =
+        { turn_lane = "text_only"
+        ; tool_surface_class = "none"
+        ; tool_requirement = "none"
+        ; visible_tool_count = 0
+        ; tool_gate_enabled = false
+        ; tool_surface_fallback_used = false
+        ; required_tool_names = []
+        ; missing_required_tool_names = []
+        ; config_root
+        ; cascade_config_path
+        ; gemini_mcp_disabled
+        ; approval_mode_effective
+        ; approval_mode_derived
+        }
+    ; requested_tool_names = []
+    ; receipt_tool_contract_result = "unknown"
+    }
+  in
   let agent_ref : Oas.Agent.t option ref = ref None in
   let local_search_fn_ref : (query:string -> max_results:int -> Yojson.Safe.t) ref =
     ref (fun ~query:_ ~max_results:_ -> `Assoc [ "results", `List [] ])
   in
-  let current_turn_ref : int ref = ref 0 in
-  let decay_turns =
-    match Sys.getenv_opt "MASC_KEEPER_TOOL_DECAY_TURNS" with
-    | Some s ->
-      (match int_of_string_opt s with
-       | Some n -> max 1 n
-       | None ->
-         Log.Keeper.warn
-           "keeper: MASC_KEEPER_TOOL_DECAY_TURNS=%S is not a valid integer, using default 5"
-           s;
-         5)
-    | None -> 5
-  in
-  let discovered_ref = ref (Keeper_discovered_tools.create ~decay_turns) in
-  let completion_contract_ref =
-    ref Keeper_tool_disclosure.Allow_text_or_tool
-  in
-  let required_tool_use_seen_ref = ref false in
-  let keeper_surface_tool_used_ref = ref false in
   let affinity_k = Keeper_tool_affinity.configured_max_k () in
   if affinity_k > 0
   then (
@@ -110,7 +169,7 @@ let prepare_agent_setup
         ~keeper_name:meta.name
         ~allowed_tool_names:allowed
         ~core_tool_names:core
-        ~discovered:!discovered_ref
+        ~discovered:acc.discovered
         ~max_k:affinity_k
     in
     if entries <> []
@@ -132,7 +191,7 @@ let prepare_agent_setup
       ~ctx_snapshot
       ~search_fn:(fun ~query ~max_results -> !local_search_fn_ref ~query ~max_results)
       ~on_tool_called:(fun name ->
-        Keeper_discovered_tools.mark_used !discovered_ref ~turn:!current_turn_ref ~name)
+        Keeper_discovered_tools.mark_used acc.discovered ~turn:acc.current_turn ~name)
       ()
   in
   let extend_turns_tool = Keeper_extend_turns.make ~agent_ref ~max_turns () in
@@ -246,8 +305,8 @@ let prepare_agent_setup
         in
         let discovered_names = List.map fst new_discoveries in
         Keeper_discovered_tools.add
-          !discovered_ref
-          ~turn:!current_turn_ref
+          acc.discovered
+          ~turn:acc.current_turn
           ~names:discovered_names;
         let masc_schemas = !Keeper_exec_tools.masc_schemas_ref in
         let results =
@@ -358,33 +417,12 @@ let prepare_agent_setup
     then Keeper_config.keeper_retry_max_tools_per_turn ()
     else Keeper_config.keeper_max_tools_per_turn ()
   in
-  let tool_overlay_ref =
-    match tool_overlay with
-    | Some r -> r
-    | None -> ref Oas.Tool_op.Keep_all
-  in
   let portal_ctx : Tool_portal.context = { config; agent_name = meta.name } in
   let visible_always_include_tools =
     Tool_portal.filter_visible_tool_names portal_ctx always_include_tools
   in
-  let tool_surface_ref =
-    ref
-      { turn_lane = "text_only"
-      ; tool_surface_class = "none"
-      ; tool_requirement = "none"
-      ; visible_tool_count = 0
-      ; tool_gate_enabled = false
-      ; tool_surface_fallback_used = false
-      ; required_tool_names = []
-      ; missing_required_tool_names = []
-      ; config_root
-      ; cascade_config_path
-      ; gemini_mcp_disabled
-      ; approval_mode_effective
-      ; approval_mode_derived
-      }
-  in
-  let requested_tool_names_ref : string list ref = ref [] in
+  (* Receipt refs: written sequentially after OAS execution, kept as refs
+     because the facade (keeper_agent_run.ml) writes them post-run. *)
   let reported_tool_names_ref : string list ref = ref [] in
   let observed_tool_names_ref : string list ref = ref [] in
   let canonical_tool_names_ref : string list ref = ref [] in
@@ -397,13 +435,11 @@ let prepare_agent_setup
     ref None
   in
   let receipt_response_text_present_ref = ref false in
-  let receipt_tool_contract_result_ref = ref "unknown" in
-  let tool_calls_ref : tool_call_detail list ref = ref [] in
   let keeper_has_owned_active_task () =
-    Option.is_some (owned_active_task_id_for_meta ~config ~meta:!meta_ref)
+    Option.is_some (owned_active_task_id_for_meta ~config ~meta:acc.meta)
   in
   let current_task_required_tools () =
-    match owned_active_task_id_for_meta ~config ~meta:!meta_ref with
+    match owned_active_task_id_for_meta ~config ~meta:acc.meta with
     | None -> []
     | Some task_id ->
       let task_id = Keeper_id.Task_id.to_string task_id in
@@ -498,10 +534,10 @@ let prepare_agent_setup
       |> List.filter (fun name -> Keeper_tool_policy.StringSet.mem name allowed_exec_set)
     in
     let discovered =
-      Keeper_discovered_tools.active_names !discovered_ref ~turn
+      Keeper_discovered_tools.active_names acc.discovered ~turn
     in
     let () =
-      if decay_discovered then ignore (Keeper_discovered_tools.decay !discovered_ref ~turn)
+      if decay_discovered then ignore (Keeper_discovered_tools.decay acc.discovered ~turn)
     in
     let selection_limit = min max_tools keeper_selection_top_k in
     let preset_tools, preset_search_index =
@@ -637,14 +673,14 @@ let prepare_agent_setup
       Oas.Tool_op.apply
         (Oas.Tool_op.compose
            [ Oas.Tool_op.Replace_with merged
-           ; !tool_overlay_ref
+           ; acc.tool_overlay
            ])
         all_tool_names
       |> validate_allow_list ~turn
     in
     let core_count = List.length (Keeper_exec_tools.effective_core_tools ()) in
     let discovered_count =
-      List.length (Keeper_discovered_tools.active_names !discovered_ref ~turn)
+      List.length (Keeper_discovered_tools.active_names acc.discovered ~turn)
     in
     let per_call_turn = turn - start_turn_count in
     let is_last_turn = per_call_turn >= max_turns in
@@ -757,7 +793,7 @@ let prepare_agent_setup
       ~current_tool_choice:None
       ~decay_discovered:false
   in
-  tool_surface_ref :=
+  acc.tool_surface <-
     { turn_lane = initial_tool_surface.lane
     ; tool_surface_class = initial_tool_surface.tool_surface_class
     ; tool_requirement = initial_tool_surface.tool_requirement
@@ -773,13 +809,11 @@ let prepare_agent_setup
     ; approval_mode_effective
     ; approval_mode_derived
     };
-  let initial_tool_surface_blocker_ref : Oas.Error.sdk_error option ref =
-    ref None
-  in
+  let initial_tool_surface_blocker = ref None in
   let initial_tool_surface_result =
     if initial_tool_surface.missing_required_tool_names <> [] then (
-      receipt_tool_contract_result_ref := "tool_surface_mismatch";
-      initial_tool_surface_blocker_ref :=
+      acc.receipt_tool_contract_result <- "tool_surface_mismatch";
+      initial_tool_surface_blocker :=
         Some
           (sdk_error_of_keeper_internal_error
              (Keeper_tool_surface_mismatch
@@ -793,7 +827,7 @@ let prepare_agent_setup
     else if initial_tool_surface.tool_gate_requested
             && initial_tool_surface.all_allowed = []
     then (
-      receipt_tool_contract_result_ref := "no_tool_capable_provider";
+      acc.receipt_tool_contract_result <- "no_tool_capable_provider";
       Prometheus.inc_counter
         Prometheus.metric_empty_tool_universe_observed
         ~labels:
@@ -803,7 +837,7 @@ let prepare_agent_setup
               string_of_bool initial_tool_surface.tool_surface_fallback_used );
           ]
         ();
-      initial_tool_surface_blocker_ref :=
+      initial_tool_surface_blocker :=
         Some
           (sdk_error_of_keeper_internal_error
              (Keeper_tool_surface_empty
@@ -819,9 +853,9 @@ let prepare_agent_setup
   match initial_tool_surface_result with
   | Error err -> Error err
   | Ok initial_tool_surface ->
-  requested_tool_names_ref := initial_tool_surface.all_allowed;
+  acc.requested_tool_names <- initial_tool_surface.all_allowed;
   let discover_work_nudge () : string option =
-    let meta = !meta_ref in
+    let meta = acc.meta in
     match meta.work_discovery_enabled with
     | Some false -> None
     | _ ->
@@ -902,6 +936,7 @@ let prepare_agent_setup
              interval (String.concat "\n\n" sections) active_schema_guard
              unknown_tool_guard))
   in
+  let meta_ref = ref acc.meta in
   let base_hooks =
     Keeper_hooks_oas.make_hooks
       ~meta_ref
@@ -916,15 +951,17 @@ let prepare_agent_setup
           ~duration_ms
           ~provider ->
         (match Keeper_registry.get ~base_path:config.base_path meta.name with
-         | Some entry -> meta_ref := entry.meta
+         | Some entry ->
+           acc.meta <- entry.meta;
+           meta_ref := entry.meta
          | None -> ());
-        tool_calls_ref :=
+        acc.tool_calls <-
           { tool_name
           ; provider
           ; outcome = if success then "ok" else "error"
           ; latency_ms = duration_ms
           }
-          :: !tool_calls_ref)
+          :: acc.tool_calls)
       ~discover_work_nudge
       ()
   in
@@ -937,7 +974,7 @@ let prepare_agent_setup
              | Oas.Hooks.BeforeTurnParams
                  { turn; current_params; messages; last_tool_results; _ } ->
                let hook_t0 = Time_compat.now () in
-               current_turn_ref := turn;
+               acc.current_turn <- turn;
                let intent =
                  if Keeper_config.keeper_adaptive_thinking_mode () then
                    let last_tool_calls =
@@ -1013,7 +1050,7 @@ let prepare_agent_setup
                     | Some existing -> Some (existing ^ "\n\n" ^ temporal))
                in
                let ctx =
-                 match (!meta_ref).current_task_id with
+                 match acc.meta.current_task_id with
                  | Some task_id ->
                      let last_tool_names =
                        let rev = List.rev messages in
@@ -1161,12 +1198,12 @@ let prepare_agent_setup
                    Keeper_tool_disclosure.completion_contract_of_tool_choice
                      tool_choice
                in
-               completion_contract_ref := turn_completion_contract;
+               acc.completion_contract <- turn_completion_contract;
                if turn_completion_contract = Keeper_tool_disclosure.Require_tool_use
-               then required_tool_use_seen_ref := true;
+               then acc.required_tool_use_seen <- true;
                let lane = computed_surface.lane in
-               requested_tool_names_ref := all_allowed;
-               tool_surface_ref :=
+               acc.requested_tool_names <- all_allowed;
+               acc.tool_surface <-
                  { turn_lane = lane
                  ; tool_surface_class = computed_surface.tool_surface_class
                  ; tool_requirement = computed_surface.tool_requirement
@@ -1204,7 +1241,7 @@ let prepare_agent_setup
                  ~generation
                  ~turn
                  ~keeper_turn_id:turn
-                 ?task_id:(Option.map Keeper_id.Task_id.to_string (!meta_ref).current_task_id)
+                 ?task_id:(Option.map Keeper_id.Task_id.to_string acc.meta.current_task_id)
                  ~goal_ids:meta.active_goal_ids
                  ~sandbox_profile:
                    (Keeper_types.sandbox_profile_to_string meta.sandbox_profile)
@@ -1331,18 +1368,9 @@ let prepare_agent_setup
      ; hooks
      ; reducer
      ; memory
-     ; meta_ref
-     ; agent_ref
+     ; acc
      ; initial_tool_surface
-     ; initial_tool_surface_blocker_ref
-     ; tool_surface_ref
-     ; tool_calls_ref
-     ; completion_contract_ref
-     ; required_tool_use_seen_ref
-     ; keeper_surface_tool_used_ref
-     ; discovered_ref
-     ; tool_overlay_ref
-     ; current_turn_ref
+     ; initial_tool_surface_blocker
      ; all_tool_names
      ; tool_usage_before
      ; receipt_turn_count_ref
@@ -1350,8 +1378,6 @@ let prepare_agent_setup
      ; receipt_stop_reason_ref
      ; receipt_cascade_observation_ref
      ; receipt_response_text_present_ref
-     ; receipt_tool_contract_result_ref
-     ; requested_tool_names_ref
      ; reported_tool_names_ref
      ; observed_tool_names_ref
      ; canonical_tool_names_ref

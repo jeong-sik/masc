@@ -112,6 +112,31 @@ BoundedSteps ==
     /\ keeper_steps <= MaxKeeperSteps
     /\ auto_ticks <= MaxAutoTicks
 
+\* ── Bug model (RFC-Q2-1) ────────────────────────────────────────
+\*
+\* Models the bug class where the autonomous tick observer becomes
+\* invasive — i.e. a tick mutates keeper_phase in addition to its
+\* own meta update. The OCaml-side guard
+\* [Keeper_post_turn.apply_autonomous_wirein] enforces read-only
+\* access to the keeper FSM; the spec verifies that even if that
+\* constraint were bypassed (e.g. via Obj.magic or a refactor
+\* that loses the guard), TickOnlyDuringRunning catches the next
+\* tick after the keeper has been pushed to draining.
+
+AutoTickFlipsKeeperPhase ==
+    /\ keeper_phase = "running"
+    /\ \E next_auto \in AutoPhases : autonomous_phase' = next_auto
+    /\ meta_present' = TRUE
+    /\ auto_ticks' = auto_ticks + 1
+    /\ keeper_phase' = "draining"   \* INVASIVE: must be preserved
+    /\ keeper_steps' = keeper_steps + 1
+
+NextBuggy ==
+    \/ Next
+    \/ AutoTickFlipsKeeperPhase
+
+SpecBuggy == Init /\ [][NextBuggy]_vars
+
 THEOREM Spec => []TypeOK
 THEOREM Spec => []MetaPersistedAfterTick
 THEOREM Spec => []TickOnlyDuringRunning

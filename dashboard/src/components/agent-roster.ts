@@ -25,6 +25,8 @@ import {
   keeperPrimaryName,
 } from './common/keeper-identity'
 import { AgentAvatar } from './overview/agent-avatar'
+import { AgentPresence } from './common/agent-presence'
+import { AgentCapability } from './common/agent-capability'
 import { openAgentDetail } from './agent-detail-state'
 import { openKeeperDetail } from './keeper-detail'
 import { formatDuration, trimText } from './mission-utils'
@@ -687,9 +689,6 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
             keeperRuntime?.recent_tool_names,
             keeperRuntime?.latest_tool_names,
           )
-          const visibleTools = recentTools.slice(0, 2)
-          const primaryTool = visibleTools[0] ?? null
-          const extraToolCount = Math.max(0, recentTools.length - (primaryTool ? 1 : 0))
           const toolCallCount =
             keeperRuntime?.latest_tool_call_count
             ?? null
@@ -753,7 +752,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                 </div>
 
                 <div class="flex shrink-0 items-start">
-                  <span class="inline-flex items-center rounded-sm border px-2.5 py-1 text-2xs font-semibold ${runtimeBadgeClass(band.key)}" title=${band.description}>${band.label}</span>
+                  <${AgentPresence} status=${agent.status} size="sm" />
                 </div>
               </div>
 
@@ -821,25 +820,11 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                 ` : null}
               </div>
 
-              ${(primaryTool || toolCallCount != null || toolAuditAt) ? html`
+              ${(recentTools.length > 0 || toolCallCount != null || toolAuditAt) ? html`
                 <div class="flex flex-wrap items-center gap-1.5 text-2xs text-[var(--color-fg-muted)]">
                   <span class="inline-flex items-center rounded-sm border border-[var(--white-8)] bg-[var(--white-2)] px-2 py-0.5">최근 도구</span>
-                  ${primaryTool ? html`
-                    <span class="inline-flex items-center rounded-sm border border-[var(--accent-20)] bg-[var(--accent-10)] px-2 py-0.5 font-mono text-3xs text-[var(--color-fg-primary)]" translate="no">
-                      ${primaryTool}
-                    </span>
-                  ` : null}
-                  ${extraToolCount > 0 ? html`
-                    <span class="inline-flex items-center rounded-sm border border-dashed border-[var(--white-8)] bg-[var(--white-2)] px-2 py-0.5 text-3xs">
-                      +${extraToolCount}
-                    </span>
-                  ` : null}
-                  ${!primaryTool && toolCallCount === 0 ? html`
-                    <span class="inline-flex items-center rounded-sm border border-[var(--white-8)] bg-[var(--white-2)] px-2 py-0.5 text-3xs">
-                      최근 도구 없음
-                    </span>
-                  ` : null}
-                  ${!primaryTool && toolCallCount != null && toolCallCount > 0 ? html`
+                  <${AgentCapability} tools=${recentTools} maxVisible=${3} />
+                  ${toolCallCount != null && toolCallCount > 0 ? html`
                     <span class="inline-flex items-center rounded-sm border border-[var(--white-8)] bg-[var(--white-2)] px-2 py-0.5 text-3xs">
                       ${toolCallCount}회 관찰됨
                     </span>

@@ -349,8 +349,6 @@ module Rest = struct
         [
           "masc_broadcast";
           "masc_messages";
-          "masc_a2a_delegate";
-          "masc_a2a_subscribe";
         ] );
       ( "decision",
         [

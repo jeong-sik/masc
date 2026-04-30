@@ -293,7 +293,7 @@ let handle_keeper_fs_edit
           | Sys_error e -> error_json ~fields:[ "path", `String target ] e
           | Unix.Unix_error (err, _, _) ->
             error_json ~fields:[ "path", `String target ]
-              (Unix.error_message err))))
+              (Unix.error_message err)))))
   | Some ((Overwrite | Append) as mode) ->
   let mode_label = fs_write_mode_to_string mode in
   if String.trim content = "" then
@@ -356,5 +356,5 @@ let handle_keeper_fs_edit
     | Invalid_argument e -> error_json ~fields:[ "path", `String target ] e
      | Sys_error e -> error_json ~fields:[ "path", `String target ] e
      | Unix.Unix_error (err, _, _) ->
-       error_json ~fields:[ "path", `String target ] (Unix.error_message err)))
+       error_json ~fields:[ "path", `String target ] (Unix.error_message err))))
 ;;

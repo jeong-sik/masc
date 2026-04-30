@@ -39,6 +39,7 @@ type governance_audit_decision =
   | Governance_expired
   | Governance_unauthorized
   | Governance_other of string
+[@@deriving tla]
 
 type action =
   | Join

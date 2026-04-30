@@ -20,13 +20,14 @@ type outcome =
 [@@deriving tla]
 
 type governance_audit_decision =
-  | Governance_allow
-  | Governance_require_confirm
-  | Governance_deny
-  | Governance_confirm
-  | Governance_expired
-  | Governance_unauthorized
-  | Governance_other of string
+  | Governance_allow [@tla.symbol "governance_allow"]
+  | Governance_require_confirm [@tla.symbol "governance_require_confirm"]
+  | Governance_deny [@tla.symbol "governance_deny"]
+  | Governance_confirm [@tla.symbol "governance_confirm"]
+  | Governance_expired [@tla.symbol "governance_expired"]
+  | Governance_unauthorized [@tla.symbol "governance_unauthorized"]
+  | Governance_other of string [@tla.symbol "governance_other"]
+[@@deriving tla]
 
 type action =
   | Join [@tla.symbol "join"]

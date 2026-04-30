@@ -49,7 +49,7 @@ val score_provider :
 
 (** A provider scored against a snapshot of fleet state. *)
 type scored_provider = {
-  cascade_name : string;
+  cascade_name : Keeper_cascade_profile.runtime_name;
   provider : Llm_provider.Provider_config.t;
   score : float;
 }

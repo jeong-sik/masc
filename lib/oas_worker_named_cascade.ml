@@ -325,6 +325,9 @@ let resolve_tool_capable_provider_across_cascades
                  | _ -> Some (cascade_name, filtered))
         |> List.concat_map (fun (cascade_name, providers) ->
              let keeper_assignable = is_keeper_assignable cascade_name in
+             let inventory_cascade_name =
+               Keeper_cascade_profile.Runtime_name cascade_name
+             in
              providers
              |> List.map (fun (provider : Llm_provider.Provider_config.t) ->
                   let score =
@@ -334,7 +337,8 @@ let resolve_tool_capable_provider_across_cascades
                       ~keeper_assignable
                       provider
                   in
-                  Cascade_inventory.{ cascade_name; provider; score }))
+                  Cascade_inventory.
+                    { cascade_name = inventory_cascade_name; provider; score }))
       in
       (* The score_provider helper already collapses cooldown,
          keeper_assignable, and the success × latency composition into a
@@ -349,4 +353,5 @@ let resolve_tool_capable_provider_across_cascades
         ~exclude:[]
         scored_candidates
       |> Option.map (fun (sp : Cascade_inventory.scored_provider) ->
-           (sp.cascade_name, sp.provider))
+           ( Keeper_cascade_profile.runtime_name_to_string sp.cascade_name,
+             sp.provider ))

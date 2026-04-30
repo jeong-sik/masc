@@ -19,9 +19,9 @@ type sandbox_profile =
         no-new-privs, read-only rootfs, tmpfs, pids/memory limits.
         Network defaults to [Network_none]; the internal git/gh
         dispatcher (see [Keeper_exec_shell.cmd_targets_git_or_gh])
-        upgrades the container to [Network_inherit] with read-only
-        mounts of ~/.config/gh and ~/.gitconfig (and optionally ~/.ssh)
-        for the duration of a git/gh command. *)
+        uses network egress plus read-only mounts from the selected
+        root/keeper GitHub identity bundle for the duration of a git/gh
+        command. *)
 
 type network_mode =
   | Network_none

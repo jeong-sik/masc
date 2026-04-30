@@ -1,13 +1,11 @@
-(** RFC-0008 PR-1 — pin {!Credential_provider} type surface and
+(** Pin {!Credential_provider} type surface and
     {!Host_config_provider} pure helpers.
 
     Integration coverage of [resolve] (which goes through
     [Keeper_gh_env.keeper_binding] + filesystem) is left to the
     existing [test_keeper_shell_docker_route] suite — that path
-    already exercises the inline composition we just centralised
-    behind the trait, so the functional contract stays pinned end
-    to end without re-staging a tmpdir + keeper profile fixture
-    here.
+    exercises selected root/keeper identity bundle mounting end to end
+    without re-staging a tmpdir + keeper profile fixture here.
 
     What this file pins:
 
@@ -17,11 +15,11 @@
     2. [Host_config_provider.For_testing.mount_if_present] returns
        [[]] for empty / missing host paths and a single-element
        [ro_mount] when the path exists.
-    3. [For_testing.compose_env] emits exactly the env-key set the
-       inline block at [keeper_shell_docker.ml:271-329] used to emit,
-       no more, no less.  This is the "behaviorally identical to
-       today" property RFC-0008 PR-1 promises.
-    4. [finalize] / [tear_down] are noops in PR-1 ([finalize] returns
+    3. [For_testing.compose_env] emits only container-local path/env
+       keys for the selected identity bundle plus non-interactive git
+       guards.  Ambient operator GitHub credentials stay outside this
+       contract.
+    4. [finalize] / [tear_down] are noops ([finalize] returns
        [Ok ()] regardless of [container_id]; [tear_down] never
        raises). *)
 
@@ -109,23 +107,23 @@ let test_mount_if_present_existing_dir () =
   | other ->
       failf "expected single mount, got %d" (List.length other)
 
-(* --- 3. compose_env key set is exactly what the inline block emitted --- *)
+(* --- 3. compose_env key set is bundle-local and non-interactive --- *)
 
 let expected_env_keys =
   [
-    (* path-derived block (RFC-0008 §3 evidence note) *)
+    (* path-derived block inside the dispatch container *)
     "HOME";
     "GH_CONFIG_DIR";
     "GIT_CONFIG_GLOBAL";
     "GIT_CONFIG_COUNT";
     "GIT_CONFIG_KEY_0";
     "GIT_CONFIG_VALUE_0";
-    (* git author / committer (RFC-0008 §3) *)
+    (* git author / committer *)
     "GIT_AUTHOR_NAME";
     "GIT_AUTHOR_EMAIL";
     "GIT_COMMITTER_NAME";
     "GIT_COMMITTER_EMAIL";
-    (* Env_git_noninteractive (RFC-0007 PR-1) *)
+    (* Env_git_noninteractive *)
     "GIT_TERMINAL_PROMPT";
     "GIT_ASKPASS";
     "GCM_INTERACTIVE";
@@ -141,7 +139,7 @@ let test_compose_env_key_set () =
   let actual_keys = List.sort compare (List.map fst env) in
   let expected_keys = List.sort compare expected_env_keys in
   check (list string)
-    "env keys match the pre-extraction inline block exactly"
+    "env keys stay bundle-local and non-interactive"
     expected_keys actual_keys
 
 let test_compose_env_path_values_anchored_to_cred_root () =
@@ -185,7 +183,7 @@ let test_finalize_is_noop_ok () =
   let b = dummy_binding () in
   match HCP.finalize b ~container_id:"abc123" with
   | Ok () -> ()
-  | Error err -> failf "finalize must noop-Ok in PR-1; got %s" (CP.pp_error err)
+  | Error err -> failf "finalize must noop-Ok; got %s" (CP.pp_error err)
 
 let test_tear_down_idempotent () =
   let b = dummy_binding () in

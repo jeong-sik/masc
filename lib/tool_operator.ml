@@ -31,6 +31,8 @@ let strict_action_enums =
        ([keeper_msg]→[keeper_message], [room_pause]→[namespace_pause],
        [room_resume]→[namespace_resume], [autonomy_tick]→[social_sweep]). *)
     `String "task_inject";
+    `String "github_identity_login_prepare";
+    `String "github_identity_status";
     `String "keeper_message";
     `String "keeper_probe";
     `String "keeper_recover";

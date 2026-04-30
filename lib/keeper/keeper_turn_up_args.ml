@@ -411,9 +411,10 @@ let validate_sandbox_settings
     Error
       "MASC_KEEPER_SANDBOX_HARD_MODE requires network_mode=none; git/gh egress is brokered by structured tools"
   else if Env_config_keeper.KeeperSandbox.hard_mode ()
-          && github_identity = None then
+          && github_identity = None
+          && not (Keeper_gh_env.root_gh_config_dir_exists config) then
     Error
-      "MASC_KEEPER_SANDBOX_HARD_MODE requires github_identity in keeper profile"
+      "MASC_KEEPER_SANDBOX_HARD_MODE requires an effective GitHub identity: configure github_identity in the keeper profile or install the root bundle at $base_path/.masc/github-identities/root/gh"
   else if Env_config_keeper.KeeperSandbox.hard_mode ()
           && Env_config_keeper.KeeperSandbox.relax_fs () then
     Error

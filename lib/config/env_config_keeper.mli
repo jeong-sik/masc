@@ -219,29 +219,6 @@ module KeeperSandbox : sig
   val cleanup_stale_after_sec : unit -> float
   val cleanup_interval_sec : unit -> float
   val with_git_dispatch_enabled : unit -> bool
-  val gh_creds_host_path : unit -> string
-  val gitconfig_host_path : unit -> string
-  val ssh_dir_host_path : unit -> string
-  val gh_token_probe_timeout_sec : unit -> float
-
-  val gh_token : unit -> string
-  (** GitHub token forwarded as GH_TOKEN env into the docker
-      git-creds execution path.  Resolution order:
-      1. [MASC_KEEPER_SANDBOX_GH_TOKEN] env override.
-      2. host [GH_TOKEN] env.
-      3. host [gh auth token] keychain fallback (cached after first
-         successful probe).
-      Returns [""] when no token is configured. *)
-
-  module For_testing : sig
-    val reset_gh_token_probe_cache : unit -> unit
-
-    val with_gh_token_probe :
-      (unit -> string option) -> (unit -> 'a) -> 'a
-    (** Swap the [gh auth token] probe for [probe] inside [f] and
-        reset the cache around the call.  Restores the prior probe
-        + clears the cache on exit. *)
-  end
 
   val symmetric_read_containment : unit -> bool
   val docker_read_routing : unit -> bool

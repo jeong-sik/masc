@@ -33,50 +33,6 @@ let docker_exec_failure_message ~image ~status ~output =
   Printf.sprintf "sandbox docker exec failed (%s, %s): %s%s"
     image (docker_exec_status_label status) output_label missing_cwd_hint
 
-(* ── Sandbox GH_TOKEN warn dedup ───────────────────────────
-
-   When [git_creds_enabled = true] but [Env_config_keeper.KeeperSandbox.gh_token]
-   returns the empty string, the keeper subprocess inside docker has *no*
-   GitHub credential — every [gh pr create]/[git push] inside the sandbox
-   returns 401, which operators only see as an unstructured CLI error from
-   the keeper turn output.  The 3-tier resolution chain
-   ([env_config_keeper.ml:700-748]: MASC_KEEPER_SANDBOX_GH_TOKEN env →
-   host GH_TOKEN env → cached `gh auth token` keychain probe) silently
-   collapses to "" and the [-e GH_TOKEN=...] argv slot is omitted.
-
-   Symmetric to #10973's expire_stale-never-called dead-end: function and
-   policy exist, single missing log line leaves the operator blind.  The
-   per-keeper dedup keeps log noise bounded — the resolution chain is
-   process-global cached, so the warn only needs to fire once per keeper
-   per server lifetime. *)
-let gh_token_warn_emitted : (string, unit) Hashtbl.t = Hashtbl.create 16
-let gh_token_warn_mu = Eio.Mutex.create ()
-
-let warn_sandbox_gh_token_missing keeper_name =
-  let should_emit =
-    Eio.Mutex.use_rw ~protect:true gh_token_warn_mu (fun () ->
-      if Hashtbl.mem gh_token_warn_emitted keeper_name then false
-      else begin
-        Hashtbl.add gh_token_warn_emitted keeper_name ();
-        true
-      end)
-  in
-  if should_emit then begin
-    Prometheus.inc_counter
-      "masc_keeper_sandbox_gh_token_missing_total"
-      ~labels:[ ("keeper", keeper_name) ]
-      ();
-    Log.Keeper.warn
-      "%s: sandbox GH_TOKEN unavailable — gh/git HTTPS calls inside the \
-       container will return 401.  Resolution chain (env_config_keeper.ml \
-       KeeperSandbox.gh_token): 1) MASC_KEEPER_SANDBOX_GH_TOKEN env, \
-       2) host GH_TOKEN env, 3) cached `gh auth token` keychain probe.  \
-       On macOS the keychain probe is permanently cached at server start; \
-       run `gh auth status` to verify credentials, then restart masc-mcp \
-       so the probe re-runs."
-      keeper_name
-  end
-
 (* ── P12: Network egress policy ───────────────────────── *)
 
 let egress_policy_path ~(config : Coord.config) ~(meta : keeper_meta) =
@@ -447,20 +403,16 @@ let run_docker_shell_command_with_status
         else
           Keeper_sandbox_runtime.docker_network_args network_mode
       in
-      let cred_root = Host_config_provider.cred_root in
       let cred_result =
         if not git_creds_enabled then
           Ok ([], [])
         else
-          (* RFC-0008 PR-1: composition centralised in
-             [Host_config_provider.resolve].  Pre-extraction this
-             site inlined ~60 lines reading from
-             [Keeper_gh_env.keeper_binding], [Env_config_sandbox.Auth_paths],
-             [Keeper_identity], and [Env_git_noninteractive].  The
-             trait keeps that surface identical (no new env keys, no
-             new mounts) and makes the lifecycle explicit so PR-3
-             can swap to [In_container_login_provider] without
-             rewiring this caller.  See RFC-0008 §3 / §4. *)
+          (* Credential composition is centralised in
+             [Host_config_provider.resolve].  It selects either the
+             keeper's explicit GitHub identity bundle or the MASC-owned
+             root bundle.  Ambient operator GH_TOKEN/GITHUB_TOKEN,
+             ~/.config/gh, ~/.ssh, and keychain probes are not part of
+             keeper execution. *)
           match
             Host_config_provider.resolve ~config ~identity:meta.name
           with
@@ -483,35 +435,6 @@ let run_docker_shell_command_with_status
       match cred_result with
       | Error err -> sandbox_error err
       | Ok (cred_mounts, cred_envs) ->
-      let ssh_auth_sock = Sys.getenv_opt "SSH_AUTH_SOCK" in
-      let ssh_auth_mount, ssh_auth_env =
-        let empty = ([], []) in
-        if not git_creds_enabled then empty
-        else
-          match ssh_auth_sock with
-          | None -> empty
-          | Some path when Sys.file_exists path ->
-              let container_path =
-                Filename.concat cred_root "ssh-agent.sock"
-              in
-              ( [ "-v"; path ^ ":" ^ container_path ],
-                [ "-e"; "SSH_AUTH_SOCK=" ^ container_path ] )
-          | Some _ -> empty
-      in
-      let token_env =
-        let gh_token =
-          if git_creds_enabled then
-            Env_config_keeper.KeeperSandbox.gh_token ()
-          else
-            ""
-        in
-        if git_creds_enabled && gh_token = "" then
-          warn_sandbox_gh_token_missing meta.name;
-        if (not git_creds_enabled) || gh_token = "" then
-          []
-        else
-          [ "-e"; "GH_TOKEN=" ^ gh_token ]
-      in
       let argv =
         Keeper_sandbox_runtime.docker_command_argv ()
         @ [
@@ -554,9 +477,6 @@ let run_docker_shell_command_with_status
         @ network_args
         @ cred_mounts
         @ cred_envs
-        @ ssh_auth_mount
-        @ ssh_auth_env
-        @ token_env
         @ identity_mounts
         @ [ image; "bash"; "-lc"; cmd ]
       in

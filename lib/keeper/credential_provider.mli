@@ -1,14 +1,13 @@
-(** Credential provider trait — abstract surface for keeper-scoped
-    GitHub credential lifecycle (RFC-0008 PR-1).
+(** Credential provider trait — abstract surface for keeper GitHub
+    credential lifecycle.
 
     The trait centralises credential composition (env + RO mounts +
     metadata) so the docker-invocation site at
     {!Keeper_shell_docker} no longer reaches into multiple SSOTs
     inline.  Concrete implementations:
 
-    - {!Host_config_provider}: Option A — host bundle mounted RO.
-    - In_container_login_provider (RFC-0008 PR-3, gated): Option B —
-      [gh auth login --with-token] inside the container.
+    - {!Host_config_provider}: selected root/keeper host bundle
+      mounted RO.
 
     Lifecycle (in caller order):
       [resolve] -> [finalize]  (after container start, post-bootstrap)
@@ -16,9 +15,8 @@
                                 [Eio.Switch.on_release] so crashes
                                 still hit it).
 
-    PR-1 scope: the trait + {!Host_config_provider} only.  [finalize]
-    and [tear_down] are noops in PR-1; the methods exist so PR-3 can
-    drop in without interface churn. *)
+    [finalize] and [tear_down] are noops for host-mounted bundles; the
+    methods keep the lifecycle explicit for future providers. *)
 
 (** Read-only mount projected from a host path into a container path.
     Empty {!ro_mount.host} or a missing path means the mount is
@@ -38,25 +36,22 @@ type binding = {
           path-derived entries (HOME, GH_CONFIG_DIR, GIT_CONFIG_COUNT
           + GIT_CONFIG_KEY_0/VALUE_0, plus GIT_AUTHOR_NAME/EMAIL and
           GIT_COMMITTER_NAME/EMAIL) with
-          {!Env_git_noninteractive.env} from RFC-0007 PR-1.  No new
-          env keys are introduced beyond what those two SSOTs already
-          define. *)
+          {!Env_git_noninteractive.env}. *)
   ro_mounts : ro_mount list;
       (** Host paths mounted read-only (Option A).  Empty for
           Option B. *)
   bootstrap : string list option;
       (** argv executed inside the container after start ([None] for
-          Option A; [Some ["gh"; "auth"; "login"; ...]] for Option B
-          in PR-3). *)
+          host-mounted bundles). *)
   metadata : (string * string) list;
       (** Audit pairs: [source], [git_identity_mode], optional
-          [github_identity], and (PR-2) [sha256_prefix]. *)
+          [github_identity], [effective_github_identity],
+          [credential_scope], and [bundle_root]. *)
 }
 
-(** Provider error variants.  [Missing_bundle] covers "no host bundle
-    found / no keeper identity configured" (RFC-0008 §3 — F-1 path).
-    [Invalid_token] is reserved for PR-2 / PR-3 [provider_gate]
-    failures.  [Finalize_failed] / [Tear_down_failed] surface the
+(** Provider error variants.  [Missing_bundle] covers a selected
+    root/keeper bundle that cannot be materialised. [Invalid_token] is
+    reserved for provider gates. [Finalize_failed] / [Tear_down_failed] surface the
     underlying reason without coercing to [string] so the caller can
     log structured fields. *)
 type error =

@@ -203,8 +203,9 @@ Operational intent:
 - shared lane: `masc_team_memory_read/write/search` only, on flattened `room="default"`
 - no arbitrary shared writable shell directory
 - `sandbox_profile=docker`는 `allowed_paths=["*"]`를 거부하고, private sandbox root 밖 경로도 허용하지 않는다
-- `github_identity`가 설정된 keeper는 `.masc/github-identities/<identity>/gh`가 없으면 fail-closed 된다. operator 개인 `gh` config로는 fallback 하지 않는다.
-- `MASC_KEEPER_SANDBOX_HARD_MODE=true`에서는 `github_identity`가 없는 keeper도 fail-closed 된다. 이 모드에서는 Docker container의 git/gh network dispatch와 host credential fallback이 꺼지고, `keeper_shell op=gh` / `op=git_clone`만 host-side broker가 keeper-scoped `GH_CONFIG_DIR`로 실행한다.
+- `github_identity`가 설정된 keeper는 `.masc/github-identities/<identity>/gh`만 사용하고, bundle이 없으면 fail-closed 된다. operator 개인 `gh` config, ambient `GH_TOKEN`/`GITHUB_TOKEN`, SSH agent로는 fallback 하지 않는다.
+- `github_identity`가 없는 keeper는 `.masc/github-identities/root/gh` root bundle만 fallback으로 사용한다. root bundle도 없으면 fail-closed 된다.
+- `MASC_KEEPER_SANDBOX_HARD_MODE=true`에서는 Docker container의 git/gh network dispatch와 ambient operator credential 사용이 꺼지고, `keeper_shell op=gh` / `op=git_clone`만 host-side broker가 selected identity bundle의 `GH_CONFIG_DIR`로 실행한다.
 
 ### Removed / forbidden fields (hard-rejected)
 

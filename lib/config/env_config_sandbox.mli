@@ -2,8 +2,8 @@
 
     Mirrors {!Env_config_exec_timeout} (#10426) and the
     {!Env_config_oas_bridge} precedent (#10094).  This module gathers
-    the 25+ env-var settings + handful of hardcoded constants that
-    today live across {!Env_config_keeper.KeeperSandbox},
+    the sandbox env settings + handful of hardcoded constants that
+    live across {!Env_config_keeper.KeeperSandbox},
     {!Env_config_keeper.DockerPlayground}, and several
     [lib/keeper/keeper_*.ml] sites — into one typed surface so:
 
@@ -13,21 +13,15 @@
     2. Tests pin the default table once; drift is a compile or test
        failure rather than a silent budget shift.
     3. The {!Shell_timeout} sub-module exposes the typed-bucket
-       pattern from {!Env_config_exec_timeout} for the 6 (+1
-       sentinel) shell timeout buckets currently scattered.
-
-    This module is purely additive in the scaffold PR: every getter
-    reads the same env var and returns the same default as the
-    existing implementation.  Call sites are migrated in follow-ups
-    (P2b alias delegation, P2c hardcoded constants, P2d doctor
-    wiring). *)
+       pattern from {!Env_config_exec_timeout} for shell timeout
+       buckets. *)
 
 (** {1 Hardening — security policy and resource limits} *)
 module Hardening : sig
   val hard_mode : unit -> bool
   (** Forces rootless/userns runtime checks, disables Docker-side
-      git/gh credential dispatch, and clears host credential
-      fallbacks.
+      git/gh credential dispatch, and forbids ambient operator
+      credential fallback.
       Env: [MASC_KEEPER_SANDBOX_HARD_MODE].  Default: [false]. *)
 
   val pids_limit : unit -> int
@@ -113,43 +107,16 @@ module Runtime : sig
 
   val git_dispatch : unit -> bool
   (** When true, keeper_bash commands beginning with ["git "] or
-      ["gh "] run in a dedicated container with [network_mode=host]
-      and read-only credential mounts.  Effective value is [false]
-      when {!Hardening.hard_mode} is true.
+      ["gh "] run in a dedicated container with network egress and
+      read-only mounts from the selected root/keeper GitHub identity
+      bundle.  Effective value is [false] when {!Hardening.hard_mode}
+      is true.
       Env: [MASC_KEEPER_SANDBOX_GIT_DISPATCH].  Default: [true]. *)
 
   val docker_playground_enabled : unit -> bool
   (** Route keeper_bash through a Docker container instead of local
       subprocess.
       Env: [MASC_KEEPER_DOCKER_PLAYGROUND].  Default: [false]. *)
-end
-
-(** {1 Auth_paths — credential mount points} *)
-module Auth_paths : sig
-  val gh_creds : unit -> string
-  (** Host path for [/root/.config/gh] read-only mount.  Empty
-      string disables the mount.  Effective value is [""] when
-      {!Hardening.hard_mode}; otherwise default falls through to
-      [$HOME/.config/gh].
-      Env: [MASC_KEEPER_SANDBOX_GH_CREDS].  Default:
-      [$HOME/.config/gh]. *)
-
-  val gitconfig : unit -> string
-  (** Host path for [/root/.gitconfig] read-only mount.  Empty
-      string disables the mount.  [""] when hard_mode.
-      Env: [MASC_KEEPER_SANDBOX_GITCONFIG].  Default:
-      [$HOME/.gitconfig]. *)
-
-  val ssh_dir : unit -> string
-  (** Host path for [~/.ssh] read-only mount.  Opt-in (default
-      empty).  [""] when hard_mode.
-      Env: [MASC_KEEPER_SANDBOX_SSH_DIR].  Default: [""]. *)
-
-  val gh_token_probe_timeout_sec : unit -> float
-  (** Wall-clock budget for the [gh auth token] keychain probe.
-      Clamped to [[0.1, 10.0]].
-      Env: [MASC_KEEPER_SANDBOX_GH_TOKEN_PROBE_TIMEOUT_SEC].
-      Default: 2.0. *)
 end
 
 (** {1 Preflight — runtime feasibility check} *)
@@ -203,8 +170,6 @@ module Shell_timeout : sig
     | User_max
         (** Upper bound for user-provided [timeout_sec] in
             keeper_bash.  180s. *)
-    | Token_probe
-        (** [gh auth token] keychain probe budget.  2s. *)
     | Cleanup_rm
         (** [docker rm -f] timeout used by turn-scoped cleanup.
             Currently hardcoded 5.0 in

@@ -109,8 +109,8 @@ let handle_keeper_bash
       Keeper_shell_shared.effective_sandbox_profile ~meta ~in_playground
     in
     (* Docker git-credential dispatch. When base profile is Docker and the
-       command's leading token is git/gh, upgrade network to inherit and
-       enable read-only mounts of ~/.config/gh and ~/.gitconfig for the
+       command's leading token is git/gh, allow network egress and mount
+       the selected root/keeper GitHub identity bundle read-only for the
        duration of this command. Disabled when
        MASC_KEEPER_SANDBOX_GIT_DISPATCH=false.
        [git_creds_enabled] replaces the former Docker_with_git variant:

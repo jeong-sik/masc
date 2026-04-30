@@ -1,27 +1,22 @@
-(** Option A credential provider — host bundle mounted read-only
-    (RFC-0008 PR-1).
+(** Keeper GitHub credential provider.
 
-    Composes the binding that {!Keeper_shell_docker} previously built
-    inline (lines 271-329 pre-extraction): RO mounts of the host
-    [gh] config dir + [.gitconfig] + [.ssh] dir, env vars projecting
-    those mounts under {!cred_root} inside the container, and the
-    canonical non-interactive git env from {!Env_git_noninteractive}.
+    Resolves the keeper's explicit [github_identity] bundle, or the
+    MASC-owned [root] bundle when the keeper has no identity.  It mounts
+    only files from that selected bundle read-only into the dispatch
+    container and composes container-local GH/Git environment variables.
+    Operator ambient credentials ([GH_TOKEN], [GITHUB_TOKEN],
+    [~/.config/gh], [~/.ssh], keychain probes) are outside this contract.
 
-    [finalize] and [tear_down] are noops here — the RO mount has
-    nothing to relabel and its lifetime is the docker [run].  PR-3's
-    [In_container_login_provider] will use the same trait surface
-    with a real [finalize] (rewrite [hosts.yml:user] inside
-    container) and [bootstrap] argv. *)
+    [finalize] and [tear_down] are noops here — the RO mount lifetime is
+    the docker [run]. *)
 
 include Credential_provider.S
 
 val cred_root : string
 (** [/tmp/keeper-creds] — in-container path under which credentials
     are projected.  Exposed so callers that compose paths relative to
-    it (currently only the [SSH_AUTH_SOCK] mount, which depends on
-    the host SSH agent and is therefore composed outside this trait)
-    stay in sync with the [HOME=<cred_root>] env entry that the
-    binding already carries. *)
+    it stay in sync with the [HOME=<cred_root>] env entry that the
+    binding carries. *)
 
 (**/**)
 

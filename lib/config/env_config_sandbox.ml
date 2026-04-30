@@ -102,40 +102,6 @@ module Runtime = struct
 end
 
 (* --------------------------------------------------------------- *)
-(* Auth_paths                                                      *)
-(* --------------------------------------------------------------- *)
-
-module Auth_paths = struct
-  let gh_creds () =
-    if Hardening.hard_mode () then ""
-    else
-      let default =
-        match Sys.getenv_opt "HOME" with
-        | Some home -> Filename.concat home ".config/gh"
-        | None -> ""
-      in
-      get_string ~default "MASC_KEEPER_SANDBOX_GH_CREDS"
-
-  let gitconfig () =
-    if Hardening.hard_mode () then ""
-    else
-      let default =
-        match Sys.getenv_opt "HOME" with
-        | Some home -> Filename.concat home ".gitconfig"
-        | None -> ""
-      in
-      get_string ~default "MASC_KEEPER_SANDBOX_GITCONFIG"
-
-  let ssh_dir () =
-    if Hardening.hard_mode () then ""
-    else get_string ~default:"" "MASC_KEEPER_SANDBOX_SSH_DIR"
-
-  let gh_token_probe_timeout_sec () =
-    get_float ~default:2.0 "MASC_KEEPER_SANDBOX_GH_TOKEN_PROBE_TIMEOUT_SEC"
-    |> max 0.1 |> min 10.0
-end
-
-(* --------------------------------------------------------------- *)
 (* Preflight                                                       *)
 (* --------------------------------------------------------------- *)
 
@@ -167,7 +133,6 @@ module Shell_timeout = struct
     | Git_meta
     | Gh_min
     | User_max
-    | Token_probe
     | Cleanup_rm
     | Unknown of string
 
@@ -179,12 +144,11 @@ module Shell_timeout = struct
     | Git_meta -> "git_meta"
     | Gh_min -> "gh_min"
     | User_max -> "user_max"
-    | Token_probe -> "token_probe"
     | Cleanup_rm -> "cleanup_rm"
     | Unknown s -> s
 
   let known_buckets () =
-    [ Io; Read; Git_meta; Gh_min; User_max; Token_probe; Cleanup_rm ]
+    [ Io; Read; Git_meta; Gh_min; User_max; Cleanup_rm ]
 
   let known_default_sec = function
     | Io -> Some 30.0
@@ -192,7 +156,6 @@ module Shell_timeout = struct
     | Git_meta -> Some 5.0
     | Gh_min -> Some 15.0
     | User_max -> Some 180.0
-    | Token_probe -> Some 2.0
     | Cleanup_rm -> Some 5.0
     | Unknown _ -> None
 
@@ -341,23 +304,6 @@ let raw_runtime () : Yojson.Safe.t =
         (bool_v (Runtime.docker_playground_enabled ()))
     ]
 
-let raw_auth_paths () : Yojson.Safe.t =
-  `Assoc
-    [ "gh_creds",
-      entry_env_overridable ~env_var:"MASC_KEEPER_SANDBOX_GH_CREDS"
-        (string_v (Auth_paths.gh_creds ()))
-    ; "gitconfig",
-      entry_env_overridable ~env_var:"MASC_KEEPER_SANDBOX_GITCONFIG"
-        (string_v (Auth_paths.gitconfig ()))
-    ; "ssh_dir",
-      entry_env_overridable ~env_var:"MASC_KEEPER_SANDBOX_SSH_DIR"
-        (string_v (Auth_paths.ssh_dir ()))
-    ; "gh_token_probe_timeout_sec",
-      entry_env_overridable
-        ~env_var:"MASC_KEEPER_SANDBOX_GH_TOKEN_PROBE_TIMEOUT_SEC"
-        (float_v (Auth_paths.gh_token_probe_timeout_sec ()))
-    ]
-
 let raw_preflight () : Yojson.Safe.t =
   `Assoc
     [ "enabled",
@@ -395,7 +341,6 @@ let raw_section () : Yojson.Safe.t =
     [ "hardening", raw_hardening ()
     ; "cleanup", raw_cleanup ()
     ; "runtime", raw_runtime ()
-    ; "auth_paths", raw_auth_paths ()
     ; "preflight", raw_preflight ()
     ; "shell_timeout", raw_shell_timeout ()
     ]
@@ -406,12 +351,6 @@ let derived_section () : Yojson.Safe.t =
       `List (List.map (fun s -> `String s)
                (Hardening.read_only_rootfs_args ()))
     ; "tmpfs_mount", `String (Hardening.tmpfs_mount ())
-    ; "effective_gh_creds_path",
-      `String (Auth_paths.gh_creds ())
-    ; "effective_gitconfig_path",
-      `String (Auth_paths.gitconfig ())
-    ; "effective_ssh_dir_path",
-      `String (Auth_paths.ssh_dir ())
     ]
 
 let effective_config_json () : Yojson.Safe.t =

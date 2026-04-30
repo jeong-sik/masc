@@ -253,6 +253,16 @@ let available_actions : available_action list =
     make_available_action ~action_type:"task_inject" ~tool_name:"masc_add_task"
       ~target_type:"root"
       ~description:"Inject a backlog task into the namespace.";
+    make_available_action
+      ~action_type:"github_identity_login_prepare"
+      ~tool_name:"masc_github_identity_login_prepare"
+      ~target_type:"root"
+      ~description:"Prepare a MASC-owned GitHub CLI identity login command.";
+    make_available_action
+      ~action_type:"github_identity_status"
+      ~tool_name:"masc_github_identity_status"
+      ~target_type:"root"
+      ~description:"Inspect a MASC-owned GitHub identity bundle and gh auth status.";
     make_available_action ~action_type:"keeper_message" ~tool_name:"masc_keeper_msg"
       ~target_type:"keeper"
       ~description:"Send a direct operator message to a keeper.";

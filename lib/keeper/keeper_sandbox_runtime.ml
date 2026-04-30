@@ -203,8 +203,7 @@ let docker_network_args = function
   | Keeper_types.Network_none -> ([ "--network"; "none" ], "none")
   | Keeper_types.Network_inherit ->
       (* Host network — matches the variant name and the docstring on
-         [keeper_types_profile.ml:20-24] (git/gh dispatcher upgrade with
-         read-only mounts of ~/.config/gh / ~/.gitconfig). Empty args
+         [keeper_types_profile.ml:20-24]. Empty args
          (docker default) gives bridge mode (NAT, no host egress) which
          broke `git clone` / `gh push` for keepers running under this
          profile. See #10431. *)

@@ -182,6 +182,17 @@ let with_keeper_identity_toml ~config ~keeper_name ~github_identity
        github_identity git_identity_mode);
   with_config_dir config_dir f
 
+let ensure_github_identity_bundle ~config github_identity =
+  let masc_dir = Filename.concat config.Coord.base_path Common.masc_dirname in
+  let gh_dir =
+    Filename.concat
+      (Filename.concat
+         (Filename.concat masc_dir "github-identities")
+         github_identity)
+      "gh"
+  in
+  ensure_dir gh_dir
+
 let parse_field raw field =
   Yojson.Safe.from_string raw |> Json.member field
 
@@ -502,6 +513,7 @@ let docker_run_line log_path =
   | None -> Alcotest.fail "expected docker run log line"
 
 let run_git_creds_docker_shell ~config ~meta ~playground ~log_path =
+  ensure_github_identity_bundle ~config Masc_mcp.Keeper_gh_env.root_github_identity;
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
@@ -569,8 +581,19 @@ let test_git_creds_mounts_numeric_user_identity () =
   @@ fun ~config ~meta ~playground ->
   let log_path = Filename.concat config.Coord.base_path "docker.log" in
   let line =
+    with_env "GH_TOKEN" "host-token" @@ fun () ->
+    with_env "GITHUB_TOKEN" "github-token" @@ fun () ->
     run_git_creds_docker_shell ~config ~meta ~playground ~log_path
   in
+  let root_gh_dir =
+    Masc_mcp.Keeper_gh_env.root_gh_config_dir config
+  in
+  Alcotest.(check bool) "root GH identity bundle mounted" true
+    (contains_substring line (root_gh_dir ^ ":/tmp/keeper-creds/.config/gh:ro"));
+  Alcotest.(check bool) "ambient GH_TOKEN not forwarded" false
+    (contains_substring line "GH_TOKEN=");
+  Alcotest.(check bool) "ambient GITHUB_TOKEN not forwarded" false
+    (contains_substring line "GITHUB_TOKEN=");
   let identity_dir = Filename.concat playground ".docker-identity" in
   let passwd_path = Filename.concat identity_dir "passwd" in
   let group_path = Filename.concat identity_dir "group" in
@@ -626,6 +649,7 @@ let test_git_clone_repairs_existing_docker_clone_checkout () =
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup ~sandbox:Keeper_types.Docker
   @@ fun ~config ~meta ~playground ->
+  ensure_github_identity_bundle ~config Masc_mcp.Keeper_gh_env.root_github_identity;
   let source_repo = Filename.concat playground "source-masc-mcp" in
   ensure_dir source_repo;
   run_ok ~cwd:source_repo "git init -q -b main";

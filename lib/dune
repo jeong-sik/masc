@@ -140,6 +140,9 @@
    server_routes_http_routes_dashboard
    server_routes_http_routes_provider_runs
    server_routes_http_routes_cascade
+   server_routes_http_routes_repositories
+   server_routes_http_routes_credentials
+   server_routes_http_routes_keeper_repos
    server_routes_http_routes_verification
    server_routes_http_routes_attribution
    server_routes_http_routes_activity
@@ -987,6 +990,8 @@
    masc_mcp.resilience
    ;; Multimodal artifact GADT sub-library (Tier B8) — Code/Image/Audio/Doc + Payload + Provenance
    masc_mcp.multimodal
+   ;; Repository manager sub-library (multi-repository feature)
+   masc_mcp.repo_manager
    )
  (preprocess (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq ppx_let ppx_tla))
  (instrumentation (backend bisect_ppx)))

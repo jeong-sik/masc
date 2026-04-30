@@ -31,21 +31,31 @@ let handle_keeper_shell
   let containment_check target =
     Keeper_sandbox_containment.check_read_target ~config ~meta ~target
   in
+  let repo_check target =
+    Keeper_repo_mapping.validate_path_access ~keeper_id:meta.name
+      ~base_path:root ~path:target
+  in
   let read_target () =
     match Keeper_shell_shared.resolve_keeper_shell_read_path ~config ~meta ~args with
     | Error _ as e -> e
     | Ok target ->
       (match containment_check target with
-       | Ok () -> Ok target
-       | Error msg -> Error msg)
+       | Error msg -> Error msg
+       | Ok () ->
+         match repo_check target with
+         | Error msg -> Error msg
+         | Ok () -> Ok target)
   in
   let cwd_target () =
     match Keeper_shell_shared.resolve_keeper_shell_read_cwd ~config ~meta ~args with
     | Error _ as e -> e
     | Ok cwd ->
       (match containment_check cwd with
-       | Ok () -> Ok cwd
-       | Error msg -> Error msg)
+       | Error msg -> Error msg
+       | Ok () ->
+         match repo_check cwd with
+         | Error msg -> Error msg
+         | Ok () -> Ok cwd)
   in
   (* Actionable error: Samchon/Claude Code validateInput pattern.
      Returns structured JSON with tried path, playground root, and concrete next action. *)

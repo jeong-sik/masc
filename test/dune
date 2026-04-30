@@ -117,6 +117,10 @@
         test_claim_post_provision_hook
         test_keeper_toml_config_validation
         test_keeper_id
+        test_repo_store
+        test_credential_store
+        test_keeper_repo_mapping
+        test_repo_sync
         test_exec_core
         test_exec_dispatch
         test_keeper_bash_safety
@@ -299,6 +303,10 @@
           test_claim_post_provision_hook
           test_keeper_toml_config_validation
           test_keeper_id
+          test_repo_store
+          test_credential_store
+          test_keeper_repo_mapping
+          test_repo_sync
           test_exec_core
           test_exec_dispatch
           test_keeper_bash_safety

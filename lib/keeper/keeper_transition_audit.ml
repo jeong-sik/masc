@@ -1,5 +1,10 @@
 (** Keeper Transition Audit — Structured audit trail (RFC-0002). *)
 
+(* tla-lint: file-scope: structured audit trail for FSM transitions.
+   The ring buffer (pos/count) and result accumulators here record
+   what the FSM did; they do not influence what it does next.
+   Mutations are bookkeeping for the JSONL flush layer. *)
+
 type transition_record = {
   snapshot : Keeper_measurement.measurement_snapshot option;
   events_fired : Keeper_state_machine.event list;

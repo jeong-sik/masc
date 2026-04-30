@@ -1,6 +1,10 @@
 (** Keeper_alerting — alert fanout, skill routing, path safety checks,
     and tool-call preparation helpers for keeper execution. *)
 
+(* tla-lint: file-scope: alert score/reason accumulators are local
+   refs scoped to a single compute_alert_score call; output is a
+   computed score+reasons pair, not a stateful FSM transition. *)
+
 open Keeper_types
 open Keeper_memory
 

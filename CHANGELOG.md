@@ -1,6 +1,15 @@
 # Changelog
 
 
+## [0.18.22] - 2026-05-01
+
+Post-v0.18.21 merge train for routine release boundary advancement. No breaking API changes.
+
+### Changed
+
+- Package and release metadata advanced from `0.18.21` to `0.18.22`.
+- Roadmap, product operating plan, opam metadata, and spec baseline version references synced to `0.18.22`.
+
 ## [0.18.21] - 2026-04-30
 
 Release-truth follow-up after the `0.18.20` version bump landed before the rest of the merge train, and the `v0.18.20` tag was later cut with additional PRs but without matching changelog text. No breaking API changes.

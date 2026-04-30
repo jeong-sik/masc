@@ -9,9 +9,9 @@ code_refs:
 
 # Product Operating Plan
 
-> Current package version: v0.18.21
-> Latest release: v0.18.21 (2026-04-30)
-> Updated: 2026-04-30
+> Current package version: v0.18.22
+> Latest release: v0.18.22 (2026-05-01)
+> Updated: 2026-05-01
 > Release line: pre-1.0 (`0.y.z`); legacy `v2.*` tags are frozen history
 
 Execution companion for capsule-only coordination hardening:

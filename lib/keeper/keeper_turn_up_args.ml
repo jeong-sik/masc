@@ -242,44 +242,19 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
     let handoff_cooldown_sec_opt = Safe_ops.json_int_opt "handoff_cooldown_sec" args in
     let instructions_arg = get_string_opt args "instructions" in
     let profile_defaults = load_keeper_profile_defaults name in
-    let soul_path =
-      Filename.concat
-        (Filename.concat
-           (Filename.concat
-              (Filename.concat ctx.config.base_path "memory")
-              "souls")
-           name)
-        "SOUL.md"
-    in
-    let soul_content, soul_fallback =
-      if not (Fs_compat.file_exists soul_path) then (
-        Log.Keeper.info "SOUL.md not found for %s (%s)" name soul_path;
-        "", Printf.sprintf "SOUL.md not found for %s (%s)." name soul_path)
-      else
-        match Safe_ops.read_file_safe soul_path with
-        | Ok c -> c, ""
-        | Error e ->
-            Log.Keeper.warn "SOUL.md read failed for %s (%s): %s" name soul_path e;
-            "",
-            Printf.sprintf "SOUL.md read failed for %s (%s): %s" name soul_path e
-    in
-    let base_instructions_opt =
+    (* The previous implementation read [<base>/memory/souls/<name>/SOUL.md]
+       on every keeper turn-up and wrapped the resulting (or "not found")
+       text into a "[SYSTEM: SOUL INFUSION]" block prepended to the
+       keeper's instructions.  No production keeper ships a SOUL.md
+       and no spec defines one — the directory does not exist on any
+       host — so the path emitted an INFO log every cycle and silently
+       polluted every keeper's instructions with a fallback string.
+       Removed; instructions now reflect only the operator-supplied
+       argument or the keeper profile default. *)
+    let instructions_opt =
       match instructions_arg with
       | Some _ -> instructions_arg
       | None -> profile_defaults.instructions
-    in
-    let instructions_opt =
-      let base = Option.value ~default:"" base_instructions_opt in
-      let soul_section =
-        if soul_content <> "" then soul_content else soul_fallback
-      in
-      let infused =
-        if base = "" then
-          "[SYSTEM: SOUL INFUSION]\n" ^ soul_section
-        else
-          base ^ "\n\n[SYSTEM: SOUL INFUSION]\n" ^ soul_section
-      in
-      Some infused
     in
     let will_opt = parse_self_model_opt args "will" in
     let needs_opt = parse_self_model_opt args "needs" in

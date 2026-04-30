@@ -49,6 +49,22 @@ val with_in_turn_liveness_pulse :
   stop:bool Atomic.t ->
   (unit -> 'b) -> 'b
 
+type semaphore_wait_observation_kind =
+  | Semaphore_wait_pending
+  | Semaphore_wait_timeout
+
+val semaphore_wait_observation_reasons :
+  kind:semaphore_wait_observation_kind ->
+  channel:Keeper_world_observation.keeper_cycle_channel ->
+  string list
+
+val record_semaphore_wait_observation :
+  base_path:string ->
+  keeper_name:string ->
+  channel:Keeper_world_observation.keeper_cycle_channel ->
+  kind:semaphore_wait_observation_kind ->
+  unit
+
 val run_keepalive_unified_turn :
   ctx:'a context ->
   meta_after_triage:keeper_meta ->

@@ -285,6 +285,28 @@ let with_in_turn_liveness_pulse
     f
 ;;
 
+type semaphore_wait_observation_kind =
+  | Semaphore_wait_pending
+  | Semaphore_wait_timeout
+
+let semaphore_wait_observation_reasons ~kind ~channel =
+  let kind_reason =
+    match kind with
+    | Semaphore_wait_pending -> "semaphore_wait_pending"
+    | Semaphore_wait_timeout -> "semaphore_wait_timeout"
+  in
+  [
+    kind_reason;
+    "peers_holding_slot";
+    "channel_" ^ Keeper_world_observation.channel_to_string channel;
+  ]
+
+let record_semaphore_wait_observation ~base_path ~keeper_name ~channel ~kind =
+  Keeper_registry.record_skip_reasons
+    ~base_path
+    keeper_name
+    ~reasons:(semaphore_wait_observation_reasons ~kind ~channel)
+
 let run_keepalive_unified_turn
       ~(ctx : _ context)
       ~(meta_after_triage : keeper_meta)
@@ -437,6 +459,14 @@ let run_keepalive_unified_turn
       then meta_after_triage
       else if should_run_turn
       then (
+        (* Admission wait happens before [mark_turn_started], so the stale
+           watchdog would otherwise see an idle keeper while the fiber is
+           legitimately blocked behind turn-capacity backpressure. *)
+        record_semaphore_wait_observation
+          ~base_path:ctx.config.base_path
+          ~keeper_name:meta_after_triage.name
+          ~channel:turn_decision.channel
+          ~kind:Semaphore_wait_pending;
         match
           Keeper_turn_slot.with_keeper_turn_slot ~keeper_name:meta_after_triage.name
             ~channel:turn_decision.channel (fun ~semaphore_wait_ms ->
@@ -541,6 +571,11 @@ let run_keepalive_unified_turn
              keeper failure. Skip this cycle and let the next heartbeat retry
              once a slot opens up. Meta is left untouched so failure counters
              do not tick. *)
+          record_semaphore_wait_observation
+            ~base_path:ctx.config.base_path
+            ~keeper_name:meta_after_triage.name
+            ~channel:turn_decision.channel
+            ~kind:Semaphore_wait_timeout;
           let auto_avail = Eio.Semaphore.get_value Keeper_turn_slot.autonomous_turn_semaphore in
           let turn_avail = Eio.Semaphore.get_value Keeper_turn_slot.turn_semaphore in
           Log.Keeper.warn

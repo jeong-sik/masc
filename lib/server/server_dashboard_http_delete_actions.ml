@@ -230,9 +230,11 @@ let add_delete_action_routes router =
              | Ok () ->
                  Http.Response.json ~compress:true ~request:req
                    {|{"ok":true}|} reqd
-             | Error _ ->
+             | Error err ->
                  Http.Response.json ~status:`Not_found ~request:req
-                   {|{"ok":false,"error":"post not found or delete failed"}|} reqd
+                   (Printf.sprintf {|{"ok":false,"error":"%s"}|}
+                      (String.escaped (Board_types.pp_board_error err)))
+                   reqd
            with Yojson.Json_error _ ->
              Http.Response.json ~status:`Bad_request ~request:req
                {|{"ok":false,"error":"invalid request: requires {\"post_id\":\"...\"}"}|} reqd
@@ -255,9 +257,11 @@ let add_delete_action_routes router =
              | Ok () ->
                  Http.Response.json ~compress:true ~request:req
                    {|{"ok":true}|} reqd
-             | Error _ ->
+             | Error err ->
                  Http.Response.json ~status:`Not_found ~request:req
-                   {|{"ok":false,"error":"task not found or delete failed"}|} reqd
+                   (Printf.sprintf {|{"ok":false,"error":"task delete failed: %s"}|}
+                      (String.escaped (Types.masc_error_to_string err)))
+                   reqd
            with Yojson.Json_error _ ->
              Http.Response.json ~status:`Bad_request ~request:req
                {|{"ok":false,"error":"invalid request: requires {\"task_id\":\"...\"}"}|} reqd

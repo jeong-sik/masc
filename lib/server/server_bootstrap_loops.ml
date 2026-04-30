@@ -394,7 +394,10 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
       Agent_tool_surfaces.local_worker_tool_schemas ~names:judge_tool_names ()
     with
     | Ok schemas -> schemas
-    | Error _ -> []
+    | Error e ->
+        Log.Server.warn "judge tool schema resolution failed: %s"
+          (Types.masc_error_to_string e);
+        []
   in
   let make_judge_dispatch ~actor ~(name : string) ~(args : Yojson.Safe.t)
       : bool * string =

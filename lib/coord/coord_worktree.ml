@@ -147,7 +147,9 @@ let load_git_clone_policy_result ~base_path =
 let load_git_clone_policy ~base_path =
   match load_git_clone_policy_result ~base_path with
   | Ok policy -> policy
-  | Error _ -> [], []
+  | Error msg ->
+      Log.Coord.routine "git_clone_policy: using defaults (%s)" msg;
+      [], []
 
 let valid_github_org_slug org =
   let valid_org_char c =

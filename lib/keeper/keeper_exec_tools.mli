@@ -121,8 +121,8 @@ type tool_result_payload =
   | Malformed_structured of string
 
 (** Bridge-facing execution outcome.
-    [tool_not_allowed] remains a non-failure outcome so preset/policy
-    rejections do not trip repeated-failure guardrails. *)
+    Structured tool errors, including [tool_not_allowed], are failures so
+    preset/policy rejections cannot silently end a keeper turn as success. *)
 type execution_outcome = [ `Success | `Failure ]
 
 (** Typed keeper tool execution result.

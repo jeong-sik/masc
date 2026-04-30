@@ -122,7 +122,7 @@ let test_malformed_json_like_payload_detected () =
       (Printf.sprintf "expected malformed_structured, got %s"
          (payload_kind other))
 
-let test_execute_with_outcome_policy_gate_is_non_failure () =
+let test_execute_with_outcome_policy_gate_is_failure () =
   with_exec_fixture
     ~tool_access:(Masc_mcp.Keeper_types.Custom [ "keeper_tools_list" ])
     "keeper_exec_tools_policy_gate"
@@ -134,7 +134,7 @@ let test_execute_with_outcome_policy_gate_is_non_failure () =
           ~input:(`Assoc [ ("path", `String "blocked.txt") ])
           ()
       in
-      check string "policy gate outcome" "success"
+      check string "policy gate outcome" "failure"
         (match result.outcome with `Success -> "success" | `Failure -> "failure");
       check string "policy gate payload shape" "structured_error"
         (payload_kind result.payload_shape);
@@ -357,8 +357,8 @@ let () =
         test_malformed_json_like_payload_detected;
     ]);
     ("execute_keeper_tool_call_with_outcome", [
-      test_case "policy gate stays non-failure" `Quick
-        test_execute_with_outcome_policy_gate_is_non_failure;
+      test_case "policy gate is failure" `Quick
+        test_execute_with_outcome_policy_gate_is_failure;
       test_case "missing file is failure" `Quick
         test_execute_with_outcome_missing_file_is_failure;
       test_case "bad query is failure" `Quick

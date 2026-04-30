@@ -1,6 +1,17 @@
 # Changelog
 
 
+## [0.18.15] - 2026-04-30
+
+### Changed
+
+- Package and release metadata advanced from `0.18.14` to `0.18.15` so post-v0.18.14 keeper, audit, dashboard, and dependency follow-ups land on a new patch line.
+- Roadmap, product operating plan, opam metadata, and spec baseline version references synced to `0.18.15`.
+
+### Deprecated
+
+- None.
+
 ## [0.18.14] - 2026-04-30
 
 Release train metadata bump immediately after publishing the v0.18.13 catch-up boundary. No runtime behavior changes.

@@ -80,6 +80,15 @@ let handle_keeper_fs_read
     (match Keeper_sandbox_containment.check_read_target ~config ~meta ~target with
      | Error e -> error_json ~fields:[ "path", `String target ] e
      | Ok () ->
+    (* Multi-repository Phase 2: repository-level access restriction.
+       If the resolved path is under a registered repository, enforce
+       keeper-to-repo mapping.  Paths outside all registered repos are
+       allowed (playground general files). *)
+    (match Keeper_repo_mapping.validate_path_access ~keeper_id:meta.name
+       ~base_path:(Keeper_alerting_path.project_root_of_config config)
+       ~path:target with
+     | Error msg -> error_json ~fields:[ "path", `String target ] msg
+     | Ok () ->
     (* RFC-0006 Phase B-2: Docker keepers route the actual byte read
        through [docker run --rm <image> cat <container_path>] so the
        container's mount restrictions are the load-bearing isolation.
@@ -223,6 +232,11 @@ let handle_keeper_fs_edit
          (match validate_write_target ~config ~meta ~target with
           | Error json -> json
           | Ok () ->
+         (match Keeper_repo_mapping.validate_path_access ~keeper_id:meta.name
+            ~base_path:(Keeper_alerting_path.project_root_of_config config)
+            ~path:target with
+          | Error msg -> error_json ~fields:[ "path", `String target ] msg
+          | Ok () ->
          (try
             let current =
               try Fs_compat.load_file target
@@ -290,6 +304,11 @@ let handle_keeper_fs_edit
   | Ok target ->
     (match validate_write_target ~config ~meta ~target with
      | Error json -> json
+     | Ok () ->
+    (match Keeper_repo_mapping.validate_path_access ~keeper_id:meta.name
+       ~base_path:(Keeper_alerting_path.project_root_of_config config)
+       ~path:target with
+     | Error msg -> error_json ~fields:[ "path", `String target ] msg
      | Ok () ->
     (try
        let write_result =

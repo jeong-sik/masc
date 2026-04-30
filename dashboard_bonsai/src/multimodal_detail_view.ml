@@ -183,20 +183,24 @@ let render_id_list (ids : string list) : Node.t =
       (List.map ids ~f:(fun id -> Node.li [ Node.text id ]))
 ;;
 
-let render_provenance (p : Multimodal_detail_types.provenance) : Node.t =
+(* Tier F3 — provenance now renders as a 1-hop DAG via
+   [Multimodal_detail_provenance_view]. The flat-list helpers above
+   ([render_id_list]) remain unused for now but we keep them in case
+   F3.1 adds a list-fallback toggle for very large neighborhoods. *)
+let _ = render_id_list
+
+let render_provenance
+    ~(selected_id : string)
+    (p : Multimodal_detail_types.provenance)
+    : Node.t
+  =
   Node.div
     [ Node.h3 ~attrs:[ Style.section_title ] [ Node.text "provenance" ]
-    ; Node.div
-        ~attrs:[ Style.prov_grid ]
-        [ Node.div
-            [ Node.div ~attrs:[ Style.section_title ] [ Node.text "origins" ]
-            ; render_id_list p.origins
-            ]
-        ; Node.div
-            [ Node.div ~attrs:[ Style.section_title ] [ Node.text "descendants" ]
-            ; render_id_list p.descendants
-            ]
-        ]
+    ; (if List.is_empty p.origins && List.is_empty p.descendants
+       then Multimodal_detail_provenance_view.render_empty
+       else
+         Multimodal_detail_provenance_view.render
+           ~selected_id ~origins:p.origins ~descendants:p.descendants)
     ]
 ;;
 
@@ -246,11 +250,12 @@ let render_detail_state
 ;;
 
 let render_provenance_state
+    ~(selected_id : string)
     (state : T.provenance T.fetch_state)
     : Node.t
   =
   match state with
-  | T.Loaded p -> render_provenance p
+  | T.Loaded p -> render_provenance ~selected_id p
   | T.Loading ->
     Node.div
       ~attrs:[ Style.loading ]
@@ -276,7 +281,7 @@ let view_of_state
   | None -> Node.none
   | Some id ->
     let body = render_detail_state ~id detail in
-    let prov_section = render_provenance_state provenance in
+    let prov_section = render_provenance_state ~selected_id:id provenance in
     Node.div ~attrs:[ Style.panel ] (body @ [ prov_section ])
 ;;
 

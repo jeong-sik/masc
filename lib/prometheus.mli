@@ -146,6 +146,12 @@ val metric_keeper_compaction_noop : string
     down on keeper_down / supervisor cleanup. No labels. *)
 val metric_keeper_tool_emission_registry_size : string
 
+(** Tier K6 — per-keeper tagged tool-emission push counter. Labels:
+    [keeper]. Incremented by [Keeper_tool_emission_hook.push] each
+    time the PostToolUse hook captures a parsed JSON tool result
+    into the keeper's accumulator. *)
+val metric_keeper_tool_emission_pushes : string
+
 val metric_keeper_operator_compact : string
 val metric_keeper_operator_clear : string
 

@@ -3,10 +3,25 @@
 type accumulator = {
   mutable items : Yojson.Safe.t list;
   mutex : Stdlib.Mutex.t;
+  keeper_name : string option;
+    (* Tier K6 — set by [accumulator_for_keeper] so the [push]
+       function can emit a per-keeper Prometheus counter without
+       routing the name through every call site. [None] for the
+       process-wide [global_accumulator] and for test-created
+       accumulators (no metric emitted in those cases). *)
 }
 
 let create_accumulator () =
-  { items = []; mutex = Stdlib.Mutex.create () }
+  { items = []
+  ; mutex = Stdlib.Mutex.create ()
+  ; keeper_name = None
+  }
+
+let create_accumulator_for ~keeper_name =
+  { items = []
+  ; mutex = Stdlib.Mutex.create ()
+  ; keeper_name = Some keeper_name
+  }
 
 let masc_tool_emission_enabled () =
   match Sys.getenv_opt "MASC_TOOL_EMISSION" with
@@ -16,7 +31,18 @@ let masc_tool_emission_enabled () =
 let push acc (json : Yojson.Safe.t) : unit =
   Stdlib.Mutex.lock acc.mutex;
   acc.items <- json :: acc.items;
-  Stdlib.Mutex.unlock acc.mutex
+  Stdlib.Mutex.unlock acc.mutex;
+  (* Tier K6 — emit per-keeper push counter. Counter is incremented
+     OUTSIDE the accumulator mutex so the metric write does not
+     extend the critical section. The [keeper_name] field is read-
+     only so reading after unlock is race-free. *)
+  match acc.keeper_name with
+  | None -> ()
+  | Some name ->
+    Prometheus.inc_counter
+      Prometheus.metric_keeper_tool_emission_pushes
+      ~labels:[ ("keeper", name) ]
+      ()
 
 let drain acc : Yojson.Safe.t list =
   Stdlib.Mutex.lock acc.mutex;
@@ -104,7 +130,7 @@ let accumulator_for_keeper (keeper_name : string) : accumulator =
     match Hashtbl.find_opt registry keeper_name with
     | Some a -> a, false
     | None ->
-        let a = create_accumulator () in
+        let a = create_accumulator_for ~keeper_name in
         Hashtbl.add registry keeper_name a;
         a, true
   in

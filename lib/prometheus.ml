@@ -380,6 +380,15 @@ let metric_keeper_compaction_noop =
 let metric_keeper_tool_emission_registry_size =
   "masc_keeper_tool_emission_registry_size"
 
+(* Tier K6 — per-keeper tagged tool-emission push counter. Increments
+   each time [Keeper_tool_emission_hook.push] captures a parsed JSON
+   tool result into the keeper's accumulator. Lets operators rank
+   keepers by multimodal output volume and detect silent emission
+   stalls (a keeper that should be emitting goes flat). Labels:
+   [keeper]. *)
+let metric_keeper_tool_emission_pushes =
+  "masc_keeper_tool_emission_pushes_total"
+
 (* #10349: keeper FS path rejection counter.  Pre-fix the
    user-facing read-path rejection strings carried the resolver's
    view of allowed sandbox roots (for example [(roots=[<list>])]
@@ -920,6 +929,11 @@ let init () =
     "Number of keepers with a registered tool-emission \
      accumulator (Tier K4c per-keeper isolation registry size)"
     Gauge;
+  (* K6: per-keeper tagged tool-emission push count. *)
+  add metric_keeper_tool_emission_pushes
+    "Total tagged tool results captured into the K4c per-keeper \
+     accumulator (labels: keeper)"
+    Counter;
   (* Operator-initiated overflow recovery — emitted by tool_keeper.ml *)
   add metric_keeper_operator_compact
     "Total operator-invoked masc_keeper_compact calls (labels: result=ok|no_checkpoint|precondition|not_found)" Counter;

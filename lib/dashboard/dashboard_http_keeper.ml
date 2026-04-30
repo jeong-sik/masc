@@ -1804,3 +1804,99 @@ let keeper_cost_aggregates_json
     ("window_minutes", `Int window_minutes);
     ("generated_at", `Float now_ts);
   ]
+
+(** Read per-keeper [.decisions.jsonl] files and return a unified,
+    time-sorted stream of recent events (turn telemetry, tool_exec,
+    memory_search, etc.).  Each event is normalized to a flat record so
+    the dashboard can render a single chronology without knowing the
+    original schema variants. *)
+let keeper_decisions_json
+    ~(config : Coord.config)
+    ~(keepers : Keeper_meta.t list)
+    ?(limit = 200)
+  : Yojson.Safe.t =
+  let per_keeper_limit = limit * 2 in
+  let all_events =
+    List.concat_map (fun (m : Keeper_meta.t) ->
+      let path = Keeper_types.keeper_decision_log_path config m.name in
+      if not (Fs_compat.file_exists path) then []
+      else
+        let lines =
+          Keeper_memory.read_file_tail_lines path
+            ~max_bytes:500_000 ~max_lines:per_keeper_limit
+        in
+        List.filter_map (fun line ->
+          try
+            let json = Yojson.Safe.from_string line in
+            let ts =
+              match Yojson.Safe.Util.member "ts_unix" json with
+              | `Float f -> f
+              | `Int i -> float_of_int i
+              | _ -> 0.0
+            in
+            let event_type =
+              match Yojson.Safe.Util.member "event" json with
+              | `String s -> s
+              | _ -> "turn"
+            in
+            let keeper_name =
+              match Yojson.Safe.Util.member "keeper_name" json with
+              | `String s -> s
+              | _ -> m.name
+            in
+            Some (ts, json, event_type, keeper_name)
+          with
+          | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
+        ) lines
+    ) keepers
+  in
+  let sorted =
+    List.sort (fun (ta, _, _, _) (tb, _, _, _) -> compare tb ta) all_events
+  in
+  let rec take n = function
+    | [] -> []
+    | _ when n <= 0 -> []
+    | x :: xs -> x :: take (n - 1) xs
+  in
+  let top = take limit sorted in
+  let items =
+    List.map (fun (_ts, json, event_type, keeper_name) ->
+      let m = Yojson.Safe.Util.member in
+      let string_or_null key =
+        match m key json with `String s -> `String s | _ -> `Null
+      in
+      let float_or_null key =
+        match m key json with
+        | `Float f -> `Float f
+        | `Int i -> `Float (float_of_int i)
+        | _ -> `Null
+      in
+      let int_or_null key =
+        match m key json with
+        | `Int i -> `Int i
+        | `Float f -> `Int (int_of_float f)
+        | _ -> `Null
+      in
+      `Assoc [
+        ("ts_unix", float_or_null "ts_unix");
+        ("keeper_name", `String keeper_name);
+        ("event_type", `String event_type);
+        ("outcome", string_or_null "outcome");
+        ("model_used", string_or_null "model_used");
+        ("latency_ms", float_or_null "latency_ms");
+        ("cost_usd", float_or_null "cost_usd");
+        ("input_tokens", int_or_null "input_tokens");
+        ("output_tokens", int_or_null "output_tokens");
+        ("stop_reason", string_or_null "stop_reason");
+        ("error_category", string_or_null "error_category");
+        ("tool", string_or_null "tool");
+        ("duration_ms", float_or_null "duration_ms");
+        ("match_count", int_or_null "match_count");
+      ]
+    ) top
+  in
+  `Assoc [
+    ("events", `List items);
+    ("limit", `Int limit);
+    ("generated_at", `Float (Unix.gettimeofday ()));
+  ]

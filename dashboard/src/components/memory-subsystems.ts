@@ -7,9 +7,11 @@ import { MermaidGraph } from './common/mermaid-graph'
 import { Select } from './common/select'
 import {
   fetchMemorySubsystems,
+  fetchKeeperDecisions,
   type MemorySubsystemsResponse,
   type MemorySubsystemsSynapse,
   type MemorySubsystemsEpisode,
+  type KeeperDecision,
 } from '../api/dashboard'
 import { formatTimeAgo } from '../lib/format-time'
 import { isAbortError } from '../lib/async-state'
@@ -752,11 +754,178 @@ export function MemorySubsystems() {
         }
       </section>
 
+      <${DecisionsStream} />
+
       ${
         error
           ? html`<div class="text-xs text-[var(--color-status-warn)] mt-2">refresh error: ${error}</div>`
           : null
       }
     </div>
+  `
+}
+
+const DECISION_REFRESH_MS = 30_000
+
+function DecisionsStream() {
+  const state = useSignal<{
+    loading: boolean
+    error: string | null
+    data: KeeperDecision[] | null
+  }>({ loading: true, error: null, data: null })
+
+  const keeperFilter = useSignal<string>('')
+  const eventFilter = useSignal<string>('')
+  const outcomeFilter = useSignal<string>('')
+  const limit = useSignal<number>(50)
+
+  async function refresh(sig?: AbortSignal) {
+    try {
+      const resp = await fetchKeeperDecisions(limit.value, { signal: sig })
+      state.value = { loading: false, error: null, data: resp.events }
+    } catch (err) {
+      if (isAbortError(err)) return
+      state.value = {
+        loading: false,
+        error: err instanceof Error ? err.message : String(err),
+        data: state.value.data,
+      }
+    }
+  }
+
+  useEffect(() => {
+    const ac = new AbortController()
+    refresh(ac.signal)
+    const cleanup = setupVisibleAutoRefresh(() => refresh(), DECISION_REFRESH_MS)
+    return () => {
+      ac.abort()
+      cleanup()
+    }
+  }, [limit.value])
+
+  const { loading, error, data } = state.value
+  const events = data ?? []
+
+  const knownKeepers = Array.from(new Set(events.map(e => e.keeper_name))).sort()
+  const knownEvents = Array.from(new Set(events.map(e => e.event_type))).sort()
+  const knownOutcomes = Array.from(new Set(events.map(e => e.outcome).filter((o): o is string => o != null))).sort()
+
+  const visible = events.filter(ev => {
+    if (keeperFilter.value && ev.keeper_name !== keeperFilter.value) return false
+    if (eventFilter.value && ev.event_type !== eventFilter.value) return false
+    if (outcomeFilter.value && ev.outcome !== outcomeFilter.value) return false
+    return true
+  })
+
+  const hasFilter = Boolean(keeperFilter.value || eventFilter.value || outcomeFilter.value)
+
+  return html`
+    <section class="flex flex-col gap-3" aria-label="Keeper decisions stream">
+      <div class="flex flex-wrap items-center gap-2">
+        <h3 class="text-sm font-semibold text-text-strong">Decisions Stream</h3>
+        <span class="text-2xs text-text-muted">${visible.length} / ${events.length} events</span>
+        <div class="ml-auto flex items-center gap-2">
+          <${Select}
+            class="px-2 py-1 text-2xs"
+            ariaLabel="Keeper"
+            value=${keeperFilter.value}
+            options=${[
+              { value: '', label: 'all keepers' },
+              ...knownKeepers.map(k => ({ value: k, label: k })),
+            ]}
+            onInput=${(v: string) => { keeperFilter.value = v }}
+          />
+          <${Select}
+            class="px-2 py-1 text-2xs"
+            ariaLabel="Event"
+            value=${eventFilter.value}
+            options=${[
+              { value: '', label: 'all events' },
+              ...knownEvents.map(e => ({ value: e, label: e })),
+            ]}
+            onInput=${(v: string) => { eventFilter.value = v }}
+          />
+          <${Select}
+            class="px-2 py-1 text-2xs"
+            ariaLabel="Outcome"
+            value=${outcomeFilter.value}
+            options=${[
+              { value: '', label: 'all outcomes' },
+              ...knownOutcomes.map(o => ({ value: o, label: o })),
+            ]}
+            onInput=${(v: string) => { outcomeFilter.value = v }}
+          />
+          ${hasFilter
+            ? html`<button
+                class="text-2xs text-text-muted hover:text-text-strong px-2 py-1 border border-card-border/40 rounded"
+                onClick=${() => {
+                  keeperFilter.value = ''
+                  eventFilter.value = ''
+                  outcomeFilter.value = ''
+                }}
+              >clear</button>`
+            : null}
+        </div>
+      </div>
+
+      ${loading && !data
+        ? html`<${LoadingState} label="decisions 로드 중..." />`
+        : error && !data
+          ? html`<div class="text-sm text-[var(--color-status-err)]">decisions 오류: ${error}</div>`
+          : html`
+              <div class="overflow-x-auto rounded border border-card-border/60 bg-[var(--backdrop-deep)]">
+                <table class="w-full text-2xs" aria-label="decision events">
+                  <thead>
+                    <tr class="border-b border-[var(--color-border-default)] text-text-muted uppercase tracking-1">
+                      <th class="px-2 py-1.5 text-left">time</th>
+                      <th class="px-2 py-1.5 text-left">keeper</th>
+                      <th class="px-2 py-1.5 text-left">event</th>
+                      <th class="px-2 py-1.5 text-left">outcome</th>
+                      <th class="px-2 py-1.5 text-left">model</th>
+                      <th class="px-2 py-1.5 text-right">latency</th>
+                      <th class="px-2 py-1.5 text-right">cost</th>
+                      <th class="px-2 py-1.5 text-right">tokens</th>
+                      <th class="px-2 py-1.5 text-left">stop / error</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${visible.map((ev: KeeperDecision) => {
+                      const ts = ev.ts_unix ? formatTimeAgo(ev.ts_unix * 1000) : '—'
+                      const latency = ev.latency_ms != null ? `${Math.round(ev.latency_ms)}ms` : '—'
+                      const cost = ev.cost_usd != null ? `$${ev.cost_usd.toFixed(4)}` : '—'
+                      const tokens = ev.input_tokens != null || ev.output_tokens != null
+                        ? `${ev.input_tokens ?? 0} / ${ev.output_tokens ?? 0}`
+                        : '—'
+                      const stopErr = ev.error_category ?? ev.stop_reason ?? '—'
+                      const rowTone = ev.outcome === 'failure' || ev.error_category
+                        ? 'text-[var(--color-status-err)]'
+                        : ev.outcome === 'partial'
+                          ? 'text-[var(--color-status-warn)]'
+                          : ''
+                      return html`
+                        <tr key=${`${ev.keeper_name}-${ev.ts_unix ?? 0}-${ev.event_type}`}
+                          class="border-b border-[var(--color-border-default)]/40 align-baseline ${rowTone}">
+                          <td class="px-2 py-1.5 font-mono whitespace-nowrap">${ts}</td>
+                          <td class="px-2 py-1.5 font-mono text-[var(--color-accent-fg)]">${ev.keeper_name}</td>
+                          <td class="px-2 py-1.5">
+                            <span class="rounded px-1 py-0.5 bg-[var(--white-10)] text-text-muted">${ev.event_type}</span>
+                          </td>
+                          <td class="px-2 py-1.5">${ev.outcome ?? '—'}</td>
+                          <td class="px-2 py-1.5 font-mono text-text-muted">${ev.model_used ?? '—'}</td>
+                          <td class="px-2 py-1.5 text-right font-mono">${latency}</td>
+                          <td class="px-2 py-1.5 text-right font-mono">${cost}</td>
+                          <td class="px-2 py-1.5 text-right font-mono">${tokens}</td>
+                          <td class="px-2 py-1.5 font-mono text-text-muted">${stopErr}</td>
+                        </tr>
+                      `
+                    })}
+                  </tbody>
+                </table>
+                ${visible.length === 0
+                  ? html`<div class="p-4 text-center text-text-muted">필터에 맞는 결정이 없습니다.</div>`
+                  : null}
+              </div>
+            `}
+    </section>
   `
 }

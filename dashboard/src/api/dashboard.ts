@@ -881,6 +881,70 @@ export async function fetchKeeperCostMetrics(
   return decoded
 }
 
+export interface KeeperDecision {
+  ts_unix: number | null
+  keeper_name: string
+  event_type: string
+  outcome: string | null
+  model_used: string | null
+  latency_ms: number | null
+  cost_usd: number | null
+  input_tokens: number | null
+  output_tokens: number | null
+  stop_reason: string | null
+  error_category: string | null
+  tool: string | null
+  duration_ms: number | null
+  match_count: number | null
+}
+
+export interface KeeperDecisionsResponse {
+  events: KeeperDecision[]
+  limit: number
+  generated_at: number | null
+}
+
+function decodeKeeperDecision(raw: unknown): KeeperDecision | null {
+  if (!isRecord(raw)) return null
+  return {
+    ts_unix: asNumber(raw.ts_unix) ?? null,
+    keeper_name: asString(raw.keeper_name) ?? '',
+    event_type: asString(raw.event_type) ?? 'turn',
+    outcome: asNullableString(raw.outcome),
+    model_used: asNullableString(raw.model_used),
+    latency_ms: asNumber(raw.latency_ms) ?? null,
+    cost_usd: asNumber(raw.cost_usd) ?? null,
+    input_tokens: asNumber(raw.input_tokens) ?? null,
+    output_tokens: asNumber(raw.output_tokens) ?? null,
+    stop_reason: asNullableString(raw.stop_reason),
+    error_category: asNullableString(raw.error_category),
+    tool: asNullableString(raw.tool),
+    duration_ms: asNumber(raw.duration_ms) ?? null,
+    match_count: asNumber(raw.match_count) ?? null,
+  }
+}
+
+function decodeKeeperDecisionsResponse(raw: unknown): KeeperDecisionsResponse | null {
+  if (!isRecord(raw)) return null
+  return {
+    events: asRecordArray(raw.events)
+      .map(decodeKeeperDecision)
+      .filter((d): d is KeeperDecision => d !== null),
+    limit: asInt(raw.limit) ?? 0,
+    generated_at: asNumber(raw.generated_at) ?? null,
+  }
+}
+
+export async function fetchKeeperDecisions(
+  limit = 200,
+  opts?: AbortableRequestOptions,
+): Promise<KeeperDecisionsResponse> {
+  const raw = await get<Record<string, unknown>>(`/api/v1/dashboard/keeper-decisions?limit=${limit}`, { signal: opts?.signal })
+  const decoded = decodeKeeperDecisionsResponse(raw)
+  if (!decoded) throw new Error('유효하지 않은 keeper decisions payload')
+  return decoded
+}
+
 export function fetchDashboardMissionBriefing(
   force = false,
   opts?: { signal?: AbortSignal },

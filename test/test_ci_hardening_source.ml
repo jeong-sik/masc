@@ -118,6 +118,16 @@ let test_agent_draft_policy_script () =
        :: base));
   check bool "ready agent PR without bypass fails" true
     (run_agent_draft_policy (("PR_IS_DRAFT", "false") :: base) <> 0);
+  check bool "ready feature PR with agent-pr label fails" true
+    (run_agent_draft_policy
+       [
+         ("GITHUB_EVENT_NAME", "pull_request");
+         ("PR_IS_DRAFT", "false");
+         ("PR_TITLE", "feat: ordinary feature title");
+         ("PR_HEAD_REF", "feature/dashboard-fsm-audit-exposure");
+         ("PR_LABELS", "enhancement,agent-pr");
+       ]
+    <> 0);
   check int "ready agent PR with bypass label passes" 0
     (run_agent_draft_policy
        (("PR_IS_DRAFT", "false")

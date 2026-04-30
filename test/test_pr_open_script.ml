@@ -119,6 +119,12 @@ case "${cmd1}:${cmd2}" in
   api:*)
     cat >"$labels_file"
     ;;
+  label:list)
+    printf '[]\n'
+    ;;
+  label:create)
+    exit 0
+    ;;
   pr:checks)
     if [ "${FAKE_GH_ALLOW_CHECKS:-}" = "1" ]; then
       printf 'checks ok\n'
@@ -213,8 +219,12 @@ let test_script_runs_under_system_bash_without_watch () =
       let labels = read_file gh_labels in
       check bool "adds enhancement label for code changes" true
         (contains_substring labels "\"enhancement\"");
+      check bool "adds agent-pr label for draft guard classification" true
+        (contains_substring labels "\"agent-pr\"");
       check bool "does not add docs label for code-only change" false
-        (contains_substring labels "\"docs\""))
+        (contains_substring labels "\"docs\"");
+      check bool "ensures agent-pr label exists" true
+        (contains_substring log "label create"))
 
 let test_script_prints_final_status_after_watch () =
   with_temp_dir "pr-open-script-watch-status" (fun dir ->

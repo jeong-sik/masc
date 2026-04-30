@@ -38,9 +38,9 @@ const MOCK_LINES: ReadonlyArray<MockLine> = [
   { num: 23, text: '}', keeper: 'masc-improver', hue: 3 },
 ]
 
-const VIEW_TABS = ['SOURCE', 'SPLIT DIFF', 'UNIFIED', 'BLAME'] as const
-
 export function IdeEditorMock() {
+  // View tabs and LAYERS toggle moved to IdeToolbar (PR-3); the editor
+  // mock now only shows the breadcrumb header for the open file.
   return html`
     <div
       role="region"
@@ -64,19 +64,6 @@ export function IdeEditorMock() {
         }}
       >
         <span>runtime / cascade / router.ts</span>
-        <span style=${{ marginLeft: 'auto', display: 'flex', gap: 'var(--sp-2)' }}>
-          ${VIEW_TABS.map((tab, i) => html`
-            <span
-              role="tab"
-              aria-selected=${i === 0 ? 'true' : 'false'}
-              style=${{
-                padding: '2px 6px',
-                color: i === 0 ? 'var(--color-fg-primary)' : 'var(--color-fg-muted)',
-                borderBottom: i === 0 ? '1px solid var(--color-accent-fg)' : '1px solid transparent',
-              }}
-            >${tab}</span>
-          `)}
-        </span>
       </header>
       <ol
         style=${{

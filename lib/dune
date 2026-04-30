@@ -551,6 +551,7 @@
    keeper_agent_run
    keeper_agent_checkpoint_hygiene
    keeper_run_context
+   keeper_run_prompt
    keeper_run_tools
    keeper_contract_classifier
    keeper_world_observation

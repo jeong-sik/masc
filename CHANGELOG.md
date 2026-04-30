@@ -3,16 +3,22 @@
 
 ## [0.18.24] - 2026-05-01
 
-Post-v0.18.23 release-truth follow-up for the silent-failure cleanup that landed immediately after the `v0.18.23` tag. No breaking API changes.
+Post-v0.18.23 release-truth follow-up for the silent-failure cleanup, keeper event queue implementation, and ratchet baseline updates that landed immediately after the `v0.18.23` tag. No breaking API changes.
+
+### Added
+
+- Keeper runtime now has the `Keeper_event_queue` Event Layer module for typed queue snapshots, enqueue decisions, draining, compaction, and admission/retention accounting (#12396).
 
 ### Changed
 
 - Package and release metadata advanced from `0.18.23` to `0.18.24`.
 - Roadmap, product operating plan, opam metadata, and spec baseline version references synced to `0.18.24`.
+- The OCaml structure ratchet baseline for `lib_dune_lines` now allows the current checked-in library layout up to 1000 lines (#12398).
 
 ### Fixed
 
 - Server, coordination, governance anomaly, mention inbox, runtime route, dashboard delete-action, and task-tool paths now avoid silent failure patterns by surfacing ignored exceptions or error details through structured logging and explicit handling (#12395).
+- The 0.18.24 release bump also repairs the #12395 logging follow-up type errors by stringifying board/auth/schema errors at the correct boundaries (#12397).
 
 ## [0.18.23] - 2026-05-01
 

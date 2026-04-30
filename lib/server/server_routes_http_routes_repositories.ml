@@ -293,6 +293,21 @@ let handle_remove_repository state _agent_name req reqd =
           json_response ~status:`Bad_request req reqd
             (json_error "DELETE expects /api/v1/repositories/:id"))
 
+let handle_discover_repositories state _agent_name req reqd =
+  let base_path = base_path_of_state state in
+  match Repo_store.discover_repositories ~base_path with
+  | Error msg ->
+      json_response ~status:`Internal_server_error req reqd (json_error msg)
+  | Ok repos ->
+      let json =
+        `Assoc
+          [
+            ("repositories", `List (List.map repository_json repos));
+            ("total", `Int (List.length repos));
+          ]
+      in
+      Http.Response.json ~request:req (Yojson.Safe.to_string json) reqd
+
 let handle_sync_repository state _agent_name req reqd =
   let base_path = base_path_of_state state in
   let path = Http.Request.path req in
@@ -344,6 +359,9 @@ let add_routes router =
   |> Http.Router.post "/api/v1/repositories" (fun request reqd ->
        with_token_permission_auth ~permission:Types.CanAdmin
          handle_add_repository request reqd)
+  |> Http.Router.post "/api/v1/repositories/discover" (fun request reqd ->
+       with_token_permission_auth ~permission:Types.CanAdmin
+         handle_discover_repositories request reqd)
   |> Http.Router.add ~path:("PREFIX:" ^ repositories_prefix)
        ~methods:[`DELETE]
        ~handler:(fun request reqd ->

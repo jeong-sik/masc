@@ -10,16 +10,20 @@ Release-truth follow-up after the `0.18.20` version bump landed before the rest 
 - RFC-0019 credential materialization landed with `with_token` provisioning support for repo-manager flows (#12336).
 - RFC-0019 credential hardening added SHA-256 token-prefix audit support and `hosts.yml` relabeling for keeper-scoped identities (#12345).
 - IDE dashboard work continued with the editor toolbar, view tabs, and design-system tooltip/ARIA sweep (#12337, #12340, #12341).
+- The IDE dashboard gained the EXPLORER file-tree store plus Popover, AlertDialog, and ResizablePanel primitives with a11y coverage (#12347, #12352).
 
 ### Fixed
 
 - Dashboard render errors in cascade inspector and agent surfaces were repaired, including the keeper metadata type reference that blocked the `v0.18.20` Linux release build (#12338).
 - Draft auto-merge guard races were closed so merged PR current-state checks fail closed instead of racing stale draft state (#12339, #12342, #12343).
 - `do-not-merge` is now a hard-stop label that overrides human-approved and non-agent bypass paths in PR automation (#12346).
+- Model inference metrics and provider routes were brought back into sync with the `latency_buckets` aggregate field and keeper type-source split (#12349, #12351, #12354).
 
 ### Changed
 
 - Routine keeper runtime log noise was reduced after the 0.18.20 boundary (#12344).
+- Cascade strategy signal contexts now carry typed cascade runtime names through the string boundary (#12350).
+- Dead keeper SOUL.md / "SYSTEM: SOUL INFUSION" path handling was removed from the checked-in runtime surface (#12353).
 - Package and release metadata advanced from `0.18.20` to `0.18.21` so the published release boundary includes the post-tag fixes.
 - Roadmap, product operating plan, opam metadata, and spec baseline version references synced to `0.18.21`.
 

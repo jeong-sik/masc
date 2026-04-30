@@ -1,5 +1,6 @@
 // Goal-related types, signals, derived data, and helper functions
 
+import { html } from 'htm/preact'
 import { signal, computed } from '@preact/signals'
 import {
   goals,
@@ -169,6 +170,26 @@ export const horizonProgress = computed<Record<'short' | 'mid' | 'long', GoalPro
 export function formatProgressPct(p: GoalProgress): string {
   if (p.total === 0) return '0%'
   return `${Math.round(p.ratio * 100)}%`
+}
+
+export function TaskProgressBar({ done, total, size = 'md' }: { done: number; total: number; size?: 'sm' | 'md' }) {
+  const ratio = total > 0 ? done / total : 0
+  const pct = Math.round(ratio * 100)
+  const barColor =
+    pct >= 80 ? 'var(--color-status-ok)'
+    : pct >= 50 ? 'var(--amber-bright)'
+    : pct >= 20 ? '#fb923c'
+    : 'var(--color-status-err)'
+
+  const h = size === 'sm' ? 'h-1.5' : 'h-2.5'
+  return html`
+    <div class="flex items-center gap-2">
+      <div class="flex-1 ${h} rounded-sm bg-[var(--white-10)] overflow-hidden">
+        <div class="${h} rounded-sm transition-all duration-500" style="width:${pct}%;background:${barColor}"></div>
+      </div>
+      <span class="text-2xs font-semibold tabular-nums text-text-muted w-14 text-right">${done}/${total}</span>
+    </div>
+  `
 }
 
 // -- Helpers -----------------------------------------------------

@@ -12,6 +12,7 @@ type SurfaceSectionId =
   | 'fleet-health'   // Phase 1: absorbs telemetry + fleet + tool-quality + monitoring governance
   | 'safe-autonomy'
   | 'cost'           // O4 cost/latency dashboard zone (#11542); use-site existed without type entry
+  | 'cascade-inspector' // O1 Cascade Inspector surface (Phase F6)
   | 'memory-subsystems'
   | 'attribution'     // Layer 4 gate-chain observation (per-gate outcome + recent events)
   // command
@@ -170,6 +171,12 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       label: '캐스케이드',
       description: 'Provider 건강도, 슬롯 용량, 모델 선택 스냅샷을 한 화면에서 봅니다.',
       params: { section: 'runtime' },
+    },
+    {
+      id: 'cascade-inspector',
+      label: 'Cascade 검사기',
+      description: 'Cascade 의사결정 이력과 프로바이더 상태를 한 화면에서 봅니다.',
+      params: { section: 'cascade-inspector' },
     },
     {
       id: 'fleet-health',

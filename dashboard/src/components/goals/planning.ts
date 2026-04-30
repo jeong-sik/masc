@@ -17,6 +17,10 @@ import {
   groupedByHorizon,
   horizonProgress,
   formatProgressPct,
+  goalProgressFor,
+  TaskProgressBar,
+  horizonLabel,
+  goalPhaseLabel,
 } from './goal-helpers'
 import { TaskBacklog } from './kanban-components'
 import { TaskStaleAlert } from './task-stale-alert'
@@ -368,6 +372,37 @@ export function Planning() {
                 ` : null}
               </div>
             ` : null}
+            <div class="mt-4 flex flex-col gap-3">
+              ${(['short', 'mid', 'long'] as const).map(h => {
+                const list = grouped[h] ?? []
+                if (list.length === 0) return null
+                return html`
+                  <div key=${h}>
+                    <div class="text-2xs font-semibold uppercase tracking-5 text-text-muted mb-2">
+                      ${horizonLabel(h)} 목표
+                    </div>
+                    <div class="flex flex-col gap-2">
+                      ${list.map(g => {
+                        const p = goalProgressFor(g.id)
+                        return html`
+                          <div key=${g.id} class="flex items-center gap-3 rounded border border-card-border/60 bg-[var(--white-3)] px-3 py-2">
+                            <div class="min-w-0 flex-1">
+                              <div class="flex items-center gap-2">
+                                <span class="text-xs font-medium text-text-strong truncate">${g.title}</span>
+                                <span class="shrink-0 rounded border border-card-border/70 bg-[var(--white-4)] px-1.5 py-0.5 text-3xs text-text-muted">${goalPhaseLabel(g.phase)}</span>
+                              </div>
+                            </div>
+                            <div class="w-28">
+                              <${TaskProgressBar} done=${p.done} total=${p.total} size="sm" />
+                            </div>
+                          </div>
+                        `
+                      })}
+                    </div>
+                  </div>
+                `
+              })}
+            </div>
           </div>
         ` : html`
           <p class="mt-2 text-sm text-text-muted">등록된 목표가 없습니다. 목표 트리에서 추가할 수 있습니다.</p>

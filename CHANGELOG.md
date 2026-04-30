@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- OAS agent SDK `v0.186.0` compatibility now handles typed `ProviderFailure` cascade classes on the current pin `3f92447233c926e4e070218a13fdd199e8579094`.
 
 ## [0.18.15] - 2026-04-30
 

@@ -112,7 +112,7 @@ let test_required_tool_support_filter_keeps_inline_or_runtime_capable_providers 
     (providers <> []);
   check bool "every surviving provider supports inline or runtime MCP tools" true
     (List.for_all provider_supports_callable_tool_use providers);
-  check bool "drops gemini_cli without runtime MCP lane" false
+  check bool "keeps gemini_cli via runtime MCP lane" true
     (List.mem "gemini_cli" (provider_kinds providers))
 
 let test_required_tool_gate_filter_keeps_runtime_mcp_capable_cli_providers () =
@@ -126,7 +126,7 @@ let test_required_tool_gate_filter_keeps_runtime_mcp_capable_cli_providers () =
     (providers <> []);
   check bool "keeps kimi_cli via runtime MCP lane" true
     (List.mem "kimi_cli" (provider_kinds providers));
-  check bool "drops gemini_cli without runtime MCP lane" false
+  check bool "keeps gemini_cli via runtime MCP lane" true
     (List.mem "gemini_cli" (provider_kinds providers))
 
 let test_required_tool_support_filter_drops_runtime_mcp_providers_without_header_support () =

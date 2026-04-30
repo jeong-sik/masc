@@ -1,9 +1,8 @@
-(** Central Tool Dispatch Registry - O(1) Hashtbl-based dispatch.
+(** Central Tool Dispatch Registry.
 
-    Replaces the 40+ sequential match chain in mcp_server_eio.ml with
-    a single Hashtbl lookup. Each Tool_X module registers a closure
-    that captures its own context, so the dispatch layer does not need
-    to know about heterogeneous context types. *)
+    Production MCP tool names route through {!Tool_name} and an exhaustive
+    module-tag match. Mutable registries remain for direct-handler
+    compatibility, schemas, and test/dynamic tools. *)
 
 (** Unified handler type: every tool call is [name * args -> tool_result option].
     [None] means "this handler does not know this tool". *)
@@ -99,11 +98,10 @@ val is_mcp_context_required : string -> bool
 val is_destructive : string -> bool
 val is_idempotent : string -> bool
 
-(** {2 Module Tag Dispatch - O(1) two-level dispatch}
+(** {2 Module Tag Dispatch}
 
-    Maps tool names to module tags at startup (once).
-    At call time, O(1) tag lookup determines which module's context
-    to create lazily. *)
+    Known tool names map to module tags through a compile-time match.
+    Runtime registrations remain as a fallback for test/dynamic tools. *)
 
 type module_tag =
   | Mod_plan | Mod_operator

@@ -1,9 +1,8 @@
-(** Central Tool Dispatch Registry — O(1) Hashtbl-based dispatch.
+(** Central Tool Dispatch Registry.
 
-    Replaces the 40+ sequential match chain in mcp_server_eio.ml with
-    a single Hashtbl lookup.  Each Tool_X module registers a closure
-    that captures its own context, so the dispatch layer does not need
-    to know about heterogeneous context types.
+    Production MCP tool names route through {!Tool_name} and an exhaustive
+    module-tag match. Mutable registries remain for direct-handler
+    compatibility, schemas, and test/dynamic tools.
 
     Activated by MASC_DISPATCH_V2=1; the legacy match chain is the
     default fallback. *)
@@ -183,12 +182,10 @@ let is_mcp_context_required name =
 let is_destructive name = with_dispatch_ro (fun () -> Hashtbl.mem destructive_set name)
 let is_idempotent name = with_dispatch_ro (fun () -> Hashtbl.mem idempotent_set name)
 
-(** {2 Module Tag Dispatch — O(1) two-level dispatch}
+(** {2 Module Tag Dispatch}
 
-    Maps tool names to module tags at startup (once).
-    At call time, O(1) tag lookup determines which module's context
-    to create lazily. Eliminates per-call 40+ context creation and
-    ~210 Hashtbl.replace ops. *)
+    Known tool names map to module tags through a compile-time match.
+    Runtime registrations remain as a fallback for test/dynamic tools. *)
 
 type module_tag =
   | Mod_plan | Mod_operator
@@ -204,6 +201,105 @@ type module_tag =
   | Mod_inline
   | Mod_autoresearch
   | Mod_shard
+
+let static_tag_of_tool_name (tool : Tool_name.t) : module_tag option =
+  match tool with
+  | Tool_name.Keeper _ -> Some Mod_shard
+  | Tool_name.Masc_keeper _ -> Some Mod_keeper
+  | Tool_name.Masc m ->
+    let open Tool_name.Masc in
+    match m with
+    | A2a_delegate
+    | Cancel_task
+    | Complete_task
+    | Dispatch_plan
+    | List_tasks
+    | Operation_pause
+    | Operation_start
+    | Operation_status
+    | Operation_stop
+    | Release_task
+    | Set_current_task -> None
+    | Add_task
+    | Batch_add_tasks
+    | Claim_next
+    | Claim_task
+    | Task_history
+    | Tasks
+    | Transition
+    | Update_priority -> Some Mod_task
+    | Agent_card
+    | Agent_fitness
+    | Agent_update
+    | Agents
+    | Collaboration_graph
+    | Get_metrics
+    | Register_capabilities -> Some Mod_agent
+    | Autoresearch_cycle
+    | Autoresearch_inject
+    | Autoresearch_record_finding
+    | Autoresearch_search_findings
+    | Autoresearch_start
+    | Autoresearch_status
+    | Autoresearch_stop -> Some Mod_autoresearch
+    | Board_cleanup
+    | Board_comment
+    | Board_comment_vote
+    | Board_delete
+    | Board_get
+    | Board_hearths
+    | Board_list
+    | Board_post
+    | Board_profile
+    | Board_search
+    | Board_stats
+    | Board_vote
+    | Approval_get
+    | Broadcast
+    | Join
+    | Leave
+    | Mcp_session
+    | Messages
+    | Spawn
+    | Start
+    | Who -> Some Mod_inline
+    | Check
+    | Coord_status
+    | Coordination_fsm_snapshot
+    | Goal_list
+    | Goal_review
+    | Goal_transition
+    | Goal_upsert
+    | Goal_verify
+    | Heartbeat
+    | Reset
+    | Status
+    | Workflow_guide -> Some Mod_room
+    | Code_read | Code_search | Code_symbols -> Some Mod_code
+    | Code_delete | Code_edit | Code_git | Code_shell | Code_write -> Some Mod_code_write
+    | Config
+    | Cleanup_zombies
+    | Dashboard
+    | Gc
+    | Tool_admin_snapshot
+    | Tool_admin_update
+    | Tool_help
+    | Tool_stats
+    | Web_search
+    | Webrtc_answer
+    | Webrtc_offer -> Some Mod_misc
+    | Deliver
+    | Note_add
+    | Plan_clear_task
+    | Plan_get
+    | Plan_get_task
+    | Plan_init
+    | Plan_set_task
+    | Plan_update -> Some Mod_plan
+    | Operator_action | Operator_confirm | Operator_digest | Operator_snapshot -> Some Mod_operator
+    | Pause | Resume -> Some Mod_control
+    | Tool_grant | Tool_list | Tool_revoke -> Some Mod_shard
+    | Worktree_create | Worktree_list | Worktree_remove -> Some Mod_worktree
 
 let tag_registry : (string, module_tag) Hashtbl.t = Hashtbl.create 512
 let tag_registry_initialized = Atomic.make false
@@ -224,7 +320,11 @@ let register_module_tag ~(schemas : Types.tool_schema list) ~tag =
 let register_name_tag ~tool_name ~tag =
   with_dispatch_rw (fun () -> Hashtbl.replace tag_registry tool_name tag)
 
-let lookup_tag name = with_dispatch_ro (fun () -> Hashtbl.find_opt tag_registry name)
+let lookup_tag name =
+  match Tool_name.of_string name with
+  | Some tool -> static_tag_of_tool_name tool
+  | None -> with_dispatch_ro (fun () -> Hashtbl.find_opt tag_registry name)
+
 let lookup_schema name = with_dispatch_ro (fun () -> Hashtbl.find_opt schema_registry name)
 
 let tag_registry_count () = with_dispatch_ro (fun () -> Hashtbl.length tag_registry)
@@ -232,15 +332,18 @@ let tag_registry_count () = with_dispatch_ro (fun () -> Hashtbl.length tag_regis
 let mark_tag_registry_initialized () = with_dispatch_rw (fun () -> Atomic.set tag_registry_initialized true)
 let is_tag_registry_initialized () = with_dispatch_ro (fun () -> Atomic.get tag_registry_initialized)
 
-(** Mint a [Tool_token.t] validated against both registries.
+(** Mint a [Tool_token.t] validated against static routes or registries.
     Protected by dispatch_mu for thread safety (Copilot review).
-    Checks tag_registry (primary) then handler registry (fallback).
+    Checks known typed tool names first, then the runtime tag/handler registries.
     In production both are populated at startup; in test binaries
     only the handler registry may be populated. *)
 let mint_token ~name =
   with_dispatch_ro (fun () ->
     Tool_token.mint_with
-      ~validate:(fun n -> Hashtbl.mem tag_registry n || Hashtbl.mem registry n)
+      ~validate:(fun n ->
+        match Tool_name.of_string n with
+        | Some tool -> Option.is_some (static_tag_of_tool_name tool)
+        | None -> Hashtbl.mem tag_registry n || Hashtbl.mem registry n)
       ~name)
 
 (** Enumerate every tool name registered in either the tag_registry (primary)

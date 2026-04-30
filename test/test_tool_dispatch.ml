@@ -95,6 +95,30 @@ let () =
               check bool "count >= 5" true
                 (Tool_dispatch.registered_count () >= 5));
         ] );
+      ( "static_tag_routing",
+        [
+          test_case "known MCP names route through static tags" `Quick (fun () ->
+              check bool "masc_board_delete -> Mod_inline" true
+                (Tool_dispatch.lookup_tag "masc_board_delete"
+                 = Some Tool_dispatch.Mod_inline);
+              check bool "masc_status -> Mod_room" true
+                (Tool_dispatch.lookup_tag "masc_status"
+                 = Some Tool_dispatch.Mod_room);
+              check bool "keeper_bash -> Mod_shard" true
+                (Tool_dispatch.lookup_tag "keeper_bash"
+                 = Some Tool_dispatch.Mod_shard));
+          test_case "mint_token accepts active static tool names" `Quick (fun () ->
+              check bool "masc_status mints" true
+                (Result.is_ok
+                   (Tool_dispatch.mint_token ~name:"masc_status")));
+          test_case "retired typed names do not mint by type alone" `Quick (fun () ->
+              check bool "complete_task has no static route" true
+                (Option.is_none
+                   (Tool_dispatch.lookup_tag "masc_complete_task"));
+              check bool "complete_task mint fails" true
+                (Result.is_error
+                   (Tool_dispatch.mint_token ~name:"masc_complete_task")));
+        ] );
       ( "read_only_set",
         [
           test_case "init and query read_only" `Quick (fun () ->

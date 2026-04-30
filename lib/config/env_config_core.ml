@@ -472,6 +472,7 @@ let git_fetch_timeout_sec () =
 
 (** SSOT for logging / observability env-var names (issue 8352). *)
 let log_level_env_key = "MASC_LOG_LEVEL"
+let log_routine_level_env_key = "MASC_LOG_ROUTINE_LEVEL"
 let telemetry_enabled_env_key = "MASC_TELEMETRY_ENABLED"
 let parse_warn_env_key = "MASC_PARSE_WARN"
 let governance_level_env_key = "MASC_GOVERNANCE_LEVEL"

@@ -13,6 +13,8 @@ type source =
   | Legacy_traceln
   | Client_tool_host
 
+type event_class = Routine
+
 (** Current log level (Atomic for thread safety in OCaml 5) *)
 let current_level = Atomic.make 1 (* Info = 1 *)
 
@@ -62,6 +64,9 @@ let source_to_string = function
   | Legacy_traceln -> "legacy_traceln"
   | Client_tool_host -> "client_tool_host"
 
+let event_class_to_string = function
+  | Routine -> "routine"
+
 let has_prefix ~prefix value = String.starts_with ~prefix value
 
 let infer_legacy_level message =
@@ -88,6 +93,32 @@ let should_log level =
 (** Set log level *)
 let set_level level =
   Atomic.set current_level (level_to_int level)
+
+let routine_level_of_string_opt s =
+  match String.lowercase_ascii (String.trim s) with
+  | "off" | "none" | "silent" -> Some None
+  | _ -> Option.map (fun level -> Some level) (level_of_string_opt s)
+
+let routine_level_cache : level option option Atomic.t = Atomic.make None
+
+let routine_level () =
+  match Atomic.get routine_level_cache with
+  | Some level -> level
+  | None ->
+      let parsed =
+        match Sys.getenv_opt "MASC_LOG_ROUTINE_LEVEL" with
+        | None -> Some Debug
+        | Some s -> (
+            match routine_level_of_string_opt s with
+            | Some level -> level
+            | None ->
+                Printf.eprintf
+                  "[masc_log] WARN: MASC_LOG_ROUTINE_LEVEL=%S is not a valid level/off; defaulting to Debug\n%!"
+                  s;
+                Some Debug)
+      in
+      Atomic.set routine_level_cache (Some parsed);
+      parsed
 
 (** Set log level from string (e.g., from env var).  Emits a stderr
     warning when the input is not a recognised level, so operator
@@ -481,6 +512,28 @@ let emit level ?(module_name = "") ?(details = `Null) message =
       ~message ~details ()
   end
 
+let details_with_event_class event_class details =
+  let event_class_field =
+    ("event_class", `String (event_class_to_string event_class))
+  in
+  match details with
+  | `Null -> `Assoc [ event_class_field ]
+  | `Assoc fields ->
+      let fields =
+        List.filter (fun (key, _) -> not (String.equal key "event_class")) fields
+      in
+      `Assoc (event_class_field :: fields)
+  | payload -> `Assoc [ event_class_field; ("payload", payload) ]
+
+let emit_event event_class level ?module_name ?(details = `Null) message =
+  emit level ?module_name ~details:(details_with_event_class event_class details)
+    message
+
+let emit_routine ?module_name ?(details = `Null) message =
+  match routine_level () with
+  | None -> ()
+  | Some level -> emit_event Routine level ?module_name ~details message
+
 (** Convenience functions *)
 let debug ?ctx fmt = log Debug ?ctx fmt
 let info ?ctx fmt = log Info ?ctx fmt
@@ -512,6 +565,35 @@ let client_tool_host_error ?(module_name = "ToolHost") ?(details = `Null) messag
   Ring.push ~raw_level:"ERROR" ~normalized_level:"ERROR" ~source:Client_tool_host
     ~module_name ~message ~details ()
 
+module type LOGGER = sig
+  val emit :
+    level ->
+    ?details:Yojson.Safe.t ->
+    ?keeper_name:string ->
+    ?turn_id:int ->
+    string ->
+    unit
+
+  val routine :
+    ?details:Yojson.Safe.t ->
+    ?keeper_name:string ->
+    ?turn_id:int ->
+    ('a, unit, string, unit) format4 ->
+    'a
+
+  val debug :
+    ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a
+
+  val info :
+    ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a
+
+  val warn :
+    ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a
+
+  val error :
+    ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a
+end
+
 (** Module-specific loggers.
     Each module checks MASC_LOG_{NAME}_LEVEL env var for per-module override,
     falling back to the global level. *)
@@ -537,19 +619,6 @@ module Make (M : sig val name : string end) = struct
     in
     level_to_int level >= threshold
 
-  let log_module level ?keeper_name ?turn_id fmt =
-    Printf.ksprintf (fun msg ->
-      if should_log_module level then begin
-        let level_str = level_to_string level in
-        let prefix = Printf.sprintf "[%s] [%s] [%s]"
-          (timestamp ()) level_str M.name in
-        Printf.eprintf "%s %s\n%!" prefix msg;
-        Ring.push ?keeper_name ?turn_id
-          ~raw_level:level_str ~normalized_level:level_str
-          ~module_name:M.name ~message:msg ()
-      end
-    ) fmt
-
   let emit level ?(details = `Null) ?keeper_name ?turn_id message =
     if should_log_module level then begin
       let level_str = level_to_string level in
@@ -560,6 +629,19 @@ module Make (M : sig val name : string end) = struct
         ~raw_level:level_str ~normalized_level:level_str
         ~module_name:M.name ~message ~details ()
     end
+
+  let log_module level ?keeper_name ?turn_id fmt =
+    Printf.ksprintf (fun msg -> emit level ?keeper_name ?turn_id msg) fmt
+
+  let routine ?(details = `Null) ?keeper_name ?turn_id fmt =
+    Printf.ksprintf
+      (fun msg ->
+         match routine_level () with
+         | None -> ()
+         | Some level ->
+             emit level ~details:(details_with_event_class Routine details)
+               ?keeper_name ?turn_id msg)
+      fmt
 
   let debug ?keeper_name ?turn_id fmt = log_module Debug ?keeper_name ?turn_id fmt
   let info ?keeper_name ?turn_id fmt = log_module Info ?keeper_name ?turn_id fmt

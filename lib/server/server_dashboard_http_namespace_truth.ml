@@ -234,9 +234,9 @@ let broadcast_namespace_truth_snapshot (state : Mcp_server.server_state) : unit 
       Sse.broadcast_to Observers legacy_sse_json;
       (* Snapshot broadcasts are normal dashboard fanout. The cache/update
          failures around this path are logged separately. *)
-      Log.Dashboard.debug "project-snapshot pushed via SSE"
+      Log.Dashboard.routine "project-snapshot pushed via SSE"
   | Some _ ->
-      Log.Dashboard.debug "project-snapshot unchanged, skipping SSE broadcast"
+      Log.Dashboard.routine "project-snapshot unchanged, skipping SSE broadcast"
 
 let () =
   Execution_surfaces._broadcast_namespace_truth_ref :=

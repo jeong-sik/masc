@@ -86,6 +86,22 @@ The taxonomy is built around **operator action**. If a log line does not change 
 | Example (good) | `Log.Keeper.debug "DOCKER_EXEC: keeper=... cwd=... cmd=... network=..."` — full command echo, useful for incident replay |
 | Anti-pattern | Silent skip of a `Debug` log just because adding it "feels excessive" — under-instrumentation is also a failure mode |
 
+### Routine event class
+
+Routine is not a fifth severity. It is a structured `details.event_class="routine"`
+tag for high-volume housekeeping/telemetry that should not be decided ad hoc at
+each callsite. Use `Log.<Module>.routine` or `Log.emit_routine`; the default
+effective severity is `Debug`.
+
+| Field | Content |
+|-------|---------|
+| Trigger | Periodic ticks, repeated fanout snapshots, reconcile start/end, successful steady-state probes |
+| Operator action | Controlled centrally by `MASC_LOG_ROUTINE_LEVEL` (`debug` default, `off` to suppress) |
+| Marker (must) | Failure, escalation, and state-change paths are logged separately at `Info`/`Warn`/`Error` |
+| Marker (must NOT) | Any event that is the only evidence of degradation or human action needed |
+| Example (good) | `Log.Keeper.routine "watchdog tick ..."` while stale termination remains `Error` |
+| Anti-pattern | Converting a warning/error into routine just because it is noisy; noisy failures need aggregation or rate limiting, not suppression |
+
 ## 3. Anti-pattern catalog
 
 These are repeating misclassifications observed in `git log --grep='demote\|promote'` over the last 90 days. CI lint ([§ 4](#4-lint)) catches them syntactically; this section explains the semantics.
@@ -123,7 +139,7 @@ These are repeating misclassifications observed in `git log --grep='demote\|prom
 |--|--|
 | Pattern | Message contains `watchdog tick`, `keepalive`, `reconcile`, `heartbeat` AND severity is `Info` AND emission is unconditional (i.e., no `noop=true` short-circuit) |
 | Why wrong | Periodic emissions dominate log volume. 11 keepers × 1 tick/30s × 4 logs/tick = 5280 lines/h before any real event. |
-| Correct | `Debug` for the tick itself; `Info` only when the tick observes a state change (e.g., `noop=false`); `Warn` when the tick detects a stuck condition |
+| Correct | `Log.<Module>.routine` for the tick itself; `Info` only when the tick observes a state change (e.g., `noop=false`); `Warn`/`Error` when the tick detects a stuck condition |
 | Origin | `Log.Keeper.info "janitor: watchdog tick noop=1 ..."` demoted by `#10910` (2026-04-26). |
 
 ### 3.5 Validation success

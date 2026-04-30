@@ -44,6 +44,9 @@ let test_log_level_to_int () =
   check bool "info < warn" true (Log.level_to_int Log.Info < Log.level_to_int Log.Warn);
   check bool "warn < error" true (Log.level_to_int Log.Warn < Log.level_to_int Log.Error)
 
+let test_log_event_class_to_string () =
+  check string "routine" "routine" (Log.event_class_to_string Log.Routine)
+
 let test_log_should_log () =
   Log.set_level Log.Info;
   check bool "info logged at info" true (Log.should_log Log.Info);
@@ -72,6 +75,37 @@ let test_log_timestamp () =
   check bool "length >= 19" true (String.length ts >= 19);
   check bool "contains dash" true (String.contains ts '-');
   check bool "contains colon" true (String.contains ts ':')
+
+let test_log_routine_tagged_entry () =
+  let routine_disabled =
+    match Sys.getenv_opt "MASC_LOG_ROUTINE_LEVEL" with
+    | Some s ->
+        List.mem
+          (String.lowercase_ascii (String.trim s))
+          [ "off"; "none"; "silent" ]
+    | None -> false
+  in
+  if routine_disabled then
+    check bool "routine disabled by env" true true
+  else begin
+    Log.set_level Log.Debug;
+    Log.Keeper.routine ~details:(`Assoc [ ("sample", `String "yes") ])
+      "routine-test-%d" 42;
+    Log.set_level Log.Info;
+    match Log.Ring.recent ~limit:1 () with
+    | [] -> fail "expected routine entry"
+    | entry :: _ ->
+        check string "module" "Keeper" entry.Log.Ring.module_name;
+        check string "level" "DEBUG" entry.Log.Ring.level;
+        check string "message" "routine-test-42" entry.Log.Ring.message;
+        let has_routine_class =
+          match entry.Log.Ring.details with
+          | `Assoc fields ->
+              List.assoc_opt "event_class" fields = Some (`String "routine")
+          | _ -> false
+        in
+        check bool "routine details tag" true has_routine_class
+  end
 
 (* ============================================================
    Config Tests
@@ -181,12 +215,14 @@ let () =
       test_case "of_string" `Quick test_log_level_of_string;
       test_case "of_string lowercase" `Quick test_log_level_of_string_lowercase;
       test_case "to_int ordering" `Quick test_log_level_to_int;
+      test_case "event_class_to_string" `Quick test_log_event_class_to_string;
     ];
     "log.logging", [
       test_case "should_log" `Quick test_log_should_log;
       test_case "set_level" `Quick test_log_set_level;
       test_case "set_level_from_string" `Quick test_log_set_level_from_string;
       test_case "timestamp" `Quick test_log_timestamp;
+      test_case "routine tagged entry" `Quick test_log_routine_tagged_entry;
     ];
     "config", [
       test_case "default" `Quick test_config_default;

@@ -153,6 +153,7 @@ val git_fetch_timeout_sec : unit -> float
 (** {1 Logging / telemetry} *)
 
 val log_level_env_key : string
+val log_routine_level_env_key : string
 val telemetry_enabled_env_key : string
 val parse_warn_env_key : string
 val governance_level_env_key : string

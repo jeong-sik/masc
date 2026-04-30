@@ -191,6 +191,8 @@ let runtime_entries =
       "Contract-driven agent loop proof capture (feature flag)";
     entry ~default:"true" "MASC_DISPATCH_V2" "Enable V2 dispatch engine";
     entry ~default:"(auto)" Env_config_core.log_level_env_key "Log level override";
+    entry ~default:"debug" Env_config_core.log_routine_level_env_key
+      "Routine telemetry log level override (debug|info|warn|error|off)";
     entry ~default:"false" Env_config_core.parse_warn_env_key "Enable JSON parse warnings";
     entry ~default:"production" Env_config_core.governance_level_env_key
       "Governance enforcement level";
@@ -960,6 +962,8 @@ let telemetry_entries =
       "Whether telemetry tracking is enabled";
     entry ~default:"(none)" Env_config_core.log_level_env_key
       "Log level string (debug|info|warn|error)";
+    entry ~default:"debug" Env_config_core.log_routine_level_env_key
+      "Routine telemetry level (debug|info|warn|error|off)";
     entry ~default:"false" Env_config_core.parse_warn_env_key
       "Whether to log parse warnings";
     entry ~default:"(none)" "MASC_OTEL_ENABLED"

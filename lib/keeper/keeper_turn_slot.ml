@@ -356,7 +356,7 @@ let with_keeper_turn_slot ~keeper_name ~channel f =
   let channel_label = Keeper_world_observation.channel_to_string channel in
   let t0 = Time_compat.now () in
   let queue_depth = List.length (autonomous_waiter_snapshot_for_test ()) in
-  Log.Keeper.debug "semaphore_acquire: keeper=%s channel=%s autonomous_available=%d turn_available=%d queue_depth=%d"
+  Log.Keeper.routine "semaphore_acquire: keeper=%s channel=%s autonomous_available=%d turn_available=%d queue_depth=%d"
     keeper_name
     channel_label
     (Eio.Semaphore.get_value autonomous_turn_semaphore)
@@ -382,10 +382,10 @@ let with_keeper_turn_slot ~keeper_name ~channel f =
           Eio.Semaphore.acquire sem);
         Ok ()
       with Eio.Time.Timeout ->
-        (* DEBUG not WARN: the keeper-specific heartbeat loop already
+        (* Routine, not WARN: the keeper-specific heartbeat loop already
            emits the operator-facing skip warning with owner/cascade
            context, while the metric below preserves attribution. *)
-        Log.Keeper.debug
+        Log.Keeper.routine
           "semaphore_wait: %s semaphore wait exceeded %.0fs (channel=%s), \
            skipping turn"
           label semaphore_wait_timeout_sec

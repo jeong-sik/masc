@@ -123,6 +123,7 @@ let set_keeper_paused_state ~agent_name paused =
              then Keeper_state_machine.Operator_pause
              else Keeper_state_machine.Operator_resume));
        if not paused then begin
+         (* tla-lint: allow-mutation: fiber signal — Atomic flag wakes the keeper from Eio.Promise.await *)
          Atomic.set entry.fiber_wakeup true;
          (* Cycle 43: KeeperHeartbeat.tla WakeupSignal post-condition. *)
          Keeper_fsm_guard_runtime.wrap_unit
@@ -642,6 +643,7 @@ let stop_keepalive ?base_path name =
   in
   List.iter
     (fun (entry : Keeper_registry.registry_entry) ->
+       (* tla-lint: allow-mutation: fiber signal — stop+wakeup pair triggers cooperative shutdown *)
        Atomic.set entry.fiber_stop true;
        Atomic.set entry.fiber_wakeup true;
        (* Cycle 43: KeeperHeartbeat.tla WakeupSignal post-condition fires

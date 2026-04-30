@@ -520,6 +520,7 @@ let sync_keeper_paused_state
          else Keeper_state_machine.Operator_resume);
       (if not paused then
          match Keeper_registry.get ~base_path:config.base_path meta.name with
+         (* tla-lint: allow-mutation: fiber signal — wake on resume from cascade budget gate *)
          | Some entry -> Atomic.set entry.fiber_wakeup true
          | None ->
              Keeper_turn_helpers.report_keeper_cycle_side_effect_issue

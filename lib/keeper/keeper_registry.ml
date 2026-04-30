@@ -681,6 +681,7 @@ let mark_turn_finished ~base_path name =
      [interruptible_sleep]'s CAS, but an explicit reset here guarantees the
      flag is clean regardless of whether the heartbeat loop's sleep path ran. *)
   (match get ~base_path name with
+   (* tla-lint: allow-mutation: fiber signal — clear stale wakeup flag, paired with [interruptible_sleep] CAS *)
    | Some entry -> Atomic.set entry.fiber_wakeup false
    | None -> ());
   if !changed then broadcast_composite_changed ~name ~ts_unix:now
@@ -752,6 +753,7 @@ let spawn_slots_available () =
 
 let wakeup ~base_path name =
   match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
+  (* tla-lint: allow-mutation: fiber signal — public wakeup API for a single keeper *)
   | Some entry -> Atomic.set entry.fiber_wakeup true
   | None -> ()
 
@@ -759,6 +761,7 @@ let wakeup_all ?base_path () =
   StringMap.iter (fun _k entry ->
     (match base_path with
      | Some expected when not (String.equal expected entry.base_path) -> ()
+     (* tla-lint: allow-mutation: fiber signal — bulk wakeup for Running keepers under base_path filter *)
      | _ -> if entry.phase = Running then Atomic.set entry.fiber_wakeup true)
   ) (Atomic.get registry)
 
@@ -1234,6 +1237,7 @@ let dispatch_event ~base_path name event =
 let prepare_fiber_launch ~base_path name =
   (match get ~base_path name with
    | Some entry ->
+       (* tla-lint: allow-mutation: fiber signal — initialise per-fiber Atomic flags before keeper launch *)
        Atomic.set entry.fiber_stop false;
        Atomic.set entry.fiber_wakeup false;
        Atomic.set entry.waiting_for_inference false

@@ -17,6 +17,7 @@ let assert_mode () =
       policy_assert_mode := Some v;
       v
 
+(* tla-lint: allow-mutation: test hook — reset env-cached policy between tests *)
 let refresh_policy_for_test () = policy_assert_mode := None
 let assert_mode_for_test () = assert_mode ()
 

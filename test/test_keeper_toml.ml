@@ -449,6 +449,8 @@ desires = "low false positives"
 instructions = "You are a log analyzer."
 mention_targets = ["sherlock", "log-analyzer"]
 proactive_enabled = true
+proactive_idle_sec = 300
+proactive_cooldown_sec = 60
 room_signal_prompt_enabled = true
 policy_voice_enabled = false
 autoboot_enabled = false
@@ -1027,6 +1029,8 @@ let test_persona_resolver_renders_durable_keeper_toml () =
         ("autoboot_enabled", `Bool false);
         ("mention_targets", `List [ `String "probe"; `String "@probe" ]);
         ("proactive_enabled", `Bool true);
+        ("proactive_idle_sec", `Int 300);
+        ("proactive_cooldown_sec", `Int 60);
         ("allowed_paths", `List [ `String "/tmp/probe" ]);
         ( "tool_access",
           `Assoc

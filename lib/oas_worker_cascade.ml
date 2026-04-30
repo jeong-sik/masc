@@ -467,6 +467,9 @@ let keeper_name_to_json keeper_name =
   | _ -> `Null
 
 let cascade_audit_json ~now ~keeper_name ~cascade_name ~observation ~outcome =
+  let cascade_name =
+    Keeper_cascade_profile.runtime_name_to_string cascade_name
+  in
   `Assoc
     [
       ("ts", `Float now);
@@ -482,6 +485,9 @@ let cascade_audit_json ~now ~keeper_name ~cascade_name ~observation ~outcome =
 
 let record_cascade_audit store_opt ~now ~keeper_name ~cascade_name ~observation
     ~outcome =
+  let cascade_name_string =
+    Keeper_cascade_profile.runtime_name_to_string cascade_name
+  in
   match store_opt with
   | None -> ()
   | Some store ->
@@ -493,7 +499,7 @@ let record_cascade_audit store_opt ~now ~keeper_name ~cascade_name ~observation
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->
           Log.Misc.warn "cascade audit append failed cascade=%s error=%s"
-            cascade_name (Printexc.to_string exn))
+            cascade_name_string (Printexc.to_string exn))
 
 (* ================================================================ *)
 (* Aggregate metrics recording                                       *)
@@ -526,7 +532,7 @@ let attempt_model_display (attempt : cascade_attempt) =
 type msg =
   | Record_cascade of {
       keeper_name : string option;
-      cascade_name : string;
+      cascade_name : Keeper_cascade_profile.runtime_name;
       observation : cascade_observation option;
       outcome : [ `Success | `Failure | `Rejected ];
       now : float;
@@ -542,9 +548,12 @@ type state = {
 let stream = Eio.Stream.create 1024
 
 let handle_record state ~now ~keeper_name ~cascade_name ~observation ~outcome =
+  let cascade_name_string =
+    Keeper_cascade_profile.runtime_name_to_string cascade_name
+  in
   let counters = state.counters in
   let counter, counters, evicted =
-    match StringMap.find_opt cascade_name counters with
+    match StringMap.find_opt cascade_name_string counters with
     | Some c -> (c, counters, None)
     | None ->
         let (counters_after_evict, evicted) =
@@ -555,7 +564,7 @@ let handle_record state ~now ~keeper_name ~cascade_name ~observation ~outcome =
           else (counters, None)
         in
         let c = create_cascade_counter ~now () in
-        (c, StringMap.add cascade_name c counters_after_evict, evicted)
+        (c, StringMap.add cascade_name_string c counters_after_evict, evicted)
   in
   let counter = { counter with calls = counter.calls + 1; last_used_at = now } in
   let counter =
@@ -598,13 +607,16 @@ let handle_record state ~now ~keeper_name ~cascade_name ~observation ~outcome =
     (fun candidate ->
       Log.Misc.warn
         "cascade metrics evicted key=%s calls=%d last_used_at=%.3f to admit %s (limit=%d)"
-        candidate.name candidate.calls candidate.last_used_at cascade_name
+        candidate.name candidate.calls candidate.last_used_at cascade_name_string
         cascade_max_keys)
     evicted;
   let audit_store_next = get_cascade_audit_store state.audit_store in
   record_cascade_audit audit_store_next ~now ~keeper_name ~cascade_name
     ~observation ~outcome;
-  { counters = StringMap.add cascade_name counter counters; audit_store = audit_store_next }
+  {
+    counters = StringMap.add cascade_name_string counter counters;
+    audit_store = audit_store_next;
+  }
 
 let handle_get_metrics state p =
   let counters = state.counters in

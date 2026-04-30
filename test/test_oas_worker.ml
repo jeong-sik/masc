@@ -528,7 +528,7 @@ let test_cascade_metrics_concurrent_recording () =
              fun () ->
                for _ = 1 to 25 do
                  Masc_mcp.Oas_worker_cascade.record_cascade
-                   ~cascade_name:"concurrent-cascade"
+                   ~cascade_name:(internal_cascade_name "concurrent-cascade")
                    ~observation:None
                    ~outcome:`Success
                    ()
@@ -554,26 +554,26 @@ let test_cascade_metrics_evicts_lowest_call_key () =
       Masc_mcp.Oas_worker_cascade.reset_cascade_counters_for_test ())
     (fun () ->
       Masc_mcp.Oas_worker_cascade.record_cascade
-        ~cascade_name:"victim-key"
+        ~cascade_name:(internal_cascade_name "victim-key")
         ~observation:None
         ~outcome:`Success
         ();
       for i = 1 to 254 do
         let name = Printf.sprintf "stable-%03d" i in
         Masc_mcp.Oas_worker_cascade.record_cascade
-          ~cascade_name:name
+          ~cascade_name:(internal_cascade_name name)
           ~observation:None
           ~outcome:`Success
           ();
         Masc_mcp.Oas_worker_cascade.record_cascade
-          ~cascade_name:name
+          ~cascade_name:(internal_cascade_name name)
           ~observation:None
           ~outcome:`Success
           ()
       done;
       for _ = 1 to 3 do
         Masc_mcp.Oas_worker_cascade.record_cascade
-          ~cascade_name:"hot-key"
+          ~cascade_name:(internal_cascade_name "hot-key")
           ~observation:None
           ~outcome:`Success
           ()
@@ -581,7 +581,7 @@ let test_cascade_metrics_evicts_lowest_call_key () =
       let before = Yojson.Safe.Util.to_list (Oas_worker.cascade_metrics_json ()) in
       Alcotest.(check int) "table capped before admit" 256 (List.length before);
       Masc_mcp.Oas_worker_cascade.record_cascade
-        ~cascade_name:"new-key"
+        ~cascade_name:(internal_cascade_name "new-key")
         ~observation:None
         ~outcome:`Success
         ();
@@ -657,7 +657,7 @@ let test_cascade_audit_persists_observation () =
       in
       Masc_mcp.Oas_worker_cascade.record_cascade
         ~keeper_name:"keeper-glm-agent-test"
-        ~cascade_name:"audit-cascade"
+        ~cascade_name:(internal_cascade_name "audit-cascade")
         ~observation:(Some observation)
         ~outcome:`Failure
         ();

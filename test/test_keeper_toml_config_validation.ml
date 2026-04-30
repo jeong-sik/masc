@@ -59,7 +59,7 @@ let test_named_keeper_docker_defaults () =
   in
   expect_keeper ~name:"issue_king" ~persona:"issue_king";
   expect_keeper ~name:"masc-improver" ~persona:"analyst";
-  expect_keeper ~name:"sangsu" ~persona:"executor"
+  expect_keeper ~name:"sangsu" ~persona:"sangsu"
 
 (** Write a temporary TOML file, run load_keeper_toml, clean up. *)
 let with_temp_toml content f =

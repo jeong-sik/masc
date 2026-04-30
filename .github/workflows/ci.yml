@@ -159,7 +159,7 @@ jobs:
             doc_truth=true
           fi
 
-          if has_match '^(specs/|lib/keeper/|lib/oas_.*\.ml$|Makefile$)'; then
+          if has_match '^(specs/.*\.(tla|cfg)$|specs/Makefile$|lib/keeper/|lib/oas_.*\.ml$|Makefile$)'; then
             tla=true
           fi
 

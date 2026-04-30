@@ -125,5 +125,76 @@ let () =
   assert (result.status = Unix.WEXITED 0);
   assert (result.stdout = "")
 
+(* --- dispatch_simple propagates sandbox runner (SND-05 regression) --- *)
+
+let () =
+  with_eio @@ fun () ->
+  let open Masc_exec.Shell_ir in
+  let bin = Masc_exec.Bin.of_string "echo" |> Result.get_ok in
+  let runner_called = ref false in
+  let runner_argv = ref [] in
+  let runner_env = ref [||] in
+  let runner_cwd = ref (Some "should_be_none") in
+  let mock_runner ~argv ~env ~cwd ~timeout_sec:_ =
+    runner_called := true;
+    runner_argv := argv;
+    runner_env := env;
+    runner_cwd := cwd;
+    (Unix.WEXITED 0, "mock_stdout", "mock_stderr")
+  in
+  let docker_sandbox =
+    Masc_exec.Sandbox_target.docker ~image:"test-image" ~runner:mock_runner
+  in
+  let ir =
+    Simple
+      { bin
+      ; args = [ Lit "hello"; Lit "world" ]
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = docker_sandbox
+      }
+  in
+  let result = Masc_exec.Exec_dispatch.dispatch ir in
+  assert (!runner_called);
+  assert (!runner_argv = [ "echo"; "hello"; "world" ]);
+  assert (Array.length !runner_env = 0);
+  assert (!runner_cwd = None);
+  assert (result.status = Unix.WEXITED 0);
+  assert (result.stdout = "mock_stdout");
+  assert (result.stderr = "mock_stderr");
+  (* Verify the kind discriminator is surfaced correctly. *)
+  (match Masc_exec.Sandbox_target.kind docker_sandbox with
+   | Masc_exec.Sandbox_target.Host -> assert false
+   | Masc_exec.Sandbox_target.Docker { image } ->
+       assert (image = "test-image"))
+
+(* --- dispatch_simple exception from runner is caught --- *)
+
+let () =
+  with_eio @@ fun () ->
+  let open Masc_exec.Shell_ir in
+  let bin = Masc_exec.Bin.of_string "echo" |> Result.get_ok in
+  let mock_runner ~argv:_ ~env:_ ~cwd:_ ~timeout_sec:_ =
+    failwith "mock docker failure"
+  in
+  let docker_sandbox =
+    Masc_exec.Sandbox_target.docker ~image:"fail-image" ~runner:mock_runner
+  in
+  let ir =
+    Simple
+      { bin
+      ; args = [ Lit "x" ]
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = docker_sandbox
+      }
+  in
+  let result = Masc_exec.Exec_dispatch.dispatch ir in
+  assert (result.status = Unix.WEXITED 1);
+  assert (result.stdout = "");
+  assert (String.length result.stderr > 0)
+
 let () =
   Printf.printf "p7_exec_dispatch: all tests passed.\n"

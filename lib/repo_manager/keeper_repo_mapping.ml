@@ -5,6 +5,17 @@ let ( let* ) = Result.bind
 let mappings_toml_path base_path =
   Filename.concat base_path ".masc/config/keeper_repo_mappings.toml"
 
+let ensure_dir path =
+  let rec loop dir =
+    if dir = "" || dir = "." || Sys.file_exists dir then ()
+    else begin
+      loop (Filename.dirname dir);
+      try Unix.mkdir dir 0o755
+      with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
+    end
+  in
+  loop path
+
 let mapping_of_toml toml keeper_id =
   let path field = ["mapping"; keeper_id; field] in
   let* repository_ids =
@@ -86,13 +97,15 @@ let save_all ~base_path mappings =
   in
   let toml = Otoml.TomlTable [("mapping", Otoml.TomlTable table)] in
   let dir = Filename.dirname path in
-  (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  ensure_dir dir;
   let content = Otoml.Printer.to_string toml in
-  let oc = open_out path in
-  Fun.protect
-    ~finally:(fun () -> close_out_noerr oc)
-    (fun () -> output_string oc content);
-  Ok ()
+  try
+    let oc = open_out path in
+    Fun.protect
+      ~finally:(fun () -> close_out_noerr oc)
+      (fun () -> output_string oc content);
+    Ok ()
+  with Sys_error msg -> Error msg
 
 let save_mapping ~base_path mapping =
   let* mappings = load_all ~base_path in

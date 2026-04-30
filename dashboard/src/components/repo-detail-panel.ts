@@ -42,12 +42,30 @@ function normalizeBranch(raw: unknown): BranchInfo | null {
   }
 }
 
+function unwrapRepository(raw: unknown): Record<string, unknown> {
+  if (!raw || typeof raw !== 'object') throw new Error('Invalid repository response')
+  const record = raw as Record<string, unknown>
+  if (record.ok === true && record.data && typeof record.data === 'object') {
+    return record.data as Record<string, unknown>
+  }
+  return record
+}
+
+function branchRows(raw: unknown): unknown[] {
+  if (Array.isArray(raw)) return raw
+  if (raw && typeof raw === 'object') {
+    const record = raw as Record<string, unknown>
+    if (Array.isArray(record.branches)) return record.branches
+    if (record.ok === true && Array.isArray(record.data)) return record.data
+  }
+  return []
+}
+
 export async function loadRepoDetail(id: string): Promise<void> {
   if (repoDetailState.value.status === 'loading') return
   await repoDetailResource.load(async () => {
     const raw = await get<unknown>(`/api/v1/repositories/${encodeURIComponent(id)}`)
-    if (!raw || typeof raw !== 'object') throw new Error('Invalid repository response')
-    const r = raw as Record<string, unknown>
+    const r = unwrapRepository(raw)
     return {
       id: typeof r.id === 'string' ? r.id : id,
       name: typeof r.name === 'string' ? r.name : '',
@@ -58,28 +76,24 @@ export async function loadRepoDetail(id: string): Promise<void> {
       auto_sync: r.auto_sync === true,
       sync_interval: typeof r.sync_interval === 'number' ? r.sync_interval : 300,
       credential_id: typeof r.credential_id === 'string' ? r.credential_id : null,
-      created_at: typeof r.created_at === 'string' ? r.created_at : '',
-      updated_at: typeof r.updated_at === 'string' ? r.updated_at : '',
+      created_at: typeof r.created_at === 'string' || typeof r.created_at === 'number' ? r.created_at : null,
+      updated_at: typeof r.updated_at === 'string' || typeof r.updated_at === 'number' ? r.updated_at : null,
     } as Repository
   })
 }
 
 export async function loadRepoBranches(id: string): Promise<void> {
   await branchesResource.load(async () => {
-    try {
-      const raw = await get<unknown[]>(`/api/v1/repositories/${encodeURIComponent(id)}/branches`)
-      return raw.map(normalizeBranch).filter((b): b is BranchInfo => b !== null)
-    } catch {
-      // Branch endpoint may not exist yet; return empty list
-      return []
-    }
+    const raw = await get<unknown>(`/api/v1/repositories/${encodeURIComponent(id)}/branches`)
+    return branchRows(raw).map(normalizeBranch).filter((b): b is BranchInfo => b !== null)
   })
 }
 
 function normalizeRepoStatus(raw: string | undefined): RepoStatus {
-  switch (raw) {
+  switch (raw?.toLowerCase()) {
     case 'active': return 'active'
     case 'paused': return 'paused'
+    case 'cloning': return 'active'
     case 'error': return 'error'
     default: return 'active'
   }
@@ -107,10 +121,11 @@ function StatusBadge({ status }: { status: RepoStatus }) {
   `
 }
 
-function formatDate(iso: string): string {
-  if (!iso) return '--'
+function formatDate(value: string | number | null): string {
+  if (value === null || value === '') return '--'
   try {
-    const d = new Date(iso)
+    const d = typeof value === 'number' ? new Date(value * 1000) : new Date(value)
+    if (Number.isNaN(d.getTime())) return String(value)
     return d.toLocaleString('ko-KR', {
       year: 'numeric',
       month: '2-digit',
@@ -119,7 +134,7 @@ function formatDate(iso: string): string {
       minute: '2-digit',
     })
   } catch {
-    return iso
+    return String(value)
   }
 }
 
@@ -298,6 +313,8 @@ export function RepoDetailPanel() {
 
         ${branchesLoading
           ? html`<${LoadingState} class="py-4">브랜치 목록 불러오는 중...<//>`
+          : branchState.status === 'error'
+            ? html`<${ErrorState} message=${branchState.message} />`
           : branches.length === 0
             ? html`
               <div class="py-4 text-center text-2xs text-[var(--color-fg-muted)]">

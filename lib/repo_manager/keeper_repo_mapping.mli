@@ -1,5 +1,9 @@
 open Repo_manager_types
 
+val load_all : base_path:string -> (keeper_repo_mapping list, string) result
+(** [load_all ~base_path] loads all keeper-repository mappings from
+    [.masc/config/keeper_repo_mappings.toml]. *)
+
 val allowed_repositories :
   keeper_id:string -> base_path:string -> (repository_id list, string) result
 (** [allowed_repositories ~keeper_id ~base_path] returns the list of

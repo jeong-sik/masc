@@ -5,6 +5,21 @@ let ( let* ) = Result.bind
 let repos_toml_path base_path =
   Filename.concat base_path ".masc/config/repositories.toml"
 
+let default_local_path id = Filename.concat ".masc/repos" id
+
+let now_unix_seconds () = Int64.of_float (Unix.time ())
+
+let ensure_dir path =
+  let rec loop dir =
+    if dir = "" || dir = "." || Sys.file_exists dir then ()
+    else begin
+      loop (Filename.dirname dir);
+      try Unix.mkdir dir 0o755
+      with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
+    end
+  in
+  loop path
+
 let string_of_status = function
   | Active -> "Active"
   | Paused -> "Paused"
@@ -12,43 +27,55 @@ let string_of_status = function
   | Error _ -> "Error"
 
 let status_of_string = function
-  | "Active" -> Ok Active
-  | "Paused" -> Ok Paused
-  | "Cloning" -> Ok Cloning
-  | "Error" -> Ok (Error "")
+  | "Active" | "active" -> Ok Active
+  | "Paused" | "paused" -> Ok Paused
+  | "Cloning" | "cloning" -> Ok Cloning
+  | "Error" | "error" -> Ok (Error "")
   | s -> Error (Printf.sprintf "Unknown repository status: %s" s)
 
 let repository_of_toml toml id =
   let ( let* ) = Result.bind in
   let path field = ["repository"; id; field] in
+  let find_string_default field default =
+    match Otoml.find_result toml Otoml.get_string (path field) with
+    | Ok value -> Ok value
+    | Error _ -> Ok default
+  in
+  let find_bool_default field default =
+    match Otoml.find_result toml Otoml.get_boolean (path field) with
+    | Ok value -> Ok value
+    | Error _ -> Ok default
+  in
+  let find_int64_default field default =
+    match Otoml.Helpers.find_integer_result toml (path field) with
+    | Ok value -> Ok (Int64.of_int value)
+    | Error _ -> Ok default
+  in
+  let find_string_list_default field default =
+    match Otoml.Helpers.find_strings_result toml (path field) with
+    | Ok value -> Ok value
+    | Error _ -> Ok default
+  in
   let* name = Otoml.find_result toml Otoml.get_string (path "name") in
   let* url = Otoml.find_result toml Otoml.get_string (path "url") in
-  let* local_path = Otoml.find_result toml Otoml.get_string (path "local_path") in
-  let* default_branch =
-    Otoml.find_result toml Otoml.get_string (path "default_branch")
-  in
-  let* credential_id =
-    Otoml.find_result toml Otoml.get_string (path "credential_id")
-  in
-  let* keepers =
-    Otoml.Helpers.find_strings_result toml (path "keepers")
-  in
-  let* status_str =
-    Otoml.find_result toml Otoml.get_string (path "status")
-  in
+  let* local_path = find_string_default "local_path" (default_local_path id) in
+  let* default_branch = find_string_default "default_branch" "main" in
+  let* credential_id = find_string_default "credential_id" "default" in
+  let* keepers = find_string_list_default "keepers" [] in
+  let* status_str = find_string_default "status" "Active" in
   let* status = status_of_string status_str in
-  let* auto_sync =
-    Otoml.find_result toml Otoml.get_boolean (path "auto_sync")
+  let status =
+    match status with
+    | Error _ -> (
+        match Otoml.find_result toml Otoml.get_string (path "status_error") with
+        | Ok msg -> Error msg
+        | Error _ -> Error "")
+    | other -> other
   in
-  let* sync_interval =
-    Otoml.Helpers.find_integer_result toml (path "sync_interval")
-  in
-  let* created_at =
-    Otoml.Helpers.find_integer_result toml (path "created_at")
-  in
-  let* updated_at =
-    Otoml.Helpers.find_integer_result toml (path "updated_at")
-  in
+  let* auto_sync = find_bool_default "auto_sync" false in
+  let* sync_interval = find_int64_default "sync_interval" (Int64.of_int 300) in
+  let* created_at = find_int64_default "created_at" Int64.zero in
+  let* updated_at = find_int64_default "updated_at" Int64.zero in
   Ok
     {
       id;
@@ -60,13 +87,13 @@ let repository_of_toml toml id =
       keepers;
       status;
       auto_sync;
-      sync_interval;
-      created_at = Int64.of_int created_at;
-      updated_at = Int64.of_int updated_at;
+      sync_interval = Int64.to_int sync_interval;
+      created_at;
+      updated_at;
     }
 
 let toml_of_repository repo =
-  Otoml.TomlTable
+  let fields =
     [
       ("name", Otoml.string repo.name);
       ("url", Otoml.string repo.url);
@@ -82,6 +109,14 @@ let toml_of_repository repo =
       ("created_at", Otoml.integer (Int64.to_int repo.created_at));
       ("updated_at", Otoml.integer (Int64.to_int repo.updated_at));
     ]
+  in
+  let fields =
+    match repo.status with
+    | Error msg when String.trim msg <> "" ->
+        ("status_error", Otoml.string msg) :: fields
+    | _ -> fields
+  in
+  Otoml.TomlTable fields
 
 let load_all ~base_path =
   let path = repos_toml_path base_path in
@@ -115,9 +150,7 @@ let load_all ~base_path =
 let save_all ~base_path (repos : repository list) =
   let path = repos_toml_path base_path in
   let config_dir = Filename.dirname path in
-  (try
-     if not (Sys.file_exists config_dir) then Sys.mkdir config_dir 0o755
-   with Sys_error _ -> ());
+  ensure_dir config_dir;
   let repo_entries =
     List.map (fun (repo : repository) -> (repo.id, toml_of_repository repo)) repos
   in
@@ -142,6 +175,20 @@ let add ~base_path (repo : repository) =
   if List.exists (fun (r : repository) -> String.equal r.id repo.id) repos then
     Error (Printf.sprintf "Repository already exists: %s" repo.id)
   else
+    let now = now_unix_seconds () in
+    let repo =
+      {
+        repo with
+        local_path =
+          (if String.trim repo.local_path = "" then default_local_path repo.id
+           else repo.local_path);
+        credential_id =
+          (if String.trim repo.credential_id = "" then "default"
+           else repo.credential_id);
+        created_at = (if Int64.equal repo.created_at Int64.zero then now else repo.created_at);
+        updated_at = (if Int64.equal repo.updated_at Int64.zero then now else repo.updated_at);
+      }
+    in
     let* () = save_all ~base_path (repo :: repos) in
     Ok repo
 
@@ -158,12 +205,13 @@ let remove ~base_path id =
 let update_status ~base_path id status =
   let* repos = load_all ~base_path in
   let found = ref false in
+  let now = now_unix_seconds () in
   let updated =
     List.map
       (fun (r : repository) ->
         if String.equal r.id id then (
           found := true;
-          { r with status })
+          { r with status; updated_at = now })
         else r)
       repos
   in

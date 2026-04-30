@@ -1,6 +1,6 @@
 // Keeper-repo mapping -- page/component for mapping keepers to repositories.
 // Fetches keepers list and allows multi-select assignment per keeper.
-// Save sends POST /api/v1/keepers/:id/repos
+// Save sends POST /api/v1/keeper-repos/:id
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
@@ -56,8 +56,13 @@ async function fetchKeepers(): Promise<Keeper[]> {
 
 async function fetchRepositories(): Promise<RepositoryOption[]> {
   const data = await get<unknown>('/api/v1/repositories')
-  if (Array.isArray(data)) {
-    return data.map((row: unknown): RepositoryOption => {
+  const rows = Array.isArray(data)
+    ? data
+    : data && typeof data === 'object' && Array.isArray((data as Record<string, unknown>).repositories)
+      ? (data as Record<string, unknown>).repositories as unknown[]
+      : []
+  if (Array.isArray(rows)) {
+    return rows.map((row: unknown): RepositoryOption => {
       const r = row as Record<string, unknown>
       return {
         id: String(r.id ?? ''),
@@ -70,15 +75,22 @@ async function fetchRepositories(): Promise<RepositoryOption[]> {
 }
 
 async function fetchKeeperRepoMappings(): Promise<KeeperRepoMapping[]> {
-  const data = await get<unknown>('/api/v1/keepers/repos')
-  if (Array.isArray(data)) {
-    return data.map((row: unknown): KeeperRepoMapping => {
+  const data = await get<unknown>('/api/v1/keeper-repos')
+  const rows = Array.isArray(data)
+    ? data
+    : data && typeof data === 'object' && Array.isArray((data as Record<string, unknown>).mappings)
+      ? (data as Record<string, unknown>).mappings as unknown[]
+      : []
+  if (Array.isArray(rows)) {
+    return rows.map((row: unknown): KeeperRepoMapping => {
       const r = row as Record<string, unknown>
       return {
         keeper_id: String(r.keeper_id ?? ''),
         keeper_name: String(r.keeper_name ?? ''),
         allowed_repos: Array.isArray(r.allowed_repos)
           ? r.allowed_repos.filter((v): v is string => typeof v === 'string')
+          : Array.isArray(r.repositories)
+            ? r.repositories.filter((v): v is string => typeof v === 'string')
           : [],
         allow_all: r.allow_all === true,
       }
@@ -88,7 +100,7 @@ async function fetchKeeperRepoMappings(): Promise<KeeperRepoMapping[]> {
 }
 
 async function saveKeeperRepos(keeperId: string, repos: string[]): Promise<void> {
-  await post(`/api/v1/keepers/${encodeURIComponent(keeperId)}/repos`, { repos })
+  await post(`/api/v1/keeper-repos/${encodeURIComponent(keeperId)}`, { repositories: repos })
 }
 
 // ── Helpers ──────────────────────────────────────────────
@@ -181,7 +193,7 @@ export async function loadKeeperRepoMappings(options?: { force?: boolean }): Pro
       for (const k of keepersState.value.data) {
         const id = k.keeper_id ?? k.name
         if (!next.has(id)) {
-          next.set(id, new Set<string>())
+          next.set(id, '*')
         }
       }
     }
@@ -268,7 +280,7 @@ export function KeeperRepoMapping() {
 
   function handleToggleRepo(keeperId: string, repoId: string) {
     const mapping = mappingByKeeper.get(keeperId)
-    const original = mapping ? buildRepoSetFromMapping(mapping) : new Set<string>()
+    const original = mapping ? buildRepoSetFromMapping(mapping) : '*'
     const current = getDraftForKeeper(keeperId, original)
     const next = toggleRepo(keeperId, repoId, current)
     const nextMap = new Map(draftMappings.value)
@@ -278,7 +290,7 @@ export function KeeperRepoMapping() {
 
   function handleToggleAllowAll(keeperId: string) {
     const mapping = mappingByKeeper.get(keeperId)
-    const original = mapping ? buildRepoSetFromMapping(mapping) : new Set<string>()
+    const original = mapping ? buildRepoSetFromMapping(mapping) : '*'
     const current = getDraftForKeeper(keeperId, original)
     const next = toggleAllowAll(keeperId, current)
     const nextMap = new Map(draftMappings.value)
@@ -315,7 +327,7 @@ export function KeeperRepoMapping() {
             const keeperId = keeper.keeper_id ?? keeper.name
             const keeperName = keeper.name
             const mapping = mappingByKeeper.get(keeperId)
-            const original = mapping ? buildRepoSetFromMapping(mapping) : new Set<string>()
+            const original = mapping ? buildRepoSetFromMapping(mapping) : '*'
             const draft = getDraftForKeeper(keeperId, original)
             const allowAll = isAllowAll(keeperId, draft)
             const changed = hasChanges(keeperId, original, draft)

@@ -41,6 +41,8 @@ let sample_credential id cred_type =
     gh_config_dir = Some ("/home/user/.config/gh-" ^ id);
     ssh_key_path = Some ("/home/user/.ssh/id_" ^ id);
     gpg_key_id = None;
+    state = Unmaterialized;
+    token_sha256_prefix = None;
   }
 
 let test_load_all_empty () =
@@ -106,6 +108,8 @@ let test_optional_fields_roundtrip () =
           gh_config_dir = None;
           ssh_key_path = None;
           gpg_key_id = Some "ABC123";
+          state = Unmaterialized;
+          token_sha256_prefix = None;
         }
       in
       match Credential_store.save_all ~base_path [ cred ] with

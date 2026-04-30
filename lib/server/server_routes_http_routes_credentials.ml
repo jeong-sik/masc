@@ -52,7 +52,22 @@ let credential_of_json (json : Yojson.Safe.t) :
         | "local" -> Ok Local
         | _ -> Error (Printf.sprintf "unknown cred_type: %s" cred_type_str)
       in
-      Ok { Repo_manager_types.id; cred_type; username; gh_config_dir; ssh_key_path; gpg_key_id }
+      (* RFC-0019 PR-B §4.4: state is stamped by
+         [Credential_materializer.ensure] inside [Credential_store.add];
+         clients posting fresh credentials surface as [Unmaterialized]
+         until the materialiser runs.  token_sha256_prefix populated by
+         the F-1 gate (PR-C). *)
+      Ok
+        {
+          Repo_manager_types.id;
+          cred_type;
+          username;
+          gh_config_dir;
+          ssh_key_path;
+          gpg_key_id;
+          state = Unmaterialized;
+          token_sha256_prefix = None;
+        }
   | _ -> Error "expected JSON object body"
 
 let add_routes router =

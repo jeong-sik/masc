@@ -486,6 +486,7 @@
    keeper_discovered_tools
    keeper_tool_affinity
    keeper_tag_dispatch
+   keeper_event_queue
    keeper_exec_shared
    keeper_failure_circuit_breaker
    keeper_exec_board

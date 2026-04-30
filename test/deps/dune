@@ -40,6 +40,7 @@
    (re_export masc_mcp.multimodal)
    (re_export masc_mcp.prompt_registry)
    (re_export masc_mcp.pulse)
+   (re_export masc_mcp.repo_manager)
    (re_export masc_mcp.response)
    ;; masc_mcp.swarm_status removed (retire swarm read surfaces, #7572)
    ;; masc_mcp.team_session_types removed (Epic #6107)

@@ -1,0 +1,221 @@
+(** Tests for Repo_store module *)
+
+open Repo_manager_types
+
+let contains_substring s needle =
+  let s_len = String.length s in
+  let n_len = String.length needle in
+  let rec loop i =
+    if i + n_len > s_len then false
+    else if String.sub s i n_len = needle then true
+    else loop (i + 1)
+  in
+  if n_len = 0 then true else loop 0
+
+let with_temp_base_path f =
+  let dir = Filename.temp_file "repo_store_test" "" in
+  Sys.remove dir;
+  Unix.mkdir dir 0o755;
+  let config_dir = Filename.concat dir ".masc" in
+  Unix.mkdir config_dir 0o755;
+  let config_subdir = Filename.concat config_dir "config" in
+  Unix.mkdir config_subdir 0o755;
+  Fun.protect
+    ~finally:(fun () ->
+      let rec rm_rf path =
+        if Sys.file_exists path then
+          if Sys.is_directory path then begin
+            Sys.readdir path |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+            Unix.rmdir path
+          end else
+            Sys.remove path
+      in
+      rm_rf dir)
+    (fun () -> f dir)
+
+let sample_repo id =
+  {
+    id;
+    name = "test-repo-" ^ id;
+    url = "https://github.com/test/" ^ id;
+    local_path = "repos/" ^ id;
+    default_branch = "main";
+    credential_id = "cred-1";
+    keepers = [ "keeper-a"; "keeper-b" ];
+    status = Active;
+    auto_sync = true;
+    sync_interval = 300;
+    created_at = Int64.of_int 1700000000;
+    updated_at = Int64.of_int 1700000100;
+  }
+
+let test_load_all_empty () =
+  with_temp_base_path (fun base_path ->
+      match Repo_store.load_all ~base_path with
+      | Ok repos -> Alcotest.(check int) "empty list" 0 (List.length repos)
+      | Error e -> Alcotest.fail ("unexpected error: " ^ e))
+
+let test_save_and_load_roundtrip () =
+  with_temp_base_path (fun base_path ->
+      let repos = [ sample_repo "r1"; sample_repo "r2" ] in
+      match Repo_store.save_all ~base_path repos with
+      | Error e -> Alcotest.fail ("save failed: " ^ e)
+      | Ok () -> (
+          match Repo_store.load_all ~base_path with
+          | Error e -> Alcotest.fail ("load failed: " ^ e)
+          | Ok loaded ->
+              Alcotest.(check int) "count" 2 (List.length loaded);
+              let ids = List.map (fun (r : repository) -> r.id) loaded in
+              Alcotest.(check bool) "has r1" true (List.mem "r1" ids);
+              Alcotest.(check bool) "has r2" true (List.mem "r2" ids)))
+
+let test_add_new_repo () =
+  with_temp_base_path (fun base_path ->
+      let repo = sample_repo "new-repo" in
+      match Repo_store.add ~base_path repo with
+      | Error e -> Alcotest.fail ("add failed: " ^ e)
+      | Ok added ->
+          Alcotest.(check string) "id" "new-repo" added.id;
+          match Repo_store.load_all ~base_path with
+          | Ok loaded -> Alcotest.(check int) "count after add" 1 (List.length loaded)
+          | Error e -> Alcotest.fail ("load after add failed: " ^ e))
+
+let test_add_duplicate_fails () =
+  with_temp_base_path (fun base_path ->
+      let repo = sample_repo "dup-repo" in
+      match Repo_store.add ~base_path repo with
+      | Error e -> Alcotest.fail ("first add failed: " ^ e)
+      | Ok _ -> (
+          match Repo_store.add ~base_path repo with
+          | Ok _ -> Alcotest.fail "expected error for duplicate"
+          | Error msg ->
+              Alcotest.(check bool) "mentions already exists" true
+                (contains_substring msg "already exists")))
+
+let test_find_existing () =
+  with_temp_base_path (fun base_path ->
+      let repo = sample_repo "find-me" in
+      match Repo_store.add ~base_path repo with
+      | Error e -> Alcotest.fail ("add failed: " ^ e)
+      | Ok _ -> (
+          match Repo_store.find ~base_path "find-me" with
+          | Error e -> Alcotest.fail ("find failed: " ^ e)
+          | Ok found -> Alcotest.(check string) "name" "test-repo-find-me" found.name))
+
+let test_find_missing () =
+  with_temp_base_path (fun base_path ->
+      match Repo_store.find ~base_path "missing" with
+      | Ok _ -> Alcotest.fail "expected error for missing repo"
+      | Error msg ->
+          Alcotest.(check bool) "mentions not found" true (contains_substring msg "not found"))
+
+let test_remove_existing () =
+  with_temp_base_path (fun base_path ->
+      let repo = sample_repo "to-remove" in
+      match Repo_store.add ~base_path repo with
+      | Error e -> Alcotest.fail ("add failed: " ^ e)
+      | Ok _ -> (
+          match Repo_store.remove ~base_path "to-remove" with
+          | Error e -> Alcotest.fail ("remove failed: " ^ e)
+          | Ok () -> (
+              match Repo_store.load_all ~base_path with
+              | Ok loaded -> Alcotest.(check int) "count after remove" 0 (List.length loaded)
+              | Error e -> Alcotest.fail ("load after remove failed: " ^ e))))
+
+let test_remove_missing () =
+  with_temp_base_path (fun base_path ->
+      match Repo_store.remove ~base_path "missing" with
+      | Ok _ -> Alcotest.fail "expected error for missing repo"
+      | Error msg ->
+          Alcotest.(check bool) "mentions not found" true (contains_substring msg "not found"))
+
+let test_update_status_existing () =
+  with_temp_base_path (fun base_path ->
+      let repo = sample_repo "status-test" in
+      match Repo_store.add ~base_path repo with
+      | Error e -> Alcotest.fail ("add failed: " ^ e)
+      | Ok _ -> (
+          match Repo_store.update_status ~base_path "status-test" Paused with
+          | Error e -> Alcotest.fail ("update_status failed: " ^ e)
+          | Ok () -> (
+              match Repo_store.find ~base_path "status-test" with
+              | Ok found -> (
+                  match found.status with
+                  | Paused -> ()
+                  | _ -> Alcotest.fail "expected Paused status")
+              | Error e -> Alcotest.fail ("find after update failed: " ^ e))))
+
+let test_update_status_missing () =
+  with_temp_base_path (fun base_path ->
+      match Repo_store.update_status ~base_path "missing" Paused with
+      | Ok _ -> Alcotest.fail "expected error for missing repo"
+      | Error msg ->
+          Alcotest.(check bool) "mentions not found" true (contains_substring msg "not found"))
+
+let test_local_path_absolute_preserved () =
+  let repo = { (sample_repo "abs") with local_path = "/absolute/path" } in
+  let path = Repo_store.local_path ~base_path:"/tmp/base" repo in
+  Alcotest.(check string) "absolute preserved" "/absolute/path" path
+
+let test_local_path_relative_resolved () =
+  let repo = { (sample_repo "rel") with local_path = "repos/rel" } in
+  let path = Repo_store.local_path ~base_path:"/tmp/base" repo in
+  Alcotest.(check string) "relative resolved" "/tmp/base/repos/rel" path
+
+let test_status_roundtrip () =
+  let statuses = [ Active; Paused; Cloning; Error "network failure" ] in
+  List.iter
+    (fun status ->
+      let str =
+        match status with
+        | Active -> "Active"
+        | Paused -> "Paused"
+        | Cloning -> "Cloning"
+        | Error _ -> "Error"
+      in
+      Alcotest.(check string) ("status string for " ^ str) str
+        (match status with
+         | Active -> "Active"
+         | Paused -> "Paused"
+         | Cloning -> "Cloning"
+         | Error _ -> "Error"))
+    statuses
+
+let () =
+  Alcotest.run "Repo_store"
+    [
+      ( "roundtrip",
+        [
+          Alcotest.test_case "load_all empty" `Quick test_load_all_empty;
+          Alcotest.test_case "save and load roundtrip" `Quick test_save_and_load_roundtrip;
+        ] );
+      ( "add",
+        [
+          Alcotest.test_case "add new repo" `Quick test_add_new_repo;
+          Alcotest.test_case "add duplicate fails" `Quick test_add_duplicate_fails;
+        ] );
+      ( "find",
+        [
+          Alcotest.test_case "find existing" `Quick test_find_existing;
+          Alcotest.test_case "find missing" `Quick test_find_missing;
+        ] );
+      ( "remove",
+        [
+          Alcotest.test_case "remove existing" `Quick test_remove_existing;
+          Alcotest.test_case "remove missing" `Quick test_remove_missing;
+        ] );
+      ( "update_status",
+        [
+          Alcotest.test_case "update existing" `Quick test_update_status_existing;
+          Alcotest.test_case "update missing" `Quick test_update_status_missing;
+        ] );
+      ( "local_path",
+        [
+          Alcotest.test_case "absolute preserved" `Quick test_local_path_absolute_preserved;
+          Alcotest.test_case "relative resolved" `Quick test_local_path_relative_resolved;
+        ] );
+      ( "status",
+        [
+          Alcotest.test_case "status string roundtrip" `Quick test_status_roundtrip;
+        ] );
+    ]

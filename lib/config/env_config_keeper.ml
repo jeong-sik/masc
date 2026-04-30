@@ -385,7 +385,6 @@ module KeeperKeepalive = struct
   let turn_timeout_sec =
     Float.max 60.0 (Float.min timeout_hard_ceiling_sec
       (get_float ~default:3600.0 "MASC_KEEPER_TURN_TIMEOUT_SEC"))
->>>>>>> 8a608170c8 (feat(resilience): bulkhead pattern - ZOMBIE state, terminal_failure_latched, cascade pool)
 
   (** Maximum time a proactive keeper will wait in the MASC admission queue
       before abandoning the current OAS attempt.

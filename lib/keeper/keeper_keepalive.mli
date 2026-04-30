@@ -17,8 +17,14 @@ val set_grpc_client : ?env:Eio_unix.Stdenv.base -> Masc_grpc_client.t -> unit
 val process_directive : agent_name:string -> string -> unit
 
 (** Wake up a specific keeper immediately. Used by broadcast notification
-    when a @mention targets a running keeper. *)
-val wakeup_keeper : ?base_path:string -> string -> unit
+    when a @mention targets a running keeper.
+
+    [?stimulus] appends the payload to the keeper's Event Layer queue
+    before flipping the wakeup flag. See RFC-0020 §3. *)
+val wakeup_keeper :
+  ?base_path:string ->
+  ?stimulus:Keeper_event_queue.stimulus ->
+  string -> unit
 
 (** Wake up all running keepers. Used for @@all broadcast mentions
     or system-wide events. *)

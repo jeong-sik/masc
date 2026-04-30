@@ -38,25 +38,13 @@ describe('command navigation', () => {
   })
 })
 
-describe('connectors navigation (Phase 7)', () => {
-  it('exposes connectors as a top-level surface with all + per-bridge sub-sections', () => {
+describe('connectors navigation (Phase 7, post-2026-04-30 merge)', () => {
+  it('exposes connectors as a top-level surface with a single all-connectors section', () => {
     expect(defaultParamsForTab('connectors')).toEqual({ section: 'connector-status' })
 
     const sections = visibleSectionItemsForTab('connectors')
-    expect(sections.map(item => item.id)).toEqual([
-      'connector-status',
-      'connector-discord',
-      'connector-imessage',
-      'connector-slack',
-      'connector-telegram',
-    ])
-    expect(sections.map(item => item.label)).toEqual([
-      '전체',
-      'Discord',
-      'iMessage',
-      'Slack',
-      'Telegram',
-    ])
+    expect(sections.map(item => item.id)).toEqual(['connector-status'])
+    expect(sections.map(item => item.label)).toEqual(['전체'])
   })
 
   it('normalizes unknown connectors section to default', () => {
@@ -64,9 +52,12 @@ describe('connectors navigation (Phase 7)', () => {
     expect(result.section).toBe('connector-status')
   })
 
-  it('preserves a valid per-bridge section through normalize', () => {
+  it('redirects legacy per-bridge section deep links to connector-status', () => {
+    // The four per-sidecar sub-tabs were merged into the single
+    // all-connectors view on 2026-04-30; deep links to the old
+    // section ids fall back to the default.
     const result = normalizeRouteParams('connectors', { section: 'connector-slack' })
-    expect(result.section).toBe('connector-slack')
+    expect(result.section).toBe('connector-status')
   })
 })
 

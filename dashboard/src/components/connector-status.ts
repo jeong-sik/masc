@@ -42,21 +42,14 @@ import { createManagedAsyncResource } from '../lib/async-state'
 import { route } from '../router'
 import { Tk } from './tk'
 
-// Sub-section -> connector_id filter. `connector-status` (default) shows
-// all connectors; the per-connector sub-sections show just that one. Source
-// of truth: dashboard/src/config/navigation.ts DASHBOARD_SECTION_ITEMS.connectors.
-const SECTION_TO_CONNECTOR_ID: Record<string, string | null> = {
-  'connector-status': null,
-  'connector-discord': 'discord',
-  'connector-imessage': 'imessage',
-  'connector-slack': 'slack',
-  'connector-telegram': 'telegram',
-}
-
+// As of 2026-04-30 the per-connector sub-tabs were merged into
+// connector-status; selection now happens inside the page via
+// ConnectorOverviewStrip rather than top-level navigation.
+// `?connector=<id>` query parameter still narrows the view for deep links.
 function activeConnectorFilter(): string | null {
-  const section = route.value.params.section
-  if (!section) return null
-  return SECTION_TO_CONNECTOR_ID[section] ?? null
+  const connector = route.value.params.connector
+  if (!connector) return null
+  return KNOWN_CONNECTOR_IDS.includes(connector as KnownConnectorId) ? connector : null
 }
 
 // Per-connector lifecycle hints. All four sidecars now ship a run.sh wrapper

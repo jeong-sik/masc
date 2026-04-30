@@ -73,7 +73,7 @@ let mk_receipt
     network_mode = "offline";
     approval_profile = None;
     approval_profile_derived = false;
-    cascade_name = "default";
+    cascade_name = R.cascade_name_of_string "default";
     cascade_selected_model = None;
     cascade_attempt_count = 1;
     cascade_fallback_applied;

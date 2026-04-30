@@ -37,6 +37,11 @@ type error_kind = Error_kind of string
 let error_kind_of_string value = Error_kind value
 let error_kind_to_string (Error_kind value) = value
 
+type cascade_name = Keeper_cascade_profile.runtime_name
+
+let cascade_name_of_string = Keeper_cascade_profile.runtime_name_of_string
+let cascade_name_to_string = Keeper_cascade_profile.runtime_name_to_string
+
 (* TLA+ ReceiptIsAuthoritative invariant
    (specs/keeper-turn-fsm/KeeperTurnFSM.tla:336):
      receipt_outcome = "receipt_done" => turn_state = "done"
@@ -72,8 +77,8 @@ type tool_surface =
   }
 
 type cascade_rotation_attempt =
-  { from_cascade : string
-  ; to_cascade : string
+  { from_cascade : cascade_name
+  ; to_cascade : cascade_name
   ; reason : string
   ; outcome : string
   ; error_kind : error_kind option
@@ -106,13 +111,13 @@ type t =
   ; network_mode : string
   ; approval_profile : string option
   ; approval_profile_derived : bool
-  ; cascade_name : string
+  ; cascade_name : cascade_name
   ; cascade_selected_model : string option
   ; cascade_attempt_count : int
   ; cascade_fallback_applied : bool
   ; cascade_outcome : string
   ; degraded_retry_applied : bool
-  ; degraded_retry_cascade : string option
+  ; degraded_retry_cascade : cascade_name option
   ; fallback_reason : string option
   ; cascade_rotation_attempts : cascade_rotation_attempt list
   ; stop_reason : string option
@@ -171,8 +176,8 @@ let last_tool_name receipt =
 let cascade_rotation_attempt_to_json attempt =
   `Assoc
     [
-      ("from_cascade", `String attempt.from_cascade);
-      ("to_cascade", `String attempt.to_cascade);
+      ("from_cascade", `String (cascade_name_to_string attempt.from_cascade));
+      ("to_cascade", `String (cascade_name_to_string attempt.to_cascade));
       ("reason", `String attempt.reason);
       ("outcome", `String attempt.outcome);
       ( "error_kind",
@@ -381,7 +386,7 @@ let to_json (receipt : t) =
       ~required_tools:receipt.tool_surface.required_tools
       ~missing_required_tools:receipt.tool_surface.missing_required_tools
       ?model:receipt.model_used
-      ~cascade_profile:receipt.cascade_name
+      ~cascade_profile:(cascade_name_to_string receipt.cascade_name)
       ()
   in
   let action_radius =
@@ -474,7 +479,7 @@ let to_json (receipt : t) =
       ( "cascade",
         `Assoc
           [
-            ("name", `String receipt.cascade_name);
+            ("name", `String (cascade_name_to_string receipt.cascade_name));
             ( "selected_model",
               match receipt.cascade_selected_model with
               | Some value -> `String value
@@ -485,7 +490,7 @@ let to_json (receipt : t) =
             ("degraded_retry_applied", `Bool receipt.degraded_retry_applied);
             ( "degraded_retry_cascade",
               match receipt.degraded_retry_cascade with
-              | Some value -> `String value
+              | Some value -> `String (cascade_name_to_string value)
               | None -> `Null );
             ( "fallback_reason",
               match receipt.fallback_reason with
@@ -574,7 +579,7 @@ let operator_broadcast_payload (receipt : t) ~disposition ~reason =
         | None -> `Null )
     ; "goal_ids", list_json receipt.goal_ids
     ; "response_text_present", `Bool receipt.response_text_present
-    ; "cascade_name", `String receipt.cascade_name
+    ; "cascade_name", `String (cascade_name_to_string receipt.cascade_name)
     ; "cascade_outcome", `String receipt.cascade_outcome
     ; "tool_contract_result", `String receipt.tool_contract_result
     ; ( "last_tool_name",
@@ -658,12 +663,13 @@ let append (config : Coord.config) (receipt : t) =
 let emit_stale_keeper_broadcast config
     ~keeper_name ~agent_name ~cascade_name ~trace_id ~generation
     ~stale_seconds ~last_turn_ts =
+  let cascade_name_string = cascade_name_to_string cascade_name in
   let payload =
     `Assoc
       [ "schema", `String "keeper.operator_broadcast_required.v1"
       ; "keeper_name", `String keeper_name
       ; "agent_name", `String agent_name
-      ; "cascade_name", `String cascade_name
+      ; "cascade_name", `String cascade_name_string
       ; "trace_id", `String trace_id
       ; "generation", `Int generation
       ; "disposition", `String "stalled"
@@ -683,7 +689,7 @@ let emit_stale_keeper_broadcast config
   in
   Log.Keeper.error
     "%s: stale_keeper_broadcast emitted last_turn=%.0fs ago cascade=%s seq=%d"
-    keeper_name stale_seconds cascade_name event.seq
+    keeper_name stale_seconds cascade_name_string event.seq
 
 let latest_json (config : Coord.config) keeper_name =
   let store =

@@ -465,19 +465,27 @@ let append_execution_receipt config ~keeper_name =
       network_mode = Lib.Keeper_types.network_mode_to_string meta.network_mode;
       approval_profile = Some "trusted_local";
       approval_profile_derived = false;
-      cascade_name = meta.cascade_name;
+      cascade_name =
+        Lib.Keeper_execution_receipt.cascade_name_of_string meta.cascade_name;
       cascade_selected_model = Some "custom:mock";
       cascade_attempt_count = 2;
       cascade_fallback_applied = true;
       cascade_outcome = "passed_to_next_model";
       degraded_retry_applied = true;
-      degraded_retry_cascade = Some Lib.Keeper_config.local_recovery_cascade_name;
+      degraded_retry_cascade =
+        Some
+          (Lib.Keeper_execution_receipt.cascade_name_of_string
+             Lib.Keeper_config.local_recovery_cascade_name);
       fallback_reason = Some "turn_timeout";
       cascade_rotation_attempts =
         [
           {
-            from_cascade = Lib.Keeper_config.default_cascade_name;
-            to_cascade = Lib.Keeper_config.local_recovery_cascade_name;
+            from_cascade =
+              Lib.Keeper_execution_receipt.cascade_name_of_string
+                Lib.Keeper_config.default_cascade_name;
+            to_cascade =
+              Lib.Keeper_execution_receipt.cascade_name_of_string
+                Lib.Keeper_config.local_recovery_cascade_name;
             reason = "turn_timeout";
             outcome = "retry_scheduled";
             error_kind =

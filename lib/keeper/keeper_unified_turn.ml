@@ -90,7 +90,8 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
         ~config
         ~meta
         ~generation
-        ~cascade_name:meta.cascade_name
+        ~cascade_name:
+          (Keeper_execution_receipt.cascade_name_of_string meta.cascade_name)
         ~outcome:"skipped"
         ~terminal_reason_code
         ~activity_kind:"keeper.turn_skipped"
@@ -202,7 +203,9 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                 ~config
                 ~meta
                 ~generation
-                ~cascade_name:effective_cascade_name
+                ~cascade_name:
+                  (Keeper_execution_receipt.cascade_name_of_string
+                     effective_cascade_name)
                 ~outcome:"error"
                 ~terminal_reason_code:"ollama_saturated"
                 ~activity_kind:"keeper.turn_failed"
@@ -289,7 +292,9 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             ~config
             ~meta
             ~generation
-            ~cascade_name:effective_cascade_name
+            ~cascade_name:
+              (Keeper_execution_receipt.cascade_name_of_string
+                 effective_cascade_name)
             ~outcome:"error"
             ~terminal_reason_code
             ~activity_kind:"keeper.turn_blocked"
@@ -334,7 +339,9 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
              ~config
              ~meta
              ~generation
-             ~cascade_name:initial_execution.cascade_name
+             ~cascade_name:
+               (Keeper_execution_receipt.cascade_name_of_string
+                  initial_execution.cascade_name)
              (* β6: "blocked" was not in outcome_kind quad-state
                 (ok/skipped/error/cancelled), causing operator_disposition
                 to classify livelock-blocked turns as "unknown".  Map to
@@ -608,8 +615,10 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
           (err : Oas.Error.sdk_error) =
         let attempt : Keeper_execution_receipt.cascade_rotation_attempt =
           {
-            from_cascade;
-            to_cascade = retry.next_cascade;
+            from_cascade =
+              Keeper_execution_receipt.cascade_name_of_string from_cascade;
+            to_cascade =
+              Keeper_execution_receipt.cascade_name_of_string retry.next_cascade;
             reason = retry.fallback_reason;
             outcome;
             error_kind =
@@ -753,7 +762,9 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                     ~config
                     ~meta:run_meta
                     ~generation:run_generation
-                    ~cascade_name:execution.cascade_name
+                    ~cascade_name:
+                      (Keeper_execution_receipt.cascade_name_of_string
+                         execution.cascade_name)
                     ~outcome:"cancelled"
                     ~terminal_reason_code:"external_cancel"
                     ~activity_kind:"keeper.turn_cancelled"

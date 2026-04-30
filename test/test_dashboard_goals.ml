@@ -130,7 +130,8 @@ let append_keeper_receipt ?(outcome = "ok")
       network_mode = Keeper_types.network_mode_to_string meta.network_mode;
       approval_profile = Some "trusted_local";
       approval_profile_derived = false;
-      cascade_name = meta.cascade_name;
+      cascade_name =
+        Keeper_execution_receipt.cascade_name_of_string meta.cascade_name;
       cascade_selected_model = Some "openai:gpt-5.4";
       cascade_attempt_count = 1;
       cascade_fallback_applied = false;

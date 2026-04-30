@@ -151,6 +151,7 @@ let enrich_sdk_error ~cascade_name
   | _ -> err
 
 let cli_wrapped_hard_quota_indicators = [
+  "hard_quota";
   "terminalquotaerror";
   "quota_exhausted";
   "exhausted your capacity on this model";

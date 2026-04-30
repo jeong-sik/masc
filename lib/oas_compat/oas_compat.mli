@@ -32,6 +32,7 @@ module Http_client : sig
     | Cli_transport_required
     | Network_error
     | Provider_terminal
+    | Provider_hard_quota
 
   val classify : Llm_provider.Http_client.http_error -> cascade_failure_class
   (** Classify an OAS HTTP/client failure into MASC's typed cascade boundary.

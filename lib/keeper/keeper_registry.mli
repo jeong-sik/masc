@@ -519,3 +519,17 @@ val enqueue_event :
     when the keeper is missing. Read-only — does not consume stimuli. *)
 val event_queue_snapshot :
   base_path:string -> string -> Keeper_event_queue.t
+
+(** Consume at most one stimulus from the keeper's Event Layer queue.
+
+    Returns [Some stim] when the queue had work (and the stimulus is
+    removed from the queue), [None] when the queue is empty or the
+    keeper is not registered. Lock-free CAS retry on
+    [entry.event_queue]; concurrent callers do not block.
+
+    The Policy Layer (turn entry) calls this once per [Emit] tick to
+    drain one stimulus per turn. See RFC-0020 §3 (Rule 4: per-turn
+    dequeue) and KeeperEventQueue.tla Conservation invariant
+    ([dequeued_total <= enqueued_total]). *)
+val dequeue_event :
+  base_path:string -> string -> Keeper_event_queue.stimulus option

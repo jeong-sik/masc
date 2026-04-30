@@ -1367,3 +1367,18 @@ let event_queue_snapshot ~base_path name =
   match get ~base_path name with
   | None -> Keeper_event_queue.empty
   | Some entry -> Atomic.get entry.event_queue
+
+let dequeue_event ~base_path name =
+  match get ~base_path name with
+  | None -> None
+  | Some entry ->
+      let rec loop () =
+        let cur = Atomic.get entry.event_queue in
+        match Keeper_event_queue.dequeue cur with
+        | None -> None
+        | Some (stim, rest) ->
+            if Atomic.compare_and_set entry.event_queue cur rest
+            then Some stim
+            else loop ()
+      in
+      loop ()

@@ -968,9 +968,11 @@ let sweep_and_recover (ctx : _ context) =
     apply_self_preservation ~keepers_dir ~total_keepers:active_count !to_restart in
   (* Restart crashed keepers *)
   List.iter (fun ((old_entry : Keeper_registry.registry_entry), crash_msg) ->
+    let attempt = old_entry.restart_count + 1 in
+    Prometheus.inc_counter Prometheus.metric_keeper_restart_attempts
+      ~labels:[("keeper", old_entry.name)] ();
     match read_meta ctx.config old_entry.name with
     | Ok (Some meta) ->
-        let attempt = old_entry.restart_count + 1 in
         (* RFC-0002: dispatch restart attempt event *)
         ignore (Keeper_registry.dispatch_event ~base_path old_entry.name
           (Keeper_state_machine.Supervisor_restart_attempt { attempt }));
@@ -988,6 +990,8 @@ let sweep_and_recover (ctx : _ context) =
                       phase = Some Keeper_state_machine.Running })
           old_entry.name
           (Printf.sprintf "attempt %d" attempt) ();
+        Prometheus.inc_counter Prometheus.metric_keeper_restart_outcomes
+          ~labels:[("keeper", old_entry.name); ("outcome", "started")] ();
         Log.Keeper.info "%s: restarted (attempt %d, backoff %.0fs)"
           old_entry.name attempt (backoff_delay (attempt - 1));
         (* Soft pre-warning when this is the FINAL allowed restart: next
@@ -1001,6 +1005,8 @@ let sweep_and_recover (ctx : _ context) =
             ~labels:[("keeper", old_entry.name)] ()
         end
     | _ ->
+        Prometheus.inc_counter Prometheus.metric_keeper_restart_outcomes
+          ~labels:[("keeper", old_entry.name); ("outcome", "meta_unavailable")] ();
         Log.Keeper.error "%s: cannot read meta for restart, removing"
           old_entry.name;
         Keeper_registry.unregister ~base_path old_entry.name;

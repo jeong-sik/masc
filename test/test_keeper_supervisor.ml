@@ -308,6 +308,124 @@ let test_sweep_restores_reconcile_gate_for_paused_keeper () =
       check bool "keeper registered after approval" true
         (Reg.is_registered ~base_path:config.base_path meta.name))
 
+let test_restart_path_emits_attempt_and_started_outcome_metrics () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let name = "restart-metric-keeper" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc_mcp.Keeper_keepalive.stop_keepalive ~base_path:base_dir name;
+      Reg.clear ();
+      Masc_mcp.Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
+      let meta = make_meta name in
+      (match KT.write_meta config meta with
+       | Ok () -> ()
+       | Error err -> fail err);
+      let reg = Reg.register ~base_path:config.base_path name meta in
+      Eio.Promise.resolve reg.done_r (`Crashed "ordinary crash");
+      Reg.restore_supervisor_state ~base_path:config.base_path name
+        ~restart_count:0 ~last_restart_ts:0.0 ~crash_log:[];
+      let attempt_labels = [ ("keeper", name) ] in
+      let outcome_labels = [ ("keeper", name); ("outcome", "started") ] in
+      let attempts_before =
+        Masc_mcp.Prometheus.metric_value_or_zero
+          Masc_mcp.Prometheus.metric_keeper_restart_attempts
+          ~labels:attempt_labels ()
+      in
+      let outcomes_before =
+        Masc_mcp.Prometheus.metric_value_or_zero
+          Masc_mcp.Prometheus.metric_keeper_restart_outcomes
+          ~labels:outcome_labels ()
+      in
+      let ctx : _ KT.context =
+        {
+          config;
+          agent_name = "supervisor";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = Some (Eio.Stdenv.net env);
+        }
+      in
+      Sup.sweep_and_recover ctx;
+      check (float 0.001) "restart attempt metric incremented"
+        (attempts_before +. 1.0)
+        (Masc_mcp.Prometheus.metric_value_or_zero
+           Masc_mcp.Prometheus.metric_keeper_restart_attempts
+           ~labels:attempt_labels ());
+      check (float 0.001) "restart started outcome metric incremented"
+        (outcomes_before +. 1.0)
+        (Masc_mcp.Prometheus.metric_value_or_zero
+           Masc_mcp.Prometheus.metric_keeper_restart_outcomes
+           ~labels:outcome_labels ());
+      match Reg.get ~base_path:config.base_path name with
+      | None -> fail "expected restarted keeper in registry"
+      | Some entry ->
+          check int "restart count restored to attempt" 1 entry.restart_count)
+
+let test_restart_path_emits_meta_unavailable_outcome_metric () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let name = "restart-missing-meta-metric-keeper" in
+  Fun.protect
+    ~finally:(fun () ->
+      Reg.clear ();
+      Masc_mcp.Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
+      let meta = make_meta name in
+      let reg = Reg.register ~base_path:config.base_path name meta in
+      Eio.Promise.resolve reg.done_r (`Crashed "ordinary crash");
+      Reg.restore_supervisor_state ~base_path:config.base_path name
+        ~restart_count:0 ~last_restart_ts:0.0 ~crash_log:[];
+      let attempt_labels = [ ("keeper", name) ] in
+      let outcome_labels =
+        [ ("keeper", name); ("outcome", "meta_unavailable") ]
+      in
+      let attempts_before =
+        Masc_mcp.Prometheus.metric_value_or_zero
+          Masc_mcp.Prometheus.metric_keeper_restart_attempts
+          ~labels:attempt_labels ()
+      in
+      let outcomes_before =
+        Masc_mcp.Prometheus.metric_value_or_zero
+          Masc_mcp.Prometheus.metric_keeper_restart_outcomes
+          ~labels:outcome_labels ()
+      in
+      let ctx : _ KT.context =
+        {
+          config;
+          agent_name = "supervisor";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = Some (Eio.Stdenv.net env);
+        }
+      in
+      Sup.sweep_and_recover ctx;
+      check (float 0.001) "restart attempt metric incremented"
+        (attempts_before +. 1.0)
+        (Masc_mcp.Prometheus.metric_value_or_zero
+           Masc_mcp.Prometheus.metric_keeper_restart_attempts
+           ~labels:attempt_labels ());
+      check (float 0.001) "missing-meta outcome metric incremented"
+        (outcomes_before +. 1.0)
+        (Masc_mcp.Prometheus.metric_value_or_zero
+           Masc_mcp.Prometheus.metric_keeper_restart_outcomes
+           ~labels:outcome_labels ());
+      check bool "keeper unregistered after missing meta" false
+        (Reg.is_registered ~base_path:config.base_path name))
+
 (* ── Dead-state loud alert (PR-C) ──────────────────────── *)
 
 (* Reproduces the 2026-04-25 incident pattern: 8 keepers crashed silently
@@ -625,6 +743,12 @@ let () =
     "reconcile_gate_recovery", [
       test_case "sweep restores reconcile gate for paused keeper" `Quick
         test_sweep_restores_reconcile_gate_for_paused_keeper;
+    ];
+    "restart_metrics", [
+      test_case "restart path emits attempt and started outcome metrics" `Quick
+        test_restart_path_emits_attempt_and_started_outcome_metrics;
+      test_case "restart path emits missing-meta outcome metrics" `Quick
+        test_restart_path_emits_meta_unavailable_outcome_metric;
     ];
     "dead_state_alert", [
       test_case "max_restarts exhaustion emits Dead alert" `Quick

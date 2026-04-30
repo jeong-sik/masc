@@ -289,6 +289,12 @@ val metric_keeper_fsm_edge_transitions : string
     keepers = ≤ 1600 series; reachable subset is much smaller. *)
 val metric_keeper_turn_fsm_transitions : string
 
+(** Keeper lifecycle phase transitions emitted by [Keeper_registry] only
+    when the persisted registry phase changes. Labels:
+    [keeper, from_phase, to_phase].  No event/reason label is included so
+    free-form transition payloads cannot create unbounded series. *)
+val metric_keeper_lifecycle_transitions : string
+
 (** Cycle 43 (Tier I3 follow-up to fsm_guard smoke at
     [keeper_turn_fsm.ml:118]): runtime [@@fsm_guard] assert violations
     that the [Keeper_fsm_guard_runtime.wrap_unit] caught and recovered
@@ -351,6 +357,14 @@ val metric_keeper_near_exhaustion_total : string
 (** Total times a keeper restart attempt landed at
     [restart_count = max_restarts - 1], i.e. one attempt away from Dead.
     Soft pre-warning; labeled by [keeper]. *)
+
+val metric_keeper_restart_attempts : string
+(** Total supervisor restart attempts for crashed keepers. Labels:
+    [keeper]. *)
+
+val metric_keeper_restart_outcomes : string
+(** Total supervisor restart outcomes. Labels:
+    [keeper, outcome]. Outcome is one of [started | meta_unavailable]. *)
 
 val metric_keeper_oas_timeout_budget_strike : string
 (** PR-M (Leak 9): consecutive [oas_timeout_budget] cycle FAILED strikes.

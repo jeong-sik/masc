@@ -1163,6 +1163,12 @@ let rec dispatch_event_with_audit
         | phase, Running when phase <> Running ->
           Atomic.incr running_count_atomic
         | _ -> ());
+       Prometheus.inc_counter Prometheus.metric_keeper_lifecycle_transitions
+         ~labels:[
+           ("keeper", name);
+           ("from_phase", Keeper_state_machine.phase_to_string tr.prev_phase);
+           ("to_phase", Keeper_state_machine.phase_to_string tr.new_phase);
+         ] ();
        (* Update dead_since_ts: always set to now on Dead transition *)
        let dead_since_ts = match tr.new_phase with
          | Keeper_state_machine.Dead -> Some now

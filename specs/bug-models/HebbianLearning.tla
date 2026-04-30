@@ -194,12 +194,12 @@ NextSafe ==
     \/ SafeStrAcquire \/ SafeStrCompute \/ SafeStrSave \/ SafeStrReset
     \/ SafeConAcquire \/ SafeConCompute \/ SafeConSave \/ SafeConReset
 
-NextUnsafe ==
+NextBuggy ==
     \/ UnsafeStrLoad \/ UnsafeStrCompute \/ UnsafeStrSave \/ UnsafeStrReset
     \/ UnsafeConLoad \/ UnsafeConCompute \/ UnsafeConSave \/ UnsafeConReset
 
 Spec == Init /\ [][NextSafe]_vars
-SpecBuggy == Init /\ [][NextUnsafe]_vars
+SpecBuggy == Init /\ [][NextBuggy]_vars
 
 \* ── Safety Invariants ─────────────────────────────────
 

@@ -14,6 +14,7 @@ module H = Masc_mcp.Cascade_health_tracker
 module C = Masc_mcp.Cascade_client_capacity
 module CH = Masc_mcp.Cascade_client_capacity_history
 module ST = Masc_mcp.Cascade_strategy_trace
+module Kcp = Masc_mcp.Keeper_cascade_profile
 module T = Masc_mcp.Cascade_throttle
 module Cascade_state = Masc_mcp.Cascade_state
 
@@ -964,7 +965,8 @@ let mk_trace_event ?(ts = 0.0) ?(cascade_name = "big_three")
     ?(strategy = "failover") ?(cycle = 0) ?(candidates_in = 3)
     ?(candidates_out = 3) ?(backoff_ms = 0) ?(kind = ST.Ordered)
     ?trace_id () =
-  { ST.ts; cascade_name; strategy; cycle; candidates_in; candidates_out;
+  { ST.ts; cascade_name = Kcp.Runtime_name cascade_name; strategy; cycle;
+    candidates_in; candidates_out;
     backoff_ms; kind; trace_id }
 
 let test_trace_record_snapshot_roundtrip () =
@@ -994,7 +996,9 @@ let test_trace_cascade_filter () =
   let unified = ST.snapshot ~cascade:"big_three" () in
   check int "big_three → 2 events" 2 (List.length unified);
   List.iter
-    (fun e -> check string "cascade filter" "big_three" e.ST.cascade_name)
+    (fun e ->
+      check string "cascade filter" "big_three"
+        (Kcp.runtime_name_to_string e.ST.cascade_name))
     unified;
   let missing = ST.snapshot ~cascade:"does_not_exist" () in
   check int "missing cascade → empty" 0 (List.length missing)

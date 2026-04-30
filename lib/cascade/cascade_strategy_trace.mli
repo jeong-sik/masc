@@ -37,7 +37,8 @@ type event_kind = Ordered | Filtered_empty | Exhausted
 (** One decision event.
 
     [ts] is a Unix timestamp (seconds).
-    [cascade_name] is the cascade.json profile name.
+    [cascade_name] is the cascade.json profile name carried as a typed
+    runtime cascade identifier.
     [strategy] is {!Cascade_strategy.kind_to_string} of the active kind.
     [cycle] is 0-based, matching the [n] in [oas_worker_named.cycle_loop].
     [candidates_in] is the input list size (post-[resolve_strategy]).
@@ -47,7 +48,7 @@ type event_kind = Ordered | Filtered_empty | Exhausted
     [0] for [Ordered] and [Exhausted]. *)
 type event = {
   ts : float;
-  cascade_name : string;
+  cascade_name : Keeper_cascade_profile.runtime_name;
   strategy : string;
   cycle : int;
   candidates_in : int;

@@ -74,7 +74,7 @@ val record_pre_dispatch_terminal_observation :
   terminal_reason_code:string ->
   activity_kind:string ->
   trajectory_outcome:Trajectory.trajectory_outcome ->
-  ?error_kind:string ->
+  ?error_kind:Keeper_execution_receipt.error_kind ->
   ?error_message:string ->
   ?keeper_turn_id:int ->
   unit -> unit

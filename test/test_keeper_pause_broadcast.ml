@@ -123,7 +123,7 @@ let test_pause_human_when_no_tools_used () =
 let test_provider_failure_not_reported_as_tool_unsatisfied () =
   let r =
     mk_receipt ~tools_used:[] ~terminal_reason_code:"api_error_invalid_request"
-      ~error_kind:(Some "api")
+      ~error_kind:(Some (R.error_kind_of_string "api"))
       ~error_message:
         (Some
            "Invalid request: kimi_cli startup crash while setting process title")
@@ -135,7 +135,7 @@ let test_provider_failure_not_reported_as_tool_unsatisfied () =
 let test_preflight_config_failure_not_reported_as_tool_unsatisfied () =
   let r =
     mk_receipt ~tools_used:[] ~terminal_reason_code:"config_error"
-      ~error_kind:(Some "config")
+      ~error_kind:(Some (R.error_kind_of_string "config"))
       ~error_message:(Some "provider auth/config failed before turn")
       ()
   in

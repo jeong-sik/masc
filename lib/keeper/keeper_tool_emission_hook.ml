@@ -77,3 +77,36 @@ let drain_into_working_context acc ~(working_context : Yojson.Safe.t option)
         ~working_context items
 
 let global_accumulator = create_accumulator ()
+
+(* Tier K4c — per-keeper registry. Each keeper gets its own
+   accumulator so concurrent multi-keeper tool emissions cannot
+   bleed across attribution boundaries. The registry itself is
+   guarded by [registry_mutex] for the get-or-create path; each
+   accumulator value carries its own mutex for push/drain (see
+   [push] / [drain]). *)
+let registry : (string, accumulator) Hashtbl.t = Hashtbl.create 16
+let registry_mutex : Stdlib.Mutex.t = Stdlib.Mutex.create ()
+
+let accumulator_for_keeper (keeper_name : string) : accumulator =
+  Stdlib.Mutex.lock registry_mutex;
+  let acc =
+    match Hashtbl.find_opt registry keeper_name with
+    | Some a -> a
+    | None ->
+        let a = create_accumulator () in
+        Hashtbl.add registry keeper_name a;
+        a
+  in
+  Stdlib.Mutex.unlock registry_mutex;
+  acc
+
+let registered_keeper_names () : string list =
+  Stdlib.Mutex.lock registry_mutex;
+  let names = Hashtbl.fold (fun k _ acc -> k :: acc) registry [] in
+  Stdlib.Mutex.unlock registry_mutex;
+  List.sort String.compare names
+
+let drop_keeper_accumulator (keeper_name : string) : unit =
+  Stdlib.Mutex.lock registry_mutex;
+  Hashtbl.remove registry keeper_name;
+  Stdlib.Mutex.unlock registry_mutex

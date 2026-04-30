@@ -376,7 +376,7 @@ TerminalFailureDetected ==
                    stop_requested, restart_budget_remaining, backoff_elapsed,
                    guardrail_triggered, drain_complete,
                    context_overflow, compact_retry_exhausted,
-                   terminal_failure_latched, restart_count>>
+                   restart_count>>
 
 \* ── Overflow Lifecycle Events ─────────────────────────────
 

@@ -238,7 +238,7 @@ let test_discover_ignores_masc_dir () =
   else
     with_temp_base_path (fun base_path ->
         let masc_dir = Filename.concat base_path ".masc" in
-        Unix.mkdir masc_dir 0o755;
+        if not (Sys.file_exists masc_dir) then Unix.mkdir masc_dir 0o755;
         let masc_repo = Filename.concat masc_dir "internal" in
         Unix.mkdir masc_repo 0o755;
         init_git_repo masc_repo "https://github.com/test/internal";

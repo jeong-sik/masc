@@ -647,6 +647,17 @@ let metric_keeper_lifecycle_callback_failures =
   "masc_keeper_lifecycle_callback_failures_total"
 let metric_keeper_event_bus_drain = "masc_keeper_event_bus_drain_total"
 let metric_keeper_dead_total = "masc_keeper_dead_total"
+(* Positive signal for the Skip_idle + Woken gate-promotion path added
+   by #12271. Increments every time run_smart_heartbeat_gate observes
+   that an external wakeup_keeper call cut a Skip_idle backoff sleep
+   short and the cycle was resumed (KeeperHeartbeat.tla HeartbeatTick
+   action). A zero rate after operator-visible board signals to a Live
+   keeper means the fix path is not firing — either the wakeup never
+   reached the atomic, or a regression silently re-introduced
+   MissedWakeup. Pair with stale_termination_by_class for full
+   positive/negative coverage. Labels: keeper. *)
+let metric_keeper_skip_idle_wake_resumed =
+  "masc_keeper_skip_idle_wake_resumed_total"
 let metric_keeper_near_exhaustion_total = "masc_keeper_near_exhaustion_total"
 (* PR-M (Leak 9): consecutive [oas_timeout_budget] cycle FAILED strikes
    per keeper. Counter increments on each strike; a strike at
@@ -968,6 +979,13 @@ let init () =
     "Total keeper transitions to Dead phase after the supervisor exhausts \
      max_restarts. Labeled by keeper and reason. Any rate >0 is operator-\
      actionable: the supervisor will not retry the keeper."
+    Counter;
+  add metric_keeper_skip_idle_wake_resumed
+    "Total cycles where an external wakeup_keeper / board signal cut a \
+     Skip_idle backoff sleep short and the heartbeat cycle was resumed \
+     (cycle_continues_after_wake -> true). Positive signal for the \
+     #12271 fix; pairs with masc_keeper_stale_termination_by_class_total \
+     {class=idle_turn} which should drop in proportion. Labels: keeper."
     Counter;
   add metric_keeper_near_exhaustion_total
     "Total keeper restart attempts at restart_count = max_restarts - 1, \

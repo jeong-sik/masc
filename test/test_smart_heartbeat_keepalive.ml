@@ -185,6 +185,50 @@ let test_after_wake_emit_unchanged () =
   check bool "Emit + Woken -> continues" true
     (KK.cycle_continues_after_wake HS.Emit KKS.Woken)
 
+(* ── Operator telemetry: positive signal counter ───────────────────
+   Sibling to masc_keeper_stale_termination_by_class_total (negative).
+   Operators read these two together: rate(positive) > 0 + rate(negative
+   {class=idle_turn}) trending to 0 = fix is firing. Both metrics must
+   be registered (no dead series), accept a [keeper] label, and increment
+   monotonically. *)
+
+module Prom = Masc_mcp.Prometheus
+
+let test_skip_idle_wake_resumed_metric_registered () =
+  let labels = [ ("keeper", "test_keeper_a") ] in
+  let before =
+    Prom.metric_value_or_zero
+      Prom.metric_keeper_skip_idle_wake_resumed ~labels ()
+  in
+  Prom.inc_counter
+    Prom.metric_keeper_skip_idle_wake_resumed ~labels ();
+  let after =
+    Prom.metric_value_or_zero
+      Prom.metric_keeper_skip_idle_wake_resumed ~labels ()
+  in
+  check (float 0.001) "counter increments by 1" 1.0 (after -. before)
+
+let test_skip_idle_wake_resumed_label_isolation () =
+  (* Per-keeper labels must not bleed: a delta on keeper_a should not
+     show on keeper_b. Otherwise operators cannot attribute the fix
+     activity to specific keepers in fleet dashboards. *)
+  let la = [ ("keeper", "test_keeper_iso_a") ] in
+  let lb = [ ("keeper", "test_keeper_iso_b") ] in
+  let b_before =
+    Prom.metric_value_or_zero
+      Prom.metric_keeper_skip_idle_wake_resumed ~labels:lb ()
+  in
+  Prom.inc_counter
+    Prom.metric_keeper_skip_idle_wake_resumed ~labels:la ();
+  Prom.inc_counter
+    Prom.metric_keeper_skip_idle_wake_resumed ~labels:la ();
+  let b_after =
+    Prom.metric_value_or_zero
+      Prom.metric_keeper_skip_idle_wake_resumed ~labels:lb ()
+  in
+  check (float 0.001) "keeper_b counter unchanged" 0.0
+    (b_after -. b_before)
+
 let test_status_tick_usage_json_includes_cache_fields () =
   let usage = KK.status_tick_usage_json () in
   let int_member key =
@@ -246,6 +290,12 @@ let () =
         `Quick test_after_wake_busy_unchanged;
       test_case "Emit outcome-agnostic"
         `Quick test_after_wake_emit_unchanged;
+    ];
+    "operator_telemetry", [
+      test_case "skip_idle_wake_resumed counter registered"
+        `Quick test_skip_idle_wake_resumed_metric_registered;
+      test_case "per-keeper label isolation"
+        `Quick test_skip_idle_wake_resumed_label_isolation;
     ];
     "status_tick_usage", [
       test_case "status tick usage preserves cache fields" `Quick

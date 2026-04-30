@@ -333,6 +333,20 @@ val metric_keeper_dead_total : string
     Labeled by [keeper] and [reason]. Operators should alert on any rate >0:
     by construction Dead means the supervisor gave up and no further
     restart will be attempted. *)
+
+val metric_keeper_skip_idle_wake_resumed : string
+(** Positive signal for the #12271 Skip_idle + Woken fix path. Increments
+    each time [run_smart_heartbeat_gate] observes an external [wakeup_keeper]
+    cut a Skip_idle backoff sleep short and the cycle was resumed
+    ([cycle_continues_after_wake] -> [true]). Operator-meaningful pair with
+    [masc_keeper_stale_termination_by_class_total] (class=idle_turn): a
+    healthy fleet should show non-zero rates here proportional to inbound
+    board signals, with the idle_turn kill rate trending toward zero. A
+    zero rate after operator-visible signals suggests either the wakeup
+    never reached the atomic, or a regression silently re-introduced
+    MissedWakeup (KeeperHeartbeat.tla bug action).
+    Labels: [keeper]. *)
+
 val metric_keeper_near_exhaustion_total : string
 (** Total times a keeper restart attempt landed at
     [restart_count = max_restarts - 1], i.e. one attempt away from Dead.

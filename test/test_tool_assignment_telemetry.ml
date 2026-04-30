@@ -117,6 +117,33 @@ let test_completed_temporal_ordering () =
     check bool "assigned before called" true (t0 <= t1);
     check bool "called before completed" true (t1 <= t2))
 
+let test_completed_error_kind_round_trip () =
+  with_eio_temp_base_path (fun () ->
+    Tool_assignment_telemetry.reset_for_testing ();
+    let assignment_id =
+      Tool_assignment_telemetry.emit_assigned
+        ~agent_id:"agent-3b"
+        ~profile:"Managed_agent"
+        ~tool_list:[ "read" ]
+        ()
+    in
+    Tool_assignment_telemetry.emit_completed
+      ~assignment_id
+      ~tool_name:"read"
+      ~success:false
+      ~duration_ms:7.0
+      ~error_kind:(Tool_assignment_telemetry.error_kind_of_string "timeout")
+      ();
+    match Tool_assignment_telemetry.read_recent ~n:1 with
+    | Error msg -> fail ("read_recent failed: " ^ msg)
+    | Ok [ Completed ev ] -> (
+        match ev.error_kind with
+        | Some kind ->
+            check string "error kind" "timeout"
+              (Tool_assignment_telemetry.error_kind_to_string kind)
+        | None -> fail "expected error_kind")
+    | Ok _ -> fail "expected one Completed event")
+
 (* --- Test 4: Config hash format validation --- *)
 
 let test_config_hash_format () =
@@ -197,6 +224,8 @@ let () =
             test_called_links_to_assignment_id;
           test_case "completed temporal ordering" `Quick
             test_completed_temporal_ordering;
+          test_case "completed error kind round-trip" `Quick
+            test_completed_error_kind_round_trip;
           test_case "config hash format" `Quick test_config_hash_format;
           test_case "read_recent newest first" `Quick
             test_read_recent_newest_first;

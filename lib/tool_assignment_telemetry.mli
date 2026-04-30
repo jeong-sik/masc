@@ -15,6 +15,15 @@
 
 type assignment_id = string
 
+type error_kind = private Error_kind of string
+(** Coarse tool completion error family. *)
+
+val error_kind_of_string : string -> error_kind
+(** Convert a wire/log label into an internal error-kind value. *)
+
+val error_kind_to_string : error_kind -> string
+(** Convert an internal error-kind value back to the public wire label. *)
+
 type tool_event =
   | Assigned of {
       assignment_id : assignment_id;
@@ -40,7 +49,7 @@ type tool_event =
       tool_name : string;
       success : bool;
       duration_ms : float;
-      error_kind : string option;
+      error_kind : error_kind option;
       timestamp : float;
     }
 
@@ -81,7 +90,7 @@ val emit_completed :
   tool_name:string ->
   success:bool ->
   duration_ms:float ->
-  ?error_kind:string ->
+  ?error_kind:error_kind ->
   unit ->
   unit
 

@@ -35,6 +35,7 @@ export default defineConfig(({ command }) => {
         include: [
           /design-system\/headless-solid\//,
           /design-system\/preview\/solid-.*/,
+          /src\/components\/.*\.solid(\.test)?\.(ts|tsx)$/,
         ],
       }),
       preact(),

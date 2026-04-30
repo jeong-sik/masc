@@ -815,6 +815,30 @@ let test_public_read_path_rejects_generic_connector_unbind () =
   check bool "generic connector unbind is not public read" false
     (SA.is_public_read_path "/api/v1/gate/connector/unbind")
 
+(* Tier F2 — multimodal dashboard reads are public *)
+let test_public_read_path_allows_multimodal_list () =
+  let module SA = Masc_mcp.Server_auth in
+  check bool "multimodal list is public read" true
+    (SA.is_public_read_path "/api/v1/multimodal/list")
+
+let test_public_read_path_allows_multimodal_get () =
+  let module SA = Masc_mcp.Server_auth in
+  check bool "multimodal get/<id> is public read" true
+    (SA.is_public_read_path "/api/v1/multimodal/get/01900000-0000-7000-8000-000000000001")
+
+let test_public_read_path_allows_multimodal_provenance () =
+  let module SA = Masc_mcp.Server_auth in
+  check bool "multimodal provenance/<id> is public read" true
+    (SA.is_public_read_path "/api/v1/multimodal/provenance/01900000-0000-7000-8000-000000000001")
+
+let test_public_read_path_rejects_unrelated_multimodal_subpath () =
+  let module SA = Masc_mcp.Server_auth in
+  (* If a future write endpoint lands under /api/v1/multimodal/, the
+     prefix entries above must NOT cover it. Only the three known
+     read paths are public; anything else stays auth-required. *)
+  check bool "multimodal create (hypothetical) is NOT public read" false
+    (SA.is_public_read_path "/api/v1/multimodal/create")
+
 let test_permission_for_tool_unknown () =
   match Auth.permission_for_tool "unknown_tool_xyz" with
   | None -> ()
@@ -1226,5 +1250,13 @@ let () =
         test_public_read_path_rejects_generic_connector_bind;
       test_case "generic connector unbind is not public read" `Quick
         test_public_read_path_rejects_generic_connector_unbind;
+      test_case "multimodal list is public read" `Quick
+        test_public_read_path_allows_multimodal_list;
+      test_case "multimodal get is public read" `Quick
+        test_public_read_path_allows_multimodal_get;
+      test_case "multimodal provenance is public read" `Quick
+        test_public_read_path_allows_multimodal_provenance;
+      test_case "unrelated multimodal subpath stays auth-required" `Quick
+        test_public_read_path_rejects_unrelated_multimodal_subpath;
     ];
   ]

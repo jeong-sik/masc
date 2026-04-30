@@ -10,7 +10,10 @@ export default defineConfig({
   test: {
     environment: 'happy-dom',
     include: ['src/**/*.test.ts', 'design-system/**/*.test.ts'],
-    exclude: ['design-system/headless-solid/**/*.test.ts'],
+    exclude: [
+      'design-system/headless-solid/**/*.test.ts',
+      'src/**/*.solid.test.{ts,tsx}',
+    ],
     globals: true,
     setupFiles: ['./vitest-setup.ts'],
   },

@@ -1,6 +1,6 @@
 ---
 status: reference
-last_verified: 2026-04-17
+last_verified: 2026-04-30
 code_refs:
   - lib/keeper/keeper_composite_observer.ml
   - lib/keeper/keeper_state_machine.ml
@@ -22,7 +22,7 @@ The keeper runtime exposes **6 orthogonal FSM axes** per entity and a **4-invari
 
 | Axis | Code site                           | States                                                                    | TLA+ spec                              |
 | ---- | ----------------------------------- | ------------------------------------------------------------------------- | -------------------------------------- |
-| KSM  | `keeper_state_machine.mli` (phase)  | Offline / Running / Failing / Overflowed / Compacting / HandingOff / Paused / Draining / Stopped / Crashed / Restarting / Dead | `KeeperStateMachine.tla`               |
+| KSM  | `keeper_state_machine.mli` (phase)  | Offline / Running / Failing / Overflowed / Compacting / HandingOff / Paused / Draining / Stopped / Crashed / Restarting / Dead / Zombie | `KeeperStateMachine.tla`               |
 | KTC  | `keeper_registry.mli:turn_phase`    | idle / prompting / executing / compacting / finalizing                    | `KeeperTurnCycle.tla`                  |
 | KDP  | `keeper_registry.mli:decision_stage`| undecided / guard_ok / gate_rejected / tool_policy_selected               | `KeeperDecisionPipeline.tla`           |
 | KCL  | `keeper_registry.mli:cascade_state` | idle / selecting / trying / done / exhausted                              | `KeeperCascadeLifecycle.tla`           |

@@ -18,6 +18,7 @@
  *   specs/keeper-state-machine/KeeperDecisionPipeline.tla
  *   specs/keeper-state-machine/KeeperCascadeLifecycle.tla
  *   specs/keeper-state-machine/KeeperCompactionLifecycle.tla
+ *   specs/keeper-state-machine/KeeperCircuitBreaker.tla
  *
  * Only the common-case edges are rendered — a full enumeration of
  * every guarded transition would be unreadable and is what the TLA+
@@ -33,7 +34,7 @@ import { MermaidGraph } from './common/mermaid-graph'
 // does not collapse e.g. two "idle" nodes (KTC and KCL both have one).
 // Labels displayed to the operator stay bare for readability.
 const MERMAID_COMPOSITE: string = `flowchart TB
-  %% ─ KSM (Lifecycle, 12 states) ──────────────────────────
+  %% ─ KSM (Lifecycle, 13 states) ──────────────────────────
   subgraph KSM ["라이프사이클 · KSM"]
     direction LR
     ksm_offline["Offline"] --> ksm_running["Running"]
@@ -53,6 +54,11 @@ const MERMAID_COMPOSITE: string = `flowchart TB
     ksm_crashed --> ksm_restarting["Restarting"]
     ksm_restarting --> ksm_running
     ksm_restarting --> ksm_dead
+    %% Zombie is reached via TerminalFailureDetected from any non-terminal
+    %% phase (derive_phase ELSE-IF branch on terminal_failure_latched=TRUE).
+    %% Failing is the most common upstream phase; the dashed edge marks
+    %% the trigger as a guarded condition rather than a direct transition.
+    ksm_failing -.-> ksm_zombie["Zombie"]
   end
 
   %% ─ KTC (Turn cycle, 5 states) ──────────────────────────
@@ -112,7 +118,7 @@ const MERMAID_COMPOSITE: string = `flowchart TB
   classDef motion   fill:#1a1305,stroke:#a16207,color:#fde68a
   classDef error    fill:#1e0a0a,stroke:#b91c1c,color:#fca5a5
 
-  class ksm_stopped,ksm_dead terminal
+  class ksm_stopped,ksm_dead,ksm_zombie terminal
   class ksm_running,ksm_paused,ktc_idle,kcl_idle,kmc_accumulating,kcb_clean stable
   class ksm_compacting,ksm_handingoff,ksm_overflowed,ksm_draining,ksm_restarting,ktc_prompting,ktc_executing,ktc_compacting,ktc_finalizing,kcl_selecting,kcl_trying,kmc_compacting,kcb_warning motion
   class ksm_failing,ksm_crashed,kdp_gate_rejected,kcl_exhausted error

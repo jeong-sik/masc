@@ -61,8 +61,8 @@ describe('Tabs a11y', () => {
       container,
     )
     const tabs = container.querySelectorAll('[role="tab"]')
-    expect(tabs[0].getAttribute('aria-selected')).toBe('true')
-    expect(tabs[1].getAttribute('aria-selected')).toBe('false')
+    expect(tabs[0]!.getAttribute('aria-selected')).toBe('true')
+    expect(tabs[1]!.getAttribute('aria-selected')).toBe('false')
   })
 
   it('tab controls panel via aria-controls', () => {
@@ -94,10 +94,10 @@ describe('Tabs a11y', () => {
       container,
     )
     const tabs = container.querySelectorAll('[role="tab"]')
-    ;(tabs[1] as HTMLButtonElement).click()
+    ;(tabs[1]! as HTMLButtonElement).click()
     await new Promise((r) => setTimeout(r, 0))
-    expect(tabs[0].getAttribute('aria-selected')).toBe('false')
-    expect(tabs[1].getAttribute('aria-selected')).toBe('true')
+    expect(tabs[0]!.getAttribute('aria-selected')).toBe('false')
+    expect(tabs[1]!.getAttribute('aria-selected')).toBe('true')
   })
 
   it(' ArrowRight cycles tabs and moves focus', async () => {
@@ -112,12 +112,12 @@ describe('Tabs a11y', () => {
       container,
     )
     const tabs = container.querySelectorAll('[role="tab"]')
-    ;(tabs[0] as HTMLButtonElement).focus()
-    tabs[0].dispatchEvent(
+    ;(tabs[0]! as HTMLButtonElement).focus()
+    tabs[0]!.dispatchEvent(
       new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }),
     )
     await new Promise((r) => setTimeout(r, 0))
     expect(document.activeElement).toBe(tabs[1])
-    expect(tabs[1].getAttribute('aria-selected')).toBe('true')
+    expect(tabs[1]!.getAttribute('aria-selected')).toBe('true')
   })
 })

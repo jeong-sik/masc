@@ -3,7 +3,7 @@
 // Home/End jump to first/last.
 
 import { html } from 'htm/preact'
-import type { ComponentChildren, VNode } from 'preact'
+import type { ComponentChildren } from 'preact'
 import { createContext } from 'preact'
 import { useCallback, useContext, useId, useRef, useState } from 'preact/hooks'
 
@@ -94,7 +94,8 @@ export function Tab({ value, children, class: cx }: TabProps) {
 
     if (nextIdx !== -1) {
       e.preventDefault()
-      const next = tabs[nextIdx] as HTMLButtonElement
+      const next = tabs[nextIdx] as HTMLButtonElement | undefined
+      if (!next) return
       next.focus()
       next.click()
     }

@@ -48,8 +48,8 @@ describe('RadioGroup a11y', () => {
       container,
     )
     const radios = container.querySelectorAll('[role="radio"]')
-    expect(radios[0].getAttribute('aria-checked')).toBe('false')
-    expect(radios[1].getAttribute('aria-checked')).toBe('true')
+    expect(radios[0]!.getAttribute('aria-checked')).toBe('false')
+    expect(radios[1]!.getAttribute('aria-checked')).toBe('true')
   })
 
   it('selects on click', async () => {
@@ -62,11 +62,11 @@ describe('RadioGroup a11y', () => {
       container,
     )
     const radios = container.querySelectorAll('[role="radio"]')
-    ;(radios[0] as HTMLDivElement).click()
+    ;(radios[0]! as HTMLDivElement).click()
     await new Promise((r) => setTimeout(r, 0))
     expect(onChange).toHaveBeenCalledWith('light')
-    expect(radios[0].getAttribute('aria-checked')).toBe('true')
-    expect(radios[1].getAttribute('aria-checked')).toBe('false')
+    expect(radios[0]!.getAttribute('aria-checked')).toBe('true')
+    expect(radios[1]!.getAttribute('aria-checked')).toBe('false')
   })
 
   it('ArrowDown moves focus and selects next', async () => {
@@ -78,12 +78,12 @@ describe('RadioGroup a11y', () => {
       container,
     )
     const radios = container.querySelectorAll('[role="radio"]')
-    ;(radios[0] as HTMLDivElement).focus()
-    radios[0].dispatchEvent(
+    ;(radios[0]! as HTMLDivElement).focus()
+    radios[0]!.dispatchEvent(
       new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }),
     )
     await new Promise((r) => setTimeout(r, 0))
     expect(document.activeElement).toBe(radios[1])
-    expect(radios[1].getAttribute('aria-checked')).toBe('true')
+    expect(radios[1]!.getAttribute('aria-checked')).toBe('true')
   })
 })

@@ -153,7 +153,7 @@ describe('Combobox a11y', () => {
     await new Promise((r) => setTimeout(r, 0))
     const options = container.querySelectorAll('[role="option"]')
     expect(options.length).toBe(1)
-    expect(options[0].textContent).toBe('Apple')
+    expect(options[0]!.textContent).toBe('Apple')
   })
 
   it('calls onChange with typed value', async () => {

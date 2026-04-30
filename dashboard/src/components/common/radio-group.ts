@@ -86,6 +86,7 @@ export function Radio({ value, children, class: cx }: RadioProps) {
     if (nextIdx !== -1) {
       e.preventDefault()
       const next = radios[nextIdx]
+      if (!next) return
       next.focus()
       next.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     } else if (e.key === ' ' || e.key === 'Spacebar') {

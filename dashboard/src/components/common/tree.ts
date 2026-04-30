@@ -4,7 +4,7 @@
 // ArrowLeft collapses, Enter selects.
 
 import { html } from 'htm/preact'
-import { useCallback, useId, useState } from 'preact/hooks'
+import { useCallback, useState } from 'preact/hooks'
 
 export interface TreeNode {
   id: string
@@ -71,7 +71,6 @@ export function Tree({
   testId,
   'aria-label': ariaLabel,
 }: TreeProps) {
-  const id = useId()
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
 
   const visible = flatten(nodes, expanded)
@@ -94,7 +93,6 @@ export function Tree({
   }
 
   const activeIndex = Math.max(0, findIndex(selectedId))
-  const activeNode = visible[activeIndex] ?? visible[0]
 
   const handleKeyDown = (e: KeyboardEvent) => {
     if (visible.length === 0) return
@@ -123,9 +121,8 @@ export function Tree({
       // Collapse: jump to parent if any
       if (node?.parentId) {
         const parentIdx = visible.findIndex((n) => n.id === node.parentId)
-        if (parentIdx >= 0) {
-          onSelect?.(visible[parentIdx].id)
-        }
+        const parent = visible[parentIdx]
+        if (parent) onSelect?.(parent.id)
         return
       }
     } else if (e.key === 'Enter') {
@@ -144,8 +141,9 @@ export function Tree({
       nextIndex = visible.length - 1
     }
 
-    if (nextIndex !== activeIndex && visible[nextIndex]) {
-      onSelect?.(visible[nextIndex].id)
+    const next = visible[nextIndex]
+    if (nextIndex !== activeIndex && next) {
+      onSelect?.(next.id)
     }
   }
 
@@ -159,7 +157,7 @@ export function Tree({
       onKeyDown=${handleKeyDown}
     >
       ${visible.map(
-        (node, idx) => html`
+        (node) => html`
           <li
             key=${node.id}
             role="treeitem"

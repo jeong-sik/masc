@@ -3,7 +3,7 @@
 // Home/End jump to first/last. Only one item is tab-accessible at a time.
 
 import { html } from 'htm/preact'
-import type { ComponentChildren, VNode } from 'preact'
+import type { ComponentChildren } from 'preact'
 import { createContext } from 'preact'
 import { useCallback, useContext, useEffect, useRef, useState } from 'preact/hooks'
 
@@ -77,6 +77,7 @@ export function Toolbar({
     if (nextIdx !== -1) {
       e.preventDefault()
       const nextId = sortedItems[nextIdx]
+      if (nextId === undefined) return
       setFocusedIndex(nextId)
     }
   }

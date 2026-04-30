@@ -51,9 +51,9 @@ describe('Toolbar a11y', () => {
       container,
     )
     const buttons = container.querySelectorAll('button')
-    expect(buttons[0].getAttribute('tabindex')).toBe('0')
-    expect(buttons[1].getAttribute('tabindex')).toBe('-1')
-    expect(buttons[2].getAttribute('tabindex')).toBe('-1')
+    expect(buttons[0]!.getAttribute('tabindex')).toBe('0')
+    expect(buttons[1]!.getAttribute('tabindex')).toBe('-1')
+    expect(buttons[2]!.getAttribute('tabindex')).toBe('-1')
   })
 
   it('moves focus with ArrowRight in horizontal mode', async () => {
@@ -67,14 +67,14 @@ describe('Toolbar a11y', () => {
     )
     await new Promise((r) => setTimeout(r, 0))
     const buttons = container.querySelectorAll('button')
-    ;(buttons[0] as HTMLButtonElement).focus()
+    ;(buttons[0]! as HTMLButtonElement).focus()
 
-    buttons[0].dispatchEvent(
+    buttons[0]!.dispatchEvent(
       new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }),
     )
     await new Promise((r) => setTimeout(r, 0))
-    expect(buttons[0].getAttribute('tabindex')).toBe('-1')
-    expect(buttons[1].getAttribute('tabindex')).toBe('0')
+    expect(buttons[0]!.getAttribute('tabindex')).toBe('-1')
+    expect(buttons[1]!.getAttribute('tabindex')).toBe('0')
   })
 
   it('moves focus with ArrowLeft in horizontal mode', async () => {
@@ -88,17 +88,17 @@ describe('Toolbar a11y', () => {
     )
     await new Promise((r) => setTimeout(r, 0))
     const buttons = container.querySelectorAll('button')
-    ;(buttons[0] as HTMLButtonElement).focus()
+    ;(buttons[0]! as HTMLButtonElement).focus()
 
-    buttons[0].dispatchEvent(
+    buttons[0]!.dispatchEvent(
       new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }),
     )
     await new Promise((r) => setTimeout(r, 0))
-    buttons[1].dispatchEvent(
+    buttons[1]!.dispatchEvent(
       new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }),
     )
     await new Promise((r) => setTimeout(r, 0))
-    expect(buttons[0].getAttribute('tabindex')).toBe('0')
+    expect(buttons[0]!.getAttribute('tabindex')).toBe('0')
   })
 
   it('jumps to first and last with Home and End', async () => {
@@ -112,24 +112,24 @@ describe('Toolbar a11y', () => {
     )
     await new Promise((r) => setTimeout(r, 0))
     const buttons = container.querySelectorAll('button')
-    ;(buttons[0] as HTMLButtonElement).focus()
+    ;(buttons[0]! as HTMLButtonElement).focus()
 
-    buttons[0].dispatchEvent(
+    buttons[0]!.dispatchEvent(
       new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }),
     )
     await new Promise((r) => setTimeout(r, 0))
 
-    buttons[1].dispatchEvent(
+    buttons[1]!.dispatchEvent(
       new KeyboardEvent('keydown', { key: 'Home', bubbles: true }),
     )
     await new Promise((r) => setTimeout(r, 0))
-    expect(buttons[0].getAttribute('tabindex')).toBe('0')
+    expect(buttons[0]!.getAttribute('tabindex')).toBe('0')
 
-    buttons[0].dispatchEvent(
+    buttons[0]!.dispatchEvent(
       new KeyboardEvent('keydown', { key: 'End', bubbles: true }),
     )
     await new Promise((r) => setTimeout(r, 0))
-    expect(buttons[2].getAttribute('tabindex')).toBe('0')
+    expect(buttons[2]!.getAttribute('tabindex')).toBe('0')
   })
 
   it('separator has role separator and aria-orientation', () => {

@@ -10,6 +10,8 @@
 module OWN = Masc_mcp.Oas_worker_named
 module Prom = Masc_mcp.Prometheus
 
+let typed_cascade_name = OWN.cascade_name_of_string
+
 (* #10285: cascade_name label was added.  Query [(kind, cascade_name)]
    pair.  Tests that only care about kind regardless of cascade pass
    the expected cascade_name explicitly so assertions stay exact. *)
@@ -63,7 +65,7 @@ let test_cascade_exhausted_kind () =
     OWN.sdk_error_of_masc_internal_error
       (OWN.Cascade_exhausted
          {
-           cascade_name;
+           cascade_name = typed_cascade_name cascade_name;
            reason =
              Masc_mcp.Keeper_types.Other_detail "all providers tried";
          })
@@ -81,7 +83,7 @@ let test_resumable_cli_session_kind () =
     OWN.sdk_error_of_masc_internal_error
       (OWN.Resumable_cli_session
          {
-           cascade_name;
+           cascade_name = typed_cascade_name cascade_name;
            detail = "session resumable";
            exit_code = Some 130;
          })
@@ -99,7 +101,7 @@ let test_no_tool_capable_provider_kind () =
     OWN.sdk_error_of_masc_internal_error
       (OWN.No_tool_capable_provider
          {
-           cascade_name;
+           cascade_name = typed_cascade_name cascade_name;
            configured_labels = [ "openai"; "anthropic" ];
          })
   in
@@ -132,7 +134,11 @@ let test_admission_queue_timeout_kind () =
   let _ =
     OWN.sdk_error_of_masc_internal_error
       (OWN.Admission_queue_timeout
-         { keeper_name = "keeper-alpha"; cascade_name; wait_sec = 30.0 })
+         {
+           keeper_name = "keeper-alpha";
+           cascade_name = typed_cascade_name cascade_name;
+           wait_sec = 30.0;
+         })
   in
   Alcotest.(check (float 0.0001))
     "admission_queue_timeout{cascade_name=big_three} counter +1"
@@ -200,7 +206,11 @@ let test_resumable_cli_session_per_cascade_isolation () =
   let _ =
     OWN.sdk_error_of_masc_internal_error
       (OWN.Resumable_cli_session
-         { cascade_name = cascade_a; detail = "exit 1"; exit_code = Some 1 })
+         {
+           cascade_name = typed_cascade_name cascade_a;
+           detail = "exit 1";
+           exit_code = Some 1;
+         })
   in
   Alcotest.(check (float 0.0001))
     "governance_judge counter advanced"
@@ -222,7 +232,11 @@ let test_empty_cascade_name_collapses_to_unknown () =
   let _ =
     OWN.sdk_error_of_masc_internal_error
       (OWN.Resumable_cli_session
-         { cascade_name = "  "; detail = "exit 1"; exit_code = Some 1 })
+         {
+           cascade_name = typed_cascade_name "  ";
+           detail = "exit 1";
+           exit_code = Some 1;
+         })
   in
   Alcotest.(check (float 0.0001))
     "blank cascade_name routes to 'unknown'"

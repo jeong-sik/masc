@@ -1129,8 +1129,8 @@ let warn_unknown_strategy ~name ~raw ~msg ~fallback_kind =
   let key = (name, raw) in
   if not (Hashtbl.mem strategy_warned key) then begin
     Hashtbl.add strategy_warned key ();
-    Printf.eprintf
-      "[warn] cascade %s: %s; falling back to %s\n%!"
+    Log.Keeper.warn
+      "cascade %s: %s; falling back to %s"
       name msg (Cascade_strategy.kind_to_string fallback_kind)
   end
 
@@ -1141,8 +1141,8 @@ let warn_invalid_priority_tier ~name ~msg ~fallback_kind =
   let key = (name, msg) in
   if not (Hashtbl.mem invalid_priority_tier_warned key) then begin
     Hashtbl.add invalid_priority_tier_warned key ();
-    Printf.eprintf
-      "[warn] cascade %s: %s; falling back to %s\n%!"
+    Log.Keeper.warn
+      "cascade %s: %s; falling back to %s"
       name msg (Cascade_strategy.kind_to_string fallback_kind)
   end
 

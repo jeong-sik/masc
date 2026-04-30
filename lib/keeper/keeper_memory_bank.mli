@@ -256,7 +256,7 @@ val normalize_memory_text_key : string -> string
     decided that…" boilerplate so the bank captures actual decisions. *)
 
 val consensus_default_re : Re.re
-val consensus_re_mu : Eio.Mutex.t
+val consensus_re_mu : Stdlib.Mutex.t
 val consensus_re_cached : (string * Re.re) option ref
 val consensus_pattern_key : unit -> string
 val compile_consensus_re : string -> Re.re

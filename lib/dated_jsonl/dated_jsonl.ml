@@ -38,23 +38,23 @@ let mutex_key base_dir =
   in
   strip_trailing_slashes path
 
-let mutex_for_base_dir ~base_dir ~injected =
+let mutex_for_base_dir ~base_dir =
   let key = mutex_key base_dir in
   Stdlib.Mutex.protect mutex_registry_mu (fun () ->
     match Hashtbl.find_opt mutex_registry key with
     | Some cell -> cell
     | None ->
-        let mutex =
-          match injected with
-          | Some mutex -> mutex
-          | None -> Eio.Mutex.create ()
-        in
+        let mutex = Eio.Mutex.create () in
         let cell = Atomic.make mutex in
         Hashtbl.add mutex_registry key cell;
         cell)
 
 let create ~base_dir ?mutex () =
-  let mutex = mutex_for_base_dir ~base_dir ~injected:mutex in
+  let mutex =
+    match mutex with
+    | Some mutex -> Atomic.make mutex
+    | None -> mutex_for_base_dir ~base_dir
+  in
   { base_dir; mutex }
 
 let base_dir t = t.base_dir
@@ -156,11 +156,9 @@ let load_tail_lines path ~max_lines =
         let chunks = ref [] in
         let total_newlines = ref 0 in
         let pos = ref file_len in
-        let truncated_prefix = ref false in
         while !pos > 0 && !total_newlines <= target_newlines do
           let read_start = max 0 (!pos - chunk_size) in
           let read_len = !pos - read_start in
-          if read_start > 0 then truncated_prefix := true;
           seek_in ic read_start;
           let chunk = Bytes.create read_len in
           really_input ic chunk 0 read_len;
@@ -184,7 +182,7 @@ let load_tail_lines path ~max_lines =
           |> String.split_on_char '\n'
         in
         let raw_lines =
-          if !truncated_prefix then
+          if !pos > 0 then
             match raw_lines with
             | _partial :: rest -> rest
             | [] -> []
@@ -193,13 +191,6 @@ let load_tail_lines path ~max_lines =
         let all_lines =
           raw_lines
           |> List.filter (fun l -> String.trim l <> "")
-        in
-        let all_lines =
-          if !pos > 0 then
-            match all_lines with
-            | _resume_overlap :: rest -> rest
-            | [] -> []
-          else all_lines
         in
         let total = List.length all_lines in
         if total <= max_lines then all_lines
@@ -364,7 +355,7 @@ module For_testing = struct
   let mutex (t : t) = Atomic.get t.mutex
 
   let mutex_for_base_dir base_dir =
-    let cell = mutex_for_base_dir ~base_dir ~injected:None in
+    let cell = mutex_for_base_dir ~base_dir in
     Atomic.get cell
 
   let registry_size () =

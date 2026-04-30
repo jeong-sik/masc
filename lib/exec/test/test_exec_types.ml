@@ -67,6 +67,16 @@ let test_path_scope_classify_sandbox () =
   | Inside_sandbox _ -> ()
   | _ -> assert false
 
+let test_path_scope_classify_sandbox_escape () =
+  let ps =
+    Path_scope.classify
+      ~raw:"/tmp/masc-keeper-xyz/../../etc/passwd"
+      ~cwd:"/tmp"
+  in
+  match Path_scope.scope ps with
+  | Absolute_unknown _ -> ()
+  | _ -> assert false
+
 let test_path_scope_classify_unresolvable () =
   (* parent dir does not exist on disk → fail-closed. *)
   let ps =
@@ -133,6 +143,7 @@ let () =
   test_parsed_polymorphic ();
   test_path_scope_classify ();
   test_path_scope_classify_sandbox ();
+  test_path_scope_classify_sandbox_escape ();
   test_path_scope_classify_unresolvable ();
   test_verdict_trusted_argv_smart_ctor ();
   test_verdict_four_way ();

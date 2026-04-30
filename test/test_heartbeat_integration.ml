@@ -53,7 +53,7 @@ let make_meta name =
     ("trace_id", `String ("trace-integ-" ^ name));
     ("goal", `String "integration test");
   ] in
-  match KT.meta_of_json json with
+  match Masc_test_deps.meta_of_json_fixture json with
   | Ok meta -> meta
   | Error err -> Alcotest.fail ("make_meta failed: " ^ err)
 

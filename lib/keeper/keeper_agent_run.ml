@@ -291,6 +291,9 @@ let run_turn
   in
   ignore (Keeper_alerting_path.ensure_sandbox_bundle ~config ~meta);
   let keeper_sandbox_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
+  let keeper_visible_sandbox_root =
+    Keeper_sandbox.keeper_visible_root_abs_of_meta ~config meta
+  in
   let effective_allowed_paths = Keeper_alerting_path.effective_allowed_paths ~meta in
   match
     Keeper_alerting_path.absolute_allowed_paths_result
@@ -1298,7 +1301,7 @@ let run_turn
               (!tool_surface_ref).missing_required_tool_names;
           };
         sandbox_kind = Keeper_execution_receipt.sandbox_kind_of_meta meta;
-        sandbox_root = Some keeper_sandbox_root;
+        sandbox_root = Some keeper_visible_sandbox_root;
         network_mode = Keeper_types.network_mode_to_string meta.network_mode;
         approval_profile = (!tool_surface_ref).approval_mode_effective;
         approval_profile_derived = (!tool_surface_ref).approval_mode_derived;

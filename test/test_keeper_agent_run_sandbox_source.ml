@@ -62,13 +62,13 @@ let test_cli_transport_cwd_is_keeper_sandbox_root () =
     (count_occurrences ~needle:"cwd = None" src)
 ;;
 
-let test_execution_receipt_reports_same_sandbox_root () =
+let test_execution_receipt_reports_keeper_visible_sandbox_root () =
   let src = load_source target_file in
   check
     bool
-    "receipt reports keeper sandbox root"
+    "receipt reports keeper-visible sandbox root"
     true
-    (contains ~needle:"sandbox_root = Some keeper_sandbox_root" src)
+    (contains ~needle:"sandbox_root = Some keeper_visible_sandbox_root" src)
 ;;
 
 let test_runtime_contract_sandbox_root_is_keeper_visible () =
@@ -106,9 +106,9 @@ let () =
             `Quick
             test_cli_transport_cwd_is_keeper_sandbox_root
         ; test_case
-            "receipt reports same sandbox root"
+            "receipt reports keeper-visible sandbox root"
             `Quick
-            test_execution_receipt_reports_same_sandbox_root
+            test_execution_receipt_reports_keeper_visible_sandbox_root
         ; test_case
             "runtime_contract sandbox_root is keeper-visible"
             `Quick

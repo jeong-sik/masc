@@ -1,13 +1,16 @@
-(** #10456 — pin {!Env_config_keeper.KeeperKeepalive.turn_timeout_sec}
-    SSOT default (3600) and the source literal in
+(** #10456/#10716 — pin {!Env_config_keeper.KeeperKeepalive.turn_timeout_sec}
+    SSOT default (1800) and the source literal in
     {!Keeper_runtime_resolved.turn_timeout_sec_live}.
 
-    Pre-fix drift was:
+    Original pre-fix drift was:
     - env_config_keeper:301 default=3600 (post-#9637)
     - keeper_runtime_resolved:75 default=1200 (stale)
 
     Math: 1200 - 30 (oas_timeout_guard_sec) = 1170s — exact match for
     #10388 cascade ollama timeout walls.
+
+    #10716 later lowered the SSOT default from 3600 to 1800; this test pins
+    the new default while preserving the 1200 drift guard.
 
     This test pins the SSOT and source-level literal so silent
     re-divergence shows up as a test failure. *)
@@ -18,10 +21,10 @@ module E = Env_config_keeper.KeeperKeepalive
 
 let approx = float 0.001
 
-let test_ssot_default_3600 () =
+let test_ssot_default_1800 () =
   check approx
-    "env_config_keeper.KeeperKeepalive.turn_timeout_sec SSOT must stay at 3600 (#9637)"
-    3600.0 E.turn_timeout_sec
+    "env_config_keeper.KeeperKeepalive.turn_timeout_sec SSOT must stay at 1800 (#10716)"
+    1800.0 E.turn_timeout_sec
 
 let resolver_source_path =
   let candidates =
@@ -46,12 +49,15 @@ let test_resolver_default_matches_ssot () =
   | None -> skip ()
   | Some p ->
       let body = read_file p in
-      (* The fix replaces default:1200.0 with default:3600.0 in
+      (* The fix replaces default:1200.0 with default:1800.0 in
          turn_timeout_sec_live. Guard: must NOT contain the stale literal
          on the same line as MASC_KEEPER_TURN_TIMEOUT_SEC. *)
       let stale_pattern = "~default:1200.0 \"MASC_KEEPER_TURN_TIMEOUT_SEC\"" in
-      let canonical_pattern =
+      let stale_3600_pattern =
         "~default:3600.0 \"MASC_KEEPER_TURN_TIMEOUT_SEC\""
+      in
+      let canonical_pattern =
+        "~default:1800.0 \"MASC_KEEPER_TURN_TIMEOUT_SEC\""
       in
       let contains s sub =
         let n = String.length s and m = String.length sub in
@@ -63,9 +69,11 @@ let test_resolver_default_matches_ssot () =
         loop 0
       in
       let has_stale = contains body stale_pattern in
+      let has_stale_3600 = contains body stale_3600_pattern in
       let has_canonical = contains body canonical_pattern in
       check bool "no stale 1200 default in resolver" false has_stale;
-      check bool "canonical 3600 default in resolver" true has_canonical
+      check bool "no stale 3600 default in resolver" false has_stale_3600;
+      check bool "canonical 1800 default in resolver" true has_canonical
 
 let test_resolver_upper_matches_ssot () =
   match resolver_source_path with
@@ -93,8 +101,8 @@ let () =
     [
       ( "ssot-pin",
         [
-          test_case "env_config_keeper SSOT default is 3600 (post-#9637)"
-            `Quick test_ssot_default_3600;
+          test_case "env_config_keeper SSOT default is 1800 (post-#10716)"
+            `Quick test_ssot_default_1800;
         ] );
       ( "resolver-drift-gate",
         [

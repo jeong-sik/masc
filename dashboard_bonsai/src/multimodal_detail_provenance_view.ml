@@ -22,8 +22,14 @@
     deferred to a follow-up (F3.1).
 
     Layout is computed in OCaml; SVG strings are emitted via
-    [Virtual_dom.Svg]. The diagram auto-sizes height based on row
-    counts and is horizontally centered around the SELECTED node. *)
+    [Node.create_svg]. The diagram auto-sizes height based on row
+    counts and is horizontally centered around the SELECTED node.
+
+    F3.1 — origin and descendant nodes are clickable: click invokes
+    [Multimodal_detail_fetch.fetch ~id] which transitions the panel
+    to that artifact (preserving the selected_id_var contract). The
+    selected (center) node is intentionally NOT clickable — clicking
+    the pivot would re-fetch the same id. *)
 
 open! Core
 open! Bonsai_web
@@ -159,13 +165,29 @@ let colors_for = function
     "var(--color-fg-primary)"
 ;;
 
-let render_node ~canvas_w ~row_y ~n ~i ~id ~role =
+(** [navigate] is [Some id] for origin/descendant nodes (click
+    fetches that artifact) and [None] for the selected node (the
+    pivot itself — clicking would re-fetch the same id). *)
+let render_node ~canvas_w ~row_y ~n ~i ~id ~role ~navigate =
   let x = row_x ~canvas_w ~n ~i in
   let fill, stroke, fg = colors_for role in
   let cx = x + (node_w / 2) in
   let cy = row_y + (node_h / 2) in
+  let click_attrs =
+    match navigate with
+    | None -> []
+    | Some target_id ->
+      [ Attr.create "style" "cursor: pointer"
+      ; Attr.create "tabindex" "0"
+      ; Attr.create "role" "button"
+      ; Attr.create "aria-label" ("Open artifact " ^ target_id)
+      ; Attr.on_click (fun _ ->
+            Multimodal_detail_fetch.fetch ~id:target_id;
+            Effect.Ignore)
+      ]
+  in
   Node.create_svg "g"
-    ~attrs:[]
+    ~attrs:click_attrs
     [ rect ~x ~y:row_y ~w:node_w ~h:node_h ~fill ~stroke
     ; label ~x:cx ~y:cy ~fill:fg (truncate_id id)
     ]
@@ -247,17 +269,17 @@ let render
   let nodes_top =
     List.mapi origins ~f:(fun i id ->
         render_node ~canvas_w ~row_y:top_row_y ~n:n_top ~i ~id
-          ~role:Role_origin)
+          ~role:Role_origin ~navigate:(Some id))
   in
   let node_center =
     let i = 0 in
     render_node ~canvas_w ~row_y:center_row_y ~n:1 ~i ~id:selected_id
-      ~role:Role_selected
+      ~role:Role_selected ~navigate:None
   in
   let nodes_bot =
     List.mapi descendants ~f:(fun i id ->
         render_node ~canvas_w ~row_y:bottom_row_y ~n:n_bot ~i ~id
-          ~role:Role_descendant)
+          ~role:Role_descendant ~navigate:(Some id))
   in
   let svg =
     Node.create_svg "svg"

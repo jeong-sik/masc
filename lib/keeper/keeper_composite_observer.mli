@@ -173,6 +173,10 @@ type snapshot = {
   run_id : string;
   ts : float;
   ksm_phase : ksm_phase;
+  raw_phase : Keeper_state_machine.phase;
+      (** Full 12-state keeper phase before the composite 12->7 collapse.
+          Dashboard diagnostics use this to explain why [derive_phase]
+          selected the current runtime phase. *)
   collapsed_from : Keeper_state_machine.phase option;
       (** Raw keeper phase collapsed into [Ksm_stable], when applicable.
           [None] for active composite phases or older payload readers.
@@ -189,6 +193,10 @@ type snapshot = {
           {!Keeper_failure_circuit_breaker.display_state}. *)
   shared_measurement : Keeper_state_machine.auto_rule_summary option;
   invariants : invariants_check;
+  conditions : Keeper_state_machine.conditions;
+      (** Raw observable conditions that derive [raw_phase]. Exposed for
+          dashboard diagnostics; callers should not infer composite state from
+          this when the dedicated axes above are present. *)
   is_live : bool;
       (** [true] when [current_turn_observation] is [Some] — a turn is
           actively executing and the live sub-FSM fields reflect its

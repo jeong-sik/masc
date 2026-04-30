@@ -29,6 +29,8 @@ export type {
   KeeperCompositeMeasurement,
   KeeperLastOutcome,
   KeeperCompositeExecution,
+  KeeperPhaseDiagnosis,
+  KeeperPhaseDiagnosisRow,
   KeeperCompositePhase,
   KeeperCompositeTurnPhase,
   KeeperCompositeDecisionStage,
@@ -493,7 +495,7 @@ export interface MemoryKindUsageEntry {
   priority: number
 }
 
-interface KeeperStateDiagramResponse {
+export interface KeeperStateDiagramResponse {
   keeper: string
   current_phase: string
   mermaid: string

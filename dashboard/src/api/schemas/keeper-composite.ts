@@ -77,6 +77,42 @@ const KeeperCompositeInvariantsSchema = object({
   event_priority_monotone: boolean(),
 })
 
+const KeeperPhaseDiagnosisRowSchema = object({
+  key: string(),
+  label: string(),
+  priority: number(),
+  value: boolean(),
+  phase: string(),
+  determining: boolean(),
+})
+
+const KeeperPhaseDiagnosisSchema = object({
+  current_phase: string(),
+  derived_phase: string(),
+  can_execute_turn: boolean(),
+  conditions: object({
+    launch_pending: boolean(),
+    fiber_alive: boolean(),
+    heartbeat_healthy: boolean(),
+    turn_healthy: boolean(),
+    context_within_budget: boolean(),
+    context_handoff_needed: boolean(),
+    compaction_active: boolean(),
+    handoff_active: boolean(),
+    operator_paused: boolean(),
+    stop_requested: boolean(),
+    restart_budget_remaining: boolean(),
+    backoff_elapsed: boolean(),
+    guardrail_triggered: boolean(),
+    drain_complete: boolean(),
+    context_overflow: boolean(),
+    compact_retry_exhausted: boolean(),
+    terminal_failure_latched: boolean(),
+  }),
+  determining_condition: nullable(string()),
+  rows: array(KeeperPhaseDiagnosisRowSchema),
+})
+
 const KeeperLastOutcomeSchema = object({
   turn_id: number(),
   ended_at: number(),
@@ -161,6 +197,7 @@ export const KeeperCompositeSnapshotSchema = object({
   ),
   measurement: KeeperCompositeMeasurementSchema,
   invariants: KeeperCompositeInvariantsSchema,
+  phase_diagnosis: optional(KeeperPhaseDiagnosisSchema),
   is_live: boolean(),
   last_outcome: nullable(KeeperLastOutcomeSchema),
   execution: optional(KeeperCompositeExecutionSchema),
@@ -172,6 +209,8 @@ export const KeeperCompositeSnapshotSchema = object({
 export type KeeperCompositeSnapshot = InferOutput<typeof KeeperCompositeSnapshotSchema>
 export type KeeperCompositeInvariants = InferOutput<typeof KeeperCompositeInvariantsSchema>
 export type KeeperCompositeMeasurement = InferOutput<typeof KeeperCompositeMeasurementSchema>
+export type KeeperPhaseDiagnosis = InferOutput<typeof KeeperPhaseDiagnosisSchema>
+export type KeeperPhaseDiagnosisRow = InferOutput<typeof KeeperPhaseDiagnosisRowSchema>
 export type KeeperLastOutcome = InferOutput<typeof KeeperLastOutcomeSchema>
 export type KeeperCompositeExecution = InferOutput<typeof KeeperCompositeExecutionSchema>
 export type KeeperCompositePhase = InferOutput<typeof KeeperCompositePhaseSchema>

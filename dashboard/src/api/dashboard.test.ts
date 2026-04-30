@@ -7,6 +7,7 @@ import {
   fetchDashboardTools,
   fetchKeeperConfig,
   fetchRuntimeModelMetrics,
+  fetchTlcResults,
   fetchToolQuality,
 } from './dashboard'
 
@@ -77,6 +78,30 @@ describe('fetchDashboardShell', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/shell?light=true')
+  })
+})
+
+describe('fetchTlcResults', () => {
+  it('uses the TLC verification results endpoint', async () => {
+    const rawResponse = {
+      updated_at: '2026-04-30T00:00:00Z',
+      results_dir: null,
+      count: 0,
+      entries: [],
+    }
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(rawResponse), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchTlcResults()
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/verification/tlc-results')
+    expect(result).toEqual(rawResponse)
   })
 })
 

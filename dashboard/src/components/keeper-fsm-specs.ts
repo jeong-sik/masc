@@ -30,6 +30,64 @@ const KDP_STATES = ['undecided', 'guard_ok', 'gate_rejected', 'tool_policy_selec
 const KCL_STATES = ['idle', 'selecting', 'trying', 'done', 'exhausted']
 const KMC_STATES = ['accumulating', 'compacting', 'done']
 
+export const TURN_FSM_STATES = [
+  'idle',
+  'phase_gating',
+  'cascade_routing',
+  'awaiting_provider',
+  'streaming',
+  'awaiting_tool_result',
+  'completing',
+  'done',
+  'failed',
+  'cancelled',
+] as const
+
+export type KeeperTurnFsmState = (typeof TURN_FSM_STATES)[number]
+
+const TURN_FSM_TLA_SYMBOLS: Record<KeeperTurnFsmState, string> = {
+  idle: 'idle',
+  phase_gating: 'phase_gating',
+  cascade_routing: 'cascade_routing',
+  awaiting_provider: 'awaiting_provider',
+  streaming: 'streaming',
+  awaiting_tool_result: 'awaiting_tool',
+  completing: 'completing',
+  done: 'done',
+  failed: 'failed',
+  cancelled: 'cancelled',
+}
+
+const LEGACY_TURN_PHASE_MAP: Record<string, KeeperTurnFsmState> = {
+  idle: 'idle',
+  prompting: 'phase_gating',
+  executing: 'streaming',
+  compacting: 'completing',
+  finalizing: 'completing',
+  awaiting_tool: 'awaiting_tool_result',
+}
+
+const TURN_FSM_EDGES: FsmEdge[] = [
+  { source: 'idle', target: 'phase_gating', label: 'StartTurn' },
+  { source: 'phase_gating', target: 'done', label: 'PhaseGateSkip', type: 'recovery' },
+  { source: 'phase_gating', target: 'cascade_routing', label: 'PhaseGateOk' },
+  { source: 'cascade_routing', target: 'awaiting_provider', label: 'CascadeRouted', type: 'cascade' },
+  { source: 'cascade_routing', target: 'failed', label: 'CascadeUnavailable', type: 'error' },
+  { source: 'awaiting_provider', target: 'streaming', label: 'ProviderResponded' },
+  { source: 'awaiting_provider', target: 'cancelled', label: 'ProviderTimeout', type: 'error' },
+  { source: 'streaming', target: 'awaiting_tool_result', label: 'StreamYieldsTool', type: 'cascade' },
+  { source: 'awaiting_tool_result', target: 'streaming', label: 'ToolReturned', type: 'recovery' },
+  { source: 'streaming', target: 'completing', label: 'StreamComplete' },
+  { source: 'completing', target: 'done', label: 'ContractOk', type: 'recovery' },
+  { source: 'completing', target: 'failed', label: 'ContractViolation', type: 'error' },
+  { source: 'completing', target: 'failed', label: 'ReceiptLost', type: 'error' },
+  { source: 'phase_gating', target: 'cancelled', label: 'HonorStopSignal', type: 'error' },
+  { source: 'cascade_routing', target: 'cancelled', label: 'HonorStopSignal', type: 'error' },
+  { source: 'streaming', target: 'cancelled', label: 'HonorStopSignal', type: 'error' },
+  { source: 'awaiting_tool_result', target: 'cancelled', label: 'HonorStopSignal', type: 'error' },
+  { source: 'completing', target: 'cancelled', label: 'HonorStopSignal', type: 'error' },
+]
+
 function nodeType(stateId: string, activeId: string, tone: 'active' | 'warn' | 'err'): FsmNode['type'] {
   return stateId === activeId ? tone : 'dim'
 }
@@ -113,6 +171,55 @@ export function buildCompactionSpec(
       { source: 'compacting', target: 'accumulating', label: 'Compaction_failed', type: 'error' },
     ],
     activeNodeId: activeStage,
+    layout: 'breadthfirst',
+    direction: 'LR',
+  }
+}
+
+export function normalizeTurnFsmState(turnPhase: string | null | undefined): KeeperTurnFsmState | null {
+  if (!turnPhase) return null
+  const normalized = turnPhase.trim().toLowerCase()
+  if (!normalized) return null
+  if ((TURN_FSM_STATES as readonly string[]).includes(normalized)) {
+    return normalized as KeeperTurnFsmState
+  }
+  return LEGACY_TURN_PHASE_MAP[normalized] ?? null
+}
+
+export function turnFsmTlaSymbol(state: KeeperTurnFsmState): string {
+  return TURN_FSM_TLA_SYMBOLS[state]
+}
+
+function turnNodeType(state: KeeperTurnFsmState, activeState: KeeperTurnFsmState | null): FsmNode['type'] {
+  if (state === activeState) {
+    if (state === 'failed') return 'err'
+    if (state === 'cancelled') return 'warn'
+    if (state === 'done') return 'ok'
+    return 'active'
+  }
+
+  switch (state) {
+    case 'done':
+      return 'ok'
+    case 'failed':
+      return 'err'
+    case 'cancelled':
+      return 'warn'
+    default:
+      return 'state'
+  }
+}
+
+export function buildTurnFsmSpec(turnPhase: string | null | undefined): FsmGraphSpec {
+  const activeState = normalizeTurnFsmState(turnPhase)
+  return {
+    nodes: TURN_FSM_STATES.map(state => ({
+      id: state,
+      label: state,
+      type: turnNodeType(state, activeState),
+    })),
+    edges: TURN_FSM_EDGES,
+    activeNodeId: activeState,
     layout: 'breadthfirst',
     direction: 'LR',
   }

@@ -12,6 +12,8 @@
       paging the full request list.
     - [GET /api/v1/verification/specs] — TLA+ spec index with clean / buggy
       cfg coverage (see {!Dashboard_tla_specs}).
+    - [GET /api/v1/verification/tlc-results] — latest observed TLC log
+      projection for each clean / buggy cfg.
     - [POST /api/v1/verification/resolve] — dashboard-initiated approve/reject
       for a pending verification request. Requires bearer token auth; the
       verifier identity is derived from the authenticated dashboard actor
@@ -70,6 +72,12 @@ let add_routes router =
   |> Http.Router.get "/api/v1/verification/specs" (fun request reqd ->
        with_public_read (fun _state req reqd ->
          let json = Dashboard_tla_specs.specs_json () in
+         Http.Response.json ~compress:true ~request:req
+           (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+  |> Http.Router.get "/api/v1/verification/tlc-results" (fun request reqd ->
+       with_public_read (fun _state req reqd ->
+         let json = Dashboard_tla_specs.tlc_results_json () in
          Http.Response.json ~compress:true ~request:req
            (Yojson.Safe.to_string json) reqd
        ) request reqd)

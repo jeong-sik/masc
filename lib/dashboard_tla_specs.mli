@@ -51,3 +51,36 @@ val specs_json : unit -> Yojson.Safe.t
       }
     ]}
 *)
+
+type tlc_status =
+  | Tlc_passed
+  | Tlc_violated
+  | Tlc_running
+  | Tlc_queued
+  | Tlc_error
+  | Tlc_not_run
+
+type tlc_result_entry = {
+  spec_name : string;
+  cfg_name : string;
+  category : string;
+  status : tlc_status;
+  states_explored : int option;
+  distinct_states : int option;
+  diameter : int option;
+  last_run_at : float option;
+  violation : string option;
+  log_path : string option;
+}
+
+val tlc_results_dir : unit -> string
+(** Directory containing TLC logs. Reads [MASC_TLC_RESULTS_DIR], falling back
+    to the host temporary directory. This matches [specs/Makefile], which
+    writes logs as [tlc-<cfg-stem>.log]. *)
+
+val list_tlc_results : unit -> tlc_result_entry list
+(** Project every discovered clean / buggy cfg to its last observed TLC result.
+    Missing logs are reported as [Tlc_not_run]; this function never runs TLC. *)
+
+val tlc_results_json : unit -> Yojson.Safe.t
+(** JSON bundle suitable for [/api/v1/verification/tlc-results]. *)

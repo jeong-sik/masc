@@ -330,3 +330,243 @@ Production:
 - `dashboard/src/api/schemas/autoresearch.ts:48-92` — loop/cycle valibot schemas.
 - `dashboard/src/types/core.ts:294-312` — `Goal` type (no `progress`/`total`).
 - `dashboard/src/config/navigation.ts:165-168, 251-254` — `safe-autonomy` and `autoresearch` route registration.
+
+---
+
+## Appendix — 15-Zone Independent Inventory
+
+These zones have **zero dedicated production surface** or a **misaligned partial implementation**. They were scoped out of the main 6-zone audit because no production component was mounted from `navigation.ts` under the preview's zone identity. This appendix records a rapid inventory so Phase F sizing can be completed.
+
+### Methodology
+
+1. Read `cb-root.jsx` section headers (lines 108–246) to record preview variant count and slot IDs.
+2. `rg`-search production `src/components/` and `src/api/` for matching component names, data shapes, or API endpoints.
+3. Check `navigation.ts` for section registration under the zone's canonical tab.
+4. Classify gap: **Zero** = no production code; **Partial** = production code exists but under a different zone identity or with a different data model; **Misaligned** = production and preview share a name but render different shapes.
+
+### Inventory summary
+
+| Zone | Track | Preview variants | Production files | Gap | Effort |
+|------|-------|------------------|------------------|-----|--------|
+| G3 Accountability | Work | 2 (ledger, matrix) | None | Zero | High |
+| C1 Board Zone | Comms | 3 (feed, thread, hot/auto) | None | Zero | Mid |
+| C2 Messages / Broadcast | Comms | 3 (room, inbox, state block) | None | Zero | High |
+| C3 Composer v2 | Comms | 3 (broadcast, mention, state) | None | Zero | High |
+| O2 Audit Ledger | Observability | 3 (ledger, by actor, summary) | None | Zero | High |
+| O4 Cost & Latency | Observability | 3 (per-agent, heatmap, latency) | `cost-dashboard.ts` (per-**model**, not per-agent) | Misaligned | Mid |
+| O5 Heuristic + Stress | Observability | 3 (log, board, by module) | None | Zero | High |
+| K2 Decisions / Memory | Cognition | 2 (stream, entries) | `memory-subsystems.ts` (memory only; no decisions stream) | Partial | Mid |
+| K3 Institution Episodes | Cognition | 2 (cards, learnings) | None | Zero | High |
+| I0 IDE Backbone | IDE | 3 (branch, keeper, nudge) | None | Zero | High |
+| E1 File Tree Explorer | IDE | 4 (tree, filter, tabs, diff) | None | Zero | High |
+| E2 Editor Surfaces | IDE | 5 (attrib, split, merge, review, blame) | None | Zero | High |
+| E3 PR Inspector | IDE | 4 (header, files, thread, checks) | None | Zero | High |
+| E4 Branch / Git Graph | IDE | 4 (DAG, commits, worktree, stash) | `git-graph-panel.ts` (read-only graph; no keeper attribution) | Partial | Mid |
+| E5 Terminal / Search | IDE | 3 (terminal, search, find/replace) | None | Zero | High |
+
+**Aggregate**: 15 zones, **36 preview variants**, **~1.5 production equivalents** (cost-dashboard + memory-subsystems + git-graph-panel). The IDE track (I0 + E1–E5) is entirely unimplemented.
+
+---
+
+### G3 · Accountability
+
+**Preview** (`cb-root.jsx:167-170`): Daily verdict ledger + keeper × scope responsibility matrix. Mock data: accountability ledger with daily entries.
+
+**Production search**: `rg -i "accountability|responsibility.*matrix|daily.*ledger|verdict.*ledger" src/` returned zero hits. `attribution-panel.ts` is a **different surface** (Layer 4 gate-chain observation, per-gate pass/fail counts).
+
+**Gap**: Zero. No ledger data source, no matrix component.
+
+**Effort**: **High** — needs new backend data model (daily accountability records) + 2 new components.
+
+---
+
+### C1 · Board Zone
+
+**Preview** (`cb-root.jsx:174-178`): Feed (hearth-grouped), single post + thread, direct vs automation toggle. Part of **Comms** track.
+
+**Production search**: Zero hits for a dedicated Comms-track board surface. `workspace?section=board` exists under the **Workspace** tab, which is a different organizational plane.
+
+**Gap**: Zero — no Comms-track board zone.
+
+**Effort**: **Mid** — if product keeps Board under Workspace, effort is config-only. If realigned to Comms, new routing + possible component split.
+
+---
+
+### C2 · Messages / Broadcast
+
+**Preview** (`cb-root.jsx:180-184`): Room timeline, mention inbox (@keeper), [STATE] block focus.
+
+**Production search**: `rg -i "broadcast|message.*room|mention.*inbox|state.*block" src/components/` returned zero hits. The `masc_broadcast` MCP tool exists but no dashboard surface consumes it.
+
+**Gap**: Zero.
+
+**Effort**: **High** — needs SSE or polling endpoint for room messages + 3 new components.
+
+---
+
+### C3 · Composer v2
+
+**Preview** (`cb-root.jsx:186-190`): Broadcast compose, mention autocomplete, structured [STATE] payload.
+
+**Production search**: Zero hits for Composer v2. The existing `Composer` component (lines 82–86 in cb-root.jsx) is a Phase 1 prompt composer, not the v2 broadcast/mention/state composer.
+
+**Gap**: Zero.
+
+**Effort**: **High** — new compose surface with mention autocomplete and structured payload validation.
+
+---
+
+### O2 · Audit Ledger
+
+**Preview** (`cb-root.jsx:200-204`): Streaming ledger, filtered by actor, event-kind summary. Append-only audit log.
+
+**Production search**: Zero hits for `audit ledger`, `streaming ledger`, or `event-kind summary`. No `audit.jsonl` consumer in dashboard.
+
+**Gap**: Zero.
+
+**Effort**: **High** — needs audit log data source + streaming component + filter UI.
+
+---
+
+### O4 · Cost & Latency
+
+**Preview** (`cb-root.jsx:212-216`): Per-agent token spend, provider × model heatmap, latency histogram.
+
+**Production**: `cost-dashboard.ts` exists and is mounted at `monitoring?section=cost`. It renders per-**model** metrics (`fetchRuntimeModelMetrics`), not per-**agent** spend. The preview explicitly asks for per-agent attribution.
+
+**Gap**: Misaligned — same tab, wrong granularity.
+
+**Effort**: **Mid** — either re-label the preview to per-model (Low) or add per-agent aggregation to backend + new table variant (Mid).
+
+---
+
+### O5 · Heuristic + Stress
+
+**Preview** (`cb-root.jsx:218-222`): Heuristic firing log, stress board (per-agent), firing rate by module. Mock data: `keeper_hooks_oas` + `agent_stress.jsonl`.
+
+**Production search**: Zero hits for `heuristic log`, `stress board`, `agent_stress`. No stress/heuristic surface in dashboard.
+
+**Gap**: Zero.
+
+**Effort**: **High** — needs stress data source + 3 new components.
+
+---
+
+### K2 · Decisions / Memory
+
+**Preview** (`cb-root.jsx:232-235`): Decisions stream (all keepers, filterable), memory entries (verified / learned / plan). Mock: `decisions.jsonl` + `memory.jsonl`.
+
+**Production**: `memory-subsystems.ts` exists (mounted at `monitoring?section=memory-subsystems`). It renders Hebbian synapse graph + episode records. **No decisions stream**. No `decisions.jsonl` consumer.
+
+**Gap**: Partial — memory half present; decisions half absent.
+
+**Effort**: **Mid** — decisions stream likely needs new endpoint or reuse of keeper telemetry.
+
+---
+
+### K3 · Institution Episodes
+
+**Preview** (`cb-root.jsx:237-240`): Turn cards (click to expand learnings), learnings extraction grouped. Mock: `institution_episodes.jsonl`.
+
+**Production search**: Zero hits for `institution_episodes`, `episode cards`, `learnings extraction`.
+
+**Gap**: Zero.
+
+**Effort**: **High** — needs episodes data source + 2 new components.
+
+---
+
+### I0 · IDE Backbone
+
+**Preview** (`cb-root.jsx:110-114`): Branch selector, keeper multi-select (chip filter), operator nudge log + compose.
+
+**Production search**: Zero hits for `branch selector`, `keeper multi-select`, `nudge log`. No IDE backbone surface exists.
+
+**Gap**: Zero.
+
+**Effort**: **High** — foundation surface for IDE track. Needs branch API + keeper filter + nudge store.
+
+---
+
+### E1 · File Tree Explorer
+
+**Preview** (`cb-root.jsx:118-123`): Tree + allowed_paths overlay, filter bar, recent/pinned/changed tabs, diff-annotated tree.
+
+**Production search**: Zero hits.
+
+**Gap**: Zero.
+
+**Effort**: **High** — 4 variants, needs file tree API + diff annotations.
+
+---
+
+### E2 · Editor Surfaces
+
+**Preview** (`cb-root.jsx:125-130`): Attribution gutter, split 2-pane, 3-way merge, inline review, blame gutter.
+
+**Production search**: Zero hits for editor surfaces. No code editor component in dashboard.
+
+**Gap**: Zero.
+
+**Effort**: **High** — 5 variants; requires Monaco/CodeMirror integration or custom editor.
+
+---
+
+### E3 · PR Inspector
+
+**Preview** (`cb-root.jsx:133-138`): PR header, files changed, comment thread, CI checks with SafeAuto.
+
+**Production search**: Zero hits for `pr inspector`, `files changed`, `comment thread`.
+
+**Gap**: Zero.
+
+**Effort**: **High** — needs GitHub API integration + 4 new components.
+
+---
+
+### E4 · Branch / Git Graph
+
+**Preview** (`cb-root.jsx:140-145`): Branch DAG (SVG), commit list with keeper attribution, worktree picker, stash list.
+
+**Production**: `git-graph-panel.ts` exists (mounted at `monitoring?section=git-graph`). It renders a read-only Git graph. **No keeper attribution**, no worktree picker, no stash list.
+
+**Gap**: Partial — graph exists but lacks preview variants B/C/D.
+
+**Effort**: **Mid** — enhance existing graph or add new variants.
+
+---
+
+### E5 · Terminal / Search
+
+**Preview** (`cb-root.jsx:147-151`): Cascade-aware terminal pane, project search (rg-style), find/replace in file.
+
+**Production search**: Zero hits for terminal or search surfaces in dashboard.
+
+**Gap**: Zero.
+
+**Effort**: **High** — terminal emulation + search backend integration.
+
+---
+
+### Phase F sizing (updated)
+
+Including the 6 zones from the main audit + these 15 zones:
+
+| Bucket | Zones | Effort |
+|--------|-------|--------|
+| Small fix (≤1 PR) | O3 (trend), O4 (relabel or per-agent table), C1 (routing decision) | Low–Mid |
+| Medium (2–3 PRs) | G2 (stale + wall), K1 (BDI + tool + token), K2 (decisions stream), E4 (git graph enrichment) | Mid |
+| Large / blocked | G1 (schema), G3 (new backend), O1 (new surface), O2 (audit backend), O5 (stress backend), K3 (episodes backend), K4 (product decision), C2/C3 (comms backend), I0 + E1–E5 (IDE track) | High |
+
+**Recommended sequence update**:
+
+1. **F1 (Low)** — O3 trend.
+2. **F2 (Mid)** — K1 BDI extraction.
+3. **F3 (Mid)** — G2 stale + wall.
+4. **F4 (Decision)** — K4 product call.
+5. **F5 (Decision)** — G1 metric source.
+6. **F6 (Large)** — O1 Cascade Inspector surface (Phase 3 territory).
+7. **F7 (Decision)** — O4: per-agent vs per-model scope call.
+8. **F8 (Mid)** — K2 decisions stream or defer.
+9. **F9–F15 (High)** — IDE track (I0 + E1–E5) is a separate epic, not Phase F.
+10. **F16–F19 (High)** — Comms track (C2, C3) + Accountability (G3) + Audit (O2) + Stress (O5) + Episodes (K3) need backend-first scoping.

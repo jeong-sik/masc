@@ -108,12 +108,19 @@ type model_stats = {
   buckets : bucket_metric list;
 }
 
+type latency_bucket = {
+  lo_ms : int;
+  hi_ms : int option;
+  count : int;
+}
+
 type aggregate = {
   window_minutes : int;
   bucket_minutes : int;
   models : model_stats list;
   total_entries : int;
   total_error_entries : int;
+  latency_buckets : latency_bucket list;
 }
 
 (* ── Percentile ───────────────────────���─────────────────── *)
@@ -1104,6 +1111,26 @@ let group_entries_by_model (entries : raw_entry list)
   in
   StringMap.fold (fun model es acc -> (model, es) :: acc) tbl []
 
+let latency_histogram (entries : raw_entry list) : latency_bucket list =
+  let bins = [| 0; 0; 0; 0 |] in
+  List.iter
+    (fun e ->
+      match e.latency_ms with
+      | None -> ()
+      | Some ms ->
+          let ms = int_of_float ms in
+          if ms < 1000 then bins.(0) <- bins.(0) + 1
+          else if ms < 4000 then bins.(1) <- bins.(1) + 1
+          else if ms < 16000 then bins.(2) <- bins.(2) + 1
+          else bins.(3) <- bins.(3) + 1)
+    entries;
+  [
+    { lo_ms = 0; hi_ms = Some 1000; count = bins.(0) };
+    { lo_ms = 1000; hi_ms = Some 4000; count = bins.(1) };
+    { lo_ms = 4000; hi_ms = Some 16000; count = bins.(2) };
+    { lo_ms = 16000; hi_ms = None; count = bins.(3) };
+  ]
+
 (* ── Public API ─────────────────────────────────────────── *)
 
 let compute ~base_path ~window_minutes : aggregate =
@@ -1115,7 +1142,8 @@ let compute ~base_path ~window_minutes : aggregate =
   in
   { window_minutes; bucket_minutes = 0; models;
     total_entries = List.length entries;
-    total_error_entries }
+    total_error_entries;
+    latency_buckets = latency_histogram entries }
 
 let compute_with_buckets ~base_path ~window_minutes ~bucket_minutes : aggregate =
   let bucket_minutes = max 1 bucket_minutes in
@@ -1143,7 +1171,8 @@ let compute_with_buckets ~base_path ~window_minutes ~bucket_minutes : aggregate 
   { window_minutes; bucket_minutes;
     models = models_with_buckets;
     total_entries = List.length entries;
-    total_error_entries }
+    total_error_entries;
+    latency_buckets = latency_histogram entries }
 
 let aggregate_buckets ~base_path ~window_min ~bucket_min : model_bucketed list =
   let since_unix = Time_compat.now () -. (Float.of_int window_min *. 60.0) in
@@ -1252,11 +1281,19 @@ let model_stats_to_json (s : model_stats) : Yojson.Safe.t =
     ]
 
 let to_json (agg : aggregate) : Yojson.Safe.t =
+  let latency_bucket_to_json b =
+    `Assoc
+      [ ("lo", `Int b.lo_ms)
+      ; ("hi", match b.hi_ms with Some n -> `Int n | None -> `Null)
+      ; ("n", `Int b.count)
+      ]
+  in
   `Assoc
     [ ("window_minutes", `Int agg.window_minutes)
     ; ("bucket_minutes", `Int agg.bucket_minutes)
     ; ("total_entries", `Int agg.total_entries)
     ; ("total_error_entries", `Int agg.total_error_entries)
+    ; ("latency_buckets", `List (List.map latency_bucket_to_json agg.latency_buckets))
     ; ("models", `List (List.map model_stats_to_json agg.models))
     ]
 

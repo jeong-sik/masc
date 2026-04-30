@@ -562,6 +562,7 @@ export interface BucketMetric {
 
 export interface DashboardRuntimeModelMetric {
   model_id: string
+  provider?: string | null
   entry_count?: number | null
   avg_tok_per_sec?: number | null
   p50_tok_per_sec?: number | null
@@ -632,11 +633,18 @@ export interface DashboardRuntimeModelMetric {
   buckets?: BucketMetric[] | null
 }
 
+export interface LatencyBucket {
+  lo_ms: number
+  hi_ms: number | null
+  count: number
+}
+
 export interface DashboardRuntimeModelMetricsResponse {
   window_minutes?: number
   bucket_minutes?: number
   total_entries?: number
   total_error_entries?: number
+  latency_buckets?: LatencyBucket[] | null
   models: DashboardRuntimeModelMetric[]
 }
 
@@ -699,6 +707,7 @@ function decodeRuntimeModelMetric(raw: unknown): DashboardRuntimeModelMetric | n
   if (!modelId) return null
   return {
     model_id: modelId,
+    provider: asNullableString(raw.provider),
     entry_count: asNumber(raw.entry_count) ?? null,
     avg_tok_per_sec: asNumber(raw.avg_tok_per_sec) ?? null,
     p50_tok_per_sec: asNumber(raw.p50_tok_per_sec) ?? null,
@@ -795,6 +804,15 @@ function decodeRuntimeModelMetricsResponse(raw: unknown): DashboardRuntimeModelM
     bucket_minutes: asNumber(raw.bucket_minutes),
     total_entries: asNumber(raw.total_entries),
     total_error_entries: asNumber(raw.total_error_entries),
+    latency_buckets: Array.isArray(raw.latency_buckets)
+      ? (raw.latency_buckets as unknown[])
+          .filter(isRecord)
+          .map(b => ({
+            lo_ms: asNumber(b.lo) ?? 0,
+            hi_ms: b.hi == null ? null : (asNumber(b.hi) ?? null),
+            count: asNumber(b.n) ?? 0,
+          }))
+      : null,
     models: asRecordArray(raw.models)
       .map(decodeRuntimeModelMetric)
       .filter((metric): metric is DashboardRuntimeModelMetric => metric !== null),
@@ -817,6 +835,299 @@ export async function fetchRuntimeModelMetrics(
   const raw = await get<Record<string, unknown>>(`/api/v1/models/metrics?window=${windowMinutes}${bParam}`, { signal: opts?.signal })
   const decoded = decodeRuntimeModelMetricsResponse(raw)
   if (!decoded) throw new Error('유효하지 않은 runtime model metrics payload')
+  return decoded
+}
+
+export interface KeeperCostMetric {
+  keeper_name: string
+  total_cost_usd: number
+  total_input_tokens: number
+  total_output_tokens: number
+  total_tokens: number
+  p50_latency_ms: number | null
+  p95_latency_ms: number | null
+  sample_count: number
+  model_breakdown: Array<{ model: string; cost_usd: number }>
+}
+
+export interface KeeperCostMetricsResponse {
+  window_minutes?: number
+  keepers: KeeperCostMetric[]
+  generated_at?: number | null
+}
+
+function decodeKeeperCostMetric(raw: unknown): KeeperCostMetric | null {
+  if (!isRecord(raw)) return null
+  const keeperName = asString(raw.keeper_name)
+  if (!keeperName) return null
+  return {
+    keeper_name: keeperName,
+    total_cost_usd: asNumber(raw.total_cost_usd) ?? 0,
+    total_input_tokens: asNumber(raw.total_input_tokens) ?? 0,
+    total_output_tokens: asNumber(raw.total_output_tokens) ?? 0,
+    total_tokens: asNumber(raw.total_tokens) ?? 0,
+    p50_latency_ms: asNumber(raw.p50_latency_ms) ?? null,
+    p95_latency_ms: asNumber(raw.p95_latency_ms) ?? null,
+    sample_count: asNumber(raw.sample_count) ?? 0,
+    model_breakdown: Array.isArray(raw.model_breakdown)
+      ? (raw.model_breakdown as unknown[])
+          .filter(isRecord)
+          .map(b => ({ model: asString(b.model) ?? '', cost_usd: asNumber(b.cost_usd) ?? 0 }))
+          .filter(b => b.model.length > 0)
+      : [],
+  }
+}
+
+function decodeKeeperCostMetricsResponse(raw: unknown): KeeperCostMetricsResponse | null {
+  if (!isRecord(raw)) return null
+  return {
+    window_minutes: asNumber(raw.window_minutes),
+    keepers: asRecordArray(raw.keepers)
+      .map(decodeKeeperCostMetric)
+      .filter((metric): metric is KeeperCostMetric => metric !== null),
+    generated_at: asNumber(raw.generated_at) ?? null,
+  }
+}
+
+export async function fetchKeeperCostMetrics(
+  windowMinutes = 1440,
+  opts?: AbortableRequestOptions,
+): Promise<KeeperCostMetricsResponse> {
+  const raw = await get<Record<string, unknown>>(`/api/v1/dashboard/keeper-costs?window=${windowMinutes}`, { signal: opts?.signal })
+  const decoded = decodeKeeperCostMetricsResponse(raw)
+  if (!decoded) throw new Error('유효하지 않은 keeper cost metrics payload')
+  return decoded
+}
+
+export interface KeeperDecision {
+  ts_unix: number | null
+  keeper_name: string
+  event_type: string
+  outcome: string | null
+  model_used: string | null
+  latency_ms: number | null
+  cost_usd: number | null
+  input_tokens: number | null
+  output_tokens: number | null
+  stop_reason: string | null
+  error_category: string | null
+  tool: string | null
+  duration_ms: number | null
+  match_count: number | null
+}
+
+export interface KeeperDecisionsResponse {
+  events: KeeperDecision[]
+  limit: number
+  generated_at: number | null
+}
+
+function decodeKeeperDecision(raw: unknown): KeeperDecision | null {
+  if (!isRecord(raw)) return null
+  return {
+    ts_unix: asNumber(raw.ts_unix) ?? null,
+    keeper_name: asString(raw.keeper_name) ?? '',
+    event_type: asString(raw.event_type) ?? 'turn',
+    outcome: asNullableString(raw.outcome),
+    model_used: asNullableString(raw.model_used),
+    latency_ms: asNumber(raw.latency_ms) ?? null,
+    cost_usd: asNumber(raw.cost_usd) ?? null,
+    input_tokens: asNumber(raw.input_tokens) ?? null,
+    output_tokens: asNumber(raw.output_tokens) ?? null,
+    stop_reason: asNullableString(raw.stop_reason),
+    error_category: asNullableString(raw.error_category),
+    tool: asNullableString(raw.tool),
+    duration_ms: asNumber(raw.duration_ms) ?? null,
+    match_count: asNumber(raw.match_count) ?? null,
+  }
+}
+
+function decodeKeeperDecisionsResponse(raw: unknown): KeeperDecisionsResponse | null {
+  if (!isRecord(raw)) return null
+  return {
+    events: asRecordArray(raw.events)
+      .map(decodeKeeperDecision)
+      .filter((d): d is KeeperDecision => d !== null),
+    limit: asInt(raw.limit) ?? 0,
+    generated_at: asNumber(raw.generated_at) ?? null,
+  }
+}
+
+export async function fetchKeeperDecisions(
+  limit = 200,
+  opts?: AbortableRequestOptions,
+): Promise<KeeperDecisionsResponse> {
+  const raw = await get<Record<string, unknown>>(`/api/v1/dashboard/keeper-decisions?limit=${limit}`, { signal: opts?.signal })
+  const decoded = decodeKeeperDecisionsResponse(raw)
+  if (!decoded) throw new Error('유효하지 않은 keeper decisions payload')
+  return decoded
+}
+
+export interface HeuristicEvent {
+  module: string
+  site: string
+  raw_value: number
+  threshold: number
+  triggered: boolean
+  provenance: { type: string; detail: string }
+  timestamp: number
+  detail?: string
+}
+
+export interface HeuristicsResponse {
+  limit: number
+  count: number
+  events: HeuristicEvent[]
+}
+
+function decodeHeuristicEvent(raw: unknown): HeuristicEvent | null {
+  if (!isRecord(raw)) return null
+  const prov = isRecord(raw.provenance) ? raw.provenance : null
+  return {
+    module: asString(raw.module) ?? '',
+    site: asString(raw.site) ?? '',
+    raw_value: asNumber(raw.raw_value) ?? 0,
+    threshold: asNumber(raw.threshold) ?? 0,
+    triggered: asBoolean(raw.triggered) ?? false,
+    provenance: prov
+      ? { type: asString(prov.type) ?? '', detail: asString(prov.detail) ?? '' }
+      : { type: '', detail: '' },
+    timestamp: asNumber(raw.timestamp) ?? 0,
+    detail: asNullableString(raw.detail) ?? undefined,
+  }
+}
+
+function decodeHeuristicsResponse(raw: unknown): HeuristicsResponse | null {
+  if (!isRecord(raw)) return null
+  return {
+    limit: asInt(raw.limit) ?? 0,
+    count: asInt(raw.count) ?? 0,
+    events: asRecordArray(raw.events)
+      .map(decodeHeuristicEvent)
+      .filter((e): e is HeuristicEvent => e !== null),
+  }
+}
+
+export async function fetchHeuristics(
+  limit = 100,
+  opts?: AbortableRequestOptions,
+): Promise<HeuristicsResponse> {
+  const raw = await get<Record<string, unknown>>(`/api/v1/dashboard/heuristics?limit=${limit}`, { signal: opts?.signal })
+  const decoded = decodeHeuristicsResponse(raw)
+  if (!decoded) throw new Error('유효하지 않은 heuristics payload')
+  return decoded
+}
+
+export interface StressKind {
+  type: string
+  count?: number
+  consecutive?: number
+  threshold?: number
+  counted_toward_crash?: boolean
+  recoverable?: boolean
+  error_kind?: string
+}
+
+export interface StressEvent {
+  agent_name: string
+  room_id: string
+  kind: StressKind
+  timestamp: number
+}
+
+export interface StressResponse {
+  limit: number
+  count: number
+  events: StressEvent[]
+}
+
+function decodeStressKind(raw: unknown): StressKind | null {
+  if (!isRecord(raw)) return null
+  return {
+    type: asString(raw.type) ?? '',
+    count: asInt(raw.count) ?? undefined,
+    consecutive: asInt(raw.consecutive) ?? undefined,
+    threshold: asInt(raw.threshold) ?? undefined,
+    counted_toward_crash: raw.counted_toward_crash === undefined ? undefined : (asBoolean(raw.counted_toward_crash) ?? false),
+    recoverable: raw.recoverable === undefined ? undefined : (asBoolean(raw.recoverable) ?? false),
+    error_kind: asNullableString(raw.error_kind) ?? undefined,
+  }
+}
+
+function decodeStressEvent(raw: unknown): StressEvent | null {
+  if (!isRecord(raw)) return null
+  const kind = decodeStressKind(raw.kind)
+  if (!kind) return null
+  return {
+    agent_name: asString(raw.agent_name) ?? '',
+    room_id: asString(raw.room_id) ?? '',
+    kind,
+    timestamp: asNumber(raw.timestamp) ?? 0,
+  }
+}
+
+function decodeStressResponse(raw: unknown): StressResponse | null {
+  if (!isRecord(raw)) return null
+  return {
+    limit: asInt(raw.limit) ?? 0,
+    count: asInt(raw.count) ?? 0,
+    events: asRecordArray(raw.events)
+      .map(decodeStressEvent)
+      .filter((e): e is StressEvent => e !== null),
+  }
+}
+
+export async function fetchStress(
+  limit = 100,
+  opts?: AbortableRequestOptions,
+): Promise<StressResponse> {
+  const raw = await get<Record<string, unknown>>(`/api/v1/dashboard/stress?limit=${limit}`, { signal: opts?.signal })
+  const decoded = decodeStressResponse(raw)
+  if (!decoded) throw new Error('유효하지 않은 stress payload')
+  return decoded
+}
+
+export interface CoverageSite {
+  module: string
+  site: string
+  count: number
+  triggered_count: number
+}
+
+export interface HeuristicCoverage {
+  total_events: number
+  unique_decision_tuples: number
+  sites: CoverageSite[]
+}
+
+function decodeCoverageSite(raw: unknown): CoverageSite | null {
+  if (!isRecord(raw)) return null
+  return {
+    module: asString(raw.module) ?? '',
+    site: asString(raw.site) ?? '',
+    count: asInt(raw.count) ?? 0,
+    triggered_count: asInt(raw.triggered_count) ?? 0,
+  }
+}
+
+function decodeHeuristicCoverage(raw: unknown): HeuristicCoverage | null {
+  if (!isRecord(raw)) return null
+  return {
+    total_events: asInt(raw.total_events) ?? 0,
+    unique_decision_tuples: asInt(raw.unique_decision_tuples) ?? 0,
+    sites: asRecordArray(raw.sites)
+      .map(decodeCoverageSite)
+      .filter((s): s is CoverageSite => s !== null),
+  }
+}
+
+export async function fetchHeuristicCoverage(
+  limit = 100,
+  opts?: AbortableRequestOptions,
+): Promise<HeuristicCoverage> {
+  const raw = await get<Record<string, unknown>>(`/api/v1/dashboard/heuristics/coverage?limit=${limit}`, { signal: opts?.signal })
+  const decoded = decodeHeuristicCoverage(raw)
+  if (!decoded) throw new Error('유효하지 않은 heuristic coverage payload')
   return decoded
 }
 
@@ -2537,6 +2848,29 @@ export function fetchTlcResults(
   opts?: AbortableRequestOptions,
 ): Promise<TlcResultsResponse> {
   return get<TlcResultsResponse>('/api/v1/verification/tlc-results', {
+    signal: opts?.signal,
+  })
+}
+
+export interface AuditEntry {
+  timestamp: number
+  key: string
+  old_value: unknown
+  new_value: unknown
+  actor: string
+  case_id?: string
+}
+
+export interface AuditLedgerResponse {
+  entries: AuditEntry[]
+  count: number
+}
+
+export function fetchAuditLedger(
+  limit = 50,
+  opts?: { signal?: AbortSignal },
+): Promise<AuditLedgerResponse> {
+  return get<AuditLedgerResponse>(`/api/v1/governance/params/audit?limit=${limit}`, {
     signal: opts?.signal,
   })
 }

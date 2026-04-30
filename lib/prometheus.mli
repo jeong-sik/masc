@@ -139,6 +139,13 @@ val metric_keeper_compaction_saved_tokens : string
     triggers rather than savings.  Labels: [keeper, trigger]. *)
 val metric_keeper_compaction_noop : string
 
+(** Tier K5 — registry size for the per-keeper tool-emission
+    accumulator (Tier K4c). Operators can alert on divergence from
+    the active keeper count — a steady-state leak shows up as the
+    gauge climbing past live keeper count without trending back
+    down on keeper_down / supervisor cleanup. No labels. *)
+val metric_keeper_tool_emission_registry_size : string
+
 val metric_keeper_operator_compact : string
 val metric_keeper_operator_clear : string
 

@@ -20,6 +20,13 @@ let find_channel_json channel json =
   |> List.find (fun item ->
          String.equal (item |> U.member "channel" |> U.to_string) channel)
 
+let check_error_kind name expected actual =
+  check string name expected (Metrics.error_kind_to_string actual)
+
+let test_error_kind_round_trip () =
+  let kind = Metrics.error_kind_of_string "validation" in
+  check_error_kind "round trip" "validation" kind
+
 let test_record_attempt_tracks_connector_diagnostics () =
   with_eio (fun () ->
       let channel = unique_channel "discord-metrics" in
@@ -42,7 +49,7 @@ let test_record_attempt_tracks_connector_diagnostics () =
       check int "validation_error_count" 1 stats.validation_error_count;
       check int "room_count counts unique rooms" 2 stats.room_count;
       check string "last_keeper trimmed" "luna" stats.last_keeper;
-      check string "last_error_kind" "validation" stats.last_error_kind;
+      check_error_kind "last_error_kind" "validation" stats.last_error_kind;
       check string "last_outcome" "duplicate" stats.last_outcome;
       check string "last_room_id" "room-b" stats.last_room_id)
 
@@ -65,7 +72,7 @@ let test_record_internal_error_exn_tracks_internal_failures () =
       check int "internal_error_count" 1 stats.internal_error_count;
       check string "last_keeper trimmed" "sangsu" stats.last_keeper;
       check string "last_error redacted" "internal error" stats.last_error;
-      check string "last_error_kind" "internal" stats.last_error_kind;
+      check_error_kind "last_error_kind" "internal" stats.last_error_kind;
       check string "last_outcome" "internal_error" stats.last_outcome)
 
 let test_record_validation_error_metric_tracks_request_metadata () =
@@ -221,6 +228,7 @@ let () =
     [
       ( "metrics",
         [
+          test_case "error kind round trip" `Quick test_error_kind_round_trip;
           test_case "records connector diagnostics" `Quick
             test_record_attempt_tracks_connector_diagnostics;
           test_case "records internal exception diagnostics" `Quick

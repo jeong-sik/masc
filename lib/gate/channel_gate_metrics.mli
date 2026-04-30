@@ -15,6 +15,13 @@ type outcome =
   | Dispatch_unavailable
   | Internal_error of string
 
+(** Closed wrapper for connector error-kind labels. JSON/status surfaces
+    continue to render the stable snake_case string labels. *)
+type error_kind = private Error_kind of string
+
+val error_kind_of_string : string -> error_kind
+val error_kind_to_string : error_kind -> string
+
 (** Per-channel statistics snapshot (immutable). *)
 type channel_stats = {
   channel : string;
@@ -32,7 +39,7 @@ type channel_stats = {
   last_keeper : string;
   last_room_id : string;
   last_error : string;
-  last_error_kind : string;
+  last_error_kind : error_kind;
   last_outcome : string;
   total_duration_ms : int;
   timed_count : int;
@@ -54,7 +61,7 @@ type binding_stats = {
   last_success_ts : float;
   last_error_ts : float;
   last_error : string;
-  last_error_kind : string;
+  last_error_kind : error_kind;
   last_outcome : string;
   total_duration_ms : int;
   timed_count : int;
@@ -69,7 +76,7 @@ type gate_event = {
   room_id : string;
   keeper : string;
   outcome : string;
-  error_kind : string;
+  error_kind : error_kind;
   error : string;
   duration_ms : int;
 }

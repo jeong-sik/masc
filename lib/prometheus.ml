@@ -1165,8 +1165,9 @@ let init () =
   add metric_silent_dashboard_actor_fallback
     "Total times Server_auth.dashboard_actor_for_request resolved no agent \
      from the bearer token (Ok None / Error _) and fell back to \
-     request_actor_hint. Labels: outcome (none | error). Counter exposes \
-     the path that masks identity drift in the HTTP transport."
+     request_actor_hint. Labels: outcome (none | error), err_kind on error \
+     paths. Counter exposes the path that masks identity drift in the HTTP \
+     transport."
     Counter;
   add metric_auth_strict_would_reject
     "Phase A F2 (2026-04-27): every silent_auth_token_resolve_error fall-through \

@@ -1,5 +1,4 @@
 (include_subdirs unqualified)
-
 (library
  (name masc_mcp)
  (public_name masc_mcp)
@@ -186,7 +185,6 @@
    tool_call_quality_benchmark_render
    tool_call_quality_benchmark
    room_protocol
-
    inference_utils
    ;; WebRTC modules removed — use ocaml-webrtc library directly
    gc_sampler
@@ -334,7 +332,6 @@
    coord_assertions
    tool_coord
    workflow_guide
-
    tool_control
    tool_misc
    tool_team_memory
@@ -573,7 +570,6 @@
    keeper_turn_helpers
    keeper_turn_liveness
    keeper_turn_cascade_budget
-
    keeper_prompt_names
    keeper_prompt
    keeper_coordination
@@ -614,7 +610,6 @@
    keeper_status_detail
    keeper_status
    keeper_status_bridge
-
    keeper_persona
    ;; Context management (used by keeper agents)
    masc_eio_env

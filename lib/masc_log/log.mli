@@ -7,6 +7,12 @@ type level =
   | Warn
   | Error
 
+(** Structured event classes carried in log [details]. *)
+type event_class = Routine
+
+val event_class_to_string : event_class -> string
+(** Convert a structured event class to its stable JSON label. *)
+
 val level_to_string : level -> string
 (** Convert level to string representation. *)
 
@@ -51,6 +57,11 @@ val log : level -> ?ctx:string -> ('a, unit, string, unit) format4 -> 'a
 
 val emit : level -> ?module_name:string -> ?details:Yojson.Safe.t -> string -> unit
 (** Log a preformatted structured message with optional JSON details. *)
+
+val emit_routine : ?module_name:string -> ?details:Yojson.Safe.t -> string -> unit
+(** Log repeatable housekeeping/telemetry through the central routine policy.
+    The effective level is controlled by [MASC_LOG_ROUTINE_LEVEL] and defaults
+    to [Debug]. Set it to [off] to suppress routine events entirely. *)
 
 val debug : ?ctx:string -> ('a, unit, string, unit) format4 -> 'a
 val info : ?ctx:string -> ('a, unit, string, unit) format4 -> 'a
@@ -108,72 +119,80 @@ val client_tool_host_error :
 (** Functor for creating module-specific loggers.
     [M.name] controls the env-var key MASC_LOG_{NAME}_LEVEL
     and the context prefix in log output. *)
-module Make (_ : sig val name : string end) : sig
+module type LOGGER = sig
   val emit : level -> ?details:Yojson.Safe.t -> ?keeper_name:string -> ?turn_id:int -> string -> unit
+  val routine :
+    ?details:Yojson.Safe.t ->
+    ?keeper_name:string ->
+    ?turn_id:int ->
+    ('a, unit, string, unit) format4 ->
+    'a
   val debug : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a
   val info : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a
   val warn : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a
   val error : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a
 end
 
+module Make (_ : sig val name : string end) : LOGGER
+
 (** {1 Pre-defined module loggers} *)
 
-module Coord : sig val debug : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val info : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val warn : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val error : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a end
-module Mcp : sig val emit : level -> ?details:Yojson.Safe.t -> ?keeper_name:string -> ?turn_id:int -> string -> unit val debug : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val info : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val warn : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val error : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a end
-module Auth : sig val debug : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val info : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val warn : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val error : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a end
-module Retry : sig val debug : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val info : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val warn : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val error : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a end
-module Backend : sig val debug : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val info : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val warn : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val error : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a end
-module Session : sig val debug : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val info : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val warn : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val error : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a end
-module Cancel : sig val debug : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val info : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val warn : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val error : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a end
-module Sub : sig val debug : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val info : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val warn : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val error : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a end
-module Spawn : sig val debug : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val info : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val warn : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val error : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a end
-module Pulse : sig val debug : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val info : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val warn : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val error : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a end
-module ModelClient : sig val debug : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val info : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val warn : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val error : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a end
-module Orchestrator : sig val debug : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val info : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val warn : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val error : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a end
-module BoardLog : sig val debug : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val info : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val warn : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val error : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a end
-module Metrics : sig val debug : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val info : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val warn : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val error : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a end
-module Dashboard : sig val debug : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val info : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val warn : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val error : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a end
-module Trpg : sig val debug : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val info : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val warn : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val error : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a end
-module Feed : sig val debug : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val info : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val warn : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val error : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a end
-module Telemetry : sig val debug : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val info : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val warn : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val error : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a end
-module Noosphere : sig val debug : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val info : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val warn : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val error : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a end
-module CmdPlane : sig val debug : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val info : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val warn : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val error : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a end
-module Governance : sig val debug : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val info : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val warn : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val error : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a end
-module Social : sig val debug : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val info : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val warn : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val error : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a end
-module Transport : sig val debug : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val info : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val warn : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val error : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a end
-module Gc : sig val debug : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val info : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val warn : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val error : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a end
-module Reputation : sig val debug : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val info : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val warn : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val error : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a end
-module Keeper : sig val debug : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val info : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val warn : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val error : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a end
-module Memory : sig val debug : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val info : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val warn : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val error : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a end
-module Mention : sig val debug : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val info : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val warn : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val error : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a end
-module Misc : sig val debug : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val info : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val warn : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val error : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a end
-module Autoresearch : sig val debug : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val info : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val warn : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val error : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a end
-module Identity : sig val debug : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val info : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val warn : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val error : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a end
-module Institution : sig val debug : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val info : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val warn : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val error : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a end
-module Pages : sig val debug : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val info : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val warn : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val error : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a end
-module Thompson : sig val debug : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val info : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val warn : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val error : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a end
-module Config : sig val debug : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val info : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val warn : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val error : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a end
-module Task : sig val debug : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val info : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val warn : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val error : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a end
-module Http : sig val debug : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val info : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val warn : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val error : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a end
-module Langfuse : sig val debug : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val info : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val warn : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val error : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a end
-module Server : sig val debug : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val info : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val warn : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val error : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a end
-module Dispatch : sig val debug : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val info : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val warn : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val error : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a end
-module BoardPg : sig val debug : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val info : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val warn : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val error : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a end
-module MemoryPg : sig val debug : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val info : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val warn : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val error : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a end
-module MemoryJsonl : sig val debug : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val info : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val warn : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val error : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a end
-module AutoResponder : sig val debug : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val info : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val warn : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val error : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a end
-module Env : sig val debug : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val info : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val warn : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val error : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a end
-module Level2 : sig val debug : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val info : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val warn : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val error : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a end
-module RoomTask : sig val debug : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val info : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val warn : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val error : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a end
-module Inline : sig val debug : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val info : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val warn : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val error : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a end
-module Protocol : sig val debug : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val info : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val warn : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val error : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a end
-module AlwaysOn : sig val debug : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val info : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val warn : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val error : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a end
-module KeeperExec : sig val debug : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val info : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val warn : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val error : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a end
-module LocalWorker : sig val debug : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val info : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val warn : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val error : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a end
-module Worker : sig val debug : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val info : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val warn : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val error : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a end
-module Sse : sig val debug : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val info : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val warn : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val error : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a end
-module Verifier : sig val debug : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val info : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val warn : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val error : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a end
-module Planner : sig val debug : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val info : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val warn : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val error : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a end
-module Compact : sig val debug : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val info : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val warn : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val error : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a end
-module Harness : sig val debug : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val info : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val warn : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val error : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a end
-module Discovery : sig val debug : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val info : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val warn : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a val error : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a end
+module Coord : LOGGER
+module Mcp : LOGGER
+module Auth : LOGGER
+module Retry : LOGGER
+module Backend : LOGGER
+module Session : LOGGER
+module Cancel : LOGGER
+module Sub : LOGGER
+module Spawn : LOGGER
+module Pulse : LOGGER
+module ModelClient : LOGGER
+module Orchestrator : LOGGER
+module BoardLog : LOGGER
+module Metrics : LOGGER
+module Dashboard : LOGGER
+module Trpg : LOGGER
+module Feed : LOGGER
+module Telemetry : LOGGER
+module Noosphere : LOGGER
+module CmdPlane : LOGGER
+module Governance : LOGGER
+module Social : LOGGER
+module Transport : LOGGER
+module Gc : LOGGER
+module Reputation : LOGGER
+module Keeper : LOGGER
+module Memory : LOGGER
+module Mention : LOGGER
+module Misc : LOGGER
+module Autoresearch : LOGGER
+module Identity : LOGGER
+module Institution : LOGGER
+module Pages : LOGGER
+module Thompson : LOGGER
+module Config : LOGGER
+module Task : LOGGER
+module Http : LOGGER
+module Langfuse : LOGGER
+module Server : LOGGER
+module Dispatch : LOGGER
+module BoardPg : LOGGER
+module MemoryPg : LOGGER
+module MemoryJsonl : LOGGER
+module AutoResponder : LOGGER
+module Env : LOGGER
+module Level2 : LOGGER
+module RoomTask : LOGGER
+module Inline : LOGGER
+module Protocol : LOGGER
+module AlwaysOn : LOGGER
+module KeeperExec : LOGGER
+module LocalWorker : LOGGER
+module Worker : LOGGER
+module Sse : LOGGER
+module Verifier : LOGGER
+module Planner : LOGGER
+module Compact : LOGGER
+module Harness : LOGGER
+module Discovery : LOGGER

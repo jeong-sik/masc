@@ -174,7 +174,7 @@ let prepare_agent_setup
     in
     if entries <> []
     then
-      Log.Keeper.debug
+      Log.Keeper.routine
         "keeper:%s affinity pre-populated %d tools: [%s]"
         meta.name
         (List.length entries)
@@ -393,7 +393,7 @@ let prepare_agent_setup
              ]));
   if Keeper_types_profile.keeper_debug
   then
-    Log.Keeper.debug
+    Log.Keeper.routine
       "keeper:%s tool visibility: total=%d search_indexed=%d"
       meta.name
       (List.length keeper_tools)

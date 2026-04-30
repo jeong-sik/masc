@@ -60,6 +60,9 @@ let emit_native_event_log (evt : Oas.Event_bus.event) (json : Yojson.Safe.t) =
   let log_at level message =
     Log.emit level ~module_name:"oas:event" ~details:json message
   in
+  let log_routine message =
+    Log.emit_routine ~module_name:"oas:event" ~details:json message
+  in
   let log message =
     log_at Log.Info message
   in
@@ -94,7 +97,7 @@ let emit_native_event_log (evt : Oas.Event_bus.event) (json : Yojson.Safe.t) =
       let names_hash =
         Digest.to_hex (Digest.string (String.concat "\n" tool_names))
       in
-      log_at Log.Debug
+      log_routine
         (Printf.sprintf
            "[substrate:tool_surface] agent=%s turn=%d count=%d names_hash=%s"
            agent_name turn (List.length tool_names)

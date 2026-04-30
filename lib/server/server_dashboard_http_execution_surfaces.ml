@@ -80,7 +80,7 @@ let broadcast_cached_surface ~event_type (json : Yojson.Safe.t) : unit =
     in
     Sse.broadcast_to Observers sse_json
   end else
-    Log.Dashboard.debug "%s: payload unchanged, skipping broadcast" event_type
+    Log.Dashboard.routine "%s: payload unchanged, skipping broadcast" event_type
 
 let execution_actor_for_request ~base_path request =
   Server_auth.sanitized_dashboard_actor_for_request ~base_path request

@@ -255,7 +255,7 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                  in_turn_stale in_turn_age failure_loop stale last_turn
                  fiber_age grace_remaining
              in
-             Log.Keeper.debug "%s" log_line;
+             Log.Keeper.routine "%s" log_line;
              let cooldown_ok =
                !last_broadcast_ts = 0.0
                || now -. !last_broadcast_ts > threshold

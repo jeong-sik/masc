@@ -104,7 +104,7 @@ let emit_resolution_trace ~cascade ~keeper_id ~provider_label ~outcome =
   let keeper_label = Option.value keeper_id ~default:"-" in
   match outcome with
   | Ok { source; _ } ->
-      Log.Auth.debug
+      Log.Auth.routine
         ?keeper_name:keeper_id
         "auth_resolve: cascade=%s provider=%s keeper=%s outcome=ok source=%s"
         cascade provider_label keeper_label

@@ -618,7 +618,7 @@ let refresh_once ~sw ~net
   (* Cycle-start log so an operator can confirm the daemon fiber is alive.
      Previously every branch was silent in steady state — a hung daemon was
      indistinguishable from a healthy one producing zero events (#8319). *)
-  Log.Governance.debug "refresh_once: cycle start";
+  Log.Governance.routine "refresh_once: cycle start";
   ignore (latest_judgments base_path);
   let served_from_cache =
     let now_ts = Unix.gettimeofday () in
@@ -630,7 +630,7 @@ let refresh_once ~sw ~net
           false)
   in
   if served_from_cache then
-    Log.Governance.debug "refresh_once: fresh cached result; skipping compute"
+    Log.Governance.routine "refresh_once: fresh cached result; skipping compute"
   else if should_backoff ~sw ~net then begin
     let was_online =
       with_lock st (fun () ->
@@ -645,7 +645,7 @@ let refresh_once ~sw ~net
     if was_online then
       Log.Governance.info "backoff: local slots saturated, skipping cycle"
     else
-      Log.Governance.debug "backoff: local slots saturated (first cycle)"
+      Log.Governance.routine "backoff: local slots saturated (first cycle)"
   end
   else begin
     with_lock st (fun () ->
@@ -655,7 +655,7 @@ let refresh_once ~sw ~net
     match compute_judgments ~masc_tools ~dispatch ~build_facts with
     | Ok (model_used, generated_at, expires_at, judgments) ->
         if judgments = [] then
-          Log.Governance.debug
+          Log.Governance.routine
             "refresh_once: ok model=%s judgments=%d"
             model_used 0
         else
@@ -716,7 +716,7 @@ let start ~sw ~clock ~net ~base_path
             else min (base *. Float.pow 2.0 (float_of_int (min n 5))) 300.0
           in
           if n > 0 then
-            Log.Governance.debug "backoff: sleeping %.0fs (consecutive=%d)" sleep_s n;
+            Log.Governance.routine "backoff: sleeping %.0fs (consecutive=%d)" sleep_s n;
           Eio.Time.sleep clock sleep_s;
           loop ()
         in

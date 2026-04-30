@@ -71,6 +71,11 @@ let str_contains s substring =
     in
     loop 0
 
+let str_starts_with ~prefix s =
+  let len_s = String.length s in
+  let len_prefix = String.length prefix in
+  len_s >= len_prefix && String.sub s 0 len_prefix = prefix
+
 let contract_requiring_tools tools =
   `Assoc [ ("required_tools", `List (List.map (fun tool -> `String tool) tools)) ]
 
@@ -861,6 +866,38 @@ let () = test "handle_claim_next_sets_planning_current_task" (fun () ->
   let (success, _result) = Tool_task.handle_claim_next ctx (`Assoc []) in
   assert success;
   assert (Planning_eio.get_current_task ctx.config = Some "task-001")
+)
+
+let () = test "handle_claim_next_returns_claim_observation" (fun () ->
+  let ctx = make_test_ctx () in
+  let _ =
+    Tool_task.handle_add_task ctx (`Assoc [ ("title", `String "Claim observed") ])
+  in
+  let success, result = Tool_task.handle_claim_next ctx (`Assoc []) in
+  if not success then failwith result;
+  let prefix = "claim_observation=" in
+  let line =
+    match
+      List.find_opt
+        (fun line -> str_starts_with ~prefix line)
+        (String.split_on_char '\n' result)
+    with
+    | Some line -> line
+    | None -> failwith ("missing claim observation in result: " ^ result)
+  in
+  let payload =
+    String.sub line (String.length prefix) (String.length line - String.length prefix)
+    |> Yojson.Safe.from_string
+  in
+  let open Yojson.Safe.Util in
+  assert (payload |> member "event_type" |> to_string
+          = "collaboration.todo.claim_observed");
+  assert (payload |> member "substrate" |> member "kind" |> to_string = "todo_claim");
+  assert (payload |> member "todo_claim" |> member "todo_id" |> to_string = "task-001");
+  assert (payload |> member "todo_claim" |> member "state" |> to_string
+          = "claim_verified");
+  assert (payload |> member "todo_claim" |> member "winner_actor_id" |> to_string
+          = ctx.agent_name)
 )
 
 let () =

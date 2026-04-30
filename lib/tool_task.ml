@@ -20,6 +20,42 @@ let result_to_response = function
   | Ok msg -> (true, msg)
   | Error e -> (false, Types.masc_error_to_string e)
 
+let build_claim_observation_payload ~(now : float) ~(agent_name : string)
+    ~(task_id : string) : Yojson.Safe.t =
+  `Assoc
+    [
+      ("event_type", `String "collaboration.todo.claim_observed");
+      ("observed_at", `Float now);
+      ( "substrate",
+        `Assoc
+          [
+            ("kind", `String "todo_claim");
+            ("provider", `String "masc.coord");
+            ("workspace_id", `Null);
+          ] );
+      ( "actor",
+        `Assoc
+          [
+            ("id", `String agent_name);
+            ("role", `Null);
+            ("display_name", `Null);
+          ] );
+      ( "todo_claim",
+        `Assoc
+          [
+            ("todo_id", `String task_id);
+            ("state", `String "claim_verified");
+            ("claimed_by", `String agent_name);
+            ("winner_actor_id", `String agent_name);
+            ("logical_clock", `Null);
+            ("convergence_delay_ms", `Null);
+          ] );
+    ]
+
+let append_claim_observation message ~now ~agent_name ~task_id =
+  let payload = build_claim_observation_payload ~now ~agent_name ~task_id in
+  message ^ "\nclaim_observation=" ^ Yojson.Safe.to_string payload
+
 let verdict_to_string (result : Anti_rationalization.review_result) =
   match result.verdict with
   | Anti_rationalization.Approve -> "approve"
@@ -533,9 +569,10 @@ let handle_claim_next ?agent_tool_names ctx _args =
     Coord.claim_next_r ctx.config ~agent_name:ctx.agent_name ?agent_tool_names ()
   in
   let message = match result with
-    | Coord.Claim_next_claimed { message; _ } ->
+    | Coord.Claim_next_claimed { message; task_id; _ } ->
         sync_planning_current_task_with_owned_task ctx;
-        message
+        append_claim_observation message ~now:(Time_compat.now ())
+          ~agent_name:ctx.agent_name ~task_id
     | Coord.Claim_next_no_unclaimed -> "📋 No unclaimed tasks available"
     | Coord.Claim_next_no_eligible { excluded_count; _ } ->
         Printf.sprintf "📋 No eligible tasks available (blocked/excluded: %d)" excluded_count

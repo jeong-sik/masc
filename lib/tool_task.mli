@@ -42,6 +42,14 @@ val completion_rejection_message : ?allow_force:bool -> string -> string
     [completion_notes_example]. Exposed for regression tests that lock
     in the example substring. *)
 
+(** [build_claim_observation_payload ~now ~agent_name ~task_id] builds the
+    downstream collaboration-observation fragment for a successful
+    [masc_claim_next] write/readback result. MASC uses a central coordination
+    store here, so CRDT-specific [logical_clock] and [convergence_delay_ms]
+    are left null. *)
+val build_claim_observation_payload :
+  now:float -> agent_name:string -> task_id:string -> Yojson.Safe.t
+
 (** [is_cross_model_verdict result] is [true] iff [result] has both
     [generator_cascade = Some g] and [evaluator_cascade] non-empty,
     and [g <> evaluator_cascade].

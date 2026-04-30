@@ -167,6 +167,26 @@ let test_claim_returns_result () =
       check bool "claim result non-empty" true (String.length s > 0)
     | _ -> fail "expected result string in claim response")
 
+let test_claim_returns_observation_fragment () =
+  with_room (fun config ->
+    let meta = make_test_meta () in
+    let _ =
+      Coord.add_task config ~title:"Observed task" ~priority:1 ~description:"desc"
+    in
+    let result = call_tool config meta "keeper_task_claim" (`Assoc []) in
+    let json = parse_json result in
+    check string "event type" "collaboration.todo.claim_observed"
+      Yojson.Safe.Util.(
+        json |> member "claim_observation" |> member "event_type" |> to_string);
+    check string "state" "claim_verified"
+      Yojson.Safe.Util.(
+        json |> member "claim_observation" |> member "todo_claim" |> member "state"
+        |> to_string);
+    check string "winner" meta.agent_name
+      Yojson.Safe.Util.(
+        json |> member "claim_observation" |> member "todo_claim"
+        |> member "winner_actor_id" |> to_string))
+
 let test_claim_syncs_keeper_current_task_id () =
   with_room (fun config ->
     let meta = make_test_meta () in
@@ -692,6 +712,8 @@ let () =
   Alcotest.run "Keeper_task_dispatch" [
     "claim", [
       test_case "claim returns result" `Quick test_claim_returns_result;
+      test_case "claim returns observation fragment" `Quick
+        test_claim_returns_observation_fragment;
       test_case "claim syncs keeper current_task_id" `Quick
         test_claim_syncs_keeper_current_task_id;
       test_case "claim empty room" `Quick test_claim_empty_room;

@@ -80,15 +80,26 @@ val runtime_mcp_policy_requires_http_headers :
     used to decide whether the runtime-MCP gate must additionally
     require [supports_runtime_mcp_http_headers]. *)
 
+val runtime_mcp_policy_requires_unsupported_http_headers :
+  Llm_provider.Provider_config.t ->
+  Llm_provider.Llm_transport.runtime_mcp_policy ->
+  bool
+(** [runtime_mcp_policy_requires_unsupported_http_headers cfg policy]
+    is true iff [policy] contains an HTTP header that [cfg] cannot
+    carry.  This is stricter than
+    {!runtime_mcp_policy_requires_http_headers}: [codex_cli] may carry
+    the non-secret MASC identity headers
+    [x-masc-agent-name] and [x-masc-keeper-name], but still rejects
+    auth-bearing headers such as [Authorization] and
+    [x-masc-internal-token]. *)
+
 val provider_supports_runtime_mcp_policy :
   Llm_provider.Provider_config.t ->
   Llm_provider.Llm_transport.runtime_mcp_policy ->
   bool
 (** [provider_supports_runtime_mcp_policy cfg policy] returns true
-    iff the provider supports runtime-MCP {b and} the policy's HTTP-
-    header requirements (if any) are satisfied.  When [policy.servers]
-    contains an [Http_server { headers = _ :: _; _ }], the provider
-    must also have [supports_runtime_mcp_http_headers]. *)
+    iff the provider supports runtime-MCP {b and} the policy's
+    provider-specific HTTP-header requirements are satisfied. *)
 
 val supports_required_tool_use :
   ?runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy ->

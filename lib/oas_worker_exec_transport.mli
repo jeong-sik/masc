@@ -116,10 +116,15 @@ val runtime_mcp_tool_requires_bound_actor : string -> bool
 (** Whether a public MCP tool requires a request-scoped actor binding. *)
 val public_mcp_tool_requires_bound_actor : string -> bool
 
-(** Inject identity headers ([x-masc-agent-name], [x-masc-keeper-name],
-    [x-masc-internal-token]) into the [masc] HTTP server entry of [policy]
-    when [agent_name] is non-empty.  Other servers are passed through. *)
+(** Inject identity headers ([x-masc-agent-name], [x-masc-keeper-name]) into
+    the [masc] HTTP server entry of [policy] when [agent_name] is non-empty.
+    [x-masc-internal-token] is also injected by default when
+    [MASC_INTERNAL_MCP_TOKEN] is available; pass
+    [~include_internal_token:false] for providers such as [codex_cli] that
+    cannot carry auth-bearing request headers.  Other servers are passed
+    through. *)
 val runtime_mcp_policy_with_masc_agent_name :
+  ?include_internal_token:bool ->
   agent_name:string ->
   Llm_provider.Llm_transport.runtime_mcp_policy ->
   Llm_provider.Llm_transport.runtime_mcp_policy

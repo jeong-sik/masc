@@ -481,6 +481,21 @@ active_goal_ids = ["goal-runtime", "goal-masc-mcp"]
         (Some [ "goal-runtime"; "goal-masc-mcp" ])
         d.active_goal_ids
 
+let test_profile_rejects_partial_proactive_interval_pair () =
+  let input = {|
+[keeper]
+goal = "test"
+proactive_idle_sec = 120
+|} in
+  match TL.parse_toml input with
+  | Error e -> fail e
+  | Ok doc ->
+      (match KTP.profile_defaults_of_toml doc with
+       | Ok _ -> fail "expected partial proactive interval error"
+       | Error msg ->
+           check bool "mentions missing cooldown" true
+             (contains_substring msg "proactive_cooldown_sec is missing"))
+
 let test_profile_rejects_invalid_git_identity_mode () =
   let input = {|
 [keeper]
@@ -753,7 +768,7 @@ let test_profile_ignores_legacy_allowed_providers () =
 [keeper]
 goal = "test"
 allowed_providers = ["Ollama", "GLM"]
-cascade_name = "local_only"
+cascade_name = "big_three"
 |} in
   match TL.parse_toml input with
   | Error e -> fail e
@@ -762,7 +777,7 @@ cascade_name = "local_only"
      | Error e -> fail e
      | Ok d ->
        check (option string) "cascade preserved"
-         (Some "local_only") d.cascade_name)
+         (Some "big_three") d.cascade_name)
 
 let test_profile_max_turns_overrides () =
   let input = {|
@@ -1522,6 +1537,8 @@ let () =
         [
           test_case "minimal" `Quick test_profile_minimal;
           test_case "full" `Quick test_profile_full;
+          test_case "rejects partial proactive interval pair" `Quick
+            test_profile_rejects_partial_proactive_interval_pair;
           test_case "rejects invalid social_model" `Quick
             test_profile_rejects_invalid_social_model;
           test_case "rejects invalid git_identity_mode" `Quick

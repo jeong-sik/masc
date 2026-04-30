@@ -179,6 +179,7 @@ module Kimi_cli_transport_local :
 
 val runtime_mcp_tool_requires_bound_actor : string -> bool
 val runtime_mcp_policy_with_masc_agent_name :
+  ?include_internal_token:bool ->
   agent_name:string ->
   Llm_provider.Llm_transport.runtime_mcp_policy ->
   Llm_provider.Llm_transport.runtime_mcp_policy

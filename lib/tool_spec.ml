@@ -117,6 +117,15 @@ let register (spec : t) =
   let effective_allow_direct =
     spec.allow_direct_call_when_hidden || is_system_internal
   in
+  let existing = Tool_catalog.registered_metadata spec.name in
+  let requires_actor_binding =
+    match spec.requires_actor_binding with
+    | Some _ as value -> value
+    | None when spec.requires_join -> Some true
+    | None ->
+        Option.bind existing (fun (meta : Tool_catalog.metadata) ->
+          meta.requires_actor_binding)
+  in
   Tool_catalog.register_metadata spec.name
     { Tool_catalog.visibility = effective_visibility;
       lifecycle = spec.lifecycle;
@@ -130,7 +139,7 @@ let register (spec : t) =
       idempotent = Some spec.is_idempotent;
       required_permission = spec.required_permission;
       effect_domain = spec.effect_domain;
-      requires_actor_binding = spec.requires_actor_binding };
+      requires_actor_binding };
   (* 5. Handler binding — auto-register Direct/Shared into Tool_dispatch *)
   (match spec.handler_binding with
    | Direct h | Shared h ->

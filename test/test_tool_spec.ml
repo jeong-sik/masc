@@ -140,7 +140,10 @@ let () =
             in
             Tool_spec.register spec;
             check bool "is_join_required" true
-              (Tool_dispatch.is_join_required "__test_spec_join"));
+              (Tool_dispatch.is_join_required "__test_spec_join");
+            let meta = Tool_catalog.metadata "__test_spec_join" in
+            check bool "requires_join implies actor binding" true
+              (meta.requires_actor_binding = Some true));
           test_case "register sets catalog metadata" `Quick (fun () ->
             let spec =
               Tool_spec.create
@@ -168,6 +171,26 @@ let () =
               (meta.requires_actor_binding = Some true);
             check bool "hidden" true (meta.visibility = Tool_catalog.Hidden);
             check bool "reason" true (meta.reason = Some "test hidden"));
+          test_case "register preserves catalog actor binding by default" `Quick (fun () ->
+            let name = "__test_spec_preserve_actor" in
+            let existing = Tool_catalog.metadata name in
+            Tool_catalog.register_metadata name
+              { existing with
+                requires_actor_binding = Some true;
+                effect_domain = Some Tool_catalog.Masc_coordination };
+            let spec =
+              Tool_spec.create
+                ~name
+                ~description:"preserve actor binding"
+                ~module_tag:Tool_dispatch.Mod_misc
+                ~input_schema:empty_schema
+                ~handler_binding:Tag_dispatch
+                ()
+            in
+            Tool_spec.register spec;
+            let meta = Tool_catalog.metadata name in
+            check bool "requires_actor_binding preserved" true
+              (meta.requires_actor_binding = Some true));
           test_case "empty name rejected" `Quick (fun () ->
             check_raises "invalid_arg"
               (Invalid_argument "Tool_spec.register: name must not be empty")

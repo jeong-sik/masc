@@ -147,14 +147,14 @@ let classify_filter_rejection
     ~require_tool_support
     (provider_cfg : Llm_provider.Provider_config.t)
   : filter_rejection_reason option =
-  let normalized_runtime_mcp_policy =
-    runtime_mcp_policy_for_provider
-      ~keeper_name ~provider_cfg runtime_mcp_policy
-  in
   if codex_cli_cannot_carry_keeper_bound_runtime_mcp
-       ~keeper_name ~provider_cfg normalized_runtime_mcp_policy
+       ~keeper_name ~provider_cfg runtime_mcp_policy
   then Some Codex_keeper_bound_actor_required
   else
+    let normalized_runtime_mcp_policy =
+      runtime_mcp_policy_for_provider
+        ~keeper_name ~provider_cfg runtime_mcp_policy
+    in
     let tool_lane_supported =
       match tools with
       | [] -> true

@@ -1,6 +1,18 @@
 # Changelog
 
 
+## [0.18.16] - 2026-04-30
+
+### Changed
+
+- Package and release metadata advanced from `0.18.15` to `0.18.16` after the downstream OAS `v0.187.2` pin landed on `main`.
+- Roadmap, product operating plan, opam metadata, and spec baseline version references synced to `0.18.16`.
+- Release boundary verified against the current `agent_sdk >= 0.187.2` floor and regenerated OAS API surface fingerprint.
+
+### Deprecated
+
+- None.
+
 ## [0.18.15] - 2026-04-30
 
 ### Changed

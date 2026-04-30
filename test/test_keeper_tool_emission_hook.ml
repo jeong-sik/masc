@@ -33,6 +33,14 @@ let with_env_unset name f =
   in
   Fun.protect ~finally:restore f
 
+let stub_schedule : THooks.tool_schedule =
+  { planned_index = 0
+  ; batch_index = 0
+  ; batch_size = 1
+  ; concurrency_class = "test"
+  ; batch_kind = "test"
+  }
+
 let make_post_tool_use ~content : THooks.hook_event =
   THooks.PostToolUse
     { tool_use_id = "tu-1"
@@ -41,7 +49,7 @@ let make_post_tool_use ~content : THooks.hook_event =
     ; output = Ok ({ TT.content } : TT.tool_output)
     ; result_bytes = String.length content
     ; duration_ms = 1.0
-    ; schedule = THooks.Now
+    ; schedule = stub_schedule
     }
 
 let make_pre_tool_use () : THooks.hook_event =
@@ -51,7 +59,7 @@ let make_pre_tool_use () : THooks.hook_event =
     ; input = `Assoc []
     ; accumulated_cost_usd = 0.0
     ; turn = 1
-    ; schedule = THooks.Now
+    ; schedule = stub_schedule
     }
 
 let make_post_tool_use_error () : THooks.hook_event =
@@ -67,7 +75,7 @@ let make_post_tool_use_error () : THooks.hook_event =
            } : TT.tool_error)
     ; result_bytes = 0
     ; duration_ms = 0.5
-    ; schedule = THooks.Now
+    ; schedule = stub_schedule
     }
 
 let assert_eq_int ~label expected actual =

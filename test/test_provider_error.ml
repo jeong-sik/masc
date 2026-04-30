@@ -24,6 +24,38 @@ let counter_for ~kind ~provider ~cascade_name ~capacity_scope =
       ]
     ()
 
+type health_decision =
+  | Hard_quota
+  | Soft_rate_limited
+  | Failure
+
+let pp_health_decision fmt = function
+  | Hard_quota -> Format.pp_print_string fmt "hard_quota"
+  | Soft_rate_limited -> Format.pp_print_string fmt "soft_rate_limited"
+  | Failure -> Format.pp_print_string fmt "failure"
+
+let health_decision = testable pp_health_decision ( = )
+
+let legacy_health_decision err =
+  if OWN.sdk_error_is_hard_quota err then Hard_quota
+  else
+    match OWN.sdk_error_soft_rate_limited err with
+    | Some _ -> Soft_rate_limited
+    | None -> Failure
+
+let typed_health_decision err =
+  let error = OWN.sdk_error_to_provider_error ~provider:"anthropic" err in
+  match error with
+  | Some (P.CapacityExhausted { scope = `Provider; _ }) -> Hard_quota
+  | Some (P.RateLimit _) -> Soft_rate_limited
+  | Some
+      (P.CapacityExhausted { scope = `Model; _ }
+      | P.AuthError _
+      | P.ServerError _
+      | P.InvalidRequest _) ->
+      Failure
+  | None -> Failure
+
 let test_rate_limit_maps_retry_after () =
   let error =
     Retry.RateLimited { retry_after = Some 1.5; message = "too many requests" }
@@ -75,6 +107,27 @@ let test_anthropic_invalid_request_specified_limit_body_pins_capacity () =
       check (list string) "affected" [ "anthropic" ] affected
   | _ -> fail "expected specified-limit InvalidRequest to become capacity"
 
+let test_cli_hard_quota_wrapper_emits_capacity_variant () =
+  let message =
+    "claude exited with code 1: API Error: 400 \
+     {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"You \
+     have reached your specified API usage limits. You will regain access on \
+     2026-05-01 at 00:00 UTC.\"}}"
+  in
+  let sdk_error =
+    Oas.Error.Api
+      (Retry.NetworkError
+         { message; kind = Llm_provider.Http_client.Unknown })
+  in
+  check bool "existing wrapper classifier" true
+    (OWN.sdk_error_is_hard_quota sdk_error);
+  match OWN.sdk_error_to_provider_error ~provider:"claude_code:auto" sdk_error with
+  | Some (P.CapacityExhausted { scope = `Provider; affected }) ->
+      check (list string) "affected" [ "claude_code:auto" ] affected
+  | Some error ->
+      failf "expected CapacityExhausted, got %s" (P.to_error_kind error)
+  | None -> fail "expected provider_error"
+
 let test_server_and_auth_errors_are_closed_variants () =
   let server =
     Retry.ServerError { status = 503; message = "overloaded" }
@@ -109,6 +162,74 @@ let test_non_capacity_invalid_request_preserves_reason () =
       check string "reason" reason actual;
       check bool "not capacity" false (P.is_capacity_exhausted error)
   | _ -> fail "expected InvalidRequest"
+
+let test_overloaded_preserves_failure_decision () =
+  let sdk_error = Oas.Error.Api (Retry.Overloaded { message = "server busy" }) in
+  check health_decision "legacy decision" Failure
+    (legacy_health_decision sdk_error);
+  match OWN.sdk_error_to_provider_error ~provider:"anthropic" sdk_error with
+  | Some (P.ServerError { code; transient }) ->
+      check int "synthetic status" 529 code;
+      check bool "transient" true transient
+  | Some error ->
+      failf "expected ServerError, got %s" (P.to_error_kind error)
+  | None -> fail "expected provider_error"
+
+let test_provider_error_preserves_legacy_health_decisions () =
+  let specified_limit =
+    Oas.Error.Api
+      (Retry.InvalidRequest
+         {
+           message =
+             "You have reached your specified API usage limits. You will \
+              regain access on 2026-05-01 at 00:00 UTC.";
+         })
+  in
+  let hard_rate_limit =
+    Oas.Error.Api
+      (Retry.RateLimited
+         { retry_after = None; message = "resource exhausted" })
+  in
+  let cli_wrapped_limit =
+    Oas.Error.Api
+      (Retry.NetworkError
+         {
+           message =
+             "claude exited with code 1: API Error: 400 \
+              {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"You \
+              have reached your specified API usage limits. You will regain \
+              access on 2026-05-01 at 00:00 UTC.\"}}";
+           kind = Llm_provider.Http_client.Unknown;
+         })
+  in
+  let soft_rate_limit =
+    Oas.Error.Api
+      (Retry.RateLimited { retry_after = Some 3.0; message = "try later" })
+  in
+  let cases =
+    [
+      ("specified-limit invalid_request", specified_limit);
+      ("resource-exhausted rate_limit", hard_rate_limit);
+      ("cli-wrapped specified-limit", cli_wrapped_limit);
+      ("transient rate_limit", soft_rate_limit);
+      ("overloaded", Oas.Error.Api (Retry.Overloaded { message = "busy" }));
+      ( "server",
+        Oas.Error.Api (Retry.ServerError { status = 503; message = "down" })
+      );
+      ("auth", Oas.Error.Api (Retry.AuthError { message = "bad key" }));
+      ("not_found", Oas.Error.Api (Retry.NotFound { message = "missing" }));
+      ( "context_overflow",
+        Oas.Error.Api
+          (Retry.ContextOverflow { message = "too long"; limit = Some 200_000 })
+      );
+      ("invalid_request", Oas.Error.Api (Retry.InvalidRequest { message = "bad" }));
+    ]
+  in
+  List.iter
+    (fun (name, sdk_error) ->
+      check health_decision name (legacy_health_decision sdk_error)
+        (typed_health_decision sdk_error))
+    cases
 
 let test_provider_error_metric_name_stable () =
   check string "metric name" "masc_provider_error_total"
@@ -179,10 +300,16 @@ let () =
             test_rate_limit_can_be_capacity_exhausted;
           test_case "Anthropic specified-limit body maps to capacity" `Quick
             test_anthropic_invalid_request_specified_limit_body_pins_capacity;
+          test_case "CLI hard-quota wrapper maps to capacity" `Quick
+            test_cli_hard_quota_wrapper_emits_capacity_variant;
           test_case "server and auth closed variants" `Quick
             test_server_and_auth_errors_are_closed_variants;
           test_case "invalid request preserves reason" `Quick
             test_non_capacity_invalid_request_preserves_reason;
+          test_case "overloaded preserves failure decision" `Quick
+            test_overloaded_preserves_failure_decision;
+          test_case "typed decisions preserve legacy health decisions" `Quick
+            test_provider_error_preserves_legacy_health_decisions;
           test_case "metric name stable" `Quick
             test_provider_error_metric_name_stable;
           test_case "emit metric for rate limit" `Quick

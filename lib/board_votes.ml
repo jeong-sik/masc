@@ -120,7 +120,7 @@ let vote store ~voter ~post_id ~direction : (int, board_error) result =
                   in
                   Hashtbl.replace store.posts (Post_id.to_string pid) flipped;
                   Hashtbl.replace store.vote_log vote_key (direction, now);
-                  store.dirty_posts <- true;  (* Deferred flush *)
+                  mark_dirty_post store (Post_id.to_string pid);
                   invalidate_post_caches store;
                   append_vote_log ~target:vote_key ~voter ~direction ~ts:now;
                   (* Record vote for Thompson Sampling feedback *)
@@ -137,7 +137,7 @@ let vote store ~voter ~post_id ~direction : (int, board_error) result =
                   in
                   Hashtbl.replace store.posts (Post_id.to_string pid) updated;
                   Hashtbl.replace store.vote_log vote_key (direction, now);
-                  store.dirty_posts <- true;  (* Deferred flush *)
+                  mark_dirty_post store (Post_id.to_string pid);
                   invalidate_post_caches store;
                   append_vote_log ~target:vote_key ~voter ~direction ~ts:now;
                   (* Record vote for Thompson Sampling feedback *)
@@ -194,7 +194,7 @@ let vote_comment store ~voter ~comment_id ~direction : (int, board_error) result
                 in
                 Hashtbl.replace store.comments (Comment_id.to_string cid) flipped;
                 Hashtbl.replace store.vote_log vote_key (direction, now);
-                store.dirty_comments <- true;  (* Deferred flush *)
+                mark_dirty_comment store (Comment_id.to_string cid);
                 invalidate_comment_caches store;
                 append_vote_log ~target:vote_key ~voter ~direction ~ts:now;
                 (* Record vote for Thompson Sampling feedback *)
@@ -209,7 +209,7 @@ let vote_comment store ~voter ~comment_id ~direction : (int, board_error) result
                 in
                 Hashtbl.replace store.comments (Comment_id.to_string cid) updated;
                 Hashtbl.replace store.vote_log vote_key (direction, now);
-                store.dirty_comments <- true;  (* Deferred flush *)
+                mark_dirty_comment store (Comment_id.to_string cid);
                 invalidate_comment_caches store;
                 append_vote_log ~target:vote_key ~voter ~direction ~ts:now;
                 (* Record vote for Thompson Sampling feedback *)
@@ -378,7 +378,11 @@ let load_persisted_comments store =
             (* Build comments_by_post index *)
             let post_key = Post_id.to_string c.post_id in
             let existing = Hashtbl.find_opt store.comments_by_post post_key |> Option.value ~default:[] in
-            Hashtbl.replace store.comments_by_post post_key (cid :: existing);
+            let indexed =
+              if List.exists (String.equal cid) existing then existing
+              else cid :: existing
+            in
+            Hashtbl.replace store.comments_by_post post_key indexed;
             incr loaded
         | _ -> ()
       ) lines;
@@ -586,6 +590,8 @@ let delete_post store ~post_id : (unit, board_error) result =
             rewrite_vote_log store;
             store.dirty_posts <- false;
             store.dirty_comments <- false;
+            Hashtbl.clear store.dirty_post_ids;
+            Hashtbl.clear store.dirty_comment_ids;
             store.last_flush <- Time_compat.now ();
             Ok ())
 
@@ -619,18 +625,39 @@ let reset_global_for_test () =
 
 (** Flush any dirty state to disk. Call on shutdown to prevent data loss. *)
 let flush_dirty store =
-  with_lock store (fun () ->
-    if store.dirty_posts then begin
-      rewrite_posts store;
-      store.dirty_posts <- false
-    end;
-    if store.dirty_comments then begin
-      rewrite_comments store;
-      store.dirty_comments <- false
-    end;
-    rewrite_vote_log store;
-    store.last_flush <- Time_compat.now ()
-  )
+  let posts, comments =
+    with_lock store (fun () ->
+      let posts =
+        if store.dirty_posts then
+          Hashtbl.fold
+            (fun post_id () acc ->
+              match Hashtbl.find_opt store.posts post_id with
+              | Some post -> post :: acc
+              | None -> acc)
+            store.dirty_post_ids []
+        else
+          []
+      in
+      let comments =
+        if store.dirty_comments then
+          Hashtbl.fold
+            (fun comment_id () acc ->
+              match Hashtbl.find_opt store.comments comment_id with
+              | Some comment -> comment :: acc
+              | None -> acc)
+            store.dirty_comment_ids []
+        else
+          []
+      in
+      Hashtbl.clear store.dirty_post_ids;
+      Hashtbl.clear store.dirty_comment_ids;
+      store.dirty_posts <- false;
+      store.dirty_comments <- false;
+      store.last_flush <- Time_compat.now ();
+      (posts, comments))
+  in
+  List.iter append_post posts;
+  List.iter append_comment comments
 
 
 (** {1 Karma & Flair - Reddit-style} *)

@@ -704,8 +704,16 @@ let session_json ?actor ~session_id ~config ~sw
     build_projection ?actor ~config ~sw
       ~clock ~proc_mgr ()
   in
+  let tasks =
+    if Coord.is_initialized config then Coord.get_tasks_safe config else []
+  in
+  let operation_contexts =
+    Dashboard_mission_assembly.build_operation_contexts ~tasks
+  in
   let session_row_json =
-    Dashboard_mission_assembly.build_sessions projection.sessions projection.attention_queue projection.agent_briefs
+    Dashboard_mission_assembly.build_sessions
+      ~operation_contexts
+      projection.sessions projection.attention_queue projection.agent_briefs
       projection.keeper_briefs
     |> List.find_opt (fun json ->
            String.equal (string_field "session_id" json) session_id)
@@ -729,7 +737,6 @@ let session_json ?actor ~session_id ~config ~sw
     ignore (config, session_id);
     `Null
   in
-  let operation_contexts = Dashboard_mission_assembly.build_operation_contexts () in
   let operations_json =
     match session_context with
     | None -> []

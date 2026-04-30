@@ -169,11 +169,10 @@ val reset_global_for_test : unit -> unit
     from test setup before concurrent fibers exist. *)
 
 val flush_dirty : store -> unit
-(** Flushes [dirty_posts] / [dirty_comments] back to the
-    JSONL files via {!rewrite_posts} / {!rewrite_comments},
-    then atomically rewrites the vote-log.  Stamps
-    [last_flush] with the wall clock.  Call on shutdown to
-    prevent data loss from the deferred-flush write path. *)
+(** Flushes dirty post/comment snapshots to the JSONL files
+    with a short in-memory snapshot lock and append-only disk
+    writes.  Vote changes are already appended on the vote
+    path.  Stamps [last_flush] with the wall clock. *)
 
 (** {1 Karma} *)
 

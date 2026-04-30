@@ -57,20 +57,22 @@ val build_internal_signals :
     one internal-signal list, sorted by descending
     pressure rank. *)
 
-val build_operation_contexts : unit -> operation_context list
-(** Currently returns [\[\]] — placeholder for upcoming
-    operation-context aggregation. *)
+val build_operation_contexts : tasks:Types.task list -> operation_context list
+(** Projects non-terminal tasks into operation contexts for mission
+    badges.  Task contract links provide operation/session ids when
+    available; otherwise the task id remains visible as the operation id. *)
 
 (** {1 Session assembly} *)
 
 val build_sessions :
+  ?operation_contexts:operation_context list ->
   session_context list ->
   attention_context list ->
   Yojson.Safe.t list ->
   Yojson.Safe.t list ->
   Yojson.Safe.t list
-(** [build_sessions sessions attention_queue agent_briefs
-      keeper_briefs] renders the session row JSON list,
+(** [build_sessions ?operation_contexts sessions attention_queue
+      agent_briefs keeper_briefs] renders the session row JSON list,
     sorted by attention count → severity rank → recency.
     Each row carries the embedded [member_previews] /
     [operation_badges] / [keeper_refs] envelopes built

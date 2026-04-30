@@ -354,16 +354,19 @@ let test_load_history_user_messages_ignores_internal_prompt_entries () =
     let lines = [
       {|{"role":"user","source":"world_state_prompt","content":"## Current World State\n\n### Namespace State\n- Unclaimed tasks: 1\n\n### Available Tools\n- keeper_board_list\n\n### Continuity\nGoal: keep going"}|};
       {|{"role":"user","content":"real user question"}|};
-      {|{"role":"user","content":"[Summary]\n[User] ## Current World State\n\n### Namespace State\n- Unclaimed tasks: 1\n\n### Available Tools\n- keeper_board_list\n\n### Continuity\nGoal: keep going"}|};
+      {|{"role":"user","source":"memory_jsonl","content":"## Current World State\n\n### Namespace State\n- User-authored world memory should survive history filtering"}|};
       {|{"role":"user","content":"second real question"}|};
     ] in
     let oc = open_out path in
     List.iter (fun l -> output_string oc (l ^ "\n")) lines;
     close_out oc;
     let result = Keeper_memory_recall.load_history_user_messages ~path ~max_n:10 in
-    check int "only real user messages kept" 2 (List.length result);
+    check int "prompt source dropped, user-authored world kept" 3 (List.length result);
     check string "first real" "real user question" (List.hd result);
-    check string "second real" "second real question" (List.nth result 1))
+    check string "world memory kept"
+      "## Current World State\n\n### Namespace State\n- User-authored world memory should survive history filtering"
+      (List.nth result 1);
+    check string "second real" "second real question" (List.nth result 2))
 
 let test_recall_candidates_with_history_dedup () =
   let dir = test_tmpdir () in

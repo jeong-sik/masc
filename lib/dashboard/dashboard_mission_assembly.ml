@@ -335,8 +335,50 @@ let build_internal_signals incidents actions =
   |> List.sort (fun left right -> Int.compare right.pressure_rank left.pressure_rank)
   |> List.map (fun (row : keeper_context) -> row.json)
 
-let build_operation_contexts () =
-  []
+let task_operation_status (task : Types.task) =
+  match task.task_status with
+  | Types.Todo | Types.Claimed _ | Types.InProgress _ -> Some "active"
+  | Types.AwaitingVerification _ -> Some "paused"
+  | Types.Done _ | Types.Cancelled _ -> None
+
+let task_operation_updated_at (task : Types.task) =
+  match task.task_status with
+  | Types.Done { completed_at; _ } -> completed_at
+  | Types.Cancelled { cancelled_at; _ } -> cancelled_at
+  | Types.InProgress { started_at; _ } -> started_at
+  | Types.AwaitingVerification { submitted_at; _ } -> submitted_at
+  | Types.Claimed { claimed_at; _ } -> claimed_at
+  | Types.Todo -> task.created_at
+
+let task_operation_links (task : Types.task) =
+  match task.contract with
+  | Some contract -> contract.links
+  | None -> { Types.operation_id = None; session_id = None; autoresearch_loop_id = None }
+
+let task_operation_id (task : Types.task) =
+  let links = task_operation_links task in
+  match trim_to_option (Option.value ~default:"" links.operation_id) with
+  | Some operation_id -> operation_id
+  | None -> task.id
+
+let build_operation_contexts ~(tasks : Types.task list) =
+  tasks
+  |> List.filter_map (fun (task : Types.task) ->
+         match task_operation_status task with
+         | None -> None
+         | Some status ->
+           let links = task_operation_links task in
+           Some
+             {
+               operation_id = task_operation_id task;
+               linked_session_id =
+                 Option.bind links.session_id (fun value -> trim_to_option value);
+               status = Some status;
+               stage = Option.map Task_stage.to_string task.stage;
+               detachment_status = None;
+               objective = trim_to_option task.title;
+               updated_at = Some (task_operation_updated_at task);
+             })
 
 let operation_badge_json (operation : operation_context) =
   let status_str =
@@ -439,7 +481,7 @@ let keeper_refs_for_session member_names keeper_briefs =
                  ("current_work", member_assoc "current_work" row);
                ]))
 
-let build_sessions sessions attention_queue agent_briefs keeper_briefs =
+let build_sessions ?(operation_contexts = []) sessions attention_queue agent_briefs keeper_briefs =
   let related_attention_count session_id =
     attention_queue
     |> List.fold_left
@@ -447,7 +489,6 @@ let build_sessions sessions attention_queue agent_briefs keeper_briefs =
            if List.mem session_id attention.related_session_ids then acc + 1 else acc)
          0
   in
-  let operation_contexts = build_operation_contexts () in
   sessions
   |> List.map (fun (session : session_context) ->
          let attention_count = related_attention_count session.session_id in

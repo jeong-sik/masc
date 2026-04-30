@@ -168,6 +168,17 @@ val load_procedures_text :
     renders them for prompt injection.  Same fail-soft
     contract as {!load_episodes_text}. *)
 
+val load_world_text :
+  backend:Oas.Memory.long_term_backend option ->
+  memory:Oas.Memory.t ->
+  limit:int ->
+  string option
+(** Reads long-term OAS memory entries whose keys start with
+    ["world"] and renders them for prompt injection.  This is
+    intentionally sourced from [Oas.Memory.t] rather than keeper
+    runtime state so user-authored world memory can reach the
+    deliberation/prompt path. *)
+
 val load_institution_text :
   config:Coord_utils.config -> string option
 (** Reads the structured [institution.json] under [config]

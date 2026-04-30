@@ -307,6 +307,57 @@ module FileSystem = struct
           acc
     | _ -> acc
 
+  let validate_prefix prefix =
+    if prefix = "" then
+      Ok ()
+    else
+      let len = String.length prefix in
+      let key =
+        if prefix.[len - 1] = ':' then
+          String.sub prefix 0 (len - 1)
+        else
+          prefix
+      in
+      match validate_key key with
+      | Ok _ -> Ok ()
+      | Error e -> Error e
+
+  let prefix_scan_root t ~prefix =
+    match validate_prefix prefix with
+    | Error e -> Error e
+    | Ok () ->
+        let segments = String.split_on_char ':' prefix in
+        let complete_segments =
+          if prefix <> "" && prefix.[String.length prefix - 1] = ':' then
+            List.filter (fun segment -> segment <> "") segments
+          else
+            match List.rev segments with
+            | [] | [ _ ] -> []
+            | _partial :: parents_rev -> List.rev parents_rev
+        in
+        let path =
+          List.fold_left (fun path segment -> Eio.Path.(path / segment)) t.fs
+            complete_segments
+        in
+        let logical_prefix = String.concat ":" complete_segments in
+        Ok (path, logical_prefix)
+
+  let list_keys_by_prefix_scan t ~prefix =
+    match prefix_scan_root t ~prefix with
+    | Error e -> Error e
+    | Ok (scan_root, logical_prefix) -> (
+        try
+          let keys =
+            collect_keys_under ~requested_prefix:prefix ~logical_prefix
+              scan_root []
+          in
+          ki_replace_bulk t (List.map (fun key -> (key, ())) keys);
+          Ok (List.sort_uniq String.compare keys)
+        with
+        | Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) -> Ok []
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn -> Error (IOError (Printexc.to_string exn)))
+
   let ensure_key_index t =
     (* Domain-safe check-and-populate.  Stdlib.Mutex serializes the
        check of key_index length + key_index_promise so that two
@@ -361,7 +412,6 @@ module FileSystem = struct
     match validate_key key with
     | Error _ -> false
     | Ok _ ->
-      ensure_key_index t;
       (* Verify the real filesystem even on index hits so raw rm_rf/reset
          cannot leave stale positives in the in-memory key index. *)
       match key_to_path t key with
@@ -381,13 +431,13 @@ module FileSystem = struct
              false)
 
   let list_keys t ~prefix =
-    ensure_key_index t;
-    let result = ref [] in
-    ki_iter t (fun k () ->
-      if prefix = "" || starts_with ~prefix k then
-        result := k :: !result
-    );
-    Ok (List.sort_uniq String.compare !result)
+    if prefix = "" then begin
+      ensure_key_index t;
+      let result = ref [] in
+      ki_iter t (fun k () -> result := k :: !result);
+      Ok (List.sort_uniq String.compare !result)
+    end else
+      list_keys_by_prefix_scan t ~prefix
 
   (** Set if not exists (atomic, auto-compresses) *)
   let set_if_not_exists t key value =

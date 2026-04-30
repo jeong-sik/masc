@@ -108,9 +108,8 @@ let write_heartbeat_snapshot
                let content =
                  Safe_ops.json_string ~default:"" "content" json |> String.trim
                in
-               if Keeper_types.is_prompt_history_source source
-                  || Keeper_context_core.has_world_state_signature content
-               then None
+               ignore content;
+               if Keeper_types.is_prompt_history_source source then None
                else Some (Keeper_context_core.message_of_json json)
              with
              | Eio.Cancel.Cancelled _ as e -> raise e

@@ -184,39 +184,6 @@ module KeeperSupervisor = struct
     Float.max 300.0 (get_float ~default:Masc_time_constants.day "MASC_KEEPER_PAUSED_CLEANUP_TTL_SEC")
 end
 
-(** {1 Keeper Watchdog Configuration}
-
-    Thresholds for the stale-turn watchdog fiber
-    ({!Keeper_stale_watchdog}). Previously hardcoded; extracted so
-    operators can tune per deployment without a rebuild.
-
-    Precedence: process env > hardcoded default below. *)
-
-module KeeperWatchdog = struct
-  (** Seconds since last turn before a Running keeper is considered idle-stale.
-      Must be >= 60. Default: 300 (5 minutes). *)
-  let stale_threshold_sec =
-    Float.max 60.0 (get_float ~default:300.0 "MASC_KEEPER_WATCHDOG_STALE_SEC")
-
-  (** Watchdog poll interval in seconds. Must be >= 5.
-      Default: 30. *)
-  let poll_sec =
-    Float.max 5.0 (get_float ~default:30.0 "MASC_KEEPER_WATCHDOG_POLL_SEC")
-
-  (** Consecutive noop turns before considering the keeper stuck in a
-      failure loop. Must be >= 2. Default: 3. *)
-  let noop_threshold =
-    max 2 (get_int ~default:3 "MASC_KEEPER_WATCHDOG_NOOP_THRESHOLD")
-
-  (** Grace period after fiber start before idle-stale detection activates.
-      Prevents false positives on server restart when [last_turn_ts] is
-      carried over from a previous server lifecycle.
-      Must be >= 0. Default: 360 (6 minutes — covers proactive warmup
-      up to 255 s plus one heartbeat cycle). *)
-  let grace_period_sec =
-    Float.max 0.0 (get_float ~default:360.0 "MASC_KEEPER_WATCHDOG_GRACE_SEC")
-end
-
 (** {1 Keeper Poll Intervals}
 
     Drain / poll cadences for keeper background fibers that have no
@@ -398,18 +365,27 @@ module KeeperKeepalive = struct
   let max_idle_turns_reactive =
     max 2 (min 50 (get_int ~default:15 "MASC_KEEPER_MAX_IDLE_TURNS_REACTIVE"))
 
+  (** Hard ceiling for all keeper timeout constants (seconds).
+      No timeout may exceed this value regardless of env override.
+      Default: 600 (10 minutes). *)
+  let timeout_hard_ceiling_sec = 600.0
+
   (** Wall-clock timeout in seconds for a single unified turn (including all
       retries and cascade fallbacks). Prevents indefinite blocking when an
       upstream LLM hangs at the TCP level.
-      Env: [MASC_KEEPER_TURN_TIMEOUT_SEC]. Default: 1800. Range: [60, 7200].
-      Raised from 1200 to 3600 (issue #9637), then lowered to 1800
-      (issue #10716): production fleet observed hung LLM provider
-      executions in the 2700-2900s range (long_tail bucket), wasting
-      45+ minutes before cancellation. 1800s (30 min) caps the loss
-      while still covering multi-turn research cycles. *)
+      Env: [MASC_KEEPER_TURN_TIMEOUT_SEC]. Default: 3600. Range: [60, 7200].
+      Raised from 1200 to 3600 (issue #9637): production fleet observed
+      "turn wall-clock timeout after 1200s" with sangsu/qa-king keepers
+      stalling on multi-turn research cycles using GLM-5.1 + local 27B
+      cascade. The new floor matches the budgeted ceiling and gives
+      operators headroom; range upper bumped to 7200 for the same reason.
+
+      Additionally capped at [timeout_hard_ceiling_sec] (600s) so the turn
+      timeout can never exceed the global hard ceiling. *)
   let turn_timeout_sec =
-    Float.max 60.0 (Float.min 7200.0
-      (get_float ~default:1800.0 "MASC_KEEPER_TURN_TIMEOUT_SEC"))
+    Float.max 60.0 (Float.min timeout_hard_ceiling_sec
+      (get_float ~default:3600.0 "MASC_KEEPER_TURN_TIMEOUT_SEC"))
+>>>>>>> 8a608170c8 (feat(resilience): bulkhead pattern - ZOMBIE state, terminal_failure_latched, cascade pool)
 
   (** Maximum time a proactive keeper will wait in the MASC admission queue
       before abandoning the current OAS attempt.
@@ -445,7 +421,10 @@ module KeeperKeepalive = struct
       multi-turn call completed.
 
       Env: [MASC_KEEPER_OAS_TIMEOUT_SEC]. Default: adaptive.
-      Range: [30, turn_timeout_sec]. *)
+      Range: [30, turn_timeout_sec].
+
+      The upstream clamp already enforces [<= turn_timeout_sec]; we keep
+      that invariant here by using [turn_timeout_sec] as the ceiling. *)
   let oas_timeout_sec_override =
     match Env_config_core.raw_value_opt "MASC_KEEPER_OAS_TIMEOUT_SEC" with
     | Some raw ->
@@ -541,6 +520,49 @@ module KeeperKeepalive = struct
       Env: [MASC_KEEPER_IDLE_SKIP_THRESHOLD]. Default: 4. *)
   let idle_skip_threshold =
     max 2 (min 20 (get_int ~default:4 "MASC_KEEPER_IDLE_SKIP_THRESHOLD"))
+end
+
+(** {1 Keeper Watchdog Configuration}
+
+    Thresholds for the stale-turn watchdog fiber
+    ({!Keeper_stale_watchdog}). Previously hardcoded; extracted so
+    operators can tune per deployment without a rebuild.
+
+    Precedence: process env > hardcoded default below. *)
+
+module KeeperWatchdog = struct
+  (** Seconds since last turn before a Running keeper is considered idle-stale.
+      Must be >= 60. Default: 300 (5 minutes).
+
+      Invariant: [stale_threshold_sec] must not exceed [turn_timeout_sec].
+      If the operator overrides push it above the turn cap, we clamp and log
+      a warning so the watchdog does not declare a keeper stale later than
+      the turn itself could possibly run. *)
+  let stale_threshold_sec =
+    let raw = Float.max 60.0 (get_float ~default:300.0 "MASC_KEEPER_WATCHDOG_STALE_SEC") in
+    if raw > KeeperKeepalive.turn_timeout_sec then (
+      Log.warn "MASC_KEEPER_WATCHDOG_STALE_SEC (%.1f) exceeds turn_timeout_sec (%.1f); clamping to turn_timeout_sec"
+        raw KeeperKeepalive.turn_timeout_sec;
+      KeeperKeepalive.turn_timeout_sec
+    ) else raw
+
+  (** Watchdog poll interval in seconds. Must be >= 5.
+      Default: 30. *)
+  let poll_sec =
+    Float.max 5.0 (get_float ~default:30.0 "MASC_KEEPER_WATCHDOG_POLL_SEC")
+
+  (** Consecutive noop turns before considering the keeper stuck in a
+      failure loop. Must be >= 2. Default: 3. *)
+  let noop_threshold =
+    max 2 (get_int ~default:3 "MASC_KEEPER_WATCHDOG_NOOP_THRESHOLD")
+
+  (** Grace period after fiber start before idle-stale detection activates.
+      Prevents false positives on server restart when [last_turn_ts] is
+      carried over from a previous server lifecycle.
+      Must be >= 0. Default: 360 (6 minutes — covers proactive warmup
+      up to 255 s plus one heartbeat cycle). *)
+  let grace_period_sec =
+    Float.max 0.0 (get_float ~default:360.0 "MASC_KEEPER_WATCHDOG_GRACE_SEC")
 end
 
 (** {1 gRPC Heartbeat Reconnect} *)

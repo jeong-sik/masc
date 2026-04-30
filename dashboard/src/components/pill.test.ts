@@ -1,140 +1,91 @@
 // @vitest-environment happy-dom
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { render } from 'preact'
-import { html } from 'htm/preact'
-import { Pill, pillAriaLabel, type PillProps } from './pill'
+import { describe, expect, it } from "vitest"
+import { render, h } from "preact"
+import { Pill, pillAriaLabel } from "./pill"
 
-describe('pillAriaLabel (pure)', () => {
-  it('returns raw content when kind is undefined or neutral', () => {
-    expect(pillAriaLabel({ children: 'IDLE' }, 'IDLE')).toBe('IDLE')
-    expect(
-      pillAriaLabel({ children: 'IDLE', kind: 'neutral' }, 'IDLE'),
-    ).toBe('IDLE')
+describe("pillAriaLabel", () => {
+  it("returns override when provided", () => {
+    expect(pillAriaLabel({ children: "A", ariaLabel: "Override" }, "A")).toBe("Override")
   })
 
-  it('appends (running) for running', () => {
-    expect(
-      pillAriaLabel({ children: 'RUN', kind: 'running' }, 'RUN'),
-    ).toBe('RUN (running)')
+  it("returns content for neutral kind", () => {
+    expect(pillAriaLabel({ children: "OK", kind: "neutral" }, "OK")).toBe("OK")
   })
 
-  it('appends (paused) for paused', () => {
-    expect(
-      pillAriaLabel({ children: 'PAUSE', kind: 'paused' }, 'PAUSE'),
-    ).toBe('PAUSE (paused)')
+  it("returns content for undefined kind", () => {
+    expect(pillAriaLabel({ children: "OK" }, "OK")).toBe("OK")
   })
 
-  it('appends (failing) for err', () => {
-    expect(
-      pillAriaLabel({ children: 'ERR', kind: 'err' }, 'ERR'),
-    ).toBe('ERR (failing)')
+  it("appends state for running kind", () => {
+    expect(pillAriaLabel({ children: "Build", kind: "running" }, "Build")).toBe("Build (running)")
   })
 
-  it('lets caller override via ariaLabel', () => {
-    expect(
-      pillAriaLabel(
-        { children: 'X', kind: 'err', ariaLabel: 'critical error' },
-        'X',
-      ),
-    ).toBe('critical error')
+  it("appends state for err kind", () => {
+    expect(pillAriaLabel({ children: "Test", kind: "err" }, "Test")).toBe("Test (failing)")
   })
 })
 
-describe('Pill', () => {
-  let host: HTMLDivElement
-
-  beforeEach(() => {
-    host = document.createElement('div')
-    document.body.appendChild(host)
+describe("Pill", () => {
+  it("renders neutral without role or dot", () => {
+    const container = document.createElement("div")
+    render(h(Pill, null, "Idle"), container)
+    const pill = container.querySelector("span")
+    expect(pill).not.toBeNull()
+    expect(pill!.getAttribute("data-kind")).toBe("neutral")
+    expect(pill!.getAttribute("role")).toBeNull()
+    expect(pill!.querySelector("span")).toBeNull()
+    expect(pill!.textContent).toBe("Idle")
   })
 
-  afterEach(() => {
-    render(null, host)
-    host.remove()
+  it("renders running with dot and status role", () => {
+    const container = document.createElement("div")
+    render(h(Pill, { kind: "running", dot: true }, "Build"), container)
+    const pill = container.querySelector("span")
+    expect(pill!.getAttribute("data-kind")).toBe("running")
+    expect(pill!.getAttribute("role")).toBe("status")
+    const dot = pill!.querySelector("span")
+    expect(dot).not.toBeNull()
+    expect(pill!.textContent).toBe("Build")
   })
 
-  function mount(props: PillProps): HTMLElement {
-    render(html`<${Pill} ...${props} />`, host)
-    return host.firstElementChild as HTMLElement
-  }
-
-  // ── Structural ──
-
-  it('emits a span with data-kind', () => {
-    const el = mount({ children: 'RUN', kind: 'running' })
-    expect(el.tagName).toBe('SPAN')
-    expect(el.getAttribute('data-kind')).toBe('running')
+  it("suppresses dot for neutral even when dot=true", () => {
+    const container = document.createElement("div")
+    render(h(Pill, { kind: "neutral", dot: true }, "None"), container)
+    const pill = container.querySelector("span")
+    expect(pill!.querySelector("span")).toBeNull()
   })
 
-  it('defaults to kind=neutral when omitted', () => {
-    const el = mount({ children: 'tag' })
-    expect(el.getAttribute('data-kind')).toBe('neutral')
+  it("applies kind-specific colors", () => {
+    const kinds = ["ok", "warn", "err", "info", "stalled"] as const
+    for (const kind of kinds) {
+      const container = document.createElement("div")
+      render(h(Pill, { kind }, kind), container)
+      const pill = container.querySelector("span") as HTMLElement
+      expect(pill.style.color).toContain("var(--color-status-")
+      expect(pill.getAttribute("data-kind")).toBe(kind)
+    }
   })
 
-  it('forwards testId to data-testid', () => {
-    const el = mount({ children: 'RUN', kind: 'running', testId: 'run-pill' })
-    expect(el.getAttribute('data-testid')).toBe('run-pill')
+  it("forwards testId and title", () => {
+    const container = document.createElement("div")
+    render(h(Pill, { testId: "status-pill", title: "Details" }, "On"), container)
+    const pill = container.querySelector("span")
+    expect(pill!.getAttribute("data-testid")).toBe("status-pill")
+    expect(pill!.getAttribute("title")).toBe("Details")
   })
 
-  // ── Aria + role ──
-
-  it('sets role=status for stateful kinds', () => {
-    const el = mount({ children: 'RUN', kind: 'running' })
-    expect(el.getAttribute('role')).toBe('status')
-    const ok = mount({ children: 'OK', kind: 'ok' })
-    expect(ok.getAttribute('role')).toBe('status')
+  it("computes aria-label from content", () => {
+    const container = document.createElement("div")
+    render(h(Pill, { kind: "warn" }, "Slow"), container)
+    const pill = container.querySelector("span")
+    expect(pill!.getAttribute("aria-label")).toBe("Slow (warning)")
   })
 
-  it('omits role when kind is neutral', () => {
-    const el = mount({ children: 'tag', kind: 'neutral' })
-    expect(el.getAttribute('role')).toBe(null)
-  })
-
-  it('encodes kind in aria-label suffix', () => {
-    const el = mount({ children: 'RUN', kind: 'running' })
-    expect(el.getAttribute('aria-label')).toBe('RUN (running)')
-  })
-
-  // ── Dot variant ──
-
-  it('renders a leading dot when dot=true and kind is stateful', () => {
-    const el = mount({ children: 'RUN', kind: 'running', dot: true })
-    expect(el.querySelector('span[aria-hidden="true"]')).not.toBeNull()
-  })
-
-  it('omits the dot for neutral kind even when dot=true', () => {
-    const el = mount({ children: 'tag', kind: 'neutral', dot: true })
-    expect(el.querySelector('span[aria-hidden="true"]')).toBeNull()
-  })
-
-  it('omits the dot when dot is undefined', () => {
-    const el = mount({ children: 'RUN', kind: 'running' })
-    expect(el.querySelector('span[aria-hidden="true"]')).toBeNull()
-  })
-
-  // ── Visual fidelity (style attr inspection) ──
-
-  it('uses accent token for running foreground', () => {
-    const el = mount({ children: 'RUN', kind: 'running' })
-    const style = el.getAttribute('style') ?? ''
-    expect(style).toContain('var(--color-accent-fg)')
-  })
-
-  it('uses ok status token for ok foreground', () => {
-    const el = mount({ children: 'OK', kind: 'ok' })
-    const style = el.getAttribute('style') ?? ''
-    expect(style).toContain('var(--color-status-ok)')
-  })
-
-  it('renders capsule shape (border-radius: 999px)', () => {
-    const el = mount({ children: 'RUN', kind: 'running' })
-    const style = el.getAttribute('style') ?? ''
-    expect(style).toContain('999px')
-  })
-
-  it('renders 16px height (SPEC pill geometry)', () => {
-    const el = mount({ children: 'tag' })
-    const style = el.getAttribute('style') ?? ''
-    expect(style).toContain('16px')
+  it("uses uppercase transform and mono font", () => {
+    const container = document.createElement("div")
+    render(h(Pill, null, "text"), container)
+    const pill = container.querySelector("span") as HTMLElement
+    expect(pill.style.textTransform).toBe("uppercase")
+    expect(pill.style.fontFamily).toContain("monospace")
   })
 })

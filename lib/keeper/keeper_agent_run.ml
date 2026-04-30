@@ -237,18 +237,10 @@ let run_turn
   let hooks = s.Keeper_run_tools.hooks in
   let reducer = s.Keeper_run_tools.reducer in
   let memory = s.Keeper_run_tools.memory in
-  let meta_ref = s.Keeper_run_tools.meta_ref in
-  let agent_ref = s.Keeper_run_tools.agent_ref in
+  let acc = s.Keeper_run_tools.acc in
+  let agent_ref : Oas.Agent.t option ref = ref None in
   let initial_tool_surface = s.Keeper_run_tools.initial_tool_surface in
-  let initial_tool_surface_blocker_ref = s.Keeper_run_tools.initial_tool_surface_blocker_ref in
-  let tool_surface_ref = s.Keeper_run_tools.tool_surface_ref in
-  let tool_calls_ref = s.Keeper_run_tools.tool_calls_ref in
-  let completion_contract_ref = s.Keeper_run_tools.completion_contract_ref in
-  let required_tool_use_seen_ref = s.Keeper_run_tools.required_tool_use_seen_ref in
-  let keeper_surface_tool_used_ref = s.Keeper_run_tools.keeper_surface_tool_used_ref in
-  let _ = s.Keeper_run_tools.discovered_ref in
-  let _ = s.Keeper_run_tools.tool_overlay_ref in
-  let _ = s.Keeper_run_tools.current_turn_ref in
+  let initial_tool_surface_blocker_ref = s.Keeper_run_tools.initial_tool_surface_blocker in
   let all_tool_names = s.Keeper_run_tools.all_tool_names in
   let tool_usage_before = s.Keeper_run_tools.tool_usage_before in
   let receipt_turn_count_ref = s.Keeper_run_tools.receipt_turn_count_ref in
@@ -256,15 +248,13 @@ let run_turn
   let receipt_stop_reason_ref = s.Keeper_run_tools.receipt_stop_reason_ref in
   let receipt_cascade_observation_ref = s.Keeper_run_tools.receipt_cascade_observation_ref in
   let receipt_response_text_present_ref = s.Keeper_run_tools.receipt_response_text_present_ref in
-  let receipt_tool_contract_result_ref = s.Keeper_run_tools.receipt_tool_contract_result_ref in
-  let requested_tool_names_ref = s.Keeper_run_tools.requested_tool_names_ref in
   let reported_tool_names_ref = s.Keeper_run_tools.reported_tool_names_ref in
   let observed_tool_names_ref = s.Keeper_run_tools.observed_tool_names_ref in
   let canonical_tool_names_ref = s.Keeper_run_tools.canonical_tool_names_ref in
   let unexpected_tool_names_ref = s.Keeper_run_tools.unexpected_tool_names_ref in
   let actual_keeper_tool_names_ref = s.Keeper_run_tools.actual_keeper_tool_names_ref in
   let keeper_has_owned_active_task () =
-    Option.is_some (owned_active_task_id_for_meta ~config ~meta:!meta_ref)
+    Option.is_some (owned_active_task_id_for_meta ~config ~meta:acc.meta)
   in
   (* 8. Run Agent *)
   let contract =
@@ -624,14 +614,14 @@ let run_turn
            ~tool_names:canonical_tool_names
        in
        if valid_tool_calls_present then
-         keeper_surface_tool_used_ref := true;
+         acc.keeper_surface_tool_used <- true;
        if unexpected_tool_names <> [] && not valid_tool_calls_present then
          let reason =
            Printf.sprintf
              "keeper turn reported unexpected tool names outside keeper surface: %s"
              (String.concat ", " unexpected_tool_names)
          in
-         receipt_tool_contract_result_ref := "violated";
+         acc.receipt_tool_contract_result <- "violated";
          Log.Keeper.error "keeper:%s cascade=%s %s" meta.name meta.cascade_name reason;
          Error (Oas.Error.Internal reason)
        else (
@@ -706,9 +696,9 @@ let run_turn
                 })
          in
          let tool_contract_status () =
-           let required_tool_names = (!tool_surface_ref).required_tool_names in
+           let required_tool_names = acc.tool_surface.required_tool_names in
            let missing_visible_required =
-             (!tool_surface_ref).missing_required_tool_names
+             acc.tool_surface.missing_required_tool_names
            in
            let class_of name =
              Keeper_tool_disclosure.classify_tool_progress name
@@ -754,18 +744,18 @@ let run_turn
          let text_result =
            let effective_completion_contract =
              Keeper_tool_disclosure.run_completion_contract
-               ~turn_contract:!completion_contract_ref
-               ~required_tool_use_seen:!required_tool_use_seen_ref
+               ~turn_contract:acc.completion_contract
+               ~required_tool_use_seen:acc.required_tool_use_seen
            in
            match
              Keeper_tool_disclosure.validate_completion_contract_presence
                ~contract:effective_completion_contract
-               ~tool_present:!keeper_surface_tool_used_ref
+               ~tool_present:acc.keeper_surface_tool_used
              , actionable_tool_contract_violation_reason
            with
            | Ok (), Some reason ->
                let contract_status = tool_contract_status () in
-               receipt_tool_contract_result_ref := contract_status;
+               acc.receipt_tool_contract_result <- contract_status;
                (* #10091: emit the labelled counter so dashboards
                   can distinguish the [has_current_task=true]
                   strict-gate path (#10031 kept this intentionally
@@ -798,14 +788,14 @@ let run_turn
                  ();
                Error (contract_violation_error reason)
            | Ok (), None ->
-               receipt_tool_contract_result_ref := tool_contract_status ();
+               acc.receipt_tool_contract_result <- tool_contract_status ();
                Ok (`Provider_text text)
            | Error reason, _ ->
                let contract_status =
                  if actual_keeper_tool_names = [] then "missing_required_tool_use"
                  else tool_contract_status ()
                in
-               receipt_tool_contract_result_ref := contract_status;
+               acc.receipt_tool_contract_result <- contract_status;
                Keeper_tool_disclosure.record_require_tool_use_violation
                  ~keeper_name:meta.name
                  ~has_current_task:(keeper_has_owned_active_task ())
@@ -946,7 +936,7 @@ let run_turn
 	                  (fun task_id ->
 	                    Coord_hooks.
 	                      { kind = "task"; id = Keeper_id.Task_id.to_string task_id })
-	                  (!meta_ref).current_task_id
+	                  acc.meta.current_task_id
 	              in
               let emit_keeper_activity ~kind ~payload ~tags =
                 try
@@ -964,7 +954,7 @@ let run_turn
                     (Printexc.to_string exn)
               in
 	              let task_id =
-	                Option.map Keeper_id.Task_id.to_string (!meta_ref).current_task_id
+	                Option.map Keeper_id.Task_id.to_string acc.meta.current_task_id
 	              in
               Cdal_eval_v1.persist ?task_id verdict;
               Keeper_turn_telemetry.log_keeper_contract_verdict ~keeper_name:meta.name verdict;
@@ -1147,14 +1137,14 @@ let run_turn
              ; usage
              ; usage_reported = Option.is_some result.response.usage
              ; tools_used = actual_keeper_tool_names
-             ; tool_calls = List.rev !tool_calls_ref
+             ; tool_calls = List.rev acc.tool_calls
              ; checkpoint = saved_checkpoint
              ; proof = result.proof
              ; trace_ref = result.trace_ref
              ; run_validation = result.run_validation
              ; stop_reason = result.stop_reason
              ; inference_telemetry = result.response.telemetry
-             ; tool_surface = !tool_surface_ref
+             ; tool_surface = acc.tool_surface
              }
          in
          match text_result with
@@ -1199,12 +1189,12 @@ let run_turn
     let tool_contract_result =
       match turn_result with
       | Error (Oas.Error.Agent (Oas.Error.CompletionContractViolation _)) ->
-        if String.equal !receipt_tool_contract_result_ref "unknown" then
+        if String.equal acc.receipt_tool_contract_result "unknown" then
           "violated"
         else
-          !receipt_tool_contract_result_ref
+          acc.receipt_tool_contract_result
       | _ ->
-        !receipt_tool_contract_result_ref
+        acc.receipt_tool_contract_result
     in
     let terminal_reason_code =
       match turn_result with
@@ -1224,7 +1214,7 @@ let run_turn
         generation;
 	        turn_count = !receipt_turn_count_ref;
 	        current_task_id =
-	          Option.map Keeper_id.Task_id.to_string (!meta_ref).current_task_id;
+	          Option.map Keeper_id.Task_id.to_string acc.meta.current_task_id;
         goal_ids = meta.active_goal_ids;
         outcome =
           (match turn_result with
@@ -1236,7 +1226,7 @@ let run_turn
         terminal_reason_code;
         response_text_present = !receipt_response_text_present_ref;
         model_used = !receipt_model_used_ref;
-        requested_tools = !requested_tool_names_ref;
+        requested_tools = acc.requested_tool_names;
         reported_tools = !reported_tool_names_ref;
         observed_tools = !observed_tool_names_ref;
         canonical_tools = !canonical_tool_names_ref;
@@ -1245,22 +1235,22 @@ let run_turn
         tool_contract_result;
         tool_surface =
           {
-            turn_lane = (!tool_surface_ref).turn_lane;
-            tool_surface_class = (!tool_surface_ref).tool_surface_class;
-            tool_requirement = (!tool_surface_ref).tool_requirement;
-            visible_tool_count = (!tool_surface_ref).visible_tool_count;
-            tool_gate_enabled = (!tool_surface_ref).tool_gate_enabled;
+            turn_lane = acc.tool_surface.turn_lane;
+            tool_surface_class = acc.tool_surface.tool_surface_class;
+            tool_requirement = acc.tool_surface.tool_requirement;
+            visible_tool_count = acc.tool_surface.visible_tool_count;
+            tool_gate_enabled = acc.tool_surface.tool_gate_enabled;
             tool_surface_fallback_used =
-              (!tool_surface_ref).tool_surface_fallback_used;
-            required_tools = (!tool_surface_ref).required_tool_names;
+              acc.tool_surface.tool_surface_fallback_used;
+            required_tools = acc.tool_surface.required_tool_names;
             missing_required_tools =
-              (!tool_surface_ref).missing_required_tool_names;
+              acc.tool_surface.missing_required_tool_names;
           };
         sandbox_kind = Keeper_execution_receipt.sandbox_kind_of_meta meta;
         sandbox_root = Some keeper_visible_sandbox_root;
         network_mode = Keeper_types.network_mode_to_string meta.network_mode;
-        approval_profile = (!tool_surface_ref).approval_mode_effective;
-        approval_profile_derived = (!tool_surface_ref).approval_mode_derived;
+        approval_profile = acc.tool_surface.approval_mode_effective;
+        approval_profile_derived = acc.tool_surface.approval_mode_derived;
         cascade_name;
         cascade_selected_model =
           Option.bind cascade_observation (fun obs -> obs.selected_model);

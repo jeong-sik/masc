@@ -13,6 +13,15 @@ module H = Masc_mcp.Keeper_tool_emission_hook
 module THooks = Agent_sdk.Hooks
 module TT = Agent_sdk.Types
 
+let dummy_schedule : THooks.tool_schedule =
+  {
+    planned_index = 0;
+    batch_index = 0;
+    batch_size = 1;
+    concurrency_class = "default";
+    batch_kind = "sequential";
+  }
+
 let with_env_set name value f =
   let prev = Sys.getenv_opt name in
   Unix.putenv name value;
@@ -41,7 +50,7 @@ let make_post_tool_use ~content : THooks.hook_event =
     ; output = Ok ({ TT.content } : TT.tool_output)
     ; result_bytes = String.length content
     ; duration_ms = 1.0
-    ; schedule = THooks.Now
+    ; schedule = dummy_schedule
     }
 
 let make_pre_tool_use () : THooks.hook_event =
@@ -51,7 +60,7 @@ let make_pre_tool_use () : THooks.hook_event =
     ; input = `Assoc []
     ; accumulated_cost_usd = 0.0
     ; turn = 1
-    ; schedule = THooks.Now
+    ; schedule = dummy_schedule
     }
 
 let make_post_tool_use_error () : THooks.hook_event =
@@ -67,7 +76,7 @@ let make_post_tool_use_error () : THooks.hook_event =
            } : TT.tool_error)
     ; result_bytes = 0
     ; duration_ms = 0.5
-    ; schedule = THooks.Now
+    ; schedule = dummy_schedule
     }
 
 let assert_eq_int ~label expected actual =

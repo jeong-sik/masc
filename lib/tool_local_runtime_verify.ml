@@ -130,6 +130,8 @@ let error_message_of_http_error = function
   | Llm_provider.Http_client.ProviderTerminal
       { kind = Llm_provider.Http_client.Other subtype; message } ->
       Printf.sprintf "provider terminal: %s: %s" subtype message
+  | Llm_provider.Http_client.ProviderFailure { kind; message } ->
+      Llm_provider.Http_client.provider_failure_to_string ~kind ~message
   | Llm_provider.Http_client.HttpError { code; body } -> (
       try
         let json = Yojson.Safe.from_string body in

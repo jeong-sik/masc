@@ -19,6 +19,11 @@ module Http_client = struct
             collapsed here because [should_cascade] only needs the
             terminality bit; consumers wanting the message extract it
             via the original [ProviderTerminal] match. *)
+    | Provider_failure
+        (** OAS [ProviderFailure] — provider/runtime failure classified at
+            the transport edge. Treat as per-provider by default so the
+            cascade can try another provider instead of terminating on
+            one lane's capacity, quota, capability, CLI, or parse failure. *)
 
   (* Case-insensitive substring check, mirroring [cascade_health_filter]. *)
   let contains_ci ?(max_scan = 512) ~haystack ~needle () =
@@ -102,6 +107,8 @@ module Http_client = struct
           Cli_transport_required
       | Llm_provider.Http_client.ProviderTerminal _ ->
           Provider_terminal
+      | Llm_provider.Http_client.ProviderFailure _ ->
+          Provider_failure
       | Llm_provider.Http_client.NetworkError _ -> Network_error
 
   let should_cascade (err : Llm_provider.Http_client.http_error) : bool =
@@ -116,7 +123,8 @@ module Http_client = struct
     | Transient_http _
     | Accept_rejected_capability_mismatch
     | Cli_transport_required
-    | Network_error ->
+    | Network_error
+    | Provider_failure ->
         true
 
   let error_message (err : Llm_provider.Http_client.http_error) : string =
@@ -132,6 +140,8 @@ module Http_client = struct
     | Llm_provider.Http_client.ProviderTerminal
         { kind = Llm_provider.Http_client.Other subtype; message } ->
         Printf.sprintf "provider terminal: %s: %s" subtype message
+    | Llm_provider.Http_client.ProviderFailure { kind; message } ->
+        Llm_provider.Http_client.provider_failure_to_string ~kind ~message
     | Llm_provider.Http_client.HttpError { code; body } -> (
         try
           let json = Yojson.Safe.from_string body in

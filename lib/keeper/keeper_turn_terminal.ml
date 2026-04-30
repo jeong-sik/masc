@@ -18,13 +18,23 @@ let severity_to_string = function
   | Warn -> "warn"
   | Bad -> "bad"
 
-let severity_of_code = function
-  | "success" -> Ok
+let known_severity_of_code = function
+  | "success" -> Some Ok
   | "external_cancel"
   | "oas_timeout_budget"
   | "turn_wall_clock_timeout"
-  | "gh_repo_context_missing_worktree" -> Warn
-  | _ -> Bad
+  | "gh_repo_context_missing_worktree" -> Some Warn
+  | "required_tool_use_no_tool_call"
+  | "required_tool_use_unsatisfied"
+  | "post_commit_ambiguous"
+  | "provider_error"
+  | "unknown_error" -> Some Bad
+  | _ -> None
+
+let severity_of_code code =
+  match known_severity_of_code code with
+  | Some severity -> severity
+  | None -> Bad
 
 let summary_of_code = function
   | "success" -> "turn completed"

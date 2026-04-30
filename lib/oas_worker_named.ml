@@ -369,6 +369,9 @@ let run_named
             { kind = Llm_provider.Http_client.Other subtype; message }) ->
             Keeper_types.Other_detail
               (Printf.sprintf "provider terminal %s: %s" subtype message)
+        | Some (Llm_provider.Http_client.ProviderFailure _ as err) ->
+            Keeper_types.Other_detail
+              (Oas_compat.Http_client.error_message err)
         | None -> Keeper_types.No_providers_available
       in
       let observation =

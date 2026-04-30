@@ -129,6 +129,34 @@ let test_provider_terminal_other () =
     (Astring.String.is_infix ~affix:"structured_terminal_subtype" rendered
      && Astring.String.is_infix ~affix:"provider signalled" rendered)
 
+let test_provider_failure_cascades_and_renders () =
+  let err =
+    Http_client.ProviderFailure
+      {
+        kind =
+          Capacity_exhausted
+            {
+              scope = Failure_scope_model;
+              retry_after = Some 30.0;
+              model = Some "gemini-2.5-pro";
+            };
+        message = "model capacity exhausted";
+      }
+  in
+  Alcotest.(check bool)
+    "ProviderFailure must cascade — typed provider failure is lane-specific"
+    true
+    (Oas_compat.Http_client.should_cascade err);
+  (match Oas_compat.Http_client.classify err with
+   | Provider_failure -> ()
+   | _ -> Alcotest.fail "ProviderFailure must classify as Provider_failure");
+  let rendered = Oas_compat.Http_client.error_message err in
+  Alcotest.(check bool)
+    "error_message renders typed provider failure kind + message"
+    true
+    (Astring.String.is_infix ~affix:"capacity_exhausted:model" rendered
+     && Astring.String.is_infix ~affix:"model capacity exhausted" rendered)
+
 let test_error_message_baseline () =
   (* Smoke check that the new helper preserves existing semantics for
      the variants that already had inline matches at the call sites. *)
@@ -174,6 +202,11 @@ let () =
             `Quick test_provider_terminal_max_turns;
           Alcotest.test_case "Other classify + cascade + message"
             `Quick test_provider_terminal_other;
+        ] );
+      ( "ProviderFailure — typed lane failure cascades",
+        [
+          Alcotest.test_case "classify + cascade + message"
+            `Quick test_provider_failure_cascades_and_renders;
         ] );
       ( "error_message helper baseline",
         [

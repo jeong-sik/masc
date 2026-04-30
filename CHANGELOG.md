@@ -1,6 +1,37 @@
 # Changelog
 
 
+## [0.18.22] - 2026-04-30
+
+Post-`0.18.21` merge-train release for keeper watchdog/lifecycle hardening, config-driven cascade routing, CI guard repairs, runtime persistence cleanup, and dashboard design-system accessibility primitives. No breaking API changes.
+
+### Added
+
+- Dashboard accessibility primitives expanded with Toolbar, Tabs, RadioGroup, Combobox, Search, Menubar, Banner, Grid, Region, List, Log, Window, Treegrid, CommandBar, Drawer, Slider, Table, agent-delegation, recovery, output-announcer, and failure-history coverage (#12359, #12364).
+- Keeper cascade routing is now driven from config/catalog state instead of hard-coded routing assumptions (#12365).
+- Keeper routine log event policy documentation now captures routine-vs-actionable runtime log boundaries (#12366).
+
+### Changed
+
+- OAS observation cascade names now flow through typed cascade boundaries (#12360).
+- Release metadata advanced from `0.18.21` to `0.18.22` after the post-`0.18.21` merge train, keeping version truth aligned with the latest main boundary (#12355).
+
+### Fixed
+
+- AlertDialog focus-trap bounds now guard missing focusable elements in the dashboard popover path (#12357).
+- Keeper policy gates and lifecycle dispatch now surface P0 failures instead of silently swallowing them (#12358).
+- Keeper task state reconciliation and UTF-8 persistence were hardened for runtime state durability (#12361).
+- `Log.Keeper.warning` is exported consistently and late event dispatch failures are guarded (#12362).
+- Sangsu keeper SSOT data was repaired while dead persona fields were stripped from the checked-in runtime surface (#12363).
+- Stale watchdog handling no longer kills proactive keepers that are idle because turns are being skipped (#12367).
+- Keeper FSM transitions now allow paused state movement from Compacting and HandingOff (#12368).
+- Draft/auto-merge CI guard behavior now handles missing CI Gate and disable-auto-merge paths without failing the wrong boundary (#12369).
+- Directive pause dispatch failures now emit keeper logs instead of disappearing behind runtime control flow (#12370).
+
+### Deprecated
+
+- Removed dead Sangsu persona fields from keeper SSOT data (#12363).
+
 ## [0.18.21] - 2026-04-30
 
 Release-truth follow-up after the `0.18.20` version bump landed before the rest of the merge train, and the `v0.18.20` tag was later cut with additional PRs but without matching changelog text. No breaking API changes.

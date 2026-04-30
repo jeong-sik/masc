@@ -269,8 +269,21 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
               Keeper_crash_persistence.enqueue_record ~keepers_dir
                 ~name:meta.name ~ts ~reason ~restart_count:rc;
               Keeper_registry.record_error ~base_path meta.name reason;
-              ignore (Keeper_registry.dispatch_event ~base_path meta.name
-                (Keeper_state_machine.Fiber_terminated { outcome = reason }));
+              (match Keeper_registry.dispatch_event ~base_path meta.name
+                      (Keeper_state_machine.Fiber_terminated { outcome = reason })
+               with
+               | Ok _ -> ()
+               | Error (Keeper_state_machine.Invalid_transition { from_phase; to_phase; reason = sm_reason }) ->
+                   Log.Keeper.error "supervisor:%s Fiber_terminated dispatch failed: %s -> %s (%s)"
+                     meta.name
+                     (Keeper_state_machine.phase_to_string from_phase)
+                     (Keeper_state_machine.phase_to_string to_phase)
+                     sm_reason
+               | Error (Keeper_state_machine.Terminal_state { current; attempted_event }) ->
+                   Log.Keeper.warn "supervisor:%s Fiber_terminated skipped, already terminal: %s (event: %s)"
+                     meta.name
+                     (Keeper_state_machine.phase_to_string current)
+                     attempted_event);
               if resolve_done (`Crashed reason) then
                 publish_phase_lifecycle ~phase:Keeper_state_machine.Crashed
                   meta.name reason ()
@@ -921,8 +934,21 @@ let sweep_and_recover (ctx : _ context) =
   ) !to_unregister;
   List.iter (fun ((entry : Keeper_registry.registry_entry), msg) ->
     (* RFC-0002: dispatch budget exhaustion before marking dead *)
-    ignore (Keeper_registry.dispatch_event ~base_path entry.name
-      Keeper_state_machine.Restart_budget_exhausted);
+    (match Keeper_registry.dispatch_event ~base_path entry.name
+            Keeper_state_machine.Restart_budget_exhausted
+     with
+     | Ok _ -> ()
+     | Error (Keeper_state_machine.Invalid_transition { from_phase; to_phase; reason }) ->
+         Log.Keeper.error "supervisor:%s Restart_budget_exhausted dispatch failed: %s -> %s (%s)"
+           entry.name
+           (Keeper_state_machine.phase_to_string from_phase)
+           (Keeper_state_machine.phase_to_string to_phase)
+           reason
+     | Error (Keeper_state_machine.Terminal_state { current; attempted_event }) ->
+         Log.Keeper.warn "supervisor:%s Restart_budget_exhausted skipped, already terminal: %s (event: %s)"
+           entry.name
+           (Keeper_state_machine.phase_to_string current)
+           attempted_event);
     Keeper_registry.mark_dead ~base_path entry.name ~at:now;
     let detail =
       Printf.sprintf "restart budget exhausted (%d), last: %s"
@@ -974,8 +1000,21 @@ let sweep_and_recover (ctx : _ context) =
     match read_meta ctx.config old_entry.name with
     | Ok (Some meta) ->
         (* RFC-0002: dispatch restart attempt event *)
-        ignore (Keeper_registry.dispatch_event ~base_path old_entry.name
-          (Keeper_state_machine.Supervisor_restart_attempt { attempt }));
+        (match Keeper_registry.dispatch_event ~base_path old_entry.name
+                (Keeper_state_machine.Supervisor_restart_attempt { attempt })
+         with
+         | Ok _ -> ()
+         | Error (Keeper_state_machine.Invalid_transition { from_phase; to_phase; reason }) ->
+             Log.Keeper.error "supervisor:%s Supervisor_restart_attempt dispatch failed: %s -> %s (%s)"
+               old_entry.name
+               (Keeper_state_machine.phase_to_string from_phase)
+               (Keeper_state_machine.phase_to_string to_phase)
+               reason
+         | Error (Keeper_state_machine.Terminal_state { current; attempted_event }) ->
+             Log.Keeper.warn "supervisor:%s Supervisor_restart_attempt skipped, already terminal: %s (event: %s)"
+               old_entry.name
+               (Keeper_state_machine.phase_to_string current)
+               attempted_event);
         let old_crash_log = old_entry.crash_log in
         let reg =
           Keeper_registry.register_restarting ~base_path old_entry.name meta

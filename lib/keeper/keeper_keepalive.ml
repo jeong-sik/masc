@@ -500,7 +500,7 @@ let record_keeper_stopped
            (Keeper_state_machine.phase_to_string to_phase)
            reason
      | Error (Keeper_state_machine.Terminal_state { current; attempted_event }) ->
-         Log.Keeper.warning "record_keeper_stopped(%s): Stop_requested skipped, already terminal: %s (event: %s)"
+         Log.Keeper.warn "record_keeper_stopped(%s): Stop_requested skipped, already terminal: %s (event: %s)"
            keeper_name
            (Keeper_state_machine.phase_to_string current)
            attempted_event);
@@ -515,7 +515,7 @@ let record_keeper_stopped
            (Keeper_state_machine.phase_to_string to_phase)
            reason
      | Error (Keeper_state_machine.Terminal_state { current; attempted_event }) ->
-         Log.Keeper.warning "record_keeper_stopped(%s): Drain_complete skipped, already terminal: %s (event: %s)"
+         Log.Keeper.warn "record_keeper_stopped(%s): Drain_complete skipped, already terminal: %s (event: %s)"
            keeper_name
            (Keeper_state_machine.phase_to_string current)
            attempted_event);
@@ -548,7 +548,7 @@ let record_keeper_crashed
            (Keeper_state_machine.phase_to_string to_phase)
            sm_reason
      | Error (Keeper_state_machine.Terminal_state { current; attempted_event }) ->
-         Log.Keeper.warning "record_keeper_crashed(%s): Fiber_terminated skipped, already terminal: %s (event: %s)"
+         Log.Keeper.warn "record_keeper_crashed(%s): Fiber_terminated skipped, already terminal: %s (event: %s)"
            keeper_name
            (Keeper_state_machine.phase_to_string current)
            attempted_event);

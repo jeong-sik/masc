@@ -1201,7 +1201,21 @@ let rec dispatch_event_with_audit
          tr.entry_actions;
        List.iter
          (fun followup_event ->
-            ignore (dispatch_event_with_audit ~base_path name followup_event))
+            match dispatch_event_with_audit ~base_path name followup_event with
+            | Ok _ -> ()
+            | Error (Keeper_state_machine.Invalid_transition { from_phase; to_phase; reason }) ->
+                Log.Keeper.error
+                  "registry(%s): followup dispatch failed: %s -> %s (%s)"
+                  name
+                  (Keeper_state_machine.phase_to_string from_phase)
+                  (Keeper_state_machine.phase_to_string to_phase)
+                  reason
+            | Error (Keeper_state_machine.Terminal_state { current; attempted_event }) ->
+                Log.Keeper.warn
+                  "registry(%s): followup skipped, already terminal: %s (event: %s)"
+                  name
+                  (Keeper_state_machine.phase_to_string current)
+                  attempted_event)
        (List.filter_map
             (followup_event_of_entry_action ~phase:tr.new_phase)
             tr.entry_actions);

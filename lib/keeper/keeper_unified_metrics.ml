@@ -1573,7 +1573,10 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
    | Some err ->
        (match Oas_worker_named.classify_masc_internal_error err with
         | Some (Oas_worker_named.No_tool_capable_provider
-                  { cascade_name; _ }) ->
+	                  { cascade_name; _ }) ->
+            let cascade_name =
+              Oas_worker_named.cascade_name_to_string cascade_name
+            in
             Prometheus.inc_counter
               Prometheus.metric_keeper_no_tool_provider
               ~labels:

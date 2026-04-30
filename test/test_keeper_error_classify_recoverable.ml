@@ -14,14 +14,17 @@ module KEC = Masc_mcp.Keeper_error_classify
 module Owne = Masc_mcp.Oas_worker_named
 module KT = Masc_mcp.Keeper_types
 
+let cascade_name raw = Owne.cascade_name_of_string raw
+
 let make_cascade_exhausted reason =
   Owne.sdk_error_of_masc_internal_error
-    (Owne.Cascade_exhausted { cascade_name = "test_cascade"; reason })
+    (Owne.Cascade_exhausted
+       { cascade_name = cascade_name "test_cascade"; reason })
 
 let make_no_tool_capable () =
   Owne.sdk_error_of_masc_internal_error
     (Owne.No_tool_capable_provider
-       { cascade_name = "test_cascade"; configured_labels = [] })
+       { cascade_name = cascade_name "test_cascade"; configured_labels = [] })
 
 let make_accept_rejected () =
   Owne.sdk_error_of_masc_internal_error

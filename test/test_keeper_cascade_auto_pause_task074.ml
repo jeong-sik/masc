@@ -30,17 +30,19 @@ module Owne = Masc_mcp.Oas_worker_named
 module KT = Masc_mcp.Keeper_types
 module Regime = Masc_mcp.Keeper_behavioral_regime
 
+let cascade_name raw = Owne.cascade_name_of_string raw
+
 (* --- 1. is_cascade_exhausted_error covers the variants auto-pause cares about --- *)
 
 let mk_cascade_exhausted () =
   Owne.sdk_error_of_masc_internal_error
     (Owne.Cascade_exhausted
-       { cascade_name = "test"; reason = KT.All_providers_failed })
+       { cascade_name = cascade_name "test"; reason = KT.All_providers_failed })
 
 let mk_no_tool_capable () =
   Owne.sdk_error_of_masc_internal_error
     (Owne.No_tool_capable_provider
-       { cascade_name = "test"; configured_labels = [] })
+       { cascade_name = cascade_name "test"; configured_labels = [] })
 
 let mk_accept_rejected () =
   Owne.sdk_error_of_masc_internal_error
@@ -49,7 +51,7 @@ let mk_accept_rejected () =
 let mk_resumable_cli_session () =
   Owne.sdk_error_of_masc_internal_error
     (Owne.Resumable_cli_session
-       { cascade_name = "test";
+       { cascade_name = cascade_name "test";
          detail = "rollout-thread-not-found";
          exit_code = Some 1 })
 
@@ -83,7 +85,7 @@ let mk_admission_queue_timeout () =
   Owne.sdk_error_of_masc_internal_error
     (Owne.Admission_queue_timeout
        { keeper_name = "test_keeper";
-         cascade_name = "test";
+         cascade_name = cascade_name "test";
          wait_sec = 5.0 })
 
 let test_pause_does_not_fire_on_transient () =

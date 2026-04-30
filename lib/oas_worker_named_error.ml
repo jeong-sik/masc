@@ -9,18 +9,23 @@
 
 open Result.Syntax
 
+type cascade_name = Keeper_cascade_profile.runtime_name
+
+let cascade_name_of_string raw = Keeper_cascade_profile.Runtime_name raw
+let cascade_name_to_string = Keeper_cascade_profile.runtime_name_to_string
+
 type masc_internal_error =
   | Cascade_exhausted of {
-      cascade_name : string;
+      cascade_name : cascade_name;
       reason : Keeper_types.cascade_exhaustion_reason;
     }
   | Resumable_cli_session of {
-      cascade_name : string;
+      cascade_name : cascade_name;
       detail : string;
       exit_code : int option;
     }
   | No_tool_capable_provider of {
-      cascade_name : string;
+      cascade_name : cascade_name;
       configured_labels : string list;
     }
   | Accept_rejected of {
@@ -30,7 +35,7 @@ type masc_internal_error =
     }
   | Admission_queue_timeout of {
       keeper_name : string;
-      cascade_name : string;
+      cascade_name : cascade_name;
       wait_sec : float;
     }
   | Admission_queue_rejected of {
@@ -63,6 +68,7 @@ let string_opt_of_assoc key = function
 
 let masc_internal_error_to_json = function
   | Cascade_exhausted { cascade_name; reason } ->
+    let cascade_name = cascade_name_to_string cascade_name in
     `Assoc
       [
         ("kind", `String "cascade_exhausted");
@@ -70,6 +76,7 @@ let masc_internal_error_to_json = function
         ("reason", Keeper_types.cascade_exhaustion_reason_to_json reason);
       ]
   | Resumable_cli_session { cascade_name; detail; exit_code } ->
+    let cascade_name = cascade_name_to_string cascade_name in
     `Assoc
       [
         ("kind", `String "resumable_cli_session");
@@ -78,6 +85,7 @@ let masc_internal_error_to_json = function
         ("exit_code", Json_util.int_opt_to_json exit_code);
       ]
   | No_tool_capable_provider { cascade_name; configured_labels } ->
+    let cascade_name = cascade_name_to_string cascade_name in
     `Assoc
       [
         ("kind", `String "no_tool_capable_provider");
@@ -94,6 +102,7 @@ let masc_internal_error_to_json = function
         ("reason", `String reason);
       ]
   | Admission_queue_timeout { keeper_name; cascade_name; wait_sec } ->
+    let cascade_name = cascade_name_to_string cascade_name in
     `Assoc
       [
         ("kind", `String "admission_queue_timeout");
@@ -192,6 +201,7 @@ let cascade_name_of_masc_internal_error = function
   | Resumable_cli_session { cascade_name; _ }
   | No_tool_capable_provider { cascade_name; _ }
   | Admission_queue_timeout { cascade_name; _ } ->
+      let cascade_name = cascade_name_to_string cascade_name in
       if String.equal (String.trim cascade_name) "" then "unknown"
       else cascade_name
   | Accept_rejected _
@@ -213,14 +223,15 @@ let sdk_error_of_masc_internal_error err =
 
 let admission_wait_timeout_error
     ~(keeper_name : string)
-    ~(cascade_name : string)
+    ~(cascade_name : cascade_name)
     ~(priority : Llm_provider.Request_priority.t)
     (wait_ms : int) =
   let wait_sec = float_of_int wait_ms /. 1000.0 in
+  let cascade_name_string = cascade_name_to_string cascade_name in
   let msg =
     Printf.sprintf
       "Admission queue wait timeout after %.1fs (wait_ms=%d, keeper=%s, cascade=%s, priority=%s)"
-      wait_sec wait_ms keeper_name cascade_name
+      wait_sec wait_ms keeper_name cascade_name_string
       (Llm_provider.Request_priority.to_string priority)
   in
   Log.Misc.warn "%s" msg;
@@ -263,7 +274,7 @@ let classify_masc_internal_error (err : Oas.Error.sdk_error) :
                  Some
                    (Cascade_exhausted
                       {
-                        cascade_name;
+                        cascade_name = cascade_name_of_string cascade_name;
                         reason;
                       })
                | None -> None)
@@ -273,7 +284,7 @@ let classify_masc_internal_error (err : Oas.Error.sdk_error) :
                  Some
                    (Resumable_cli_session
                       {
-                        cascade_name;
+                        cascade_name = cascade_name_of_string cascade_name;
                         detail;
                         exit_code = int_opt_of_assoc "exit_code" json;
                       })
@@ -296,7 +307,7 @@ let classify_masc_internal_error (err : Oas.Error.sdk_error) :
                  Some
                    (No_tool_capable_provider
                       {
-                        cascade_name;
+                        cascade_name = cascade_name_of_string cascade_name;
                         configured_labels;
                       })
                | None -> None)
@@ -324,7 +335,13 @@ let classify_masc_internal_error (err : Oas.Error.sdk_error) :
                        | _ -> 0.0)
                    | _ -> 0.0
                  in
-                 Some (Admission_queue_timeout { keeper_name; cascade_name; wait_sec })
+                 Some
+                   (Admission_queue_timeout
+                      {
+                        keeper_name;
+                        cascade_name = cascade_name_of_string cascade_name;
+                        wait_sec;
+                      })
                | _ -> None)
            | Some (`String "admission_queue_rejected") -> (
                match string_opt_of_assoc "keeper_name" json,

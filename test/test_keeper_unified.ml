@@ -21,6 +21,8 @@ module OMR = Masc_mcp.Oas_model_resolve
 module AQ = Masc_mcp.Keeper_approval_queue
 module Keeper_types = Masc_mcp.Keeper_types
 
+let oas_error_cascade_name = Masc_mcp.Oas_worker_named.cascade_name_of_string
+
 let has_prompt_root path =
   Sys.file_exists (Filename.concat path "config/prompts/keeper.unified.system.md")
 
@@ -3646,7 +3648,8 @@ let wrapped_cascade_max_turns_error () =
   Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
     (Masc_mcp.Oas_worker_named.Cascade_exhausted
        {
-         cascade_name = Masc_mcp.Keeper_config.default_cascade_name;
+         cascade_name =
+           oas_error_cascade_name Masc_mcp.Keeper_config.default_cascade_name;
          reason = Keeper_types.Other_detail wrapped_claude_max_turns_message;
        })
 
@@ -3683,7 +3686,7 @@ let test_degraded_retry_after_recoverable_error_uses_local_recovery_for_resumabl
       (Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
          (Masc_mcp.Oas_worker_named.Resumable_cli_session
             {
-              cascade_name = "kimi_cli_keeper";
+              cascade_name = oas_error_cascade_name "kimi_cli_keeper";
               detail =
                 "kimi exited with code 75: \nTo resume this session: kimi -r ff37febe-2adb-4ac6-9dc6-cae23e672fbc";
               exit_code = Some 75;
@@ -3701,7 +3704,7 @@ let test_degraded_retry_after_recoverable_error_includes_admission_queue_timeout
          (Masc_mcp.Oas_worker_named.Admission_queue_timeout
             {
               keeper_name = "nick0cave";
-              cascade_name = "big_three";
+              cascade_name = oas_error_cascade_name "big_three";
               wait_sec = 90.0;
             }))
   in
@@ -4286,7 +4289,7 @@ let test_metrics_failure_response_redacts_resumable_cli_session_detail () =
     Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
       (Masc_mcp.Oas_worker_named.Resumable_cli_session
          {
-           cascade_name = "kimi_cli_keeper";
+           cascade_name = oas_error_cascade_name "kimi_cli_keeper";
            detail = canonical_detail;
            exit_code = Some 75;
          })
@@ -4684,7 +4687,8 @@ let test_cascade_exhausted_error_detected_from_structured_internal_error () =
     Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
       (Masc_mcp.Oas_worker_named.Cascade_exhausted
          {
-           cascade_name = Masc_mcp.Keeper_config.default_cascade_name;
+           cascade_name =
+             oas_error_cascade_name Masc_mcp.Keeper_config.default_cascade_name;
            reason = Masc_mcp.Keeper_types.All_providers_failed;
          })
   in
@@ -4725,7 +4729,8 @@ let test_auto_recoverable_turn_error_includes_wrapped_cascade_exhausted_hard_quo
     Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
       (Masc_mcp.Oas_worker_named.Cascade_exhausted
          {
-           cascade_name = Masc_mcp.Keeper_config.default_cascade_name;
+           cascade_name =
+             oas_error_cascade_name Masc_mcp.Keeper_config.default_cascade_name;
            reason =
              Keeper_types.Other_detail
                "claude exited with code 1: {\"type\":\"result\",\"subtype\":\"success\",\"is_error\":true,\"api_error_status\":429,\"result\":\"You've hit your limit · resets Apr 24 at 4am (Asia/Seoul)\"}";
@@ -4743,7 +4748,8 @@ let test_auto_recoverable_turn_error_includes_filtered_candidates_cascade_exhaus
     Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
       (Masc_mcp.Oas_worker_named.Cascade_exhausted
          {
-           cascade_name = Masc_mcp.Keeper_config.default_cascade_name;
+           cascade_name =
+             oas_error_cascade_name Masc_mcp.Keeper_config.default_cascade_name;
            reason = Keeper_types.Candidates_filtered_after_cycles;
          })
   in
@@ -4755,7 +4761,7 @@ let test_auto_recoverable_turn_error_includes_resumable_cli_session_error () =
     Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
       (Masc_mcp.Oas_worker_named.Resumable_cli_session
          {
-           cascade_name = "kimi_cli_keeper";
+           cascade_name = oas_error_cascade_name "kimi_cli_keeper";
            detail =
              Masc_mcp.Oas_worker_exec.Kimi_cli_transport_local.resumable_session_detail;
            exit_code = Some 75;
@@ -4769,7 +4775,7 @@ let test_cascade_exhausted_error_includes_resumable_cli_session_error () =
     Masc_mcp.Oas_worker_named.sdk_error_of_masc_internal_error
       (Masc_mcp.Oas_worker_named.Resumable_cli_session
          {
-           cascade_name = "kimi_cli_keeper";
+           cascade_name = oas_error_cascade_name "kimi_cli_keeper";
            detail =
              Masc_mcp.Oas_worker_exec.Kimi_cli_transport_local.resumable_session_detail;
            exit_code = Some 75;

@@ -10,6 +10,9 @@ open Masc_mcp
 
 module Oas = Agent_sdk
 
+let internal_cascade_name = Oas_worker_named.cascade_name_of_string
+let internal_cascade_name_to_string = Oas_worker_named.cascade_name_to_string
+
 let ctx_messages = Keeper_exec_context.messages_of_context
 let ctx_system_prompt = Keeper_exec_context.system_prompt_of_context
 
@@ -895,7 +898,7 @@ let test_sdk_error_is_resumable_cli_session_detects_structured_error () =
     Oas_worker_named.sdk_error_of_masc_internal_error
       (Oas_worker_named.Resumable_cli_session
          {
-           cascade_name = "governance_judge";
+           cascade_name = internal_cascade_name "governance_judge";
            detail =
              "kimi_cli reported a resumable CLI session (exit 1). \
               Resumable session available via -r.";
@@ -1544,13 +1547,16 @@ let test_classify_masc_internal_error_roundtrip () =
     Oas_worker_named.sdk_error_of_masc_internal_error
       (Oas_worker_named.Cascade_exhausted
          {
-           cascade_name = Masc_mcp.Keeper_config.default_cascade_name;
+           cascade_name =
+             internal_cascade_name Masc_mcp.Keeper_config.default_cascade_name;
            reason = Keeper_types.All_providers_failed;
          })
   in
   (match Oas_worker_named.classify_masc_internal_error cascade_err with
    | Some (Oas_worker_named.Cascade_exhausted { cascade_name; reason }) ->
-       Alcotest.(check string) "cascade name" Masc_mcp.Keeper_config.default_cascade_name cascade_name;
+       Alcotest.(check string) "cascade name"
+         Masc_mcp.Keeper_config.default_cascade_name
+         (internal_cascade_name_to_string cascade_name);
        Alcotest.(check string) "cascade reason"
          (Keeper_types.cascade_exhaustion_summary Keeper_types.All_providers_failed)
          (Keeper_types.cascade_exhaustion_summary reason)
@@ -1576,14 +1582,15 @@ let test_classify_masc_internal_error_roundtrip () =
     Oas_worker_named.sdk_error_of_masc_internal_error
       (Oas_worker_named.Resumable_cli_session
          {
-           cascade_name = "kimi_cli_keeper";
+           cascade_name = internal_cascade_name "kimi_cli_keeper";
            detail = Oas_worker_exec.Kimi_cli_transport_local.resumable_session_detail;
            exit_code = Some 75;
          })
   in
   match Oas_worker_named.classify_masc_internal_error resumable_err with
   | Some (Oas_worker_named.Resumable_cli_session { cascade_name; detail; exit_code }) ->
-      Alcotest.(check string) "resumable cascade" "kimi_cli_keeper" cascade_name;
+      Alcotest.(check string) "resumable cascade" "kimi_cli_keeper"
+        (internal_cascade_name_to_string cascade_name);
       Alcotest.(check string) "resumable detail redacted"
         Oas_worker_exec.Kimi_cli_transport_local.resumable_session_detail
         detail;
@@ -2565,7 +2572,8 @@ let test_kimi_cli_resumable_invalid_request_reclassifies_as_structured () =
       | Some
           (Oas_worker_named.Resumable_cli_session
              { cascade_name; detail = structured_detail; exit_code }) ->
-          Alcotest.(check string) "cascade" "kimi_cli_keeper" cascade_name;
+          Alcotest.(check string) "cascade" "kimi_cli_keeper"
+            (internal_cascade_name_to_string cascade_name);
           Alcotest.(check string) "detail" detail structured_detail;
           Alcotest.(check (option int)) "exit code" (Some 1) exit_code
       | _ -> Alcotest.fail "expected structured resumable CLI session")

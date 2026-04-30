@@ -10,18 +10,23 @@
 
 (** {1 MASC internal error type} *)
 
+type cascade_name = Keeper_cascade_profile.runtime_name
+
+val cascade_name_of_string : string -> cascade_name
+val cascade_name_to_string : cascade_name -> string
+
 type masc_internal_error =
   | Cascade_exhausted of {
-      cascade_name : string;
+      cascade_name : cascade_name;
       reason : Keeper_types.cascade_exhaustion_reason;
     }
   | Resumable_cli_session of {
-      cascade_name : string;
+      cascade_name : cascade_name;
       detail : string;
       exit_code : int option;
     }
   | No_tool_capable_provider of {
-      cascade_name : string;
+      cascade_name : cascade_name;
       configured_labels : string list;
     }
   | Accept_rejected of {
@@ -31,7 +36,7 @@ type masc_internal_error =
     }
   | Admission_queue_timeout of {
       keeper_name : string;
-      cascade_name : string;
+      cascade_name : cascade_name;
       wait_sec : float;
     }
   | Admission_queue_rejected of {
@@ -78,7 +83,7 @@ val masc_oas_error_total_metric : string
 
 val admission_wait_timeout_error :
   keeper_name:string ->
-  cascade_name:string ->
+  cascade_name:cascade_name ->
   priority:Llm_provider.Request_priority.t ->
   int ->
   (string, Oas.Error.sdk_error) result

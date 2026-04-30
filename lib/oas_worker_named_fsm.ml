@@ -245,7 +245,8 @@ let sdk_error_to_resumable_cli_session ~cascade_name
           (Oas_worker_named_error.sdk_error_of_masc_internal_error
              (Oas_worker_named_error.Resumable_cli_session
                 {
-                  cascade_name;
+                  cascade_name =
+                    Oas_worker_named_error.cascade_name_of_string cascade_name;
                   detail = resumable_cli_session_detail message;
                   exit_code = resumable_cli_session_exit_code message;
                 }))

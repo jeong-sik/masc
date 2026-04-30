@@ -97,6 +97,7 @@ let run_named
     if Option.is_some model_strings && trimmed <> "" then trimmed
     else Keeper_cascade_profile.normalize_declared_name cascade_name
   in
+  let error_cascade_name = cascade_name_of_string cascade_name in
   let runtime_mcp_policy = runtime_mcp_policy_for_tools ~keeper_name tools in
   let configured_labels_result, candidate_cfgs_result =
     match model_strings with
@@ -173,10 +174,13 @@ let run_named
         (sdk_error_of_masc_internal_error
            (if require_tool_choice_support then
               No_tool_capable_provider
-                { cascade_name; configured_labels }
+                { cascade_name = error_cascade_name; configured_labels }
             else
               Cascade_exhausted
-                { cascade_name; reason = Keeper_types.No_providers_available }))
+                {
+                  cascade_name = error_cascade_name;
+                  reason = Keeper_types.No_providers_available;
+                }))
   | _ ->
   let capture, _metrics =
     Oas_worker_cascade.cascade_metrics_for_candidates ~candidate_cfgs ()
@@ -391,7 +395,7 @@ let run_named
             sdk_error_of_masc_internal_error
               (Resumable_cli_session
                  {
-                   cascade_name;
+                   cascade_name = error_cascade_name;
                    detail = resumable_cli_session_detail message;
                    exit_code = resumable_cli_session_exit_code message;
                  })
@@ -400,7 +404,7 @@ let run_named
             sdk_error_of_masc_internal_error
               (Resumable_cli_session
                  {
-                   cascade_name;
+                   cascade_name = error_cascade_name;
                    detail = resumable_cli_session_detail reason;
                    exit_code = resumable_cli_session_exit_code reason;
                  })
@@ -408,7 +412,7 @@ let run_named
             sdk_error_of_masc_internal_error
               (Cascade_exhausted
                  {
-                   cascade_name;
+                   cascade_name = error_cascade_name;
                    reason;
                  })
       in
@@ -827,7 +831,11 @@ let run_named
       ~outcome:`Failure ~observation:(Some observation) ();
     Error
       (sdk_error_of_masc_internal_error
-         (Cascade_exhausted { cascade_name; reason = Keeper_types.Candidates_filtered_after_cycles }))
+         (Cascade_exhausted
+            {
+              cascade_name = error_cascade_name;
+              reason = Keeper_types.Candidates_filtered_after_cycles;
+            }))
   in
   let record_trace ~cycle ~candidates_out ~backoff_ms ~kind =
     Cascade_strategy_trace.record {

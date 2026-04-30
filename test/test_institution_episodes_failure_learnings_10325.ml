@@ -37,11 +37,13 @@ open Alcotest
 module M = Masc_mcp.Memory_oas_bridge
 module Prom = Masc_mcp.Prometheus
 
+let kind value = M.error_kind_of_string value
+
 (* --- learnings shape -------------------------------------------- *)
 
 let test_learnings_carries_error_kind_first () =
   let learnings =
-    M.failure_learnings ~error_kind:"oas_timeout_budget"
+    M.failure_learnings ~error_kind:(kind "oas_timeout_budget")
       ~error_preview:"Adaptive estimated input tokens exceeded budget"
   in
   check (list string)
@@ -54,7 +56,7 @@ let test_learnings_carries_error_kind_first () =
 
 let test_learnings_omits_empty_preview () =
   let learnings =
-    M.failure_learnings ~error_kind:"resumable_cli_session"
+    M.failure_learnings ~error_kind:(kind "resumable_cli_session")
       ~error_preview:""
   in
   check (list string)
@@ -62,7 +64,7 @@ let test_learnings_omits_empty_preview () =
     [ "failure_kind: resumable_cli_session" ]
     learnings;
   let learnings_ws =
-    M.failure_learnings ~error_kind:"resumable_cli_session"
+    M.failure_learnings ~error_kind:(kind "resumable_cli_session")
       ~error_preview:"   \n  "
   in
   check (list string)
@@ -74,7 +76,7 @@ let test_learnings_omits_empty_preview () =
 
 let test_empty_error_kind_normalises_to_unspecified () =
   let learnings =
-    M.failure_learnings ~error_kind:"" ~error_preview:"some preview"
+    M.failure_learnings ~error_kind:(kind "") ~error_preview:"some preview"
   in
   check (list string)
     "empty error_kind becomes unspecified sentinel"
@@ -86,7 +88,7 @@ let test_empty_error_kind_normalises_to_unspecified () =
 
 let test_whitespace_error_kind_normalises_to_unspecified () =
   let learnings =
-    M.failure_learnings ~error_kind:"  \t " ~error_preview:""
+    M.failure_learnings ~error_kind:(kind "  \t ") ~error_preview:""
   in
   check (list string)
     "whitespace-only error_kind becomes unspecified"

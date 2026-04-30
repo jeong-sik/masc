@@ -468,12 +468,22 @@ let store_episode_from_snapshot
 
 (** #10341 (#10350): emit Agent_stress Timeout event for timeout-shaped
     error_kind from institution failure path. *)
+type error_kind = Error_kind of string
+
+let error_kind_of_string value = Error_kind value
+let error_kind_to_string (Error_kind value) = value
+
 let timeout_error_kinds =
-  [ "oas_timeout_budget"; "turn_timeout"; "admission_queue_timeout" ]
+  List.map error_kind_of_string
+    [ "oas_timeout_budget"; "turn_timeout"; "admission_queue_timeout" ]
 
 let stress_kind_for_error_kind error_kind =
-  let trimmed = String.trim error_kind in
-  if List.exists (String.equal trimmed) timeout_error_kinds then
+  let trimmed = String.trim (error_kind_to_string error_kind) in
+  if
+    List.exists
+      (fun kind -> String.equal trimmed (error_kind_to_string kind))
+      timeout_error_kinds
+  then
     Some Agent_stress.Timeout
   else None
 
@@ -507,7 +517,7 @@ let () =
     ()
 
 let normalize_error_kind kind =
-  let trimmed = String.trim kind in
+  let trimmed = String.trim (error_kind_to_string kind) in
   if trimmed = "" then "unspecified" else trimmed
 
 let failure_learnings ~error_kind ~error_preview =
@@ -528,7 +538,7 @@ let store_failed_turn_episode
     ~(keeper_name : string)
     ~(turn : int)
     ~(trace_id : string)
-    ~(error_kind : string)
+    ~(error_kind : error_kind)
     ~(error_message : string)
     () : unit =
   let error_preview =
@@ -539,8 +549,9 @@ let store_failed_turn_episode
     String_util.utf8_safe ~max_bytes:4099 ~suffix:"..." error_message
     |> String_util.to_string
   in
+  let error_kind_label = error_kind_to_string error_kind in
   let summary =
-    Printf.sprintf "keeper turn %d failed (%s): %s" turn error_kind
+    Printf.sprintf "keeper turn %d failed (%s): %s" turn error_kind_label
       error_preview
   in
   Prometheus.inc_counter institution_episode_failure_kind_metric
@@ -583,7 +594,7 @@ let store_failed_turn_episode
               [
                 ("trace_id", `String trace_id);
                 ("turn", `String (string_of_int turn));
-                ("error_kind", `String error_kind);
+                ("error_kind", `String error_kind_label);
                 ("error_message", `String error_context);
               ] );
         ];

@@ -489,7 +489,7 @@ let test_failed_turn_episode_flushes_failure_outcome () =
         ~keeper_name:"test-failed-turn"
         ~turn:7
         ~trace_id:"trace-failed-turn"
-        ~error_kind:"provider_timeout"
+        ~error_kind:(Memory_oas_bridge.error_kind_of_string "provider_timeout")
         ~error_message:"provider timed out before producing a tool-using turn"
         ();
       let flushed =

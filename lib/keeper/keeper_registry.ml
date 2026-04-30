@@ -1074,6 +1074,12 @@ let followup_event_of_entry_action
   | _ ->
       None
 
+let record_followup_dispatch_rejection event =
+  Prometheus.inc_counter
+    Prometheus.metric_keeper_lifecycle_dispatch_rejections
+    ~labels:[ ("event", Keeper_state_machine.event_to_string event) ]
+    ()
+
 let pending_measurement_after_event now entry event =
   match event with
   | Keeper_state_machine.Context_measured { auto_rules; _ } ->
@@ -1219,6 +1225,7 @@ let rec dispatch_event_with_audit
             match dispatch_event_with_audit ~base_path name followup_event with
             | Ok _ -> ()
             | Error (Keeper_state_machine.Invalid_transition { from_phase; to_phase; reason }) ->
+                record_followup_dispatch_rejection followup_event;
                 Log.Keeper.error
                   "registry(%s): followup dispatch failed: %s -> %s (%s)"
                   name
@@ -1226,6 +1233,7 @@ let rec dispatch_event_with_audit
                   (Keeper_state_machine.phase_to_string to_phase)
                   reason
             | Error (Keeper_state_machine.Terminal_state { current; attempted_event }) ->
+                record_followup_dispatch_rejection followup_event;
                 Log.Keeper.warn
                   "registry(%s): followup skipped, already terminal: %s (event: %s)"
                   name

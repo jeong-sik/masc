@@ -9,6 +9,11 @@ async function refreshActivityGraphSurface(): Promise<void> {
   await refreshActivityGraph()
 }
 
+async function refreshGitGraphSurface(): Promise<void> {
+  const { refreshGitGraph } = await import('./components/git-graph-store')
+  await refreshGitGraph()
+}
+
 async function refreshObservatoryPanel(): Promise<void> {
   const { refreshObservatorySurface } = await import('./components/observatory/observatory')
   refreshObservatorySurface()
@@ -51,6 +56,7 @@ type RefreshTask =
   | 'execution'
   | 'observatory'
   | 'activityGraph'
+  | 'gitGraph'
   | 'board'
   | 'goals'
   | 'autoresearch'
@@ -70,6 +76,9 @@ export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params
       }
       if (routeState.params.section === 'journey') {
         return ['execution', 'missionSnapshot']
+      }
+      if (routeState.params.section === 'git-graph') {
+        return ['gitGraph']
       }
       if (routeState.params.section === 'agents') {
         return ['namespaceTruth', 'execution', 'missionSnapshot']
@@ -125,6 +134,7 @@ const REFRESHERS: Record<RefreshTask, (routeState: Pick<RouteState, 'tab' | 'par
   execution: () => { void refreshExecution() },
   observatory: () => { void refreshObservatoryPanel() },
   activityGraph: () => { void refreshActivityGraphSurface() },
+  gitGraph: () => { void refreshGitGraphSurface() },
   board: () => { void refreshBoard() },
   goals: () => { void refreshGoals() },
   autoresearch: () => { void refreshAutoresearchLabSurface() },

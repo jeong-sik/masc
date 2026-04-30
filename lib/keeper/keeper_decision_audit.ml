@@ -5,6 +5,12 @@
 
     @since Decision Layer v2 — Phase A2 (#6232) *)
 
+(* tla-lint: file-scope: forensics ring buffer + accumulator. The
+   ring's pos/count/unflushed counters are observability bookkeeping
+   for the JSONL flush, not state-machine state observed by the
+   keeper FSM. The header explicitly notes the abstract record
+   prevents trust calculations from consuming forensics data. *)
+
 (* ================================================================ *)
 (* Feature flag                                                     *)
 (* ================================================================ *)

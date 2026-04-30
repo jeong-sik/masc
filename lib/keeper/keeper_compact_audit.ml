@@ -1,6 +1,11 @@
 (** Compaction audit: Event_bus subscriber + paired JSONL persistence.
     See {!Keeper_compact_audit} for API docs. *)
 
+(* tla-lint: file-scope: compaction audit subscriber. The store_ref
+   cache and start/complete pair-grouping accumulators are
+   observability bookkeeping for the JSONL flush layer; no value
+   here feeds back into keeper FSM state. *)
+
 (* ── Types ─────────────────────────────────────────────────────── *)
 
 type trigger =

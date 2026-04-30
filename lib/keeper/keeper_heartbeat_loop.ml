@@ -704,10 +704,15 @@ let run_smart_heartbeat_gate
             [should_emit] does not immediately re-classify as Skip_idle,
             and let the cycle proceed (presence/board/turn dispatch).
             Spec: KeeperHeartbeat.tla HeartbeatTick — turn_state must
-            transition to "running". *)
+            transition to "running". Prometheus counter is the operator-
+            visible positive signal for the #12271 fix path. *)
          Log.Keeper.info
            "smart heartbeat: idle wake — cycle resumed (post=consumed)";
-         last_heartbeat_cycle_ts := Time_compat.now ()
+         last_heartbeat_cycle_ts := Time_compat.now ();
+         Prometheus.inc_counter
+           Prometheus.metric_keeper_skip_idle_wake_resumed
+           ~labels:[ ("keeper", meta_current.name) ]
+           ()
        | Keeper_keepalive_signal.Stopped | Keeper_keepalive_signal.Timeout -> ());
       outcome
     | Heartbeat_smart.Emit ->

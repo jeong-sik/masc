@@ -21,6 +21,7 @@ import {
   KpiStripIsland,
   type KpiStripIslandData,
 } from '../../src/components/kpi-strip-island'
+import { KpiStripIslandSync } from '../../src/components/kpi-strip-island-sync'
 
 interface SeedRow {
   total: number
@@ -492,6 +493,154 @@ document.getElementById('run-keeper-shape')?.addEventListener('click', async () 
     `=== keeper-shape spike (n=${n}, ${burstUpdates} updates each side) ===`,
     `Preact: total ${ps.reduce((a, b) => a + b, 0).toFixed(0)}ms, mean ${(ps.reduce((a, b) => a + b, 0) / ps.length).toFixed(2)}ms, p95 ${p95(ps).toFixed(2)}ms, max ${Math.max(...ps).toFixed(2)}ms`,
     `Solid:  total ${is_.reduce((a, b) => a + b, 0).toFixed(0)}ms, mean ${(is_.reduce((a, b) => a + b, 0) / is_.length).toFixed(2)}ms, p95 ${p95(is_).toFixed(2)}ms, max ${Math.max(...is_).toFixed(2)}ms`,
+    '',
+  ]
+  resultsEl.textContent = block.join('\n') + '\n'
+  console.log(block.join('\n'))
+})
+
+// ── Sync-mount spike (RFC 0017 §7d) ──
+//
+// Compares the shipping island wrapper (useEffect-based) against
+// `KpiStripIslandSync`, which moves the Solid mount into a Preact ref
+// callback (commit-phase synchronous) and the prop sync into
+// `useLayoutEffect`. If the spike's hypothesis holds, the ~30 ms
+// useEffect overhead disappears and the variant beats the shipping
+// island at the same n.
+
+const syncHost = document.getElementById('sync-host') as HTMLElement
+
+async function timeSyncRender(
+  rows: SeedRow[],
+  cellsPerStrip: number,
+  expectedSentinels: ReadonlyArray<string>,
+): Promise<number> {
+  return timeUpdateToDom(
+    () => {
+      render(
+        html`<div>${rows.map((r) => html`
+          <${KpiStripIslandSync} ariaLabel="bench" cols=${cellsPerStrip} cells=${rowToCells(r, cellsPerStrip)} />
+        `)}</div>`,
+        syncHost,
+      )
+    },
+    syncHost,
+    expectedSentinels,
+  )
+}
+
+document.getElementById('run-spike-sync')?.addEventListener('click', async () => {
+  resultsEl.textContent = 'sync-mount spike: warmup...\n'
+  const n = 16
+  const cellsPerStrip = Number(cellsInput.value)
+  const burstUpdates = 60
+
+  // Warmup
+  for (let i = 0; i < 3; i += 1) {
+    await runMount(n, cellsPerStrip)
+    render(null, syncHost)
+  }
+
+  resultsEl.textContent = ''
+
+  // ─── Mount comparison ───
+  const rows = makeSeed(n)
+  const expected = n * cellsPerStrip
+
+  render(null, preactHost)
+  const preactMountMs = await timeRenderToDom(
+    () => render(
+      html`<div>${rows.map((r) => html`
+        <${KpiStrip} ariaLabel="bench" cols=${cellsPerStrip}>
+          ${rowToCells(r, cellsPerStrip).map((cell) => html`<${KpiCell} ...${cell} />`)}
+        <//>
+      `)}</div>`,
+      preactHost,
+    ),
+    preactHost,
+    expected,
+  )
+
+  render(null, islandHost)
+  const islandMountMs = await timeRenderToDom(
+    () => render(
+      html`<div>${rows.map((r) => html`
+        <${KpiStripIsland} ariaLabel="bench" cols=${cellsPerStrip} cells=${rowToCells(r, cellsPerStrip)} />
+      `)}</div>`,
+      islandHost,
+    ),
+    islandHost,
+    expected,
+  )
+
+  render(null, syncHost)
+  const syncMountMs = await timeRenderToDom(
+    () => render(
+      html`<div>${rows.map((r) => html`
+        <${KpiStripIslandSync} ariaLabel="bench" cols=${cellsPerStrip} cells=${rowToCells(r, cellsPerStrip)} />
+      `)}</div>`,
+      syncHost,
+    ),
+    syncHost,
+    expected,
+  )
+
+  // ─── Burst update comparison (60 sequential re-renders) ───
+  const preactSamples: number[] = []
+  const islandSamples: number[] = []
+  const syncSamples: number[] = []
+  for (let i = 0; i < burstUpdates; i += 1) {
+    for (const r of rows) r.total += 1
+    const sentinels = rows.map((r) => String(r.total))
+
+    preactSamples.push(await timeUpdateToDom(
+      () => render(
+        html`<div>${rows.map((r) => html`
+          <${KpiStrip} ariaLabel="bench" cols=${cellsPerStrip}>
+            ${rowToCells(r, cellsPerStrip).map((cell) => html`<${KpiCell} ...${cell} />`)}
+          <//>
+        `)}</div>`,
+        preactHost,
+      ),
+      preactHost,
+      sentinels,
+    ))
+
+    islandSamples.push(await timeUpdateToDom(
+      () => render(
+        html`<div>${rows.map((r) => html`
+          <${KpiStripIsland} ariaLabel="bench" cols=${cellsPerStrip} cells=${rowToCells(r, cellsPerStrip)} />
+        `)}</div>`,
+        islandHost,
+      ),
+      islandHost,
+      sentinels,
+    ))
+
+    syncSamples.push(await timeSyncRender(rows, cellsPerStrip, sentinels))
+  }
+
+  const summary = (samples: number[]): string => {
+    const total = samples.reduce((a, b) => a + b, 0)
+    const mean = total / samples.length
+    return `total=${total.toFixed(0)}ms mean=${mean.toFixed(2)}ms p95=${p95(samples).toFixed(2)}ms max=${Math.max(...samples).toFixed(2)}ms`
+  }
+
+  const block = [
+    `=== sync-mount spike (n=${n}, ${burstUpdates} updates) ===`,
+    `Mount→DOM:`,
+    `  Preact KpiStrip:           ${preactMountMs.toFixed(2)} ms`,
+    `  Solid useEffect island:    ${islandMountMs.toFixed(2)} ms`,
+    `  Solid sync-mount island:   ${syncMountMs.toFixed(2)} ms`,
+    `  delta sync vs useEffect:   ${(islandMountMs - syncMountMs).toFixed(2)} ms saved`,
+    `  delta sync vs Preact:      ${(syncMountMs - preactMountMs).toFixed(2)} ms (positive = sync slower than Preact)`,
+    ``,
+    `Update→DOM (${burstUpdates} samples):`,
+    `  Preact KpiStrip:           ${summary(preactSamples)}`,
+    `  Solid useEffect island:    ${summary(islandSamples)}`,
+    `  Solid sync-mount island:   ${summary(syncSamples)}`,
+    `  throughput sync/Preact:    ${(syncSamples.reduce((a, b) => a + b, 0) / preactSamples.reduce((a, b) => a + b, 0)).toFixed(2)} (1.0 = parity)`,
+    `  throughput sync/useEffect: ${(syncSamples.reduce((a, b) => a + b, 0) / islandSamples.reduce((a, b) => a + b, 0)).toFixed(2)}`,
     '',
   ]
   resultsEl.textContent = block.join('\n') + '\n'

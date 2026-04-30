@@ -125,13 +125,46 @@ The Solid path consumes roughly twice the main-thread budget for the same stream
 - The update measurement re-renders the entire tree each round (worst case for Preact). Solid's *targeted* signal updates (changing a single cell value through a stored ref) would be faster, but our caller pattern always re-renders from scratch on prop change because `cells` is a fresh array literal each parent render. Refactoring callers to keep persistent stores would shift the comparison, but is itself a non-trivial migration.
 - The 30 ms overhead is dominated by `useEffect` scheduling. A different mounting strategy (e.g. `solidRender` called synchronously in the Preact component body during the first render) could close most of this gap, but would break the eventual-consistency model the test shim relies on, and require a redesign of `KpiStripIsland`.
 
+## Synchronous-mount spike (RFC 0017 §7d, added 2026-04-30)
+
+Recommendation 4 below proposed investigating a sync-mount strategy. That spike is now done: `kpi-strip-island-sync.ts` moves the Solid mount into a Preact ref callback (commit-phase synchronous) and the prop sync into `useLayoutEffect` (synchronous, before paint). Both shift the work out of task tier.
+
+Numbers at n=16 (warm cache, headless Chromium):
+
+```
+Mount → DOM:
+  Preact KpiStrip:          16.50 ms
+  Solid useEffect island:   32.80 ms   ← shipping wrapper
+  Solid sync-mount island:  16.80 ms   ← spike variant (kpi-strip-island-sync.ts)
+    delta vs useEffect:     16.00 ms saved
+    delta vs Preact:         0.30 ms slower
+
+Update burst (60 sequential re-renders):
+  Preact KpiStrip:          total= 991 ms, mean=16.51 ms
+  Solid useEffect island:   total=1999 ms, mean=33.32 ms   ← shipping (~half throughput)
+  Solid sync-mount island:  total=1008 ms, mean=16.80 ms   ← spike (parity with Preact)
+
+  throughput sync/Preact:    1.02   (1.0 = parity)
+  throughput sync/useEffect: 0.50   (sync mount is 2× the useEffect path)
+```
+
+The `useEffect` overhead is **eliminated** by the ref-callback approach. Sync-mount island reaches **parity with Preact** at our production scale.
+
+**But parity is not a win.** This spike removes the latency *regression* the shipping wrapper introduces, but the original RFC 0017 promise — that Solid would be *faster* — is still unrealised. The reason: at small N with full prop replacement on every parent render, both Preact's diff and Solid's per-cell render do similar amounts of work. Solid's fine-grained reactivity advantage only surfaces when individual cells subscribe to their own signals and the parent doesn't recreate the `cells` array on every event.
+
+For the RFC 0017 trajectory this means:
+
+1. **Sync-mount can be promoted to production** as a low-risk improvement: removes the 30 ms regression on every page using a migrated caller, no API change, identical DOM contract.
+2. **Phase 2 / Phase 3 islands stay paused** until the per-cell signal redesign (separate larger RFC) is done. Adding more sync-mount islands at parity gives no win, just larger frame budget consumption with no benefit.
+
 ## Recommendations
 
 1. **Do not roll back blindly.** Bundle isolation (9.3 KB amortised after first caller, 0 B per subsequent caller), type safety, and the test-shim infrastructure are all clean wins; reverting them costs more than the latency we'd recover.
-2. **Amend RFC 0017 §4.** The krausest citation does not generalise to our app shape. Replace it with these measured numbers and an explicit note that the migration was not justified by user-perceived latency.
-3. **Skip RFC 0017 §6 (Lifeline/Ticker islands) for now.** Per these numbers, more islands have no performance justification unless those components have N>200 cells. They do not. **The sustained-load numbers strengthen this**: at n=16 Solid throughput is half of Preact's, so adding more islands to a streaming dashboard makes the SSE back-pressure problem worse, not better.
-4. **Investigate a synchronous mount strategy** as a future spike. If the 30 ms `useEffect` overhead can be eliminated, the cross-over point shifts down toward our actual usage and the migration becomes a real win. This is worth a separate, scoped RFC.
-5. **Keep the current migration as deliberate code organisation.** The Solid island gives us framework-agnostic primitives, a clean migration boundary, and a reusable test pattern (`vi.doMock` shim). Those are the actual wins to report — performance is not.
+2. **Amend RFC 0017 §4.** The krausest citation does not generalise to our app shape. Replace it with these measured numbers and an explicit note that the migration was not justified by user-perceived latency *unless paired with a per-cell signal API*.
+3. **Skip RFC 0017 §6 (Lifeline/Ticker islands) for now.** Per these numbers, more islands have no performance justification unless those components have N>200 cells (they do not) or use fine-grained signals (current API does not).
+4. **Promote `KpiStripIslandSync` to the shipping wrapper** as a separate small PR. Spike result is unambiguous: removes the 30 ms regression, achieves parity with Preact. Risk is bounded — the wrapper is a thin Preact component, the Solid factory it imports is unchanged, and the existing test shim still works (it bypasses the wrapper entirely with `vi.doMock`).
+5. **Per-cell signal API redesign** as a separate, larger RFC if real perf wins are needed. This would change `KpiStripIslandData` from `cells: ReadonlyArray<KpiCellProps>` to `cellSignals: ReadonlyArray<Accessor<KpiCellProps>>`, allowing callers to mutate one cell without recreating the array. Costly: every caller refactors its data flow.
+6. **Keep the current migration as deliberate code organisation.** The Solid island gives us framework-agnostic primitives, a clean migration boundary, and a reusable test pattern (`vi.doMock` shim). Those are the actual wins to report — performance was not, until the sync-mount spike, which now gives us parity.
 
 ## Reproduction
 

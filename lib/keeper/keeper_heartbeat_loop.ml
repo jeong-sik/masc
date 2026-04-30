@@ -690,6 +690,7 @@ let cycle_continues_after_wake
 ;;
 
 let run_smart_heartbeat_gate
+      ~(base_path : string)
       ~(clock : _ Eio.Time.clock)
       ~(stop : bool Atomic.t)
       ~(wakeup : bool Atomic.t)
@@ -710,6 +711,22 @@ let run_smart_heartbeat_gate
         ~last_activity:!last_successful_heartbeat_ts
         ~last_heartbeat:!last_heartbeat_cycle_ts)
     else Heartbeat_smart.Emit
+  in
+  (* RFC-0020 Rule 2: the Event Layer queue overrides the Smart Heartbeat
+     policy. When the queue holds an unprocessed stimulus, force [Emit]
+     regardless of the busy/idle decision so the next cycle consumes the
+     stimulus on time. Pinned by KeeperEventQueue.tla
+     QueueNeverStarvedBySkip invariant. *)
+  let smart_hb_decision =
+    if Heartbeat_smart.should_emit_now smart_hb_decision
+    then smart_hb_decision
+    else (
+      let queue =
+        Keeper_registry.event_queue_snapshot ~base_path meta_current.name
+      in
+      if Keeper_event_queue.is_empty queue
+      then smart_hb_decision
+      else Heartbeat_smart.Emit)
   in
   (* Run side-effects (idle sleep, cycle-timestamp update) per the
      decision, then delegate the gate answer to [cycle_continues_after_wake]
@@ -946,6 +963,7 @@ let run_heartbeat_loop
           ~base_path:ctx.config.base_path meta_current.name meta_current;
       if
         run_smart_heartbeat_gate
+          ~base_path:ctx.config.base_path
           ~clock:ctx.clock
           ~stop
           ~wakeup

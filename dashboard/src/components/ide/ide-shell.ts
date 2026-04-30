@@ -1,14 +1,17 @@
 import { html } from 'htm/preact'
+import { useState } from 'preact/hooks'
 import { IdeExplorerMock } from './ide-explorer-mock'
 import { IdeEditorMock } from './ide-editor-mock'
 import { IdeConversationRailMock } from './ide-conversation-rail-mock'
 import { IdeActivityMock } from './ide-activity-mock'
 import { IdeInterjectMock } from './ide-interject-mock'
+import { IdeToolbar } from './ide-toolbar'
 
-// PR-2: 4-pane CODE mode shell with mock content. Layout matches the
-// cockpit IdePlane prototype's grid (`design-system/ui_kits/cockpit/
-// cockpit.css` `.ide-v2-tree / .ide-v2-center / .ide-v2-right /
-// .ide-v2-terminal`); production tokens are v0.4 Semantic-tier only.
+// PR-3: 4-pane CODE mode shell with editor toolbar (view tabs + LAYERS
+// toggle, RFC 0020 controller). Layout matches the cockpit IdePlane
+// prototype's grid (`design-system/ui_kits/cockpit/cockpit.css`
+// `.ide-v2-tree / .ide-v2-center / .ide-v2-right / .ide-v2-terminal`);
+// production tokens are v0.4 Semantic-tier only.
 //
 // Each child mock cites the implementation PR that replaces it:
 //   EXPLORER          -> Phase 2 PR-4 (file-tree-store, RFC 0014)
@@ -20,15 +23,19 @@ import { IdeInterjectMock } from './ide-interject-mock'
 // Audit reference:
 //   dashboard/design-system/audits/2026-04-30-ide-mockup-vs-v0.4-mapping.md
 
+type ViewTab = 'source' | 'split-diff' | 'unified' | 'blame'
+
 export function IdeShell() {
+  const [activeView, setActiveView] = useState<ViewTab>('source')
+
   return html`
     <section
       class="ide-plane-shell"
       role="region"
-      aria-label="Code IDE shell (Phase 1 PR-2 — mock content)"
+      aria-label="Code IDE shell (Phase 1 PR-3 — toolbar + 4-pane mock)"
       style=${{
         display: 'grid',
-        gridTemplateRows: 'auto 1fr auto',
+        gridTemplateRows: 'auto auto 1fr auto',
         background: 'var(--color-bg-page)',
         color: 'var(--color-fg-primary)',
         minHeight: 'calc(100vh - var(--h-topbar) - var(--h-kpi))',
@@ -51,6 +58,7 @@ export function IdeShell() {
         <span>* runtime / main / nick0cave@dkr-a1 / improver@wt-run-47</span>
         <span style=${{ marginLeft: 'auto', color: 'var(--color-status-ok, var(--ok))' }}>● mcp · connected</span>
       </header>
+      <${IdeToolbar} activeView=${activeView} onViewChange=${setActiveView} />
       <div
         class="ide-plane-grid"
         role="presentation"

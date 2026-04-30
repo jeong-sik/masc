@@ -51,21 +51,8 @@ let handle_keeper_down ctx args : tool_result =
            | Error err ->
                Log.Keeper.error "keeper_down write_meta failed: %s" err);
           Keeper_registry.update_meta ~base_path:ctx.config.base_path name retained;
-          (match Keeper_registry.dispatch_event ~base_path:ctx.config.base_path name
-             Keeper_state_machine.Operator_pause
-           with
-           | Ok _ -> ()
-           | Error (Keeper_state_machine.Invalid_transition { from_phase; to_phase; reason }) ->
-               Log.Keeper.error "keeper_down(%s): Operator_pause dispatch failed: %s -> %s (%s)"
-                 name
-                 (Keeper_state_machine.phase_to_string from_phase)
-                 (Keeper_state_machine.phase_to_string to_phase)
-                 reason
-           | Error (Keeper_state_machine.Terminal_state { current; attempted_event }) ->
-               Log.Keeper.warn "keeper_down(%s): Operator_pause skipped, already terminal: %s (event: %s)"
-                 name
-                 (Keeper_state_machine.phase_to_string current)
-                 attempted_event)));
+          ignore (Keeper_registry.dispatch_event_and_log ~base_path:ctx.config.base_path name
+            Keeper_state_machine.Operator_pause)));
       if remove_session then (
         let rec rm_rf path =
           if Fs_compat.file_exists path then begin

@@ -412,6 +412,8 @@ let metric_keeper_heartbeat_successes =
   "masc_keeper_heartbeat_successes_total"
 let metric_keeper_heartbeat_failures =
   "masc_keeper_heartbeat_failures_total"
+let metric_keeper_dispatch_event_failures =
+  "masc_keeper_dispatch_event_failures_total"
 let metric_keeper_tool_call_duration =
   "masc_keeper_tool_call_duration_seconds"
 let metric_keeper_write_meta_failures =

@@ -1269,6 +1269,42 @@ let rec dispatch_event_with_audit
 let dispatch_event ~base_path name event =
   dispatch_event_with_audit ~base_path name event
 
+let dispatch_event_and_log ~base_path name event =
+  match dispatch_event ~base_path name event with
+  | Ok tr -> Ok tr
+  | Error e ->
+    let reason_label =
+      match e with
+      | Keeper_state_machine.Terminal_state _ -> "terminal_state"
+      | Keeper_state_machine.Invalid_transition _ -> "invalid_transition"
+    in
+    Log.Keeper.warn
+      "registry: dispatch_event failed name=%s error=%s"
+      name (Keeper_state_machine.transition_error_to_string e);
+    Prometheus.inc_counter
+      Prometheus.metric_keeper_dispatch_event_failures
+      ~labels:[("keeper", name); ("reason", reason_label)]
+      ();
+    Error e
+
+let dispatch_event_with_audit_and_log ~base_path ?snapshot ?events_fired ?selected_event name event =
+  match dispatch_event_with_audit ~base_path ?snapshot ?events_fired ?selected_event name event with
+  | Ok tr -> Ok tr
+  | Error e ->
+    let reason_label =
+      match e with
+      | Keeper_state_machine.Terminal_state _ -> "terminal_state"
+      | Keeper_state_machine.Invalid_transition _ -> "invalid_transition"
+    in
+    Log.Keeper.warn
+      "registry: dispatch_event_with_audit failed name=%s error=%s"
+      name (Keeper_state_machine.transition_error_to_string e);
+    Prometheus.inc_counter
+      Prometheus.metric_keeper_dispatch_event_failures
+      ~labels:[("keeper", name); ("reason", reason_label)]
+      ();
+    Error e
+
 let prepare_fiber_launch ~base_path name =
   (match get ~base_path name with
    | Some entry ->

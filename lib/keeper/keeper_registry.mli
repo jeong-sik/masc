@@ -474,6 +474,23 @@ val dispatch_event_with_audit :
   string -> Keeper_state_machine.event ->
   (Keeper_state_machine.transition_result, Keeper_state_machine.transition_error) result
 
+(** Like [dispatch_event], but logs and emits a Prometheus counter on
+    [Error] so silent-failure call sites do not lose the signal.
+    Same return type — callers that need the result can still match. *)
+val dispatch_event_and_log :
+  base_path:string -> string -> Keeper_state_machine.event ->
+  (Keeper_state_machine.transition_result, Keeper_state_machine.transition_error) result
+
+(** Like [dispatch_event_with_audit], but logs and emits a Prometheus
+    counter on [Error]. *)
+val dispatch_event_with_audit_and_log :
+  base_path:string ->
+  ?snapshot:Keeper_measurement.measurement_snapshot ->
+  ?events_fired:Keeper_state_machine.event list ->
+  ?selected_event:Keeper_state_machine.event ->
+  string -> Keeper_state_machine.event ->
+  (Keeper_state_machine.transition_result, Keeper_state_machine.transition_error) result
+
 (** Get the fine-grained phase of a keeper. *)
 val get_phase : base_path:string -> string -> Keeper_state_machine.phase option
 

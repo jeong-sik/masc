@@ -30,6 +30,10 @@ let known_cascades = List.map to_string all
 let default = Big_three
 let default_name = to_string default
 
+type runtime_name = Runtime_name of string
+
+let runtime_name_to_string (Runtime_name value) = value
+
 let of_string_opt (raw : string) : t option =
   match String.trim raw |> String.lowercase_ascii with
   | "" -> Some default
@@ -266,6 +270,8 @@ let resolve_live ?config_path raw =
 
 let canonicalize (raw : string) : string =
   canonicalize_with_catalog ~catalog:(catalog_names ()) raw
+
+let runtime_name_of_string raw = Runtime_name (canonicalize raw)
 
 let models_key_t t = to_string t ^ "_models"
 let temperature_key_t t = to_string t ^ "_temperature"

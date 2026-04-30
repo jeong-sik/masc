@@ -9,6 +9,8 @@ open Alcotest
 
 module AQ = Masc_mcp.Admission_queue
 
+let cascade_name raw = Masc_mcp.Keeper_cascade_profile.runtime_name_of_string raw
+
 (* ============================================================
    Passthrough Contract
    ============================================================ *)
@@ -16,7 +18,7 @@ module AQ = Masc_mcp.Admission_queue
 let test_with_permit_runs () =
   Eio_main.run (fun _env ->
     match AQ.with_permit ~priority:Interactive
-      ~keeper_name:"test" ~cascade_name:"test" (fun () -> 42) with
+      ~keeper_name:"test" ~cascade_name:(cascade_name "test") (fun () -> 42) with
     | Ok result -> check int "runs and returns" 42 result
     | Error _ -> fail "unexpected error")
 
@@ -24,7 +26,7 @@ let test_with_permit_propagates_exception () =
   Eio_main.run (fun _env ->
     match
       AQ.with_permit ~priority:Interactive
-        ~keeper_name:"test" ~cascade_name:"test"
+        ~keeper_name:"test" ~cascade_name:(cascade_name "test")
         (fun () -> failwith "boom")
     with
     | Ok _ -> fail "should raise"
@@ -34,7 +36,7 @@ let test_with_permit_propagates_exception () =
 let test_try_always_succeeds () =
   Eio_main.run (fun _env ->
     let result = AQ.try_with_permit ~priority:Interactive
-      ~keeper_name:"test" ~cascade_name:"test" (fun () -> 42) in
+      ~keeper_name:"test" ~cascade_name:(cascade_name "test") (fun () -> 42) in
     check (option int) "always Some" (Some 42) result)
 
 let test_concurrent_all_run () =
@@ -42,7 +44,7 @@ let test_concurrent_all_run () =
     let count = Atomic.make 0 in
     let run_one name =
       match AQ.with_permit ~priority:Proactive
-        ~keeper_name:name ~cascade_name:"test"
+        ~keeper_name:name ~cascade_name:(cascade_name "test")
         (fun () ->
           ignore (Atomic.fetch_and_add count 1);
           Eio.Fiber.yield ())
@@ -91,7 +93,7 @@ let test_wait_timeout_passthrough_no_leak () =
     AQ.reset_for_test ~max_slots:1;
     let ran = ref false in
     (match AQ.with_permit ~wait_timeout_sec:0.01 ~priority:Background
-      ~keeper_name:"timed-out" ~cascade_name:"test"
+      ~keeper_name:"timed-out" ~cascade_name:(cascade_name "test")
       (fun () -> ran := true)
     with
     | Ok () -> check bool "wait timeout ignored in passthrough" true !ran
@@ -160,7 +162,7 @@ let test_with_permit_releases_inflight_gauge () =
         "masc_inference_queue_inflight" ()
     in
     (match AQ.with_permit ~priority:Interactive
-      ~keeper_name:"metric-test" ~cascade_name:"test"
+      ~keeper_name:"metric-test" ~cascade_name:(cascade_name "test")
       (fun () -> ())
     with
     | Ok () -> ()
@@ -178,8 +180,8 @@ let test_with_permit_releases_on_exception () =
         "masc_inference_queue_inflight" ()
     in
     (match
-       AQ.with_permit ~priority:Interactive
-         ~keeper_name:"metric-test-exn" ~cascade_name:"test"
+         AQ.with_permit ~priority:Interactive
+         ~keeper_name:"metric-test-exn" ~cascade_name:(cascade_name "test")
          (fun () -> failwith "boom")
      with
      | Ok _ -> fail "should raise"
@@ -198,7 +200,7 @@ let test_with_permit_increments_acquired_counter () =
         "masc_inference_queue_acquired_total" ()
     in
     (match AQ.with_permit ~priority:Interactive
-      ~keeper_name:"counter-test" ~cascade_name:"test"
+      ~keeper_name:"counter-test" ~cascade_name:(cascade_name "test")
       (fun () -> ())
     with
     | Ok () -> ()
@@ -216,7 +218,7 @@ let test_try_with_permit_releases_inflight_gauge () =
         "masc_inference_queue_inflight" ()
     in
     let _ : int option = AQ.try_with_permit ~priority:Interactive
-      ~keeper_name:"try-metric" ~cascade_name:"test"
+      ~keeper_name:"try-metric" ~cascade_name:(cascade_name "test")
       (fun () -> 1)
     in
     let after =

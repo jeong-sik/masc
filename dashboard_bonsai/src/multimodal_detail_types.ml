@@ -14,10 +14,16 @@ open! Core
 type detail =
   { id : string
   ; kind : string
+  ; payload : Yojson.Safe.t
+      (* Tier F5 — raw payload sub-tree retained so kind-specific
+         renderers can introspect (image data_url, audio url,
+         code text + language, doc text). Older callers can keep
+         using [payload_pretty] as a generic JSON dump fallback. *)
   ; payload_pretty : string
       (* Whole [payload] sub-tree pretty-printed as JSON. Server
          returns this verbatim (lazy-decoded blobs are stringified
-         server-side); F2 does not interpret kind-specific shapes. *)
+         server-side); used as fallback when the kind-specific
+         renderer cannot extract a preview. *)
   ; metadata_pretty : string
       (* Whole [metadata] sub-tree pretty-printed as JSON for
          operator inspection. *)
@@ -65,9 +71,8 @@ let detail_of_yojson (json : Yojson.Safe.t) : detail =
     | `String s -> s
     | _ -> ""
   in
-  let payload_pretty =
-    pretty_of (Yojson.Safe.Util.member "payload" json)
-  in
+  let payload = Yojson.Safe.Util.member "payload" json in
+  let payload_pretty = pretty_of payload in
   let metadata_pretty =
     pretty_of (Yojson.Safe.Util.member "metadata" json)
   in
@@ -81,6 +86,7 @@ let detail_of_yojson (json : Yojson.Safe.t) : detail =
   in
   { id = string_field "id"
   ; kind = string_field "kind"
+  ; payload
   ; payload_pretty
   ; metadata_pretty
   ; created_by

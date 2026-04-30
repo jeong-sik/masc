@@ -298,7 +298,6 @@
    shutdown_hooks
    spawn
    sse
-   sse_presence
    streamable_http
    subsystem_health
    subscriptions

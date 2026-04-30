@@ -33,11 +33,17 @@ val for_json : name:string -> Yojson.Safe.t -> t
 
 (** Resolve a temperature value with cascade config priority.
     Returns cascade config value if present, otherwise calls [fallback]. *)
-val resolve_temperature : cascade_name:string -> fallback:(unit -> float) -> float
+val resolve_temperature :
+  cascade_name:Keeper_cascade_profile.runtime_name ->
+  fallback:(unit -> float) ->
+  float
 
 (** Resolve a max_tokens value with cascade config priority.
     Returns cascade config value if present, otherwise calls [fallback]. *)
-val resolve_max_tokens : cascade_name:string -> fallback:(unit -> int) -> int
+val resolve_max_tokens :
+  cascade_name:Keeper_cascade_profile.runtime_name ->
+  fallback:(unit -> int) ->
+  int
 
 (** Clamp max_tokens to provider ceiling.
 

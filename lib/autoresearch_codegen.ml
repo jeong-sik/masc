@@ -137,15 +137,18 @@ let generate_code_change ~goal ~baseline ~lower_is_better ~history ~insights
   end else
   let prompt = build_code_change_prompt ~goal ~baseline ~lower_is_better ~history ~insights
     ~file_content ~target_file in
+  let inference_cascade_name =
+    Keeper_cascade_profile.Runtime_name "autoresearch"
+  in
   match
     Masc_oas_bridge.run_with_caller
       ~caller:Env_config_oas_bridge.Autoresearch_codegen (fun () ->
       Oas_worker.run_named ~cascade_name:"autoresearch"
         ~goal:prompt ~max_turns:1
         ~temperature:(Cascade_inference.resolve_temperature
-          ~cascade_name:"autoresearch" ~fallback:(fun () -> 0.7))
+          ~cascade_name:inference_cascade_name ~fallback:(fun () -> 0.7))
         ~max_tokens:(Cascade_inference.resolve_max_tokens
-          ~cascade_name:"autoresearch" ~fallback:(fun () -> 4096))
+          ~cascade_name:inference_cascade_name ~fallback:(fun () -> 4096))
         ~approval:Approval_callbacks.auto_approve
         ()
     )

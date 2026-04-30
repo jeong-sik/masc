@@ -68,13 +68,19 @@ let for_cascade ~(name : string) : t =
       empty
 
 (** Resolve a temperature value: cascade config -> fallback. *)
-let resolve_temperature ~(cascade_name : string) ~(fallback : unit -> float) : float =
+let resolve_temperature
+    ~(cascade_name : Keeper_cascade_profile.runtime_name)
+    ~(fallback : unit -> float) : float =
+  let cascade_name = Keeper_cascade_profile.runtime_name_to_string cascade_name in
   match (for_cascade ~name:cascade_name).temperature with
   | Some t -> t
   | None -> fallback ()
 
 (** Resolve a max_tokens value: cascade config -> fallback. *)
-let resolve_max_tokens ~(cascade_name : string) ~(fallback : unit -> int) : int =
+let resolve_max_tokens
+    ~(cascade_name : Keeper_cascade_profile.runtime_name)
+    ~(fallback : unit -> int) : int =
+  let cascade_name = Keeper_cascade_profile.runtime_name_to_string cascade_name in
   match (for_cascade ~name:cascade_name).max_tokens with
   | Some t -> t
   | None -> fallback ()

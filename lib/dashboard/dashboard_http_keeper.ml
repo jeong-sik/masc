@@ -1485,7 +1485,12 @@ let keeper_config_json (config : Coord.config) (name : string)
           ("cooldown_sec", `Int m.proactive.cooldown_sec);
         ]
       in
-      let drift = drift_surface_json () in
+      let drift =
+        let toml_defaults =
+          Keeper_types_profile.load_keeper_profile_defaults name
+        in
+        drift_surface_json ~unknown_toml_keys:toml_defaults.unknown_toml_keys
+      in
       let handoff =
         `Assoc [
           ("auto", `Bool m.auto_handoff);

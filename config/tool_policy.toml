@@ -98,11 +98,23 @@ tools = ["masc_status", "masc_web_search"]
 # Coordination: external agent coordination tools.
 # Only needed by keepers that manage tasks across agents.
 [masc.coordination]
-tools = ["masc_tasks", "masc_claim_next", "masc_transition", "masc_add_task", "masc_batch_add_tasks", "masc_agents", "masc_dashboard", "masc_agent_card", "masc_tool_help"]
+tools = [
+  "masc_tasks", "masc_claim_next", "masc_transition", "masc_add_task",
+  "masc_batch_add_tasks", "masc_agents", "masc_dashboard",
+  "masc_agent_card", "masc_tool_help",
+  "masc_join", "masc_leave", "masc_who", "masc_heartbeat",
+  "masc_messages", "masc_broadcast",
+]
 
 # Full core: backward compat alias (essential + coordination).
 [masc.core]
-tools = ["masc_status", "masc_tasks", "masc_claim_next", "masc_transition", "masc_add_task", "masc_batch_add_tasks", "masc_agents", "masc_dashboard", "masc_agent_card", "masc_tool_help", "masc_web_search"]
+tools = [
+  "masc_status", "masc_tasks", "masc_claim_next", "masc_transition",
+  "masc_add_task", "masc_batch_add_tasks", "masc_agents", "masc_dashboard",
+  "masc_agent_card", "masc_tool_help", "masc_web_search",
+  "masc_join", "masc_leave", "masc_who", "masc_heartbeat",
+  "masc_messages", "masc_broadcast",
+]
 
 [masc.dispatch]
 tools = [

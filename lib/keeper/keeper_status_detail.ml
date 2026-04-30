@@ -1097,7 +1097,12 @@ let handle_keeper_status ctx args : tool_result =
                then `Null
                else `String m.runtime.proactive_rt.last_preview);
            ]);
-           ("drift", drift_surface_json ());
+           ("drift",
+             let toml_defaults =
+               Keeper_types_profile.load_keeper_profile_defaults name
+             in
+             drift_surface_json
+               ~unknown_toml_keys:toml_defaults.unknown_toml_keys);
            ("policy", `Assoc [
              ("voice_tools_available", `Bool (List.mem "keeper_voice_speak" allowed_tools));
              ("sandbox_profile",

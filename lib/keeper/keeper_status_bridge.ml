@@ -7,14 +7,11 @@ let string_list_to_json values =
 
 
 
-let drift_surface_json () =
+let drift_surface_json ~unknown_toml_keys =
   `Assoc
     [
-      ("status", `String "unwired");
-      ("enabled", `Null);
-      ("min_turn_gap", `Null);
-      ("count_total", `Null);
-      ("last_reason", `Null);
+      ("unknown_toml_keys", string_list_to_json unknown_toml_keys);
+      ("unknown_toml_keys_count", `Int (List.length unknown_toml_keys));
     ]
 
 let auto_execution_session_surface_json () =

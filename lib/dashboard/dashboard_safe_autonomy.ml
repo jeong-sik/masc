@@ -1031,6 +1031,36 @@ let write_artifacts ~(config : Coord.config) payload =
   if history_appended then Fs_compat.append_jsonl history_path payload;
   { latest_path; history_path; fingerprint; history_appended }
 
+let read_history_scores ~(config : Coord.config) : float list =
+  let _dir, _latest_path, history_path = artifact_paths config in
+  if not (Fs_compat.file_exists history_path) then []
+  else
+    let entries = Fs_compat.load_jsonl history_path in
+    let scores =
+      List.filter_map
+        (fun json ->
+           match json with
+           | `Assoc fields ->
+               (match List.assoc_opt "summary" fields with
+                | Some (`Assoc summary_fields) ->
+                    (match List.assoc_opt "global_score" summary_fields with
+                     | Some (`Float f) -> Some f
+                     | Some (`Int i) -> Some (float_of_int i)
+                     | _ -> None)
+                | _ -> None)
+           | _ -> None)
+        entries
+    in
+    let len = List.length scores in
+    if len <= 15 then scores
+    else
+      let rec drop n = function
+        | [] -> []
+        | _ :: xs when n > 0 -> drop (n - 1) xs
+        | xs -> xs
+      in
+      drop (len - 15) scores
+
 let global_status_of_score ~has_fail score =
   if has_fail || score < 60.0 then Fail
   else if score < 85.0 then Warn
@@ -1150,6 +1180,7 @@ let json ~(config : Coord.config) () =
     timeline_entries_json ~alias_to_keeper ~activity_items ~approval_by_keeper
       ~keepers:keeper_snapshots
   in
+  let history_scores = read_history_scores ~config in
   let payload =
     `Assoc
       [
@@ -1195,6 +1226,7 @@ let json ~(config : Coord.config) () =
                 (base_evidence_ref "route" "metrics" "/metrics");
             ] );
         ("tool_quality_live", live_tool_payload);
+        ("history", `List (List.map (fun s -> `Float s) history_scores));
       ]
   in
   let artifacts = write_artifacts ~config payload in

@@ -85,6 +85,7 @@ interface SafeAutonomyData {
   findings: FindingItem[]
   timeline: TimelineItem[]
   artifacts: Record<string, unknown>
+  history: number[]
 }
 
 const safeAutonomy: AsyncResource<SafeAutonomyData> = createAsyncResource()
@@ -186,6 +187,10 @@ function normalizeTimelineItem(value: unknown): TimelineItem {
 
 function normalizePayload(raw: unknown): SafeAutonomyData {
   const data = isRecord(raw) ? raw : {}
+  const historyRaw = Array.isArray(data.history) ? data.history : []
+  const history = historyRaw
+    .map((v) => (typeof v === 'number' ? v : undefined))
+    .filter((v): v is number => v !== undefined)
   return {
     generated_at: asString(data.generated_at, ''),
     summary: normalizeSummary(data.summary),
@@ -194,6 +199,7 @@ function normalizePayload(raw: unknown): SafeAutonomyData {
     findings: asRecordArray(data.findings).map(normalizeFinding),
     timeline: asRecordArray(data.timeline).map(normalizeTimelineItem),
     artifacts: isRecord(data.artifacts) ? data.artifacts : {},
+    history,
   }
 }
 
@@ -305,6 +311,40 @@ function FindingsList({ findings }: { findings: FindingItem[] }) {
   `
 }
 
+function SafeAutonomyTrend({ history }: { history: number[] }) {
+  if (history.length === 0) {
+    return html`<${EmptyState} message="충분한 history가 쌓이면 trend가 표시됩니다." compact />`
+  }
+  const min = Math.min(...history)
+  const max = Math.max(...history)
+  const range = max - min || 1
+  const threshold = 78
+  return html`
+    <div class="space-y-2">
+      <div class="flex items-end gap-1 h-16">
+        ${history.map((score) => {
+          const pct = Math.max(0, Math.min(100, ((score - min) / range) * 100))
+          const belowThreshold = score < threshold
+          return html`
+            <div
+              class="flex-1 rounded-sm ${belowThreshold
+                ? 'bg-[var(--bad-30)]'
+                : 'bg-[var(--ok-30)]'}"
+              style=${`height: ${pct}%`}
+              title=${`score: ${score.toFixed(1)}`}
+            />
+          `
+        })}
+      </div>
+      <div class="flex items-center justify-between text-3xs text-[var(--color-fg-muted)]">
+        <span>min ${min.toFixed(1)}</span>
+        <span class="font-semibold text-[var(--color-fg-secondary)]">current ${history[history.length - 1]!.toFixed(1)}</span>
+        <span>max ${max.toFixed(1)}</span>
+      </div>
+    </div>
+  `
+}
+
 function TimelineList({ timeline }: { timeline: TimelineItem[] }) {
   if (timeline.length === 0) {
     return html`<${EmptyState} message="최근 타임라인 이벤트가 없습니다." compact />`
@@ -388,6 +428,10 @@ export function SafeAutonomyPanel() {
                     ? html`<${EmptyState} message="표시할 keeper snapshot이 없습니다." compact />`
                     : data.per_keeper.map(item => html`<${KeeperCard} key=${item.name} item=${item} />`)}
                 </div>
+              <//>
+
+              <${Card} title="글로벌 스코어 트렌드" class="section">
+                <${SafeAutonomyTrend} history=${data.history} />
               <//>
 
               <div class="grid grid-cols-1 gap-4 xl:grid-cols-2">

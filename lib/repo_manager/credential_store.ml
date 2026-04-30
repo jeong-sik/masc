@@ -5,10 +5,31 @@ let ( let* ) = Result.bind
 let creds_toml_path base_path =
   Filename.concat base_path ".masc/config/credentials.toml"
 
+let default_credential =
+  {
+    id = "default";
+    cred_type = Local;
+    username = "default";
+    gh_config_dir = None;
+    ssh_key_path = None;
+    gpg_key_id = None;
+  }
+
+let ensure_dir path =
+  let rec loop dir =
+    if dir = "" || dir = "." || Sys.file_exists dir then ()
+    else begin
+      loop (Filename.dirname dir);
+      try Unix.mkdir dir 0o755
+      with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
+    end
+  in
+  loop path
+
 let credential_type_of_string = function
-  | "Github" -> Ok Github
-  | "Gitlab" -> Ok Gitlab
-  | "Local" -> Ok Local
+  | "Github" | "github" -> Ok Github
+  | "Gitlab" | "gitlab" -> Ok Gitlab
+  | "Local" | "local" -> Ok Local
   | s -> Error (Printf.sprintf "Unknown credential type: %s" s)
 
 let string_of_credential_type = function
@@ -154,9 +175,7 @@ let load_all ~base_path =
 let save_all ~base_path (creds : credential list) =
   let path = creds_toml_path base_path in
   let config_dir = Filename.dirname path in
-  (try
-     if not (Sys.file_exists config_dir) then Sys.mkdir config_dir 0o755
-   with Sys_error _ -> ());
+  ensure_dir config_dir;
   let cred_entries =
     List.map (fun (cred : credential) -> (cred.id, toml_of_credential cred)) creds
   in
@@ -174,6 +193,7 @@ let find ~base_path id =
   let* creds = load_all ~base_path in
   match List.find_opt (fun (c : credential) -> String.equal c.id id) creds with
   | Some cred -> Ok cred
+  | None when String.equal id default_credential.id -> Ok default_credential
   | None -> Error (Printf.sprintf "Credential not found: %s" id)
 
 let add ~base_path (cred : credential) =

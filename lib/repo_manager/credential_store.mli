@@ -1,5 +1,10 @@
 open Repo_manager_types
 
+val default_credential : credential
+(** Local unauthenticated credential used for public/local repositories when a
+    repository explicitly references [default] and no configured credential is
+    present. *)
+
 val load_all : base_path:string -> (credential list, string) result
 (** [load_all ~base_path] loads all credentials from
     [.masc/config/credentials.toml]. *)

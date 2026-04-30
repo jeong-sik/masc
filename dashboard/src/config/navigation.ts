@@ -25,12 +25,15 @@ type SurfaceSectionId =
   // workspace
   | 'board'
   | 'planning'       // Phase 1: absorbs goals
+  | 'repositories'   // Multi-repository cockpit and keeper access mapping
   | 'collab-mvp'     // Track 1: CRDT/editor/git graph/claim queue contract
   | 'verification'   // CDAL follow-up (#7531): Mission detail verification table
   // lab
   | 'tools'
   | 'autoresearch'
   | 'harness'
+  // code (Stage 5 IDE plane — shell only in PR-1, 4-pane content in PR-2+)
+  | 'ide-shell'
 
 type NonHomeTabId = Exclude<TabId, 'overview' | 'logs'>
 
@@ -114,6 +117,15 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
     defaultTab: 'lab',
     defaultParams: { section: 'tools' },
     tabs: ['lab'],
+  },
+  {
+    id: 'code',
+    label: '코드',
+    icon: '💻',
+    description: 'Keeper 협업 코드 review IDE — 파일 트리, blame-by-keeper, 라인 anchored 대화, activity 스트림',
+    defaultTab: 'code',
+    defaultParams: { section: 'ide-shell' },
+    tabs: ['code'],
   },
   {
     id: 'logs',
@@ -238,6 +250,12 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       params: { section: 'planning' },
     },
     {
+      id: 'repositories',
+      label: '저장소',
+      description: '등록 저장소, 브랜치, credential, keeper 접근 범위를 저장소별로 봅니다.',
+      params: { section: 'repositories' },
+    },
+    {
       id: 'collab-mvp',
       label: '협업 MVP',
       description: 'Yjs/CodeMirror substrate, Git graph, TODO claim, turn queue, telemetry contract를 한 화면에서 봅니다.',
@@ -268,6 +286,14 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       label: '세이프티 하네스',
       description: '평가 모델, 압축 전 상태, 세대 교체 모니터링 상태.',
       params: { section: 'harness' },
+    },
+  ],
+  code: [
+    {
+      id: 'ide-shell',
+      label: '코드 IDE',
+      description: 'Keeper 협업 코드 review IDE shell. 4-pane (EXPLORER · 에디터 · CONVERSATION · ACTIVITY) 는 후속 PR에서 채워집니다.',
+      params: { section: 'ide-shell' },
     },
   ],
 }

@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import type { GoalTreeNode, GoalTreeTask } from '../../types'
-import { filterGoalTree, filterGoalTreeByPhase } from './goal-tree'
+import {
+  filterGoalTree,
+  filterGoalTreeByPhase,
+  goalFsmObservationLabel,
+  goalFsmStateKindLabel,
+  goalFsmStagnationLabel,
+} from './goal-tree'
 
 function makeTask(overrides: Partial<GoalTreeTask> = {}): GoalTreeTask {
   return {
@@ -28,6 +34,14 @@ function makeNode(overrides: Partial<GoalTreeNode> = {}): GoalTreeNode {
     status_color: '#fff',
     phase: 'executing',
     phase_color: '#0ea5e9',
+    goal_fsm: {
+      state: 'executing',
+      source: 'goal.phase',
+      state_kind: 'executing',
+      next_actions: ['request_complete', 'pause', 'operator_block', 'drop'],
+      activity_observation: 'goal_metadata',
+      stagnation_status: 'recent',
+    },
     health: 'on_track',
     health_color: '#4ade80',
     badges: [],
@@ -58,6 +72,8 @@ function makeNode(overrides: Partial<GoalTreeNode> = {}): GoalTreeNode {
     child_count: 0,
     last_activity_at: '2026-04-17T00:00:00Z',
     stagnation_seconds: 0,
+    activity_observation: 'goal_metadata',
+    stagnation_status: 'recent',
     linked_keeper_names: [],
     pending_approval_count: 0,
     infra_risk_count: 0,
@@ -196,6 +212,20 @@ describe('filterGoalTree', () => {
     })
     const result = filterGoalTree([root], 'anything')
     expect(result).toHaveLength(0)
+  })
+})
+
+describe('goal FSM labels', () => {
+  it('labels FSM state kinds separately from coarse health', () => {
+    expect(goalFsmStateKindLabel('verification_gate')).toBe('검증 게이트')
+    expect(goalFsmStateKindLabel('approval_gate')).toBe('승인 게이트')
+    expect(goalFsmStateKindLabel('executing')).toBe('실행')
+  })
+
+  it('labels metadata-only freshness as unobserved instead of stalled', () => {
+    expect(goalFsmObservationLabel('goal_metadata')).toBe('goal metadata only')
+    expect(goalFsmStagnationLabel('unobserved')).toBe('unobserved')
+    expect(goalFsmStagnationLabel('stalled')).toBe('stalled')
   })
 })
 

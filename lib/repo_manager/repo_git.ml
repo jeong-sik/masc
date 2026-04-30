@@ -1,45 +1,87 @@
 open Repo_manager_types
 
+let ensure_dir path =
+  let rec loop dir =
+    if dir = "" || dir = "." || Sys.file_exists dir then ()
+    else begin
+      loop (Filename.dirname dir);
+      try Unix.mkdir dir 0o755
+      with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
+    end
+  in
+  loop path
+
+let merge_env overrides =
+  let keys = List.map fst overrides in
+  let has_key entry =
+    match String.index_opt entry '=' with
+    | None -> false
+    | Some idx ->
+        let key = String.sub entry 0 idx in
+        List.exists (String.equal key) keys
+  in
+  let inherited =
+    Unix.environment ()
+    |> Array.to_list
+    |> List.filter (fun entry -> not (has_key entry))
+  in
+  Array.of_list
+    (List.map (fun (k, v) -> Printf.sprintf "%s=%s" k v) overrides
+     @ inherited)
+
 let env_of_credential credential =
+  let non_interactive =
+    [
+      ("GIT_TERMINAL_PROMPT", "0");
+      ("GIT_ASKPASS", "true");
+      ("SSH_ASKPASS", "true");
+    ]
+  in
   match credential.cred_type with
   | Github | Gitlab -> (
       match credential.gh_config_dir with
-      | Some dir -> [Printf.sprintf "GH_CONFIG_DIR=%s" dir]
-      | None -> [])
+      | Some dir -> ("GH_CONFIG_DIR", dir) :: non_interactive
+      | None -> non_interactive)
   | Local -> (
       match credential.ssh_key_path with
-      | Some key -> [Printf.sprintf "GIT_SSH_COMMAND=ssh -i %s" key]
-      | None -> [])
+      | Some key -> ("GIT_SSH_COMMAND", Printf.sprintf "ssh -i %S" key) :: non_interactive
+      | None -> non_interactive)
 
-let run_git ~cwd ?(env = []) args =
-  let env_prefix =
-    if env = [] then "" else String.concat " " env ^ " "
+let split_lines text =
+  if text = "" then []
+  else String.split_on_char '\n' text |> List.filter (fun line -> line <> "")
+
+let run_git ~cwd ?(env = []) args : (string list, string) result =
+  let argv = "git" :: "-C" :: cwd :: args in
+  let envp = merge_env env in
+  let raw_source = String.concat " " (List.map Filename.quote argv) in
+  let status, stdout, stderr =
+    Masc_exec.Exec_gate.run_argv_with_status_split
+      ~actor:"repo-manager/git" ~raw_source ~summary:"repo manager git"
+      ~timeout_sec:300.0 ~env:envp argv
   in
-  let cmd =
-    Printf.sprintf "%sgit -C %S %s" env_prefix cwd
-      (String.concat " " (List.map Filename.quote args))
-  in
-  let ic = Unix.open_process_in cmd in
-  Fun.protect
-    ~finally:(fun () -> close_in_noerr ic)
-    (fun () ->
-      let rec loop acc =
-        match input_line ic with
-        | line -> loop (line :: acc)
-        | exception End_of_file -> List.rev acc
+  match status with
+  | Unix.WEXITED 0 -> Ok (split_lines stdout)
+  | _ ->
+      let status_text =
+        match status with
+        | Unix.WEXITED code -> Printf.sprintf "exit %d" code
+        | Unix.WSIGNALED signal -> Printf.sprintf "signal %d" signal
+        | Unix.WSTOPPED signal -> Printf.sprintf "stopped %d" signal
       in
-      let lines = loop [] in
-      match Unix.close_process_in ic with
-      | Unix.WEXITED 0 -> Ok lines
-      | _ -> Error (Printf.sprintf "git command failed: %s" cmd))
+      let detail =
+        let stderr = String.trim stderr in
+        let stdout = String.trim stdout in
+        if stderr <> "" then status_text ^ ": " ^ stderr
+        else if stdout <> "" then status_text ^ ": " ^ stdout
+        else status_text
+      in
+      Error (Printf.sprintf "git %s failed: %s" (String.concat " " args) detail)
 
 let clone ~repository ~credential =
   let env = env_of_credential credential in
   let parent_dir = Filename.dirname repository.local_path in
-  (try
-     if not (Sys.file_exists parent_dir) then
-       Sys.mkdir parent_dir 0o755
-   with Sys_error _ -> ());
+  ensure_dir parent_dir;
   match
     run_git ~cwd:parent_dir ~env
       ["clone"; repository.url; repository.local_path]
@@ -60,14 +102,13 @@ let fetch ~repository ~credential : (string list, string) result =
       | Error msg -> Error msg)
 
 let checkout_worktree ~repository ~branch =
-  let worktree_path =
-    Filename.concat repository.local_path (Printf.sprintf "_worktrees/%s" branch)
+  let safe_branch_path =
+    String.map (function '/' | ':' | '\\' -> '-' | c -> c) branch
   in
-  (try
-     if not (Sys.file_exists worktree_path) then
-       let parent = Filename.dirname worktree_path in
-       if not (Sys.file_exists parent) then Sys.mkdir parent 0o755
-   with Sys_error _ -> ());
+  let worktree_path =
+    Filename.concat repository.local_path (Printf.sprintf "_worktrees/%s" safe_branch_path)
+  in
+  ensure_dir (Filename.dirname worktree_path);
   match
     run_git ~cwd:repository.local_path
       ["worktree"; "add"; worktree_path; branch]

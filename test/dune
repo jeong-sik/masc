@@ -121,6 +121,7 @@
         test_credential_store
         test_credential_materializer
         test_keeper_repo_mapping
+        test_credential_provider_bridge
         test_repo_sync
         test_exec_core
         test_exec_dispatch
@@ -308,6 +309,7 @@
           test_credential_store
           test_credential_materializer
           test_keeper_repo_mapping
+          test_credential_provider_bridge
           test_repo_sync
           test_exec_core
           test_exec_dispatch

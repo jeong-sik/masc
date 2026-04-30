@@ -33,6 +33,23 @@ let with_temp_base_path f =
       rm_rf dir)
     (fun () -> f dir)
 
+let with_empty_temp_base_path f =
+  let dir = Filename.temp_file "mapping_test_empty" "" in
+  Sys.remove dir;
+  Unix.mkdir dir 0o755;
+  Fun.protect
+    ~finally:(fun () ->
+      let rec rm_rf path =
+        if Sys.file_exists path then
+          if Sys.is_directory path then begin
+            Sys.readdir path |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+            Unix.rmdir path
+          end else
+            Sys.remove path
+      in
+      rm_rf dir)
+    (fun () -> f dir)
+
 let write_mapping base_path keeper_id repo_ids =
   let path = Filename.concat base_path ".masc/config/keeper_repo_mappings.toml" in
   let entries =
@@ -84,7 +101,7 @@ let test_is_allowed_wildcard () =
 let test_is_allowed_no_mapping () =
   with_temp_base_path (fun base_path ->
       Alcotest.(check bool)
-        "no mapping means not allowed" false
+        "no mapping preserves legacy access" true
         (Keeper_repo_mapping.is_allowed ~keeper_id:"unknown" ~repository_id:"repo-a" ~base_path))
 
 let test_validate_access_allowed () =
@@ -134,7 +151,7 @@ let test_apply_mapping_no_mapping () =
       let filtered =
         Keeper_repo_mapping.apply_mapping ~keeper_id:"unknown" ~base_path ~repositories:repos
       in
-      Alcotest.(check int) "no mapping returns empty" 0 (List.length filtered))
+      Alcotest.(check int) "no mapping returns all for compatibility" 2 (List.length filtered))
 
 let test_allowed_repositories () =
   with_temp_base_path (fun base_path ->
@@ -152,6 +169,20 @@ let test_allowed_repositories_no_mapping () =
       | Ok _ -> Alcotest.fail "expected Error"
       | Error msg ->
           Alcotest.(check bool) "mentions no mapping" true (contains_substring msg "No mapping"))
+
+let test_save_mapping_creates_config_dir () =
+  with_empty_temp_base_path (fun base_path ->
+      let mapping =
+        { keeper_id = "keeper-new"; repository_ids = [ "repo-a"; "repo-b" ] }
+      in
+      match Keeper_repo_mapping.save_mapping ~base_path mapping with
+      | Error e -> Alcotest.fail ("save_mapping failed: " ^ e)
+      | Ok () -> (
+          match Keeper_repo_mapping.allowed_repositories ~keeper_id:"keeper-new" ~base_path with
+          | Error e -> Alcotest.fail ("allowed_repositories failed: " ^ e)
+          | Ok ids ->
+              Alcotest.(check int) "saved count" 2 (List.length ids);
+              Alcotest.(check bool) "has repo-a" true (List.mem "repo-a" ids)))
 
 let () =
   Alcotest.run "Keeper_repo_mapping"
@@ -177,5 +208,9 @@ let () =
         [
           Alcotest.test_case "returns list" `Quick test_allowed_repositories;
           Alcotest.test_case "no mapping" `Quick test_allowed_repositories_no_mapping;
+        ] );
+      ( "save_mapping",
+        [
+          Alcotest.test_case "creates config dir" `Quick test_save_mapping_creates_config_dir;
         ] );
     ]

@@ -5,6 +5,17 @@ let ( let* ) = Result.bind
 let mappings_toml_path base_path =
   Filename.concat base_path ".masc/config/keeper_repo_mappings.toml"
 
+let ensure_dir path =
+  let rec loop dir =
+    if dir = "" || dir = "." || Sys.file_exists dir then ()
+    else begin
+      loop (Filename.dirname dir);
+      try Unix.mkdir dir 0o755
+      with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
+    end
+  in
+  loop path
+
 let mapping_of_toml toml keeper_id =
   let path field = ["mapping"; keeper_id; field] in
   let* repository_ids =
@@ -62,6 +73,59 @@ let allowed_repositories ~keeper_id ~base_path =
   let* mapping = find_mapping ~base_path keeper_id in
   Ok mapping.repository_ids
 
+(** Resolve the credentials currently mapped to [keeper_id], by looking
+    through every repository the keeper is allowed to access and
+    extracting each repository's [credential_id] into a unique list of
+    [credential] records.
+
+    Returns [Ok []] when the keeper has no mapping.  This is the
+    backward-compatibility branch consumed by the credential provider
+    bridge (RFC-0019 PR-A): a keeper without a mapping continues to use
+    the legacy [Keeper_gh_env.keeper_binding] resolver.
+
+    Returns [Error _] only on infrastructure failure (mapping store
+    unreadable, repository not found, credential not found).  Absence of
+    mapping is not an error. *)
+let credentials_for_keeper ~base_path ~keeper_id =
+  match find_mapping ~base_path keeper_id with
+  | Error _ -> Ok []
+  | Ok mapping ->
+      let* repos = Repo_store.load_all ~base_path in
+      let mapped_repos =
+        if List.exists (String.equal "*") mapping.repository_ids then
+          repos
+        else
+          List.filter
+            (fun (r : repository) ->
+              List.exists (String.equal r.id) mapping.repository_ids)
+            repos
+      in
+      (* Unique credential ids preserving first-seen order, so a keeper
+         with several repos pointing at the same credential collapses to
+         a single entry; the bridge can then dispatch deterministically. *)
+      let cred_ids =
+        List.fold_left
+          (fun acc (r : repository) ->
+            if List.mem r.credential_id acc then acc
+            else r.credential_id :: acc)
+          []
+          mapped_repos
+        |> List.rev
+      in
+      let rec resolve_creds acc = function
+        | [] -> Ok (List.rev acc)
+        | id :: rest -> (
+            match Credential_store.find ~base_path id with
+            | Ok c -> resolve_creds (c :: acc) rest
+            | Error msg ->
+                Error
+                  (Printf.sprintf
+                     "credential %s referenced by mapping for keeper %s \
+                      not found in credential store: %s"
+                     id keeper_id msg))
+      in
+      resolve_creds [] cred_ids
+
 let is_allowed ~keeper_id ~repository_id ~base_path =
   match find_mapping ~base_path keeper_id with
   | Error _ -> true
@@ -86,13 +150,15 @@ let save_all ~base_path mappings =
   in
   let toml = Otoml.TomlTable [("mapping", Otoml.TomlTable table)] in
   let dir = Filename.dirname path in
-  (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  ensure_dir dir;
   let content = Otoml.Printer.to_string toml in
-  let oc = open_out path in
-  Fun.protect
-    ~finally:(fun () -> close_out_noerr oc)
-    (fun () -> output_string oc content);
-  Ok ()
+  try
+    let oc = open_out path in
+    Fun.protect
+      ~finally:(fun () -> close_out_noerr oc)
+      (fun () -> output_string oc content);
+    Ok ()
+  with Sys_error msg -> Error msg
 
 let save_mapping ~base_path mapping =
   let* mappings = load_all ~base_path in

@@ -2,6 +2,22 @@ import { describe, expect, it } from 'vitest'
 
 import { SECTION_REDIRECTS, defaultParamsForTab, normalizeRouteParams, visibleSectionItemsForTab } from './navigation'
 
+describe('code (IDE plane) navigation', () => {
+  it('exposes a single ide-shell section under the code surface (Phase 1, PR-1)', () => {
+    expect(defaultParamsForTab('code')).toEqual({ section: 'ide-shell' })
+
+    const codeSections = visibleSectionItemsForTab('code')
+
+    expect(codeSections.map(item => item.id)).toEqual(['ide-shell'])
+    expect(codeSections.map(item => item.label)).toEqual(['코드 IDE'])
+  })
+
+  it('normalizes unknown code section to default ide-shell', () => {
+    const result = normalizeRouteParams('code', { section: 'bogus' })
+    expect(result.section).toBe('ide-shell')
+  })
+})
+
 describe('lab navigation', () => {
   it('contains only research surfaces after Phase 1 reorg', () => {
     expect(defaultParamsForTab('lab')).toEqual({ section: 'tools' })

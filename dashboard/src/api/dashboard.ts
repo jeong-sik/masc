@@ -956,6 +956,27 @@ function decodeGoalTreeTask(raw: unknown): GoalTreeTask | null {
   }
 }
 
+function decodeGoalFsmProjection(raw: unknown, phase: string) {
+  if (!isRecord(raw)) {
+    return {
+      state: phase,
+      source: 'goal.phase',
+      state_kind: phase,
+      next_actions: [],
+      activity_observation: 'goal_metadata',
+      stagnation_status: 'recent',
+    }
+  }
+  return {
+    state: asString(raw.state, phase),
+    source: asString(raw.source, 'goal.phase'),
+    state_kind: asString(raw.state_kind, phase),
+    next_actions: asStringArray(raw.next_actions),
+    activity_observation: asString(raw.activity_observation, 'goal_metadata'),
+    stagnation_status: asString(raw.stagnation_status, 'recent'),
+  }
+}
+
 function decodeGoalKeeperTrustLatestEvent(raw: unknown): GoalKeeperTrustLatestEvent | null {
   if (!isRecord(raw)) return null
   const kind = asString(raw.kind)
@@ -1034,6 +1055,7 @@ function decodeGoalTreeNode(raw: unknown): GoalTreeNode | null {
     status_color: asString(raw.status_color, ''),
     phase: asString(raw.phase, 'unknown'),
     phase_color: asString(raw.phase_color, ''),
+    goal_fsm: decodeGoalFsmProjection(raw.goal_fsm, asString(raw.phase, 'unknown')),
     health: asString(raw.health, 'at_risk'),
     health_color: asString(raw.health_color, ''),
     badges: asStringArray(raw.badges),
@@ -1057,6 +1079,8 @@ function decodeGoalTreeNode(raw: unknown): GoalTreeNode | null {
     child_count: asInt(raw.child_count) ?? children.length,
     last_activity_at: asString(raw.last_activity_at, ''),
     stagnation_seconds: asInt(raw.stagnation_seconds) ?? 0,
+    activity_observation: asString(raw.activity_observation, 'goal_metadata'),
+    stagnation_status: asString(raw.stagnation_status, 'recent'),
     linked_keeper_names: asStringArray(raw.linked_keeper_names),
     pending_approval_count: asInt(raw.pending_approval_count) ?? 0,
     infra_risk_count: asInt(raw.infra_risk_count) ?? 0,

@@ -164,6 +164,16 @@ let test_find_missing () =
       | Error msg ->
           Alcotest.(check bool) "mentions not found" true (contains_substring msg "not found"))
 
+let test_find_default_without_config () =
+  with_temp_base_path (fun base_path ->
+      match Credential_store.find ~base_path "default" with
+      | Error e -> Alcotest.fail ("default credential missing: " ^ e)
+      | Ok cred ->
+          Alcotest.(check string) "id" "default" cred.id;
+          Alcotest.(check bool) "local credential"
+            true
+            (match cred.cred_type with Local -> true | _ -> false))
+
 let test_remove_existing () =
   with_temp_base_path (fun base_path ->
       let cred = sample_credential "to-remove" Local in
@@ -213,6 +223,8 @@ let () =
         [
           Alcotest.test_case "find existing" `Quick test_find_existing;
           Alcotest.test_case "find missing" `Quick test_find_missing;
+          Alcotest.test_case "default without config" `Quick
+            test_find_default_without_config;
         ] );
       ( "remove",
         [

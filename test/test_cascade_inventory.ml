@@ -9,6 +9,7 @@ open Alcotest
 
 module H = Masc_mcp.Cascade_health_tracker
 module Inv = Masc_mcp.Cascade_inventory
+module Kcp = Masc_mcp.Keeper_cascade_profile
 
 (* Build a Provider_config.t from a cascade label, e.g.
    "codex_cli:gpt-5.3-codex" or "ollama:auto".  Reuses the existing
@@ -20,7 +21,12 @@ let provider_of_label label =
   | None -> fail ("expected model label to parse: " ^ label)
 
 let mk_scored ?(cascade_name = "test") ?(score = 0.0) label =
-  Inv.{ cascade_name; provider = provider_of_label label; score }
+  Inv.
+    {
+      cascade_name = Kcp.Runtime_name cascade_name;
+      provider = provider_of_label label;
+      score;
+    }
 
 (* ── score_provider ─────────────────────────────────────────────── *)
 

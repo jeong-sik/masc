@@ -49,6 +49,12 @@ let sample_repo id =
     updated_at = Int64.of_int 1700000100;
   }
 
+let write_file path content =
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc content)
+
 let test_load_all_empty () =
   with_temp_base_path (fun base_path ->
       match Repo_store.load_all ~base_path with
@@ -181,6 +187,25 @@ let test_status_roundtrip () =
          | Error _ -> "Error"))
     statuses
 
+let test_load_minimal_toml_defaults () =
+  with_temp_base_path (fun base_path ->
+      let path = Filename.concat base_path ".masc/config/repositories.toml" in
+      write_file path
+        "[repository.demo]\n\
+         name = \"demo\"\n\
+         url = \"https://github.com/example/demo.git\"\n";
+      match Repo_store.load_all ~base_path with
+      | Error e -> Alcotest.fail ("load failed: " ^ e)
+      | Ok [repo] ->
+          Alcotest.(check string) "id" "demo" repo.id;
+          Alcotest.(check string) "local_path default" ".masc/repos/demo" repo.local_path;
+          Alcotest.(check string) "default branch" "main" repo.default_branch;
+          Alcotest.(check string) "credential" "default" repo.credential_id;
+          Alcotest.(check bool) "auto_sync default" false repo.auto_sync;
+          Alcotest.(check int) "interval default" 300 repo.sync_interval
+      | Ok repos ->
+          Alcotest.failf "expected one repo, got %d" (List.length repos))
+
 let () =
   Alcotest.run "Repo_store"
     [
@@ -217,5 +242,10 @@ let () =
       ( "status",
         [
           Alcotest.test_case "status string roundtrip" `Quick test_status_roundtrip;
+        ] );
+      ( "defaults",
+        [
+          Alcotest.test_case "minimal TOML gets production defaults" `Quick
+            test_load_minimal_toml_defaults;
         ] );
     ]

@@ -1,9 +1,25 @@
 open Repo_manager_types
 
+val load_all : base_path:string -> (keeper_repo_mapping list, string) result
+(** [load_all ~base_path] loads all keeper-repository mappings from
+    [.masc/config/keeper_repo_mappings.toml]. *)
+
 val allowed_repositories :
   keeper_id:string -> base_path:string -> (repository_id list, string) result
 (** [allowed_repositories ~keeper_id ~base_path] returns the list of
     repository IDs that [keeper_id] is allowed to access. *)
+
+val credentials_for_keeper :
+  base_path:string -> keeper_id:string -> (credential list, string) result
+(** [credentials_for_keeper ~base_path ~keeper_id] resolves the unique
+    credentials currently mapped to [keeper_id] by walking every
+    repository the keeper is allowed to access and looking up each
+    repository's [credential_id] in the credential store.
+
+    Returns [Ok []] when the keeper has no mapping (backward-compatibility
+    signal consumed by the RFC-0019 PR-A credential provider bridge).
+    Returns [Error _] only on infrastructure failure (mapping store
+    unreadable, referenced credential missing). *)
 
 val is_allowed :
   keeper_id:string -> repository_id:repository_id -> base_path:string -> bool

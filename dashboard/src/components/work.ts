@@ -10,14 +10,17 @@ import { VerificationRequestsPanel } from './verification-requests-panel'
 import { ErrorBoundary } from './common/error-boundary'
 import { LoadingState } from './common/feedback-state'
 
-type WorkSection = 'board' | 'planning' | 'collab-mvp' | 'verification'
+type WorkSection = 'board' | 'planning' | 'repositories' | 'collab-mvp' | 'verification'
 
 const LazyCollabMvp = lazy(async () => ({
   default: (await import('./collab-mvp')).CollabMvp,
 }))
+const LazyRepositoryManagement = lazy(async () => ({
+  default: (await import('./repository-management')).RepositoryManagement,
+}))
 
 function isWorkSection(v: string | undefined): v is WorkSection {
-  return v === 'board' || v === 'planning' || v === 'collab-mvp' || v === 'verification'
+  return v === 'board' || v === 'planning' || v === 'repositories' || v === 'collab-mvp' || v === 'verification'
 }
 
 export function Work() {
@@ -31,6 +34,11 @@ export function Work() {
         <${ErrorBoundary} label=${current}>
           ${current === 'board' ? html`<${Memory} />`
             : current === 'planning' ? html`<${PlanningPanel} />`
+            : current === 'repositories' ? html`
+              <${Suspense} fallback=${html`<${LoadingState}>저장소 화면 불러오는 중...<//>`}>
+                <${LazyRepositoryManagement} />
+              <//>
+            `
             : current === 'collab-mvp' ? html`
               <${Suspense} fallback=${html`<${LoadingState}>협업 화면 불러오는 중...<//>`}>
                 <${LazyCollabMvp} />

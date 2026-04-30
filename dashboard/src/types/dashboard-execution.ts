@@ -569,6 +569,15 @@ export interface GoalVerificationSummary {
   remaining_possible: number
 }
 
+export interface GoalFsmProjection {
+  state: string
+  source: 'goal.phase' | string
+  state_kind: string
+  next_actions: string[]
+  activity_observation: 'runtime' | 'approval' | 'task' | 'child' | 'goal_metadata' | string
+  stagnation_status: 'recent' | 'stalled' | 'unobserved' | string
+}
+
 export interface GoalKeeperTrustLatestEvent {
   kind: string
   ts: string
@@ -614,6 +623,7 @@ export interface GoalTreeNode {
   status_color: string
   phase: string
   phase_color: string
+  goal_fsm: GoalFsmProjection
   health: 'done' | 'paused' | 'blocked' | 'at_risk' | 'on_track' | string
   health_color: string
   badges: string[]
@@ -637,6 +647,8 @@ export interface GoalTreeNode {
   child_count: number
   last_activity_at: string
   stagnation_seconds: number
+  activity_observation: GoalFsmProjection['activity_observation']
+  stagnation_status: GoalFsmProjection['stagnation_status']
   linked_keeper_names: string[]
   pending_approval_count: number
   infra_risk_count: number

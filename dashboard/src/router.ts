@@ -61,8 +61,11 @@ function parseSegments(
     }
   }
 
-  if ((segments[0] === 'monitoring' || segments[0] === 'workspace' || segments[0] === 'lab') && segments[1]) {
-    const tab = segments[0] as 'monitoring' | 'workspace' | 'lab'
+  if (
+    (segments[0] === 'monitoring' || segments[0] === 'workspace' || segments[0] === 'lab' || segments[0] === 'code')
+    && segments[1]
+  ) {
+    const tab = segments[0] as 'monitoring' | 'workspace' | 'lab' | 'code'
     const nextParams = { ...params, section: decodeSafe(segments[1]) }
     return {
       tab,

@@ -2851,3 +2851,26 @@ export function fetchTlcResults(
     signal: opts?.signal,
   })
 }
+
+export interface AuditEntry {
+  timestamp: number
+  key: string
+  old_value: unknown
+  new_value: unknown
+  actor: string
+  case_id?: string
+}
+
+export interface AuditLedgerResponse {
+  entries: AuditEntry[]
+  count: number
+}
+
+export function fetchAuditLedger(
+  limit = 50,
+  opts?: { signal?: AbortSignal },
+): Promise<AuditLedgerResponse> {
+  return get<AuditLedgerResponse>(`/api/v1/governance/params/audit?limit=${limit}`, {
+    signal: opts?.signal,
+  })
+}

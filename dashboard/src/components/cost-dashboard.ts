@@ -21,6 +21,7 @@ import {
   fetchStress,
   fetchCascadeHealth,
   fetchCascadeConfig,
+  fetchAuditLedger,
   type DashboardRuntimeModelMetric,
   type KeeperCostMetric,
   type LatencyBucket,
@@ -30,6 +31,8 @@ import {
   type StressEvent,
   type CascadeHealthResponse,
   type CascadeConfigResponse,
+  type AuditEntry,
+  type AuditLedgerResponse,
 } from '../api/dashboard'
 import { LoadingState, ErrorState } from './common/feedback-state'
 
@@ -77,6 +80,12 @@ type CascadeConfigLoadState =
   | { status: 'loaded'; data: CascadeConfigResponse }
   | { status: 'error'; message: string }
 
+type AuditLedgerLoadState =
+  | { status: 'idle' }
+  | { status: 'loading' }
+  | { status: 'loaded'; data: AuditLedgerResponse }
+  | { status: 'error'; message: string }
+
 const viewMode = signal<ViewMode>('model')
 const modelState = signal<ModelLoadState>({ status: 'idle' })
 const keeperState = signal<KeeperLoadState>({ status: 'idle' })
@@ -85,6 +94,7 @@ const stressState = signal<StressLoadState>({ status: 'idle' })
 const coverageState = signal<CoverageLoadState>({ status: 'idle' })
 const cascadeHealthState = signal<CascadeHealthLoadState>({ status: 'idle' })
 const cascadeConfigState = signal<CascadeConfigLoadState>({ status: 'idle' })
+const auditLedgerState = signal<AuditLedgerLoadState>({ status: 'idle' })
 
 const WINDOW_OPTIONS: Array<{ key: number; label: string }> = [
   { key: 30, label: '30분' },
@@ -181,6 +191,17 @@ async function loadCascadeConfig() {
   }
 }
 
+async function loadAuditLedger(limit = 50) {
+  auditLedgerState.value = { status: 'loading' }
+  try {
+    const resp = await fetchAuditLedger(limit)
+    auditLedgerState.value = { status: 'loaded', data: resp }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'audit ledger 불러오기 실패'
+    auditLedgerState.value = { status: 'error', message }
+  }
+}
+
 function loadActiveView(window: number) {
   if (viewMode.value === 'model') {
     void loadModelMetrics(window)
@@ -192,6 +213,7 @@ function loadActiveView(window: number) {
   void loadHeuristicCoverage()
   void loadCascadeHealth()
   void loadCascadeConfig()
+  void loadAuditLedger()
 }
 
 const modelTotals = computed(() => {
@@ -793,6 +815,55 @@ function CascadeBoard({ health, config }: { health: CascadeHealthResponse; confi
   `
 }
 
+function AuditLedgerBoard({ entries, count }: { entries: AuditEntry[]; count: number }) {
+  const fmtTime = (ts: number): string => {
+    const d = new Date(ts * 1000)
+    return d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
+  }
+
+  const fmtValue = (v: unknown): string => {
+    if (v === null) return 'null'
+    if (v === undefined) return 'undefined'
+    if (typeof v === 'string') return v
+    return JSON.stringify(v)
+  }
+
+  return html`
+    <section class="flex flex-col gap-4" aria-label="Audit ledger">
+      <div class="flex items-center justify-between rounded border border-card-border/60 bg-[var(--backdrop-deep)] px-3 py-2">
+        <span class="font-mono text-2xs uppercase tracking-1 text-text-muted">audit ledger · ${count} entries</span>
+      </div>
+
+      <div class="overflow-x-auto rounded border border-card-border/60 bg-[var(--backdrop-deep)]">
+        <table class="w-full" aria-label="Parameter audit entries">
+          <thead>
+            <tr class="border-b border-[var(--color-border-default)] text-2xs uppercase tracking-1 text-text-muted">
+              <th scope="col" class="px-2 py-1.5 text-left">time</th>
+              <th scope="col" class="px-2 py-1.5 text-left">actor</th>
+              <th scope="col" class="px-2 py-1.5 text-left">key</th>
+              <th scope="col" class="px-2 py-1.5 text-left">old</th>
+              <th scope="col" class="px-2 py-1.5 text-left">new</th>
+              <th scope="col" class="px-2 py-1.5 text-left">case</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${entries.map((e, i) => html`
+              <tr key=${i} class="border-b border-[var(--color-border-default)]/50 text-2xs">
+                <td class="px-2 py-1.5 text-left font-mono text-text-muted">${fmtTime(e.timestamp)}</td>
+                <td class="px-2 py-1.5 text-left font-mono text-xs text-[var(--color-accent-fg)]">${e.actor}</td>
+                <td class="px-2 py-1.5 text-left font-mono text-text-strong">${e.key}</td>
+                <td class="px-2 py-1.5 text-left font-mono text-text-muted max-w-[12ch] truncate" title=${fmtValue(e.old_value)}>${fmtValue(e.old_value)}</td>
+                <td class="px-2 py-1.5 text-left font-mono text-text-muted max-w-[12ch] truncate" title=${fmtValue(e.new_value)}>${fmtValue(e.new_value)}</td>
+                <td class="px-2 py-1.5 text-left font-mono text-text-muted">${e.case_id ?? '—'}</td>
+              </tr>
+            `)}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  `
+}
+
 export function CostDashboard() {
   const activeState = viewMode.value === 'model' ? modelState.value : keeperState.value
 
@@ -973,6 +1044,18 @@ export function CostDashboard() {
                 onRetry=${() => void loadCascadeConfig()}
               />`
             : html`<${LoadingState} />`}
+
+      ${auditLedgerState.value.status === 'loaded'
+        ? html`<${AuditLedgerBoard}
+            entries=${auditLedgerState.value.data.entries}
+            count=${auditLedgerState.value.data.count}
+          />`
+        : auditLedgerState.value.status === 'error'
+          ? html`<${ErrorState}
+              message=${auditLedgerState.value.message}
+              onRetry=${() => void loadAuditLedger()}
+            />`
+          : html`<${LoadingState} />`}
     </section>
   `
 }

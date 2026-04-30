@@ -105,6 +105,19 @@ let make_health_json ?(listener = "http/1.1") request =
     else Printf.sprintf "%dh %dm" (uptime_secs / 3600) ((uptime_secs mod 3600) / 60)
   in
   let build = Build_identity.current () in
+  let keeper_config_parse_errors =
+    try Keeper_types_profile.keeper_toml_config_errors () with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn ->
+        [
+          {
+            Keeper_types_profile.keeper_name = "unknown";
+            path = "";
+            error = Printexc.to_string exn;
+            reason = "health_probe_failed";
+          };
+        ]
+  in
   `Assoc [
     ("status", `String "ok");
     ("server", `String "masc-mcp");
@@ -136,6 +149,12 @@ let make_health_json ?(listener = "http/1.1") request =
       ("minor_heap_size", `Int (let c = Gc.get () in c.minor_heap_size));
     ]);
     ("keeper_fibers", `Int (Keeper_registry.count_running ()));
+    ("keeper_config_parse_error_count",
+     `Int (List.length keeper_config_parse_errors));
+    ( "keeper_config_parse_errors",
+      `List
+        (List.map Keeper_types_profile.keeper_toml_config_error_to_json
+           keeper_config_parse_errors) );
     (* P2 silent-failure fix: lazy_task_boot_guard fires when a keeper
        startup task exceeds the boot timeout (server_bootstrap_loops.ml:116).
        The Prometheus counter `masc_lazy_task_boot_guard_fired_total`

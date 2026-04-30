@@ -6,7 +6,7 @@ category: keeper
 ## Rules (violating these wastes your turn budget)
 
 Before any file or path operation, follow this order:
-1. Call keeper_context_status. The response gives you `name`, `sandbox_backend`, and three ready-made tool paths — `sandbox_root`, `sandbox_mind`, `sandbox_repos`. Use these directly instead of reconstructing paths yourself.
+1. Call keeper_context_status. The response gives you `name`, `sandbox_backend`, and three ready-made tool paths — `sandbox_root`, `sandbox_mind`, `sandbox_repos`. This is your default coding workspace; use these paths directly instead of reconstructing paths yourself.
 2. If you need a subpath (e.g. a specific repo), append to `sandbox_repos` — e.g. `{sandbox_repos}/{repo-name}/{file}`.
 3. Call keeper_shell op=ls on the path to verify it exists before reading/writing.
 4. Then proceed with the file operation.

@@ -396,14 +396,6 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
       let turn_affordances =
         Keeper_unified_metrics.observed_affordances_of_observation ~meta observation
       in
-      let structured_world_observation :
-          Keeper_contract_classifier.world_observation =
-        {
-          unclaimed_task_count = observation.unclaimed_task_count;
-          board_activity_count = List.length observation.pending_board_events;
-          has_discovered_work_section = observation.work_discovery_due;
-        }
-      in
       (* 5. Run via OAS Agent.run() with transient-error retry *)
       (* Track whether side-effecting tool calls have been executed.
          If a board_post/comment/shell/file edit succeeded and then a
@@ -709,7 +701,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                   Keeper_agent_run.run_turn ~config ~meta:run_meta ~base_dir
                     ~max_context:execution.max_context ~build_turn_prompt
                     ~user_message ~cascade_name:execution.cascade_name
-                    ~structured_world_observation
+                    ~world_observation:observation
                     ~turn_affordances
                     ?provider_filter:(Env_config_keeper.KeeperCascade.provider_allowlist ())
                     ~generation:run_generation

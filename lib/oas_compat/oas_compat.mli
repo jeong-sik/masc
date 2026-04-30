@@ -32,7 +32,14 @@ module Http_client : sig
     | Cli_transport_required
     | Network_error
     | Provider_terminal
+        (** Provider-level terminal condition that should stop cascading. *)
+    | Provider_capacity_exhausted
     | Provider_hard_quota
+    | Provider_capability_mismatch
+    | Provider_cli_policy_invalid
+    | Provider_cli_startup_failed
+    | Provider_failure_parse_error
+    | Provider_failure_unknown
 
   val classify : Llm_provider.Http_client.http_error -> cascade_failure_class
   (** Classify an OAS HTTP/client failure into MASC's typed cascade boundary.
@@ -63,7 +70,12 @@ module Http_client : sig
         CLI source explicitly marks this "so the cascade can move on".
       All of these are per-provider, not cascade-wide; a fallback provider
       may succeed where the current one rejected. See masc-mcp #9932
-      (kimi fallback), #9850 (codex_cli runtime_mcp_auth). *)
+      (kimi fallback), #9850 (codex_cli runtime_mcp_auth).
+
+      [ProviderFailure] is already typed by OAS, so this adapter maps it
+      without marker matching. Capacity, quota, capability, CLI policy/startup,
+      provider parse, and unknown provider failures all advance the cascade as
+      provider-local skip conditions. *)
 
   val error_message : Llm_provider.Http_client.http_error -> string
   (** Extract a human-readable message from an OAS HTTP error.

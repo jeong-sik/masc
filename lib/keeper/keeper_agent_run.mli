@@ -209,7 +209,7 @@ val adaptive_thinking_budget :
            and checkpoint message history, returns the final turn system prompt
     @param user_message The user's message to the keeper
     @param cascade_name Cascade profile name for model selection
-    @param structured_world_observation Structured world signal used by
+    @param world_observation Structured keeper world snapshot used by
            required-tool contract checks. When omitted, the contract gate
            does not infer world state from prompt text.
     @param provider_filter Optional provider restriction
@@ -240,7 +240,7 @@ val run_turn :
         -> turn_prompt)
   -> user_message:string
   -> cascade_name:string
-  -> ?structured_world_observation:Keeper_contract_classifier.world_observation
+  -> ?world_observation:Keeper_world_observation.world_observation
   -> ?turn_affordances:string list
   -> ?provider_filter:string list
   -> generation:int

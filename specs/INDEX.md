@@ -5,7 +5,7 @@ Edit the generator, not this file. Re-run: scripts/gen-tla-index.sh > specs/INDE
 
 # TLA+ Spec Index
 
-Generated: 2026-04-30T03:00:48Z (HEAD: 63db68cc78)
+Generated: 2026-04-30T09:16:03Z (HEAD: 6cf32801ee)
 
 Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to refresh.
 
@@ -17,8 +17,8 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | Manual specs | 84 |
 | TTrace (auto-generated) | 0 |
 | Directories | 17 |
-| Total .cfg files | 160 |
-| Buggy .cfg (bug-model pair) | 73 |
+| Total .cfg files | 168 |
+| Buggy .cfg (bug-model pair) | 81 |
 
 `kind` column: **manual** = hand-authored spec; **ttrace** = TLC counterexample export (`*TTrace*` or trace marker in header). `cfg`/`buggy` columns count companion `.cfg` files. `invariants/properties` lists names per cfg label (`clean=...`, `buggy=...`).
 
@@ -40,8 +40,8 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 
 | File | Module | Kind | cfg | buggy | Invariants / Properties | Last Modified |
 |------|--------|------|-----|-------|-------------------------|---------------|
-| AutonomousLoop.tla | AutonomousLoop | manual | 1 | 0 | clean={inv:TypeOK, inv:MetaPersistedAfterTick, inv:TickOnlyDuringRunning} | 2026-04-29 |
-| AutonomousPhase.tla | AutonomousPhase | manual | 1 | 0 | clean={inv:TypeOK, inv:StartedAtIdle, inv:CurrentMatchesHead, inv:OnlyLegalTransitions} | 2026-04-29 |
+| AutonomousLoop.tla | AutonomousLoop | manual | 2 | 1 | clean={inv:TypeOK, inv:MetaPersistedAfterTick, inv:TickOnlyDuringRunning, inv:AutoTickReadOnly} buggy={inv:TypeOK, inv:MetaPersistedAfterTick, inv:TickOnlyDuringRunning, inv:AutoTickReadOnly} | 2026-04-30 |
+| AutonomousPhase.tla | AutonomousPhase | manual | 2 | 1 | clean={inv:TypeOK, inv:StartedAtIdle, inv:CurrentMatchesHead, inv:OnlyLegalTransitions} buggy={inv:TypeOK, inv:StartedAtIdle, inv:CurrentMatchesHead, inv:OnlyLegalTransitions} | 2026-04-30 |
 
 ### specs/boundary (18 specs)
 
@@ -72,7 +72,7 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 |------|--------|------|-----|-------|-------------------------|---------------|
 | AmbiguousPartialCommit.tla | AmbiguousPartialCommit | manual | 1 | 0 | clean={inv:TypeOK, inv:Safety} | 2026-04-29 |
 | AmbiguousPartialCommitBug.tla | AmbiguousPartialCommitBug | manual | 1 | 1 | buggy={inv:TypeOK, inv:Safety} | 2026-04-29 |
-| AtomicFileWrite.tla | AtomicFileWrite | manual | 2 | 1 | clean={inv:ReaderNeverSeesEmpty} buggy={inv:ReaderNeverSeesEmpty} | 2026-04-29 |
+| AtomicFileWrite.tla | AtomicFileWrite | manual | 2 | 1 | clean={inv:ReaderNeverSeesEmpty} buggy={inv:ReaderNeverSeesEmpty} | 2026-04-30 |
 | AuthIdentityFSM.tla | AuthIdentityFSM | manual | 2 | 1 | clean={inv:TypeOK, inv:SafetyInvariant} buggy={inv:TypeOK, inv:SafetyInvariant} | 2026-04-29 |
 | CascadeCrossFallback.tla | CascadeCrossFallback | manual | 2 | 1 | clean={inv:TypeOK, inv:AtMostOneCrossCascadePerTurn, inv:PromotionRequiresExhaustion, inv:PromotionFrozenAfterFinish} buggy={inv:TypeOK, inv:AtMostOneCrossCascadePerTurn} | 2026-04-29 |
 | CascadeExhaustion.tla | CascadeExhaustion | manual | 2 | 1 | clean={inv:TypeOK, inv:ExhaustionSafetyLastOk} buggy={inv:TypeOK, inv:ExhaustionDiagnosticConsistency} | 2026-04-29 |
@@ -82,7 +82,7 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | DispatchCoverage.tla | DispatchCoverage | manual | 2 | 1 | clean={inv:TypeOK, inv:DataFsmConsistent, inv:PhaseConsistent, inv:NeverStuckFailing} buggy={inv:TypeOK, inv:DataFsmConsistent, inv:PhaseConsistent, inv:NeverStuckFailing} | 2026-04-29 |
 | DispatchHookChain.tla | DispatchHookChain | manual | 2 | 1 | clean={inv:ShortCircuitSkipsHandler, inv:PostHooksAfterHandler, inv:HandlerRequiresNoReject} buggy={inv:ShortCircuitSkipsHandler} | 2026-04-29 |
 | FileLockStarvation.tla | FileLockStarvation | manual | 2 | 1 | clean={inv:TypeOK, inv:FlockMutex, inv:SingleMutexPerPath} buggy={inv:TypeOK, inv:FlockMutex, inv:SingleMutexPerPath} | 2026-04-29 |
-| HebbianLearning.tla | HebbianLearning | manual | 2 | 1 | clean={inv:WeightBounded NoLostUpdate} buggy={inv:WeightBounded NoLostUpdate} | 2026-04-29 |
+| HebbianLearning.tla | HebbianLearning | manual | 2 | 1 | clean={inv:WeightBounded NoLostUpdate} buggy={inv:WeightBounded NoLostUpdate} | 2026-04-30 |
 | KeepalivePhaseConsistency.tla | KeepalivePhaseConsistency | manual | 2 | 1 | clean={inv:TypeOK, inv:KeepalivePhaseConsistent, inv:InFlightImpliesRunning} buggy={inv:TypeOK, inv:KeepalivePhaseConsistent, inv:InFlightImpliesRunning} | 2026-04-29 |
 | KeeperPhaseRace.tla | KeeperPhaseRace | manual | 2 | 1 | clean={inv:TypeOK, inv:CrashImpliesThreshold, inv:RecordOnlyOnCrash, inv:CounterBoundedByObservations} buggy={inv:TypeOK, inv:CrashImpliesThreshold, inv:RecordOnlyOnCrash, inv:CounterBoundedByObservations} | 2026-04-29 |
 | KeeperTaskInterlock.tla | KeeperTaskInterlock | manual | 3 | 1 | clean={inv:TypeOK, inv:NoDeadKeeperHoldsTask, inv:ClaimerNotDead, inv:AwaitingVerificationHasClaimer} buggy={inv:TypeOK, inv:NoDeadKeeperHoldsTask, inv:ClaimerNotDead} current={inv:TypeOK} | 2026-04-29 |
@@ -146,21 +146,21 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 
 | File | Module | Kind | cfg | buggy | Invariants / Properties | Last Modified |
 |------|--------|------|-----|-------|-------------------------|---------------|
-| MASCEcosystem.tla | MASCEcosystem | manual | 1 | 0 | clean={inv:NoContextOverflow, inv:SingleTaskPerAgent, prop:AllTasksEventuallyCompleted, prop:MemoryManagementWorks} | 2026-04-29 |
+| MASCEcosystem.tla | MASCEcosystem | manual | 2 | 1 | clean={inv:NoContextOverflow, inv:SingleTaskPerAgent, inv:AtMostOneAgentPerTask, prop:AllTasksEventuallyCompleted, prop:MemoryManagementWorks} buggy={inv:NoContextOverflow, inv:SingleTaskPerAgent, inv:AtMostOneAgentPerTask} | 2026-04-30 |
 
 ### specs/multimodal (2 specs)
 
 | File | Module | Kind | cfg | buggy | Invariants / Properties | Last Modified |
 |------|--------|------|-----|-------|-------------------------|---------------|
-| MultimodalArtifact.tla | MultimodalArtifact | manual | 1 | 0 | clean={inv:TypeOK, inv:ArtifactIdMatchesKey, inv:DAGRefIntegrity, inv:NoSelfLoops, inv:DAGAcyclic, inv:ProvenanceOriginsLive} | 2026-04-29 |
-| MultimodalHydrator.tla | MultimodalHydrator | manual | 1 | 0 | clean={inv:TypeOK, inv:NoSelfLoop, inv:NoCycleBounded, inv:DedupeIdempotent} | 2026-04-29 |
+| MultimodalArtifact.tla | MultimodalArtifact | manual | 2 | 1 | clean={inv:TypeOK, inv:ArtifactIdMatchesKey, inv:DAGRefIntegrity, inv:NoSelfLoops, inv:DAGAcyclic, inv:ProvenanceOriginsLive} buggy={inv:TypeOK, inv:ArtifactIdMatchesKey, inv:DAGRefIntegrity, inv:NoSelfLoops, inv:DAGAcyclic, inv:ProvenanceOriginsLive} | 2026-04-30 |
+| MultimodalHydrator.tla | MultimodalHydrator | manual | 2 | 1 | clean={inv:TypeOK, inv:NoSelfLoop, inv:NoCycleBounded, inv:DedupeIdempotent} buggy={inv:TypeOK, inv:NoSelfLoop, inv:NoCycleBounded, inv:DedupeIdempotent} | 2026-04-30 |
 
 ### specs/resilience (2 specs)
 
 | File | Module | Kind | cfg | buggy | Invariants / Properties | Last Modified |
 |------|--------|------|-----|-------|-------------------------|---------------|
-| ResilienceDegradation.tla | ResilienceDegradation | manual | 1 | 0 | clean={inv:TypeOK, inv:MonotonicDegradation, inv:NoRetryAtL4Permanent, inv:NoRetryAtL4Exhausted} | 2026-04-29 |
-| ResilienceOutcome.tla | ResilienceOutcome | manual | 1 | 0 | clean={inv:TypeOK, inv:ConfidenceInRange, inv:DegradationLevelInRange, inv:CompletedFailedDisjoint, inv:RecoveryStrategyDeclared} | 2026-04-29 |
+| ResilienceDegradation.tla | ResilienceDegradation | manual | 2 | 1 | clean={inv:TypeOK, inv:MonotonicDegradation, inv:NoRetryAtL4Permanent, inv:NoRetryAtL4Exhausted} buggy={inv:TypeOK, inv:MonotonicDegradation, inv:NoRetryAtL4Permanent, inv:NoRetryAtL4Exhausted} | 2026-04-30 |
+| ResilienceOutcome.tla | ResilienceOutcome | manual | 2 | 1 | clean={inv:TypeOK, inv:ConfidenceInRange, inv:DegradationLevelInRange, inv:CompletedFailedDisjoint, inv:RecoveryStrategyDeclared} buggy={inv:TypeOK, inv:ConfidenceInRange, inv:DegradationLevelInRange, inv:CompletedFailedDisjoint, inv:RecoveryStrategyDeclared} | 2026-04-30 |
 
 ### specs/server-state (1 specs)
 
@@ -172,7 +172,7 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 
 | File | Module | Kind | cfg | buggy | Invariants / Properties | Last Modified |
 |------|--------|------|-----|-------|-------------------------|---------------|
-| SharedAudit.tla | SharedAudit | manual | 1 | 0 | clean={inv:TypeOK, inv:IdsUnique, inv:ChainIntegrity, inv:EntryIdMinted} | 2026-04-29 |
+| SharedAudit.tla | SharedAudit | manual | 2 | 1 | clean={inv:TypeOK, inv:IdsUnique, inv:ChainIntegrity, inv:EntryIdMinted} buggy={inv:TypeOK, inv:IdsUnique, inv:ChainIntegrity, inv:EntryIdMinted} | 2026-04-30 |
 
 ### specs/social-state-cap (1 specs)
 

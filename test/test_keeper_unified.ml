@@ -36,8 +36,43 @@ let repo_root () =
       in
       ascend (Sys.getcwd ())
 
+let copy_file src dst =
+  let ic = open_in_bin src in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr ic)
+    (fun () ->
+      let oc = open_out_bin dst in
+      Fun.protect
+        ~finally:(fun () -> close_out_noerr oc)
+        (fun () -> output_string oc (In_channel.input_all ic)))
+
+let unix_mkdir_p path =
+  let rec loop dir =
+    if dir = "" || dir = "." || Sys.file_exists dir then ()
+    else (
+      loop (Filename.dirname dir);
+      Unix.mkdir dir 0o755)
+  in
+  loop path
+
 let () =
   let base_path = repo_root () in
+  let test_base_path =
+    let path = Filename.temp_file "test_keeper_unified_runtime_" "" in
+    Unix.unlink path;
+    Unix.mkdir path 0o755;
+    path
+  in
+  let test_config_dir =
+    Filename.concat (Filename.concat test_base_path ".masc") "config"
+  in
+  unix_mkdir_p test_config_dir;
+  copy_file
+    (Filename.concat base_path "config/cascade.json")
+    (Filename.concat test_config_dir "cascade.json");
+  Unix.putenv "MASC_BASE_PATH" test_base_path;
+  Unix.putenv "MASC_CONFIG_DIR" test_config_dir;
+  Masc_mcp.Config_dir_resolver.reset ();
   let prompts_dir = Filename.concat base_path "config/prompts" in
   Prompt_registry.set_markdown_dir prompts_dir;
   ignore (Result.get_ok (Masc_mcp.Keeper_exec_tools.init_policy_config ~base_path));
@@ -115,6 +150,25 @@ let with_env name value f =
     match old with
     | Some v -> Unix.putenv name v
     | None -> (try Unix.putenv name "" with _ -> ()))
+    f
+
+let prepare_test_config_root base_dir =
+  let config_dir =
+    Filename.concat (Filename.concat base_dir ".masc") "config"
+  in
+  Keeper_types.mkdir_p config_dir;
+  copy_file
+    (Filename.concat (repo_root ()) "config/cascade.json")
+    (Filename.concat config_dir "cascade.json");
+  config_dir
+
+let with_test_runtime_roots base_dir f =
+  let config_dir = prepare_test_config_root base_dir in
+  with_env "MASC_BASE_PATH" base_dir @@ fun () ->
+  with_env "MASC_CONFIG_DIR" config_dir @@ fun () ->
+  Masc_mcp.Config_dir_resolver.reset ();
+  Fun.protect
+    ~finally:(fun () -> Masc_mcp.Config_dir_resolver.reset ())
     f
 
 (* ---------- World Observation type tests ---------- *)
@@ -1072,6 +1126,7 @@ let test_runtime_trust_snapshot_tolerates_null_telemetry () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
+      with_test_runtime_roots base_dir @@ fun () ->
       let config = Masc_mcp.Coord.default_config base_dir in
       let keeper_name = "runtime-trust-null-telemetry" in
       let meta = { minimal_meta with name = keeper_name } in
@@ -1093,6 +1148,7 @@ let test_runtime_trust_snapshot_surfaces_terminal_reason () =
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
+      with_test_runtime_roots base_dir @@ fun () ->
       let config = Masc_mcp.Coord.default_config base_dir in
       let keeper_name = "runtime-trust-terminal-reason" in
       let meta =
@@ -3163,7 +3219,7 @@ let test_run_keeper_cycle_skips_non_executable_phase () =
            with
            | None -> fail "expected skipped turn execution receipt"
            | Some receipt ->
-               check string "skipped receipt outcome" "skipped"
+              check string "skipped receipt outcome" "skipped"
                  Yojson.Safe.Util.(receipt |> member "outcome" |> to_string);
                check string "skipped receipt terminal reason"
                  "non_executable_phase:paused"
@@ -3210,8 +3266,8 @@ let test_run_keeper_cycle_records_trajectory_source_contract () =
     (source_file_contains "lib/keeper/keeper_unified_turn.ml"
        "Coord.masc_root_dir config");
   check bool "keeper cycle finalizes trajectory on completion/failure" true
-    (source_file_contains "lib/keeper/keeper_unified_turn.ml"
-       "Trajectory.finalize trajectory_acc");
+    (source_file_contains "lib/keeper/keeper_turn_helpers.ml"
+       "let finalize_trajectory_acc");
   check bool "pre-dispatch exits record terminal receipt" true
     (source_file_contains "lib/keeper/keeper_unified_turn.ml"
        "record_pre_dispatch_terminal_observation");
@@ -3338,7 +3394,7 @@ let test_pre_tool_gate_records_durable_attempt_telemetry () =
 
 let test_run_keeper_cycle_surfaces_side_effect_failures_source_contract () =
   check bool "keeper cycle records side-effect issues in registry" true
-    (source_file_contains "lib/keeper/keeper_unified_turn.ml"
+    (source_file_contains "lib/keeper/keeper_turn_helpers.ml"
        "Keeper_registry.record_error ~base_path:config.base_path");
   check bool "trajectory finalize is not silently ignored" false
     (source_file_contains "lib/keeper/keeper_unified_turn.ml"
@@ -4733,15 +4789,14 @@ let test_bounded_oas_timeout_uses_adaptive_when_budget_is_large () =
       ~estimated_input_tokens ~remaining_turn_budget_s:1200.0
   with
   | Some timeout_s ->
-      (* The bounded variant subtracts a 15s finalization guard
-         from [remaining_turn_budget_s] and caps at the adaptive
-         raw.  With #10008 fm2 the adaptive raw equals
-         [turn_timeout_sec] (1200), so the finalization guard path
-         dominates: returned value is [remaining - 15]. *)
+      (* The bounded variant subtracts a 15s finalization guard from
+         [remaining_turn_budget_s] and caps at the adaptive raw.  After
+         the bulkhead hard ceiling, [turn_timeout_sec] is 600, so the
+         adaptive cap dominates this large remaining-budget case. *)
       check bool "bounded timeout at or below adaptive raw"
         true (timeout_s <= expected);
-      check bool "bounded leaves positive finalization guard"
-        true (timeout_s < 1200.0 && timeout_s > 1100.0)
+      check (float 0.01) "bounded uses hard-capped adaptive timeout"
+        expected timeout_s
   | None -> fail "expected bounded timeout"
 
 (* #10008 fm2: the budget formula no longer scales with token count,
@@ -4788,14 +4843,13 @@ let test_bounded_oas_timeout_uses_channel_turn_budget_override () =
   with
   | Some timeout_s ->
       (* #10008 fm2: raw formula no longer depends on max_turns;
-         bounded variant still subtracts the 15s finalization
-         guard from [remaining_turn_budget_s] and caps at the
-         raw.  Verify the cap was applied ([<=] raw) and the
-         guard reserved a positive amount. *)
+         bounded variant still subtracts the 15s finalization guard
+         from [remaining_turn_budget_s] and caps at the raw.  After
+         the bulkhead hard ceiling, the raw 600s cap dominates. *)
       check bool "bounded timeout at or below raw formula output"
         true (timeout_s <= raw);
-      check bool "finalization guard reserves positive delta"
-        true (timeout_s <= 1200.0 && timeout_s > 1100.0)
+      check (float 0.01) "bounded uses channel hard-capped raw timeout"
+        raw timeout_s
   | None -> fail "expected bounded timeout"
 
 let test_bounded_oas_timeout_reserves_degraded_retry_budget () =
@@ -4811,7 +4865,7 @@ let test_bounded_oas_timeout_reserves_degraded_retry_budget () =
       check (float 0.01) "remaining budget records post-guard usable budget"
         1185.0 budget.remaining_turn_budget_sec;
       check string "source records retry reserve"
-        "adaptive_estimated_input_tokens_capped_by_turn_budget_and_degraded_retry_budget"
+        "adaptive_estimated_input_tokens_capped_by_degraded_retry_budget"
         budget.source
   | None -> fail "expected bounded timeout"
 
@@ -5258,26 +5312,30 @@ let test_actionable_tool_contract_allows_execution_tools () =
        ~actionable_signal_context:false
        ~tool_names:[])
 
-let test_stay_silent_satisfies_required_contract_despite_read_only_effect () =
+let test_stay_silent_requires_typed_no_work_proof_on_actionable_signal () =
   (* keeper_stay_silent has effect_domain=Read_only in tool_catalog but is
-     classified as Completion in completion_tool_names.  When the LLM
-     correctly signals "no work for me" via stay_silent alongside status
-     reads, the contract must not fire a false violation.  Observed
-     2026-04-28: analyst/janitor cycles rejected with "passive status/read
-     tools: keeper_stay_silent, keeper_task_list". *)
+     classified as Completion in completion_tool_names, so it can still
+     satisfy a plain required-tool contract.  On an actionable world signal,
+     however, stay_silent must not close the turn unless the typed observation
+     path already proved there is no actionable work. *)
   check bool "stay_silent satisfies required contract" true
     (KTD.tool_name_can_satisfy_required_contract "keeper_stay_silent");
   check bool "completion tool set includes stay_silent" true
     (KTD.is_completion_tool_name "keeper_stay_silent");
-  check (option string) "stay_silent + passive tools = no violation" None
-    (KTD.actionable_tool_contract_violation_reason
+  (match
+     KTD.actionable_tool_contract_violation_reason
        ~claim_context_allowed:true
        ~actionable_signal_context:true
-       ~tool_names:[ "keeper_stay_silent"; "keeper_tasks_list" ]);
-  check (option string) "stay_silent alone = no violation" None
+       ~tool_names:[ "keeper_stay_silent"; "keeper_tasks_list" ]
+   with
+   | Some reason ->
+       check bool "reason mentions typed no-work proof" true
+         (contains_substring reason "typed no-work proof")
+   | None -> fail "expected stay_silent actionable violation");
+  check (option string) "non-actionable stay_silent remains allowed" None
     (KTD.actionable_tool_contract_violation_reason
        ~claim_context_allowed:true
-       ~actionable_signal_context:true
+       ~actionable_signal_context:false
        ~tool_names:[ "keeper_stay_silent" ]);
   (* Without stay_silent, passive-only still violates *)
   check bool "passive-only still violates" true
@@ -6616,8 +6674,8 @@ let () =
             test_claim_tool_classification_covers_masc_claim_task;
           test_case "actionable signal allows execution tools" `Quick
             test_actionable_tool_contract_allows_execution_tools;
-          test_case "stay_silent satisfies required contract despite read-only effect" `Quick
-            test_stay_silent_satisfies_required_contract_despite_read_only_effect;
+          test_case "stay_silent needs typed no-work proof on actionable signal" `Quick
+            test_stay_silent_requires_typed_no_work_proof_on_actionable_signal;
           test_case "required tool predicate rejects passive tools" `Quick
             test_required_tool_satisfaction_rejects_passive_tools;
           test_case "required tool predicate accepts mutating tools" `Quick

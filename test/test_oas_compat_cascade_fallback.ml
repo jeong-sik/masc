@@ -148,48 +148,49 @@ let test_provider_failure_capacity_cascades () =
     true
     (Oas_compat.Http_client.should_cascade err);
   match Oas_compat.Http_client.classify err with
-  | Transient_http 529 -> ()
-  | _ -> Alcotest.fail "Capacity_exhausted must classify as Transient_http 529"
+  | Provider_capacity_exhausted -> ()
+  | _ ->
+      Alcotest.fail
+        "Capacity_exhausted must classify as Provider_capacity_exhausted"
+
+let test_provider_failure_hard_quota_cascades () =
+  let err =
+    Http_client.ProviderFailure
+      {
+        kind = Hard_quota { retry_after = Some 60.0 };
+        message = "monthly quota exhausted";
+      }
+  in
+  Alcotest.(check bool)
+    "ProviderFailure Hard_quota cascades as a provider-local skip condition"
+    true
+    (Oas_compat.Http_client.should_cascade err);
+  (match Oas_compat.Http_client.classify err with
+   | Provider_hard_quota -> ()
+   | _ -> Alcotest.fail "Hard_quota must classify as Provider_hard_quota");
+  Alcotest.(check bool)
+    "error_message renders typed provider failure"
+    true
+    (Astring.String.is_infix ~affix:"hard_quota"
+       (Oas_compat.Http_client.error_message err))
 
 let test_provider_failure_capability_mismatch_cascades () =
   let err =
     Http_client.ProviderFailure
       {
-        kind =
-          Capability_mismatch
-            { capability = Some "request_scoped_runtime_mcp" };
-        message = "provider lacks request-scoped MCP";
+        kind = Capability_mismatch { capability = Some "runtime_mcp_tools" };
+        message = "gemini_cli cannot receive runtime MCP tools";
       }
   in
   Alcotest.(check bool)
-    "ProviderFailure Capability_mismatch must cascade"
+    "ProviderFailure Capability_mismatch cascades without string markers"
     true
     (Oas_compat.Http_client.should_cascade err);
-  match Oas_compat.Http_client.classify err with
-  | Accept_rejected_capability_mismatch -> ()
-  | _ ->
-      Alcotest.fail
-        "Capability_mismatch must classify as Accept_rejected_capability_mismatch"
-
-let test_provider_failure_hard_quota_stops () =
-  let err =
-    Http_client.ProviderFailure
-      {
-        kind = Hard_quota { retry_after = None };
-        message = "account quota exhausted";
-      }
-  in
-  Alcotest.(check bool)
-    "ProviderFailure Hard_quota must NOT cascade"
-    false
-    (Oas_compat.Http_client.should_cascade err);
   (match Oas_compat.Http_client.classify err with
-   | Provider_hard_quota -> ()
-   | _ -> Alcotest.fail "Hard_quota must classify as Provider_hard_quota");
-  Alcotest.(check string)
-    "error_message delegates to OAS ProviderFailure renderer"
-    "hard_quota: account quota exhausted"
-    (Oas_compat.Http_client.error_message err)
+   | Provider_capability_mismatch -> ()
+   | _ ->
+       Alcotest.fail
+         "Capability_mismatch must classify as Provider_capability_mismatch")
 
 let test_error_message_baseline () =
   (* Smoke check that the new helper preserves existing semantics for
@@ -237,14 +238,14 @@ let () =
           Alcotest.test_case "Other classify + cascade + message"
             `Quick test_provider_terminal_other;
         ] );
-      ( "ProviderFailure — typed provider failures map to cascade policy",
+      ( "ProviderFailure — typed provider-local skips cascade",
         [
-          Alcotest.test_case "Capacity_exhausted cascades"
+          Alcotest.test_case "Capacity_exhausted classify + cascade"
             `Quick test_provider_failure_capacity_cascades;
-          Alcotest.test_case "Capability_mismatch cascades"
+          Alcotest.test_case "Hard_quota classify + cascade + message"
+            `Quick test_provider_failure_hard_quota_cascades;
+          Alcotest.test_case "Capability_mismatch classify + cascade"
             `Quick test_provider_failure_capability_mismatch_cascades;
-          Alcotest.test_case "Hard_quota stops and renders"
-            `Quick test_provider_failure_hard_quota_stops;
         ] );
       ( "error_message helper baseline",
         [

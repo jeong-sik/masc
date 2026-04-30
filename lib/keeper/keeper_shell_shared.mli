@@ -148,6 +148,15 @@ val rewrite_turn_runtime_paths_to_host :
     its host playground absolute path so the LLM-facing output
     references real host paths. *)
 
+val rewrite_docker_host_paths_to_container :
+  config:Coord.config ->
+  meta:Keeper_types.keeper_meta ->
+  string ->
+  string
+(** Rewrite host playground root occurrences in keeper-issued Docker
+    commands to the corresponding in-container playground root before
+    execution. *)
+
 val run_argv_with_status_retry_eintr :
   ?cwd:string ->
   timeout_sec:float ->

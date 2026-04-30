@@ -19,11 +19,24 @@ module Http_client = struct
             collapsed here because [should_cascade] only needs the
             terminality bit; consumers wanting the message extract it
             via the original [ProviderTerminal] match. *)
+    | Provider_capacity_exhausted
     | Provider_hard_quota
-        (** OAS [ProviderFailure.Hard_quota] — a provider/account quota
-            stop. Treat as cascade-stopping for the current turn so the
-            keeper can surface the quota path instead of burning the
-            remaining cascade budget. *)
+    | Provider_capability_mismatch
+    | Provider_cli_policy_invalid
+    | Provider_cli_startup_failed
+    | Provider_failure_parse_error
+    | Provider_failure_unknown
+
+  let classify_provider_failure_kind =
+    let module H = Llm_provider.Http_client in
+    function
+    | H.Capacity_exhausted _ -> Provider_capacity_exhausted
+    | H.Hard_quota _ -> Provider_hard_quota
+    | H.Capability_mismatch _ -> Provider_capability_mismatch
+    | H.Cli_policy_invalid _ -> Provider_cli_policy_invalid
+    | H.Cli_startup_failed _ -> Provider_cli_startup_failed
+    | H.Provider_parse_error _ -> Provider_failure_parse_error
+    | H.Unknown_provider_failure _ -> Provider_failure_unknown
 
   (* Case-insensitive substring check, mirroring [cascade_health_filter]. *)
   let contains_ci ?(max_scan = 512) ~haystack ~needle () =
@@ -107,20 +120,8 @@ module Http_client = struct
           Cli_transport_required
       | Llm_provider.Http_client.ProviderTerminal _ ->
           Provider_terminal
-      | Llm_provider.Http_client.ProviderFailure { kind; _ } -> (
-          match kind with
-          | Llm_provider.Http_client.Capacity_exhausted _ ->
-              Transient_http 529
-          | Llm_provider.Http_client.Hard_quota _ ->
-              Provider_hard_quota
-          | Llm_provider.Http_client.Capability_mismatch _
-          | Llm_provider.Http_client.Cli_policy_invalid _
-          | Llm_provider.Http_client.Cli_startup_failed _ ->
-              Accept_rejected_capability_mismatch
-          | Llm_provider.Http_client.Provider_parse_error _ ->
-              Provider_parse_error
-          | Llm_provider.Http_client.Unknown_provider_failure _ ->
-              Network_error)
+      | Llm_provider.Http_client.ProviderFailure { kind; _ } ->
+          classify_provider_failure_kind kind
       | Llm_provider.Http_client.NetworkError _ -> Network_error
 
   let should_cascade (err : Llm_provider.Http_client.http_error) : bool =
@@ -128,15 +129,21 @@ module Http_client = struct
     | Local_resource_exhaustion
     | Terminal_http _
     | Accept_rejected_terminal
-    | Provider_terminal
-    | Provider_hard_quota ->
+    | Provider_terminal ->
         false
     | Context_overflow
     | Provider_parse_error
     | Transient_http _
     | Accept_rejected_capability_mismatch
     | Cli_transport_required
-    | Network_error ->
+    | Network_error
+    | Provider_capacity_exhausted
+    | Provider_hard_quota
+    | Provider_capability_mismatch
+    | Provider_cli_policy_invalid
+    | Provider_cli_startup_failed
+    | Provider_failure_parse_error
+    | Provider_failure_unknown ->
         true
 
   let error_message (err : Llm_provider.Http_client.http_error) : string =

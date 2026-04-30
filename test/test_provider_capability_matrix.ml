@@ -14,11 +14,9 @@
        a subprocess that doesn't read them, and the turn would
        silently degrade.
 
-    2. CLI providers MUST advertise runtime MCP tools and
-       runtime tool events.  This is the lane keeper tools
-       (masc_status, keeper_shell, etc.) flow through.  If
-       this regressed for any CLI the keeper would lose its
-       toolset entirely on that provider.
+    2. CLI providers advertise runtime MCP only when their transport
+       accepts request-scoped MCP/tool events. Gemini CLI is static-config
+       only and must not be routed into a required-tool turn.
 
     The CLI list is exhaustively typed via [match] so adding a
     new CLI variant fails compilation here, not at runtime when
@@ -102,18 +100,23 @@ let test_cli_no_inline_tools () =
         false caps.supports_inline_tool_choice)
     cli_kinds
 
+let expected_cli_runtime_mcp = function
+  | PC.Gemini_cli -> false
+  | Claude_code | Kimi_cli | Codex_cli -> true
+  | Anthropic | Kimi | OpenAI_compat | Ollama | Gemini | Glm | DashScope ->
+      false
+
 let test_cli_runtime_mcp_lane () =
   List.iter
     (fun kind ->
       let caps = PTS.capabilities_of_config (make_cfg ~kind) in
+      let expected = expected_cli_runtime_mcp kind in
       Alcotest.(check bool)
-        ("CLI " ^ kind_label kind
-       ^ " must support runtime MCP tools")
-        true caps.supports_runtime_mcp_tools;
+        ("CLI " ^ kind_label kind ^ " runtime MCP tools")
+        expected caps.supports_runtime_mcp_tools;
       Alcotest.(check bool)
-        ("CLI " ^ kind_label kind
-       ^ " must support runtime tool events")
-        true caps.supports_runtime_tool_events)
+        ("CLI " ^ kind_label kind ^ " runtime tool events")
+        expected caps.supports_runtime_tool_events)
     cli_kinds
 
 (** Total function check: [capabilities_of_config] returns for

@@ -1403,8 +1403,65 @@ let classify_toml_failure_reason (err : string) : string =
   else if contains "invalid shared_memory_scope" then "invalid_shared_memory_scope"
   else if contains "invalid" then "invalid_enum"
   else if contains "unknown" || contains "unexpected field" then "unknown_field"
-  else if contains "parse" || contains "syntax" then "parse_error"
+  else if contains "parse" || contains "syntax" || contains "expected" then
+    "parse_error"
   else "other"
+
+type keeper_toml_config_error = {
+  keeper_name : string;
+  path : string;
+  error : string;
+  reason : string;
+}
+
+let keeper_toml_config_error_to_json
+    ({ keeper_name; path; error; reason } : keeper_toml_config_error)
+    : Yojson.Safe.t =
+  `Assoc
+    [
+      ("keeper", `String keeper_name);
+      ("path", `String path);
+      ("reason", `String reason);
+      ("error", `String error);
+      ("terminal_reason", `String "config_parse_failed");
+    ]
+
+let keeper_name_of_toml_path path =
+  Filename.basename path |> Filename.remove_extension
+
+let keeper_toml_config_error_of_path path =
+  match load_keeper_toml path with
+  | Ok _ -> None
+  | Error error ->
+      Some
+        {
+          keeper_name = keeper_name_of_toml_path path;
+          path;
+          error;
+          reason = classify_toml_failure_reason error;
+        }
+
+let keeper_toml_config_errors_in_dir dir =
+  if not (Fs_compat.file_exists dir && Sys.is_directory dir) then []
+  else
+    dir
+    |> Sys.readdir
+    |> Array.to_list
+    |> List.filter (fun f -> Filename.check_suffix f ".toml")
+    |> List.sort String.compare
+    |> List.filter_map (fun f ->
+         keeper_toml_config_error_of_path (Filename.concat dir f))
+
+let keeper_toml_config_errors () =
+  keeper_toml_config_errors_in_dir (Config_dir_resolver.keepers_dir ())
+
+let keeper_toml_config_errors_json () =
+  `List (List.map keeper_toml_config_error_to_json (keeper_toml_config_errors ()))
+
+let keeper_toml_config_error_for_name name =
+  match keeper_toml_path_opt name with
+  | None -> None
+  | Some path -> keeper_toml_config_error_of_path path
 
 let load_keeper_profile_defaults name : keeper_profile_defaults =
   match load_keeper_profile_defaults_result name with

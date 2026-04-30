@@ -1,6 +1,26 @@
 # Changelog
 
 
+## [0.18.20] - 2026-04-30
+
+Post-v0.18.19 merge train for the OAS `0.187.4` downstream pin and the first IDE-plane/RFC-0019 keeper credential slices. No breaking API changes.
+
+### Added
+
+- IDE-plane dashboard shell routing and design-system RFCs for the next code-management surface landed behind the existing dashboard boundaries (#12325, #12330).
+- RFC-0019 keeper credential unification began with credential-store host config bridging and GitHub identity setup documentation (#12328, #12329, #12323).
+
+### Changed
+
+- OAS agent SDK pin metadata advanced to `0.187.4`, including the regenerated public API surface fingerprint and downstream pin documentation (#12327, #12331).
+- Multi-repo management, dashboard connector status, cascade inventory naming, and goal-FSM freshness surfaces were hardened or consolidated after the `0.18.19` release boundary (#12321, #12322, #12324, #12326).
+- Package and release metadata advanced from `0.18.19` to `0.18.20`.
+- Roadmap, product operating plan, opam metadata, and spec baseline version references synced to `0.18.20`.
+
+### Deprecated
+
+- None.
+
 ## [0.18.19] - 2026-04-30
 
 Release-truth catch-up after the `v0.18.18` tag was cut before the final changelog sync and design-system mapping audit landed. No runtime behavior changes beyond the commits already on `main`.

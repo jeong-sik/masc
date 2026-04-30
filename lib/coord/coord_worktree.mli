@@ -43,10 +43,11 @@ val policy_string_array_of_line :
 
 val load_git_clone_policy :
   base_path:string -> string list * string list
-(** Load [(allow_orgs, allow_orgrepos)] from
-    [<base_path>/git_clone_policy.toml]; returns empty lists when the file
-    is missing or unparseable.  Used to gate auto-provisioning of sandbox
-    clones from arbitrary GitHub URLs. *)
+(** Load [(allowed_orgs, denied_repos)] from [tool_policy.toml].  Canonical
+    [<base_path>/.masc/config/tool_policy.toml] takes priority over legacy
+    [<base_path>/config/tool_policy.toml].  Returns empty lists when the file
+    is missing for compatibility; enforcement uses a fail-closed result loader
+    internally. *)
 
 (** {1 GitHub URL parsing} *)
 
@@ -60,7 +61,9 @@ val extract_github_org : string -> string option
 val validate_clone_origin_url :
   base_path:string -> string -> (unit, string) result
 (** Validate [origin_url] against the policy at [base_path].  Used before
-    auto-provisioning a sandbox clone from a workspace repo. *)
+    auto-provisioning a sandbox clone from a workspace repo.  Missing policy
+    fails closed; an explicitly empty [allowed_orgs] list allows any supported
+    GitHub ["org/repo"] URL subject to [denied_repos]. *)
 
 (** {1 Repository discovery / shape checks} *)
 

@@ -194,24 +194,46 @@ let truncate_output s =
 
 (* Loads tool_policy.toml config directly via Keeper_tool_policy_config
    to avoid circular dependency with Keeper_tool_policy (which imports
-   Tool_code_write.schemas for schema assembly). *)
-let _policy_config_cache : Keeper_tool_policy_config.t option ref = ref None
+   Tool_code_write.schemas for schema assembly).  Enforcement paths must
+   distinguish "loaded with an empty allowlist" from "policy unavailable". *)
+type policy_config_cache_entry = {
+  base_path : string;
+  env_config_dir : string option;
+  result : (Keeper_tool_policy_config.t, string) result;
+}
+
+let _policy_config_cache : policy_config_cache_entry option ref = ref None
 
 (** Reset internal config cache — for test isolation only. *)
 let reset_policy_config_cache () = _policy_config_cache := None
 
-let get_policy_config ~base_path =
+let get_policy_config_result ~base_path =
+  let env_config_dir = Env_config.config_dir_opt () in
   match !_policy_config_cache with
-  | Some cfg -> Some cfg
-  | None ->
-    match Keeper_tool_policy_config.load ~base_path with
-    | Ok cfg -> _policy_config_cache := Some cfg; Some cfg
-    | Error _ -> None
+  | Some { base_path = cached_base_path; env_config_dir = cached_env; result }
+    when String.equal cached_base_path base_path && cached_env = env_config_dir ->
+    result
+  | _ ->
+    let result = Keeper_tool_policy_config.load ~base_path in
+    _policy_config_cache := Some { base_path; env_config_dir; result };
+    result
+
+let get_policy_config ~base_path =
+  match get_policy_config_result ~base_path with
+  | Ok cfg -> Some cfg
+  | Error _ -> None
 
 let load_clone_allowed_orgs ~base_path =
   match get_policy_config ~base_path with
   | Some cfg -> Keeper_tool_policy_config.git_clone_allowed_orgs cfg
-  | None -> []
+  | None ->
+    []
+
+let valid_github_org_slug org =
+  let valid_org_char c =
+    (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c = '-'
+  in
+  org <> "" && Seq.for_all valid_org_char (String.to_seq org)
 
 (** Extract GitHub org from clone URL (case-normalized to lowercase).
     Strict matching: URL must start with an exact known prefix to prevent
@@ -221,7 +243,7 @@ let load_clone_allowed_orgs ~base_path =
     - [git@github.com:ORG/repo\[.git\]]
     - [ssh://git@github.com/ORG/repo\[.git\]] *)
 let extract_github_org url =
-  let lc = String.lowercase_ascii url in
+  let lc = String.lowercase_ascii (String.trim url) in
   let prefixes = [
     "https://github.com/";
     "git@github.com:";
@@ -243,11 +265,7 @@ let extract_github_org url =
     | None -> None
     | Some idx ->
       let org = String.sub rest 0 idx in
-      (* GitHub org names: alphanumeric + hyphens only *)
-      let valid_org_char c =
-        (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c = '-'
-      in
-      if org = "" || not (String.to_seq org |> Seq.for_all valid_org_char) then
+      if not (valid_github_org_slug org) then
         None
       else
         Some org
@@ -255,7 +273,7 @@ let extract_github_org url =
 (** Extract "org/repo" from a GitHub clone URL (lowercase, .git and trailing
     slash stripped). Returns exactly two path segments or None. *)
 let extract_github_org_repo url =
-  let lc = String.lowercase_ascii url in
+  let lc = String.lowercase_ascii (String.trim url) in
   let prefixes = [
     "https://github.com/";
     "git@github.com:";
@@ -285,7 +303,7 @@ let extract_github_org_repo url =
     in
     (* Validate exactly "org/repo" — two segments, no deeper paths *)
     match String.split_on_char '/' stripped with
-    | [org; repo] when org <> "" && repo <> "" ->
+    | [org; repo] when valid_github_org_slug org && repo <> "" ->
       Some (org ^ "/" ^ repo)
     | _ -> None
 
@@ -295,35 +313,35 @@ let load_clone_denied_repos ~base_path =
   | None -> []
 
 let validate_clone_url ~base_path url =
-  let allowed = load_clone_allowed_orgs ~base_path in
-  let denied = load_clone_denied_repos ~base_path in
-  let denied_lc = List.map String.lowercase_ascii denied in
-  let denied_check () =
+  match get_policy_config_result ~base_path with
+  | Error msg ->
+    Error (Printf.sprintf "Git clone policy unavailable: %s" msg)
+  | Ok cfg ->
+    let allowed = Keeper_tool_policy_config.git_clone_allowed_orgs cfg in
+    let denied = Keeper_tool_policy_config.git_clone_denied_repos cfg in
+    let allowed_lc = List.map String.lowercase_ascii allowed in
+    let denied_lc = List.map String.lowercase_ascii denied in
     match extract_github_org_repo url with
-    | Some org_repo when List.mem org_repo denied_lc ->
-      Error (Printf.sprintf "Repository '%s' is in the denied list" org_repo)
-    | _ -> Ok ()
-  in
-  if allowed = [] then
-    (* Empty allowed_orgs = skip org check. Per config/tool_policy.toml,
-       this matches operator intent: the keeper may clone any repo reachable
-       through the operator's gh credential, subject to denied_repos. SSOT
-       alignment with [Gh_command_validation.validate_gh_command], which
-       treats [allowed_orgs = []] as "policy not configured / skip". #11830. *)
-    denied_check ()
-  else
-    match extract_github_org url with
     | None ->
-      Error (Printf.sprintf "Cannot parse GitHub org from URL: %s" url)
-    | Some org ->
-      let allowed_lc = List.map String.lowercase_ascii allowed in
-      if not (List.mem org allowed_lc) then
-        Error
-          (Printf.sprintf
-             "GitHub org '%s' not in allowed list: %s. Use the actual GitHub owner from the clone URL; do not infer an org from local workspace path segments."
-             org (String.concat ", " allowed))
+      Error (Printf.sprintf "Cannot parse GitHub org/repo from URL: %s" url)
+    | Some org_repo ->
+      if List.mem org_repo denied_lc then
+        Error (Printf.sprintf "Repository '%s' is in the denied list" org_repo)
       else
-        denied_check ()
+        match String.split_on_char '/' org_repo with
+        | _org :: _ when allowed_lc = [] ->
+          (* Explicit empty allowed_orgs means "any supported GitHub org",
+             still bounded by URL parsing and denied_repos. *)
+          Ok ()
+        | org :: _ when List.mem org allowed_lc ->
+          Ok ()
+        | org :: _ ->
+          Error
+            (Printf.sprintf
+               "GitHub org '%s' not in allowed list: %s. Use the actual GitHub owner from the clone URL; do not infer an org from local workspace path segments."
+               org (String.concat ", " allowed))
+        | [] ->
+          Error (Printf.sprintf "Cannot parse GitHub org/repo from URL: %s" url)
 
 (** Validate cwd for clone: allows .worktrees/ itself (not just subdirs)
     and THIS agent's own .masc/playground/<agent_name>/repos/ directory.

@@ -30,6 +30,52 @@ let with_trimmed_env name value f =
       | None -> Unix.putenv name "")
     f
 
+let with_temp_dir prefix f =
+  let dir = Filename.temp_file prefix "" in
+  Sys.remove dir;
+  Unix.mkdir dir 0o755;
+  let rec rm_rf path =
+    if Sys.file_exists path then
+      if Sys.is_directory path then begin
+        Sys.readdir path
+        |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+        Unix.rmdir path
+      end else
+        Sys.remove path
+  in
+  Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
+
+let rec mkdir_p dir =
+  if dir = "" || dir = "." || dir = "/" then ()
+  else if Sys.file_exists dir then ()
+  else begin
+    mkdir_p (Filename.dirname dir);
+    Unix.mkdir dir 0o755
+  end
+
+let write_file path content =
+  Out_channel.with_open_bin path (fun oc -> output_string oc content)
+
+let policy_toml ?(denied_repos = []) allowed_orgs =
+  let array items =
+    items |> List.map (Printf.sprintf "%S") |> String.concat ", "
+  in
+  Printf.sprintf
+    "[git_clone]\nallowed_orgs = [%s]\ndenied_repos = [%s]\n"
+    (array allowed_orgs)
+    (array denied_repos)
+
+let with_temp_policy ?denied_repos allowed_orgs f =
+  with_temp_dir "tool-code-write-policy" @@ fun base_path ->
+  let config_dir = Filename.concat base_path "config" in
+  mkdir_p config_dir;
+  write_file
+    (Filename.concat config_dir "tool_policy.toml")
+    (policy_toml ?denied_repos allowed_orgs);
+  Tool_code_write.reset_policy_config_cache ();
+  Fun.protect ~finally:Tool_code_write.reset_policy_config_cache (fun () ->
+    f base_path)
+
 (* ── extract_github_org ──────────────────────────────────────────── *)
 
 let test_https_url () =
@@ -133,21 +179,21 @@ let dispatch_exn ctx ~name ~args =
   | None -> fail ("dispatch returned None for " ^ name)
 
 let test_allowed_org () =
-  let bp = project_base_path () in
+  with_temp_policy [ "jeong-sik" ] @@ fun bp ->
   (check (result unit string)) "allowed org passes"
     (Ok ())
     (Tool_code_write.validate_clone_url ~base_path:bp
        "https://github.com/jeong-sik/masc-mcp.git")
 
 let test_disallowed_org () =
-  let bp = project_base_path () in
+  with_temp_policy [ "jeong-sik" ] @@ fun bp ->
   match Tool_code_write.validate_clone_url ~base_path:bp
     "https://github.com/other-org/repo.git" with
   | Error _ -> ()
   | Ok () -> fail "expected error for disallowed org"
 
 let test_disallowed_org_mentions_workspace_path_hint () =
-  let bp = project_base_path () in
+  with_temp_policy [ "jeong-sik" ] @@ fun bp ->
   match Tool_code_write.validate_clone_url ~base_path:bp
     "https://github.com/yousleepwhen/masc-mcp.git" with
   | Error reason ->
@@ -158,14 +204,30 @@ let test_disallowed_org_mentions_workspace_path_hint () =
   | Ok () -> fail "expected error for disallowed org"
 
 let test_non_github_rejected () =
-  let bp = project_base_path () in
+  with_temp_policy [] @@ fun bp ->
   match Tool_code_write.validate_clone_url ~base_path:bp
     "https://gitlab.com/jeong-sik/repo.git" with
   | Error _ -> ()
   | Ok () -> fail "expected error for non-github URL"
 
+let test_empty_allowed_orgs_allows_supported_github () =
+  with_temp_policy [] @@ fun bp ->
+  (check (result unit string)) "explicit empty allowed_orgs allows GitHub"
+    (Ok ())
+    (Tool_code_write.validate_clone_url ~base_path:bp
+       "https://github.com/other-org/repo.git")
+
+let test_empty_allowed_orgs_still_applies_denied_repos () =
+  with_temp_policy ~denied_repos:[ "jeong-sik/me" ] [] @@ fun bp ->
+  match Tool_code_write.validate_clone_url ~base_path:bp
+    "https://github.com/jeong-sik/me.git" with
+  | Error reason ->
+      check bool "mentions denied list" true
+        (msg_contains ~needle:"denied list" reason)
+  | Ok () -> fail "expected denied repo to fail even with empty allowed_orgs"
+
 let test_ssh_allowed () =
-  let bp = project_base_path () in
+  with_temp_policy [ "jeong-sik" ] @@ fun bp ->
   (check (result unit string)) "ssh allowed org passes"
     (Ok ())
     (Tool_code_write.validate_clone_url ~base_path:bp
@@ -182,12 +244,30 @@ let test_missing_base_path_without_config_fails_closed () =
       (Env_config.config_dir_opt ());
     match Tool_code_write.validate_clone_url ~base_path:"/nonexistent"
       "https://github.com/evil-corp/repo.git" with
-    | Error _ -> ()
-    | Ok () -> fail "validation should fail closed when config root is missing")
+  | Error _ -> ()
+  | Ok () -> fail "validation should fail closed when config root is missing")
+
+let test_missing_policy_does_not_reuse_previous_cache () =
+  with_temp_policy [ "jeong-sik" ] @@ fun configured_bp ->
+  (check (result unit string)) "configured policy passes"
+    (Ok ())
+    (Tool_code_write.validate_clone_url ~base_path:configured_bp
+       "https://github.com/jeong-sik/repo.git");
+  with_temp_dir "tool-code-write-missing-policy" @@ fun missing_bp ->
+  match Tool_code_write.validate_clone_url ~base_path:missing_bp
+    "https://github.com/jeong-sik/repo.git" with
+  | Error reason ->
+      check bool "mentions unavailable policy" true
+        (msg_contains ~needle:"Git clone policy unavailable" reason)
+  | Ok () -> fail "missing policy should not reuse prior cached config"
 
 let test_explicit_config_dir_override_still_validates () =
-  let project_root = project_base_path () in
-  let config_dir = Filename.concat project_root "config" in
+  with_temp_dir "tool-code-write-env-policy" @@ fun root ->
+  let config_dir = Filename.concat root "config" in
+  mkdir_p config_dir;
+  write_file
+    (Filename.concat config_dir "tool_policy.toml")
+    (policy_toml [ "jeong-sik" ]);
   Tool_code_write.reset_policy_config_cache ();
   Fun.protect ~finally:Tool_code_write.reset_policy_config_cache (fun () ->
     with_trimmed_env "MASC_CONFIG_DIR" (Some config_dir) @@ fun () ->
@@ -203,7 +283,7 @@ let test_explicit_config_dir_override_still_validates () =
         fail "disallowed org should still be rejected with explicit config override")
 
 let test_mixed_case_org () =
-  let bp = project_base_path () in
+  with_temp_policy [ "jeong-sik" ] @@ fun bp ->
   (check (result unit string)) "mixed-case org passes"
     (Ok ())
     (Tool_code_write.validate_clone_url ~base_path:bp
@@ -486,8 +566,14 @@ let () =
       test_case "disallowed org hints against workspace path inference" `Quick
         test_disallowed_org_mentions_workspace_path_hint;
       test_case "non-github rejected" `Quick test_non_github_rejected;
+      test_case "empty allowed_orgs allows supported GitHub" `Quick
+        test_empty_allowed_orgs_allows_supported_github;
+      test_case "empty allowed_orgs still applies denied repos" `Quick
+        test_empty_allowed_orgs_still_applies_denied_repos;
       test_case "ssh allowed" `Quick test_ssh_allowed;
       test_case "missing config fails closed" `Quick test_missing_base_path_without_config_fails_closed;
+      test_case "missing policy does not reuse previous cache" `Quick
+        test_missing_policy_does_not_reuse_previous_cache;
       test_case "explicit config dir override still validates" `Quick test_explicit_config_dir_override_still_validates;
       test_case "mixed-case org" `Quick test_mixed_case_org;
     ]);

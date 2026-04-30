@@ -129,7 +129,6 @@ specs/**/*_TTrace_*.bin
 pr_*.json
 pr-*.json
 pr_body_*.txt
-pr*.json
 cr_*.txt
 comments_*.txt
 all_comments_*.txt

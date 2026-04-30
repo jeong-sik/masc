@@ -1,5 +1,5 @@
 [keeper]
-persona_name = "executor"
+persona_name = "sangsu"
 sandbox_profile = "docker"
 network_mode = "inherit"
 work_discovery_enabled = true
@@ -9,4 +9,4 @@ git_identity_mode = "github_identity"
 
 [keeper.tool_access]
 kind = "preset"
-preset = "messaging"
+preset = "coding"

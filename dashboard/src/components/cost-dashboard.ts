@@ -22,6 +22,7 @@ import {
   fetchCascadeHealth,
   fetchCascadeConfig,
   fetchAuditLedger,
+  fetchKeeperDecisions,
   type DashboardRuntimeModelMetric,
   type KeeperCostMetric,
   type LatencyBucket,
@@ -33,6 +34,8 @@ import {
   type CascadeConfigResponse,
   type AuditEntry,
   type AuditLedgerResponse,
+  type KeeperDecision,
+  type KeeperDecisionsResponse,
 } from '../api/dashboard'
 import { LoadingState, ErrorState } from './common/feedback-state'
 
@@ -86,6 +89,12 @@ type AuditLedgerLoadState =
   | { status: 'loaded'; data: AuditLedgerResponse }
   | { status: 'error'; message: string }
 
+type KeeperDecisionsLoadState =
+  | { status: 'idle' }
+  | { status: 'loading' }
+  | { status: 'loaded'; data: KeeperDecisionsResponse }
+  | { status: 'error'; message: string }
+
 const viewMode = signal<ViewMode>('model')
 const modelState = signal<ModelLoadState>({ status: 'idle' })
 const keeperState = signal<KeeperLoadState>({ status: 'idle' })
@@ -95,6 +104,7 @@ const coverageState = signal<CoverageLoadState>({ status: 'idle' })
 const cascadeHealthState = signal<CascadeHealthLoadState>({ status: 'idle' })
 const cascadeConfigState = signal<CascadeConfigLoadState>({ status: 'idle' })
 const auditLedgerState = signal<AuditLedgerLoadState>({ status: 'idle' })
+const keeperDecisionsState = signal<KeeperDecisionsLoadState>({ status: 'idle' })
 
 const WINDOW_OPTIONS: Array<{ key: number; label: string }> = [
   { key: 30, label: '30분' },
@@ -202,6 +212,17 @@ async function loadAuditLedger(limit = 50) {
   }
 }
 
+async function loadKeeperDecisions(limit = 200) {
+  keeperDecisionsState.value = { status: 'loading' }
+  try {
+    const resp = await fetchKeeperDecisions(limit)
+    keeperDecisionsState.value = { status: 'loaded', data: resp }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'keeper decisions 불러오기 실패'
+    keeperDecisionsState.value = { status: 'error', message }
+  }
+}
+
 function loadActiveView(window: number) {
   if (viewMode.value === 'model') {
     void loadModelMetrics(window)
@@ -214,6 +235,7 @@ function loadActiveView(window: number) {
   void loadCascadeHealth()
   void loadCascadeConfig()
   void loadAuditLedger()
+  void loadKeeperDecisions()
 }
 
 const modelTotals = computed(() => {
@@ -864,6 +886,53 @@ function AuditLedgerBoard({ entries, count }: { entries: AuditEntry[]; count: nu
   `
 }
 
+function KeeperDecisionsBoard({ events, limit }: { events: KeeperDecision[]; limit: number }) {
+  const fmtTime = (ts: number | null): string => {
+    if (ts == null) return '—'
+    const d = new Date(ts * 1000)
+    return d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
+  }
+
+  return html`
+    <section class="flex flex-col gap-4" aria-label="Keeper decisions">
+      <div class="flex items-center justify-between rounded border border-card-border/60 bg-[var(--backdrop-deep)] px-3 py-2">
+        <span class="font-mono text-2xs uppercase tracking-1 text-text-muted">keeper decisions · ${events.length} events · limit ${limit}</span>
+      </div>
+
+      <div class="overflow-x-auto rounded border border-card-border/60 bg-[var(--backdrop-deep)]">
+        <table class="w-full" aria-label="Keeper decision events">
+          <thead>
+            <tr class="border-b border-[var(--color-border-default)] text-2xs uppercase tracking-1 text-text-muted">
+              <th scope="col" class="px-2 py-1.5 text-left">time</th>
+              <th scope="col" class="px-2 py-1.5 text-left">keeper</th>
+              <th scope="col" class="px-2 py-1.5 text-left">event</th>
+              <th scope="col" class="px-2 py-1.5 text-left">outcome</th>
+              <th scope="col" class="px-2 py-1.5 text-left">model</th>
+              <th scope="col" class="px-2 py-1.5 text-right">latency</th>
+              <th scope="col" class="px-2 py-1.5 text-right">cost</th>
+              <th scope="col" class="px-2 py-1.5 text-center">tool</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${events.map((e, i) => html`
+              <tr key=${i} class="border-b border-[var(--color-border-default)]/50 text-2xs">
+                <td class="px-2 py-1.5 text-left font-mono text-text-muted">${fmtTime(e.ts_unix)}</td>
+                <td class="px-2 py-1.5 text-left font-mono text-xs text-[var(--color-accent-fg)]">${e.keeper_name}</td>
+                <td class="px-2 py-1.5 text-left font-mono text-text-strong">${e.event_type}</td>
+                <td class="px-2 py-1.5 text-left font-mono ${e.outcome === 'success' ? 'text-[var(--color-status-ok)]' : e.outcome === 'error' ? 'text-[var(--color-status-err)]' : 'text-text-muted'}">${e.outcome ?? '—'}</td>
+                <td class="px-2 py-1.5 text-left font-mono text-text-muted">${e.model_used ?? '—'}</td>
+                <td class="px-2 py-1.5 text-right font-mono text-text-muted">${e.latency_ms == null ? '—' : `${Math.round(e.latency_ms)}ms`}</td>
+                <td class="px-2 py-1.5 text-right font-mono text-text-muted">${e.cost_usd == null ? '—' : `$${e.cost_usd.toFixed(4)}`}</td>
+                <td class="px-2 py-1.5 text-center font-mono text-text-muted">${e.tool ?? '—'}</td>
+              </tr>
+            `)}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  `
+}
+
 export function CostDashboard() {
   const activeState = viewMode.value === 'model' ? modelState.value : keeperState.value
 
@@ -1054,6 +1123,18 @@ export function CostDashboard() {
           ? html`<${ErrorState}
               message=${auditLedgerState.value.message}
               onRetry=${() => void loadAuditLedger()}
+            />`
+          : html`<${LoadingState} />`}
+
+      ${keeperDecisionsState.value.status === 'loaded'
+        ? html`<${KeeperDecisionsBoard}
+            events=${keeperDecisionsState.value.data.events}
+            limit=${keeperDecisionsState.value.data.limit}
+          />`
+        : keeperDecisionsState.value.status === 'error'
+          ? html`<${ErrorState}
+              message=${keeperDecisionsState.value.message}
+              onRetry=${() => void loadKeeperDecisions()}
             />`
           : html`<${LoadingState} />`}
     </section>

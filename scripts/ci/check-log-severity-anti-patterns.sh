@@ -38,22 +38,55 @@ cd "$(git rev-parse --show-toplevel)"
 # (which only deletes 5 dead .mli files at lib/ root and cannot add log
 # patterns).  Naturalizing the baseline here unblocks #11740 and any
 # other open PR that hits the same drift.
-BASELINE_L1_SILENT=32
-BASELINE_L1_LOGGING_ONLY=12
-BASELINE_L2_OPERATOR_BROADCAST=13
-BASELINE_L4_WATCHDOG_TICK=9
+# 2026-04-30: switch from counting `rg -U` output rows to actual regex
+# matches. The previous baselines were line counts inside multi-line matches,
+# so they were vulnerable to false failures when unrelated lines were added
+# within the match window.
+BASELINE_L1_SILENT=8
+BASELINE_L1_LOGGING_ONLY=2
+BASELINE_L2_OPERATOR_BROADCAST=1
+BASELINE_L4_WATCHDOG_TICK=1
 BASELINE_L5_VALIDATION_SUCCESS=0
 
 exit_code=0
 total_current=0
 total_baseline=0
 
-# Multi-line scan. Returns count of unique callsite locations.
-# `rg` exits 1 when there are zero matches; pipefail would propagate that as
-# a script abort. Force a non-failing exit so wc sees an empty stream.
-count_pattern() {
+# Multi-line scan. Returns one row per matched callsite location.
+#
+# `rg -U` prints every line in a multi-line match. Counting those rows makes
+# the ratchet sensitive to unrelated line wrapping inside the matched window:
+# adding telemetry between an existing Log.info call and the next "watchdog
+# tick" string can look like new log-severity violations. Use Perl's slurp mode
+# to count regex matches directly, then print only the match start line.
+list_pattern_locations() {
   local pat="$1"
-  ( rg -nUP --type ml -g '!test/' "$pat" lib/ 2>/dev/null || true ) | wc -l | tr -d ' '
+  local files=()
+  local file
+
+  while IFS= read -r -d '' file; do
+    files+=("$file")
+  done < <(rg --files -0 --type ml -g '!test/' lib/)
+
+  if [ "${#files[@]}" -eq 0 ]; then
+    return 0
+  fi
+
+  PATTERN="$pat" perl -0ne '
+    my $pat = $ENV{"PATTERN"};
+    while (/$pat/g) {
+      my $start = $-[0];
+      my $prefix = substr($_, 0, $start);
+      my $line = 1 + ($prefix =~ tr/\n//);
+      my $match = substr($_, $start, $+[0] - $start);
+      $match =~ s/\n.*\z//s;
+      print "$ARGV:$line:$match\n";
+    }
+  ' "${files[@]}"
+}
+
+count_pattern() {
+  list_pattern_locations "$1" | wc -l | tr -d ' '
 }
 
 check_rule() {
@@ -72,8 +105,7 @@ check_rule() {
     echo "FAIL  $rule_id ($description): $current > baseline=$baseline"
     echo "      see docs/spec/18-log-severity-taxonomy.md $doc_section"
     echo "      first 5 offending lines:"
-    rg -nUP --type ml -g '!test/' "$pattern" lib/ 2>/dev/null \
-      | head -5 | sed 's/^/        /'
+    list_pattern_locations "$pattern" | sed -n '1,5p' | sed 's/^/        /'
     echo
     exit_code=1
   elif [ "$current" -lt "$baseline" ]; then

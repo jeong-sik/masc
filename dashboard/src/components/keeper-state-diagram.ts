@@ -69,12 +69,12 @@ const DIAGRAM_VIEW_CHIPS: Array<{ key: DiagramView; label: string; title: string
   { key: 'mermaid', label: 'Mermaid', title: 'Backend-generated phase diagram' },
 ]
 
-function normalizePhase(phase: string | null | undefined): string | null {
+export function normalizePhase(phase: string | null | undefined): string | null {
   if (!phase) return null
   return PHASE_ID_MAP[phase] ?? phase
 }
 
-function transitionType(selectedEvent: unknown): string {
+export function transitionType(selectedEvent: unknown): string {
   if (selectedEvent && typeof selectedEvent === 'object' && 'type' in selectedEvent) {
     const raw = (selectedEvent as { type?: unknown }).type
     if (typeof raw === 'string' && raw.trim()) {
@@ -84,7 +84,7 @@ function transitionType(selectedEvent: unknown): string {
   return 'event'
 }
 
-function signalTone(severity: string | null | undefined): string {
+export function signalTone(severity: string | null | undefined): string {
   // Unknown severity → treat as warn (fail-closed). Only an explicit "ok" from
   // the backend renders as green. See issue #9894 (Unknown → Permissive Default
   // anti-pattern; CLAUDE.md #2). Backend emits 'ok' | 'warn' | 'bad' today via
@@ -107,7 +107,7 @@ function signalTone(severity: string | null | undefined): string {
   }
 }
 
-function badgeTone(ok: boolean): string {
+export function badgeTone(ok: boolean): string {
   return ok
     ? 'border-[rgba(34,197,94,0.24)] bg-[var(--emerald-8)] text-[var(--color-status-ok)]'
     : 'border-[rgba(239,68,68,0.24)] bg-[var(--bad-10)] text-[var(--color-status-err)]'

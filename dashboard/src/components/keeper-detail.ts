@@ -76,6 +76,7 @@ import { KeeperToolTelemetry } from './keeper-tool-telemetry'
 import { KeeperToolCallInspector } from './keeper-tool-call-inspector'
 import { SupervisorDiagnosticsPanel } from './keeper-supervisor-diagnostics'
 import { KeeperEvalQualityPanel } from './keeper-eval-quality'
+import { KeeperBDIPanel } from './keeper-bdi-panel'
 import { KeeperDetailSectionCard as SectionCard } from './keeper-detail-layout'
 import {
   KeeperDetailHeaderInfo,
@@ -670,39 +671,6 @@ function KeeperCommsPanel({ keeper }: { keeper: Keeper }) {
   `
 }
 
-// ── Profile field (label + value inline) ────────────────
-
-function ProfileField({ label, value, color }: { label: string; value: string; color: string }) {
-  return html`
-    <div class="flex items-start gap-2 text-xs text-[var(--color-fg-muted)]">
-      <span class="flex-shrink-0">${label}:</span>
-      <span class="font-medium leading-relaxed" style="color: ${color}">${value}</span>
-    </div>
-  `
-}
-
-// ── BDI panel (will / needs / desires) ──────────────────
-// Preview spec K1 BDI variant — extraction of inline fragments.
-// Returns null when all three identity fields are absent so callers
-// can place this unconditionally without an outer guard.
-function BdiSection({
-  will,
-  needs,
-  desires,
-}: {
-  will: string | null | undefined
-  needs: string | null | undefined
-  desires: string | null | undefined
-}) {
-  if (!will && !needs && !desires) return null
-  return html`
-    <div class="mt-3 flex flex-col gap-1.5">
-      ${will ? html`<${ProfileField} label="의지" value=${will} color="var(--cyan)" />` : null}
-      ${needs ? html`<${ProfileField} label="필요" value=${needs} color="var(--color-status-warn)" />` : null}
-      ${desires ? html`<${ProfileField} label="열망" value=${desires} color="var(--purple)" />` : null}
-    </div>
-  `
-}
 
 // ── Playground Repos Panel ──────────────────────────────
 
@@ -1173,9 +1141,15 @@ export function KeeperDetailPage() {
               ? html`<div class="text-2xs text-[var(--color-fg-muted)] mt-1 leading-relaxed">${keeper.skill_reason}</div>`
               : null}
 
-            ${'' /* ── Identity: will / needs / desires (extracted to BdiSection) ── */}
-            <${BdiSection} will=${keeper.will} needs=${keeper.needs} desires=${keeper.desires} />
-              <//>
+            <${KeeperBDIPanel}
+              will=${keeper.will}
+              needs=${keeper.needs}
+              desires=${keeper.desires}
+              short_goal=${keeper.short_goal}
+              mid_goal=${keeper.mid_goal}
+              long_goal=${keeper.long_goal}
+              goal_horizons=${keeper.goal_horizons}
+            />
 
           ${keeper.inventory && keeper.inventory.length > 0
             ? html`

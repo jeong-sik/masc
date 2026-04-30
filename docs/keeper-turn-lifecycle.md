@@ -26,16 +26,16 @@ sequenceDiagram
     else phase allows turn
         G->>C: select_cascade
         alt ollama saturated
-            C-->>R: record_pre_dispatch_terminal_observation outcome=skipped
-            R-->>U: Ok meta (skip)
+            C-->>R: record_pre_dispatch_terminal_observation outcome=error
+            R-->>U: Error
         else cascade ok
             C->>A: Keeper_agent_run.run_turn
             alt run_turn returns Error
                 A-->>R: record_pre_dispatch_terminal_observation outcome=error
                 R-->>U: Error
             else turn livelock blocked
-                A-->>R: record_pre_dispatch_terminal_observation outcome=blocked
-                R-->>U: Ok meta (block)
+                A-->>R: record_pre_dispatch_terminal_observation outcome=error
+                R-->>U: Ok meta (terminal failure)
             else turn dispatched
                 A->>T: stream tokens + tool calls
                 T-->>A: results
@@ -58,7 +58,7 @@ stateDiagram-v2
     direction LR
     [*] --> Idle
     Idle --> Phase_gating: heartbeat tick
-    Phase_gating --> Cancelled: phase blocks turn (Cancelled_phase_gate_close)
+    Phase_gating --> Done: phase blocks turn (PhaseGateSkip)
     Phase_gating --> Cascade_routing: phase allows turn
     Cascade_routing --> Failed: cascade unavailable (Failure_cascade_unavailable)
     Cascade_routing --> Failed: cascade build error (Failure_provider_error)
@@ -86,9 +86,9 @@ stateDiagram-v2
 |---|---|---|---|
 | Phase_gating (skip) | phase non-executable | `skipped` | ✓ (#11154) |
 | Cascade_routing | provider selection in flight | (transient) | ✓ |
-| Ollama_saturated (skip) | local provider over budget | `skipped` | ✓ (#11154) |
+| Ollama_saturated | local provider over budget | `error` | ✓ (#11154) |
 | Cascade_error | run_turn returns Error early | `error` | ✓ (#11154) |
-| Turn_livelock (block) | livelock guard caught loop | `blocked` | ✓ (#11154) |
+| Turn_livelock | livelock guard caught loop | `error` | ✓ (#11154) |
 | Streaming | provider yielding tokens | (active) | ✓ |
 | Awaiting_tool_result | tool call in flight | (active) | ✓ |
 | Done | response_text present + receipt ok | `done` | ✓ |

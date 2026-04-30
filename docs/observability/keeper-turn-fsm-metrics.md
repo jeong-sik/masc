@@ -69,7 +69,7 @@ The older counter encodes **cross sub-FSM** edges (`ksm_to_kcl_routing`, `kmc_to
 ```promql
 # Phase-gate skip rate per keeper (5m window).
 rate(masc_keeper_turn_fsm_transitions_total{
-  from="phase_gating", to="cancelled:phase_gate_close"
+  from="phase_gating", to="done"
 }[5m])
 
 # Total failure rate by reason.
@@ -112,7 +112,7 @@ violation raises during tests/CI.
 $ masc-trace ~/me alice 42
 2026-04-28T... [receipt 04-28.jsonl] cascade=keeper-default outcome=skipped reason=...
 2026-04-28T... [fsm] alice: [fsm:transition] - -> phase_gating
-2026-04-28T... [fsm] alice: [fsm:transition] phase_gating -> cancelled:phase_gate_close
+2026-04-28T... [fsm] alice: [fsm:transition] phase_gating -> done
 1777248791.071 [tool keeper_tasks_list] ok duration_ms=372
 ```
 
@@ -128,7 +128,7 @@ Source-of-truth cross-reference (after Step 4 caller adoption):
 | Transition | File:line | PR |
 |------------|-----------|-----|
 | `Idle → Phase_gating` (entry) | `keeper_unified_turn.ml:1064` | #11288 |
-| `Phase_gating → Cancelled phase_gate_close` (skip) | `keeper_unified_turn.ml:1086` | #11269 |
+| `Phase_gating → Done` (phase skip) | `keeper_unified_turn.ml:1086` | #11269 |
 | `Phase_gating → Cascade_routing` | `keeper_unified_turn.ml:1095` | #11347 |
 | `Cascade_routing → Failed cascade_unavailable` (ollama) | `keeper_unified_turn.ml:1195` | #11269 |
 | `Cascade_routing → Failed provider_error` (cascade build) | `keeper_unified_turn.ml:1284` | #11340 (variant) + #11269 (site) |

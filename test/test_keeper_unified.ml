@@ -3096,6 +3096,32 @@ let test_run_keeper_cycle_skips_non_executable_phase () =
         (Some "paused")
         (Option.map KP.phase_to_string
            (KR.get_phase ~base_path:base_dir meta.name));
+      let phase_skip_labels =
+        [
+          ("from", "phase_gating");
+          ("to", "done");
+          ("keeper", meta.name);
+        ]
+      in
+      let legacy_phase_cancel_labels =
+        [
+          ("from", "phase_gating");
+          ("to", "cancelled:phase_gate_close");
+          ("keeper", meta.name);
+        ]
+      in
+      let phase_skip_before =
+        Masc_mcp.Prometheus.metric_value_or_zero
+          Masc_mcp.Prometheus.metric_keeper_turn_fsm_transitions
+          ~labels:phase_skip_labels
+          ()
+      in
+      let legacy_phase_cancel_before =
+        Masc_mcp.Prometheus.metric_value_or_zero
+          Masc_mcp.Prometheus.metric_keeper_turn_fsm_transitions
+          ~labels:legacy_phase_cancel_labels
+          ()
+      in
       match
         UT.run_keeper_cycle
           ~config
@@ -3109,7 +3135,25 @@ let test_run_keeper_cycle_skips_non_executable_phase () =
             ("expected paused-phase skip, got error: "
             ^ Agent_sdk.Error.to_string err)
       | Ok updated ->
+          let phase_skip_after =
+            Masc_mcp.Prometheus.metric_value_or_zero
+              Masc_mcp.Prometheus.metric_keeper_turn_fsm_transitions
+              ~labels:phase_skip_labels
+              ()
+          in
+          let legacy_phase_cancel_after =
+            Masc_mcp.Prometheus.metric_value_or_zero
+              Masc_mcp.Prometheus.metric_keeper_turn_fsm_transitions
+              ~labels:legacy_phase_cancel_labels
+              ()
+          in
           check string "keeper name preserved" meta.name updated.name;
+          check (float 0.0) "phase skip emits Done transition"
+            (phase_skip_before +. 1.0)
+            phase_skip_after;
+          check (float 0.0) "phase skip does not emit legacy cancel"
+            legacy_phase_cancel_before
+            legacy_phase_cancel_after;
           check (option string) "phase remains paused after skipped turn"
             (Some "paused")
             (Option.map KP.phase_to_string

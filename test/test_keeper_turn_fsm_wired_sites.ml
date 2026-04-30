@@ -65,9 +65,9 @@ let count_substring haystack needle =
     | Step | site                                                  | count |
     |------|-------------------------------------------------------|-------|
     | 4c   | run_keeper_cycle entry [Idle -> Phase_gating]         | 1     |
-    | 4b   | phase-gate skip [Phase_gating -> Cancelled]           | 1     |
+    | 4b   | phase-gate skip [Phase_gating -> Done]                | 1     |
     | 4g   | phase pass [Phase_gating -> Cascade_routing]          | 1     |
-    | 4b   | ollama saturated skip                                 | 1     |
+    | 4b   | ollama saturated failure                              | 1     |
     | 4b   | cascade build error                                   | 1     |
     | 4g   | livelock Started [Cascade_routing -> Awaiting_provider] | 1   |
     | 4b   | livelock Blocked                                      | 1     |

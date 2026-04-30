@@ -3,7 +3,7 @@
 
 ## [0.18.18] - 2026-04-30
 
-Aggregate of 16 commits since v0.18.17. No breaking API changes.
+Post-v0.18.17 merge train through the release boundary. No breaking API changes.
 
 ### Added
 
@@ -13,11 +13,12 @@ Aggregate of 16 commits since v0.18.17. No breaking API changes.
 
 ### Fixed
 
-- Local MCP client bearer lifetime, clone-policy fail-closed behavior, keeper stream idle timeout defaults, fs-read containment matching, and dashboard IO contention/world-memory prompt handling were fixed (#12295, #12305, #12307, #12310, #12311).
+- Local MCP client bearer lifetime, clone-policy fail-closed behavior, keeper stream idle timeout defaults, fs-read containment matching regressions, and dashboard IO contention/world-memory prompt handling were fixed (#12295, #12305, #12307, #12310, #12311, #12313, #12314).
 
 ### Changed
 
 - Cascade/OAS labels are now typed at metric and FSM boundaries, and routine keeper logs are demoted to reduce operator noise (#12298, #12308, #12299).
+- OAS agent SDK pin metadata advanced to `0.187.3` after the downstream pin lane landed (#12312).
 - Package and release metadata advanced from `0.18.17` to `0.18.18` after the post-v0.18.17 merge train.
 - Roadmap, product operating plan, opam metadata, and spec baseline version references synced to `0.18.18`.
 

@@ -152,6 +152,29 @@ Spec == Init /\ [][Next]_vars
 
 BoundedDecisions == Len(decisions) <= MaxDecisions
 
+\* ── Bug model (RFC-Q2-6) ────────────────────────────────────────
+\*
+\* Models the bug class where the lattice monotonicity is broken —
+\* operator-authorised L4 transparently drops back to L1 without
+\* an explicit recovery action. The clean EscalateLevel only allows
+\* level transitions where the level index increases (or holds).
+\* The bug action drops that constraint, allowing arbitrary
+\* lattice regression.
+
+LatticeRegress(new_level) ==
+    /\ new_level \in Levels
+    /\ new_level # level
+    \* deliberately omitted: the EscalateLevel monotonicity check.
+    \* Any transition is allowed, including L4 -> L1 regression.
+    /\ level' = new_level
+    /\ UNCHANGED decisions
+
+NextBuggy ==
+    \/ Next
+    \/ \E new_level \in Levels : LatticeRegress(new_level)
+
+SpecBuggy == Init /\ [][NextBuggy]_vars
+
 THEOREM Spec => []TypeOK
 THEOREM Spec => []MonotonicDegradation
 THEOREM Spec => []NoRetryAtL4Permanent

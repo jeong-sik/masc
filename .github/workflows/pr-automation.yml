@@ -13,7 +13,7 @@ on:
       - unlabeled
 
 permissions:
-  contents: read
+  contents: write
   checks: read
   issues: write
   pull-requests: write
@@ -292,9 +292,16 @@ jobs:
                 const ciGateStatus = latestCiGate
                   ? `${latestCiGate.status}/${latestCiGate.conclusion || "none"} ${latestCiGate.html_url}`
                   : "missing";
-                policyFailures.push(`CI Gate is not completed successfully for head ${pr.head.sha}: ${ciGateStatus}`);
-                shouldDisableAutoMerge = true;
-                ciGatePolicyFailure = true;
+                // CI Gate may not exist yet immediately after auto-merge is enabled
+                // (CI workflow is still starting). Only block when the gate is known
+                // to exist but failed, or when this is not the auto_merge_enabled event.
+                if (!latestCiGate && action === "auto_merge_enabled") {
+                  core.info(`CI Gate not yet present for head ${pr.head.sha}; skipping block on auto_merge_enabled event.`);
+                } else {
+                  policyFailures.push(`CI Gate is not completed successfully for head ${pr.head.sha}: ${ciGateStatus}`);
+                  shouldDisableAutoMerge = true;
+                  ciGatePolicyFailure = true;
+                }
               }
             }
 

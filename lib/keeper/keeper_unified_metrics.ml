@@ -192,9 +192,7 @@ let label_or_unknown raw =
 
 let provider_kind_of_model_used raw =
   let model_used = label_or_unknown raw in
-  match String.index_opt model_used ':' with
-  | Some idx when idx > 0 -> String.sub model_used 0 idx
-  | _ -> "unknown"
+  Provider_adapter.provider_of_model_label model_used
 
 let record_turn_latency_by_model_bucket
     ~(keeper : string)

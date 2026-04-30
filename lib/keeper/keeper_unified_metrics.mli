@@ -123,9 +123,9 @@ val record_turn_latency_bucket :
   keeper:string -> latency_ms:int -> unit
 
 val provider_kind_of_model_used : string -> string
-(** Derive the bounded provider label from a keeper [model_used]
-    surface such as [claude_code:auto] or [kimi_cli:kimi-for-coding].
-    Empty or unprefixed values collapse to [unknown]. *)
+(** Derive the bounded provider label from a keeper [model_used] surface via
+    the provider adapter registry. Empty, unprefixed, or unregistered
+    provider prefixes collapse to [unknown]. *)
 
 val record_turn_latency_by_model_bucket :
   keeper:string ->

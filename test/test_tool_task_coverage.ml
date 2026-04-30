@@ -1039,7 +1039,7 @@ let () = test "transition_release_clears_planning_current_task" (fun () ->
   assert (Planning_eio.get_current_task ctx.config = None)
 )
 
-let () = test "transition_done_redirects_to_verification_and_keeps_planning_current_task" (fun () ->
+let () = test "transition_done_redirects_to_verification_and_clears_planning_current_task" (fun () ->
   let ctx = make_test_ctx () in
   let _ = Tool_task.handle_add_task ctx (`Assoc [("title", `String "Transition done")]) in
   let (success_claim, _result) =
@@ -1058,7 +1058,7 @@ let () = test "transition_done_redirects_to_verification_and_keeps_planning_curr
   in
   assert success_done;
   assert (not (str_contains result "rejected"));
-  assert (Planning_eio.get_current_task ctx.config = Some "task-001");
+  assert (Planning_eio.get_current_task ctx.config = None);
   match Coord.get_tasks_raw ctx.config with
   | [ task ] -> (
       match task.task_status with

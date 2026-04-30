@@ -339,9 +339,26 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
       (* Execution queue: top 10 priority items *)
       let limited_queue = take 10 execution_queue in
       let base_fields =
+        let utf8_repair = Safe_ops.persistence_utf8_repair_stats () in
         [
           ("generated_at", `String (Types.now_iso ()));
           ("status", room_status_json config);
+          ( "projection_diagnostics",
+            `Assoc
+              [
+                ("surface", `String "execution");
+                ("coordination_root", `String config.base_path);
+                ("workspace_path", `String config.workspace_path);
+                ( "persistence_sanitized_count",
+                  `Int utf8_repair.repaired_reads );
+                ( "persistence_sanitized_bytes",
+                  `Int utf8_repair.repaired_bytes );
+                ( "persistence_sanitized_paths_sample",
+                  `List
+                    (List.map
+                       (fun path -> `String path)
+                       utf8_repair.path_samples) );
+              ] );
           ("execution_queue", `List (List.map (fun (row : queue_context) -> row.json) limited_queue));
           ("operation_briefs", `List (List.map (fun (row : operation_context) -> row.json) limited_ops));
           ("worker_support_briefs", `List (List.map (fun (row : worker_context) -> row.json) worker_support_briefs));

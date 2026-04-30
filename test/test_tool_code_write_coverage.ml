@@ -233,6 +233,12 @@ let test_ssh_allowed () =
     (Tool_code_write.validate_clone_url ~base_path:bp
        "git@github.com:jeong-sik/oas.git")
 
+let test_normalize_github_clone_url_converts_ssh_to_https () =
+  check string "ssh remote normalized to https"
+    "https://github.com/jeong-sik/oas.git"
+    (Tool_code_write.normalize_github_clone_url
+       "git@github.com:jeong-sik/oas.git")
+
 let test_missing_base_path_without_config_fails_closed () =
   Tool_code_write.reset_policy_config_cache ();
   Fun.protect ~finally:Tool_code_write.reset_policy_config_cache (fun () ->
@@ -576,6 +582,8 @@ let () =
         test_missing_policy_does_not_reuse_previous_cache;
       test_case "explicit config dir override still validates" `Quick test_explicit_config_dir_override_still_validates;
       test_case "mixed-case org" `Quick test_mixed_case_org;
+      test_case "normalize ssh clone url to https" `Quick
+        test_normalize_github_clone_url_converts_ssh_to_https;
     ]);
     ("masc_code_git", [
       test_case "clone rejects flag args" `Quick

@@ -190,93 +190,17 @@ let preferred_tool_choice_for_required_turn ~(has_current_task : bool)
        task_update, task_done, etc.). *)
     Oas.Types.Any
 
-let owned_active_task_id_for_meta ~(config : Coord.config)
-    ~(meta : Keeper_types.keeper_meta) =
-  match meta.current_task_id with
-  | Some task_id -> Some task_id
-  | None ->
-    let actual_name =
-      try Coord.resolve_agent_name config meta.agent_name
-      with
-      | Sys_error _ | Yojson.Json_error _ -> meta.agent_name
-      | exn ->
-        Log.Keeper.warn
-          "keeper:%s resolve_agent_name failed while reconciling current task: %s"
-          meta.name (Printexc.to_string exn);
-        meta.agent_name
-    in
-    let matches assignee =
-      String.equal assignee meta.agent_name || String.equal assignee actual_name
-    in
-    (try
-       Coord.get_tasks_raw config
-       |> List.find_map (fun (task : Types.task) ->
-            match task.task_status with
-            | Types.Claimed { assignee; _ }
-            | Types.InProgress { assignee; _ }
-            | Types.AwaitingVerification { assignee; _ }
-              when matches assignee -> (
-                match Keeper_id.Task_id.of_string task.id with
-                | Ok task_id -> Some task_id
-                | Error msg ->
-                  Log.Keeper.warn
-                    "keeper:%s owned task %s could not be parsed: %s"
-                    meta.name task.id msg;
-                  None)
-            | Types.Claimed _
-            | Types.InProgress _
-            | Types.AwaitingVerification _
-            | Types.Todo
-            | Types.Done _
-            | Types.Cancelled _ -> None)
-     with
-     | Eio.Cancel.Cancelled _ as e -> raise e
-     | exn ->
-       Log.Keeper.warn
-         "keeper:%s owned task reconciliation failed: %s"
-         meta.name (Printexc.to_string exn);
-       None)
-;;
+let owned_active_task_id_for_meta =
+  Keeper_current_task_reconcile.owned_active_task_id_for_meta
 
-let merge_current_task_id ~(latest : Keeper_types.keeper_meta)
-    ~(caller : Keeper_types.keeper_meta) =
-  {
-    latest with
-    current_task_id = caller.current_task_id;
-    updated_at = caller.updated_at;
-  }
-;;
+let merge_current_task_id =
+  Keeper_current_task_reconcile.merge_current_task_id
 
-let sync_current_task_id_from_backlog ~(config : Coord.config)
-    (meta : Keeper_types.keeper_meta) =
-  match meta.current_task_id with
-  | Some _ -> meta
-  | None -> (
-    match owned_active_task_id_for_meta ~config ~meta with
-    | None -> meta
-    | Some task_id ->
-      let updated_meta =
-        {
-          meta with
-          current_task_id = Some task_id;
-          updated_at = Types.now_iso ();
-        }
-      in
-      Keeper_registry.update_meta ~base_path:config.base_path meta.name updated_meta;
-      (match
-         Keeper_types.write_meta_with_merge
-           ~merge:merge_current_task_id config updated_meta
-       with
-       | Ok () -> ()
-       | Error msg ->
-         Log.Keeper.warn
-           "keeper:%s failed to persist reconciled current_task_id=%s: %s"
-           meta.name (Keeper_id.Task_id.to_string task_id) msg);
-      Log.Keeper.info
-        "keeper:%s reconciled current_task_id=%s from backlog ownership"
-        meta.name (Keeper_id.Task_id.to_string task_id);
-      updated_meta)
-;;
+let sync_current_task_id_from_backlog =
+  Keeper_current_task_reconcile.sync_current_task_id_from_backlog
+
+let sync_current_task_id_for_agent_name =
+  Keeper_current_task_reconcile.sync_current_task_id_for_agent_name
 
 let tool_names =
   List.map Tool_name.to_string

@@ -32,6 +32,28 @@ let test_parse_json_safe_invalid () =
   let result = parse_json_safe ~context:"test" "not json" in
   check bool "Error on invalid JSON" true (Result.is_error result)
 
+let test_parse_json_safe_repairs_invalid_utf8_inside_string () =
+  let open Safe_ops in
+  reset_persistence_utf8_repair_stats_for_tests ();
+  let replacement = "\xEF\xBF\xBD" in
+  let result = parse_json_safe ~context:"utf8-fixture" "{\"msg\":\"ok\xffbad\"}" in
+  match result with
+  | Error msg -> fail msg
+  | Ok json ->
+    let msg = Yojson.Safe.Util.(json |> member "msg" |> to_string) in
+    check string "invalid byte replaced" ("ok" ^ replacement ^ "bad") msg;
+    let stats = persistence_utf8_repair_stats () in
+    check int "one repaired read" 1 stats.repaired_reads;
+    check int "one invalid byte" 1 stats.repaired_bytes
+
+let test_parse_json_safe_still_rejects_malformed_json_after_utf8_repair () =
+  let open Safe_ops in
+  reset_persistence_utf8_repair_stats_for_tests ();
+  let result = parse_json_safe ~context:"utf8-malformed" ("{\xff:1}") in
+  check bool "malformed json still rejected" true (Result.is_error result);
+  let stats = persistence_utf8_repair_stats () in
+  check int "repair was observed" 1 stats.repaired_reads
+
 let test_read_file_safe_not_found () =
   let open Safe_ops in
   let result = read_file_safe "/nonexistent/path/file.txt" in
@@ -373,6 +395,10 @@ let () =
     "parse_json_safe", [
       test_case "valid json" `Quick test_parse_json_safe_valid;
       test_case "invalid json" `Quick test_parse_json_safe_invalid;
+      test_case "repairs invalid utf8 inside string" `Quick
+        test_parse_json_safe_repairs_invalid_utf8_inside_string;
+      test_case "malformed json still rejected after utf8 repair" `Quick
+        test_parse_json_safe_still_rejects_malformed_json_after_utf8_repair;
       test_case "long invalid" `Quick test_parse_json_safe_long_invalid;
     ];
     "read_file_safe", [

@@ -564,19 +564,6 @@ let gh_simple_command_has_repo_flag cmd =
 let gh_simple_command_with_repo_flag ~repo_slug cmd =
   { argv = inject_repo_flag_args ~repo_slug cmd.argv }
 
-let run_argv_first_line_unix ~(prog : string) ~(argv : string array) : string option =
-  try
-    match
-      With_process.with_process_args_in prog argv (fun ic ->
-        With_process.drain_lines ic
-        |> List.map String.trim
-        |> List.find_opt (fun line -> line <> ""))
-    with
-    | line, Unix.WEXITED 0 -> line
-    | _ -> None
-  with
-  | Unix.Unix_error _ | Sys_error _ -> None
-
 let inject_repo_flag_cmd ~repo_slug cmd =
   let normalized = normalize_gh_command cmd in
   if has_repo_flag normalized
@@ -584,33 +571,14 @@ let inject_repo_flag_cmd ~repo_slug cmd =
   else String.trim (normalized ^ " --repo " ^ repo_slug)
 
 let repo_slug_of_remote_url url =
-  let url = String.trim url in
-  let strip_git s =
-    if String.length s > 4 && String.sub s (String.length s - 4) 4 = ".git"
-    then String.sub s 0 (String.length s - 4)
-    else s
-  in
-  match String.split_on_char ':' url with
-  | [ _; path ] when String.contains url '@' ->
-      validate_repo_slug (strip_git path) |> Result.to_option
-  | _ ->
-      let parts = String.split_on_char '/' url in
-      let n = List.length parts in
-      if n >= 2
-      then
-        match List.nth_opt parts (n - 2), List.nth_opt parts (n - 1) with
-        | Some owner, Some last_part ->
-            let repo = strip_git last_part in
-            validate_repo_slug (owner ^ "/" ^ repo) |> Result.to_option
-        | _ -> None
-      else
-        None
+  match Tool_code_write.extract_github_org_repo url with
+  | Some slug -> validate_repo_slug slug |> Result.to_option
+  | None -> None
 
-(** Cached owner/repo slug from git remote origin. *)
-let _repo_slug_cache : string option option ref = ref None
-
-let repo_slug_of_git_config ~git_root =
-  let config_path = Filename.concat git_root ".git/config" in
+(** Read an origin slug from a concrete git config path without invoking git.
+    This survives host/container worktree divergence where [.git] points at a
+    container-only gitdir but the host-side parent clone config is readable. *)
+let origin_url_of_git_config_path config_path =
   if not (Sys.file_exists config_path)
   then None
   else
@@ -637,24 +605,121 @@ let repo_slug_of_git_config ~git_root =
                 then String.sub trimmed 6 (String.length trimmed - 6)
                 else String.sub trimmed 4 (String.length trimmed - 4)
               in
-              repo_slug_of_remote_url value
+              Some (String.trim value)
             else loop ~in_origin
           | exception End_of_file -> None
         in
         loop ~in_origin:false)
 
+let repo_slug_of_git_config_path config_path =
+  match origin_url_of_git_config_path config_path with
+  | Some url -> repo_slug_of_remote_url url
+  | None -> None
+
+(** Cached owner/repo slug from git remote origin. *)
+let _repo_slug_cache : string option option ref = ref None
+
+let repo_slug_of_git_config ~git_root =
+  Filename.concat git_root ".git/config" |> repo_slug_of_git_config_path
+
+let repo_root_inferred_from_worktree_cwd worktree_cwd =
+  let marker = "/.worktrees/" in
+  match String_util.find_substring worktree_cwd marker with
+  | None -> None
+  | Some idx -> Some (String.sub worktree_cwd 0 idx)
+
+let repo_slug_of_worktree_parent_config ~worktree_cwd =
+  match repo_root_inferred_from_worktree_cwd worktree_cwd with
+  | Some repo_root -> repo_slug_of_git_config ~git_root:repo_root
+  | None -> None
+
+let origin_url_of_worktree_parent_config ~worktree_cwd =
+  match repo_root_inferred_from_worktree_cwd worktree_cwd with
+  | Some repo_root ->
+    origin_url_of_git_config_path
+      (Filename.concat repo_root ".git/config")
+  | None -> None
+
+let origin_url_of_worktree_gitfile ~worktree_cwd =
+  let dotgit = Filename.concat worktree_cwd ".git" in
+  if not (Sys.file_exists dotgit) || Sys.is_directory dotgit then None
+  else
+    try
+      let line =
+        let ic = open_in_bin dotgit in
+        Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
+            input_line ic)
+      in
+      let prefix = "gitdir:" in
+      let trimmed = String.trim line in
+      if not (String.starts_with ~prefix trimmed) then None
+      else
+        let raw = String.sub trimmed (String.length prefix)
+            (String.length trimmed - String.length prefix)
+          |> String.trim
+        in
+        let gitdir =
+          if Filename.is_relative raw then Filename.concat worktree_cwd raw
+          else raw
+        in
+        match origin_url_of_git_config_path (Filename.concat gitdir "config") with
+        | Some _ as origin -> origin
+        | None ->
+          let common_git_dir =
+            Filename.dirname (Filename.dirname gitdir)
+          in
+          origin_url_of_git_config_path
+            (Filename.concat common_git_dir "config")
+    with
+    | Sys_error _ | End_of_file -> None
+
+let repo_slug_of_worktree_gitfile ~worktree_cwd =
+  match origin_url_of_worktree_gitfile ~worktree_cwd with
+  | Some url -> repo_slug_of_remote_url url
+  | None -> None
+
+let repo_slug_of_git_command ~cwd =
+  match
+    Process_eio.run_argv_with_status
+      ~cwd
+      ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Git_meta ())
+      [ "git"; "remote"; "get-url"; "origin" ]
+  with
+  | Unix.WEXITED 0, url -> repo_slug_of_remote_url url
+  | _ -> None
+
+let origin_url_of_git_command ~cwd =
+  match
+    Process_eio.run_argv_with_status
+      ~cwd
+      ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Git_meta ())
+      [ "git"; "remote"; "get-url"; "origin" ]
+  with
+  | Unix.WEXITED 0, url ->
+    let url = String.trim url in
+    if url = "" then None else Some url
+  | _ -> None
+
+let origin_url_of_task_worktree ~git_root ~worktree_cwd =
+  [ (fun () ->
+      origin_url_of_git_config_path
+        (Filename.concat git_root ".git/config"))
+  ; (fun () -> origin_url_of_worktree_parent_config ~worktree_cwd)
+  ; (fun () -> origin_url_of_worktree_gitfile ~worktree_cwd)
+  ; (fun () -> origin_url_of_git_command ~cwd:git_root)
+  ; (fun () -> origin_url_of_git_command ~cwd:worktree_cwd)
+  ]
+  |> List.find_map (fun f -> f ())
+
+let repo_slug_of_task_worktree ~git_root ~worktree_cwd =
+  match origin_url_of_task_worktree ~git_root ~worktree_cwd with
+  | Some url -> repo_slug_of_remote_url url
+  | None -> None
+
 let repo_slug_of_git_root ~git_root =
   match repo_slug_of_git_config ~git_root with
   | Some slug -> Some slug
-  | None ->
-    (match
-       Process_eio.run_argv_with_status
-         ~cwd:git_root
-         ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Git_meta ())
-         [ "git"; "remote"; "get-url"; "origin" ]
-     with
-     | Unix.WEXITED 0, url -> repo_slug_of_remote_url url
-     | _ -> None)
+  | None -> repo_slug_of_git_command ~cwd:git_root
 
 let project_repo_slug () : string option =
   match !_repo_slug_cache with
@@ -685,23 +750,23 @@ let resolve_task_repo_context
       | None -> Error (Current_task_missing_worktree task_id)
       | Some wt ->
         let git_root = wt.git_root in
-        (match
-           run_argv_first_line_unix
-             ~prog:"git"
-             ~argv:[| "git"; "-C"; git_root; "remote"; "get-url"; "origin" |]
-         with
-         | Some origin_url ->
-           let origin_url = String.trim origin_url in
-           (match Tool_code_write.extract_github_org_repo origin_url with
-            | Some repo_slug -> Ok { task_id; git_root; repo_slug }
-            | None ->
+        let worktree_cwd =
+          if Filename.is_relative wt.path
+          then Filename.concat git_root wt.path
+          else wt.path
+        in
+        (match repo_slug_of_task_worktree ~git_root ~worktree_cwd with
+         | Some repo_slug -> Ok { task_id; git_root; repo_slug }
+         | None ->
+           (match origin_url_of_task_worktree ~git_root ~worktree_cwd with
+            | Some _ ->
               Error
                 (Current_task_origin_not_github
-                   { task_id; git_root }))
-         | None ->
+                   { task_id; git_root })
+            | None ->
            Error
              (Current_task_origin_unavailable
-                { task_id; git_root }))
+                { task_id; git_root })))
 
 (** Replace a wrong --repo/-R slug in cmd with the correct one.
     Returns (corrected_cmd, was_corrected). *)

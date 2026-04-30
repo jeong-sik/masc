@@ -159,6 +159,15 @@ val extract_github_org_repo : string -> string option
     are rejected so org-level allow + repo-level deny lookups
     cannot be confused by sub-paths. *)
 
+val canonical_github_https_clone_url : string -> string option
+(** Return [Some "https://github.com/org/repo.git"] for supported
+    GitHub SSH/HTTPS clone URLs, using the same parser as
+    {!extract_github_org_repo}. *)
+
+val normalize_github_clone_url : string -> string
+(** Convert supported GitHub SSH clone URLs to HTTPS clone URLs.
+    Non-GitHub or malformed inputs are returned unchanged. *)
+
 val validate_clone_url :
   base_path:string -> string -> (unit, string) result
 (** [validate_clone_url ~base_path url] validates the URL

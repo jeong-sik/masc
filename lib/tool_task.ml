@@ -132,14 +132,20 @@ let sync_planning_current_task_with_owned_task (ctx : context) =
     |> List.find_map (fun (task : Types.task) ->
            match task.task_status with
            | Types.Claimed { assignee; _ }
-           | Types.InProgress { assignee; _ }
-           | Types.AwaitingVerification { assignee; _ } ->
+           | Types.InProgress { assignee; _ } ->
                if matches_you assignee then Some task.id else None
-           | Types.Todo | Types.Done _ | Types.Cancelled _ -> None)
+           | Types.Todo
+           | Types.AwaitingVerification _
+           | Types.Done _
+           | Types.Cancelled _ -> None)
   in
   match owned_task with
   | Some task_id -> Planning_eio.set_current_task ctx.config ~task_id
   | None -> Planning_eio.clear_current_task ctx.config
+
+let sync_keeper_current_task_binding (ctx : context) =
+  Keeper_current_task_reconcile.sync_current_task_id_for_agent_name
+    ~config:ctx.config ~agent_name:ctx.agent_name
 
 let keeper_agent_tool_names (ctx : context) =
   let resolved =
@@ -546,6 +552,7 @@ let handle_claim ?agent_tool_names ctx args =
   in
   (match result with
    | Ok _ ->
+       sync_keeper_current_task_binding ctx;
        sync_planning_current_task_with_owned_task ctx;
        Subscriptions.push_event_to_sessions (`Assoc [
          ("type", `String "masc/task_claimed");
@@ -570,6 +577,7 @@ let handle_claim_next ?agent_tool_names ctx _args =
   in
   let message = match result with
     | Coord.Claim_next_claimed { message; task_id; _ } ->
+        sync_keeper_current_task_binding ctx;
         sync_planning_current_task_with_owned_task ctx;
         append_claim_observation message ~now:(Time_compat.now ())
           ~agent_name:ctx.agent_name ~task_id
@@ -601,7 +609,9 @@ let handle_release ctx args =
              ?expected_version ?handoff_context ()
          in
          (match result with
-          | Ok _ -> sync_planning_current_task_with_owned_task ctx
+          | Ok _ ->
+            sync_keeper_current_task_binding ctx;
+            sync_planning_current_task_with_owned_task ctx
           | Error _ -> ());
          result_to_response result)
 
@@ -650,6 +660,7 @@ and handle_cancel_task ctx args =
   (* Record failed metric on cancellation *)
   (match result with
    | Ok _ ->
+       sync_keeper_current_task_binding ctx;
        sync_planning_current_task_with_owned_task ctx;
        let metric : Metrics_store_eio.task_metric = {
          id = Printf.sprintf "metric-%s-%d" task_id (int_of_float (Time_compat.now () *. 1000.));
@@ -973,7 +984,9 @@ and handle_transition ?agent_tool_names ctx args =
   in
   let result = try_transition 0 in
   (match result with
-   | Ok _ -> sync_planning_current_task_with_owned_task ctx
+   | Ok _ ->
+     sync_keeper_current_task_binding ctx;
+     sync_planning_current_task_with_owned_task ctx
    | Error _ -> ());
   (* Notify A2A subscribers on successful transition *)
   (match result with

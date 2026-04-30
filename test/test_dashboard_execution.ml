@@ -224,6 +224,37 @@ let test_dashboard_execution_live_empty_room () =
           (json |> member "continuity_briefs" |> to_list |> List.length);
       ))
 
+let test_dashboard_execution_surfaces_utf8_repair_diagnostics () =
+  let dir = test_dir () in
+  Safe_ops.reset_persistence_utf8_repair_stats_for_tests ();
+  Fun.protect
+    ~finally:(fun () ->
+      Safe_ops.reset_persistence_utf8_repair_stats_for_tests ();
+      cleanup_dir dir)
+    (fun () ->
+      ignore
+        (Safe_ops.parse_json_safe ~context:"dashboard-corrupt-row"
+           "{\"msg\":\"bad\xffrow\"}");
+      let config = Coord_utils.default_config dir in
+      Eio_main.run @@ fun env ->
+      Eio.Switch.run (fun sw ->
+        let json =
+          Lib.Dashboard_execution.json
+            ~config
+            ~sw
+            ~clock:(Eio.Stdenv.clock env)
+            ~proc_mgr:None
+            ()
+        in
+        let open Yojson.Safe.Util in
+        let diagnostics = json |> member "projection_diagnostics" in
+        check string "execution diagnostics surface" "execution"
+          (diagnostics |> member "surface" |> to_string);
+        check int "utf8 repair count surfaced" 1
+          (diagnostics |> member "persistence_sanitized_count" |> to_int);
+        check int "utf8 repair bytes surfaced" 1
+          (diagnostics |> member "persistence_sanitized_bytes" |> to_int)))
+
 let test_dashboard_execution_namespace_status () =
   let dir = test_dir () in
   Fun.protect
@@ -911,6 +942,8 @@ let () =
         [
           Alcotest.test_case "fixture response" `Quick test_dashboard_execution_fixture;
           Alcotest.test_case "live empty room is safe" `Quick test_dashboard_execution_live_empty_room;
+          Alcotest.test_case "execution surfaces utf8 repair diagnostics"
+            `Quick test_dashboard_execution_surfaces_utf8_repair_diagnostics;
           Alcotest.test_case "current room drives status" `Quick
             test_dashboard_execution_namespace_status;
           Alcotest.test_case "shell follows current room" `Quick

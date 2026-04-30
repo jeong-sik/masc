@@ -136,6 +136,13 @@ val inject_repo_flag_cmd : repo_slug:string -> string -> string
 
 val project_repo_slug : unit -> string option
 
+val repo_slug_of_remote_url : string -> string option
+
+val repo_slug_of_git_config : git_root:string -> string option
+
+val repo_slug_of_task_worktree :
+  git_root:string -> worktree_cwd:string -> string option
+
 val resolve_task_repo_context :
   config:Coord.config ->
   meta:Keeper_types.keeper_meta ->

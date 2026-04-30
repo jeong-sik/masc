@@ -164,6 +164,12 @@ let test_provider_kind_of_model_used () =
     "claude_code" (M.provider_kind_of_model_used "claude_code:auto");
   Alcotest.(check string) "kimi_cli label"
     "kimi_cli" (M.provider_kind_of_model_used " kimi_cli:kimi-for-coding ");
+  Alcotest.(check string) "direct api prefix stays distinct from cli"
+    "claude" (M.provider_kind_of_model_used "claude:auto");
+  Alcotest.(check string) "unknown prefixed label is not trusted"
+    "unknown" (M.provider_kind_of_model_used "pretend_provider:model");
+  Alcotest.(check string) "custom endpoint label remains bounded"
+    "custom" (M.provider_kind_of_model_used "custom:model@https://example.test/v1");
   Alcotest.(check string) "unprefixed"
     "unknown" (M.provider_kind_of_model_used "gpt-5.4");
   Alcotest.(check string) "empty"

@@ -763,32 +763,20 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
                        fallback_error))
   in
   let result =
-    Result.bind result (fun () -> tool_access_defaults_result)
-  in
-  let result =
     Result.bind result (fun () ->
-        let has_proactive_enabled = has "proactive_enabled" in
         let has_proactive_idle = has "proactive_idle_sec" in
         let has_proactive_cooldown = has "proactive_cooldown_sec" in
-        match
-          (has_proactive_enabled, has_proactive_idle, has_proactive_cooldown)
-        with
-        | true, false, false ->
+        match (has_proactive_idle, has_proactive_cooldown) with
+        | false, true ->
             Error
-              "proactive_enabled is set but proactive_idle_sec and \
-               proactive_cooldown_sec are missing"
-        | true, false, _ ->
+              "proactive_cooldown_sec is set but proactive_idle_sec is missing"
+        | true, false ->
             Error
-              "proactive_enabled is set but proactive_idle_sec is missing"
-        | true, _, false ->
-            Error
-              "proactive_enabled is set but proactive_cooldown_sec is \
-               missing"
-        | false, true, _ | false, _, true ->
-            Error
-              "proactive_idle_sec or proactive_cooldown_sec is set but \
-               proactive_enabled is missing"
+              "proactive_idle_sec is set but proactive_cooldown_sec is missing"
         | _ -> Ok ())
+  in
+  let result =
+    Result.bind result (fun () -> tool_access_defaults_result)
   in
   Result.map
     (fun (tool_preset, tool_also_allow, tool_preset_source) ->

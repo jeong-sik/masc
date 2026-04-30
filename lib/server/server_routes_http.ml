@@ -26,6 +26,7 @@ let make_routes ~port ~host ~sw ~clock =
   |> Server_routes_http_routes_attribution.add_routes
   |> Server_routes_http_routes_activity.add_routes ~sw ~clock
   |> Server_routes_http_routes_artifacts.add_routes
+  |> Server_routes_http_routes_git_graph.add_routes
   |> Server_routes_http_routes_multimodal.add_routes
   |> Server_routes_http_routes_autonomous.add_routes
   |> Server_routes_http_routes_resilience.add_routes

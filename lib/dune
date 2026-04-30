@@ -109,7 +109,7 @@
    dashboard_harness_health
    dashboard_eval_feed
    dashboard_goals
-   dashboard_feature_health
+   dashboard_feature_health git_graph_snapshot
    dashboard_provider_runs
    dashboard_cascade
    dashboard_oas_bridge
@@ -142,7 +142,7 @@
    server_routes_http_routes_verification
    server_routes_http_routes_attribution
    server_routes_http_routes_activity
-   server_routes_http_routes_artifacts
+   server_routes_http_routes_artifacts server_routes_http_routes_git_graph
    server_routes_http_routes_multimodal
    server_routes_http_routes_autonomous
    server_routes_http_routes_resilience

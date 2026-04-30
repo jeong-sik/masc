@@ -5,6 +5,7 @@ type SurfaceSectionId =
   // monitoring
   | 'observatory'
   | 'journey'
+  | 'git-graph'
   | 'agents'
   | 'runtime'
   | 'fleet-health'   // Phase 1: absorbs telemetry + fleet + tool-quality + monitoring governance
@@ -143,6 +144,12 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       label: '관찰소 (beta)',
       description: '조사형 타임라인과 활동 분석을 한 화면에서 빠르게 훑습니다.',
       params: { section: 'observatory' },
+    },
+    {
+      id: 'git-graph',
+      label: 'Git 그래프',
+      description: '브랜치, worktree, 충돌 신호를 Track 4 시각화로 봅니다.',
+      params: { section: 'git-graph' },
     },
     {
       id: 'agents',

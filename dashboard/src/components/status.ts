@@ -8,7 +8,7 @@ import { route } from '../router'
 import { LoadingState } from './common/feedback-state'
 
 type StatusSection =
-  | 'observatory' | 'journey' | 'agents' | 'runtime' | 'fleet-health'
+  | 'observatory' | 'journey' | 'git-graph' | 'agents' | 'runtime' | 'fleet-health'
   | 'safe-autonomy'
   | 'memory-subsystems' | 'attribution'
   | 'cost'
@@ -34,6 +34,9 @@ const LazyAttributionPanel = lazy(async () => ({
 const LazyJourneyPanel = lazy(async () => ({
   default: (await import('./journey-panel')).JourneyPanel,
 }))
+const LazyGitGraphPanel = lazy(async () => ({
+  default: (await import('./git-graph-panel')).GitGraphPanel,
+}))
 const LazySafeAutonomyPanel = lazy(async () => ({
   default: (await import('./safe-autonomy')).SafeAutonomyPanel,
 }))
@@ -51,6 +54,8 @@ function sectionLabel(section: StatusSection): string {
       return '관찰소'
     case 'journey':
       return '여정'
+    case 'git-graph':
+      return 'Git 그래프'
     case 'runtime':
       return '런타임'
     case 'fleet-health':
@@ -74,6 +79,8 @@ function renderSection(section: StatusSection) {
       return html`<${LazyObservatory} />`
     case 'journey':
       return html`<${LazyJourneyPanel} />`
+    case 'git-graph':
+      return html`<${LazyGitGraphPanel} />`
     case 'runtime':
       return html`<${LazyRuntimePanel} />`
     case 'fleet-health':
@@ -96,6 +103,7 @@ function currentSection(): StatusSection {
   if (
     section === 'observatory'
     || section === 'journey'
+    || section === 'git-graph'
     || section === 'runtime'
     || section === 'fleet-health'
     || section === 'safe-autonomy'

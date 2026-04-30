@@ -3,7 +3,7 @@
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
-import { post } from '../api/core'
+import { get, post } from '../api/core'
 import { showToast } from './common/toast'
 import { fetchRepositories, showAddRepoDialog } from './repo-sidebar'
 import { X } from 'lucide-preact'
@@ -28,6 +28,7 @@ const formSubmitting = signal(false)
 const formError = signal<string | null>(null)
 const credentialsResource = signal<CredentialOption[]>([])
 const credentialsLoading = signal(false)
+const credentialsLoaded = signal(false)
 
 function resetForm(): void {
   formName.value = ''
@@ -56,14 +57,25 @@ export function closeAddRepoDialog(): void {
 async function loadCredentials(): Promise<void> {
   credentialsLoading.value = true
   try {
-    const raw = await post<unknown[]>('/api/v1/credentials/list', {})
-    const options: CredentialOption[] = raw
+    const raw = await get<unknown>('/api/v1/credentials')
+    const rows = Array.isArray(raw)
+      ? raw
+      : raw && typeof raw === 'object' && Array.isArray((raw as Record<string, unknown>).credentials)
+        ? (raw as Record<string, unknown>).credentials as unknown[]
+        : []
+    const options: CredentialOption[] = rows
       .filter((item): item is Record<string, unknown> =>
         item !== null && typeof item === 'object',
       )
       .map(item => ({
         id: typeof item.id === 'string' ? item.id : '',
-        name: typeof item.name === 'string' ? item.name : '',
+        name: typeof item.name === 'string'
+          ? item.name
+          : typeof item.username === 'string'
+            ? item.username
+            : typeof item.id === 'string'
+              ? item.id
+              : '',
       }))
       .filter(opt => opt.id && opt.name)
     credentialsResource.value = options
@@ -72,6 +84,7 @@ async function loadCredentials(): Promise<void> {
     credentialsResource.value = []
   } finally {
     credentialsLoading.value = false
+    credentialsLoaded.value = true
   }
 }
 
@@ -91,24 +104,20 @@ async function submitAddRepo(): Promise<void> {
     formError.value = '저장소 URL을 입력하세요.'
     return
   }
-  if (!localPath) {
-    formError.value = '로컬 경로를 입력하세요.'
-    return
-  }
-
   formSubmitting.value = true
   formError.value = null
 
   try {
-    await post('/api/v1/repositories', {
+    const payload: Record<string, unknown> = {
       name,
       url,
-      local_path: localPath,
       default_branch: defaultBranch,
-      credential_id: formCredentialId.value || null,
+      credential_id: formCredentialId.value || 'default',
       auto_sync: formAutoSync.value,
       sync_interval: Math.max(60, formSyncInterval.value),
-    })
+    }
+    if (localPath) payload.local_path = localPath
+    await post('/api/v1/repositories', payload)
     showToast('저장소 등록 완료', 'success')
     closeAddRepoDialog()
     await fetchRepositories()
@@ -133,6 +142,9 @@ const labelBase = 'block text-2xs font-semibold uppercase tracking-wider text-te
 export function AddRepoDialog() {
   const open = showAddRepoDialog.value
   if (!open) return null
+  if (!credentialsLoaded.value && !credentialsLoading.value) {
+    void loadCredentials()
+  }
 
   const credentials = credentialsResource.value
   const hasCredentials = credentials.length > 0
@@ -196,11 +208,11 @@ export function AddRepoDialog() {
           </div>
 
           <div>
-            <label class="${labelBase}">로컬 경로 <span class="text-[var(--color-status-err)]">*</span></label>
+            <label class="${labelBase}">로컬 경로</label>
             <input
               type="text"
               class="${inputBase}"
-              placeholder="/path/to/local/clone"
+              placeholder=".masc/repos/<저장소-id>"
               value=${formLocalPath.value}
               onInput=${(e: Event) => { formLocalPath.value = (e.target as HTMLInputElement).value }}
               disabled=${formSubmitting.value}

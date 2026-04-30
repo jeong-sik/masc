@@ -25,6 +25,7 @@ type SurfaceSectionId =
   // workspace
   | 'board'
   | 'planning'       // Phase 1: absorbs goals
+  | 'repositories'   // Multi-repository cockpit and keeper access mapping
   | 'collab-mvp'     // Track 1: CRDT/editor/git graph/claim queue contract
   | 'verification'   // CDAL follow-up (#7531): Mission detail verification table
   // lab
@@ -247,6 +248,12 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       label: '계획 & 목표',
       description: '실행 단위 칸반과 상위 의도 구조(목표 트리)를 함께 봅니다.',
       params: { section: 'planning' },
+    },
+    {
+      id: 'repositories',
+      label: '저장소',
+      description: '등록 저장소, 브랜치, credential, keeper 접근 범위를 저장소별로 봅니다.',
+      params: { section: 'repositories' },
     },
     {
       id: 'collab-mvp',

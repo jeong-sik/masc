@@ -12,6 +12,7 @@
    repo_sync)
  (wrapped false)
  (libraries
+   masc_mcp.masc_exec
    yojson
    otoml
    unix)

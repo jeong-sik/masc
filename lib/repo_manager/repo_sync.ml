@@ -5,7 +5,16 @@ let ( let* ) = Result.bind
 let sync_repository ~base_path repo credential : (unit, string) result =
   let local_path = Repo_store.local_path ~base_path repo in
   let repo_with_path = { repo with local_path } in
-  match Repo_git.fetch ~repository:repo_with_path ~credential with
+  let* () = Repo_store.update_status ~base_path repo.id Cloning in
+  let sync_result =
+    if Sys.file_exists local_path then
+      Repo_git.fetch ~repository:repo_with_path ~credential
+    else
+      match Repo_git.clone ~repository:repo_with_path ~credential with
+      | Error msg -> Error msg
+      | Ok () -> Repo_git.fetch ~repository:repo_with_path ~credential
+  in
+  match sync_result with
   | Error msg ->
       let* () = Repo_store.update_status ~base_path repo.id (Error msg) in
       Error msg

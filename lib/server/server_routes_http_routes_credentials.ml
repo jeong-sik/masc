@@ -4,15 +4,18 @@ open Server_utils
 module Http = Http_server_eio
 
 let credential_json (c : Repo_manager_types.credential) : Yojson.Safe.t =
+  let typ =
+    match c.cred_type with
+    | Github -> "github"
+    | Gitlab -> "gitlab"
+    | Local -> "local"
+  in
   `Assoc
     [
       ("id", `String c.id);
-      ( "cred_type",
-        `String
-          (match c.cred_type with
-           | Github -> "github"
-           | Gitlab -> "gitlab"
-           | Local -> "local") );
+      ("name", `String c.username);
+      ("type", `String typ);
+      ("cred_type", `String typ);
       ("username", `String c.username);
       ( "gh_config_dir",
         match c.gh_config_dir with Some s -> `String s | None -> `Null );
@@ -32,6 +35,17 @@ let credential_of_json (json : Yojson.Safe.t) :
         | Some _ -> Error (Printf.sprintf "field %s must be a string" key)
         | None -> Error (Printf.sprintf "missing field %s" key)
       in
+      let get_string_alias keys =
+        let rec loop = function
+          | [] -> Error (Printf.sprintf "missing field %s" (String.concat "/" keys))
+          | key :: rest -> (
+              match List.assoc_opt key fields with
+              | Some (`String s) -> Ok s
+              | Some _ -> Error (Printf.sprintf "field %s must be a string" key)
+              | None -> loop rest)
+        in
+        loop keys
+      in
       let get_opt_string key =
         match List.assoc_opt key fields with
         | Some (`String s) -> Ok (Some s)
@@ -40,8 +54,8 @@ let credential_of_json (json : Yojson.Safe.t) :
         | None -> Ok None
       in
       let* id = get_string "id" in
-      let* cred_type_str = get_string "cred_type" in
-      let* username = get_string "username" in
+      let* cred_type_str = get_string_alias ["cred_type"; "type"] in
+      let* username = get_string_alias ["username"; "name"] in
       let* gh_config_dir = get_opt_string "gh_config_dir" in
       let* ssh_key_path = get_opt_string "ssh_key_path" in
       let* gpg_key_id = get_opt_string "gpg_key_id" in
@@ -67,7 +81,21 @@ let add_routes router =
                   (`Assoc [ ("ok", `Bool false); ("error", `String msg) ]))
                reqd
          | Ok credentials ->
-             let json = `Assoc [ ("credentials", `List (List.map credential_json credentials)) ] in
+             let credentials =
+               if List.exists
+                    (fun (c : Repo_manager_types.credential) ->
+                      String.equal c.id Credential_store.default_credential.id)
+                    credentials
+               then credentials
+               else Credential_store.default_credential :: credentials
+             in
+             let json =
+               `Assoc
+                 [
+                   ("credentials", `List (List.map credential_json credentials));
+                   ("total", `Int (List.length credentials));
+                 ]
+             in
              Http.Response.json ~compress:true ~request:req
                (Yojson.Safe.to_string json)
                reqd

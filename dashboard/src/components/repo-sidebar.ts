@@ -3,7 +3,7 @@
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
-import { get, post } from '../api/core'
+import { authHeaders, get, post } from '../api/core'
 import { createAsyncResource } from '../lib/async-state'
 import { LoadingState, ErrorState } from './common/feedback-state'
 import { showToast } from './common/toast'
@@ -23,8 +23,8 @@ export interface Repository {
   auto_sync: boolean
   sync_interval: number
   credential_id: string | null
-  created_at: string
-  updated_at: string
+  created_at: string | number | null
+  updated_at: string | number | null
 }
 
 // ── State ────────────────────────────────────────────────
@@ -37,12 +37,23 @@ export const showAddRepoDialog = signal(false)
 // ── API ──────────────────────────────────────────────────
 
 function normalizeRepoStatus(raw: string | undefined): RepoStatus {
-  switch (raw) {
+  switch (raw?.toLowerCase()) {
     case 'active': return 'active'
     case 'paused': return 'paused'
+    case 'cloning': return 'active'
     case 'error': return 'error'
     default: return 'active'
   }
+}
+
+function repositoryRows(raw: unknown): unknown[] {
+  if (Array.isArray(raw)) return raw
+  if (raw && typeof raw === 'object') {
+    const record = raw as Record<string, unknown>
+    if (Array.isArray(record.repositories)) return record.repositories
+    if (record.ok === true && Array.isArray(record.data)) return record.data
+  }
+  return []
 }
 
 function normalizeRepository(raw: unknown): Repository | null {
@@ -61,15 +72,15 @@ function normalizeRepository(raw: unknown): Repository | null {
     auto_sync: r.auto_sync === true,
     sync_interval: typeof r.sync_interval === 'number' ? r.sync_interval : 300,
     credential_id: typeof r.credential_id === 'string' ? r.credential_id : null,
-    created_at: typeof r.created_at === 'string' ? r.created_at : '',
-    updated_at: typeof r.updated_at === 'string' ? r.updated_at : '',
+    created_at: typeof r.created_at === 'string' || typeof r.created_at === 'number' ? r.created_at : null,
+    updated_at: typeof r.updated_at === 'string' || typeof r.updated_at === 'number' ? r.updated_at : null,
   }
 }
 
 export async function fetchRepositories(): Promise<void> {
   await reposResource.load(async () => {
-    const raw = await get<unknown[]>('/api/v1/repositories')
-    return raw.map(normalizeRepository).filter((r): r is Repository => r !== null)
+    const raw = await get<unknown>('/api/v1/repositories')
+    return repositoryRows(raw).map(normalizeRepository).filter((r): r is Repository => r !== null)
   })
 }
 
@@ -86,7 +97,14 @@ export async function syncRepository(id: string): Promise<void> {
 
 export async function deleteRepository(id: string): Promise<void> {
   try {
-    await post(`/api/v1/repositories/${encodeURIComponent(id)}/delete`, {})
+    const res = await fetch(`/api/v1/repositories/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      headers: authHeaders(),
+    })
+    if (!res.ok) {
+      const text = await res.text().catch(() => '삭제 실패')
+      throw new Error(text || '삭제 실패')
+    }
     showToast('저장소 삭제 완료', 'success')
     await fetchRepositories()
     if (selectedRepoId.value === id) {

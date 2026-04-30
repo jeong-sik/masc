@@ -3,7 +3,7 @@
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
-import { get, post } from '../api/core'
+import { authHeaders, get, post } from '../api/core'
 import { createAsyncResource } from '../lib/async-state'
 import { showToast } from './common/toast'
 import { ErrorState, LoadingState } from './common/feedback-state'
@@ -16,6 +16,10 @@ export interface Credential {
   id: string
   name: string
   type: CredentialType
+  username: string
+  gh_config_dir?: string | null
+  ssh_key_path?: string | null
+  gpg_key_id?: string | null
   description?: string
   config?: Record<string, unknown>
   created_at?: string
@@ -25,6 +29,10 @@ export interface CredentialCreatePayload {
   id: string
   name: string
   type: CredentialType
+  username: string
+  gh_config_dir?: string | null
+  ssh_key_path?: string | null
+  gpg_key_id?: string | null
   description?: string
   config?: Record<string, unknown>
 }
@@ -42,6 +50,7 @@ const deletingId = signal<string | null>(null)
 const addDraft = signal<CredentialCreatePayload>({
   id: '',
   name: '',
+  username: '',
   type: 'github',
   description: '',
 })
@@ -49,14 +58,24 @@ const addDraft = signal<CredentialCreatePayload>({
 // ── API ──────────────────────────────────────────────────
 
 async function fetchCredentials(): Promise<Credential[]> {
-  const data = await get('/api/v1/credentials')
-  if (Array.isArray(data)) {
-    return data.map((row: unknown): Credential => {
+  const data = await get<unknown>('/api/v1/credentials')
+  const rows = Array.isArray(data)
+    ? data
+    : data && typeof data === 'object' && Array.isArray((data as Record<string, unknown>).credentials)
+      ? (data as Record<string, unknown>).credentials as unknown[]
+      : []
+  if (Array.isArray(rows)) {
+    return rows.map((row: unknown): Credential => {
       const r = row as Record<string, unknown>
+      const username = String(r.username ?? r.name ?? '')
       return {
         id: String(r.id ?? ''),
-        name: String(r.name ?? ''),
-        type: coerceCredentialType(r.type),
+        name: String(r.name ?? username ?? r.id ?? ''),
+        type: coerceCredentialType(r.type ?? r.cred_type),
+        username,
+        gh_config_dir: typeof r.gh_config_dir === 'string' ? r.gh_config_dir : null,
+        ssh_key_path: typeof r.ssh_key_path === 'string' ? r.ssh_key_path : null,
+        gpg_key_id: typeof r.gpg_key_id === 'string' ? r.gpg_key_id : null,
         description: r.description ? String(r.description) : undefined,
         config: isRecord(r.config) ? r.config : undefined,
         created_at: r.created_at ? String(r.created_at) : undefined,
@@ -67,13 +86,20 @@ async function fetchCredentials(): Promise<Credential[]> {
 }
 
 async function createCredential(payload: CredentialCreatePayload): Promise<void> {
-  await post('/api/v1/credentials', payload)
+  await post('/api/v1/credentials', {
+    id: payload.id,
+    cred_type: payload.type,
+    username: payload.username || payload.name,
+    gh_config_dir: payload.gh_config_dir ?? null,
+    ssh_key_path: payload.ssh_key_path ?? null,
+    gpg_key_id: payload.gpg_key_id ?? null,
+  })
 }
 
 async function deleteCredential(id: string): Promise<void> {
   const res = await fetch(`/api/v1/credentials/${encodeURIComponent(id)}`, {
     method: 'DELETE',
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders(),
   })
   if (!res.ok) {
     const text = await res.text().catch(() => '삭제 요청 실패')
@@ -113,7 +139,7 @@ function credentialTypeBadgeClass(type: CredentialType): string {
 }
 
 function resetAddDraft() {
-  addDraft.value = { id: '', name: '', type: 'github', description: '' }
+  addDraft.value = { id: '', name: '', username: '', type: 'github', description: '' }
   saveError.value = null
 }
 
@@ -158,6 +184,10 @@ function CredentialTypeBadge({ type }: { type: CredentialType }) {
 export function CredentialSettings() {
   const state = credentialsState.value
 
+  if (state.status === 'idle') {
+    void loadCredentials()
+  }
+
   if (state.status === 'idle' || state.status === 'loading') {
     return html`<${LoadingState}>크리덴셜 목록 불러오는 중...<//>`
   }
@@ -183,8 +213,8 @@ export function CredentialSettings() {
   const draft = addDraft.value
 
   async function handleSave() {
-    if (!draft.id.trim() || !draft.name.trim()) {
-      saveError.value = 'ID와 이름은 필수입니다.'
+    if (!draft.id.trim() || !draft.name.trim() || !draft.username.trim()) {
+      saveError.value = 'ID, 이름, 사용자명은 필수입니다.'
       return
     }
     saving.value = true
@@ -193,6 +223,7 @@ export function CredentialSettings() {
       await createCredential({
         id: draft.id.trim(),
         name: draft.name.trim(),
+        username: draft.username.trim(),
         type: draft.type,
         description: draft.description?.trim() || undefined,
       })
@@ -268,6 +299,16 @@ export function CredentialSettings() {
               />
             </div>
             <div>
+              <label class="block text-2xs font-semibold uppercase tracking-wider text-text-muted mb-1.5">사용자명</label>
+              <input
+                type="text"
+                class="${fieldStyle}"
+                placeholder="github-user"
+                value=${draft.username}
+                onInput=${(e: Event) => { addDraft.value = { ...draft, username: (e.target as HTMLInputElement).value } }}
+              />
+            </div>
+            <div>
               <label class="block text-2xs font-semibold uppercase tracking-wider text-text-muted mb-1.5">타입</label>
               <select
                 class="${fieldStyle}"
@@ -331,7 +372,7 @@ export function CredentialSettings() {
               ${list.map(cred => html`
                 <tr class="hover:bg-card/40 transition-colors">
                   <td class="py-2 px-3 text-xs font-mono text-text-body truncate max-w-[12rem]">${cred.id}</td>
-                  <td class="py-2 px-3 text-xs font-medium text-text-strong">${cred.name}</td>
+                  <td class="py-2 px-3 text-xs font-medium text-text-strong">${cred.name || cred.username}</td>
                   <td class="py-2 px-3">
                     <${CredentialTypeBadge} type=${cred.type} />
                   </td>

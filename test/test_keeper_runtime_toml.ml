@@ -118,12 +118,13 @@ let test_applies_turn_execution_overrides () =
      llm_rerank = true\n\
      llm_rerank_cascade = \"tool_rerank_fast\"\n\
      temperature = 0.65\n\
-     max_output_tokens = 8192\n"
+     max_output_tokens = 8192\n\
+     stream_idle_timeout_sec = 90\n"
   in
   let count, overrides =
     Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
   in
-  check int "applied 6" 6 count;
+  check int "applied 7" 7 count;
   check (option string) "tool cost ceiling"
     (Some "1.25")
     (List.assoc_opt "MASC_KEEPER_TOOL_COST_MAX_USD" overrides);
@@ -141,7 +142,10 @@ let test_applies_turn_execution_overrides () =
     (List.assoc_opt "MASC_KEEPER_UNIFIED_TEMP" overrides);
   check (option string) "max output tokens"
     (Some "8192")
-    (List.assoc_opt "MASC_KEEPER_UNIFIED_MAX_TOKENS" overrides)
+    (List.assoc_opt "MASC_KEEPER_UNIFIED_MAX_TOKENS" overrides);
+  check (option string) "stream idle timeout"
+    (Some "90")
+    (List.assoc_opt "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC" overrides)
 
 let test_applies_watchdog_overrides () =
   let doc = parse_or_fail
@@ -289,7 +293,7 @@ let test_resolved_runtime_freezes_toml_values_after_init () =
   with_base_path @@ fun base_path ->
   write_toml base_path
     "[turn]\n\
-     timeout_sec = 1500\n\
+     timeout_sec = 500\n\
      [reactive]\n\
      max_turns_per_call = 12\n";
   (match Keeper_runtime_config.load_and_apply ~base_path with
@@ -300,7 +304,7 @@ let test_resolved_runtime_freezes_toml_values_after_init () =
   Config_boot_overrides.set "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL" "4";
   let runtime = Keeper_runtime_resolved.current () in
   check (float 0.0001) "turn timeout frozen from toml"
-    1500.0 runtime.turn_timeout_sec.value;
+    500.0 runtime.turn_timeout_sec.value;
   check string "turn timeout source"
     "toml"
     (Keeper_runtime_resolved.source_to_string runtime.turn_timeout_sec.source);
@@ -319,18 +323,51 @@ let test_resolved_runtime_accepts_max_turns_ceiling () =
   check int "autonomous max turns accepts 100"
     100 runtime.autonomous_max_turns_per_call.value
 
+let test_resolved_stream_idle_timeout_defaults_and_clamps_to_total () =
+  with_clean_boot_overrides @@ fun () ->
+  Keeper_runtime_resolved.init ();
+  let runtime = Keeper_runtime_resolved.current () in
+  check (float 0.0001) "stream idle timeout default"
+    120.0 runtime.stream_idle_timeout_sec.value;
+  check string "stream idle timeout default source"
+    "default"
+    (Keeper_runtime_resolved.source_to_string runtime.stream_idle_timeout_sec.source);
+  check (float 0.0001) "stream idle clamps to shorter total"
+    60.0
+    (Keeper_runtime_resolved.stream_idle_timeout_for_total_timeout
+       ~total_timeout_s:60.0);
+  check (float 0.0001) "stream idle keeps configured default below total"
+    120.0
+    (Keeper_runtime_resolved.stream_idle_timeout_for_total_timeout
+       ~total_timeout_s:600.0)
+
+let test_resolved_stream_idle_timeout_uses_toml () =
+  with_clean_boot_overrides @@ fun () ->
+  with_base_path @@ fun base_path ->
+  write_toml base_path "[turn]\nstream_idle_timeout_sec = 75\n";
+  (match Keeper_runtime_config.load_and_apply ~base_path with
+   | Error msg -> failf "unexpected error: %s" msg
+   | Ok _ -> ());
+  Keeper_runtime_resolved.init ();
+  let runtime = Keeper_runtime_resolved.current () in
+  check (float 0.0001) "stream idle timeout from toml"
+    75.0 runtime.stream_idle_timeout_sec.value;
+  check string "stream idle timeout source"
+    "toml"
+    (Keeper_runtime_resolved.source_to_string runtime.stream_idle_timeout_sec.source)
+
 let test_resolved_runtime_prefers_env_over_toml () =
   with_clean_boot_overrides @@ fun () ->
   with_base_path @@ fun base_path ->
-  write_toml base_path "[turn]\ntimeout_sec = 1500\n";
-  with_env "MASC_KEEPER_TURN_TIMEOUT_SEC" (Some "777") @@ fun () ->
+  write_toml base_path "[turn]\ntimeout_sec = 500\n";
+  with_env "MASC_KEEPER_TURN_TIMEOUT_SEC" (Some "555") @@ fun () ->
   (match Keeper_runtime_config.load_and_apply ~base_path with
    | Error msg -> failf "unexpected error: %s" msg
    | Ok _ -> ());
   Keeper_runtime_resolved.init ();
   let runtime = Keeper_runtime_resolved.current () in
   check (float 0.0001) "env timeout wins"
-    777.0 runtime.turn_timeout_sec.value;
+    555.0 runtime.turn_timeout_sec.value;
   check string "env source"
     "env"
     (Keeper_runtime_resolved.source_to_string runtime.turn_timeout_sec.source)
@@ -354,6 +391,8 @@ let () =
         ; test_case "float value round trip" `Quick test_float_value_round_trip
         ; test_case "resolved runtime freezes toml values after init" `Quick test_resolved_runtime_freezes_toml_values_after_init
         ; test_case "resolved runtime accepts max_turns ceiling" `Quick test_resolved_runtime_accepts_max_turns_ceiling
+        ; test_case "resolved stream idle timeout defaults and clamps to total" `Quick test_resolved_stream_idle_timeout_defaults_and_clamps_to_total
+        ; test_case "resolved stream idle timeout uses toml" `Quick test_resolved_stream_idle_timeout_uses_toml
         ; test_case "resolved runtime prefers env over toml" `Quick test_resolved_runtime_prefers_env_over_toml
         ] )
     ]

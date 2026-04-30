@@ -120,7 +120,7 @@ Parse errors log a warning and fall back to env defaults.
 Legacy compatibility names that are no longer read by the unified turn path
 are intentionally excluded from this TOML surface.
 
-**Sections** (68 knobs total):
+**Sections** (69 knobs total):
 
 | Section | Count | Key examples |
 | --- | --- | --- |
@@ -128,7 +128,7 @@ are intentionally excluded from this TOML surface.
 | `[autonomous]` | 6 | `max_turns_per_call`, `semaphore_wait_timeout_sec`, `concurrency` |
 | `[reactive]` | 2 | `max_turns_per_call`, `max_idle_turns` |
 | `[heartbeat]` | 7 | `interval_sec`, `max_silence_sec`, `smart_heartbeat` |
-| `[turn]` | 16 | `timeout_sec`, `tool_cost_max_usd`, `max_tools_per_turn`, `temperature` |
+| `[turn]` | 17 | `timeout_sec`, `stream_idle_timeout_sec`, `tool_cost_max_usd`, `temperature` |
 | `[watchdog]` | 4 | `stale_sec`, `grace_sec`, `noop_threshold` |
 | `[supervisor]` | 4 | `max_restarts`, `backoff_base_sec`, `backoff_max_sec` |
 | `[lifecycle]` | 4 | `self_preservation_ratio`, `dead_ttl_sec` |
@@ -151,6 +151,7 @@ max_turns_per_call = 15
 max_active_keepers = 12
 
 [turn]
+stream_idle_timeout_sec = 120
 tool_cost_max_usd = 1.25
 max_tools_per_turn = 64
 llm_rerank = true

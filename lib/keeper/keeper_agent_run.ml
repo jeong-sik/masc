@@ -32,7 +32,7 @@ include Keeper_agent_checkpoint_hygiene
     @param user_message The user's message to the keeper
     @param cascade_name Cascade profile name for model selection
     @param generation Current generation counter
-    @param max_turns Maximum agent turns (default: 50, generous budget for multi-step)
+    @param max_turns Maximum agent turns (default from keeper runtime config)
     @param guardrails Optional OAS guardrails for tool safety gates
     @param temperature MODEL temperature override; when omitted, resolved
            from [Cascade_inference] with a 0.3 fallback
@@ -228,13 +228,15 @@ let run_turn
        (Anthropic/OpenAI/Gemini/GLM/Ollama). The deadline resets after each
        successful line, so this is gap detection, not total run cap.
        (CLI subprocess transports ignore it; bounded separately by OAS
-       cli_common_subprocess idle.) Previous value [timeout_s -. 5.0] made
-       the gap window almost equal to the outer turn budget (~3595s),
-       which never fires in practice. 120s catches real network/stream
+       cli_common_subprocess idle.) Default 120s catches real network/stream
        hangs while preserving legitimate reasoning pauses + provider
-       keepalives (Anthropic SSE keepalive ~15s, reasoning models pause
-       10-30s mid-thought). #9639 envelope addendum. *)
-    let stream_idle_timeout_s = Some 120.0 in
+       keepalives. If the total OAS timeout is shorter, the idle gap is
+       clamped to that total cap so the nested timeout envelope is explicit. *)
+    let stream_idle_timeout_s =
+      Some
+        (Keeper_runtime_resolved.stream_idle_timeout_for_total_timeout
+           ~total_timeout_s:timeout_s)
+    in
     (* Observability for issue #10049: providers that declare runtime MCP
        HTTP header support need claude_mcp_config to reach the masc-mcp
        HTTP MCP endpoint; otherwise the MCP tool catalog is invisible to

@@ -783,13 +783,13 @@ let keeper_tool_search_top_k_rp =
 let keeper_tool_search_top_k () : int =
   Runtime_params.get keeper_tool_search_top_k_rp
 
-(* max_turns is set in keeper_agent_run.ml (default: 50).
+(* max_turns is set in keeper_agent_run.ml from keeper runtime config.
    Known constraints (retain for future tuning):
    - 1000 turns caused 787s+ latency per turn
    - 20 turns caused 6.7GB RSS in 2 minutes with 3 concurrent keepers
    - 3 turns left keepers unable to do meaningful work (board_post x3 only)
    - 10 turns was insufficient for multi-step tasks (PR creation, web search)
-   - 50 turns balances completion rate vs resource usage *)
+   - historical 50-turn experiments balanced completion rate vs resource usage *)
 
 (** Force module initialization to guarantee all runtime params are registered
     before [Runtime_params.restore]. Call from server bootstrap. *)

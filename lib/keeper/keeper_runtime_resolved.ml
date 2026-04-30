@@ -18,6 +18,7 @@ type t = {
   turn_timeout_sec : float field;
   admission_wait_timeout_sec : float field;
   oas_timeout_override_sec : float option field;
+  stream_idle_timeout_sec : float field;
   oas_timeout_per_1k : float field;
   oas_timeout_per_turn : float field;
 }
@@ -82,6 +83,11 @@ let admission_wait_timeout_sec_live () =
   Float.max 5.0
     (Float.min 1200.0
        (get_float ~default:180.0 "MASC_KEEPER_ADMISSION_WAIT_TIMEOUT_SEC"))
+
+let stream_idle_timeout_sec_live () =
+  Float.max 5.0
+    (Float.min 600.0
+       (get_float ~default:120.0 "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC"))
 
 let oas_timeout_override_sec_live ~turn_timeout_sec =
   match Env_config_core.raw_value_opt "MASC_KEEPER_OAS_TIMEOUT_SEC" with
@@ -148,6 +154,11 @@ let freeze_from_current () =
           (source_of_env_name "MASC_KEEPER_OAS_TIMEOUT_SEC");
     }
   in
+  let stream_idle_timeout_sec =
+    source_field
+      "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC"
+      (stream_idle_timeout_sec_live ())
+  in
   let oas_timeout_per_1k =
     source_field
       "MASC_KEEPER_OAS_TIMEOUT_PER_1K"
@@ -167,6 +178,7 @@ let freeze_from_current () =
     turn_timeout_sec;
     admission_wait_timeout_sec;
     oas_timeout_override_sec;
+    stream_idle_timeout_sec;
     oas_timeout_per_1k;
     oas_timeout_per_turn;
   }
@@ -208,6 +220,7 @@ let to_yojson (runtime : t) =
       ("turn_timeout_sec", field_to_yojson (fun value -> `Float value) runtime.turn_timeout_sec);
       ("admission_wait_timeout_sec", field_to_yojson (fun value -> `Float value) runtime.admission_wait_timeout_sec);
       ("oas_timeout_override_sec", field_to_yojson option_float_to_yojson runtime.oas_timeout_override_sec);
+      ("stream_idle_timeout_sec", field_to_yojson (fun value -> `Float value) runtime.stream_idle_timeout_sec);
       ("oas_timeout_per_1k", field_to_yojson (fun value -> `Float value) runtime.oas_timeout_per_1k);
       ("oas_timeout_per_turn", field_to_yojson (fun value -> `Float value) runtime.oas_timeout_per_turn);
     ]
@@ -232,6 +245,12 @@ let turn_timeout_sec () =
 
 let admission_wait_timeout_sec () =
   (current ()).admission_wait_timeout_sec.value
+
+let stream_idle_timeout_sec () =
+  (current ()).stream_idle_timeout_sec.value
+
+let stream_idle_timeout_for_total_timeout ~(total_timeout_s : float) =
+  Float.min total_timeout_s (stream_idle_timeout_sec ())
 
 let oas_timeout_for_estimated_input_tokens_with_turn_budget
     ~(estimated_input_tokens : int) ~(max_turns : int) : float =

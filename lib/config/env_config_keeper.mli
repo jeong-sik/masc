@@ -138,6 +138,7 @@ module KeeperKeepalive : sig
     estimated_input_tokens:int -> float
 
   val oas_timeout_sec : float
+  val stream_idle_timeout_sec : float
   val idle_skip_threshold : int
 end
 

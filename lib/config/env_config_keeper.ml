@@ -511,6 +511,14 @@ module KeeperKeepalive = struct
   let oas_timeout_sec =
     Option.value ~default:300.0 oas_timeout_sec_override
 
+  (** Idle-gap timeout for streaming OAS provider responses.
+      This bounds time between streamed lines, not total turn duration.
+      Env: [MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC]. Default: 120. Range: [5, 600]. *)
+  let stream_idle_timeout_sec =
+    Float.max 5.0
+      (Float.min 600.0
+         (get_float ~default:120.0 "MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC"))
+
   (** Consecutive idle tool repetitions before on_idle hook issues Skip.
       Below this: graduated Nudge messages.
       With tool_choice=Any, the model always calls tools, so idle

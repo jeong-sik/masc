@@ -1732,7 +1732,7 @@ let test_unified_turn_runtime_defaults () =
        This test verifies the runtime default, not cascade-resolved value. *)
     check int "unified max_tokens default" 65536
       (KC.keeper_unified_max_tokens ())
-    (* max_turns is set in keeper_agent_run.ml (default: 50) *)))
+    (* max_turns is set in keeper_agent_run.ml from keeper runtime config. *)))
 
 let test_meta_defaults_social_model () =
   check string "default social model" "bdi_speech_v1"

@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite'
 import preact from '@preact/preset-vite'
+import solid from 'vite-plugin-solid'
 import tailwindcss from '@tailwindcss/vite'
 import { visualizer } from 'rollup-plugin-visualizer'
 
@@ -23,7 +24,22 @@ export default defineConfig(({ command }) => {
     : []
 
   return {
-    plugins: [tailwindcss(), preact(), ...reportPlugins],
+    plugins: [
+      tailwindcss(),
+      // SolidJS plugin must run before Preact's so it claims its files
+      // first. The `include` regex restricts Solid's JSX transform to
+      // headless-solid/ adapters and preview/solid-* pages — the rest of
+      // the app (src/, headless-preact/, all other previews) stays Preact.
+      // PoC scope per RFC 0017.
+      solid({
+        include: [
+          /design-system\/headless-solid\//,
+          /design-system\/preview\/solid-.*/,
+        ],
+      }),
+      preact(),
+      ...reportPlugins,
+    ],
     base: '/dashboard/',
     build: {
       outDir: '../assets/dashboard',
@@ -38,6 +54,7 @@ export default defineConfig(({ command }) => {
         output: {
           manualChunks: {
             vendor: ['preact', 'preact/hooks', 'htm', '@preact/signals'],
+            solid: ['solid-js', 'solid-js/store', 'solid-js/web'],
           },
         },
       },

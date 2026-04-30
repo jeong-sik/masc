@@ -14,9 +14,6 @@ let create () =
     Cascade_pool.create Cascade_pool.Emergency ~provider_keys:[]
   in
   let pools = [tier1; tier2; emergency] in
-  if pools = [] then
-    failwith "Cascade_pool_router.create: configuration produced an empty pool set"
-  ;
   let keeper_pool_map = Hashtbl.create 64 in
   { pools; keeper_pool_map }
 

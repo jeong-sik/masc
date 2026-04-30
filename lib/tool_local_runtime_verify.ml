@@ -118,28 +118,7 @@ let first_endpoint_url endpoints =
   | (endpoint : Discovery_cache.endpoint_info) :: _ -> Some endpoint.url
   | [] -> None
 
-let error_message_of_http_error = function
-  | Llm_provider.Http_client.NetworkError { message; _ } -> message
-  | Llm_provider.Http_client.AcceptRejected { reason } -> reason
-  | Llm_provider.Http_client.CliTransportRequired { kind } ->
-      Printf.sprintf "%s provider requires a CLI transport" kind
-  | Llm_provider.Http_client.ProviderTerminal
-      { kind = Llm_provider.Http_client.Max_turns { turns; limit }; message } ->
-      Printf.sprintf "provider terminal: max turns exceeded (%d/%d): %s"
-        turns limit message
-  | Llm_provider.Http_client.ProviderTerminal
-      { kind = Llm_provider.Http_client.Other subtype; message } ->
-      Printf.sprintf "provider terminal: %s: %s" subtype message
-  | Llm_provider.Http_client.HttpError { code; body } -> (
-      try
-        let json = Yojson.Safe.from_string body in
-        match Yojson.Safe.Util.member "error" json with
-        | `Assoc fields -> (
-            match List.assoc_opt "message" fields with
-            | Some (`String msg) -> msg
-            | _ -> Printf.sprintf "HTTP %d" code)
-        | _ -> Printf.sprintf "HTTP %d" code
-      with Yojson.Json_error _ -> Printf.sprintf "HTTP %d" code)
+let error_message_of_http_error = Oas_compat.Http_client.error_message
 
 (** Probe whether an endpoint supports the OpenAI chat-completions protocol.
     This is a protocol-level probe; it explicitly depends on OAS

@@ -68,6 +68,8 @@ let format_exhausted_error last_err =
          [Oas_compat.Http_client.error_message] supplies that exact
          format, so future variant additions only break the adapter. *)
       Oas_compat.Http_client.error_message err
+    | Some (Llm_provider.Http_client.ProviderFailure _ as err) ->
+      Oas_compat.Http_client.error_message err
     | None -> "No providers available"
   in
   let network_error_kind =

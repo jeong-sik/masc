@@ -102,6 +102,17 @@ module Http_client = struct
           Cli_transport_required
       | Llm_provider.Http_client.ProviderTerminal _ ->
           Provider_terminal
+      | Llm_provider.Http_client.ProviderFailure
+          { kind = Capacity_exhausted _ | Hard_quota _; _ } ->
+          Transient_http 429
+      | Llm_provider.Http_client.ProviderFailure
+          { kind = Capability_mismatch _ | Cli_startup_failed _; _ } ->
+          Accept_rejected_capability_mismatch
+      | Llm_provider.Http_client.ProviderFailure
+          { kind = Provider_parse_error _; _ } ->
+          Provider_parse_error
+      | Llm_provider.Http_client.ProviderFailure _ ->
+          Provider_terminal
       | Llm_provider.Http_client.NetworkError _ -> Network_error
 
   let should_cascade (err : Llm_provider.Http_client.http_error) : bool =
@@ -132,6 +143,8 @@ module Http_client = struct
     | Llm_provider.Http_client.ProviderTerminal
         { kind = Llm_provider.Http_client.Other subtype; message } ->
         Printf.sprintf "provider terminal: %s: %s" subtype message
+    | Llm_provider.Http_client.ProviderFailure { kind; message } ->
+        Llm_provider.Http_client.provider_failure_to_string ~kind ~message
     | Llm_provider.Http_client.HttpError { code; body } -> (
         try
           let json = Yojson.Safe.from_string body in

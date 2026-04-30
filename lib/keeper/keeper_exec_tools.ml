@@ -85,7 +85,7 @@ let inferred_outcome_of_result ~raw_output ~payload_shape =
   | Plain_text ->
       `Success
   | Structured_error ->
-      if is_policy_gate_error raw_output then `Success else `Failure
+      `Failure
   | Malformed_structured _ ->
       `Failure
 

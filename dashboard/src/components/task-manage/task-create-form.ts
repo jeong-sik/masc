@@ -7,9 +7,9 @@ import { RichComposer } from '../common/rich-composer'
 import { showTaskCreate, taskCreating, createTask } from './task-manage-state'
 import { Tk } from '../tk'
 
-const title = signal('')
-const description = signal('')
-const priority = signal(3) // MASC priority: 1=P1 highest, 4=P4 lowest
+export const title = signal('')
+export const description = signal('')
+export const priority = signal(3) // MASC priority: 1=P1 highest, 4=P4 lowest
 const PRIORITY_OPTIONS = [
   { value: '1', label: 'P1 · 긴급' },
   { value: '2', label: 'P2 · 높음' },
@@ -17,7 +17,7 @@ const PRIORITY_OPTIONS = [
   { value: '4', label: 'P4 · 낮음' },
 ]
 
-function resetForm() { title.value = ''; description.value = ''; priority.value = 3 }
+export function resetForm() { title.value = ''; description.value = ''; priority.value = 3 }
 
 export function TaskCreateForm(props: { goalId?: string | null; goalTitle?: string | null } = {}) {
   const linkedGoalId = props.goalId?.trim() || null

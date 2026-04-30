@@ -258,12 +258,18 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                   resolved_max_context_for_turn ~meta model_labels
                 in
                 let temperature =
+                  let cascade_name =
+                    Keeper_cascade_profile.Runtime_name cascade_name
+                  in
                   Cascade_inference.resolve_temperature
                     ~cascade_name
                     ~fallback:Keeper_config.keeper_unified_temperature
                 in
                 let max_tokens =
                   let raw =
+                    let cascade_name =
+                      Keeper_cascade_profile.Runtime_name cascade_name
+                    in
                     Cascade_inference.resolve_max_tokens
                       ~cascade_name
                       ~fallback:Keeper_config.keeper_unified_max_tokens

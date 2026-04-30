@@ -44,18 +44,22 @@ let prepare_run_context
   let receipt_started_at = Types.now_iso () in
   let meta = Keeper_agent_tool_surface.sync_current_task_id_from_backlog ~config meta in
   (* 0. Resolve inference parameters via Cascade_inference *)
+  let inference_cascade_name =
+    Keeper_cascade_profile.Runtime_name cascade_name
+  in
   let temperature =
     match temperature with
     | Some t -> t
     | None ->
-      Cascade_inference.resolve_temperature ~cascade_name ~fallback:(fun () -> 0.3)
+      Cascade_inference.resolve_temperature
+        ~cascade_name:inference_cascade_name ~fallback:(fun () -> 0.3)
   in
   let max_tokens =
     match max_tokens with
     | Some t -> t
     | None ->
       Cascade_inference.resolve_max_tokens
-        ~cascade_name
+        ~cascade_name:inference_cascade_name
           (* 8192 allows complex multi-tool reasoning per turn.
            Cloudflare tunnel 100s is no longer a constraint with
            streaming responses. *)

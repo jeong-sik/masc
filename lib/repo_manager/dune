@@ -1,0 +1,18 @@
+(include_subdirs no)
+
+(library
+ (name repo_manager)
+ (public_name masc_mcp.repo_manager)
+ (modules
+   repo_manager_types
+   repo_store
+   repo_git
+   credential_store
+   keeper_repo_mapping
+   repo_sync)
+ (wrapped false)
+ (libraries
+   yojson
+   otoml
+   unix)
+ (preprocess (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq)))

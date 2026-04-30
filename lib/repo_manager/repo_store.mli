@@ -1,0 +1,35 @@
+open Repo_manager_types
+
+val load_all : base_path:string -> (repository list, string) result
+(** [load_all ~base_path] reads [.masc/config/repositories.toml] and returns
+    all registered repositories. Returns [Ok []] if the file does not exist. *)
+
+val save_all : base_path:string -> repository list -> (unit, string) result
+(** [save_all ~base_path repos] writes [repos] to
+    [.masc/config/repositories.toml], replacing any previous content. *)
+
+val find : base_path:string -> repository_id -> (repository, string) result
+(** [find ~base_path id] returns the repository with the given [id]. *)
+
+val add : base_path:string -> repository -> (repository, string) result
+(** [add ~base_path repo] adds [repo] to the store. If a repository with the
+    same [id] already exists, returns an error. *)
+
+val remove : base_path:string -> repository_id -> (unit, string) result
+(** [remove ~base_path id] removes the repository with the given [id]. *)
+
+val update_status :
+  base_path:string -> repository_id -> repository_status -> (unit, string) result
+(** [update_status ~base_path id status] updates the status of the repository
+    with the given [id]. *)
+
+val list_branches :
+  base_path:string -> repository_id -> (string list, string) result
+(** [list_branches ~base_path id] lists branch names for the repository.
+    This delegates to the git layer and will be wired once {!Repo_git} is
+    available. *)
+
+val local_path : base_path:string -> repository -> string
+(** [local_path ~base_path repo] returns the absolute path to the repository's
+    local checkout. If [repo.local_path] is already absolute, it is returned
+    as-is; otherwise it is resolved relative to [base_path]. *)

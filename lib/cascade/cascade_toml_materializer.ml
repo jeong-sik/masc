@@ -1,6 +1,7 @@
 type source_kind =
-  | Json
-  | Toml
+  | Json [@tla.symbol "json"]
+  | Toml [@tla.symbol "toml"]
+[@@deriving tla]
 
 type source_info = {
   kind : source_kind;

@@ -26,6 +26,7 @@ type source_kind =
   | Toml
       (** [<config_dir>/cascade.toml] exists; the JSON sibling is a
           derived artifact and not editable in place. *)
+[@@deriving tla]
 
 type source_info = {
   kind : source_kind;

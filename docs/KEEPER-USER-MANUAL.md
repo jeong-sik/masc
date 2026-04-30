@@ -281,7 +281,7 @@ spawn 시 인자로 직접 설정하는 필드.
 | `network_mode` | string | `inherit` 또는 `none` | 샌드박스 네트워크 정책. `docker`는 기본 `none` (기본 모드의 git/gh dispatch만 `inherit`으로 승격). hard mode에서는 `none`만 허용된다. | `masc_keeper_up`의 `network_mode` 인자 |
 | `shared_memory_scope` | string | `disabled` | typed shared-memory lane. `room`이면 keeper-authorized `masc_team_memory_*`를 flattened `default` namespace에서 사용 가능 | `masc_keeper_up`의 `shared_memory_scope` 인자 |
 | `github_identity` | string | 없음 | keeper에 바인딩된 GitHub CLI identity 이름. `.masc/github-identities/<identity>/gh` bundle을 사용한다. | `keeper.toml` 선언 |
-| `git_identity_mode` | string | `keeper_alias` | git author를 keeper alias로 유지할지, 향후 GitHub identity와 결합할지 결정 | `keeper.toml` 선언 |
+| `git_identity_mode` | string | `keeper_alias` | git author를 keeper alias로 유지할지, GitHub identity 기반 author로 결합할지 결정 | `keeper.toml` 선언 |
 | `active_goal_ids` | string[] | 없음 | 설정 시 `keeper_task_claim`이 해당 goal에 링크된 task만 claim | `keeper.toml` 선언 |
 
 ### 3.1.1 Sandbox Core V1 사용법
@@ -312,6 +312,47 @@ spawn 시 인자로 직접 설정하는 필드.
 - `shared_memory_scope=room`은 공용 writable mount가 아니라 flattened `default` namespace typed lane만 연다.
 - team memory 도구는 keeper tool surface에도 노출되어야 하므로 preset에 없다면 `tool_also_allow` 또는 `tool_access.also_allow`로 명시해야 한다.
 
+### 3.1.2 GitHub identity 운영 절차
+
+`github_identity`는 현재 대시보드의 일반 설정 화면에서 수정하는 필드가 아니라 active config root의 `keeper.toml` overlay가 SSOT다. 대시보드에서 찾지 못하면 먼저 active config root를 확인하고 파일을 수정한다.
+
+```bash
+masc-mcp doctor config --base-path /path/to/base --json | jq -r '.active_config_root'
+```
+
+Keeper가 사용할 identity bundle은 base path 아래에 있어야 한다. 예를 들어 `anyang-keepers`를 쓸 때:
+
+```bash
+GH_CONFIG_DIR=/path/to/base/.masc/github-identities/anyang-keepers/gh \
+  gh auth status --hostname github.com
+```
+
+bundle이 없으면 같은 `GH_CONFIG_DIR`로 login한다.
+
+```bash
+mkdir -p /path/to/base/.masc/github-identities/anyang-keepers/gh
+GH_CONFIG_DIR=/path/to/base/.masc/github-identities/anyang-keepers/gh \
+  gh auth login --hostname github.com --git-protocol https --web
+```
+
+각 keeper의 `<active_config_root>/keepers/<keeper>.toml`에 다음을 둔다.
+
+```toml
+github_identity = "anyang-keepers"
+git_identity_mode = "github_identity"
+```
+
+확인 순서:
+
+```bash
+rg -n 'github_identity|git_identity_mode' <active_config_root>/keepers
+GH_CONFIG_DIR=/path/to/base/.masc/github-identities/anyang-keepers/gh \
+  gh auth status --hostname github.com
+masc-mcp doctor config --base-path /path/to/base --json
+```
+
+Docker keeper의 실제 사용 여부는 keeper가 `keeper_shell op=gh`, `keeper_shell op=git_clone`, 또는 git/gh 계열 `keeper_bash`를 호출할 때 확정된다. 이 경로는 operator host의 `~/.config/gh`, `GH_TOKEN`, `GITHUB_TOKEN`, SSH agent, keychain으로 fallback하지 않는다. selected bundle이 없으면 fail-closed 된다.
+
 hard mode 예시:
 
 ```toml
@@ -320,6 +361,7 @@ persona_name = "analyst"
 sandbox_profile = "docker"
 network_mode = "none"
 github_identity = "anyang-keepers"
+git_identity_mode = "github_identity"
 shared_memory_scope = "room"
 tool_also_allow = ["masc_team_memory_read", "masc_team_memory_write", "masc_team_memory_search"]
 ```

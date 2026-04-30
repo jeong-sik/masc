@@ -24,6 +24,7 @@ import type {
   DashboardCoordinationFsmViolation,
   GoalDetailKeeper,
   GoalDetailTimelineEvent,
+  GoalFsmProjection,
   GoalTreeNode,
   GoalTreeTask,
   GoalTreeSummary,
@@ -147,6 +148,7 @@ function badgeLabel(badge: string): string {
     case 'cascade': return 'Cascade'
     case 'task_verification_pending': return 'Task 검증 대기'
     case 'stalled': return '정체'
+    case 'activity_unobserved': return '활동 관측 부족'
     case 'linkage_warning': return '연결 경고'
     default: return badge
   }
@@ -159,6 +161,8 @@ function badgeClass(badge: string): string {
     case 'task_verification_pending':
     case 'stalled':
       return 'border-warn/30 bg-warn/10 text-warn'
+    case 'activity_unobserved':
+      return 'border-card-border/60 bg-[var(--white-4)] text-text-muted'
     case 'sandbox':
       return 'border-accent/30 bg-[var(--accent-10)] text-accent'
     case 'linkage_warning':
@@ -224,6 +228,62 @@ function blockerSourceClass(source: GoalTreeNode['blocking_source']): string {
     default:
       return 'border-card-border/60 bg-[var(--white-4)] text-text-body'
   }
+}
+
+export function goalFsmStateKindLabel(kind: GoalFsmProjection['state_kind']): string {
+  switch (kind) {
+    case 'executing': return '실행'
+    case 'verification_gate': return '검증 게이트'
+    case 'approval_gate': return '승인 게이트'
+    case 'blocked': return '차단'
+    case 'paused': return '일시정지'
+    case 'completed': return '완료'
+    case 'dropped': return '중단'
+    default: return kind
+  }
+}
+
+export function goalFsmObservationLabel(
+  observation: GoalFsmProjection['activity_observation'],
+): string {
+  switch (observation) {
+    case 'runtime': return 'runtime evidence'
+    case 'approval': return 'approval event'
+    case 'task': return 'task update'
+    case 'child': return 'child goal'
+    case 'goal_metadata': return 'goal metadata only'
+    default: return observation
+  }
+}
+
+export function goalFsmStagnationLabel(
+  status: GoalFsmProjection['stagnation_status'],
+): string {
+  switch (status) {
+    case 'recent': return 'recent'
+    case 'stalled': return 'stalled'
+    case 'unobserved': return 'unobserved'
+    default: return status
+  }
+}
+
+function GoalFsmBadge({ fsm }: { fsm: GoalFsmProjection }) {
+  const toneClass =
+    fsm.stagnation_status === 'stalled'
+      ? 'border-warn/30 bg-warn/10 text-warn'
+      : fsm.state_kind === 'blocked'
+        ? 'border-bad/35 bg-bad/10 text-bad'
+        : fsm.state_kind === 'verification_gate' || fsm.state_kind === 'approval_gate'
+          ? 'border-amber-400/30 bg-amber-400/10 text-amber-200'
+          : 'border-card-border/60 bg-[var(--white-4)] text-text-body'
+  return html`
+    <span
+      class="inline-flex items-center rounded border px-2 py-0.5 text-3xs font-semibold uppercase ${toneClass}"
+      title=${`source=${fsm.source}; activity=${goalFsmObservationLabel(fsm.activity_observation)}; stagnation=${goalFsmStagnationLabel(fsm.stagnation_status)}`}
+    >
+      Goal FSM · ${goalFsmStateKindLabel(fsm.state_kind)}
+    </span>
+  `
 }
 
 function keeperTrustDispositionClass(
@@ -593,6 +653,7 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
               ${horizonLabel(node.horizon)}
             </span>
             <${StatusBadge} status=${goalPhaseStatus(node.phase)} label=${goalPhaseLabel(node.phase)} />
+            <${GoalFsmBadge} fsm=${node.goal_fsm} />
             <span class="break-words text-base font-semibold text-text-strong line-clamp-2">${node.title}</span>
             <span class="text-2xs text-text-dim">${priorityStars(node.priority)}</span>
           </div>
@@ -896,6 +957,7 @@ function GoalDetailPanel({
             <${HealthBadge} health=${selectedNode.health} />
             <${StatusBadge} status=${selectedNode.status} />
             <${StatusBadge} status=${goalPhaseStatus(selectedNode.phase)} label=${goalPhaseLabel(selectedNode.phase)} />
+            <${GoalFsmBadge} fsm=${selectedNode.goal_fsm} />
             <span class="rounded border border-[var(--white-10)] bg-[var(--white-5)] px-2 py-0.5 text-3xs font-semibold uppercase tracking-widest" style="color:${horizonColor(selectedNode.horizon)}">
               ${horizonLabel(selectedNode.horizon)}
             </span>
@@ -936,6 +998,40 @@ function GoalDetailPanel({
       ${loading && !detail ? html`<${LoadingState}>goal detail 로드 중...<//>` : null}
 
       ${activeTab === 'summary' ? html`
+        <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4">
+          <div class="mb-2 flex flex-wrap items-center gap-2">
+            <span class="text-2xs font-semibold uppercase text-text-muted">Goal FSM</span>
+            <span class="rounded border border-card-border/60 bg-[var(--white-4)] px-2 py-0.5 text-3xs font-semibold text-text-body">
+              ${selectedNode.goal_fsm.source}
+            </span>
+          </div>
+          <div class="grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-2 text-xs text-text-body">
+            <div class="rounded border border-card-border/50 bg-[var(--white-3)] p-2">
+              <div class="text-3xs uppercase text-text-muted">state</div>
+              <div class="mt-1 font-semibold text-text-strong">${goalPhaseLabel(selectedNode.goal_fsm.state)}</div>
+            </div>
+            <div class="rounded border border-card-border/50 bg-[var(--white-3)] p-2">
+              <div class="text-3xs uppercase text-text-muted">kind</div>
+              <div class="mt-1 font-semibold text-text-strong">${goalFsmStateKindLabel(selectedNode.goal_fsm.state_kind)}</div>
+            </div>
+            <div class="rounded border border-card-border/50 bg-[var(--white-3)] p-2">
+              <div class="text-3xs uppercase text-text-muted">activity</div>
+              <div class="mt-1 font-semibold text-text-strong">${goalFsmObservationLabel(selectedNode.goal_fsm.activity_observation)}</div>
+            </div>
+            <div class="rounded border border-card-border/50 bg-[var(--white-3)] p-2">
+              <div class="text-3xs uppercase text-text-muted">stagnation</div>
+              <div class="mt-1 font-semibold text-text-strong">${goalFsmStagnationLabel(selectedNode.goal_fsm.stagnation_status)}</div>
+            </div>
+          </div>
+          ${selectedNode.goal_fsm.next_actions.length > 0 ? html`
+            <div class="mt-3 flex flex-wrap gap-1.5">
+              ${selectedNode.goal_fsm.next_actions.map(action => html`
+                <code key=${action} class="rounded border border-card-border/60 bg-[var(--white-4)] px-1.5 py-0.5 text-3xs text-text-secondary">${action}</code>
+              `)}
+            </div>
+          ` : null}
+        </div>
+
         ${selectedNode.blocking_source !== 'none' ? html`
           <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4">
             <div class="mb-2 flex flex-wrap items-center gap-2">

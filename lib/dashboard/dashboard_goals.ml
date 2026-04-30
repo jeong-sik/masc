@@ -23,6 +23,8 @@ type tree_node = {
   latest_keeper_ref : string option;
   latest_turn_ref : int option;
   stalled_since : string option;
+  activity_observation : string;
+  stagnation_status : string;
 }
 
 type goal_detail_keeper = {
@@ -117,6 +119,9 @@ let receipt_started_at json =
 let receipt_ended_at json =
   json |> member "ended_at" |> to_string_option
 
+let receipt_turn_count json =
+  json |> member "turn_count" |> to_int_option
+
 let trust_disposition json =
   json |> member "disposition" |> to_string_option
 
@@ -129,6 +134,12 @@ let trust_attention_reason json =
 let trust_needs_attention json =
   json |> member "needs_attention" |> to_bool_option
   |> Option.value ~default:false
+
+let trust_snapshot_unavailable json =
+  String.equal
+    (json |> member "disposition_reason" |> to_string_option
+     |> Option.value ~default:"")
+    "runtime_trust_snapshot_unavailable"
 
 let trust_turn_id json =
   json |> member "turn_id" |> to_int_option
@@ -270,7 +281,8 @@ let goal_phase_to_health = function
 
 let goal_health_reason ~goal_phase ~blocked_by_receipt ~child_blocked
     ~pending_approvals ~sandbox_risk ~cascade_risk ~fsm_risk ~stalled
-    ~stagnation_seconds ~child_at_risk ~linkage_warning_reason =
+    ~stagnation_seconds ~child_at_risk ~linkage_warning_reason
+    ~activity_observation ~stagnation_status =
   match goal_phase_to_health goal_phase with
   | Some "done" -> "Goal phase is completed."
   | Some "paused" -> "Goal phase is paused."
@@ -306,6 +318,10 @@ let goal_health_reason ~goal_phase ~blocked_by_receipt ~child_blocked
       else if stalled then
         Printf.sprintf "No linked activity for %s."
           (human_duration stagnation_seconds)
+      else if String.equal stagnation_status "unobserved" then
+        Printf.sprintf
+          "Goal FSM is %s; activity freshness is based only on %s, so stalled is not asserted."
+          (Goal_phase.to_string goal_phase) activity_observation
       else if child_at_risk then
         "A linked sub-goal is at risk."
       else
@@ -319,14 +335,64 @@ let tree_health ~goal_phase ~blocked_by_receipt ~child_blocked ~at_risk =
       else if at_risk then "at_risk"
       else "on_track"
 
-let tree_badges ~pending_approvals ~sandbox_risk ~cascade_risk ~fsm_risk ~stalled =
+let tree_badges ~pending_approvals ~sandbox_risk ~cascade_risk ~fsm_risk ~stalled
+    ~activity_unobserved =
   let badges = ref [] in
   if pending_approvals > 0 then badges := "awaiting_approval" :: !badges;
   if sandbox_risk then badges := "sandbox" :: !badges;
   if cascade_risk then badges := "cascade" :: !badges;
   if fsm_risk then badges := "task_verification_pending" :: !badges;
   if stalled then badges := "stalled" :: !badges;
+  if activity_unobserved then badges := "activity_unobserved" :: !badges;
   List.rev !badges
+
+let goal_fsm_state_kind = function
+  | Goal_phase.Executing -> "executing"
+  | Goal_phase.Awaiting_verification -> "verification_gate"
+  | Goal_phase.Awaiting_approval -> "approval_gate"
+  | Goal_phase.Blocked -> "blocked"
+  | Goal_phase.Paused -> "paused"
+  | Goal_phase.Completed -> "completed"
+  | Goal_phase.Dropped -> "dropped"
+
+let goal_fsm_next_actions ~goal_phase ~has_effective_verifier_policy
+    ~require_completion_approval =
+  [
+    Goal_phase.Request_complete;
+    Goal_phase.Approve_completion;
+    Goal_phase.Reject_completion;
+    Goal_phase.Pause;
+    Goal_phase.Resume;
+    Goal_phase.Operator_block;
+    Goal_phase.Operator_unblock;
+    Goal_phase.Drop;
+    Goal_phase.Reopen;
+  ]
+  |> List.filter (fun action ->
+         match
+           Goal_phase.decide_transition ~phase:goal_phase ~action
+             ~has_effective_verifier_policy ~require_completion_approval
+         with
+         | Ok _ -> true
+         | Error _ -> false)
+  |> List.map Goal_phase.action_to_string
+
+let goal_fsm_to_json ~effective_policy (goal : Goal_store.goal)
+    (node : tree_node) =
+  `Assoc
+    [
+      ("state", Goal_phase.to_yojson goal.phase);
+      ("source", `String "goal.phase");
+      ("state_kind", `String (goal_fsm_state_kind goal.phase));
+      ( "next_actions",
+        `List
+          (goal_fsm_next_actions ~goal_phase:goal.phase
+             ~has_effective_verifier_policy:(Option.is_some effective_policy)
+             ~require_completion_approval:goal.require_completion_approval
+          |> List.map (fun action -> `String action)) );
+      ("activity_observation", `String node.activity_observation);
+      ("stagnation_status", `String node.stagnation_status);
+    ]
 
 type build_context = {
   now_ts : float;
@@ -336,6 +402,188 @@ type build_context = {
   latest_receipts : (string * Yojson.Safe.t) list;
   latest_runtime_trusts : (string * Yojson.Safe.t) list;
 }
+
+let keeper_runtime_trust_snapshot_json ~config ~(meta : Keeper_types.keeper_meta) =
+  try Keeper_runtime_trust_snapshot.snapshot_json ~config ~meta with
+  | exn ->
+      let error = Printexc.to_string exn in
+      `Assoc
+        [
+          ("disposition", `String "Pause");
+          ("disposition_reason", `String "runtime_trust_snapshot_unavailable");
+          ("needs_attention", `Bool true);
+          ("attention_reason", `String "runtime_trust_snapshot_unavailable");
+          ("next_human_action", `String "inspect_keeper_runtime_trust");
+          ("snapshot_error", `String error);
+          ("latest_causal_event", `Null);
+          ("causal_timeline", `List []);
+        ]
+
+let display_disposition_of_receipt_json receipt =
+  let operator_disposition =
+    receipt |> member "operator_disposition" |> to_string_option
+    |> Option.value ~default:"unknown"
+  in
+  let operator_disposition_reason =
+    receipt |> member "operator_disposition_reason" |> to_string_option
+    |> Option.value ~default:""
+  in
+  let reason fallback =
+    match String.trim operator_disposition_reason with
+    | "" -> fallback
+    | value -> value
+  in
+  match String.lowercase_ascii operator_disposition with
+  | "pass" -> ("Pass", "healthy", operator_disposition, operator_disposition_reason)
+  | "skipped" ->
+      ("Pass", "phase_skipped", operator_disposition, operator_disposition_reason)
+  | "pass_next_model" ->
+      ("Pass", "cascade_fallback", operator_disposition, operator_disposition_reason)
+  | "pause_human" ->
+      ( "Pause",
+        reason "needs_human_attention",
+        operator_disposition,
+        operator_disposition_reason )
+  | "fail_open_next_cascade" ->
+      ("Pause", reason "degraded_retry", operator_disposition, operator_disposition_reason)
+  | "user_cancelled" ->
+      ("Pause", reason "cancelled", operator_disposition, operator_disposition_reason)
+  | "alert_exhausted" ->
+      ("Alert", reason "cascade_exhausted", operator_disposition, operator_disposition_reason)
+  | "unknown" ->
+      ( "Alert",
+        reason "unmapped_cascade_state",
+        operator_disposition,
+        operator_disposition_reason )
+  | _ ->
+      ( "Alert",
+        reason "unmapped_operator_disposition",
+        operator_disposition,
+        operator_disposition_reason )
+
+let runtime_blocker_event_from_meta ~config ~(meta : Keeper_types.keeper_meta) =
+  let runtime_blocker_fields =
+    Keeper_status_bridge.runtime_blocker_fields_json config meta
+  in
+  let assoc_string_opt name =
+    match List.assoc_opt name runtime_blocker_fields with
+    | Some json -> to_string_option json
+    | None -> None
+  in
+  let blocker_class = assoc_string_opt "runtime_blocker_class" in
+  let blocker_summary = assoc_string_opt "runtime_blocker_summary" in
+  let summary =
+    match blocker_summary, blocker_class with
+    | Some value, _ when String.trim value <> "" -> Some value
+    | _, Some value when String.trim value <> "" -> Some value
+    | _ -> None
+  in
+  match summary with
+  | None -> None
+  | Some summary ->
+      let now_ts = Time_compat.now () in
+      let now_iso = Types.now_iso () in
+      Some
+        (`Assoc
+          [
+            ("kind", `String "runtime_blocker");
+            ("ts", `String now_iso);
+            ("ts_unix", `Float now_ts);
+            ("observed_at", `String now_iso);
+            ("observed_at_unix", `Float now_ts);
+            ("observation_only", `Bool true);
+            ("trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
+            ("keeper_turn_id", `Null);
+            ("task_id", `Null);
+            ( "goal_ids",
+              `List (List.map (fun goal_id -> `String goal_id) meta.active_goal_ids)
+            );
+            ("title", `String "Runtime Blocker");
+            ("summary", `String summary);
+            ( "severity",
+              `String
+                (match blocker_class with
+                 | Some "cascade_exhausted"
+                 | Some "completion_contract_violation" ->
+                     "bad"
+                 | _ -> "warn") );
+            ("next_human_action", `String "inspect_runtime_blocker");
+          ])
+
+let runtime_trust_from_receipt_fallback ~config ~(meta : Keeper_types.keeper_meta)
+    receipt =
+  let disposition, disposition_reason, operator_disposition,
+      operator_disposition_reason =
+    display_disposition_of_receipt_json receipt
+  in
+  let ts =
+    receipt_ended_at receipt
+    |> Option.value ~default:meta.updated_at
+  in
+  let turn_id = receipt_turn_count receipt in
+  let severity =
+    match disposition with
+    | "Pass" -> "ok"
+    | "Pause" -> "warn"
+    | _ -> "bad"
+  in
+  let latest_event =
+    `Assoc
+      [
+        ("kind", `String "execution_receipt");
+        ("ts", `String ts);
+        ("keeper_turn_id", Json_util.int_opt_to_json turn_id);
+        ("goal_ids", `List (List.map (fun goal_id -> `String goal_id) meta.active_goal_ids));
+        ("title", `String "Keeper Execution Receipt");
+        ("summary", `String disposition_reason);
+        ("severity", `String severity);
+      ]
+  in
+  let runtime_blocker_fields =
+    Keeper_status_bridge.runtime_blocker_fields_json config meta
+  in
+  let causal_timeline =
+    let blocker_events =
+      runtime_blocker_event_from_meta ~config ~meta
+      |> Option.map (fun event -> [ event ])
+      |> Option.value ~default:[]
+    in
+    `List (latest_event :: blocker_events)
+  in
+  `Assoc
+    [
+      ("trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
+      ("generation", `Int meta.runtime.generation);
+      ("turn_id", Json_util.int_opt_to_json turn_id);
+      ("phase", `Null);
+      ("raw_phase", `Null);
+      ("goal_ids", `List (List.map (fun goal_id -> `String goal_id) meta.active_goal_ids));
+      ("disposition", `String disposition);
+      ("disposition_reason", `String disposition_reason);
+      ("operator_disposition", `String operator_disposition);
+      ("operator_disposition_reason", `String operator_disposition_reason);
+      ("needs_attention", `Bool (not (String.equal disposition "Pass")));
+      ("attention_reason", `Null);
+      ("next_human_action", `Null);
+      ( "approval",
+        `Assoc
+          [
+            ("state", `String "idle");
+            ("summary", `String "idle");
+            ("pending_count", `Int 0);
+          ] );
+      ( "execution_summary",
+        `Assoc
+          [
+            ( "tool_contract_result",
+              receipt |> member "tool_contract_result" );
+            ("latest_receipt_at", `String ts);
+          ] );
+      ("runtime_blockers", `Assoc runtime_blocker_fields);
+      ("latest_causal_event", latest_event);
+      ("causal_timeline", causal_timeline);
+      ("latest_receipt", receipt);
+    ]
 
 let rec build_tree context goals goal =
   let child_goals =
@@ -375,10 +623,14 @@ let rec build_tree context goals goal =
   let direct_linked_keeper_names =
     dedupe_sort (direct_task_keeper_names @ direct_goal_keeper_names)
   in
-  let direct_receipts =
+  let direct_receipt_refs =
     direct_linked_keeper_names
     |> List.filter_map (fun keeper_name ->
-           List.assoc_opt keeper_name context.latest_receipts)
+           List.assoc_opt keeper_name context.latest_receipts
+           |> Option.map (fun receipt -> (keeper_name, receipt)))
+  in
+  let direct_receipts =
+    direct_receipt_refs |> List.map snd
   in
   let direct_runtime_trusts =
     direct_linked_keeper_names
@@ -397,16 +649,34 @@ let rec build_tree context goals goal =
         || String.equal child.health "blocked")
       children
   in
+  let task_activity_values =
+    linked_tasks
+    |> List.map (fun ((task, _) : Types.task * string) -> task_updated_at task)
+  in
+  let approval_activity_values =
+    direct_pending_approvals
+    |> List.filter_map (fun json ->
+           json |> member "requested_at_iso" |> to_string_option)
+  in
+  let receipt_activity_values =
+    direct_receipts |> List.filter_map receipt_ended_at
+  in
+  let runtime_activity_values =
+    direct_runtime_trusts
+    |> List.filter_map (fun (_, trust) -> trust_latest_event_ts trust)
+  in
+  let direct_observed_activity_values =
+    task_activity_values @ approval_activity_values @ receipt_activity_values
+    @ runtime_activity_values
+  in
   let direct_last_activity_values =
-    goal.Goal_store.updated_at
-    :: (linked_tasks
-        |> List.map (fun ((task, _) : Types.task * string) -> task_updated_at task))
-    @ (direct_pending_approvals
-       |> List.filter_map (fun json ->
-              json |> member "requested_at_iso" |> to_string_option))
-    @ (direct_receipts |> List.filter_map receipt_ended_at)
-    @ (direct_runtime_trusts
-       |> List.filter_map (fun (_, trust) -> trust_latest_event_ts trust))
+    goal.Goal_store.updated_at :: direct_observed_activity_values
+  in
+  let child_observed_activity_values =
+    children
+    |> List.filter_map (fun child ->
+           if String.equal child.activity_observation "goal_metadata" then None
+           else Some child.last_activity_at)
   in
   let child_last_activity_values =
     children |> List.map (fun child -> child.last_activity_at)
@@ -437,16 +707,19 @@ let rec build_tree context goals goal =
   let direct_runtime_blocking_reason =
     direct_runtime_trusts
     |> List.find_map (fun (_keeper_name, trust) ->
-           match trust_disposition trust with
-           | Some "Alert" ->
-               (match trust_attention_reason trust with
-                | Some _ as reason -> reason
-                | None -> trust_disposition_reason trust)
-           | Some "Pause" when trust_needs_attention trust ->
-               (match trust_attention_reason trust with
-                | Some _ as reason -> reason
-                | None -> trust_disposition_reason trust)
-           | _ -> None)
+           if trust_snapshot_unavailable trust && direct_receipts <> [] then
+             None
+           else
+             match trust_disposition trust with
+             | Some "Alert" ->
+                 (match trust_attention_reason trust with
+                  | Some _ as reason -> reason
+                  | None -> trust_disposition_reason trust)
+             | Some "Pause" when trust_needs_attention trust ->
+                 (match trust_attention_reason trust with
+                  | Some _ as reason -> reason
+                  | None -> trust_disposition_reason trust)
+             | _ -> None)
   in
   let direct_fsm_risk =
     List.exists
@@ -487,13 +760,35 @@ let rec build_tree context goals goal =
     | Goal_phase.Dropped ->
         None
   in
-  let stalled =
+  let activity_observation =
+    if runtime_activity_values <> [] || receipt_activity_values <> [] then
+      "runtime"
+    else if approval_activity_values <> [] then
+      "approval"
+    else if task_activity_values <> [] then
+      "task"
+    else if child_observed_activity_values <> [] then
+      "child"
+    else
+      "goal_metadata"
+  in
+  let stale_by_threshold =
     stagnation_seconds >= stagnation_threshold_seconds goal.Goal_store.horizon
+  in
+  let observed_for_stagnation =
+    not (String.equal activity_observation "goal_metadata")
+  in
+  let stalled = stale_by_threshold && observed_for_stagnation in
+  let stagnation_status =
+    if stalled then "stalled"
+    else if stale_by_threshold then "unobserved"
+    else "recent"
   in
   let direct_badges =
     tree_badges ~pending_approvals:(List.length direct_pending_approvals)
       ~sandbox_risk:direct_sandbox_risk ~cascade_risk:direct_cascade_risk
       ~fsm_risk:direct_fsm_risk ~stalled
+      ~activity_unobserved:(String.equal stagnation_status "unobserved")
   in
   let direct_badges =
     match linkage_warning_reason with
@@ -521,10 +816,13 @@ let rec build_tree context goals goal =
     + List.length
         (List.filter
            (fun (_, trust) ->
-             match trust_disposition trust with
-             | Some "Alert" -> true
-             | Some "Pause" -> trust_needs_attention trust
-             | _ -> false)
+             if trust_snapshot_unavailable trust && direct_receipts <> [] then
+               false
+             else
+               match trust_disposition trust with
+               | Some "Alert" -> true
+               | Some "Pause" -> trust_needs_attention trust
+               | _ -> false)
            direct_runtime_trusts)
   in
   let infra_risk_count =
@@ -570,6 +868,7 @@ let rec build_tree context goals goal =
       ~sandbox_risk:direct_sandbox_risk ~cascade_risk:direct_cascade_risk
       ~fsm_risk:direct_fsm_risk ~stalled
       ~stagnation_seconds ~child_at_risk ~linkage_warning_reason
+      ~activity_observation ~stagnation_status
   in
   let blocking_source, blocking_reason =
     match goal.Goal_store.phase with
@@ -593,15 +892,40 @@ let rec build_tree context goals goal =
         else
           ("none", status_reason)
   in
-  let latest_keeper_ref, latest_turn_ref =
+  let latest_receipt_ref =
+    direct_receipt_refs
+    |> List.sort (fun (_, left) (_, right) ->
+           String.compare
+             (Option.value ~default:"" (receipt_ended_at right))
+             (Option.value ~default:"" (receipt_ended_at left)))
+    |> function
+    | (keeper_name, receipt) :: _ -> (Some keeper_name, receipt_turn_count receipt)
+    | [] -> (None, None)
+  in
+  let latest_runtime_ref =
     direct_runtime_trusts
+    |> List.filter (fun (_, trust) ->
+           Option.is_some (trust_latest_event_ts_unix trust))
     |> List.sort (fun (_, left) (_, right) ->
            Float.compare
              (Option.value ~default:0.0 (trust_latest_event_ts_unix right))
              (Option.value ~default:0.0 (trust_latest_event_ts_unix left)))
     |> function
-    | (keeper_name, trust) :: _ -> (Some keeper_name, trust_turn_id trust)
+    | (keeper_name, trust) :: _ -> Some (Some keeper_name, trust_turn_id trust)
+    | [] -> None
+  in
+  let latest_linked_keeper_ref =
+    match direct_linked_keeper_names with
+    | keeper_name :: _ -> (Some keeper_name, None)
     | [] -> (None, None)
+  in
+  let latest_keeper_ref, latest_turn_ref =
+    match latest_runtime_ref with
+    | Some latest -> latest
+    | None -> (
+        match latest_receipt_ref with
+        | Some _, _ -> latest_receipt_ref
+        | None, _ -> latest_linked_keeper_ref)
   in
   let stalled_since =
     if stalled then Some last_activity_at else None
@@ -627,6 +951,8 @@ let rec build_tree context goals goal =
     latest_keeper_ref;
     latest_turn_ref;
     stalled_since;
+    activity_observation;
+    stagnation_status;
   }
 
 let build_forest ~(config : Coord.config) ~goals ~tasks =
@@ -664,8 +990,7 @@ let build_forest ~(config : Coord.config) ~goals ~tasks =
         keeper_metas
         |> List.map (fun (meta : Keeper_types.keeper_meta) ->
                ( meta.name,
-                 Keeper_runtime_trust_snapshot.snapshot_json
-                   ~config ~meta ));
+                 keeper_runtime_trust_snapshot_json ~config ~meta ));
     }
   in
   goals
@@ -829,6 +1154,7 @@ let rec tree_node_to_json ?(effective_policy_for_goal = fun _ -> None)
       ("status_color", `String (goal_status_color goal.status));
       ("phase", Goal_phase.to_yojson goal.phase);
       ("phase_color", `String (goal_phase_color goal.phase));
+      ("goal_fsm", goal_fsm_to_json ~effective_policy goal node);
       ("health", `String node.health);
       ("health_color", `String (goal_health_color node.health));
       ("badges", `List (List.map (fun badge -> `String badge) node.badges));
@@ -894,6 +1220,8 @@ let rec tree_node_to_json ?(effective_policy_for_goal = fun _ -> None)
       ("child_count", `Int (List.length node.children));
       ("last_activity_at", `String node.last_activity_at);
       ("stagnation_seconds", `Int node.stagnation_seconds);
+      ("activity_observation", `String node.activity_observation);
+      ("stagnation_status", `String node.stagnation_status);
       ( "linked_keeper_names",
         `List
           (List.map (fun keeper_name -> `String keeper_name) node.linked_keeper_names)
@@ -1198,16 +1526,28 @@ let goal_detail_json ~(config : Coord.config) ~goal_id :
         |> List.filter_map (fun keeper_name ->
                match Keeper_types.read_meta config keeper_name with
                | Ok (Some meta) when List.mem meta.name node.linked_keeper_names ->
+                   let latest_receipt =
+                     List.assoc_opt meta.name
+                       (Keeper_execution_receipt.latest_json_by_keeper
+                          config node.linked_keeper_names)
+                   in
+                   let runtime_trust =
+                     let snapshot =
+                       keeper_runtime_trust_snapshot_json ~config ~meta
+                     in
+                     if trust_snapshot_unavailable snapshot then
+                       match latest_receipt with
+                       | Some receipt ->
+                           runtime_trust_from_receipt_fallback ~config ~meta receipt
+                       | None -> snapshot
+                     else
+                       snapshot
+                   in
                    Some
                      {
                        meta;
-                       latest_receipt =
-                         List.assoc_opt meta.name
-                           (Keeper_execution_receipt.latest_json_by_keeper
-                              config node.linked_keeper_names);
-                       runtime_trust =
-                         Keeper_runtime_trust_snapshot.snapshot_json
-                           ~config ~meta;
+                       latest_receipt;
+                       runtime_trust;
                      }
                | Ok None | Error _ | Ok (Some _) -> None)
       in

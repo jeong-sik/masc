@@ -1282,6 +1282,17 @@ let prepare_agent_setup
     in
     Oas.Hooks.compose ~outer:mem_hooks ~inner:hooks
   in
+  (* Tier K4b: install the tool-emission PostToolUse hook so tagged
+     tool results flow into the K4 process-wide accumulator during
+     Agent.run. The drain happens in keeper_post_turn.ml
+     [apply_tool_emission_wirein] BEFORE [apply_multimodal_wirein].
+     When [MASC_TOOL_EMISSION] is off the hook is a no-op (see
+     [Keeper_tool_emission_hook] for the gating). *)
+  let hooks =
+    Keeper_tool_emission_hook.install_into_hooks
+      Keeper_tool_emission_hook.global_accumulator
+      hooks
+  in
   let reducer =
     let hydrator_steps =
       match Keeper_artifact_hydrator.reducer_from_env () with

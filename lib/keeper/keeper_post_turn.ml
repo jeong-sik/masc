@@ -221,6 +221,46 @@ let apply_resilience_wirein
    and the unmodified lifecycle result is returned, preserving the
    keeper's primary turn outcome. *)
 
+(* ── Tier K4b: tool-emission drain (Cycle 27) ──────────────────────
+   Drains the K4 hook accumulator (parsed JSONs captured by
+   [Keeper_tool_emission_hook.make_post_tool_use_hook] during
+   Agent.run) into [working_context["multimodal_artifacts"]] so the
+   K1 wirein below picks them up.
+
+   Strict ordering: this MUST run BEFORE [apply_multimodal_wirein].
+   K4b emit + K1 hydrate is a producer/consumer pair on the same
+   working_context bag.
+
+   Feature flag: [MASC_TOOL_EMISSION] (default off). When off, the
+   drain is a no-op (the hook itself is also a no-op when the flag
+   is off, so the accumulator is empty). *)
+let apply_tool_emission_wirein
+    ~(now : float)
+    (lifecycle : post_turn_lifecycle) : post_turn_lifecycle =
+  let _ = now in
+  if not (Keeper_tool_emission_hook.masc_tool_emission_enabled ()) then
+    lifecycle
+  else
+    match lifecycle.checkpoint with
+    | None -> lifecycle
+    | Some cp -> (
+        try
+          let new_wc =
+            Keeper_tool_emission_hook.drain_into_working_context
+              Keeper_tool_emission_hook.global_accumulator
+              ~working_context:cp.Oas.Checkpoint.working_context
+          in
+          let new_cp =
+            { cp with Oas.Checkpoint.working_context = new_wc }
+          in
+          { lifecycle with checkpoint = Some new_cp }
+        with exn ->
+          Log.Keeper.warn
+            "keeper:%s tool emission drain failed: %s"
+            lifecycle.updated_meta.name
+            (Printexc.to_string exn);
+          lifecycle)
+
 let apply_multimodal_wirein
     ~(now : float)
     (lifecycle : post_turn_lifecycle) : post_turn_lifecycle =
@@ -544,12 +584,16 @@ let apply_post_turn_lifecycle
       }
   in
   (* Strict ordering: autonomous tick → resilience classification
-     → multimodal hydration. Do not reorder — A6/K1 pinned this
-     sequence. The multimodal pass runs last because it persists a
-     [workspace_meta] summary that depends on whether prior passes
-     have already mutated [working_context]. *)
+     → tool emission drain (K4b) → multimodal hydration (K1). Do
+     not reorder — A6/K1 pinned the autonomous→resilience→multimodal
+     sequence; K4b inserts between resilience and multimodal because
+     it is the producer that K1 consumes. The multimodal pass runs
+     last because it persists a [workspace_meta] summary that
+     depends on whether prior passes have already mutated
+     [working_context]. *)
   let body = apply_autonomous_wirein ~now:now_ts body in
   let body = apply_resilience_wirein ~now:now_ts body in
+  let body = apply_tool_emission_wirein ~now:now_ts body in
   apply_multimodal_wirein ~now:now_ts body
 
 let forced_overflow_retry_meta

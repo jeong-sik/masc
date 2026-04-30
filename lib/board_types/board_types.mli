@@ -148,6 +148,8 @@ type store = {
   (** post_id -> comment_id list. *)
   mutable dirty_posts : bool;
   mutable dirty_comments : bool;
+  dirty_post_ids : (string, unit) Hashtbl.t;
+  dirty_comment_ids : (string, unit) Hashtbl.t;
   mutable last_flush : float;
   flusher_inbox : flusher_msg Eio.Stream.t;
 }

@@ -120,6 +120,14 @@ val rotate_if_needed : string -> unit
     routed through the persist-error counter so the runtime
     keeps appending to the live file rather than aborting. *)
 
+(** {1 Append-only persistence} *)
+
+val append_post : post -> unit
+(** Appends one post snapshot to {!persist_path}. *)
+
+val append_comment : comment -> unit
+(** Appends one comment snapshot to {!comments_path}. *)
+
 (** {1 Whole-state JSONL rewrite} *)
 
 val rewrite_posts : store -> unit
@@ -131,6 +139,14 @@ val rewrite_comments : store -> unit
 (** Atomically rewrites {!comments_path} from
     [store.comments].  Same usage pattern as
     {!rewrite_posts}. *)
+
+val mark_dirty_post : store -> string -> unit
+(** Marks one post for append-only deferred persistence.  Call with
+    [store.mutex] already held. *)
+
+val mark_dirty_comment : store -> string -> unit
+(** Marks one comment for append-only deferred persistence.  Call with
+    [store.mutex] already held. *)
 
 (** {1 Wire encoders} *)
 

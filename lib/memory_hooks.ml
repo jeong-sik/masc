@@ -28,13 +28,19 @@
 
     Pure: no side effects, no OAS state mutation. *)
 let render_memory_context
+    ?memory
+    ?world_backend
     ~(agent_name : string)
     ~(config : Coord_utils.config)
     ~(episode_limit : int)
     ~(procedure_limit : int)
+    ?(world_limit = 8)
     () : string option =
   let sections =
     [ Memory_oas_bridge.load_institution_text ~config
+    ; Option.bind memory (fun memory ->
+        Memory_oas_bridge.load_world_text ~backend:world_backend
+          ~memory ~limit:world_limit)
     ; Memory_oas_bridge.load_episodes_text ~limit:episode_limit
     ; Memory_oas_bridge.load_procedures_text ~agent_name ~limit:procedure_limit
     ]
@@ -65,6 +71,7 @@ let make
     ~(agent_name : string)
     ~(config : Coord_utils.config)
     ~(memory : Oas.Memory.t)
+    ?world_backend
     ?(episode_limit = 30)
     ?(procedure_limit = 10)
     () : Oas.Hooks.hooks =
@@ -74,7 +81,7 @@ let make
       match event with
       | Oas.Hooks.BeforeTurnParams { current_params; _ } ->
         let memory_ctx =
-          render_memory_context ~agent_name ~config
+          render_memory_context ~memory ?world_backend ~agent_name ~config
             ~episode_limit ~procedure_limit ()
         in
         (match memory_ctx with

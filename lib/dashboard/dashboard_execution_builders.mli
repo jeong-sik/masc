@@ -29,11 +29,10 @@ val task_assignee : Types.task -> string option
     contract seam — adding a new task status that should also
     carry an assignee requires extending this match. *)
 
-val build_operation_contexts : unit -> operation_context list
-(** [build_operation_contexts ()] currently returns [\[\]].
-    Reserved for future operation-context aggregation; kept as a
-    function (not constant) so callers don't need to change call
-    sites when the implementation lands. *)
+val build_operation_contexts : tasks:Types.task list -> operation_context list
+(** [build_operation_contexts ~tasks] projects non-terminal tasks into
+    operation rows.  Task contracts provide operation/session links when
+    present; otherwise the task id is used as a stable operation id. *)
 
 val build_worker_support_briefs :
   now_ts:float ->

@@ -809,6 +809,68 @@ let load_procedures_text ~(agent_name : string) ~(limit : int) : string option =
     Some (Printf.sprintf "[procedural memory: %d procedures]\n%s"
       (List.length ps) (String.concat "\n" lines))
 
+let compact_world_text raw =
+  raw
+  |> String.map (function '\n' | '\r' | '\t' -> ' ' | c -> c)
+  |> String_util.utf8_safe ~max_bytes:603 ~suffix:"..."
+  |> String_util.to_string
+
+let take_unique_entries limit entries =
+  if limit <= 0 then
+    []
+  else
+    let seen = Hashtbl.create (limit + 1) in
+    let rec loop remaining acc = function
+      | [] -> List.rev acc
+      | _ when remaining <= 0 -> List.rev acc
+      | (key, value) :: rest ->
+          if Hashtbl.mem seen key then
+            loop remaining acc rest
+          else begin
+            Hashtbl.replace seen key ();
+            loop (remaining - 1) ((key, value) :: acc) rest
+          end
+    in
+    loop limit [] entries
+
+let memory_context_query ~(memory : Oas.Memory.t) ~prefix ~limit =
+  let ctx = Oas.Memory.context memory in
+  Oas.Context.keys_in_scope ctx (Oas.Context.Custom "lt")
+  |> List.filter (fun key -> String.starts_with ~prefix key)
+  |> List.filter_map (fun key ->
+         match Oas.Context.get_scoped ctx (Oas.Context.Custom "lt") key with
+         | Some value -> Some (key, value)
+         | None -> None)
+  |> take_unique_entries limit
+
+let load_world_text
+    ~backend
+    ~(memory : Oas.Memory.t)
+    ~(limit : int) : string option =
+  let entries =
+    let backend_entries =
+      match backend with
+      | Some backend -> backend.Oas.Memory.query ~prefix:"world" ~limit
+      | None -> []
+    in
+    take_unique_entries limit
+      (backend_entries @ memory_context_query ~memory ~prefix:"world" ~limit)
+  in
+  match entries with
+  | [] -> None
+  | rows ->
+    let lines =
+      List.map
+        (fun (key, json) ->
+          Printf.sprintf "- %s: %s" key
+            (json |> content_of_json |> compact_world_text))
+        rows
+    in
+    Some
+      (Printf.sprintf "[world memory: %d entries]\n%s"
+         (List.length rows)
+         (String.concat "\n" lines))
+
 (** Load institutional memory as a text block for system context injection.
 
     Returns [None] when no institution config is available.

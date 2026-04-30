@@ -632,7 +632,6 @@ let load_history_user_messages ~(path : string) ~(max_n : int) : string list =
            in
            if content = ""
               || Keeper_types.is_internal_history_source source
-              || Keeper_context_core.has_world_state_signature content
            then None
            else Some content
          else None

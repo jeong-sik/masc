@@ -20,10 +20,13 @@
     - [before_turn_params]: injects memory text via [extra_system_context]
     - [after_turn]: incrementally flushes episodes/procedures *)
 val render_memory_context :
+  ?memory:Agent_sdk.Memory.t ->
+  ?world_backend:Agent_sdk.Memory.long_term_backend ->
   agent_name:string ->
   config:Coord_utils.config ->
   episode_limit:int ->
   procedure_limit:int ->
+  ?world_limit:int ->
   unit ->
   string option
 
@@ -31,6 +34,7 @@ val make :
   agent_name:string ->
   config:Coord_utils.config ->
   memory:Agent_sdk.Memory.t ->
+  ?world_backend:Agent_sdk.Memory.long_term_backend ->
   ?episode_limit:int ->
   ?procedure_limit:int ->
   unit ->

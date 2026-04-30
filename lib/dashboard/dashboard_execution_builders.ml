@@ -385,8 +385,90 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
    future code needs status-based severity, re-introduce with a Variant
    input + exhaustive match instead of a string. *)
 
-let build_operation_contexts () =
-  []
+let task_operation_status (task : Types.task) =
+  match task.task_status with
+  | Types.Todo | Types.Claimed _ | Types.InProgress _ -> Some "active"
+  | Types.AwaitingVerification _ -> Some "paused"
+  | Types.Done _ | Types.Cancelled _ -> None
+
+let task_operation_severity (task : Types.task) =
+  match task.task_status with
+  | Types.AwaitingVerification _ -> Tone_warn
+  | Types.Todo | Types.Claimed _ | Types.InProgress _ -> Tone_ok
+  | Types.Done _ | Types.Cancelled _ -> Tone_ok
+
+let task_operation_updated_at (task : Types.task) =
+  match task.task_status with
+  | Types.Done { completed_at; _ } -> completed_at
+  | Types.Cancelled { cancelled_at; _ } -> cancelled_at
+  | Types.InProgress { started_at; _ } -> started_at
+  | Types.AwaitingVerification { submitted_at; _ } -> submitted_at
+  | Types.Claimed { claimed_at; _ } -> claimed_at
+  | Types.Todo -> task.created_at
+
+let task_operation_links (task : Types.task) =
+  match task.contract with
+  | Some contract -> contract.links
+  | None -> { Types.operation_id = None; session_id = None; autoresearch_loop_id = None }
+
+let task_operation_id (task : Types.task) =
+  let links = task_operation_links task in
+  match trim_to_option (Option.value ~default:"" links.operation_id) with
+  | Some operation_id -> operation_id
+  | None -> task.id
+
+let build_operation_contexts ~(tasks : Types.task list) =
+  tasks
+  |> List.filter_map (fun (task : Types.task) ->
+         match task_operation_status task with
+         | None -> None
+         | Some status ->
+           let links = task_operation_links task in
+           let operation_id = task_operation_id task in
+           let updated_at = task_operation_updated_at task in
+           let severity = task_operation_severity task in
+           let stage = Option.map Task_stage.to_string task.stage in
+           let linked_session_id =
+             Option.bind links.session_id (fun value -> trim_to_option value)
+           in
+           let last_seen_ts =
+             parse_iso_opt (Some updated_at) |> Option.value ~default:0.0
+           in
+           Some
+             {
+               operation_id;
+               severity;
+               last_seen_ts;
+               linked_session_id;
+               linked_detachment_id = None;
+               json =
+                 `Assoc
+                   [
+                     ("operation_id", `String operation_id);
+                     ("status", `String status);
+                     ("task_status", `String (Types.task_status_to_string task.task_status));
+                     ("stage", json_string_option stage);
+                     ("objective", `String task.title);
+                     ("updated_at", `String updated_at);
+                     ("source", `String "task_contract");
+                     ("task_id", `String task.id);
+                     ("severity", `String (string_of_tone severity));
+                     ("linked_session_id", json_string_option linked_session_id);
+                     ("linked_detachment_id", `Null);
+                     ( "handoff",
+                       handoff_json ~surface:"dashboard_execution"
+                         ?operation_id:(Some operation_id)
+                         ~label:"Open task"
+                         ~target_type:"task"
+                         ~target_id:task.id
+                         ~focus_kind:"task"
+                         () );
+                   ];
+             })
+  |> List.sort (fun left right ->
+         let by_tone = Int.compare (tone_rank right.severity) (tone_rank left.severity) in
+         if by_tone <> 0 then by_tone
+         else Float.compare right.last_seen_ts left.last_seen_ts)
 
 let build_worker_support_briefs ~(now_ts : float) ~(tasks : Types.task list)
     ~(agents : Types.agent list) ~(messages : Types.message list) session_contexts :

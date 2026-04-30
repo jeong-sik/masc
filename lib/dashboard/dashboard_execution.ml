@@ -274,7 +274,8 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
          Eio's cooperative scheduler needs explicit yields in CPU-bound paths
          so other fibers (SSE, health checks) can progress. *)
       Eio.Fiber.yield ();
-      let operation_contexts = build_operation_contexts () in
+      let tasks = tasks_safe config in
+      let operation_contexts = build_operation_contexts ~tasks in
       let session_contexts = [] in
       let execution_queue =
         build_execution_queue session_contexts operation_contexts
@@ -313,7 +314,6 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
          In light mode, tasks and messages are NOT serialized in the
          response payload (saves ~143KB) but are still loaded for
          worker_support_briefs computation. *)
-      let tasks = tasks_safe config in
       let agents = agents_safe config in
       let messages = messages_safe config in
       let t_after_data_load = Time_compat.now () in

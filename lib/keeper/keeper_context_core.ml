@@ -614,9 +614,10 @@ type history_line_action =
 
 let classify_history_entry ~(source : string) ~(content : string) :
     history_line_action =
-  if Keeper_types.is_prompt_history_source source
-     || has_world_state_signature content
-  then Drop_line
+  (* World-state headings can appear in user-authored long-term memory.
+     Only explicit prompt/internal sources control history routing. *)
+  ignore content;
+  if Keeper_types.is_prompt_history_source source then Drop_line
   else if Keeper_types.is_internal_history_source source then
     Move_internal
   else Keep_main

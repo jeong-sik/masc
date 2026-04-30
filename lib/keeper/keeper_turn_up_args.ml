@@ -251,16 +251,17 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
            name)
         "SOUL.md"
     in
-    let soul_content =
+    let soul_content, soul_fallback =
       if not (Fs_compat.file_exists soul_path) then (
         Log.Keeper.info "SOUL.md not found for %s (%s)" name soul_path;
-        "")
+        "", Printf.sprintf "SOUL.md not found for %s (%s)." name soul_path)
       else
         match Safe_ops.read_file_safe soul_path with
-        | Ok c -> c
+        | Ok c -> c, ""
         | Error e ->
             Log.Keeper.warn "SOUL.md read failed for %s (%s): %s" name soul_path e;
-            ""
+            "",
+            Printf.sprintf "SOUL.md read failed for %s (%s): %s" name soul_path e
     in
     let base_instructions_opt =
       match instructions_arg with
@@ -268,11 +269,17 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
       | None -> profile_defaults.instructions
     in
     let instructions_opt =
-      if soul_content <> "" then
-        let base = Option.value ~default:"" base_instructions_opt in
-        Some (base ^ "\n\n[SYSTEM: SOUL INFUSION]\n" ^ soul_content)
-      else
-        base_instructions_opt
+      let base = Option.value ~default:"" base_instructions_opt in
+      let soul_section =
+        if soul_content <> "" then soul_content else soul_fallback
+      in
+      let infused =
+        if base = "" then
+          "[SYSTEM: SOUL INFUSION]\n" ^ soul_section
+        else
+          base ^ "\n\n[SYSTEM: SOUL INFUSION]\n" ^ soul_section
+      in
+      Some infused
     in
     let will_opt = parse_self_model_opt args "will" in
     let needs_opt = parse_self_model_opt args "needs" in

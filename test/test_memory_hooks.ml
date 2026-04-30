@@ -13,7 +13,19 @@ open Alcotest
 module Memory_oas_bridge = Masc_mcp.Memory_oas_bridge
 module Memory_hooks = Masc_mcp.Memory_hooks
 
+let test_base_path = Filename.temp_dir "masc_memory_hooks_base" ""
+let () = Unix.putenv "MASC_BASE_PATH" test_base_path
+
 (* ── Test helpers ──────────────────────────────────────────── *)
+
+let contains_text ~needle haystack =
+  let needle_len = String.length needle in
+  let haystack_len = String.length haystack in
+  let rec loop idx =
+    idx + needle_len <= haystack_len
+    && (String.sub haystack idx needle_len = needle || loop (idx + 1))
+  in
+  needle_len = 0 || loop 0
 
 let make_test_config ~base_path : Coord_utils.config =
   let backend_config : Backend_types.config = {
@@ -122,6 +134,42 @@ let test_hook_preserves_existing_context () =
    | _ -> fail "unexpected hook decision");
   (try Sys.rmdir tmp_dir with _ -> ())
 
+let test_hook_injects_world_memory () =
+  let tmp_dir = Filename.temp_dir "masc_test_mh" "" in
+  let config = make_test_config ~base_path:tmp_dir in
+  let memory = Agent_sdk.Memory.create () in
+  ignore
+    (Agent_sdk.Memory.store
+       memory
+       ~tier:Agent_sdk.Memory.Long_term
+       "world:mission"
+       (`Assoc [ "content", `String "Bridge the world memory into prompt context." ]));
+  let hooks =
+    Memory_hooks.make
+      ~agent_name:"test_world"
+      ~config
+      ~memory
+      ()
+  in
+  let event = make_before_turn_params_event ~turn:1 () in
+  let decision =
+    match hooks.before_turn_params with
+    | Some f -> f event
+    | None -> fail "before_turn_params hook should be Some"
+  in
+  (match decision with
+   | Agent_sdk.Hooks.AdjustParams params ->
+     (match params.extra_system_context with
+      | Some ctx ->
+        check bool "world section present" true
+          (contains_text ~needle:"[world memory:" ctx);
+        check bool "world key present" true
+          (contains_text ~needle:"world:mission" ctx)
+      | None -> fail "world memory should inject extra_system_context")
+   | Agent_sdk.Hooks.Continue -> fail "world memory should adjust params"
+   | _ -> fail "unexpected hook decision");
+  (try Sys.rmdir tmp_dir with _ -> ())
+
 let test_after_turn_hook_returns_continue () =
   let tmp_dir = Filename.temp_dir "masc_test_mh" "" in
   let config = make_test_config ~base_path:tmp_dir in
@@ -195,6 +243,7 @@ let () =
     "hook_decisions", [
       test_case "returns Continue when no memory" `Quick test_hook_returns_continue_when_no_memory;
       test_case "preserves existing context" `Quick test_hook_preserves_existing_context;
+      test_case "injects world memory" `Quick test_hook_injects_world_memory;
       test_case "after_turn returns Continue" `Quick test_after_turn_hook_returns_continue;
     ];
     "hook_structure", [

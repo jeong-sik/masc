@@ -1314,17 +1314,22 @@ let prepare_agent_setup
   in
   let hooks = Oas.Hooks.compose ~outer:before_turn_hook ~inner:base_hooks in
   let base_dir = Coord.masc_root_dir config in
-  let memory =
-    Memory_oas_bridge.create_memory
+  let memory_session_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
+  let memory_backend =
+    Memory_oas_bridge.make_backend
       ~agent_name
       ~base_dir
-      ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+      ~session_id:memory_session_id
       ()
+  in
+  let memory =
+    Oas.Memory.create ~long_term:memory_backend ()
   in
   let hooks =
     let mem_hooks =
       Memory_hooks.make
         ~agent_name ~config ~memory
+        ~world_backend:memory_backend
         ~episode_limit:30
         ~procedure_limit:10 ()
     in

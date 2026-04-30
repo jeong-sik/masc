@@ -31,6 +31,8 @@ let create_store () = {
   comments_by_post = Hashtbl.create 1024;
   dirty_posts = false;
   dirty_comments = false;
+  dirty_post_ids = Hashtbl.create 256;
+  dirty_comment_ids = Hashtbl.create 512;
   last_flush = Time_compat.now ();
   flusher_inbox = Eio.Stream.create 1000;
 }
@@ -53,6 +55,14 @@ let invalidate_post_caches store =
 (** Invalidate caches that depend on comment data *)
 let invalidate_comment_caches store =
   store.karma_cache <- None
+
+let mark_dirty_post store post_id =
+  store.dirty_posts <- true;
+  Hashtbl.replace store.dirty_post_ids post_id ()
+
+let mark_dirty_comment store comment_id =
+  store.dirty_comments <- true;
+  Hashtbl.replace store.dirty_comment_ids comment_id ()
 
 (** {1 Eio-style Locking with Switch.on_release} *)
 
@@ -511,6 +521,7 @@ let reclassify_posts store ?(limit = 5200) ?(dry_run = true) () =
       invalidate_post_caches store;
       rewrite_posts store;
       store.dirty_posts <- false;
+      Hashtbl.clear store.dirty_post_ids;
       store.last_flush <- Time_compat.now ()
     end;
     {

@@ -33,8 +33,12 @@ let is_local_label label =
   | Some pname -> Provider_adapter.is_local_provider pname
   | None -> false
 
+let cascade_name_to_string = Keeper_cascade_profile.runtime_name_to_string
+
 let default_model_strings ~cascade_name =
-  let cascade_name = Keeper_cascade_profile.canonicalize cascade_name in
+  let cascade_name =
+    cascade_name |> cascade_name_to_string |> Keeper_cascade_profile.canonicalize
+  in
   let all_labels =
     match Provider_adapter.explicit_llama_model_label_result () with
     | Ok label -> [ label ]
@@ -259,16 +263,18 @@ let cascade_config_path () : string option =
   Config_dir_resolver.log_warnings ~context:"CascadeRuntime" ();
   Config_dir_resolver.cascade_path_opt ()
 
-let models_of_cascade_name_result (cascade_name : string) :
+let models_of_cascade_name_result cascade_name :
     (string list, string) result =
-  Cascade_catalog_runtime.models_of_cascade_name cascade_name
+  Cascade_catalog_runtime.models_of_cascade_name
+    (cascade_name_to_string cascade_name)
 
-let models_of_cascade_name (cascade_name : string) : string list =
+let models_of_cascade_name cascade_name =
+  let cascade_name_string = cascade_name_to_string cascade_name in
   match models_of_cascade_name_result cascade_name with
   | Ok labels -> labels
   | Error detail ->
       let normalized =
-        Keeper_cascade_profile.normalize_declared_name cascade_name
+        Keeper_cascade_profile.normalize_declared_name cascade_name_string
       in
       Log.warn ~ctx:"CascadeRuntime"
         "cascade config resolve failed for %s, returning []: %s"
@@ -304,10 +310,14 @@ let resolve_named_providers_result ?provider_filter
     ?runtime_mcp_policy
     ~cascade_name ()
     : (Llm_provider.Provider_config.t list, string) result =
-  let label = Keeper_cascade_profile.normalize_declared_name cascade_name in
+  let cascade_name_string = cascade_name_to_string cascade_name in
+  let label =
+    Keeper_cascade_profile.normalize_declared_name cascade_name_string
+  in
   match
     Cascade_catalog_runtime.resolve_named_providers ?provider_filter
-      ?runtime_mcp_policy ~require_tool_choice_support:false ~cascade_name ()
+      ?runtime_mcp_policy ~require_tool_choice_support:false
+      ~cascade_name:cascade_name_string ()
   with
   | Error _ as e -> e
   | Ok providers ->
@@ -329,6 +339,7 @@ let resolve_named_providers ?provider_filter
   | Ok providers -> providers
   | Error detail ->
       Log.Misc.warn "cascade %s: %s"
-        (Keeper_cascade_profile.normalize_declared_name cascade_name)
+        (Keeper_cascade_profile.normalize_declared_name
+           (cascade_name_to_string cascade_name))
         detail;
       []

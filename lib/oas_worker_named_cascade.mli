@@ -39,7 +39,7 @@ val resolve_cascade_providers :
   ?require_tool_choice_support:bool ->
   ?require_tool_support:bool ->
   ?runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy ->
-  cascade_name:string -> unit ->
+  cascade_name:Keeper_cascade_profile.runtime_name -> unit ->
   (Llm_provider.Provider_config.t list, string) result
 (** Resolve cascade provider configs via MASC Cascade_config. *)
 

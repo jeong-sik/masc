@@ -685,7 +685,8 @@ let audit_provider_mcp_config_paths (_state : Mcp_server.server_state) =
       List.concat_map
         (fun name ->
           try
-            Cascade_runtime.models_of_cascade_name name
+            Cascade_runtime.models_of_cascade_name
+              (Keeper_cascade_profile.Runtime_name name)
             |> List.filter_map Cascade_runtime.provider_name_of_label
           with exn ->
             Log.Misc.warn

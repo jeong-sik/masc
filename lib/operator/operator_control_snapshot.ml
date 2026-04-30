@@ -116,7 +116,10 @@ let keeper_runtime_identity_fields (meta : Keeper_types.keeper_meta) =
     Keeper_cascade_profile.resolve_live meta.cascade_name
   in
   let primary_model =
-    match Cascade_runtime.models_of_cascade_name effective_cascade with
+    match
+      Cascade_runtime.models_of_cascade_name
+        (Keeper_cascade_profile.Runtime_name effective_cascade)
+    with
     | model :: _ -> Some model
     | [] -> None
   in

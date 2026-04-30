@@ -20,7 +20,12 @@ type any_level = Any_level : 'a level -> any_level
 
 (* ── Tag mirror ───────────────────────────────────────────────── *)
 
-type level_tag = Tag_l1 | Tag_l2 | Tag_l3 | Tag_l4
+type level_tag =
+  | Tag_l1 [@tla.symbol "L1"]
+  | Tag_l2 [@tla.symbol "L2"]
+  | Tag_l3 [@tla.symbol "L3"]
+  | Tag_l4 [@tla.symbol "L4"] [@tla.terminal]
+[@@deriving tla]
 
 let all_level_tags = [ Tag_l1; Tag_l2; Tag_l3; Tag_l4 ]
 

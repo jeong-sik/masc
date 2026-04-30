@@ -159,6 +159,7 @@ type registry_entry = {
   conditions : Keeper_state_machine.conditions;
   fiber_stop : bool Atomic.t;
   fiber_wakeup : bool Atomic.t;
+  event_queue : Keeper_event_queue.t Atomic.t;
   started_at : float;
   grpc_close : (unit -> unit) option Atomic.t;
   done_p : [ `Stopped | `Crashed of string ] Eio.Promise.t;
@@ -300,6 +301,7 @@ let register_with_state ~base_path name meta
     conditions;
     fiber_stop = Atomic.make false;
     fiber_wakeup = Atomic.make false;
+    event_queue = Atomic.make Keeper_event_queue.empty;
     started_at = Time_compat.now ();
     grpc_close = Atomic.make None;
     done_p;
@@ -1346,3 +1348,22 @@ let get_conditions ~base_path name =
   match get ~base_path name with
   | Some entry -> Some entry.conditions
   | None -> None
+
+let enqueue_event ~base_path name stimulus =
+  match get ~base_path name with
+  | None ->
+      Log.Keeper.warn
+        "registry: enqueue_event name=%s base_path=%s: keeper not registered"
+        name base_path
+  | Some entry ->
+      let rec loop () =
+        let cur = Atomic.get entry.event_queue in
+        let next = Keeper_event_queue.enqueue cur stimulus in
+        if not (Atomic.compare_and_set entry.event_queue cur next) then loop ()
+      in
+      loop ()
+
+let event_queue_snapshot ~base_path name =
+  match get ~base_path name with
+  | None -> Keeper_event_queue.empty
+  | Some entry -> Atomic.get entry.event_queue

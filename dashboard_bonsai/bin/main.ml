@@ -141,5 +141,7 @@ let () =
   Dashboard_bonsai_lib.Overview_fetch.start_polling ();
   Dashboard_bonsai_lib.Goals_fetch.run ();
   Dashboard_bonsai_lib.Goals_fetch.start_polling ();
+  Dashboard_bonsai_lib.Multimodal_fetch.run ();
+  Dashboard_bonsai_lib.Multimodal_fetch.start_polling ();
   install_moon_clock ()
 ;;

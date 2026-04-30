@@ -23,5 +23,6 @@ let root (graph @ local) =
   | Archive_runs -> Archive_runs_view.component graph
   | Overview -> Overview_view.component graph
   | Goals -> Goals_view.component graph
+  | Multimodal -> Multimodal_view.component graph
   | other -> Placeholder_view.component ~route:other graph
 ;;

@@ -15,8 +15,9 @@ module StringMap = Map.Make (String)
 (** {1 Types} *)
 
 type outcome =
-  | Success
-  | Failure of string
+  | Success [@tla.symbol "success"]
+  | Failure of string [@tla.symbol "failure"]
+[@@deriving tla]
 
 type governance_audit_decision =
   | Governance_allow

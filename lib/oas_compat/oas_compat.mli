@@ -66,8 +66,9 @@ module Http_client : sig
         (documented at [oas_worker_named.ml:661-678]).
       - "rejected the request" — kimi_cli exit 1. The auth/config error
         is Moonshot-specific; another provider can succeed.
-      - "startup crash" — gemini_cli top-level await / yoga_wasm. The
-        CLI source explicitly marks this "so the cascade can move on".
+      - "startup crash" — gemini_cli top-level await / yoga_wasm or
+        kimi_cli process-title UnicodeDecodeError. The CLI source
+        explicitly marks this "so the cascade can move on".
       All of these are per-provider, not cascade-wide; a fallback provider
       may succeed where the current one rejected. See masc-mcp #9932
       (kimi fallback), #9850 (codex_cli runtime_mcp_auth).

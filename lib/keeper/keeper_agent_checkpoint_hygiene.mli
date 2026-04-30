@@ -44,6 +44,10 @@ val prepare_resume_checkpoint_for_dispatch :
 
     1. Forces a fresh compaction evaluation by overriding
        [meta.compaction.cooldown_sec] to [0].
+       The evaluation is scoped to restored checkpoint/history state.
+       Fresh turn substrate such as the system prompt, tool catalog, and
+       current user assignment is measured by wake-payload telemetry but
+       is not checkpoint history that this function can compact.
     2. Calls {!Keeper_compact_policy.compact_if_needed_typed}; populates
        [before_tokens] / [after_tokens] / [trigger] / [decision] from
        the result.

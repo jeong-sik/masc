@@ -237,11 +237,50 @@ let operator_disposition (receipt : t) =
   let error_kind =
     Option.map String.lowercase_ascii receipt.error_kind
   in
+  let provider_runtime_failure =
+    String.starts_with ~prefix:"api_error_" terminal_reason
+    || String.equal terminal_reason "provider_error"
+    ||
+    (match error_kind with
+     | Some
+         ( "api"
+         | "mcp"
+         | "io"
+         | "orchestration"
+         | "serialization" ) ->
+         true
+     | Some _ | None -> false)
+  in
+  let preflight_config_failure =
+    match error_kind with
+    | Some kind ->
+        string_contains_ci kind "config"
+        || string_contains_ci kind "auth"
+        || string_contains_ci terminal_reason "config"
+        || string_contains_ci terminal_reason "auth"
+    | None ->
+        string_contains_ci terminal_reason "config"
+        || string_contains_ci terminal_reason "auth"
+  in
   if
     String.equal terminal_reason "cascade_exhausted"
     || String.equal cascade_outcome "cascade_exhausted"
     || String.equal cascade_outcome "exhausted"
   then ("alert_exhausted", "cascade_exhausted")
+  else if preflight_config_failure then
+    ("pause_human", "preflight_config_error")
+  else if
+    provider_runtime_failure
+    && (receipt.degraded_retry_applied
+        || Option.is_some receipt.degraded_retry_cascade)
+  then ("fail_open_next_cascade", "degraded_retry")
+  else if
+    provider_runtime_failure
+    && (receipt.cascade_fallback_applied
+        || String.equal cascade_outcome "passed_to_next_model")
+  then ("pass_next_model", "cascade_fallback")
+  else if provider_runtime_failure then
+    ("pause_human", "provider_runtime_error")
   else if
     String.equal receipt.tool_surface.tool_requirement "required"
     && (List.mem tool_contract_result
@@ -257,17 +296,6 @@ let operator_disposition (receipt : t) =
           ]
         || receipt.tools_used = [])
   then ("pause_human", "tool_required_unsatisfied")
-  else if
-    match error_kind with
-    | Some kind ->
-        string_contains_ci kind "config"
-        || string_contains_ci kind "auth"
-        || string_contains_ci terminal_reason "config"
-        || string_contains_ci terminal_reason "auth"
-    | None ->
-        string_contains_ci terminal_reason "config"
-        || string_contains_ci terminal_reason "auth"
-  then ("pause_human", "preflight_config_error")
   else if receipt.degraded_retry_applied || Option.is_some receipt.degraded_retry_cascade
   then ("fail_open_next_cascade", "degraded_retry")
   else if

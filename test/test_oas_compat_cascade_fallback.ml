@@ -42,6 +42,19 @@ let test_gemini_cli_startup_crash_cascades () =
     true
     (Oas_compat.Http_client.should_cascade err)
 
+let test_kimi_cli_startup_crash_cascades () =
+  let reason =
+    "kimi_cli startup crash while setting process title \
+     (UnicodeDecodeError). This is a local CLI/runtime failure, not \
+     keeper auth or sandbox failure; rejecting without retry so the \
+     cascade can move on."
+  in
+  let err = Http_client.AcceptRejected { reason } in
+  Alcotest.(check bool)
+    "kimi_cli startup crash must cascade — next provider may still succeed"
+    true
+    (Oas_compat.Http_client.should_cascade err)
+
 let test_does_not_support_still_cascades () =
   (* Regression pin for #9850: the provider-capability-mismatch marker
      added by codex_cli runtime_mcp_auth / tool_support must keep
@@ -216,6 +229,8 @@ let () =
             `Quick test_kimi_cli_exit_1_cascades;
           Alcotest.test_case "gemini_cli startup crash cascades"
             `Quick test_gemini_cli_startup_crash_cascades;
+          Alcotest.test_case "kimi_cli startup crash cascades"
+            `Quick test_kimi_cli_startup_crash_cascades;
         ] );
       ( "AcceptRejected — capability mismatch still cascades (#9850)",
         [

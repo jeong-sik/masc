@@ -249,8 +249,9 @@ module Kimi_cli_transport_local : sig
   val resumable_session_exit_code_of_text : string -> int option
 
   (** Reclassify a [NetworkError] from kimi_cli into [AcceptRejected] when
-      the message indicates a permanent error (auth/config/model) or a
-      resumable-session report.  Other variants pass through. *)
+      the message indicates a permanent per-provider error
+      (auth/config/model), a local CLI startup crash, or a resumable-session
+      report.  Other variants pass through. *)
   val classify_cli_error :
     ('a, Llm_provider.Http_client.http_error) result ->
     ('a, Llm_provider.Http_client.http_error) result

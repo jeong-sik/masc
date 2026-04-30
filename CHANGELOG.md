@@ -1,6 +1,30 @@
 # Changelog
 
 
+## [0.18.18] - 2026-04-30
+
+Aggregate of 16 commits since v0.18.17. No breaking API changes.
+
+### Added
+
+- Multi-repository architecture landed with repository, credential, sync, and keeper-mapping stores, server routes, tests, and dashboard management surfaces (#12304).
+- Keeper observability gained lifecycle restart metrics and a per-keeper tool-emission push counter (#12306, #12302).
+- Dashboard multimodal navigation and payload rendering improvements shipped through DAG node navigation, sidebar entry, server-side list filtering, and kind-specific renderers (#12296, #12300, #12301, #12303).
+
+### Fixed
+
+- Local MCP client bearer lifetime, clone-policy fail-closed behavior, keeper stream idle timeout defaults, fs-read containment matching, and dashboard IO contention/world-memory prompt handling were fixed (#12295, #12305, #12307, #12310, #12311).
+
+### Changed
+
+- Cascade/OAS labels are now typed at metric and FSM boundaries, and routine keeper logs are demoted to reduce operator noise (#12298, #12308, #12299).
+- Package and release metadata advanced from `0.18.17` to `0.18.18` after the post-v0.18.17 merge train.
+- Roadmap, product operating plan, opam metadata, and spec baseline version references synced to `0.18.18`.
+
+### Deprecated
+
+- None.
+
 ## [0.18.17] - 2026-04-30
 
 ### Fixed

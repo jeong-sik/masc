@@ -355,7 +355,7 @@ INTEGRATED_BENCH_PHASES=search ./scripts/harness_integrated_benchmark.sh
 full substrate:
 
 ```bash
-INTEGRATED_BENCH_PHASES=control,search,local64 \
+INTEGRATED_BENCH_PHASES=control,search \
 LLAMA_SWARM_MODEL=<exact-model-id> \
 ./scripts/harness_integrated_benchmark.sh
 ```

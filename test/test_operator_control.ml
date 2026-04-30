@@ -199,15 +199,6 @@ let () =
             Test_operator_control_keeper
             .test_operator_keeper_message_rejects_legacy_model_args;
           Alcotest.test_case "expired confirmation rejected" `Quick
-            Test_operator_control_swarm.test_confirm_rejects_expired_token;
-          Alcotest.test_case "swarm run continue removed from operator actions" `Quick
-            Test_operator_control_swarm
-            .test_swarm_run_continue_removed_from_operator_actions;
-          Alcotest.test_case "swarm run rerun removed from operator actions" `Quick
-            Test_operator_control_swarm
-            .test_swarm_run_rerun_removed_from_operator_actions;
-          Alcotest.test_case "swarm run abandon removed from operator actions" `Quick
-            Test_operator_control_swarm
-            .test_swarm_run_abandon_removed_from_operator_actions;
+            Test_operator_control_confirm.test_confirm_rejects_expired_token;
         ] );
     ]

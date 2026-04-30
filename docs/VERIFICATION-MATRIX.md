@@ -33,7 +33,7 @@ make test-contract
 
 의도:
 
-- 기본 브랜치가 초록이면 core MCP/HTTP/team-session/golden-path 계약이 깨지지 않았다고 볼 수 있어야 한다.
+- 기본 브랜치가 초록이면 core MCP/HTTP/keeper/operator 계약이 깨지지 않았다고 볼 수 있어야 한다.
 - contract/transport harness는 “서버가 이미 떠 있음”을 전제로 하지 않고 hermetic bootstrap 경로로 실행돼야 한다.
 - `archive/trpg/scripts/` 아래의 game-view/TRPG 계약 스크립트는 active CI-required contract suite가 아니라 archive/manual 성격으로 본다.
 
@@ -43,10 +43,6 @@ make test-contract
 
 대표 항목:
 
-- PostgreSQL 의존
-  - `test/test_board_pg.ml`
-  - `test/test_tool_mdal_pg.ml`
-  - `test/test_pubsub_postgres.ml`
 - live network / realtime 환경 의존
   - live ICE/STUN/TURN/browser interop proof
   - `scripts/harness/transport/verify_webrtc_live_env.sh`
@@ -71,12 +67,10 @@ make test-contract
   - `scripts/harness_agent_swarm_live.sh`
   - `docs/BENCHMARK-RUNBOOK.md`
 - supervised delivery / operator path
-  - `scripts/harness_supervisor_team_session.sh`
-  - `docs/SWARM-DELIVERY-RUNBOOK.md`
   - `docs/SUPERVISOR-MODE.md`
-- local64 / runtime matrix
-  - `scripts/harness_team_session_local64_smoke.sh`
-  - `scripts/harness_local64_model_matrix.sh`
+- local runtime capacity
+  - `scripts/llama-runtime-pool.sh`
+  - `docs/PERFORMANCE-SLO.md`
 
 규칙:
 

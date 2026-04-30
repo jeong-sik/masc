@@ -154,12 +154,9 @@
         test_autoresearch_codegen
         test_autoresearch_oas_primitives
         test_autoresearch_target_score
-        ; test_contract_risk removed (team session cleanup)
-        ; test_contract_composer removed (team session cleanup)
         test_cdal_conformance
         test_task_stage
         test_ocaml_north_star_task_lifecycle
-        ; test_risk_digest removed (team session cleanup)
         test_tool_blob_store
         test_tool_bridge_externalize
         test_keeper_artifact_hydrator
@@ -681,10 +678,6 @@
     (run %{test}))))
  (libraries masc_test_deps))
 
-; test_worker_run_evidence_summary removed (team session cleanup)
-
-; test_team_session_worker_run_meta_repair removed (team session cleanup)
-
 ; ============================================================
 ; Group 3: Eio-native tests (single-module, standard deps)
 ; Merged from ~100 individual (test ...) stanzas.
@@ -697,7 +690,6 @@
         test_streamable_http
         test_dashboard_mission
         test_dashboard_mission_briefing
-        ; test_dashboard_proof removed (team session cleanup)
         ; test_command_plane_help removed (CP purge)
 
         test_dashboard_cache
@@ -750,8 +742,6 @@
         test_memory_oas_5tier
         test_verifier_oas_bridge
         test_oas_adapters
-        ; test_team_session_oas_bridge removed (team session cleanup)
-        ; test_team_session_swarm_runner removed (team session cleanup)
         test_cache_eio
         test_metrics_store_eio
         test_hebbian_eio
@@ -769,7 +759,6 @@
         test_common
         test_room_messages_raw
         ; test_cp_cleanup, test_cp_search_fabric, test_cp_section_cache, test_cp_jsonl_tail removed (CP purge)
-        ; test_swarm_persistence removed (team session cleanup)
         test_local_runtime_pool
         test_keeper_tools_oas
         test_keeper_tool_exposure
@@ -895,7 +884,6 @@
         test_streamable_http
         test_dashboard_mission
         test_dashboard_mission_briefing
-        ; test_dashboard_proof removed (team session cleanup)
         ; test_command_plane_help removed (CP purge)
 
         test_dashboard_cache
@@ -948,8 +936,6 @@
         test_memory_oas_5tier
         test_verifier_oas_bridge
         test_oas_adapters
-        ; test_team_session_oas_bridge removed (team session cleanup)
-        ; test_team_session_swarm_runner removed (team session cleanup)
         test_cache_eio
         test_metrics_store_eio
         test_hebbian_eio
@@ -967,7 +953,6 @@
         test_common
         test_room_messages_raw
         ; test_cp_cleanup, test_cp_search_fabric, test_cp_section_cache, test_cp_jsonl_tail removed (CP purge)
-        ; test_swarm_persistence removed (team session cleanup)
         test_local_runtime_pool
         test_keeper_tools_oas
         test_keeper_tool_exposure
@@ -1031,7 +1016,6 @@
         test_tool_board_coverage
         test_anti_rationalization_fail_mode
         test_board_truncation_detection
-        ; test_proof_criteria removed (team session cleanup)
         test_tool_registration_consistency
         ; test_tree_index removed (CP purge)
         test_tool_registry
@@ -1417,7 +1401,7 @@
           test_operator_control_snapshot
           test_operator_control_actions
           test_operator_control_judgment
-          test_operator_control_swarm
+          test_operator_control_confirm
           test_operator_control_keeper)
  (libraries masc_test_deps)
  (enabled_if (= %{env:MASC_INCLUDE_OPERATOR_CONTROL=true} "true")))

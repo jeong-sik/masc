@@ -518,16 +518,11 @@ let test_agent_json_route_served_on_canonical_path () =
   let (_json, name) = fetch_agent_card 3 in
   check string "agent card name present" "MASC-MCP" name
 
-let test_operator_mcp_supervision () =
-  Alcotest.skip ()
-
 let () =
   run "operator_mcp_e2e"
     [
       ( "operator",
         [
-          test_case "remote operator supervises team session over MCP" `Slow
-            test_operator_mcp_supervision;
           test_case "full mcp requires auth on non-loopback bind" `Slow
             test_mcp_requires_auth_when_bound_non_loopback;
           test_case "canonical agent discovery route" `Quick

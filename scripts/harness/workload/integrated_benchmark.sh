@@ -5,10 +5,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 
 DEFAULT_PHASES="control,search"
-if [ "${INTEGRATED_BENCH_ENABLE_LOCAL64:-false}" = "true" ]; then
-  DEFAULT_PHASES="control,search,local64"
-fi
-
 PHASES="${INTEGRATED_BENCH_PHASES:-$DEFAULT_PHASES}"
 OUTPUT_DIR="${INTEGRATED_BENCH_OUTPUT_DIR:-$(mktemp -d "${TMPDIR:-/tmp}/masc-integrated-benchmark.XXXXXX")}"
 FAIL_FAST="${INTEGRATED_BENCH_FAIL_FAST:-false}"
@@ -36,9 +32,6 @@ phase_script() {
       ;;
     search)
       printf '%s\n' "$ROOT_DIR/scripts/harness_cp_search_fabric.sh"
-      ;;
-    local64)
-      printf '%s\n' "$ROOT_DIR/scripts/harness_team_session_local64_smoke.sh"
       ;;
     *)
       return 1
@@ -164,12 +157,6 @@ for raw_phase in "${REQUESTED_PHASES[@]}"; do
       )"
       if [ -n "$search_json" ] && printf '%s' "$search_json" | jq -e . >/dev/null 2>&1; then
         metrics_json="$(printf '%s' "$search_json" | jq -c .)"
-      fi
-      ;;
-    local64)
-      session_id="$(rg -o 'session_id=[^[:space:]]+' "$log_path" | tail -n1 | cut -d= -f2- || true)"
-      if [ -n "$session_id" ]; then
-        session_id_json="$(jq -cn --arg session_id "$session_id" '$session_id')"
       fi
       ;;
   esac

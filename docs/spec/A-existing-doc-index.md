@@ -33,9 +33,8 @@ code_refs:
 | `docs/RELEASE-EVIDENCE.md` | Canonical | reproducible production proof bundle contract |
 | `docs/spec/SPEC-INDEX.md` | Canonical | spec suite index |
 | `docs/BENCHMARK-RUNBOOK.md` | Canonical | baseline vs swarm recipe |
-| `docs/INTEGRATED-BENCHMARK-RUNBOOK.md` | Canonical | control/search/local64 wrapper |
+| `docs/INTEGRATED-BENCHMARK-RUNBOOK.md` | Canonical | control/search wrapper |
 | `docs/SUPERVISOR-MODE.md` | Canonical | supervised delivery/operator path |
-| `docs/SWARM-DELIVERY-RUNBOOK.md` | Canonical | swarm delivery path |
 | `docs/TRANSPORT-PRACTICAL-PLAYBOOK.md` | Canonical | transport selection and diagnostics |
 | `docs/KEEPER-USER-MANUAL.md` | Canonical | keeper lifecycle and troubleshooting |
 

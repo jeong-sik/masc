@@ -1,28 +1,28 @@
 [
   {
-    "question_id": "cpv2-vs-supervisor",
+    "question_id": "integrated-benchmark-phases",
     "claims": [
-      "cpv2_direct_is_canonical_benchmark",
-      "supervisor_mode_is_guided_loop",
-      "dashboard_is_canonical_write_surface"
+      "integrated_default_phases_are_control_and_search",
+      "search_phase_uses_cp_search_fabric",
+      "local64_phase_still_runs_by_default"
     ],
     "cited_paths": [
-      "docs/COMMAND-PLANE-RUNBOOK.md",
-      "docs/SUPERVISOR-MODE.md",
+      "docs/INTEGRATED-BENCHMARK-RUNBOOK.md",
+      "scripts/harness/workload/integrated_benchmark.sh",
       "docs/SUPERVISOR-MODE.md"
     ],
     "latency_ms": 640
   },
   {
-    "question_id": "current-room-compat",
+    "question_id": "supervisor-boundary",
     "claims": [
-      "current_room_pointer_is_ssot",
-      "repo_root_room_semantics_remain",
-      "named_rooms_still_listable"
+      "supervisor_mode_is_keeper_fsm_and_board_posts",
+      "team_session_tools_still_drive_supervisor",
+      "swarm_runs_use_legacy_masc_surface"
     ],
     "cited_paths": [
-      "docs/spec/03-room-coordination.md",
-      "lib/tool_coord.ml",
+      "docs/SUPERVISOR-MODE.md",
+      "docs/PRODUCT-REVIEW.md",
       "docs/SUPERVISOR-MODE.md"
     ],
     "latency_ms": 710
@@ -30,12 +30,12 @@
   {
     "question_id": "proof-surface-linkage",
     "claims": [
-      "team_session_prove_emits_proof_paths",
+      "managed_operation_proof_uses_agent_swarm_live_harness",
       "operator_surface_reads_without_being_canonical_benchmark_path",
       "proof_is_only_kept_in_markdown"
     ],
     "cited_paths": [
-      "docs/SUPERVISOR-MODE.md",
+      "docs/BENCHMARK-RUNBOOK.md",
       "docs/SUPERVISOR-MODE.md",
       "lib/tool_coord.ml"
     ],

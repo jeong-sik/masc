@@ -430,7 +430,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
       let post_commit_failure_reason = ref None in
       let paused_meta_override = ref None in
       let current_turn_overflow_blocker = ref None in
-      let event_bus_drain_active = Atomic.make true in
+      let event_bus_drain_cancel = ref None in
       let turn_event_bus_mu = Eio.Mutex.create () in
       let mark_paused_after_overflow ~run_meta ~reason =
         let paused_meta =
@@ -551,16 +551,17 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
         match event_bus_sub, Eio_context.get_switch_opt () with
         | Some _, Some sw ->
             Eio.Fiber.fork ~sw (fun () ->
-              let rec loop () =
-                if Atomic.get event_bus_drain_active then begin
-                  (try
-                     ignore (drain_turn_event_bus ~site:"background_poll" ())
-                   with
-                   | Eio.Cancel.Cancelled _ as e -> raise e
-                   | exn ->
-                       Log.Keeper.warn
-                         "%s: keeper_turn event-bus drain failed: %s"
-                         meta.name (Printexc.to_string exn));
+              Eio.Cancel.sub (fun cc ->
+                event_bus_drain_cancel := Some cc;
+                let rec loop () =
+                  try
+                    ignore (drain_turn_event_bus ~site:"background_poll" ())
+                  with
+                  | Eio.Cancel.Cancelled _ as e -> raise e
+                  | exn ->
+                    Log.Keeper.warn
+                      "%s: keeper_turn event-bus drain failed: %s"
+                      meta.name (Printexc.to_string exn);
                   (* 2026-04-20: 0.25s → 0.05s.  OAS publishes a burst
                      of events per tool cycle (ToolCalled / ToolResult /
                      ToolCompleted + assistant / usage).  With 0.25s
@@ -577,13 +578,14 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                      via [MASC_KEEPER_TURN_DRAIN_INTERVAL_SEC]. *)
                   Eio.Time.sleep clock (turn_event_bus_drain_interval_sec ());
                   loop ()
-                end
-              in
-              loop ())
+                in
+                loop ()))
         | _ -> ()
       in
       let unsubscribe_event_bus () =
-        Atomic.set event_bus_drain_active false;
+        (match !event_bus_drain_cancel with
+         | Some cc -> Eio.Cancel.cancel cc (Failure "event_bus_unsubscribed")
+         | None -> ());
         ignore (drain_turn_event_bus ~site:"unsubscribe_final" ());
         match event_bus_sub, Keeper_event_bus.get () with
         | Some sub, Some bus -> Oas_bus_instrument.unsubscribe bus sub

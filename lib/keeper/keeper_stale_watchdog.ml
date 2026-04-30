@@ -396,6 +396,10 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                 with
                 | Eio.Cancel.Cancelled _ as e -> raise e
                 | exn ->
+                  Prometheus.inc_counter
+                    "masc_keeper_stale_broadcast_emit_failures"
+                    ~labels:[("keeper", meta.name)]
+                    ();
                   Log.Keeper.warn
                     "%s: stale broadcast emit failed (restart still triggered): %s"
                     meta.name (Printexc.to_string exn))

@@ -291,6 +291,14 @@ let metric_keeper_turn_latency_by_model_bucket =
 let metric_keeper_provider_cooldown_skip =
   "masc_keeper_provider_cooldown_skip_total"
 
+(* P-DASH-02: turn queue depth gauge.  Semaphore waiters are
+   observable via [autonomous_waiter_snapshot_for_test] but were
+   only emitted as a debug log line.  Surfacing as a gauge lets
+   operators alert on queue pressure without log parsing.
+   Labels: keeper, channel. *)
+let metric_keeper_turn_queue_depth =
+  "masc_keeper_turn_queue_depth"
+
 (* #10125: keeper supervisor sweep observability.
 
    The supervisor sweep is a Pulse loop that recovers crashed

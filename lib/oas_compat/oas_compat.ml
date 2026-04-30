@@ -19,6 +19,11 @@ module Http_client = struct
             collapsed here because [should_cascade] only needs the
             terminality bit; consumers wanting the message extract it
             via the original [ProviderTerminal] match. *)
+    | Provider_hard_quota
+        (** OAS [ProviderFailure.Hard_quota] — a provider/account quota
+            stop. Treat as cascade-stopping for the current turn so the
+            keeper can surface the quota path instead of burning the
+            remaining cascade budget. *)
 
   (* Case-insensitive substring check, mirroring [cascade_health_filter]. *)
   let contains_ci ?(max_scan = 512) ~haystack ~needle () =
@@ -102,17 +107,20 @@ module Http_client = struct
           Cli_transport_required
       | Llm_provider.Http_client.ProviderTerminal _ ->
           Provider_terminal
-      | Llm_provider.Http_client.ProviderFailure
-          { kind = Capacity_exhausted _ | Hard_quota _; _ } ->
-          Transient_http 429
-      | Llm_provider.Http_client.ProviderFailure
-          { kind = Capability_mismatch _ | Cli_startup_failed _; _ } ->
-          Accept_rejected_capability_mismatch
-      | Llm_provider.Http_client.ProviderFailure
-          { kind = Provider_parse_error _; _ } ->
-          Provider_parse_error
-      | Llm_provider.Http_client.ProviderFailure _ ->
-          Provider_terminal
+      | Llm_provider.Http_client.ProviderFailure { kind; _ } -> (
+          match kind with
+          | Llm_provider.Http_client.Capacity_exhausted _ ->
+              Transient_http 529
+          | Llm_provider.Http_client.Hard_quota _ ->
+              Provider_hard_quota
+          | Llm_provider.Http_client.Capability_mismatch _
+          | Llm_provider.Http_client.Cli_policy_invalid _
+          | Llm_provider.Http_client.Cli_startup_failed _ ->
+              Accept_rejected_capability_mismatch
+          | Llm_provider.Http_client.Provider_parse_error _ ->
+              Provider_parse_error
+          | Llm_provider.Http_client.Unknown_provider_failure _ ->
+              Network_error)
       | Llm_provider.Http_client.NetworkError _ -> Network_error
 
   let should_cascade (err : Llm_provider.Http_client.http_error) : bool =
@@ -120,7 +128,8 @@ module Http_client = struct
     | Local_resource_exhaustion
     | Terminal_http _
     | Accept_rejected_terminal
-    | Provider_terminal ->
+    | Provider_terminal
+    | Provider_hard_quota ->
         false
     | Context_overflow
     | Provider_parse_error

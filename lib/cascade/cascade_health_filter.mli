@@ -25,6 +25,7 @@ type cascade_failure_class =
   | Cli_transport_required
   | Network_error
   | Provider_terminal
+  | Provider_hard_quota
 
 val classify_failure :
   Llm_provider.Http_client.http_error -> cascade_failure_class

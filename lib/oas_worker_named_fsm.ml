@@ -316,7 +316,8 @@ let retry_api_error_to_provider_error ~provider ~capacity_exhausted api_error =
       if capacity_exhausted then provider_capacity provider
       else Some (Provider_error.RateLimit { retry_after; provider })
   | Llm_provider.Retry.Overloaded _ ->
-      provider_capacity provider
+      if capacity_exhausted then provider_capacity provider
+      else Some (Provider_error.ServerError { code = 529; transient = true })
   | Llm_provider.Retry.ServerError { status; _ } ->
       Some
         (Provider_error.ServerError
@@ -332,7 +333,7 @@ let retry_api_error_to_provider_error ~provider ~capacity_exhausted api_error =
       provider_capacity ~scope:`Model provider
   | Llm_provider.Retry.NetworkError _
   | Llm_provider.Retry.Timeout _ ->
-      None
+      if capacity_exhausted then provider_capacity provider else None
 
 let sdk_error_to_provider_error ~provider err =
   match err with

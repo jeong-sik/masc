@@ -36,7 +36,7 @@ export const showAddRepoDialog = signal(false)
 
 // ── API ──────────────────────────────────────────────────
 
-function normalizeRepoStatus(raw: string | undefined): RepoStatus {
+export function normalizeRepoStatus(raw: string | undefined): RepoStatus {
   switch (raw?.toLowerCase()) {
     case 'active': return 'active'
     case 'paused': return 'paused'
@@ -46,7 +46,7 @@ function normalizeRepoStatus(raw: string | undefined): RepoStatus {
   }
 }
 
-function repositoryRows(raw: unknown): unknown[] {
+export function repositoryRows(raw: unknown): unknown[] {
   if (Array.isArray(raw)) return raw
   if (raw && typeof raw === 'object') {
     const record = raw as Record<string, unknown>
@@ -56,7 +56,7 @@ function repositoryRows(raw: unknown): unknown[] {
   return []
 }
 
-function normalizeRepository(raw: unknown): Repository | null {
+export function normalizeRepository(raw: unknown): Repository | null {
   if (!raw || typeof raw !== 'object') return null
   const r = raw as Record<string, unknown>
   const id = typeof r.id === 'string' ? r.id : ''

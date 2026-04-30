@@ -245,16 +245,9 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
              in
              let failure_loop = noop_count >= noop_threshold () in
              let stale = idle_stale || in_turn_stale || failure_loop in
-             (* #10908: 92% of ticks are
-               [noop=0 idle_stale=false failure_loop=false stale=false]
-                — every health bool at default.  Logging at INFO drowns
-                actionable ticks (and competing real signals) under
-                ~800 lines/day of identical heartbeat noise.  Same fix
-                pattern as #10881 (WS lifecycle log): keep INFO for
-                anything an operator should see (any flag set or any
-                noop accumulated), demote the all-default heartbeat to
-                DEBUG. *)
-             let actionable = stale || noop_count > 0 || idle_skip_suppressed in
+             (* The tick line is a sampled state snapshot. Stale termination
+                and broadcasts below remain ERROR, so INFO does not need every
+                intermediate heartbeat/noop snapshot. *)
              let log_line =
                Printf.sprintf
                  "%s: watchdog tick noop=%d idle_stale=%b idle_skip_suppressed=%b in_turn_stale=%b in_turn_age=%.0f failure_loop=%b stale=%b last_turn=%.0f fiber_age=%.0f grace_rem=%.0f"
@@ -262,9 +255,7 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                  in_turn_stale in_turn_age failure_loop stale last_turn
                  fiber_age grace_remaining
              in
-             if actionable
-             then Log.Keeper.info "%s" log_line
-             else Log.Keeper.debug "%s" log_line;
+             Log.Keeper.debug "%s" log_line;
              let cooldown_ok =
                !last_broadcast_ts = 0.0
                || now -. !last_broadcast_ts > threshold

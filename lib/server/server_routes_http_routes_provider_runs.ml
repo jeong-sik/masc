@@ -119,7 +119,7 @@ let add_routes ~sw router =
          in
          let json =
            Dashboard_http_keeper.keeper_decisions_json
-             ~config ~keepers ~limit
+             ~config ~keepers ~limit ()
          in
          Http.Response.json ~compress:true ~request:req
            (Yojson.Safe.to_string json) reqd

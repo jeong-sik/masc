@@ -73,7 +73,7 @@ let build_turn_context
      | Some hex -> hex
      | None -> "empty"
    in
-   Log.Keeper.info
+   Log.Keeper.debug
      "[substrate:system_prompt] agent=%s turn=%d length=%d hash=%s"
      meta.agent_name (start_turn_count + 1) segment.Keeper_agent_prompt_metrics.bytes hash16);
   (* [substrate:task_assignment] observability *)
@@ -85,7 +85,7 @@ let build_turn_context
      | Some hex -> hex
      | None -> "empty"
    in
-   Log.Keeper.info
+   Log.Keeper.debug
      "[substrate:task_assignment] agent=%s turn=%d user_length=%d \
       user_hash=%s dyn_length=%d dyn_hash=%s"
      meta.agent_name (start_turn_count + 1) user_seg.Keeper_agent_prompt_metrics.bytes

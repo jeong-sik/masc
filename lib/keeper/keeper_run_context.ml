@@ -202,7 +202,7 @@ let prepare_run_context
        decision checkpoint_hygiene.before_tokens checkpoint_hygiene.after_tokens
        max_context before_ratio loaded_checkpoint_present
    else
-     Log.Keeper.info
+     Log.Keeper.debug
        "%s: pre-dispatch compaction skipped decision=%s tokens=%d \
         max_context=%d ratio=%.4f checkpoint=%b"
        meta.name decision checkpoint_hygiene.before_tokens max_context before_ratio

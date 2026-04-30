@@ -36,6 +36,9 @@
 val keeper_count : Coord.config -> int
 (** Total keepers visible in [config.base_path] meta. *)
 
+val keeper_names : Coord.config -> string list
+(** Keeper names visible in [config.base_path] meta. *)
+
 val running_keeper_count : Coord.config -> int
 (** Counts keepers whose meta indicates an active
     keep-alive runtime.  Used by the dashboard fleet
@@ -71,6 +74,21 @@ val execution_trust_dashboard_json : Coord.config -> Yojson.Safe.t
     every keeper's recent turns + capability metadata
     into a single JSON envelope used by the
     [Server_dashboard_http_execution_surfaces] cache. *)
+
+val keeper_cost_aggregates_json :
+  config:Coord.config ->
+  keepers:Keeper_types.keeper_meta list ->
+  window_minutes:int ->
+  Yojson.Safe.t
+(** Renders per-keeper cost and latency aggregates for the provider dashboard. *)
+
+val keeper_decisions_json :
+  config:Coord.config ->
+  keepers:Keeper_types.keeper_meta list ->
+  ?limit:int ->
+  unit ->
+  Yojson.Safe.t
+(** Renders a recent unified keeper decision/event stream. *)
 
 (** {1 Per-keeper config snapshot} *)
 

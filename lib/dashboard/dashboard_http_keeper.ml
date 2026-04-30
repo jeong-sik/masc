@@ -1692,16 +1692,26 @@ let keeper_config_json (config : Coord.config) (name : string)
 
     This closes the Phase-2 gap between per-model metrics (already in
     /api/v1/models/metrics) and per-agent spend (required by preview). *)
+let percentile_sorted_float (sorted : float array) (p : float) : float =
+  let n = Array.length sorted in
+  if n = 0 then 0.0
+  else
+    let rank = p /. 100.0 *. Float.of_int (n - 1) in
+    let lo = int_of_float (floor rank) in
+    let hi = min (lo + 1) (n - 1) in
+    let frac = rank -. Float.of_int lo in
+    sorted.(lo) *. (1.0 -. frac) +. sorted.(hi) *. frac
+
 let keeper_cost_aggregates_json
     ~(config : Coord.config)
-    ~(keepers : Keeper_meta.t list)
+    ~(keepers : Keeper_types.keeper_meta list)
     ~(window_minutes : int)
   : Yojson.Safe.t =
   let now_ts = Unix.gettimeofday () in
   let window_sec = float_of_int window_minutes *. 60.0 in
   let start_ts = now_ts -. window_sec in
   let keeper_items =
-    List.map (fun (m : Keeper_meta.t) ->
+    List.map (fun (m : Keeper_types.keeper_meta) ->
       let metrics_store = Keeper_types.keeper_metrics_store config m.name in
       let all_metrics_lines =
         let dated = Dated_jsonl.read_recent_lines metrics_store 500 in
@@ -1769,11 +1779,11 @@ let keeper_cost_aggregates_json
       in
       let p50_latency =
         if Array.length latency_arr = 0 then None
-        else Some (percentile latency_arr 50.0)
+        else Some (percentile_sorted_float latency_arr 50.0)
       in
       let p95_latency =
         if Array.length latency_arr = 0 then None
-        else Some (percentile latency_arr 95.0)
+        else Some (percentile_sorted_float latency_arr 95.0)
       in
       let model_breakdown_json =
         model_costs
@@ -1812,12 +1822,13 @@ let keeper_cost_aggregates_json
     original schema variants. *)
 let keeper_decisions_json
     ~(config : Coord.config)
-    ~(keepers : Keeper_meta.t list)
+    ~(keepers : Keeper_types.keeper_meta list)
     ?(limit = 200)
+    ()
   : Yojson.Safe.t =
   let per_keeper_limit = limit * 2 in
   let all_events =
-    List.concat_map (fun (m : Keeper_meta.t) ->
+    List.concat_map (fun (m : Keeper_types.keeper_meta) ->
       let path = Keeper_types.keeper_decision_log_path config m.name in
       if not (Fs_compat.file_exists path) then []
       else

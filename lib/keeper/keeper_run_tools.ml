@@ -174,7 +174,7 @@ let prepare_agent_setup
     in
     if entries <> []
     then
-      Log.Keeper.info
+      Log.Keeper.debug
         "keeper:%s affinity pre-populated %d tools: [%s]"
         meta.name
         (List.length entries)

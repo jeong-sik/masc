@@ -232,19 +232,9 @@ let broadcast_namespace_truth_snapshot (state : Mcp_server.server_state) : unit 
       Sse.broadcast_to Observers namespace_sse_json;
       Sse.broadcast_to Observers namespace_alias_sse_json;
       Sse.broadcast_to Observers legacy_sse_json;
-      (* Demote the "pushed via SSE" log to DEBUG when no SSE client is
-         connected. With zero observers, the broadcast still runs (for
-         the replay buffer and external subscribers) but the log line
-         is pure housekeeping noise — once per minute for 96 minutes
-         straight in a fresh masc-server.log when nothing is tailing
-         /project-snapshot. Operators only care about this signal when
-         there is an actual client on the wire. *)
-      let log_fn =
-        if Sse.client_count () > 0
-        then Log.Dashboard.info
-        else Log.Dashboard.debug
-      in
-      log_fn "project-snapshot pushed via SSE"
+      (* Snapshot broadcasts are normal dashboard fanout. The cache/update
+         failures around this path are logged separately. *)
+      Log.Dashboard.debug "project-snapshot pushed via SSE"
   | Some _ ->
       Log.Dashboard.debug "project-snapshot unchanged, skipping SSE broadcast"
 

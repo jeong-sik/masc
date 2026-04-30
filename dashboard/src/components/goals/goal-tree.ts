@@ -42,6 +42,7 @@ import {
   goalPhaseStatus,
   matchesGoalPhaseFilter,
   phaseFilterLabel,
+  TaskProgressBar,
 } from './goal-helpers'
 
 type GoalDetailTab = 'summary' | 'tasks' | 'evidence'
@@ -599,7 +600,7 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
           <div class="flex flex-wrap items-center gap-2.5 text-2xs text-text-muted">
             <${HealthBadge} health=${node.health} />
             <${StatusBadge} status=${node.status} />
-            ${node.task_count > 0 ? html`<span>${node.task_done_count}/${node.task_count} 태스크</span>` : null}
+            ${node.task_count > 0 ? html`<div class="w-32"><${TaskProgressBar} done=${node.task_done_count} total=${node.task_count} size="sm" /></div>` : null}
             ${node.metric ? html`
               <span
                 class="rounded-sm border border-[var(--white-10)] bg-[var(--white-3)] px-1.5 py-0.5 font-mono text-3xs text-text-secondary"

@@ -9,6 +9,7 @@ import { LoadingState } from './common/feedback-state'
 
 type StatusSection =
   | 'live' | 'observatory' | 'journey' | 'git-graph' | 'agents' | 'runtime' | 'fleet-health'
+  | 'cascade-inspector'
   | 'safe-autonomy'
   | 'memory-subsystems' | 'attribution'
   | 'cost'
@@ -46,6 +47,9 @@ const LazySafeAutonomyPanel = lazy(async () => ({
 const LazyCostDashboard = lazy(async () => ({
   default: (await import('./cost-dashboard')).CostDashboard,
 }))
+const LazyCascadeInspector = lazy(async () => ({
+  default: (await import('./cascade-inspector')).CascadeInspector,
+}))
 
 function sectionFallback(label: string) {
   return html`<${LoadingState}>${label} 불러오는 중...<//>`
@@ -75,6 +79,8 @@ function sectionLabel(section: StatusSection): string {
       return '에이전트 상태'
     case 'cost':
       return '비용 / 지연'
+    case 'cascade-inspector':
+      return 'Cascade 검사기'
   }
 }
 
@@ -102,6 +108,8 @@ function renderSection(section: StatusSection) {
       return html`<${LazyAgentsUnified} />`
     case 'cost':
       return html`<${LazyCostDashboard} />`
+    case 'cascade-inspector':
+      return html`<${LazyCascadeInspector} />`
   }
 }
 
@@ -118,6 +126,7 @@ function currentSection(): StatusSection {
     || section === 'memory-subsystems'
     || section === 'attribution'
     || section === 'cost'
+    || section === 'cascade-inspector'
   ) return section
   return 'agents'
 }

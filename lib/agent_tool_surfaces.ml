@@ -211,7 +211,5 @@ let local_worker_resolvable_tool_names () : string list =
   | Ok schemas ->
       List.map (fun (s : Types.tool_schema) -> s.name) schemas
   | Error msg ->
-      Eio.traceln
-        "[AgentToolSurfaces] local_worker_tool_schemas failed: %s"
-        msg;
+      Log.Misc.warn "[AgentToolSurfaces] local_worker_tool_schemas failed: %s" msg;
       []

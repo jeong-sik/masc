@@ -1211,7 +1211,7 @@ let auto_label_for_adapter (adapter : adapter) =
     match default_model_label_for_adapter adapter with
     | Ok label -> Some label
     | Error msg ->
-        Eio.traceln "[ProviderAdapter] default_model_label_for_adapter failed: %s" msg;
+        Log.Misc.warn "[ProviderAdapter] default_model_label_for_adapter failed: %s" msg;
         None
 
 (** Cloud adapters that participate in auto-detection (excludes llama

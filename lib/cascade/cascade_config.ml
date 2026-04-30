@@ -1046,8 +1046,9 @@ let apply_provider_filter ~provider_filter ~label providers =
     in
     let filtered = List.filter matches providers in
     if filtered = [] then (
-      Eio.traceln "[CascadeConfig] provider_filter matched no providers (%s); \
-        falling back to unfiltered (filter=[%s] providers=[%s])"
+      Log.warn ~ctx:"CascadeConfig"
+        "provider_filter matched no providers (%s); \
+         falling back to unfiltered (filter=[%s] providers=[%s])"
         label (String.concat "," filters)
         (String.concat "," (List.map (fun (p : Llm_provider.Provider_config.t) ->
           Llm_provider.Provider_config.string_of_provider_kind p.kind) providers));

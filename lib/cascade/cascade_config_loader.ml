@@ -326,8 +326,7 @@ let read_bool_field json key =
 let resolve_inference_params ~config_path ~name =
   match load_json config_path with
   | Error msg ->
-      Eio.traceln
-        "[CascadeConfig] resolve_inference_params: %s (name=%s, path=%s)"
+      Log.Misc.warn "[CascadeConfig] resolve_inference_params: %s (name=%s, path=%s)"
         msg name config_path;
       { temperature = None; max_tokens = None;
         keep_alive = None; num_ctx = None;
@@ -400,8 +399,7 @@ let read_api_key_env_field json key =
 let resolve_api_key_env ~config_path ~name =
   match load_json config_path with
   | Error msg ->
-      Eio.traceln
-        "[CascadeConfig] resolve_api_key_env: %s (name=%s, path=%s)"
+      Log.Misc.warn "[CascadeConfig] resolve_api_key_env: %s (name=%s, path=%s)"
         msg name config_path;
       []
   | Ok json ->
@@ -466,8 +464,7 @@ let empty_strategy_config = {
 let resolve_strategy_config ~config_path ~name =
   match load_json config_path with
   | Error msg ->
-      Eio.traceln
-        "[CascadeConfig] resolve_strategy_config: %s (name=%s, path=%s)"
+      Log.Misc.warn "[CascadeConfig] resolve_strategy_config: %s (name=%s, path=%s)"
         msg name config_path;
       empty_strategy_config
   | Ok json ->

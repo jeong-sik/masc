@@ -240,8 +240,8 @@ let fallback_cascade_for ?config_path name =
                     let key = (trimmed_name, target) in
                     if not (Hashtbl.mem logged_invalid_fallback key) then begin
                       Hashtbl.add logged_invalid_fallback key ();
-                      Eio.traceln
-                        "[CascadeConfig] WARN profile %s declares \
+                      Log.Misc.warn
+                        "[CascadeConfig] profile %s declares \
                          fallback_cascade=%s which is not in the live \
                          catalog; ignoring hint"
                         trimmed_name target

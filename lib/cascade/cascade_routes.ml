@@ -222,8 +222,8 @@ let warn_invalid_route_target_once ~route_key ~target ~fallback =
   let key = (route_key, target) in
   if not (Hashtbl.mem logged_invalid_route_targets key) then begin
     Hashtbl.add logged_invalid_route_targets key ();
-    Eio.traceln
-      "[CascadeRoutes] WARN routes.%s targets missing profile %s; using %s"
+    Log.Misc.warn
+      "[CascadeRoutes] routes.%s targets missing profile %s; using %s"
       route_key target fallback
   end
 

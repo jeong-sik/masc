@@ -328,6 +328,12 @@ val mark_turn_finished : base_path:string -> string -> unit
 val record_skip_reasons :
   base_path:string -> string -> reasons:string list -> unit
 
+(** Touch [last_turn_ts] in the registry entry so the stale watchdog
+    sees the keeper as recently active.  Called from the heartbeat
+    skip branch when a proactive keeper legitimately has no work to do.
+    No-op if no entry is registered for [name]. *)
+val touch_last_turn_ts : base_path:string -> string -> unit
+
 (** Increment turn consecutive failure counter. *)
 val increment_turn_failures : base_path:string -> string -> unit
 

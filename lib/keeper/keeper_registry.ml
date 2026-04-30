@@ -696,6 +696,21 @@ let record_skip_reasons ~base_path name ~reasons =
       { e with last_skip_observation = Some (now, reasons) })
   end
 
+let touch_last_turn_ts ~base_path name =
+  let now = Time_compat.now () in
+  update_entry ~base_path name (fun e ->
+    let runtime = e.meta.runtime in
+    let usage = runtime.usage in
+    { e with
+      meta =
+        { e.meta with
+          runtime =
+            { runtime with
+              usage = { usage with last_turn_ts = now }
+            }
+        }
+    })
+
 let increment_turn_failures ~base_path name =
   update_entry ~base_path name (fun e ->
     { e with turn_consecutive_failures = e.turn_consecutive_failures + 1 })

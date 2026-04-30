@@ -1193,6 +1193,11 @@
  (libraries masc_test_deps))
 
 (test
+ (name test_cascade_fsm)
+ (modules test_cascade_fsm)
+ (libraries masc_test_deps))
+
+(test
  (name test_cascade_trust_persist)
  (modules test_cascade_trust_persist)
  (libraries masc_test_deps))

@@ -350,31 +350,27 @@ let run_named
             else if message_looks_like_cli_wrapped_max_turns message then
               Keeper_types.Max_turns_exceeded
             else
-              Keeper_types.Other_detail message
-        | Some (Llm_provider.Http_client.HttpError { code; body }) ->
+              Keeper_types.Other_detail (Cascade_fsm.to_user_message last_err)
+        | Some (Llm_provider.Http_client.HttpError { body; _ }) ->
             if message_looks_like_cli_wrapped_max_turns body then
               Keeper_types.Max_turns_exceeded
             else
-              Keeper_types.Other_detail
-                (Printf.sprintf "HTTP %d: %s" code
-                  (String_util.utf8_safe ~max_bytes:203 ~suffix:"..." body |> String_util.to_string))
+              Keeper_types.Other_detail (Cascade_fsm.to_user_message last_err)
         | Some (Llm_provider.Http_client.AcceptRejected { reason = r }) ->
             if message_looks_like_cli_wrapped_max_turns r then
               Keeper_types.Max_turns_exceeded
             else
-              Keeper_types.Other_detail r
-        | Some (Llm_provider.Http_client.CliTransportRequired { kind }) ->
-            Keeper_types.Other_detail
-              (Printf.sprintf "%s provider requires a CLI transport" kind)
+              Keeper_types.Other_detail (Cascade_fsm.to_user_message last_err)
+        | Some (Llm_provider.Http_client.CliTransportRequired _) ->
+            Keeper_types.Other_detail (Cascade_fsm.to_user_message last_err)
         | Some (Llm_provider.Http_client.ProviderTerminal
             { kind = Llm_provider.Http_client.Max_turns _; _ }) ->
             Keeper_types.Max_turns_exceeded
         | Some (Llm_provider.Http_client.ProviderTerminal
-            { kind = Llm_provider.Http_client.Other subtype; message }) ->
-            Keeper_types.Other_detail
-              (Printf.sprintf "provider terminal %s: %s" subtype message)
+            { kind = Llm_provider.Http_client.Other _; _ }) ->
+            Keeper_types.Other_detail (Cascade_fsm.to_user_message last_err)
         | Some (Llm_provider.Http_client.ProviderFailure _ as err) ->
-            let message = Oas_compat.Http_client.error_message err in
+            let message = Cascade_fsm.to_user_message (Some err) in
             if message_looks_like_cli_wrapped_max_turns message then
               Keeper_types.Max_turns_exceeded
             else

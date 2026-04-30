@@ -264,6 +264,78 @@ function KeeperRow({
   `
 }
 
+function CostMatrix({ models }: { models: DashboardRuntimeModelMetric[] }) {
+  const providers = Array.from(new Set(models.map(m => m.provider ?? 'unknown'))).sort()
+  const modelIds = Array.from(new Set(models.map(m => m.model_id))).sort((a, b) => {
+    const ca = models.find(m => m.model_id === a)?.total_cost_usd ?? 0
+    const cb = models.find(m => m.model_id === b)?.total_cost_usd ?? 0
+    return cb - ca
+  })
+
+  const grid: number[][] = providers.map(p =>
+    modelIds.map(mid => {
+      const match = models.find(m => m.model_id === mid && (m.provider ?? 'unknown') === p)
+      return match?.total_cost_usd ?? 0
+    })
+  )
+
+  const flat = grid.flat().filter(v => v > 0)
+  const max = flat.length > 0 ? Math.max(...flat) : 0
+
+  const zone = (v: number): string => {
+    if (v === 0) return 'z0'
+    const p = v / max
+    if (p < 0.1) return 'z1'
+    if (p < 0.3) return 'z2'
+    if (p < 0.7) return 'z3'
+    return 'z4'
+  }
+
+  const zoneClass = (z: string): string => {
+    switch (z) {
+      case 'z0': return 'bg-[var(--color-bg-surface)] text-text-disabled'
+      case 'z1': return 'bg-[var(--accent-5)]/30 text-text-muted'
+      case 'z2': return 'bg-[var(--accent-10)]/40 text-text-strong'
+      case 'z3': return 'bg-[var(--accent-15)]/50 text-accent'
+      case 'z4': return 'bg-[var(--color-accent-fg)] text-white'
+      default: return ''
+    }
+  }
+
+  return html`
+    <section class="flex flex-col gap-2" aria-label="Provider × Model cost matrix">
+      <div class="flex items-center justify-between rounded border border-card-border/60 bg-[var(--backdrop-deep)] px-3 py-2">
+        <span class="font-mono text-2xs uppercase tracking-1 text-text-muted">provider × model · $ spent</span>
+      </div>
+      <div class="overflow-x-auto rounded border border-card-border/60 bg-[var(--backdrop-deep)]">
+        <table class="w-full" aria-label="Provider by model cost matrix">
+          <thead>
+            <tr class="border-b border-[var(--color-border-default)] text-2xs uppercase tracking-1 text-text-muted">
+              <th scope="col" class="px-2 py-1.5 text-left"></th>
+              ${modelIds.map(mid => html`<th scope="col" class="px-2 py-1.5 text-left font-mono text-xs">${mid}</th>`)}
+            </tr>
+          </thead>
+          <tbody>
+            ${providers.map((p, i) => html`
+              <tr key=${p} class="border-b border-[var(--color-border-default)]/40">
+                <th scope="row" class="px-2 py-1.5 text-left font-mono text-xs text-[var(--color-accent-fg)]">${p}</th>
+                ${(grid[i] ?? []).map((v, j) => {
+                  const z = zone(v)
+                  return html`
+                    <td key=${j} class="px-2 py-1.5 text-right font-mono text-xs ${zoneClass(z)}">
+                      ${v > 0 ? `$${v.toFixed(2)}` : '—'}
+                    </td>
+                  `
+                })}
+              </tr>
+            `)}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  `
+}
+
 export function CostDashboard() {
   const activeState = viewMode.value === 'model' ? modelState.value : keeperState.value
 
@@ -369,6 +441,10 @@ export function CostDashboard() {
           />
         </div>
       ` : null}
+
+      ${viewMode.value === 'model' && activeState.status === 'loaded'
+        ? html`<${CostMatrix} models=${activeState.data as DashboardRuntimeModelMetric[]} />`
+        : null}
 
       ${data.length === 0 ? html`
         <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-6 text-center text-sm text-text-muted">

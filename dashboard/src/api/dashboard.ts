@@ -562,6 +562,7 @@ export interface BucketMetric {
 
 export interface DashboardRuntimeModelMetric {
   model_id: string
+  provider?: string | null
   entry_count?: number | null
   avg_tok_per_sec?: number | null
   p50_tok_per_sec?: number | null
@@ -699,6 +700,7 @@ function decodeRuntimeModelMetric(raw: unknown): DashboardRuntimeModelMetric | n
   if (!modelId) return null
   return {
     model_id: modelId,
+    provider: asNullableString(raw.provider),
     entry_count: asNumber(raw.entry_count) ?? null,
     avg_tok_per_sec: asNumber(raw.avg_tok_per_sec) ?? null,
     p50_tok_per_sec: asNumber(raw.p50_tok_per_sec) ?? null,

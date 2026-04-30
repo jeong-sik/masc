@@ -34,8 +34,8 @@ let test_to_public_round_trip () =
     "Bash" (Alias.to_public "keeper_bash");
   Alcotest.(check string) "keeper_fs_read -> Read"
     "Read" (Alias.to_public "keeper_fs_read");
-  Alcotest.(check string) "keeper_shell -> Grep"
-    "Grep" (Alias.to_public "keeper_shell");
+  Alcotest.(check string) "keeper_shell stays internal"
+    "keeper_shell" (Alias.to_public "keeper_shell");
   (* Edit/Write collapse: first occurrence wins for stability *)
   Alcotest.(check string) "keeper_fs_edit -> Edit (first wins)"
     "Edit" (Alias.to_public "keeper_fs_edit")

@@ -1,61 +1,9 @@
 open Keeper_types
 open Keeper_exec_shared
 
-let split_once_on_substring s sep =
-  let len = String.length s in
-  let sep_len = String.length sep in
-  if sep_len = 0 then None
-  else
-    let rec loop i =
-      if i + sep_len > len then None
-      else if String.sub s i sep_len = sep then
-        Some
-          ( String.sub s 0 i,
-            String.sub s (i + sep_len) (len - i - sep_len) )
-      else loop (i + 1)
-    in
-    loop 0
-
-let split_shell_chain_for_retry cmd =
-  let rec split_all sep acc s =
-    match split_once_on_substring s sep with
-    | None -> List.rev (String.trim s :: acc)
-    | Some (left, right) -> split_all sep (String.trim left :: acc) right
-  in
-  let commands =
-    if String_util.contains_substring cmd "&&" then split_all "&&" [] cmd
-    else if String_util.contains_substring cmd "||" then split_all "||" [] cmd
-    else if String_util.contains_substring cmd ";" then split_all ";" [] cmd
-    else [ cmd ]
-  in
-  let commands = List.filter (fun s -> String.trim s <> "") commands in
-  match commands with
-  | _ :: _ :: _ when List.length commands <= 8 -> Some commands
-  | _ -> None
-
-let readonly_chain_rewrite_extra ~category cmd =
-  if not (String.equal category "chaining") then []
-  else
-    match split_shell_chain_for_retry cmd with
-    | None -> []
-    | Some commands ->
-        [
-          "rewrite_kind", `String "split_shell_chain";
-          ( "rewrite_hint",
-            `String
-              "Retry each split command as a separate keeper_shell op=bash call in order; keep the same cwd." );
-          "split_commands", `List (List.map (fun c -> `String c) commands);
-          ( "suggested_calls",
-            `List
-              (List.map
-                 (fun c ->
-                   `Assoc [ "op", `String "bash"; "cmd", `String c ])
-                 commands) );
-        ]
-
 let handle_keeper_shell
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
-      ~(exec_cache : Masc_exec.Exec_cache.t option)
+      ~exec_cache:(_exec_cache : Masc_exec.Exec_cache.t option)
       ~(config : Coord.config)
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
@@ -909,208 +857,24 @@ let handle_keeper_shell
         (Printf.sprintf "Unknown git_worktree action '%s'. Use: list, add." other)
     end
   | "bash" ->
-    let cmd_str = Safe_ops.json_string ~default:"" "command" args |> String.trim in
-    let timeout_sec = Keeper_shell_shared.clamp_shell_timeout ~default:Keeper_shell_shared.io_timeout_sec args in
-    if cmd_str = "" then error_json ~fields:[ "op", `String op ] "command is required for bash op. Good: command='env'. Bad: command=''."
-
-    else
-      (* Non-overridable deny layer (runs after preset gate).
-         First match wins — specific patterns before generic. *)
-      let substring_rules =
-        [ (* chaining *)
-          "&&", "chaining"
-        ; "||", "chaining"
-        ; ";", "chaining"
-        (* redirect *)
-        ; "| tee ", "redirect"
-        ; ">> ", "redirect"
-        ; "> ", "redirect"
-        ]
-      in
-      let matched =
-        match List.find_opt (fun (pat, _cat) ->
-          String_util.contains_substring_ci cmd_str pat
-        ) substring_rules with
-        | Some (pat, category) -> Some (pat, category)
-        | None -> Keeper_shell_shared.readonly_shell_token_match (Keeper_shell_shared.lowercase_shell_words cmd_str)
-      in
-      (match matched with
-      | Some (pat, category) ->
-        let hint = Keeper_shell_shared.readonly_hint_of_category category in
-        Yojson.Safe.to_string
-          (Exec_core.blocked_result_json
-             ~cmd:cmd_str
-             ~error:"command_blocked_readonly"
-             ~reason:
-               (Printf.sprintf
-                  "Readonly shell blocked pattern '%s' in category '%s'."
-                  pat category)
-             ~hint
-             ~diag:(Keeper_shell_shared.diagnosis_of_readonly_category category)
-             ~extra:
-               ([
-                  "op", `String op;
-                  "blocked_pattern", `String pat;
-                  "category", `String category;
-                ]
-                @ readonly_chain_rewrite_extra ~category cmd_str)
-             ())
-      | None ->
-        (match cwd_target () with
-         | Error e -> path_error e
-         | Ok cwd ->
-           (match Worker_dev_tools.validate_command_paths ~workdir:cwd cmd_str with
-            | Error e -> path_error e
-            | Ok () ->
-              (* PR #11080 sibling sweep: when [turn_sandbox_factory]
-                 is bound the bash exec runs inside the keeper's
-                 container, so the LLM-facing [cwd] field must hold
-                 the in-container path.  When the runtime is absent
-                 (Local-effective keepers) the host path is what the
-                 keeper sees and the [Local] variant passes it
-                 through unchanged. *)
-              let cwd_response =
-                match Keeper_sandbox_factory.resolve_opt turn_sandbox_factory ~cwd with
-                | Some runtime ->
-                  Keeper_cwd_response.docker ~host_cwd:cwd
-                    ~container_cwd:
-                      (Keeper_turn_sandbox_runtime.container_cwd_of_host
-                         runtime ~host_cwd:cwd)
-                | None ->
-                  Keeper_cwd_response.local ~host_cwd:cwd
-              in
-              let cwd_field =
-                Keeper_cwd_response.to_yojson_response cwd_response
-              in
-              (* P21: exec cache — skip execution on hit, store on miss *)
-              (match exec_cache with
-               | Some cache ->
-                 (match Masc_exec.Exec_cache.lookup cache cmd_str with
-                  | Some entry ->
-                    let st = Unix.WEXITED entry.exit_code in
-                    Yojson.Safe.to_string
-                      (Exec_core.process_result_json
-                         ~artifact_policy:Exec_core.Inline_only
-                         ~base_path:root
-                         ~keeper_name:meta.name
-                         ~cmd:cmd_str
-                         ~extra:
-                           [ "op", `String op
-                           ; "cwd", cwd_field
-                           ; "command", `String cmd_str
-                           ; "cached", `Bool true
-                           ; "cache_age_ms",
-                               `Int (int_of_float
-                                       ((Unix.time () -. entry.cached_at) *. 1000.))
-                           ]
-                         ~status:st
-                         ~output:entry.output
-                         ())
-                  | None ->
-                    let t0 = Unix.gettimeofday () in
-                    let st, out =
-                      match Keeper_sandbox_factory.resolve_opt turn_sandbox_factory ~cwd with
-                      | Some runtime ->
-                        (match
-                           Keeper_turn_sandbox_runtime.run_bash_with_status runtime
-                             ~cwd ~cmd:cmd_str ~timeout_sec ()
-                         with
-                         | Ok payload -> payload
-                         | Error msg -> (Unix.WEXITED 127, msg))
-                      | None ->
-                        Keeper_shell_shared.run_argv_with_status_retry_eintr ~cwd ~timeout_sec
-                          [ "bash"; "-lc"; cmd_str ^ " 2>&1" ]
-                    in
-                    let elapsed_ms =
-                      int_of_float ((Unix.gettimeofday () -. t0) *. 1000.)
-                    in
-                    if not (Keeper_shell_shared.process_status_is_timeout st) then begin
-                      let exit_code = match st with
-                        | Unix.WEXITED n -> n
-                        | Unix.WSIGNALED n -> 128 + n
-                        | Unix.WSTOPPED n -> 256 + n
-                      in
-                      Masc_exec.Exec_cache.store cache
-                        ~cmd:cmd_str ~exit_code ~output:out ~duration_ms:elapsed_ms
-                    end;
-                    if Keeper_shell_shared.process_status_is_timeout st then
-                      Yojson.Safe.to_string
-                        (Exec_core.process_result_json
-                           ~artifact_policy:Exec_core.Inline_only
-                           ~base_path:root
-                           ~keeper_name:meta.name
-                           ~cmd:cmd_str
-                           ~extra:
-                             [ "op", `String op
-                             ; "cwd", cwd_field
-                             ; "command", `String cmd_str
-                             ; "error", `String "command_timed_out"
-                             ; "timeout_sec", `Float timeout_sec
-                             ]
-                           ~status:st
-                           ~output:out
-                           ())
-                    else
-                      Yojson.Safe.to_string
-                        (Exec_core.process_result_json
-                           ~artifact_policy:Exec_core.Inline_only
-                           ~base_path:root
-                           ~keeper_name:meta.name
-                           ~cmd:cmd_str
-                           ~extra:
-                             [ "op", `String op
-                             ; "cwd", cwd_field
-                             ; "command", `String cmd_str
-                             ]
-                           ~status:st
-                           ~output:out
-                           ()))
-               | None ->
-                 let st, out =
-                   match Keeper_sandbox_factory.resolve_opt turn_sandbox_factory ~cwd with
-                   | Some runtime ->
-                     (match
-                        Keeper_turn_sandbox_runtime.run_bash_with_status runtime
-                          ~cwd ~cmd:cmd_str ~timeout_sec ()
-                      with
-                      | Ok payload -> payload
-                      | Error msg -> (Unix.WEXITED 127, msg))
-                   | None ->
-                     Keeper_shell_shared.run_argv_with_status_retry_eintr ~cwd ~timeout_sec
-                       [ "bash"; "-lc"; cmd_str ^ " 2>&1" ]
-                 in
-                 if Keeper_shell_shared.process_status_is_timeout st then
-                   Yojson.Safe.to_string
-                     (Exec_core.process_result_json
-                        ~artifact_policy:Exec_core.Inline_only
-                        ~base_path:root
-                        ~keeper_name:meta.name
-                        ~cmd:cmd_str
-                        ~extra:
-                          [ "op", `String op
-                          ; "cwd", cwd_field
-                          ; "command", `String cmd_str
-                          ; "error", `String "command_timed_out"
-                          ; "timeout_sec", `Float timeout_sec
-                          ]
-                        ~status:st
-                        ~output:out
-                        ())
-                 else
-                   Yojson.Safe.to_string
-                     (Exec_core.process_result_json
-                        ~artifact_policy:Exec_core.Inline_only
-                        ~base_path:root
-                        ~keeper_name:meta.name
-                        ~cmd:cmd_str
-                        ~extra:
-                          [ "op", `String op
-                          ; "cwd", cwd_field
-                          ; "command", `String cmd_str
-                          ]
-                        ~status:st
-                        ~output:out
-                        ())))))
+    Yojson.Safe.to_string
+      (`Assoc
+         [ "ok", `Bool false
+         ; "op", `String op
+         ; "error", `String "keeper_shell_bash_deprecated"
+         ; "hint", `String
+             "keeper_shell is now structured-only and no longer executes \
+              op=bash. Use Bash or keeper_bash for command execution; use \
+              keeper_shell only for structured ops such as rg, ls, cat, \
+              git_status, git_log, git_diff, git_clone, and gh."
+         ; "suggested_tool", `String "keeper_bash"
+         ; "suggested_public_tool", `String "Bash"
+         ; "supported_ops",
+             `List
+               (List.map
+                  (fun s -> `String s)
+                  Keeper_shell_shared.valid_shell_op_strings)
+         ])
   | "git_clone" ->
     (* Clone a repo into this keeper's playground repos directory.
        Sandboxed: always targets .masc/playground/<keeper_name>/repos/<repo_name>.

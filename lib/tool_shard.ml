@@ -65,15 +65,15 @@ let vote_direction_enum_strings =
 (** Issue #8524: hand-mirrored from
     [Keeper_exec_shell.valid_shell_op_strings]. Direct dependency
     would create a Tool_shard -> Keeper_* -> Tool_shard cycle (same
-    shape as #8467/#8480/#8484/#8490). Schema previously hand-listed
-    only 15 of 16 ops — git_worktree was missing even though the
-    dispatcher accepted it and supported_ops advertised it. Sync
-    regression test in [test_types.ml :: keeper_shell_op_ssot]
-    catches drift. *)
+    shape as #8467/#8480/#8484/#8490). Schema previously drifted from
+    the dispatcher (git_worktree was missing) and now intentionally
+    mirrors only structured keeper_shell ops; generic bash execution
+    belongs to Bash/keeper_bash. Sync regression test in
+    [test_types.ml :: keeper_shell_op_ssot] catches drift. *)
 let keeper_shell_op_enum_strings =
   [ "pwd"; "ls"; "cat"; "rg"; "git_status"; "find"; "head"; "tail";
-    "wc"; "tree"; "git_log"; "git_diff"; "git_worktree"; "bash";
-    "git_clone"; "gh" ]
+    "wc"; "tree"; "git_log"; "git_diff"; "git_worktree"; "git_clone";
+    "gh" ]
 
 (** A named collection of tools that can be granted/revoked. *)
 type shard = {
@@ -357,34 +357,32 @@ Creates parent dirs.";
 let shell_tools : Types.tool_schema list = [
   {
     name = "keeper_shell";
-    description = "Run a safe project shell command. \
-ops: pwd, ls, cat, rg, git_status, find, head, tail, wc, tree, git_log, git_diff, bash, git_clone, gh. \
-Read-only ops default to the keeper sandbox. \
+    description = "Run a structured project shell operation. \
+ops: pwd, ls, cat, rg, git_status, find, head, tail, wc, tree, git_log, git_diff, git_worktree, git_clone, gh. \
+Structured ops default to the keeper sandbox. \
 IMPORTANT: paths resolve automatically — use 'repos/X' or 'mind/X'. Never include host paths like '.masc/playground/your-name/repos/X' in path or cwd. \
 Use cwd to target an explicit allowed directory or cloned repo. \
 find REQUIRES pattern param (e.g. pattern=\"*.ml\"). \
-bash op: single command only, no chaining (&&, ||, |, ; are blocked), no redirects (>, >>). \
+No generic bash execution: use Bash/keeper_bash for command execution. \
 git_clone: clone a repo into your sandbox repos/ lane (url required). \
 gh op: run a gh CLI subcommand with cmd=\"<subcommand>\" (e.g. cmd=\"pr list --state open\"). Requires an active claimed task/current_task_id because repo context is derived from the task worktree. Always run `gh pr list` first before referencing a PR number to avoid hallucinations. Dangerous commands (repo delete, auth logout, secret set/delete) are blocked. \
 If path not found, clone the repo first with op=git_clone. \
 Use rg for pattern search, find for path discovery, head/tail for line ranges, \
-git_log/git_diff for repo history, bash for curl/jq/env/which, gh for GitHub PR/issue/CI.";
+git_log/git_diff for repo history, gh for GitHub PR/issue/CI.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
         (* Issue #8524: derive from local mirror tracking
            [Keeper_exec_shell.valid_shell_op_strings].  Schema used to
            omit git_worktree even though the handler accepted it. *)
-        ("op", `Assoc [("type", `String "string"); ("enum", `List (List.map (fun s -> `String s) keeper_shell_op_enum_strings)); ("description", `String "Command to run")]);
+        ("op", `Assoc [("type", `String "string"); ("enum", `List (List.map (fun s -> `String s) keeper_shell_op_enum_strings)); ("description", `String "Structured operation to run")]);
         ("cmd", `Assoc [("type", `String "string"); ("description", `String "gh subcommand for op=gh, e.g. 'pr list --state open'. Requires an active claimed task/current_task_id. The active task worktree determines the repo; any --repo flag is normalized to that repo.")]);
         ("path", `Assoc [("type", `String "string"); ("description", `String "Target path for ls/cat/rg/find/head/tail/wc/tree")]);
-        ("cwd", `Assoc [("type", `String "string"); ("description", `String "Optional working directory for pwd/git_status/git_log/git_diff/git_worktree/bash. Must stay within the keeper sandbox or an explicit allowed path.")]);
+        ("cwd", `Assoc [("type", `String "string"); ("description", `String "Optional working directory for pwd/git_status/git_log/git_diff/git_worktree. Must stay within the keeper sandbox or an explicit allowed path.")]);
         ("pattern", `Assoc [("type", `String "string"); ("description", `String "Search pattern for rg, or name glob for find (REQUIRED for find, e.g. \"*.ml\")")]);
         ("limit", `Assoc [("type", `String "integer"); ("description", `String "Result limit for ls/rg/find/tree, or line count for git_log")]);
         ("lines", `Assoc [("type", `String "integer"); ("description", `String "Number of lines for head/tail (default 20, max 200)")]);
         ("max_bytes", `Assoc [("type", `String "integer"); ("description", `String "Max bytes for cat")]);
-        ("command", `Assoc [("type", `String "string"); ("description", `String "Single shell command for bash op. No chaining (&&/||/;/|) or redirects (>/>>) allowed. Read-only.")]);
-        ("timeout_sec", `Assoc [("type", `String "number"); ("description", `String "Timeout seconds for bash op (default: 30, max: 180)")]);
         ("url", `Assoc [("type", `String "string"); ("description", `String "Git repo URL for git_clone op (e.g. 'https://github.com/org/repo'). Clones into sandbox repos/.")]);
       ]);
       ("required", `List [`String "op"]);
@@ -395,10 +393,11 @@ git_log/git_diff for repo history, bash for curl/jq/env/which, gh for GitHub PR/
 let coding_keeper_bridge_tools : Types.tool_schema list = [
   {
     name = "keeper_bash";
-    description = "Execute ONE shell command. \
-NO chaining (&&, ||, ;), NO pipes (|), NO redirects (> >>). \
-Violations are blocked. Good: cmd='dune build', cmd='ls -la lib/'. \
-Bad: cmd='cd x && dune build', cmd='rg foo | wc -l'. \
+    description = "Execute ONE shell command through the keeper_bash safety gates. \
+No chaining/control syntax (&&, ||, ;), command substitution, background operators, or file redirects. \
+Pipelines and fd-only redirects are accepted only when the active preset validator allows every segment. \
+Good: cmd='dune build', cmd='ls -la lib/'. \
+Bad: cmd='cd x && dune build', cmd='echo hi > out.txt'. \
 Runs in the keeper sandbox by default; use cwd to target an explicit allowed directory. \
 Paths resolve automatically — never include host storage prefixes such as '.masc/playground/your-name/' in cwd. Use 'repos/X' instead. \
 Sandbox root is NOT a git repository: git/gh calls require cwd='repos/<REPO_NAME>' (or the worktree path under it). 'not a git repository' or 'path_outside_sandbox' from the sandbox root means you forgot the cwd. \
@@ -408,7 +407,7 @@ poll with keeper_bash_output, terminate with keeper_bash_kill).";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
-        ("cmd", `Assoc [("type", `String "string"); ("description", `String "Single command only. No chaining/pipe/redirect. Example: 'dune build', 'rg pattern lib/'")]);
+        ("cmd", `Assoc [("type", `String "string"); ("description", `String "Single command only. No chaining/control syntax or file redirects. Example: 'dune build', 'rg pattern lib/'")]);
         ("cwd", `Assoc [("type", `String "string"); ("description", `String "Optional working directory for the command. Must stay within the keeper sandbox or an explicit allowed path.")]);
         ("timeout_sec", `Assoc [("type", `String "number"); ("description", `String "Timeout seconds (default: 30, max: 180). For run_in_background=true, 0 disables the timeout.")]);
         ("run_in_background", `Assoc [("type", `String "boolean"); ("description", `String "Default false. When true, returns immediately with background_task_id; poll output via keeper_bash_output, stop via keeper_bash_kill.")]);

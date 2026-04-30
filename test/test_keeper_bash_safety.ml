@@ -418,9 +418,9 @@ let parse_hint raw =
   |> Json.member "hint"
   |> Json.to_string_option
 
-let parse_category raw =
+let parse_error_field raw =
   Yojson.Safe.from_string raw
-  |> Json.member "category"
+  |> Json.member "error"
   |> Json.to_string_option
 
 let test_keeper_shell_ls_recovers_doubled_playground_prefix () =
@@ -453,14 +453,12 @@ let test_keeper_shell_ls_recovers_doubled_playground_prefix () =
   Alcotest.(check string) "path normalized to repos root" repos
     (json |> Json.member "path" |> Json.to_string)
 
-(* task-238: terse "X blocked" error caused model retry loops. Hint must
-   redirect the model to either separate calls or a specific sub-op. *)
-let test_readonly_chaining_hint_lists_subops () =
+let test_keeper_shell_bash_op_is_deprecated () =
   with_eio_fs @@ fun () ->
   let base_path, config = make_config () in
   Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
   Keeper_registry.clear ();
-  let meta = make_readonly_meta "chain-hint" in
+  let meta = make_readonly_meta "bash-deprecated" in
   let raw =
     Keeper_exec_shell.handle_keeper_shell
       ~turn_sandbox_factory:None ~exec_cache:None
@@ -470,42 +468,42 @@ let test_readonly_chaining_hint_lists_subops () =
         ("command", `String "git status && git log --oneline -5");
       ])
   in
-  Alcotest.(check (option string)) "category is chaining"
-    (Some "chaining") (parse_category raw);
+  Alcotest.(check (option string)) "error is deprecation"
+    (Some "keeper_shell_bash_deprecated") (parse_error_field raw);
   (match parse_hint raw with
    | None -> Alcotest.fail ("expected hint field, got: " ^ raw)
    | Some hint ->
-     Alcotest.(check bool) "hint names the separate-call alternative" true
-       (String_util.contains_substring hint "one command per keeper_shell call");
-     (* A concrete list of sub-ops prevents the model from guessing. *)
-     List.iter (fun sub_op ->
-       Alcotest.(check bool)
-         (Printf.sprintf "hint lists %s sub-op" sub_op) true
-         (String_util.contains_substring hint sub_op)
-     ) [ "git_log"; "git_status"; "git_diff"; "rg"; "ls"; "cat" ])
+     Alcotest.(check bool) "hint points to keeper_bash" true
+       (String_util.contains_substring hint "keeper_bash");
+     Alcotest.(check bool) "hint points to Bash alias" true
+       (String_util.contains_substring hint "Bash");
+     Alcotest.(check bool) "hint keeps keeper_shell structured" true
+       (String_util.contains_substring hint "structured ops"))
 
-let test_readonly_redirect_hint_points_at_fs_edit () =
+let test_keeper_shell_bash_op_does_not_execute () =
   with_eio_fs @@ fun () ->
   let base_path, config = make_config () in
   Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
   Keeper_registry.clear ();
-  let meta = make_readonly_meta "redirect-hint" in
+  let meta = make_readonly_meta "bash-no-exec" in
+  let playground =
+    Filename.concat base_path (playground_path_of meta.name)
+  in
+  ensure_dir playground;
+  let marker = Filename.concat playground "should-not-exist" in
   let raw =
     Keeper_exec_shell.handle_keeper_shell
       ~turn_sandbox_factory:None ~exec_cache:None
       ~config ~meta
       ~args:(`Assoc [
         ("op", `String "bash");
-        ("command", `String "echo hi > out.txt");
+        ("command", `String "touch should-not-exist");
       ])
   in
-  Alcotest.(check (option string)) "category is redirect"
-    (Some "redirect") (parse_category raw);
-  match parse_hint raw with
-  | None -> Alcotest.fail ("expected hint field, got: " ^ raw)
-  | Some hint ->
-    Alcotest.(check bool) "hint mentions keeper_fs_edit" true
-      (String_util.contains_substring hint "keeper_fs_edit")
+  Alcotest.(check (option string)) "error is deprecation"
+    (Some "keeper_shell_bash_deprecated") (parse_error_field raw);
+  Alcotest.(check bool) "legacy bash op did not execute" false
+    (Sys.file_exists marker)
 
 let test_git_write_classification () =
   let is_branch_switch = Masc_mcp.Worker_dev_tools.is_git_branch_switch in
@@ -678,10 +676,10 @@ let () =
     ("readonly_hints", [
       Alcotest.test_case "doubled playground prefix auto-recovers" `Quick
         test_keeper_shell_ls_recovers_doubled_playground_prefix;
-      Alcotest.test_case "chaining hint lists sub-ops (task-238)" `Quick
-        test_readonly_chaining_hint_lists_subops;
-      Alcotest.test_case "redirect hint points at keeper_fs_edit" `Quick
-        test_readonly_redirect_hint_points_at_fs_edit;
+      Alcotest.test_case "op=bash is deprecated" `Quick
+        test_keeper_shell_bash_op_is_deprecated;
+      Alcotest.test_case "op=bash does not execute" `Quick
+        test_keeper_shell_bash_op_does_not_execute;
     ]);
     ("rg_exit_code", [
       Alcotest.test_case "rg exit semantics (0=ok, 1=ok, 2+=error)" `Quick test_rg_exit_code_semantics;

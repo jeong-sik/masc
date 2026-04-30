@@ -14,9 +14,9 @@ code_refs:
 # Legendary Bash Runbook
 
 This runbook documents the operator surface of the "Legendary Bash" exec
-rework — the P1–P6 upgrades to `keeper_bash` / `keeper_shell` — and the
-procedure for interpreting dark-launch observer logs before flipping the
-remaining defaults.
+rework — the P1–P6 upgrades to `keeper_bash` and adjacent structured shell
+routing — and the procedure for interpreting dark-launch observer logs before
+flipping the remaining defaults.
 
 ## Related Documents
 
@@ -26,9 +26,13 @@ remaining defaults.
 
 ## Scope
 
-- Covers: `keeper_bash`, `keeper_shell`, exec semantic exit, output
-  truncation, background task lifecycle, AST safety gate, verification
-  contract markers.
+- Covers: `keeper_bash`, exec semantic exit, output truncation, background task
+  lifecycle, AST safety gate, verification contract markers, and the
+  structured-shell boundary around it.
+- `keeper_shell` is not a raw command execution surface. It owns structured ops
+  such as `rg`, `ls`, `cat`, `git_status`, `git_log`, `git_diff`, `git_clone`,
+  and `gh`; `keeper_shell op=bash` is a deprecated non-executing compatibility
+  response.
 - Does not cover: the cascade verifier itself or the approval layer for
   MCP tools. Those are separate surfaces.
 

@@ -35,6 +35,7 @@ such as preset selection, shard assignment, and tool access, not through a
 Notes:
 - `voice` and `weather` shards still exist, but they are no longer part of the default keeper surface.
 - `keeper_fs_edit` remains a legacy internal tool but is intentionally excluded from default keeper exposure.
+- `keeper_shell` is structured-only (`pwd`, `ls`, `cat`, `rg`, `find`, `head`, `tail`, `wc`, `tree`, `git_status`, `git_log`, `git_diff`, `git_worktree`, `git_clone`, `gh`). Raw command execution lives in `Bash`/`keeper_bash`.
 - Code mutation uses `masc_code_{write,edit,delete,shell,git}` in addition to the `coding` shard above.
 
 ## Tool Surface

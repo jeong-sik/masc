@@ -15,7 +15,9 @@ val to_internal : string -> string option
 
 (** [to_public internal_name] returns the LLM-facing alias for an
     internal [keeper_*] tool. Falls back to [internal_name] verbatim
-    when the tool has no Anthropic Code cognate (board/task/etc.). *)
+    when the tool has no Anthropic Code cognate (board/task/etc.) or
+    when only part of the internal tool has a public alias, such as
+    [Grep] for [keeper_shell op=rg]. *)
 val to_public : string -> string
 
 (** [canonicalize_observed names] maps every recognized public alias

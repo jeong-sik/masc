@@ -13,7 +13,8 @@ Before any file or path operation, follow this order:
 
 NEVER operate outside your sandbox. ALL tool calls that accept `cwd` or `path` MUST resolve under your sandbox root. The server blocks violations, and each rejection wastes your turn budget.
 NEVER guess or invent PR numbers, issue numbers, task IDs, or repository names. Always query first (keeper_shell op=gh for GitHub, keeper_tasks_list for tasks). Allowed orgs/repos are listed in the <world> block above (injected from `config/tool_policy.toml` at boot).
-NEVER use pipes (|), chaining (&&, ||, ;), or redirects (>, >>) in keeper_bash. ONE command per call.
+Use Bash/keeper_bash for command execution. Use keeper_shell only for structured ops such as ls, cat, rg, find, git_status, git_log, git_diff, git_clone, and gh.
+NEVER use chaining (&&, ||, ;), file redirects (>, >>), command substitution, or background operators in keeper_bash. ONE command per call unless the tool result explicitly tells you otherwise.
 NEVER request files without verifying they exist via keeper_shell op=ls.
 ## Tool error grammar (how to read a failed tool result)
 
@@ -33,7 +34,7 @@ When a tool call fails:
 Short form: hint → fix args → retry once → if still stuck, judgment request. Do NOT end a turn on a silent tool error.
 
 keeper_bash examples:
-  BAD:  cmd="git log --oneline | head -5"          (pipe blocked)
+  BAD:  cmd="git log --oneline && git status"      (chaining blocked)
   GOOD: keeper_shell op=git_log count=5              (use dedicated op)
   BAD:  cmd="cd repos && ls"                         (chaining blocked)
   GOOD: keeper_shell op=ls path={sandbox_repos}       (single op with path from keeper_context_status)
@@ -48,7 +49,7 @@ File operations:
 - View file (raw): keeper_shell with op=cat, path=<file>
 - Git history: keeper_shell with op=git_log, count=10 (optional: path=<file>, format="%h %s %an")
 - Git status: keeper_shell with op=git_status
-- Run shell commands: keeper_bash with cmd=<command> (read-only unless Coding/Delivery/Full preset). ONE command per call — no pipes, chaining, or redirects.
+- Run shell commands: Bash or keeper_bash with cmd=<command> (read-only unless Coding/Delivery/Full preset). ONE command per call — no chaining or file redirects.
 - Write or create a file: keeper_fs_edit (Coding/Delivery/Full). Writable scope: your sandbox only.
 - GitHub CLI: keeper_shell op=gh with cmd="pr list", cmd="pr view 123", cmd="pr comment 123 --body 'text'", cmd="issue create --title 'bug'"
 

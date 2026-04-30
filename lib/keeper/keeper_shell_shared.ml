@@ -24,7 +24,6 @@ type shell_op =
   | Git_log
   | Git_diff
   | Git_worktree
-  | Bash
   | Git_clone
   | Gh
 
@@ -42,19 +41,18 @@ let shell_op_to_string = function
   | Git_log -> "git_log"
   | Git_diff -> "git_diff"
   | Git_worktree -> "git_worktree"
-  | Bash -> "bash"
   | Git_clone -> "git_clone"
   | Gh -> "gh"
 
 let all_shell_ops =
   [ Pwd; Ls; Cat; Rg; Git_status; Find; Head; Tail; Wc; Tree;
-    Git_log; Git_diff; Git_worktree; Bash; Git_clone; Gh ]
+    Git_log; Git_diff; Git_worktree; Git_clone; Gh ]
 
 let valid_shell_op_strings = List.map shell_op_to_string all_shell_ops
 
 (** Shell operation timeout constants.
     - [io_timeout_sec]: commands that may block on network/disk I/O
-      (git status, ls with large dirs, custom bash).
+      (git status, gh, ls with large dirs).
     - [read_timeout_sec]: fast read-only commands on local files
       (cat, rg, head, tail, find, git_log, tree).
     - [user_timeout_max_sec]: upper bound for user-provided timeout_sec
@@ -144,10 +142,11 @@ let readonly_shell_token_match tokens =
 let readonly_hint_of_category = function
   | "chaining" ->
       "`&&`, `||`, and `;` chaining are blocked in readonly shell. \
-       Issue one command per keeper_shell call, or use a dedicated \
-       sub-op: git_log, git_status, git_diff, git_worktree, find, \
-       ls, rg, head, tail, wc, tree, cat, pwd. \
-       Good: command='git status'. Bad: command='git status && git log -1'."
+       Issue one command per keeper_bash call, or use a dedicated \
+       keeper_shell sub-op: git_log, git_status, git_diff, \
+       git_worktree, find, ls, rg, head, tail, wc, tree, cat, pwd. \
+       Good: keeper_bash cmd='git status'. \
+       Bad: keeper_bash cmd='git status && git log -1'."
   | "redirect" ->
       "Redirects (`>`, `>>`, `| tee`) are blocked in readonly shell. \
        Use keeper_fs_edit to write files, or keeper_bash with the \
@@ -157,17 +156,17 @@ let readonly_hint_of_category = function
   | "git_write" ->
       "Use keeper_bash with coding preset for git write operations. \
        Good: keeper_bash cmd='git add lib/foo.ml'. \
-       Bad: keeper_shell command='git commit -m x' (readonly shell \
+       Bad: keeper_bash cmd='git commit -m x' without write access \
        does not accept git write commands)."
   | "package_install" ->
       "Package installation requires keeper_bash with coding preset. \
        Good: keeper_bash cmd='opam install -y eio'. \
-       Bad: keeper_shell command='opam install eio' (readonly shell \
+       Bad: keeper_bash cmd='opam install eio' without write access \
        does not accept package installs)."
   | "destructive" ->
       "Use keeper_bash for write operations, not readonly shell. \
        Good: keeper_bash cmd='rm .tmp/scratch.log'. \
-       Bad: keeper_shell command='rm -rf .tmp/' (readonly shell does \
+       Bad: keeper_bash cmd='rm -rf .tmp/' (readonly shell does \
        not accept destructive commands)."
   | _ -> "This operation is not allowed in readonly shell."
 
@@ -182,9 +181,8 @@ let diagnosis_of_readonly_category category =
                 "&&, ||, and ; chain multiple commands; the readonly shell \
                  validates one command per call."
             ; rewrite =
-                Some "Split into two calls: keeper_shell op='custom' \
-                      command='git status' then keeper_shell op='custom' \
-                      command='git log -1'."
+                Some "Split into two calls: keeper_bash cmd='git status' \
+                      then keeper_bash cmd='git log -1'."
             ; tool_suggestion = None }
   | "redirect" ->
       Some { Exec_core.rule_id = "readonly_redirect_blocked"

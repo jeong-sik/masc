@@ -306,6 +306,33 @@ let test_registry_drop_keeper_unknown_name_ok () =
   H.drop_keeper_accumulator unique;
   print_endline "  registry_drop_keeper_unknown_name_ok: OK"
 
+let test_registry_drop_then_recreate_yields_fresh_accumulator () =
+  with_env_set "MASC_TOOL_EMISSION" "1" (fun () ->
+      let name =
+        Printf.sprintf "k4c-test-recreate-%d" (Unix.getpid ())
+      in
+      H.drop_keeper_accumulator name;
+      let acc1 = H.accumulator_for_keeper name in
+      (* Capture one item into acc1. *)
+      let hook = H.make_post_tool_use_hook acc1 in
+      let _ : THooks.hook_decision =
+        hook
+          (make_post_tool_use
+             ~content:
+               {|{"__multimodal_kind":"code","__multimodal_id":"01900000-0000-7000-8000-0000000000c1"}|})
+      in
+      assert_eq_int ~label:"acc1_before_drop" 1
+        (H.accumulator_size acc1);
+      (* Teardown — simulates [keeper_down] removing the keeper. *)
+      H.drop_keeper_accumulator name;
+      (* Recreate — simulates a re-spawned keeper with the same name. *)
+      let acc2 = H.accumulator_for_keeper name in
+      assert (not (acc1 == acc2));
+      assert_eq_int ~label:"acc2_starts_empty" 0
+        (H.accumulator_size acc2);
+      H.drop_keeper_accumulator name);
+  print_endline "  registry_drop_then_recreate_yields_fresh: OK"
+
 let () =
   print_endline "=== Keeper_tool_emission_hook ===";
   test_disabled_no_op ();
@@ -321,4 +348,5 @@ let () =
   test_registry_isolates_two_keepers ();
   test_registry_registered_names_sorted ();
   test_registry_drop_keeper_unknown_name_ok ();
-  print_endline "=== Keeper_tool_emission_hook: 13/13 OK ==="
+  test_registry_drop_then_recreate_yields_fresh_accumulator ();
+  print_endline "=== Keeper_tool_emission_hook: 14/14 OK ==="

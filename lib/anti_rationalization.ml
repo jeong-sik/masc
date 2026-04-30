@@ -397,13 +397,15 @@ let parse_verdict (text : string) : (verdict, string) result =
 (* ================================================================ *)
 
 (** Default evaluator cascade name. Override via [~evaluator_cascade]
-    to force cross-model evaluation (e.g. "cross_verifier" configured
-    to use a different provider than the generator's cascade).
+    to force a specific evaluator profile. Without an override, the
+    concrete profile comes from [routes.cross_verifier].
 
     Cross-model evaluation is more effective than same-model different-role
     because different model architectures have different blindspots.
     See: Anthropic "Harness Design" blog analysis. *)
-let default_evaluator_cascade = "cross_verifier"
+let default_evaluator_cascade =
+  Keeper_cascade_profile.cascade_name_for_use
+    Keeper_cascade_profile.Cross_verifier
 
 (* ================================================================ *)
 (* Core: review                                                     *)
@@ -412,8 +414,9 @@ let default_evaluator_cascade = "cross_verifier"
 (** Review completion notes for avoidance patterns and substance.
 
     @param evaluator_cascade Override the cascade used for LLM verification.
-      Default: ["verifier"]. Set to a cascade that uses a different model
-      family than the generator for genuine cross-model evaluation.
+      Default: the profile selected by [routes.cross_verifier]. Set to a
+      cascade that uses a different model family than the generator for genuine
+      cross-model evaluation.
     @param generator_cascade Optional name of the cascade the generator used.
       Logged for auditing model separation. Not used in verification logic. *)
 (* ================================================================ *)

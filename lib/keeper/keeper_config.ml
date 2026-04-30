@@ -2,25 +2,34 @@
 
 open Tool_args
 
-(** Default cascade name for keeper turns. SSOT — all keeper code must
-    reference this constant instead of using the string literal. *)
-let default_cascade_name = Keeper_cascade_profile.default_name
+(** Default cascade name for keeper turns. Resolved through [routes.keeper_turn]
+    so the concrete profile remains configuration-owned. *)
+let default_cascade_name =
+  Keeper_cascade_profile.cascade_name_for_use
+    Keeper_cascade_profile.Keeper_turn
 
 
 (** Cascade name for recovery turns when keeper is in Failing phase.
-    Maps to local_recovery_* entries in cascade.json. *)
-let local_recovery_cascade_name = "local_recovery"
+    Two-profile deployments no longer maintain a separate local recovery lane;
+    recovery reuses the canonical keeper cascade. *)
+let local_recovery_cascade_name =
+  Keeper_cascade_profile.cascade_name_for_use
+    Keeper_cascade_profile.Phase_recovery
 
-(** Cascade name for buffer operations (compacting, handing off).
-    Maps to local_only_* entries in cascade.json. *)
-let local_only_cascade_name = "local_only"
+(** Cascade name for buffer operations (compacting, handing off). *)
+let local_only_cascade_name =
+  Keeper_cascade_profile.cascade_name_for_use
+    Keeper_cascade_profile.Phase_buffer
 
 let phase_routing_cascade_names =
   [ local_only_cascade_name; local_recovery_cascade_name ]
+  |> List.sort_uniq String.compare
 ;;
 
 (** Cascade name for turns that must use a tool-capable provider lane. *)
-let tool_use_strict_cascade_name = "tool_use_strict"
+let tool_use_strict_cascade_name =
+  Keeper_cascade_profile.cascade_name_for_use
+    Keeper_cascade_profile.Tool_required
 
 (** Minimum context window (tokens) for any keeper turn.
     64k-class local models are valid keeper backends; do not clamp them upward
@@ -676,11 +685,17 @@ let keeper_llm_rerank_enabled () : bool =
   Runtime_params.get keeper_llm_rerank_enabled_rp
 
 (** Named cascade profile for the LLM reranker.
-    Env: [MASC_KEEPER_LLM_RERANK_CASCADE]. Default: "tool_rerank". *)
+    Env: [MASC_KEEPER_LLM_RERANK_CASCADE]. Default: [routes.llm_rerank]. *)
 let keeper_llm_rerank_cascade () : string =
   match Env_config_core.raw_value_opt "MASC_KEEPER_LLM_RERANK_CASCADE" with
-  | Some v when String.trim v <> "" -> String.trim v
-  | _ -> "tool_rerank"
+  | Some v when String.trim v <> "" -> (
+      let trimmed = String.trim v in
+      match Keeper_cascade_profile.logical_use_of_string_opt trimmed with
+      | Some use -> Keeper_cascade_profile.cascade_name_for_use use
+      | None -> trimmed)
+  | _ ->
+      Keeper_cascade_profile.cascade_name_for_use
+        Keeper_cascade_profile.Tool_rerank_use
 
 (* ================================================================ *)
 (* Rule engine thresholds                                           *)

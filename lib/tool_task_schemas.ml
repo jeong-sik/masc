@@ -236,7 +236,7 @@ Tasks created through masc_add_task normally route action='done' into awaiting_v
         ]);
         ("evaluator_cascade", `Assoc [
           ("type", `String "string");
-          ("description", `String "Optional evaluator cascade override for anti-rationalization review. Default: cross_verifier");
+          ("description", `String "Optional evaluator cascade override for anti-rationalization review. Default comes from routes.cross_verifier");
         ]);
         ("reason", `Assoc [
           ("type", `String "string");

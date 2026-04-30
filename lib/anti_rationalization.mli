@@ -62,8 +62,8 @@ type review_result = {
 (** Review a task completion claim with optional cross-model separation.
 
     @param evaluator_cascade Override cascade for LLM verification.
-      Default: ["cross_verifier"]. Use a different cascade name to ensure
-      cross-model evaluation (e.g. ["cross_verifier"]).
+      Default: the profile selected by [routes.cross_verifier]. Use a
+      different cascade name to force a specific evaluator profile.
     @param generator_cascade Optional name of the generator's cascade.
       Logged for auditing; not used in verification logic. *)
 val review :

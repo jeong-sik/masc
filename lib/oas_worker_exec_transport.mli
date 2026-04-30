@@ -218,8 +218,8 @@ module Kimi_cli_transport_local : sig
   val default_config : config
 
   (** Build the kimi_cli argv from a config + per-call request, deciding
-      whether the prompt goes via [-p] or stdin (see
-      {!prompt_exceeds_argv_budget}). *)
+      whether the prompt goes via [-p] or stdin. Non-ASCII or large prompts
+      use stdin to avoid Kimi CLI macOS setproctitle UTF-8 decode crashes. *)
   val build_args :
     config:config ->
     req_config:Llm_provider.Provider_config.t ->

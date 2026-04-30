@@ -476,9 +476,8 @@ let runtime_required_profiles ~config_path =
     | Error _ -> []
   in
   List.sort_uniq String.compare
-    (Keeper_cascade_profile.known_cascades
-    @ keepers_from_catalog
-    @ [ "governance_judge"; "operator_judge" ])
+    (keepers_from_catalog
+     @ Cascade_routes.configured_route_targets ~config_path ())
 
 let runtime_required_profile_names ?config_path () =
   let config_path =
@@ -490,9 +489,7 @@ let runtime_required_profile_names ?config_path () =
         | None -> "")
   in
   if String.equal config_path "" then
-    Keeper_cascade_profile.known_cascades
-    @ [ "governance_judge"; "operator_judge" ]
-    |> List.sort_uniq String.compare
+    Keeper_cascade_profile.known_cascades |> List.sort_uniq String.compare
   else
     runtime_required_profiles ~config_path
 
@@ -520,6 +517,26 @@ let validate_path_result ~config_path =
              ~profiles:[])
     | Ok json ->
         let profiles = discover_profiles json in
+        let required_default_profile =
+          Cascade_routes.cascade_name_for_use
+            ~config_path
+            Cascade_routes.Keeper_turn
+        in
+        let route_target_errors =
+          Cascade_routes.configured_route_targets ~config_path ()
+          |> List.filter_map (fun target ->
+                 if List.mem target profiles then None
+                 else
+                   Some
+                     (Printf.sprintf
+                        "cascade route targets missing profile %S"
+                        target))
+        in
+        let route_key_errors =
+          Cascade_routes.configured_unknown_route_keys ~config_path ()
+          |> List.map (fun key ->
+                 Printf.sprintf "unknown cascade route key %S" key)
+        in
         let top_errors =
           let base =
             if profiles = [] then
@@ -527,15 +544,15 @@ let validate_path_result ~config_path =
             else
               []
           in
-          if List.mem Keeper_config.default_cascade_name profiles then
-            base
+          let base = base @ route_key_errors @ route_target_errors in
+          if List.mem required_default_profile profiles then base
           else
             base
             @
             [
               Printf.sprintf
                 "required default profile %S is missing"
-                Keeper_config.default_cascade_name;
+                required_default_profile;
             ]
         in
         let built_profiles, statically_rejected_profiles =
@@ -579,7 +596,7 @@ let validate_path_result ~config_path =
           let default_profile_validated =
             List.exists
               (fun (profile : profile_snapshot) ->
-                String.equal profile.name Keeper_config.default_cascade_name)
+                String.equal profile.name required_default_profile)
               profile_snapshots
           in
           let snapshot =
@@ -603,7 +620,7 @@ let validate_path_result ~config_path =
                       [
                         Printf.sprintf
                           "required default profile %S failed validation"
-                          Keeper_config.default_cascade_name;
+                          required_default_profile;
                       ])
                    @
                    [
@@ -746,10 +763,16 @@ let normalize_declared_name raw =
   Keeper_cascade_profile.normalize_declared_name raw
 
 let lookup_active_profile ?sw ?net ?clock raw_name =
-  let normalized = normalize_declared_name raw_name in
   match require_snapshot ?sw ?net ?clock () with
   | Error _ as e -> e
   | Ok snapshot -> (
+      let trimmed = String.trim raw_name in
+      let normalized =
+        if (not (String.equal trimmed ""))
+           && Option.is_some (profile_lookup snapshot.profiles trimmed)
+        then trimmed
+        else normalize_declared_name raw_name
+      in
       match profile_lookup snapshot.profiles normalized with
       | Some profile -> Ok (snapshot, normalized, profile)
       | None ->

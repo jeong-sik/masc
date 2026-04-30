@@ -2,8 +2,8 @@ open Alcotest
 
 module Profile = Masc_mcp.Keeper_cascade_profile
 
-(* Only the SSOT variants round-trip through [of_string_opt] -> [to_string].
-   Legacy aliases collapse to Big_three; phase-routing names return None. *)
+(* Only concrete profile variants round-trip through [of_string_opt] ->
+   [to_string]. Legacy aliases are logical route names, not profile names. *)
 let variant_names = [ "big_three"; "tool_rerank" ]
 
 let write_file path contents =
@@ -38,7 +38,7 @@ let test_known_cascades_covers_variants () =
       check bool ("known_cascades contains " ^ name) true listed)
     variant_names
 
-let test_legacy_aliases_collapse_to_big_three () =
+let test_legacy_aliases_follow_keeper_fallback_without_catalog () =
   let aliases = [ "oas-keeper_unified"; "coding_first"; "oas-coding_first";
                   "keeper_turn"; "keeper_reply"; "default"; "keeper_unified";
                   "sangsu"; "local_mlx_vlm_qwen36";
@@ -48,28 +48,28 @@ let test_legacy_aliases_collapse_to_big_three () =
   List.iter
     (fun raw ->
       let canon = Profile.canonicalize_with_catalog ~catalog:[] raw in
-      check string ("alias " ^ raw ^ " -> big_three") "big_three" canon)
+      check string ("alias " ^ raw ^ " -> fallback") "big_three" canon)
     aliases
 
-let test_catalog_routed_names_return_none () =
+let test_logical_route_names_are_not_profile_variants () =
   check (option (testable (fun fmt _ -> Format.fprintf fmt "<profile>") (=)))
-    "keeper_unified returns None"
+    "keeper_unified is not a built-in profile"
     None
     (Profile.of_string_opt "keeper_unified");
   check (option (testable (fun fmt _ -> Format.fprintf fmt "<profile>") (=)))
-    "tool_use_strict returns None"
+    "tool_use_strict is not a built-in profile"
     None
     (Profile.of_string_opt "tool_use_strict");
   check (option (testable (fun fmt _ -> Format.fprintf fmt "<profile>") (=)))
-    "resilient_breaker returns None"
+    "resilient_breaker is not a built-in profile"
     None
     (Profile.of_string_opt "resilient_breaker");
   check (option (testable (fun fmt _ -> Format.fprintf fmt "<profile>") (=)))
-    "local_only returns None"
+    "local_only is not a built-in profile"
     None
     (Profile.of_string_opt "local_only");
   check (option (testable (fun fmt _ -> Format.fprintf fmt "<profile>") (=)))
-    "local_recovery returns None"
+    "local_recovery is not a built-in profile"
     None
     (Profile.of_string_opt "local_recovery")
 
@@ -125,10 +125,10 @@ let test_catalog_names_follow_live_config () =
         "tool_use_strict"
         (Profile.canonicalize_with_catalog ~catalog "tool_use_strict");
       check string "dynamic live profile requires exact match"
-        "big_three"
+        "custom_live"
         (Profile.canonicalize_with_catalog ~catalog "Custom_Live");
       check string "unknown live profile still falls back"
-        "big_three"
+        "custom_live"
         (Profile.canonicalize_with_catalog ~catalog "missing_profile"))
 
 let test_resolve_live_with_catalog_requires_active_membership () =
@@ -152,15 +152,75 @@ let test_resolve_live_with_catalog_requires_active_membership () =
       check string "tool_use_strict catalog profile survives live resolution"
         "tool_use_strict"
         (Profile.resolve_live_with_catalog ~catalog "tool_use_strict");
-      check string "legacy alias resolves through active default"
-        "big_three"
+      check string "legacy alias resolves through active catalog fallback"
+        "custom_live"
         (Profile.resolve_live_with_catalog ~catalog "oas-keeper_unified");
       check string "inactive built-in profile falls back to default"
-        "big_three"
+        "custom_live"
         (Profile.resolve_live_with_catalog ~catalog "vendor_mix_balanced");
       check string "unknown profile falls back to default"
-        "big_three"
+        "custom_live"
         (Profile.resolve_live_with_catalog ~catalog "missing_profile"))
+
+let test_routes_resolve_logical_uses_to_configured_profiles () =
+  with_temp_config
+    {|
+      {
+        "big_three_models": ["codex_cli:auto"],
+        "custom_live_models": ["gemini_cli:auto"],
+        "tool_rerank_models": ["codex_cli:auto"],
+        "tool_rerank_keeper_assignable": false,
+        "routes": {
+          "governance_judge": "custom_live",
+          "operator_judge": "big_three",
+          "llm_rerank": "tool_rerank"
+        }
+      }
+    |}
+    (fun path ->
+      check string "governance route target"
+        "custom_live"
+        (Profile.cascade_name_for_use ~config_path:path Profile.Governance_judge);
+      check string "operator route target"
+        "big_three"
+        (Profile.cascade_name_for_use ~config_path:path Profile.Operator_judge);
+      check string "tool rerank route target"
+        "tool_rerank"
+        (Profile.cascade_name_for_use ~config_path:path Profile.Tool_rerank_use);
+      check (list string) "route targets are discovered"
+        [ "big_three"; "custom_live"; "tool_rerank" ]
+        (Profile.configured_route_targets ~config_path:path ()))
+
+let test_missing_route_uses_catalog_fallback_not_logical_name () =
+  with_temp_config
+    {|
+      {
+        "alpha_models": ["gemini_cli:auto"],
+        "tool_rerank_models": ["codex_cli:auto"],
+        "tool_rerank_keeper_assignable": false
+      }
+    |}
+    (fun path ->
+      check string "missing governance route uses keeper-assignable profile"
+        "alpha"
+        (Profile.cascade_name_for_use ~config_path:path Profile.Governance_judge);
+      check string "missing rerank route still prefers tool_rerank when present"
+        "tool_rerank"
+        (Profile.cascade_name_for_use ~config_path:path Profile.Tool_rerank_use))
+
+let test_missing_system_route_prefers_system_only_catalog_profile () =
+  with_temp_config
+    {|
+      {
+        "alpha_models": ["gemini_cli:auto"],
+        "short_scoring_models": ["codex_cli:auto"],
+        "short_scoring_keeper_assignable": false
+      }
+    |}
+    (fun path ->
+      check string "system route uses system-only catalog profile"
+        "short_scoring"
+        (Profile.cascade_name_for_use ~config_path:path Profile.Tool_rerank_use))
 
 let test_catalog_read_failures_do_not_fallback_to_hardcoded_names () =
   let missing = Filename.concat (Filename.get_temp_dir_name ()) "missing-cascade.json" in
@@ -179,13 +239,20 @@ let () =
     [ ( "ssot",
         [ test_case "active names round-trip" `Quick test_round_trip;
           test_case "known_cascades covers active" `Quick test_known_cascades_covers_variants;
-          test_case "legacy aliases collapse" `Quick test_legacy_aliases_collapse_to_big_three;
-          test_case "catalog-routed names return None" `Quick
-            test_catalog_routed_names_return_none;
+          test_case "legacy aliases follow fallback" `Quick
+            test_legacy_aliases_follow_keeper_fallback_without_catalog;
+          test_case "logical route names are not profile variants" `Quick
+            test_logical_route_names_are_not_profile_variants;
           test_case "unknown falls back to default" `Quick test_unknown_falls_back_to_default;
           test_case "catalog_names follow live config" `Quick test_catalog_names_follow_live_config;
           test_case "resolve_live_with_catalog requires active membership" `Quick
             test_resolve_live_with_catalog_requires_active_membership;
+          test_case "routes resolve logical uses" `Quick
+            test_routes_resolve_logical_uses_to_configured_profiles;
+          test_case "missing route uses catalog fallback" `Quick
+            test_missing_route_uses_catalog_fallback_not_logical_name;
+          test_case "missing system route uses system-only fallback" `Quick
+            test_missing_system_route_prefers_system_only_catalog_profile;
           test_case "catalog read failures stay empty" `Quick
             test_catalog_read_failures_do_not_fallback_to_hardcoded_names ] )
     ]

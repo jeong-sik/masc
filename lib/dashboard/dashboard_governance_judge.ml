@@ -482,6 +482,10 @@ let compute_judgments
     ~(masc_tools : Types.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
     ~build_facts =
+  let cascade_name =
+    Keeper_cascade_profile.cascade_name_for_use
+      Keeper_cascade_profile.Governance_judge
+  in
   match
     (* build_facts() is moved inside the bridge so a deadlock in
        get_agents_status is bounded by the resolved timeout rather
@@ -493,7 +497,7 @@ let compute_judgments
       ~caller:Env_config_oas_bridge.Governance_judge (fun () ->
       let factual_json = build_facts () in
       let prompt = prompt_for_facts factual_json in
-      Oas_worker.run_named_with_masc_tools ~cascade_name:"governance_judge"
+      Oas_worker.run_named_with_masc_tools ~cascade_name
         ~goal:prompt ~masc_tools ~dispatch ~max_turns:3
         ~approval:Approval_callbacks.auto_approve
         ()
@@ -597,10 +601,14 @@ let append_judgments base_path judgments =
   List.iter (fun json -> Dated_jsonl.append store json) judgments
 
 let should_backoff ~sw ~net =
+  let cascade_name =
+    Keeper_cascade_profile.cascade_name_for_use
+      Keeper_cascade_profile.Governance_judge
+  in
   try
     let capacity =
       Cascade_config.local_capacity_for_selections ~sw ~net
-        [ "governance_judge" ]
+        [ cascade_name ]
     in
     capacity.all_discovered && capacity.endpoints_found > 0
     && capacity.process_available <= 0

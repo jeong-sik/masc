@@ -7,16 +7,19 @@
 
 (** {1 Core Constants} *)
 
-(** Default cascade name for keeper turns.  All keeper code must reference
-    this constant instead of using the string literal.
+(** Default cascade name for keeper turns. Resolved from [routes.keeper_turn];
+    all keeper code must reference this constant instead of using a profile
+    string literal.
     @since v2.128.0 *)
 val default_cascade_name : string
 
-(** Cascade name for recovery turns (Failing phase).
+(** Cascade name for recovery turns (Failing phase). In the two-profile
+    catalog this resolves to the canonical keeper cascade.
     @since Core Triad *)
 val local_recovery_cascade_name : string
 
-(** Cascade name for buffer operations (Compacting, HandingOff).
+(** Cascade name for buffer operations (Compacting, HandingOff). In the
+    two-profile catalog this resolves to the canonical keeper cascade.
     @since Core Triad *)
 val local_only_cascade_name : string
 
@@ -203,6 +206,8 @@ val keeper_retry_max_tools_per_turn : unit -> int
 val keeper_board_event_limit : unit -> int
 val keeper_llm_rerank_enabled : unit -> bool
 val keeper_llm_rerank_cascade : unit -> string
+(** Reranker cascade profile. Defaults through [routes.llm_rerank]; env
+    overrides may be either a concrete profile name or a logical route key. *)
 
 val keeper_rule_reflect_repetition_threshold : unit -> float
 val keeper_rule_plan_goal_alignment_threshold : unit -> float

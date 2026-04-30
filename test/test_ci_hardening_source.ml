@@ -918,15 +918,15 @@ let test_oas_capacity_restore_contracts () =
   check bool "operator judge backoff uses OAS local capacity" true
     (file_contains_pattern "lib/dashboard/dashboard_operator_judge.ml"
        "local_capacity_for_selections ~sw ~net");
-  check bool "operator judge selection is explicit" true
+  check bool "operator judge selection is routed through cascade config" true
     (file_contains_pattern "lib/dashboard/dashboard_operator_judge.ml"
-       {|[ "operator_judge" ]|});
+       "Keeper_cascade_profile.Operator_judge");
   check bool "governance judge backoff uses OAS local capacity" true
     (file_contains_pattern "lib/dashboard/dashboard_governance_judge.ml"
        "local_capacity_for_selections ~sw ~net");
-  check bool "governance judge selection is explicit" true
+  check bool "governance judge selection is routed through cascade config" true
     (file_contains_pattern "lib/dashboard/dashboard_governance_judge.ml"
-       {|[ "governance_judge" ]|});
+       "Keeper_cascade_profile.Governance_judge");
   check bool "autoresearch background gating restores OAS capacity query" true
     (file_contains_pattern "lib/autoresearch_codegen.ml"
        "local_capacity_for_selections ~sw ~net");

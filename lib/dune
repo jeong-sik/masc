@@ -42,7 +42,7 @@
    cascade_client_capacity_history
    cascade_catalog_validator
    cascade_config
-   cascade_config_loader
+   cascade_config_loader cascade_routes
    cascade_toml_materializer
    cascade_fsm
    cascade_health_filter

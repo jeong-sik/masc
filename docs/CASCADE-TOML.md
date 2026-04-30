@@ -16,9 +16,12 @@ runtime materializes sibling `cascade.json` before loading.
 The repo seed should stay intentionally small.
 
 - Keep the checked-in keeper-assignable set explicit and boring:
-  `big_three` for normal bootstrap and `ollama_only` for local-only keepers.
-- Keep system-only plumbing profiles checked in only when runtime routing needs
-  them: `default`, `governance_judge`, `operator_judge`, `local_only`, `local_recovery`, `tool_rerank`
+  `big_three` for keeper/general turns.
+- Keep system-only lanes explicit and minimal: `tool_rerank` for short
+  rerank/scoring calls.
+- Put logical usages such as `governance_judge`, `operator_judge`,
+  `local_recovery`, `tool_use_strict`, `cross_verifier`, and `autoresearch`
+  under `[routes]`. They are route keys, not profile names.
 - Put personal experiments, vendor mixes, and machine-specific profiles in
   live config under `$MASC_BASE_PATH/.masc/config/cascade.toml`, not in the
   repo seed
@@ -28,19 +31,28 @@ graveyard of personal cascade variants.
 
 ## Seed Profiles
 
-- `default`: fallback for unknown/missing cascade names. Keep it boring and
-  close to `big_three`.
-- `big_three`: canonical keeper bootstrap profile for checked-in keepers.
-- `governance_judge`: system-only dashboard governance judge profile.
-- `operator_judge`: system-only dashboard operator judge profile.
-- `local_only`: system-only local lane used by phase routing during compacting
-  and handoff paths.
-- `local_recovery`: system-only local recovery lane used after provider/cloud
-  failures.
-- `ollama_only`: keeper-assignable local-only profile for keepers that should
-  not enter cloud/provider rotation.
-- `tool_rerank`: system-only short-output override. It has no own model list
-  and reuses the default cascade models.
+- `big_three`: canonical keeper/workflow profile.
+- `tool_rerank`: system-only short-output profile.
+
+## Routes
+
+`[routes]` maps logical call-site names to concrete profiles:
+
+```toml
+[routes]
+governance_judge = "big_three"
+operator_judge = "big_three"
+cross_verifier = "big_three"
+llm_rerank = "tool_rerank"
+```
+
+Runtime code must use the logical route key and let config choose the concrete
+profile. Do not add a new checked-in profile just because one call site needs a
+name.
+
+The runtime validates `[routes]` against the code route registry. Unknown route
+keys are rejected as config/code drift, and route targets must name an active
+profile in the same catalog.
 
 Use `keeper_assignable = false` for profiles that must exist in the catalog but
 must not appear as normal keeper choices.
@@ -69,8 +81,8 @@ dune exec --root . ./test/test_keeper_cascade_profile.exe
 Add a checked-in profile only when at least one of these is true:
 
 - a checked-in keeper depends on it
-- phase-routing/runtime recovery depends on it
-- operators need the same boring default everywhere
+- the profile has materially different model/parameter behavior from the two
+  defaults
 
 Otherwise, put it in live config or a private/local cookbook-derived setup.
 

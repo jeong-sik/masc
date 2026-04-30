@@ -1,15 +1,13 @@
-(** Canonical keeper cascade profile names and legacy alias normalization.
+(** Canonical keeper cascade profile names and config-driven route lookup.
 
     Keepers historically used stringly-typed cascade names in TOML, runtime
     metadata, telemetry labels, and cascade.json lookups. This module is the
-    SSOT for the active keeper cascade profile and the legacy aliases that must
-    continue to resolve to it.
+    SSOT for the small built-in profile vocabulary and the logical route keys
+    that resolve through [cascade.json]/[cascade.toml].
 
     One keeper-assignable bootstrap profile (Big_three) and one system-only
-    profile (Tool_rerank).
-    Catalog-routed names ("keeper_unified", "tool_use_strict",
-    "resilient_breaker", "local_only", "local_recovery") are NOT variants —
-    they pass through [canonicalize_with_catalog] as catalog names.
+    profile (Tool_rerank). Historical routing, judge, evaluator, and local names
+    are logical uses, not live catalog profiles.
 
     @since 0.9.5 *)
 
@@ -34,10 +32,9 @@ val to_string : t -> string
 (** Canonical lowercase-snake-case name. *)
 
 val of_string_opt : string -> t option
-(** Parse a raw cascade name into the variant. Handles legacy aliases
-    by collapsing them to [Big_three]. Returns [None] for unknown names
-    and catalog-routed names ("keeper_unified", "tool_use_strict",
-    "resilient_breaker", "local_only", "local_recovery"). *)
+(** Parse a raw cascade profile name into the built-in variant. Logical route
+    names and legacy aliases return [None]; use {!cascade_name_for_use} for
+    call sites that mean "governance judge", "operator judge", etc. *)
 
 val canonical : string -> t
 (** [canonical raw] = [of_string_opt raw |> Option.value ~default]. *)
@@ -45,6 +42,48 @@ val canonical : string -> t
 val default : t
 val default_name : string
 (** [default_name = to_string default = "big_three"]. *)
+
+type logical_use =
+  | Keeper_turn
+  | Phase_recovery
+  | Phase_buffer
+  | Tool_required
+  | Governance_judge
+  | Operator_judge
+  | Cross_verifier
+  | Verifier
+  | Autoresearch
+  | Adversarial_reviewer
+  | Auto_responder
+  | Routing
+  | Openai_compat
+  | Persona_generation
+  | Provider_benchmark
+  | Tool_rerank_use
+
+val logical_use_key : logical_use -> string
+(** Stable config key under [routes]. *)
+
+val logical_use_of_string_opt : string -> logical_use option
+(** Parse a logical route key or historical alias. Concrete profile names such
+    as [big_three] and [tool_rerank] are not logical route keys. *)
+
+val cascade_name_for_use : ?config_path:string -> logical_use -> string
+(** Runtime cascade profile for a logical call site.
+
+    Resolution order:
+    1. [routes.<logical_use_key>] from the active cascade config, when it points
+       at a live catalog profile.
+    2. A catalog-derived fallback based on route policy: keeper work prefers a
+       keeper-assignable profile; system work prefers a system-only profile.
+    3. The two-profile seed names only when no catalog is available.
+
+    This is the boundary for code that used to hardcode profile names such as
+    ["governance_judge"], ["operator_judge"], ["local_recovery"], or
+    ["cross_verifier"]. *)
+
+val configured_route_targets : ?config_path:string -> unit -> string list
+(** Unique non-empty profile names referenced from [routes]. *)
 
 val known_cascades : string list
 (** [known_cascades = List.map to_string all]. Provided for consumers

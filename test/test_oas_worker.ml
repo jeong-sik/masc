@@ -2439,6 +2439,19 @@ let test_kimi_cli_build_args_uses_stdin_for_large_prompt () =
   Alcotest.(check bool) "large prompt does not use -p" false
     (List.mem "-p" argv)
 
+let test_kimi_cli_build_args_uses_stdin_for_non_ascii_prompt () =
+  let prompt = "한글 prompt" in
+  let argv =
+    Oas_worker_exec.Kimi_cli_transport_local.build_args
+      ~config:Oas_worker_exec.Kimi_cli_transport_local.default_config
+      ~req_config:(make_kimi_cli_provider_cfg ())
+      ~mcp_config_json:[] ~prompt
+  in
+  Alcotest.(check bool) "non-ASCII prompt is omitted from argv" false
+    (List.mem prompt argv);
+  Alcotest.(check bool) "non-ASCII prompt does not use -p" false
+    (List.mem "-p" argv)
+
 let test_kimi_cli_model_for_provider_keeps_transport_default_on_auto () =
   let provider_cfg = make_kimi_cli_provider_cfg () in
   Alcotest.(check (option string)) "auto uses transport default"
@@ -3981,6 +3994,8 @@ let () =
         test_kimi_cli_build_args_include_runtime_mcp_config;
       Alcotest.test_case "kimi large prompt uses stdin, not argv" `Quick
         test_kimi_cli_build_args_uses_stdin_for_large_prompt;
+      Alcotest.test_case "kimi non-ASCII prompt uses stdin, not argv" `Quick
+        test_kimi_cli_build_args_uses_stdin_for_non_ascii_prompt;
       Alcotest.test_case "kimi auto model keeps transport default" `Quick
         test_kimi_cli_model_for_provider_keeps_transport_default_on_auto;
       Alcotest.test_case "kimi explicit model is preserved" `Quick

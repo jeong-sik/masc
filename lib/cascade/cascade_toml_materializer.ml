@@ -247,6 +247,19 @@ let api_key_env_json ~path value =
       in
       loop [] fields
 
+let routes_json ~path value =
+  match table_fields ~path value with
+  | Error _ as err -> err
+  | Ok fields ->
+      let rec loop acc = function
+        | [] -> Ok (`Assoc (List.rev acc))
+        | (key, field_value) :: rest -> (
+            match trimmed_nonempty_string ~path:(Printf.sprintf "%s.%s" path key) field_value with
+            | Ok target -> loop ((key, `String target) :: acc) rest
+            | Error _ as err -> err)
+      in
+      loop [] fields
+
 let profile_field_json ~profile_name ~field_name field_value =
   let profile_path = profile_name ^ "." ^ field_name in
   match field_name with
@@ -339,6 +352,10 @@ let render_toml_to_yojson toml =
               match string_value ~path:"comment" value with
               | Ok text -> loop ([ ("_comment", `String text) ] :: acc) rest
               | Error _ as err -> err
+            else if String.equal key "routes" then
+              match routes_json ~path:"routes" value with
+              | Ok routes -> loop ([ ("routes", routes) ] :: acc) rest
+              | Error _ as err -> err
             else (
               match profile_table_json_fields ~profile_name:key value with
               | Ok rendered -> loop (rendered :: acc) rest
@@ -398,10 +415,11 @@ let toml_section_names_result ~config_path =
                 let is_meta_key key =
                   String.length key > 0 && key.[0] = '_'
                 in
+                let is_reserved_table key = String.equal key "routes" in
                 let names =
                   fields
                   |> List.filter_map (fun (key, value) ->
-                         if is_meta_key key then None
+                         if is_meta_key key || is_reserved_table key then None
                          else
                            match value with
                            | Otoml.TomlTable _ | Otoml.TomlInlineTable _ ->

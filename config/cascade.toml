@@ -1,85 +1,45 @@
-comment = "Checked-in seed for cascade authoring. Keep repo defaults boring: bootstrap keeper profile big_three, local keeper profile ollama_only, system-only fallback/judge/phase-routing profiles (default, governance_judge, operator_judge, local_only, local_recovery, tool_rerank), and move personal/live experiments to $MASC_BASE_PATH/.masc/config/cascade.toml."
+comment = "Checked-in seed for cascade authoring. Repo defaults expose exactly two profiles: big_three for keeper/workflow calls and tool_rerank for short rerank calls. Logical usage names are configured under [routes] instead of being profile names."
 
-[default]
-comment = "System-only fallback profile for unknown/missing cascade names. Mirrors big_three without Claude CLI so automatic recovery does not pull Claude by default. glm:auto + gemini:auto are Direct API fallbacks that pass the tool-use gate via inline tools (Path B) — CLI providers (codex_cli, gemini_cli) cannot carry keeper-bound runtime MCP HTTP headers."
-models = [
-  { model = "codex_cli:auto", weight = 1 },
-  { model = "gemini_cli:auto", weight = 1 },
-  { model = "codex_cli:gpt-5.3-codex-spark", weight = 1 },
-  { model = "glm:auto", weight = 1 },
-  { model = "gemini:auto", weight = 1 },
-]
-temperature = 0.2
-max_tokens = 16384
-keeper_assignable = false
+[routes]
+keeper_turn = "big_three"
+phase_recovery = "big_three"
+phase_buffer = "big_three"
+tool_required = "big_three"
+governance_judge = "big_three"
+operator_judge = "big_three"
+cross_verifier = "big_three"
+verifier = "big_three"
+autoresearch = "big_three"
+adversarial_reviewer = "big_three"
+auto_responder = "big_three"
+routing = "big_three"
+openai_compat = "big_three"
+persona_generation = "big_three"
+provider_benchmark = "big_three"
+llm_rerank = "tool_rerank"
 
 [big_three]
-comment = "Canonical keeper bootstrap profile exposed by the checked-in seed. Automatic keepers stay off Claude CLI unless an operator opts in via live config. glm:auto + gemini:auto are Direct API fallbacks that pass the tool-use gate via inline tools (Path B)."
+comment = "Canonical keeper/workflow profile. Keep operator-chosen providers here; code must route logical usages through [routes] instead of hardcoding extra profile names."
 models = [
-  { model = "codex_cli:auto", weight = 1 },
-  { model = "gemini_cli:auto", weight = 1 },
-  { model = "codex_cli:gpt-5.3-codex-spark", weight = 1 },
-  { model = "glm:auto", weight = 1 },
-  { model = "gemini:auto", weight = 1 },
+  "codex_cli:gpt-5.3-codex-spark",
+  "gemini_cli:auto",
+  "kimi_cli:kimi-for-coding",
+  "glm-coding:auto",
+  "claude_code:auto",
 ]
 temperature = 0.2
 max_tokens = 16384
-
-[governance_judge]
-comment = "System-only dashboard governance judge profile. Explicitly defined so background judge loops do not inherit fallback providers such as Claude CLI. Gemini listed first because [codex_cli:auto] internally rotates 5 models (30s timeout each = 150s wasted wall-clock when codex auth is broken); Gemini-first attempts the cheap success path first while codex remains a fallback that auto-rejoins on recovery (#10554 disabled codex_cli for 4 seed cascades; this profile keeps codex as fallback rather than removing it). glm:auto + gemini:auto are Direct API fallbacks that pass the tool-use gate via inline tools (Path B)."
-models = [
-  { model = "gemini_cli:auto", weight = 1 },
-  { model = "codex_cli:auto", weight = 1 },
-  { model = "glm:auto", weight = 1 },
-  { model = "gemini:auto", weight = 1 },
-]
-temperature = 0.2
-max_tokens = 16384
-keeper_assignable = false
-
-[operator_judge]
-comment = "System-only dashboard operator judge profile. Mirrors governance_judge so background control loops stay off Claude CLI by default. Gemini-first ordering: see governance_judge for rationale. glm:auto + gemini:auto are Direct API fallbacks that pass the tool-use gate via inline tools (Path B)."
-models = [
-  { model = "gemini_cli:auto", weight = 1 },
-  { model = "codex_cli:auto", weight = 1 },
-  { model = "glm:auto", weight = 1 },
-  { model = "gemini:auto", weight = 1 },
-]
-temperature = 0.2
-max_tokens = 16384
-keeper_assignable = false
-
-[local_only]
-comment = "System-only local phase-routing profile for compacting/handoff paths."
-models = [
-  "ollama:auto",
-]
-temperature = 0.2
-max_tokens = 32768
-keeper_assignable = false
-
-[local_recovery]
-comment = "System-only local recovery profile used after cloud/provider failures."
-models = [
-  "ollama:auto",
-]
-temperature = 0.1
-max_tokens = 8192
-keeper_assignable = false
-
-[ollama_only]
-comment = "Keeper-assignable ollama-only profile for local-only agents. qwen3.6 27B supports 256k context locally; default to a 128k Ollama context while keeping output capped."
-models = [
-  "ollama:auto",
-]
-temperature = 0.7
-max_tokens = 8192
-keep_alive = "-1"
-num_ctx = 131072
 keeper_assignable = true
 
 [tool_rerank]
-comment = "inference-only override: tool_rerank has no _models of its own; callers reuse the default cascade's models and apply the short max_tokens here."
+comment = "System-only short-output profile for rerank/scoring calls."
+models = [
+  "codex_cli:gpt-5.3-codex-spark",
+  "gemini_cli:auto",
+  "kimi_cli:kimi-for-coding",
+  "glm-coding:auto",
+  "claude_code:auto",
+]
 temperature = 0.0
 max_tokens = 200
 keeper_assignable = false

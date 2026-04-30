@@ -687,7 +687,7 @@ let text_of_response (resp : Llm_provider.Types.api_response) : string =
     | _ -> None)
   |> fun lst -> List.fold_left (fun acc s -> acc ^ s) "" lst
 
-(* ── Model resolution: named -> "default" -> hardcoded ─── *)
+(* ── Model resolution: named -> routes.keeper_turn -> built-in defaults ─── *)
 
 type cascade_source =
   | Named
@@ -823,9 +823,14 @@ let resolve_model_strings_traced_with
           (fun (e : Cascade_config_loader.weighted_entry) -> e.model) ordered in
       (models, Named)
     else
+      let fallback_profile =
+        Cascade_routes.cascade_name_for_use
+          ~config_path:path
+          Cascade_routes.Keeper_turn
+      in
       let fallback_weighted =
         Cascade_config_loader.load_profile_weighted
-          ~config_path:path ~name:"default" in
+          ~config_path:path ~name:fallback_profile in
       if fallback_weighted <> [] then
         let ordered = order_weighted_entries ~rand_int fallback_weighted in
         let models = List.map
@@ -982,9 +987,14 @@ let resolve_model_strings_with_trace ?config_path ~name ~defaults () =
       let candidates = List.map candidate_info_of_weighted ordered in
       (models, { candidates; source = Named })
     else
+      let fallback_profile =
+        Cascade_routes.cascade_name_for_use
+          ~config_path:path
+          Cascade_routes.Keeper_turn
+      in
       let fallback_weighted =
         Cascade_config_loader.load_profile_weighted
-          ~config_path:path ~name:"default" in
+          ~config_path:path ~name:fallback_profile in
       if fallback_weighted <> [] then
         let ordered = order_weighted_entries fallback_weighted in
         let models = List.map

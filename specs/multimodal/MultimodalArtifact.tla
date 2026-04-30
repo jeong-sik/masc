@@ -194,6 +194,31 @@ Next ==
 
 Spec == Init /\ [][Next]_vars
 
+\* ── Bug model (RFC-Q2-4) ────────────────────────────────────────
+\*
+\* Models the bug class where the hydrator's [add_edge] precondition
+\* check on artifact presence is bypassed (e.g. a callsite passes a
+\* placeholder Artifact_id.t that has not yet been realised via
+\* CreateArtifact). The resulting DAG references a non-present
+\* artifact, violating DAGRefIntegrity.
+
+AddEdgeWithDeadEndpoint(from_id, to_id) ==
+    /\ from_id # to_id
+    /\ <<from_id, to_id>> \notin dag
+    /\ DAGAcyclicIn(dag \cup {<<from_id, to_id>>})
+    \* deliberately omitted: artifacts[<id>].present checks
+    /\ \/ ~artifacts[from_id].present
+       \/ ~artifacts[to_id].present
+    /\ dag' = dag \cup {<<from_id, to_id>>}
+    /\ UNCHANGED artifacts
+
+NextBuggy ==
+    \/ Next
+    \/ \E from_id \in ArtifactIds, to_id \in ArtifactIds :
+            AddEdgeWithDeadEndpoint(from_id, to_id)
+
+SpecBuggy == Init /\ [][NextBuggy]_vars
+
 THEOREM Spec => []TypeOK
 THEOREM Spec => []ArtifactIdMatchesKey
 THEOREM Spec => []DAGRefIntegrity

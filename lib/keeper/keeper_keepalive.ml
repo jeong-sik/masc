@@ -116,12 +116,26 @@ let set_keeper_paused_state ~agent_name paused =
          }
        in
        persist_directive_meta_update entry ~updated_meta;
-       ignore
-         (Keeper_registry.dispatch_event
-            ~base_path:entry.base_path entry.name
-            (if paused
-             then Keeper_state_machine.Operator_pause
-             else Keeper_state_machine.Operator_resume));
+       (match Keeper_registry.dispatch_event
+               ~base_path:entry.base_path entry.name
+               (if paused
+                then Keeper_state_machine.Operator_pause
+                else Keeper_state_machine.Operator_resume)
+        with
+        | Ok _ -> ()
+        | Error (Keeper_state_machine.Invalid_transition { from_phase; to_phase; reason }) ->
+            Log.Keeper.error "%s: directive %s dispatch failed: %s -> %s (%s)"
+              entry.name
+              (if paused then "pause" else "resume")
+              (Keeper_state_machine.phase_to_string from_phase)
+              (Keeper_state_machine.phase_to_string to_phase)
+              reason
+        | Error (Keeper_state_machine.Terminal_state { current; attempted_event }) ->
+            Log.Keeper.warn "%s: directive %s skipped, already terminal: %s (event: %s)"
+              entry.name
+              (if paused then "pause" else "resume")
+              (Keeper_state_machine.phase_to_string current)
+              attempted_event);
        if not paused then begin
          (* tla-lint: allow-mutation: fiber signal — Atomic flag wakes the keeper from Eio.Promise.await *)
          Atomic.set entry.fiber_wakeup true;

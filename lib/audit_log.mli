@@ -29,6 +29,7 @@ type config = Coord_utils.config
 type outcome =
   | Success
   | Failure of string
+[@@deriving tla]
 
 type governance_audit_decision =
   | Governance_allow

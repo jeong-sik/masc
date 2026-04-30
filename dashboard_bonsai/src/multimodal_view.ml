@@ -8,8 +8,10 @@
     until [MASC_MULTIMODAL=1] + [MASC_TOOL_EMISSION=1] are both on
     AND a keeper tool emits a tagged JSON result.
 
-    The view is read-only — interactions (filtering, opening payload)
-    are deferred to F2. *)
+    Cards are clickable: click triggers parallel fetches against
+    [/api/v1/multimodal/get/<id>] + [/api/v1/multimodal/provenance/<id>]
+    via [Multimodal_detail_fetch.fetch], and the detail panel
+    ([Multimodal_detail_view]) renders below the grid. *)
 
 open! Core
 open! Bonsai_web
@@ -58,6 +60,11 @@ stylesheet
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
+    cursor: pointer;
+    transition: border-color 120ms ease;
+  }
+  .card:hover {
+    border-color: color-mix(in oklab, var(--accent-blood) 50%, var(--color-border-default));
   }
   .card_head {
     display: flex;
@@ -108,7 +115,15 @@ let truncate_id (s : string) : string =
 
 let card (a : Multimodal_types.artifact) : Node.t =
   Node.div
-    ~attrs:[ Style.card ]
+    ~attrs:
+      [ Style.card
+      ; Attr.role "button"
+      ; Attr.create "tabindex" "0"
+      ; Attr.create "aria-label" ("Open artifact " ^ a.id)
+      ; Attr.on_click (fun _ ->
+            Multimodal_detail_fetch.fetch ~id:a.id;
+            Effect.Ignore)
+      ]
     [ Node.div
         ~attrs:[ Style.card_head ]
         [ Node.span ~attrs:[ Style.badge ] [ Node.text a.kind ]
@@ -140,7 +155,11 @@ let empty_state : Node.t =
     ]
 ;;
 
-let view_of_response (r : Multimodal_types.response) : Node.t =
+let view_of_response
+    ~(detail_panel : Node.t)
+    (r : Multimodal_types.response)
+    : Node.t
+  =
   Node.div
     ~attrs:[ Style.root; Attr.role "main"; Attr.create "aria-label" "Multimodal gallery" ]
     [ Node.div
@@ -155,9 +174,12 @@ let view_of_response (r : Multimodal_types.response) : Node.t =
          Node.div
            ~attrs:[ Style.grid ]
            (List.map r.artifacts ~f:card))
+    ; detail_panel
     ]
 ;;
 
-let component (_graph @ local) =
-  Bonsai.map (Bonsai.Expert.Var.value Multimodal_var.var) ~f:view_of_response
+let component (graph @ local) =
+  let%map.Bonsai response = Bonsai.Expert.Var.value Multimodal_var.var
+  and detail_panel = Multimodal_detail_view.component graph in
+  view_of_response ~detail_panel response
 ;;

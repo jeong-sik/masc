@@ -164,9 +164,11 @@ let render_detail (d : Multimodal_detail_types.detail) : Node.t list =
          ~attrs:[ Style.created_by ]
          [ Node.text ("created by " ^ d.created_by) ])
   ; Node.div
-      [ Node.h3 ~attrs:[ Style.section_title ] [ Node.text "payload" ]
-      ; Node.pre ~attrs:[ Style.json ] [ Node.text d.payload_pretty ]
-      ]
+      (Node.h3 ~attrs:[ Style.section_title ] [ Node.text "payload" ]
+       :: Multimodal_payload_renderer.render
+            ~kind:d.kind
+            ~payload:d.payload
+            ~payload_pretty:d.payload_pretty)
   ; Node.div
       [ Node.h3 ~attrs:[ Style.section_title ] [ Node.text "metadata" ]
       ; Node.pre ~attrs:[ Style.json ] [ Node.text d.metadata_pretty ]

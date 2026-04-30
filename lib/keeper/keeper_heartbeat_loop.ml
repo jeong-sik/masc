@@ -298,7 +298,7 @@ let emit_in_turn_liveness_pulse ~(ctx : _ context) ~(meta : keeper_meta) =
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->
-           Log.Keeper.debug "in-turn heartbeat failed for %s: %s"
+           Log.Keeper.warn "in-turn heartbeat failed for %s: %s"
              meta.name (Printexc.to_string exn));
       let now_ts = Time_compat.now () in
       (try

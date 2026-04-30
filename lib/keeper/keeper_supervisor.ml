@@ -557,7 +557,7 @@ let reconcile_keepalive_keepers (ctx : _ context) =
          | Ok (Some _meta) -> () (* paused, skip *)
          | Ok None -> ()
          | Error err ->
-             Log.Keeper.debug "reconcile: read_meta failed for %s: %s" name err)
+             Log.Keeper.warn "reconcile: read_meta failed for %s: %s" name err)
     names;
   Log.Keeper.routine "reconcile_keepalive_keepers: completed (elapsed_ms=%d)"
     (int_of_float ((Time_compat.now () -. t0) *. 1000.0))

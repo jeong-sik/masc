@@ -111,7 +111,7 @@ function StrategyTraceTable({ events }: { events: CascadeStrategyTraceEvent[] })
           ${events.map(e => html`
             <tr key=${e.ts + e.cascade_name + e.cycle} class="hover:bg-[var(--white-3)] transition-colors">
               <td class="px-3 py-2 text-text-body whitespace-nowrap">
-                <${TimeAgo} iso=${new Date(e.ts).toISOString()} />
+                <${TimeAgo} timestamp=${e.ts} />
               </td>
               <td class="px-3 py-2 font-medium text-text-strong">${e.cascade_name}</td>
               <td class="px-3 py-2 text-text-body">${e.strategy}</td>
@@ -159,7 +159,7 @@ function ProviderHealthTable({ providers }: { providers: CascadeHealthProvider[]
               </td>
               <td class="px-3 py-2">
                 ${p.in_cooldown
-                  ? html`<${StatusBadge} tone="warn">잇데이 출다욘 징햊학<///>`
+                  ? html`<${StatusBadge} tone="warn">쿨다운 진행 중<//>`
                   : html`<span class="text-text-muted">-</span>`}
               </td>
               <td class="px-3 py-2 text-right tabular-nums text-text-muted">${p.events_in_window}</td>

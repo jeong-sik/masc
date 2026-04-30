@@ -68,3 +68,8 @@ val to_string : truncation -> string
 
 val was_truncated : truncation -> bool
 (** [true] iff the argument is the [Truncated] constructor. *)
+
+val escape_xml : string -> string
+(** Escape the five XML 1.0 predefined entities: ampersand,
+    less-than, greater-than, double-quote, and apostrophe.
+    Order is safe for round-trip use: ampersand is replaced first. *)

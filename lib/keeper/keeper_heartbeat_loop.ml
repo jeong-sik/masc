@@ -646,6 +646,14 @@ let smart_heartbeat_cycle_continues (d : Heartbeat_smart.decision) : bool =
   | Heartbeat_smart.Skip_idle _ -> false
 ;;
 
+let cycle_continues_after_wake
+      (d : Heartbeat_smart.decision)
+      (outcome : Keeper_keepalive_signal.sleep_outcome) : bool =
+  match d, outcome with
+  | Heartbeat_smart.Skip_idle _, Keeper_keepalive_signal.Woken -> true
+  | _, _ -> smart_heartbeat_cycle_continues d
+;;
+
 let run_smart_heartbeat_gate
       ~(clock : _ Eio.Time.clock)
       ~(stop : bool Atomic.t)
@@ -669,24 +677,44 @@ let run_smart_heartbeat_gate
     else Heartbeat_smart.Emit
   in
   (* Run side-effects (idle sleep, cycle-timestamp update) per the
-     decision, then use [smart_heartbeat_cycle_continues] (pure, see
-     .mli) as the authoritative gate answer. This split exists so the
-     regression guard lives in a pure function that unit tests can
-     exercise without an Eio runtime. *)
-  (match smart_hb_decision with
-   | Heartbeat_smart.Skip_busy ->
-     Log.Keeper.debug
-       "smart heartbeat: busy (task=%s) — cycle continues, broadcast may be debounced"
-       (match meta_current.current_task_id with Some t -> Keeper_id.Task_id.to_string t | None -> "?");
-     last_heartbeat_cycle_ts := Time_compat.now ()
-   | Heartbeat_smart.Skip_idle next_time ->
-     let wait = Float.max 1.0 (next_time -. Time_compat.now ()) in
-     Log.Keeper.debug "smart heartbeat: skip (idle, next in %.1fs)" wait;
-     let jitter = wait *. 0.1 *. Random.float 1.0 in
-     Keeper_keepalive_signal.interruptible_sleep ~clock ~stop ~wakeup (wait +. jitter)
-   | Heartbeat_smart.Emit ->
-     last_heartbeat_cycle_ts := Time_compat.now ());
-  smart_heartbeat_cycle_continues smart_hb_decision
+     decision, then delegate the gate answer to [cycle_continues_after_wake]
+     so the [Skip_idle + Woken] case can promote to [true] (closing the
+     [MissedWakeup] gap in KeeperHeartbeat.tla — sibling of #10078). The
+     pure helpers stay testable without an Eio runtime. *)
+  let sleep_outcome =
+    match smart_hb_decision with
+    | Heartbeat_smart.Skip_busy ->
+      Log.Keeper.debug
+        "smart heartbeat: busy (task=%s) — cycle continues, broadcast may be debounced"
+        (match meta_current.current_task_id with Some t -> Keeper_id.Task_id.to_string t | None -> "?");
+      last_heartbeat_cycle_ts := Time_compat.now ();
+      Keeper_keepalive_signal.Timeout
+    | Heartbeat_smart.Skip_idle next_time ->
+      let wait = Float.max 1.0 (next_time -. Time_compat.now ()) in
+      Log.Keeper.debug "smart heartbeat: skip (idle, next in %.1fs)" wait;
+      let jitter = wait *. 0.1 *. Random.float 1.0 in
+      let outcome =
+        Keeper_keepalive_signal.interruptible_sleep
+          ~clock ~stop ~wakeup (wait +. jitter)
+      in
+      (match outcome with
+       | Keeper_keepalive_signal.Woken ->
+         (* External wakeup arrived during idle backoff: the keeper is
+            no longer idle. Stamp the cycle timestamp so the next
+            [should_emit] does not immediately re-classify as Skip_idle,
+            and let the cycle proceed (presence/board/turn dispatch).
+            Spec: KeeperHeartbeat.tla HeartbeatTick — turn_state must
+            transition to "running". *)
+         Log.Keeper.info
+           "smart heartbeat: idle wake — cycle resumed (post=consumed)";
+         last_heartbeat_cycle_ts := Time_compat.now ()
+       | Keeper_keepalive_signal.Stopped | Keeper_keepalive_signal.Timeout -> ());
+      outcome
+    | Heartbeat_smart.Emit ->
+      last_heartbeat_cycle_ts := Time_compat.now ();
+      Keeper_keepalive_signal.Timeout
+  in
+  cycle_continues_after_wake smart_hb_decision sleep_outcome
 ;;
 
 let maybe_write_heartbeat_snapshot
@@ -1027,7 +1055,9 @@ let run_heartbeat_loop
         let jitter =
           base *. Env_config.KeeperKeepalive.jitter_factor *. Random.float 1.0
         in
-        Keeper_keepalive_signal.interruptible_sleep ~clock:ctx.clock ~stop ~wakeup (base +. jitter));
+        ignore (Keeper_keepalive_signal.interruptible_sleep
+                  ~clock:ctx.clock ~stop ~wakeup (base +. jitter)
+                : Keeper_keepalive_signal.sleep_outcome));
       if Atomic.get stop then () else loop ())
   in
   loop ()

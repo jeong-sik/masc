@@ -82,28 +82,34 @@ let post_submit_task ~(meta : keeper_meta) ~(task_id : Keeper_id.Task_id.t) =
 let post_heartbeat_tick ~(wakeup : bool Atomic.t) = ignore wakeup
   [@@fsm_guard "Atomic.get wakeup = false"]
 
+type sleep_outcome =
+  | Stopped
+  | Woken
+  | Timeout
+
 (** Sleep in short chunks so [stop_keepalive] or [wakeup_keeper] takes
     effect within ~chunk_sec instead of waiting for the full interval. *)
-let interruptible_sleep ~clock ~stop ~wakeup duration =
+let interruptible_sleep ~clock ~stop ~wakeup duration : sleep_outcome =
   let chunk_sec = Env_config.KeeperKeepalive.sleep_chunk_sec in
   let rec wait remaining =
     if Atomic.get stop
-    then ()
+    then Stopped
     else if (* Spec: KeeperHeartbeat.tla HeartbeatTick action — wakeup is
               consumed (TRUE -> FALSE) and the caller proceeds to dispatch.
-              MissedWakeup bug-action would have this compare_and_set
-              succeed without a follow-up turn; structural invariant is
-              that this branch returns immediately so the surrounding
-              loop can re-enter and dispatch on next tick. *)
+              Returning [Woken] lets [run_smart_heartbeat_gate] honour
+              the spec's [turn_state' = "running"] postcondition; without
+              the discriminator the [Skip_idle] branch would consume the
+              CAS and then skip the cycle (the [MissedWakeup] bug-action). *)
             Atomic.compare_and_set wakeup true false
-    then
+    then (
       (* Cycle 43: post-action guard mirrors the spec's [wakeup_signaled =
          FALSE] postcondition. Counter-mode by default. *)
       Keeper_fsm_guard_runtime.wrap_unit
         ~action:"HeartbeatTick" ~stage:"post"
-        (fun () -> post_heartbeat_tick ~wakeup)
+        (fun () -> post_heartbeat_tick ~wakeup);
+      Woken)
     else if remaining <= 0.0
-    then ()
+    then Timeout
     else (
       let chunk = Float.min chunk_sec remaining in
       Eio.Time.sleep clock chunk;

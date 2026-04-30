@@ -81,6 +81,12 @@ val fairness_delay_sec_at : now:float -> keeper_name:string -> float
     ever running a turn. *)
 val smart_heartbeat_cycle_continues : Heartbeat_smart.decision -> bool
 
+(** Pure: post-sleep refinement. Promotes [Skip_idle] to [true] iff the
+    sleep ended with [Woken]. Closes the [MissedWakeup] gap in
+    KeeperHeartbeat.tla left open by sibling fix #10078. *)
+val cycle_continues_after_wake :
+  Heartbeat_smart.decision -> Keeper_keepalive_signal.sleep_outcome -> bool
+
 val status_tick_usage_json : unit -> Yojson.Safe.t
 (** Usage payload for heartbeat/status metrics rows.  Status ticks are not
     LLM calls, so all per-turn token counters are explicit zeroes while

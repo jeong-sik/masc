@@ -243,7 +243,8 @@ let run_grpc_heartbeat_stream
       if not (Atomic.get stop || Atomic.get close_ref)
       then (
         let no_wakeup = Atomic.make false in
-        interruptible_sleep ~clock ~stop ~wakeup:no_wakeup interval_sec;
+        ignore (interruptible_sleep ~clock ~stop ~wakeup:no_wakeup interval_sec
+                : Keeper_keepalive_signal.sleep_outcome);
         tick ()))
   in
   tick ()

@@ -206,6 +206,60 @@ let test_load_minimal_toml_defaults () =
       | Ok repos ->
           Alcotest.failf "expected one repo, got %d" (List.length repos))
 
+let git_available () =
+  Sys.command "git --version >/dev/null 2>&1" = 0
+
+let init_git_repo dir url =
+  ignore (Sys.command (Printf.sprintf "git init %s >/dev/null 2>&1" (Filename.quote dir)));
+  ignore
+    (Sys.command
+       (Printf.sprintf "git -C %s remote add origin %s >/dev/null 2>&1"
+          (Filename.quote dir)
+          (Filename.quote url)))
+
+let test_discover_finds_git_repos () =
+  if not (git_available ()) then Alcotest.skip ()
+  else
+    with_temp_base_path (fun base_path ->
+        let repo_a = Filename.concat base_path "project-a" in
+        Unix.mkdir repo_a 0o755;
+        init_git_repo repo_a "https://github.com/test/project-a";
+        match Repo_store.discover_repositories ~base_path with
+        | Error e -> Alcotest.fail ("discover failed: " ^ e)
+        | Ok repos ->
+            Alcotest.(check int) "found 1 repo" 1 (List.length repos);
+            let repo = List.hd repos in
+            Alcotest.(check string) "id" "project-a" repo.id;
+            Alcotest.(check string) "url" "https://github.com/test/project-a" repo.url;
+            Alcotest.(check string) "local_path" repo_a repo.local_path)
+
+let test_discover_ignores_masc_dir () =
+  if not (git_available ()) then Alcotest.skip ()
+  else
+    with_temp_base_path (fun base_path ->
+        let masc_dir = Filename.concat base_path ".masc" in
+        Unix.mkdir masc_dir 0o755;
+        let masc_repo = Filename.concat masc_dir "internal" in
+        Unix.mkdir masc_repo 0o755;
+        init_git_repo masc_repo "https://github.com/test/internal";
+        match Repo_store.discover_repositories ~base_path with
+        | Error e -> Alcotest.fail ("discover failed: " ^ e)
+        | Ok repos ->
+            Alcotest.(check int) "ignores .masc repo" 0 (List.length repos))
+
+let test_discover_skips_registered () =
+  if not (git_available ()) then Alcotest.skip ()
+  else
+    with_temp_base_path (fun base_path ->
+        let repo_a = Filename.concat base_path "project-a" in
+        Unix.mkdir repo_a 0o755;
+        init_git_repo repo_a "https://github.com/test/project-a";
+        let* () = Repo_store.save_all ~base_path [ { (sample_repo "project-a") with local_path = repo_a } ] in
+        match Repo_store.discover_repositories ~base_path with
+        | Error e -> Alcotest.fail ("discover failed: " ^ e)
+        | Ok repos ->
+            Alcotest.(check int) "skips already registered" 0 (List.length repos))
+
 let () =
   Alcotest.run "Repo_store"
     [
@@ -247,5 +301,11 @@ let () =
         [
           Alcotest.test_case "minimal TOML gets production defaults" `Quick
             test_load_minimal_toml_defaults;
+        ] );
+      ( "discover",
+        [
+          Alcotest.test_case "finds git repos" `Quick test_discover_finds_git_repos;
+          Alcotest.test_case "ignores .masc repos" `Quick test_discover_ignores_masc_dir;
+          Alcotest.test_case "skips registered repos" `Quick test_discover_skips_registered;
         ] );
     ]

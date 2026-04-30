@@ -390,7 +390,7 @@
    transport
    transport_bridge
    transport_read_model
-   transport_metrics
+   transport_metrics track2_sync_boundary
    ;; gRPC coordination transport (grpc-direct)
    masc_grpc_types
    masc_grpc_service

@@ -87,6 +87,8 @@ let make_credential ~id ~username ~gh_config_dir : credential =
     gh_config_dir = Some gh_config_dir;
     ssh_key_path = None;
     gpg_key_id = None;
+    state = Unmaterialized;
+    token_sha256_prefix = None;
   }
 
 let make_repo ~id ~credential_id : repository =

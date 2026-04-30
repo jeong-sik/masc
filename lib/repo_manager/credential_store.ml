@@ -13,6 +13,8 @@ let default_credential =
     gh_config_dir = None;
     ssh_key_path = None;
     gpg_key_id = None;
+    state = Unmaterialized;
+    token_sha256_prefix = None;
   }
 
 let ensure_dir path =

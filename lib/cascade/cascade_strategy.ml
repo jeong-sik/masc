@@ -6,8 +6,11 @@ type signal_ctx = {
   now : float;
   rand_int : int -> int;
   keeper_name : string;
-  cascade_name : string;
+  cascade_name : Keeper_cascade_profile.runtime_name;
 }
+
+let signal_cascade_name ctx =
+  Keeper_cascade_profile.runtime_name_to_string ctx.cascade_name
 
 (* ── Latency-aware weight scaling (Phase: PR3 of cascade resilience) ──
 
@@ -342,10 +345,11 @@ let priority_tier_order adapter ctx ~tiers ~cycle cands =
 (* ── Sticky ─────────────────────────────────────────────────────── *)
 
 let sticky_order adapter ctx cands =
+  let cascade = signal_cascade_name ctx in
   match
     Cascade_state.lookup_sticky
       ~keeper:ctx.keeper_name
-      ~cascade:ctx.cascade_name
+      ~cascade
       ~now:ctx.now
   with
   | None -> cands
@@ -372,7 +376,7 @@ let round_robin_order ctx cands =
   else
     let cursor =
       Cascade_state.rotate_round_robin
-        ~cascade:ctx.cascade_name
+        ~cascade:(signal_cascade_name ctx)
         ~bound:n
     in
     let head, tail =
@@ -415,9 +419,10 @@ let order_candidates t ~adapter ~ctx ~cycle cands =
 let record_choice t ~ctx ~provider_key =
   match t.kind with
   | Sticky ->
+    let cascade = signal_cascade_name ctx in
     Cascade_state.record_sticky_choice
       ~keeper:ctx.keeper_name
-      ~cascade:ctx.cascade_name
+      ~cascade
       ~provider:provider_key
       ~ttl_ms:t.sticky_ttl_ms
       ~now:ctx.now

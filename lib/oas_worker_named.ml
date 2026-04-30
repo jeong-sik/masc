@@ -807,7 +807,7 @@ let run_named
     now = Unix.gettimeofday ();
     rand_int = Random.int;
     keeper_name;
-    cascade_name;
+    cascade_name = error_cascade_name;
   } in
   let cycle_clock = Eio_context.get_clock_opt () in
   let do_backoff cycle =

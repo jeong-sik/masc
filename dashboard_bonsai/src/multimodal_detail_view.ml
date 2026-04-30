@@ -112,6 +112,23 @@ stylesheet
     font-style: italic;
     color: var(--color-fg-muted);
   }
+  .not_found {
+    font-family: 'EB Garamond', Georgia, serif;
+    color: var(--color-fg-muted);
+    padding: 0.75rem;
+    border: 1px dashed color-mix(in oklab, var(--color-border-default) 70%, transparent);
+    border-radius: 4px;
+    text-align: center;
+  }
+  .error {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.8rem;
+    color: var(--text-bright);
+    background: color-mix(in oklab, var(--accent-blood) 18%, transparent);
+    border: 1px solid color-mix(in oklab, var(--accent-blood) 50%, transparent);
+    padding: 0.6rem 0.75rem;
+    border-radius: 4px;
+  }
   .created_by {
     font-family: 'EB Garamond', Georgia, serif;
     font-style: italic;
@@ -183,40 +200,83 @@ let render_provenance (p : Multimodal_detail_types.provenance) : Node.t =
     ]
 ;;
 
+module T = Multimodal_detail_types
+
+let header_for_id (id : string) : Node.t =
+  Node.div
+    ~attrs:[ Style.head ]
+    [ Node.div
+        ~attrs:[ Style.head_left ]
+        [ Node.span ~attrs:[ Style.head_id ] [ Node.text id ] ]
+    ; close_button
+    ]
+;;
+
+(** Detail-side rendering for each fetch_state. When the state is
+    [Loaded d], we use [render_detail d] which embeds its own header
+    (with kind + id). All other states fall back to a simple
+    id-only header so the close button stays available. *)
+let render_detail_state
+    ~(id : string)
+    (state : T.detail T.fetch_state)
+    : Node.t list
+  =
+  match state with
+  | T.Loaded d -> render_detail d
+  | T.Loading ->
+    [ header_for_id id
+    ; Node.div ~attrs:[ Style.loading ] [ Node.text "loading detail…" ]
+    ]
+  | T.Idle ->
+    (* Defensive — should not occur while selected_id is Some,
+       but render close-able header so the operator can clear. *)
+    [ header_for_id id ]
+  | T.NotFound ->
+    [ header_for_id id
+    ; Node.div
+        ~attrs:[ Style.not_found ]
+        [ Node.text "artifact not found" ]
+    ]
+  | T.Error msg ->
+    [ header_for_id id
+    ; Node.div
+        ~attrs:[ Style.error ]
+        [ Node.text ("detail unavailable: " ^ msg) ]
+    ]
+;;
+
+let render_provenance_state
+    (state : T.provenance T.fetch_state)
+    : Node.t
+  =
+  match state with
+  | T.Loaded p -> render_provenance p
+  | T.Loading ->
+    Node.div
+      ~attrs:[ Style.loading ]
+      [ Node.text "loading provenance…" ]
+  | T.Idle -> Node.none
+  | T.NotFound ->
+    Node.div
+      ~attrs:[ Style.not_found ]
+      [ Node.text "no provenance recorded" ]
+  | T.Error msg ->
+    Node.div
+      ~attrs:[ Style.error ]
+      [ Node.text ("provenance unavailable: " ^ msg) ]
+;;
+
 let view_of_state
     ~(selected_id : string option)
-    ~(detail : Multimodal_detail_types.detail option)
-    ~(provenance : Multimodal_detail_types.provenance option)
+    ~(detail : T.detail T.fetch_state)
+    ~(provenance : T.provenance T.fetch_state)
     : Node.t
   =
   match selected_id with
   | None -> Node.none
   | Some id ->
-    let header_when_loading =
-      Node.div
-        ~attrs:[ Style.head ]
-        [ Node.div
-            ~attrs:[ Style.head_left ]
-            [ Node.span ~attrs:[ Style.head_id ] [ Node.text id ] ]
-        ; close_button
-        ]
-    in
-    let body =
-      match detail with
-      | None ->
-        [ header_when_loading
-        ; Node.div ~attrs:[ Style.loading ] [ Node.text "loading detail…" ]
-        ]
-      | Some d -> render_detail d
-    in
-    let prov_section =
-      match provenance with
-      | None ->
-        Node.div
-          ~attrs:[ Style.loading ]
-          [ Node.text "loading provenance…" ]
-      | Some p -> render_provenance p
-    in
+    let body = render_detail_state ~id detail in
+    let prov_section = render_provenance_state provenance in
     Node.div ~attrs:[ Style.panel ] (body @ [ prov_section ])
 ;;
 

@@ -1,0 +1,9 @@
+{
+  "_comment": "Stringly boundary baseline. Regenerate with scripts/stringly-boundary-ratchet.sh --regenerate.",
+  "_metrics": "See scripts/stringly-boundary-ratchet.sh METRICS / DESCRIPTIVE_METRICS arrays.",
+  "_issue": "#11926",
+  "raw_decision_string_signatures": 0,
+  "raw_error_kind_string_signatures": 0,
+  "raw_cascade_name_string_signatures": 81,
+  "raw_status_string_signatures": 91
+}

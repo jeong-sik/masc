@@ -8,6 +8,7 @@ import { isLoaded } from '../lib/async-state'
 import { ActionButton } from './common/button'
 import { SurfaceCard } from './common/card'
 import { EmptyState } from './common/empty-state'
+import { Eyebrow } from './common/eyebrow'
 import { formatElapsedCompact, formatTimestampKo, formatDelta } from '../lib/format-time'
 import { statusLabel } from '../lib/status-label'
 import { navigate } from '../router'
@@ -167,36 +168,36 @@ function LoopOverview({ loop }: { loop: AutoresearchLoopSummary }) {
     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
       <div class="flex flex-col gap-3">
         <div>
-          <div class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)] mb-1">목표</div>
+          <${Eyebrow} class="mb-1">목표</${Eyebrow}>
           <div class="text-[var(--text-body)] text-sm leading-relaxed">${loop.goal}</div>
         </div>
         <div class="grid grid-cols-2 gap-3">
           <div>
-            <div class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)] mb-0.5">상태</div>
+            <${Eyebrow} class="mb-0.5">상태</${Eyebrow}>
             <div class="text-sm font-medium ${statusColor(loop.status)}">${statusLabel(loop.status)}</div>
           </div>
           <div>
-            <div class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)] mb-0.5">사이클</div>
+            <${Eyebrow} class="mb-0.5">사이클</${Eyebrow}>
             <div class="text-[var(--text-strong)] text-sm font-mono">${loop.current_cycle} / ${loop.max_cycles}</div>
           </div>
           <div>
-            <div class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)] mb-0.5">경과 시간</div>
+            <${Eyebrow} class="mb-0.5">경과 시간</${Eyebrow}>
             <div class="text-[var(--text-body)] text-sm font-mono">${formatElapsedCompact(loop.elapsed_s)}</div>
           </div>
           <div>
-            <div class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)] mb-0.5">실행자</div>
+            <${Eyebrow} class="mb-0.5">실행자</${Eyebrow}>
             <div class="text-[var(--text-body)] text-sm font-mono">${loop.author ?? '알 수 없음'}</div>
           </div>
           <div>
-            <div class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)] mb-0.5">모델</div>
+            <${Eyebrow} class="mb-0.5">모델</${Eyebrow}>
             <div class="text-[var(--text-body)] text-sm font-mono">${loop.model_model}</div>
           </div>
           <div>
-            <div class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)] mb-0.5">소스</div>
+            <${Eyebrow} class="mb-0.5">소스</${Eyebrow}>
             <div class="text-[var(--text-body)] text-sm">${liveLabel(loop)}</div>
           </div>
           <div>
-            <div class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)] mb-0.5">최근 갱신</div>
+            <${Eyebrow} class="mb-0.5">최근 갱신</${Eyebrow}>
             <div class="text-[var(--text-body)] text-sm font-mono">${loop.updated_at != null ? formatTimestampKo(loop.updated_at) : '알 수 없음'}</div>
           </div>
         </div>
@@ -205,16 +206,16 @@ function LoopOverview({ loop }: { loop: AutoresearchLoopSummary }) {
       <div class="flex flex-col gap-3">
         <div class="grid grid-cols-2 gap-3">
           <div>
-            <div class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)] mb-0.5">기준선</div>
+            <${Eyebrow} class="mb-0.5">기준선</${Eyebrow}>
             <div class="text-[var(--text-body)] text-sm font-mono">${loop.baseline.toFixed(4)}</div>
           </div>
           <div>
-            <div class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)] mb-0.5">최고 점수</div>
+            <${Eyebrow} class="mb-0.5">최고 점수</${Eyebrow}>
             <div class="text-[var(--color-status-ok)] text-sm font-mono font-semibold">${loop.best_score.toFixed(4)}</div>
           </div>
         </div>
         <div>
-          <div class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)] mb-1">유지 / 삭제</div>
+          <${Eyebrow} class="mb-1">유지 / 삭제</${Eyebrow}>
           <div class="flex items-center gap-2">
             <span class="text-[var(--color-status-ok)] text-sm font-mono font-semibold">${loop.total_keeps}</span>
             <span class="text-[var(--color-fg-muted)] text-xs">/</span>
@@ -235,11 +236,11 @@ function LoopOverview({ loop }: { loop: AutoresearchLoopSummary }) {
           ` : null}
         </div>
         <div>
-          <div class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)] mb-0.5">대상 파일</div>
+          <${Eyebrow} class="mb-0.5">대상 파일</${Eyebrow}>
           <div class="text-[var(--text-body)] text-xs font-mono truncate" title=${loop.target_file}>${loop.target_file}</div>
         </div>
         <div>
-          <div class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)] mb-0.5">메트릭</div>
+          <${Eyebrow} class="mb-0.5">메트릭</${Eyebrow}>
           <div class="text-[var(--text-body)] text-xs font-mono truncate" title=${loop.metric_fn}>${loop.metric_fn}</div>
         </div>
       </div>
@@ -357,7 +358,7 @@ function ResearchBrief({ loop }: { loop: AutoresearchLoopSummary }) {
     <${SurfaceCard} variant="compact">
       <div class="flex flex-col gap-3">
         <div>
-          <div class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)] mb-1 font-medium">연구 브리프</div>
+          <${Eyebrow} class="mb-1 font-medium">연구 브리프</${Eyebrow}>
           <div class="text-sm leading-paragraph text-[var(--text-body)]">
             이 루프는 <span class="font-semibold text-[var(--text-strong)]">${loop.goal}</span> 를 목표로
             <span class="font-mono text-[var(--text-strong)]"> ${loop.target_file} </span>
@@ -369,16 +370,16 @@ function ResearchBrief({ loop }: { loop: AutoresearchLoopSummary }) {
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
           <div class="rounded border border-[var(--white-8)] bg-[var(--white-4)] p-3">
-            <div class="mb-1 text-3xs uppercase tracking-wider text-[var(--color-fg-muted)]">무엇을 연구하나</div>
+            <${Eyebrow} class="mb-1">무엇을 연구하나</${Eyebrow}>
             <div class="leading-relaxed text-[var(--text-body)]">${loop.goal}</div>
           </div>
           <div class="rounded border border-[var(--white-8)] bg-[var(--white-4)] p-3">
-            <div class="mb-1 text-3xs uppercase tracking-wider text-[var(--color-fg-muted)]">무엇으로 성공을 보나</div>
+            <${Eyebrow} class="mb-1">무엇으로 성공을 보나</${Eyebrow}>
             <div class="font-mono text-[var(--text-body)]">${loop.metric_fn}</div>
             <div class="mt-1 text-[var(--color-fg-disabled)]">baseline ${loop.baseline.toFixed(4)} -> best ${loop.best_score.toFixed(4)}</div>
           </div>
           <div class="rounded border border-[var(--white-8)] bg-[var(--white-4)] p-3">
-            <div class="mb-1 text-3xs uppercase tracking-wider text-[var(--color-fg-muted)]">연결된 실행 컨텍스트</div>
+            <${Eyebrow} class="mb-1">연결된 실행 컨텍스트</${Eyebrow}>
             <div class="flex flex-col gap-1 text-[var(--text-body)]">
               <span>session ${loop.session_id ?? '없음'}</span>
               <span>operation ${loop.operation_id ?? '없음'}</span>
@@ -386,7 +387,7 @@ function ResearchBrief({ loop }: { loop: AutoresearchLoopSummary }) {
             </div>
           </div>
           <div class="rounded border border-[var(--white-8)] bg-[var(--white-4)] p-3">
-            <div class="mb-1 text-3xs uppercase tracking-wider text-[var(--color-fg-muted)]">현재 가설 / 메모</div>
+            <${Eyebrow} class="mb-1">현재 가설 / 메모</${Eyebrow}>
             <div class="flex flex-col gap-1 text-[var(--text-body)] leading-relaxed">
               <span>${loop.queued_hypothesis ?? '대기 가설 없음'}</span>
               <span class="text-[var(--color-fg-disabled)]">${loop.program_note ?? 'program note 없음'}</span>
@@ -408,7 +409,7 @@ function OutcomeVsHarnessCallout({ loopCount }: { loopCount: number }) {
     <${SurfaceCard} variant="compact">
       <div class="grid grid-cols-1 gap-3 md:grid-cols-[1.3fr_1fr]">
         <div class="rounded border border-[var(--white-8)] bg-[var(--white-4)] p-3">
-          <div class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)]">실험 결과</div>
+          <${Eyebrow}>실험 결과</${Eyebrow}>
           <div class="mt-1 text-sm font-medium text-[var(--text-strong)]">이 화면은 keep/discard 루프를 봅니다.</div>
           <div class="mt-2 text-sm leading-loose text-[var(--text-body)]">
             어떤 파일을 바꾸고 어떤 metric을 밀어 올리려는지, 그리고 현재 ${loopCount}개 루프가 어떤 cycle에 있는지 직접 봅니다.
@@ -416,7 +417,7 @@ function OutcomeVsHarnessCallout({ loopCount }: { loopCount: number }) {
         </div>
 
         <div class="rounded border border-[var(--white-8)] bg-[var(--white-3)] p-3">
-          <div class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)]">안전 하네스</div>
+          <${Eyebrow}>안전 하네스</${Eyebrow}>
           <div class="mt-1 text-sm font-medium text-[var(--text-strong)]">심판 기계의 건강도는 별도로 봅니다.</div>
           <div class="mt-2 text-sm leading-loose text-[var(--text-body)]">
             평가 모델, 압축 전 상태, 세대 교체 rail 상태는 하네스에서 봅니다.
@@ -466,7 +467,7 @@ function LoopDetailView() {
 
       <${SurfaceCard} variant="compact">
         <div class="flex items-start justify-between gap-3 mb-3">
-          <div class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)] font-medium">루프 개요</div>
+          <${Eyebrow} class="font-medium">루프 개요</${Eyebrow}>
           ${canRepairErrorLoop ? html`
             <div class="flex items-center gap-2">
               <${ActionButton}
@@ -506,15 +507,15 @@ function LoopDetailView() {
 
       <${SurfaceCard} variant="compact">
         <div class="flex items-center justify-between mb-3">
-          <div class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)] font-medium">
+          <${Eyebrow} class="font-medium">
             사이클 이력 ${detail ? `(${detail.history_count}건)` : ''}
-          </div>
+          </${Eyebrow}>
         </div>
         <${CycleHistoryTable} cycles=${cycles} />
       <//>
 
       <${SurfaceCard} variant="compact">
-        <div class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)] mb-3 font-medium">인사이트</div>
+        <${Eyebrow} class="mb-3 font-medium">인사이트</${Eyebrow}>
         <${InsightsList} insights=${insights} />
       <//>
     </div>
@@ -573,9 +574,9 @@ export function Autoresearch() {
       <${OutcomeVsHarnessCallout} loopCount=${loops.length} />
 
       <div class="flex items-center justify-between">
-        <div class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)] font-medium">
+        <${Eyebrow} class="font-medium">
           전체 ${loops.length}개 루프
-        </div>
+        </${Eyebrow}>
         <div class="flex items-center gap-2">
           <${StartFormButton}
             class="px-2.5 py-1 rounded text-2xs text-accent border border-accent/40 hover:bg-[var(--accent-10)] transition-colors"

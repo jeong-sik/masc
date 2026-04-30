@@ -8,6 +8,7 @@ import { useEffect } from 'preact/hooks'
 import { fetchKeeperEval } from '../api/keeper'
 import type { KeeperEvalResponse, EvalSnapshot, EvalLayerResult } from '../api/keeper'
 import { ProgressBar } from './common/progress-bar'
+import { Eyebrow } from './common/eyebrow'
 
 // ── Per-keeper cached state ─────────────────────────────
 
@@ -206,7 +207,7 @@ export function KeeperEvalQualityPanel({ keeperName }: { keeperName: string }) {
       ${'' /* Layer Results */}
       ${layers.length > 0 ? html`
         <div class="mb-3">
-          <div class="text-3xs uppercase tracking-wider text-[var(--color-fg-disabled)] mb-1.5">레이어 결과</div>
+          <${Eyebrow} tone="disabled" class="mb-1.5">레이어 결과</${Eyebrow}>
           <div class="flex flex-col gap-0.5">
             ${layers.map((layer: EvalLayerResult) => html`<${LayerResultRow} layer=${layer} />`)}
           </div>
@@ -216,7 +217,7 @@ export function KeeperEvalQualityPanel({ keeperName }: { keeperName: string }) {
       ${'' /* 24h Trend */}
       ${trend ? html`
         <div class="flex items-center gap-2 pt-2 border-t border-[var(--white-8)]">
-          <span class="text-3xs uppercase tracking-wider text-[var(--color-fg-disabled)]">추세 (24h)</span>
+          <${Eyebrow} tone="disabled">추세 (24h)</${Eyebrow}>
           <span class="text-2xs font-mono tabular-nums text-[var(--color-fg-muted)]">
             ${trend.oldCoverage.toFixed(2)} \u2192 ${trend.newCoverage.toFixed(2)}
           </span>

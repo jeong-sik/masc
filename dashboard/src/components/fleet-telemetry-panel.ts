@@ -3,6 +3,7 @@ import { useSignal } from '@preact/signals'
 import { useEffect, useMemo, useRef } from 'preact/hooks'
 import { RotateCcw } from 'lucide-preact'
 import { LoadingState } from './common/feedback-state'
+import { Eyebrow } from './common/eyebrow'
 import {
   fetchDashboardExecution,
   fetchDashboardNamespaceTruth,
@@ -132,7 +133,7 @@ function SummaryCard({
 
   return html`
     <div class="rounded border ${toneClass} p-3">
-      <div class="text-3xs uppercase tracking-wider text-[var(--color-fg-disabled)]">${title}</div>
+      <${Eyebrow} tone="disabled">${title}</${Eyebrow}>
       <div class="mt-1 text-xl font-semibold text-[var(--text)]">${value}</div>
       <div class="mt-1 text-2xs leading-relaxed text-[var(--color-fg-disabled)]">${detail}</div>
     </div>
@@ -271,13 +272,13 @@ function ControlRoomPanel({ state }: { state: FleetTelemetryState }) {
 
       <div class="grid grid-cols-1 gap-3 xl:grid-cols-[minmax(0,2fr)_minmax(0,1.3fr)]">
         <div>
-          <div class="mb-1 text-3xs uppercase tracking-wider text-[var(--color-fg-disabled)]">준비 상태 항목</div>
+          <${Eyebrow} tone="disabled" class="mb-1">준비 상태 항목</${Eyebrow}>
           <div class="grid grid-cols-1 gap-2 md:grid-cols-2">
             ${readiness.pillars.map(pillar => html`<${ReadinessPillarCard} pillar=${pillar} />`)}
           </div>
         </div>
         <div>
-          <div class="mb-1 text-3xs uppercase tracking-wider text-[var(--color-fg-disabled)]">주의 대기열</div>
+          <${Eyebrow} tone="disabled" class="mb-1">주의 대기열</${Eyebrow}>
           <${AttentionEventList} events=${attentionEvents} />
         </div>
       </div>
@@ -756,18 +757,18 @@ export function FleetTelemetryPanel() {
       </div>
 
       <div>
-        <div class="mb-1 text-3xs uppercase tracking-wider text-[var(--color-fg-disabled)]">함대 통제실</div>
+        <${Eyebrow} tone="disabled" class="mb-1">함대 통제실</${Eyebrow}>
         <${ControlRoomPanel} state=${value} />
       </div>
 
       <div>
-        <div class="mb-1 text-3xs uppercase tracking-wider text-[var(--color-fg-disabled)]">압박 감시 목록</div>
+        <${Eyebrow} tone="disabled" class="mb-1">압박 감시 목록</${Eyebrow}>
         <${PressureWatchlist} rows=${value.rows} />
       </div>
 
       <div>
         <div class="mb-1 flex items-center justify-between gap-2">
-          <div class="text-3xs uppercase tracking-wider text-[var(--color-fg-disabled)]">Keeper 비교</div>
+          <${Eyebrow} tone="disabled">Keeper 비교</${Eyebrow}>
           <${TextInput}
             type="search"
             value=${query.value}
@@ -783,12 +784,12 @@ export function FleetTelemetryPanel() {
       </div>
 
       <div>
-        <div class="mb-1 text-3xs uppercase tracking-wider text-[var(--color-fg-disabled)]">텔레메트리 출처</div>
+        <${Eyebrow} tone="disabled" class="mb-1">텔레메트리 출처</${Eyebrow}>
         <${TelemetrySourcesPanel} sources=${value.telemetry_sources} />
       </div>
 
       <div>
-        <div class="mb-1 text-3xs uppercase tracking-wider text-[var(--color-fg-disabled)]">실패 분류</div>
+        <${Eyebrow} tone="disabled" class="mb-1">실패 분류</${Eyebrow}>
         <${FailureCategoryPanel} toolQuality=${value.tool_quality} />
       </div>
     </div>

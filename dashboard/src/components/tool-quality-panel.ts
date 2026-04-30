@@ -6,6 +6,7 @@ import { TELEMETRY_AUTO_REFRESH_MS } from '../config/constants'
 import { formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../lib/auto-refresh'
 import { ErrorState, LoadingState } from './common/feedback-state'
 import { TextInput } from './common/input'
+import { Eyebrow } from './common/eyebrow'
 import { ProgressBar } from './common/progress-bar'
 import {
   cancelSharedToolQuality,
@@ -220,7 +221,7 @@ function TrendSparkline({ points }: { points: HourlyPoint[] }) {
   return html`
     <div class="rounded border border-[var(--color-border-default)] bg-[var(--white-3)] p-3">
       <div class="flex items-center justify-between mb-1.5">
-        <span class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)]">성공률 추이</span>
+        <${Eyebrow}>성공률 추이</${Eyebrow}>
         <span class="text-xs font-mono" style="color:${lineColor}">${lastRate.toFixed(1)}%</span>
       </div>
       <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" role="img" aria-label="성공률 추이 차트" style="background:var(--bg-deepest);">

@@ -5,6 +5,7 @@ import { html } from 'htm/preact'
 import { signal, computed } from '@preact/signals'
 import { DialogOverlay } from './common/dialog'
 import { TextInput, TextArea } from './common/input'
+import { Eyebrow } from './common/eyebrow'
 import {
   AUTORESEARCH_DEFAULT_MAX_CYCLES,
   AUTORESEARCH_DEFAULT_CYCLE_TIMEOUT_S,
@@ -130,7 +131,7 @@ export function StartAutoresearchForm() {
 
       <div class="flex flex-col gap-3">
         <label class="flex flex-col gap-1">
-          <span class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)] font-medium">목표 *</span>
+          <${Eyebrow} class="font-medium">목표 *</${Eyebrow}>
           <${TextArea}
             value=${formGoal.value}
             placeholder="최적화 목표 (예: Reduce inference latency by optimizing hot path)"
@@ -141,7 +142,7 @@ export function StartAutoresearchForm() {
         </label>
 
         <label class="flex flex-col gap-1">
-          <span class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)] font-medium">메트릭 명령어 *</span>
+          <${Eyebrow} class="font-medium">메트릭 명령어 *</${Eyebrow}>
           <${TextInput}
             value=${formMetricFn.value}
             placeholder="마지막 줄에 float를 출력하는 명령어 (예: python eval.py --metric accuracy)"
@@ -151,7 +152,7 @@ export function StartAutoresearchForm() {
         </label>
 
         <label class="flex flex-col gap-1">
-          <span class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)] font-medium">대상 파일 *</span>
+          <${Eyebrow} class="font-medium">대상 파일 *</${Eyebrow}>
           <${TextInput}
             value=${formTargetFile.value}
             placeholder="수정할 파일 경로 (예: lib/optimizer.ml)"
@@ -170,7 +171,7 @@ export function StartAutoresearchForm() {
         ${formShowAdvanced.value ? html`
           <div class="grid grid-cols-2 gap-3 border-t border-card-border pt-3">
             <label class="flex flex-col gap-1">
-              <span class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)]">작업 디렉토리</span>
+              <${Eyebrow}>작업 디렉토리</${Eyebrow}>
               <${TextInput}
                 value=${formWorkdir.value}
                 placeholder="기본: 프로젝트 루트"
@@ -178,7 +179,7 @@ export function StartAutoresearchForm() {
               />
             </label>
             <label class="flex flex-col gap-1">
-              <span class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)]">모델</span>
+              <${Eyebrow}>모델</${Eyebrow}>
               <${TextInput}
                 value=${formModelModel.value}
                 placeholder="glm"
@@ -186,7 +187,7 @@ export function StartAutoresearchForm() {
               />
             </label>
             <label class="flex flex-col gap-1">
-              <span class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)]">최대 사이클</span>
+              <${Eyebrow}>최대 사이클</${Eyebrow}>
               <${TextInput}
                 type="number"
                 value=${formMaxCycles.value}
@@ -195,7 +196,7 @@ export function StartAutoresearchForm() {
               />
             </label>
             <label class="flex flex-col gap-1">
-              <span class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)]">사이클 타임아웃 (초)</span>
+              <${Eyebrow}>사이클 타임아웃 (초)</${Eyebrow}>
               <${TextInput}
                 type="number"
                 value=${formCycleTimeoutS.value}
@@ -204,7 +205,7 @@ export function StartAutoresearchForm() {
               />
             </label>
             <label class="flex flex-col gap-1">
-              <span class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)]">기준선 (baseline)</span>
+              <${Eyebrow}>기준선 (baseline)</${Eyebrow}>
               <${TextInput}
                 type="number"
                 value=${formBaseline.value}
@@ -213,7 +214,7 @@ export function StartAutoresearchForm() {
               />
             </label>
             <label class="flex flex-col gap-1">
-              <span class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)]">인내 (patience)</span>
+              <${Eyebrow}>인내 (patience)</${Eyebrow}>
               <${TextInput}
                 type="number"
                 value=${formPatience.value}
@@ -222,7 +223,7 @@ export function StartAutoresearchForm() {
               />
             </label>
             <label class="col-span-2 flex flex-col gap-1">
-              <span class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)]">빌드 검증 명령어</span>
+              <${Eyebrow}>빌드 검증 명령어</${Eyebrow}>
               <${TextInput}
                 value=${formBuildVerifyFn.value}
                 placeholder="선택 (예: dune build)"

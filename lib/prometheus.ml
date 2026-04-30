@@ -372,6 +372,14 @@ let metric_keeper_operator_clear = "masc_keeper_operator_clear_total"
 let metric_keeper_compaction_noop =
   "masc_keeper_compaction_noop_total"
 
+(* Tier K5 — observability over the K4c per-keeper tool-emission
+   accumulator registry. The registry is process-local; this gauge
+   exposes its size so operators can alert on divergence from the
+   active keeper count (a leak symptom would be registry size >
+   live keeper count without trending down on teardown). *)
+let metric_keeper_tool_emission_registry_size =
+  "masc_keeper_tool_emission_registry_size"
+
 (* #10349: keeper FS path rejection counter.  Pre-fix the
    user-facing read-path rejection strings carried the resolver's
    view of allowed sandbox roots (for example [(roots=[<list>])]
@@ -906,6 +914,12 @@ let init () =
      after_tokens > 0 (compaction triggered but produced no \
      savings; labels: keeper, trigger)"
     Counter;
+  (* K5: per-keeper tool-emission accumulator registry size.
+     Updated by Keeper_tool_emission_hook on register/drop. *)
+  add metric_keeper_tool_emission_registry_size
+    "Number of keepers with a registered tool-emission \
+     accumulator (Tier K4c per-keeper isolation registry size)"
+    Gauge;
   (* Operator-initiated overflow recovery — emitted by tool_keeper.ml *)
   add metric_keeper_operator_compact
     "Total operator-invoked masc_keeper_compact calls (labels: result=ok|no_checkpoint|precondition|not_found)" Counter;

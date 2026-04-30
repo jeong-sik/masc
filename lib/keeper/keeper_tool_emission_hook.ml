@@ -87,16 +87,28 @@ let global_accumulator = create_accumulator ()
 let registry : (string, accumulator) Hashtbl.t = Hashtbl.create 16
 let registry_mutex : Stdlib.Mutex.t = Stdlib.Mutex.create ()
 
+(* Tier K5 — emit registry size gauge after every register/drop so
+   operators can alert on divergence from the active keeper count.
+   Caller MUST already hold [registry_mutex]; we read the size
+   under the same lock that mutated the table. No labels. *)
+let emit_registry_size_gauge_holding_lock () : unit =
+  let n = Hashtbl.length registry in
+  Prometheus.set_gauge
+    Prometheus.metric_keeper_tool_emission_registry_size
+    ~labels:[]
+    (float_of_int n)
+
 let accumulator_for_keeper (keeper_name : string) : accumulator =
   Stdlib.Mutex.lock registry_mutex;
-  let acc =
+  let acc, grew =
     match Hashtbl.find_opt registry keeper_name with
-    | Some a -> a
+    | Some a -> a, false
     | None ->
         let a = create_accumulator () in
         Hashtbl.add registry keeper_name a;
-        a
+        a, true
   in
+  if grew then emit_registry_size_gauge_holding_lock ();
   Stdlib.Mutex.unlock registry_mutex;
   acc
 
@@ -108,5 +120,7 @@ let registered_keeper_names () : string list =
 
 let drop_keeper_accumulator (keeper_name : string) : unit =
   Stdlib.Mutex.lock registry_mutex;
+  let was_present = Hashtbl.mem registry keeper_name in
   Hashtbl.remove registry keeper_name;
+  if was_present then emit_registry_size_gauge_holding_lock ();
   Stdlib.Mutex.unlock registry_mutex

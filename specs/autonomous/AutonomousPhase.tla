@@ -87,6 +87,28 @@ Spec == Init /\ [][Next]_vars
 
 BoundedHistory == Len(history) <= MaxHistory
 
+\* ── Bug model (RFC-Q2-2) ────────────────────────────────────────
+\*
+\* Models the bug class where an illegal phase transition slips past
+\* the OCaml-side GADT guard and reaches the runtime history. The
+\* GADT in [Autonomous_phase.Transition.t : ('from, 'to_) t] makes
+\* this unconstructible at the type level, but the spec verifies
+\* that even if the constraint were lifted (e.g. via Obj.magic or a
+\* serialisation round-trip), [OnlyLegalTransitions] catches it.
+
+IllegalStep(next_phase) ==
+    /\ next_phase \in Phases
+    /\ next_phase /= current  \* skip the trivial self-loop case
+    /\ <<current, next_phase>> \notin LegalTransitions
+    /\ current' = next_phase
+    /\ history' = Append(history, next_phase)
+
+NextBuggy ==
+    \/ Next
+    \/ \E next_phase \in Phases : IllegalStep(next_phase)
+
+SpecBuggy == Init /\ [][NextBuggy]_vars
+
 THEOREM Spec => []TypeOK
 THEOREM Spec => []StartedAtIdle
 THEOREM Spec => []CurrentMatchesHead

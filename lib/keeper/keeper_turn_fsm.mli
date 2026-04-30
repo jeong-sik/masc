@@ -75,6 +75,50 @@ val pp_cancel_reason : Format.formatter -> cancel_reason -> unit
 val pp_failure_reason : Format.formatter -> failure_reason -> unit
 val pp_turn_state : Format.formatter -> turn_state -> unit
 
+type transition_action =
+  | StartTurn
+  | PhaseGateSkip
+  | PhaseGateOk
+  | CascadeRouted
+  | CascadeUnavailable
+  | ProviderResponded
+  | ProviderTimeout
+  | StreamYieldsTool
+  | ToolReturned
+  | StreamComplete
+  | ContractOk
+  | ContractViolation
+  | ReceiptLost
+  | GenericFail
+  | SupervisorRequestsStop
+  | HonorStopSignal
+  | TerminalStutter
+(** Runtime image of [KeeperTurnFSM.tla] [Next] actions.
+
+    [GenericFail] is the OCaml-side structured-failure extension for
+    active-state failures whose carrier is more specific than the compact
+    TLA projection. *)
+
+val transition_action_label : transition_action -> string
+
+type transition_violation = {
+  from_state : string;
+  to_state : string;
+  reason : string;
+}
+
+val classify_transition :
+  from_state:turn_state ->
+  to_state:turn_state ->
+  transition_action option
+(** Return the TLA+ action represented by an OCaml state edge, if the
+    edge is allowed by the keeper-turn FSM contract. *)
+
+val assert_transition_allowed :
+  from_state:turn_state ->
+  to_state:turn_state ->
+  (transition_action, transition_violation) result
+
 val require_active_state : turn_state -> turn_state
 (** Identity on [s]; runtime-asserts that [s] is not a terminal state
     ([Done], [Failed _], [Cancelled _]).

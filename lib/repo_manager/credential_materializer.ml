@@ -45,18 +45,229 @@ let verify_state ~gh_config_dir : credential_state =
   else
     Stale { reason = "gh auth status returned non-zero exit code" }
 
-(** Re-compute and update the [state] field of [cred] without touching
-    other fields.  Idempotent.  Called by [Credential_store.add] /
-    [Credential_store.update] (PR-B Slice 2) so newly-registered
-    credentials carry an accurate state without requiring an explicit
-    second call. *)
-let ensure (cred : credential) : credential =
-  let new_state =
-    match cred.gh_config_dir with
-    | None -> Unmaterialized
-    | Some dir -> verify_state ~gh_config_dir:dir
+(* RFC-0019 PR-C §3.2 P1 — token-as-boundary invariant requires a
+   stable, length-bounded fingerprint of the actual oauth_token so the
+   F-1 gate can compare a keeper-scoped credential against the operator
+   ambient credential without ever seeing the token strings themselves.
+
+   We use [Digestif.SHA256.digest_string] with a 12-character hex prefix.
+   12 hex chars = 48 bits — enough to make accidental collisions
+   astronomically unlikely (2^-48 per pair) while being short enough to
+   surface in logs/audit without prompting people to redact it. *)
+let sha256_prefix s =
+  let full =
+    Digestif.SHA256.(digest_string s |> to_hex)
   in
-  { cred with state = new_state }
+  String.sub full 0 12
+
+(* Strip a single leading or trailing whitespace/quote/CR around the
+   YAML scalar value.  Tokens in [hosts.yml] never contain whitespace,
+   so this is sufficient for the narrow F-1 input.  Conservative: we
+   accept either bare or single/double-quoted forms. *)
+let strip_value_decorations raw =
+  let trimmed = String.trim raw in
+  let n = String.length trimmed in
+  if n >= 2
+     && ( (trimmed.[0] = '"' && trimmed.[n - 1] = '"')
+       || (trimmed.[0] = '\'' && trimmed.[n - 1] = '\'') )
+  then String.sub trimmed 1 (n - 2)
+  else trimmed
+
+(* Read the [oauth_token] line from a [hosts.yml] under [gh_config_dir].
+   Returns [None] if the file is missing or the token line is absent.
+   The token value never escapes this function; callers receive only
+   its [sha256_prefix]. *)
+let read_token_from_hosts_yml ~gh_config_dir =
+  let path = Filename.concat gh_config_dir "hosts.yml" in
+  if not (Sys.file_exists path) then None
+  else
+    try
+      let ic = open_in path in
+      let token = ref None in
+      (try
+         while !token = None do
+           let line = input_line ic in
+           let trimmed = String.trim line in
+           let prefix = "oauth_token:" in
+           let plen = String.length prefix in
+           if String.length trimmed > plen
+              && String.equal (String.sub trimmed 0 plen) prefix
+           then
+             let raw =
+               String.sub trimmed plen (String.length trimmed - plen)
+             in
+             token := Some (strip_value_decorations raw)
+         done
+       with End_of_file -> ());
+      close_in ic;
+      !token
+    with Sys_error _ -> None
+
+(** Compute the SHA-256 prefix of the [oauth_token] stored in
+    [<gh_config_dir>/hosts.yml].  Returns [None] when the bundle has not
+    been materialised yet (no hosts.yml on disk).  Callers that need the
+    full hash should not — the prefix is sufficient for F-1 comparison
+    and intentionally short enough to be safe to surface. *)
+let compute_token_sha256_prefix ~gh_config_dir : string option =
+  match read_token_from_hosts_yml ~gh_config_dir with
+  | None -> None
+  | Some token -> Some (sha256_prefix token)
+
+(* Capture the operator ambient [gh auth token] best-effort.  Used only
+   for F-1 comparison; on any failure (gh not installed, not authed,
+   subprocess error) we return [None] and the gate stays silent — F-1
+   is permissive in PR-C and only ratchets to strict in a follow-up. *)
+let read_operator_ambient_token () : string option =
+  let read_fd, write_fd = Unix.pipe ~cloexec:false () in
+  let devnull_err =
+    try Some (Unix.openfile "/dev/null" [ Unix.O_WRONLY ] 0o644)
+    with Unix.Unix_error _ -> None
+  in
+  let stderr_fd = Option.value devnull_err ~default:Unix.stderr in
+  (* Strip any GH_CONFIG_DIR set in the parent so we read the operator
+     ambient credential, not whatever the parent caller pointed at. *)
+  let env =
+    Unix.environment ()
+    |> Array.to_list
+    |> List.filter (fun kv ->
+      not (String.length kv >= 14
+           && String.equal (String.sub kv 0 14) "GH_CONFIG_DIR="))
+    |> Array.of_list
+  in
+  let pid =
+    try
+      Some
+        (Unix.create_process_env "gh"
+           [| "gh"; "auth"; "token" |]
+           env Unix.stdin write_fd stderr_fd)
+    with Unix.Unix_error _ -> None
+  in
+  (try Unix.close write_fd with Unix.Unix_error _ -> ());
+  Option.iter
+    (fun fd -> try Unix.close fd with Unix.Unix_error _ -> ())
+    devnull_err;
+  match pid with
+  | None ->
+      (try Unix.close read_fd with Unix.Unix_error _ -> ());
+      None
+  | Some pid ->
+      let ic = Unix.in_channel_of_descr read_fd in
+      let buf = Buffer.create 128 in
+      (try
+         while true do Buffer.add_channel buf ic 64 done
+       with End_of_file -> ());
+      (try close_in ic with _ -> ());
+      let status = snd (Unix.waitpid [] pid) in
+      (match status with
+       | Unix.WEXITED 0 ->
+           let token = String.trim (Buffer.contents buf) in
+           if String.equal token "" then None else Some token
+       | _ -> None)
+
+(** RFC-0019 PR-C §3.2 P1 — F-1 gate (permissive).
+
+    Compares the SHA-256 prefix of the keeper bundle's token against the
+    operator ambient [gh auth token].  Emits the
+    [keeper_credential_provider_gate_warned_total] Prometheus counter
+    when the prefixes match (i.e. the keeper is reusing the operator's
+    PAT — the cosmetic-identity scenario that motivated RFC-0008 F-1).
+
+    Permissive in PR-C: the gate logs and counts but does not refuse
+    materialisation.  Strict mode is gated on a 2-week soak window in
+    PR-D.  Best-effort on the operator side: if [gh] is not installed
+    or the operator is not authed, we silently skip — the warning is
+    a positive signal, never an absence-of-signal. *)
+type f1_gate_outcome =
+  | F1_skipped of string
+  | F1_distinct
+  | F1_shared_with_operator
+
+let f1_gate_check ~credential_id:_ ~gh_config_dir : f1_gate_outcome =
+  match compute_token_sha256_prefix ~gh_config_dir with
+  | None -> F1_skipped "bundle has no oauth_token to fingerprint"
+  | Some bundle_prefix ->
+      (match read_operator_ambient_token () with
+       | None ->
+           F1_skipped
+             "operator ambient `gh auth token` unavailable; gate is \
+              permissive and skips comparison"
+       | Some op_token ->
+           let op_prefix = sha256_prefix op_token in
+           if String.equal op_prefix bundle_prefix then
+             F1_shared_with_operator
+           else F1_distinct)
+
+(** Re-compute and update the [state] and [token_sha256_prefix] fields
+    of [cred] without touching other fields.  Idempotent.  Called by
+    [Credential_store.add] / [Credential_store.update] so newly-
+    registered credentials carry an accurate state without requiring an
+    explicit second call. *)
+let ensure (cred : credential) : credential =
+  let new_state, new_prefix =
+    match cred.gh_config_dir with
+    | None -> Unmaterialized, None
+    | Some dir ->
+        let s = verify_state ~gh_config_dir:dir in
+        let p =
+          match s with
+          | Materialized _ -> compute_token_sha256_prefix ~gh_config_dir:dir
+          | _ -> None
+        in
+        s, p
+  in
+  { cred with state = new_state; token_sha256_prefix = new_prefix }
+
+(** RFC-0008 F-2 / RFC-0019 PR-C — rewrite [hosts.yml:user] back to the
+    keeper-scoped identity label after [gh auth login --with-token]
+    overwrites it with the real GitHub login.
+
+    Best-effort: the relabel is cosmetic by P1 (the credential boundary
+    IS the token, not the [user:] line).  We attempt the rewrite and
+    silently skip on any I/O error — the bundle remains usable and the
+    operator's audit shows the real GitHub login as a fallback.  Any
+    failure is reflected in the [state] field by the next
+    [verify_state] call. *)
+let relabel_hosts_yml ~gh_config_dir ~identity_label =
+  let path = Filename.concat gh_config_dir "hosts.yml" in
+  if not (Sys.file_exists path) then ()
+  else
+    try
+      let ic = open_in path in
+      let lines = ref [] in
+      (try
+         while true do lines := input_line ic :: !lines done
+       with End_of_file -> ());
+      close_in ic;
+      let rewritten =
+        List.rev_map
+          (fun line ->
+            let trimmed = String.trim line in
+            let prefix = "user:" in
+            let plen = String.length prefix in
+            if String.length trimmed > plen
+               && String.equal (String.sub trimmed 0 plen) prefix
+            then
+              (* Preserve the original indentation. *)
+              let leading_ws =
+                let n = String.length line in
+                let i = ref 0 in
+                while !i < n && (line.[!i] = ' ' || line.[!i] = '\t') do
+                  incr i
+                done;
+                String.sub line 0 !i
+              in
+              Printf.sprintf "%suser: %s" leading_ws identity_label
+            else line)
+          !lines
+      in
+      let oc = open_out path in
+      Fun.protect
+        ~finally:(fun () -> close_out_noerr oc)
+        (fun () ->
+          List.iter
+            (fun line -> output_string oc line; output_char oc '\n')
+            rewritten)
+    with Sys_error _ -> ()
 
 (* RFC-0019 PR-B Slice 2 + §8 R3: refuse paths that escape via [..]
    segments.  Absolute or relative are both allowed; what is not allowed
@@ -104,7 +315,8 @@ let rec mkdir_p path mode =
     The function is synchronous (uses [Unix.create_process_env]); PR-C
     will move it to [Process_eio.run_argv] alongside the keeper-side
     lifecycle hooks. *)
-let provision_via_with_token ~gh_config_dir ~token : (credential_state, string) result =
+let provision_via_with_token ?credential_id ?identity_label
+    ~gh_config_dir ~token () : (credential_state, string) result =
   match path_safe gh_config_dir with
   | Error _ as e -> e
   | Ok () ->
@@ -175,6 +387,20 @@ let provision_via_with_token ~gh_config_dir ~token : (credential_state, string) 
               let status = snd (Unix.waitpid [] pid) in
               (match status with
                | Unix.WEXITED 0 ->
+                   (* RFC-0008 F-2: relabel hosts.yml:user back to the
+                      keeper-scoped identity (gh just overwrote it
+                      with the real GitHub login).  Best-effort. *)
+                   Option.iter
+                     (fun label ->
+                       relabel_hosts_yml ~gh_config_dir
+                         ~identity_label:label)
+                     identity_label;
+                   (* RFC-0019 PR-C: F-1 gate is invoked by the caller
+                      (server route) so the Prometheus emission stays in
+                      the masc_mcp library, avoiding a circular dep
+                      from repo_manager.  The [credential_id] arg is
+                      accepted here for API symmetry only. *)
+                   ignore credential_id;
                    Ok (verify_state ~gh_config_dir)
                | Unix.WEXITED n ->
                    Error

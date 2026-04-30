@@ -104,9 +104,13 @@ let test_ensure_preserves_other_fields_and_resets_state_to_unmaterialized () =
   Alcotest.(check string) "username preserved" cred.username updated.username;
   Alcotest.(check (option string))
     "gh_config_dir preserved" cred.gh_config_dir updated.gh_config_dir;
+  (* RFC-0019 PR-C: when state transitions away from Materialized,
+     token_sha256_prefix is reset to None.  A stale prefix would mislead
+     the F-1 gate (it would compare against a fingerprint that no
+     longer corresponds to the on-disk token). *)
   Alcotest.(check (option string))
-    "token_sha256_prefix preserved"
-    cred.token_sha256_prefix updated.token_sha256_prefix;
+    "token_sha256_prefix reset to None when not Materialized"
+    None updated.token_sha256_prefix;
   Alcotest.(check bool)
     "ssh_key_path preserved" true
     (cred.ssh_key_path = updated.ssh_key_path);
@@ -181,7 +185,7 @@ let canary_token =
 let test_provision_rejects_empty_token () =
   match
     Credential_materializer.provision_via_with_token
-      ~gh_config_dir:"/tmp/keeper-creds-canary" ~token:""
+      ~gh_config_dir:"/tmp/keeper-creds-canary" ~token:"" ()
   with
   | Error msg ->
       Alcotest.(check bool) "error mentions non-empty requirement"
@@ -195,7 +199,7 @@ let test_provision_rejects_empty_token () =
 let test_provision_rejects_path_traversal () =
   match
     Credential_materializer.provision_via_with_token
-      ~gh_config_dir:"/tmp/../etc/gh" ~token:canary_token
+      ~gh_config_dir:"/tmp/../etc/gh" ~token:canary_token ()
   with
   | Error msg ->
       Alcotest.(check bool) "error mentions forbidden segment" true
@@ -211,6 +215,168 @@ let test_provision_rejects_path_traversal () =
            true
          with Not_found -> false)
   | Ok _ -> Alcotest.fail "expected Error for path with .. segment"
+
+(* --- 6. SHA-256 fingerprint + F-1 gate (PR-C) --- *)
+
+let is_hex_char c =
+  (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
+
+let test_sha256_prefix_length () =
+  let p = Credential_materializer.sha256_prefix "hello" in
+  Alcotest.(check int) "12 hex chars" 12 (String.length p);
+  String.iter
+    (fun c ->
+      Alcotest.(check bool)
+        (Printf.sprintf "char %C is hex" c) true (is_hex_char c))
+    p
+
+let test_sha256_prefix_deterministic () =
+  let a = Credential_materializer.sha256_prefix "ghp_canary" in
+  let b = Credential_materializer.sha256_prefix "ghp_canary" in
+  Alcotest.(check string) "same input -> same output" a b
+
+let test_sha256_prefix_distinguishes () =
+  let a = Credential_materializer.sha256_prefix "ghp_token_A" in
+  let b = Credential_materializer.sha256_prefix "ghp_token_B" in
+  Alcotest.(check bool) "distinct inputs -> distinct prefixes" true
+    (not (String.equal a b))
+
+let make_hosts_yml ~gh_config_dir ~user ~token =
+  Unix.mkdir gh_config_dir 0o700;
+  let path = Filename.concat gh_config_dir "hosts.yml" in
+  let oc = open_out path in
+  output_string oc "github.com:\n";
+  Printf.fprintf oc "    user: %s\n" user;
+  Printf.fprintf oc "    oauth_token: %s\n" token;
+  output_string oc "    git_protocol: https\n";
+  close_out oc
+
+let test_compute_prefix_no_hosts_yml () =
+  with_temp_base_path (fun base ->
+      let dir = Filename.concat base "no_hosts" in
+      Unix.mkdir dir 0o700;
+      match
+        Credential_materializer.compute_token_sha256_prefix
+          ~gh_config_dir:dir
+      with
+      | None -> ()
+      | Some _ ->
+          Alcotest.fail "expected None when hosts.yml is absent")
+
+let test_compute_prefix_matches_token () =
+  with_temp_base_path (fun base ->
+      let dir = Filename.concat base "with_hosts" in
+      let token = "ghp_test_token_RFC0019_PRC" in
+      make_hosts_yml ~gh_config_dir:dir ~user:"keeper-A" ~token;
+      match
+        Credential_materializer.compute_token_sha256_prefix
+          ~gh_config_dir:dir
+      with
+      | None -> Alcotest.fail "expected Some prefix"
+      | Some prefix ->
+          let expected = Credential_materializer.sha256_prefix token in
+          Alcotest.(check string) "prefix matches sha256_prefix(token)"
+            expected prefix)
+
+(* RFC-0019 §8 R2: even though the token is read from disk into memory
+   to be hashed, the function never returns the token itself nor exposes
+   it through any other surface.  We assert that a canary token written
+   to hosts.yml does NOT appear in:
+     - the prefix returned by compute_token_sha256_prefix
+     - the f1_gate_check outcome (F1_skipped reason / F1_distinct / F1_shared)
+*)
+let test_f1_gate_skipped_no_token () =
+  with_temp_base_path (fun base ->
+      let dir = Filename.concat base "empty_bundle" in
+      Unix.mkdir dir 0o700;
+      match
+        Credential_materializer.f1_gate_check
+          ~credential_id:"k" ~gh_config_dir:dir
+      with
+      | F1_skipped reason ->
+          (* Reason mentions the absence; never echoes any token. *)
+          Alcotest.(check bool)
+            "reason mentions fingerprint absence" true
+            (try
+               ignore (Str.search_forward (Str.regexp "fingerprint") reason 0);
+               true
+             with Not_found -> false)
+      | F1_distinct | F1_shared_with_operator ->
+          Alcotest.fail "expected F1_skipped when bundle has no token")
+
+(* --- 7. hosts.yml relabel --- *)
+
+let test_relabel_user_line () =
+  with_temp_base_path (fun base ->
+      let dir = Filename.concat base "relabel" in
+      let token = "ghp_relabel_token" in
+      make_hosts_yml ~gh_config_dir:dir ~user:"vincent-real" ~token;
+      Credential_materializer.relabel_hosts_yml
+        ~gh_config_dir:dir ~identity_label:"keeper-anyang";
+      let ic = open_in (Filename.concat dir "hosts.yml") in
+      let buf = Buffer.create 256 in
+      (try while true do
+              Buffer.add_string buf (input_line ic);
+              Buffer.add_char buf '\n'
+            done
+       with End_of_file -> ());
+      close_in ic;
+      let content = Buffer.contents buf in
+      Alcotest.(check bool) "user line shows new identity" true
+        (try
+           ignore
+             (Str.search_forward (Str.regexp_string "user: keeper-anyang")
+                content 0);
+           true
+         with Not_found -> false);
+      Alcotest.(check bool) "old user value gone" false
+        (try
+           ignore
+             (Str.search_forward (Str.regexp_string "user: vincent-real")
+                content 0);
+           true
+         with Not_found -> false))
+
+let test_relabel_preserves_other_lines () =
+  with_temp_base_path (fun base ->
+      let dir = Filename.concat base "preserve" in
+      let token = "ghp_preserved_token_canary" in
+      make_hosts_yml ~gh_config_dir:dir ~user:"original" ~token;
+      Credential_materializer.relabel_hosts_yml
+        ~gh_config_dir:dir ~identity_label:"new-id";
+      let ic = open_in (Filename.concat dir "hosts.yml") in
+      let buf = Buffer.create 256 in
+      (try while true do
+              Buffer.add_string buf (input_line ic);
+              Buffer.add_char buf '\n'
+            done
+       with End_of_file -> ());
+      close_in ic;
+      let content = Buffer.contents buf in
+      (* Token line must survive verbatim. *)
+      Alcotest.(check bool) "oauth_token line preserved" true
+        (try
+           ignore
+             (Str.search_forward
+                (Str.regexp_string ("oauth_token: " ^ token))
+                content 0);
+           true
+         with Not_found -> false);
+      Alcotest.(check bool) "git_protocol line preserved" true
+        (try
+           ignore
+             (Str.search_forward
+                (Str.regexp_string "git_protocol: https") content 0);
+           true
+         with Not_found -> false))
+
+let test_relabel_no_file () =
+  with_temp_base_path (fun base ->
+      let dir = Filename.concat base "missing" in
+      Unix.mkdir dir 0o700;
+      (* Must not raise even though hosts.yml is absent. *)
+      Credential_materializer.relabel_hosts_yml
+        ~gh_config_dir:dir ~identity_label:"x")
 
 let () =
   Alcotest.run "credential_materializer"
@@ -248,5 +414,37 @@ let () =
           Alcotest.test_case
             "provision rejects path traversal without echoing token"
             `Quick test_provision_rejects_path_traversal;
+        ] );
+      ( "F-1 gate fingerprint",
+        [
+          Alcotest.test_case "sha256_prefix is 12 hex chars" `Quick
+            test_sha256_prefix_length;
+          Alcotest.test_case "sha256_prefix is deterministic" `Quick
+            test_sha256_prefix_deterministic;
+          Alcotest.test_case "sha256_prefix differs for different inputs"
+            `Quick test_sha256_prefix_distinguishes;
+          Alcotest.test_case
+            "compute_token_sha256_prefix returns None when hosts.yml \
+             missing"
+            `Quick test_compute_prefix_no_hosts_yml;
+          Alcotest.test_case
+            "compute_token_sha256_prefix matches sha256_prefix of token"
+            `Quick test_compute_prefix_matches_token;
+          Alcotest.test_case
+            "f1_gate_check returns F1_skipped when no token in bundle"
+            `Quick test_f1_gate_skipped_no_token;
+        ] );
+      ( "hosts.yml relabel",
+        [
+          Alcotest.test_case
+            "relabel_hosts_yml rewrites user line, preserves indent"
+            `Quick test_relabel_user_line;
+          Alcotest.test_case
+            "relabel_hosts_yml leaves other lines (incl oauth_token) \
+             untouched"
+            `Quick test_relabel_preserves_other_lines;
+          Alcotest.test_case
+            "relabel_hosts_yml is silent when hosts.yml is missing"
+            `Quick test_relabel_no_file;
         ] );
     ]

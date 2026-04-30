@@ -258,10 +258,41 @@ let add_routes router =
                                    match
                                      Credential_materializer
                                      .provision_via_with_token
-                                       ~gh_config_dir:dir ~token
+                                       ~credential_id:credential.id
+                                       ~identity_label:credential.username
+                                       ~gh_config_dir:dir ~token ()
                                    with
                                    | Error msg -> response `Bad_request msg
                                    | Ok _state -> (
+                                       (* RFC-0019 PR-C F-1 gate
+                                          (permissive): emit the
+                                          gate_warned counter when the
+                                          freshly-provisioned bundle's
+                                          token fingerprint matches the
+                                          operator ambient `gh auth
+                                          token`.  Operator can trace
+                                          credentials that share their
+                                          PAT via Prometheus before
+                                          PR-D ramps the gate to strict.
+                                          Never blocks materialisation. *)
+                                       (match
+                                          Credential_materializer
+                                          .f1_gate_check
+                                            ~credential_id:credential.id
+                                            ~gh_config_dir:dir
+                                        with
+                                        | Credential_materializer
+                                          .F1_shared_with_operator ->
+                                            Prometheus.inc_counter
+                                              "keeper_credential_provider_gate_warned_total"
+                                              ~labels:
+                                                [ ("credential_id",
+                                                   credential.id);
+                                                  ("scope",
+                                                   "shared_with_operator") ]
+                                              ()
+                                        | F1_distinct | F1_skipped _ ->
+                                            ());
                                        match
                                          Credential_store.add
                                            ~base_path credential

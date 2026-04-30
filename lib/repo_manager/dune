@@ -14,6 +14,7 @@
  (wrapped false)
  (libraries
    masc_mcp.masc_exec
+   digestif
    yojson
    otoml
    unix)

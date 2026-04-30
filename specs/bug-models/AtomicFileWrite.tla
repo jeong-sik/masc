@@ -66,12 +66,12 @@ Read ==
 
 \* ── Unsafe Next (bug model) ───────────────────────────
 
-NextUnsafe ==
+NextBuggy ==
     \/ UnsafeTruncate
     \/ UnsafeWrite
     \/ Read
 
-SpecUnsafe == Init /\ [][NextUnsafe]_vars
+SpecBuggy == Init /\ [][NextBuggy]_vars
 
 \* ── Safe Next (fixed model) ───────────────────────────
 

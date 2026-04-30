@@ -191,11 +191,10 @@ jobs:
             let shouldRestoreDraft = false;
             let shouldDisableAutoMerge = false;
             let ciGatePolicyFailure = false;
-            // When a guarded PR is already in the safe invariant
-            // (draft=true, no auto-merge), treating "missing approval" as a
-            // policy violation is a false positive: the guard has nothing left
-            // to enforce because the PR is already draft-only. This covers the
-            // initial draft open path as well as explicit convert-to-draft.
+            // Keep the required guard fail-closed even while the PR is draft.
+            // A previous success on the same head SHA can otherwise let a
+            // ready_for_review + immediate merge race reuse that success before
+            // the new guard run has time to fail.
             const safeDraftOnlyState = current.isDraft && !hasAutoMergeRequest;
             const approvalRequired =
               looksAgentAuthored ||
@@ -204,8 +203,7 @@ jobs:
               bypassPolicyFailures.length > 0;
             const missingVerifiedApproval =
               approvalRequired &&
-              verifiedBypassLabels.length === 0 &&
-              !safeDraftOnlyState;
+              verifiedBypassLabels.length === 0;
             if (missingVerifiedApproval) {
               const expected =
                 bypassLabels.length > 0 ? bypassLabels.join(", ") : "(no configured bypass labels)";
@@ -213,7 +211,7 @@ jobs:
               shouldRestoreDraft = !current.isDraft;
               shouldDisableAutoMerge = hasAutoMergeRequest;
             }
-            if (bypassPolicyFailures.length > 0 && !safeDraftOnlyState) {
+            if (bypassPolicyFailures.length > 0) {
               shouldRestoreDraft = !current.isDraft;
               shouldDisableAutoMerge = hasAutoMergeRequest;
             }

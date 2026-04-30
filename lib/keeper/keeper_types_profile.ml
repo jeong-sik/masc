@@ -764,8 +764,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
   in
   let tool_access_defaults = tool_access_defaults_result in
   let result =
-    Result.bind result
-      (fun (tool_preset, tool_also_allow, tool_preset_source) ->
+    Result.bind result (fun () ->
         let has_proactive_enabled = has "proactive_enabled" in
         let has_proactive_idle = has "proactive_idle_sec" in
         let has_proactive_cooldown = has "proactive_cooldown_sec" in
@@ -787,7 +786,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
             Error
               "proactive_idle_sec or proactive_cooldown_sec is set but \
                proactive_enabled is missing"
-        | _ -> Ok (tool_preset, tool_also_allow, tool_preset_source))
+        | _ -> Ok ())
   in
   Result.bind result (fun () ->
       match tool_access_defaults with

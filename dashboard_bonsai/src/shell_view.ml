@@ -709,6 +709,7 @@ let nav ~(active : Route.t) =
     ; lnk Tools
     ; lnk Sessions
     ; lnk Social_board
+    ; lnk Multimodal
     ; section "crypt"
     ; lnk Dead_keepers
     ; lnk Archive_runs

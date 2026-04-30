@@ -439,6 +439,14 @@ let run_keepalive_unified_turn
           ~base_path:ctx.config.base_path
           meta_after_triage.name
           ~reasons:verdict_strs;
+        (* #10940 follow-up — proactive keepers with no actionable work skip
+           turns legitimately.  Without updating [last_turn_ts] the stale
+           watchdog sees an idle > 300 s fiber and kills the keeper.
+           Touching the timestamp keeps the watchdog aligned with the
+           heartbeat loop's actual liveness. *)
+        Keeper_registry.touch_last_turn_ts
+          ~base_path:ctx.config.base_path
+          meta_after_triage.name;
         let log_not_scheduled =
           match turn_decision.verdict with
           | Keeper_world_observation.Skip { reasons = (Keeper_world_observation.Scheduled_autonomous_disabled, []) } ->

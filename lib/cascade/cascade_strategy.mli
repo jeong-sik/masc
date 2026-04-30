@@ -46,10 +46,11 @@ type signal_ctx = {
 
       @since 0.9.7 *)
 
-  cascade_name : string;
+  cascade_name : Keeper_cascade_profile.runtime_name;
   (** Cascade identifier (the [<name>] in [<name>_models]).  Used by
       [Sticky] and [Round_robin] to scope their state.  Required for
-      stateful kinds; tolerated as ["" ] for stateless kinds.
+      stateful kinds; tolerated as [Runtime_name "" ] for stateless kinds.
+      Rendered to string only at the {!Cascade_state} boundary.
 
       @since 0.9.7 *)
 }

@@ -57,7 +57,7 @@ let mk_ctx ?(health = H.create ())
            ?(cascade_name = "")
            () : S.signal_ctx =
   { health; capacity; now; rand_int = rand;
-    keeper_name; cascade_name }
+    keeper_name; cascade_name = Kcp.Runtime_name cascade_name }
 
 let mk_t ?(cycle = S.default_cycle_policy)
          ?(tiers = [])

@@ -27,6 +27,8 @@ open Alcotest
 
 let target_file = "lib/server/server_dashboard_http_keeper_api.ml"
 
+let status_detail_file = "lib/keeper/keeper_status_detail.ml"
+
 let metric_name = "metric_keeper_paused_state_persist_errors"
 
 let load_source rel =
@@ -151,6 +153,25 @@ let test_counter_inc_calls () =
        src
      >= 6)
 
+let test_keeper_status_disposition_mirrors_runtime_trust () =
+  let src = load_source status_detail_file in
+  check bool "keeper status builds runtime_trust" true
+    (count_occurrences
+       ~needle:
+         "let runtime_trust =\n           Keeper_runtime_trust_snapshot.snapshot_json"
+       src
+     >= 1);
+  check bool "top-level disposition reads runtime_trust" true
+    (count_occurrences
+       ~needle:"json_string_opt_member runtime_trust \"disposition\""
+       src
+     >= 1);
+  check bool "top-level disposition field is emitted" true
+    (count_occurrences
+       ~needle:"(\"disposition\", Json_util.string_opt_to_json disposition)"
+       src
+     >= 1)
+
 let () =
   run "keeper_pause_silent_failure_source"
     [ ( "issue-8391-high-1"
@@ -163,5 +184,7 @@ let () =
             test_error_branch_observable
         ; test_case "counter inc calls present" `Quick
             test_counter_inc_calls
+        ; test_case "keeper status mirrors runtime-trust disposition" `Quick
+            test_keeper_status_disposition_mirrors_runtime_trust
         ] )
     ]

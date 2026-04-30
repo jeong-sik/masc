@@ -291,6 +291,13 @@ let metric_keeper_turn_latency_by_model_bucket =
 let metric_keeper_provider_cooldown_skip =
   "masc_keeper_provider_cooldown_skip_total"
 
+(* P-DASH-01: provider cooldown remaining seconds gauge.
+   Exposes the current cooldown duration so operators can see
+   which cascade is blocked and for how long without log parsing.
+   Labels: keeper, cascade. *)
+let metric_keeper_provider_cooldown_remaining_sec =
+  "masc_keeper_provider_cooldown_remaining_sec"
+
 (* P-DASH-02: turn queue depth gauge.  Semaphore waiters are
    observable via [autonomous_waiter_snapshot_for_test] but were
    only emitted as a debug log line.  Surfacing as a gauge lets

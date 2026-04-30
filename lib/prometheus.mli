@@ -110,6 +110,11 @@ val metric_keeper_provider_cooldown_skip : string
     cascade is in provider cooldown and the keeper fail-opens to a
     fallback cascade.  Labels: [keeper, from_cascade, to_cascade]. *)
 
+val metric_keeper_provider_cooldown_remaining_sec : string
+(** P-DASH-01: provider cooldown remaining seconds gauge.
+    Exposes the current cooldown duration so operators can see
+    which cascade is blocked and for how long.  Labels: [keeper, cascade]. *)
+
 val metric_keeper_turn_queue_depth : string
 (** P-DASH-02: turn queue depth gauge.  Semaphore waiter count
     surfaced so operators can alert on queue pressure without log

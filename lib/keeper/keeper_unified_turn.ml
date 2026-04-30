@@ -150,6 +150,13 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             ~cascade_name:effective_cascade_name
         with
         | Some remaining_sec ->
+            Prometheus.set_gauge
+              Prometheus.metric_keeper_provider_cooldown_remaining_sec
+              ~labels:[
+                ("keeper", meta.name);
+                ("cascade", effective_cascade_name);
+              ]
+              (float_of_int remaining_sec);
             (match
                EC.fallback_cascade_for_unavailable_profile
                  ~base_cascade:meta.cascade_name
@@ -170,7 +177,15 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                    ();
                  fallback_cascade
              | _ -> effective_cascade_name)
-        | None -> effective_cascade_name
+        | None ->
+            Prometheus.set_gauge
+              Prometheus.metric_keeper_provider_cooldown_remaining_sec
+              ~labels:[
+                ("keeper", meta.name);
+                ("cascade", effective_cascade_name);
+              ]
+              0.0;
+            effective_cascade_name
       in
       (* PR-B: ollama saturation pre-skip.  If the resolved cascade
          is ollama-only and the [/api/ps] cache reports zero

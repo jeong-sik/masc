@@ -130,6 +130,7 @@ module type LOGGER = sig
   val debug : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a
   val info : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a
   val warn : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a
+  val warning : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a
   val error : ?keeper_name:string -> ?turn_id:int -> ('a, unit, string, unit) format4 -> 'a
 end
 

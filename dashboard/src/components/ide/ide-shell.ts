@@ -1,6 +1,6 @@
 import { html } from 'htm/preact'
 import { useState } from 'preact/hooks'
-import { IdeExplorerMock } from './ide-explorer-mock'
+import { IdeExplorer } from './ide-explorer'
 import { IdeEditorMock } from './ide-editor-mock'
 import { IdeConversationRailMock } from './ide-conversation-rail-mock'
 import { IdeActivityMock } from './ide-activity-mock'
@@ -70,7 +70,7 @@ export function IdeShell() {
         }}
       >
         <div style=${{ gridColumn: 1, gridRow: '1 / span 2' }}>
-          <${IdeExplorerMock} />
+          <${IdeExplorer} />
         </div>
         <div style=${{ gridColumn: 2, gridRow: '1 / span 2', minHeight: 0 }}>
           <${IdeEditorMock} />

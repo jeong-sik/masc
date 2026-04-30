@@ -6,8 +6,7 @@ import { navigate } from '../router'
 import { Card } from './common/card'
 import { SectionCap } from './common/section-cap'
 import { MermaidGraph } from './common/mermaid-graph'
-import { KpiCell } from './kpi-cell'
-import { KpiStrip } from './kpi-strip'
+import { KpiStripIsland, type KpiStripIslandData } from './kpi-strip-island'
 import {
   harness,
   loadHarnessHealth,
@@ -345,17 +344,21 @@ export function HarnessHealth() {
               </div>
             ` : null}
 
-            <${KpiStrip} ariaLabel="calibration 요약" cols=${4}>
-              <${KpiCell} variant="stacked" label="총 판정" value=${cal.total_verdicts} />
-              <${KpiCell} variant="stacked" label="거부율" value="${rejectRate}%" />
-              <${KpiCell} variant="stacked" label="대체 처리율" value="${fallbackPct}%" />
-              <${KpiCell}
-                variant="stacked"
-                label="일치율"
-                value="${agreementPct}%"
-                caption="FP:${cal.false_positive_count} FN:${cal.false_negative_count}"
-              />
-            <//>
+            <${KpiStripIsland}
+              ariaLabel="calibration 요약"
+              cols=${4}
+              cells=${[
+                { variant: 'stacked', label: '총 판정', value: cal.total_verdicts },
+                { variant: 'stacked', label: '거부율', value: `${rejectRate}%` },
+                { variant: 'stacked', label: '대체 처리율', value: `${fallbackPct}%` },
+                {
+                  variant: 'stacked',
+                  label: '일치율',
+                  value: `${agreementPct}%`,
+                  caption: `FP:${cal.false_positive_count} FN:${cal.false_negative_count}`,
+                },
+              ] satisfies KpiStripIslandData['cells']}
+            />
 
             <div class="rounded border border-[var(--white-8)] bg-[var(--white-3)] p-3 text-xs leading-loose text-[var(--color-fg-muted)]">
               인간 라벨 ${cal.labeled_count}건이 calibration ground truth입니다. 값이 0이면 runtime health는 볼 수 있어도 evaluator accuracy는 아직 검증되지 않았습니다.
@@ -385,24 +388,30 @@ export function HarnessHealth() {
               status=${data.pre_compact.status}
               lastEventAt=${data.pre_compact.last_event_at}
             />
-            <${KpiStrip} ariaLabel="압축 전 상태 요약" variant="stacked">
-              <${KpiCell}
-                variant="stacked"
-                label="최근 컨텍스트 사용률"
-                value=${data.overview.latest_pre_compact_ratio != null ? `${Math.round(data.overview.latest_pre_compact_ratio * 100)}%` : '-'}
-                caption=${`최근 ${data.pre_compact.total_recent}건`}
-              />
-              <${KpiCell}
-                variant="stacked"
-                label="최근 신호"
-                value=${freshnessLabel(data.pre_compact.last_event_at)}
-              />
-              <${KpiCell}
-                variant="stacked"
-                label="상태"
-                value=${railStatusLabel(data.pre_compact.status)}
-              />
-            <//>
+            <${KpiStripIsland}
+              ariaLabel="압축 전 상태 요약"
+              variant="stacked"
+              cells=${[
+                {
+                  variant: 'stacked',
+                  label: '최근 컨텍스트 사용률',
+                  value: data.overview.latest_pre_compact_ratio != null
+                    ? `${Math.round(data.overview.latest_pre_compact_ratio * 100)}%`
+                    : '-',
+                  caption: `최근 ${data.pre_compact.total_recent}건`,
+                },
+                {
+                  variant: 'stacked',
+                  label: '최근 신호',
+                  value: freshnessLabel(data.pre_compact.last_event_at),
+                },
+                {
+                  variant: 'stacked',
+                  label: '상태',
+                  value: railStatusLabel(data.pre_compact.status),
+                },
+              ] satisfies KpiStripIslandData['cells']}
+            />
             <${PreCompactList} section=${data.pre_compact} />
           </div>
         `}
@@ -419,24 +428,30 @@ export function HarnessHealth() {
               status=${data.recent_handoffs.status}
               lastEventAt=${data.recent_handoffs.last_event_at}
             />
-            <${KpiStrip} ariaLabel="세대 교체 요약" variant="stacked">
-              <${KpiCell}
-                variant="stacked"
-                label="최근 세대"
-                value=${data.overview.latest_handoff_generation != null ? `${data.overview.latest_handoff_generation}세대` : '-'}
-                caption=${`최근 ${data.recent_handoffs.total_recent}건`}
-              />
-              <${KpiCell}
-                variant="stacked"
-                label="최근 신호"
-                value=${freshnessLabel(data.recent_handoffs.last_event_at)}
-              />
-              <${KpiCell}
-                variant="stacked"
-                label="상태"
-                value=${railStatusLabel(data.recent_handoffs.status)}
-              />
-            <//>
+            <${KpiStripIsland}
+              ariaLabel="세대 교체 요약"
+              variant="stacked"
+              cells=${[
+                {
+                  variant: 'stacked',
+                  label: '최근 세대',
+                  value: data.overview.latest_handoff_generation != null
+                    ? `${data.overview.latest_handoff_generation}세대`
+                    : '-',
+                  caption: `최근 ${data.recent_handoffs.total_recent}건`,
+                },
+                {
+                  variant: 'stacked',
+                  label: '최근 신호',
+                  value: freshnessLabel(data.recent_handoffs.last_event_at),
+                },
+                {
+                  variant: 'stacked',
+                  label: '상태',
+                  value: railStatusLabel(data.recent_handoffs.status),
+                },
+              ] satisfies KpiStripIslandData['cells']}
+            />
             <${HandoffList} section=${data.recent_handoffs} />
           </div>
         `}

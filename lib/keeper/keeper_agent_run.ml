@@ -110,7 +110,6 @@ let run_turn
   let session_dir = ctx.session_dir in
   let session = ctx.session in
   let base_system_prompt = ctx.base_system_prompt in
-  let ctx_work = ctx.ctx_work in
   let resume_oas_checkpoint = ctx.resume_oas_checkpoint in
   let pre_dispatch_compacted = ctx.pre_dispatch_compacted in
   let pre_dispatch_checkpoint_error = ctx.pre_dispatch_checkpoint_error in
@@ -122,102 +121,20 @@ let run_turn
   let approval_mode_effective = ctx.approval_mode_effective in
   let approval_mode_derived = ctx.approval_mode_derived in
   let keeper_oas_context = ctx.keeper_oas_context in
-  (* 5. Build final turn system prompt via caller callback.
-     Hard constraints stay in system_prompt; soft context is injected
-     via OAS extra_system_context (prepended as User message after reduction). *)
-  let { system_prompt = turn_system_prompt; dynamic_context } =
-    build_turn_prompt
-      ~base_system_prompt
-      ~messages:(Keeper_exec_context.messages_of_context ctx_work)
+  (* Steps 5-6: turn prompt, memory/temporal context, prompt metrics,
+     user message append, token estimation — Keeper_run_prompt. *)
+  let prompt_ctx = Keeper_run_prompt.build_turn_context
+      ~ctx ~build_turn_prompt ~user_message ~config ~meta
+      ~history_user_source ~is_retry ~start_turn_count
   in
-  let memory_episode_limit = 30 in
-  let memory_procedure_limit = 10 in
-  let memory_context =
-    Memory_hooks.render_memory_context
-      ~agent_name:meta.agent_name
-      ~config
-      ~episode_limit:memory_episode_limit
-      ~procedure_limit:memory_procedure_limit
-      ()
-    |> Option.value ~default:""
-  in
-  let temporal_context =
-    Masc_context_injector.render_temporal_summary shared_context
-    |> Option.value ~default:""
-  in
-  let prompt_metrics =
-    build_prompt_metrics ~system_prompt:turn_system_prompt ~dynamic_context
-      ~user_message
-  in
-  (* [substrate:system_prompt] — single grep-friendly line per turn carrying
-     the system prompt's deterministic identity (length + 16-char SHA256
-     prefix).  Operators can confirm at a glance whether a keeper's system
-     prompt drifted across turns or differs from the persona file, without
-     dumping the raw prompt text.  Companion to [substrate:tool_surface]
-     emitted from the OAS Event_bus.TurnReady arm.  Phase 2 of substrate
-     observability. *)
-  (let segment = prompt_metrics.system_prompt_segment in
-   let hash16 =
-     match segment.fingerprint with
-     | Some hex when String.length hex >= 16 -> String.sub hex 0 16
-     | Some hex -> hex
-     | None -> "empty"
-   in
-   Log.Keeper.info
-     "[substrate:system_prompt] agent=%s turn=%d length=%d hash=%s"
-     meta.agent_name (start_turn_count + 1) segment.bytes hash16);
-  (* [substrate:task_assignment] — turn-level fingerprint of the user
-     message (the task body the LLM actually sees this turn) plus the
-     dynamic_context that wraps it (current task, memory continuity,
-     temporal summary, route hint). Operators can confirm whether the
-     task body changed between turns ("did the keeper get a new task,
-     or replay the same prompt?") without dumping the raw text. Phase 3
-     of substrate observability. *)
-  (let user_seg = prompt_metrics.user_message_segment in
-   let dyn_seg = prompt_metrics.dynamic_context_segment in
-   let pick_hash16 (segment : Keeper_agent_prompt_metrics.prompt_segment_metrics) =
-     match segment.fingerprint with
-     | Some hex when String.length hex >= 16 -> String.sub hex 0 16
-     | Some hex -> hex
-     | None -> "empty"
-   in
-   Log.Keeper.info
-     "[substrate:task_assignment] agent=%s turn=%d user_length=%d \
-      user_hash=%s dyn_length=%d dyn_hash=%s"
-     meta.agent_name (start_turn_count + 1) user_seg.bytes
-     (pick_hash16 user_seg) dyn_seg.bytes (pick_hash16 dyn_seg));
-  (* 6. Append user message and persist.
-     On retry (is_retry=true), the user message was already persisted by the
-     first attempt.  Checkpoint reload does not include it (checkpoint is
-     written only on success), so we still append to ctx — but skip persist
-     to avoid duplicate entries in the session history file. *)
-  let user_msg = Oas.Types.user_msg user_message in
-  (* Capture history BEFORE appending the current user_msg.
-     OAS Agent.run appends user_msg from ~goal internally, so passing it
-     in initial_messages would cause duplication. *)
-  (* OAS Utf8_sanitize.sanitize handles UTF-8 repair and control char
-     stripping at serialization time (backend_openai_serialize.ml,
-     backend_anthropic.ml). No pre-sanitize needed here. See OAS #916. *)
-  (* Repair orphaned ToolResult blocks before passing to OAS Agent.run.
-     Stale checkpoints saved before #7237 may contain tool_result blocks
-     whose matching tool_use was trimmed. Anthropic API rejects these.
-     repair_broken_tool_call_pairs downgrades broken tool_use/tool_result
-     pairs to plain Text before the provider validates adjacency. *)
-  let history_messages =
-    Keeper_context_core.repair_broken_tool_call_pairs
-      (Keeper_exec_context.messages_of_context ctx_work)
-  in
-  let estimated_input_tokens =
-    let composition =
-      build_ctx_composition_metrics ~system_prompt:turn_system_prompt
-        ~dynamic_context ~memory_context ~temporal_context ~user_message
-        ~history_messages ~actual_input_tokens:0
-    in
-    max prompt_metrics.estimated_total_tokens composition.display_total_tokens
-  in
-  let ctx_work = Keeper_exec_context.append ctx_work user_msg in
-  if not is_retry
-  then Keeper_exec_context.persist_message ~source:history_user_source session user_msg;
+  let turn_system_prompt = prompt_ctx.Keeper_run_prompt.turn_system_prompt in
+  let dynamic_context = prompt_ctx.Keeper_run_prompt.dynamic_context in
+  let memory_context = prompt_ctx.Keeper_run_prompt.memory_context in
+  let temporal_context = prompt_ctx.Keeper_run_prompt.temporal_context in
+  let prompt_metrics = prompt_ctx.Keeper_run_prompt.prompt_metrics in
+  let history_messages = prompt_ctx.Keeper_run_prompt.history_messages in
+  let estimated_input_tokens = prompt_ctx.Keeper_run_prompt.estimated_input_tokens in
+  let ctx_work = prompt_ctx.Keeper_run_prompt.ctx_work in
   (* 7. Set up agent — delegated to Keeper_run_tools *)
   let setup =
     Keeper_run_tools.prepare_agent_setup

@@ -216,6 +216,66 @@ let test_claim_syncs_keeper_current_task_id () =
       check (option string) "persisted current_task_id" (Some task_id)
         (current_task_id_string persisted_meta)))
 
+let test_release_clears_keeper_current_task_id () =
+  with_room (fun config ->
+    let meta = make_test_meta () in
+    with_registered_keeper config meta (fun () ->
+      let _ =
+        Coord.add_task config ~title:"Release task" ~priority:1
+          ~description:"desc"
+      in
+      let result = call_tool config meta "keeper_task_claim" (`Assoc []) in
+      let json = parse_json result in
+      let task_id =
+        Yojson.Safe.Util.(
+          json |> member "claimed_task" |> member "task_id" |> to_string)
+      in
+      let ok, message =
+        Tool_task.handle_transition
+          { Tool_task.config; agent_name = meta.agent_name; sw = None }
+          (`Assoc
+             [
+               ("task_id", `String task_id);
+               ("action", `String "release");
+               ("reason", `String "scope changed");
+             ])
+      in
+      if not ok then fail message;
+      let registry_meta =
+        match Keeper_registry.get ~base_path:config.Coord.base_path meta.name with
+        | Some entry -> entry.meta
+        | None -> fail "expected keeper registry entry"
+      in
+      check (option string) "registry current_task_id cleared" None
+        (current_task_id_string registry_meta);
+      let persisted_meta =
+        match Keeper_types.read_meta config meta.name with
+        | Ok (Some meta) -> meta
+        | Ok None -> fail "expected persisted keeper meta"
+        | Error msg -> fail msg
+      in
+      check (option string) "persisted current_task_id cleared" None
+        (current_task_id_string persisted_meta)))
+
+let test_stale_current_task_id_is_cleared_from_backlog () =
+  with_room (fun config ->
+    let task_id =
+      match Keeper_id.Task_id.of_string "task-missing" with
+      | Ok task_id -> task_id
+      | Error msg -> fail msg
+    in
+    let meta = { (make_test_meta ()) with current_task_id = Some task_id } in
+    with_registered_keeper config meta (fun () ->
+      (match Keeper_types.write_meta config meta with
+       | Ok () -> ()
+       | Error msg -> fail msg);
+      let synced =
+        Keeper_agent_tool_surface.sync_current_task_id_from_backlog
+          ~config meta
+      in
+      check (option string) "stale current_task_id cleared" None
+        (current_task_id_string synced)))
+
 let test_claim_empty_room () =
   with_room (fun config ->
     let meta = make_test_meta () in
@@ -616,7 +676,15 @@ let test_submit_for_verification_transitions_task () =
                  fail
                    (Printf.sprintf
                       "expected awaiting_verification, got %s"
-                      (Types.string_of_task_status status)))
+                      (Types.string_of_task_status status)));
+            let persisted_meta =
+              match Keeper_types.read_meta config meta.name with
+              | Ok (Some meta) -> meta
+              | Ok None -> fail "expected persisted keeper meta"
+              | Error msg -> fail msg
+            in
+            check (option string) "awaiting verification clears current_task_id"
+              None (current_task_id_string persisted_meta)
         | _ -> fail "expected keeper_task_submit_for_verification to succeed")))
 
 (* --- keeper_tool_search tests --- *)
@@ -716,6 +784,10 @@ let () =
         test_claim_returns_observation_fragment;
       test_case "claim syncs keeper current_task_id" `Quick
         test_claim_syncs_keeper_current_task_id;
+      test_case "release clears keeper current_task_id" `Quick
+        test_release_clears_keeper_current_task_id;
+      test_case "stale current_task_id clears from backlog" `Quick
+        test_stale_current_task_id_is_cleared_from_backlog;
       test_case "claim empty room" `Quick test_claim_empty_room;
       test_case "claim respects active_goal_ids" `Quick
         test_claim_respects_active_goal_ids;

@@ -906,6 +906,7 @@ let handle_keeper_shell
                ; "url", `String url
                ])
        | Ok () ->
+         let clone_url = Tool_code_write.normalize_github_clone_url url in
          let _bundle_paths = Keeper_alerting_path.ensure_sandbox_bundle ~config ~meta in
          ignore (_bundle_paths : string list);
          let playground = keeper_playground_root ~config ~meta in
@@ -952,6 +953,30 @@ let handle_keeper_shell
            | Ok env ->
                Process_eio.run_argv_with_status ?env ~cwd ~timeout_sec argv
          in
+         let normalize_existing_origin_to_https clone_path =
+           match
+             Process_eio.run_argv_with_status
+               ~timeout_sec:10.0
+               [ "git"; "-C"; clone_path; "remote"; "get-url"; "origin" ]
+           with
+           | Unix.WEXITED 0, origin ->
+             let origin = String.trim origin in
+             let normalized = Tool_code_write.normalize_github_clone_url origin in
+             if String.equal origin normalized then None
+             else
+               (match
+                  Process_eio.run_argv_with_status
+                    ~timeout_sec:10.0
+                    [ "git"; "-C"; clone_path; "remote"; "set-url"; "origin"; normalized ]
+                with
+                | Unix.WEXITED 0, _ -> Some "origin remote normalized to HTTPS"
+                | _, out ->
+                  Some
+                    (Printf.sprintf
+                       "origin remote normalization failed: %s"
+                       (String.trim out)))
+           | _ -> None
+         in
          if Fs_compat.file_exists clone_path then
            (* Existing sandbox clones may have a .git directory but no
               checked-out files. Repair that locally before a pull, otherwise
@@ -973,6 +998,9 @@ let handle_keeper_shell
                        ]
                       @ route_fields))
             | Ok repair_note ->
+                let origin_repair_note =
+                  normalize_existing_origin_to_https clone_path
+                in
                 (* Already cloned — pull latest instead *)
                 let st, out =
                   if docker_hard_mode_brokered then
@@ -997,9 +1025,11 @@ let handle_keeper_shell
                     ~playground_dir:playground ~repo_name ~repo_path:clone_path
                     ~action:"pull" ~shallow:false;
                 let repair_fields =
-                  match repair_note with
-                  | None -> []
-                  | Some note -> [ "repair_note", `String note ]
+                  [ repair_note; origin_repair_note ]
+                  |> List.filter_map (fun note -> note)
+                  |> function
+                  | [] -> []
+                  | notes -> [ "repair_note", `String (String.concat "; " notes) ]
                 in
                 Yojson.Safe.to_string
                   (`Assoc
@@ -1022,12 +1052,12 @@ let handle_keeper_shell
              if docker_hard_mode_brokered then
                run_brokered_git ~cwd:repos_dir
                  ~timeout_sec:(Keeper_tool_policy.clone_timeout_sec ())
-                 ("git" :: "clone" :: depth_args @ [ url; clone_path ])
+                 ("git" :: "clone" :: depth_args @ [ clone_url; clone_path ])
              else if meta.sandbox_profile = Docker then
                let clone_cmd =
                  String.concat " "
                    (List.map Filename.quote
-                      ("git" :: "clone" :: depth_args @ [ url; repo_name ]))
+                      ("git" :: "clone" :: depth_args @ [ clone_url; repo_name ]))
                in
                match
                  Keeper_shell_shared.run_docker_shell_command_with_status ~config ~meta ~cwd:repos_dir
@@ -1040,7 +1070,7 @@ let handle_keeper_shell
              else
                Process_eio.run_argv_with_status
                  ~timeout_sec:(Keeper_tool_policy.clone_timeout_sec ())
-                 ("git" :: "clone" :: depth_args @ [ url; clone_path ])
+                 ("git" :: "clone" :: depth_args @ [ clone_url; clone_path ])
            in
            if st = Unix.WEXITED 0 then
              Keeper_shell_shared.update_playground_repo_cache

@@ -263,14 +263,17 @@ let read_text config path =
   match key_of_path config path with
   | Some key -> begin
       match backend_get config ~key with
-      | Ok (Some content) -> content
+      | Ok (Some content) ->
+        Safe_ops.repair_utf8_text ~surface:"coord_text" ~path content
       | Ok None -> ""
       | Error e ->
         Log.Misc.warn "[read_text] backend_get failed for %s: %s" key (Backend_types.show_error e);
         ""
     end
   | None ->
-      if Fs_compat.file_exists path then Fs_compat.load_file path
+      if Fs_compat.file_exists path then
+        Fs_compat.load_file path
+        |> Safe_ops.repair_utf8_text ~surface:"coord_text" ~path
       else ""
 
 let should_dual_write_local (config : config) =

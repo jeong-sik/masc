@@ -497,6 +497,27 @@ let test_resolve_task_repo_context_rejects_non_github_origin () =
   | Ok _ -> Alcotest.fail "expected non-github origin error"
   | Error _ -> Alcotest.fail "unexpected repo context error"
 
+let test_repo_slug_of_task_worktree_infers_parent_config_for_container_gitdir () =
+  with_repo_context_test_env @@ fun ~base:_ ~config:_ ~repo_dir ->
+  run_argv
+    [ "git"; "-C"; repo_dir; "remote"; "add"; "origin"
+    ; "git@github.com:example/project.git"
+    ];
+  let worktree_dir = Filename.concat repo_dir ".worktrees/task-001" in
+  ensure_dir worktree_dir;
+  let oc = open_out_bin (Filename.concat worktree_dir ".git") in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () ->
+      output_string oc
+        "gitdir: /home/keeper/repos/project/.git/worktrees/task-001\n");
+  Alcotest.(check (option string))
+    "repo slug recovered from host parent clone config"
+    (Some "example/project")
+    (Keeper_gh_shared.repo_slug_of_task_worktree
+       ~git_root:"/home/keeper/repos/project"
+       ~worktree_cwd:worktree_dir)
+
 let fake_docker_gh_script =
   "#!/bin/sh\n\
 if [ \"$1\" = \"info\" ]; then\n\
@@ -884,6 +905,10 @@ let () =
             test_resolve_task_repo_context_reports_missing_worktree;
           Alcotest.test_case "non-github origin is structured error" `Quick
             test_resolve_task_repo_context_rejects_non_github_origin;
+          Alcotest.test_case
+            "worktree parent config survives container gitdir"
+            `Quick
+            test_repo_slug_of_task_worktree_infers_parent_config_for_container_gitdir;
           Alcotest.test_case
             "keeper_shell gh without current task uses sandbox context"
             `Quick test_keeper_shell_gh_without_current_task_uses_sandbox_context;

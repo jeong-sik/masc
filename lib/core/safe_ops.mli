@@ -26,6 +26,24 @@ val handle : (unit -> 'a) -> (exn -> 'a) -> 'a
 
 (** {1 JSON Parsing} *)
 
+type utf8_repair_stats =
+  { repaired_reads : int
+  ; repaired_bytes : int
+  ; path_samples : string list
+  }
+
+val repair_utf8_text :
+  ?surface:string -> ?path:string -> string -> string
+(** Replace malformed UTF-8 byte sequences with U+FFFD and record an
+    observable persistence repair. Valid UTF-8 is returned unchanged. *)
+
+val persistence_utf8_repair_stats : unit -> utf8_repair_stats
+(** Process-local cumulative count of malformed UTF-8 repairs seen by
+    persistence read helpers. *)
+
+val reset_persistence_utf8_repair_stats_for_tests : unit -> unit
+(** Reset {!persistence_utf8_repair_stats}. Test-only. *)
+
 val parse_json_safe : context:string -> string -> (Yojson.Safe.t, string) result
 (** Parse JSON with detailed error reporting. *)
 

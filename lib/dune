@@ -546,7 +546,7 @@
    keeper_runtime_contract
    keeper_runtime_trust_snapshot
    keeper_agent_prompt_metrics
-   keeper_agent_tool_surface
+   keeper_current_task_reconcile keeper_agent_tool_surface
    keeper_agent_result
    keeper_agent_error
    keeper_turn_terminal
@@ -756,7 +756,7 @@
   keeper_model_labels
   keeper_fs
   keeper_identity
-  keeper_checkpoint_store
+  keeper_current_task_reconcile keeper_checkpoint_store
   keeper_text_processing
   keeper_summarizer
   keeper_context_core

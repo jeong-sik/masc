@@ -134,7 +134,10 @@ let resolve_gh_repo_context ~(config : Coord.config) ~(meta : keeper_meta)
                          ^ " If the task is already claimed, recreate the linked task worktree, then retry the gh command.")
                       ())
                else
-                 match Keeper_gh_shared.repo_slug_of_git_root ~git_root with
+                 match
+                   Keeper_gh_shared.repo_slug_of_task_worktree
+                     ~git_root ~worktree_cwd
+                 with
                  | Some repo_slug ->
                      Ok
                        {

@@ -307,6 +307,16 @@ let extract_github_org_repo url =
       Some (org ^ "/" ^ repo)
     | _ -> None
 
+let canonical_github_https_clone_url url =
+  match extract_github_org_repo url with
+  | Some slug -> Some ("https://github.com/" ^ slug ^ ".git")
+  | None -> None
+
+let normalize_github_clone_url url =
+  match canonical_github_https_clone_url url with
+  | Some normalized -> normalized
+  | None -> url
+
 let load_clone_denied_repos ~base_path =
   match get_policy_config ~base_path with
   | Some cfg -> Keeper_tool_policy_config.git_clone_denied_repos cfg
@@ -657,6 +667,7 @@ let handle_code_git ctx args =
         match validate_clone_cwd ~agent_name:ctx.agent_name ctx.config cwd with
         | Error e -> (false, Types.masc_error_to_string e)
         | Ok abs_cwd ->
+          let clone_url = normalize_github_clone_url url in
           (* Only pass the validated URL — no extra args allowed.
              Depth and timeout are config-driven via [git_clone] in tool_policy.toml. *)
           let depth = match get_policy_config ~base_path:ctx.config.Coord.base_path with
@@ -674,7 +685,7 @@ let handle_code_git ctx args =
                      Printf.sprintf "cd %s && git clone%s %s"
                        (Filename.quote abs_cwd)
                        depth_flag
-                       (Filename.quote url)]
+                       (Filename.quote clone_url)]
           in
           match Process_eio.run_argv_with_status ~timeout_sec:timeout cmd with
           | Unix.WEXITED code, output ->

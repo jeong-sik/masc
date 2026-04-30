@@ -59,8 +59,83 @@ let handle f handler =
     Printexc.raise_with_backtrace e bt
   | exn -> handler exn
 
+type utf8_repair_stats =
+  { repaired_reads : int
+  ; repaired_bytes : int
+  ; path_samples : string list
+  }
+
+let utf8_repair_mu = Stdlib.Mutex.create ()
+let utf8_repaired_reads = ref 0
+let utf8_repaired_bytes = ref 0
+let utf8_repair_path_samples = ref []
+let utf8_repair_path_sample_limit = 8
+
+let record_utf8_repair ~surface ~path ~invalid_bytes =
+  let surface = if String.trim surface = "" then "persistence" else surface in
+  let path = match path with Some p when String.trim p <> "" -> p | _ -> "(unknown)" in
+  Stdlib.Mutex.protect utf8_repair_mu (fun () ->
+      incr utf8_repaired_reads;
+      utf8_repaired_bytes := !utf8_repaired_bytes + invalid_bytes;
+      if not (List.mem path !utf8_repair_path_samples) then
+        utf8_repair_path_samples :=
+          (path :: !utf8_repair_path_samples)
+          |> List.filteri (fun i _ -> i < utf8_repair_path_sample_limit));
+  Log.Misc.warn "[%s] persistence UTF-8 repaired path=%s invalid_bytes=%d"
+    surface path invalid_bytes
+
+let persistence_utf8_repair_stats () =
+  Stdlib.Mutex.protect utf8_repair_mu (fun () ->
+      { repaired_reads = !utf8_repaired_reads
+      ; repaired_bytes = !utf8_repaired_bytes
+      ; path_samples = List.rev !utf8_repair_path_samples
+      })
+
+let reset_persistence_utf8_repair_stats_for_tests () =
+  Stdlib.Mutex.protect utf8_repair_mu (fun () ->
+      utf8_repaired_reads := 0;
+      utf8_repaired_bytes := 0;
+      utf8_repair_path_samples := [])
+
+let count_invalid_utf8_bytes s =
+  let len = String.length s in
+  let rec loop i count =
+    if i >= len then count
+    else
+      let dec = String.get_utf_8_uchar s i in
+      let dlen = Uchar.utf_decode_length dec in
+      if dlen > 0 && Uchar.utf_decode_is_valid dec then
+        loop (i + dlen) count
+      else
+        loop (i + 1) (count + 1)
+  in
+  loop 0 0
+
+let repair_utf8_text ?(surface = "persistence") ?path s =
+  let invalid_bytes = count_invalid_utf8_bytes s in
+  if invalid_bytes = 0 then s
+  else
+    let len = String.length s in
+    let buf = Buffer.create len in
+    let rec loop i =
+      if i >= len then ()
+      else
+        let dec = String.get_utf_8_uchar s i in
+        let dlen = Uchar.utf_decode_length dec in
+        if dlen > 0 && Uchar.utf_decode_is_valid dec then (
+          Buffer.add_substring buf s i dlen;
+          loop (i + dlen))
+        else (
+          Buffer.add_string buf "\xEF\xBF\xBD";
+          loop (i + 1))
+    in
+    loop 0;
+    record_utf8_repair ~surface ~path ~invalid_bytes;
+    Buffer.contents buf
+
 (** Parse JSON with detailed error reporting *)
 let parse_json_safe ~context str : (Yojson.Safe.t, string) result =
+  let str = repair_utf8_text ~surface:"json" ~path:context str in
   try Ok (Yojson.Safe.from_string str)
   with Yojson.Json_error msg ->
     let preview = String_util.utf8_safe ~max_bytes:53 ~suffix:"..." str |> String_util.to_string in
@@ -132,7 +207,7 @@ let result_to_option_logged ~on_drop ~surface ~reason ~path = function
     Drop-in replacement for [Yojson.Safe.from_file] in Eio fiber contexts.
     Falls back to blocking I/O when Eio fs is not set. *)
 let read_json_eio (path : string) : Yojson.Safe.t =
-  let content = Fs_compat.load_file path in
+  let content = Fs_compat.load_file path |> repair_utf8_text ~surface:"json_eio" ~path in
   Yojson.Safe.from_string content
 
 (** List files in directory safely *)

@@ -118,6 +118,13 @@ val sync_current_task_id_from_backlog :
   Keeper_types.keeper_meta ->
   Keeper_types.keeper_meta
 
+(** Best-effort reconciliation for callers that only know an agent name.
+    No-ops for non-keeper agents. *)
+val sync_current_task_id_for_agent_name :
+  config:Coord.config ->
+  agent_name:string ->
+  unit
+
 (** Convenience [List.map Tool_name.to_string]. *)
 val tool_names : Tool_name.t list -> string list
 

@@ -200,6 +200,11 @@ let extract_github_org url =
       | [] -> None)
   | None -> None
 
+let normalize_github_clone_url url =
+  match extract_github_org_repo url with
+  | Some org_repo -> "https://github.com/" ^ org_repo ^ ".git"
+  | None -> url
+
 let validate_clone_origin_url ~base_path url =
   match load_git_clone_policy_result ~base_path with
   | Error msg ->
@@ -623,6 +628,20 @@ let git_origin_url root =
   | Unix.WEXITED 0, output -> first_nonempty_line output
   | _ -> None
 
+let normalize_origin_remote_to_https root =
+  match git_origin_url root with
+  | None -> None
+  | Some origin_url ->
+      let normalized = normalize_github_clone_url origin_url in
+      if String.equal origin_url normalized then None
+      else
+        match
+          run_argv_with_status
+            [ "git"; "-C"; root; "remote"; "set-url"; "origin"; normalized ]
+        with
+        | Unix.WEXITED 0, _ -> Some normalized
+        | _ -> None
+
 let auto_provision_sandbox_clone ~config ~agent_name ~repos_dir ~repo_name =
   let search_root = project_root config in
   match workspace_repo_matches ~search_root ~repo_name with
@@ -663,6 +682,7 @@ let auto_provision_sandbox_clone ~config ~agent_name ~repos_dir ~repo_name =
                          "auto_provision_clone_failed: origin %s rejected by clone policy: %s"
                          origin_url err))
              | Ok () ->
+                 let origin_url = normalize_github_clone_url origin_url in
                  let status, output =
                    run_argv_with_status [ "git"; "clone"; origin_url; clone_path ]
                  in
@@ -854,6 +874,7 @@ let worktree_create_r ?(link_task=true) ?repo_name config ~agent_name ~task_id ~
                Use the longer git_fetch_timeout_sec budget — the default
                30s rejected legitimately slow Docker-bridge fetches and
                cold fetches on large remotes (#9587). *)
+            ignore (normalize_origin_remote_to_https root : string option);
             let fetch_exit =
               run_argv_exit
                 ~timeout_sec:(Env_config_core.git_fetch_timeout_sec ())

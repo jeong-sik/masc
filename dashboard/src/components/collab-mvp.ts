@@ -25,7 +25,7 @@ function getCytoscape(): Promise<typeof cytoscape> {
   return cytoscapePromise
 }
 
-function toneForStackStatus(status: CollabMvpStackStatus): string {
+export function toneForStackStatus(status: CollabMvpStackStatus): string {
   switch (status) {
     case 'installed':
       return 'border-ok/35 bg-ok/10 text-ok'
@@ -36,7 +36,7 @@ function toneForStackStatus(status: CollabMvpStackStatus): string {
   }
 }
 
-function stateTone(state: string): string {
+export function stateTone(state: string): string {
   switch (state) {
     case 'running':
     case 'claimed':
@@ -71,7 +71,7 @@ function MetricTile({
   `
 }
 
-function graphElements(graph: CollabGitGraphSpec): cytoscape.ElementDefinition[] {
+export function graphElements(graph: CollabGitGraphSpec): cytoscape.ElementDefinition[] {
   return [
     ...graph.nodes.map(node => ({
       data: {
@@ -93,7 +93,7 @@ function graphElements(graph: CollabGitGraphSpec): cytoscape.ElementDefinition[]
   ]
 }
 
-function graphKey(graph: CollabGitGraphSpec): string {
+export function graphKey(graph: CollabGitGraphSpec): string {
   return [
     graph.source,
     ...graph.nodes.map(node => `${node.id}/${node.label}/${node.parent ?? ''}`),
@@ -101,7 +101,7 @@ function graphKey(graph: CollabGitGraphSpec): string {
   ].join('|')
 }
 
-function graphStylesheet(): cytoscape.StylesheetJsonBlock[] {
+export function graphStylesheet(): cytoscape.StylesheetJsonBlock[] {
   return [
     {
       selector: 'node',

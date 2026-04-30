@@ -66,6 +66,18 @@ let create_done_task config ~goal_id ~title =
 let string_list_field json field =
   json |> member field |> to_list |> List.map to_string
 
+let rewrite_goal_updated_at config ~goal_id ~updated_at =
+  let state = Goal_store.read_state config in
+  let goals =
+    state.goals
+    |> List.map (fun (goal : Goal_store.goal) ->
+           if String.equal goal.id goal_id then
+             { goal with created_at = updated_at; updated_at }
+           else
+             goal)
+  in
+  Goal_store.write_state config { state with updated_at; goals }
+
 let make_keeper_meta ~name ~goal_id =
   match
     Masc_test_deps.meta_of_json_fixture
@@ -130,8 +142,7 @@ let append_keeper_receipt ?(outcome = "ok")
       network_mode = Keeper_types.network_mode_to_string meta.network_mode;
       approval_profile = Some "trusted_local";
       approval_profile_derived = false;
-      cascade_name =
-        Keeper_execution_receipt.cascade_name_of_string meta.cascade_name;
+      cascade_name = Keeper_cascade_profile.Runtime_name meta.cascade_name;
       cascade_selected_model = Some "openai:gpt-5.4";
       cascade_attempt_count = 1;
       cascade_fallback_applied = false;
@@ -373,10 +384,61 @@ let test_blocked_phase_projects_blocked_health () =
     (node |> member "phase" |> to_string);
   check string "health follows blocked phase" "blocked"
     (node |> member "health" |> to_string);
+  let fsm = node |> member "goal_fsm" in
+  check string "goal fsm source is explicit phase" "goal.phase"
+    (fsm |> member "source" |> to_string);
+  check string "goal fsm state follows phase" "blocked"
+    (fsm |> member "state" |> to_string);
+  check string "goal fsm kind is blocked" "blocked"
+    (fsm |> member "state_kind" |> to_string);
+  check (list string) "blocked goal next actions"
+    [ "operator_unblock"; "drop" ]
+    (string_list_field fsm "next_actions");
   check int "blocked summary count" 1
     (json |> member "summary" |> member "blocked_goals" |> to_int);
   check int "paused summary count" 0
     (json |> member "summary" |> member "paused_goals" |> to_int)
+
+let test_goal_fsm_withholds_stalled_when_activity_is_metadata_only () =
+  with_room @@ fun config ->
+  let goal, _kind =
+    match Goal_store.upsert_goal config ~title:"Metadata-only active goal" () with
+    | Ok payload -> payload
+    | Error msg -> fail msg
+  in
+  rewrite_goal_updated_at config ~goal_id:goal.id
+    ~updated_at:"2026-04-01T00:00:00Z";
+  let meta = make_keeper_meta ~name:"metadata-only-keeper" ~goal_id:goal.id in
+  (match Keeper_types.write_meta ~force:true config meta with
+   | Ok () -> ()
+   | Error err -> fail ("write_meta failed: " ^ err));
+  let node = Dashboard_goals.dashboard_goals_tree_json ~config |> root_node in
+  check string "phase remains the lifecycle source" "executing"
+    (node |> member "phase" |> to_string);
+  check string "snapshot failure is surfaced as keeper runtime risk"
+    "keeper_runtime"
+    (node |> member "blocking_source" |> to_string);
+  check string "health is demoted by runtime-trust failure" "at_risk"
+    (node |> member "health" |> to_string);
+  check bool "stalled badge withheld" false
+    (List.mem "stalled" (string_list_field node "badges"));
+  check bool "unobserved badge explains weak freshness" true
+    (List.mem "activity_unobserved" (string_list_field node "badges"));
+  check string "activity observation is metadata only" "goal_metadata"
+    (node |> member "activity_observation" |> to_string);
+  check string "stagnation status is unobserved" "unobserved"
+    (node |> member "stagnation_status" |> to_string);
+  let fsm = node |> member "goal_fsm" in
+  check string "goal fsm source is explicit phase" "goal.phase"
+    (fsm |> member "source" |> to_string);
+  check string "goal fsm state remains executing" "executing"
+    (fsm |> member "state" |> to_string);
+  check string "goal fsm carries observation confidence" "goal_metadata"
+    (fsm |> member "activity_observation" |> to_string);
+  check string "goal fsm carries unobserved freshness" "unobserved"
+    (fsm |> member "stagnation_status" |> to_string);
+  check bool "operator can still pause executing goal" true
+    (List.mem "pause" (string_list_field fsm "next_actions"))
 
 let test_goal_detail_surfaces_keeper_runtime_trust_and_blockers () =
   with_room @@ fun config ->
@@ -556,6 +618,10 @@ let () =
             test_title_marker_links_legacy_task;
           test_case "blocked phase maps to blocked health" `Quick
             test_blocked_phase_projects_blocked_health;
+          test_case
+            "metadata-only freshness does not assert stalled FSM state"
+            `Quick
+            test_goal_fsm_withholds_stalled_when_activity_is_metadata_only;
           test_case "goal detail surfaces keeper runtime trust and blockers"
             `Quick
             test_goal_detail_surfaces_keeper_runtime_trust_and_blockers;

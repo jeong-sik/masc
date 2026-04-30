@@ -56,6 +56,8 @@ type tree_node = {
   latest_keeper_ref : string option;
   latest_turn_ref : int option;
   stalled_since : string option;
+  activity_observation : string;
+  stagnation_status : string;
 }
 (** Per-goal projection node returned by
     {!build_forest}.  Concrete record because

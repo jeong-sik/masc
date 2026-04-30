@@ -6,6 +6,8 @@ module Prom = Masc_mcp.Prometheus
 module Retry = Llm_provider.Retry
 module OWN = Masc_mcp.Oas_worker_named
 
+let cascade_name raw = OWN.cascade_name_of_string raw
+
 let check_json name expected error =
   check string name expected (Yojson.Safe.to_string (P.to_yojson error))
 
@@ -243,7 +245,7 @@ let test_emit_sdk_provider_error_metric_rate_limit () =
   let emitted =
     Oas.Error.Api
       (Retry.RateLimited { retry_after = Some 2.0; message = "too many" })
-    |> OWN.emit_sdk_provider_error_metric ~cascade_name:"big_three"
+    |> OWN.emit_sdk_provider_error_metric ~cascade_name:(cascade_name "big_three")
          ~provider:"anthropic"
     |> expect_some
   in
@@ -265,7 +267,7 @@ let test_emit_sdk_provider_error_metric_capacity_scope () =
              "You have reached your specified API usage limits. You will \
               regain access on 2026-05-01 at 00:00 UTC.";
          })
-    |> OWN.emit_sdk_provider_error_metric ~cascade_name:"big_three"
+    |> OWN.emit_sdk_provider_error_metric ~cascade_name:(cascade_name "big_three")
          ~provider:"anthropic"
     |> expect_some
   in
@@ -281,7 +283,7 @@ let test_emit_sdk_provider_error_metric_skips_non_api () =
   in
   let emitted =
     Oas.Error.Internal "structural failure"
-    |> OWN.emit_sdk_provider_error_metric ~cascade_name:"big_three"
+    |> OWN.emit_sdk_provider_error_metric ~cascade_name:(cascade_name "big_three")
          ~provider:"anthropic"
   in
   check bool "no provider error emitted" true (Option.is_none emitted);

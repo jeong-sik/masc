@@ -19,7 +19,7 @@ val sdk_error_to_cascade_outcome :
 (** {1 Error enrichment} *)
 
 val enrich_sdk_error :
-  cascade_name:string ->
+  cascade_name:Oas_worker_named_error.cascade_name ->
   provider_cfg:Llm_provider.Provider_config.t ->
   Oas.Error.sdk_error -> Oas.Error.sdk_error
 (** Enrich an SDK error with provider-specific diagnostic hints
@@ -57,7 +57,9 @@ val retry_message_looks_like_not_found : string -> bool
 (** {1 SDK error predicates} *)
 
 val sdk_error_to_resumable_cli_session :
-  cascade_name:string -> Oas.Error.sdk_error -> Oas.Error.sdk_error option
+  cascade_name:Oas_worker_named_error.cascade_name ->
+  Oas.Error.sdk_error ->
+  Oas.Error.sdk_error option
 (** If the error looks like a resumable CLI session, convert it into the
     structured [Resumable_cli_session] form. *)
 
@@ -85,7 +87,7 @@ val provider_error_total_metric : string
 (** Prometheus counter for additive provider-error variant emission. *)
 
 val emit_provider_error_metric :
-  cascade_name:string ->
+  cascade_name:Oas_worker_named_error.cascade_name ->
   provider:string ->
   Provider_error.t ->
   unit
@@ -93,7 +95,7 @@ val emit_provider_error_metric :
     string-based health tracker labels. *)
 
 val emit_sdk_provider_error_metric :
-  cascade_name:string ->
+  cascade_name:Oas_worker_named_error.cascade_name ->
   provider:string ->
   Oas.Error.sdk_error ->
   Provider_error.t option
@@ -112,7 +114,8 @@ val sdk_error_is_max_turns_exceeded : Oas.Error.sdk_error -> bool
 
 val is_moonshot_provider : Llm_provider.Provider_config.t -> bool
 
-val resolve_kimi_api_key_env_name : cascade_name:string -> string
+val resolve_kimi_api_key_env_name :
+  cascade_name:Oas_worker_named_error.cascade_name -> string
 
 val moonshot_auth_hint_marker : string
 val openai_compat_not_found_hint_marker : string

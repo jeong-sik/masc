@@ -320,7 +320,7 @@ let run_named
     | Ok result ->
       let result =
         Result.map_error
-          (enrich_sdk_error ~cascade_name ~provider_cfg)
+          (enrich_sdk_error ~cascade_name:error_cascade_name ~provider_cfg)
           result
       in
       (* Extract checkpoint from the agent if it made progress.
@@ -534,7 +534,10 @@ let run_named
            Ok result)
       | Error sdk_err ->
         let sdk_err =
-          match sdk_error_to_resumable_cli_session ~cascade_name sdk_err with
+          match
+            sdk_error_to_resumable_cli_session
+              ~cascade_name:error_cascade_name sdk_err
+          with
           | Some err -> err
           | None -> sdk_err
         in
@@ -547,7 +550,7 @@ let run_named
            state. *)
         let err_str = Oas.Error.to_string sdk_err in
         let (_ : Provider_error.t option) =
-          emit_sdk_provider_error_metric ~cascade_name
+          emit_sdk_provider_error_metric ~cascade_name:error_cascade_name
             ~provider:provider_cfg.model_id sdk_err
         in
         if sdk_error_is_hard_quota sdk_err then

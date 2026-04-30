@@ -870,7 +870,7 @@ let test_sdk_error_to_cascade_outcome_cascades_resumable_cli_session () =
   let structured =
     match
       Oas_worker_named.sdk_error_to_resumable_cli_session
-        ~cascade_name:"tool_use_strict" sdk_error
+        ~cascade_name:(internal_cascade_name "tool_use_strict") sdk_error
     with
     | Some structured -> structured
     | None -> Alcotest.fail "expected structured resumable CLI session"
@@ -958,7 +958,7 @@ let test_enrich_sdk_error_for_moonshot_auth_includes_env_hint () =
   in
   let rendered =
     Oas_worker_named.enrich_sdk_error
-      ~cascade_name:"keeper_unified"
+      ~cascade_name:(internal_cascade_name "keeper_unified")
       ~provider_cfg
       err
     |> Oas.Error.to_string
@@ -982,7 +982,7 @@ let test_enrich_sdk_error_for_openai_not_found_includes_endpoint_hint () =
   in
   let rendered =
     Oas_worker_named.enrich_sdk_error
-      ~cascade_name:"keeper_unified"
+      ~cascade_name:(internal_cascade_name "keeper_unified")
       ~provider_cfg
       err
     |> Oas.Error.to_string
@@ -2565,7 +2565,7 @@ let test_kimi_cli_resumable_invalid_request_reclassifies_as_structured () =
   in
   match
     Oas_worker_named.sdk_error_to_resumable_cli_session
-      ~cascade_name:"kimi_cli_keeper" sdk_error
+      ~cascade_name:(internal_cascade_name "kimi_cli_keeper") sdk_error
   with
   | Some structured -> (
       match Oas_worker_named.classify_masc_internal_error structured with

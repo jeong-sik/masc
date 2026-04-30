@@ -33,9 +33,24 @@ val bind_workspace_getter :
     integration follow-up to wire keeper-side state into the
     HTTP surface. *)
 
-val list_response : unit -> Yojson.Safe.t
-(** [{ "count": n, "artifacts": [...] }] envelope listing
-    every artifact currently in the workspace. *)
+val list_response :
+  ?kind_filter:string ->
+  ?created_by_filter:string ->
+  ?query:string ->
+  unit ->
+  Yojson.Safe.t
+(** Tier D3 — server-side filtered list envelope.
+
+    Returns [{ "count": filtered_n, "total": pre_filter_n,
+    "artifacts": [...] }]. When all three filter args are absent,
+    [count = total] and the artifact list is unfiltered (mirrors
+    the pre-D3 behavior).
+
+    Filter semantics (mirrored in dashboard's [Multimodal_filter_view]):
+    - [kind_filter]: exact-match against artifact's [kind] field
+    - [created_by_filter]: exact-match against [provenance.created_by]
+    - [query]: case-insensitive substring against [id], [kind],
+      [created_by], and [metadata]'s top-level keys *)
 
 val artifact_response :
   id_str:string -> Yojson.Safe.t * Httpun.Status.t

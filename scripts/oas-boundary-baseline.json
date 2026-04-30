@@ -1,0 +1,7 @@
+{
+  "_comment": "OAS<->MASC boundary baseline. Regenerate with scripts/oas-boundary-ratchet.sh --regenerate.",
+  "_metrics": "See scripts/oas-boundary-ratchet.sh METRICS / DESCRIPTIVE_METRICS arrays.",
+  "_audit": "docs/audit/OAS-MASC-BOUNDARY-AUDIT-2026-04*.md",
+  "c4_direct_runtime_calls_layer_c": 0,
+  "bridge_adoption_files": 4
+}

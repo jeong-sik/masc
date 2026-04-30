@@ -280,23 +280,9 @@ let record_keepalive_dispatch_rejection event =
 
 let dispatch_keepalive_event ~(ctx : _ context) ~(keeper_name : string) event =
   if keepalive_entry_accepts_late_event ~ctx ~keeper_name then
-    (match Keeper_registry.dispatch_event
-            ~base_path:ctx.config.base_path keeper_name event
-     with
-     | Ok _ -> ()
-     | Error (Keeper_state_machine.Invalid_transition { from_phase; to_phase; reason }) ->
-         record_keepalive_dispatch_rejection event;
-         Log.Keeper.error "dispatch_keepalive_event(%s): dispatch failed: %s -> %s (%s)"
-           keeper_name
-           (Keeper_state_machine.phase_to_string from_phase)
-           (Keeper_state_machine.phase_to_string to_phase)
-           reason
-     | Error (Keeper_state_machine.Terminal_state { current; attempted_event }) ->
-         record_keepalive_dispatch_rejection event;
-         Log.Keeper.warn "dispatch_keepalive_event(%s): skipped, already terminal: %s (event: %s)"
-           keeper_name
-           (Keeper_state_machine.phase_to_string current)
-           attempted_event)
+<<<<<<< HEAD
+    ignore (Keeper_registry.dispatch_event_and_log
+      ~base_path:ctx.config.base_path keeper_name event)
 
 let dispatch_keepalive_event_with_audit
       ~(ctx : _ context)
@@ -307,25 +293,11 @@ let dispatch_keepalive_event_with_audit
       event
   =
   if keepalive_entry_accepts_late_event ~ctx ~keeper_name then
-    (match Keeper_registry.dispatch_event_with_audit
-            ~base_path:ctx.config.base_path
-            ~snapshot
-            ~events_fired
-            ~selected_event
-            keeper_name
-            event
-     with
-     | Ok _ -> ()
-     | Error (Keeper_state_machine.Invalid_transition { from_phase; to_phase; reason }) ->
-         record_keepalive_dispatch_rejection event;
-         Log.Keeper.error "dispatch_keepalive_event_with_audit(%s): dispatch failed: %s -> %s (%s)"
-           keeper_name
-           (Keeper_state_machine.phase_to_string from_phase)
-           (Keeper_state_machine.phase_to_string to_phase)
-           reason
-     | Error (Keeper_state_machine.Terminal_state { current; attempted_event }) ->
-         record_keepalive_dispatch_rejection event;
-         Log.Keeper.warn "dispatch_keepalive_event_with_audit(%s): skipped, already terminal: %s (event: %s)"
-           keeper_name
-           (Keeper_state_machine.phase_to_string current)
-           attempted_event)
+<<<<<<< HEAD
+    ignore (Keeper_registry.dispatch_event_with_audit_and_log
+      ~base_path:ctx.config.base_path
+      ~snapshot
+      ~events_fired
+      ~selected_event
+      keeper_name
+      event)

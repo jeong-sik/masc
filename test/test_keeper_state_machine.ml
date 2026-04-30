@@ -1342,6 +1342,7 @@ let test_invariant_fiber_started_reset_exhaustive () =
     drain_complete = true;
     context_overflow = true;
     compact_retry_exhausted = true;
+    terminal_failure_latched = true;
   } in
   let updated = match SM.apply_event ~current_phase:SM.Restarting
       ~conditions:dirty_conds ~event:SM.Fiber_started ~now:1000.0 with
@@ -1574,6 +1575,7 @@ let test_invariant_derive_matches_matrix () =
         | SM.Restarting -> { SM.default_conditions with
             fiber_alive = false; restart_budget_remaining = true;
             backoff_elapsed = true }
+        | SM.Zombie -> { SM.default_conditions with terminal_failure_latched = true }
         | SM.Stopped | SM.Dead -> running_conditions (* unreachable *)
       in
       (* Verify conditions produce the expected phase *)
@@ -1617,6 +1619,7 @@ let test_invariant_priority_chain () =
     drain_complete = true;
     context_overflow = true;
     compact_retry_exhausted = true;
+    terminal_failure_latched = false;
   } in
   (* TLA+ fix: all_true has compaction+handoff active, so Stopped is blocked → Draining.
      Clear buffer ops to reach Stopped. *)
@@ -1651,7 +1654,7 @@ let test_invariant_priority_chain () =
 (* ── Property: derive_phase x apply_event consistency ──── *)
 
 let test_all_phases_covered () =
-  check int "12 phases" 12 (List.length SM.all_phases)
+  check int "13 phases" 13 (List.length SM.all_phases)
 
 (* ── Mermaid diagram tests ─────────────────────────────── *)
 
@@ -1766,6 +1769,7 @@ let test_setclear_coverage () =
     "drain_complete",            (fun c -> c.drain_complete);
     "context_overflow",          (fun c -> c.context_overflow);
     "compact_retry_exhausted",   (fun c -> c.compact_retry_exhausted);
+    "terminal_failure_latched",  (fun c -> c.terminal_failure_latched);
   ] in
   (* Conditions with all booleans false *)
   let all_false : SM.conditions = {
@@ -1785,6 +1789,7 @@ let test_setclear_coverage () =
     drain_complete = false;
     context_overflow = false;
     compact_retry_exhausted = false;
+    terminal_failure_latched = false;
   } in
   (* Conditions with all booleans true *)
   let all_true : SM.conditions = {
@@ -1804,6 +1809,7 @@ let test_setclear_coverage () =
     drain_complete = true;
     context_overflow = true;
     compact_retry_exhausted = true;
+    terminal_failure_latched = true;
   } in
   (* auto_rules with all flags false *)
   let auto_rules_clean : SM.auto_rule_summary = {
@@ -1877,6 +1883,8 @@ let test_setclear_coverage () =
       SM.Operator_compact_requested;
     "Operator_clear_requested",
       SM.Operator_clear_requested { preserve_system = true; reason = "test" };
+    "Terminal_failure_detected",
+      SM.Terminal_failure_detected { reason = "test" };
   ] in
   (* Build coverage map: for each field, which events set it and clear it *)
   let setters = Hashtbl.create 16 in

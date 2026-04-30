@@ -77,6 +77,7 @@ let all_set b : SM.conditions =
     drain_complete = b;
     context_overflow = b;
     compact_retry_exhausted = b;
+    terminal_failure_latched = b;
   }
 
 let json_field_diff (a : Yojson.Safe.t) (b : Yojson.Safe.t) : string list =
@@ -289,6 +290,7 @@ let canonical_events : (string * SM.event) list =
     ("SupervisorRestartAttempt", SM.Supervisor_restart_attempt { attempt = 1 });
     ("RestartBudgetExhausted", SM.Restart_budget_exhausted);
     ("GuardrailStop", SM.Guardrail_stop { reason = "test" });
+    ("TerminalFailureDetected", SM.Terminal_failure_detected { reason = "test" });
     ( "ContextOverflowDetected",
       SM.Context_overflow_detected
         { source = `Oas_signal; token_count = 200_000; limit_tokens = Some 200_000 } );

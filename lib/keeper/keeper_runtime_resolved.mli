@@ -27,6 +27,7 @@ type t = {
   turn_timeout_sec : float field;
   admission_wait_timeout_sec : float field;
   oas_timeout_override_sec : float option field;
+  stream_idle_timeout_sec : float field;
   oas_timeout_per_1k : float field;
   oas_timeout_per_turn : float field;
 }
@@ -48,6 +49,8 @@ val reactive_max_idle_turns : unit -> int
 val autonomous_max_idle_turns : unit -> int
 val turn_timeout_sec : unit -> float
 val admission_wait_timeout_sec : unit -> float
+val stream_idle_timeout_sec : unit -> float
+val stream_idle_timeout_for_total_timeout : total_timeout_s:float -> float
 val oas_timeout_for_estimated_input_tokens_with_turn_budget :
   estimated_input_tokens:int ->
   max_turns:int ->

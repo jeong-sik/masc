@@ -90,3 +90,13 @@ val drain_into_working_context :
 (** Number of items currently held in the accumulator. Useful for
     tests and metrics. *)
 val accumulator_size : accumulator -> int
+
+(** Process-wide singleton accumulator used by K4b runtime wire-up
+    (see [Keeper_run_tools] hook installation +
+    [Keeper_post_turn.apply_tool_emission_wirein]). All keepers share
+    this accumulator; cross-keeper attribution is acceptable because
+    [Multimodal.Workspace_holder] is itself process-wide.
+
+    Tests and other call sites that need an isolated accumulator
+    should use [create_accumulator] instead. *)
+val global_accumulator : accumulator

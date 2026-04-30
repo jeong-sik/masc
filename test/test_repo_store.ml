@@ -55,10 +55,14 @@ let write_file path content =
     ~finally:(fun () -> close_out_noerr oc)
     (fun () -> output_string oc content)
 
-let test_load_all_empty () =
+let test_load_all_backward_compat () =
   with_temp_base_path (fun base_path ->
       match Repo_store.load_all ~base_path with
-      | Ok repos -> Alcotest.(check int) "empty list" 0 (List.length repos)
+      | Ok repos ->
+          Alcotest.(check int) "backward compat default repo" 1 (List.length repos);
+          let repo = List.hd repos in
+          Alcotest.(check string) "default id" "default" repo.id;
+          Alcotest.(check string) "local_path is base_path" base_path repo.local_path
       | Error e -> Alcotest.fail ("unexpected error: " ^ e))
 
 let test_save_and_load_roundtrip () =
@@ -154,6 +158,29 @@ let test_update_status_existing () =
 let test_update_status_missing () =
   with_temp_base_path (fun base_path ->
       match Repo_store.update_status ~base_path "missing" Paused with
+      | Ok _ -> Alcotest.fail "expected error for missing repo"
+      | Error msg ->
+          Alcotest.(check bool) "mentions not found" true (contains_substring msg "not found"))
+
+let test_update_existing () =
+  with_temp_base_path (fun base_path ->
+      let repo = sample_repo "update-test" in
+      match Repo_store.add ~base_path repo with
+      | Error e -> Alcotest.fail ("add failed: " ^ e)
+      | Ok _ -> (
+          let updated = { repo with name = "updated-name"; url = "https://github.com/test/updated" } in
+          match Repo_store.update ~base_path "update-test" updated with
+          | Error e -> Alcotest.fail ("update failed: " ^ e)
+          | Ok () -> (
+              match Repo_store.find ~base_path "update-test" with
+              | Ok found ->
+                  Alcotest.(check string) "name updated" "updated-name" found.name;
+                  Alcotest.(check string) "url updated" "https://github.com/test/updated" found.url
+              | Error e -> Alcotest.fail ("find after update failed: " ^ e))))
+
+let test_update_missing () =
+  with_temp_base_path (fun base_path ->
+      match Repo_store.update ~base_path "missing" (sample_repo "missing") with
       | Ok _ -> Alcotest.fail "expected error for missing repo"
       | Error msg ->
           Alcotest.(check bool) "mentions not found" true (contains_substring msg "not found"))
@@ -270,7 +297,7 @@ let () =
     [
       ( "roundtrip",
         [
-          Alcotest.test_case "load_all empty" `Quick test_load_all_empty;
+          Alcotest.test_case "backward compat default" `Quick test_load_all_backward_compat;
           Alcotest.test_case "save and load roundtrip" `Quick test_save_and_load_roundtrip;
         ] );
       ( "add",
@@ -292,6 +319,11 @@ let () =
         [
           Alcotest.test_case "update existing" `Quick test_update_status_existing;
           Alcotest.test_case "update missing" `Quick test_update_status_missing;
+        ] );
+      ( "update",
+        [
+          Alcotest.test_case "update existing" `Quick test_update_existing;
+          Alcotest.test_case "update missing" `Quick test_update_missing;
         ] );
       ( "local_path",
         [

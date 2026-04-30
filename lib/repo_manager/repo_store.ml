@@ -120,7 +120,26 @@ let toml_of_repository repo =
 
 let load_all ~base_path =
   let path = repos_toml_path base_path in
-  if not (Sys.file_exists path) then Ok []
+  if not (Sys.file_exists path) then
+    (* backward compatibility: treat base_path as a single default repository *)
+    let now = now_unix_seconds () in
+    Ok
+      [
+        {
+          id = "default";
+          name = Filename.basename base_path;
+          url = "";
+          local_path = base_path;
+          default_branch = "main";
+          credential_id = "default";
+          keepers = [];
+          status = Active;
+          auto_sync = false;
+          sync_interval = 0;
+          created_at = now;
+          updated_at = now;
+        };
+      ]
   else
     match Otoml.Parser.from_file_result path with
     | Error msg -> Error msg
@@ -212,6 +231,22 @@ let update_status ~base_path id status =
         if String.equal r.id id then (
           found := true;
           { r with status; updated_at = now })
+        else r)
+      repos
+  in
+  if not !found then Error (Printf.sprintf "Repository not found: %s" id)
+  else save_all ~base_path updated
+
+let update ~base_path id (repo : repository) =
+  let* repos = load_all ~base_path in
+  let found = ref false in
+  let now = now_unix_seconds () in
+  let updated =
+    List.map
+      (fun (r : repository) ->
+        if String.equal r.id id then (
+          found := true;
+          { repo with created_at = r.created_at; updated_at = now })
         else r)
       repos
   in

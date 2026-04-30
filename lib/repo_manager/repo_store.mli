@@ -23,6 +23,11 @@ val update_status :
 (** [update_status ~base_path id status] updates the status of the repository
     with the given [id]. *)
 
+val update :
+  base_path:string -> repository_id -> repository -> (unit, string) result
+(** [update ~base_path id repo] replaces the repository with the given [id]
+    with [repo], preserving the original [created_at]. *)
+
 val list_branches :
   base_path:string -> repository_id -> (string list, string) result
 (** [list_branches ~base_path id] lists branch names for the repository.

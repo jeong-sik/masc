@@ -1,6 +1,19 @@
 # Changelog
 
 
+## [0.18.25] - 2026-05-01
+
+Post-v0.18.24 release-truth follow-up for the keeper registry event-queue wiring that landed immediately after the `v0.18.24` tag. No breaking API changes.
+
+### Added
+
+- Keeper registry entries now carry the `Keeper_event_queue` field, wiring the Event Layer queue into keeper registry construction and snapshots (#12403).
+
+### Changed
+
+- Package and release metadata advanced from `0.18.24` to `0.18.25`.
+- Roadmap, product operating plan, opam metadata, and spec baseline version references synced to `0.18.25`.
+
 ## [0.18.24] - 2026-05-01
 
 Post-v0.18.23 release-truth follow-up for the silent-failure cleanup, keeper event queue implementation, and ratchet baseline updates that landed immediately after the `v0.18.23` tag. No breaking API changes.

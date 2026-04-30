@@ -3,6 +3,7 @@ open Alcotest
 module KAP = Masc_mcp.Keeper_alerting_path
 module KT = Masc_mcp.Keeper_types
 module KTU = Masc_mcp.Keeper_turn_up_args
+module KGH = Masc_mcp.Keeper_gh_env
 
 let make_meta ?(allowed_paths = []) ~name () =
   let json =
@@ -12,6 +13,8 @@ let make_meta ?(allowed_paths = []) ~name () =
         ("agent_name", `String ("agent-" ^ name));
         ("trace_id", `String ("trace-" ^ name));
         ("goal", `String "test");
+        ("sandbox_profile", `String "local");
+        ("network_mode", `String "inherit");
         ("allowed_paths", `List (List.map (fun path -> `String path) allowed_paths));
       ]
   in
@@ -54,6 +57,26 @@ let with_temp_config f =
     Eio_main.run @@ fun env ->
     Fs_compat.set_fs (Eio.Stdenv.fs env);
     f (Masc_mcp.Coord.default_config dir))
+
+let ensure_dir path =
+  let rec loop p =
+    if p = "" || p = "." || p = "/" then ()
+    else if Sys.file_exists p then ()
+    else (
+      loop (Filename.dirname p);
+      Unix.mkdir p 0o755)
+  in
+  loop path
+
+let contains_substring s needle =
+  let s_len = String.length s in
+  let n_len = String.length needle in
+  let rec loop i =
+    if i + n_len > s_len then false
+    else if String.sub s i n_len = needle then true
+    else loop (i + 1)
+  in
+  n_len = 0 || loop 0
 
 let test_empty_paths_default_to_sandbox_root () =
   let meta = make_meta ~name:"keeper" () in
@@ -182,9 +205,17 @@ let test_hard_mode_requires_docker_none_identity () =
      with
      | Ok () -> fail "expected hard mode to reject missing github_identity"
      | Error err ->
-         check string "requires github_identity"
-           "MASC_KEEPER_SANDBOX_HARD_MODE requires github_identity in keeper profile"
-           err);
+         check bool "requires effective identity" true
+           (contains_substring err "effective GitHub identity");
+         check bool "points at root bundle" true
+           (contains_substring err "github-identities/root/gh"));
+    ensure_dir (KGH.root_gh_config_dir config);
+    (match
+       validate ~github_identity:None
+         ~sandbox_profile:KT.Docker ~network_mode:KT.Network_none ()
+     with
+     | Ok () -> ()
+     | Error err -> fail ("expected root fallback to validate: " ^ err));
     (match
        validate ~github_identity:(Some "anyang-keepers")
          ~sandbox_profile:KT.Docker ~network_mode:KT.Network_none ()

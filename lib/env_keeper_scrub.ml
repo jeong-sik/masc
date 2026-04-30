@@ -44,23 +44,28 @@ let scrub : string list =
     "OVERRIDE_GITHUB_TOKEN";
     "DEFAULT_WORKFLOW_TOKEN";
     "SSH_SIGNING_KEY";
+
+    (* Keeper GitHub work must use the MASC-owned identity bundle
+       selected by Keeper_gh_env. Ambient host credentials would turn
+       keeper/root identity labels into a cosmetic boundary. *)
+    "GH_TOKEN";
+    "GITHUB_TOKEN";
+    "GH_CONFIG_DIR";
+    "SSH_AUTH_SOCK";
+    "GIT_CONFIG_GLOBAL";
+    "GIT_CONFIG_SYSTEM";
+    "GIT_CONFIG_COUNT";
   ]
 
 let pass : string list =
   [
-    (* Job-scoped GitHub tokens — documented consumer is gh/git. *)
-    "GH_TOKEN";
-    "GITHUB_TOKEN";
-    (* SSH agent forwarding socket — short-lived, per-session. *)
-    "SSH_AUTH_SOCK";
-    (* Git user identity + config wiring; SSOT'd elsewhere but allowed to
-       pass when set by host. *)
+    (* Git user identity is not a credential by itself. Git config
+       location/count env is intentionally scrubbed above because it can
+       inject credential helpers or host-global settings. *)
     "GIT_AUTHOR_NAME";
     "GIT_AUTHOR_EMAIL";
     "GIT_COMMITTER_NAME";
     "GIT_COMMITTER_EMAIL";
-    "GIT_CONFIG_GLOBAL";
-    "GIT_CONFIG_COUNT";
   ]
 
 let scrub_table =

@@ -353,6 +353,12 @@ let test_remote_operator_action_schema_is_strict () =
                 Alcotest.(check bool) "remote includes keeper_message" true
                   (List.mem (`String "keeper_message") enums);
                 Alcotest.(check bool)
+                  "remote includes github_identity_login_prepare" true
+                  (List.mem (`String "github_identity_login_prepare") enums);
+                Alcotest.(check bool)
+                  "remote includes github_identity_status" true
+                  (List.mem (`String "github_identity_status") enums);
+                Alcotest.(check bool)
                   "remote includes keeper_github_identity_login_prepare" true
                   (List.mem (`String "keeper_github_identity_login_prepare") enums);
                 Alcotest.(check bool)

@@ -18,16 +18,6 @@ val docker_exec_failure_message :
   output:string ->
   string
 
-(** Per-keeper dedupe set guarding [warn_sandbox_gh_token_missing]. *)
-val gh_token_warn_emitted : (string, unit) Hashtbl.t
-
-val gh_token_warn_mu : Eio.Mutex.t
-
-(** Emit one structured warning + Prometheus counter increment
-    when the sandbox GH_TOKEN resolution chain collapses to "" for
-    [keeper_name]. *)
-val warn_sandbox_gh_token_missing : string -> unit
-
 (** Path of the per-keeper egress policy file
     [<sandbox_root>/egress.json]. *)
 val egress_policy_path :

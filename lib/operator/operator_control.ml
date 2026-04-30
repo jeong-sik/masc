@@ -47,35 +47,52 @@ type keeper_github_identity_target = {
   requested_name : string;
   resolved_name : string;
   github_identity : string;
+  credential_scope : string;
   git_identity_mode : string;
   bundle_root : string;
   gh_config_dir : string;
 }
 
+type github_identity_target = {
+  requested_identity : string;
+  github_identity : string;
+  bundle_root : string;
+  gh_config_dir : string;
+}
+
+let github_identity_target (ctx : 'a context) ~(identity : string) =
+  let identity = String.trim identity in
+  if identity = "" then Error "target_id identity is required"
+  else if not (Keeper_config.validate_name identity) then
+    Error (Printf.sprintf "invalid github_identity '%s'" identity)
+  else
+    let bundle_root = Keeper_gh_env.bundle_root ctx.config ~github_identity:identity in
+    let gh_config_dir = Keeper_gh_env.gh_config_dir_of_bundle bundle_root in
+    Ok { requested_identity = identity; github_identity = identity; bundle_root; gh_config_dir }
+
 let keeper_github_identity_target (ctx : 'a context) ~(name : string) =
   let* resolved_name = resolve_keeper_name_for_action ctx ~name in
   let defaults = Keeper_types_profile.load_keeper_profile_defaults resolved_name in
-  match defaults.github_identity with
-  | None ->
-      Error
-        (Printf.sprintf
-           "keeper %s has no github_identity configured"
-           resolved_name)
-  | Some github_identity ->
-      let git_identity_mode =
-        Option.value ~default:"keeper_alias" defaults.git_identity_mode
-      in
-      let bundle_root = Keeper_gh_env.bundle_root ctx.config ~github_identity in
-      let gh_config_dir = Keeper_gh_env.gh_config_dir_of_bundle bundle_root in
-      Ok
-        {
-          requested_name = name;
-          resolved_name;
-          github_identity;
-          git_identity_mode;
-          bundle_root;
-          gh_config_dir;
-        }
+  let git_identity_mode =
+    Option.value ~default:"keeper_alias" defaults.git_identity_mode
+  in
+  let github_identity, credential_scope =
+    match defaults.github_identity with
+    | Some value -> value, "keeper_identity"
+    | None -> Keeper_gh_env.root_github_identity, "root_fallback"
+  in
+  let bundle_root = Keeper_gh_env.bundle_root ctx.config ~github_identity in
+  let gh_config_dir = Keeper_gh_env.gh_config_dir_of_bundle bundle_root in
+  Ok
+    {
+      requested_name = name;
+      resolved_name;
+      github_identity;
+      credential_scope;
+      git_identity_mode;
+      bundle_root;
+      gh_config_dir;
+    }
 
 let keeper_github_identity_preview_json target =
   `Assoc
@@ -83,6 +100,7 @@ let keeper_github_identity_preview_json target =
       ("target_id", `String target.requested_name);
       ("keeper", `String target.resolved_name);
       ("github_identity", `String target.github_identity);
+      ("credential_scope", `String target.credential_scope);
       ("git_identity_mode", `String target.git_identity_mode);
       ("bundle_root", `String target.bundle_root);
       ("gh_config_dir", `String target.gh_config_dir);
@@ -90,15 +108,19 @@ let keeper_github_identity_preview_json target =
       ("git_protocol", `String "https");
     ]
 
+let github_identity_preview_json target =
+  `Assoc
+    [
+      ("target_id", `String target.requested_identity);
+      ("github_identity", `String target.github_identity);
+      ("bundle_root", `String target.bundle_root);
+      ("gh_config_dir", `String target.gh_config_dir);
+      ("hostname", `String "github.com");
+      ("git_protocol", `String "https");
+    ]
+
 let gh_process_env_for_config_dir gh_config_dir =
-  let gh_config = "GH_CONFIG_DIR=" ^ gh_config_dir in
-  let base =
-    Unix.environment ()
-    |> Array.to_list
-    |> List.filter (fun entry ->
-         not (String.starts_with ~prefix:"GH_CONFIG_DIR=" entry))
-  in
-  Array.of_list (gh_config :: base)
+  Keeper_gh_env.compose_base_with_gh_config ~dir:gh_config_dir
 
 let run_gh_auth_status ~gh_config_dir =
   try
@@ -212,6 +234,66 @@ let execute_room_action (ctx : 'a context) (request : action_request) =
       in
       let result = Coord.add_task ctx.config ~title ~priority ~description in
       room_action_result request (`String result)
+  | "github_identity_login_prepare" ->
+      let* () = validate_target_type "root" request in
+      let* identity = require_target_id request in
+      let* target = github_identity_target ctx ~identity in
+      Fs_compat.mkdir_p target.bundle_root;
+      Fs_compat.mkdir_p target.gh_config_dir;
+      let login_command =
+        Printf.sprintf
+          "GH_CONFIG_DIR=%s gh auth login --hostname github.com --git-protocol https --web"
+          (Filename.quote target.gh_config_dir)
+      in
+      room_action_result request
+        (`Assoc
+           [
+             ("github_identity", `String target.github_identity);
+             ("bundle_root", `String target.bundle_root);
+             ("gh_config_dir", `String target.gh_config_dir);
+             ("hostname", `String "github.com");
+             ("git_protocol", `String "https");
+             ("login_command", `String login_command);
+           ])
+  | "github_identity_status" ->
+      let* () = validate_target_type "root" request in
+      let* identity = require_target_id request in
+      let* target = github_identity_target ctx ~identity in
+      let gh_config_dir_exists =
+        Sys.file_exists target.gh_config_dir && Sys.is_directory target.gh_config_dir
+      in
+      let auth_result =
+        if gh_config_dir_exists then
+          Some (run_gh_auth_status ~gh_config_dir:target.gh_config_dir)
+        else None
+      in
+      let authenticated =
+        match auth_result with
+        | Some (Ok (Unix.WEXITED 0, _output)) -> true
+        | _ -> false
+      in
+      let auth_status_json =
+        match auth_result with
+        | Some (Ok (status, output)) ->
+            `Assoc
+              [
+                ("status", Keeper_alerting_path.process_status_to_json status);
+                ("output", `String output);
+              ]
+        | Some (Error err) -> `Assoc [ ("error", `String err) ]
+        | None -> `Null
+      in
+      room_action_result request
+        (`Assoc
+           [
+             ("github_identity", `String target.github_identity);
+             ("bundle_root", `String target.bundle_root);
+             ("gh_config_dir", `String target.gh_config_dir);
+             ("gh_config_dir_exists", `Bool gh_config_dir_exists);
+             ("operator_fallback_allowed", `Bool false);
+             ("authenticated", `Bool authenticated);
+             ("auth_status", auth_status_json);
+           ])
   | _ -> Error (Printf.sprintf "not a namespace action: %s" request.action_type)
 
 (* Issue #8394: removed [execute_team_action] — team session execution
@@ -389,6 +471,7 @@ let execute_keeper_action (ctx : 'a context) (request : action_request) =
                 [
                   ("keeper", `String target.resolved_name);
                   ("github_identity", `String target.github_identity);
+                  ("credential_scope", `String target.credential_scope);
                   ("git_identity_mode", `String target.git_identity_mode);
                   ("bundle_root", `String target.bundle_root);
                   ("gh_config_dir", `String target.gh_config_dir);
@@ -402,33 +485,44 @@ let execute_keeper_action (ctx : 'a context) (request : action_request) =
       let* name = require_target_id request in
       let* resolved_name = resolve_keeper_name_for_action ctx ~name in
       let defaults = Keeper_types_profile.load_keeper_profile_defaults resolved_name in
-      let github_identity = defaults.github_identity in
       let git_identity_mode =
         Option.value ~default:"keeper_alias" defaults.git_identity_mode
       in
+      let binding_result = Keeper_gh_env.keeper_binding ctx.config ~keeper_name:resolved_name in
+      let configured_github_identity = defaults.github_identity in
+      let effective_github_identity, credential_scope, bundle_root, gh_config_dir, binding_error =
+        match binding_result with
+        | Ok binding ->
+            ( binding.effective_github_identity
+            , Keeper_gh_env.credential_scope_to_string binding.credential_scope
+            , binding.bundle_root
+            , binding.gh_config_dir
+            , None )
+        | Error err ->
+            let fallback_identity =
+              Option.value ~default:Keeper_gh_env.root_github_identity
+                configured_github_identity
+            in
+            let bundle_root =
+              Keeper_gh_env.bundle_root ctx.config
+                ~github_identity:fallback_identity
+            in
+            ( fallback_identity
+            , (match configured_github_identity with
+               | Some _ -> "keeper_identity"
+               | None -> "root_fallback")
+            , bundle_root
+            , Keeper_gh_env.gh_config_dir_of_bundle bundle_root
+            , Some err )
+      in
       let hard_mode = Env_config_keeper.KeeperSandbox.hard_mode () in
-      let legacy_gh_config_dir =
-        if hard_mode then None else Keeper_gh_env.config_dir ctx.config
-      in
-      let bundle_root =
-        Option.map
-          (fun identity -> Keeper_gh_env.bundle_root ctx.config ~github_identity:identity)
-          github_identity
-      in
-      let gh_config_dir =
-        match bundle_root with
-        | Some root -> Some (Keeper_gh_env.gh_config_dir_of_bundle root)
-        | None -> legacy_gh_config_dir
-      in
       let gh_config_dir_exists =
-        match gh_config_dir with
-        | Some dir -> Sys.file_exists dir && Sys.is_directory dir
-        | None -> false
+        Sys.file_exists gh_config_dir && Sys.is_directory gh_config_dir
       in
       let auth_result =
-        match gh_config_dir with
-        | Some dir when gh_config_dir_exists -> Some (run_gh_auth_status ~gh_config_dir:dir)
-        | _ -> None
+        if gh_config_dir_exists then
+          Some (run_gh_auth_status ~gh_config_dir)
+        else None
       in
       let authenticated =
         match auth_result with
@@ -454,17 +548,22 @@ let execute_keeper_action (ctx : 'a context) (request : action_request) =
               `Assoc
                 [
                   ("keeper", `String resolved_name);
-                  ("github_identity",
-                    (match github_identity with Some value -> `String value | None -> `Null));
+                  ("configured_github_identity",
+                    (match configured_github_identity with
+                     | Some value -> `String value
+                     | None -> `Null));
+                  ("effective_github_identity", `String effective_github_identity);
+                  ("credential_scope", `String credential_scope);
                   ("git_identity_mode", `String git_identity_mode);
-                  ("bundle_root",
-                    (match bundle_root with Some value -> `String value | None -> `Null));
-                  ("gh_config_dir",
-                    (match gh_config_dir with Some value -> `String value | None -> `Null));
+                  ("bundle_root", `String bundle_root);
+                  ("gh_config_dir", `String gh_config_dir);
                   ("gh_config_dir_exists", `Bool gh_config_dir_exists);
-                  ("legacy_gh_config_dir",
-                    (match legacy_gh_config_dir with Some value -> `String value | None -> `Null));
+                  ("root_fallback_available",
+                    `Bool (Keeper_gh_env.root_gh_config_dir_exists ctx.config));
+                  ("operator_fallback_allowed", `Bool false);
                   ("hard_mode", `Bool hard_mode);
+                  ("binding_error",
+                    (match binding_error with Some err -> `String err | None -> `Null));
                   ("authenticated", `Bool authenticated);
                   ("auth_status", auth_status_json);
                 ] );
@@ -480,7 +579,8 @@ let execute_action (ctx : 'a context) (request : action_request) :
     | _ -> request
   in
   match request.action_type with
-  | "broadcast" | "namespace_pause" | "namespace_resume" | "social_sweep" | "task_inject" ->
+  | "broadcast" | "namespace_pause" | "namespace_resume" | "social_sweep"
+  | "task_inject" | "github_identity_login_prepare" | "github_identity_status" ->
       execute_room_action ctx request
   | "keeper_probe" | "keeper_recover" | "keeper_message"
   | "keeper_github_identity_login_prepare"
@@ -524,6 +624,10 @@ let action_json ?actor_hint (ctx : _ context) args :
     let* token = generate_confirm_token ~clock:ctx.clock ctx.config in
     let* preview =
       match request.action_type with
+      | "github_identity_login_prepare" ->
+          let* identity = require_target_id request in
+          let* target = github_identity_target ctx ~identity in
+          Ok (github_identity_preview_json target)
       | "keeper_github_identity_login_prepare" ->
           let* name = require_target_id request in
           let* target = keeper_github_identity_target ctx ~name in

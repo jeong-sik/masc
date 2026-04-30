@@ -6,13 +6,16 @@
     (MASC server) and are not needed inside the keeper container or shell
     subprocess.
 
-    Job-scoped tokens ([GH_TOKEN], [GITHUB_TOKEN], [SSH_AUTH_SOCK], and
-    other [GIT_*]) are explicitly passed through — they are expected
-    consumers of gh/git operations and expire with the job.
+    Keeper GitHub execution must use the selected MASC identity bundle,
+    never the operator's ambient GitHub token/config or SSH agent.
+    [GH_TOKEN], [GITHUB_TOKEN], [GH_CONFIG_DIR], and [SSH_AUTH_SOCK]
+    are scrubbed at this boundary. Git config-location env such as
+    [GIT_CONFIG_GLOBAL] is also scrubbed because it can inject host
+    credential helpers; [GIT_*] non-secret behavior can still pass unless
+    a key is explicitly listed in [scrub].
 
     Design reference: [GHA_SUBPROCESS_SCRUB] in claude-code at
-    [src/utils/subprocessEnv.ts:15-53]. Principle P2 of RFC-0007:
-    "Scrub vs pass-through is decided by token scoping." *)
+    [src/utils/subprocessEnv.ts:15-53]. *)
 
 val scrub : string list
 (** Env-var keys stripped before spawning a keeper subprocess. *)

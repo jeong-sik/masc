@@ -45,17 +45,12 @@ let sandbox_env_names =
   ; "MASC_KEEPER_SANDBOX_DOCKER_IMAGE"
   ; "MASC_KEEPER_SANDBOX_GIT_DISPATCH"
   ; "MASC_KEEPER_DOCKER_PLAYGROUND"
-  ; "MASC_KEEPER_SANDBOX_GH_CREDS"
-  ; "MASC_KEEPER_SANDBOX_GITCONFIG"
-  ; "MASC_KEEPER_SANDBOX_SSH_DIR"
-  ; "MASC_KEEPER_SANDBOX_GH_TOKEN_PROBE_TIMEOUT_SEC"
   ; "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED"
   ; "MASC_KEEPER_SHELL_TIMEOUT_IO_SEC"
   ; "MASC_KEEPER_SHELL_TIMEOUT_READ_SEC"
   ; "MASC_KEEPER_SHELL_TIMEOUT_GIT_META_SEC"
   ; "MASC_KEEPER_SHELL_TIMEOUT_GH_MIN_SEC"
   ; "MASC_KEEPER_SHELL_TIMEOUT_USER_MAX_SEC"
-  ; "MASC_KEEPER_SHELL_TIMEOUT_TOKEN_PROBE_SEC"
   ; "MASC_KEEPER_SHELL_TIMEOUT_CLEANUP_RM_SEC"
   ; "MASC_KEEPER_SHELL_TIMEOUT_DEFAULT_SEC"
   ]
@@ -132,16 +127,6 @@ let test_defaults_pinned () =
   check bool "Runtime.git_dispatch default" true (S.Runtime.git_dispatch ());
   check bool "Runtime.docker_playground_enabled default" false
     (S.Runtime.docker_playground_enabled ());
-  (* Auth_paths.gh_creds / gitconfig defaults derive from $HOME but
-     since OCaml 5.4 stdlib lacks [Unix.unsetenv], we cannot fully
-     un-set the env to observe the default branch.  Coverage here is
-     intentionally narrow: ssh_dir default is empty (matches env="")
-     and probe timeout has a deterministic float clamp.  The hard_mode
-     interaction tests below cover the "force-empty" branch which
-     exercises the [if hard_mode () then "" else ...] path. *)
-  check string "Auth_paths.ssh_dir default" "" (S.Auth_paths.ssh_dir ());
-  check approx "Auth_paths.gh_token_probe_timeout_sec default" 2.0
-    (S.Auth_paths.gh_token_probe_timeout_sec ());
   (* Preflight *)
   check bool "Preflight.enabled default" true (S.Preflight.enabled ());
   check approx "Preflight.min_timeout_sec default" 5.0
@@ -164,7 +149,6 @@ let test_defaults_pinned () =
   pin S.Shell_timeout.Git_meta 5.0;
   pin S.Shell_timeout.Gh_min 15.0;
   pin S.Shell_timeout.User_max 180.0;
-  pin S.Shell_timeout.Token_probe 2.0;
   pin S.Shell_timeout.Cleanup_rm 5.0
 
 (* ---------------------------------------------------------------- *)
@@ -205,10 +189,10 @@ let test_per_bucket_env_var_shape () =
   check string "Io env var name"
     "MASC_KEEPER_SHELL_TIMEOUT_IO_SEC"
     (S.Shell_timeout.per_bucket_env_var ~bucket:S.Shell_timeout.Io);
-  check string "Token_probe env var name"
-    "MASC_KEEPER_SHELL_TIMEOUT_TOKEN_PROBE_SEC"
+  check string "Cleanup_rm env var name"
+    "MASC_KEEPER_SHELL_TIMEOUT_CLEANUP_RM_SEC"
     (S.Shell_timeout.per_bucket_env_var
-       ~bucket:S.Shell_timeout.Token_probe);
+       ~bucket:S.Shell_timeout.Cleanup_rm);
   check string "Unknown bucket env var lowercases"
     "MASC_KEEPER_SHELL_TIMEOUT_FUTURE_X_SEC"
     (S.Shell_timeout.per_bucket_env_var
@@ -255,16 +239,6 @@ let test_hard_mode_forces_require_flags () =
     check bool "hard_mode forces git_dispatch false"
       false (S.Runtime.git_dispatch ()))
 
-let test_hard_mode_clears_credential_paths () =
-  with_clean_sandbox_env @@ fun () ->
-  with_env "MASC_KEEPER_SANDBOX_HARD_MODE" (Some "true") (fun () ->
-    check string "hard_mode clears gh_creds" ""
-      (S.Auth_paths.gh_creds ());
-    check string "hard_mode clears gitconfig" ""
-      (S.Auth_paths.gitconfig ());
-    check string "hard_mode clears ssh_dir" ""
-      (S.Auth_paths.ssh_dir ()))
-
 let test_relax_fs_propagates_to_derived () =
   (* relax_fs raw value passes through; derived values change. *)
   with_clean_sandbox_env @@ fun () ->
@@ -303,8 +277,7 @@ let test_json_shape_has_top_level_keys () =
   let raw = List.assoc "raw" assoc in
   let raw_assoc = match raw with `Assoc xs -> xs | _ -> [] in
   let raw_keys =
-    [ "hardening"; "cleanup"; "runtime"; "auth_paths"
-    ; "preflight"; "shell_timeout" ]
+    [ "hardening"; "cleanup"; "runtime"; "preflight"; "shell_timeout" ]
   in
   List.iter
     (fun k ->
@@ -350,8 +323,6 @@ let () =
     ; ( "hard-mode",
         [ test_case "hard_mode forces require flags" `Quick
             test_hard_mode_forces_require_flags
-        ; test_case "hard_mode clears credentials" `Quick
-            test_hard_mode_clears_credential_paths
         ; test_case "relax_fs propagates to derived" `Quick
             test_relax_fs_propagates_to_derived
         ] )

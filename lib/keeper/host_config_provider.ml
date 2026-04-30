@@ -10,17 +10,10 @@ let mount_if_present ~host ~container : Credential_provider.ro_mount list =
 (* ── Skipped credential mount warn dedup ───────────────────────
 
    [mount_if_present] silently drops mounts whose host path is empty
-   or missing.  When called for the 3 critical credential mounts
-   (gh CLI config, gitconfig, ssh dir) the keeper subprocess then
-   runs inside docker without the corresponding credential; [gh pr
-   create] returns 401 / [git push] returns permission denied; the
-   keeper turn output shows only the raw CLI error.
-
-   Symmetric to #11025 (sandbox GH_TOKEN env warn): function exists,
-   policy exists, single missing log line at the composition layer
-   leaves operators blind.  Per-keeper one-shot WARN with explicit
-   list of which paths were skipped + reason (empty/not_found), plus
-   a Prometheus counter labelled by keeper + mount + reason.
+   or missing.  For the selected GH config bundle this would make a
+   keeper git/gh dispatch fail later with an opaque CLI error, so the
+   composition layer emits a single diagnostic and [resolve] fail-closes
+   when no credential mount remains.
 
    Fires at [compose_ro_mounts] (one observation point per keeper
    sandbox launch), not inside [mount_if_present] which is exposed
@@ -85,17 +78,18 @@ let warn_mount_skips_if_any ~keeper_name (attempts : mount_attempt list) =
       Log.Keeper.warn
         "%s: sandbox credential mount(s) skipped — keeper inside docker \
          will be missing the corresponding host credential.  Skipped: \
-         [%s].  Resolution: ensure host paths exist or override via \
-         [Env_config_sandbox.Auth_paths] env knobs.  See \
+         [%s].  Resolution: install the selected root/keeper GitHub \
+         identity bundle under $base_path/.masc/github-identities.  See \
          [host_config_provider.ml compose_ro_mounts]."
         keeper_name
         (String.concat "; " (List.map pp_skip skipped))
     end
   end
 
-(* RFC-0008 PR-1: env composition mirrors the inline block at
-   keeper_shell_docker.ml:271-329 (pre-extraction).  No new env keys
-   are introduced; this is the same surface, concentrated. *)
+(* Env composition for the selected identity bundle inside the docker
+   credential dispatch container.  Ambient operator credential env is
+   scrubbed before callers reach this provider; this block exposes only
+   container-local GH/Git paths plus non-interactive git guards. *)
 let compose_env ~git_author_name ~git_author_email =
   [
     "HOME", cred_root;
@@ -112,17 +106,19 @@ let compose_env ~git_author_name ~git_author_email =
   @ Env_git_noninteractive.env
 
 let compose_ro_mounts ?keeper_name (kb : Keeper_gh_env.keeper_binding) =
-  let gh_creds =
-    match kb.gh_config_dir with
-    | Some dir -> dir
-    | None -> Env_config_sandbox.Auth_paths.gh_creds ()
+  let gh_creds = kb.gh_config_dir in
+  let identity_gitconfig = Filename.concat kb.bundle_root "gitconfig" in
+  let identity_ssh_dir = Filename.concat kb.bundle_root "ssh" in
+  let gitconfig =
+    if Sys.file_exists identity_gitconfig then identity_gitconfig else ""
   in
-  let gitconfig = Env_config_sandbox.Auth_paths.gitconfig () in
-  let ssh_dir = Env_config_sandbox.Auth_paths.ssh_dir () in
+  let ssh_dir =
+    if Sys.file_exists identity_ssh_dir && Sys.is_directory identity_ssh_dir then
+      identity_ssh_dir
+    else ""
+  in
   let attempts = [
     classify_mount_attempt ~label:"gh_creds" ~host:gh_creds;
-    classify_mount_attempt ~label:"gitconfig" ~host:gitconfig;
-    classify_mount_attempt ~label:"ssh_dir" ~host:ssh_dir;
   ] in
   Option.iter
     (fun name -> warn_mount_skips_if_any ~keeper_name:name attempts)
@@ -146,6 +142,10 @@ let metadata_of_binding (kb : Keeper_gh_env.keeper_binding) =
   let base =
     [ "source", "host_config";
       "git_identity_mode", kb.git_identity_mode;
+      "effective_github_identity", kb.effective_github_identity;
+      "credential_scope",
+      Keeper_gh_env.credential_scope_to_string kb.credential_scope;
+      "bundle_root", kb.bundle_root;
     ]
   in
   match kb.github_identity with
@@ -181,7 +181,7 @@ let resolve ~config ~identity:keeper_name =
         let metadata = metadata_of_binding kb in
         Ok
           Credential_provider.{
-            identity = keeper_name;
+            identity = kb.effective_github_identity;
             env;
             ro_mounts;
             bootstrap = None;

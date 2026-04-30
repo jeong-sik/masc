@@ -121,6 +121,8 @@ let canonical_action_type action_type =
   | "keeper_message" -> "keeper_message"
   | "keeper_probe" -> "keeper_probe"
   | "keeper_recover" -> "keeper_recover"
+  | "github_identity_login_prepare" -> "github_identity_login_prepare"
+  | "github_identity_status" -> "github_identity_status"
   | "keeper_github_identity_login_prepare" -> "keeper_github_identity_login_prepare"
   | "keeper_github_identity_status" -> "keeper_github_identity_status"
   | other -> other
@@ -135,7 +137,8 @@ let normalize_action_target_type target_type =
 
 let default_target_type_for action_type =
   match action_type with
-  | "broadcast" | "namespace_pause" | "namespace_resume" | "task_inject" | "social_sweep" -> "root"
+  | "broadcast" | "namespace_pause" | "namespace_resume" | "task_inject" | "social_sweep"
+  | "github_identity_login_prepare" | "github_identity_status" -> "root"
   | "keeper_message" | "keeper_probe" | "keeper_recover"
   | "keeper_github_identity_login_prepare" | "keeper_github_identity_status" -> "keeper"
   | _ -> ""

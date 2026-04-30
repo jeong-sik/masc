@@ -487,6 +487,32 @@ let test_snapshot_exposes_keeper_and_social_actions () =
             Yojson.Safe.Util.(keeper_recover |> member "target_type" |> to_string);
           Alcotest.(check bool) "keeper_recover confirm true" true
             Yojson.Safe.Util.(keeper_recover |> member "confirm_required" |> to_bool);
+          let root_identity_login_prepare =
+            match find_action "github_identity_login_prepare" with
+            | Some row -> row
+            | None ->
+                Alcotest.fail
+                  "expected github_identity_login_prepare in available_actions"
+          in
+          Alcotest.(check string) "root identity login target_type" "root"
+            Yojson.Safe.Util.(
+              root_identity_login_prepare |> member "target_type" |> to_string);
+          Alcotest.(check bool) "root identity login requires confirm" true
+            Yojson.Safe.Util.(
+              root_identity_login_prepare |> member "confirm_required" |> to_bool);
+          let root_identity_status =
+            match find_action "github_identity_status" with
+            | Some row -> row
+            | None ->
+                Alcotest.fail
+                  "expected github_identity_status in available_actions"
+          in
+          Alcotest.(check string) "root identity status target_type" "root"
+            Yojson.Safe.Util.(
+              root_identity_status |> member "target_type" |> to_string);
+          Alcotest.(check bool) "root identity status confirm false" false
+            Yojson.Safe.Util.(
+              root_identity_status |> member "confirm_required" |> to_bool);
           let keeper_identity_login_prepare =
             match find_action "keeper_github_identity_login_prepare" with
             | Some row -> row

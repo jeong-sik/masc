@@ -122,6 +122,12 @@ val metric_keeper_semaphore_wait_timeout : string
     Labels: [keeper, channel] with channel in
     [autonomous_queue_head | autonomous | turn]. *)
 
+val metric_keeper_turn_queue_depth : string
+(** P-DASH-02: gauge for keeper turn wait queue depth.
+    Labels: [channel] with [autonomous_queue] for the explicit autonomous
+    FIFO wait queue. Reactive turn depth is intentionally not inferred from
+    semaphore availability. *)
+
 val metric_timeout_policy_overshoot : string
 (** #9662: cooperative-cancel timeout overshoot counter emitted by
     [Timeout_policy].  Labels: [layer, origin]. *)

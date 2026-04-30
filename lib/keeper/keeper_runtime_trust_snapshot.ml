@@ -488,6 +488,62 @@ let disposition_of_snapshot ~pending_approval_count ~runtime_blocker_fields =
     | Some _, _ -> ("Alert", "critical_block")
     | None, _ -> ("Pass", "healthy")
 
+let operator_disposition_of_display ~disposition ~disposition_reason =
+  match disposition with
+  | "Pass" -> ("pass", disposition_reason)
+  | "Pause" -> ("pause_human", disposition_reason)
+  | "Alert" -> ("alert_exhausted", disposition_reason)
+  | _ -> ("pause_human", disposition_reason)
+
+let display_disposition_of_operator ~operator_disposition
+    ~operator_disposition_reason =
+  let reason default =
+    match String.trim operator_disposition_reason with
+    | "" -> default
+    | value -> value
+  in
+  match String.lowercase_ascii operator_disposition with
+  | "pass" -> ("Pass", "healthy")
+  | "skipped" -> ("Pass", "phase_skipped")
+  | "pass_next_model" -> ("Pass", "cascade_fallback")
+  | "pause_human" -> ("Pause", reason "needs_human_attention")
+  | "fail_open_next_cascade" -> ("Pause", reason "degraded_retry")
+  | "user_cancelled" -> ("Pause", reason "cancelled")
+  | "alert_exhausted" -> ("Alert", reason "cascade_exhausted")
+  | "unknown" -> ("Alert", reason "unmapped_cascade_state")
+  | _ -> ("Alert", reason "unmapped_operator_disposition")
+
+let receipt_operator_disposition receipt =
+  match
+    ( json_string_opt_member "operator_disposition" receipt,
+      json_string_opt_member "operator_disposition_reason" receipt )
+  with
+  | Some disposition, Some reason -> Some (disposition, reason)
+  | Some disposition, None -> Some (disposition, "")
+  | None, _ -> None
+
+let effective_disposition_fields ~fallback_disposition ~fallback_reason
+    latest_receipt =
+  match Option.bind latest_receipt receipt_operator_disposition with
+  | Some (operator_disposition, operator_disposition_reason) ->
+      let disposition, disposition_reason =
+        display_disposition_of_operator ~operator_disposition
+          ~operator_disposition_reason
+      in
+      ( disposition,
+        disposition_reason,
+        operator_disposition,
+        operator_disposition_reason )
+  | None ->
+      let operator_disposition, operator_disposition_reason =
+        operator_disposition_of_display ~disposition:fallback_disposition
+          ~disposition_reason:fallback_reason
+      in
+      ( fallback_disposition,
+        fallback_reason,
+        operator_disposition,
+        operator_disposition_reason )
+
 let disposition_fields_json ~(config : Coord.config) ~(meta : keeper_meta) :
     Yojson.Safe.t =
   let pending_approval_count =
@@ -498,6 +554,11 @@ let disposition_fields_json ~(config : Coord.config) ~(meta : keeper_meta) :
   in
   let disposition, disposition_reason =
     disposition_of_snapshot ~pending_approval_count ~runtime_blocker_fields
+  in
+  let latest_receipt = Keeper_execution_receipt.latest_json config meta.name in
+  let disposition, disposition_reason, _, _ =
+    effective_disposition_fields ~fallback_disposition:disposition
+      ~fallback_reason:disposition_reason latest_receipt
   in
   `Assoc
     [
@@ -891,33 +952,18 @@ let snapshot_json ~(config : Coord.config) ~(meta : keeper_meta) =
   let runtime_contract =
     Keeper_runtime_contract.runtime_contract_json ~config meta
   in
-  let disposition, disposition_reason =
+  let fallback_disposition, fallback_disposition_reason =
     disposition_of_snapshot ~pending_approval_count ~runtime_blocker_fields
   in
-  let operator_disposition, operator_disposition_reason =
-    match latest_receipt with
-    | Some receipt -> (
-        let open Yojson.Safe.Util in
-        match
-          ( member "operator_disposition" receipt
-          , member "operator_disposition_reason" receipt )
-        with
-        | `String disposition, `String reason -> (disposition, reason)
-        | _ -> (
-            match disposition with
-            | "Pass" -> ("pass", disposition_reason)
-            | "Pause" -> ("pause_human", disposition_reason)
-            | "Alert" -> ("alert_exhausted", disposition_reason)
-            | _ -> ("pause_human", disposition_reason)))
-    | None -> (
-        match disposition with
-        | "Pass" -> ("pass", disposition_reason)
-        | "Pause" -> ("pause_human", disposition_reason)
-        | "Alert" -> ("alert_exhausted", disposition_reason)
-        | _ -> ("pause_human", disposition_reason))
+  let disposition, disposition_reason, operator_disposition,
+      operator_disposition_reason =
+    effective_disposition_fields ~fallback_disposition
+      ~fallback_reason:fallback_disposition_reason latest_receipt
   in
   let needs_attention =
     assoc_bool_default "needs_attention" ~default:false attention_fields
+    || String.equal disposition "Pause"
+    || String.equal disposition "Alert"
   in
   let attention_reason =
     assoc_string_opt "attention_reason" attention_fields

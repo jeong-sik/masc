@@ -81,7 +81,17 @@ let make_keeper_meta ~name ~goal_id =
   | Ok meta -> { meta with active_goal_ids = [ goal_id ] }
   | Error err -> fail ("meta_of_json failed: " ^ err)
 
-let append_keeper_receipt (config : Coord.config) (meta : Keeper_types.keeper_meta) =
+let append_keeper_receipt ?(outcome = "ok")
+    ?(terminal_reason_code = "completed")
+    ?(requested_tools = [ "keeper_fs_read" ])
+    ?(reported_tools = [ "Read" ])
+    ?(observed_tools = [ "keeper_fs_read" ])
+    ?(canonical_tools = [ "keeper_fs_read" ])
+    ?(tools_used = [ "keeper_fs_read" ])
+    ?(tool_contract_result = "satisfied")
+    ?(tool_requirement = "required")
+    ?(cascade_outcome = "completed") (config : Coord.config)
+    (meta : Keeper_types.keeper_meta) =
   let started_at = Types.now_iso () in
   let ended_at = Types.now_iso () in
   let receipt : Keeper_execution_receipt.t =
@@ -93,22 +103,22 @@ let append_keeper_receipt (config : Coord.config) (meta : Keeper_types.keeper_me
       turn_count = Some 7;
       current_task_id = None;
       goal_ids = meta.active_goal_ids;
-      outcome = "ok";
-      terminal_reason_code = "completed";
+      outcome;
+      terminal_reason_code;
       response_text_present = true;
       model_used = Some "openai:gpt-5.4";
-      requested_tools = [ "keeper_fs_read" ];
-      reported_tools = [ "Read" ];
-      observed_tools = [ "keeper_fs_read" ];
-      canonical_tools = [ "keeper_fs_read" ];
+      requested_tools;
+      reported_tools;
+      observed_tools;
+      canonical_tools;
       unexpected_tools = [];
-      tools_used = [ "keeper_fs_read" ];
-      tool_contract_result = "satisfied";
+      tools_used;
+      tool_contract_result;
       tool_surface =
         {
           turn_lane = "tool";
           tool_surface_class = "mixed";
-          tool_requirement = "required";
+          tool_requirement;
           visible_tool_count = 1;
           tool_gate_enabled = true;
           tool_surface_fallback_used = false;
@@ -124,12 +134,12 @@ let append_keeper_receipt (config : Coord.config) (meta : Keeper_types.keeper_me
       cascade_selected_model = Some "openai:gpt-5.4";
       cascade_attempt_count = 1;
       cascade_fallback_applied = false;
-      cascade_outcome = "completed";
+      cascade_outcome;
       degraded_retry_applied = false;
       degraded_retry_cascade = None;
       fallback_reason = None;
       cascade_rotation_attempts = [];
-      stop_reason = Some "completed";
+      stop_reason = Some terminal_reason_code;
       error_kind = None;
       error_message = None;
       started_at;
@@ -414,6 +424,40 @@ let test_goal_detail_surfaces_keeper_runtime_trust_and_blockers () =
         "execution_receipt"
         (linked_keeper |> member "latest_causal_event" |> member "kind" |> to_string)
 
+let test_goal_detail_uses_receipt_disposition_for_required_tool_failure () =
+  with_room @@ fun config ->
+  let goal, _kind =
+    match Goal_store.upsert_goal config ~title:"Surface required tool failure" () with
+    | Ok payload -> payload
+    | Error msg -> fail msg
+  in
+  let meta = make_keeper_meta ~name:"tool-failure-keeper" ~goal_id:goal.id in
+  (match Keeper_types.write_meta ~force:true config meta with
+   | Ok () -> ()
+   | Error err -> fail ("write_meta failed: " ^ err));
+  append_keeper_receipt ~reported_tools:[] ~observed_tools:[] ~canonical_tools:[]
+    ~tools_used:[] ~tool_contract_result:"missing_required_tool_use" config meta;
+  match Dashboard_goals.goal_detail_json ~config ~goal_id:goal.id with
+  | Error msg -> fail msg
+  | Ok json ->
+      let linked_keeper =
+        match json |> member "linked_keepers" |> to_list with
+        | keeper :: _ -> keeper
+        | [] -> fail "expected linked keeper detail"
+      in
+      let runtime_trust = linked_keeper |> member "runtime_trust" in
+      check string "receipt-derived disposition pauses" "Pause"
+        (runtime_trust |> member "disposition" |> to_string);
+      check string "receipt-derived reason surfaced"
+        "tool_required_unsatisfied"
+        (runtime_trust |> member "disposition_reason" |> to_string);
+      check string "operator disposition preserved" "pause_human"
+        (runtime_trust |> member "operator_disposition" |> to_string);
+      check string "operator reason preserved" "tool_required_unsatisfied"
+        (runtime_trust |> member "operator_disposition_reason" |> to_string);
+      check bool "receipt-derived failure needs attention" true
+        (runtime_trust |> member "needs_attention" |> to_bool)
+
 let test_goal_tree_tolerates_null_decision_telemetry () =
   with_room @@ fun config ->
   let goal, _kind =
@@ -514,6 +558,9 @@ let () =
           test_case "goal detail surfaces keeper runtime trust and blockers"
             `Quick
             test_goal_detail_surfaces_keeper_runtime_trust_and_blockers;
+          test_case "goal detail pauses on required tool receipt failure"
+            `Quick
+            test_goal_detail_uses_receipt_disposition_for_required_tool_failure;
           test_case "goal tree tolerates null decision telemetry" `Quick
             test_goal_tree_tolerates_null_decision_telemetry;
           test_case

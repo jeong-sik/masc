@@ -279,6 +279,10 @@ let launch_supervised_fiber ~proactive_warmup_sec ctx (meta : keeper_meta)
         with
         | Eio.Cancel.Cancelled _ as e -> raise e
         | exn ->
+          Prometheus.inc_counter
+            Prometheus.metric_keeper_supervisor_cleanup_failures
+            ~labels:[("keeper", meta.name)]
+            ();
           Log.Keeper.warn
             "%s: supervisor finally cleanup failed (suppressed to avoid Fun.Finally_raised): %s"
             meta.name (Printexc.to_string exn)))

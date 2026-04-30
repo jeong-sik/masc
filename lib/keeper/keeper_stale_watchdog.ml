@@ -410,6 +410,10 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
          with
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->
+           Prometheus.inc_counter
+             Prometheus.metric_keeper_stale_watchdog_tick_failures
+             ~labels:[("keeper", meta.name)]
+             ();
            Log.Keeper.warn
              "%s: stale watchdog tick failed (suppressed): %s"
              meta.name (Printexc.to_string exn));

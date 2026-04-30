@@ -134,6 +134,12 @@ let test_agent_draft_policy_script () =
        (("PR_IS_DRAFT", "false")
        :: ("PR_LABELS", "enhancement,human-approved-ready")
        :: List.remove_assoc "PR_LABELS" base));
+  check bool "hard-stop label overrides bypass label" true
+    (run_agent_draft_policy
+       (("PR_IS_DRAFT", "false")
+       :: ("PR_LABELS", "enhancement,human-approved-ready,do-not-merge")
+       :: List.remove_assoc "PR_LABELS" base)
+    <> 0);
   check int "draft agent PR with bypass label passes" 0
     (run_agent_draft_policy
        (("PR_IS_DRAFT", "true")
@@ -148,6 +154,16 @@ let test_agent_draft_policy_script () =
          ("PR_HEAD_REF", "feature/human-branch");
          ("PR_LABELS", "enhancement");
        ]);
+  check bool "hard-stop label fails non-agent PR too" true
+    (run_agent_draft_policy
+       [
+         ("GITHUB_EVENT_NAME", "pull_request");
+         ("PR_IS_DRAFT", "false");
+         ("PR_TITLE", "fix: human authored branch");
+         ("PR_HEAD_REF", "feature/human-branch");
+         ("PR_LABELS", "enhancement,do-not-merge");
+       ]
+    <> 0);
   (* #10192: post-merge gate race.  When the live PR state is
      MERGED or CLOSED, the policy is moot (the merge already
      happened) and a missing bypass label must NOT resurrect a
@@ -193,7 +209,13 @@ let test_pr_automation_draft_guard_contracts () =
      | _ -> false);
   check bool "draft-only state does not suppress missing approval" true
     (file_not_contains_pattern ".github/workflows/pr-automation.yml"
-       "verifiedBypassLabels.length === 0 &&\n              !safeDraftOnlyState")
+       "verifiedBypassLabels.length === 0 &&\n              !safeDraftOnlyState");
+  check bool "pr automation has hard-stop label policy" true
+    (file_contains_pattern ".github/workflows/pr-automation.yml"
+       "hard-stop label present");
+  check bool "pr automation hard-stop participates in guarded decision" true
+    (file_contains_pattern ".github/workflows/pr-automation.yml"
+       "presentHardStopLabels.length > 0")
 
 let test_health_and_ci_runner_diagnostics () =
   check bool "health snapshot records baseline source" true

@@ -41,6 +41,7 @@ jobs:
           AGENT_DRAFT_GUARD_TITLE_RE: ${{ vars.AGENT_DRAFT_GUARD_TITLE_RE }}
           AGENT_DRAFT_GUARD_BRANCH_RE: ${{ vars.AGENT_DRAFT_GUARD_BRANCH_RE }}
           AGENT_DRAFT_GUARD_BYPASS_LABELS: ${{ vars.AGENT_DRAFT_GUARD_BYPASS_LABELS }}
+          AGENT_DRAFT_GUARD_HARD_STOP_LABELS: ${{ vars.AGENT_DRAFT_GUARD_HARD_STOP_LABELS }}
           AGENT_DRAFT_GUARD_HUMAN_ACTORS: ${{ vars.AGENT_DRAFT_GUARD_HUMAN_ACTORS }}
         with:
           script: |
@@ -63,6 +64,10 @@ jobs:
               .split(",")
               .map((s) => s.trim().toLowerCase())
               .filter((label) => !automationProneBypassLabels.has(label))
+              .filter(Boolean);
+            const hardStopLabels = (process.env.AGENT_DRAFT_GUARD_HARD_STOP_LABELS || "do-not-merge")
+              .split(",")
+              .map((s) => s.trim().toLowerCase())
               .filter(Boolean);
             const humanActors = (process.env.AGENT_DRAFT_GUARD_HUMAN_ACTORS || owner)
               .split(",")
@@ -100,6 +105,11 @@ jobs:
             );
             if (ignoredBypassLabels.length > 0) {
               core.info(`Ignoring automation-prone bypass labels: ${ignoredBypassLabels.join(", ")}.`);
+            }
+            const hardStopLabelSet = new Set(hardStopLabels);
+            const presentHardStopLabels = labels.filter((label) => hardStopLabelSet.has(label));
+            if (presentHardStopLabels.length > 0) {
+              core.warning(`Hard-stop labels present: ${presentHardStopLabels.join(", ")}.`);
             }
 
             const looksAgentAuthored =
@@ -187,6 +197,7 @@ jobs:
               current.isDraft ||
               hasAutoMergeRequest ||
               draftBoundaryAction ||
+              presentHardStopLabels.length > 0 ||
               looksAgentAuthored;
             if (!guarded) {
               if (humanAuthored) {
@@ -209,6 +220,11 @@ jobs:
             let shouldRestoreDraft = false;
             let shouldDisableAutoMerge = false;
             let ciGatePolicyFailure = false;
+            if (presentHardStopLabels.length > 0) {
+              policyFailures.push(`hard-stop label present: ${presentHardStopLabels.join(", ")}`);
+              shouldRestoreDraft = !current.isDraft;
+              shouldDisableAutoMerge = hasAutoMergeRequest;
+            }
             // Keep the required guard fail-closed even while the PR is draft.
             // A previous success on the same head SHA can otherwise let a
             // ready_for_review + immediate merge race reuse that success before

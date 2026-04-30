@@ -4,6 +4,7 @@ set -euo pipefail
 title_re="${AGENT_DRAFT_GUARD_TITLE_RE:-^\[codex\]}"
 branch_re="${AGENT_DRAFT_GUARD_BRANCH_RE:-^(codex[/-]|keeper[/-])}"
 bypass_labels_csv="${AGENT_DRAFT_GUARD_BYPASS_LABELS:-human-approved-ready}"
+hard_stop_labels_csv="${AGENT_DRAFT_GUARD_HARD_STOP_LABELS:-do-not-merge}"
 
 event_name="${GITHUB_EVENT_NAME:-}"
 if [[ "$event_name" != "pull_request" ]]; then
@@ -58,6 +59,16 @@ csv_has_label() {
   done
   return 1
 }
+
+IFS=',' read -r -a hard_stop_labels <<<"$hard_stop_labels_csv"
+for label in "${hard_stop_labels[@]}"; do
+  label="$(printf '%s' "$label" | xargs)"
+  [[ -n "$label" ]] || continue
+  if csv_has_label "$pr_labels_csv" "$label"; then
+    echo "::error title=Do-not-merge policy violation::PR '${pr_head_ref}' has hard-stop label ${label}. Remove the hard-stop label before ready/merge."
+    exit 1
+  fi
+done
 
 looks_agent_authored=0
 if [[ "$pr_title" =~ $title_re || "$pr_head_ref" =~ $branch_re ]]; then

@@ -237,6 +237,7 @@ let keeper_name_of_agent_name agent_name =
     None
 
 let runtime_mcp_policy_with_masc_agent_name
+    ?(include_internal_token = true)
     ~(agent_name : string)
     (policy : Llm_provider.Llm_transport.runtime_mcp_policy) =
   let agent_name = String.trim agent_name in
@@ -253,15 +254,17 @@ let runtime_mcp_policy_with_masc_agent_name
                   ~value:agent_name headers
               in
               let headers =
-                match
-                  ( first_nonempty_env [ "MASC_INTERNAL_MCP_TOKEN" ],
-                    keeper_name_of_agent_name agent_name )
-                with
-                | Some token, Some _ ->
-                    upsert_http_header
-                      ~key:"x-masc-internal-token"
-                      ~value:token headers
-                | _ -> headers
+                if include_internal_token then
+                  match
+                    ( first_nonempty_env [ "MASC_INTERNAL_MCP_TOKEN" ],
+                      keeper_name_of_agent_name agent_name )
+                  with
+                  | Some token, Some _ ->
+                      upsert_http_header
+                        ~key:"x-masc-internal-token"
+                        ~value:token headers
+                  | _ -> headers
+                else headers
               in
               let headers =
                 match keeper_name_of_agent_name agent_name with
@@ -309,12 +312,14 @@ let runtime_mcp_policy_for_provider
          [Auth.find_credential_by_token]'s alphabetical first-match
          (the #9786 root cause behind the [bearer token belongs to X]
          rejection storm).  Strip ambient/auth headers as before, then
-         re-inject the identity-only whitelist
-         (x-masc-agent-name, x-masc-keeper-name, x-masc-internal-token)
+         re-inject the non-secret identity-only whitelist
+         (x-masc-agent-name, x-masc-keeper-name)
          so the server side resolves the requester correctly even when
          ambient-env auth is the primary channel. *)
       let stripped = runtime_mcp_policy_without_http_headers policy in
-      Some (runtime_mcp_policy_with_masc_agent_name ~agent_name stripped)
+      Some
+        (runtime_mcp_policy_with_masc_agent_name
+           ~include_internal_token:false ~agent_name stripped)
   | Some policy, Llm_provider.Provider_config.Codex_cli, None ->
       (* No agent_name to inject — preserve the legacy strip-all behavior. *)
       Some (runtime_mcp_policy_without_http_headers policy)
@@ -620,8 +625,8 @@ let resolve_tool_lane_for_oas_tools
         let runtime_mcp_requires_http_headers =
           match runtime_mcp_policy with
           | Some policy ->
-              Provider_tool_support.runtime_mcp_policy_requires_http_headers
-                policy
+              Provider_tool_support.runtime_mcp_policy_requires_unsupported_http_headers
+                provider_cfg policy
           | None -> false
         in
         if public_tool_names <> []

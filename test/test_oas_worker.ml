@@ -1733,10 +1733,11 @@ let test_resolve_tool_lane_for_codex_cli_public_tools_uses_runtime_mcp_policy ()
       Alcotest.fail "expected codex_cli public MCP tools to use runtime MCP lane"
   | Error err -> Alcotest.fail (Oas.Error.to_string err)
 
-let test_resolve_tool_lane_for_codex_cli_public_tools_with_agent_name_strips_runtime_headers () =
+let test_resolve_tool_lane_for_codex_cli_public_tools_with_agent_name_keeps_identity_headers () =
   with_env "MASC_HTTP_BASE_URL" "http://127.0.0.1:8935" @@ fun () ->
   with_env "MASC_INTERNAL_MCP_TOKEN" "" @@ fun () ->
   with_env "MASC_MCP_TOKEN" "" @@ fun () ->
+  with_temp_masc_base_path "codex-public-runtime-mcp" @@ fun _base_path ->
   let tools =
     [ make_named_noop_tool "masc_status"; make_named_noop_tool "masc_tasks" ]
   in
@@ -1757,8 +1758,12 @@ let test_resolve_tool_lane_for_codex_cli_public_tools_with_agent_name_strips_run
       in
       Alcotest.(check int) "runtime lane strips inline tools" 0
         (List.length effective_tools);
-      Alcotest.(check (option string)) "codex_cli strips agent header" None
+      Alcotest.(check (option string)) "codex_cli preserves agent identity header"
+        (Some "keeper-sangsu-agent")
         (Option.bind masc_headers (List.assoc_opt "x-masc-agent-name"));
+      Alcotest.(check (option string)) "codex_cli preserves keeper identity header"
+        (Some "sangsu")
+        (Option.bind masc_headers (List.assoc_opt "x-masc-keeper-name"));
       Alcotest.(check (option string)) "codex_cli strips bearer header" None
         (Option.bind masc_headers (List.assoc_opt "Authorization"))
   | Ok (_, None) ->
@@ -1791,7 +1796,11 @@ let test_resolve_tool_lane_for_codex_cli_keeper_bound_public_tools_omits_bound_t
         (List.length effective_tools);
       Alcotest.(check (list string)) "keeper-bound tool omitted for codex_cli"
         [ "masc_status" ] policy.allowed_tool_names;
-      Alcotest.(check (option string)) "codex_cli strips keeper header" None
+      Alcotest.(check (option string)) "codex_cli preserves agent identity header"
+        (Some "keeper-sangsu-agent")
+        (Option.bind masc_headers (List.assoc_opt "x-masc-agent-name"));
+      Alcotest.(check (option string)) "codex_cli preserves keeper identity header"
+        (Some "sangsu")
         (Option.bind masc_headers (List.assoc_opt "x-masc-keeper-name"));
       Alcotest.(check (option string)) "codex_cli strips internal token" None
         (Option.bind masc_headers (List.assoc_opt "x-masc-internal-token"))
@@ -2094,6 +2103,13 @@ let test_classify_filter_rejection_codex_keeper_bound_actor () =
     Oas_worker_exec.public_mcp_runtime_policy_of_tool_names
       ~agent_name:"keeper-sangsu-agent" [ "masc_status"; "masc_claim_next" ]
   in
+  (match runtime_mcp_policy with
+   | Some policy ->
+       Alcotest.(check (list string)) "runtime policy keeps requested tools"
+         [ "masc_status"; "masc_claim_next" ] policy.allowed_tool_names;
+       Alcotest.(check bool) "masc_claim_next requires actor binding" true
+         (Oas_worker_exec.runtime_mcp_tool_requires_bound_actor "masc_claim_next")
+   | None -> Alcotest.fail "expected public MCP runtime policy");
   let reason =
     Masc_mcp.Oas_worker_named.classify_filter_rejection
       ~keeper_name:"sangsu"
@@ -3945,9 +3961,9 @@ let () =
       Alcotest.test_case "public MCP tools on codex_cli use runtime MCP lane" `Quick
         test_resolve_tool_lane_for_codex_cli_public_tools_uses_runtime_mcp_policy;
       Alcotest.test_case
-        "public MCP tools on codex_cli strip unsupported runtime MCP headers"
+        "public MCP tools on codex_cli keep identity runtime MCP headers"
         `Quick
-        test_resolve_tool_lane_for_codex_cli_public_tools_with_agent_name_strips_runtime_headers;
+        test_resolve_tool_lane_for_codex_cli_public_tools_with_agent_name_keeps_identity_headers;
       Alcotest.test_case
         "keeper-bound public MCP tools on codex_cli omit request-scoped tools"
         `Quick

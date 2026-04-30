@@ -28,6 +28,20 @@ let policy_with_headers : L.Llm_transport.runtime_mcp_policy =
     ];
   }
 
+let policy_with_masc_identity_headers : L.Llm_transport.runtime_mcp_policy =
+  { L.Llm_transport.empty_runtime_mcp_policy with
+    servers = [
+      L.Llm_transport.Http_server {
+        name = "masc";
+        url = "https://example/mcp";
+        headers = [
+          ("x-masc-agent-name", "keeper-sangsu-agent");
+          ("x-masc-keeper-name", "sangsu");
+        ];
+      }
+    ];
+  }
+
 let policy_without_headers : L.Llm_transport.runtime_mcp_policy =
   { L.Llm_transport.empty_runtime_mcp_policy with
     servers = [
@@ -54,18 +68,27 @@ let test_codex_blocked_by_headers () =
   check string "codex_cli rejected with header-required policy"
     "runtime_mcp_http_headers_required" (label r)
 
-(* Kimi_cli's normalize_cli_provider_caps sets runtime_mcp_tools=true
-   AND supports_tool_choice=false; so it relies entirely on runtime
-   mcp. With a policy that demands HTTP headers and kimi_cli's
-   no_tool_http_headers policy, the rejection cause is the same as
-   codex — the tool_policy mismatch, not capability gaps. *)
-let test_kimi_blocked_by_headers () =
+(* Kimi_cli advertises request-scoped runtime MCP HTTP-header support,
+   so a header-bearing policy is accepted through the runtime MCP lane. *)
+let test_kimi_accepts_headers () =
   let r =
     P.classify_rejection ~runtime_mcp_policy:policy_with_headers
       ~require_tool_choice_support:true ~require_tool_support:true kimi
   in
-  check string "kimi_cli rejected with header-required policy"
-    "runtime_mcp_http_headers_required" (label r)
+  check string "kimi_cli accepted with header-required policy"
+    "<accepted>" (label r)
+
+(* Codex_cli cannot carry arbitrary request-scoped headers, but the
+   provider-normalized MASC identity headers are safe to keep. They are
+   enough for the MASC server to disambiguate the caller when ambient auth
+   supplies the bearer token. *)
+let test_codex_accepts_masc_identity_headers () =
+  let r =
+    P.classify_rejection ~runtime_mcp_policy:policy_with_masc_identity_headers
+      ~require_tool_choice_support:true ~require_tool_support:true codex
+  in
+  check string "codex_cli accepted with MASC identity headers"
+    "<accepted>" (label r)
 
 (* Without HTTP headers in the policy, kimi_cli passes via runtime
    mcp because it has runtime_mcp_tools=true. *)
@@ -90,8 +113,10 @@ let () =
     ("classify_rejection", [
         test_case "codex_cli blocked by HTTP-headers policy" `Quick
           test_codex_blocked_by_headers;
-        test_case "kimi_cli blocked by HTTP-headers policy" `Quick
-          test_kimi_blocked_by_headers;
+        test_case "kimi_cli accepts HTTP-headers policy" `Quick
+          test_kimi_accepts_headers;
+        test_case "codex_cli accepts MASC identity headers" `Quick
+          test_codex_accepts_masc_identity_headers;
         test_case "kimi_cli passes stdio-only policy" `Quick
           test_kimi_passes_stdio_policy;
         test_case "filter disabled bypasses classification" `Quick

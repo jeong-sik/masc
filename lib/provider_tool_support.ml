@@ -99,15 +99,44 @@ let runtime_mcp_policy_requires_http_headers
       | _ -> false)
     policy.servers
 
+let normalize_header_key key = String.lowercase_ascii (String.trim key)
+
+let codex_cli_identity_runtime_mcp_header key =
+  match normalize_header_key key with
+  | "x-masc-agent-name" | "x-masc-keeper-name" -> true
+  | _ -> false
+
+let provider_supports_runtime_mcp_http_header
+    (provider_cfg : Llm_provider.Provider_config.t)
+    key =
+  if supports_runtime_mcp_http_headers provider_cfg then true
+  else
+    match provider_cfg.kind with
+    | Llm_provider.Provider_config.Codex_cli ->
+        codex_cli_identity_runtime_mcp_header key
+    | _ -> false
+
+let runtime_mcp_policy_requires_unsupported_http_headers
+    (provider_cfg : Llm_provider.Provider_config.t)
+    (policy : Llm_provider.Llm_transport.runtime_mcp_policy) =
+  List.exists
+    (function
+      | Llm_provider.Llm_transport.Http_server { headers; _ } ->
+          List.exists
+            (fun (key, _) ->
+              not (provider_supports_runtime_mcp_http_header provider_cfg key))
+            headers
+      | _ -> false)
+    policy.servers
+
 let provider_supports_runtime_mcp_policy
     (provider_cfg : Llm_provider.Provider_config.t)
     (policy : Llm_provider.Llm_transport.runtime_mcp_policy) =
   let caps = capabilities_of_config provider_cfg in
   caps.supports_runtime_mcp_tools
   && caps.supports_runtime_tool_events
-  &&
-  ((not (runtime_mcp_policy_requires_http_headers policy))
-  || caps.supports_runtime_mcp_http_headers)
+  && not
+       (runtime_mcp_policy_requires_unsupported_http_headers provider_cfg policy)
 
 let supports_required_tool_use ?runtime_mcp_policy
     ~require_tool_choice_support ~require_tool_support
@@ -181,8 +210,7 @@ let classify_rejection ?runtime_mcp_policy
       runtime_mcp_caps_ok &&
       (match runtime_mcp_policy with
        | Some policy ->
-         runtime_mcp_policy_requires_http_headers policy
-         && not caps.supports_runtime_mcp_http_headers
+         runtime_mcp_policy_requires_unsupported_http_headers provider_cfg policy
        | None -> false)
     in
     let inline_path_ok =

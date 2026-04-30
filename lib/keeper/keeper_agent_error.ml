@@ -71,14 +71,54 @@ let api_error_terminal_reason_code (err : Oas.Error.api_error) : string =
   | Oas.Retry.NetworkError _ -> "api_error_network"
   | Oas.Retry.Timeout _ -> "api_error_timeout"
 
-let terminal_reason_code_of_sdk_error = function
-  | Oas.Error.Agent
-      (Oas.Error.CompletionContractViolation { contract; _ }) ->
+(* Per-variant terminal_reason_code for Oas.Error.Agent.
+   Previously every Agent failure collapsed to "agent_error", mirroring
+   the old Api behaviour. Memory: no-collapse-richer-enum-at-sdk-boundary. *)
+let agent_error_terminal_reason_code = function
+  | Oas.Error.CompletionContractViolation { contract; _ } ->
     Printf.sprintf
       "completion_contract_violation:%s"
       (Oas.Completion_contract_id.to_string contract)
+  | Oas.Error.MaxTurnsExceeded { turns; limit } ->
+    Printf.sprintf
+      "agent_error_max_turns_exceeded:turns=%d,limit=%d"
+      turns limit
+  | Oas.Error.ExitConditionMet { turn } ->
+    Printf.sprintf
+      "agent_error_exit_condition_met:turn=%d"
+      turn
+  | Oas.Error.UnrecognizedStopReason { reason } ->
+    Printf.sprintf
+      "agent_error_unrecognized_stop_reason:%s"
+      reason
+  | Oas.Error.TokenBudgetExceeded { kind; used; limit } ->
+    Printf.sprintf
+      "agent_error_token_budget_exceeded:kind=%s,used=%d,limit=%d"
+      kind used limit
+  | Oas.Error.CostBudgetExceeded { spent_usd; limit_usd } ->
+    Printf.sprintf
+      "agent_error_cost_budget_exceeded:spent_usd=%.2f,limit_usd=%.2f"
+      spent_usd limit_usd
+  | Oas.Error.IdleDetected { consecutive_idle_turns } ->
+    Printf.sprintf
+      "agent_error_idle_detected:consecutive_idle_turns=%d"
+      consecutive_idle_turns
+  | Oas.Error.ToolRetryExhausted { attempts; limit; detail = _ } ->
+    Printf.sprintf
+      "agent_error_tool_retry_exhausted:attempts=%d,limit=%d"
+      attempts limit
+  | Oas.Error.GuardrailViolation { validator; reason = _ } ->
+    Printf.sprintf
+      "agent_error_guardrail_violation:validator=%s"
+      validator
+  | Oas.Error.TripwireViolation { tripwire; reason = _ } ->
+    Printf.sprintf
+      "agent_error_tripwire_violation:tripwire=%s"
+      tripwire
+
+let terminal_reason_code_of_sdk_error = function
+  | Oas.Error.Agent err -> agent_error_terminal_reason_code err
   | Oas.Error.Api err -> api_error_terminal_reason_code err
-  | Oas.Error.Agent _ -> "agent_error"
   | Oas.Error.Mcp _ -> "mcp_error"
   | Oas.Error.Config _ -> "config_error"
   | Oas.Error.Serialization _ -> "serialization_error"

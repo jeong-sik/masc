@@ -13,6 +13,7 @@ module KAE = Masc_mcp.Keeper_agent_error
 module KT = Masc_mcp.Keeper_turn_terminal
 
 let mk_api err = Agent_sdk.Error.Api err
+let mk_agent err = Agent_sdk.Error.Agent err
 let code = KAE.terminal_reason_code_of_sdk_error
 
 let terminal_code (reason : KT.t) = reason.code
@@ -90,13 +91,77 @@ let test_checkpoint_persistence_error_is_internal_error () =
   check bool "message carries stable prefix" true
     (String.contains (Agent_sdk.Error.to_string err) ':')
 
-(* Other variants kept their existing codes — guard against accidental
+(* Agent variants no longer collapse to a single "agent_error" code.
+   Pin the per-variant codes so a future refactor cannot re-collapse
+   the enum (memory: no-collapse-richer-enum-at-sdk-boundary). *)
+
+let test_agent_max_turns_exceeded () =
+  check string "max_turns_exceeded" "agent_error_max_turns_exceeded:turns=1,limit=1"
+    (code (mk_agent (Agent_sdk.Error.MaxTurnsExceeded { turns = 1; limit = 1 })))
+
+let test_agent_exit_condition_met () =
+  check string "exit_condition_met" "agent_error_exit_condition_met:turn=5"
+    (code (mk_agent (Agent_sdk.Error.ExitConditionMet { turn = 5 })))
+
+let test_agent_unrecognized_stop_reason () =
+  check string "unrecognized_stop_reason" "agent_error_unrecognized_stop_reason:bad-stop"
+    (code (mk_agent (Agent_sdk.Error.UnrecognizedStopReason { reason = "bad-stop" })))
+
+let test_agent_token_budget_exceeded () =
+  check string "token_budget_exceeded"
+    "agent_error_token_budget_exceeded:kind=Input,used=1000,limit=2000"
+    (code (mk_agent
+             (Agent_sdk.Error.TokenBudgetExceeded
+                { kind = "Input"; used = 1000; limit = 2000 })))
+
+let test_agent_completion_contract_violation () =
+  check string "completion_contract_violation"
+    "completion_contract_violation:require_tool_use"
+    (code (mk_agent
+             (Agent_sdk.Error.CompletionContractViolation
+                { contract = Agent_sdk.Completion_contract_id.Require_tool_use
+                ; reason = "required tool contract unsatisfied"
+                })))
+
+let test_agent_cost_budget_exceeded () =
+  check string "cost_budget_exceeded"
+    "agent_error_cost_budget_exceeded:spent_usd=5.50,limit_usd=10.00"
+    (code (mk_agent
+             (Agent_sdk.Error.CostBudgetExceeded
+                { spent_usd = 5.5; limit_usd = 10.0 })))
+
+let test_agent_idle_detected () =
+  check string "idle_detected"
+    "agent_error_idle_detected:consecutive_idle_turns=3"
+    (code (mk_agent
+             (Agent_sdk.Error.IdleDetected
+                { consecutive_idle_turns = 3 })))
+
+let test_agent_tool_retry_exhausted () =
+  check string "tool_retry_exhausted"
+    "agent_error_tool_retry_exhausted:attempts=3,limit=3"
+    (code (mk_agent
+             (Agent_sdk.Error.ToolRetryExhausted
+                { attempts = 3; limit = 3; detail = "rate limited" })))
+
+let test_agent_guardrail_violation () =
+  check string "guardrail_violation"
+    "agent_error_guardrail_violation:validator=content_filter"
+    (code (mk_agent
+             (Agent_sdk.Error.GuardrailViolation
+                { validator = "content_filter"; reason = "toxic" })))
+
+let test_agent_tripwire_violation () =
+  check string "tripwire_violation"
+    "agent_error_tripwire_violation:tripwire=disallow_shell"
+    (code (mk_agent
+             (Agent_sdk.Error.TripwireViolation
+                { tripwire = "disallow_shell"; reason = "exec detected" })))
+
+(* Non-Agent variants kept their existing codes — guard against accidental
    churn in adjacent branches. *)
 
-let test_other_variants_unchanged () =
-  check string "agent" "agent_error"
-    (code (Agent_sdk.Error.Agent
-             (Agent_sdk.Error.MaxTurnsExceeded { turns = 1; limit = 1 })));
+let test_non_agent_variants_unchanged () =
   check string "mcp" "mcp_error"
     (code (Agent_sdk.Error.Mcp
              (Agent_sdk.Error.InitializeFailed { detail = "x" })));
@@ -133,6 +198,37 @@ let test_all_api_codes_distinct () =
     List.sort_uniq String.compare codes |> List.length
   in
   check int "9 variants -> 9 distinct codes" 9 unique
+
+(* Same property for Agent variants: 10 distinct codes. *)
+
+let test_all_agent_codes_distinct () =
+  let codes =
+    [
+      code (mk_agent (Agent_sdk.Error.CompletionContractViolation
+                        { contract = Agent_sdk.Completion_contract_id.Require_tool_use
+                        ; reason = "x"
+                        }));
+      code (mk_agent (Agent_sdk.Error.MaxTurnsExceeded { turns = 1; limit = 1 }));
+      code (mk_agent (Agent_sdk.Error.ExitConditionMet { turn = 5 }));
+      code (mk_agent (Agent_sdk.Error.UnrecognizedStopReason { reason = "x" }));
+      code (mk_agent (Agent_sdk.Error.TokenBudgetExceeded
+                        { kind = "Input"; used = 1; limit = 1 }));
+      code (mk_agent (Agent_sdk.Error.CostBudgetExceeded
+                        { spent_usd = 1.0; limit_usd = 1.0 }));
+      code (mk_agent (Agent_sdk.Error.IdleDetected
+                        { consecutive_idle_turns = 1 }));
+      code (mk_agent (Agent_sdk.Error.ToolRetryExhausted
+                        { attempts = 1; limit = 1; detail = "x" }));
+      code (mk_agent (Agent_sdk.Error.GuardrailViolation
+                        { validator = "x"; reason = "x" }));
+      code (mk_agent (Agent_sdk.Error.TripwireViolation
+                        { tripwire = "x"; reason = "x" }));
+    ]
+  in
+  let unique =
+    List.sort_uniq String.compare codes |> List.length
+  in
+  check int "10 agent variants -> 10 distinct codes" 10 unique
 
 let test_structured_required_tool_no_tool_call () =
   let err =
@@ -205,19 +301,36 @@ let () =
           test_case "NetworkError" `Quick test_network_error;
           test_case "Timeout" `Quick test_timeout;
         ] );
-	      ( "regression",
-	        [
+      ( "regression",
+        [
           test_case "provider timeout receipt outcome -> cancelled" `Quick
             test_timeout_receipt_outcome_is_cancelled;
           test_case "non-timeout receipt outcome -> error" `Quick
             test_non_timeout_receipt_outcome_is_error;
           test_case "checkpoint persistence failure is terminal error" `Quick
             test_checkpoint_persistence_error_is_internal_error;
-          test_case "non-Api variants unchanged" `Quick
-            test_other_variants_unchanged;
-	          test_case "all 9 api codes are pairwise distinct" `Quick
-	            test_all_api_codes_distinct;
-	        ] );
+          test_case "non-Agent variants unchanged" `Quick
+            test_non_agent_variants_unchanged;
+          test_case "all 9 api codes are pairwise distinct" `Quick
+            test_all_api_codes_distinct;
+          test_case "all 4 agent codes are pairwise distinct" `Quick
+            test_all_agent_codes_distinct;
+        ] );
+      ( "agent_error variants",
+        [
+          test_case "CompletionContractViolation" `Quick
+            test_agent_completion_contract_violation;
+          test_case "MaxTurnsExceeded" `Quick test_agent_max_turns_exceeded;
+          test_case "ExitConditionMet" `Quick test_agent_exit_condition_met;
+          test_case "UnrecognizedStopReason" `Quick
+            test_agent_unrecognized_stop_reason;
+          test_case "TokenBudgetExceeded" `Quick test_agent_token_budget_exceeded;
+          test_case "CostBudgetExceeded" `Quick test_agent_cost_budget_exceeded;
+          test_case "IdleDetected" `Quick test_agent_idle_detected;
+          test_case "ToolRetryExhausted" `Quick test_agent_tool_retry_exhausted;
+          test_case "GuardrailViolation" `Quick test_agent_guardrail_violation;
+          test_case "TripwireViolation" `Quick test_agent_tripwire_violation;
+        ] );
 	      ( "structured terminal reason",
 	        [
 	          test_case "required tool no tool call" `Quick

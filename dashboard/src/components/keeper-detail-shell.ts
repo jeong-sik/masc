@@ -5,7 +5,7 @@ import { fetchCascadeProfiles, updateKeeperCascade } from '../api/dashboard'
 import { TimeAgo } from './common/time-ago'
 import { showToast } from './common/toast'
 import type { Keeper } from '../types'
-import { refreshDashboard } from '../store'
+import { refreshDashboard, keepers } from '../store'
 import { KeeperPhaseAndStage } from './keeper-phase-indicator'
 import { formatDuration } from '../lib/format-time'
 import {
@@ -127,13 +127,24 @@ export function KeeperDetailMissingState({
   keeperName: string
   onClose: () => void
 }) {
+  // #12283: split the message by registry state. If [keepers.value] is empty
+  // we are likely in a refresh transition (data still loading); if it has
+  // entries but our target is missing, the keeper is genuinely absent — most
+  // commonly a stale-watchdog kill (KeeperHeartbeat.tla idle_turn class) or
+  // an operator stop. Naming the cause lets the operator decide between
+  // "wait for refresh" and "filter is pointing at a dead keeper".
+  const liveCount = keepers.value.length
+  const isLikelyDead = liveCount > 0
+  const explanation = isLikelyDead
+    ? `현재 fleet에 ${keeperName}이(가) 없습니다 (live ${liveCount}명). watchdog 종료 또는 operator stop 가능성이 높습니다 — masc_keeper_stale_termination_total{keeper=\"${keeperName}\"} 에서 종료 시각을 확인하세요.`
+    : '레지스트리가 아직 로드되지 않았습니다. 잠시 후 자동 갱신됩니다.'
   return html`
     <div class="mx-auto flex w-full max-w-[1100px] flex-col gap-4">
       <div class="rounded-[28px] border border-[var(--color-border-default)] bg-[rgba(9,14,24,0.92)] px-6 py-6 shadow-[0_24px_48px_rgba(0,0,0,0.24)]">
         <div class="text-3xs font-semibold uppercase tracking-[0.18em] text-[var(--color-fg-muted)]">키퍼 상세</div>
         <h2 class="m-0 mt-2 text-xl font-semibold text-[var(--text-strong)]">${keeperName}</h2>
         <p class="m-0 mt-2 text-sm leading-relaxed text-[var(--text-secondary)]">
-          현재 스냅샷에서 keeper를 찾지 못했습니다. 목록으로 돌아가서 다시 선택하거나, 최신 dashboard refresh 이후 다시 열어 보세요.
+          ${explanation}
         </p>
         <div class="mt-4">
           <button

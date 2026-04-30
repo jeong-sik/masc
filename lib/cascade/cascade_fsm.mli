@@ -51,6 +51,13 @@ val decide :
 
 (** {1 Error formatting} *)
 
+val to_user_message :
+  Llm_provider.Http_client.http_error option ->
+  string
+(** Render the terminal cascade detail used in keeper/operator messages.
+    This does not add the transport-level ["All models failed"] wrapper; use
+    [format_exhausted_error] when constructing the final HTTP client error. *)
+
 val format_exhausted_error :
   Llm_provider.Http_client.http_error option ->
   Llm_provider.Http_client.http_error

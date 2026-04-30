@@ -396,7 +396,7 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
     | Ok schemas -> schemas
     | Error e ->
         Log.Server.warn "judge tool schema resolution failed: %s"
-          (Types.masc_error_to_string e);
+          e;
         []
   in
   let make_judge_dispatch ~actor ~(name : string) ~(args : Yojson.Safe.t)

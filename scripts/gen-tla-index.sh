@@ -108,12 +108,13 @@ extract_invariants() {
   ' "$cfg"
 }
 
-# Last commit date (ISO short) for a file. Falls back to "-".
-last_modified() {
+# Stable content ID for a file. This intentionally avoids commit history so
+# shallow and full clones generate the same index for identical file contents.
+content_id() {
   local f="$1"
-  local d
-  d="$(git log -1 --format=%cs -- "$f" 2>/dev/null || true)"
-  if [[ -z "$d" ]]; then echo "-"; else echo "$d"; fi
+  local h
+  h="$(git hash-object -- "$f" 2>/dev/null | cut -c1-12 || true)"
+  if [[ -z "$h" ]]; then echo "-"; else echo "$h"; fi
 }
 
 # Markdown-escape pipes inside table cells.
@@ -177,12 +178,12 @@ while IFS= read -r tla; do
   [[ -z "$inv_summary" ]] && inv_summary="-"
 
   module="$(module_name "$tla")"
-  modified="$(last_modified "$tla")"
+  content="$(content_id "$tla")"
 
   # Persist row, grouped by dir.
   group_key="$(group_key_for "$dir")"
   row="$(printf '%s\t%s\t%s\t%s\t%s\t%s\t%s' \
-    "$base.tla" "$module" "$kind" "$cfg_count" "$buggy_count" "$inv_summary" "$modified")"
+    "$base.tla" "$module" "$kind" "$cfg_count" "$buggy_count" "$inv_summary" "$content")"
   printf '%s\n' "$row" >> "$WORKDIR/$group_key.rows"
   echo "$dir" >> "$WORKDIR/dirs.list"
 done < <(find specs -name "*.tla" -type f | sort)
@@ -232,10 +233,10 @@ sort -u "$WORKDIR/dirs.list" | while IFS= read -r dir; do
   spec_count="$(wc -l <"$rows_file" | tr -d ' ')"
 
   printf '### %s (%s specs)\n\n' "$dir" "$spec_count"
-  printf '| File | Module | Kind | cfg | buggy | Invariants / Properties | Last Modified |\n'
-  printf '|------|--------|------|-----|-------|-------------------------|---------------|\n'
+  printf '| File | Module | Kind | cfg | buggy | Invariants / Properties | Content ID |\n'
+  printf '|------|--------|------|-----|-------|-------------------------|------------|\n'
 
-  sort "$rows_file" | while IFS=$'\t' read -r file module kind cfg_count buggy_count inv_summary modified; do
+  sort "$rows_file" | while IFS=$'\t' read -r file module kind cfg_count buggy_count inv_summary content; do
     printf '| %s | %s | %s | %s | %s | %s | %s |\n' \
       "$(md_escape "$file")" \
       "$(md_escape "$module")" \
@@ -243,7 +244,7 @@ sort -u "$WORKDIR/dirs.list" | while IFS= read -r dir; do
       "$cfg_count" \
       "$buggy_count" \
       "$(md_escape "$inv_summary")" \
-      "$modified"
+      "$content"
   done
   printf '\n'
 done

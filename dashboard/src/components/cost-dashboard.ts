@@ -17,11 +17,14 @@ import {
   fetchRuntimeModelMetrics,
   fetchKeeperCostMetrics,
   fetchHeuristics,
+  fetchHeuristicCoverage,
   fetchStress,
   type DashboardRuntimeModelMetric,
   type KeeperCostMetric,
   type LatencyBucket,
   type HeuristicEvent,
+  type HeuristicCoverage,
+  type CoverageSite,
   type StressEvent,
 } from '../api/dashboard'
 import { LoadingState, ErrorState } from './common/feedback-state'
@@ -52,11 +55,18 @@ type StressLoadState =
   | { status: 'loaded'; data: StressEvent[]; limit: number }
   | { status: 'error'; message: string }
 
+type CoverageLoadState =
+  | { status: 'idle' }
+  | { status: 'loading' }
+  | { status: 'loaded'; data: HeuristicCoverage }
+  | { status: 'error'; message: string }
+
 const viewMode = signal<ViewMode>('model')
 const modelState = signal<ModelLoadState>({ status: 'idle' })
 const keeperState = signal<KeeperLoadState>({ status: 'idle' })
 const heuristicState = signal<HeuristicLoadState>({ status: 'idle' })
 const stressState = signal<StressLoadState>({ status: 'idle' })
+const coverageState = signal<CoverageLoadState>({ status: 'idle' })
 
 const WINDOW_OPTIONS: Array<{ key: number; label: string }> = [
   { key: 30, label: '30분' },
@@ -120,6 +130,17 @@ async function loadStress(limit = 100) {
   }
 }
 
+async function loadHeuristicCoverage(limit = 100) {
+  coverageState.value = { status: 'loading' }
+  try {
+    const resp = await fetchHeuristicCoverage(limit)
+    coverageState.value = { status: 'loaded', data: resp }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'heuristic coverage 불러오기 실패'
+    coverageState.value = { status: 'error', message }
+  }
+}
+
 function loadActiveView(window: number) {
   if (viewMode.value === 'model') {
     void loadModelMetrics(window)
@@ -128,6 +149,7 @@ function loadActiveView(window: number) {
   }
   void loadHeuristics()
   void loadStress()
+  void loadHeuristicCoverage()
 }
 
 const modelTotals = computed(() => {
@@ -569,6 +591,61 @@ function StressBoard({ events, limit }: { events: StressEvent[]; limit: number }
   `
 }
 
+function HeuristicByModule({ coverage }: { coverage: HeuristicCoverage }) {
+  const byModule = coverage.sites.reduce((acc, site) => {
+    const arr = acc.get(site.module) ?? []
+    arr.push(site)
+    acc.set(site.module, arr)
+    return acc
+  }, new Map<string, CoverageSite[]>())
+
+  const sortedModules = Array.from(byModule.entries()).sort((a, b) => b[1].length - a[1].length)
+
+  return html`
+    <section class="flex flex-col gap-2" aria-label="Heuristic by module">
+      <div class="flex items-center justify-between rounded border border-card-border/60 bg-[var(--backdrop-deep)] px-3 py-2">
+        <span class="font-mono text-2xs uppercase tracking-1 text-text-muted">heuristic by module · ${coverage.total_events} events · ${coverage.unique_decision_tuples} unique tuples</span>
+      </div>
+      <div class="flex flex-col gap-2">
+        ${sortedModules.map(([moduleName, sites]) => {
+          const totalCount = sites.reduce((s, x) => s + x.count, 0)
+          const totalTriggered = sites.reduce((s, x) => s + x.triggered_count, 0)
+          return html`
+            <div key=${moduleName} class="rounded border border-card-border/60 bg-[var(--backdrop-deep)]">
+              <div class="flex items-center justify-between border-b border-[var(--color-border-default)]/50 px-3 py-1.5">
+                <span class="text-xs font-semibold text-text-strong">${moduleName}</span>
+                <span class="font-mono text-2xs text-text-muted">${sites.length} sites · ${totalCount} obs · ${totalTriggered} triggered</span>
+              </div>
+              <div class="overflow-x-auto">
+                <table class="w-full" aria-label=${`Heuristic sites for ${moduleName}`}>
+                  <thead>
+                    <tr class="border-b border-[var(--color-border-default)]/30 text-2xs uppercase tracking-1 text-text-muted">
+                      <th scope="col" class="px-2 py-1 text-left">site</th>
+                      <th scope="col" class="px-2 py-1 text-right">count</th>
+                      <th scope="col" class="px-2 py-1 text-right">triggered</th>
+                      <th scope="col" class="px-2 py-1 text-right">rate</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${sites.sort((a, b) => b.count - a.count).map((s, i) => html`
+                      <tr key=${i} class="border-b border-[var(--color-border-default)]/20 text-2xs">
+                        <td class="px-2 py-1 text-text-muted">${s.site}</td>
+                        <td class="px-2 py-1 text-right font-mono">${s.count}</td>
+                        <td class="px-2 py-1 text-right font-mono ${s.triggered_count > 0 ? 'text-[var(--color-status-err)]' : ''}">${s.triggered_count}</td>
+                        <td class="px-2 py-1 text-right font-mono text-text-muted">${s.count > 0 ? ((s.triggered_count / s.count) * 100).toFixed(1) : '0.0'}%</td>
+                      </tr>
+                    `)}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          `
+        })}
+      </div>
+    </section>
+  `
+}
+
 export function CostDashboard() {
   const activeState = viewMode.value === 'model' ? modelState.value : keeperState.value
 
@@ -725,6 +802,12 @@ export function CostDashboard() {
         ? html`<${StressBoard} events=${stressState.value.data} limit=${stressState.value.limit} />`
         : stressState.value.status === 'error'
           ? html`<${ErrorState} message=${stressState.value.message} onRetry=${() => void loadStress()} />`
+          : html`<${LoadingState} />`}
+
+      ${coverageState.value.status === 'loaded'
+        ? html`<${HeuristicByModule} coverage=${coverageState.value.data} />`
+        : coverageState.value.status === 'error'
+          ? html`<${ErrorState} message=${coverageState.value.message} onRetry=${() => void loadHeuristicCoverage()} />`
           : html`<${LoadingState} />`}
     </section>
   `

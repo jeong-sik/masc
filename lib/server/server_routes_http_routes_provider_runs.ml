@@ -138,6 +138,15 @@ let add_routes ~sw router =
          Http.Response.json ~compress:true ~request:req
            (Yojson.Safe.to_string json) reqd
        ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/heuristics/coverage" (fun request reqd ->
+       with_public_read (fun _state req reqd ->
+         let limit = int_query_param req "limit" ~default:100 in
+         let report = Heuristic_metrics.recent_coverage limit in
+         Http.Response.json ~compress:true ~request:req
+           (Yojson.Safe.to_string
+              (Heuristic_metrics.coverage_report_to_json report))
+           reqd
+       ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/stress" (fun request reqd ->
        with_public_read (fun _state req reqd ->
          let limit = int_query_param req "limit" ~default:100 in

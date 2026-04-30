@@ -1087,6 +1087,50 @@ export async function fetchStress(
   return decoded
 }
 
+export interface CoverageSite {
+  module: string
+  site: string
+  count: number
+  triggered_count: number
+}
+
+export interface HeuristicCoverage {
+  total_events: number
+  unique_decision_tuples: number
+  sites: CoverageSite[]
+}
+
+function decodeCoverageSite(raw: unknown): CoverageSite | null {
+  if (!isRecord(raw)) return null
+  return {
+    module: asString(raw.module) ?? '',
+    site: asString(raw.site) ?? '',
+    count: asInt(raw.count) ?? 0,
+    triggered_count: asInt(raw.triggered_count) ?? 0,
+  }
+}
+
+function decodeHeuristicCoverage(raw: unknown): HeuristicCoverage | null {
+  if (!isRecord(raw)) return null
+  return {
+    total_events: asInt(raw.total_events) ?? 0,
+    unique_decision_tuples: asInt(raw.unique_decision_tuples) ?? 0,
+    sites: asRecordArray(raw.sites)
+      .map(decodeCoverageSite)
+      .filter((s): s is CoverageSite => s !== null),
+  }
+}
+
+export async function fetchHeuristicCoverage(
+  limit = 100,
+  opts?: AbortableRequestOptions,
+): Promise<HeuristicCoverage> {
+  const raw = await get<Record<string, unknown>>(`/api/v1/dashboard/heuristics/coverage?limit=${limit}`, { signal: opts?.signal })
+  const decoded = decodeHeuristicCoverage(raw)
+  if (!decoded) throw new Error('유효하지 않은 heuristic coverage payload')
+  return decoded
+}
+
 export function fetchDashboardMissionBriefing(
   force = false,
   opts?: { signal?: AbortSignal },

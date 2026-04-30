@@ -70,6 +70,12 @@ let key_to_env =
     (* [metrics] *)
     "metrics.max_bytes",                "MASC_KEEPER_METRICS_MAX_BYTES";
     "metrics.max_rotated",              "MASC_KEEPER_METRICS_MAX_ROTATED";
+    (* [memory] *)
+    "memory.max_notes",                 "MASC_KEEPER_MEMORY_MAX_NOTES";
+    "memory.compact_trigger_bytes",     "MASC_KEEPER_MEMORY_COMPACT_TRIGGER_BYTES";
+    "memory.max_length",                "MASC_KEEPER_MEMORY_MAX_LENGTH";
+    "memory.placeholders",              "MASC_KEEPER_MEMORY_PLACEHOLDERS";
+    "memory.consensus_pattern",         "MASC_KEEPER_MEMORY_CONSENSUS_PATTERN";
     (* [alert] *)
     "alert.enabled",                    "MASC_KEEPER_ALERT_ENABLED";
     "alert.min_score",                  "MASC_KEEPER_ALERT_MIN_SCORE";

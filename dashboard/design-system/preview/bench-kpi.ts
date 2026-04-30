@@ -318,8 +318,182 @@ document.getElementById('run-warmup')?.addEventListener('click', async () => {
 document.getElementById('run-suite')?.addEventListener('click', async () => {
   resultsEl.textContent = ''
   const cellsPerStrip = Number(cellsInput.value)
-  for (const n of [10, 50, 100, 250, 500]) {
+  for (const n of [10, 16, 50, 100, 250, 500]) {
     countInput.value = String(n)
     await runFullBench(`suite n=${n}`, n, cellsPerStrip, 3)
   }
+})
+
+// ── Sustained-update benchmark ──
+//
+// Models the realistic dashboard workload: 16 keepers (or domain rows)
+// each emitting an SSE event burst that triggers a parent re-render.
+// The naive "3 update samples" mode in the suite above misses what
+// happens when update events keep landing while the previous one is
+// still draining. This mode loops re-renders for a fixed window and
+// records:
+//   - throughput (updates/sec actually completed)
+//   - frame budget impact (rAF callbacks observed during the window;
+//     a healthy 60 Hz tab sees ~60 frames/sec → fewer = blocked frames)
+//   - mean / p95 update latency
+//
+// We run the loop on each side **separately** (Preact first, then
+// island) so they don't compete for the main thread. Otherwise the
+// slower side would skew the faster side's measurement.
+
+interface SustainedResult {
+  side: 'preact' | 'island'
+  windowMs: number
+  updates: number
+  framesObserved: number
+  expectedFrames: number
+  meanMs: number
+  p95Ms: number
+  maxMs: number
+}
+
+function frameCounter(windowMs: number): { stop: () => number } {
+  let count = 0
+  let stopped = false
+  const tick = (): void => {
+    if (stopped) return
+    count += 1
+    requestAnimationFrame(tick)
+  }
+  requestAnimationFrame(tick)
+  return {
+    stop: () => {
+      stopped = true
+      return count
+    },
+  }
+}
+
+function p95(values: number[]): number {
+  if (values.length === 0) return NaN
+  const sorted = [...values].sort((a, b) => a - b)
+  const idx = Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))
+  return sorted[idx] ?? NaN
+}
+
+async function runSustainedSide(
+  side: 'preact' | 'island',
+  rows: SeedRow[],
+  cellsPerStrip: number,
+  windowMs: number,
+): Promise<SustainedResult> {
+  const host = side === 'preact' ? preactHost : islandHost
+  const expectedFrames = Math.round((windowMs / 1000) * 60)
+  const fc = frameCounter(windowMs)
+
+  const samples: number[] = []
+  const start = performance.now()
+  const deadline = start + windowMs
+  let updates = 0
+
+  while (performance.now() < deadline) {
+    for (const r of rows) r.total += 1
+    const sentinels = rows.map((r) => String(r.total))
+    const renderFn = side === 'preact'
+      ? () => render(
+          html`<div>${rows.map((r) => html`
+            <${KpiStrip} ariaLabel="bench" cols=${cellsPerStrip}>
+              ${rowToCells(r, cellsPerStrip).map((cell) => html`<${KpiCell} ...${cell} />`)}
+            <//>
+          `)}</div>`,
+          host,
+        )
+      : () => render(
+          html`<div>${rows.map((r) => html`
+            <${KpiStripIsland} ariaLabel="bench" cols=${cellsPerStrip} cells=${rowToCells(r, cellsPerStrip)} />
+          `)}</div>`,
+          host,
+        )
+
+    try {
+      const ms = await timeUpdateToDom(renderFn, host, sentinels, 1000)
+      samples.push(ms)
+      updates += 1
+    } catch {
+      // Drop missed updates; loop will re-render the next iteration.
+      break
+    }
+  }
+
+  const framesObserved = fc.stop()
+  const mean = samples.length ? samples.reduce((a, b) => a + b, 0) / samples.length : NaN
+
+  return {
+    side,
+    windowMs,
+    updates,
+    framesObserved,
+    expectedFrames,
+    meanMs: mean,
+    p95Ms: p95(samples),
+    maxMs: samples.length ? Math.max(...samples) : NaN,
+  }
+}
+
+function reportSustained(label: string, n: number, preactR: SustainedResult, islandR: SustainedResult): void {
+  const block = [
+    `=== ${label} (n=${n} strips, window=${preactR.windowMs}ms) ===`,
+    `Preact:  ${preactR.updates.toString().padStart(4)} updates,  frames ${preactR.framesObserved}/${preactR.expectedFrames}  ` +
+      `mean=${preactR.meanMs.toFixed(2)} p95=${preactR.p95Ms.toFixed(2)} max=${preactR.maxMs.toFixed(2)} ms`,
+    `Solid:   ${islandR.updates.toString().padStart(4)} updates,  frames ${islandR.framesObserved}/${islandR.expectedFrames}  ` +
+      `mean=${islandR.meanMs.toFixed(2)} p95=${islandR.p95Ms.toFixed(2)} max=${islandR.maxMs.toFixed(2)} ms`,
+    `  → throughput ratio Solid/Preact = ${(islandR.updates / Math.max(1, preactR.updates)).toFixed(2)}`,
+    `  → frame retention Preact ${((preactR.framesObserved / preactR.expectedFrames) * 100).toFixed(0)}%, Solid ${((islandR.framesObserved / islandR.expectedFrames) * 100).toFixed(0)}%`,
+    '',
+  ]
+  resultsEl.textContent = (resultsEl.textContent ?? '') + block.join('\n') + '\n'
+  console.log(block.join('\n'))
+}
+
+document.getElementById('run-sustained')?.addEventListener('click', async () => {
+  resultsEl.textContent = 'sustained: warmup mount n=16...\n'
+  const n = 16
+  const cellsPerStrip = Number(cellsInput.value)
+  const mount = await runMount(n, cellsPerStrip)
+
+  // Run each side for 5s separately so the slow one doesn't poison
+  // the fast one's frame counter.
+  const windowMs = 5000
+  resultsEl.textContent += `Running Preact side ${windowMs}ms...\n`
+  const preactR = await runSustainedSide('preact', mount.rows, cellsPerStrip, windowMs)
+  resultsEl.textContent += `Running Solid side ${windowMs}ms...\n`
+  const islandR = await runSustainedSide('island', mount.rows, cellsPerStrip, windowMs)
+
+  reportSustained(`sustained 5s`, n, preactR, islandR)
+})
+
+// "Keeper-shape spike": 16 keepers each emit a burst of ~60 updates
+// (one per second over a minute, compressed). Measures cumulative cost
+// of a typical hour of dashboard idle-watching.
+document.getElementById('run-keeper-shape')?.addEventListener('click', async () => {
+  resultsEl.textContent = ''
+  const n = 16
+  const cellsPerStrip = Number(cellsInput.value)
+  const mount = await runMount(n, cellsPerStrip)
+
+  const burstUpdates = 60
+  const preactSamples: number[] = []
+  const islandSamples: number[] = []
+
+  for (let i = 0; i < burstUpdates; i += 1) {
+    const u = await runUpdate(mount.rows, cellsPerStrip)
+    preactSamples.push(u.preactUpdateMs)
+    islandSamples.push(u.islandUpdateMs)
+  }
+
+  const ps = preactSamples
+  const is_ = islandSamples
+  const block = [
+    `=== keeper-shape spike (n=${n}, ${burstUpdates} updates each side) ===`,
+    `Preact: total ${ps.reduce((a, b) => a + b, 0).toFixed(0)}ms, mean ${(ps.reduce((a, b) => a + b, 0) / ps.length).toFixed(2)}ms, p95 ${p95(ps).toFixed(2)}ms, max ${Math.max(...ps).toFixed(2)}ms`,
+    `Solid:  total ${is_.reduce((a, b) => a + b, 0).toFixed(0)}ms, mean ${(is_.reduce((a, b) => a + b, 0) / is_.length).toFixed(2)}ms, p95 ${p95(is_).toFixed(2)}ms, max ${Math.max(...is_).toFixed(2)}ms`,
+    '',
+  ]
+  resultsEl.textContent = block.join('\n') + '\n'
+  console.log(block.join('\n'))
 })

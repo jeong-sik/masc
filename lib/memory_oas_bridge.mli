@@ -70,12 +70,19 @@ val store_episode_from_snapshot :
     [keeper_name] / [turn] / [trace_id] metadata, and
     writes via [Oas.Memory.store_episode]. *)
 
+(** Typed wrapper for failed-turn error-kind labels. JSON/status/metric
+    surfaces continue to render the stable string label. *)
+type error_kind = private Error_kind of string
+
+val error_kind_of_string : string -> error_kind
+val error_kind_to_string : error_kind -> string
+
 val store_failed_turn_episode :
   memory:Oas.Memory.t ->
   keeper_name:string ->
   turn:int ->
   trace_id:string ->
-  error_kind:string ->
+  error_kind:error_kind ->
   error_message:string ->
   unit ->
   unit
@@ -90,7 +97,7 @@ val store_failed_turn_episode :
 (** {1 Failure-learning helpers} *)
 
 val failure_learnings :
-  error_kind:string -> error_preview:string -> string list
+  error_kind:error_kind -> error_preview:string -> string list
 (** Builds the canonical [learnings] list for a failed
     episode: [["failure_kind: <normalised>"]] plus, when
     non-empty, ["error_preview: <preview>"].
@@ -194,16 +201,16 @@ val institution_episode_failure_kind_metric : string
     [test/test_institution_episodes_failure_learnings_10325.ml]
     asserts the wire string for telemetry compatibility. *)
 
-val timeout_error_kinds : string list
-(** SSOT list of error-kind strings the
+val timeout_error_kinds : error_kind list
+(** SSOT list of typed error-kind labels the
     {!stress_kind_for_error_kind} mapper treats as
     timeout-class.  Pinned because
     [test/test_agent_stress_timeout_wire_10341.ml] asserts
     its length to keep the catalogue from drifting. *)
 
 val stress_kind_for_error_kind :
-  string -> Agent_stress.stress_kind option
-(** Maps an error kind string onto an
+  error_kind -> Agent_stress.stress_kind option
+(** Maps an error kind label onto an
     {!Agent_stress.kind} when the kind belongs to the
     timeout family ([timeout_error_kinds] internal list).
     Returns [None] for non-timeout errors so the caller

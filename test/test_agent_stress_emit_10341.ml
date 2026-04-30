@@ -46,7 +46,9 @@ let opt_kind = testable
        | Some x, Some y -> kind_eq x y
        | _ -> false)
 
-let classify = Keeper_agent_memory_episode.stress_kind_of_error_kind
+let classify value =
+  Keeper_agent_memory_episode.stress_kind_of_error_kind
+    (Memory_oas_bridge.error_kind_of_string value)
 
 let test_oas_timeout_budget_to_timeout () =
   check opt_kind "oas_timeout_budget -> Timeout"

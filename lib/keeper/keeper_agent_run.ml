@@ -1185,7 +1185,8 @@ let run_turn
          ~memory
          ~turn
          ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-         ~error_kind:(sdk_error_kind err)
+         ~error_kind:
+           (Memory_oas_bridge.error_kind_of_string (sdk_error_kind err))
          ~error_message:(Oas.Error.to_string err)
          ())
     ;

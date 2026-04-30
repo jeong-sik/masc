@@ -32,7 +32,8 @@ val record_success :
 (** Classify [error_kind] into the matching {!Agent_stress.stress_kind}.
     Returns [None] for kinds that do not map to a pre-existing stress
     dimension. *)
-val stress_kind_of_error_kind : string -> Agent_stress.stress_kind option
+val stress_kind_of_error_kind :
+  Memory_oas_bridge.error_kind -> Agent_stress.stress_kind option
 
 (** Persist a failed-turn episode and surface the failure to
     [Agent_stress] for non-keepalive failure modes. Logs and swallows
@@ -43,7 +44,7 @@ val record_failure :
   memory:Oas.Memory.t ->
   turn:int ->
   trace_id:string ->
-  error_kind:string ->
+  error_kind:Memory_oas_bridge.error_kind ->
   error_message:string ->
   unit ->
   unit

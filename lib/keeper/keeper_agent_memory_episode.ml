@@ -78,7 +78,9 @@ let record_success
       response failed contract parse — semantically a parse-degraded
       output, not a timeout or hard failure streak). *)
 let stress_kind_of_error_kind error_kind : Agent_stress.stress_kind option =
-  let trimmed = String.trim error_kind in
+  let trimmed =
+    String.trim (Memory_oas_bridge.error_kind_to_string error_kind)
+  in
   let ends_with suffix s =
     let ls = String.length s in
     let lp = String.length suffix in
@@ -111,7 +113,7 @@ let record_failure
     ~(memory : Oas.Memory.t)
     ~(turn : int)
     ~(trace_id : string)
-    ~(error_kind : string)
+    ~(error_kind : Memory_oas_bridge.error_kind)
     ~(error_message : string)
     () : unit =
   try

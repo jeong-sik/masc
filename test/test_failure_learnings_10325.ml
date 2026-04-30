@@ -6,9 +6,9 @@
     placeholder ("persist failed keeper turns ...").  This defeated the
     institution-memory contract that downstream readers (governance
     judge, anti-rationalization, future keeper turns) consume.  After
-    the fix, [learnings] carries [error_kind:X] and
-    [error_message:Y] tags, or the explicit [NO_LEARNING] sentinel
-    when neither has signal. *)
+    the current contract, [learnings] carries [failure_kind: X] and
+    [error_preview: Y] entries. Blank kinds normalize to the explicit
+    [unspecified] sentinel so rows stay queryable. *)
 
 open Alcotest
 open Masc_mcp
@@ -35,7 +35,9 @@ let extract_failure_learnings ~error_kind ~error_message =
       let memory = Memory_oas_bridge.create_memory ~agent_name:"test" ~base_dir:base () in
       Memory_oas_bridge.store_failed_turn_episode
         ~memory ~keeper_name:"test-keeper" ~turn:1
-        ~trace_id:"trace-1" ~error_kind ~error_message ();
+        ~trace_id:"trace-1"
+        ~error_kind:(Memory_oas_bridge.error_kind_of_string error_kind)
+        ~error_message ();
       let episodes = Oas.Memory.recall_episodes memory ~limit:10 () in
       match episodes with
       | [] -> failwith "no episode persisted"
@@ -70,25 +72,23 @@ let test_kind_and_message_emitted_as_tags () =
   in
   let has_kind =
     List.exists
-      (fun s -> s = "error_kind:oas_timeout_budget")
+      (fun s -> s = "failure_kind: oas_timeout_budget")
       learnings
   in
   let has_message_tag =
     List.exists
-      (fun s ->
-         String.length s > 14
-         && String.equal (String.sub s 0 14) "error_message:")
+      (fun s -> String.starts_with ~prefix:"error_preview:" s)
       learnings
   in
-  check bool "error_kind tag emitted" true has_kind;
-  check bool "error_message tag emitted" true has_message_tag
+  check bool "failure_kind entry emitted" true has_kind;
+  check bool "error_preview entry emitted" true has_message_tag
 
-let test_no_learning_sentinel_when_both_blank () =
+let test_unspecified_kind_when_both_blank () =
   let learnings =
     extract_failure_learnings ~error_kind:"" ~error_message:""
   in
-  check (list string) "explicit absence sentinel"
-    [ "[NO_LEARNING]" ] learnings
+  check (list string) "explicit unspecified sentinel"
+    [ "failure_kind: unspecified" ] learnings
 
 let test_only_kind_when_message_blank () =
   let learnings =
@@ -96,7 +96,7 @@ let test_only_kind_when_message_blank () =
       ~error_kind:"resumable_cli_session" ~error_message:""
   in
   check (list string) "only kind tag emitted"
-    [ "error_kind:resumable_cli_session" ] learnings
+    [ "failure_kind: resumable_cli_session" ] learnings
 
 let () =
   run "failure_learnings_10325"
@@ -106,8 +106,8 @@ let () =
              test_no_generic_boilerplate;
            test_case "kind and message become tag entries" `Quick
              test_kind_and_message_emitted_as_tags;
-           test_case "[NO_LEARNING] sentinel when both blank" `Quick
-             test_no_learning_sentinel_when_both_blank;
+           test_case "unspecified sentinel when both blank" `Quick
+             test_unspecified_kind_when_both_blank;
            test_case "only error_kind when message blank" `Quick
              test_only_kind_when_message_blank;
          ]);

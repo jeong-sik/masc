@@ -3,16 +3,26 @@
 
 ## [0.18.25] - 2026-05-01
 
-Post-v0.18.24 release-truth follow-up for the keeper registry event-queue wiring that landed immediately after the `v0.18.24` tag. No breaking API changes.
+Post-v0.18.24 merge train for keeper event-queue registry wiring, silent-failure visibility, cascade typing/FSM message cleanup, runtime memory config, prompt XML escaping, and release-truth sync. No breaking API changes.
 
 ### Added
 
 - Keeper registry entries now carry the `Keeper_event_queue` field, wiring the Event Layer queue into keeper registry construction and snapshots (#12403).
+- RFC-0020 now documents the keeper Event Layer / Policy Layer split, including the one-way Event-to-Policy data path and TLA+ correspondence for the queued heartbeat work (#12409).
+- Agent terminal reason reporting now has per-variant `Oas.Error.Agent` reason codes so dashboard chips and operator broadcast payloads can distinguish terminal agent failure classes (#12402).
 
 ### Changed
 
+- Runtime cascade lookups now use typed `Keeper_cascade_profile.runtime_name` boundaries internally while preserving existing public/OAS string entry points (#12404).
 - Package and release metadata advanced from `0.18.24` to `0.18.25`.
 - Roadmap, product operating plan, opam metadata, and spec baseline version references synced to `0.18.25`.
+
+### Fixed
+
+- Remaining dev-only diagnostics in agent, cascade, provider, repo-manager, sidecar, tool, and verification paths now surface through structured operator-visible logging instead of disappearing silently (#12400).
+- Keeper memory compaction knobs now route through `keeper_runtime.toml` / env precedence so boot-time runtime overrides are visible to memory-bank readers (#12384).
+- Cascade exhaustion user messages now render through the cascade FSM boundary instead of duplicated worker-side string formatting (#12383).
+- Persona and goal prompt blocks now escape XML predefined entities before injection into pseudo-XML prompt tags (#12408).
 
 ## [0.18.24] - 2026-05-01
 

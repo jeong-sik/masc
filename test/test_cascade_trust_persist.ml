@@ -14,6 +14,8 @@ open Alcotest
 module H = Masc_mcp.Cascade_health_tracker
 module P = Masc_mcp.Cascade_trust_persist
 
+let kind value = H.error_kind_of_string value
+
 let temp_base_path () =
   let dir = Filename.temp_file "cascade-trust-persist-" "" in
   Sys.remove dir;
@@ -102,7 +104,7 @@ let test_snapshot_includes_recorded_provider () =
   with_temp_base (fun dir ->
     let key = "test_persist_includes:" ^ string_of_int (Random.bits ()) in
     H.record_failure H.global ~provider_key:key
-      ~error_kind:"failure" ~error_reason:"boom" ();
+      ~error_kind:(kind "failure") ~error_reason:"boom" ();
     P.snapshot_now ~base_path:dir;
     match read_all_jsonl_in dir with
     | [] -> fail "no record"
@@ -122,7 +124,7 @@ let test_snapshot_provider_record_shape () =
   with_temp_base (fun dir ->
     let key = "test_persist_shape:" ^ string_of_int (Random.bits ()) in
     H.record_failure H.global ~provider_key:key
-      ~error_kind:"timeout" ~error_reason:"deadline" ();
+      ~error_kind:(kind "timeout") ~error_reason:"deadline" ();
     P.snapshot_now ~base_path:dir;
     match read_all_jsonl_in dir with
     | [] -> fail "no record"

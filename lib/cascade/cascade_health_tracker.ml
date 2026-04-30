@@ -256,6 +256,11 @@ type t = {
   mu: Stdlib.Mutex.t;
 }
 
+type error_kind = Error_kind of string
+
+let error_kind_of_string value = Error_kind value
+let error_kind_to_string (Error_kind value) = value
+
 (* ── Constructor ──────────────────────────────── *)
 
 let create () : t = {
@@ -337,7 +342,9 @@ let push_latency state lat_ms =
 let make_fingerprint ?error_kind ?error_reason () =
   let kind =
     match error_kind with
-    | Some k when String.trim k <> "" -> String.trim k
+    | Some k ->
+      let trimmed = String.trim (error_kind_to_string k) in
+      if trimmed = "" then "unclassified" else trimmed
     | _ -> "unclassified"
   in
   match error_reason with

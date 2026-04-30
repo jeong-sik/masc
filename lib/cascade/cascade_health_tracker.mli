@@ -81,6 +81,13 @@ val latency_ring_size : int
 (** Opaque health tracker state. *)
 type t
 
+(** Typed wrapper for provider-health error classifications. Dashboard
+    fingerprints and summaries continue to render the stable string label. *)
+type error_kind = private Error_kind of string
+
+val error_kind_of_string : string -> error_kind
+val error_kind_to_string : error_kind -> string
+
 (** Create a new empty tracker. *)
 val create : unit -> t
 
@@ -115,7 +122,7 @@ val record_success :
 val record_failure :
   t ->
   provider_key:string ->
-  ?error_kind:string ->
+  ?error_kind:error_kind ->
   ?error_reason:string ->
   unit ->
   unit
@@ -140,7 +147,7 @@ val record_failure :
 val record_rejected :
   t ->
   provider_key:string ->
-  ?error_kind:string ->
+  ?error_kind:error_kind ->
   ?error_reason:string ->
   unit ->
   unit
@@ -165,7 +172,7 @@ val record_rejected :
 val record_hard_quota :
   t ->
   provider_key:string ->
-  ?error_kind:string ->
+  ?error_kind:error_kind ->
   ?error_reason:string ->
   unit ->
   unit
@@ -181,7 +188,7 @@ val record_hard_quota :
 val record_terminal_failure :
   t ->
   provider_key:string ->
-  ?error_kind:string ->
+  ?error_kind:error_kind ->
   ?error_reason:string ->
   unit ->
   unit
@@ -210,7 +217,7 @@ val record_soft_rate_limited :
   t ->
   provider_key:string ->
   ?retry_after_s:float ->
-  ?error_kind:string ->
+  ?error_kind:error_kind ->
   ?error_reason:string ->
   unit ->
   unit

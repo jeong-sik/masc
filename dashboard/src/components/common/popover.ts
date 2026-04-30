@@ -75,8 +75,8 @@ export function Popover({
         close()
       }
     }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
   }, [open])
 
   const childProps = (trigger.props as Record<string, unknown>) || {}

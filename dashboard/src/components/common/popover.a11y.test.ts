@@ -83,11 +83,11 @@ describe('Popover a11y', () => {
     )
     const btn = container.querySelector('button') as HTMLButtonElement
     btn.click()
-    await new Promise((r) => setTimeout(r, 0))
+    await new Promise((r) => setTimeout(r, 10))
     expect(container.querySelector('[data-testid="popover-panel"]')).not.toBeNull()
-    window.dispatchEvent(
-      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
-    )
+    const ev = new Event('keydown', { bubbles: true })
+    ;(ev as any).key = 'Escape'
+    document.dispatchEvent(ev)
     await new Promise((r) => setTimeout(r, 50))
     expect(container.querySelector('[data-testid="popover-panel"]')).toBeNull()
   })

@@ -274,6 +274,42 @@ let test_discover_ignores_masc_dir () =
         | Ok repos ->
             Alcotest.(check int) "ignores .masc repo" 0 (List.length repos))
 
+let test_migration_backward_compat_to_explicit () =
+  with_temp_base_path (fun base_path ->
+      (* Phase 1: no TOML — backward compat returns default repo *)
+      match Repo_store.load_all ~base_path with
+      | Error e -> Alcotest.fail ("load failed: " ^ e)
+      | Ok repos ->
+          Alcotest.(check int) "backward compat count" 1 (List.length repos);
+          let default = List.hd repos in
+          Alcotest.(check string) "default id" "default" default.id;
+          (* Phase 2: operator discovers and adds explicit repos *)
+          let explicit = sample_repo "migrated" in
+          (match Repo_store.add ~base_path explicit with
+           | Error e -> Alcotest.fail ("add failed: " ^ e)
+           | Ok _ -> (
+               match Repo_store.load_all ~base_path with
+               | Error e -> Alcotest.fail ("load after migration failed: " ^ e)
+               | Ok migrated ->
+                   Alcotest.(check int) "migrated count" 2 (List.length migrated);
+                   let ids = List.map (fun (r : repository) -> r.id) migrated in
+                   Alcotest.(check bool) "has default" true (List.mem "default" ids);
+                   Alcotest.(check bool) "has migrated" true (List.mem "migrated" ids))))
+
+let test_migration_preserves_existing_toml () =
+  with_temp_base_path (fun base_path ->
+      let path = Filename.concat base_path ".masc/config/repositories.toml" in
+      write_file path
+        "[repository.existing]\n\
+         name = \"existing\"\n\
+         url = \"https://github.com/test/existing.git\"\n";
+      (* TOML exists — backward compat must NOT inject default *)
+      match Repo_store.load_all ~base_path with
+      | Error e -> Alcotest.fail ("load failed: " ^ e)
+      | Ok repos ->
+          Alcotest.(check int) "existing toml count" 1 (List.length repos);
+          Alcotest.(check string) "existing id" "existing" (List.hd repos).id)
+
 let test_discover_skips_registered () =
   if not (git_available ()) then Alcotest.skip ()
   else
@@ -344,5 +380,12 @@ let () =
           Alcotest.test_case "finds git repos" `Quick test_discover_finds_git_repos;
           Alcotest.test_case "ignores .masc repos" `Quick test_discover_ignores_masc_dir;
           Alcotest.test_case "skips registered repos" `Quick test_discover_skips_registered;
+        ] );
+      ( "migration",
+        [
+          Alcotest.test_case "backward compat to explicit" `Quick
+            test_migration_backward_compat_to_explicit;
+          Alcotest.test_case "preserves existing toml" `Quick
+            test_migration_preserves_existing_toml;
         ] );
     ]

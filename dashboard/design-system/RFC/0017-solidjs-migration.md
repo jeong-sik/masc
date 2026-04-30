@@ -1,10 +1,10 @@
 # RFC 0017 — SolidJS Cockpit Migration
 
-> **Status**: Draft (PR #1 of N — coexistence + adapter PoC).
+> **Status**: KpiStrip migration **complete** (#12162 → #12268). Performance hypothesis **falsified** for our app shape — see [`0017-solidjs-migration-measurement.md`](./0017-solidjs-migration-measurement.md) (2026-04-30). Phase 2 (Lifeline) and Phase 3 (Ticker) **paused** pending a synchronous-mount spike.
 > **Date**: 2026-04-30
-> **Relation to RFC 0013**: Amends RFC 0013 (cockpit-migration). RFC 0013 specified Preact for Phase 1 (KpiStrip), 2 (Lifeline), 3 (Ticker). This RFC supersedes the framework choice based on performance evidence; the phasing and component scope from RFC 0013 are preserved.
+> **Relation to RFC 0013**: Amends RFC 0013 (cockpit-migration). RFC 0013 specified Preact for Phase 1 (KpiStrip), 2 (Lifeline), 3 (Ticker). This RFC supersedes the framework choice based on (then-projected) performance evidence; the phasing and component scope from RFC 0013 are preserved. Section 1 below records the original projection; the measurement companion document records what we actually observed.
 
-## 1. Motivation
+## 1. Motivation (original projection — see §7 for the post-implementation reality)
 
 The MASC Cockpit's "extreme information density" target — 1,000+ live KPI updates, 100K+ row event feeds, 24/7 runtime — exposes the Virtual DOM cost paid on every Preact re-render. krausest benchmark (Chrome 146, M4) shows Preact Hooks at geometric mean **1.40** vs vanilla baseline 1.00. SolidJS measures **1.12** (~3-4× closer to vanilla). For partial updates and single-row selection — the cockpit's dominant pattern — SolidJS is 26-52% faster.
 
@@ -80,12 +80,33 @@ Out of scope for this PR: any change to `dashboard/src/components/`, eslint rule
 
 ## 7. Verification
 
+### 7a. Original PR #1 acceptance criteria
+
 PR #1 succeeds when all of the following hold:
 1. `pnpm install` clean — no peer-dep conflicts.
 2. `pnpm typecheck` passes — dual JSX runtimes resolve.
 3. `pnpm test design-system/headless-solid/use-task-queue` — Solid adapter tests pass. **This is the load-bearing check** — proves the headless-core primitive is genuinely framework-agnostic.
 4. `pnpm build` produces a separate `solid-*.js` chunk; `index-*.js` size unchanged.
 5. `pnpm dev` and `solid-poc.html` renders, button clicks update list, HMR works.
+
+### 7b. Post-implementation measurement (2026-04-30)
+
+After 7 sequential PRs (#12162 → #12268) migrated 6 callers, headless Chromium measurement (`bench-kpi.html` + puppeteer runner) produced the numbers in [`0017-solidjs-migration-measurement.md`](./0017-solidjs-migration-measurement.md).
+
+**Headline**: KpiStripIsland adds a ~30 ms fixed mount overhead vs Preact KpiStrip, dominated by `useEffect` task-tier scheduling. The cross-over point (where Solid's faster per-cell work amortises the fixed cost) is around N=200 strips. **Every production page using the migrated callers has N ≤ 10**, so the migration is a net latency regression on our app shape.
+
+| Workload | Preact | Solid island | Solid wins? |
+|----------|--------|--------------|-------------|
+| Mount n=10 | 6.10 ms | 33.30 ms | ❌ (5.5×) |
+| Mount n=100 | 16.30 ms | 28.80 ms | ❌ (1.8×) |
+| Mount n=250 | 42.20 ms | 31.20 ms | ✅ (0.74×) |
+| Mount n=500 | 87.00 ms | 47.10 ms | ✅ (0.54×) |
+| Update n=10 | 16.37 ms | 33.57 ms | ❌ (2.0×) |
+| Update n=500 | 102.57 ms | 63.47 ms | ✅ (0.62×) |
+
+**What we kept anyway**: bundle isolation (9.3 KB amortised, 0 B per subsequent caller), `headless-core` framework-agnosticism proven, reusable `vi.doMock` test-shim pattern, file-boundary transform isolation for Preact↔Solid coexistence. Those are real wins that justify the migration *as code organisation*, not as latency improvement.
+
+The krausest figures in §1 do not generalise to our usage shape (small N) and were the original justification for this RFC. The companion measurement document records what we actually observed and recommends Phase 2 (Lifeline) and Phase 3 (Ticker) be paused pending a synchronous-mount spike that could close the 30 ms `useEffect` gap.
 
 ## 8. Rollback Criteria
 

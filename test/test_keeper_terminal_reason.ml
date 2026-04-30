@@ -56,6 +56,35 @@ let test_timeout () =
   check string "timeout" "api_error_timeout"
     (code (mk_api (Agent_sdk.Retry.Timeout { message = "x" })))
 
+let outcome_code err =
+  Masc_mcp.Keeper_execution_receipt.outcome_kind_to_string
+    (KAE.receipt_outcome_kind_of_sdk_error err)
+
+let test_timeout_receipt_outcome_is_cancelled () =
+  check string "timeout receipt outcome" "cancelled"
+    (outcome_code
+       (mk_api (Agent_sdk.Retry.Timeout { message = "x" })))
+
+let test_non_timeout_receipt_outcome_is_error () =
+  check string "auth receipt outcome" "error"
+    (outcome_code
+       (mk_api (Agent_sdk.Retry.AuthError { message = "x" })));
+  check string "agent receipt outcome" "error"
+    (outcome_code
+       (Agent_sdk.Error.Agent
+          (Agent_sdk.Error.MaxTurnsExceeded { turns = 1; limit = 1 })))
+
+let test_checkpoint_persistence_error_is_internal_error () =
+  let err =
+    KAE.checkpoint_persistence_error ~keeper_name:"sangsu"
+      ~detail:"missing OAS checkpoint after run"
+  in
+  check string "kind" "internal" (KAE.sdk_error_kind err);
+  check string "terminal reason" "internal_error" (code err);
+  check string "receipt outcome" "error" (outcome_code err);
+  check bool "message carries stable prefix" true
+    (String.contains (Agent_sdk.Error.to_string err) ':')
+
 (* Other variants kept their existing codes — guard against accidental
    churn in adjacent branches. *)
 
@@ -118,6 +147,12 @@ let () =
         ] );
       ( "regression",
         [
+          test_case "provider timeout receipt outcome -> cancelled" `Quick
+            test_timeout_receipt_outcome_is_cancelled;
+          test_case "non-timeout receipt outcome -> error" `Quick
+            test_non_timeout_receipt_outcome_is_error;
+          test_case "checkpoint persistence failure is terminal error" `Quick
+            test_checkpoint_persistence_error_is_internal_error;
           test_case "non-Api variants unchanged" `Quick
             test_other_variants_unchanged;
           test_case "all 9 api codes are pairwise distinct" `Quick

@@ -102,13 +102,13 @@ let spec_terminal_outcome_set : string list =
         (fun s -> not (String.equal s "receipt_unset"))
         outcomes
 
-(* The four [outcome_kind] terminal variants prefixed with "receipt_"
-   to align with the TLA+ string form. *)
+(* The four [outcome_kind] terminal variants mapped to their TLA+
+   receipt symbols.  This is not a blind prefix: the JSON boundary keeps
+   legacy ["ok"] / ["error"], while the spec names those terminal
+   receipt outcomes ["receipt_done"] / ["receipt_failed"]. *)
 let ocaml_terminal_outcome_set =
   List.map
-    (fun k ->
-      "receipt_"
-      ^ Masc_mcp.Keeper_execution_receipt.outcome_kind_to_string k)
+    Masc_mcp.Keeper_execution_receipt.outcome_kind_to_tla_receipt
     [ `Ok; `Skipped; `Error; `Cancelled ]
 
 let sort = List.sort String.compare

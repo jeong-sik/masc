@@ -112,6 +112,7 @@ let run_turn
   let ctx_work = ctx.ctx_work in
   let resume_oas_checkpoint = ctx.resume_oas_checkpoint in
   let pre_dispatch_compacted = ctx.pre_dispatch_compacted in
+  let pre_dispatch_checkpoint_error = ctx.pre_dispatch_checkpoint_error in
   let start_turn_count = ctx.start_turn_count in
   let receipt_started_at = ctx.receipt_started_at in
   let config_root = ctx.config_root in
@@ -414,6 +415,9 @@ let run_turn
             meta.name (Printexc.to_string exn)
     in
     let turn_result =
+      match pre_dispatch_checkpoint_error with
+      | Some err -> Error err
+      | None ->
       match !initial_tool_surface_blocker_ref with
       | Some err -> Error err
       | None ->
@@ -943,7 +947,7 @@ let run_turn
            (* Save checkpoint after extracting the replay snapshot so the
                  persisted checkpoint carries scrubbed assistant text plus
                  structured replay metadata on the last assistant message. *)
-           let saved_checkpoint =
+           let saved_checkpoint_result =
              match result.checkpoint with
              | Some checkpoint ->
                let patched =
@@ -956,14 +960,27 @@ let run_turn
                (match
                   Keeper_checkpoint_store.save_oas ~session_dir:session.session_dir patched
                 with
-                | Ok () -> ()
+                | Ok () -> Ok (Some patched)
                 | Error e ->
-                  Log.Keeper.error "keeper:%s cascade=%s OAS checkpoint save failed: %s" meta.name meta.cascade_name e);
-               Some patched
+                  Log.Keeper.error
+                    "keeper:%s cascade=%s OAS checkpoint save failed: %s"
+                    meta.name meta.cascade_name e;
+                  Error
+                    (checkpoint_persistence_error
+                       ~keeper_name:meta.name
+                       ~detail:("OAS checkpoint save failed: " ^ e)))
              | None ->
-               Log.Keeper.error "keeper:%s cascade=%s missing OAS checkpoint after run" meta.name meta.cascade_name;
-               None
+               Log.Keeper.error
+                 "keeper:%s cascade=%s missing OAS checkpoint after run"
+                 meta.name meta.cascade_name;
+               Error
+                 (checkpoint_persistence_error
+                    ~keeper_name:meta.name
+                    ~detail:"missing OAS checkpoint after run")
            in
+           match saved_checkpoint_result with
+           | Error e -> Error e
+           | Ok saved_checkpoint ->
            (match result.proof with
             | Some p ->
               Keeper_turn_telemetry.log_keeper_proof ~keeper_name:meta.name p;
@@ -1252,8 +1269,11 @@ let run_turn
         goal_ids = meta.active_goal_ids;
         outcome =
           (match turn_result with
-           | Ok _ -> "ok"
-           | Error _ -> "error");
+           | Ok _ ->
+             Keeper_execution_receipt.outcome_kind_to_string `Ok
+           | Error err ->
+             Keeper_execution_receipt.outcome_kind_to_string
+               (receipt_outcome_kind_of_sdk_error err));
         terminal_reason_code;
         response_text_present = !receipt_response_text_present_ref;
         model_used = !receipt_model_used_ref;

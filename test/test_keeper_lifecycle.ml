@@ -123,6 +123,8 @@ let make_keeper_meta ?(name = "keeper-lifecycle-test")
           ("trace_id", `String trace_id);
           ("cascade_name", `String Masc_mcp.Keeper_config.default_cascade_name);
           ("last_model_used", `String "llama:auto");
+          ("sandbox_profile", `String "local");
+          ("network_mode", `String "inherit");
         ])
   with
   | Ok meta -> meta
@@ -1922,6 +1924,54 @@ let test_pre_dispatch_resume_checkpoint_saves_compacted_context () =
     !saved_message_count
     (List.length resume_checkpoint.messages)
 
+let test_pre_dispatch_resume_checkpoint_blocks_unsaved_compaction () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let now_ts = 30_000.0 in
+  let base_meta =
+    make_gate_only_meta
+      ~last_continuity_update_ts:now_ts
+      ~cooldown_sec:3600
+      ()
+  in
+  let meta =
+    {
+      base_meta with
+      compaction =
+        {
+          base_meta.compaction with
+          ratio_gate = 0.1;
+        };
+    }
+  in
+  let long_text = String.make emergency_test_text_length 'x' in
+  let ctx =
+    KEC.create ~system_prompt:"sp" ~max_tokens:1000
+    |> fun c -> KEC.append c (Agent_sdk.Types.user_msg long_text)
+    |> fun c -> KEC.append c (Agent_sdk.Types.assistant_msg long_text)
+    |> KEC.sync_oas_context
+  in
+  let checkpoint =
+    {
+      (KEC.checkpoint_of_context ctx) with
+      turn_count = 11;
+      messages = KEC.messages_of_context ctx;
+    }
+  in
+  let ctx = { ctx with checkpoint } in
+  let result =
+    KAR.prepare_resume_checkpoint_for_dispatch
+      ~meta
+      ~now_ts
+      ~loaded_checkpoint_present:true
+      ~save_checkpoint:(fun _ -> Error "disk unavailable")
+      ctx
+  in
+  check bool "pre-dispatch compaction applied" true result.applied;
+  check bool "save error is surfaced" true (Option.is_some result.save_error);
+  check bool "unsaved checkpoint is not used for resume" false
+    (Option.is_some result.resume_checkpoint)
+
 let test_dispatch_keeper_phase_event_uses_room_base_path () =
   let base_dir = temp_dir "keeper_lifecycle_registry_phase" in
   Fun.protect
@@ -2104,6 +2154,8 @@ let () =
             test_pre_dispatch_resume_checkpoint_uses_loaded_working_context;
           test_case "pre-dispatch resume saves compacted context" `Quick
             test_pre_dispatch_resume_checkpoint_saves_compacted_context;
+          test_case "pre-dispatch resume blocks unsaved compaction" `Quick
+            test_pre_dispatch_resume_checkpoint_blocks_unsaved_compaction;
         ] );
       ( "registry_dispatch",
         [

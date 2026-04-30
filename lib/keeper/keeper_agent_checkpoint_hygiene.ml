@@ -54,8 +54,7 @@ let prepare_resume_checkpoint_for_dispatch
     else
       match save_checkpoint compacted_ctx with
       | Ok checkpoint -> (Some checkpoint, None)
-      | Error detail ->
-          (Some (Keeper_exec_context.checkpoint_of_context compacted_ctx), Some detail)
+      | Error detail -> (None, Some detail)
   in
   let context =
     match checkpoint_opt with

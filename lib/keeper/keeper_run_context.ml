@@ -18,6 +18,7 @@ type run_context =
   ; ctx_work : working_context
   ; resume_oas_checkpoint : Oas.Checkpoint.t option
   ; pre_dispatch_compacted : bool
+  ; pre_dispatch_checkpoint_error : Oas.Error.sdk_error option
   ; start_turn_count : int
   ; receipt_started_at : string
   ; config_root : string
@@ -165,12 +166,18 @@ let prepare_run_context
   let ctx_work = checkpoint_hygiene.context in
   let resume_oas_checkpoint = checkpoint_hygiene.resume_checkpoint in
   let pre_dispatch_compacted = checkpoint_hygiene.compacted in
-  (match checkpoint_hygiene.save_error with
-   | Some detail ->
-       Log.Keeper.error
-         "%s: pre-dispatch checkpoint compaction save failed: %s"
-         meta.name detail
-   | None -> ());
+  let pre_dispatch_checkpoint_error =
+    match checkpoint_hygiene.save_error with
+    | Some detail ->
+      Log.Keeper.error
+        "%s: pre-dispatch checkpoint compaction save failed: %s"
+        meta.name detail;
+      Some
+        (Keeper_agent_error.checkpoint_persistence_error
+           ~keeper_name:meta.name
+           ~detail:("pre-dispatch checkpoint compaction save failed: " ^ detail))
+    | None -> None
+  in
   (if checkpoint_hygiene.applied then
      Log.Keeper.info
        "%s: pre-dispatch compaction %s trigger=%s tokens=%d->%d max_context=%d"
@@ -198,6 +205,7 @@ let prepare_run_context
   ; ctx_work
   ; resume_oas_checkpoint
   ; pre_dispatch_compacted
+  ; pre_dispatch_checkpoint_error
   ; start_turn_count
   ; receipt_started_at
   ; config_root

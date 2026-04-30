@@ -15,6 +15,12 @@ let outcome_kind_to_string = function
   | `Error -> "error"
   | `Cancelled -> "cancelled"
 
+let outcome_kind_to_tla_receipt = function
+  | `Ok -> "receipt_done"
+  | `Skipped -> "receipt_skipped"
+  | `Error -> "receipt_failed"
+  | `Cancelled -> "receipt_cancelled"
+
 let outcome_kind_of_string = function
   | "ok" -> Some `Ok
   | "skipped" -> Some `Skipped

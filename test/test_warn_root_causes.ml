@@ -219,7 +219,7 @@ let test_concurrent_atomic_writes_never_empty () =
 let test_keeper_mainline_failures_log_at_error () =
   check bool "missing checkpoint after run logs at ERROR" true
     (file_contains_pattern "lib/keeper/keeper_agent_run.ml"
-       {|Log.Keeper.error "keeper:%s missing OAS checkpoint after run"|});
+       {|"keeper:%s cascade=%s missing OAS checkpoint after run"|});
   check bool "memory write failures log at ERROR" true
     (file_contains_pattern "lib/keeper/keeper_agent_run.ml"
        {|"keeper:%s memory_write failed: %s"|});
@@ -228,16 +228,16 @@ let test_keeper_mainline_failures_log_at_error () =
        {|Log.Keeper.warn
                "keeper:%s memory_write failed: %s"|});
   check bool "episode creation failures log at ERROR" true
-    (file_contains_pattern "lib/keeper/keeper_agent_run.ml"
+    (file_contains_pattern "lib/keeper/keeper_agent_memory_episode.ml"
        {|"keeper:%s episode_create failed: %s"|});
   check bool "episode creation failures are no longer WARN" true
-    (file_not_contains_pattern "lib/keeper/keeper_agent_run.ml"
+    (file_not_contains_pattern "lib/keeper/keeper_agent_memory_episode.ml"
        {|Log.Keeper.warn "keeper:%s episode_create failed: %s"|});
   check bool "post-failure read_meta None logs at ERROR" true
-    (file_contains_pattern "lib/keeper/keeper_keepalive.ml"
+    (file_contains_pattern "lib/keeper/keeper_heartbeat_loop.ml"
        {|Log.Keeper.error "keeper:%s read_meta returned None after turn failure, using stale meta"|});
   check bool "post-failure read_meta Error logs at ERROR" true
-    (file_contains_pattern "lib/keeper/keeper_keepalive.ml"
+    (file_contains_pattern "lib/keeper/keeper_heartbeat_loop.ml"
        {|Log.Keeper.error "keeper:%s read_meta failed after turn failure (%s), using stale meta"|})
 
 let test_oas_mainline_warns_are_promoted_in_bridge () =

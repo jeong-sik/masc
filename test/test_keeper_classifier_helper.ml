@@ -1,6 +1,5 @@
-(** test_keeper_classifier_helper — coverage for the structured
-    [classify_actionable_signal] introduced as the precursor to Step 6b
-    caller adoption. *)
+(** test_keeper_classifier_helper — coverage for the structured actionable
+    signal classifier used by the required-tool contract gate. *)
 
 open Masc_mcp
 module C = Keeper_contract_classifier
@@ -42,6 +41,35 @@ let test_discovered_only_when_no_other () =
   Alcotest.check s "discovered alone"
     C.Has_discovered_work
     (C.classify_actionable_signal (obs ~discovered:true ()))
+
+let test_allowed_tools_preserve_fallback_precedence () =
+  Alcotest.check s "board wins when claim tools are hidden"
+    C.Has_board_activity
+    (C.classify_actionable_signal_with_allowed_tools
+       ~allowed_tool_names:[ "keeper_board_post" ]
+       (obs ~tasks:2 ~board:1 ()));
+  Alcotest.check s "discovered wins when claim and board tools are hidden"
+    C.Has_discovered_work
+    (C.classify_actionable_signal_with_allowed_tools
+       ~allowed_tool_names:[ "keeper_tasks_audit" ]
+       (obs ~tasks:2 ~board:1 ~discovered:true ()));
+  Alcotest.check s "no unwinnable signal without action tools"
+    C.No_actionable_signal
+    (C.classify_actionable_signal_with_allowed_tools
+       ~allowed_tool_names:[ "keeper_tasks_list"; "masc_status" ]
+       (obs ~tasks:2 ~board:1 ~discovered:true ()))
+
+let test_allowed_tools_keep_top_priority_when_actionable () =
+  Alcotest.check s "unclaimed wins with claim tool visible"
+    C.Has_unclaimed_tasks
+    (C.classify_actionable_signal_with_allowed_tools
+       ~allowed_tool_names:[ "keeper_task_claim"; "keeper_board_post" ]
+       (obs ~tasks:2 ~board:1 ~discovered:true ()));
+  Alcotest.check s "board wins over discovered with board tool visible"
+    C.Has_board_activity
+    (C.classify_actionable_signal_with_allowed_tools
+       ~allowed_tool_names:[ "keeper_board_comment"; "keeper_tasks_audit" ]
+       (obs ~board:1 ~discovered:true ()))
 
 let test_zero_counts_are_inactive () =
   (* count = 0 must NOT promote to *_activity (boundary check on ">0"). *)
@@ -106,6 +134,10 @@ let () =
             test_board_takes_second_priority;
           Alcotest.test_case "discovered alone" `Quick
             test_discovered_only_when_no_other;
+          Alcotest.test_case "allowed tools preserve fallback precedence" `Quick
+            test_allowed_tools_preserve_fallback_precedence;
+          Alcotest.test_case "allowed tools keep top actionable priority" `Quick
+            test_allowed_tools_keep_top_priority_when_actionable;
           Alcotest.test_case "zero counts are inactive" `Quick
             test_zero_counts_are_inactive;
           Alcotest.test_case "negative counts are inactive" `Quick

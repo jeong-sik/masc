@@ -1,43 +1,44 @@
 [
   {
-    "question_id": "cpv2-vs-supervisor",
+    "question_id": "integrated-benchmark-phases",
     "claims": [
-      "cpv2_direct_is_canonical_benchmark",
-      "supervisor_mode_is_guided_loop",
-      "swarm_delivery_uses_team_session_plus_supervisor"
+      "integrated_default_phases_are_control_and_search",
+      "local64_phase_is_retired_from_integrated_wrapper",
+      "search_phase_uses_cp_search_fabric"
     ],
     "cited_paths": [
-      "docs/COMMAND-PLANE-RUNBOOK.md",
-      "docs/SUPERVISOR-MODE.md",
-      "docs/SWARM-DELIVERY-RUNBOOK.md"
+      "docs/INTEGRATED-BENCHMARK-RUNBOOK.md",
+      "docs/BENCHMARK-RUNBOOK.md",
+      "scripts/harness/workload/integrated_benchmark.sh"
     ],
     "latency_ms": 820
   },
   {
-    "question_id": "current-room-compat",
+    "question_id": "supervisor-boundary",
     "claims": [
-      "current_room_pointer_is_ssot",
-      "named_room_tools_removed",
-      "repo_root_room_semantics_remain"
+      "supervisor_mode_is_keeper_fsm_and_board_posts",
+      "team_session_tools_are_retired",
+      "swarm_runs_use_oas_substrate_directly"
     ],
     "cited_paths": [
-      "docs/spec/03-room-coordination.md",
-      "docs/MULTI-ROOM-DESIGN.md",
-      "lib/tool_coord.ml"
+      "docs/SUPERVISOR-MODE.md",
+      "docs/COMMAND-PLANE-RUNBOOK.md",
+      "docs/OAS-MASC-BOUNDARY.md"
     ],
     "latency_ms": 910
   },
   {
     "question_id": "proof-surface-linkage",
     "claims": [
-      "team_session_prove_emits_proof_paths",
+      "managed_operation_proof_uses_agent_swarm_live_harness",
       "operator_surface_reads_without_being_canonical_benchmark_path",
-      "dashboard_proof_links_cp_backing"
+      "dashboard_mission_execution_board_are_live_proof_surfaces"
     ],
     "cited_paths": [
+      "docs/INTEGRATED-BENCHMARK-RUNBOOK.md",
+      "docs/BENCHMARK-RUNBOOK.md",
       "docs/SUPERVISOR-MODE.md",
-      "docs/SUPERVISOR-MODE.md",
-      "lib/dashboard/dashboard_proof.ml"
+      "docs/COMMAND-PLANE-RUNBOOK.md"
     ],
     "latency_ms": 980
   }

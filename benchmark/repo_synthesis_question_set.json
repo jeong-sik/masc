@@ -1,66 +1,68 @@
 [
   {
-    "question_id": "cpv2-vs-supervisor",
-    "title": "Canonical benchmark path versus supervisor loop",
-    "question": "Which path is canonical for benchmark or swarm orchestration, and how does Supervisor Mode differ from it?",
+    "question_id": "integrated-benchmark-phases",
+    "title": "Integrated benchmark phases",
+    "question": "Which phases does the integrated benchmark wrapper run now, and what happened to the old local64/team-session lane?",
     "artifact_scope": [
-      "docs/COMMAND-PLANE-RUNBOOK.md",
-      "docs/SUPERVISOR-MODE.md",
-      "docs/SWARM-DELIVERY-RUNBOOK.md"
+      "docs/INTEGRATED-BENCHMARK-RUNBOOK.md",
+      "docs/BENCHMARK-RUNBOOK.md",
+      "scripts/harness/workload/integrated_benchmark.sh"
     ],
     "required_claims": [
-      "cpv2_direct_is_canonical_benchmark",
-      "supervisor_mode_is_guided_loop",
-      "swarm_delivery_uses_team_session_plus_supervisor"
+      "integrated_default_phases_are_control_and_search",
+      "local64_phase_is_retired_from_integrated_wrapper",
+      "search_phase_uses_cp_search_fabric"
     ],
     "gold_paths": [
-      "docs/COMMAND-PLANE-RUNBOOK.md",
-      "docs/SUPERVISOR-MODE.md",
-      "docs/SWARM-DELIVERY-RUNBOOK.md"
+      "docs/INTEGRATED-BENCHMARK-RUNBOOK.md",
+      "docs/BENCHMARK-RUNBOOK.md",
+      "scripts/harness/workload/integrated_benchmark.sh"
     ],
     "difficulty": "medium",
-    "tags": ["cpv2", "supervisor", "runbook"]
+    "tags": ["benchmark", "integrated", "runbook"]
   },
   {
-    "question_id": "current-room-compat",
-    "title": "Current-room-only room semantics",
-    "question": "What remains of the room concept after the current-room-only refactor, and which named-room tools were removed?",
+    "question_id": "supervisor-boundary",
+    "title": "Supervisor boundary after team-session retirement",
+    "question": "What does Supervisor Mode coordinate through now that team-session tools are retired?",
     "artifact_scope": [
-      "docs/spec/03-room-coordination.md",
-      "docs/MULTI-ROOM-DESIGN.md",
-      "lib/tool_room.ml"
+      "docs/SUPERVISOR-MODE.md",
+      "docs/COMMAND-PLANE-RUNBOOK.md",
+      "docs/OAS-MASC-BOUNDARY.md"
     ],
     "required_claims": [
-      "current_room_pointer_is_ssot",
-      "named_room_tools_removed",
-      "repo_root_room_semantics_remain"
+      "supervisor_mode_is_keeper_fsm_and_board_posts",
+      "team_session_tools_are_retired",
+      "swarm_runs_use_oas_substrate_directly"
     ],
     "gold_paths": [
-      "docs/spec/03-room-coordination.md",
-      "docs/MULTI-ROOM-DESIGN.md",
-      "lib/tool_room.ml"
+      "docs/SUPERVISOR-MODE.md",
+      "docs/COMMAND-PLANE-RUNBOOK.md",
+      "docs/OAS-MASC-BOUNDARY.md"
     ],
     "difficulty": "medium",
-    "tags": ["room", "compat", "current-room"]
+    "tags": ["supervisor", "team-session", "boundary"]
   },
   {
     "question_id": "proof-surface-linkage",
     "title": "Proof and operator linkage",
-    "question": "How are team-session proof artifacts connected to the operator and command-plane surfaces?",
+    "question": "Which surfaces carry live benchmark proof and operator context now?",
     "artifact_scope": [
-      "docs/TEAM-SESSION.md",
+      "docs/INTEGRATED-BENCHMARK-RUNBOOK.md",
+      "docs/BENCHMARK-RUNBOOK.md",
       "docs/SUPERVISOR-MODE.md",
-      "lib/dashboard/dashboard_proof.ml"
+      "docs/COMMAND-PLANE-RUNBOOK.md"
     ],
     "required_claims": [
-      "team_session_prove_emits_proof_paths",
+      "managed_operation_proof_uses_agent_swarm_live_harness",
       "operator_surface_reads_without_being_canonical_benchmark_path",
-      "dashboard_proof_links_cp_backing"
+      "dashboard_mission_execution_board_are_live_proof_surfaces"
     ],
     "gold_paths": [
-      "docs/TEAM-SESSION.md",
+      "docs/INTEGRATED-BENCHMARK-RUNBOOK.md",
+      "docs/BENCHMARK-RUNBOOK.md",
       "docs/SUPERVISOR-MODE.md",
-      "lib/dashboard/dashboard_proof.ml"
+      "docs/COMMAND-PLANE-RUNBOOK.md"
     ],
     "difficulty": "medium",
     "tags": ["proof", "operator", "dashboard"]

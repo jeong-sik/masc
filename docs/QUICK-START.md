@@ -312,6 +312,6 @@ Config/init diagnosis: `docs/CONFIG-DOCTOR.md`
 
 - `docs/COMMAND-PLANE-RUNBOOK.md` — managed-operation compatibility lane
 - `docs/BENCHMARK-RUNBOOK.md` — benchmark recipes
-- `docs/INTEGRATED-BENCHMARK-RUNBOOK.md` — control/search/local64 wrapper
+- `docs/INTEGRATED-BENCHMARK-RUNBOOK.md` — control/search wrapper
 - `docs/SUPERVISOR-MODE.md` — supervised execution path
 - `README.md` — canonical public overview

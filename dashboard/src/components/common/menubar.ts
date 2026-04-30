@@ -3,7 +3,7 @@
 // Enter/Space executes; Home/End jumps to first/last.
 
 import { html } from 'htm/preact'
-import type { ComponentChildren, VNode } from 'preact'
+import type { ComponentChildren } from 'preact'
 import { createContext } from 'preact'
 import { useCallback, useContext, useEffect, useRef, useState } from 'preact/hooks'
 
@@ -65,7 +65,8 @@ export function Menubar({ children, class: cx, 'aria-label': ariaLabel }: Menuba
 
     if (nextIdx !== -1) {
       e.preventDefault()
-      setFocusedIndex(sortedItems[nextIdx])
+      const next = sortedItems[nextIdx]
+      if (next !== undefined) setFocusedIndex(next)
     }
   }
 

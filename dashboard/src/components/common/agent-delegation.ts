@@ -5,7 +5,7 @@
 // elapsed time.
 
 import { html } from 'htm/preact'
-import { AgentPresence, agentStatusToPresence } from './agent-presence'
+import { AgentPresence } from './agent-presence'
 
 export interface DelegationNode {
   agentId: string

@@ -51,6 +51,7 @@ export function RecoveryWizard({
       onRetry(current.id)
       setCountdown(5)
     }
+    return undefined
   }, [countdown, current, onRetry])
 
   useEffect(() => {

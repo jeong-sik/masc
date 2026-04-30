@@ -151,9 +151,7 @@ describe('AgentOutputAnnouncer a11y', () => {
 })
 
 function renderInAct(vnode: any, container: HTMLElement) {
-  let currentVNode = vnode
   const rerender = (newVNode: any) => {
-    currentVNode = newVNode
     act(() => render(newVNode, container))
   }
   act(() => render(vnode, container))

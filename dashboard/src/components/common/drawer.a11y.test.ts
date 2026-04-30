@@ -50,7 +50,9 @@ describe('Drawer a11y', () => {
       container,
     )
     await new Promise((r) => setTimeout(r, 0))
-    const call = addListenerSpy.mock.calls.find((c) => c[0] === 'keydown')
+    const call = addListenerSpy.mock.calls.find(
+      (c) => c[0] === 'keydown' && typeof c[1] === 'function',
+    )
     const handler = call?.[1] as EventListener
     handler(new KeyboardEvent('keydown', { key: 'Escape' }))
     expect(onClose).toHaveBeenCalledOnce()

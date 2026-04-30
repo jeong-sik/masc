@@ -75,9 +75,9 @@ describe('Grid a11y', () => {
       container,
     )
     const rows = container.querySelectorAll('tbody [role="row"]')
-    expect(rows[1].getAttribute('aria-selected')).toBe('true')
-    expect(rows[0].getAttribute('aria-selected')).toBe('false')
-    expect(rows[2].getAttribute('aria-selected')).toBe('false')
+    expect(rows[1]!.getAttribute('aria-selected')).toBe('true')
+    expect(rows[0]!.getAttribute('aria-selected')).toBe('false')
+    expect(rows[2]!.getAttribute('aria-selected')).toBe('false')
   })
 
   it('moves focus with ArrowDown', async () => {
@@ -95,8 +95,8 @@ describe('Grid a11y', () => {
     await new Promise((r) => setTimeout(r, 0))
 
     const rows = container.querySelectorAll('tbody [role="row"]')
-    expect(rows[1].getAttribute('tabindex')).toBe('0')
-    expect(rows[0].getAttribute('tabindex')).toBe('-1')
+    expect(rows[1]!.getAttribute('tabindex')).toBe('0')
+    expect(rows[0]!.getAttribute('tabindex')).toBe('-1')
   })
 
   it('moves focus with ArrowUp', async () => {
@@ -119,8 +119,8 @@ describe('Grid a11y', () => {
     await new Promise((r) => setTimeout(r, 0))
 
     const rows = container.querySelectorAll('tbody [role="row"]')
-    expect(rows[0].getAttribute('tabindex')).toBe('0')
-    expect(rows[1].getAttribute('tabindex')).toBe('-1')
+    expect(rows[0]!.getAttribute('tabindex')).toBe('0')
+    expect(rows[1]!.getAttribute('tabindex')).toBe('-1')
   })
 
   it('selects on Enter and calls onSelectRow', async () => {
@@ -164,13 +164,13 @@ describe('Grid a11y', () => {
     )
     await new Promise((r) => setTimeout(r, 0))
     let rows = container.querySelectorAll('tbody [role="row"]')
-    expect(rows[0].getAttribute('tabindex')).toBe('0')
+    expect(rows[0]!.getAttribute('tabindex')).toBe('0')
 
     grid.dispatchEvent(
       new KeyboardEvent('keydown', { key: 'End', bubbles: true }),
     )
     await new Promise((r) => setTimeout(r, 0))
     rows = container.querySelectorAll('tbody [role="row"]')
-    expect(rows[2].getAttribute('tabindex')).toBe('0')
+    expect(rows[2]!.getAttribute('tabindex')).toBe('0')
   })
 })

@@ -141,7 +141,7 @@ export function Table<T>({
         </tr>
       </thead>
       <tbody>
-        ${rows.map((row, idx) => {
+        ${rows.map((row) => {
           const id = getRowId(row)
           const selected = isSelected(id)
           return html`

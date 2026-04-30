@@ -45,7 +45,9 @@ export function AgentOutputAnnouncer({
   useEffect(() => {
     if (outputs.length > prevCountRef.current && liveRef.current) {
       const latest = outputs[outputs.length - 1]
-      liveRef.current.textContent = announceAgentOutput(latest)
+      if (latest) {
+        liveRef.current.textContent = announceAgentOutput(latest)
+      }
     }
     prevCountRef.current = outputs.length
   }, [outputs])

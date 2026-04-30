@@ -69,6 +69,7 @@ type any_level = Any_level : 'a level -> any_level
 (** {1 Tag mirror} *)
 
 type level_tag = Tag_l1 | Tag_l2 | Tag_l3 | Tag_l4
+[@@deriving tla]
 
 val all_level_tags : level_tag list
 

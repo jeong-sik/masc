@@ -175,7 +175,7 @@ let request_of_yojson = function
                    match criterion_of_yojson j with
                    | Ok c -> Some c
                    | Error msg ->
-                     Eio.traceln "[Verification] dropping invalid criterion: %s" msg;
+                     Log.Misc.warn "[Verification] dropping invalid criterion: %s" msg;
                      None
                  ) l
              | _ -> []
@@ -192,7 +192,7 @@ let request_of_yojson = function
              | Some json -> (match request_status_of_yojson json with
                  | Ok s -> s
                  | Error msg ->
-                   Eio.traceln "[Verification] unparseable status, falling back to Pending: %s" msg;
+                   Log.Misc.warn "[Verification] unparseable status, falling back to Pending: %s" msg;
                    Pending)
              | None -> Pending
            in

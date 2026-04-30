@@ -143,7 +143,7 @@ let recent n =
     else
       match Safe_ops.read_file_safe path with
       | Error msg ->
-          Eio.traceln "[AgentStress] recent read_file_safe failed: %s" msg;
+          Log.Misc.warn "[AgentStress] recent read_file_safe failed: %s" msg;
           []
       | Ok content ->
         let lines =

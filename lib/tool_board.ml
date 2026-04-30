@@ -663,7 +663,7 @@ let handle_vote args =
                     author dimension (if is_positive then "+0.01" else "-0.01")
                 end else ""
             | Error e ->
-                Eio.traceln "[ToolBoard] get_reputation_evolution failed: %s" (board_error_to_string e);
+                Log.Misc.warn "[ToolBoard] get_reputation_evolution failed: %s" (board_error_to_string e);
                 ""
       in
       (true, Printf.sprintf "%s Vote recorded. New score: %+d%s" arrow new_score evolution_msg)

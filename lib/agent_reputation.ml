@@ -76,7 +76,9 @@ let load_jsonl_safe (path : string) : Yojson.Safe.t list =
   if not (Sys.file_exists path) then []
   else
     match Safe_ops.read_file_safe path with
-    | Error _ -> []
+    | Error msg ->
+        Log.Misc.warn "agent_reputation: failed to read %s: %s" path msg;
+        []
     | Ok content ->
       String.split_on_char '\n' content
       |> List.filter (fun line -> String.length (String.trim line) > 0)

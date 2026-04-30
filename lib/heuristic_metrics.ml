@@ -258,7 +258,7 @@ let recent n =
     else
       match Safe_ops.read_file_safe path with
       | Error msg ->
-          Eio.traceln "[HeuristicMetrics] recent read_file_safe failed: %s" msg;
+          Log.warn ~ctx:"heuristic_metrics" "recent_entries read failed: %s" msg;
           []
       | Ok content ->
         let lines =

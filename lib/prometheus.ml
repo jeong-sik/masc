@@ -659,6 +659,8 @@ let metric_keeper_fsm_edge_transitions =
   "masc_keeper_fsm_edge_transitions_total"
 let metric_keeper_turn_fsm_transitions =
   "masc_keeper_turn_fsm_transitions_total"
+let metric_keeper_lifecycle_transitions =
+  "masc_keeper_lifecycle_transitions_total"
 let metric_fsm_guard_violation = "masc_fsm_guard_violation_total"
 let metric_keeper_lifecycle_callback_failures =
   "masc_keeper_lifecycle_callback_failures_total"
@@ -676,6 +678,10 @@ let metric_keeper_dead_total = "masc_keeper_dead_total"
 let metric_keeper_skip_idle_wake_resumed =
   "masc_keeper_skip_idle_wake_resumed_total"
 let metric_keeper_near_exhaustion_total = "masc_keeper_near_exhaustion_total"
+let metric_keeper_restart_attempts =
+  "masc_keeper_restart_attempts_total"
+let metric_keeper_restart_outcomes =
+  "masc_keeper_restart_outcomes_total"
 (* PR-M (Leak 9): consecutive [oas_timeout_budget] cycle FAILED strikes
    per keeper. Counter increments on each strike; a strike at
    [outcome=promote] means [Keeper_fiber_crash] was raised so
@@ -1018,6 +1024,18 @@ let init () =
   add metric_keeper_near_exhaustion_total
     "Total keeper restart attempts at restart_count = max_restarts - 1, \
      i.e. one failure away from Dead. Soft pre-warning; labeled by keeper."
+    Counter;
+  add metric_keeper_lifecycle_transitions
+    "Total keeper lifecycle phase transitions emitted only when the registry \
+     phase changes. Labeled by keeper, from_phase, and to_phase; deliberately \
+     omits event/reason payloads to keep cardinality bounded."
+    Counter;
+  add metric_keeper_restart_attempts
+    "Total supervisor restart attempts for crashed keepers. Labeled by keeper."
+    Counter;
+  add metric_keeper_restart_outcomes
+    "Total supervisor restart outcomes. Labeled by keeper and bounded \
+     outcome=started|meta_unavailable."
     Counter;
   add metric_keeper_tool_alias_canonicalizations
     "Total observed LLM-facing tool names canonicalized to keeper internal \

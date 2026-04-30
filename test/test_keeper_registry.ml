@@ -434,6 +434,43 @@ let test_dispatch_event_emits_phase_sse () =
           check string "event" "operator_pause"
             (Json.member "event" payload |> Json.to_string))
 
+let test_dispatch_event_emits_lifecycle_transition_metric_only_on_phase_change () =
+  R.clear ();
+  let keeper_name = "k4-lifecycle-metric" in
+  let changed_labels =
+    [
+      ("keeper", keeper_name);
+      ("from_phase", "running");
+      ("to_phase", "paused");
+    ]
+  in
+  let unchanged_labels =
+    [
+      ("keeper", keeper_name);
+      ("from_phase", "running");
+      ("to_phase", "running");
+    ]
+  in
+  let changed_before =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      Masc_mcp.Prometheus.metric_keeper_lifecycle_transitions
+      ~labels:changed_labels ()
+  in
+  ignore (R.register ~base_path:bp keeper_name (make_meta keeper_name));
+  ignore (R.dispatch_event ~base_path:bp keeper_name KSM.Fiber_started);
+  check (float 0.001) "no same-phase metric emitted" 0.0
+    (Masc_mcp.Prometheus.metric_value_or_zero
+       Masc_mcp.Prometheus.metric_keeper_lifecycle_transitions
+       ~labels:unchanged_labels ());
+  ignore (R.dispatch_event ~base_path:bp keeper_name KSM.Operator_pause);
+  let changed_after =
+    Masc_mcp.Prometheus.metric_value_or_zero
+      Masc_mcp.Prometheus.metric_keeper_lifecycle_transitions
+      ~labels:changed_labels ()
+  in
+  check (float 0.001) "phase-change transition metric incremented"
+    (changed_before +. 1.0) changed_after
+
 let test_extended_states () =
   R.clear ();
   let _entry = R.register ~base_path:bp "k4x" (make_meta "k4x") in
@@ -1198,6 +1235,8 @@ let () =
           eio_test "set state" test_set_state;
           eio_test "dispatch event emits phase SSE"
             test_dispatch_event_emits_phase_sse;
+          eio_test "dispatch event emits lifecycle metric only on phase change"
+            test_dispatch_event_emits_lifecycle_transition_metric_only_on_phase_change;
           eio_test "extended states" test_extended_states;
           eio_test "stopped entry action is observability-only"
             test_stopped_entry_action_is_observability_only;

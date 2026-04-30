@@ -1,10 +1,4 @@
-(** Typed classifier for keeper turn completion contract.
-
-    Step 6a of the bloodflow restoration plan introduces only the
-    type vocabulary; the call-site rewrite that replaces the
-    [String_util.contains_substring_ci haystack ...] heuristic in
-    [keeper_agent_run.ml:2285-2298] is left to a follow-up stack
-    so the type surface lands additively first. *)
+(** Typed classifier for keeper turn completion contract. *)
 
 type actionable_signal =
   | Has_unclaimed_tasks
@@ -28,12 +22,9 @@ val contract_status_label : contract_status -> string
 val pp_contract_status : Format.formatter -> contract_status -> unit
 
 (** Structured per-turn world snapshot consumed by
-    [classify_actionable_signal]. Mirrors the three substring markers
-    that [keeper_agent_run.ml:2285-2298] currently scrapes from the
-    rendered prompt body — the upstream code already knows these as
-    counts and a boolean before formatting them into the string, so
-    Step 6b's caller rewrite will populate this record at the source
-    instead of re-parsing the prompt. *)
+    [classify_actionable_signal].  These values are observed before prompt
+    rendering so the completion-contract gate does not infer world state
+    from rendered prose. *)
 type world_observation = {
   unclaimed_task_count : int;
       (** Number of unclaimed tasks in the keeper's queue.
@@ -65,6 +56,16 @@ type world_observation = {
     is the structured equivalent of the existing
     [actionable_signal_context = true]. *)
 val classify_actionable_signal : world_observation -> actionable_signal
+
+(** Like [classify_actionable_signal], but skips a candidate signal when
+    the active tool surface has no tool capable of acting on that signal.
+
+    This preserves the documented precedence while avoiding unwinnable
+    contract violations. Example: if unclaimed tasks exist but the keeper
+    cannot see a claim tool, board activity can still become the selected
+    actionable signal when board tools are visible. *)
+val classify_actionable_signal_with_allowed_tools :
+  allowed_tool_names:string list -> world_observation -> actionable_signal
 
 (** [is_actionable s] is [false] iff [s = No_actionable_signal].
     Provided so callers comparing the structured signal against the

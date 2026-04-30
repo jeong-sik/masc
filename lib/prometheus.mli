@@ -105,6 +105,11 @@ val metric_keeper_turn_latency_by_model_bucket : string
     [keeper, channel, provider_kind, model_used, resolved_model_id,
     cascade_profile, bucket]. *)
 
+val metric_keeper_provider_cooldown_skip : string
+(** P-DASH-01: provider cooldown skip counter.  Incremented when a
+    cascade is in provider cooldown and the keeper fail-opens to a
+    fallback cascade.  Labels: [keeper, from_cascade, to_cascade]. *)
+
 (** #10125: supervisor sweep liveness counters.  See {!Prometheus.ml}
     for the rationale.  Counter increments on each Pulse start;
     gauge advances on every successful beat. *)

@@ -160,6 +160,14 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                  Log.Keeper.warn
                    "%s: cascade %s provider cooldown pending (%ds); fail-opening to %s"
                    meta.name effective_cascade_name remaining_sec fallback_cascade;
+                 Prometheus.inc_counter
+                   Prometheus.metric_keeper_provider_cooldown_skip
+                   ~labels:[
+                     ("keeper", meta.name);
+                     ("from_cascade", effective_cascade_name);
+                     ("to_cascade", fallback_cascade);
+                   ]
+                   ();
                  fallback_cascade
              | _ -> effective_cascade_name)
         | None -> effective_cascade_name

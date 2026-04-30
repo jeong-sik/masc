@@ -25,6 +25,12 @@ type cascade_failure_class =
   | Accept_rejected_terminal
   | Cli_transport_required
   | Network_error
+  | Provider_failure_capacity_exhausted
+  | Provider_failure_hard_quota
+  | Provider_failure_capability_mismatch
+  | Provider_failure_cli_policy_invalid
+  | Provider_failure_cli_startup_failed
+  | Provider_failure_unknown
   | Provider_terminal
 
 let classify_failure err = Oas_compat.Http_client.classify err

@@ -129,6 +129,44 @@ let test_provider_terminal_other () =
     (Astring.String.is_infix ~affix:"structured_terminal_subtype" rendered
      && Astring.String.is_infix ~affix:"provider signalled" rendered)
 
+let test_provider_failure_typed_classes_cascade () =
+  let hard_quota =
+    Http_client.ProviderFailure
+      { kind = Hard_quota { retry_after = Some 3600. };
+        message = "quota will reset later" }
+  in
+  let capability =
+    Http_client.ProviderFailure
+      { kind = Capability_mismatch { capability = Some "runtime_mcp_auth" };
+        message = "provider cannot forward runtime MCP auth" }
+  in
+  let policy =
+    Http_client.ProviderFailure
+      { kind = Cli_policy_invalid { tool_name = Some "glm"; rule = Some 248 };
+        message = "Gemini CLI policy rejected configured tool" }
+  in
+  List.iter
+    (fun err ->
+      Alcotest.(check bool)
+        "typed ProviderFailure classes cascade to the next provider lane"
+        true
+        (Oas_compat.Http_client.should_cascade err))
+    [ hard_quota; capability; policy ];
+  (match Oas_compat.Http_client.classify hard_quota with
+   | Provider_failure_hard_quota -> ()
+   | _ -> Alcotest.fail "hard quota must classify as Provider_failure_hard_quota");
+  (match Oas_compat.Http_client.classify capability with
+   | Provider_failure_capability_mismatch -> ()
+   | _ ->
+       Alcotest.fail
+         "capability mismatch must classify as Provider_failure_capability_mismatch");
+  let rendered = Oas_compat.Http_client.error_message policy in
+  Alcotest.(check bool)
+    "ProviderFailure render keeps typed kind and provider message"
+    true
+    (Astring.String.is_infix ~affix:"cli_policy_invalid:rule_248:glm" rendered
+     && Astring.String.is_infix ~affix:"Gemini CLI policy" rendered)
+
 let test_error_message_baseline () =
   (* Smoke check that the new helper preserves existing semantics for
      the variants that already had inline matches at the call sites. *)
@@ -174,6 +212,11 @@ let () =
             `Quick test_provider_terminal_max_turns;
           Alcotest.test_case "Other classify + cascade + message"
             `Quick test_provider_terminal_other;
+        ] );
+      ( "ProviderFailure — typed provider/runtime failures cascade",
+        [
+          Alcotest.test_case "typed ProviderFailure classes"
+            `Quick test_provider_failure_typed_classes_cascade;
         ] );
       ( "error_message helper baseline",
         [

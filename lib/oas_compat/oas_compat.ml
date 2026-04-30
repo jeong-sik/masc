@@ -11,6 +11,12 @@ module Http_client = struct
     | Accept_rejected_terminal
     | Cli_transport_required
     | Network_error
+    | Provider_failure_capacity_exhausted
+    | Provider_failure_hard_quota
+    | Provider_failure_capability_mismatch
+    | Provider_failure_cli_policy_invalid
+    | Provider_failure_cli_startup_failed
+    | Provider_failure_unknown
     | Provider_terminal
         (** OAS [ProviderTerminal] — provider has signalled a terminal
             condition (e.g. claude_cli [error_max_turns]). Treat as
@@ -75,6 +81,17 @@ module Http_client = struct
       (fun needle -> contains_ci ~haystack:reason ~needle ())
       accept_rejected_cascadable_markers
 
+  let classify_provider_failure
+      (kind : Llm_provider.Http_client.provider_failure_kind) =
+    match kind with
+    | Capacity_exhausted _ -> Provider_failure_capacity_exhausted
+    | Hard_quota _ -> Provider_failure_hard_quota
+    | Capability_mismatch _ -> Provider_failure_capability_mismatch
+    | Cli_policy_invalid _ -> Provider_failure_cli_policy_invalid
+    | Cli_startup_failed _ -> Provider_failure_cli_startup_failed
+    | Provider_parse_error _ -> Provider_parse_error
+    | Unknown_provider_failure _ -> Provider_failure_unknown
+
   let classify (err : Llm_provider.Http_client.http_error) :
       cascade_failure_class =
     if Llm_provider.Http_client.is_local_resource_exhaustion err then
@@ -102,6 +119,8 @@ module Http_client = struct
           Cli_transport_required
       | Llm_provider.Http_client.ProviderTerminal _ ->
           Provider_terminal
+      | Llm_provider.Http_client.ProviderFailure { kind; _ } ->
+          classify_provider_failure kind
       | Llm_provider.Http_client.NetworkError _ -> Network_error
 
   let should_cascade (err : Llm_provider.Http_client.http_error) : bool =
@@ -116,12 +135,20 @@ module Http_client = struct
     | Transient_http _
     | Accept_rejected_capability_mismatch
     | Cli_transport_required
+    | Provider_failure_capacity_exhausted
+    | Provider_failure_hard_quota
+    | Provider_failure_capability_mismatch
+    | Provider_failure_cli_policy_invalid
+    | Provider_failure_cli_startup_failed
+    | Provider_failure_unknown
     | Network_error ->
         true
 
   let error_message (err : Llm_provider.Http_client.http_error) : string =
     match err with
     | Llm_provider.Http_client.NetworkError { message; _ } -> message
+    | Llm_provider.Http_client.ProviderFailure { kind; message } ->
+        Llm_provider.Http_client.provider_failure_to_string ~kind ~message
     | Llm_provider.Http_client.AcceptRejected { reason } -> reason
     | Llm_provider.Http_client.CliTransportRequired { kind } ->
         Printf.sprintf "%s provider requires a CLI transport" kind

@@ -31,6 +31,12 @@ module Http_client : sig
     | Accept_rejected_terminal
     | Cli_transport_required
     | Network_error
+    | Provider_failure_capacity_exhausted
+    | Provider_failure_hard_quota
+    | Provider_failure_capability_mismatch
+    | Provider_failure_cli_policy_invalid
+    | Provider_failure_cli_startup_failed
+    | Provider_failure_unknown
     | Provider_terminal
 
   val classify : Llm_provider.Http_client.http_error -> cascade_failure_class
@@ -60,6 +66,11 @@ module Http_client : sig
         is Moonshot-specific; another provider can succeed.
       - "startup crash" — gemini_cli top-level await / yoga_wasm. The
         CLI source explicitly marks this "so the cascade can move on".
+      [ProviderFailure] variants are typed provider/runtime failures
+      parsed by OAS at the transport edge. They cascade because they
+      describe the failed provider lane, not a proven cascade-wide
+      impossibility; MASC records/labels the specific class separately
+      instead of parsing vendor stderr.
       All of these are per-provider, not cascade-wide; a fallback provider
       may succeed where the current one rejected. See masc-mcp #9932
       (kimi fallback), #9850 (codex_cli runtime_mcp_auth). *)

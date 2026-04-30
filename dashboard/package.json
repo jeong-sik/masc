@@ -14,7 +14,7 @@
     "lint": "eslint src",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview",
-    "test": "vitest run --no-file-parallelism --maxWorkers=1",
+    "test": "vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 && vitest run --config vitest.solid.config.ts --no-file-parallelism --maxWorkers=1",
     "test:serial": "pnpm test",
     "test:watch": "vitest",
     "tokens:build": "tsx design-system/tokens/build.ts",

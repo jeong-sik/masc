@@ -119,6 +119,7 @@
         test_keeper_id
         test_repo_store
         test_credential_store
+        test_credential_materializer
         test_keeper_repo_mapping
         test_credential_provider_bridge
         test_repo_sync
@@ -306,6 +307,7 @@
           test_keeper_id
           test_repo_store
           test_credential_store
+          test_credential_materializer
           test_keeper_repo_mapping
           test_credential_provider_bridge
           test_repo_sync

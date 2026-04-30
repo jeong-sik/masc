@@ -132,3 +132,95 @@ groups:
               - cascade exhaustion specific to this keeper's cascade
               - livelock guard re-rejecting (see KeeperTurnLivelockBurst)
             Drill: bin/masc-trace <base> {{ $labels.keeper }} <recent_turn_id>
+
+  # PPX [@@fsm_guard "<expr>"] runtime assertion violations.
+  # Counter: masc_fsm_guard_violation_total{action,stage}
+  #   - Defined: lib/prometheus.ml:645
+  #   - Bumped:  lib/keeper/keeper_fsm_guard_runtime.ml:24
+  #   - Wired:   12 hot-path call sites (heartbeat_loop, keepalive,
+  #              unified_turn, turn_helpers)
+  #
+  # Default production policy is counter mode (MASC_FSM_GUARD_ASSERT=0):
+  # Assert_failure is caught and the counter increments silently. Any
+  # non-zero rate here is a TLA+ Next-set violation that escaped the
+  # parity test gate; treat as spec drift, not "noise".
+  #
+  # Hard mode (MASC_FSM_GUARD_ASSERT=1) is for tests / smoke / CI and
+  # raises Assert_failure instead of bumping the counter. So a positive
+  # rate here implies production is in counter mode.
+  - name: masc_keeper_fsm_guard
+    interval: 30s
+    rules:
+
+      # Any violation is signal -- counter mode swallows the
+      # Assert_failure, so the metric is the only operator-visible
+      # surface. for: 5m debounces transient single-tick blips that
+      # could happen during compaction or cancel storms.
+      - alert: KeeperFsmGuardViolation
+        expr: |
+          rate(masc_fsm_guard_violation_total[5m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+          component: keeper
+          subsystem: fsm_guard
+        annotations:
+          summary: "Keeper FSM guard violation in {{ $labels.action }} ({{ $labels.stage }})"
+          description: |
+            A [@@fsm_guard]-injected assertion failed in
+            {{ $labels.action }} at stage {{ $labels.stage }} at rate
+            {{ $value }}/s for 5m. This means an OCaml hot-path took
+            a state transition that the corresponding TLA+ Next set
+            does not enable.
+
+            Common causes:
+              - Spec change merged but OCaml call site not migrated
+              - New emit site landed without [@@deriving tla] / [@@fsm_guard]
+              - PPX guard expression is stale relative to refactored
+                state shape
+
+            Drill:
+              1. Identify the offending action: {{ $labels.action }}
+              2. Find the [@@fsm_guard] attribute carrying that label:
+                 rg '@@fsm_guard.*"{{ $labels.action }}"' lib/keeper/
+              3. Compare to specs/keeper-turn-fsm/KeeperTurnFSM.tla
+                 (or sibling .tla in specs/keeper-state-machine/)
+                 for the matching action's enablement condition.
+              4. Re-run the call site under MASC_FSM_GUARD_ASSERT=1
+                 to capture the Assert_failure stack.
+              5. Either: fix the OCaml call site, update the PPX guard
+                 expression, or correct the spec -- whichever is wrong.
+
+            Reference: docs/observability/keeper-turn-fsm-metrics.md
+            Reference: lib/keeper/keeper_fsm_guard_runtime.mli (contract)
+
+      # Burst: rate > 0.5/s over 1m sustained for 2m means a keeper
+      # is taking the bad transition every couple of cycles, not
+      # once. Page rather than warn.
+      - alert: KeeperFsmGuardViolationBurst
+        expr: |
+          rate(masc_fsm_guard_violation_total[1m]) > 0.5
+        for: 2m
+        labels:
+          severity: critical
+          component: keeper
+          subsystem: fsm_guard
+        annotations:
+          summary: "Keeper FSM guard burst -- {{ $labels.action }} firing > 0.5/s"
+          description: |
+            [@@fsm_guard] for {{ $labels.action }} is failing at
+            > 0.5/s sustained for 2m. A repeat-rate this high
+            indicates a keeper is wedged on a single transition that
+            is now spec-illegal. counter-mode default means the
+            keeper is still "running" but every relevant tick is a
+            silent invariant violation.
+
+            Immediate action:
+              - Set MASC_FSM_GUARD_ASSERT=1 on the affected keeper
+                to fail-fast and surface the Assert_failure.
+              - Check whether the same keeper is also producing
+                masc_keeper_invariant_violations_total ticks
+                (KeeperCompositeInvariantSingleKeeperStuck).
+              - If the offending {{ $labels.action }} matches a recent
+                spec change, consider reverting the [@@fsm_guard]
+                expression update until the call sites are migrated.

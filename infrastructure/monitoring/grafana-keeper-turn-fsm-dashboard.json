@@ -140,6 +140,61 @@
       "options": {
         "legend": { "displayMode": "table", "placement": "right", "showLegend": true }
       }
+    },
+    {
+      "type": "timeseries",
+      "title": "FSM guard violations by (action, stage) — rate / 5m",
+      "gridPos": { "x": 0, "y": 24, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Per-(action, stage) rate of [@@fsm_guard]-injected assertion failures. Production default (MASC_FSM_GUARD_ASSERT=0) catches Assert_failure and bumps this counter silently — any non-zero rate here is spec drift that escaped the parity test gate. See lib/keeper/keeper_fsm_guard_runtime.mli.",
+      "targets": [
+        {
+          "expr": "sum by (action, stage) (rate(masc_fsm_guard_violation_total[5m]))",
+          "legendFormat": "{{action}} / {{stage}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "color": { "mode": "palette-classic" }
+        }
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right", "showLegend": true }
+      }
+    },
+    {
+      "type": "stat",
+      "title": "FSM guard violations — lifetime total",
+      "gridPos": { "x": 12, "y": 24, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "Cumulative [@@fsm_guard] violations since process start, broken down by (action, stage). Non-zero on a fresh process means the very first heartbeat already drifted from spec; investigate before trusting any other panel on this dashboard.",
+      "targets": [
+        {
+          "expr": "sum by (action, stage) (masc_fsm_guard_violation_total)",
+          "legendFormat": "{{action}} / {{stage}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "red", "value": 100 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      }
     }
   ],
   "refresh": "30s",

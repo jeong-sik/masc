@@ -58,6 +58,7 @@ type action =
   | SearchRefinement
   | GovernanceDecision of governance_audit_decision
   | Custom of string
+[@@deriving tla]
 
 type audit_entry = {
   timestamp : float;

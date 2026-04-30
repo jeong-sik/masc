@@ -29,23 +29,24 @@ type governance_audit_decision =
   | Governance_other of string
 
 type action =
-  | Join
-  | Leave
-  | ClaimTask
-  | StartTask
-  | DoneTask
-  | CancelTask
-  | ReleaseTask
-  | Broadcast
-  | Suspend
-  | ToolCall of string
-  | AuthSuccess
-  | AuthFailure
-  | CircuitOpen
-  | CircuitClose
-  | SearchRefinement
-  | GovernanceDecision of governance_audit_decision
-  | Custom of string
+  | Join [@tla.symbol "join"]
+  | Leave [@tla.symbol "leave"]
+  | ClaimTask [@tla.symbol "claim_task"]
+  | StartTask [@tla.symbol "start_task"]
+  | DoneTask [@tla.symbol "done_task"]
+  | CancelTask [@tla.symbol "cancel_task"]
+  | ReleaseTask [@tla.symbol "release_task"]
+  | Broadcast [@tla.symbol "broadcast"]
+  | Suspend [@tla.symbol "suspend"]
+  | ToolCall of string [@tla.symbol "tool_call"]
+  | AuthSuccess [@tla.symbol "auth_success"]
+  | AuthFailure [@tla.symbol "auth_failure"]
+  | CircuitOpen [@tla.symbol "circuit_open"]
+  | CircuitClose [@tla.symbol "circuit_close"]
+  | SearchRefinement [@tla.symbol "search_refinement"]
+  | GovernanceDecision of governance_audit_decision [@tla.symbol "governance_decision"]
+  | Custom of string [@tla.symbol "custom"]
+[@@deriving tla]
 
 type audit_entry = {
   timestamp: float;

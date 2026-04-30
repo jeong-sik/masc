@@ -18,6 +18,18 @@ let counter_for ~keeper ~channel =
     ]
     ()
 
+let make_meta name =
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc [
+         ("name", `String name);
+         ("agent_name", `String name);
+         ("trace_id", `String ("trace-" ^ name));
+       ])
+  with
+  | Ok meta -> meta
+  | Error err -> Alcotest.fail ("make_meta failed: " ^ err)
+
 let test_metric_name_stable () =
   Alcotest.(check string)
     "semaphore wait timeout canonical metric name"
@@ -70,6 +82,51 @@ let test_channel_isolation () =
     before_turn
     (counter_for ~keeper ~channel:"turn")
 
+let test_wait_observation_reason_labels () =
+  Alcotest.(check (list string))
+    "pending reactive reasons"
+    [ "semaphore_wait_pending"; "peers_holding_slot"; "channel_reactive" ]
+    (Masc_mcp.Keeper_heartbeat_loop.semaphore_wait_observation_reasons
+       ~kind:Masc_mcp.Keeper_heartbeat_loop.Semaphore_wait_pending
+       ~channel:Masc_mcp.Keeper_world_observation.Reactive);
+  Alcotest.(check (list string))
+    "timeout scheduled autonomous reasons"
+    [
+      "semaphore_wait_timeout";
+      "peers_holding_slot";
+      "channel_scheduled_autonomous";
+    ]
+    (Masc_mcp.Keeper_heartbeat_loop.semaphore_wait_observation_reasons
+       ~kind:Masc_mcp.Keeper_heartbeat_loop.Semaphore_wait_timeout
+       ~channel:Masc_mcp.Keeper_world_observation.Scheduled_autonomous)
+
+let test_wait_observation_updates_registry_skip_stamp () =
+  let base_path =
+    Filename.concat (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc-semaphore-wait-observation-%d" (Unix.getpid ()))
+  in
+  let keeper = "wait-observation-9771" in
+  Masc_mcp.Keeper_registry.unregister ~base_path keeper;
+  let meta = make_meta keeper in
+  ignore (Masc_mcp.Keeper_registry.register ~base_path keeper meta);
+  Fun.protect
+    ~finally:(fun () ->
+      Masc_mcp.Keeper_registry.unregister ~base_path keeper)
+    (fun () ->
+      Masc_mcp.Keeper_heartbeat_loop.record_semaphore_wait_observation
+        ~base_path
+        ~keeper_name:keeper
+        ~channel:Masc_mcp.Keeper_world_observation.Reactive
+        ~kind:Masc_mcp.Keeper_heartbeat_loop.Semaphore_wait_pending;
+      match Masc_mcp.Keeper_registry.get ~base_path keeper with
+      | Some { Masc_mcp.Keeper_registry.last_skip_observation = Some (_, reasons); _ } ->
+        Alcotest.(check (list string))
+          "pending wait stamped for watchdog suppression"
+          [ "semaphore_wait_pending"; "peers_holding_slot"; "channel_reactive" ]
+          reasons
+      | Some _ -> Alcotest.fail "last_skip_observation was not stamped"
+      | None -> Alcotest.fail "registered keeper missing")
+
 let () =
   Alcotest.run "keeper_semaphore_wait_counter_9771" [
     "metric_name", [
@@ -83,5 +140,11 @@ let () =
     "isolation", [
       Alcotest.test_case "keepers isolated" `Quick test_keeper_isolation;
       Alcotest.test_case "channels isolated" `Quick test_channel_isolation;
+    ];
+    "watchdog_observation", [
+      Alcotest.test_case "reason labels are stable" `Quick
+        test_wait_observation_reason_labels;
+      Alcotest.test_case "registry skip stamp is updated" `Quick
+        test_wait_observation_updates_registry_skip_stamp;
     ];
   ]

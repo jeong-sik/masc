@@ -278,7 +278,8 @@ let execute_tool_eio ~sw ~clock ?(profile = Mcp_server_eio_tool_profile.Full)
         match Auth.resolve_agent_from_token config.base_path ~token:raw with
         | Ok owner_name -> resolve_owner_keeper_identity owner_name
         | Error msg ->
-            Log.Auth.routine "owner_keeper_identity: token resolve failed: %s" msg;
+            Log.Auth.routine "owner_keeper_identity: token resolve failed: %s"
+              (Types.masc_error_to_string msg);
             None)
   in
 

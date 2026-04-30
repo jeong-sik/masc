@@ -1,6 +1,19 @@
 # Changelog
 
 
+## [0.18.24] - 2026-05-01
+
+Post-v0.18.23 release-truth follow-up for the silent-failure cleanup that landed immediately after the `v0.18.23` tag. No breaking API changes.
+
+### Changed
+
+- Package and release metadata advanced from `0.18.23` to `0.18.24`.
+- Roadmap, product operating plan, opam metadata, and spec baseline version references synced to `0.18.24`.
+
+### Fixed
+
+- Server, coordination, governance anomaly, mention inbox, runtime route, dashboard delete-action, and task-tool paths now avoid silent failure patterns by surfacing ignored exceptions or error details through structured logging and explicit handling (#12395).
+
 ## [0.18.23] - 2026-05-01
 
 Post-v0.18.22 merge train for keeper silent-failure visibility, sandbox dispatch regression coverage, TLA/FSM naming cleanup, cascade-name typing, RFC-0019 keeper repo access control, and release-truth baseline cleanup. No breaking API changes.

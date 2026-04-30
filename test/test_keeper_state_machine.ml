@@ -459,6 +459,12 @@ let test_can_transition_handingoff_to_failing () =
 let test_can_transition_handingoff_to_crashed () =
   check bool "-> Crashed" true (SM.can_transition ~from_phase:SM.HandingOff ~to_phase:SM.Crashed)
 
+let test_can_transition_compacting_to_paused () =
+  check bool "-> Paused" true (SM.can_transition ~from_phase:SM.Compacting ~to_phase:SM.Paused)
+
+let test_can_transition_handingoff_to_paused () =
+  check bool "-> Paused" true (SM.can_transition ~from_phase:SM.HandingOff ~to_phase:SM.Paused)
+
 let test_can_transition_failing_to_draining () =
   check bool "-> Draining" true (SM.can_transition ~from_phase:SM.Failing ~to_phase:SM.Draining)
 
@@ -2138,8 +2144,10 @@ let () =
       test_case "Crashed -> Restarting|Dead only" `Quick test_can_transition_crashed_only_restart_or_dead;
       test_case "Compacting -> Failing" `Quick test_can_transition_compacting_to_failing;
       test_case "Compacting -> Crashed" `Quick test_can_transition_compacting_to_crashed;
+      test_case "Compacting -> Paused" `Quick test_can_transition_compacting_to_paused;
       test_case "HandingOff -> Failing" `Quick test_can_transition_handingoff_to_failing;
       test_case "HandingOff -> Crashed" `Quick test_can_transition_handingoff_to_crashed;
+      test_case "HandingOff -> Paused" `Quick test_can_transition_handingoff_to_paused;
       test_case "Failing -> Draining" `Quick test_can_transition_failing_to_draining;
       test_case "Restarting -> Crashed" `Quick test_can_transition_restarting_to_crashed;
       test_case "Restarting -> Dead" `Quick test_can_transition_restarting_to_dead;

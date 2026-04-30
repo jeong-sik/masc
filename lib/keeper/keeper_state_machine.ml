@@ -288,13 +288,15 @@ let can_transition ~from_phase ~to_phase =
      re-enters Overflowed so the retry loop can decide next step — if the
      caller has latched [compact_retry_exhausted], derive_phase immediately
      promotes to Paused instead)
+     | Paused (operator pause during compaction)
      | Failing (hb fail / guardrail during)
      | Crashed (fatal) | Draining (operator stop during). *)
-  | Compacting, (Running | Overflowed | Failing | Crashed | Draining) -> true
+  | Compacting, (Running | Overflowed | Failing | Crashed | Draining | Paused) -> true
   | Compacting, _ -> false
   (* HandingOff -> Running (done) | Failing | Crashed
-     | Draining (operator stop during handoff) *)
-  | HandingOff, (Running | Failing | Crashed | Draining) -> true
+     | Draining (operator stop during handoff)
+     | Paused (operator pause during handoff) *)
+  | HandingOff, (Running | Failing | Crashed | Draining | Paused) -> true
   | HandingOff, _ -> false
   (* Draining -> Stopped (done) | Crashed (fatal during drain) *)
   | Draining, (Stopped | Crashed) -> true

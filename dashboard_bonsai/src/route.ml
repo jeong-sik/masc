@@ -23,6 +23,7 @@ type t =
   | Social_board
   | Dead_keepers
   | Archive_runs
+  | Multimodal
   | Hello
 [@@deriving sexp, compare, equal]
 
@@ -38,6 +39,7 @@ let slug = function
   | Social_board -> "social-board"
   | Dead_keepers -> "dead-keepers"
   | Archive_runs -> "archive-runs"
+  | Multimodal -> "multimodal"
   | Hello -> "hello"
 ;;
 
@@ -54,6 +56,7 @@ let label = function
   | Social_board -> "social board"
   | Dead_keepers -> "dead keepers"
   | Archive_runs -> "archive runs"
+  | Multimodal -> "multimodal"
   | Hello -> "hello"
 ;;
 
@@ -61,7 +64,7 @@ let path t = Printf.sprintf "/dashboard/b/%s" (slug t)
 
 (* Bonsai로 이식된 탭 목록. 그 외는 placeholder (Phase 2+). *)
 let is_implemented = function
-  | Logs | Hello | Dead_keepers | Keepers | Archive_runs | Overview | Goals -> true
+  | Logs | Hello | Dead_keepers | Keepers | Archive_runs | Overview | Goals | Multimodal -> true
   | Observatory | Intervene | Tools | Sessions | Social_board -> false
 ;;
 
@@ -78,6 +81,7 @@ let all : t list =
   ; Social_board
   ; Dead_keepers
   ; Archive_runs
+  ; Multimodal
   ]
 ;;
 
@@ -109,6 +113,7 @@ let of_path (path_str : string) : t =
   | "social-board" -> Social_board
   | "dead-keepers" -> Dead_keepers
   | "archive-runs" -> Archive_runs
+  | "multimodal" -> Multimodal
   | "hello" -> Hello
   | "" -> Overview (* /dashboard/b/ → Overview *)
   | _ -> Overview (* unknown → Overview *)

@@ -470,7 +470,7 @@ let run_named
            distinguish it from hard errors. *)
         Cascade_health_tracker.(
           record_rejected global ~provider_key:provider_cfg.model_id
-            ~error_kind:"accept_rejected" ());
+            ~error_kind:(error_kind_of_string "accept_rejected") ());
         (* FSM: Accept_rejected → decide *)
         let reason = Printf.sprintf "response rejected by accept (model=%s)" result.response.model in
         let outcome = Cascade_fsm.Accept_rejected
@@ -549,11 +549,13 @@ let run_named
         if sdk_error_is_hard_quota sdk_err then
           Cascade_health_tracker.(
             record_hard_quota global ~provider_key:provider_cfg.model_id
-              ~error_kind:"hard_quota" ~error_reason:err_str ())
+              ~error_kind:(error_kind_of_string "hard_quota")
+              ~error_reason:err_str ())
         else if sdk_error_is_resumable_cli_session sdk_err then
           Cascade_health_tracker.(
             record_terminal_failure global ~provider_key:provider_cfg.model_id
-              ~error_kind:"resumable_cli_session" ~error_reason:err_str ())
+              ~error_kind:(error_kind_of_string "resumable_cli_session")
+              ~error_reason:err_str ())
         else (match sdk_error_soft_rate_limited sdk_err with
         | Some retry_after_opt ->
           (* Transient 429 (not a hard quota in disguise).  Trip an
@@ -567,7 +569,8 @@ let run_named
           Cascade_health_tracker.(
             record_soft_rate_limited global ~provider_key:provider_cfg.model_id
               ?retry_after_s:retry_after_opt
-              ~error_kind:"http_429" ~error_reason:err_str ())
+              ~error_kind:(error_kind_of_string "http_429")
+              ~error_reason:err_str ())
         | None -> (
           (* Classify the err_str into named buckets so Cascade_health_tracker
              fingerprint groups separate codex internal-state corruption
@@ -604,7 +607,8 @@ let run_named
           in
           Cascade_health_tracker.(
             record_failure global ~provider_key:provider_cfg.model_id
-              ~error_kind ~error_reason:err_str ())));
+              ~error_kind:(error_kind_of_string error_kind)
+              ~error_reason:err_str ())));
         (* FSM: Call_err → decide.
            Hard-quota fast-path: a hard quota is permanent for this turn —
            every remaining tier in this cascade (and any cross-cascade

@@ -7,6 +7,8 @@
 open Alcotest
 module H = Masc_mcp.Cascade_health_tracker
 
+let kind value = H.error_kind_of_string value
+
 let test_record_success_keeps_rate_1 () =
   let t = H.create () in
   H.record_success t ~provider_key:"p" ();
@@ -218,11 +220,11 @@ let info_or_fail t ~provider_key =
 let test_fingerprint_same_classification_accumulates () =
   let t = H.create () in
   H.record_failure t ~provider_key:"p"
-    ~error_kind:"timeout" ~error_reason:"deadline exceeded" ();
+    ~error_kind:(kind "timeout") ~error_reason:"deadline exceeded" ();
   H.record_failure t ~provider_key:"p"
-    ~error_kind:"timeout" ~error_reason:"deadline exceeded" ();
+    ~error_kind:(kind "timeout") ~error_reason:"deadline exceeded" ();
   H.record_failure t ~provider_key:"p"
-    ~error_kind:"timeout" ~error_reason:"deadline exceeded" ();
+    ~error_kind:(kind "timeout") ~error_reason:"deadline exceeded" ();
   let info = info_or_fail t ~provider_key:"p" in
   check int "exactly one fingerprint bucket"
     1 (List.length info.top_fingerprints);
@@ -234,9 +236,9 @@ let test_fingerprint_same_classification_accumulates () =
 let test_fingerprint_distinct_reasons_split () =
   let t = H.create () in
   H.record_failure t ~provider_key:"p"
-    ~error_kind:"failure" ~error_reason:"reason A" ();
+    ~error_kind:(kind "failure") ~error_reason:"reason A" ();
   H.record_failure t ~provider_key:"p"
-    ~error_kind:"failure" ~error_reason:"reason B" ();
+    ~error_kind:(kind "failure") ~error_reason:"reason B" ();
   let info = info_or_fail t ~provider_key:"p" in
   check int "two distinct fingerprints"
     2 (List.length info.top_fingerprints)
@@ -246,7 +248,7 @@ let test_fingerprint_top_3_cap () =
   for i = 1 to 5 do
     let r = Printf.sprintf "reason %d" i in
     H.record_failure t ~provider_key:"p"
-      ~error_kind:"failure" ~error_reason:r ()
+      ~error_kind:(kind "failure") ~error_reason:r ()
   done;
   let info = info_or_fail t ~provider_key:"p" in
   check int "top_fingerprints capped at 3"
@@ -264,7 +266,7 @@ let test_fingerprint_unclassified_when_kind_missing () =
 
 let test_last_failure_at_set_on_failure () =
   let t = H.create () in
-  H.record_failure t ~provider_key:"p" ~error_kind:"failure" ();
+  H.record_failure t ~provider_key:"p" ~error_kind:(kind "failure") ();
   let info_after = info_or_fail t ~provider_key:"p" in
   check bool "last_failure_at populated after failure"
     true (info_after.last_failure_at <> None)
@@ -281,17 +283,17 @@ let test_fingerprint_top_sorted_descending () =
   let t = H.create () in
   (* low: 1, medium: 2, high: 3 *)
   H.record_failure t ~provider_key:"p"
-    ~error_kind:"failure" ~error_reason:"low" ();
+    ~error_kind:(kind "failure") ~error_reason:"low" ();
   H.record_failure t ~provider_key:"p"
-    ~error_kind:"failure" ~error_reason:"medium" ();
+    ~error_kind:(kind "failure") ~error_reason:"medium" ();
   H.record_failure t ~provider_key:"p"
-    ~error_kind:"failure" ~error_reason:"medium" ();
+    ~error_kind:(kind "failure") ~error_reason:"medium" ();
   H.record_failure t ~provider_key:"p"
-    ~error_kind:"failure" ~error_reason:"high" ();
+    ~error_kind:(kind "failure") ~error_reason:"high" ();
   H.record_failure t ~provider_key:"p"
-    ~error_kind:"failure" ~error_reason:"high" ();
+    ~error_kind:(kind "failure") ~error_reason:"high" ();
   H.record_failure t ~provider_key:"p"
-    ~error_kind:"failure" ~error_reason:"high" ();
+    ~error_kind:(kind "failure") ~error_reason:"high" ();
   let info = info_or_fail t ~provider_key:"p" in
   match info.top_fingerprints with
   | (_, c1) :: (_, c2) :: (_, c3) :: _ ->
@@ -355,7 +357,7 @@ let test_terminal_failure_preserves_longer_existing_cooldown () =
 let test_terminal_failure_records_fingerprint () =
   let t = H.create () in
   H.record_terminal_failure t ~provider_key:"kimi-for-coding"
-    ~error_kind:"resumable_cli_session"
+    ~error_kind:(kind "resumable_cli_session")
     ~error_reason:"kimi exited with code 1: session conflict" ();
   let info = info_or_fail t ~provider_key:"kimi-for-coding" in
   match info.top_fingerprints with
@@ -472,7 +474,7 @@ let test_soft_rate_limit_does_not_shorten_hard_quota () =
 let test_soft_rate_limit_records_fingerprint () =
   let t = H.create () in
   H.record_soft_rate_limited t ~provider_key:"claude-cli"
-    ~error_kind:"http_429"
+    ~error_kind:(kind "http_429")
     ~error_reason:"rate limit exceeded for tier" ();
   let info = info_or_fail t ~provider_key:"claude-cli" in
   match info.top_fingerprints with

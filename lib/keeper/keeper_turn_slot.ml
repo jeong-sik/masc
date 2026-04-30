@@ -71,10 +71,19 @@ let autonomous_queue_poll_sec =
 let with_autonomous_wait_queue f =
   Eio.Mutex.use_rw ~protect:true autonomous_wait_queue_mutex f
 
+let autonomous_queue_depth_labels = [ ("channel", "autonomous_queue") ]
+
+let record_autonomous_queue_depth depth =
+  Prometheus.set_gauge
+    Prometheus.metric_keeper_turn_queue_depth
+    ~labels:autonomous_queue_depth_labels
+    (float_of_int depth)
+
 let reset_autonomous_turn_queue_for_test () =
   with_autonomous_wait_queue (fun () ->
     autonomous_wait_queue := [];
-    autonomous_wait_queue_next_ticket := 0)
+    autonomous_wait_queue_next_ticket := 0;
+    record_autonomous_queue_depth 0)
 
 let enqueue_autonomous_waiter ~(keeper_name : string) : int =
   with_autonomous_wait_queue (fun () ->
@@ -82,12 +91,14 @@ let enqueue_autonomous_waiter ~(keeper_name : string) : int =
     incr autonomous_wait_queue_next_ticket;
     autonomous_wait_queue :=
       !autonomous_wait_queue @ [{ ticket; keeper_name }];
+    record_autonomous_queue_depth (List.length !autonomous_wait_queue);
     ticket)
 
 let drop_autonomous_waiter ~(ticket : int) : unit =
   with_autonomous_wait_queue (fun () ->
     autonomous_wait_queue :=
-      List.filter (fun waiter -> waiter.ticket <> ticket) !autonomous_wait_queue)
+      List.filter (fun waiter -> waiter.ticket <> ticket) !autonomous_wait_queue;
+    record_autonomous_queue_depth (List.length !autonomous_wait_queue))
 
 let autonomous_waiter_snapshot_for_test () : string list =
   with_autonomous_wait_queue (fun () ->

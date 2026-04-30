@@ -18,6 +18,12 @@ let counter_for ~keeper ~channel =
     ]
     ()
 
+let queue_depth_for ~channel =
+  Masc_mcp.Prometheus.metric_value_or_zero
+    Masc_mcp.Prometheus.metric_keeper_turn_queue_depth
+    ~labels:[ ("channel", channel) ]
+    ()
+
 let make_meta name =
   match
     Masc_test_deps.meta_of_json_fixture
@@ -34,7 +40,40 @@ let test_metric_name_stable () =
   Alcotest.(check string)
     "semaphore wait timeout canonical metric name"
     "masc_keeper_semaphore_wait_timeout_total"
-    Masc_mcp.Prometheus.metric_keeper_semaphore_wait_timeout
+    Masc_mcp.Prometheus.metric_keeper_semaphore_wait_timeout;
+  Alcotest.(check string)
+    "turn queue depth canonical metric name"
+    "masc_keeper_turn_queue_depth"
+    Masc_mcp.Prometheus.metric_keeper_turn_queue_depth
+
+let test_autonomous_queue_depth_gauge_tracks_fifo () =
+  Eio_main.run @@ fun _env ->
+  let module KK = Masc_mcp.Keeper_keepalive in
+  KK.reset_autonomous_turn_queue_for_test ();
+  Alcotest.(check (float 0.0001))
+    "reset records zero depth"
+    0.0
+    (queue_depth_for ~channel:"autonomous_queue");
+  let first = KK.enqueue_autonomous_waiter_for_test "alpha-depth" in
+  Alcotest.(check (float 0.0001))
+    "first enqueue records depth"
+    1.0
+    (queue_depth_for ~channel:"autonomous_queue");
+  let second = KK.enqueue_autonomous_waiter_for_test "beta-depth" in
+  Alcotest.(check (float 0.0001))
+    "second enqueue records depth"
+    2.0
+    (queue_depth_for ~channel:"autonomous_queue");
+  KK.drop_autonomous_waiter_for_test first;
+  Alcotest.(check (float 0.0001))
+    "drop records reduced depth"
+    1.0
+    (queue_depth_for ~channel:"autonomous_queue");
+  KK.drop_autonomous_waiter_for_test second;
+  Alcotest.(check (float 0.0001))
+    "final drop records zero depth"
+    0.0
+    (queue_depth_for ~channel:"autonomous_queue")
 
 let test_increments_per_channel () =
   let keeper = "sangsu-test-9771" in
@@ -132,6 +171,10 @@ let () =
     "metric_name", [
       Alcotest.test_case "canonical name stable" `Quick
         test_metric_name_stable;
+    ];
+    "queue_depth", [
+      Alcotest.test_case "autonomous FIFO depth gauge tracks queue" `Quick
+        test_autonomous_queue_depth_gauge_tracks_fifo;
     ];
     "counter", [
       Alcotest.test_case "all 3 channels increment" `Quick

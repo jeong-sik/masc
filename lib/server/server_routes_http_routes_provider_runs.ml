@@ -124,3 +124,17 @@ let add_routes ~sw router =
          Http.Response.json ~compress:true ~request:req
            (Yojson.Safe.to_string json) reqd
        ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/heuristics" (fun request reqd ->
+       with_public_read (fun _state req reqd ->
+         let limit = int_query_param req "limit" ~default:100 in
+         let events = Heuristic_metrics.recent limit in
+         let json =
+           `Assoc [
+             ("limit", `Int limit);
+             ("count", `Int (List.length events));
+             ("events", `List events);
+           ]
+         in
+         Http.Response.json ~compress:true ~request:req
+           (Yojson.Safe.to_string json) reqd
+       ) request reqd)

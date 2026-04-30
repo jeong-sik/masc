@@ -16,9 +16,11 @@ import { signal, computed } from '@preact/signals'
 import {
   fetchRuntimeModelMetrics,
   fetchKeeperCostMetrics,
+  fetchHeuristics,
   type DashboardRuntimeModelMetric,
   type KeeperCostMetric,
   type LatencyBucket,
+  type HeuristicEvent,
 } from '../api/dashboard'
 import { LoadingState, ErrorState } from './common/feedback-state'
 
@@ -36,9 +38,16 @@ type KeeperLoadState =
   | { status: 'loaded'; data: KeeperCostMetric[]; windowMinutes: number }
   | { status: 'error'; message: string }
 
+type HeuristicLoadState =
+  | { status: 'idle' }
+  | { status: 'loading' }
+  | { status: 'loaded'; data: HeuristicEvent[]; limit: number }
+  | { status: 'error'; message: string }
+
 const viewMode = signal<ViewMode>('model')
 const modelState = signal<ModelLoadState>({ status: 'idle' })
 const keeperState = signal<KeeperLoadState>({ status: 'idle' })
+const heuristicState = signal<HeuristicLoadState>({ status: 'idle' })
 
 const WINDOW_OPTIONS: Array<{ key: number; label: string }> = [
   { key: 30, label: '30분' },
@@ -80,12 +89,24 @@ async function loadKeeperMetrics(window: number) {
   }
 }
 
+async function loadHeuristics(limit = 100) {
+  heuristicState.value = { status: 'loading' }
+  try {
+    const resp = await fetchHeuristics(limit)
+    heuristicState.value = { status: 'loaded', data: resp.events, limit: resp.limit }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'heuristic metrics 불러오기 실패'
+    heuristicState.value = { status: 'error', message }
+  }
+}
+
 function loadActiveView(window: number) {
   if (viewMode.value === 'model') {
     void loadModelMetrics(window)
   } else {
     void loadKeeperMetrics(window)
   }
+  void loadHeuristics()
 }
 
 const modelTotals = computed(() => {
@@ -410,6 +431,56 @@ function CostLatency({ buckets, p50, p95 }: {
   `
 }
 
+function HeuristicLog({ events, limit }: { events: HeuristicEvent[]; limit: number }) {
+  const fmtTime = (ts: number): string => {
+    const d = new Date(ts * 1000)
+    return d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
+  }
+
+  const triggeredCount = events.filter(e => e.triggered).length
+
+  return html`
+    <section class="flex flex-col gap-2" aria-label=${`Heuristic log · ${events.length} events`}>
+      <div class="flex items-center justify-between rounded border border-card-border/60 bg-[var(--backdrop-deep)] px-3 py-2">
+        <span class="font-mono text-2xs uppercase tracking-1 text-text-muted">heuristic log · ${events.length} events · ${triggeredCount} triggered</span>
+        <span class="font-mono text-2xs text-text-muted">limit ${limit}</span>
+      </div>
+      <div class="overflow-x-auto rounded border border-card-border/60 bg-[var(--backdrop-deep)]">
+        <table class="w-full" aria-label="Heuristic events">
+          <thead>
+            <tr class="border-b border-[var(--color-border-default)] text-2xs uppercase tracking-1 text-text-muted">
+              <th scope="col" class="px-2 py-1.5 text-left">time</th>
+              <th scope="col" class="px-2 py-1.5 text-left">module</th>
+              <th scope="col" class="px-2 py-1.5 text-left">site</th>
+              <th scope="col" class="px-2 py-1.5 text-right">value</th>
+              <th scope="col" class="px-2 py-1.5 text-right">threshold</th>
+              <th scope="col" class="px-2 py-1.5 text-center">state</th>
+              <th scope="col" class="px-2 py-1.5 text-left">provenance</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${events.map((e, i) => html`
+              <tr key=${i} class="border-b border-[var(--color-border-default)]/50 text-2xs ${e.triggered ? 'bg-[var(--color-status-err)]/5' : ''}">
+                <td class="px-2 py-1.5 font-mono text-text-muted">${fmtTime(e.timestamp)}</td>
+                <td class="px-2 py-1.5 text-text-strong">${e.module}</td>
+                <td class="px-2 py-1.5 text-text-muted">${e.site}</td>
+                <td class="px-2 py-1.5 text-right font-mono">${e.raw_value.toFixed(3)}</td>
+                <td class="px-2 py-1.5 text-right font-mono text-text-muted">${e.threshold.toFixed(3)}</td>
+                <td class="px-2 py-1.5 text-center">
+                  <span class="inline-block rounded px-1.5 py-0.5 text-2xs font-semibold ${e.triggered ? 'bg-[var(--color-status-err)]/15 text-[var(--color-status-err)]' : 'bg-[var(--color-status-ok)]/15 text-[var(--color-status-ok)]'}">
+                    ${e.triggered ? 'TRIGGERED' : 'ok'}
+                  </span>
+                </td>
+                <td class="px-2 py-1.5 text-text-muted">${e.provenance.type}${e.provenance.detail ? ` · ${e.provenance.detail}` : ''}</td>
+              </tr>
+            `)}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  `
+}
+
 export function CostDashboard() {
   const activeState = viewMode.value === 'model' ? modelState.value : keeperState.value
 
@@ -555,6 +626,12 @@ export function CostDashboard() {
           </table>
         </div>
       `}
+
+      ${heuristicState.value.status === 'loaded'
+        ? html`<${HeuristicLog} events=${heuristicState.value.data} limit=${heuristicState.value.limit} />`
+        : heuristicState.value.status === 'error'
+          ? html`<${ErrorState} message=${heuristicState.value.message} onRetry=${() => void loadHeuristics()} />`
+          : html`<${LoadingState} />`}
     </section>
   `
 }

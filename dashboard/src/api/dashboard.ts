@@ -963,6 +963,61 @@ export async function fetchKeeperDecisions(
   return decoded
 }
 
+export interface HeuristicEvent {
+  module: string
+  site: string
+  raw_value: number
+  threshold: number
+  triggered: boolean
+  provenance: { type: string; detail: string }
+  timestamp: number
+  detail?: string
+}
+
+export interface HeuristicsResponse {
+  limit: number
+  count: number
+  events: HeuristicEvent[]
+}
+
+function decodeHeuristicEvent(raw: unknown): HeuristicEvent | null {
+  if (!isRecord(raw)) return null
+  const prov = isRecord(raw.provenance) ? raw.provenance : null
+  return {
+    module: asString(raw.module) ?? '',
+    site: asString(raw.site) ?? '',
+    raw_value: asNumber(raw.raw_value) ?? 0,
+    threshold: asNumber(raw.threshold) ?? 0,
+    triggered: asBoolean(raw.triggered),
+    provenance: prov
+      ? { type: asString(prov.type) ?? '', detail: asString(prov.detail) ?? '' }
+      : { type: '', detail: '' },
+    timestamp: asNumber(raw.timestamp) ?? 0,
+    detail: asNullableString(raw.detail) ?? undefined,
+  }
+}
+
+function decodeHeuristicsResponse(raw: unknown): HeuristicsResponse | null {
+  if (!isRecord(raw)) return null
+  return {
+    limit: asInt(raw.limit) ?? 0,
+    count: asInt(raw.count) ?? 0,
+    events: asRecordArray(raw.events)
+      .map(decodeHeuristicEvent)
+      .filter((e): e is HeuristicEvent => e !== null),
+  }
+}
+
+export async function fetchHeuristics(
+  limit = 100,
+  opts?: AbortableRequestOptions,
+): Promise<HeuristicsResponse> {
+  const raw = await get<Record<string, unknown>>(`/api/v1/dashboard/heuristics?limit=${limit}`, { signal: opts?.signal })
+  const decoded = decodeHeuristicsResponse(raw)
+  if (!decoded) throw new Error('유효하지 않은 heuristics payload')
+  return decoded
+}
+
 export function fetchDashboardMissionBriefing(
   force = false,
   opts?: { signal?: AbortSignal },

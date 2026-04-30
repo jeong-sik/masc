@@ -37,6 +37,10 @@ val claude_code_auto_models : unit -> string list
     Defaults to [["kimi-for-coding"]]. *)
 val kimi_cli_auto_models : unit -> string list
 
+type model_selector = Concrete of string | Auto
+
+val model_selector_of_string : string -> model_selector
+
 type model_resolution_provenance =
   | Explicit_input
   | Alias of string
@@ -52,9 +56,9 @@ type model_resolution = {
 }
 
 val resolve_glm_model :
-  ?getenv:(string -> string option) -> string -> model_resolution
+  ?getenv:(string -> string option) -> model_selector -> model_resolution
 val resolve_glm_coding_model :
-  ?getenv:(string -> string option) -> string -> model_resolution
+  ?getenv:(string -> string option) -> model_selector -> model_resolution
 
 (** Resolve a GLM model alias to the concrete API model ID.
     - ["auto"] -> env var [ZAI_DEFAULT_MODEL] or ["glm-5.1"]
@@ -72,7 +76,7 @@ val resolve_auto_model :
   ?getenv:(string -> string option) ->
   ?discover:(unit -> string option) ->
   string ->
-  string ->
+  model_selector ->
   model_resolution
 val resolve_auto_model_id : string -> string -> string
 

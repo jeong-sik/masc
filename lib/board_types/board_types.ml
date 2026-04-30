@@ -120,9 +120,10 @@ type visibility =
   | Direct      (* Mentioned agents only *)
 
 type post_kind =
-  | Human_post
-  | Automation_post
-  | System_post
+  | Human_post [@tla.symbol "human_post"]
+  | Automation_post [@tla.symbol "automation_post"]
+  | System_post [@tla.symbol "system_post"]
+[@@deriving tla]
 
 type post = {
   id: Post_id.t;

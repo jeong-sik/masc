@@ -9,6 +9,11 @@ type outcome =
   | Dispatch_unavailable
   | Internal_error of string
 
+type error_kind = Error_kind of string
+
+let error_kind_of_string value = Error_kind value
+let error_kind_to_string (Error_kind value) = value
+
 type channel_stats = {
   channel : string;
   message_count : int;
@@ -25,7 +30,7 @@ type channel_stats = {
   last_keeper : string;
   last_room_id : string;
   last_error : string;
-  last_error_kind : string;
+  last_error_kind : error_kind;
   last_outcome : string;
   total_duration_ms : int;
   timed_count : int;
@@ -46,7 +51,7 @@ type binding_stats = {
   last_success_ts : float;
   last_error_ts : float;
   last_error : string;
-  last_error_kind : string;
+  last_error_kind : error_kind;
   last_outcome : string;
   total_duration_ms : int;
   timed_count : int;
@@ -60,7 +65,7 @@ type gate_event = {
   room_id : string;
   keeper : string;
   outcome : string;
-  error_kind : string;
+  error_kind : error_kind;
   error : string;
   duration_ms : int;
 }
@@ -75,7 +80,7 @@ type binding_acc = {
   mutable last_error_ts : float;
   mutable keeper : string;
   mutable last_error : string;
-  mutable last_error_kind : string;
+  mutable last_error_kind : error_kind;
   mutable last_outcome : string;
   mutable total_dur_ms : int;
   mutable timed_count : int;
@@ -97,7 +102,7 @@ type stats_acc = {
   mutable last_keeper : string;
   mutable last_room_id : string;
   mutable last_error : string;
-  mutable last_error_kind : string;
+  mutable last_error_kind : error_kind;
   mutable last_outcome : string;
   mutable total_dur_ms : int;
   mutable timed_count : int;
@@ -125,7 +130,7 @@ let make_binding_acc () =
     last_error_ts = 0.0;
     keeper = "";
     last_error = "";
-    last_error_kind = "";
+    last_error_kind = error_kind_of_string "";
     last_outcome = "idle";
     total_dur_ms = 0;
     timed_count = 0;
@@ -148,7 +153,7 @@ let make_acc () =
     last_keeper = "";
     last_room_id = "";
     last_error = "";
-    last_error_kind = "";
+    last_error_kind = error_kind_of_string "";
     last_outcome = "idle";
     total_dur_ms = 0;
     timed_count = 0;
@@ -228,11 +233,12 @@ let get_or_create_binding acc room_id =
       binding
 
 let outcome_error_details = function
-  | Validation_error message -> ("validation", message)
-  | Keeper_error message -> ("keeper", message)
-  | Dispatch_unavailable -> ("dispatch_unavailable", "keeper dispatch unavailable")
-  | Internal_error message -> ("internal", message)
-  | Success | Duplicate -> ("", "")
+  | Validation_error message -> (error_kind_of_string "validation", message)
+  | Keeper_error message -> (error_kind_of_string "keeper", message)
+  | Dispatch_unavailable ->
+      (error_kind_of_string "dispatch_unavailable", "keeper dispatch unavailable")
+  | Internal_error message -> (error_kind_of_string "internal", message)
+  | Success | Duplicate -> (error_kind_of_string "", "")
 
 let append_event ~channel ~room_id ~keeper ~duration_ms outcome ~timestamp =
   let error_kind, error = outcome_error_details outcome in
@@ -308,35 +314,41 @@ let record_attempt ~channel ~room_id ~keeper ~duration_ms outcome =
            | None -> ())
       | Validation_error message ->
           acc.validation_error_count <- acc.validation_error_count + 1;
-          update_error_fields acc ~now ~kind:"validation" ~message;
+          update_error_fields acc ~now
+            ~kind:(error_kind_of_string "validation") ~message;
           (match binding with
            | Some binding ->
-               update_binding_error_fields binding ~now ~kind:"validation"
-                 ~message
+               update_binding_error_fields binding ~now
+                 ~kind:(error_kind_of_string "validation") ~message
            | None -> ())
       | Keeper_error message ->
           acc.keeper_error_count <- acc.keeper_error_count + 1;
-          update_error_fields acc ~now ~kind:"keeper" ~message;
+          update_error_fields acc ~now ~kind:(error_kind_of_string "keeper")
+            ~message;
           (match binding with
            | Some binding ->
-               update_binding_error_fields binding ~now ~kind:"keeper" ~message
+               update_binding_error_fields binding ~now
+                 ~kind:(error_kind_of_string "keeper") ~message
            | None -> ())
       | Dispatch_unavailable ->
           acc.dispatch_unavailable_count <- acc.dispatch_unavailable_count + 1;
-          update_error_fields acc ~now ~kind:"dispatch_unavailable"
+          update_error_fields acc ~now
+            ~kind:(error_kind_of_string "dispatch_unavailable")
             ~message:"keeper dispatch unavailable";
           (match binding with
            | Some binding ->
-               update_binding_error_fields binding ~now ~kind:"dispatch_unavailable"
+               update_binding_error_fields binding ~now
+                 ~kind:(error_kind_of_string "dispatch_unavailable")
                  ~message:"keeper dispatch unavailable"
            | None -> ())
       | Internal_error message ->
           acc.internal_error_count <- acc.internal_error_count + 1;
-          update_error_fields acc ~now ~kind:"internal" ~message;
+          update_error_fields acc ~now ~kind:(error_kind_of_string "internal")
+            ~message;
           (match binding with
            | Some binding ->
-               update_binding_error_fields binding ~now ~kind:"internal"
-                 ~message
+               update_binding_error_fields binding ~now
+                 ~kind:(error_kind_of_string "internal") ~message
            | None -> ()));
       append_event ~channel:channel_key ~room_id:trimmed_room ~keeper:trimmed_keeper
         ~duration_ms outcome ~timestamp:now)
@@ -533,7 +545,7 @@ let gate_event_to_json (event : gate_event) =
       ("room_id", `String event.room_id);
       ("keeper", `String event.keeper);
       ("outcome", `String event.outcome);
-      ("error_kind", `String event.error_kind);
+      ("error_kind", `String (error_kind_to_string event.error_kind));
       ("error", `String event.error);
       ("duration_ms", `Int event.duration_ms);
     ]
@@ -656,7 +668,7 @@ let snapshot_json () =
         ("last_keeper", `String stats.last_keeper);
         ("last_room_id", `String stats.last_room_id);
         ("last_error", `String stats.last_error);
-        ("last_error_kind", `String stats.last_error_kind);
+        ("last_error_kind", `String (error_kind_to_string stats.last_error_kind));
         ("last_outcome", `String stats.last_outcome);
         ("avg_duration_ms", `Int avg_dur);
         ("max_duration_ms", `Int stats.max_duration_ms);
@@ -685,7 +697,7 @@ let snapshot_json () =
         ("last_success", `String (iso_of_ts stats.last_success_ts));
         ("last_error_at", `String (iso_of_ts stats.last_error_ts));
         ("last_error", `String stats.last_error);
-        ("last_error_kind", `String stats.last_error_kind);
+        ("last_error_kind", `String (error_kind_to_string stats.last_error_kind));
         ("last_outcome", `String stats.last_outcome);
         ("avg_duration_ms", `Int avg_dur);
         ("max_duration_ms", `Int stats.max_duration_ms);

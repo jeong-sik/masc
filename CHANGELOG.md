@@ -1,6 +1,19 @@
 # Changelog
 
 
+## [0.18.19] - 2026-04-30
+
+Release-truth catch-up after the `v0.18.18` tag was cut before the final changelog sync and design-system mapping audit landed. No runtime behavior changes beyond the commits already on `main`.
+
+### Changed
+
+- Release metadata advanced from `0.18.18` to `0.18.19` so the tagged boundary includes the 0.18.18 changelog correction and IDE mockup/v0.4 mapping audit (#12316, #12317).
+- Roadmap, product operating plan, opam metadata, and spec baseline version references synced to `0.18.19`.
+
+### Deprecated
+
+- None.
+
 ## [0.18.18] - 2026-04-30
 
 Post-v0.18.17 merge train through the release boundary. No breaking API changes.

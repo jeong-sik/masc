@@ -70,6 +70,10 @@ module KeeperWatchdog : sig
   val poll_sec : float
   val noop_threshold : int
   val grace_period_sec : float
+  val termination_window_sec : float
+  val escalation_threshold : int
+  val batch_window_sec : float
+  val batch_threshold : int
 end
 
 (** {1 Keeper poll intervals} *)

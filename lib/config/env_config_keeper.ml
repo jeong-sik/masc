@@ -570,6 +570,26 @@ module KeeperWatchdog = struct
       up to 255 s plus one heartbeat cycle). *)
   let grace_period_sec =
     Float.max 0.0 (get_float ~default:360.0 "MASC_KEEPER_WATCHDOG_GRACE_SEC")
+
+  (** Sliding window for stale-termination escalation tracking.
+      Default: 21600 (6 hours). *)
+  let termination_window_sec =
+    Float.max 3600.0 (get_float ~default:21600.0 "MASC_KEEPER_TERMINATION_WINDOW_SEC")
+
+  (** Number of stale terminations within [termination_window_sec] before
+      escalating to [Stale_termination_storm]. Default: 5. *)
+  let escalation_threshold =
+    max 1 (get_int ~default:5 "MASC_KEEPER_ESCALATION_THRESHOLD")
+
+  (** Fleet batch-termination detection window in seconds.
+      Default: 30. *)
+  let batch_window_sec =
+    Float.max 1.0 (get_float ~default:30.0 "MASC_KEEPER_BATCH_WINDOW_SEC")
+
+  (** Number of distinct keepers terminating within [batch_window_sec] before
+      emitting a fleet batch alert. Default: 3. *)
+  let batch_threshold =
+    max 1 (get_int ~default:3 "MASC_KEEPER_BATCH_THRESHOLD")
 end
 
 (** {1 gRPC Heartbeat Reconnect} *)

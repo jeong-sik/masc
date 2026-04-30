@@ -4,6 +4,7 @@ type severity =
   | Ok
   | Warn
   | Bad
+  | Unknown_bad
 
 type t =
   { code : string

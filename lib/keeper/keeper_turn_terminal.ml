@@ -4,6 +4,7 @@ type severity =
   | Ok
   | Warn
   | Bad
+  | Unknown_bad
 
 type t =
   { code : string
@@ -17,24 +18,23 @@ let severity_to_string = function
   | Ok -> "ok"
   | Warn -> "warn"
   | Bad -> "bad"
+  | Unknown_bad -> "bad"
 
-let severity_of_code_opt = function
-  | "success" -> Some Ok
+let severity_of_code = function
+  | "success" -> Ok
   | "external_cancel"
   | "oas_timeout_budget"
   | "turn_wall_clock_timeout"
-  | "gh_repo_context_missing_worktree" -> Some Warn
+  | "gh_repo_context_missing_worktree" ->
+      Warn
   | "required_tool_use_no_tool_call"
   | "required_tool_use_unsatisfied"
   | "post_commit_ambiguous"
   | "provider_error"
-  | "unknown_error" -> Some Bad
-  | _ -> None
-
-let severity_of_code code =
-  match severity_of_code_opt code with
-  | Some severity -> severity
-  | None -> Bad
+  | "unknown_error" ->
+      Bad
+  | code when String.starts_with ~prefix:"api_error_" code -> Bad
+  | _unknown -> Unknown_bad
 
 let summary_of_code = function
   | "success" -> "turn completed"

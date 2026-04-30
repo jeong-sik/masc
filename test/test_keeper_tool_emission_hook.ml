@@ -14,12 +14,11 @@ module THooks = Agent_sdk.Hooks
 module TT = Agent_sdk.Types
 
 let dummy_schedule : THooks.tool_schedule =
-  {
-    planned_index = 0;
-    batch_index = 0;
-    batch_size = 1;
-    concurrency_class = "default";
-    batch_kind = "sequential";
+  { planned_index = 0
+  ; batch_index = 0
+  ; batch_size = 1
+  ; concurrency_class = "default"
+  ; batch_kind = "sequential"
   }
 
 let with_env_set name value f =

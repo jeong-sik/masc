@@ -13,6 +13,7 @@ type session_kind =
   | Observer
   | Coordinator
   | Presence
+[@@deriving tla]
 
 type broadcast_target =
   | All

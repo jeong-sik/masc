@@ -21,7 +21,8 @@ let cleanup_dir dir =
   in
   try rm dir with _ -> ()
 
-let make_keeper_meta ?agent_name ?current_task_id ?(goal_ids = []) name =
+let make_keeper_meta ?agent_name ?current_task_id ?(goal_ids = [])
+    ?tool_access name =
   let agent_name =
     Option.value agent_name
       ~default:(Masc_mcp.Keeper_types.keeper_agent_name name)
@@ -44,10 +45,34 @@ let make_keeper_meta ?agent_name ?current_task_id ?(goal_ids = []) name =
            ( "active_goal_ids",
              `List (List.map (fun goal_id -> `String goal_id) goal_ids) );
          ])
+    @
+    (match tool_access with
+     | Some tool_access ->
+         [
+           ( "tool_access",
+             Masc_mcp.Keeper_types.tool_access_to_json tool_access );
+         ]
+     | None -> [])
   in
   match Masc_test_deps.meta_of_json_fixture (`Assoc fields) with
   | Ok meta -> meta
   | Error err -> fail ("make_keeper_meta failed: " ^ err)
+
+let contract_requiring_tools required_tools : Types.task_contract =
+  {
+    strict = false;
+    completion_contract = [];
+    required_tools;
+    required_evidence = [];
+    inspect_gate_evidence = [];
+    verify_gate_evidence = [];
+    links =
+      {
+        operation_id = None;
+        session_id = None;
+        autoresearch_loop_id = None;
+      };
+  }
 
 let extract_json_from_text text =
   try
@@ -190,6 +215,53 @@ let test_runtime_mcp_keeper_log_context_uses_keeper_trace_and_current_turn () =
         (Some []) ctx.missing_required_tools;
       check (option string) "cascade profile" (Some meta.cascade_name)
         ctx.cascade_profile)
+
+let test_runtime_mcp_keeper_log_context_loads_current_task_contract () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = temp_dir () in
+  let keeper_name = "sangsu-task-contract" in
+  let config = Masc_mcp.Coord.default_config base_path in
+  ignore (Masc_mcp.Coord.init config ~agent_name:(Some keeper_name));
+  let contract =
+    contract_requiring_tools [ "keeper_bash"; "keeper_fs_edit" ]
+  in
+  ignore
+    (Masc_mcp.Coord.add_task
+       ~contract
+       config
+       ~title:"Needs execution tools"
+       ~priority:1
+       ~description:"exercise runtime MCP required tool logging");
+  let meta =
+    make_keeper_meta
+      ~current_task_id:"task-001"
+      ~tool_access:(Masc_mcp.Keeper_types.Custom [ "keeper_bash" ])
+      keeper_name
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc_mcp.Keeper_registry.unregister ~base_path keeper_name;
+      cleanup_dir base_path)
+    (fun () ->
+      ignore
+        (Masc_mcp.Keeper_registry.register_offline ~base_path keeper_name meta);
+      let entry =
+        match Masc_mcp.Keeper_registry.get ~base_path keeper_name with
+        | Some entry -> entry
+        | None -> fail "expected registered keeper entry"
+      in
+      let ctx =
+        Masc_mcp.Mcp_server_eio_call_tool.runtime_mcp_keeper_log_context_of_entry
+          entry
+          ~arguments:(`Assoc [])
+      in
+      check (option (list string)) "runtime mcp required tools"
+        (Some [ "keeper_bash"; "keeper_fs_edit" ])
+        ctx.required_tools;
+      check (option (list string)) "runtime mcp missing required tools"
+        (Some [ "keeper_fs_edit" ])
+        ctx.missing_required_tools)
 
 let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
   Eio_main.run @@ fun env ->
@@ -365,6 +437,8 @@ let () =
           test_case "regular tool keeps default timeout" `Quick test_regular_tool_uses_default_timeout;
           test_case "runtime MCP log context uses keeper trace/current turn" `Quick
             test_runtime_mcp_keeper_log_context_uses_keeper_trace_and_current_turn;
+          test_case "runtime MCP log context loads current task contract" `Quick
+            test_runtime_mcp_keeper_log_context_loads_current_task_contract;
           test_case "runtime MCP trace logs and broadcasts" `Quick
             test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts;
         ] );

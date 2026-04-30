@@ -160,6 +160,32 @@ let test_agent_draft_policy_script () =
        (("PR_IS_DRAFT", "false") :: ("PR_LIVE_STATE", "OPEN") :: base)
      <> 0)
 
+let test_pr_automation_draft_guard_contracts () =
+  check bool "pr automation live query includes PR state" true
+    (file_contains_pattern ".github/workflows/pr-automation.yml"
+       "state\n                    merged");
+  check bool "pr automation skips live merged PRs" true
+    (file_contains_pattern ".github/workflows/pr-automation.yml"
+       {|current.state === "MERGED"|});
+  check bool "pr automation skips live closed PRs" true
+    (file_contains_pattern ".github/workflows/pr-automation.yml"
+       {|current.state === "CLOSED"|});
+  check bool "pr automation skips when live merged flag is true" true
+    (file_contains_pattern ".github/workflows/pr-automation.yml"
+       "current.merged === true");
+  let live_state_skip =
+    file_pattern_position ".github/workflows/pr-automation.yml"
+      {|current.state === "MERGED"|}
+  in
+  let draft_restore =
+    file_pattern_position ".github/workflows/pr-automation.yml"
+      "convertPullRequestToDraft"
+  in
+  check bool "post-merge skip runs before draft restore mutation" true
+    (match live_state_skip, draft_restore with
+     | Some skip_pos, Some restore_pos -> skip_pos < restore_pos
+     | _ -> false)
+
 let test_health_and_ci_runner_diagnostics () =
   check bool "health snapshot records baseline source" true
     (file_contains_pattern "scripts/health_snapshot.sh" "\"baseline\": {");
@@ -1033,6 +1059,8 @@ let () =
            test_case "sync and asset contracts" `Quick test_ci_sync_and_asset_contracts;
            test_case "agent draft policy script" `Quick
              test_agent_draft_policy_script;
+           test_case "pr automation draft guard contracts" `Quick
+             test_pr_automation_draft_guard_contracts;
            test_case "contract harness contracts" `Quick
              test_contract_harness_contracts;
            test_case "health and ci diagnostics" `Quick test_health_and_ci_runner_diagnostics;

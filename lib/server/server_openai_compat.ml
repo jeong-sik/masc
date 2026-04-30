@@ -101,11 +101,15 @@ let route_keeper ~config ~sw ~clock ~keeper_name ~message : (string, string) res
 (** Route to direct MASC named-cascade execution via [Oas_worker.run_named]. *)
 let route_cascade ~message ~system_prompt ~max_tokens ~temperature
   : (string, string) result =
+  let cascade_name =
+    Keeper_cascade_profile.cascade_name_for_use
+      Keeper_cascade_profile.Openai_compat
+  in
   match
     Masc_oas_bridge.run_with_caller
       ~caller:Env_config_oas_bridge.Server_openai_compat (fun () ->
       Oas_worker.run_named
-        ~cascade_name:"default_models"
+        ~cascade_name
         ~goal:message
         ~system_prompt
         ~max_turns:1

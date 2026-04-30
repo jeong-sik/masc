@@ -229,6 +229,99 @@ let runtime_mcp_policy_with_headers =
     disable_builtin_tools = true;
   }
 
+let test_route_validation_rejects_unknown_route_key () =
+  with_temp_dir "cascade-routes-unknown-key" @@ fun dir ->
+  let config_dir = Filename.concat dir "config" in
+  init_config_root config_dir;
+  with_config_dir config_dir @@ fun () ->
+  let model = Printf.sprintf "custom:stable@%s/v1" dummy_base_url in
+  ignore
+    (write_cascade_json config_dir
+       (Printf.sprintf
+          {|{
+  "routes": {
+    "keeper_turn": "big_three",
+    "governance_jduge": "big_three"
+  },
+  "big_three_models": ["%s"]
+}|}
+          model));
+  match Cascade_catalog_runtime.inspect_active () with
+  | Error rejection ->
+      let detail =
+        Cascade_catalog_runtime.rejection_to_yojson rejection
+        |> Yojson.Safe.to_string
+      in
+      check bool "unknown route key is surfaced" true
+        (contains_substring detail "unknown cascade route key")
+  | Ok state ->
+      failf "expected route key rejection, got %s"
+        (Yojson.Safe.to_string (Cascade_catalog_runtime.state_to_yojson state))
+
+let test_route_validation_rejects_missing_route_target () =
+  with_temp_dir "cascade-routes-missing-target" @@ fun dir ->
+  let config_dir = Filename.concat dir "config" in
+  init_config_root config_dir;
+  with_config_dir config_dir @@ fun () ->
+  let model = Printf.sprintf "custom:stable@%s/v1" dummy_base_url in
+  ignore
+    (write_cascade_json config_dir
+       (Printf.sprintf
+          {|{
+  "routes": {
+    "keeper_turn": "big_three",
+    "governance_judge": "missing_profile"
+  },
+  "big_three_models": ["%s"]
+}|}
+          model));
+  match Cascade_catalog_runtime.inspect_active () with
+  | Error rejection ->
+      let detail =
+        Cascade_catalog_runtime.rejection_to_yojson rejection
+        |> Yojson.Safe.to_string
+      in
+      check bool "missing route target is surfaced" true
+        (contains_substring detail
+           "cascade route targets missing profile")
+  | Ok state ->
+      failf "expected route target rejection, got %s"
+        (Yojson.Safe.to_string (Cascade_catalog_runtime.state_to_yojson state))
+
+let test_keeper_turn_route_is_required_default_profile () =
+  with_temp_dir "cascade-routes-default-profile" @@ fun dir ->
+  let config_dir = Filename.concat dir "config" in
+  init_config_root config_dir;
+  with_config_dir config_dir @@ fun () ->
+  let model = Printf.sprintf "custom:stable@%s/v1" dummy_base_url in
+  ignore
+    (write_cascade_json config_dir
+       (Printf.sprintf
+          {|{
+  "routes": {
+    "keeper_turn": "custom_default"
+  },
+  "custom_default_models": ["%s"]
+}|}
+          model));
+  let snapshot =
+    match Cascade_catalog_runtime.inspect_active () with
+    | Ok (Cascade_catalog_runtime.Validated snapshot) -> snapshot
+    | Ok state ->
+        failf "expected fully validated custom default, got %s"
+          (Yojson.Safe.to_string (Cascade_catalog_runtime.state_to_yojson state))
+    | Error rejection ->
+        failf "unexpected route-default rejection: %s"
+          (Yojson.Safe.to_string
+             (Cascade_catalog_runtime.rejection_to_yojson rejection))
+  in
+  let snapshot_json = Cascade_catalog_runtime.snapshot_to_yojson snapshot in
+  check int "profile_count" 1 (json_int_field "profile_count" snapshot_json);
+  check string "blank name follows routes.keeper_turn"
+    "custom_default"
+    (require_ok
+       (Cascade_catalog_runtime.resolve_declared_name ~raw_name:"" ()))
+
 let test_valid_catalog_skips_live_probes_at_bootstrap () =
   with_temp_dir "cascade-catalog-runtime" @@ fun dir ->
   let config_dir = Filename.concat dir "config" in
@@ -817,6 +910,18 @@ let () =
             "valid catalog skips live probes at bootstrap"
             `Quick
             test_valid_catalog_skips_live_probes_at_bootstrap;
+          test_case
+            "route validation rejects unknown route key"
+            `Quick
+            test_route_validation_rejects_unknown_route_key;
+          test_case
+            "route validation rejects missing route target"
+            `Quick
+            test_route_validation_rejects_missing_route_target;
+          test_case
+            "routes.keeper_turn is the required default profile"
+            `Quick
+            test_keeper_turn_route_is_required_default_profile;
           test_case
             "invalid hot reload preserves last-known-good"
             `Quick

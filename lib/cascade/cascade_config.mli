@@ -192,7 +192,7 @@ val load_profile :
 (** How a cascade name was resolved. *)
 type cascade_source =
   | Named              (** Found as "{name}_models" in config *)
-  | Default_fallback   (** Name not found; used "default_models" *)
+  | Default_fallback   (** Name not found; used the [routes.keeper_turn] profile *)
   | Hardcoded_defaults (** Neither found; used hardcoded [defaults] *)
   | Load_failed of string
     (** Config file load failed (parse / IO / missing).  Returned in
@@ -204,7 +204,7 @@ type cascade_source =
 
     Resolution order:
     1. Named profile "{name}_models" from [config_path]
-    2. "default_models" profile from [config_path] (fallback)
+    2. [routes.keeper_turn] profile from [config_path] (fallback)
     3. Hardcoded [defaults]
 
     When [config_path] is [None], returns [defaults] directly. *)

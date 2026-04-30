@@ -85,9 +85,13 @@ let verify (req : verification_request) : (verdict, string) result =
         Log.Verifier.warn "Structured verdict parse failed: %s" msg;
         (false, sprintf "Invalid verdict format: %s" msg)
     in
+    let cascade_name =
+      Keeper_cascade_profile.cascade_name_for_use
+        Keeper_cascade_profile.Verifier
+    in
     match
       Oas_worker_named.run_named_with_masc_tools
-        ~cascade_name:"verifier"
+        ~cascade_name
         ~goal:prompt
         ~masc_tools:[report_verdict_schema]
         ~dispatch

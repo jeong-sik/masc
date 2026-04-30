@@ -104,23 +104,104 @@ let model_names_for_profile json profile_name =
        | `String model -> model
        | value -> value |> member "model" |> to_string)
 
-let test_repo_seed_excludes_claude_from_automatic_profiles () =
+let test_repo_seed_uses_two_profiles_plus_routes () =
   let rendered = render_or_fail (repo_toml_path ()) |> Yojson.Safe.from_string in
   let expect_profile_models profile_name expected =
     check (list string) (profile_name ^ " models")
       expected
       (model_names_for_profile rendered profile_name)
   in
-  expect_profile_models "default"
-    [ "codex_cli:auto"; "gemini_cli:auto"; "codex_cli:gpt-5.3-codex-spark" ];
   expect_profile_models "big_three"
-    [ "codex_cli:auto"; "gemini_cli:auto"; "codex_cli:gpt-5.3-codex-spark" ];
-  expect_profile_models "governance_judge" [ "gemini_cli:auto"; "codex_cli:auto" ];
-  expect_profile_models "operator_judge" [ "gemini_cli:auto"; "codex_cli:auto" ];
-  check bool "governance_judge is system-only" false
-    (rendered |> member "governance_judge_keeper_assignable" |> to_bool);
-  check bool "operator_judge is system-only" false
-    (rendered |> member "operator_judge_keeper_assignable" |> to_bool)
+    [
+      "codex_cli:gpt-5.3-codex-spark";
+      "gemini_cli:auto";
+      "kimi_cli:kimi-for-coding";
+      "glm-coding:auto";
+      "claude_code:auto";
+    ];
+  expect_profile_models "tool_rerank"
+    [
+      "codex_cli:gpt-5.3-codex-spark";
+      "gemini_cli:auto";
+      "kimi_cli:kimi-for-coding";
+      "glm-coding:auto";
+      "claude_code:auto";
+    ];
+  check bool "default profile removed" true
+    (match rendered |> member "default_models" with `Null -> true | _ -> false);
+  check bool "governance profile removed" true
+    (match rendered |> member "governance_judge_models" with `Null -> true | _ -> false);
+  check bool "operator profile removed" true
+    (match rendered |> member "operator_judge_models" with `Null -> true | _ -> false);
+  let routes = rendered |> member "routes" in
+  let route_keys =
+    match routes with
+    | `Assoc fields -> fields |> List.map fst |> List.sort String.compare
+    | _ -> []
+  in
+  check (list string) "repo seed routes cover known logical uses"
+    (Masc_mcp.Cascade_routes.known_route_keys |> List.sort String.compare)
+    route_keys;
+  check string "governance route" "big_three"
+    (routes |> member "governance_judge" |> to_string);
+  check string "operator route" "big_three"
+    (routes |> member "operator_judge" |> to_string);
+  check string "rerank route" "tool_rerank"
+    (routes |> member "llm_rerank" |> to_string);
+  check bool "tool_rerank is system-only" false
+    (rendered |> member "tool_rerank_keeper_assignable" |> to_bool)
+
+let test_routes_table_is_parsed () =
+  match
+    Masc_mcp.Cascade_toml_materializer.render_toml_string_to_json_string
+      {|
+[routes]
+governance_judge = "big_three"
+llm_rerank = "tool_rerank"
+
+[big_three]
+models = ["codex_cli:auto"]
+
+[tool_rerank]
+models = ["gemini_cli:auto"]
+keeper_assignable = false
+|}
+  with
+  | Error msg -> failf "expected routes table to parse, got: %s" msg
+  | Ok json_str ->
+      let json = Yojson.Safe.from_string json_str in
+      let routes = json |> member "routes" in
+      check string "governance_judge route rendered" "big_three"
+        (routes |> member "governance_judge" |> to_string);
+      check string "llm_rerank route rendered" "tool_rerank"
+        (routes |> member "llm_rerank" |> to_string);
+      check (list string) "routes is not a profile section fallback"
+        [ "big_three"; "tool_rerank" ]
+        (let dir = Filename.temp_file "cascade-routes-section-" "" in
+         Sys.remove dir;
+         Unix.mkdir dir 0o755;
+         let toml_path = Filename.concat dir "cascade.toml" in
+         let json_path = Filename.concat dir "cascade.json" in
+         write_file toml_path
+           {|
+[routes]
+governance_judge = "big_three"
+
+[big_three]
+models = ["codex_cli:auto"]
+
+[tool_rerank]
+models = ["gemini_cli:auto"]
+|};
+         Fun.protect
+           ~finally:(fun () -> rm_rf dir)
+           (fun () ->
+             match
+               Masc_mcp.Cascade_toml_materializer.toml_section_names_result
+                 ~config_path:json_path
+             with
+             | Ok names -> names
+             | Error msg -> failf "section fallback failed: %s" msg))
 
 let test_repo_toml_renders_to_committed_json () =
   let rendered = render_or_fail (repo_toml_path ()) in
@@ -493,8 +574,8 @@ let () =
         [
           test_case "repo toml renders to committed json" `Quick
             test_repo_toml_renders_to_committed_json;
-          test_case "repo seed excludes claude from automatic profiles" `Quick
-            test_repo_seed_excludes_claude_from_automatic_profiles;
+          test_case "repo seed uses two profiles plus routes" `Quick
+            test_repo_seed_uses_two_profiles_plus_routes;
         ] );
       ( "validation",
         [
@@ -510,6 +591,8 @@ let () =
             test_keep_alive_duration_string_is_parsed;
           test_case "num_ctx field is parsed" `Quick
             test_num_ctx_field_is_parsed;
+          test_case "routes table is parsed" `Quick
+            test_routes_table_is_parsed;
           test_case "keep_alive absent is backward compatible" `Quick
             test_keep_alive_absent_is_backward_compatible;
           test_case "loader catalog exposes fallback_cascade" `Quick

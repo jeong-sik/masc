@@ -3,10 +3,8 @@
 (** SSOT variant for the 1+1 cascade model.
 
     One keeper-assignable bootstrap profile ({!Big_three}) and one system-only
-    profile ({!Tool_rerank}).  Phase-routing names ("local_only",
-    "local_recovery") are NOT variants — they pass through
-    [canonicalize_with_catalog] as catalog names, so keeper phase-routing
-    code that references them by string continues to work without changes.
+    profile ({!Tool_rerank}). Historical phase-routing, judge, evaluator, and
+    local names are logical route keys, not live catalog profiles.
 
     Adding a new profile is a compile-time event: add a variant here, then
     exhaustive [match] sites flag every consumer that needs to handle it.
@@ -30,6 +28,29 @@ let known_cascades = List.map to_string all
 let default = Big_three
 let default_name = to_string default
 
+type logical_use = Cascade_routes.logical_use =
+  | Keeper_turn
+  | Phase_recovery
+  | Phase_buffer
+  | Tool_required
+  | Governance_judge
+  | Operator_judge
+  | Cross_verifier
+  | Verifier
+  | Autoresearch
+  | Adversarial_reviewer
+  | Auto_responder
+  | Routing
+  | Openai_compat
+  | Persona_generation
+  | Provider_benchmark
+  | Tool_rerank_use
+
+let logical_use_key = Cascade_routes.logical_use_key
+let logical_use_of_string_opt = Cascade_routes.logical_use_of_string_opt
+let configured_route_targets = Cascade_routes.configured_route_targets
+let cascade_name_for_use = Cascade_routes.cascade_name_for_use
+
 type runtime_name = Runtime_name of string
 
 let runtime_name_to_string (Runtime_name value) = value
@@ -39,23 +60,6 @@ let of_string_opt (raw : string) : t option =
   | "" -> Some default
   | "big_three" -> Some Big_three
   | "tool_rerank" -> Some Tool_rerank
-  (* Legacy aliases → Big_three *)
-  | "default"
-  | "oas-keeper_unified"
-  | "coding_first"
-  | "oas-coding_first"
-  | "keeper_turn" | "keeper_reply"
-  | "sangsu" | "local_mlx_vlm_qwen36"
-  | "nick0cave" | "capacity_queue_trio" | "vendor_mix_balanced"
-  | "cost_tier_ladder" | "oauth_cli_rotate" | "quality_sticky_glm51"
-  | "underdog" | "local"
-    -> Some Big_three
-  (* Catalog-routed names: NOT variants.  Returning None lets
-     [canonicalize_with_catalog] preserve them as catalog names so
-     keeper phase-routing and tool-routing code continues to resolve
-     cascade.json keys correctly. *)
-  | "keeper_unified" | "tool_use_strict" | "resilient_breaker"
-  | "local_only" | "local_recovery" -> None
   | _ -> None
 
 let canonical (raw : string) : t =
@@ -247,23 +251,48 @@ let fallback_cascade_for ?config_path name =
 
 let canonicalize_with_catalog ~catalog raw =
   match String.trim raw with
-  | "" -> default_name
+  | "" -> Cascade_routes.fallback_name_for_catalog Keeper_turn ~catalog
   | trimmed -> (
-      match of_string_opt trimmed with
-      | Some profile -> to_string profile
+      if List.mem trimmed catalog then trimmed
+      else match of_string_opt trimmed with
+      | Some profile ->
+          let name = to_string profile in
+          if catalog = [] || List.mem name catalog then name
+          else Cascade_routes.fallback_name_for_catalog Keeper_turn ~catalog
       | None ->
-          if List.mem trimmed catalog then trimmed else default_name)
+          match logical_use_of_string_opt trimmed with
+          | Some use -> Cascade_routes.fallback_name_for_catalog use ~catalog
+          | None -> Cascade_routes.fallback_name_for_catalog Keeper_turn ~catalog)
 
 let normalize_declared_name (raw : string) : string =
   let trimmed = String.trim raw in
-  match of_string_opt trimmed with
-  | Some t -> to_string t
-  | None when trimmed = "" -> default_name
-  | None -> trimmed
+  if String.equal trimmed "" then
+    cascade_name_for_use Keeper_turn
+  else
+    match of_string_opt trimmed with
+    | Some t -> to_string t
+    | None -> (
+        match logical_use_of_string_opt trimmed with
+        | Some use -> cascade_name_for_use use
+        | None -> trimmed)
 
 let resolve_live_with_catalog ~catalog raw =
-  let normalized = normalize_declared_name raw in
-  if List.mem normalized catalog then normalized else default_name
+  let trimmed = String.trim raw in
+  let normalized =
+    if List.mem trimmed catalog then trimmed
+    else
+      match of_string_opt trimmed with
+      | Some t ->
+          let name = to_string t in
+          if catalog = [] || List.mem name catalog then name
+          else Cascade_routes.fallback_name_for_catalog Keeper_turn ~catalog
+      | None -> (
+          match logical_use_of_string_opt trimmed with
+          | Some use -> Cascade_routes.fallback_name_for_catalog use ~catalog
+          | None -> trimmed)
+  in
+  if List.mem normalized catalog then normalized
+  else Cascade_routes.fallback_name_for_catalog Keeper_turn ~catalog
 
 let resolve_live ?config_path raw =
   resolve_live_with_catalog ~catalog:(catalog_names ?config_path ()) raw

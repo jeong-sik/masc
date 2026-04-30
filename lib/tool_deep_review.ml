@@ -103,11 +103,15 @@ let handle_deep_review (config : Coord.config) args : bool * string =
           ("error", `String msg)
         ]))
     | Ok prompt ->
+        let cascade_name =
+          Keeper_cascade_profile.cascade_name_for_use
+            Keeper_cascade_profile.Adversarial_reviewer
+        in
         match
           Masc_oas_bridge.run_with_caller
             ~caller:Env_config_oas_bridge.Tool_deep_review (fun () ->
             Oas_worker.run_named
-              ~cascade_name:"adversarial_reviewer"
+              ~cascade_name
               ~goal:prompt
               ~max_turns:1
               ~temperature:0.5

@@ -161,7 +161,7 @@ module Model_defaults : sig
   val default_provider_opt : unit -> string option
   val default_model_opt : unit -> string option
   val routing_cascade : unit -> string
-  (** [MASC_ROUTING_CASCADE] (default ["routing_judge"]). *)
+  (** [MASC_ROUTING_CASCADE] override, otherwise logical key ["routing"]. *)
 
   val goal_models_opt : unit -> string option
   val goal_dispatch_runtime : unit -> string

@@ -1,56 +1,36 @@
 {
-  "_comment": "Checked-in seed for cascade authoring. Keep repo defaults boring: bootstrap keeper profile big_three, local keeper profile ollama_only, system-only fallback/judge/phase-routing profiles (default, governance_judge, operator_judge, local_only, local_recovery, tool_rerank), and move personal/live experiments to $MASC_BASE_PATH/.masc/config/cascade.toml.",
-  "_comment_default": "System-only fallback profile for unknown/missing cascade names. Mirrors big_three without Claude CLI so automatic recovery does not pull Claude by default.",
-  "default_models": [
-    { "model": "codex_cli:auto", "weight": 1 },
-    { "model": "gemini_cli:auto", "weight": 1 },
-    { "model": "codex_cli:gpt-5.3-codex-spark", "weight": 1 }
-  ],
-  "default_temperature": 0.2,
-  "default_max_tokens": 16384,
-  "default_keeper_assignable": false,
-  "_comment_big_three": "Canonical keeper bootstrap profile exposed by the checked-in seed. Automatic keepers stay off Claude CLI unless an operator opts in via live config.",
+  "_comment": "Checked-in seed for cascade authoring. Repo defaults expose exactly two profiles: big_three for keeper/workflow calls and tool_rerank for short rerank calls. Logical usage names are configured under [routes] instead of being profile names.",
+  "routes": {
+    "keeper_turn": "big_three",
+    "phase_recovery": "big_three",
+    "phase_buffer": "big_three",
+    "tool_required": "big_three",
+    "governance_judge": "big_three",
+    "operator_judge": "big_three",
+    "cross_verifier": "big_three",
+    "verifier": "big_three",
+    "autoresearch": "big_three",
+    "adversarial_reviewer": "big_three",
+    "auto_responder": "big_three",
+    "routing": "big_three",
+    "openai_compat": "big_three",
+    "persona_generation": "big_three",
+    "provider_benchmark": "big_three",
+    "llm_rerank": "tool_rerank"
+  },
+  "_comment_big_three": "Canonical keeper/workflow profile. Keep operator-chosen providers here; code must route logical usages through [routes] instead of hardcoding extra profile names.",
   "big_three_models": [
-    { "model": "codex_cli:auto", "weight": 1 },
-    { "model": "gemini_cli:auto", "weight": 1 },
-    { "model": "codex_cli:gpt-5.3-codex-spark", "weight": 1 }
+    "codex_cli:gpt-5.3-codex-spark", "gemini_cli:auto",
+    "kimi_cli:kimi-for-coding", "glm-coding:auto", "claude_code:auto"
   ],
   "big_three_temperature": 0.2,
   "big_three_max_tokens": 16384,
-  "_comment_governance_judge": "System-only dashboard governance judge profile. Explicitly defined so background judge loops do not inherit fallback providers such as Claude CLI. Gemini listed first because [codex_cli:auto] internally rotates 5 models (30s timeout each = 150s wasted wall-clock when codex auth is broken); Gemini-first attempts the cheap success path first while codex remains a fallback that auto-rejoins on recovery (#10554 disabled codex_cli for 4 seed cascades; this profile keeps codex as fallback rather than removing it).",
-  "governance_judge_models": [
-    { "model": "gemini_cli:auto", "weight": 1 },
-    { "model": "codex_cli:auto", "weight": 1 }
+  "big_three_keeper_assignable": true,
+  "_comment_tool_rerank": "System-only short-output profile for rerank/scoring calls.",
+  "tool_rerank_models": [
+    "codex_cli:gpt-5.3-codex-spark", "gemini_cli:auto",
+    "kimi_cli:kimi-for-coding", "glm-coding:auto", "claude_code:auto"
   ],
-  "governance_judge_temperature": 0.2,
-  "governance_judge_max_tokens": 16384,
-  "governance_judge_keeper_assignable": false,
-  "_comment_operator_judge": "System-only dashboard operator judge profile. Mirrors governance_judge so background control loops stay off Claude CLI by default. Gemini-first ordering: see governance_judge for rationale.",
-  "operator_judge_models": [
-    { "model": "gemini_cli:auto", "weight": 1 },
-    { "model": "codex_cli:auto", "weight": 1 }
-  ],
-  "operator_judge_temperature": 0.2,
-  "operator_judge_max_tokens": 16384,
-  "operator_judge_keeper_assignable": false,
-  "_comment_local_only": "System-only local phase-routing profile for compacting/handoff paths.",
-  "local_only_models": [ "ollama:auto" ],
-  "local_only_temperature": 0.2,
-  "local_only_max_tokens": 32768,
-  "local_only_keeper_assignable": false,
-  "_comment_local_recovery": "System-only local recovery profile used after cloud/provider failures.",
-  "local_recovery_models": [ "ollama:auto" ],
-  "local_recovery_temperature": 0.1,
-  "local_recovery_max_tokens": 8192,
-  "local_recovery_keeper_assignable": false,
-  "_comment_ollama_only": "Keeper-assignable ollama-only profile for local-only agents. qwen3.6 27B supports 256k context locally; default to a 128k Ollama context while keeping output capped.",
-  "ollama_only_models": [ "ollama:auto" ],
-  "ollama_only_temperature": 0.7,
-  "ollama_only_max_tokens": 8192,
-  "ollama_only_keep_alive": "-1",
-  "ollama_only_num_ctx": 131072,
-  "ollama_only_keeper_assignable": true,
-  "_comment_tool_rerank": "inference-only override: tool_rerank has no _models of its own; callers reuse the default cascade's models and apply the short max_tokens here.",
   "tool_rerank_temperature": 0.0,
   "tool_rerank_max_tokens": 200,
   "tool_rerank_keeper_assignable": false

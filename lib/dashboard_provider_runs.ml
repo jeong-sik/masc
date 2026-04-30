@@ -419,6 +419,11 @@ let execute_single_agent_run ~sw ~net ~run_id ~provider ~model ~prompt =
                "Provider '%s' is not runnable in dashboard single-agent mode"
                provider)
         else (
+          let inference_cascade_name =
+            Keeper_cascade_profile.Runtime_name
+              (Keeper_cascade_profile.cascade_name_for_use
+                 Keeper_cascade_profile.Provider_benchmark)
+          in
           match
             Masc_oas_bridge.run_with_caller
               ~caller:Env_config_oas_bridge.Dashboard_provider_runs (fun () ->
@@ -426,12 +431,10 @@ let execute_single_agent_run ~sw ~net ~run_id ~provider ~model ~prompt =
                 ~system_prompt:(run_system_prompt provider)
                 ~max_turns:4
                 ~max_tokens:(Cascade_inference.resolve_max_tokens
-                  ~cascade_name:
-                    (Keeper_cascade_profile.Runtime_name "provider_benchmark")
+                  ~cascade_name:inference_cascade_name
                   ~fallback:(fun () -> 2048))
                 ~temperature:(Cascade_inference.resolve_temperature
-                  ~cascade_name:
-                    (Keeper_cascade_profile.Runtime_name "provider_benchmark")
+                  ~cascade_name:inference_cascade_name
                   ~fallback:(fun () -> 0.2))
                 ~sw ?net
                 ()

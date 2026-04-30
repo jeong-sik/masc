@@ -664,9 +664,9 @@ module Kimi_cli_transport_local = struct
     }
 
   (* Kimi CLI imports [setproctitle] on macOS before processing the
-     request.  Long UTF-8 prompts in argv can make setproctitle's
-     import-time [getproctitle()] decode fail before Kimi reads the
-     prompt, so keep argv small and stream keeper prompts via stdin. *)
+     request. UTF-8 prompts in argv can make setproctitle's import-time
+     [getproctitle()] decode fail before Kimi reads the prompt, so keep
+     non-ASCII or large prompts out of argv and stream them via stdin. *)
   let default_prompt_argv_threshold = 16 * 1024
 
   let prompt_argv_threshold () =
@@ -680,8 +680,18 @@ module Kimi_cli_transport_local = struct
   let prompt_exceeds_argv_budget prompt =
     String.length prompt >= prompt_argv_threshold ()
 
+  let prompt_contains_non_ascii prompt =
+    let rec loop idx =
+      idx < String.length prompt
+      && (Char.code prompt.[idx] > 0x7f || loop (idx + 1))
+    in
+    loop 0
+
+  let prompt_needs_stdin prompt =
+    prompt_exceeds_argv_budget prompt || prompt_contains_non_ascii prompt
+
   let stdin_for_prompt prompt =
-    if prompt_exceeds_argv_budget prompt then Some prompt else None
+    if prompt_needs_stdin prompt then Some prompt else None
 
   let cli_model_override ~(config : config)
       ~(req_config : Llm_provider.Provider_config.t) =
@@ -693,7 +703,7 @@ module Kimi_cli_transport_local = struct
       ~(req_config : Llm_provider.Provider_config.t)
       ~(mcp_config_json : string list)
       ~prompt =
-    let prompt_via_stdin = prompt_exceeds_argv_budget prompt in
+    let prompt_via_stdin = prompt_needs_stdin prompt in
     let args =
       ref [ config.kimi_path; "--print"; "--output-format"; "stream-json" ]
     in

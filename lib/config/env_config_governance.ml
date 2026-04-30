@@ -182,11 +182,13 @@ module Model_defaults = struct
   let default_model_opt () =
     Sys.getenv_opt "MASC_DEFAULT_MODEL" |> trim_opt
 
-  (** Routing cascade for team session routing. Default: "routing_judge". *)
+  (** Routing cascade for team session routing. Defaults to the logical
+      [routes.routing] key; runtime callers normalize it through the cascade
+      route table. *)
   let routing_cascade () =
     match Sys.getenv_opt "MASC_ROUTING_CASCADE" |> trim_opt with
     | Some s -> s
-    | None -> "routing_judge"
+    | None -> "routing"
 
   (** Goal models (comma-separated). *)
   let goal_models_opt () =

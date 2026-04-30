@@ -110,12 +110,16 @@ let parse_model_code_response response =
       Result.error "MODEL response must be a JSON object"
 
 let has_background_capacity () =
+  let cascade_name =
+    Keeper_cascade_profile.cascade_name_for_use
+      Keeper_cascade_profile.Autoresearch
+  in
   match Eio_context.get_switch_opt (), Eio_context.get_net_opt () with
   | Some sw, Some net -> (
       try
         let capacity =
           Cascade_config.local_capacity_for_selections ~sw ~net
-            [ "autoresearch" ]
+            [ cascade_name ]
         in
         not
           (capacity.all_discovered && capacity.endpoints_found > 0
@@ -127,7 +131,7 @@ let has_background_capacity () =
         false)
   | _ -> false
 
-(** Generate code change via Cascade "autoresearch" profile.
+(** Generate code change via the profile selected by [routes.autoresearch].
     Returns Ok (hypothesis, new_code) or Error reason. *)
 let generate_code_change ~goal ~baseline ~lower_is_better ~history ~insights
     ~target_file ~file_content =
@@ -137,13 +141,15 @@ let generate_code_change ~goal ~baseline ~lower_is_better ~history ~insights
   end else
   let prompt = build_code_change_prompt ~goal ~baseline ~lower_is_better ~history ~insights
     ~file_content ~target_file in
-  let inference_cascade_name =
-    Keeper_cascade_profile.Runtime_name "autoresearch"
+  let cascade_name =
+    Keeper_cascade_profile.cascade_name_for_use
+      Keeper_cascade_profile.Autoresearch
   in
+  let inference_cascade_name = Keeper_cascade_profile.Runtime_name cascade_name in
   match
     Masc_oas_bridge.run_with_caller
       ~caller:Env_config_oas_bridge.Autoresearch_codegen (fun () ->
-      Oas_worker.run_named ~cascade_name:"autoresearch"
+      Oas_worker.run_named ~cascade_name
         ~goal:prompt ~max_turns:1
         ~temperature:(Cascade_inference.resolve_temperature
           ~cascade_name:inference_cascade_name ~fallback:(fun () -> 0.7))

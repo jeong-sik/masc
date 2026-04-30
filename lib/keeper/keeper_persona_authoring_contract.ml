@@ -20,7 +20,9 @@ type archetype_axis =
   }
 
 let default_generation_language = "ko"
-let default_generation_cascade_name = "operator_judge"
+let default_generation_cascade_name =
+  Keeper_cascade_profile.cascade_name_for_use
+    Keeper_cascade_profile.Persona_generation
 let default_temperature = 0.7
 let default_max_tokens = 2500
 let default_proactive_enabled = false

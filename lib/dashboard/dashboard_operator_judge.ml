@@ -194,6 +194,10 @@ let compute_judgments
     ~(dispatch : name:string -> args:Yojson.Safe.t -> bool * string)
     ~facts_json =
   let prompt = prompt_for_facts facts_json in
+  let cascade_name =
+    Keeper_cascade_profile.cascade_name_for_use
+      Keeper_cascade_profile.Operator_judge
+  in
   match
     (* #9629: caller migrated from legacy run_safe (which fell back to
        the global 30s inference timeout) to run_with_caller so this
@@ -201,7 +205,7 @@ let compute_judgments
        per-caller Prometheus counter. *)
     Masc_oas_bridge.run_with_caller
       ~caller:Env_config_oas_bridge.Operator_judge (fun () ->
-      Oas_worker.run_named_with_masc_tools ~cascade_name:"operator_judge"
+      Oas_worker.run_named_with_masc_tools ~cascade_name
         ~goal:prompt ~masc_tools ~dispatch ~max_turns:3
         ~approval:Approval_callbacks.auto_approve
         ()
@@ -230,10 +234,14 @@ let compute_judgments
           Error (Printf.sprintf "Operator judge parse error: %s" (Printexc.to_string exn)))
 
 let should_backoff ~sw ~net =
+  let cascade_name =
+    Keeper_cascade_profile.cascade_name_for_use
+      Keeper_cascade_profile.Operator_judge
+  in
   try
     let capacity =
       Cascade_config.local_capacity_for_selections ~sw ~net
-        [ "operator_judge" ]
+        [ cascade_name ]
     in
     capacity.all_discovered && capacity.endpoints_found > 0
     && capacity.process_available <= 0

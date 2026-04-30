@@ -2,6 +2,7 @@ module Lib = Masc_mcp
 open Alcotest
 
 let assoc key attrs = List.assoc_opt key attrs
+let cascade_name raw = Lib.Keeper_cascade_profile.Runtime_name raw
 
 let test_keeper_turn_span_name () =
   check
@@ -16,7 +17,7 @@ let test_keeper_turn_attrs_dual_emit () =
     Lib.Otel_genai.keeper_turn_attrs
       ~keeper_name:"ani1999"
       ~agent_name:"ani1999"
-      ~cascade_name:"research"
+      ~cascade_name:(cascade_name "research")
       ~trace_id:"trace-123"
       ~generation:7
       ~max_context:120000
@@ -87,7 +88,7 @@ let test_keeper_turn_attrs_omit_missing_task () =
     Lib.Otel_genai.keeper_turn_attrs
       ~keeper_name:"ani1999"
       ~agent_name:"ani1999"
-      ~cascade_name:"research"
+      ~cascade_name:(cascade_name "research")
       ~trace_id:"trace-123"
       ~generation:7
       ~max_context:120000

@@ -7,7 +7,7 @@ val keeper_turn_span_name : keeper_name:string -> string
 val keeper_turn_attrs
   :  keeper_name:string
   -> agent_name:string
-  -> cascade_name:string
+  -> cascade_name:Keeper_cascade_profile.runtime_name
   -> trace_id:string
   -> generation:int
   -> max_context:int
@@ -21,7 +21,7 @@ val keeper_turn_attrs
 val with_keeper_turn_span
   :  keeper_name:string
   -> agent_name:string
-  -> cascade_name:string
+  -> cascade_name:Keeper_cascade_profile.runtime_name
   -> trace_id:string
   -> generation:int
   -> max_context:int

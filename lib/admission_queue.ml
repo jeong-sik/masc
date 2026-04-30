@@ -137,7 +137,6 @@ let check_host_resources ~keeper_name =
     Ok ()
 
 let with_permit ?wait_timeout_sec:_ ~priority:_ ~keeper_name ~cascade_name f =
-  let cascade_name = Keeper_cascade_profile.runtime_name_to_string cascade_name in
   match check_host_resources ~keeper_name with
   | Error _ as e -> e
   | Ok () ->
@@ -157,7 +156,6 @@ let with_permit ?wait_timeout_sec:_ ~priority:_ ~keeper_name ~cascade_name f =
         raise exn
 
 let try_with_permit ~priority:_ ~keeper_name ~cascade_name f =
-  let cascade_name = Keeper_cascade_profile.runtime_name_to_string cascade_name in
   match check_host_resources ~keeper_name with
   | Error _ -> None
   | Ok () ->

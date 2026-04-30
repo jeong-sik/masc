@@ -109,6 +109,37 @@ NoContextOverflow == \A k \in Keepers: keeper_context[k] <= MaxContext
 \* 2. A normal Agent can only have one task at a time
 SingleTaskPerAgent == \A a \in Agents: agent_tasks[a] = "None" \/ agent_tasks[a] \in Tasks
 
+\* 3. A task is claimed by at most one agent at any moment.
+\*    SingleTaskPerAgent constrains the per-agent side; this
+\*    constrains the per-task side. Required as the prereq for the
+\*    DoubleClaim Bug Model (RFC-Q2-3).
+AtMostOneAgentPerTask ==
+    \A t \in Tasks :
+        Cardinality({a \in Agents : agent_tasks[a] = t}) <= 1
+
+\* ── Bug model (RFC-Q2-3) ────────────────────────────────────────
+\*
+\* Models the bug class where two agents end up claiming the same
+\* task — e.g. a race in agent_tasks update without a CAS guard,
+\* or a refactor that loses the [tasks_status[t] = "Pending"]
+\* check. The clean AgentClaimsTask enforces the precondition;
+\* the buggy variant drops it.
+
+DoubleClaim(a, t) ==
+    /\ a \in room_agents
+    /\ agent_tasks[a] = "None"
+    \* deliberately omitted: tasks_status[t] = "Pending"
+    /\ \E other \in Agents : agent_tasks[other] = t  \* force overlap
+    /\ agent_tasks' = [agent_tasks EXCEPT ![a] = t]
+    /\ UNCHANGED <<room_agents, tasks_status, keeper_context,
+                   keeper_gen, board_posts>>
+
+NextBuggy ==
+    \/ Next
+    \/ \E a \in Agents, t \in Tasks : DoubleClaim(a, t)
+
+SpecBuggy == Init /\ [][NextBuggy]_vars /\ Fairness
+
 \* ── Liveness Properties ───────────────────────────────────
 
 \* 3. A Task is eventually completed by an Agent

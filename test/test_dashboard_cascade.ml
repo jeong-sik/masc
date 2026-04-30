@@ -639,9 +639,10 @@ let test_declared_provider_schemes_handles_malformed_config () =
 (* ── SLO (LT-11) ─────────────────────────────────────── *)
 
 module ST = Masc_mcp.Cascade_strategy_trace
+module Kcp = Masc_mcp.Keeper_cascade_profile
 
 let mk_trace ?(ts = 0.0) ?(strategy = "failover") ?trace_id ~kind () =
-  { ST.ts; cascade_name = "c1"; strategy; cycle = 0;
+  { ST.ts; cascade_name = Kcp.Runtime_name "c1"; strategy; cycle = 0;
     candidates_in = 1; candidates_out = 1; backoff_ms = 0; kind; trace_id }
 
 let assert_field name fields =

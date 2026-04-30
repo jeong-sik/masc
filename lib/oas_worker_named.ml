@@ -843,7 +843,7 @@ let run_named
   let record_trace ~cycle ~candidates_out ~backoff_ms ~kind =
     Cascade_strategy_trace.record {
       ts = Unix.gettimeofday ();
-      cascade_name;
+      cascade_name = Keeper_cascade_profile.Runtime_name cascade_name;
       strategy = strategy_name;
       cycle;
       candidates_in = List.length candidate_cfgs;

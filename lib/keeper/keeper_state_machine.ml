@@ -16,6 +16,7 @@ type phase =
   | Crashed
   | Restarting
   | Dead
+  | Zombie
 
 let phase_to_string = function
   | Offline -> "offline"
@@ -30,6 +31,7 @@ let phase_to_string = function
   | Crashed -> "crashed"
   | Restarting -> "restarting"
   | Dead -> "dead"
+  | Zombie -> "zombie"
 
 let phase_of_string = function
   | "offline" -> Some Offline
@@ -44,11 +46,12 @@ let phase_of_string = function
   | "crashed" -> Some Crashed
   | "restarting" -> Some Restarting
   | "dead" -> Some Dead
+  | "zombie" -> Some Zombie
   | _ -> None
 
 let all_phases =
   [ Offline; Running; Failing; Overflowed; Compacting; HandingOff;
-    Draining; Paused; Stopped; Crashed; Restarting; Dead ]
+    Draining; Paused; Stopped; Crashed; Restarting; Dead; Zombie ]
 
 (* ── Conditions ────────────────────────────────────────── *)
 
@@ -69,6 +72,7 @@ type conditions = {
   drain_complete : bool;
   context_overflow : bool;
   compact_retry_exhausted : bool;
+  terminal_failure_latched : bool;
 }
 
 let default_conditions = {
@@ -88,6 +92,7 @@ let default_conditions = {
   drain_complete = false;
   context_overflow = false;
   compact_retry_exhausted = false;
+  terminal_failure_latched = false;
 }
 
 (* ── Events ────────────────────────────────────────────── *)
@@ -129,6 +134,7 @@ type event =
   | Supervisor_restart_attempt of { attempt : int }
   | Restart_budget_exhausted
   | Guardrail_stop of { reason : string }
+  | Terminal_failure_detected of { reason : string }
   | Context_overflow_detected of {
       source : [`Prompt_rejected | `Oas_signal];
       token_count : int;
@@ -185,6 +191,8 @@ let event_to_string = function
   | Restart_budget_exhausted -> "restart_budget_exhausted"
   | Guardrail_stop r ->
     Printf.sprintf "guardrail_stop(%s)" r.reason
+  | Terminal_failure_detected r ->
+    Printf.sprintf "terminal_failure_detected(%s)" r.reason
   | Context_overflow_detected r ->
     let src = match r.source with
       | `Prompt_rejected -> "prompt_rejected"
@@ -220,6 +228,7 @@ type entry_action =
   | Schedule_restart of { delay_sec : float }
   | Publish_lifecycle of { event_name : string; detail : string }
   | Mark_dead_tombstone
+  | Mark_zombie_tombstone
   | Cleanup_and_unregister
 
 (* ── Transition Types ──────────────────────────────────── *)
@@ -252,6 +261,9 @@ let can_transition ~from_phase ~to_phase =
   (* Terminal states accept nothing *)
   | Stopped, _ -> false
   | Dead, _ -> false
+  | Zombie, _ -> false
+  (* Terminal failure can strike from any non-terminal phase *)
+  | _, Zombie -> true
   (* Offline -> Running | Stopped | Draining (stop while not yet started) *)
   | Offline, (Running | Stopped | Draining) -> true
   | Offline, _ -> false
@@ -304,7 +316,7 @@ let can_transition ~from_phase ~to_phase =
 let can_execute_turn = function
   | Running | Failing -> true
   | Offline | Overflowed | Compacting | HandingOff | Draining | Paused
-  | Stopped | Crashed | Restarting | Dead -> false
+  | Stopped | Crashed | Restarting | Dead | Zombie -> false
 
 (* ── derive_phase ──────────────────────────────────────── *)
 
@@ -396,38 +408,40 @@ let derive_phase (c : conditions) : phase =
      && not c.compaction_active && not c.handoff_active then Stopped
   (* 2. Pre-start registration. This is the only path into Offline. *)
   else if c.launch_pending && not c.fiber_alive then Offline
-  (* 3. Fiber lifecycle — Dead / Restarting / Crashed *)
+  (* 3. Terminal structural failure — Zombie (non-recoverable) *)
+  else if c.terminal_failure_latched then Zombie
+  (* 4. Fiber lifecycle — Dead / Restarting / Crashed *)
   else if not c.fiber_alive && not c.restart_budget_remaining then Dead
   else if not c.fiber_alive && c.restart_budget_remaining && c.backoff_elapsed then Restarting
   else if not c.fiber_alive && c.restart_budget_remaining then Crashed
-  (* 4. In-progress stop — still draining *)
+  (* 5. In-progress stop — still draining *)
   else if c.stop_requested then Draining
-  (* 5. Guardrail -> Failing *)
+  (* 6. Guardrail -> Failing *)
   else if c.guardrail_triggered then Failing
-  (* 6. Operator pause OR auto-compact retry budget exhausted.
+  (* 7. Operator pause OR auto-compact retry budget exhausted.
      When [compact_retry_exhausted] is latched together with an ongoing
      [context_overflow], the keeper MUST land on [Paused] so that an
      operator has to intervene; otherwise [Overflowed → Compacting]
      would loop indefinitely. *)
   else if c.operator_paused
        || (c.context_overflow && c.compact_retry_exhausted) then Paused
-  (* 7. Buffer states: in-progress operations *)
+  (* 8. Buffer states: in-progress operations *)
   else if c.handoff_active then HandingOff
   else if c.compaction_active then Compacting
-  (* 7b. Context overflow awaiting auto-compact.
+  (* 8b. Context overflow awaiting auto-compact.
      Transient: [entry_actions_for] emits [Start_compaction] on entry,
      which flips [compaction_active] via [Auto_compact_triggered] and the
      next [derive_phase] returns [Compacting]. If [compaction_active] is
-     already set (compaction already started), priority 7 wins and the
+     already set (compaction already started), priority 8 wins and the
      keeper reads as [Compacting], not [Overflowed]. *)
   else if c.context_overflow then Overflowed
-  (* 8. Health degradation *)
+  (* 9. Health degradation *)
   else if not c.heartbeat_healthy
           || not c.turn_healthy
   then Failing
-  (* 9. Healthy running *)
+  (* 10. Healthy running *)
   else if c.fiber_alive then Running
-  (* 10. Initial / unreachable fallback *)
+  (* 11. Initial / unreachable fallback *)
   else Offline
 
 (* ── Condition Updaters ────────────────────────────────── *)
@@ -533,6 +547,7 @@ let update_conditions (c : conditions) (ev : event) : conditions =
       stop_requested = false;
       context_overflow = false;
       compact_retry_exhausted = false;
+      terminal_failure_latched = false;
     }
   | Fiber_terminated _ ->
     { c with fiber_alive = false }
@@ -542,6 +557,8 @@ let update_conditions (c : conditions) (ev : event) : conditions =
     { c with restart_budget_remaining = false }
   | Guardrail_stop _ ->
     { c with guardrail_triggered = true }
+  | Terminal_failure_detected _ ->
+    { c with terminal_failure_latched = true }
   | Context_overflow_detected _ ->
     (* Hard overflow reported by the provider. The phase derivation
        maps this to either [Overflowed] (auto-compact path) or [Paused]
@@ -593,6 +610,8 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
     [ Start_drain; lifecycle "draining" "" ]
   | _, Dead ->
     [ Mark_dead_tombstone; lifecycle "dead" "restart budget exhausted" ]
+  | _, Zombie ->
+    [ Mark_zombie_tombstone; lifecycle "zombie" "terminal structural failure" ]
   | _, Stopped ->
     [ Cleanup_and_unregister;
       lifecycle "stopped"
@@ -663,7 +682,7 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
 let apply_event ~current_phase ~conditions ~event ~now =
   (* Terminal states reject all events *)
   match current_phase with
-  | Stopped | Dead ->
+  | Stopped | Dead | Zombie ->
     Error (Terminal_state {
       current = current_phase;
       attempted_event = event_to_string event;
@@ -726,6 +745,7 @@ let conditions_to_json (c : conditions) =
     "drain_complete", `Bool c.drain_complete;
     "context_overflow", `Bool c.context_overflow;
     "compact_retry_exhausted", `Bool c.compact_retry_exhausted;
+    "terminal_failure_latched", `Bool c.terminal_failure_latched;
   ]
 
 let event_to_json (ev : event) : Yojson.Safe.t =
@@ -782,6 +802,8 @@ let event_to_json (ev : event) : Yojson.Safe.t =
     obj "supervisor_restart_attempt" ["attempt", `Int r.attempt]
   | Restart_budget_exhausted -> obj "restart_budget_exhausted" []
   | Guardrail_stop r -> obj "guardrail_stop" ["reason", `String r.reason]
+  | Terminal_failure_detected r ->
+    obj "terminal_failure_detected" ["reason", `String r.reason]
   | Context_overflow_detected r ->
     let source = match r.source with
       | `Prompt_rejected -> "prompt_rejected"
@@ -830,6 +852,7 @@ let phase_to_mermaid_id = function
   | Crashed -> "Crashed"
   | Restarting -> "Restarting"
   | Dead -> "Dead"
+  | Zombie -> "Zombie"
 
 let phase_to_mermaid ~(current : phase) : string =
   let b = Buffer.create 512 in
@@ -883,13 +906,17 @@ let phase_to_mermaid ~(current : phase) : string =
   p "    Restarting --> Paused : operator pause\n";
   p "    Stopped --> [*]\n";
   p "    Dead --> [*]\n";
+  p "    Zombie --> [*]\n";
+  p "    Running --> Zombie : terminal failure\n";
+  p "    Failing --> Zombie : terminal failure\n";
+  p "    Crashed --> Zombie : terminal failure\n";
   (* Highlight current phase with classDef *)
   p "\n";
   p "    classDef active fill:#22c55e,stroke:#16a34a,color:#fff,stroke-width:3px\n";
   p "    classDef terminal fill:#6b7280,stroke:#4b5563,color:#fff\n";
   p "    classDef buffer fill:#f59e0b,stroke:#d97706,color:#fff\n";
   (match current with
-   | Stopped | Dead ->
+   | Stopped | Dead | Zombie ->
      p "    class %s terminal\n" (phase_to_mermaid_id current)
    | Failing | Overflowed | Compacting | HandingOff | Draining | Restarting ->
      p "    class %s buffer\n" (phase_to_mermaid_id current)

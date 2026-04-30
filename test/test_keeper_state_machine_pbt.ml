@@ -132,7 +132,7 @@ let valid_events_for_phase (phase : SM.phase) (c : SM.conditions) : SM.event lis
         SM.Fiber_terminated { outcome = "fail" };
         SM.Restart_budget_exhausted;
       ]
-    | SM.Stopped | SM.Dead -> []
+    | SM.Stopped | SM.Dead | SM.Zombie -> []
     | SM.Offline -> [ SM.Fiber_started ]
   in
   (* Also add Context_measured with guardrail=true when running *)

@@ -28,7 +28,7 @@ let select_cascade ~(base_cascade : string) ~(phase : Keeper_state_machine.phase
   | Draining | Paused ->
       { effective_cascade = base_cascade;
         reason = "winding down: complete in-progress work" }
-  | Offline | Stopped | Dead | Crashed | Restarting ->
+  | Offline | Stopped | Dead | Zombie | Crashed | Restarting ->
       { effective_cascade = base_cascade;
         reason = "non-turn phase (blocked upstream)" }
 

@@ -377,7 +377,7 @@ let bonsai_keeper_status_of_phase phase =
   | Failing | Overflowed | Compacting | HandingOff | Draining | Paused
   | Restarting ->
       Warn
-  | Offline | Stopped | Crashed | Dead -> Dead
+  | Offline | Stopped | Crashed | Dead | Zombie -> Dead
 
 let bonsai_ctx_pct (meta : Keeper_types.keeper_meta) =
   match meta.max_context_override with

@@ -51,6 +51,8 @@
    cascade_inventory
    cascade_model_resolve
    cascade_ollama_probe
+   cascade_pool
+   cascade_pool_router
    cascade_runtime
    cascade_state
    cascade_strategy

@@ -506,7 +506,8 @@ let reconcile_keepalive_keepers (ctx : _ context) =
                | Some e ->
                  match e.phase with
                  | Keeper_state_machine.Running | Keeper_state_machine.Paused -> true
-                 | Keeper_state_machine.Crashed | Keeper_state_machine.Dead -> true
+                 | Keeper_state_machine.Crashed | Keeper_state_machine.Dead
+                 | Keeper_state_machine.Zombie -> true
                  | Keeper_state_machine.Failing | Keeper_state_machine.Overflowed
                  | Keeper_state_machine.Compacting
                  | Keeper_state_machine.HandingOff | Keeper_state_machine.Draining
@@ -859,7 +860,7 @@ let sweep_and_recover (ctx : _ context) =
   let to_cleanup_dead = ref [] in
   List.iter (fun (entry : Keeper_registry.registry_entry) ->
     match entry.phase with
-    | Keeper_state_machine.Dead ->
+    | Keeper_state_machine.Dead | Keeper_state_machine.Zombie ->
         (match entry.dead_since_ts with
          | Some dead_since when now -. dead_since >= dead_ttl_sec ->
              to_cleanup_dead := entry :: !to_cleanup_dead

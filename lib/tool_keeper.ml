@@ -1265,7 +1265,7 @@ let handle_keeper_compact ctx args : tool_result =
       match entry.phase with
       | Overflowed | Paused | Compacting -> true
       | Running | Failing -> force
-      | Offline | Stopped | Dead | Crashed | Restarting | HandingOff | Draining -> false
+      | Offline | Stopped | Dead | Zombie | Crashed | Restarting | HandingOff | Draining -> false
     in
     if not allowed then begin
       Prometheus.inc_counter Prometheus.metric_keeper_operator_compact

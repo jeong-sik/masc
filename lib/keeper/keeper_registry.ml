@@ -767,7 +767,7 @@ let fiber_health_of ~base_path name =
   | None -> Fiber_unknown
   | Some entry -> (
       match entry.phase with
-      | Dead -> Fiber_dead
+      | Dead | Zombie -> Fiber_dead
       | Crashed | Restarting ->
           let max_restarts =
             Runtime_params.get Governance_registry.keeper_supervisor_max_restarts
@@ -1040,6 +1040,7 @@ let execute_entry_action_observability
   | Start_drain
   | Schedule_restart _
   | Mark_dead_tombstone
+  | Mark_zombie_tombstone
   | Cleanup_and_unregister ->
       ()
 

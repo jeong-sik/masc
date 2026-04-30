@@ -599,4 +599,4 @@ let pipeline_stage_of_phase (phase : Keeper_state_machine.phase) : string =
   | Keeper_state_machine.Stopped -> "offline"
   | Keeper_state_machine.Crashed -> "crashed"
   | Keeper_state_machine.Restarting -> "restarting"
-  | Keeper_state_machine.Dead -> "offline"
+  | Keeper_state_machine.Dead | Keeper_state_machine.Zombie -> "offline"

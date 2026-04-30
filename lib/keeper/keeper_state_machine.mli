@@ -11,7 +11,7 @@
     Key invariant: given the same [conditions] and [event], [apply_event]
     always produces the same [transition_result]. *)
 
-(** {1 Phase (12-State Enum)} *)
+(** {1 Phase (13-State Enum)} *)
 
 (** Fine-grained keeper lifecycle phase.
     Buffer states ([Failing], [Overflowed], [Compacting], [HandingOff],
@@ -35,6 +35,10 @@ type phase =
   | Crashed       (** Unrecoverable error, restart candidate *)
   | Restarting    (** Supervisor backoff wait before re-launch *)
   | Dead          (** Restart budget exhausted, tombstone, terminal *)
+  | Zombie        (** Terminal structural failure, non-recoverable.
+                      Distinct from [Dead]: restart budget may remain,
+                      but the keeper encountered a permanent provider
+                      or adapter error and cannot continue. *)
 
 val phase_to_string : phase -> string
 val phase_of_string : string -> phase option
@@ -89,6 +93,12 @@ type conditions = {
       instead of [Overflowed] so operator intervention is required.
       Reset by a [Compaction_completed] with real savings or by
       [Fiber_started]; a noop compaction does not reset this latch. *)
+  terminal_failure_latched : bool;
+  (** Set when the keeper encounters a permanent structural error
+      (provider adapter failure, unresumable session conflict, etc).
+      Once latched, [derive_phase] returns [Zombie] regardless of
+      fiber or budget state. Reset only by [Fiber_started] so a
+      full restart can attempt recovery with a fresh trace. *)
 }
 
 val default_conditions : conditions
@@ -175,6 +185,10 @@ type event =
   | Supervisor_restart_attempt of { attempt : int }
   | Restart_budget_exhausted
   | Guardrail_stop of { reason : string }
+  | Terminal_failure_detected of { reason : string }
+    (** Permanent structural error (provider adapter failure, unresumable
+        session conflict, etc). Latches [terminal_failure_latched] and
+        drives the keeper to [Zombie] on the next [derive_phase]. *)
   | Context_overflow_detected of {
       source : [`Prompt_rejected | `Oas_signal];
       token_count : int;
@@ -229,6 +243,7 @@ type entry_action =
   | Schedule_restart of { delay_sec : float }
   | Publish_lifecycle of { event_name : string; detail : string }
   | Mark_dead_tombstone
+  | Mark_zombie_tombstone
   | Cleanup_and_unregister
 
 (** Result of applying an event. *)

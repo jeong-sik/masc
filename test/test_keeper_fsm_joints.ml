@@ -257,7 +257,7 @@ let expected_routing (phase : SM.phase) ~base : string =
   | SM.Failing -> "local_recovery"
   | SM.Compacting | SM.HandingOff -> "local_only"
   | SM.Running | SM.Draining | SM.Paused | SM.Overflowed
-  | SM.Offline | SM.Stopped | SM.Crashed | SM.Restarting | SM.Dead -> base
+  | SM.Offline | SM.Stopped | SM.Crashed | SM.Restarting | SM.Dead | SM.Zombie -> base
 
 let test_kdp_kcl_join_routing_table () =
   let base = "keeper_unified" in

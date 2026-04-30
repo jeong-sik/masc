@@ -108,6 +108,11 @@ let operator_signal_of_transition (r : transition_record) =
             ~requires_operator_decision:true
             ~next_human_action:"inspect_or_recreate_keeper"
             "keeper reached dead phase"
+      | Zombie ->
+          operator_signal ~signal_class:"runtime_alert" ~severity:"bad"
+            ~requires_operator_decision:true
+            ~next_human_action:"inspect_or_recreate_keeper"
+            "keeper reached zombie phase (terminal structural failure)"
       | Failing ->
           operator_signal ~signal_class:"runtime_recovery" ~severity:"warn"
             ~requires_operator_decision:false

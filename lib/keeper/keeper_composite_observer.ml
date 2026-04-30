@@ -263,7 +263,7 @@ let derive_ksm_phase (phase : Keeper_state_machine.phase) : ksm_phase =
   | Keeper_state_machine.Stopped
   | Keeper_state_machine.Crashed
   | Keeper_state_machine.Restarting
-  | Keeper_state_machine.Dead -> Ksm_stable
+  | Keeper_state_machine.Dead | Keeper_state_machine.Zombie -> Ksm_stable
 
 let collapsed_from_phase
     (phase : Keeper_state_machine.phase)

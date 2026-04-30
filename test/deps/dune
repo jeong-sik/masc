@@ -51,6 +51,7 @@
    (re_export mirage-crypto)
    (re_export mirage-crypto-rng)
    (re_export mirage-crypto-rng.unix)
+   (re_export multimodal)
    (re_export ocaml-protoc-plugin)
    (re_export ocaml-webrtc)
    (re_export qcheck-alcotest)

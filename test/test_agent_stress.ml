@@ -20,7 +20,7 @@ let test_turn_failure_json_contract () =
           threshold = 3;
           counted_toward_crash = true;
           recoverable = false;
-          error_kind = Some "api";
+          error_kind = Some (Stress.error_kind_of_string "api");
         };
       timestamp = 1_777_120_045.0;
     }

@@ -5,6 +5,12 @@
 (* Types                                                            *)
 (* ================================================================ *)
 
+type error_kind = Error_kind of string
+
+let error_kind_of_string value = Error_kind value
+
+let error_kind_to_string (Error_kind value) = value
+
 type stress_kind =
   | Failure_streak of int
   | Turn_failure of turn_failure
@@ -18,7 +24,7 @@ and turn_failure = {
   threshold : int;
   counted_toward_crash : bool;
   recoverable : bool;
-  error_kind : string option;
+  error_kind : error_kind option;
 }
 
 type event = {
@@ -46,7 +52,7 @@ let stress_kind_to_json = function
     let fields =
       match f.error_kind with
       | None -> base
-      | Some kind -> base @ [("error_kind", `String kind)]
+      | Some kind -> base @ [("error_kind", `String (error_kind_to_string kind))]
     in
     `Assoc fields
   | Fallback_approval ->

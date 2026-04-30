@@ -90,7 +90,7 @@ let record_turn_failure_stress
         threshold;
         counted_toward_crash = not is_auto_recoverable;
         recoverable = is_auto_recoverable;
-        error_kind = Some (sdk_error_kind err);
+        error_kind = Some (Agent_stress.error_kind_of_string (sdk_error_kind err));
       };
     timestamp = Unix.gettimeofday ();
   }

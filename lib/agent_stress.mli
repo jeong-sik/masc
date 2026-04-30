@@ -9,6 +9,15 @@
 
     @since RFC-0001 Gate A *)
 
+(** Coarse error family attached to turn-failure stress events. *)
+type error_kind = private Error_kind of string
+
+val error_kind_of_string : string -> error_kind
+(** Convert a wire/log label into an internal error-kind value. *)
+
+val error_kind_to_string : error_kind -> string
+(** Convert an internal error-kind value back to the public wire label. *)
+
 (** Stress event kinds -- each maps to a measurable condition. *)
 type stress_kind =
   | Failure_streak of int        (** consecutive failure count *)
@@ -23,7 +32,7 @@ and turn_failure = {
   threshold : int;               (** crash threshold used for the decision *)
   counted_toward_crash : bool;   (** false for auto-recoverable/transient failures *)
   recoverable : bool;            (** whether keeper can continue without crash escalation *)
-  error_kind : string option;    (** coarse sdk error family; never the raw error text *)
+  error_kind : error_kind option; (** coarse sdk error family; never the raw error text *)
 }
 
 (** A single stress observation. *)

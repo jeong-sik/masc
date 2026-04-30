@@ -186,11 +186,11 @@ let register_pre_hook () =
     match hook ~name ~args:compat_args with
     | Oas.Tool_middleware.Pass
       when not (Yojson.Safe.equal compat_args args) ->
-      Log.info "tool_input_validation coerced args for %s" name;
+      Log.debug "tool_input_validation coerced args for %s" name;
       Proceed compat_args
     | Oas.Tool_middleware.Pass -> Pass
     | Oas.Tool_middleware.Proceed coerced ->
-      Log.info "tool_input_validation coerced args for %s" name;
+      Log.debug "tool_input_validation coerced args for %s" name;
       Proceed coerced
     | Oas.Tool_middleware.Reject { message; _ } ->
       let augmented = augment_missing_param_hint ~args:compat_args message in

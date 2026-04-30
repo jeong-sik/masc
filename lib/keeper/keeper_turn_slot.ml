@@ -382,10 +382,10 @@ let with_keeper_turn_slot ~keeper_name ~channel f =
           Eio.Semaphore.acquire sem);
         Ok ()
       with Eio.Time.Timeout ->
-        (* INFO not WARN: see commentary above — keeper skips this turn
-           and the next heartbeat re-queues it. Per-event noise hurts
-           operator signal more than it helps. *)
-        Log.Keeper.info
+        (* DEBUG not WARN: the keeper-specific heartbeat loop already
+           emits the operator-facing skip warning with owner/cascade
+           context, while the metric below preserves attribution. *)
+        Log.Keeper.debug
           "semaphore_wait: %s semaphore wait exceeded %.0fs (channel=%s), \
            skipping turn"
           label semaphore_wait_timeout_sec

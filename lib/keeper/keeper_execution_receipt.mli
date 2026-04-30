@@ -18,6 +18,11 @@ val outcome_kind_to_string : outcome_kind -> string
     boundary while the receipt record still stores the legacy string
     form. *)
 
+val outcome_kind_to_tla_receipt : outcome_kind -> string
+(** TLA+ receipt symbol mapping: [`Ok] serializes as ["ok"] in JSON but
+    corresponds to ["receipt_done"] in [KeeperTurnFSM.tla]; [`Error]
+    similarly maps to ["receipt_failed"]. *)
+
 val outcome_kind_of_string : string -> outcome_kind option
 (** Parse the legacy string form. Recognises the four terminal kinds
     and returns [None] for everything else (including ["unset"]) so

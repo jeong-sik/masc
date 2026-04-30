@@ -51,8 +51,7 @@ val prepare_resume_checkpoint_for_dispatch :
        resolution entirely — the dispatch starts a fresh OAS run.
     4. When checkpoint resolution is required and compaction did
        fire, calls [save_checkpoint] to persist the compacted state.
-       On save failure the result still carries a derived checkpoint
-       so the dispatch is not blocked, and [save_error] surfaces the
-       detail for observability.
+       On save failure the result carries no resume checkpoint, and
+       [save_error] surfaces the detail so the caller can block dispatch.
     5. When no compaction fired, returns the derived checkpoint of
        the unchanged context. *)

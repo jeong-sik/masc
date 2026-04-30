@@ -87,6 +87,16 @@ let terminal_reason_code_of_sdk_error = function
   | Oas.Error.A2a _ -> "a2a_error"
   | Oas.Error.Internal _ -> "internal_error"
 
+let receipt_outcome_kind_of_sdk_error = function
+  | Oas.Error.Api (Oas.Retry.Timeout _) -> `Cancelled
+  | _ -> `Error
+
+let checkpoint_persistence_error ~keeper_name ~detail =
+  Oas.Error.Internal
+    (Printf.sprintf
+       "keeper_checkpoint_persist_failed: keeper=%s detail=%s"
+       keeper_name detail)
+
 let cascade_outcome_of_observation = function
   | Some (obs : Oas_worker.cascade_observation) when obs.fallback_applied ->
     "passed_to_next_model"

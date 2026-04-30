@@ -40,6 +40,18 @@ val api_error_terminal_reason_code : Oas.Error.api_error -> string
     embedding the contract id for completion-contract violations. *)
 val terminal_reason_code_of_sdk_error : Oas.Error.sdk_error -> string
 
+(** Receipt outcome for terminal SDK errors.  Provider timeouts map to
+    [`Cancelled] to match [KeeperTurnFSM.tla] [ProviderTimeout], while
+    all other SDK errors remain ordinary failed receipts. *)
+val receipt_outcome_kind_of_sdk_error :
+  Oas.Error.sdk_error -> Keeper_execution_receipt.outcome_kind
+
+(** Structured internal error for post-turn checkpoint persistence
+    failures.  Used to prevent an otherwise successful keeper turn from
+    returning [Ok] when the replay checkpoint is not durable. *)
+val checkpoint_persistence_error :
+  keeper_name:string -> detail:string -> Oas.Error.sdk_error
+
 (** Map an optional cascade observation to a textual outcome label
     ("passed_to_next_model" / "completed" / "not_observed"). *)
 val cascade_outcome_of_observation :

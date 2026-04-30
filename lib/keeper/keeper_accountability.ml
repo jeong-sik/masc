@@ -305,6 +305,7 @@ let resolution_event_of_json json =
 
 let read_window_entries (config : Coord_query.config) =
   (match !window_read_count_for_testing_ref with
+  (* tla-lint: allow-mutation: test hook — opt-in counter for window-read assertions *)
   | Some count -> window_read_count_for_testing_ref := Some (count + 1)
   | None -> ());
   let now = Time_compat.now () in
@@ -957,9 +958,11 @@ let accountability_summary_json (config : Coord_query.config) ~keeper_name
   accountability_summary_lookup config ~keeper_name ~agent_name
 
 let enable_window_read_count_for_testing () =
+  (* tla-lint: allow-mutation: test hook — initialise opt-in counter from test setup *)
   window_read_count_for_testing_ref := Some 0
 
 let disable_window_read_count_for_testing () =
+  (* tla-lint: allow-mutation: test hook — clear opt-in counter from test teardown *)
   window_read_count_for_testing_ref := None
 
 let window_read_count_for_testing () =

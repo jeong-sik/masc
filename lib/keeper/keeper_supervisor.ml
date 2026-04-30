@@ -424,6 +424,7 @@ let resume_keeper_after_reconcile_gate (ctx : _ context) (meta : keeper_meta) =
        resumed_meta.name Keeper_state_machine.Operator_resume);
   match Keeper_registry.get ~base_path:ctx.config.base_path resumed_meta.name with
   | Some entry when Option.is_none (Eio.Promise.peek entry.done_p) ->
+      (* tla-lint: allow-mutation: fiber signal — wake the keeper after operator resume *)
       Atomic.set entry.fiber_wakeup true
   | Some _ ->
       Keeper_registry.unregister ~base_path:ctx.config.base_path

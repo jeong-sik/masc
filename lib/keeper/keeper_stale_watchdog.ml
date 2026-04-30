@@ -327,6 +327,7 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                in
                Keeper_registry.set_failure_reason ~base_path meta.name
                  (Some (Keeper_registry.Stale_turn_timeout kill_class));
+               (* tla-lint: allow-mutation: fiber signal — stop the wedged keeper after stale-turn classification *)
                Atomic.set reg.fiber_stop true;
                let window_count = record_stale_termination meta.name now in
                Prometheus.inc_counter

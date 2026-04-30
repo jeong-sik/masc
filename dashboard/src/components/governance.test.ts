@@ -4,6 +4,8 @@ import { act } from 'preact/test-utils'
 import * as Vitest from 'vitest'
 import type { DashboardGovernanceResponse, GovernanceCaseBundle, KeeperApprovalQueueItem } from '../types'
 import { filterApprovalQueue } from './governance'
+import { KpiStrip } from './kpi-strip'
+import { KpiCell } from './kpi-cell'
 
 const { afterEach, beforeEach, describe, expect, it, vi } = Vitest
 
@@ -58,6 +60,28 @@ async function loadComponentWithApi(api: {
   Vitest.vi.doMock('../api', () => api)
   Vitest.vi.doMock('../sse-store', () => ({
     registerGovernanceRefresh: Vitest.vi.fn(),
+  }))
+  // KpiStripIsland mounts its Solid subtree inside `useEffect`, so the
+  // first synchronous render produces an empty `<div>` and the assertions
+  // on cell text would fire before mount. Substitute a synchronous Preact
+  // shim that renders the same cells via the original KpiStrip + KpiCell.
+  // Production behaviour stays as the real island; this shim only exists
+  // for the Preact-side test config (vitest.config.ts).
+  Vitest.vi.doMock('./kpi-strip-island', () => ({
+    KpiStripIsland: (props: {
+      ariaLabel: string
+      variant?: 'standard' | 'compact' | 'stacked'
+      cols?: number
+      cells: ReadonlyArray<Record<string, unknown>>
+    }) => html`
+      <${KpiStrip}
+        ariaLabel=${props.ariaLabel}
+        variant=${props.variant}
+        cols=${props.cols}
+      >
+        ${props.cells.map((cell) => html`<${KpiCell} ...${cell} />`)}
+      <//>
+    `,
   }))
   return import('./governance')
 }

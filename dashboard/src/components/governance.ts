@@ -6,8 +6,8 @@ import type { GovernanceJudgeSummary, KeeperApprovalQueueItem, KeeperApprovalRul
 import { TELEMETRY_AUTO_REFRESH_MS } from '../config/constants'
 import { formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../lib/auto-refresh'
 import { Card } from './common/card'
-import { KpiCell, type KpiCellKind } from './kpi-cell'
-import { KpiStrip } from './kpi-strip'
+import type { KpiCellKind } from './kpi-cell'
+import { KpiStripIsland, type KpiStripIslandData } from './kpi-strip-island'
 import { TimeAgo } from './common/time-ago'
 import { EmptyState } from './common/empty-state'
 import { StatusDot } from './common/status-dot'
@@ -121,34 +121,38 @@ function GovernanceSummaryStrip() {
       </div>
     </div>
     <div class="mb-5">
-      <${KpiStrip} ariaLabel="governance 요약" cols=${4}>
-        <${KpiCell}
-          variant="stacked"
-          label="Judge 상태"
-          value=${liveJudgeState}
-          caption=${judge?.keeper_name?.trim() || '실시간 judge'}
-          kind=${(judgeUnhealthy ? 'warn' : (judgeHealthy ? 'ok' : undefined)) as KpiCellKind | undefined}
-        />
-        <${KpiCell}
-          variant="stacked"
-          label="Judge 모델"
-          value=${liveJudgeModel}
-          caption=${judge?.model_used?.trim() ? '런타임 보고' : '알 수 없음'}
-        />
-        <${KpiCell}
-          variant="stacked"
-          label="최근 판단"
-          value=${judgmentCount}
-          caption="실시간"
-        />
-        <${KpiCell}
-          variant="stacked"
-          label="관리자 승인 대기"
-          value=${approvalCount}
-          caption=${approvalCount > 0 ? '검토 필요' : (judgeHealthy ? '정상' : 'live')}
-          kind=${(approvalCount > 0 ? 'warn' : (judgeHealthy ? 'ok' : undefined)) as KpiCellKind | undefined}
-        />
-      <//>
+      <${KpiStripIsland}
+        ariaLabel="governance 요약"
+        cols=${4}
+        cells=${[
+          {
+            variant: 'stacked',
+            label: 'Judge 상태',
+            value: liveJudgeState,
+            caption: judge?.keeper_name?.trim() || '실시간 judge',
+            kind: (judgeUnhealthy ? 'warn' : (judgeHealthy ? 'ok' : undefined)) as KpiCellKind | undefined,
+          },
+          {
+            variant: 'stacked',
+            label: 'Judge 모델',
+            value: liveJudgeModel,
+            caption: judge?.model_used?.trim() ? '런타임 보고' : '알 수 없음',
+          },
+          {
+            variant: 'stacked',
+            label: '최근 판단',
+            value: judgmentCount,
+            caption: '실시간',
+          },
+          {
+            variant: 'stacked',
+            label: '관리자 승인 대기',
+            value: approvalCount,
+            caption: approvalCount > 0 ? '검토 필요' : (judgeHealthy ? '정상' : 'live'),
+            kind: (approvalCount > 0 ? 'warn' : (judgeHealthy ? 'ok' : undefined)) as KpiCellKind | undefined,
+          },
+        ] satisfies KpiStripIslandData['cells']}
+      />
     </div>
     <${JudgeStatusBar} />
     ${governanceError.value ? html`<div class="mb-5 rounded border border-[var(--bad-30)] bg-[var(--bad-8)] p-2.5 text-xs text-[#f7b6b6]">${governanceError.value}</div>` : null}

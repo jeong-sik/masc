@@ -1,9 +1,16 @@
 // Pure TS unit tests for AgentPresenceManager. No DOM.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
+  AGENT_COLOR_PALETTE,
+  activityAnnouncement,
+  assignAgentColorSlot,
+  colorForSlot,
   createAgentPresenceManager,
+  createPresenceUpdateCoalescer,
   deriveSigil,
   kSlot,
+  summarizeActivityEvents,
+  type AgentPaletteSlot,
   type AgentDescriptor,
 } from './agent-presence'
 
@@ -172,6 +179,25 @@ describe('createAgentPresenceManager — cursor + heartbeat', () => {
     m.heartbeat('nick0cave')
     expect(m.agents.get('nick0cave')!.idleMs).toBe(0)
   })
+
+  it('updatePresence stores ephemeral role/task/selection/focus metadata', () => {
+    const m = createAgentPresenceManager({ initialAgents: [nick] })
+    m.updatePresence('nick0cave', {
+      role: 'Refactor',
+      currentTask: 'Tighten auth boundary',
+      selection: {
+        file: 'auth.ts',
+        anchor: { line: 10, column: 1 },
+        focus: { line: 12, column: 8 },
+      },
+      focus: { kind: 'symbol', id: 'auth.verify', label: 'verify' },
+    })
+    expect(m.agents.get('nick0cave')!.presence).toMatchObject({
+      role: 'Refactor',
+      currentTask: 'Tighten auth boundary',
+      updatedAt: '2026-04-29T00:00:00.000Z',
+    })
+  })
 })
 
 describe('deriveSigil + kSlot', () => {
@@ -186,12 +212,29 @@ describe('deriveSigil + kSlot', () => {
     expect(kSlot('sangsu')).toBe(kSlot('sangsu'))
   })
 
-  it('kSlot returns a slot in 1..12', () => {
+  it('kSlot stays compatible with existing 1..12 keeper CSS slots', () => {
     for (const id of ['a', 'b', 'foo', 'nick0cave', 'sangsu', 'rama']) {
       const slot = kSlot(id)
       expect(slot).toBeGreaterThanOrEqual(1)
       expect(slot).toBeLessThanOrEqual(12)
     }
+  })
+
+  it('color helpers expose the 12 keeper + 3 reserve palette', () => {
+    expect(AGENT_COLOR_PALETTE).toHaveLength(15)
+    expect(colorForSlot(1)).toBe('#E74C3C')
+    expect(colorForSlot(15)).toBe('#FF5722')
+  })
+
+  it('assignAgentColorSlot fills unused slots before falling back to hash', () => {
+    const existing = new Map<string, AgentPaletteSlot>()
+    for (let i = 1; i <= 14; i += 1) {
+      existing.set(`k${i}`, i as AgentPaletteSlot)
+    }
+    expect(assignAgentColorSlot('reserve', existing)).toBe(15)
+    existing.set('reserve', 15)
+    expect(assignAgentColorSlot('reserve', existing)).toBe(15)
+    expect(assignAgentColorSlot('overflow', existing)).toBe(kSlot('overflow'))
   })
 })
 
@@ -255,5 +298,98 @@ describe('createAgentPresenceManager — high-throughput correctness', () => {
     dispose()
     m.updateState('k0', 'thinking')
     expect(fires).toBe(12 * states.length)
+  })
+})
+
+describe('createPresenceUpdateCoalescer', () => {
+  it('coalesces many updates to latest per agent around a 33ms interval', () => {
+    const applied: string[] = []
+    const coalescer = createPresenceUpdateCoalescer((update) => {
+      applied.push(`${update.id}:${update.cursor?.line}:${update.currentTask}`)
+    })
+    coalescer.enqueue({ id: 'nick0cave', file: 'a.ts', cursor: { line: 1, column: 1 } })
+    coalescer.enqueue({
+      id: 'nick0cave',
+      file: 'a.ts',
+      cursor: { line: 2, column: 4 },
+      currentTask: 'editing',
+    })
+    coalescer.enqueue({ id: 'sangsu', file: 'b.ts', cursor: { line: 9, column: 1 } })
+    expect(applied).toEqual([])
+    vi.advanceTimersByTime(32)
+    expect(applied).toEqual([])
+    vi.advanceTimersByTime(1)
+    expect(applied).toEqual(['nick0cave:2:editing', 'sangsu:9:undefined'])
+  })
+
+  it('cancel drops pending updates', () => {
+    const applied: string[] = []
+    const coalescer = createPresenceUpdateCoalescer((update) => applied.push(update.id))
+    coalescer.enqueue({ id: 'nick0cave', currentTask: 'editing' })
+    coalescer.cancel()
+    vi.advanceTimersByTime(33)
+    expect(applied).toEqual([])
+  })
+})
+
+describe('activity primitives', () => {
+  it('summarizes activity events in five second buckets', () => {
+    const summaries = summarizeActivityEvents([
+      {
+        id: '1',
+        type: 'edit.started',
+        agentId: 'nick0cave',
+        agentName: 'nick0cave',
+        file: 'core.ts',
+        timestampMs: 1000,
+      },
+      {
+        id: '2',
+        type: 'edit.started',
+        agentId: 'nick0cave',
+        agentName: 'nick0cave',
+        file: 'core.ts',
+        timestampMs: 3200,
+      },
+      {
+        id: '3',
+        type: 'conflict.detected',
+        file: 'core.ts',
+        timestampMs: 5100,
+      },
+    ])
+    expect(summaries).toHaveLength(2)
+    expect(summaries[0]).toMatchObject({
+      type: 'edit.started',
+      count: 2,
+      agentIds: ['nick0cave'],
+      files: ['core.ts'],
+      severity: 'low',
+    })
+    expect(summaries[1]).toMatchObject({
+      type: 'conflict.detected',
+      severity: 'critical',
+    })
+  })
+
+  it('announces only screen-reader-worthy activity events', () => {
+    expect(activityAnnouncement({
+      id: '1',
+      type: 'edit.started',
+      agentId: 'nick0cave',
+      timestampMs: 0,
+    })).toBeNull()
+    expect(activityAnnouncement({
+      id: '2',
+      type: 'conflict.detected',
+      file: 'core.ts',
+      timestampMs: 0,
+    })).toEqual({ text: 'Conflict detected in core.ts', assertive: true })
+    expect(activityAnnouncement({
+      id: '3',
+      type: 'agent.completed',
+      agentName: 'sangsu',
+      timestampMs: 0,
+    })).toEqual({ text: 'sangsu completed', assertive: false })
   })
 })

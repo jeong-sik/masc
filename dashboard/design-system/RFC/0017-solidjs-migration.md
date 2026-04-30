@@ -104,9 +104,20 @@ After 7 sequential PRs (#12162 → #12268) migrated 6 callers, headless Chromium
 | Update n=10 | 16.37 ms | 33.57 ms | ❌ (2.0×) |
 | Update n=500 | 102.57 ms | 63.47 ms | ✅ (0.62×) |
 
+### 7c. Sustained-load measurement (16-keeper SSE workload, added later same day)
+
+The single-shot 3-sample numbers above don't tell us what happens when the dashboard is consuming a continuous SSE event stream. Added a sustained-mode bench at **n=16** (= production keeper count):
+
+| Mode | Preact | Solid island |
+|------|--------|--------------|
+| Burst (60 sequential updates @ n=16) | 1019 ms total, mean 16.98 ms/update | 1987 ms total, mean 33.12 ms/update |
+| 5 s sustained window @ n=16 | **296 updates** (~59 Hz), 99% frame retention | **148 updates** (~30 Hz), 99% frame retention |
+
+**Solid throughput is exactly half of Preact's** at our production scale. Frame retention is 99% on both because the rAF poll between updates yields naturally — but the throughput gap means Solid will start lagging the SSE queue at event rates Preact still keeps up with. For a 16-keeper × 1 Hz/keeper stream Preact uses ~27% of a second of main-thread time; Solid uses ~53%.
+
 **What we kept anyway**: bundle isolation (9.3 KB amortised, 0 B per subsequent caller), `headless-core` framework-agnosticism proven, reusable `vi.doMock` test-shim pattern, file-boundary transform isolation for Preact↔Solid coexistence. Those are real wins that justify the migration *as code organisation*, not as latency improvement.
 
-The krausest figures in §1 do not generalise to our usage shape (small N) and were the original justification for this RFC. The companion measurement document records what we actually observed and recommends Phase 2 (Lifeline) and Phase 3 (Ticker) be paused pending a synchronous-mount spike that could close the 30 ms `useEffect` gap.
+The krausest figures in §1 do not generalise to our usage shape (small N, but high update rate from SSE). The companion measurement document records what we actually observed and recommends Phase 2 (Lifeline) and Phase 3 (Ticker) be paused pending a synchronous-mount spike that could close the 30 ms `useEffect` gap.
 
 ## 8. Rollback Criteria
 

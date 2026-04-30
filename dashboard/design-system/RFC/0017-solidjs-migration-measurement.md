@@ -76,6 +76,49 @@ Solid  updates→DOM:   min=62.30 avg=63.47 max=64.30 ms     (Solid/Preact = 0.6
 
 Maximum simultaneous strips on any production page: ~10. **Every actual usage falls in the Preact-wins region.**
 
+## Sustained-load measurement (added 2026-04-30, addresses 16-keeper SSE workload)
+
+The single-shot 3-sample suite above leaves a critical question unanswered: what happens when the dashboard is consuming a continuous SSE event stream from many keepers and the parent component re-renders many times per second? The bench was extended with two modes that target this shape — both at **n=16** (= production keeper count).
+
+### Burst — 60 sequential updates at n=16
+
+```
+Preact: total 1019 ms, mean 16.98 ms, p95 20.60 ms, max 25.00 ms
+Solid:  total 1987 ms, mean 33.12 ms, p95 35.80 ms, max 38.90 ms
+```
+
+A 60-update burst (one second of typical 1 Hz/keeper traffic over 16 keepers, compressed) takes Solid **2× longer** to drain. Every individual update is also 2× slower.
+
+### Sustained 5-second window at n=16, target ≈30 Hz
+
+```
+Preact:   296 updates,  frames 296/300 (99%)  mean=16.89 p95=20.60 max=30.30 ms
+Solid:    148 updates,  frames 296/300 (99%)  mean=33.97 p95=40.20 max=53.40 ms
+  → throughput ratio Solid/Preact = 0.50
+```
+
+Preact sustains ~59 updates/sec; Solid sustains ~30 updates/sec. **Solid's throughput is exactly half** of Preact's at our production scale.
+
+Both sides keep 99% frame retention because the rAF poll between updates yields naturally — but the throughput gap means that if SSE event arrival exceeds Solid's drain rate (~30 Hz), the queue grows and the UI shows stale data. Preact has roughly 2× the headroom before the same back-pressure starts.
+
+### Implication for the 16-keeper case
+
+If keepers emit at 1 Hz each (16 events/sec total) and the parent re-renders on every event:
+
+| | Preact | Solid |
+|--|--------|-------|
+| Time to drain one event batch (n=16) | ~17 ms | ~33 ms |
+| Steady-state CPU per second of stream | ~270 ms (27%) | ~530 ms (53%) |
+| Headroom before queue grows | up to ~59 events/sec | up to ~30 events/sec |
+
+The Solid path consumes roughly twice the main-thread budget for the same stream rate. At higher event rates (e.g. burst keeper-startup: 16 keepers × multiple state changes/sec), Solid will start lagging at a rate Preact would still keep up with.
+
+### Caveats specific to sustained mode
+
+- The bench drives both implementations through Preact `render()` at the top, so Preact's sync render cycle and Solid's `useEffect` → solid-root path are both included end-to-end.
+- Headless Chromium with no concurrent workload — a real laptop with other tabs would amplify the absolute numbers but the ratio (Solid 2× slower) is the durable signal.
+- Solid's 33 ms floor is dominated by `useEffect` task-tier scheduling. Targeted signal updates that bypass the parent re-render entirely (e.g. a dedicated keeper-state store the island reads via `createMemo`) would close most of the gap. That refactor is out of scope for the current `KpiStripIsland` shape, which takes a fresh `cells` array literal on every parent render.
+
 ## Caveats
 
 - Headless Chromium has no concurrent workload; numbers may differ on a real laptop running the dashboard alongside other apps. The relative gap between the two implementations is what carries; absolute numbers will vary.
@@ -86,7 +129,7 @@ Maximum simultaneous strips on any production page: ~10. **Every actual usage fa
 
 1. **Do not roll back blindly.** Bundle isolation (9.3 KB amortised after first caller, 0 B per subsequent caller), type safety, and the test-shim infrastructure are all clean wins; reverting them costs more than the latency we'd recover.
 2. **Amend RFC 0017 §4.** The krausest citation does not generalise to our app shape. Replace it with these measured numbers and an explicit note that the migration was not justified by user-perceived latency.
-3. **Skip RFC 0017 §6 (Lifeline/Ticker islands) for now.** Per these numbers, more islands have no performance justification unless those components have N>200 cells. They do not.
+3. **Skip RFC 0017 §6 (Lifeline/Ticker islands) for now.** Per these numbers, more islands have no performance justification unless those components have N>200 cells. They do not. **The sustained-load numbers strengthen this**: at n=16 Solid throughput is half of Preact's, so adding more islands to a streaming dashboard makes the SSE back-pressure problem worse, not better.
 4. **Investigate a synchronous mount strategy** as a future spike. If the 30 ms `useEffect` overhead can be eliminated, the cross-over point shifts down toward our actual usage and the migration becomes a real win. This is worth a separate, scoped RFC.
 5. **Keep the current migration as deliberate code organisation.** The Solid island gives us framework-agnostic primitives, a clean migration boundary, and a reusable test pattern (`vi.doMock` shim). Those are the actual wins to report — performance is not.
 

@@ -154,13 +154,14 @@ let backoff_ms policy ~cycle =
     min policy.backoff_cap_ms raw
 
 type kind =
-  | Failover
-  | Capacity_aware
-  | Weighted_random
-  | Circuit_breaker_cycling
-  | Priority_tier
-  | Sticky
-  | Round_robin
+  | Failover [@tla.symbol "failover"]
+  | Capacity_aware [@tla.symbol "capacity_aware"]
+  | Weighted_random [@tla.symbol "weighted_random"]
+  | Circuit_breaker_cycling [@tla.symbol "circuit_breaker_cycling"]
+  | Priority_tier [@tla.symbol "priority_tier"]
+  | Sticky [@tla.symbol "sticky"]
+  | Round_robin [@tla.symbol "round_robin"]
+[@@deriving tla]
 
 let kind_to_string = function
   | Failover -> "failover"

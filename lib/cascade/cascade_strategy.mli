@@ -172,6 +172,11 @@ type kind =
         single cycle, the rotated order is preserved (Failover
         within); cross-call fairness comes from the cursor.
         @since 0.9.7 *)
+[@@deriving tla]
+(** [@@deriving tla] generates [to_tla_symbol] (kind -> string),
+    [all_symbols] (string list), and [all_states] (kind list) so
+    [specs/boundary/CascadeStrategy.tla] string literals stay
+    drift-free with the OCaml type. PPX adoption per Cycle 18. *)
 
 val kind_to_string : kind -> string
 

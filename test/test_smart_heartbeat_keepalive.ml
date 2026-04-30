@@ -144,6 +144,47 @@ let test_cycle_pauses_on_skip_idle () =
   check bool "Skip_idle pauses cycle" false
     (KK.smart_heartbeat_cycle_continues (HS.Skip_idle next))
 
+(* ── MissedWakeup gap regression guard (KeeperHeartbeat.tla) ───────
+   Skip_idle + Woken must promote the gate to [true]. Without this,
+   external wakeup_keeper / board_signal calls that fire during a
+   Skip_idle backoff sleep are silently absorbed: the CAS clears the
+   atomic, the loop returns, but the cycle is skipped — the spec's
+   MissedWakeup bug-action (line 104, KeeperHeartbeat.tla) made
+   concrete. Sibling of #10078 which closed the same hole for
+   Skip_busy. *)
+
+module KKS = Masc_mcp.Keeper_keepalive_signal
+
+let test_after_wake_idle_woken_continues () =
+  let next = Unix.gettimeofday () +. 60.0 in
+  check bool "Skip_idle + Woken -> cycle resumes" true
+    (KK.cycle_continues_after_wake (HS.Skip_idle next) KKS.Woken)
+
+let test_after_wake_idle_timeout_pauses () =
+  let next = Unix.gettimeofday () +. 60.0 in
+  check bool "Skip_idle + Timeout -> cycle still paused" false
+    (KK.cycle_continues_after_wake (HS.Skip_idle next) KKS.Timeout)
+
+let test_after_wake_idle_stopped_pauses () =
+  let next = Unix.gettimeofday () +. 60.0 in
+  check bool "Skip_idle + Stopped -> cycle paused (shutdown path)" false
+    (KK.cycle_continues_after_wake (HS.Skip_idle next) KKS.Stopped)
+
+let test_after_wake_busy_unchanged () =
+  (* Skip_busy already continues per #10078; outcome must not regress
+     that decision regardless of the sleep outcome (this branch never
+     sleeps in practice, but the helper is total). *)
+  check bool "Skip_busy + Woken -> still continues" true
+    (KK.cycle_continues_after_wake HS.Skip_busy KKS.Woken);
+  check bool "Skip_busy + Timeout -> still continues" true
+    (KK.cycle_continues_after_wake HS.Skip_busy KKS.Timeout)
+
+let test_after_wake_emit_unchanged () =
+  check bool "Emit + Timeout -> continues" true
+    (KK.cycle_continues_after_wake HS.Emit KKS.Timeout);
+  check bool "Emit + Woken -> continues" true
+    (KK.cycle_continues_after_wake HS.Emit KKS.Woken)
+
 let test_status_tick_usage_json_includes_cache_fields () =
   let usage = KK.status_tick_usage_json () in
   let int_member key =
@@ -193,6 +234,18 @@ let () =
         `Quick test_cycle_continues_on_skip_busy;
       test_case "Emit -> cycle continues" `Quick test_cycle_continues_on_emit;
       test_case "Skip_idle -> cycle pauses" `Quick test_cycle_pauses_on_skip_idle;
+    ];
+    "missed_wakeup_gap", [
+      test_case "Skip_idle + Woken -> resumes (MissedWakeup spec gap)"
+        `Quick test_after_wake_idle_woken_continues;
+      test_case "Skip_idle + Timeout -> still paused"
+        `Quick test_after_wake_idle_timeout_pauses;
+      test_case "Skip_idle + Stopped -> paused (shutdown)"
+        `Quick test_after_wake_idle_stopped_pauses;
+      test_case "Skip_busy outcome-agnostic"
+        `Quick test_after_wake_busy_unchanged;
+      test_case "Emit outcome-agnostic"
+        `Quick test_after_wake_emit_unchanged;
     ];
     "status_tick_usage", [
       test_case "status tick usage preserves cache fields" `Quick

@@ -15,11 +15,27 @@ val post_wakeup_signal : wakeup:bool Atomic.t -> unit
 val post_submit_task : meta:keeper_meta -> task_id:Keeper_id.Task_id.t -> unit
 val post_heartbeat_tick : wakeup:bool Atomic.t -> unit
 
+(** Outcome of an [interruptible_sleep] call. Mirrors the three terminal
+    branches of the polling loop, so callers can react to "woken by an
+    external signal" distinctly from "slept the full duration".
+
+    Closing the [Skip_idle] half of the [MissedWakeup] gap (see
+    [specs/keeper-state-machine/KeeperHeartbeat.tla]) requires
+    discriminating [`Woken`] from [`Timeout`] at the call site — sibling
+    fix #10078 covered [Skip_busy] without exposing this distinction. *)
+type sleep_outcome =
+  | Stopped   (** [stop] atomic was observed [true] before the duration
+                  elapsed. *)
+  | Woken     (** [wakeup] atomic transitioned [true -> false] via CAS;
+                  the caller should treat this as a [HeartbeatTick]
+                  spec-action and dispatch a turn. *)
+  | Timeout   (** Full [duration] elapsed without [stop] or [wakeup]. *)
+
 (** Sleep in short chunks so [stop_keepalive] or [wakeup_keeper] takes
     effect within ~chunk_sec instead of waiting for the full interval. *)
 val interruptible_sleep :
   clock:'a Eio.Time.clock -> stop:bool Atomic.t -> wakeup:bool Atomic.t ->
-  float -> unit
+  float -> sleep_outcome
 
 (** Wake up a specific keeper immediately. *)
 val wakeup_keeper : ?base_path:string -> string -> unit

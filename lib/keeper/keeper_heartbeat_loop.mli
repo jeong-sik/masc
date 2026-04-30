@@ -81,6 +81,25 @@ val dispatch_recurring_keepalive :
     [Emit] -> [true]. *)
 val smart_heartbeat_cycle_continues : Heartbeat_smart.decision -> bool
 
+(** Pure: post-sleep refinement of [smart_heartbeat_cycle_continues] that
+    closes the [MissedWakeup] gap in [KeeperHeartbeat.tla].
+
+    The base helper is computed before the idle sleep, but during a
+    [Skip_idle] sleep an external [wakeup_keeper] / board signal can
+    flip the wakeup atomic — [interruptible_sleep] returns [Woken] in
+    that case. The spec's honest [HeartbeatTick] action requires
+    [turn_state' = "running"] when wakeup is consumed, so the cycle
+    must continue even though the original decision was [Skip_idle].
+    This sibling of #10078 (which lifted the same restriction for
+    [Skip_busy]) closes the [Skip_idle] half intentionally left open
+    by that fix.
+
+    Contract: returns the base decision unchanged for [Skip_busy] and
+    [Emit]; for [Skip_idle], promotes to [true] iff the sleep ended
+    with [Woken] (not [Timeout] / [Stopped]). *)
+val cycle_continues_after_wake :
+  Heartbeat_smart.decision -> Keeper_keepalive_signal.sleep_outcome -> bool
+
 val run_smart_heartbeat_gate :
   clock:'a Eio.Time.clock ->
   stop:bool Atomic.t ->

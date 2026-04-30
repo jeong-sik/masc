@@ -402,7 +402,7 @@
           test_keeper_turn_fsm_wired_sites
           test_keeper_tool_emission_hook
           )
- (libraries masc_test_deps))
+ (libraries masc_test_deps multimodal))
 
 ; ============================================================
 ; Group 2: Property-based tests (QCheck)

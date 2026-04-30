@@ -3,6 +3,7 @@ import type { RouteState, TabId } from '../types'
 type SurfaceId = TabId
 type SurfaceSectionId =
   // monitoring
+  | 'live'
   | 'observatory'
   | 'journey'
   | 'git-graph'
@@ -134,6 +135,12 @@ export const DASHBOARD_NAV_ITEMS: DashboardNavItem[] = DASHBOARD_SURFACES.map(su
 
 export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavItem[]> = {
   monitoring: [
+    {
+      id: 'live',
+      label: '라이브 협업',
+      description: '현재 에이전트 펄스, 활동 스트림, Keeper 상태를 함께 봅니다.',
+      params: { section: 'live' },
+    },
     {
       id: 'journey',
       label: '여정 맵',

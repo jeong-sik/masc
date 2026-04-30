@@ -18,11 +18,10 @@ export function Live({ variant = 'full' }: LiveProps) {
   return html`
     <div class="flex flex-col gap-5">
       ${!observatoryMode ? html`
-        <section class="contain-content monitor-surface-card monitor-surface-card-strong px-5 py-4" aria-label="라이브 모니터 소개">
+        <section class="contain-content monitor-surface-card monitor-surface-card-strong px-5 py-4" aria-label="라이브 협업 상태">
           <div class="flex flex-col gap-2">
             <div class="flex flex-col gap-2">
-              <h2 class="m-0 text-[1.25rem] font-semibold text-[var(--color-fg-secondary)]">라이브 모니터</h2>
-              <p class="m-0 text-sm leading-paragraph text-[var(--color-fg-primary)]">실시간 이벤트 흐름과 활성 에이전트 상태를 한 화면에서 봅니다.</p>
+              <h2 class="m-0 text-[1.25rem] font-semibold text-[var(--color-fg-secondary)]">라이브 협업</h2>
             </div>
           </div>
         </section>

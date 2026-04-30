@@ -1,5 +1,5 @@
 // MASC Dashboard — Status Surface (Phase 2+4: fleet-health + runtime unified)
-// Read-only observability surfaces: observatory, journey, agents, runtime,
+// Read-only observability surfaces: live, observatory, journey, agents, runtime,
 // fleet-health (FilterChips unified panel), memory-subsystems.
 
 import { html } from 'htm/preact'
@@ -8,7 +8,7 @@ import { route } from '../router'
 import { LoadingState } from './common/feedback-state'
 
 type StatusSection =
-  | 'observatory' | 'journey' | 'git-graph' | 'agents' | 'runtime' | 'fleet-health'
+  | 'live' | 'observatory' | 'journey' | 'git-graph' | 'agents' | 'runtime' | 'fleet-health'
   | 'safe-autonomy'
   | 'memory-subsystems' | 'attribution'
   | 'cost'
@@ -27,6 +27,9 @@ const LazyFleetHealthPanel = lazy(async () => ({
 }))
 const LazyObservatory = lazy(async () => ({
   default: (await import('./observatory/observatory')).Observatory,
+}))
+const LazyLive = lazy(async () => ({
+  default: (await import('./live')).Live,
 }))
 const LazyAttributionPanel = lazy(async () => ({
   default: (await import('./attribution-panel')).AttributionPanel,
@@ -50,6 +53,8 @@ function sectionFallback(label: string) {
 
 function sectionLabel(section: StatusSection): string {
   switch (section) {
+    case 'live':
+      return '라이브 협업'
     case 'observatory':
       return '관찰소'
     case 'journey':
@@ -75,6 +80,8 @@ function sectionLabel(section: StatusSection): string {
 
 function renderSection(section: StatusSection) {
   switch (section) {
+    case 'live':
+      return html`<${LazyLive} />`
     case 'observatory':
       return html`<${LazyObservatory} />`
     case 'journey':
@@ -102,6 +109,7 @@ function currentSection(): StatusSection {
   const section = route.value.params.section
   if (
     section === 'observatory'
+    || section === 'live'
     || section === 'journey'
     || section === 'git-graph'
     || section === 'runtime'

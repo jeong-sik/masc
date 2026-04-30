@@ -546,6 +546,7 @@
    keeper_agent_tool_surface
    keeper_agent_result
    keeper_agent_error
+   keeper_turn_terminal
    keeper_agent_memory_episode
    keeper_agent_run
    keeper_agent_checkpoint_hygiene

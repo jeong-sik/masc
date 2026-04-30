@@ -343,6 +343,10 @@ let keeper_trust_json ?(include_receipt = false)
       ("next_human_action", Yojson.Safe.Util.member "next_human_action" runtime_trust);
       ("approval_state", Yojson.Safe.Util.member "approval" runtime_trust);
       ("execution_summary", Yojson.Safe.Util.member "execution" runtime_trust);
+      ( "latest_terminal_reason",
+        Yojson.Safe.Util.member "latest_terminal_reason" runtime_trust );
+      ( "latest_next_action",
+        Yojson.Safe.Util.member "latest_next_action" runtime_trust );
       ("latest_causal_event", Yojson.Safe.Util.member "latest_causal_event" runtime_trust);
       ( "last_receipt_at",
         match latest_receipt with

@@ -1390,6 +1390,11 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
               (err, updated_meta)
           in
           let e_str = Oas.Error.to_string err in
+          let terminal_reason =
+            Keeper_turn_terminal.of_failure
+              ~post_commit_ambiguous:is_ambiguous_partial
+              ~raw_error:e_str err
+          in
           Keeper_unified_metrics.append_decision_record ~config ~meta:updated_meta ~observation
             ~latency_ms ~semaphore_wait_ms
             ~outcome:(if is_ambiguous_partial then "partial" else "error")
@@ -1397,7 +1402,9 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             ?degraded_retry_cascade
             ?fallback_reason
             ~social_state
-            ~error:e_str ();
+            ~error:e_str
+            ~terminal_reason
+            ();
           (* #9769 root fix: heartbeat-field-merge prevents the
              turn-failure retry from clobbering heartbeat-owned fields
              (joined_room_ids, last_seen_seq_by_room), which was the

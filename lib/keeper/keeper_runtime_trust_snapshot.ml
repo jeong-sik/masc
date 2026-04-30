@@ -111,6 +111,22 @@ let severity_of_decision = function
 
 let severity_of_tool_call success = if success then "ok" else "bad"
 
+let terminal_reason_from_decision json =
+  match json_member "terminal_reason" json with
+  | `Assoc _ as terminal_reason -> Keeper_turn_terminal.of_json terminal_reason
+  | _ -> None
+
+let terminal_reason_from_receipt receipt =
+  match json_string_opt_member "terminal_reason_code" receipt with
+  | Some code ->
+      Some (Keeper_turn_terminal.of_code ~source:"execution_receipt" code)
+  | None -> None
+
+let latest_terminal_reason_opt ~latest_decision ~latest_receipt =
+  match Option.bind latest_decision terminal_reason_from_decision with
+  | Some _ as value -> value
+  | None -> Option.bind latest_receipt terminal_reason_from_receipt
+
 let severity_of_approval_event event decision =
   match event with
   | "pending" -> "warn"
@@ -248,6 +264,56 @@ let decision_timeline_event json =
            ~title:"Turn Decision"
            ~summary
            ~severity:(severity_of_decision turn_verdict) ())
+
+let terminal_reason_timeline_event ~latest_decision ~latest_receipt =
+  let source_json, ts_unix_opt, reason_opt =
+    match latest_decision with
+    | Some decision -> (
+        match terminal_reason_from_decision decision with
+        | Some reason ->
+            ( Some decision,
+              (match json_float_opt_member "ts_unix" decision with
+               | Some _ as value -> value
+               | None -> json_float_opt_member "wall_clock" decision),
+              Some reason )
+        | None -> (None, None, None))
+    | None -> (None, None, None)
+  in
+  let source_json, ts_unix_opt, reason_opt =
+    match reason_opt, latest_receipt with
+    | Some _, _ -> (source_json, ts_unix_opt, reason_opt)
+    | None, Some receipt -> (
+        match terminal_reason_from_receipt receipt with
+        | Some reason ->
+            let ts_unix_opt =
+              match json_string_opt_member "ended_at" receipt with
+              | Some ended_at ->
+                  let ts = Types.parse_iso8601 ~default_time:0.0 ended_at in
+                  if ts > 0.0 then Some ts else None
+              | None -> None
+            in
+            (Some receipt, ts_unix_opt, Some reason)
+        | None -> (None, None, None))
+    | None, None -> (None, None, None)
+  in
+  match source_json, ts_unix_opt, reason_opt with
+  | Some source_json, Some ts_unix, Some reason ->
+      Some
+        (timeline_event_json
+           ?trace_id:(json_string_opt_member "trace_id" source_json)
+           ?keeper_turn_id:(keeper_turn_id_of_json source_json)
+           ?task_id:
+             (match json_string_opt_member "task_id" source_json with
+              | Some _ as value -> value
+              | None -> json_string_opt_member "current_task_id" source_json)
+           ~goal_ids:(goal_ids_of_json source_json)
+           ?next_human_action:reason.next_action
+           ~ts_unix ~kind:"terminal_reason"
+           ~title:"Terminal Reason"
+           ~summary:reason.summary
+           ~severity:(Keeper_turn_terminal.severity_to_string reason.severity)
+           ())
+  | _ -> None
 
 let transition_timeline_event json =
   match json_float_opt_member "wall_clock_at_decision" json with
@@ -724,6 +790,10 @@ let causal_timeline_json ~base_path ~meta ~latest_decision ~latest_receipt
      | None -> [])
     |> List.filter_map Fun.id
   in
+  let terminal_reason_events =
+    [ terminal_reason_timeline_event ~latest_decision ~latest_receipt ]
+    |> List.filter_map Fun.id
+  in
   let blocker_events =
     let task_id = Keeper_runtime_contract.current_task_id_opt meta in
     let goal_ids = meta.active_goal_ids in
@@ -758,8 +828,8 @@ let causal_timeline_json ~base_path ~meta ~latest_decision ~latest_receipt
     then acc
     else item :: acc
   in
-  tool_events @ approval_events @ transition_events @ decision_events
-  @ receipt_events @ blocker_events
+  tool_events @ approval_events @ transition_events @ terminal_reason_events
+  @ decision_events @ receipt_events @ blocker_events
   @ (List.filter_map Fun.id [ latest_tool_call_event; latest_approval_event ])
   |> List.fold_left dedupe []
   |> sort_timeline_events
@@ -773,6 +843,17 @@ let snapshot_json ~(config : Coord.config) ~(meta : keeper_meta) =
   let latest_decision = latest_decision_json ~config ~keeper_name:meta.name in
   let latest_tool_call = latest_tool_call_json ~keeper_name:meta.name in
   let latest_receipt = latest_receipt_json ~config ~keeper_name:meta.name in
+  let latest_terminal_reason =
+    latest_terminal_reason_opt ~latest_decision ~latest_receipt
+  in
+  let latest_terminal_reason_json =
+    latest_terminal_reason
+    |> Option.map Keeper_turn_terminal.to_json
+    |> Option.value ~default:`Null
+  in
+  let latest_next_action =
+    Option.bind latest_terminal_reason (fun reason -> reason.next_action)
+  in
   let latest_approval_audit =
     match
       Keeper_approval_queue.read_recent_audit ~base_path:config.base_path
@@ -889,6 +970,8 @@ let snapshot_json ~(config : Coord.config) ~(meta : keeper_meta) =
       ("next_human_action", Json_util.string_opt_to_json next_human_action);
       ("approval", approval_state);
       ("execution", execution_summary);
+      ("latest_terminal_reason", latest_terminal_reason_json);
+      ("latest_next_action", Json_util.string_opt_to_json latest_next_action);
       ("pending_approval_count", `Int pending_approval_count);
       ("pending_approvals", pending_approvals);
       ("latest_decision", Option.value ~default:`Null latest_decision);

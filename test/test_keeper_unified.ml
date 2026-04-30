@@ -1066,6 +1066,8 @@ let test_scheduled_turn_decision_runs_immediately_on_fresh_backlog_update () =
      | WO.Skip _ -> false)
 
 let test_runtime_trust_snapshot_tolerates_null_telemetry () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_dir = temp_dir () in
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
@@ -1081,8 +1083,62 @@ let test_runtime_trust_snapshot_tolerates_null_telemetry () =
       let snapshot =
         Masc_mcp.Keeper_runtime_trust_snapshot.snapshot_json ~config ~meta
       in
-      check bool "selected model stays null" true
-        Yojson.Safe.Util.(snapshot |> member "selected_model" = `Null))
+	      check bool "selected model stays null" true
+	        Yojson.Safe.Util.(snapshot |> member "selected_model" = `Null))
+
+let test_runtime_trust_snapshot_surfaces_terminal_reason () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc_mcp.Coord.default_config base_dir in
+      let keeper_name = "runtime-trust-terminal-reason" in
+      let meta =
+        {
+          minimal_meta with
+          name = keeper_name;
+          active_goal_ids = [ "goal-terminal-reason" ];
+        }
+      in
+      let decision_path = Keeper_types.keeper_decision_log_path config keeper_name in
+      Keeper_types.mkdir_p (Filename.dirname decision_path);
+      Masc_mcp.Keeper_types_support.append_jsonl_line
+        decision_path
+        (`Assoc
+          [
+            ("ts_unix", `Float 1_712_000_000.0);
+            ("trace_id", `String "trace-terminal-reason");
+            ("turn_id", `Int 7);
+            ("task_id", `String "task-terminal-reason");
+            ("goal_ids", `List [ `String "goal-terminal-reason" ]);
+            ( "terminal_reason",
+              `Assoc
+                [
+                  ("code", `String "gh_repo_context_missing_worktree");
+                  ("source", `String "legacy_error_text");
+                  ("severity", `String "warn");
+                  ( "summary",
+                    `String "GitHub command blocked because the active task has no linked worktree" );
+                  ("next_action", `String "create_or_link_worktree");
+                ] );
+          ]);
+      let snapshot =
+        Masc_mcp.Keeper_runtime_trust_snapshot.snapshot_json ~config ~meta
+      in
+      let open Yojson.Safe.Util in
+      check string "latest terminal code" "gh_repo_context_missing_worktree"
+        (snapshot |> member "latest_terminal_reason" |> member "code" |> to_string);
+      check string "latest next action" "create_or_link_worktree"
+        (snapshot |> member "latest_next_action" |> to_string);
+      let timeline = snapshot |> member "causal_timeline" |> to_list in
+      check bool "terminal reason event present" true
+        (List.exists
+           (fun event ->
+             event |> member "kind" |> to_string = "terminal_reason"
+             && event |> member "next_human_action" |> to_string = "create_or_link_worktree")
+           timeline))
 
 let test_prompt_contains_identity () =
   let sys, _user = UP.build_prompt ~base_path:"/test" ~meta:minimal_meta ~observation:base_observation () in
@@ -2919,10 +2975,18 @@ let test_append_decision_record_persists_tool_calls () =
         Yojson.Safe.Util.(List.nth recorded_tool_calls 0 |> member "tool_name" |> to_string);
       check string "first provider" "codex_cli"
         Yojson.Safe.Util.(List.nth recorded_tool_calls 0 |> member "provider" |> to_string);
-      check string "second outcome" "error"
-        Yojson.Safe.Util.(List.nth recorded_tool_calls 1 |> member "outcome" |> to_string);
-      check (float 0.001) "second latency" 3.0
-        Yojson.Safe.Util.(List.nth recorded_tool_calls 1 |> member "latency_ms" |> to_float))
+	      check string "second outcome" "error"
+	        Yojson.Safe.Util.(List.nth recorded_tool_calls 1 |> member "outcome" |> to_string);
+	      check (float 0.001) "second latency" 3.0
+	        Yojson.Safe.Util.(List.nth recorded_tool_calls 1 |> member "latency_ms" |> to_float);
+	      check string "terminal reason success" "success"
+	        Yojson.Safe.Util.(json |> member "terminal_reason" |> member "code" |> to_string);
+	      check string "provider context selected model" "codex_cli:gpt-5.4"
+	        Yojson.Safe.Util.(json |> member "provider_context" |> member "selected_model" |> to_string);
+	      check string "tool contract requirement" "optional"
+	        Yojson.Safe.Util.(json |> member "tool_contract" |> member "requirement" |> to_string);
+	      check int "tool contract count mirrors tool calls" 2
+	        Yojson.Safe.Util.(json |> member "tool_contract" |> member "tool_call_count" |> to_int))
 
 let test_append_decision_record_nulls_unreported_usage () =
   Eio_main.run @@ fun env ->
@@ -2975,8 +3039,37 @@ let test_append_decision_record_nulls_unreported_usage () =
         (telemetry |> member "telemetry_reported" |> to_bool);
       check string "coverage stage persisted" "oas"
         (telemetry |> member "coverage_stage" |> to_string);
-      check string "coverage reason persisted" "missing_usage_and_inference"
-        (telemetry |> member "coverage_reason" |> to_string))
+	      check string "coverage reason persisted" "missing_usage_and_inference"
+	        (telemetry |> member "coverage_reason" |> to_string))
+
+let test_append_decision_record_classifies_legacy_worktree_error () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "observer"));
+      UM.append_decision_record
+        ~config
+        ~meta:minimal_meta
+        ~observation:base_observation
+        ~latency_ms:19
+        ~outcome:"error"
+        ~error:
+          "keeper_shell failed: gh_repo_context_missing_worktree: active task has no linked worktree"
+        ();
+      let json =
+        read_jsonl_line (Keeper_types.keeper_decision_log_path config minimal_meta.name)
+      in
+      let open Yojson.Safe.Util in
+      check string "terminal code" "gh_repo_context_missing_worktree"
+        (json |> member "terminal_reason" |> member "code" |> to_string);
+      check string "next action" "create_or_link_worktree"
+        (json |> member "terminal_reason" |> member "next_action" |> to_string);
+      check string "tool contract unknown for error path" "unknown"
+        (json |> member "tool_contract" |> member "requirement" |> to_string))
 
 let test_run_keeper_cycle_skips_non_executable_phase () =
   Eio_main.run @@ fun env ->
@@ -6262,9 +6355,11 @@ let () =
             test_task_backlog_cooldown_applies_noop_backoff_once;
           test_case "fresh backlog update bypasses cooldown" `Quick
             test_scheduled_turn_decision_runs_immediately_on_fresh_backlog_update;
-          test_case "runtime trust snapshot tolerates null telemetry" `Quick
-            test_runtime_trust_snapshot_tolerates_null_telemetry;
-          test_case "with goals" `Quick test_observation_with_goals;
+	          test_case "runtime trust snapshot tolerates null telemetry" `Quick
+	            test_runtime_trust_snapshot_tolerates_null_telemetry;
+	          test_case "runtime trust snapshot surfaces terminal reason" `Quick
+	            test_runtime_trust_snapshot_surfaces_terminal_reason;
+	          test_case "with goals" `Quick test_observation_with_goals;
           test_case "economic modes" `Quick test_observation_economic_modes;
         ] );
       ( "unified_prompt",
@@ -6397,10 +6492,12 @@ let () =
             test_append_metrics_snapshot_marks_untrusted_usage;
           test_case "decision record persists tool call details" `Quick
             test_append_decision_record_persists_tool_calls;
-          test_case "decision record nulls unreported usage" `Quick
-            test_append_decision_record_nulls_unreported_usage;
-          test_case "social fields" `Quick
-            test_metrics_persist_social_state_fields;
+	          test_case "decision record nulls unreported usage" `Quick
+	            test_append_decision_record_nulls_unreported_usage;
+	          test_case "decision record classifies worktree blocker" `Quick
+	            test_append_decision_record_classifies_legacy_worktree_error;
+	          test_case "social fields" `Quick
+	            test_metrics_persist_social_state_fields;
           test_case "failure response" `Quick test_metrics_failure_response;
           test_case "timeout failure increments proactive backoff" `Quick
             test_metrics_failure_timeout_increments_proactive_backoff;

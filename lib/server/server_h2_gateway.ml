@@ -460,11 +460,26 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
                              h2_respond_json h2_reqd body ~status:`Bad_request
                                ~extra_headers:(cors @ mcp_headers session_id (get_protocol_version httpun_request))
                          | Ok () ->
+                             let protocol_version =
+                               get_protocol_version httpun_request
+                             in
+                             let sse_active_before_stop =
+                               Server_mcp_transport_http.is_active_sse_session
+                                 session_id
+                             in
                              stop_sse_session session_id;
                              Sse.unregister session_id;
                              forget_mcp_session session_id;
-                             Log.info ~ctx:"h2_gateway" "Session terminated: %s" session_id;
-                             let mcp_hdrs = mcp_headers session_id (get_protocol_version httpun_request) in
+                             Log.info ~ctx:"h2_gateway"
+                               "Session terminated: %s reason=client_delete \
+                                profile=%s protocol_version=%s \
+                                sse_active_before_stop=%b"
+                               session_id
+                               (Server_mcp_transport_http.profile_label profile)
+                               protocol_version sse_active_before_stop;
+                             let mcp_hdrs =
+                               mcp_headers session_id protocol_version
+                             in
                              h2_respond_empty h2_reqd ~extra_headers:mcp_hdrs))
                 | None ->
                     h2_respond_text h2_reqd "Mcp-Session-Id required" ~status:`Bad_request ~extra_headers:cors))

@@ -802,21 +802,31 @@ let handle_delete_mcp ~deps ?(profile = Full) request reqd =
                   in
                   Httpun.Reqd.respond_with_string reqd response body
               | Ok () ->
+               let protocol_version = get_protocol_version request in
+               let sse_active_before_stop = is_active_sse_session session_id in
                stop_sse_session session_id;
                Sse.unregister session_id;
-               (match request_runtime_result deps with
-               | Ok runtime ->
-                   runtime.clear_resource_subscriptions_for_session session_id
-               | Error msg ->
-                   Log.Server.debug
-                     "skip resource subscription cleanup for session %s: %s"
-                     session_id msg);
+               let resource_cleanup =
+                 match request_runtime_result deps with
+                 | Ok runtime ->
+                     runtime.clear_resource_subscriptions_for_session session_id;
+                     "cleared"
+                 | Error msg ->
+                     Log.Server.debug
+                       "skip resource subscription cleanup for session %s: %s"
+                       session_id msg;
+                     "skipped_runtime_unavailable"
+               in
                forget_mcp_session session_id;
-               Log.info ~ctx:"mcp_transport" "Session terminated: %s" session_id;
+               Log.info ~ctx:"mcp_transport"
+                 "Session terminated: %s reason=client_delete profile=%s \
+                  protocol_version=%s sse_active_before_stop=%b \
+                  resource_cleanup=%s"
+                 session_id (profile_label profile) protocol_version
+                 sse_active_before_stop resource_cleanup;
               let headers =
                 Httpun.Headers.of_list
-                  (("content-length", "0")
-                  :: mcp_headers session_id (get_protocol_version request))
+                  (("content-length", "0") :: mcp_headers session_id protocol_version)
               in
               let response = Httpun.Response.create ~headers `No_content in
               Httpun.Reqd.respond_with_string reqd response ""))

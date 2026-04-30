@@ -40,6 +40,10 @@ val forget_mcp_session : string -> unit
 (** Removes both the protocol-version and tool-profile entries
     for [session_id]. *)
 
+val profile_label : Server_mcp_transport_http_types.tool_profile -> string
+(** Stable label for the MCP HTTP surface a session belongs to.
+    Used in profile-mismatch errors and termination logs. *)
+
 val reap_stale_sessions :
   is_active_session:(string -> bool) -> int
 (** [reap_stale_sessions ~is_active_session] removes session

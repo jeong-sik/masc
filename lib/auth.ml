@@ -795,15 +795,21 @@ let record_bearer_token_mismatch ~expected_agent ~actual_agent =
     ]
     ()
 
+let bearer_token_owner_mismatch_message ~requested_agent ~token_owner =
+  Printf.sprintf
+    "No credential found for %s (bearer token belongs to %s). MCP identity \
+     mismatch: mint/sync a bearer for %s (`masc-mcp login --agent %s --role \
+     worker --shell`, then `sb mcp sync`) or send the token owner's identity."
+    requested_agent token_owner requested_agent requested_agent
+
 let missing_credential_error config ~agent_name ~token : masc_error =
   match find_credential_by_token config ~token with
   | Ok owner when owner.agent_name <> agent_name ->
       record_bearer_token_mismatch
         ~expected_agent:agent_name ~actual_agent:owner.agent_name;
       Unauthorized
-        (Printf.sprintf
-           "No credential found for %s (bearer token belongs to %s)"
-           agent_name owner.agent_name)
+        (bearer_token_owner_mismatch_message ~requested_agent:agent_name
+           ~token_owner:owner.agent_name)
   | _ -> Unauthorized ("No credential found for " ^ agent_name)
 
 (** Verify a token.
@@ -831,9 +837,8 @@ let verify_token_owner_alias config ~agent_name ~token =
         ~expected_agent:agent_name ~actual_agent:owner.agent_name;
       Error
         (Unauthorized
-           (Printf.sprintf
-              "No credential found for %s (bearer token belongs to %s)"
-              agent_name owner.agent_name))
+           (bearer_token_owner_mismatch_message ~requested_agent:agent_name
+              ~token_owner:owner.agent_name))
   | Error e -> Error e
 
 let verify_token config ~agent_name ~token : (agent_credential, masc_error) result =

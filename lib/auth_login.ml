@@ -15,6 +15,7 @@ type t = {
   raw_token_file : string;
   dashboard_url : string;
   mcp_url : string;
+  mcp_token_env_var : string;
   codex_server_name : string;
   codex_token_env_var : string;
   codex_login_supported : bool;
@@ -23,6 +24,12 @@ type t = {
 let codex_server_name = "masc"
 
 let codex_token_env_var = "MASC_MCP_TOKEN"
+
+let mcp_token_env_var_for_agent = function
+  | "claude" -> "MASC_CLAUDE_MCP_TOKEN"
+  | "gemini" -> "MASC_GEMINI_MCP_TOKEN"
+  | "codex" | "codex-mcp-client" -> codex_token_env_var
+  | _ -> codex_token_env_var
 
 let rng_initialized = Atomic.make false
 
@@ -106,6 +113,7 @@ let mint ~base_path ~host ~port ~agent_name ~role () =
               raw_token_file;
               dashboard_url;
               mcp_url;
+              mcp_token_env_var = mcp_token_env_var_for_agent cred.agent_name;
               codex_server_name;
               codex_token_env_var;
               codex_login_supported = false;
@@ -124,6 +132,14 @@ let to_yojson report =
       ("raw_token_file", `String report.raw_token_file);
       ("dashboard_url", `String report.dashboard_url);
       ("mcp_url", `String report.mcp_url);
+      ( "mcp_client",
+        `Assoc
+          [
+            ("server_name", `String report.codex_server_name);
+            ("agent_name", `String report.agent_name);
+            ("auth_model", `String "bearer_token_env");
+            ("token_env_var", `String report.mcp_token_env_var);
+          ] );
       ( "codex_mcp",
         `Assoc
           [
@@ -144,7 +160,7 @@ let render_shell report =
         (single_quote_shell report.agent_name);
       Printf.sprintf "export MASC_OPERATOR_TOKEN=%s"
         (single_quote_shell report.bearer_token);
-      Printf.sprintf "export %s=%s" report.codex_token_env_var
+      Printf.sprintf "export %s=%s" report.mcp_token_env_var
         (single_quote_shell report.bearer_token);
       Printf.sprintf "export MASC_DASHBOARD_URL=%s"
         (single_quote_shell report.dashboard_url);
@@ -167,6 +183,12 @@ let render_text report =
       "";
       "exports:";
       render_shell report;
+      "";
+      "mcp_client:";
+      Printf.sprintf "- server_name: %s" report.codex_server_name;
+      Printf.sprintf "- agent_name: %s" report.agent_name;
+      Printf.sprintf "- token_env_var: %s" report.mcp_token_env_var;
+      "- auth_model: bearer_token_env";
       "";
       "codex_mcp:";
       Printf.sprintf "- server_name: %s" report.codex_server_name;

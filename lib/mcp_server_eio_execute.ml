@@ -76,6 +76,21 @@ let silent_auth_token_error_kind = function
 let should_read_legacy_persisted_agent_name ~has_explicit_agent_name ~agent_name =
   (not has_explicit_agent_name) && is_ephemeral_agent_name agent_name
 
+let caller_agent_name_from_arguments arguments =
+  let nonempty_nonunknown key =
+    match Safe_ops.json_string_opt key arguments with
+    | Some value ->
+        let value = String.trim value in
+        if value <> "" && value <> "unknown" then
+          Some value
+        else
+          None
+    | None -> None
+  in
+  match nonempty_nonunknown "_agent_name" with
+  | Some _ as value -> value
+  | None -> nonempty_nonunknown "agent_name"
+
 let direct_call_block_message name =
   if Tool_catalog.is_on_surface Tool_catalog.Keeper_internal name then
     let replacement_hint =
@@ -158,18 +173,18 @@ let execute_tool_eio ~sw ~clock ?(profile = Mcp_server_eio_tool_profile.Full)
   in
 
   (* Helper to get values from JSON arguments - delegates to Safe_ops *)
-  let arg_get_string key default =
-    Safe_ops.json_string ~default key arguments
-  in
   let arg_get_string_opt key =
     match Safe_ops.json_string_opt key arguments with
     | Some "" -> None
     | other -> other
   in
 
-  (* Resolve agent_name via Agent Identity system (primary) with legacy fallback. *)
-  let raw_agent_name = arg_get_string "agent_name" "" in
-  let has_explicit_agent_name = raw_agent_name <> "" && raw_agent_name <> "unknown" in
+  (* Resolve caller identity.  HTTP auth injects [_agent_name] from the
+     bearer-token owner; legacy [agent_name] is still accepted for direct
+     callers and for older MCP clients that have not moved to the internal
+     marker yet. *)
+  let explicit_agent_name = caller_agent_name_from_arguments arguments in
+  let has_explicit_agent_name = Option.is_some explicit_agent_name in
   let identity_session_prefix =
     let len = min 8 (String.length identity.session_key) in
     if len = 0 then "anon" else String.sub identity.session_key 0 len
@@ -179,30 +194,39 @@ let execute_tool_eio ~sw ~clock ?(profile = Mcp_server_eio_tool_profile.Full)
   in
   let agent_name =
     (* Fix 4: Use cached resolved name to skip legacy /tmp file reads *)
-    if has_explicit_agent_name then
-      raw_agent_name
-    else match cached_resolved_agent with
-    | Some cached -> cached
+    match explicit_agent_name with
+    | Some agent_name -> agent_name
     | None ->
-    if identity.Agent_identity.agent_name <> "" then
-      identity.Agent_identity.agent_name
-    else
-      match read_mcp_session_agent () with
-      | Some name -> name
-      | None ->
-          if Option.is_some mcp_session_id then
-            generated_fallback_agent_name
-          else
-            let term_session_id = Option.value ~default:"" (Sys.getenv_opt "TERM_SESSION_ID") in
-            let term_file = Printf.sprintf "/tmp/.masc_agent_%s" term_session_id in
-            (match Safe_ops.protect ~default:None (fun () ->
-               let name = Fs_compat.load_file term_file |> String.trim in
-               if name <> "" then Some name else None)
-             with
-             | Some name ->
-                 Log.Mcp.warn "[deprecated] agent name resolved via /tmp TERM file — migrate to Agent_identity";
-                 name
-             | None -> generated_fallback_agent_name)
+        (match cached_resolved_agent with
+         | Some cached -> cached
+         | None ->
+             if identity.Agent_identity.agent_name <> "" then
+               identity.Agent_identity.agent_name
+             else
+               match read_mcp_session_agent () with
+               | Some name -> name
+               | None ->
+                   if Option.is_some mcp_session_id then
+                     generated_fallback_agent_name
+                   else
+                     let term_session_id =
+                       Option.value ~default:"" (Sys.getenv_opt "TERM_SESSION_ID")
+                     in
+                     let term_file =
+                       Printf.sprintf "/tmp/.masc_agent_%s" term_session_id
+                     in
+                     (match
+                        Safe_ops.protect ~default:None (fun () ->
+                            let name =
+                              Fs_compat.load_file term_file |> String.trim
+                            in
+                            if name <> "" then Some name else None)
+                      with
+                      | Some name ->
+                          Log.Mcp.warn
+                            "[deprecated] agent name resolved via /tmp TERM file — migrate to Agent_identity";
+                          name
+                      | None -> generated_fallback_agent_name))
   in
 
   let token =

@@ -41,6 +41,7 @@ type t = {
   raw_token_file : string;
   dashboard_url : string;
   mcp_url : string;
+  mcp_token_env_var : string;
   codex_server_name : string;
   codex_token_env_var : string;
   codex_login_supported : bool;
@@ -54,6 +55,10 @@ type t = {
       written to [raw_token_file] (operator-readable, mode 0600).
     - [dashboard_url] always carries [agent] + [token] query params,
       both URL-encoded.
+    - [mcp_token_env_var] is the client-specific bearer env var for
+      known MCP clients ([claude] -> [MASC_CLAUDE_MCP_TOKEN],
+      [gemini] -> [MASC_GEMINI_MCP_TOKEN], Codex ->
+      [MASC_MCP_TOKEN]).
     - [codex_server_name] is the constant [["masc"]] and
       [codex_token_env_var] is [["MASC_MCP_TOKEN"]]; both pinned at
       this level so the operator runbook for `codex` integration
@@ -106,7 +111,8 @@ val to_yojson : t -> Yojson.Safe.t
 (** [to_yojson report] renders the canonical JSON-RPC result
     object with fields [status: "ok"] / [base_path] / [auth_config_path]
     / [auth_change] / [agent_name] / [role] / [bearer_token] /
-    [raw_token_file] / [dashboard_url] / [mcp_url] / [codex_mcp].
+    [raw_token_file] / [dashboard_url] / [mcp_url] / [mcp_client] /
+    [codex_mcp].
 
     The [codex_mcp] sub-object pins five fields: [server_name],
     [auth_model: "bearer_token_env"], [token_env_var],
@@ -121,7 +127,7 @@ val render_shell : t -> string
 
     - [MASC_OPERATOR_AGENT]
     - [MASC_OPERATOR_TOKEN]
-    - [<codex_token_env_var>] (currently [MASC_MCP_TOKEN])
+    - [<mcp_token_env_var>] (client-specific for Claude/Gemini/Codex)
     - [MASC_DASHBOARD_URL]
 
     All values are POSIX-quoted (single-quoted with embedded
@@ -133,8 +139,8 @@ val render_text : t -> string
     suitable for terminal display: status / base_path /
     auth_config_path / auth_change / agent_name / role /
     raw_token_file / dashboard_url / mcp_url, then the shell
-    [exports:] block (from {!render_shell}), then the [codex_mcp:]
-    block describing the bearer-token-env auth model.
+    [exports:] block (from {!render_shell}), then [mcp_client:] and
+    [codex_mcp:] blocks describing the bearer-token-env auth model.
 
     The bearer token itself is intentionally NOT included as a
     standalone line in the text output — it appears only inside

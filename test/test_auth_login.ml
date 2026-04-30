@@ -48,6 +48,8 @@ let test_login_enables_bearer_auth_and_prints_codex_exports () =
         (Types.agent_role_to_string report.role);
       check string "codex env" "MASC_MCP_TOKEN"
         report.codex_token_env_var;
+      check string "client env" "MASC_MCP_TOKEN"
+        report.mcp_token_env_var;
       check bool "codex login unsupported" false
         report.codex_login_supported;
       check bool "raw token file exists" true
@@ -76,6 +78,32 @@ let test_login_enables_bearer_auth_and_prints_codex_exports () =
         (Yojson.Safe.Util.member "status" json
         |> Yojson.Safe.Util.to_string)
 
+let test_login_prints_claude_client_env () =
+  with_temp_dir "auth-login-claude" @@ fun base_path ->
+  match
+    Auth_login.mint ~base_path ~host:"127.0.0.1" ~port:8935
+      ~agent_name:"claude" ~role:Types.Worker ()
+  with
+  | Error err ->
+      failf "login mint failed: %s" (Types.masc_error_to_string err)
+  | Ok report ->
+      check string "agent" "claude" report.agent_name;
+      check string "client env" "MASC_CLAUDE_MCP_TOKEN"
+        report.mcp_token_env_var;
+      check string "codex env remains pinned" "MASC_MCP_TOKEN"
+        report.codex_token_env_var;
+      let shell = Auth_login.render_shell report in
+      check bool "shell exports claude token" true
+        (contains_substring ~needle:"export MASC_CLAUDE_MCP_TOKEN="
+           shell);
+      check bool "shell does not export codex token for claude login" false
+        (contains_substring ~needle:"export MASC_MCP_TOKEN=" shell);
+      let json = Auth_login.to_yojson report in
+      check string "json client env" "MASC_CLAUDE_MCP_TOKEN"
+        (Yojson.Safe.Util.member "mcp_client" json
+         |> Yojson.Safe.Util.member "token_env_var"
+         |> Yojson.Safe.Util.to_string)
+
 let () =
   run "auth_login"
     [
@@ -83,5 +111,7 @@ let () =
         [
           test_case "enables bearer auth and prints Codex exports" `Quick
             test_login_enables_bearer_auth_and_prints_codex_exports;
+          test_case "prints Claude client env" `Quick
+            test_login_prints_claude_client_env;
         ] );
     ]

@@ -663,7 +663,11 @@ module Kimi_cli_transport_local = struct
       cancel = None;
     }
 
-  let default_prompt_argv_threshold = 512 * 1024
+  (* Kimi CLI imports [setproctitle] on macOS before processing the
+     request.  Long UTF-8 prompts in argv can make setproctitle's
+     import-time [getproctitle()] decode fail before Kimi reads the
+     prompt, so keep argv small and stream keeper prompts via stdin. *)
+  let default_prompt_argv_threshold = 16 * 1024
 
   let prompt_argv_threshold () =
     match Sys.getenv_opt "OAS_KIMI_PROMPT_ARGV_THRESHOLD" with
@@ -997,12 +1001,27 @@ module Kimi_cli_transport_local = struct
     | _ when text_looks_like_resumable_session text -> exit_code_marker_of_text text
     | _ -> None
 
+  let text_looks_like_process_title_unicode_crash text =
+    String_util.contains_substring_ci text "UnicodeDecodeError"
+    && String_util.contains_substring_ci text "setproctitle"
+
   let classify_cli_error = function
     | Error (Llm_provider.Http_client.NetworkError { message; _ }) as err -> (
         if text_looks_like_resumable_session message then
           Error
             (Llm_provider.Http_client.AcceptRejected
                { reason = resumable_session_detail_of_text message })
+        else if text_looks_like_process_title_unicode_crash message then
+          Error
+            (Llm_provider.Http_client.AcceptRejected
+               {
+                 reason =
+                   "kimi_cli startup crash while setting process title \
+                    (UnicodeDecodeError). This is a local CLI/runtime \
+                    failure, not keeper auth or sandbox failure; rejecting \
+                    without retry so the cascade can move on. "
+                   ^ message;
+               })
         else
           match exit_code_of_message message with
         | Some 1 ->

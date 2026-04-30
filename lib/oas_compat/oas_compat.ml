@@ -69,9 +69,10 @@ module Http_client = struct
          - kimi_cli exit 1: [transport_kimi_cli.ml] labels this
            "permanent auth/config/model error". The auth/config is specific
            to Moonshot; claude/gpt/ollama providers are unaffected.
-         - gemini_cli startup crash: [transport_gemini_cli.ml] explicitly
-           marks the AcceptRejected with "rejecting without retry so the
-           cascade can move on".
+         - gemini_cli startup crash and kimi_cli process-title
+           UnicodeDecodeError: the CLI source explicitly marks the
+           AcceptRejected with "rejecting without retry so the cascade can
+           move on".
      (b) Provider capability mismatches wrapped by MASC's worker layer at
          [oas_worker_named.ml:672-678] (InvalidConfig runtime_mcp_auth /
          tool_support). The detail string is built in

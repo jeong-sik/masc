@@ -2419,6 +2419,19 @@ let test_kimi_cli_build_args_include_runtime_mcp_config () =
        (contains_substring ~needle:"http://127.0.0.1:8947/mcp")
        argv)
 
+let test_kimi_cli_build_args_uses_stdin_for_large_prompt () =
+  let long_prompt = String.make (20 * 1024) 'x' in
+  let argv =
+    Oas_worker_exec.Kimi_cli_transport_local.build_args
+      ~config:Oas_worker_exec.Kimi_cli_transport_local.default_config
+      ~req_config:(make_kimi_cli_provider_cfg ())
+      ~mcp_config_json:[] ~prompt:long_prompt
+  in
+  Alcotest.(check bool) "large prompt is omitted from argv" false
+    (List.mem long_prompt argv);
+  Alcotest.(check bool) "large prompt does not use -p" false
+    (List.mem "-p" argv)
+
 let test_kimi_cli_model_for_provider_keeps_transport_default_on_auto () =
   let provider_cfg = make_kimi_cli_provider_cfg () in
   Alcotest.(check (option string)) "auto uses transport default"
@@ -2581,6 +2594,30 @@ let test_kimi_cli_classify_cli_error_keeps_exit_1_with_error_as_reject () =
       Alcotest.(check bool) "stderr detail preserved" true
         (contains_substring ~needle:"Authentication failed" reason)
   | _ -> Alcotest.fail "expected exit 1 with real stderr to stay rejected"
+
+let test_kimi_cli_classify_cli_error_labels_process_title_unicode_crash () =
+  let raw_message =
+    "kimi exited with code 1: Traceback ... \
+     setproctitle/__init__.py:57 in <module> getproctitle() \
+     UnicodeDecodeError: 'utf-8' codec can't decode byte 0xef"
+  in
+  match
+    Oas_worker_exec.Kimi_cli_transport_local.classify_cli_error
+      (Error
+         (Llm_provider.Http_client.NetworkError
+            {
+              message = raw_message;
+              kind = Llm_provider.Http_client.Unknown;
+            }))
+  with
+  | Error (Llm_provider.Http_client.AcceptRejected { reason }) ->
+      Alcotest.(check bool) "startup crash marker" true
+        (contains_substring ~needle:"startup crash" reason);
+      Alcotest.(check bool) "unicode crash detail preserved" true
+        (contains_substring ~needle:"UnicodeDecodeError" reason);
+      Alcotest.(check bool) "not framed as auth/config" false
+        (contains_substring ~needle:"auth/config/model" reason)
+  | _ -> Alcotest.fail "expected setproctitle UnicodeDecodeError to map to AcceptRejected"
 let test_codex_cli_prompt_preflight_uses_pipeline_context_window_fallback () =
   let provider_cfg = make_codex_cli_provider_cfg () in
   let config =
@@ -3934,6 +3971,8 @@ let () =
         test_kimi_cli_runtime_mcp_jsons_include_request_policy;
       Alcotest.test_case "kimi argv includes request runtime MCP config" `Quick
         test_kimi_cli_build_args_include_runtime_mcp_config;
+      Alcotest.test_case "kimi large prompt uses stdin, not argv" `Quick
+        test_kimi_cli_build_args_uses_stdin_for_large_prompt;
       Alcotest.test_case "kimi auto model keeps transport default" `Quick
         test_kimi_cli_model_for_provider_keeps_transport_default_on_auto;
       Alcotest.test_case "kimi explicit model is preserved" `Quick
@@ -3950,6 +3989,8 @@ let () =
         test_kimi_cli_resumable_invalid_request_reclassifies_as_structured;
       Alcotest.test_case "kimi exit 1 with stderr remains rejected" `Quick
         test_kimi_cli_classify_cli_error_keeps_exit_1_with_error_as_reject;
+      Alcotest.test_case "kimi setproctitle unicode crash is startup crash" `Quick
+        test_kimi_cli_classify_cli_error_labels_process_title_unicode_crash;
       Alcotest.test_case "worker build_agent installs retry policy" `Quick
         test_worker_build_agent_uses_default_internal_retry_policy;
       Alcotest.test_case "resume config propagates retry policy" `Quick

@@ -120,6 +120,28 @@ let test_pause_human_when_no_tools_used () =
   let r = mk_receipt ~tools_used:[] () in
   check_disp "tools_used=[]" r "pause_human" "tool_required_unsatisfied"
 
+let test_provider_failure_not_reported_as_tool_unsatisfied () =
+  let r =
+    mk_receipt ~tools_used:[] ~terminal_reason_code:"api_error_invalid_request"
+      ~error_kind:(Some "api")
+      ~error_message:
+        (Some
+           "Invalid request: kimi_cli startup crash while setting process title")
+      ()
+  in
+  check_disp "provider failure before tool use" r "pause_human"
+    "provider_runtime_error"
+
+let test_preflight_config_failure_not_reported_as_tool_unsatisfied () =
+  let r =
+    mk_receipt ~tools_used:[] ~terminal_reason_code:"config_error"
+      ~error_kind:(Some "config")
+      ~error_message:(Some "provider auth/config failed before turn")
+      ()
+  in
+  check_disp "preflight config before tool use" r "pause_human"
+    "preflight_config_error"
+
 (* === Cascade exhausted always alerts ================================ *)
 
 let test_alert_for_cascade_exhausted () =
@@ -245,6 +267,10 @@ let () =
             test_pause_human_for_each_violation;
           test_case "tools_used=[] -> pause_human" `Quick
             test_pause_human_when_no_tools_used;
+          test_case "provider failure before tool use -> provider_runtime_error" `Quick
+            test_provider_failure_not_reported_as_tool_unsatisfied;
+          test_case "config failure before tool use -> preflight_config_error" `Quick
+            test_preflight_config_failure_not_reported_as_tool_unsatisfied;
           test_case "cascade_exhausted -> alert_exhausted" `Quick
             test_alert_for_cascade_exhausted;
           test_case "unmapped -> unknown" `Quick test_unknown_when_unmapped;

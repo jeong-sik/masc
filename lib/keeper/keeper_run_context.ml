@@ -178,17 +178,31 @@ let prepare_run_context
            ~detail:("pre-dispatch checkpoint compaction save failed: " ^ detail))
     | None -> None
   in
-  (if checkpoint_hygiene.applied then
+  (let decision =
+     Option.value
+       ~default:
+         (Keeper_compact_policy.compaction_decision_to_string
+            checkpoint_hygiene.decision)
+       checkpoint_hygiene.trigger
+   in
+   let before_ratio =
+     if max_context <= 0 then 0.0
+     else float_of_int checkpoint_hygiene.before_tokens /. float_of_int max_context
+   in
+   if checkpoint_hygiene.applied then
      Log.Keeper.info
-       "%s: pre-dispatch compaction %s trigger=%s tokens=%d->%d max_context=%d"
+       "%s: pre-dispatch compaction %s trigger=%s tokens=%d->%d \
+        max_context=%d ratio=%.4f checkpoint=%b"
        meta.name
        (if checkpoint_hygiene.meaningful_reduction then "applied" else "attempted")
-       (Option.value
-          ~default:
-            (Keeper_compact_policy.compaction_decision_to_string
-               checkpoint_hygiene.decision)
-          checkpoint_hygiene.trigger)
-       checkpoint_hygiene.before_tokens checkpoint_hygiene.after_tokens max_context);
+       decision checkpoint_hygiene.before_tokens checkpoint_hygiene.after_tokens
+       max_context before_ratio loaded_checkpoint_present
+   else
+     Log.Keeper.info
+       "%s: pre-dispatch compaction skipped decision=%s tokens=%d \
+        max_context=%d ratio=%.4f checkpoint=%b"
+       meta.name decision checkpoint_hygiene.before_tokens max_context before_ratio
+       loaded_checkpoint_present);
   let start_turn_count =
     match resume_oas_checkpoint with
     | Some cp -> cp.turn_count

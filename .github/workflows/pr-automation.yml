@@ -69,6 +69,24 @@ jobs:
               .map((s) => s.trim().toLowerCase())
               .filter(Boolean);
 
+            // Race-condition defence: the event payload reflects the PR state at
+            // trigger time. If the PR was merged/closed between trigger and job
+            // execution, bail out gracefully instead of failing on irreversible
+            // mutations (e.g. convert-to-draft on a merged PR).
+            const { data: currentPr } = await github.rest.pulls.get({
+              owner,
+              repo,
+              pull_number: pullNumber
+            });
+            if (currentPr.merged) {
+              core.info(`PR #${pullNumber} is already merged. Skipping draft guard.`);
+              return;
+            }
+            if (currentPr.state === "closed") {
+              core.info(`PR #${pullNumber} is already closed. Skipping draft guard.`);
+              return;
+            }
+
             const prAuthorLogin = (pr.user?.login || "").toLowerCase();
             const prAuthorType = pr.user?.type;
             const humanAuthored =

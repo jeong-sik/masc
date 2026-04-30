@@ -78,5 +78,44 @@ if [ "$got" != "0" ]; then
 fi
 echo "ok case 3 — comment lines containing := are not flagged"
 
+# Case 4: file-scope pragma exempts the entire file.
+cat > "$TMP/lib/keeper/test_fixture.ml" <<'OCAML'
+(* Synthetic parser file with many local-accumulator mutations. *)
+
+(* tla-lint: file-scope: parser local state — accumulators only *)
+
+let counter = ref 0
+
+let many_mutations () =
+  counter := !counter + 1;
+  counter := !counter + 1;
+  counter := !counter + 1;
+  let a = Atomic.make 0 in
+  Atomic.set a 1;
+  Atomic.set a 2
+OCAML
+got="$(TLA_LINT_KEEPER_DIR="$TMP/lib/keeper" bash "$DETECTOR" --count)"
+if [ "$got" != "0" ]; then
+  echo "FAIL case 4: file-scope pragma should exempt all mutations, got $got" >&2
+  TLA_LINT_KEEPER_DIR="$TMP/lib/keeper" bash "$DETECTOR" >&2 || true
+  exit 1
+fi
+echo "ok case 4 — file-scope pragma exempts all mutations in the file"
+
+# Case 5: file-scope pragma must appear in the first 30 lines.
+{
+  for _ in $(seq 1 35); do echo "(* padding *)"; done
+  echo "(* tla-lint: file-scope: too-late pragma should not exempt *)"
+  echo "let counter = ref 0"
+  echo "let mut () = counter := !counter + 1"
+} > "$TMP/lib/keeper/test_fixture.ml"
+got="$(TLA_LINT_KEEPER_DIR="$TMP/lib/keeper" bash "$DETECTOR" --count)"
+if [ "$got" != "1" ]; then
+  echo "FAIL case 5: late pragma should NOT exempt; expected 1, got $got" >&2
+  TLA_LINT_KEEPER_DIR="$TMP/lib/keeper" bash "$DETECTOR" >&2 || true
+  exit 1
+fi
+echo "ok case 5 — pragma after line 30 does not exempt"
+
 echo ""
-echo "[tla-mutation-lint test] PASS — 3/3 cases"
+echo "[tla-mutation-lint test] PASS — 5/5 cases"

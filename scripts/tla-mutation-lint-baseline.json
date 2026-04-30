@@ -4,5 +4,5 @@
   "_comment_3": "Reduce by either: (a) refactoring the site away from mutation, or (b) annotating with (* tla-lint: allow-mutation: <reason> *).",
   "_comment_4": "After reducing, run scripts/tla-mutation-lint-ratchet.sh --regenerate to rewrite this file. Increases require a paired follow-up issue.",
   "_comment_5": "Reference: planning/claude-plans/greedy-sleeping-blossom.md (Track 1A).",
-  "keeper_mutation_sites_max": 238
+  "keeper_mutation_sites_max": 195
 }

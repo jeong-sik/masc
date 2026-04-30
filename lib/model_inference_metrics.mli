@@ -56,6 +56,12 @@ type model_bucketed = {
     (** Ordered oldest-first; only non-empty buckets are emitted. *)
 }
 
+type latency_bucket = {
+  lo_ms : int;
+  hi_ms : int option;
+  count : int;
+}
+
 type model_stats = {
   model_id : string;
   provider : string option;
@@ -108,6 +114,7 @@ type aggregate = {
   models : model_stats list;
   total_entries : int;
   total_error_entries : int;
+  latency_buckets : latency_bucket list;
 }
 
 val compute : base_path:string -> window_minutes:int -> aggregate

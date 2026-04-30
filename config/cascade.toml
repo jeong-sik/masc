@@ -1,41 +1,49 @@
 comment = "Checked-in seed for cascade authoring. Keep repo defaults boring: bootstrap keeper profile big_three, local keeper profile ollama_only, system-only fallback/judge/phase-routing profiles (default, governance_judge, operator_judge, local_only, local_recovery, tool_rerank), and move personal/live experiments to $MASC_BASE_PATH/.masc/config/cascade.toml."
 
 [default]
-comment = "System-only fallback profile for unknown/missing cascade names. Mirrors big_three without Claude CLI so automatic recovery does not pull Claude by default."
+comment = "System-only fallback profile for unknown/missing cascade names. Mirrors big_three without Claude CLI so automatic recovery does not pull Claude by default. glm:auto + gemini:auto are Direct API fallbacks that pass the tool-use gate via inline tools (Path B) — CLI providers (codex_cli, gemini_cli) cannot carry keeper-bound runtime MCP HTTP headers."
 models = [
   { model = "codex_cli:auto", weight = 1 },
   { model = "gemini_cli:auto", weight = 1 },
   { model = "codex_cli:gpt-5.3-codex-spark", weight = 1 },
+  { model = "glm:auto", weight = 1 },
+  { model = "gemini:auto", weight = 1 },
 ]
 temperature = 0.2
 max_tokens = 16384
 keeper_assignable = false
 
 [big_three]
-comment = "Canonical keeper bootstrap profile exposed by the checked-in seed. Automatic keepers stay off Claude CLI unless an operator opts in via live config."
+comment = "Canonical keeper bootstrap profile exposed by the checked-in seed. Automatic keepers stay off Claude CLI unless an operator opts in via live config. glm:auto + gemini:auto are Direct API fallbacks that pass the tool-use gate via inline tools (Path B)."
 models = [
   { model = "codex_cli:auto", weight = 1 },
   { model = "gemini_cli:auto", weight = 1 },
   { model = "codex_cli:gpt-5.3-codex-spark", weight = 1 },
+  { model = "glm:auto", weight = 1 },
+  { model = "gemini:auto", weight = 1 },
 ]
 temperature = 0.2
 max_tokens = 16384
 
 [governance_judge]
-comment = "System-only dashboard governance judge profile. Explicitly defined so background judge loops do not inherit fallback providers such as Claude CLI. Gemini listed first because [codex_cli:auto] internally rotates 5 models (30s timeout each = 150s wasted wall-clock when codex auth is broken); Gemini-first attempts the cheap success path first while codex remains a fallback that auto-rejoins on recovery (#10554 disabled codex_cli for 4 seed cascades; this profile keeps codex as fallback rather than removing it)."
+comment = "System-only dashboard governance judge profile. Explicitly defined so background judge loops do not inherit fallback providers such as Claude CLI. Gemini listed first because [codex_cli:auto] internally rotates 5 models (30s timeout each = 150s wasted wall-clock when codex auth is broken); Gemini-first attempts the cheap success path first while codex remains a fallback that auto-rejoins on recovery (#10554 disabled codex_cli for 4 seed cascades; this profile keeps codex as fallback rather than removing it). glm:auto + gemini:auto are Direct API fallbacks that pass the tool-use gate via inline tools (Path B)."
 models = [
   { model = "gemini_cli:auto", weight = 1 },
   { model = "codex_cli:auto", weight = 1 },
+  { model = "glm:auto", weight = 1 },
+  { model = "gemini:auto", weight = 1 },
 ]
 temperature = 0.2
 max_tokens = 16384
 keeper_assignable = false
 
 [operator_judge]
-comment = "System-only dashboard operator judge profile. Mirrors governance_judge so background control loops stay off Claude CLI by default. Gemini-first ordering: see governance_judge for rationale."
+comment = "System-only dashboard operator judge profile. Mirrors governance_judge so background control loops stay off Claude CLI by default. Gemini-first ordering: see governance_judge for rationale. glm:auto + gemini:auto are Direct API fallbacks that pass the tool-use gate via inline tools (Path B)."
 models = [
   { model = "gemini_cli:auto", weight = 1 },
   { model = "codex_cli:auto", weight = 1 },
+  { model = "glm:auto", weight = 1 },
+  { model = "gemini:auto", weight = 1 },
 ]
 temperature = 0.2
 max_tokens = 16384

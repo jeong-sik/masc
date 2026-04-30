@@ -102,6 +102,26 @@ Spec == Init /\ [][Next]_vars
 
 BoundedEdges == Cardinality(edges) <= MaxEdges
 
+\* ── Bug model (RFC-Q2-5) ────────────────────────────────────────
+\*
+\* Models the bug class where the hydrator's add_edge precondition
+\* check on from_id /= to_id is bypassed (the spec header notes
+\* the runtime is more permissive than the spec forbids; a
+\* refactor that loses the production-side guard reproduces the
+\* bug). NoSelfLoop catches this on the first reflexive edge.
+
+AddSelfLoop(node) ==
+    /\ <<node, node>> \notin edges
+    /\ Cardinality(edges) < MaxEdges
+    \* deliberately omitted: from_id /= to_id check
+    /\ edges' = edges \cup { <<node, node>> }
+
+NextBuggy ==
+    \/ Next
+    \/ \E node \in Nodes : AddSelfLoop(node)
+
+SpecBuggy == Init /\ [][NextBuggy]_vars
+
 THEOREM Spec => []TypeOK
 THEOREM Spec => []NoSelfLoop
 THEOREM Spec => []NoCycleBounded

@@ -86,3 +86,22 @@ let add_routes ~sw router =
                    (Yojson.Safe.to_string
                       (`Assoc [ ("error", `String message) ])))
        ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/keeper-costs" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let window = int_query_param req "window" ~default:1440 in
+         let config = state.Mcp_server.room_config in
+         let keeper_names = Dashboard_http_keeper.keeper_names config in
+         let keepers =
+           List.filter_map (fun name ->
+             match Keeper_types.read_meta config name with
+             | Ok (Some m) -> Some m
+             | _ -> None
+           ) keeper_names
+         in
+         let json =
+           Dashboard_http_keeper.keeper_cost_aggregates_json
+             ~config ~keepers ~window_minutes:window
+         in
+         Http.Response.json ~compress:true ~request:req
+           (Yojson.Safe.to_string json) reqd
+       ) request reqd)

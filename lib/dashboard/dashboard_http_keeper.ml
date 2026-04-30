@@ -1683,3 +1683,124 @@ let keeper_config_json (config : Coord.config) (name : string)
          ("sources", source_provenance_json config m);
          ("metrics", metrics);
        ])
+
+(** Per-keeper cost/latency aggregates for the O4 cost dashboard.
+
+    Reads each keeper's metrics JSONL, extracts cost_usd / latency_ms /
+    token fields, and returns per-keeper totals plus p50/p95 latency
+    percentiles and a model-level cost breakdown.
+
+    This closes the Phase-2 gap between per-model metrics (already in
+    /api/v1/models/metrics) and per-agent spend (required by preview). *)
+let keeper_cost_aggregates_json
+    ~(config : Coord.config)
+    ~(keepers : Keeper_meta.t list)
+    ~(window_minutes : int)
+  : Yojson.Safe.t =
+  let now_ts = Unix.gettimeofday () in
+  let window_sec = float_of_int window_minutes *. 60.0 in
+  let start_ts = now_ts -. window_sec in
+  let keeper_items =
+    List.map (fun (m : Keeper_meta.t) ->
+      let metrics_store = Keeper_types.keeper_metrics_store config m.name in
+      let all_metrics_lines =
+        let dated = Dated_jsonl.read_recent_lines metrics_store 500 in
+        if dated <> [] then dated
+        else
+          let metrics_path = Keeper_types.keeper_metrics_path config m.name in
+          Keeper_memory.read_file_tail_lines metrics_path
+            ~max_bytes:200000 ~max_lines:500
+      in
+      let costs_rev = ref [] in
+      let latencies_rev = ref [] in
+      let input_tokens = ref 0 in
+      let output_tokens = ref 0 in
+      let total_tokens = ref 0 in
+      let model_costs : (string, float) Hashtbl.t = Hashtbl.create 8 in
+      let sample_count = ref 0 in
+      List.iter (fun line ->
+        try
+          let j = Yojson.Safe.from_string line in
+          let ts_unix = Safe_ops.json_float ~default:0.0 "ts_unix" j in
+          if ts_unix >= start_ts then begin
+            let cost =
+              Safe_ops.json_float_opt "cost_usd" j
+              |> Option.value ~default:0.0
+            in
+            let latency_ms = Safe_ops.json_int ~default:0 "latency_ms" j in
+            let input_t =
+              Safe_ops.json_int_opt "input_tokens" j
+              |> Option.value ~default:0
+            in
+            let output_t =
+              Safe_ops.json_int_opt "output_tokens" j
+              |> Option.value ~default:0
+            in
+            let total_t =
+              Safe_ops.json_int_opt "total_tokens" j
+              |> Option.value ~default:0
+            in
+            let model_used =
+              Safe_ops.json_string ~default:"" "model_used" j
+            in
+            let model_used_norm = normalize_model_name model_used in
+            if cost > 0.0 || latency_ms > 0 then begin
+              costs_rev := cost :: !costs_rev;
+              latencies_rev := float_of_int latency_ms :: !latencies_rev;
+              input_tokens := !input_tokens + input_t;
+              output_tokens := !output_tokens + output_t;
+              total_tokens := !total_tokens + total_t;
+              let prev =
+                Option.value ~default:0.0
+                  (Hashtbl.find_opt model_costs model_used_norm)
+              in
+              Hashtbl.replace model_costs model_used_norm (prev +. cost);
+              incr sample_count;
+            end
+          end
+        with
+        | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> ()
+      ) all_metrics_lines;
+      let total_cost = List.fold_left ( +. ) 0.0 !costs_rev in
+      let latency_arr =
+        let arr = Array.of_list !latencies_rev in
+        Array.sort Float.compare arr;
+        arr
+      in
+      let p50_latency =
+        if Array.length latency_arr = 0 then None
+        else Some (percentile latency_arr 50.0)
+      in
+      let p95_latency =
+        if Array.length latency_arr = 0 then None
+        else Some (percentile latency_arr 95.0)
+      in
+      let model_breakdown_json =
+        model_costs
+        |> Hashtbl.to_seq
+        |> List.of_seq
+        |> List.sort (fun (_, ca) (_, cb) -> Float.compare cb ca)
+        |> List.map (fun (model, cost) ->
+             `Assoc [
+               ("model", `String model);
+               ("cost_usd", `Float cost);
+             ])
+      in
+      `Assoc [
+        ("keeper_name", `String m.name);
+        ("total_cost_usd", `Float total_cost);
+        ("total_input_tokens", `Int !input_tokens);
+        ("total_output_tokens", `Int !output_tokens);
+        ("total_tokens", `Int !total_tokens);
+        ("p50_latency_ms", Json_util.float_opt_to_json p50_latency);
+        ("p95_latency_ms", Json_util.float_opt_to_json p95_latency);
+        ("sample_count", `Int !sample_count);
+        ("model_breakdown", `List model_breakdown_json);
+      ]
+    ) keepers
+  in
+  `Assoc [
+    ("keepers", `List keeper_items);
+    ("window_minutes", `Int window_minutes);
+    ("generated_at", `Float now_ts);
+  ]

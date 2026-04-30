@@ -820,6 +820,67 @@ export async function fetchRuntimeModelMetrics(
   return decoded
 }
 
+export interface KeeperCostMetric {
+  keeper_name: string
+  total_cost_usd: number
+  total_input_tokens: number
+  total_output_tokens: number
+  total_tokens: number
+  p50_latency_ms: number | null
+  p95_latency_ms: number | null
+  sample_count: number
+  model_breakdown: Array<{ model: string; cost_usd: number }>
+}
+
+export interface KeeperCostMetricsResponse {
+  window_minutes?: number
+  keepers: KeeperCostMetric[]
+  generated_at?: number | null
+}
+
+function decodeKeeperCostMetric(raw: unknown): KeeperCostMetric | null {
+  if (!isRecord(raw)) return null
+  const keeperName = asString(raw.keeper_name)
+  if (!keeperName) return null
+  return {
+    keeper_name: keeperName,
+    total_cost_usd: asNumber(raw.total_cost_usd) ?? 0,
+    total_input_tokens: asNumber(raw.total_input_tokens) ?? 0,
+    total_output_tokens: asNumber(raw.total_output_tokens) ?? 0,
+    total_tokens: asNumber(raw.total_tokens) ?? 0,
+    p50_latency_ms: asNumber(raw.p50_latency_ms) ?? null,
+    p95_latency_ms: asNumber(raw.p95_latency_ms) ?? null,
+    sample_count: asNumber(raw.sample_count) ?? 0,
+    model_breakdown: Array.isArray(raw.model_breakdown)
+      ? (raw.model_breakdown as unknown[])
+          .filter(isRecord)
+          .map(b => ({ model: asString(b.model) ?? '', cost_usd: asNumber(b.cost_usd) ?? 0 }))
+          .filter(b => b.model.length > 0)
+      : [],
+  }
+}
+
+function decodeKeeperCostMetricsResponse(raw: unknown): KeeperCostMetricsResponse | null {
+  if (!isRecord(raw)) return null
+  return {
+    window_minutes: asNumber(raw.window_minutes),
+    keepers: asRecordArray(raw.keepers)
+      .map(decodeKeeperCostMetric)
+      .filter((metric): metric is KeeperCostMetric => metric !== null),
+    generated_at: asNumber(raw.generated_at) ?? null,
+  }
+}
+
+export async function fetchKeeperCostMetrics(
+  windowMinutes = 1440,
+  opts?: AbortableRequestOptions,
+): Promise<KeeperCostMetricsResponse> {
+  const raw = await get<Record<string, unknown>>(`/api/v1/dashboard/keeper-costs?window=${windowMinutes}`, { signal: opts?.signal })
+  const decoded = decodeKeeperCostMetricsResponse(raw)
+  if (!decoded) throw new Error('유효하지 않은 keeper cost metrics payload')
+  return decoded
+}
+
 export function fetchDashboardMissionBriefing(
   force = false,
   opts?: { signal?: AbortSignal },

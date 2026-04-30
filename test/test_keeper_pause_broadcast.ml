@@ -10,9 +10,11 @@
 open Alcotest
 
 module R = Masc_mcp.Keeper_execution_receipt
+module U = Yojson.Safe.Util
 
 let mk_tool_surface ?(tool_requirement = "required")
-    ?(missing_required_tools = []) () : R.tool_surface =
+    ?(required_tools = []) ?(missing_required_tools = []) () :
+    R.tool_surface =
   {
     turn_lane = "unified";
     tool_surface_class = "post_dispatch";
@@ -20,7 +22,7 @@ let mk_tool_surface ?(tool_requirement = "required")
     visible_tool_count = 1;
     tool_gate_enabled = true;
     tool_surface_fallback_used = false;
-    required_tools = [];
+    required_tools;
     missing_required_tools;
   }
 
@@ -29,8 +31,17 @@ let mk_receipt
     ?(terminal_reason_code = "")
     ?(tool_contract_result = "satisfied")
     ?(tools_used = [ "Read" ])
+    ?(observed_tools = [])
+    ?(canonical_tools = [])
+    ?(reported_tools = [])
+    ?(requested_tools = [])
+    ?(required_tools = [])
+    ?(missing_required_tools = [])
     ?(tool_requirement = "required")
     ?(cascade_outcome = "completed")
+    ?current_task_id
+    ?stop_reason
+    ?(goal_ids = [])
     ?(error_kind = None)
     ?(error_message = None)
     ?(degraded_retry_applied = false)
@@ -42,20 +53,21 @@ let mk_receipt
     trace_id = "trace-test";
     generation = 1;
     turn_count = Some 1;
-    current_task_id = None;
-    goal_ids = [];
+    current_task_id;
+    goal_ids;
     outcome;
     terminal_reason_code;
     response_text_present = true;
     model_used = None;
-    requested_tools = [];
-    reported_tools = [];
-    observed_tools = [];
-    canonical_tools = [];
+    requested_tools;
+    reported_tools;
+    observed_tools;
+    canonical_tools;
     unexpected_tools = [];
     tools_used;
     tool_contract_result;
-    tool_surface = mk_tool_surface ~tool_requirement ();
+    tool_surface =
+      mk_tool_surface ~tool_requirement ~required_tools ~missing_required_tools ();
     sandbox_kind = "local";
     sandbox_root = None;
     network_mode = "offline";
@@ -70,7 +82,7 @@ let mk_receipt
     degraded_retry_cascade = None;
     fallback_reason = None;
     cascade_rotation_attempts = [];
-    stop_reason = None;
+    stop_reason;
     error_kind;
     error_message;
     started_at = "2026-04-26T00:00:00Z";
@@ -183,6 +195,47 @@ let test_each_broadcast_disp_is_reachable () =
   let d3, _ = R.operator_disposition r3 in
   check bool "unknown reachable" true (R.needs_operator_broadcast d3)
 
+let string_list_member name json =
+  json |> U.member name |> U.to_list |> List.map U.to_string
+
+let test_broadcast_payload_carries_turn_diagnostics () =
+  let receipt =
+    mk_receipt
+      ~terminal_reason_code:"completion_contract_violation:require_tool_use"
+      ~tool_contract_result:"missing_required_tool_use"
+      ~tools_used:[ "keeper_tasks_list"; "keeper_stay_silent" ]
+      ~observed_tools:[ "keeper_tasks_list"; "keeper_stay_silent" ]
+      ~required_tools:[ "keeper_shell"; "masc_worktree_create" ]
+      ~missing_required_tools:[ "keeper_shell" ]
+      ~current_task_id:"task-102"
+      ~stop_reason:"completed"
+      ~goal_ids:[ "goal-main" ]
+      ()
+  in
+  let payload =
+    R.operator_broadcast_payload receipt ~disposition:"pause_human"
+      ~reason:"tool_required_unsatisfied"
+  in
+  check string "task id" "task-102"
+    (payload |> U.member "current_task_id" |> U.to_string);
+  check string "last tool" "keeper_stay_silent"
+    (payload |> U.member "last_tool_name" |> U.to_string);
+  check (list string) "goal ids" [ "goal-main" ]
+    (string_list_member "goal_ids" payload);
+  check (list string) "tools used"
+    [ "keeper_tasks_list"; "keeper_stay_silent" ]
+    (string_list_member "tools_used" payload);
+  let contract = payload |> U.member "tool_contract" in
+  check string "contract result" "missing_required_tool_use"
+    (contract |> U.member "result" |> U.to_string);
+  check (list string) "required tools"
+    [ "keeper_shell"; "masc_worktree_create" ]
+    (string_list_member "required_tools" contract);
+  check (list string) "missing required tools" [ "keeper_shell" ]
+    (string_list_member "missing_required_tools" contract);
+  check string "stop reason" "completed"
+    (payload |> U.member "stop_reason" |> U.to_string)
+
 let () =
   run "keeper_pause_broadcast"
     [
@@ -206,5 +259,7 @@ let () =
           test_case "exact predicate" `Quick test_needs_broadcast_predicate;
           test_case "all 3 broadcast paths reachable" `Quick
             test_each_broadcast_disp_is_reachable;
+          test_case "broadcast payload carries turn diagnostics" `Quick
+            test_broadcast_payload_carries_turn_diagnostics;
         ] );
     ]

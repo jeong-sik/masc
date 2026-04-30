@@ -108,12 +108,12 @@ extract_invariants() {
   ' "$cfg"
 }
 
-# Last commit date (ISO short) for a file. Falls back to "-".
-last_modified() {
+# Stable source content fingerprint for a file. Falls back to "-".
+source_hash() {
   local f="$1"
-  local d
-  d="$(git log -1 --format=%cs -- "$f" 2>/dev/null || true)"
-  if [[ -z "$d" ]]; then echo "-"; else echo "$d"; fi
+  local h
+  h="$(git hash-object -- "$f" 2>/dev/null | cut -c1-12 || true)"
+  if [[ -z "$h" ]]; then echo "-"; else echo "$h"; fi
 }
 
 # Markdown-escape pipes inside table cells.
@@ -121,6 +121,11 @@ md_escape() { local s="$1"; printf '%s' "${s//|/\\|}"; }
 
 # Replace "/" with "__" for use as a flat filesystem key.
 group_key_for() { local s="$1"; printf '%s' "${s//\//__}"; }
+
+is_tracked() {
+  local f="$1"
+  git ls-files --error-unmatch -- "$f" >/dev/null 2>&1
+}
 
 # --- Pass 1: enumerate specs and collect per-directory data -------------------
 
@@ -148,10 +153,16 @@ while IFS= read -r tla; do
   # Match .cfg pairs for this spec.
   clean_cfg="$dir/$base.cfg"
   cfgs=()
-  if [[ -f "$clean_cfg" ]]; then cfgs+=("$clean_cfg"); fi
+  if [[ -f "$clean_cfg" ]] && is_tracked "$clean_cfg"; then cfgs+=("$clean_cfg"); fi
   while IFS= read -r extra; do
     [[ -n "$extra" ]] && cfgs+=("$extra")
-  done < <(find "$dir" -maxdepth 1 -type f -name "${base}-*.cfg" 2>/dev/null | sort)
+  done < <(
+    find "$dir" -maxdepth 1 -type f -name "${base}-*.cfg" 2>/dev/null \
+      | while IFS= read -r extra; do
+          is_tracked "$extra" && printf '%s\n' "$extra"
+        done \
+      | sort
+  )
 
   # Aggregate cfg invariants.
   cfg_count=0
@@ -177,15 +188,21 @@ while IFS= read -r tla; do
   [[ -z "$inv_summary" ]] && inv_summary="-"
 
   module="$(module_name "$tla")"
-  modified="$(last_modified "$tla")"
+  revision="$(source_hash "$tla")"
 
   # Persist row, grouped by dir.
   group_key="$(group_key_for "$dir")"
   row="$(printf '%s\t%s\t%s\t%s\t%s\t%s\t%s' \
-    "$base.tla" "$module" "$kind" "$cfg_count" "$buggy_count" "$inv_summary" "$modified")"
+    "$base.tla" "$module" "$kind" "$cfg_count" "$buggy_count" "$inv_summary" "$revision")"
   printf '%s\n' "$row" >> "$WORKDIR/$group_key.rows"
   echo "$dir" >> "$WORKDIR/dirs.list"
-done < <(find specs -name "*.tla" -type f | sort)
+done < <(
+  find specs -name "*.tla" -type f \
+    | while IFS= read -r tla; do
+        is_tracked "$tla" && printf '%s\n' "$tla"
+      done \
+    | sort
+)
 
 # Sort and count distinct directories.
 TOTAL_DIRS="$(sort -u "$WORKDIR/dirs.list" | wc -l | tr -d ' ')"
@@ -218,7 +235,7 @@ Source of truth: \`specs/\`. Run \`scripts/gen-tla-index.sh > specs/INDEX.md\` t
 | Total .cfg files | $TOTAL_CFG |
 | Buggy .cfg (bug-model pair) | $TOTAL_CFG_BUGGY |
 
-\`kind\` column: **manual** = hand-authored spec; **ttrace** = TLC counterexample export (\`*TTrace*\` or trace marker in header). \`cfg\`/\`buggy\` columns count companion \`.cfg\` files. \`invariants/properties\` lists names per cfg label (\`clean=...\`, \`buggy=...\`).
+\`kind\` column: **manual** = hand-authored spec; **ttrace** = TLC counterexample export (\`*TTrace*\` or trace marker in header). \`cfg\`/\`buggy\` columns count companion \`.cfg\` files. \`invariants/properties\` lists names per cfg label (\`clean=...\`, \`buggy=...\`). \`source hash\` is the tracked \`.tla\` blob fingerprint.
 
 ## Specs by Directory
 
@@ -232,7 +249,7 @@ sort -u "$WORKDIR/dirs.list" | while IFS= read -r dir; do
   spec_count="$(wc -l <"$rows_file" | tr -d ' ')"
 
   printf '### %s (%s specs)\n\n' "$dir" "$spec_count"
-  printf '| File | Module | Kind | cfg | buggy | Invariants / Properties | Last Modified |\n'
+  printf '| File | Module | Kind | cfg | buggy | Invariants / Properties | Source Hash |\n'
   printf '|------|--------|------|-----|-------|-------------------------|---------------|\n'
 
   sort "$rows_file" | while IFS=$'\t' read -r file module kind cfg_count buggy_count inv_summary modified; do

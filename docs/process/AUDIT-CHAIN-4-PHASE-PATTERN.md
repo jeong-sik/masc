@@ -57,6 +57,24 @@ In all three cases the audit *over-classified* in the conservative direction. Th
 
 Survey audits should pick this side of the trade-off.
 
+## 4.5 Phase 2 outcome categories
+
+Across six chains using this pattern (boundary, specs gap, PPX adoption, dashboard observability, auth/credential, server HTTP routes), Phase 2 produces one of three outcomes per gap class. Naming them helps later authors set expectations.
+
+| Outcome | What happens | Example |
+|---|---|---|
+| **Narrow-confirm** | Phase 1 estimate sits inside a range; Phase 2 lands in or near that range. | Server HTTP routes C2: Phase 1 said 14–16 silent modules → Phase 2 confirmed 14. |
+| **Narrow-collapse** | Phase 2 finds the gap doesn't exist at all. | Server HTTP routes C4 (no auth check): Phase 1 estimate 3–5 → Phase 2 found 0 (all routes wrap in `with_tool_auth` / `with_public_read`). Auth/credential C4 (credential redaction): Phase 1 candidates 2 → Phase 2 found 0 `Log.*` callsites in scope. |
+| **Narrow-discover** | Phase 2 confirms the gap is real *because* a Phase 1 hopeful fallback (platform enforcement, shared middleware, etc.) doesn't exist. | Server HTTP routes C1 (no body size-limit): Phase 1 hoped `Http_server_eio` enforced limits globally → Phase 2 confirmed it doesn't. Gap stays real. |
+
+A single audit can produce multiple outcome categories simultaneously. Server HTTP routes Phase 2 (PR #12218) produced one of each: confirm (C2), collapse (C4), discover (C1). Auth Phase 2 (PR #12217) additionally exposed a fourth, less-clean variant — **anchor-falsification**: Phase 1 listed `auth_strict_mode` and `auth_resolve` as C5 anchors based on domain centrality, but Prometheus grep showed 0 calls in either. Phase 1 wasn't over-classifying gaps; it was over-classifying *coverage*.
+
+Calling these out:
+- **Narrow-confirm** is the boring base case; expect it on most classes.
+- **Narrow-collapse** is the most cost-saving — it eliminates Phase 3 work entirely. Phase 1 should write its taxonomy with collapse in mind ("if X is satisfied by Y, this whole class drops").
+- **Narrow-discover** is the most informative — it tells you the gap is *structural*, not accidental. Phase 3 work for narrow-discover gaps usually requires shared infrastructure (middleware, helpers), not per-module fixes.
+- **Anchor-falsification** is rare but worth flagging because it inverts the failure mode. Recommendation: in Phase 1, mark C5 anchors as candidates too, and verify them in Phase 2 with the same structural rigor as gap classes.
+
 ## 5. Phase 1 framing rules (most important)
 
 The most leveraged decisions live in Phase 1. From observed patterns:
@@ -106,8 +124,13 @@ Rule of thumb: **defer hard-gating until at least 2 Phase 3 PRs have moved the f
 
 - `docs/audit/OAS-MASC-BOUNDARY-AUDIT-2026-04*.md` — Q-P0-3 chain (4/4 MERGED)
 - `docs/audit/TLA-SPECS-GAP-AUDIT-2026-04*.md` — Q-P0-2 chain (Phase 3 closure in #12188)
+- `docs/audit/TLA-PPX-ADOPTION-AUDIT-2026-04.md` — runtime-side PPX adoption (PR #12143 MERGED)
+- `docs/audit/DASHBOARD-OBSERVABILITY-AUDIT-2026-04*.md` — first new-domain application of codified pattern (PR #12202 Phase 1, PR #12208 Phase 2)
+- `docs/audit/AUTH-CREDENTIAL-AUDIT-2026-04*.md` — second new-domain application; surfaced anchor-falsification outcome (PR #12209 Phase 1, PR #12217 Phase 2)
+- `docs/audit/SERVER-HTTP-ROUTES-AUDIT-2026-04*.md` — third new-domain application; surfaced narrow-confirm + narrow-collapse + narrow-discover in a single chain (PR #12213 Phase 1, PR #12218 Phase 2)
 - `scripts/oas-boundary-ratchet.sh` — ratchet template (decreasing-monotonic)
 - `scripts/tla-ppx-ratchet.sh` — ratchet template (increasing-monotonic, PR #12151)
+- `scripts/tla-bug-model-ratchet.sh` — first mixed-direction ratchet (PR #12192)
 - Memory: `feedback_diagnostic_with_measurement_strongly_triggers_root_fix` — measurement matters
 
-*Process doc / 2026-04-30 / source: Q-P0-2 + Q-P0-3 closure observations*
+*Process doc / 2026-04-30 / source: Q-P0-2 + Q-P0-3 closure observations + 3 new-domain chains; updated 2026-04-30 with §4.5 outcome categories from Auth + Server HTTP Phase 2 findings*

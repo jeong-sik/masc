@@ -750,20 +750,10 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
             Log.Server.info "Reaped %d stale connections (active: %d)"
               (List.length stale_sids) (Sse.client_count ());
           let evicted_events = Sse.cleanup_expired_events () in
-          if evicted_events > 0 then begin
-            (* Same rationale as the namespace-truth broadcast log below:
-               when zero SSE clients are attached, the eviction loop is
-               garbage-collecting events that nobody would ever replay,
-               which is routine housekeeping rather than an
-               operator-actionable signal. Emit at INFO only when at
-               least one client is on the wire — otherwise DEBUG. *)
-            let log_fn =
-              if Sse.client_count () > 0
-              then Log.Server.info
-              else Log.Server.debug
-            in
-            log_fn "Evicted %d expired SSE buffer events" evicted_events
-          end;
+          if evicted_events > 0 then
+            (* SSE replay-buffer eviction is periodic housekeeping; failed
+               sends and stale connection reaping remain visible elsewhere. *)
+            Log.Server.debug "Evicted %d expired SSE buffer events" evicted_events;
           let evicted = Cache_eio.evict_expired state.room_config in
           if evicted > 0 then
             Log.Server.info "Cache: evicted %d expired entries" evicted;

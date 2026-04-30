@@ -654,9 +654,14 @@ let refresh_once ~sw ~net
         st.degraded_reason <- None);
     match compute_judgments ~masc_tools ~dispatch ~build_facts with
     | Ok (model_used, generated_at, expires_at, judgments) ->
-        Log.Governance.info
-          "refresh_once: ok model=%s judgments=%d"
-          model_used (List.length judgments);
+        if judgments = [] then
+          Log.Governance.debug
+            "refresh_once: ok model=%s judgments=%d"
+            model_used 0
+        else
+          Log.Governance.info
+            "refresh_once: ok model=%s judgments=%d"
+            model_used (List.length judgments);
         append_judgments base_path judgments;
         with_lock st (fun () ->
             st.refreshing <- false;

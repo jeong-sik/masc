@@ -57,8 +57,11 @@ let payload_agent_name payload =
      | None -> payload_string_opt "keeper_name" payload)
 
 let emit_native_event_log (evt : Oas.Event_bus.event) (json : Yojson.Safe.t) =
+  let log_at level message =
+    Log.emit level ~module_name:"oas:event" ~details:json message
+  in
   let log message =
-    Log.emit Log.Info ~module_name:"oas:event" ~details:json message
+    log_at Log.Info message
   in
   match evt.payload with
   | Oas.Event_bus.AgentStarted { agent_name; task_id } ->
@@ -91,7 +94,7 @@ let emit_native_event_log (evt : Oas.Event_bus.event) (json : Yojson.Safe.t) =
       let names_hash =
         Digest.to_hex (Digest.string (String.concat "\n" tool_names))
       in
-      log
+      log_at Log.Debug
         (Printf.sprintf
            "[substrate:tool_surface] agent=%s turn=%d count=%d names_hash=%s"
            agent_name turn (List.length tool_names)

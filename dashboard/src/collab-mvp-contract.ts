@@ -80,6 +80,132 @@ export interface CollabMvpEventSemantic {
   attributes: string[]
 }
 
+export type CollabPerformanceBudgetMetricId =
+  | 'sync_latency_p95_ms'
+  | 'ws_connect_p95_ms'
+  | 'checks_rate'
+  | 'keystroke_latency_ms'
+  | 'fps'
+  | 'lcp_ms'
+  | 'inp_ms'
+  | 'document_size_bytes'
+  | 'merge_12_docs_ms'
+  | 'ops_per_sec'
+
+export type CollabPerformanceBudgetComparator = 'lt' | 'lte' | 'gt' | 'gte'
+export type CollabPerformanceBudgetUnit = 'ms' | 'ratio' | 'fps' | 'bytes' | 'ops/sec'
+
+export interface CollabPerformanceBudgetMetric {
+  id: CollabPerformanceBudgetMetricId
+  label: string
+  unit: CollabPerformanceBudgetUnit
+  target: number
+  comparator: CollabPerformanceBudgetComparator
+  sourceSection: 'multiagent-ide-deep-analysis.md#8'
+  owner: 'masc'
+}
+
+export interface CollabPerformanceBudgetResult {
+  id: CollabPerformanceBudgetMetricId
+  value: number
+  target: number
+  comparator: CollabPerformanceBudgetComparator
+  pass: boolean
+}
+
+export const COLLAB_TRACK8_PERFORMANCE_BUDGET: CollabPerformanceBudgetMetric[] = [
+  {
+    id: 'sync_latency_p95_ms',
+    label: 'Sync latency p95',
+    unit: 'ms',
+    target: 100,
+    comparator: 'lt',
+    sourceSection: 'multiagent-ide-deep-analysis.md#8',
+    owner: 'masc',
+  },
+  {
+    id: 'ws_connect_p95_ms',
+    label: 'WebSocket connect p95',
+    unit: 'ms',
+    target: 500,
+    comparator: 'lt',
+    sourceSection: 'multiagent-ide-deep-analysis.md#8',
+    owner: 'masc',
+  },
+  {
+    id: 'checks_rate',
+    label: 'Checks pass rate',
+    unit: 'ratio',
+    target: 0.99,
+    comparator: 'gt',
+    sourceSection: 'multiagent-ide-deep-analysis.md#8',
+    owner: 'masc',
+  },
+  {
+    id: 'keystroke_latency_ms',
+    label: 'Keystroke latency',
+    unit: 'ms',
+    target: 16,
+    comparator: 'lt',
+    sourceSection: 'multiagent-ide-deep-analysis.md#8',
+    owner: 'masc',
+  },
+  {
+    id: 'fps',
+    label: 'Frame rate',
+    unit: 'fps',
+    target: 55,
+    comparator: 'gte',
+    sourceSection: 'multiagent-ide-deep-analysis.md#8',
+    owner: 'masc',
+  },
+  {
+    id: 'lcp_ms',
+    label: 'Largest Contentful Paint',
+    unit: 'ms',
+    target: 2500,
+    comparator: 'lt',
+    sourceSection: 'multiagent-ide-deep-analysis.md#8',
+    owner: 'masc',
+  },
+  {
+    id: 'inp_ms',
+    label: 'Interaction to Next Paint',
+    unit: 'ms',
+    target: 200,
+    comparator: 'lt',
+    sourceSection: 'multiagent-ide-deep-analysis.md#8',
+    owner: 'masc',
+  },
+  {
+    id: 'document_size_bytes',
+    label: 'Document size',
+    unit: 'bytes',
+    target: 10 * 1024 * 1024,
+    comparator: 'lt',
+    sourceSection: 'multiagent-ide-deep-analysis.md#8',
+    owner: 'masc',
+  },
+  {
+    id: 'merge_12_docs_ms',
+    label: 'Merge 12 docs',
+    unit: 'ms',
+    target: 100,
+    comparator: 'lt',
+    sourceSection: 'multiagent-ide-deep-analysis.md#8',
+    owner: 'masc',
+  },
+  {
+    id: 'ops_per_sec',
+    label: 'CRDT throughput',
+    unit: 'ops/sec',
+    target: 1000,
+    comparator: 'gt',
+    sourceSection: 'multiagent-ide-deep-analysis.md#8',
+    owner: 'masc',
+  },
+]
+
 export const COLLAB_MVP_EVENT_SEMANTICS: CollabMvpEventSemantic[] = [
   {
     name: 'masc.collab.doc.sync',
@@ -127,6 +253,39 @@ export const COLLAB_MVP_EVENT_SEMANTICS: CollabMvpEventSemantic[] = [
     ],
   },
 ]
+
+function passesPerformanceBudget(
+  value: number,
+  target: number,
+  comparator: CollabPerformanceBudgetComparator,
+): boolean {
+  switch (comparator) {
+    case 'lt':
+      return value < target
+    case 'lte':
+      return value <= target
+    case 'gt':
+      return value > target
+    case 'gte':
+      return value >= target
+  }
+}
+
+export function evaluateCollabPerformanceBudget(
+  samples: Partial<Record<CollabPerformanceBudgetMetricId, number>>,
+): CollabPerformanceBudgetResult[] {
+  return COLLAB_TRACK8_PERFORMANCE_BUDGET.flatMap(metric => {
+    const value = samples[metric.id]
+    if (value === undefined) return []
+    return [{
+      id: metric.id,
+      value,
+      target: metric.target,
+      comparator: metric.comparator,
+      pass: Number.isFinite(value) && passesPerformanceBudget(value, metric.target, metric.comparator),
+    }]
+  })
+}
 
 export type TodoClaimState = 'unclaimed' | 'claimed' | 'running' | 'verification' | 'terminal'
 

@@ -129,7 +129,7 @@ let handle_keeper_fs_read
              ; "bytes", `Int total
              ; "truncated", `Bool truncated
              ; "content", `String body
-             ])))
+             ]))))
 ;;
 
 (* RFC-0006 Phase A.4: replace [old] with [new] in [text]. When

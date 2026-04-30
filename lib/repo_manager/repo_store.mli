@@ -33,3 +33,13 @@ val local_path : base_path:string -> repository -> string
 (** [local_path ~base_path repo] returns the absolute path to the repository's
     local checkout. If [repo.local_path] is already absolute, it is returned
     as-is; otherwise it is resolved relative to [base_path]. *)
+
+val discover_repositories : base_path:string -> (repository list, string) result
+(** [discover_repositories ~base_path] scans [base_path] for git repositories
+    (directories containing [.git] up to depth 3) and returns a list of
+    candidate {!repository} records inferred from their [origin] remote URL.
+
+    Directories under [.masc/] and repositories already registered in
+    [repositories.toml] are excluded. This function is read-only and is
+    intended for Phase 1 onboarding where the operator confirms discovered
+    repositories before adding them to the store. *)

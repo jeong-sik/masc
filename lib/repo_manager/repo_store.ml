@@ -228,3 +228,89 @@ let list_branches ~base_path id : (string list, string) result =
   let* repo = find ~base_path id in
   let path = local_path ~base_path repo in
   Repo_git.get_branches ~repository:{ repo with local_path = path }
+
+let slugify_id s =
+  String.map
+    (fun c ->
+      match c with
+      | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '-' | '_' -> c
+      | _ -> '-')
+    s
+
+let run_read_line cmd =
+  try
+    let ic = Unix.open_process_in cmd in
+    Fun.protect
+      ~finally:(fun () -> ignore (Unix.close_process_in ic))
+      (fun () ->
+        try Ok (input_line ic) with End_of_file -> Error "no output")
+  with Sys_error msg -> Error msg
+
+let discover_repositories ~base_path =
+  let existing_paths =
+    match load_all ~base_path with
+    | Ok repos ->
+        List.map (fun (r : repository) -> local_path ~base_path r) repos
+    | Error _ -> []
+  in
+  let git_dirs =
+    try
+      let cmd =
+        Printf.sprintf "find %s -name \".git\" -maxdepth 3 -type d 2>/dev/null"
+          (Filename.quote base_path)
+      in
+      let ic = Unix.open_process_in cmd in
+      Fun.protect
+        ~finally:(fun () -> ignore (Unix.close_process_in ic))
+        (fun () ->
+          let rec read_lines acc =
+            match input_line ic with
+            | line -> read_lines (line :: acc)
+            | exception End_of_file -> List.rev acc
+          in
+          read_lines [])
+    with _ -> []
+  in
+  let is_masc_dir path =
+    let masc_prefix = Filename.concat base_path ".masc" in
+    String.length path >= String.length masc_prefix
+    && String.sub path 0 (String.length masc_prefix) = masc_prefix
+  in
+  let candidates =
+    List.filter_map
+      (fun git_dir ->
+        let repo_dir = Filename.dirname git_dir in
+        let abs_repo_dir =
+          if Filename.is_relative repo_dir then Filename.concat base_path repo_dir
+          else repo_dir
+        in
+        if is_masc_dir abs_repo_dir then None
+        else if List.exists (String.equal abs_repo_dir) existing_paths then None
+        else
+          let url_cmd =
+            Printf.sprintf "git -C %s remote get-url origin 2>/dev/null"
+              (Filename.quote abs_repo_dir)
+          in
+          match run_read_line url_cmd with
+          | Ok url ->
+              let name = Filename.basename abs_repo_dir in
+              let id = slugify_id name in
+              Some
+                {
+                  id;
+                  name;
+                  url;
+                  local_path = abs_repo_dir;
+                  default_branch = "main";
+                  credential_id = "default";
+                  keepers = [];
+                  status = Active;
+                  auto_sync = false;
+                  sync_interval = 0;
+                  created_at = Int64.zero;
+                  updated_at = Int64.zero;
+                }
+          | Error _ -> None)
+      git_dirs
+  in
+  Ok candidates

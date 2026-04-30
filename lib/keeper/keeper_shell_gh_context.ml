@@ -139,13 +139,34 @@ let resolve_gh_repo_context ~(config : Coord.config) ~(meta : keeper_meta)
                      ~git_root ~worktree_cwd
                  with
                  | Some repo_slug ->
-                     Ok
-                       {
-                         task_id;
-                         git_root;
-                         worktree_cwd;
-                         repo_slug = Some repo_slug;
-                       }
+                     (* PR-D: enforce keeper-repo access control via
+                        Keeper_repo_mapping.  When no mapping exists the
+                        validator returns Ok () for backward compatibility. *)
+                     (match Keeper_repo_mapping.validate_path_access
+                        ~keeper_id:meta.name
+                        ~base_path:config.base_path
+                        ~path:worktree_cwd
+                      with
+                      | Ok () ->
+                          Ok
+                            {
+                              task_id;
+                              git_root;
+                              worktree_cwd;
+                              repo_slug = Some repo_slug;
+                            }
+                      | Error reason ->
+                          Error
+                            (gh_repo_context_error ~task_id ~git_root
+                               ~worktree_path:worktree_cwd
+                               ~code:"gh_repo_context_repo_not_allowed"
+                               ~detail:
+                                 (Printf.sprintf
+                                    "Keeper %s is not allowed to access the repository at %s. %s"
+                                    meta.name worktree_cwd reason)
+                               ~hint:
+                                 "Check keeper_repo_mappings.toml or ask the operator to grant access."
+                               ()))
                  | None ->
                      Error
                        (gh_repo_context_error ~task_id ~git_root

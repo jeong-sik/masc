@@ -59,6 +59,39 @@ let write_mapping base_path keeper_id repo_ids =
   let oc = open_out path in
   Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () -> output_string oc content)
 
+let write_repositories base_path repos =
+  let path = Filename.concat base_path ".masc/config/repositories.toml" in
+  let repo_block (r : repository) =
+    let local_path_str =
+      if Filename.is_relative r.local_path then
+        Filename.concat base_path r.local_path
+      else
+        r.local_path
+    in
+    Printf.sprintf
+      "[repository.%s]\nname = \"%s\"\nurl = \"%s\"\nlocal_path = \"%s\"\n\
+       default_branch = \"%s\"\ncredential_id = \"%s\"\nkeepers = [%s]\n\
+       status = \"%s\"\nauto_sync = %s\nsync_interval = %s\n"
+      r.id
+      r.name
+      r.url
+      local_path_str
+      r.default_branch
+      r.credential_id
+      (String.concat ", " (List.map (fun s -> "\"" ^ s ^ "\"") r.keepers))
+      (match r.status with Active -> "Active" | Paused -> "Paused" | Cloning -> "Cloning" | Error _ -> "Error")
+      (string_of_bool r.auto_sync)
+      (string_of_int r.sync_interval)
+  in
+  let content = String.concat "\n" (List.map repo_block repos) in
+  let oc = open_out path in
+  Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () -> output_string oc content)
+
+let repo_under_base base_path id =
+  let local_path = Filename.concat base_path ("repo-" ^ id) in
+  Unix.mkdir local_path 0o755;
+  local_path
+
 let sample_repo id =
   {
     id;
@@ -74,6 +107,10 @@ let sample_repo id =
     created_at = Int64.zero;
     updated_at = Int64.zero;
   }
+
+let sample_repo_at base_path id =
+  let local_path = repo_under_base base_path id in
+  { (sample_repo id) with local_path }
 
 let test_is_allowed_explicit () =
   with_temp_base_path (fun base_path ->
@@ -122,6 +159,39 @@ let test_validate_access_denied () =
       | Ok _ -> Alcotest.fail "expected Error"
       | Error msg ->
           Alcotest.(check bool) "mentions not allowed" true (contains_substring msg "not allowed"))
+
+let test_validate_path_access_allowed () =
+  with_temp_base_path (fun base_path ->
+      let repo_a = sample_repo_at base_path "repo-a" in
+      write_repositories base_path [ repo_a ];
+      write_mapping base_path "keeper-1" [ "repo-a" ];
+      let path = repo_a.local_path in
+      match Keeper_repo_mapping.validate_path_access ~keeper_id:"keeper-1" ~base_path ~path with
+      | Ok () -> ()
+      | Error e -> Alcotest.fail ("expected Ok, got: " ^ e))
+
+let test_validate_path_access_denied () =
+  with_temp_base_path (fun base_path ->
+      let repo_a = sample_repo_at base_path "repo-a" in
+      let repo_b = sample_repo_at base_path "repo-b" in
+      write_repositories base_path [ repo_a; repo_b ];
+      write_mapping base_path "keeper-1" [ "repo-a" ];
+      let path = repo_b.local_path in
+      match Keeper_repo_mapping.validate_path_access ~keeper_id:"keeper-1" ~base_path ~path with
+      | Ok _ -> Alcotest.fail "expected Error"
+      | Error msg ->
+          Alcotest.(check bool) "mentions not allowed" true (contains_substring msg "not allowed"))
+
+let test_validate_path_access_no_repo () =
+  with_temp_base_path (fun base_path ->
+      let repo_a = sample_repo_at base_path "repo-a" in
+      write_repositories base_path [ repo_a ];
+      write_mapping base_path "keeper-1" [ "repo-a" ];
+      let path = Filename.concat base_path "some-unrelated-path" in
+      Unix.mkdir path 0o755;
+      match Keeper_repo_mapping.validate_path_access ~keeper_id:"keeper-1" ~base_path ~path with
+      | Ok () -> ()
+      | Error e -> Alcotest.fail ("expected Ok for no-repo path, got: " ^ e))
 
 let test_apply_mapping_explicit () =
   with_temp_base_path (fun base_path ->
@@ -197,6 +267,12 @@ let () =
         [
           Alcotest.test_case "allowed" `Quick test_validate_access_allowed;
           Alcotest.test_case "denied" `Quick test_validate_access_denied;
+        ] );
+      ( "validate_path_access",
+        [
+          Alcotest.test_case "allowed" `Quick test_validate_path_access_allowed;
+          Alcotest.test_case "denied" `Quick test_validate_path_access_denied;
+          Alcotest.test_case "no repo" `Quick test_validate_path_access_no_repo;
         ] );
       ( "apply_mapping",
         [

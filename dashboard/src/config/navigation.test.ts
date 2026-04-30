@@ -75,6 +75,7 @@ describe('monitoring navigation labels', () => {
     const sections = visibleSectionItemsForTab('monitoring')
     const labelFor = (id: string) => sections.find(item => item.id === id)?.label
 
+    expect(labelFor('live')).toBe('라이브 협업')
     expect(labelFor('observatory')).toBe('관찰소 (beta)')
     expect(labelFor('journey')).toBe('여정 맵')
     expect(labelFor('fleet-health')).toBe('플릿 텔레메트리')
@@ -99,6 +100,7 @@ describe('monitoring navigation labels', () => {
     const ids = sections.map(item => item.id)
 
     expect(ids).toContain('journey')
+    expect(ids).toContain('live')
     expect(ids).toContain('fleet-health')
     expect(ids).toContain('safe-autonomy')
     expect(ids).toContain('runtime')
@@ -112,10 +114,11 @@ describe('monitoring navigation labels', () => {
     expect(ids).not.toContain('governance')
   })
 
-  it('puts journey first so the integrated flow map is the clearest monitoring entry point', () => {
+  it('puts live collaboration first before slower analysis surfaces', () => {
     const sections = visibleSectionItemsForTab('monitoring')
-    expect(sections[0]?.id).toBe('journey')
-    expect(sections[1]?.id).toBe('observatory')
+    expect(sections[0]?.id).toBe('live')
+    expect(sections[1]?.id).toBe('journey')
+    expect(sections[2]?.id).toBe('observatory')
   })
 
   it('monitoring sidebar labels are unique (no overloaded term like "런타임")', () => {

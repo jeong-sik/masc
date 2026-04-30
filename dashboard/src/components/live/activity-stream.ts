@@ -51,7 +51,7 @@ export function ActivityStream() {
         <span class="text-xs text-[var(--color-fg-muted)]">${totalEvents.value} 수신 · ${entries.length} 표시</span>
       </div>
       <${FilterBar} />
-      <div class="activity-stream-list grid max-h-[52vh] min-h-0 content-start gap-2 overflow-y-auto pr-1">
+      <div class="activity-stream-list grid max-h-[52vh] min-h-0 content-start gap-2 overflow-y-auto pr-1" role="log" aria-live="polite" aria-label="활동 스트림 이벤트">
         ${entries.length === 0
           ? !connected.value
             ? html`<${ErrorState} message="실시간 연결이 끊겨있습니다. 서버 상태를 확인하세요." />`

@@ -67,6 +67,11 @@ describe('refreshPlanForRoute', () => {
   it('uses the current monitoring sections', () => {
     expect(refreshPlanForRoute({
       tab: 'monitoring',
+      params: { section: 'live' },
+    })).toEqual(['namespaceTruth', 'execution', 'missionSnapshot'])
+
+    expect(refreshPlanForRoute({
+      tab: 'monitoring',
       params: { section: 'agents' },
     })).toEqual(['namespaceTruth', 'execution', 'missionSnapshot'])
 

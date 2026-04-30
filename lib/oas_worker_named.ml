@@ -871,8 +871,11 @@ let run_named
          do_backoff (n + 1);
          cycle_loop (n + 1))
   in
+  let admission_cascade_name =
+    Keeper_cascade_profile.runtime_name_of_string cascade_name
+  in
   match Admission_queue.with_permit ?wait_timeout_sec
-    ~priority:queue_priority ~keeper_name:name ~cascade_name
+    ~priority:queue_priority ~keeper_name:name ~cascade_name:admission_cascade_name
     (fun () -> cycle_loop 0) with
   | Ok result -> result
   | Error (`Host_resource_saturated reason) ->
@@ -929,10 +932,13 @@ let run_model_by_label
       in
       let config = { config with transport = transport_resolved } in
       match
+        let admission_cascade_name =
+          Keeper_cascade_profile.runtime_name_of_string model_label
+        in
         Admission_queue.with_permit ?wait_timeout_sec
           ~priority:Llm_provider.Request_priority.Proactive
           ~keeper_name:"oas-label-model"
-          ~cascade_name:model_label
+          ~cascade_name:admission_cascade_name
           (fun () ->
             with_codex_cli_preflight
               ~scope:(Printf.sprintf "model_label:%s" model_label)
@@ -1056,10 +1062,13 @@ let run_model_with_masc_tools
       in
       let config = { config with raw_trace; transport = transport_resolved } in
       match
+        let admission_cascade_name =
+          Keeper_cascade_profile.runtime_name_of_string model_label
+        in
         Admission_queue.with_permit ?wait_timeout_sec
           ~priority:Llm_provider.Request_priority.Proactive
           ~keeper_name:"oas-explicit-model"
-          ~cascade_name:model_label
+          ~cascade_name:admission_cascade_name
           (fun () ->
             with_codex_cli_preflight
               ~scope:(Printf.sprintf "explicit_model:%s" model_label)

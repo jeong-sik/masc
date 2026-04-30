@@ -50,6 +50,16 @@ val known_cascades : string list
 (** [known_cascades = List.map to_string all]. Provided for consumers
     that still operate on strings; new code should take {!t} directly. *)
 
+type runtime_name = Runtime_name of string
+(** Catalog-aware cascade name after point-of-use runtime normalization.
+    Unlike {!t}, this can carry dynamic cascade catalog names. *)
+
+val runtime_name_to_string : runtime_name -> string
+val runtime_name_of_string : string -> runtime_name
+(** Canonicalizes legacy aliases and live catalog names for runtime
+    telemetry/admission labels. Unknown nonblank values fall back to
+    {!default_name}, matching {!canonicalize}. *)
+
 val catalog_names : ?config_path:string -> unit -> string list
 (** Live profile catalog discovered from the active [cascade.json].
     When the file cannot be read, returns [[]]. *)

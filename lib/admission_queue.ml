@@ -10,7 +10,7 @@
 
 type waiter_info = {
   keeper_name : string;
-  cascade_name : string;
+  cascade_name : Keeper_cascade_profile.runtime_name;
   enqueue_ts : float;
   priority : Llm_provider.Request_priority.t;
 }
@@ -137,9 +137,7 @@ let check_host_resources ~keeper_name =
     Ok ()
 
 let with_permit ?wait_timeout_sec:_ ~priority:_ ~keeper_name ~cascade_name f =
-  (* SSOT: every admission_queue entry point canonicalizes cascade_name
-     so metrics/structs never see drift values. *)
-  let cascade_name = Keeper_cascade_profile.canonicalize cascade_name in
+  let cascade_name = Keeper_cascade_profile.runtime_name_to_string cascade_name in
   match check_host_resources ~keeper_name with
   | Error _ as e -> e
   | Ok () ->
@@ -159,6 +157,7 @@ let with_permit ?wait_timeout_sec:_ ~priority:_ ~keeper_name ~cascade_name f =
         raise exn
 
 let try_with_permit ~priority:_ ~keeper_name ~cascade_name f =
+  let cascade_name = Keeper_cascade_profile.runtime_name_to_string cascade_name in
   match check_host_resources ~keeper_name with
   | Error _ -> None
   | Ok () ->
@@ -190,7 +189,8 @@ let snapshot_json () =
     ("waiters", `List (List.map (fun (w : waiter_info) ->
       `Assoc [
         ("keeper_name", `String w.keeper_name);
-        ("cascade_name", `String w.cascade_name);
+        ( "cascade_name",
+          `String (Keeper_cascade_profile.runtime_name_to_string w.cascade_name) );
         ("priority", `String (Llm_provider.Request_priority.to_string w.priority));
         ("wait_seconds", `Float (now -. w.enqueue_ts));
       ]) s.waiters));

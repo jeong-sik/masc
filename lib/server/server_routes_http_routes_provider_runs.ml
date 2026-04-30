@@ -90,7 +90,7 @@ let add_routes ~sw router =
        with_public_read (fun state req reqd ->
          let window = int_query_param req "window" ~default:1440 in
          let config = state.Mcp_server.room_config in
-         let keeper_names = Dashboard_http_keeper.keeper_names config in
+         let keeper_names = Keeper_types.keeper_names config in
          let keepers =
            List.filter_map (fun name ->
              match Keeper_types.read_meta config name with
@@ -109,7 +109,7 @@ let add_routes ~sw router =
        with_public_read (fun state req reqd ->
          let limit = int_query_param req "limit" ~default:200 in
          let config = state.Mcp_server.room_config in
-         let keeper_names = Dashboard_http_keeper.keeper_names config in
+         let keeper_names = Keeper_types.keeper_names config in
          let keepers =
            List.filter_map (fun name ->
              match Keeper_types.read_meta config name with

@@ -45,6 +45,13 @@ VARIABLES
 vars == << cycle, attempted, outcome, accepted_provider >>
 
 OutcomeSet == {"in_progress", "accepted", "exhausted"}
+\* Runtime strategy taxonomy mirror pinned by the OCaml/TLA parity
+\* test. The model below abstracts over candidate ordering, but the
+\* exported strategy kind set still must not drift from
+\* lib/cascade/cascade_strategy.ml.
+StrategyKindSet == {"failover", "capacity_aware", "weighted_random",
+                    "circuit_breaker_cycling", "priority_tier",
+                    "sticky", "round_robin"}
 NoneProvider == "_none_"
 ASSUME NoneProvider \notin Candidates
 

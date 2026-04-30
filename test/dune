@@ -441,6 +441,11 @@
  (libraries masc_test_deps))
 
 (test
+ (name test_tla_literal_parity)
+ (modules test_tla_literal_parity)
+ (libraries masc_test_deps autonomous resilience))
+
+(test
  (name test_keeper_receipt_authoritative)
  (modules test_keeper_receipt_authoritative)
  (libraries masc_test_deps))

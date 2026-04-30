@@ -5,7 +5,7 @@ Edit the generator, not this file. Re-run: scripts/gen-tla-index.sh > specs/INDE
 
 # TLA+ Spec Index
 
-Generated: 2026-04-30T09:32:44Z (HEAD: f975e0f4bd)
+Generated: 2026-04-30T10:05:39Z (HEAD: 54b91fd4e9)
 
 Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to refresh.
 
@@ -54,7 +54,7 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | Cancellation.tla | Cancellation | manual | 2 | 1 | clean={inv:TypeOK, inv:ReasonBeforeCancelled, inv:CallbacksFiredAtMostOnce} buggy={inv:ReasonBeforeCancelled, inv:CallbacksFiredAtMostOnce} | 834dcb495e5a |
 | CascadeKeeperRecovery.tla | CascadeKeeperRecovery | manual | 2 | 1 | clean={inv:SafetyInvariant} buggy={inv:SafetyInvariant} | 370581910533 |
 | CascadeResolver.tla | CascadeResolver | manual | 2 | 1 | clean={inv:SafetyInvariant} buggy={inv:NeverRouteToDown} | e0c5a7d1d999 |
-| CascadeStrategy.tla | CascadeStrategy | manual | 2 | 1 | clean={inv:Safety} buggy={inv:BoundedCycle} | fecb35cea4e9 |
+| CascadeStrategy.tla | CascadeStrategy | manual | 2 | 1 | clean={inv:Safety} buggy={inv:BoundedCycle} | 004523df4adf |
 | CascadeStrategyStateful.tla | CascadeStrategyStateful | manual | 2 | 1 | clean={inv:TypeOK, inv:StickyDomainBounded, inv:StickyMembersAreCandidates, inv:RRBounded, inv:NoExpiredEntriesUsable, prop:StickyEventuallyEvicts} buggy={inv:TypeOK, inv:StickyDomainBounded, inv:StickyMembersAreCandidates, inv:RRBounded, inv:NoExpiredEntriesUsable, prop:StickyEventuallyEvicts} | 3e154032b46f |
 | KeeperContinueGate.tla | KeeperContinueGate | manual | 2 | 1 | clean={inv:Safety, prop:PendingEventuallyResolves} buggy={inv:ApprovedResolutionClearsFailure} | 7f71fad0d4cb |
 | KeeperContractViolated.tla | KeeperContractViolated | manual | 2 | 1 | clean={inv:Safety} buggy={inv:Safety} | 65324331c483 |

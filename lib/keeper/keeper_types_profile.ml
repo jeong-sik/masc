@@ -8,13 +8,13 @@ include Keeper_config
 let keeper_debug = Env_config.KeeperRuntime.debug
 
 type sandbox_profile =
-  | Local [@tla.symbol "Local"]
+  | Local
     (** Host-process execution. Filesystem scope is bound to
         [~/me/.masc/playground/<keeper>/] (see [Playground_paths]).
         Network inherits the server's namespace. Intended for keepers
         whose work stays on local files and does not need container-grade
         isolation. *)
-  | Docker [@tla.symbol "Docker"]
+  | Docker
     (** Containerized execution with hardened defaults: cap-drop,
         no-new-privs, read-only rootfs, tmpfs, pids/memory limits.
         Network defaults to [Network_none]; the internal git/gh
@@ -22,9 +22,17 @@ type sandbox_profile =
         uses network egress plus read-only mounts from the selected
         root/keeper GitHub identity bundle for the duration of a git/gh
         command. *)
-[@@deriving tla]
-(** [@@deriving tla] generates [to_tla_symbol] / [all_symbols] /
-    [all_states] matching the [ProfileSet] string set declared in
+
+module Sandbox_profile_tla = struct
+  type t = sandbox_profile =
+    | Local [@tla.symbol "Local"]
+    | Docker [@tla.symbol "Docker"]
+  [@@deriving tla]
+end
+(** TLA+ dispatch symbols for {!sandbox_profile}. Kept in a submodule
+    so the generated [to_tla_symbol] / [all_symbols] / [all_states]
+    names cannot be shadowed by the separate [network_mode] deriver
+    below. Matches [ProfileSet] in
     [specs/boundary/SandboxDispatch.tla]. *)
 
 type network_mode =

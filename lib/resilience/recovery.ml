@@ -36,6 +36,35 @@ type _ strategy =
   | Abort : { reason : string; cleanup : unit -> unit }
       -> [> `Abort ] strategy
 
+(* TLA+ taxonomy mirrors for specs/resilience/ResilienceDegradation.tla.
+   Payload-bearing constructors cannot use ppx_tla's [all_states], so
+   the exhaustive functions below are the typed contract and the lists
+   are the set surface consumed by parity tests. *)
+let error_mode_to_tla_symbol = function
+  | TransientError _ -> "Transient"
+  | PermanentError _ -> "Permanent"
+  | ResourceExhausted _ -> "ResourceExhausted"
+  | AmbiguityError _ -> "Ambiguity"
+  | ConsensusError _ -> "Consensus"
+  | DegradationRequired _ -> "Degradation"
+
+let all_error_mode_tla_symbols =
+  [ "Transient";
+    "Permanent";
+    "ResourceExhausted";
+    "Ambiguity";
+    "Consensus";
+    "Degradation";
+  ]
+
+let strategy_to_tla_symbol : type a. a strategy -> string = function
+  | Retry _ -> "Retry"
+  | Fallback _ -> "Fallback"
+  | Handoff _ -> "Handoff"
+  | Abort _ -> "Abort"
+
+let all_strategy_tla_symbols = [ "Retry"; "Fallback"; "Handoff"; "Abort" ]
+
 (* ── Convenience constructors ─────────────────────────────────── *)
 
 let transient ~detail ?(max_retries = 3) ?(backoff_ms = 200) () =

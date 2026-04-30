@@ -382,7 +382,8 @@ let run_named
         | None -> Keeper_types.No_providers_available
       in
       let observation =
-        Oas_worker_cascade.cascade_observation_with_metrics ~cascade_name
+        Oas_worker_cascade.cascade_observation_with_metrics
+          ~cascade_name:error_cascade_name
           ?strategy:!cascade_strategy_name_ref ~configured_labels
           ~candidate_cfgs ~selected_model_raw:None ~capture ()
       in
@@ -453,7 +454,8 @@ let run_named
           ~latency_ms:attempt_latency_ms ());
         (* FSM: Call_ok → Accept *)
         let observation =
-          Oas_worker_cascade.cascade_observation_with_metrics ~cascade_name
+          Oas_worker_cascade.cascade_observation_with_metrics
+            ~cascade_name:error_cascade_name
             ?strategy:!cascade_strategy_name_ref ~configured_labels
             ~candidate_cfgs ~selected_model_raw:(Some result.response.model)
             ~capture ()
@@ -482,7 +484,8 @@ let run_named
         (match Cascade_fsm.decide ~accept_on_exhaustion:false ~is_last outcome with
          | Cascade_fsm.Accept_on_exhaustion { response; _ } ->
            let observation =
-             Oas_worker_cascade.cascade_observation_with_metrics ~cascade_name
+             Oas_worker_cascade.cascade_observation_with_metrics
+               ~cascade_name:error_cascade_name
                ?strategy:!cascade_strategy_name_ref ~configured_labels
                ~candidate_cfgs ~selected_model_raw:(Some response.model)
                ~capture ()
@@ -502,7 +505,8 @@ let run_named
            try_cascade ?resume_checkpoint:next_resume rest new_err
          | Cascade_fsm.Exhausted _ ->
            let observation =
-             Oas_worker_cascade.cascade_observation_with_metrics ~cascade_name
+             Oas_worker_cascade.cascade_observation_with_metrics
+               ~cascade_name:error_cascade_name
                ?strategy:!cascade_strategy_name_ref ~configured_labels
                ~candidate_cfgs ~selected_model_raw:(Some result.response.model)
                ~capture ()
@@ -523,7 +527,8 @@ let run_named
            (* Should be unreachable with accept_on_exhaustion:false, but handle gracefully *)
            Log.Misc.warn "cascade %s: unexpected Accept in Accept_rejected branch (model=%s)" cascade_name resp.model;
            let observation =
-             Oas_worker_cascade.cascade_observation_with_metrics ~cascade_name
+             Oas_worker_cascade.cascade_observation_with_metrics
+               ~cascade_name:error_cascade_name
                ?strategy:!cascade_strategy_name_ref ~configured_labels
                ~candidate_cfgs ~selected_model_raw:(Some resp.model) ~capture ()
            in
@@ -690,7 +695,8 @@ let run_named
               try_cascade ?resume_checkpoint:next_resume rest new_err
             | Cascade_fsm.Exhausted _ ->
               let observation =
-                Oas_worker_cascade.cascade_observation_with_metrics ~cascade_name
+                Oas_worker_cascade.cascade_observation_with_metrics
+                  ~cascade_name:error_cascade_name
                   ?strategy:!cascade_strategy_name_ref ~configured_labels
                   ~candidate_cfgs ~selected_model_raw:None ~capture ()
               in
@@ -703,7 +709,8 @@ let run_named
          | None ->
            (* Non-API error (agent, config, etc.) — not cascadeable *)
            let observation =
-             Oas_worker_cascade.cascade_observation_with_metrics ~cascade_name
+             Oas_worker_cascade.cascade_observation_with_metrics
+               ~cascade_name:error_cascade_name
                ?strategy:!cascade_strategy_name_ref ~configured_labels
                ~candidate_cfgs ~selected_model_raw:None ~capture ()
            in
@@ -826,7 +833,8 @@ let run_named
   in
   let cascade_exhausted_after_filter ~cycle =
     let observation =
-      Oas_worker_cascade.cascade_observation_with_metrics ~cascade_name
+      Oas_worker_cascade.cascade_observation_with_metrics
+        ~cascade_name:error_cascade_name
         ?strategy:!cascade_strategy_name_ref ~configured_labels
         ~candidate_cfgs ~selected_model_raw:None ~capture ()
     in

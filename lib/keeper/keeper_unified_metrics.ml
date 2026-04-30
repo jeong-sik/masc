@@ -502,7 +502,8 @@ let provider_context_json ~(meta : keeper_meta)
       let cascade_name, selected_model, candidate_models =
         match r.cascade_observation with
         | Some observation ->
-            ( observation.cascade_name,
+            ( Keeper_cascade_profile.runtime_name_to_string
+                observation.cascade_name,
               observation.selected_model,
               observation.candidate_models )
         | None ->
@@ -812,8 +813,12 @@ let append_decision_record
               let cascade_fields =
                 match r.cascade_observation with
                 | Some co ->
+                    let cascade_name =
+                      Keeper_cascade_profile.runtime_name_to_string
+                        co.cascade_name
+                    in
                     [
-                      ("cascade_name", `String co.cascade_name);
+                      ("cascade_name", `String cascade_name);
                       ("strategy", Json_util.string_opt_to_json co.strategy);
                       ("primary_model", match co.primary_model with Some m -> `String m | None -> `Null);
                       ("selected_model", match co.selected_model with Some m -> `String m | None -> `Null);
@@ -1309,7 +1314,9 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
   record_turn_latency_bucket ~keeper:meta.name ~latency_ms;
   let cascade_profile =
     match result.cascade_observation with
-    | Some observation -> observation.Oas_worker.cascade_name
+    | Some observation ->
+      Keeper_cascade_profile.runtime_name_to_string
+        observation.Oas_worker.cascade_name
     | None -> meta.cascade_name
   in
   (* #9933: same latency bucket, split by provider/model/cascade.

@@ -39,7 +39,7 @@ let worker_max_tool_calls_per_turn = 12
 (* ================================================================ *)
 
 type cascade_observation = {
-  cascade_name : string;
+  cascade_name : Keeper_cascade_profile.runtime_name;
   strategy : string option;
   configured_labels : string list;
   candidate_models : string list;
@@ -399,9 +399,12 @@ let cascade_observation_with_metrics ~cascade_name ?strategy ~configured_labels
 (* ================================================================ *)
 
 let cascade_observation_to_json (obs : cascade_observation) : Yojson.Safe.t =
+  let cascade_name =
+    Keeper_cascade_profile.runtime_name_to_string obs.cascade_name
+  in
   `Assoc
     [
-      ("cascade_name", `String obs.cascade_name);
+      ("cascade_name", `String cascade_name);
       ("strategy", Json_util.string_opt_to_json obs.strategy);
       ( "configured_labels",
         `List (List.map (fun label -> `String label) obs.configured_labels) );

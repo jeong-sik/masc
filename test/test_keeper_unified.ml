@@ -1921,7 +1921,9 @@ let test_metrics_surface_model_prefers_successful_cascade_label () =
       ~model:"qwen3.5:27b-nvfp4" ~input_tok:100 ~output_tok:50
       ~cascade_observation:
         {
-          Masc_mcp.Oas_worker.cascade_name = Masc_mcp.Keeper_config.default_cascade_name;
+          Masc_mcp.Oas_worker.cascade_name =
+            Masc_mcp.Keeper_cascade_profile.Runtime_name
+              Masc_mcp.Keeper_config.default_cascade_name;
           strategy = Some "round_robin";
           configured_labels = [ "llama:auto" ];
           candidate_models =
@@ -1984,7 +1986,8 @@ let test_metrics_resolved_model_id_prefers_last_attempt_id () =
       ~cascade_observation:
         {
           Masc_mcp.Oas_worker.cascade_name =
-            Masc_mcp.Keeper_config.default_cascade_name;
+            Masc_mcp.Keeper_cascade_profile.Runtime_name
+              Masc_mcp.Keeper_config.default_cascade_name;
           strategy = Some "round_robin";
           configured_labels = [ "claude_code:auto" ];
           candidate_models =
@@ -2392,7 +2395,9 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
           cascade_observation =
             Some
               {
-                Masc_mcp.Oas_worker.cascade_name = Masc_mcp.Keeper_config.default_cascade_name;
+                Masc_mcp.Oas_worker.cascade_name =
+                  Masc_mcp.Keeper_cascade_profile.Runtime_name
+                    Masc_mcp.Keeper_config.default_cascade_name;
                 strategy = Some "round_robin";
                 configured_labels = [ "llama:auto" ];
                 candidate_models =

@@ -106,6 +106,18 @@ let with_env name value f =
       | None -> Unix.putenv name "")
     f
 
+let with_temp_masc_base_path prefix f =
+  let base = temp_dir prefix in
+  let previous = Sys.getenv_opt "MASC_BASE_PATH" in
+  Unix.putenv "MASC_BASE_PATH" base;
+  Fun.protect
+    ~finally:(fun () ->
+      (match previous with
+       | Some value -> Unix.putenv "MASC_BASE_PATH" value
+       | None -> Unix.putenv "MASC_BASE_PATH" "");
+      cleanup_dir base)
+    f
+
 let with_temp_masc_config cascade_json f =
   let base = temp_dir "test_masc_config" in
   let config_dir = Filename.concat base ".masc/config" in
@@ -435,7 +447,9 @@ let test_cascade_inference_normalizes_keeper_aliases () =
 let test_cascade_observation_json_includes_fallback_fields () =
   let observation : Oas_worker.cascade_observation =
     {
-      cascade_name = Masc_mcp.Keeper_config.default_cascade_name;
+      cascade_name =
+        Masc_mcp.Keeper_cascade_profile.Runtime_name
+          Masc_mcp.Keeper_config.default_cascade_name;
       strategy = Some "round_robin";
       configured_labels = [ "glm:auto"; "llama:auto" ];
       candidate_models = [ "glm:glm-5.1"; "openai:qwen3.5-35b" ];
@@ -503,6 +517,7 @@ let find_cascade_metric_entry name (json : Yojson.Safe.t) =
            name)
 
 let test_cascade_metrics_concurrent_recording () =
+  with_temp_masc_base_path "test_cascade_metrics_concurrent" @@ fun () ->
   Masc_mcp.Oas_worker_cascade.reset_cascade_counters_for_test ();
   Fun.protect
     ~finally:(fun () ->
@@ -532,6 +547,7 @@ let test_cascade_metrics_concurrent_recording () =
             Yojson.Safe.Util.(entry |> member "failures" |> to_int))
 
 let test_cascade_metrics_evicts_lowest_call_key () =
+  with_temp_masc_base_path "test_cascade_metrics_evicts" @@ fun () ->
   Masc_mcp.Oas_worker_cascade.reset_cascade_counters_for_test ();
   Fun.protect
     ~finally:(fun () ->
@@ -597,7 +613,8 @@ let test_cascade_audit_persists_observation () =
       Unix.putenv "MASC_BASE_PATH" base;
       let observation : Masc_mcp.Oas_worker_cascade.cascade_observation =
         {
-          cascade_name = "audit-cascade";
+          cascade_name =
+            Masc_mcp.Keeper_cascade_profile.Runtime_name "audit-cascade";
           strategy = Some "round_robin";
           configured_labels = [ "glm:auto"; "openai:auto" ];
           candidate_models = [ "glm:glm-5.1"; "openai:qwen3.5-35b" ];
@@ -644,6 +661,7 @@ let test_cascade_audit_persists_observation () =
         ~observation:(Some observation)
         ~outcome:`Failure
         ();
+      ignore (Oas_worker.cascade_metrics_json ());
       let store =
         Dated_jsonl.create
           ~base_dir:(Filename.concat base ".masc/cascade_audit")
@@ -3787,6 +3805,8 @@ let () =
     ~proc_mgr:(Eio.Stdenv.process_mgr env)
     ~clock:(Eio.Stdenv.clock env);
   Eio_guard.enable ();
+  Eio.Switch.run @@ fun sw ->
+  Masc_mcp.Oas_worker_cascade.start_actor_if_needed ~sw;
   Alcotest.run "OAS Worker" [
     "sse_event_bridge", [
       Alcotest.test_case "text delta extraction" `Quick

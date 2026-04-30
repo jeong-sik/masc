@@ -432,9 +432,21 @@ let resume_keeper_after_reconcile_gate (ctx : _ context) (meta : keeper_meta) =
     resumed_meta.name None;
   Keeper_registry.reset_turn_failures ~base_path:ctx.config.base_path
     resumed_meta.name;
-  ignore
-    (Keeper_registry.dispatch_event ~base_path:ctx.config.base_path
-       resumed_meta.name Keeper_state_machine.Operator_resume);
+  (match Keeper_registry.dispatch_event ~base_path:ctx.config.base_path
+          resumed_meta.name Keeper_state_machine.Operator_resume
+   with
+   | Ok _ -> ()
+   | Error (Keeper_state_machine.Invalid_transition { from_phase; to_phase; reason }) ->
+       Log.Keeper.error "%s: Operator_resume dispatch failed: %s -> %s (%s)"
+         resumed_meta.name
+         (Keeper_state_machine.phase_to_string from_phase)
+         (Keeper_state_machine.phase_to_string to_phase)
+         reason
+   | Error (Keeper_state_machine.Terminal_state { current; attempted_event }) ->
+       Log.Keeper.warn "%s: Operator_resume skipped, already terminal: %s (event: %s)"
+         resumed_meta.name
+         (Keeper_state_machine.phase_to_string current)
+         attempted_event);
   match Keeper_registry.get ~base_path:ctx.config.base_path resumed_meta.name with
   | Some entry when Option.is_none (Eio.Promise.peek entry.done_p) ->
       (* tla-lint: allow-mutation: fiber signal — wake the keeper after operator resume *)

@@ -666,9 +666,8 @@ let expires_at_for_auth_config auth_cfg =
   else
     None
 
-let save_raw_token_credential config ~agent_name ~role ~raw_token :
-    (agent_credential, masc_error) result =
-  let auth_cfg = load_auth_config config in
+let save_raw_token_credential_with_expiry config ~agent_name ~role ~raw_token
+    ~expires_at : (agent_credential, masc_error) result =
   let cred =
     {
       id = None;
@@ -677,7 +676,7 @@ let save_raw_token_credential config ~agent_name ~role ~raw_token :
       token = sha256_hash raw_token;
       role;
       created_at = now_iso ();
-      expires_at = expires_at_for_auth_config auth_cfg;
+      expires_at;
     }
   in
   try
@@ -691,6 +690,17 @@ let save_raw_token_credential config ~agent_name ~role ~raw_token :
     Log.Auth.error "%s" msg;
     Error (IoError msg)
 
+let save_raw_token_credential config ~agent_name ~role ~raw_token :
+    (agent_credential, masc_error) result =
+  let auth_cfg = load_auth_config config in
+  save_raw_token_credential_with_expiry config ~agent_name ~role ~raw_token
+    ~expires_at:(expires_at_for_auth_config auth_cfg)
+
+let save_raw_token_credential_without_expiry config ~agent_name ~role
+    ~raw_token : (agent_credential, masc_error) result =
+  save_raw_token_credential_with_expiry config ~agent_name ~role ~raw_token
+    ~expires_at:None
+
 (* ============================================ *)
 (* Token operations                             *)
 (* ============================================ *)
@@ -699,6 +709,16 @@ let save_raw_token_credential config ~agent_name ~role ~raw_token :
 let create_token config ~agent_name ~role : (string * agent_credential, masc_error) result =
   let raw_token = generate_token () in
   match save_raw_token_credential config ~agent_name ~role ~raw_token with
+  | Ok cred -> Ok (raw_token, cred)
+  | Error e -> Error e
+
+let create_token_without_expiry config ~agent_name ~role :
+    (string * agent_credential, masc_error) result =
+  let raw_token = generate_token () in
+  match
+    save_raw_token_credential_without_expiry config ~agent_name ~role
+      ~raw_token
+  with
   | Ok cred -> Ok (raw_token, cred)
   | Error e -> Error e
 

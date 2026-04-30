@@ -97,8 +97,11 @@ If you want structured output for automation:
 authorization endpoint, so `codex mcp login masc` is expected to fail with
 `No authorization support detected`.
 
-For the Codex MCP server, mint a worker bearer and export it as
-`MASC_MCP_TOKEN`:
+For the Codex MCP server, the local startup path maintains a private
+non-expiring worker bearer at
+`$BASE_PATH/.masc/auth/codex-mcp-client.token`. Manual `login` is still useful
+when bootstrapping or rotating the bearer; export the printed value as
+`MASC_MCP_TOKEN` in the shell that starts Codex:
 
 ```bash
 BASE_PATH="${MASC_BASE_PATH:-$HOME}"
@@ -109,8 +112,7 @@ BASE_PATH="${MASC_BASE_PATH:-$HOME}"
   --shell
 ```
 
-Then use the printed `export MASC_MCP_TOKEN=...` in the shell that starts
-Codex. Confirm the Codex-side registration points at the bearer env var:
+Confirm the Codex-side registration points at the bearer env var:
 
 ```bash
 codex mcp get masc
@@ -124,7 +126,7 @@ Bearer Token Env Var: MASC_MCP_TOKEN
 ```
 
 If Codex still reports that `masc` is not logged in, check the pipeline
-projection before retrying OAuth login:
+projection instead of retrying OAuth login:
 
 ```bash
 ./_build/default/bin/main_eio.exe doctor auth --base-path "$BASE_PATH" --json \
@@ -156,6 +158,11 @@ BASE_PATH="${MASC_BASE_PATH:-$HOME/me}"
 
 ~/me/scripts/mcp-sync.sh
 ```
+
+Local startup also self-heals private non-expiring token files for `claude` and
+`gemini`. Manual `login` is for first-time setup or explicit rotation; after
+that, `~/me/scripts/mcp-sync.sh` can project those token files into client
+config.
 
 `doctor auth --json` exposes `.mcp_clients[]`; `claude` should use
 `MASC_CLAUDE_MCP_TOKEN` / `X-MASC-Agent: claude`, and `gemini` should use

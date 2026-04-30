@@ -1618,19 +1618,46 @@ let test_main_eio_self_heals_codex_mcp_token_file () =
           in
           Alcotest.(check bool) "existing role preserved" true
             (credential.role = Types.Worker);
+          Alcotest.(check (option string)) "codex credential does not expire"
+            None credential.expires_at;
           Alcotest.(check string) "raw token hashes to stored credential"
             credential.token (Auth.sha256_hash repaired_raw);
-          match
-            Auth.verify_token dir ~agent_name:"codex-mcp-client"
-              ~token:repaired_raw
-          with
-          | Ok _ -> ()
-          | Error err ->
-              Alcotest.failf "repaired raw token should verify: %s"
-                (Types.masc_error_to_string err)))
+          (match
+             Auth.verify_token dir ~agent_name:"codex-mcp-client"
+               ~token:repaired_raw
+           with
+           | Ok _ -> ()
+           | Error err ->
+               Alcotest.failf "repaired raw token should verify: %s"
+                 (Types.masc_error_to_string err));
+          List.iter
+            (fun agent_name ->
+              let path = Filename.concat auth_dir (agent_name ^ ".token") in
+              Alcotest.(check bool)
+                (agent_name ^ " raw token file exists")
+                true (Sys.file_exists path);
+              let raw = String.trim (read_file path) in
+              let credential =
+                match Auth.load_credential dir agent_name with
+                | Some cred -> cred
+                | None ->
+                    Alcotest.failf "missing %s credential after startup"
+                      agent_name
+              in
+              Alcotest.(check (option string))
+                (agent_name ^ " credential does not expire")
+                None credential.expires_at;
+              Alcotest.(check string)
+                (agent_name ^ " raw token hashes to stored credential")
+                credential.token (Auth.sha256_hash raw);
+              match Auth.verify_token dir ~agent_name ~token:raw with
+              | Ok _ -> ()
+              | Error err ->
+                  Alcotest.failf "%s raw token should verify: %s"
+                    agent_name (Types.masc_error_to_string err))
+            [ "claude"; "gemini" ]))
 
 let test_codex_mcp_config_sync_updates_only_masc_section () =
-  let raw_token = "fresh-\"codex\"\\\\token" in
   let content =
     {|[mcp_servers.other]
 http_headers = { Authorization = "Bearer keep-other" }
@@ -1660,8 +1687,7 @@ http_headers = { Authorization = "Bearer nested-should-stay" }
 |}
   in
   let updated, status =
-    Server_runtime_bootstrap.sync_codex_mcp_auth_header_content ~raw_token
-      content
+    Server_runtime_bootstrap.sync_codex_mcp_auth_header_content content
   in
   Alcotest.(check string) "masc section updated" expected updated;
   Alcotest.(check bool) "reported updated" true
@@ -1682,7 +1708,7 @@ bearer_token_env_var = "MASC_MCP_TOKEN"
   in
   let updated, status =
     Server_runtime_bootstrap.sync_codex_mcp_auth_header_content
-      ~raw_token:"fresh-token" content
+      content
   in
   Alcotest.(check string) "missing config inserted" expected updated;
   Alcotest.(check bool) "reported updated" true

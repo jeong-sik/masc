@@ -31,6 +31,10 @@ let mcp_token_env_var_for_agent = function
   | "codex" | "codex-mcp-client" -> codex_token_env_var
   | _ -> codex_token_env_var
 
+let is_local_mcp_client_agent = function
+  | "claude" | "gemini" | "codex" | "codex-mcp-client" -> true
+  | _ -> false
+
 let rng_initialized = Atomic.make false
 
 let ensure_rng_initialized () =
@@ -89,7 +93,13 @@ let mint ~base_path ~host ~port ~agent_name ~role () =
   match ensure_required_bearer_auth ~base_path ~agent_name with
   | Error err -> Error err
   | Ok auth_change -> (
-      match Auth.create_token base_path ~agent_name ~role with
+      let create_token =
+        if is_local_mcp_client_agent agent_name then
+          Auth.create_token_without_expiry
+        else
+          Auth.create_token
+      in
+      match create_token base_path ~agent_name ~role with
       | Error err -> Error err
       | Ok (bearer_token, cred) ->
           let raw_token_file =

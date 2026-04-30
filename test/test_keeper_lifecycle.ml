@@ -6,6 +6,7 @@ module KAR = Masc_mcp.Keeper_agent_run
 module KMP = Masc_mcp.Keeper_memory_policy
 module KT = Masc_mcp.Keeper_types
 module KR = Masc_mcp.Keeper_registry
+module KHS = Masc_mcp.Keeper_keepalive_signal
 module KST = Masc_mcp.Keeper_state_machine
 
 let ctx_messages = KEC.messages_of_context
@@ -2061,6 +2062,47 @@ let test_dispatch_keeper_phase_event_rejection_increments_metric () =
       in
       check bool "rejection metric increments" true (after > before))
 
+let test_keepalive_dispatch_event_rejection_increments_metric () =
+  let base_dir = temp_dir "keeper_lifecycle_keepalive_rejection" in
+  Fun.protect
+    ~finally:(fun () ->
+      KR.clear ();
+      cleanup_dir base_dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Eio.Switch.run @@ fun sw ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      KR.clear ();
+      let config = Masc_mcp.Coord.default_config base_dir in
+      let ctx : _ KT.context =
+        {
+          config;
+          agent_name = "test-operator";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = None;
+        }
+      in
+      let labels = [ ("event", "compaction_started") ] in
+      let before =
+        Masc_mcp.Prometheus.get_metric_value
+          Masc_mcp.Prometheus.metric_keeper_lifecycle_dispatch_rejections
+          ~labels ()
+        |> Option.value ~default:0.0
+      in
+      KHS.dispatch_keepalive_event
+        ~ctx
+        ~keeper_name:"missing-keeper"
+        KST.Compaction_started;
+      let after =
+        Masc_mcp.Prometheus.get_metric_value
+          Masc_mcp.Prometheus.metric_keeper_lifecycle_dispatch_rejections
+          ~labels ()
+        |> Option.value ~default:0.0
+      in
+      check bool "keepalive rejection metric increments" true (after > before))
+
 let () =
   run "keeper_lifecycle"
     [
@@ -2165,5 +2207,7 @@ let () =
             test_dispatch_post_turn_lifecycle_events_uses_room_base_path;
           test_case "phase event rejection increments metric" `Quick
             test_dispatch_keeper_phase_event_rejection_increments_metric;
+          test_case "keepalive event rejection increments metric" `Quick
+            test_keepalive_dispatch_event_rejection_increments_metric;
         ] );
     ]

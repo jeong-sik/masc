@@ -1485,7 +1485,12 @@ let view_heartbeat ?(entries : Logs_types.entry list = []) () =
     | [] -> heartbeat_bars
     | _ -> heartbeat_bars_of_entries entries
   in
-  let active = List.count ~f:(fun (_, l) -> l <> `Idle) bars in
+  let active =
+    List.count bars ~f:(fun (_, l) ->
+      match l with
+      | `Idle -> false
+      | `Info | `Warn | `Error -> true)
+  in
   let max_height = List.fold bars ~init:0 ~f:(fun acc (h, _) -> Int.max acc h) in
   let aria_desc =
     Printf.sprintf
@@ -1762,7 +1767,7 @@ let render_response
                      (fun el ->
                         el##setAttribute
                           (Js.string "aria-pressed")
-                          (Js.string (if lvl = level then "true" else "false")))
+                          (Js.string (if String.equal lvl level then "true" else "false")))
                  in
                  update "debug"; update "info"; update "warn"; update "error")
                ()
@@ -1772,13 +1777,21 @@ let render_response
                [ Style.chip
                ; Attr.create "data-filter-level" level
                ; Attr.role "button"
-               ; Attr.create "aria-pressed" (if level = "info" then "true" else "false")
+               ; Attr.create "aria-pressed" (if String.equal level "info" then "true" else "false")
                ; Attr.tabindex 0
                ; Attr.on_click (fun _ev -> fire ())
-               ; Attr.on_key_down (fun ev ->
-                   let open Virtual_dom.Vdom.Event.Keyboard in
-                   if Key.equal ev.key Key.Enter
-                      || Key.equal ev.key (Key.of_string " ")
+               ; Attr.on_keydown (fun ev ->
+                   (* Vdom keyboard event API moved out of
+                      Virtual_dom.Vdom.Event in newer bonsai_web.
+                      Read the raw JS [key] field instead. *)
+                   let key_str =
+                     Js_of_ocaml.Js.Optdef.case
+                       ev##.key
+                       (fun () -> "")
+                       Js_of_ocaml.Js.to_string
+                   in
+                   if String.equal key_str "Enter"
+                      || String.equal key_str " "
                    then fire ()
                    else Effect.of_sync_fun (fun () -> ()) ())
                ]
@@ -1938,7 +1951,7 @@ let render_response
                      (fun el ->
                         el##setAttribute
                           (Js.string "aria-pressed")
-                          (Js.string (if n = name then "true" else "false")))
+                          (Js.string (if String.equal n name then "true" else "false")))
                  in
                  update "dark"; update "cyber"; update "term";
                  update "parchment"; update "paper")
@@ -1949,13 +1962,21 @@ let render_response
                [ Style.theme_chip
                ; Attr.create "data-chip-theme" name
                ; Attr.role "button"
-               ; Attr.create "aria-pressed" (if name = "dark" then "true" else "false")
+               ; Attr.create "aria-pressed" (if String.equal name "dark" then "true" else "false")
                ; Attr.tabindex 0
                ; Attr.on_click (fun _ -> fire ())
-               ; Attr.on_key_down (fun ev ->
-                   let open Virtual_dom.Vdom.Event.Keyboard in
-                   if Key.equal ev.key Key.Enter
-                      || Key.equal ev.key (Key.of_string " ")
+               ; Attr.on_keydown (fun ev ->
+                   (* Vdom keyboard event API moved out of
+                      Virtual_dom.Vdom.Event in newer bonsai_web.
+                      Read the raw JS [key] field instead. *)
+                   let key_str =
+                     Js_of_ocaml.Js.Optdef.case
+                       ev##.key
+                       (fun () -> "")
+                       Js_of_ocaml.Js.to_string
+                   in
+                   if String.equal key_str "Enter"
+                      || String.equal key_str " "
                    then fire ()
                    else Effect.of_sync_fun (fun () -> ()) ())
                ]

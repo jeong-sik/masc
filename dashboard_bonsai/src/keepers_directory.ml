@@ -434,8 +434,16 @@ let row_click_effect name =
   let select () = Bonsai.Expert.Var.set selected_name_var (Some name) in
   [ Attr.on_click (fun _ -> Effect.of_sync_fun select ())
   ; Attr.on_keydown (fun ev ->
-      let open Virtual_dom.Vdom.Event.Keyboard in
-      if Key.equal ev.key Key.Enter || Key.equal ev.key (Key.of_string " ")
+      (* Vdom keyboard event API moved out of Virtual_dom.Vdom.Event
+         in newer bonsai_web; read the raw JS [key] field instead.
+         Same activation contract as the click handler. *)
+      let key_str =
+        Js_of_ocaml.Js.Optdef.case
+          ev##.key
+          (fun () -> "")
+          Js_of_ocaml.Js.to_string
+      in
+      if String.equal key_str "Enter" || String.equal key_str " "
       then Effect.of_sync_fun select ()
       else Effect.of_sync_fun (fun () -> ()) ())
   ]

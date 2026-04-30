@@ -134,6 +134,8 @@ jobs:
                   pullRequest(number: $number) {
                     id
                     isDraft
+                    state
+                    merged
                     autoMergeRequest {
                       enabledAt
                     }
@@ -147,6 +149,17 @@ jobs:
               number: pullNumber
             });
             const current = result.repository.pullRequest;
+            if (!current) {
+              core.info(`PR #${pullNumber} no longer resolves; skip draft auto-merge guard.`);
+              return;
+            }
+            if (current.state === "MERGED" || current.state === "CLOSED" || current.merged === true) {
+              core.info(
+                `PR #${pullNumber} live state is ${current.state} (merged=${current.merged}); ` +
+                  "skip draft auto-merge guard for post-close/post-merge event."
+              );
+              return;
+            }
             const draftBoundaryAction =
               action === "ready_for_review" ||
               action === "auto_merge_enabled" ||

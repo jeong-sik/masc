@@ -855,13 +855,11 @@ let () =
           Tool_schemas_inline_infra.mcp_session_action_enum_strings);
     ];
     "keeper_shell_op_ssot", [
-      (* Issue #8524: Keeper_exec_shell.shell_op Variant has 16
-         constructors but tool_shard.ml schema enum hand-listed only
-         15 — git_worktree was missing even though the dispatcher
-         accepted it (line 1021) and supported_ops self-advertised it
-         (line 1383). 6th REAL bug found via this sweep. Same shape
-         as #8430 / #8471 / #8474 / #8493 / #8513. *)
-      Alcotest.test_case "witness covers all 16 variants" `Quick (fun () ->
+      (* Issue #8524: keep the keeper_shell structured-op variant and
+         tool_shard schema mirror in sync. 2026-04-30 also pins that
+         generic bash execution is no longer advertised through
+         keeper_shell; Bash/keeper_bash owns command execution. *)
+      Alcotest.test_case "witness covers all 15 variants" `Quick (fun () ->
         let module S = Masc_mcp.Keeper_exec_shell in
         let witness o =
           let actual = S.shell_op_to_string o in
@@ -871,8 +869,8 @@ let () =
         witness S.Pwd; witness S.Ls; witness S.Cat; witness S.Rg;
         witness S.Git_status; witness S.Find; witness S.Head; witness S.Tail;
         witness S.Wc; witness S.Tree; witness S.Git_log; witness S.Git_diff;
-        witness S.Git_worktree; witness S.Bash; witness S.Git_clone; witness S.Gh;
-        Alcotest.(check int) "count" 16 (List.length S.valid_shell_op_strings));
+        witness S.Git_worktree; witness S.Git_clone; witness S.Gh;
+        Alcotest.(check int) "count" 15 (List.length S.valid_shell_op_strings));
       Alcotest.test_case "schema mirror matches SSOT" `Quick (fun () ->
         Alcotest.(check (list string)) "tool_shard mirror == SSOT"
           Masc_mcp.Keeper_exec_shell.valid_shell_op_strings
@@ -880,6 +878,9 @@ let () =
       Alcotest.test_case "git_worktree now in schema" `Quick (fun () ->
         Alcotest.(check bool) "git_worktree present" true
           (List.mem "git_worktree" Masc_mcp.Tool_shard.keeper_shell_op_enum_strings));
+      Alcotest.test_case "bash op not advertised" `Quick (fun () ->
+        Alcotest.(check bool) "bash absent" false
+          (List.mem "bash" Masc_mcp.Tool_shard.keeper_shell_op_enum_strings));
     ];
     "channel_label_ssot", [
       (* Issue #8569: keeper_keepalive used to hand-build the

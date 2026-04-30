@@ -55,9 +55,17 @@ let internal_to_public_tbl =
 let to_internal name = Hashtbl.find_opt public_to_internal_tbl name
 
 let to_public internal =
-  match Hashtbl.find_opt internal_to_public_tbl internal with
-  | Some public -> public
-  | None -> internal
+  match internal with
+  | "keeper_shell" ->
+      (* Grep is only an alias for keeper_shell op=rg, not for the whole
+         structured shell surface. Keep the internal name when a caller asks
+         for a generic display name so dashboards/help do not imply that
+         keeper_shell itself is Grep. *)
+      internal
+  | _ ->
+      (match Hashtbl.find_opt internal_to_public_tbl internal with
+       | Some public -> public
+       | None -> internal)
 
 let public_masc_to_internal_tbl =
   let t = Hashtbl.create 16 in

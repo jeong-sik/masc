@@ -515,9 +515,21 @@ let make_tool_bundle
             | Some s -> s
             | None -> internal_def.input_schema
           in
+          let description =
+            match public with
+            | "Grep" ->
+                "Search file contents with ripgrep. This is a public alias \
+                 for keeper_shell op=rg only; use Bash/keeper_bash for \
+                 command execution."
+            | "Bash" ->
+                "Execute one shell command through keeper_bash, including \
+                 Legendary Bash safety gates, write gating, background \
+                 execution, and sandbox routing."
+            | _ -> internal_def.description
+          in
           Some (Tool_bridge.oas_tool_of_masc
             ~name:public
-            ~description:internal_def.description
+            ~description
             ~input_schema
             (make_keeper_tool_handler ~name:internal ~config ~meta ~ctx_snapshot
                ?turn_sandbox_factory

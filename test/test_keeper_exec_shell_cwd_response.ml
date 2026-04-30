@@ -1,10 +1,9 @@
 (** Integration pin for PR-3 of the [Keeper_cwd_response] series.
 
     PR-3 wires [Keeper_cwd_response.to_yojson_response] into the
-    Docker-route response builders inside [keeper_exec_shell.ml]:
+    Docker-route response builders inside [keeper_shell_ops.ml]:
 
     - [render_docker_process_result] (op=pwd / git_status / git_diff / ...)
-    - [op="bash"] runtime branch (5 cwd-echo sites in one match arm)
     - [op="git_log"] runtime branch (1 cwd-echo site under [via=docker])
 
     All other [cwd] usages in the file are intentionally left
@@ -12,9 +11,8 @@
 
     - [~fields:] / [~extra:] params to [error_json] / [Log.Keeper.*]
       (operator-facing — host path is what operators ssh into)
-    - [keeper_bash] Local-execution branch (after the Docker
-      dispatch at lines 765/779; for Local keepers the host path
-      IS the keeper-visible path)
+    - [keeper_bash] Local-execution branch in [keeper_shell_bash.ml];
+      for Local keepers the host path IS the keeper-visible path
     - [op] read-style ops with a [path] field (no [cwd] in
       response Assoc — those echo the input target, separate
       concern)
@@ -45,9 +43,9 @@ let read_source path =
 let find_source_path () =
   List.find_opt Sys.file_exists
     [
-      "lib/keeper/keeper_exec_shell.ml"
-    ; "../lib/keeper/keeper_exec_shell.ml"
-    ; "../../lib/keeper/keeper_exec_shell.ml"
+      "lib/keeper/keeper_shell_ops.ml"
+    ; "../lib/keeper/keeper_shell_ops.ml"
+    ; "../../lib/keeper/keeper_shell_ops.ml"
     ]
 
 let count_substring src needle =
@@ -59,9 +57,8 @@ let count_substring src needle =
   loop 0 0
 
 (* The wiring uses [Keeper_cwd_response.to_yojson_response cwd_response]
-   for the dispatcher helper and [cwd_field] (a let-bound
-   [to_yojson_response] result reused across the 5 op="bash" sites)
-   for the bash arm. Both forms must appear at least once each. *)
+   for the dispatcher helper. Generic op=bash has been removed from
+   keeper_shell, so there should no longer be a separate bash cwd echo path. *)
 
 let test_render_docker_process_result_uses_cwd_response () =
   match find_source_path () with
@@ -82,32 +79,16 @@ let test_render_docker_process_result_uses_cwd_response () =
          ~affix:"Keeper_cwd_response.to_yojson_response"
          src)
 
-let test_bash_op_has_runtime_aware_cwd_field () =
+let test_bash_op_has_no_runtime_cwd_field () =
   match find_source_path () with
   | None -> ()
   | Some path ->
     let src = read_source path in
-    (* The op="bash" arm threads cwd_response via a [cwd_field]
-       let-binding that is reused across cached/uncached and
-       timeout/success branches. Pinning the binding shape
-       prevents accidental revert to literal `String cwd`. *)
-    check bool
-      "cwd_field let-binding (Keeper_cwd_response result) exists"
-      true
-      (Astring.String.is_infix ~affix:"let cwd_field" src);
-    check bool "cwd_field references to_yojson_response" true
+    check bool "legacy op=bash deprecation exists" true
       (Astring.String.is_infix
-         ~affix:"Keeper_cwd_response.to_yojson_response cwd_response"
-         src);
-    (* The bash arm previously had 5 [`String cwd] echo sites; all
-       should now read [cwd_field]. We assert at least 4 occurrences
-       of [cwd_field] in the response Assoc lists. *)
-    let cwd_field_uses = count_substring src "; \"cwd\", cwd_field" in
-    check bool
-      (Printf.sprintf
-         "cwd_field used in >= 4 Assoc lists (found %d)"
-         cwd_field_uses)
-      true (cwd_field_uses >= 4)
+         ~affix:"keeper_shell_bash_deprecated" src);
+    check bool "legacy op=bash cwd_field removed" false
+      (Astring.String.is_infix ~affix:"let cwd_field" src)
 
 let test_git_log_runtime_branch_uses_cwd_response () =
   match find_source_path () with
@@ -117,8 +98,8 @@ let test_git_log_runtime_branch_uses_cwd_response () =
     (* The git_log runtime branch builds its own cwd_response.
        Verify at least 2 distinct [cwd_response = Keeper_cwd_response.docker]
        constructions in the file (render_docker + git_log; the
-       op="bash" arm uses [match turn_sandbox_factory] form
-       which differs). *)
+       generic op=bash branch is now a non-executing deprecation
+       response and no longer constructs cwd responses). *)
     let docker_ctor_uses =
       count_substring src "Keeper_cwd_response.docker ~host_cwd:cwd"
     in
@@ -180,8 +161,8 @@ let () =
             "render_docker_process_result wires Cwd_response"
             `Quick
             test_render_docker_process_result_uses_cwd_response
-        ; test_case "op=bash uses runtime-aware cwd_field" `Quick
-            test_bash_op_has_runtime_aware_cwd_field
+        ; test_case "op=bash has no runtime cwd field" `Quick
+            test_bash_op_has_no_runtime_cwd_field
         ; test_case
             "git_log runtime branch wires Cwd_response"
             `Quick test_git_log_runtime_branch_uses_cwd_response

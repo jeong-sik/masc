@@ -1,8 +1,8 @@
-(** Keeper shell tool handlers — bash execution and structured shell ops.
+(** Keeper shell tool handlers — command execution and structured shell ops.
 
     Handles [keeper_bash] (arbitrary commands with blocklist) and
     [keeper_shell] (structured ops: ls, cat, find, rg, head, tail, wc, tree,
-    git-log, git-diff, git-status, git-clone, git-worktree, bash).
+    git-log, git-diff, git-status, git-clone, git-worktree, gh).
 
     Both tools default to the keeper playground unless an explicit
     allowed [cwd] is provided. *)
@@ -12,7 +12,7 @@
     catches drift). Schema previously omitted git_worktree. *)
 type shell_op =
   | Pwd | Ls | Cat | Rg | Git_status | Find | Head | Tail | Wc | Tree
-  | Git_log | Git_diff | Git_worktree | Bash | Git_clone | Gh
+  | Git_log | Git_diff | Git_worktree | Git_clone | Gh
 
 val shell_op_to_string : shell_op -> string
 val all_shell_ops : shell_op list

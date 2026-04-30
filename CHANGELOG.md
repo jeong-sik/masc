@@ -22,6 +22,7 @@ Post-`0.18.21` merge-train release for keeper watchdog/lifecycle hardening, conf
 - Keeper policy gates and lifecycle dispatch now surface P0 failures instead of silently swallowing them (#12358).
 - Keeper task state reconciliation and UTF-8 persistence were hardened for runtime state durability (#12361).
 - `Log.Keeper.warning` is exported consistently and late event dispatch failures are guarded (#12362).
+- Keeper TOML profile validation now preserves parsed tool-access defaults through proactive-field validation, restoring `@check`/`@install` compilation after the post-`0.18.21` merge train (#12372).
 - Sangsu keeper SSOT data was repaired while dead persona fields were stripped from the checked-in runtime surface (#12363).
 - Stale watchdog handling no longer kills proactive keepers that are idle because turns are being skipped (#12367).
 - Keeper FSM transitions now allow paused state movement from Compacting and HandingOff (#12368).

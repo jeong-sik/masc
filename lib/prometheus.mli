@@ -340,6 +340,8 @@ val metric_fsm_guard_violation : string
       [Keeper_rollover.maybe_rollover_oas_handoff]
     Cardinality: ≤ 2 series, fleet-independent. *)
 val metric_keeper_lifecycle_callback_failures : string
+val metric_keeper_supervisor_cleanup_failures : string
+val metric_keeper_stale_watchdog_tick_failures : string
 
 (** PR-J: number of times the per-turn OAS event-bus drain helper ran,
     labelled by call-site so operators can attribute drain pressure

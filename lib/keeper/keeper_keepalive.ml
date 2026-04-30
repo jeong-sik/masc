@@ -253,7 +253,12 @@ let run_grpc_heartbeat_stream
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | End_of_file -> raise End_of_file
-       | exn -> Log.Keeper.error "gRPC heartbeat tick error: %s" (Printexc.to_string exn));
+       | exn ->
+         Prometheus.inc_counter
+           Prometheus.metric_keeper_heartbeat_failures
+           ~labels:[("keeper", agent_name)]
+           ();
+         Log.Keeper.error "gRPC heartbeat tick error: %s" (Printexc.to_string exn));
       if not (Atomic.get stop || Atomic.get close_ref)
       then (
         let no_wakeup = Atomic.make false in

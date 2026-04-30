@@ -1262,6 +1262,10 @@ let rec dispatch_event_with_audit
        broadcast_composite_changed ~name ~ts_unix:now;
        Ok tr
      | Error e ->
+       Prometheus.inc_counter
+         Prometheus.metric_keeper_lifecycle_dispatch_rejections
+         ~labels:[("event", Keeper_state_machine.event_to_string event)]
+         ();
        Log.Keeper.warn "registry: dispatch_event rejected name=%s error=%s"
          name (Keeper_state_machine.transition_error_to_string e);
        Error e)

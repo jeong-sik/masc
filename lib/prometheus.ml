@@ -665,6 +665,10 @@ let metric_fsm_guard_violation = "masc_fsm_guard_violation_total"
 let metric_keeper_lifecycle_callback_failures =
   "masc_keeper_lifecycle_callback_failures_total"
 let metric_keeper_event_bus_drain = "masc_keeper_event_bus_drain_total"
+let metric_keeper_supervisor_cleanup_failures =
+  "masc_keeper_supervisor_cleanup_failures_total"
+let metric_keeper_stale_watchdog_tick_failures =
+  "masc_keeper_stale_watchdog_tick_failures_total"
 let metric_keeper_dead_total = "masc_keeper_dead_total"
 (* Positive signal for the Skip_idle + Woken gate-promotion path added
    by #12271. Increments every time run_smart_heartbeat_gate observes
@@ -1013,6 +1017,13 @@ let init () =
     "Total keeper transitions to Dead phase after the supervisor exhausts \
      max_restarts. Labeled by keeper and reason. Any rate >0 is operator-\
      actionable: the supervisor will not retry the keeper."
+    Counter;
+  add metric_keeper_supervisor_cleanup_failures
+    "Total supervisor finally-cleanup failures suppressed to avoid \
+     Fun.Finally_raised. Labeled by keeper."
+    Counter;
+  add metric_keeper_stale_watchdog_tick_failures
+    "Total stale watchdog tick failures suppressed during poll. Labeled by keeper."
     Counter;
   add metric_keeper_skip_idle_wake_resumed
     "Total cycles where an external wakeup_keeper / board signal cut a \

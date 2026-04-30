@@ -4,6 +4,12 @@
 
 type assignment_id = string
 
+type error_kind = Error_kind of string
+
+let error_kind_of_string value = Error_kind value
+
+let error_kind_to_string (Error_kind value) = value
+
 type tool_event =
   | Assigned of {
       assignment_id : assignment_id;
@@ -29,7 +35,7 @@ type tool_event =
       tool_name : string;
       success : bool;
       duration_ms : float;
-      error_kind : string option;
+      error_kind : error_kind option;
       timestamp : float;
     }
 
@@ -71,7 +77,9 @@ let event_to_json = function
         ; ("success", `Bool success)
         ; ("duration_ms", `Float duration_ms)
         ; ( "error_kind"
-          , match error_kind with Some e -> `String e | None -> `Null )
+          , match error_kind with
+            | Some e -> `String (error_kind_to_string e)
+            | None -> `Null )
         ; ("timestamp", `Float timestamp)
         ]
 
@@ -117,7 +125,7 @@ let event_of_json json : (tool_event, string) result =
         let error_kind =
           match json |> member "error_kind" with
           | `Null -> None
-          | `String s -> Some s
+          | `String s -> Some (error_kind_of_string s)
           | _ -> None
         in
         Ok

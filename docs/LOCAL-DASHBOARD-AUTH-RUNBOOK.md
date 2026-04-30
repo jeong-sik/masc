@@ -134,7 +134,34 @@ projection before retrying OAuth login:
 Every required config stage should be `pass`; `codex_oauth_login` is expected
 to be `skip` because MASC uses bearer-token auth.
 
-## 5. Supported Local Start
+## 5. Claude / Gemini MCP Bearers
+
+Claude and Gemini must not reuse the Codex bearer. Mint each local MCP client
+as its own worker identity, then sync the shared client config:
+
+```bash
+BASE_PATH="${MASC_BASE_PATH:-$HOME/me}"
+
+./_build/default/bin/main_eio.exe login \
+  --base-path "$BASE_PATH" \
+  --agent claude \
+  --role worker \
+  --shell
+
+./_build/default/bin/main_eio.exe login \
+  --base-path "$BASE_PATH" \
+  --agent gemini \
+  --role worker \
+  --shell
+
+~/me/scripts/mcp-sync.sh
+```
+
+`doctor auth --json` exposes `.mcp_clients[]`; `claude` should use
+`MASC_CLAUDE_MCP_TOKEN` / `X-MASC-Agent: claude`, and `gemini` should use
+`MASC_GEMINI_MCP_TOKEN` / `X-MASC-Agent: gemini`.
+
+## 6. Supported Local Start
 
 When running from a worktree but using a shared local coordination root, start the server with an explicit base path:
 
@@ -149,7 +176,7 @@ MASC_BASE_PATH="$BASE_PATH" \
 
 Then run `./_build/default/bin/main_eio.exe doctor --base-path "$BASE_PATH"` and re-check `/health` to confirm the effective base path is the path you intended.
 
-## 6. Bootstrap an Admin Bearer
+## 7. Bootstrap an Admin Bearer
 
 If you already have an admin bearer, skip to step 7.
 
@@ -235,7 +262,7 @@ Notes:
 - keep the raw bearer outside the repo
 - this is for trusted local operator use, not a remote/public bootstrap path
 
-## 7. Open the Dashboard as Admin
+## 8. Open the Dashboard as Admin
 
 Pass the token once via query string. The dashboard moves it into `sessionStorage` and removes it from the URL.
 
@@ -260,7 +287,7 @@ Expected:
 - `effective_agent="codex-tool-matrix"`
 - `effective_role="admin"`
 
-## 8. Verify Admin-Only Routes
+## 9. Verify Admin-Only Routes
 
 Use a low-risk keeper first.
 
@@ -310,7 +337,7 @@ curl -sS http://127.0.0.1:8935/api/v1/dashboard/execution \
   | jq '.keepers[] | select(.name=="<keeper>") | {name,status,paused,trace_id,active_model}'
 ```
 
-## 9. Rollback
+## 10. Rollback
 
 If you need to go back to anonymous loopback behavior:
 

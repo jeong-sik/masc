@@ -1,6 +1,6 @@
 (** Auth_doctor — Server-side authentication health diagnostic.
 
-    Inspects the resolved auth directory + Codex MCP wiring +
+    Inspects the resolved auth directory + MCP client wiring +
     admin-token sources and produces a structured {!t} report
     that is rendered as JSON ({!to_yojson}) or human text
     ({!render_text}) and graded by {!exit_code} for CLI use.
@@ -14,7 +14,7 @@
     [watched_agent_names], [admin_token_env_state],
     [admin_token_env_fields], [role_counts_of_credentials],
     [live_admin_token_file_source], [admin_bearer_sources],
-    [codex_mcp_report], plus the per-record yojson encoders
+    [codex_mcp_report], MCP client identity checks, plus the per-record yojson encoders
     ([watched_agent_to_yojson], [codex_mcp_to_yojson]).
     All consumed only inside {!analyze} / {!to_yojson} /
     {!render_text}. *)
@@ -31,7 +31,7 @@ val status_to_string : status -> string
     ["ok"] / ["warn"] / ["error"].  Pinned literal — drift would
     break tooling that parses the auth-doctor JSON. *)
 
-(** {1 Per-agent + Codex MCP records} *)
+(** {1 Per-agent + MCP records} *)
 
 type watched_agent = {
   agent_name : string;
@@ -61,6 +61,26 @@ type codex_mcp = {
     [codex mcp login] is OAuth-only while masc-mcp uses bearer
     token auth — pinned at the contract seam. *)
 
+type mcp_client = {
+  client_name : string;
+  agent_name : string;
+  token_env_var : string;
+  token_file_path : string;
+  credential_present : bool;
+  credential_role : string option;
+  raw_token_file_present : bool;
+  token_source : string;
+  token_status : string;
+  token_agent : string option;
+  token_role : string option;
+  token_can_read_state : bool option;
+  identity_ready : bool;
+}
+(** Per-client MCP identity readiness for local Codex/Claude/Gemini
+    bearer-token wiring.  [token_source] is ["env"], ["token_file"],
+    or ["missing"]; [token_status] is ["live"], ["wrong_agent"],
+    ["invalid_or_expired"], or ["missing"]. *)
+
 (** {1 Aggregate report} *)
 
 type t = {
@@ -87,6 +107,7 @@ type t = {
   role_counts : (string * int) list;
   watched_agents : watched_agent list;
   codex_mcp : codex_mcp;
+  mcp_clients : mcp_client list;
   warnings : string list;
   next_actions : string list;
 }
@@ -111,7 +132,8 @@ val analyze :
     + Each registered agent credential -> {!watched_agent} row.
     + Admin-token env-var status + admin-bearer source
       enumeration ([admin_bearer_sources]).
-    + Codex MCP wiring via {!Codex_mcp_config_doctor}.
+    + Codex MCP config via {!Codex_mcp_config_doctor}.
+    + Local MCP client identities for Codex, Claude, and Gemini.
 
     Side-effecting (file reads); pure with respect to the
     process registry — does not mutate auth state. *)

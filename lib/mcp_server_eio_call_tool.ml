@@ -641,10 +641,17 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
     | None -> `Null
   in
 
-  (* Resolve agent_name: session identity > arguments > fallback *)
+  (* Resolve agent_name for telemetry.  HTTP auth injects [_agent_name] as
+     the canonical caller; legacy [agent_name] may be a tool-domain target. *)
   let agent_name =
-    let from_args = Safe_ops.json_string ~default:"" "agent_name" arguments in
-    if from_args <> "" then from_args
+    let from_transport =
+      Safe_ops.json_string ~default:"" "_agent_name" arguments
+    in
+    let from_legacy =
+      Safe_ops.json_string ~default:"" "agent_name" arguments
+    in
+    if from_transport <> "" then from_transport
+    else if from_legacy <> "" then from_legacy
     else
       let identity =
         Agent_registry_eio.get_or_create_identity ?mcp_session_id arguments

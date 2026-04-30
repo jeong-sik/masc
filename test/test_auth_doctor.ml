@@ -92,6 +92,16 @@ let save_credential_or_fail base_path ~agent_name ~role ~raw_token =
 let raw_token_file base_path agent_name =
   Filename.concat (Auth.auth_dir base_path) (agent_name ^ ".token")
 
+let find_mcp_client report client_name =
+  match
+    List.find_opt
+      (fun (client : Auth_doctor.mcp_client) ->
+        String.equal client.client_name client_name)
+      (report : Auth_doctor.t).mcp_clients
+  with
+  | Some client -> client
+  | None -> failf "missing mcp client report for %s" client_name
+
 let test_warns_for_codex_worker_admin_route_mismatch () =
   with_temp_dir "auth-doctor-warn" @@ fun base_path ->
   let auth_cfg =
@@ -262,6 +272,59 @@ let test_reports_codex_mcp_bearer_env () =
     (list_contains_substring ~needle:"codex mcp login"
        report.warnings)
 
+let test_reports_claude_and_gemini_mcp_client_identities () =
+  with_temp_dir "auth-doctor-mcp-clients" @@ fun base_path ->
+  let auth_cfg =
+    Types.
+      {
+        enabled = true;
+        room_secret_hash = None;
+        require_token = true;
+        token_expiry_hours = 24;
+      }
+  in
+  Auth.save_auth_config base_path auth_cfg;
+  save_credential_or_fail base_path ~agent_name:"admin" ~role:Types.Admin
+    ~raw_token:"admin-token";
+  Auth.save_private_text_file (raw_token_file base_path "admin")
+    "admin-token";
+  save_credential_or_fail base_path ~agent_name:"claude"
+    ~role:Types.Worker ~raw_token:"claude-token";
+  Auth.save_private_text_file (raw_token_file base_path "claude")
+    "claude-token";
+  save_credential_or_fail base_path ~agent_name:"gemini"
+    ~role:Types.Worker ~raw_token:"gemini-token";
+  Auth.save_private_text_file (raw_token_file base_path "gemini")
+    "gemini-token";
+  with_env "MASC_HOST" "127.0.0.1" @@ fun () ->
+  with_env "MASC_HTTP_AUTH_STRICT" "" @@ fun () ->
+  with_env "MASC_ADMIN_TOKEN" "" @@ fun () ->
+  with_env "MASC_MCP_TOKEN" "" @@ fun () ->
+  with_env "MASC_CLAUDE_MCP_TOKEN" "" @@ fun () ->
+  with_env "MASC_GEMINI_MCP_TOKEN" "" @@ fun () ->
+  with_valid_codex_config base_path @@ fun () ->
+  let report =
+    Auth_doctor.analyze ~base_path_input:base_path
+      ~default_base_path:base_path ()
+  in
+  let claude = find_mcp_client report "claude" in
+  check string "claude agent" "claude" claude.agent_name;
+  check string "claude env" "MASC_CLAUDE_MCP_TOKEN"
+    claude.token_env_var;
+  check string "claude token source" "token_file" claude.token_source;
+  check string "claude token status" "live" claude.token_status;
+  check bool "claude identity ready" true claude.identity_ready;
+  let gemini = find_mcp_client report "gemini" in
+  check string "gemini env" "MASC_GEMINI_MCP_TOKEN"
+    gemini.token_env_var;
+  check bool "gemini identity ready" true gemini.identity_ready;
+  check bool "json exposes mcp clients" true
+    (contains_substring ~needle:"\"mcp_clients\""
+       (Auth_doctor.to_yojson report |> Yojson.Safe.to_string));
+  check bool "text names claude env" true
+    (contains_substring ~needle:"MASC_CLAUDE_MCP_TOKEN"
+       (Auth_doctor.render_text report))
+
 let test_reports_codex_config_pipeline_stages () =
   with_temp_dir "auth-doctor-codex-config-ok" @@ fun base_path ->
   let auth_cfg =
@@ -412,6 +475,8 @@ let () =
             test_ignores_stale_admin_raw_token_file;
           test_case "reports Codex MCP bearer env" `Quick
             test_reports_codex_mcp_bearer_env;
+          test_case "reports Claude and Gemini MCP client identities" `Quick
+            test_reports_claude_and_gemini_mcp_client_identities;
           test_case "reports Codex MCP config pipeline stages" `Quick
             test_reports_codex_config_pipeline_stages;
           test_case "reports stable Codex MCP config stages when file missing"

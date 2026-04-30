@@ -28,6 +28,22 @@ type codex_mcp = {
   config : Codex_mcp_config_doctor.t;
 }
 
+type mcp_client = {
+  client_name : string;
+  agent_name : string;
+  token_env_var : string;
+  token_file_path : string;
+  credential_present : bool;
+  credential_role : string option;
+  raw_token_file_present : bool;
+  token_source : string;
+  token_status : string;
+  token_agent : string option;
+  token_role : string option;
+  token_can_read_state : bool option;
+  identity_ready : bool;
+}
+
 type t = {
   status : status;
   base_path : string;
@@ -52,6 +68,7 @@ type t = {
   role_counts : (string * int) list;
   watched_agents : watched_agent list;
   codex_mcp : codex_mcp;
+  mcp_clients : mcp_client list;
   warnings : string list;
   next_actions : string list;
 }
@@ -71,6 +88,31 @@ let codex_mcp_token_env_var = "MASC_MCP_TOKEN"
 
 let codex_mcp_login_note =
   "`codex mcp login` is OAuth-only; masc-mcp uses bearer token auth."
+
+type mcp_client_spec = {
+  client_name : string;
+  agent_name : string;
+  token_env_var : string;
+}
+
+let mcp_client_specs =
+  [
+    {
+      client_name = "codex";
+      agent_name = "codex-mcp-client";
+      token_env_var = codex_mcp_token_env_var;
+    };
+    {
+      client_name = "claude";
+      agent_name = "claude";
+      token_env_var = "MASC_CLAUDE_MCP_TOKEN";
+    };
+    {
+      client_name = "gemini";
+      agent_name = "gemini";
+      token_env_var = "MASC_GEMINI_MCP_TOKEN";
+    };
+  ]
 
 let canonicalize_path path =
   try Unix.realpath path with
@@ -265,6 +307,81 @@ let codex_mcp_report ~base_path =
             config;
           })
 
+let mcp_client_report ~base_path ~auth_dir
+    ({ client_name; agent_name; token_env_var } : mcp_client_spec) =
+  let token_file_path = raw_token_file_path ~auth_dir agent_name in
+  let credential_opt = Auth.load_credential base_path agent_name in
+  let raw_token_file_present = file_exists token_file_path in
+  let token_source, raw_token =
+    match Sys.getenv_opt token_env_var |> Env_config_core.trim_opt with
+    | Some value -> ("env", Some value)
+    | None -> (
+        match read_nonempty_text_file token_file_path with
+        | Some value -> ("token_file", Some value)
+        | None -> ("missing", None))
+  in
+  let token_status, token_agent, token_role, token_can_read_state =
+    match raw_token with
+    | None -> ("missing", None, None, None)
+    | Some token -> (
+        match Auth.find_credential_by_token base_path ~token with
+        | Ok cred ->
+            let status =
+              if String.equal cred.agent_name agent_name then
+                "live"
+              else
+                "wrong_agent"
+            in
+            ( status,
+              Some cred.agent_name,
+              Some (agent_role_to_string cred.role),
+              Some (has_permission cred.role CanReadState) )
+        | Error _ -> ("invalid_or_expired", None, None, None))
+  in
+  let identity_ready =
+    Option.is_some credential_opt && String.equal token_status "live"
+  in
+  {
+    client_name;
+    agent_name;
+    token_env_var;
+    token_file_path;
+    credential_present = Option.is_some credential_opt;
+    credential_role = Option.map (fun (cred : agent_credential) -> agent_role_to_string cred.role) credential_opt;
+    raw_token_file_present;
+    token_source;
+    token_status;
+    token_agent;
+    token_role;
+    token_can_read_state;
+    identity_ready;
+  }
+
+let mcp_client_warning (client : mcp_client) =
+  match client.token_status with
+  | "wrong_agent" ->
+      Some
+        (Printf.sprintf
+           "%s MCP bearer resolves to %s instead of %s; rerun `masc-mcp login --agent %s --role worker --shell` and `sb mcp sync`."
+           client.client_name
+           (Option.value ~default:"(unknown)" client.token_agent)
+           client.agent_name client.agent_name)
+  | "invalid_or_expired" ->
+      Some
+        (Printf.sprintf
+           "%s MCP bearer from %s is invalid or expired; rerun `masc-mcp login --agent %s --role worker --shell` and `sb mcp sync`."
+           client.client_name client.token_source client.agent_name)
+  | _ -> None
+
+let mcp_client_next_action (client : mcp_client) =
+  if client.identity_ready then
+    None
+  else
+    Some
+      (Printf.sprintf
+         "For %s MCP, run `masc-mcp login --agent %s --role worker --shell`, then `sb mcp sync` so its bearer and X-MASC-Agent match."
+         client.client_name client.agent_name)
+
 let analyze ~base_path_input ~default_base_path () =
   let normalized_base_path =
     Env_config_core.normalize_masc_base_path_input base_path_input
@@ -300,6 +417,9 @@ let analyze ~base_path_input ~default_base_path () =
       ~dashboard_dev_token_available ~admin_token_env_state credentials
   in
   let codex_mcp = codex_mcp_report ~base_path in
+  let mcp_clients =
+    List.map (mcp_client_report ~base_path ~auth_dir) mcp_client_specs
+  in
   let token_bound_admin_http_ready =
     auth_cfg.enabled && auth_cfg.require_token && admin_bearer_sources <> []
   in
@@ -381,7 +501,10 @@ let analyze ~base_path_input ~default_base_path () =
          None);
     ]
     |> List.filter_map Fun.id
-    |> (fun values -> values @ Codex_mcp_config_doctor.warnings codex_mcp.config)
+    |> (fun values ->
+         values
+         @ List.filter_map mcp_client_warning mcp_clients
+         @ Codex_mcp_config_doctor.warnings codex_mcp.config)
     |> dedupe_keep_order
   in
   let next_actions =
@@ -430,7 +553,10 @@ let analyze ~base_path_input ~default_base_path () =
       Some "Rerun `masc-mcp doctor auth` after editing auth files or rotating tokens.";
     ]
     |> List.filter_map Fun.id
-    |> (fun values -> values @ Codex_mcp_config_doctor.next_actions codex_mcp.config)
+    |> (fun values ->
+         values
+         @ List.filter_map mcp_client_next_action mcp_clients
+         @ Codex_mcp_config_doctor.next_actions codex_mcp.config)
     |> dedupe_keep_order
   in
   let status =
@@ -466,11 +592,12 @@ let analyze ~base_path_input ~default_base_path () =
     role_counts = role_counts_of_credentials credentials;
     watched_agents;
     codex_mcp;
+    mcp_clients;
     warnings;
     next_actions;
   }
 
-let watched_agent_to_yojson agent =
+let watched_agent_to_yojson (agent : watched_agent) =
   `Assoc
     [
       ("agent_name", `String agent.agent_name);
@@ -501,6 +628,27 @@ let codex_mcp_to_yojson codex_mcp =
       ("login_supported", `Bool codex_mcp.login_supported);
       ("login_note", `String codex_mcp.login_note);
       ("config", Codex_mcp_config_doctor.to_yojson codex_mcp.config);
+    ]
+
+let mcp_client_to_yojson (client : mcp_client) =
+  `Assoc
+    [
+      ("client_name", `String client.client_name);
+      ("agent_name", `String client.agent_name);
+      ("token_env_var", `String client.token_env_var);
+      ("token_file_path", `String client.token_file_path);
+      ("credential_present", `Bool client.credential_present);
+      (option_field "credential_role" client.credential_role);
+      ("raw_token_file_present", `Bool client.raw_token_file_present);
+      ("token_source", `String client.token_source);
+      ("token_status", `String client.token_status);
+      (option_field "token_agent" client.token_agent);
+      (option_field "token_role" client.token_role);
+      ( "token_can_read_state",
+        match client.token_can_read_state with
+        | Some value -> `Bool value
+        | None -> `Null );
+      ("identity_ready", `Bool client.identity_ready);
     ]
 
 let to_yojson (report : t) =
@@ -543,6 +691,8 @@ let to_yojson (report : t) =
       ( "watched_agents",
         `List (List.map watched_agent_to_yojson report.watched_agents) );
       ("codex_mcp", codex_mcp_to_yojson report.codex_mcp);
+      ( "mcp_clients",
+        `List (List.map mcp_client_to_yojson report.mcp_clients) );
       ("warnings", `List (List.map (fun value -> `String value) report.warnings));
       ("next_actions", `List (List.map (fun value -> `String value) report.next_actions));
     ]
@@ -606,7 +756,7 @@ let render_text (report : t) =
   add_line "";
   add_line "watched_agents:";
   List.iter
-    (fun agent ->
+    (fun (agent : watched_agent) ->
       add_line
         (Printf.sprintf
            "- %s: credential=%s role=%s can_admin=%s raw_token_file=%s expires_at=%s"
@@ -669,6 +819,20 @@ let render_text (report : t) =
            (Codex_mcp_config_doctor.stage_status_to_string stage.status)
            stage.detail))
     report.codex_mcp.config.stages;
+  add_line "";
+  add_line "mcp_clients:";
+  List.iter
+    (fun (client : mcp_client) ->
+      add_line
+        (Printf.sprintf
+           "- %s: agent=%s env=%s token_file=%s credential=%s token_source=%s token_status=%s token_agent=%s identity_ready=%s"
+           client.client_name client.agent_name client.token_env_var
+           client.token_file_path
+           (yes_no client.credential_present)
+           client.token_source client.token_status
+           (option_value client.token_agent)
+           (yes_no client.identity_ready)))
+    report.mcp_clients;
   if report.warnings <> [] then begin
     add_line "";
     add_line "warnings:";

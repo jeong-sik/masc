@@ -1650,6 +1650,33 @@ let test_execute_tool_generated_agent_name_uses_token_identity () =
 
   cleanup_dir base_path
 
+let test_execute_tool_internal_agent_name_overrides_legacy_arg () =
+  let resolve args =
+    Masc_mcp.Mcp_server_eio_execute.caller_agent_name_from_arguments args
+  in
+  Alcotest.(check (option string))
+    "_agent_name wins over legacy agent_name"
+    (Some "stable-admin")
+    (resolve
+       (`Assoc
+         [
+           ("_agent_name", `String "stable-admin");
+           ("agent_name", `String "claude");
+         ]));
+  Alcotest.(check (option string))
+    "legacy agent_name remains fallback"
+    (Some "claude")
+    (resolve (`Assoc [ ("agent_name", `String "claude") ]));
+  Alcotest.(check (option string))
+    "unknown internal marker falls back to legacy"
+    (Some "claude")
+    (resolve
+       (`Assoc
+         [
+           ("_agent_name", `String "unknown");
+           ("agent_name", `String "claude");
+         ]))
+
 let check_task_still_todo config task_id =
   match
     Masc_mcp.Coord.get_tasks_raw config
@@ -3155,6 +3182,8 @@ let eio_tests = [
   "explicit alias reuses joined nickname", `Quick, test_execute_tool_explicit_alias_reuses_joined_nickname;
   "generated agent_name uses token identity", `Quick,
     test_execute_tool_generated_agent_name_uses_token_identity;
+  "internal _agent_name overrides legacy agent_name", `Quick,
+    test_execute_tool_internal_agent_name_overrides_legacy_arg;
   "explicit generated alias claim_next not rewritten by token", `Quick,
     test_execute_tool_explicit_generated_alias_claim_next_not_rewritten_by_token;
   "explicit generated alias transition not rewritten by token", `Quick,

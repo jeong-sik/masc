@@ -2,12 +2,15 @@
     plus the join-state resolver shared with the keeper
     onboarding path.
 
-    The .ml is 919 lines.  Only 4 entries reach callers:
+    The .ml is 919 lines.  Only a small set of entries reach callers:
     - {!resolve_join_state} and
       {!should_read_legacy_persisted_agent_name} —
       [test/test_mcp_server_eio.ml] exercises both to
       verify the join-required + ephemeral-name fallback
       decisions stay consistent across refactors.
+    - {!caller_agent_name_from_arguments} — isolates the
+      HTTP [_agent_name] vs legacy [agent_name] precedence
+      contract without running the full dispatcher.
     - {!execute_tool_eio} — invoked by
       [lib/server/server_runtime_bootstrap.ml] and threaded
       through {!Mcp_server_eio_call_tool.handle_call_tool_eio}
@@ -65,6 +68,13 @@ val should_read_legacy_persisted_agent_name :
     {b ephemeral} class ([_ephemeral_*] / unknown
     sentinels).  Tested directly to keep the legacy /
     explicit path split honest. *)
+
+val caller_agent_name_from_arguments : Yojson.Safe.t -> string option
+(** Returns the explicit caller identity carried in [tools/call]
+    arguments.  The internal HTTP-auth marker [_agent_name] wins
+    over legacy [agent_name]; legacy [agent_name] remains the fallback
+    for direct callers and old MCP clients.  Blank and ["unknown"]
+    values are ignored. *)
 
 (** {1 [tools/call] inner dispatcher} *)
 

@@ -48,6 +48,24 @@ let with_env name value f =
      | None -> Unix.putenv name "");
     raise exn
 
+let contains_substring text needle =
+  let text_len = String.length text in
+  let needle_len = String.length needle in
+  if needle_len = 0 then
+    true
+  else if needle_len > text_len then
+    false
+  else
+    let rec loop i =
+      if i + needle_len > text_len then
+        false
+      else if String.sub text i needle_len = needle then
+        true
+      else
+        loop (i + 1)
+    in
+    loop 0
+
 let with_eio_runtime f =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -247,9 +265,13 @@ let test_verify_token_reports_token_owner_on_agent_mismatch () =
   cleanup_test_room dir;
   match create_result, verify_result with
   | Ok _, Error (Types.Unauthorized msg) ->
-      check string "mismatch message"
-        "🔐 Unauthorized: No credential found for gemini (bearer token belongs to codex)"
-        (Types.masc_error_to_string (Types.Unauthorized msg))
+      let rendered = Types.masc_error_to_string (Types.Unauthorized msg) in
+      check bool "mismatch message names token owner" true
+        (String.contains rendered '('
+         && contains_substring rendered "bearer token belongs to codex");
+      check bool "mismatch message explains fix" true
+        (contains_substring rendered
+           "masc-mcp login --agent gemini --role worker --shell")
   | Ok _, Ok _ ->
       fail "verify_token should fail when token owner and requested agent differ"
   | Ok _, Error e ->

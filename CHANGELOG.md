@@ -1,6 +1,32 @@
 # Changelog
 
 
+## [0.18.21] - 2026-04-30
+
+Release-truth follow-up after the `0.18.20` version bump landed before the rest of the merge train, and the `v0.18.20` tag was later cut with additional PRs but without matching changelog text. No breaking API changes.
+
+### Added
+
+- RFC-0019 credential materialization landed with `with_token` provisioning support for repo-manager flows (#12336).
+- RFC-0019 credential hardening added SHA-256 token-prefix audit support and `hosts.yml` relabeling for keeper-scoped identities (#12345).
+- IDE dashboard work continued with the editor toolbar, view tabs, and design-system tooltip/ARIA sweep (#12337, #12340, #12341).
+
+### Fixed
+
+- Dashboard render errors in cascade inspector and agent surfaces were repaired, including the keeper metadata type reference that blocked the `v0.18.20` Linux release build (#12338).
+- Draft auto-merge guard races were closed so merged PR current-state checks fail closed instead of racing stale draft state (#12339, #12342, #12343).
+- `do-not-merge` is now a hard-stop label that overrides human-approved and non-agent bypass paths in PR automation (#12346).
+
+### Changed
+
+- Routine keeper runtime log noise was reduced after the 0.18.20 boundary (#12344).
+- Package and release metadata advanced from `0.18.20` to `0.18.21` so the published release boundary includes the post-tag fixes.
+- Roadmap, product operating plan, opam metadata, and spec baseline version references synced to `0.18.21`.
+
+### Deprecated
+
+- None.
+
 ## [0.18.20] - 2026-04-30
 
 Post-v0.18.19 merge train for the OAS `0.187.4` downstream pin and the first IDE-plane/RFC-0019 keeper credential slices. No breaking API changes.

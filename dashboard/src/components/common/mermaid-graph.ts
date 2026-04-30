@@ -89,12 +89,13 @@ export function MermaidGraph({
         const parser = new DOMParser()
         const doc = parser.parseFromString(svg, 'image/svg+xml')
         const parseError = doc.querySelector('parsererror')
-        if (parseError) {
+        const rootTag = doc.documentElement?.tagName?.toLowerCase()
+        if (parseError || rootTag !== 'svg') {
           if (!cancelled) setError('SVG parse failed')
           return
         }
         const svgEl = doc.documentElement
-        if (svgEl instanceof SVGElement) {
+        if (svgEl) {
           hostEl.textContent = ''
           hostEl.appendChild(svgEl)
         } else {

@@ -8,7 +8,7 @@
 
 import { html } from 'htm/preact'
 import type { ComponentChildren, VNode } from 'preact'
-import { useEffect, useId, useRef, useState } from 'preact/hooks'
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'preact/hooks'
 import { cloneElement } from 'preact'
 
 interface PopoverProps {
@@ -67,7 +67,7 @@ export function Popover({
   }, [open])
 
   // ESC to close
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!open) return
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {

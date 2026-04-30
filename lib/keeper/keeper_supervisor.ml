@@ -569,6 +569,7 @@ let cleanup_dead_tombstone (ctx : _ context)
               false
       in
       Keeper_registry.unregister ~base_path:ctx.config.base_path entry.name;
+      Keeper_tool_emission_hook.drop_keeper_accumulator entry.name;
       if persisted_paused then begin
         publish_lifecycle
           ~event:(Keeper_lifecycle_events.Custom_event
@@ -584,6 +585,7 @@ let cleanup_dead_tombstone (ctx : _ context)
       end
   | Ok None ->
       Keeper_registry.unregister ~base_path:ctx.config.base_path entry.name;
+      Keeper_tool_emission_hook.drop_keeper_accumulator entry.name;
       publish_lifecycle
         ~event:(Keeper_lifecycle_events.Custom_event
                   { verb = Keeper_lifecycle_events.Dead_cleaned; phase = None })
@@ -591,6 +593,7 @@ let cleanup_dead_tombstone (ctx : _ context)
       Log.Keeper.warn "%s: dead tombstone unregistered (meta missing)" entry.name
   | Error err ->
       Keeper_registry.unregister ~base_path:ctx.config.base_path entry.name;
+      Keeper_tool_emission_hook.drop_keeper_accumulator entry.name;
       publish_lifecycle
         ~event:(Keeper_lifecycle_events.Custom_event
                   { verb = Keeper_lifecycle_events.Dead_cleaned; phase = None })
@@ -911,7 +914,10 @@ let sweep_and_recover (ctx : _ context) =
                end))
   ) entries;
   List.iter (fun (entry : Keeper_registry.registry_entry) ->
-    Keeper_registry.unregister ~base_path entry.name
+    Keeper_registry.unregister ~base_path entry.name;
+    (* K4c — restart-budget exhaustion: keeper is permanently
+       removed (no respawn), so reclaim its accumulator slot. *)
+    Keeper_tool_emission_hook.drop_keeper_accumulator entry.name
   ) !to_unregister;
   List.iter (fun ((entry : Keeper_registry.registry_entry), msg) ->
     (* RFC-0002: dispatch budget exhaustion before marking dead *)
@@ -997,7 +1003,9 @@ let sweep_and_recover (ctx : _ context) =
     | _ ->
         Log.Keeper.error "%s: cannot read meta for restart, removing"
           old_entry.name;
-        Keeper_registry.unregister ~base_path old_entry.name
+        Keeper_registry.unregister ~base_path old_entry.name;
+        (* K4c — restart-meta read failure: keeper abandoned, drop. *)
+        Keeper_tool_emission_hook.drop_keeper_accumulator old_entry.name
   ) restart_list;
   (* Phase 2: restore paused reconcile gates whose approval queue was lost
      on restart. The queue itself is in-memory, but paused keeper meta is

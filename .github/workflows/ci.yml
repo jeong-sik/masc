@@ -754,6 +754,9 @@ jobs:
       - name: Run OCaml structure ratchet
         run: scripts/ocaml-structure-ratchet.sh
 
+      - name: Run stringly boundary ratchet
+        run: scripts/stringly-boundary-ratchet.sh
+
       - name: Run OAS boundary ratchet
         run: scripts/oas-boundary-ratchet.sh
 

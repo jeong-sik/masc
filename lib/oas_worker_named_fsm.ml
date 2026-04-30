@@ -80,7 +80,10 @@ let is_moonshot_provider (provider_cfg : Llm_provider.Provider_config.t) =
   String_util.contains_substring_ci provider_cfg.base_url "moonshot.ai"
   || String.starts_with ~prefix:"kimi" provider_cfg.model_id
 
+let cascade_name_to_string = Oas_worker_named_error.cascade_name_to_string
+
 let resolve_kimi_api_key_env_name ~cascade_name =
+  let cascade_name = cascade_name_to_string cascade_name in
   let fallback_env = "KIMI_API_KEY_SB" in
   let resolve_from_overrides overrides =
     let find_non_empty key =
@@ -246,7 +249,7 @@ let sdk_error_to_resumable_cli_session ~cascade_name
              (Oas_worker_named_error.Resumable_cli_session
                 {
                   cascade_name =
-                    Oas_worker_named_error.cascade_name_of_string cascade_name;
+                    cascade_name;
                   detail = resumable_cli_session_detail message;
                   exit_code = resumable_cli_session_exit_code message;
                 }))
@@ -356,7 +359,7 @@ let provider_error_capacity_scope_label = function
       "none"
 
 let emit_provider_error_metric ~cascade_name ~provider error =
-  let cascade_name = provider_label cascade_name in
+  let cascade_name = provider_label (cascade_name_to_string cascade_name) in
   let provider = provider_label provider in
   Prometheus.inc_counter provider_error_total_metric
     ~labels:

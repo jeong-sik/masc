@@ -6,6 +6,7 @@
 
 module DOB = Masc_mcp.Dashboard_oas_bridge
 module Oas = Masc_mcp.Oas
+module Json = Yojson.Safe.Util
 
 let make_sample
     ?(provider = "anthropic")
@@ -142,6 +143,75 @@ let test_summary_status_counts () =
   Alcotest.(check (float 1e-9)) "error_ratio" 0.5 r.DOB.error_ratio;
   Alcotest.(check int) "cancelled_count" 1 r.DOB.cancelled_count
 
+(* --- dashboard JSON surface --- *)
+
+let test_sample_json_preserves_signal_fields () =
+  let json =
+    DOB.sample_to_yojson
+      (make_sample ~provider:"ollama" ~model:"qwen3" ~ttfb:12.0
+         ~dur:34.0 ~serialization:2.0 ~input:123 ~output:45
+         ~throughput:200.0 ~cost:0.03 ~cache:true
+         ~status:(DOB.Cancelled { reason = "operator" }) ~retry:2 ())
+  in
+  Alcotest.(check string) "provider" "ollama"
+    (json |> Json.member "provider_id" |> Json.to_string);
+  Alcotest.(check string) "model" "qwen3"
+    (json |> Json.member "model_id" |> Json.to_string);
+  Alcotest.(check (float 1e-9)) "ttfb" 12.0
+    (json |> Json.member "ttfb_ms" |> Json.to_float);
+  Alcotest.(check (float 1e-9)) "duration" 34.0
+    (json |> Json.member "total_duration_ms" |> Json.to_float);
+  Alcotest.(check (float 1e-9)) "serialization" 2.0
+    (json |> Json.member "serialization_ms" |> Json.to_float);
+  Alcotest.(check int) "input" 123
+    (json |> Json.member "input_tokens" |> Json.to_int);
+  Alcotest.(check int) "output" 45
+    (json |> Json.member "output_tokens" |> Json.to_int);
+  Alcotest.(check (float 1e-9)) "throughput" 200.0
+    (json |> Json.member "throughput_tokens_per_s" |> Json.to_float);
+  Alcotest.(check (float 1e-9)) "cost" 0.03
+    (json |> Json.member "cost_usd" |> Json.to_float);
+  Alcotest.(check bool) "cache" true
+    (json |> Json.member "cache_hit" |> Json.to_bool);
+  Alcotest.(check string) "status kind" "cancelled"
+    (json |> Json.member "status" |> Json.member "kind" |> Json.to_string);
+  Alcotest.(check string) "status reason" "operator"
+    (json |> Json.member "status" |> Json.member "reason" |> Json.to_string);
+  Alcotest.(check int) "retry" 2
+    (json |> Json.member "retry_count" |> Json.to_int)
+
+let test_recent_json_filters_provider () =
+  setup ();
+  DOB.record (make_sample ~provider:"anthropic" ());
+  DOB.record (make_sample ~provider:"ollama" ~model:"qwen3" ());
+  let json = DOB.recent_json ~provider:"ollama" ~limit:5 () in
+  Alcotest.(check string) "provider" "ollama"
+    (json |> Json.member "provider" |> Json.to_string);
+  Alcotest.(check int) "limit" 5
+    (json |> Json.member "limit" |> Json.to_int);
+  Alcotest.(check int) "count" 1
+    (json |> Json.member "count" |> Json.to_int);
+  match json |> Json.member "samples" |> Json.to_list with
+  | [ entry ] ->
+      Alcotest.(check string) "sample provider" "ollama"
+        (entry |> Json.member "sample" |> Json.member "provider_id"
+       |> Json.to_string)
+  | samples ->
+      Alcotest.failf "expected one sample, got %d" (List.length samples)
+
+let test_summary_json_contains_aggregate () =
+  setup ();
+  DOB.record (make_sample ~cache:true ~status:DOB.Success ());
+  DOB.record (make_sample ~cache:false ~status:DOB.Timeout ());
+  let json = DOB.summary_json ~provider:"anthropic" ~limit:10 () in
+  let summary = json |> Json.member "summary" in
+  Alcotest.(check int) "sample_count" 2
+    (summary |> Json.member "sample_count" |> Json.to_int);
+  Alcotest.(check (float 1e-9)) "cache_hit_ratio" 0.5
+    (summary |> Json.member "cache_hit_ratio" |> Json.to_float);
+  Alcotest.(check (float 1e-9)) "error_ratio" 0.5
+    (summary |> Json.member "error_ratio" |> Json.to_float)
+
 (* --- clear --- *)
 
 let test_clear_provider () =
@@ -239,6 +309,15 @@ let () =
           Alcotest.test_case "cache hit + cost" `Quick
             test_summary_cache_and_cost;
           Alcotest.test_case "status counts" `Quick test_summary_status_counts;
+        ] );
+      ( "json",
+        [
+          Alcotest.test_case "sample fields" `Quick
+            test_sample_json_preserves_signal_fields;
+          Alcotest.test_case "recent filters provider" `Quick
+            test_recent_json_filters_provider;
+          Alcotest.test_case "summary aggregate" `Quick
+            test_summary_json_contains_aggregate;
         ] );
       ( "clear",
         [ Alcotest.test_case "clear provider" `Quick test_clear_provider ] );

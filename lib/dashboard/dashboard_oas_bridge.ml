@@ -37,7 +37,71 @@ let with_lock f =
   Mutex.lock mu;
   Fun.protect ~finally:(fun () -> Mutex.unlock mu) f
 
+let status_to_yojson = function
+  | Success -> `Assoc [ ("kind", `String "success") ]
+  | Error { transient } ->
+      `Assoc
+        [
+          ("kind", `String "error");
+          ("transient", `Bool transient);
+        ]
+  | Cancelled { reason } ->
+      `Assoc
+        [
+          ("kind", `String "cancelled");
+          ("reason", `String reason);
+        ]
+  | Timeout -> `Assoc [ ("kind", `String "timeout") ]
+
+let sample_to_yojson (s : sample) =
+  `Assoc
+    [
+      ("provider_id", `String s.provider_id);
+      ("model_id", `String s.model_id);
+      ("ttfb_ms", `Float s.ttfb_ms);
+      ("total_duration_ms", `Float s.total_duration_ms);
+      ("serialization_ms", `Float s.serialization_ms);
+      ("input_tokens", `Int s.input_tokens);
+      ("output_tokens", `Int s.output_tokens);
+      ("throughput_tokens_per_s", `Float s.throughput_tokens_per_s);
+      ("cost_usd", `Float s.cost_usd);
+      ("cache_hit", `Bool s.cache_hit);
+      ("status", status_to_yojson s.status);
+      ("retry_count", `Int s.retry_count);
+    ]
+
+let sample_entry_to_yojson (s, recorded_at) =
+  `Assoc
+    [
+      ("sample", sample_to_yojson s);
+      ("recorded_at", `Float recorded_at);
+    ]
+
+let provider_json = function
+  | Some provider -> `String provider
+  | None -> `Null
+
+let broadcast_sample_entry entry =
+  let sample, recorded_at = entry in
+  let json =
+    `Assoc
+      [
+        ("type", `String "oas_telemetry_sample");
+        ("payload", sample_entry_to_yojson entry);
+        ("provider_id", `String sample.provider_id);
+        ("model_id", `String sample.model_id);
+        ("ts_unix", `Float recorded_at);
+      ]
+  in
+  try Sse.broadcast_to Sse.Observers json
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+      Log.Dashboard.warn "oas telemetry SSE broadcast failed: %s"
+        (Printexc.to_string exn)
+
 let record_with_time ~now (s : sample) =
+  let entry = (s, now) in
   with_lock (fun () ->
       let q =
         match Hashtbl.find_opt table s.provider_id with
@@ -50,7 +114,8 @@ let record_with_time ~now (s : sample) =
       Queue.push (s, now) q;
       while Queue.length q > per_provider_cap do
         ignore (Queue.pop q)
-      done)
+      done);
+  broadcast_sample_entry entry
 
 let record (s : sample) = record_with_time ~now:(Unix.gettimeofday ()) s
 
@@ -234,6 +299,46 @@ let summary ?provider ?limit () =
         error_ratio = float_of_int errors /. float_of_int n;
         cancelled_count = cancels;
       }
+
+let summary_to_yojson (s : summary) =
+  `Assoc
+    [
+      ("sample_count", `Int s.sample_count);
+      ("ttfb_p50_ms", `Float s.ttfb_p50_ms);
+      ("ttfb_p95_ms", `Float s.ttfb_p95_ms);
+      ("total_duration_p50_ms", `Float s.total_duration_p50_ms);
+      ("total_duration_p95_ms", `Float s.total_duration_p95_ms);
+      ("total_duration_p99_ms", `Float s.total_duration_p99_ms);
+      ("cache_hit_ratio", `Float s.cache_hit_ratio);
+      ("total_cost_usd", `Float s.total_cost_usd);
+      ("error_ratio", `Float s.error_ratio);
+      ("cancelled_count", `Int s.cancelled_count);
+    ]
+
+let recent_json ?provider ?limit () =
+  let samples = recent ?provider ?limit () in
+  `Assoc
+    [
+      ("provider", provider_json provider);
+      ( "limit",
+        match limit with
+        | Some limit -> `Int limit
+        | None -> `Null );
+      ("count", `Int (List.length samples));
+      ("samples", `List (List.map sample_entry_to_yojson samples));
+    ]
+
+let summary_json ?provider ?limit () =
+  let summary = summary ?provider ?limit () in
+  `Assoc
+    [
+      ("provider", provider_json provider);
+      ( "limit",
+        match limit with
+        | Some limit -> `Int limit
+        | None -> `Null );
+      ("summary", summary_to_yojson summary);
+    ]
 
 let clear ?provider () =
   with_lock (fun () ->

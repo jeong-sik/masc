@@ -64,6 +64,17 @@ let telemetry_summary_cache_key ~base_path ~masc_root =
   let digest = Digest.string (base_path ^ "\000" ^ masc_root) |> Digest.to_hex in
   "dashboard:telemetry_summary:" ^ digest
 
+let trimmed_query_param req key =
+  match Server_utils.query_param req key |> Option.map String.trim with
+  | Some value when value <> "" -> Some value
+  | _ -> None
+
+let oas_telemetry_limit_param req =
+  Server_utils.int_query_param req "limit" ~default:50
+  |> Server_utils.clamp ~min_v:1 ~max_v:200
+
+let oas_telemetry_provider_param req = trimmed_query_param req "provider"
+
 let sync_keeper_cascade_meta ~(config : Coord.config) ~(name : string)
     ~(cascade_name : string) : (bool, string) result =
   let updated_at = Keeper_types.now_iso () in
@@ -860,6 +871,22 @@ let rec add_routes ~sw ~clock router =
            Dashboard_cache.get_or_compute cache_key ~ttl:30.0 (fun () ->
                Telemetry_unified.summary_json ~base_path ~masc_root ())
          in
+         Http.Response.json ~compress:true ~request:req
+           (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/oas/telemetry/recent" (fun request reqd ->
+       with_public_read (fun _state req reqd ->
+         let provider = oas_telemetry_provider_param req in
+         let limit = oas_telemetry_limit_param req in
+         let json = Dashboard_oas_bridge.recent_json ?provider ~limit () in
+         Http.Response.json ~compress:true ~request:req
+           (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/oas/telemetry/summary" (fun request reqd ->
+       with_public_read (fun _state req reqd ->
+         let provider = oas_telemetry_provider_param req in
+         let limit = oas_telemetry_limit_param req in
+         let json = Dashboard_oas_bridge.summary_json ?provider ~limit () in
          Http.Response.json ~compress:true ~request:req
            (Yojson.Safe.to_string json) reqd
        ) request reqd)

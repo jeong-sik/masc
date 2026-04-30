@@ -103,6 +103,21 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
     H2.Body.Writer.close writer
   in
 
+  let trimmed_query_param req key =
+    match Server_utils.query_param req key |> Option.map String.trim with
+    | Some value when value <> "" -> Some value
+    | _ -> None
+  in
+
+  let oas_telemetry_limit_param req =
+    Server_utils.int_query_param req "limit" ~default:50
+    |> Server_utils.clamp ~min_v:1 ~max_v:200
+  in
+
+  let oas_telemetry_provider_param req =
+    trimmed_query_param req "provider"
+  in
+
   (* Read H2 request body asynchronously *)
   let h2_read_body h2_reqd callback =
     let body = H2.Reqd.request_body h2_reqd in
@@ -677,6 +692,20 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
           with_server_state h2_reqd (fun state ->
             let json = dashboard_perf_http_json state.Mcp_server.room_config in
             h2_respond_json h2_reqd (Yojson.Safe.to_string json) ~extra_headers:cors)
+
+      | `GET, "/api/v1/dashboard/oas/telemetry/recent" ->
+          let provider = oas_telemetry_provider_param httpun_request in
+          let limit = oas_telemetry_limit_param httpun_request in
+          let json = Dashboard_oas_bridge.recent_json ?provider ~limit () in
+          h2_respond_json h2_reqd (Yojson.Safe.to_string json)
+            ~extra_headers:cors
+
+      | `GET, "/api/v1/dashboard/oas/telemetry/summary" ->
+          let provider = oas_telemetry_provider_param httpun_request in
+          let limit = oas_telemetry_limit_param httpun_request in
+          let json = Dashboard_oas_bridge.summary_json ?provider ~limit () in
+          h2_respond_json h2_reqd (Yojson.Safe.to_string json)
+            ~extra_headers:cors
 
       | `GET, "/api/v1/git/graph" ->
           with_server_state h2_reqd (fun state ->

@@ -15,7 +15,9 @@
     is O(1) amortized and memory stays bounded regardless of emit volume.
 
     OAS workers call {!record} after each LLM turn (tool path or chat path),
-    and the REST/SSE endpoints read from {!recent} and {!summary}.
+    and the REST/SSE endpoints read from {!recent} and {!summary}. Each
+    recorded sample is also emitted to Observer SSE sessions as an additive
+    [oas_telemetry_sample] dashboard event.
 
     Cross-domain: guarded by [Stdlib.Mutex]. Eio fibers may call these
     functions directly; the critical section is short (queue push or fold)
@@ -141,6 +143,26 @@ val summary : ?provider:string -> ?limit:int -> unit -> summary
     [p], the percentile is the value at index [ceil(p*n) - 1], clamped
     to [\[0, n-1\]]. The choice keeps the dashboard deterministic with
     very small windows (e.g. one sample → p50 = p95 = the only value). *)
+
+val status_to_yojson : status -> Yojson.Safe.t
+(** JSON projection used by the dashboard REST/SSE surface. *)
+
+val sample_to_yojson : sample -> Yojson.Safe.t
+(** JSON projection of the twelve-signal sample fields. *)
+
+val sample_entry_to_yojson : sample * float -> Yojson.Safe.t
+(** JSON projection of [(sample, recorded_at)]. *)
+
+val summary_to_yojson : summary -> Yojson.Safe.t
+(** JSON projection of aggregate fields from {!summary}. *)
+
+val recent_json : ?provider:string -> ?limit:int -> unit -> Yojson.Safe.t
+(** Dashboard payload for
+    [GET /api/v1/dashboard/oas/telemetry/recent?provider=P&limit=N]. *)
+
+val summary_json : ?provider:string -> ?limit:int -> unit -> Yojson.Safe.t
+(** Dashboard payload for
+    [GET /api/v1/dashboard/oas/telemetry/summary?provider=P&limit=N]. *)
 
 val clear : ?provider:string -> unit -> unit
 (** [clear ?provider ()] drops samples. With [provider] only that ring is

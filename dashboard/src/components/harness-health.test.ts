@@ -3,6 +3,8 @@ import { render } from 'preact'
 import { signal } from '@preact/signals'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { escapeMermaidLabel, flowStatusClass } from './harness-health'
+import { KpiStrip } from './kpi-strip'
+import { KpiCell } from './kpi-cell'
 
 // ── Pure function tests ──
 
@@ -189,6 +191,27 @@ async function loadComponentWithApi(api: {
   }))
   vi.doMock('../router', () => ({
     navigate: api.navigate ?? vi.fn(),
+  }))
+  // Synchronous Preact shim — KpiStripIsland mounts its Solid subtree
+  // inside useEffect, so cell text would only appear after a flush. The
+  // existing assertions on '9세대' etc. fire immediately. Production
+  // ships the real island; this shim is test-config-only. Real island
+  // integration tests live in kpi-strip-island.solid.test.ts.
+  vi.doMock('./kpi-strip-island', () => ({
+    KpiStripIsland: (props: {
+      ariaLabel: string
+      variant?: 'standard' | 'compact' | 'stacked'
+      cols?: number
+      cells: ReadonlyArray<Record<string, unknown>>
+    }) => html`
+      <${KpiStrip}
+        ariaLabel=${props.ariaLabel}
+        variant=${props.variant}
+        cols=${props.cols}
+      >
+        ${props.cells.map((cell) => html`<${KpiCell} ...${cell} />`)}
+      <//>
+    `,
   }))
   vi.doMock('./common/mermaid-graph', () => ({
     MermaidGraph: ({ source, fallbackText }: { source: string; fallbackText?: string }) => html`

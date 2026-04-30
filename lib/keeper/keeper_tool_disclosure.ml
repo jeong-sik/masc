@@ -227,6 +227,12 @@ let is_completion_tool_name name =
   in
   List.mem canonical_name completion_tool_names
 
+let is_stay_silent_tool_name name =
+  let name = canonical_tool_name name in
+  match Tool_name.of_string name with
+  | Some (Keeper Stay_silent) -> true
+  | _ -> false
+
 let tool_name_can_satisfy_required_contract name =
   let name = canonical_tool_name name in
   (* Completion tools (stay_silent, release, done, etc.) intentionally
@@ -279,6 +285,13 @@ let classify_tool_progress name =
   then Execution
   else Passive_status
 
+let is_owned_task_progress_tool_name name =
+  if is_stay_silent_tool_name name then false
+  else
+    match classify_tool_progress name with
+    | Execution | Completion -> true
+    | Passive_status | Claim_context -> false
+
 let is_passive_status_tool_name name =
   match classify_tool_progress name with
   | Passive_status -> true
@@ -322,6 +335,13 @@ let actionable_tool_contract_violation_reason
     | [] ->
       Some
         "actionable keeper signal was present, but the model called no keeper tools"
+    | names
+      when (not claim_context_allowed)
+           && not (List.exists is_owned_task_progress_tool_name names) ->
+      Some
+        (Printf.sprintf
+           "actionable keeper signal was present for an owned active task, but the model only used passive/claim/stay_silent tools without execution progress: %s"
+           (String.concat ", " names))
     | names
       when List.for_all
              (fun name ->

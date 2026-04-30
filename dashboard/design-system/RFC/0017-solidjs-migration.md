@@ -119,6 +119,22 @@ The single-shot 3-sample numbers above don't tell us what happens when the dashb
 
 The krausest figures in §1 do not generalise to our usage shape (small N, but high update rate from SSE). The companion measurement document records what we actually observed and recommends Phase 2 (Lifeline) and Phase 3 (Ticker) be paused pending a synchronous-mount spike that could close the 30 ms `useEffect` gap.
 
+### 7d. Synchronous-mount spike (added 2026-04-30 — same-day follow-up)
+
+`kpi-strip-island-sync.ts` is a spike variant that moves the Solid mount into a Preact ref callback (commit-phase synchronous) and the prop sync into `useLayoutEffect`. Both shift the work out of task tier, eliminating the bulk of the 30 ms `useEffect` gap.
+
+| Workload (n=16) | Preact | Solid useEffect | Solid sync-mount |
+|-----------------|--------|-----------------|------------------|
+| Mount → DOM | 16.50 ms | 32.80 ms | **16.80 ms** (parity) |
+| Update burst (60 samples), total | 991 ms | 1999 ms | **1008 ms** (parity) |
+| Throughput vs Preact | 1.00 | 0.50 | **1.02** |
+
+The spike's hypothesis holds — useEffect overhead is eliminated. **But parity is not a win.** The original §1 promise that Solid would be *faster* is still unrealised at small N because both renderers do similar work when callers replace the entire `cells` prop on every parent render. The fine-grained-signal advantage only surfaces if callers stop recreating the array.
+
+**Production action**: promote `KpiStripIslandSync` to the shipping wrapper as a separate small PR (no API change, identical DOM contract). This removes the 30 ms regression on every page that uses a migrated caller, returning the existing trajectory to neutral.
+
+**Phase 2 / Phase 3 stay paused** until a per-cell signal API redesign is done — that's a separate larger RFC.
+
 ## 8. Rollback Criteria
 
 This RFC is rolled back (and PR #N reverted) if:

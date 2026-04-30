@@ -83,6 +83,7 @@
       <button id="run-suite">Full suite (mount + 3× update)</button>
       <button id="run-sustained">Sustained 5s (n=16, 30 updates/sec target)</button>
       <button id="run-keeper-shape">Keeper-shape spike (n=16, 60 updates burst)</button>
+      <button id="run-spike-sync">Sync-mount spike (n=16, useEffect vs ref callback)</button>
     </div>
 
     <pre class="results" id="results">(no measurements yet)</pre>
@@ -97,6 +98,9 @@
         <div id="island-host"></div>
       </div>
     </div>
+
+    <h2 style="font-size:14px; margin-top:24px">Sync-mount spike host (RFC 0017 §7d)</h2>
+    <div id="sync-host"></div>
   </div>
 
   <script type="module" src="bench-kpi.ts"></script>

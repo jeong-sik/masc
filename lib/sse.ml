@@ -37,9 +37,10 @@ let run_test_hook hook =
   | None -> ()
 
 type session_kind =
-  | Observer     (** Dashboard / read-only viewers *)
-  | Coordinator  (** MCP agent connections *)
-  | Presence     (** Ephemeral liveness / awareness channel *)
+  | Observer [@tla.symbol "observer"]    (** Dashboard / read-only viewers *)
+  | Coordinator [@tla.symbol "coordinator"] (** MCP agent connections *)
+  | Presence [@tla.symbol "presence"]    (** Ephemeral liveness / awareness channel *)
+[@@deriving tla]
 
 (** Broadcast targeting selector. *)
 type broadcast_target =

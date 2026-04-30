@@ -71,11 +71,6 @@ if [[ "$looks_agent_authored" -eq 0 ]]; then
   exit 0
 fi
 
-if [[ "$(lower "$pr_is_draft")" == "true" ]]; then
-  echo "agent draft policy: pass, agent PR remains draft"
-  exit 0
-fi
-
 bypass_present=0
 IFS=',' read -r -a bypass_labels <<<"$bypass_labels_csv"
 for label in "${bypass_labels[@]}"; do
@@ -96,5 +91,5 @@ if [[ "$bypass_present" -eq 1 ]]; then
   exit 0
 fi
 
-echo "::error title=Agent draft policy violation::agent-like PR '${pr_head_ref}' is ready without an approved bypass label (${bypass_labels_csv}). Keep it draft or add an approved human bypass label."
+echo "::error title=Agent draft policy violation::agent-like PR '${pr_head_ref}' lacks an approved human bypass label (${bypass_labels_csv}). Keep the required gate red until a human adds an approved bypass label."
 exit 1

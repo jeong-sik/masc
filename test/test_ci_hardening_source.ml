@@ -101,11 +101,12 @@ let test_agent_draft_policy_script () =
   in
   check int "non pull_request events are ignored" 0
     (run_agent_draft_policy [ ("GITHUB_EVENT_NAME", "push") ]);
-  check int "draft agent PR passes" 0
-    (run_agent_draft_policy (("PR_IS_DRAFT", "true") :: base));
-  check int "live draft state overrides stale ready event" 0
+  check bool "draft agent PR without bypass fails closed" true
+    (run_agent_draft_policy (("PR_IS_DRAFT", "true") :: base) <> 0);
+  check bool "live draft state does not bypass approval gate" true
     (run_agent_draft_policy
-       (("PR_LIVE_IS_DRAFT", "true") :: ("PR_IS_DRAFT", "false") :: base));
+       (("PR_LIVE_IS_DRAFT", "true") :: ("PR_IS_DRAFT", "false") :: base)
+    <> 0);
   check bool "live ready state overrides stale draft event" true
     (run_agent_draft_policy
        (("PR_LIVE_IS_DRAFT", "false") :: ("PR_IS_DRAFT", "true") :: base)
@@ -131,6 +132,11 @@ let test_agent_draft_policy_script () =
   check int "ready agent PR with bypass label passes" 0
     (run_agent_draft_policy
        (("PR_IS_DRAFT", "false")
+       :: ("PR_LABELS", "enhancement,human-approved-ready")
+       :: List.remove_assoc "PR_LABELS" base));
+  check int "draft agent PR with bypass label passes" 0
+    (run_agent_draft_policy
+       (("PR_IS_DRAFT", "true")
        :: ("PR_LABELS", "enhancement,human-approved-ready")
        :: List.remove_assoc "PR_LABELS" base));
   check int "ready non-agent PR passes" 0
@@ -184,7 +190,10 @@ let test_pr_automation_draft_guard_contracts () =
   check bool "post-merge skip runs before draft restore mutation" true
     (match live_state_skip, draft_restore with
      | Some skip_pos, Some restore_pos -> skip_pos < restore_pos
-     | _ -> false)
+     | _ -> false);
+  check bool "draft-only state does not suppress missing approval" true
+    (file_not_contains_pattern ".github/workflows/pr-automation.yml"
+       "verifiedBypassLabels.length === 0 &&\n              !safeDraftOnlyState")
 
 let test_health_and_ci_runner_diagnostics () =
   check bool "health snapshot records baseline source" true

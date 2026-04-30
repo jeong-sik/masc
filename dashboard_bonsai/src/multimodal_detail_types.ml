@@ -29,8 +29,35 @@ type provenance =
   ; descendants : string list
   }
 
+(** Tier F2-ux — fetch state for the detail/provenance vars.
+
+    [Idle]     : nothing selected; the panel is hidden.
+    [Loading]  : selection set, fetch in flight.
+    [Loaded x] : success, payload available.
+    [NotFound] : server returned an error envelope ([{"error":"..."}]),
+                 most commonly because the id does not resolve.
+    [Error s]  : everything else (network, CORS, JSON parse failure).
+                 [s] is operator-facing; English short string. *)
+type 'a fetch_state =
+  | Idle
+  | Loading
+  | Loaded of 'a
+  | NotFound
+  | Error of string
+
 let pretty_of json =
   Yojson.Safe.pretty_to_string ~std:true json
+
+(** Classify a parsed JSON response: [{"error": ...}] envelope ⇒
+    [Error_envelope_msg]; any other shape ⇒ [Ok_json json]. *)
+type json_classification =
+  | Ok_json of Yojson.Safe.t
+  | Error_envelope_msg of string
+
+let classify_json (json : Yojson.Safe.t) : json_classification =
+  match Yojson.Safe.Util.member "error" json with
+  | `String s -> Error_envelope_msg s
+  | _ -> Ok_json json
 
 let detail_of_yojson (json : Yojson.Safe.t) : detail =
   let string_field name =

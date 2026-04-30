@@ -639,21 +639,29 @@ let append_execution_receipt ?(tool_contract_result = "satisfied")
         Masc_mcp.Keeper_types.network_mode_to_string meta.network_mode;
       approval_profile = Some "trusted_local";
       approval_profile_derived = false;
-      cascade_name = meta.cascade_name;
+      cascade_name =
+        Masc_mcp.Keeper_execution_receipt.cascade_name_of_string
+          meta.cascade_name;
       cascade_selected_model = Some "custom:mock";
       cascade_attempt_count = 2;
       cascade_fallback_applied;
       cascade_outcome;
       degraded_retry_applied;
-      degraded_retry_cascade;
+      degraded_retry_cascade =
+        Option.map Masc_mcp.Keeper_execution_receipt.cascade_name_of_string
+          degraded_retry_cascade;
       fallback_reason;
       cascade_rotation_attempts =
         (match degraded_retry_cascade, fallback_reason with
          | Some retry_cascade, Some reason ->
            [
              {
-               from_cascade = meta.cascade_name;
-               to_cascade = retry_cascade;
+               from_cascade =
+                 Masc_mcp.Keeper_execution_receipt.cascade_name_of_string
+                   meta.cascade_name;
+               to_cascade =
+                 Masc_mcp.Keeper_execution_receipt.cascade_name_of_string
+                   retry_cascade;
                reason;
                outcome = "retry_scheduled";
                error_kind =

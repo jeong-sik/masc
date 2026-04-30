@@ -185,7 +185,7 @@ let record_pre_dispatch_terminal_observation
     ~(config : Coord.config)
     ~(meta : keeper_meta)
     ~(generation : int)
-    ~(cascade_name : string)
+    ~(cascade_name : Keeper_execution_receipt.cascade_name)
     ~(outcome : string)
     ~(terminal_reason_code : string)
     ~(activity_kind : string)
@@ -194,6 +194,9 @@ let record_pre_dispatch_terminal_observation
     ?error_message
     ?keeper_turn_id
     () : unit =
+  let cascade_name_string =
+    Keeper_execution_receipt.cascade_name_to_string cascade_name
+  in
   let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
   let started_at = now_iso () in
   let masc_root = Coord.masc_root_dir config in
@@ -277,7 +280,7 @@ let record_pre_dispatch_terminal_observation
                 ("trace_id", `String trace_id);
                 ("outcome", `String outcome);
                 ("terminal_reason_code", `String terminal_reason_code);
-                ("cascade_name", `String cascade_name);
+                ("cascade_name", `String cascade_name_string);
               ])
          ()
      in

@@ -39,6 +39,14 @@ type error_kind = private Error_kind of string
 val error_kind_of_string : string -> error_kind
 val error_kind_to_string : error_kind -> string
 
+type cascade_name = Keeper_cascade_profile.runtime_name
+(** Runtime cascade profile name as stored by execution receipts. Dynamic
+    catalog names stay possible, but receipt construction must cross this
+    typed boundary before persistence. *)
+
+val cascade_name_of_string : string -> cascade_name
+val cascade_name_to_string : cascade_name -> string
+
 type receipt_authority_violation = {
   outcome : string;
   turn_state : string;
@@ -85,8 +93,8 @@ type tool_surface =
   }
 
 type cascade_rotation_attempt =
-  { from_cascade : string
-  ; to_cascade : string
+  { from_cascade : cascade_name
+  ; to_cascade : cascade_name
   ; reason : string
   ; outcome : string
   ; error_kind : error_kind option
@@ -119,13 +127,13 @@ type t =
   ; network_mode : string
   ; approval_profile : string option
   ; approval_profile_derived : bool
-  ; cascade_name : string
+  ; cascade_name : cascade_name
   ; cascade_selected_model : string option
   ; cascade_attempt_count : int
   ; cascade_fallback_applied : bool
   ; cascade_outcome : string
   ; degraded_retry_applied : bool
-  ; degraded_retry_cascade : string option
+  ; degraded_retry_cascade : cascade_name option
   ; fallback_reason : string option
   ; cascade_rotation_attempts : cascade_rotation_attempt list
   ; stop_reason : string option
@@ -167,7 +175,7 @@ val emit_stale_keeper_broadcast :
   Coord.config ->
   keeper_name:string ->
   agent_name:string ->
-  cascade_name:string ->
+  cascade_name:cascade_name ->
   trace_id:string ->
   generation:int ->
   stale_seconds:float ->

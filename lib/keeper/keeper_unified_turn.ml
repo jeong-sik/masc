@@ -9,6 +9,7 @@
 open Keeper_types
 open Keeper_exec_context
 module Social = Keeper_social_model
+module KCP = Keeper_cascade_profile
 
 include Keeper_turn_helpers
 include Keeper_turn_liveness
@@ -238,9 +239,10 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
       (match saturation_skip_meta with
        | Some meta_after_skip -> Ok meta_after_skip
        | None ->
-      let build_cascade_execution ~(cascade_name : string) :
+      let build_cascade_execution ~(cascade_name : KCP.runtime_name) :
           (cascade_execution, Oas.Error.sdk_error) result =
-        let meta_for_cascade = { meta with cascade_name } in
+        let cascade_name_string = KCP.runtime_name_to_string cascade_name in
+        let meta_for_cascade = { meta with cascade_name = cascade_name_string } in
         let model_labels =
           Keeper_coordination.effective_model_labels_for_turn meta_for_cascade
         in
@@ -258,18 +260,12 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                   resolved_max_context_for_turn ~meta model_labels
                 in
                 let temperature =
-                  let cascade_name =
-                    Keeper_cascade_profile.Runtime_name cascade_name
-                  in
                   Cascade_inference.resolve_temperature
                     ~cascade_name
                     ~fallback:Keeper_config.keeper_unified_temperature
                 in
                 let max_tokens =
                   let raw =
-                    let cascade_name =
-                      Keeper_cascade_profile.Runtime_name cascade_name
-                    in
                     Cascade_inference.resolve_max_tokens
                       ~cascade_name
                       ~fallback:Keeper_config.keeper_unified_max_tokens
@@ -287,7 +283,12 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                     max_tokens;
                   })
       in
-      match build_cascade_execution ~cascade_name:effective_cascade_name with
+      let effective_cascade_runtime_name =
+        KCP.Runtime_name effective_cascade_name
+      in
+      match
+        build_cascade_execution ~cascade_name:effective_cascade_runtime_name
+      with
       | Error err ->
           let terminal_reason_code =
             Printf.sprintf "pre_dispatch_%s"
@@ -298,9 +299,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             ~config
             ~meta
             ~generation
-            ~cascade_name:
-              (Keeper_execution_receipt.cascade_name_of_string
-                 effective_cascade_name)
+            ~cascade_name:effective_cascade_runtime_name
             ~outcome:"error"
             ~terminal_reason_code
             ~activity_kind:"keeper.turn_blocked"
@@ -345,9 +344,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
              ~config
              ~meta
              ~generation
-             ~cascade_name:
-               (Keeper_execution_receipt.cascade_name_of_string
-                  initial_execution.cascade_name)
+             ~cascade_name:initial_execution.cascade_name
              (* β6: "blocked" was not in outcome_kind quad-state
                 (ok/skipped/error/cancelled), causing operator_disposition
                 to classify livelock-blocked turns as "unknown".  Map to
@@ -615,14 +612,13 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
       let degraded_retry_info = ref None in
       let cascade_rotation_attempts = ref [] in
       let record_cascade_rotation_attempt
-          ~(from_cascade : string)
+          ~(from_cascade : Keeper_execution_receipt.cascade_name)
           ~(retry : EC.degraded_retry)
           ~(outcome : string)
           (err : Oas.Error.sdk_error) =
         let attempt : Keeper_execution_receipt.cascade_rotation_attempt =
           {
-            from_cascade =
-              Keeper_execution_receipt.cascade_name_of_string from_cascade;
+            from_cascade;
             to_cascade =
               Keeper_execution_receipt.cascade_name_of_string retry.next_cascade;
             reason = retry.fallback_reason;
@@ -698,11 +694,13 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
           let do_run ~(execution : cascade_execution) ~run_meta ~run_generation ~is_retry
               ~oas_timeout_s =
             last_execution := execution;
+            let execution_cascade_name =
+              KCP.runtime_name_to_string execution.cascade_name
+            in
             Otel_genai.with_keeper_turn_span
               ~keeper_name:run_meta.name
               ~agent_name:run_meta.agent_name
-              ~cascade_name:
-                (Keeper_cascade_profile.Runtime_name execution.cascade_name)
+              ~cascade_name:execution.cascade_name
               ~trace_id:(Keeper_id.Trace_id.to_string run_meta.runtime.trace_id)
               ~generation:run_generation
               ~max_context:execution.max_context
@@ -721,7 +719,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                 try
                   Keeper_agent_run.run_turn ~config ~meta:run_meta ~base_dir
                     ~max_context:execution.max_context ~build_turn_prompt
-                    ~user_message ~cascade_name:execution.cascade_name
+                    ~user_message ~cascade_name:execution_cascade_name
                     ~world_observation:observation
                     ~turn_affordances
                     ?provider_filter:(Env_config_keeper.KeeperCascade.provider_allowlist ())
@@ -769,9 +767,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                     ~config
                     ~meta:run_meta
                     ~generation:run_generation
-                    ~cascade_name:
-                      (Keeper_execution_receipt.cascade_name_of_string
-                         execution.cascade_name)
+                    ~cascade_name:execution.cascade_name
                     ~outcome:"cancelled"
                     ~terminal_reason_code:"external_cancel"
                     ~activity_kind:"keeper.turn_cancelled"
@@ -794,6 +790,9 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
               ~attempt ~is_retry
               ~overflow_retry_used
               ~attempted_cascades =
+            let execution_cascade_name =
+              KCP.runtime_name_to_string execution.cascade_name
+            in
             let mark_terminal_error err =
               if EC.is_cascade_exhausted_error err then begin
                 Keeper_registry.set_turn_cascade_state
@@ -845,10 +844,10 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
               let reserve_degraded_retry_budget =
                 match
                   Keeper_cascade_profile.fallback_cascade_for
-                    execution.cascade_name
+                    execution_cascade_name
                 with
                 | Some fallback_cascade ->
-                    not (String.equal fallback_cascade execution.cascade_name)
+                    not (String.equal fallback_cascade execution_cascade_name)
                 | None -> false
               in
               match
@@ -982,7 +981,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                      (%s after %d prior rotation(s)) — skipping further \
                      rotation; rotating again is unlikely to change the \
                      model's passive-tool choice. Error: %s"
-                    meta.name execution.cascade_name
+                    meta.name execution_cascade_name
                     (List.length attempted_cascades)
                     (short_preview (Oas.Error.to_string err));
                   Prometheus.inc_counter
@@ -996,7 +995,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                     next_fail_open_cascade_for_turn_with_budget
                       ?rotation_cascades:fail_open_rotation_cascades
                       ~base_cascade:meta.cascade_name
-                      ~effective_cascade:execution.cascade_name
+                      ~effective_cascade:execution_cascade_name
                       ~tool_requirement:initial_tool_requirement
                       ~attempted_cascades
                       ~estimated_input_tokens:
@@ -1008,7 +1007,8 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                   | Degraded_retry_allowed degraded_retry -> (
                       match
                         build_cascade_execution
-                          ~cascade_name:degraded_retry.next_cascade
+                          ~cascade_name:
+                            (KCP.Runtime_name degraded_retry.next_cascade)
                       with
                       | Error fail_open_err ->
                           record_cascade_rotation_attempt
@@ -1018,13 +1018,17 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                             fail_open_err;
                           Log.Keeper.warn
                             "%s: recoverable cascade failure in %s suggested degraded retry to %s (reason=%s), but retry setup failed: %s"
-                            meta.name execution.cascade_name
+                            meta.name execution_cascade_name
                             degraded_retry.next_cascade
                             degraded_retry.fallback_reason
                             (short_preview (Oas.Error.to_string fail_open_err));
                           mark_terminal_error fail_open_err;
                           Error fail_open_err
                       | Ok next_execution ->
+                          let next_execution_cascade_name =
+                            KCP.runtime_name_to_string
+                              next_execution.cascade_name
+                          in
                           record_cascade_rotation_attempt
                             ~from_cascade:execution.cascade_name
                             ~retry:degraded_retry
@@ -1033,8 +1037,8 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                           degraded_retry_info := Some degraded_retry;
                           Log.Keeper.warn
                             "%s: recoverable cascade failure in %s; rotation retry on cascade=%s reason=%s max_context=%d context_budget=%d primary_budget=%d requested_override=%s: %s"
-                            meta.name execution.cascade_name
-                            next_execution.cascade_name
+                            meta.name execution_cascade_name
+                            next_execution_cascade_name
                             degraded_retry.fallback_reason
                             next_execution.max_context
                             next_execution.max_context_resolution.effective_budget
@@ -1052,11 +1056,11 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                             ~is_retry:true
                             ~overflow_retry_used
                             ~attempted_cascades:
-                              (next_execution.cascade_name :: attempted_cascades))
+                              (next_execution_cascade_name :: attempted_cascades))
                   | Degraded_retry_budget_exhausted degraded_retry ->
                       Log.Keeper.warn
                         "%s: recoverable cascade failure in %s suggested degraded retry to %s (reason=%s), but remaining turn budget %.1fs is below the OAS retry guard/minimum; ending this cycle: %s"
-                        meta.name execution.cascade_name
+                        meta.name execution_cascade_name
                         degraded_retry.next_cascade
                         degraded_retry.fallback_reason
                         (remaining_turn_budget_s ())
@@ -1068,7 +1072,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                       let delay = EC.transient_backoff_sec attempt in
                       Log.Keeper.warn
                         "%s: transient network error cascade=%s max_context=%d context_budget=%d primary_budget=%d requested_override=%s retry=%d/%d backoff=%.0fs: %s"
-                        meta.name execution.cascade_name
+                        meta.name execution_cascade_name
                         execution.max_context
                         execution.max_context_resolution.effective_budget
                         execution.max_context_resolution.primary_budget
@@ -1179,7 +1183,8 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                 retry_loop ~run_meta:meta ~execution:initial_execution
                   ~run_generation:generation ~attempt:1
                   ~is_retry:false ~overflow_retry_used:false
-                  ~attempted_cascades:[initial_execution.cascade_name])
+                  ~attempted_cascades:
+                    [ KCP.runtime_name_to_string initial_execution.cascade_name ])
           with Eio.Time.Timeout ->
             let msg =
               Printf.sprintf
@@ -1318,7 +1323,8 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                     detail = short_preview e_str }));
           Log.Keeper.error
             "%s: keeper cycle FAILED cascade=%s max_context=%d context_budget=%d primary_budget=%d requested_override=%s latency=%dms%s error=%s"
-            meta.name final_execution.cascade_name
+            meta.name
+            (KCP.runtime_name_to_string final_execution.cascade_name)
             final_execution.max_context
             final_execution.max_context_resolution.effective_budget
             final_execution.max_context_resolution.primary_budget

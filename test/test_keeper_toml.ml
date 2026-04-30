@@ -487,6 +487,7 @@ let test_profile_rejects_partial_proactive_interval_pair () =
   let input = {|
 [keeper]
 goal = "test"
+proactive_enabled = true
 proactive_idle_sec = 120
 |} in
   match TL.parse_toml input with

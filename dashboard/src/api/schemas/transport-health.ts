@@ -78,6 +78,7 @@ const SseOuterSchema = object({
 interface SseSection {
   sessions_observer: number
   sessions_coordinator: number
+  sessions_presence: number
   sessions_total: number
   external_subscribers: number
   broadcast_avg_seconds: number
@@ -270,6 +271,7 @@ export function parseTransportHealthData(data: unknown): TransportHealthData {
     sse: {
       sessions_observer: outer.sse.sessions_observer,
       sessions_coordinator: outer.sse.sessions_coordinator,
+      sessions_presence: outer.sse.sessions_presence,
       sessions_total: outer.sse.sessions_total,
       external_subscribers: outer.sse.external_subscribers,
       broadcast_avg_seconds: outer.sse.broadcast_avg_seconds,

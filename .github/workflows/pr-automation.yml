@@ -14,6 +14,7 @@ on:
 
 permissions:
   contents: read
+  checks: read
   issues: write
   pull-requests: write
 
@@ -68,26 +69,12 @@ jobs:
               .map((s) => s.trim().toLowerCase())
               .filter(Boolean);
 
-            // The agent draft guard exists to keep *agent-authored* PRs draft-only
-            // until a human approves them. When the PR author is itself a verified
-            // human (repo owner or AGENT_DRAFT_GUARD_HUMAN_ACTORS), the policy
-            // does not apply: the human is the approver. Skipping here also
-            // breaks a deadlock where convertPullRequestToDraft returns
-            // "Resource not accessible by integration" on owner-authored PRs,
-            // failing this required check for every owner PR.
             const prAuthorLogin = (pr.user?.login || "").toLowerCase();
             const prAuthorType = pr.user?.type;
-            if (
+            const humanAuthored =
               prAuthorType === "User" &&
               prAuthorLogin &&
-              humanActors.includes(prAuthorLogin)
-            ) {
-              core.info(
-                `PR author ${pr.user.login} is in AGENT_DRAFT_GUARD_HUMAN_ACTORS; ` +
-                  "agent draft guard does not apply."
-              );
-              return;
-            }
+              humanActors.includes(prAuthorLogin);
 
             const labels = (pr.labels || []).map((label) => label.name.toLowerCase());
             const ignoredBypassLabels = labels.filter((label) =>
@@ -136,7 +123,6 @@ jobs:
             }
             if (verifiedBypassLabels.length > 0) {
               core.info(`Verified human bypass label present: ${verifiedBypassLabels.join(", ")}.`);
-              return;
             }
             for (const failure of bypassPolicyFailures) {
               core.warning(`Ignoring unverified bypass label: ${failure}.`);
@@ -165,38 +151,58 @@ jobs:
               action === "ready_for_review" ||
               action === "auto_merge_enabled" ||
               action === "converted_to_draft";
+            const hasAutoMergeRequest = Boolean(current.autoMergeRequest);
             const guarded =
               current.isDraft ||
-              Boolean(current.autoMergeRequest) ||
+              hasAutoMergeRequest ||
               draftBoundaryAction ||
               looksAgentAuthored;
             if (!guarded) {
-              core.info("PR is not draft, auto-merge-enabled, draft-boundary, or agent-like; skip draft auto-merge guard.");
+              if (humanAuthored) {
+                core.info(
+                  `PR author ${pr.user.login} is in AGENT_DRAFT_GUARD_HUMAN_ACTORS, ` +
+                    "and this event has no draft/auto-merge boundary; skip draft auto-merge guard."
+                );
+              } else {
+                core.info("PR is not draft, auto-merge-enabled, draft-boundary, or agent-like; skip draft auto-merge guard.");
+              }
               return;
             }
 
             const actions = [];
             const failedActions = [];
-            // Soft failures: non-critical actions that don't affect draft safety.
-            // auto-merge disable is cosmetic because GitHub never auto-merges a draft PR.
             const softFailures = [];
             const policyFailures = bypassPolicyFailures.map((failure) =>
               `unverified bypass label ${failure}`
             );
-            // When an agent PR is already in the safe invariant
+            let shouldRestoreDraft = false;
+            let shouldDisableAutoMerge = false;
+            let ciGatePolicyFailure = false;
+            // When a guarded PR is already in the safe invariant
             // (draft=true, no auto-merge), treating "missing approval" as a
             // policy violation is a false positive: the guard has nothing left
             // to enforce because the PR is already draft-only. This covers the
             // initial draft open path as well as explicit convert-to-draft.
-            const safeDraftOnlyState = current.isDraft && !current.autoMergeRequest;
+            const safeDraftOnlyState = current.isDraft && !hasAutoMergeRequest;
+            const approvalRequired =
+              looksAgentAuthored ||
+              draftBoundaryAction ||
+              hasAutoMergeRequest ||
+              bypassPolicyFailures.length > 0;
             const missingVerifiedApproval =
-              looksAgentAuthored &&
+              approvalRequired &&
               verifiedBypassLabels.length === 0 &&
               !safeDraftOnlyState;
             if (missingVerifiedApproval) {
               const expected =
                 bypassLabels.length > 0 ? bypassLabels.join(", ") : "(no configured bypass labels)";
               policyFailures.push(`missing verified human approval label: ${expected}`);
+              shouldRestoreDraft = !current.isDraft;
+              shouldDisableAutoMerge = hasAutoMergeRequest;
+            }
+            if (bypassPolicyFailures.length > 0 && !safeDraftOnlyState) {
+              shouldRestoreDraft = !current.isDraft;
+              shouldDisableAutoMerge = hasAutoMergeRequest;
             }
             const summarizeError = (error) => {
               const messages = [];
@@ -219,7 +225,35 @@ jobs:
               core.info(`Draft PR guard soft-failure (${actionName}): ${summary}`);
             };
 
-            if (current.autoMergeRequest) {
+            if (hasAutoMergeRequest) {
+              const checks = await github.rest.checks.listForRef({
+                owner,
+                repo,
+                ref: pr.head.sha,
+                check_name: "CI Gate",
+                per_page: 100
+              });
+              const ciGateRuns = [...(checks.data.check_runs || [])].sort((a, b) => {
+                const aTime = Date.parse(a.started_at || a.created_at || "") || 0;
+                const bTime = Date.parse(b.started_at || b.created_at || "") || 0;
+                return bTime - aTime;
+              });
+              const latestCiGate = ciGateRuns[0];
+              if (
+                !latestCiGate ||
+                latestCiGate.status !== "completed" ||
+                latestCiGate.conclusion !== "success"
+              ) {
+                const ciGateStatus = latestCiGate
+                  ? `${latestCiGate.status}/${latestCiGate.conclusion || "none"} ${latestCiGate.html_url}`
+                  : "missing";
+                policyFailures.push(`CI Gate is not completed successfully for head ${pr.head.sha}: ${ciGateStatus}`);
+                shouldDisableAutoMerge = true;
+                ciGatePolicyFailure = true;
+              }
+            }
+
+            if (current.autoMergeRequest && shouldDisableAutoMerge) {
               try {
                 await github.graphql(`
                   mutation($pullRequestId: ID!) {
@@ -232,11 +266,11 @@ jobs:
                 `, { pullRequestId: current.id });
                 actions.push("disabled auto-merge");
               } catch (error) {
-                recordSoftFailure("disable auto-merge", error);
+                recordFailure("disable auto-merge", error);
               }
             }
 
-            if (!current.isDraft) {
+            if (!current.isDraft && shouldRestoreDraft) {
               try {
                 await github.graphql(`
                   mutation($pullRequestId: ID!) {
@@ -254,7 +288,13 @@ jobs:
             }
 
             if (actions.length === 0 && failedActions.length === 0 && policyFailures.length === 0) {
-              core.info("Guarded PR is already draft-only.");
+              if (safeDraftOnlyState) {
+                core.info("Guarded PR is already draft-only.");
+              } else if (verifiedBypassLabels.length > 0) {
+                core.info("Guarded PR has verified human approval; no draft restore needed.");
+              } else {
+                core.info("Guarded PR needs no draft or auto-merge repair.");
+              }
               return;
             }
 
@@ -265,7 +305,7 @@ jobs:
               failedActions.length > 0
                 ? "Draft PR guard could not fully reapply protection."
                 : policyFailures.length > 0
-                ? "Draft PR guard blocked an unapproved agent PR."
+                ? "Draft PR guard blocked an unsafe draft or auto-merge transition."
                 : softFailures.length > 0
                 ? "Draft PR guard applied with non-critical notes."
                 : `Draft PR guard reapplied: ${actions.join(", ")}.`;
@@ -290,7 +330,9 @@ jobs:
                 : policyFailures.length > 0
                 ? [
                     "",
-                    "Manual action required: add a bypass label only after explicit human approval."
+                    ciGatePolicyFailure
+                      ? "Manual action required: restore draft state if needed, add a bypass label only after explicit human approval, and wait for CI Gate success before re-enabling auto-merge."
+                      : "Manual action required: add a bypass label only after explicit human approval."
                   ]
                 : softFailures.length > 0
                 ? [
@@ -337,9 +379,8 @@ jobs:
             //   - agent-like PR lacks a verified human approval label
             //   - convert-to-draft failed (PR is still Ready when it shouldn't be)
             //   - someone tried to enable auto-merge / flip to draft while a policy is breached.
-            // auto-merge disable failure is NOT a hard failure because:
-            //   1. GitHub never auto-merges a draft PR regardless of auto-merge setting
-            //   2. The convert-to-draft action is the real safety mechanism
+            // Auto-merge disable failure is a hard failure when the guard is
+            // disabling auto-merge because CI Gate is missing/pending/failed.
             const hardFailure = failedActions.length > 0 || policyFailures.length > 0;
             const draftSafetyViolation =
               (action === "auto_merge_enabled" || action === "converted_to_draft") &&

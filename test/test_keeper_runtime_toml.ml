@@ -172,6 +172,70 @@ let test_applies_watchdog_overrides () =
     (Some "900")
     (List.assoc_opt "MASC_KEEPER_WATCHDOG_GRACE_SEC" overrides)
 
+let test_applies_memory_overrides () =
+  let doc = parse_or_fail
+    "[memory]\n\
+     max_notes = 321\n\
+     compact_trigger_bytes = 234567\n\
+     max_length = 2048\n\
+     placeholders = \"custom-empty,custom-none\"\n\
+     consensus_pattern = \"CUSTOMBLOCK\"\n"
+  in
+  let count, overrides =
+    Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
+  in
+  check int "applied 5" 5 count;
+  check (option string) "memory max notes"
+    (Some "321")
+    (List.assoc_opt "MASC_KEEPER_MEMORY_MAX_NOTES" overrides);
+  check (option string) "memory trigger bytes"
+    (Some "234567")
+    (List.assoc_opt "MASC_KEEPER_MEMORY_COMPACT_TRIGGER_BYTES" overrides);
+  check (option string) "memory max length"
+    (Some "2048")
+    (List.assoc_opt "MASC_KEEPER_MEMORY_MAX_LENGTH" overrides);
+  check (option string) "memory placeholders"
+    (Some "custom-empty,custom-none")
+    (List.assoc_opt "MASC_KEEPER_MEMORY_PLACEHOLDERS" overrides);
+  check (option string) "memory consensus pattern"
+    (Some "CUSTOMBLOCK")
+    (List.assoc_opt "MASC_KEEPER_MEMORY_CONSENSUS_PATTERN" overrides)
+
+let test_memory_bank_reads_boot_override_knobs () =
+  let env_names =
+    [
+      "MASC_KEEPER_MEMORY_MAX_NOTES";
+      "MASC_KEEPER_MEMORY_COMPACT_TRIGGER_BYTES";
+      "MASC_KEEPER_MEMORY_MAX_LENGTH";
+      "MASC_KEEPER_MEMORY_PLACEHOLDERS";
+      "MASC_KEEPER_MEMORY_CONSENSUS_PATTERN";
+    ]
+  in
+  if List.exists (fun name -> Sys.getenv_opt name <> None) env_names then
+    skip ()
+  else
+  with_clean_boot_overrides @@ fun () ->
+  Config_boot_overrides.set "MASC_KEEPER_MEMORY_MAX_NOTES" "321";
+  Config_boot_overrides.set "MASC_KEEPER_MEMORY_COMPACT_TRIGGER_BYTES" "234567";
+  Config_boot_overrides.set "MASC_KEEPER_MEMORY_MAX_LENGTH" "2048";
+  Config_boot_overrides.set "MASC_KEEPER_MEMORY_PLACEHOLDERS" "custom-empty";
+  Config_boot_overrides.set "MASC_KEEPER_MEMORY_CONSENSUS_PATTERN" "CUSTOMBLOCK";
+  check int "target notes from boot override"
+    321
+    (Keeper_memory_bank.memory_compaction_target_notes ());
+  check int "trigger bytes from boot override"
+    234567
+    (Keeper_memory_bank.memory_compaction_trigger_bytes ~target_notes:321);
+  check int "max text length from boot override"
+    2048
+    (Keeper_memory_bank.max_memory_text_length ());
+  check bool "placeholder from boot override"
+    true
+    (List.mem "custom-empty" (Keeper_memory_bank.memory_placeholders ()));
+  check string "consensus pattern from boot override"
+    "CUSTOMBLOCK"
+    (Keeper_memory_bank.consensus_pattern_key ())
+
 let test_caller_env_wins_over_toml () =
   let doc = parse_or_fail "[autonomous]\nmax_turns_per_call = 7\n" in
   let fake_env =
@@ -381,6 +445,8 @@ let () =
         ; test_case "applies multiple overrides" `Quick test_applies_multiple_overrides
         ; test_case "applies turn execution overrides" `Quick test_applies_turn_execution_overrides
         ; test_case "applies watchdog overrides" `Quick test_applies_watchdog_overrides
+        ; test_case "applies memory overrides" `Quick test_applies_memory_overrides
+        ; test_case "memory bank reads boot override knobs" `Quick test_memory_bank_reads_boot_override_knobs
         ; test_case "caller env wins over TOML" `Quick test_caller_env_wins_over_toml
         ; test_case "unknown keys ignored" `Quick test_unknown_keys_ignored
         ; test_case "parse error returns Error" `Quick test_parse_error_returns_error

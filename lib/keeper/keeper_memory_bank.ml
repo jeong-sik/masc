@@ -165,10 +165,29 @@ let consensus_default_re = Re.Pcre.re {|\d{6,}ep\+?|} |> Re.compile
 let consensus_re_mu = Stdlib.Mutex.create ()
 let consensus_re_cached : (string * Re.re) option ref = ref None
 
+let memory_env_opt name =
+  match Env_config_core.raw_value_opt name with
+  | None -> None
+  | Some raw ->
+      let s = String.trim raw in
+      if s = "" then None else Some s
+
+let memory_env_int_logged name ~default =
+  match memory_env_opt name with
+  | None -> default
+  | Some raw ->
+      (match int_of_string_opt raw with
+       | Some n -> n
+       | None ->
+           Log.Keeper.warn
+             "invalid %s=%S; using default %d"
+             name raw default;
+           default)
+
 let consensus_pattern_key () =
-  match Sys.getenv_opt "MASC_KEEPER_MEMORY_CONSENSUS_PATTERN" with
+  match memory_env_opt "MASC_KEEPER_MEMORY_CONSENSUS_PATTERN" with
   | None -> ""
-  | Some raw -> String.trim raw
+  | Some raw -> raw
 
 let compile_consensus_re pattern =
   if pattern = "" then consensus_default_re
@@ -213,7 +232,7 @@ let memory_placeholders () =
       "미정";
     ]
   in
-  match Sys.getenv_opt "MASC_KEEPER_MEMORY_PLACEHOLDERS" with
+  match memory_env_opt "MASC_KEEPER_MEMORY_PLACEHOLDERS" with
   | None -> base
   | Some raw ->
       let extra =
@@ -224,10 +243,10 @@ let memory_placeholders () =
       base @ extra
 
 let max_memory_text_length () =
-  match Sys.getenv_opt "MASC_KEEPER_MEMORY_MAX_LENGTH" with
+  match memory_env_opt "MASC_KEEPER_MEMORY_MAX_LENGTH" with
   | None -> 4096
   | Some raw ->
-      (match int_of_string_opt (String.trim raw) with
+      (match int_of_string_opt raw with
        | Some n when n > 0 -> n
        | _ -> 4096)
 
@@ -452,7 +471,7 @@ let consolidate_memory_notes (rows : keeper_memory_row_raw list)
 let memory_compaction_target_notes () : int =
   let default_target = 220 in
   let raw =
-    Safe_ops.get_env_int_logged
+    memory_env_int_logged
       "MASC_KEEPER_MEMORY_MAX_NOTES"
       ~default:default_target
   in
@@ -461,7 +480,7 @@ let memory_compaction_target_notes () : int =
 let memory_compaction_trigger_bytes ~(target_notes : int) : int =
   let default_trigger = max 120000 (target_notes * 360) in
   let raw =
-    Safe_ops.get_env_int_logged
+    memory_env_int_logged
       "MASC_KEEPER_MEMORY_COMPACT_TRIGGER_BYTES"
       ~default:default_trigger
   in

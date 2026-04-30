@@ -30,7 +30,14 @@ let handle_keeper_down ctx args : tool_result =
       (if remove_meta then
          ( Safe_ops.remove_file_logged ~context:"keeper_down"
              (keeper_meta_path ctx.config name);
-           Keeper_registry.unregister ~base_path:ctx.config.base_path name )
+           Keeper_registry.unregister ~base_path:ctx.config.base_path name;
+           (* Tier K4c teardown — when the keeper is fully removed
+              (remove_meta=true), drop its tool-emission accumulator
+              from the registry so its slot is reclaimable. The
+              retain-paused branch (else) deliberately keeps the
+              accumulator alive so a future resume can drain any
+              pending items captured before pause. *)
+           Keeper_tool_emission_hook.drop_keeper_accumulator name )
        else
          let retained =
            {

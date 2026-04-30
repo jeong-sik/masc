@@ -139,6 +139,39 @@ let test_model_field_stored () =
     Alcotest.(check bool) "model field present" true
       (Observability_redact.contains_substring ~sub:"glm-4-9b" entry_str))
 
+let test_policy_denied_structured_error_gets_semantic_failure () =
+  with_tmp_log (fun () ->
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"k" ~tool_name:"keeper_fs_read"
+      ~input:(`Assoc [("path", `String "blocked.txt")])
+      ~output_text:
+        {|{"ok":false,"error":"tool_not_allowed","tool":"keeper_fs_read"}|}
+      ~success:true ~duration_ms:1.0 ();
+    let entries = Keeper_tool_call_log.read_recent ~n:1 () in
+    Alcotest.(check int) "one entry" 1 (List.length entries);
+    let entry = List.hd entries in
+    Alcotest.(check bool) "transport success preserved" true
+      (Safe_ops.json_bool ~default:false "success" entry);
+    Alcotest.(check bool) "semantic success is false" false
+      (Safe_ops.json_bool ~default:true "semantic_success" entry);
+    Alcotest.(check (option string)) "semantic outcome"
+      (Some "policy_denied")
+      (Safe_ops.json_string_opt "semantic_outcome" entry);
+    let summary = Dashboard_http_tool_quality.aggregate ~n:10 () in
+    Alcotest.(check int) "dashboard semantic success count" 0
+      (Safe_ops.json_int ~default:(-1) "success" summary);
+    Alcotest.(check int) "dashboard semantic failure count" 1
+      (Safe_ops.json_int ~default:(-1) "failure" summary);
+    let failure_category =
+      summary
+      |> Yojson.Safe.Util.member "failure_categories"
+      |> Yojson.Safe.Util.to_list
+      |> List.hd
+    in
+    Alcotest.(check (option string)) "failure category"
+      (Some "policy_denied")
+      (Safe_ops.json_string_opt "category" failure_category))
+
 let test_turn_context_fields_stored () =
   with_tmp_log (fun () ->
     Keeper_tool_call_log.set_turn_context
@@ -619,6 +652,8 @@ let () =
         [ eio_test "denied tool not logged" test_denied_tool_not_logged
         ; eio_test "sensitive input fields redacted" test_sensitive_input_fields_redacted
         ; eio_test "model field stored" test_model_field_stored
+        ; eio_test "policy denied is semantic failure"
+            test_policy_denied_structured_error_gets_semantic_failure
         ; eio_test "turn context fields stored" test_turn_context_fields_stored
         ; eio_test "turn context fields absent without context"
             test_turn_context_fields_absent_without_context

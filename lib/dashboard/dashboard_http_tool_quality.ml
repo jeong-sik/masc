@@ -100,6 +100,27 @@ let thinking_mode_of_record record =
      | _ -> "unknown")
   | _ -> "unknown"
 
+let bool_field_opt record field =
+  match record with
+  | `Assoc fields ->
+    (match List.assoc_opt field fields with
+     | Some (`Bool value) -> Some value
+     | _ -> None)
+  | _ -> None
+
+let tool_success_of_record record =
+  match bool_field_opt record "semantic_success" with
+  | Some value -> value
+  | None ->
+    (match bool_field_opt record "success" with
+     | Some value -> value
+     | None -> false)
+
+let semantic_outcome_of_record record ~ok =
+  match Safe_ops.json_string_opt "semantic_outcome" record with
+  | Some value when String.trim value <> "" -> value
+  | _ -> if ok then "success" else "tool_failure"
+
 let hour_key_of_record record =
   let hour_of_unix ts =
     let tm = Unix.gmtime ts in
@@ -179,6 +200,7 @@ let empty_summary ~window_hours ~n ~sampling_mode =
     ; ("by_lane", `List [])
     ; ("by_thinking_mode", `List [])
     ; ("by_tool_choice", `List [])
+    ; ("by_semantic_outcome", `List [])
     ; ("failure_categories", `List [])
     ; ("hourly_trend", `List [])
     ])
@@ -221,6 +243,9 @@ let aggregate ?(n = 5000) ?window_hours () : Yojson.Safe.t =
   let tool_choice_stats : (string, int ref * int ref) Hashtbl.t =
     Hashtbl.create 8
   in
+  let semantic_outcome_stats : (string, int ref * int ref) Hashtbl.t =
+    Hashtbl.create 8
+  in
   (* error category -> count *)
   let failure_cats : (string, int ref) Hashtbl.t = Hashtbl.create 32 in
   List.iter (fun record ->
@@ -233,12 +258,8 @@ let aggregate ?(n = 5000) ?window_hours () : Yojson.Safe.t =
       Safe_ops.json_string_opt "keeper" record
       |> Option.value ~default:"unknown"
     in
-    let ok = match record with
-      | `Assoc fields ->
-        (match List.assoc_opt "success" fields with
-         | Some (`Bool b) -> b | _ -> false)
-      | _ -> false
-    in
+    let ok = tool_success_of_record record in
+    let semantic_outcome = semantic_outcome_of_record record ~ok in
     let dur = match record with
       | `Assoc fields ->
         (match List.assoc_opt "duration_ms" fields with
@@ -306,6 +327,7 @@ let aggregate ?(n = 5000) ?window_hours () : Yojson.Safe.t =
     update_rate_table thinking_mode_stats (thinking_mode_of_record record) ok;
     update_rate_table tool_choice_stats
       (bucket_key record "tool_choice" ~default:"unknown") ok;
+    update_rate_table semantic_outcome_stats semantic_outcome ok;
     (* failure category *)
     if not ok then begin
       let output =
@@ -323,7 +345,10 @@ let aggregate ?(n = 5000) ?window_hours () : Yojson.Safe.t =
            | _ -> "")
         | _ -> ""
       in
-      let cat = classify_failure_output output
+      let cat =
+        match semantic_outcome with
+        | "policy_denied" | "structured_error" -> semantic_outcome
+        | _ -> classify_failure_output output
       in
       let r = match Hashtbl.find_opt failure_cats cat with
         | Some r -> r
@@ -375,6 +400,9 @@ let aggregate ?(n = 5000) ?window_hours () : Yojson.Safe.t =
   let by_tool_choice =
     render_rate_table ~field:"name" tool_choice_stats
   in
+  let by_semantic_outcome =
+    render_rate_table ~field:"name" semantic_outcome_stats
+  in
   let failure_categories =
     Hashtbl.fold (fun cat r acc ->
       (!r, `Assoc [("category", `String cat); ("count", `Int !r)]) :: acc
@@ -423,6 +451,7 @@ let aggregate ?(n = 5000) ?window_hours () : Yojson.Safe.t =
     ("by_lane", `List by_lane);
     ("by_thinking_mode", `List by_thinking_mode);
     ("by_tool_choice", `List by_tool_choice);
+    ("by_semantic_outcome", `List by_semantic_outcome);
     ("failure_categories", `List failure_categories);
     ("hourly_trend", `List hourly);
   ])

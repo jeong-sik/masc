@@ -309,6 +309,28 @@ let blob_aware_output_json (output : string) : Yojson.Safe.t =
         ]
   | Tool_output.Inline _ -> `String output
 
+let semantic_outcome_of_output ~success output =
+  match Safe_ops.parse_json_safe
+          ~context:"Keeper_tool_call_log.semantic_outcome"
+          output
+  with
+  | Ok json ->
+      let ok_field = Safe_ops.json_bool_opt "ok" json in
+      let error_field =
+        Safe_ops.json_string_opt "error" json |> Option.map String.trim
+      in
+      (match error_field with
+       | Some "tool_not_allowed" -> (false, "policy_denied")
+       | Some error when error <> "" -> (false, "structured_error")
+       | _ ->
+         (match ok_field with
+          | Some false -> (false, "structured_error")
+          | Some true -> (success, if success then "success" else "tool_failure")
+          | None ->
+            if success then (true, "success") else (false, "tool_failure")))
+  | Error _ ->
+      if success then (true, "success") else (false, "tool_failure")
+
 let input_to_json (input : Yojson.Safe.t) : Yojson.Safe.t =
   (* Per-leaf sentinel-aware truncation. Previously
      [String.sub (Yojson.Safe.to_string input) 0 (max - suffix)] chopped
@@ -519,6 +541,9 @@ let log_call ~keeper_name ~tool_name ~(input : Yojson.Safe.t)
       let safe_input = input_to_json (Observability_redact.redact_json_value input) in
       let safe_output = Observability_redact.redact_preview ~max_len:max_output_len output_text in
       let output_json = blob_aware_output_json safe_output in
+      let semantic_success, semantic_outcome =
+        semantic_outcome_of_output ~success safe_output
+      in
       let model_opt = optional_model (Some model) in
       let runtime_contract =
         Keeper_runtime_contract.runtime_contract_json_from_fields
@@ -563,6 +588,8 @@ let log_call ~keeper_name ~tool_name ~(input : Yojson.Safe.t)
            ; ("input", safe_input)
            ; ("output", output_json)
            ; ("success", `Bool success)
+           ; ("semantic_success", `Bool semantic_success)
+           ; ("semantic_outcome", `String semantic_outcome)
            ; ("duration_ms", `Float duration_ms)
            ; ("runtime_contract", runtime_contract)
            ; ("action_radius", action_radius)

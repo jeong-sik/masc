@@ -36,6 +36,7 @@ const LazyOperations = lazy(async () => ({ default: (await import('./control')).
 const LazyConnectors = lazy(async () => ({ default: (await import('./connector-status')).ConnectorStatusPanel }))
 const LazyLabSurface = lazy(async () => ({ default: (await import('./lab')).Lab }))
 const LazyLogViewer = lazy(async () => ({ default: (await import('./logs')).LogViewer }))
+const LazyIdeShell = lazy(async () => ({ default: (await import('./ide/ide-shell')).IdeShell }))
 
 function lazyTabFallback(label: string) {
   return html`<${LoadingState}>${label} 불러오는 중...<//>`
@@ -501,6 +502,12 @@ function TabContent() {
       return html`
         <${Suspense} fallback=${lazyTabFallback('실험실 화면')}>
           <${LazyLabSurface} />
+        <//>
+      `
+    case 'code':
+      return html`
+        <${Suspense} fallback=${lazyTabFallback('코드 IDE')}>
+          <${LazyIdeShell} />
         <//>
       `
     case 'logs':

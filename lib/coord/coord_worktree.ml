@@ -83,18 +83,44 @@ let policy_string_array_of_line ~key line =
       in
       Some items
 
-(* SSOT path resolution: canonical config root is [<base_path>/.masc/config/]
-   (same primitive Config_dir_resolver.path_from_local_masc uses via
-   Common.masc_dir_from_base_path). The legacy [<base_path>/config/] form is
-   retained as a secondary lookup for older deployments. Reading order:
-   canonical first, legacy fallback only when canonical is absent. *)
-let load_git_clone_policy ~base_path =
+let git_clone_policy_paths ~base_path =
   let canonical =
     Filename.concat
       (Common.masc_dir_from_base_path ~base_path |> fun d -> Filename.concat d "config")
       "tool_policy.toml"
   in
   let legacy = Filename.concat (Filename.concat base_path "config") "tool_policy.toml" in
+  canonical, legacy
+
+let parse_git_clone_policy_content content =
+  let rec loop in_git_clone allowed denied = function
+    | [] -> allowed, denied
+    | raw_line :: rest ->
+        let line = String.trim raw_line in
+        if line = "" || String.starts_with ~prefix:"#" line then
+          loop in_git_clone allowed denied rest
+        else if String.length line >= 2 && line.[0] = '[' && line.[String.length line - 1] = ']'
+        then
+          loop (String.equal line "[git_clone]") allowed denied rest
+        else if not in_git_clone then
+          loop in_git_clone allowed denied rest
+        else
+          let allowed =
+            match policy_string_array_of_line ~key:"allowed_orgs" line with
+            | Some items -> items
+            | None -> allowed
+          in
+          let denied =
+            match policy_string_array_of_line ~key:"denied_repos" line with
+            | Some items -> items
+            | None -> denied
+          in
+          loop in_git_clone allowed denied rest
+  in
+  loop false [] [] (String.split_on_char '\n' content)
+
+let load_git_clone_policy_result ~base_path =
+  let canonical, legacy = git_clone_policy_paths ~base_path in
   let read_or_empty p =
     match Safe_ops.read_file_safe p with
     | Error _ -> None
@@ -106,33 +132,28 @@ let load_git_clone_policy ~base_path =
     | None -> read_or_empty legacy
   in
   match content_opt with
-  | None -> [], []
-  | Some content ->
-      let rec loop in_git_clone allowed denied = function
-        | [] -> allowed, denied
-        | raw_line :: rest ->
-            let line = String.trim raw_line in
-            if line = "" || String.starts_with ~prefix:"#" line then
-              loop in_git_clone allowed denied rest
-            else if String.length line >= 2 && line.[0] = '[' && line.[String.length line - 1] = ']'
-            then
-              loop (String.equal line "[git_clone]") allowed denied rest
-            else if not in_git_clone then
-              loop in_git_clone allowed denied rest
-            else
-              let allowed =
-                match policy_string_array_of_line ~key:"allowed_orgs" line with
-                | Some items -> items
-                | None -> allowed
-              in
-              let denied =
-                match policy_string_array_of_line ~key:"denied_repos" line with
-                | Some items -> items
-                | None -> denied
-              in
-              loop in_git_clone allowed denied rest
-      in
-      loop false [] [] (String.split_on_char '\n' content)
+  | None ->
+      Error
+        (Printf.sprintf
+           "tool policy config not found at %s or %s"
+           canonical legacy)
+  | Some content -> Ok (parse_git_clone_policy_content content)
+
+(* SSOT path resolution: canonical config root is [<base_path>/.masc/config/]
+   (same primitive Config_dir_resolver.path_from_local_masc uses via
+   Common.masc_dir_from_base_path). The legacy [<base_path>/config/] form is
+   retained as a secondary lookup for older deployments. Reading order:
+   canonical first, legacy fallback only when canonical is absent. *)
+let load_git_clone_policy ~base_path =
+  match load_git_clone_policy_result ~base_path with
+  | Ok policy -> policy
+  | Error _ -> [], []
+
+let valid_github_org_slug org =
+  let valid_org_char c =
+    (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c = '-'
+  in
+  org <> "" && Seq.for_all valid_org_char (String.to_seq org)
 
 let extract_github_org_repo url =
   let lc = String.lowercase_ascii (String.trim url) in
@@ -167,7 +188,8 @@ let extract_github_org_repo url =
         else rest
       in
       match String.split_on_char '/' stripped with
-      | [ org; repo ] when org <> "" && repo <> "" -> Some (org ^ "/" ^ repo)
+      | [ org; repo ] when valid_github_org_slug org && repo <> "" ->
+          Some (org ^ "/" ^ repo)
       | _ -> None
 
 let extract_github_org url =
@@ -179,32 +201,32 @@ let extract_github_org url =
   | None -> None
 
 let validate_clone_origin_url ~base_path url =
-  let allowed_orgs, denied_repos = load_git_clone_policy ~base_path in
-  let denied_check () =
-    match extract_github_org_repo url with
-    | Some org_repo when List.mem org_repo denied_repos ->
-        Error (Printf.sprintf "Repository '%s' is in the denied list" org_repo)
-    | _ -> Ok ()
-  in
-  if allowed_orgs = [] then
-    (* Empty allowed_orgs = skip org check. Per config/tool_policy.toml,
-       this matches operator intent: the keeper may clone any repo
-       reachable through the operator's gh credential, subject to
-       denied_repos. SSOT alignment with [Tool_code_write.validate_clone_url]
-       (#11951) and [Gh_command_validation.validate_gh_command] which
-       both treat [allowed_orgs = []] as "policy not configured / skip".
-       Follow-up to #11830 — second site that PR #11951 missed. *)
-    denied_check ()
-  else
-    match extract_github_org url with
-    | None ->
-        Error (Printf.sprintf "Cannot parse GitHub org from URL: %s" url)
-    | Some org when not (List.mem org allowed_orgs) ->
-        Error
-          (Printf.sprintf
-             "GitHub org '%s' not in allowed list: %s. Use the actual GitHub owner from the clone URL; do not infer an org from local workspace path segments."
-             org (String.concat ", " allowed_orgs))
-    | Some _ -> denied_check ()
+  match load_git_clone_policy_result ~base_path with
+  | Error msg ->
+      Error (Printf.sprintf "Git clone policy unavailable: %s" msg)
+  | Ok (allowed_orgs, denied_repos) ->
+      let allowed_lc = List.map String.lowercase_ascii allowed_orgs in
+      let denied_lc = List.map String.lowercase_ascii denied_repos in
+      match extract_github_org_repo url with
+      | None ->
+          Error (Printf.sprintf "Cannot parse GitHub org/repo from URL: %s" url)
+      | Some org_repo ->
+          if List.mem org_repo denied_lc then
+            Error (Printf.sprintf "Repository '%s' is in the denied list" org_repo)
+          else
+            match String.split_on_char '/' org_repo with
+            | _org :: _ when allowed_lc = [] ->
+                (* Explicit empty allowed_orgs means "any supported GitHub org",
+                   still bounded by URL parsing and denied_repos. *)
+                Ok ()
+            | org :: _ when List.mem org allowed_lc -> Ok ()
+            | org :: _ ->
+                Error
+                  (Printf.sprintf
+                     "GitHub org '%s' not in allowed list: %s. Use the actual GitHub owner from the clone URL; do not infer an org from local workspace path segments."
+                     org (String.concat ", " allowed_orgs))
+            | [] ->
+                Error (Printf.sprintf "Cannot parse GitHub org/repo from URL: %s" url)
 
 (** Check if directory is a git repository - delegates to Coord_git *)
 let is_git_repo config =

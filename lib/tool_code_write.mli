@@ -162,11 +162,14 @@ val extract_github_org_repo : string -> string option
 val validate_clone_url :
   base_path:string -> string -> (unit, string) result
 (** [validate_clone_url ~base_path url] validates the URL
-    against the policy at
-    [{base_path}/config/tool_policy.toml]:
+    against the resolved [tool_policy.toml] for [base_path]:
 
-    + Empty allowed-orgs list -> [Error] (no clones permitted
-      until configured).
+    + Missing/unreadable policy -> [Error] (clone policy fails
+      closed).
+    + URL must parse as a supported GitHub ["org/repo"] clone URL,
+      even when the allowlist is explicitly empty.
+    + Empty allowed-orgs list in a loaded policy -> skip org allowlist
+      matching, still subject to URL parsing and repo denylist.
     + Org from {!extract_github_org} not in
       [git_clone.allowed_orgs] -> [Error].
     + ["org/repo"] from {!extract_github_org_repo} present in

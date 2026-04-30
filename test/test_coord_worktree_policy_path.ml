@@ -14,6 +14,16 @@ open Alcotest
 
 module CW = Coord_worktree
 
+let contains ~needle haystack =
+  let hlen = String.length haystack in
+  let nlen = String.length needle in
+  let rec loop i =
+    if i + nlen > hlen then false
+    else if String.sub haystack i nlen = needle then true
+    else loop (i + 1)
+  in
+  nlen = 0 || loop 0
+
 let with_temp_dir prefix f =
   let dir = Filename.temp_file prefix "" in
   Sys.remove dir;
@@ -38,9 +48,19 @@ let rec mkdir_p dir =
 let write_file path content =
   Out_channel.with_open_bin path (fun oc -> output_string oc content)
 
-let policy_with_orgs orgs =
+let policy_with_orgs ?(denied_repos = []) orgs =
   let arr = orgs |> List.map (Printf.sprintf "%S") |> String.concat ", " in
-  Printf.sprintf "[git_clone]\nallowed_orgs = [%s]\n" arr
+  let denied =
+    denied_repos |> List.map (Printf.sprintf "%S") |> String.concat ", "
+  in
+  Printf.sprintf
+    "[git_clone]\nallowed_orgs = [%s]\ndenied_repos = [%s]\n"
+    arr denied
+
+let write_canonical_policy base content =
+  let dir = Filename.concat (Filename.concat base ".masc") "config" in
+  mkdir_p dir;
+  write_file (Filename.concat dir "tool_policy.toml") content
 
 let test_canonical_masc_config () =
   with_temp_dir "coord-worktree-policy-canon" @@ fun base ->
@@ -82,6 +102,52 @@ let test_neither_present () =
   check (list string) "no policy file → empty allowed" [] allowed;
   check (list string) "no policy file → empty denied" [] denied
 
+let test_validate_missing_policy_fails_closed () =
+  with_temp_dir "coord-worktree-policy-validate-none" @@ fun base ->
+  match CW.validate_clone_origin_url ~base_path:base
+    "https://github.com/jeong-sik/masc-mcp.git" with
+  | Error reason ->
+      check bool "mentions unavailable policy" true
+        (contains ~needle:"Git clone policy unavailable" reason)
+  | Ok () -> fail "missing policy must fail closed"
+
+let test_validate_empty_allowed_allows_supported_github () =
+  with_temp_dir "coord-worktree-policy-validate-open" @@ fun base ->
+  write_canonical_policy base (policy_with_orgs []);
+  (check (result unit string)) "explicit empty allowed_orgs allows GitHub"
+    (Ok ())
+    (CW.validate_clone_origin_url ~base_path:base
+       "https://github.com/other-org/repo.git")
+
+let test_validate_empty_allowed_rejects_non_github () =
+  with_temp_dir "coord-worktree-policy-validate-nongh" @@ fun base ->
+  write_canonical_policy base (policy_with_orgs []);
+  match CW.validate_clone_origin_url ~base_path:base
+    "https://gitlab.com/other-org/repo.git" with
+  | Error _ -> ()
+  | Ok () -> fail "non-GitHub URL must be rejected even with empty allowed_orgs"
+
+let test_validate_empty_allowed_applies_denied_repos () =
+  with_temp_dir "coord-worktree-policy-validate-denied" @@ fun base ->
+  write_canonical_policy base
+    (policy_with_orgs ~denied_repos:[ "jeong-sik/me" ] []);
+  match CW.validate_clone_origin_url ~base_path:base
+    "https://github.com/jeong-sik/me.git" with
+  | Error reason ->
+      check bool "mentions denied list" true
+        (contains ~needle:"denied list" reason)
+  | Ok () -> fail "denied repo must be rejected"
+
+let test_validate_allowed_org_rejects_other_org () =
+  with_temp_dir "coord-worktree-policy-validate-allowed" @@ fun base ->
+  write_canonical_policy base (policy_with_orgs [ "jeong-sik" ]);
+  match CW.validate_clone_origin_url ~base_path:base
+    "https://github.com/other-org/repo.git" with
+  | Error reason ->
+      check bool "mentions allowed list" true
+        (contains ~needle:"not in allowed list" reason)
+  | Ok () -> fail "org outside non-empty allowed_orgs must be rejected"
+
 let () =
   Alcotest.run "coord_worktree policy path"
     [
@@ -91,5 +157,18 @@ let () =
           test_case "legacy <base>/config/" `Quick test_legacy_config_dir;
           test_case "canonical takes priority" `Quick test_canonical_takes_priority;
           test_case "neither path present" `Quick test_neither_present;
+        ] );
+      ( "validate_clone_origin_url",
+        [
+          test_case "missing policy fails closed" `Quick
+            test_validate_missing_policy_fails_closed;
+          test_case "empty allowed_orgs allows supported GitHub" `Quick
+            test_validate_empty_allowed_allows_supported_github;
+          test_case "empty allowed_orgs rejects non-GitHub" `Quick
+            test_validate_empty_allowed_rejects_non_github;
+          test_case "empty allowed_orgs applies denied repos" `Quick
+            test_validate_empty_allowed_applies_denied_repos;
+          test_case "non-empty allowed_orgs rejects other org" `Quick
+            test_validate_allowed_org_rejects_other_org;
         ] );
     ]

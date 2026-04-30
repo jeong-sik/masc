@@ -409,7 +409,7 @@ let resolve_keeper_read_path ~(config : Coord.config)
           ~labels:[ ("kind", "out_of_roots") ] ();
         Error
           (Printf.sprintf "path_not_found_under_allowed_roots: %s"
-             target_norm)
+             raw)
       end
 
 let process_status_to_json (st : Unix.process_status) : Yojson.Safe.t =

@@ -111,6 +111,31 @@ Spec == Init /\ [][Next]_vars
 \* enumerate exhaustively. Wired in via the .cfg CONSTRAINT.
 BoundedEntries == Len(entries) <= 3
 
+\* ── Bug model (RFC-Q2-8) ────────────────────────────────────────
+\*
+\* Models the bug class where Envelope.make computes prev_hash
+\* incorrectly — uses GenesisHash for a non-genesis entry (e.g.
+\* race with a concurrent appender, or a refactor that lost the
+\* chain-link computation). The clean ChainIntegrity invariant
+\* catches this: every i >= 2 must have prev_hash = HashOf(prev).
+
+AppendEntryWithStaleHash(new_id, cat) ==
+    /\ new_id \notin used_ids
+    /\ Len(entries) > 0  \* genesis case is fine; bug is for follow-on entries
+    /\ used_ids' = used_ids \cup {new_id}
+    /\ entries' =
+            Append(entries,
+                   [ id |-> new_id,
+                     category |-> cat,
+                     prev_hash |-> GenesisHash ])  \* stale: should be HashOf(prev)
+
+NextBuggy ==
+    \/ Next
+    \/ \E new_id \in Ids, cat \in Categories :
+            AppendEntryWithStaleHash(new_id, cat)
+
+SpecBuggy == Init /\ [][NextBuggy]_vars
+
 THEOREM Spec => []TypeOK
 THEOREM Spec => []IdsUnique
 THEOREM Spec => []ChainIntegrity

@@ -1060,8 +1060,8 @@ module Kimi_cli_transport_local = struct
     if !warned || tools = [] then ()
     else (
       warned := true;
-      Eio.traceln
-        "[warn] kimi_cli print mode ignores OAS req.tools. \
+      Log.Misc.warn
+        "kimi_cli print mode ignores OAS req.tools. \
          Provider-native built-in tools and configured MCP servers remain \
          available; external OAS tool callbacks require a future wire-mode \
          transport.")

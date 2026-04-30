@@ -1185,7 +1185,12 @@ let handle_start state request reqd =
                     ?previous_attempt
                     ~observed_state
                     ~write_attempt:(write_attempt_record ~base_path ~id)
-                    ~start_shell:(fun () -> ignore (Sys.command cmd))
+                    ~start_shell:(fun () ->
+                        let exit_code = Sys.command cmd in
+                        if exit_code <> 0 then
+                          Log.Misc.warn
+                            "[Sidecar] shell start failed with exit=%d (cmd=%s)"
+                            exit_code cmd)
                     desired
                 in
                 respond_json request reqd ~status:`Accepted

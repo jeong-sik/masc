@@ -2,6 +2,8 @@ open Repo_manager_types
 
 let ( let* ) = Result.bind
 
+let logged_mapping_errors : (string, unit) Hashtbl.t = Hashtbl.create 4
+
 let mappings_toml_path base_path =
   Filename.concat base_path ".masc/config/keeper_repo_mappings.toml"
 
@@ -88,7 +90,13 @@ let allowed_repositories ~keeper_id ~base_path =
     mapping is not an error. *)
 let credentials_for_keeper ~base_path ~keeper_id =
   match find_mapping ~base_path keeper_id with
-  | Error _ -> Ok []
+  | Error msg ->
+      if not (String.starts_with ~prefix:"No mapping found" msg) then
+        Log.Misc.warn
+          "[KeeperRepoMapping] credentials_for_keeper: mapping store error \
+           for keeper %s (error: %s)"
+          keeper_id msg;
+      Ok []
   | Ok mapping ->
       let* repos = Repo_store.load_all ~base_path in
       let mapped_repos =
@@ -128,7 +136,17 @@ let credentials_for_keeper ~base_path ~keeper_id =
 
 let is_allowed ~keeper_id ~repository_id ~base_path =
   match find_mapping ~base_path keeper_id with
-  | Error _ -> true
+  | Error msg ->
+      if not (String.starts_with ~prefix:"No mapping found" msg)
+         && not (Hashtbl.mem logged_mapping_errors keeper_id)
+      then begin
+        Hashtbl.add logged_mapping_errors keeper_id ();
+        Log.Misc.warn
+          "[KeeperRepoMapping] is_allowed: mapping store error for keeper %s \
+           — access control bypassed (error: %s)"
+          keeper_id msg
+      end;
+      true
   | Ok mapping ->
       List.exists
         (fun id -> String.equal id repository_id || String.equal id "*")
@@ -172,7 +190,13 @@ let save_mapping ~base_path mapping =
 
 let apply_mapping ~keeper_id ~base_path ~repositories =
   match find_mapping ~base_path keeper_id with
-  | Error _ -> repositories
+  | Error msg ->
+      if not (String.starts_with ~prefix:"No mapping found" msg) then
+        Log.Misc.warn
+          "[KeeperRepoMapping] apply_mapping: mapping store error for \
+           keeper %s — returning unfiltered repositories (error: %s)"
+          keeper_id msg;
+      repositories
   | Ok mapping ->
       if List.exists (String.equal "*") mapping.repository_ids then
         repositories
@@ -203,7 +227,12 @@ let path_under_repo ~base_path repo path =
     if the path is not under any registered repository. *)
 let repository_id_of_path ~base_path ~path =
   match Repo_store.load_all ~base_path with
-  | Error _ -> None
+  | Error msg ->
+      Log.Misc.warn
+        "[KeeperRepoMapping] repository_id_of_path: repo store load failed \
+         for path %s (error: %s)"
+        path msg;
+      None
   | Ok repos -> (
       match
         List.find_opt (fun repo -> path_under_repo ~base_path repo path) repos

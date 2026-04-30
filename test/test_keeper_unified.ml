@@ -5164,6 +5164,32 @@ let test_actionable_tool_contract_rejects_claim_context_when_already_claimed () 
        ~actionable_signal_context:true
        ~tool_names:[ "keeper_task_claim" ])
 
+let test_actionable_tool_contract_rejects_stay_silent_when_already_claimed () =
+  let check_violation label tool_names =
+    match
+      KTD.actionable_tool_contract_violation_reason
+        ~claim_context_allowed:false
+        ~actionable_signal_context:true
+        ~tool_names
+    with
+    | Some reason ->
+        check bool (label ^ " mentions owned active task") true
+          (contains_substring reason "owned active task");
+        check bool (label ^ " mentions execution progress") true
+          (contains_substring reason "without execution progress")
+    | None -> fail (label ^ ": expected owned-task silence violation")
+  in
+  check_violation "stay_silent alone" [ "keeper_stay_silent" ];
+  check_violation "stay_silent plus passive"
+    [ "keeper_stay_silent"; "keeper_tasks_list"; "masc_status" ];
+  check_violation "claim plus passive"
+    [ "keeper_task_claim"; "keeper_tasks_list" ];
+  check (option string) "task completion still satisfies owned task" None
+    (KTD.actionable_tool_contract_violation_reason
+       ~claim_context_allowed:false
+       ~actionable_signal_context:true
+       ~tool_names:[ "keeper_task_done" ])
+
 let test_claim_tool_classification_covers_masc_claim_task () =
   check bool "keeper claim is claim tool" true
     (KTD.is_claim_tool_name "keeper_task_claim");
@@ -6538,6 +6564,10 @@ let () =
             "actionable signal rejects claim context after ownership"
             `Quick
             test_actionable_tool_contract_rejects_claim_context_when_already_claimed;
+          test_case
+            "actionable signal rejects stay_silent after ownership"
+            `Quick
+            test_actionable_tool_contract_rejects_stay_silent_when_already_claimed;
           test_case "claim tool classification covers masc claim task" `Quick
             test_claim_tool_classification_covers_masc_claim_task;
           test_case "actionable signal allows execution tools" `Quick

@@ -15,8 +15,10 @@
     Session kinds:
     [Observer] sessions receive dashboard snapshots but not agent
     coordination traffic.  [Coordinator] sessions receive heartbeats
-    and task events but not dashboard snapshots.  [broadcast_to All]
-    reaches every session (backward-compatible with the old [broadcast]).
+    and task events but not dashboard snapshots.  [Presence] sessions
+    receive ephemeral liveness/awareness updates through the bufferless
+    presence channel.  [broadcast_to All] reaches every durable session
+    (backward-compatible with the old [broadcast]).
 
     Signal handler safety: registry operations avoid [Eio.Mutex] and rely on
     immutable snapshots plus CAS, so readers can inspect counts without
@@ -37,12 +39,14 @@ let run_test_hook hook =
 type session_kind =
   | Observer     (** Dashboard / read-only viewers *)
   | Coordinator  (** MCP agent connections *)
+  | Presence     (** Ephemeral liveness / awareness channel *)
 
 (** Broadcast targeting selector. *)
 type broadcast_target =
   | All          (** Every connected session (backward-compatible default) *)
   | Observers    (** Only [Observer] sessions *)
   | Coordinators (** Only [Coordinator] sessions *)
+  | Presence_only (** Only [Presence] sessions; never replay-buffered *)
 
 (** Maximum concurrent SSE clients -- prevents connection storm on restart.
     Increased from 50 to 200 to handle Claude.ai MCP client reconnections. *)
@@ -92,6 +96,7 @@ type session_snapshot = {
 let session_kind_to_string = function
   | Observer -> "observer"
   | Coordinator -> "coordinator"
+  | Presence -> "presence"
 
 let take n xs =
   let rec loop acc remaining items =
@@ -115,6 +120,7 @@ let sync_transport_snapshot () =
      compounds with the fan-out itself. *)
   let observer = ref 0 in
   let coordinator = ref 0 in
+  let presence = ref 0 in
   let queue_sum = ref 0 in
   let max_queue_depth = ref 0 in
   let sessions_acc = ref [] in
@@ -125,7 +131,8 @@ let sync_transport_snapshot () =
     max_queue_depth := max !max_queue_depth queue_depth;
     (match client.kind with
      | Observer -> incr observer
-     | Coordinator -> incr coordinator);
+     | Coordinator -> incr coordinator
+     | Presence -> incr presence);
     incr total_sessions_acc;
     sessions_acc :=
       {
@@ -163,6 +170,7 @@ let sync_transport_snapshot () =
   in
   Transport_metrics.set_sse_sessions ~kind:"observer" !observer;
   Transport_metrics.set_sse_sessions ~kind:"coordinator" !coordinator;
+  Transport_metrics.set_sse_sessions ~kind:"presence" !presence;
   Transport_metrics.set_sse_queue_snapshot ~avg_depth
     ~max_depth:!max_queue_depth ~hot_sessions
 
@@ -446,9 +454,10 @@ let push_timeout_s = 5.0
 (** Test whether a client matches a broadcast target. *)
 let client_matches_target target (client : client) =
   match target with
-  | All -> true
+  | All -> client.kind <> Presence
   | Observers -> client.kind = Observer
   | Coordinators -> client.kind = Coordinator
+  | Presence_only -> client.kind = Presence
 
 (** {1 External Subscriber Hook}
 
@@ -650,14 +659,16 @@ let reap_dead_external_subscribers () =
 
     After SSE fan-out, external subscribers (gRPC streams, etc.) are
     also notified with the same formatted event string. *)
-let broadcast_impl target json =
+let broadcast_impl ?(buffer = true) ?(notify_external = true)
+    ?(event_type = "message") target json =
   let t0 = Time_compat.now () in
   let data = Yojson.Safe.to_string json in
   (* Atomically allocate the event id so two concurrent broadcasts
      cannot observe the same peeked counter value and emit duplicates. *)
   let current_event_id = next_id () in
-  let event = format_event ~id:current_event_id ~event_type:"message" data in
-  buffer_event current_event_id event;
+  let event = format_event ~id:current_event_id ~event_type data in
+  if buffer then
+    buffer_event current_event_id event;
   (* The [SMap.t] returned by [Atomic.get] is immutable
      (Lockfree_atomic.update_with_commit replaces it wholesale on
      subscribe/unsubscribe), so we iterate it directly with [SMap.iter].
@@ -667,6 +678,7 @@ let broadcast_impl target json =
     | All -> "all"
     | Observers -> "observers"
     | Coordinators -> "coordinators"
+    | Presence_only -> "presence"
   in
   let clients_entries = (Atomic.get clients).entries in
   let failed = ref [] in
@@ -709,8 +721,10 @@ let broadcast_impl target json =
   let elapsed = Time_compat.now () -. t0 in
   Transport_metrics.observe_broadcast_duration ~target:target_label elapsed;
   sync_transport_snapshot ();
-  (* Notify external subscribers (gRPC streams, etc.) *)
-  notify_external_subscribers event
+  (* Notify external subscribers (gRPC streams, etc.) for durable broadcast
+     traffic only. Presence is intentionally live-only and bufferless. *)
+  if notify_external then
+    notify_external_subscribers event
 
 (** Broadcast event to all connected clients (backward-compatible). *)
 let broadcast json = broadcast_impl All json
@@ -720,6 +734,14 @@ let broadcast json = broadcast_impl All json
     - [Observers]: dashboard / read-only viewers only
     - [Coordinators]: MCP agent sessions only *)
 let broadcast_to target json = broadcast_impl target json
+
+(** Broadcast an ephemeral presence/awareness event. Presence events are live
+    only: they are not replay-buffered and do not fan out through generic
+    external subscribers. Durable consumers continue to receive the caller's
+    normal [broadcast] / [broadcast_to] emission. *)
+let broadcast_presence json =
+  broadcast_impl ~buffer:false ~notify_external:false ~event_type:"presence"
+    Presence_only json
 
 (** Send a JSON-RPC message to a specific session.
     Enqueues the event in the session's stream for asynchronous delivery. *)

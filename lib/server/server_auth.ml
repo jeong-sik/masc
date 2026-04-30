@@ -92,7 +92,8 @@ let observer_sse_query_token_from_request request =
   in
   match request.Httpun.Request.meth with
   | `GET
-    when observer_stream_requested && String.equal path "/mcp" ->
+    when (observer_stream_requested && String.equal path "/mcp")
+         || String.equal path "/events/presence" ->
       trim_opt (query_param request "token")
   | _ -> None
 
@@ -211,7 +212,7 @@ let verify_mcp_observer_stream_auth ~base_path request =
         | None ->
             Error
               "Authentication required. Use 'Authorization: Bearer <token>' header \
-               or 'token' query param for the observer SSE stream."
+               or 'token' query param for the observer/presence SSE stream."
         | Some token -> (
             match resolve_agent_name_for_auth_raw ~base_path request ~token:(Some token) with
             | Error err -> Error (Types.masc_error_to_string err)

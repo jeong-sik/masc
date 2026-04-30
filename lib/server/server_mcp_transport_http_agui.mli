@@ -70,3 +70,17 @@ val handle_ag_ui_events :
     while this handler uses a local shadow to keep the AG-UI fiber
     independent of header-module evolution.  A future "let's unify"
     refactor must touch the duplicate explicitly. *)
+
+val handle_presence_events :
+  deps:Server_mcp_transport_http_types.deps ->
+  Httpun.Request.t ->
+  Httpun.Reqd.t ->
+  unit
+(** [handle_presence_events ~deps request reqd] handles
+    [GET /events/presence].
+
+    The stream registers a {!Sse.Presence} session under a namespaced
+    session id so the dashboard can keep its durable [/mcp] observer
+    stream open while subscribing to live-only presence traffic.
+    Presence events are not replayed from {!Sse.get_events_after};
+    reconnecting clients receive only future liveness/awareness frames. *)

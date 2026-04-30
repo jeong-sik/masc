@@ -83,6 +83,7 @@ describe('decodeTransportHealthData', () => {
     expect(result!.summary.external_fanout_targets).toBe(0)
     // sse defaults
     expect(result!.sse.sessions_total).toBe(0)
+    expect(result!.sse.sessions_presence).toBe(0)
     expect(result!.sse.relay_queue_depth).toBe(0)
     expect(result!.sse.relay_retry_total).toBe(0)
     expect(result!.sse.relay_drop_total).toBe(0)
@@ -96,6 +97,7 @@ describe('decodeTransportHealthData', () => {
     expect(result!.webrtc.signaling_mode).toBe('unknown')
     // streamable_http defaults
     expect(result!.streamable_http.default_transport).toBe('unknown')
+    expect(result!.streamable_http.presence_stream).toBe('/events/presence')
     // http2 defaults
     expect(result!.http2.listener_mode).toBe('unknown')
     // cluster defaults
@@ -121,7 +123,8 @@ describe('decodeTransportHealthData', () => {
       sse: {
         sessions_observer: 2,
         sessions_coordinator: 1,
-        sessions_total: 3,
+        sessions_presence: 1,
+        sessions_total: 4,
         external_subscribers: 5,
         broadcast_avg_seconds: 0.5,
         broadcast_count: 100,
@@ -173,6 +176,7 @@ describe('decodeTransportHealthData', () => {
       streamable_http: {
         endpoint: '/mcp',
         observer_stream: '/mcp?sse_kind=observer',
+        presence_stream: '/events/presence',
         managed_endpoint: '/mcp/managed',
         operator_endpoint: '/mcp/operator',
         delete_endpoint: '/mcp',
@@ -204,7 +208,8 @@ describe('decodeTransportHealthData', () => {
     const result = decodeTransportHealthData(raw)
     expect(result!.summary.primary_path).toBe('grpc')
     expect(result!.summary.recent_messages).toBe(42)
-    expect(result!.sse.sessions_total).toBe(3)
+    expect(result!.sse.sessions_total).toBe(4)
+    expect(result!.sse.sessions_presence).toBe(1)
     expect(result!.sse.relay_queue_depth).toBe(4)
     expect(result!.sse.relay_retry_total).toBe(6)
     expect(result!.sse.relay_drop_total).toBe(3)
@@ -216,6 +221,7 @@ describe('decodeTransportHealthData', () => {
     expect(result!.websocket.mode).toBe('relay')
     expect(result!.webrtc.ice_server_count).toBe(2)
     expect(result!.streamable_http.supports_post).toBe(true)
+    expect(result!.streamable_http.presence_stream).toBe('/events/presence')
     expect(result!.http2.multiplex_ready).toBe(true)
     expect(result!.cluster.total_units).toBe(5)
     expect(result!.cluster.live_agents).toBe(3)

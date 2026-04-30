@@ -160,6 +160,48 @@ let test_broadcast_equals_broadcast_to_all () =
   Sse.unregister "s-eq-obs";
   Sse.unregister "s-eq-coord"
 
+let test_broadcast_all_excludes_presence_sessions () =
+  reset ();
+  ignore (Sse.register ~kind:Presence "s-all-presence" ~last_event_id:0);
+  ignore (Sse.register ~kind:Coordinator "s-all-coord-only" ~last_event_id:0);
+  Sse.broadcast (`Assoc [("durable", `Bool true)]);
+  let got_presence = Sse.try_pop "s-all-presence" in
+  let got_coord = Sse.try_pop "s-all-coord-only" in
+  Alcotest.(check bool) "presence did not get durable all" true
+    (got_presence = None);
+  Alcotest.(check bool) "coordinator got durable all" true (got_coord <> None);
+  Sse.unregister "s-all-presence";
+  Sse.unregister "s-all-coord-only"
+
+let test_broadcast_presence_is_live_only () =
+  reset ();
+  let original_buffer = Atomic.get Sse.event_buffer in
+  Fun.protect
+    ~finally:(fun () ->
+      Atomic.set Sse.event_buffer original_buffer;
+      Sse.unregister "s-presence";
+      Sse.unregister "s-observer")
+    (fun () ->
+      Atomic.set Sse.event_buffer [];
+      ignore (Sse.register ~kind:Presence "s-presence" ~last_event_id:0);
+      ignore (Sse.register ~kind:Observer "s-observer" ~last_event_id:0);
+      let before_id = Sse.current_id () in
+      Sse.broadcast_presence (`Assoc [("type", `String "keeper_heartbeat")]);
+      let got_presence = Sse.try_pop "s-presence" in
+      let got_observer = Sse.try_pop "s-observer" in
+      Alcotest.(check bool) "presence got event" true (got_presence <> None);
+      Alcotest.(check bool) "observer did not get presence" true
+        (got_observer = None);
+      (match got_presence with
+       | Some event ->
+           Alcotest.(check bool) "presence event type" true
+             (List.exists
+                (String.equal "event: presence")
+                (String.split_on_char '\n' event))
+       | None -> Alcotest.fail "expected presence event");
+      Alcotest.(check (list string)) "presence not replay buffered" []
+        (Sse.get_events_after before_id))
+
 let test_register_defaults_to_coordinator () =
   reset ();
   (* Register without explicit kind *)
@@ -205,6 +247,8 @@ let () =
           Alcotest.test_case "coordinators only" `Quick test_broadcast_to_coordinators_only;
           Alcotest.test_case "all targets" `Quick test_broadcast_to_all;
           Alcotest.test_case "broadcast = broadcast_to All" `Quick test_broadcast_equals_broadcast_to_all;
+          Alcotest.test_case "broadcast All excludes presence" `Quick test_broadcast_all_excludes_presence_sessions;
+          Alcotest.test_case "presence live-only" `Quick test_broadcast_presence_is_live_only;
           Alcotest.test_case "default kind is Coordinator" `Quick test_register_defaults_to_coordinator;
         ] );
     ]

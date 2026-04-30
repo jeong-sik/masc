@@ -93,6 +93,7 @@ let add_routes ~port ~host router =
   |> Http.Router.get "/.well-known/agent.json" (serve_agent_card ~host ~port)
   |> Http.Router.get "/.well-known/agent-card.json" (serve_agent_card ~host ~port)
   |> Http.Router.get "/ag-ui/events" handle_ag_ui_events
+  |> Http.Router.get "/events/presence" handle_presence_events
   (* Dashboard sub-routes: must come before the SPA catchall *)
   |> Http.Router.get "/dashboard/credits" (fun request reqd ->
        with_canonical_loopback_host ~port

@@ -18,6 +18,7 @@ function sampleResponse(overrides?: Partial<Record<string, unknown>>) {
     sse: {
       sessions_observer: 1,
       sessions_coordinator: 0,
+      sessions_presence: 0,
       sessions_total: 1,
       external_subscribers: 0,
       broadcast_avg_seconds: 0.01,
@@ -78,6 +79,7 @@ function sampleResponse(overrides?: Partial<Record<string, unknown>>) {
     streamable_http: {
       endpoint: '/mcp',
       observer_stream: '/mcp?sse_kind=observer',
+      presence_stream: '/events/presence',
       managed_endpoint: '/mcp/managed',
       operator_endpoint: '/mcp/operator',
       delete_endpoint: '/mcp',
@@ -189,6 +191,8 @@ describe('TransportHealthPanel', () => {
     expect(container.innerHTML).toContain('시그널링 중단')
     expect(container.innerHTML).not.toContain('2 ICE')
     expect(container.textContent).toContain('namespace default')
+    expect(container.textContent).toContain('프레즌스 스트림')
+    expect(container.textContent).toContain('/events/presence')
   })
 
   it('renders namespace chip with cluster prefix for non-default clusters', async () => {
@@ -262,7 +266,8 @@ describe('TransportHealthPanel', () => {
         sse: {
           sessions_observer: 1,
           sessions_coordinator: 0,
-          sessions_total: 1,
+          sessions_presence: 1,
+          sessions_total: 2,
           external_subscribers: 0,
           broadcast_avg_seconds: 0.01,
           broadcast_count: 2,

@@ -449,12 +449,15 @@ let turn_phase_of_cascade_state = function
 
 let broadcast_composite_changed ~name ~ts_unix =
   try
-    Sse.broadcast
-      (`Assoc [
-         "type", `String "keeper_composite_changed";
-         "name", `String name;
-         "ts_unix", `Float ts_unix;
-       ])
+    let json =
+      `Assoc [
+        "type", `String "keeper_composite_changed";
+        "name", `String name;
+        "ts_unix", `Float ts_unix;
+      ]
+    in
+    Sse.broadcast json;
+    Sse.broadcast_presence json
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->

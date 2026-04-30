@@ -206,6 +206,9 @@ let test_transport_health_json () =
   ignore
     (Masc_mcp.Sse.register ~kind:Masc_mcp.Sse.Coordinator "coordinator-session"
        ~last_event_id:0);
+  ignore
+    (Masc_mcp.Sse.register ~kind:Masc_mcp.Sse.Presence "presence-session"
+       ~last_event_id:0);
   TM.set_grpc_active_streams 1;
   TM.set_grpc_subscribers 2;
   Prometheus.set_gauge Prometheus.metric_oas_sse_relay_queue_depth 4.0;
@@ -233,6 +236,8 @@ let test_transport_health_json () =
     (sse_json |> U.member "sessions_observer" |> U.to_int);
   check int "coordinator sessions" 1
     (sse_json |> U.member "sessions_coordinator" |> U.to_int);
+  check int "presence sessions" 1
+    (sse_json |> U.member "sessions_presence" |> U.to_int);
   check bool "queue depth reflects queued event" true
     ((sse_json |> U.member "queue_max_depth" |> U.to_int) > 0);
   check bool "hot sessions are reported" true
@@ -255,6 +260,8 @@ let test_transport_health_json () =
     (match streamable_json |> U.member "auth_policy_present" with
     | `Bool _ -> true
     | _ -> false);
+  check string "presence stream endpoint" "/events/presence"
+    (streamable_json |> U.member "presence_stream" |> U.to_string);
   check int "grpc active streams" 1
     (grpc_json |> U.member "active_streams" |> U.to_int);
   check int "grpc subscribers" 2

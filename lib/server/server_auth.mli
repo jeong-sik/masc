@@ -67,7 +67,8 @@ val auth_token_from_request : Httpun.Request.t -> string option
 (** Token from [Authorization: Bearer …] on the request. *)
 
 val observer_sse_query_token_from_request : Httpun.Request.t -> string option
-(** Observer SSE allows the token via query string for browser EventSource. *)
+(** Observer/presence SSE allows the token via query string for browser
+    EventSource. *)
 
 val observer_sse_auth_token_from_request : Httpun.Request.t -> string option
 (** Combined header-or-query lookup for the SSE observer endpoint. *)

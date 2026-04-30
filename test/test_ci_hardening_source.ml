@@ -372,7 +372,7 @@ let test_http_write_auth_contracts () =
        {|trim_opt (query_param request "token")|});
   check bool "observer SSE auth error documents scoped query token contract" true
     (file_contains_pattern "lib/server/server_auth.ml"
-       {|or 'token' query param for the observer SSE stream.|});
+       {|or 'token' query param for the observer/presence SSE stream.|});
   check bool "server auth keeps general MCP auth header-only" true
     (file_contains_pattern "lib/server/server_auth.ml"
        {|match auth_token_from_request request with|});

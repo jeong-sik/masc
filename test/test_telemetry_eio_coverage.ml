@@ -13,6 +13,9 @@ module Telemetry_eio = Masc_mcp.Telemetry_eio
 module Coord = Masc_mcp.Coord
 module Prometheus = Masc_mcp.Prometheus
 
+let error_kind value = Telemetry_eio.error_kind_of_string value
+let error_kind_to_string = Telemetry_eio.error_kind_to_string
+
 let temp_dir () =
   let dir = Filename.temp_file "test_telemetry_eio_" "" in
   Unix.unlink dir;
@@ -111,7 +114,7 @@ let test_event_tool_called () =
     session_id = Some "mcp-session-1";
     operation_id = Some "op-1";
     worker_run_id = Some "run-1";
-    error_kind = Some "timeout";
+    error_kind = Some (error_kind "timeout");
     error_message = Some "timed out after 30s";
     exit_code = None;
     stderr_excerpt = None;
@@ -123,7 +126,8 @@ let test_event_tool_called () =
       check (option string) "session_id" (Some "mcp-session-1") r.session_id;
       check (option string) "operation_id" (Some "op-1") r.operation_id;
       check (option string) "worker_run_id" (Some "run-1") r.worker_run_id;
-      check (option string) "error_kind" (Some "timeout") r.error_kind;
+      check (option string) "error_kind" (Some "timeout")
+        (Option.map error_kind_to_string r.error_kind);
       check (option string) "error_message" (Some "timed out after 30s")
         r.error_message
   | _ -> fail "expected Tool_called"

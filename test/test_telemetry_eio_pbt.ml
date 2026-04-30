@@ -86,7 +86,7 @@ let gen_event : Telemetry_eio.event QCheck.Gen.t =
              session_id;
              operation_id;
              worker_run_id;
-             error_kind;
+             error_kind = Option.map Telemetry_eio.error_kind_of_string error_kind;
              error_message;
              exit_code;
              stderr_excerpt;
@@ -140,7 +140,7 @@ let saturated_tool_called : Telemetry_eio.event_record =
           session_id = Some "mcp-session";
           operation_id = Some "op-1";
           worker_run_id = Some "wr-1";
-          error_kind = Some "failure";
+          error_kind = Some (Telemetry_eio.error_kind_of_string "failure");
           error_message = Some "boom";
           exit_code = Some 1;
           stderr_excerpt = Some "...";

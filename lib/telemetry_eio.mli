@@ -20,6 +20,13 @@ type config = Coord_utils.config
 
 (** {1 Events} *)
 
+(** Typed wrapper for tool-call error classification labels. JSONL rows
+    continue to encode [error_kind] as the stable string label. *)
+type error_kind = private Error_kind of string
+
+val error_kind_of_string : string -> error_kind
+val error_kind_to_string : error_kind -> string
+
 type event =
   | Agent_joined of { agent_id : string; capabilities : string list }
   | Agent_left of { agent_id : string; reason : string }
@@ -48,7 +55,7 @@ type event =
       session_id : string option; [@default None]
       operation_id : string option; [@default None]
       worker_run_id : string option; [@default None]
-      error_kind : string option; [@default None]
+      error_kind : error_kind option; [@default None]
       error_message : string option; [@default None]
       exit_code : int option; [@default None]
       stderr_excerpt : string option; [@default None]
@@ -186,7 +193,7 @@ val track_tool_called :
   ?session_id:string ->
   ?operation_id:string ->
   ?worker_run_id:string ->
-  ?error_kind:string ->
+  ?error_kind:error_kind ->
   ?error_message:string ->
   ?exit_code:int ->
   ?stderr_excerpt:string ->

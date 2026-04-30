@@ -4,6 +4,25 @@
 (** Config type alias *)
 type config = Coord_utils.config
 
+(** Tool-call error classification labels. *)
+type error_kind = Error_kind of string
+
+let error_kind_of_string value = Error_kind value
+let error_kind_to_string (Error_kind value) = value
+let error_kind_to_yojson kind = `String (error_kind_to_string kind)
+
+let error_kind_of_yojson = function
+  | `String value -> Ok (error_kind_of_string value)
+  | json ->
+      Error
+        (Printf.sprintf "Telemetry_eio.error_kind: expected string, got %s"
+           (Yojson.Safe.to_string json))
+
+let pp_error_kind fmt kind =
+  Format.pp_print_string fmt (error_kind_to_string kind)
+
+let show_error_kind = error_kind_to_string
+
 (** Telemetry event types *)
 type event =
   | Agent_joined of { agent_id: string; capabilities: string list }
@@ -21,7 +40,7 @@ type event =
       session_id: string option [@default None];
       operation_id: string option [@default None];
       worker_run_id: string option [@default None];
-      error_kind: string option [@default None];
+      error_kind: error_kind option [@default None];
       error_message: string option [@default None];
       exit_code: int option [@default None];
       stderr_excerpt: string option [@default None];
@@ -384,10 +403,19 @@ let nonempty_opt value =
       if trimmed = "" then None else Some trimmed
   | None -> None
 
+let nonempty_error_kind_opt value =
+  match value with
+  | Some kind ->
+      let trimmed = String.trim (error_kind_to_string kind) in
+      if trimmed = "" then None else Some (error_kind_of_string trimmed)
+  | None -> None
+
 let track_tool_called ?fs config ~tool_name ~success ~duration_ms ?agent_id
     ?source ?session_id ?operation_id ?worker_run_id ?error_kind
     ?error_message ?exit_code ?stderr_excerpt () =
-  let error_kind = if success then None else nonempty_opt error_kind in
+  let error_kind =
+    if success then None else nonempty_error_kind_opt error_kind
+  in
   let error_message = if success then None else nonempty_opt error_message in
   let exit_code = if success then None else exit_code in
   let stderr_excerpt =
@@ -412,7 +440,8 @@ let track_tool_called ?fs config ~tool_name ~success ~duration_ms ?agent_id
   if not success then
     match error_kind with
     | None -> ()
-    | Some trimmed_kind ->
+    | Some kind ->
+          let trimmed_kind = error_kind_to_string kind in
           let message =
             match error_message with
             | Some m -> m

@@ -20,6 +20,9 @@ import { refreshShell } from './store'
 import { connectDashboardWS, disconnectDashboardWS, subscribeDashboardRoute } from './dashboard-ws'
 import { dashboardWsOnlyEnabled } from './dashboard-ws-cutover'
 import { ensureDevToken } from './api/dev-token'
+import { fetchDashboardConfig, parseContextThresholds } from './api/dashboard'
+import { CONTEXT_RATIO_CRITICAL, CONTEXT_RATIO_WARN, CONTEXT_RATIO_COMPACTING } from './config/constants'
+import { setContextThresholds } from './config/context-thresholds'
 import {
   BuildIdentityBadge,
   ConnectionStatus,
@@ -100,6 +103,21 @@ export function App() {
     // while the project snapshot warms heavier execution/command projections.
     void refreshShell({ light: true })
     requestNamespaceTruthNow()
+
+    // Fetch runtime thresholds so health-strip and lifecycle state use
+    // server-side config instead of compiled fallback defaults (P-DASH-07).
+    void fetchDashboardConfig()
+      .then(data => {
+        const thresholds = parseContextThresholds(data, {
+          critical: CONTEXT_RATIO_CRITICAL,
+          warn: CONTEXT_RATIO_WARN,
+          compacting: CONTEXT_RATIO_COMPACTING,
+        })
+        setContextThresholds(thresholds)
+      })
+      .catch(err => {
+        console.warn('[app] dashboard config fetch failed', err instanceof Error ? err.message : err)
+      })
 
     // Replay durable OAS state before opening the live SSE tail.
     pauseQueuedOasRuntimeIngress()

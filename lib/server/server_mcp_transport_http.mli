@@ -38,6 +38,7 @@ val is_valid_protocol_version : string -> bool
 val remember_protocol_version : string -> string -> unit
 val remember_mcp_profile : string -> tool_profile -> unit
 val forget_mcp_session : string -> unit
+val profile_label : tool_profile -> string
 val reap_stale_sessions : is_active_session:(string -> bool) -> int
 val validate_mcp_session_profile :
   profile:tool_profile -> string -> (unit, string) result

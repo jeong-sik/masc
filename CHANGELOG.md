@@ -1,6 +1,27 @@
 # Changelog
 
 
+## [0.18.17] - 2026-04-30
+
+### Fixed
+
+- Closed the `Skip_idle + Woken` half of the `MissedWakeup` gap modeled in `KeeperHeartbeat.tla` (#12271). `interruptible_sleep` now returns the discriminator `Stopped | Woken | Timeout` and `run_smart_heartbeat_gate` promotes a wakeup-cut idle backoff to a continuing cycle, so external `wakeup_keeper` / board signals on a Live keeper no longer get absorbed by the smart-heartbeat gate. Sibling fix to #10078, which closed the same shape for `Skip_busy`.
+- Dashboard agent directory no longer crashes with `insertBefore: parameter 1 is not of type 'Node'` when a filter targets a keeper the live registry has dropped (#12290 closes #12283). `KeeperDetailPage` now refuses the cached `selectedKeeper` fallback whenever the live registry is non-empty, falling through to a redesigned missing-state that names the likely cause (watchdog kill / operator stop) and points at `masc_keeper_stale_termination_total{keeper=...}`.
+
+### Added
+
+- New positive-signal Prometheus counter `masc_keeper_skip_idle_wake_resumed_total{keeper}` increments every time `cycle_continues_after_wake` promotes a `Skip_idle` to a turn dispatch (#12282). Pairs with the existing `masc_keeper_stale_termination_by_class_total{class=idle_turn}` so operators can read the fix as a positive/negative balance: a healthy fleet shows non-zero rate of resumes proportional to inbound signals while idle-class kills trend toward zero.
+- New pure helper `resolveKeeperForDetail` in `dashboard/src/lib/keeper-detail-resolution.ts` (#12290), unit-tested without a React render or signal harness so the dashboard regression guard stays cheap.
+
+### Changed
+
+- Package and release metadata advanced from `0.18.16` to `0.18.17` to mark the keeper idle-wake regression boundary on `main`.
+- Roadmap, product operating plan, opam metadata, and spec baseline version references synced to `0.18.17`.
+
+### Deprecated
+
+- None.
+
 ## [0.18.16] - 2026-04-30
 
 ### Changed

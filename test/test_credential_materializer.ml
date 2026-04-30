@@ -156,6 +156,62 @@ let test_credential_store_add_invokes_ensure () =
                       "expected Unmaterialized after roundtrip, got %s"
                       (show_credential_state other))))
 
+(* --- 5. Provisioner: path_safe + invariants --- *)
+
+let test_path_safe_rejects_dot_dot () =
+  match Credential_materializer.path_safe "/foo/../bar" with
+  | Error _ -> ()
+  | Ok () -> Alcotest.fail "expected Error for path with .. segment"
+
+let test_path_safe_accepts_ordinary_paths () =
+  match Credential_materializer.path_safe "/tmp/keeper-creds/.config/gh" with
+  | Ok () -> ()
+  | Error msg -> Alcotest.failf "unexpected Error: %s" msg
+
+(* The provisioner spawns a real `gh` subprocess; this test is best-effort.
+   We only assert the *security invariants* that we can verify without
+   gh being installed:
+     - Empty token is rejected with a clear, token-free message.
+     - Path-traversal in gh_config_dir is rejected before any subprocess.
+     - The error message never contains the supplied token. *)
+
+let canary_token =
+  "canary_token_RFC0019_PRB_a1b2c3d4e5f6_should_NEVER_appear_in_logs"
+
+let test_provision_rejects_empty_token () =
+  match
+    Credential_materializer.provision_via_with_token
+      ~gh_config_dir:"/tmp/keeper-creds-canary" ~token:""
+  with
+  | Error msg ->
+      Alcotest.(check bool) "error mentions non-empty requirement"
+        true
+        (try
+           ignore (Str.search_forward (Str.regexp "non-empty") msg 0);
+           true
+         with Not_found -> false)
+  | Ok _ -> Alcotest.fail "expected Error for empty token"
+
+let test_provision_rejects_path_traversal () =
+  match
+    Credential_materializer.provision_via_with_token
+      ~gh_config_dir:"/tmp/../etc/gh" ~token:canary_token
+  with
+  | Error msg ->
+      Alcotest.(check bool) "error mentions forbidden segment" true
+        (try
+           ignore (Str.search_forward (Str.regexp "forbidden") msg 0);
+           true
+         with Not_found -> false);
+      (* RFC-0019 §8 R2: token must never appear in the error message. *)
+      Alcotest.(check bool)
+        "error must not echo token" false
+        (try
+           ignore (Str.search_forward (Str.regexp_string canary_token) msg 0);
+           true
+         with Not_found -> false)
+  | Ok _ -> Alcotest.fail "expected Error for path with .. segment"
+
 let () =
   Alcotest.run "credential_materializer"
     [
@@ -180,5 +236,17 @@ let () =
         [
           Alcotest.test_case "add invokes ensure and roundtrips" `Quick
             test_credential_store_add_invokes_ensure;
+        ] );
+      ( "provisioner",
+        [
+          Alcotest.test_case "path_safe rejects .. segments" `Quick
+            test_path_safe_rejects_dot_dot;
+          Alcotest.test_case "path_safe accepts ordinary paths" `Quick
+            test_path_safe_accepts_ordinary_paths;
+          Alcotest.test_case "provision rejects empty token" `Quick
+            test_provision_rejects_empty_token;
+          Alcotest.test_case
+            "provision rejects path traversal without echoing token"
+            `Quick test_provision_rejects_path_traversal;
         ] );
     ]

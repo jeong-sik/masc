@@ -96,6 +96,9 @@ export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params
       if (routeState.params.section === 'board') {
         return ['board']
       }
+      if (routeState.params.section === 'collab-mvp') {
+        return ['execution', 'board']
+      }
       return []
     case 'lab':
       if (routeState.params.section === 'autoresearch') {

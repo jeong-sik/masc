@@ -52,6 +52,14 @@ type severity =
 
 val severity_to_string : severity -> string
 
+type observation_principle =
+  | Observable_updates
+  | Deterministic_convergence
+  | Monotonic_progress
+
+val observation_principle_to_string : observation_principle -> string
+val observation_driven_principles : observation_principle list
+
 type ids =
   { goal_id : string option
   ; task_ids : string list
@@ -82,6 +90,28 @@ val empty_task_counts : task_counts
 val task_counts_of_statuses : Types.task_status list -> task_counts
 val task_phase_of_counts : Types.task_status list -> task_phase
 val task_counts_to_yojson : task_counts -> Yojson.Safe.t
+
+type claim_observation =
+  { task_id : string
+  ; owner : string
+  ; phase : task_phase
+  }
+
+type duplicate_active_claim =
+  { task_id : string
+  ; owners : string list
+  }
+
+type turn_queue_entry =
+  { task_id : string
+  ; priority : int
+  ; created_at : string
+  }
+
+val active_claim_observation : Types.task -> claim_observation option
+val active_claims : Types.task list -> claim_observation list
+val duplicate_active_claims : Types.task list -> duplicate_active_claim list
+val visible_claim_queue : Types.task list -> turn_queue_entry list
 
 type facts =
   { economy_enabled : bool
@@ -149,6 +179,8 @@ type violation =
   ; message : string
   ; ids : ids
   }
+
+val observation_driven_violations : Types.task list -> violation list
 
 val reward_phase_of_facts
   :  economy_enabled:bool

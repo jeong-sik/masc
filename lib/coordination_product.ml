@@ -88,6 +88,21 @@ let severity_to_string = function
   | Error -> "error"
 ;;
 
+type observation_principle =
+  | Observable_updates
+  | Deterministic_convergence
+  | Monotonic_progress
+
+let observation_principle_to_string = function
+  | Observable_updates -> "observable_updates"
+  | Deterministic_convergence -> "deterministic_convergence"
+  | Monotonic_progress -> "monotonic_progress"
+;;
+
+let observation_driven_principles =
+  [ Observable_updates; Deterministic_convergence; Monotonic_progress ]
+;;
+
 type ids =
   { goal_id : string option
   ; task_ids : string list
@@ -148,6 +163,91 @@ let task_phase_of_counts statuses =
     if List.for_all (fun status -> task_phase_of_status status = first_phase) rest
     then first_phase
     else Mixed
+;;
+
+type claim_observation =
+  { task_id : string
+  ; owner : string
+  ; phase : task_phase
+  }
+
+type duplicate_active_claim =
+  { task_id : string
+  ; owners : string list
+  }
+
+type turn_queue_entry =
+  { task_id : string
+  ; priority : int
+  ; created_at : string
+  }
+
+let active_owner_of_status = function
+  | Types.Claimed { assignee; _ }
+  | Types.InProgress { assignee; _ }
+  | Types.AwaitingVerification { assignee; _ } -> Some assignee
+  | Types.Todo | Types.Done _ | Types.Cancelled _ -> None
+;;
+
+let active_claim_observation (task : Types.task) =
+  active_owner_of_status task.task_status
+  |> Option.map (fun owner ->
+    { task_id = task.id; owner; phase = task_phase_of_status task.task_status })
+;;
+
+let active_claims tasks = List.filter_map active_claim_observation tasks
+
+let normalize_strings values =
+  values
+  |> List.map String.trim
+  |> List.filter (fun value -> value <> "")
+  |> List.sort_uniq String.compare
+;;
+
+let duplicate_active_claims tasks : duplicate_active_claim list =
+  let owners_by_task_id = Hashtbl.create (List.length tasks) in
+  tasks
+  |> active_claims
+  |> List.iter (fun (observation : claim_observation) ->
+    let owners =
+      match Hashtbl.find_opt owners_by_task_id observation.task_id with
+      | Some owners -> owners
+      | None -> []
+    in
+    Hashtbl.replace owners_by_task_id observation.task_id (observation.owner :: owners));
+  Hashtbl.fold
+    (fun task_id owners acc ->
+       match normalize_strings owners with
+       | _ :: _ :: _ as owners -> ({ task_id; owners } : duplicate_active_claim) :: acc
+       | [] | [ _ ] -> acc)
+    owners_by_task_id
+    []
+  |> List.sort (fun (left : duplicate_active_claim) right ->
+    String.compare left.task_id right.task_id)
+;;
+
+let compare_turn_queue_entry left right =
+  let priority_cmp = Int.compare left.priority right.priority in
+  if priority_cmp <> 0
+  then priority_cmp
+  else (
+    let created_cmp = String.compare left.created_at right.created_at in
+    if created_cmp <> 0 then created_cmp else String.compare left.task_id right.task_id)
+;;
+
+let visible_claim_queue tasks =
+  tasks
+  |> List.filter_map (fun (task : Types.task) ->
+    match task.task_status, task.do_not_reclaim_reason with
+    | Types.Todo, None ->
+      Some { task_id = task.id; priority = task.priority; created_at = task.created_at }
+    | Types.Todo, Some _
+    | Types.Claimed _, _
+    | Types.InProgress _, _
+    | Types.AwaitingVerification _, _
+    | Types.Done _, _
+    | Types.Cancelled _, _ -> None)
+  |> List.sort compare_turn_queue_entry
 ;;
 
 type facts =
@@ -245,6 +345,26 @@ type violation =
   ; message : string
   ; ids : ids
   }
+
+let observation_driven_violations tasks =
+  duplicate_active_claims tasks
+  |> List.map (fun (duplicate : duplicate_active_claim) ->
+    { axis = Task
+    ; code = "duplicate_active_claim_owners"
+    ; severity = Error
+    ; message =
+        Printf.sprintf
+          "Task %s has multiple active owners in the observed shared state: %s."
+          duplicate.task_id
+          (String.concat ", " duplicate.owners)
+    ; ids =
+        { goal_id = None
+        ; task_ids = [ duplicate.task_id ]
+        ; post_ids = []
+        ; agent_name = None
+        }
+    })
+;;
 
 let reward_phase_of_facts
       ~economy_enabled

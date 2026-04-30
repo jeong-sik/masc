@@ -605,7 +605,11 @@ let project state =
         ~persist_errors:state.persist_errors
         ~economy_enabled:state.economy_enabled)
   in
-  Coordination_product.snapshot (goal_products @ unlinked_task_products)
+  let snapshot = Coordination_product.snapshot (goal_products @ unlinked_task_products) in
+  { snapshot with
+    violations =
+      snapshot.violations @ Coordination_product.observation_driven_violations all_tasks
+  }
 ;;
 
 let build config = config |> capture |> project

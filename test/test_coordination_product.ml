@@ -156,6 +156,63 @@ let test_task_axis_projection () =
     (CP.task_phase_to_string (CP.task_phase_of_counts [ done_status; cancelled_status ]))
 ;;
 
+let test_observation_principles_are_stable () =
+  Alcotest.(check (list string))
+    "principles"
+    [ "observable_updates"; "deterministic_convergence"; "monotonic_progress" ]
+    (List.map CP.observation_principle_to_string CP.observation_driven_principles)
+;;
+
+let test_visible_claim_queue_is_deterministic () =
+  let tasks =
+    [ task ~id:"claimed" ~title:"Claimed" ~task_status:claimed_status ()
+    ; task ~id:"later" ~title:"Later" ()
+    ; task ~id:"earlier" ~title:"Earlier" ()
+    ]
+  in
+  let tasks =
+    List.map
+      (fun (task : Types.task) ->
+         if String.equal task.id "later"
+         then { task with priority = 2; created_at = "2026-04-24T02:00:00Z" }
+         else if String.equal task.id "earlier"
+         then { task with priority = 1; created_at = "2026-04-24T01:00:00Z" }
+         else task)
+      tasks
+  in
+  let queue = CP.visible_claim_queue tasks in
+  Alcotest.(check (list string))
+    "queue"
+    [ "earlier"; "later" ]
+    (List.map (fun (entry : CP.turn_queue_entry) -> entry.task_id) queue)
+;;
+
+let test_duplicate_active_claim_violation () =
+  let tasks =
+    [ task
+        ~id:"task-dup"
+        ~title:"First owner"
+        ~task_status:
+          (Types.Claimed { assignee = "worker-a"; claimed_at = "2026-04-24T00:00:00Z" })
+        ()
+    ; task
+        ~id:"task-dup"
+        ~title:"Second owner"
+        ~task_status:
+          (Types.InProgress { assignee = "worker-b"; started_at = "2026-04-24T00:01:00Z" })
+        ()
+    ; task ~id:"task-open" ~title:"Open" ()
+    ]
+  in
+  let duplicates = CP.duplicate_active_claims tasks in
+  (match duplicates with
+   | [ { CP.task_id = "task-dup"; owners } ] ->
+     Alcotest.(check (list string)) "owners" [ "worker-a"; "worker-b" ] owners
+   | _ -> Alcotest.fail "expected one duplicate active claim");
+  let violations = CP.observation_driven_violations tasks in
+  check_has_code "duplicate_active_claim_owners" violations
+;;
+
 let test_goal_linkage_prefers_structured_goal_id () =
   let explicit =
     task ~id:"task-1" ~title:"Implement product FSM" ~goal_id:"goal-1" ()
@@ -380,7 +437,21 @@ let test_projection_is_deterministic_from_captured_state () =
 let () =
   Alcotest.run
     "Coordination_product"
-    [ "task_axis", [ Alcotest.test_case "projection" `Quick test_task_axis_projection ]
+    [ ( "task_axis"
+      , [ Alcotest.test_case "projection" `Quick test_task_axis_projection
+        ; Alcotest.test_case
+            "observation principles"
+            `Quick
+            test_observation_principles_are_stable
+        ; Alcotest.test_case
+            "visible claim queue"
+            `Quick
+            test_visible_claim_queue_is_deterministic
+        ; Alcotest.test_case
+            "duplicate active claim owners"
+            `Quick
+            test_duplicate_active_claim_violation
+        ] )
     ; ( "goal_linkage"
       , [ Alcotest.test_case
             "structured goal_id matcher"

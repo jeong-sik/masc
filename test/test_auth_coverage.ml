@@ -910,8 +910,8 @@ let test_dashboard_actor_invalid_token_fallback_is_counted () =
       ignore (Auth.enable_auth dir ~require_token:true ~agent_name:"bootstrap-admin");
       let before =
         Prometheus.metric_value_or_zero
-          Prometheus.metric_silent_dashboard_actor_fallback
-          ~labels:[ ("outcome", "error") ]
+        Prometheus.metric_silent_dashboard_actor_fallback
+          ~labels:[ ("outcome", "error"); ("err_kind", "token_mismatch") ]
           ()
       in
       let headers =
@@ -927,8 +927,8 @@ let test_dashboard_actor_invalid_token_fallback_is_counted () =
         (SA.dashboard_actor_for_request ~base_path:dir request);
       let after =
         Prometheus.metric_value_or_zero
-          Prometheus.metric_silent_dashboard_actor_fallback
-          ~labels:[ ("outcome", "error") ]
+        Prometheus.metric_silent_dashboard_actor_fallback
+          ~labels:[ ("outcome", "error"); ("err_kind", "token_mismatch") ]
           ()
       in
       check bool "counter increments" true (after > before))

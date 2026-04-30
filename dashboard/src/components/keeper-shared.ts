@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import { AgentFailure, failureTypeFromDiagnostic } from './common/agent-failure'
 import { Markdown } from "./common/markdown"
 import { useState } from 'preact/hooks'
 import { keeperDirectChatAccess } from '../lib/keeper-chat-access'
@@ -219,7 +220,10 @@ export function KeeperDiagnosticSummary({
         ${diagnostic?.next_eligible_at_s ? html` -- 다음 응답 가능 ${formatEligible(diagnostic.next_eligible_at_s)}` : null}
       </div>
       ${diagnostic?.last_error
-        ? html`<div class="text-xs text-[var(--bad-light)] leading-relaxed mt-1">${diagnostic.last_error}</div>`
+        ? html`<${AgentFailure}
+            type=${failureTypeFromDiagnostic(diagnostic.last_error, diagnostic.recoverable)}
+            message=${diagnostic.last_error}
+          />`
         : null}
       ${showRawStatus
         ? html`<div class="mt-3 max-h-60 overflow-auto rounded border border-[var(--color-border-default)] bg-[var(--color-bg-page)] custom-scrollbar"><${Markdown} text=${'```text\n' + (detail?.rawText ?? '키퍼 상태를 아직 불러오지 않았습니다.') + '\n```'} /></div>`

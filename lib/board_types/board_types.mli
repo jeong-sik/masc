@@ -68,6 +68,7 @@ type post_kind =
   | Human_post
   | Automation_post
   | System_post
+[@@deriving tla]
 
 (** {1 Records — Mandatory TTL} *)
 

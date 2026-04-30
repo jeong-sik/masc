@@ -298,8 +298,9 @@ val metric_keeper_turn_fsm_transitions : string
 
     Labels: [action, stage]. [action] is the spec-action name
     ([WakeupSignal], [HeartbeatTick], [TurnComplete],
-    [SubmitTask], [AssignTask], [EmptyQueueSleep]). [stage] is
-    [pre] or [post].
+    [SubmitTask], [AssignTask], [EmptyQueueSleep]) or a runtime
+    contract surface such as [KeeperTurnFSM.Next]. [stage] is [pre],
+    [post], or a compact contract edge such as [streaming->done].
 
     Operator signal: a non-zero value on any [action,stage] pair
     indicates the OCaml runtime drifted from the

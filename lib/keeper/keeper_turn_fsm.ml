@@ -51,18 +51,11 @@ let failure_reason_label = function
   | Failure_unexpected_exception _ -> "unexpected_exception"
 
 let turn_state_label = function
-  | Idle -> "idle"
-  | Phase_gating -> "phase_gating"
-  | Cascade_routing -> "cascade_routing"
-  | Awaiting_provider -> "awaiting_provider"
-  | Streaming -> "streaming"
-  | Awaiting_tool_result -> "awaiting_tool_result"
-  | Completing -> "completing"
-  | Done -> "done"
   | Failed reason ->
-      "failed:" ^ failure_reason_label reason
+      to_tla_symbol (Failed reason) ^ ":" ^ failure_reason_label reason
   | Cancelled reason ->
-      "cancelled:" ^ cancel_reason_label reason
+      to_tla_symbol (Cancelled reason) ^ ":" ^ cancel_reason_label reason
+  | state -> to_tla_symbol state
 
 let pp_cancel_reason fmt r =
   Format.pp_print_string fmt (cancel_reason_label r)
@@ -90,12 +83,118 @@ let pp_failure_reason fmt = function
 let pp_turn_state fmt s =
   Format.pp_print_string fmt (turn_state_label s)
 
+type transition_action =
+  | StartTurn
+  | PhaseGateSkip
+  | PhaseGateOk
+  | CascadeRouted
+  | CascadeUnavailable
+  | ProviderResponded
+  | ProviderTimeout
+  | StreamYieldsTool
+  | ToolReturned
+  | StreamComplete
+  | ContractOk
+  | ContractViolation
+  | ReceiptLost
+  | GenericFail
+  | SupervisorRequestsStop
+  | HonorStopSignal
+  | TerminalStutter
+
+let transition_action_label = function
+  | StartTurn -> "StartTurn"
+  | PhaseGateSkip -> "PhaseGateSkip"
+  | PhaseGateOk -> "PhaseGateOk"
+  | CascadeRouted -> "CascadeRouted"
+  | CascadeUnavailable -> "CascadeUnavailable"
+  | ProviderResponded -> "ProviderResponded"
+  | ProviderTimeout -> "ProviderTimeout"
+  | StreamYieldsTool -> "StreamYieldsTool"
+  | ToolReturned -> "ToolReturned"
+  | StreamComplete -> "StreamComplete"
+  | ContractOk -> "ContractOk"
+  | ContractViolation -> "ContractViolation"
+  | ReceiptLost -> "ReceiptLost"
+  | GenericFail -> "GenericFail"
+  | SupervisorRequestsStop -> "SupervisorRequestsStop"
+  | HonorStopSignal -> "HonorStopSignal"
+  | TerminalStutter -> "TerminalStutter"
+
+type transition_violation = {
+  from_state : string;
+  to_state : string;
+  reason : string;
+}
+
+let same_tla_state a b =
+  String.equal (to_tla_symbol a) (to_tla_symbol b)
+
+let same_observable_state a b =
+  String.equal (turn_state_label a) (turn_state_label b)
+
+let classify_transition ~from_state ~to_state =
+  match from_state, to_state with
+  | Idle, Phase_gating -> Some StartTurn
+  | Phase_gating, Done -> Some PhaseGateSkip
+  | Phase_gating, Cascade_routing -> Some PhaseGateOk
+  | Cascade_routing, Awaiting_provider -> Some CascadeRouted
+  | Cascade_routing, Failed (Failure_cascade_unavailable _) ->
+      Some CascadeUnavailable
+  | Awaiting_provider, Streaming -> Some ProviderResponded
+  | Awaiting_provider, Cancelled Cancelled_provider_timeout ->
+      Some ProviderTimeout
+  | Streaming, Awaiting_tool_result -> Some StreamYieldsTool
+  | Awaiting_tool_result, Streaming -> Some ToolReturned
+  | Streaming, Completing -> Some StreamComplete
+  | Completing, Done -> Some ContractOk
+  | Completing, Failed (Failure_tool_contract_violation _) ->
+      Some ContractViolation
+  | Completing, Failed (Failure_receipt_lost _) -> Some ReceiptLost
+  | _, Failed _ when is_active from_state -> Some GenericFail
+  | _, Cancelled _ when is_active from_state -> Some HonorStopSignal
+  | _, _ when is_active from_state && same_tla_state from_state to_state ->
+      Some SupervisorRequestsStop
+  | _, _
+    when is_terminal from_state && is_terminal to_state
+         && same_observable_state from_state to_state ->
+      Some TerminalStutter
+  | _ -> None
+
+let assert_transition_allowed ~from_state ~to_state =
+  match classify_transition ~from_state ~to_state with
+  | Some action -> Ok action
+  | None ->
+      Error
+        {
+          from_state = to_tla_symbol from_state;
+          to_state = to_tla_symbol to_state;
+          reason = "not_in_keeper_turn_fsm_next";
+        }
+
+let guard_transition ~keeper_name ~turn_id ~from_state ~to_state =
+  match assert_transition_allowed ~from_state ~to_state with
+  | Ok _ -> ()
+  | Error violation ->
+      let stage = violation.from_state ^ "->" ^ violation.to_state in
+      Keeper_fsm_guard_runtime.wrap_unit
+        ~action:"KeeperTurnFSM.Next"
+        ~stage
+        (fun () -> assert false);
+      Log.Keeper.warn ~keeper_name ~turn_id
+        "[fsm:transition:violation] %s -> %s (%s)"
+        violation.from_state violation.to_state violation.reason
+
 let emit_transition ~keeper_name ~turn_id ?prev state =
   let prev_label =
     match prev with
     | Some s -> turn_state_label s
     | None -> "-"
   in
+  (match prev with
+   | Some from_state ->
+       guard_transition ~keeper_name ~turn_id ~from_state ~to_state:state
+   | None -> ());
   let state_label = turn_state_label state in
   Log.Keeper.info ~keeper_name ~turn_id
     "[fsm:transition] %s -> %s" prev_label state_label;

@@ -37,8 +37,8 @@ Bumped exactly once per `Keeper_turn_fsm.emit_transition` call.
 
 | Label | Values |
 |-------|--------|
-| `from` | `idle`, `phase_gating`, `cascade_routing`, `awaiting_provider`, `streaming`, `awaiting_tool_result`, `completing`, plus `-` when no `?prev` was supplied |
-| `to` | one of `turn_state_label` outputs: `idle`, `phase_gating`, `cascade_routing`, `awaiting_provider`, `streaming`, `awaiting_tool_result`, `completing`, `done`, `failed:<reason>`, `cancelled:<reason>` |
+| `from` | `idle`, `phase_gating`, `cascade_routing`, `awaiting_provider`, `streaming`, `awaiting_tool`, `completing`, plus `-` when no `?prev` was supplied |
+| `to` | one of `turn_state_label` outputs: `idle`, `phase_gating`, `cascade_routing`, `awaiting_provider`, `streaming`, `awaiting_tool`, `completing`, `done`, `failed:<reason>`, `cancelled:<reason>` |
 | `keeper` | keeper name (e.g. `nick0cave`, `alice`) |
 
 `failed:` reasons (`failure_reason_label`):
@@ -97,6 +97,12 @@ Format:
 Emitted via `Log.Keeper.info` with the `keeper_name` and `turn_id` structured fields wired in Step 0a (#11154 / #11156 / #11159). A missing `?prev` renders as `-`.
 
 The line text is stable and pinned by the `test_keeper_turn_fsm_emit` sentinel — a label rename or signature drift fails the build.
+
+`emit_transition` also classifies every `(prev, next)` pair against the
+runtime image of `KeeperTurnFSM.tla` `Next`. An edge outside the contract
+increments `masc_fsm_guard_violation_total{action="KeeperTurnFSM.Next", ...}`
+and logs `[fsm:transition:violation]`; with `MASC_FSM_GUARD_ASSERT=1` the same
+violation raises during tests/CI.
 
 ## Pulling a single turn back out
 

@@ -128,6 +128,12 @@ type registry_entry = {
       (** Observable conditions that derive [phase]. *)
   fiber_stop : bool Atomic.t;
   fiber_wakeup : bool Atomic.t;
+  event_queue : Keeper_event_queue.t Atomic.t;
+      (** Event Layer queue for incoming stimuli. Independent of
+          [fiber_wakeup] (which remains a hint signal). The Policy
+          Layer turn must consult this queue at the start of every
+          [emit] tick — see [specs/keeper-state-machine/KeeperEventQueue.tla]
+          and the [TurnDequeue] action. *)
   started_at : float;
   grpc_close : (unit -> unit) option Atomic.t;
   done_p : [ `Stopped | `Crashed of string ] Eio.Promise.t;
@@ -496,3 +502,20 @@ val get_phase : base_path:string -> string -> Keeper_state_machine.phase option
 
 (** Get the observable conditions of a keeper. *)
 val get_conditions : base_path:string -> string -> Keeper_state_machine.conditions option
+
+(** Append a stimulus to the keeper's Event Layer queue.
+
+    Always succeeds when the keeper is registered. Lock-free CAS
+    loop on [entry.event_queue]; concurrent [enqueue_event] callers
+    do not block. Stimuli arrive in the order observed by the CAS
+    winner, which the Policy Layer respects via [Keeper_event_queue.dequeue].
+
+    Logs a warning when [name] is not in the registry — calling sites
+    should not depend on enqueue success for missing keepers. *)
+val enqueue_event :
+  base_path:string -> string -> Keeper_event_queue.stimulus -> unit
+
+(** Snapshot the keeper's Event Layer queue. Returns [Keeper_event_queue.empty]
+    when the keeper is missing. Read-only — does not consume stimuli. *)
+val event_queue_snapshot :
+  base_path:string -> string -> Keeper_event_queue.t

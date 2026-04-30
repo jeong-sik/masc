@@ -12,8 +12,8 @@ import { useMemo } from 'preact/hooks'
 import { TimeAgo } from '../common/time-ago'
 import { StatusDot } from '../common/status-dot'
 import { RouteLink } from '../common/route-link'
-import { KpiCell, type KpiCellKind } from '../kpi-cell'
-import { KpiStrip } from '../kpi-strip'
+import type { KpiCellKind } from '../kpi-cell'
+import { KpiStripIsland } from '../kpi-strip-island'
 import { AgentAvatar } from './agent-avatar'
 import { missionSnapshot } from '../../mission-store'
 import { tasks, keepers } from '../../store'
@@ -97,13 +97,17 @@ function FunnelCard({ counts }: { counts: FunnelCounts }) {
         <h2 class="text-xs font-semibold uppercase tracking-wider text-[var(--color-fg-secondary)]">오늘 상황</h2>
         <span class="text-2xs text-[var(--color-fg-muted)]">task 기준</span>
       </header>
-      <${KpiStrip} ariaLabel="오늘 funnel" cols=${5}>
-        <${KpiCell} variant="stacked" label="신규" value=${String(counts.created)} testId="funnel-created" />
-        <${KpiCell} variant="stacked" label="진행" value=${String(counts.inProgress)} testId="funnel-in-progress" />
-        <${KpiCell} variant="stacked" label="검증 대기" value=${String(counts.awaiting)} kind=${awaitingKind} testId="funnel-awaiting" />
-        <${KpiCell} variant="stacked" label="완료" value=${String(counts.completed)} kind="ok" testId="funnel-completed" />
-        <${KpiCell} variant="stacked" label="목표" value=${formatTargetRatio(counts)} testId="funnel-target" />
-      <//>
+      <${KpiStripIsland}
+        ariaLabel="오늘 funnel"
+        cols=${5}
+        cells=${[
+          { variant: 'stacked', label: '신규', value: String(counts.created), testId: 'funnel-created' },
+          { variant: 'stacked', label: '진행', value: String(counts.inProgress), testId: 'funnel-in-progress' },
+          { variant: 'stacked', label: '검증 대기', value: String(counts.awaiting), kind: awaitingKind, testId: 'funnel-awaiting' },
+          { variant: 'stacked', label: '완료', value: String(counts.completed), kind: 'ok', testId: 'funnel-completed' },
+          { variant: 'stacked', label: '목표', value: formatTargetRatio(counts), testId: 'funnel-target' },
+        ]}
+      />
     </section>
   `
 }

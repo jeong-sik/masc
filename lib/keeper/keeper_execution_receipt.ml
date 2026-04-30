@@ -22,10 +22,10 @@ let outcome_kind_to_tla_receipt = function
   | `Cancelled -> "receipt_cancelled"
 
 let outcome_kind_of_string = function
-  | "ok" -> Some `Ok
-  | "skipped" -> Some `Skipped
-  | "error" -> Some `Error
-  | "cancelled" -> Some `Cancelled
+  | "ok" | "receipt_done" -> Some `Ok
+  | "skipped" | "receipt_skipped" -> Some `Skipped
+  | "error" | "receipt_failed" -> Some `Error
+  | "cancelled" | "receipt_cancelled" -> Some `Cancelled
   | _ -> None
 
 let outcome_kind_is_terminal_success = function
@@ -425,7 +425,11 @@ let to_json (receipt : t) =
         | Some value -> `String value
         | None -> `Null );
       ("goal_ids", list_json receipt.goal_ids);
-      ("outcome", `String receipt.outcome);
+      ("outcome",
+       `String
+         (match outcome_kind_of_string receipt.outcome with
+          | Some kind -> outcome_kind_to_tla_receipt kind
+          | None -> receipt.outcome));
       ("terminal_reason_code", `String receipt.terminal_reason_code);
       ("operator_disposition", `String operator_disposition);
       ("operator_disposition_reason", `String operator_disposition_reason);
@@ -571,7 +575,11 @@ let operator_broadcast_payload (receipt : t) ~disposition ~reason =
         | None -> `Null )
     ; "disposition", `String disposition
     ; "disposition_reason", `String reason
-    ; "outcome", `String receipt.outcome
+    ; "outcome",
+      `String
+        (match outcome_kind_of_string receipt.outcome with
+         | Some kind -> outcome_kind_to_tla_receipt kind
+         | None -> receipt.outcome)
     ; "terminal_reason_code", `String receipt.terminal_reason_code
     ; ( "current_task_id",
         match receipt.current_task_id with

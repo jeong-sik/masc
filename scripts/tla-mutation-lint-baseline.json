@@ -1,0 +1,8 @@
+{
+  "_comment_1": "Mutation-lint ratchet baseline. Floor enforced by scripts/tla-mutation-lint-ratchet.sh.",
+  "_comment_2": "Direction: monotonic DECREASE. current must be <= keeper_mutation_sites_max (we want fewer mutations over time).",
+  "_comment_3": "Reduce by either: (a) refactoring the site away from mutation, or (b) annotating with (* tla-lint: allow-mutation: <reason> *).",
+  "_comment_4": "After reducing, run scripts/tla-mutation-lint-ratchet.sh --regenerate to rewrite this file. Increases require a paired follow-up issue.",
+  "_comment_5": "Reference: planning/claude-plans/greedy-sleeping-blossom.md (Track 1A).",
+  "keeper_mutation_sites_max": 254
+}

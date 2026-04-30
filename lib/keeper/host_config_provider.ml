@@ -152,41 +152,160 @@ let metadata_of_binding (kb : Keeper_gh_env.keeper_binding) =
   | Some id -> base @ [ "github_identity", id ]
   | None -> base
 
-let resolve ~config ~identity:keeper_name =
+(* RFC-0019 PR-A — bridge to the multi-repo credential store
+   (#12304).  When a keeper has a [Keeper_repo_mapping] entry that
+   resolves to exactly one [Credential_store] credential we synthesise
+   a [Keeper_gh_env.keeper_binding] from that credential and reuse the
+   existing [compose_env]/[compose_ro_mounts] flow verbatim, preserving
+   every fail-closed semantics and warning the legacy path already
+   carries.  Keepers with no mapping fall through to [legacy_resolve]
+   exactly as before.
+
+   See [docs/rfc/RFC-0019-keeper-credential-unification.md] §4.2 and §5
+   (PR-A) for the rationale.  Per-repo dispatch for keepers with
+   multiple mapped credentials is delivered in PR-B; PR-A reports
+   such keepers as [Missing_bundle] with an actionable [path] field. *)
+let count_resolve_outcome ~keeper_name ~source ~reason =
+  Prometheus.inc_counter
+    "keeper_credential_provider_resolve_total"
+    ~labels:
+      [ ("keeper", keeper_name); ("source", source); ("reason", reason) ]
+    ()
+
+let bind_from_keeper_binding ~keeper_name (kb : Keeper_gh_env.keeper_binding)
+    ~extra_metadata =
+  let git_author_name, git_author_email =
+    resolve_git_identity kb ~keeper_name
+  in
+  let env = compose_env ~git_author_name ~git_author_email in
+  let ro_mounts = compose_ro_mounts ~keeper_name kb in
+  (* β7 fail-closed: resolve is called only when git_creds_enabled
+     (caller at keeper_shell_docker.ml:398-400).  If ALL credential
+     host paths are empty or missing, ro_mounts will be [].  Returning
+     Ok with empty mounts lets the keeper start in Docker with no
+     credential files — gh/git commands then fail with confusing 401
+     or "permission denied" errors.  Return Error so the caller
+     reports the real cause at sandbox creation time. *)
+  if ro_mounts = [] then
+    Error
+      (Credential_provider.Missing_bundle
+         { identity = keeper_name
+         ; path = "all credential host paths empty or missing"
+         })
+  else
+    let metadata = metadata_of_binding kb @ extra_metadata in
+    Ok
+      Credential_provider.
+        {
+          identity = kb.effective_github_identity;
+          env;
+          ro_mounts;
+          bootstrap = None;
+          metadata;
+        }
+
+let legacy_resolve ~config ~keeper_name =
   match Keeper_gh_env.keeper_binding config ~keeper_name with
   | Error reason ->
       Error
         (Credential_provider.Missing_bundle
-          { identity = keeper_name; path = reason })
-  | Ok kb ->
-      let git_author_name, git_author_email =
-        resolve_git_identity kb ~keeper_name
-      in
-      let env = compose_env ~git_author_name ~git_author_email in
-      let ro_mounts = compose_ro_mounts ~keeper_name kb in
-      (* β7 fail-closed: resolve is called only when git_creds_enabled
-         (caller at keeper_shell_docker.ml:398-400).  If ALL credential
-         host paths are empty or missing, ro_mounts will be [].  Returning
-         Ok with empty mounts lets the keeper start in Docker with no
-         credential files — gh/git commands then fail with confusing 401
-         or "permission denied" errors.  Return Error so the caller
-         reports the real cause at sandbox creation time. *)
-      if ro_mounts = [] then
-        Error
-          (Credential_provider.Missing_bundle
-            { identity = keeper_name
-            ; path = "all credential host paths empty or missing"
-            })
-      else
-        let metadata = metadata_of_binding kb in
-        Ok
-          Credential_provider.{
-            identity = kb.effective_github_identity;
-            env;
-            ro_mounts;
-            bootstrap = None;
-            metadata;
+           { identity = keeper_name; path = reason })
+  | Ok kb -> bind_from_keeper_binding ~keeper_name kb ~extra_metadata:[]
+
+(* Synthesise a [Keeper_gh_env.keeper_binding] from a credential store
+   record.  PR-A convention: [bundle_root = dirname gh_config_dir].  This
+   matches the existing host bundle layout
+   (<base>/.masc/github-identities/<id>/gh) but tolerates operator-set
+   custom paths — sibling files (gitconfig, ssh) that happen to live next
+   to [gh_config_dir] are picked up by [compose_ro_mounts] via
+   [mount_if_present]; absent siblings are silently skipped, just as in
+   the legacy path. *)
+let binding_of_credential (cred : Repo_manager_types.credential)
+    : (Keeper_gh_env.keeper_binding, string) result =
+  match cred.gh_config_dir with
+  | None ->
+      Error
+        (Printf.sprintf
+           "credential %s has no gh_config_dir; the PR-A bridge cannot \
+            materialise an unmaterialised credential. Resolution: \
+            populate gh_config_dir via dashboard or `gh auth login` \
+            into the bundle path, then retry."
+           cred.id)
+  | Some "" ->
+      Error
+        (Printf.sprintf
+           "credential %s has empty gh_config_dir" cred.id)
+  | Some gh_config_dir ->
+      (* Local name [synth_bundle_root] avoids field punning collision
+         with the [Keeper_gh_env.bundle_root] function that the
+         [Keeper_gh_env.{ ... }] qualified record syntax brings into
+         scope. *)
+      let synth_bundle_root = Filename.dirname gh_config_dir in
+      Ok
+        Keeper_gh_env.
+          {
+            github_identity = Some cred.username;
+            effective_github_identity = cred.username;
+            credential_scope = Keeper_identity;
+            git_identity_mode = "github_identity";
+            bundle_root = synth_bundle_root;
+            gh_config_dir;
           }
+
+let bind_from_credential ~keeper_name (cred : Repo_manager_types.credential) =
+  match binding_of_credential cred with
+  | Error reason ->
+      Error
+        (Credential_provider.Missing_bundle
+           { identity = keeper_name; path = reason })
+  | Ok kb ->
+      bind_from_keeper_binding ~keeper_name kb
+        ~extra_metadata:
+          [ ("credential_source", "credential_store");
+            ("credential_id", cred.id) ]
+
+let resolve ~config ~identity:keeper_name =
+  match
+    Keeper_repo_mapping.credentials_for_keeper
+      ~base_path:config.Coord.base_path ~keeper_id:keeper_name
+  with
+  | Error err ->
+      (* Mapping store unreadable — treat as infra error, not absence.
+         Fall through to legacy resolver so a corrupt
+         [keeper_repo_mappings.toml] does not break previously-working
+         keepers. *)
+      count_resolve_outcome ~keeper_name ~source:"legacy"
+        ~reason:"mapping_load_error";
+      Log.Keeper.warn
+        "%s: keeper_repo_mapping load error (%s); falling back to \
+         legacy host_config_provider resolver"
+        keeper_name err;
+      legacy_resolve ~config ~keeper_name
+  | Ok [] ->
+      count_resolve_outcome ~keeper_name ~source:"legacy"
+        ~reason:"no_mapping";
+      legacy_resolve ~config ~keeper_name
+  | Ok [cred] ->
+      count_resolve_outcome ~keeper_name ~source:"credential_store"
+        ~reason:"single_mapping";
+      bind_from_credential ~keeper_name cred
+  | Ok many ->
+      count_resolve_outcome ~keeper_name ~source:"ambiguous"
+        ~reason:"multi_mapping";
+      let ids =
+        List.map (fun (c : Repo_manager_types.credential) -> c.id) many
+      in
+      Error
+        (Credential_provider.Missing_bundle
+           { identity = keeper_name
+           ; path =
+               Printf.sprintf
+                 "keeper %s has %d credentials mapped (%s); RFC-0019 \
+                  PR-A resolves only single-credential keepers. \
+                  Per-repo dispatch is delivered in PR-B \
+                  (resolve_for_repo)."
+                 keeper_name (List.length many) (String.concat ", " ids)
+           })
 
 let finalize (_b : Credential_provider.binding) ~container_id:_ =
   (* PR-1: noop.  PR-3 will rewrite hosts.yml:user inside the

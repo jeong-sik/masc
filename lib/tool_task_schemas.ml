@@ -166,7 +166,7 @@ Tip: Look for status='todo' tasks to claim.";
   };
   {
     name = "masc_claim_next";
-    description = "Automatically claim the highest priority unclaimed task. Use this when you want to pick up the most important available work without manually checking the task board. Returns the claimed task details including priority level.";
+    description = "Automatically claim the highest priority unclaimed task. Use this when you want to pick up the most important available work without manually checking the task board. Returns the claimed task details including priority level and a claim_observation fragment for the verified write/readback result.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

@@ -284,6 +284,10 @@ let handle_keeper_task_tool
           let matched_goal_id = find_task_goal_id config task_id in
           ( active_goal_scope_json ~meta ?matched_goal_id ()
           , [
+              ( "claim_observation",
+                Tool_task.build_claim_observation_payload
+                  ~now:(Time_compat.now ()) ~agent_name:meta.agent_name
+                  ~task_id );
               ( "claimed_task",
                 `Assoc
                   [

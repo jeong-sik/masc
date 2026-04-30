@@ -35,6 +35,9 @@ open Alcotest
 open Masc_mcp
 module T = Telemetry_eio
 
+let error_kind value = T.error_kind_of_string value
+let error_kind_to_string = T.error_kind_to_string
+
 let make_config () =
   let dir = Filename.temp_file "telem_10358_" "" in
   Sys.remove dir;
@@ -93,7 +96,7 @@ let test_success_true_no_error_emit () =
   with_temp_config @@ fun config ->
   T.track_tool_called config ~tool_name:"masc_status"
     ~success:true ~duration_ms:5
-    ~error_kind:"timeout"
+    ~error_kind:(error_kind "timeout")
     ();
   let kinds = recent_events_kinds config 5 in
   check (list string)
@@ -122,7 +125,7 @@ let test_failure_with_error_kind_pairs () =
     ~agent_id:"keeper-executor-agent"
     ~source:"keeper_internal"
     ~session_id:"sess-10358"
-    ~error_kind:"timeout"
+    ~error_kind:(error_kind "timeout")
     ~error_message:"timeout=1|duration_ms=30000|detail=deadline"
     ();
   let kinds = recent_events_kinds config 5 in
@@ -136,7 +139,7 @@ let test_failure_with_error_kind_pairs () =
   with
   | { T.event = T.Tool_called tool; _ } :: _ ->
       check (option string) "Tool_called.error_kind"
-        (Some "timeout") tool.error_kind;
+        (Some "timeout") (Option.map error_kind_to_string tool.error_kind);
       check (option string) "Tool_called.error_message"
         (Some "timeout=1|duration_ms=30000|detail=deadline")
         tool.error_message
@@ -148,7 +151,7 @@ let test_whitespace_error_kind_no_pair () =
   with_temp_config @@ fun config ->
   T.track_tool_called config ~tool_name:"masc_status"
     ~success:false ~duration_ms:1
-    ~error_kind:"   "
+    ~error_kind:(error_kind "   ")
     ();
   let kinds = recent_events_kinds config 5 in
   check (list string)
@@ -161,7 +164,7 @@ let test_error_message_override_preserved () =
   with_temp_config @@ fun config ->
   T.track_tool_called config ~tool_name:"keeper_edit"
     ~success:false ~duration_ms:42
-    ~error_kind:"tool_failure"
+    ~error_kind:(error_kind "tool_failure")
     ~error_message:"file not found: /tmp/missing.ml"
     ();
   let records = T.read_all_events config in

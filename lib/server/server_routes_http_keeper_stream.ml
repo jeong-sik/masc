@@ -88,7 +88,8 @@ let execute_keeper_stream_tool ~sw ~clock ?auth_token:_ state ~agent_name ~argum
     | Some fs ->
         (try
            let telemetry_error_kind =
-             if success then None else Some "tool_failure"
+             if success then None
+             else Some (Telemetry_eio.error_kind_of_string "tool_failure")
            in
            Telemetry_eio.track_tool_called ~fs state.Mcp_server.room_config
              ~tool_name:"masc_keeper_msg" ~agent_id:agent_name ~success ~duration_ms
@@ -318,7 +319,8 @@ let execute_keeper_stream_tool_streaming ~sw ~clock ?auth_token:_ state
     | Some fs ->
         (try
            let telemetry_error_kind =
-             if success then None else Some "tool_failure"
+             if success then None
+             else Some (Telemetry_eio.error_kind_of_string "tool_failure")
            in
            Telemetry_eio.track_tool_called ~fs state.Mcp_server.room_config
              ~tool_name:"masc_keeper_msg" ~agent_id:agent_name ~success

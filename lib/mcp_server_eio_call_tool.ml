@@ -756,7 +756,9 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
      [Error_occurred] event for the previously-dead ADT variant. *)
   let telemetry_error_kind =
     if not success then
-      if !timeout_hit then Some "timeout" else Some "tool_failure"
+      Some
+        (Telemetry_eio.error_kind_of_string
+           (if !timeout_hit then "timeout" else "tool_failure"))
     else None
   in
   (* Track tool call in telemetry (controlled by MASC_TELEMETRY_ENABLED) *)

@@ -246,3 +246,12 @@ end
 module KeeperCascade : sig
   val provider_allowlist : unit -> string list option
 end
+
+(** {1 Transient retry backoff} *)
+
+module KeeperRetryBackoff : sig
+  val max_transient_retries : unit -> int
+  val transient_backoff_base_sec : unit -> float
+  val transient_backoff_cap_sec : unit -> float
+  val transient_backoff_sec : int -> float
+end

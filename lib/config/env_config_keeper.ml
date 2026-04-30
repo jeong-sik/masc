@@ -811,4 +811,35 @@ module KeeperCascade = struct
        | _ -> Some parts)
 end
 
+(** {1 Transient Retry Backoff}
+
+    Outer-loop retry parameters for transient network errors and
+    recoverable cascade failures.  These govern the keeper's exponential
+    backoff between re-attempts when all OAS providers fail transiently
+    (e.g. TCP keepalive expiry).  They do NOT affect OAS internal
+    per-provider retry (3 attempts with its own backoff). *)
+module KeeperRetryBackoff = struct
+  (** Maximum outer-loop retries after the initial attempt.
+      Total attempts = 1 initial + max_transient_retries.
+      Env: [MASC_KEEPER_MAX_TRANSIENT_RETRIES].  Default: 2. *)
+  let max_transient_retries () = get_int ~default:2 "MASC_KEEPER_MAX_TRANSIENT_RETRIES"
+
+  (** Base delay (seconds) for exponential backoff.
+      Delay at attempt [n] is [base * 2^(n-1)].
+      Env: [MASC_KEEPER_TRANSIENT_BACKOFF_BASE_SEC].  Default: 1.0. *)
+  let transient_backoff_base_sec () = get_float ~default:1.0 "MASC_KEEPER_TRANSIENT_BACKOFF_BASE_SEC"
+
+  (** Hard cap on backoff delay (seconds).
+      Env: [MASC_KEEPER_TRANSIENT_BACKOFF_CAP_SEC].  Default: 4.0. *)
+  let transient_backoff_cap_sec () = get_float ~default:4.0 "MASC_KEEPER_TRANSIENT_BACKOFF_CAP_SEC"
+
+  (** Exponential backoff delay for transient retry [attempt] (1-indexed).
+      Env: [MASC_KEEPER_TRANSIENT_BACKOFF_BASE_SEC] and
+      [MASC_KEEPER_TRANSIENT_BACKOFF_CAP_SEC]. *)
+  let transient_backoff_sec (attempt : int) : float =
+    let base = transient_backoff_base_sec () in
+    let cap = transient_backoff_cap_sec () in
+    Float.min cap (base *. Float.of_int (1 lsl (attempt - 1)))
+end
+
 (** Print configuration summary for debugging *)

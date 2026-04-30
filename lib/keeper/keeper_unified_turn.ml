@@ -1068,7 +1068,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                       mark_terminal_error err;
                       Error err
                   | No_degraded_retry when EC.is_transient_network_error err
-                              && attempt <= EC.max_transient_retries ->
+                              && attempt <= EC.max_transient_retries () ->
                       let delay = EC.transient_backoff_sec attempt in
                       Log.Keeper.warn
                         "%s: transient network error cascade=%s max_context=%d context_budget=%d primary_budget=%d requested_override=%s retry=%d/%d backoff=%.0fs: %s"
@@ -1079,7 +1079,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                         (match execution.max_context_resolution.requested_override with
                          | Some requested -> string_of_int requested
                          | None -> "none")
-                        attempt EC.max_transient_retries delay
+                        attempt (EC.max_transient_retries ()) delay
                         (short_preview (Oas.Error.to_string err));
                       Eio.Time.sleep clock delay;
                       retry_loop ~run_meta ~execution ~run_generation

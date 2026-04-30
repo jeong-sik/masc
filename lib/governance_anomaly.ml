@@ -257,7 +257,9 @@ let load_profile ~base_path ~agent_id =
   if not (Sys.file_exists path) then None
   else
     match Safe_ops.read_file_safe path with
-    | Error _ -> None
+    | Error msg ->
+        Log.Misc.warn "governance_anomaly: failed to read profile %s: %s" path msg;
+        None
     | Ok content -> (
         try
           let json = Yojson.Safe.from_string content in

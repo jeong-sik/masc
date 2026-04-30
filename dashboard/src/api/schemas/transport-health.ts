@@ -56,6 +56,7 @@ const SummarySchema = object({
 const SseOuterSchema = object({
   sessions_observer: fallback(number(), 0),
   sessions_coordinator: fallback(number(), 0),
+  sessions_presence: fallback(number(), 0),
   sessions_total: fallback(number(), 0),
   external_subscribers: fallback(number(), 0),
   broadcast_avg_seconds: fallback(number(), 0),
@@ -157,6 +158,7 @@ const WebrtcSchema = object({
 const StreamableHttpSchema = object({
   endpoint: fallback(string(), '/mcp'),
   observer_stream: fallback(string(), '/mcp?sse_kind=observer'),
+  presence_stream: fallback(string(), '/events/presence'),
   managed_endpoint: fallback(string(), '/mcp/managed'),
   operator_endpoint: fallback(string(), '/mcp/operator'),
   delete_endpoint: fallback(string(), '/mcp'),

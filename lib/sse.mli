@@ -12,11 +12,13 @@ module SMap : Map.S with type key = string
 type session_kind =
   | Observer
   | Coordinator
+  | Presence
 
 type broadcast_target =
   | All
   | Observers
   | Coordinators
+  | Presence_only
 
 type client = {
   id : int;
@@ -75,6 +77,7 @@ val current_id : unit -> int
 
 val broadcast : Yojson.Safe.t -> unit
 val broadcast_to : broadcast_target -> Yojson.Safe.t -> unit
+val broadcast_presence : Yojson.Safe.t -> unit
 val send_to : string -> Yojson.Safe.t -> unit
 val pop : string -> string option
 val try_pop : string -> string option

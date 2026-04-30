@@ -119,3 +119,5 @@ val handle_delete_mcp :
   unit
 val handle_ag_ui_events :
   deps:deps -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+val handle_presence_events :
+  deps:deps -> Httpun.Request.t -> Httpun.Reqd.t -> unit

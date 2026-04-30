@@ -440,6 +440,21 @@ let relay_event_type json =
        | Some value -> value
        | None -> "unknown")
 
+let relay_event_is_presence_class json =
+  match relay_event_type json with
+  | "masc:keeper:snapshot" -> true
+  | _ -> false
+
+let broadcast_relay_json json =
+  Sse.broadcast_to All json;
+  if relay_event_is_presence_class json then
+    try Sse.broadcast_presence json
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn ->
+        Log.Misc.warn "oas_event_bridge: presence relay failed: %s"
+          (Printexc.to_string exn)
+
 let update_relay_queue_depth pending =
   Prometheus.set_gauge Prometheus.metric_oas_sse_relay_queue_depth
     (float_of_int (List.length pending))
@@ -564,7 +579,7 @@ let deliver_pending ?store_ref (pending : pending_relay) =
   try
     deliver_pending_with
       ~append_json
-      ~broadcast_json:(Sse.broadcast_to All)
+      ~broadcast_json:broadcast_relay_json
       pending
   with
   | Eio.Cancel.Cancelled _ as e -> raise e

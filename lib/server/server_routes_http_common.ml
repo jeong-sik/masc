@@ -268,3 +268,7 @@ let handle_delete_mcp ?(profile = Server_mcp_transport_http.Full) request reqd =
 let handle_ag_ui_events request reqd =
   Server_mcp_transport_http.handle_ag_ui_events ~deps:(mcp_transport_http_deps ())
     request reqd
+
+let handle_presence_events request reqd =
+  Server_mcp_transport_http.handle_presence_events
+    ~deps:(mcp_transport_http_deps ()) request reqd

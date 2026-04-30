@@ -177,6 +177,9 @@ val handle_delete_mcp :
 val handle_ag_ui_events :
   Httpun.Request.t -> Httpun.Reqd.t -> unit
 
+val handle_presence_events :
+  Httpun.Request.t -> Httpun.Reqd.t -> unit
+
 (** {1 Misc helpers} *)
 
 val mcp_transport_http_deps :

@@ -455,6 +455,7 @@ export function TransportHealthPanel() {
             <${SectionCard} title="SSE" status=${sseStatus} eyebrow=${`${data.sse.sessions_total} 활성`}>
               <${MetricRow} label="옵저버" value=${data.sse.sessions_observer} />
               <${MetricRow} label="코디네이터" value=${data.sse.sessions_coordinator} />
+              <${MetricRow} label="프레즌스" value=${data.sse.sessions_presence} />
               <${MetricRow} label="외부 팬아웃" value=${data.sse.external_subscribers} />
               <${MetricRow} label="큐" value=${data.sse.queue_max_depth} sub=${`최대 / 평균 ${formatFloat(data.sse.queue_avg_depth)}`} />
               <${MetricRow} label="릴레이 큐" value=${data.sse.relay_queue_depth} />
@@ -514,6 +515,7 @@ export function TransportHealthPanel() {
             <${SectionCard} title="HTTP" status=${h2Status} eyebrow=${data.http2.listener_mode}>
               <${MetricRow} label="POST" value=${data.streamable_http.endpoint} />
               <${MetricRow} label="옵저버 스트림" value=${data.streamable_http.observer_stream} />
+              <${MetricRow} label="프레즌스 스트림" value=${data.streamable_http.presence_stream} />
               <${MetricRow} label="오퍼레이터 표면" value=${data.streamable_http.operator_endpoint} />
               <${MetricRow} label="레거시" value=${data.streamable_http.legacy_sse_endpoint} sub=${'deprecated'} />
             <//>

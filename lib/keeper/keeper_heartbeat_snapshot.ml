@@ -392,14 +392,17 @@ let write_heartbeat_snapshot
     in
     Dated_jsonl.append metrics_store snapshot;
     (try
-       Sse.broadcast
-         (`Assoc
-             [ "type", `String "keeper_heartbeat"
-             ; "name", `String meta_current.name
-             ; "generation", `Int meta_current.runtime.generation
-             ; "context_ratio", `Float context_ratio_v
-             ; "ts_unix", `Float now_ts
-             ])
+       let json =
+         `Assoc
+           [ "type", `String "keeper_heartbeat"
+           ; "name", `String meta_current.name
+           ; "generation", `Int meta_current.runtime.generation
+           ; "context_ratio", `Float context_ratio_v
+           ; "ts_unix", `Float now_ts
+           ]
+       in
+       Sse.broadcast json;
+       Sse.broadcast_presence json
      with
      | Eio.Cancel.Cancelled _ as e -> raise e
      | exn ->

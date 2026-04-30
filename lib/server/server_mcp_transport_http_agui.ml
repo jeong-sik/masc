@@ -30,6 +30,21 @@ let ag_ui_event_of_masc_event event =
 
 let sse_ping_interval_s = 30.0
 
+let presence_stream_headers ~deps raw_session_id protocol_version origin =
+  Httpun.Headers.of_list
+    ([
+       ("content-type", Http_negotiation.sse_content_type);
+       ("cache-control", "no-cache");
+       ("connection", "keep-alive");
+       ("x-accel-buffering", "no");
+       Server_mcp_transport_http_headers.session_cookie_header raw_session_id;
+     ]
+    @ Server_mcp_transport_http_headers.mcp_headers raw_session_id
+        protocol_version
+    @ deps.cors_headers origin)
+
+let presence_session_id raw_session_id = "presence:" ^ raw_session_id
+
 let handle_ag_ui_events ~deps request reqd =
   let origin = deps.get_origin request in
   let session_id = Mcp_session.get_or_generate (get_session_id_any request) in
@@ -139,3 +154,114 @@ let handle_ag_ui_events ~deps request reqd =
       | Error msg ->
           Log.Server.debug "ag-ui SSE runtime unavailable for session %s: %s"
             session_id msg)
+
+let handle_presence_events ~deps request reqd =
+  let origin = deps.get_origin request in
+  let raw_session_id = Mcp_session.get_or_generate (get_session_id_any request) in
+  let session_id = presence_session_id raw_session_id in
+  let protocol_version =
+    get_protocol_version_for_session ~session_id:raw_session_id request
+  in
+  let base_path = deps.get_base_path () in
+  match deps.verify_mcp_observer_stream_auth ~base_path request with
+  | Error msg ->
+      respond_mcp_auth_error ~deps request reqd ~session_id:raw_session_id
+        ~protocol_version msg
+  | Ok () -> (
+      match check_sse_connect_guard session_id with
+      | Error (reason, retry_after_s) ->
+          respond_sse_rate_limited ~deps ~origin ~session_id
+            ~protocol_version ~reason ~retry_after_s reqd
+      | Ok () ->
+          stop_sse_session_preserve_guard session_id;
+          let headers =
+            presence_stream_headers ~deps raw_session_id protocol_version origin
+          in
+          let response = Httpun.Response.create ~headers `OK in
+          let writer = Httpun.Reqd.respond_with_streaming reqd response in
+          let mutex = Eio.Mutex.create () in
+          let client_id, event_stream, evicted =
+            Sse.register ~kind:Sse.Presence session_id ~last_event_id:0
+          in
+          (match evicted with
+          | Some evicted_sid -> stop_sse_session evicted_sid
+          | None -> ());
+          let info =
+            {
+              session_id;
+              client_id;
+              writer;
+              mutex;
+              stop = ref false;
+              closed = false;
+            }
+          in
+          register_sse_conn ~session_id ~info;
+          if not (send_raw info ": presence-stream\nretry: 3000\n\n") then
+            Log.Server.debug "presence prime send failed for session %s"
+              info.session_id;
+          match deps.get_runtime_result () with
+          | Ok runtime ->
+              let sw = runtime.sw in
+              let clock = runtime.clock in
+              Eio.Fiber.fork ~sw (fun () ->
+                  let rec drain () =
+                    let event = Eio.Stream.take event_stream in
+                    (try
+                       if not (info.closed || !(info.stop)) then
+                         if not (send_raw info event) then
+                           Log.Server.debug
+                             "presence drain send failed for session %s"
+                             info.session_id
+                     with
+                     | Eio.Cancel.Cancelled _ as e -> raise e
+                     | exn ->
+                         Log.Server.error "presence drain write error: %s"
+                           (Printexc.to_string exn);
+                         stop_sse_session_preserve_guard info.session_id);
+                    if not !(info.stop) then drain ()
+                  in
+                  try drain ()
+                  with
+                  | Eio.Cancel.Cancelled _ as e -> raise e
+                  | exn ->
+                      Log.Server.error "presence drain loop error: %s"
+                        (Printexc.to_string exn));
+              Eio.Fiber.fork ~sw (fun () ->
+                  let rec loop () =
+                    if not !(info.stop) then (
+                      (try Eio.Time.sleep clock sse_ping_interval_s
+                       with
+                       | Eio.Cancel.Cancelled _ as e -> raise e
+                       | exn ->
+                           Log.Server.debug
+                             "presence ping sleep interrupted: %s"
+                             (Printexc.to_string exn));
+                      (try
+                         if info.closed then
+                           stop_sse_session_preserve_guard info.session_id
+                         else if not !(info.stop) then
+                           if not (send_raw info ": ping\n\n") then
+                             Log.Server.debug
+                               "presence ping send failed for session %s"
+                               info.session_id
+                       with
+                       | Eio.Cancel.Cancelled _ as e -> raise e
+                       | exn ->
+                           Log.Server.warn
+                             "presence ping send failed for session %s: %s"
+                             info.session_id (Printexc.to_string exn);
+                           stop_sse_session_preserve_guard info.session_id);
+                      loop ())
+                  in
+                  try loop ()
+                  with
+                  | Eio.Cancel.Cancelled _ as e -> raise e
+                  | exn ->
+                      Log.Server.error
+                        "presence ping loop exited for session %s: %s"
+                        info.session_id (Printexc.to_string exn))
+          | Error msg ->
+              Log.Server.debug
+                "presence SSE runtime unavailable for session %s: %s"
+                session_id msg)

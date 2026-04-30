@@ -7,8 +7,7 @@ import { Card } from './common/card'
 import { JsonViewerCard } from './common/json-viewer'
 import { EmptyState } from './common/empty-state'
 import { KeeperBadge } from './keeper-badge'
-import { KpiCell } from './kpi-cell'
-import { KpiStrip } from './kpi-strip'
+import { KpiStripIsland, type KpiStripIslandData } from './kpi-strip-island'
 import { formatTimeAgo } from '../lib/format-time'
 import {
   asBoolean,
@@ -265,14 +264,18 @@ function KeeperCard({ item }: { item: KeeperItem }) {
             : null}
         </div>
         <div class="text-xs lg:min-w-[220px]">
-          <${KpiStrip} ariaLabel="domain 통계" cols=${2}>
-            <${KpiCell} variant="stacked" label="score" value=${item.score.toFixed(1)} />
-            <${KpiCell} variant="stacked" label="approvals" value=${item.approval_pending_count} />
-            <${KpiCell} variant="stacked" label="turns" value=${item.total_turns} />
-            <${KpiCell} variant="stacked" label="activity" value=${item.recent_activity_count} />
-            <${KpiCell} variant="stacked" label="history" value=${item.trace_history_count} />
-            <${KpiCell} variant="stacked" label="task" value=${item.current_task_id ?? 'none'} />
-          <//>
+          <${KpiStripIsland}
+            ariaLabel="domain 통계"
+            cols=${2}
+            cells=${[
+              { variant: 'stacked', label: 'score', value: item.score.toFixed(1) },
+              { variant: 'stacked', label: 'approvals', value: item.approval_pending_count },
+              { variant: 'stacked', label: 'turns', value: item.total_turns },
+              { variant: 'stacked', label: 'activity', value: item.recent_activity_count },
+              { variant: 'stacked', label: 'history', value: item.trace_history_count },
+              { variant: 'stacked', label: 'task', value: item.current_task_id ?? 'none' },
+            ] satisfies KpiStripIslandData['cells']}
+          />
         </div>
       </div>
     </div>
@@ -407,14 +410,18 @@ export function SafeAutonomyPanel() {
                       generated ${data.generated_at ? formatTimeAgo(data.generated_at) : '정보 없음'}
                     </div>
                   </div>
-                  <${KpiStrip} ariaLabel="safe-autonomy 요약" cols=${4}>
-                    <${KpiCell} variant="stacked" label="keepers" value=${data.summary.keeper_count} />
-                    <${KpiCell} variant="stacked" label="active goals" value=${data.summary.active_goal_count} />
-                    <${KpiCell} variant="stacked" label="findings" value=${data.summary.findings_total} />
-                    <${KpiCell} variant="stacked" label="human queue" value=${data.summary.human_action_required_count} />
-                    <${KpiCell} variant="stacked" label="with task" value=${data.summary.keepers_with_current_task} />
-                    <${KpiCell} variant="stacked" label="approval depth" value=${data.summary.approval_queue_depth} />
-                  <//>
+                  <${KpiStripIsland}
+                    ariaLabel="safe-autonomy 요약"
+                    cols=${4}
+                    cells=${[
+                      { variant: 'stacked', label: 'keepers', value: data.summary.keeper_count },
+                      { variant: 'stacked', label: 'active goals', value: data.summary.active_goal_count },
+                      { variant: 'stacked', label: 'findings', value: data.summary.findings_total },
+                      { variant: 'stacked', label: 'human queue', value: data.summary.human_action_required_count },
+                      { variant: 'stacked', label: 'with task', value: data.summary.keepers_with_current_task },
+                      { variant: 'stacked', label: 'approval depth', value: data.summary.approval_queue_depth },
+                    ] satisfies KpiStripIslandData['cells']}
+                  />
                 </div>
               </div>
 

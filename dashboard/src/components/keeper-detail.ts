@@ -28,6 +28,7 @@ import {
 import { TimeAgo } from './common/time-ago'
 import { Checkbox } from './common/checkbox'
 import { TextArea } from './common/input'
+import { SectionHeader } from './common/section-header'
 import type { Keeper } from '../types'
 import { invalidateDashboardCache, refreshDashboard, keepers } from '../store'
 import { hydrateKeeperStatus, selectKeeper } from '../keeper-runtime'
@@ -78,7 +79,8 @@ import { KeeperToolCallInspector } from './keeper-tool-call-inspector'
 import { SupervisorDiagnosticsPanel } from './keeper-supervisor-diagnostics'
 import { KeeperEvalQualityPanel } from './keeper-eval-quality'
 import { KeeperBDIPanel } from './keeper-bdi-panel'
-import { KeeperDetailSectionCard as SectionCard } from './keeper-detail-layout'
+import { PanelCard } from './common/panel-card'
+import { CollapsibleSection } from './common/collapsible'
 import {
   KeeperDetailHeaderInfo,
   KeeperDetailMissingState,
@@ -90,6 +92,7 @@ import {
   KeeperCheckpointPanel,
 } from './keeper-detail-history'
 import { navigate, route } from '../router'
+import { StatusDot } from './common/status-dot'
 export {
   filterCheckpointHistory,
   lineageTransitionLabel,
@@ -733,11 +736,11 @@ function PlaygroundReposPanel({ keeperName }: { keeperName: string }) {
   if (repos.length === 0 && prs.length === 0 && worktrees.length === 0) return null
 
   return html`
-    <${SectionCard} title="플레이그라운드">
+    <${PanelCard}title="플레이그라운드">
       <div class="flex flex-col gap-3">
         ${repos.length > 0 ? html`
           <div>
-            <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)] mb-1.5">저장소 (${repos.length})</div>
+            <${SectionHeader} size="xs" class="mb-1.5">저장소 (${repos.length})</${SectionHeader}>
             <div class="flex flex-col gap-1.5">
               ${repos.map(r => html`
                 <div class="flex items-center gap-3 px-3 py-2 rounded border border-[var(--white-8)] bg-[var(--white-2)]">
@@ -758,7 +761,7 @@ function PlaygroundReposPanel({ keeperName }: { keeperName: string }) {
 
         ${prs.length > 0 ? html`
           <div>
-            <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)] mb-1.5">PRs (${prs.length})</div>
+            <${SectionHeader} size="xs" class="mb-1.5">PRs (${prs.length})</${SectionHeader}>
             <div class="flex flex-col gap-1.5">
               ${prs.map(pr => html`
                 <div class="flex items-center gap-2 px-3 py-1.5 rounded border border-[var(--white-8)] bg-[var(--white-2)]">
@@ -774,7 +777,7 @@ function PlaygroundReposPanel({ keeperName }: { keeperName: string }) {
 
         ${worktrees.length > 0 ? html`
           <div>
-            <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)] mb-1.5">워크트리 (${worktrees.length})</div>
+            <${SectionHeader} size="xs" class="mb-1.5">워크트리 (${worktrees.length})</${SectionHeader}>
             <div class="flex flex-wrap gap-1.5">
               ${worktrees.map(w => html`
                 <span class="text-3xs font-mono px-2 py-1 rounded border border-[var(--white-8)] bg-[var(--white-2)] text-[var(--color-fg-muted)]" title=${w.path}>${w.name}</span>
@@ -976,25 +979,13 @@ export function KeeperDetailPage() {
             description="상태 기계, 메모리 티어, KPI, 추론/컨텍스트 계측을 먼저 훑어 keeper의 현재 건강도를 빠르게 판단합니다."
           >
         <${PipelineStageBar} stage=${keeper.pipeline_stage} />
-        <details class="rounded border border-[var(--white-8)] bg-[var(--white-2)]">
-          <summary class="cursor-pointer py-2 px-4 text-3xs font-semibold uppercase tracking-widest text-[var(--color-fg-muted)] list-none select-none flex items-center gap-2">
-            <span class="w-1.5 h-1.5 rounded-full bg-[rgba(71,184,255,0.5)]" aria-hidden="true"></span>
-            Phase State Machine
-          </summary>
-          <div class="px-4 pb-4 pt-1">
-            <${KeeperStateDiagramPanel} keeperName=${keeper.name} currentPhase=${keeper.phase} />
-          </div>
-        </details>
+        <${CollapsibleSection} title="Phase State Machine">
+          <${KeeperStateDiagramPanel} keeperName=${keeper.name} currentPhase=${keeper.phase} />
+        <//>
 
-        <details class="rounded border border-[var(--white-8)] bg-[var(--white-2)]">
-          <summary class="cursor-pointer py-2 px-4 text-3xs font-semibold uppercase tracking-widest text-[var(--color-fg-muted)] list-none select-none flex items-center gap-2">
-            <span class="w-1.5 h-1.5 rounded-full bg-[rgba(99,102,241,0.5)]" aria-hidden="true"></span>
-            Memory Tier & Compaction
-          </summary>
-          <div class="px-4 pb-4 pt-1">
-            <${KeeperMemoryTierPanel} keeperName=${keeper.name} currentPhase=${keeper.phase} />
-          </div>
-        </details>
+        <${CollapsibleSection} title="Memory Tier & Compaction">
+          <${KeeperMemoryTierPanel} keeperName=${keeper.name} currentPhase=${keeper.phase} />
+        <//>
 
         ${'' /* ── Divergent conditions (amber banner; renders only when phase lags observed signals) ── */}
         <${KeeperConditionsDivergent} keeper=${keeper} />
@@ -1073,7 +1064,7 @@ export function KeeperDetailPage() {
             description="운영자가 keeper와 바로 대화하고, 같은 화면에서 세션 이벤트를 대조할 수 있도록 묶었습니다."
           >
             <${KeeperCommsPanel} keeper=${keeper} />
-            <${SectionCard} title="세션 활동 로그">
+            <${PanelCard}title="세션 활동 로그">
               <div class="text-2xs text-[var(--color-fg-muted)] mb-3">현재 세션의 도구 호출, 태스크 완료, 메시지 등 이벤트 기록</div>
               <${SessionTraceView} agentName=${keeper.name} isKeeper=${true} keeperStatus=${keeper.status} keeperGeneration=${keeper.generation} />
             <//>
@@ -1087,38 +1078,30 @@ export function KeeperDetailPage() {
           >
             <${KeeperToolTelemetry} keeperName=${keeper.name} />
             <${KeeperEvalQualityPanel} keeperName=${keeper.name} />
-            <details
-          class="rounded border border-card-border bg-card/40 backdrop-blur-sm shadow-sm"
-          open=${diagOpen}
-          onToggle=${(e: Event) => setDiagOpen((e.currentTarget as HTMLDetailsElement).open)}
-        >
-          <summary class="cursor-pointer py-3 px-5 text-2xs font-semibold uppercase tracking-widest text-text-muted list-none select-none flex items-center gap-2">
-            <span class="w-1.5 h-1.5 rounded-full bg-accent/50" aria-hidden="true"></span>
-            런타임 진단
-          </summary>
-          <div class="flex flex-col gap-3 px-5 pb-5 pt-2">
-            <${SupervisorDiagnosticsPanel} keeper=${keeper} />
-            <${KeeperDiagnosticSummary} keeper=${keeper} />
-            <${KeeperRuntimeActions}
-              actor=${currentDashboardActor()}
-              keeper=${keeper}
-              onSocialSweep=${() => { void runSocialSweep() }}
-            />
-            <div class="pt-3 border-t border-[var(--color-border-divider)]">
-              <h4 class="m-0 mb-3 text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">호출 검사기</h4>
-              ${diagOpen ? html`<${KeeperToolCallInspector} keeperName=${keeper.name} />` : null}
-            </div>
-          </div>
-        </details>
-            <details class="p-5 rounded border border-card-border bg-card/40 backdrop-blur-sm shadow-sm">
-              <summary class="cursor-pointer text-2xs font-semibold uppercase tracking-widest text-text-muted list-none select-none flex items-center gap-2">
-                <span class="w-1.5 h-1.5 rounded-full bg-accent/50" aria-hidden="true"></span>
-                품질 시그널 (고급 지표)
-              </summary>
+            <${CollapsibleSection}
+              title="런타임 진단"
+              open=${diagOpen}
+              onToggle=${(open: boolean) => setDiagOpen(open)}
+            >
+              <div class="flex flex-col gap-3">
+                <${SupervisorDiagnosticsPanel} keeper=${keeper} />
+                <${KeeperDiagnosticSummary} keeper=${keeper} />
+                <${KeeperRuntimeActions}
+                  actor=${currentDashboardActor()}
+                  keeper=${keeper}
+                  onSocialSweep=${() => { void runSocialSweep() }}
+                />
+                <div class="pt-3 border-t border-[var(--color-border-divider)]">
+                  <${SectionHeader} size="xs" class="mb-3">호출 검사기</${SectionHeader}>
+                  ${diagOpen ? html`<${KeeperToolCallInspector} keeperName=${keeper.name} />` : null}
+                </div>
+              </div>
+            <//>
+            <${CollapsibleSection} title="품질 시그널 (고급 지표)"
               <div class="mt-3 text-2xs text-[var(--color-fg-muted)] mb-3">폴백 비율, 정렬 품질, 자율 행동 비율 등 metrics_window 기반 런타임 품질 지표</div>
               <${RuntimeSignals} keeper=${keeper} />
-            </details>
-          <//>
+            <//>
+          </${KeeperDetailSection}>
 
           <${KeeperDetailSection}
             id="keeper-identity"
@@ -1127,7 +1110,7 @@ export function KeeperDetailPage() {
             description="프로필, 관계, 장비, generation lineage, checkpoints를 하나의 맥락으로 보고 continuity를 해석합니다."
           >
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <${SectionCard} title="프로필">
+              <${PanelCard}title="프로필">
             <${TraitsList} traits=${keeper.traits ?? []} label="특성" />
             <${TraitsList} traits=${keeper.interests ?? []} label="관심사" />
             ${keeper.primaryValue
@@ -1159,7 +1142,7 @@ export function KeeperDetailPage() {
 
           ${keeper.inventory && keeper.inventory.length > 0
             ? html`
-              <${SectionCard} title="장비 (${keeper.inventory.length})">
+              <${PanelCard}title="장비 (${keeper.inventory.length})">
                 <${EquipmentList} items=${keeper.inventory} />
               <//>
             `
@@ -1167,7 +1150,7 @@ export function KeeperDetailPage() {
 
           ${keeper.relationships && Object.keys(keeper.relationships).length > 0
             ? html`
-              <${SectionCard} title="관계 (${Object.keys(keeper.relationships).length})">
+              <${PanelCard}title="관계 (${Object.keys(keeper.relationships).length})">
                 <${RelationshipList} rels=${keeper.relationships} />
               <//>
             `
@@ -1176,19 +1159,15 @@ export function KeeperDetailPage() {
           <${GenerationLineagePanel} keeperName=${keeper.name} />
             </div>
 
-          <details class="p-5 rounded border border-card-border bg-card/40 backdrop-blur-sm shadow-sm">
-            <summary class="cursor-pointer text-2xs font-semibold uppercase tracking-widest text-text-muted list-none select-none flex items-center gap-2">
-              <span class="w-1.5 h-1.5 rounded-full bg-accent/50" aria-hidden="true"></span>
-              Checkpoint & Snapshots
-            </summary>
+          <${CollapsibleSection} title="Checkpoint & Snapshots"
             <div class="mt-4">
               <${KeeperCheckpointPanel}
                 keeperName=${keeper.name}
                 refreshToken=${checkpointRefreshToken}
               />
             </div>
-          </details>
           <//>
+          </${KeeperDetailSection}>
 
           <${KeeperDetailSection}
             id="keeper-config"
@@ -1197,26 +1176,18 @@ export function KeeperDetailPage() {
             description="분산되어 있던 허용 도구 목록, 작업 budget, playground repo, keeper config를 한 섹션으로 모았습니다."
           >
             <${TurnBudgetSection} keeper=${keeper} />
-            <details class="p-5 rounded border border-card-border bg-card/40 backdrop-blur-sm shadow-sm">
-              <summary class="cursor-pointer text-2xs font-semibold uppercase tracking-widest text-text-muted list-none select-none flex items-center gap-2">
-                <span class="w-1.5 h-1.5 rounded-full bg-accent/50" aria-hidden="true"></span>
-                허용 도구
-              </summary>
+            <${CollapsibleSection} title="허용 도구"
               <div class="mt-3">
                 <${KeeperNeighborhood} keeper=${keeper} />
               </div>
-            </details>
+            <//>
             <${PlaygroundReposPanel} keeperName=${keeper.name} />
-            <details class="p-5 rounded border border-card-border bg-card/40 backdrop-blur-sm shadow-sm">
-              <summary class="cursor-pointer text-2xs font-semibold uppercase tracking-widest text-text-muted list-none select-none flex items-center gap-2">
-                <span class="w-1.5 h-1.5 rounded-full bg-accent/50" aria-hidden="true"></span>
-                Keeper 설정
-              </summary>
+            <${CollapsibleSection} title="Keeper 설정"
               <div class="mt-4">
                 <${KeeperConfigPanel} keeperName=${keeper.name} />
               </div>
-            </details>
-          <//>
+            <//>
+          </${KeeperDetailSection}>
 
           <${KeeperDetailSection}
             id="keeper-debug"
@@ -1226,16 +1197,16 @@ export function KeeperDetailPage() {
           >
             <details class="mt-0">
           <summary class="cursor-pointer py-3 px-4 text-2xs font-semibold uppercase tracking-widest text-[var(--color-fg-muted)] list-none select-none rounded border border-[var(--color-border-default)] bg-[var(--white-3)] hover:bg-[var(--white-6)] transition-colors flex items-center gap-2">
-            <span class="w-1.5 h-1.5 rounded-full bg-[var(--color-fg-disabled)]" aria-hidden="true"></span>
+            <${StatusDot} size="xs" class="bg-[var(--color-fg-disabled)]" />
             디버그
           </summary>
           <div class="mt-2 flex flex-col gap-4">
             <div class="p-5 rounded border border-card-border bg-card/40 backdrop-blur-sm">
-              <h4 class="m-0 mb-3 text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">저널</h4>
+              <${SectionHeader} size="xs" class="mb-3">저널</${SectionHeader}>
               <${AgentJournalStream} agentName=${keeper.name} />
             </div>
             <div class="p-5 rounded border border-card-border bg-card/40 backdrop-blur-sm">
-              <h4 class="m-0 mb-3 text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">원시 데이터</h4>
+              <${SectionHeader} size="xs" class="mb-3">원시 데이터</${SectionHeader}>
               <${RawDataDebug} keeper=${keeper} />
             </div>
           </div>

@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { KeeperDetailSectionCard } from './keeper-detail-layout'
+import { PanelCard } from './common/panel-card'
 
 function ProfileField({ label, value, color }: { label: string; value: string; color: string }) {
   return html`
@@ -58,7 +58,7 @@ export function KeeperBDIPanel({
   if (!hasBdi && !hasGoals) return null
 
   return html`
-    <${KeeperDetailSectionCard} title="BDI & Horizons">
+    <${PanelCard} title="BDI & Horizons">
       <div class="flex flex-col gap-3">
         ${hasBdi
           ? html`

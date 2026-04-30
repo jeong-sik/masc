@@ -6,6 +6,8 @@ import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { formatTimeAgo } from '../lib/format-time'
 import { FilterChips } from './common/filter-chips'
+import { PanelCard } from './common/panel-card'
+import { ProgressBar } from './common/progress-bar'
 import {
   groupCrashCohorts,
   filterCrashLog,
@@ -21,18 +23,6 @@ const crashCategoryFilter = signal<CrashFilterKey>('all')
 const crashShowAll = signal<boolean>(false)
 
 // ── Helpers ──────────────────────────────────────────────
-
-function SectionCard({ title, children }: { title: string; children: preact.ComponentChildren }) {
-  return html`
-    <div class="p-5 rounded border border-card-border bg-card/40 backdrop-blur-sm shadow-sm transition-[border-color,box-shadow] duration-[var(--t-med)] hover:border-accent/30 hover:shadow-sm">
-      <div class="text-2xs font-semibold uppercase tracking-widest text-text-muted mb-4 flex items-center gap-2">
-        <span class="w-1.5 h-1.5 rounded-full bg-accent/50" aria-hidden="true"></span>
-        ${title}
-      </div>
-      ${children}
-    </div>
-  `
-}
 
 function registryStateBadge(state: string | null) {
   if (!state) return null
@@ -125,11 +115,11 @@ export function SupervisorDiagnosticsPanel({ keeper }: { keeper: Keeper }) {
     dead_eta_sec,
   } = diag
   const budgetPct = max_restarts > 0 ? Math.min(100, (restart_count / max_restarts) * 100) : 0
-  const budgetColor = budgetPct >= 80 ? 'var(--color-status-err)' : budgetPct >= 50 ? 'var(--amber-bright)' : 'var(--color-status-ok)'
+  const budgetFillClass = budgetPct >= 80 ? 'bg-[var(--color-status-err)]' : budgetPct >= 50 ? 'bg-[var(--amber-bright)]' : 'bg-[var(--color-status-ok)]'
   const hs = typeof health_score === 'number' ? health_score : 100
   const hsColor = hs >= 80 ? 'var(--color-status-ok)' : hs >= 50 ? 'var(--amber-bright)' : 'var(--color-status-err)'
   return html`
-    <${SectionCard} title="감독 진단">
+    <${PanelCard} title="감독 진단">
       <div class="space-y-3">
         <div class="flex items-center justify-between">
           <span class="text-xs text-[var(--color-fg-muted)]">건강도</span>
@@ -144,9 +134,7 @@ export function SupervisorDiagnosticsPanel({ keeper }: { keeper: Keeper }) {
             <span class="text-xs text-[var(--color-fg-muted)]">재시작 예산</span>
             <span class="text-xs font-mono text-[var(--color-fg-primary)]">${restart_count}/${max_restarts}</span>
           </div>
-          <div class="w-full h-1.5 rounded-sm bg-[var(--white-5)] overflow-hidden">
-            <div class="h-full rounded-sm transition-all duration-300" style="width: ${budgetPct}%; background: ${budgetColor}"></div>
-          </div>
+          <${ProgressBar} pct=${budgetPct} size="sm" class=${budgetFillClass} />
         </div>
         ${typeof dead_eta_sec === 'number' && dead_eta_sec > 0 && dead_since == null ? html`
           <div class="flex items-center justify-between">

@@ -14,7 +14,7 @@ import {
   type KeeperDecision,
 } from '../api/dashboard'
 import { formatTimeAgo } from '../lib/format-time'
-import { isAbortError } from '../lib/async-state'
+import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
 import { setupVisibleAutoRefresh } from '../lib/auto-refresh'
 import { openAgentDetail } from './agent-detail-state'
 import { ringFocusClasses } from './common/ring'
@@ -464,11 +464,7 @@ function EpisodeCard({ ep }: { ep: MemorySubsystemsEpisode }) {
 }
 
 export function MemorySubsystems() {
-  const state = useSignal<{
-    loading: boolean
-    error: string | null
-    data: MemorySubsystemsResponse | null
-  }>({ loading: true, error: null, data: null })
+  const resource = useManagedAsyncResource<MemorySubsystemsResponse>(null)
 
   const keeperFilter = useSignal<string>('')
   const outcomeFilter = useSignal<string>('')
@@ -478,37 +474,27 @@ export function MemorySubsystems() {
   // size and needs its own needle.
   const synapseQuery = useSignal<string>('')
 
-  async function refresh(signal?: AbortSignal) {
-    try {
-      const data = await fetchMemorySubsystems({
-        limit: 100,
-        keeper: keeperFilter.value || undefined,
-        outcome: outcomeFilter.value || undefined,
-        q: searchQuery.value || undefined,
-        signal,
-      })
-      state.value = { loading: false, error: null, data }
-    } catch (err) {
-      if (isAbortError(err)) return
-      state.value = {
-        loading: false,
-        error: err instanceof Error ? err.message : String(err),
-        data: state.value.data,
-      }
-    }
-  }
-
   useEffect(() => {
-    const ac = new AbortController()
-    refresh(ac.signal)
-    const cleanup = setupVisibleAutoRefresh(() => refresh(), REFRESH_MS)
+    const run = () => {
+      void resource.load(async (signal) =>
+        fetchMemorySubsystems({
+          limit: 100,
+          keeper: keeperFilter.value || undefined,
+          outcome: outcomeFilter.value || undefined,
+          q: searchQuery.value || undefined,
+          signal,
+        }),
+      )
+    }
+    run()
+    const cleanup = setupVisibleAutoRefresh(run, REFRESH_MS)
     return () => {
-      ac.abort()
+      resource.cancel()
       cleanup()
     }
-  }, [keeperFilter.value, outcomeFilter.value, searchQuery.value])
+  }, [keeperFilter.value, outcomeFilter.value, searchQuery.value, resource])
 
-  const { loading, error, data } = state.value
+  const { loading, error, data } = resource.state.value
   if (loading && !data) return html`<${LoadingState} label="기억 서브시스템 로드 중..." />`
   if (error && !data)
     return html`<div class="p-4 text-[var(--bad-light)]">오류: ${error}</div>`

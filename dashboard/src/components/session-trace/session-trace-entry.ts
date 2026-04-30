@@ -9,6 +9,7 @@ import { Markdown } from '../common/markdown'
 import { ProgressBar } from '../common/progress-bar'
 import { truncate } from '../../lib/truncate'
 import { toolCategory, durationColor, formatDuration, formatArgs as sharedFormatArgs } from '../tool-call-shared'
+import { SectionHeader } from '../common/section-header'
 import type { UnifiedTraceEvent, TraceEventKind } from './session-trace-state'
 
 // ── Constants ──────────────────────────────────────────
@@ -241,7 +242,7 @@ function ToolCallDetail({ event }: { event: UnifiedTraceEvent }) {
     <div class="mt-2 space-y-2">
       ${event.toolArgs ? html`
         <div>
-          <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)] mb-1">인자</div>
+          <${SectionHeader} size="xs" class="mb-1">인자</${SectionHeader}>
           <${JsonViewerCard} title="인자" data=${parseJsonLikeData(event.toolArgs)} />
         </div>
       ` : null}

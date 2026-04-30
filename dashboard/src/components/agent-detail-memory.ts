@@ -2,6 +2,7 @@ import { html } from 'htm/preact'
 import { useSignal } from '@preact/signals'
 import { useEffect, useMemo } from 'preact/hooks'
 import { LoadingState } from './common/feedback-state'
+import { ProgressBar } from './common/progress-bar'
 import { Card } from './common/card'
 import {
   fetchMemorySubsystems,
@@ -10,7 +11,7 @@ import {
   type MemorySubsystemsEpisode,
 } from '../api/dashboard'
 import { formatTimeAgo } from '../lib/format-time'
-import { isAbortError } from '../lib/async-state'
+import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
 import { highlightMatch } from '../lib/highlight-match'
 import { TextInput } from './common/input'
 
@@ -57,38 +58,42 @@ export function filterEpisodes(
   })
 }
 
+function synapseWeightFillClass(weight: number): string {
+  if (weight >= 0.7) return 'bg-[var(--ok-10)]'
+  if (weight >= 0.4) return 'bg-[var(--warn-10)]'
+  return 'bg-[var(--bad-10)]'
+}
+
+function SynapseWeightBar({ weight }: { weight: number }) {
+  const pct = Math.round(weight * 100)
+  return html`
+    <${ProgressBar}
+      pct=${pct}
+      size="sm"
+      trackClass="w-16 rounded"
+      class=${synapseWeightFillClass(weight)}
+      ariaLabel="시냅스 가중치 ${pct}%"
+    />
+  `
+}
+
 export function AgentDetailMemory({ agentName }: Props) {
-  const state = useSignal<{
-    loading: boolean
-    error: string | null
-    data: MemorySubsystemsResponse | null
-  }>({ loading: true, error: null, data: null })
+  const resource = useManagedAsyncResource<MemorySubsystemsResponse>(null)
   const episodeQuery = useSignal('')
 
   useEffect(() => {
-    const ac = new AbortController()
-    ;(async () => {
-      try {
-        const data = await fetchMemorySubsystems({
-          keeper: normalizeKeeperName(agentName),
-          limit: 10,
-          signal: ac.signal,
-        })
-        state.value = { loading: false, error: null, data }
-      } catch (err) {
-        if (isAbortError(err)) return
-        state.value = {
-          loading: false,
-          error: err instanceof Error ? err.message : String(err),
-          data: null,
-        }
-      }
-    })()
-    return () => ac.abort()
-  }, [agentName])
+    void resource.load(async (signal) =>
+      fetchMemorySubsystems({
+        keeper: normalizeKeeperName(agentName),
+        limit: 10,
+        signal,
+      }),
+    )
+    return () => resource.cancel()
+  }, [agentName, resource])
 
-  const { loading, error, data } = state.value
-  if (loading) return html`<${LoadingState} label="메모리 컨텍스트 로드 중..." />`
+  const { loading, error, data } = resource.state.value
+  if (loading) return html`<${LoadingState}>메모리 컨텍스트 로드 중...<//>`
   if (error)
     return html`<div class="text-sm text-[var(--color-status-warn)]" role="alert">메모리 로드 실패: ${error}</div>`
   if (!data) return null
@@ -140,16 +145,7 @@ export function AgentDetailMemory({ agentName }: Props) {
                                 (s: MemorySubsystemsSynapse) => html`
                                   <div class="flex items-center gap-2 text-xs">
                                     <span class="font-mono flex-1 truncate">${normalizeKeeperName(s.to_agent)}</span>
-                                    <div class="w-16 bg-[var(--white-5)] rounded h-1.5">
-                                      <div
-                                        role="progressbar"
-                                        aria-valuenow=${Math.round(s.weight * 100)}
-                                        aria-valuemin=${0}
-                                        aria-valuemax=${100}
-                                        class="${s.weight >= 0.7 ? 'bg-[var(--ok-10)]' : s.weight >= 0.4 ? 'bg-[var(--warn-10)]' : 'bg-[var(--bad-10)]'} rounded h-1.5"
-                                        style="width:${Math.round(s.weight * 100)}%"
-                                      ></div>
-                                    </div>
+                                    <${SynapseWeightBar} weight=${s.weight} />
                                     <span class="text-[var(--color-fg-muted)] w-10 text-right">${Math.round(s.weight * 100)}%</span>
                                   </div>
                                 `,
@@ -169,16 +165,7 @@ export function AgentDetailMemory({ agentName }: Props) {
                                 (s: MemorySubsystemsSynapse) => html`
                                   <div class="flex items-center gap-2 text-xs">
                                     <span class="font-mono flex-1 truncate">${normalizeKeeperName(s.from_agent)}</span>
-                                    <div class="w-16 bg-[var(--white-5)] rounded h-1.5">
-                                      <div
-                                        role="progressbar"
-                                        aria-valuenow=${Math.round(s.weight * 100)}
-                                        aria-valuemin=${0}
-                                        aria-valuemax=${100}
-                                        class="${s.weight >= 0.7 ? 'bg-[var(--ok-10)]' : s.weight >= 0.4 ? 'bg-[var(--warn-10)]' : 'bg-[var(--bad-10)]'} rounded h-1.5"
-                                        style="width:${Math.round(s.weight * 100)}%"
-                                      ></div>
-                                    </div>
+                                    <${SynapseWeightBar} weight=${s.weight} />
                                     <span class="text-[var(--color-fg-muted)] w-10 text-right">${Math.round(s.weight * 100)}%</span>
                                   </div>
                                 `,
@@ -249,7 +236,7 @@ export function AgentDetailMemory({ agentName }: Props) {
                                 <span class="${outcomeColor}">${outcomeIcon}</span>
                                 <span class="truncate text-[var(--color-fg-muted)]">${highlightMatch(ep.summary, episodeQuery.value)}</span>
                               </div>
-                              <span class="text-3xs text-[var(--color-fg-muted)]0 shrink-0">${formatTimeAgo(ep.timestamp * 1000)}</span>
+                              <span class="text-3xs text-[var(--color-fg-muted)] shrink-0">${formatTimeAgo(ep.timestamp * 1000)}</span>
                             </div>
                             ${ep.learnings.length > 0
                               ? html`<div class="mt-1 text-2xs text-[var(--color-fg-muted)] pl-3 border-l border-[var(--white-10)]">${highlightMatch(ep.learnings[0]!, episodeQuery.value)}</div>`

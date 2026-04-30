@@ -7,6 +7,7 @@ import { signal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
 import { fetchKeeperEval } from '../api/keeper'
 import type { KeeperEvalResponse, EvalSnapshot, EvalLayerResult } from '../api/keeper'
+import { ProgressBar } from './common/progress-bar'
 
 // ── Per-keeper cached state ─────────────────────────────
 
@@ -54,6 +55,12 @@ function coverageColor(coverage: number): string {
   if (coverage >= 0.9) return 'var(--color-status-ok)'
   if (coverage >= 0.6) return 'var(--color-status-warn)'
   return 'var(--color-status-err)'
+}
+
+function coverageFillClass(coverage: number): string {
+  if (coverage >= 0.9) return 'bg-[var(--color-status-ok)]'
+  if (coverage >= 0.6) return 'bg-[var(--color-status-warn)]'
+  return 'bg-[var(--color-status-err)]'
 }
 
 function coverageTone(coverage: number): string {
@@ -192,12 +199,7 @@ export function KeeperEvalQualityPanel({ keeperName }: { keeperName: string }) {
       ${'' /* Coverage bar */}
       <div class="flex items-center gap-3 mb-3">
         <span class="text-3xs text-[var(--color-fg-muted)] flex-shrink-0 w-16">커버리지</span>
-        <div class="flex-1 h-2 bg-[var(--white-6)] rounded-sm overflow-hidden">
-          <div
-            class="h-full rounded-sm transition-all duration-500"
-            style="width:${coveragePct}%;background:${coverageColor(coverage)}"
-          ></div>
-        </div>
+        <${ProgressBar} pct=${coveragePct} size="md" class=${coverageFillClass(coverage)} trackTone="dim" trackClass="flex-1" />
         <span class="text-sm font-bold tabular-nums flex-shrink-0" style="color:${coverageColor(coverage)}">${coverage.toFixed(2)}</span>
       </div>
 

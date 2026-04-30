@@ -31,6 +31,7 @@ import { FilterChips } from './common/filter-chips'
 import { TextInput } from './common/input'
 import type { ManagedAsyncResource } from '../lib/async-state'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
+import { truncate } from '../lib/truncate'
 import { route } from '../router'
 
 const AUTO_REFRESH_MS = 15_000
@@ -173,11 +174,6 @@ function verdictTone(v: VerificationRequestVerdict): 'ok' | 'warn' | 'bad' {
 }
 
 // ── Formatting helpers ────────────────────────────────
-
-function truncate(s: string, max = 20): string {
-  if (s.length <= max) return s
-  return s.slice(0, max - 1) + '…'
-}
 
 function parseIso(ts: string | null | undefined): number | null {
   if (!ts) return null

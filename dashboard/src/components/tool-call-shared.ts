@@ -122,3 +122,8 @@ export function prettyArgs(args: Record<string, unknown> | string): string {
   try { return JSON.stringify(args, null, 2) } catch { return String(args) }
 }
 
+/** Strip `keeper_` and `masc_` prefixes from a tool name for display. */
+export function normalizeToolName(name: string): string {
+  return name.replace(/^(keeper_|masc_)/, '')
+}
+

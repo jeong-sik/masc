@@ -6,7 +6,7 @@ import { useEffect } from 'preact/hooks'
 import { useSignal } from '@preact/signals'
 import { fetchKeeperToolCalls } from '../api/dashboard'
 import type { ToolCallEntry, ToolCallsResponse, TelemetryFreshnessMetadata } from '../api/dashboard'
-import { formatTimeHms, formatElapsedCompact } from '../lib/format-time'
+import { formatTimeHms } from '../lib/format-time'
 import { LoadingState } from './common/feedback-state'
 import { SectionCap } from './common/section-cap'
 import { toolCategory, formatDuration, durationColor } from './tool-call-shared'
@@ -15,32 +15,10 @@ import { parseToolBlobMarker } from '../lib/tool-blob-marker'
 import { CopyIdButton } from './common/copy-id-button'
 import { TextInput } from './common/input'
 import { ringFocusClasses } from './common/ring'
+import { sourceHealthClass, freshnessText } from './common/source-health'
 
 // Delegated to lib/format-time (SSOT)
 const formatTimestamp = formatTimeHms
-
-function sourceHealthClass(health?: string | null): string {
-  switch ((health ?? '').toLowerCase()) {
-    case 'ok':
-      return 'text-[var(--color-status-ok)]'
-    case 'stale':
-    case 'coverage_gap':
-    case 'empty':
-      return 'text-[var(--color-status-warn)]'
-    case 'missing':
-      return 'text-[var(--bad-light)]'
-    default:
-      return 'text-[var(--color-fg-disabled)]'
-  }
-}
-
-function freshnessText(d: TelemetryFreshnessMetadata): string {
-  if (d.stale_reason) return d.stale_reason
-  if (typeof d.latest_age_s !== 'number' || !Number.isFinite(d.latest_age_s)) {
-    return 'latest n/a'
-  }
-  return `latest ${formatElapsedCompact(d.latest_age_s)}`
-}
 
 function FreshnessLine({ data }: { data: TelemetryFreshnessMetadata }) {
   return html`

@@ -8,6 +8,8 @@ import { formatPct, formatTokens } from '../lib/format-number'
 import { TextInput } from './common/input'
 import { CopyIdButton } from './common/copy-id-button'
 import { ProgressBar } from './common/progress-bar'
+import { Eyebrow } from './common/eyebrow'
+import { SectionHeader } from './common/section-header'
 import type { Keeper, KeeperMetricPoint, PromptSegmentTelemetry } from '../types'
 
 // ── Context pressure thresholds (shared across KPIs, charts) ─
@@ -130,13 +132,13 @@ function KpiCard({ label, value, hint, tone = 'default', progress }: {
   return html`
     <div class="p-3.5 rounded border ${KPI_TONE[tone]} flex flex-col gap-1.5 transition-colors">
       <div class="flex items-center justify-between">
-        <span class="text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">${label}</span>
+        <${SectionHeader} size="xs">${label}</${SectionHeader}>
         ${icon ? html`<span class="text-2xs opacity-60">${icon}</span>` : null}
       </div>
       <div class="text-2xl font-bold ${KPI_VALUE_TONE[tone]} tabular-nums leading-none">${value}</div>
       ${progress != null ? html`
-        <div class="w-full h-1 bg-[var(--white-6)] rounded-sm overflow-hidden mt-0.5">
-          <div class="h-full rounded-sm transition-all duration-500" style="width:${Math.min(progress, 100)}%;background:${ctxColor(progress)}"></div>
+        <div class="mt-0.5">
+          <${ProgressBar} pct=${progress} size="xs" trackTone="dim" class=${`bg-[${ctxColor(progress)}]`} />
         </div>
       ` : null}
       ${hint ? html`<div class="text-3xs text-[var(--color-fg-disabled)] leading-snug">${hint}</div>` : null}
@@ -169,26 +171,26 @@ function OperationalHealth({ keeper }: { keeper: Keeper }) {
       <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
         ${hb ? html`
           <div class="p-2 rounded border ${KPI_TONE[hbTone]} flex flex-col gap-0.5">
-            <span class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)]">하트비트</span>
+            <${Eyebrow}>하트비트</${Eyebrow}>
             <span class="text-xs font-mono ${KPI_VALUE_TONE[hbTone]}">${hb.replace('T', ' ').slice(0, 19)}</span>
           </div>
         ` : null}
         ${compSavedRatio != null ? html`
           <div class="p-2 rounded border ${KPI_TONE[compTone]} flex flex-col gap-0.5">
-            <span class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)]">압축 절감률</span>
+            <${Eyebrow}>압축 절감률</${Eyebrow}>
             <span class="text-sm font-mono tabular-nums ${KPI_VALUE_TONE[compTone]}">${(compSavedRatio * 100).toFixed(1)}%</span>
             ${avgSaved != null ? html`<span class="text-3xs text-[var(--color-fg-disabled)]">avg ${formatTokens(avgSaved)} saved</span>` : null}
           </div>
         ` : null}
         ${dropRatio != null ? html`
           <div class="p-2 rounded border ${KPI_TONE[dropTone]} flex flex-col gap-0.5">
-            <span class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)]">메모리 손실률</span>
+            <${Eyebrow}>메모리 손실률</${Eyebrow}>
             <span class="text-sm font-mono tabular-nums ${KPI_VALUE_TONE[dropTone]}">${(dropRatio * 100).toFixed(1)}%</span>
           </div>
         ` : null}
         ${lastCompAgo != null ? html`
           <div class="p-2 rounded border ${KPI_TONE['default']} flex flex-col gap-0.5">
-            <span class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)]">마지막 압축</span>
+            <${Eyebrow}>마지막 압축</${Eyebrow}>
             <span class="text-xs font-mono text-[var(--color-fg-secondary)]">${formatDuration(lastCompAgo)} 전</span>
           </div>
         ` : null}
@@ -245,7 +247,7 @@ function OutcomesLedger({ keeper, outcomes }: {
       ${'' /* Row 1 — Success / Failure Ledger */}
       <div class="rounded border border-[var(--color-border-default)] bg-[var(--white-3)] px-3 py-2">
         <div class="flex items-baseline justify-between gap-2 mb-1.5">
-          <span class="text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">성공/실패 (최근 ${observed_turns}턴)</span>
+          <${SectionHeader} size="xs">성공/실패 (최근 ${observed_turns}턴)</${SectionHeader}>
           <span class="text-3xs text-[var(--color-fg-disabled)]">${ledgerTotal > 0 ? `합계 ${ledgerTotal}` : '관측 없음'}</span>
         </div>
         <div class="flex items-center gap-3 text-xs">
@@ -271,16 +273,14 @@ function OutcomesLedger({ keeper, outcomes }: {
       ${'' /* Row 2 — Validator Pass Rate */}
       <div class="rounded border border-[var(--color-border-default)] bg-[var(--white-3)] px-3 py-2">
         <div class="flex items-baseline justify-between gap-2 mb-1.5">
-          <span class="text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">검증자 (OAS verdict)</span>
+          <${SectionHeader} size="xs">검증자 (OAS verdict)</${SectionHeader}>
           <span class="text-3xs text-[var(--color-fg-disabled)]">
             ${verdictTotal > 0 ? `${verdicts.pass}/${verdictTotal} pass` : 'verdict 없음'}
           </span>
         </div>
         ${verdictTotal > 0 ? html`
           <div class="flex items-center gap-2">
-            <div class="flex-1 h-1.5 bg-[var(--white-6)] rounded-sm overflow-hidden">
-              <div class="h-full rounded-sm transition-all duration-300" style="width:${passRatePct}%;background:${passBarColor}"></div>
-            </div>
+            <${ProgressBar} pct=${passRatePct} size="sm" trackTone="dim" trackClass="flex-1" class=${`bg-[${passBarColor}]`} />
             <span class="shrink-0 text-sm font-semibold tabular-nums" style="color:${passBarColor}">${passRatePct}%</span>
           </div>
           ${verdicts.top_failure_reasons.length > 0 ? html`
@@ -310,7 +310,7 @@ function OutcomesLedger({ keeper, outcomes }: {
       ${'' /* Row 3 — Resilience Profile */}
       <div class="rounded border border-[var(--color-border-default)] bg-[var(--white-3)] px-3 py-2">
         <div class="flex items-baseline justify-between gap-2 mb-1.5">
-          <span class="text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">회복력</span>
+          <${SectionHeader} size="xs">회복력</${SectionHeader}>
           <span class="text-3xs text-[var(--color-fg-disabled)]">supervisor 이력</span>
         </div>
         <div class="flex flex-wrap gap-1.5 text-2xs">
@@ -509,9 +509,7 @@ export function ContextChart({ keeper }: { keeper: Keeper }) {
     const color = ctxColor(pct)
     return html`
       <div class="flex items-center gap-3 mb-5 p-3 rounded border border-[var(--color-border-default)] bg-[var(--white-3)]">
-        <div class="flex-1 h-2 bg-[var(--white-6)] rounded-sm overflow-hidden">
-          <div class="h-full rounded-sm transition-all duration-300" style="width:${pct.toFixed(1)}%;background:${color}"></div>
-        </div>
+        <${ProgressBar} pct=${pct} size="md" trackTone="dim" trackClass="flex-1" class=${`bg-[${color}]`} />
         <span class="text-sm font-semibold tabular-nums text-[var(--color-fg-secondary)]">${pct.toFixed(1)}%</span>
       </div>`
   }
@@ -619,7 +617,7 @@ export function TokenTrendChart({ keeper }: { keeper: Keeper }) {
 
         ${'' /* Input/Output ratio */}
         <div class="p-3 rounded border border-[var(--color-border-default)] bg-[var(--white-3)] flex flex-col justify-between">
-          <span class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)]">In/Out 비율</span>
+          <${Eyebrow}>In/Out 비율</${Eyebrow}>
           <span class="text-lg font-mono tabular-nums text-[var(--color-accent-fg)]">${avgRatio.toFixed(1)}x</span>
           <span class="text-3xs text-[var(--color-fg-disabled)]">${avgRatio > 10 ? '프롬프트 비대 주의' : avgRatio > 5 ? '프롬프트 무거움' : '정상 범위'}</span>
         </div>
@@ -688,7 +686,7 @@ export function PromptTelemetryPanel({ keeper }: { keeper: Keeper }) {
       <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
         <div class="md:col-span-2 p-3 rounded border border-[var(--color-border-default)] bg-[var(--white-3)]">
           <div class="flex items-center justify-between mb-1.5">
-            <span class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)]">estimated prompt tokens</span>
+            <${Eyebrow}>estimated prompt tokens</${Eyebrow}>
             <span class="text-xs font-mono tabular-nums text-[var(--color-accent-fg)]">${latestTotal != null ? formatTokens(latestTotal) : '-'}</span>
           </div>
           <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" role="img" aria-label="프롬프트 토큰 추이" style="background:var(--bg-deepest);">
@@ -714,13 +712,13 @@ export function PromptTelemetryPanel({ keeper }: { keeper: Keeper }) {
         </div>
 
         <div class="p-3 rounded border border-[var(--color-border-default)] bg-[var(--white-3)] flex flex-col justify-between">
-          <span class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)]">fingerprint revisions</span>
+          <${Eyebrow}>fingerprint revisions</${Eyebrow}>
           <span class="text-lg font-mono tabular-nums text-[var(--color-status-warn)]">${fingerprintTransitions}</span>
           <span class="text-3xs text-[var(--color-fg-disabled)]">${uniqueFingerprintCount} unique</span>
         </div>
 
         <div class="p-3 rounded border border-[var(--color-border-default)] bg-[var(--white-3)] flex flex-col justify-between">
-          <span class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)]">latest fingerprint</span>
+          <${Eyebrow}>latest fingerprint</${Eyebrow}>
           <div class="flex items-center gap-1.5">
             <span class="text-sm font-mono break-all text-[var(--color-fg-secondary)]" title=${latest?.prompt_fingerprint ?? ''}>${latest?.prompt_fingerprint ? formatFingerprint(latest.prompt_fingerprint) : '-'}</span>
             ${latest?.prompt_fingerprint ? html`<${CopyIdButton} value=${latest.prompt_fingerprint} label="fingerprint" size=${12} />` : null}
@@ -734,7 +732,7 @@ export function PromptTelemetryPanel({ keeper }: { keeper: Keeper }) {
           ${latestSegments.map(([segmentKey, segment]) => html`
             <div class="p-3 rounded border border-[var(--color-border-default)] bg-[var(--white-3)]">
               <div class="flex items-center justify-between gap-2 mb-2">
-                <span class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)]">${formatSegmentLabel(segmentKey)}</span>
+                <${Eyebrow}>${formatSegmentLabel(segmentKey)}</${Eyebrow}>
                 <span class="inline-flex items-center gap-1">
                   <span class="text-3xs font-mono text-[var(--color-fg-disabled)]" title=${segment.fingerprint ?? ''}>${formatFingerprint(segment.fingerprint)}</span>
                   ${segment.fingerprint ? html`<${CopyIdButton} value=${segment.fingerprint} label="segment fingerprint" size=${10} />` : null}
@@ -742,11 +740,11 @@ export function PromptTelemetryPanel({ keeper }: { keeper: Keeper }) {
               </div>
               <div class="grid grid-cols-2 gap-2 text-xs">
                 <div class="rounded border border-[var(--white-8)] bg-[var(--white-2)] px-2.5 py-2">
-                  <div class="text-3xs uppercase tracking-wider text-[var(--color-fg-disabled)]">tokens</div>
+                  <${Eyebrow} tone="disabled">tokens</${Eyebrow}>
                   <div class="mt-1 font-mono tabular-nums text-[var(--color-accent-fg)]">${formatTokens(segment.estimated_tokens)}</div>
                 </div>
                 <div class="rounded border border-[var(--white-8)] bg-[var(--white-2)] px-2.5 py-2">
-                  <div class="text-3xs uppercase tracking-wider text-[var(--color-fg-disabled)]">bytes</div>
+                  <${Eyebrow} tone="disabled">bytes</${Eyebrow}>
                   <div class="mt-1 font-mono tabular-nums text-[var(--color-fg-secondary)]">${segment.bytes.toLocaleString()}</div>
                 </div>
               </div>
@@ -810,7 +808,7 @@ export function CtxCompositionPanel({ keeper }: { keeper: Keeper }) {
       <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
         <div class="md:col-span-2 p-3 rounded border border-[var(--color-border-default)] bg-[var(--white-3)]">
           <div class="flex items-center justify-between mb-2 gap-3">
-            <span class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)]">latest turn input</span>
+            <${Eyebrow}>latest turn input</${Eyebrow}>
             <span class="text-xs font-mono tabular-nums text-[var(--color-accent-fg)]">${formatTokens(latestTotal)}</span>
           </div>
           <div class="h-3 rounded-sm overflow-hidden border border-[var(--white-8)] bg-[var(--white-2)] flex">
@@ -831,7 +829,7 @@ export function CtxCompositionPanel({ keeper }: { keeper: Keeper }) {
         </div>
 
         <div class="p-3 rounded border border-[var(--color-border-default)] bg-[var(--white-3)] flex flex-col justify-between">
-          <span class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)]">largest bucket</span>
+          <${Eyebrow}>largest bucket</${Eyebrow}>
           <span class="text-sm font-medium text-[var(--color-fg-secondary)]">${ctxSegmentLabel(latestEntries[0]?.[0] ?? 'unknown')}</span>
           <span class="text-3xs font-mono text-[var(--color-fg-disabled)]">
             ${latestEntries[0] ? `${formatTokens(latestEntries[0][1].estimated_tokens)} · ${((latestEntries[0][1].estimated_tokens / latestTotal) * 100).toFixed(1)}%` : '-'}
@@ -839,7 +837,7 @@ export function CtxCompositionPanel({ keeper }: { keeper: Keeper }) {
         </div>
 
         <div class="p-3 rounded border border-[var(--color-border-default)] bg-[var(--white-3)] flex flex-col justify-between">
-          <span class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)]">residual</span>
+          <${Eyebrow}>residual</${Eyebrow}>
           <span class="text-lg font-mono tabular-nums text-[var(--color-status-warn)]">${formatTokens(unattributedTokens)}</span>
           <span class="text-3xs text-[var(--color-fg-disabled)]">tool schema / provider overhead / estimator gap</span>
         </div>
@@ -848,7 +846,7 @@ export function CtxCompositionPanel({ keeper }: { keeper: Keeper }) {
       <div class="mt-3 grid grid-cols-1 md:grid-cols-3 gap-3">
         <div class="md:col-span-2 p-3 rounded border border-[var(--color-border-default)] bg-[var(--white-3)]">
           <div class="flex items-center justify-between mb-1.5">
-            <span class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)]">stacked history</span>
+            <${Eyebrow}>stacked history</${Eyebrow}>
             <span class="text-3xs text-[var(--color-fg-disabled)]">${points.length} turns</span>
           </div>
           <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" role="img" aria-label="컨텍스트 구성 스택 히스토리" style="background:var(--bg-deepest);">
@@ -877,7 +875,7 @@ export function CtxCompositionPanel({ keeper }: { keeper: Keeper }) {
 
         <div class="p-3 rounded border border-[var(--color-border-default)] bg-[var(--white-3)]">
           <div class="flex items-center justify-between gap-2 mb-2">
-            <span class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)]">latest breakdown</span>
+            <${Eyebrow}>latest breakdown</${Eyebrow}>
             <span class="text-3xs font-mono text-[var(--color-fg-disabled)]">${visibleCtxEntries.length}/${latestEntries.length}</span>
           </div>
           <${TextInput}
@@ -992,7 +990,7 @@ export function InferenceTelemetryPanel({ keeper }: { keeper: Keeper }) {
         ${wallTokPerSec.length > 0 ? html`
         <div class="p-3 rounded border border-[var(--color-border-default)] bg-[var(--white-3)]">
           <div class="flex items-center justify-between mb-1.5">
-            <span class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)]">wall tok/s</span>
+            <${Eyebrow}>wall tok/s</${Eyebrow}>
             <span class="text-xs font-mono tabular-nums text-[var(--good)]">${lastWallTps.toFixed(1)}</span>
           </div>
           <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" role="img" aria-label="Wall TPS 추이" style="background:var(--bg-deepest);">
@@ -1005,7 +1003,7 @@ export function InferenceTelemetryPanel({ keeper }: { keeper: Keeper }) {
         ${hwTokPerSec.length > 0 ? html`
         <div class="p-3 rounded border border-[var(--color-border-default)] bg-[var(--white-3)]">
           <div class="flex items-center justify-between mb-1.5">
-            <span class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)]">hw tok/s</span>
+            <${Eyebrow}>hw tok/s</${Eyebrow}>
             <span class="text-xs font-mono tabular-nums text-[var(--good)]">${lastHwTps.toFixed(1)}</span>
           </div>
           <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" role="img" aria-label="하드웨어 TPS 추이" style="background:var(--bg-deepest);">
@@ -1018,7 +1016,7 @@ export function InferenceTelemetryPanel({ keeper }: { keeper: Keeper }) {
         ${'' /* request latency */}
         <div class="p-3 rounded border border-[var(--color-border-default)] bg-[var(--white-3)]">
           <div class="flex items-center justify-between mb-1.5">
-            <span class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)]">API latency</span>
+            <${Eyebrow}>API latency</${Eyebrow}>
             <span class="text-xs font-mono tabular-nums text-[var(--color-accent-fg)]">${lastLatency > 0 ? `${(lastLatency / 1000).toFixed(1)}s` : '-'}</span>
           </div>
           <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" role="img" aria-label="API 지연 시간 추이" style="background:var(--bg-deepest);">
@@ -1028,14 +1026,14 @@ export function InferenceTelemetryPanel({ keeper }: { keeper: Keeper }) {
 
         ${'' /* cache hits */}
         <div class="p-3 rounded border border-[var(--color-border-default)] bg-[var(--white-3)] flex flex-col justify-between">
-          <span class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)]">KV Cache</span>
+          <${Eyebrow}>KV Cache</${Eyebrow}>
           <span class="text-lg font-mono tabular-nums text-[var(--purple)]">${totalCacheN > 0 ? totalCacheN.toLocaleString() : '-'}</span>
           <span class="text-3xs text-[var(--color-fg-disabled)]">cumulative tokens</span>
         </div>
 
         ${'' /* reasoning tokens */}
         <div class="p-3 rounded border border-[var(--color-border-default)] bg-[var(--white-3)] flex flex-col justify-between">
-          <span class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)]">추론</span>
+          <${Eyebrow}>추론</${Eyebrow}>
           <span class="text-lg font-mono tabular-nums text-[var(--color-status-warn)]">${totalReasoning > 0 ? totalReasoning.toLocaleString() : '-'}</span>
           <span class="text-3xs text-[var(--color-fg-disabled)]">total tokens</span>
         </div>
@@ -1077,7 +1075,7 @@ export function MetricsCharts({ keeper }: { keeper: Keeper }) {
       ${'' /* Latency + fallback markers */}
       <div class="p-3 rounded border border-[var(--color-border-default)] bg-[var(--white-3)]">
         <div class="flex items-center justify-between mb-1.5">
-          <span class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)]">지연 시간</span>
+          <${Eyebrow}>지연 시간</${Eyebrow}>
           <span class="flex items-center gap-2">
             ${fallbackCount > 0 ? html`<span class="text-3xs px-1.5 py-0.5 rounded bg-[var(--bad-soft)] text-[var(--color-status-err)] font-mono">FB ${fallbackCount}</span>` : null}
             <span class="text-xs font-mono tabular-nums text-[var(--color-accent-fg)]">${lastLatency > 0 ? `${(lastLatency / 1000).toFixed(1)}s` : '-'}</span>
@@ -1095,7 +1093,7 @@ export function MetricsCharts({ keeper }: { keeper: Keeper }) {
       ${'' /* Cost */}
       <div class="p-3 rounded border border-[var(--color-border-default)] bg-[var(--white-3)]">
         <div class="flex items-center justify-between mb-1.5">
-          <span class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)]">비용</span>
+          <${Eyebrow}>비용</${Eyebrow}>
           <span class="text-xs font-mono tabular-nums text-[var(--purple)]">$${totalCost.toFixed(4)}</span>
         </div>
         <svg aria-hidden="true" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" style="background:var(--bg-deepest);">
@@ -1107,7 +1105,7 @@ export function MetricsCharts({ keeper }: { keeper: Keeper }) {
       ${modelSwitches.length > 0 ? html`
         <div class="md:col-span-2 p-3 rounded border border-[var(--color-border-default)] bg-[var(--white-3)]">
           <div class="flex items-center justify-between mb-1.5">
-            <span class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)]">모델 전환</span>
+            <${Eyebrow}>모델 전환</${Eyebrow}>
             <span class="text-3xs text-[var(--color-fg-disabled)]">${modelSwitches.length}회</span>
           </div>
           <div class="flex flex-wrap gap-1.5">
@@ -1124,7 +1122,7 @@ export function MetricsCharts({ keeper }: { keeper: Keeper }) {
       ${fallbackCount > 0 ? html`
         <div class="md:col-span-2 p-3 rounded border border-[var(--bad-20)] bg-[var(--bad-6)]">
           <div class="flex items-center justify-between mb-1.5">
-            <span class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)]">캐스케이드 폴백</span>
+            <>캐스케이드 폴백</>
             <span class="text-3xs text-[var(--color-status-err)]">${fallbackCount}회</span>
           </div>
           <div class="flex flex-wrap gap-1.5">

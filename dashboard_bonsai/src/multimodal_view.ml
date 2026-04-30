@@ -157,9 +157,24 @@ let empty_state : Node.t =
 
 let view_of_response
     ~(detail_panel : Node.t)
+    ~(kind_filter : string option)
+    ~(created_by_filter : string option)
+    ~(query : string)
     (r : Multimodal_types.response)
     : Node.t
   =
+  let filtered =
+    Multimodal_filter_view.apply_filter r.artifacts
+      ~kind:kind_filter ~created_by:created_by_filter ~query
+  in
+  let filter_bar =
+    Multimodal_filter_view.view
+      ~artifacts:r.artifacts
+      ~kind:kind_filter
+      ~created_by:created_by_filter
+      ~query
+      ~filtered_count:(List.length filtered)
+  in
   Node.div
     ~attrs:[ Style.root; Attr.role "main"; Attr.create "aria-label" "Multimodal gallery" ]
     [ Node.div
@@ -169,17 +184,29 @@ let view_of_response
             ~attrs:[ Style.count ]
             [ Node.text (Printf.sprintf "%d artifacts" r.count) ]
         ]
+    ; (if List.is_empty r.artifacts then Node.none else filter_bar)
     ; (if List.is_empty r.artifacts then empty_state
+       else if List.is_empty filtered then
+         Node.div
+           ~attrs:[ Style.empty ]
+           [ Node.text "no artifacts match the current filter." ]
        else
          Node.div
            ~attrs:[ Style.grid ]
-           (List.map r.artifacts ~f:card))
+           (List.map filtered ~f:card))
     ; detail_panel
     ]
 ;;
 
 let component (graph @ local) =
   let%map.Bonsai response = Bonsai.Expert.Var.value Multimodal_var.var
-  and detail_panel = Multimodal_detail_view.component graph in
-  view_of_response ~detail_panel response
+  and detail_panel = Multimodal_detail_view.component graph
+  and kind_filter =
+    Bonsai.Expert.Var.value Multimodal_filter_var.kind_var
+  and created_by_filter =
+    Bonsai.Expert.Var.value Multimodal_filter_var.created_by_var
+  and query = Bonsai.Expert.Var.value Multimodal_filter_var.search_var in
+  view_of_response
+    ~detail_panel ~kind_filter ~created_by_filter ~query
+    response
 ;;

@@ -11,8 +11,7 @@ import { Card } from './common/card'
 import { FilterChips } from './common/filter-chips'
 import { TextInput } from './common/input'
 import { SectionCap } from './common/section-cap'
-import { KpiCell } from './kpi-cell'
-import { KpiStrip } from './kpi-strip'
+import { KpiStripIsland, type KpiStripIslandData } from './kpi-strip-island'
 
 type FeatureStatus = 'healthy' | 'warning' | 'inactive' | 'deprecated'
 type StatusFilter = FeatureStatus | 'all'
@@ -229,14 +228,18 @@ export function FeatureHealth() {
                   </div>
 
                   <div class="mt-4">
-                    <${KpiStrip} ariaLabel="기능 상태 요약" variant="standard">
-                      <${KpiCell} variant="stacked" label="총 기능" value=${overview.total_features} />
-                      <${KpiCell} variant="stacked" label="활성화" value=${overview.enabled_count} />
-                      <${KpiCell} variant="stacked" label="정상" value=${overview.healthy_count} kind="ok" />
-                      <${KpiCell} variant="stacked" label="실험적" value=${overview.warning_count} kind="warn" />
-                      <${KpiCell} variant="stacked" label="비활성" value=${overview.inactive_count} />
-                      <${KpiCell} variant="stacked" label="폐기 예정" value=${overview.deprecated_count} kind="err" />
-                    <//>
+                    <${KpiStripIsland}
+                      ariaLabel="기능 상태 요약"
+                      variant="standard"
+                      cells=${[
+                        { variant: 'stacked', label: '총 기능', value: overview.total_features },
+                        { variant: 'stacked', label: '활성화', value: overview.enabled_count },
+                        { variant: 'stacked', label: '정상', value: overview.healthy_count, kind: 'ok' },
+                        { variant: 'stacked', label: '실험적', value: overview.warning_count, kind: 'warn' },
+                        { variant: 'stacked', label: '비활성', value: overview.inactive_count },
+                        { variant: 'stacked', label: '폐기 예정', value: overview.deprecated_count, kind: 'err' },
+                      ] satisfies KpiStripIslandData['cells']}
+                    />
                   </div>
 
                   <div class="mt-4 text-xs text-[var(--color-fg-disabled)]">

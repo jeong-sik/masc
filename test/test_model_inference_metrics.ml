@@ -848,6 +848,7 @@ let test_provider_rollup_empty_aggregate () =
     ; models = []
     ; total_entries = 0
     ; total_error_entries = 0
+    ; latency_buckets = []
     }
   in
   check int "empty models gives empty rollup" 0
@@ -859,7 +860,7 @@ let test_provider_rollup_skips_unknown_provider () =
   let m2 = zero_model_stats "bare-model" ~provider:None ~entry_count:3 in
   let agg : M.aggregate =
     { window_minutes = 30; bucket_minutes = 0; models = [m1; m2]
-    ; total_entries = 8; total_error_entries = 0 }
+    ; total_entries = 8; total_error_entries = 0; latency_buckets = [] }
   in
   let rollup = M.provider_rollup agg in
   check int "only provider=Some survives" 1 (List.length rollup);
@@ -883,7 +884,7 @@ let test_provider_rollup_weighted_mean () =
   in
   let agg : M.aggregate =
     { window_minutes = 30; bucket_minutes = 0; models = [m1; m2]
-    ; total_entries = 100; total_error_entries = 0 }
+    ; total_entries = 100; total_error_entries = 0; latency_buckets = [] }
   in
   let rollup = M.provider_rollup agg in
   let stats = List.hd rollup in
@@ -903,7 +904,7 @@ let test_provider_rollup_all_none_yields_none () =
   let m2 = zero_model_stats "x:2" ~provider:(Some "x") ~entry_count:5 in
   let agg : M.aggregate =
     { window_minutes = 30; bucket_minutes = 0; models = [m1; m2]
-    ; total_entries = 10; total_error_entries = 0 }
+    ; total_entries = 10; total_error_entries = 0; latency_buckets = [] }
   in
   let rollup = M.provider_rollup agg in
   let stats = List.hd rollup in
@@ -920,7 +921,7 @@ let test_provider_rollup_sort_by_entry_count_desc () =
   let c = zero_model_stats "c:1" ~provider:(Some "c") ~entry_count:7 in
   let agg : M.aggregate =
     { window_minutes = 30; bucket_minutes = 0; models = [a; b; c]
-    ; total_entries = 20; total_error_entries = 0 }
+    ; total_entries = 20; total_error_entries = 0; latency_buckets = [] }
   in
   let rollup = M.provider_rollup agg in
   let names = List.map (fun s -> s.M.ps_provider) rollup in
@@ -936,7 +937,7 @@ let test_provider_rollup_json_shape () =
   in
   let agg : M.aggregate =
     { window_minutes = 30; bucket_minutes = 0; models = [m]
-    ; total_entries = 42; total_error_entries = 0 }
+    ; total_entries = 42; total_error_entries = 0; latency_buckets = [] }
   in
   let json = M.provider_stats_to_json (List.hd (M.provider_rollup agg)) in
   match json with

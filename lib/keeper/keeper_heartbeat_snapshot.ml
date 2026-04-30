@@ -56,7 +56,8 @@ let write_heartbeat_snapshot
   =
   let metrics_store = keeper_metrics_store ctx.config meta_current.name in
   let cascade_models =
-    Cascade_runtime.models_of_cascade_name meta_current.cascade_name
+    Cascade_runtime.models_of_cascade_name
+      (Keeper_cascade_profile.Runtime_name meta_current.cascade_name)
   in
   let max_cascade_context =
     let resolution =

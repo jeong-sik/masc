@@ -1386,8 +1386,9 @@ let handle_keeper_get_subroutes state req request reqd =
             Keeper_cascade_routing.select_cascade
               ~base_cascade:m.cascade_name ~phase:current
           in
-          let models = Cascade_runtime.models_of_cascade_name
-            routing.effective_cascade
+          let models =
+            Cascade_runtime.models_of_cascade_name
+              (Keeper_cascade_profile.Runtime_name routing.effective_cascade)
           in
           let last_model = m.runtime.usage.last_model_used in
           let last_provider_result =
@@ -1430,7 +1431,7 @@ let handle_keeper_get_subroutes state req request reqd =
         match meta with
         | Ok (Some m) ->
           Cascade_runtime.models_of_cascade_name
-            m.cascade_name
+            (Keeper_cascade_profile.Runtime_name m.cascade_name)
         | _ -> ["(unknown)"]
       in
       let last_provider =

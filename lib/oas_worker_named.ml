@@ -98,6 +98,7 @@ let run_named
     else Keeper_cascade_profile.normalize_declared_name cascade_name
   in
   let error_cascade_name = cascade_name_of_string cascade_name in
+  let runtime_cascade_name = Keeper_cascade_profile.Runtime_name cascade_name in
   let runtime_mcp_policy = runtime_mcp_policy_for_tools ~keeper_name tools in
   let configured_labels_result, candidate_cfgs_result =
     match model_strings with
@@ -109,9 +110,10 @@ let run_named
           (resolve_providers_from_model_strings ?provider_filter
              ~require_tool_choice_support ~require_tool_support ms) )
     | _ ->
-      ( Cascade_runtime.models_of_cascade_name_result cascade_name,
+      ( Cascade_runtime.models_of_cascade_name_result runtime_cascade_name,
         resolve_cascade_providers ?provider_filter
-          ~require_tool_choice_support ~require_tool_support ~cascade_name ()
+          ~require_tool_choice_support ~require_tool_support
+          ~cascade_name:runtime_cascade_name ()
       )
   in
   (match configured_labels_result, candidate_cfgs_result with

@@ -480,7 +480,10 @@ let resolve_keeper_meta ctx args =
 let default_keeper_model_label (meta : keeper_meta) =
   match String.trim meta.runtime.usage.last_model_used with
   | "" -> (
-      match Cascade_runtime.models_of_cascade_name meta.cascade_name with
+      match
+        Cascade_runtime.models_of_cascade_name
+          (Keeper_cascade_profile.Runtime_name meta.cascade_name)
+      with
       | first :: _ when String.trim first <> "" -> first
       | _ -> Env_config.Local_runtime.default_model)
   | model -> model

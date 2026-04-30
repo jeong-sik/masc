@@ -1965,7 +1965,8 @@ proactive_enabled = true
        |> to_string);
       let expected_default_models =
         Masc_mcp.Cascade_runtime.models_of_cascade_name
-          Masc_mcp.Keeper_config.default_cascade_name
+          (Masc_mcp.Keeper_cascade_profile.Runtime_name
+             Masc_mcp.Keeper_config.default_cascade_name)
       in
       Alcotest.(check (list string)) "selected cascade models use default profile"
         expected_default_models

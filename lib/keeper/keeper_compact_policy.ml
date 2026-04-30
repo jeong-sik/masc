@@ -130,7 +130,9 @@ let compact_if_needed_typed
         let model_labels =
           match dedupe_keep_order (List.filter (fun s -> String.trim s <> "") meta.models) with
           | _ :: _ as explicit -> explicit
-          | [] -> Cascade_runtime.models_of_cascade_name meta.cascade_name
+          | [] ->
+              Cascade_runtime.models_of_cascade_name
+                (Keeper_cascade_profile.Runtime_name meta.cascade_name)
         in
         let primary_id = match Cascade_config.parse_model_strings model_labels with
           | c :: _ -> c.Llm_provider.Provider_config.model_id | [] -> "auto" in

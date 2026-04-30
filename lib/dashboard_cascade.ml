@@ -118,7 +118,10 @@ let profile_json_runtime ~keeper_assignable_names name =
       None
 
 let profile_json_raw ~config_path ~keeper_assignable_names name =
-  let defaults = Cascade_runtime.default_model_strings ~cascade_name:name in
+  let defaults =
+    Cascade_runtime.default_model_strings
+      ~cascade_name:(Keeper_cascade_profile.Runtime_name name)
+  in
   let (_models, trace) =
     CC.resolve_model_strings_with_trace ?config_path ~name ~defaults ()
   in

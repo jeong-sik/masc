@@ -859,7 +859,8 @@ let fallback_cascade_for_provider_cooldown
 let provider_cooldown_remaining_sec_for_cascade
     ~(cascade_name : string) : int option =
   let model_ids =
-    Cascade_runtime.models_of_cascade_name cascade_name
+    Cascade_runtime.models_of_cascade_name
+      (Keeper_cascade_profile.Runtime_name cascade_name)
     |> Cascade_config.parse_model_strings
     |> List.map (fun (cfg : Llm_provider.Provider_config.t) ->
            String.trim cfg.model_id)

@@ -211,7 +211,8 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
       in
       let effective_models =
         if direct_reply then
-          Cascade_runtime.models_of_cascade_name turn_cascade_name
+          Cascade_runtime.models_of_cascade_name
+            (Keeper_cascade_profile.Runtime_name turn_cascade_name)
               else
           effective_model_labels_for_turn meta
       in

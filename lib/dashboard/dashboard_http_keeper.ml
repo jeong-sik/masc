@@ -567,7 +567,8 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
           let next_model_hint = Keeper_exec_status.next_model_hint_of_meta m in
           let effective_cascade_name = live_keeper_cascade_name m.cascade_name in
           let cascade_models =
-            Cascade_runtime.models_of_cascade_name effective_cascade_name
+            Cascade_runtime.models_of_cascade_name
+              (Keeper_cascade_profile.Runtime_name effective_cascade_name)
           in
           let primary_model =
             match cascade_models with
@@ -870,7 +871,8 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
             | None ->
                 (let effective_cascade_name = live_keeper_cascade_name m.cascade_name in
                  let effective_models =
-                   Cascade_runtime.models_of_cascade_name effective_cascade_name
+                   Cascade_runtime.models_of_cascade_name
+                     (Keeper_cascade_profile.Runtime_name effective_cascade_name)
                  in
                  let cfgs = Cascade_config.parse_model_strings effective_models in
                  match cfgs with
@@ -1455,7 +1457,8 @@ let keeper_config_json (config : Coord.config) (name : string)
           ( "models",
             `List
               (List.map (fun s -> `String s)
-                 (Cascade_runtime.models_of_cascade_name effective_cascade_name)) );
+                 (Cascade_runtime.models_of_cascade_name
+                    (Keeper_cascade_profile.Runtime_name effective_cascade_name))) );
           ("active_model", `String active_model);
           ("active_model_label", Json_util.string_opt_to_json active_model_label);
           ("last_model_used_label", Json_util.string_opt_to_json last_model_used_label);

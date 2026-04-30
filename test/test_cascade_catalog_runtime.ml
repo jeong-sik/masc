@@ -471,10 +471,12 @@ let test_legacy_runtime_wrapper_does_not_fallback_to_defaults () =
   ignore (Cascade_catalog_runtime.inspect_active ());
   check (list string) "legacy wrapper still resolves known profile"
     [ valid_model ]
-    (Cascade_runtime.models_of_cascade_name Keeper_config.default_cascade_name);
+    (Cascade_runtime.models_of_cascade_name
+       (Keeper_cascade_profile.Runtime_name Keeper_config.default_cascade_name));
   check (list string) "unknown profile no longer falls back to defaults"
     []
-    (Cascade_runtime.models_of_cascade_name "missing_profile")
+    (Cascade_runtime.models_of_cascade_name
+       (Keeper_cascade_profile.Runtime_name "missing_profile"))
 
 let test_legacy_runtime_wrapper_preserves_configured_label_order () =
   with_temp_dir "cascade-runtime-order" @@ fun dir ->
@@ -505,7 +507,9 @@ let test_legacy_runtime_wrapper_preserves_configured_label_order () =
   ignore (Cascade_catalog_runtime.inspect_active ~sw ~net ~clock ());
   let observed_orders =
     List.init 8 (fun _ ->
-        Cascade_runtime.models_of_cascade_name Keeper_config.default_cascade_name)
+        Cascade_runtime.models_of_cascade_name
+          (Keeper_cascade_profile.Runtime_name
+             Keeper_config.default_cascade_name))
   in
   check (list string) "legacy wrapper keeps configured order" expected
     (List.hd observed_orders);

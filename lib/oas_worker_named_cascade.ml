@@ -9,7 +9,9 @@
 (* Cascade profile defaults (moved from Cascade module) *)
 
 let default_config_path = Cascade_runtime.cascade_config_path
-let default_model_strings = Cascade_runtime.default_model_strings
+let default_model_strings ~cascade_name =
+  Cascade_runtime.default_model_strings
+    ~cascade_name:(Keeper_cascade_profile.Runtime_name cascade_name)
 
 (* Named model execution *)
 

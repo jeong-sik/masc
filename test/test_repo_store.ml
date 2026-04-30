@@ -254,11 +254,17 @@ let test_discover_skips_registered () =
         let repo_a = Filename.concat base_path "project-a" in
         Unix.mkdir repo_a 0o755;
         init_git_repo repo_a "https://github.com/test/project-a";
-        let* () = Repo_store.save_all ~base_path [ { (sample_repo "project-a") with local_path = repo_a } ] in
-        match Repo_store.discover_repositories ~base_path with
-        | Error e -> Alcotest.fail ("discover failed: " ^ e)
-        | Ok repos ->
-            Alcotest.(check int) "skips already registered" 0 (List.length repos))
+        match
+          Repo_store.save_all ~base_path
+            [ { (sample_repo "project-a") with local_path = repo_a } ]
+        with
+        | Error e -> Alcotest.fail ("save failed: " ^ e)
+        | Ok () -> (
+            match Repo_store.discover_repositories ~base_path with
+            | Error e -> Alcotest.fail ("discover failed: " ^ e)
+            | Ok repos ->
+                Alcotest.(check int) "skips already registered" 0
+                  (List.length repos)))
 
 let () =
   Alcotest.run "Repo_store"

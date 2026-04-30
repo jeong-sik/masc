@@ -9,7 +9,7 @@ open Keeper_exec_context
 module EC = Keeper_error_classify
 
 type cascade_execution = {
-  cascade_name : string;
+  cascade_name : Keeper_cascade_profile.runtime_name;
   max_context_resolution : Keeper_exec_context.max_context_resolution;
   max_context : int;
   temperature : float;

@@ -1,6 +1,18 @@
 # Changelog
 
 
+## [0.18.15] - 2026-04-30
+
+### Changed
+
+- Package and release metadata advanced from `0.18.14` to `0.18.15` so post-v0.18.14 keeper, audit, dashboard, and dependency follow-ups land on a new patch line.
+- Roadmap, product operating plan, opam metadata, and spec baseline version references synced to `0.18.15`.
+- OAS agent SDK pin advanced to `v0.185.0` / `a04ce1f373c8f9458b7e6059558c8a6867856743`, including the regenerated public API surface fingerprint and keeper manual pin block.
+
+### Deprecated
+
+- None.
+
 ## [0.18.14] - 2026-04-30
 
 Release train metadata bump immediately after publishing the v0.18.13 catch-up boundary. No runtime behavior changes.

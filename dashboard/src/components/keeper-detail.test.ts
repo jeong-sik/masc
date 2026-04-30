@@ -275,3 +275,4 @@ describe('lineageTransitionLabel', () => {
     expect(lineageTransitionLabel(4, 5)).toBe('gen 4 -> gen 5')
   })
 })
+

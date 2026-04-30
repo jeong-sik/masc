@@ -29,11 +29,12 @@ import { TimeAgo } from './common/time-ago'
 import { Checkbox } from './common/checkbox'
 import { TextArea } from './common/input'
 import type { Keeper } from '../types'
-import { invalidateDashboardCache, refreshDashboard } from '../store'
+import { invalidateDashboardCache, refreshDashboard, keepers } from '../store'
 import { hydrateKeeperStatus, selectKeeper } from '../keeper-runtime'
 import { activeKeeperName, keeperStatusDetails } from '../keeper-state'
 import { registerKeeperTurnRefresh } from '../sse-store'
 import { findKeeper } from '../lib/keeper-utils'
+import { resolveKeeperForDetail } from '../lib/keeper-detail-resolution'
 import {
   KeeperConversationPanel,
   KeeperDiagnosticSummary,
@@ -795,9 +796,13 @@ export function KeeperDetailPage() {
       : ''
   if (!keeperName) return null
 
-  const fallback = selectedKeeper.value
-  const keeper = findKeeper(keeperName)
-    ?? (fallback && (fallback.name === keeperName || fallback.agent_name === keeperName) ? fallback : null)
+  // Resolve the active keeper. See [resolveKeeperForDetail] for semantics.
+  const keeper = resolveKeeperForDetail(
+    keeperName,
+    findKeeper(keeperName),
+    selectedKeeper.value,
+    keepers.value.length,
+  )
   if (!keeper) {
     return html`<${KeeperDetailMissingState} keeperName=${keeperName} onClose=${closeKeeperDetail} />`
   }

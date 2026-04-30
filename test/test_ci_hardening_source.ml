@@ -669,7 +669,7 @@ let test_activity_surface_contracts () =
        "Activity_graph.emit config");
   check bool "coord task lifecycle emits activity events via hook" true
     (file_contains_pattern "lib/coord/coord_task.ml"
-       "(Atomic.get Coord_hooks.activity_emit_fn)\n      config");
+       "emit_task_activity");
   check bool "coord broadcast emits activity events via hook" true
     (file_contains_pattern "lib/coord/coord_broadcast.ml"
        "(Atomic.get Coord_hooks.activity_emit_fn) config");
@@ -1007,6 +1007,8 @@ let test_masc_dirname_ssot_contracts () =
     "Common.masc_dir_from_base_path";       (* base-rooted helper *)
     "Masc_paths.masc_dir_from_base_path";   (* alias re-export *)
     "Common.masc_dirname";                  (* relative-only constant *)
+    "Common.auth_dir_from_base_path";       (* derived auth root helper *)
+    "Common.agents_dir_from_base_path";     (* derived auth agents helper *)
   ] in
   let file_uses_masc_dir_helper file =
     List.exists (fun p -> file_contains_pattern file p)

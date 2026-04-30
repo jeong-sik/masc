@@ -68,9 +68,35 @@ let normalize_cwd cwd =
 let starts_with_dir ~prefix abs =
   abs = prefix || String.starts_with ~prefix:(prefix ^ "/") abs
 
+let lexical_normalize_abs abs =
+  let parts = String.split_on_char '/' abs in
+  let stack = ref [] in
+  List.iter
+    (function
+      | "" | "." -> ()
+      | ".." ->
+          (match !stack with
+           | _ :: rest -> stack := rest
+           | [] -> ())
+      | part -> stack := part :: !stack)
+    parts;
+  "/" ^ String.concat "/" (List.rev !stack)
+
+let lexical_abs ~cwd raw =
+  let abs =
+    if Filename.is_relative raw then Filename.concat cwd raw
+    else raw
+  in
+  lexical_normalize_abs abs
+
 let classify ~raw ~cwd =
   match normalize_path ~cwd raw with
-  | None -> { raw; scope = Absolute_unknown raw }
+  | None ->
+      let abs = lexical_abs ~cwd raw in
+      if starts_with_sandbox abs then
+        { raw; scope = Inside_sandbox abs }
+      else
+        { raw; scope = Absolute_unknown raw }
   | Some abs ->
     if starts_with_sandbox abs then
       { raw; scope = Inside_sandbox abs }

@@ -12,6 +12,7 @@ type runtime_kind =
   | Local
   | Cli_agent
   | Direct_api
+[@@deriving tla]
 
 type auth_mode =
   | No_auth

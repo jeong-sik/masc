@@ -147,6 +147,40 @@ Next ==
 
 Spec == Init /\ [][Next]_vars
 
+\* ── Bug model (RFC-Q2-7) ────────────────────────────────────────
+\*
+\* Models the bug class where the caller computes [completed] and
+\* [failed] artifact sets without enforcing disjointness — e.g. a
+\* shared mutable state mutation lets the same artifact id land in
+\* both. The clean AppendPartial enforces completed \cap failed = {}
+\* at the precondition; the bug action drops that check.
+
+AppendPartialNonDisjoint(conf, completed, failed, level) ==
+    /\ conf \in 0..ConfidenceMax
+    /\ completed \subseteq ArtifactIds
+    /\ failed \subseteq ArtifactIds
+    \* deliberately omitted: completed \cap failed = {}
+    /\ completed \cap failed # {}  \* force overlap to actually happen
+    /\ level \in 1..4
+    /\ outcomes' =
+        Append(outcomes,
+               [ class |-> "partial",
+                 confidence_num |-> conf,
+                 degradation_level |-> level,
+                 completed |-> completed,
+                 failed |-> failed,
+                 recovery_strategy |-> CHOOSE s \in Strategies : TRUE ])
+
+NextBuggy ==
+    \/ Next
+    \/ \E conf \in {0, 50, 100},
+          completed \in SUBSET ArtifactIds,
+          failed \in SUBSET ArtifactIds,
+          level \in 1..4 :
+            AppendPartialNonDisjoint(conf, completed, failed, level)
+
+SpecBuggy == Init /\ [][NextBuggy]_vars
+
 \* State-space bound for TLC: keep the outcomes sequence small
 \* enough to enumerate exhaustively. Wired in via the .cfg
 \* CONSTRAINT clause.

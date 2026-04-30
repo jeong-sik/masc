@@ -1,6 +1,29 @@
 # Changelog
 
 
+## [0.18.22] - 2026-04-30
+
+Post-`0.18.21` merge-train release for the IDE explorer, cascade strategy signal typing, model-metrics fixture repairs, and legacy keeper prompt cleanup. No breaking API changes.
+
+### Added
+
+- The dashboard IDE explorer gained a file-tree store with 1K/5K performance smoke coverage and stabilized expansion notifications (#12347).
+- Dashboard design-system coverage expanded with Popover, AlertDialog, and ResizablePanel primitives plus a11y tests (#12352).
+
+### Changed
+
+- Cascade strategy signal naming now uses typed cascade names instead of stringly provider-route helpers (#12350).
+- Release metadata advanced from `0.18.21` to `0.18.22` after the post-bump merge train, keeping version truth aligned with the latest main boundary.
+
+### Fixed
+
+- Model inference aggregate fixtures now include latency buckets, restoring Health/@check compilation on main and release PRs (#12349, #12351, #12354).
+- Provider run routes now read keeper names from the keeper type boundary rather than the dashboard keeper HTTP module (#12349).
+
+### Deprecated
+
+- Removed the dead SOUL.md / "SYSTEM: SOUL INFUSION" keeper prompt path (#12353).
+
 ## [0.18.21] - 2026-04-30
 
 Release-truth follow-up after the `0.18.20` version bump landed before the rest of the merge train, and the `v0.18.20` tag was later cut with additional PRs but without matching changelog text. No breaking API changes.

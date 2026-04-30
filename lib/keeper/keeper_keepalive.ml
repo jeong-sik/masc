@@ -116,26 +116,12 @@ let set_keeper_paused_state ~agent_name paused =
          }
        in
        persist_directive_meta_update entry ~updated_meta;
-       (match Keeper_registry.dispatch_event
-               ~base_path:entry.base_path entry.name
-               (if paused
-                then Keeper_state_machine.Operator_pause
-                else Keeper_state_machine.Operator_resume)
-        with
-        | Ok _ -> ()
-        | Error (Keeper_state_machine.Invalid_transition { from_phase; to_phase; reason }) ->
-            Log.Keeper.error "%s: directive %s dispatch failed: %s -> %s (%s)"
-              entry.name
-              (if paused then "pause" else "resume")
-              (Keeper_state_machine.phase_to_string from_phase)
-              (Keeper_state_machine.phase_to_string to_phase)
-              reason
-        | Error (Keeper_state_machine.Terminal_state { current; attempted_event }) ->
-            Log.Keeper.warn "%s: directive %s skipped, already terminal: %s (event: %s)"
-              entry.name
-              (if paused then "pause" else "resume")
-              (Keeper_state_machine.phase_to_string current)
-              attempted_event);
+       ignore
+         (Keeper_registry.dispatch_event
+            ~base_path:entry.base_path entry.name
+            (if paused
+             then Keeper_state_machine.Operator_pause
+             else Keeper_state_machine.Operator_resume));
        if not paused then begin
          (* tla-lint: allow-mutation: fiber signal — Atomic flag wakes the keeper from Eio.Promise.await *)
          Atomic.set entry.fiber_wakeup true;
@@ -508,36 +494,10 @@ let record_keeper_stopped
   =
   if resolve_registry_done entry `Stopped
   then (
-    (match Keeper_registry.dispatch_event ~base_path keeper_name
-            Keeper_state_machine.Stop_requested
-     with
-     | Ok _ -> ()
-     | Error (Keeper_state_machine.Invalid_transition { from_phase; to_phase; reason }) ->
-         Log.Keeper.error "record_keeper_stopped(%s): Stop_requested dispatch failed: %s -> %s (%s)"
-           keeper_name
-           (Keeper_state_machine.phase_to_string from_phase)
-           (Keeper_state_machine.phase_to_string to_phase)
-           reason
-     | Error (Keeper_state_machine.Terminal_state { current; attempted_event }) ->
-         Log.Keeper.warn "record_keeper_stopped(%s): Stop_requested skipped, already terminal: %s (event: %s)"
-           keeper_name
-           (Keeper_state_machine.phase_to_string current)
-           attempted_event);
-    (match Keeper_registry.dispatch_event ~base_path keeper_name
-            Keeper_state_machine.Drain_complete
-     with
-     | Ok _ -> ()
-     | Error (Keeper_state_machine.Invalid_transition { from_phase; to_phase; reason }) ->
-         Log.Keeper.error "record_keeper_stopped(%s): Drain_complete dispatch failed: %s -> %s (%s)"
-           keeper_name
-           (Keeper_state_machine.phase_to_string from_phase)
-           (Keeper_state_machine.phase_to_string to_phase)
-           reason
-     | Error (Keeper_state_machine.Terminal_state { current; attempted_event }) ->
-         Log.Keeper.warn "record_keeper_stopped(%s): Drain_complete skipped, already terminal: %s (event: %s)"
-           keeper_name
-           (Keeper_state_machine.phase_to_string current)
-           attempted_event);
+    ignore (Keeper_registry.dispatch_event_and_log ~base_path keeper_name
+      Keeper_state_machine.Stop_requested);
+    ignore (Keeper_registry.dispatch_event_and_log ~base_path keeper_name
+      Keeper_state_machine.Drain_complete);
     publish_keeper_phase_lifecycle ~phase:Keeper_state_machine.Stopped
       ~keeper_name ~detail ();
     true)
@@ -556,21 +516,8 @@ let record_keeper_crashed
   if resolve_registry_done entry (`Crashed reason)
   then (
     Keeper_registry.set_failure_reason ~base_path keeper_name (Some failure_reason);
-    (match Keeper_registry.dispatch_event ~base_path keeper_name
-            (Keeper_state_machine.Fiber_terminated { outcome = reason })
-     with
-     | Ok _ -> ()
-     | Error (Keeper_state_machine.Invalid_transition { from_phase; to_phase; reason = sm_reason }) ->
-         Log.Keeper.error "record_keeper_crashed(%s): Fiber_terminated dispatch failed: %s → %s (%s)"
-           keeper_name
-           (Keeper_state_machine.phase_to_string from_phase)
-           (Keeper_state_machine.phase_to_string to_phase)
-           sm_reason
-     | Error (Keeper_state_machine.Terminal_state { current; attempted_event }) ->
-         Log.Keeper.warn "record_keeper_crashed(%s): Fiber_terminated skipped, already terminal: %s (event: %s)"
-           keeper_name
-           (Keeper_state_machine.phase_to_string current)
-           attempted_event);
+    ignore (Keeper_registry.dispatch_event_and_log ~base_path keeper_name
+      (Keeper_state_machine.Fiber_terminated { outcome = reason }));
     Keeper_registry.record_crash ~base_path keeper_name (Time_compat.now ()) reason;
     Keeper_registry.record_error ~base_path keeper_name reason;
     publish_keeper_phase_lifecycle ~phase:Keeper_state_machine.Crashed

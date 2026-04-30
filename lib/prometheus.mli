@@ -417,6 +417,12 @@ val metric_auth_strict_unknown_tool_denials : string
     [agent_name, tool_class] where [tool_class] is bounded to
     [empty | external]. *)
 
+val metric_keeper_dispatch_event_failures : string
+(** A1 track: counter for keeper registry dispatch_event failures that
+    were previously silently dropped via [ignore].  Labels:
+    [keeper, reason] where reason is [terminal_state] or
+    [invalid_transition]. *)
+
 val metric_auth_credential_token_duplicate : string
 (** #9786 follow-up: boot-time audit counter for credentials
     sharing the same token hash.  Increments once per boot per

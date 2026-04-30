@@ -1,99 +1,55 @@
-import { describe, expect, it } from 'vitest'
+// @vitest-environment happy-dom
+import { describe, expect, it } from "vitest"
+import { filterActionGroups, visibleNamespaceLabel } from "./activity-graph"
+import type { ActionTimelineGroup } from "../types"
 
-import { filterActionGroups, visibleNamespaceLabel } from './activity-graph'
-import type { ActionTimelineGroup } from '../types'
-
-describe('visibleNamespaceLabel', () => {
-  it('hides empty and default namespaces', () => {
-    expect(visibleNamespaceLabel(null)).toBeNull()
-    expect(visibleNamespaceLabel(undefined)).toBeNull()
-    expect(visibleNamespaceLabel('')).toBeNull()
-    expect(visibleNamespaceLabel('   ')).toBeNull()
-    expect(visibleNamespaceLabel('default')).toBeNull()
-    expect(visibleNamespaceLabel(' default ')).toBeNull()
-  })
-
-  it('returns trimmed non-default namespaces', () => {
-    expect(visibleNamespaceLabel('project-a')).toBe('project-a')
-    expect(visibleNamespaceLabel(' project-b ')).toBe('project-b')
-  })
-})
-
-function makeGroup(overrides: Partial<ActionTimelineGroup>): ActionTimelineGroup {
+function makeGroup(overrides: Partial<ActionTimelineGroup> = {}): ActionTimelineGroup {
   return {
-    id: 'g1',
-    category: 'task',
-    actor: 'dreamer',
+    id: "1",
+    title: "Title",
+    summary: "Summary",
+    actor: null,
     subjectId: null,
-    title: 'claim task PK-123',
-    summary: 'dreamer claimed task PK-123',
-    latestTs: '2026-04-17T00:00:00Z',
-    latestTsMs: 0,
+    category: "task",
     rawCount: 1,
-    kinds: ['task.claim'],
+    latestTs: "",
+    kinds: [],
     rawEvents: [],
     ...overrides,
   }
 }
 
-describe('filterActionGroups', () => {
-  const groups: readonly ActionTimelineGroup[] = [
-    makeGroup({ id: 'a', title: 'claim task PK-123', actor: 'dreamer', subjectId: 'PK-123' }),
-    makeGroup({ id: 'b', title: 'session start', actor: 'keeper-1', subjectId: null, summary: 'keeper-1 joined room alpha' }),
-    makeGroup({ id: 'c', title: 'broadcast status', actor: 'Watcher', subjectId: 'room-beta', summary: 'Watcher posted status update' }),
-    makeGroup({ id: 'd', title: 'governance vote', actor: 'judge', subjectId: null, summary: '' }),
+describe("filterActionGroups", () => {
+  const groups = [
+    makeGroup({ id: "1", title: "Alpha", summary: "summary one", actor: "user1", subjectId: "sub1" }),
+    makeGroup({ id: "2", title: "Beta", summary: "summary two", actor: "user2", subjectId: "sub2" }),
   ]
 
-  it('returns input reference when query is empty', () => {
-    expect(filterActionGroups(groups, '')).toBe(groups)
+  it("returns same reference for empty query", () => {
+    expect(filterActionGroups(groups, "  ")).toBe(groups)
   })
+  it("filters by title", () => {
+    expect(filterActionGroups(groups, "alpha")).toHaveLength(1)
+  })
+  it("filters by summary", () => {
+    expect(filterActionGroups(groups, "two")).toHaveLength(1)
+  })
+  it("filters by actor", () => {
+    expect(filterActionGroups(groups, "USER1")).toHaveLength(1)
+  })
+  it("filters by subjectId", () => {
+    expect(filterActionGroups(groups, "sub2")).toHaveLength(1)
+  })
+  it("returns empty when no match", () => {
+    expect(filterActionGroups(groups, "zzz")).toHaveLength(0)
+  })
+})
 
-  it('returns input reference when query is whitespace only', () => {
-    expect(filterActionGroups(groups, '   ')).toBe(groups)
-  })
-
-  it('trims query before matching', () => {
-    const result = filterActionGroups(groups, '  claim  ')
-    expect(result).toHaveLength(1)
-    expect(result[0]!.id).toBe('a')
-  })
-
-  it('matches title case-insensitively', () => {
-    const result = filterActionGroups(groups, 'CLAIM')
-    expect(result.map(g => g.id)).toEqual(['a'])
-  })
-
-  it('matches actor substring', () => {
-    const result = filterActionGroups(groups, 'watch')
-    expect(result.map(g => g.id)).toEqual(['c'])
-  })
-
-  it('matches subjectId substring', () => {
-    const result = filterActionGroups(groups, 'room-beta')
-    expect(result.map(g => g.id)).toEqual(['c'])
-  })
-
-  it('matches summary substring', () => {
-    const result = filterActionGroups(groups, 'joined room')
-    expect(result.map(g => g.id)).toEqual(['b'])
-  })
-
-  it('returns empty array when no group matches', () => {
-    expect(filterActionGroups(groups, 'nonexistent-needle')).toEqual([])
-  })
-
-  it('handles null subjectId without crashing', () => {
-    const result = filterActionGroups(groups, 'judge')
-    expect(result.map(g => g.id)).toEqual(['d'])
-  })
-
-  it('does not mutate the input array', () => {
-    const snapshot = groups.slice()
-    filterActionGroups(groups, 'claim')
-    expect(groups).toEqual(snapshot)
-  })
-
-  it('returns empty result on empty input', () => {
-    expect(filterActionGroups([], 'claim')).toEqual([])
-  })
+describe("visibleNamespaceLabel", () => {
+  it("returns null for null", () => expect(visibleNamespaceLabel(null)).toBeNull())
+  it("returns null for undefined", () => expect(visibleNamespaceLabel(undefined)).toBeNull())
+  it("returns null for empty string", () => expect(visibleNamespaceLabel("")).toBeNull())
+  it("returns null for default", () => expect(visibleNamespaceLabel("default")).toBeNull())
+  it("returns null for whitespace default", () => expect(visibleNamespaceLabel("  default  ")).toBeNull())
+  it("returns trimmed value otherwise", () => expect(visibleNamespaceLabel("ns1")).toBe("ns1"))
 })

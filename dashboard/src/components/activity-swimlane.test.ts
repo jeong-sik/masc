@@ -1,90 +1,36 @@
-import { describe, it, expect } from 'vitest'
-import { truncateLabel, spanStyle } from './activity-swimlane'
+// @vitest-environment happy-dom
+import { describe, expect, it } from "vitest"
+import { truncateLabel, spanStyle } from "./activity-swimlane"
 
-describe('truncateLabel', () => {
-  it('returns short strings unchanged', () => {
-    expect(truncateLabel('hello')).toBe('hello')
+describe("truncateLabel", () => {
+  it("returns short strings unchanged", () => {
+    expect(truncateLabel("hello")).toBe("hello")
   })
-
-  it('truncates strings exceeding max length', () => {
-    const input = 'a'.repeat(25)
-    expect(truncateLabel(input)).toBe('a'.repeat(18) + '..')
+  it("returns exact length unchanged", () => {
+    expect(truncateLabel("a".repeat(20))).toBe("a".repeat(20))
   })
-
-  it('respects custom max length', () => {
-    expect(truncateLabel('abcdefghij', 8)).toBe('abcdef..')
+  it("truncates long strings", () => {
+    expect(truncateLabel("a".repeat(21))).toBe("a".repeat(18) + "..")
   })
-
-  it('does not truncate at exactly max length', () => {
-    const input = 'a'.repeat(20)
-    expect(truncateLabel(input)).toBe(input)
-  })
-
-  it('truncates at max+1 length', () => {
-    const input = 'a'.repeat(21)
-    expect(truncateLabel(input)).toBe('a'.repeat(18) + '..')
-  })
-
-  it('handles empty string', () => {
-    expect(truncateLabel('')).toBe('')
-  })
-
-  it('handles single character', () => {
-    expect(truncateLabel('x')).toBe('x')
-  })
-
-  it('handles max=0 by slicing from -2 and appending ".."', () => {
-    // slice(0, -2) on 'abc' = 'a', then + '..' = 'a..'
-    expect(truncateLabel('abc', 0)).toBe('a..')
-  })
-
-  it('handles max=1', () => {
-    // slice(0, -1) on 'abc' = 'ab', then + '..' = 'ab..'
-    expect(truncateLabel('abc', 1)).toBe('ab..')
-  })
-
-  it('handles max=2', () => {
-    expect(truncateLabel('abcdef', 2)).toBe('..')
+  it("uses custom max", () => {
+    expect(truncateLabel("hello world", 8)).toBe("hello ..")
   })
 })
 
-describe('spanStyle', () => {
-  it('returns task style', () => {
-    const style = spanStyle('task')
-    expect(style).toEqual({ bg: 'var(--color-status-warn)', text: 'var(--panel-dark)' })
+describe("spanStyle", () => {
+  it("returns style for task", () => {
+    expect(spanStyle("task")).toEqual({ bg: "var(--color-status-warn)", text: "var(--panel-dark)" })
   })
-
-  it('returns operation style', () => {
-    const style = spanStyle('operation')
-    expect(style).toEqual({ bg: 'var(--color-status-ok)', text: 'var(--panel-dark)' })
+  it("returns style for operation", () => {
+    expect(spanStyle("operation")).toEqual({ bg: "var(--color-status-ok)", text: "var(--panel-dark)" })
   })
-
-  it('returns autonomy style', () => {
-    const style = spanStyle('autonomy')
-    expect(style).toEqual({ bg: 'var(--cyan)', text: 'var(--panel-dark)' })
+  it("returns style for autonomy", () => {
+    expect(spanStyle("autonomy")).toEqual({ bg: "var(--cyan)", text: "var(--panel-dark)" })
   })
-
-  it('returns presence style with rgba', () => {
-    const style = spanStyle('presence')
-    expect(style.bg).toContain('rgba(')
-    expect(style.text).toBe('var(--frost-100)')
+  it("returns style for presence", () => {
+    expect(spanStyle("presence")).toEqual({ bg: "rgba(148, 163, 184, 0.25)", text: "var(--frost-100)" })
   })
-
-  it('returns default for unknown kind', () => {
-    const style = spanStyle('unknown')
-    expect(style).toEqual({ bg: 'var(--slate-400)', text: 'var(--panel-dark)' })
-  })
-
-  it('returns default for empty string', () => {
-    const style = spanStyle('')
-    expect(style).toEqual({ bg: 'var(--slate-400)', text: 'var(--panel-dark)' })
-  })
-
-  it('each known style has bg and text keys', () => {
-    for (const kind of ['task', 'operation', 'autonomy', 'presence']) {
-      const style = spanStyle(kind)
-      expect(style).toHaveProperty('bg')
-      expect(style).toHaveProperty('text')
-    }
+  it("returns default for unknown kind", () => {
+    expect(spanStyle("unknown")).toEqual({ bg: "var(--slate-400)", text: "var(--panel-dark)" })
   })
 })

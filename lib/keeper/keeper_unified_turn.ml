@@ -695,7 +695,8 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             Otel_genai.with_keeper_turn_span
               ~keeper_name:run_meta.name
               ~agent_name:run_meta.agent_name
-              ~cascade_name:execution.cascade_name
+              ~cascade_name:
+                (Keeper_cascade_profile.Runtime_name execution.cascade_name)
               ~trace_id:(Keeper_id.Trace_id.to_string run_meta.runtime.trace_id)
               ~generation:run_generation
               ~max_context:execution.max_context

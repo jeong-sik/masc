@@ -5,11 +5,16 @@
 
     @since 3.0.0 *)
 
-val on_acquire : keeper_name:string -> cascade_name:string -> wait_ms:int -> unit
+val on_acquire :
+  keeper_name:string ->
+  cascade_name:Keeper_cascade_profile.runtime_name ->
+  wait_ms:int ->
+  unit
 (** Called after successful acquire. Increments inflight gauge,
     records wait time histogram. *)
 
-val on_release : keeper_name:string -> cascade_name:string -> unit
+val on_release :
+  keeper_name:string -> cascade_name:Keeper_cascade_profile.runtime_name -> unit
 (** Called on release. Decrements inflight gauge. *)
 
 val set_max_concurrent : int -> unit

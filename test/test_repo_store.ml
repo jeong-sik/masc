@@ -265,7 +265,6 @@ let test_discover_skips_registered () =
             | Ok repos ->
                 Alcotest.(check int) "skips already registered" 0
                   (List.length repos)))
-
 let () =
   Alcotest.run "Repo_store"
     [

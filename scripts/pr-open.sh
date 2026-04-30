@@ -17,7 +17,7 @@ Options:
 Behavior:
   1) push current branch
   2) create draft PR if absent
-  3) auto-label docs/enhancement by changed files
+  3) auto-label agent-pr plus docs/enhancement by changed files
   4) add extra labels
   5) optionally watch checks
 USAGE
@@ -73,6 +73,21 @@ is_doc_path() {
     docs/*|examples/trpg-mvp/*|README.md|*.md) return 0 ;;
     *) return 1 ;;
   esac
+}
+
+ensure_agent_pr_label() {
+  local exists
+
+  exists="$(gh label list --repo "$repo" --search agent-pr --json name --jq 'any(.[]; .name == "agent-pr")' 2>/dev/null || true)"
+  if [[ "$exists" == "true" ]]; then
+    return 0
+  fi
+
+  gh label create agent-pr \
+    --repo "$repo" \
+    --color "5319E7" \
+    --description "Agent-authored draft PR; requires human-approved-ready before ready/merge" \
+    >/dev/null 2>&1 || true
 }
 
 repo=""
@@ -145,6 +160,8 @@ else
   pr_number="$(gh pr view "$pr_url" --repo "$repo" --json number --jq .number)"
 fi
 
+ensure_agent_pr_label
+
 load_changed_files "origin/$base...HEAD"
 if [[ ${#changed_files[@]} -eq 0 ]]; then
   load_changed_files "HEAD~1..HEAD"
@@ -163,7 +180,7 @@ for f in "${changed_files[@]}"; do
   fi
 done
 
-labels=()
+labels=("agent-pr")
 if [[ $has_docs -eq 1 ]]; then
   labels+=("docs")
 fi

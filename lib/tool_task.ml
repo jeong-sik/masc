@@ -560,7 +560,7 @@ let handle_claim ?agent_tool_names ctx args =
          ("agent_name", `String ctx.agent_name);
          ("timestamp", `Float (Time_compat.now ()));
        ])
-   | Error e -> Log.Task.debug "task claim failed for %s: %s" task_id (Types.masc_error_to_string e));
+   | Error e -> Log.Task.warn "task claim failed for %s: %s" task_id (Types.masc_error_to_string e));
   result_to_response result
 
 let handle_claim_next ?agent_tool_names ctx _args =

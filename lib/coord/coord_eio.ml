@@ -197,7 +197,7 @@ let get_recent_events config ~limit =
     | Ok n -> n
     | Error (Backend.NotFound _) -> 0
     | Error e ->
-        Log.Coord.debug "get_recent_events: event seq read failed: %s"
+        Log.Coord.warn "get_recent_events: event seq read failed: %s"
           (match e with Backend.IOError m -> m
            | _ -> "unexpected backend error");
         0

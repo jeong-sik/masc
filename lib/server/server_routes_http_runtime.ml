@@ -214,15 +214,19 @@ let readiness_handler _request reqd =
 
 let board_post_detail_json ~response_format ~post_id =
   match Board_dispatch.get_post ~post_id with
-  | Error _ ->
-      (`Not_found, {|{"error":"Post not found"}|})
+  | Error err ->
+      (`Not_found, Printf.sprintf {|{"error":"%s"}|}
+         (String.escaped (Board_types.pp_board_error err)))
   | Ok post ->
       let author = Board.Agent_id.to_string post.author in
       let author_karma = Board_dispatch.get_agent_karma ~agent_name:author in
       let comments =
         match Board_dispatch.get_comments ~post_id with
         | Ok cs -> cs
-        | Error _ -> []
+        | Error err ->
+            Log.Server.warn "board_post_detail: get_comments failed for %s: %s"
+              post_id (Board_types.pp_board_error err);
+            []
       in
       let post_json = board_post_dashboard_json ~author_karma post in
       let comments_json = `List (List.map board_comment_dashboard_json comments) in

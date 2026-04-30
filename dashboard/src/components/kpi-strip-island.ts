@@ -34,8 +34,13 @@ import { KpiCell } from './kpi-cell'
 
 export type { KpiStripIslandData } from './kpi-strip-island-solid.solid'
 
-declare const process: { env?: Record<string, string | undefined> } | undefined
-const isVitest = typeof process !== 'undefined' && process.env?.VITEST === 'true'
+interface GlobalWithProcess {
+  process?: { env?: Record<string, string | undefined> }
+}
+
+const isVitest =
+  typeof (globalThis as GlobalWithProcess).process !== 'undefined' &&
+  (globalThis as GlobalWithProcess).process?.env?.VITEST === 'true'
 
 export function KpiStripIsland(props: KpiStripIslandData): VNode {
   // In test environments (happy-dom/jsdom) Solid JSX isn't transformed by

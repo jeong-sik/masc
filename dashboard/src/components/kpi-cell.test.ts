@@ -2,7 +2,8 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { render } from 'preact'
 import { html } from 'htm/preact'
-import { KpiCell, kpiCellAriaLabel, type KpiCellProps } from './kpi-cell'
+import { KpiCell } from './kpi-cell'
+import { kpiCellAriaLabel, type KpiCellProps } from './kpi-shared'
 
 describe('kpiCellAriaLabel (pure)', () => {
   it('returns "label: value" for the minimal case', () => {

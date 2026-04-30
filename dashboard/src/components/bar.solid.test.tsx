@@ -1,11 +1,17 @@
+/** @jsxImportSource solid-js */
 // @vitest-environment happy-dom
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { render } from 'preact'
-import { html } from 'htm/preact'
-import { Bar } from './bar'
+//
+// Mirrors `bar.test.ts` (Preact). Same DOM contract assertions on the
+// Solid render path. Pure-helper tests (barPercent) reuse the
+// Preact-equivalent fixtures verbatim — the function is pure and
+// framework-agnostic, so it must produce identical results.
+
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { render } from 'solid-js/web'
+import { Bar } from './bar.solid'
 import { barPercent, type BarProps } from './bar-shared'
 
-describe('barPercent (pure)', () => {
+describe('barPercent (pure, Solid mirror)', () => {
   it('rounds to integer', () => {
     expect(barPercent(0)).toBe(0)
     expect(barPercent(50.4)).toBe(50)
@@ -28,8 +34,9 @@ describe('barPercent (pure)', () => {
   })
 })
 
-describe('Bar', () => {
+describe('Bar (Solid)', () => {
   let host: HTMLDivElement
+  let dispose: (() => void) | undefined
 
   beforeEach(() => {
     host = document.createElement('div')
@@ -37,13 +44,14 @@ describe('Bar', () => {
   })
 
   afterEach(() => {
-    render(null, host)
+    dispose?.()
+    dispose = undefined
     host.remove()
   })
 
   function mount(props: BarProps): HTMLElement {
-    render(html`<${Bar} ...${props} />`, host)
-    return host.firstElementChild as HTMLElement
+    dispose = render(() => <Bar {...props} />, host)
+    return host.querySelector('[role="progressbar"]') as HTMLElement
   }
 
   // ── Structural ──

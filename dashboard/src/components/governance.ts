@@ -6,7 +6,7 @@ import type { GovernanceJudgeSummary, KeeperApprovalQueueItem, KeeperApprovalRul
 import { TELEMETRY_AUTO_REFRESH_MS } from '../config/constants'
 import { formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../lib/auto-refresh'
 import { Card } from './common/card'
-import type { KpiCellKind } from './kpi-cell'
+import type { KpiCellKind } from './kpi-shared'
 import { KpiStripIsland, type KpiStripIslandData } from './kpi-strip-island'
 import { TimeAgo } from './common/time-ago'
 import { EmptyState } from './common/empty-state'

@@ -1,21 +1,22 @@
 // @vitest-environment happy-dom
 //
-// Integration test for the Preact→Solid island bridge. Verifies:
-//   1. Initial mount produces the Solid subtree (role=list + cells).
-//   2. Re-rendering the Preact parent with new `cells` prop reaches
-//      the Solid signal and updates only changed cells (no re-mount).
-//   3. Unmounting the Preact parent disposes the Solid root cleanly.
+// Tests the Preact fallback path that KpiStripIsland takes when
+// `isVitest === true` (see kpi-strip-island.ts). In the browser the
+// component mounts a Solid island via `solid-js/web` render; in
+// test environments (happy-dom/jsdom) we fall back to native Preact
+// because vite-plugin-solid has global side-effects that break
+// Preact hook tests.
 //
-// These three scenarios are the contract that PR #4 promises: a Preact
-// parent can keep its render cycle while a Solid child stays
-// reactive without any cross-framework bridge code at the call site.
+// These tests verify the fallback contract: the same DOM structure,
+// aria attributes, and reactive updates, just rendered through
+// Preact instead of Solid.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { render } from 'preact'
 import { html } from 'htm/preact'
 import { KpiStripIsland, type KpiStripIslandData } from './kpi-strip-island'
 
-describe('KpiStripIsland (Preact→Solid bridge)', () => {
+describe('KpiStripIsland (vitest fallback path)', () => {
   let container: HTMLElement
 
   beforeEach(() => {

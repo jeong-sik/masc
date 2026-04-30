@@ -5,6 +5,8 @@
       rejected verification requests.
     - [GET /api/v1/verification/summary] — bucket counts.
     - [GET /api/v1/verification/specs] — TLA+ spec index.
+    - [GET /api/v1/verification/tlc-results] — latest observed TLC
+      log projection.
     - [POST /api/v1/verification/resolve] — dashboard-initiated
       approve/reject (bearer token required). *)
 

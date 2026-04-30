@@ -26,6 +26,7 @@ import { FilterChips } from './common/filter-chips'
 import { TextInput } from './common/input'
 import type { ManagedAsyncResource } from '../lib/async-state'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
+import { TlcResultsPanel } from './tlc-results-panel'
 
 type CategoryFilter = 'all' | TlaSpecCategory
 const categoryFilter = signal<CategoryFilter>('all')
@@ -195,6 +196,8 @@ export function VerificationSpecsPanel() {
               : '조건에 맞는 스펙이 없습니다.'} />`
           : html`<${SpecsTable} entries=${filtered} />`}
       <//>
+
+      <${TlcResultsPanel} />
     </div>
   `
 }

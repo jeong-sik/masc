@@ -187,6 +187,40 @@ let test_snapshot_reports_keeper_identity () =
       (Some keeper_name)
       (Json.member "keeper" snapshot |> Json.to_string_option))
 
+let test_snapshot_reports_phase_diagnosis () =
+  with_registry (fun () ->
+    let base_path = "/tmp/keeper-composite-phase-diagnosis" in
+    let keeper_name = "phase-diagnosis" in
+    ignore (Reg.register ~base_path keeper_name (make_meta keeper_name));
+    ignore (Reg.dispatch_event ~base_path keeper_name Ksm.Operator_pause);
+    let entry =
+      match Reg.get ~base_path keeper_name with
+      | Some entry -> entry
+      | None -> fail "expected paused keeper entry"
+    in
+    let snapshot = Obs.observe entry |> Obs.snapshot_to_json in
+    let diagnosis = Json.member "phase_diagnosis" snapshot in
+    check (option string) "current phase is raw keeper phase"
+      (Some "paused")
+      (Json.member "current_phase" diagnosis |> Json.to_string_option);
+    check (option string) "derived phase matches conditions"
+      (Some "paused")
+      (Json.member "derived_phase" diagnosis |> Json.to_string_option);
+    check bool "paused cannot execute turn"
+      false
+      (Json.member "can_execute_turn" diagnosis |> Json.to_bool);
+    check (option string) "operator pause wins"
+      (Some "paused_operator_or_retry_exhausted")
+      (Json.member "determining_condition" diagnosis |> Json.to_string_option);
+    let rows = Json.member "rows" diagnosis |> Json.to_list in
+    check int "priority rows include fallback" 15 (List.length rows);
+    let determining =
+      rows
+      |> List.filter (fun row ->
+           Json.member "determining" row |> Json.to_bool)
+    in
+    check int "exactly one determining row" 1 (List.length determining))
+
 let test_direct_turn_mutations_emit_composite_changed () =
   with_registry (fun () ->
     let base_path = "/tmp/keeper-composite-turn-ticks" in
@@ -221,6 +255,7 @@ let () =
     [ test_case "stable phase exposes collapsed_from" `Quick test_snapshot_reports_collapsed_from_for_stable_phase
     ; test_case "active phase leaves collapsed_from null" `Quick test_snapshot_omits_collapsed_from_for_active_phase
     ; test_case "snapshot exposes keeper identity" `Quick test_snapshot_reports_keeper_identity
+    ; test_case "snapshot exposes phase diagnosis" `Quick test_snapshot_reports_phase_diagnosis
     ];
     "composite change signals",
     [ test_case "direct turn mutations emit composite tick" `Quick test_direct_turn_mutations_emit_composite_changed ];

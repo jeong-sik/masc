@@ -108,6 +108,7 @@ type snapshot = {
   run_id : string;
   ts : float;
   ksm_phase : ksm_phase;
+  raw_phase : Keeper_state_machine.phase;
   collapsed_from : Keeper_state_machine.phase option;
   ktc_turn_phase : turn_phase;
   kdp_decision : decision_stage;
@@ -116,6 +117,7 @@ type snapshot = {
   kcb_state : Keeper_failure_circuit_breaker.display_state;
   shared_measurement : Keeper_state_machine.auto_rule_summary option;
   invariants : invariants_check;
+  conditions : Keeper_state_machine.conditions;
   is_live : bool;
   last_outcome : last_outcome option;
   fiber_stop_flag : bool;
@@ -443,6 +445,7 @@ let observe
     run_id;
     ts;
     ksm_phase;
+    raw_phase = entry.phase;
     collapsed_from;
     ktc_turn_phase = turn_phase;
     kdp_decision = decision_stage;
@@ -451,6 +454,7 @@ let observe
     kcb_state;
     shared_measurement = measurement;
     invariants;
+    conditions = entry.conditions;
     is_live;
     last_outcome =
       (match entry.last_completed_turn with
@@ -505,6 +509,102 @@ let measurement_to_json (m : Keeper_state_machine.auto_rule_summary) : Yojson.Sa
       "goal_drift", `Float m.goal_drift;
     ]
 
+type phase_condition_row = {
+  key : string;
+  label : string;
+  priority : int;
+  value : bool;
+  phase : Keeper_state_machine.phase;
+}
+
+let phase_condition_rows (c : Keeper_state_machine.conditions) : phase_condition_row list =
+  let row key label priority value phase =
+    { key; label; priority; value; phase }
+  in
+  [
+    row "stopped_clean_drain" "Stopped: clean drain complete" 1
+      (c.stop_requested && c.drain_complete
+       && not c.compaction_active && not c.handoff_active)
+      Keeper_state_machine.Stopped;
+    row "offline_launch_pending" "Offline: launch pending without fiber" 2
+      (c.launch_pending && not c.fiber_alive)
+      Keeper_state_machine.Offline;
+    row "zombie_terminal_failure" "Zombie: terminal failure latched" 3
+      c.terminal_failure_latched
+      Keeper_state_machine.Zombie;
+    row "dead_no_fiber_no_budget" "Dead: fiber down and restart budget exhausted" 4
+      ((not c.fiber_alive) && not c.restart_budget_remaining)
+      Keeper_state_machine.Dead;
+    row "restarting_backoff_elapsed" "Restarting: fiber down with elapsed backoff" 5
+      ((not c.fiber_alive) && c.restart_budget_remaining && c.backoff_elapsed)
+      Keeper_state_machine.Restarting;
+    row "crashed_restart_budget" "Crashed: fiber down with restart budget" 6
+      ((not c.fiber_alive) && c.restart_budget_remaining)
+      Keeper_state_machine.Crashed;
+    row "draining_stop_requested" "Draining: stop requested" 7
+      c.stop_requested
+      Keeper_state_machine.Draining;
+    row "failing_guardrail" "Failing: guardrail triggered" 8
+      c.guardrail_triggered
+      Keeper_state_machine.Failing;
+    row "paused_operator_or_retry_exhausted" "Paused: operator pause or compact retry exhausted" 9
+      (c.operator_paused || (c.context_overflow && c.compact_retry_exhausted))
+      Keeper_state_machine.Paused;
+    row "handing_off_active" "HandingOff: handoff active" 10
+      c.handoff_active
+      Keeper_state_machine.HandingOff;
+    row "compacting_active" "Compacting: compaction active" 11
+      c.compaction_active
+      Keeper_state_machine.Compacting;
+    row "overflowed_context" "Overflowed: context overflow awaiting compaction" 12
+      c.context_overflow
+      Keeper_state_machine.Overflowed;
+    row "failing_unhealthy" "Failing: heartbeat or turn unhealthy" 13
+      ((not c.heartbeat_healthy) || not c.turn_healthy)
+      Keeper_state_machine.Failing;
+    row "running_fiber_alive" "Running: fiber alive" 14
+      c.fiber_alive
+      Keeper_state_machine.Running;
+    row "offline_fallback" "Offline: fallback" 15
+      true
+      Keeper_state_machine.Offline;
+  ]
+
+let phase_diagnosis_to_json
+    ~(current_phase : Keeper_state_machine.phase)
+    (conditions : Keeper_state_machine.conditions)
+    : Yojson.Safe.t =
+  let derived_phase = Keeper_state_machine.derive_phase conditions in
+  let rows = phase_condition_rows conditions in
+  let determining =
+    rows
+    |> List.find_opt (fun row -> row.value)
+    |> Option.map (fun row -> row.key)
+  in
+  `Assoc [
+    "current_phase", `String (Keeper_state_machine.phase_to_string current_phase);
+    "derived_phase", `String (Keeper_state_machine.phase_to_string derived_phase);
+    "can_execute_turn", `Bool (Keeper_state_machine.can_execute_turn derived_phase);
+    "conditions", Keeper_state_machine.conditions_to_json conditions;
+    "determining_condition",
+      (match determining with
+       | Some key -> `String key
+       | None -> `Null);
+    "rows",
+      `List
+        (List.map
+           (fun row ->
+              `Assoc [
+                "key", `String row.key;
+                "label", `String row.label;
+                "priority", `Int row.priority;
+                "value", `Bool row.value;
+                "phase", `String (Keeper_state_machine.phase_to_string row.phase);
+                "determining", `Bool (Some row.key = determining);
+              ])
+           rows);
+  ]
+
 let snapshot_to_json (s : snapshot) : Yojson.Safe.t =
   `Assoc [
     "keeper", `String s.keeper_name;
@@ -541,6 +641,8 @@ let snapshot_to_json (s : snapshot) : Yojson.Safe.t =
           "captured", `Bool false;
         ]);
     "invariants", invariants_to_json s.invariants;
+    "phase_diagnosis", phase_diagnosis_to_json
+      ~current_phase:s.raw_phase s.conditions;
     "is_live", `Bool s.is_live;
     "last_outcome", (match s.last_outcome with
       | Some lo -> `Assoc [

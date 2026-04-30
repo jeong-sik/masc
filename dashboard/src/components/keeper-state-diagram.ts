@@ -3,14 +3,24 @@ import { useEffect, useMemo, useState } from 'preact/hooks'
 
 import {
   fetchKeeperComposite,
+  fetchKeeperStateDiagram,
   fetchKeeperTransitions,
   type KeeperCompositeSnapshot,
+  type KeeperStateDiagramResponse,
   type KeeperTransition,
 } from '../api/keeper'
+import { isRecord } from './common/normalize'
 import { EmptyState } from './common/empty-state'
 import { InlineSpinner } from './common/inline-spinner'
 import { CytoscapeFsm } from './common/cytoscape-fsm'
+import { MermaidGraph } from './common/mermaid-graph'
+import { FilterChips } from './common/filter-chips'
 import { buildCompositeFsmSpec } from './keeper-fsm-specs'
+import { TurnFsmDetailPanel } from './turn-fsm-detail-panel'
+import {
+  normalizePhaseDiagnosis,
+  PhaseConditionsPanel,
+} from './phase-conditions-panel'
 import type { KeeperPhase } from '../types'
 
 interface KeeperStateDiagramProps {
@@ -50,6 +60,13 @@ const INVARIANT_LABELS: Array<[keyof KeeperCompositeSnapshot['invariants'], stri
   ['no_cascade_before_measurement', 'Cascade 순서'],
   ['compaction_atomicity', '압축 원자성'],
   ['event_priority_monotone', '이벤트 우선순위'],
+]
+
+type DiagramView = 'cytoscape' | 'mermaid'
+
+const DIAGRAM_VIEW_CHIPS: Array<{ key: DiagramView; label: string; title: string }> = [
+  { key: 'cytoscape', label: 'Cytoscape', title: 'Composite lifecycle graph' },
+  { key: 'mermaid', label: 'Mermaid', title: 'Backend-generated phase diagram' },
 ]
 
 function normalizePhase(phase: string | null | undefined): string | null {
@@ -96,22 +113,32 @@ function badgeTone(ok: boolean): string {
     : 'border-[rgba(239,68,68,0.24)] bg-[var(--bad-10)] text-[var(--color-status-err)]'
 }
 
+function snapshotPhaseDiagnosis(snapshot: KeeperCompositeSnapshot): unknown {
+  return isRecord(snapshot) ? snapshot.phase_diagnosis : undefined
+}
+
 export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStateDiagramProps) {
   const [snapshot, setSnapshot] = useState<KeeperCompositeSnapshot | null>(null)
+  const [stateDiagram, setStateDiagram] = useState<KeeperStateDiagramResponse | null>(null)
   const [transitions, setTransitions] = useState<KeeperTransition[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [diagramError, setDiagramError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [diagramView, setDiagramView] = useState<DiagramView>('cytoscape')
 
   useEffect(() => {
     const controller = new AbortController()
     setLoading(true)
     setError(null)
+    setDiagramError(null)
+    setStateDiagram(null)
 
     Promise.allSettled([
       fetchKeeperComposite(keeperName, { signal: controller.signal }),
+      fetchKeeperStateDiagram(keeperName, { signal: controller.signal }),
       fetchKeeperTransitions(keeperName, 5, { signal: controller.signal }),
     ])
-      .then(([snapshotResult, transitionsResult]) => {
+      .then(([snapshotResult, stateDiagramResult, transitionsResult]) => {
         if (controller.signal.aborted) return
 
         if (snapshotResult.status === 'fulfilled') {
@@ -119,6 +146,17 @@ export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStat
         } else {
           setSnapshot(null)
           setError(snapshotResult.reason instanceof Error ? snapshotResult.reason.message : 'composite fetch failed')
+        }
+
+        if (stateDiagramResult.status === 'fulfilled') {
+          setStateDiagram(stateDiagramResult.value)
+        } else {
+          setStateDiagram(null)
+          setDiagramError(
+            stateDiagramResult.reason instanceof Error
+              ? stateDiagramResult.reason.message
+              : 'state-diagram fetch failed',
+          )
         }
 
         if (transitionsResult.status === 'fulfilled') {
@@ -141,6 +179,11 @@ export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStat
   const keeperPhase = normalizePhase(currentPhase)
   const compositePhase = normalizePhase(snapshot?.phase)
   const phaseMismatch = Boolean(keeperPhase && compositePhase && keeperPhase !== compositePhase)
+  const phaseDiagnosis = useMemo(
+    () => snapshot ? normalizePhaseDiagnosis(snapshotPhaseDiagnosis(snapshot)) : null,
+    [snapshot],
+  )
+  const mermaidSource = stateDiagram?.mermaid?.trim() ?? ''
 
   const compositeSpec = useMemo(
     () => snapshot
@@ -205,9 +248,54 @@ export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStat
       ` : null}
 
       <div>
-        <div class="text-3xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)] mb-2">통합 라이프사이클 (KSM · KTC · KDP · KCL · KMC)</div>
-        <${CytoscapeFsm} spec=${compositeSpec} height="320px" />
+        <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
+          <div class="text-3xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">
+            통합 라이프사이클 (KSM · KTC · KDP · KCL · KMC)
+          </div>
+          <${FilterChips}
+            chips=${DIAGRAM_VIEW_CHIPS}
+            value=${diagramView}
+            onChange=${setDiagramView}
+            tone="accent"
+          />
+        </div>
+        ${diagramView === 'cytoscape' ? html`
+          <div role="tabpanel" aria-label="Composite lifecycle Cytoscape graph">
+            <${CytoscapeFsm} spec=${compositeSpec} height="320px" />
+          </div>
+        ` : html`
+          <div role="tabpanel" aria-label="Backend-generated Mermaid phase diagram">
+            ${diagramError ? html`
+              <${EmptyState} message=${diagramError} compact />
+            ` : mermaidSource ? html`
+              <div class="grid gap-2">
+                <${MermaidGraph}
+                  source=${mermaidSource}
+                  prefix=${`keeper-phase-${keeperName}`}
+                  minHeightClass="min-h-72"
+                  fallbackText=${mermaidSource}
+                />
+                <div class="flex flex-wrap items-center gap-1.5 text-3xs text-[var(--color-fg-disabled)]">
+                  <span class="rounded-sm border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5">
+                    backend phase ${stateDiagram?.current_phase ?? 'unknown'}
+                  </span>
+                  <span class="rounded-sm border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5">
+                    response.mermaid
+                  </span>
+                </div>
+              </div>
+            ` : html`
+              <${EmptyState} message="backend Mermaid diagram 없음" compact />
+            `}
+          </div>
+        `}
       </div>
+
+      <${TurnFsmDetailPanel} snapshot=${snapshot} />
+
+      ${phaseDiagnosis ? html`
+        <${PhaseConditionsPanel} diagnosis=${phaseDiagnosis} />
+      ` : null}
 
       <div class="grid gap-2 md:grid-cols-2">
         ${INVARIANT_LABELS.map(([key, label]) => {
@@ -222,7 +310,7 @@ export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStat
       </div>
 
       ${transitions.length > 0 ? html`
-        <div class="grid gap-2">
+        <div class="grid gap-2" role="log" aria-live="polite" aria-label="관측된 전이">
           <div class="text-3xs font-semibold uppercase tracking-1 text-[var(--color-fg-muted)]">관측된 전이</div>
           ${transitions.map(transition => html`
             <div class="rounded border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-2xs leading-normal text-[var(--color-fg-primary)]">

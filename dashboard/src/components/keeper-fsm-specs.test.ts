@@ -2,6 +2,10 @@ import { describe, it, expect } from 'vitest'
 import {
   buildCompositeFsmSpec,
   buildCompactionSpec,
+  buildTurnFsmSpec,
+  normalizeTurnFsmState,
+  turnFsmTlaSymbol,
+  TURN_FSM_STATES,
 } from './keeper-fsm-specs'
 
 describe('buildCompositeFsmSpec', () => {
@@ -240,5 +244,72 @@ describe('buildCompactionSpec', () => {
     const edge = spec.edges.find(e => e.source === 'compacting' && e.target === 'accumulating')
     expect(edge).toBeTruthy()
     expect(edge!.type).toBe('error')
+  })
+})
+
+// ================================================================
+// buildTurnFsmSpec
+// ================================================================
+
+describe('buildTurnFsmSpec', () => {
+  it('creates one node per keeper_turn_fsm state', () => {
+    const spec = buildTurnFsmSpec('streaming')
+    expect(spec.nodes.map(n => n.id)).toEqual([...TURN_FSM_STATES])
+  })
+
+  it('marks the projected current state active', () => {
+    const spec = buildTurnFsmSpec('streaming')
+    const streaming = spec.nodes.find(n => n.id === 'streaming')
+    expect(streaming!.type).toBe('active')
+    expect(spec.activeNodeId).toBe('streaming')
+  })
+
+  it('maps legacy prompting to phase_gating', () => {
+    expect(normalizeTurnFsmState('prompting')).toBe('phase_gating')
+    const spec = buildTurnFsmSpec('prompting')
+    expect(spec.activeNodeId).toBe('phase_gating')
+  })
+
+  it('maps legacy executing to streaming', () => {
+    expect(normalizeTurnFsmState('executing')).toBe('streaming')
+  })
+
+  it('maps legacy finalizing and compacting to completing', () => {
+    expect(normalizeTurnFsmState('finalizing')).toBe('completing')
+    expect(normalizeTurnFsmState('compacting')).toBe('completing')
+  })
+
+  it('maps the TLA awaiting_tool symbol to the UI awaiting_tool_result state', () => {
+    expect(normalizeTurnFsmState('awaiting_tool')).toBe('awaiting_tool_result')
+    expect(turnFsmTlaSymbol('awaiting_tool_result')).toBe('awaiting_tool')
+  })
+
+  it('keeps failed and cancelled terminal states visible', () => {
+    const failedSpec = buildTurnFsmSpec('failed')
+    const failed = failedSpec.nodes.find(n => n.id === 'failed')
+    const cancelled = failedSpec.nodes.find(n => n.id === 'cancelled')
+    expect(failed!.type).toBe('err')
+    expect(cancelled!.type).toBe('warn')
+  })
+
+  it('returns no active node for unknown turn phases', () => {
+    const spec = buildTurnFsmSpec('mystery')
+    expect(spec.activeNodeId).toBeNull()
+  })
+
+  it('includes the provider/tool/receipt terminal edges', () => {
+    const spec = buildTurnFsmSpec('streaming')
+    expect(spec.edges).toContainEqual({
+      source: 'streaming',
+      target: 'awaiting_tool_result',
+      label: 'StreamYieldsTool',
+      type: 'cascade',
+    })
+    expect(spec.edges).toContainEqual({
+      source: 'completing',
+      target: 'failed',
+      label: 'ReceiptLost',
+      type: 'error',
+    })
   })
 })

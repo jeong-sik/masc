@@ -2480,3 +2480,39 @@ export function fetchTlaSpecs(
     signal: opts?.signal,
   })
 }
+
+export type TlcResultStatus =
+  | 'passed'
+  | 'violated'
+  | 'running'
+  | 'queued'
+  | 'error'
+  | 'not_run'
+
+export interface TlcResultEntry {
+  spec_name: string
+  cfg_name: string
+  category: TlaSpecCategory
+  status: TlcResultStatus
+  states_explored: number | null
+  distinct_states: number | null
+  diameter: number | null
+  last_run_at: string | null
+  violation: string | null
+  log_path: string | null
+}
+
+export interface TlcResultsResponse {
+  updated_at: string
+  results_dir: string | null
+  count: number
+  entries: TlcResultEntry[]
+}
+
+export function fetchTlcResults(
+  opts?: AbortableRequestOptions,
+): Promise<TlcResultsResponse> {
+  return get<TlcResultsResponse>('/api/v1/verification/tlc-results', {
+    signal: opts?.signal,
+  })
+}

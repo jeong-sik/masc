@@ -25,9 +25,10 @@ let spec_terminal_outcome_set : string list =
   |> List.filter (fun s -> not (String.equal s "receipt_unset"))
 
 (* The four [outcome_kind] terminal variants mapped to their TLA+
-   receipt symbols.  This is not a blind prefix: the JSON boundary keeps
-   legacy ["ok"] / ["error"], while the spec names those terminal
-   receipt outcomes ["receipt_done"] / ["receipt_failed"]. *)
+   receipt symbols.  The JSON boundary now emits spec-aligned names
+   (["receipt_done"] / ["receipt_failed"] / ["receipt_skipped"] /
+   ["receipt_cancelled"]); legacy names (["ok"] / ["error"] / etc.)
+   are still accepted on parse for backward compatibility. *)
 let ocaml_terminal_outcome_set =
   List.map
     Masc_mcp.Keeper_execution_receipt.outcome_kind_to_tla_receipt
@@ -75,6 +76,25 @@ let test_string_roundtrip () =
                "outcome_kind round-trip failed for %s -> %s -> ?" s s))
     [ `Ok; `Skipped; `Error; `Cancelled ]
 
+let test_tla_name_roundtrip () =
+  (* JSON boundary migration (FSM-01): TLA names must parse back to the
+     same variant so that spec-aligned emission is reversible. *)
+  List.iter
+    (fun k ->
+      let s =
+        Masc_mcp.Keeper_execution_receipt.outcome_kind_to_tla_receipt k
+      in
+      match
+        Masc_mcp.Keeper_execution_receipt.outcome_kind_of_string s
+      with
+      | Some k' when k = k' -> ()
+      | Some _ | None ->
+          failwith
+            (Printf.sprintf
+               "outcome_kind TLA name round-trip failed for %s -> %s -> ?"
+               s s))
+    [ `Ok; `Skipped; `Error; `Cancelled ]
+
 let test_skipped_is_terminal_success () =
   (* PhaseGateSkip reaches terminal [Done] without dispatching, so the
      receipt outcome must classify as a successful no-op rather than a
@@ -107,6 +127,7 @@ let test_unset_is_not_a_terminal_outcome () =
 let () =
   test_terminal_set_parity ();
   test_string_roundtrip ();
+  test_tla_name_roundtrip ();
   test_skipped_is_terminal_success ();
   test_unset_is_not_a_terminal_outcome ();
   print_endline "test_keeper_receipt_outcome_tla_parity: OK"

@@ -228,7 +228,6 @@ let core_remote_operation_names =
         "masc_agents";
         "masc_agent_update";
         "masc_messages";
-        "masc_a2a_subscribe";
         "masc_plan_init";
         "masc_plan_get";
         "masc_plan_update";

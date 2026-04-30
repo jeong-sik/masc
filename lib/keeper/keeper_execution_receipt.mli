@@ -142,6 +142,12 @@ val operator_disposition : t -> string * string
     indicates a silent dead-end that operators must be notified about. *)
 val needs_operator_broadcast : string -> bool
 
+val operator_broadcast_payload :
+  t -> disposition:string -> reason:string -> Yojson.Safe.t
+(** Structured payload emitted for [keeper.operator_broadcast_required].
+    Exposed so tests can pin the diagnostic fields operators need when a
+    keeper turn pauses or stalls silently. *)
+
 val append : Coord.config -> t -> unit
 val latest_json : Coord.config -> string -> Yojson.Safe.t option
 val latest_json_by_keeper :

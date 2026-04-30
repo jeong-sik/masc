@@ -140,6 +140,29 @@ let string_opt_json = function
   | Some value -> `String value
   | None -> `Null
 
+let last_nonempty values =
+  List.fold_left
+    (fun acc value ->
+      if String.trim value = "" then acc else Some value)
+    None values
+
+let last_tool_name receipt =
+  let rec choose = function
+    | [] -> None
+    | values :: rest -> (
+        match last_nonempty values with
+        | Some _ as value -> value
+        | None -> choose rest)
+  in
+  choose
+    [
+      receipt.observed_tools;
+      receipt.canonical_tools;
+      receipt.tools_used;
+      receipt.reported_tools;
+      receipt.requested_tools;
+    ]
+
 let cascade_rotation_attempt_to_json attempt =
   `Assoc
     [
@@ -492,32 +515,73 @@ let needs_operator_broadcast = function
   | "pause_human" | "alert_exhausted" | "unknown" -> true
   | _ -> false
 
+let operator_broadcast_payload (receipt : t) ~disposition ~reason =
+  `Assoc
+    [ "schema", `String "keeper.operator_broadcast_required.v1"
+    ; "keeper_name", `String receipt.keeper_name
+    ; "agent_name", `String receipt.agent_name
+    ; "trace_id", `String receipt.trace_id
+    ; "generation", `Int receipt.generation
+    ; ( "turn_count",
+        match receipt.turn_count with
+        | Some value -> `Int value
+        | None -> `Null )
+    ; "disposition", `String disposition
+    ; "disposition_reason", `String reason
+    ; "outcome", `String receipt.outcome
+    ; "terminal_reason_code", `String receipt.terminal_reason_code
+    ; ( "current_task_id",
+        match receipt.current_task_id with
+        | Some value -> `String value
+        | None -> `Null )
+    ; "goal_ids", list_json receipt.goal_ids
+    ; "response_text_present", `Bool receipt.response_text_present
+    ; "cascade_name", `String receipt.cascade_name
+    ; "cascade_outcome", `String receipt.cascade_outcome
+    ; "tool_contract_result", `String receipt.tool_contract_result
+    ; ( "last_tool_name",
+        match last_tool_name receipt with
+        | Some value -> `String value
+        | None -> `Null )
+    ; "tools_used", list_json receipt.tools_used
+    ; ( "tool_contract",
+        `Assoc
+          [ "result", `String receipt.tool_contract_result
+          ; "required_tools", list_json receipt.tool_surface.required_tools
+          ; ( "missing_required_tools",
+              list_json receipt.tool_surface.missing_required_tools )
+          ; "visible_tool_count", `Int receipt.tool_surface.visible_tool_count
+          ; "tool_requirement", `String receipt.tool_surface.tool_requirement
+          ; "tool_surface_class", `String receipt.tool_surface.tool_surface_class
+          ; "tool_gate_enabled", `Bool receipt.tool_surface.tool_gate_enabled
+          ] )
+    ; ( "sandbox",
+        `Assoc
+          [ "kind", `String receipt.sandbox_kind
+          ; "sandbox_root", string_opt_json receipt.sandbox_root
+          ; "network_mode", `String receipt.network_mode
+          ] )
+    ; ( "model_used",
+        match receipt.model_used with
+        | Some value -> `String value
+        | None -> `Null )
+    ; ( "stop_reason",
+        match receipt.stop_reason with
+        | Some value -> `String value
+        | None -> `Null )
+    ; ( "error_kind",
+        match receipt.error_kind with
+        | Some v -> `String v
+        | None -> `Null )
+    ; ( "error_message",
+        match receipt.error_message with
+        | Some v -> `String v
+        | None -> `Null )
+    ; "ended_at", `String receipt.ended_at
+    ]
+
 let emit_operator_broadcast config (receipt : t) ~disposition ~reason =
-  let payload =
-    `Assoc
-      [ "schema", `String "keeper.operator_broadcast_required.v1"
-      ; "keeper_name", `String receipt.keeper_name
-      ; "agent_name", `String receipt.agent_name
-      ; "trace_id", `String receipt.trace_id
-      ; "generation", `Int receipt.generation
-      ; "disposition", `String disposition
-      ; "disposition_reason", `String reason
-      ; "outcome", `String receipt.outcome
-      ; "terminal_reason_code", `String receipt.terminal_reason_code
-      ; "cascade_name", `String receipt.cascade_name
-      ; "cascade_outcome", `String receipt.cascade_outcome
-      ; "tool_contract_result", `String receipt.tool_contract_result
-      ; ( "error_kind"
-        , match receipt.error_kind with
-          | Some v -> `String v
-          | None -> `Null )
-      ; ( "error_message"
-        , match receipt.error_message with
-          | Some v -> `String v
-          | None -> `Null )
-      ; "ended_at", `String receipt.ended_at
-      ]
-  in
+  let payload = operator_broadcast_payload receipt ~disposition ~reason in
   let event =
     Activity_graph.emit config
       ~actor:{ Activity_graph.kind = "agent"; id = receipt.agent_name }

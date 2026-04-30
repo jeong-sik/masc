@@ -20,6 +20,126 @@ let test_default_burst () =
   check int "default burst" 150 Rate_limit.default_burst
 
 (* ============================================================
+   Agent Quota Tier Contract Tests
+   ============================================================ *)
+
+let must_allocations total_req_per_min =
+  match Rate_limit.compute_agent_quota_allocations ~total_req_per_min with
+  | Ok allocations -> allocations
+  | Error msg -> fail msg
+
+let allocation_for tier allocations =
+  match
+    List.find_opt
+      (fun allocation ->
+        Rate_limit.agent_quota_tier_code allocation.Rate_limit.allocation_tier
+        = Rate_limit.agent_quota_tier_code tier)
+      allocations
+  with
+  | Some allocation -> allocation
+  | None -> fail ("missing allocation for " ^ Rate_limit.agent_quota_tier_code tier)
+
+let total_allocated allocations =
+  List.fold_left
+    (fun total allocation ->
+      total + allocation.Rate_limit.allocation_req_per_min)
+    0 allocations
+
+let test_agent_quota_default_allocations () =
+  let allocations =
+    must_allocations Rate_limit.default_agent_quota_total_per_min
+  in
+  check int "P0 req/min" 400
+    (allocation_for Rate_limit.P0 allocations).allocation_req_per_min;
+  check int "P1 req/min" 400
+    (allocation_for Rate_limit.P1 allocations).allocation_req_per_min;
+  check int "P2 req/min" 200
+    (allocation_for Rate_limit.P2 allocations).allocation_req_per_min;
+  check int "sum preserved" 1000 (total_allocated allocations)
+
+let test_agent_quota_rounding_preserves_sum () =
+  let allocations = must_allocations 1001 in
+  check int "sum preserved" 1001 (total_allocated allocations);
+  check int "P0 receives first remainder" 401
+    (allocation_for Rate_limit.P0 allocations).allocation_req_per_min;
+  check int "P1 unchanged" 400
+    (allocation_for Rate_limit.P1 allocations).allocation_req_per_min;
+  check int "P2 unchanged" 200
+    (allocation_for Rate_limit.P2 allocations).allocation_req_per_min
+
+let test_agent_quota_invalid_total () =
+  match Rate_limit.compute_agent_quota_allocations ~total_req_per_min:0 with
+  | Ok _ -> fail "expected invalid total to fail"
+  | Error msg ->
+    check bool "mentions positive total" true
+      (String.contains msg 'p')
+
+let test_agent_quota_validate_sum () =
+  let allocations = must_allocations 1000 in
+  (match
+     Rate_limit.validate_agent_quota_allocations
+       ~total_req_per_min:1000 allocations
+   with
+   | Ok () -> ()
+   | Error msg -> fail msg);
+  let bad_allocations =
+    List.map
+      (fun allocation ->
+        if allocation.Rate_limit.allocation_tier = Rate_limit.P2 then
+          {
+            allocation with
+            allocation_req_per_min = allocation.allocation_req_per_min - 1;
+          }
+        else
+          allocation)
+      allocations
+  in
+  match
+    Rate_limit.validate_agent_quota_allocations
+      ~total_req_per_min:1000 bad_allocations
+  with
+  | Ok () -> fail "expected sum mismatch to fail"
+  | Error msg ->
+    check bool "mentions sum mismatch" true
+      (String.contains msg 's')
+
+let test_agent_quota_stable_labels () =
+  check string "P0 code" "P0" (Rate_limit.agent_quota_tier_code Rate_limit.P0);
+  check string "P1 code" "P1" (Rate_limit.agent_quota_tier_code Rate_limit.P1);
+  check string "P2 code" "P2" (Rate_limit.agent_quota_tier_code Rate_limit.P2);
+  check string "P0 label" "P0 Critical"
+    (Rate_limit.agent_quota_tier_label Rate_limit.P0);
+  check string "P1 label" "P1 Standard"
+    (Rate_limit.agent_quota_tier_label Rate_limit.P1);
+  check string "P2 label" "P2 Background"
+    (Rate_limit.agent_quota_tier_label Rate_limit.P2);
+  check (list string) "control labels"
+    ["lease-expiry"; "backpressure"; "adaptive-rate"]
+    Rate_limit.agent_quota_control_labels
+
+let test_agent_quota_contracts () =
+  let contracts = Rate_limit.agent_quota_tier_contracts in
+  check int "three contracts" 3 (List.length contracts);
+  let p0 = List.hd contracts in
+  check string "P0 contract code" "P0" p0.code;
+  check int "P0 share" 40 p0.share_percent;
+  check int "P0 default req/min" 400 p0.default_req_per_min
+
+let test_agent_quota_task_priority_mapping () =
+  check string "priority 1 -> P0" "P0"
+    (Rate_limit.agent_quota_tier_code
+       (Rate_limit.agent_quota_tier_of_task_priority 1));
+  check string "priority 3 -> P1" "P1"
+    (Rate_limit.agent_quota_tier_code
+       (Rate_limit.agent_quota_tier_of_task_priority 3));
+  check string "priority 4 -> P2" "P2"
+    (Rate_limit.agent_quota_tier_code
+       (Rate_limit.agent_quota_tier_of_task_priority 4));
+  check string "priority 0 -> P0" "P0"
+    (Rate_limit.agent_quota_tier_code
+       (Rate_limit.agent_quota_tier_of_task_priority 0))
+
+(* ============================================================
    Create Tests
    ============================================================ *)
 
@@ -226,6 +346,17 @@ let () =
     "constants", [
       test_case "default_rate" `Quick test_default_rate;
       test_case "default_burst" `Quick test_default_burst;
+    ];
+    "agent_quota_tiers", [
+      test_case "default allocations" `Quick test_agent_quota_default_allocations;
+      test_case "rounding preserves sum" `Quick
+        test_agent_quota_rounding_preserves_sum;
+      test_case "invalid total" `Quick test_agent_quota_invalid_total;
+      test_case "validate sum" `Quick test_agent_quota_validate_sum;
+      test_case "stable labels" `Quick test_agent_quota_stable_labels;
+      test_case "contracts" `Quick test_agent_quota_contracts;
+      test_case "task priority mapping" `Quick
+        test_agent_quota_task_priority_mapping;
     ];
     "create", [
       test_case "default" `Quick test_create_default;

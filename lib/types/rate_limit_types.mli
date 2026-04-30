@@ -33,3 +33,38 @@ type rate_limit_error = {
   category : rate_limit_category;
 }
 [@@deriving show]
+
+(** Product-facing agent quota tiers.  These are MASC-owned operator
+    terms, not OAS provider vocabulary. *)
+type agent_quota_tier =
+  | P0
+  | P1
+  | P2
+[@@deriving show { with_path = false }]
+
+(** Small labels for future quota controls.  This module only names the
+    contract; it does not implement lease/backpressure infrastructure. *)
+type agent_quota_control =
+  | LeaseExpiry
+  | Backpressure
+  | AdaptiveRate
+[@@deriving show { with_path = false }]
+
+(** Static operator contract for one quota tier. *)
+type agent_quota_tier_contract = {
+  contract_tier : agent_quota_tier;
+  code : string;
+  label : string;
+  workload_label : string;
+  share_percent : int;
+  default_req_per_min : int;
+}
+[@@deriving show]
+
+(** Computed request budget for one quota tier. *)
+type agent_quota_allocation = {
+  allocation_tier : agent_quota_tier;
+  allocation_percent : int;
+  allocation_req_per_min : int;
+}
+[@@deriving show]

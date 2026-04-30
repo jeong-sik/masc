@@ -1,0 +1,94 @@
+name: PR-0.2.H — Dashboard Lighthouse CI (synthetic perf budget)
+
+# Lighthouse CI smoke against the masc-mcp dashboard build. Sibling of:
+#   - .github/workflows/perf-baseline.yml          (PR-0.2.F, server perf)
+#   - .github/workflows/dashboard-ws-load.yml      (PR-0.2.G, k6 WS load)
+#
+# CI mode: smoke. Lighthouse runs against `vite preview` of the local
+# dashboard build (no live server). The script fails closed only on
+# config errors; performance budget violations surface as warnings in
+# the artifact and are not enforced as required checks until budgets
+# are calibrated against real builds (see budget-calibration step in
+# docs/design/dashboard-perf-protocol.md §4).
+#
+# This continue-on-error is scoped to the *budget assertion* step. The
+# build / typecheck steps in this repo never use continue-on-error
+# (memory: feedback_ci_build_step_continue_on_error_masks_compile_break).
+#
+# Why synthetic-only (no RUM):
+#   - Dashboard pageviews are two-digit scale (≤30/day across keepers).
+#     INP / CLS / LCP p75 require ~hundreds of samples to be statistically
+#     meaningful (web-vitals.js docs §sampling).
+#   - Research recommendation: knowledge/research/2026-04-masc-ide-strategy/
+#     ch4_dashboard.md:80 (PR-4.11) — "synthetic only, RUM 도입 안 함".
+#   - This workflow uses Lighthouse (synthetic). A future Playwright
+#     scenario can call `webVitals.onINP/onLCP/onCLS` inside automated
+#     flows for additional synthetic samples; that lives outside this PR.
+#
+# References:
+#   - dashboard/test/perf/lighthouse-budget.json
+#   - docs/design/dashboard-perf-protocol.md
+#   - knowledge/research/2026-04-masc-ide-strategy/ch4_dashboard.md §4
+
+on:
+  pull_request:
+    paths:
+      - 'dashboard/**'
+      - 'dashboard/test/perf/**'
+      - '.github/workflows/dashboard-lighthouse.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lighthouse-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+          run_install: false
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build dashboard
+        run: pnpm build
+
+      - name: Install Lighthouse CI
+        run: npm install -g @lhci/cli@0.14.x
+
+      - name: Run Lighthouse (warn-only budgets)
+        continue-on-error: true
+        env:
+          LHCI_BUDGET_PATH: dashboard/test/perf/lighthouse-budget.json
+        run: |
+          lhci autorun \
+            --collect.staticDistDir=dist \
+            --collect.numberOfRuns=1 \
+            --upload.target=filesystem \
+            --upload.outputDir=.lighthouseci \
+            --assert.budgetsFile="$LHCI_BUDGET_PATH" \
+            || echo "lighthouse exit=$?"
+
+      - name: Upload Lighthouse artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lighthouse-report-${{ github.run_id }}
+          path: dashboard/.lighthouseci/
+          retention-days: 30
+          if-no-files-found: ignore

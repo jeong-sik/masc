@@ -62,3 +62,13 @@ val format_exhausted_error :
   Llm_provider.Http_client.http_error option ->
   Llm_provider.Http_client.http_error
 (** Format the final error when all providers are exhausted. *)
+
+(** {1 Human-readable description} *)
+
+val provider_outcome_to_string : provider_outcome -> string
+(** Short label for a provider outcome: ["call-ok"], ["call-err"],
+    ["accept-rejected"], ["slot-full"]. *)
+
+val provider_outcome_option_to_string : provider_outcome option -> string
+(** Same as [provider_outcome_to_string] wrapped with ["some-"] or ["none"].
+    Useful for test failure messages. *)

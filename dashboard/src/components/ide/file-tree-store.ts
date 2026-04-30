@@ -85,7 +85,14 @@ export function createFileTreeStore(): FileTreeStore {
   const visibleNodes = (): ReadonlyArray<FileTreeNode> => visibleNodesSignal.value
 
   const subscribe = (listener: () => void): (() => void) => {
-    const unsub = visibleNodesSignal.subscribe(() => listener())
+    let sawInitialSnapshot = false
+    const unsub = visibleNodesSignal.subscribe(() => {
+      if (!sawInitialSnapshot) {
+        sawInitialSnapshot = true
+        return
+      }
+      listener()
+    })
     return unsub
   }
 
@@ -142,4 +149,3 @@ export function createFileTreeStore(): FileTreeStore {
     nodeCount,
   }
 }
-

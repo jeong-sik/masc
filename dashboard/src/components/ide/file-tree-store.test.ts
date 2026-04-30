@@ -130,44 +130,54 @@ describe('createFileTreeStore', () => {
 
 function generateBigTree(target: number): ReadonlyArray<FileTreeNode> {
   const nodes: FileTreeNode[] = []
-  const dirsPerLevel = 8
-  const filesPerDir = 6
+  const frontier: Array<{ path: string; depth: number }> = []
   let count = 0
 
-  const make = (parent: string | null, depth: number): void => {
+  const pushDir = (parent: string | null, depth: number, index: number): void => {
     if (count >= target) return
-    for (let i = 0; i < dirsPerLevel && count < target; i += 1) {
-      const dirPath = parent ? `${parent}/d${depth}-${i}` : `d${depth}-${i}`
+    const dirPath = parent ? `${parent}/d${depth}-${index}` : `d${depth}-${index}`
+    nodes.push({
+      path: dirPath,
+      label: `d${depth}-${index}`,
+      depth,
+      parent,
+      hasChildren: true,
+      diff: null,
+      keeperId: null,
+      hueIndex: null,
+    })
+    frontier.push({ path: dirPath, depth })
+    count += 1
+  }
+
+  for (let i = 0; i < 8 && count < target; i += 1) {
+    pushDir(null, 0, i)
+  }
+
+  let cursor = 0
+  while (cursor < frontier.length && count < target) {
+    const parent = frontier[cursor]
+    if (!parent) break
+    cursor += 1
+
+    for (let j = 0; j < 6 && count < target; j += 1) {
       nodes.push({
-        path: dirPath,
-        label: `d${depth}-${i}`,
-        depth,
-        parent,
-        hasChildren: true,
-        diff: null,
-        keeperId: null,
-        hueIndex: null,
+        path: `${parent.path}/f${j}.ts`,
+        label: `f${j}.ts`,
+        depth: parent.depth + 1,
+        parent: parent.path,
+        hasChildren: false,
+        diff: j % 3 === 0 ? '+1' : null,
+        keeperId: j % 4 === 0 ? `kp${j}` : null,
+        hueIndex: j % 4 === 0 ? ((j % 12) + 1) : null,
       })
       count += 1
+    }
 
-      for (let j = 0; j < filesPerDir && count < target; j += 1) {
-        nodes.push({
-          path: `${dirPath}/f${j}.ts`,
-          label: `f${j}.ts`,
-          depth: depth + 1,
-          parent: dirPath,
-          hasChildren: false,
-          diff: j % 3 === 0 ? '+1' : null,
-          keeperId: j % 4 === 0 ? `kp${j}` : null,
-          hueIndex: j % 4 === 0 ? ((j % 12) + 1) : null,
-        })
-        count += 1
-      }
-
-      if (depth < 2) make(dirPath, depth + 1)
+    for (let i = 0; i < 8 && count < target; i += 1) {
+      pushDir(parent.path, parent.depth + 1, i)
     }
   }
 
-  make(null, 0)
   return nodes
 }

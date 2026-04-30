@@ -82,7 +82,7 @@ type cascade_fallback_event = {
 }
 
 type cascade_observation = {
-  cascade_name : string;
+  cascade_name : Keeper_cascade_profile.runtime_name;
   strategy : string option;
   configured_labels : string list;
   candidate_models : string list;
@@ -146,7 +146,7 @@ val cascade_metrics_for_candidates :
     global [Llm_metric_bridge] when both are wired). *)
 
 val cascade_observation_with_metrics :
-  cascade_name:string ->
+  cascade_name:Keeper_cascade_profile.runtime_name ->
   ?strategy:string ->
   configured_labels:string list ->
   candidate_cfgs:Llm_provider.Provider_config.t list ->

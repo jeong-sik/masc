@@ -33,7 +33,7 @@ type cascade_fallback_event = {
 }
 
 type cascade_observation = {
-  cascade_name : string;
+  cascade_name : Keeper_cascade_profile.runtime_name;
   strategy : string option;
   configured_labels : string list;
   candidate_models : string list;

@@ -10,8 +10,7 @@ type t
 
 (** Create a router from the global cascade configuration.
 
-    Reads pool assignments from [cascade.json] or environment overrides.
-    @raise Failure when the configuration produces an empty pool set. *)
+    Reads pool assignments from [cascade.json] or environment overrides. *)
 val create : unit -> t
 
 (** Resolve the primary pool for a keeper. *)

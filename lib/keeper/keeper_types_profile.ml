@@ -24,8 +24,9 @@ type sandbox_profile =
         command. *)
 
 type network_mode =
-  | Network_none
-  | Network_inherit
+  | Network_none [@tla.symbol "Network_none"]
+  | Network_inherit [@tla.symbol "Network_inherit"]
+[@@deriving tla]
 
 type shared_memory_scope =
   | Shared_memory_disabled

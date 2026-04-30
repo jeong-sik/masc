@@ -335,6 +335,12 @@ type inference_params = {
   num_ctx: int option;
   (** Ollama [num_ctx] override. Honored only when the resolved
       provider is Ollama. *)
+  thinking_enabled: bool option;
+  thinking_budget: int option;
+  (** [thinking_budget] is a per-turn thinking token budget seed.
+      Keeper adaptive logic may adjust this per turn based on intent
+      classification and error/retry signals.  Provider-specific
+      mapping happens downstream in OAS. *)
 }
 
 (** Resolve inference parameters from cascade.json.

@@ -938,16 +938,7 @@ let prepare_agent_setup
                  { turn; current_params; messages; last_tool_results; _ } ->
                let hook_t0 = Time_compat.now () in
                current_turn_ref := turn;
-               let adaptive_thinking_budget =
-                 adaptive_thinking_budget
-                   ~enabled:(Keeper_config.keeper_adaptive_thinking_enabled ())
-                   ~is_retry
-                   ~last_tool_results
-                   ~user_message
-                   ~dynamic_context
-                   ~current_budget:current_params.thinking_budget
-               in
-               let adaptive_thinking_override =
+               let intent =
                  if Keeper_config.keeper_adaptive_thinking_mode () then
                    let last_tool_calls =
                      let rev = List.rev messages in
@@ -966,15 +957,35 @@ let prepare_agent_setup
                      scan rev
                    in
                    let retry_count = if is_retry then 1 else 0 in
-                   let intent =
-                     Keeper_turn_intent.classify
-                       ~last_tool_calls
-                       ~last_user_message:(Some user_message)
-                       ~retry_count
-                   in
-                   Some (Keeper_turn_intent.equal intent Keeper_turn_intent.Cognitive)
+                   Some
+                     (Keeper_turn_intent.classify
+                        ~last_tool_calls
+                        ~last_user_message:(Some user_message)
+                        ~retry_count)
                  else
                    None
+               in
+               let cascade_seed = Cascade_inference.for_cascade ~name:cascade_name in
+               let current_budget =
+                 match cascade_seed.thinking_budget with
+                 | Some _ as v -> v
+                 | None -> current_params.thinking_budget
+               in
+               let adaptive_thinking_budget =
+                 adaptive_thinking_budget
+                   ~enabled:(Keeper_config.keeper_adaptive_thinking_enabled ())
+                   ~is_retry
+                   ~last_tool_results
+                   ~user_message
+                   ~dynamic_context
+                   ~current_budget
+                   ~intent
+               in
+               let adaptive_thinking_override =
+                 match intent with
+                 | Some i ->
+                   Some (Keeper_turn_intent.equal i Keeper_turn_intent.Cognitive)
+                 | None -> None
                in
                let current_params =
                  { current_params with

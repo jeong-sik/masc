@@ -194,6 +194,7 @@ val adaptive_thinking_budget :
   -> user_message:string
   -> dynamic_context:string
   -> current_budget:int option
+  -> intent:Keeper_turn_intent.t option
   -> int option
 
 (** {1 Turn execution} *)

@@ -242,6 +242,70 @@ let test_install_no_existing_hook () =
         (H.accumulator_size acc));
   print_endline "  install_no_existing_hook: OK"
 
+(* ── Tier K4c — per-keeper accumulator registry ────────────────── *)
+
+let test_registry_get_or_create_idempotent () =
+  let unique = Printf.sprintf "k4c-test-idem-%d" (Unix.getpid ()) in
+  H.drop_keeper_accumulator unique;
+  let a1 = H.accumulator_for_keeper unique in
+  let a2 = H.accumulator_for_keeper unique in
+  (* Physical equality: get-or-create returns the same instance. *)
+  assert (a1 == a2);
+  H.drop_keeper_accumulator unique;
+  print_endline "  registry_get_or_create_idempotent: OK"
+
+let test_registry_isolates_two_keepers () =
+  with_env_set "MASC_TOOL_EMISSION" "1" (fun () ->
+      let alpha = Printf.sprintf "k4c-test-alpha-%d" (Unix.getpid ()) in
+      let beta = Printf.sprintf "k4c-test-beta-%d" (Unix.getpid ()) in
+      H.drop_keeper_accumulator alpha;
+      H.drop_keeper_accumulator beta;
+      let acc_a = H.accumulator_for_keeper alpha in
+      let acc_b = H.accumulator_for_keeper beta in
+      assert (not (acc_a == acc_b));
+      let hook_a = H.make_post_tool_use_hook acc_a in
+      let _ : THooks.hook_decision =
+        hook_a
+          (make_post_tool_use
+             ~content:
+               {|{"__multimodal_kind":"code","__multimodal_id":"01900000-0000-7000-8000-0000000000a1"}|})
+      in
+      assert_eq_int ~label:"alpha_capture" 1 (H.accumulator_size acc_a);
+      assert_eq_int ~label:"beta_isolated" 0 (H.accumulator_size acc_b);
+      H.drop_keeper_accumulator alpha;
+      H.drop_keeper_accumulator beta);
+  print_endline "  registry_isolates_two_keepers: OK"
+
+let test_registry_registered_names_sorted () =
+  let pid = Unix.getpid () in
+  let names =
+    [ Printf.sprintf "k4c-test-zeta-%d" pid
+    ; Printf.sprintf "k4c-test-alpha-%d" pid
+    ; Printf.sprintf "k4c-test-mu-%d" pid
+    ]
+  in
+  List.iter H.drop_keeper_accumulator names;
+  List.iter (fun n -> ignore (H.accumulator_for_keeper n)) names;
+  let listed = H.registered_keeper_names () in
+  let listed_subset =
+    List.for_all (fun n -> List.mem n listed) names
+  in
+  assert listed_subset;
+  let rec is_sorted = function
+    | [] | [ _ ] -> true
+    | a :: b :: rest -> String.compare a b <= 0 && is_sorted (b :: rest)
+  in
+  assert (is_sorted listed);
+  List.iter H.drop_keeper_accumulator names;
+  print_endline "  registry_registered_names_sorted: OK"
+
+let test_registry_drop_keeper_unknown_name_ok () =
+  let unique = Printf.sprintf "k4c-test-never-%d" (Unix.getpid ()) in
+  (* Drop on a never-registered name must not raise. *)
+  H.drop_keeper_accumulator unique;
+  H.drop_keeper_accumulator unique;
+  print_endline "  registry_drop_keeper_unknown_name_ok: OK"
+
 let () =
   print_endline "=== Keeper_tool_emission_hook ===";
   test_disabled_no_op ();
@@ -253,4 +317,8 @@ let () =
   test_drain_skips_untagged ();
   test_install_chain_preserves_decision ();
   test_install_no_existing_hook ();
-  print_endline "=== Keeper_tool_emission_hook: 9/9 OK ==="
+  test_registry_get_or_create_idempotent ();
+  test_registry_isolates_two_keepers ();
+  test_registry_registered_names_sorted ();
+  test_registry_drop_keeper_unknown_name_ok ();
+  print_endline "=== Keeper_tool_emission_hook: 13/13 OK ==="

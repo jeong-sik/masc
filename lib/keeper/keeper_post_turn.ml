@@ -245,9 +245,17 @@ let apply_tool_emission_wirein
     | None -> lifecycle
     | Some cp -> (
         try
+          let acc =
+            (* Tier K4c — pull THIS keeper's accumulator. Producer
+               side ([Keeper_run_tools]) registered it under the
+               same name pre-Agent.run, so the items captured during
+               this turn drain into this turn's working_context. *)
+            Keeper_tool_emission_hook.accumulator_for_keeper
+              lifecycle.updated_meta.name
+          in
           let new_wc =
             Keeper_tool_emission_hook.drain_into_working_context
-              Keeper_tool_emission_hook.global_accumulator
+              acc
               ~working_context:cp.Oas.Checkpoint.working_context
           in
           let new_cp =

@@ -91,12 +91,37 @@ val drain_into_working_context :
     tests and metrics. *)
 val accumulator_size : accumulator -> int
 
-(** Process-wide singleton accumulator used by K4b runtime wire-up
-    (see [Keeper_run_tools] hook installation +
-    [Keeper_post_turn.apply_tool_emission_wirein]). All keepers share
-    this accumulator; cross-keeper attribution is acceptable because
-    [Multimodal.Workspace_holder] is itself process-wide.
+(** Process-wide singleton accumulator. Retained for backwards
+    compatibility with callers that pre-date Tier K4c per-keeper
+    isolation. Production wire-up (K4b) now uses
+    [accumulator_for_keeper] instead so concurrent multi-keeper tool
+    emissions do not bleed across attribution boundaries.
 
     Tests and other call sites that need an isolated accumulator
     should use [create_accumulator] instead. *)
 val global_accumulator : accumulator
+
+(** Tier K4c — per-keeper accumulator registry.
+
+    Look up (or lazily create) the accumulator owned by [keeper_name].
+    Both the producer side ([Keeper_run_tools.install_into_hooks]
+    pre-Agent.run) and the consumer side
+    ([Keeper_post_turn.apply_tool_emission_wirein] post-Agent.run) MUST
+    pass the same [keeper_name] so the in-flight items captured during
+    a turn drain back into the same working_context.
+
+    The keeper name is the canonical identifier (
+    [Keeper_metadata.t.name] / [lifecycle.updated_meta.name]) — stable
+    across turns. Trace ids rotate per turn and are NOT suitable here.
+
+    Thread-safe; safe for concurrent calls from multiple keeper fibers. *)
+val accumulator_for_keeper : string -> accumulator
+
+(** Snapshot of keeper names with a registered accumulator, in
+    ascending order. Useful for metrics/diagnostics. *)
+val registered_keeper_names : unit -> string list
+
+(** Remove a keeper's accumulator entry from the registry. Intended
+    for keeper teardown paths (process shutdown, keeper down/repair).
+    Safe to call on a name that was never registered (no-op). *)
+val drop_keeper_accumulator : string -> unit

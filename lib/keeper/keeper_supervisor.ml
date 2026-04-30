@@ -495,7 +495,7 @@ let restore_reconcile_continue_gate (ctx : _ context) (meta : keeper_meta) =
 let reconcile_keepalive_keepers (ctx : _ context) =
   let base_path = ctx.config.base_path in
   let names = Keeper_types.keepalive_keeper_names ctx.config in
-  Log.Keeper.info "reconcile_keepalive_keepers: started (candidates=%d)"
+  Log.Keeper.debug "reconcile_keepalive_keepers: started (candidates=%d)"
     (List.length names);
   let t0 = Time_compat.now () in
   List.iter (fun name ->
@@ -534,7 +534,7 @@ let reconcile_keepalive_keepers (ctx : _ context) =
          | Error err ->
              Log.Keeper.debug "reconcile: read_meta failed for %s: %s" name err)
     names;
-  Log.Keeper.info "reconcile_keepalive_keepers: completed (elapsed_ms=%d)"
+  Log.Keeper.debug "reconcile_keepalive_keepers: completed (elapsed_ms=%d)"
     (int_of_float ((Time_compat.now () -. t0) *. 1000.0))
 
 let cleanup_dead_tombstone (ctx : _ context)

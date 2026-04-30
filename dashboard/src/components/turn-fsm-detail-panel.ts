@@ -9,7 +9,7 @@ import {
   turnFsmTlaSymbol,
 } from './keeper-fsm-specs'
 
-function chipClass(tone: 'accent' | 'neutral' | 'warn' | 'err' | 'ok'): string {
+export function chipClass(tone: 'accent' | 'neutral' | 'warn' | 'err' | 'ok'): string {
   switch (tone) {
     case 'accent':
       return 'border-[var(--accent-30)] bg-[var(--accent-10)] text-[var(--color-accent-fg)]'
@@ -25,7 +25,7 @@ function chipClass(tone: 'accent' | 'neutral' | 'warn' | 'err' | 'ok'): string {
   }
 }
 
-function terminalTone(outcome: string | null | undefined): 'neutral' | 'ok' | 'warn' | 'err' {
+export function terminalTone(outcome: string | null | undefined): 'neutral' | 'ok' | 'warn' | 'err' {
   switch (outcome) {
     case 'done':
     case 'skipped':
@@ -40,7 +40,7 @@ function terminalTone(outcome: string | null | undefined): 'neutral' | 'ok' | 'w
   }
 }
 
-function isExactTurnProjection(rawTurnPhase: string, projected: string | null): boolean {
+export function isExactTurnProjection(rawTurnPhase: string, projected: string | null): boolean {
   const normalized = rawTurnPhase.trim().toLowerCase()
   return normalized === projected || (normalized === 'awaiting_tool' && projected === 'awaiting_tool_result')
 }

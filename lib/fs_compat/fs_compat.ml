@@ -406,4 +406,3 @@ let backend_kind_to_string = function
 
 let default_backend ~base_path =
   { kind = Local; base_path }
-

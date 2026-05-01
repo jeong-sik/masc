@@ -49,6 +49,22 @@ describe('RouteLink', () => {
     expect(a?.getAttribute('aria-current')).toBe('page')
   })
 
+  it('passes accessible names through for icon-only nav links', () => {
+    const container = document.createElement('div')
+    render(h(RouteLink, { tab: 'home' as any, 'aria-label': 'Home surface' }, 'Home'), container)
+    const a = container.querySelector('a')
+    expect(a?.getAttribute('aria-label')).toBe('Home surface')
+    expect(a?.getAttribute('role')).toBeNull()
+  })
+
+  it('uses the dashboard accent focus ring instead of the old blue ring', () => {
+    const container = document.createElement('div')
+    render(h(RouteLink, { tab: 'home' as any }, 'Home'), container)
+    const className = container.querySelector('a')?.getAttribute('class') ?? ''
+    expect(className).toContain('focus-visible:ring-[var(--accent-45)]')
+    expect(className).not.toContain('71,184,255')
+  })
+
   it('calls navigate on left click', async () => {
     const container = document.createElement('div')
     render(h(RouteLink, { tab: 'home' as any }, 'Home'), container)

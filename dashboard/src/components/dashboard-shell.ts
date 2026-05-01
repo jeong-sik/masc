@@ -469,15 +469,16 @@ export function SideRail({ collapsed, onToggle }: { collapsed?: boolean; onToggl
                     ${sections.map(item => {
                       const isSectionActive = isSurfaceActive && currentSection?.id === item.id
                       return html`
-                        <${RouteLink}
-                          role="listitem"
-                          tab=${surface.id}
-                          params=${item.params}
-                          class="w-full rounded-sm border px-2 py-0.5 text-left font-mono text-[10px] uppercase leading-5 tracking-[0.06em] cursor-pointer transition-[background-color,border-color,color,box-shadow] duration-[var(--t-med)] ${isSectionActive ? 'border-[var(--select-20)] bg-[var(--select-10)] !text-[var(--select)] shadow-[inset_2px_0_0_var(--select)]' : 'border-transparent !text-[var(--color-fg-muted)] hover:border-[var(--white-8)] hover:bg-[var(--white-4)] hover:!text-[var(--color-fg-primary)]'}"
-                          ariaCurrent=${isSectionActive ? 'page' : undefined}
-                        >
-                          <div class="truncate">${item.label}</div>
-                        <//>
+                        <div role="listitem">
+                          <${RouteLink}
+                            tab=${surface.id}
+                            params=${item.params}
+                            class="block w-full rounded-sm border px-2 py-0.5 text-left font-mono text-[10px] uppercase leading-5 tracking-[0.06em] cursor-pointer transition-[background-color,border-color,color,box-shadow] duration-[var(--t-med)] ${isSectionActive ? 'border-[var(--select-20)] bg-[var(--select-10)] !text-[var(--select)] shadow-[inset_2px_0_0_var(--select)]' : 'border-transparent !text-[var(--color-fg-muted)] hover:border-[var(--white-8)] hover:bg-[var(--white-4)] hover:!text-[var(--color-fg-primary)]'}"
+                            ariaCurrent=${isSectionActive ? 'page' : undefined}
+                          >
+                            <div class="truncate">${item.label}</div>
+                          <//>
+                        </div>
                       `
                     })}
                   </div>

@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest'
-import { navigate, route } from './router'
+import { describe, it, expect, vi } from 'vitest'
+import { navigate, replaceRoute, route } from './router'
 
 describe('navigate', () => {
   it('navigates to monitoring tab with agent param', () => {
@@ -56,7 +56,6 @@ describe('navigate', () => {
     expect(route.value.params.section).toBe('operations')
     expect(route.value.params.view).toBe('safety')
   })
-
   it('maps cockpit Cognition design deep links into the production keeper surface', () => {
     window.location.hash = '#repo=viewer&branch=wt%2Fsangsu-smoke&mode=Cognition'
     window.dispatchEvent(new HashChangeEvent('hashchange'))
@@ -125,5 +124,27 @@ describe('navigate', () => {
     expect(route.value.params.section).toBe('operations')
     expect(route.value.params.view).toBe('safety')
     expect(route.value.params.repo).toBe('viewer')
+  })
+
+  it('replaceRoute writes a canonical hash while preserving the current search params', () => {
+    window.history.replaceState(null, '', '/dashboard?theme=paper#overview')
+    replaceRoute('workspace', { section: 'planning', view: 'default' })
+
+    expect(route.value.tab).toBe('workspace')
+    expect(route.value.params.section).toBe('planning')
+    expect(route.value.params.view).toBe('default')
+    expect(window.location.search).toBe('?theme=paper')
+    expect(window.location.hash).toBe('#workspace?section=planning&view=default')
+  })
+
+  it('replaceRoute dispatches hashchange for existing listeners', () => {
+    const onHashChange = vi.fn()
+    window.addEventListener('hashchange', onHashChange)
+    try {
+      replaceRoute('monitoring', { section: 'fleet-health', view: 'tool-quality' })
+      expect(onHashChange).toHaveBeenCalledTimes(1)
+    } finally {
+      window.removeEventListener('hashchange', onHashChange)
+    }
   })
 })

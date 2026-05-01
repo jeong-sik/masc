@@ -253,6 +253,18 @@ export function navigate(tab: TabId, params?: Record<string, string>): void {
   }
 }
 
+export function replaceRoute(tab: TabId, params?: Record<string, string>): void {
+  const next = canonicalRoute(tab, params ?? {})
+  const nextHash = toHash(next)
+  route.value = next
+  window.history.replaceState(
+    null,
+    '',
+    `${window.location.pathname}${window.location.search}${nextHash}`,
+  )
+  window.dispatchEvent(new HashChangeEvent('hashchange'))
+}
+
 export function navigateToPost(postId: string): void {
   window.location.hash = `#workspace?section=board&post=${encodeURIComponent(postId)}`
 }

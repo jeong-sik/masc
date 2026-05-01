@@ -62,7 +62,7 @@ describe('OperationsPanel', () => {
 
     expect(container.textContent).toContain('Ops')
     expect(container.textContent).toContain('Governance')
-    expect(container.textContent).toContain('Safety')
+    expect(container.textContent).toContain('SafeAutonomy')
   })
 
   it('renders only Ops when view is ops', async () => {
@@ -73,7 +73,7 @@ describe('OperationsPanel', () => {
 
     expect(container.textContent).toContain('Ops')
     expect(container.textContent).not.toContain('Governance')
-    expect(container.textContent).not.toContain('Safety')
+    expect(container.textContent).not.toContain('SafeAutonomy')
   })
 
   it('renders only Governance when view is governance', async () => {
@@ -84,7 +84,7 @@ describe('OperationsPanel', () => {
 
     expect(container.textContent).not.toContain('Ops')
     expect(container.textContent).toContain('Governance')
-    expect(container.textContent).not.toContain('Safety')
+    expect(container.textContent).not.toContain('SafeAutonomy')
   })
 
   it('renders FilterChips options without legacy connectors view', async () => {
@@ -112,7 +112,7 @@ describe('OperationsPanel', () => {
 
     expect(container.textContent).toContain('Ops')
     expect(container.textContent).toContain('Governance')
-    expect(container.textContent).toContain('Safety')
+    expect(container.textContent).toContain('SafeAutonomy')
   })
 
   it('marks the active chip with aria-selected=true', async () => {

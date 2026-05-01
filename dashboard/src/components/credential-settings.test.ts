@@ -118,7 +118,7 @@ describe("credential create request", () => {
       token: "ghp_x",
     })
     expect(githubLoginCommand("/tmp/keeper's-gh")).toBe(
-      "GH_CONFIG_DIR='/tmp/keeper'\\''s-gh' gh auth login --hostname github.com --git-protocol https --web",
+      "GH_CONFIG_DIR='/tmp/keeper'\\''s-gh' gh auth login --hostname github.com --git-protocol https --web --clipboard",
     )
   })
 })

@@ -8,6 +8,15 @@ import { get, post } from '../api/core'
 import { createAsyncResource } from '../lib/async-state'
 import { showToast } from './common/toast'
 import { ErrorState, LoadingState } from './common/feedback-state'
+import {
+  coerceCredentialType,
+  credentialStateBadgeClass,
+  credentialStateLabel,
+  githubLoginCommand,
+  parseCredentialState,
+  type CredentialState,
+  type CredentialType,
+} from './credential-settings'
 import type { Keeper } from '../types'
 
 // ── Types ────────────────────────────────────────────────
@@ -23,6 +32,16 @@ export interface KeeperRepoMapping {
   keeper_name: string
   allowed_repos: string[]
   allow_all: boolean
+  credential_id?: string | null
+}
+
+export interface KeeperCredentialOption {
+  id: string
+  name: string
+  type: CredentialType
+  username: string
+  gh_config_dir?: string | null
+  state?: CredentialState | null
 }
 
 // ── State ────────────────────────────────────────────────
@@ -33,6 +52,9 @@ const keepersState = keepersResource.state
 const reposResource = createAsyncResource<RepositoryOption[]>()
 const reposState = reposResource.state
 
+const credentialsResource = createAsyncResource<KeeperCredentialOption[]>()
+const credentialsState = credentialsResource.state
+
 const mappingsResource = createAsyncResource<KeeperRepoMapping[]>()
 const mappingsState = mappingsResource.state
 
@@ -41,6 +63,7 @@ const saveError = signal<string | null>(null)
 
 // Local draft: keeper_id -> Set of repo ids or '*' for all
 const draftMappings = signal<Map<string, Set<string> | '*'>>(new Map())
+const draftCredentials = signal<Map<string, string | null>>(new Map())
 
 // ── API ──────────────────────────────────────────────────
 
@@ -74,6 +97,27 @@ async function fetchRepositories(): Promise<RepositoryOption[]> {
   return []
 }
 
+async function fetchCredentials(): Promise<KeeperCredentialOption[]> {
+  const data = await get<unknown>('/api/v1/credentials')
+  const rows = Array.isArray(data)
+    ? data
+    : data && typeof data === 'object' && Array.isArray((data as Record<string, unknown>).credentials)
+      ? (data as Record<string, unknown>).credentials as unknown[]
+      : []
+  return rows.map((row: unknown): KeeperCredentialOption => {
+    const r = row as Record<string, unknown>
+    const username = String(r.username ?? r.name ?? '')
+    return {
+      id: String(r.id ?? ''),
+      name: String(r.name ?? username ?? r.id ?? ''),
+      type: coerceCredentialType(r.type ?? r.cred_type),
+      username,
+      gh_config_dir: typeof r.gh_config_dir === 'string' ? r.gh_config_dir : null,
+      state: parseCredentialState(r.state),
+    }
+  }).filter(cred => cred.id !== '')
+}
+
 async function fetchKeeperRepoMappings(): Promise<KeeperRepoMapping[]> {
   const data = await get<unknown>('/api/v1/keeper-repos')
   const rows = Array.isArray(data)
@@ -93,14 +137,22 @@ async function fetchKeeperRepoMappings(): Promise<KeeperRepoMapping[]> {
             ? r.repositories.filter((v): v is string => typeof v === 'string')
           : [],
         allow_all: r.allow_all === true,
+        credential_id: normalizeCredentialId(typeof r.credential_id === 'string' ? r.credential_id : null),
       }
     })
   }
   return []
 }
 
-async function saveKeeperRepos(keeperId: string, repos: string[]): Promise<void> {
-  await post(`/api/v1/keeper-repos/${encodeURIComponent(keeperId)}`, { repositories: repos })
+async function saveKeeperRepos(
+  keeperId: string,
+  repos: string[],
+  credentialId: string | null,
+): Promise<void> {
+  await post(`/api/v1/keeper-repos/${encodeURIComponent(keeperId)}`, {
+    repositories: repos,
+    credential_id: normalizeCredentialId(credentialId),
+  })
 }
 
 // ── Helpers ──────────────────────────────────────────────
@@ -108,6 +160,16 @@ async function saveKeeperRepos(keeperId: string, repos: string[]): Promise<void>
 function getDraftForKeeper(keeperId: string, fallback: Set<string> | '*'): Set<string> | '*' {
   const draft = draftMappings.value.get(keeperId)
   return draft !== undefined ? draft : fallback
+}
+
+function getDraftCredentialForKeeper(keeperId: string, fallback: string | null): string | null {
+  const draft = draftCredentials.value.get(keeperId)
+  return draft !== undefined ? draft : fallback
+}
+
+export function normalizeCredentialId(value: string | null | undefined): string | null {
+  const trimmed = value?.trim() ?? ''
+  return trimmed === '' ? null : trimmed
 }
 
 export function isRepoSelected(_keeperId: string, repoId: string, current: Set<string> | '*'): boolean {
@@ -152,9 +214,21 @@ export function hasChanges(_keeperId: string, original: Set<string> | '*', draft
   return false
 }
 
+export function hasCredentialChange(
+  _keeperId: string,
+  original: string | null | undefined,
+  draft: string | null | undefined,
+): boolean {
+  return normalizeCredentialId(original) !== normalizeCredentialId(draft)
+}
+
 export function buildRepoSetFromMapping(mapping: KeeperRepoMapping): Set<string> | '*' {
   if (mapping.allow_all) return '*'
   return new Set(mapping.allowed_repos)
+}
+
+export function buildCredentialIdFromMapping(mapping: KeeperRepoMapping): string | null {
+  return normalizeCredentialId(mapping.credential_id)
 }
 
 // ── Load / Refresh ───────────────────────────────────────
@@ -174,38 +248,50 @@ export async function loadKeeperRepoMappings(options?: { force?: boolean }): Pro
     await reposResource.load(() => fetchRepositories())
   }
 
+  const loadCredentials = async () => {
+    if (!force && credentialsState.value.status === 'loaded') return
+    if (force) credentialsResource.reset()
+    await credentialsResource.load(() => fetchCredentials())
+  }
+
   const loadMappings = async () => {
     if (!force && mappingsState.value.status === 'loaded') return
     if (force) mappingsResource.reset()
     await mappingsResource.load(() => fetchKeeperRepoMappings())
   }
 
-  await Promise.all([loadKeepers(), loadRepos(), loadMappings()])
+  await Promise.all([loadKeepers(), loadRepos(), loadCredentials(), loadMappings()])
 
   // Initialize drafts from loaded mappings
-  if (mappingsState.value.status === 'loaded' && draftMappings.value.size === 0) {
-    const next = new Map<string, Set<string> | '*'>()
+  if (mappingsState.value.status === 'loaded' && (force || draftMappings.value.size === 0)) {
+    const nextMappings = new Map<string, Set<string> | '*'>()
+    const nextCredentials = new Map<string, string | null>()
     for (const m of mappingsState.value.data) {
-      next.set(m.keeper_id, buildRepoSetFromMapping(m))
+      nextMappings.set(m.keeper_id, buildRepoSetFromMapping(m))
+      nextCredentials.set(m.keeper_id, buildCredentialIdFromMapping(m))
     }
     // Also initialize empty drafts for keepers without mappings
     if (keepersState.value.status === 'loaded') {
       for (const k of keepersState.value.data) {
         const id = k.keeper_id ?? k.name
-        if (!next.has(id)) {
-          next.set(id, '*')
+        if (!nextMappings.has(id)) {
+          nextMappings.set(id, '*')
+          nextCredentials.set(id, null)
         }
       }
     }
-    draftMappings.value = next
+    draftMappings.value = nextMappings
+    draftCredentials.value = nextCredentials
   }
 }
 
 export function resetKeeperRepoMappings(): void {
   keepersResource.reset()
   reposResource.reset()
+  credentialsResource.reset()
   mappingsResource.reset()
   draftMappings.value = new Map()
+  draftCredentials.value = new Map()
   savingKeeperId.value = null
   saveError.value = null
 }
@@ -225,6 +311,7 @@ function RepoBadge({ name }: { name: string }) {
 export function KeeperRepoMapping() {
   const kState = keepersState.value
   const rState = reposState.value
+  const cState = credentialsState.value
   const mState = mappingsState.value
 
   // Trigger load on first render
@@ -232,7 +319,7 @@ export function KeeperRepoMapping() {
     void loadKeeperRepoMappings()
   }
 
-  if (kState.status === 'loading' || rState.status === 'loading' || mState.status === 'loading') {
+  if (kState.status === 'loading' || rState.status === 'loading' || cState.status === 'loading' || mState.status === 'loading') {
     return html`<${LoadingState}>키퍼와 저장소 정보 불러오는 중...<//>`
   }
 
@@ -242,16 +329,20 @@ export function KeeperRepoMapping() {
   if (rState.status === 'error') {
     return html`<${ErrorState} message=${rState.message} />`
   }
+  if (cState.status === 'error') {
+    return html`<${ErrorState} message=${cState.message} />`
+  }
   if (mState.status === 'error') {
     return html`<${ErrorState} message=${mState.message} />`
   }
 
-  if (kState.status !== 'loaded' || rState.status !== 'loaded') {
+  if (kState.status !== 'loaded' || rState.status !== 'loaded' || cState.status !== 'loaded') {
     return null
   }
 
   const keepers = kState.data
   const repos = rState.data
+  const credentials = cState.data.filter(credential => credential.type === 'github')
   const mappings = mState.status === 'loaded' ? mState.data : []
   const mappingByKeeper = new Map(mappings.map(m => [m.keeper_id, m]))
 
@@ -262,10 +353,11 @@ export function KeeperRepoMapping() {
     if (draft === undefined) return
 
     const payload = draft === '*' ? ['*'] : Array.from(draft)
+    const credentialId = getDraftCredentialForKeeper(keeperId, null)
     savingKeeperId.value = keeperId
     saveError.value = null
     try {
-      await saveKeeperRepos(keeperId, payload)
+      await saveKeeperRepos(keeperId, payload, credentialId)
       showToast('저장소 매핑 저장 완료', 'success')
       // Update the "original" mapping state so hasChanges resets
       await loadKeeperRepoMappings({ force: true })
@@ -296,6 +388,12 @@ export function KeeperRepoMapping() {
     const nextMap = new Map(draftMappings.value)
     nextMap.set(keeperId, next)
     draftMappings.value = nextMap
+  }
+
+  function handleCredentialChange(keeperId: string, value: string) {
+    const nextMap = new Map(draftCredentials.value)
+    nextMap.set(keeperId, normalizeCredentialId(value))
+    draftCredentials.value = nextMap
   }
 
   return html`
@@ -329,8 +427,32 @@ export function KeeperRepoMapping() {
             const mapping = mappingByKeeper.get(keeperId)
             const original = mapping ? buildRepoSetFromMapping(mapping) : '*'
             const draft = getDraftForKeeper(keeperId, original)
+            const originalCredentialId = mapping ? buildCredentialIdFromMapping(mapping) : null
+            const draftCredentialId = getDraftCredentialForKeeper(keeperId, originalCredentialId)
+            const credentialOptions =
+              draftCredentialId && !credentials.some(credential => credential.id === draftCredentialId)
+                ? [
+                    {
+                      id: draftCredentialId,
+                      name: `Missing: ${draftCredentialId}`,
+                      type: 'github' as const,
+                      username: draftCredentialId,
+                      gh_config_dir: null,
+                      state: null,
+                    },
+                    ...credentials,
+                  ]
+                : credentials
+            const selectedCredential = draftCredentialId
+              ? credentialOptions.find(credential => credential.id === draftCredentialId)
+              : null
+            const selectedLoginCommand = selectedCredential
+              ? githubLoginCommand(selectedCredential.gh_config_dir)
+              : null
             const allowAll = isAllowAll(keeperId, draft)
-            const changed = hasChanges(keeperId, original, draft)
+            const repoChanged = hasChanges(keeperId, original, draft)
+            const credentialChanged = hasCredentialChange(keeperId, originalCredentialId, draftCredentialId)
+            const changed = repoChanged || credentialChanged
             const isSaving = savingKeeperId.value === keeperId
 
             return html`
@@ -361,6 +483,47 @@ export function KeeperRepoMapping() {
                 </div>
 
                 <div class="p-3">
+                  <div class="mb-3 rounded border border-card-border/40 bg-[var(--white-3)] px-2.5 py-2">
+                    <div class="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                      <label class="flex flex-col gap-1 min-w-0 md:min-w-[18rem]">
+                        <span class="text-2xs font-bold uppercase tracking-wide text-text-muted">GitHub credential</span>
+                        <select
+                          class="rounded border border-card-border/60 bg-card px-2 py-1.5 text-xs text-text-body outline-none focus:border-accent"
+                          value=${draftCredentialId ?? ''}
+                          onChange=${(event: Event) => {
+                            const target = event.currentTarget as HTMLSelectElement
+                            handleCredentialChange(keeperId, target.value)
+                          }}
+                        >
+                          <option value="">기본값: repo credential / local root</option>
+                          ${credentialOptions.map(credential => html`
+                            <option key=${credential.id} value=${credential.id}>
+                              ${credential.name || credential.id} (${credential.username || credential.id})
+                            </option>
+                          `)}
+                        </select>
+                      </label>
+
+                      <div class="flex flex-col gap-1 min-w-0 text-2xs text-text-muted md:items-end">
+                        ${selectedCredential ? html`
+                          <div class="flex items-center gap-1.5 min-w-0">
+                            <span class="px-2 py-0.5 rounded border ${credentialStateBadgeClass(selectedCredential.state)}">
+                              ${credentialStateLabel(selectedCredential.state)}
+                            </span>
+                            <span class="font-mono truncate">${selectedCredential.gh_config_dir ?? 'gh_config_dir 없음'}</span>
+                          </div>
+                          ${selectedLoginCommand ? html`
+                            <code class="block max-w-full overflow-x-auto rounded bg-[var(--black-30)] px-2 py-1 font-mono text-3xs text-text-body">
+                              ${selectedLoginCommand}
+                            </code>
+                          ` : null}
+                        ` : html`
+                          <span>직접 지정 없음</span>
+                        `}
+                      </div>
+                    </div>
+                  </div>
+
                   <label class="flex items-center gap-2 mb-3 cursor-pointer select-none">
                     <input
                       type="checkbox"

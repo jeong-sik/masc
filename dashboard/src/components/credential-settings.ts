@@ -197,7 +197,7 @@ export function shellQuote(value: string): string {
 export function githubLoginCommand(ghConfigDir: string | null | undefined): string | null {
   const dir = sanitizeOptionalString(ghConfigDir)
   if (!dir) return null
-  return `GH_CONFIG_DIR=${shellQuote(dir)} gh auth login --hostname github.com --git-protocol https --web`
+  return `GH_CONFIG_DIR=${shellQuote(dir)} gh auth login --hostname github.com --git-protocol https --web --clipboard`
 }
 
 export function buildCredentialCreateRequest(payload: CredentialCreatePayload): Record<string, unknown> {

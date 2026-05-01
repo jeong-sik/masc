@@ -12,6 +12,7 @@ import { FilterChips } from './common/filter-chips'
 import { TextInput } from './common/input'
 import { SectionCap } from './common/section-cap'
 import { InfoCard } from './common/info-card'
+import { StatusChip } from './common/status-chip'
 import { KpiStripIsland, type KpiStripIslandData } from './kpi-strip-island'
 
 type FeatureStatus = 'healthy' | 'warning' | 'inactive' | 'deprecated'
@@ -118,25 +119,23 @@ export function statusLabel(status: FeatureStatus): string {
   }
 }
 
-export function statusChipClass(status: FeatureStatus): string {
+export function statusChipTone(status: FeatureStatus): 'ok' | 'warn' | 'neutral' | 'bad' {
   switch (status) {
     case 'healthy':
-      return 'border-[var(--ok-30)] bg-[var(--ok-12)] text-[var(--color-status-ok)]'
+      return 'ok'
     case 'warning':
-      return 'border-[var(--warn-30)] bg-[var(--warn-12)] text-[var(--color-status-warn)]'
+      return 'warn'
     case 'inactive':
-      return 'border-[var(--white-12)] bg-[var(--white-4)] text-[var(--color-fg-muted)]'
+      return 'neutral'
     case 'deprecated':
     default:
-      return 'border-[var(--bad-30)] bg-[var(--bad-12)] text-[var(--color-status-err)]'
+      return 'bad'
   }
 }
 
 function StatusPill({ status }: { status: FeatureStatus }) {
   return html`
-    <span class=${`inline-flex items-center rounded-sm border px-2 py-0.5 text-3xs font-semibold uppercase tracking-wide ${statusChipClass(status)}`}>
-      ${statusLabel(status)}
-    </span>
+    <${StatusChip} tone=${statusChipTone(status)}>${statusLabel(status)}<//>
   `
 }
 
@@ -148,15 +147,7 @@ function FeatureItem({ item }: { item: FeatureHealthItem }) {
           <div class="flex items-center gap-2">
             <code class="text-xs font-medium text-[var(--text-strong)]">${item.env_name}</code>
             <${StatusPill} status=${item.status} />
-            ${item.is_enabled ? html`
-              <span class="inline-flex items-center rounded border border-[var(--ok-30)] bg-[var(--ok-12)] px-1.5 py-0.5 text-3xs font-semibold text-[var(--color-status-ok)]">
-                ON
-              </span>
-            ` : html`
-              <span class="inline-flex items-center rounded border border-[var(--white-12)] bg-[var(--white-4)] px-1.5 py-0.5 text-3xs font-semibold text-[var(--color-fg-muted)]">
-                OFF
-              </span>
-            `}
+            <${StatusChip} tone=${item.is_enabled ? 'ok' : 'neutral'}>${item.is_enabled ? 'ON' : 'OFF'}<//>
           </div>
           <div class="mt-1.5 text-sm text-[var(--text-body)]">${item.description}</div>
           <div class="mt-1 flex items-center gap-3 text-xs text-[var(--color-fg-muted)]">

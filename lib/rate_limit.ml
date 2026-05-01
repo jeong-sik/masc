@@ -209,9 +209,16 @@ let compute_agent_quota_allocations ~total_req_per_min =
 let default_rate = 60.0  (* 12+ concurrent keepers need higher throughput *)
 let default_burst = 150
 
+let default_agent_rate = 20.0
+let default_agent_burst = 50
+
 let rate_from_env () = Env_config.Rate_bucket.rate
 
 let burst_from_env () = Env_config.Rate_bucket.burst
+
+let agent_rate_from_env () = Env_config.Rate_bucket.agent_rate
+
+let agent_burst_from_env () = Env_config.Rate_bucket.agent_burst
 
 (** {1 Limiter Creation} *)
 
@@ -228,6 +235,9 @@ let burst t = t.burst
 
 let create_from_env () =
   create ~rate:(rate_from_env ()) ~burst:(burst_from_env ()) ()
+
+let create_agent_from_env () =
+  create ~rate:(agent_rate_from_env ()) ~burst:(agent_burst_from_env ()) ()
 
 (** {1 Rate Checking} *)
 
@@ -290,6 +300,21 @@ let check_global ~key =
 let remaining_global ~key =
   remaining (Eio.Lazy.force global) ~key
 
+(** {1 Per-Agent Global Instance}
+
+    A separate token-bucket limiter keyed by resolved agent name or bearer
+    token hash.  Uses lower defaults than the per-IP global limiter so that a
+    single agent cannot starve others even if they share the same egress IP. *)
+
+let agent_global =
+  Eio.Lazy.from_fun ~cancel:`Protect create_agent_from_env
+
+let check_agent_global ~key =
+  check (Eio.Lazy.force agent_global) ~key
+
+let remaining_agent_global ~key =
+  remaining (Eio.Lazy.force agent_global) ~key
+
 (** {1 Automatic Cleanup Loop} *)
 
 (** Start a background fiber that periodically cleans up stale rate limit buckets.
@@ -328,8 +353,14 @@ let headers limiter ~key =
 let too_many_requests_body () =
   {|{"error":"Too Many Requests","message":"Rate limit exceeded"}|}
 
+let too_many_agent_requests_body () =
+  {|{"error":"Too Many Requests","message":"Per-agent rate limit exceeded"}|}
+
 let headers_global ~key =
   headers (Eio.Lazy.force global) ~key
+
+let headers_agent_global ~key =
+  headers (Eio.Lazy.force agent_global) ~key
 
 (** {1 Client Address Key Extraction} *)
 
@@ -343,8 +374,28 @@ let key_of_sockaddr (client_addr : Eio.Net.Sockaddr.stream) =
   | `Tcp (ip, _) -> Fmt.str "%a" Eio.Net.Ipaddr.pp ip
   | `Unix path -> "unix:" ^ Filename.basename path
 
+(** {1 Agent Key Extraction} *)
+
+(** Derive a stable per-agent rate-limit key from either a bearer token
+    (preferred — uses the first 16 hex chars of its SHA-256 to avoid storing
+    the raw credential) or an agent-name string.  Returns [None] when neither
+    is provided (anonymous / loopback request). *)
+let agent_key_of_token_or_name ?token ?agent_name () =
+  match token with
+  | Some t when t <> "" ->
+      (* Use a prefix of the token's hex digest so the key is stable across
+         requests without retaining the full secret in memory. *)
+      let digest = Digestif.SHA256.(to_hex (digest_string t)) in
+      Some ("token:" ^ String.sub digest 0 (min 16 (String.length digest)))
+  | _ ->
+      (match agent_name with
+       | Some name when name <> "" -> Some ("agent:" ^ name)
+       | _ -> None)
+
 (** {1 Global Startup Helper} *)
 
-(** Start the global rate-limit cleanup loop.  Call once at server startup. *)
+(** Start the global rate-limit cleanup loops.  Call once at server startup.
+    Starts loops for both the per-IP global limiter and the per-agent limiter. *)
 let start_global_cleanup_loop ~sw ~clock =
-  start_cleanup_loop ~sw ~clock (Eio.Lazy.force global)
+  start_cleanup_loop ~sw ~clock (Eio.Lazy.force global);
+  start_cleanup_loop ~sw ~clock (Eio.Lazy.force agent_global)

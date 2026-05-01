@@ -570,6 +570,47 @@ let respond_auth_error request reqd err =
   let response = Httpun.Response.create ~headers status in
   Httpun.Reqd.respond_with_string reqd response body
 
+(** Respond with 429 Too Many Requests when the per-agent rate limit is
+    exceeded.  Includes standard rate-limit headers and CORS so browser
+    clients can inspect the response. *)
+let respond_agent_rate_limited ~rl_key request reqd =
+  let origin = get_origin request in
+  let body = Rate_limit.too_many_agent_requests_body () in
+  let rl_headers = Rate_limit.headers_agent_global ~key:rl_key in
+  let headers = Httpun.Headers.of_list (
+    ("content-type", "application/json") ::
+    ("content-length", string_of_int (String.length body)) ::
+    rl_headers @
+    cors_headers origin
+  ) in
+  Httpun.Reqd.respond_with_string reqd
+    (Httpun.Response.create ~headers `Too_many_requests) body
+
+(** Extract a per-agent rate-limit key from the request.  Prefers the bearer
+    token (keyed by a short SHA-256 prefix) over the declared agent-name
+    header so that token-bearing clients cannot evade per-agent limits by
+    rotating their agent-name header. *)
+let agent_rl_key_of_request request =
+  let token = auth_token_from_request request in
+  let agent_name = agent_from_request request in
+  Rate_limit.agent_key_of_token_or_name ?token ?agent_name ()
+
+(** Check the per-agent rate limit for a request.  Returns [Ok ()] when the
+    request is allowed.  Returns [Error ()] and sends a 429 response when the
+    per-agent limit is exceeded.  Anonymous requests (no token, no agent
+    header) are always allowed through — the per-IP limit in
+    [bin/main_eio.ml:try_rate_limit_block] covers that case. *)
+let check_agent_rate_limit request reqd =
+  match agent_rl_key_of_request request with
+  | None -> Ok ()  (* anonymous — covered by per-IP limit *)
+  | Some rl_key ->
+      if Rate_limit.check_agent_global ~key:rl_key then
+        Ok ()
+      else begin
+        respond_agent_rate_limited ~rl_key request reqd;
+        Error ()
+      end
+
 (** Admin-only access - requires MASC_ADMIN_TOKEN.
     Uses timing-safe comparison (XOR-based constant-time) to prevent
     timing side-channel attacks that could leak token bytes. *)
@@ -749,8 +790,11 @@ and with_read_auth handler request reqd =
   | Some state ->
       let base_path = state.Mcp_server.room_config.base_path in
       match authorize_read_request ~base_path request with
-      | Ok () -> handler state request reqd
       | Error err -> respond_auth_error request reqd err
+      | Ok () ->
+          match check_agent_rate_limit request reqd with
+          | Error () -> ()
+          | Ok () -> handler state request reqd
 
 and with_permission_auth ~permission handler request reqd =
   match !server_state with
@@ -758,8 +802,11 @@ and with_permission_auth ~permission handler request reqd =
   | Some state ->
       let base_path = state.Mcp_server.room_config.base_path in
       match authorize_permission_request ~base_path ~permission request with
-      | Ok () -> handler state request reqd
       | Error err -> respond_auth_error request reqd err
+      | Ok () ->
+          match check_agent_rate_limit request reqd with
+          | Error () -> ()
+          | Ok () -> handler state request reqd
 
 and with_tool_auth ~tool_name handler request reqd =
   match !server_state with
@@ -767,8 +814,11 @@ and with_tool_auth ~tool_name handler request reqd =
   | Some state ->
       let base_path = state.Mcp_server.room_config.base_path in
       match authorize_tool_request ~base_path ~tool_name request with
-      | Ok () -> handler state request reqd
       | Error err -> respond_auth_error request reqd err
+      | Ok () ->
+          match check_agent_rate_limit request reqd with
+          | Error () -> ()
+          | Ok () -> handler state request reqd
 
 and with_token_permission_auth ~permission handler request reqd =
   match !server_state with
@@ -776,8 +826,11 @@ and with_token_permission_auth ~permission handler request reqd =
   | Some state ->
       let base_path = state.Mcp_server.room_config.base_path in
       match authorize_token_bound_permission_request ~base_path ~permission request with
-      | Ok agent_name -> handler state agent_name request reqd
       | Error err -> respond_auth_error request reqd err
+      | Ok agent_name ->
+          match check_agent_rate_limit request reqd with
+          | Error () -> ()
+          | Ok () -> handler state agent_name request reqd
 
 let serve_agent_card ~host ~port request reqd =
   with_read_auth

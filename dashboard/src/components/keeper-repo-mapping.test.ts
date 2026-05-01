@@ -5,7 +5,10 @@ import {
   isAllowAll,
   toggleAllowAll,
   hasChanges,
+  hasCredentialChange,
+  normalizeCredentialId,
   buildRepoSetFromMapping,
+  buildCredentialIdFromMapping,
 } from "./keeper-repo-mapping"
 import type { KeeperRepoMapping } from "./keeper-repo-mapping"
 
@@ -97,6 +100,7 @@ describe("buildRepoSetFromMapping", () => {
       keeper_name: "Keeper 1",
       allowed_repos: ["repo-a"],
       allow_all: true,
+      credential_id: "cred-a",
     }
     expect(buildRepoSetFromMapping(mapping)).toBe("*")
   })
@@ -107,6 +111,7 @@ describe("buildRepoSetFromMapping", () => {
       keeper_name: "Keeper 1",
       allowed_repos: ["repo-a", "repo-b"],
       allow_all: false,
+      credential_id: null,
     }
     const result = buildRepoSetFromMapping(mapping)
     expect(result).toBeInstanceOf(Set)
@@ -121,9 +126,37 @@ describe("buildRepoSetFromMapping", () => {
       keeper_name: "Keeper 1",
       allowed_repos: [],
       allow_all: false,
+      credential_id: undefined,
     }
     const result = buildRepoSetFromMapping(mapping)
     expect(result).toBeInstanceOf(Set)
     expect((result as Set<string>).size).toBe(0)
+  })
+})
+
+describe("credential mapping helpers", () => {
+  it("normalizes credential ids", () => {
+    expect(normalizeCredentialId(" cred-a ")).toBe("cred-a")
+    expect(normalizeCredentialId("")).toBeNull()
+    expect(normalizeCredentialId(null)).toBeNull()
+    expect(normalizeCredentialId(undefined)).toBeNull()
+  })
+
+  it("detects credential id changes after normalization", () => {
+    expect(hasCredentialChange("k1", " cred-a ", "cred-a")).toBe(false)
+    expect(hasCredentialChange("k1", null, "")).toBe(false)
+    expect(hasCredentialChange("k1", null, "cred-a")).toBe(true)
+    expect(hasCredentialChange("k1", "cred-a", "cred-b")).toBe(true)
+  })
+
+  it("builds credential id from mapping", () => {
+    const mapping: KeeperRepoMapping = {
+      keeper_id: "k1",
+      keeper_name: "Keeper 1",
+      allowed_repos: ["*"],
+      allow_all: true,
+      credential_id: " cred-selected ",
+    }
+    expect(buildCredentialIdFromMapping(mapping)).toBe("cred-selected")
   })
 })

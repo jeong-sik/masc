@@ -11,10 +11,13 @@ val allowed_repositories :
 
 val credentials_for_keeper :
   base_path:string -> keeper_id:string -> (credential list, string) result
-(** [credentials_for_keeper ~base_path ~keeper_id] resolves the unique
-    credentials currently mapped to [keeper_id] by walking every
-    repository the keeper is allowed to access and looking up each
-    repository's [credential_id] in the credential store.
+(** [credentials_for_keeper ~base_path ~keeper_id] resolves the
+    credential currently mapped to [keeper_id].  A direct
+    [github_credential_id] / [credential_id] TOML or JSON field on the
+    keeper mapping wins and must reference a GitHub credential; otherwise
+    this resolves the unique credentials by walking every repository the
+    keeper is allowed to access and looking up each repository's
+    [credential_id] in the credential store.
 
     Returns [Ok []] when the keeper has no mapping (backward-compatibility
     signal consumed by the RFC-0019 PR-A credential provider bridge).

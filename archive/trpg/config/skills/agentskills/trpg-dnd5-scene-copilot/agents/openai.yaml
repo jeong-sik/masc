@@ -1,6 +1,0 @@
-version: 1
-skill:
-  id: trpg-dnd5-scene-copilot
-  display_name: TRPG DnD5 Scene Copilot
-  short_description: Suggests 3 actionable turn options with DnD5-lite checks.
-  default_prompt: Suggest safe, tempo, and high-risk actions using actor skills and DnD5-lite checks.

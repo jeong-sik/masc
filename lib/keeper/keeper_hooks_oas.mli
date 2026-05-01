@@ -175,7 +175,9 @@ val model_resolution_source_for_ledger :
 
 val pricing_catalog_status : pricing_model:string -> string
 (** Catalogue lookup status for the resolved pricing model
-    (["priced"] / ["unpriced"] / ["unknown"]). *)
+    (["hit_paid"] / ["hit_free"] / ["miss"]).  Unresolved aliases
+    such as ["auto"] remain misses so missing canonical telemetry is
+    visible in the ledger. *)
 
 val cost_status_for_event :
   provider:string ->

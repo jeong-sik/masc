@@ -23,15 +23,41 @@ let mapping_of_toml toml keeper_id =
   let* repository_ids =
     Otoml.Helpers.find_strings_result toml (path "repositories")
   in
-  Ok { keeper_id; repository_ids }
+  let* github_credential_id =
+    match Otoml.find_result toml Fun.id (path "credential_id") with
+    | Error _ -> Ok None
+    | Ok (Otoml.TomlString id) ->
+        let id = String.trim id in
+        Ok (if id = "" then None else Some id)
+    | Ok _ ->
+        Error
+          (Printf.sprintf
+             "mapping.%s.credential_id must be a string when present" keeper_id)
+  in
+  Ok { keeper_id; repository_ids; github_credential_id }
+
+let credential_type_label = function
+  | Github -> "GitHub"
+  | Gitlab -> "GitLab"
+  | Local -> "Local"
 
 let toml_of_mapping mapping =
-  Otoml.TomlTable
+  let fields =
     [
       ( "repositories",
         Otoml.TomlArray
           (List.map (fun s -> Otoml.TomlString s) mapping.repository_ids) );
     ]
+  in
+  let fields =
+    match mapping.github_credential_id with
+    | Some id ->
+        let id = String.trim id in
+        if id = "" then fields
+        else ("credential_id", Otoml.TomlString id) :: fields
+    | None -> fields
+  in
+  Otoml.TomlTable fields
 
 let load_all ~base_path =
   let path = mappings_toml_path base_path in
@@ -98,6 +124,29 @@ let credentials_for_keeper ~base_path ~keeper_id =
           keeper_id msg;
       Ok []
   | Ok mapping ->
+      let resolve_credential id =
+        match Credential_store.find ~base_path id with
+        | Ok c -> Ok c
+        | Error msg ->
+            Error
+              (Printf.sprintf
+                 "credential %s referenced by mapping for keeper %s not found \
+                  in credential store: %s"
+                 id keeper_id msg)
+      in
+      (match mapping.github_credential_id with
+      | Some id when String.trim id <> "" ->
+          let id = String.trim id in
+          let* credential = resolve_credential id in
+          if credential.cred_type <> Github then
+            Error
+              (Printf.sprintf
+                 "credential %s referenced by github_credential_id for keeper %s \
+                  must be of type GitHub, got %s"
+                 id keeper_id (credential_type_label credential.cred_type))
+          else
+            Ok [credential]
+      | Some _ | None ->
       let* repos = Repo_store.load_all ~base_path in
       let mapped_repos =
         if List.exists (String.equal "*") mapping.repository_ids then
@@ -123,16 +172,11 @@ let credentials_for_keeper ~base_path ~keeper_id =
       let rec resolve_creds acc = function
         | [] -> Ok (List.rev acc)
         | id :: rest -> (
-            match Credential_store.find ~base_path id with
+            match resolve_credential id with
             | Ok c -> resolve_creds (c :: acc) rest
-            | Error msg ->
-                Error
-                  (Printf.sprintf
-                     "credential %s referenced by mapping for keeper %s \
-                      not found in credential store: %s"
-                     id keeper_id msg))
+            | Error msg -> Error msg)
       in
-      resolve_creds [] cred_ids
+      resolve_creds [] cred_ids)
 
 let is_allowed ~keeper_id ~repository_id ~base_path =
   match find_mapping ~base_path keeper_id with

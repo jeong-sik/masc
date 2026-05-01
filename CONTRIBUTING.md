@@ -67,11 +67,9 @@ test/                         # Alcotest suites + fixtures
 | Subsystem | Entry Point | Description |
 |-----------|-------------|-------------|
 | **MCP Server** | `bin/main_eio.ml`, `lib/mcp_server_eio_*` | JSON-RPC over Streamable HTTP |
-| **Room** | `lib/room/`, `lib/tool_room.ml` | Agent collaboration rooms |
 | **Board** | `lib/board/`, `lib/tool_board.ml` | Posts, votes, comments |
 | **Keeper** | `lib/keeper/`, `lib/tool_keeper.ml` | long-running keeper runtime |
 | **Worker Contracts** | `lib/worker_contract_types/` | shared worker/runtime contract types |
-| **A2A** | `a2a_tools.ml` | Agent-to-Agent protocol tools |
 
 ### Testing
 
@@ -107,7 +105,6 @@ make check-memory-leak
 |---------|---------|----------|
 | GraphQL API / Neo4j | agent graph and identity-backed features | Optional by workflow |
 | Supabase pgvector / PostgreSQL | persistence and vector-backed features | Optional by workflow |
-| local llama / cloud model providers | inference-backed tools, swarm/runtime paths | Optional by workflow |
 
 ### Commit Messages
 
@@ -181,7 +178,6 @@ PRs should include these sections:
 State which promise the PR affects:
 
 - `repo coordination`
-- `delivery swarm`
 - `ops visibility`
 - `none/internal`
 

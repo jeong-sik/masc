@@ -231,9 +231,7 @@ shared_memory_scope = "room"
       check string "sandbox_profile" "docker"
         (Keeper_types.sandbox_profile_to_string updated.sandbox_profile);
       check string "network_mode" "none"
-        (Keeper_types.network_mode_to_string updated.network_mode);
-      check string "shared_memory_scope" "room"
-        (Keeper_types.shared_memory_scope_to_string updated.shared_memory_scope)
+        (Keeper_types.network_mode_to_string updated.network_mode)
 
 let test_keeper_up_create_uses_profile_default_sandbox_policy () =
   with_temp_dir "keeper-config-ssot-room" @@ fun room_dir ->
@@ -288,9 +286,7 @@ shared_memory_scope = "room"
           check string "sandbox_profile from defaults" "docker"
             (Keeper_types.sandbox_profile_to_string meta.sandbox_profile);
           check string "network_mode from defaults" "inherit"
-            (Keeper_types.network_mode_to_string meta.network_mode);
-          check string "shared_memory_scope from defaults" "room"
-            (Keeper_types.shared_memory_scope_to_string meta.shared_memory_scope)
+            (Keeper_types.network_mode_to_string meta.network_mode)
       | Ok None -> fail "keeper meta missing after keeper_up"
       | Error e -> fail ("read_meta failed: " ^ e))
 

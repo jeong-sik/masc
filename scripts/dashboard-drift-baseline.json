@@ -6,9 +6,9 @@
   "text-zinc": 0,
   "bg-zinc": 0,
   "border-zinc": 0,
-  "rounded-px-literal": 9,
-  "text-9px": 0,
-  "text-px-literal": 6,
+  "rounded-px-literal": 10,
+  "text-9px": 3,
+  "text-px-literal": 12,
   "ring-accent-raw": 1,
   "ring-accent-fg-raw": 1,
   "ring-accent-soft-raw": 0

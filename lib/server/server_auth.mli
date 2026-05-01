@@ -313,10 +313,3 @@ val with_token_permission_auth :
   Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** Like [with_permission_auth] but threads the token id into the
     handler so the handler can audit the call. *)
-
-(** {1 Agent card surface} *)
-
-val serve_agent_card :
-  host:string -> port:int -> Httpun.Request.t -> Httpun.Reqd.t -> unit
-(** Serve the public [.well-known/agent-card.json] using the canonical
-    [(host, port)] for absolute URLs. *)

@@ -50,15 +50,12 @@ let legacy_permission_entries : (string * permission) list =
     ("masc_dispatch_plan", CanReadState);
     ("masc_observe_operations", CanReadState);
     ("masc_observe_capacity", CanReadState);
-    ("masc_observe_traces", CanReadState);
-    ("masc_agent_card", CanReadState);
-    ("masc_agent_fitness", CanReadState);
+    ("masc_observe_traces", CanReadState);    ("masc_agent_fitness", CanReadState);
     ("masc_dashboard", CanReadState);
     ("masc_check", CanReadState);
     ("masc_coordination_fsm_snapshot", CanReadState);
     ("masc_approval_pending", CanReadState);
     ("masc_approval_get", CanAdmin);
-    ("masc_collaboration_graph", CanReadState);
     ("masc_get_metrics", CanReadState);
     ("masc_plan_get_task", CanReadState);
     ("masc_plan_get", CanReadState);

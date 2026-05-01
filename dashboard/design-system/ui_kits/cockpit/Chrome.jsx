@@ -26,6 +26,8 @@ function Topbar({ goal, goals, mode, setMode, density, setDensity, branch, setBr
         <span className="tb-name">MASC</span>
       </div>
       <span className="tb-sep"></span>
+      {window.RepoSelector ? <window.RepoSelector/> : null}
+      <span className="tb-sep"></span>
       <div className="tb-branch" onClick={() => setBrOpen(o => !o)} title={`HEAD ${cur.head}`}>
         <span className="nm">{cur.name}</span>
         <span className="ahbh">
@@ -98,8 +100,58 @@ function Ticker({ events }) {
 
 // ============== KPI Strip ==============
 function KpiStrip() {
+  const [col, toggle] = (window.useCollapsed ? window.useCollapsed("kpi") : [false, () => {}]);
+  // "Spotlight" — surface the most urgent KPI as the first, larger cell.
+  // Priority: cascade@step ≥ 2 > stalled keepers > failed tests > token velocity
+  const D = window.MASC_DATA || {};
+  const stalled = (D.keepers || []).filter(k => k.status === "stalled");
+  const cascadeHits = 2; // mock seeded
+  const fails = 3;
+  let spot;
+  if (cascadeHits >= 2) {
+    spot = { label: "Cascade @step\u22652", value: cascadeHits, unit: "@step", tone: "info", note: "anthropic → moonshot", urgent: true };
+  } else if (stalled.length > 0) {
+    spot = { label: "Stalled", value: stalled.length, unit: "", tone: "stalled", note: stalled[0].id + " · 22m", urgent: true };
+  } else if (fails > 0) {
+    spot = { label: "Fails", value: fails, unit: "/47", tone: "err", note: "merge-blockers", urgent: true };
+  } else {
+    spot = { label: "Tokens/sec", value: "1.24", unit: "tps", tone: "brass", note: "▲ +0.10 · 5m", urgent: false };
+  }
   return (
-    <div className="kpi">
+    <div className={"kpi" + (col ? " wx-collapsed" : "")}>
+      <div
+        className="kpi-collapse-tab"
+        onClick={toggle}
+        onKeyDown={(e) => {
+          if (
+            e.target !== e.currentTarget &&
+            e.target.closest &&
+            e.target.closest("a,button,input,textarea,select")
+          ) return;
+          if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") {
+            e.preventDefault();
+            toggle();
+          }
+        }}
+        title={col ? "expand KPI" : "collapse KPI"}
+        role="button"
+        tabIndex={0}
+        aria-expanded={!col}>
+        {col ? "▸ KPI · " + (spot.urgent ? "⚠ " + spot.label : "8 metrics") : "▾"}
+        {!col && (
+          <a className="wx-popout"
+             href="?widget=kpi"
+             target="_blank" rel="noopener"
+             onClick={(e)=>e.stopPropagation()}
+             title="open KPI strip in new tab"
+             style={{marginLeft:"auto"}}>↗</a>
+        )}
+      </div>
+      <div className={"kpi-cell spotlight " + (spot.urgent ? "urgent" : "")}>
+        <span className="kpi-l">◆ SPOTLIGHT · {spot.label}</span>
+        <span className={"kpi-v " + spot.tone}>{spot.value}{spot.unit && <span className="u">{spot.unit}</span>}</span>
+        <span className="kpi-d">{spot.note}</span>
+      </div>
       <div className="kpi-cell live">
         <span className="kpi-l">Tokens/sec</span>
         <span className="kpi-v brass">1.24<span className="u">tps</span></span>
@@ -146,30 +198,63 @@ function KpiStrip() {
 
 // ============== Lifeline ==============
 function Lifeline() {
-  // Build a nice heartbeat trace (deterministic)
-  const pts = [];
+  const [col, toggleLife] = (window.useCollapsed ? window.useCollapsed("lifeline") : [false, () => {}]);
+  // Build a heartbeat trace from real keeper events instead of pure sin wave.
+  // Each event becomes a peak; baseline runs flat.
+  // Map seed event kinds to lifeline peak levels:
+  //   err → fail (y=2)  |  flag → cascade (y=4)
+  //   note/tool → nudge (y=6)  |  verify → claim (y=8)
+  const _kindMap = { err:"fail", flag:"cascade", note:"nudge", tool:"nudge", verify:"claim" };
+  const D = window.MASC_DATA || {};
+  const events = (D.events || []).slice(0, 24);
   const N = 120;
-  for (let i=0;i<N;i++) {
-    const x = (i/(N-1))*600;
-    const base = 10;
-    let y = base;
-    if (i%14 === 2) y = 2;
-    else if (i%14 === 3) y = 18;
-    else if (i%14 === 4) y = 6;
-    else if (i%14 === 10) y = 14;
-    else y = base + (Math.sin(i*0.4)*1.5);
+  const pts = [];
+  // Map events to x positions (most recent on right).
+  const eventX = events.map((e, i) => Math.floor(N - 1 - (i * (N-2) / Math.max(events.length-1,1))));
+  const eventKind = {};
+  events.forEach((e, i) => { eventKind[eventX[i]] = _kindMap[e.kind] || "nudge"; });
+  for (let i = 0; i < N; i++) {
+    const x = (i / (N-1)) * 600;
+    const base = 12;
+    let y = base + Math.sin(i * 0.18) * 0.5;
+    const k = eventKind[i];
+    if (k === "fail")     y = 2;
+    else if (k === "cascade") y = 4;
+    else if (k === "nudge")   y = 6;
+    else if (k === "claim")   y = 8;
     pts.push(`${x.toFixed(1)},${y.toFixed(1)}`);
   }
-  const d = "M"+pts.join(" L");
+  const d = "M" + pts.join(" L");
+  // Render event markers as small dots.
+  const markers = events.slice(0, 8).map((e, i) => ({
+    x: (eventX[i] / (N-1)) * 600,
+    kind: _kindMap[e.kind] || "nudge",
+    keeper: e.keeper,
+  }));
   return (
-    <div className="life">
-      <span className="life-label">Lifeline · 60s</span>
+    <div className={"life" + (col ? " wx-collapsed" : "")}>
+      <span className="life-label" onClick={toggleLife} title={col ? "expand lifeline" : "collapse lifeline"} style={{cursor:"pointer"}}>
+        {col ? "▸" : "▾"} Lifeline · 60s
+      </span>
       <div className="life-trace">
         <svg viewBox="0 0 600 20" preserveAspectRatio="none">
           <path d={d} stroke="var(--color-accent-fg)" strokeWidth="1" fill="none" />
+          {markers.map((m, i) => (
+            <circle key={i} cx={m.x}
+              cy={m.kind === "fail" ? 2 : m.kind === "cascade" ? 4 : m.kind === "claim" ? 8 : 6} r="1.6"
+              fill={m.kind === "fail" ? "var(--err-fg)" : m.kind === "cascade" ? "var(--info-fg)" : m.kind === "nudge" ? "var(--brass-1)" : "var(--ok-fg)"} />
+          ))}
         </svg>
       </div>
-      <span className="life-now"><span className="life-dot"></span> 1.24 TPS · NOW</span>
+      <span className="life-now">
+        <span className="life-dot"></span> {events.length} events · NOW
+        <a className="wx-popout"
+           href="?widget=lifeline"
+           target="_blank" rel="noopener"
+           onClick={(e)=>e.stopPropagation()}
+           title="open lifeline in new tab"
+           style={{marginLeft:"8px"}}>↗</a>
+      </span>
     </div>
   );
 }

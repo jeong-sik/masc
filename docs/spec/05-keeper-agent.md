@@ -206,7 +206,7 @@ stateDiagram-v2
 | continuity summary | `keeper_post_turn.ml` | keeper meta | keeper post-turn contract |
 | memory bank | `keeper_agent_run.ml` | `.masc/keepers/<name>.memory.jsonl` | memory policy / bank compaction |
 | episode flush | `keeper_agent_run.ml` | `.masc/institution_episodes.jsonl` | episode schema / JSONL cap |
-| hebbian learning | `coord_task.ml` | `.masc/synapses/graph.json` | task lifecycle + hebbian rules |
+| collaboration activity signal | `coord_task.ml` + `coord.ml` | `.masc/activity-events/YYYY-MM/YYYY-MM-DD.jsonl` | task lifecycle + activity graph event contract |
 
 ### 4.2 Keeper Supervisor Lifecycle
 

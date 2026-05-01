@@ -117,9 +117,6 @@ export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params
       if (routeState.params.section === 'repositories' && routeState.params.view === 'graph') {
         return ['gitGraph']
       }
-      if (routeState.params.section === 'collab-mvp') {
-        return ['execution', 'board']
-      }
       return []
     case 'lab':
       if (routeState.params.section === 'autoresearch') {

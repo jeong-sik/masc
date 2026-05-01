@@ -8,7 +8,6 @@ open Types
 
 let retired_front_door_schema_names =
   [
-    "masc_collaboration_graph";
   ]
 
 let filter_retired_front_door_schemas (schemas : tool_schema list) =
@@ -40,9 +39,7 @@ let all_schemas_extended =
   filter_retired_front_door_schemas
     (all_schemas
     @ Tool_schemas_control.schemas
-    @ Tool_schemas_a2a.schemas
     @ Tool_schemas_misc.schemas
-    @ Tool_team_memory.schemas
     @ Keeper_types.schemas
     @ Tool_local_runtime.schemas @ Tool_shard.schemas
     @ Tool_autoresearch.schemas)

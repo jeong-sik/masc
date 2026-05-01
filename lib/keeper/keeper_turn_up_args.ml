@@ -19,7 +19,6 @@ type parsed_args = {
   autoboot_enabled_opt : bool option;
   sandbox_profile_opt : sandbox_profile option;
   network_mode_opt : network_mode option;
-  shared_memory_scope_opt : shared_memory_scope option;
   voice_enabled_opt : bool option;
   voice_channel_opt : string option;
   voice_agent_id_opt : string option;
@@ -175,30 +174,22 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
       parse_enum_string_opt args "network_mode" network_mode_of_string
         ~allowed_values:"none, inherit"
     in
-    let shared_memory_scope_opt_res =
-      parse_enum_string_opt args "shared_memory_scope"
-        shared_memory_scope_of_string
-        ~allowed_values:"disabled, room"
-    in
     match
       compaction_profile_opt_res, tool_access_input_res, allowed_paths_opt_res,
-      active_goal_ids_opt_res, sandbox_profile_opt_res, network_mode_opt_res,
-      shared_memory_scope_opt_res
+      active_goal_ids_opt_res, sandbox_profile_opt_res, network_mode_opt_res
     with
-    | Error e, _, _, _, _, _, _
-    | _, Error e, _, _, _, _, _
-    | _, _, Error e, _, _, _, _
-    | _, _, _, Error e, _, _, _
-    | _, _, _, _, Error e, _, _
-    | _, _, _, _, _, Error e, _
-    | _, _, _, _, _, _, Error e -> Error (false, e)
+    | Error e, _, _, _, _, _
+    | _, Error e, _, _, _, _
+    | _, _, Error e, _, _, _
+    | _, _, _, Error e, _, _
+    | _, _, _, _, Error e, _
+    | _, _, _, _, _, Error e -> Error (false, e)
     | Ok compaction_profile_opt,
       Ok (tool_access_opt, tool_preset_opt, tool_also_allow_opt),
       Ok allowed_paths_opt,
       Ok active_goal_ids_opt,
       Ok sandbox_profile_opt,
-      Ok network_mode_opt,
-      Ok shared_memory_scope_opt ->
+      Ok network_mode_opt ->
     let goal_opt = get_string_opt args "goal" in
     let short_goal_opt = parse_goal_horizon_opt args "short_goal" in
     let mid_goal_opt = parse_goal_horizon_opt args "mid_goal" in
@@ -275,7 +266,6 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
       autoboot_enabled_opt;
       sandbox_profile_opt;
       network_mode_opt;
-      shared_memory_scope_opt;
       voice_enabled_opt;
       voice_channel_opt;
       voice_agent_id_opt;
@@ -320,9 +310,6 @@ let resolve_network_mode ~sandbox_profile ~preferred ~fallback =
   first_some preferred fallback
   |> Option.value ~default:(default_network_mode_for_profile sandbox_profile)
 
-let resolve_shared_memory_scope ~preferred ~fallback =
-  first_some preferred fallback
-  |> Option.value ~default:default_shared_memory_scope
 
 let private_workspace_root_rel ~sandbox_profile keeper_name =
   Keeper_sandbox.host_root_rel_of_profile sandbox_profile keeper_name

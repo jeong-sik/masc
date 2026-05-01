@@ -131,7 +131,6 @@ export type RuntimeDraft = {
   sandbox_profile: SandboxProfile
   active_goal_ids: string[]
   network_mode: SandboxNetworkMode
-  shared_memory_scope: SharedMemoryScope
   allowed_paths_text: string
   proactive_enabled: boolean
   proactive_idle_sec: number
@@ -167,7 +166,6 @@ export function initRuntimeDraftFromConfig(c: KeeperConfig): RuntimeDraft {
       ? c.coordination.active_goal_ids
       : c.active_goal_ids,
     network_mode: coerceNetworkMode(c.network_mode),
-    shared_memory_scope: coerceSharedMemoryScope(c.shared_memory_scope),
     allowed_paths_text: (c.allowed_paths ?? []).join('\n'),
     proactive_enabled: c.proactive.enabled,
     proactive_idle_sec: c.proactive.idle_sec,
@@ -193,7 +191,6 @@ export function buildRuntimePayload(draft: RuntimeDraft, orig: KeeperConfig): Ke
   if (JSON.stringify(newPaths) !== JSON.stringify(origPaths)) payload.allowed_paths = newPaths
   if (draft.sandbox_profile !== coerceSandboxProfile(orig.sandbox_profile)) payload.sandbox_profile = draft.sandbox_profile
   if (draft.network_mode !== coerceNetworkMode(orig.network_mode)) payload.network_mode = draft.network_mode
-  if (draft.shared_memory_scope !== coerceSharedMemoryScope(orig.shared_memory_scope)) payload.shared_memory_scope = draft.shared_memory_scope
   if (draft.proactive_enabled !== orig.proactive.enabled) payload.proactive_enabled = draft.proactive_enabled
   if (draft.proactive_idle_sec !== orig.proactive.idle_sec) payload.proactive_idle_sec = draft.proactive_idle_sec
   if (draft.proactive_cooldown_sec !== orig.proactive.cooldown_sec) payload.proactive_cooldown_sec = draft.proactive_cooldown_sec
@@ -809,7 +806,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       <div class="mt-2">
         <${Callout}
           title="런타임 설정"
-          body="실행 범위 섹션에서 sandbox_profile, network_mode, shared_memory_scope, allowed_paths를 저장할 수 있습니다. 프로액티브, 컴팩션, 핸드오프도 인라인 편집 가능하고, 소스/실행/런타임/조율은 읽기 전용입니다."
+          body="실행 범위 섹션에서 sandbox_profile, network_mode, allowed_paths를 저장할 수 있습니다. 프로액티브, 컴팩션, 핸드오프도 인라인 편집 가능하고, 소스/실행/런타임/조율은 읽기 전용입니다."
         />
       </div>
 
@@ -937,12 +934,6 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
           options=${rd.sandbox_profile === 'docker' ? ['inherit', 'none'] as const : ['inherit'] as const}
           onChange=${(value: string) => updateRuntimeDraft('network_mode', value as SandboxNetworkMode)}
         />
-        <${InlineSelectRow}
-          label="shared_memory_scope"
-          value=${rd.shared_memory_scope}
-          options=${['disabled', 'room'] as const}
-          onChange=${(value: string) => updateRuntimeDraft('shared_memory_scope', value as SharedMemoryScope)}
-        />
         <div class="py-2 px-3 rounded bg-[var(--white-3)]">
           <div class="flex items-center justify-between mb-1">
             <span class="text-xs text-[var(--text-body)]">allowed_paths</span>
@@ -973,7 +964,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       ` : html`
         <${ConfigRow} label="sandbox_profile" value=${c.sandbox_profile ?? 'local'} />
         <${ConfigRow} label="network_mode" value=${c.network_mode ?? 'inherit'} />
-        <${ConfigRow} label="shared_memory_scope" value=${c.shared_memory_scope ?? 'disabled'} />
+        
         <${ConfigRow} label="effective_sandbox_image" value=${c.effective_sandbox_image || '--'} />
         <${ConfigRow} label="allowed_paths" value=${(c.allowed_paths ?? []).join(', ') || '(computed default)'} />
         <${ConfigRow} label="effective_paths" value=${(c.effective_allowed_paths ?? []).join(', ') || '(전체 허용)'} />

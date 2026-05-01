@@ -6,7 +6,7 @@
 const { useState: usePlaneState } = React;
 
 // ─── shared header ───────────────────────────────────────────
-function PlaneHeader({ title, subtitle, branch, keepers }) {
+function PlaneHeader({ title, subtitle, branch, keepers, popoutId }) {
   const sk = keepers || new Set();
   return (
     <div className="plane-hdr">
@@ -16,18 +16,25 @@ function PlaneHeader({ title, subtitle, branch, keepers }) {
         <span>⎇ <span className="br">{branch || "main"}</span></span>
         <span>·</span>
         <span><span className="kp">{sk.size}</span> keepers selected</span>
+        {popoutId && (
+          <a className="wx-popout"
+             href={"?widget=" + popoutId}
+             target="_blank" rel="noopener"
+             title="open plane in new tab"
+             style={{marginLeft:"8px"}}>↗</a>
+        )}
       </span>
     </div>
   );
 }
 
 // ─── shared tabbed shell ─────────────────────────────────────
-function PlaneShell({ title, subtitle, branch, keepers, tabs, defaultTab }) {
+function PlaneShell({ title, subtitle, branch, keepers, tabs, defaultTab, popoutId }) {
   const [tab, setTab] = usePlaneState(defaultTab || tabs[0].id);
   const cur = tabs.find(t => t.id === tab) || tabs[0];
   return (
     <div className="plane">
-      <PlaneHeader title={title} subtitle={subtitle} branch={branch} keepers={keepers} />
+      <PlaneHeader title={title} subtitle={subtitle} branch={branch} keepers={keepers} popoutId={popoutId} />
       <div className="plane-tabs">
         {tabs.map(t => (
           <button key={t.id} className={tab === t.id ? "active" : ""} onClick={() => setTab(t.id)}>{t.label}</button>
@@ -47,6 +54,7 @@ function WorkPlane({ branch, keepers }) {
   return (
     <PlaneShell
       title="Work Plane" subtitle="Goals · Tasks · Accountability"
+      popoutId="plane-work"
       branch={branch} keepers={keepers}
       tabs={[
         { id:"goal-h",   label:"Goal · Horizon",     render: () => <window.GoalHorizonTrack/> },
@@ -69,6 +77,7 @@ function CommsPlane({ branch, keepers }) {
   return (
     <PlaneShell
       title="Comms Plane" subtitle="Board · Messages · Composer v2"
+      popoutId="plane-comms"
       branch={branch} keepers={keepers}
       tabs={[
         { id:"bd-feed", label:"Board · Feed",      render: () => <window.BoardFeed/> },
@@ -92,6 +101,7 @@ function ObservePlane({ branch, keepers }) {
   return (
     <PlaneShell
       title="Observability" subtitle="Cascade · Audit · Safe Autonomy · Cost · Heuristic"
+      popoutId="plane-observe"
       branch={branch} keepers={keepers}
       tabs={[
         { id:"cs-list", label:"Cascade · List",       render: () => <window.CascadeList/> },
@@ -121,6 +131,7 @@ function CognitionPlane({ branch, keepers }) {
   return (
     <PlaneShell
       title="Cognition" subtitle="Keeper Inspector · Decisions · Memory · Episodes · Autoresearch"
+      popoutId="plane-cognition"
       branch={branch} keepers={keepers}
       tabs={[
         { id:"ki-bdi",  label:"Keeper · BDI",         render: () => <window.KeeperBDIPanel/> },
@@ -139,13 +150,15 @@ function CognitionPlane({ branch, keepers }) {
 }
 
 // ═════════════════════════════════════════════════════════════
-// IDE PLANE — Phase 3 Code IDE v2
+// IDE PLANE — Phase 3 Code IDE v2 (re-designed in Phase B-C)
+// - bottom terminal removed (use shared Drawer instead)
+// - keeper chips removed (sidebar already shows fleet)
+// - modebar: branch + mode tabs only (no terminal toggle)
+// - wide modes (review/merge/graph/search) use full center; edit shows inspector right rail
 // ═════════════════════════════════════════════════════════════
 function IdePlane({ branch, keepers }) {
   const [mode, setMode] = usePlaneState("edit");
-  const [terminalOpen, setTerminalOpen] = usePlaneState(true);
   const ctx = { branch, keepers };
-  const keeperCount = keepers ? keepers.size : 0;
 
   const center =
     mode === "review" ? <window.IxEditReview {...ctx}/> :
@@ -154,44 +167,55 @@ function IdePlane({ branch, keepers }) {
     mode === "search" ? <window.IxSearch {...ctx}/> :
     <window.IxEditAttrib {...ctx}/>;
 
+  // edit mode shows inspector rail on right;
+  // review/merge/graph/search use center wide
   const right =
-    mode === "review" ? <window.IxPrThread {...ctx}/> :
-    mode === "merge" || mode === "graph" || mode === "search" ? null :
-    <div className="ide-v2-right-stack">
-      <window.IxPrHeader {...ctx}/>
-      <window.IxPrChecks {...ctx}/>
-    </div>;
+    mode === "edit" ?
+      <div className="ide-v2-right-stack">
+        <window.IxPrHeader {...ctx}/>
+        <window.IxPrChecks {...ctx}/>
+      </div>
+    : mode === "review" ? <window.IxPrThread {...ctx}/>
+    : null;
+
+  // open shared drawer with terminal tab as a hint
+  const openTerminal = () => {
+    window.dispatchEvent(new CustomEvent("masc-drawer-set", { detail: { open: true, tab: "terminal" } }));
+  };
 
   const centerPanelId = `ide-v2-center-${mode}`;
   return (
-    <div className="plane ide-v2" role="region" aria-label="IDE Plane">
-      <PlaneHeader title="IDE Plane" subtitle="Tree · editor · PR · graph · terminal/search." branch={branch} keepers={keepers} />
-      <div className="ide-v2-modebar">
-        <div className="ide-v2-branch" aria-label={`Active branch ${branch || "main"}, ${keeperCount} keepers, worktree active`}>
+    <div className="plane ide-v2 ide-v3" role="region" aria-label="IDE Plane">
+      <PlaneHeader title="IDE" subtitle="tree · editor · PR · graph · search" branch={branch} keepers={keepers} popoutId="plane-ide" />
+      <div className="ide-v2-modebar ide-v3-modebar">
+        <div className="ide-v2-branch">
           <span className="lbl">branch</span>
           <span className="name">{branch || "main"}</span>
-          <span className="meta">{keeperCount} keepers · worktree active</span>
+          <span className="meta">worktree active · 14 changed · 3 staged</span>
         </div>
         <div className="ide-v2-modes" role="tablist" aria-label="IDE mode">
           {["edit","review","merge","graph","search"].map(m => (
-            <button key={m} type="button" role="tab" id={`ide-v2-mode-${m}`} aria-selected={mode === m} aria-controls={`ide-v2-center-${m}`} tabIndex={mode === m ? 0 : -1} className={mode === m ? "active" : ""} onClick={() => setMode(m)}>{m}</button>
+            <button key={m} type="button" role="tab"
+                    id={`ide-v2-mode-${m}`} aria-selected={mode === m}
+                    aria-controls={`ide-v2-center-${m}`}
+                    tabIndex={mode === m ? 0 : -1}
+                    className={mode === m ? "active" : ""}
+                    onClick={() => setMode(m)}>{m}</button>
           ))}
         </div>
-        <button type="button" aria-pressed={terminalOpen} aria-controls="ide-v2-terminal" className={`ide-v2-terminal-toggle ${terminalOpen ? "active" : ""}`} onClick={() => setTerminalOpen(v => !v)}>
-          terminal
+        <button type="button"
+                className="ide-v3-drawer-hint"
+                onClick={openTerminal}
+                title="open shared bottom drawer (Terminal/Output/Cascade/Audit/Cost)">
+          ⌃` drawer
         </button>
       </div>
-      <div className={`ide-v2-body ${right ? "" : "wide"} ${terminalOpen ? "term-open" : ""}`}>
+      <div className={`ide-v2-body ide-v3-body ${right ? "" : "wide"}`}>
         <div className="ide-v2-tree" role="region" aria-label="File tree">
           <window.IxTreeDiff {...ctx}/>
         </div>
         <div className="ide-v2-center" role="tabpanel" id={centerPanelId} aria-labelledby={`ide-v2-mode-${mode}`}>{center}</div>
-        {right && <div className="ide-v2-right" role="region" aria-label="PR context rail">{right}</div>}
-        {terminalOpen && (
-          <div className="ide-v2-terminal" id="ide-v2-terminal" role="region" aria-label="Cascade-aware terminal">
-            <window.IxTerm {...ctx}/>
-          </div>
-        )}
+        {right && <div className="ide-v2-right" role="region" aria-label="Inspector rail">{right}</div>}
       </div>
     </div>
   );

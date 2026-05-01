@@ -23,7 +23,6 @@
 open Alcotest
 
 module H  = Masc_mcp.Keeper_hooks_oas
-module Oas = Masc_mcp.Oas
 
 (* ------------------------------------------------------------------ *)
 (* Helpers                                                             *)
@@ -246,6 +245,15 @@ let test_status_unpriced_model () =
     ~cost_usd:0.0
     "unpriced_model"
 
+let test_status_auto_alias_unpriced_model () =
+  check_status
+    ~msg:"known provider + auto alias → unpriced_model"
+    ~provider:"openai" ~pricing_model:"auto"
+    ~usage_missing:false ~usage_trusted:true
+    ~input_tokens:500 ~output_tokens:200
+    ~cost_usd:0.0
+    "unpriced_model"
+
 (* Trusted + known-paid provider + model in catalog + zero cost (despite
    tokens) → priced status because the catalog hit means we estimated
    and got a positive value (test with real model + real tokens).
@@ -335,6 +343,7 @@ let () =
         ; test_case "known_free unmetered"         `Quick test_status_known_free_for_unmetered
         ; test_case "provider_unknown"             `Quick test_status_provider_unknown
         ; test_case "unpriced_model"               `Quick test_status_unpriced_model
+        ; test_case "auto alias unpriced_model"    `Quick test_status_auto_alias_unpriced_model
         ; test_case "priced real model"            `Quick test_status_priced_path_with_real_model
         ; test_case "known_free via catalog"       `Quick test_status_known_free_via_catalog
         ] )

@@ -45,7 +45,6 @@ body:
       label: Promise affected
       options:
         - repo coordination
-        - delivery swarm
         - ops visibility
         - experimental or internal
     validations:

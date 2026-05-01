@@ -1,0 +1,446 @@
+/* MASC Cockpit — Dark Brass tokens
+   Color discipline: bg is almost-black with 2-3% warm tint.
+   Brass accent used ONLY for active/running state. Status colors
+   reserved for data, never chrome. Everything else is grayscale. */
+
+:root {
+  /* Surface stack — 4 steps from bg to floating */
+  --bg-0: #0c0b08;         /* page bg */
+  --bg-1: #141210;         /* topbar / composer */
+  --bg-2: #1a1815;         /* panel surface */
+  --bg-3: #211e1a;         /* elevated card */
+  --bg-4: #2a2621;         /* hover / active row */
+
+  /* Hairlines — warm neutral, barely visible */
+  --line-1: #2a2520;       /* default border */
+  --line-2: #3a332c;       /* emphasized border */
+  --line-3: #4a4137;       /* divider between zones */
+
+  /* Text — 4 steps, never pure white */
+  --fg-1: #f0e9dc;         /* primary */
+  --fg-2: #b8ad9a;         /* secondary */
+  --fg-3: #7a7065;         /* tertiary / labels */
+  --fg-4: #4a453e;         /* disabled / placeholder */
+
+  /* Brass — the ONE accent. Used for: running state, focused row,
+     active tab underline, primary button. Nothing else. */
+  --brass-1: #d4a14a;
+  --brass-2: #b8843a;
+  --brass-3: #8a5f28;
+  --brass-glow: 212 161 74;  /* rgb triplet for alpha */
+
+  /* Status — muted, desaturated. Never neon. */
+  --ok:     #6b9e6b;       /* done, success */
+  --warn:   #c9a24a;       /* at-risk, degraded */
+  --err:    #c46a5a;       /* failed, blocker */
+  --info:   #6a8eb0;       /* pending, queued */
+  --idle:   #6a6a6a;       /* silent, noop */
+  --stalled:#8a6aa0;       /* stalled, drift */
+
+  /* Status glow triplets — for box-shadow alpha */
+  --ok-glow:   107 158 107;
+  --warn-glow: 201 162 74;
+  --err-glow:  196 106 90;
+  --info-glow: 106 142 176;
+  --stalled-glow: 138 106 160;
+
+  /* Semantic 4-slot per status — soft bg, fg, border, ring.
+     Use these instead of bare --ok / rgb(var(--ok-glow)/...) in components. */
+  --ok-soft:   rgb(107 158 107 / .10);
+  --ok-fg:     #8ebc8e;
+  --ok-border: rgb(107 158 107 / .35);
+  --ok-ring:   0 0 0 1px rgb(107 158 107 / .45), 0 0 8px rgb(107 158 107 / .35);
+
+  --warn-soft:   rgb(201 162 74 / .12);
+  --warn-fg:     #d9b764;
+  --warn-border: rgb(201 162 74 / .35);
+  --warn-ring:   0 0 0 1px rgb(201 162 74 / .45), 0 0 8px rgb(201 162 74 / .35);
+
+  --err-soft:   rgb(196 106 90 / .12);
+  --err-fg:     #d8806f;
+  --err-border: rgb(196 106 90 / .4);
+  --err-ring:   0 0 0 1px rgb(196 106 90 / .5), 0 0 8px rgb(196 106 90 / .4);
+
+  --info-soft:   rgb(106 142 176 / .12);
+  --info-fg:     #8aa6c4;
+  --info-border: rgb(106 142 176 / .35);
+  --info-ring:   0 0 0 1px rgb(106 142 176 / .45), 0 0 8px rgb(106 142 176 / .35);
+
+  --idle-soft:   rgb(106 106 106 / .10);
+  --idle-fg:     #8a8a8a;
+  --idle-border: rgb(106 106 106 / .3);
+
+  --stalled-soft:   rgb(138 106 160 / .12);
+  --stalled-fg:     #a88ac0;
+  --stalled-border: rgb(138 106 160 / .35);
+  --stalled-ring:   0 0 0 1px rgb(138 106 160 / .45), 0 0 8px rgb(138 106 160 / .35);
+
+  --brass-soft:   rgb(212 161 74 / .10);
+  --brass-fg:     var(--brass-1);
+  --brass-border: rgb(212 161 74 / .35);
+  --brass-ring:   0 0 0 1px rgb(212 161 74 / .5), 0 0 10px rgb(212 161 74 / .5);
+
+  /* Keeper palette — 5 named fleet members.
+     Each gets a distinct hue anchored to a status/brand tone.
+     Used for: blame, presence dot, swimlane header, attribution. */
+  --k-nick:    #d4a14a;    /* nick0cave — brass (captain) */
+  --k-masc:    #6b9e6b;    /* masc-improver — green */
+  --k-sangsu:  #6a8eb0;    /* sangsu — blue */
+  --k-qa:      #c46a5a;    /* qa-king — red */
+  --k-rama:    #8a6aa0;    /* rama — purple */
+  --k-nick-glow:   212 161 74;
+  --k-masc-glow:   107 158 107;
+  --k-sangsu-glow: 106 142 176;
+  --k-qa-glow:     196 106 90;
+  --k-rama-glow:   138 106 160;
+
+  /* Keeper 4-slot semantic — soft bg / border / ring for attribution surfaces.
+     Matches the pattern of --ok-soft / --warn-soft / etc. */
+  --k-nick-soft:   rgb(212 161 74 / .10);
+  --k-nick-border: rgb(212 161 74 / .35);
+  --k-nick-ring:   0 0 0 1px rgb(212 161 74 / .45), 0 0 8px rgb(212 161 74 / .35);
+  --k-masc-soft:   rgb(107 158 107 / .10);
+  --k-masc-border: rgb(107 158 107 / .35);
+  --k-masc-ring:   0 0 0 1px rgb(107 158 107 / .45), 0 0 8px rgb(107 158 107 / .35);
+  --k-sangsu-soft:   rgb(106 142 176 / .10);
+  --k-sangsu-border: rgb(106 142 176 / .35);
+  --k-sangsu-ring:   0 0 0 1px rgb(106 142 176 / .45), 0 0 8px rgb(106 142 176 / .35);
+  --k-qa-soft:   rgb(196 106 90 / .12);
+  --k-qa-border: rgb(196 106 90 / .4);
+  --k-qa-ring:   0 0 0 1px rgb(196 106 90 / .5), 0 0 8px rgb(196 106 90 / .4);
+  --k-rama-soft:   rgb(138 106 160 / .12);
+  --k-rama-border: rgb(138 106 160 / .35);
+  --k-rama-ring:   0 0 0 1px rgb(138 106 160 / .45), 0 0 8px rgb(138 106 160 / .35);
+
+  /* Provider palette — for cascade chips and provider cells */
+  --p-anthropic: #c9a88a;  /* warm sand */
+  --p-moonshot:  #8a98c9;  /* cool indigo */
+  --p-openai:    #6b9e8e;  /* muted teal */
+  --p-xai:       #a896a0;  /* mauve */
+
+  /* Provider 4-slot — soft tint + border for provider cells & cascade pills */
+  --p-anthropic-soft:   rgb(201 168 138 / .10);
+  --p-anthropic-border: rgb(201 168 138 / .3);
+  --p-moonshot-soft:    rgb(138 152 201 / .10);
+  --p-moonshot-border:  rgb(138 152 201 / .3);
+  --p-openai-soft:      rgb(107 158 142 / .10);
+  --p-openai-border:    rgb(107 158 142 / .3);
+  --p-xai-soft:         rgb(168 150 160 / .10);
+  --p-xai-border:       rgb(168 150 160 / .3);
+
+  /* Diff — muted overlay tints on top of bg */
+  --diff-add:     rgb(107 158 107 / .08);
+  --diff-del:     rgb(196 106 90 / .08);
+  --diff-add-bar: rgb(107 158 107 / .35);
+  --diff-del-bar: rgb(196 106 90 / .35);
+
+  /* Heatmap — brass-tinted, 3 steps + accent */
+  --heat-1: rgb(212 161 74 / .04);
+  --heat-2: rgb(212 161 74 / .08);
+  --heat-3: rgb(212 161 74 / .14);
+
+  /* Comment kind — semantic colors distinct from raw status */
+  --cmt-question: var(--info);
+  --cmt-flag:     var(--err);
+  --cmt-note:     var(--fg-2);
+  --cmt-approve:  var(--ok);
+  --cmt-suggest:  var(--brass-1);
+
+  /* Type scale — tabular, compact.
+     Raw sizes kept for escape hatches; prefer role tokens below. */
+  --font-sans: ui-sans-serif, -apple-system, "SF Pro Text", "Inter", system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+
+  --fs-9:  9px;
+  --fs-10: 10px;
+  --fs-11: 11px;
+  --fs-12: 12px;
+  --fs-13: 13px;
+  --fs-14: 14px;
+  --fs-16: 16px;
+  --fs-20: 20px;
+  --fs-28: 28px;
+  --fs-36: 36px;
+
+  --lh-tight: 1.2;
+  --lh-body:  1.45;
+  --lh-loose: 1.6;
+
+  --fw-reg:  400;
+  --fw-med:  500;
+  --fw-semi: 600;
+  --fw-bold: 700;
+
+  --track-tight:  -0.01em;
+  --track-normal:  0;
+  --track-wide:    0.04em;
+  --track-caps:    0.08em;
+
+  /* Type ROLE tokens — prefer these over raw --fs-*.
+     Each role bundles size / weight / line-height / tracking. */
+  --type-micro:   var(--fs-9)/var(--lh-tight) var(--font-mono);
+  --type-caption: var(--fs-10)/var(--lh-tight) var(--font-mono);
+  --type-label:   var(--fs-11)/var(--lh-tight) var(--font-sans);
+  --type-meta:    var(--fs-12)/var(--lh-tight) var(--font-mono);
+  --type-body:    var(--fs-13)/var(--lh-body)  var(--font-sans);
+  --type-code:    var(--fs-12)/var(--lh-body)  var(--font-mono);
+  --type-title:   var(--fs-14)/var(--lh-tight) var(--font-sans);
+  --type-kpi-m:   var(--fs-16)/var(--lh-tight) var(--font-mono);
+  --type-kpi-l:   var(--fs-20)/var(--lh-tight) var(--font-mono);
+  --type-hero:    var(--fs-28)/var(--lh-tight) var(--font-mono);
+  --type-display: var(--fs-36)/var(--lh-tight) var(--font-mono);
+
+  /* Spacing — 4px base. Atomic scale (escape hatch).
+     Components should prefer role tokens below. */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-7: 32px;
+  --sp-8: 40px;
+  --sp-0h: 2px;            /* half-step for gutter micro-gaps */
+
+  /* 8px baseline grid — alignment rhythm */
+  --grid-unit: 8px;
+  --grid-half: 4px;
+  --grid-dbl:  16px;
+
+  /* Density scale — Tweaks can flip --density to switch modes.
+     These are role spacings. Components should use --sp-row / --sp-gutter
+     instead of raw --sp-2 when they need to respect density. */
+  --density: 1;  /* 0.85 compact · 1 normal · 1.15 comfortable */
+
+  --sp-inline:    calc(var(--density) * 4px);   /* icon-to-label gap */
+  --sp-gutter:    calc(var(--density) * 8px);   /* between sibling fields */
+  --sp-stack:     calc(var(--density) * 12px);  /* between blocks */
+  --sp-section:   calc(var(--density) * 20px);  /* between sections */
+  --sp-region:    calc(var(--density) * 32px);  /* between regions */
+
+  --row-h-micro:  calc(var(--density) * 18px);  /* chip row, micro list */
+  --row-h-tight:  calc(var(--density) * 22px);  /* dense table row */
+  --row-h:        calc(var(--density) * 26px);  /* default row */
+  --row-h-loose:  calc(var(--density) * 32px);  /* menu item, card row */
+  --row-h-tall:   calc(var(--density) * 40px);  /* card header, tab bar */
+
+  --ctrl-h-xs:    calc(var(--density) * 16px);
+  --ctrl-h-sm:    calc(var(--density) * 20px);
+  --ctrl-h:       calc(var(--density) * 24px);
+  --ctrl-h-lg:    calc(var(--density) * 28px);
+
+  /* Density modes — apply via body[data-density="..."] */
+}
+body[data-density="compact"]      { --density: 0.85; }
+body[data-density="normal"]       { --density: 1; }
+body[data-density="comfortable"]  { --density: 1.15; }
+
+:root {
+  /* Sentinel — closes the auto-var block so the density override above
+     scopes cleanly. */
+  --_density-scope: 1;
+
+  /* Radius — small only; this is an ops tool */
+  --r-1: 3px;
+  --r-2: 5px;
+  --r-3: 8px;
+
+  /* Elevation — 7-step scale. Each level bundles shadow + bg + border.
+     Use `.elev-*` helper classes in primitives.css, or reference tokens directly. */
+  --elev-0-bg:     var(--bg-0);  /* page / inset surface */
+  --elev-0-border: transparent;
+  --elev-0-shadow: none;
+
+  --elev-1-bg:     var(--bg-1);  /* resting panel (sticky chrome) */
+  --elev-1-border: var(--line-1);
+  --elev-1-shadow: 0 1px 0 rgb(0 0 0 / .4);
+
+  --elev-2-bg:     var(--bg-2);  /* card / default section surface */
+  --elev-2-border: var(--line-1);
+  --elev-2-shadow: 0 1px 0 rgb(0 0 0 / .4), inset 0 1px 0 rgb(255 255 255 / .02);
+
+  --elev-3-bg:     var(--bg-3);  /* hovered card / selected row */
+  --elev-3-border: var(--line-2);
+  --elev-3-shadow: 0 2px 6px rgb(0 0 0 / .45), inset 0 1px 0 rgb(255 255 255 / .03);
+
+  --elev-4-bg:     var(--bg-3);  /* floating menu / popover */
+  --elev-4-border: var(--line-2);
+  --elev-4-shadow: 0 6px 18px rgb(0 0 0 / .55), 0 0 0 1px var(--line-2), inset 0 1px 0 rgb(255 255 255 / .03);
+
+  --elev-5-bg:     var(--bg-3);  /* drawer / sheet */
+  --elev-5-border: var(--line-3);
+  --elev-5-shadow: 0 12px 32px rgb(0 0 0 / .6), 0 0 0 1px var(--line-3), inset 0 1px 0 rgb(255 255 255 / .04);
+
+  --elev-6-bg:     var(--bg-3);  /* modal overlay */
+  --elev-6-border: var(--line-3);
+  --elev-6-shadow: 0 24px 64px rgb(0 0 0 / .7), 0 0 0 1px var(--line-3), inset 0 1px 0 rgb(255 255 255 / .04);
+
+  /* Shadow aliases (kept for compat with existing styles) */
+  --shadow-1: var(--elev-2-shadow);
+  --shadow-2: var(--elev-4-shadow);
+  --shadow-3: var(--elev-5-shadow);
+  --shadow-inset: inset 0 1px 0 rgb(255 255 255 / .03);
+
+  /* Focus / interaction overlays — reuse across all interactive primitives */
+  --focus-ring:    0 0 0 1px var(--brass-1), 0 0 0 3px rgb(var(--brass-glow) / .25);
+  --focus-ring-err: 0 0 0 1px var(--err), 0 0 0 3px rgb(var(--err-glow) / .3);
+  --hover-overlay:  rgb(255 255 255 / .03);
+  --active-overlay: rgb(0 0 0 / .25);
+
+  /* Interactive state role tokens — prefer these over raw bg-3/bg-4
+     so hover/selected/pressed semantics are explicit at the callsite. */
+  --state-hover-bg:      var(--bg-3);
+  --state-hover-fg:      var(--fg-1);
+  --state-hover-border:  var(--line-2);
+  --state-selected-bg:   var(--bg-4);
+  --state-selected-fg:   var(--fg-1);
+  --state-selected-border: var(--line-3);
+  --state-pressed-bg:    rgb(0 0 0 / .4);
+  --state-active-bg:     rgb(var(--brass-glow) / .08);
+  --state-active-fg:     var(--brass-1);
+  --state-active-border: var(--brass-3);
+  --state-disabled-fg:   var(--fg-4);
+  --state-disabled-bg:   transparent;
+
+  /* Divider alias — semantic pointer to the line you draw between panels.
+     line-1 is the raw hairline; --divider is the role. */
+  --divider:         var(--line-1);
+  --divider-emphasis: var(--line-2);
+  --divider-zone:    var(--line-3);
+
+  /* Overlay scrims — for drawer / modal / sheet backdrops */
+  --scrim-subtle:  rgb(0 0 0 / .3);
+  --scrim:         rgb(0 0 0 / .5);
+  --scrim-strong:  rgb(0 0 0 / .7);
+  --scrim-brass:   rgb(var(--brass-glow) / .04);  /* warm wash behind active region */
+
+  /* z-index scale — avoid magic numbers */
+  --z-base:     1;
+  --z-sticky:   20;
+  --z-dropdown: 30;
+  --z-overlay:  40;    /* comment composer, tooltips */
+  --z-drawer:   60;    /* inspector / right drawer */
+  --z-modal:    80;
+  --z-toast:    100;
+
+  /* Zone heights */
+  --h-topbar: 36px;
+  --h-ticker: 32px;
+  --h-kpi: 56px;
+  --h-lifeline: 28px;
+  --h-composer: 48px;
+  --h-deck: 240px;
+
+  /* Grid widths */
+  --w-sidebar: 168px;
+  --w-rail: 300px;
+
+  /* Motion */
+  --ease: cubic-bezier(.2, .7, .2, 1);
+  --ease-out: cubic-bezier(.16, 1, .3, 1);
+  --ease-in:  cubic-bezier(.7, 0, .84, 0);
+  --ease-inout: cubic-bezier(.65, 0, .35, 1);
+  --ease-spring: cubic-bezier(.34, 1.56, .64, 1);
+  --t-fast: 120ms;
+  --t-med: 200ms;
+  --t-slow: 360ms;
+  --t-xslow: 600ms;
+
+  /* Motion role tokens — bundle duration + easing for common gestures */
+  --motion-enter:    var(--t-med)  var(--ease-out);
+  --motion-exit:     var(--t-fast) var(--ease-in);
+  --motion-swap:     var(--t-fast) var(--ease);
+  --motion-reveal:   var(--t-slow) var(--ease-out);
+  --motion-settle:   var(--t-xslow) var(--ease-out);
+  --motion-pop:      var(--t-med)  var(--ease-spring);
+
+  /* Reduced-motion respect */
+}
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --t-fast: 1ms; --t-med: 1ms; --t-slow: 1ms; --t-xslow: 1ms;
+    --motion-enter: 1ms linear; --motion-exit: 1ms linear;
+    --motion-swap: 1ms linear;  --motion-reveal: 1ms linear;
+    --motion-settle: 1ms linear; --motion-pop: 1ms linear;
+  }
+}
+:root {
+  --_motion-scope: 1;
+}
+
+/* Reset / base */
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; height: 100%; }
+body {
+  background: var(--bg-0);
+  color: var(--fg-1);
+  font: var(--fs-13)/var(--lh-body) var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: "cv08", "ss01";
+}
+code, kbd, samp, pre, .mono { font-family: var(--font-mono); }
+
+/* Utilities */
+.tnum { font-variant-numeric: tabular-nums; }
+.truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.clamp-3 { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.muted { color: var(--fg-3); }
+.dim { color: var(--fg-2); }
+
+/* Status dot — 6px solid, used in rows & KPI */
+.dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; vertical-align: middle; }
+.dot-ok { background: var(--ok); }
+.dot-warn { background: var(--warn); }
+.dot-err { background: var(--err); }
+.dot-info { background: var(--info); }
+.dot-idle { background: var(--idle); }
+.dot-stalled { background: var(--stalled); }
+.dot-running { background: var(--brass-1); box-shadow: 0 0 6px rgb(var(--brass-glow) / .6); }
+
+/* Keeper dot — glowing, used in presence / blame attribution */
+.dot-k-nick    { background: var(--k-nick);    box-shadow: 0 0 5px rgb(var(--k-nick-glow) / .6); }
+.dot-k-masc    { background: var(--k-masc);    box-shadow: 0 0 5px rgb(var(--k-masc-glow) / .6); }
+.dot-k-sangsu  { background: var(--k-sangsu);  box-shadow: 0 0 5px rgb(var(--k-sangsu-glow) / .6); }
+.dot-k-qa      { background: var(--k-qa);      box-shadow: 0 0 5px rgb(var(--k-qa-glow) / .6); }
+.dot-k-rama    { background: var(--k-rama);    box-shadow: 0 0 5px rgb(var(--k-rama-glow) / .6); }
+
+/* Label — small-caps lock-up used on every panel title */
+.label {
+  font-size: var(--fs-11);
+  font-weight: 600;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+}
+
+/* Scrollbar — thin, warm */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--line-3); }
+
+/* Focus */
+:focus-visible {
+  outline: 1px solid var(--brass-1);
+  outline-offset: 1px;
+}
+
+/* Buttons — minimal chrome */
+button, .btn {
+  font: inherit;
+  background: transparent;
+  color: var(--fg-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-1);
+  padding: 4px 10px;
+  cursor: pointer;
+  transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+button:hover, .btn:hover { background: var(--bg-3); color: var(--fg-1); }
+button.is-active, .btn.is-active { background: var(--bg-4); color: var(--brass-1); border-color: var(--brass-3); }

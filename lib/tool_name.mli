@@ -67,9 +67,7 @@ end
 
 module Masc : sig
   type t =
-    | A2a_delegate
     | Add_task
-    | Agent_card
     | Agent_fitness
     | Agent_update
     | Agents
@@ -158,7 +156,6 @@ module Masc : sig
     | Worktree_list
     | Worktree_remove
     | Approval_get
-    | Collaboration_graph
     | Config
     | Gc
     | Get_metrics

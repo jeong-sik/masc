@@ -14,7 +14,6 @@ include module type of Coord_status
 include module type of Coord_task
 include module type of Coord_task_schedule
 include module type of Coord_query
-include module type of Coord_portal
 include module type of Coord_worktree
 include module type of Coord_gc
 include module type of Coord_agent

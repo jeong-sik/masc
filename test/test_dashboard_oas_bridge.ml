@@ -5,7 +5,6 @@
     the nearest-rank percentile in {!Dashboard_oas_bridge.summary}. *)
 
 module DOB = Masc_mcp.Dashboard_oas_bridge
-module Oas = Masc_mcp.Oas
 module Json = Yojson.Safe.Util
 
 let make_sample

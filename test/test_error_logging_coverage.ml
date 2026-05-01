@@ -14,7 +14,6 @@
 open Alcotest
 
 module Tool_task = Masc_mcp.Tool_task
-module A2a_tools = Masc_mcp.A2a_tools
 module Coord = Masc_mcp.Coord
 
 (* ============================================================
@@ -131,29 +130,6 @@ let test_tool_task_cancel_nonexistent_logs () =
     true (str_contains output "[Task]")
 
 (* ============================================================
-   a2a_tools: submit_heartbeat_result unknown status → "[a2a]" on stderr
-   ============================================================ *)
-
-(** submit_heartbeat_result with a status that is not "acted", "skipped",
-    or "failed". result becomes Error "Unknown worker status: ..." and the
-    [a2a] eprintf fires. *)
-let test_a2a_submit_unknown_status_logs () =
-  let output = capture_stderr (fun () ->
-    ignore (A2a_tools.submit_heartbeat_result
-      ~worker_name:"test-worker"
-      ~agent:"test-agent"
-      ~status:"INVALID_STATUS_XYZ"
-      ~summary:"test summary"
-      ~tool_call_count:0
-      ~tool_names:[]
-      ~decision_reason:"invalid test"
-      ~decision_confidence:0.0
-      ())
-  ) in
-  check bool "stderr contains [Misc] prefix for unknown status"
-    true (str_contains output "[Misc]")
-
-(* ============================================================
    Test runner
    ============================================================ *)
 
@@ -164,9 +140,5 @@ let () =
         `Quick test_tool_task_done_nonexistent_logs;
       test_case "cancel on missing task logs [task]"
         `Quick test_tool_task_cancel_nonexistent_logs;
-    ];
-    "a2a_tools", [
-      test_case "submit_heartbeat unknown status logs [a2a]"
-        `Quick test_a2a_submit_unknown_status_logs;
     ];
   ]

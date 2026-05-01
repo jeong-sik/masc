@@ -1,14 +1,31 @@
 /* global React, Topbar, Ticker, KpiStrip, Lifeline, Sidebar, Swimlanes, Deck, Rail, Composer, StatusBar,
-          MASC_DATA, WorkPlane, CommsPlane, ObservePlane, CognitionPlane, IdePlane */
-const { useState, useCallback } = React;
+          MASC_DATA, WorkPlane, CommsPlane, ObservePlane, CognitionPlane, IdePlane,
+          ViewportBanner, useCockpitState, useLayoutProfile, Drawer */
+const { useState, useCallback, useEffect } = React;
+const useCockpitLayoutProfile = window.useLayoutProfile || function useCockpitLayoutProfileNoop() {
+  return undefined;
+};
 
 function App() {
-  const [mode, setMode] = useState("Dashboard");
+  // sync mode/branch with the cockpit-state singleton (URL+localStorage)
+  const [cs, setCs] = (window.useCockpitState ? window.useCockpitState() : [{}, () => {}]);
+  // Always call the same hook-shaped function so hook order stays stable.
+  useCockpitLayoutProfile();
+  const [mode, setModeRaw] = useState(cs.mode || "Dashboard");
   const [density, setDensity] = useState("normal");
   const [selKeeper, setSelKeeper] = useState("nick0cave");
   const [selGoal, setSelGoal] = useState("goal-merge-blockers");
-  const [branch, setBranch] = useState("main");
+  const [branch, setBranchRaw] = useState(cs.branch || "main");
   const [selectedKeepers, setSelectedKeepers] = useState(new Set(["nick0cave","sangsu"]));
+
+  // cs is the source of truth for mode/branch — mirror to local state for child props
+  useEffect(() => {
+    if (cs.mode && cs.mode !== mode) setModeRaw(cs.mode);
+    if (cs.branch && cs.branch !== branch) setBranchRaw(cs.branch);
+  }, [cs.mode, cs.branch]);
+
+  const setMode = useCallback((m) => { setModeRaw(m); setCs({ mode: m }); }, [setCs]);
+  const setBranch = useCallback((b) => { setBranchRaw(b); setCs({ branch: b }); }, [setCs]);
 
   const D = window.MASC_DATA;
   const activeGoal = D.goals.find(g => g.id === selGoal) || D.goals[0];
@@ -41,6 +58,7 @@ function App() {
 
   return (
     <div className="app" data-screen-label="MASC Cockpit" data-density={density}>
+      {window.ViewportBanner ? <window.ViewportBanner/> : null}
       <Topbar goal={activeGoal} goals={D.goals} mode={mode} setMode={setMode}
               density={density} setDensity={setDensity}
               branch={branch} setBranch={setBranch} />
@@ -53,11 +71,21 @@ function App() {
                selectedKeepers={selectedKeepers} toggleKeeper={toggleKeeper} />
       {renderCenter()}
       <Rail events={D.events} cascade={D.cascade} />
+      {window.Drawer ? <window.Drawer/> : null}
       <Composer selKeeper={selKeeper} />
       <StatusBar providers={D.providers} />
+      {window.FocusToggle ? <window.FocusToggle/> : null}
+      {window.StatusTray ? <window.StatusTray/> : null}
     </div>
   );
 }
 
 const root = ReactDOM.createRoot(document.getElementById("root"));
-root.render(<App />);
+
+// pop-out: if URL has ?widget=<id>, render that widget solo
+const __soloId = new URL(window.location.href).searchParams.get("widget");
+if (__soloId && window.WidgetSolo) {
+  root.render(<window.WidgetSolo id={__soloId} />);
+} else {
+  root.render(<App />);
+}

@@ -15,7 +15,6 @@ For historical feature-train rules and release intake background, see [docs/VERS
 Promise levels:
 
 - Front door: repo coordination
-- Advanced: supervised delivery swarm
 - Supporting: dashboard and operator visibility
 - Deferred or experimental: broad research surfaces, extraction work, and deep architecture cleanup
 
@@ -50,8 +49,7 @@ Items that directly affect the current product promise:
 Items that improve advanced workflows after the front-door promise is cleaner:
 
 - auth and API contract hardening for non-local operation
-- delivery-swarm ergonomics
-  - ready-to-delegate contract
+-   - ready-to-delegate contract
   - verifier turn-budget reliability
   - clearer runtime / model visibility in proof
 - richer operator diagnosis bundles and deeper read confidence
@@ -95,9 +93,6 @@ Legacy `v2.*` reference points:
 | Version | Theme | Key deliverables |
 |--------|-------|------------------|
 | v2.87.0 | Release closeout | CI green, changelog honesty, worktree cleanup |
-| v2.88.0 | Reliable Swarm | provider fallback, dispatch serialization |
-| v2.89.0 | Visible Swarm | heartbeat tracking, zombie detection |
-| v2.90.0 | Recoverable Swarm | checkpointing, schema validation |
 | v2.91.0 | Immortal Base | supervision, health, graceful shutdown |
 | v2.92.0 | Product Portfolio Trim | explicit keep / archive decisions for experimental surfaces |
 | v2.93.0-v2.158.0 | Incremental | see changelog and product operating plan |

@@ -1067,7 +1067,6 @@ let test_masc_dirname_ssot_contracts () =
     "lib/board_votes.ml";
     "lib/discovery_history.ml";
     "lib/handover_eio.ml";
-    "lib/hebbian_eio.ml";
     "lib/institution_eio.ml";
     "lib/repo_synthesis_benchmark.ml";
     "lib/tool_blob_store/tool_blob_store.ml";
@@ -1077,7 +1076,6 @@ let test_masc_dirname_ssot_contracts () =
     "lib/oas_worker_cascade.ml";
     "lib/procedural_memory.ml";
     (* batch 3 (#10257) *)
-    "lib/tool_team_memory.ml";
     "lib/exec_core.ml";
     "lib/keeper/keeper_accountability.ml";
     (* batch 4 (#10262) *)
@@ -1222,6 +1220,35 @@ let test_human_approval_environment_check_contracts () =
     (file_contains_pattern "scripts/check-human-approval-env.sh"
        ".login // .slug // .name // .id // empty")
 
+let test_copilot_zero_diff_cleanup_contracts () =
+  check bool "copilot zero-diff cleanup script exists" true
+    (Sys.file_exists
+       (source_path "scripts/cleanup-copilot-zero-diff-prs.sh"));
+  check bool "copilot zero-diff cleanup is dry-run by default" true
+    (file_contains_pattern "scripts/cleanup-copilot-zero-diff-prs.sh"
+       "Dry run only");
+  check bool "copilot zero-diff cleanup requires explicit close flag" true
+    (file_contains_pattern "scripts/cleanup-copilot-zero-diff-prs.sh"
+       "--close");
+  check bool "copilot zero-diff cleanup targets copilot author by default" true
+    (file_contains_pattern "scripts/cleanup-copilot-zero-diff-prs.sh"
+       "copilot-swe-agent");
+  check bool "copilot zero-diff cleanup filters WIP titles" true
+    (file_contains_pattern "scripts/cleanup-copilot-zero-diff-prs.sh"
+       "startswith($prefix)");
+  check bool "copilot zero-diff cleanup uses GraphQL file totals" true
+    (file_contains_pattern "scripts/cleanup-copilot-zero-diff-prs.sh"
+       "files(first: 1) { totalCount }");
+  check bool "copilot zero-diff cleanup preserves review threads" true
+    (file_contains_pattern "scripts/cleanup-copilot-zero-diff-prs.sh"
+       "reviewThreads(first: 1)");
+  check bool "copilot zero-diff cleanup skips active discussion" true
+    (file_contains_pattern "scripts/cleanup-copilot-zero-diff-prs.sh"
+       "SKIP_ACTIVE");
+  check bool "copilot zero-diff cleanup does not delete branches" true
+    (file_not_contains_pattern "scripts/cleanup-copilot-zero-diff-prs.sh"
+       "--delete-branch")
+
 let () =
   run "ci_hardening_source"
     [
@@ -1286,5 +1313,7 @@ let () =
              test_human_approval_credential_boundary_contracts;
            test_case "human approval environment check contracts (#12561)" `Quick
              test_human_approval_environment_check_contracts;
+           test_case "copilot zero-diff cleanup contracts (#12567)" `Quick
+             test_copilot_zero_diff_cleanup_contracts;
          ]);
     ]

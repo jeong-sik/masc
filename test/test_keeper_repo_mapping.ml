@@ -50,12 +50,20 @@ let with_empty_temp_base_path f =
       rm_rf dir)
     (fun () -> f dir)
 
-let write_mapping base_path keeper_id repo_ids =
+let write_mapping ?credential_id base_path keeper_id repo_ids =
   let path = Filename.concat base_path ".masc/config/keeper_repo_mappings.toml" in
   let entries =
     String.concat ", " (List.map (fun s -> "\"" ^ s ^ "\"") repo_ids)
   in
-  let content = Printf.sprintf "[mapping.%s]\nrepositories = [%s]\n" keeper_id entries in
+  let credential_line =
+    match credential_id with
+    | Some id -> Printf.sprintf "credential_id = \"%s\"\n" id
+    | None -> ""
+  in
+  let content =
+    Printf.sprintf "[mapping.%s]\nrepositories = [%s]\n%s" keeper_id entries
+      credential_line
+  in
   let oc = open_out path in
   Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () -> output_string oc content)
 
@@ -243,7 +251,11 @@ let test_allowed_repositories_no_mapping () =
 let test_save_mapping_creates_config_dir () =
   with_empty_temp_base_path (fun base_path ->
       let mapping =
-        { keeper_id = "keeper-new"; repository_ids = [ "repo-a"; "repo-b" ] }
+        {
+          keeper_id = "keeper-new";
+          repository_ids = [ "repo-a"; "repo-b" ];
+          github_credential_id = None;
+        }
       in
       match Keeper_repo_mapping.save_mapping ~base_path mapping with
       | Error e -> Alcotest.fail ("save_mapping failed: " ^ e)
@@ -253,6 +265,57 @@ let test_save_mapping_creates_config_dir () =
           | Ok ids ->
               Alcotest.(check int) "saved count" 2 (List.length ids);
               Alcotest.(check bool) "has repo-a" true (List.mem "repo-a" ids)))
+
+let test_save_mapping_preserves_credential_id () =
+  with_empty_temp_base_path (fun base_path ->
+      let mapping =
+        {
+          keeper_id = "keeper-new";
+          repository_ids = ["*"];
+          github_credential_id = Some "cred-selected";
+        }
+      in
+      match Keeper_repo_mapping.save_mapping ~base_path mapping with
+      | Error e -> Alcotest.fail ("save_mapping failed: " ^ e)
+      | Ok () -> (
+          match Keeper_repo_mapping.load_all ~base_path with
+          | Error e -> Alcotest.fail ("load_all failed: " ^ e)
+          | Ok [loaded] ->
+              Alcotest.(check (option string))
+                "credential id"
+                (Some "cred-selected")
+                loaded.github_credential_id
+          | Ok rows ->
+              Alcotest.failf "expected one mapping, got %d" (List.length rows)))
+
+let test_load_all_trims_credential_id () =
+  with_temp_base_path (fun base_path ->
+      write_mapping ~credential_id:" cred-selected " base_path "keeper-1" [ "*" ];
+      match Keeper_repo_mapping.load_all ~base_path with
+      | Error e -> Alcotest.fail ("load_all failed: " ^ e)
+      | Ok [loaded] ->
+          Alcotest.(check (option string))
+            "trimmed credential id"
+            (Some "cred-selected")
+            loaded.github_credential_id
+      | Ok rows -> Alcotest.failf "expected one mapping, got %d" (List.length rows))
+
+let test_load_all_rejects_non_string_credential_id () =
+  with_temp_base_path (fun base_path ->
+      let path = Filename.concat base_path ".masc/config/keeper_repo_mappings.toml" in
+      let oc = open_out path in
+      Fun.protect
+        ~finally:(fun () -> close_out_noerr oc)
+        (fun () ->
+          output_string oc
+            "[mapping.keeper-1]\nrepositories = [\"*\"]\ncredential_id = 42\n");
+      match Keeper_repo_mapping.load_all ~base_path with
+      | Ok _ -> Alcotest.fail "expected non-string credential_id to fail"
+      | Error msg ->
+          Alcotest.(check bool)
+            "mentions credential_id"
+            true
+            (contains_substring msg "credential_id"))
 
 let sample_credential id cred_type =
   {
@@ -316,6 +379,65 @@ let test_credentials_for_keeper_wildcard () =
                    Alcotest.(check bool) "has cred-1" true (List.mem "cred-1" ids);
                    Alcotest.(check bool) "has cred-2" true (List.mem "cred-2" ids)))))
 
+let test_credentials_for_keeper_direct_credential_overrides_repo () =
+  with_temp_base_path (fun base_path ->
+      let selected = sample_credential "cred-selected" Github in
+      let repo_a =
+        {
+          (sample_repo "repo-a") with
+          local_path = repo_under_base base_path "repo-a";
+          credential_id = "cred-missing-repo";
+        }
+      in
+      write_repositories base_path [repo_a];
+      (match Credential_store.add ~base_path selected with
+       | Error e -> Alcotest.fail ("add selected failed: " ^ e)
+       | Ok _ -> (
+           write_mapping ~credential_id:"cred-selected" base_path "keeper-1" [ "repo-a" ];
+           match Keeper_repo_mapping.credentials_for_keeper ~base_path ~keeper_id:"keeper-1" with
+           | Error e -> Alcotest.fail ("credentials_for_keeper failed: " ^ e)
+           | Ok creds ->
+               Alcotest.(check int) "count" 1 (List.length creds);
+               Alcotest.(check string) "cred id" "cred-selected" (List.hd creds).id)))
+
+let test_credentials_for_keeper_direct_missing_credential () =
+  with_temp_base_path (fun base_path ->
+      write_mapping ~credential_id:"cred-missing" base_path "keeper-1" [ "*" ];
+      match Keeper_repo_mapping.credentials_for_keeper ~base_path ~keeper_id:"keeper-1" with
+      | Ok creds ->
+          Alcotest.failf "expected Error for missing direct credential, got %d creds"
+            (List.length creds)
+      | Error msg ->
+          Alcotest.(check bool)
+            "mentions missing credential"
+            true (contains_substring msg "cred-missing"))
+
+let test_credentials_for_keeper_direct_wrong_type () =
+  with_temp_base_path (fun base_path ->
+      let local_cred = sample_credential "cred-local" Local in
+      (match Credential_store.add ~base_path local_cred with
+       | Error e -> Alcotest.fail ("add local credential failed: " ^ e)
+       | Ok _ ->
+           write_mapping ~credential_id:"cred-local" base_path "keeper-1" [ "*" ];
+           match Keeper_repo_mapping.credentials_for_keeper ~base_path ~keeper_id:"keeper-1" with
+           | Ok creds ->
+               Alcotest.failf
+                 "expected Error for non-GitHub direct credential, got %d creds"
+                 (List.length creds)
+           | Error msg ->
+               Alcotest.(check bool)
+                 "mentions credential id"
+                 true
+                 (contains_substring msg "cred-local");
+               Alcotest.(check bool)
+                 "mentions GitHub type"
+                 true
+                 (contains_substring msg "must be of type GitHub");
+               Alcotest.(check bool)
+                 "mentions actual type"
+                 true
+                 (contains_substring msg "Local")))
+
 let test_credentials_for_keeper_no_mapping () =
   with_temp_base_path (fun base_path ->
       match Keeper_repo_mapping.credentials_for_keeper ~base_path ~keeper_id:"unknown" with
@@ -356,11 +478,18 @@ let () =
       ( "save_mapping",
         [
           Alcotest.test_case "creates config dir" `Quick test_save_mapping_creates_config_dir;
+          Alcotest.test_case "preserves credential id" `Quick test_save_mapping_preserves_credential_id;
+          Alcotest.test_case "loads trimmed credential id" `Quick test_load_all_trims_credential_id;
+          Alcotest.test_case "rejects non-string credential id" `Quick
+            test_load_all_rejects_non_string_credential_id;
         ] );
       ( "credentials_for_keeper",
         [
           Alcotest.test_case "explicit mapping" `Quick test_credentials_for_keeper_explicit;
           Alcotest.test_case "wildcard mapping" `Quick test_credentials_for_keeper_wildcard;
+          Alcotest.test_case "direct credential overrides repo" `Quick test_credentials_for_keeper_direct_credential_overrides_repo;
+          Alcotest.test_case "direct credential missing" `Quick test_credentials_for_keeper_direct_missing_credential;
+          Alcotest.test_case "direct credential wrong type" `Quick test_credentials_for_keeper_direct_wrong_type;
           Alcotest.test_case "no mapping" `Quick test_credentials_for_keeper_no_mapping;
         ] );
     ]

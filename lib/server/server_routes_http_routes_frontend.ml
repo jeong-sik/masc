@@ -90,8 +90,6 @@ let add_routes ~port ~host router =
          let body = Prometheus.to_prometheus_text () in
          Http.Response.bytes ~content_type:"text/plain; version=0.0.4; charset=utf-8" body reqd
        ) request reqd)
-  |> Http.Router.get "/.well-known/agent.json" (serve_agent_card ~host ~port)
-  |> Http.Router.get "/.well-known/agent-card.json" (serve_agent_card ~host ~port)
   |> Http.Router.get "/ag-ui/events" handle_ag_ui_events
   |> Http.Router.get "/events/presence" handle_presence_events
   (* Dashboard sub-routes: must come before the SPA catchall *)

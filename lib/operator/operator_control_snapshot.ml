@@ -424,49 +424,13 @@ let keeper_tool_audit_fields ?(include_allowed_tools = true) config
              else None);
         }
   in
-  match A2a_tools.latest_heartbeat_task meta.agent_name,
-        A2a_tools.latest_heartbeat_result meta.agent_name with
-  | Some task, Some result ->
-      if task.seq > result.seq then
-        ( task.allowed_tools,
-          recent_tool_names,
-          result.tool_names,
-          Some result.tool_call_count,
-          fallback_snapshot.latest_action_source,
-          Some "heartbeat_task_pending_result",
-          Some task.created_at )
-      else
-        ( task.allowed_tools,
-          merge_tool_name_lists result.tool_names recent_tool_names,
-          result.tool_names,
-          Some result.tool_call_count,
-          fallback_snapshot.latest_action_source,
-          Some "heartbeat_result",
-          Some result.updated_at )
-  | Some task, None ->
-      ( task.allowed_tools,
-        recent_tool_names,
-        [],
-        None,
-        fallback_snapshot.latest_action_source,
-        Some "heartbeat_task",
-        Some task.created_at )
-  | None, Some result ->
-      ( fallback_allowed,
-        merge_tool_name_lists result.tool_names recent_tool_names,
-        result.tool_names,
-        Some result.tool_call_count,
-        fallback_snapshot.latest_action_source,
-        Some "heartbeat_result",
-        Some result.updated_at )
-  | None, None ->
-      ( fallback_allowed,
-        recent_tool_names,
-        fallback_snapshot.latest_tool_names,
-        fallback_snapshot.latest_tool_call_count,
-        fallback_snapshot.latest_action_source,
-        fallback_snapshot.tool_audit_source,
-        fallback_snapshot.tool_audit_at )
+  ( fallback_allowed,
+    recent_tool_names,
+    fallback_snapshot.latest_tool_names,
+    fallback_snapshot.latest_tool_call_count,
+    fallback_snapshot.latest_action_source,
+    fallback_snapshot.tool_audit_source,
+    fallback_snapshot.tool_audit_at )
 
 let lightweight_tool_audit_fallback_json (meta : Keeper_types.keeper_meta) =
   let last_autonomous = String.trim meta.runtime.last_autonomous_action_at in

@@ -150,11 +150,7 @@ export interface FunnelCounts {
   target: number | null
 }
 
-export function computeFunnelCounts(
-  taskList: readonly Task[],
-  active: DashboardMissionSessionCard | null,
-  nowMs: number = Date.now(),
-): FunnelCounts {
+export function computeFunnelCounts(taskList: readonly Task[], active: DashboardMissionSessionCard | null, nowMs = Date.now()): FunnelCounts {
   const todayMs = startOfTodayMs(nowMs)
   let created = 0
   let inProgress = 0
@@ -176,8 +172,6 @@ export function computeFunnelCounts(
         if (completedMs !== null && completedMs >= todayMs) completed += 1
         break
       }
-      default:
-        break
     }
   }
   const target =
@@ -227,7 +221,7 @@ function FunnelCard({ counts }: { counts: FunnelCounts }) {
 // ─── Mission Party ────────────────────────────────────────────────────────────
 
 export function progressPct(session: DashboardMissionSessionCard | null): number | null {
-  if (session === null) return null
+  if (!session) return null
   const req = session.required_count ?? 0
   if (req <= 0) return null
   const cur = session.seen_count ?? session.active_count ?? 0

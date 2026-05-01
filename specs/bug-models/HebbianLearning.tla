@@ -1,10 +1,10 @@
 ---- MODULE HebbianLearning ----
 \* Bug Model: Hebbian read-modify-write without file lock.
 \*
-\* Models hebbian_eio.ml strengthen/consolidate concurrency.
-\* Each operation does: load → compute → save. The file lock
-\* serializes these so no interleaving writes occur between
-\* an operation's load and save.
+\* Historical model for the retired Hebbian graph strengthen/consolidate
+\* concurrency path. Each operation does: load -> compute -> save. The
+\* file lock serializes these so no interleaving writes occur between an
+\* operation's load and save.
 \*
 \* Without the lock, operation A can save between B's load and save,
 \* causing B to clobber A's effect (lost update).
@@ -12,12 +12,10 @@
 \* Invariant: when an operation saves, no other write has happened
 \* since that operation loaded (graph_version == load_version + 1).
 \*
-\* Reference (verified 2026-04-20):
-\*   lib/hebbian_eio.ml:strengthen — wraps body in with_graph_lock config
-\*     (load -> compute -> save).
-\*   The lock-required pattern is enforced by call-site convention
-\*   (every public mutator calls with_graph_lock); there is no inline
-\*   docstring inside the strengthen body.
+\* Current runtime reference (verified 2026-05-01):
+\*   lib/coord.ml:hebbian_on_task_done_fn emits hebbian activity events for
+\*   task completion. The old .masc/synapses graph read-modify-write path
+\*   is retired, so this model remains as a historical lost-update guard.
 
 EXTENDS Naturals
 

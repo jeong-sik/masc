@@ -7,6 +7,7 @@ import {
   deriveBreadcrumbTrail,
   composeDocumentTitle,
   describeReconnecting,
+  dashboardRouteBoundaryKey,
   summarizeAttentionPreview,
   composeHealthIndicatorTitle,
   composeBuildBadgeTitle,
@@ -108,6 +109,55 @@ describe('currentSectionShareUrl (pure)', () => {
     } finally {
       windowSpy.mockRestore()
     }
+  })
+})
+
+describe('dashboardRouteBoundaryKey (pure)', () => {
+  it('keeps the agents directory on the stable section key', () => {
+    expect(dashboardRouteBoundaryKey({
+      tab: 'monitoring',
+      params: { section: 'agents' },
+      postId: null,
+    })).toBe('monitoring:agents')
+  })
+
+  it('keys keeper detail separately from the agents directory', () => {
+    const directoryKey = dashboardRouteBoundaryKey({
+      tab: 'monitoring',
+      params: { section: 'agents' },
+      postId: null,
+    })
+    const keeperKey = dashboardRouteBoundaryKey({
+      tab: 'monitoring',
+      params: { section: 'agents', keeper: 'analyst' },
+      postId: null,
+    })
+
+    expect(keeperKey).toBe('monitoring:agents:keeper=analyst')
+    expect(keeperKey).not.toBe(directoryKey)
+  })
+
+  it('keys agent profile detail separately from keeper detail', () => {
+    expect(dashboardRouteBoundaryKey({
+      tab: 'monitoring',
+      params: { section: 'agents', agent: 'sangsu' },
+      postId: null,
+    })).toBe('monitoring:agents:agent=sangsu')
+  })
+
+  it('includes structural view and trace identifiers without using noisy filters', () => {
+    expect(dashboardRouteBoundaryKey({
+      tab: 'monitoring',
+      params: {
+        section: 'runtime',
+        view: 'inspector',
+        q: 'typing-filter',
+        session_id: 'sess-1',
+        operation_id: 'op-1',
+        worker_run_id: 'worker-1',
+      },
+      postId: null,
+    })).toBe('monitoring:runtime:view=inspector:session=sess-1:operation=op-1:worker=worker-1')
   })
 })
 

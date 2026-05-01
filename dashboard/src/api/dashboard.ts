@@ -983,6 +983,115 @@ export async function fetchKeeperDecisions(
   return decoded
 }
 
+// ─── K2 Decisions Log ───────────────────────────────────────────────────────
+
+export interface KeeperDecisionLog {
+  id: string
+  ts: string
+  ts_unix: number | null
+  keeper: string
+  decision_type: string
+  summary: string
+  evidence_refs: string[]
+}
+
+export interface KeeperDecisionLogResponse {
+  events: KeeperDecisionLog[]
+  limit: number
+  generated_at: number | null
+}
+
+function decodeKeeperDecisionLog(raw: unknown): KeeperDecisionLog | null {
+  if (!isRecord(raw)) return null
+  return {
+    id: asString(raw.id) ?? '',
+    ts: asString(raw.ts) ?? '',
+    ts_unix: asNumber(raw.ts_unix) ?? null,
+    keeper: asString(raw.keeper) ?? '',
+    decision_type: asString(raw.decision_type) ?? 'turn',
+    summary: asString(raw.summary) ?? '',
+    evidence_refs: asStringArray(raw.evidence_refs),
+  }
+}
+
+function decodeKeeperDecisionLogResponse(raw: unknown): KeeperDecisionLogResponse | null {
+  if (!isRecord(raw)) return null
+  return {
+    events: asRecordArray(raw.events)
+      .map(decodeKeeperDecisionLog)
+      .filter((d): d is KeeperDecisionLog => d !== null),
+    limit: asInt(raw.limit) ?? 0,
+    generated_at: asNumber(raw.generated_at) ?? null,
+  }
+}
+
+export async function fetchKeeperDecisionLog(
+  limit = 200,
+  opts?: AbortableRequestOptions,
+): Promise<KeeperDecisionLogResponse> {
+  const raw = await get<Record<string, unknown>>(`/api/v1/dashboard/keeper-decisions-log?limit=${limit}`, { signal: opts?.signal })
+  const decoded = decodeKeeperDecisionLogResponse(raw)
+  if (!decoded) throw new Error('유효하지 않은 keeper decisions log payload')
+  return decoded
+}
+
+// ─── K2 Memory Log ──────────────────────────────────────────────────────────
+
+export type MemoryLogKind = 'episode' | 'fact' | 'plan'
+
+export interface KeeperMemoryEntry {
+  id: string
+  ts: string
+  ts_unix: number | null
+  keeper: string
+  kind: MemoryLogKind
+  summary: string
+  ttl?: number
+}
+
+export interface KeeperMemoryLogResponse {
+  entries: KeeperMemoryEntry[]
+  limit: number
+  generated_at: number | null
+}
+
+function decodeKeeperMemoryEntry(raw: unknown): KeeperMemoryEntry | null {
+  if (!isRecord(raw)) return null
+  const kind = asString(raw.kind)
+  const validKind: MemoryLogKind =
+    kind === 'episode' || kind === 'fact' || kind === 'plan' ? kind : 'fact'
+  return {
+    id: asString(raw.id) ?? '',
+    ts: asString(raw.ts) ?? '',
+    ts_unix: asNumber(raw.ts_unix) ?? null,
+    keeper: asString(raw.keeper) ?? '',
+    kind: validKind,
+    summary: asString(raw.summary) ?? '',
+    ttl: asNumber(raw.ttl) ?? undefined,
+  }
+}
+
+function decodeKeeperMemoryLogResponse(raw: unknown): KeeperMemoryLogResponse | null {
+  if (!isRecord(raw)) return null
+  return {
+    entries: asRecordArray(raw.entries)
+      .map(decodeKeeperMemoryEntry)
+      .filter((e): e is KeeperMemoryEntry => e !== null),
+    limit: asInt(raw.limit) ?? 0,
+    generated_at: asNumber(raw.generated_at) ?? null,
+  }
+}
+
+export async function fetchKeeperMemoryLog(
+  limit = 200,
+  opts?: AbortableRequestOptions,
+): Promise<KeeperMemoryLogResponse> {
+  const raw = await get<Record<string, unknown>>(`/api/v1/dashboard/keeper-memory-log?limit=${limit}`, { signal: opts?.signal })
+  const decoded = decodeKeeperMemoryLogResponse(raw)
+  if (!decoded) throw new Error('유효하지 않은 keeper memory log payload')
+  return decoded
+}
+
 export interface HeuristicEvent {
   module: string
   site: string

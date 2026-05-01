@@ -1914,3 +1914,173 @@ let keeper_decisions_json
     ("limit", `Int limit);
     ("generated_at", `Float (Unix.gettimeofday ()));
   ]
+
+(** Map a keeper memory bank [kind] to the K2 log vocabulary:
+    [episode] for progress notes, [plan] for goal/decision/next entries,
+    [fact] for everything else (belief, open_question, constraints, etc.). *)
+let memory_kind_for_log (kind : string) : string =
+  match String.lowercase_ascii (String.trim kind) with
+  | "progress" -> "episode"
+  | "goal" | "next" | "decision" -> "plan"
+  | _ -> "fact"
+
+(** Build the K2 decisions log from per-keeper [.decisions.jsonl] files.
+    Returns events in the spec shape:
+      {id, ts, ts_unix, keeper, decision_type, summary, evidence_refs[]}
+    [decision_type] comes from [speech_act] when present, otherwise [outcome].
+    [summary] is a human-readable sentence assembled from the available
+    social-model fields. [evidence_refs] is the belief summary when non-empty.
+    Events are sorted newest-first and capped at [limit]. *)
+let keeper_decisions_log_json
+    ~(config : Coord.config)
+    ~(keepers : Keeper_types.keeper_meta list)
+    ?(limit = 200)
+    ()
+  : Yojson.Safe.t =
+  let per_keeper_limit = limit * 2 in
+  let all_events =
+    List.concat_map (fun (m : Keeper_types.keeper_meta) ->
+      let path = Keeper_types.keeper_decision_log_path config m.name in
+      if not (Fs_compat.file_exists path) then []
+      else
+        let lines =
+          Keeper_memory.read_file_tail_lines path
+            ~max_bytes:500_000 ~max_lines:per_keeper_limit
+        in
+        List.filter_map (fun line ->
+          try
+            let json = Yojson.Safe.from_string line in
+            let str key =
+              match Yojson.Safe.Util.member key json with
+              | `String s -> s
+              | _ -> ""
+            in
+            let ts_unix =
+              match Yojson.Safe.Util.member "ts_unix" json with
+              | `Float f -> f
+              | `Int i -> float_of_int i
+              | _ -> 0.0
+            in
+            let keeper_name =
+              let raw = str "keeper_name" in
+              if raw = "" then m.name else raw
+            in
+            let decision_type =
+              let sa = str "speech_act" in
+              if sa <> "" then sa
+              else
+                let outcome = str "outcome" in
+                if outcome <> "" then outcome else "turn"
+            in
+            let belief_summary = str "belief_summary" in
+            let current_intention = str "current_intention" in
+            let blocker = str "blocker" in
+            let channel = str "channel" in
+            let summary_parts =
+              List.filter (fun s -> s <> "")
+                [ decision_type
+                ; (if channel <> "" then "via " ^ channel else "")
+                ; (if current_intention <> "" then "\xe2\x86\x92 " ^ current_intention else "")
+                ; (if blocker <> "" then "blocked: " ^ blocker else "")
+                ; (if belief_summary <> "" then belief_summary else "")
+                ]
+            in
+            let summary = String.concat " \xc2\xb7 " summary_parts in
+            let evidence_refs =
+              if belief_summary <> "" then [`String belief_summary]
+              else []
+            in
+            Some (ts_unix, `Assoc [
+              ("id", `String (str "id"));
+              ("ts", `String (str "ts"));
+              ("ts_unix", `Float ts_unix);
+              ("keeper", `String keeper_name);
+              ("decision_type", `String decision_type);
+              ("summary", `String summary);
+              ("evidence_refs", `List evidence_refs);
+            ])
+          with
+          | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
+        ) lines
+    ) keepers
+  in
+  let sorted =
+    List.sort (fun (ta, _) (tb, _) -> compare tb ta) all_events
+  in
+  let rec take n = function
+    | [] -> []
+    | _ when n <= 0 -> []
+    | x :: xs -> x :: take (n - 1) xs
+  in
+  let items = List.map snd (take limit sorted) in
+  `Assoc [
+    ("events", `List items);
+    ("limit", `Int limit);
+    ("generated_at", `Float (Unix.gettimeofday ()));
+  ]
+
+(** Build the K2 memory log from per-keeper memory bank files.
+    Returns entries in the spec shape:
+      {id, ts, ts_unix, keeper, kind, summary}
+    [kind] is mapped to [episode|fact|plan] via [memory_kind_for_log].
+    [summary] is the raw memory text. Entries are sorted newest-first
+    and capped at [limit]. *)
+let keeper_memory_log_json
+    ~(config : Coord.config)
+    ~(keepers : Keeper_types.keeper_meta list)
+    ?(limit = 200)
+    ()
+  : Yojson.Safe.t =
+  let per_keeper_limit = limit * 2 in
+  let all_entries =
+    List.concat_map (fun (m : Keeper_types.keeper_meta) ->
+      let path = Keeper_types.keeper_memory_bank_path config m.name in
+      if not (Fs_compat.file_exists path) then []
+      else
+        let lines =
+          Keeper_memory.read_file_tail_lines path
+            ~max_bytes:500_000 ~max_lines:per_keeper_limit
+        in
+        List.filter_map (fun line ->
+          match Keeper_memory.parse_memory_bank_row line with
+          | None -> None
+          | Some (row : Keeper_memory.keeper_memory_row_raw) ->
+              let kind = memory_kind_for_log row.kind in
+              let ts =
+                if row.ts_unix > 0.0 then
+                  let t = Unix.gmtime row.ts_unix in
+                  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
+                    (t.Unix.tm_year + 1900) (t.Unix.tm_mon + 1) t.Unix.tm_mday
+                    t.Unix.tm_hour t.Unix.tm_min t.Unix.tm_sec
+                else ""
+              in
+              let id =
+                Printf.sprintf "mem-%s-%d"
+                  m.name
+                  (int_of_float (row.ts_unix *. 1000.0))
+              in
+              Some (row.ts_unix, `Assoc [
+                ("id", `String id);
+                ("ts", `String ts);
+                ("ts_unix", `Float row.ts_unix);
+                ("keeper", `String m.name);
+                ("kind", `String kind);
+                ("summary", `String row.text);
+              ])
+        ) lines
+    ) keepers
+  in
+  let sorted =
+    List.sort (fun (ta, _) (tb, _) -> compare tb ta) all_entries
+  in
+  let rec take n = function
+    | [] -> []
+    | _ when n <= 0 -> []
+    | x :: xs -> x :: take (n - 1) xs
+  in
+  let items = List.map snd (take limit sorted) in
+  `Assoc [
+    ("entries", `List items);
+    ("limit", `Int limit);
+    ("generated_at", `Float (Unix.gettimeofday ()));
+  ]

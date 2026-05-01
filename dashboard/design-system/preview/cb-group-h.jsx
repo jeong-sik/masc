@@ -212,6 +212,152 @@ function MemoryEntries() {
   );
 }
 
+// K2-A · KeeperDecisionsLog — cross-keeper decisions feed, spec shape
+// { id, ts, keeper, decision_type, summary, evidence_refs[] }
+// decision_type filter chips + keeper filter chip
+function KeeperDecisionsLog() {
+  // Map P2h.decisions to spec shape
+  const entries = P2h.decisions.map(d => ({
+    id: d.id,
+    ts: d.ts,
+    keeper: d.keeper,
+    decision_type: d.speech_act || d.outcome || 'turn',
+    summary: [
+      d.speech_act,
+      d.channel ? 'via ' + d.channel : '',
+      d.intention ? '\u2192 ' + d.intention : '',
+      d.blocker   ? 'blocked: ' + d.blocker : '',
+      d.belief    ? d.belief : '',
+    ].filter(Boolean).join(' \u00b7 '),
+    evidence_refs: d.belief ? [d.belief] : [],
+  }));
+
+  const [keeperFilter, setKeeperFilter] = useState('all');
+  const [typeFilter, setTypeFilter]   = useState('all');
+
+  const knownKeepers = ['all', ...new Set(entries.map(e => e.keeper))];
+  const knownTypes   = ['all', ...new Set(entries.map(e => e.decision_type))];
+
+  const visible = entries.filter(e => {
+    if (keeperFilter !== 'all' && e.keeper !== keeperFilter) return false;
+    if (typeFilter   !== 'all' && e.decision_type !== typeFilter)   return false;
+    return true;
+  });
+
+  return (
+    <section aria-label={`Keeper decisions log · ${visible.length} / ${entries.length} entries`} style={{display:'flex',flexDirection:'column',gap:'6px'}}>
+      <div role="toolbar" aria-label="Decisions log filters" style={{padding:'4px 8px',background:'var(--color-bg-panel-alt)',border:'1px solid var(--color-border-strong)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',letterSpacing:'.12em',textTransform:'uppercase',color:'var(--color-fg-disabled)',display:'flex',flexWrap:'wrap',alignItems:'center',gap:'6px'}}>
+        <span aria-hidden="true">decisions · cross-keeper</span>
+        <span aria-hidden="true" style={{color:'var(--color-accent-fg)',marginLeft:'auto'}}>{visible.length} / {entries.length}</span>
+        <span role="radiogroup" aria-label="Filter by keeper" style={{display:'flex',gap:'2px'}}>
+          {knownKeepers.map(k => (
+            <button key={k} type="button" role="radio" aria-checked={keeperFilter===k} onClick={() => setKeeperFilter(k)}
+              style={{padding:'1px 6px',background: keeperFilter===k ? 'var(--color-accent-fg-dim)' : 'var(--color-bg-surface)',border:'1px solid var(--color-border-strong)',color: keeperFilter===k ? 'var(--color-accent-fg)' : 'var(--color-fg-muted)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-10)',cursor:'pointer'}}>
+              {k}
+            </button>
+          ))}
+        </span>
+        <span role="radiogroup" aria-label="Filter by decision type" style={{display:'flex',gap:'2px'}}>
+          {knownTypes.map(t => (
+            <button key={t} type="button" role="radio" aria-checked={typeFilter===t} onClick={() => setTypeFilter(t)}
+              style={{padding:'1px 6px',background: typeFilter===t ? 'var(--color-accent-fg-dim)' : 'var(--color-bg-surface)',border:'1px solid var(--color-border-strong)',color: typeFilter===t ? 'var(--color-accent-fg)' : 'var(--color-fg-muted)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-10)',cursor:'pointer'}}>
+              {t}
+            </button>
+          ))}
+        </span>
+      </div>
+      <div role="log" aria-live="polite" aria-label={`${visible.length} keeper decision entries`} style={{background:'var(--color-bg-page)',border:'1px solid var(--color-border-default)'}}>
+        {visible.length > 0 ? visible.map(e => (
+          <div key={e.id} className="dec-row" role="listitem" aria-label={`${e.ts.slice(11,19)} · ${e.keeper} · ${e.decision_type} · ${e.summary}`}>
+            <span className="ts" aria-hidden="true">{e.ts.slice(11,19)}</span>
+            <span className="kpr" aria-hidden="true">{e.keeper}</span>
+            <span className="act" aria-hidden="true" style={{padding:'0 5px',background:'var(--color-accent-fg-dim)',border:'1px solid var(--color-border-strong)',color:'var(--color-accent-fg)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',borderRadius:'2px'}}>{e.decision_type}</span>
+            <div className="body" aria-hidden="true">
+              <span style={{fontFamily:'var(--font-mono)',fontSize:'var(--fs-11)',color:'var(--color-fg-default)'}}>{e.summary}</span>
+              {e.evidence_refs.length > 0 && (
+                <span style={{marginLeft:'8px',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',color:'var(--color-fg-disabled)'}}>
+                  refs: {e.evidence_refs.join(', ')}
+                </span>
+              )}
+            </div>
+          </div>
+        )) : (
+          <div role="status" style={{padding:'12px 8px',fontFamily:'var(--font-mono)',fontSize:'var(--fs-11)',color:'var(--color-fg-disabled)',textAlign:'center'}}>
+            no decisions match current filters
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+// K2-B · KeeperMemoryLog — cross-keeper memory feed, spec shape
+// { id, ts, keeper, kind: 'episode'|'fact'|'plan', summary, ttl? }
+// kind filter chips
+function KeeperMemoryLog() {
+  const tagToKind = (tag) => tag === 'plan' ? 'plan' : 'fact';
+
+  // Map P2h.memoryEntries to spec shape
+  const entries = P2h.memoryEntries.map((m, i) => ({
+    id: 'mem-' + i,
+    ts: m.at,
+    keeper: m.keeper,
+    kind: tagToKind(m.tag),
+    summary: m.body,
+  }));
+
+  const KINDS = ['all', 'episode', 'fact', 'plan'];
+  const [kindFilter, setKindFilter] = useState('all');
+  const [keeperFilter, setKeeperFilter] = useState('all');
+
+  const knownKeepers = ['all', ...new Set(entries.map(e => e.keeper))];
+
+  const visible = entries.filter(e => {
+    if (kindFilter   !== 'all' && e.kind   !== kindFilter)   return false;
+    if (keeperFilter !== 'all' && e.keeper !== keeperFilter) return false;
+    return true;
+  });
+
+  return (
+    <section aria-label={`Keeper memory log · ${visible.length} / ${entries.length} entries`} style={{display:'flex',flexDirection:'column',gap:'6px'}}>
+      <div role="toolbar" aria-label="Memory log filters" style={{padding:'4px 8px',background:'var(--color-bg-panel-alt)',border:'1px solid var(--color-border-strong)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',letterSpacing:'.12em',textTransform:'uppercase',color:'var(--color-fg-disabled)',display:'flex',flexWrap:'wrap',alignItems:'center',gap:'6px'}}>
+        <span aria-hidden="true">memory · cross-keeper</span>
+        <span aria-hidden="true" style={{color:'var(--color-accent-fg)',marginLeft:'auto'}}>{visible.length} / {entries.length}</span>
+        <span role="radiogroup" aria-label="Filter by kind" style={{display:'flex',gap:'2px'}}>
+          {KINDS.map(k => (
+            <button key={k} type="button" role="radio" aria-checked={kindFilter===k} onClick={() => setKindFilter(k)}
+              style={{padding:'1px 6px',background: kindFilter===k ? 'var(--color-accent-fg-dim)' : 'var(--color-bg-surface)',border:'1px solid var(--color-border-strong)',color: kindFilter===k ? 'var(--color-accent-fg)' : 'var(--color-fg-muted)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-10)',cursor:'pointer'}}>
+              {k}
+            </button>
+          ))}
+        </span>
+        <span role="radiogroup" aria-label="Filter by keeper" style={{display:'flex',gap:'2px'}}>
+          {knownKeepers.map(kp => (
+            <button key={kp} type="button" role="radio" aria-checked={keeperFilter===kp} onClick={() => setKeeperFilter(kp)}
+              style={{padding:'1px 6px',background: keeperFilter===kp ? 'var(--color-accent-fg-dim)' : 'var(--color-bg-surface)',border:'1px solid var(--color-border-strong)',color: keeperFilter===kp ? 'var(--color-accent-fg)' : 'var(--color-fg-muted)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-10)',cursor:'pointer'}}>
+              {kp}
+            </button>
+          ))}
+        </span>
+      </div>
+      <div role="list" aria-label={`${visible.length} memory log entries`} style={{background:'var(--color-bg-page)',border:'1px solid var(--color-border-default)'}}>
+        {visible.length > 0 ? visible.map((e, i) => (
+          <div key={e.id + '-' + i} className="mem-row" role="listitem" aria-label={`${e.ts.slice(11,19)} · ${e.keeper} · ${e.kind} · ${e.summary}`}>
+            <span className="ts" aria-hidden="true">{e.ts.slice(11,19)}</span>
+            <span className="kpr" aria-hidden="true">{e.keeper}</span>
+            <span className={`tag ${e.kind}`} aria-hidden="true" style={{padding:'0 5px',background:'var(--color-bg-panel-alt)',border:'1px solid var(--color-border-default)',fontFamily:'var(--font-mono)',fontSize:'var(--fs-9)',borderRadius:'2px'}}>{e.kind}</span>
+            <span className="body" aria-hidden="true" style={{fontFamily:'var(--font-mono)',fontSize:'var(--fs-11)',color:'var(--color-fg-default)'}}>{e.summary}</span>
+          </div>
+        )) : (
+          <div role="status" style={{padding:'12px 8px',fontFamily:'var(--font-mono)',fontSize:'var(--fs-11)',color:'var(--color-fg-disabled)',textAlign:'center'}}>
+            no memory entries match current filters
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
 // ═════════════════════════════════════════════════════════════════
 // K3 · INSTITUTION EPISODES
 // ═════════════════════════════════════════════════════════════════
@@ -409,6 +555,7 @@ function ARHypothesisFlow() {
 Object.assign(window, {
   KeeperBDIPanel, KeeperToolAccess, KeeperTokenStats,
   DecisionsStream, MemoryEntries,
+  KeeperDecisionsLog, KeeperMemoryLog,
   EpisodeCards, EpisodeLearnings,
   ARLoopList, ARFindingCard, ARHypothesisFlow,
 });

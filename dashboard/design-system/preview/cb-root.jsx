@@ -232,6 +232,8 @@ function App() {
       <DCSection id="decisions" title="K2 · Decisions / Memory" subtitle="decisions.jsonl + memory.jsonl — belief · intention · blocker · latency per turn">
         <DCArtboard id="dc-stream" label="A · Decisions stream (all keepers, filterable)"  width={1080} height={500}><DecisionsStream/></DCArtboard>
         <DCArtboard id="dc-mem"    label="B · Memory entries (verified / learned / plan)"  width={920}  height={320}><MemoryEntries/></DCArtboard>
+        <DCArtboard id="dc-log"    label="A2 · KeeperDecisionsLog (keeper + decision_type chips)" width={1080} height={500}><KeeperDecisionsLog/></DCArtboard>
+        <DCArtboard id="dc-memlog" label="B2 · KeeperMemoryLog (kind: episode|fact|plan)"  width={920}  height={320}><KeeperMemoryLog/></DCArtboard>
       </DCSection>
 
       <DCSection id="episodes" title="K3 · Institution Episodes" subtitle="institution_episodes.jsonl — per-turn learning records, click to expand">

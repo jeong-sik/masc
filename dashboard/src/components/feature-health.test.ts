@@ -5,7 +5,7 @@ import {
   featureMatchesStatus,
   filterFeatures,
   statusLabel,
-  statusChipClass,
+  statusChipTone,
 } from './feature-health'
 
 type FeatureStatus = 'healthy' | 'warning' | 'inactive' | 'deprecated'
@@ -168,13 +168,13 @@ describe('statusLabel', () => {
   })
 })
 
-describe('statusChipClass', () => {
+describe('statusChipTone', () => {
   it.each([
-    ['healthy', 'border-[var(--ok-30)] bg-[var(--ok-12)] text-[var(--color-status-ok)]'],
-    ['warning', 'border-[var(--warn-30)] bg-[var(--warn-12)] text-[var(--color-status-warn)]'],
-    ['inactive', 'border-[var(--white-12)] bg-[var(--white-4)] text-[var(--color-fg-muted)]'],
-    ['deprecated', 'border-[var(--bad-30)] bg-[var(--bad-12)] text-[var(--color-status-err)]'],
-  ] as const)('statusChipClass(%s) → %s', (status, expected) => {
-    expect(statusChipClass(status)).toBe(expected)
+    ['healthy', 'ok'],
+    ['warning', 'warn'],
+    ['inactive', 'neutral'],
+    ['deprecated', 'bad'],
+  ] as const)('statusChipTone(%s) → %s', (status, expected) => {
+    expect(statusChipTone(status)).toBe(expected)
   })
 })

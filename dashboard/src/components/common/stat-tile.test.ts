@@ -21,28 +21,28 @@ describe('StatTile', () => {
     const container = document.createElement('div')
     render(h(StatTile, { label: 'A', value: '1' }), container)
     const el = container.querySelector('div')
-    expect(el?.classList.contains('bg-[var(--white-4)]')).toBe(true)
+    expect(el?.classList.contains('bg-[var(--color-bg-elevated)]')).toBe(true)
   })
 
   it('applies gold variant styles', () => {
     const container = document.createElement('div')
     render(h(StatTile, { label: 'A', value: '1', variant: 'gold' }), container)
     const el = container.querySelector('div')
-    expect(el?.classList.contains('bg-[rgba(200,168,78,0.05)]')).toBe(true)
+    expect(el?.classList.contains('bg-[var(--color-brass-soft)]')).toBe(true)
   })
 
   it('applies accent variant styles', () => {
     const container = document.createElement('div')
     render(h(StatTile, { label: 'A', value: '1', variant: 'accent' }), container)
     const el = container.querySelector('div')
-    expect(el?.classList.contains('bg-[var(--color-accent-soft)]')).toBe(true)
+    expect(el?.classList.contains('bg-[var(--color-state-active-bg)]')).toBe(true)
   })
 
   it('applies warn variant styles', () => {
     const container = document.createElement('div')
     render(h(StatTile, { label: 'A', value: '1', variant: 'warn' }), container)
     const el = container.querySelector('div')
-    expect(el?.classList.contains('text-[var(--color-status-warn)]')).toBe(true)
+    expect(el?.classList.contains('text-[var(--color-warn-fg)]')).toBe(true)
   })
 })
 

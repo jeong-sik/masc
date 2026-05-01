@@ -31,13 +31,6 @@
   animation: activityFadeIn 0.3s ease-out;
 }
 
-@utility activity-kind-chip {
-  &.live-event-broadcast { background: var(--blue-400-15); color: var(--accent); }
-  &.live-event-task { background: var(--ok-soft); color: var(--ok); }
-  &.live-event-keeper { background: rgba(168,85,247,0.15); color: var(--purple-500); }
-  &.live-event-system { background: var(--white-6); color: var(--color-fg-muted); }
-}
-
 @utility focus-agent-card {
   transition: background 0.15s, border-color 0.15s;
   &:hover { background: var(--white-4); border-color: var(--white-10); }

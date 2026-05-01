@@ -13,6 +13,8 @@ import {
   miniSparkline,
   filterCtxCompositionEntries,
   InferenceTelemetryPanel,
+  RelationshipList,
+  TraitsList,
 } from './keeper-detail-panels'
 
 afterEach(() => {
@@ -403,5 +405,31 @@ describe('InferenceTelemetryPanel', () => {
     expect(container.textContent).toContain('hw tok/s')
     expect(container.textContent).toContain('avg 50.0')
     expect(container.textContent).toContain('avg 145.0')
+  })
+})
+
+describe('RelationshipList and TraitsList primitives', () => {
+  it('renders relationship names with the shared status chip primitive', () => {
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+
+    render(html`<${RelationshipList} rels=${{ alpha: 'mentor' }} />`, container)
+
+    const chip = container.querySelector('[data-status-chip]')
+    expect(chip?.textContent).toContain('alpha')
+    expect(chip?.getAttribute('data-status-chip-tone')).toBe('info')
+    expect(chip?.getAttribute('data-status-chip-uppercase')).toBe('false')
+  })
+
+  it('renders trait labels with the shared status chip primitive', () => {
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+
+    render(html`<${TraitsList} label="traits" traits=${['planner']} />`, container)
+
+    const chip = container.querySelector('[data-status-chip]')
+    expect(chip?.textContent).toContain('planner')
+    expect(chip?.getAttribute('data-status-chip-tone')).toBe('info')
+    expect(chip?.getAttribute('data-status-chip-uppercase')).toBe('false')
   })
 })

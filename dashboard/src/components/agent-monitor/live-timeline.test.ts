@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { JournalEntry } from '../../types'
-import { eventMatchesFilter } from './live-timeline'
+import { eventKindBadgeTone, eventMatchesFilter } from './live-timeline'
 
 function entry(overrides: Partial<JournalEntry>): JournalEntry {
   return {
@@ -26,5 +26,29 @@ describe('eventMatchesFilter', () => {
       eventType: 'oas_turn',
       text: 'NO_TOOL_CHANNEL: provider returned text',
     }), 'tool')).toBe(false)
+  })
+})
+
+describe('eventKindBadgeTone', () => {
+  it('maps heartbeat events to the ok semantic tone', () => {
+    expect(eventKindBadgeTone(entry({ eventType: 'keeper_heartbeat' }))).toBe('ok')
+    expect(eventKindBadgeTone(entry({ eventType: 'oas_keeper_snapshot' }))).toBe('ok')
+  })
+
+  it('maps explicit error entries to the bad semantic tone', () => {
+    expect(eventKindBadgeTone(entry({
+      eventType: 'broadcast',
+      text: 'Error: failed to claim task',
+    }))).toBe('bad')
+  })
+
+  it('maps operational events to supported semantic tones', () => {
+    expect(eventKindBadgeTone(entry({ eventType: 'oas_tool' }))).toBe('warn')
+    expect(eventKindBadgeTone(entry({ eventType: 'task_update' }))).toBe('ok')
+    expect(eventKindBadgeTone(entry({ eventType: 'keeper_compaction' }))).toBe('warn')
+  })
+
+  it('falls back to the neutral semantic tone', () => {
+    expect(eventKindBadgeTone(entry({ eventType: undefined }))).toBe('neutral')
   })
 })

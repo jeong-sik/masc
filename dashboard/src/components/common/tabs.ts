@@ -15,6 +15,21 @@ interface TabsCtx {
 
 const Ctx = createContext<TabsCtx | null>(null)
 
+const TABLIST_DEFAULT_CLASS =
+  'inline-flex items-center gap-1 rounded border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] p-0.5'
+
+const TAB_DEFAULT_CLASS = [
+  'relative inline-flex items-center justify-center rounded-sm border border-transparent px-2.5 py-1',
+  'text-2xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]',
+  'transition-colors duration-[var(--t-fast)]',
+  'hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)]',
+  'aria-selected:bg-[var(--color-state-active-bg)]',
+  'aria-selected:border-[var(--color-state-active-border)]',
+  'aria-selected:text-[var(--color-state-active-fg)]',
+  'aria-selected:shadow-[inset_0_-1px_0_var(--color-tab-indicator)]',
+  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-45)]',
+].join(' ')
+
 function useCtx() {
   const c = useContext(Ctx)
   if (!c) throw new Error('Tabs compound components must be inside <Tabs>')
@@ -62,7 +77,7 @@ interface TabListProps {
 }
 
 export function TabList({ children, class: cx }: TabListProps) {
-  return html`<div role="tablist" class=${cx ?? ''}>${children}</div>`
+  return html`<div role="tablist" class=${cx ?? TABLIST_DEFAULT_CLASS}>${children}</div>`
 }
 
 /* ─── Tab ─── */
@@ -109,7 +124,7 @@ export function Tab({ value, children, class: cx }: TabProps) {
       aria-selected=${active}
       aria-controls=${panelId}
       tabindex=${active ? 0 : -1}
-      class=${cx ?? ''}
+      class=${cx ?? TAB_DEFAULT_CLASS}
       onClick=${() => onChange(value)}
       onKeyDown=${onKeyDown}
     >

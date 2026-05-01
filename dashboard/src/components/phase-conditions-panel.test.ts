@@ -1,6 +1,9 @@
-import { describe, expect, it } from 'vitest'
+// @vitest-environment happy-dom
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { render } from 'preact'
+import { html } from 'htm/preact'
 
-import { normalizePhaseDiagnosis } from './phase-conditions-panel'
+import { normalizePhaseDiagnosis, PhaseConditionsPanel } from './phase-conditions-panel'
 
 describe('normalizePhaseDiagnosis', () => {
   it('normalizes and sorts backend phase diagnosis rows by priority', () => {
@@ -60,5 +63,64 @@ describe('normalizePhaseDiagnosis', () => {
   it('returns null for missing optional backend field', () => {
     expect(normalizePhaseDiagnosis(undefined)).toBeNull()
     expect(normalizePhaseDiagnosis({ rows: [] })).toBeNull()
+  })
+})
+
+describe('PhaseConditionsPanel', () => {
+  let container: HTMLElement
+
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+  })
+
+  afterEach(() => {
+    render(null, container)
+    document.body.removeChild(container)
+  })
+
+  it('renders phase badges through the shared StatusChip primitive', () => {
+    const diagnosis = normalizePhaseDiagnosis({
+      current_phase: 'Running',
+      derived_phase: 'Failing',
+      can_execute_turn: false,
+      determining_condition: 'failing_unhealthy',
+      rows: [
+        {
+          key: 'failing_unhealthy',
+          label: 'Failing: heartbeat or turn unhealthy',
+          priority: 13,
+          value: true,
+          phase: 'Failing',
+        },
+        {
+          key: 'running_fiber_alive',
+          label: 'Running: fiber alive',
+          priority: 14,
+          value: false,
+          phase: 'Running',
+        },
+      ],
+    })
+
+    render(html`<${PhaseConditionsPanel} diagnosis=${diagnosis} />`, container)
+
+    const chips = [...container.querySelectorAll('[data-status-chip]')]
+    expect(chips.map(chip => chip.textContent?.trim())).toEqual(expect.arrayContaining([
+      'current Running',
+      'derived Failing',
+      'turn blocked',
+      'P13',
+      'true',
+      'determining',
+      'false',
+    ]))
+    expect(chips.map(chip => chip.getAttribute('data-status-chip-tone'))).toEqual(expect.arrayContaining([
+      'neutral',
+      'info',
+      'warn',
+      'ok',
+    ]))
+    expect(chips.every(chip => chip.getAttribute('data-status-chip-uppercase') === 'false')).toBe(true)
   })
 })

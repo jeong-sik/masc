@@ -1,6 +1,14 @@
 // @vitest-environment happy-dom
-import { describe, expect, it } from "vitest"
-import { filterCheckpointHistory, lineageVerdictMeta, lineageTransitionLabel } from "./keeper-detail-history"
+import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import { render } from "preact"
+import { html } from "htm/preact"
+import {
+  filterCheckpointHistory,
+  lineageVerdictMeta,
+  lineageTransitionLabel,
+  lineageVerdictTone,
+  MonoBadge,
+} from "./keeper-detail-history"
 import type { KeeperCheckpointSummary } from "../api/keeper"
 
 function makeRow(overrides: Partial<KeeperCheckpointSummary> = {}): KeeperCheckpointSummary {
@@ -86,6 +94,40 @@ describe("lineageVerdictMeta", () => {
       badgeLabel: "알 수 없음",
       detail: "continuity 신호는 존재하지만 본 판정이 아직 operator-facing 설명에 매핑되지 않았습니다.",
     })
+  })
+})
+
+describe("lineageVerdictTone", () => {
+  it("maps lineage verdicts to shared StatusChip tones", () => {
+    expect(lineageVerdictTone("verified")).toBe("ok")
+    expect(lineageVerdictTone("drift_detected")).toBe("warn")
+    expect(lineageVerdictTone("unavailable")).toBe("neutral")
+    expect(lineageVerdictTone("future_verdict")).toBe("neutral")
+    expect(lineageVerdictTone(undefined)).toBe("neutral")
+  })
+})
+
+describe("MonoBadge", () => {
+  let container: HTMLElement
+
+  beforeEach(() => {
+    container = document.createElement("div")
+    document.body.appendChild(container)
+  })
+
+  afterEach(() => {
+    render(null, container)
+    document.body.removeChild(container)
+  })
+
+  it("renders through the shared StatusChip primitive without uppercasing identifiers", () => {
+    render(html`<${MonoBadge}>feature/CaseSensitive<//>`, container)
+
+    const chip = container.querySelector("[data-status-chip]")
+    expect(chip?.textContent).toBe("feature/CaseSensitive")
+    expect(chip?.getAttribute("data-status-chip-tone")).toBe("info")
+    expect(chip?.getAttribute("data-status-chip-uppercase")).toBe("false")
+    expect(chip?.classList.contains("font-mono")).toBe(true)
   })
 })
 

@@ -35,7 +35,14 @@ describe('StatCell', () => {
     const container = document.createElement('div')
     render(h(StatCell, { label: 'A', value: '1', bg: 'white-3' }), container)
     const el = container.querySelector('div')
-    expect(el?.classList.contains('bg-[var(--white-3)]')).toBe(true)
+    expect(el?.classList.contains('bg-[var(--color-bg-panel-alt)]')).toBe(true)
+  })
+
+  it('uses cockpit border token', () => {
+    const container = document.createElement('div')
+    render(h(StatCell, { label: 'A', value: '1' }), container)
+    const el = container.querySelector('div')
+    expect(el?.classList.contains('border-[var(--color-border-default)]')).toBe(true)
   })
 
   it('applies custom class', () => {

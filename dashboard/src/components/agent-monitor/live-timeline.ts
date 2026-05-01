@@ -7,6 +7,7 @@ import { useEffect, useRef, useMemo } from 'preact/hooks'
 import { TimeAgo } from '../common/time-ago'
 import { FilterChips } from '../common/filter-chips'
 import { EmptyState } from '../common/empty-state'
+import { StatusChip, type StatusChipTone } from '../common/status-chip'
 import { journal } from '../../sse'
 import { isErrorJournalEntry } from '../../journal-entry'
 import type { JournalEntry, JournalEventType } from '../../types'
@@ -25,6 +26,8 @@ const FILTER_CHIPS: { key: FilterKind; label: string }[] = [
   { key: 'error', label: '오류' },
   { key: 'lifecycle', label: '라이프사이클' },
 ]
+
+type EventBadgeTone = Extract<StatusChipTone, 'ok' | 'warn' | 'bad' | 'info' | 'neutral'>
 
 export function eventMatchesFilter(entry: JournalEntry, filter: FilterKind): boolean {
   if (filter === 'all') return true
@@ -47,39 +50,40 @@ export function eventMatchesFilter(entry: JournalEntry, filter: FilterKind): boo
   }
 }
 
-function eventKindBadgeClass(entry: JournalEntry): string {
-  if (isErrorJournalEntry(entry)) return 'agent-event-badge--error'
+export function eventKindBadgeTone(entry: JournalEntry): EventBadgeTone {
+  if (isErrorJournalEntry(entry)) return 'bad'
   const eventType = entry.eventType
   switch (eventType) {
     case 'keeper_heartbeat':
     case 'oas_keeper_snapshot':
-      return 'agent-event-badge--heartbeat'
+      return 'ok'
     case 'oas_turn':
-      return 'agent-event-badge--broadcast'
+      return 'info'
     case 'oas_tool':
-      return 'agent-event-badge--task'
+      return 'warn'
     case 'oas_context':
-      return 'agent-event-badge--keeper'
+      return 'neutral'
     case 'oas_event':
     case 'oas_task':
-      return 'agent-event-badge--lifecycle'
+      return 'info'
     case 'agent_joined':
     case 'agent_left':
-      return 'agent-event-badge--lifecycle'
+      return 'info'
     case 'keeper_handoff':
+      return 'info'
     case 'keeper_compaction':
-      return 'agent-event-badge--keeper'
+      return 'warn'
     case 'keeper_guardrail':
-      return 'agent-event-badge--error'
+      return 'bad'
     case 'broadcast':
-      return 'agent-event-badge--broadcast'
+      return 'info'
     case 'task_update':
-      return 'agent-event-badge--task'
+      return 'ok'
     case 'board_post':
     case 'board_comment':
-      return 'agent-event-badge--board'
+      return 'info'
     default:
-      return 'agent-event-badge--default'
+      return 'neutral'
   }
 }
 
@@ -170,9 +174,7 @@ export function AgentLiveTimeline({ name }: { name: string }) {
           ? html`<${EmptyState} message="필터에 맞는 이벤트 없음" compact />`
           : filtered.map((entry: JournalEntry, idx: number) => html`
               <div class="flex items-baseline gap-1.5 py-1 px-2 text-sm transition-[background] duration-100 rounded hover:bg-[var(--white-4)]" key=${idx}>
-                <span class="agent-event-badge ${eventKindBadgeClass(entry)}">
-                  ${eventKindLabel(entry.eventType)}
-                </span>
+                <${StatusChip} tone=${eventKindBadgeTone(entry)}>${eventKindLabel(entry.eventType)}<//>
                 <span class="flex-1 text-[var(--color-fg-primary)] truncate">${compactText(entry.text)}</span>
                 ${entry.timestamp ? html`
                   <span class="text-[var(--color-fg-disabled)] text-2xs whitespace-nowrap"><${TimeAgo} timestamp=${entry.timestamp} /></span>

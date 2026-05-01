@@ -13,6 +13,7 @@ import { SectionCap } from './common/section-cap'
 import { PanelCard } from './common/panel-card'
 import { ProgressBar } from './common/progress-bar'
 import { sourceHealthClass, freshnessText } from './common/source-health'
+import { StatusChip } from './common/status-chip'
 
 // ── Types ─────────────────────────────────────────────
 
@@ -221,20 +222,20 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
 
       ${'' /* Summary row */}
       <div class="flex gap-3 flex-wrap text-2xs">
-        <span class="inline-flex items-center gap-1 px-2 py-1 rounded bg-[var(--white-4)] border border-[var(--white-6)] text-[var(--color-fg-muted)]">
+        <${StatusChip} tone="neutral" uppercase=${false} class="gap-1 py-1">
           <span class="font-mono font-medium text-[var(--color-fg-secondary)]">${s.tools.length}</span> 도구
-        </span>
-        <span class="inline-flex items-center gap-1 px-2 py-1 rounded bg-[var(--white-4)] border border-[var(--white-6)] text-[var(--color-fg-muted)]">
+        <//>
+        <${StatusChip} tone="neutral" uppercase=${false} class="gap-1 py-1">
           <span class="font-mono font-medium text-[var(--color-fg-secondary)]">${s.totalEntries}</span> 호출
-        </span>
+        <//>
         ${totalCost > 0 ? html`
-          <span class="inline-flex items-center gap-1 px-2 py-1 rounded bg-[var(--accent-12)] border border-[var(--accent-15)] text-[var(--color-fg-muted)]">
+          <${StatusChip} tone="info" uppercase=${false} class="gap-1 py-1">
             <span class="font-mono font-medium text-[var(--color-accent-fg)]">$${totalCost.toFixed(3)}</span>
-          </span>
+          <//>
         ` : null}
-        <span class="inline-flex items-center gap-1 px-2 py-1 rounded bg-[var(--white-4)] border border-[var(--white-6)] text-[var(--color-fg-disabled)]">
+        <${StatusChip} tone="neutral" uppercase=${false} class="gap-1 py-1 text-[var(--color-fg-disabled)]">
           ${s.windowHours}h 기간
-        </span>
+        <//>
       </div>
       <${FreshnessLine} data=${s} />
 

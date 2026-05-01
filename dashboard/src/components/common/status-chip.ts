@@ -39,7 +39,7 @@
 import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'
 
-type StatusChipTone =
+export type StatusChipTone =
   | 'ok'
   | 'warn'
   | 'bad'

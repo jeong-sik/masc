@@ -16,24 +16,15 @@ import { isRecord } from './common/normalize'
 import { showToast } from './common/toast'
 import { PanelCard } from './common/panel-card'
 import { SectionHeader } from './common/section-header'
+import { StatusChip, type StatusChipTone } from './common/status-chip'
 
 function SnapshotBadge({ tone, children }: { tone: 'accent' | 'neutral' | 'ok'; children: unknown }) {
-  const cls = (() => {
-    switch (tone) {
-      case 'accent':
-        return 'inline-flex items-center rounded-sm px-2 py-0.5 text-3xs font-semibold bg-[var(--accent-12)] text-[var(--color-accent-fg)] border border-[var(--accent-18)]'
-      case 'ok':
-        return 'inline-flex items-center rounded-sm px-2 py-0.5 text-3xs font-semibold border border-[var(--ok-20)] bg-[var(--ok-10)] text-[var(--color-status-ok)]'
-      case 'neutral':
-      default:
-        return 'inline-flex items-center rounded-sm px-2 py-0.5 text-3xs font-semibold border border-[var(--white-8)] bg-[var(--white-3)] text-[var(--color-fg-muted)]'
-    }
-  })()
-  return html`<span class="${cls}">${children}</span>`
+  const chipTone: StatusChipTone = tone === 'accent' ? 'info' : tone
+  return html`<${StatusChip} tone=${chipTone} uppercase=${false} class="font-semibold">${children}</${StatusChip}>`
 }
 
 export function MonoBadge({ children }: { children: unknown }) {
-  return html`<span class="text-3xs font-mono px-1.5 py-0.5 rounded bg-[var(--accent-12)] text-[var(--color-accent-fg)] border border-[var(--accent-15)]">${children}</span>`
+  return html`<${StatusChip} tone="info" uppercase=${false} class="font-mono">${children}</${StatusChip}>`
 }
 
 function formatCheckpointTime(timestamp: number): string {
@@ -429,16 +420,16 @@ export function lineageTransitionLabel(parentGeneration: number | null | undefin
   return `${parentGeneration != null ? `gen ${parentGeneration}` : 'root'} -> gen ${generation}`
 }
 
-function verdictBadgeClass(verdict: string | undefined): string {
+export function lineageVerdictTone(verdict: string | undefined): StatusChipTone {
   switch (verdict) {
     case 'verified':
-      return 'bg-[var(--ok-10)] text-[var(--color-status-ok)] border border-[var(--ok-20)]'
+      return 'ok'
     case 'drift_detected':
-      return 'bg-[var(--warn-10)] text-[var(--color-status-warn)] border border-[var(--warn-20)]'
+      return 'warn'
     case 'unavailable':
-      return 'bg-[var(--white-5)] text-[var(--color-fg-muted)] border border-[var(--white-8)]'
+      return 'neutral'
     default:
-      return 'bg-[var(--white-5)] text-[var(--color-fg-muted)] border border-[var(--white-8)]'
+      return 'neutral'
   }
 }
 
@@ -479,9 +470,7 @@ export function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
               <div class="flex flex-wrap items-center gap-2 mb-1">
                 <span class="text-3xs font-semibold uppercase tracking-wider text-[var(--color-accent-fg)]">최신 핸드오프</span>
                 <${MonoBadge}>${lineageTransitionLabel(latestEntry.parent_generation, latestEntry.generation)}</${MonoBadge}>
-                <span class="text-3xs px-1.5 py-0.5 rounded ${verdictBadgeClass(latestEntry.continuity_verdict)}">
-                  ${latestEntryMeta?.badgeLabel}
-                </span>
+                <${StatusChip} tone=${lineageVerdictTone(latestEntry.continuity_verdict)} uppercase=${false} class="font-semibold">${latestEntryMeta?.badgeLabel}</${StatusChip}>
                 ${latestEntry.created_at
                   ? html`<span class="text-3xs text-[var(--color-fg-disabled)]">recorded <${TimeAgo} timestamp=${latestEntry.created_at} /></span>`
                   : null}
@@ -521,7 +510,7 @@ export function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
                 <${SectionHeader} size="xs">현재 매니페스트</${SectionHeader}>
                 <${MonoBadge}>gen ${manifest.generation}</${MonoBadge}>
                 ${continuity?.verdict
-                  ? html`<span class="text-3xs px-1.5 py-0.5 rounded ${verdictBadgeClass(continuity.verdict)}">${continuityMeta.badgeLabel}</span>`
+                  ? html`<${StatusChip} tone=${lineageVerdictTone(continuity.verdict)} uppercase=${false} class="font-semibold">${continuityMeta.badgeLabel}</${StatusChip}>`
                   : null}
                 ${manifest.created_at
                   ? html`<span class="text-3xs text-[var(--color-fg-disabled)]">created <${TimeAgo} timestamp=${manifest.created_at} /></span>`
@@ -544,19 +533,13 @@ export function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
               <div class="mt-3 flex flex-wrap gap-2">
                 ${delta
                   ? html`
-                    <span class="text-3xs px-2 py-1 rounded border border-[var(--white-8)] bg-[var(--white-2)] text-[var(--color-fg-muted)]">
-                      inherited ${delta.inherited_fields.length}
-                    </span>
-                    <span class="text-3xs px-2 py-1 rounded border border-[var(--white-8)] bg-[var(--white-2)] text-[var(--color-fg-muted)]">
-                      changed ${delta.changed_fields.length}
-                    </span>
-                    <span class="text-3xs px-2 py-1 rounded border border-[var(--white-8)] bg-[var(--white-2)] text-[var(--color-fg-muted)]">
-                      dropped ${delta.dropped_fields.length}
-                    </span>
+                    <${StatusChip} tone="neutral" uppercase=${false}>inherited ${delta.inherited_fields.length}</${StatusChip}>
+                    <${StatusChip} tone="neutral" uppercase=${false}>changed ${delta.changed_fields.length}</${StatusChip}>
+                    <${StatusChip} tone="neutral" uppercase=${false}>dropped ${delta.dropped_fields.length}</${StatusChip}>
                   `
                   : null}
                 ${continuity?.similarity != null
-                  ? html`<span class="text-3xs px-2 py-1 rounded border border-[var(--white-8)] bg-[var(--white-2)] text-[var(--color-fg-muted)]">similarity ${(continuity.similarity * 100).toFixed(1)}%</span>`
+                  ? html`<${StatusChip} tone="neutral" uppercase=${false}>similarity ${(continuity.similarity * 100).toFixed(1)}%</${StatusChip}>`
                   : null}
               </div>
               ${continuity?.verdict
@@ -587,10 +570,10 @@ export function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
                       <div class="flex flex-wrap items-center gap-2">
                         <${MonoBadge}>gen ${entry.generation}</${MonoBadge}>
                         ${isLatest
-                          ? html`<span class="text-3xs px-1.5 py-0.5 rounded border border-[var(--accent-18)] bg-[var(--accent-12)] text-[var(--color-accent-fg)]">latest</span>`
+                          ? html`<${StatusChip} tone="info" uppercase=${false} class="font-semibold">latest</${StatusChip}>`
                           : null}
                         ${entry.continuity_verdict
-                          ? html`<span class="text-3xs px-1.5 py-0.5 rounded ${verdictBadgeClass(entry.continuity_verdict)}">${entryMeta.badgeLabel}</span>`
+                          ? html`<${StatusChip} tone=${lineageVerdictTone(entry.continuity_verdict)} uppercase=${false} class="font-semibold">${entryMeta.badgeLabel}</${StatusChip}>`
                           : null}
                         ${entry.created_at
                           ? html`<span class="text-3xs text-[var(--color-fg-disabled)]"><${TimeAgo} timestamp=${entry.created_at} /></span>`

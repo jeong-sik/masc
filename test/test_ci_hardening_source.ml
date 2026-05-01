@@ -1195,6 +1195,35 @@ let test_human_approval_credential_boundary_contracts () =
     (file_contains_pattern "scripts/ci/check-agent-draft-policy.sh"
        "human-approval")
 
+let test_copilot_zero_diff_cleanup_contracts () =
+  check bool "copilot zero-diff cleanup script exists" true
+    (Sys.file_exists
+       (source_path "scripts/cleanup-copilot-zero-diff-prs.sh"));
+  check bool "copilot zero-diff cleanup is dry-run by default" true
+    (file_contains_pattern "scripts/cleanup-copilot-zero-diff-prs.sh"
+       "Dry run only");
+  check bool "copilot zero-diff cleanup requires explicit close flag" true
+    (file_contains_pattern "scripts/cleanup-copilot-zero-diff-prs.sh"
+       "--close");
+  check bool "copilot zero-diff cleanup targets copilot author by default" true
+    (file_contains_pattern "scripts/cleanup-copilot-zero-diff-prs.sh"
+       "copilot-swe-agent");
+  check bool "copilot zero-diff cleanup filters WIP titles" true
+    (file_contains_pattern "scripts/cleanup-copilot-zero-diff-prs.sh"
+       "startswith($prefix)");
+  check bool "copilot zero-diff cleanup uses GraphQL file totals" true
+    (file_contains_pattern "scripts/cleanup-copilot-zero-diff-prs.sh"
+       "files(first: 1) { totalCount }");
+  check bool "copilot zero-diff cleanup preserves review threads" true
+    (file_contains_pattern "scripts/cleanup-copilot-zero-diff-prs.sh"
+       "reviewThreads(first: 1)");
+  check bool "copilot zero-diff cleanup skips active discussion" true
+    (file_contains_pattern "scripts/cleanup-copilot-zero-diff-prs.sh"
+       "SKIP_ACTIVE");
+  check bool "copilot zero-diff cleanup does not delete branches" true
+    (file_not_contains_pattern "scripts/cleanup-copilot-zero-diff-prs.sh"
+       "--delete-branch")
+
 let () =
   run "ci_hardening_source"
     [
@@ -1257,5 +1286,7 @@ let () =
              test_ssot_fingerprint_gate_contracts;
            test_case "human approval credential boundary contracts (#9733)" `Quick
              test_human_approval_credential_boundary_contracts;
+           test_case "copilot zero-diff cleanup contracts (#12567)" `Quick
+             test_copilot_zero_diff_cleanup_contracts;
          ]);
     ]

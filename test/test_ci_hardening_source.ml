@@ -115,12 +115,24 @@ let test_ci_sync_and_asset_contracts () =
   check bool "live PR gate has explicit pull request read permission" true
     (file_contains_pattern ".github/workflows/ci.yml"
        "pull-requests: read");
+  check bool "live PR gate can run after skipped non-PR sync check" true
+    (file_contains_pattern ".github/workflows/ci.yml"
+       "always() && !cancelled() && (needs.pr-sync-check.result == 'success' || needs.pr-sync-check.result == 'skipped')");
+  check bool "live PR gate defaults non-PR triggers to heavy CI" true
+    (file_contains_pattern ".github/workflows/ci.yml"
+       {|[ "${GITHUB_EVENT_NAME}" != "pull_request" ]|});
   check bool "live PR gate waits for draft automation to settle" true
     (file_contains_pattern ".github/workflows/ci.yml"
        "LIVE_PR_GATE_SETTLE_SEC");
+  check bool "live PR gate annotates gh lookup failures" true
+    (file_contains_pattern ".github/workflows/ci.yml"
+       {|if ! live_fields="$(gh pr view "$PR_NUMBER"|});
   check bool "heavy CI uses live PR gate output" true
     (file_contains_pattern ".github/workflows/ci.yml"
        "needs.pr-live-gate.outputs.run_heavy == 'true'");
+  check bool "heavy CI waits for changed-surface detection" true
+    (file_contains_pattern ".github/workflows/ci.yml"
+       "needs.changes.result == 'success'");
   check bool "ci gate allows skipped live PR gate on non-PR triggers" true
     (file_contains_pattern ".github/workflows/ci.yml"
        {|"$result" == "success" || "$result" == "skipped"|});

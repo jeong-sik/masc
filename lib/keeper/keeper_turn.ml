@@ -155,9 +155,9 @@ let resolve_turn_cascade_name (meta : keeper_meta) =
 let handle_keeper_msg ?on_text_delta ctx args : tool_result =
   let on_event = match on_text_delta with
     | None -> None
-    | Some cb -> Some (fun (evt : Oas.Types.sse_event) ->
+    | Some cb -> Some (fun (evt : Agent_sdk.Types.sse_event) ->
         match evt with
-        | Oas.Types.ContentBlockDelta { delta = TextDelta text; _ } -> cb text
+        | Agent_sdk.Types.ContentBlockDelta { delta = TextDelta text; _ } -> cb text
         | _ -> ())
   in
   let name = get_string args "name" "" in
@@ -424,7 +424,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
             in
             match run_result with
             | Error err ->
-              let e_str = Oas.Error.to_string err in
+              let e_str = Agent_sdk.Error.to_string err in
               (try
                  let _ = Trajectory.finalize trajectory_acc
                    (Trajectory.Failed e_str) in

@@ -134,10 +134,10 @@ let write_heartbeat_snapshot
   in
   let c_messages = messages_for_continuity in
   let latest_user_message =
-    latest_message_content_by_role ~role:Oas.Types.User c_messages
+    latest_message_content_by_role ~role:Agent_sdk.Types.User c_messages
   in
   let latest_assistant_message =
-    latest_message_content_by_role ~role:Oas.Types.Assistant c_messages
+    latest_message_content_by_role ~role:Agent_sdk.Types.Assistant c_messages
     in
     let continuity_snapshot = latest_state_snapshot_from_messages c_messages in
     let continuity_summary =

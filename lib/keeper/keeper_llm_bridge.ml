@@ -7,7 +7,7 @@
     the exception is caught, OAS-local context mutations are discarded
     (functional rollback), external tool side effects are not reverted.
 
-    Timeout returns [Oas.Error.Api (Timeout ...)].
+    Timeout returns [Agent_sdk.Error.Api (Timeout ...)].
     Cancellation (server shutdown / parent fiber cancel) re-raises so the caller
     exits immediately instead of retrying. *)
 let run_with_timeout_and_fallback ~timeout_s fn =
@@ -67,7 +67,7 @@ let run_with_timeout_and_fallback ~timeout_s fn =
     Log.Keeper.warn
       "keeper_llm_bridge: OAS execution timed out after %.1fs (budget=%.0fs; OAS context rollback only; external tool side effects are not reverted)"
       wall timeout_s;
-    Error (Oas.Error.Api (Timeout { message = Printf.sprintf "Timeout after %.1fs (budget=%.0fs)" wall timeout_s }))
+    Error (Agent_sdk.Error.Api (Timeout { message = Printf.sprintf "Timeout after %.1fs (budget=%.0fs)" wall timeout_s }))
   | Eio.Cancel.Cancelled inner_exn as exn ->
     (* TLA+: FiberHandlesCancellation -> Rollback context.
        Cancelled means a parent fiber (server shutdown, global stop) requested
@@ -107,4 +107,4 @@ let run_with_timeout_and_fallback ~timeout_s fn =
     (* TLA+: HandleError -> Rollback context *)
     let bt = Printexc.get_backtrace () in
     Log.Keeper.error "keeper_llm_bridge: OAS execution error: %s\n%s" (Printexc.to_string exn) bt;
-    Error (Oas.Error.Internal (Printexc.to_string exn))
+    Error (Agent_sdk.Error.Internal (Printexc.to_string exn))

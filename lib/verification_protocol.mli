@@ -111,7 +111,7 @@ val notify_reject_verification :
 
 val check_timeouts : config:Coord.config -> unit
 (** [check_timeouts ~config] scans pending verifications and
-    auto-rejects any past their TTL.  No-op when
+    emits operator-visible timeout events for any past their TTL. No-op when
     [Env_config_runtime.Verification.fsm_enabled ()] is [false]
     — pinned at the contract seam so disabling the FSM does not
     silently drop the timeout sweep entirely; it just does nothing. *)

@@ -68,8 +68,8 @@ val oas_retry_budget_available_for_turn :
     attempt budget and incorrectly rotating cascades. *)
 val reclassify_oas_timeout_for_attempt :
   timeout_budget:oas_timeout_budget_resolution option ->
-  Oas.Error.sdk_error ->
-  Oas.Error.sdk_error
+  Agent_sdk.Error.sdk_error ->
+  Agent_sdk.Error.sdk_error
 
 type degraded_retry_budget_decision =
   | No_degraded_retry
@@ -85,7 +85,7 @@ val next_fail_open_cascade_for_turn_with_budget :
   estimated_input_tokens:int ->
   max_turns:int ->
   remaining_turn_budget_s:float ->
-  Oas.Error.sdk_error ->
+  Agent_sdk.Error.sdk_error ->
   degraded_retry_budget_decision
 
 (** Turn-local overflow hint published by the OAS event bus before a
@@ -105,14 +105,14 @@ type turn_event_bus_summary = {
 (** Fold the drained OAS event-bus events for a single keeper turn into
     the signals MASC currently consumes. *)
 val summarize_turn_event_bus :
-  Oas.Event_bus.event list -> turn_event_bus_summary
+  Agent_sdk.Event_bus.event list -> turn_event_bus_summary
 
 (** Build the keeper overflow event from either a drained event-bus
     signal or the structured OAS error fallback. Exposed for tests. *)
 val context_overflow_event_of_error :
   fallback_tokens:int ->
   ?turn_event_bus:turn_event_bus_summary ->
-  Oas.Error.sdk_error ->
+  Agent_sdk.Error.sdk_error ->
   Keeper_state_machine.event
 
 (** Resolve the initial keeper turn context budget.
@@ -209,7 +209,7 @@ val next_fail_open_cascade_for_turn :
   effective_cascade:string ->
   tool_requirement:string ->
   attempted_cascades:string list ->
-  Oas.Error.sdk_error ->
+  Agent_sdk.Error.sdk_error ->
   Keeper_error_classify.degraded_retry option
 
 val run_keeper_cycle :
@@ -219,9 +219,9 @@ val run_keeper_cycle :
   generation:int ->
   ?channel:Keeper_world_observation.keeper_cycle_channel ->
   ?semaphore_wait_ms:int ->
-  ?shared_context:Oas.Context.t ->
+  ?shared_context:Agent_sdk.Context.t ->
   unit ->
-  (Keeper_types.keeper_meta, Oas.Error.sdk_error) result
+  (Keeper_types.keeper_meta, Agent_sdk.Error.sdk_error) result
 
 val run_unified_turn :
   config:Coord.config ->
@@ -230,6 +230,6 @@ val run_unified_turn :
   generation:int ->
   ?channel:Keeper_world_observation.keeper_cycle_channel ->
   ?semaphore_wait_ms:int ->
-  ?shared_context:Oas.Context.t ->
+  ?shared_context:Agent_sdk.Context.t ->
   unit ->
-  (Keeper_types.keeper_meta, Oas.Error.sdk_error) result
+  (Keeper_types.keeper_meta, Agent_sdk.Error.sdk_error) result

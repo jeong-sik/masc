@@ -301,16 +301,16 @@ val snapshot_of_replay_metadata :
 (** Inverse of [replay_metadata_of_snapshot]. *)
 
 val with_snapshot_metadata :
-  Oas.Types.message ->
-  keeper_state_snapshot -> Oas.Types.message
+  Agent_sdk.Types.message ->
+  keeper_state_snapshot -> Agent_sdk.Types.message
 (** Attach replay metadata to an assistant message. *)
 
 val snapshot_of_message_metadata :
-  Oas.Types.message -> keeper_state_snapshot option
+  Agent_sdk.Types.message -> keeper_state_snapshot option
 (** Hydrate a snapshot from a message's metadata, if present. *)
 
 val snapshot_of_message :
-  Oas.Types.message -> keeper_state_snapshot option
+  Agent_sdk.Types.message -> keeper_state_snapshot option
 (** [snapshot_of_message_metadata] then fallback to parsing the
     message body's [STATE] block. *)
 
@@ -318,7 +318,7 @@ val snapshot_of_structured_working_context :
   Yojson.Safe.t -> keeper_state_snapshot option
 
 val latest_state_snapshot_from_messages :
-  Oas.Types.message list -> keeper_state_snapshot option
+  Agent_sdk.Types.message list -> keeper_state_snapshot option
 (** Latest snapshot reachable from the message history. *)
 
 (** {1 Priority / scoring} *)

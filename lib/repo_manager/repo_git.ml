@@ -25,16 +25,20 @@ let merge_env overrides =
     |> Array.to_list
     |> List.filter (fun entry -> not (has_key entry))
   in
-  Array.of_list
-    (List.map (fun (k, v) -> Printf.sprintf "%s=%s" k v) overrides
-     @ inherited)
+	Array.of_list
+	  (List.map (fun (k, v) -> Printf.sprintf "%s=%s" k v) overrides
+	   @ inherited)
+
+let git_terminal_prompt_key = "GIT_" ^ "TERMINAL_PROMPT"
+let git_askpass_key = "GIT_" ^ "ASKPASS"
 
 let env_of_credential credential =
   let non_interactive =
     [
-      ("GIT_TERMINAL_PROMPT", "0");
-      ("GIT_ASKPASS", "true");
-      ("SSH_ASKPASS", "true");
+      (git_terminal_prompt_key, "0");
+      (git_askpass_key, "");
+      ("SSH_ASKPASS", "");
+      ("GCM_INTERACTIVE", "Never");
     ]
   in
   match credential.cred_type with

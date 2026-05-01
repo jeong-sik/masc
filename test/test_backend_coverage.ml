@@ -72,9 +72,9 @@ let test_get_status_all_backends () =
   let s2 = Backend_types.get_status cfg_fs in
   check string "fs status" "filesystem" (s2 |> member "backend_type" |> to_string)
 
-let test_pubsub_max_messages_env () =
-  (* Test the default value - cannot easily test env override in unit test *)
-  let result = Backend_types.pubsub_max_messages_from_env () in
+let test_pubsub_max_messages_constant () =
+  (* Test the fixed default value. *)
+  let result = Backend_types.pubsub_max_messages in
   check bool "pubsub default >= 100" true (result >= 100)
 
 (* ============================================================ *)
@@ -478,7 +478,7 @@ let () =
     ];
     "config_status", [
       test_case "get_status all backends" `Quick test_get_status_all_backends;
-      test_case "pubsub_max_messages" `Quick test_pubsub_max_messages_env;
+      test_case "pubsub_max_messages" `Quick test_pubsub_max_messages_constant;
     ];
     "eio_compression", [
       test_case "small data" `Quick test_compression_small_data;

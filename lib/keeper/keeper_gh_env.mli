@@ -39,6 +39,10 @@ val gh_config_dir_of_bundle : string -> string
 
 val root_gh_config_dir : Coord.config -> string
 
+val git_config_env_entries : string list
+
+val git_config_env_pairs : (string * string) list
+
 val root_gh_config_dir_exists : Coord.config -> bool
 
 (** Resolve the keeper's GitHub identity binding, or an error string

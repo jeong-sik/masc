@@ -46,10 +46,10 @@ let effective_model_of_resume ~existing_meta spec =
       resolve_oas_provider_of_label spec.Worker_execution_spec.model_label
       |> Result.map snd
 
-let dedupe_tools_by_name (tools : Oas.Tool.t list) =
+let dedupe_tools_by_name (tools : Agent_sdk.Tool.t list) =
   let rec loop seen acc = function
     | [] -> List.rev acc
-    | ((tool : Oas.Tool.t) :: rest) ->
+    | ((tool : Agent_sdk.Tool.t) :: rest) ->
         if List.mem tool.schema.name seen then
           loop seen acc rest
         else
@@ -61,12 +61,12 @@ let create_raw_trace ~base_path ~worker_name =
   try
     ensure_worker_container_dirs ~base_path ~worker_name;
     match
-      Oas.Raw_trace.create
+      Agent_sdk.Raw_trace.create
         ~path:(worker_raw_trace_path ~base_path ~worker_name)
         ()
     with
     | Ok raw_trace -> Ok raw_trace
-    | Error err -> Error (Oas.Error.to_string err)
+    | Error err -> Error (Agent_sdk.Error.to_string err)
   with Sys_error msg ->
     Error
       (Printf.sprintf "failed to create worker raw trace for %s: %s"

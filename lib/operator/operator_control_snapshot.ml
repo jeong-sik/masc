@@ -513,6 +513,27 @@ let _keeper_snapshot_max_concurrency =
 
 let _keeper_sem = Eio.Semaphore.make _keeper_snapshot_max_concurrency
 
+let compact_keeper_runtime_trust_json ~(config : Coord.config)
+    ~(meta : Keeper_types.keeper_meta) =
+  let runtime_trust =
+    Keeper_runtime_trust_snapshot.snapshot_json ~config ~meta
+  in
+  let member key = Yojson.Safe.Util.member key runtime_trust in
+  `Assoc
+    [
+      ("disposition", member "disposition");
+      ("disposition_reason", member "disposition_reason");
+      ("operator_disposition", member "operator_disposition");
+      ("operator_disposition_reason", member "operator_disposition_reason");
+      ("needs_attention", member "needs_attention");
+      ("attention_reason", member "attention_reason");
+      ("next_human_action", member "next_human_action");
+      ("execution_summary", member "execution");
+      ("latest_terminal_reason", member "latest_terminal_reason");
+      ("latest_next_action", member "latest_next_action");
+      ("latest_causal_event", member "latest_causal_event");
+    ]
+
 let keepers_json ?keeper_names ?(include_recent_activity = false)
     ?(lightweight = false) config =
   let names = match keeper_names with
@@ -586,6 +607,16 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                      | None -> `String "paused"
                    in
                    dt_phase := Time_compat.now () -. t_ph;
+                   let runtime_trust =
+                     try compact_keeper_runtime_trust_json ~config ~meta
+                     with
+                     | Eio.Cancel.Cancelled _ as e -> raise e
+                     | exn ->
+                         Log.Dashboard.warn
+                           "operator snapshot trust compact failed for paused keeper %s: %s"
+                           meta.name (Printexc.to_string exn);
+                         `Null
+                   in
                    emit_timing_log (Time_compat.now () -. t_work_start);
                    Some
                      (`Assoc
@@ -603,7 +634,10 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                          ("updated_at", `String meta.updated_at);
                          ("created_at", `String meta.created_at);
                        ]
-                       @ keeper_runtime_identity_fields meta))
+                       @ keeper_runtime_identity_fields meta
+                       @ Keeper_status_bridge.runtime_blocker_fields_json config meta
+                       @ Keeper_status_bridge.attention_fields_json config meta
+                       @ [ ("runtime_trust", runtime_trust) ]))
                  ) else begin
                  let t_agent = Time_compat.now () in
                  let agent_json =
@@ -735,6 +769,16 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                  let context_snapshot =
                    if lightweight then fallback_keeper_context_snapshot meta
                    else keeper_context_snapshot_of_meta config meta
+                 in
+                 let runtime_trust =
+                   try compact_keeper_runtime_trust_json ~config ~meta
+                   with
+                   | Eio.Cancel.Cancelled _ as e -> raise e
+                   | exn ->
+                       Log.Dashboard.warn
+                         "operator snapshot trust compact failed for keeper %s: %s"
+                         meta.name (Printexc.to_string exn);
+                       `Null
                  in
                  emit_timing_log (Time_compat.now () -. t_work_start);
                  Some
@@ -925,7 +969,9 @@ let keepers_json ?keeper_names ?(include_recent_activity = false)
                           result));
                      ]
                      @ keeper_context_snapshot_fields context_snapshot
-                     @ Keeper_status_bridge.runtime_blocker_fields_json config meta))
+                     @ Keeper_status_bridge.runtime_blocker_fields_json config meta
+                     @ Keeper_status_bridge.attention_fields_json config meta
+                     @ [ ("runtime_trust", runtime_trust) ]))
                  end
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
              Log.Dashboard.error "keepers_json fiber error (%s): %s"

@@ -117,7 +117,7 @@ let verify (req : verification_request) : (verdict, string) result =
               parse_err (String.sub text 0 (min 80 (String.length text)));
             Error (sprintf "verdict parse: %s" parse_err)))
     | Error err ->
-      Error (Oas.Error.to_string err)
+      Error (Agent_sdk.Error.to_string err)
 
 (* ================================================================ *)
 (* Verdict -> Hook Decision (OAS bridge)                            *)
@@ -132,21 +132,21 @@ let verify (req : verification_request) : (verdict, string) result =
     Warn reasons are logged to stderr for observability but do not halt
     execution, matching existing behavior where warnings are
     informational. *)
-let verdict_to_hook_decision (v : verdict) : Oas.Hooks.hook_decision =
+let verdict_to_hook_decision (v : verdict) : Agent_sdk.Hooks.hook_decision =
   match v with
-  | Pass -> Oas.Hooks.Continue
+  | Pass -> Agent_sdk.Hooks.Continue
   | Warn reason ->
     Log.Verifier.warn "%s" reason;
-    Oas.Hooks.Continue
+    Agent_sdk.Hooks.Continue
   | Fail reason ->
     Log.Verifier.error "FAIL (skipping tool): %s" reason;
-    Oas.Hooks.Skip
+    Agent_sdk.Hooks.Skip
 
 let continue_with_degraded_verifier ~tool_name ~reason =
   Log.Verifier.error
     "verification degraded for %s; allowing tool to continue: %s"
     tool_name reason;
-  Oas.Hooks.Continue
+  Agent_sdk.Hooks.Continue
 
 let handle_pre_tool_use
     ?(verify_fn = verify)
@@ -155,10 +155,10 @@ let handle_pre_tool_use
     ~(tool_name : string)
     ~(input : Yojson.Safe.t)
     ()
-  : Oas.Hooks.hook_decision =
+  : Agent_sdk.Hooks.hook_decision =
   let action_description = sprintf "tool:%s" tool_name in
   if should_skip ~action_description then
-    Oas.Hooks.Continue
+    Agent_sdk.Hooks.Continue
   else
     (match
        try Ok (Yojson.Safe.to_string input)
@@ -200,24 +200,24 @@ let make_pre_tool_hook
     ?(verify_fn = verify)
     ~(goal : string)
     ~(context_summary : string)
-  : Oas.Hooks.hook =
+  : Agent_sdk.Hooks.hook =
   fun event ->
     match event with
-    | Oas.Hooks.PreToolUse { tool_name; input; _ } ->
+    | Agent_sdk.Hooks.PreToolUse { tool_name; input; _ } ->
       handle_pre_tool_use ~verify_fn ~goal ~context_summary ~tool_name ~input ()
-    | Oas.Hooks.BeforeTurn _
-    | Oas.Hooks.BeforeTurnParams _
-    | Oas.Hooks.AfterTurn _
-    | Oas.Hooks.PostToolUse _
-    | Oas.Hooks.PostToolUseFailure _
-    | Oas.Hooks.OnStop _
-    | Oas.Hooks.OnIdle _
-    | Oas.Hooks.OnIdleEscalated _
-    | Oas.Hooks.OnError _
-    | Oas.Hooks.OnToolError _
-    | Oas.Hooks.PreCompact _
-    | Oas.Hooks.PostCompact _
-    | Oas.Hooks.OnContextCompacted _ -> Oas.Hooks.Continue
+    | Agent_sdk.Hooks.BeforeTurn _
+    | Agent_sdk.Hooks.BeforeTurnParams _
+    | Agent_sdk.Hooks.AfterTurn _
+    | Agent_sdk.Hooks.PostToolUse _
+    | Agent_sdk.Hooks.PostToolUseFailure _
+    | Agent_sdk.Hooks.OnStop _
+    | Agent_sdk.Hooks.OnIdle _
+    | Agent_sdk.Hooks.OnIdleEscalated _
+    | Agent_sdk.Hooks.OnError _
+    | Agent_sdk.Hooks.OnToolError _
+    | Agent_sdk.Hooks.PreCompact _
+    | Agent_sdk.Hooks.PostCompact _
+    | Agent_sdk.Hooks.OnContextCompacted _ -> Agent_sdk.Hooks.Continue
 
 (** Install the verifier hook into an existing OAS hooks record.
 
@@ -225,16 +225,16 @@ let make_pre_tool_hook
     it is replaced (not chained). The caller is responsible for composing
     hooks if needed.
 
-    @param hooks The base hooks record (typically {!Oas.Hooks.empty}).
+    @param hooks The base hooks record (typically {!Agent_sdk.Hooks.empty}).
     @param model The verification model spec.
     @param goal The agent goal.
     @param context_summary The agent context summary.
     @return Updated hooks record with the verifier installed in pre_tool_use. *)
 let install_hook
-    ~(hooks : Oas.Hooks.hooks)
+    ~(hooks : Agent_sdk.Hooks.hooks)
     ~(goal : string)
     ~(context_summary : string)
-  : Oas.Hooks.hooks =
+  : Agent_sdk.Hooks.hooks =
   { hooks with
     pre_tool_use = Some (make_pre_tool_hook ~goal ~context_summary) }
 
@@ -262,9 +262,9 @@ let install_hook
 let guardrails_with_read_only_tag
     ?(max_tool_calls_per_turn : int option)
     ()
-  : Oas.Guardrails.t =
+  : Agent_sdk.Guardrails.t =
   {
-    tool_filter = Oas.Guardrails.AllowAll;
+    tool_filter = Agent_sdk.Guardrails.AllowAll;
     max_tool_calls_per_turn;
   }
 
@@ -273,7 +273,7 @@ let guardrails_with_read_only_tag
     Returns a predicate [tool_schema -> bool] that returns true when the
     tool name matches read-only patterns. Can be used in custom
     guardrails pipelines for conditional verification bypass. *)
-let read_only_predicate (schema : Oas.Types.tool_schema) : bool =
+let read_only_predicate (schema : Agent_sdk.Types.tool_schema) : bool =
   should_skip ~action_description:schema.name
 
 (* ================================================================ *)
@@ -295,21 +295,21 @@ let read_only_predicate (schema : Oas.Types.tool_schema) : bool =
 
     @since Phase 6 — OAS Guardrails bridge *)
 let eval_gate_to_oas_guardrails (gate : Eval_gate.gate_config) :
-    Oas.Guardrails.t =
+    Agent_sdk.Guardrails.t =
   let tool_filter =
     match (gate.allowlist_enabled, gate.allowed_tools, gate.denied_tools) with
     | true, (_ :: _ as allowed), _ ->
         (* AllowList is the stricter filter; deny is handled at runtime *)
-        Oas.Guardrails.AllowList allowed
+        Agent_sdk.Guardrails.AllowList allowed
     | true, [], _ ->
         (* Allowlist enabled but empty = deny all tools *)
-        Oas.Guardrails.AllowList []
+        Agent_sdk.Guardrails.AllowList []
     | false, _, (_ :: _ as denied) ->
-        Oas.Guardrails.DenyList denied
+        Agent_sdk.Guardrails.DenyList denied
     | false, _, [] ->
-        Oas.Guardrails.AllowAll
+        Agent_sdk.Guardrails.AllowAll
   in
   {
-    Oas.Guardrails.tool_filter;
+    Agent_sdk.Guardrails.tool_filter;
     max_tool_calls_per_turn = Some gate.max_tool_calls_per_turn;
   }

@@ -2,12 +2,14 @@ import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'
 import { hashForRoute, navigate } from '../../router'
 import type { TabId } from '../../types'
+import { ringFocusClasses } from './ring'
 
 interface RouteLinkProps {
   tab: TabId
   params?: Record<string, string>
   class?: string
   title?: string
+  'aria-label'?: string
   ariaCurrent?: 'page' | 'location' | undefined
   children: ComponentChildren
 }
@@ -17,13 +19,14 @@ export function RouteLink({
   params,
   class: className,
   title,
+  'aria-label': ariaLabel,
   ariaCurrent,
   children,
 }: RouteLinkProps) {
   const href = hashForRoute(tab, params)
   const classNameWithFocus = [
     className,
-    'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[rgba(71,184,255,0.35)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-bg-surface)]',
+    ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'surface' }),
   ].filter(Boolean).join(' ')
 
   return html`
@@ -31,6 +34,7 @@ export function RouteLink({
       href=${href}
       class=${classNameWithFocus}
       title=${title}
+      aria-label=${ariaLabel}
       aria-current=${ariaCurrent}
       onClick=${(event: MouseEvent) => {
         if (

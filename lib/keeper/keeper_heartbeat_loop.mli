@@ -76,7 +76,7 @@ val run_keepalive_unified_turn :
   pending_board_events:Keeper_world_observation.pending_board_event list ->
   stop:bool Atomic.t ->
   proactive_warmup_elapsed:bool ->
-  shared_context:Oas.Context.t ->
+  shared_context:Agent_sdk.Context.t ->
   keeper_meta
 
 val refresh_work_as_heartbeat :

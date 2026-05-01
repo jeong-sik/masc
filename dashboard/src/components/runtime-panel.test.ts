@@ -11,7 +11,7 @@ async function flushUi(): Promise<void> {
 
 async function loadRuntimePanel() {
   vi.resetModules()
-  vi.doMock('../router', () => ({ route }))
+  vi.doMock('../router', () => ({ route, replaceRoute: vi.fn() }))
   vi.doMock('./oas-health-chip', () => ({
     OasHealthChip: () => html`<div data-testid="oas-health">OasHealthChip</div>`,
   }))
@@ -28,7 +28,7 @@ async function loadRuntimePanel() {
     VerificationSpecsPanel: () => html`<div data-testid="verification-specs">VerificationSpecsPanel</div>`,
   }))
   vi.doMock('./cost-dashboard', () => ({
-    CostDashboard: () => html`<div data-testid="cost-dashboard">CostDashboard</div>`,
+    CostDashboard: ({ view }: { view?: string }) => html`<div data-testid="cost-dashboard" data-view=${view ?? 'cost'}>CostDashboard</div>`,
   }))
   vi.doMock('./cascade-inspector', () => ({
     CascadeInspector: () => html`<div data-testid="cascade-inspector">CascadeInspector</div>`,
@@ -148,14 +148,29 @@ describe('RuntimePanel', () => {
     await flushUi()
 
     const chips = container.querySelectorAll('[data-testid="chip"]')
-    expect(chips.length).toBe(7)
+    expect(chips.length).toBe(10)
     expect(chips[0]?.textContent).toBe('전체')
     expect(chips[1]?.textContent).toBe('Cascade')
     expect(chips[2]?.textContent).toBe('프로바이더')
     expect(chips[3]?.textContent).toBe('비용 / 지연')
-    expect(chips[4]?.textContent).toBe('검사기')
-    expect(chips[5]?.textContent).toBe('메트릭')
-    expect(chips[6]?.textContent).toBe('형식검증')
+    expect(chips[4]?.textContent).toBe('감사')
+    expect(chips[5]?.textContent).toBe('휴리스틱')
+    expect(chips[6]?.textContent).toBe('스트레스')
+    expect(chips[7]?.textContent).toBe('검사기')
+    expect(chips[8]?.textContent).toBe('메트릭')
+    expect(chips[9]?.textContent).toBe('형식검증')
+  })
+
+  it('routes runtime diagnostic views through CostDashboard', async () => {
+    route.value.params = { view: 'heuristics' }
+    const { RuntimePanel } = await loadRuntimePanel()
+    render(html`<${RuntimePanel} />`, container)
+    await flushUi()
+
+    const costDashboard = container.querySelector('[data-testid="cost-dashboard"]')
+    expect(costDashboard).not.toBeNull()
+    expect(costDashboard?.getAttribute('data-view')).toBe('heuristics')
+    expect(container.textContent).not.toContain('RuntimeMonitor')
   })
 
   it('falls back to default for unknown view param', async () => {

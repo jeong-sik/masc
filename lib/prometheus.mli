@@ -511,14 +511,13 @@ val metric_empty_tool_universe_observed : string
     [fallback_used] = "true" | "false". *)
 
 val metric_coord_join_normalize_outcome : string
-(** RFC P3-a (2026-04-26): Coord.join preflighted by
-    [Keeper_identity.normalize_all_names] in logging-only mode.
+(** RFC P3-a (2026-04-26): Coord.join identity normalization by
+    [Keeper_identity.normalize_all_names].
     Labels: [outcome] = "ok" | "empty_input" | "persona_not_found"
     | "credential_missing" | "name_ambiguous" | "ephemeral_suffix_rejected".
-    Non-ok outcomes still proceed with the original agent_name; the
-    counter classifies bootstrap-window silent-fallback patterns
-    (cross-reference [metric_silent_auth_token_resolve_error]) before
-    the mode is promoted to hard-error in a follow-up PR. *)
+    Non-ok outcomes reject [masc_join] at the fail-closed identity gate.
+    Cross-reference [metric_silent_auth_token_resolve_error] for auth/name
+    drift diagnosis. *)
 
 
 (** {1 Transport metrics} *)

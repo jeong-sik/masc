@@ -7,15 +7,15 @@ type run_context =
   { temperature : float
   ; max_tokens : int
   ; context_injector : Agent_sdk.Hooks.context_injector
-  ; shared_context : Oas.Context.t
+  ; shared_context : Agent_sdk.Context.t
   ; session_dir : string
   ; session : Keeper_types.session_context
   ; loaded_checkpoint_present : bool
   ; base_system_prompt : string
   ; ctx_work : working_context
-  ; resume_oas_checkpoint : Oas.Checkpoint.t option
+  ; resume_oas_checkpoint : Agent_sdk.Checkpoint.t option
   ; pre_dispatch_compacted : bool
-  ; pre_dispatch_checkpoint_error : Oas.Error.sdk_error option
+  ; pre_dispatch_checkpoint_error : Agent_sdk.Error.sdk_error option
   ; start_turn_count : int
   ; receipt_started_at : string
   ; config_root : string
@@ -34,7 +34,7 @@ val prepare_run_context :
   -> cascade_name:Keeper_cascade_profile.runtime_name
   -> ?temperature:float
   -> ?max_tokens:int
-  -> ?shared_context:Oas.Context.t
+  -> ?shared_context:Agent_sdk.Context.t
   -> generation:int
   -> unit
   -> run_context

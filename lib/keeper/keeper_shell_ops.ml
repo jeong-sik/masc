@@ -813,22 +813,15 @@ let handle_keeper_shell
           "branch is required. Good: action='add', branch='feature/my-task'. Bad: branch=''."
       else (
         match cwd_target () with
-        | Error e -> path_error e
-        | Ok cwd ->
-          let wt_out_result =
-            match Keeper_sandbox_factory.resolve_opt turn_sandbox_factory ~cwd with
-            | Some runtime ->
-              Keeper_turn_sandbox_runtime.run_command runtime
-                ~cwd
-                ~command_argv:[ "git"; "worktree"; "list"; "--porcelain" ]
-                ~max_bytes:1_000_000
-                ~timeout_sec:Keeper_shell_shared.git_meta_timeout_sec ()
-            | None ->
-              let _st, wt_out =
-                Keeper_shell_shared.run_argv_with_status_retry_eintr ~timeout_sec:Keeper_shell_shared.git_meta_timeout_sec
-                  [ "git"; "-C"; cwd; "worktree"; "list"; "--porcelain" ]
-              in
-              Ok wt_out
+	        | Error e -> path_error e
+	        | Ok cwd ->
+	          let wt_out_result =
+	            let _st, wt_out =
+	              Keeper_shell_shared.run_argv_with_status_retry_eintr
+	                ~timeout_sec:Keeper_shell_shared.git_meta_timeout_sec
+	                [ "git"; "-C"; cwd; "worktree"; "list"; "--porcelain" ]
+	            in
+	            Ok wt_out
           in
           match wt_out_result with
           | Error msg ->
@@ -852,16 +845,14 @@ let handle_keeper_shell
                   ; "existing_worktree", `String existing_path
                   ; "hint", `String "Branch is already in a worktree. Use 'cd' to the existing path, or choose a different branch name."
                   ])
-          else
-            let wt_path = Printf.sprintf ".worktrees/%s"
-              (String.map (fun c -> if c = '/' then '-' else c) branch)
-            in
-            run_in_turn_runtime ~cwd
-              ~cmd:(Printf.sprintf "git worktree add %s -b %s %s" wt_path branch base)
-              ~command_argv:[ "git"; "worktree"; "add"; wt_path; "-b"; branch; base ]
-              ~max_bytes:1_000_000
-              ~timeout_sec:Keeper_shell_shared.io_timeout_sec ()
-      )
+	          else
+	            let wt_path = Printf.sprintf ".worktrees/%s"
+	              (String.map (fun c -> if c = '/' then '-' else c) branch)
+	            in
+	            render_process_result ~cwd
+	              ~cmd:(Printf.sprintf "git worktree add %s -b %s %s" wt_path branch base)
+	              [ "git"; "worktree"; "add"; wt_path; "-b"; branch; base ]
+	      )
     | other ->
       error_json ~fields:[ "op", `String op ]
         (Printf.sprintf "Unknown git_worktree action '%s'. Use: list, add." other)
@@ -1284,33 +1275,40 @@ let handle_keeper_shell
              | Ok () ->
                (match Keeper_shell_shared.resolve_keeper_shell_write_cwd ~config ~meta ~args with
                 | Error e -> error_json e
-                  | Ok gh_cwd ->
-                  (match Keeper_shell_gh_context.resolve_gh_repo_context ~config ~meta ~cwd:gh_cwd with
-                   | Error err ->
-                     Keeper_shell_gh_context.gh_repo_context_error_json
-                       ~op
-                       ~cmd_display:(gh_cmd_display parsed_cmd) err
-                   | Ok ctx ->
-                     match repo_check ctx.worktree_cwd with
-                     | Error msg ->
-                         gh_base ~ok:false ~cwd:ctx.worktree_cwd
-                           ~command:(gh_cmd_display parsed_cmd)
-                           [ "error", `String "repo_access_denied"
-                           ; "hint", `String msg
-                           ]
-                     | Ok () ->
-                         let cmd_to_run =
-                           match ctx.repo_slug with
-                           | Some repo_slug ->
-                               Keeper_gh_shared.gh_simple_command_with_repo_flag
-                                 ~repo_slug parsed_cmd
-                           | None -> parsed_cmd
-                         in
-                         run_gh_command
-                           ~display_command:(gh_cmd_display cmd_to_run)
-                           ~parsed_command:cmd_to_run
-                           ~cwd:ctx.worktree_cwd
-                           ~ctx:(Some ctx)))
+                | Ok gh_cwd ->
+                  if Keeper_gh_shared.gh_simple_command_has_repo_flag parsed_cmd
+                  then
+                    run_gh_command
+                      ~display_command:(gh_cmd_display parsed_cmd)
+                      ~parsed_command:parsed_cmd
+                      ~cwd:gh_cwd ~ctx:None
+                  else
+                    (match Keeper_shell_gh_context.resolve_gh_repo_context ~config ~meta ~cwd:gh_cwd with
+                     | Error err ->
+                       Keeper_shell_gh_context.gh_repo_context_error_json
+                         ~op
+                         ~cmd_display:(gh_cmd_display parsed_cmd) err
+                     | Ok ctx ->
+                       match repo_check ctx.worktree_cwd with
+                       | Error msg ->
+                           gh_base ~ok:false ~cwd:ctx.worktree_cwd
+                             ~command:(gh_cmd_display parsed_cmd)
+                             [ "error", `String "repo_access_denied"
+                             ; "hint", `String msg
+                             ]
+                       | Ok () ->
+                           let cmd_to_run =
+                             match ctx.repo_slug with
+                             | Some repo_slug ->
+                                 Keeper_gh_shared.gh_simple_command_with_repo_flag
+                                   ~repo_slug parsed_cmd
+                             | None -> parsed_cmd
+                           in
+                           run_gh_command
+                             ~display_command:(gh_cmd_display cmd_to_run)
+                             ~parsed_command:cmd_to_run
+                             ~cwd:ctx.worktree_cwd
+                             ~ctx:(Some ctx)))
            end))
   | _ ->
     Yojson.Safe.to_string

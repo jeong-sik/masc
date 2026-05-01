@@ -825,11 +825,11 @@ let metric_auth_strict_would_reject =
 let metric_empty_tool_universe_observed =
   "masc_empty_tool_universe_observed_total"
 
-(** Counter for Coord.join preflight outcomes (RFC P3-a, logging-only mode).
+(** Counter for Coord.join identity-normalization outcomes (RFC P3-a).
    Labels: outcome (ok | empty_input | persona_not_found | credential_missing
-   | name_ambiguous | ephemeral_suffix_rejected). Cross-reference with
-   [metric_silent_auth_token_resolve_error] to attribute 119-burst pattern
-   to a normalize_all_names branch before promoting P3-a to hard-error. *)
+   | name_ambiguous | ephemeral_suffix_rejected). Non-ok outcomes reject the
+   join at the fail-closed gate. Cross-reference with
+   [metric_silent_auth_token_resolve_error] for auth/name drift diagnosis. *)
 let metric_coord_join_normalize_outcome =
   "masc_coord_join_normalize_outcome_total"
 
@@ -1219,13 +1219,13 @@ let init () =
      approaching this cap indicate impending publish blocking."
     Gauge;
   add metric_oas_bus_publish_block_seconds
-    "Cumulative seconds spent inside Oas.Event_bus.publish when routed \
+    "Cumulative seconds spent inside Agent_sdk.Event_bus.publish when routed \
      through Oas_bus_instrument.publish. A sustained ramp indicates a \
      subscriber drain loop has fallen behind and publishers are blocking \
      on Eio.Stream.add."
     Counter;
   add metric_oas_bus_publish
-    "Total Oas.Event_bus.publish calls routed through \
+    "Total Agent_sdk.Event_bus.publish calls routed through \
      Oas_bus_instrument.publish."
     Counter;
   add metric_runtime_ollama_probe_generate_skips
@@ -1316,13 +1316,12 @@ let init () =
      fallback_used (true | false)."
     Counter;
   add metric_coord_join_normalize_outcome
-    "Total Coord.join calls preflighted by Keeper_identity.normalize_all_names \
+    "Total Coord.join identity normalizations by Keeper_identity.normalize_all_names \
      (RFC P3-a). Labels: outcome (ok | empty_input | persona_not_found | \
      credential_missing | name_ambiguous | ephemeral_suffix_rejected). \
-     Logging-only mode: non-ok outcomes still proceed with the original \
-     agent_name; counter classifies bootstrap-window silent-fallback patterns \
-     (paired with masc_silent_auth_token_resolve_error_total) before the \
-     mode is promoted to hard-error in a follow-up PR."
+     Non-ok outcomes reject masc_join at the fail-closed identity gate; pair \
+     with masc_silent_auth_token_resolve_error_total for auth/name drift \
+     diagnosis."
     Counter;
   (* Transport metrics — registered here so transport_metrics.ml can use
      module constants instead of string literals. *)

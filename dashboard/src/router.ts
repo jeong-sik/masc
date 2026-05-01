@@ -5,6 +5,7 @@ import { signal } from '@preact/signals'
 import type { RouteState, TabId } from './types'
 import { VALID_TABS } from './types'
 import { normalizeRouteParams, sectionItemsForTab } from './config/navigation'
+import { cockpitTargetForParams, normalizeCockpitMode } from './cockpit-entrypoints'
 
 const DEFAULT_ROUTE: RouteState = { tab: 'overview', params: {}, postId: null }
 const VALID_COMMAND_SECTIONS = new Set(
@@ -56,6 +57,21 @@ function parseParams(raw: string | undefined): Record<string, string> {
   return params
 }
 
+function routeForCockpitMode(params: Record<string, string>): RouteState | null {
+  const redirect = cockpitTargetForParams(params)
+  if (!redirect) return null
+
+  const nextParams = { ...params, ...(redirect.params ?? {}) }
+  return canonicalRoute(redirect.tab, nextParams)
+}
+
+function shouldApplyCockpitModeRoute(segments: string[], params: Record<string, string>): boolean {
+  if (!normalizeCockpitMode(params.mode ?? params.plane)) return false
+  if (segments.length === 0) return true
+  if (segments.length === 1 && isTabId(segments[0]) && !params.section) return true
+  return false
+}
+
 function applyCrossSurfaceRedirect(
   tab: TabId,
   params: Record<string, string>,
@@ -105,6 +121,11 @@ function parseSegments(
   segments: string[],
   params: Record<string, string>,
 ): RouteState {
+  if (shouldApplyCockpitModeRoute(segments, params)) {
+    const cockpitModeRoute = routeForCockpitMode(params)
+    if (cockpitModeRoute) return cockpitModeRoute
+  }
+
   if (segments[0] === 'command' && segments[1]) {
     const nextParams = { ...params }
     const second = decodeSafe(segments[1])
@@ -155,14 +176,21 @@ function parseHash(hash: string): RouteState {
     }
   }
 
-  if (!queryPart && pathPart.includes('=') && !pathPart.includes('/')) {
-    queryPart = pathPart
+  if (!queryPart && hashLooksLikeQuery(raw)) {
+    queryPart = raw
     pathPart = ''
   }
 
   const params = parseParams(queryPart)
   const segments = normalizeSegments(pathPart)
   return parseSegments(segments, params)
+}
+
+function hashLooksLikeQuery(rawHashBody: string): boolean {
+  const eqIndex = rawHashBody.indexOf('=')
+  if (eqIndex < 0) return false
+  const slashIndex = rawHashBody.indexOf('/')
+  return slashIndex < 0 || eqIndex < slashIndex
 }
 
 function parsePathname(pathname: string, search: string): RouteState | null {
@@ -223,6 +251,18 @@ export function navigate(tab: TabId, params?: Record<string, string>): void {
   if (window.location.hash !== nextHash) {
     window.location.hash = nextHash
   }
+}
+
+export function replaceRoute(tab: TabId, params?: Record<string, string>): void {
+  const next = canonicalRoute(tab, params ?? {})
+  const nextHash = toHash(next)
+  route.value = next
+  window.history.replaceState(
+    null,
+    '',
+    `${window.location.pathname}${window.location.search}${nextHash}`,
+  )
+  window.dispatchEvent(new HashChangeEvent('hashchange'))
 }
 
 export function navigateToPost(postId: string): void {

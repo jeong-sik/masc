@@ -23,7 +23,7 @@ let adaptive_thinking_budget
         (* 1) Structured tool errors in last tools -> High thinking *)
         let had_error =
           List.exists
-            (fun (r : Oas.Types.tool_result) ->
+            (fun (r : Agent_sdk.Types.tool_result) ->
                match r with
                | Error _ -> true
                | Ok _ -> false)
@@ -92,7 +92,7 @@ let prompt_segment_metrics_of_text (text : string) : prompt_segment_metrics =
   {
     bytes = String.length text;
     estimated_tokens =
-      (if text = "" then 0 else Oas.Context_reducer.estimate_char_tokens text);
+      (if text = "" then 0 else Agent_sdk.Context_reducer.estimate_char_tokens text);
     fingerprint =
       (if text = ""
        then None
@@ -168,17 +168,17 @@ let add_segment_metric
     }
 
 let metric_of_block
-    ~(role : Oas.Types.role)
-    (block : Oas.Types.content_block) : prompt_segment_metrics =
+    ~(role : Agent_sdk.Types.role)
+    (block : Agent_sdk.Types.content_block) : prompt_segment_metrics =
   let bytes =
     match block with
-    | Oas.Types.Text text ->
+    | Agent_sdk.Types.Text text ->
         String.length (Inference_utils.sanitize_text_utf8 text)
-    | Oas.Types.ToolUse { id; name; input } ->
+    | Agent_sdk.Types.ToolUse { id; name; input } ->
         String.length (Inference_utils.sanitize_text_utf8 id)
         + String.length (Inference_utils.sanitize_text_utf8 name)
         + String.length (Yojson.Safe.to_string input)
-    | Oas.Types.ToolResult { tool_use_id; content; json; _ } ->
+    | Agent_sdk.Types.ToolResult { tool_use_id; content; json; _ } ->
         String.length (Inference_utils.sanitize_text_utf8 tool_use_id)
         + String.length (Inference_utils.sanitize_text_utf8 content)
         + (match json with
@@ -186,9 +186,9 @@ let metric_of_block
            | None -> 0)
     | _ -> 0
   in
-  let msg : Oas.Types.message =
+  let msg : Agent_sdk.Types.message =
     {
-      Oas.Types.role;
+      Agent_sdk.Types.role;
       content = [block];
       name = None;
       tool_call_id = None;
@@ -202,17 +202,17 @@ let metric_of_block
   }
 
 let history_bucket_of_block
-    ~(role : Oas.Types.role)
-    (block : Oas.Types.content_block) : string =
+    ~(role : Agent_sdk.Types.role)
+    (block : Agent_sdk.Types.content_block) : string =
   match block with
-  | Oas.Types.ToolUse _ -> "history_tool_use"
-  | Oas.Types.ToolResult _ -> "history_tool_result"
-  | Oas.Types.Text _ -> (
+  | Agent_sdk.Types.ToolUse _ -> "history_tool_use"
+  | Agent_sdk.Types.ToolResult _ -> "history_tool_result"
+  | Agent_sdk.Types.Text _ -> (
       match role with
-      | Oas.Types.User -> "history_user"
-      | Oas.Types.Assistant | Oas.Types.System ->
+      | Agent_sdk.Types.User -> "history_user"
+      | Agent_sdk.Types.Assistant | Agent_sdk.Types.System ->
           "history_assistant_text"
-      | Oas.Types.Tool -> "history_tool_result")
+      | Agent_sdk.Types.Tool -> "history_tool_result")
   | _ -> "history_other"
 
 let build_ctx_composition_metrics
@@ -221,7 +221,7 @@ let build_ctx_composition_metrics
     ~(memory_context : string)
     ~(temporal_context : string)
     ~(user_message : string)
-    ~(history_messages : Oas.Types.message list)
+    ~(history_messages : Agent_sdk.Types.message list)
     ~(actual_input_tokens : int) : ctx_composition_metrics =
   let totals : (string, prompt_segment_metrics) Hashtbl.t = Hashtbl.create 16 in
   let add_text_segment bucket text =
@@ -234,7 +234,7 @@ let build_ctx_composition_metrics
   add_text_segment "temporal_context" temporal_context;
   add_text_segment "user_message" user_message;
   List.iter
-    (fun (message : Oas.Types.message) ->
+    (fun (message : Agent_sdk.Types.message) ->
       List.iter
         (fun block ->
           let bucket = history_bucket_of_block ~role:message.role block in

@@ -38,7 +38,7 @@ let emit_flush_activity
 let record_success
     ~(config : Coord_utils.config)
     ~(keeper_name : string)
-    ~(memory : Oas.Memory.t)
+    ~(memory : Agent_sdk.Memory.t)
     ~(turn : int)
     ~(trace_id : string)
     ~(snapshot : Keeper_memory_policy.keeper_state_snapshot)
@@ -110,7 +110,7 @@ let stress_kind_of_error_kind error_kind : Agent_stress.stress_kind option =
 let record_failure
     ~(config : Coord_utils.config)
     ~(keeper_name : string)
-    ~(memory : Oas.Memory.t)
+    ~(memory : Agent_sdk.Memory.t)
     ~(turn : int)
     ~(trace_id : string)
     ~(error_kind : Memory_oas_bridge.error_kind)

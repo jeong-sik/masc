@@ -58,9 +58,9 @@ val masc_tool_emission_enabled : unit -> bool
     All hook events return [Continue]. The hook is purely
     observational: it never aborts a tool call, never adjusts
     params, never elicits input. *)
-val make_post_tool_use_hook : accumulator -> Oas.Hooks.hook
+val make_post_tool_use_hook : accumulator -> Agent_sdk.Hooks.hook
 
-(** Wrap an existing [Oas.Hooks.hooks] record so that
+(** Wrap an existing [Agent_sdk.Hooks.hooks] record so that
     [post_tool_use] also routes through the K4 accumulator hook.
 
     If the record already has a [post_tool_use] hook, both hooks
@@ -70,8 +70,8 @@ val make_post_tool_use_hook : accumulator -> Oas.Hooks.hook
     K4 hook is installed. *)
 val install_into_hooks :
   accumulator ->
-  Oas.Hooks.hooks ->
-  Oas.Hooks.hooks
+  Agent_sdk.Hooks.hooks ->
+  Agent_sdk.Hooks.hooks
 
 (** Drain the accumulator and merge any tagged tool results into
     [working_context["multimodal_artifacts"]] via

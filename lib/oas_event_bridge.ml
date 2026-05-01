@@ -56,7 +56,7 @@ let payload_agent_name payload =
      | Some _ as value -> value
      | None -> payload_string_opt "keeper_name" payload)
 
-let emit_native_event_log (evt : Oas.Event_bus.event) (json : Yojson.Safe.t) =
+let emit_native_event_log (evt : Agent_sdk.Event_bus.event) (json : Yojson.Safe.t) =
   let log_at level message =
     Log.emit level ~module_name:"oas:event" ~details:json message
   in
@@ -67,27 +67,27 @@ let emit_native_event_log (evt : Oas.Event_bus.event) (json : Yojson.Safe.t) =
     log_at Log.Info message
   in
   match evt.payload with
-  | Oas.Event_bus.AgentStarted { agent_name; task_id } ->
+  | Agent_sdk.Event_bus.AgentStarted { agent_name; task_id } ->
       log
         (Printf.sprintf "agent started agent=%s task_id=%s" agent_name task_id)
-  | Oas.Event_bus.AgentCompleted { agent_name; task_id; elapsed; _ } ->
+  | Agent_sdk.Event_bus.AgentCompleted { agent_name; task_id; elapsed; _ } ->
       log
         (Printf.sprintf
            "agent completed agent=%s task_id=%s elapsed_s=%.3f"
            agent_name task_id elapsed)
-  | Oas.Event_bus.TurnStarted { agent_name; turn } ->
+  | Agent_sdk.Event_bus.TurnStarted { agent_name; turn } ->
       log (Printf.sprintf "turn started agent=%s turn=%d" agent_name turn)
-  | Oas.Event_bus.TurnCompleted { agent_name; turn } ->
+  | Agent_sdk.Event_bus.TurnCompleted { agent_name; turn } ->
       log (Printf.sprintf "turn completed agent=%s turn=%d" agent_name turn)
-  | Oas.Event_bus.ToolCalled { agent_name; tool_name; _ } ->
+  | Agent_sdk.Event_bus.ToolCalled { agent_name; tool_name; _ } ->
       log
         (Printf.sprintf "tool called agent=%s tool_name=%s" agent_name tool_name)
-  | Oas.Event_bus.ToolCompleted { agent_name; tool_name; _ } ->
+  | Agent_sdk.Event_bus.ToolCompleted { agent_name; tool_name; _ } ->
       log
         (Printf.sprintf
            "tool completed agent=%s tool_name=%s"
            agent_name tool_name)
-  | Oas.Event_bus.TurnReady { agent_name; turn; tool_names } ->
+  | Agent_sdk.Event_bus.TurnReady { agent_name; turn; tool_names } ->
       (* [substrate:tool_surface] — deterministic per-turn snapshot of the
          tool list the LLM actually sees this turn (after guardrails,
          operator policy, tool_filter_override).  Emitted as a single
@@ -102,19 +102,19 @@ let emit_native_event_log (evt : Oas.Event_bus.event) (json : Yojson.Safe.t) =
            "[substrate:tool_surface] agent=%s turn=%d count=%d names_hash=%s"
            agent_name turn (List.length tool_names)
            (String.sub names_hash 0 16))
-  | Oas.Event_bus.ContextCompacted
+  | Agent_sdk.Event_bus.ContextCompacted
       { agent_name; before_tokens; after_tokens; phase } ->
       log
         (Printf.sprintf
            "context compacted agent=%s before_tokens=%d after_tokens=%d phase=%s"
            agent_name before_tokens after_tokens phase)
-  | Oas.Event_bus.ContextOverflowImminent
+  | Agent_sdk.Event_bus.ContextOverflowImminent
       { agent_name; estimated_tokens; limit_tokens; ratio } ->
       log
         (Printf.sprintf
            "context overflow imminent agent=%s estimated_tokens=%d limit_tokens=%d ratio=%.3f"
            agent_name estimated_tokens limit_tokens ratio)
-  | Oas.Event_bus.ContextCompactStarted { agent_name; trigger } ->
+  | Agent_sdk.Event_bus.ContextCompactStarted { agent_name; trigger } ->
       log
         (Printf.sprintf
            "context compact started agent=%s trigger=%s"
@@ -145,7 +145,7 @@ let wrap_event ~ts ~correlation_id ~run_id ~event_type ~payload
 
     The match below intentionally combines explicit per-variant arms
     with a final [other] catch-all that produces a kind-only fallback
-    via [Oas.Event_bus.payload_kind].  The catch-all is "redundant" at
+    via [Agent_sdk.Event_bus.payload_kind].  The catch-all is "redundant" at
     every individual snapshot of the OAS variant set (warning 11), but
     it is a deliberate future-proof against the OAS pin-bump P0 class
     (#10490, #10574, #10584).  Without the catch-all, every new
@@ -157,11 +157,11 @@ let wrap_event ~ts ~correlation_id ~run_id ~event_type ~payload
     Suppressing warning 11 ([@warning "-11"]) is therefore the entire
     point of this function's shape — do not remove it without also
     removing the catch-all. *)
-let native_event_to_json (evt : Oas.Event_bus.event) : Yojson.Safe.t option =
-  let { Oas.Event_bus.correlation_id; run_id; ts; _ } = evt.meta in
+let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t option =
+  let { Agent_sdk.Event_bus.correlation_id; run_id; ts; _ } = evt.meta in
   let wrap = wrap_event ~ts ~correlation_id ~run_id in
   match[@warning "-11"] evt.payload with
-  | Oas.Event_bus.AgentStarted { agent_name; task_id } ->
+  | Agent_sdk.Event_bus.AgentStarted { agent_name; task_id } ->
       let payload =
         `Assoc
           [
@@ -170,7 +170,7 @@ let native_event_to_json (evt : Oas.Event_bus.event) : Yojson.Safe.t option =
           ]
       in
       Some (wrap ~event_type:"agent_started" ~payload ~agent_name ~task_id ())
-  | Oas.Event_bus.AgentCompleted { agent_name; task_id; elapsed; result } ->
+  | Agent_sdk.Event_bus.AgentCompleted { agent_name; task_id; elapsed; result } ->
       let usage_fields = match result with Ok _ -> [] | Error _ -> [] in
       let payload =
         `Assoc
@@ -182,18 +182,18 @@ let native_event_to_json (evt : Oas.Event_bus.event) : Yojson.Safe.t option =
           @ usage_fields)
       in
       Some (wrap ~event_type:"agent_completed" ~payload ~agent_name ~task_id ())
-  | Oas.Event_bus.AgentFailed { agent_name; task_id; error; elapsed } ->
+  | Agent_sdk.Event_bus.AgentFailed { agent_name; task_id; error; elapsed } ->
       let payload =
         `Assoc
           [
             ("agent_name", `String agent_name);
             ("task_id", `String task_id);
             ("elapsed_s", `Float elapsed);
-            ("error", `String (Oas.Error.to_string error));
+            ("error", `String (Agent_sdk.Error.to_string error));
           ]
       in
       Some (wrap ~event_type:"agent_failed" ~payload ~agent_name ~task_id ())
-  | Oas.Event_bus.ToolCalled { agent_name; tool_name; _ } ->
+  | Agent_sdk.Event_bus.ToolCalled { agent_name; tool_name; _ } ->
       let payload =
         `Assoc
           [
@@ -202,7 +202,7 @@ let native_event_to_json (evt : Oas.Event_bus.event) : Yojson.Safe.t option =
           ]
       in
       Some (wrap ~event_type:"tool_called" ~payload ~agent_name ~tool_name ())
-  | Oas.Event_bus.ToolCompleted { agent_name; tool_name; _ } ->
+  | Agent_sdk.Event_bus.ToolCompleted { agent_name; tool_name; _ } ->
       let payload =
         `Assoc
           [
@@ -211,7 +211,7 @@ let native_event_to_json (evt : Oas.Event_bus.event) : Yojson.Safe.t option =
           ]
       in
       Some (wrap ~event_type:"tool_completed" ~payload ~agent_name ~tool_name ())
-  | Oas.Event_bus.TurnStarted { agent_name; turn } ->
+  | Agent_sdk.Event_bus.TurnStarted { agent_name; turn } ->
       let payload =
         `Assoc
           [
@@ -220,7 +220,7 @@ let native_event_to_json (evt : Oas.Event_bus.event) : Yojson.Safe.t option =
           ]
       in
       Some (wrap ~event_type:"turn_started" ~payload ~agent_name ~turn ())
-  | Oas.Event_bus.TurnCompleted { agent_name; turn } ->
+  | Agent_sdk.Event_bus.TurnCompleted { agent_name; turn } ->
       let payload =
         `Assoc
           [
@@ -229,7 +229,7 @@ let native_event_to_json (evt : Oas.Event_bus.event) : Yojson.Safe.t option =
           ]
       in
       Some (wrap ~event_type:"turn_completed" ~payload ~agent_name ~turn ())
-  | Oas.Event_bus.TurnReady { agent_name; turn; tool_names } ->
+  | Agent_sdk.Event_bus.TurnReady { agent_name; turn; tool_names } ->
       let names_hash =
         Digest.to_hex (Digest.string (String.concat "\n" tool_names))
       in
@@ -245,7 +245,7 @@ let native_event_to_json (evt : Oas.Event_bus.event) : Yojson.Safe.t option =
           ]
       in
       Some (wrap ~event_type:"turn_ready" ~payload ~agent_name ~turn ())
-  | Oas.Event_bus.HandoffRequested { from_agent; to_agent; reason } ->
+  | Agent_sdk.Event_bus.HandoffRequested { from_agent; to_agent; reason } ->
       let payload =
         `Assoc
           [
@@ -256,7 +256,7 @@ let native_event_to_json (evt : Oas.Event_bus.event) : Yojson.Safe.t option =
       in
       Some
         (wrap ~event_type:"handoff_requested" ~payload ~agent_name:from_agent ())
-  | Oas.Event_bus.HandoffCompleted { from_agent; to_agent; elapsed } ->
+  | Agent_sdk.Event_bus.HandoffCompleted { from_agent; to_agent; elapsed } ->
       let payload =
         `Assoc
           [
@@ -267,7 +267,7 @@ let native_event_to_json (evt : Oas.Event_bus.event) : Yojson.Safe.t option =
       in
       Some
         (wrap ~event_type:"handoff_completed" ~payload ~agent_name:from_agent ())
-  | Oas.Event_bus.ContextCompacted
+  | Agent_sdk.Event_bus.ContextCompacted
       { agent_name; before_tokens; after_tokens; phase } ->
       (* #9935: compaction completed — clears any pending
          imminent and fires action-taken counter. *)
@@ -282,9 +282,9 @@ let native_event_to_json (evt : Oas.Event_bus.event) : Yojson.Safe.t option =
           ]
       in
       Some (wrap ~event_type:"context_compacted" ~payload ~agent_name ())
-  | Oas.Event_bus.ElicitationCompleted _ ->
+  | Agent_sdk.Event_bus.ElicitationCompleted _ ->
     None  (* Internal; no SSE relay needed *)
-  | Oas.Event_bus.ContextOverflowImminent
+  | Agent_sdk.Event_bus.ContextOverflowImminent
         { agent_name; estimated_tokens; limit_tokens; ratio } ->
       (* #9935: track imminent→action pairing so an unanswered
          overflow (no compact_started/compacted within grace
@@ -303,7 +303,7 @@ let native_event_to_json (evt : Oas.Event_bus.event) : Yojson.Safe.t option =
       in
       Some (wrap ~event_type:"context_overflow_imminent" ~payload
               ~agent_name ())
-  | Oas.Event_bus.ContextCompactStarted { agent_name; trigger } ->
+  | Agent_sdk.Event_bus.ContextCompactStarted { agent_name; trigger } ->
       (* #9935: compaction started — clears pending imminent
          and fires action-taken counter. *)
       Context_overflow_action_tracker.record_action ~keeper_name:agent_name;
@@ -315,7 +315,7 @@ let native_event_to_json (evt : Oas.Event_bus.event) : Yojson.Safe.t option =
       in
       Some (wrap ~event_type:"context_compact_started" ~payload
               ~agent_name ())
-  | Oas.Event_bus.ContentReplacementReplaced
+  | Agent_sdk.Event_bus.ContentReplacementReplaced
       { tool_use_id; preview; original_chars; seen_count_after } ->
       let payload =
         `Assoc [
@@ -326,7 +326,7 @@ let native_event_to_json (evt : Oas.Event_bus.event) : Yojson.Safe.t option =
         ]
       in
       Some (wrap ~event_type:"content_replacement_replaced" ~payload ())
-  | Oas.Event_bus.ContentReplacementKept { tool_use_id; seen_count_after } ->
+  | Agent_sdk.Event_bus.ContentReplacementKept { tool_use_id; seen_count_after } ->
       let payload =
         `Assoc [
           ("tool_use_id", `String tool_use_id);
@@ -334,13 +334,13 @@ let native_event_to_json (evt : Oas.Event_bus.event) : Yojson.Safe.t option =
         ]
       in
       Some (wrap ~event_type:"content_replacement_kept" ~payload ())
-  | Oas.Event_bus.SlotSchedulerObserved
+  | Agent_sdk.Event_bus.SlotSchedulerObserved
       { max_slots; active; available; queue_length; state } ->
       let state_str =
         match state with
-        | Oas.Event_bus.Idle -> "idle"
-        | Oas.Event_bus.Queued -> "queued"
-        | Oas.Event_bus.Saturated -> "saturated"
+        | Agent_sdk.Event_bus.Idle -> "idle"
+        | Agent_sdk.Event_bus.Queued -> "queued"
+        | Agent_sdk.Event_bus.Saturated -> "saturated"
       in
       let payload =
         `Assoc [
@@ -352,7 +352,7 @@ let native_event_to_json (evt : Oas.Event_bus.event) : Yojson.Safe.t option =
         ]
       in
       Some (wrap ~event_type:"slot_scheduler_observed" ~payload ())
-  | Oas.Event_bus.Custom (name, payload) ->
+  | Agent_sdk.Event_bus.Custom (name, payload) ->
       (* Wire compatibility: dashboard consumers historically decoded
          [masc:broadcast] / [masc:keeper:snapshot] (all colons).
          Internally MASC now emits dot-separated names per OAS Custom
@@ -371,7 +371,7 @@ let native_event_to_json (evt : Oas.Event_bus.event) : Yojson.Safe.t option =
            ?turn:(payload_int_opt "turn" payload)
            ?tool_name:(payload_string_opt "tool_name" payload)
            ())
-  | Oas.Event_bus.InferenceTelemetry _ ->
+  | Agent_sdk.Event_bus.InferenceTelemetry _ ->
       (* Per-token telemetry from OAS#1202; not surfaced over SSE — the
          dashboard receives token usage via the existing AgentCompleted
          payload aggregate. Skip the relay to avoid flooding SSE
@@ -384,7 +384,7 @@ let native_event_to_json (evt : Oas.Event_bus.event) : Yojson.Safe.t option =
          [InferenceTelemetry] (#10490) and [Stale_turn_timeout] (#10574)
          broke main with [-warn-error +8] partial-match errors.
 
-         [Oas.Event_bus.payload_kind] is co-located with the [payload]
+         [Agent_sdk.Event_bus.payload_kind] is co-located with the [payload]
          variant in OAS — adding a new variant upstream forces an
          entry there in the same patch, so the snake_case label is
          always accurate.  Emit a kind-only SSE event so subscribers
@@ -397,7 +397,7 @@ let native_event_to_json (evt : Oas.Event_bus.event) : Yojson.Safe.t option =
          that an OAS variant has shipped without a masc-mcp consumer
          migration; downstream PRs should then move the variant out
          of this catch-all into an explicit arm. *)
-      let kind = Oas.Event_bus.payload_kind other in
+      let kind = Agent_sdk.Event_bus.payload_kind other in
       Log.Misc.warn
         "oas_event_bridge: kind-only fallback for unmigrated payload \
          variant kind=%s correlation_id=%s run_id=%s"
@@ -693,7 +693,7 @@ let start_impl ~interval_s ~sw ~clock ~(config : Coord.config) ~bus =
   let sub =
     Oas_bus_instrument.subscribe
       ~purpose:"sse_bridge"
-      ~filter:Oas.Event_bus.accept_all
+      ~filter:Agent_sdk.Event_bus.accept_all
       bus
   in
   Eio.Switch.on_release sw (fun () ->

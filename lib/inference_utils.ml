@@ -24,20 +24,20 @@ let int_of_env_default name ~default ~min_v ~max_v =
 (* ================================================================ *)
 
 (** Compute total tokens from OAS api_usage. *)
-let total_tokens (u : Oas.Types.api_usage) = u.input_tokens + u.output_tokens
+let total_tokens (u : Agent_sdk.Types.api_usage) = u.input_tokens + u.output_tokens
 
 (** CJK-aware token estimate delegated to OAS Context_reducer. *)
 let estimate_tokens (s : string) : int =
-  if s = "" then 0 else Oas.Context_reducer.estimate_char_tokens s
+  if s = "" then 0 else Agent_sdk.Context_reducer.estimate_char_tokens s
 
 (** Zero usage marker — delegates to OAS Types.zero_api_usage.
     @since 2.123.0 — delegated to OAS *)
-let zero_usage : Oas.Types.api_usage =
+let zero_usage : Agent_sdk.Types.api_usage =
   { input_tokens = 0; output_tokens = 0; cache_read_input_tokens = 0; cache_creation_input_tokens = 0; cost_usd = None }
 
 (** Extract usage from an api_response, defaulting to zero.
     @since 2.123.0 *)
-let usage_of_response (resp : Oas_response.api_response) : Oas.Types.api_usage =
+let usage_of_response (resp : Oas_response.api_response) : Agent_sdk.Types.api_usage =
   match resp.usage with Some u -> u | None -> zero_usage
 
 (** Measure wall-clock latency of a thunk in milliseconds.
@@ -120,17 +120,17 @@ let rec sanitize_json_utf8 (json : Yojson.Safe.t) : Yojson.Safe.t =
   | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _) as other -> other
 
 let rec sanitize_content_blocks_utf8
-    (blocks : Oas.Types.content_block list)
-  : Oas.Types.content_block list =
+    (blocks : Agent_sdk.Types.content_block list)
+  : Agent_sdk.Types.content_block list =
   match blocks with
   | [] -> blocks
   | block :: rest ->
       let sanitized_block =
         match block with
-        | Oas.Types.Text s ->
+        | Agent_sdk.Types.Text s ->
             let sanitized = sanitize_text_utf8 s in
-            if sanitized == s then block else Oas.Types.Text sanitized
-        | Oas.Types.ToolResult { tool_use_id; content; is_error; json } ->
+            if sanitized == s then block else Agent_sdk.Types.Text sanitized
+        | Agent_sdk.Types.ToolResult { tool_use_id; content; is_error; json } ->
             let sanitized_tool_use_id = sanitize_text_utf8 tool_use_id in
             let sanitized_content = sanitize_text_utf8 content in
             let sanitized_json, json_changed =
@@ -145,7 +145,7 @@ let rec sanitize_content_blocks_utf8
                && not json_changed
             then block
             else
-              Oas.Types.ToolResult {
+              Agent_sdk.Types.ToolResult {
                 tool_use_id = sanitized_tool_use_id;
                 content = sanitized_content;
                 is_error;
@@ -157,12 +157,12 @@ let rec sanitize_content_blocks_utf8
       if sanitized_block == block && sanitized_rest == rest then blocks
       else sanitized_block :: sanitized_rest
 
-let sanitize_message_utf8 (m : Oas.Types.message) : Oas.Types.message =
+let sanitize_message_utf8 (m : Agent_sdk.Types.message) : Agent_sdk.Types.message =
   let sanitized_content = sanitize_content_blocks_utf8 m.content in
   if sanitized_content == m.content then m
   else { m with content = sanitized_content }
 
-let sanitize_messages_utf8 (msgs : Oas.Types.message list) : Oas.Types.message list =
+let sanitize_messages_utf8 (msgs : Agent_sdk.Types.message list) : Agent_sdk.Types.message list =
   let rec loop messages =
     match messages with
     | [] -> messages

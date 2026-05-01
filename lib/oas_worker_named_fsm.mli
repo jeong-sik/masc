@@ -11,7 +11,7 @@
 (** {1 Cascade outcome classification} *)
 
 val sdk_error_to_cascade_outcome :
-  Oas.Error.sdk_error -> Cascade_fsm.provider_outcome option
+  Agent_sdk.Error.sdk_error -> Cascade_fsm.provider_outcome option
 (** Convert an SDK error into a cascade FSM provider outcome.
     API-level errors and model-capability-dependent agent errors are
     cascadeable.  Structural agent errors (budget, idle, exit) are not. *)
@@ -21,7 +21,7 @@ val sdk_error_to_cascade_outcome :
 val enrich_sdk_error :
   cascade_name:Oas_worker_named_error.cascade_name ->
   provider_cfg:Llm_provider.Provider_config.t ->
-  Oas.Error.sdk_error -> Oas.Error.sdk_error
+  Agent_sdk.Error.sdk_error -> Agent_sdk.Error.sdk_error
 (** Enrich an SDK error with provider-specific diagnostic hints
     (e.g. Moonshot auth, OpenAI-compat 404). *)
 
@@ -58,20 +58,20 @@ val retry_message_looks_like_not_found : string -> bool
 
 val sdk_error_to_resumable_cli_session :
   cascade_name:Oas_worker_named_error.cascade_name ->
-  Oas.Error.sdk_error ->
-  Oas.Error.sdk_error option
+  Agent_sdk.Error.sdk_error ->
+  Agent_sdk.Error.sdk_error option
 (** If the error looks like a resumable CLI session, convert it into the
     structured [Resumable_cli_session] form. *)
 
-val sdk_error_is_resumable_cli_session : Oas.Error.sdk_error -> bool
+val sdk_error_is_resumable_cli_session : Agent_sdk.Error.sdk_error -> bool
 
 val sdk_error_is_terminal_provider_runtime_failure :
-  Oas.Error.sdk_error -> bool
+  Agent_sdk.Error.sdk_error -> bool
 (** [true] for deterministic provider/adapter crashes that should enter the
     immediate long cooldown lane instead of waiting for generic failure
     thresholding. *)
 
-val sdk_error_is_hard_quota : Oas.Error.sdk_error -> bool
+val sdk_error_is_hard_quota : Agent_sdk.Error.sdk_error -> bool
 (** [true] when the error represents a hard usage quota that will not
     recover within the cascade turn budget. *)
 
@@ -85,7 +85,7 @@ val retry_api_error_to_provider_error :
     stays at this OAS boundary instead of moving into [Provider_error]. *)
 
 val sdk_error_to_provider_error :
-  provider:string -> Oas.Error.sdk_error -> Provider_error.t option
+  provider:string -> Agent_sdk.Error.sdk_error -> Provider_error.t option
 (** Convert API-level SDK errors into provider errors. Non-API structural
     errors return [None]. *)
 
@@ -103,18 +103,18 @@ val emit_provider_error_metric :
 val emit_sdk_provider_error_metric :
   cascade_name:Oas_worker_named_error.cascade_name ->
   provider:string ->
-  Oas.Error.sdk_error ->
+  Agent_sdk.Error.sdk_error ->
   Provider_error.t option
 (** Convert and emit an SDK provider error. Returns the converted variant
     so callers/tests can assert the same decision without reparsing metrics. *)
 
 val sdk_error_soft_rate_limited :
-  Oas.Error.sdk_error -> float option option
+  Agent_sdk.Error.sdk_error -> float option option
 (** [Some (Some retry_after)] for non-quota 429 responses with a parsed
     [retry_after].  [Some None] when [retry_after] is absent.
     [None] for non-429 or hard-quota-429 errors. *)
 
-val sdk_error_is_max_turns_exceeded : Oas.Error.sdk_error -> bool
+val sdk_error_is_max_turns_exceeded : Agent_sdk.Error.sdk_error -> bool
 
 (** {1 Moonshot / Kimi helpers} *)
 

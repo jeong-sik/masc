@@ -19,7 +19,7 @@ module Float = Stdlib.Float
 (** Typed broadcast tool — Phase 1 PoC for Typed_tool_masc.
     Derives parse + params from Tool_schema_gen combinators. *)
 
-module Sg = Oas.Tool_schema_gen
+module Sg = Agent_sdk.Tool_schema_gen
 
 let message_field =
   Sg.string_field "message" ~required:true
@@ -58,7 +58,7 @@ let parse_broadcast (json : Yojson.Safe.t) =
   | Ok v -> Ok v
   | Error errs ->
       Error
-        (Oas.Tool_input_validation.format_errors
+        (Agent_sdk.Tool_input_validation.format_errors
            ~tool_name:"masc_broadcast_typed" errs)
 
 let tool = Typed_tool_masc.create

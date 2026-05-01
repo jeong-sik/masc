@@ -16,7 +16,7 @@
     2. Behavioural: [Approval_callbacks.auto_approve] returns
        [Approve] (unchanged contract, for trusted system runs).
     3. Structural: every MASC source file that constructs an
-       [Oas.Agent.t] via [Oas.Builder.build_safe] wires an approval
+       [Agent_sdk.Agent.t] via [Agent_sdk.Builder.build_safe] wires an approval
        callback (with_approval, or threads ~approval to a helper that
        does). Missing wiring → fail-open, the exact bug #7883.
     4. Structural: every MASC call site of
@@ -29,7 +29,7 @@
 
 module AC = Masc_mcp.Approval_callbacks
 
-let check_reject name (result : Masc_mcp.Oas.Hooks.approval_decision) =
+let check_reject name (result : Masc_mcp.Agent_sdk.Hooks.approval_decision) =
   match result with
   | Reject reason ->
       Alcotest.(check bool)
@@ -43,7 +43,7 @@ let check_reject name (result : Masc_mcp.Oas.Hooks.approval_decision) =
       Alcotest.fail
         (Printf.sprintf "%s: expected Reject, got Edit" name)
 
-let check_approve name (result : Masc_mcp.Oas.Hooks.approval_decision) =
+let check_approve name (result : Masc_mcp.Agent_sdk.Hooks.approval_decision) =
   match result with
   | Approve -> ()
   | Reject reason ->
@@ -69,7 +69,7 @@ let test_reject_by_default_rejects_any_tool () =
     tools
 
 let test_reject_by_default_reason_mentions_tool () =
-  let decision : Masc_mcp.Oas.Hooks.approval_decision =
+  let decision : Masc_mcp.Agent_sdk.Hooks.approval_decision =
     AC.reject_by_default ~tool_name:"masc_worktree_create"
       ~input:(`Assoc [])
   in
@@ -131,7 +131,7 @@ let file_matches path pattern =
     true
   with Sys_error _ | Not_found -> false
 
-(** Each MASC source file that calls [Oas.Builder.build_safe] must
+(** Each MASC source file that calls [Agent_sdk.Builder.build_safe] must
     also install an approval callback. We express this as: the file
     contains "with_approval" OR threads the caller-supplied
     [?approval] into a helper that does (e.g. oas_worker_exec wires
@@ -139,13 +139,13 @@ let file_matches path pattern =
 let builder_sites = [
   (* Worker OAS Builder — issue #8232 path. *)
   ( "lib/worker_oas.ml",
-    "Oas.Builder.build_safe",
-    "Oas.Builder.with_approval" );
+    "Agent_sdk.Builder.build_safe",
+    "Agent_sdk.Builder.with_approval" );
   (* Oas_worker_exec Builder — run_named pipeline. This file wires
      config.approval into the builder directly. *)
   ( "lib/oas_worker_exec.ml",
-    "Oas.Builder.build_safe",
-    "Oas.Builder.with_approval" );
+    "Agent_sdk.Builder.build_safe",
+    "Agent_sdk.Builder.with_approval" );
 ]
 
 let test_builder_sites_wire_approval () =

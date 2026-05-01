@@ -65,11 +65,11 @@ type cli_transport_overrides =
 type config = Oas_worker_exec_agent.config = {
   name : string;
   provider_cfg : Llm_provider.Provider_config.t;
-  provider : Oas.Provider.config;
+  provider : Agent_sdk.Provider.config;
   model_id : string;
   priority : Llm_provider.Request_priority.t option;
   system_prompt : string;
-  tools : Oas.Tool.t list;
+  tools : Agent_sdk.Tool.t list;
   runtime_mcp_policy :
     Llm_provider.Llm_transport.runtime_mcp_policy option;
   max_turns : int;
@@ -79,20 +79,20 @@ type config = Oas_worker_exec_agent.config = {
   max_input_tokens : int option;
   max_cost_usd : float option;
   temperature : float;
-  hooks : Oas.Hooks.hooks option;
-  context_reducer : Oas.Context_reducer.t option;
-  guardrails : Oas.Guardrails.t option;
-  event_bus : Oas.Event_bus.t option;
+  hooks : Agent_sdk.Hooks.hooks option;
+  context_reducer : Agent_sdk.Context_reducer.t option;
+  guardrails : Agent_sdk.Guardrails.t option;
+  event_bus : Agent_sdk.Event_bus.t option;
   checkpoint_dir : string option;
   session_id : string option;
   description : string option;
-  memory : Oas.Memory.t option;
-  initial_messages : Oas.Types.message list;
-  raw_trace : Oas.Raw_trace.t option;
-  tool_retry_policy : Oas.Tool_retry_policy.t option;
+  memory : Agent_sdk.Memory.t option;
+  initial_messages : Agent_sdk.Types.message list;
+  raw_trace : Agent_sdk.Raw_trace.t option;
+  tool_retry_policy : Agent_sdk.Tool_retry_policy.t option;
   required_tool_satisfaction :
-    Oas.Completion_contract.required_tool_satisfaction;
-  contract : Oas.Risk_contract.t option;
+    Agent_sdk.Completion_contract.required_tool_satisfaction;
+  contract : Agent_sdk.Risk_contract.t option;
   enable_thinking : bool option;
   transport : Masc_grpc_transport.t;
   allowed_paths : string list;
@@ -100,13 +100,13 @@ type config = Oas_worker_exec_agent.config = {
   cache_system_prompt : bool;
   yield_on_tool : bool;
   compact_ratio : float option;
-  context_injector : Oas.Hooks.context_injector option;
-  context : Oas.Context.t option;
+  context_injector : Agent_sdk.Hooks.context_injector option;
+  context : Agent_sdk.Context.t option;
   slot_id : int option;
-  approval : Oas.Hooks.approval_callback option;
+  approval : Agent_sdk.Hooks.approval_callback option;
   exit_condition : (int -> bool) option;
   exit_condition_result : (int -> stop_reason * string option) option;
-  summarizer : (Oas.Types.message list -> string) option;
+  summarizer : (Agent_sdk.Types.message list -> string) option;
   cli_transport_overrides : cli_transport_overrides option;
 }
 
@@ -114,7 +114,7 @@ val default_config :
   name:string ->
   provider_cfg:Llm_provider.Provider_config.t ->
   system_prompt:string ->
-  tools:Oas.Tool.t list ->
+  tools:Agent_sdk.Tool.t list ->
   config
 (** Builds a {!config} populated with sensible defaults
     for every field except the four required ones.
@@ -125,19 +125,19 @@ val default_config :
 (** {1 Run result} *)
 
 type run_result = {
-  response : Oas.Types.api_response;
-  checkpoint : Oas.Checkpoint.t option;
+  response : Agent_sdk.Types.api_response;
+  checkpoint : Agent_sdk.Checkpoint.t option;
   session_id : string;
   turns : int;
-  trace_ref : Oas.Raw_trace.run_ref option;
-  run_validation : Oas.Raw_trace.run_validation option;
-  proof : Oas.Cdal_proof.t option;
+  trace_ref : Agent_sdk.Raw_trace.run_ref option;
+  run_validation : Agent_sdk.Raw_trace.run_validation option;
+  proof : Agent_sdk.Cdal_proof.t option;
   cascade_observation : Oas_worker_cascade.cascade_observation option;
   stop_reason : stop_reason;
 }
 
 val proof_result_status_to_string :
-  Oas.Cdal_proof.result_status -> string
+  Agent_sdk.Cdal_proof.result_status -> string
 
 (** {1 Label resolution} *)
 
@@ -145,7 +145,7 @@ val label_resolution_error_to_string :
   Oas_worker_exec_transport.label_resolution_error -> string
 val label_resolution_error_to_sdk_error :
   Oas_worker_exec_transport.label_resolution_error ->
-  Oas.Error.sdk_error
+  Agent_sdk.Error.sdk_error
 
 val resolve_provider_config_of_label :
   string -> (Llm_provider.Provider_config.t,
@@ -204,11 +204,11 @@ val resolve_tool_lane_for_oas_tools :
   ?agent_name:string ->
   ?tool_requirement:[ `Required | `Optional ] ->
   provider_cfg:Llm_provider.Provider_config.t ->
-  tools:Oas.Tool.t list ->
+  tools:Agent_sdk.Tool.t list ->
   unit ->
-  ( Oas.Tool.t list
+  ( Agent_sdk.Tool.t list
     * Llm_provider.Llm_transport.runtime_mcp_policy option,
-    Oas.Error.sdk_error )
+    Agent_sdk.Error.sdk_error )
   result
 
 (** {1 Per-call switch transport} *)
@@ -220,7 +220,7 @@ val make_per_call_switch_transport :
 (** {1 Lifecycle / checkpoint helpers (re-exported)} *)
 
 val publish_lifecycle :
-  Oas.Event_bus.t ->
+  Agent_sdk.Event_bus.t ->
   name:string ->
   event:string ->
   detail:string ->
@@ -230,7 +230,7 @@ val publish_lifecycle :
   unit ->
   unit
 val enrich_idle_detail :
-  string -> Oas.Types.message list -> string
+  string -> Agent_sdk.Types.message list -> string
 
 (** {1 Build / resume / run} *)
 
@@ -238,8 +238,8 @@ val build :
   sw:Eio.Switch.t ->
   net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   config:config ->
-  (Oas.Agent.t, Oas.Error.sdk_error) result
-(** Builds an [Oas.Agent.t] from a {!config} ready for a
+  (Agent_sdk.Agent.t, Agent_sdk.Error.sdk_error) result
+(** Builds an [Agent_sdk.Agent.t] from a {!config} ready for a
     fresh run.  Resolves the per-call non-HTTP transport
     via {!non_http_transport_of_provider}; threads
     [config.approval] into the OAS builder when present. *)
@@ -248,8 +248,8 @@ val resume_from_checkpoint :
   sw:Eio.Switch.t ->
   net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   config:config ->
-  checkpoint:Oas.Checkpoint.t ->
-  (Oas.Agent.t, Oas.Error.sdk_error) result
+  checkpoint:Agent_sdk.Checkpoint.t ->
+  (Agent_sdk.Agent.t, Agent_sdk.Error.sdk_error) result
 (** Resumes from a persisted checkpoint.  Uses
     [Oas_worker_exec_agent.prepare_resume] to reconcile
     [checkpoint.turn_count] with the current
@@ -259,20 +259,20 @@ val run :
   sw:Eio.Switch.t ->
   net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   config:config ->
-  ?oas_checkpoint:Oas.Checkpoint.t ->
-  ?on_event:(Oas.Types.sse_event -> unit) ->
+  ?oas_checkpoint:Agent_sdk.Checkpoint.t ->
+  ?on_event:(Agent_sdk.Types.sse_event -> unit) ->
   ?on_yield:(unit -> unit) ->
   ?on_resume:(unit -> unit) ->
-  ?agent_ref:Oas.Agent.t option ref ->
-  ?proof_ref:Oas.Cdal_proof.t option ref ->
-  ?contract:Oas.Risk_contract.t ->
+  ?agent_ref:Agent_sdk.Agent.t option ref ->
+  ?proof_ref:Agent_sdk.Cdal_proof.t option ref ->
+  ?contract:Agent_sdk.Risk_contract.t ->
   string ->
-  (run_result, Oas.Error.sdk_error) result
+  (run_result, Agent_sdk.Error.sdk_error) result
 (** Runs an OAS agent against [goal].  When
     [oas_checkpoint] is present, {!resume_from_checkpoint}
     is used; otherwise {!build} produces a fresh agent.
     Returns the wrapped {!run_result}; errors propagate
-    as [Oas.Error.sdk_error]. *)
+    as [Agent_sdk.Error.sdk_error]. *)
 
 val run_with_masc_tools :
   sw:Eio.Switch.t ->
@@ -280,12 +280,12 @@ val run_with_masc_tools :
   config:config ->
   masc_tools:Types.tool_schema list ->
   dispatch:(name:string -> args:Yojson.Safe.t -> bool * string) ->
-  ?contract:Oas.Risk_contract.t ->
-  ?on_event:(Oas.Types.sse_event -> unit) ->
+  ?contract:Agent_sdk.Risk_contract.t ->
+  ?on_event:(Agent_sdk.Types.sse_event -> unit) ->
   ?on_yield:(unit -> unit) ->
   ?on_resume:(unit -> unit) ->
   string ->
-  (run_result, Oas.Error.sdk_error) result
+  (run_result, Agent_sdk.Error.sdk_error) result
 (** Variant of {!run} that wires MASC public-MCP tools
     into the agent through [dispatch].  Used by the
     keeper-runtime path that needs to expose MCP-style

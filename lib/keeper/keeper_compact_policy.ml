@@ -118,7 +118,7 @@ let compact_if_needed_typed
       in
       (* Use OAS stub_tool_results instead of MASC's FoldCompleted —
          OAS owns context reduction, MASC is a consumer. *)
-      let fold_reducer = Oas.Context_reducer.stub_tool_results ~keep_recent:2 in
+      let fold_reducer = Agent_sdk.Context_reducer.stub_tool_results ~keep_recent:2 in
       let strategy_names =
         List.map Context_compact_oas.strategy_name strategies
         @ ["StubToolResults"]
@@ -185,7 +185,7 @@ let compact_if_needed_typed
           in
           (* Apply keeper-private fold after standard strategies *)
           let msgs_after_fold =
-            Oas.Context_reducer.reduce fold_reducer msgs_after_compact
+            Agent_sdk.Context_reducer.reduce fold_reducer msgs_after_compact
           in
           Keeper_context_core.repair_broken_tool_call_pairs msgs_after_fold
         in

@@ -1,0 +1,41 @@
+name: Closed PR CI Cleanup
+
+on:
+  pull_request_target:
+    types: [closed]
+
+permissions:
+  actions: write
+  contents: read
+  pull-requests: read
+
+jobs:
+  cancel-pr-ci:
+    name: Cancel closed PR CI
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+
+    steps:
+      - name: Cancel in-flight pull_request CI for the closed PR head
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+
+          for status in queued in_progress pending; do
+            gh run list \
+              --repo "$GITHUB_REPOSITORY" \
+              --workflow CI \
+              --event pull_request \
+              --branch "$PR_HEAD_REF" \
+              --status "$status" \
+              --limit 100 \
+              --json databaseId,headSha \
+              --jq '.[] | select(.headSha == env.PR_HEAD_SHA) | .databaseId' |
+            while IFS= read -r run_id; do
+              [ -n "$run_id" ] || continue
+              gh run cancel "$run_id" --repo "$GITHUB_REPOSITORY" || true
+            done
+          done

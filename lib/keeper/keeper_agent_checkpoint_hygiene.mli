@@ -1,6 +1,6 @@
 (** Keeper_agent_checkpoint_hygiene — pre-dispatch checkpoint hygiene.
 
-    Runs once per turn before dispatching to {!Oas.Agent.run}: applies
+    Runs once per turn before dispatching to {!Agent_sdk.Agent.run}: applies
     the compaction policy with [cooldown_sec=0] (a forced one-shot
     evaluation distinct from the regular cooldown-gated policy), then
     resolves the resume checkpoint slot.  Extracted from
@@ -9,7 +9,7 @@
 
 type pre_dispatch_checkpoint_hygiene_result = {
   context : Keeper_types.working_context;
-  resume_checkpoint : Oas.Checkpoint.t option;
+  resume_checkpoint : Agent_sdk.Checkpoint.t option;
   compacted : bool;
   (** Equal to [applied].  Kept for surface clarity at call sites. *)
   applied : bool;
@@ -36,7 +36,7 @@ val prepare_resume_checkpoint_for_dispatch :
   loaded_checkpoint_present:bool ->
   save_checkpoint:
     (Keeper_types.working_context ->
-    (Oas.Checkpoint.t, string) result) ->
+    (Agent_sdk.Checkpoint.t, string) result) ->
   Keeper_types.working_context ->
   pre_dispatch_checkpoint_hygiene_result
 (** [prepare_resume_checkpoint_for_dispatch ~meta ~now_ts

@@ -3,7 +3,7 @@
     @since 2.260.0 *)
 
 type ('input, 'output) t = {
-  oas_tool : ('input, 'output) Oas.Typed_tool.t;
+  oas_tool : ('input, 'output) Agent_sdk.Typed_tool.t;
   module_tag : Tool_dispatch.module_tag;
   is_read_only : bool;
   is_destructive : bool;
@@ -17,7 +17,7 @@ let create ~name ~description ~module_tag ~params ~parse ~handler ~encode
     ?(is_read_only = false) ?(is_destructive = false) ?(is_idempotent = false)
     ?(visibility = Tool_catalog.Default) ?(requires_join = false)
     ?effect_domain () =
-  let oas_tool = Oas.Typed_tool.create
+  let oas_tool = Agent_sdk.Typed_tool.create
     ~name ~description ~params ~parse ~handler ~encode () in
   { oas_tool; module_tag; is_read_only; is_destructive;
     is_idempotent; visibility; requires_join; effect_domain }
@@ -27,13 +27,13 @@ let create ~name ~description ~module_tag ~params ~parse ~handler ~encode
     so the [name] parameter will always match — no guard needed. *)
 let make_dispatch_handler (tool : (_, _) t) : Tool_dispatch.handler =
   fun ~name:_ ~args ->
-    match Oas.Typed_tool.execute tool.oas_tool args with
+    match Agent_sdk.Typed_tool.execute tool.oas_tool args with
     | Ok { content } -> Some (true, content)
     | Error { message; _ } -> Some (false, message)
 
 let to_spec tool =
-  let schema = Oas.Typed_tool.schema tool.oas_tool in
-  let input_schema = Oas.Types.params_to_input_schema schema.parameters in
+  let schema = Agent_sdk.Typed_tool.schema tool.oas_tool in
+  let input_schema = Agent_sdk.Types.params_to_input_schema schema.parameters in
   Tool_spec.create
     ~name:schema.name
     ~description:schema.description
@@ -53,5 +53,5 @@ let register tool =
   Tool_spec.register spec
 
 let to_oas tool = tool.oas_tool
-let name tool = Oas.Typed_tool.name tool.oas_tool
-let schema tool = Oas.Typed_tool.schema tool.oas_tool
+let name tool = Agent_sdk.Typed_tool.name tool.oas_tool
+let schema tool = Agent_sdk.Typed_tool.schema tool.oas_tool

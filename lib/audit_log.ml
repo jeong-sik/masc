@@ -308,6 +308,162 @@ let append_entry (config : config) (entry : audit_entry) =
 
 (** {1 Logging API} *)
 
+(* ── Audit-event helpers ─────────────────────────────────────────── *)
+
+(** Derive a stable lexicographic ID from timestamp and entry content.
+    Format: [aud-<16-hex-ms>-<8-hex-content-hash>] *)
+let audit_entry_id ~timestamp ~agent_id ~action =
+  let ms = Int64.of_float (timestamp *. 1000.0) in
+  let hash = Digest.to_hex (Digest.string (agent_id ^ action_to_string action
+                                           ^ Printf.sprintf "%.6f" timestamp)) in
+  Printf.sprintf "aud-%016Lx-%s" ms (String.sub hash 0 8)
+
+(** Format a Unix timestamp as ISO 8601 UTC string. *)
+let format_iso8601 ts =
+  let t = Int64.to_int (Int64.of_float ts) in
+  let tm = Unix.gmtime (float_of_int t) in
+  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
+    (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
+    tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
+
+(** Map outcome + action to O2 severity string. *)
+let audit_severity ~action ~outcome =
+  match outcome with
+  | Failure _ -> (match action with
+    | AuthFailure | CircuitOpen -> "error"
+    | _ -> "warn")
+  | Success -> (match action with
+    | AuthSuccess -> "info"
+    | GovernanceDecision d -> (match d with
+      | Governance_deny | Governance_unauthorized -> "warn"
+      | _ -> "info")
+    | CircuitClose -> "warn"
+    | _ -> "info")
+
+(** Build a human-readable one-line summary from action + details. *)
+let audit_summary ~action ~details =
+  let kind = action_to_string action in
+  let extract_str key =
+    match details with
+    | `Assoc fields -> (match List.assoc_opt key fields with
+      | Some (`String v) -> Some (String.sub v 0 (min (String.length v) 80))
+      | _ -> None)
+    | _ -> None
+  in
+  match action with
+  | ToolCall name ->
+    (match extract_str "error_msg" with
+     | Some msg -> Printf.sprintf "tool_call:%s failed: %s" name msg
+     | None -> Printf.sprintf "tool_call:%s" name)
+  | GovernanceDecision d ->
+    let decision = governance_audit_decision_to_string d in
+    (match extract_str "action_type" with
+     | Some at -> Printf.sprintf "governance %s: %s" decision at
+     | None -> Printf.sprintf "governance %s" decision)
+  | Broadcast ->
+    (match extract_str "preview" with
+     | Some p -> Printf.sprintf "broadcast: %s" p
+     | None -> "broadcast")
+  | Suspend ->
+    (match extract_str "target_agent" with
+     | Some t -> Printf.sprintf "suspend %s" t
+     | None -> "suspend")
+  | CancelTask ->
+    (match extract_str "task_id" with
+     | Some id -> Printf.sprintf "cancel_task %s" id
+     | None -> "cancel_task")
+  | _ -> kind
+
+(** Extract primary target from action + details, if any. *)
+let audit_target ~action ~details =
+  let extract_str key =
+    match details with
+    | `Assoc fields -> (match List.assoc_opt key fields with
+      | Some (`String v) -> Some v
+      | _ -> None)
+    | _ -> None
+  in
+  match action with
+  | ToolCall name -> Some name
+  | GovernanceDecision _ -> extract_str "action_type"
+  | ClaimTask | StartTask | DoneTask | CancelTask | ReleaseTask ->
+    extract_str "task_id"
+  | Suspend -> extract_str "target_agent"
+  | Custom _ -> extract_str "tool_name"
+  | _ -> None
+
+let audit_event_severity (entry : audit_entry) =
+  audit_severity ~action:entry.action ~outcome:entry.outcome
+
+let audit_event_json (entry : audit_entry) =
+  let kind = action_to_string entry.action in
+  let id =
+    audit_entry_id ~timestamp:entry.timestamp ~agent_id:entry.agent_id
+      ~action:entry.action
+  in
+  let target = audit_target ~action:entry.action ~details:entry.details in
+  let fields =
+    [
+      ("id", `String id);
+      ("ts", `String (format_iso8601 entry.timestamp));
+      ("actor", `String entry.agent_id);
+      ("kind", `String kind);
+      ("summary", `String (audit_summary ~action:entry.action ~details:entry.details));
+      ("severity", `String (audit_event_severity entry));
+    ]
+  in
+  let fields =
+    match target with
+    | Some value -> ("target", `String value) :: fields
+    | None -> fields
+  in
+  let fields =
+    if entry.details = `Null then fields else ("payload", entry.details) :: fields
+  in
+  `Assoc fields
+
+let audit_events_response_json ?actor ?kind ?severity ?since ?until ~limit
+    (entries : audit_entry list) =
+  let filtered =
+    entries
+    |> (match actor with
+        | None -> Fun.id
+        | Some value ->
+            let actor = String.trim value in
+            List.filter (fun entry -> String.equal entry.agent_id actor))
+    |> (match kind with
+        | None -> Fun.id
+        | Some value ->
+            let kind = String.trim value in
+            List.filter (fun entry ->
+                String.starts_with ~prefix:kind (action_to_string entry.action)))
+    |> (match since with
+        | None -> Fun.id
+        | Some value -> List.filter (fun entry -> entry.timestamp >= value))
+    |> (match until with
+        | None -> Fun.id
+        | Some value -> List.filter (fun entry -> entry.timestamp <= value))
+    |> (match severity with
+        | None -> Fun.id
+        | Some value ->
+            let severity = String.trim value in
+            List.filter (fun entry ->
+                String.equal (audit_event_severity entry) severity))
+  in
+  let total = List.length filtered in
+  let drop_n = max 0 (total - limit) in
+  let rec drop_front n = function
+    | list when n <= 0 -> list
+    | [] -> []
+    | _ :: rest -> drop_front (n - 1) rest
+  in
+  let page = drop_front drop_n filtered in
+  `Assoc
+    [
+      ("entries", `List (List.map audit_event_json page));
+      ("count", `Int (List.length page));
+    ]
+
 let log_action
     (config : config)
     ~agent_id
@@ -330,7 +486,17 @@ let log_action
     token_count;
     trace_id;
   } in
-  append_entry config entry
+  append_entry config entry;
+  (* Publish to the MASC event bus for real-time SSE streaming. *)
+  let id = audit_entry_id ~timestamp:entry.timestamp ~agent_id ~action in
+  let ts = format_iso8601 entry.timestamp in
+  let kind = action_to_string action in
+  let severity = audit_severity ~action ~outcome in
+  let summary = audit_summary ~action ~details in
+  let target = audit_target ~action ~details in
+  let payload_opt = if details = `Null then None else Some details in
+  Oas_events.publish_audit_event ~id ~ts ~actor:agent_id ~kind ?target
+    ~summary ~severity ?payload:payload_opt ()
 
 (** Convenience functions for common events *)
 

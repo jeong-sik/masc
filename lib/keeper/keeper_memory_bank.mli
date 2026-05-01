@@ -183,16 +183,16 @@ val replay_metadata_of_snapshot : keeper_state_snapshot -> Yojson.Safe.t
 val snapshot_of_replay_metadata :
   Yojson.Safe.t -> keeper_state_snapshot option
 val with_snapshot_metadata :
-  Oas.Types.message ->
-  keeper_state_snapshot -> Oas.Types.message
+  Agent_sdk.Types.message ->
+  keeper_state_snapshot -> Agent_sdk.Types.message
 val snapshot_of_message_metadata :
-  Oas.Types.message -> keeper_state_snapshot option
+  Agent_sdk.Types.message -> keeper_state_snapshot option
 val snapshot_of_message :
-  Oas.Types.message -> keeper_state_snapshot option
+  Agent_sdk.Types.message -> keeper_state_snapshot option
 val snapshot_of_structured_working_context :
   Yojson.Safe.t -> keeper_state_snapshot option
 val latest_state_snapshot_from_messages :
-  Oas.Types.message list -> keeper_state_snapshot option
+  Agent_sdk.Types.message list -> keeper_state_snapshot option
 val priority_for_kind : kind:string -> int
 val contains_any_ci : string -> string list -> bool
 val signal_bonus : text:string -> int

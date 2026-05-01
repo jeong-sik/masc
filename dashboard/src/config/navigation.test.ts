@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  DASHBOARD_SURFACES,
   SECTION_REDIRECTS,
   defaultParamsForTab,
   normalizeRouteParams,
@@ -9,13 +10,14 @@ import {
 } from './navigation'
 
 describe('code (IDE plane) navigation', () => {
-  it('keeps the ide-shell route hidden until the IDE plane is real', () => {
+  it('exposes the production IDE plane in the sidebar', () => {
     expect(defaultParamsForTab('code')).toEqual({ section: 'ide-shell' })
+    expect(DASHBOARD_SURFACES.find(surface => surface.id === 'code')?.hidden).not.toBe(true)
 
     const visibleCodeSections = visibleSectionItemsForTab('code')
     const allCodeSections = sectionItemsForTab('code')
 
-    expect(visibleCodeSections).toEqual([])
+    expect(visibleCodeSections.map(item => item.id)).toEqual(['ide-shell'])
     expect(allCodeSections.map(item => item.id)).toEqual(['ide-shell'])
     expect(allCodeSections.map(item => item.label)).toEqual(['Code IDE'])
   })
@@ -98,6 +100,7 @@ describe('monitoring navigation labels', () => {
     // whose labels collide on the same word.
     expect(labelFor('runtime')).toBe('Cascade')
     expect(labelFor('agents')).toBe('Agent Directory')
+    expect(labelFor('cognition')).toBe('Cognition')
   })
 
   it('does not expose sessions section (removed in Phase 0 of RFC-MASC-006)', () => {
@@ -111,8 +114,9 @@ describe('monitoring navigation labels', () => {
     const sections = visibleSectionItemsForTab('monitoring')
     const ids = sections.map(item => item.id)
 
-    expect(ids).toEqual(['journey', 'agents', 'runtime', 'fleet-health'])
+    expect(ids).toEqual(['journey', 'agents', 'cognition', 'runtime', 'fleet-health'])
     expect(ids).toContain('journey')
+    expect(ids).toContain('cognition')
     expect(ids).toContain('fleet-health')
     expect(ids).toContain('runtime')
     expect(ids).toContain('agents')
@@ -136,8 +140,9 @@ describe('monitoring navigation labels', () => {
     const sections = visibleSectionItemsForTab('monitoring')
     expect(sections[0]?.id).toBe('journey')
     expect(sections[1]?.id).toBe('agents')
-    expect(sections[2]?.id).toBe('runtime')
-    expect(sections[3]?.id).toBe('fleet-health')
+    expect(sections[2]?.id).toBe('cognition')
+    expect(sections[3]?.id).toBe('runtime')
+    expect(sections[4]?.id).toBe('fleet-health')
   })
 
   it('keeps diagnostic monitoring routes available but hidden from the sidebar', () => {

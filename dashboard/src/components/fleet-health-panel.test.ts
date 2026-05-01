@@ -10,8 +10,17 @@ const routeSignal = signal<{ tab: string; params: Record<string, string>; postId
   postId: null,
 })
 
+function replaceRoute(tab: string, params?: Record<string, string>) {
+  routeSignal.value = { tab, params: params ?? {}, postId: null }
+  const query = new URLSearchParams(params ?? {}).toString()
+  const hash = query ? `#${tab}?${query}` : `#${tab}`
+  window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}${hash}`)
+  window.dispatchEvent(new HashChangeEvent('hashchange'))
+}
+
 vi.mock('../router', () => ({
   get route() { return routeSignal },
+  replaceRoute,
 }))
 
 // Mock child panels to avoid real fetch calls. Each renders a data-testid marker.

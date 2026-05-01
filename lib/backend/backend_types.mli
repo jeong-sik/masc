@@ -41,9 +41,8 @@ type config = {
   pubsub_max_messages : int;
 }
 
-(** Currently returns a fixed literal (1000). Kept as a function to
-    allow future env-var override without API change. *)
-val pubsub_max_messages_from_env : unit -> int
+(** Fixed upper bound for in-memory pub/sub message delivery. *)
+val pubsub_max_messages : int
 
 (** Generate a node identifier of the form
     ["<hostname>-<pid>-<rand4hex>"], suitable for
@@ -51,7 +50,7 @@ val pubsub_max_messages_from_env : unit -> int
 val generate_node_id : unit -> string
 
 (** Default config: [FileSystem] backend rooted at [".masc"], cluster
-    ["default"], and [pubsub_max_messages = pubsub_max_messages_from_env ()]. *)
+    ["default"], and [pubsub_max_messages]. *)
 val default_config : config
 
 (** {1 Status reporting} *)

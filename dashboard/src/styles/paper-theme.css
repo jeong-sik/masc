@@ -52,6 +52,50 @@
   --font-sans-paper: 'Noto Sans KR', 'Pretendard', -apple-system, BlinkMacSystemFont, sans-serif;
   --font-mono-paper: 'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
 
+  /* ───── Base SSOT tokens (paper inversion) ───────────────
+     Keep these first so all downstream aliases (`--bg-*`, `--fg-*`,
+     `--line-*`, status tokens, and `--color-*`) inherit the warm stack
+     for the full shell. */
+  --color-bg-0: var(--paper);
+  --color-bg-1: var(--paper-2);
+  --color-bg-2: var(--paper-3);
+  --color-bg-3: var(--paper-3);
+  --color-bg-4: var(--paper-4);
+
+  --color-fg-1: var(--ink);
+  --color-fg-2: var(--ink-2);
+  --color-fg-3: var(--ink-4);
+  --color-fg-4: var(--ink-6);
+
+  --color-line-1: var(--border-3-paper);
+  --color-line-2: var(--border-4-paper);
+  --color-line-3: var(--border-5-paper);
+
+  --color-brass-1: var(--brass);
+  --color-brass-2: var(--brass-line);
+  --color-brass-3: var(--brass);
+  --color-brass-soft: var(--brass-fill);
+
+  --color-ok: var(--forest);
+  --color-warn: var(--ember);
+  --color-err: var(--brick);
+  --color-info: var(--slate);
+  --color-idle: var(--ink-5);
+  --color-stalled: var(--plum);
+
+  --color-ok-glow: 45 95 78;
+  --color-warn-glow: 179 90 31;
+  --color-err-glow: 139 58 58;
+  --color-info-glow: 62 74 92;
+  --color-stalled-glow: 92 62 86;
+
+  --color-ok-soft: rgb(var(--color-ok-glow) / 0.10);
+  --color-warn-soft: rgb(var(--color-warn-glow) / 0.12);
+  --color-err-soft: rgb(var(--color-err-glow) / 0.12);
+  --color-info-soft: rgb(var(--color-info-glow) / 0.12);
+  --color-stalled-soft: rgb(var(--color-stalled-glow) / 0.12);
+  --color-idle-soft: rgba(135, 131, 121, 0.10);
+
   /* =====================================================================
      Bridge to existing MASC semantic tokens.
      Each line overrides a variable declared in tokens.css so every
@@ -133,6 +177,80 @@
   --select: var(--brass);
   --select-10: var(--brass-fill);
   --select-20: var(--brass-fill);
+
+  /* ───── Tailwind alias bridge ─────────────────────────────
+     These legacy tokens are still referenced by components
+     that were migrated before the token migration finished.
+     Mapping them keeps paper mode visually coherent without
+     per-component rewrites.
+     ------------------------------------------------------------------ */
+
+  /* Blue-family names now use cool-neutral paper accents (no neon blue). */
+  --blue-400: var(--ink-5);
+  --blue-400-8: rgba(130, 126, 118, 0.08);
+  --blue-400-15: rgba(130, 126, 118, 0.15);
+
+  /* Sky-family names now use the same neutral tone family. */
+  --sky-400: var(--slate);
+  --sky-4: rgba(131, 120, 104, 0.04);
+  --sky-8: rgba(131, 120, 104, 0.08);
+  --sky-28: rgba(131, 120, 104, 0.28);
+
+  /* Slate-family aliases keep text hierarchy and borders warm. */
+  --slate: var(--ink-6);
+  --slate-400: var(--ink-6);
+  --slate-500: var(--ink-5);
+  --slate-600: var(--ink-4);
+  --slate-800: var(--ink-2);
+  --slate-fill: var(--paper-3);
+
+  /* Indigo and related variants: waiting / dependency-blocking states. */
+  --indigo: var(--slate);
+  --indigo-4: rgba(62, 74, 92, 0.04);
+  --indigo-40: rgba(62, 74, 92, 0.40);
+  --indigo-45: rgba(62, 74, 92, 0.45);
+  --indigo-50: rgba(62, 74, 92, 0.50);
+
+  /* Purple-family aliases used across topology, heatmaps, and FSM swatches. */
+  --purple: var(--plum);
+  --purple-3: rgba(92, 62, 86, 0.03);
+  --purple-10: rgba(92, 62, 86, 0.10);
+  --purple-11: rgba(92, 62, 86, 0.11);
+  --purple-12: rgba(92, 62, 86, 0.12);
+  --purple-20: rgba(92, 62, 86, 0.20);
+  --purple-24: rgba(92, 62, 86, 0.24);
+  --purple-50: rgba(92, 62, 86, 0.50);
+  --purple-500: var(--plum);
+
+  /* Cyan-family aliases for active/agent states and heatmaps. */
+  --cyan: var(--teal);
+  --cyan-12: rgba(35, 104, 116, 0.12);
+  --cyan-16: rgba(35, 104, 116, 0.16);
+  --cyan-100: var(--teal-fill);
+
+  /* Rose-family aliases for error-like markers. */
+  --rose: var(--brick);
+  --rose-10: rgba(139, 58, 58, 0.10);
+  --rose-28: rgba(139, 58, 58, 0.28);
+  --rose-fg: var(--brick-line);
+  --rose-light: var(--brick);
+
+  /* Neutral/utility aliases. */
+  --frost-100: var(--paper-3);
+  --text-slate: var(--ink-5);
+  --text-slate-light: var(--ink-6);
+  --text-near-white: var(--ink-2);
+  --panel-dark: var(--ink);
+  --panel-dark-60: rgba(21, 21, 21, 0.6);
+
+  --slate-gray-8: rgba(46, 46, 44, 0.08);
+  --slate-gray-10: rgba(46, 46, 44, 0.10);
+  --slate-gray-12: rgba(46, 46, 44, 0.12);
+  --slate-gray-14: rgba(46, 46, 44, 0.14);
+  --slate-gray-15: rgba(46, 46, 44, 0.15);
+  --slate-gray-16: rgba(46, 46, 44, 0.16);
+
+  --white-pure: var(--paper-2);
 }
 
 /* Base surface + text when paper theme is active.

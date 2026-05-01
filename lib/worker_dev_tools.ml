@@ -76,8 +76,8 @@ let validate_path ?workdir path =
         | Some home -> is_within_dir ~dir:(resolve_path (Filename.concat home "me")) resolved
         | None -> false)
 
-let tool_error ?(recoverable = false) message : Oas.Types.tool_result =
-  Error { Oas.Types.message; recoverable; error_class = None }
+let tool_error ?(recoverable = false) message : Agent_sdk.Types.tool_result =
+  Error { Agent_sdk.Types.message; recoverable; error_class = None }
 
 (** shell_exec intentionally supports only a narrow allowlist of dev/test
     commands and rejects shell control syntax to keep execution predictable. *)
@@ -736,13 +736,13 @@ let file_read_description =
     file_read_max_label
 
 let make_file_read ?workdir ?on_exec () =
-  Oas.Tool.create
+  Agent_sdk.Tool.create
     ~name:"file_read"
     ~description:file_read_description
     ~parameters:[
       { name = "path";
         description = "Absolute file path to read";
-        param_type = Oas.Types.String; required = true };
+        param_type = Agent_sdk.Types.String; required = true };
     ]
     (fun input ->
        match Worker_tool_input.extract_string "path" input with
@@ -772,10 +772,10 @@ let make_file_read ?workdir ?on_exec () =
                (fun f -> f ~tool_name:"file_read" ~success:true ~duration_ms)
                on_exec;
              if String.length content > file_read_max_bytes then
-               Ok { Oas.Types.content =
+               Ok { Agent_sdk.Types.content =
                  String.sub content 0 file_read_max_bytes
                  ^ Printf.sprintf "\n[TRUNCATED at %s]" file_read_max_label }
-             else Ok { Oas.Types.content = content }
+             else Ok { Agent_sdk.Types.content = content }
            with Sys_error msg ->
              let duration_ms =
                int_of_float ((Time_compat.now () -. started) *. 1000.0)
@@ -786,7 +786,7 @@ let make_file_read ?workdir ?on_exec () =
              tool_error (Printf.sprintf "Cannot read: %s" msg))
 
 let make_file_write ?workdir ?on_exec () =
-  Oas.Tool.create
+  Agent_sdk.Tool.create
     ~name:"file_write"
     ~description:"Write content to a file by absolute path. Creates the file \
       if it doesn't exist, overwrites if it does. Creates parent directories. \
@@ -794,10 +794,10 @@ let make_file_write ?workdir ?on_exec () =
     ~parameters:[
       { name = "path";
         description = "Absolute file path to write";
-        param_type = Oas.Types.String; required = true };
+        param_type = Agent_sdk.Types.String; required = true };
       { name = "content";
         description = "Content to write to the file";
-        param_type = Oas.Types.String; required = true };
+        param_type = Agent_sdk.Types.String; required = true };
     ]
     (fun input ->
        match Worker_tool_input.extract_string "path" input,
@@ -829,7 +829,7 @@ let make_file_write ?workdir ?on_exec () =
              Option.iter
                (fun f -> f ~tool_name:"file_write" ~success:true ~duration_ms)
                on_exec;
-             Ok { Oas.Types.content =
+             Ok { Agent_sdk.Types.content =
                Printf.sprintf "Written %d bytes to %s"
                  (String.length content) resolved_path }
            with Sys_error msg ->
@@ -889,16 +889,16 @@ let attribution_of_validation ~cmd
 
 let make_shell_exec_with_allowlist ~workdir ~on_exec ~proc_mgr ~clock ~allowed_commands
     ~description () =
-  Oas.Tool.create
+  Agent_sdk.Tool.create
     ~name:"shell_exec"
     ~description
     ~parameters:[
       { name = "command";
         description = "Shell command to execute";
-        param_type = Oas.Types.String; required = true };
+        param_type = Agent_sdk.Types.String; required = true };
       { name = "timeout_s";
         description = "Timeout in seconds (default 30, max 120)";
-        param_type = Oas.Types.Number; required = false };
+        param_type = Agent_sdk.Types.Number; required = false };
     ]
     (fun input ->
        match Worker_tool_input.extract_string "command" input with
@@ -949,7 +949,7 @@ let make_shell_exec_with_allowlist ~workdir ~on_exec ~proc_mgr ~clock ~allowed_c
                  in
                  match status with
                  | `Exited 0 ->
-                   Ok { Oas.Types.content = output }
+                   Ok { Agent_sdk.Types.content = output }
                  | `Exited code ->
                    tool_error
                      (Printf.sprintf "Exit code %d:\n%s" code output)
@@ -1005,12 +1005,12 @@ let make_shell_exec_readonly ~workdir ~on_exec ~proc_mgr ~clock =
 
 (** Create dev tools that close over Eio capabilities.
     Returns [file_read; file_write; shell_exec]. *)
-let make_tools ~proc_mgr ~clock ?workdir ?on_exec () : Oas.Tool.t list =
+let make_tools ~proc_mgr ~clock ?workdir ?on_exec () : Agent_sdk.Tool.t list =
   [ make_file_read ?workdir ?on_exec ();
     make_file_write ?workdir ?on_exec ();
     make_shell_exec ~workdir ~on_exec ~proc_mgr ~clock ]
 
-let make_readonly_tools ~proc_mgr ~clock ?workdir ?on_exec () : Oas.Tool.t list =
+let make_readonly_tools ~proc_mgr ~clock ?workdir ?on_exec () : Agent_sdk.Tool.t list =
   [ make_file_read ?workdir ?on_exec ();
     make_shell_exec_readonly ~workdir ~on_exec ~proc_mgr ~clock ]
 

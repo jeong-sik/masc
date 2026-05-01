@@ -19,7 +19,7 @@ module Float = Stdlib.Float
 (** Tool_local_runtime_bench -- concurrency benchmark against runtime pool. *)
 
 include Tool_local_runtime_http
-module Oas_types = Oas.Types
+module Oas_types = Agent_sdk.Types
 
 let pctl percentile values =
   match values with

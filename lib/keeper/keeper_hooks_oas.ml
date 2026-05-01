@@ -37,7 +37,7 @@ let provider_of_model ?provider_kind (model : string) : string =
   Provider_adapter.provider_of_model_label ?provider_kind model
 
 let provider_kind_of_telemetry
-    (telemetry : Oas.Types.inference_telemetry option) =
+    (telemetry : Agent_sdk.Types.inference_telemetry option) =
   match telemetry with
   | Some { provider_kind = Some kind; _ } -> Some kind
   | Some _ | None -> None
@@ -49,7 +49,7 @@ let provider_of_model_with_telemetry ~model ~telemetry =
 let structurally_unmetered_provider provider =
   Provider_adapter.is_structurally_unmetered_provider provider
 
-let usage_has_tokens (usage : Oas.Types.api_usage) =
+let usage_has_tokens (usage : Agent_sdk.Types.api_usage) =
   usage.input_tokens > 0
   || usage.output_tokens > 0
   || usage.cache_creation_input_tokens > 0
@@ -208,7 +208,7 @@ let alias_response_model_metric =
 
 let unknown_model_sentinel = "unknown_provider"
 
-let zero_usage : Oas.Types.api_usage =
+let zero_usage : Agent_sdk.Types.api_usage =
   {
     input_tokens = 0;
     output_tokens = 0;
@@ -218,7 +218,7 @@ let zero_usage : Oas.Types.api_usage =
   }
 
 let canonical_model_id_of_telemetry ~model
-    (telemetry : Oas.Types.inference_telemetry option) =
+    (telemetry : Agent_sdk.Types.inference_telemetry option) =
   match telemetry with
   | Some { canonical_model_id = Some id; _ } when String.trim id <> "" ->
       String.trim id
@@ -248,7 +248,7 @@ let is_auto_model_label model =
     "auto"
 
 let canonical_model_id_opt
-    (telemetry : Oas.Types.inference_telemetry option) =
+    (telemetry : Agent_sdk.Types.inference_telemetry option) =
   match telemetry with
   | Some { canonical_model_id = Some id; _ } ->
       let trimmed = String.trim id in
@@ -266,7 +266,7 @@ let canonical_model_id_opt
    path emits a counter so the operator can attribute leaks per
    keeper per source. *)
 let resolve_after_turn_model ~keeper_name
-    ~(response : Oas.Types.api_response) =
+    ~(response : Agent_sdk.Types.api_response) =
   let raw_model = response.model in
   if String.trim raw_model <> "" then
     match canonical_model_id_opt response.telemetry with
@@ -299,7 +299,7 @@ let resolve_after_turn_model ~keeper_name
   end
 
 let context_max_of_telemetry
-    (telemetry : Oas.Types.inference_telemetry option) =
+    (telemetry : Agent_sdk.Types.inference_telemetry option) =
   match telemetry with
   | Some { effective_context_window = Some n; _ } when n > 0 -> n
   | _ -> 0
@@ -344,7 +344,7 @@ let record_usage_anomaly_metrics ~keeper_name ~model usage_trust =
    (OAS #555 parallel). Paid providers (openai gpt-5 family, glm
    family) are missing from the upstream OAS catalog today, so this
    path is the only place the miss becomes observable. *)
-let estimate_usage_cost_usd ~(model : string) (usage : Oas.Types.api_usage)
+let estimate_usage_cost_usd ~(model : string) (usage : Agent_sdk.Types.api_usage)
     : float =
   match Llm_provider.Pricing.pricing_for_model_opt model with
   | Some pricing ->
@@ -444,7 +444,7 @@ let cost_status_for_event
     | None -> Cost_unpriced_model
 
 let cost_usd_for_usage ?provider_kind ~(model : string)
-    (usage : Oas.Types.api_usage)
+    (usage : Agent_sdk.Types.api_usage)
     : float =
   let provider = provider_of_model ?provider_kind model in
   match usage.cost_usd with
@@ -504,10 +504,10 @@ let record_keeper_tool_duration_metric
     mixes prefill and decode phases.
 
     Extracted so the after_turn hook is unit-testable without
-    constructing a full [Oas.Hooks.AfterTurn] event. *)
+    constructing a full [Agent_sdk.Hooks.AfterTurn] event. *)
 let record_llm_tok_s_metrics
     ~(model : string)
-    ~(telemetry : Oas.Types.inference_telemetry option)
+    ~(telemetry : Agent_sdk.Types.inference_telemetry option)
   : unit =
   let prompt_tok_s_opt, decode_tok_s_opt =
     match telemetry with
@@ -541,7 +541,7 @@ let record_llm_tok_s_metrics
 let wall_tokens_per_second
     ~(usage_missing : bool)
     ~(output_tokens : int)
-    ~(telemetry : Oas.Types.inference_telemetry option)
+    ~(telemetry : Agent_sdk.Types.inference_telemetry option)
   : float option =
   match telemetry with
   | Some t when not usage_missing && output_tokens > 0
@@ -619,7 +619,7 @@ let emit_cost_event
     ~(cost_usd : float)
     ?(usage_missing : bool = false)
     ?usage_trust
-    ?(telemetry : Oas.Types.inference_telemetry option)
+    ?(telemetry : Agent_sdk.Types.inference_telemetry option)
     () : unit =
   let path = Filename.concat masc_root "costs.jsonl" in
   let int_field name = function
@@ -630,7 +630,7 @@ let emit_cost_event
     | Some v -> [ (name, `Float v) ]
     | None -> []
   in
-  let usage_for_trust : Oas.Types.api_usage =
+  let usage_for_trust : Agent_sdk.Types.api_usage =
     {
       input_tokens;
       output_tokens;
@@ -802,7 +802,7 @@ let suggest_alternatives ~(allowed_tools : string list)
     burning more tokens on a stuck LLM is worse than retrying later. *)
 let on_idle_decision_with_threshold ~skip_at ~consecutive_idle_turns
     ~allowed_tools ~tool_names
-  : Oas.Hooks.hook_decision =
+  : Agent_sdk.Hooks.hook_decision =
   let tools_str = match tool_names with
     | [] -> "<none>"
     | names -> String.concat ", " names
@@ -816,15 +816,15 @@ let on_idle_decision_with_threshold ~skip_at ~consecutive_idle_turns
     | alts -> String.concat ", " alts
   in
   if consecutive_idle_turns >= skip_at then
-    Oas.Hooks.Skip
+    Agent_sdk.Hooks.Skip
   else if consecutive_idle_turns = skip_at - 1 then
-    Oas.Hooks.Nudge
+    Agent_sdk.Hooks.Nudge
       (Printf.sprintf
          "FINAL WARNING: you repeated %s %d times. Next idle = turn ends. \
           Use one of these instead: %s — or call keeper_stay_silent to do nothing."
          tools_str consecutive_idle_turns alt_str)
   else
-    Oas.Hooks.Nudge
+    Agent_sdk.Hooks.Nudge
       (Printf.sprintf
          "You are repeating %s without progress. \
           Available alternatives: %s."
@@ -835,7 +835,7 @@ let on_idle_decision_with_threshold ~skip_at ~consecutive_idle_turns
     Reads the keeper's allowed tool names from [meta_ref] for concrete
     alternative suggestions. *)
 let on_idle_decision ~consecutive_idle_turns ~allowed_tools ~tool_names
-  : Oas.Hooks.hook_decision =
+  : Agent_sdk.Hooks.hook_decision =
   let skip_at = Env_config_keeper.KeeperKeepalive.idle_skip_threshold in
   on_idle_decision_with_threshold ~skip_at ~consecutive_idle_turns
     ~allowed_tools ~tool_names
@@ -871,7 +871,7 @@ let make_hooks
     ?(discover_work_nudge : unit -> string option =
         fun () -> None)
     ()
-  : Oas.Hooks.hooks =
+  : Agent_sdk.Hooks.hooks =
   let sse_turn_complete = "keeper_turn_complete" in
   let tool_start_time = ref 0.0 in
   (* Per-turn tool call counter for SSE enrichment.
@@ -907,7 +907,7 @@ let make_hooks
       ~pre_tool_use_guard
   in
   let non_gate_hooks =
-    { Oas.Hooks.empty with
+    { Agent_sdk.Hooks.empty with
 
     (* Work discovery injection (#8773 fix). The callback owns the policy
        (interval, sources, query) and returns Some text only when there
@@ -917,11 +917,11 @@ let make_hooks
        None — silent no-op, no token cost. *)
     before_turn = Some (fun event ->
       match event with
-      | Oas.Hooks.BeforeTurn _ ->
+      | Agent_sdk.Hooks.BeforeTurn _ ->
         (match discover_work_nudge () with
-         | None -> Oas.Hooks.Continue
+         | None -> Agent_sdk.Hooks.Continue
          | Some text when String.trim text = "" ->
-           Oas.Hooks.Continue
+           Agent_sdk.Hooks.Continue
          | Some text when not (String.is_valid_utf_8 text) ->
            (* Defensive: nudge path producers (e.g. keeper_agent_run's
               discover_work_nudge) source strings from external input
@@ -935,16 +935,16 @@ let make_hooks
               drift. See #9036 for the first observed producer fix. *)
            Log.Keeper.warn "keeper:%s before_turn: dropped invalid UTF-8 nudge (%d bytes)"
              (!meta_ref).name (String.length text);
-           Oas.Hooks.Continue
+           Agent_sdk.Hooks.Continue
          | Some text ->
            Log.Keeper.info "keeper:%s before_turn: injecting work_discovery nudge (%d chars)"
              (!meta_ref).name (String.length text);
-           Oas.Hooks.Nudge text)
-      | _ -> Oas.Hooks.Continue);
+           Agent_sdk.Hooks.Nudge text)
+      | _ -> Agent_sdk.Hooks.Continue);
 
     after_turn = Some (fun event ->
       match event with
-      | Oas.Hooks.AfterTurn { turn; response } ->
+      | Agent_sdk.Hooks.AfterTurn { turn; response } ->
         let meta = !meta_ref in
         let model = resolve_after_turn_model ~keeper_name:meta.name ~response in
         let usage_trust =
@@ -1071,7 +1071,7 @@ let make_hooks
              ~usage_trust
              ?telemetry:response.telemetry ()
          | None -> ());
-        let text = Oas.Types.text_of_content response.content in
+        let text = Agent_sdk.Types.text_of_content response.content in
         let has_state_block =
           Option.is_some (Keeper_memory_policy.find_state_block text)
         in
@@ -1116,24 +1116,24 @@ let make_hooks
            should not hit threshold 5). *)
         streak_state.Keeper_guards.entry <- ("", 0);
         tool_call_count_ref := 0;
-        Oas.Hooks.Continue
-      | _ -> Oas.Hooks.Continue);
+        Agent_sdk.Hooks.Continue
+      | _ -> Agent_sdk.Hooks.Continue);
 
     post_tool_use = Some (fun event ->
       match event with
-      | Oas.Hooks.PostToolUse { tool_name; input; output; duration_ms = hook_duration_ms; _ } ->
+      | Agent_sdk.Hooks.PostToolUse { tool_name; input; output; duration_ms = hook_duration_ms; _ } ->
         incr tool_call_count_ref;
         let output_text = match output with
-          | Ok { Oas.Types.content; _ } -> content
-          | Error { Oas.Types.message; _ } -> message
+          | Ok { Agent_sdk.Types.content; _ } -> content
+          | Error { Agent_sdk.Types.message; _ } -> message
         in
         let input_keys = match input with
           | `Assoc pairs -> String.concat "," (List.map fst pairs)
           | _ -> "-"
         in
         let outcome, out_len = match output with
-          | Ok { Oas.Types.content; _ } -> "ok", String.length content
-          | Error { Oas.Types.message; _ } -> "error", String.length message
+          | Ok { Agent_sdk.Types.content; _ } -> "ok", String.length content
+          | Error { Agent_sdk.Types.message; _ } -> "error", String.length message
         in
         Log.Keeper.info "keeper:%s tool_call tool=%s params=[%s] outcome=%s out_len=%d"
           (!meta_ref).name tool_name input_keys outcome out_len;
@@ -1286,8 +1286,8 @@ let make_hooks
         if is_keeper_board_write_tool_name tool_name then
           Log.Keeper.debug "keeper:%s social_event tool=%s"
             (!meta_ref).name tool_name;
-        Oas.Hooks.Continue
-      | _ -> Oas.Hooks.Continue);
+        Agent_sdk.Hooks.Continue
+      | _ -> Agent_sdk.Hooks.Continue);
 
     (* pre_tool_use is provided by [guard_chain] below via Hooks.compose.
        The guard chain (timing + custom + streak + deny + cost +
@@ -1296,7 +1296,7 @@ let make_hooks
 
     on_idle = Some (fun event ->
       match event with
-      | Oas.Hooks.OnIdle { consecutive_idle_turns; tool_names; _ } ->
+      | Agent_sdk.Hooks.OnIdle { consecutive_idle_turns; tool_names; _ } ->
         let allowed_tools =
           Keeper_tool_policy.keeper_allowed_tool_names !meta_ref in
         let decision =
@@ -1305,32 +1305,32 @@ let make_hooks
         let tools_str = match tool_names with
           | [] -> "<none>" | names -> String.concat ", " names in
         (match decision with
-         | Oas.Hooks.Skip ->
+         | Agent_sdk.Hooks.Skip ->
            Log.Keeper.warn "keeper:%s idle_turns=%d repeated_tools=[%s] — requesting stop"
              (!meta_ref).name consecutive_idle_turns tools_str
-         | Oas.Hooks.Nudge _ ->
+         | Agent_sdk.Hooks.Nudge _ ->
            Log.Keeper.info "keeper:%s idle_turns=%d tools=[%s] — nudging LLM via Nudge"
              (!meta_ref).name consecutive_idle_turns tools_str
          | _ -> ());
         decision
-      | _ -> Oas.Hooks.Continue);
+      | _ -> Agent_sdk.Hooks.Continue);
 
     on_error = Some (function
-      | Oas.Hooks.OnError { detail; context = err_ctx } ->
+      | Agent_sdk.Hooks.OnError { detail; context = err_ctx } ->
         Log.Keeper.error "keeper:%s on_error: %s (context: %s)"
           (!meta_ref).name detail err_ctx;
-        Oas.Hooks.Continue
-      | _ -> Oas.Hooks.Continue);
+        Agent_sdk.Hooks.Continue
+      | _ -> Agent_sdk.Hooks.Continue);
 
     on_tool_error = Some (function
-      | Oas.Hooks.OnToolError { tool_name; error } ->
+      | Agent_sdk.Hooks.OnToolError { tool_name; error } ->
         Log.Keeper.error "keeper:%s tool_error: %s — %s"
           (!meta_ref).name tool_name error;
-        Oas.Hooks.Continue
-      | _ -> Oas.Hooks.Continue);
+        Agent_sdk.Hooks.Continue
+      | _ -> Agent_sdk.Hooks.Continue);
 
     post_tool_use_failure = Some (function
-      | Oas.Hooks.PostToolUseFailure { tool_name; error; _ } ->
+      | Agent_sdk.Hooks.PostToolUseFailure { tool_name; error; _ } ->
         let meta = !meta_ref in
         (* The richer counterpart
              "tool <name> returned error result (n/max): <detail>"
@@ -1342,15 +1342,15 @@ let make_hooks
           meta.name tool_name error;
         (* #9919: this path is a count event, not a heuristic decision. *)
         record_tool_use_failure ~keeper_name:meta.name ~tool_name;
-        Oas.Hooks.Continue
-      | _ -> Oas.Hooks.Continue);
+        Agent_sdk.Hooks.Continue
+      | _ -> Agent_sdk.Hooks.Continue);
   }
   in
   (* Guards fire first (outer). If all return Continue, non_gate_hooks
      fire for the remaining slots (inner). pre_tool_use lives in
      guard_chain only; non_gate_hooks has it None, so Hooks.compose
      keeps guard_chain's pre_tool_use verbatim. *)
-  Oas.Hooks.compose ~outer:guard_chain ~inner:non_gate_hooks
+  Agent_sdk.Hooks.compose ~outer:guard_chain ~inner:non_gate_hooks
 
 (** Static introspection of hook slot configuration.
     Returns a JSON summary of which hook slots are active, their gates/effects,

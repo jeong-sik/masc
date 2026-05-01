@@ -33,6 +33,10 @@ const doneVisibleCount = signal(20)
 const searchDoneVisibleCount = signal(20)
 const DONE_PAGE_SIZE = 20
 const REPO_ISSUES_BASE = 'https://github.com/jeong-sik/masc-mcp/issues'
+const DECK_PANEL = 'overflow-hidden rounded-sm border border-[var(--color-border-default)] bg-[var(--color-bg-page)]'
+const DECK_HEAD = 'border-b border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2'
+const DECK_CHIP = 'rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-bg-elevated)] px-1.5 py-0.5 font-mono text-3xs'
+const META_CHIP = 'rounded-sm border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-1.5 py-0.5 font-mono text-3xs'
 
 export function resetTaskBacklogState() {
   doneVisibleCount.value = DONE_PAGE_SIZE
@@ -41,10 +45,10 @@ export function resetTaskBacklogState() {
 
 function priorityToneClass(priority: number): string {
   switch (priority) {
-    case 1: return 'border-l-[var(--rose-light)] bg-[var(--color-status-err)]/10 text-[var(--rose-fg)]'
-    case 2: return 'border-l-[var(--color-status-warn)] bg-[var(--color-status-warn)]/10 text-[var(--yellow-100)]'
-    case 3: return 'border-l-[var(--blue-400)] bg-[var(--blue-400)]/10 text-[#bfdbfe]'
-    default: return 'border-l-[rgba(148,163,184,0.45)] bg-[var(--white-5)] text-text-muted'
+    case 1: return 'border-[var(--color-err-border)] bg-[var(--color-err-soft)] text-[var(--color-err-fg)]'
+    case 2: return 'border-[var(--color-warn-border)] bg-[var(--color-warn-soft)] text-[var(--color-warn-fg)]'
+    case 3: return 'border-[var(--color-info-border)] bg-[var(--color-info-soft)] text-[var(--color-info-fg)]'
+    default: return 'border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)]'
   }
 }
 
@@ -102,11 +106,11 @@ function KanbanCard({ task }: { task: Task }) {
   }
 
   return html`
-    <article class="flex flex-col gap-3 rounded border border-card-border/60 border-l-4 bg-[rgba(7,12,20,0.92)] p-4 ${priorityToneClass(p)}">
+    <article class="flex flex-col gap-2 rounded-sm border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3 transition-colors hover:border-[var(--color-border-strong)] hover:bg-[var(--color-bg-panel-alt)]">
       <div class="flex items-start justify-between gap-3">
-        <div class="flex flex-wrap items-center gap-2">
-          <span class="rounded border border-current/20 px-2 py-0.5 text-2xs font-semibold">${priorityLabel(p)}</span>
-          ${scope ? html`<span class="rounded border border-card-border/70 bg-[var(--white-5)] px-2 py-0.5 text-2xs font-medium text-text-body">${scope}</span>` : null}
+        <div class="flex flex-wrap items-center gap-1.5">
+          <span class="${DECK_CHIP} ${priorityToneClass(p)} font-semibold">${priorityLabel(p)}</span>
+          ${scope ? html`<span class="${META_CHIP} font-medium text-[var(--color-fg-secondary)]">${scope}</span>` : null}
         </div>
         <${ActionButton}
           variant="danger"
@@ -122,19 +126,19 @@ function KanbanCard({ task }: { task: Task }) {
 
       <button
         type="button"
-        class="text-left text-base font-semibold leading-snug text-text-strong whitespace-pre-wrap break-words cursor-pointer bg-transparent border-none p-0 font-[inherit] transition-colors hover:text-accent"
+        class="cursor-pointer border-none bg-transparent p-0 text-left font-[inherit] text-sm font-semibold leading-snug text-[var(--color-fg-primary)] whitespace-pre-wrap break-words transition-colors hover:text-[var(--color-accent-fg)]"
         onClick=${() => openTaskDetail(task)}
       >${task.title}</button>
 
       ${hasDescription ? html`
         <div class="flex flex-col gap-2">
-          <div class=${`overflow-hidden text-sm leading-relaxed text-text-body ${isExpanded || !canExpand ? '' : 'max-h-[9rem]'}`}>
+          <div class=${`overflow-hidden text-xs leading-relaxed text-[var(--color-fg-secondary)] ${isExpanded || !canExpand ? '' : 'max-h-[8rem]'}`}>
             <${RichContent} text=${description} previewLimit=${1} />
           </div>
           ${canExpand ? html`
             <button
               type="button"
-              class="w-fit rounded border border-card-border/70 bg-[var(--white-4)] px-2 py-1 text-2xs text-text-muted transition-colors hover:text-text-strong"
+              class="w-fit rounded-sm border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 font-mono text-3xs text-[var(--color-fg-muted)] transition-colors hover:border-[var(--color-border-strong)] hover:text-[var(--color-fg-primary)]"
               onClick=${() => toggleTaskExpand(task.id)}
               aria-expanded=${isExpanded}
             >
@@ -143,25 +147,25 @@ function KanbanCard({ task }: { task: Task }) {
           ` : null}
         </div>
       ` : html`
-        <div class="text-xs text-text-dim">설명 없음</div>
+        <div class="font-mono text-3xs text-[var(--color-fg-disabled)]">설명 없음</div>
       `}
 
-      <div class="flex flex-wrap items-center gap-2 text-2xs text-text-muted">
+      <div class="flex flex-wrap items-center gap-1.5 font-mono text-3xs text-[var(--color-fg-muted)]">
         ${task.status === 'awaiting_verification'
-          ? html`<span class="rounded border border-accent/30 bg-[var(--accent-10)] px-2 py-1 text-accent" title="verifier keeper의 독립 실측을 기다리는 중">검증 대기${task.updated_at ? html` <${TimeAgo} timestamp=${task.updated_at} />` : null}</span>`
+          ? html`<span class="rounded-sm border border-[var(--color-brass-border)] bg-[var(--color-brass-soft)] px-1.5 py-0.5 text-[var(--color-accent-fg)]" title="verifier keeper의 독립 실측을 기다리는 중">검증 대기${task.updated_at ? html` <${TimeAgo} timestamp=${task.updated_at} />` : null}</span>`
           : task.completed_at && task.status === 'done'
-            ? html`<span class="rounded border border-ok/25 bg-ok/10 px-2 py-1 text-ok">완�� <${TimeAgo} timestamp=${task.completed_at} /></span>`
+            ? html`<span class="rounded-sm border border-ok/25 bg-ok/10 px-1.5 py-0.5 text-ok">완료 <${TimeAgo} timestamp=${task.completed_at} /></span>`
             : task.completed_at && task.status === 'cancelled'
-              ? html`<span class="rounded border border-[var(--bad-30)] bg-[var(--bad-10)] px-2 py-1 text-[var(--bad-light)]">취소 <${TimeAgo} timestamp=${task.completed_at} /></span>`
+              ? html`<span class="rounded-sm border border-[var(--bad-30)] bg-[var(--bad-10)] px-1.5 py-0.5 text-[var(--bad-light)]">취소 <${TimeAgo} timestamp=${task.completed_at} /></span>`
               : task.created_at
-                ? html`<span class="rounded border border-card-border/70 bg-[var(--white-4)] px-2 py-1"><${TimeAgo} timestamp=${task.created_at} /></span>`
+                ? html`<span class="${META_CHIP}"><${TimeAgo} timestamp=${task.created_at} /></span>`
                 : null}
-        ${task.assignee ? html`<span class="rounded border border-accent/20 bg-[var(--accent-10)] px-2 py-1 text-accent">@${task.assignee}</span>` : null}
+        ${task.assignee ? html`<span class="rounded-sm border border-[var(--color-brass-border)] bg-[var(--color-brass-soft)] px-1.5 py-0.5 text-[var(--color-accent-fg)]">@${task.assignee}</span>` : null}
         <a
           href=${link.href}
           target="_blank"
           rel="noreferrer"
-          class="inline-flex items-center gap-1 rounded border border-card-border/70 bg-[var(--white-4)] px-2 py-1 text-text-body transition-colors hover:border-accent/35 hover:text-text-strong"
+          class="inline-flex items-center gap-1 rounded-sm border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-1.5 py-0.5 text-[var(--color-fg-secondary)] transition-colors hover:border-[var(--color-border-strong)] hover:text-[var(--color-fg-primary)]"
         >
           ${link.label}
           <span aria-hidden="true">\u2197</span>
@@ -193,15 +197,15 @@ function TaskColumn({
   }, [listRef])
 
   return html`
-    <section class="flex min-h-60 flex-col gap-4 rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4" aria-label=${title}>
-      <div class="flex items-start justify-between gap-3 border-b border-card-border/50 pb-3">
+    <section class="flex min-h-60 flex-col ${DECK_PANEL}" aria-label=${title}>
+      <div class="${DECK_HEAD} flex items-start justify-between gap-3">
         <div>
-          <h3 class="text-md font-semibold text-text-strong">${title}</h3>
-          <p class="mt-1 text-xs leading-relaxed text-text-muted">${description}</p>
+          <h3 class="font-mono text-2xs font-semibold uppercase tracking-[0.08em] text-[var(--color-fg-primary)]">${title}</h3>
+          <p class="mt-1 text-3xs leading-relaxed text-[var(--color-fg-muted)]">${description}</p>
         </div>
-        <span class="rounded px-2.5 py-1 text-xs font-semibold ${badgeClass}">${count}</span>
+        <span class="rounded-sm px-1.5 py-0.5 font-mono text-3xs font-semibold ${badgeClass}">${count}</span>
       </div>
-      <div ref=${listRef} class="flex max-h-170 flex-col gap-3 overflow-y-auto pr-1 custom-scrollbar">
+      <div ref=${listRef} class="flex max-h-170 flex-col gap-2 overflow-y-auto p-2.5 pr-1.5 custom-scrollbar">
         ${children}
       </div>
     </section>
@@ -256,12 +260,12 @@ export function TaskBacklog() {
   const hasData = executionLoaded.value
 
   if (isLoading) {
-    return html`<${Card} title="태스크 백로그" class="section"><${LoadingState}>백로그 불러오는 중...<//><//>`
+    return html`<${Card} title="태스크 백로그" class="section" variant="compact"><${LoadingState}>백로그 불러오는 중...<//><//>`
   }
 
   if (hasError && !hasData) {
     return html`
-      <${Card} title="태스크 백로그" class="section">
+      <${Card} title="태스크 백로그" class="section" variant="compact">
         <div class="flex flex-col items-center gap-3 py-6">
           <${ErrorState} message="데이터를 불러오지 못했습니다." />
           <${ActionButton} variant="ghost" size="sm" onClick=${() => refreshExecution({ force: true })}>재시도<//>
@@ -271,15 +275,15 @@ export function TaskBacklog() {
   }
 
   if (hasData && totalTasks === 0) {
-    return html`<${Card} title="태스크 백로그" class="section"><${EmptyState} message="등록된 태스크가 없습니다" /><//>`
+    return html`<${Card} title="태스크 백로그" class="section" variant="compact"><${EmptyState} message="등록된 태스크가 없습니다" /><//>`
   }
 
   return html`
-    <${Card} title="태스크 백로그" class="section">
+    <${Card} title="태스크 백로그" class="section" variant="compact">
       ${hasError && hasData ? html`
-        <div class="mb-3 rounded border border-warn/25 bg-warn/10 px-3 py-2 text-xs text-warn">마지막 갱신에 실패했습니다. 표시된 데이터가 오래되었을 수 있습니다.</div>
+        <div class="mb-2 rounded-sm border border-warn/25 bg-warn/10 px-2.5 py-1.5 text-2xs text-warn">마지막 갱신에 실패했습니다. 표시된 데이터가 오래되었을 수 있습니다.</div>
       ` : null}
-      <div class="mb-4 flex flex-wrap items-center gap-2">
+      <div class="mb-3 flex flex-wrap items-center gap-2">
         <div class="min-w-55 flex-1">
           <${TextInput}
             value=${query}
@@ -291,16 +295,16 @@ export function TaskBacklog() {
         ${hasSearch ? html`
           <button
             type="button"
-            class="rounded border border-card-border/70 bg-[var(--white-4)] px-3 py-2 text-xs text-text-muted transition-colors hover:border-accent/35 hover:text-text-strong"
+            class="rounded-sm border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2.5 py-2 font-mono text-3xs text-[var(--color-fg-muted)] transition-colors hover:border-[var(--color-border-strong)] hover:text-[var(--color-fg-primary)]"
             onClick=${() => {
               resetTaskSearch()
               searchDoneVisibleCount.value = DONE_PAGE_SIZE
             }}
           >검색 초기화</button>
-          <span class="text-xs text-text-muted">${filteredTotal}/${totalTasks}</span>
+          <span class="font-mono text-3xs text-[var(--color-fg-muted)]">${filteredTotal}/${totalTasks}</span>
         ` : null}
       </div>
-      <div class="grid grid-cols-[repeat(auto-fit,minmax(320px,1fr))] gap-4 items-start">
+      <div class="grid grid-cols-[repeat(auto-fit,minmax(300px,1fr))] gap-3 items-start">
         <${TaskColumn}
           title="할 일"
           count=${sortedTodo.length}
@@ -343,7 +347,7 @@ export function TaskBacklog() {
           ${hasMoreDone ? html`
             <button
               type="button"
-              class="w-full rounded border border-card-border/60 bg-[var(--white-3)] px-3 py-2 text-xs font-medium text-text-muted transition-colors hover:border-accent/35 hover:text-text-strong"
+              class="w-full rounded-sm border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2.5 py-1.5 font-mono text-3xs font-medium text-[var(--color-fg-muted)] transition-colors hover:border-[var(--color-border-strong)] hover:text-[var(--color-fg-primary)]"
               onClick=${() => {
                 if (hasSearch) searchDoneVisibleCount.value += DONE_PAGE_SIZE
                 else doneVisibleCount.value += DONE_PAGE_SIZE

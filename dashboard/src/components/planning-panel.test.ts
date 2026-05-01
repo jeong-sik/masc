@@ -11,6 +11,9 @@ const routeSignal = signal<{ tab: string; params: Record<string, string>; postId
 
 vi.mock('../router', () => ({
   get route() { return routeSignal },
+  replaceRoute: vi.fn((tab: string, params?: Record<string, string>) => {
+    routeSignal.value = { tab, params: params ?? {}, postId: null }
+  }),
 }))
 
 const coordinationSignal = signal<unknown>(null)

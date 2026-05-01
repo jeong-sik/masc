@@ -63,11 +63,11 @@ val merge_completion_contract :
   current:completion_contract ->
   completion_contract
 
-(** Map an [Oas.Types.tool_choice option] to the corresponding
+(** Map an [Agent_sdk.Types.tool_choice option] to the corresponding
     [completion_contract] (#8696: exhaustive match against
-    [Oas.Types.tool_choice] so SDK drift is caught at compile time). *)
+    [Agent_sdk.Types.tool_choice] so SDK drift is caught at compile time). *)
 val completion_contract_of_tool_choice :
-  Oas.Types.tool_choice option -> completion_contract
+  Agent_sdk.Types.tool_choice option -> completion_contract
 
 (** Combine a per-turn contract with the run-level
     [required_tool_use_seen] flag — once [true], the run becomes
@@ -126,7 +126,7 @@ val tool_name_can_satisfy_required_contract : string -> bool
     used by the run contract to reject read-only calls under
     [Require_tool_use]. *)
 val required_tool_satisfaction :
-  Oas.Completion_contract.tool_call -> (unit, string) result
+  Agent_sdk.Completion_contract.tool_call -> (unit, string) result
 
 (** Project a tool name to its [tool_progress_class]. *)
 val classify_tool_progress : string -> tool_progress_class
@@ -188,7 +188,7 @@ val allow_deterministic_tool :
     that are NOT in [core], pass [allow_deterministic_tool], and
     cap at [selection_limit]. *)
 val deterministic_prefilter_names :
-  search_index:Oas.Tool_index.t ->
+  search_index:Agent_sdk.Tool_index.t ->
   query_text:string ->
   selection_limit:int ->
   core:string list ->

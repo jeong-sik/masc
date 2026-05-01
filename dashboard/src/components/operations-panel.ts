@@ -9,7 +9,7 @@ import { Ops } from './ops'
 import { Governance } from './governance'
 import { LabInspector } from './lab-inspector'
 import { SafeAutonomyPanel } from './safe-autonomy'
-import { route } from '../router'
+import { replaceRoute, route } from '../router'
 
 type OpsView = 'default' | 'ops' | 'governance' | 'safety' | 'inspector'
 
@@ -30,18 +30,18 @@ function currentView(): OpsView {
 }
 
 function updateViewParam(next: OpsView): void {
-  const base = '#command?section=operations'
-  const hash = next === 'default' ? base : `${base}&view=${next}`
-  window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}${hash}`)
-  window.dispatchEvent(new HashChangeEvent('hashchange'))
+  replaceRoute(
+    'command',
+    next === 'default'
+      ? { section: 'operations' }
+      : { section: 'operations', view: next },
+  )
 }
 
 // Legacy URL migration (Phase 7):
 // #command?section=operations&view=connectors → #connectors?section=connector-status
 function redirectLegacyConnectorsView(): void {
-  const hash = '#connectors?section=connector-status'
-  window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}${hash}`)
-  window.dispatchEvent(new HashChangeEvent('hashchange'))
+  replaceRoute('connectors', { section: 'connector-status' })
 }
 
 export function OperationsPanel() {

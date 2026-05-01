@@ -1,7 +1,7 @@
 (** Keeper Hooks (OAS bridge) — provider classification, cost ledger,
     and pre-/post-tool hook factory.
 
-    Bridges OAS [Oas.Hooks] callbacks with MASC's keeper accounting:
+    Bridges OAS [Agent_sdk.Hooks] callbacks with MASC's keeper accounting:
     classifies the provider/model that produced each turn, derives a
     trustworthy USD cost (with explicit unknowns), records Prometheus
     metrics, and gates pre-tool execution via [Keeper_guards].  The
@@ -24,13 +24,13 @@ val provider_of_model :
     when the model label is ambiguous. *)
 
 val provider_kind_of_telemetry :
-  Oas.Types.inference_telemetry option ->
+  Agent_sdk.Types.inference_telemetry option ->
   Llm_provider.Provider_kind.t option
 (** Extract the provider kind from inference telemetry, when present. *)
 
 val provider_of_model_with_telemetry :
   model:string ->
-  telemetry:Oas.Types.inference_telemetry option -> string
+  telemetry:Agent_sdk.Types.inference_telemetry option -> string
 (** [provider_of_model] but consults telemetry first so a model alias
     (e.g. ["auto"]) resolves to the actual provider used for the turn. *)
 
@@ -38,7 +38,7 @@ val structurally_unmetered_provider : string -> bool
 (** [true] for providers whose tokens are not metered by upstream
     (e.g. local ollama).  Used to short-circuit the cost ledger. *)
 
-val usage_has_tokens : Oas.Types.api_usage -> bool
+val usage_has_tokens : Agent_sdk.Types.api_usage -> bool
 (** [true] when the usage record carries a non-zero token count. *)
 
 (** {1 Pre-tool gate integration} *)
@@ -86,11 +86,11 @@ val alias_response_model_metric : string
 val unknown_model_sentinel : string
 (** Sentinel string for unknown model ids in metric/log labels. *)
 
-val zero_usage : Oas.Types.api_usage
+val zero_usage : Agent_sdk.Types.api_usage
 (** All-zero [api_usage] used as a default. *)
 
 val canonical_model_id_of_telemetry :
-  model:string -> Oas.Types.inference_telemetry option -> string
+  model:string -> Agent_sdk.Types.inference_telemetry option -> string
 (** Resolve [model] to its canonical id using telemetry when available,
     falling back to [model] when not. *)
 
@@ -106,17 +106,17 @@ val is_auto_model_label : string -> bool
     concrete model id. *)
 
 val canonical_model_id_opt :
-  Oas.Types.inference_telemetry option -> string option
+  Agent_sdk.Types.inference_telemetry option -> string option
 (** Canonical model id from telemetry alone, [None] when telemetry is
     missing or carries no model info. *)
 
 val resolve_after_turn_model :
-  keeper_name:string -> response:Oas.Types.api_response -> string
+  keeper_name:string -> response:Agent_sdk.Types.api_response -> string
 (** Best-effort model resolution after a turn completes; emits anomaly
     metrics when the response model is missing or still aliased. *)
 
 val context_max_of_telemetry :
-  Oas.Types.inference_telemetry option -> int
+  Agent_sdk.Types.inference_telemetry option -> int
 (** Provider-reported context window max, or [0] when telemetry omits it. *)
 
 (** {1 Usage-trust classification}
@@ -127,9 +127,9 @@ val context_max_of_telemetry :
     accounting can opt out of mis-reported numbers. *)
 
 val classify_usage_trust :
-  ?usage:Oas.Types.api_usage ->
+  ?usage:Agent_sdk.Types.api_usage ->
   model:string ->
-  telemetry:Oas.Types.inference_telemetry option ->
+  telemetry:Agent_sdk.Types.inference_telemetry option ->
   unit -> Keeper_usage_trust.t
 (** Combine usage / model / telemetry into a usage-trust verdict. *)
 
@@ -138,7 +138,7 @@ val record_usage_anomaly_metrics :
 (** Emit Prometheus counters for each anomaly category in the verdict. *)
 
 val estimate_usage_cost_usd :
-  model:string -> Oas.Types.api_usage -> float
+  model:string -> Agent_sdk.Types.api_usage -> float
 (** Estimate USD cost from token counts using the static pricing
     catalogue.  Returns [0.] when the model is unpriced. *)
 
@@ -164,7 +164,7 @@ val cost_status_reason : cost_status -> string
 
 val pricing_model_for_ledger :
   model:string ->
-  telemetry:Oas.Types.inference_telemetry option -> string
+  telemetry:Agent_sdk.Types.inference_telemetry option -> string
 (** Model id used for the pricing lookup (not necessarily the
     response's model — telemetry-canonicalised). *)
 
@@ -187,7 +187,7 @@ val cost_status_for_event :
 
 val cost_usd_for_usage :
   ?provider_kind:Llm_provider.Provider_config.provider_kind ->
-  model:string -> Oas.Types.api_usage -> float
+  model:string -> Agent_sdk.Types.api_usage -> float
 (** Public cost calculator combining provider classification and
     pricing catalogue. *)
 
@@ -214,13 +214,13 @@ val record_keeper_tool_duration_metric :
 
 val record_llm_tok_s_metrics :
   model:string ->
-  telemetry:Oas.Types.inference_telemetry option -> unit
+  telemetry:Agent_sdk.Types.inference_telemetry option -> unit
 (** Record provider-reported tokens-per-second when telemetry exposes it. *)
 
 val wall_tokens_per_second :
   usage_missing:bool ->
   output_tokens:int ->
-  telemetry:Oas.Types.inference_telemetry option -> float option
+  telemetry:Agent_sdk.Types.inference_telemetry option -> float option
 (** Wall-clock tokens/sec computed from telemetry latency, or [None]
     when usage / latency is missing. *)
 
@@ -248,7 +248,7 @@ val emit_cost_event :
   cost_usd:float ->
   ?usage_missing:bool ->
   ?usage_trust:Keeper_usage_trust.t ->
-  ?telemetry:Oas.Types.inference_telemetry -> unit -> unit
+  ?telemetry:Agent_sdk.Types.inference_telemetry -> unit -> unit
 (** Append a structured cost-ledger event to [costs.jsonl]. *)
 
 (** {1 Idle-loop policy} *)
@@ -262,13 +262,13 @@ val on_idle_decision_with_threshold :
   skip_at:int ->
   consecutive_idle_turns:int ->
   allowed_tools:string list ->
-  tool_names:string list -> Oas.Hooks.hook_decision
+  tool_names:string list -> Agent_sdk.Hooks.hook_decision
 (** Idle-handler with explicit [skip_at] threshold for testing. *)
 
 val on_idle_decision :
   consecutive_idle_turns:int ->
   allowed_tools:string list ->
-  tool_names:string list -> Oas.Hooks.hook_decision
+  tool_names:string list -> Agent_sdk.Hooks.hook_decision
 (** Idle-handler with the production threshold. *)
 
 val recent_tool_streak_count :
@@ -291,8 +291,8 @@ val make_hooks :
                      duration_ms:float -> provider:string -> unit) ->
   ?trajectory_acc:Trajectory.accumulator ->
   ?discover_work_nudge:(unit -> string option) ->
-  unit -> Oas.Hooks.hooks
-(** Build the [Oas.Hooks.hooks] record used by the keeper turn loop:
+  unit -> Agent_sdk.Hooks.hooks
+(** Build the [Agent_sdk.Hooks.hooks] record used by the keeper turn loop:
     pre-tool gate, post-tool accounting, idle-detection, cost guard,
     and trajectory hooks all wired together. *)
 

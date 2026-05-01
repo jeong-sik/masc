@@ -16,7 +16,7 @@ let retry_message_looks_like_not_found (message : string) : bool =
     API-level errors and model-capability-dependent agent errors are
     cascadeable (a different provider may succeed).  Structural agent
     errors (budget, idle, exit) are not — they would recur on any model. *)
-let sdk_error_to_cascade_outcome (err : Oas.Error.sdk_error)
+let sdk_error_to_cascade_outcome (err : Agent_sdk.Error.sdk_error)
     : Cascade_fsm.provider_outcome option =
   match Oas_worker_named_error.classify_masc_internal_error err with
   | Some (Oas_worker_named_error.Resumable_cli_session { detail; _ }) ->
@@ -26,7 +26,7 @@ let sdk_error_to_cascade_outcome (err : Oas.Error.sdk_error)
             { message = detail; kind = Llm_provider.Http_client.Unknown }))
   | _ -> (
   match err with
-  | Oas.Error.Api api_err ->
+  | Agent_sdk.Error.Api api_err ->
     let http_err = match[@warning "-8"] api_err with
       | Llm_provider.Retry.InvalidRequest { message } ->
         let code =
@@ -57,16 +57,16 @@ let sdk_error_to_cascade_outcome (err : Oas.Error.sdk_error)
      required — a different model with better tool calling may succeed.
      UnrecognizedStopReason: model returned a non-standard stop reason
      that this provider does not map — another provider may not. *)
-  | Oas.Error.Agent (Oas.Error.CompletionContractViolation { reason; _ }) ->
+  | Agent_sdk.Error.Agent (Agent_sdk.Error.CompletionContractViolation { reason; _ }) ->
     Some (Cascade_fsm.Call_err
       (Llm_provider.Http_client.AcceptRejected { reason }))
-  | Oas.Error.Agent (Oas.Error.UnrecognizedStopReason { reason }) ->
+  | Agent_sdk.Error.Agent (Agent_sdk.Error.UnrecognizedStopReason { reason }) ->
     Some (Cascade_fsm.Call_err
       (Llm_provider.Http_client.AcceptRejected { reason }))
-  | Oas.Error.Config
-      (Oas.Error.InvalidConfig { field = "runtime_mcp_auth"; detail })
-  | Oas.Error.Config
-      (Oas.Error.InvalidConfig { field = "tool_support"; detail }) ->
+  | Agent_sdk.Error.Config
+      (Agent_sdk.Error.InvalidConfig { field = "runtime_mcp_auth"; detail })
+  | Agent_sdk.Error.Config
+      (Agent_sdk.Error.InvalidConfig { field = "tool_support"; detail }) ->
     Some
       (Cascade_fsm.Call_err
          (Llm_provider.Http_client.AcceptRejected { reason = detail }))
@@ -108,7 +108,7 @@ let resolve_kimi_api_key_env_name ~cascade_name =
 
 let enrich_sdk_error ~cascade_name
     ~(provider_cfg : Llm_provider.Provider_config.t)
-    (err : Oas.Error.sdk_error) =
+    (err : Agent_sdk.Error.sdk_error) =
   let append_hint message hint_marker detail =
     if String_util.contains_substring_ci message hint_marker then
       message
@@ -116,7 +116,7 @@ let enrich_sdk_error ~cascade_name
       Printf.sprintf "%s (%s: %s)" message hint_marker detail
   in
   match err with
-  | Oas.Error.Api (Llm_provider.Retry.AuthError { message })
+  | Agent_sdk.Error.Api (Llm_provider.Retry.AuthError { message })
     when is_moonshot_provider provider_cfg ->
     let env_name =
       match resolve_kimi_api_key_env_name ~cascade_name with
@@ -131,13 +131,13 @@ let enrich_sdk_error ~cascade_name
           "%s was loaded and the auth header was populated; verify that it is a valid Moonshot API key"
           env_name
     in
-    Oas.Error.Api
+    Agent_sdk.Error.Api
       (Llm_provider.Retry.AuthError
          {
            message =
              append_hint message moonshot_auth_hint_marker detail;
          })
-  | Oas.Error.Api (Llm_provider.Retry.InvalidRequest { message })
+  | Agent_sdk.Error.Api (Llm_provider.Retry.InvalidRequest { message })
     when provider_cfg.kind = Llm_provider.Provider_config.OpenAI_compat
       && retry_message_looks_like_not_found message ->
     let detail =
@@ -145,7 +145,7 @@ let enrich_sdk_error ~cascade_name
         provider_cfg.base_url provider_cfg.request_path
         (provider_cfg.base_url ^ provider_cfg.request_path)
     in
-    Oas.Error.Api
+    Agent_sdk.Error.Api
       (Llm_provider.Retry.InvalidRequest
          {
            message =
@@ -238,11 +238,11 @@ let resumable_cli_session_exit_code (message : string) : int option =
     message
 
 let sdk_error_to_resumable_cli_session ~cascade_name
-    (err : Oas.Error.sdk_error) =
+    (err : Agent_sdk.Error.sdk_error) =
   match Oas_worker_named_error.classify_masc_internal_error err with
   | Some (Oas_worker_named_error.Resumable_cli_session _) -> Some err
   | _ ->
-      let message = Oas.Error.to_string err in
+      let message = Agent_sdk.Error.to_string err in
       if message_looks_like_resumable_cli_session message then
         Some
           (Oas_worker_named_error.sdk_error_of_masc_internal_error
@@ -255,13 +255,13 @@ let sdk_error_to_resumable_cli_session ~cascade_name
                 }))
       else None
 
-let sdk_error_is_resumable_cli_session (err : Oas.Error.sdk_error) : bool =
+let sdk_error_is_resumable_cli_session (err : Agent_sdk.Error.sdk_error) : bool =
   match Oas_worker_named_error.classify_masc_internal_error err with
   | Some (Oas_worker_named_error.Resumable_cli_session _) -> true
   | _ ->
       let direct_api_message =
         match err with
-        | Oas.Error.Api
+        | Agent_sdk.Error.Api
             (Llm_provider.Retry.NetworkError { message; _ }
             | Llm_provider.Retry.Overloaded { message }
             | Llm_provider.Retry.ServerError { message; _ }
@@ -275,7 +275,7 @@ let sdk_error_is_resumable_cli_session (err : Oas.Error.sdk_error) : bool =
         | _ -> false
       in
       direct_api_message
-      || message_looks_like_resumable_cli_session (Oas.Error.to_string err)
+      || message_looks_like_resumable_cli_session (Agent_sdk.Error.to_string err)
 
 let message_looks_like_terminal_provider_runtime_failure message =
   let contains needle = String_util.contains_substring_ci message needle in
@@ -287,10 +287,10 @@ let message_looks_like_terminal_provider_runtime_failure message =
       && (contains "jsonrpc" || contains "jsonrpcmessage"))
 
 let sdk_error_is_terminal_provider_runtime_failure
-    (err : Oas.Error.sdk_error) : bool =
+    (err : Agent_sdk.Error.sdk_error) : bool =
   let direct_api_message =
     match err with
-    | Oas.Error.Api
+    | Agent_sdk.Error.Api
         (Llm_provider.Retry.NetworkError { message; _ }
         | Llm_provider.Retry.Overloaded { message }
         | Llm_provider.Retry.ServerError { message; _ }
@@ -305,11 +305,11 @@ let sdk_error_is_terminal_provider_runtime_failure
   in
   direct_api_message
   || message_looks_like_terminal_provider_runtime_failure
-       (Oas.Error.to_string err)
+       (Agent_sdk.Error.to_string err)
 
-let sdk_error_is_hard_quota (err : Oas.Error.sdk_error) : bool =
+let sdk_error_is_hard_quota (err : Agent_sdk.Error.sdk_error) : bool =
   match err with
-  | Oas.Error.Api api_err ->
+  | Agent_sdk.Error.Api api_err ->
     Llm_provider.Retry.is_hard_quota api_err
     ||
     (match[@warning "-8"] api_err with
@@ -371,7 +371,7 @@ let retry_api_error_to_provider_error ~provider ~capacity_exhausted api_error =
 
 let sdk_error_to_provider_error ~provider err =
   match err with
-  | Oas.Error.Api api_err ->
+  | Agent_sdk.Error.Api api_err ->
       retry_api_error_to_provider_error ~provider
         ~capacity_exhausted:(sdk_error_is_hard_quota err)
         api_err
@@ -420,15 +420,15 @@ let emit_sdk_provider_error_metric ~cascade_name ~provider err =
    here and clamped/defaulted at the tracker boundary so the caller's
    semantics ("the 429 still happened, so cool down at least the
    default") are maintained centrally. *)
-let sdk_error_soft_rate_limited (err : Oas.Error.sdk_error)
+let sdk_error_soft_rate_limited (err : Agent_sdk.Error.sdk_error)
   : float option option =
   match err with
-  | Oas.Error.Api (Llm_provider.Retry.RateLimited { retry_after; _ } as api_err)
+  | Agent_sdk.Error.Api (Llm_provider.Retry.RateLimited { retry_after; _ } as api_err)
     when not (Llm_provider.Retry.is_hard_quota api_err) ->
     Some retry_after
   | _ -> None
 
-let sdk_error_is_max_turns_exceeded (err : Oas.Error.sdk_error) : bool =
+let sdk_error_is_max_turns_exceeded (err : Agent_sdk.Error.sdk_error) : bool =
   match Oas_worker_named_error.classify_masc_internal_error err with
   | Some
       (Oas_worker_named_error.Cascade_exhausted
@@ -450,20 +450,20 @@ let sdk_error_is_max_turns_exceeded (err : Oas.Error.sdk_error) : bool =
       false
   | None -> (
       match err with
-      | Oas.Error.Agent (Oas.Error.MaxTurnsExceeded _) -> true
-      | Oas.Error.Api
+      | Agent_sdk.Error.Agent (Agent_sdk.Error.MaxTurnsExceeded _) -> true
+      | Agent_sdk.Error.Api
           (Llm_provider.Retry.NetworkError { message; _ }
           | Llm_provider.Retry.Overloaded { message }
           | Llm_provider.Retry.ServerError { message; _ }
           | Llm_provider.Retry.InvalidRequest { message }
           | Llm_provider.Retry.Timeout { message }) ->
           message_looks_like_cli_wrapped_max_turns message
-      | Oas.Error.Api
+      | Agent_sdk.Error.Api
           (Llm_provider.Retry.RateLimited _
           | Llm_provider.Retry.AuthError _
           | Llm_provider.Retry.NotFound _
           | Llm_provider.Retry.ContextOverflow _) ->
           false
-      | Oas.Error.Internal message ->
+      | Agent_sdk.Error.Internal message ->
           message_looks_like_cli_wrapped_max_turns message
       | _ -> false)

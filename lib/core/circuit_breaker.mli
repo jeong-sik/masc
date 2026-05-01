@@ -85,10 +85,10 @@ val create :
     a fresh instance with an empty breaker map.  Defaults match
     the [default_*] constants above. *)
 
-val create_from_env : unit -> t
-(** [create_from_env ()] currently delegates to {!create} with all
-    defaults.  Pinned at the contract seam — future env-driven
-    overrides reuse this entry without breaking callers. *)
+val create_default : unit -> t
+(** [create_default ()] creates an instance with all defaults.
+    Pinned at the contract seam — future config-driven overrides
+    reuse this entry without breaking callers. *)
 
 (** {1 Lifecycle} *)
 

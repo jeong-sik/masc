@@ -49,7 +49,7 @@ type config = {
   pubsub_max_messages: int;
 }
 
-let pubsub_max_messages_from_env () = 1000
+let pubsub_max_messages = 1000
 
 let generate_node_id () =
   let hostname = try Unix.gethostname () with Unix.Unix_error _ -> "unknown" in
@@ -62,7 +62,7 @@ let default_config = {
   base_path = Common.masc_dirname;
   node_id = generate_node_id ();
   cluster_name = "default";
-  pubsub_max_messages = pubsub_max_messages_from_env ();
+  pubsub_max_messages = pubsub_max_messages;
 }
 
 (* ============================================ *)

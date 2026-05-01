@@ -4,6 +4,7 @@ import { signal, computed, type ReadonlySignal } from '@preact/signals'
 import { isOfflineStatus } from './lib/status-utils'
 import type { JournalEntry } from './types'
 import type { PipelineStage } from './types/core'
+import type { AuditEntry } from './api/dashboard'
 import { journal } from './sse'
 import { agents, agentMotionMap, keepers, staleKeepers } from './store'
 import { contextThresholds } from './config/context-thresholds'
@@ -213,4 +214,21 @@ export function eventKindLabel(entry: JournalEntry): string {
   if (entry.kind === 'tasks') return 'task'
   if (entry.kind === 'keepers') return 'keeper'
   return 'system'
+}
+
+// --- Global audit ledger (O2 Phase 2) ---
+
+const AUDIT_MAX_ENTRIES = 500
+
+/** Append-only ring buffer of live audit entries pushed via SSE. */
+export const auditEntries = signal<AuditEntry[]>([])
+
+/** Append a single audit entry from an SSE event.  Trims to the
+ *  most recent AUDIT_MAX_ENTRIES to keep memory bounded. */
+export function appendAuditEntry(entry: AuditEntry): void {
+  const next = [...auditEntries.value, entry]
+  auditEntries.value =
+    next.length > AUDIT_MAX_ENTRIES
+      ? next.slice(next.length - AUDIT_MAX_ENTRIES)
+      : next
 }

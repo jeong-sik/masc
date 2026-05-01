@@ -24,7 +24,7 @@ val of_failure :
   ?post_commit_ambiguous:bool ->
   ?tool_call_count:int ->
   raw_error:string ->
-  Oas.Error.sdk_error ->
+  Agent_sdk.Error.sdk_error ->
   t
 
 val of_legacy_error_text : string -> t

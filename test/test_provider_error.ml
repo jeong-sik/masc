@@ -97,7 +97,7 @@ let test_anthropic_invalid_request_specified_limit_body_pins_capacity () =
      on 2026-05-01 at 00:00 UTC."
   in
   let api_error = Retry.InvalidRequest { message } in
-  let sdk_error = Oas.Error.Api api_error in
+  let sdk_error = Agent_sdk.Error.Api api_error in
   check bool "existing OAS hard-quota classifier pins production body" true
     (OWN.sdk_error_is_hard_quota sdk_error);
   let error =
@@ -117,7 +117,7 @@ let test_cli_hard_quota_wrapper_emits_capacity_variant () =
      2026-05-01 at 00:00 UTC.\"}}"
   in
   let sdk_error =
-    Oas.Error.Api
+    Agent_sdk.Error.Api
       (Retry.NetworkError
          { message; kind = Llm_provider.Http_client.Unknown })
   in
@@ -166,7 +166,7 @@ let test_non_capacity_invalid_request_preserves_reason () =
   | _ -> fail "expected InvalidRequest"
 
 let test_overloaded_preserves_failure_decision () =
-  let sdk_error = Oas.Error.Api (Retry.Overloaded { message = "server busy" }) in
+  let sdk_error = Agent_sdk.Error.Api (Retry.Overloaded { message = "server busy" }) in
   check health_decision "legacy decision" Failure
     (legacy_health_decision sdk_error);
   match OWN.sdk_error_to_provider_error ~provider:"anthropic" sdk_error with
@@ -179,7 +179,7 @@ let test_overloaded_preserves_failure_decision () =
 
 let test_provider_error_preserves_legacy_health_decisions () =
   let specified_limit =
-    Oas.Error.Api
+    Agent_sdk.Error.Api
       (Retry.InvalidRequest
          {
            message =
@@ -188,12 +188,12 @@ let test_provider_error_preserves_legacy_health_decisions () =
          })
   in
   let hard_rate_limit =
-    Oas.Error.Api
+    Agent_sdk.Error.Api
       (Retry.RateLimited
          { retry_after = None; message = "resource exhausted" })
   in
   let cli_wrapped_limit =
-    Oas.Error.Api
+    Agent_sdk.Error.Api
       (Retry.NetworkError
          {
            message =
@@ -205,7 +205,7 @@ let test_provider_error_preserves_legacy_health_decisions () =
          })
   in
   let soft_rate_limit =
-    Oas.Error.Api
+    Agent_sdk.Error.Api
       (Retry.RateLimited { retry_after = Some 3.0; message = "try later" })
   in
   let cases =
@@ -214,17 +214,17 @@ let test_provider_error_preserves_legacy_health_decisions () =
       ("resource-exhausted rate_limit", hard_rate_limit);
       ("cli-wrapped specified-limit", cli_wrapped_limit);
       ("transient rate_limit", soft_rate_limit);
-      ("overloaded", Oas.Error.Api (Retry.Overloaded { message = "busy" }));
+      ("overloaded", Agent_sdk.Error.Api (Retry.Overloaded { message = "busy" }));
       ( "server",
-        Oas.Error.Api (Retry.ServerError { status = 503; message = "down" })
+        Agent_sdk.Error.Api (Retry.ServerError { status = 503; message = "down" })
       );
-      ("auth", Oas.Error.Api (Retry.AuthError { message = "bad key" }));
-      ("not_found", Oas.Error.Api (Retry.NotFound { message = "missing" }));
+      ("auth", Agent_sdk.Error.Api (Retry.AuthError { message = "bad key" }));
+      ("not_found", Agent_sdk.Error.Api (Retry.NotFound { message = "missing" }));
       ( "context_overflow",
-        Oas.Error.Api
+        Agent_sdk.Error.Api
           (Retry.ContextOverflow { message = "too long"; limit = Some 200_000 })
       );
-      ("invalid_request", Oas.Error.Api (Retry.InvalidRequest { message = "bad" }));
+      ("invalid_request", Agent_sdk.Error.Api (Retry.InvalidRequest { message = "bad" }));
     ]
   in
   List.iter
@@ -243,7 +243,7 @@ let test_emit_sdk_provider_error_metric_rate_limit () =
       ~cascade_name:"big_three" ~capacity_scope:"none"
   in
   let emitted =
-    Oas.Error.Api
+    Agent_sdk.Error.Api
       (Retry.RateLimited { retry_after = Some 2.0; message = "too many" })
     |> OWN.emit_sdk_provider_error_metric ~cascade_name:(cascade_name "big_three")
          ~provider:"anthropic"
@@ -260,7 +260,7 @@ let test_emit_sdk_provider_error_metric_capacity_scope () =
       ~cascade_name:"big_three" ~capacity_scope:"provider"
   in
   let emitted =
-    Oas.Error.Api
+    Agent_sdk.Error.Api
       (Retry.InvalidRequest
          {
            message =
@@ -282,7 +282,7 @@ let test_emit_sdk_provider_error_metric_skips_non_api () =
       ~cascade_name:"big_three" ~capacity_scope:"none"
   in
   let emitted =
-    Oas.Error.Internal "structural failure"
+    Agent_sdk.Error.Internal "structural failure"
     |> OWN.emit_sdk_provider_error_metric ~cascade_name:(cascade_name "big_three")
          ~provider:"anthropic"
   in

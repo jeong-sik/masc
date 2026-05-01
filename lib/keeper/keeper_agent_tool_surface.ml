@@ -165,13 +165,13 @@ let preferred_tool_choice_for_required_turn ~(has_current_task : bool)
   if (not has_current_task)
      && has_task_claim_affordance turn_affordances
      && List.mem "keeper_task_claim" allowed_tool_names
-  then Oas.Types.Tool "keeper_task_claim"
+  then Agent_sdk.Types.Tool "keeper_task_claim"
   else if has_turn_affordance Task_audit turn_affordances
           && List.mem "keeper_tasks_audit" allowed_tool_names
-  then Oas.Types.Tool "keeper_tasks_audit"
+  then Agent_sdk.Types.Tool "keeper_tasks_audit"
   else if has_turn_affordance Task_verify turn_affordances
           && List.mem "keeper_tasks_list" allowed_tool_names
-  then Oas.Types.Tool "keeper_tasks_list"
+  then Agent_sdk.Types.Tool "keeper_tasks_list"
   else if not has_current_task then
     (* #10008: no active task and no applicable specific claim tool
        to force.  Fall back to [Auto] instead of [Any] so the model
@@ -183,12 +183,12 @@ let preferred_tool_choice_for_required_turn ~(has_current_task : bool)
        completion contract to [Allow_text_or_tool].  Otherwise the
        affordance-driven gate would self-contradict — force a tool
        call when no applicable tool exists. *)
-    Oas.Types.Auto
+    Agent_sdk.Types.Auto
   else
     (* Active task in progress: keep the strict gate.  The keeper is
        expected to make progress via some tool call (board update,
        task_update, task_done, etc.). *)
-    Oas.Types.Any
+    Agent_sdk.Types.Any
 
 let owned_active_task_id_for_meta =
   Keeper_current_task_reconcile.owned_active_task_id_for_meta
@@ -316,13 +316,13 @@ let tool_search_aliases name =
       |> List.filter (fun alias -> alias <> "")
   | None -> []
 
-let tool_index_entry ~name ~description : Oas.Tool_index.entry =
+let tool_index_entry ~name ~description : Agent_sdk.Tool_index.entry =
   let group =
     Tool_catalog.tool_group name
     |> Option.map Tool_catalog.tool_group_to_string
   in
   let aliases = tool_search_aliases name in
-  Oas.Tool_index.{ name; description; group; aliases }
+  Agent_sdk.Tool_index.{ name; description; group; aliases }
 
-let tool_index_entry_of_tool (t : Oas.Tool.t) : Oas.Tool_index.entry =
+let tool_index_entry_of_tool (t : Agent_sdk.Tool.t) : Agent_sdk.Tool_index.entry =
   tool_index_entry ~name:t.schema.name ~description:t.schema.description

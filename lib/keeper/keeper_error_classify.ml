@@ -1,7 +1,7 @@
 (** Keeper_error_classify — Error classification, side-effect safety,
     and retry constants for the unified keeper cycle.
 
-    Pure predicates and classification functions over [Oas.Error.sdk_error].
+    Pure predicates and classification functions over [Agent_sdk.Error.sdk_error].
     No I/O, no state mutation.
 
     Extracted from keeper_unified_turn.ml.
@@ -50,20 +50,20 @@ let string_contains_substring ~(needle : string) (haystack : string) : bool =
       over availability); duplicate OAS per-provider retry counts. *)
 
 (** Detect transient network errors that warrant retry with short backoff.
-    Uses structured [Oas.Error.sdk_error] pattern matching instead of
+    Uses structured [Agent_sdk.Error.sdk_error] pattern matching instead of
     substring matching on stringified error messages. *)
 let is_structural_oas_timeout_message message =
   let lower = String.lowercase_ascii message in
   string_contains_substring ~needle:"(budget=" lower
   || string_contains_substring ~needle:"turn wall-clock budget exhausted" lower
 
-let is_transient_network_error (err : Oas.Error.sdk_error) : bool =
+let is_transient_network_error (err : Agent_sdk.Error.sdk_error) : bool =
   match err with
-  | Oas.Error.Api (NetworkError _) -> true
-  | Oas.Error.Api (Timeout { message }) ->
+  | Agent_sdk.Error.Api (NetworkError _) -> true
+  | Agent_sdk.Error.Api (Timeout { message }) ->
       not (is_structural_oas_timeout_message message)
-  | Oas.Error.Api (Overloaded _) -> true
-  | Oas.Error.Api (ServerError { status = 503; _ }) -> true
+  | Agent_sdk.Error.Api (Overloaded _) -> true
+  | Agent_sdk.Error.Api (ServerError { status = 503; _ }) -> true
   | _ -> false
 
 (** Detect server-side request body parse errors (e.g. Ollama yyjson
@@ -75,9 +75,9 @@ let is_transient_network_error (err : Oas.Error.sdk_error) : bool =
     eligible for same-turn retry.  They ARE eligible for auto-recovery
     when all committed tools are reconcile-safe (idempotent/board-like):
     the keeper's next heartbeat cycle will build a fresh prompt. *)
-let is_server_rejected_parse_error (err : Oas.Error.sdk_error) : bool =
+let is_server_rejected_parse_error (err : Agent_sdk.Error.sdk_error) : bool =
   match err with
-  | Oas.Error.Api (InvalidRequest { message }) ->
+  | Agent_sdk.Error.Api (InvalidRequest { message }) ->
       let lower = String.lowercase_ascii message in
       (* Compound patterns to avoid false positives on generic messages
          like "Service closing" or "Can't find the specified tool".
@@ -89,13 +89,13 @@ let is_server_rejected_parse_error (err : Oas.Error.sdk_error) : bool =
       || string_contains_substring ~needle:"parse error" lower
   | _ -> false
 
-let is_required_tool_contract_violation (err : Oas.Error.sdk_error) : bool =
+let is_required_tool_contract_violation (err : Agent_sdk.Error.sdk_error) : bool =
   match err with
-  | Oas.Error.Agent (Oas.Error.CompletionContractViolation { contract; _ }) ->
-      contract = Oas.Completion_contract_id.Require_tool_use
+  | Agent_sdk.Error.Agent (Agent_sdk.Error.CompletionContractViolation { contract; _ }) ->
+      contract = Agent_sdk.Completion_contract_id.Require_tool_use
   | _ -> false
 
-let is_auto_recoverable_cascade_exhausted_error (err : Oas.Error.sdk_error) : bool =
+let is_auto_recoverable_cascade_exhausted_error (err : Agent_sdk.Error.sdk_error) : bool =
   match Oas_worker_named.classify_masc_internal_error err with
   | Some
       (Oas_worker_named.Cascade_exhausted
@@ -123,7 +123,7 @@ let is_auto_recoverable_cascade_exhausted_error (err : Oas.Error.sdk_error) : bo
   | None ->
       false
 
-let is_resumable_cli_session_error (err : Oas.Error.sdk_error) : bool =
+let is_resumable_cli_session_error (err : Agent_sdk.Error.sdk_error) : bool =
   match Oas_worker_named.classify_masc_internal_error err with
   | Some (Oas_worker_named.Resumable_cli_session _) -> true
   | Some (Oas_worker_named.Cascade_exhausted _)
@@ -138,7 +138,7 @@ let is_resumable_cli_session_error (err : Oas.Error.sdk_error) : bool =
       false
 
 let is_auto_recoverable_cascade_fail_open_error
-    (err : Oas.Error.sdk_error) : bool =
+    (err : Agent_sdk.Error.sdk_error) : bool =
   Oas_worker_named.sdk_error_is_hard_quota err
   || Oas_worker_named.sdk_error_is_max_turns_exceeded err
   || is_resumable_cli_session_error err
@@ -169,7 +169,7 @@ let fallback_cascade_for_unavailable_profile
 let degraded_retry_after_recoverable_error
     ~(effective_cascade : string)
     ~(tool_requirement : string)
-    (err : Oas.Error.sdk_error) : degraded_retry option =
+    (err : Agent_sdk.Error.sdk_error) : degraded_retry option =
   let normalized_effective =
     Keeper_cascade_profile.normalize_declared_name effective_cascade
   in
@@ -220,7 +220,7 @@ let degraded_retry_after_recoverable_error
     | None ->
         None
 
-let recoverable_cascade_failure_reason (err : Oas.Error.sdk_error) =
+let recoverable_cascade_failure_reason (err : Agent_sdk.Error.sdk_error) =
   if is_required_tool_contract_violation err then
     Some "required_tool_contract_violation"
   else if Oas_worker_named.sdk_error_is_hard_quota err then
@@ -348,7 +348,7 @@ let degraded_rotation_after_recoverable_error
     ~(effective_cascade : string)
     ~(tool_requirement : string)
     ~(attempted_cascades : string list)
-    (err : Oas.Error.sdk_error) : degraded_retry option =
+    (err : Agent_sdk.Error.sdk_error) : degraded_retry option =
   match recoverable_cascade_failure_reason err with
   | None -> None
   | Some fallback_reason ->
@@ -365,7 +365,7 @@ let degraded_rotation_after_recoverable_error
              not (List.exists (String.equal candidate) attempted))
       |> Option.map (fun next_cascade -> { next_cascade; fallback_reason })
 
-let is_auto_recoverable_turn_error (err : Oas.Error.sdk_error) : bool =
+let is_auto_recoverable_turn_error (err : Agent_sdk.Error.sdk_error) : bool =
   is_transient_network_error err
   || is_server_rejected_parse_error err
   || Oas_worker_named.sdk_error_is_max_turns_exceeded err
@@ -380,12 +380,12 @@ let committed_mutating_tools tool_names =
   |> dedupe_keep_order
   |> List.filter Keeper_exec_tools.has_mutating_side_effect
 
-let is_ambiguous_side_effect_error (err : Oas.Error.sdk_error) : bool =
+let is_ambiguous_side_effect_error (err : Agent_sdk.Error.sdk_error) : bool =
   match Oas_worker_named.classify_masc_internal_error err with
   | Some (Oas_worker_named.Ambiguous_post_commit _) -> true
   | None -> (
       match err with
-      | Oas.Error.Internal msg ->
+      | Agent_sdk.Error.Internal msg ->
           string_contains_substring
             ~needle:ambiguous_side_effect_error_prefix msg
       | _ -> false)
@@ -393,29 +393,29 @@ let is_ambiguous_side_effect_error (err : Oas.Error.sdk_error) : bool =
 
 let reclassify_error_after_side_effect
     ~(tool_names : string list)
-    (err : Oas.Error.sdk_error) : Oas.Error.sdk_error =
+    (err : Agent_sdk.Error.sdk_error) : Agent_sdk.Error.sdk_error =
   let committed_tools = committed_mutating_tools tool_names in
   if committed_tools = [] || is_ambiguous_side_effect_error err then err
   else
     let tools = committed_tools in
-    let original = short_preview (Oas.Error.to_string err) in
-    let is_timeout = match err with Oas.Error.Api (Timeout _) -> true | _ -> false in
+    let original = short_preview (Agent_sdk.Error.to_string err) in
+    let is_timeout = match err with Agent_sdk.Error.Api (Timeout _) -> true | _ -> false in
     Oas_worker_named.sdk_error_of_masc_internal_error
       (Oas_worker_named.Ambiguous_post_commit
          { is_timeout; tools; original_error = original })
 
-let post_commit_failure_kind_of_error (err : Oas.Error.sdk_error) =
+let post_commit_failure_kind_of_error (err : Agent_sdk.Error.sdk_error) =
   match err with
-  | Oas.Error.Api (Timeout _) -> Keeper_registry.Post_commit_timeout
+  | Agent_sdk.Error.Api (Timeout _) -> Keeper_registry.Post_commit_timeout
   | _ -> Keeper_registry.Post_commit_failure
 
 let summarize_post_commit_failure
     ~(tool_names : string list)
     ~(kind : Keeper_registry.ambiguous_partial_commit_kind)
-    (err : Oas.Error.sdk_error) =
+    (err : Agent_sdk.Error.sdk_error) =
   let committed_tools = committed_mutating_tools tool_names in
   let tools = String.concat ", " committed_tools in
-  let err_preview = short_preview (Oas.Error.to_string err) in
+  let err_preview = short_preview (Agent_sdk.Error.to_string err) in
   (* Manual reconcile blocker removed — no "required/not required" branching.
      Evidence is recorded via Keeper_registry; the next turn's observation
      signals the failure for autonomous or operator-driven recovery. *)
@@ -434,7 +434,7 @@ let summarize_post_commit_failure
 let classify_post_commit_failure
     ~(tool_names : string list)
     ?kind
-    (err : Oas.Error.sdk_error) =
+    (err : Agent_sdk.Error.sdk_error) =
   let committed_tools = committed_mutating_tools tool_names in
   if committed_tools = []
   then None
@@ -471,15 +471,15 @@ let transient_backoff_sec (attempt : int) : float =
   Env_config_keeper.KeeperRetryBackoff.transient_backoff_sec attempt
 
 (** [true] when a structured error indicates context overflow. *)
-let is_context_overflow (err : Oas.Error.sdk_error) : bool =
+let is_context_overflow (err : Agent_sdk.Error.sdk_error) : bool =
   match err with
-  | Oas.Error.Api (ContextOverflow _) -> true
-  | Oas.Error.Agent (TokenBudgetExceeded { kind = "Input"; _ }) -> true
+  | Agent_sdk.Error.Api (ContextOverflow _) -> true
+  | Agent_sdk.Error.Agent (TokenBudgetExceeded { kind = "Input"; _ }) -> true
   | _ -> false
 
 (** [true] when an error represents terminal cascade exhaustion or a
     final accept-rejected result from the MASC OAS boundary. *)
-let is_cascade_exhausted_error (err : Oas.Error.sdk_error) : bool =
+let is_cascade_exhausted_error (err : Agent_sdk.Error.sdk_error) : bool =
   match Oas_worker_named.classify_masc_internal_error err with
   | Some (Oas_worker_named.Cascade_exhausted _)
   | Some (Oas_worker_named.Resumable_cli_session _)

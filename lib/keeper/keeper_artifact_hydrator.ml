@@ -26,9 +26,9 @@ let try_hydrate ~store ~sha256 ~marker =
     None
 
 let hydrate_block ~store ~remaining
-    (block : Oas.Types.content_block) : Oas.Types.content_block =
+    (block : Agent_sdk.Types.content_block) : Agent_sdk.Types.content_block =
   match block with
-  | Oas.Types.ToolResult { tool_use_id; content; is_error; json } ->
+  | Agent_sdk.Types.ToolResult { tool_use_id; content; is_error; json } ->
       if !remaining = 0 then block
       else
         (match Tool_output.decode_from_oas content with
@@ -36,14 +36,14 @@ let hydrate_block ~store ~remaining
              (match try_hydrate ~store ~sha256 ~marker:content with
               | Some bytes ->
                   decr remaining;
-                  Oas.Types.ToolResult
+                  Agent_sdk.Types.ToolResult
                     { tool_use_id; content = bytes; is_error; json }
               | None -> block)
          | Tool_output.Inline _ -> block)
   | _ -> block
 
 let hydrate_messages ~store ~keep_recent
-    (messages : Oas.Types.message list) : Oas.Types.message list =
+    (messages : Agent_sdk.Types.message list) : Agent_sdk.Types.message list =
   let remaining = ref keep_recent in
   (* "Recent" = tail of the message list. Reverse first so iteration
      visits the LAST message first; the counter then ticks down on the
@@ -56,7 +56,7 @@ let hydrate_messages ~store ~keep_recent
   let reversed = List.rev messages in
   let mapped =
     List.map
-      (fun (msg : Oas.Types.message) ->
+      (fun (msg : Agent_sdk.Types.message) ->
         let new_content =
           List.map (hydrate_block ~store ~remaining) msg.content
         in
@@ -65,11 +65,11 @@ let hydrate_messages ~store ~keep_recent
   in
   List.rev mapped
 
-let hydrate_recent ~store ~keep_recent : Oas.Context_reducer.t =
+let hydrate_recent ~store ~keep_recent : Agent_sdk.Context_reducer.t =
   let strategy =
-    Oas.Context_reducer.Custom (hydrate_messages ~store ~keep_recent)
+    Agent_sdk.Context_reducer.Custom (hydrate_messages ~store ~keep_recent)
   in
-  { Oas.Context_reducer.strategy }
+  { Agent_sdk.Context_reducer.strategy }
 
 let reducer_from_env () =
   match Env_config_core.base_path_opt () with

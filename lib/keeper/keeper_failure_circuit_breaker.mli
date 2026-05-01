@@ -1,8 +1,12 @@
-(** Keeper Failure Circuit Breaker — detect repeated tool failures and
-    inject corrective hints into error responses.
+(** Keeper Failure Circuit Breaker — detect repeated tool failures,
+    inject corrective hints into error responses, and expose a bounded
+    cooling state for observers.
 
     After [threshold] consecutive failures of the same error class,
-    appends a corrective hint to the error message. Resets on success.
+    appends a corrective hint to the error message. A trip opens a
+    short cooling window. Any later successful tool call closes the
+    window immediately; otherwise observers auto-close it after
+    [cooling_reset_sec].
 
     @since v0.5.11 *)
 
@@ -24,6 +28,10 @@ val record_success : keeper_name:string -> unit
     breaker threshold has been reached. Returns the original message
     unchanged if under threshold, or message + hint if tripped. *)
 val maybe_enrich_error : keeper_name:string -> error_msg:string -> string
+
+(** Cooling window in seconds after a trip. This is intentionally a
+    circuit-level reset, not an OAS/provider cooldown. *)
+val cooling_reset_sec : float
 
 (** {1 Failure signature diagnostics (task-240)}
 
@@ -55,23 +63,27 @@ val recent_failures_of : keeper_name:string -> failure_signature list
 
     Each entry adds a [recent_failures] array (newest first):
     {[ { "ts": 1..., "class": "other", "fingerprint": "..." } ]}
+    and circuit state fields:
+    {[ { "display_state": "cooling", "last_tripped_at": 1... } ]}
     *)
 val snapshot_json : unit -> Yojson.Safe.t
 
 (** {1 Observable display state (LT-16-KCB)}
 
     The internal breaker advances through several micro-states during
-    [record_failure], but [tripped] is NOT observable — on trip, the
-    function immediately resets [consecutive_count] to 0 and only
-    [total_tripped] increments. Any snapshot taken between tool calls
-    therefore reports one of three stable states:
+    [record_failure], but [tripped] is NOT stable — on trip, the
+    function resets [consecutive_count] to 0, increments historical
+    [total_tripped], and opens a time-bounded cooling window. Any
+    snapshot taken between tool calls therefore reports one of three
+    stable states:
 
     - ["clean"]   — never failed: [consecutive_count = 0] AND
-                    [total_tripped = 0].
+                    no active cooling window.
     - ["warning"] — partial failure streak: [consecutive_count > 0]
                     (always below [threshold] because a trip resets it).
-    - ["cooling"] — recovered from at least one trip:
-                    [consecutive_count = 0] AND [total_tripped > 0].
+    - ["cooling"] — recently tripped: [consecutive_count = 0] AND
+                    the latest trip has not been closed by success or
+                    [cooling_reset_sec] expiry.
 
     Exposed so downstream observers (the composite-FSM matrix, test
     harnesses) can classify a KCB snapshot without reaching into the
@@ -85,10 +97,12 @@ type display_state =
   | Warning
   | Cooling
 
-(** Pure classifier: [derive_display_state ~consecutive_count ~total_tripped].
+(** Legacy pure classifier:
+    [derive_display_state ~consecutive_count ~total_tripped].
     Does not care about [threshold] — [consecutive_count] above threshold
     cannot occur in a well-formed record (the mutator resets on trip),
-    so any non-zero count is classified as [Warning]. *)
+    so any non-zero count is classified as [Warning]. This preserves the
+    historical snapshot interpretation when no trip timestamp is present. *)
 val derive_display_state :
   consecutive_count:int ->
   total_tripped:int ->
@@ -105,6 +119,13 @@ val display_state_to_string : display_state -> string
     Single-keeper alternative to classifying a whole snapshot — used by
     the composite observer so fleet snapshotting stays O(fleet). *)
 val display_state_of :
+  keeper_name:string ->
+  display_state
+
+(** Deterministic variant of {!display_state_of} for tests and replayed
+    snapshots. Production callers should usually use {!display_state_of}. *)
+val display_state_of_at :
+  now:float ->
   keeper_name:string ->
   display_state
 

@@ -5,7 +5,7 @@
 
 import { html } from 'htm/preact'
 import { computed } from '@preact/signals'
-import { route } from '../router'
+import { replaceRoute, route } from '../router'
 import { coordinationFsmSnapshot } from '../store'
 import { FilterChips } from './common/filter-chips'
 import { Planning } from './goals'
@@ -36,11 +36,12 @@ const VIEW_CHIPS: Array<{ key: PlanningView; label: string }> = [
 ]
 
 function updateViewParam(view: PlanningView): void {
-  const hash = view === 'goal-tree'
-    ? '#workspace?section=planning'
-    : `#workspace?section=planning&view=${view}`
-  history.replaceState(null, '', hash)
-  window.dispatchEvent(new HashChangeEvent('hashchange'))
+  replaceRoute(
+    'workspace',
+    view === 'goal-tree'
+      ? { section: 'planning' }
+      : { section: 'planning', view },
+  )
 }
 
 function coordinationCount(

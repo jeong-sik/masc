@@ -18,18 +18,30 @@ RUN apt-get update \
       coreutils \
       curl \
       findutils \
+      gcc \
       git \
       gh \
       jq \
       make \
       nodejs \
       npm \
+      ocaml-nox \
       opam \
-      ocaml-dune \
       openssh-client \
       python3 \
       ripgrep \
       tree \
  && rm -rf /var/lib/apt/lists/*
+
+# Install dune 3.22 via opam.
+# Ubuntu 24.04's ocaml-dune apt package provides dune 3.14 only;
+# the repo dune-project requires (lang dune 3.22).
+ENV OPAMROOT=/opt/opam
+RUN opam init --disable-sandboxing --root "$OPAMROOT" --bare -y \
+ && opam switch create default ocaml-system --root "$OPAMROOT" -y \
+ && opam install --root "$OPAMROOT" -y dune.3.22.0 \
+ && rm -rf "$OPAMROOT/repo" "$OPAMROOT/.opam-switch/sources"
+
+ENV PATH="/opt/opam/default/bin:${PATH}"
 
 CMD ["/bin/bash"]

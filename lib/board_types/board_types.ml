@@ -194,6 +194,7 @@ type store = {
   post_count: int ref;
   mutable last_sweep: float;
   mutex: Eio.Mutex.t;
+  persist_mutex: Eio.Mutex.t;
   (* Phase 2 caches *)
   mutable karma_cache: (string * int) list option;       (** None = stale *)
   mutable sorted_posts_cache: post list option;           (** None = stale *)

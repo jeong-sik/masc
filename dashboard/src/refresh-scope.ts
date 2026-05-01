@@ -26,7 +26,7 @@ function routeWantsExecution(routeState: Pick<RouteState, 'tab' | 'params'>): bo
   if (routeState.tab !== 'monitoring') return false
 
   const section = routeState.params.section
-  if (section === 'observatory' || section === 'journey' || section === 'agents') {
+  if (section === 'observatory' || section === 'journey' || section === 'agents' || section === 'cognition') {
     return true
   }
 

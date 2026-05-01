@@ -14,9 +14,9 @@ type run_result = {
   tool_call_count : int;
   tool_names : string list;
   session_id : string;
-  raw_trace_run : Oas.Raw_trace.run_ref option;
-  api_response : Oas.Types.api_response option;
-  proof : Oas.Cdal_proof.t option;
+  raw_trace_run : Agent_sdk.Raw_trace.run_ref option;
+  api_response : Agent_sdk.Types.api_response option;
+  proof : Agent_sdk.Cdal_proof.t option;
 }
 
 type worker_container_state =
@@ -450,7 +450,7 @@ let parse_text_tool_args (args_text : string) =
     in
     build [] parts
 
-let parse_text_tool_calls (content : string) : Oas.Types.content_block list =
+let parse_text_tool_calls (content : string) : Agent_sdk.Types.content_block list =
   let prefix = "mcp__masc__" in
   let prefix_len = String.length prefix in
   let len = String.length content in
@@ -505,7 +505,7 @@ let parse_text_tool_calls (content : string) : Oas.Types.content_block list =
             (match parse_text_tool_args args_raw with
             | Ok args_json ->
                 collect (close_idx + 1) (call_id + 1)
-                  (Oas.Types.ToolUse {
+                  (Agent_sdk.Types.ToolUse {
                      id = sprintf "text-fallback-%d" call_id;
                      name = tool_name;
                      input = args_json;
@@ -518,15 +518,15 @@ let parse_text_tool_calls (content : string) : Oas.Types.content_block list =
   in
   collect 0 1 []
 
-let make_usage ?(input_tokens = 0) ?(output_tokens = 0) () : Oas.Types.api_usage =
-  { Oas.Types.input_tokens;
+let make_usage ?(input_tokens = 0) ?(output_tokens = 0) () : Agent_sdk.Types.api_usage =
+  { Agent_sdk.Types.input_tokens;
     output_tokens;
     cache_creation_input_tokens = 0;
     cache_read_input_tokens = 0;
     cost_usd = None }
 
-let merge_usage (a : Oas.Types.api_usage) (b : Oas.Types.api_usage) : Oas.Types.api_usage =
-  { Oas.Types.input_tokens = a.input_tokens + b.input_tokens;
+let merge_usage (a : Agent_sdk.Types.api_usage) (b : Agent_sdk.Types.api_usage) : Agent_sdk.Types.api_usage =
+  { Agent_sdk.Types.input_tokens = a.input_tokens + b.input_tokens;
     output_tokens = a.output_tokens + b.output_tokens;
     cache_creation_input_tokens =
       a.cache_creation_input_tokens + b.cache_creation_input_tokens;
@@ -539,7 +539,7 @@ let merge_usage (a : Oas.Types.api_usage) (b : Oas.Types.api_usage) : Oas.Types.
        | None, None -> None) }
 
 let estimate_cost_usd ~(model_id : string)
-    (usage : Oas.Types.api_usage) : float option =
+    (usage : Agent_sdk.Types.api_usage) : float option =
   let pricing = Llm_provider.Pricing.pricing_for_model model_id in
   Some (Llm_provider.Pricing.estimate_cost ~pricing
     ~input_tokens:usage.input_tokens ~output_tokens:usage.output_tokens ())

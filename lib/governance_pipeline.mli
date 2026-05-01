@@ -112,7 +112,7 @@ val to_oas_approval_callback :
   ?meta:Keeper_types.keeper_meta ->
   ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
   unit ->
-  Oas.Hooks.approval_callback
+  Agent_sdk.Hooks.approval_callback
 (** Build an OAS approval callback with genuine HITL fiber suspension.
 
     Pre-computes trifecta status from the keeper's active shard tool set.

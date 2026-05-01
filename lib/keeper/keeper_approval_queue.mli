@@ -14,8 +14,8 @@ type risk_level =
   | High
   | Critical
 
-(** [Oas.Hooks.approval_decision] alias used as the resolver type. *)
-type decision = Oas.Hooks.approval_decision
+(** [Agent_sdk.Hooks.approval_decision] alias used as the resolver type. *)
+type decision = Agent_sdk.Hooks.approval_decision
 
 type approval_audit_decision =
   | Approval_resolved of decision
@@ -41,8 +41,8 @@ type pending_approval =
   ; selected_model : string option
   ; disposition : string option
   ; disposition_reason : string option
-  ; resolver : Oas.Hooks.approval_decision Eio.Promise.u option
-  ; on_resolution : (Oas.Hooks.approval_decision -> unit) option
+  ; resolver : Agent_sdk.Hooks.approval_decision Eio.Promise.u option
+  ; on_resolution : (Agent_sdk.Hooks.approval_decision -> unit) option
   }
 
 (** Persisted auto-approval rule that can satisfy a pending entry
@@ -194,7 +194,7 @@ val submit_and_await :
   ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
   ?timeout_s:float ->
   unit ->
-  Oas.Hooks.approval_decision
+  Agent_sdk.Hooks.approval_decision
 
 (** Submit a tool call for approval without suspending the caller —
     the supplied [on_resolution] callback is invoked when the
@@ -213,7 +213,7 @@ val submit_pending :
   ?selected_model:string ->
   ?disposition:string ->
   ?disposition_reason:string ->
-  on_resolution:(Oas.Hooks.approval_decision -> unit) ->
+  on_resolution:(Agent_sdk.Hooks.approval_decision -> unit) ->
   unit ->
   string
 
@@ -225,7 +225,7 @@ val submit_pending :
 val resolve_with_policy :
   ?base_path:string ->
   id:string ->
-  decision:Oas.Hooks.approval_decision ->
+  decision:Agent_sdk.Hooks.approval_decision ->
   ?remember_rule:bool ->
   ?created_by:string ->
   unit ->
@@ -236,7 +236,7 @@ val resolve_with_policy :
     handler and the MCP inline dispatch. *)
 val resolve :
   id:string ->
-  decision:Oas.Hooks.approval_decision ->
+  decision:Agent_sdk.Hooks.approval_decision ->
   (unit, resolve_error) result
 
 (** {1 Query} *)

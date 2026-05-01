@@ -11,6 +11,14 @@ open Masc_mcp
 
 let rng_initialized = ref false
 
+let with_env key value f =
+  let previous = Sys.getenv_opt key in
+  Unix.putenv key value;
+  Fun.protect f ~finally:(fun () ->
+      match previous with
+      | Some raw -> Unix.putenv key raw
+      | None -> Unix.putenv key "")
+
 let with_temp_config ~fsm_enabled f =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -158,6 +166,29 @@ let test_submit_for_verification_moves_to_awaiting () =
     | Ok _ ->
       Alcotest.(check string) "status" "awaiting_verification"
         (status_string config task_id))
+
+let test_submit_for_verification_sets_timeout_deadline () =
+  with_env "MASC_VERIFICATION_TIMEOUT_DEADLINE_SEC" "86400" @@ fun () ->
+  with_temp_config ~fsm_enabled:true @@ fun config ->
+    let task_id = add_strict_task config in
+    claim_and_start config "worker" task_id;
+    match Coord.transition_task_r config ~agent_name:"worker"
+            ~task_id ~action:Types.Submit_for_verification () with
+    | Error e -> Alcotest.fail ("submit failed: " ^ Types.show_masc_error e)
+    | Ok _ ->
+      match get_task config task_id with
+      | Some { task_status =
+                 Types.AwaitingVerification { submitted_at; deadline = Some deadline; _ };
+               _ } ->
+        let submitted_ts = Types.parse_iso8601 submitted_at in
+        let deadline_ts = Types.parse_iso8601 deadline in
+        Alcotest.(check (float 0.0)) "deadline offset"
+          86400.0
+          (deadline_ts -. submitted_ts)
+      | Some { task_status = Types.AwaitingVerification { deadline = None; _ }; _ } ->
+        Alcotest.fail "awaiting verification deadline missing"
+      | Some _ -> Alcotest.fail "task is not awaiting verification"
+      | None -> Alcotest.fail "task not found"
 
 let test_submit_for_verification_from_claimed_moves_to_awaiting () =
   with_temp_config ~fsm_enabled:true (fun config ->
@@ -596,6 +627,8 @@ let () =
     ("transitions_enabled", [
       Alcotest.test_case "submit moves to awaiting_verification" `Quick
         test_submit_for_verification_moves_to_awaiting;
+      Alcotest.test_case "submit sets timeout deadline" `Quick
+        test_submit_for_verification_sets_timeout_deadline;
       Alcotest.test_case "submit from claimed moves to awaiting_verification"
         `Quick test_submit_for_verification_from_claimed_moves_to_awaiting;
       Alcotest.test_case "submit prepare failure keeps task in_progress"

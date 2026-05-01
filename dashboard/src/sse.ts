@@ -12,6 +12,7 @@ import {
   normalizeJournalSource,
 } from './journal-entry'
 import { appendLiveToolCall } from './components/session-trace/session-trace-live-store'
+import { appendAuditEntry } from './live-store'
 import { parseSSEMessage } from './schemas/sse'
 import { RingBuffer } from './lib/ring-buffer'
 
@@ -203,6 +204,21 @@ export function buildDashboardSseUrl(sessionId: string, locationSearch = window.
   return `/mcp?${sseParams.toString()}`
 }
 
+export function normalizeSSEDispatchType(rawType: string): string {
+  if (
+    rawType === 'oas:masc:audit_event'
+    || rawType === 'masc:audit_event'
+    || rawType === 'masc/audit_event'
+  ) {
+    return 'audit_event'
+  }
+  const mascPrefix = 'masc/'
+  return rawType.startsWith(mascPrefix)
+    && !rawType.startsWith('masc/board_')
+    ? rawType.slice(mascPrefix.length)
+    : rawType
+}
+
 function clearReconnectTimer(): void {
   if (reconnectTimer) {
     clearTimeout(reconnectTimer)
@@ -290,21 +306,15 @@ export function connectSSE(): void {
 }
 
 function handleEvent(event: SSEEvent): void {
-  // Normalize: server may emit "masc/agent_joined" or "agent_joined".
-  // Strip the "masc/" prefix for the core event types so both forms match
-  // the same switch cases.  Keep the original type for OAS/namespaced events
-  // that genuinely use colons or other prefixes.
+  // Normalize only dispatch aliases. The OAS Event_bus bridge relays
+  // MASC Custom("masc.*") payloads as oas:masc:* events; audit ledger
+  // events still belong to the dashboard audit stream.
   const rawType = event.type
   if (pauseOasRuntimeIngress && rawType.startsWith('oas:')) {
     queuedOasEvents.push(event)
     return
   }
-  const MASC_PREFIX = 'masc/'
-  const type =
-    rawType.startsWith(MASC_PREFIX)
-    && !rawType.startsWith('masc/board_')   // board_post/board_comment already have explicit cases
-      ? rawType.slice(MASC_PREFIX.length)
-      : rawType
+  const type = normalizeSSEDispatchType(rawType)
   const agent = event.agent ?? event.author ?? event.from ?? event.from_agent ?? ''
   if (rawType.startsWith('oas:')) {
     void loadOasRuntimeStore()
@@ -910,6 +920,29 @@ function handleEvent(event: SSEEvent): void {
       addTypedJournalEntry(agent, type, 'oas', 'oas_event', {
         severity: event.severity,
         source: event.source,
+      })
+      break
+    }
+    case 'audit_event': {
+      // Global audit ledger event pushed via SSE (O2 Phase 2).
+      // Payload fields mirror the /api/v1/audit entry shape.
+      const p = (event.payload ?? {}) as Record<string, unknown>
+      const auditId = (event.audit_id ?? (p.id as string)) ?? ''
+      const auditTs = (event.audit_ts ?? (p.ts as string)) ?? new Date().toISOString()
+      const auditActor = (event.audit_actor ?? (p.actor as string)) ?? agent
+      const auditKind = (event.audit_kind ?? (p.kind as string)) ?? type
+      const auditTarget = event.audit_target ?? (p.target as string | undefined)
+      const auditSummary = (event.audit_summary ?? (p.summary as string)) ?? auditKind
+      const auditSeverity = (event.audit_severity ?? (p.severity as string)) ?? 'info'
+      appendAuditEntry({
+        id: auditId,
+        ts: auditTs,
+        actor: auditActor,
+        kind: auditKind,
+        target: auditTarget,
+        summary: auditSummary,
+        severity: auditSeverity,
+        payload: event.audit_payload ?? p.payload,
       })
       break
     }

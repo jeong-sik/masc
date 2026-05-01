@@ -153,7 +153,7 @@ let maybe_rollover_oas_handoff
     ~(model : string)
     ~(primary_model_max_tokens : int)
     ~(current_turn_overflow_blocker : string option)
-    ~(checkpoint : Oas.Checkpoint.t option) : handoff_rollover =
+    ~(checkpoint : Agent_sdk.Checkpoint.t option) : handoff_rollover =
   match checkpoint with
   | None ->
       {

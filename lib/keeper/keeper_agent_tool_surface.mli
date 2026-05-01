@@ -98,7 +98,7 @@ val preferred_tool_choice_for_required_turn :
   has_current_task:bool ->
   turn_affordances:string list ->
   allowed_tool_names:string list ->
-  Oas.Types.tool_choice
+  Agent_sdk.Types.tool_choice
 
 (** Find the active task ID a keeper currently owns. *)
 val owned_active_task_id_for_meta :
@@ -147,6 +147,6 @@ val tool_search_alias_entries : (string * string) list
 val tool_search_aliases : string -> string list
 
 val tool_index_entry :
-  name:string -> description:string -> Oas.Tool_index.entry
+  name:string -> description:string -> Agent_sdk.Tool_index.entry
 
-val tool_index_entry_of_tool : Oas.Tool.t -> Oas.Tool_index.entry
+val tool_index_entry_of_tool : Agent_sdk.Tool.t -> Agent_sdk.Tool_index.entry

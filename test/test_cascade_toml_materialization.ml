@@ -383,6 +383,23 @@ unknown_field = 1
       check bool "error mentions unknown field" true
         (contains_substring msg "unknown field")
 
+let test_legacy_timeout_sec_field_is_ignored () =
+  match
+    Masc_mcp.Cascade_toml_materializer.render_toml_string_to_json_string
+      {|
+[big_three]
+models = ["ollama:qwen3.5:35b-a3b-nvfp4"]
+timeout_sec = 60
+|}
+  with
+  | Error msg -> failf "legacy timeout_sec should be accepted: %s" msg
+  | Ok rendered ->
+      let json = Yojson.Safe.from_string rendered in
+      check bool "profile still renders models" true
+        (json |> member "big_three_models" <> `Null);
+      check bool "legacy timeout_sec is not materialized" true
+        (json |> member "big_three_timeout_sec" = `Null)
+
 let test_runtime_materializes_missing_json_on_load () =
   with_temp_dir "cascade-toml-materialize" @@ fun dir ->
   let config_dir = Filename.concat dir "config" in
@@ -581,6 +598,8 @@ let () =
         [
           test_case "unknown profile field is rejected" `Quick
             test_unknown_profile_field_is_rejected;
+          test_case "legacy timeout_sec field is ignored" `Quick
+            test_legacy_timeout_sec_field_is_ignored;
           test_case "fallback_cascade field is parsed" `Quick
             test_fallback_cascade_field_is_parsed;
           test_case "fallback_cascade absent is backward compatible" `Quick

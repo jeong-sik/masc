@@ -29,11 +29,11 @@ type stop_reason =
 type config = {
   name : string;
   provider_cfg : Llm_provider.Provider_config.t;
-  provider : Oas.Provider.config;
+  provider : Agent_sdk.Provider.config;
   model_id : string;
   priority : Llm_provider.Request_priority.t option;
   system_prompt : string;
-  tools : Oas.Tool.t list;
+  tools : Agent_sdk.Tool.t list;
   runtime_mcp_policy :
     Llm_provider.Llm_transport.runtime_mcp_policy option;
   max_turns : int;
@@ -43,20 +43,20 @@ type config = {
   max_input_tokens : int option;
   max_cost_usd : float option;
   temperature : float;
-  hooks : Oas.Hooks.hooks option;
-  context_reducer : Oas.Context_reducer.t option;
-  guardrails : Oas.Guardrails.t option;
-  event_bus : Oas.Event_bus.t option;
+  hooks : Agent_sdk.Hooks.hooks option;
+  context_reducer : Agent_sdk.Context_reducer.t option;
+  guardrails : Agent_sdk.Guardrails.t option;
+  event_bus : Agent_sdk.Event_bus.t option;
   checkpoint_dir : string option;
   session_id : string option;
   description : string option;
-  memory : Oas.Memory.t option;
-  initial_messages : Oas.Types.message list;
-  raw_trace : Oas.Raw_trace.t option;
-  tool_retry_policy : Oas.Tool_retry_policy.t option;
+  memory : Agent_sdk.Memory.t option;
+  initial_messages : Agent_sdk.Types.message list;
+  raw_trace : Agent_sdk.Raw_trace.t option;
+  tool_retry_policy : Agent_sdk.Tool_retry_policy.t option;
   required_tool_satisfaction :
-    Oas.Completion_contract.required_tool_satisfaction;
-  contract : Oas.Risk_contract.t option;
+    Agent_sdk.Completion_contract.required_tool_satisfaction;
+  contract : Agent_sdk.Risk_contract.t option;
   enable_thinking : bool option;
   transport : Masc_grpc_transport.t;
   allowed_paths : string list;
@@ -64,13 +64,13 @@ type config = {
   cache_system_prompt : bool;
   yield_on_tool : bool;
   compact_ratio : float option;
-  context_injector : Oas.Hooks.context_injector option;
-  context : Oas.Context.t option;
+  context_injector : Agent_sdk.Hooks.context_injector option;
+  context : Agent_sdk.Context.t option;
   slot_id : int option;
-  approval : Oas.Hooks.approval_callback option;
+  approval : Agent_sdk.Hooks.approval_callback option;
   exit_condition : (int -> bool) option;
   exit_condition_result : (int -> stop_reason * string option) option;
-  summarizer : (Oas.Types.message list -> string) option;
+  summarizer : (Agent_sdk.Types.message list -> string) option;
   cli_transport_overrides :
     Oas_worker_exec_transport.cli_transport_overrides option;
 }
@@ -84,7 +84,7 @@ val default_config :
   name:string ->
   provider_cfg:Llm_provider.Provider_config.t ->
   system_prompt:string ->
-  tools:Oas.Tool.t list ->
+  tools:Agent_sdk.Tool.t list ->
   config
 (** [default_config ~name ~provider_cfg ~system_prompt ~tools]
     returns a {!config} populated with sensible defaults for every
@@ -99,9 +99,9 @@ val builder_without_approval :
   config:config ->
   ?transport:Llm_provider.Llm_transport.t ->
   unit ->
-  Oas.Builder.t
+  Agent_sdk.Builder.t
 (** [builder_without_approval ~net ~config ?transport ()] builds an
-    {!Oas.Builder.t} from [config] without wiring approval
+    {!Agent_sdk.Builder.t} from [config] without wiring approval
     callbacks.  Approval wiring is the responsibility of the
     public facade ({!Oas_worker_exec}) which adds the approval
     callback before calling [Builder.build_safe]. *)
@@ -109,9 +109,9 @@ val builder_without_approval :
 (** {1 Resume preparation} *)
 
 type prepared_resume = {
-  patched_checkpoint : Oas.Checkpoint.t;
-  agent_config : Oas.Types.agent_config;
-  options : Oas.Agent.options;
+  patched_checkpoint : Agent_sdk.Checkpoint.t;
+  agent_config : Agent_sdk.Types.agent_config;
+  options : Agent_sdk.Agent.options;
 }
 (** Output of {!prepare_resume}.  [patched_checkpoint] has
     [turn_count] and budget fields adjusted so that resume picks
@@ -119,7 +119,7 @@ type prepared_resume = {
     consumed turns. *)
 
 val prepare_resume :
-  config:config -> checkpoint:Oas.Checkpoint.t -> prepared_resume
+  config:config -> checkpoint:Agent_sdk.Checkpoint.t -> prepared_resume
 (** [prepare_resume ~config ~checkpoint] computes the patched
     checkpoint + agent_config + options for an
     [Agent.resume] call.  Pure — no side effects.  The patched

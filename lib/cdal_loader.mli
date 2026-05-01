@@ -10,9 +10,9 @@
     [proof] is the decoded manifest proof, which is treated as the
     stored truth source for phase-1A replay. *)
 type loaded_bundle = {
-  proof : Oas.Cdal_proof.t;
+  proof : Agent_sdk.Cdal_proof.t;
   manifest_json : Yojson.Safe.t;
-  contract : Oas.Risk_contract.t;
+  contract : Agent_sdk.Risk_contract.t;
   contract_json : Yojson.Safe.t;
   recomputed_contract_id : string;
 }
@@ -35,8 +35,8 @@ type load_error =
     4. Decode with Agent_sdk types
     5. Recompute contract_id *)
 val load :
-  store:Oas.Proof_store.config ->
-  Oas.Cdal_proof.t ->
+  store:Agent_sdk.Proof_store.config ->
+  Agent_sdk.Cdal_proof.t ->
   (loaded_bundle, load_error) result
 
 (** Human-readable error description. *)

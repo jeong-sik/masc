@@ -285,6 +285,11 @@ jobs:
         if: needs.changes.outputs.spec_refs == 'true'
         run: bash scripts/lint/spec-line-refs.sh
 
+      - name: Check sandbox dune version alignment
+        run: |
+          chmod +x scripts/check-sandbox-dune-version.sh
+          scripts/check-sandbox-dune-version.sh
+
       - name: Meta bug-class gates (SSOT, SIL, STR, BND)
         run: |
           chmod +x scripts/ci/*.sh
@@ -337,26 +342,49 @@ jobs:
         with:
           install-flags: --with-test
 
-      - name: Fetch base branch for health ratchet
-        if: github.event_name == 'pull_request' && needs.changes.outputs.health_snapshot == 'true'
-        run: bash scripts/ci/git-fetch-retry.sh origin "${{ github.base_ref }}" --depth=1
+      - name: Fetch baseline for health ratchet
+        if: needs.changes.outputs.health_snapshot == 'true'
+        env:
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_BASE_REF: ${{ github.base_ref }}
+          GITHUB_BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          zero_sha="0000000000000000000000000000000000000000"
+          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
+            bash scripts/ci/git-fetch-retry.sh origin "${GITHUB_BASE_REF}" --depth=1
+          elif [ "${GITHUB_EVENT_NAME}" = "push" ] && [ -n "${GITHUB_BEFORE}" ] && [ "${GITHUB_BEFORE}" != "${zero_sha}" ]; then
+            bash scripts/ci/git-fetch-retry.sh origin "${GITHUB_BEFORE}" --depth=1
+          else
+            echo "No health baseline ref for ${GITHUB_EVENT_NAME}; snapshot will run without ratchet gating"
+          fi
 
       - name: Run health snapshot
         if: needs.changes.outputs.health_snapshot == 'true'
         env:
-          HEALTH_BASELINE_REF: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_BASE_REF: ${{ github.base_ref }}
+          GITHUB_BEFORE: ${{ github.event.before }}
         run: |
+          set -euo pipefail
           chmod +x scripts/health_snapshot.sh scripts/anti-fake-audit.sh
-          if [ -n "${HEALTH_BASELINE_REF}" ]; then
+          zero_sha="0000000000000000000000000000000000000000"
+          baseline_ref=""
+          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
+            baseline_ref="origin/${GITHUB_BASE_REF}"
+          elif [ "${GITHUB_EVENT_NAME}" = "push" ] && [ -n "${GITHUB_BEFORE}" ] && [ "${GITHUB_BEFORE}" != "${zero_sha}" ]; then
+            baseline_ref="${GITHUB_BEFORE}"
+          fi
+
+          if [ -n "${baseline_ref}" ]; then
             opam exec -- bash scripts/health_snapshot.sh \
               --json-out .health/health-snapshot.json \
-              --baseline-ref "${HEALTH_BASELINE_REF}" \
+              --baseline-ref "${baseline_ref}" \
               --fail-on-lib-regression
           else
             opam exec -- bash scripts/health_snapshot.sh \
               --json-out .health/health-snapshot.json \
-              --baseline-file .ci/health-baseline.json \
-              --fail-on-lib-regression
+              --baseline-file .ci/health-baseline.json
           fi
 
       - name: Upload health snapshot

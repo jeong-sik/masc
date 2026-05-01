@@ -330,6 +330,52 @@ let test_claim_respects_active_goal_ids () =
           json |> member "claimed_task" |> member "goal_id" |> to_string)
     | None -> fail "expected a claimed task")
 
+let test_claim_falls_back_from_empty_auto_goal_scope () =
+  with_room (fun config ->
+    let meta = make_test_meta ~name:"executor" () in
+    let auto_goal, _ =
+      match
+        Goal_store.upsert_goal config
+          ~title:(Keeper_goal_repair.goal_title_of_purpose meta.goal)
+          ()
+      with
+      | Ok payload -> payload
+      | Error msg -> fail msg
+    in
+    let product_goal, _ =
+      match Goal_store.upsert_goal config ~title:"Product goal" () with
+      | Ok payload -> payload
+      | Error msg -> fail msg
+    in
+    let meta = { meta with active_goal_ids = [ auto_goal.id ] } in
+    let _ =
+      Coord_task.add_task ~goal_id:product_goal.id config
+        ~title:"Product task" ~priority:1 ~description:"desc"
+    in
+    let result = call_tool config meta "keeper_task_claim" (`Assoc []) in
+    let json = parse_json result in
+    let claimed_task =
+      Coord.get_tasks_raw config
+      |> List.find_opt (fun (task : Types.task) ->
+           Types.task_assignee_of_status task.task_status = Some meta.agent_name)
+    in
+    match claimed_task with
+    | Some task ->
+      check string "claimed product task" "Product task" task.title;
+      let scope = Yojson.Safe.Util.member "claim_scope" json in
+      check string "claim scope mode" "auto_goal_fallback_all_tasks"
+        Yojson.Safe.Util.(scope |> member "mode" |> to_string);
+      check int "effective goal ids cleared" 0
+        Yojson.Safe.Util.(
+          scope |> member "effective_goal_ids" |> to_list |> List.length);
+      check string "claim scope matched product goal" product_goal.id
+        Yojson.Safe.Util.(scope |> member "matched_goal_id" |> to_string);
+      check bool "fallback reason present" true
+        Yojson.Safe.Util.(
+          scope |> member "fallback_reason" |> to_string |> fun s ->
+          String.length s > 0)
+    | None -> fail "expected fallback to claim a product task")
+
 let test_claim_skips_required_tools_without_access () =
   with_room (fun config ->
     let meta = make_meta_with_tools [ "keeper_task_claim"; "keeper_tasks_list" ] in
@@ -791,6 +837,8 @@ let () =
       test_case "claim empty room" `Quick test_claim_empty_room;
       test_case "claim respects active_goal_ids" `Quick
         test_claim_respects_active_goal_ids;
+      test_case "claim falls back from empty auto goal scope" `Quick
+        test_claim_falls_back_from_empty_auto_goal_scope;
       test_case "claim skips tasks requiring missing tools" `Quick
         test_claim_skips_required_tools_without_access;
       test_case "claim allows tasks requiring available tools" `Quick

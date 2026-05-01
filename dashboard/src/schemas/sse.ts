@@ -65,6 +65,9 @@ const FIXED_SSE_EVENT_TYPES = new Set([
   'operator_snapshot',
   'operator_digest',
   'transport_health_snapshot',
+  'masc:audit_event',
+  'audit_event',
+  'masc/audit_event',
 ])
 
 const STRING_FIELDS = new Set([

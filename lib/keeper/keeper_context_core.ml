@@ -53,7 +53,7 @@ type session_context = Keeper_types.session_context
 (* Working Context Operations (inlined from Keeper_working_context)  *)
 (* ================================================================ *)
 
-let text_of_message = Oas.Types.text_of_message
+let text_of_message = Agent_sdk.Types.text_of_message
 
 let ensure_dir path =
   ignore (Keeper_fs.ensure_dir path)
@@ -62,7 +62,7 @@ let ensure_dir path =
 
     All OAS Context_reducer estimation calls in MASC pass through this
     module.  Other keeper modules must NOT call
-    [Oas.Context_reducer.estimate_*] directly for decision-making.
+    [Agent_sdk.Context_reducer.estimate_*] directly for decision-making.
 
     @boundary-contract
     - MASC owns: observation (context_ratio for logging, compaction strategy
@@ -75,17 +75,17 @@ let ensure_dir path =
 
 (** Estimate token count for a raw string (CJK-aware). *)
 let estimate_char_tokens (s : string) : int =
-  Oas.Context_reducer.estimate_char_tokens s
+  Agent_sdk.Context_reducer.estimate_char_tokens s
 
 (** CJK-aware token estimate delegated to OAS Context_reducer.
     OAS estimator is already conservative (CJK-aware, ceil-based).
     Prior 15% buffer (#5053) removed — it caused premature compaction
     and masked the OAS estimator's actual accuracy. *)
-let msg_tokens (m : Oas.Types.message) : int =
-  Oas.Context_reducer.estimate_message_tokens m
+let msg_tokens (m : Agent_sdk.Types.message) : int =
+  Agent_sdk.Context_reducer.estimate_message_tokens m
 
-let count_tokens (system_prompt : string) (msgs : Oas.Types.message list) =
-  let sys_tokens = Oas.Context_reducer.estimate_char_tokens system_prompt in
+let count_tokens (system_prompt : string) (msgs : Agent_sdk.Types.message list) =
+  let sys_tokens = Agent_sdk.Context_reducer.estimate_char_tokens system_prompt in
   List.fold_left (fun acc m -> acc + msg_tokens m) sys_tokens msgs
 
 let checkpoint_of_context (ctx : working_context) = ctx.checkpoint
@@ -108,15 +108,15 @@ let messages_of_context (ctx : working_context) =
   ctx.checkpoint.messages
 
 let empty_runtime_checkpoint ~system_prompt ~messages ~max_tokens
-    ~(context : Oas.Context.t) : Oas.Checkpoint.t =
+    ~(context : Agent_sdk.Context.t) : Agent_sdk.Checkpoint.t =
   {
-    Oas.Checkpoint.version = Oas.Checkpoint.checkpoint_version;
+    Agent_sdk.Checkpoint.version = Agent_sdk.Checkpoint.checkpoint_version;
     session_id = "";
     agent_name = "";
     model = "";
     system_prompt = Some system_prompt;
     messages;
-    usage = Oas.Types.empty_usage;
+    usage = Agent_sdk.Types.empty_usage;
     turn_count = 0;
     created_at = Time_compat.now ();
     tools = [];
@@ -127,7 +127,7 @@ let empty_runtime_checkpoint ~system_prompt ~messages ~max_tokens
     top_k = None;
     min_p = None;
     enable_thinking = None;
-    response_format = Oas.Types.Off;
+    response_format = Agent_sdk.Types.Off;
     thinking_budget = None;
     cache_system_prompt = false;
     max_input_tokens = None;
@@ -149,7 +149,7 @@ let context_ratio (ctx : working_context) : float =
   else float_of_int (token_count ctx) /. float_of_int max_tokens
 
 let create ~system_prompt ~max_tokens =
-  let context = Oas.Context.create () in
+  let context = Agent_sdk.Context.create () in
   let checkpoint =
     empty_runtime_checkpoint ~system_prompt ~messages:[] ~max_tokens ~context
   in
@@ -158,9 +158,9 @@ let create ~system_prompt ~max_tokens =
 let set_system_prompt (ctx : working_context) ~system_prompt =
   let messages =
     List.map
-      (fun (m : Oas.Types.message) ->
-        if m.role = Oas.Types.System
-        then { m with role = Oas.Types.Assistant }
+      (fun (m : Agent_sdk.Types.message) ->
+        if m.role = Agent_sdk.Types.System
+        then { m with role = Agent_sdk.Types.Assistant }
         else m)
       (messages_of_context ctx)
   in
@@ -169,7 +169,7 @@ let set_system_prompt (ctx : working_context) ~system_prompt =
   in
   { ctx with checkpoint }
 
-let append ctx (msg : Oas.Types.message) =
+let append ctx (msg : Agent_sdk.Types.message) =
   let checkpoint =
     { ctx.checkpoint with messages = messages_of_context ctx @ [ msg ] }
   in
@@ -187,11 +187,11 @@ let sync_oas_context (ctx : working_context) : working_context =
     if max_tokens = 0 then 0.0
     else float_of_int token_count /. float_of_int max_tokens
   in
-  Oas.Context.set_scoped context Oas.Context.Session
+  Agent_sdk.Context.set_scoped context Agent_sdk.Context.Session
     "message_count" (`Int message_count);
-  Oas.Context.set_scoped context Oas.Context.Session
+  Agent_sdk.Context.set_scoped context Agent_sdk.Context.Session
     "token_count" (`Int token_count);
-  Oas.Context.set_scoped context Oas.Context.Session
+  Agent_sdk.Context.set_scoped context Agent_sdk.Context.Session
     "context_ratio" (`Float context_ratio);
   ctx
 
@@ -199,7 +199,7 @@ let generate_checkpoint_id () =
   let ts = int_of_float (Time_compat.now () *. 1000.0) in
   sprintf "ckpt-%d" ts
 
-let role_to_string (r : Oas.Types.role) = match r with
+let role_to_string (r : Agent_sdk.Types.role) = match r with
   | System -> "system" | User -> "user"
   | Assistant -> "assistant" | Tool -> "tool"
 
@@ -211,10 +211,10 @@ let role_to_string (r : Oas.Types.role) = match r with
    echo prior assistant replies as user input, or downgrade system
    prompt privileges. Same anti-pattern class as #8605/#8615. *)
 let role_of_string_opt = function
-  | "system" -> Some Oas.Types.System
-  | "user" -> Some Oas.Types.User
-  | "assistant" -> Some Oas.Types.Assistant
-  | "tool" -> Some Oas.Types.Tool
+  | "system" -> Some Agent_sdk.Types.System
+  | "user" -> Some Agent_sdk.Types.User
+  | "assistant" -> Some Agent_sdk.Types.Assistant
+  | "tool" -> Some Agent_sdk.Types.Tool
   | _ -> None
 
 (* Backwards-compatible wrapper. [Tool] is the safest fallback for an
@@ -228,19 +228,19 @@ let role_of_string s =
   | None ->
     Log.Misc.warn
       "keeper_context_core: unknown role %S, defaulting to Tool (#8623)" s;
-    Oas.Types.Tool
+    Agent_sdk.Types.Tool
 
 let content_blocks_to_json
-    (blocks : Oas.Types.content_block list) : Yojson.Safe.t =
-  `List (List.map Oas.Api.content_block_to_json blocks)
+    (blocks : Agent_sdk.Types.content_block list) : Yojson.Safe.t =
+  `List (List.map Agent_sdk.Api.content_block_to_json blocks)
 
 let content_blocks_of_json
-    (json : Yojson.Safe.t) : Oas.Types.content_block list option =
+    (json : Yojson.Safe.t) : Agent_sdk.Types.content_block list option =
   let open Yojson.Safe.Util in
   match json |> member "content_blocks" with
   | `List blocks ->
       let parsed =
-        List.filter_map Oas.Api.content_block_of_json blocks
+        List.filter_map Agent_sdk.Api.content_block_of_json blocks
       in
       if List.length parsed = List.length blocks then Some parsed else None
   | _ -> None
@@ -255,17 +255,17 @@ let metadata_of_json (json : Yojson.Safe.t) : (string * Yojson.Safe.t) list =
   | `Assoc fields -> fields
   | _ -> []
 
-let message_to_json (m : Oas.Types.message) : Yojson.Safe.t =
+let message_to_json (m : Agent_sdk.Types.message) : Yojson.Safe.t =
   let m = Inference_utils.sanitize_message_utf8 m in
   let tool_call_id =
     match m.tool_call_id with
     | Some _ as explicit -> explicit
     | None ->
         (match m.role with
-         | Oas.Types.Tool ->
+         | Agent_sdk.Types.Tool ->
              List.find_map
                (function
-                 | Oas.Types.ToolResult { tool_use_id; _ } -> Some tool_use_id
+                 | Agent_sdk.Types.ToolResult { tool_use_id; _ } -> Some tool_use_id
                  | _ -> None)
                m.content
          | _ -> None)
@@ -286,7 +286,7 @@ let message_to_json (m : Oas.Types.message) : Yojson.Safe.t =
      @ string_field_opt "tool_call_id" tool_call_id
      @ if m.metadata = [] then [] else [ ("metadata", `Assoc m.metadata) ])
 
-let message_of_json (json : Yojson.Safe.t) : Oas.Types.message =
+let message_of_json (json : Yojson.Safe.t) : Agent_sdk.Types.message =
   let open Yojson.Safe.Util in
   let role = json |> member "role" |> to_string |> role_of_string in
   let text =
@@ -303,13 +303,13 @@ let message_of_json (json : Yojson.Safe.t) : Oas.Types.message =
            so rebuilding a structured ToolResult here creates an invalid
            orphaned pair on the next Anthropic request. Fall back to plain
            text so old checkpoints remain readable without breaking turns. *)
-        [ Oas.Types.Text text ]
+        [ Agent_sdk.Types.Text text ]
     | None ->
-        [ Oas.Types.Text text ]
+        [ Agent_sdk.Types.Text text ]
   in
   Inference_utils.sanitize_message_utf8
     {
-      Oas.Types.role;
+      Agent_sdk.Types.role;
       content;
       name =
         (json |> member "name" |> to_string_option
@@ -329,9 +329,9 @@ let text_of_history_jsonl_json (json : Yojson.Safe.t) : string =
   let open Yojson.Safe.Util in
   match content_blocks_of_json json with
   | Some blocks when blocks <> [] ->
-      let msg : Oas.Types.message =
+      let msg : Agent_sdk.Types.message =
         {
-          Oas.Types.role = Oas.Types.User;
+          Agent_sdk.Types.role = Agent_sdk.Types.User;
           content = blocks;
           name = None;
           tool_call_id = None;
@@ -344,24 +344,24 @@ let text_of_history_jsonl_json (json : Yojson.Safe.t) : string =
        | Some value -> Inference_utils.sanitize_text_utf8 value
        | None -> "")
 
-let tool_use_ids_of_message (msg : Oas.Types.message) : string list =
+let tool_use_ids_of_message (msg : Agent_sdk.Types.message) : string list =
   List.filter_map
     (function
-      | Oas.Types.ToolUse { id; _ } -> Some id
+      | Agent_sdk.Types.ToolUse { id; _ } -> Some id
       | _ -> None)
     msg.content
 
-let tool_result_ids_of_message (msg : Oas.Types.message) : string list =
+let tool_result_ids_of_message (msg : Agent_sdk.Types.message) : string list =
   List.filter_map
     (function
-      | Oas.Types.ToolResult { tool_use_id; _ } -> Some tool_use_id
+      | Agent_sdk.Types.ToolResult { tool_use_id; _ } -> Some tool_use_id
       | _ -> None)
     msg.content
 
-let has_tool_result_block (msg : Oas.Types.message) : bool =
+let has_tool_result_block (msg : Agent_sdk.Types.message) : bool =
   List.exists
     (function
-      | Oas.Types.ToolResult _ -> true
+      | Agent_sdk.Types.ToolResult _ -> true
       | _ -> false)
     msg.content
 
@@ -376,8 +376,8 @@ let has_tool_result_block (msg : Oas.Types.message) : bool =
     implementation used [List.filteri (fun i _ -> i >= drop)] which splits
     on message index, breaking mid-pair boundaries. *)
 let trim_messages_preserving_pairs
-    (messages : Oas.Types.message list) ~(max_count : int)
-    : Oas.Types.message list =
+    (messages : Agent_sdk.Types.message list) ~(max_count : int)
+    : Agent_sdk.Types.message list =
   let n = List.length messages in
   if n <= max_count then messages
   else
@@ -427,10 +427,10 @@ let tool_use_text_of_block
   Printf.sprintf "[tool use %s %s input=%s]" tool_name tool_use_id input_json
 
 let repair_dangling_tool_use_messages
-    (messages : Oas.Types.message list) : Oas.Types.message list =
+    (messages : Agent_sdk.Types.message list) : Agent_sdk.Types.message list =
   let repair_with_next
-      (current : Oas.Types.message)
-      (next_opt : Oas.Types.message option) =
+      (current : Agent_sdk.Types.message)
+      (next_opt : Agent_sdk.Types.message option) =
     let next_tool_result_ids =
       match next_opt with
       | Some next -> tool_result_ids_of_message next
@@ -439,7 +439,7 @@ let repair_dangling_tool_use_messages
     let has_dangling =
       List.exists
         (function
-          | Oas.Types.ToolUse { id; _ } ->
+          | Agent_sdk.Types.ToolUse { id; _ } ->
               not (List.mem id next_tool_result_ids)
           | _ -> false)
         current.content
@@ -449,9 +449,9 @@ let repair_dangling_tool_use_messages
       let content =
         List.map
           (function
-            | Oas.Types.ToolUse { id; name; input }
+            | Agent_sdk.Types.ToolUse { id; name; input }
               when not (List.mem id next_tool_result_ids) ->
-                Oas.Types.Text
+                Agent_sdk.Types.Text
                   (tool_use_text_of_block
                      ~tool_use_id:id ~tool_name:name ~input)
             | other -> other)
@@ -470,7 +470,7 @@ let repair_dangling_tool_use_messages
   loop [] messages
 
 let repair_orphan_tool_result_messages
-    (messages : Oas.Types.message list) : Oas.Types.message list =
+    (messages : Agent_sdk.Types.message list) : Agent_sdk.Types.message list =
   let rec loop prev acc = function
     | [] -> List.rev acc
     | msg :: rest ->
@@ -491,7 +491,7 @@ let repair_orphan_tool_result_messages
             let has_orphan =
               List.exists
                 (function
-                  | Oas.Types.ToolResult { tool_use_id; _ } ->
+                  | Agent_sdk.Types.ToolResult { tool_use_id; _ } ->
                       not (List.mem tool_use_id prev_tool_use_ids)
                   | _ -> false)
                 msg.content
@@ -501,8 +501,8 @@ let repair_orphan_tool_result_messages
               let content =
                 List.map
                   (function
-                    | Oas.Types.ToolResult { tool_use_id; content; json; _ } ->
-                        Oas.Types.Text
+                    | Agent_sdk.Types.ToolResult { tool_use_id; content; json; _ } ->
+                        Agent_sdk.Types.Text
                           (tool_result_text_of_block ~tool_use_id ~content ~json)
                     | other -> other)
                   msg.content
@@ -514,7 +514,7 @@ let repair_orphan_tool_result_messages
   loop None [] messages
 
 let repair_broken_tool_call_pairs
-    (messages : Oas.Types.message list) : Oas.Types.message list =
+    (messages : Agent_sdk.Types.message list) : Agent_sdk.Types.message list =
   messages
   |> repair_dangling_tool_use_messages
   |> repair_orphan_tool_result_messages
@@ -539,7 +539,7 @@ let deserialize_context (s : string) ~max_tokens : working_context =
     |> repair_broken_tool_call_pairs
   in
   let _legacy_token_count = json |> member "token_count" |> to_int_option in
-  let context = Oas.Context.create () in
+  let context = Agent_sdk.Context.create () in
   let checkpoint =
     empty_runtime_checkpoint ~system_prompt ~messages ~max_tokens ~context
   in
@@ -745,7 +745,7 @@ let persist_message ?source session msg =
   let content_text =
     msg.content
     |> List.filter_map (function
-         | Oas.Types.Text text -> Some text
+         | Agent_sdk.Types.Text text -> Some text
          | _ -> None)
     |> String.concat "\n"
   in
@@ -933,14 +933,14 @@ let sanitize_checkpoint_text_block (text : string)
   else (Some text, empty_checkpoint_sanitize_stats)
 
 let sanitize_checkpoint_message
-    (msg : Oas.Types.message)
-  : Oas.Types.message option * checkpoint_sanitize_stats =
+    (msg : Agent_sdk.Types.message)
+  : Agent_sdk.Types.message option * checkpoint_sanitize_stats =
   let kept_rev, _, _, _, _, stats =
     List.fold_left
       (fun (kept_rev, kept_text_blocks, kept_text_chars,
             kept_tool_results, kept_tool_result_chars, stats) block ->
          match block with
-         | Oas.Types.Text text ->
+         | Agent_sdk.Types.Text text ->
              let sanitized_text, text_stats =
                sanitize_checkpoint_text_block text
              in
@@ -996,14 +996,14 @@ let sanitize_checkpoint_message
                           }
                         else empty_checkpoint_sanitize_stats
                       in
-                      ( Oas.Types.Text capped_text :: kept_rev,
+                      ( Agent_sdk.Types.Text capped_text :: kept_rev,
                         kept_text_blocks + 1,
                         kept_text_chars + String.length capped_text,
                         kept_tool_results, kept_tool_result_chars,
                         add_checkpoint_sanitize_stats
                           (add_checkpoint_sanitize_stats stats text_stats)
                           block_stats ))
-         | Oas.Types.Thinking { content; _ } ->
+         | Agent_sdk.Types.Thinking { content; _ } ->
              ( kept_rev,
                kept_text_blocks,
                kept_text_chars,
@@ -1014,7 +1014,7 @@ let sanitize_checkpoint_message
                    dropped_blocks = 1;
                    dropped_chars = String.length content;
                  } )
-         | Oas.Types.RedactedThinking text ->
+         | Agent_sdk.Types.RedactedThinking text ->
              ( kept_rev,
                kept_text_blocks,
                kept_text_chars,
@@ -1025,7 +1025,7 @@ let sanitize_checkpoint_message
                    dropped_blocks = 1;
                    dropped_chars = String.length text;
                  } )
-         | Oas.Types.ToolResult { tool_use_id; content; is_error; _ } ->
+         | Agent_sdk.Types.ToolResult { tool_use_id; content; is_error; _ } ->
              let tool_chars = String.length content in
              if kept_tool_results
                 >= default_max_checkpoint_tool_results_per_message
@@ -1035,7 +1035,7 @@ let sanitize_checkpoint_message
                (* Over count or aggregate budget: stub the result *)
                let stub_content = "[tool result cleared]" in
                let stub =
-                 Oas.Types.ToolResult
+                 Agent_sdk.Types.ToolResult
                    { tool_use_id;
                      content = stub_content;
                      is_error;
@@ -1058,7 +1058,7 @@ let sanitize_checkpoint_message
                  ^ checkpoint_text_cap_marker
                in
                let block =
-                 Oas.Types.ToolResult
+                 Agent_sdk.Types.ToolResult
                    { tool_use_id; content = capped; is_error; json = None }
                in
                ( block :: kept_rev,
@@ -1095,8 +1095,8 @@ let sanitize_checkpoint_message
   else (Some { msg with content = kept }, stats)
 
 let sanitize_checkpoint_messages
-    (messages : Oas.Types.message list)
-  : Oas.Types.message list * checkpoint_sanitize_stats =
+    (messages : Agent_sdk.Types.message list)
+  : Agent_sdk.Types.message list * checkpoint_sanitize_stats =
   List.fold_right
     (fun msg (acc, stats) ->
        let sanitized_opt, msg_stats = sanitize_checkpoint_message msg in
@@ -1114,8 +1114,8 @@ let sanitize_checkpoint_messages
 
 let sanitize_oas_checkpoint
     ?(repair_orphans = true)
-    (cp : Oas.Checkpoint.t)
-  : Oas.Checkpoint.t * checkpoint_sanitize_stats =
+    (cp : Agent_sdk.Checkpoint.t)
+  : Agent_sdk.Checkpoint.t * checkpoint_sanitize_stats =
   let messages, stats = sanitize_checkpoint_messages cp.messages in
   let messages =
     if repair_orphans then repair_broken_tool_call_pairs messages
@@ -1123,7 +1123,7 @@ let sanitize_oas_checkpoint
   in
   ({ cp with messages }, stats)
 
-let checkpoint_max_tokens (cp : Oas.Checkpoint.t) ~(fallback : int) : int =
+let checkpoint_max_tokens (cp : Agent_sdk.Checkpoint.t) ~(fallback : int) : int =
   let open Yojson.Safe.Util in
   match cp.max_total_tokens with
   | Some value -> value
@@ -1137,7 +1137,7 @@ let checkpoint_max_tokens (cp : Oas.Checkpoint.t) ~(fallback : int) : int =
 let context_of_oas_checkpoint
     ?(repair_orphans = true)
     ~(max_checkpoint_messages : int)
-    (cp : Oas.Checkpoint.t)
+    (cp : Agent_sdk.Checkpoint.t)
     ~(primary_model_max_tokens : int) : working_context =
   let cp, _ = sanitize_oas_checkpoint ~repair_orphans cp in
   let system_prompt = Option.value ~default:"" cp.system_prompt in
@@ -1152,7 +1152,7 @@ let context_of_oas_checkpoint
     if repair_orphans then repair_broken_tool_call_pairs messages
     else messages
   in
-  let context = Oas.Context.copy cp.context in
+  let context = Agent_sdk.Context.copy cp.context in
   let checkpoint =
     { cp with system_prompt = Some system_prompt; messages; context }
   in
@@ -1179,9 +1179,9 @@ let save_oas_checkpoint
     ~(model : string)
     ~(ctx : working_context)
     ~(generation : int)
-  : (Oas.Checkpoint.t, string) result =
-  let checkpoint_context = Oas.Context.copy (oas_context_of_context ctx) in
-  Oas.Context.set_scoped checkpoint_context Oas.Context.Session
+  : (Agent_sdk.Checkpoint.t, string) result =
+  let checkpoint_context = Agent_sdk.Context.copy (oas_context_of_context ctx) in
+  Agent_sdk.Context.set_scoped checkpoint_context Agent_sdk.Context.Session
     checkpoint_generation_key (`Int generation);
   (* Truncate messages at save time to match the load-time cap.
      Without this, checkpoints grow unbounded between compaction cycles,
@@ -1199,8 +1199,8 @@ let save_oas_checkpoint
      at checkpoint persistence we are more aggressive — older tool results
      are unlikely to be useful on resume and bloat disk/memory. *)
   let capped_messages =
-    Oas.Context_reducer.reduce
-      (Oas.Context_reducer.stub_tool_results ~keep_recent:1)
+    Agent_sdk.Context_reducer.reduce
+      (Agent_sdk.Context_reducer.stub_tool_results ~keep_recent:1)
       capped_messages
   in
   let capped_messages, _ = sanitize_checkpoint_messages capped_messages in
@@ -1212,7 +1212,7 @@ let save_oas_checkpoint
   let checkpoint =
     {
       ctx.checkpoint with
-      version = Oas.Checkpoint.checkpoint_version;
+      version = Agent_sdk.Checkpoint.checkpoint_version;
       session_id = session.session_id;
       agent_name;
       model;
@@ -1227,10 +1227,10 @@ let save_oas_checkpoint
   | Ok () -> Ok checkpoint
   | Error e -> Error e
 
-let checkpoint_generation (cp : Oas.Checkpoint.t) ~(fallback : int) : int =
+let checkpoint_generation (cp : Agent_sdk.Checkpoint.t) ~(fallback : int) : int =
   let open Yojson.Safe.Util in
   match
-    Oas.Context.get_scoped cp.context Oas.Context.Session
+    Agent_sdk.Context.get_scoped cp.context Agent_sdk.Context.Session
       checkpoint_generation_key
   with
   | Some (`Int value) -> value
@@ -1350,8 +1350,8 @@ let load_context_from_checkpoint ~max_checkpoint_messages ~trace_id ~primary_mod
     [working_context]/[STATE] paths for older checkpoints. *)
 let patch_checkpoint_last_assistant
     ?snapshot
-    (cp : Oas.Checkpoint.t) ~session_id ~response_text
-  : Oas.Checkpoint.t =
+    (cp : Agent_sdk.Checkpoint.t) ~session_id ~response_text
+  : Agent_sdk.Checkpoint.t =
   let snapshot =
     match snapshot with
     | Some snapshot -> Some snapshot
@@ -1365,8 +1365,8 @@ let patch_checkpoint_last_assistant
   (* Find index of last assistant message. *)
   let last_asst_idx = ref (-1) in
   List.iteri
-    (fun i (msg : Oas.Types.message) ->
-      if msg.role = Oas.Types.Assistant then last_asst_idx := i)
+    (fun i (msg : Agent_sdk.Types.message) ->
+      if msg.role = Agent_sdk.Types.Assistant then last_asst_idx := i)
     cp.messages;
   let messages =
     if !last_asst_idx < 0 then cp.messages
@@ -1384,15 +1384,15 @@ let patch_checkpoint_last_assistant
                   ]
               | None -> []
             in
-            Oas.Types.make_message
-              ~role:Oas.Types.Assistant
+            Agent_sdk.Types.make_message
+              ~role:Agent_sdk.Types.Assistant
               ~metadata
-              [ Oas.Types.Text visible_response_text ]
+              [ Agent_sdk.Types.Text visible_response_text ]
           else msg)
         cp.messages
   in
   let sanitized_messages, _ = sanitize_checkpoint_messages messages in
-  { cp with Oas.Checkpoint.session_id;
+  { cp with Agent_sdk.Checkpoint.session_id;
             messages = sanitized_messages;
             working_context = None }
 

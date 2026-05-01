@@ -22,7 +22,7 @@ type hook_accumulator =
   ; mutable required_tool_use_seen : bool
   ; mutable keeper_surface_tool_used : bool
   ; mutable discovered : Keeper_discovered_tools.t
-  ; mutable tool_overlay : Oas.Tool_op.t
+  ; mutable tool_overlay : Agent_sdk.Tool_op.t
   ; mutable tool_surface : tool_surface_metrics
   ; mutable requested_tool_names : string list
   ; mutable receipt_tool_contract_result : string
@@ -36,7 +36,7 @@ type hook_outputs =
   ; out_required_tool_use_seen : bool
   ; out_keeper_surface_tool_used : bool
   ; out_discovered : Keeper_discovered_tools.t
-  ; out_tool_overlay : Oas.Tool_op.t
+  ; out_tool_overlay : Agent_sdk.Tool_op.t
   ; out_tool_surface : tool_surface_metrics
   ; out_requested_tool_names : string list
   ; out_receipt_tool_contract_result : string
@@ -61,13 +61,13 @@ let freeze (acc : hook_accumulator) : hook_outputs =
     facade post-processing writes, and [agent_ref] is created locally
     at the OAS call site. *)
 type agent_setup =
-  { tools : Oas.Tool.t list
-  ; hooks : Oas.Hooks.hooks
-  ; reducer : Oas.Context_reducer.t
-  ; memory : Oas.Memory.t
+  { tools : Agent_sdk.Tool.t list
+  ; hooks : Agent_sdk.Hooks.hooks
+  ; reducer : Agent_sdk.Context_reducer.t
+  ; memory : Agent_sdk.Memory.t
   ; acc : hook_accumulator
   ; initial_tool_surface : computed_tool_surface
-  ; initial_tool_surface_blocker : Oas.Error.sdk_error option ref
+  ; initial_tool_surface_blocker : Agent_sdk.Error.sdk_error option ref
   ; all_tool_names : string list
   ; tool_usage_before : (string * int) list
   ; receipt_turn_count_ref : int option ref
@@ -91,9 +91,9 @@ let prepare_agent_setup
       ~(turn_system_prompt : string)
       ~(user_message : string)
       ~(dynamic_context : string)
-      ~(history_messages : Oas.Types.message list)
+      ~(history_messages : Agent_sdk.Types.message list)
       ~(prompt_metrics : Keeper_agent_prompt_metrics.prompt_metrics)
-      ~(shared_context : Oas.Context.t)
+      ~(shared_context : Agent_sdk.Context.t)
       ~(context_injector : Agent_sdk.Hooks.context_injector)
       ~(start_turn_count : int)
       ~(generation : int)
@@ -108,9 +108,9 @@ let prepare_agent_setup
       ~(approval_mode_derived : bool)
       ?max_cost_usd
       ~(trajectory_acc : Trajectory.accumulator option)
-      ~(tool_overlay : Oas.Tool_op.t ref option)
+      ~(tool_overlay : Agent_sdk.Tool_op.t ref option)
       ()
-  : (agent_setup, Oas.Error.sdk_error) result
+  : (agent_setup, Agent_sdk.Error.sdk_error) result
   =
   let cascade_name_string =
     Keeper_cascade_profile.runtime_name_to_string cascade_name
@@ -136,7 +136,7 @@ let prepare_agent_setup
              5)
         | None -> 5
       end)
-    ; tool_overlay = (match tool_overlay with Some r -> !r | None -> Oas.Tool_op.Keep_all)
+    ; tool_overlay = (match tool_overlay with Some r -> !r | None -> Agent_sdk.Tool_op.Keep_all)
     ; tool_surface =
         { turn_lane = "text_only"
         ; tool_surface_class = "none"
@@ -156,7 +156,7 @@ let prepare_agent_setup
     ; receipt_tool_contract_result = "unknown"
     }
   in
-  let agent_ref : Oas.Agent.t option ref = ref None in
+  let agent_ref : Agent_sdk.Agent.t option ref = ref None in
   let local_search_fn_ref : (query:string -> max_results:int -> Yojson.Safe.t) ref =
     ref (fun ~query:_ ~max_results:_ -> `Assoc [ "results", `List [] ])
   in
@@ -203,12 +203,12 @@ let prepare_agent_setup
     Keeper_tool_disclosure.keeper_tool_usage_snapshot ~base_path:config.base_path ~keeper_name:meta.name
   in
   let tool_index_config =
-    { Oas.Tool_index.default_config with
+    { Agent_sdk.Tool_index.default_config with
       top_k = Keeper_config.keeper_tool_search_top_k ()
     }
   in
   let tool_entries = List.map tool_index_entry_of_tool keeper_tools in
-  let search_index = Oas.Tool_index.build ~config:tool_index_config tool_entries in
+  let search_index = Agent_sdk.Tool_index.build ~config:tool_index_config tool_entries in
   let load_preset_selection_context () =
     let preset_names =
       Keeper_tool_policy.keeper_preset_universe_tool_names meta
@@ -217,22 +217,22 @@ let prepare_agent_setup
     List.iter (fun n -> Hashtbl.replace preset_set n true) preset_names;
     let preset_tools =
       List.filter
-        (fun (t : Oas.Tool.t) -> Hashtbl.mem preset_set t.schema.name)
+        (fun (t : Agent_sdk.Tool.t) -> Hashtbl.mem preset_set t.schema.name)
         keeper_tools
     in
     let progressive_tool_index_config =
-      { Oas.Tool_index.default_config with
+      { Agent_sdk.Tool_index.default_config with
         top_k = keeper_selection_bm25_prefilter_n }
     in
     let preset_tool_entries = List.map tool_index_entry_of_tool preset_tools in
     (preset_tools,
-     Oas.Tool_index.build ~config:progressive_tool_index_config
+     Agent_sdk.Tool_index.build ~config:progressive_tool_index_config
        preset_tool_entries)
   in
   let oas_description_map =
     let tbl = Hashtbl.create (List.length keeper_tools) in
     List.iter
-      (fun (t : Oas.Tool.t) ->
+      (fun (t : Agent_sdk.Tool.t) ->
          Hashtbl.replace tbl t.schema.name t.schema.description)
       keeper_tools;
     tbl
@@ -240,8 +240,8 @@ let prepare_agent_setup
   let oas_input_schema_map =
     let tbl = Hashtbl.create (List.length keeper_tools) in
     List.iter
-      (fun (t : Oas.Tool.t) ->
-         let param_type_str (pt : Oas.Types.param_type) =
+      (fun (t : Agent_sdk.Tool.t) ->
+         let param_type_str (pt : Agent_sdk.Types.param_type) =
            match pt with
            | String -> "string"
            | Integer -> "integer"
@@ -252,7 +252,7 @@ let prepare_agent_setup
          in
          let props =
            List.map
-             (fun (p : Oas.Types.tool_param) ->
+             (fun (p : Agent_sdk.Types.tool_param) ->
                 ( p.name
                 , `Assoc
                     [ "type", `String (param_type_str p.param_type)
@@ -262,8 +262,8 @@ let prepare_agent_setup
          in
          let required =
            t.schema.parameters
-           |> List.filter (fun (p : Oas.Types.tool_param) -> p.required)
-           |> List.map (fun (p : Oas.Types.tool_param) -> `String p.name)
+           |> List.filter (fun (p : Agent_sdk.Types.tool_param) -> p.required)
+           |> List.map (fun (p : Agent_sdk.Types.tool_param) -> `String p.name)
          in
          let schema =
            `Assoc
@@ -279,7 +279,7 @@ let prepare_agent_setup
   (local_search_fn_ref
    := fun ~query ~max_results ->
         let core = Keeper_exec_tools.effective_core_tools () in
-        let retrieved = Oas.Tool_index.retrieve search_index query in
+        let retrieved = Agent_sdk.Tool_index.retrieve search_index query in
         let allowed = Keeper_exec_tools.keeper_allowed_tool_names meta in
         let allowed_set =
           let tbl = Hashtbl.create (List.length allowed) in
@@ -403,7 +403,7 @@ let prepare_agent_setup
       (List.length tool_entries);
   let always_include_tools = Keeper_exec_tools.core_always_tools in
   let all_tool_names =
-    "extend_turns" :: List.map (fun (t : Oas.Tool.t) -> t.schema.name) keeper_tools
+    "extend_turns" :: List.map (fun (t : Agent_sdk.Tool.t) -> t.schema.name) keeper_tools
   in
   let universe_set = Keeper_tool_policy.tool_name_set all_tool_names in
   let allowed_exec_names = Keeper_exec_tools.keeper_allowed_tool_names meta in
@@ -508,7 +508,7 @@ let prepare_agent_setup
   let tool_gate_requested_for_turn ~current_tool_choice ~is_last_turn =
     let caller_requires_tools =
       match current_tool_choice with
-      | Some (Oas.Types.Any | Oas.Types.Tool _) -> true
+      | Some (Agent_sdk.Types.Any | Agent_sdk.Types.Tool _) -> true
       | _ -> false
     in
     max_turns > 1
@@ -519,9 +519,9 @@ let prepare_agent_setup
       : computed_tool_surface =
     let last_user_text =
       List.fold_left
-        (fun acc (m : Oas.Types.message) ->
+        (fun acc (m : Agent_sdk.Types.message) ->
            match m.role with
-           | Oas.Types.User -> Oas.Types.text_of_content m.content
+           | Agent_sdk.Types.User -> Agent_sdk.Types.text_of_content m.content
            | _ -> acc)
         ""
         messages
@@ -586,7 +586,7 @@ let prepare_agent_setup
                        []
                    | first_provider :: _ ->
                        let rerank_fn =
-                         Oas.Tool_selector.default_rerank_fn
+                         Agent_sdk.Tool_selector.default_rerank_fn
                            ~sw
                            ~net
                            ~provider:first_provider
@@ -594,7 +594,7 @@ let prepare_agent_setup
                            ()
                        in
                        let strategy =
-                         Oas.Tool_selector.TopK_llm
+                         Agent_sdk.Tool_selector.TopK_llm
                            { k = selection_limit
                            ; bm25_prefilter_n =
                                min
@@ -607,7 +607,7 @@ let prepare_agent_setup
                        in
                        (try
                           let selected =
-                            Oas.Tool_selector.select_names
+                            Agent_sdk.Tool_selector.select_names
                               ~strategy
                               ~context:query_text
                               ~tools:preset_tools
@@ -672,9 +672,9 @@ let prepare_agent_setup
            llm_selected)
     in
     let all_allowed =
-      Oas.Tool_op.apply
-        (Oas.Tool_op.compose
-           [ Oas.Tool_op.Replace_with merged
+      Agent_sdk.Tool_op.apply
+        (Agent_sdk.Tool_op.compose
+           [ Agent_sdk.Tool_op.Replace_with merged
            ; acc.tool_overlay
            ])
         all_tool_names
@@ -703,8 +703,8 @@ let prepare_agent_setup
     in
     let all_allowed =
       if is_last_turn && required_tool_names = [] then
-        Oas.Tool_op.apply
-          (Oas.Tool_op.Intersect_with safe_last_turn_tools)
+        Agent_sdk.Tool_op.apply
+          (Agent_sdk.Tool_op.Intersect_with safe_last_turn_tools)
           all_allowed
       else
         all_allowed
@@ -763,7 +763,7 @@ let prepare_agent_setup
       else if String.equal tool_requirement "optional" then "tool_optional"
       else (
         match current_tool_choice with
-        | Some Oas.Types.None_ -> "tool_disabled"
+        | Some Agent_sdk.Types.None_ -> "tool_disabled"
         | _ -> "text_only")
     in
     { all_allowed
@@ -967,13 +967,13 @@ let prepare_agent_setup
       ~discover_work_nudge
       ()
   in
-  let before_turn_hook : Oas.Hooks.hooks =
-    { Oas.Hooks.empty with
+  let before_turn_hook : Agent_sdk.Hooks.hooks =
+    { Agent_sdk.Hooks.empty with
       before_turn_params =
         Some
           (fun event ->
              match event with
-             | Oas.Hooks.BeforeTurnParams
+             | Agent_sdk.Hooks.BeforeTurnParams
                  { turn; current_params; messages; last_tool_results; _ } ->
                let hook_t0 = Time_compat.now () in
                acc.current_turn <- turn;
@@ -983,11 +983,11 @@ let prepare_agent_setup
                      let rev = List.rev messages in
                      let rec scan = function
                        | [] -> []
-                       | (msg : Oas.Types.message) :: rest ->
+                       | (msg : Agent_sdk.Types.message) :: rest ->
                          let names =
                            List.filter_map
                              (function
-                               | Oas.Types.ToolUse { name; _ } -> Some name
+                               | Agent_sdk.Types.ToolUse { name; _ } -> Some name
                                | _ -> None)
                              msg.content
                          in
@@ -1060,11 +1060,11 @@ let prepare_agent_setup
                        let rev = List.rev messages in
                        let rec scan = function
                          | [] -> []
-                         | (msg : Oas.Types.message) :: rest ->
+                         | (msg : Agent_sdk.Types.message) :: rest ->
                            let names =
                              List.filter_map
                                (function
-                                 | Oas.Types.ToolUse { name; _ } -> Some name
+                                 | Agent_sdk.Types.ToolUse { name; _ } -> Some name
                                  | _ -> None)
                                msg.content
                            in
@@ -1179,7 +1179,7 @@ let prepare_agent_setup
                    computed_surface.per_call_max_turns
                    computed_surface.is_last_turn;
                let all_allowed = computed_surface.all_allowed in
-               let tool_filter = Oas.Guardrails.AllowList all_allowed in
+               let tool_filter = Agent_sdk.Guardrails.AllowList all_allowed in
                let tool_choice =
                  if computed_surface.is_last_turn
                  then current_params.tool_choice
@@ -1193,7 +1193,7 @@ let prepare_agent_setup
                in
                let turn_completion_contract =
                  match computed_surface.tool_gate_requested, tool_choice with
-                 | true, Some Oas.Types.Auto ->
+                 | true, Some Agent_sdk.Types.Auto ->
                    Keeper_tool_disclosure.completion_contract_of_tool_choice
                      tool_choice
                  | true, _ ->
@@ -1235,7 +1235,7 @@ let prepare_agent_setup
                  ?tool_choice:(Option.map
                    (fun choice ->
                      Yojson.Safe.to_string
-                       (Oas.Types.tool_choice_to_json choice))
+                       (Agent_sdk.Types.tool_choice_to_json choice))
                    tool_choice)
                  ~thinking_enabled:thinking_enabled_effective
                  ?thinking_budget:current_params.thinking_budget
@@ -1304,16 +1304,16 @@ let prepare_agent_setup
                     meta.name
                     (Printexc.to_string exn));
                Eio.Fiber.yield ();
-               Oas.Hooks.AdjustParams
+               Agent_sdk.Hooks.AdjustParams
                  { current_params with
                    extra_system_context = ctx
                  ; tool_choice
                  ; tool_filter_override = Some tool_filter
                  }
-             | _ -> Oas.Hooks.Continue)
+             | _ -> Agent_sdk.Hooks.Continue)
     }
   in
-  let hooks = Oas.Hooks.compose ~outer:before_turn_hook ~inner:base_hooks in
+  let hooks = Agent_sdk.Hooks.compose ~outer:before_turn_hook ~inner:base_hooks in
   let base_dir = Coord.masc_root_dir config in
   let memory_session_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
   let memory_backend =
@@ -1324,7 +1324,7 @@ let prepare_agent_setup
       ()
   in
   let memory =
-    Oas.Memory.create ~long_term:memory_backend ()
+    Agent_sdk.Memory.create ~long_term:memory_backend ()
   in
   let hooks =
     let mem_hooks =
@@ -1334,7 +1334,7 @@ let prepare_agent_setup
         ~episode_limit:30
         ~procedure_limit:10 ()
     in
-    Oas.Hooks.compose ~outer:mem_hooks ~inner:hooks
+    Agent_sdk.Hooks.compose ~outer:mem_hooks ~inner:hooks
   in
   (* Tier K4b/K4c: install the tool-emission PostToolUse hook so
      tagged tool results flow into this keeper's own accumulator
@@ -1355,21 +1355,21 @@ let prepare_agent_setup
       | Some r -> [ r ]
       | None -> []
     in
-    Oas.Context_reducer.compose (
+    Agent_sdk.Context_reducer.compose (
       hydrator_steps @ [
-      Oas.Context_reducer.drop_thinking;
-      Oas.Context_reducer.stub_tool_results ~keep_recent:3;
-      Oas.Context_reducer.prune_tool_outputs ~max_output_len:4000;
-      Oas.Context_reducer.cap_message_tokens
+      Agent_sdk.Context_reducer.drop_thinking;
+      Agent_sdk.Context_reducer.stub_tool_results ~keep_recent:3;
+      Agent_sdk.Context_reducer.prune_tool_outputs ~max_output_len:4000;
+      Agent_sdk.Context_reducer.cap_message_tokens
         ~max_tokens:Env_config_keeper.KeeperReducer.cap_message_tokens
         ~keep_recent:Env_config_keeper.KeeperReducer.cap_message_keep_recent;
-      Oas.Context_reducer.repair_dangling_tool_calls;
+      Agent_sdk.Context_reducer.repair_dangling_tool_calls;
       {
-        Oas.Context_reducer.strategy =
-          Oas.Context_reducer.Custom
+        Agent_sdk.Context_reducer.strategy =
+          Agent_sdk.Context_reducer.Custom
             Keeper_context_core.repair_broken_tool_call_pairs;
       };
-      Oas.Context_reducer.merge_contiguous;
+      Agent_sdk.Context_reducer.merge_contiguous;
     ])
   in
   Ok { tools

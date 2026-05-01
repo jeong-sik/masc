@@ -17,9 +17,9 @@
       own mutex; we release the registry mutex before touching it. *)
 
 type tracked = {
-  sub: Oas.Event_bus.subscription;
+  sub: Agent_sdk.Event_bus.subscription;
   purpose: string;
-  filter: Oas.Event_bus.filter;
+  filter: Agent_sdk.Event_bus.filter;
   depth: int ref;
   warned_above_threshold: bool ref;
 }
@@ -53,8 +53,8 @@ let update_gauge_for purpose value =
     ~labels:[("subscriber_purpose", purpose)]
     (float_of_int value)
 
-let subscribe ~purpose ?(filter = Oas.Event_bus.accept_all) bus =
-  let sub = Oas.Event_bus.subscribe ~filter bus in
+let subscribe ~purpose ?(filter = Agent_sdk.Event_bus.accept_all) bus =
+  let sub = Agent_sdk.Event_bus.subscribe ~filter bus in
   let t =
     {
       sub;
@@ -69,7 +69,7 @@ let subscribe ~purpose ?(filter = Oas.Event_bus.accept_all) bus =
   t
 
 let drain (t : handle) =
-  let events = Oas.Event_bus.drain t.sub in
+  let events = Agent_sdk.Event_bus.drain t.sub in
   let n = List.length events in
   if n > 0 then begin
     let new_depth =
@@ -87,13 +87,13 @@ let unsubscribe bus (t : handle) =
   (* Zero out the gauge so a stale value doesn't linger after a
      subscriber shuts down. *)
   update_gauge_for t.purpose 0;
-  Oas.Event_bus.unsubscribe bus t.sub
+  Agent_sdk.Event_bus.unsubscribe bus t.sub
 
 (* Collect subscriptions whose filter accepts [evt] and bump their
    depth. Done under the registry mutex so a concurrent [unsubscribe]
    cannot free the tracked record mid-bump. Filter evaluation is
    cheap (predicate match). *)
-let bump_matching_subs (evt : Oas.Event_bus.event) =
+let bump_matching_subs (evt : Agent_sdk.Event_bus.event) =
   let updates =
     with_registry (fun () ->
       List.filter_map
@@ -106,7 +106,7 @@ let bump_matching_subs (evt : Oas.Event_bus.event) =
   in
   List.iter (fun (purpose, depth) -> update_gauge_for purpose depth) updates
 
-let publish bus (evt : Oas.Event_bus.event) =
+let publish bus (evt : Agent_sdk.Event_bus.event) =
   bump_matching_subs evt;
   Prometheus.inc_counter counter_publish_total ();
   let started = Time_compat.now () in
@@ -115,7 +115,7 @@ let publish bus (evt : Oas.Event_bus.event) =
       let elapsed = Time_compat.now () -. started in
       if elapsed > 0.0 then
         Prometheus.inc_counter counter_publish_block_seconds ~delta:elapsed ())
-    (fun () -> Oas.Event_bus.publish bus evt)
+    (fun () -> Agent_sdk.Event_bus.publish bus evt)
 
 let compute_threshold_transitions ~warn_threshold : transition list =
   with_registry (fun () ->

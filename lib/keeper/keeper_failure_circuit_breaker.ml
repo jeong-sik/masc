@@ -1,10 +1,13 @@
-(** Keeper Failure Circuit Breaker — detect repeated tool failures and
-    inject corrective hints into error responses.
+(** Keeper Failure Circuit Breaker — detect repeated tool failures,
+    inject corrective hints into error responses, and expose a bounded
+    cooling state for observers.
 
     Tracks consecutive failures per keeper by error class. After
     [threshold] consecutive failures of the same class, appends a
     corrective hint to the error message so the LLM adjusts its
-    next tool call.
+    next tool call. A trip opens a short cooling window; successful
+    tool calls close it immediately and observers auto-close it after
+    [cooling_reset_sec].
 
     Error classes are coarse categories (path_not_found, cwd_not_directory,
     path_not_in_allowed_paths/path_outside_sandbox) — not exact error strings. This prevents
@@ -89,6 +92,7 @@ type breaker_state = {
   mutable consecutive_class : error_class;
   mutable consecutive_count : int;
   mutable total_tripped : int;
+  mutable last_tripped_at : float option;
   (* Newest-first; length bounded by [recent_failures_capacity].
      Retained across trips so "cooling" inspection still has context. *)
   mutable recent_failures : failure_signature list;
@@ -143,13 +147,16 @@ let with_states_ro f = Eio_guard.with_mutex_ro states_mu f
 
 let threshold = 3
 
+let cooling_reset_sec = 60.0
+
 (* Caller must hold [states_mu]. *)
 let get_or_create_locked keeper_name =
   match Hashtbl.find_opt states keeper_name with
   | Some s -> s
   | None ->
     let s = { consecutive_class = Other; consecutive_count = 0;
-              total_tripped = 0; recent_failures = [] } in
+              total_tripped = 0; last_tripped_at = None;
+              recent_failures = [] } in
     Hashtbl.replace states keeper_name s;
     s
 
@@ -195,7 +202,8 @@ let format_recent_failures (sigs : failure_signature list) : string =
 let record_success ~keeper_name =
   with_states_rw (fun () ->
     let s = get_or_create_locked keeper_name in
-    s.consecutive_count <- 0)
+    s.consecutive_count <- 0;
+    s.last_tripped_at <- None)
 
 let rec record_failure ~keeper_name ~(error_msg : string) : string option =
   let cls = classify_error error_msg in
@@ -214,7 +222,9 @@ let rec record_failure ~keeper_name ~(error_msg : string) : string option =
       s.consecutive_count <- 1
     end;
     if s.consecutive_count >= threshold then begin
+      let now = sig_.ts in
       s.total_tripped <- s.total_tripped + 1;
+      s.last_tripped_at <- Some now;
       s.consecutive_count <- 0;
       let tripped = s.total_tripped in
       let recent = s.recent_failures in
@@ -296,17 +306,34 @@ let maybe_enrich_error ~keeper_name ~(error_msg : string) : string =
 (* ================================================================ *)
 
 let snapshot_json () : Yojson.Safe.t =
+  let now = Time_compat.now () in
   let entries =
     with_states_ro (fun () ->
       Hashtbl.fold (fun name state acc ->
         let recent_json =
           `List (List.map signature_to_json state.recent_failures)
         in
+        let display_state =
+          if state.consecutive_count > 0 then "warning"
+          else
+            match state.last_tripped_at with
+            | Some tripped_at
+              when state.total_tripped > 0
+                   && now -. tripped_at < cooling_reset_sec ->
+                "cooling"
+            | _ -> "clean"
+        in
         `Assoc [
           "keeper", `String name;
           "consecutive_class", `String (error_class_to_string state.consecutive_class);
           "consecutive_count", `Int state.consecutive_count;
           "total_tripped", `Int state.total_tripped;
+          "last_tripped_at",
+          (match state.last_tripped_at with
+           | Some ts -> `Float ts
+           | None -> `Null);
+          "cooling_reset_sec", `Float cooling_reset_sec;
+          "display_state", `String display_state;
           "recent_failures", recent_json;
         ] :: acc
       ) states [])
@@ -333,19 +360,40 @@ let derive_display_state ~consecutive_count ~total_tripped =
   else if total_tripped > 0 then Cooling
   else Clean
 
+let derive_display_state_current ~now ~consecutive_count ~total_tripped
+    ~last_tripped_at =
+  if consecutive_count > 0 then Warning
+  else
+    match last_tripped_at with
+    | Some tripped_at
+      when total_tripped > 0 && now -. tripped_at < cooling_reset_sec ->
+        Cooling
+    | _ -> Clean
+
 let display_state_to_string = function
   | Clean -> "clean"
   | Warning -> "warning"
   | Cooling -> "cooling"
 
-let display_state_of ~keeper_name =
+let display_state_of_at ~now ~keeper_name =
   with_states_ro (fun () ->
     match Hashtbl.find_opt states keeper_name with
     | None -> Clean
     | Some s ->
-      derive_display_state
+      derive_display_state_current
+        ~now
         ~consecutive_count:s.consecutive_count
-        ~total_tripped:s.total_tripped)
+        ~total_tripped:s.total_tripped
+        ~last_tripped_at:s.last_tripped_at)
+
+let display_state_of ~keeper_name =
+  display_state_of_at ~now:(Time_compat.now ()) ~keeper_name
+
+let display_state_of_string = function
+  | "clean" -> Some Clean
+  | "warning" -> Some Warning
+  | "cooling" -> Some Cooling
+  | _ -> None
 
 let classify_snapshot_json (json : Yojson.Safe.t)
   : ((string * display_state) list, string) result =
@@ -372,9 +420,20 @@ let classify_snapshot_json (json : Yojson.Safe.t)
           in
           (match name, cc, tt with
            | Some n, Some c, Some t ->
-             Some (n, derive_display_state
-                        ~consecutive_count:c
-                        ~total_tripped:t)
+             let state =
+               match List.assoc_opt "display_state" fields with
+               | Some (`String raw) ->
+                 (match display_state_of_string raw with
+                  | Some s -> s
+                  | None -> derive_display_state
+                              ~consecutive_count:c
+                              ~total_tripped:t)
+               | _ ->
+                 derive_display_state
+                   ~consecutive_count:c
+                   ~total_tripped:t
+             in
+             Some (n, state)
            | _ -> None)
         | _ -> None
       ) entries

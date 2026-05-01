@@ -218,7 +218,7 @@ let sdk_error_of_masc_internal_error err =
         ("cascade_name", cascade_name_of_masc_internal_error err);
       ]
     ();
-  Oas.Error.Internal
+  Agent_sdk.Error.Internal
     (masc_internal_error_prefix ^ Yojson.Safe.to_string (masc_internal_error_to_json err))
 
 let admission_wait_timeout_error
@@ -239,7 +239,7 @@ let admission_wait_timeout_error
     (sdk_error_of_masc_internal_error
        (Admission_queue_timeout { keeper_name; cascade_name; wait_sec }))
 
-let classify_masc_internal_error (err : Oas.Error.sdk_error) :
+let classify_masc_internal_error (err : Agent_sdk.Error.sdk_error) :
     masc_internal_error option =
   let int_opt_of_assoc key = function
     | `Assoc fields -> (
@@ -250,7 +250,7 @@ let classify_masc_internal_error (err : Oas.Error.sdk_error) :
     | _ -> None
   in
   match err with
-  | Oas.Error.Internal msg when String.starts_with ~prefix:masc_internal_error_prefix msg ->
+  | Agent_sdk.Error.Internal msg when String.starts_with ~prefix:masc_internal_error_prefix msg ->
     let payload =
       String.sub msg
         (String.length masc_internal_error_prefix)
@@ -415,7 +415,7 @@ let config_for_label
     ~(name : string)
     ~(model_label : string)
     ~(system_prompt : string)
-    ~(tools : Oas.Tool.t list)
+    ~(tools : Agent_sdk.Tool.t list)
     ~(max_turns : int)
     ~(max_tokens : int)
     ?(max_input_tokens : int option)
@@ -433,7 +433,7 @@ let config_for_label
     ?contract
     ?approval
     ~(description : string option)
-    () : (Oas_worker_exec.config, Oas.Error.sdk_error) result =
+    () : (Oas_worker_exec.config, Agent_sdk.Error.sdk_error) result =
   let* provider =
     Oas_worker_exec.resolve_provider_config_of_label model_label
     |> Result.map_error Oas_worker_exec.label_resolution_error_to_sdk_error
@@ -490,11 +490,11 @@ let codex_cli_prompt_preflight ~(config : Oas_worker_exec.config) ~(goal : strin
   match config.provider_cfg.kind with
   | Llm_provider.Provider_config.Codex_cli ->
     let messages =
-      Oas.Agent_turn.prepare_messages
-        ~messages:(config.initial_messages @ [ Oas.Types.user_msg goal ])
+      Agent_sdk.Agent_turn.prepare_messages
+        ~messages:(config.initial_messages @ [ Agent_sdk.Types.user_msg goal ])
         ~context_reducer:config.context_reducer
         ~tiered_memory:None
-        ~turn_params:Oas.Hooks.default_turn_params
+        ~turn_params:Agent_sdk.Hooks.default_turn_params
     in
     let req_config =
       match String.trim config.system_prompt with
@@ -517,10 +517,10 @@ let codex_cli_prompt_preflight ~(config : Oas_worker_exec.config) ~(goal : strin
     in
     let prompt_bytes = String.length prompt in
     let prompt_tokens =
-      max 1 (Oas.Context_reducer.estimate_char_tokens prompt)
+      max 1 (Agent_sdk.Context_reducer.estimate_char_tokens prompt)
     in
     let context_window_tokens =
-      Oas.Provider.resolve_max_context_tokens
+      Agent_sdk.Provider.resolve_max_context_tokens
         ~fallback:Cascade_runtime.fallback_context_window
         (Some config.provider)
     in
@@ -560,8 +560,8 @@ let codex_cli_preflight_error ~(scope : string)
     preflight.prompt_tokens preflight.retry_limit_tokens
     preflight.context_window_tokens preflight.hits_argv_limit
     preflight.hits_context_window;
-  Oas.Error.Agent
-    (Oas.Error.TokenBudgetExceeded
+  Agent_sdk.Error.Agent
+    (Agent_sdk.Error.TokenBudgetExceeded
        {
          kind = "Input";
          used = preflight.prompt_tokens;
@@ -569,8 +569,8 @@ let codex_cli_preflight_error ~(scope : string)
        })
 
 let with_codex_cli_preflight ~(scope : string) ~(config : Oas_worker_exec.config)
-    ~(goal : string) (run : unit -> ('a, Oas.Error.sdk_error) result)
-    : ('a, Oas.Error.sdk_error) result =
+    ~(goal : string) (run : unit -> ('a, Agent_sdk.Error.sdk_error) result)
+    : ('a, Agent_sdk.Error.sdk_error) result =
   match codex_cli_prompt_preflight ~config ~goal with
   | Some preflight ->
     Error (codex_cli_preflight_error ~scope ~provider_cfg:config.provider_cfg preflight)

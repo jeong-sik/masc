@@ -17,10 +17,10 @@ val default_max_checkpoint_messages : int
 (** {1 Token counting} *)
 
 (** Token count of a single OAS message. *)
-val msg_tokens : Oas.Types.message -> int
+val msg_tokens : Agent_sdk.Types.message -> int
 
 (** Total tokens across [system_prompt] + every message. *)
-val count_tokens : string -> Oas.Types.message list -> int
+val count_tokens : string -> Agent_sdk.Types.message list -> int
 
 val token_count : working_context -> int
 val message_count : working_context -> int
@@ -31,8 +31,8 @@ val max_tokens_of_context : working_context -> int
     into [checkpoint.max_total_tokens]. *)
 val with_max_tokens : working_context -> int -> working_context
 
-(** Re-export of [Oas.Types.text_of_message]. *)
-val text_of_message : Oas.Types.message -> string
+(** Re-export of [Agent_sdk.Types.text_of_message]. *)
+val text_of_message : Agent_sdk.Types.message -> string
 
 (** {1 Working-context construction & mutation} *)
 
@@ -43,8 +43,8 @@ val create : system_prompt:string -> max_tokens:int -> working_context
 val set_system_prompt :
   working_context -> system_prompt:string -> working_context
 
-val append : working_context -> Oas.Types.message -> working_context
-val append_many : working_context -> Oas.Types.message list -> working_context
+val append : working_context -> Agent_sdk.Types.message -> working_context
+val append_many : working_context -> Agent_sdk.Types.message list -> working_context
 
 (** Push the working-context's derived counters into the OAS
     [Context.t] (Session scope). *)
@@ -52,25 +52,25 @@ val sync_oas_context : working_context -> working_context
 
 (** {1 Working-context projections} *)
 
-val checkpoint_of_context : working_context -> Oas.Checkpoint.t
-val oas_context_of_context : working_context -> Oas.Context.t
+val checkpoint_of_context : working_context -> Agent_sdk.Checkpoint.t
+val oas_context_of_context : working_context -> Agent_sdk.Context.t
 val system_prompt_of_context : working_context -> string
-val messages_of_context : working_context -> Oas.Types.message list
+val messages_of_context : working_context -> Agent_sdk.Types.message list
 
 (** {1 Role / message JSON} *)
 
-val role_to_string : Oas.Types.role -> string
+val role_to_string : Agent_sdk.Types.role -> string
 
 (** [Some] only for the four wire-format names; callers must
     handle [None] explicitly (#8623). *)
-val role_of_string_opt : string -> Oas.Types.role option
+val role_of_string_opt : string -> Agent_sdk.Types.role option
 
 (** Backwards-compatible wrapper that defaults unknown roles to
     [Tool] with a warn log (#8623). *)
-val role_of_string : string -> Oas.Types.role
+val role_of_string : string -> Agent_sdk.Types.role
 
-val message_to_json : Oas.Types.message -> Yojson.Safe.t
-val message_of_json : Yojson.Safe.t -> Oas.Types.message
+val message_to_json : Agent_sdk.Types.message -> Yojson.Safe.t
+val message_of_json : Yojson.Safe.t -> Agent_sdk.Types.message
 
 (** Project a JSONL entry to its visible-text rendering used by
     history classification. *)
@@ -81,7 +81,7 @@ val text_of_history_jsonl_json : Yojson.Safe.t -> string
 (** Insert dangling-tool-use placeholders + drop orphan tool
     results so OAS checkpoint replay never sees a mismatched pair. *)
 val repair_broken_tool_call_pairs :
-  Oas.Types.message list -> Oas.Types.message list
+  Agent_sdk.Types.message list -> Agent_sdk.Types.message list
 
 (** {1 Context (de)serialization} *)
 
@@ -123,7 +123,7 @@ val migrate_session_history_logs :
 (** Append [msg] to the keeper's history JSONL, choosing
     [history.jsonl] / [history.internal.jsonl] from [source]. *)
 val persist_message :
-  ?source:string -> session_context -> Oas.Types.message -> unit
+  ?source:string -> session_context -> Agent_sdk.Types.message -> unit
 
 (** {1 Re-exports from Inference_utils} *)
 
@@ -146,7 +146,7 @@ val save_oas_checkpoint :
   model:string ->
   ctx:working_context ->
   generation:int ->
-  (Oas.Checkpoint.t, string) result
+  (Agent_sdk.Checkpoint.t, string) result
 
 (** Wrap [create_checkpoint] + [save_session_checkpoint] for the
     legacy on-disk checkpoint store; returns the persisted
@@ -156,8 +156,8 @@ val save_checkpoint :
 
 (** {1 OAS checkpoint inspection} *)
 
-val checkpoint_generation : Oas.Checkpoint.t -> fallback:int -> int
-val checkpoint_max_tokens : Oas.Checkpoint.t -> fallback:int -> int
+val checkpoint_generation : Agent_sdk.Checkpoint.t -> fallback:int -> int
+val checkpoint_max_tokens : Agent_sdk.Checkpoint.t -> fallback:int -> int
 
 (** Drop orphan [tool_result] blocks (those without a matching
     preceding [tool_use]) so a checkpoint payload satisfies the
@@ -165,7 +165,7 @@ val checkpoint_max_tokens : Oas.Checkpoint.t -> fallback:int -> int
     tool_use. Public so [Keeper_rollover] / [Keeper_post_turn] can
     reuse it before persisting a checkpoint. *)
 val repair_orphan_tool_result_messages :
-  Oas.Types.message list -> Oas.Types.message list
+  Agent_sdk.Types.message list -> Agent_sdk.Types.message list
 
 type checkpoint_sanitize_stats = {
   dropped_messages : int;
@@ -182,8 +182,8 @@ type checkpoint_sanitize_stats = {
     aggregated stats. *)
 val sanitize_oas_checkpoint :
   ?repair_orphans:bool ->
-  Oas.Checkpoint.t ->
-  Oas.Checkpoint.t * checkpoint_sanitize_stats
+  Agent_sdk.Checkpoint.t ->
+  Agent_sdk.Checkpoint.t * checkpoint_sanitize_stats
 
 val checkpoint_sanitize_changed : checkpoint_sanitize_stats -> bool
 (** [true] iff any of the counters in [stats] is non-zero. *)
@@ -215,7 +215,7 @@ val tool_result_text_of_block :
     without re-implementing the projection. *)
 
 val sanitize_checkpoint_message :
-  Oas.Types.message -> Oas.Types.message option * checkpoint_sanitize_stats
+  Agent_sdk.Types.message -> Agent_sdk.Types.message option * checkpoint_sanitize_stats
 (** Apply the per-message portion of {!sanitize_oas_checkpoint}: cap
     Text and tool_result blocks, drop empties, return the cleaned
     message (or [None] if every block was dropped) plus its stats.
@@ -238,7 +238,7 @@ val checkpoint_model_of_meta : Keeper_types.keeper_meta -> string
 val context_of_oas_checkpoint :
   ?repair_orphans:bool ->
   max_checkpoint_messages:int ->
-  Oas.Checkpoint.t ->
+  Agent_sdk.Checkpoint.t ->
   primary_model_max_tokens:int ->
   working_context
 
@@ -259,10 +259,10 @@ val load_context_from_checkpoint :
     text (state blocks stripped). *)
 val patch_checkpoint_last_assistant :
   ?snapshot:Keeper_memory_policy.keeper_state_snapshot ->
-  Oas.Checkpoint.t ->
+  Agent_sdk.Checkpoint.t ->
   session_id:string ->
   response_text:string ->
-  Oas.Checkpoint.t
+  Agent_sdk.Checkpoint.t
 
 (** {1 Diagnostics} *)
 

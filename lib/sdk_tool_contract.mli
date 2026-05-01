@@ -91,13 +91,13 @@ val string_member : string -> Yojson.Safe.t -> string option
     absent or wrong type. *)
 
 val param_type_of_schema_opt :
-  Yojson.Safe.t -> Oas.Types.param_type option
+  Yojson.Safe.t -> Agent_sdk.Types.param_type option
 (** Strict JSON-Schema [type] classifier: [Some param_type] only for
     documented vocabulary ([string] / [integer] / [number] /
     [boolean] / [array] / [object]); [None] for non-vocabulary
     values like [null] / typos / tuple variants (#8832). *)
 
-val param_type_of_schema : Yojson.Safe.t -> Oas.Types.param_type
+val param_type_of_schema : Yojson.Safe.t -> Agent_sdk.Types.param_type
 (** Permissive variant of {!param_type_of_schema_opt} that defaults
     unknown / missing types to [String]. *)
 

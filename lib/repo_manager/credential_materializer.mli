@@ -75,6 +75,10 @@ val provision_via_with_token :
     - [stdout]/[stderr] of the subprocess are redirected to [/dev/null]
       so [gh] cannot leak a malformed-token diagnostic.
     - [gh_config_dir] is rejected if it contains a [..] segment.
+    - [gh] receives a bundle-local environment that scrubs ambient
+      GH_TOKEN/GITHUB_TOKEN values and forces [--insecure-storage], so
+      the resulting [hosts.yml] is mounted with the keeper bundle
+      instead of being hidden in the operator's host keyring.
     - On success the function: (1) calls {!relabel_hosts_yml} when
       [identity_label] is supplied (RFC-0008 F-2 close), (2) calls
       {!f1_gate_check} when [credential_id] is supplied (RFC-0019 PR-C

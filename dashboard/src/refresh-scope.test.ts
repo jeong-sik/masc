@@ -18,6 +18,7 @@ describe('routeWantsRefreshTarget', () => {
 
   it('matches execution-backed routes without broadening fleet-health defaults', () => {
     expect(routeWantsRefreshTarget(route('monitoring', { section: 'agents' }), 'execution')).toBe(true)
+    expect(routeWantsRefreshTarget(route('monitoring', { section: 'cognition' }), 'execution')).toBe(true)
     expect(routeWantsRefreshTarget(route('monitoring', { section: 'journey' }), 'execution')).toBe(true)
     expect(routeWantsRefreshTarget(route('workspace', { section: 'planning' }), 'execution')).toBe(true)
     expect(routeWantsRefreshTarget(route('monitoring', { section: 'fleet-health' }), 'execution')).toBe(false)

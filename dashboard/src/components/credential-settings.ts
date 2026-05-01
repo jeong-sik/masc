@@ -11,6 +11,13 @@ import { ErrorState, LoadingState } from './common/feedback-state'
 // ── Types ────────────────────────────────────────────────
 
 export type CredentialType = 'github' | 'gitlab' | 'local'
+export type CredentialOauthMethod = 'web' | 'with_token'
+
+export interface CredentialState {
+  kind: 'Unmaterialized' | 'Materialized' | 'Stale' | string
+  last_verified_at_unix_ms?: string | number | null
+  reason?: string | null
+}
 
 export interface Credential {
   id: string
@@ -20,6 +27,8 @@ export interface Credential {
   gh_config_dir?: string | null
   ssh_key_path?: string | null
   gpg_key_id?: string | null
+  state?: CredentialState | null
+  token_sha256_prefix?: string | null
   description?: string
   config?: Record<string, unknown>
   created_at?: string
@@ -33,6 +42,8 @@ export interface CredentialCreatePayload {
   gh_config_dir?: string | null
   ssh_key_path?: string | null
   gpg_key_id?: string | null
+  oauth_method?: CredentialOauthMethod
+  token?: string | null
   description?: string
   config?: Record<string, unknown>
 }
@@ -52,6 +63,7 @@ const addDraft = signal<CredentialCreatePayload>({
   name: '',
   username: '',
   type: 'github',
+  oauth_method: 'web',
   description: '',
 })
 
@@ -76,6 +88,8 @@ async function fetchCredentials(): Promise<Credential[]> {
         gh_config_dir: typeof r.gh_config_dir === 'string' ? r.gh_config_dir : null,
         ssh_key_path: typeof r.ssh_key_path === 'string' ? r.ssh_key_path : null,
         gpg_key_id: typeof r.gpg_key_id === 'string' ? r.gpg_key_id : null,
+        state: parseCredentialState(r.state),
+        token_sha256_prefix: typeof r.token_sha256_prefix === 'string' ? r.token_sha256_prefix : null,
         description: r.description ? String(r.description) : undefined,
         config: isRecord(r.config) ? r.config : undefined,
         created_at: r.created_at ? String(r.created_at) : undefined,
@@ -86,14 +100,7 @@ async function fetchCredentials(): Promise<Credential[]> {
 }
 
 async function createCredential(payload: CredentialCreatePayload): Promise<void> {
-  await post('/api/v1/credentials', {
-    id: payload.id,
-    cred_type: payload.type,
-    username: payload.username || payload.name,
-    gh_config_dir: payload.gh_config_dir ?? null,
-    ssh_key_path: payload.ssh_key_path ?? null,
-    gpg_key_id: payload.gpg_key_id ?? null,
-  })
+  await post('/api/v1/credentials', buildCredentialCreateRequest(payload))
 }
 
 async function deleteCredential(id: string): Promise<void> {
@@ -119,6 +126,20 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+export function parseCredentialState(raw: unknown): CredentialState | null {
+  if (!isRecord(raw)) return null
+  const kind = typeof raw.kind === 'string' ? raw.kind : null
+  if (!kind) return null
+  return {
+    kind,
+    last_verified_at_unix_ms:
+      typeof raw.last_verified_at_unix_ms === 'string' || typeof raw.last_verified_at_unix_ms === 'number'
+        ? raw.last_verified_at_unix_ms
+        : null,
+    reason: typeof raw.reason === 'string' ? raw.reason : null,
+  }
+}
+
 export function credentialTypeLabel(type: CredentialType): string {
   switch (type) {
     case 'github': return 'GitHub'
@@ -138,8 +159,69 @@ export function credentialTypeBadgeClass(type: CredentialType): string {
   }
 }
 
+export function credentialStateLabel(state: CredentialState | null | undefined): string {
+  switch (state?.kind) {
+    case 'Materialized':
+      return 'Materialized'
+    case 'Stale':
+      return 'Stale'
+    case 'Unmaterialized':
+      return 'Unmaterialized'
+    default:
+      return 'Unknown'
+  }
+}
+
+export function credentialStateBadgeClass(state: CredentialState | null | undefined): string {
+  switch (state?.kind) {
+    case 'Materialized':
+      return 'bg-[var(--ok-10)] text-[var(--color-status-ok)] border-[var(--ok-20)]'
+    case 'Stale':
+      return 'bg-[var(--warn-10)] text-[var(--color-status-warn)] border-[var(--warn-20)]'
+    case 'Unmaterialized':
+      return 'bg-[var(--white-5)] text-text-dim border-[var(--white-10)]'
+    default:
+      return 'bg-[var(--white-5)] text-text-muted border-[var(--white-10)]'
+  }
+}
+
+export function sanitizeOptionalString(value: string | null | undefined): string | null {
+  const trimmed = value?.trim() ?? ''
+  return trimmed === '' ? null : trimmed
+}
+
+export function shellQuote(value: string): string {
+  return `'${value.split("'").join("'\\''")}'`
+}
+
+export function githubLoginCommand(ghConfigDir: string | null | undefined): string | null {
+  const dir = sanitizeOptionalString(ghConfigDir)
+  if (!dir) return null
+  return `GH_CONFIG_DIR=${shellQuote(dir)} gh auth login --hostname github.com --git-protocol https --web`
+}
+
+export function buildCredentialCreateRequest(payload: CredentialCreatePayload): Record<string, unknown> {
+  const ghConfigDir = sanitizeOptionalString(payload.gh_config_dir)
+  const sshKeyPath = sanitizeOptionalString(payload.ssh_key_path)
+  const gpgKeyId = sanitizeOptionalString(payload.gpg_key_id)
+  const oauthMethod =
+    payload.type === 'github'
+      ? payload.oauth_method === 'with_token' ? 'with_token' : 'web'
+      : 'web'
+  return {
+    id: payload.id.trim(),
+    cred_type: payload.type,
+    username: (payload.username || payload.name).trim(),
+    gh_config_dir: ghConfigDir,
+    ssh_key_path: sshKeyPath,
+    gpg_key_id: gpgKeyId,
+    oauth_method: oauthMethod,
+    token: oauthMethod === 'with_token' ? sanitizeOptionalString(payload.token) : null,
+  }
+}
+
 function resetAddDraft() {
-  addDraft.value = { id: '', name: '', username: '', type: 'github', description: '' }
+  addDraft.value = { id: '', name: '', username: '', type: 'github', oauth_method: 'web', description: '' }
   saveError.value = null
 }
 
@@ -179,6 +261,14 @@ function CredentialTypeBadge({ type }: { type: CredentialType }) {
   `
 }
 
+function CredentialStateBadge({ state }: { state?: CredentialState | null }) {
+  return html`
+    <span class="text-2xs font-bold px-2 py-0.5 rounded border ${credentialStateBadgeClass(state)} shadow-sm">
+      ${credentialStateLabel(state)}
+    </span>
+  `
+}
+
 // ── Main component ───────────────────────────────────────
 
 export function CredentialSettings() {
@@ -213,8 +303,12 @@ export function CredentialSettings() {
   const draft = addDraft.value
 
   async function handleSave() {
-    if (!draft.id.trim() || !draft.name.trim() || !draft.username.trim()) {
-      saveError.value = 'ID, 이름, 사용자명은 필수입니다.'
+    if (!draft.id.trim() || !draft.username.trim()) {
+      saveError.value = 'ID와 사용자명은 필수입니다.'
+      return
+    }
+    if (draft.type === 'github' && draft.oauth_method === 'with_token' && !sanitizeOptionalString(draft.token)) {
+      saveError.value = 'with-token 방식은 token 값이 필요합니다.'
       return
     }
     saving.value = true
@@ -225,6 +319,11 @@ export function CredentialSettings() {
         name: draft.name.trim(),
         username: draft.username.trim(),
         type: draft.type,
+        gh_config_dir: sanitizeOptionalString(draft.gh_config_dir),
+        ssh_key_path: sanitizeOptionalString(draft.ssh_key_path),
+        gpg_key_id: sanitizeOptionalString(draft.gpg_key_id),
+        oauth_method: draft.oauth_method ?? 'web',
+        token: sanitizeOptionalString(draft.token),
         description: draft.description?.trim() || undefined,
       })
       showToast('크리덴셜 추가 완료', 'success')
@@ -257,6 +356,7 @@ export function CredentialSettings() {
 
   const btnBase = 'py-1.5 px-4 rounded text-xs font-semibold cursor-pointer border-none'
   const fieldStyle = 'w-full bg-card/60 backdrop-blur-sm text-text-strong text-sm border border-card-border rounded py-2 px-3 font-sans focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/50 transition-all duration-[var(--t-med)] shadow-inner'
+  const helperStyle = 'mt-1 text-3xs leading-relaxed text-text-dim'
 
   return html`
     <div class="flex flex-col gap-4">
@@ -293,7 +393,7 @@ export function CredentialSettings() {
               <input
                 type="text"
                 class="${fieldStyle}"
-                placeholder="표시 이름"
+                placeholder="선택 사항"
                 value=${draft.name}
                 onInput=${(e: Event) => { addDraft.value = { ...draft, name: (e.target as HTMLInputElement).value } }}
               />
@@ -313,12 +413,82 @@ export function CredentialSettings() {
               <select
                 class="${fieldStyle}"
                 value=${draft.type}
-                onChange=${(e: Event) => { addDraft.value = { ...draft, type: coerceCredentialType((e.target as HTMLSelectElement).value) } }}
+                onChange=${(e: Event) => {
+                  const nextType = coerceCredentialType((e.target as HTMLSelectElement).value)
+                  addDraft.value = {
+                    ...draft,
+                    type: nextType,
+                    oauth_method: nextType === 'github' ? draft.oauth_method ?? 'web' : 'web',
+                    token: nextType === 'github' ? draft.token ?? '' : '',
+                  }
+                }}
               >
                 <option value="github">GitHub</option>
                 <option value="gitlab">GitLab</option>
                 <option value="local">Local</option>
               </select>
+            </div>
+            ${draft.type === 'github' ? html`
+              <div>
+                <label class="block text-2xs font-semibold uppercase tracking-wider text-text-muted mb-1.5">gh login</label>
+                <select
+                  class="${fieldStyle}"
+                  value=${draft.oauth_method ?? 'web'}
+                  onChange=${(e: Event) => {
+                    addDraft.value = {
+                      ...draft,
+                      oauth_method: (e.target as HTMLSelectElement).value === 'with_token' ? 'with_token' : 'web',
+                    }
+                  }}
+                >
+                  <option value="web">gh auth login --web</option>
+                  <option value="with_token">gh auth login --with-token</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-2xs font-semibold uppercase tracking-wider text-text-muted mb-1.5">GH_CONFIG_DIR</label>
+                <input
+                  type="text"
+                  class="${fieldStyle}"
+                  placeholder="base_path/.masc/github-identities/<credential-id>/gh"
+                  value=${draft.gh_config_dir ?? ''}
+                  onInput=${(e: Event) => { addDraft.value = { ...draft, gh_config_dir: (e.target as HTMLInputElement).value } }}
+                />
+                <div class="${helperStyle}">비우면 서버 base_path 아래 identity bundle을 사용합니다.</div>
+              </div>
+              ${draft.oauth_method === 'with_token' ? html`
+                <div>
+                  <label class="block text-2xs font-semibold uppercase tracking-wider text-text-muted mb-1.5">Token</label>
+                  <textarea
+                    class="${fieldStyle} min-h-20 resize-y"
+                    placeholder="gh auth login --with-token 입력값"
+                    value=${draft.token ?? ''}
+                    onInput=${(e: Event) => { addDraft.value = { ...draft, token: (e.target as HTMLTextAreaElement).value } }}
+                  />
+                </div>
+              ` : null}
+            ` : null}
+            ${(draft.type === 'github' || draft.type === 'local') ? html`
+              <div>
+                <label class="block text-2xs font-semibold uppercase tracking-wider text-text-muted mb-1.5">SSH key path</label>
+                <input
+                  type="text"
+                  class="${fieldStyle}"
+                  placeholder="base_path/.masc/github-identities/<credential-id>/ssh/id_ed25519"
+                  value=${draft.ssh_key_path ?? ''}
+                  onInput=${(e: Event) => { addDraft.value = { ...draft, ssh_key_path: (e.target as HTMLInputElement).value } }}
+                />
+              </div>
+            ` : null}
+            <div>
+              <label class="block text-2xs font-semibold uppercase tracking-wider text-text-muted mb-1.5">GPG key id</label>
+              <input
+                type="text"
+                class="${fieldStyle}"
+                placeholder="선택 사항"
+                value=${draft.gpg_key_id ?? ''}
+                onInput=${(e: Event) => { addDraft.value = { ...draft, gpg_key_id: (e.target as HTMLInputElement).value } }}
+              />
             </div>
             <div>
               <label class="block text-2xs font-semibold uppercase tracking-wider text-text-muted mb-1.5">설명</label>
@@ -362,9 +532,10 @@ export function CredentialSettings() {
             <thead>
               <tr class="border-b border-card-border/30 bg-card/40">
                 <th class="py-2 px-3 text-2xs font-semibold uppercase tracking-wider text-text-muted">ID</th>
-                <th class="py-2 px-3 text-2xs font-semibold uppercase tracking-wider text-text-muted">이름</th>
+                <th class="py-2 px-3 text-2xs font-semibold uppercase tracking-wider text-text-muted">계정</th>
                 <th class="py-2 px-3 text-2xs font-semibold uppercase tracking-wider text-text-muted">타입</th>
-                <th class="py-2 px-3 text-2xs font-semibold uppercase tracking-wider text-text-muted">설명</th>
+                <th class="py-2 px-3 text-2xs font-semibold uppercase tracking-wider text-text-muted">상태</th>
+                <th class="py-2 px-3 text-2xs font-semibold uppercase tracking-wider text-text-muted">경로</th>
                 <th class="py-2 px-3 text-2xs font-semibold uppercase tracking-wider text-text-muted text-right">동작</th>
               </tr>
             </thead>
@@ -376,8 +547,29 @@ export function CredentialSettings() {
                   <td class="py-2 px-3">
                     <${CredentialTypeBadge} type=${cred.type} />
                   </td>
-                  <td class="py-2 px-3 text-xs text-text-muted truncate max-w-[16rem]">
-                    ${cred.description || '--'}
+                  <td class="py-2 px-3">
+                    <div class="flex flex-col gap-1">
+                      <${CredentialStateBadge} state=${cred.state} />
+                      ${cred.token_sha256_prefix ? html`
+                        <span class="text-3xs font-mono text-text-dim">token ${cred.token_sha256_prefix}</span>
+                      ` : null}
+                      ${cred.state?.kind === 'Stale' && cred.state.reason ? html`
+                        <span class="text-3xs text-[var(--color-status-warn)] max-w-[12rem] break-words">${cred.state.reason}</span>
+                      ` : null}
+                    </div>
+                  </td>
+                  <td class="py-2 px-3 text-xs text-text-muted max-w-[28rem]">
+                    <div class="flex flex-col gap-1">
+                      ${cred.gh_config_dir ? html`
+                        <code class="font-mono text-3xs text-text-body break-all">${cred.gh_config_dir}</code>
+                      ` : html`<span class="text-3xs text-text-dim">GH_CONFIG_DIR --</span>`}
+                      ${githubLoginCommand(cred.gh_config_dir) && cred.state?.kind !== 'Materialized' ? html`
+                        <code class="font-mono text-3xs text-accent break-all">${githubLoginCommand(cred.gh_config_dir)}</code>
+                      ` : null}
+                      ${cred.ssh_key_path ? html`
+                        <code class="font-mono text-3xs text-text-dim break-all">ssh ${cred.ssh_key_path}</code>
+                      ` : null}
+                    </div>
                   </td>
                   <td class="py-2 px-3 text-right">
                     <button

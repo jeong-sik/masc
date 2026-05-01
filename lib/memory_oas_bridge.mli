@@ -1,9 +1,9 @@
 (** Memory_oas_bridge — bridges MASC's institution / procedural
-    memory layer onto the OAS [Oas.Memory.t] long-term store.
+    memory layer onto the OAS [Agent_sdk.Memory.t] long-term store.
 
     Two responsibilities:
     - {b Round-trip} between [Institution_eio.episode]
-      (MASC JSONL log) and [Oas.Memory.episode] (OAS
+      (MASC JSONL log) and [Agent_sdk.Memory.episode] (OAS
       long-term store) so the two persistence paths share a
       single semantic model.
     - {b Flush + reload} the OAS memory back to the MASC
@@ -27,7 +27,7 @@ val make_backend :
   agent_name:string ->
   session_id:string ->
   unit ->
-  Oas.Memory.long_term_backend
+  Agent_sdk.Memory.long_term_backend
 (** Builds the JSONL long-term backend rooted at
     [base_dir / .masc / oas-memory / <agent_name>] (the
     [base_dir] resolver falls back to
@@ -38,8 +38,8 @@ val create_memory :
   ?base_dir:string ->
   ?session_id:string ->
   unit ->
-  Oas.Memory.t
-(** Creates an [Oas.Memory.t] backed by {!make_backend}.
+  Agent_sdk.Memory.t
+(** Creates an [Agent_sdk.Memory.t] backed by {!make_backend}.
     [session_id] defaults to a timestamp-based id from
     {!Time_compat.now}.  Filesystem-first: no PG, no
     network. *)
@@ -47,7 +47,7 @@ val create_memory :
 (** {1 OAS / MASC episode round-trip} *)
 
 val oas_procedure_of_masc :
-  Procedural_memory.procedure -> Oas.Memory.procedure
+  Procedural_memory.procedure -> Agent_sdk.Memory.procedure
 (** Converts a MASC {!Procedural_memory.procedure} into the
     OAS shape.  [pattern] becomes both [pattern] and
     [action] (MASC combines the trigger / action in
@@ -58,7 +58,7 @@ val oas_procedure_of_masc :
 (** {1 Episode persistence} *)
 
 val store_episode_from_snapshot :
-  memory:Oas.Memory.t ->
+  memory:Agent_sdk.Memory.t ->
   keeper_name:string ->
   turn:int ->
   trace_id:string ->
@@ -68,7 +68,7 @@ val store_episode_from_snapshot :
     store: serialises the [goal] / [progress] /
     [done_summary] tuple from the snapshot, attaches
     [keeper_name] / [turn] / [trace_id] metadata, and
-    writes via [Oas.Memory.store_episode]. *)
+    writes via [Agent_sdk.Memory.store_episode]. *)
 
 (** Typed wrapper for failed-turn error-kind labels. JSON/status/metric
     surfaces continue to render the stable string label. *)
@@ -78,7 +78,7 @@ val error_kind_of_string : string -> error_kind
 val error_kind_to_string : error_kind -> string
 
 val store_failed_turn_episode :
-  memory:Oas.Memory.t ->
+  memory:Agent_sdk.Memory.t ->
   keeper_name:string ->
   turn:int ->
   trace_id:string ->
@@ -106,7 +106,7 @@ val failure_learnings :
     see a blank kind. *)
 
 val record_failure_lesson :
-  memory:Oas.Memory.t ->
+  memory:Agent_sdk.Memory.t ->
   pattern:string ->
   summary:string ->
   ?action:string ->
@@ -121,7 +121,7 @@ val record_failure_lesson :
   unit ->
   unit
 (** Records a failure lesson via
-    {!Oas.Lesson_memory.record_failure}.  All optional
+    {!Agent_sdk.Lesson_memory.record_failure}.  All optional
     fields default to [None] so the caller only fills in
     what the failure path actually produced.  Returns
     [unit] (the underlying record-failure result is
@@ -131,7 +131,7 @@ val record_failure_lesson :
 (** {1 Flush (MASC JSONL ← OAS memory)} *)
 
 val flush_episodes :
-  memory:Oas.Memory.t -> agent_name:string -> int
+  memory:Agent_sdk.Memory.t -> agent_name:string -> int
 (** Drains every episode held in [memory] that is not yet
     persisted to the institution JSONL log.  Returns the
     number of new rows written.  Idempotent — re-running
@@ -139,7 +139,7 @@ val flush_episodes :
     skips duplicates). *)
 
 val flush_procedures :
-  memory:Oas.Memory.t -> agent_name:string -> int
+  memory:Agent_sdk.Memory.t -> agent_name:string -> int
 (** Drains every procedure held in [memory] that has
     changed since the last flush.  Dedup happens by
     [Procedural_memory.procedure.id] keeping the entry
@@ -147,7 +147,7 @@ val flush_procedures :
     number of rows written. *)
 
 val flush_incremental :
-  memory:Oas.Memory.t -> agent_name:string -> int * int
+  memory:Agent_sdk.Memory.t -> agent_name:string -> int * int
 (** Convenience wrapper around {!flush_episodes} +
     {!flush_procedures}.  Returns
     [(episodes_written, procedures_written)]. *)
@@ -169,13 +169,13 @@ val load_procedures_text :
     contract as {!load_episodes_text}. *)
 
 val load_world_text :
-  backend:Oas.Memory.long_term_backend option ->
-  memory:Oas.Memory.t ->
+  backend:Agent_sdk.Memory.long_term_backend option ->
+  memory:Agent_sdk.Memory.t ->
   limit:int ->
   string option
 (** Reads long-term OAS memory entries whose keys start with
     ["world"] and renders them for prompt injection.  This is
-    intentionally sourced from [Oas.Memory.t] rather than keeper
+    intentionally sourced from [Agent_sdk.Memory.t] rather than keeper
     runtime state so user-authored world memory can reach the
     deliberation/prompt path. *)
 
@@ -190,13 +190,13 @@ val load_institution_text :
 (** {1 Lesson retrieval} *)
 
 val render_lesson_prompt_context :
-  memory:Oas.Memory.t ->
+  memory:Agent_sdk.Memory.t ->
   pattern:string ->
   limit:int ->
   string option
 (** Retrieves the top [limit] lessons matching [pattern]
-    via {!Oas.Lesson_memory.retrieve_lessons} and renders
-    them through {!Oas.Lesson_memory.render_prompt_context}
+    via {!Agent_sdk.Lesson_memory.retrieve_lessons} and renders
+    them through {!Agent_sdk.Lesson_memory.render_prompt_context}
     for prompt injection.  Returns [None] when no lesson
     matches; the caller ([tool_autoresearch_cycle.ml])
     branches on the [option] to decide whether to attach

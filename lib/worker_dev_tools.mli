@@ -131,7 +131,7 @@ val make_tools :
   ?workdir:string ->
   ?on_exec:tool_exec_observer ->
   unit ->
-  Oas.Tool.t list
+  Agent_sdk.Tool.t list
 (** Build the full Fleet dev toolset: [file_read], [file_write], and
     [shell_exec].  [shell_exec] uses the strict {!validate_command}
     gate and the dev allowlist.  All tools resolve paths relative to
@@ -144,7 +144,7 @@ val make_readonly_tools :
   ?workdir:string ->
   ?on_exec:tool_exec_observer ->
   unit ->
-  Oas.Tool.t list
+  Agent_sdk.Tool.t list
 (** Build the read-only subset: [file_read] + a [shell_exec] gated to
     a smaller read-only command allowlist (rg, grep, ls, cat, ...).
     [file_write] is intentionally absent. *)

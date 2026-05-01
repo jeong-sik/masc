@@ -182,6 +182,46 @@ let test_path_safe_accepts_ordinary_paths () =
 let canary_token =
   "canary_token_RFC0019_PRB_a1b2c3d4e5f6_should_NEVER_appear_in_logs"
 
+let contains_substring s needle =
+  try
+    ignore (Str.search_forward (Str.regexp_string needle) s 0);
+    true
+  with Not_found -> false
+
+let write_file path content =
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc content)
+
+let read_file path =
+  let ic = open_in path in
+  let buf = Buffer.create 256 in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr ic)
+    (fun () ->
+      try
+        while true do
+          Buffer.add_string buf (input_line ic);
+          Buffer.add_char buf '\n'
+        done;
+        Buffer.contents buf
+      with End_of_file -> Buffer.contents buf)
+
+let with_env_vars vars f =
+  let saved =
+    List.map (fun (k, _) -> (k, Sys.getenv_opt k)) vars
+  in
+  List.iter (fun (k, v) -> Unix.putenv k v) vars;
+  Fun.protect
+    ~finally:(fun () ->
+      List.iter
+        (function
+          | k, Some v -> Unix.putenv k v
+          | k, None -> Unix.putenv k "")
+        saved)
+    f
+
 let test_provision_rejects_empty_token () =
   match
     Credential_materializer.provision_via_with_token
@@ -215,6 +255,126 @@ let test_provision_rejects_path_traversal () =
            true
          with Not_found -> false)
   | Ok _ -> Alcotest.fail "expected Error for path with .. segment"
+
+let test_provision_uses_bundle_env_and_insecure_storage () =
+  with_temp_base_path (fun base ->
+      let bin_dir = Filename.concat base "bin" in
+      Unix.mkdir bin_dir 0o755;
+      let gh_path = Filename.concat bin_dir "gh" in
+      write_file gh_path
+        {|#!/bin/sh
+set -eu
+cmd1="${1:-}"
+cmd2="${2:-}"
+mkdir -p "$GH_CONFIG_DIR"
+if [ "$cmd1" = "auth" ] && [ "$cmd2" = "login" ]; then
+  env | sort > "$GH_CONFIG_DIR/login.env"
+  printf '%s\n' "$@" > "$GH_CONFIG_DIR/login.argv"
+  IFS= read -r token || token=""
+  {
+    printf 'github.com:\n'
+    printf '    user: real-login\n'
+    printf '    oauth_token: %s\n' "$token"
+    printf '    git_protocol: https\n'
+  } > "$GH_CONFIG_DIR/hosts.yml"
+  exit 0
+fi
+if [ "$cmd1" = "auth" ] && [ "$cmd2" = "status" ]; then
+  env | sort > "$GH_CONFIG_DIR/status.env"
+  printf '%s\n' "$@" > "$GH_CONFIG_DIR/status.argv"
+  if [ -s "$GH_CONFIG_DIR/hosts.yml" ]; then
+    exit 0
+  fi
+  exit 1
+fi
+exit 2
+|};
+      Unix.chmod gh_path 0o755;
+      let gh_config_dir = Filename.concat base "bundle-gh" in
+      let ambient_gh_config_dir = Filename.concat base "ambient-gh" in
+      let path =
+        match Sys.getenv_opt "PATH" with
+        | None | Some "" -> bin_dir
+        | Some current -> bin_dir ^ ":" ^ current
+      in
+      with_env_vars
+        [
+          ("PATH", path);
+          ("GH_CONFIG_DIR", ambient_gh_config_dir);
+          ("GH_TOKEN", "ambient-gh-token");
+          ("GITHUB_TOKEN", "ambient-github-token");
+          ("GH_ENTERPRISE_TOKEN", "ambient-enterprise-token");
+          ("GITHUB_ENTERPRISE_TOKEN", "ambient-github-enterprise-token");
+          ("GH_PROMPT_DISABLED", "0");
+          ("GIT_TERMINAL_PROMPT", "1");
+        ]
+        (fun () ->
+          match
+            Credential_materializer.provision_via_with_token
+              ~credential_id:"keeper-A" ~identity_label:"keeper-A"
+              ~gh_config_dir ~token:canary_token ()
+          with
+          | Error msg ->
+              Alcotest.failf
+                "expected fake gh provisioning to succeed: %s" msg
+          | Ok (Materialized _) -> ()
+          | Ok other ->
+              Alcotest.failf "expected Materialized, got %s"
+                (show_credential_state other));
+      let login_argv =
+        read_file (Filename.concat gh_config_dir "login.argv")
+      in
+      Alcotest.(check bool) "login uses --insecure-storage" true
+        (contains_substring login_argv "--insecure-storage");
+      Alcotest.(check bool) "login argv does not expose token" false
+        (contains_substring login_argv canary_token);
+      let assert_clean_env label content =
+        Alcotest.(check bool)
+          (label ^ " uses target GH_CONFIG_DIR")
+          true
+          (contains_substring content ("GH_CONFIG_DIR=" ^ gh_config_dir));
+        Alcotest.(check bool)
+          (label ^ " disables gh prompts")
+          true
+          (contains_substring content "GH_PROMPT_DISABLED=1");
+        Alcotest.(check bool)
+          (label ^ " disables git terminal prompts")
+          true
+          (contains_substring content "GIT_TERMINAL_PROMPT=0");
+        List.iter
+          (fun poisoned ->
+            Alcotest.(check bool)
+              (label ^ " scrubs " ^ poisoned)
+              false
+              (contains_substring content poisoned))
+          [
+            "GH_CONFIG_DIR=" ^ ambient_gh_config_dir;
+            "GH_TOKEN=ambient-gh-token";
+            "GITHUB_TOKEN=ambient-github-token";
+            "GH_ENTERPRISE_TOKEN=ambient-enterprise-token";
+            "GITHUB_ENTERPRISE_TOKEN=ambient-github-enterprise-token";
+          ]
+      in
+      assert_clean_env "login env"
+        (read_file (Filename.concat gh_config_dir "login.env"));
+      assert_clean_env "status env"
+        (read_file (Filename.concat gh_config_dir "status.env"));
+      let hosts_yml =
+        read_file (Filename.concat gh_config_dir "hosts.yml")
+      in
+      Alcotest.(check bool) "hosts.yml user relabeled" true
+        (contains_substring hosts_yml "user: keeper-A");
+      Alcotest.(check bool) "real gh login user hidden" false
+        (contains_substring hosts_yml "user: real-login");
+      match
+        Credential_materializer.compute_token_sha256_prefix
+          ~gh_config_dir
+      with
+      | None -> Alcotest.fail "expected token fingerprint"
+      | Some prefix ->
+          Alcotest.(check string) "fingerprint is canary hash"
+            (Credential_materializer.sha256_prefix canary_token)
+            prefix)
 
 (* --- 6. SHA-256 fingerprint + F-1 gate (PR-C) --- *)
 
@@ -414,6 +574,9 @@ let () =
           Alcotest.test_case
             "provision rejects path traversal without echoing token"
             `Quick test_provision_rejects_path_traversal;
+          Alcotest.test_case
+            "provision writes bundle-local gh auth without ambient env"
+            `Quick test_provision_uses_bundle_env_and_insecure_storage;
         ] );
       ( "F-1 gate fingerprint",
         [

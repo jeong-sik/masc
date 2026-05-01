@@ -15,7 +15,7 @@
 
 val high_risk_actions : string list
 (** Action types that always require operator confirmation. Risk
-    level is [Oas.Approval.High] and {!confirm_required} returns
+    level is [Agent_sdk.Approval.High] and {!confirm_required} returns
     [true] for every member. *)
 
 val allowed_actions : string list
@@ -25,7 +25,7 @@ val allowed_actions : string list
 
 (** {1 Risk classification} *)
 
-val risk_of_action : string -> Oas.Approval.risk_level
+val risk_of_action : string -> Agent_sdk.Approval.risk_level
 (** [High] when the action is in {!high_risk_actions}, [Low] when
     only in {!allowed_actions}, otherwise [Medium]. *)
 
@@ -37,7 +37,7 @@ val confirm_required : string -> bool
 
 (** {1 OAS approval pipeline} *)
 
-val pipeline : Oas.Approval.t
+val pipeline : Agent_sdk.Approval.t
 (** The composed pipeline: auto-approve allowed non-high-risk
     actions, then a [high_risk_gate] stage that emits
     [Reject "requires operator confirmation"] for high-risk
@@ -47,7 +47,7 @@ val evaluate_action :
   action_type:string ->
   agent_name:string ->
   turn:int ->
-  Oas.Hooks.approval_decision
+  Agent_sdk.Hooks.approval_decision
 (** Evaluate [action_type] against {!pipeline} with an empty input
     payload. The [agent_name] / [turn] pair is forwarded to the
     OAS approval context. *)

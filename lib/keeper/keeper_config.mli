@@ -55,6 +55,7 @@ val tool_first_sentence_max_chars : int
 val default_proactive_enabled : bool
 val default_proactive_idle_sec : int
 val default_proactive_cooldown_sec : int
+val approval_queue_stale_max_wait_sec : float
 val default_room_signal_prompt_enabled : bool
 val default_goal_horizon_max_chars : int
 val default_drift_max_clauses : int

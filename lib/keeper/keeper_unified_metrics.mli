@@ -30,7 +30,7 @@ type usage_trust = Keeper_usage_trust.t =
 
 val classify_usage_trust :
   usage_reported:bool ->
-  usage:Oas.Types.api_usage ->
+  usage:Agent_sdk.Types.api_usage ->
   model_used:string ->
   resolved_model_id:string ->
   context_max:int ->
@@ -41,7 +41,7 @@ val usage_trust_is_trusted : usage_trust -> bool
 val estimate_trusted_usage_cost_usd :
   usage_trusted:bool ->
   model:string ->
-  Oas.Types.api_usage ->
+  Agent_sdk.Types.api_usage ->
   float
 (** Estimate turn cost for trusted usage using the OAS pricing catalog,
     including cache creation/read token multipliers.  Returns [0.0] for
@@ -157,7 +157,7 @@ val update_metrics_from_failure :
   ?is_transient:bool ->
   ?social_state:Keeper_social_model.social_state ->
   ?social_transition_reason:string ->
-  ?sdk_error:Oas.Error.sdk_error ->
+  ?sdk_error:Agent_sdk.Error.sdk_error ->
   unit ->
   Keeper_types.keeper_meta
 
@@ -211,7 +211,7 @@ val broadcast_lifecycle_events :
 val has_substantive_tool_calls : string list -> bool
 
 val visible_run_validation :
-  Keeper_agent_run.run_result -> Oas.Raw_trace.run_validation option
+  Keeper_agent_run.run_result -> Agent_sdk.Raw_trace.run_validation option
 
 val turn_mode_of_result : Keeper_agent_run.run_result -> turn_mode
 
@@ -229,7 +229,7 @@ val accountability_evidence_refs :
   trace_id:string ->
   turn_number:int ->
   result:Keeper_agent_run.run_result ->
-  validated_evidence:Oas.Raw_trace.run_validation option ->
+  validated_evidence:Agent_sdk.Raw_trace.run_validation option ->
   string list
 
 val decision_channel_of_observation :

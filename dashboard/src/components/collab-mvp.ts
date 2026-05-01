@@ -14,6 +14,12 @@ import {
 } from '../collab-mvp-contract'
 import { InlineSpinner } from './common/inline-spinner'
 
+const SECTION_CARD = 'rounded border border-card-border/70 bg-[rgba(8,13,22,0.74)] p-3'
+
+function SectionTitle({ children }: { children: unknown }) {
+  return html`<h3 class="m-0 text-sm font-semibold text-text-strong">${children}</h3>`
+}
+
 type CyCore = cytoscape.Core
 
 let cytoscapePromise: Promise<typeof cytoscape> | null = null
@@ -316,10 +322,10 @@ export function CollabMvp() {
       </div>
 
       <div class="grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(20rem,0.65fr)]">
-        <section class="min-w-0 rounded border border-card-border/70 bg-[rgba(8,13,22,0.74)] p-3">
+        <section class="min-w-0 ${SECTION_CARD}">
           <div class="mb-2 flex items-center justify-between gap-3">
             <div>
-              <h3 class="m-0 text-sm font-semibold text-text-strong">Git Graph</h3>
+              <${SectionTitle}>Git Graph</${SectionTitle}>
               <div class="text-3xs text-text-dim">${projection.gitGraph.nodes.length} nodes · ${projection.gitGraph.edges.length} edges</div>
             </div>
             <span class="rounded border border-card-border/60 bg-black/20 px-2 py-1 text-3xs uppercase text-text-muted">
@@ -329,8 +335,8 @@ export function CollabMvp() {
           <${CollabGitGraph} graph=${projection.gitGraph} />
         </section>
 
-        <section class="rounded border border-card-border/70 bg-[rgba(8,13,22,0.74)] p-3">
-          <h3 class="m-0 text-sm font-semibold text-text-strong">Substrate</h3>
+        <section class=${SECTION_CARD}>
+          <${SectionTitle}>Substrate</${SectionTitle}>
           <ul class="mt-3 grid gap-2">
             ${COLLAB_MVP_STACK.map(item => html`
               <li class="flex items-center justify-between gap-3 rounded border border-card-border/60 bg-black/10 px-3 py-2">
@@ -348,9 +354,9 @@ export function CollabMvp() {
       </div>
 
       <div class="grid gap-4 lg:grid-cols-2">
-        <section class="rounded border border-card-border/70 bg-[rgba(8,13,22,0.74)] p-3">
+        <section class=${SECTION_CARD}>
           <div class="mb-2 flex items-center justify-between gap-2">
-            <h3 class="m-0 text-sm font-semibold text-text-strong">TODO Claim</h3>
+            <${SectionTitle}>TODO Claim</${SectionTitle}>
             <span class="text-3xs text-text-dim">${projection.summary.unclaimedTasks} unclaimed</span>
           </div>
           ${visibleClaims.length === 0 ? html`
@@ -362,9 +368,9 @@ export function CollabMvp() {
           `}
         </section>
 
-        <section class="rounded border border-card-border/70 bg-[rgba(8,13,22,0.74)] p-3">
+        <section class=${SECTION_CARD}>
           <div class="mb-2 flex items-center justify-between gap-2">
-            <h3 class="m-0 text-sm font-semibold text-text-strong">Turn Queue</h3>
+            <${SectionTitle}>Turn Queue</${SectionTitle}>
             <span class="text-3xs text-text-dim">${visibleQueue.length} observed</span>
           </div>
           ${visibleQueue.length === 0 ? html`
@@ -377,9 +383,9 @@ export function CollabMvp() {
         </section>
       </div>
 
-      <section class="rounded border border-card-border/70 bg-[rgba(8,13,22,0.74)] p-3">
+      <section class=${SECTION_CARD}>
         <div class="mb-2 flex items-center justify-between gap-2">
-          <h3 class="m-0 text-sm font-semibold text-text-strong">Event Semantics</h3>
+          <${SectionTitle}>Event Semantics</${SectionTitle}>
           <span class="text-3xs text-text-dim">${projection.generatedAt}</span>
         </div>
         <div class="grid gap-2 lg:grid-cols-2">

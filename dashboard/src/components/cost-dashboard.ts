@@ -291,6 +291,10 @@ function StatCell({
   `
 }
 
+function ThRight({ children }: { children: unknown }) {
+  return html`<th scope="col" class="px-2 py-1.5 text-right">${children}</th>`
+}
+
 function ModelRow({
   model, maxCost, maxP95,
 }: {
@@ -932,12 +936,12 @@ function CostDashboardContent({ view }: { view: CostView }) {
               <thead>
                 <tr class="border-b border-[var(--color-border-default)] text-2xs uppercase tracking-1 text-text-muted">
                   <th scope="col" class="px-2 py-1.5 text-left">${viewMode.value === 'model' ? 'model' : 'keeper'}</th>
-                  <th scope="col" class="px-2 py-1.5 text-right">in tok</th>
-                  <th scope="col" class="px-2 py-1.5 text-right">out tok</th>
-                  <th scope="col" class="px-2 py-1.5 text-right">$ cost</th>
+                  <${ThRight}>in tok</${ThRight}>
+                  <${ThRight}>out tok</${ThRight}>
+                  <${ThRight}>$ cost</${ThRight}>
                   <th scope="col" class="px-2 py-1.5 text-left">cost</th>
-                  <th scope="col" class="px-2 py-1.5 text-right">p50</th>
-                  <th scope="col" class="px-2 py-1.5 text-right">p95</th>
+                  <${ThRight}>p50</${ThRight}>
+                  <${ThRight}>p95</${ThRight}>
                   <th scope="col" class="px-2 py-1.5 text-left">p95 trend</th>
                   ${viewMode.value === 'keeper' ? html`<th scope="col" class="px-2 py-1.5 text-left">top model</th>` : null}
                 </tr>

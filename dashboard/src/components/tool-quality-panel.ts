@@ -4,9 +4,10 @@ import { useEffect } from 'preact/hooks'
 import { type ToolQualityResponse } from '../api/dashboard'
 import { TELEMETRY_AUTO_REFRESH_MS } from '../config/constants'
 import { formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../lib/auto-refresh'
-import { formatElapsedCompact } from '../lib/format-time'
 import { ErrorState, LoadingState } from './common/feedback-state'
 import { TextInput } from './common/input'
+import { Eyebrow } from './common/eyebrow'
+import { ProgressBar } from './common/progress-bar'
 import {
   cancelSharedToolQuality,
   refreshSharedToolQuality,
@@ -15,6 +16,7 @@ import {
   sharedToolQualityLoading,
 } from './fleet-data-core'
 import { route } from '../router'
+import { sourceHealthClass, freshnessText } from './common/source-health'
 
 const TOOL_QUALITY_WINDOW_HOURS = 24
 
@@ -100,28 +102,6 @@ const successColor = computed(() => {
   return 'text-[var(--bad-light)]'
 })
 
-function sourceHealthClass(health?: string | null): string {
-  switch ((health ?? '').toLowerCase()) {
-    case 'ok':
-      return 'text-[var(--color-status-ok)]'
-    case 'stale':
-    case 'coverage_gap':
-    case 'empty':
-      return 'text-[var(--color-status-warn)]'
-    case 'missing':
-      return 'text-[var(--bad-light)]'
-    default:
-      return 'text-[var(--color-fg-disabled)]'
-  }
-}
-
-function freshnessText(d: ToolQualityData): string {
-  if (typeof d.latest_age_s !== 'number' || !Number.isFinite(d.latest_age_s)) {
-    return 'latest n/a'
-  }
-  return `latest ${formatElapsedCompact(d.latest_age_s)}`
-}
-
 // Per-tool search (case-insensitive substring on raw tool name).
 // Kept as a pure function so it can be tested in isolation and re-used if the
 // tool table later moves out of this panel.
@@ -140,14 +120,12 @@ export function filterTools<T extends Pick<ToolStat, 'name'>>(tools: T[], query:
 }
 
 function RateGauge({ rate, label }: { rate: number; label: string }) {
-  const color = rate >= 95 ? 'bg-[var(--ok-10)]' : rate >= 90 ? 'bg-[var(--warn-10)]' : 'bg-[var(--bad-10)]'
+  const fillClass = rate >= 95 ? 'bg-[var(--ok-10)]' : rate >= 90 ? 'bg-[var(--warn-10)]' : 'bg-[var(--bad-10)]'
   return html`
     <div class="flex flex-col gap-1">
       <div class="text-3xs text-[var(--color-fg-disabled)] uppercase tracking-wider">${label}</div>
       <div class="flex items-center gap-2">
-        <div class="flex-1 h-1.5 bg-[var(--bg-subtle)] rounded-sm overflow-hidden">
-          <div class="${color} h-full rounded-sm transition-all" style="width: ${Math.min(rate, 100)}%" />
-        </div>
+        <${ProgressBar} pct=${rate} size="sm" class=${fillClass} trackClass="flex-1 bg-[var(--bg-subtle)]" />
         <span class="text-xs font-mono ${rate >= 95 ? 'text-[var(--color-status-ok)]' : rate >= 90 ? 'text-[var(--color-status-warn)]' : 'text-[var(--bad-light)]'}">${rate.toFixed(1)}%</span>
       </div>
     </div>
@@ -243,7 +221,7 @@ function TrendSparkline({ points }: { points: HourlyPoint[] }) {
   return html`
     <div class="rounded border border-[var(--color-border-default)] bg-[var(--white-3)] p-3">
       <div class="flex items-center justify-between mb-1.5">
-        <span class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)]">성공률 추이</span>
+        <${Eyebrow}>성공률 추이</${Eyebrow}>
         <span class="text-xs font-mono" style="color:${lineColor}">${lastRate.toFixed(1)}%</span>
       </div>
       <svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" class="rounded w-full" role="img" aria-label="성공률 추이 차트" style="background:var(--bg-deepest);">
@@ -265,14 +243,12 @@ function KeeperRateBars({ keepers }: { keepers: KeeperStat[] }) {
   return html`
     <div class="flex flex-col gap-1.5">
       ${keepers.map(k => {
-        const color = k.success_pct >= 95 ? 'bg-[var(--ok-10)]' : k.success_pct >= 90 ? 'bg-[var(--warn-10)]' : 'bg-[var(--bad-10)]'
+        const fillClass = k.success_pct >= 95 ? 'bg-[var(--ok-10)]' : k.success_pct >= 90 ? 'bg-[var(--warn-10)]' : 'bg-[var(--bad-10)]'
         const textColor = k.success_pct >= 95 ? 'text-[var(--color-status-ok)]' : k.success_pct >= 90 ? 'text-[var(--color-status-warn)]' : 'text-[var(--bad-light)]'
         return html`
           <div class="flex items-center gap-2 text-2xs">
             <span class="w-24 truncate text-[var(--color-fg-disabled)] font-mono" title=${k.name}>${k.name}</span>
-            <div class="flex-1 h-1.5 bg-[var(--bg-subtle)] rounded-sm overflow-hidden">
-              <div class="${color} h-full rounded-sm transition-all" style="width:${Math.min(k.success_pct, 100)}%" />
-            </div>
+            <${ProgressBar} pct=${k.success_pct} size="sm" class=${fillClass} trackClass="flex-1 bg-[var(--bg-subtle)]" />
             <span class="w-12 text-right font-mono ${textColor}">${k.success_pct.toFixed(1)}%</span>
             <span class="w-10 text-right text-[var(--color-fg-disabled)]">${k.calls}</span>
           </div>

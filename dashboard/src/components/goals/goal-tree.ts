@@ -48,6 +48,8 @@ import {
 
 type GoalDetailTab = 'summary' | 'tasks' | 'evidence'
 
+const CARD_BOX = 'rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4'
+
 /**
  * Pure hierarchy filter for goal tree nodes.
  *
@@ -374,7 +376,7 @@ function GoalVerificationEvidencePanel({
   const votes = request?.votes ?? []
   const panelClass = compact
     ? 'ml-6 rounded border border-amber-400/20 bg-amber-400/8 p-2 text-xs text-amber-100'
-    : 'rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4'
+    : CARD_BOX
 
   return html`
     <div class=${panelClass}>
@@ -1033,7 +1035,7 @@ function GoalDetailPanel({
         </div>
 
         ${selectedNode.blocking_source !== 'none' ? html`
-          <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4">
+          <div class=${CARD_BOX}>
             <div class="mb-2 flex flex-wrap items-center gap-2">
               <span class="text-2xs font-semibold uppercase tracking-widest text-text-muted">차단 맥락</span>
               <span class="rounded border px-2 py-0.5 text-3xs font-semibold ${blockerSourceClass(selectedNode.blocking_source)}">
@@ -1068,13 +1070,13 @@ function GoalDetailPanel({
         <${GoalVerificationEvidencePanel} summary=${verificationSummary} />
 
         ${selectedNode.badges.length > 0 ? html`
-          <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4">
+          <div class=${CARD_BOX}>
             <div class="mb-2 text-2xs font-semibold uppercase tracking-widest text-text-muted">배지</div>
             <${GoalBadges} badges=${selectedNode.badges} />
           </div>
         ` : null}
 
-        <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4">
+        <div class=${CARD_BOX}>
           <div class="mb-3 flex items-center justify-between gap-3">
             <div>
               <div class="text-2xs font-semibold uppercase tracking-widest text-text-muted">Goal 범위 태스크</div>
@@ -1102,7 +1104,7 @@ function GoalDetailPanel({
           <div class="flex flex-col gap-4">
             <${GoalVerificationEvidencePanel} summary=${verificationSummary} />
 
-            <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4">
+            <div class=${CARD_BOX}>
               <div class="mb-3 text-2xs font-semibold uppercase tracking-widest text-text-muted">키퍼 준비 상태</div>
               ${detail ? (
                 detail.linked_keepers.length > 0
@@ -1115,7 +1117,7 @@ function GoalDetailPanel({
               ) : null}
             </div>
 
-            <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4">
+            <div class=${CARD_BOX}>
               <div class="mb-3 text-2xs font-semibold uppercase tracking-widest text-text-muted">승인 대기</div>
               ${detail ? (
                 detail.approvals.length > 0
@@ -1137,7 +1139,7 @@ function GoalDetailPanel({
             </div>
           </div>
 
-          <div class="rounded border border-card-border/60 bg-[var(--backdrop-deep)] p-4">
+          <div class=${CARD_BOX}>
             <div class="mb-3 text-2xs font-semibold uppercase tracking-widest text-text-muted">통합 타임라인</div>
             ${detail ? html`<${GoalTimeline} events=${detail.timeline} />` : null}
           </div>

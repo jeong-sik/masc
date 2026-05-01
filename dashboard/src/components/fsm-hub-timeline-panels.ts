@@ -29,6 +29,14 @@ const FIELD_COLOR: Record<string, string> = {
   KMC: 'text-[var(--amber-bright)]',
 }
 
+function LegendItem({ dotClass, label }: { dotClass: string; label: string }) {
+  return html`
+    <span class="flex items-center gap-1">
+      <span class="inline-block h-2 w-3 rounded-sm ${dotClass}"></span>${label}
+    </span>
+  `
+}
+
 const SWIMLANE_LANES: Array<{
   key: LaneKey
   label: string
@@ -294,11 +302,11 @@ export function SwimlaneTimeline({
         </div>
       ` : null}
       <div class="mt-2 flex flex-wrap items-center gap-2 text-3xs text-[var(--color-fg-disabled)]">
-        <span class="flex items-center gap-1"><span class="inline-block h-2 w-3 rounded-sm bg-[var(--indigo-45)]"></span>active</span>
-        <span class="flex items-center gap-1"><span class="inline-block h-2 w-3 rounded-sm bg-[var(--amber-bright-45)]"></span>compact</span>
-        <span class="flex items-center gap-1"><span class="inline-block h-2 w-3 rounded-sm bg-[var(--purple-50)]"></span>handoff</span>
-        <span class="flex items-center gap-1"><span class="inline-block h-2 w-3 rounded-sm bg-[var(--bad-50)]"></span>alarm</span>
-        <span class="flex items-center gap-1"><span class="inline-block h-2 w-3 rounded-sm border border-[var(--white-8)] bg-[var(--white-3)]"></span>idle</span>
+        <${LegendItem} dotClass="bg-[var(--indigo-45)]" label="active" />
+        <${LegendItem} dotClass="bg-[var(--amber-bright-45)]" label="compact" />
+        <${LegendItem} dotClass="bg-[var(--purple-50)]" label="handoff" />
+        <${LegendItem} dotClass="bg-[var(--bad-50)]" label="alarm" />
+        <${LegendItem} dotClass="border border-[var(--white-8)] bg-[var(--white-3)]" label="idle" />
       </div>
     </div>
   `

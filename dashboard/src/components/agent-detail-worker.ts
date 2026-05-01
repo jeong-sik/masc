@@ -8,6 +8,14 @@ import { CopyIdButton } from './common/copy-id-button'
 import { workerBriefForAgent } from './agent-detail-state'
 import { trimText } from '../lib/truncate'
 
+function DetailLabel({ children }: { children: unknown }) {
+  return html`<span class="text-2xs text-[var(--color-fg-muted)] min-w-15 shrink-0">${children}</span>`
+}
+
+function WorkerInfoRow({ children }: { children: unknown }) {
+  return html`<div class="flex items-baseline gap-2 text-sm">${children}</div>`
+}
+
 export function AgentWorkerBrief({ agentName }: { agentName: string }) {
   const worker = workerBriefForAgent(agentName)
   if (!worker) return null
@@ -15,35 +23,35 @@ export function AgentWorkerBrief({ agentName }: { agentName: string }) {
   return html`
     <${Card} title="워커 상태">
       <div class="flex flex-col gap-1.5">
-        <div class="flex items-baseline gap-2 text-sm">
-          <span class="text-2xs text-[var(--color-fg-muted)] min-w-15 shrink-0">상태</span>
+        <${WorkerInfoRow}>
+          <${DetailLabel}>상태</${DetailLabel}>
           <${StatusBadge} status=${worker.state} />
-        </div>
+        </${WorkerInfoRow}>
         ${worker.focus ? html`
-          <div class="flex items-baseline gap-2 text-sm">
-            <span class="text-2xs text-[var(--color-fg-muted)] min-w-15 shrink-0">포커스</span>
+          <${WorkerInfoRow}>
+            <${DetailLabel}>포커스</${DetailLabel}>
             <span>${worker.focus}</span>
-          </div>
+          </${WorkerInfoRow}>
         ` : null}
         ${worker.recent_output_preview ? html`
-          <div class="flex items-baseline gap-2 text-sm">
-            <span class="text-2xs text-[var(--color-fg-muted)] min-w-15 shrink-0">출력</span>
+          <${WorkerInfoRow}>
+            <${DetailLabel}>출력</${DetailLabel}>
             <span class="agent-worker-brief__preview">${trimText(worker.recent_output_preview, 200)}</span>
-          </div>
+          </${WorkerInfoRow}>
         ` : null}
         ${worker.related_session_id ? html`
-          <div class="flex items-baseline gap-2 text-sm">
-            <span class="text-2xs text-[var(--color-fg-muted)] min-w-15 shrink-0">세션</span>
+          <${WorkerInfoRow}>
+            <${DetailLabel}>세션</${DetailLabel}>
             <span class="font-mono truncate" style="font-size: 11px" title=${worker.related_session_id}>${worker.related_session_id}</span>
             <${CopyIdButton} value=${worker.related_session_id} label="session_id" size=${10} />
-          </div>
+          </${WorkerInfoRow}>
         ` : null}
         ${worker.last_signal_at ? html`
-          <div class="flex items-baseline gap-2 text-sm">
-            <span class="text-2xs text-[var(--color-fg-muted)] min-w-15 shrink-0">시그널</span>
+          <${WorkerInfoRow}>
+            <${DetailLabel}>시그널</${DetailLabel}>
             <${TimeAgo} timestamp=${worker.last_signal_at} />
             ${worker.signal_truth ? html`<span class="text-3xs py-0.5 px-2 border border-solid border-[var(--accent-36)] bg-[var(--accent-12)] text-[var(--color-accent-fg)] whitespace-nowrap rounded-sm">${worker.signal_truth}</span>` : null}
-          </div>
+          </${WorkerInfoRow}>
         ` : null}
       </div>
     <//>

@@ -14,7 +14,27 @@ import { TimeAgo } from './common/time-ago'
 import { keeperStatusDetails } from '../keeper-state'
 import { isRecord } from './common/normalize'
 import { showToast } from './common/toast'
-import { KeeperDetailSectionCard } from './keeper-detail-layout'
+import { PanelCard } from './common/panel-card'
+import { SectionHeader } from './common/section-header'
+
+function SnapshotBadge({ tone, children }: { tone: 'accent' | 'neutral' | 'ok'; children: unknown }) {
+  const cls = (() => {
+    switch (tone) {
+      case 'accent':
+        return 'inline-flex items-center rounded-sm px-2 py-0.5 text-3xs font-semibold bg-[var(--accent-12)] text-[var(--color-accent-fg)] border border-[var(--accent-18)]'
+      case 'ok':
+        return 'inline-flex items-center rounded-sm px-2 py-0.5 text-3xs font-semibold border border-[var(--ok-20)] bg-[var(--ok-10)] text-[var(--color-status-ok)]'
+      case 'neutral':
+      default:
+        return 'inline-flex items-center rounded-sm px-2 py-0.5 text-3xs font-semibold border border-[var(--white-8)] bg-[var(--white-3)] text-[var(--color-fg-muted)]'
+    }
+  })()
+  return html`<span class="${cls}">${children}</span>`
+}
+
+export function MonoBadge({ children }: { children: unknown }) {
+  return html`<span class="text-3xs font-mono px-1.5 py-0.5 rounded bg-[var(--accent-12)] text-[var(--color-accent-fg)] border border-[var(--accent-15)]">${children}</span>`
+}
 
 function formatCheckpointTime(timestamp: number): string {
   if (!Number.isFinite(timestamp) || timestamp <= 0) return '-'
@@ -70,14 +90,10 @@ function CheckpointSummaryCard({
     <div class="rounded border border-[var(--color-border-default)] bg-[var(--white-2)] px-3 py-3">
       <div class="flex flex-wrap items-center gap-2">
         <span class="text-xs font-semibold text-[var(--color-fg-secondary)]">${title}</span>
-        <span class="inline-flex items-center rounded-sm px-2 py-0.5 text-3xs font-semibold bg-[var(--accent-12)] text-[var(--color-accent-fg)] border border-[var(--accent-18)]">
-          gen ${summary.generation}
-        </span>
-        <span class="inline-flex items-center rounded-sm px-2 py-0.5 text-3xs font-semibold border border-[var(--white-8)] bg-[var(--white-3)] text-[var(--color-fg-muted)]">
-          ${summary.message_count} msgs
-        </span>
+        <${SnapshotBadge} tone="accent">gen ${summary.generation}</${SnapshotBadge}>
+        <${SnapshotBadge} tone="neutral">${summary.message_count} msgs</${SnapshotBadge}>
         ${summary.system_prompt_present
-          ? html`<span class="inline-flex items-center rounded-sm px-2 py-0.5 text-3xs font-semibold border border-[var(--ok-20)] bg-[var(--ok-10)] text-[var(--color-status-ok)]">system kept</span>`
+          ? html`<${SnapshotBadge} tone="ok">system kept</${SnapshotBadge}>`
           : null}
       </div>
       <div class="mt-2 text-2xs text-[var(--color-fg-muted)]">
@@ -259,14 +275,10 @@ export function KeeperCheckpointPanel({
                       <div class="min-w-0 flex-1">
                         <div class="flex flex-wrap items-center gap-2">
                           <span class="font-mono text-[var(--color-fg-secondary)]">${item.snapshot_id}</span>
-                          <span class="inline-flex items-center rounded-sm px-2 py-0.5 text-3xs font-semibold bg-[var(--accent-12)] text-[var(--color-accent-fg)] border border-[var(--accent-18)]">
-                            gen ${item.generation}
-                          </span>
-                          <span class="inline-flex items-center rounded-sm px-2 py-0.5 text-3xs font-semibold border border-[var(--white-8)] bg-[var(--white-3)] text-[var(--color-fg-muted)]">
-                            ${item.message_count} msgs
-                          </span>
+                          <${SnapshotBadge} tone="accent">gen ${item.generation}</${SnapshotBadge}>
+                          <${SnapshotBadge} tone="neutral">${item.message_count} msgs</${SnapshotBadge}>
                           ${item.system_prompt_present
-                            ? html`<span class="inline-flex items-center rounded-sm px-2 py-0.5 text-3xs font-semibold border border-[var(--ok-20)] bg-[var(--ok-10)] text-[var(--color-status-ok)]">system kept</span>`
+                            ? html`<${SnapshotBadge} tone="ok">system kept</${SnapshotBadge}>`
                             : null}
                         </div>
                         <div class="mt-1 text-2xs text-[var(--color-fg-muted)]">
@@ -456,7 +468,7 @@ export function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
 
   return html`
     <div class="md:col-span-2">
-      <${KeeperDetailSectionCard} title="생성 계보">
+      <${PanelCard} title="생성 계보">
         <div class="text-2xs text-[var(--color-fg-muted)] mb-3">
           성공한 핸드오프에서 keeper 상태 전이를 추적합니다. 계보 telemetry 는 append-only 이며 최신 rollover 가 먼저 표시되어 동일한 keeper identity 가 새 trace 로 이어졌는지 설명합니다.
         </div>
@@ -466,9 +478,7 @@ export function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
             <div class="rounded border border-[var(--accent-20)] bg-[var(--accent-8)] p-3 mb-3">
               <div class="flex flex-wrap items-center gap-2 mb-1">
                 <span class="text-3xs font-semibold uppercase tracking-wider text-[var(--color-accent-fg)]">최신 핸드오프</span>
-                <span class="text-3xs font-mono px-1.5 py-0.5 rounded bg-[var(--accent-12)] text-[var(--color-accent-fg)] border border-[var(--accent-15)]">
-                  ${lineageTransitionLabel(latestEntry.parent_generation, latestEntry.generation)}
-                </span>
+                <${MonoBadge}>${lineageTransitionLabel(latestEntry.parent_generation, latestEntry.generation)}</${MonoBadge}>
                 <span class="text-3xs px-1.5 py-0.5 rounded ${verdictBadgeClass(latestEntry.continuity_verdict)}">
                   ${latestEntryMeta?.badgeLabel}
                 </span>
@@ -488,17 +498,17 @@ export function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
 
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3">
           <div class="px-3 py-2 rounded border border-[var(--white-8)] bg-[var(--white-2)]">
-            <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">현재 세대</div>
+            <${SectionHeader} size="xs">현재 세대</${SectionHeader}>
             <div class="mt-1 text-lg font-semibold text-[var(--color-fg-secondary)]">${currentGeneration ?? '-'}</div>
             ${generationId ? html`<div class="text-3xs text-[var(--color-fg-disabled)] font-mono truncate" title=${generationId}>${generationId}</div>` : null}
           </div>
           <div class="px-3 py-2 rounded border border-[var(--white-8)] bg-[var(--white-2)]">
-            <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">추적 계보</div>
+            <${SectionHeader} size="xs">추적 계보</${SectionHeader}>
             <div class="mt-1 text-lg font-semibold text-[var(--color-fg-secondary)]">${traceHistoryCount}</div>
             <div class="text-3xs text-[var(--color-fg-disabled)]">historical traces retained in meta.trace_history</div>
           </div>
           <div class="px-3 py-2 rounded border border-[var(--white-8)] bg-[var(--white-2)]">
-            <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">현재 추적</div>
+            <${SectionHeader} size="xs">현재 추적</${SectionHeader}>
             <div class="mt-1 text-sm font-mono text-[var(--color-fg-secondary)] truncate" title=${currentTraceId ?? ''}>${currentTraceId ? compactTraceId(currentTraceId) : '-'}</div>
             <div class="text-3xs text-[var(--color-fg-disabled)]">artifact appears after the first successful handoff</div>
           </div>
@@ -508,8 +518,8 @@ export function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
           ? html`
             <div class="rounded border border-[var(--white-8)] bg-[var(--white-2)] p-3 mb-3">
               <div class="flex flex-wrap items-center gap-2 mb-2">
-                <span class="text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">현재 매니페스트</span>
-                <span class="text-3xs font-mono px-1.5 py-0.5 rounded bg-[var(--accent-12)] text-[var(--color-accent-fg)] border border-[var(--accent-15)]">gen ${manifest.generation}</span>
+                <${SectionHeader} size="xs">현재 매니페스트</${SectionHeader}>
+                <${MonoBadge}>gen ${manifest.generation}</${MonoBadge}>
                 ${continuity?.verdict
                   ? html`<span class="text-3xs px-1.5 py-0.5 rounded ${verdictBadgeClass(continuity.verdict)}">${continuityMeta.badgeLabel}</span>`
                   : null}
@@ -564,7 +574,7 @@ export function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
           `}
 
         <div>
-          <div class="text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)] mb-1">최근 핸드오프</div>
+          <${SectionHeader} size="xs" class="mb-1">최근 핸드오프</${SectionHeader}>
           <div class="text-2xs text-[var(--color-fg-disabled)] mb-2">최신 rollover 가 먼저 표시되어 operator 가 현재 trace 를 최근 이력과 비교할 수 있습니다.</div>
           ${recent.length > 0
             ? html`
@@ -575,7 +585,7 @@ export function GenerationLineagePanel({ keeperName }: { keeperName: string }) {
                   return html`
                     <div class=${`px-3 py-2 rounded border ${isLatest ? 'border-[var(--accent-22)] bg-[var(--accent-8)]' : 'border-[var(--white-8)] bg-[var(--white-2)]'}`}>
                       <div class="flex flex-wrap items-center gap-2">
-                        <span class="text-3xs font-mono px-1.5 py-0.5 rounded bg-[var(--accent-12)] text-[var(--color-accent-fg)] border border-[var(--accent-15)]">gen ${entry.generation}</span>
+                        <${MonoBadge}>gen ${entry.generation}</${MonoBadge}>
                         ${isLatest
                           ? html`<span class="text-3xs px-1.5 py-0.5 rounded border border-[var(--accent-18)] bg-[var(--accent-12)] text-[var(--color-accent-fg)]">latest</span>`
                           : null}

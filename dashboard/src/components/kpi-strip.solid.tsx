@@ -14,8 +14,9 @@
 // `resolveStripCols` is exported for direct testing (pure helper).
 
 import { createContext, useContext, type JSX } from 'solid-js'
+import { resolveStripCols, type KpiStripVariant } from './kpi-shared'
 
-export type KpiStripVariant = 'standard' | 'compact' | 'stacked'
+export { resolveStripCols, type KpiStripVariant } from './kpi-shared'
 
 export interface KpiStripProps {
   variant?: KpiStripVariant
@@ -24,20 +25,6 @@ export interface KpiStripProps {
   children: JSX.Element
   id?: string
   class?: string
-}
-
-const COLS_BY_VARIANT: Record<KpiStripVariant, number> = {
-  standard: 6,
-  compact: 6,
-  stacked: 3,
-}
-
-export function resolveStripCols(
-  variant: KpiStripVariant | undefined,
-  override: number | undefined,
-): number {
-  if (typeof override === 'number' && override > 0) return override
-  return COLS_BY_VARIANT[variant ?? 'standard']
 }
 
 interface KpiStripContextValue {

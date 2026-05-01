@@ -646,6 +646,10 @@ export function fmtPerfTokPerSec(
  * Compact rendering of per-provider p50/p95 latency used in the Health
  * Tracker table.  Same empty-state rules as `fmtPerfTokPerSec`.
  */
+function NumCell({ children }: { children: unknown }) {
+  return html`<td class="py-1 text-right tabular-nums">${children}</td>`
+}
+
 export function fmtPerfLatencyPair(
   p50: number | null | undefined,
   p95: number | null | undefined,
@@ -776,17 +780,17 @@ function HealthTable({
                     ? html`<${StatusChip} tone=${providerStatusTone(status)} uppercase=${false}>${status}<//>`
                     : html`<span class="text-[var(--color-fg-muted)]">—</span>`}
                 </td>
-                <td class="py-1 text-right tabular-nums">${fmtPct(p.success_rate)}</td>
-                <td class="py-1 text-right tabular-nums">${p.consecutive_failures}</td>
-                <td class="py-1 text-right tabular-nums">${p.events_in_window}</td>
-                <td class="py-1 text-right tabular-nums">
+                <${NumCell}>${fmtPct(p.success_rate)}</${NumCell}>
+                <${NumCell}>${p.consecutive_failures}</${NumCell}>
+                <${NumCell}>${p.events_in_window}</${NumCell}>
+                <${NumCell}>
                   ${rejected > 0
                     ? html`<span class="text-[var(--color-status-warn)]">${rejected}</span>`
                     : html`<span class="text-[var(--color-fg-muted)]">—</span>`}
-                </td>
-                <td class="py-1 text-right tabular-nums">${fmtPerfTokPerSec(p.avg_prompt_tok_per_sec)}</td>
-                <td class="py-1 text-right tabular-nums">${fmtPerfTokPerSec(p.avg_decode_tok_per_sec)}</td>
-                <td class="py-1 text-right tabular-nums">${fmtPerfLatencyPair(p.p50_latency_ms, p.p95_latency_ms)}</td>
+                </${NumCell}>
+                <${NumCell}>${fmtPerfTokPerSec(p.avg_prompt_tok_per_sec)}</${NumCell}>
+                <${NumCell}>${fmtPerfTokPerSec(p.avg_decode_tok_per_sec)}</${NumCell}>
+                <${NumCell}>${fmtPerfLatencyPair(p.p50_latency_ms, p.p95_latency_ms)}</${NumCell}>
                 <td class="py-1 text-right">
                   ${p.in_cooldown
                     ? html`<${StatusChip} tone="bad">${fmtCooldownExpiry(p.cooldown_expires_at)}<//>`
@@ -958,9 +962,9 @@ function StrategyTraceTable({
             <td class="py-1 text-[var(--color-fg-muted)] tabular-nums">${fmtRelativeTime(e.ts)}</td>
             <td class="py-1"><code class="text-[var(--text-strong)]">${e.cascade_name}</code></td>
             <td class="py-1 text-[var(--color-fg-muted)]">${e.strategy}</td>
-            <td class="py-1 text-right tabular-nums">${e.cycle}</td>
-            <td class="py-1 text-right tabular-nums">${e.candidates_in}/${e.candidates_out}</td>
-            <td class="py-1 text-right tabular-nums">${e.backoff_ms > 0 ? e.backoff_ms : '–'}</td>
+            <${NumCell}>${e.cycle}</${NumCell}>
+            <${NumCell}>${e.candidates_in}/${e.candidates_out}</${NumCell}>
+            <${NumCell}>${e.backoff_ms > 0 ? e.backoff_ms : '–'}</${NumCell}>
             <td class="py-1"><${StatusChip} tone=${tone}>${traceKindLabel(e.kind)}<//></td>
           </tr>
         `})}
@@ -993,7 +997,7 @@ function ClientCapacityHistoryTable({
             <td class="py-1 text-[var(--color-fg-muted)] tabular-nums">${fmtRelativeTime(e.ts)}</td>
             <td class="py-1"><${StatusChip} tone=${tone}>${eventKindLabel(e.kind)}<//></td>
             <td class="py-1"><code class="text-[var(--text-strong)]">${e.key}</code></td>
-            <td class="py-1 text-right tabular-nums">${e.active_after}</td>
+            <${NumCell}>${e.active_after}</${NumCell}>
           </tr>
         `})}
       </tbody>
@@ -1025,9 +1029,9 @@ function ClientCapacityTable({ capacity }: { capacity: CascadeClientCapacityResp
             <td class="py-1"><span class=${`inline-block w-2 h-2 rounded-full ${TONE_DOT[tone]}`}></span></td>
             <td class="py-1"><${StatusChip} tone=${tone === 'ok' ? 'neutral' : tone}>${capacityKindLabel(e.kind)}<//></td>
             <td class="py-1"><code class="text-[var(--text-strong)]">${e.key}</code></td>
-            <td class="py-1 text-right tabular-nums">${e.active}</td>
-            <td class="py-1 text-right tabular-nums">${e.available}</td>
-            <td class="py-1 text-right tabular-nums">${e.total}</td>
+            <${NumCell}>${e.active}</${NumCell}>
+            <${NumCell}>${e.available}</${NumCell}>
+            <${NumCell}>${e.total}</${NumCell}>
           </tr>
         `})}
       </tbody>

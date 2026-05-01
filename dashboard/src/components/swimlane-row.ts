@@ -21,6 +21,7 @@
 import { html } from 'htm/preact'
 import type { VNode } from 'preact'
 import { KeeperBadge } from './keeper-badge'
+import { MONO_STACK } from './common/font-stacks'
 
 export type SwimlaneEventKind = 'ok' | 'warn' | 'err' | 'info' | 'neutral'
 
@@ -61,7 +62,6 @@ const EVENT_COLOR_BY_KIND: Record<SwimlaneEventKind, string> = {
 
 const HEAD_WIDTH_PX = 130 // matches cb-group-b's lane-head fixed width
 
-const MONO_STACK = 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace'
 
 /** Pure: build the inline style for one event. Exposed for tests + for
  *  callers that want to render events into their own track (e.g. a

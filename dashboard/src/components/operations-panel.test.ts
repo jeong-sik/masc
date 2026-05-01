@@ -84,7 +84,7 @@ describe('OperationsPanel', () => {
 
     expect(container.textContent).not.toContain('Ops')
     expect(container.textContent).toContain('Governance')
-    expect(container.textContent).not.toContain('Safety')
+    expect(container.querySelector('[data-testid="safety"]')).toBeNull()
   })
 
   it('renders FilterChips options without legacy connectors view', async () => {
@@ -112,7 +112,7 @@ describe('OperationsPanel', () => {
 
     expect(container.textContent).toContain('Ops')
     expect(container.textContent).toContain('Governance')
-    expect(container.textContent).toContain('SafeAutonomy')
+    expect(container.querySelector('[data-testid="safety"]')).not.toBeNull()
   })
 
   it('marks the active chip with aria-selected=true', async () => {

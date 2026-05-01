@@ -1,20 +1,11 @@
 open Base
-module Format = Stdlib.Format
-module Map = Stdlib.Map
-module Set = Stdlib.Set
-module Queue = Stdlib.Queue
 module Hashtbl = Stdlib.Hashtbl
-module Mutex = Stdlib.Mutex
 module Option = Stdlib.Option
 module Result = Stdlib.Result
 module Sys = Stdlib.Sys
 module Filename = Stdlib.Filename
 module List = Stdlib.List
-module Array = Stdlib.Array
 module String = Stdlib.String
-module Char = Stdlib.Char
-module Int = Stdlib.Int
-module Float = Stdlib.Float
 
 (** Board Core — JSONL store logic and persistence.
     Types are in Board_types. *)
@@ -564,7 +555,7 @@ let list_posts store ?(visibility_filter=None) ?hearth ?(limit=50) () : post lis
           let sorted = List.sort (fun (a : post) (b : post) ->
             let score_a = a.votes_up - a.votes_down in
             let score_b = b.votes_up - b.votes_down in
-            let cmp = compare score_b score_a in
+            let cmp = Stdlib.Int.compare score_b score_a in
             if cmp <> 0 then cmp
             else Stdlib.Float.compare b.created_at a.created_at
           ) all in

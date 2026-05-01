@@ -1,5 +1,3 @@
-open Base
-
 (** Board_votes — voting + karma + flair on top of the
     Board_core store.
 

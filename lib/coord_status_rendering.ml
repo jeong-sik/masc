@@ -184,13 +184,14 @@ let status_summary_string
     Buffer.add_string buf
       (Printf.sprintf "💡 Suggested next: %s\n"
          (String.concat " -> " suggested_next)));
-  if Stdlib.List.length attention_items > 0 then begin
+  (match attention_items with
+  | [] -> ()
+  | _ ->
     Buffer.add_string buf "\n⚠️ Attention:\n";
     List.iter
       (fun item ->
         Buffer.add_string buf (Printf.sprintf "  - %s\n" item))
-      attention_items
-  end;
+      attention_items);
   Buffer.add_string buf "📌 Players:\n";
   (match shown_agents with
   | [] ->

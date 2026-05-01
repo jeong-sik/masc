@@ -218,7 +218,7 @@ let sort_posts_in_memory ~sort_by (posts : Board.post list) =
         Stdlib.Float.compare score_b score_a) posts
   | Discussed ->
       List.sort (fun (a : Board.post) (b : Board.post) ->
-        let cmp = compare b.reply_count a.reply_count in
+        let cmp = Stdlib.Int.compare b.reply_count a.reply_count in
         if cmp <> 0 then cmp else Stdlib.Float.compare b.created_at a.created_at) posts
 
 let normalize_author_filter = function

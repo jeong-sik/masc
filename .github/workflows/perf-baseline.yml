@@ -1,16 +1,14 @@
-name: Perf Baseline (Daily)
+name: Perf Baseline (Manual)
 
-# Runs scripts/perf-baseline.sh on a daily schedule and records the
-# raw output as an artifact. The script targets a live masc-mcp server
-# at :8935; in CI no server is running, so the run is expected to exit
-# with code 3 ("server unreachable"). The captured artifact is still
-# useful as an audit trail of attempted runs and dependency presence
-# (curl, awk, date, mkdir, tee) on the runner.
+# Validates scripts/perf-baseline.sh on demand and records the dry-run
+# output as an artifact. The script targets a live masc-mcp server at
+# :8935; in GitHub-hosted CI no server is running, so scheduled runs only
+# produced fake green artifacts for the expected "server unreachable" path.
 #
 # Real 14-day baseline collection happens on the Railway production
 # host per docs/design/perf-baseline-protocol.md section 3.3. This
-# workflow documents the schedule and leaves a paper trail; the daily
-# production cron is the source of truth for actual numbers.
+# workflow is manual-only; the production cron is the source of truth for
+# actual numbers.
 #
 # References:
 #   - scripts/perf-baseline.sh        (#11984)
@@ -18,9 +16,11 @@ name: Perf Baseline (Daily)
 #   - knowledge/research/2026-04-masc-ide-strategy/IMPLEMENTATION-PLAN.md PR-0.2.F
 
 on:
-  schedule:
-    - cron: '0 8 * * *'  # daily 08:00 UTC
   workflow_dispatch:
+
+concurrency:
+  group: perf-baseline-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   baseline:
@@ -30,14 +30,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Run perf baseline
+      - name: Validate perf baseline script
         run: |
           chmod +x scripts/perf-baseline.sh
-          ./scripts/perf-baseline.sh > baseline-output.txt 2>&1 || echo "exit=$?" >> baseline-output.txt
+          ./scripts/perf-baseline.sh --dry-run > baseline-output.txt 2>&1
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: perf-baseline-${{ github.run_id }}
           path: baseline-output.txt
-          retention-days: 90
+          retention-days: 14

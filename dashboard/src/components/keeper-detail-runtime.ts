@@ -10,6 +10,7 @@ import { DistributionBars, type DistributionItem } from './common/distribution-b
 import { TextInput } from './common/input'
 import { TimeAgo } from './common/time-ago'
 import { SectionHeader } from './common/section-header'
+import { StatusChip, type StatusChipTone } from './common/status-chip'
 import { toolCategory } from './tool-call-shared'
 import type { Keeper } from '../types'
 import { serverStatus } from '../store'
@@ -174,12 +175,43 @@ function hasTurnBudgetDivergence(keeper: Keeper): boolean {
   )
 }
 
+export type BudgetSource = 'override' | 'env' | 'override_invalid'
+
 interface BudgetSlot {
   value: number
-  source: 'override' | 'env' | 'override_invalid'
+  source: BudgetSource
   env_default: number
   env_var: string
   raw_override: number | null
+}
+
+export function budgetSourceTone(source: BudgetSource): StatusChipTone {
+  switch (source) {
+    case 'override_invalid':
+      return 'bad'
+    case 'override':
+      return 'warn'
+    case 'env':
+    default:
+      return 'neutral'
+  }
+}
+
+export function budgetSourceLabel(source: BudgetSource): string {
+  switch (source) {
+    case 'override_invalid':
+      return 'invalid'
+    case 'override':
+      return 'override'
+    case 'env':
+    default:
+      return 'env'
+  }
+}
+
+export function BudgetSourceBadge({ source, children }: { source: BudgetSource; children?: unknown }) {
+  const weight = source === 'env' ? 'font-medium' : 'font-semibold'
+  return html`<${StatusChip} tone=${budgetSourceTone(source)} class=${weight}>${children ?? budgetSourceLabel(source)}</${StatusChip}>`
 }
 
 function buildBudgetTooltip(slot: BudgetSlot, manifest: string | null, clamp: { min: number; max: number }): string {
@@ -220,16 +252,12 @@ function BudgetRow({ label, slot, manifest, clamp }: {
       : `${delta} (env 기준)`
 
   let valueClass: string
-  let pill
   if (isInvalid) {
     valueClass = 'text-[var(--bad-light)] underline decoration-wavy decoration-red-400 underline-offset-4 cursor-help'
-    pill = html`<span class="rounded bg-[var(--bad-10)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-wider text-[var(--bad-light)]">invalid</span>`
   } else if (isOverride) {
     valueClass = 'text-[var(--color-fg-secondary)] underline decoration-dotted decoration-amber-300/60 underline-offset-4 cursor-help'
-    pill = html`<span class="rounded bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-wider text-[var(--color-status-warn)]">override</span>`
   } else {
     valueClass = 'text-[var(--color-fg-muted)] cursor-help'
-    pill = html`<span class="rounded bg-[var(--white-6)] px-1.5 py-0.5 text-3xs font-medium uppercase tracking-wider text-[var(--color-fg-muted)]">env</span>`
   }
 
   return html`
@@ -243,7 +271,7 @@ function BudgetRow({ label, slot, manifest, clamp }: {
           class="text-xs font-medium tabular-nums ${valueClass}"
           title=${buildBudgetTooltip(slot, manifest, clamp)}
         >${slot.value}</span>
-        ${pill}
+        <${BudgetSourceBadge} source=${slot.source} />
       </div>
     </div>
   `
@@ -272,10 +300,10 @@ function TurnBudgetPanel({ keeper }: { keeper: Keeper }) {
       <div class="flex items-center gap-2 mb-1">
         <${SectionHeader} size="xs">턴 예산 (OAS 호출당)</${SectionHeader}>
         ${hasInvalid
-          ? html`<span class="rounded-sm bg-[var(--bad-10)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-wider text-[var(--bad-light)]">invalid override</span>`
+          ? html`<${StatusChip} tone="bad" class="font-semibold">invalid override</${StatusChip}>`
           : hasOverride
-            ? html`<span class="rounded-sm bg-[var(--warn-10)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-wider text-[var(--color-status-warn)]">override</span>`
-            : html`<span class="rounded-sm bg-[var(--ok-10)] px-1.5 py-0.5 text-3xs font-medium uppercase tracking-wider text-[var(--color-status-ok)]">inherited</span>`}
+            ? html`<${StatusChip} tone="warn" class="font-semibold">override</${StatusChip}>`
+            : html`<${StatusChip} tone="ok" class="font-medium">inherited</${StatusChip}>`}
       </div>
       <${BudgetRow}
         label="반응형"

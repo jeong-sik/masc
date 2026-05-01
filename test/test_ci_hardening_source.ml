@@ -1213,7 +1213,7 @@ let test_copilot_zero_diff_cleanup_contracts () =
        "startswith($prefix)");
   check bool "copilot zero-diff cleanup uses GraphQL file totals" true
     (file_contains_pattern "scripts/cleanup-copilot-zero-diff-prs.sh"
-       "files { totalCount }");
+       "files(first: 1) { totalCount }");
   check bool "copilot zero-diff cleanup preserves review threads" true
     (file_contains_pattern "scripts/cleanup-copilot-zero-diff-prs.sh"
        "reviewThreads(first: 1)");

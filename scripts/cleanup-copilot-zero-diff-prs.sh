@@ -18,7 +18,7 @@ REPO="${GITHUB_REPOSITORY:-}"
 AUTHOR="copilot-swe-agent"
 TITLE_PREFIX="[WIP]"
 LIMIT=100
-MIN_AGE_HOURS=0
+MIN_AGE_HOURS=24
 CLOSE=0
 COMMENT="Closing this stale Copilot [WIP] draft because it is draft-only, authored by copilot-swe-agent, and currently has zero changed files. Reopen or recreate it if work resumes with a real diff."
 
@@ -116,7 +116,7 @@ QUERY='query($owner: String!, $name: String!, $limit: Int!) {
         headRefOid
         reviewDecision
         author { login }
-        files { totalCount }
+        files(first: 1) { totalCount }
         reviews(first: 1) { totalCount }
         reviewThreads(first: 1) { totalCount }
         comments(first: 1) { totalCount }
@@ -180,6 +180,7 @@ candidates="$(
           }
       ] as $items
       | ($items
+         | sort_by(.headRefOid // "")
          | group_by(.headRefOid // "")
          | map(select(length > 1) | {(.[0].headRefOid // ""): length})
          | add // {}) as $duplicates

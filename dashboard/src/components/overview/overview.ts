@@ -22,6 +22,7 @@ import { missionSnapshot } from '../../mission-store'
 import { agents, tasks, keepers } from '../../store'
 import type { Agent, Task, Keeper } from '../../types/core'
 import type {
+  DashboardMissionResponse,
   DashboardMissionSessionCard,
 } from '../../types/dashboard-mission'
 import { openAgentDetail } from '../agent-detail-state'
@@ -47,32 +48,32 @@ export interface TaskAlert {
 }
 
 /** Derive a list of failing / offline agent alerts from the live agent list. */
-export function deriveAgentAlerts(agentList: Agent[]): AgentAlert[] {
+export function deriveAgentAlerts(agentList: readonly Agent[]): AgentAlert[] {
   return agentList
     .filter(a => a.status === 'offline' || a.status === 'inactive')
     .map(a => ({
       name: a.name,
-      display: a.display_name || a.name,
+      display: a.koreanName && a.koreanName !== '' ? a.koreanName : a.name,
       reason: a.status === 'offline' ? 'Offline' : 'Inactive',
       severity: 'critical',
     }))
 }
 
 /** Derive a list of stalled tasks or tasks needing attention. */
-export function deriveTaskAlerts(taskList: Task[], nowMs: number): TaskAlert[] {
+export function deriveTaskAlerts(taskList: readonly Task[], nowMs: number = Date.now()): TaskAlert[] {
   // Simple heuristic: tasks in 'awaiting_verification' for too long
   const STALL_THRESHOLD_MS = 1000 * 60 * 10 // 10 mins
   return taskList
     .filter(t => t.status === 'awaiting_verification')
     .filter(t => {
-      const updated = new Date(t.updated_at).getTime()
-      return nowMs - updated > STALL_THRESHOLD_MS
+      const updated = t.updated_at ? Date.parse(t.updated_at) : Number.NaN
+      return !Number.isFinite(updated) || nowMs - updated > STALL_THRESHOLD_MS
     })
     .map(t => ({
       id: t.id,
       title: t.title,
-      status: t.status,
-      assignee: t.assignee,
+      status: 'awaiting_verification',
+      assignee: t.assignee ?? null,
       severity: 'warn',
       task: t,
     }))
@@ -87,7 +88,7 @@ export function severityToneClass(severity?: string | null): string {
     case 'medium':
       return 'text-[var(--color-status-warn)]'
     default:
-      return 'text-[var(--color-fg-secondary)]'
+      return 'text-[var(--color-fg-muted)]'
   }
 }
 
@@ -149,25 +150,40 @@ export interface FunnelCounts {
   target: number | null
 }
 
-export function computeFunnelCounts(taskList: Task[], active: DashboardMissionSessionCard | null): FunnelCounts {
-  const todayMs = startOfTodayMs()
-  const created = taskList.filter(t => parseIsoMs(t.created_at) >= todayMs).length
+export function computeFunnelCounts(
+  taskList: readonly Task[],
+  active: DashboardMissionSessionCard | null,
+  now: number = Date.now(),
+): FunnelCounts {
+  const todayMs = startOfTodayMs(now)
+  const created = taskList.filter(t => {
+    const createdMs = parseIsoMs(t.created_at)
+    return createdMs !== null && createdMs >= todayMs
+  }).length
   const inProgress = taskList.filter(t => t.status === 'claimed' || t.status === 'in_progress').length
   const awaiting = taskList.filter(t => t.status === 'awaiting_verification').length
-  const completed = taskList.filter(t => t.status === 'done' && parseIsoMs(t.updated_at) >= todayMs).length
-  const target = active?.target_value ? parseInt(active.target_value, 10) : null
+  const completed = taskList.filter(t => {
+    const completedMs = parseIsoMs(t.completed_at)
+    return t.status === 'done' && completedMs !== null && completedMs >= todayMs
+  }).length
+  const target =
+    typeof active?.required_count === 'number' && active.required_count > 0
+      ? active.required_count
+      : null
 
   return { created, inProgress, awaiting, completed, target }
 }
 
-function startOfTodayMs(): number {
-  const d = new Date()
+function startOfTodayMs(now: number): number {
+  const d = new Date(now)
   d.setHours(0, 0, 0, 0)
   return d.getTime()
 }
 
-function parseIsoMs(iso: string): number {
-  return new Date(iso).getTime()
+function parseIsoMs(iso: string | null | undefined): number | null {
+  if (iso === null || iso === undefined || iso === '') return null
+  const ms = Date.parse(iso)
+  return Number.isNaN(ms) ? null : ms
 }
 
 export function formatTargetRatio(counts: FunnelCounts): string {
@@ -197,9 +213,10 @@ function FunnelCard({ counts }: { counts: FunnelCounts }) {
 
 // ─── Mission Party ────────────────────────────────────────────────────────────
 
-function progressPct(session: DashboardMissionSessionCard): number {
+export function progressPct(session: DashboardMissionSessionCard | null): number | null {
+  if (!session) return null
   const req = session.required_count ?? 0
-  if (req <= 0) return 0
+  if (req <= 0) return null
   const cur = session.seen_count ?? session.active_count ?? 0
   return Math.min(100, Math.round((cur / req) * 100))
 }
@@ -214,22 +231,23 @@ function MissionPartyCard({ active }: { active: DashboardMissionSessionCard | nu
   }
 
   const progress = progressPct(active)
+  const status = active.status ?? active.health ?? 'unknown'
 
   return html`
     <${SectionCard} title="Active Mission" data-testid="overview-party">
       <div class="space-y-4">
         <div class="flex items-center justify-between">
            <p class="text-xs font-semibold text-[var(--color-fg-default)] truncate flex-1 mr-4">
-             ${active.goal_id}
+             ${active.goal !== '' ? active.goal : '(no goal)'}
            </p>
            <div class="flex -space-x-1.5">
-             ${active.members.map(m => html`<${AgentAvatar} key=${m} name=${m} size="xs" class="ring-1 ring-[var(--color-bg-default)]" />`)}
+             ${active.member_names.map(m => html`<${AgentAvatar} key=${m} name=${m} size="xs" class="ring-1 ring-[var(--color-bg-default)]" />`)}
            </div>
         </div>
         
         <div class="grid grid-cols-2 gap-3">
-          <${StatTile} label="Progress" value="${progress}%" variant="${progress > 80 ? 'accent' : 'default'}" />
-          <${StatTile} label="Status" value="${active.status.toUpperCase()}" variant="${active.status === 'running' || active.status === 'active' ? 'accent' : 'default'}" />
+          <${StatTile} label="Progress" value=${progress === null ? 'n/a' : `${progress}%`} variant=${progress !== null && progress > 80 ? 'accent' : 'default'} />
+          <${StatTile} label="Status" value=${status.toUpperCase()} variant=${status === 'running' || status === 'active' ? 'accent' : 'default'} />
         </div>
       </div>
     <//>
@@ -254,17 +272,19 @@ function keeperStatusToneClass(status?: string | null): string {
   }
 }
 
-function pickActiveKeepers(keeperList: Keeper[], max = 3): Keeper[] {
+export function pickActiveKeepers(keeperList: readonly Keeper[], max = 3): Keeper[] {
   return [...keeperList]
     .sort((a, b) => {
-      const tsA = new Date(a.last_seen_at || 0).getTime()
-      const tsB = new Date(b.last_seen_at || 0).getTime()
-      return tsB - tsA
+      const tsA = Date.parse(a.last_heartbeat ?? '')
+      const tsB = Date.parse(b.last_heartbeat ?? '')
+      const scoreA = (Number.isFinite(tsA) ? tsA : 0) + (a.paused === true ? -1e15 : 0)
+      const scoreB = (Number.isFinite(tsB) ? tsB : 0) + (b.paused === true ? -1e15 : 0)
+      return scoreB - scoreA
     })
     .slice(0, max)
 }
 
-function KeeperStrip({ keeperList }: { keeperList: Keeper[] }) {
+function KeeperStrip({ keeperList }: { keeperList: readonly Keeper[] }) {
   const activeKeepers = pickActiveKeepers(keeperList)
 
   if (activeKeepers.length === 0) {
@@ -281,7 +301,7 @@ function KeeperStrip({ keeperList }: { keeperList: Keeper[] }) {
         ${activeKeepers.slice(0, 1).map(
           k => html`
             <${LifelineBar} 
-              label=${k.display_name_ko || k.name} 
+              label=${k.koreanName && k.koreanName !== '' ? k.koreanName : k.name}
               bpm=${72} 
             />
           `,
@@ -290,10 +310,10 @@ function KeeperStrip({ keeperList }: { keeperList: Keeper[] }) {
           ${activeKeepers.slice(1).map(
             k => html`
               <li key=${k.name} class="flex items-center gap-2">
-                <${StatusDot} tone=${keeperStatusToneClass(k.status)} />
+                <${StatusDot} class=${keeperStatusToneClass(k.status)} />
                 <div class="min-w-0">
-                  <p class="text-xs font-medium truncate">${k.display_name_ko || k.name}</p>
-                  <${TimeAgo} timestamp=${k.last_seen_at} class="text-3xs text-[var(--color-fg-muted)]" />
+                  <p class="text-xs font-medium truncate">${k.koreanName && k.koreanName !== '' ? k.koreanName : k.name}</p>
+                  <${TimeAgo} timestamp=${k.last_heartbeat} class="text-3xs text-[var(--color-fg-muted)]" />
                 </div>
               </li>
             `,
@@ -304,9 +324,12 @@ function KeeperStrip({ keeperList }: { keeperList: Keeper[] }) {
   `
 }
 
-export function pickActiveSession(snap: any): DashboardMissionSessionCard | null {
+export function pickActiveSession(snap: DashboardMissionResponse | null): DashboardMissionSessionCard | null {
   if (!snap) return null
-  const running = snap.sessions.find((s: any) => s.status === 'running' || s.status === 'active')
+  const running = snap.sessions.find(s => {
+    const status = (s.status ?? '').toLowerCase()
+    return status === 'running' || status === 'active' || status === 'busy'
+  })
   return running || snap.sessions[0] || null
 }
 

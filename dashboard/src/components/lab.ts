@@ -32,8 +32,10 @@ function Highlight({ attention }: { attention: OperatorAttentionItem | null }) {
       <div class="flex items-center gap-3">
         <span class="flex-shrink-0 flex h-2 w-2 rounded-full bg-[var(--color-status-err)] animate-pulse" />
         <div class="flex-1 min-w-0">
-          <p class="text-xs font-medium truncate ${severityToneClass(attention.severity)}">${attention.title}</p>
-          <p class="text-2xs text-[var(--color-fg-secondary)] truncate">${attention.message}</p>
+          <p class="text-xs font-medium truncate ${severityToneClass(attention.severity)}">${attention.summary}</p>
+          <p class="text-2xs text-[var(--color-fg-secondary)] truncate">
+            ${attention.target_id ?? attention.target_type}
+          </p>
         </div>
       </div>
     <//>

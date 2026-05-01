@@ -105,6 +105,17 @@ let add_routes ~sw router =
          Http.Response.json ~compress:true ~request:req
            (Yojson.Safe.to_string json) reqd
        ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/cost-latency" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let window = int_query_param req "window" ~default:1440 in
+         let base_path = state.Mcp_server.room_config.base_path in
+         let json =
+           Model_inference_metrics.compute_cost_latency_json
+             ~base_path ~window_minutes:window
+         in
+         Http.Response.json ~compress:true ~request:req
+           (Yojson.Safe.to_string json) reqd
+       ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/keeper-decisions" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let limit = int_query_param req "limit" ~default:200 in

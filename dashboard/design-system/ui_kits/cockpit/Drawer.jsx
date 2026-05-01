@@ -381,7 +381,7 @@ function Drawer() {
 
   // ctrl/cmd + ` toggles open/closed
   document.addEventListener("keydown", (e) => {
-    if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key === "`") {
+    if ((e.ctrlKey || e.metaKey) && e.code === "Backquote") {
       if (isEditableTarget(e.target)) return;
       e.preventDefault();
       window.dispatchEvent(new CustomEvent("masc-drawer-toggle"));

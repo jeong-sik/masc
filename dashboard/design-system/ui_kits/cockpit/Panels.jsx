@@ -65,7 +65,8 @@ function Sidebar({ keepers, goals, selKeeper, setSelKeeper, selGoal, setSelGoal,
         role="button"
         tabIndex={0}
         title="expand sidebar"
-        aria-label="expand sidebar">
+        aria-label="expand sidebar"
+        aria-expanded={!colSide}>
         <div className="wx-rail-vlabel">FLEET · GOALS</div>
       </aside>
     );
@@ -390,7 +391,8 @@ function Rail({ events, cascade }) {
         role="button"
         tabIndex={0}
         title="expand activity rail"
-        aria-label="expand activity rail">
+        aria-label="expand activity rail"
+        aria-expanded={!colRail}>
         <div className="wx-rail-vlabel">ACTIVITY · NUDGES</div>
       </aside>
     );

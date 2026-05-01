@@ -340,7 +340,7 @@ let discover_repositories ~base_path =
             | exception End_of_file -> List.rev acc
           in
           read_lines [])
-    with _ -> []
+    with Sys_error _ -> []
   in
   let is_masc_dir path =
     let masc_prefix = Filename.concat base_path ".masc" in

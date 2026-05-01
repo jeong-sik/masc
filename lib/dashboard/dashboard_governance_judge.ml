@@ -524,7 +524,9 @@ let compute_judgments
               match Judge_json_recovery.extract_balanced_object raw with
               | Some block -> (
                   try Llm_provider.Lenient_json.parse block
-                  with _ -> parsed)
+                  with
+                  | Yojson.Json_error _ -> parsed
+                  | Failure _ -> parsed)
               | None -> parsed)
           | _ -> parsed
         in

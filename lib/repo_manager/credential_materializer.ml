@@ -430,8 +430,9 @@ let provision_via_with_token ?credential_id ?identity_label
                  output_string oc token;
                  output_char oc '\n';
                  close_out oc
-               with _ ->
-                 close_out_noerr oc);
+               with
+               | Sys_error _ ->
+                   close_out_noerr oc);
               let status = snd (Unix.waitpid [] pid) in
               (match status with
                | Unix.WEXITED 0 ->

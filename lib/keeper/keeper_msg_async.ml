@@ -121,7 +121,7 @@ let entry_to_json (e : entry) : Yojson.Safe.t =
     | Done { ok; body } ->
       fields @ [
         ("ok", `Bool ok);
-        ("result", (try Yojson.Safe.from_string body with Eio.Cancel.Cancelled _ as e -> raise e | _ -> `String body));
+        ("result", (try Yojson.Safe.from_string body with Eio.Cancel.Cancelled _ as e -> raise e | Yojson.Json_error _ -> `String body));
       ]
     | _ -> fields
   in

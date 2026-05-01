@@ -272,15 +272,8 @@ let keepalive_entry_accepts_late_event ~(ctx : _ context) ~(keeper_name : string
   | Some (Keeper_state_machine.Stopped | Keeper_state_machine.Dead) -> false
   | Some _ -> true
 
-let record_keepalive_dispatch_rejection event =
-  Prometheus.inc_counter
-    Prometheus.metric_keeper_lifecycle_dispatch_rejections
-    ~labels:[ ("event", Keeper_state_machine.event_to_string event) ]
-    ()
-
 let dispatch_keepalive_event ~(ctx : _ context) ~(keeper_name : string) event =
   if keepalive_entry_accepts_late_event ~ctx ~keeper_name then
-<<<<<<< HEAD
     ignore (Keeper_registry.dispatch_event_and_log
       ~base_path:ctx.config.base_path keeper_name event)
 
@@ -293,7 +286,6 @@ let dispatch_keepalive_event_with_audit
       event
   =
   if keepalive_entry_accepts_late_event ~ctx ~keeper_name then
-<<<<<<< HEAD
     ignore (Keeper_registry.dispatch_event_with_audit_and_log
       ~base_path:ctx.config.base_path
       ~snapshot

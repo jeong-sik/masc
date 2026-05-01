@@ -794,7 +794,14 @@ let sort_entries_by_requested_at entries =
 
 (** Submit a tool call for approval and suspend the calling fiber.
     Returns the operator's decision when the promise is resolved.
-    Called from the OAS approval_callback (inside agent fiber). *)
+    Called from the OAS approval_callback (inside agent fiber).
+
+    [timeout_s] defaults to 600s. This is intentionally longer than the
+    30s wrapper used by A2 for generic [Eio.Promise.await] sites: a
+    HITL approval is bounded by an operator's response time, not by an
+    SLA on autonomous progress. Drop the default only after measuring
+    the operator-response distribution — premature shortening turns
+    every distracted operator into an [Approval_expired] event. *)
 let submit_and_await ~keeper_name ~tool_name ~input ~risk_level
     ?turn_id ?task_id ?goal_id ?(goal_ids = []) ?runtime_contract
     ?selected_model ?disposition ?disposition_reason

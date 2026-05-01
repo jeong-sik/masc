@@ -10,9 +10,11 @@
     2. An honest thunk (no assert raised) leaves the counter alone.
     3. A buggy thunk (raises [Assert_failure], simulating a PPX-injected
        guard that observed a spec violation) bumps the counter by one
-       and is swallowed by default (counter mode).
-    4. With [MASC_FSM_GUARD_ASSERT=1], the same buggy thunk re-raises
-       after bumping the counter (assert mode for tests / CI).
+       and re-raises by default (assert mode is now the default — see
+       commit "invert MASC_FSM_GUARD_ASSERT default to assert mode").
+    4. With [MASC_FSM_GUARD_ASSERT=0], the same buggy thunk is swallowed
+       after bumping the counter (counter mode opts out of re-raise so
+       hot paths like keeper heartbeats degrade gracefully).
     5. Non-[Assert_failure] exceptions propagate unchanged — only the
        spec-violation channel is intercepted. *)
 

@@ -1,5 +1,6 @@
 open Alcotest
 open Masc_mcp
+open Coord_types
 open Tool_coord
 open Yojson.Safe.Util
 

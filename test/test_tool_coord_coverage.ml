@@ -1,7 +1,7 @@
 (** Coverage tests for Tool_coord *)
 
 open Masc_mcp
-open Tool_coord
+open Coord_types
 
 let () = Random.self_init ()
 
@@ -370,6 +370,7 @@ let () = test "dispatch_status_no_owned_prefers_claim_next_over_transition" (fun
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let ctx = make_test_ctx () in
   let _ = Coord.init ctx.config ~agent_name:(Some "test-agent") in
+  ignore (Auth.enable_auth ctx.config.base_path ~require_token:true ~agent_name:"test-agent");
   ignore (Coord.add_task ctx.config ~title:"Unclaimed task" ~priority:3 ~description:"");
   Planning_eio.set_current_task ctx.config ~task_id:"task-001";
   match Tool_coord.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with

@@ -5,6 +5,7 @@ let default_evidence_path = Tool_call_quality_benchmark_loader.default_evidence_
 let load_cases_from_file = Tool_call_quality_benchmark_loader.load_cases_from_file
 let load_runs_from_file = Tool_call_quality_benchmark_loader.load_runs_from_file
 let score_run = Tool_call_quality_benchmark_scoring.score_run
+let to_reward_advice = Tool_call_quality_benchmark_scoring.to_reward_advice
 let summarize = Tool_call_quality_benchmark_summary.summarize
 let json_check_to_yojson = Tool_call_quality_benchmark_render.json_check_to_yojson
 let case_score_to_yojson = Tool_call_quality_benchmark_render.case_score_to_yojson

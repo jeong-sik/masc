@@ -62,3 +62,11 @@ val score_run :
     [(forbidden_count + over_limit) / call_count], capped at
     [1.0].  Zero calls -> [0.0].  [Tool_forbidden] case -> [1.0]
     when any call exists. *)
+
+val to_reward_advice :
+  agent_name:string ->
+  ?task_id:string ->
+  Tool_call_quality_benchmark_types.case_score ->
+  Reward_advice_artifact.reward_advice_artifact
+(** Build a {!Reward_advice_artifact.reward_advice_artifact} from a case score.
+    Maps [composite_score] to a reward multiplier and generates an advisory message. *)

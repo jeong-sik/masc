@@ -263,3 +263,33 @@ let to_dimension_results result =
     { dimension = Quality; verdict = result.quality };
     { dimension = Safety; verdict = result.safety };
   ]
+
+(** Build a {!Reward_advice_artifact.reward_advice_artifact} from a verification result.
+    Delegates to [Reward_advice_artifact.of_post_verifier_verdict]. *)
+let to_reward_advice ~agent_name ?task_id result =
+  let verdict =
+    match result.overall with
+    | Pass -> "pass"
+    | Warn _ -> "warn"
+    | Fail _ -> "fail"
+  in
+  let advisory_message =
+    match result.overall with
+    | Pass ->
+      "Content passes all 3 post-verifier dimensions (relevance, quality, safety). \
+       No reward adjustment recommended."
+    | Warn reason ->
+      Printf.sprintf
+        "Post-verifier advisory: %s. \
+         Content is acceptable but a small reward reduction is suggested \
+         to reflect the warning signal. Evaluate in context before applying."
+        reason
+    | Fail reason ->
+      Printf.sprintf
+        "Post-verifier failed: %s. \
+         A significant reward reduction is suggested. \
+         This is an advisory; the reward system should confirm before applying."
+        reason
+  in
+  Reward_advice_artifact.of_post_verifier_verdict
+    ~agent_name ?task_id ~verdict ~advisory_message ()

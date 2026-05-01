@@ -240,7 +240,9 @@ let update_status ~base_path id status =
 let update ~base_path id (repo : repository) =
   let* repos = load_all ~base_path in
   let now = now_unix_seconds () in
-  let result = ref (Error (Printf.sprintf "Repository not found: %s" id)) in
+  let result : (repository, string) Stdlib.result ref =
+    ref (Stdlib.Error (Printf.sprintf "Repository not found: %s" id))
+  in
   let updated =
     List.map
       (fun (r : repository) ->
@@ -259,14 +261,14 @@ let update ~base_path id (repo : repository) =
               updated_at = now;
             }
           in
-          result := Ok normalised;
+          result := Stdlib.Ok normalised;
           normalised
         else r)
       repos
   in
   match !result with
-  | Error _ as e -> e
-  | Ok _ ->
+  | Stdlib.Error _ as e -> e
+  | Stdlib.Ok _ ->
       let* () = save_all ~base_path updated in
       !result
 

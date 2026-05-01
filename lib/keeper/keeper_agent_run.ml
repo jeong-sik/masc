@@ -155,6 +155,24 @@ let run_turn
   match setup with
   | Error e -> Error e
   | Ok s ->
+  let cleanup_agent_setup () =
+    try s.Keeper_run_tools.cleanup () with
+    | Eio.Cancel.Cancelled _ -> ()
+    | e ->
+      Log.Keeper.warn
+        "%s: keeper tool bundle cleanup raised: %s"
+        meta.name (Printexc.to_string e)
+  in
+  let run_with_setup_cleanup f =
+    match f () with
+    | result ->
+      cleanup_agent_setup ();
+      result
+    | exception e ->
+      cleanup_agent_setup ();
+      raise e
+  in
+  run_with_setup_cleanup @@ fun () ->
   let tools = s.Keeper_run_tools.tools in
   let hooks = s.Keeper_run_tools.hooks in
   let reducer = s.Keeper_run_tools.reducer in

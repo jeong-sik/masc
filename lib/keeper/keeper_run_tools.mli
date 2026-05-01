@@ -51,6 +51,7 @@ val freeze : hook_accumulator -> hook_outputs
     at the OAS call site. *)
 type agent_setup =
   { tools : Agent_sdk.Tool.t list
+  ; cleanup : unit -> unit
   ; hooks : Agent_sdk.Hooks.hooks
   ; reducer : Agent_sdk.Context_reducer.t
   ; memory : Agent_sdk.Memory.t

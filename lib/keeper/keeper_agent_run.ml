@@ -172,8 +172,9 @@ let run_turn
       cleanup_agent_setup ();
       result
     | exception e ->
+      let backtrace = Printexc.get_raw_backtrace () in
       cleanup_agent_setup ();
-      raise e
+      Printexc.raise_with_backtrace e backtrace
   in
   run_with_setup_cleanup @@ fun () ->
   let tools = s.Keeper_run_tools.tools in

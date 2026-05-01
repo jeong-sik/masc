@@ -45,12 +45,74 @@ jobs:
             --pr-number "$PR_NUMBER" \
             --expected-head-sha "$PR_HEAD_SHA"
 
+  pr-live-gate:
+    name: PR Live Gate
+    runs-on: ubuntu-latest
+    needs: [pr-sync-check]
+    if: ${{ always() && !cancelled() && (needs.pr-sync-check.result == 'success' || needs.pr-sync-check.result == 'skipped') }}
+    timeout-minutes: 2
+    permissions:
+      pull-requests: read
+    outputs:
+      run_heavy: ${{ steps.live.outputs.run_heavy }}
+      live_is_draft: ${{ steps.live.outputs.live_is_draft }}
+      live_state: ${{ steps.live.outputs.live_state }}
+
+    steps:
+      - name: Resolve live PR state before heavy CI
+        id: live
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          LIVE_PR_GATE_SETTLE_SEC: 15
+        run: |
+          set -euo pipefail
+
+          if [ "${GITHUB_EVENT_NAME}" != "pull_request" ]; then
+            echo "run_heavy=true" >> "$GITHUB_OUTPUT"
+            echo "live_is_draft=false" >> "$GITHUB_OUTPUT"
+            echo "live_state=NON_PR" >> "$GITHUB_OUTPUT"
+            echo "::notice::PR live gate: non-PR event=${GITHUB_EVENT_NAME}; run_heavy=true"
+            exit 0
+          fi
+
+          # Give pull_request_target draft automation a short window to restore
+          # draft state before this workflow decides whether to spend runners on
+          # the heavy matrix. This avoids stale ready_for_review payloads running
+          # full CI after the PR has already been converted back to draft.
+          sleep "${LIVE_PR_GATE_SETTLE_SEC}"
+
+          if ! live_fields="$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json state,isDraft --jq '.state + " " + (.isDraft | tostring)' 2>&1)"; then
+            echo "::error::Could not resolve live PR state for #${PR_NUMBER}: ${live_fields}"
+            exit 1
+          fi
+          live_state="${live_fields%% *}"
+          live_is_draft="${live_fields#* }"
+
+          if [ -z "$live_state" ] || { [ "$live_is_draft" != "true" ] && [ "$live_is_draft" != "false" ]; }; then
+            echo "::error::Could not resolve live PR state for #${PR_NUMBER}: ${live_fields}"
+            exit 1
+          fi
+
+          run_heavy=true
+          if [ "$live_state" != "OPEN" ]; then
+            run_heavy=false
+          elif [ "$live_is_draft" = "true" ]; then
+            run_heavy=false
+          fi
+
+          echo "run_heavy=${run_heavy}" >> "$GITHUB_OUTPUT"
+          echo "live_is_draft=${live_is_draft}" >> "$GITHUB_OUTPUT"
+          echo "live_state=${live_state}" >> "$GITHUB_OUTPUT"
+          echo "::notice::PR live gate: state=${live_state:-unknown} draft=${live_is_draft:-unknown} run_heavy=${run_heavy}"
+
   changes:
     name: Detect Changed Surfaces
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    needs: [pr-sync-check]
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && (needs.pr-sync-check.result == 'success' || needs.pr-sync-check.result == 'skipped') }}
+    needs: [pr-live-gate]
+    if: ${{ always() && !cancelled() && needs.pr-live-gate.outputs.run_heavy == 'true' }}
     outputs:
       build: ${{ steps.scope.outputs.build }}
       lint: ${{ steps.scope.outputs.lint }}
@@ -209,8 +271,8 @@ jobs:
     name: Meta Guards
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: [pr-sync-check, changes]
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && (needs.pr-sync-check.result == 'success' || needs.pr-sync-check.result == 'skipped') }}
+    needs: [pr-live-gate, changes]
+    if: ${{ always() && !cancelled() && needs.pr-live-gate.outputs.run_heavy == 'true' && needs.changes.result == 'success' }}
 
     steps:
       - name: Checkout
@@ -314,8 +376,8 @@ jobs:
     name: Health
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    needs: [pr-sync-check, changes]
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && needs.changes.outputs.health == 'true' && (needs.pr-sync-check.result == 'success' || needs.pr-sync-check.result == 'skipped') }}
+    needs: [pr-live-gate, changes]
+    if: ${{ always() && !cancelled() && needs.pr-live-gate.outputs.run_heavy == 'true' && needs.changes.result == 'success' && needs.changes.outputs.health == 'true' }}
 
     steps:
       - name: Checkout
@@ -398,8 +460,8 @@ jobs:
     name: Build and Test
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    needs: [pr-sync-check, changes]
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && needs.changes.outputs.build == 'true' && (needs.pr-sync-check.result == 'success' || needs.pr-sync-check.result == 'skipped') }}
+    needs: [pr-live-gate, changes]
+    if: ${{ always() && !cancelled() && needs.pr-live-gate.outputs.run_heavy == 'true' && needs.changes.result == 'success' && needs.changes.outputs.build == 'true' }}
     outputs:
       advisory_status: ${{ steps.build_advisory_status.outputs.advisory_status }}
 
@@ -649,8 +711,8 @@ jobs:
     # Dependency installation plus @install warn-error build regularly exceeds
     # 20 minutes on cold runners; keep this above the install-only worst case.
     timeout-minutes: 40
-    needs: [pr-sync-check, changes]
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && needs.changes.outputs.lint == 'true' && (needs.pr-sync-check.result == 'success' || needs.pr-sync-check.result == 'skipped') }}
+    needs: [pr-live-gate, changes]
+    if: ${{ always() && !cancelled() && needs.pr-live-gate.outputs.run_heavy == 'true' && needs.changes.result == 'success' && needs.changes.outputs.lint == 'true' }}
 
     steps:
       - name: Checkout
@@ -731,8 +793,8 @@ jobs:
     name: Dashboard
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    needs: [pr-sync-check, changes]
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && needs.changes.outputs.dashboard == 'true' && (needs.pr-sync-check.result == 'success' || needs.pr-sync-check.result == 'skipped') }}
+    needs: [pr-live-gate, changes]
+    if: ${{ always() && !cancelled() && needs.pr-live-gate.outputs.run_heavy == 'true' && needs.changes.result == 'success' && needs.changes.outputs.dashboard == 'true' }}
 
     steps:
       - name: Checkout
@@ -777,8 +839,8 @@ jobs:
     name: OCaml Structure Ratchet
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    needs: [pr-sync-check, changes]
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && (needs.changes.outputs.lib_deps == 'true' || needs.changes.outputs.build == 'true') && (needs.pr-sync-check.result == 'success' || needs.pr-sync-check.result == 'skipped') }}
+    needs: [pr-live-gate, changes]
+    if: ${{ always() && !cancelled() && needs.pr-live-gate.outputs.run_heavy == 'true' && needs.changes.result == 'success' && (needs.changes.outputs.lib_deps == 'true' || needs.changes.outputs.build == 'true') }}
 
     steps:
       - name: Checkout
@@ -800,8 +862,8 @@ jobs:
     name: Keeper Cwd Leak Gate
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    needs: [pr-sync-check]
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && (needs.pr-sync-check.result == 'success' || needs.pr-sync-check.result == 'skipped') }}
+    needs: [pr-live-gate]
+    if: ${{ always() && !cancelled() && needs.pr-live-gate.outputs.run_heavy == 'true' }}
 
     steps:
       - name: Checkout
@@ -814,8 +876,8 @@ jobs:
     name: TLA+ Model Checking
     runs-on: ubuntu-latest
     timeout-minutes: 40
-    needs: [pr-sync-check, changes]
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && needs.changes.outputs.tla == 'true' && (needs.pr-sync-check.result == 'success' || needs.pr-sync-check.result == 'skipped') }}
+    needs: [pr-live-gate, changes]
+    if: ${{ always() && !cancelled() && needs.pr-live-gate.outputs.run_heavy == 'true' && needs.changes.result == 'success' && needs.changes.outputs.tla == 'true' }}
 
     steps:
       - name: Checkout
@@ -840,8 +902,8 @@ jobs:
   ci-gate:
     name: CI Gate
     runs-on: ubuntu-latest
-    needs: [pr-sync-check, changes, meta, build, lint, dashboard, health, structure-ratchet, tla-specs]
-    if: ${{ !cancelled() }}
+    needs: [pr-sync-check, pr-live-gate, changes, meta, build, lint, dashboard, health, structure-ratchet, tla-specs]
+    if: ${{ always() && !cancelled() }}
     timeout-minutes: 10
 
     steps:
@@ -887,6 +949,7 @@ jobs:
       - name: Aggregate required check status
         env:
           PR_SYNC_RESULT: ${{ needs.pr-sync-check.result }}
+          PR_LIVE_GATE_RESULT: ${{ needs.pr-live-gate.result }}
           CHANGES_RESULT: ${{ needs.changes.result }}
           META_RESULT: ${{ needs.meta.result }}
           BUILD_RESULT: ${{ needs.build.result }}
@@ -935,6 +998,9 @@ jobs:
             fi
           }
           check "pr-sync-check"   "$PR_SYNC_RESULT"
+          # pr-live-gate folds skipped non-PR sync checks into run_heavy=true,
+          # while failed live-state lookup remains a hard merge blocker.
+          check "pr-live-gate"    "$PR_LIVE_GATE_RESULT"
           check "changes"         "$CHANGES_RESULT"
           check "meta"            "$META_RESULT"
           check "build"           "$BUILD_RESULT"

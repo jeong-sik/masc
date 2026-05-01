@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 (** Board Core — JSONL store logic and persistence.
     Types are in Board_types. *)
 
@@ -80,21 +98,21 @@ let sweep store =
 
     (* Sweep posts - with batch limit; skip permanent posts (expires_at = 0) *)
     let expired_posts = Hashtbl.fold (fun id (post : post) acc ->
-      if post.expires_at > 0.0 && post.expires_at < now && !removed_posts < Limits.sweeper_batch_size then begin
-        incr removed_posts;
+      if Stdlib.Float.compare post.expires_at 0.0 > 0 && Stdlib.Float.compare post.expires_at now < 0 && !removed_posts < Limits.sweeper_batch_size then begin
+        Stdlib.incr removed_posts;
         id :: acc
       end else acc
     ) store.posts [] in
     List.iter (fun id ->
       Hashtbl.remove store.posts id;
       Hashtbl.remove store.comments_by_post id;
-      decr store.post_count
+      Stdlib.decr store.post_count
     ) expired_posts;
 
     (* Sweep comments - skip permanent (expires_at = 0) *)
     let expired_comments = Hashtbl.fold (fun id (comment : comment) acc ->
-      if comment.expires_at > 0.0 && comment.expires_at < now && !removed_comments < Limits.sweeper_batch_size then begin
-        incr removed_comments;
+      if Stdlib.Float.compare comment.expires_at 0.0 > 0 && Stdlib.Float.compare comment.expires_at now < 0 && !removed_comments < Limits.sweeper_batch_size then begin
+        Stdlib.incr removed_comments;
         id :: acc
       end else acc
     ) store.comments [] in
@@ -119,7 +137,7 @@ let sweep store =
       Hashtbl.iter (fun _author posts ->
         if List.length posts > Limits.author_post_cap then begin
           let sorted = List.sort (fun (a : post) (b : post) ->
-            compare a.created_at b.created_at
+            Stdlib.Float.compare a.created_at b.created_at
           ) posts in
           let excess = List.length sorted - Limits.author_post_cap in
           let rec take_first n = function
@@ -132,8 +150,8 @@ let sweep store =
             let id = Post_id.to_string post.id in
             Hashtbl.remove store.posts id;
             Hashtbl.remove store.comments_by_post id;
-            decr store.post_count;
-            incr cap_evicted
+            Stdlib.decr store.post_count;
+            Stdlib.incr cap_evicted
           ) to_evict
         end
       ) author_posts
@@ -159,11 +177,11 @@ let sweep store =
 (** Auto-sweep if needed, delegates to flusher actor inbox *)
 let maybe_sweep store =
   let now = Time_compat.now () in
-  if now -. store.last_sweep > float_of_int Limits.sweeper_interval_sec then begin
+  if Stdlib.Float.compare (now -. store.last_sweep) (Stdlib.Float.of_int Limits.sweeper_interval_sec) > 0 then begin
     store.last_sweep <- now;
     Eio.Stream.add store.flusher_inbox Sweep
   end;
-  if now -. store.last_flush > flush_interval_sec then begin
+  if Stdlib.Float.compare (now -. store.last_flush) flush_interval_sec > 0 then begin
     store.last_flush <- now;
     Eio.Stream.add store.flusher_inbox Flush
   end
@@ -185,7 +203,7 @@ let comments_path () =
   Filename.concat (board_masc_dir ()) "board_comments.jsonl"
 
 let ensure_dir path =
-  if path = "" || path = "." || path = "/" then ()
+  if String.equal path "" || String.equal path "." || String.equal path "/" then ()
   else Fs_compat.mkdir_p path
 
 let ensure_masc_dir () =
@@ -306,7 +324,7 @@ let append_comment (c : comment) =
 
 let create_post store ~author ~content ?title ?body ~post_kind ?meta_json
     ?(visibility=Internal) ?(ttl_hours=Limits.default_ttl_hours) ?hearth ?thread_id ()
-  : (post, board_error) result =
+  : (post, board_error) Result.t =
   maybe_sweep store;
 
   (* Validate author *)
@@ -328,7 +346,7 @@ let create_post store ~author ~content ?title ?body ~post_kind ?meta_json
   let hearth = Option.map (fun h -> String.lowercase_ascii (String.trim h)) hearth in
   let expires_at =
     let now = Time_compat.now () in
-    if ttl = 0 then 0.0 else now +. (float_of_int ttl *. 3600.0)
+    if ttl = 0 then 0.0 else now +. (Stdlib.Float.of_int ttl *. 3600.0)
   in
   let normalized_title, normalized_body, normalized_kind, normalized_meta =
     normalize_post_payload ~content ?title ?body ~post_kind ?meta_json ()
@@ -368,7 +386,7 @@ let create_post store ~author ~content ?title ?body ~post_kind ?meta_json
           thread_id;
         } in
         Hashtbl.add store.posts (Post_id.to_string post.id) post;
-        incr store.post_count;
+        Stdlib.incr store.post_count;
         invalidate_post_caches store;
         append_post post;
         Ok post
@@ -391,7 +409,7 @@ let create_post store ~author ~content ?title ?body ~post_kind ?meta_json
        Ok post
    | Error _ as e -> e)
 
-let get_post store ~post_id : (post, board_error) result =
+let get_post store ~post_id : (post, board_error) Result.t =
   maybe_sweep store;
   match Post_id.of_string post_id with
   | Error e -> Error e
@@ -411,7 +429,7 @@ let get_post store ~post_id : (post, board_error) result =
    keeps the read atomic, removes one [maybe_sweep] dispatch, and
    eliminates the inter-call lock churn. *)
 let get_post_and_comments store ~post_id
-    : (post * comment list, board_error) result =
+    : (post * comment list, board_error) Result.t =
   maybe_sweep store;
   match Post_id.of_string post_id with
   | Error e -> Error e
@@ -433,7 +451,7 @@ let get_post_and_comments store ~post_id
             let sorted =
               List.sort
                 (fun (a : comment) (b : comment) ->
-                  compare a.created_at b.created_at)
+                  Stdlib.Float.compare a.created_at b.created_at)
                 comments
             in
             Ok (post, sorted)
@@ -445,13 +463,13 @@ let reclassify_posts store ?(limit = 5200) ?(dry_run = true) () =
     let scan_limit = max 0 (min limit 5200) in
     let json_string name json =
       match Yojson.Safe.Util.member name json with
-      | `String value when String.trim value <> "" -> Some value
+      | `String value when not (String.equal (String.trim value) "") -> Some value
       | _ -> None
     in
     let json_float name json =
       match Yojson.Safe.Util.member name json with
       | `Float value -> Some value
-      | `Int value -> Some (float_of_int value)
+      | `Int value -> Some (Stdlib.Float.of_int value)
       | _ -> None
     in
     let persisted_candidates =
@@ -467,7 +485,7 @@ let reclassify_posts store ?(limit = 5200) ?(dry_run = true) () =
                        let expires_at =
                          json_float "expires_at" json |> Option.value ~default:0.0
                        in
-                       if expires_at > 0.0 && expires_at <= now then None
+                       if Stdlib.Float.compare expires_at 0.0 > 0 && Stdlib.Float.compare expires_at now <= 0 then None
                        else
                          let stored_kind =
                            Option.bind (json_string "post_kind" json) post_kind_of_string
@@ -501,14 +519,14 @@ let reclassify_posts store ?(limit = 5200) ?(dry_run = true) () =
     in
     persisted_candidates
     |> List.sort (fun (_, created_a, _, _) (_, created_b, _, _) ->
-           compare created_b created_a)
+           Stdlib.Float.compare created_b created_a)
     |> List.filteri (fun idx _ -> idx < scan_limit)
     |> List.iter (fun (post_id, _, stored_kind, canonical_kind) ->
-           incr scanned;
-           if stored_kind = Some canonical_kind then
-             incr unchanged
+           Stdlib.incr scanned;
+           if Option.equal Poly.equal stored_kind (Some canonical_kind) then
+             Stdlib.incr unchanged
            else begin
-             incr changed;
+             Stdlib.incr changed;
              record_changed_id post_id;
              if not dry_run then
                match Hashtbl.find_opt store.posts post_id with
@@ -548,7 +566,7 @@ let list_posts store ?(visibility_filter=None) ?hearth ?(limit=50) () : post lis
             let score_b = b.votes_up - b.votes_down in
             let cmp = compare score_b score_a in
             if cmp <> 0 then cmp
-            else compare b.created_at a.created_at
+            else Stdlib.Float.compare b.created_at a.created_at
           ) all in
           store.sorted_posts_cache <- Some sorted;
           sorted
@@ -556,13 +574,13 @@ let list_posts store ?(visibility_filter=None) ?hearth ?(limit=50) () : post lis
     (* Apply filters on the pre-sorted list *)
     let filtered = match visibility_filter with
       | None -> sorted_all
-      | Some v -> List.filter (fun (p : post) -> p.visibility = v) sorted_all
+      | Some v -> List.filter (fun (p : post) -> Poly.equal p.visibility v) sorted_all
     in
     let filtered = match hearth with
       | None -> filtered
       | Some h ->
           let h_norm = String.lowercase_ascii (String.trim h) in
-          List.filter (fun (p : post) -> p.hearth = Some h_norm) filtered
+          List.filter (fun (p : post) -> Option.equal String.equal p.hearth (Some h_norm)) filtered
     in
     (* Cap at Limits.max_posts (default 10_000) as an OOM guard. The
        previous inner cap of 100 was a duplicate of Board_dispatch.list_posts's
@@ -583,7 +601,7 @@ let search_posts store ~predicate ~limit : post list =
     ) store.posts [] in
     (* Sort by recency for search results *)
     let sorted = List.sort (fun (a : post) (b : post) ->
-      compare b.created_at a.created_at
+      Stdlib.Float.compare b.created_at a.created_at
     ) matches in
     take limit sorted
   )
@@ -591,7 +609,7 @@ let search_posts store ~predicate ~limit : post list =
 (** {1 Comment Operations} *)
 
 let add_comment store ~post_id ~author ~content ?parent_id ?(ttl_hours=Limits.default_ttl_hours) ()
-  : (comment, board_error) result =
+  : (comment, board_error) Result.t =
   maybe_sweep store;
 
   (* Validate all IDs first *)
@@ -651,7 +669,7 @@ let add_comment store ~post_id ~author ~content ?parent_id ?(ttl_hours=Limits.de
             author = author_id;
             content;
             created_at = now;
-            expires_at = if ttl = 0 then 0.0 else now +. (float_of_int ttl *. 3600.0);
+            expires_at = if ttl = 0 then 0.0 else now +. (Stdlib.Float.of_int ttl *. 3600.0);
             votes_up = 0;
             votes_down = 0;
           } in
@@ -670,7 +688,7 @@ let add_comment store ~post_id ~author ~content ?parent_id ?(ttl_hours=Limits.de
         end
   )
 
-let get_comments store ~post_id : (comment list, board_error) result =
+let get_comments store ~post_id : (comment list, board_error) Result.t =
   maybe_sweep store;
   match Post_id.of_string post_id with
   | Error e -> Error e
@@ -681,7 +699,7 @@ let get_comments store ~post_id : (comment list, board_error) result =
         let comments = List.filter_map (fun cid ->
           Hashtbl.find_opt store.comments cid
         ) comment_ids in
-        Ok (List.sort (fun (a : comment) (b : comment) -> compare a.created_at b.created_at) comments)
+        Ok (List.sort (fun (a : comment) (b : comment) -> Stdlib.Float.compare a.created_at b.created_at) comments)
       )
 
 (** List all comments (for profile aggregation) *)
@@ -690,7 +708,7 @@ let list_comments store ?(limit=1000) () : comment list =
   with_lock store (fun () ->
     let all = Hashtbl.fold (fun _ c acc -> c :: acc) store.comments [] in
     let sorted = List.sort (fun (a : comment) (b : comment) ->
-      compare b.created_at a.created_at
+      Stdlib.Float.compare b.created_at a.created_at
     ) all in
     List.filteri (fun i _ -> i < limit) sorted
   )

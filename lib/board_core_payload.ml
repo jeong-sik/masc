@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 (** Board_core_payload — State block extraction and post payload normalization.
 
     Handles [STATE]...[/STATE] block parsing from post bodies,
@@ -44,7 +62,7 @@ let meta_state_block (meta_json : Yojson.Safe.t option) =
       match List.assoc_opt "state_block" fields with
       | Some (`String value) ->
           let value = String.trim value in
-          if value = "" then None else Some value
+          if String.equal value "" then None else Some value
       | _ -> None)
   | _ -> None
 
@@ -57,7 +75,7 @@ let merge_meta_json ?state_block (meta_json : Yojson.Safe.t option) :
   in
   let fields =
     match state_block with
-    | Some block when block <> "" && not (List.mem_assoc "state_block" fields) ->
+    | Some block when not (String.equal block "") && not (List.mem_assoc "state_block" fields) ->
         ("state_block", `String block) :: fields
     | _ -> fields
   in
@@ -70,7 +88,7 @@ let derive_post_title (body : string) =
     body
     |> String.split_on_char '\n'
     |> List.map String.trim
-    |> List.find_opt (fun line -> line <> "")
+    |> List.find_opt (fun line -> not (String.equal line ""))
     |> Option.value ~default:"Untitled post"
   in
   (* UTF-8-safe truncation: byte-based String.sub used to split multi-byte
@@ -86,7 +104,7 @@ let normalize_post_payload ~content ?title ?body ~post_kind ?meta_json () =
   let normalized_body = String.trim stripped_body in
   let normalized_title =
     match title with
-    | Some value when String.trim value <> "" -> String.trim value
+    | Some value when not (String.equal (String.trim value) "") -> String.trim value
     | _ -> derive_post_title normalized_body
   in
   let merged_meta = merge_meta_json ?state_block:extracted_state meta_json in

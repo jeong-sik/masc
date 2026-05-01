@@ -1,3 +1,5 @@
+open Base
+
 (** Board_votes — voting + karma + flair on top of the
     Board_core store.
 
@@ -78,7 +80,7 @@ val vote :
   voter:string ->
   post_id:string ->
   direction:vote_direction ->
-  (int, board_error) result
+  (int, board_error) Result.t
 (** Casts a vote on the post identified by [post_id].
     Returns [Ok delta] where [delta] is the new
     [(votes_up - votes_down)] score.  Validates [voter] +
@@ -99,7 +101,7 @@ val vote_comment :
   voter:string ->
   comment_id:string ->
   direction:vote_direction ->
-  (int, board_error) result
+  (int, board_error) Result.t
 (** Same shape as {!vote} but targets a comment via its
     [comment_id]. *)
 
@@ -142,13 +144,13 @@ val set_thread_id :
   store ->
   post_id:string ->
   thread_id:string ->
-  (unit, board_error) result
+  (unit, board_error) Result.t
 (** Pins [thread_id] onto the post.  Used by the
     Conversation linker to bridge a Board post to a
     persisted Conversation thread. *)
 
 val delete_post :
-  store -> post_id:string -> (unit, board_error) result
+  store -> post_id:string -> (unit, board_error) Result.t
 (** Removes the post and every comment under it from the
     in-memory store.  The JSONL log keeps the original
     rows; the rewriter on next flush overwrites the file

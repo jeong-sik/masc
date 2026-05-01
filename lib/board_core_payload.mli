@@ -1,3 +1,5 @@
+open Base
+
 (** Board_core_payload — [STATE] block extraction and post payload
     normalisation for the board store.
 

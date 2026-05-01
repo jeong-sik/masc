@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 (** Coord_assertions - State inspection and assertion-based verification *)
 
 open Types
@@ -100,7 +118,7 @@ let handle_check ~(inspect_state : context -> agent_state) ctx args =
     match Yojson.Safe.Util.member "assertions" args with
     | `List items ->
         let parsed = List.filter_map (function `String s -> Some s | _ -> None) items in
-        if parsed = [] then default_assertions else parsed
+        (match parsed with [] -> default_assertions | _ -> parsed)
     | _ -> default_assertions
   in
   let results = List.map (check_assertion st) assertions in

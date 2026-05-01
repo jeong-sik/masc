@@ -1,3 +1,5 @@
+open Base
+
 (** Coord_status_rendering — rendering logic for [masc_status].
 
     Pure-text status summary for the [masc_status] tool.  The

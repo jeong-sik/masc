@@ -1,3 +1,5 @@
+open Base
+
 (** Board_core — in-memory board store, persistence, and
     canonical post / comment operations.
 
@@ -168,7 +170,7 @@ val create_post :
   ?hearth:string ->
   ?thread_id:string ->
   unit ->
-  (post, board_error) result
+  (post, board_error) Result.t
 (** Creates a new post.  Validates [author] via
     {!Agent_id.of_string}, normalises [hearth] (lowercased +
     trimmed), folds the canonical [title / body / kind /
@@ -183,12 +185,12 @@ val create_post :
     readers on the ledger write. *)
 
 val get_post :
-  store -> post_id:string -> (post, board_error) result
+  store -> post_id:string -> (post, board_error) Result.t
 
 val get_post_and_comments :
   store ->
   post_id:string ->
-  (post * comment list, board_error) result
+  (post * comment list, board_error) Result.t
 (** Coalesces [get_post] + [get_comments] under a single
     {!with_lock} block to avoid the two-call lock churn
     that previously surfaced as
@@ -239,7 +241,7 @@ val add_comment :
   ?parent_id:string ->
   ?ttl_hours:int ->
   unit ->
-  (comment, board_error) result
+  (comment, board_error) Result.t
 (** Validates [post_id] / [author] / optional [parent_id]
     via {!Post_id.of_string} / {!Agent_id.of_string} /
     {!Comment_id.of_string} before taking the lock.
@@ -251,7 +253,7 @@ val add_comment :
 val get_comments :
   store ->
   post_id:string ->
-  (comment list, board_error) result
+  (comment list, board_error) Result.t
 (** Returns the comments for [post_id] sorted by
     [created_at] ascending. *)
 

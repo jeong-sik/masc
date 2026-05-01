@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 (** Board_core_classify — Post visibility/kind converters and classification.
 
     Contains all conversion helpers, legacy migration heuristics, and
@@ -77,7 +95,7 @@ let meta_source = function
       match List.assoc_opt "source" fields with
       | Some (`String source) ->
           let source = String.lowercase_ascii (String.trim source) in
-          if source = "" then None else Some source
+          if String.equal source "" then None else Some source
       | _ -> None)
   | _ -> None
 
@@ -89,7 +107,7 @@ let meta_field meta_json key =
 let nonempty_json_string = function
   | `String value ->
       let value = String.trim value in
-      if value = "" then None else Some value
+      if String.equal value "" then None else Some value
   | _ -> None
 
 let judgment_reason = function
@@ -129,9 +147,9 @@ let legacy_migrate_post_kind ~meta_json ~author ~visibility ~expires_at ~hearth 
   in
   if legacy_system_board_author author then
     System_post
-  else if meta_source meta_json = Some "keeper_board_post" then
+  else if (match meta_source meta_json with Some "keeper_board_post" -> true | _ -> false) then
     Automation_post
-  else if visibility = Internal && expires_at > 0.0 && hearth <> ""
+  else if Poly.equal visibility Internal && Stdlib.Float.compare expires_at 0.0 > 0 && not (String.equal hearth "")
           && (String.starts_with ~prefix:"mdal" hearth
               || contains_substring hearth "harness")
   then
@@ -186,8 +204,8 @@ let post_classification_reason (p : post) =
 
 let post_matches_filters ~exclude_system ~exclude_automation (p : post) =
   let kind = p.post_kind in
-  (not exclude_system || kind <> System_post)
-  && (not exclude_automation || kind <> Automation_post)
+  (not exclude_system || not (Poly.equal kind System_post))
+  && (not exclude_automation || not (Poly.equal kind Automation_post))
 
 type reclassify_report = {
   backend : string;

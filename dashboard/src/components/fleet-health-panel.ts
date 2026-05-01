@@ -5,7 +5,7 @@
 
 import { html } from 'htm/preact'
 import { computed } from '@preact/signals'
-import { route } from '../router'
+import { replaceRoute, route } from '../router'
 import { FilterChips } from './common/filter-chips'
 import { TelemetryUnified } from './telemetry-unified'
 import { FleetTelemetryPanel } from './fleet-telemetry-panel'
@@ -39,11 +39,12 @@ const VIEW_CHIPS: Array<{ key: FleetHealthView; label: string }> = [
 ]
 
 function updateViewParam(view: FleetHealthView) {
-  const hash = view === 'default'
-    ? '#monitoring?section=fleet-health'
-    : `#monitoring?section=fleet-health&view=${view}`
-  history.replaceState(null, '', hash)
-  window.dispatchEvent(new HashChangeEvent('hashchange'))
+  replaceRoute(
+    'monitoring',
+    view === 'default'
+      ? { section: 'fleet-health' }
+      : { section: 'fleet-health', view },
+  )
 }
 
 function DefaultDualPanel() {

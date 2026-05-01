@@ -13,7 +13,7 @@ async function flushUi(): Promise<void> {
 
 async function loadPanel() {
   vi.resetModules()
-  vi.doMock('../router', () => ({ route }))
+  vi.doMock('../router', () => ({ route, replaceRoute: vi.fn() }))
   vi.doMock('./ops', () => ({
     Ops: () => html`<div data-testid="ops">Ops</div>`,
   }))

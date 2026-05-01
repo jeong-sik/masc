@@ -11,7 +11,7 @@ async function flushUi(): Promise<void> {
 
 async function loadRuntimePanel() {
   vi.resetModules()
-  vi.doMock('../router', () => ({ route }))
+  vi.doMock('../router', () => ({ route, replaceRoute: vi.fn() }))
   vi.doMock('./oas-health-chip', () => ({
     OasHealthChip: () => html`<div data-testid="oas-health">OasHealthChip</div>`,
   }))

@@ -7,7 +7,7 @@ import { AddRepoDialog } from './add-repo-dialog'
 import { CredentialSettings } from './credential-settings'
 import { KeeperRepoMapping } from './keeper-repo-mapping'
 import { GitBranch, GitFork, KeyRound, ShieldCheck } from 'lucide-preact'
-import { route } from '../router'
+import { replaceRoute, route } from '../router'
 import { GitGraphPanel } from './git-graph-panel'
 
 type RepositoryView = 'repos' | 'graph' | 'credentials' | 'mappings'
@@ -20,11 +20,12 @@ function currentView(): RepositoryView {
 }
 
 function updateViewParam(view: RepositoryView): void {
-  const hash = view === 'repos'
-    ? '#workspace?section=repositories'
-    : `#workspace?section=repositories&view=${view}`
-  window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}${hash}`)
-  window.dispatchEvent(new HashChangeEvent('hashchange'))
+  replaceRoute(
+    'workspace',
+    view === 'repos'
+      ? { section: 'repositories' }
+      : { section: 'repositories', view },
+  )
 }
 
 function viewButton(view: RepositoryView, label: string, icon: unknown) {

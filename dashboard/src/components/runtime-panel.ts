@@ -20,7 +20,7 @@
 
 import { html } from 'htm/preact'
 import { computed } from '@preact/signals'
-import { route } from '../router'
+import { replaceRoute, route } from '../router'
 import { FilterChips } from './common/filter-chips'
 import { CollapsibleSection } from './common/collapsible'
 import { OasHealthChip } from './oas-health-chip'
@@ -55,11 +55,12 @@ const VIEW_CHIPS: Array<{ key: RuntimeView; label: string }> = [
 ]
 
 function updateViewParam(view: RuntimeView): void {
-  const hash = view === 'default'
-    ? '#monitoring?section=runtime'
-    : `#monitoring?section=runtime&view=${view}`
-  history.replaceState(null, '', hash)
-  window.dispatchEvent(new HashChangeEvent('hashchange'))
+  replaceRoute(
+    'monitoring',
+    view === 'default'
+      ? { section: 'runtime' }
+      : { section: 'runtime', view },
+  )
 }
 
 export function RuntimePanel() {

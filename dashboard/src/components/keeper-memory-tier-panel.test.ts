@@ -1,9 +1,27 @@
 // @vitest-environment happy-dom
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { render } from 'preact'
+import { cleanup, render, screen, waitFor } from '@testing-library/preact'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { html } from 'htm/preact'
-import type { MemoryKindUsageEntry } from '../api/keeper'
-import { filterMemoryKindUsage, MemoryTierBadge } from './keeper-memory-tier-panel'
+import {
+  fetchKeeperComposite,
+  fetchKeeperStateDiagram,
+  type KeeperCompositeSnapshot,
+  type KeeperStateDiagramResponse,
+  type MemoryKindUsageEntry,
+} from '../api/keeper'
+import { filterMemoryKindUsage, KeeperMemoryTierPanel } from './keeper-memory-tier-panel'
+
+vi.mock('../api/keeper', async () => {
+  const actual = await vi.importActual<typeof import('../api/keeper')>('../api/keeper')
+  return {
+    ...actual,
+    fetchKeeperComposite: vi.fn(),
+    fetchKeeperStateDiagram: vi.fn(),
+  }
+})
+
+const fetchKeeperCompositeMock = vi.mocked(fetchKeeperComposite)
+const fetchKeeperStateDiagramMock = vi.mocked(fetchKeeperStateDiagram)
 
 const sample: MemoryKindUsageEntry[] = [
   { kind: 'tool_result', used: 10, cap: 10, priority: 1 },
@@ -68,31 +86,55 @@ describe('filterMemoryKindUsage', () => {
   })
 })
 
-describe('MemoryTierBadge', () => {
-  let container: HTMLElement
+function mockMemoryTierFetches(usage: MemoryKindUsageEntry[]) {
+  fetchKeeperStateDiagramMock.mockResolvedValue({
+    keeper: 'keeper-1',
+    current_phase: 'Compacting',
+    mermaid: 'graph TD',
+    memory_kind_usage: usage,
+  } satisfies KeeperStateDiagramResponse)
+  fetchKeeperCompositeMock.mockResolvedValue({
+    correlation_id: 'keeper-1:run-1',
+    run_id: 'run-1',
+    ts: 0,
+    phase: 'Compacting',
+    turn_phase: 'idle',
+    decision: { stage: 'idle' },
+    cascade: { state: 'idle' },
+    compaction: { stage: 'compacting' },
+    measurement: { captured: false },
+    invariants: {
+      phase_turn_alignment: true,
+      no_cascade_before_measurement: true,
+      compaction_atomicity: true,
+      event_priority_monotone: true,
+    },
+    is_live: true,
+    last_outcome: null,
+    recommended_actions: [],
+  } as KeeperCompositeSnapshot)
+}
 
-  beforeEach(() => {
-    container = document.createElement('div')
-    document.body.appendChild(container)
-  })
+afterEach(() => {
+  cleanup()
+  vi.clearAllMocks()
+})
 
-  afterEach(() => {
-    render(null, container)
-    document.body.removeChild(container)
-  })
+describe('KeeperMemoryTierPanel status chips', () => {
+  it('renders memory tier labels through StatusChip without uppercasing', async () => {
+    mockMemoryTierFetches([{ kind: 'tool_result', used: 10, cap: 10, priority: 1 }])
 
-  it('renders memory tier labels through StatusChip without uppercasing', () => {
-    render(html`<${MemoryTierBadge}>KMC compacting<//>`, container)
+    render(html`<${KeeperMemoryTierPanel} keeperName="keeper-1" />`)
 
-    const chip = container.querySelector('[data-status-chip]')
-    expect(chip?.textContent).toBe('KMC compacting')
-    expect(chip?.getAttribute('data-status-chip-tone')).toBe('neutral')
-    expect(chip?.getAttribute('data-status-chip-uppercase')).toBe('false')
-  })
+    await waitFor(() => expect(screen.getByText('KMC compacting')).toBeTruthy())
 
-  it('passes through the compacting warning tone', () => {
-    render(html`<${MemoryTierBadge} tone="warn">compacting<//>`, container)
+    const chips = Array.from(document.querySelectorAll('[data-status-chip]'))
+    const kmcChip = chips.find(chip => chip.textContent === 'KMC compacting')
+    const compactingChip = chips.find(chip => chip.textContent === 'compacting')
 
-    expect(container.querySelector('[data-status-chip]')?.getAttribute('data-status-chip-tone')).toBe('warn')
+    expect(kmcChip?.getAttribute('data-status-chip-tone')).toBe('neutral')
+    expect(kmcChip?.getAttribute('data-status-chip-uppercase')).toBe('false')
+    expect(compactingChip?.getAttribute('data-status-chip-tone')).toBe('warn')
+    expect(compactingChip?.getAttribute('data-status-chip-uppercase')).toBe('false')
   })
 })

@@ -211,7 +211,7 @@ export function budgetSourceLabel(source: BudgetSource): string {
 
 export function BudgetSourceBadge({ source, children }: { source: BudgetSource; children?: unknown }) {
   const weight = source === 'env' ? 'font-medium' : 'font-semibold'
-  return html`<${StatusChip} tone=${budgetSourceTone(source)} class=${weight}>${children ?? budgetSourceLabel(source)}</${StatusChip}>`
+  return html`<${StatusChip} tone=${budgetSourceTone(source)} uppercase=${true} class=${weight}>${children ?? budgetSourceLabel(source)}</${StatusChip}>`
 }
 
 function buildBudgetTooltip(slot: BudgetSlot, manifest: string | null, clamp: { min: number; max: number }): string {

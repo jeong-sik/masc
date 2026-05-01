@@ -25,7 +25,7 @@ interface KeeperMemoryTierPanelProps {
 
 type MemoryTierFilter = 'all' | 'saturated'
 
-export function MemoryTierBadge({
+function MemoryTierBadge({
   tone = 'neutral',
   children,
 }: {

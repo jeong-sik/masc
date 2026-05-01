@@ -67,11 +67,6 @@ describe('refreshPlanForRoute', () => {
   it('uses the current monitoring sections', () => {
     expect(refreshPlanForRoute({
       tab: 'monitoring',
-      params: { section: 'live' },
-    })).toEqual(['namespaceTruth', 'execution', 'missionSnapshot'])
-
-    expect(refreshPlanForRoute({
-      tab: 'monitoring',
       params: { section: 'agents' },
     })).toEqual(['namespaceTruth', 'execution', 'missionSnapshot'])
 
@@ -84,11 +79,6 @@ describe('refreshPlanForRoute', () => {
       tab: 'monitoring',
       params: { section: 'observatory' },
     })).toEqual(['namespaceTruth', 'execution', 'missionSnapshot', 'observatory', 'activityGraph'])
-
-    expect(refreshPlanForRoute({
-      tab: 'monitoring',
-      params: { section: 'git-graph' },
-    })).toEqual(['gitGraph'])
   })
 
   it('keeps the consolidated command surface hydrated for ops queue deep links', () => {
@@ -108,6 +98,11 @@ describe('refreshPlanForRoute', () => {
       tab: 'workspace',
       params: { section: 'board' },
     })).toEqual(['board'])
+
+    expect(refreshPlanForRoute({
+      tab: 'workspace',
+      params: { section: 'repositories', view: 'graph' },
+    })).toEqual(['gitGraph'])
 
     expect(refreshPlanForRoute({
       tab: 'lab',
@@ -154,10 +149,10 @@ describe('refreshPlanForRoute', () => {
     })
   })
 
-  it('refreshes the Git graph surface on route entry', async () => {
+  it('refreshes the repository Git graph view on route entry', async () => {
     refreshForRoute({
-      tab: 'monitoring',
-      params: { section: 'git-graph' },
+      tab: 'workspace',
+      params: { section: 'repositories', view: 'graph' },
     })
 
     await waitFor(() => {

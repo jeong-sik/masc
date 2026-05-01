@@ -11,6 +11,28 @@ const VALID_COMMAND_SECTIONS = new Set(
   sectionItemsForTab('command').map(item => item.params.section),
 )
 
+interface CrossSurfaceRedirect {
+  tab: TabId
+  section: string
+  view?: string
+  params?: Record<string, string>
+}
+
+type TabSectionKey = `${TabId}:${string}`
+
+const CROSS_SURFACE_SECTION_REDIRECTS: Record<TabSectionKey, CrossSurfaceRedirect> = {
+  'monitoring:git-graph': {
+    tab: 'workspace',
+    section: 'repositories',
+    view: 'graph',
+  },
+  'monitoring:safe-autonomy': {
+    tab: 'command',
+    section: 'operations',
+    view: 'safety',
+  },
+}
+
 function isTabId(v: string | null | undefined): v is TabId {
   return !!v && VALID_TABS.includes(v as TabId)
 }
@@ -34,6 +56,44 @@ function parseParams(raw: string | undefined): Record<string, string> {
   return params
 }
 
+function applyCrossSurfaceRedirect(
+  tab: TabId,
+  params: Record<string, string>,
+): { tab: TabId; params: Record<string, string> } | null {
+  const section = params.section
+  if (!section) return null
+  const redirect = CROSS_SURFACE_SECTION_REDIRECTS[`${tab}:${section}` as TabSectionKey]
+  if (!redirect) return null
+
+  const nextParams = { ...params, ...(redirect.params ?? {}) }
+  nextParams.section = redirect.section
+  if (redirect.view && !nextParams.view) nextParams.view = redirect.view
+  return { tab: redirect.tab, params: nextParams }
+}
+
+function canonicalRoute(tab: TabId, params: Record<string, string>): RouteState {
+  const rawCrossSurface = applyCrossSurfaceRedirect(tab, params)
+  if (rawCrossSurface) {
+    return {
+      tab: rawCrossSurface.tab,
+      params: normalizeRouteParams(rawCrossSurface.tab, rawCrossSurface.params),
+      postId: null,
+    }
+  }
+
+  const normalizedParams = normalizeRouteParams(tab, params)
+  const normalizedCrossSurface = applyCrossSurfaceRedirect(tab, normalizedParams)
+  if (normalizedCrossSurface) {
+    return {
+      tab: normalizedCrossSurface.tab,
+      params: normalizeRouteParams(normalizedCrossSurface.tab, normalizedCrossSurface.params),
+      postId: null,
+    }
+  }
+
+  return { tab, params: normalizedParams, postId: null }
+}
+
 function normalizeSegments(pathPart: string): string[] {
   const normalized = pathPart.replace(/^\/+/, '')
   const segments = normalized.split('/').filter(Boolean)
@@ -49,16 +109,12 @@ function parseSegments(
     const nextParams = { ...params }
     const second = decodeSafe(segments[1])
     if (!VALID_COMMAND_SECTIONS.has(second)) {
-      console.warn('[router] unknown command section, falling back to intervene', second)
-      nextParams.section = 'intervene'
+      console.warn('[router] unknown command section, falling back to operations', second)
+      nextParams.section = 'operations'
     } else {
       nextParams.section = second
     }
-    return {
-      tab: 'command',
-      params: normalizeRouteParams('command', nextParams),
-      postId: null,
-    }
+    return canonicalRoute('command', nextParams)
   }
 
   if (
@@ -67,11 +123,7 @@ function parseSegments(
   ) {
     const tab = segments[0] as 'monitoring' | 'workspace' | 'lab' | 'code'
     const nextParams = { ...params, section: decodeSafe(segments[1]) }
-    return {
-      tab,
-      params: normalizeRouteParams(tab, nextParams),
-      postId: null,
-    }
+    return canonicalRoute(tab, nextParams)
   }
 
   const tabFromPath = segments[0]
@@ -81,9 +133,7 @@ function parseSegments(
     (isTabId(tabFromPath) && tabFromPath)
     || (isTabId(tabFromQuery) && tabFromQuery)
     || 'overview'
-  const mergedParams = normalizeRouteParams(resolvedTab, params)
-
-  return { tab: resolvedTab, params: mergedParams, postId: null }
+  return canonicalRoute(resolvedTab, params)
 }
 
 function parseHash(hash: string): RouteState {
@@ -128,11 +178,7 @@ function parsePathname(pathname: string, search: string): RouteState | null {
 }
 
 export function hashForRoute(tab: TabId, params?: Record<string, string>): string {
-  return toHash({
-    tab,
-    params: normalizeRouteParams(tab, params ?? {}),
-    postId: null,
-  })
+  return toHash(canonicalRoute(tab, params ?? {}))
 }
 
 function toHash(r: RouteState): string {
@@ -167,11 +213,7 @@ window.addEventListener('hashchange', () => {
 // --- Navigation helpers ---
 
 export function navigate(tab: TabId, params?: Record<string, string>): void {
-  const next = {
-    tab,
-    params: normalizeRouteParams(tab, params ?? {}),
-    postId: null,
-  } satisfies RouteState
+  const next = canonicalRoute(tab, params ?? {})
   const nextHash = hashForRoute(tab, params)
   // Update signal synchronously so Preact re-renders immediately.
   // Without this, clicking the same surface twice is needed because

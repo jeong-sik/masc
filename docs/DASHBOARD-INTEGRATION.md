@@ -1,6 +1,6 @@
 ---
 status: reference
-last_verified: 2026-04-22
+last_verified: 2026-05-01
 code_refs:
   - dashboard/src/config/navigation.ts
   - dashboard/src/components/status.ts
@@ -46,25 +46,22 @@ code_refs:
   - `#overview`
 - `monitoring`
   - `#monitoring?section=journey`
-  - `#monitoring?section=observatory`
+  - `#monitoring?section=observatory` (hidden diagnostic)
   - `#monitoring?section=agents`
   - `#monitoring?section=runtime`
   - `#monitoring?section=fleet-health`
-  - `#monitoring?section=memory-subsystems`
-  - `#monitoring?section=attribution`
+  - `#monitoring?section=memory-subsystems` (hidden diagnostic)
 - `command`
   - `#command?section=operations`
-  - sub-view는 `view=ops|governance|inspector|connectors` 로 분기한다.
+  - sub-view는 `view=ops|governance|safety|inspector|connectors` 로 분기한다.
   - `view=connectors` 는 `#connectors?section=connector-status` 로 canonical redirect 된다.
 - `connectors`
   - `#connectors?section=connector-status`
-  - `#connectors?section=connector-discord`
-  - `#connectors?section=connector-imessage`
-  - `#connectors?section=connector-slack`
-  - `#connectors?section=connector-telegram`
 - `workspace`
   - `#workspace?section=board`
   - `#workspace?section=planning`
+  - `#workspace?section=repositories`
+  - `#workspace?section=collab-mvp` (hidden diagnostic)
   - `#workspace?section=verification`
 - `lab`
   - `#lab?section=tools`
@@ -72,20 +69,32 @@ code_refs:
   - `#lab?section=harness`
 - `logs`
   - `#logs`
+- hidden route
+  - `#code?section=ide-shell`
 
 ## Legacy Redirect Contract
 - `monitoring:sessions -> monitoring:agents`
 - `monitoring:activity -> monitoring:observatory`
+- `monitoring:live -> monitoring:observatory&view=live`
 - `monitoring:telemetry -> monitoring:fleet-health&view=event-log`
 - `monitoring:fleet -> monitoring:fleet-health&view=comparison`
 - `monitoring:tool-quality -> monitoring:fleet-health&view=tool-quality`
 - `monitoring:governance -> monitoring:fleet-health&view=governance`
+- `monitoring:attribution -> monitoring:fleet-health&view=attribution`
 - `monitoring:fsm-hub -> monitoring:agents&view=fsm`
 - `monitoring:metrics -> monitoring:runtime`
+- `monitoring:cascade-inspector -> monitoring:runtime&view=inspector`
+- `monitoring:cost -> monitoring:runtime&view=cost`
+- `monitoring:git-graph -> workspace:repositories&view=graph`
+- `monitoring:safe-autonomy -> command:operations&view=safety`
 - `command:intervene -> command:operations`
 - `command:governance -> command:operations`
 - `command:connectors -> command:operations&view=connectors`
 - `command:inspector -> command:operations&view=inspector`
+- `connectors:connector-discord -> connectors:connector-status&connector=discord`
+- `connectors:connector-imessage -> connectors:connector-status&connector=imessage`
+- `connectors:connector-slack -> connectors:connector-status&connector=slack`
+- `connectors:connector-telegram -> connectors:connector-status&connector=telegram`
 - `workspace:goals -> workspace:planning`
 
 이 redirect는 router/navigation 호환성 계약이다. `surface-readiness`에는 legacy surface를 다시 등재하지 않는다.
@@ -102,7 +111,13 @@ code_refs:
 - `GET /api/v1/dashboard/memory-subsystems`
   - memory subsystem health
 - `GET /api/v1/attribution/summary`
-  - attribution gate summary
+  - fleet-health attribution view
+- `GET /api/v1/dashboard/safe-autonomy`
+  - operations safety view
+- `GET /api/v1/models/metrics`, `GET /api/v1/dashboard/keeper-costs`
+  - runtime cost/latency view
+- `GET /api/v1/cascade/strategy-trace`, `GET /api/v1/cascade/health`
+  - runtime inspector view
 - `GET /api/v1/operator/digest`
   - operations read model
 - `GET /api/v1/gate/connectors`
@@ -111,6 +126,8 @@ code_refs:
   - workspace board
 - `GET /api/v1/dashboard/planning`
   - planning + goal tree
+- `GET /api/v1/git/graph`
+  - workspace repository graph view
 - `GET /api/v1/verification/requests`
   - workspace verification table
 - `GET /api/v1/dashboard/tools`

@@ -80,22 +80,16 @@ export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params
       if (routeState.params.section === 'observatory') {
         return ['namespaceTruth', 'execution', 'missionSnapshot', 'observatory', 'activityGraph']
       }
-      if (routeState.params.section === 'live') {
-        return ['namespaceTruth', 'execution', 'missionSnapshot']
-      }
       if (routeState.params.section === 'journey') {
         return ['execution', 'missionSnapshot']
-      }
-      if (routeState.params.section === 'git-graph') {
-        return ['gitGraph']
       }
       if (routeState.params.section === 'agents') {
         return ['namespaceTruth', 'execution', 'missionSnapshot']
       }
-      // fleet-health: view-aware refresh (Phase 1 contract from tab-refresh.test.ts)
-      if (routeState.params.section === 'cascade-inspector') {
+      if (routeState.params.section === 'runtime' && routeState.params.view === 'inspector') {
         return ['cascadeInspector']
       }
+      // fleet-health: view-aware refresh (Phase 1 contract from tab-refresh.test.ts)
       if (routeState.params.section === 'fleet-health') {
         const view = routeState.params.view
         if (view === 'tool-quality') return ['toolQuality']
@@ -116,6 +110,9 @@ export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params
       }
       if (routeState.params.section === 'board') {
         return ['board']
+      }
+      if (routeState.params.section === 'repositories' && routeState.params.view === 'graph') {
+        return ['gitGraph']
       }
       if (routeState.params.section === 'collab-mvp') {
         return ['execution', 'board']

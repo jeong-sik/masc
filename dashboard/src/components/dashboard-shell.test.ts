@@ -83,8 +83,8 @@ describe('currentSectionShareUrl (pure)', () => {
   })
 
   it('returns window.location.href when available', () => {
-    window.history.pushState({}, '', '/?tab=connectors&section=connector-discord')
-    expect(currentSectionShareUrl()).toContain('?tab=connectors&section=connector-discord')
+    window.history.pushState({}, '', '/?tab=connectors&section=connector-status&connector=discord')
+    expect(currentSectionShareUrl()).toContain('?tab=connectors&section=connector-status&connector=discord')
   })
 
   it('preserves hash fragments (router hash-based flow)', () => {

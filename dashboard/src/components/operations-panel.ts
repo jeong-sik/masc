@@ -1,5 +1,5 @@
 // MASC Dashboard — Operations Panel (Phase 5+6+7)
-// FilterChips toggle for ops/governance/inspector sub-views.
+// FilterChips toggle for ops/governance/safety/inspector sub-views.
 // Phase 7: connectors split out as a top-level surface (#command?view=connectors → #connectors).
 
 import { html } from 'htm/preact'
@@ -8,16 +8,18 @@ import { FilterChips } from './common/filter-chips'
 import { Ops } from './ops'
 import { Governance } from './governance'
 import { LabInspector } from './lab-inspector'
+import { SafeAutonomyPanel } from './safe-autonomy'
 import { route } from '../router'
 
-type OpsView = 'default' | 'ops' | 'governance' | 'inspector'
+type OpsView = 'default' | 'ops' | 'governance' | 'safety' | 'inspector'
 
-const VALID_VIEWS: OpsView[] = ['default', 'ops', 'governance', 'inspector']
+const VALID_VIEWS: OpsView[] = ['default', 'ops', 'governance', 'safety', 'inspector']
 
 const VIEW_CHIPS: { key: OpsView; label: string }[] = [
   { key: 'default', label: '전체' },
   { key: 'ops', label: '개입' },
   { key: 'governance', label: '거버넌스' },
+  { key: 'safety', label: '안전성' },
   { key: 'inspector', label: '인스펙터' },
 ]
 
@@ -68,12 +70,17 @@ export function OperationsPanel() {
         ? html`<${Ops} />`
       : view === 'governance'
         ? html`<${Governance} />`
+      : view === 'safety'
+        ? html`<${SafeAutonomyPanel} />`
       : view === 'inspector'
         ? html`<${LabInspector} />`
       : html`
             <${Ops} />
             <div class="mt-4">
               <${Governance} />
+            </div>
+            <div class="mt-4">
+              <${SafeAutonomyPanel} />
             </div>
           `}
     </div>

@@ -1,15 +1,23 @@
 import { describe, expect, it } from 'vitest'
 
-import { SECTION_REDIRECTS, defaultParamsForTab, normalizeRouteParams, visibleSectionItemsForTab } from './navigation'
+import {
+  SECTION_REDIRECTS,
+  defaultParamsForTab,
+  normalizeRouteParams,
+  sectionItemsForTab,
+  visibleSectionItemsForTab,
+} from './navigation'
 
 describe('code (IDE plane) navigation', () => {
-  it('exposes a single ide-shell section under the code surface (Phase 1, PR-1)', () => {
+  it('keeps the ide-shell route hidden until the IDE plane is real', () => {
     expect(defaultParamsForTab('code')).toEqual({ section: 'ide-shell' })
 
-    const codeSections = visibleSectionItemsForTab('code')
+    const visibleCodeSections = visibleSectionItemsForTab('code')
+    const allCodeSections = sectionItemsForTab('code')
 
-    expect(codeSections.map(item => item.id)).toEqual(['ide-shell'])
-    expect(codeSections.map(item => item.label)).toEqual(['코드 IDE'])
+    expect(visibleCodeSections).toEqual([])
+    expect(allCodeSections.map(item => item.id)).toEqual(['ide-shell'])
+    expect(allCodeSections.map(item => item.label)).toEqual(['코드 IDE'])
   })
 
   it('normalizes unknown code section to default ide-shell', () => {
@@ -82,11 +90,8 @@ describe('monitoring navigation labels', () => {
     const sections = visibleSectionItemsForTab('monitoring')
     const labelFor = (id: string) => sections.find(item => item.id === id)?.label
 
-    expect(labelFor('live')).toBe('라이브 협업')
-    expect(labelFor('observatory')).toBe('관찰소 (beta)')
     expect(labelFor('journey')).toBe('여정 맵')
     expect(labelFor('fleet-health')).toBe('플릿 텔레메트리')
-    expect(labelFor('safe-autonomy')).toBe('세이프 오토노미')
     // "캐스케이드" and "에이전트 디렉터리" replaced the duplicated
     // "런타임" labels (one section renamed to cascade, the other to
     // agent directory) so monitoring no longer has two sidebar items
@@ -106,13 +111,19 @@ describe('monitoring navigation labels', () => {
     const sections = visibleSectionItemsForTab('monitoring')
     const ids = sections.map(item => item.id)
 
+    expect(ids).toEqual(['journey', 'agents', 'runtime', 'fleet-health'])
     expect(ids).toContain('journey')
-    expect(ids).toContain('live')
     expect(ids).toContain('fleet-health')
-    expect(ids).toContain('safe-autonomy')
     expect(ids).toContain('runtime')
-    expect(ids).toContain('observatory')
+    expect(ids).toContain('agents')
     // Legacy sections removed in Phase 1
+    expect(ids).not.toContain('live')
+    expect(ids).not.toContain('observatory')
+    expect(ids).not.toContain('git-graph')
+    expect(ids).not.toContain('safe-autonomy')
+    expect(ids).not.toContain('cost')
+    expect(ids).not.toContain('cascade-inspector')
+    expect(ids).not.toContain('attribution')
     expect(ids).not.toContain('activity')
     expect(ids).not.toContain('tool-quality')
     expect(ids).not.toContain('fleet')
@@ -121,11 +132,19 @@ describe('monitoring navigation labels', () => {
     expect(ids).not.toContain('governance')
   })
 
-  it('puts live collaboration first before slower analysis surfaces', () => {
+  it('puts the operator story first before drill-down status surfaces', () => {
     const sections = visibleSectionItemsForTab('monitoring')
-    expect(sections[0]?.id).toBe('live')
-    expect(sections[1]?.id).toBe('journey')
-    expect(sections[2]?.id).toBe('observatory')
+    expect(sections[0]?.id).toBe('journey')
+    expect(sections[1]?.id).toBe('agents')
+    expect(sections[2]?.id).toBe('runtime')
+    expect(sections[3]?.id).toBe('fleet-health')
+  })
+
+  it('keeps diagnostic monitoring routes available but hidden from the sidebar', () => {
+    const sections = sectionItemsForTab('monitoring')
+    const hiddenIds = sections.filter(item => item.hidden).map(item => item.id)
+
+    expect(hiddenIds).toEqual(['observatory', 'memory-subsystems'])
   })
 
   it('monitoring sidebar labels are unique (no overloaded term like "런타임")', () => {
@@ -179,6 +198,29 @@ describe('normalizeRouteParams backward compat (RFC-MASC-006 Phase 0)', () => {
     expect(result.keeper).toBe('nova')
   })
 
+  it('redirects live collaboration to the observatory live view', () => {
+    const result = normalizeRouteParams('monitoring', { section: 'live' })
+    expect(result.section).toBe('observatory')
+    expect(result.view).toBe('live')
+  })
+
+  it('redirects standalone runtime diagnostics into runtime views', () => {
+    expect(normalizeRouteParams('monitoring', { section: 'cascade-inspector' })).toMatchObject({
+      section: 'runtime',
+      view: 'inspector',
+    })
+    expect(normalizeRouteParams('monitoring', { section: 'cost' })).toMatchObject({
+      section: 'runtime',
+      view: 'cost',
+    })
+  })
+
+  it('redirects attribution into fleet-health', () => {
+    const result = normalizeRouteParams('monitoring', { section: 'attribution' })
+    expect(result.section).toBe('fleet-health')
+    expect(result.view).toBe('attribution')
+  })
+
   it('drops unsupported legacy all-range when redirecting activity to observatory', () => {
     const result = normalizeRouteParams('monitoring', {
       section: 'activity',
@@ -207,7 +249,7 @@ describe('SECTION_REDIRECTS table (consolidation Phase -1)', () => {
       if (redirect.view !== undefined) {
         expect(redirect.view).toMatch(/^[a-z][a-z0-9-]*$/)
       }
-      expect(key).toMatch(/^(monitoring|command|workspace|lab):/)
+      expect(key).toMatch(/^(monitoring|command|connectors|workspace|lab):/)
     }
   })
 })
@@ -235,6 +277,12 @@ describe('normalizeRouteParams query param preservation', () => {
     expect(result.section).toBe('fleet-health')
     expect(result.view).toBe('tool-quality')
     expect(result.tool).toBe('bash')
+  })
+
+  it('preserves connector intent through old per-connector routes', () => {
+    const result = normalizeRouteParams('connectors', { section: 'connector-slack' })
+    expect(result.section).toBe('connector-status')
+    expect(result.connector).toBe('slack')
   })
 
   it('preserves intervene workflow params through operations redirect', () => {

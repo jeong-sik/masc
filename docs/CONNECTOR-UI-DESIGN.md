@@ -36,9 +36,9 @@ explains *why* they look the way they do — code is the *what*.
   **ConnectorOverviewStrip** above the stacked detail panels: 4
   brand-colored mini cards each with a rail. Operator scans the strip
   before scrolling.
-- Per-bridge sub-sections (`section=connector-discord` etc.) hide the
-  strip — there's only one card to look at, an at-a-glance overview
-  of the others would be noise.
+- Per-bridge deep links now stay on `section=connector-status` and use
+  `connector=<id>` to select the relevant card. Old
+  `section=connector-discord` style links redirect into that picker.
 
 ## 2. Inline action over menu navigation
 

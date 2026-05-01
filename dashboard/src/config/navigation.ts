@@ -3,18 +3,12 @@ import type { RouteState, TabId } from '../types'
 type SurfaceId = TabId
 type SurfaceSectionId =
   // monitoring
-  | 'live'
   | 'observatory'
   | 'journey'
-  | 'git-graph'
   | 'agents'
   | 'runtime'
   | 'fleet-health'   // Phase 1: absorbs telemetry + fleet + tool-quality + monitoring governance
-  | 'safe-autonomy'
-  | 'cost'           // O4 cost/latency dashboard zone (#11542); use-site existed without type entry
-  | 'cascade-inspector' // O1 Cascade Inspector surface (Phase F6)
   | 'memory-subsystems'
-  | 'attribution'     // Layer 4 gate-chain observation (per-gate outcome + recent events)
   // command
   | 'operations'     // Phase 1+6: absorbs intervene + governance + inspector (Phase 7: connectors split out)
   // connectors (Phase 7: top-level surface — sidecar-driven channel bridges)
@@ -77,9 +71,9 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
     id: 'monitoring',
     label: '모니터링',
     icon: '📡',
-    description: '에이전트 디렉터리와 플릿 신호 관찰',
+    description: '운영 스토리라인, 에이전트, 런타임, 플릿 신호 관찰',
     defaultTab: 'monitoring',
-    defaultParams: { section: 'agents' },
+    defaultParams: { section: 'journey' },
     tabs: ['monitoring'],
   },
   {
@@ -126,6 +120,7 @@ export const DASHBOARD_SURFACES: DashboardNavGroup[] = [
     defaultTab: 'code',
     defaultParams: { section: 'ide-shell' },
     tabs: ['code'],
+    hidden: true,
   },
   {
     id: 'logs',
@@ -148,12 +143,6 @@ export const DASHBOARD_NAV_ITEMS: DashboardNavItem[] = DASHBOARD_SURFACES.map(su
 export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavItem[]> = {
   monitoring: [
     {
-      id: 'live',
-      label: '라이브 협업',
-      description: '현재 에이전트 펄스, 활동 스트림, Keeper 상태를 함께 봅니다.',
-      params: { section: 'live' },
-    },
-    {
       id: 'journey',
       label: '여정 맵',
       description: 'Task, run, contract, keeper, thinking, memory, turn, life, cascade를 한 카드에 묶어 봅니다.',
@@ -161,15 +150,10 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     },
     {
       id: 'observatory',
-      label: '관찰소 (beta)',
-      description: '조사형 타임라인과 활동 분석을 한 화면에서 빠르게 훑습니다.',
+      label: '관찰소',
+      description: '라이브 협업과 조사형 타임라인은 Fleet/Journey에서 drill-down으로 접근합니다.',
       params: { section: 'observatory' },
-    },
-    {
-      id: 'git-graph',
-      label: 'Git 그래프',
-      description: '브랜치, worktree, 충돌 신호를 Track 4 시각화로 봅니다.',
-      params: { section: 'git-graph' },
+      hidden: true,
     },
     {
       id: 'agents',
@@ -180,51 +164,28 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     {
       id: 'runtime',
       label: '캐스케이드',
-      description: 'Provider 건강도, 슬롯 용량, 모델 선택 스냅샷을 한 화면에서 봅니다.',
+      description: 'Provider 건강도, 슬롯 용량, 모델 선택, 비용/지연, cascade inspector를 한 화면에서 봅니다.',
       params: { section: 'runtime' },
-    },
-    {
-      id: 'cascade-inspector',
-      label: 'Cascade 검사기',
-      description: 'Cascade 의사결정 이력과 프로바이더 상태를 한 화면에서 봅니다.',
-      params: { section: 'cascade-inspector' },
     },
     {
       id: 'fleet-health',
       label: '플릿 텔레메트리',
-      description: '이벤트 로그, Keeper 비교, 도구 품질, 거버넌스 신호를 한 화면에서 봅니다.',
+      description: '이벤트 로그, Keeper 비교, 도구 품질, 거버넌스, attribution 신호를 한 화면에서 봅니다.',
       params: { section: 'fleet-health' },
-    },
-    {
-      id: 'safe-autonomy',
-      label: '세이프 오토노미',
-      description: '도구, 샌드박스, 승인, 캐스케이드/FSM, 감사 추적을 keeper별 scorecard로 봅니다.',
-      params: { section: 'safe-autonomy' },
-    },
-    {
-      id: 'cost',
-      label: '비용 / 지연',
-      description: '모델별 토큰·비용·latency 를 한 화면에서 봅니다. 어디에 돈이 들고 어디가 느린지 빠르게 스캔합니다.',
-      params: { section: 'cost' },
     },
     {
       id: 'memory-subsystems',
       label: '기억 서브시스템',
-      description: 'Hebbian 시냅스 그래프, 에피소드 기록, compaction 상태.',
+      description: 'Hebbian 시냅스 그래프, 에피소드 기록, compaction 상태. 메인 루프가 아니라 warning/detail 링크로 접근합니다.',
       params: { section: 'memory-subsystems' },
-    },
-    {
-      id: 'attribution',
-      label: 'Attribution',
-      description: 'gate별 pass/fail 카운트와 최근 이벤트. 누가·어디서·뭘·왜 4축으로 본다.',
-      params: { section: 'attribution' },
+      hidden: true,
     },
   ],
   command: [
     {
       id: 'operations',
       label: '운영 행동',
-      description: '브로드캐스트, 키퍼 메시지, 자율 결정 승인/반려, 인스펙터를 한 화면에서. 커넥터는 상위 메뉴 「커넥터」에서.',
+      description: '브로드캐스트, 키퍼 메시지, 자율 결정 승인/반려, safety, 인스펙터를 한 화면에서. 커넥터는 상위 메뉴 「커넥터」에서.',
       params: { section: 'operations' },
     },
   ],
@@ -252,14 +213,15 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
     {
       id: 'repositories',
       label: '저장소',
-      description: '등록 저장소, 브랜치, credential, keeper 접근 범위를 저장소별로 봅니다.',
+      description: '등록 저장소, Git graph, 브랜치, credential, keeper 접근 범위를 저장소별로 봅니다.',
       params: { section: 'repositories' },
     },
     {
       id: 'collab-mvp',
       label: '협업 MVP',
-      description: 'Yjs/CodeMirror substrate, Git graph, TODO claim, turn queue, telemetry contract를 한 화면에서 봅니다.',
+      description: 'Yjs/CodeMirror substrate, Git graph, TODO claim, turn queue, telemetry contract 실험 화면입니다.',
       params: { section: 'collab-mvp' },
+      hidden: true,
     },
     {
       id: 'verification',
@@ -294,6 +256,7 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       label: '코드 IDE',
       description: 'Keeper 협업 코드 review IDE shell. 4-pane (EXPLORER · 에디터 · CONVERSATION · ACTIVITY) 는 후속 PR에서 채워집니다.',
       params: { section: 'ide-shell' },
+      hidden: true,
     },
   ],
 }
@@ -335,6 +298,7 @@ export function visibleSectionItemsForTab(tabId: TabId): DashboardSectionNavItem
 interface SectionRedirect {
   section: string
   view?: string
+  params?: Record<string, string>
 }
 
 type TabSectionKey = `${TabId}:${string}`
@@ -343,14 +307,18 @@ export const SECTION_REDIRECTS: Record<TabSectionKey, SectionRedirect> = {
   // RFC-MASC-006 Phase 0: sessions stub removed
   'monitoring:sessions': { section: 'agents' },
   'monitoring:activity': { section: 'observatory' },
+  'monitoring:live': { section: 'observatory', view: 'live' },
 
   // Dashboard consolidation Phase 1: monitoring surface
   'monitoring:telemetry':    { section: 'fleet-health', view: 'event-log' },
   'monitoring:fleet':        { section: 'fleet-health', view: 'comparison' },
   'monitoring:tool-quality': { section: 'fleet-health', view: 'tool-quality' },
   'monitoring:governance':   { section: 'fleet-health', view: 'governance' },
+  'monitoring:attribution':   { section: 'fleet-health', view: 'attribution' },
   'monitoring:fsm-hub':      { section: 'agents', view: 'fsm' },
   'monitoring:metrics':      { section: 'runtime' },
+  'monitoring:cascade-inspector': { section: 'runtime', view: 'inspector' },
+  'monitoring:cost': { section: 'runtime', view: 'cost' },
 
   // Dashboard consolidation Phase 1+6: command surface
   'command:intervene':    { section: 'operations' },
@@ -360,6 +328,12 @@ export const SECTION_REDIRECTS: Record<TabSectionKey, SectionRedirect> = {
 
   // Dashboard consolidation Phase 1: workspace surface
   'workspace:goals': { section: 'planning' },
+
+  // Dashboard consolidation Phase 7: per-connector sections collapsed into one picker.
+  'connectors:connector-discord': { section: 'connector-status', params: { connector: 'discord' } },
+  'connectors:connector-imessage': { section: 'connector-status', params: { connector: 'imessage' } },
+  'connectors:connector-slack': { section: 'connector-status', params: { connector: 'slack' } },
+  'connectors:connector-telegram': { section: 'connector-status', params: { connector: 'telegram' } },
 }
 
 export function normalizeRouteParams(tabId: TabId, params: Record<string, string>): Record<string, string> {
@@ -385,6 +359,9 @@ export function normalizeRouteParams(tabId: TabId, params: Record<string, string
 
     const redirect = SECTION_REDIRECTS[`${tabId}:${inputSection}` as TabSectionKey]
     if (redirect) {
+      for (const [key, value] of Object.entries(redirect.params ?? {})) {
+        if (!next[key]) next[key] = value
+      }
       if (redirect.view && !next.view) next.view = redirect.view
       next.section = redirect.section
       // Cross-surface redirect handled by caller (router) — see contract doc.

@@ -108,12 +108,12 @@ let all_entries =
     };
     {
       id = "monitoring.observatory";
-      label = "관찰소 (beta)";
-      exposure_status = "main";
-      hidden_from_nav = false;
-      meets_main_gate = true;
+      label = "관찰소";
+      exposure_status = "diagnostic";
+      hidden_from_nav = true;
+      meets_main_gate = false;
       rationale =
-        "관찰소는 라이브 밴드와 activity-derived investigation 패널을 통합한 canonical monitoring surface입니다.";
+        "관찰소는 라이브 밴드와 activity-derived investigation 패널을 보존한 drill-down surface라 메인 내비에서는 숨깁니다.";
       route_hash = Some "#monitoring?section=observatory";
       refs =
         {
@@ -170,7 +170,7 @@ let all_entries =
       hidden_from_nav = false;
       meets_main_gate = true;
       rationale =
-        "플릿 텔레메트리는 event-log, comparison, tool-quality, governance sub-view를 한 surface로 수렴한 canonical monitoring surface입니다.";
+        "플릿 텔레메트리는 event-log, comparison, tool-quality, governance, attribution sub-view를 한 surface로 수렴한 canonical monitoring surface입니다.";
       route_hash = Some "#monitoring?section=fleet-health";
       refs =
         {
@@ -183,32 +183,13 @@ let all_entries =
         };
     };
     {
-      id = "monitoring.safe-autonomy";
-      label = "세이프 오토노미";
-      exposure_status = "main";
-      hidden_from_nav = false;
-      meets_main_gate = true;
-      rationale =
-        "세이프 오토노미는 도구, 샌드박스, 승인, 캐스케이드/FSM, 감사 추적을 keeper별 scorecard로 모아 보는 canonical monitoring surface입니다.";
-      route_hash = Some "#monitoring?section=safe-autonomy";
-      refs =
-        {
-          fixture_harness = Some "dune exec ./test/test_dashboard_safe_autonomy.exe";
-          live_spotcheck = Some "/api/v1/dashboard/safe-autonomy";
-          logs_ref = Some "/api/v1/dashboard/logs";
-          metrics_ref = Some "/metrics";
-          proof_ref = Some "/api/v1/dashboard/proof";
-          tool_name = Some "masc_surface_audit";
-        };
-    };
-    {
       id = "monitoring.memory-subsystems";
       label = "기억 서브시스템";
-      exposure_status = "main";
-      hidden_from_nav = false;
-      meets_main_gate = true;
+      exposure_status = "diagnostic";
+      hidden_from_nav = true;
+      meets_main_gate = false;
       rationale =
-        "기억 서브시스템은 Hebbian, episodic, compaction health를 읽는 canonical monitoring surface입니다.";
+        "기억 서브시스템은 Hebbian, episodic, compaction health 진단용 drill-down이라 메인 내비에서는 숨깁니다.";
       route_hash = Some "#monitoring?section=memory-subsystems";
       refs =
         {
@@ -218,25 +199,6 @@ let all_entries =
           metrics_ref = Some "/metrics";
           proof_ref = None;
           tool_name = Some "masc_surface_audit";
-        };
-    };
-    {
-      id = "monitoring.attribution";
-      label = "Attribution";
-      exposure_status = "main";
-      hidden_from_nav = false;
-      meets_main_gate = true;
-      rationale =
-        "Attribution은 gate별 outcome과 최근 이벤트를 관찰하는 canonical monitoring surface입니다.";
-      route_hash = Some "#monitoring?section=attribution";
-      refs =
-        {
-          fixture_harness = None;
-          live_spotcheck = Some "/api/v1/attribution/summary";
-          logs_ref = Some "/api/v1/dashboard/logs";
-          metrics_ref = Some "/metrics";
-          proof_ref = None;
-          tool_name = None;
         };
     };
     {
@@ -267,82 +229,6 @@ let all_entries =
       rationale =
         "전체 커넥터 상태는 Discord, iMessage, Slack, Telegram sidecar를 한 화면에서 보는 canonical connectors surface입니다.";
       route_hash = Some "#connectors?section=connector-status";
-      refs =
-        {
-          fixture_harness = None;
-          live_spotcheck = Some "/api/v1/gate/connectors";
-          logs_ref = Some "/api/v1/dashboard/logs";
-          metrics_ref = Some "/metrics";
-          proof_ref = None;
-          tool_name = None;
-        };
-    };
-    {
-      id = "connectors.connector-discord";
-      label = "Discord";
-      exposure_status = "main";
-      hidden_from_nav = false;
-      meets_main_gate = true;
-      rationale =
-        "Discord connector view는 sidecar 상태와 keeper binding을 점검하는 canonical per-connector surface입니다.";
-      route_hash = Some "#connectors?section=connector-discord";
-      refs =
-        {
-          fixture_harness = None;
-          live_spotcheck = Some "/api/v1/gate/connectors";
-          logs_ref = Some "/api/v1/dashboard/logs";
-          metrics_ref = Some "/metrics";
-          proof_ref = None;
-          tool_name = None;
-        };
-    };
-    {
-      id = "connectors.connector-imessage";
-      label = "iMessage";
-      exposure_status = "main";
-      hidden_from_nav = false;
-      meets_main_gate = true;
-      rationale =
-        "iMessage connector view는 self-chat/polling 상태를 점검하는 canonical per-connector surface입니다.";
-      route_hash = Some "#connectors?section=connector-imessage";
-      refs =
-        {
-          fixture_harness = None;
-          live_spotcheck = Some "/api/v1/gate/connectors";
-          logs_ref = Some "/api/v1/dashboard/logs";
-          metrics_ref = Some "/metrics";
-          proof_ref = None;
-          tool_name = None;
-        };
-    };
-    {
-      id = "connectors.connector-slack";
-      label = "Slack";
-      exposure_status = "main";
-      hidden_from_nav = false;
-      meets_main_gate = true;
-      rationale =
-        "Slack connector view는 Socket Mode와 bot/app token wiring을 점검하는 canonical per-connector surface입니다.";
-      route_hash = Some "#connectors?section=connector-slack";
-      refs =
-        {
-          fixture_harness = None;
-          live_spotcheck = Some "/api/v1/gate/connectors";
-          logs_ref = Some "/api/v1/dashboard/logs";
-          metrics_ref = Some "/metrics";
-          proof_ref = None;
-          tool_name = None;
-        };
-    };
-    {
-      id = "connectors.connector-telegram";
-      label = "Telegram";
-      exposure_status = "main";
-      hidden_from_nav = false;
-      meets_main_gate = true;
-      rationale =
-        "Telegram connector view는 bot token과 admin wiring을 점검하는 canonical per-connector surface입니다.";
-      route_hash = Some "#connectors?section=connector-telegram";
       refs =
         {
           fixture_harness = None;
@@ -389,6 +275,44 @@ let all_entries =
           metrics_ref = Some "/metrics";
           proof_ref = None;
           tool_name = Some "masc_plan_get";
+        };
+    };
+    {
+      id = "workspace.repositories";
+      label = "저장소";
+      exposure_status = "main";
+      hidden_from_nav = false;
+      meets_main_gate = true;
+      rationale =
+        "저장소는 등록 repo, Git graph, credential, keeper access mapping을 묶는 canonical workspace surface입니다.";
+      route_hash = Some "#workspace?section=repositories";
+      refs =
+        {
+          fixture_harness = None;
+          live_spotcheck = Some "/api/v1/git/graph";
+          logs_ref = Some "/api/v1/dashboard/logs";
+          metrics_ref = Some "/metrics";
+          proof_ref = None;
+          tool_name = Some "masc_surface_audit";
+        };
+    };
+    {
+      id = "workspace.collab-mvp";
+      label = "협업 MVP";
+      exposure_status = "diagnostic";
+      hidden_from_nav = true;
+      meets_main_gate = false;
+      rationale =
+        "협업 MVP는 Track 1 contract/demo 성격이 강해 route는 보존하되 메인 workspace 내비에서는 숨깁니다.";
+      route_hash = Some "#workspace?section=collab-mvp";
+      refs =
+        {
+          fixture_harness = None;
+          live_spotcheck = Some "/api/v1/dashboard/execution";
+          logs_ref = Some "/api/v1/dashboard/logs";
+          metrics_ref = Some "/metrics";
+          proof_ref = None;
+          tool_name = None;
         };
     };
     {
@@ -465,6 +389,25 @@ let all_entries =
           metrics_ref = Some "/metrics";
           proof_ref = None;
           tool_name = Some "masc_surface_audit";
+        };
+    };
+    {
+      id = "code.ide-shell";
+      label = "코드 IDE";
+      exposure_status = "diagnostic";
+      hidden_from_nav = true;
+      meets_main_gate = false;
+      rationale =
+        "코드 IDE는 4-pane shell placeholder 단계라 route readiness는 보존하되 메인 내비에서는 숨깁니다.";
+      route_hash = Some "#code?section=ide-shell";
+      refs =
+        {
+          fixture_harness = None;
+          live_spotcheck = Some "/api/v1/dashboard/shell";
+          logs_ref = Some "/api/v1/dashboard/logs";
+          metrics_ref = Some "/metrics";
+          proof_ref = None;
+          tool_name = None;
         };
     };
     {

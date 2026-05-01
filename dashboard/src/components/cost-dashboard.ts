@@ -13,7 +13,6 @@
 
 import { html } from 'htm/preact'
 import { signal, computed } from '@preact/signals'
-import { route } from '../router'
 import {
   fetchRuntimeModelMetrics,
   fetchKeeperCostMetrics,
@@ -35,37 +34,16 @@ import {
   type KeeperDecisionsResponse,
 } from '../api/dashboard'
 import { LoadingState, ErrorState } from './common/feedback-state'
-import { FilterChips } from './common/filter-chips'
 
 type ViewMode = 'model' | 'keeper'
 
 type CostView = 'cost' | 'heuristics' | 'stress' | 'audit' | 'decisions'
+type CostDashboardMode = 'cost-only'
 
 const COST_VIEWS: CostView[] = ['cost', 'heuristics', 'stress', 'audit', 'decisions']
 
 export function isCostView(v: string | undefined): v is CostView {
   return !!v && (COST_VIEWS as string[]).includes(v)
-}
-
-const activeView = computed<CostView>(() => {
-  const v = route.value.params.view
-  return isCostView(v) ? v : 'cost'
-})
-
-const VIEW_CHIPS: Array<{ key: CostView; label: string }> = [
-  { key: 'cost',        label: '비용 / 지연' },
-  { key: 'heuristics',  label: '휴리스틱' },
-  { key: 'stress',      label: '스트레스' },
-  { key: 'audit',       label: '감사 원장' },
-  { key: 'decisions',   label: 'Keeper 결정' },
-]
-
-function updateViewParam(view: CostView) {
-  const hash = view === 'cost'
-    ? '#monitoring?section=cost'
-    : `#monitoring?section=cost&view=${view}`
-  history.replaceState(null, '', hash)
-  window.dispatchEvent(new HashChangeEvent('hashchange'))
 }
 
 type ModelLoadState =
@@ -214,8 +192,7 @@ async function loadKeeperDecisions(limit = 200) {
   }
 }
 
-function loadActiveView(window: number) {
-  const view = activeView.value
+function loadActiveView(window: number, view: CostView) {
   if (view === 'cost') {
     if (viewMode.value === 'model') {
       void loadModelMetrics(window)
@@ -828,14 +805,12 @@ function KeeperDecisionsBoard({ events, limit }: { events: KeeperDecision[]; lim
   `
 }
 
-function CostDashboardContent() {
-  const view = activeView.value
-
+function CostDashboardContent({ view }: { view: CostView }) {
   if (view === 'cost') {
     const activeState = viewMode.value === 'model' ? modelState.value : keeperState.value
 
     if (activeState.status === 'idle') {
-      void loadActiveView(windowMinutes.value)
+      void loadActiveView(windowMinutes.value, view)
     }
     if (activeState.status === 'loading') {
       return html`<${LoadingState}>cost / latency metrics 불러오는 중...<//>`
@@ -899,8 +874,8 @@ function CostDashboardContent() {
                   aria-checked=${windowMinutes.value === o.key}
                   class="rounded border px-2 py-0.5 text-2xs ${windowMinutes.value === o.key
                     ? 'border-accent/50 bg-[var(--accent-15)] text-accent'
-                    : 'border-card-border/40 text-text-muted hover:border-card-border/60'}"
-                  onClick=${() => { windowMinutes.value = o.key; void loadActiveView(o.key) }}
+                  : 'border-card-border/40 text-text-muted hover:border-card-border/60'}"
+                  onClick=${() => { windowMinutes.value = o.key; void loadActiveView(o.key, view) }}
                 >
                   ${o.label}
                 </button>
@@ -1072,18 +1047,11 @@ function CostDashboardContent() {
   return null
 }
 
-export function CostDashboard() {
-  const view = activeView.value
+export function CostDashboard({ mode: _mode = 'cost-only' }: { mode?: CostDashboardMode }) {
+  const view: CostView = 'cost'
   return html`
     <div class="contain-content flex flex-col gap-4">
-      <${FilterChips}
-        chips=${VIEW_CHIPS}
-        value=${view}
-        onChange=${updateViewParam}
-        size="sm"
-        tone="accent"
-      />
-      <${CostDashboardContent} />
+      <${CostDashboardContent} view=${view} />
     </div>
   `
 }

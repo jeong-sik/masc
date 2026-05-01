@@ -373,18 +373,17 @@ module KeeperKeepalive = struct
   (** Wall-clock timeout in seconds for a single unified turn (including all
       retries and cascade fallbacks). Prevents indefinite blocking when an
       upstream LLM hangs at the TCP level.
-      Env: [MASC_KEEPER_TURN_TIMEOUT_SEC]. Default: 3600. Range: [60, 7200].
-      Raised from 1200 to 3600 (issue #9637): production fleet observed
-      "turn wall-clock timeout after 1200s" with sangsu/qa-king keepers
-      stalling on multi-turn research cycles using GLM-5.1 + local 27B
-      cascade. The new floor matches the budgeted ceiling and gives
-      operators headroom; range upper bumped to 7200 for the same reason.
+      Env: [MASC_KEEPER_TURN_TIMEOUT_SEC]. Default: 600. Range: [60, 600].
 
-      Additionally capped at [timeout_hard_ceiling_sec] (600s) so the turn
-      timeout can never exceed the global hard ceiling. *)
+      The default is deliberately the global hard ceiling. Individual OAS
+      provider attempts are capped by [oas_timeout_default_sec] and
+      provider-specific bounds below, so the full turn budget remains a
+      container for fallback/retry work rather than one provider's spend. *)
   let turn_timeout_sec =
     Float.max 60.0 (Float.min timeout_hard_ceiling_sec
-      (get_float ~default:3600.0 "MASC_KEEPER_TURN_TIMEOUT_SEC"))
+      (get_float ~default:600.0 "MASC_KEEPER_TURN_TIMEOUT_SEC"))
+
+  let oas_timeout_default_sec = 300.0
 
   (** Maximum time a proactive keeper will wait in the MASC admission queue
       before abandoning the current OAS attempt.
@@ -412,12 +411,10 @@ module KeeperKeepalive = struct
   (** Per-call timeout in seconds for a single OAS Agent.run execution.
       Guards against indefinite LLM response waits within a turn.
 
-      When [MASC_KEEPER_OAS_TIMEOUT_SEC] is set, that value is used directly.
-      Otherwise, {!oas_timeout_for_estimated_input_tokens} returns the
-      keeper wall-clock cap directly.  The previous adaptive formula used
-      token count and per-turn multipliers, but those estimates were far
-      below observed fleet turn latency and could timeout before a real
-      multi-turn call completed.
+      When [MASC_KEEPER_OAS_TIMEOUT_SEC] is set, that value is used directly
+      up to the keeper turn cap. Otherwise, the default is 300s. This keeps
+      OAS calls shorter than the 600s keeper turn envelope, so a stalled
+      provider cannot consume the whole turn before cascade fallback can run.
 
       Env: [MASC_KEEPER_OAS_TIMEOUT_SEC]. Default: adaptive.
       Range: [30, turn_timeout_sec].
@@ -470,34 +467,13 @@ module KeeperKeepalive = struct
     match oas_timeout_sec_override with
     | Some v -> v
     | None ->
-      (* #10008 fm2: the prior formula scaled the budget linearly with
-         [max_turns * per_turn (=30s)].  #9933 recent-hour measurement
-         shows fleet p50 turn latency ~16 min (960s) — the 30s-per-turn
-         assumption was 32x below reality.  velvet-hammer at max_turns=10
-         computed only 423.8s of OAS budget against a 1200s wall-clock
-         cap; multi-turn research calls regularly hit
-         [oas_timeout_budget] before a single real turn finished.
-
-         Root-cause fix: drop the [per_turn * turns] term entirely.
-         [turn_timeout_sec] is already the authoritative wall-clock
-         cap the formula was trying to approach.  Keep the tiny
-         [base + input_time] estimate as a lower bound so tests and
-         callers that set explicit overrides still see a sensible
-         value, then floor at the wall-clock cap.  [max_turns] stops
-         being an input to this computation — the count controls the
-         OAS agent's retry budget elsewhere, not MASC's wall-clock
-         expectation. *)
+      (* #10008 fm2 removed token-count scaling because it timed out real
+         research turns before useful work could finish. The replacement must
+         still leave headroom for cascade fallback: default OAS calls get a
+         300s cap inside the 600s keeper turn envelope. [max_turns] controls
+         the OAS agent's loop budget elsewhere; it is not a wall-clock input. *)
       let _ = estimated_input_tokens in
-      (* Use wall-clock cap directly.  Short calls exit early via
-         tool-response detection; they do not need a smaller budget
-         reserved up front.  [estimated_input_tokens] and the old
-         [base + input_time] estimate are no longer load-bearing
-         inputs — they scaled at 1.5s/1k tokens, which was
-         negligible compared to the real p50 turn latency the
-         multiplier was trying to reserve for.  Kept in the
-         signature because callers still pass the value; ignored
-         for budget computation. *)
-      turn_timeout_sec
+      Float.min turn_timeout_sec oas_timeout_default_sec
 
   let oas_timeout_for_estimated_input_tokens
       ~(estimated_input_tokens : int) : float =
@@ -509,7 +485,7 @@ module KeeperKeepalive = struct
       Prefer {!oas_timeout_for_estimated_input_tokens} when a live prompt
       estimate is available. *)
   let oas_timeout_sec =
-    Option.value ~default:300.0 oas_timeout_sec_override
+    Option.value ~default:oas_timeout_default_sec oas_timeout_sec_override
 
   (** Idle-gap timeout for streaming OAS provider responses.
       This bounds time between streamed lines, not total turn duration.

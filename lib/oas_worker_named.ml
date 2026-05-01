@@ -16,24 +16,59 @@ include Oas_worker_named_cascade
 include Oas_worker_named_error
 include Oas_worker_named_fsm
 
-let provider_attempt_timeout_hint_s
-    (provider_cfg : Llm_provider.Provider_config.t) : float option =
+type provider_attempt_timeout_constraints = {
+  min_timeout_s : float option;
+  max_timeout_s : float option;
+}
+
+let provider_attempt_timeout_constraints
+    (provider_cfg : Llm_provider.Provider_config.t) =
   match provider_cfg.kind with
-  | Llm_provider.Provider_config.Ollama -> Some 300.0
-  | Claude_code -> Some 120.0
-  | Gemini | Gemini_cli -> Some 180.0
-  | Kimi_cli -> Some 60.0
-  | Anthropic | Kimi | OpenAI_compat | Glm | DashScope | Codex_cli -> None
+  | Llm_provider.Provider_config.Ollama ->
+      { min_timeout_s = Some 300.0; max_timeout_s = None }
+  | Claude_code ->
+      { min_timeout_s = None; max_timeout_s = Some 120.0 }
+  | Gemini | Gemini_cli ->
+      { min_timeout_s = None; max_timeout_s = Some 180.0 }
+  | Kimi_cli ->
+      { min_timeout_s = None; max_timeout_s = Some 60.0 }
+  | Anthropic | Kimi | OpenAI_compat | Glm | DashScope | Codex_cli ->
+      { min_timeout_s = None; max_timeout_s = None }
+
+let apply_provider_attempt_timeout_constraints constraints timeout_s =
+  let timeout_s =
+    match constraints.min_timeout_s with
+    | Some min_s -> Float.max timeout_s min_s
+    | None -> timeout_s
+  in
+  match constraints.max_timeout_s with
+  | Some max_s -> Float.min timeout_s max_s
+  | None -> timeout_s
+
+let provider_default_attempt_timeout_s constraints =
+  match constraints.min_timeout_s, constraints.max_timeout_s with
+  | Some min_s, Some max_s -> Some (Float.min max_s min_s)
+  | Some min_s, None -> Some min_s
+  | None, Some max_s -> Some max_s
+  | None, None -> None
 
 let effective_provider_attempt_timeout_s
     ~(is_last : bool)
     ~(configured_timeout_s : float option)
     (provider_cfg : Llm_provider.Provider_config.t) : float option =
-  match configured_timeout_s, provider_attempt_timeout_hint_s provider_cfg with
-  | Some configured, Some hinted -> Some (Float.max configured hinted)
-  | Some configured, None -> if is_last then None else Some configured
-  | None, Some hinted -> Some hinted
-  | None, None -> None
+  let constraints = provider_attempt_timeout_constraints provider_cfg in
+  match configured_timeout_s with
+  | Some configured ->
+      let bounded =
+        apply_provider_attempt_timeout_constraints constraints configured
+      in
+      if is_last
+         && Option.is_none constraints.min_timeout_s
+         && Option.is_none constraints.max_timeout_s
+      then None
+      else Some bounded
+  | None ->
+      provider_default_attempt_timeout_s constraints
 
 (* ================================================================ *)
 (* Facade-only: run_named, run_model_by_label, and MASC tool bridges  *)

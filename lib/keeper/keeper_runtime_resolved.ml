@@ -72,12 +72,13 @@ let autonomous_max_idle_turns_live () =
 
 let turn_timeout_sec_live () =
   (* SSOT: must match Env_config_keeper.KeeperKeepalive.turn_timeout_sec
-     (range [60, timeout_hard_ceiling_sec], default 3600 clamped to
-     600 post-bulkhead hard ceiling). Drift here was the mathematical
-     root of #10388 (1200 - 30 oas_guard = 1170s budget). *)
+     (range [60, timeout_hard_ceiling_sec], default 600). Drift here was
+     the mathematical root of #10388 (1200 - 30 oas_guard = 1170s budget). *)
   Float.max 60.0
     (Float.min 600.0
-       (get_float ~default:3600.0 "MASC_KEEPER_TURN_TIMEOUT_SEC"))
+       (get_float ~default:600.0 "MASC_KEEPER_TURN_TIMEOUT_SEC"))
+
+let oas_timeout_default_sec = 300.0
 
 let admission_wait_timeout_sec_live () =
   Float.max 5.0
@@ -265,11 +266,9 @@ let oas_timeout_for_estimated_input_tokens_with_turn_budget
          The old formula scaled linearly with [max_turns * per_turn(=30s)]
          but production p50 turn latency was ~16 min (#9933), making
          the multiplier 32x below reality.  Drop the turn-count and
-         input-token scaling; return [turn_timeout_sec] directly as
-         the wall-clock cap.  Short calls exit early via tool-response
-         detection, they do not need a smaller budget reserved up
-         front. *)
-      runtime.turn_timeout_sec.value
+         input-token scaling. Keep the default OAS call cap at 300s so
+         the 600s keeper turn envelope has room for cascade fallback. *)
+      Float.min runtime.turn_timeout_sec.value oas_timeout_default_sec
 
 let oas_timeout_for_estimated_input_tokens ~(estimated_input_tokens : int) :
     float =

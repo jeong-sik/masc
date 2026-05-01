@@ -31,6 +31,34 @@ let make_accept_rejected () =
     (Owne.Accept_rejected
        { scope = "test"; model = None; reason = "no body" })
 
+let timeout_class_to_string = function
+  | KEC.Provider_timeout -> "provider_timeout"
+  | KEC.Oas_timeout_budget -> "oas_timeout_budget"
+  | KEC.Turn_wall_clock_timeout -> "turn_wall_clock_timeout"
+
+let check_timeout_class label expected err =
+  match KEC.timeout_failure_class_of_error err with
+  | Some actual ->
+      check string label expected (timeout_class_to_string actual)
+  | None -> fail (Printf.sprintf "%s: expected timeout class" label)
+
+let make_provider_timeout message =
+  Agent_sdk.Error.Api (Agent_sdk.Retry.Timeout { message })
+
+let make_oas_timeout_budget () =
+  Owne.sdk_error_of_masc_internal_error
+    (Owne.Oas_timeout_budget
+       {
+         budget_sec = 90.0;
+         keeper_turn_timeout_sec = 1200.0;
+         estimated_input_tokens = 10_000;
+         source = "test";
+       })
+
+let make_turn_timeout () =
+  Owne.sdk_error_of_masc_internal_error
+    (Owne.Turn_timeout { elapsed_sec = 1200.0 })
+
 let test_other_detail_generic_recoverable () =
   let err = make_cascade_exhausted (KT.Other_detail "transport unavailable") in
   match KEC.recoverable_cascade_failure_reason err with
@@ -110,6 +138,23 @@ let test_catalog_rotation_preserves_order_without_base_injection () =
     check string "fallback reason" "cascade_exhausted" retry.fallback_reason
   | None -> fail "Expected catalog-ordered degraded retry"
 
+let test_timeout_failure_class_provider_timeout () =
+  check_timeout_class "provider timeout" "provider_timeout"
+    (make_provider_timeout "request timed out after 30s")
+
+let test_timeout_failure_class_oas_budget () =
+  check_timeout_class "oas budget typed" "oas_timeout_budget"
+    (make_oas_timeout_budget ());
+  check_timeout_class "oas budget legacy message" "oas_timeout_budget"
+    (make_provider_timeout
+       "OAS execution timed out before dispatch (budget=90.000s)")
+
+let test_timeout_failure_class_turn_wall_clock () =
+  check_timeout_class "turn timeout typed" "turn_wall_clock_timeout"
+    (make_turn_timeout ());
+  check_timeout_class "turn timeout legacy message" "turn_wall_clock_timeout"
+    (make_provider_timeout "Turn wall-clock timeout after 1200s")
+
 let () =
   run "keeper_error_classify_recoverable"
     [
@@ -134,5 +179,14 @@ let () =
         [
           test_case "catalog order is not prefixed by base cascade" `Quick
             test_catalog_rotation_preserves_order_without_base_injection;
+        ] );
+      ( "timeout_failure_class",
+        [
+          test_case "provider timeout stays provider-scoped" `Quick
+            test_timeout_failure_class_provider_timeout;
+          test_case "OAS budget timeout is structural" `Quick
+            test_timeout_failure_class_oas_budget;
+          test_case "turn wall-clock timeout is structural" `Quick
+            test_timeout_failure_class_turn_wall_clock;
         ] );
     ]

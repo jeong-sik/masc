@@ -13,6 +13,17 @@ val is_transient_network_error : Oas.Error.sdk_error -> bool
     not a transport-level timeout. *)
 val is_structural_oas_timeout_message : string -> bool
 
+type timeout_failure_class =
+  | Provider_timeout
+  | Oas_timeout_budget
+  | Turn_wall_clock_timeout
+
+(** Classify timeout-like SDK errors without stringifying the whole error.
+    Provider timeouts stay distinct from structural OAS/keeper budget
+    expiry so heartbeat strike logic only counts the latter. *)
+val timeout_failure_class_of_error :
+  Oas.Error.sdk_error -> timeout_failure_class option
+
 (** Detect server-side request body parse errors (e.g. Ollama yyjson
     rejecting a malformed request body).  The LLM never
     processed the request, so committed tool results are not at risk

@@ -540,8 +540,8 @@ let run_keepalive_unified_turn
                  same-fiber retry has the same context budget, so a
                  budget exhaustion is unrecoverable in place and only
                  [sweep_and_recover] can clear it. *)
-              if String_util.contains_substring e_str "oas_timeout_budget"
-              then begin
+              (match Keeper_error_classify.timeout_failure_class_of_error err with
+               | Some Keeper_error_classify.Oas_timeout_budget ->
                 let keeper_name = meta_after_observe.name in
                 let strikes = Keeper_turn_slot.bump_budget_exhaustion ~keeper_name in
                 if strikes >= Keeper_turn_slot.oas_timeout_budget_strike_limit then begin
@@ -574,7 +574,10 @@ let run_keepalive_unified_turn
                       ("outcome", "warn");
                     ] ()
                 end
-              end;
+               | Some Keeper_error_classify.Provider_timeout
+               | Some Keeper_error_classify.Turn_wall_clock_timeout
+               | None ->
+                 ());
               (match read_meta ctx.config meta_after_observe.name with
                | Ok (Some latest) -> latest
                | Ok None ->

@@ -59,7 +59,7 @@ let test_network_error () =
                      ; kind = Llm_provider.Http_client.Connection_refused })))
 
 let test_timeout () =
-  check string "timeout" "api_error_timeout"
+  check string "timeout" "provider_timeout"
     (code (mk_api (Agent_sdk.Retry.Timeout { message = "x" })))
 
 let outcome_code err =
@@ -275,6 +275,25 @@ let test_structured_turn_wall_clock_timeout () =
   in
   check string "code" "turn_wall_clock_timeout" (terminal_code terminal)
 
+let test_provider_timeout_terminal_reason () =
+  let err =
+    mk_api
+      (Agent_sdk.Retry.Timeout { message = "request timed out after 30s" })
+  in
+  let terminal =
+    KT.of_failure ~raw_error:(Agent_sdk.Error.to_string err) err
+  in
+  check string "code" "provider_timeout" (terminal_code terminal);
+  check string "severity" "warn" (KT.severity_to_string (terminal_severity terminal));
+  check (option string) "next action" (Some "inspect_provider_timeout")
+    (terminal_next_action terminal)
+
+let test_legacy_api_timeout_normalizes_to_provider_timeout () =
+  let terminal = KT.of_code "api_error_timeout" in
+  check string "code" "provider_timeout" (terminal_code terminal);
+  check (option string) "next action" (Some "inspect_provider_timeout")
+    (terminal_next_action terminal)
+
 let test_legacy_gh_worktree_text () =
   let terminal =
     KT.of_legacy_error_text
@@ -339,6 +358,10 @@ let () =
 	            test_structured_oas_timeout_budget;
 	          test_case "turn wall-clock timeout" `Quick
 	            test_structured_turn_wall_clock_timeout;
+	          test_case "provider timeout" `Quick
+	            test_provider_timeout_terminal_reason;
+	          test_case "legacy api timeout normalizes" `Quick
+	            test_legacy_api_timeout_normalizes_to_provider_timeout;
 	          test_case "legacy gh missing worktree text" `Quick
 	            test_legacy_gh_worktree_text;
 	        ] );

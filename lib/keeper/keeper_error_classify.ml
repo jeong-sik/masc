@@ -52,10 +52,41 @@ let string_contains_substring ~(needle : string) (haystack : string) : bool =
 (** Detect transient network errors that warrant retry with short backoff.
     Uses structured [Oas.Error.sdk_error] pattern matching instead of
     substring matching on stringified error messages. *)
-let is_structural_oas_timeout_message message =
+let is_oas_timeout_budget_message message =
   let lower = String.lowercase_ascii message in
   string_contains_substring ~needle:"(budget=" lower
+  || string_contains_substring ~needle:"oas_timeout_budget" lower
+  || string_contains_substring ~needle:"oas budget timeout" lower
+
+let is_turn_wall_clock_timeout_message message =
+  let lower = String.lowercase_ascii message in
+  string_contains_substring ~needle:"turn wall-clock timeout" lower
   || string_contains_substring ~needle:"turn wall-clock budget exhausted" lower
+
+let is_structural_oas_timeout_message message =
+  is_oas_timeout_budget_message message
+  || is_turn_wall_clock_timeout_message message
+
+type timeout_failure_class =
+  | Provider_timeout
+  | Oas_timeout_budget
+  | Turn_wall_clock_timeout
+
+let timeout_failure_class_of_error (err : Oas.Error.sdk_error) :
+    timeout_failure_class option =
+  match Oas_worker_named.classify_masc_internal_error err with
+  | Some (Oas_worker_named.Oas_timeout_budget _) -> Some Oas_timeout_budget
+  | Some (Oas_worker_named.Turn_timeout _) -> Some Turn_wall_clock_timeout
+  | _ -> (
+      match err with
+      | Oas.Error.Api (Timeout { message }) ->
+          if is_turn_wall_clock_timeout_message message then
+            Some Turn_wall_clock_timeout
+          else if is_oas_timeout_budget_message message then
+            Some Oas_timeout_budget
+          else
+            Some Provider_timeout
+      | _ -> None)
 
 let is_transient_network_error (err : Oas.Error.sdk_error) : bool =
   match err with

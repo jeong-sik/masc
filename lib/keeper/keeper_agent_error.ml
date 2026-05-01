@@ -69,7 +69,7 @@ let api_error_terminal_reason_code (err : Oas.Error.api_error) : string =
   | Oas.Retry.NotFound _ -> "api_error_not_found"
   | Oas.Retry.ContextOverflow _ -> "api_error_context_overflow"
   | Oas.Retry.NetworkError _ -> "api_error_network"
-  | Oas.Retry.Timeout _ -> "api_error_timeout"
+  | Oas.Retry.Timeout _ -> "provider_timeout"
 
 (* Per-variant terminal_reason_code for Oas.Error.Agent.
    Previously every Agent failure collapsed to "agent_error", mirroring

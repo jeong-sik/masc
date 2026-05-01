@@ -253,6 +253,7 @@ let operator_disposition (receipt : t) =
   let provider_runtime_failure =
     String.starts_with ~prefix:"api_error_" terminal_reason
     || String.equal terminal_reason "provider_error"
+    || String.equal terminal_reason "provider_timeout"
     ||
     (match error_kind with
      | Some

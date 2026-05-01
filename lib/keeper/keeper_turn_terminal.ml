@@ -23,6 +23,7 @@ let severity_to_string = function
 let severity_of_code = function
   | "success" -> Ok
   | "external_cancel"
+  | "provider_timeout"
   | "oas_timeout_budget"
   | "turn_wall_clock_timeout"
   | "gh_repo_context_missing_worktree" ->
@@ -50,6 +51,8 @@ let summary_of_code = function
       "keeper turn hit the wall-clock timeout"
   | "external_cancel" ->
       "keeper turn was cancelled before completion"
+  | "provider_timeout" ->
+      "provider call timed out"
   | "post_commit_ambiguous" ->
       "provider failed after a mutating tool may have committed side effects"
   | "provider_error" ->
@@ -68,6 +71,8 @@ let next_action_of_code = function
   | "oas_timeout_budget"
   | "turn_wall_clock_timeout" ->
       Some "inspect_timeout_budget"
+  | "provider_timeout" ->
+      Some "inspect_provider_timeout"
   | "external_cancel" ->
       Some "rerun_if_still_relevant"
   | "post_commit_ambiguous" ->
@@ -81,7 +86,7 @@ let normalize_code = function
   | "completed" -> "success"
   | "completion_contract_violation:require_tool_use" ->
       "required_tool_use_unsatisfied"
-  | "api_error_timeout" -> "provider_error"
+  | "api_error_timeout" -> "provider_timeout"
   | code -> code
 
 let make ?(source = "typed") ?summary ?next_action code =

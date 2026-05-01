@@ -159,17 +159,19 @@ let try_rate_limit_block ~path ~client_addr ~request reqd =
           | Some agent_key ->
               if Masc_mcp.Rate_limit.check_agent_global ~key:agent_key then false
               else begin
-                let body = Masc_mcp.Rate_limit.too_many_requests_body () in
+                let body = Masc_mcp.Rate_limit.too_many_agent_requests_body () in
                 let rl_headers =
                   Masc_mcp.Rate_limit.headers_agent_global ~key:agent_key
                 in
-                let headers = Httpun.Headers.of_list (
-                  ("content-type", "application/json") ::
-                  ("content-length", string_of_int (String.length body)) ::
-                  rl_headers
-                ) in
+                let headers =
+                  Httpun.Headers.of_list
+                    (("content-type", "application/json")
+                    :: ("content-length", string_of_int (String.length body))
+                    :: rl_headers)
+                in
                 Httpun.Reqd.respond_with_string reqd
-                  (Httpun.Response.create ~headers `Too_many_requests) body;
+                  (Httpun.Response.create ~headers `Too_many_requests)
+                  body;
                 true
               end
 

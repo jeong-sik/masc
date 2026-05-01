@@ -226,6 +226,83 @@ let test_non_default_room_blocked () =
   check bool "mentions default namespace" true
     (String_util.contains_substring err "room must be 'default'")
 
+let test_keeper_only_scope_uses_private_room () =
+  with_temp_dir "team-memory-keeper-only" @@ fun base_path ->
+  Fs_compat.clear_fs ();
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let config = Coord.default_config base_path in
+  let agent_name =
+    write_keeper_meta ~config ~name:"room-alpha" ~shared_memory_scope:"keeper_only"
+  in
+  let write_json =
+    json_result_exn
+      (dispatch ~config ~agent_name ~name:"masc_team_memory_write"
+         (`Assoc
+            [
+              ("room", `String "default");
+              ("key", `String "notes/private.md");
+              ("content", `String "private keeper note");
+            ]))
+  in
+  let open Yojson.Safe.Util in
+  check string "private room id" "room-alpha"
+    (write_json |> member "room" |> to_string);
+  let read_json =
+    json_result_exn
+      (dispatch ~config ~agent_name ~name:"masc_team_memory_read"
+         (`Assoc
+            [
+              ("room", `String "default");
+              ("key", `String "notes/private.md");
+            ]))
+  in
+  check string "read private content" "private keeper note"
+    (read_json |> member "content" |> to_string)
+
+let test_room_readonly_scope_blocks_write_allows_read () =
+  with_temp_dir "team-memory-room-readonly" @@ fun base_path ->
+  Fs_compat.clear_fs ();
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let config = Coord.default_config base_path in
+  let agent_name =
+    write_keeper_meta ~config ~name:"room-alpha" ~shared_memory_scope:"room_readonly"
+  in
+  let root = Tool_team_memory.team_memory_root ~config "default" in
+  Fs_compat.mkdir_p (Filename.concat root "notes");
+  (match
+     Fs_compat.save_file_atomic
+       (Filename.concat root "notes/seed.md")
+       "readonly seed"
+   with
+  | Ok () -> ()
+  | Error err -> fail err);
+  let read_json =
+    json_result_exn
+      (dispatch ~config ~agent_name ~name:"masc_team_memory_read"
+         (`Assoc
+            [
+              ("room", `String "default");
+              ("key", `String "notes/seed.md");
+            ]))
+  in
+  let open Yojson.Safe.Util in
+  check string "readonly read content" "readonly seed"
+    (read_json |> member "content" |> to_string);
+  let ok, err =
+    dispatch ~config ~agent_name ~name:"masc_team_memory_write"
+      (`Assoc
+         [
+           ("room", `String "default");
+           ("key", `String "notes/seed.md");
+           ("content", `String "blocked write");
+         ])
+  in
+  check bool "write blocked" false ok;
+  check bool "mentions readonly" true
+    (String_util.contains_substring err "readonly")
+
 let () =
   run "team_memory"
     [
@@ -246,5 +323,9 @@ let () =
             test_non_keeper_agent_blocked;
           test_case "non-default room blocked" `Quick
             test_non_default_room_blocked;
+          test_case "keeper_only uses private room" `Quick
+            test_keeper_only_scope_uses_private_room;
+          test_case "room_readonly blocks write allows read" `Quick
+            test_room_readonly_scope_blocks_write_allows_read;
         ] );
     ]

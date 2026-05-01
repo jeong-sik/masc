@@ -99,6 +99,8 @@ type conditions = {
       Once latched, [derive_phase] returns [Zombie] regardless of
       fiber or budget state. Reset only by [Fiber_started] so a
       full restart can attempt recovery with a fresh trace. *)
+  credential_archived : bool;
+  zombie_timeout_reached : bool;
 }
 
 val default_conditions : conditions
@@ -184,6 +186,8 @@ type event =
   | Fiber_terminated of { outcome : string }
   | Supervisor_restart_attempt of { attempt : int }
   | Restart_budget_exhausted
+  | Credential_archived
+  | Zombie_timeout
   | Guardrail_stop of { reason : string }
   | Terminal_failure_detected of { reason : string }
     (** Permanent structural error (provider adapter failure, unresumable
@@ -245,6 +249,8 @@ type entry_action =
   | Mark_dead_tombstone
   | Mark_zombie_tombstone
   | Cleanup_and_unregister
+  | Trigger_immediate_cleanup
+  | Cancel_pending_oas
 
 (** Result of applying an event. *)
 type transition_result = {

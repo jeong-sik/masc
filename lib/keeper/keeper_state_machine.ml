@@ -73,6 +73,8 @@ type conditions = {
   context_overflow : bool;
   compact_retry_exhausted : bool;
   terminal_failure_latched : bool;
+  credential_archived : bool;
+  zombie_timeout_reached : bool;
 }
 
 let default_conditions = {
@@ -93,6 +95,8 @@ let default_conditions = {
   context_overflow = false;
   compact_retry_exhausted = false;
   terminal_failure_latched = false;
+  credential_archived = false;
+  zombie_timeout_reached = false;
 }
 
 (* ── Events ────────────────────────────────────────────── *)
@@ -133,6 +137,8 @@ type event =
   | Fiber_terminated of { outcome : string }
   | Supervisor_restart_attempt of { attempt : int }
   | Restart_budget_exhausted
+  | Credential_archived
+  | Zombie_timeout
   | Guardrail_stop of { reason : string }
   | Terminal_failure_detected of { reason : string }
   | Context_overflow_detected of {
@@ -189,6 +195,8 @@ let event_to_string = function
   | Supervisor_restart_attempt r ->
     Printf.sprintf "supervisor_restart_attempt(%d)" r.attempt
   | Restart_budget_exhausted -> "restart_budget_exhausted"
+  | Credential_archived -> "credential_archived"
+  | Zombie_timeout -> "zombie_timeout"
   | Guardrail_stop r ->
     Printf.sprintf "guardrail_stop(%s)" r.reason
   | Terminal_failure_detected r ->
@@ -230,6 +238,8 @@ type entry_action =
   | Mark_dead_tombstone
   | Mark_zombie_tombstone
   | Cleanup_and_unregister
+  | Trigger_immediate_cleanup
+  | Cancel_pending_oas
 
 (* ── Transition Types ──────────────────────────────────── *)
 
@@ -264,6 +274,9 @@ let can_transition ~from_phase ~to_phase =
   | Zombie, _ -> false
   (* Terminal failure can strike from any non-terminal phase *)
   | _, Zombie -> true
+  (* External hard-stop signals such as credential archival can terminate any
+     non-terminal keeper without going through crash/restart budget flow. *)
+  | _, Dead -> true
   (* Offline -> Running | Stopped | Draining (stop while not yet started) *)
   | Offline, (Running | Stopped | Draining) -> true
   | Offline, _ -> false
@@ -307,12 +320,13 @@ let can_transition ~from_phase ~to_phase =
      to clear an overflow-induced pause) *)
   | Paused, (Running | Compacting | Draining | Stopped | Crashed) -> true
   | Paused, _ -> false
-  (* Crashed -> Restarting (backoff done) | Dead (budget exhausted) *)
-  | Crashed, (Restarting | Dead) -> true
+  (* Crashed -> Restarting (backoff done). Dead is covered by the global
+     hard-stop/budget terminal transition above. *)
+  | Crashed, Restarting -> true
   | Crashed, _ -> false
-  (* Restarting -> Running (success) | Crashed (fail) | Dead (budget)
+  (* Restarting -> Running (success) | Crashed (fail)
      | Draining (stop_requested persists) | Paused (operator_paused persists) *)
-  | Restarting, (Running | Crashed | Dead | Draining | Paused) -> true
+  | Restarting, (Running | Crashed | Draining | Paused) -> true
   | Restarting, _ -> false
 
 let can_execute_turn = function
@@ -405,8 +419,10 @@ let derive_phase (c : conditions) : phase =
      which includes buffer operations. Guard Stopped against active buffer
      ops so the keeper stays in Draining until compaction/handoff exits. *)
 
+  (* 0. Forced terminal state — external cleanup/credential signals. *)
+  if c.credential_archived || c.zombie_timeout_reached then Dead
   (* 1. Completed stop — drain succeeded AND no buffer ops in flight *)
-  if c.stop_requested && c.drain_complete
+  else if c.stop_requested && c.drain_complete
      && not c.compaction_active && not c.handoff_active then Stopped
   (* 2. Pre-start registration. This is the only path into Offline. *)
   else if c.launch_pending && not c.fiber_alive then Offline
@@ -557,6 +573,10 @@ let update_conditions (c : conditions) (ev : event) : conditions =
     { c with backoff_elapsed = true }
   | Restart_budget_exhausted ->
     { c with restart_budget_remaining = false }
+  | Credential_archived ->
+    { c with restart_budget_remaining = false; fiber_alive = false; credential_archived = true }
+  | Zombie_timeout ->
+    { c with restart_budget_remaining = false; zombie_timeout_reached = true }
   | Guardrail_stop _ ->
     { c with guardrail_triggered = true }
   | Terminal_failure_detected _ ->
@@ -611,7 +631,10 @@ let entry_actions_for ~prev_phase ~new_phase ~(event : event) : entry_action lis
   | _, Draining ->
     [ Start_drain; lifecycle "draining" "" ]
   | _, Dead ->
-    [ Mark_dead_tombstone; lifecycle "dead" "restart budget exhausted" ]
+    [ Mark_dead_tombstone;
+      lifecycle "dead" (event_to_string event);
+      Trigger_immediate_cleanup;
+      Cancel_pending_oas ]
   | _, Zombie ->
     [ Mark_zombie_tombstone; lifecycle "zombie" "terminal structural failure" ]
   | _, Stopped ->
@@ -748,6 +771,8 @@ let conditions_to_json (c : conditions) =
     "context_overflow", `Bool c.context_overflow;
     "compact_retry_exhausted", `Bool c.compact_retry_exhausted;
     "terminal_failure_latched", `Bool c.terminal_failure_latched;
+    "credential_archived", `Bool c.credential_archived;
+    "zombie_timeout_reached", `Bool c.zombie_timeout_reached;
   ]
 
 let event_to_json (ev : event) : Yojson.Safe.t =
@@ -803,6 +828,8 @@ let event_to_json (ev : event) : Yojson.Safe.t =
   | Supervisor_restart_attempt r ->
     obj "supervisor_restart_attempt" ["attempt", `Int r.attempt]
   | Restart_budget_exhausted -> obj "restart_budget_exhausted" []
+  | Credential_archived -> obj "credential_archived" []
+  | Zombie_timeout -> obj "zombie_timeout" []
   | Guardrail_stop r -> obj "guardrail_stop" ["reason", `String r.reason]
   | Terminal_failure_detected r ->
     obj "terminal_failure_detected" ["reason", `String r.reason]

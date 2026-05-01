@@ -629,20 +629,23 @@ let task_by_id config task_id =
     backlog.tasks
 
 let max_path_hints = 20
+let mention_score_value = 100
+let file_score_weight = 25
 
 let score_repo_candidate ~(task : task) ~tokens ~path_hints candidate =
   let mention_score =
-    if repo_name_mentioned ~tokens candidate.name then 100 else 0
+    if repo_name_mentioned ~tokens candidate.name then mention_score_value
+    else 0
   in
   let file_score =
-    if mention_score >= 100 then 0
+    if mention_score >= mention_score_value then 0
     else
       path_hints
       |> List.filteri (fun i _ -> i < max_path_hints)
       |> List.filter (fun rel_path ->
              safe_file_exists (Filename.concat candidate.path rel_path))
       |> List.length
-      |> ( * ) 25
+      |> ( * ) file_score_weight
   in
   let worktree_score =
     match task.worktree with

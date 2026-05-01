@@ -300,13 +300,40 @@ jobs:
                 // for this startup race.
                 const ciGateStartupRaceAction =
                   action === "auto_merge_enabled" || action === "synchronize";
+                let activeHeadChecks = [];
+                if (
+                  ciGateStartupRaceAction &&
+                  latestCiGate?.status === "completed" &&
+                  latestCiGate?.conclusion === "failure"
+                ) {
+                  const refChecks = await github.rest.checks.listForRef({
+                    owner,
+                    repo,
+                    ref: pr.head.sha,
+                    per_page: 100
+                  });
+                  activeHeadChecks = (refChecks.data.check_runs || [])
+                    .filter((run) => run.status !== "completed")
+                    .filter((run) => run.name !== "Draft Auto-Merge Guard")
+                    .map((run) => `${run.name}:${run.status}`);
+                }
+                const staleFailedCiGateDuringActiveRun =
+                  ciGateStartupRaceAction &&
+                  latestCiGate?.status === "completed" &&
+                  latestCiGate?.conclusion === "failure" &&
+                  activeHeadChecks.length > 0;
                 const ciGateStartupRace =
                   ciGateStartupRaceAction &&
                   (!latestCiGate ||
                     latestCiGate.status !== "completed" ||
-                    latestCiGate.conclusion === "cancelled");
+                    latestCiGate.conclusion === "cancelled" ||
+                    staleFailedCiGateDuringActiveRun);
                 if (ciGateStartupRace) {
-                  core.info(`CI Gate is ${ciGateStatus} for head ${pr.head.sha}; skipping block on ${action} event.`);
+                  const activeSuffix =
+                    activeHeadChecks.length > 0
+                      ? `; active head checks: ${activeHeadChecks.join(", ")}`
+                      : "";
+                  core.info(`CI Gate is ${ciGateStatus} for head ${pr.head.sha}${activeSuffix}; skipping block on ${action} event.`);
                 } else {
                   policyFailures.push(`CI Gate is not completed successfully for head ${pr.head.sha}: ${ciGateStatus}`);
                   shouldDisableAutoMerge = true;

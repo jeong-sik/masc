@@ -110,6 +110,23 @@ let test_ci_sync_and_asset_contracts () =
      policy script so already-merged PRs do not flip red. *)
   check bool "ci gate refreshes live PR state" true
     (file_contains_pattern ".github/workflows/ci.yml" "PR_LIVE_STATE");
+  check bool "ci workflow has live PR gate before heavy matrix" true
+    (file_contains_pattern ".github/workflows/ci.yml" "PR Live Gate");
+  check bool "live PR gate waits for draft automation to settle" true
+    (file_contains_pattern ".github/workflows/ci.yml"
+       "LIVE_PR_GATE_SETTLE_SEC");
+  check bool "changes job depends on live PR gate" true
+    (file_contains_pattern ".github/workflows/ci.yml"
+       "needs: [pr-sync-check, pr-live-gate]");
+  check bool "heavy CI uses live PR gate output" true
+    (file_contains_pattern ".github/workflows/ci.yml"
+       "needs.pr-live-gate.outputs.run_heavy == 'true'");
+  check bool "ci gate aggregates live PR gate" true
+    (file_contains_pattern ".github/workflows/ci.yml"
+       "PR_LIVE_GATE_RESULT");
+  check bool "heavy CI no longer trusts stale draft payload" true
+    (file_not_contains_pattern ".github/workflows/ci.yml"
+       "github.event.pull_request.draft == false");
   check bool "pr hygiene no longer checks dashboard assets (gitignored)" true
     (not (file_contains_pattern "scripts/check-pr-hygiene.sh" "dashboard source or Vite config changed but assets/dashboard was not updated"))
 

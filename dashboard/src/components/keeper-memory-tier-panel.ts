@@ -1,4 +1,5 @@
 import { html } from 'htm/preact'
+import type { ComponentChildren } from 'preact'
 import { useEffect, useMemo, useState } from 'preact/hooks'
 
 import {
@@ -30,7 +31,7 @@ function MemoryTierBadge({
   children,
 }: {
   tone?: StatusChipTone
-  children: unknown
+  children: ComponentChildren
 }) {
   return html`<${StatusChip} tone=${tone} uppercase=${false}>${children}</${StatusChip}>`
 }

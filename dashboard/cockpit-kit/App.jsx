@@ -3,11 +3,19 @@
           ViewportBanner, useCockpitState, useLayoutProfile, Drawer */
 const { useState, useCallback, useEffect } = React;
 
+const useCockpitStateHook = window.useCockpitState || function useFallbackCockpitState() {
+  return useState({});
+};
+
+const useLayoutProfileHook = window.useLayoutProfile || function useFallbackLayoutProfile() {
+  useEffect(() => {}, []);
+};
+
 function App() {
   // sync mode/branch with the cockpit-state singleton (URL+localStorage)
-  const [cs, setCs] = (window.useCockpitState ? window.useCockpitState() : [{}, () => {}]);
+  const [cs, setCs] = useCockpitStateHook();
   // run layout profile — auto-collapses chrome per mode
-  if (window.useLayoutProfile) window.useLayoutProfile();
+  useLayoutProfileHook();
   const [mode, setModeRaw] = useState(cs.mode || "Dashboard");
   const [density, setDensity] = useState("normal");
   const [selKeeper, setSelKeeper] = useState("nick0cave");

@@ -27,6 +27,10 @@
 
 const { useState: _wsUseState, useEffect: _wsUseEffect } = React;
 
+const _useSoloCockpitState = window.useCockpitState || function useFallbackSoloCockpitState() {
+  return _wsUseState({ collapsed: new Set() });
+};
+
 const _WS_DEFS = {
   sidebar:    { name: "Sidebar",        kind: "sidebar"    },
   rail:       { name: "Rail",           kind: "rail"       },
@@ -42,9 +46,18 @@ const _WS_DEFS = {
   "plane-ide":       { name: "IDE plane",        kind: "plane-ide"        },
 };
 
+const _DRAWER_SOLO_IDS = ["terminal", "output", "cascade", "audit", "cost"];
+
+function _drawerSoloDef(id) {
+  if (!id || !id.startsWith("drawer-")) return null;
+  const drawerKind = id.slice("drawer-".length);
+  if (!_DRAWER_SOLO_IDS.includes(drawerKind)) return null;
+  return { name: "Drawer · " + drawerKind, kind: "drawer", drawerKind };
+}
+
 function WidgetSolo({ id }) {
   // pull state hook to clear collapsed widgets for this solo view
-  const [_cs, _setCs] = (window.useCockpitState ? window.useCockpitState() : [{collapsed:new Set()}, () => {}]);
+  const [_cs, _setCs] = _useSoloCockpitState();
 
   // mark body + title; clear collapsed set so widgets render expanded
   _wsUseEffect(() => {
@@ -55,7 +68,7 @@ function WidgetSolo({ id }) {
   }, [id]);
 
   const D = window.MASC_DATA || {};
-  const def = _WS_DEFS[id];
+  const def = _WS_DEFS[id] || _drawerSoloDef(id);
 
   // unknown widget — show a friendly index
   if (!def) {
@@ -76,6 +89,12 @@ function WidgetSolo({ id }) {
                 <li key={k}>
                   <a href={"?widget=" + k}>?widget={k}</a>
                   <span className="dim"> — {_WS_DEFS[k].name}</span>
+                </li>
+              ))}
+              {_DRAWER_SOLO_IDS.map(k => (
+                <li key={"drawer-" + k}>
+                  <a href={"?widget=drawer-" + k}>?widget=drawer-{k}</a>
+                  <span className="dim"> — Drawer · {k}</span>
                 </li>
               ))}
             </ul>
@@ -140,6 +159,11 @@ function WidgetSolo({ id }) {
     case "plane-observe":   body = <div className="center"><window.ObservePlane {...ctx}/></div>; break;
     case "plane-cognition": body = <div className="center"><window.CognitionPlane {...ctx}/></div>; break;
     case "plane-ide":       body = <div className="center"><window.IdePlane {...ctx}/></div>; break;
+    case "drawer":
+      body = window.__DrawerPanel
+        ? <window.__DrawerPanel kind={def.drawerKind} />
+        : <div className="ws-empty-msg">drawer renderer not wired</div>;
+      break;
     default:
       body = <div className="ws-empty-msg">renderer not wired</div>;
   }

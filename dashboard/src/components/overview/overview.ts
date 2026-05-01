@@ -150,7 +150,7 @@ export interface FunnelCounts {
   target: number | null
 }
 
-export function computeFunnelCounts(taskList: Task[], active: DashboardMissionSessionCard | null, nowMs = Date.now()): FunnelCounts {
+export function computeFunnelCounts(taskList: readonly Task[], active: DashboardMissionSessionCard | null, nowMs = Date.now()): FunnelCounts {
   const todayMs = startOfTodayMs(nowMs)
   let created = 0
   let inProgress = 0

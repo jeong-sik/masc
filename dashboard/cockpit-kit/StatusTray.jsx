@@ -12,6 +12,10 @@
 
 const { useState: _stUseState, useEffect: _stUseEffect, useRef: _stUseRef } = React;
 
+const _useTrayCockpitState = window.useCockpitState || function useFallbackTrayCockpitState() {
+  return _stUseState({ trayHidden: false });
+};
+
 function _useTrayPop() {
   const [open, setOpen] = _stUseState(null); // 'kpi' | 'life' | 'ticker' | 'keepers' | null
   const ref = _stUseRef(null);
@@ -64,7 +68,7 @@ function _eventTone(e) {
 
 function StatusTray() {
   const D = window.MASC_DATA || {};
-  const [cs, setCs] = (window.useCockpitState ? window.useCockpitState() : [{trayHidden:false}, ()=>{}]);
+  const [cs, setCs] = _useTrayCockpitState();
   const hidden = !!cs.trayHidden;
   const [open, setOpen, ref] = _useTrayPop();
   const spot = _kpiSpotlight(D);
@@ -120,7 +124,7 @@ function StatusTray() {
                   <span className={"st-dot k-" + _eventTone(e)}></span>
                   <span className="st-list-keeper">{e.keeper || "system"}</span>
                   <span className="st-list-kind">{e.kind}</span>
-                  <span className="st-list-msg">{e.summary || e.msg || ""}</span>
+                  <span className="st-list-msg">{_eventText(e)}</span>
                 </div>
               ))}
             </div>

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { JournalEntry } from '../../types'
-import { eventMatchesFilter } from './live-timeline'
+import { eventKindBadgeTone, eventMatchesFilter } from './live-timeline'
 
 function entry(overrides: Partial<JournalEntry>): JournalEntry {
   return {
@@ -26,5 +26,23 @@ describe('eventMatchesFilter', () => {
       eventType: 'oas_turn',
       text: 'NO_TOOL_CHANNEL: provider returned text',
     }), 'tool')).toBe(false)
+  })
+})
+
+describe('eventKindBadgeTone', () => {
+  it('maps heartbeat events to the heartbeat tone class', () => {
+    expect(eventKindBadgeTone(entry({ eventType: 'keeper_heartbeat' }))).toBe('agent-event-badge--heartbeat')
+    expect(eventKindBadgeTone(entry({ eventType: 'oas_keeper_snapshot' }))).toBe('agent-event-badge--heartbeat')
+  })
+
+  it('maps explicit error entries to the error tone class', () => {
+    expect(eventKindBadgeTone(entry({
+      eventType: 'broadcast',
+      text: 'Error: failed to claim task',
+    }))).toBe('agent-event-badge--error')
+  })
+
+  it('falls back to the default tone class', () => {
+    expect(eventKindBadgeTone(entry({ eventType: undefined }))).toBe('agent-event-badge--default')
   })
 })

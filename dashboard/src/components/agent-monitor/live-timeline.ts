@@ -7,6 +7,7 @@ import { useEffect, useRef, useMemo } from 'preact/hooks'
 import { TimeAgo } from '../common/time-ago'
 import { FilterChips } from '../common/filter-chips'
 import { EmptyState } from '../common/empty-state'
+import { StatusChip } from '../common/status-chip'
 import { journal } from '../../sse'
 import { isErrorJournalEntry } from '../../journal-entry'
 import type { JournalEntry, JournalEventType } from '../../types'
@@ -47,7 +48,7 @@ export function eventMatchesFilter(entry: JournalEntry, filter: FilterKind): boo
   }
 }
 
-function eventKindBadgeClass(entry: JournalEntry): string {
+export function eventKindBadgeTone(entry: JournalEntry): string {
   if (isErrorJournalEntry(entry)) return 'agent-event-badge--error'
   const eventType = entry.eventType
   switch (eventType) {
@@ -170,9 +171,7 @@ export function AgentLiveTimeline({ name }: { name: string }) {
           ? html`<${EmptyState} message="필터에 맞는 이벤트 없음" compact />`
           : filtered.map((entry: JournalEntry, idx: number) => html`
               <div class="flex items-baseline gap-1.5 py-1 px-2 text-sm transition-[background] duration-100 rounded hover:bg-[var(--white-4)]" key=${idx}>
-                <span class="agent-event-badge ${eventKindBadgeClass(entry)}">
-                  ${eventKindLabel(entry.eventType)}
-                </span>
+                <${StatusChip} tone=${eventKindBadgeTone(entry)}>${eventKindLabel(entry.eventType)}<//>
                 <span class="flex-1 text-[var(--color-fg-primary)] truncate">${compactText(entry.text)}</span>
                 ${entry.timestamp ? html`
                   <span class="text-[var(--color-fg-disabled)] text-2xs whitespace-nowrap"><${TimeAgo} timestamp=${entry.timestamp} /></span>

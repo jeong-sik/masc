@@ -25,6 +25,10 @@ import { StatusChip } from './common/status-chip'
 import type { ManagedAsyncResource } from '../lib/async-state'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
 
+function ThCell({ children }: { children: unknown }) {
+  return html`<${ThCell}>${children}</th>`
+}
+
 type StatusFilter = 'all' | TlcResultStatus
 
 const statusFilter = signal<StatusFilter>('all')
@@ -161,14 +165,14 @@ function ResultsTable({ entries }: { entries: TlcResultEntry[] }) {
       <table class="w-full text-xs tabular-nums" aria-label="TLC 실행 결과">
         <thead class="text-left text-[var(--color-fg-muted)]">
           <tr>
-            <th scope="col" class="py-1 pr-4">사양</th>
-            <th scope="col" class="py-1 pr-4">Cfg</th>
-            <th scope="col" class="py-1 pr-4">분류</th>
-            <th scope="col" class="py-1 pr-4">상태</th>
+            <${ThCell}>사양</${ThCell}>
+            <${ThCell}>Cfg</${ThCell}>
+            <${ThCell}>분류</${ThCell}>
+            <${ThCell}>상태</${${ThCell}>
             <th scope="col" class="py-1 pr-4 text-right">States</th>
             <th scope="col" class="py-1 pr-4 text-right">Distinct</th>
             <th scope="col" class="py-1 pr-4 text-right">Diameter</th>
-            <th scope="col" class="py-1 pr-4">마지막 실행</th>
+            <${ThCell}>마지막 실행</${ThCell}>
             <th scope="col" class="py-1">증거</th>
           </tr>
         </thead>

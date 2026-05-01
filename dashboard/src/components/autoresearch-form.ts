@@ -17,6 +17,10 @@ import {
 } from '../api'
 import { refreshAutoresearchSurface } from './autoresearch-state'
 
+function LabelCol({ children }: { children: unknown }) {
+  return html`<${LabelCol}>${children}</${LabelCol}>`
+}
+
 // --- Form signals ---
 
 export const showStartForm = signal(false)
@@ -130,7 +134,7 @@ export function StartAutoresearchForm() {
       </h2>
 
       <div class="flex flex-col gap-3">
-        <label class="flex flex-col gap-1">
+        <${LabelCol}>
           <${Eyebrow} class="font-medium">목표 *</${Eyebrow}>
           <${TextArea}
             value=${formGoal.value}
@@ -139,9 +143,9 @@ export function StartAutoresearchForm() {
             required
             onInput=${inputHandler(formGoal)}
           />
-        </label>
+        </${LabelCol}>
 
-        <label class="flex flex-col gap-1">
+        <${LabelCol}>
           <${Eyebrow} class="font-medium">메트릭 명령어 *</${Eyebrow}>
           <${TextInput}
             value=${formMetricFn.value}
@@ -149,9 +153,9 @@ export function StartAutoresearchForm() {
             required
             onInput=${inputHandler(formMetricFn)}
           />
-        </label>
+        </${LabelCol}>
 
-        <label class="flex flex-col gap-1">
+        <${LabelCol}>
           <${Eyebrow} class="font-medium">대상 파일 *</${Eyebrow}>
           <${TextInput}
             value=${formTargetFile.value}
@@ -159,7 +163,7 @@ export function StartAutoresearchForm() {
             required
             onInput=${inputHandler(formTargetFile)}
           />
-        </label>
+        </${LabelCol}>
 
         <button type="button"
           class="self-start text-2xs text-[var(--color-fg-muted)] hover:text-[var(--color-fg-primary)] transition-colors"
@@ -170,23 +174,23 @@ export function StartAutoresearchForm() {
 
         ${formShowAdvanced.value ? html`
           <div class="grid grid-cols-2 gap-3 border-t border-card-border pt-3">
-            <label class="flex flex-col gap-1">
+            <${LabelCol}>
               <${Eyebrow}>작업 디렉토리</${Eyebrow}>
               <${TextInput}
                 value=${formWorkdir.value}
                 placeholder="기본: 프로젝트 루트"
                 onInput=${inputHandler(formWorkdir)}
               />
-            </label>
-            <label class="flex flex-col gap-1">
+            </${LabelCol}>
+            <${LabelCol}>
               <${Eyebrow}>모델</${Eyebrow}>
               <${TextInput}
                 value=${formModelModel.value}
                 placeholder="glm"
                 onInput=${inputHandler(formModelModel)}
               />
-            </label>
-            <label class="flex flex-col gap-1">
+            </${LabelCol}>
+            <${LabelCol}>
               <${Eyebrow}>최대 사이클</${Eyebrow}>
               <${TextInput}
                 type="number"
@@ -194,8 +198,8 @@ export function StartAutoresearchForm() {
                 placeholder="100"
                 onInput=${inputHandler(formMaxCycles)}
               />
-            </label>
-            <label class="flex flex-col gap-1">
+            </${LabelCol}>
+            <${LabelCol}>
               <${Eyebrow}>사이클 타임아웃 (초)</${Eyebrow}>
               <${TextInput}
                 type="number"
@@ -203,8 +207,8 @@ export function StartAutoresearchForm() {
                 placeholder="300"
                 onInput=${inputHandler(formCycleTimeoutS)}
               />
-            </label>
-            <label class="flex flex-col gap-1">
+            </${LabelCol}>
+            <${LabelCol}>
               <${Eyebrow}>기준선 (baseline)</${Eyebrow}>
               <${TextInput}
                 type="number"
@@ -212,8 +216,8 @@ export function StartAutoresearchForm() {
                 placeholder="자동 측정 (빈칸)"
                 onInput=${inputHandler(formBaseline)}
               />
-            </label>
-            <label class="flex flex-col gap-1">
+            </${LabelCol}>
+            <${LabelCol}>
               <${Eyebrow}>인내 (patience)</${Eyebrow}>
               <${TextInput}
                 type="number"
@@ -221,7 +225,7 @@ export function StartAutoresearchForm() {
                 placeholder="기본값 사용"
                 onInput=${inputHandler(formPatience)}
               />
-            </label>
+            </${LabelCol}>
             <label class="col-span-2 flex flex-col gap-1">
               <${Eyebrow}>빌드 검증 명령어</${Eyebrow}>
               <${TextInput}

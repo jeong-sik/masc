@@ -11,6 +11,7 @@ import { TextInput } from './common/input'
 import { SectionCap } from './common/section-cap'
 import { StatusChip } from './common/status-chip'
 import { StatusDot } from './common/status-dot'
+import { InfoCard } from './common/info-card'
 import type {
   RailStatus,
   GateDistribution,
@@ -20,6 +21,11 @@ import type {
   PreCompactEvent,
   HandoffEvent,
 } from './harness-health-state'
+
+function ItemTitle({ children, class: cx }: { children: unknown; class?: string }) {
+  return html`<div class=${`text-sm font-medium text-[var(--color-fg-secondary)] ${cx ?? ''}`}>${children}</div>
+  `
+}
 
 /**
  * Pure filter for recent verdict rows.
@@ -278,7 +284,7 @@ export function HeroRailCard({
   return html`
     <div class=${`rounded border p-3 ${statusCardClass(status)}`}>
       <div class="flex items-start justify-between gap-3">
-        <div class="text-sm font-medium text-[var(--color-fg-secondary)]">${label}</div>
+        <${ItemTitle}>${label}</${ItemTitle}>
         <${StatusPill} status=${status} />
       </div>
       <div class="mt-3 text-lg font-semibold text-[var(--color-fg-primary)]">${detail}</div>
@@ -295,7 +301,7 @@ export function ScopePairing() {
           <div class="flex items-center justify-between gap-3">
             <div>
               <${SectionCap}>실험 루프<//>
-              <div class="mt-1 text-sm font-medium text-[var(--color-fg-secondary)]">오토리서치가 답하는 것</div>
+              <${ItemTitle} class="mt-1">오토리서치가 답하는 것</${ItemTitle}>
             </div>
             <button
               type="button"
@@ -312,7 +318,7 @@ export function ScopePairing() {
       <${SurfaceCard} variant="compact">
         <div class="flex flex-col gap-2">
           <${SectionCap}>안전 감시<//>
-          <div class="text-sm font-medium text-[var(--color-fg-secondary)]">하네스가 답하는 것</div>
+          <${ItemTitle}>하네스가 답하는 것</${ItemTitle}>
           <div class="text-sm leading-loose text-[var(--color-fg-primary)]">
             평가 모델이 건강한지, 장기 실행 중 압축이 정상인지, 세대 교체가 안전한지 봅니다.
           </div>
@@ -337,7 +343,7 @@ export function RailHeader({
     <div class="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
       <div>
         <div class="flex items-center gap-2">
-          <div class="text-sm font-medium text-[var(--color-fg-secondary)]">${title}</div>
+          <${ItemTitle}>${title}</${ItemTitle}>
           <${StatusPill} status=${status} />
         </div>
         <div class="mt-1 text-sm leading-loose text-[var(--color-fg-muted)]">${description}</div>
@@ -376,10 +382,10 @@ export function RecentVerdictsList({ items }: { items: HarnessVerdictItem[] }) {
       ${isFiltering && visibleItems.length === 0
         ? html`<div class="py-4 text-center text-2xs text-[var(--color-fg-disabled)]">필터 결과 없음 (${items.length} items)</div>`
         : visibleItems.map(item => html`
-          <div class="rounded border border-[var(--white-8)] bg-[var(--white-4)] p-3">
+          <${InfoCard}>
             <div class="flex items-start justify-between gap-3">
               <div>
-                <div class="text-sm font-medium text-[var(--color-fg-secondary)]">${item.task_title || item.task_id}</div>
+                <${ItemTitle}>${item.task_title || item.task_id}</${ItemTitle}>
                 <div class="mt-1 text-xs text-[var(--color-fg-muted)]">
                   ${item.agent_name || 'agent'} · ${item.gate || 'gate'} · ${item.evaluator_cascade || 'cascade'} · ${formatTimestamp(item.timestamp)}
                 </div>
@@ -390,7 +396,7 @@ export function RecentVerdictsList({ items }: { items: HarnessVerdictItem[] }) {
             ${item.fallback_reason ? html`
               <div class="mt-2 break-all text-xs text-[var(--color-status-warn)]">${item.fallback_reason}</div>
             ` : null}
-          </div>
+          <//>
         `)}
     </div>
   `
@@ -423,9 +429,9 @@ export function PreCompactList({ section }: { section: HarnessSignalSection<PreC
       ${isFiltering && visibleItems.length === 0
         ? html`<div class="py-4 text-center text-2xs text-[var(--color-fg-disabled)]">필터 결과 없음 (${section.recent_events.length} items)</div>`
         : visibleItems.map(item => html`
-          <div class="rounded border border-[var(--white-8)] bg-[var(--white-4)] p-3">
+          <${InfoCard}>
             <div class="flex items-start justify-between gap-3">
-              <div class="text-sm font-medium text-[var(--color-fg-secondary)]">${item.keeper_name}</div>
+              <${ItemTitle}>${item.keeper_name}</${ItemTitle}>
               <div class="text-xs text-[var(--color-fg-muted)]">${formatTimestamp(item.timestamp)}</div>
             </div>
             <div class="mt-2 grid grid-cols-2 gap-2 text-xs text-[var(--color-fg-primary)]">
@@ -442,7 +448,7 @@ export function PreCompactList({ section }: { section: HarnessSignalSection<PreC
                 `)}
               </div>
             ` : null}
-          </div>
+          <//>
         `)}
     </div>
   `
@@ -475,9 +481,9 @@ export function HandoffList({ section }: { section: HarnessSignalSection<Handoff
       ${isFiltering && visibleItems.length === 0
         ? html`<div class="py-4 text-center text-2xs text-[var(--color-fg-disabled)]">필터 결과 없음 (${section.recent_events.length} items)</div>`
         : visibleItems.map(item => html`
-          <div class="rounded border border-[var(--white-8)] bg-[var(--white-4)] p-3">
+          <${InfoCard}>
             <div class="flex items-start justify-between gap-3">
-              <div class="text-sm font-medium text-[var(--color-fg-secondary)]">${item.keeper_name}</div>
+              <${ItemTitle}>${item.keeper_name}</${ItemTitle}>
               <div class="text-xs text-[var(--color-fg-muted)]">${formatTimestamp(item.timestamp)}</div>
             </div>
             <div class="mt-2 grid grid-cols-2 gap-2 text-xs text-[var(--color-fg-primary)]">
@@ -492,7 +498,7 @@ export function HandoffList({ section }: { section: HarnessSignalSection<Handoff
             ${item.prev_trace_id ? html`
               <div class="mt-2 text-xs text-[var(--color-fg-muted)]">이전 ${item.prev_trace_id.slice(0, 8)} → 새 ${item.new_trace_id?.slice(0, 8) ?? '-'}</div>
             ` : null}
-          </div>
+          <//>
         `)}
     </div>
   `

@@ -28,6 +28,11 @@ import { formatAgeSummary } from './governance-utils'
 // Re-export for consumers that import from './governance'
 export { refreshGovernance } from './governance-store'
 
+function MetaTag({ children, mono = false }: { children: unknown; mono?: boolean }) {
+  const cls = `rounded border border-[var(--white-10)] bg-[var(--white-5)] px-1.5 py-0.5 text-text-muted${mono ? ' font-mono' : ''}`
+  return html`<span class=${cls}>${children}</span>`
+}
+
 function judgeRuntimeStatus(
   judge?: GovernanceJudgeSummary,
   summary?: { judge_online?: boolean },
@@ -553,15 +558,13 @@ function KeeperApprovalQueueSection() {
                       ? html`<div class="mt-2 text-xs leading-relaxed text-text-muted break-words">${item.input_preview}</div>`
                       : null}
                     <div class="mt-2 flex flex-wrap gap-1.5 text-2xs">
-                      ${item.task_id ? html`<span class="rounded border border-[var(--white-10)] bg-[var(--white-5)] px-1.5 py-0.5 text-text-muted">task ${item.task_id}</span>` : null}
-                      ${item.goal_id ? html`<span class="rounded border border-[var(--white-10)] bg-[var(--white-5)] px-1.5 py-0.5 text-text-muted">goal ${item.goal_id}</span>` : null}
+                      ${item.task_id ? html`<${MetaTag}>task ${item.task_id}</${MetaTag}>` : null}
+                      ${item.goal_id ? html`<${MetaTag}>goal ${item.goal_id}</${MetaTag}>` : null}
                       ${item.runtime_contract?.sandbox_profile
-                        ? html`<span class="rounded border border-[var(--white-10)] bg-[var(--white-5)] px-1.5 py-0.5 text-text-muted">
-                          sandbox ${item.runtime_contract.sandbox_profile}${item.runtime_contract.backend ? ` / ${item.runtime_contract.backend}` : ''}
-                        </span>`
+                        ? html`<${MetaTag}>sandbox ${item.runtime_contract.sandbox_profile}${item.runtime_contract.backend ? ` / ${item.runtime_contract.backend}` : ''}</${MetaTag}>`
                         : null}
                       ${item.selected_model
-                        ? html`<span class="rounded border border-[var(--white-10)] bg-[var(--white-5)] px-1.5 py-0.5 text-text-muted font-mono">${item.selected_model}</span>`
+                        ? html`<${MetaTag} mono>${item.selected_model}</${MetaTag}>`
                         : null}
                       ${item.disposition
                         ? html`<span class="rounded border px-1.5 py-0.5 font-bold ${approvalDispositionToneClass(item.disposition)}">
@@ -641,10 +644,10 @@ function ApprovalRulesSection() {
                       </span>
                     </div>
                     <div class="mt-2 flex flex-wrap gap-1.5 text-2xs">
-                      ${rule.sandbox_profile ? html`<span class="rounded border border-[var(--white-10)] bg-[var(--white-5)] px-1.5 py-0.5 text-text-muted">sandbox ${rule.sandbox_profile}${rule.backend ? ` / ${rule.backend}` : ''}</span>` : null}
-                      ${rule.request_fingerprint_preview ? html`<span class="rounded border border-[var(--white-10)] bg-[var(--white-5)] px-1.5 py-0.5 text-text-muted font-mono">fp ${rule.request_fingerprint_preview}</span>` : null}
-                      ${typeof rule.match_count === 'number' ? html`<span class="rounded border border-[var(--white-10)] bg-[var(--white-5)] px-1.5 py-0.5 text-text-muted">match ${rule.match_count}</span>` : null}
-                      ${rule.source_approval_id ? html`<span class="rounded border border-[var(--white-10)] bg-[var(--white-5)] px-1.5 py-0.5 text-text-muted">from ${rule.source_approval_id}</span>` : null}
+                      ${rule.sandbox_profile ? html`<${MetaTag}>sandbox ${rule.sandbox_profile}${rule.backend ? ` / ${rule.backend}` : ''}<//>` : null}
+                      ${rule.request_fingerprint_preview ? html`<${MetaTag} mono>fp ${rule.request_fingerprint_preview}<//>` : null}
+                      ${typeof rule.match_count === 'number' ? html`<${MetaTag}>match ${rule.match_count}<//>` : null}
+                      ${rule.source_approval_id ? html`<${MetaTag}>from ${rule.source_approval_id}<//>` : null}
                     </div>
                     <div class="mt-3 flex justify-end">
                       <${ActionButton}

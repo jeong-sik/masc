@@ -9,6 +9,7 @@ import { ActionButton } from './common/button'
 import { SurfaceCard } from './common/card'
 import { EmptyState } from './common/empty-state'
 import { Eyebrow } from './common/eyebrow'
+import { InfoCard } from './common/info-card'
 import { formatElapsedCompact, formatTimestampKo, formatDelta } from '../lib/format-time'
 import { statusLabel } from '../lib/status-label'
 import { navigate } from '../router'
@@ -56,6 +57,10 @@ export function resetAutoresearchState(): void {
 }
 
 // --- Helpers ---
+
+function MonoBody({ children }: { children: unknown }) {
+  return html`<${MonoBody}>${children}</${MonoBody}>`
+}
 
 function statusColor(status: string): string {
   switch (status) {
@@ -182,15 +187,15 @@ function LoopOverview({ loop }: { loop: AutoresearchLoopSummary }) {
           </div>
           <div>
             <${Eyebrow} class="mb-0.5">경과 시간</${Eyebrow}>
-            <div class="text-[var(--text-body)] text-sm font-mono">${formatElapsedCompact(loop.elapsed_s)}</div>
+            <${MonoBody}>${formatElapsedCompact(loop.elapsed_s)}</${MonoBody}>
           </div>
           <div>
             <${Eyebrow} class="mb-0.5">실행자</${Eyebrow}>
-            <div class="text-[var(--text-body)] text-sm font-mono">${loop.author ?? '알 수 없음'}</div>
+            <${MonoBody}>${loop.author ?? '알 수 없음'}</${MonoBody}>
           </div>
           <div>
             <${Eyebrow} class="mb-0.5">모델</${Eyebrow}>
-            <div class="text-[var(--text-body)] text-sm font-mono">${loop.model_model}</div>
+            <${MonoBody}>${loop.model_model}</${MonoBody}>
           </div>
           <div>
             <${Eyebrow} class="mb-0.5">소스</${Eyebrow}>
@@ -198,7 +203,7 @@ function LoopOverview({ loop }: { loop: AutoresearchLoopSummary }) {
           </div>
           <div>
             <${Eyebrow} class="mb-0.5">최근 갱신</${Eyebrow}>
-            <div class="text-[var(--text-body)] text-sm font-mono">${loop.updated_at != null ? formatTimestampKo(loop.updated_at) : '알 수 없음'}</div>
+            <${MonoBody}>${loop.updated_at != null ? formatTimestampKo(loop.updated_at) : '알 수 없음'}</${MonoBody}>
           </div>
         </div>
       </div>
@@ -207,7 +212,7 @@ function LoopOverview({ loop }: { loop: AutoresearchLoopSummary }) {
         <div class="grid grid-cols-2 gap-3">
           <div>
             <${Eyebrow} class="mb-0.5">기준선</${Eyebrow}>
-            <div class="text-[var(--text-body)] text-sm font-mono">${loop.baseline.toFixed(4)}</div>
+            <${MonoBody}>${loop.baseline.toFixed(4)}</${MonoBody}>
           </div>
           <div>
             <${Eyebrow} class="mb-0.5">최고 점수</${Eyebrow}>
@@ -369,30 +374,30 @@ function ResearchBrief({ loop }: { loop: AutoresearchLoopSummary }) {
         </div>
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
-          <div class="rounded border border-[var(--white-8)] bg-[var(--white-4)] p-3">
+          <${InfoCard}>
             <${Eyebrow} class="mb-1">무엇을 연구하나</${Eyebrow}>
             <div class="leading-relaxed text-[var(--text-body)]">${loop.goal}</div>
-          </div>
-          <div class="rounded border border-[var(--white-8)] bg-[var(--white-4)] p-3">
+          </${InfoCard}>
+          <${InfoCard}>
             <${Eyebrow} class="mb-1">무엇으로 성공을 보나</${Eyebrow}>
             <div class="font-mono text-[var(--text-body)]">${loop.metric_fn}</div>
             <div class="mt-1 text-[var(--color-fg-disabled)]">baseline ${loop.baseline.toFixed(4)} -> best ${loop.best_score.toFixed(4)}</div>
-          </div>
-          <div class="rounded border border-[var(--white-8)] bg-[var(--white-4)] p-3">
+          </${InfoCard}>
+          <${InfoCard}>
             <${Eyebrow} class="mb-1">연결된 실행 컨텍스트</${Eyebrow}>
             <div class="flex flex-col gap-1 text-[var(--text-body)]">
               <span>session ${loop.session_id ?? '없음'}</span>
               <span>operation ${loop.operation_id ?? '없음'}</span>
               <span>linked ${linkedAt}</span>
             </div>
-          </div>
-          <div class="rounded border border-[var(--white-8)] bg-[var(--white-4)] p-3">
+          </${InfoCard}>
+          <${InfoCard}>
             <${Eyebrow} class="mb-1">현재 가설 / 메모</${Eyebrow}>
             <div class="flex flex-col gap-1 text-[var(--text-body)] leading-relaxed">
               <span>${loop.queued_hypothesis ?? '대기 가설 없음'}</span>
               <span class="text-[var(--color-fg-disabled)]">${loop.program_note ?? 'program note 없음'}</span>
             </div>
-          </div>
+          </${InfoCard}>
         </div>
 
         <div class="rounded border border-[var(--white-8)] bg-[var(--white-3)] px-3 py-2 text-xs leading-normal text-[var(--color-fg-muted)]">
@@ -408,13 +413,13 @@ function OutcomeVsHarnessCallout({ loopCount }: { loopCount: number }) {
   return html`
     <${SurfaceCard} variant="compact">
       <div class="grid grid-cols-1 gap-3 md:grid-cols-[1.3fr_1fr]">
-        <div class="rounded border border-[var(--white-8)] bg-[var(--white-4)] p-3">
+        <${InfoCard}>
           <${Eyebrow}>실험 결과</${Eyebrow}>
           <div class="mt-1 text-sm font-medium text-[var(--text-strong)]">이 화면은 keep/discard 루프를 봅니다.</div>
           <div class="mt-2 text-sm leading-loose text-[var(--text-body)]">
             어떤 파일을 바꾸고 어떤 metric을 밀어 올리려는지, 그리고 현재 ${loopCount}개 루프가 어떤 cycle에 있는지 직접 봅니다.
           </div>
-        </div>
+        </${InfoCard}>
 
         <div class="rounded border border-[var(--white-8)] bg-[var(--white-3)] p-3">
           <${Eyebrow}>안전 하네스</${Eyebrow}>

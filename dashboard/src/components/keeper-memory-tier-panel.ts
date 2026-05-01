@@ -24,6 +24,10 @@ interface KeeperMemoryTierPanelProps {
 
 type MemoryTierFilter = 'all' | 'saturated'
 
+function Badge({ children }: { children: unknown }) {
+  return html`<span class="inline-flex items-center rounded-sm border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5">${children}</span>`
+}
+
 /**
  * Pure filter for memory-tier rows.
  *
@@ -145,15 +149,9 @@ export function KeeperMemoryTierPanel({
   return html`
     <div class="flex flex-col gap-3">
       <div class="flex flex-wrap items-center gap-2 text-3xs text-[var(--color-fg-disabled)]">
-        <span class="inline-flex items-center rounded-sm border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5">
-          total ${totalUsed} / ${totalCap}
-        </span>
-        <span class="inline-flex items-center rounded-sm border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5">
-          ${usage.length} kinds
-        </span>
-        <span class="inline-flex items-center rounded-sm border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5">
-          KMC ${compactionStage}
-        </span>
+        <${Badge}>total ${totalUsed} / ${totalCap}</${Badge}>
+        <${Badge}>${usage.length} kinds</${Badge}>
+        <${Badge}>KMC ${compactionStage}</${Badge}>
         ${isCompacting ? html`
           <span class="inline-flex items-center rounded-sm border border-[rgba(251,191,36,0.3)] bg-[var(--warn-10)] px-2 py-0.5 text-[var(--amber-bright)]">
             compacting

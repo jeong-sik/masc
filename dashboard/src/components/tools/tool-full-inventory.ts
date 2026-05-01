@@ -29,6 +29,15 @@ import {
   showBackToTop,
 } from './tool-state'
 
+function StatCard({ value, label }: { value: number; label: string }) {
+  return html`
+    <div class="p-4 rounded border border-[var(--color-border-default)] bg-[var(--white-3)] flex flex-col gap-1.5">
+      <span class="text-[var(--color-fg-secondary)] text-3xl font-bold leading-none tabular-nums">${value}</span>
+      <span class="text-2xs text-[var(--color-fg-muted)] uppercase tracking-wider font-medium">${label}</span>
+    </div>
+  `
+}
+
 export function FullInventoryView({
   inventory,
   loading,
@@ -87,30 +96,12 @@ export function FullInventoryView({
   return html`
     <div class="sticky top-[var(--header-h)] z-[var(--z-tab-sticky)] bg-[var(--backdrop-modal)] backdrop-blur-[8px] py-3 border-b border-[var(--color-border-default)]">
       <div class="grid grid-cols-[repeat(auto-fit,minmax(120px,1fr))] gap-3 my-4">
-        <div class="p-4 rounded border border-[var(--color-border-default)] bg-[var(--white-3)] flex flex-col gap-1.5">
-          <span class="text-[var(--color-fg-secondary)] text-3xl font-bold leading-none tabular-nums">${totalCount}</span>
-          <span class="text-2xs text-[var(--color-fg-muted)] uppercase tracking-wider font-medium">전체 도구</span>
-        </div>
-        <div class="p-4 rounded border border-[var(--color-border-default)] bg-[var(--white-3)] flex flex-col gap-1.5">
-          <span class="text-[var(--color-fg-secondary)] text-3xl font-bold leading-none tabular-nums">${publicCount}</span>
-          <span class="text-2xs text-[var(--color-fg-muted)] uppercase tracking-wider font-medium">MCP 공개</span>
-        </div>
-        <div class="p-4 rounded border border-[var(--color-border-default)] bg-[var(--white-3)] flex flex-col gap-1.5">
-          <span class="text-[var(--color-fg-secondary)] text-3xl font-bold leading-none tabular-nums">${hiddenCount}</span>
-          <span class="text-2xs text-[var(--color-fg-muted)] uppercase tracking-wider font-medium">숨김</span>
-        </div>
-        <div class="p-4 rounded border border-[var(--color-border-default)] bg-[var(--white-3)] flex flex-col gap-1.5">
-          <span class="text-[var(--color-fg-secondary)] text-3xl font-bold leading-none tabular-nums">${deprecatedCount}</span>
-          <span class="text-2xs text-[var(--color-fg-muted)] uppercase tracking-wider font-medium">지원 중단</span>
-        </div>
-        <div class="p-4 rounded border border-[var(--color-border-default)] bg-[var(--white-3)] flex flex-col gap-1.5">
-          <span class="text-[var(--color-fg-secondary)] text-3xl font-bold leading-none tabular-nums">${directCallCount}</span>
-          <span class="text-2xs text-[var(--color-fg-muted)] uppercase tracking-wider font-medium">직접 호출</span>
-        </div>
-        <div class="p-4 rounded border border-[var(--color-border-default)] bg-[var(--white-3)] flex flex-col gap-1.5">
-          <span class="text-[var(--color-fg-secondary)] text-3xl font-bold leading-none tabular-nums">${filtered.length}</span>
-          <span class="text-2xs text-[var(--color-fg-muted)] uppercase tracking-wider font-medium">필터 결과</span>
-        </div>
+        <${StatCard} value=${totalCount} label="전체 도구" />
+        <${StatCard} value=${publicCount} label="MCP 공개" />
+        <${StatCard} value=${hiddenCount} label="숨김" />
+        <${StatCard} value=${deprecatedCount} label="지원 중단" />
+        <${StatCard} value=${directCallCount} label="직접 호출" />
+        <${StatCard} value=${filtered.length} label="필터 결과" />
       </div>
 
       <div class="text-xs text-[var(--color-fg-muted)] mb-4">

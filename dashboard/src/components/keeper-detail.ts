@@ -90,9 +90,15 @@ import {
 import {
   GenerationLineagePanel,
   KeeperCheckpointPanel,
+  MonoBadge,
 } from './keeper-detail-history'
 import { navigate, route } from '../router'
 import { StatusDot } from './common/status-dot'
+
+function StrongSecondary({ children }: { children: unknown }) {
+  return html`<strong class="text-[var(--color-fg-secondary)]">${children}</strong>`
+}
+
 export {
   filterCheckpointHistory,
   lineageTransitionLabel,
@@ -188,6 +194,13 @@ function keeperNeedsDiagnosticAttention(keeper: Keeper): boolean {
     || Boolean(runtimeBlocker)
     || Boolean(blocker)
     || hbStale
+}
+
+function RuntimeBadge({ tone, children }: { tone: 'warn' | 'bad'; children: unknown }) {
+  const toneCls = tone === 'warn'
+    ? 'bg-[var(--warn-14)] text-[var(--color-status-warn)]'
+    : 'bg-[var(--bad-soft)] text-[var(--color-status-err)]'
+  return html`<span class="inline-flex items-center rounded-sm px-2 py-0.5 text-2xs font-semibold ${toneCls}">${children}</span>`
 }
 
 function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
@@ -352,7 +365,7 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
     <div class="px-6 pt-4">
       <div class="rounded border ${toneClass} px-4 py-3 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-[var(--color-fg-primary)]">
         ${keeper.paused
-          ? html`<span class="inline-flex items-center rounded-sm px-2 py-0.5 text-2xs font-semibold bg-[var(--warn-14)] text-[var(--color-status-warn)]">일시정지</span>
+          ? html`<${RuntimeBadge} tone="warn">일시정지</${RuntimeBadge}>
             ${hasActivitySignal ? html`<span class="text-[var(--color-fg-muted)]">${renderActivitySignal()}</span>` : null}
             <${ActionButton}
               variant="ghost"
@@ -384,28 +397,28 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
             ? html`<span>하트비트는 유지되지만 자율 행동은 멈춰 있습니다.</span>`
           : null}
         ${hbStale
-          ? html`<span class="inline-flex items-center rounded-sm px-2 py-0.5 text-2xs font-semibold bg-[var(--bad-soft)] text-[var(--color-status-err)]">하트비트 끊김</span>
+          ? html`<${RuntimeBadge} tone="bad">하트비트 끊김</${RuntimeBadge}>
             <span>마지막 하트비트: <${TimeAgo} timestamp=${keeper.last_heartbeat} /></span>`
           : null}
         ${continueGate
           ? html`
-              <span class="inline-flex items-center rounded-sm px-2 py-0.5 text-2xs font-semibold bg-[var(--warn-14)] text-[var(--color-status-warn)]">
+              <${RuntimeBadge} tone="warn">
                 계속 진행 승인 대기
-              </span>
+              </${RuntimeBadge}>
               ${hasActivitySignal ? html`<span class="text-[var(--color-fg-muted)]">${renderActivitySignal()}</span>` : null}
             `
           : socialFallbackActive
           ? html`
-              <span class="inline-flex items-center rounded-sm px-2 py-0.5 text-2xs font-semibold bg-[var(--warn-14)] text-[var(--color-status-warn)]">
+              <${RuntimeBadge} tone="warn">
                 소셜 폴백
-              </span>
+              </${RuntimeBadge}>
               ${hasActivitySignal ? html`<span class="text-[var(--color-fg-muted)]">${renderActivitySignal()}</span>` : null}
             `
           : runtimeBlockerClass
           ? html`
-              <span class="inline-flex items-center rounded-sm px-2 py-0.5 text-2xs font-semibold bg-[var(--bad-soft)] text-[var(--color-status-err)]">
+              <${RuntimeBadge} tone="bad">
                 ${runtimeBlockerLabel ?? '런타임 차단'}
-              </span>
+              </${RuntimeBadge}>
               ${hasActivitySignal ? html`<span class="text-[var(--color-fg-muted)]">${renderActivitySignal()}</span>` : null}
             `
           : null}
@@ -413,10 +426,10 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
           ? html`<span><strong class="text-[var(--color-fg-secondary)]">런타임 차단</strong> · ${runtimeBlocker}</span>`
           : null}
         ${blocker
-          ? html`<span><strong class="text-[var(--color-fg-secondary)]">차단 요인</strong> · ${blocker}</span>`
+          ? html`<span><${StrongSecondary}>차단 요인</${StrongSecondary}> · ${blocker}</span>`
           : null}
         ${keeper.last_need
-          ? html`<span><strong class="text-[var(--color-fg-secondary)]">최근 필요</strong> · ${keeper.last_need}</span>`
+          ? html`<span><${StrongSecondary}>최근 필요</${StrongSecondary}> · ${keeper.last_need}</span>`
           : null}
         ${attentionReason
           ? html`<span><strong class="text-[var(--color-fg-secondary)]">주의 사유</strong> · ${attentionReason}</span>`
@@ -432,10 +445,10 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
             `
           : null}
         ${trustSummary
-          ? html`<span><strong class="text-[var(--color-fg-secondary)]">검증</strong> · ${trustSummary}</span>`
+          ? html`<span><${StrongSecondary}>검증</${StrongSecondary}> · ${trustSummary}</span>`
           : null}
         ${runtimeProofStatus
-          ? html`<span><strong class="text-[var(--color-fg-secondary)]">증명</strong> · ${runtimeProofStatus}</span>`
+          ? html`<span><${StrongSecondary}>증명</${StrongSecondary}> · ${runtimeProofStatus}</span>`
           : null}
         ${requiredTools.length > 0
           ? html`<span><strong class="text-[var(--color-fg-secondary)]">필요 도구</strong> · ${requiredTools.join(', ')}</span>`
@@ -450,7 +463,7 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
           ? html`<span><strong class="text-[var(--color-fg-secondary)]">캐스케이드</strong> · ${cascadeLabel}</span>`
           : null}
         ${runtimeModel
-          ? html`<span><strong class="text-[var(--color-fg-secondary)]">${runtimeModel.label}</strong> · ${runtimeModel.value}</span>`
+          ? html`<span><${StrongSecondary}>${runtimeModel.label}</${StrongSecondary}> · ${runtimeModel.value}</span>`
           : null}
         ${observedProviderModel || observedCascadeOutcome || typeof observedProviderAttempts === 'number'
           ? html`
@@ -475,7 +488,7 @@ function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
         ${trustLatestEvent
           ? html`
               <span>
-                <strong class="text-[var(--color-fg-secondary)]">최근 검증 이벤트</strong>
+                <${StrongSecondary}>최근 검증 이벤트</${StrongSecondary}>
                 · ${trustLatestEvent.title}
                 · <${TimeAgo} timestamp=${trustLatestEvent.ts} />
               </span>
@@ -747,7 +760,7 @@ function PlaygroundReposPanel({ keeperName }: { keeperName: string }) {
                   <div class="flex-1 min-w-0">
                     <div class="flex items-center gap-2">
                       <span class="text-xs font-medium text-[var(--color-fg-secondary)] truncate">${r.name}</span>
-                      <span class="text-3xs font-mono px-1.5 py-0.5 rounded bg-[var(--accent-12)] text-[var(--color-accent-fg)] border border-[var(--accent-15)]">${r.branch}</span>
+                      <${MonoBadge}>${r.branch}</${MonoBadge}>
                       ${r.shallow ? html`<span class="text-3xs px-1 py-0.5 rounded bg-[var(--warn-10)] text-[var(--color-status-warn)] border border-[var(--warn-20)]">shallow</span>` : null}
                     </div>
                     <div class="text-3xs text-[var(--color-fg-muted)] font-mono mt-0.5 truncate">${r.latest_commit}</div>
@@ -766,7 +779,7 @@ function PlaygroundReposPanel({ keeperName }: { keeperName: string }) {
               ${prs.map(pr => html`
                 <div class="flex items-center gap-2 px-3 py-1.5 rounded border border-[var(--white-8)] bg-[var(--white-2)]">
                   <span class="text-xs text-[var(--color-fg-secondary)] truncate flex-1">${pr.title}</span>
-                  <span class="text-3xs font-mono px-1.5 py-0.5 rounded bg-[var(--accent-12)] text-[var(--color-accent-fg)] border border-[var(--accent-15)]">${pr.branch}</span>
+                  <${MonoBadge}>${pr.branch}</${MonoBadge}>
                   ${pr.draft ? html`<span class="text-3xs px-1 py-0.5 rounded bg-[var(--warn-10)] text-[var(--color-status-warn)] border border-[var(--warn-20)]">draft</span>` : null}
                   <a href=${pr.pr_url} target="_blank" rel="noopener" class="text-3xs text-[var(--color-accent-fg)] hover:underline flex-shrink-0">PR</a>
                 </div>

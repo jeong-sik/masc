@@ -25,6 +25,10 @@ import { SetupGuideCard } from './setup-guide-card'
 import { SectionHeader } from './common/section-header'
 import { StatusDot } from './common/status-dot'
 
+function MutedLabel({ children }: { children: unknown }) {
+  return html`<span class="text-xs font-medium text-text-muted">${children}</span>`
+}
+
 // ── State ────────────────────────────────────────────────
 
 const configResource = createAsyncResource<KeeperConfig>()
@@ -321,7 +325,7 @@ async function loadGoalOptions(options?: { force?: boolean }): Promise<void> {
 function ConfigRow({ label, value }: { label: string; value: string }) {
   return html`
     <div class="flex items-center justify-between py-2 px-3 rounded border border-card-border/50 bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-sm mb-1.5">
-      <span class="text-xs font-medium text-text-muted">${label}</span>
+      <${MutedLabel}>${label}</${MutedLabel}>
       <span class="text-xs font-semibold text-text-strong">${value}</span>
     </div>
   `
@@ -451,7 +455,7 @@ const fieldStyle = 'w-full bg-card/60 backdrop-blur-sm text-text-strong text-sm 
 function InlineToggleRow({ label, value, onChange }: { label: string; value: boolean; onChange: (v: boolean) => void }) {
   return html`
     <div class="flex items-center justify-between py-2 px-3 rounded border border-card-border/50 bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-sm mb-1.5">
-      <span class="text-xs font-medium text-text-muted">${label}</span>
+      <${MutedLabel}>${label}</${MutedLabel}>
       <button type="button"
         class="relative inline-flex h-5 w-9 items-center rounded-sm transition-colors cursor-pointer ${value ? 'bg-ok/60' : 'bg-[var(--white-10)]'}"
         aria-label=${`${label} ${value ? '비활성화' : '활성화'}`}
@@ -470,7 +474,7 @@ function InlineNumberRow({ label, value, onChange, min, max, step, suffix }: {
 }) {
   return html`
     <div class="flex items-center justify-between py-2 px-3 rounded border border-card-border/50 bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-sm mb-1.5">
-      <span class="text-xs font-medium text-text-muted">${label}</span>
+      <${MutedLabel}>${label}</${MutedLabel}>
       <div class="flex items-center gap-1.5">
         <input type="number"
           aria-label=${label}
@@ -503,7 +507,7 @@ function InlineSelectRow({
 }) {
   return html`
     <div class="flex items-center justify-between py-2 px-3 rounded-xl border border-card-border/50 bg-card/20 backdrop-blur-sm hover:bg-card/40 transition-colors shadow-sm mb-1.5 gap-3">
-      <span class="text-xs font-medium text-text-muted">${label}</span>
+      <${MutedLabel}>${label}</${MutedLabel}>
       <select
         aria-label=${label}
         class="text-xs bg-card/60 border border-card-border rounded px-2 py-1 text-text-strong"
@@ -819,7 +823,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       ${hasCascadeSelector
         ? html`
             <label class="flex flex-col gap-1.5 py-2 px-3 rounded border border-card-border/50 bg-card/20 backdrop-blur-sm mb-1.5">
-              <span class="text-xs font-medium text-text-muted">활성 cascade profile</span>
+              <${MutedLabel}>활성 cascade profile</${MutedLabel}>
               <select
                 class="rounded border border-card-border/60 bg-[var(--white-4)] px-3 py-2 text-xs font-semibold text-text-strong disabled:opacity-60"
                 value=${currentCascade}
@@ -1028,7 +1032,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       <${SectionHeader} title="네임스페이스 조율" />
       <div class="py-2 px-3 rounded border border-card-border/50 bg-card/20 backdrop-blur-sm mb-1.5">
         <div class="flex items-center justify-between gap-3 mb-2">
-          <span class="text-xs font-medium text-text-muted">active_goal_ids</span>
+          <${MutedLabel}>active_goal_ids</${MutedLabel}>
           <span class="text-3xs text-[var(--color-fg-muted)]">${selectedActiveGoalIds.length}개 선택</span>
         </div>
         ${goalState.status === 'loading' ? html`

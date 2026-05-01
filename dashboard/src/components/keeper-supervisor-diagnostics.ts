@@ -16,6 +16,10 @@ import {
 } from './keeper-supervisor-helpers'
 import type { Keeper, KeeperSupervisorCrashLogEntry } from '../types'
 
+function MutedLabel({ children }: { children: unknown }) {
+  return html`<span class="text-xs text-[var(--color-fg-muted)]">${children}</span>`
+}
+
 type CrashFilterKey = 'all' | CrashCategory
 
 // Module-level signals (per-keeper instance ok — panel only renders for active keeper).
@@ -122,29 +126,29 @@ export function SupervisorDiagnosticsPanel({ keeper }: { keeper: Keeper }) {
     <${PanelCard} title="감독 진단">
       <div class="space-y-3">
         <div class="flex items-center justify-between">
-          <span class="text-xs text-[var(--color-fg-muted)]">건강도</span>
+          <${MutedLabel}>건강도</${MutedLabel}>
           <span class="text-sm font-bold font-mono" style="color: ${hsColor}">${hs}</span>
         </div>
         <div class="flex items-center justify-between">
-          <span class="text-xs text-[var(--color-fg-muted)]">실행 상태</span>
+          <${MutedLabel}>실행 상태</${MutedLabel}>
           ${registryStateBadge(keeper.registry_state ?? null)}
         </div>
         <div>
           <div class="flex items-center justify-between mb-1">
-            <span class="text-xs text-[var(--color-fg-muted)]">재시작 예산</span>
+            <${MutedLabel}>재시작 예산</${MutedLabel}>
             <span class="text-xs font-mono text-[var(--color-fg-primary)]">${restart_count}/${max_restarts}</span>
           </div>
           <${ProgressBar} pct=${budgetPct} size="sm" class=${budgetFillClass} />
         </div>
         ${typeof dead_eta_sec === 'number' && dead_eta_sec > 0 && dead_since == null ? html`
           <div class="flex items-center justify-between">
-            <span class="text-xs text-[var(--color-fg-muted)]">종료 예상</span>
+            <${MutedLabel}>종료 예상</${MutedLabel}>
             <span class="text-2xs font-mono" style="color: ${budgetPct >= 50 ? 'var(--amber-bright)' : 'var(--color-fg-primary)'}">${dead_eta_sec >= 3600 ? (dead_eta_sec / 3600).toFixed(1) + 'h' : (dead_eta_sec / 60).toFixed(0) + 'm'} 후</span>
           </div>
         ` : null}
         ${last_failure_reason ? html`
           <div class="flex items-center justify-between">
-            <span class="text-xs text-[var(--color-fg-muted)]">마지막 실패 원인</span>
+            <${MutedLabel}>마지막 실패 원인</${MutedLabel}>
             <span class="text-2xs font-mono text-[var(--rose-light)]">${last_failure_reason}</span>
           </div>
         ` : null}

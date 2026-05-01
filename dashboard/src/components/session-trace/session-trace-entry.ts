@@ -16,6 +16,31 @@ import type { UnifiedTraceEvent, TraceEventKind } from './session-trace-state'
 
 const BROADCAST_PREVIEW_MAX = 160
 
+// ── Trace badge helper ──────────────────────────────────
+
+function TraceBadge({
+  tone,
+  wide,
+  children,
+}: {
+  tone: 'neutral' | 'bad' | 'ok'
+  wide?: boolean
+  children: unknown
+}) {
+  const cls = (() => {
+    switch (tone) {
+      case 'bad':
+        return 'text-3xs px-1.5 py-0.5 rounded bg-[var(--bad-10)] text-[var(--color-status-err)]'
+      case 'ok':
+        return 'text-3xs px-1.5 py-0.5 rounded bg-[rgba(52,211,153,0.1)] text-[var(--color-status-ok)]'
+      case 'neutral':
+      default:
+        return `text-3xs px-1.5 py-0.5 rounded bg-[var(--white-5)] text-[var(--color-fg-disabled)] uppercase${wide ? ' tracking-wider' : ''}`
+    }
+  })()
+  return html`<span class="${cls}">${children}</span>`
+}
+
 // ── Search highlight ────────────────────────────────────
 
 interface HighlightSegment {
@@ -204,7 +229,7 @@ function ResultViewer({ text, hint, isError: isErr }: { text: string; hint: Cont
       <div class="flex items-center justify-between mb-1">
         <span class="text-3xs font-semibold uppercase tracking-wider ${titleColor}">${titleLabel}</span>
         ${hint !== 'plain' ? html`
-          <span class="text-3xs px-1.5 py-0.5 rounded bg-[var(--white-5)] text-[var(--color-fg-disabled)] uppercase">${hint}</span>
+          <${TraceBadge} tone="neutral">${hint}</${TraceBadge}>
         ` : null}
       </div>
       <div class="rounded border ${borderColor} ${bgColor} overflow-hidden">
@@ -498,9 +523,9 @@ export function SessionTraceEntry({ event, searchQuery }: { event: UnifiedTraceE
           ${event.kind === 'tool_call' && event.toolName
             ? html`<span class="text-xs font-mono font-medium ${style.color}">${event.toolName}</span>`
             : html`<span class="text-3xs font-medium uppercase tracking-wider ${kindStyle.color}">${kindStyle.label}</span>`}
-          <span class="text-3xs px-1.5 py-0.5 rounded bg-[var(--white-5)] text-[var(--color-fg-disabled)] uppercase tracking-wider">
+          <${TraceBadge} tone="neutral" wide>
             ${event.sourceLane === 'oas' ? 'OAS' : 'MASC'}
-          </span>
+          </${TraceBadge}>
           ${event.turn != null ? html`
             <span class="text-3xs text-[var(--color-fg-disabled)]">
               T${event.turn}${event.round != null ? `R${event.round}` : ''}
@@ -515,11 +540,11 @@ export function SessionTraceEntry({ event, searchQuery }: { event: UnifiedTraceE
             </span>
           ` : null}
           ${event.error
-            ? html`<span class="text-3xs px-1.5 py-0.5 rounded bg-[var(--bad-10)] text-[var(--color-status-err)]">오류</span>`
+            ? html`<${TraceBadge} tone="bad">오류</${TraceBadge}>`
             : gateRejected
-              ? html`<span class="text-3xs px-1.5 py-0.5 rounded bg-[var(--bad-10)] text-[var(--color-status-err)]">거부</span>`
+              ? html`<${TraceBadge} tone="bad">거부</${TraceBadge}>`
               : event.kind === 'tool_call'
-                ? html`<span class="text-3xs px-1.5 py-0.5 rounded bg-[rgba(52,211,153,0.1)] text-[var(--color-status-ok)]">완료</span>`
+                ? html`<${TraceBadge} tone="ok">완료</${TraceBadge}>`
                 : null}
         </div>
         <div class="mt-0.5 text-2xs text-[var(--color-fg-muted)] font-mono truncate max-w-full" title=${event.summary}>

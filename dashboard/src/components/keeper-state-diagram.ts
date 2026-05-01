@@ -28,6 +28,13 @@ interface KeeperStateDiagramProps {
   currentPhase?: KeeperPhase | string | null
 }
 
+function PhaseBadge({ accent, children }: { accent?: boolean; children: unknown }) {
+  const cls = accent
+    ? 'inline-flex items-center rounded-sm border border-[var(--accent-30)] bg-[var(--accent-10)] px-2 py-0.5 text-[var(--color-accent-fg)]'
+    : 'inline-flex items-center rounded-sm border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5'
+  return html`<span class="${cls}">${children}</span>`
+}
+
 const PHASE_ID_MAP: Record<string, string> = {
   Offline: 'Offline',
   Running: 'Running',
@@ -214,30 +221,16 @@ export function KeeperStateDiagramPanel({ keeperName, currentPhase }: KeeperStat
   return html`
     <div class="flex flex-col gap-3">
       <div class="flex flex-wrap items-center gap-2 text-3xs text-[var(--color-fg-disabled)]">
-        <span class="inline-flex items-center rounded-sm border border-[var(--accent-30)] bg-[var(--accent-10)] px-2 py-0.5 text-[var(--color-accent-fg)]">
-          composite ${snapshot.phase}
-        </span>
+        <${PhaseBadge} accent>composite ${snapshot.phase}<//>
         ${keeperPhase ? html`
-          <span class="inline-flex items-center rounded-sm border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5">
-            keeper ${keeperPhase}
-          </span>
+          <${PhaseBadge}>keeper ${keeperPhase}<//>
         ` : null}
-        <span class="inline-flex items-center rounded-sm border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5">
-          KTC ${snapshot.turn_phase}
-        </span>
-        <span class="inline-flex items-center rounded-sm border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5">
-          KDP ${snapshot.decision.stage}
-        </span>
-        <span class="inline-flex items-center rounded-sm border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5">
-          KCL ${snapshot.cascade.state}
-        </span>
-        <span class="inline-flex items-center rounded-sm border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5">
-          KMC ${snapshot.compaction.stage}
-        </span>
+        <${PhaseBadge}>KTC ${snapshot.turn_phase}<//>
+        <${PhaseBadge}>KDP ${snapshot.decision.stage}<//>
+        <${PhaseBadge}>KCL ${snapshot.cascade.state}<//>
+        <${PhaseBadge}>KMC ${snapshot.compaction.stage}<//>
         ${transitions.length > 0 ? html`
-          <span class="inline-flex items-center rounded-sm border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5">
-            observed ${transitions.length} transitions
-          </span>
+          <${PhaseBadge}>observed ${transitions.length} transitions<//>
         ` : null}
       </div>
 

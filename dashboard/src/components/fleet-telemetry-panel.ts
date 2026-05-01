@@ -351,6 +351,10 @@ function TrendCell({ name, metric, value, valueClass }: {
   `
 }
 
+function ThRight({ children }: { children: unknown }) {
+  return html`<th scope="col" class="py-1 text-right font-normal">${children}</th>`
+}
+
 function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (name: string) => void }) {
   if (rows.length === 0) {
     return html`<div class="text-2xs text-[var(--color-fg-disabled)]">Keeper 데이터 없음.</div>`
@@ -362,14 +366,14 @@ function FleetComparisonTable({ rows, onReset }: { rows: FleetRow[]; onReset: (n
         <thead>
           <tr class="border-b border-[var(--color-border-default)] text-[var(--color-fg-disabled)]">
             <th scope="col" class="py-1 text-left font-normal">키퍼</th>
-            <th scope="col" class="py-1 text-right font-normal">상태</th>
-            <th scope="col" class="py-1 text-right font-normal">활동</th>
-            <th scope="col" class="py-1 text-right font-normal">측정</th>
-            <th scope="col" class="py-1 text-right font-normal">도구</th>
-            <th scope="col" class="py-1 text-right font-normal">성공</th>
-            <th scope="col" class="py-1 text-right font-normal">Ctx</th>
-            <th scope="col" class="py-1 text-right font-normal">지연</th>
-            <th scope="col" class="py-1 text-right font-normal">런타임</th>
+            <${ThRight}>상태</${ThRight}>
+            <${ThRight}>활동</${ThRight}>
+            <${ThRight}>측정</${ThRight}>
+            <${ThRight}>도구</${ThRight}>
+            <${ThRight}>성공</${ThRight}>
+            <${ThRight}>Ctx</${ThRight}>
+            <${ThRight}>지연</${ThRight}>
+            <${ThRight}>런타임</${ThRight}>
             <th scope="col" class="py-1 text-center font-normal">예산</th>
             <th scope="col" class="w-8 py-1"></th>
           </tr>

@@ -29,6 +29,10 @@ const LOG_ROW_HEIGHT = 92
 let moduleDebounceTimer: ReturnType<typeof setTimeout> | null = null
 let latestRequestId = 0
 
+function MetaTag({ children }: { children: unknown }) {
+  return html`<span class="rounded-sm border border-[var(--white-10)] px-2 py-0.5 text-3xs text-[var(--color-fg-muted)]">${children}</span>`
+}
+
 const LEVEL_COLORS: Record<string, string> = {
   DEBUG: 'var(--color-fg-muted)',
   INFO: 'var(--color-fg-primary)',
@@ -263,10 +267,10 @@ function renderLogRow(entry: LogEntry) {
           ${sourceLabel(source)}
         </span>
         ${entry.legacy_classified
-          ? html`<span class="rounded-sm border border-[var(--white-10)] px-2 py-0.5 text-3xs text-[var(--color-fg-muted)]">classified</span>`
+          ? html`<${MetaTag}>classified</${MetaTag}>`
           : null}
         ${rawLevelChanged
-          ? html`<span class="rounded-sm border border-[var(--white-10)] px-2 py-0.5 text-3xs text-[var(--color-fg-muted)]">${entry.raw_level}</span>`
+          ? html`<${MetaTag}>${entry.raw_level}</${MetaTag}>`
           : null}
         ${clientName
           ? html`<span class="rounded-sm border border-[var(--color-accent-soft)] px-2 py-0.5 text-3xs text-[#dff3ff]">${clientName}</span>`
@@ -275,22 +279,22 @@ function renderLogRow(entry: LogEntry) {
           ? html`<span class="inline-flex items-center gap-1 rounded-sm border border-[var(--white-10)] px-2 py-0.5 text-3xs"><span class="font-mono font-bold ${toolCategory(toolName).color}">${toolCategory(toolName).icon}</span><span class="text-[var(--color-fg-muted)]">${toolName}</span></span>`
           : null}
         ${fixes
-          ? html`<span class="rounded-sm border border-[var(--white-10)] px-2 py-0.5 text-3xs text-[var(--color-fg-muted)]">fixes ${fixes}</span>`
+          ? html`<${MetaTag}>fixes ${fixes}</${MetaTag}>`
           : null}
         ${phase
-          ? html`<span class="rounded-sm border border-[var(--white-10)] px-2 py-0.5 text-3xs text-[var(--color-fg-muted)]">${phase}</span>`
+          ? html`<${MetaTag}>${phase}</${MetaTag}>`
           : null}
         ${requestId
-          ? html`<span class="rounded-sm border border-[var(--white-10)] px-2 py-0.5 text-3xs text-[var(--color-fg-muted)]">req ${requestId}</span>`
+          ? html`<${MetaTag}>req ${requestId}</${MetaTag}>`
           : null}
         ${sessionId
-          ? html`<span class="rounded-sm border border-[var(--white-10)] px-2 py-0.5 text-3xs text-[var(--color-fg-muted)]">session ${sessionId}</span>`
+          ? html`<${MetaTag}>session ${sessionId}</${MetaTag}>`
           : null}
         ${failure
           ? html`<span class="rounded-sm border border-[rgba(224,80,80,0.24)] bg-[var(--brick-soft)] px-2 py-0.5 text-3xs text-[var(--bad-light)]">${failure.cause_code}</span>`
           : null}
         ${failure
-          ? html`<span class="rounded-sm border border-[var(--white-10)] px-2 py-0.5 text-3xs text-[var(--color-fg-muted)]">${failure.recoverability}</span>`
+          ? html`<${MetaTag}>${failure.recoverability}</${MetaTag}>`
           : null}
         ${failure?.operator_action
           ? html`<span class="rounded-sm border border-[var(--accent-20)] bg-[var(--accent-10)] px-2 py-0.5 text-3xs text-[#dff3ff]">next ${failure.operator_action}</span>`

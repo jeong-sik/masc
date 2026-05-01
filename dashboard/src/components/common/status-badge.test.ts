@@ -86,4 +86,12 @@ describe('StatusBadge', () => {
     expect(el?.textContent).toContain('cooldown')
     expect(el?.classList.contains('warn')).toBe(true)
   })
+
+  it('does not override offline utility colors inline', () => {
+    const container = document.createElement('div')
+    render(h(StatusBadge, { status: 'offline' }), container)
+    const el = container.querySelector('[data-status-badge-tone]')
+    expect(el?.classList.contains('offline')).toBe(true)
+    expect(el?.className).not.toContain('text-[var(--color-fg-disabled)]')
+  })
 })

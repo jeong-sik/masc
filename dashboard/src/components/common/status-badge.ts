@@ -71,7 +71,7 @@ export function StatusBadge({ status, label, tone, children }: StatusBadgeProps)
   const content = children ?? label ?? (status != null ? statusLabel(status) : '')
   return html`
     <span
-      class="status-badge border border-solid border-[var(--color-border-default)] ${statusClass} ${status === 'offline' ? 'text-[var(--color-fg-disabled)]' : ''}"
+      class="status-badge border border-solid border-[var(--color-border-default)] ${statusClass}"
       data-status-badge-tone=${resolvedTone}
     >
       <span class="size-1.5 rounded-sm inline-block ${DOT_CLASS[resolvedTone]}"></span>

@@ -97,6 +97,19 @@ describe('SectionCard', () => {
     expect(container.textContent).toContain('degraded')
     expect(container.innerHTML).toContain('bg-[var(--color-status-warn)]')
   })
+
+  it('normalizes watch status before choosing the dot tone', () => {
+    const container = document.createElement('div')
+    render(
+      h(
+        SectionCard,
+        { title: 'Transport', status: 'Watch', eyebrow: 'observing' },
+        h('p', null, 'Body'),
+      ),
+      container,
+    )
+    expect(container.innerHTML).toContain('bg-[var(--color-status-warn)]')
+  })
 })
 
 describe('Card', () => {

@@ -63,7 +63,7 @@ function statusDotClass(status?: string): string {
       return statusDotColor('active')
     case 'watch':
     case 'danger':
-      return statusDotColor(status === 'watch' ? 'warn' : 'bad')
+      return statusDotColor(normalized === 'watch' ? 'warn' : 'bad')
     case 'offline':
       return statusDotColor('bad')
     default:

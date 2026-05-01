@@ -15,14 +15,14 @@ function getCytoscape(): Promise<typeof cytoscape> {
   return cytoscapePromise
 }
 
-function borderForStatus(status: string): string {
+export function borderForStatus(status: string): string {
   if (status === 'conflict') return '#ef4444'
   if (status === 'dirty') return '#f59e0b'
   if (status === 'current') return '#22c55e'
   return '#475569'
 }
 
-function buildElements(graph: GitGraphResponse): cytoscape.ElementDefinition[] {
+export function buildElements(graph: GitGraphResponse): cytoscape.ElementDefinition[] {
   const agentParents = graph.agents.map(agent => ({
     data: {
       id: `agent:${agent.id}`,
@@ -65,7 +65,7 @@ function buildElements(graph: GitGraphResponse): cytoscape.ElementDefinition[] {
   return [...agentParents, ...nodes, ...edges]
 }
 
-function stylesheet(): cytoscape.StylesheetJsonBlock[] {
+export function stylesheet(): cytoscape.StylesheetJsonBlock[] {
   return [
     {
       selector: 'node',

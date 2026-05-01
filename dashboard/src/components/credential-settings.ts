@@ -109,17 +109,17 @@ async function deleteCredential(id: string): Promise<void> {
 
 // ── Helpers ──────────────────────────────────────────────
 
-function coerceCredentialType(raw: unknown): CredentialType {
+export function coerceCredentialType(raw: unknown): CredentialType {
   if (raw === 'gitlab') return 'gitlab'
   if (raw === 'local') return 'local'
   return 'github'
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-function credentialTypeLabel(type: CredentialType): string {
+export function credentialTypeLabel(type: CredentialType): string {
   switch (type) {
     case 'github': return 'GitHub'
     case 'gitlab': return 'GitLab'
@@ -127,7 +127,7 @@ function credentialTypeLabel(type: CredentialType): string {
   }
 }
 
-function credentialTypeBadgeClass(type: CredentialType): string {
+export function credentialTypeBadgeClass(type: CredentialType): string {
   switch (type) {
     case 'github':
       return 'bg-[var(--accent-10)] text-accent border-accent/20'

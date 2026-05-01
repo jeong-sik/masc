@@ -98,7 +98,7 @@ let prepare_agent_setup
       ~(start_turn_count : int)
       ~(generation : int)
       ~(max_turns : int)
-      ~(cascade_name : string)
+      ~(cascade_name : Keeper_cascade_profile.runtime_name)
       ~(is_retry : bool)
       ~(turn_affordances : string list)
       ~(config_root : string)
@@ -112,6 +112,9 @@ let prepare_agent_setup
       ()
   : (agent_setup, Oas.Error.sdk_error) result
   =
+  let cascade_name_string =
+    Keeper_cascade_profile.runtime_name_to_string cascade_name
+  in
   let ctx_snapshot = ctx_work in
   let agent_name = meta.agent_name in
   let acc : hook_accumulator =
@@ -1002,7 +1005,9 @@ let prepare_agent_setup
                  else
                    None
                in
-               let cascade_seed = Cascade_inference.for_cascade ~name:cascade_name in
+               let cascade_seed =
+                 Cascade_inference.for_cascade ~name:cascade_name_string
+               in
                let current_budget =
                  match cascade_seed.thinking_budget with
                  | Some _ as v -> v
@@ -1258,7 +1263,7 @@ let prepare_agent_setup
                  ~visible_tool_count:(List.length all_allowed)
                  ~required_tools:computed_surface.required_tool_names
                  ~missing_required_tools:computed_surface.missing_required_tool_names
-                 ~cascade_profile:cascade_name
+                 ~cascade_profile:cascade_name_string
                  ();
                (let now = Time_compat.now () in
                 let hook_elapsed_ms = Keeper_timing.round1 ((now -. hook_t0) *. 1000.0) in

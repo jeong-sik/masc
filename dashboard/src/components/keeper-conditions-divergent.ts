@@ -23,10 +23,10 @@ import type { Keeper, KeeperConditions, KeeperPhase } from '../types'
 
 type DivergenceFn = (value: boolean, phase: KeeperPhase | null | undefined) => string | null
 
-const isOperating = (p: KeeperPhase | null | undefined): boolean =>
+export const isOperating = (p: KeeperPhase | null | undefined): boolean =>
   p === 'Running' || p === 'Failing' || p === 'Overflowed'
 
-const isTerminated = (p: KeeperPhase | null | undefined): boolean =>
+export const isTerminated = (p: KeeperPhase | null | undefined): boolean =>
   p === 'Stopped' || p === 'Dead' || p === 'Crashed'
 
 /** Rule table — each entry returns a ko-language reason when divergent,
@@ -89,7 +89,7 @@ interface Divergence {
   reason: string
 }
 
-function computeDivergences(
+export function computeDivergences(
   conditions: KeeperConditions,
   phase: KeeperPhase | null | undefined,
 ): Divergence[] {

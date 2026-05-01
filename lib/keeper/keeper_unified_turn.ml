@@ -150,6 +150,13 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
             ~cascade_name:effective_cascade_name
         with
         | Some remaining_sec ->
+            Prometheus.set_gauge
+              Prometheus.metric_keeper_provider_cooldown_remaining_sec
+              ~labels:[
+                ("keeper", meta.name);
+                ("cascade", effective_cascade_name);
+              ]
+              (float_of_int remaining_sec);
             (match
                EC.fallback_cascade_for_unavailable_profile
                  ~base_cascade:meta.cascade_name
@@ -160,9 +167,25 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                  Log.Keeper.warn
                    "%s: cascade %s provider cooldown pending (%ds); fail-opening to %s"
                    meta.name effective_cascade_name remaining_sec fallback_cascade;
+                 Prometheus.inc_counter
+                   Prometheus.metric_keeper_provider_cooldown_skip
+                   ~labels:[
+                     ("keeper", meta.name);
+                     ("from_cascade", effective_cascade_name);
+                     ("to_cascade", fallback_cascade);
+                   ]
+                   ();
                  fallback_cascade
              | _ -> effective_cascade_name)
-        | None -> effective_cascade_name
+        | None ->
+            Prometheus.set_gauge
+              Prometheus.metric_keeper_provider_cooldown_remaining_sec
+              ~labels:[
+                ("keeper", meta.name);
+                ("cascade", effective_cascade_name);
+              ]
+              0.0;
+            effective_cascade_name
       in
       (* PR-B: ollama saturation pre-skip.  If the resolved cascade
          is ollama-only and the [/api/ps] cache reports zero
@@ -422,7 +445,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
       let post_commit_failure_reason = ref None in
       let paused_meta_override = ref None in
       let current_turn_overflow_blocker = ref None in
-      let event_bus_drain_active = Atomic.make true in
+      let event_bus_drain_cancel = ref None in
       let turn_event_bus_mu = Eio.Mutex.create () in
       let mark_paused_after_overflow ~run_meta ~reason =
         let paused_meta =
@@ -543,16 +566,17 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
         match event_bus_sub, Eio_context.get_switch_opt () with
         | Some _, Some sw ->
             Eio.Fiber.fork ~sw (fun () ->
-              let rec loop () =
-                if Atomic.get event_bus_drain_active then begin
-                  (try
-                     ignore (drain_turn_event_bus ~site:"background_poll" ())
-                   with
-                   | Eio.Cancel.Cancelled _ as e -> raise e
-                   | exn ->
-                       Log.Keeper.warn
-                         "%s: keeper_turn event-bus drain failed: %s"
-                         meta.name (Printexc.to_string exn));
+              Eio.Cancel.sub (fun cc ->
+                event_bus_drain_cancel := Some cc;
+                let rec loop () =
+                  try
+                    ignore (drain_turn_event_bus ~site:"background_poll" ())
+                  with
+                  | Eio.Cancel.Cancelled _ as e -> raise e
+                  | exn ->
+                    Log.Keeper.warn
+                      "%s: keeper_turn event-bus drain failed: %s"
+                      meta.name (Printexc.to_string exn);
                   (* 2026-04-20: 0.25s → 0.05s.  OAS publishes a burst
                      of events per tool cycle (ToolCalled / ToolResult /
                      ToolCompleted + assistant / usage).  With 0.25s
@@ -569,13 +593,14 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                      via [MASC_KEEPER_TURN_DRAIN_INTERVAL_SEC]. *)
                   Eio.Time.sleep clock (turn_event_bus_drain_interval_sec ());
                   loop ()
-                end
-              in
-              loop ())
+                in
+                loop ()))
         | _ -> ()
       in
       let unsubscribe_event_bus () =
-        Atomic.set event_bus_drain_active false;
+        (match !event_bus_drain_cancel with
+         | Some cc -> Eio.Cancel.cancel cc (Failure "event_bus_unsubscribed")
+         | None -> ());
         ignore (drain_turn_event_bus ~site:"unsubscribe_final" ());
         match event_bus_sub, Keeper_event_bus.get () with
         | Some sub, Some bus -> Oas_bus_instrument.unsubscribe bus sub
@@ -1068,7 +1093,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                       mark_terminal_error err;
                       Error err
                   | No_degraded_retry when EC.is_transient_network_error err
-                              && attempt <= EC.max_transient_retries ->
+                              && attempt <= EC.max_transient_retries () ->
                       let delay = EC.transient_backoff_sec attempt in
                       Log.Keeper.warn
                         "%s: transient network error cascade=%s max_context=%d context_budget=%d primary_budget=%d requested_override=%s retry=%d/%d backoff=%.0fs: %s"
@@ -1079,7 +1104,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                         (match execution.max_context_resolution.requested_override with
                          | Some requested -> string_of_int requested
                          | None -> "none")
-                        attempt EC.max_transient_retries delay
+                        attempt (EC.max_transient_retries ()) delay
                         (short_preview (Oas.Error.to_string err));
                       Eio.Time.sleep clock delay;
                       retry_loop ~run_meta ~execution ~run_generation

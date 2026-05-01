@@ -7,7 +7,7 @@ import { lazy, Suspense } from 'preact/compat'
 import { route } from '../router'
 import { LoadingState } from './common/feedback-state'
 
-type StatusSection =
+export type StatusSection =
   | 'live' | 'observatory' | 'journey' | 'git-graph' | 'agents' | 'runtime' | 'fleet-health'
   | 'cascade-inspector'
   | 'safe-autonomy'
@@ -55,7 +55,7 @@ function sectionFallback(label: string) {
   return html`<${LoadingState}>${label} 불러오는 중...<//>`
 }
 
-function sectionLabel(section: StatusSection): string {
+export function sectionLabel(section: StatusSection): string {
   switch (section) {
     case 'live':
       return '라이브 협업'

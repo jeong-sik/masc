@@ -187,7 +187,8 @@ let test_labels_require_local_discovery () =
 
 let test_cascade_model_resolve_alias_provenance () =
   let resolved =
-    Model_resolve.resolve_glm_model ~getenv:(fun _ -> None) "flash"
+    Model_resolve.resolve_glm_model ~getenv:(fun _ -> None)
+      (Model_resolve.model_selector_of_string "flash")
   in
   check string "glm flash alias" "glm-4.7-flashx" resolved.resolved_model_id;
   check resolution_provenance "alias provenance"
@@ -195,7 +196,8 @@ let test_cascade_model_resolve_alias_provenance () =
 
 let test_cascade_model_resolve_hardcoded_default_provenance () =
   let resolved =
-    Model_resolve.resolve_auto_model ~getenv:(fun _ -> None) "openai" "auto"
+    Model_resolve.resolve_auto_model ~getenv:(fun _ -> None) "openai"
+      (Model_resolve.model_selector_of_string "auto")
   in
   check string "openai hardcoded default" "gpt-4.1" resolved.resolved_model_id;
   check resolution_provenance "hardcoded provenance"
@@ -207,7 +209,8 @@ let test_cascade_model_resolve_env_default_provenance () =
     | _ -> None
   in
   let resolved =
-    Model_resolve.resolve_auto_model ~getenv "gemini" "auto"
+    Model_resolve.resolve_auto_model ~getenv "gemini"
+      (Model_resolve.model_selector_of_string "auto")
   in
   check string "gemini env default" "gemini-2.5-flash"
     resolved.resolved_model_id;
@@ -220,7 +223,7 @@ let test_cascade_model_resolve_discovery_provenance () =
     Model_resolve.resolve_auto_model
       ~getenv:(fun _ -> None)
       ~discover:(fun () -> Some "qwen3:8b")
-      "ollama" "auto"
+      "ollama" (Model_resolve.model_selector_of_string "auto")
   in
   check string "ollama discovery" "qwen3:8b" resolved.resolved_model_id;
   check resolution_provenance "discovery provenance"
@@ -228,7 +231,8 @@ let test_cascade_model_resolve_discovery_provenance () =
 
 let test_cascade_model_resolve_unresolved_auto_provenance () =
   let resolved =
-    Model_resolve.resolve_auto_model ~getenv:(fun _ -> None) "openrouter" "auto"
+    Model_resolve.resolve_auto_model ~getenv:(fun _ -> None) "openrouter"
+      (Model_resolve.model_selector_of_string "auto")
   in
   check string "openrouter unresolved auto stays auto" "auto"
     resolved.resolved_model_id;

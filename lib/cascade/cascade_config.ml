@@ -283,7 +283,8 @@ let make_registry_config ~temperature ~max_tokens ?system_prompt
     | _ -> None
   in
   let model_resolution =
-    resolve_auto_model ?discover provider_name model_id
+    resolve_auto_model ?discover provider_name
+      (Cascade_model_resolve.model_selector_of_string model_id)
   in
   let resolved_model_id = model_resolution.resolved_model_id in
   let base_url =

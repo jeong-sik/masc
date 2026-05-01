@@ -123,6 +123,7 @@
         test_keeper_repo_mapping
         test_credential_provider_bridge
         test_repo_sync
+        test_repo_git
         test_exec_core
         test_exec_dispatch
         test_keeper_bash_safety
@@ -311,6 +312,7 @@
           test_keeper_repo_mapping
           test_credential_provider_bridge
           test_repo_sync
+          test_repo_git
           test_exec_core
           test_exec_dispatch
           test_keeper_bash_safety

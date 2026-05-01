@@ -21,6 +21,12 @@
 
     All text/vision models support function calling.
     glm-5.1 supports reasoning (reasoning_content field). *)
+type model_selector = Concrete of string | Auto
+
+let model_selector_of_string s =
+  if String.equal (String.lowercase_ascii (String.trim s)) "auto" then Auto
+  else Concrete s
+
 type model_resolution_provenance =
   | Explicit_input
   | Alias of string
@@ -101,21 +107,24 @@ let kimi_cli_auto_models () =
   Provider_adapter.auto_models_for_cascade_prefix "kimi_cli"
   |> Option.value ~default:[]
 
-let resolve_glm_model ?getenv model_id =
+let resolve_glm_model ?getenv selector =
+  let model_id = match selector with Concrete s -> s | Auto -> "auto" in
   let default_model = default_resolution ?getenv "glm" ~requested_model_id:model_id in
   let resolved_model_id =
     Llm_provider.Zai_catalog.resolve_glm_alias
       ~default_model:default_model.resolved_model_id
       model_id
   in
-  if String.equal model_id "auto" then
-    { default_model with resolved_model_id }
-  else if String.equal resolved_model_id model_id then
-    explicit_resolution model_id resolved_model_id
-  else
-    { requested_model_id = model_id; resolved_model_id; provenance = Alias model_id }
+  match selector with
+  | Auto -> { default_model with resolved_model_id }
+  | Concrete _ ->
+      if String.equal resolved_model_id model_id then
+        explicit_resolution model_id resolved_model_id
+      else
+        { requested_model_id = model_id; resolved_model_id; provenance = Alias model_id }
 
-let resolve_glm_coding_model ?getenv model_id =
+let resolve_glm_coding_model ?getenv selector =
+  let model_id = match selector with Concrete s -> s | Auto -> "auto" in
   let default_model =
     default_resolution ?getenv "glm-coding" ~requested_model_id:model_id
   in
@@ -124,14 +133,16 @@ let resolve_glm_coding_model ?getenv model_id =
       ~default_model:default_model.resolved_model_id
       model_id
   in
-  if String.equal model_id "auto" then
-    { default_model with resolved_model_id }
-  else if String.equal resolved_model_id model_id then
-    explicit_resolution model_id resolved_model_id
-  else
-    { requested_model_id = model_id; resolved_model_id; provenance = Alias model_id }
+  match selector with
+  | Auto -> { default_model with resolved_model_id }
+  | Concrete _ ->
+      if String.equal resolved_model_id model_id then
+        explicit_resolution model_id resolved_model_id
+      else
+        { requested_model_id = model_id; resolved_model_id; provenance = Alias model_id }
 
-let resolve_kimi_model ?getenv model_id =
+let resolve_kimi_model ?getenv selector =
+  let model_id = match selector with Concrete s -> s | Auto -> "auto" in
   let trimmed = String.trim model_id in
   match String.lowercase_ascii trimmed with
   | "auto" ->
@@ -146,10 +157,10 @@ let resolve_kimi_model ?getenv model_id =
   | _ -> explicit_resolution model_id trimmed
 
 let resolve_glm_model_id model_id =
-  (resolve_glm_model model_id).resolved_model_id
+  (resolve_glm_model (model_selector_of_string model_id)).resolved_model_id
 
 let resolve_glm_coding_model_id model_id =
-  (resolve_glm_coding_model model_id).resolved_model_id
+  (resolve_glm_coding_model (model_selector_of_string model_id)).resolved_model_id
 
 (** Resolve "auto" and aliases to concrete model IDs.
     Cloud APIs generally require concrete model names, and local
@@ -162,32 +173,34 @@ let resolve_glm_coding_model_id model_id =
 let resolve_auto_model
     ?getenv
     ?(discover = Llm_provider.Discovery.first_discovered_model_id)
-    provider_name model_id =
+    provider_name selector =
+  let model_id = match selector with Concrete s -> s | Auto -> "auto" in
   match Provider_adapter.resolve_adapter_by_cascade_prefix provider_name with
   | Some { runtime_kind = Provider_adapter.Local; _ } ->
-      if String.equal model_id "auto" then
-        match discover () with
-        | Some resolved_model_id ->
-            { requested_model_id = model_id; resolved_model_id; provenance = Discovery }
-        | None -> default_resolution ?getenv provider_name ~requested_model_id:model_id
-      else explicit_resolution model_id model_id
+      (match selector with
+       | Auto ->
+           (match discover () with
+            | Some resolved_model_id ->
+                { requested_model_id = model_id; resolved_model_id; provenance = Discovery }
+            | None -> default_resolution ?getenv provider_name ~requested_model_id:model_id)
+       | Concrete _ -> explicit_resolution model_id model_id)
   | Some { model_policy = { family = Provider_adapter.Glm_general; _ }; _ } ->
-      resolve_glm_model ?getenv model_id
+      resolve_glm_model ?getenv selector
   | Some { model_policy = { family = Provider_adapter.Glm_coding; _ }; _ } ->
-      resolve_glm_coding_model ?getenv model_id
+      resolve_glm_coding_model ?getenv selector
   | Some { model_policy = { family = Provider_adapter.Kimi_api_family; _ }; _ } ->
-      resolve_kimi_model ?getenv model_id
+      resolve_kimi_model ?getenv selector
   | Some _ ->
-      if String.equal model_id "auto" then
-        default_resolution ?getenv provider_name ~requested_model_id:model_id
-      else
-        explicit_resolution model_id model_id
+      (match selector with
+       | Auto -> default_resolution ?getenv provider_name ~requested_model_id:model_id
+       | Concrete _ -> explicit_resolution model_id model_id)
   | None ->
-      if String.equal model_id "auto" then unresolved_auto model_id
-      else explicit_resolution model_id model_id
+      (match selector with
+       | Auto -> unresolved_auto model_id
+       | Concrete _ -> explicit_resolution model_id model_id)
 
 let resolve_auto_model_id provider_name model_id =
-  (resolve_auto_model provider_name model_id).resolved_model_id
+  (resolve_auto_model provider_name (model_selector_of_string model_id)).resolved_model_id
 
 let parse_custom_model model_id =
   match String.index_opt model_id '@' with

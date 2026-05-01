@@ -18,7 +18,7 @@ import {
   isRecord,
 } from './common/normalize'
 
-type DomainStatus = 'pass' | 'warn' | 'fail'
+export type DomainStatus = 'pass' | 'warn' | 'fail'
 
 interface ScorecardSummary {
   global_score: number
@@ -89,7 +89,7 @@ interface SafeAutonomyData {
 
 const safeAutonomy: AsyncResource<SafeAutonomyData> = createAsyncResource()
 
-function statusTone(status: DomainStatus): string {
+export function statusTone(status: DomainStatus): string {
   switch (status) {
     case 'pass':
       return 'border-[var(--ok-30)] bg-[var(--ok-12)] text-[var(--color-status-ok)]'
@@ -101,7 +101,7 @@ function statusTone(status: DomainStatus): string {
   }
 }
 
-function statusLabel(status: DomainStatus): string {
+export function statusLabel(status: DomainStatus): string {
   switch (status) {
     case 'pass':
       return 'PASS'
@@ -113,7 +113,7 @@ function statusLabel(status: DomainStatus): string {
   }
 }
 
-function normalizeSummary(value: unknown): ScorecardSummary {
+export function normalizeSummary(value: unknown): ScorecardSummary {
   const summary = isRecord(value) ? value : {}
   return {
     global_score: asNumber(summary.global_score, 0),
@@ -127,7 +127,7 @@ function normalizeSummary(value: unknown): ScorecardSummary {
   }
 }
 
-function normalizeDomain(value: unknown): ScorecardItem {
+export function normalizeDomain(value: unknown): ScorecardItem {
   const item = isRecord(value) ? value : {}
   return {
     id: asString(item.id, 'domain'),
@@ -140,7 +140,7 @@ function normalizeDomain(value: unknown): ScorecardItem {
   }
 }
 
-function normalizeKeeper(value: unknown): KeeperItem {
+export function normalizeKeeper(value: unknown): KeeperItem {
   const item = isRecord(value) ? value : {}
   return {
     name: asString(item.name, 'keeper'),
@@ -161,7 +161,7 @@ function normalizeKeeper(value: unknown): KeeperItem {
   }
 }
 
-function normalizeFinding(value: unknown): FindingItem {
+export function normalizeFinding(value: unknown): FindingItem {
   const item = isRecord(value) ? value : {}
   return {
     reason_code: asString(item.reason_code, 'unknown'),
@@ -174,7 +174,7 @@ function normalizeFinding(value: unknown): FindingItem {
   }
 }
 
-function normalizeTimelineItem(value: unknown): TimelineItem {
+export function normalizeTimelineItem(value: unknown): TimelineItem {
   const item = isRecord(value) ? value : {}
   return {
     ts_iso: asString(item.ts_iso, ''),
@@ -184,7 +184,7 @@ function normalizeTimelineItem(value: unknown): TimelineItem {
   }
 }
 
-function normalizePayload(raw: unknown): SafeAutonomyData {
+export function normalizePayload(raw: unknown): SafeAutonomyData {
   const data = isRecord(raw) ? raw : {}
   const historyRaw = Array.isArray(data.history) ? data.history : []
   const history = historyRaw

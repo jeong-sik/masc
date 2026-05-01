@@ -104,7 +104,7 @@ val degraded_rotation_after_recoverable_error :
   Oas.Error.sdk_error ->
   degraded_retry option
 
-val max_transient_retries : int
+val max_transient_retries : unit -> int
 
 val transient_backoff_sec : int -> float
 

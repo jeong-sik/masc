@@ -263,6 +263,10 @@ let log_grpc_heartbeat_stream_failure ~agent_name ~attempts = function
       (attempts + 1)
       Env_config.KeeperGrpc.max_reconnect_attempts
   | `Error exn ->
+    Prometheus.inc_counter
+      "masc_keeper_grpc_stream_failures"
+      ~labels:[("keeper", agent_name)]
+      ();
     Log.Keeper.warn
       "gRPC heartbeat stream error for %s: %s (attempt %d/%d)"
       agent_name
@@ -424,6 +428,8 @@ let bootstrap_live_keeper_meta ~(ctx : _ context) (m : keeper_meta) : keeper_met
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
+    Prometheus.inc_counter Prometheus.metric_keeper_write_meta_failures
+      ~labels:[("keeper", m.name); ("phase", "bootstrap-catch")] ();
     Log.Keeper.error "room presence bootstrap failed: %s" (Printexc.to_string exn);
     m
 ;;
@@ -602,6 +608,10 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
         with
         | Eio.Cancel.Cancelled _ -> ()
         | e ->
+          Prometheus.inc_counter
+            "masc_keeper_cleanup_tracking_failures"
+            ~labels:[("keeper", live_meta.name)]
+            ();
           Log.Keeper.warn
             "%s: cleanup_tracking in heartbeat finally raised: %s"
             live_meta.name (Printexc.to_string e)
@@ -663,7 +673,11 @@ let stop_keepalive ?base_path name =
        | Some close_fn ->
           (try close_fn () with
            | Eio.Cancel.Cancelled _ as e -> raise e
-           | _exn -> ())
+           | _exn ->
+              Prometheus.inc_counter
+                "masc_keeper_grpc_close_failures"
+                ~labels:[("keeper", entry.meta.name)]
+                ())
         | None -> ());
        (match entry.phase with
         | Keeper_state_machine.Crashed | Keeper_state_machine.Dead -> ()

@@ -43,7 +43,7 @@ type CostView = 'cost' | 'heuristics' | 'stress' | 'audit' | 'decisions'
 
 const COST_VIEWS: CostView[] = ['cost', 'heuristics', 'stress', 'audit', 'decisions']
 
-function isCostView(v: string | undefined): v is CostView {
+export function isCostView(v: string | undefined): v is CostView {
   return !!v && (COST_VIEWS as string[]).includes(v)
 }
 
@@ -286,7 +286,7 @@ const keeperTotals = computed(() => {
   return { totalCost, totalIn, totalOut, p50Avg, p95Max, count: data.length }
 })
 
-function formatTokens(n: number): string {
+export function formatTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`
   return `${n}`

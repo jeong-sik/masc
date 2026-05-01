@@ -4,6 +4,7 @@
 // Home jumps to min, End jumps to max.
 
 import { html } from 'htm/preact'
+import type { FunctionComponent } from 'preact'
 import { useCallback, useEffect, useRef, useState } from 'preact/hooks'
 
 interface SliderProps {
@@ -24,7 +25,7 @@ const TRACK_CLS =
 const THUMB_CLS =
   'absolute rounded-full bg-[var(--color-accent-fg)] shadow-md '
 
-export function Slider({
+export const Slider: FunctionComponent<SliderProps> = ({
   min = 0,
   max = 100,
   step = 1,
@@ -34,7 +35,7 @@ export function Slider({
   'aria-label': ariaLabel,
   disabled,
   class: cx,
-}: SliderProps) {
+}) => {
   const [internalValue, setInternalValue] = useState(min)
   const value = controlledValue ?? internalValue
   const trackRef = useRef<HTMLDivElement>(null)

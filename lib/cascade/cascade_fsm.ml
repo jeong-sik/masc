@@ -88,4 +88,16 @@ let format_exhausted_error last_err =
         kind = network_error_kind;
       }
 
+(* ── Human-readable description ─────────────────── *)
+
+let provider_outcome_to_string = function
+  | Call_ok _ -> "call-ok"
+  | Call_err _ -> "call-err"
+  | Accept_rejected _ -> "accept-rejected"
+  | Slot_full -> "slot-full"
+
+let provider_outcome_option_to_string = function
+  | Some outcome -> "some-" ^ provider_outcome_to_string outcome
+  | None -> "none"
+
 (* ── Inline tests ───────────────────────────────── *)

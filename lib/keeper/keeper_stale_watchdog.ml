@@ -75,8 +75,8 @@ open Keeper_types
    This is observability only — we still let the supervisor restart
    the keeper.  Phase 2 (deciding whether to auto-pause) is left
    for a follow-up PR with measurement evidence in hand. *)
-let termination_window_sec = 21600.0  (* 6h *)
-let escalation_threshold = 5
+let termination_window_sec = Env_config_keeper.KeeperWatchdog.termination_window_sec
+let escalation_threshold = Env_config_keeper.KeeperWatchdog.escalation_threshold
 let termination_history : (string, float list) Hashtbl.t = Hashtbl.create 16
 let termination_history_mu = Eio.Mutex.create ()
 
@@ -152,8 +152,8 @@ let () =
    systemic root-cause issue list, plus a Prometheus counter.  No
    state-machine change: the per-keeper restart still proceeds.  The
    point is to make the batch event visible at all. *)
-let batch_window_sec = 30.0
-let batch_threshold = 3
+let batch_window_sec = Env_config_keeper.KeeperWatchdog.batch_window_sec
+let batch_threshold = Env_config_keeper.KeeperWatchdog.batch_threshold
 let batch_terminations : (string * float) list Atomic.t = Atomic.make []
 
 let record_batch_termination keeper_name now : string list =
@@ -396,6 +396,10 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                 with
                 | Eio.Cancel.Cancelled _ as e -> raise e
                 | exn ->
+                  Prometheus.inc_counter
+                    "masc_keeper_stale_broadcast_emit_failures"
+                    ~labels:[("keeper", meta.name)]
+                    ();
                   Log.Keeper.warn
                     "%s: stale broadcast emit failed (restart still triggered): %s"
                     meta.name (Printexc.to_string exn))

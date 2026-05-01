@@ -2,8 +2,35 @@ import { html } from 'htm/preact'
 import { render } from 'preact'
 import { signal } from '@preact/signals'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { filterHotSessions, formatHitRate, formatAvgBufferedBytes } from './transport-health'
-import type { HotSession } from '../api/transport-health'
+import {
+  filterHotSessions,
+  formatHitRate,
+  formatAvgBufferedBytes,
+  shouldRefreshFromEvent,
+  formatLatency,
+  formatFloat,
+  formatIdle,
+  compactId,
+  statusDot,
+  toneClass,
+  queuePressureTone,
+  sseTone,
+  transportTone,
+  grpcTone,
+  websocketTone,
+  webrtcActive,
+  webrtcTone,
+  http2Tone,
+  staleTone,
+  agentPoolTone,
+  formatMetricValue,
+  transportTruthLine,
+  transportEyebrow,
+  webrtcEyebrow,
+  type StatusTone,
+} from './transport-health'
+import type { HotSession, TransportHealthData } from '../api/transport-health'
+import type { SSEEvent } from '../types'
 
 function sampleResponse(overrides?: Partial<Record<string, unknown>>) {
   return {
@@ -489,5 +516,403 @@ describe('formatAvgBufferedBytes', () => {
 
   it('rounds byte averages to the nearest integer', () => {
     expect(formatAvgBufferedBytes(7, 2)).toBe('4 B')
+  })
+})
+
+describe('shouldRefreshFromEvent', () => {
+  it.each([
+    [{ type: '' }, false],
+    [{ type: 'keeper_heartbeat' }, false],
+    [{ type: 'broadcast' }, true],
+    [{ type: 'masc/broadcast' }, true],
+    [{ type: 'agent_joined' }, true],
+    [{ type: 'masc/agent_joined' }, true],
+    [{ type: 'agent_left' }, true],
+    [{ type: 'masc/agent_left' }, true],
+    [{ type: 'task_claimed' }, true],
+    [{ type: 'masc/task_started' }, true],
+    [{ type: 'keeper_state_changed' }, true],
+    [{ type: 'masc/keeper_offline' }, true],
+    [{ type: 'decision_created' }, true],
+    [{ type: 'governance_param_changed' }, true],
+    [{ type: 'client_input_received' }, true],
+    [{ type: 'unknown_type' }, false],
+  ] as const)('shouldRefreshFromEvent(%o) → %s', (event, expected) => {
+    expect(shouldRefreshFromEvent(event as SSEEvent)).toBe(expected)
+  })
+})
+
+describe('formatLatency', () => {
+  it.each([
+    [0, '-'],
+    [0.0000005, '1us'],
+    [0.0005, '500us'],
+    [0.5, '500.0ms'],
+    [1.234, '1.23s'],
+    [60, '60.00s'],
+  ] as const)('formatLatency(%s) → %s', (input, expected) => {
+    expect(formatLatency(input)).toBe(expected)
+  })
+})
+
+describe('formatFloat', () => {
+  it.each([
+    [0, '0'],
+    [0.123, '0.12'],
+    [0.999, '1.00'],
+    [1.5, '1.5'],
+    [10.25, '10.3'],
+    [100, '100.0'],
+  ] as const)('formatFloat(%s) → %s', (input, expected) => {
+    expect(formatFloat(input)).toBe(expected)
+  })
+})
+
+describe('formatIdle', () => {
+  it.each([
+    [0, '0s'],
+    [45, '45s'],
+    [59, '59s'],
+    [60, '1m'],
+    [3599, '60m'],
+    [3600, '1h'],
+    [7200, '2h'],
+  ] as const)('formatIdle(%s) → %s', (input, expected) => {
+    expect(formatIdle(input)).toBe(expected)
+  })
+})
+
+describe('compactId', () => {
+  it.each([
+    ['short', 'short'],
+    ['exactly18charslong', 'exactly18charslong'],
+    ['abcdefghijklmnopqrstuvwxyz', 'abcdefgh...uvwxyz'],
+    ['aaaa1111-2222-3333-4444-555566667777', 'aaaa1111...667777'],
+  ] as const)('compactId(%s) → %s', (input, expected) => {
+    expect(compactId(input)).toBe(expected)
+  })
+})
+
+describe('statusDot', () => {
+  it.each([
+    ['ok', 'bg-[var(--color-status-ok)]'],
+    ['warn', 'bg-[var(--color-status-warn)]'],
+    ['bad', 'bg-[var(--color-status-err)]'],
+  ] as const)('statusDot(%s) → %s', (input, expected) => {
+    expect(statusDot(input as StatusTone)).toBe(expected)
+  })
+})
+
+describe('toneClass', () => {
+  it.each([
+    ['ok', 'text-[var(--color-status-ok)]'],
+    ['warn', 'text-[var(--color-status-warn)]'],
+    ['bad', 'text-[var(--color-status-err)]'],
+  ] as const)('toneClass(%s) → %s', (input, expected) => {
+    expect(toneClass(input as StatusTone)).toBe(expected)
+  })
+})
+
+describe('queuePressureTone', () => {
+  it.each([
+    ['high', 'bad'],
+    ['watch', 'warn'],
+    ['steady', 'ok'],
+    ['low', 'ok'],
+    ['', 'ok'],
+  ] as const)('queuePressureTone(%s) → %s', (input, expected) => {
+    expect(queuePressureTone(input)).toBe(expected as StatusTone)
+  })
+})
+
+describe('transportTone', () => {
+  it.each([
+    [false, true, true, 'warn'],
+    [true, false, true, 'bad'],
+    [true, true, true, 'ok'],
+    [true, true, false, 'warn'],
+    [false, false, false, 'warn'],
+  ] as const)('transportTone(%s,%s,%s) → %s', (configured, listening, active, expected) => {
+    expect(transportTone(configured, listening, active)).toBe(expected as StatusTone)
+  })
+})
+
+describe('staleTone', () => {
+  it.each([
+    [0, 'ok'],
+    [1, 'warn'],
+    [2, 'warn'],
+    [3, 'bad'],
+    [10, 'bad'],
+  ] as const)('staleTone(%s) → %s', (input, expected) => {
+    expect(staleTone(input)).toBe(expected as StatusTone)
+  })
+})
+
+describe('formatMetricValue', () => {
+  it.each([
+    [null, 'n/a'],
+    [0, 0],
+    [42, 42],
+    [-1, -1],
+  ] as const)('formatMetricValue(%s) → %s', (input, expected) => {
+    expect(formatMetricValue(input)).toBe(expected)
+  })
+})
+
+describe('transportEyebrow', () => {
+  it.each([
+    [false, true, 50052, '비활성'],
+    [true, true, 50052, ':50052 활성'],
+    [true, false, 50052, ':50052 중단'],
+  ] as const)('transportEyebrow(%s,%s,%s) → %s', (configured, listening, port, expected) => {
+    expect(transportEyebrow(configured, listening, port)).toBe(expected)
+  })
+})
+
+function makeData(overrides?: Partial<TransportHealthData>): TransportHealthData {
+  return {
+    summary: {
+      primary_path: 'streamable_http',
+      queue_pressure: 'steady',
+      recent_messages: null,
+      recent_messages_available: false,
+      recent_messages_source: 'metrics_only',
+      external_fanout_targets: 0,
+    },
+    sse: {
+      sessions_observer: 1,
+      sessions_coordinator: 0,
+      sessions_presence: 0,
+      sessions_total: 1,
+      external_subscribers: 0,
+      broadcast_avg_seconds: 0.01,
+      broadcast_count: 2,
+      queue_avg_depth: 0,
+      queue_max_depth: 1,
+      relay_queue_depth: 0,
+      relay_retry_total: 0,
+      relay_retry_append: 0,
+      relay_retry_broadcast: 0,
+      relay_drop_total: 0,
+      relay_drop_append: 0,
+      relay_drop_broadcast: 0,
+      hot_sessions: [],
+    },
+    grpc: {
+      enabled: true,
+      configured: true,
+      listening: true,
+      port: 50052,
+      active_streams: 0,
+      subscribers: 0,
+      heartbeat_avg_seconds: 0,
+      events_delivered: 0,
+      events_dropped: 0,
+    },
+    websocket: {
+      enabled: true,
+      configured: true,
+      listening: true,
+      mode: 'standalone',
+      port: 8936,
+      sessions: 0,
+      relay_source: 'sse_external_subscriber',
+      delivery: {
+        parse_cache_hits: 0,
+        parse_cache_misses: 0,
+        bytes_cache_hits: 0,
+        bytes_cache_misses: 0,
+        client_acks: 0,
+        throttled_deliveries: 0,
+        client_buffered_bytes_sum: 0,
+        client_buffered_bytes_count: 0,
+      },
+    },
+    webrtc: {
+      enabled: true,
+      configured: true,
+      signaling_available: true,
+      signaling_mode: 'shared_http',
+      pending_offers: 0,
+      active_peers: 0,
+      live_connections: 0,
+      connected_channels: 0,
+      ice_server_count: 2,
+    },
+    streamable_http: {
+      endpoint: '/mcp',
+      observer_stream: '/mcp?sse_kind=observer',
+      presence_stream: '/events/presence',
+      managed_endpoint: '/mcp/managed',
+      operator_endpoint: '/mcp/operator',
+      delete_endpoint: '/mcp',
+      legacy_sse_endpoint: '/sse',
+      legacy_messages_endpoint: '/messages',
+      default_transport: 'streamable_http',
+      supports_post: true,
+      supports_sse_upgrade: true,
+      supports_delete: true,
+    },
+    http2: {
+      listener_mode: 'h2',
+      multiplex_ready: true,
+      prior_knowledge_path: '/mcp',
+    },
+    cluster: {
+      cluster: 'default',
+      room_id: 'default',
+      topology_available: false,
+      topology_source: 'metrics_only',
+      total_units: null,
+      managed_units: null,
+      live_agents: null,
+      active_operations: null,
+      stale_units: null,
+    },
+    agent_health: {
+      stale_total: 0,
+      lifecycle_dispatch_rejections_total: 0,
+    },
+    generated_at: '2026-04-02T00:00:00Z',
+    ...overrides,
+  } as unknown as TransportHealthData
+}
+
+describe('sseTone', () => {
+  it('is bad when drops exist', () => {
+    expect(sseTone(makeData({ sse: { ...makeData().sse, relay_drop_total: 1 } }))).toBe('bad')
+  })
+  it('is warn when retries or queue depth exist', () => {
+    expect(sseTone(makeData({ sse: { ...makeData().sse, relay_retry_total: 1 } }))).toBe('warn')
+    expect(sseTone(makeData({ sse: { ...makeData().sse, relay_queue_depth: 2 } }))).toBe('warn')
+  })
+  it('falls back to queue pressure tone when no relay issues', () => {
+    expect(sseTone(makeData({ summary: { ...makeData().summary, queue_pressure: 'high' } }))).toBe('bad')
+    expect(sseTone(makeData({ summary: { ...makeData().summary, queue_pressure: 'watch' } }))).toBe('warn')
+    expect(sseTone(makeData())).toBe('ok')
+  })
+})
+
+describe('grpcTone', () => {
+  it('is ok when listening with active streams', () => {
+    expect(grpcTone(makeData({ grpc: { ...makeData().grpc, active_streams: 1, subscribers: 1 } }))).toBe('ok')
+  })
+  it('degrades to warn when events are dropped on healthy base', () => {
+    expect(grpcTone(makeData({ grpc: { ...makeData().grpc, active_streams: 1, subscribers: 1, events_dropped: 3 } }))).toBe('warn')
+  })
+  it('stays bad when listener is down regardless of drops', () => {
+    expect(grpcTone(makeData({ grpc: { ...makeData().grpc, listening: false } }))).toBe('bad')
+  })
+  it('is warn when listening but no activity', () => {
+    expect(grpcTone(makeData())).toBe('warn')
+  })
+})
+
+describe('websocketTone', () => {
+  it('is ok when listening with sessions', () => {
+    expect(websocketTone(makeData({ websocket: { ...makeData().websocket, sessions: 2 } }))).toBe('ok')
+  })
+  it('degrades to warn when throttled on healthy base', () => {
+    expect(websocketTone(makeData({ websocket: { ...makeData().websocket, sessions: 2, delivery: { ...makeData().websocket.delivery, throttled_deliveries: 1 } } }))).toBe('warn')
+  })
+  it('stays bad when listener is down', () => {
+    expect(websocketTone(makeData({ websocket: { ...makeData().websocket, listening: false } }))).toBe('bad')
+  })
+  it('is warn when listening but no sessions', () => {
+    expect(websocketTone(makeData())).toBe('warn')
+  })
+})
+
+describe('webrtcActive', () => {
+  it('returns false when all counts are zero', () => {
+    expect(webrtcActive(makeData())).toBe(false)
+  })
+  it('returns true when any count is positive', () => {
+    expect(webrtcActive(makeData({ webrtc: { ...makeData().webrtc, connected_channels: 1 } }))).toBe(true)
+    expect(webrtcActive(makeData({ webrtc: { ...makeData().webrtc, live_connections: 1 } }))).toBe(true)
+    expect(webrtcActive(makeData({ webrtc: { ...makeData().webrtc, active_peers: 1 } }))).toBe(true)
+  })
+})
+
+describe('webrtcTone', () => {
+  it('is ok when signaling is available and active', () => {
+    expect(webrtcTone(makeData({ webrtc: { ...makeData().webrtc, connected_channels: 1 } }))).toBe('ok')
+  })
+  it('is bad when signaling is unavailable', () => {
+    expect(webrtcTone(makeData({ webrtc: { ...makeData().webrtc, signaling_available: false } }))).toBe('bad')
+  })
+  it('is warn when signaling available but inactive', () => {
+    expect(webrtcTone(makeData())).toBe('warn')
+  })
+})
+
+describe('http2Tone', () => {
+  it('is ok when multiplex_ready', () => {
+    expect(http2Tone(makeData())).toBe('ok')
+  })
+  it('is warn when not multiplex_ready', () => {
+    expect(http2Tone(makeData({ http2: { ...makeData().http2, multiplex_ready: false } }))).toBe('warn')
+  })
+})
+
+describe('agentPoolTone', () => {
+  it('is ok when everything is clean', () => {
+    expect(agentPoolTone(makeData())).toBe('ok')
+  })
+  it('is warn when lifecycle rejects exist', () => {
+    expect(agentPoolTone(makeData({ agent_health: { ...makeData().agent_health, lifecycle_dispatch_rejections_total: 3 } }))).toBe('warn')
+  })
+  it('is warn when stale agents are below threshold', () => {
+    expect(agentPoolTone(makeData({ agent_health: { ...makeData().agent_health, stale_total: 1 } }))).toBe('warn')
+  })
+  it('is bad when stale agents reach threshold', () => {
+    expect(agentPoolTone(makeData({ agent_health: { ...makeData().agent_health, stale_total: 5 } }))).toBe('bad')
+  })
+})
+
+describe('transportTruthLine', () => {
+  it('returns null when no projection_diagnostics', () => {
+    expect(transportTruthLine(makeData())).toBeNull()
+  })
+  it('builds a line from source, cache state, and last success', () => {
+    const data = makeData({
+      projection_diagnostics: {
+        source: 'live_metrics',
+        cache_state: 'fresh',
+        last_success_at: '2026-04-15T10:00:00Z',
+        last_attempt_at: '2026-04-15T10:00:01Z',
+        last_error_at: null,
+        stale_reason: null,
+        stale_age_ms: null,
+      },
+    })
+    expect(transportTruthLine(data)).toBe('live_metrics · cache fresh · last ok 2026-04-15T10:00:00Z')
+  })
+  it('shows stale age when present instead of last success', () => {
+    const data = makeData({
+      projection_diagnostics: {
+        source: 'live_metrics',
+        cache_state: 'stale',
+        last_success_at: '2026-04-15T10:00:00Z',
+        last_attempt_at: '2026-04-15T10:00:01Z',
+        last_error_at: null,
+        stale_reason: null,
+        stale_age_ms: 1234,
+      },
+    })
+    expect(transportTruthLine(data)).toBe('live_metrics · cache stale · stale 1234ms')
+  })
+})
+
+describe('webrtcEyebrow', () => {
+  it('returns 비활성 when not configured', () => {
+    expect(webrtcEyebrow(makeData({ webrtc: { ...makeData().webrtc, configured: false } }))).toBe('비활성')
+  })
+  it('returns signaling ready when available', () => {
+    expect(webrtcEyebrow(makeData())).toBe('2 ICE · 시그널링 준비')
+  })
+  it('returns signaling down when unavailable', () => {
+    expect(webrtcEyebrow(makeData({ webrtc: { ...makeData().webrtc, signaling_available: false } }))).toBe('시그널링 중단')
   })
 })

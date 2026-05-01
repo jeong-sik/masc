@@ -1,6 +1,24 @@
 # Changelog
 
 
+## [0.19.0] - 2026-05-01
+
+Multi-repository architecture Phase 1. Introduces explicit repository registry and keeper-scoped access control, resolving the basepath mixing problem where all Git branches from nested projects were conflated.
+
+### Added
+
+- `Repo_store` module for repository CRUD, TOML persistence, git discovery, and backward-compatible default repo injection (#12401).
+- `Keeper_repo_mapping` module for keeper-to-repository access control with wildcard support and credential isolation (#12401).
+- `Credential_store` module for credential CRUD and type-safe storage (#12401).
+- `Repo_git` and `Repo_sync` modules for branch listing and sync scheduling (#12401).
+- HTTP API endpoints under `/api/v1/repositories` for listing, adding, removing, updating, discovering, and syncing repositories (#12401).
+- `Keeper_repo_mapping.validate_path_access` integration in `keeper_shell_ops` for path-level access enforcement (#12401).
+
+### Changed
+
+- Package version advanced from `0.18.25` to `0.19.0`.
+- Spec baseline and snapshot metadata synced to `0.19.0`.
+
 ## [0.18.25] - 2026-05-01
 
 Post-v0.18.24 merge train for keeper event-queue registry wiring, silent-failure visibility, cascade typing/FSM message cleanup, runtime memory config, prompt XML escaping, and release-truth sync. No breaking API changes.

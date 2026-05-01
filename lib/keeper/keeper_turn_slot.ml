@@ -373,6 +373,9 @@ let with_keeper_turn_slot ~keeper_name ~channel f =
     (Eio.Semaphore.get_value autonomous_turn_semaphore)
     (Eio.Semaphore.get_value turn_semaphore)
     queue_depth;
+  Prometheus.set_gauge Prometheus.metric_keeper_turn_queue_depth
+    ~labels:[("keeper", keeper_name); ("channel", channel_label)]
+    (float_of_int queue_depth);
   (* Track acquisitions in mutable flags so the outer Fun.protect can
      release exactly the slots we hold — regardless of which result or
      exception path fires (Eio.Cancel.Cancelled or any other). This

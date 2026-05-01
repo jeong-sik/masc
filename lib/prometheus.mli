@@ -105,6 +105,21 @@ val metric_keeper_turn_latency_by_model_bucket : string
     [keeper, channel, provider_kind, model_used, resolved_model_id,
     cascade_profile, bucket]. *)
 
+val metric_keeper_provider_cooldown_skip : string
+(** P-DASH-01: provider cooldown skip counter.  Incremented when a
+    cascade is in provider cooldown and the keeper fail-opens to a
+    fallback cascade.  Labels: [keeper, from_cascade, to_cascade]. *)
+
+val metric_keeper_provider_cooldown_remaining_sec : string
+(** P-DASH-01: provider cooldown remaining seconds gauge.
+    Exposes the current cooldown duration so operators can see
+    which cascade is blocked and for how long.  Labels: [keeper, cascade]. *)
+
+val metric_keeper_turn_queue_depth : string
+(** P-DASH-02: turn queue depth gauge.  Semaphore waiter count
+    surfaced so operators can alert on queue pressure without log
+    parsing.  Labels: [keeper, channel]. *)
+
 (** #10125: supervisor sweep liveness counters.  See {!Prometheus.ml}
     for the rationale.  Counter increments on each Pulse start;
     gauge advances on every successful beat. *)
@@ -362,6 +377,16 @@ val metric_keeper_dead_total : string
     restart will be attempted. *)
 
 val metric_keeper_skip_idle_wake_resumed : string
+
+(** RFC-0020 Rule 2 evidence — incremented every time
+    [run_smart_heartbeat_gate] overrides a [Skip_busy] / [Skip_idle]
+    decision because the Event Layer queue
+    ([Keeper_registry.event_queue_snapshot]) was non-empty. A zero
+    rate against ongoing keeper activity means either the queue
+    write path (PR-C1 [wakeup_keeper ?stimulus]) is not firing or
+    the smart heartbeat is already returning [Emit] on its own —
+    either way operators can distinguish. Labels: [keeper]. *)
+val metric_keeper_event_queue_override : string
 (** Positive signal for the #12271 Skip_idle + Woken fix path. Increments
     each time [run_smart_heartbeat_gate] observes an external [wakeup_keeper]
     cut a Skip_idle backoff sleep short and the cycle was resumed

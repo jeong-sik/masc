@@ -31,7 +31,7 @@ val prepare_run_context :
   -> meta:keeper_meta
   -> base_dir:string
   -> max_context:int
-  -> cascade_name:string
+  -> cascade_name:Keeper_cascade_profile.runtime_name
   -> ?temperature:float
   -> ?max_tokens:int
   -> ?shared_context:Oas.Context.t

@@ -12,7 +12,7 @@ import type { ActivityGraphResponse, ActivityGraphEdge } from '../types'
 
 const hoveredNodeId = signal<string | null>(null)
 
-function nodeColor(kind: string, status: string): string {
+export function nodeColor(kind: string, status: string): string {
   if (status === 'offline' || status === 'retired') return 'var(--slate-500)'
   switch (kind) {
     case 'keeper': return 'var(--color-status-ok)'
@@ -26,7 +26,7 @@ function nodeColor(kind: string, status: string): string {
   }
 }
 
-function edgeColor(kind: string, active: boolean): string {
+export function edgeColor(kind: string, active: boolean): string {
   if (!active) return 'rgba(100, 116, 139, 0.15)'
   switch (kind) {
     case 'works_on': return 'rgba(251, 191, 36, 0.5)'
@@ -46,7 +46,7 @@ function edgeColor(kind: string, active: boolean): string {
   }
 }
 
-function kindLabel(kind: string): string {
+export function kindLabel(kind: string): string {
   switch (kind) {
     case 'keeper': return '키퍼'
     case 'agent': return '에이전트'
@@ -60,7 +60,7 @@ function kindLabel(kind: string): string {
   }
 }
 
-function edgeKindLabel(kind: string): string {
+export function edgeKindLabel(kind: string): string {
   switch (kind) {
     case 'works_on': return '작업 중'
     case 'creates': return '생성'

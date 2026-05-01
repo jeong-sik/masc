@@ -1,36 +1,57 @@
-import { describe, it, expect } from 'vitest'
+// @ts-nocheck
+import { describe, expect, it } from 'vitest'
 import { trimText, truncate } from './truncate'
 
 describe('trimText', () => {
-  it('returns null for null', () => { expect(trimText(null)).toBeNull() })
-  it('returns null for undefined', () => { expect(trimText(undefined)).toBeNull() })
-  it('returns null for empty', () => { expect(trimText('')).toBeNull() })
-  it('returns null for whitespace only', () => { expect(trimText('   ')).toBeNull() })
-  it('passes short text through', () => { expect(trimText('hello')).toBe('hello') })
-  it('collapses whitespace', () => { expect(trimText('hello   world')).toBe('hello world') })
-  it('trims leading/trailing whitespace', () => { expect(trimText('  hello  ')).toBe('hello') })
-  it('truncates long text with ellipsis', () => {
-    const long = 'a'.repeat(200)
-    const result = trimText(long, 120)
-    expect(result!.length).toBeLessThanOrEqual(120)
-    expect(result).toContain('…')
+  it('returns null for empty string', () => {
+    expect(trimText('')).toBeNull()
   })
-  it('respects custom max', () => {
-    expect(trimText('abcdefghij', 5)).toBe('abcd…')
+
+  it('returns null for whitespace-only string', () => {
+    expect(trimText('   ')).toBeNull()
+  })
+
+  it('returns null for null input', () => {
+    expect(trimText(null)).toBeNull()
+  })
+
+  it('returns null for undefined input', () => {
+    expect(trimText(undefined)).toBeNull()
+  })
+
+  it('collapses whitespace', () => {
+    expect(trimText('a    b')).toBe('a b')
+  })
+
+  it('trims leading and trailing whitespace', () => {
+    expect(trimText('  hello  ')).toBe('hello')
+  })
+
+  it('returns short text unchanged', () => {
+    expect(trimText('hello', 10)).toBe('hello')
+  })
+
+  it('truncates long text with ellipsis', () => {
+    expect(trimText('hello world', 5)).toBe('hell…')
   })
 })
 
 describe('truncate', () => {
-  it('passes short text through', () => { expect(truncate('hello')).toBe('hello') })
-  it('truncates long text', () => {
-    const result = truncate('a'.repeat(300))
-    expect(result.length).toBeLessThan(300)
-    expect(result).toContain('…')
+  it('returns original if within limit', () => {
+    expect(truncate('hi', 10)).toBe('hi')
   })
-  it('respects custom limit', () => {
-    expect(truncate('abcdefghij', 5)).toBe('abcd…')
+
+  it('truncates with ellipsis when over limit', () => {
+    expect(truncate('hello', 4)).toBe('hel…')
   })
-  it('keeps text at exact limit', () => {
-    expect(truncate('abcde', 5)).toBe('abcde')
+
+  it('handles exact limit', () => {
+    expect(truncate('hello', 5)).toBe('hello')
+  })
+
+  it('uses default limit', () => {
+    const long = 'a'.repeat(261)
+    expect(truncate(long).length).toBeLessThan(long.length)
+    expect(truncate(long).endsWith('…')).toBe(true)
   })
 })

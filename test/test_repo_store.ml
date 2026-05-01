@@ -55,10 +55,19 @@ let write_file path content =
     ~finally:(fun () -> close_out_noerr oc)
     (fun () -> output_string oc content)
 
-let test_load_all_empty () =
+let init_empty_store base_path =
+  let toml_path = Filename.concat (Filename.concat base_path ".masc") "config" in
+  let toml_file = Filename.concat toml_path "repositories.toml" in
+  write_file toml_file "[repository]\n"
+
+let test_load_all_backward_compat () =
   with_temp_base_path (fun base_path ->
       match Repo_store.load_all ~base_path with
-      | Ok repos -> Alcotest.(check int) "empty list" 0 (List.length repos)
+      | Ok repos ->
+          Alcotest.(check int) "backward compat default repo" 1 (List.length repos);
+          let repo = List.hd repos in
+          Alcotest.(check string) "default id" "default" repo.id;
+          Alcotest.(check string) "local_path is base_path" base_path repo.local_path
       | Error e -> Alcotest.fail ("unexpected error: " ^ e))
 
 let test_save_and_load_roundtrip () =
@@ -77,6 +86,7 @@ let test_save_and_load_roundtrip () =
 
 let test_add_new_repo () =
   with_temp_base_path (fun base_path ->
+      init_empty_store base_path;
       let repo = sample_repo "new-repo" in
       match Repo_store.add ~base_path repo with
       | Error e -> Alcotest.fail ("add failed: " ^ e)
@@ -117,6 +127,7 @@ let test_find_missing () =
 
 let test_remove_existing () =
   with_temp_base_path (fun base_path ->
+      init_empty_store base_path;
       let repo = sample_repo "to-remove" in
       match Repo_store.add ~base_path repo with
       | Error e -> Alcotest.fail ("add failed: " ^ e)
@@ -154,6 +165,27 @@ let test_update_status_existing () =
 let test_update_status_missing () =
   with_temp_base_path (fun base_path ->
       match Repo_store.update_status ~base_path "missing" Paused with
+      | Ok _ -> Alcotest.fail "expected error for missing repo"
+      | Error msg ->
+          Alcotest.(check bool) "mentions not found" true (contains_substring msg "not found"))
+
+let test_update_existing () =
+  with_temp_base_path (fun base_path ->
+      let repo = sample_repo "update-test" in
+      match Repo_store.add ~base_path repo with
+      | Error e -> Alcotest.fail ("add failed: " ^ e)
+      | Ok _ -> (
+          let updated = { repo with name = "updated-name"; url = "https://github.com/test/updated" } in
+          match Repo_store.update ~base_path "update-test" updated with
+          | Error e -> Alcotest.fail ("update failed: " ^ e)
+          | Ok persisted ->
+              Alcotest.(check string) "name updated" "updated-name" persisted.name;
+              Alcotest.(check string) "url updated" "https://github.com/test/updated" persisted.url;
+              Alcotest.(check bool) "updated_at non-zero" true (Int64.compare persisted.updated_at Int64.zero > 0)))
+
+let test_update_missing () =
+  with_temp_base_path (fun base_path ->
+      match Repo_store.update ~base_path "missing" (sample_repo "missing") with
       | Ok _ -> Alcotest.fail "expected error for missing repo"
       | Error msg ->
           Alcotest.(check bool) "mentions not found" true (contains_substring msg "not found"))
@@ -247,6 +279,42 @@ let test_discover_ignores_masc_dir () =
         | Ok repos ->
             Alcotest.(check int) "ignores .masc repo" 0 (List.length repos))
 
+let test_migration_backward_compat_to_explicit () =
+  with_temp_base_path (fun base_path ->
+      (* Phase 1: no TOML — backward compat returns default repo *)
+      match Repo_store.load_all ~base_path with
+      | Error e -> Alcotest.fail ("load failed: " ^ e)
+      | Ok repos ->
+          Alcotest.(check int) "backward compat count" 1 (List.length repos);
+          let default = List.hd repos in
+          Alcotest.(check string) "default id" "default" default.id;
+          (* Phase 2: operator discovers and adds explicit repos *)
+          let explicit = sample_repo "migrated" in
+          (match Repo_store.add ~base_path explicit with
+           | Error e -> Alcotest.fail ("add failed: " ^ e)
+           | Ok _ -> (
+               match Repo_store.load_all ~base_path with
+               | Error e -> Alcotest.fail ("load after migration failed: " ^ e)
+               | Ok migrated ->
+                   Alcotest.(check int) "migrated count" 2 (List.length migrated);
+                   let ids = List.map (fun (r : repository) -> r.id) migrated in
+                   Alcotest.(check bool) "has default" true (List.mem "default" ids);
+                   Alcotest.(check bool) "has migrated" true (List.mem "migrated" ids))))
+
+let test_migration_preserves_existing_toml () =
+  with_temp_base_path (fun base_path ->
+      let path = Filename.concat base_path ".masc/config/repositories.toml" in
+      write_file path
+        "[repository.existing]\n\
+         name = \"existing\"\n\
+         url = \"https://github.com/test/existing.git\"\n";
+      (* TOML exists — backward compat must NOT inject default *)
+      match Repo_store.load_all ~base_path with
+      | Error e -> Alcotest.fail ("load failed: " ^ e)
+      | Ok repos ->
+          Alcotest.(check int) "existing toml count" 1 (List.length repos);
+          Alcotest.(check string) "existing id" "existing" (List.hd repos).id)
+
 let test_discover_skips_registered () =
   if not (git_available ()) then Alcotest.skip ()
   else
@@ -265,13 +333,12 @@ let test_discover_skips_registered () =
             | Ok repos ->
                 Alcotest.(check int) "skips already registered" 0
                   (List.length repos)))
-
 let () =
   Alcotest.run "Repo_store"
     [
       ( "roundtrip",
         [
-          Alcotest.test_case "load_all empty" `Quick test_load_all_empty;
+          Alcotest.test_case "backward compat default" `Quick test_load_all_backward_compat;
           Alcotest.test_case "save and load roundtrip" `Quick test_save_and_load_roundtrip;
         ] );
       ( "add",
@@ -294,6 +361,11 @@ let () =
           Alcotest.test_case "update existing" `Quick test_update_status_existing;
           Alcotest.test_case "update missing" `Quick test_update_status_missing;
         ] );
+      ( "update",
+        [
+          Alcotest.test_case "update existing" `Quick test_update_existing;
+          Alcotest.test_case "update missing" `Quick test_update_missing;
+        ] );
       ( "local_path",
         [
           Alcotest.test_case "absolute preserved" `Quick test_local_path_absolute_preserved;
@@ -313,5 +385,12 @@ let () =
           Alcotest.test_case "finds git repos" `Quick test_discover_finds_git_repos;
           Alcotest.test_case "ignores .masc repos" `Quick test_discover_ignores_masc_dir;
           Alcotest.test_case "skips registered repos" `Quick test_discover_skips_registered;
+        ] );
+      ( "migration",
+        [
+          Alcotest.test_case "backward compat to explicit" `Quick
+            test_migration_backward_compat_to_explicit;
+          Alcotest.test_case "preserves existing toml" `Quick
+            test_migration_preserves_existing_toml;
         ] );
     ]

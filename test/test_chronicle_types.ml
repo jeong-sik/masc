@@ -10,7 +10,7 @@ module CI = Masc_mcp.Chronicle_index
 
 let sample_causation () =
   [ { CT.trigger = "CI failure on main"
-    ; CT.decision = "pin dune-project version"
+    ; CT.conclusion = "pin dune-project version"
     ; CT.rationale = "unpin caused drift across 9 PRs"
     }
   ]

@@ -3,7 +3,7 @@
 
 type causation_entry =
   { trigger : string
-  ; decision : string
+  ; conclusion : string
   ; rationale : string
   }
 [@@deriving yojson, show]

@@ -42,6 +42,30 @@ let gh_config_dir_of_bundle bundle_root =
 let root_gh_config_dir config =
   gh_config_dir_of_bundle (root_bundle_root config)
 
+let git_config_env_entries =
+  [
+    "GIT_CONFIG_COUNT=4";
+    "GIT_CONFIG_KEY_0=safe.directory";
+    "GIT_CONFIG_VALUE_0=*";
+    "GIT_CONFIG_KEY_1=credential.helper";
+    "GIT_CONFIG_VALUE_1=";
+    "GIT_CONFIG_KEY_2=credential.https://github.com.helper";
+    "GIT_CONFIG_VALUE_2=!gh auth git-credential";
+    "GIT_CONFIG_KEY_3=credential.useHttpPath";
+    "GIT_CONFIG_VALUE_3=true";
+  ]
+
+let git_config_env_pairs =
+  List.filter_map
+    (fun entry ->
+      match String.index_opt entry '=' with
+      | None -> None
+      | Some idx ->
+          Some
+            ( String.sub entry 0 idx,
+              String.sub entry (idx + 1) (String.length entry - idx - 1) ))
+    git_config_env_entries
+
 let gh_config_dir_exists dir =
   Sys.file_exists dir && Sys.is_directory dir
 
@@ -120,8 +144,12 @@ let with_env (config : Coord.config) (gh_cmd : string) : string =
   let bundle_root = root_bundle_root config in
   Printf.sprintf
     "GH_TOKEN= GITHUB_TOKEN= SSH_AUTH_SOCK= HOME=%s GH_CONFIG_DIR=%s \
-     GIT_CONFIG_GLOBAL=%s GIT_CONFIG_COUNT=1 \
-     GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0='*' %s"
+     GIT_CONFIG_GLOBAL=%s GIT_CONFIG_COUNT=4 \
+     GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0='*' \
+     GIT_CONFIG_KEY_1=credential.helper GIT_CONFIG_VALUE_1= \
+     GIT_CONFIG_KEY_2=credential.https://github.com.helper \
+     GIT_CONFIG_VALUE_2='!gh auth git-credential' \
+     GIT_CONFIG_KEY_3=credential.useHttpPath GIT_CONFIG_VALUE_3=true %s"
     (Filename.quote bundle_root)
     (Filename.quote (root_gh_config_dir config))
     (Filename.quote (Filename.concat bundle_root "gitconfig"))
@@ -162,10 +190,8 @@ let compose_base_with_gh_config ~dir =
       "HOME=" ^ bundle_root;
       "GH_CONFIG_DIR=" ^ dir;
       "GIT_CONFIG_GLOBAL=" ^ Filename.concat bundle_root "gitconfig";
-      "GIT_CONFIG_COUNT=1";
-      "GIT_CONFIG_KEY_0=safe.directory";
-      "GIT_CONFIG_VALUE_0=*";
     ]
+    @ git_config_env_entries
   in
   Array.of_list (scoped @ without_existing_config)
 

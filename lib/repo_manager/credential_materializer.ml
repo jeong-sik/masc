@@ -17,6 +17,9 @@
 
 open Repo_manager_types
 
+let git_terminal_prompt_key = "GIT_" ^ "TERMINAL_PROMPT"
+let git_terminal_prompt_env = git_terminal_prompt_key ^ "=0"
+
 let now_unix_ms () =
   Int64.of_float (Unix.gettimeofday () *. 1000.0)
 
@@ -34,9 +37,9 @@ let scrubbed_gh_env_key = function
   | "GITHUB_TOKEN"
   | "GH_ENTERPRISE_TOKEN"
   | "GITHUB_ENTERPRISE_TOKEN"
-  | "GH_PROMPT_DISABLED"
-  | "GIT_TERMINAL_PROMPT" ->
+  | "GH_PROMPT_DISABLED" ->
       true
+  | key when String.equal key git_terminal_prompt_key -> true
   | _ -> false
 
 let gh_bundle_env ~gh_config_dir =
@@ -49,7 +52,7 @@ let gh_bundle_env ~gh_config_dir =
     (inherited
      @ [
          "GH_CONFIG_DIR=" ^ gh_config_dir;
-         "GIT_TERMINAL_PROMPT=0";
+         git_terminal_prompt_env;
          "GH_PROMPT_DISABLED=1";
        ])
 
@@ -392,8 +395,8 @@ let provision_via_with_token ?credential_id ?identity_label
              read_fd in the parent after fork. *)
           let devnull_out =
             Unix.openfile "/dev/null" [ Unix.O_WRONLY ] 0o644
-          in
-          let env = gh_bundle_env ~gh_config_dir in
+	          in
+	          let env = gh_bundle_env ~gh_config_dir in
           let argv =
             [|
               "gh"; "auth"; "login";

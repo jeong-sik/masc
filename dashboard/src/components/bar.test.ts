@@ -1,80 +1,157 @@
 // @vitest-environment happy-dom
-import { describe, expect, it } from "vitest"
-import { render, h } from "preact"
-import { Bar, barPercent } from "./bar"
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { render } from 'preact'
+import { html } from 'htm/preact'
+import { Bar } from './bar'
+import { barPercent, type BarProps } from './bar-shared'
 
-describe("barPercent", () => {
-  it("returns 0 for NaN", () => {
-    expect(barPercent(NaN)).toBe(0)
-  })
-
-  it("clamps negative to 0", () => {
-    expect(barPercent(-10)).toBe(0)
-  })
-
-  it("clamps over 100 to 100", () => {
-    expect(barPercent(150)).toBe(100)
-  })
-
-  it("rounds to integer", () => {
-    expect(barPercent(66.6)).toBe(67)
-  })
-
-  it("passes through valid values", () => {
+describe('barPercent (pure)', () => {
+  it('rounds to integer', () => {
     expect(barPercent(0)).toBe(0)
-    expect(barPercent(50)).toBe(50)
+    expect(barPercent(50.4)).toBe(50)
+    expect(barPercent(50.6)).toBe(51)
     expect(barPercent(100)).toBe(100)
+  })
+
+  it('clamps below 0 to 0', () => {
+    expect(barPercent(-1)).toBe(0)
+    expect(barPercent(-100)).toBe(0)
+  })
+
+  it('clamps above 100 to 100', () => {
+    expect(barPercent(101)).toBe(100)
+    expect(barPercent(9999)).toBe(100)
+  })
+
+  it('coerces NaN to 0', () => {
+    expect(barPercent(Number.NaN)).toBe(0)
   })
 })
 
-describe("Bar", () => {
-  it("renders progressbar role and aria values", () => {
-    const container = document.createElement("div")
-    render(h(Bar, { value: 42 }), container)
-    const bar = container.querySelector("[role=\"progressbar\"]")
-    expect(bar).not.toBeNull()
-    expect(bar!.getAttribute("aria-valuenow")).toBe("42")
-    expect(bar!.getAttribute("aria-valuemin")).toBe("0")
-    expect(bar!.getAttribute("aria-valuemax")).toBe("100")
-    expect(bar!.getAttribute("aria-label")).toBe("42%")
+describe('Bar', () => {
+  let host: HTMLDivElement
+
+  beforeEach(() => {
+    host = document.createElement('div')
+    document.body.appendChild(host)
   })
 
-  it("sets fill width from value", () => {
-    const container = document.createElement("div")
-    render(h(Bar, { value: 75 }), container)
-    const fill = container.querySelector("span[aria-hidden=\"true\"]")
+  afterEach(() => {
+    render(null, host)
+    host.remove()
+  })
+
+  function mount(props: BarProps): HTMLElement {
+    render(html`<${Bar} ...${props} />`, host)
+    return host.firstElementChild as HTMLElement
+  }
+
+  // ── Structural ──
+
+  it('emits a div with role=progressbar', () => {
+    const el = mount({ value: 50 })
+    expect(el.tagName).toBe('DIV')
+    expect(el.getAttribute('role')).toBe('progressbar')
+  })
+
+  it('exposes aria-valuenow/min/max', () => {
+    const el = mount({ value: 42 })
+    expect(el.getAttribute('aria-valuenow')).toBe('42')
+    expect(el.getAttribute('aria-valuemin')).toBe('0')
+    expect(el.getAttribute('aria-valuemax')).toBe('100')
+  })
+
+  it('defaults aria-label to the rounded percent', () => {
+    const el = mount({ value: 67.4 })
+    expect(el.getAttribute('aria-label')).toBe('67%')
+  })
+
+  it('lets caller override aria-label', () => {
+    const el = mount({ value: 30, ariaLabel: '3 of 10 tasks complete' })
+    expect(el.getAttribute('aria-label')).toBe('3 of 10 tasks complete')
+  })
+
+  it('forwards testId to data-testid', () => {
+    const el = mount({ value: 50, testId: 'budget-bar' })
+    expect(el.getAttribute('data-testid')).toBe('budget-bar')
+  })
+
+  it('records kind on data-kind', () => {
+    const el = mount({ value: 50, kind: 'warn' })
+    expect(el.getAttribute('data-kind')).toBe('warn')
+  })
+
+  it('defaults to kind=default when omitted', () => {
+    const el = mount({ value: 50 })
+    expect(el.getAttribute('data-kind')).toBe('default')
+  })
+
+  // ── Fill ──
+
+  it('renders an inner fill span aria-hidden', () => {
+    const el = mount({ value: 50 })
+    const fill = el.querySelector('span[aria-hidden="true"]')
     expect(fill).not.toBeNull()
-    expect((fill as HTMLElement).style.width).toBe("75%")
   })
 
-  it("applies kind-specific fill color", () => {
-    const container = document.createElement("div")
-    render(h(Bar, { value: 30, kind: "err" }), container)
-    const bar = container.querySelector("[role=\"progressbar\"]")
-    expect(bar!.getAttribute("data-kind")).toBe("err")
-    const fill = container.querySelector("span[aria-hidden=\"true\"]") as HTMLElement
-    expect(fill.style.background).toBe("var(--color-status-err)")
+  it('clamps value below 0 to 0% width', () => {
+    const el = mount({ value: -5 })
+    expect(el.getAttribute('aria-valuenow')).toBe('0')
+    const fill = el.querySelector('span[aria-hidden="true"]') as HTMLElement
+    expect(fill.getAttribute('style') ?? '').toContain('width: 0%')
   })
 
-  it("omits transition when noTransition is true", () => {
-    const container = document.createElement("div")
-    render(h(Bar, { value: 50, noTransition: true }), container)
-    const fill = container.querySelector("span[aria-hidden=\"true\"]") as HTMLElement
-    expect(fill.style.transition).toBe("")
+  it('clamps value above 100 to 100% width', () => {
+    const el = mount({ value: 150 })
+    expect(el.getAttribute('aria-valuenow')).toBe('100')
+    const fill = el.querySelector('span[aria-hidden="true"]') as HTMLElement
+    expect(fill.getAttribute('style') ?? '').toContain('width: 100%')
   })
 
-  it("uses custom aria-label when provided", () => {
-    const container = document.createElement("div")
-    render(h(Bar, { value: 80, ariaLabel: "Eighty percent complete" }), container)
-    const bar = container.querySelector("[role=\"progressbar\"]")
-    expect(bar!.getAttribute("aria-label")).toBe("Eighty percent complete")
+  // ── Visual fidelity ──
+
+  it('renders 4px height (SPEC bar geometry)', () => {
+    const el = mount({ value: 50 })
+    const style = el.getAttribute('style') ?? ''
+    expect(style).toContain('4px')
   })
 
-  it("forwards testId and title", () => {
-    const container = document.createElement("div")
-    render(h(Bar, { value: 10, testId: "prog", title: "Progress" }), container)
-    const bar = container.querySelector("[role=\"progressbar\"]")
-    expect(bar!.getAttribute("data-testid")).toBe("prog")
-    expect(bar!.getAttribute("title")).toBe("Progress")
+  it('uses elevated bg as track', () => {
+    const el = mount({ value: 50 })
+    const style = el.getAttribute('style') ?? ''
+    expect(style).toContain('var(--color-bg-elevated)')
+  })
+
+  it('uses accent fill for default kind', () => {
+    const el = mount({ value: 50 })
+    const fill = el.querySelector('span[aria-hidden="true"]') as HTMLElement
+    expect(fill.getAttribute('style') ?? '').toContain('var(--color-accent-fg)')
+  })
+
+  it('uses ok status token for ok kind', () => {
+    const el = mount({ value: 50, kind: 'ok' })
+    const fill = el.querySelector('span[aria-hidden="true"]') as HTMLElement
+    expect(fill.getAttribute('style') ?? '').toContain('var(--color-status-ok)')
+  })
+
+  it('uses err status token for err kind', () => {
+    const el = mount({ value: 50, kind: 'err' })
+    const fill = el.querySelector('span[aria-hidden="true"]') as HTMLElement
+    expect(fill.getAttribute('style') ?? '').toContain('var(--color-status-err)')
+  })
+
+  // ── Transition ──
+
+  it('applies width transition by default', () => {
+    const el = mount({ value: 50 })
+    const fill = el.querySelector('span[aria-hidden="true"]') as HTMLElement
+    expect(fill.getAttribute('style') ?? '').toContain('transition')
+  })
+
+  it('drops transition when noTransition=true', () => {
+    const el = mount({ value: 50, noTransition: true })
+    const fill = el.querySelector('span[aria-hidden="true"]') as HTMLElement
+    const style = fill.getAttribute('style') ?? ''
+    expect(style).not.toContain('transition')
   })
 })

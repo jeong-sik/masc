@@ -271,7 +271,7 @@ let auto_approval_soft_forbidden ~tool_name ~input =
   destructive_tool_or_op ~tool_name ~input
 
 let to_oas_approval_callback
-    ?config ~governance_level ~keeper_name ?meta () : Oas.Hooks.approval_callback =
+    ?config ~governance_level ~keeper_name ?meta ?clock () : Oas.Hooks.approval_callback =
   let queue_risk_level = function
     | Low -> Keeper_approval_queue.Low
     | Medium -> Keeper_approval_queue.Medium
@@ -427,6 +427,7 @@ let to_oas_approval_callback
               ~disposition:"Pause"
               ~disposition_reason:"waiting_approval"
               ~risk_level
+              ?clock
               ()
     else
       Oas.Hooks.Approve

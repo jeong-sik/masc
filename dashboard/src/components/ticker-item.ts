@@ -19,6 +19,7 @@
 import { html } from 'htm/preact'
 import type { VNode } from 'preact'
 import { KeeperBadge } from './keeper-badge'
+import { MONO_STACK } from './common/font-stacks'
 
 export type TickerItemKind = 'ok' | 'warn' | 'err' | 'info' | 'neutral'
 export type TickerTimePosition = 'leading' | 'trailing' | 'none'
@@ -39,7 +40,6 @@ export interface TickerItemProps {
   bodyMaxChars?: number
 }
 
-const MONO_STACK = 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace'
 
 const BODY_COLOR_BY_KIND: Record<TickerItemKind, string> = {
   ok: 'var(--color-status-ok)',

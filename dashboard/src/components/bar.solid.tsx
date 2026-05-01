@@ -11,29 +11,9 @@
 //   - barPercent clamps NaN → 0 and rounds to int
 
 import type { JSX } from 'solid-js'
+import { barPercent, FILL_COLOR, type BarProps, type BarKind } from './bar-shared'
 
-export type BarKind = 'default' | 'ok' | 'warn' | 'err'
-
-export interface BarProps {
-  value: number
-  kind?: BarKind
-  ariaLabel?: string
-  testId?: string
-  title?: string
-  noTransition?: boolean
-}
-
-const FILL_COLOR: Record<BarKind, string> = {
-  default: 'var(--color-accent-fg)',
-  ok: 'var(--color-status-ok)',
-  warn: 'var(--color-status-warn)',
-  err: 'var(--color-status-err)',
-}
-
-export function barPercent(value: number): number {
-  if (Number.isNaN(value)) return 0
-  return Math.round(Math.min(Math.max(value, 0), 100))
-}
+export { barPercent, type BarProps, type BarKind } from './bar-shared'
 
 export function Bar(props: BarProps): JSX.Element {
   const kind = (): BarKind => props.kind ?? 'default'

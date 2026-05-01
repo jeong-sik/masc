@@ -551,6 +551,12 @@ module Rate_bucket = struct
 
   (** Burst capacity. Default: 150. *)
   let burst = get_int ~default:150 "MASC_RATE_BURST"
+
+  (** Per-agent requests per second. Default: 20. *)
+  let agent_rate = get_float ~default:20.0 "MASC_AGENT_RATE_LIMIT"
+
+  (** Per-agent burst capacity. Default: 50. *)
+  let agent_burst = get_int ~default:50 "MASC_AGENT_RATE_BURST"
 end
 
 (** {1 Worker / Local Runtime Configuration} *)
@@ -787,6 +793,13 @@ module InternalTimers = struct
       is sized for the steady-state connection count. *)
   let janitor_interval_sec =
     get_float ~default:60.0 "MASC_JANITOR_INTERVAL_SEC"
+
+  (** Repository auto-sync interval (seconds). The repo_sync fiber in
+      [server_bootstrap_loops] wakes at this cadence to fetch repositories
+      with [auto_sync = true]. Default: 300 (5 min). *)
+  let repo_sync_interval_sec =
+    let value = get_float ~default:300.0 "MASC_REPO_SYNC_INTERVAL_SEC" in
+    if value > 0.0 then value else 300.0
 
   (** Rate-limit bucket staleness TTL (seconds). Buckets with no traffic for
       this long are reaped by the janitor loop. Default: 300 (5 min). Raise

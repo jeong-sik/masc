@@ -67,6 +67,8 @@ type failure_reason =
           consecutive cycles. This is a provider/cascade/runtime throughput
           failure, so the supervisor pauses instead of restarting into the
           same slow model and burning another multi-minute budget. *)
+  | Provider_runtime_error of { code : string; detail : string }
+  | Tool_required_unsatisfied of { code : string; detail : string }
   | Ambiguous_partial_commit of ambiguous_partial_commit
   | Fiber_unresolved
   | Exception of string
@@ -87,6 +89,10 @@ let failure_reason_to_string = function
       Printf.sprintf "stale_termination_storm(count=%d)" count
   | Oas_timeout_budget_loop { count } ->
       Printf.sprintf "oas_timeout_budget_loop(count=%d)" count
+  | Provider_runtime_error { code; detail } ->
+      Printf.sprintf "provider_runtime_error(%s:%s)" code detail
+  | Tool_required_unsatisfied { code; detail } ->
+      Printf.sprintf "tool_required_unsatisfied(%s:%s)" code detail
   | Ambiguous_partial_commit { kind; detail } ->
       Printf.sprintf "ambiguous_partial_commit(%s:%s)"
         (ambiguous_partial_commit_kind_to_string kind)
@@ -109,10 +115,27 @@ let failure_reason_cohort_key = function
   | Some (Stale_turn_timeout _) -> "stale_turn_timeout"
   | Some (Stale_termination_storm _) -> "stale_termination_storm"
   | Some (Oas_timeout_budget_loop _) -> "oas_timeout_budget_loop"
+  | Some (Provider_runtime_error _) -> "provider_runtime_error"
+  | Some (Tool_required_unsatisfied _) -> "tool_required_unsatisfied"
   | Some (Ambiguous_partial_commit _) -> "ambiguous_partial_commit"
   | Some Fiber_unresolved -> "fiber_unresolved"
   | Some (Exception _) -> "exception"
   | None -> "unknown"
+
+let stale_watchdog_failure_reason ~prior ~kill_class =
+  match prior with
+  | Some
+      ( Oas_timeout_budget_loop _
+      | Provider_runtime_error _
+      | Tool_required_unsatisfied _
+      | Ambiguous_partial_commit _
+      | Turn_consecutive_failures _
+      | Heartbeat_consecutive_failures _
+      | Exception _ ) ->
+      prior
+  | Some (Stale_termination_storm _ | Stale_turn_timeout _ | Fiber_unresolved)
+  | None ->
+      Some (Stale_turn_timeout kill_class)
 
 (** Pure control-flow signal for immediate fiber termination (RFC-0002).
     Carries no state — failure reason must be pre-stored via
@@ -1292,9 +1315,6 @@ let dispatch_event_and_log ~base_path name event =
       | Keeper_state_machine.Terminal_state _ -> "terminal_state"
       | Keeper_state_machine.Invalid_transition _ -> "invalid_transition"
     in
-    Log.Keeper.warn
-      "registry: dispatch_event failed name=%s error=%s"
-      name (Keeper_state_machine.transition_error_to_string e);
     Prometheus.inc_counter
       Prometheus.metric_keeper_dispatch_event_failures
       ~labels:[("keeper", name); ("reason", reason_label)]
@@ -1310,9 +1330,6 @@ let dispatch_event_with_audit_and_log ~base_path ?snapshot ?events_fired ?select
       | Keeper_state_machine.Terminal_state _ -> "terminal_state"
       | Keeper_state_machine.Invalid_transition _ -> "invalid_transition"
     in
-    Log.Keeper.warn
-      "registry: dispatch_event_with_audit failed name=%s error=%s"
-      name (Keeper_state_machine.transition_error_to_string e);
     Prometheus.inc_counter
       Prometheus.metric_keeper_dispatch_event_failures
       ~labels:[("keeper", name); ("reason", reason_label)]

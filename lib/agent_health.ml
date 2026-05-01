@@ -1,3 +1,22 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+module Random = Stdlib.Random
+
 (** Agent Health — Autonomy-specific health gate over Circuit Breaker.
 
     Wraps Circuit_breaker with agent-name semantics for Keeper Heartbeat.
@@ -39,7 +58,7 @@ let check_health ~agent_name : health_status =
   match Circuit_breaker.check_global ~agent_id:agent_name with
   | Ok () ->
       let status = Circuit_breaker.get_status_global ~agent_id:agent_name in
-      if status.state_name = "half_open" then Recovering
+      if String.equal status.state_name "half_open" then Recovering
       else Healthy
   | Error reason ->
       Unhealthy reason
@@ -107,7 +126,7 @@ let cooldown_remaining_of (open_until : float option) : int =
   match open_until with
   | Some until ->
       let remaining = until -. Time_compat.now () in
-      if remaining > 0.0 then int_of_float remaining else 0
+      if Stdlib.Float.compare remaining 0.0 > 0 then Int.of_float remaining else 0
   | None -> 0
 
 (** Get health summary for a single agent. *)

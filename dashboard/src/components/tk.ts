@@ -37,6 +37,7 @@
 
 import { html } from 'htm/preact'
 import type { ComponentChildren, VNode } from 'preact'
+import { MONO_STACK } from './common/font-stacks'
 
 export type TkKind = 'default' | 'brass' | 'err'
 
@@ -80,8 +81,6 @@ const KIND_STYLE: Record<TkKind, KindStyle> = {
   },
 }
 
-const MONO_STACK =
-  'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace'
 
 export function Tk(props: TkProps): VNode {
   const kind = props.kind ?? 'default'

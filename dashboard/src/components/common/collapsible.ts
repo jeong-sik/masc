@@ -12,6 +12,10 @@ interface CollapsibleSectionProps {
   class?: string
   /** Summary extra content (badges, counts) */
   badge?: ComponentChildren
+  /** Dot color class for the status indicator in the summary. */
+  dotClass?: string
+  /** Callback fired when the open state changes via user interaction. */
+  onToggle?: (open: boolean) => void
   /** Avoid mounting expensive closed panels until the operator expands them. */
   mountWhenOpen?: boolean
   children: ComponentChildren
@@ -23,6 +27,8 @@ export function CollapsibleSection({
   id,
   class: cx,
   badge,
+  dotClass,
+  onToggle,
   mountWhenOpen = false,
   children,
 }: CollapsibleSectionProps) {
@@ -39,10 +45,13 @@ export function CollapsibleSection({
       id=${id}
       class="rounded border border-[var(--color-border-default)] overflow-hidden ${cx ?? ''}"
       onToggle=${(event: Event) => {
-        if ((event.currentTarget as HTMLDetailsElement).open) setHasOpened(true)
+        const isOpen = (event.currentTarget as HTMLDetailsElement).open
+        if (isOpen) setHasOpened(true)
+        onToggle?.(isOpen)
       }}
     >
       <summary class="flex items-center gap-2 px-4 py-3 cursor-pointer text-sm font-medium text-[var(--color-fg-secondary)] select-none hover:bg-[var(--white-3)] transition-colors list-none">
+        ${dotClass != null ? html`<span class="w-1.5 h-1.5 rounded-full ${dotClass}" aria-hidden="true"></span>` : null}
         ${title}
         ${badge ?? null}
       </summary>

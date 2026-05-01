@@ -1,3 +1,4 @@
+open Base
 (** Filesystem Compatibility Layer - Eio-native I/O with fallback
 
     Provides a unified filesystem API for gradual migration from
@@ -42,7 +43,7 @@ let has_fs () =
 let with_io ~path f =
   try f ()
   with Eio.Io _ as e ->
-    raise (Sys_error (Printf.sprintf "%s: %s" path (Printexc.to_string e)))
+    raise (Sys_error (Printf.sprintf "%s: %s" path (Exn.to_string e)))
 
 (* #9921: defense-in-depth write-boundary guard.
 
@@ -66,44 +67,43 @@ exception Test_isolation_breach of string
 
 let test_exec_home_guard ~op path =
   let basename =
-    Sys.executable_name |> Filename.basename |> String.lowercase_ascii
+    Stdlib.Sys.executable_name |> Stdlib.Filename.basename |> String.lowercase
   in
   let is_test_exec =
-    String.length basename >= 5 && String.starts_with ~prefix:"test_" basename
+    String.length basename >= 5 && String.is_prefix basename ~prefix:"test_"
   in
   if not is_test_exec then ()
   else
     let allow =
-      match Sys.getenv_opt "MASC_TEST_ALLOW_HOME_BASE_PATH" with
+      match Sys.getenv "MASC_TEST_ALLOW_HOME_BASE_PATH" with
       | Some v ->
-          let v = String.lowercase_ascii (String.trim v) in
-          v = "1" || v = "true" || v = "yes"
+          let v = String.lowercase (String.strip v) in
+          String.equal v "1" || String.equal v "true" || String.equal v "yes"
       | None -> false
     in
     if allow then ()
     else
-      match Sys.getenv_opt "HOME" with
+      match Sys.getenv "HOME" with
       | None | Some "" -> ()
       | Some home ->
           let home_norm =
-            let trimmed = String.trim home in
+            let trimmed = String.strip home in
             let len = String.length trimmed in
-            if len > 1 && trimmed.[len - 1] = '/' then
-              String.sub trimmed 0 (len - 1)
+            if len > 1 && Char.equal trimmed.[len - 1] '/' then
+              String.sub trimmed ~pos:0 ~len:(len - 1)
             else
               trimmed
           in
           let home_len = String.length home_norm in
           if home_len > 0
              && String.length path >= home_len
-             && String.sub path 0 home_len = home_norm then
-            raise (Test_isolation_breach
+             && String.is_prefix path ~prefix:home_norm then            raise (Test_isolation_breach
               (Printf.sprintf
                  "#9921 %s blocked under HOME=%S (path=%S) in test executable %S. \
                   MASC_BASE_PATH override did not apply — fix the test setup or \
                   set MASC_TEST_ALLOW_HOME_BASE_PATH=1."
                  op home_norm path
-                 (Filename.basename Sys.executable_name)))
+                 (Stdlib.Filename.basename Stdlib.Sys.executable_name)))
 
 let with_fs_or_fallback ~path ~fallback f =
   match Atomic.get global_fs with
@@ -113,30 +113,30 @@ let with_fs_or_fallback ~path ~fallback f =
   | None -> fallback ()
 
 let load_file_unix (path : string) : string =
-  let ic = open_in path in
-  Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
-    let len = in_channel_length ic in
-    really_input_string ic len
+  let ic = Stdlib.open_in path in
+  Stdlib.Fun.protect ~finally:(fun () -> Stdlib.close_in_noerr ic) (fun () ->
+    let len = Stdlib.in_channel_length ic in
+    Stdlib.really_input_string ic len
   )
 
 let save_file_unix (path : string) (content : string) : unit =
-  let oc = open_out path in
-  Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
-    output_string oc content
+  let oc = Stdlib.open_out path in
+  Stdlib.Fun.protect ~finally:(fun () -> Stdlib.close_out_noerr oc) (fun () ->
+    Stdlib.output_string oc content
   )
 
 let append_file_unix (path : string) (content : string) : unit =
-  let oc = open_out_gen [Open_append; Open_creat] 0o644 path in
-  Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
-    output_string oc content
+  let oc = Stdlib.open_out_gen [Stdlib.Open_append; Stdlib.Open_creat] 0o644 path in
+  Stdlib.Fun.protect ~finally:(fun () -> Stdlib.close_out_noerr oc) (fun () ->
+    Stdlib.output_string oc content
   )
 
 let mkdir_p_unix (path : string) : unit =
   let rec ensure_dir (p : string) : unit =
-    if p = "" || p = "." || p = "/" then ()
-    else if Sys.file_exists p then ()
+    if String.equal p "" || String.equal p "." || String.equal p "/" then ()
+    else if Stdlib.Sys.file_exists p then ()
     else begin
-      ensure_dir (Filename.dirname p);
+      ensure_dir (Stdlib.Filename.dirname p);
       try Unix.mkdir p 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
     end
   in
@@ -165,8 +165,8 @@ let save_file (path : string) (content : string) : unit =
    what we observed on backlog.json after an abrupt shutdown (2026-04-18). *)
 let fsync_path path =
   let fd = Unix.openfile path [ Unix.O_RDONLY ] 0 in
-  Fun.protect
-    ~finally:(fun () -> try Unix.close fd with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Printf.eprintf "[fs_compat] fsync_path close failed: %s\n%!" (Printexc.to_string exn))
+  Stdlib.Fun.protect
+    ~finally:(fun () -> try Unix.close fd with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Stdlib.Printf.eprintf "[fs_compat] fsync_path close failed: %s\n%!" (Exn.to_string exn))
     (fun () ->
       try Unix.fsync fd
       with Unix.Unix_error ((Unix.EINVAL | Unix.EOPNOTSUPP), _, _) ->
@@ -183,28 +183,28 @@ let fsync_path path =
 let atomic_tmp_prefix = ".atomic_"
 let atomic_tmp_suffix = ".tmp"
 
-let save_file_atomic (path : string) (content : string) : (unit, string) result =
-  let dir = Filename.dirname path in
+let save_file_atomic (path : string) (content : string) : (unit, string) Result.t =
+  let dir = Stdlib.Filename.dirname path in
   let tmp =
-    Filename.temp_file ~temp_dir:dir atomic_tmp_prefix atomic_tmp_suffix
+    Stdlib.Filename.temp_file ~temp_dir:dir atomic_tmp_prefix atomic_tmp_suffix
   in
   try
     save_file tmp content;
     fsync_path tmp;
-    Sys.rename tmp path;
+    Stdlib.Sys.rename tmp path;
     (try fsync_path dir with Unix.Unix_error _ -> ());
     Ok ()
   with
   | Eio.Cancel.Cancelled _ as e ->
-    (try Sys.remove tmp with Sys_error _ -> ());
+    (try Stdlib.Sys.remove tmp with Sys_error _ -> ());
     raise e
   | exn ->
-    (try Sys.remove tmp with Sys_error _ -> ());
-    Error (Printf.sprintf "save_file_atomic %s: %s" path (Printexc.to_string exn))
+    (try Stdlib.Sys.remove tmp with Sys_error _ -> ());
+    Error (Printf.sprintf "save_file_atomic %s: %s" path (Exn.to_string exn))
 
 (* #10130: orphaned [.atomic_*.tmp] files from [save_file_atomic]
    that accumulated because the owning process was SIGKILL'd or
-   [Filename.temp_file] raised ENFILE/EMFILE (so the with-handler
+   [Stdlib.Filename.temp_file] raised ENFILE/EMFILE (so the with-handler
    never ran).  The 2026-04-24 audit found 33 orphans in
    [~/me/.masc/] with 6 non-zero files carrying real keeper-meta
    JSON — evidence of 6 silent atomic-save failures that
@@ -226,18 +226,18 @@ let is_atomic_orphan_name name =
   let p = String.length atomic_tmp_prefix in
   let s = String.length atomic_tmp_suffix in
   n >= p + s
-  && String.sub name 0 p = atomic_tmp_prefix
-  && String.sub name (n - s) s = atomic_tmp_suffix
+  && String.is_prefix name ~prefix:atomic_tmp_prefix
+  && String.is_suffix name ~suffix:atomic_tmp_suffix
 
 let cleanup_atomic_orphans
     ~(base_path : string)
     ?(recovered_subdir = ".recovered")
     () : int * int =
-  let recovered_dir = Filename.concat base_path recovered_subdir in
+  let recovered_dir = Stdlib.Filename.concat base_path recovered_subdir in
   let deleted = ref 0 in
   let preserved = ref 0 in
   (* #10205 finding 3: previous body reinvented [mkdir_p] inline with
-     [Sys.file_exists]+[Unix.mkdir]+[Unix.Unix_error _] swallowing.  The
+     [Stdlib.Sys.file_exists]+[Unix.mkdir]+[Unix.Unix_error _] swallowing.  The
      same module already exposes [mkdir_p_unix], which is recursive,
      idempotent (handles [EEXIST] precisely instead of swallowing every
      [Unix_error]), and correct when [base_path] itself does not exist
@@ -246,49 +246,43 @@ let cleanup_atomic_orphans
     try mkdir_p_unix recovered_dir with Unix.Unix_error _ -> ()
   in
   let handle_file dir name =
-    let path = Filename.concat dir name in
+    let path = Stdlib.Filename.concat dir name in
     match Unix.stat path with
     | exception Unix.Unix_error _ -> ()
     | stat when stat.Unix.st_size = 0 ->
-        (try Sys.remove path; incr deleted
+        (try Stdlib.Sys.remove path; Int.incr deleted
          with Sys_error _ -> ())
     | _stat ->
         ensure_recovered_dir ();
         let target =
-          Filename.concat recovered_dir
+          Stdlib.Filename.concat recovered_dir
             (Printf.sprintf "%s.%.0f" name (Unix.gettimeofday () *. 1000.0))
         in
-        (try Sys.rename path target; incr preserved
+        (try Stdlib.Sys.rename path target; Int.incr preserved
          with Sys_error _ | Unix.Unix_error _ -> ())
   in
   let scan_dir dir entries =
-    Array.iter
-      (fun name ->
-        if is_atomic_orphan_name name then handle_file dir name)
-      entries
+    Array.iter entries ~f:(fun name -> if is_atomic_orphan_name name then handle_file dir name)
   in
   let read_dir_entries dir =
-    match Sys.readdir dir with
+    match Stdlib.Sys.readdir dir with
     | exception Sys_error _ -> [||]
     | entries -> entries
   in
-  (* #10205 finding 4: previous body called [Sys.readdir base_path]
+  (* #10205 finding 4: previous body called [Stdlib.Sys.readdir base_path]
      twice — once via [scan_dir] for orphan-find, once for the
      subdirectory recursion pass.  Read once, run both passes against
      the cached entry array. *)
   let entries = read_dir_entries base_path in
   scan_dir base_path entries;
-  Array.iter
-    (fun name ->
-      if name = recovered_subdir then ()
+  Array.iter entries ~f:(fun name -> if String.equal name recovered_subdir then ()
       else
-        let sub = Filename.concat base_path name in
+        let sub = Stdlib.Filename.concat base_path name in
         match Unix.stat sub with
         | exception Unix.Unix_error _ -> ()
-        | stat when stat.Unix.st_kind = Unix.S_DIR ->
+        | stat when Poly.equal stat.Unix.st_kind Unix.S_DIR ->
             scan_dir sub (read_dir_entries sub)
-        | _ -> ())
-    entries;
+        | _ -> ());
   (!deleted, !preserved)
 
 (** Append string to file.
@@ -301,9 +295,9 @@ let append_file (path : string) (content : string) : unit =
       Eio.Path.save ~append:true ~create:(`If_missing 0o644) eio_path content)
 
 (** Check if file exists.
-    Uses Sys.file_exists (works in both Eio and non-Eio contexts). *)
+    Uses Stdlib.Sys.file_exists (works in both Eio and non-Eio contexts). *)
 let file_exists (path : string) : bool =
-  with_fs_or_fallback ~path ~fallback:(fun () -> Sys.file_exists path) (fun fs ->
+  with_fs_or_fallback ~path ~fallback:(fun () -> Stdlib.Sys.file_exists path) (fun fs ->
     try
       let _ = Eio.Path.stat ~follow:true Eio.Path.(fs / path) in true
     with Eio.Io _ -> false)
@@ -324,7 +318,7 @@ let file_mtime (path : string) : float option =
 
 
 let rename (src : string) (dst : string) : unit =
-  with_fs_or_fallback ~path:src ~fallback:(fun () -> Sys.rename src dst) (fun fs ->
+  with_fs_or_fallback ~path:src ~fallback:(fun () -> Stdlib.Sys.rename src dst) (fun fs ->
     Eio.Path.rename Eio.Path.(fs / src) Eio.Path.(fs / dst))
 
 let rmdir (path : string) : unit =
@@ -352,17 +346,17 @@ let parse_jsonl_lines ~(source : string) (lines : string list)
     : Yojson.Safe.t list * int =
   let malformed = ref 0 in
   let parsed =
-    List.filter_map (fun line ->
-      let trimmed = String.trim line in
-      if trimmed = "" then None
+    List.filter_map lines ~f:(fun line ->
+      let trimmed = String.strip line in
+      if String.equal trimmed "" then None
       else
         match Yojson.Safe.from_string trimmed with
         | json -> Some json
         | exception Yojson.Json_error msg ->
-            incr malformed;
-            Printf.eprintf "[fs_compat] malformed JSONL (%s): %s\n%!" source msg;
+            Int.incr malformed;
+            Stdlib.Printf.eprintf "[fs_compat] malformed JSONL (%s): %s\n%!" source msg;
             None
-    ) lines
+    )
   in
   (parsed, !malformed)
 
@@ -372,8 +366,8 @@ let load_jsonl_diagnostics (path : string) : Yojson.Safe.t list * int =
   if not (file_exists path) then ([], 0)
   else
     let content = load_file path in
-    let lines = String.split_on_char '\n' content in
-    parse_jsonl_lines ~source:(Filename.basename path) lines
+    let lines = String.split content ~on:'\n' in
+    parse_jsonl_lines ~source:(Stdlib.Filename.basename path) lines
 
 (** Load JSONL file as list of JSON values.
     Malformed lines are logged and dropped. *)
@@ -382,7 +376,7 @@ let load_jsonl (path : string) : Yojson.Safe.t list =
 
 (** Append JSON value as line to JSONL file. *)
 let append_jsonl (path : string) (json : Yojson.Safe.t) : unit =
-  let dir = Filename.dirname path in
+  let dir = Stdlib.Filename.dirname path in
   mkdir_p dir;
   let line = Yojson.Safe.to_string json ^ "\n" in
   append_file path line

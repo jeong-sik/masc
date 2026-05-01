@@ -210,11 +210,29 @@ val respond_auth_error :
   Httpun.Request.t -> Httpun.Reqd.t -> Types.masc_error -> unit
 (** Compose [http_status_of_auth_error] + [auth_error_json] + CORS. *)
 
+val respond_agent_rate_limited :
+  rl_key:string -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+(** Send a 429 Too Many Requests response for a per-agent rate-limit
+    violation.  Includes [X-RateLimit-*] headers and CORS so browser
+    clients can inspect the response. *)
+
+val agent_rl_key_of_request : Httpun.Request.t -> string option
+(** Extract a per-agent rate-limit key from the request.  Prefers the
+    bearer token (SHA-256 prefix) over the declared agent-name header.
+    Returns [None] for anonymous requests. *)
+
+val check_agent_rate_limit :
+  Httpun.Request.t -> Httpun.Reqd.t -> (unit, unit) result
+(** Check the per-agent rate limit.  Returns [Ok ()] if allowed.
+    Sends a 429 response and returns [Error ()] if rate-limited.
+    Anonymous requests (no token, no agent header) are always allowed. *)
+
 (** {1 Handler combinators}
 
     Each [with_*_auth] takes a handler that expects an authorised
     [server_state] and returns a [Httpun] handler.  Failure paths emit
-    a structured auth error via [respond_auth_error]. *)
+    a structured auth error via [respond_auth_error].  All combinators
+    apply per-agent rate limiting after successful auth. *)
 
 val with_admin_auth :
   (Mcp_server.server_state ->

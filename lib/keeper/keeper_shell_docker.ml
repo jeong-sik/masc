@@ -646,6 +646,13 @@ let run_docker_hardened_bash
                 ("output", `String out);
               ] @ gh_exit_class_field ~cmd ~status:st ~output:out)))
     | _ ->
+      (match turn_sandbox_runtime with
+       | Some _ ->
+         Prometheus.inc_counter
+           "masc_keeper_docker_runtime_discarded_total"
+           ~labels:[ ("keeper", meta.name); ("reason", "network_mode_mismatch") ]
+           ()
+       | None -> ());
       (* P12: check egress policy before running networked container *)
       (match check_egress ~config ~meta ~cmd with
        | Some blocked_json -> blocked_json

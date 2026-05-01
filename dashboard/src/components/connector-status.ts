@@ -42,6 +42,21 @@ import { createManagedAsyncResource } from '../lib/async-state'
 import { route } from '../router'
 import { Tk } from './tk'
 
+function MutedSpan({ children }: { children: unknown }) {
+  return html`<span class="text-[var(--color-fg-disabled)]">${children}</span>`
+}
+
+function BoldLabel({ children }: { children: unknown }) {
+  return html`<span class="font-medium">${children}</span>`
+}
+
+function CardBox({ children, dataKeeper }: { children: unknown; dataKeeper?: string }) {
+  if (dataKeeper) {
+    return html`<div class="rounded border border-[var(--color-border-default)] bg-[var(--white-4)] px-3 py-2" data-keeper=${dataKeeper}>${children}</div>`
+  }
+  return html`<div class="rounded border border-[var(--color-border-default)] bg-[var(--white-4)] px-3 py-2">${children}</div>`
+}
+
 // As of 2026-04-30 the per-connector sub-tabs were merged into
 // connector-status; selection now happens inside the page via
 // ConnectorOverviewStrip rather than top-level navigation.
@@ -825,19 +840,19 @@ function ConnectorLivePanel({
         <span class="text-base leading-none" aria-hidden="true">${headerIcon}</span>
         <span class="text-sm font-semibold text-[var(--color-fg-primary)]">${connectorName}</span>
         ${connector?.bot_user_name
-          ? html`<span class="text-[var(--color-fg-disabled)]"><span aria-hidden="true">· </span>${connector.bot_user_name}</span>`
+          ? html`<${MutedSpan}><span aria-hidden="true">· </span>${connector.bot_user_name}</${MutedSpan}>`
           : null}
         <span class="text-[var(--color-fg-disabled)]" aria-hidden="true">·</span>
         <span class=${`inline-flex items-center gap-1.5 rounded-sm border px-2 py-0.5 text-3xs uppercase tracking-4 ${directTone}`}>
           <span class=${`inline-block h-2 w-2 rounded-full ${dotClassForLabel(directLabel)}`}></span>
           <span>${directLabel}</span>
         </span>
-        <span class="text-[var(--color-fg-disabled)]"><span aria-hidden="true">· </span>hb ${timeAgo(connector?.updated_at ?? '')}</span>
+        <${MutedSpan}><span aria-hidden="true">· </span>hb ${timeAgo(connector?.updated_at ?? '')}</${MutedSpan}>
         ${connector?.reply_mode
-          ? html`<span class="text-[var(--color-fg-disabled)]"><span aria-hidden="true">· </span>reply ${connector.reply_mode}</span>`
+          ? html`<${MutedSpan}><span aria-hidden="true">· </span>reply ${connector.reply_mode}</${MutedSpan}>`
           : null}
         ${connector?.self_chat_guid
-          ? html`<span class="text-[var(--color-fg-disabled)]"><span aria-hidden="true">· </span>self-chat ${truncateMiddle(connector.self_chat_guid, 28)}</span>`
+          ? html`<${MutedSpan}><span aria-hidden="true">· </span>self-chat ${truncateMiddle(connector.self_chat_guid, 28)}</${MutedSpan}>`
           : null}
         <span class="ml-auto flex items-center gap-2">
           ${connector?.available
@@ -904,8 +919,8 @@ function ConnectorLivePanel({
                 ${livenessDots.map(dot => html`
                   <div class="flex min-w-0 flex-wrap items-center gap-2">
                     <span class=${`inline-block h-2 w-2 rounded-full ${dotClass(dot.state)}`}></span>
-                    <span class="font-medium">${dot.label}</span>
-                    <span class="text-[var(--color-fg-disabled)]">${dot.detail}</span>
+                    <${BoldLabel}>${dot.label}</${BoldLabel}>
+                    <${MutedSpan}>${dot.detail}</${MutedSpan}>
                     ${dot.hint && (dot.state === 'down' || dot.state === 'warn')
                       ? html`<span class="italic text-[var(--color-fg-disabled)]">— ${dot.hint}</span>`
                       : null}
@@ -933,10 +948,10 @@ function ConnectorLivePanel({
                 ${connectorError ? 'Connector API 사용 불가' : 'Sidecar 상태 경고'}
               </div>
               <div class="mt-1">
-                <span class="font-medium">Cause: </span> ${connectorError ?? connector?.error}
+                <${BoldLabel}>Cause: </${BoldLabel}> ${connectorError ?? connector?.error}
               </div>
               <div class="mt-1">
-                <span class="font-medium">Next: </span>
+                <${BoldLabel}>Next: </${BoldLabel}>
                 ${connectorError
                   ? html`refresh the dashboard or check <${Tk}>/api/v1/gate/connectors<//> on ${connector?.gate_base_url || 'the Gate server'}.`
                   : html`run the ${connectorName} status command and inspect <${Tk}>${connector?.status_path || `sidecars/${connectorId}-bot/status.json`}<//>.`}
@@ -965,10 +980,10 @@ function ConnectorLivePanel({
                 ? html`<span class="text-3xs text-[var(--color-fg-disabled)]">checked ${timeAgo(connector.gate_health_checked_at)}</span>`
                 : null}
               <div class="mt-1">
-                <span class="font-medium">Cause: </span> keeper 디렉토리 사용 불가, 수동 입력만 가능.
+                <${BoldLabel}>Cause: </${BoldLabel}> keeper 디렉토리 사용 불가, 수동 입력만 가능.
               </div>
               <div class="mt-1">
-                <span class="font-medium">Next: </span> 지금은 수동 입력으로 진행, 이후 <${Tk}>config/keepers/<//> 복원 또는 <${Tk}>/api/v1/gate/keepers<//> 수정 후 디렉토리 추천에 의존하세요.
+                <${BoldLabel}>Next: </${BoldLabel}> 지금은 수동 입력으로 진행, 이후 <${Tk}>config/keepers/<//> 복원 또는 <${Tk}>/api/v1/gate/keepers<//> 수정 후 디렉토리 추천에 의존하세요.
               </div>
             </div>
           `
@@ -1047,10 +1062,10 @@ function ConnectorLivePanel({
                 </div>
                 <div class="text-2xs text-[var(--color-status-warn)]/80">
                   <div>
-                    <span class="font-medium">원인: </span> 사이드카 status 파일이 <${Tk}>${connector?.status_path || `sidecars/${connectorId}-bot/status.json`}<//> 에서 관찰되지 않았습니다.
+                    <${BoldLabel}>원인: </${BoldLabel}> 사이드카 status 파일이 <${Tk}>${connector?.status_path || `sidecars/${connectorId}-bot/status.json`}<//> 에서 관찰되지 않았습니다.
                   </div>
                   <div class="mt-1">
-                    <span class="font-medium">다음: </span> <strong>Start</strong> 버튼으로 백엔드를 통해 실행하거나, 아래 명령을 복사해 터미널에서 실행하세요. 오프라인이 지속되면 <strong>status</strong> 와 <strong>tail logs</strong> 를 사용하세요.
+                    <${BoldLabel}>다음: </${BoldLabel}> <strong>Start</strong> 버튼으로 백엔드를 통해 실행하거나, 아래 명령을 복사해 터미널에서 실행하세요. 오프라인이 지속되면 <strong>status</strong> 와 <strong>tail logs</strong> 를 사용하세요.
                   </div>
                 </div>
                 <div class="mt-2 grid grid-cols-1 gap-1.5">
@@ -1123,7 +1138,7 @@ function ConnectorLivePanel({
                   }
                 }
                 return html`
-                  <div class="rounded border border-[var(--color-border-default)] bg-[var(--white-4)] px-3 py-2" data-keeper=${group.name}>
+                  <${CardBox} dataKeeper=${group.name}>
                     <div class="flex flex-wrap items-baseline gap-3">
                       <div class="text-sm font-medium text-[var(--color-fg-primary)]">${group.name}</div>
                       ${keeper
@@ -1225,7 +1240,7 @@ function ConnectorLivePanel({
                             : null}
                         `
                       : null}
-                  </div>
+                  </${CardBox}>
                 `
               })}
             </div>
@@ -1253,7 +1268,7 @@ function ConnectorLivePanel({
                             <span class="mr-1 text-[var(--color-fg-disabled)]" aria-hidden="true">·</span>
                             ${humanized
                               ? html`<span>${humanized}</span>`
-                              : html`<span class="text-[var(--color-fg-disabled)]">names pending</span>`}
+                              : html`<${MutedSpan}>names pending</${MutedSpan}>`}
                             <span class="ml-2 text-3xs text-[var(--color-fg-disabled)]">(${truncateMiddle(binding.channel_id, 14)})</span>
                           </div>
                           ${bindingActionsEnabled
@@ -1347,11 +1362,11 @@ function ChannelCard({ ch }: { ch: ChannelInfo }) {
       <div class="mt-3 grid grid-cols-2 gap-2 text-2xs text-[var(--color-fg-disabled)]">
         <div>
           avg ${(ch.avg_duration_ms / 1000).toFixed(1)}s
-          <span class="text-[var(--color-fg-disabled)]"> / max ${(ch.max_duration_ms / 1000).toFixed(1)}s</span>
+          <${MutedSpan}> / max ${(ch.max_duration_ms / 1000).toFixed(1)}s</${MutedSpan}>
         </div>
         <div>
           slow ${ch.slow_count}
-          <span class="text-[var(--color-fg-disabled)]"> (${ch.slow_rate_pct}%)</span>
+          <${MutedSpan}> (${ch.slow_rate_pct}%)</${MutedSpan}>
         </div>
         <div>
           last outcome
@@ -1382,7 +1397,7 @@ function BindingRow({ binding }: { binding: BindingInfo }) {
   const lastError = shortText(binding.last_error, 72)
 
   return html`
-    <div class="rounded border border-[var(--color-border-default)] bg-[var(--white-4)] px-3 py-2">
+    <${CardBox}>
       <div class="flex items-start justify-between gap-3">
         <div class="min-w-0">
           <div class="text-xs font-medium text-[var(--color-fg-primary)]">
@@ -1417,7 +1432,7 @@ function BindingRow({ binding }: { binding: BindingInfo }) {
             </div>
           `
         : null}
-    </div>
+    <//>
   `
 }
 
@@ -1428,7 +1443,7 @@ function EventRow({ event }: { event: GateEventInfo }) {
     : 'border border-[var(--color-border-default)] bg-[var(--white-4)] text-[var(--color-fg-disabled)]'
 
   return html`
-    <div class="rounded border border-[var(--color-border-default)] bg-[var(--white-4)] px-3 py-2">
+    <${CardBox}>
       <div class="flex items-start justify-between gap-3">
         <div class="min-w-0 text-2xs text-[var(--color-fg-disabled)]">
           <div class="font-medium text-[var(--color-fg-primary)]">
@@ -1452,7 +1467,7 @@ function EventRow({ event }: { event: GateEventInfo }) {
             </div>
           `
         : null}
-    </div>
+    <//>
   `
 }
 
@@ -1527,14 +1542,12 @@ function GateAnalyticsSection({
               </div>
 
               <div class="mb-4 grid grid-cols-2 gap-2 text-2xs text-[var(--color-fg-disabled)] max-[720px]:grid-cols-1">
-                <div class="rounded border border-[var(--color-border-default)] bg-[var(--white-4)] px-3 py-2">
-                  duplicate suppressions
+                <${CardBox}>duplicate suppressions
                   <span class="ml-2 font-mono text-[var(--color-fg-primary)]">${gate.total_duplicates}</span>
-                </div>
-                <div class="rounded border border-[var(--color-border-default)] bg-[var(--white-4)] px-3 py-2">
-                  active connectors
+                <//>
+                <${CardBox}>active connectors
                   <span class="ml-2 font-mono text-[var(--color-fg-primary)]">${gate.channels.length}</span>
-                </div>
+                <//>
               </div>
 
               <div class="mb-4 grid grid-cols-2 gap-3 max-[900px]:grid-cols-1">
@@ -1687,7 +1700,7 @@ export function ConnectorStatusPanel() {
                   <span class="font-semibold text-[var(--color-fg-primary)]">${CONNECTOR_DISPLAY_NAMES[focusedConnectorId]}</span>
                   <span class="ml-2 text-[var(--color-fg-disabled)]">선택한 커넥터의 상세와 액션만 보여줍니다.</span>
                 </div>
-                <span class="text-[var(--color-fg-disabled)]">overview 카드에서 전환</span>
+                <${MutedSpan}>overview 카드에서 전환</${MutedSpan}>
               </div>
               <${ConnectorLivePanel}
                 connector=${focusedConnector}

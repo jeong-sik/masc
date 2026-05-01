@@ -1,3 +1,4 @@
+open Base
 (** Filesystem Compatibility Layer - Eio-native I/O with fallback
 
     @since 2026-02 - Keeper Emergent Identity v2.0
@@ -28,7 +29,7 @@ val load_file : string -> string
 val save_file : string -> string -> unit
 (** Save string to file (overwrite). *)
 
-val save_file_atomic : string -> string -> (unit, string) result
+val save_file_atomic : string -> string -> (unit, string) Result.t
 (** Write content to path via temp file + rename.
     Returns [Error msg] on I/O failure instead of raising. *)
 

@@ -223,6 +223,10 @@ function rowCenterY(idx: number): number {
   return idx * ROW_STRIDE_PX + ROW_HEIGHT_PX / 2
 }
 
+function LegendDot({ color, label }: { color: string; label: string }) {
+  return html`<span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full ${color}" aria-hidden="true"></span>${label}</span>`
+}
+
 interface Props {
   windowMs?: number
   pollMs?: number
@@ -291,21 +295,11 @@ export function HandoffTimeline({
           </p>
         </div>
         <div class="flex gap-2 text-3xs text-text-muted">
-          <span class="flex items-center gap-1">
-            <span class="w-2 h-2 rounded-full bg-[var(--ok-10)]" aria-hidden="true"></span>lifecycle
-          </span>
-          <span class="flex items-center gap-1">
-            <span class="w-2 h-2 rounded-full bg-[var(--accent-10)]" aria-hidden="true"></span>tool
-          </span>
-          <span class="flex items-center gap-1">
-            <span class="w-2 h-2 rounded-full bg-[var(--warn-10)]" aria-hidden="true"></span>handoff
-          </span>
-          <span class="flex items-center gap-1">
-            <span class="w-2 h-2 rounded-full bg-[var(--accent-10)]" aria-hidden="true"></span>context
-          </span>
-          <span class="flex items-center gap-1">
-            <span class="w-2 h-2 rounded-full bg-[var(--bad-10)]" aria-hidden="true"></span>failure
-          </span>
+          <${LegendDot} color="bg-[var(--ok-10)]" label="lifecycle" />
+          <${LegendDot} color="bg-[var(--accent-10)]" label="tool" />
+          <${LegendDot} color="bg-[var(--warn-10)]" label="handoff" />
+          <${LegendDot} color="bg-[var(--accent-10)]" label="context" />
+          <${LegendDot} color="bg-[var(--bad-10)]" label="failure" />
         </div>
       </header>
       <div class="flex items-center justify-end">

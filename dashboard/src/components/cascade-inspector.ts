@@ -15,6 +15,18 @@ import { FilterChips } from './common/filter-chips'
 import { StatusBadge } from './common/status-badge'
 import { TimeAgo } from './common/time-ago'
 
+function NumCell({ children }: { children: unknown }) {
+  return html`<td class="px-3 py-2 text-right tabular-nums text-text-muted">${children}</td>`
+}
+
+function ThRight({ children }: { children: unknown }) {
+  return html`<th class="px-3 py-2 font-semibold text-right">${children}</th>`
+}
+
+function ThBase({ children }: { children: unknown }) {
+  return html`<th class="px-3 py-2 font-semibold">${children}</th>`
+}
+
 // -- Local state -------------------------------------------------
 
 const traceLoading = signal<boolean>(false)
@@ -98,13 +110,13 @@ function StrategyTraceTable({ events }: { events: CascadeStrategyTraceEvent[] })
       <table class="w-full text-left text-xs">
         <thead class="bg-[var(--white-3)] text-text-muted">
           <tr>
-            <th class="px-3 py-2 font-semibold">시간</th>
-            <th class="px-3 py-2 font-semibold">Cascade</th>
-            <th class="px-3 py-2 font-semibold">전략</th>
-            <th class="px-3 py-2 font-semibold text-right">Cycle</th>
-            <th class="px-3 py-2 font-semibold text-right">후보</th>
-            <th class="px-3 py-2 font-semibold text-right">백오프(ms)</th>
-            <th class="px-3 py-2 font-semibold">결과</th>
+            <${ThBase}>시간</${ThBase}>
+            <${ThBase}>Cascade</${ThBase}>
+            <${ThBase}>전략</${ThBase}>
+            <${ThRight}>Cycle</${ThRight}>
+            <${ThRight}>후보</${ThRight}>
+            <${ThRight}>백오프(ms)</${ThRight}>
+            <${ThBase}>결과</${ThBase}>
           </tr>
         </thead>
         <tbody class="divide-y divide-card-border/40">
@@ -115,9 +127,9 @@ function StrategyTraceTable({ events }: { events: CascadeStrategyTraceEvent[] })
               </td>
               <td class="px-3 py-2 font-medium text-text-strong">${e.cascade_name}</td>
               <td class="px-3 py-2 text-text-body">${e.strategy}</td>
-              <td class="px-3 py-2 text-right tabular-nums text-text-muted">${e.cycle}</td>
-              <td class="px-3 py-2 text-right tabular-nums text-text-muted">${e.candidates_in}→${e.candidates_out}</td>
-              <td class="px-3 py-2 text-right tabular-nums text-text-muted">${e.backoff_ms}</td>
+              <${NumCell}>${e.cycle}<//>
+              <${NumCell}>${e.candidates_in}→${e.candidates_out}<//>
+              <${NumCell}>${e.backoff_ms}<//>
               <td class="px-3 py-2">
                 <${TraceKindBadge} kind=${e.kind} />
               </td>
@@ -139,12 +151,12 @@ function ProviderHealthTable({ providers }: { providers: CascadeHealthProvider[]
       <table class="w-full text-left text-xs">
         <thead class="bg-[var(--white-3)] text-text-muted">
           <tr>
-            <th class="px-3 py-2 font-semibold">프로바이더</th>
-            <th class="px-3 py-2 font-semibold text-right">성공률</th>
-            <th class="px-3 py-2 font-semibold text-right">연속 실패</th>
-            <th class="px-3 py-2 font-semibold">쿨다운</th>
-            <th class="px-3 py-2 font-semibold text-right">이벤트</th>
-            <th class="px-3 py-2 font-semibold text-right">평균 지연(ms)</th>
+            <${ThBase}>프로바이더</${ThBase}>
+            <${ThRight}>성공률</${ThRight}>
+            <${ThRight}>연속 실패</${ThRight}>
+            <${ThBase}>쿨다운</${ThBase}>
+            <${ThRight}>이벤트</${ThRight}>
+            <${ThRight}>평균 지연(ms)</${ThRight}>
           </tr>
         </thead>
         <tbody class="divide-y divide-card-border/40">
@@ -162,10 +174,10 @@ function ProviderHealthTable({ providers }: { providers: CascadeHealthProvider[]
                   ? html`<${StatusBadge} tone="warn">쿨다운 진행 중<//>`
                   : html`<span class="text-text-muted">-</span>`}
               </td>
-              <td class="px-3 py-2 text-right tabular-nums text-text-muted">${p.events_in_window}</td>
-              <td class="px-3 py-2 text-right tabular-nums text-text-muted">
+              <${NumCell}>${p.events_in_window}<//>
+              <${NumCell}>
                 ${p.avg_latency_ms != null ? Math.round(p.avg_latency_ms) : '-'}
-              </td>
+              <//>
             </tr>
           `)}
         </tbody>

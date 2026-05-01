@@ -11,6 +11,9 @@ let reset () = ignore (Sse.close_all_clients ())
 
 let _dummy_push _s = ()
 
+let jsonrpc_notification method_name =
+  `Assoc [ ("jsonrpc", `String "2.0"); ("method", `String method_name) ]
+
 (* ============================================================
    pop / try_pop
    ============================================================ *)
@@ -29,7 +32,7 @@ let test_try_pop_no_events () =
 
 let test_broadcast_popable () =
   reset ();
-  ignore (Sse.register "s-pop-bc" ~last_event_id:0);
+  ignore (Sse.register ~kind:Observer "s-pop-bc" ~last_event_id:0);
   Sse.broadcast (`Assoc [("key", `String "val")]);
   let ev = Sse.try_pop "s-pop-bc" in
   Alcotest.(check bool) "got event from stream" true (ev <> None);
@@ -40,9 +43,9 @@ let test_broadcast_popable () =
 
 let test_broadcast_multiple_clients_streams () =
   reset ();
-  ignore (Sse.register "s-mc-1" ~last_event_id:0);
-  ignore (Sse.register "s-mc-2" ~last_event_id:0);
-  ignore (Sse.register "s-mc-3" ~last_event_id:0);
+  ignore (Sse.register ~kind:Observer "s-mc-1" ~last_event_id:0);
+  ignore (Sse.register ~kind:Observer "s-mc-2" ~last_event_id:0);
+  ignore (Sse.register ~kind:Observer "s-mc-3" ~last_event_id:0);
   Sse.broadcast (`Assoc [("multi", `Bool true)]);
   let got1 = Sse.try_pop "s-mc-1" in
   let got2 = Sse.try_pop "s-mc-2" in
@@ -58,7 +61,7 @@ let test_send_to_popable () =
   reset ();
   ignore (Sse.register "s-st-1" ~last_event_id:0);
   ignore (Sse.register "s-st-2" ~last_event_id:0);
-  Sse.send_to "s-st-1" (`Assoc [("direct", `Bool true)]);
+  Sse.send_to "s-st-1" (jsonrpc_notification "notifications/test");
   let got1 = Sse.try_pop "s-st-1" in
   let got2 = Sse.try_pop "s-st-2" in
   Alcotest.(check bool) "target got event" true (got1 <> None);
@@ -68,7 +71,7 @@ let test_send_to_popable () =
 
 let test_pop_blocks_then_receives () =
   reset ();
-  ignore (Sse.register "s-block" ~last_event_id:0);
+  ignore (Sse.register ~kind:Observer "s-block" ~last_event_id:0);
   (* pop in a sub-fiber, broadcast from main fiber *)
   Eio.Fiber.both
     (fun () ->
@@ -83,7 +86,7 @@ let test_pop_blocks_then_receives () =
 let test_broadcast_skips_already_seen () =
   reset ();
   (* Register with a high last_event_id so events are skipped *)
-  ignore (Sse.register "s-skip" ~last_event_id:999_999_999);
+  ignore (Sse.register ~kind:Observer "s-skip" ~last_event_id:999_999_999);
   Sse.broadcast (`Assoc [("skip", `Bool true)]);
   let ev = Sse.try_pop "s-skip" in
   Alcotest.(check bool) "skipped (already seen)" true (ev = None);
@@ -91,7 +94,7 @@ let test_broadcast_skips_already_seen () =
 
 let test_broadcast_event_contains_data () =
   reset ();
-  ignore (Sse.register "s-data" ~last_event_id:0);
+  ignore (Sse.register ~kind:Observer "s-data" ~last_event_id:0);
   Sse.broadcast (`Assoc [("payload", `Int 42)]);
   match Sse.try_pop "s-data" with
   | None -> Alcotest.fail "expected an event"
@@ -127,7 +130,7 @@ let test_broadcast_to_coordinators_only () =
   reset ();
   ignore (Sse.register ~kind:Observer "s-obs2" ~last_event_id:0);
   ignore (Sse.register ~kind:Coordinator "s-coord2" ~last_event_id:0);
-  Sse.broadcast_to Coordinators (`Assoc [("target", `String "coordinators")]);
+  Sse.broadcast_to Coordinators (jsonrpc_notification "notifications/test");
   let got_obs = Sse.try_pop "s-obs2" in
   let got_coord = Sse.try_pop "s-coord2" in
   Alcotest.(check bool) "observer did not get event" true (got_obs = None);
@@ -139,7 +142,7 @@ let test_broadcast_to_all () =
   reset ();
   ignore (Sse.register ~kind:Observer "s-all-obs" ~last_event_id:0);
   ignore (Sse.register ~kind:Coordinator "s-all-coord" ~last_event_id:0);
-  Sse.broadcast_to All (`Assoc [("target", `String "all")]);
+  Sse.broadcast_to All (jsonrpc_notification "notifications/test");
   let got_obs = Sse.try_pop "s-all-obs" in
   let got_coord = Sse.try_pop "s-all-coord" in
   Alcotest.(check bool) "observer got event" true (got_obs <> None);
@@ -152,7 +155,7 @@ let test_broadcast_equals_broadcast_to_all () =
   ignore (Sse.register ~kind:Observer "s-eq-obs" ~last_event_id:0);
   ignore (Sse.register ~kind:Coordinator "s-eq-coord" ~last_event_id:0);
   (* broadcast (no target) should reach everyone, same as broadcast_to All *)
-  Sse.broadcast (`Assoc [("compat", `Bool true)]);
+  Sse.broadcast (jsonrpc_notification "notifications/test");
   let got_obs = Sse.try_pop "s-eq-obs" in
   let got_coord = Sse.try_pop "s-eq-coord" in
   Alcotest.(check bool) "observer got broadcast" true (got_obs <> None);
@@ -163,15 +166,15 @@ let test_broadcast_equals_broadcast_to_all () =
 let test_broadcast_all_excludes_presence_sessions () =
   reset ();
   ignore (Sse.register ~kind:Presence "s-all-presence" ~last_event_id:0);
-  ignore (Sse.register ~kind:Coordinator "s-all-coord-only" ~last_event_id:0);
+  ignore (Sse.register ~kind:Observer "s-all-observer-only" ~last_event_id:0);
   Sse.broadcast (`Assoc [("durable", `Bool true)]);
   let got_presence = Sse.try_pop "s-all-presence" in
-  let got_coord = Sse.try_pop "s-all-coord-only" in
+  let got_observer = Sse.try_pop "s-all-observer-only" in
   Alcotest.(check bool) "presence did not get durable all" true
     (got_presence = None);
-  Alcotest.(check bool) "coordinator got durable all" true (got_coord <> None);
+  Alcotest.(check bool) "observer got durable all" true (got_observer <> None);
   Sse.unregister "s-all-presence";
-  Sse.unregister "s-all-coord-only"
+  Sse.unregister "s-all-observer-only"
 
 let test_broadcast_presence_is_live_only () =
   reset ();
@@ -202,12 +205,32 @@ let test_broadcast_presence_is_live_only () =
       Alcotest.(check (list string)) "presence not replay buffered" []
         (Sse.get_events_after before_id))
 
+let test_non_jsonrpc_broadcast_does_not_reach_coordinators () =
+  reset ();
+  let before_id = Sse.current_id () in
+  ignore (Sse.register ~kind:Observer "s-nonjson-obs" ~last_event_id:0);
+  ignore (Sse.register ~kind:Coordinator "s-nonjson-coord" ~last_event_id:0);
+  Sse.broadcast (`Assoc [("type", `String "keeper_tool_call")]);
+  let got_obs = Sse.try_pop "s-nonjson-obs" in
+  let got_coord = Sse.try_pop "s-nonjson-coord" in
+  Alcotest.(check bool) "observer got dashboard event" true (got_obs <> None);
+  Alcotest.(check bool) "coordinator skipped non-JSON-RPC" true
+    (got_coord = None);
+  Alcotest.(check int) "observer replay keeps dashboard event" 1
+    (List.length (Sse.get_events_after_for_kind Observer before_id));
+  Alcotest.(check (list string))
+    "coordinator replay skips non-JSON-RPC"
+    []
+    (Sse.get_events_after_for_kind Coordinator before_id);
+  Sse.unregister "s-nonjson-obs";
+  Sse.unregister "s-nonjson-coord"
+
 let test_register_defaults_to_coordinator () =
   reset ();
   (* Register without explicit kind *)
   ignore (Sse.register "s-default" ~last_event_id:0);
   (* Should be Coordinator: receives Coordinators-targeted broadcast *)
-  Sse.broadcast_to Coordinators (`Assoc [("default_kind", `Bool true)]);
+  Sse.broadcast_to Coordinators (jsonrpc_notification "notifications/test");
   let got = Sse.try_pop "s-default" in
   Alcotest.(check bool) "default kind is Coordinator" true (got <> None);
   (* Should not receive Observers-targeted broadcast *)
@@ -249,6 +272,8 @@ let () =
           Alcotest.test_case "broadcast = broadcast_to All" `Quick test_broadcast_equals_broadcast_to_all;
           Alcotest.test_case "broadcast All excludes presence" `Quick test_broadcast_all_excludes_presence_sessions;
           Alcotest.test_case "presence live-only" `Quick test_broadcast_presence_is_live_only;
+          Alcotest.test_case "non-JSON-RPC skips coordinators" `Quick
+            test_non_jsonrpc_broadcast_does_not_reach_coordinators;
           Alcotest.test_case "default kind is Coordinator" `Quick test_register_defaults_to_coordinator;
         ] );
     ]

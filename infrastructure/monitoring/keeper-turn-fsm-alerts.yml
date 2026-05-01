@@ -140,14 +140,13 @@ groups:
   #   - Wired:   12 hot-path call sites (heartbeat_loop, keepalive,
   #              unified_turn, turn_helpers)
   #
-  # Default production policy is counter mode (MASC_FSM_GUARD_ASSERT=0):
-  # Assert_failure is caught and the counter increments silently. Any
-  # non-zero rate here is a TLA+ Next-set violation that escaped the
-  # parity test gate; treat as spec drift, not "noise".
-  #
-  # Hard mode (MASC_FSM_GUARD_ASSERT=1) is for tests / smoke / CI and
-  # raises Assert_failure instead of bumping the counter. So a positive
-  # rate here implies production is in counter mode.
+  # Default production policy is assert mode (MASC_FSM_GUARD_ASSERT
+  # unset or =1): Assert_failure is re-raised immediately. Counter mode
+  # (MASC_FSM_GUARD_ASSERT=0) swallows the failure and increments the
+  # counter silently — use only during soak periods where transient
+  # drift should not crash the fleet. Any non-zero rate here while in
+  # counter mode is a TLA+ Next-set violation that escaped the parity
+  # test gate; treat as spec drift, not "noise".
   - name: masc_keeper_fsm_guard
     interval: 30s
     rules:
@@ -171,7 +170,9 @@ groups:
             {{ $labels.action }} at stage {{ $labels.stage }} at rate
             {{ $value }}/s for 5m. This means an OCaml hot-path took
             a state transition that the corresponding TLA+ Next set
-            does not enable.
+            does not enable.  (If production is in assert mode, the
+            keeper crashes on first violation and this metric never
+            increments; a positive rate implies counter mode.)
 
             Common causes:
               - Spec change merged but OCaml call site not migrated

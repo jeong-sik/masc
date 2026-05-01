@@ -74,6 +74,8 @@
         test_keeper_wake_telemetry
         test_keeper_memory
         test_keeper_accountability
+        test_reputation_ledger_v2
+        test_reputation_multi_dim
         test_keeper_goal_repair
         test_accountability_emit_skip_10314
         test_keeper_exec_status
@@ -124,6 +126,7 @@
         test_credential_provider_bridge
         test_repo_sync
         test_repo_git
+        test_repo_e2e
         test_exec_core
         test_exec_dispatch
         test_keeper_bash_safety
@@ -263,6 +266,8 @@
           test_keeper_wake_telemetry
           test_keeper_memory
           test_keeper_accountability
+          test_reputation_ledger_v2
+          test_reputation_multi_dim
           test_keeper_goal_repair
           test_accountability_emit_skip_10314
           test_keeper_exec_status
@@ -313,6 +318,7 @@
           test_credential_provider_bridge
           test_repo_sync
           test_repo_git
+          test_repo_e2e
           test_exec_core
           test_exec_dispatch
           test_keeper_bash_safety

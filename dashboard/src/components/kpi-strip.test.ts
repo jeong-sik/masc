@@ -2,8 +2,9 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { render } from 'preact'
 import { html } from 'htm/preact'
-import { KpiStrip, resolveStripCols } from './kpi-strip'
+import { KpiStrip } from './kpi-strip'
 import { KpiCell } from './kpi-cell'
+import { resolveStripCols } from './kpi-shared'
 
 describe('resolveStripCols (pure)', () => {
   it('maps the SPEC variant cardinality table', () => {

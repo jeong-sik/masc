@@ -73,7 +73,7 @@ let now_iso () =
 (** {1 Configuration} *)
 
 (** Create Eio-native room configuration *)
-let create_config ~fs base_path =
+let create_config ~fs ?clock base_path =
   let backend_config = Backend.{
     backend_type = FileSystem;
     base_path = Common.masc_dir_from_base_path ~base_path;
@@ -81,7 +81,7 @@ let create_config ~fs base_path =
     cluster_name = "default";
     pubsub_max_messages = Backend.pubsub_max_messages_from_env ();
   } in
-  let backend = Backend.FileSystem.create ~fs backend_config in
+  let backend = Backend.FileSystem.create ~fs ?clock backend_config in
   {
     base_path;
     lock_expiry_minutes = 30;

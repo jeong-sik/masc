@@ -63,6 +63,7 @@ let record_handoff_metric ?(timestamp = Time_compat.now ()) ?(keeper_name = "kee
     ?prev_trace_id ?new_trace_id ?to_model config =
   let meta = make_keeper_meta ~name:keeper_name ~trace_id () in
   write_keeper_meta config meta;
+  let keeper_name = meta.name in
   let handoff_fields =
     [ ("performed", `Bool true) ]
     @ (match next_generation with

@@ -281,7 +281,14 @@ let local_path ~base_path repo =
 let list_branches ~base_path id : (string list, string) result =
   let* repo = find ~base_path id in
   let path = local_path ~base_path repo in
-  Repo_git.get_branches ~repository:{ repo with local_path = path }
+  let* branches = Repo_git.get_branches ~repository:{ repo with local_path = path } in
+  let normalize b =
+    if String.starts_with ~prefix:"origin/" b then
+      String.sub b 7 (String.length b - 7)
+    else
+      b
+  in
+  Ok (List.filter (fun b -> b <> "HEAD") (List.map normalize branches))
 
 let slugify_id s =
   String.map

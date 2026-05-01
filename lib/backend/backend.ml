@@ -40,10 +40,11 @@ module FileSystem = struct
         Executor_pool workers on non-Eio domains can safely
         read/write the shared hashtable. *)
     mutable key_index_promise: unit Eio.Promise.or_exn option;
+    clock: float Eio.Time.clock_ty Eio.Resource.t option;
   }
 
   (** Create a new FileSystem backend *)
-  let create ~fs config =
+  let create ~fs ?clock config =
     let path = Eio.Path.(fs / config.base_path) in
     (* Ensure base directory exists *)
     (try Eio.Path.mkdirs ~exists_ok:true ~perm:0o755 path
@@ -59,6 +60,7 @@ module FileSystem = struct
       key_index = Hashtbl.create 256;
       key_index_mu = Mutex.create ();
       key_index_promise = None;
+      clock;
     }
 
   (** {2 Domain-safe key_index helpers}
@@ -358,7 +360,16 @@ module FileSystem = struct
         | Eio.Cancel.Cancelled _ as e -> raise e
         | exn -> Error (IOError (Printexc.to_string exn)))
 
-  let ensure_key_index t =
+  (** Outcome of [ensure_key_index]. Callers that read the in-memory
+      index after [ensure_key_index] must distinguish [`Ready] from
+      [`Timed_out]/[`Failed _] — only [`Ready] guarantees the index
+      reflects on-disk state. *)
+  type ensure_index_outcome =
+    [ `Ready
+    | `Timed_out
+    | `Failed of string ]
+
+  let ensure_key_index t : ensure_index_outcome =
     (* Domain-safe check-and-populate.  Stdlib.Mutex serializes the
        check of key_index length + key_index_promise so that two
        Executor_pool domains cannot both start a population traverse.
@@ -378,14 +389,32 @@ module FileSystem = struct
             `Populate r)
     in
     match action with
-    | `Done -> ()
+    | `Done -> `Ready
     | `Wait p ->
-      (match Eio.Promise.await p with
-       | Ok () -> ()
-       | Error (Eio.Cancel.Cancelled _ as exn) -> raise exn
-       | Error exn ->
-           Log.Backend.debug "key_index populate wait failed: %s"
-             (Printexc.to_string exn))
+      let result =
+        match t.clock with
+        | Some clock -> (
+            match
+              Eio.Fiber.first
+                (fun () -> `Ok (Eio.Promise.await p))
+                (fun () ->
+                  Eio.Time.sleep clock 30.0;
+                  `Timeout)
+            with
+            | `Ok r -> `Outcome r
+            | `Timeout -> `Wait_timed_out)
+        | None -> `Outcome (Eio.Promise.await p)
+      in
+      (match result with
+       | `Outcome (Ok ()) -> `Ready
+       | `Outcome (Error (Eio.Cancel.Cancelled _ as exn)) -> raise exn
+       | `Outcome (Error exn) ->
+           let detail = Printexc.to_string exn in
+           Log.Backend.debug "key_index populate wait failed: %s" detail;
+           `Failed detail
+       | `Wait_timed_out ->
+           Log.Backend.warn "key_index populate wait timed out after 30s";
+           `Timed_out)
     | `Populate r ->
       (try
          let keys =
@@ -395,7 +424,8 @@ module FileSystem = struct
          let len = ki_length t in
          if len > 0 then
            Log.Backend.info "key_index populated: %d keys" len;
-         Eio.Promise.resolve_ok r ()
+         Eio.Promise.resolve_ok r ();
+         `Ready
        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
          Mutex.lock t.key_index_mu;
          Fun.protect ~finally:(fun () -> Mutex.unlock t.key_index_mu) (fun () ->
@@ -404,8 +434,9 @@ module FileSystem = struct
          match exn with
          | Eio.Cancel.Cancelled _ -> raise exn
          | _ ->
-           Log.Backend.warn "key_index population failed: %s"
-             (Printexc.to_string exn))
+           let detail = Printexc.to_string exn in
+           Log.Backend.warn "key_index population failed: %s" detail;
+           `Failed detail)
 
   (** Check if key exists (in-memory index first, filesystem fallback) *)
   let exists t key =
@@ -432,10 +463,17 @@ module FileSystem = struct
 
   let list_keys t ~prefix =
     if prefix = "" then begin
-      ensure_key_index t;
-      let result = ref [] in
-      ki_iter t (fun k () -> result := k :: !result);
-      Ok (List.sort_uniq String.compare !result)
+      match ensure_key_index t with
+      | `Ready ->
+        let result = ref [] in
+        ki_iter t (fun k () -> result := k :: !result);
+        Ok (List.sort_uniq String.compare !result)
+      | `Timed_out | `Failed _ ->
+        (* Fall through to a synchronous filesystem scan rather than
+           returning an empty/stale index view.  list_keys_by_prefix_scan
+           also primes the in-memory index via ki_replace_bulk, so the
+           next call avoids paying the scan cost again. *)
+        list_keys_by_prefix_scan t ~prefix:""
     end else
       list_keys_by_prefix_scan t ~prefix
 

@@ -52,6 +52,23 @@ let rec yield_until ?(attempts = 50) predicate =
     Eio.Fiber.yield ();
     yield_until ~attempts:(attempts - 1) predicate)
 
+let pending_id_for_keeper ~keeper_name =
+  match AQ.list_pending_json () with
+  | `List entries ->
+    List.find_map
+      (function
+        | `Assoc kvs ->
+          (match
+             List.assoc_opt "keeper_name" kvs,
+             List.assoc_opt "id" kvs
+           with
+           | Some (`String name), Some (`String id)
+             when String.equal name keeper_name -> Some id
+           | _ -> None)
+        | _ -> None)
+      entries
+  | _ -> None
+
 let execute_approval_get args =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -342,6 +359,83 @@ let test_approval_queue_expire_skips_critical () =
   (* Cleanup: manually resolve so subsequent tests don't see stray state. *)
   match AQ.resolve ~id ~decision:(Agent_sdk.Hooks.Reject "test cleanup") with
   | Ok () | Error _ -> ()
+
+let test_submit_and_await_clock_timeout_skips_critical () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let keeper_name = "critical-clock-timeout-test" in
+  let result = ref None in
+  Eio.Fiber.fork ~sw (fun () ->
+    let decision =
+      AQ.submit_and_await
+        ~keeper_name
+        ~tool_name:"keeper_continue_after_reconcile"
+        ~input:(`Assoc [])
+        ~risk_level:AQ.Critical
+        ~clock
+        ~timeout_s:0.01
+        ()
+    in
+    result := Some decision);
+  yield_until (fun () -> Option.is_some (pending_id_for_keeper ~keeper_name));
+  Eio.Time.sleep clock 0.03;
+  Alcotest.(check bool)
+    "Critical approval still waits past submit timeout"
+    true
+    (Option.is_none !result);
+  let id =
+    match pending_id_for_keeper ~keeper_name with
+    | Some id -> id
+    | None -> Alcotest.fail "Critical approval was auto-removed"
+  in
+  (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
+   | Ok () -> ()
+   | Error err ->
+      Alcotest.fail ("resolve failed: " ^ AQ.resolve_error_to_string err));
+  yield_until (fun () -> Option.is_some !result);
+  match !result with
+  | Some Agent_sdk.Hooks.Approve -> ()
+  | Some decision ->
+      Alcotest.fail
+        ("expected Approve, got " ^ AQ.approval_decision_to_string decision)
+  | None -> Alcotest.fail "Critical approval did not resume"
+
+let test_submit_and_await_clock_returns_manual_decision () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let keeper_name = "medium-clock-manual-test" in
+  let result = ref None in
+  Eio.Fiber.fork ~sw (fun () ->
+    let decision =
+      AQ.submit_and_await
+        ~keeper_name
+        ~tool_name:"keeper_shell"
+        ~input:(`Assoc [ ("op", `String "write") ])
+        ~risk_level:AQ.Medium
+        ~clock
+        ~timeout_s:1.0
+        ()
+    in
+    result := Some decision);
+  yield_until (fun () -> Option.is_some (pending_id_for_keeper ~keeper_name));
+  let id =
+    match pending_id_for_keeper ~keeper_name with
+    | Some id -> id
+    | None -> Alcotest.fail "medium approval was not queued"
+  in
+  (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
+   | Ok () -> ()
+   | Error err ->
+      Alcotest.fail ("resolve failed: " ^ AQ.resolve_error_to_string err));
+  yield_until (fun () -> Option.is_some !result);
+  match !result with
+  | Some Agent_sdk.Hooks.Approve -> ()
+  | Some decision ->
+      Alcotest.fail
+        ("expected Approve, got " ^ AQ.approval_decision_to_string decision)
+  | None -> Alcotest.fail "manual approval did not resume"
 
 let test_approval_resolve_nonexistent () =
   Eio_main.run @@ fun _env ->
@@ -1007,6 +1101,10 @@ let () =
       Alcotest.test_case "submit and reject" `Quick test_approval_queue_reject;
       Alcotest.test_case "expire stale" `Quick test_approval_queue_expire_stale;
       Alcotest.test_case "expire skips Critical" `Quick test_approval_queue_expire_skips_critical;
+      Alcotest.test_case "submit timeout skips Critical" `Quick
+        test_submit_and_await_clock_timeout_skips_critical;
+      Alcotest.test_case "submit timeout returns manual winner" `Quick
+        test_submit_and_await_clock_returns_manual_decision;
       Alcotest.test_case "resolve nonexistent" `Quick test_approval_resolve_nonexistent;
       Alcotest.test_case "cancel cleans up" `Quick test_approval_queue_cancel_cleans_up;
       Alcotest.test_case "background pending callback" `Quick

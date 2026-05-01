@@ -1,4 +1,4 @@
-.PHONY: doctor-oas-pin doctor-disk-hygiene fix-disk-hygiene fix-disk-hygiene-hard doctor-oas-drift dashboard-drift-check dashboard-drift-regen fmt fmt-check health ocaml-health check-memory-leak check-silent ci
+.PHONY: doctor-oas-pin doctor-disk-hygiene fix-disk-hygiene fix-disk-hygiene-hard doctor-oas-drift dashboard-drift-check dashboard-drift-regen fmt fmt-check health ocaml-health check-memory-leak check-silent check-ssot ci
 
 # Fast local-only doctor for OAS/agent_sdk pin drift in the current switch.
 doctor-oas-pin:
@@ -70,6 +70,22 @@ check-silent:
 	bash scripts/ci/check-silent-failure-patterns.sh
 	bash scripts/lint/no-unknown-permissive-default.sh
 	@echo "=== check-silent: PASS ==="
+
+# SSOT fingerprint diff + orphan spec validation.
+# Runs all three SSOT gate scripts:
+#   1. scripts/check-ssot.sh          — ratchet-based bypass checks (R1–R5)
+#   2. scripts/ci/check-ssot-spawn-drift.sh — Provider_adapter ↔ Spawn symmetry
+#   3. scripts/check-spec-truth.sh    — TLA+ Mirrors: orphan spec validator
+# Meta-issue: #9516
+check-ssot:
+	@echo "=== SSOT gate: ratchet bypass checks ==="
+	bash scripts/check-ssot.sh
+	@echo ""
+	@echo "=== SSOT gate: spawn adapter drift ==="
+	bash scripts/ci/check-ssot-spawn-drift.sh
+	@echo ""
+	@echo "=== SSOT gate: spec truth (orphan spec validator) ==="
+	bash scripts/check-spec-truth.sh
 
 # CI target (for GitHub Actions)
 ci: fmt-check test test-contract test-transport

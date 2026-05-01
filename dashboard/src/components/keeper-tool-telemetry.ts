@@ -6,11 +6,13 @@ import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
 import { fetchKeeperToolStats } from '../api/dashboard'
 import type { ToolStat, HourlyBucket, ToolStatsResponse, TelemetryFreshnessMetadata } from '../api/dashboard'
-import { toolCategory, formatDuration, durationColor } from './tool-call-shared'
+import { toolCategory, formatDuration, durationColor, normalizeToolName } from './tool-call-shared'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
 import { TextInput } from './common/input'
 import { SectionCap } from './common/section-cap'
-import { formatElapsedCompact } from '../lib/format-time'
+import { PanelCard } from './common/panel-card'
+import { ProgressBar } from './common/progress-bar'
+import { sourceHealthClass, freshnessText } from './common/source-health'
 
 // ── Types ─────────────────────────────────────────────
 
@@ -19,29 +21,6 @@ interface TelemetryState extends TelemetryFreshnessMetadata {
   timeline: HourlyBucket[]
   totalEntries: number
   windowHours: number
-}
-
-function sourceHealthClass(health?: string | null): string {
-  switch ((health ?? '').toLowerCase()) {
-    case 'ok':
-      return 'text-[var(--color-status-ok)]'
-    case 'stale':
-    case 'coverage_gap':
-    case 'empty':
-      return 'text-[var(--color-status-warn)]'
-    case 'missing':
-      return 'text-[var(--bad-light)]'
-    default:
-      return 'text-[var(--color-fg-disabled)]'
-  }
-}
-
-function freshnessText(d: TelemetryFreshnessMetadata): string {
-  if (d.stale_reason) return d.stale_reason
-  if (typeof d.latest_age_s !== 'number' || !Number.isFinite(d.latest_age_s)) {
-    return 'latest n/a'
-  }
-  return `latest ${formatElapsedCompact(d.latest_age_s)}`
 }
 
 function FreshnessLine({ data }: { data: TelemetryFreshnessMetadata }) {
@@ -86,7 +65,7 @@ export function filterToolStats(
 
 // ── Sparkline ─────────────────────────────────────────
 
-function Sparkline({ buckets, height = 32 }: { buckets: HourlyBucket[]; height?: number }) {
+function HourlyBarChart({ buckets, height = 32 }: { buckets: HourlyBucket[]; height?: number }) {
   if (buckets.length === 0) return null
 
   const maxCount = Math.max(...buckets.map(b => b.call_count), 1)
@@ -139,19 +118,20 @@ function Sparkline({ buckets, height = 32 }: { buckets: HourlyBucket[]; height?:
 
 function SuccessRateBar({ stat }: { stat: ToolStat }) {
   const successPct = stat.call_count > 0 ? (stat.success_count / stat.call_count) * 100 : 100
-  let barColor = 'var(--color-status-err)'
+  let fillClass = 'bg-[var(--color-status-err)]'
+  let labelColor = 'var(--color-status-err)'
   if (successPct >= 95) {
-    barColor = 'var(--color-status-ok)'
+    fillClass = 'bg-[var(--color-status-ok)]'
+    labelColor = 'var(--color-status-ok)'
   } else if (successPct >= 80) {
-    barColor = 'var(--color-status-warn)'
+    fillClass = 'bg-[var(--color-status-warn)]'
+    labelColor = 'var(--color-status-warn)'
   }
 
   return html`
     <div class="flex items-center gap-2 w-full">
-      <div class="flex-1 h-1.5 rounded-sm bg-[var(--white-5)] overflow-hidden">
-        <div class="h-full rounded-sm transition-all duration-300" style="width: ${successPct}%; background: ${barColor}"></div>
-      </div>
-      <span class="text-3xs font-mono w-10 text-right" style="color: ${barColor}">
+      <${ProgressBar} pct=${successPct} size="sm" class=${fillClass} trackClass="flex-1" />
+      <span class="text-3xs font-mono w-10 text-right" style="color: ${labelColor}">
         ${successPct === 100 ? '100%' : `${successPct.toFixed(0)}%`}
       </span>
     </div>
@@ -236,11 +216,7 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
   const trimmedQuery = query.trim()
 
   return html`
-    <div class="p-5 rounded border border-card-border bg-card/40 backdrop-blur-sm shadow-sm transition-[border-color,box-shadow] duration-[var(--t-med)] hover:border-accent/30 hover:shadow-sm">
-      <div class="text-2xs font-semibold uppercase tracking-widest text-text-muted mb-4 flex items-center gap-2">
-        <span class="w-1.5 h-1.5 rounded-full bg-accent/50" aria-hidden="true"></span>
-        도구 텔레메트리
-      </div>
+    <${PanelCard} title="도구 텔레메트리">
       <div class="flex flex-col gap-4">
 
       ${'' /* Summary row */}
@@ -267,7 +243,7 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
         <div class="flex flex-col gap-1">
           <${SectionCap} tone="dim" weight="semibold" class="mb-1">시간대별 활동<//>
           <div class="overflow-x-auto py-1">
-            <${Sparkline} buckets=${s.timeline} height=${28} />
+            <${HourlyBarChart} buckets=${s.timeline} height=${28} />
           </div>
         </div>
       ` : null}
@@ -305,7 +281,7 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
                 ${cat.icon}
               </div>
               <div class="w-28 flex-shrink-0 text-2xs font-mono text-[var(--color-fg-muted)] truncate" title=${stat.name}>
-                ${stat.name.replace(/^(keeper_|masc_)/, '')}
+                ${normalizeToolName(stat.name)}
               </div>
               <div class="flex-1 h-3 rounded bg-[var(--white-5)] overflow-hidden">
                 <div class="h-full rounded transition-all duration-300"
@@ -343,7 +319,7 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
           <${SectionCap} tone="dim" weight="semibold" class="mb-1">P95 지연 시간<//>
           ${slowest.map(stat => html`
             <div class="flex items-center justify-between py-1 px-2 rounded bg-[var(--white-3)]">
-              <span class="text-2xs font-mono text-[var(--color-fg-muted)]">${stat.name.replace(/^(keeper_|masc_)/, '')}</span>
+              <span class="text-2xs font-mono text-[var(--color-fg-muted)]">${normalizeToolName(stat.name)}</span>
               <div class="flex items-center gap-3">
                 <span class="text-3xs text-[var(--color-fg-disabled)]">avg ${formatDuration(stat.avg_duration_ms)}</span>
                 <span class="text-2xs font-mono font-medium ${durationColor(stat.p95_duration_ms)}">p95 ${formatDuration(stat.p95_duration_ms)}</span>
@@ -353,6 +329,6 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
         </div>
       ` : null}
       </div>
-    </div>
+    <//>
   `
 }

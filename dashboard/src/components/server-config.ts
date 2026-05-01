@@ -9,6 +9,7 @@ import type { DashboardConfigResponse, ConfigEntry } from '../api/dashboard'
 import { createAsyncResource } from '../lib/async-state'
 import { formatElapsedCompact } from '../lib/format-time'
 import { LoadingState } from './common/feedback-state'
+import { Eyebrow } from './common/eyebrow'
 import { refreshShell, shellConfigResolution, shellRuntimeResolution } from '../store'
 
 const configResource = createAsyncResource<DashboardConfigResponse>()
@@ -136,19 +137,19 @@ function ServerMeta() {
   return html`
     <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
       <div class="px-3 py-2 rounded bg-[var(--bg-surface)] border border-[var(--color-border-divider)]">
-        <div class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)]">버전</div>
+        <${Eyebrow}>버전</${Eyebrow}>
         <div class="text-sm font-mono text-[var(--color-fg-secondary)]">${server.version}</div>
       </div>
       <div class="px-3 py-2 rounded bg-[var(--bg-surface)] border border-[var(--color-border-divider)]">
-        <div class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)]">가동시간</div>
+        <${Eyebrow}>가동시간</${Eyebrow}>
         <div class="text-sm font-mono text-[var(--color-fg-secondary)]">${formatUptime(server.uptime_seconds)}</div>
       </div>
       <div class="px-3 py-2 rounded bg-[var(--bg-surface)] border border-[var(--color-border-divider)]">
-        <div class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)]">OCaml</div>
+        <${Eyebrow}>OCaml</${Eyebrow}>
         <div class="text-sm font-mono text-[var(--color-fg-secondary)]">${server.ocaml_version}</div>
       </div>
       <div class="px-3 py-2 rounded bg-[var(--bg-surface)] border border-[var(--color-border-divider)]">
-        <div class="text-3xs uppercase tracking-wider text-[var(--color-fg-muted)]">PID</div>
+        <${Eyebrow}>PID</${Eyebrow}>
         <div class="text-sm font-mono text-[var(--color-fg-secondary)]">${server.pid}</div>
       </div>
     </div>

@@ -10,8 +10,9 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { JSX } from 'solid-js'
 import { render } from 'solid-js/web'
-import { KpiStrip, resolveStripCols } from './kpi-strip.solid'
+import { KpiStrip } from './kpi-strip.solid'
 import { KpiCell } from './kpi-cell.solid'
+import { resolveStripCols } from './kpi-shared'
 
 describe('resolveStripCols (pure)', () => {
   it('maps the SPEC variant cardinality table', () => {

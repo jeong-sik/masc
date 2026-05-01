@@ -1291,18 +1291,26 @@ let handle_keeper_shell
                        ~op
                        ~cmd_display:(gh_cmd_display parsed_cmd) err
                    | Ok ctx ->
-                     let cmd_to_run =
-                       match ctx.repo_slug with
-                       | Some repo_slug ->
-                           Keeper_gh_shared.gh_simple_command_with_repo_flag
-                             ~repo_slug parsed_cmd
-                       | None -> parsed_cmd
-                     in
-                     run_gh_command
-                       ~display_command:(gh_cmd_display cmd_to_run)
-                       ~parsed_command:cmd_to_run
-                       ~cwd:ctx.worktree_cwd
-                       ~ctx:(Some ctx)))
+                     match repo_check ctx.worktree_cwd with
+                     | Error msg ->
+                         gh_base ~ok:false ~cwd:ctx.worktree_cwd
+                           ~command:(gh_cmd_display parsed_cmd)
+                           [ "error", `String "repo_access_denied"
+                           ; "hint", `String msg
+                           ]
+                     | Ok () ->
+                         let cmd_to_run =
+                           match ctx.repo_slug with
+                           | Some repo_slug ->
+                               Keeper_gh_shared.gh_simple_command_with_repo_flag
+                                 ~repo_slug parsed_cmd
+                           | None -> parsed_cmd
+                         in
+                         run_gh_command
+                           ~display_command:(gh_cmd_display cmd_to_run)
+                           ~parsed_command:cmd_to_run
+                           ~cwd:ctx.worktree_cwd
+                           ~ctx:(Some ctx)))
            end))
   | _ ->
     Yojson.Safe.to_string

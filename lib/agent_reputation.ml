@@ -1,3 +1,22 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+module Random = Stdlib.Random
+
 (** Agent_reputation — Reputation scoring from existing JSONL data
 
     Computes agent reputation from task transitions, mention inbox,
@@ -26,6 +45,16 @@ type agent_reputation = {
   accountability_source: string; [@default "none"]
   accountability_source_label: string; [@default "No accountability history"]
   overall_score: float; [@default 0.0]
+  (* v2 multi-dimensional scores — additive fields; absent in v1 records
+     are interpreted as the neutral default (1.0 for rates, "standard" for level). *)
+  execution_reliability: float; [@default 1.0]
+  (** Tool-call success rate from the v2 ledger. 0.0–1.0. *)
+  goal_adherence: float; [@default 1.0]
+  (** Proportion of goal completions that were on-topic and within budget. 0.0–1.0. *)
+  safety_compliance: float; [@default 1.0]
+  (** Penalty-adjusted safety score; decreases with each sandbox violation. 0.0–1.0. *)
+  autonomy_level: string; [@default "standard"]
+  (** Derived autonomy envelope: "restricted" | "standard" | "elevated" | "full". *)
 } [@@deriving yojson { strict = false }]
 
 (** {1 Defaults} *)
@@ -49,6 +78,10 @@ let default_reputation ~(agent_name : string) : agent_reputation =
     accountability_source = "none";
     accountability_source_label = "No accountability history";
     overall_score = 0.0;
+    execution_reliability = 1.0;
+    goal_adherence = 1.0;
+    safety_compliance = 1.0;
+    autonomy_level = "standard";
   }
 
 (** {1 JSON Serialization}
@@ -63,7 +96,7 @@ let reputation_to_json : agent_reputation -> Yojson.Safe.t =
 
 let reputation_of_json (json : Yojson.Safe.t) : agent_reputation option =
   match agent_reputation_of_yojson json with
-  | Ok r when r.agent_name <> "" -> Some r
+  | Ok r when not (String.equal r.agent_name "") -> Some r
   | Ok _ -> None
   | Error msg ->
     Log.Reputation.warn "agent reputation of_json: %s" msg;
@@ -101,11 +134,11 @@ let count_tasks_from_room (config : Coord.config) ~(agent_name : string)
          | Types.Claimed { assignee; _ }
          | Types.InProgress { assignee; _ }
          | Types.AwaitingVerification { assignee; _ }
-           when assignee = agent_name ->
-             incr claimed
-         | Types.Done { assignee; _ } when assignee = agent_name ->
-             incr claimed;
-             incr completed
+           when String.equal assignee agent_name ->
+             Stdlib.incr claimed
+         | Types.Done { assignee; _ } when String.equal assignee agent_name ->
+             Stdlib.incr claimed;
+             Stdlib.incr completed
          | Types.Todo
          | Types.Claimed _ | Types.InProgress _ | Types.AwaitingVerification _
          | Types.Done _ | Types.Cancelled _ -> ());
@@ -124,7 +157,7 @@ let count_board_activity (config : Coord.config) ~(agent_name : string)
     posts_rows
     |> List.filter (fun json ->
         let author = Safe_ops.json_string ~default:"" "author" json in
-        author = agent_name)
+        String.equal author agent_name)
     |> List.length
   in
   (* Board comments JSONL *)
@@ -134,7 +167,7 @@ let count_board_activity (config : Coord.config) ~(agent_name : string)
     comments_rows
     |> List.filter (fun json ->
         let author = Safe_ops.json_string ~default:"" "author" json in
-        author = agent_name)
+        String.equal author agent_name)
     |> List.length
   in
   (post_count, comment_count)
@@ -145,7 +178,7 @@ let count_mention_activity (config : Coord.config) ~(agent_name : string)
     : int * int =
   let all = Mention_inbox.read_mentions config ~target_agent:agent_name ~limit:10000 in
   let received = List.length all in
-  let responded = List_util.count_if (fun r -> r.Mention_inbox.read_at > 0.0) all in
+  let responded = List_util.count_if (fun r -> Stdlib.Float.compare r.Mention_inbox.read_at 0.0 > 0) all in
   (received, responded)
 
 (** {1 Overall Score Computation} *)
@@ -171,14 +204,14 @@ let board_activity_cap = 20.0
 let compute_accountability_score ~evidence_coverage
     ~unsupported_completion_rate ~open_overdue_commitments : float =
   let overdue_penalty =
-    Float.min 0.5 (0.1 *. float_of_int open_overdue_commitments)
+    Float.min 0.5 (0.1 *. Float.of_int open_overdue_commitments)
   in
   clamp01
     (evidence_coverage -. unsupported_completion_rate -. overdue_penalty)
 
 let compute_overall_score ~completion_rate ~response_rate
     ~board_posts ~board_comments : float =
-  let board_total = float_of_int (board_posts + board_comments) in
+  let board_total = Float.of_int (board_posts + board_comments) in
   let board_norm = Float.min 1.0 (board_total /. board_activity_cap) in
   (weight_completion *. completion_rate)
   +. (weight_response *. response_rate)
@@ -225,6 +258,9 @@ let accountability_metrics (config : Coord.config) ~(agent_name : string) =
 
 (** {1 Main Computation} *)
 
+(** Default window for v2 ledger metrics: 14 days matches accountability window. *)
+let v2_ledger_window_days = 14
+
 let compute_reputation (config : Coord.config) ~(agent_name : string)
     : agent_reputation =
   let (tasks_claimed, tasks_completed) =
@@ -232,7 +268,7 @@ let compute_reputation (config : Coord.config) ~(agent_name : string)
   in
   let completion_rate =
     if tasks_claimed > 0 then
-      float_of_int tasks_completed /. float_of_int tasks_claimed
+      Float.of_int tasks_completed /. Float.of_int tasks_claimed
     else 0.0
   in
   let (mentions_received, mentions_responded) =
@@ -240,7 +276,7 @@ let compute_reputation (config : Coord.config) ~(agent_name : string)
   in
   let response_rate =
     if mentions_received > 0 then
-      float_of_int mentions_responded /. float_of_int mentions_received
+      Float.of_int mentions_responded /. Float.of_int mentions_received
     else 0.0
   in
   let (board_posts, board_comments) = count_board_activity config ~agent_name in
@@ -258,6 +294,23 @@ let compute_reputation (config : Coord.config) ~(agent_name : string)
       ~response_rate ~board_posts ~board_comments
     *. clamp01 accountability_score
   in
+  (* v2: pull multi-dimensional metrics from the reputation ledger. *)
+  let v2_metrics =
+    (try
+       Reputation_ledger_v2.compute_ledger_metrics config
+         ~agent_id:agent_name ~window_days:v2_ledger_window_days
+     with
+     | Eio.Cancel.Cancelled _ as e -> raise e
+     | _exn ->
+       Reputation_ledger_v2.default_ledger_metrics)
+  in
+  let autonomy =
+    Reputation_autonomy.compute_autonomy_level
+      ~execution_reliability:v2_metrics.Reputation_ledger_v2.execution_reliability
+      ~goal_adherence:v2_metrics.Reputation_ledger_v2.goal_adherence
+      ~safety_compliance:v2_metrics.Reputation_ledger_v2.safety_compliance
+      ~accountability_score:(clamp01 accountability_score)
+  in
   { agent_name;
     tasks_completed; tasks_claimed; completion_rate;
     mentions_received; mentions_responded; response_rate;
@@ -271,4 +324,8 @@ let compute_reputation (config : Coord.config) ~(agent_name : string)
     accountability_source;
     accountability_source_label;
     overall_score;
+    execution_reliability = v2_metrics.Reputation_ledger_v2.execution_reliability;
+    goal_adherence = v2_metrics.Reputation_ledger_v2.goal_adherence;
+    safety_compliance = v2_metrics.Reputation_ledger_v2.safety_compliance;
+    autonomy_level = Reputation_autonomy.autonomy_level_to_string autonomy;
   }

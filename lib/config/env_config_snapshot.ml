@@ -205,8 +205,10 @@ let runtime_entries =
 
 let rate_limiting_entries =
   [
-    entry ~default:"100.0" "MASC_RATE_LIMIT" "Requests per second";
-    entry ~default:"150" "MASC_RATE_BURST" "Burst capacity";
+    entry ~default:"100.0" "MASC_RATE_LIMIT" "Requests per second (per-client global bucket)";
+    entry ~default:"150" "MASC_RATE_BURST" "Burst capacity (per-client global bucket)";
+    entry ~default:"20.0" "MASC_AGENT_RATE_LIMIT" "Requests per second per resolved agent/token";
+    entry ~default:"50" "MASC_AGENT_RATE_BURST" "Burst capacity per resolved agent/token";
     entry ~default:"300.0" "MASC_RATE_LIMIT_CLEANUP_INTERVAL_SEC"
       "Stale bucket cleanup interval (seconds)";
     entry ~default:"3600.0" "MASC_RATE_LIMIT_ENTRY_MAX_AGE_SEC"
@@ -377,10 +379,6 @@ let dashboard_entries =
   [
     entry ~default:"(none)" "MASC_BENCHMARK_RESULTS_DIR"
       "Benchmark results directory override; None when unset";
-    entry ~default:"false" "MASC_COMMAND_PLANE_SNAPSHOT_REFRESH_ENABLED"
-      "Enable proactive command-plane snapshot refresh loop";
-    entry ~default:"30" "MASC_COMMAND_PLANE_SNAPSHOT_CACHE_TTL_S"
-      "TTL for on-demand command-plane snapshot cache hits";
     entry ~default:"(none)" "MASC_DASHBOARD_CACHE_MAX_ENTRIES"
       "Dashboard cache max entries (clamped 16-512)";
     entry ~default:"0.50" "MASC_DASHBOARD_CTX_COMPACTING"

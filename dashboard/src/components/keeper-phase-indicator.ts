@@ -1,4 +1,4 @@
-// Keeper phase indicator — shows the 12-state lifecycle phase
+// Keeper phase indicator — shows the 13-state lifecycle phase
 // as a color-coded badge with Korean label.
 // Phase = lifecycle health (생명주기), complementary to pipeline_stage (활동).
 //
@@ -36,7 +36,7 @@ interface PhaseStyle {
 //   working compacting · handing_off · draining · restarting → --accent (slate)
 //   warn    failing · overflowed                             → --warn
 //   paused  paused                                           → --paused
-//   inactive offline · stopped · dead                        → --text-muted / --bad-light
+//   inactive offline · stopped · dead · zombie               → --text-muted / --bad-light
 //
 // Restarting sits with "working" — operators read a restart as
 // recovery-in-progress, not a fresh failure. Dead keeps the bad-light

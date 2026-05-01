@@ -25,6 +25,34 @@ let file_contains_pattern file_rel pattern =
 let file_not_contains_pattern file_rel pattern =
   not (file_contains_pattern file_rel pattern)
 
+let file_contains_line_with_patterns file_rel patterns =
+  let source_root =
+    match Sys.getenv_opt "DUNE_SOURCEROOT" with
+    | Some root -> root
+    | None -> Sys.getcwd ()
+  in
+  let path = Filename.concat source_root file_rel in
+  if not (Sys.file_exists path) then false
+  else
+    let ic = open_in path in
+    Fun.protect
+      ~finally:(fun () -> close_in_noerr ic)
+      (fun () ->
+        let line_matches line =
+          List.for_all
+            (fun pattern ->
+               let re = Str.regexp_string pattern in
+               try ignore (Str.search_forward re line 0); true
+               with Not_found -> false)
+            patterns
+        in
+        let rec loop () =
+          match input_line ic with
+          | line -> line_matches line || loop ()
+          | exception End_of_file -> false
+        in
+        loop ())
+
 let file_pattern_position file_rel pattern =
   let source_root =
     match Sys.getenv_opt "DUNE_SOURCEROOT" with
@@ -259,7 +287,7 @@ let test_health_and_ci_runner_diagnostics () =
     (file_contains_pattern ".github/workflows/ci.yml"
        "dune exec ./test/test_operator_control.exe");
   check bool "operator control test is env-gated in dune" true
-    (file_contains_pattern "test/dune"
+    (file_contains_pattern "test/stanzas/test_operator_control.inc"
        "(enabled_if (= %{env:MASC_INCLUDE_OPERATOR_CONTROL=true} \"true\"))")
 
 let test_release_truth_contracts () =
@@ -1095,7 +1123,7 @@ let test_ssot_fingerprint_gate_contracts () =
   check bool "quality.mk declares check-ssot rule header" true
     (file_contains_pattern "mk/quality.mk" "check-ssot:");
   check bool "quality.mk declares check-ssot as phony" true
-    (file_contains_pattern "mk/quality.mk" ".PHONY: check-ssot");
+    (file_contains_line_with_patterns "mk/quality.mk" [ ".PHONY:"; "check-ssot" ]);
   check bool "check-ssot target runs ratchet bypass script" true
     (file_contains_pattern "mk/quality.mk" "bash scripts/check-ssot.sh");
   check bool "check-ssot target runs spawn drift script" true

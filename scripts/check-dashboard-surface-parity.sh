@@ -127,13 +127,22 @@ def parse_navigation_contract() -> list[dict[str, object]]:
         "}",
     )
 
+    def exposure_for(tab: str, hidden: bool) -> str:
+        if hidden:
+            return "diagnostic"
+        if tab == "lab":
+            return "lab"
+        return "main"
+
+    def meets_main_gate_for(tab: str, hidden: bool) -> bool:
+        return (not hidden) and tab != "lab"
+
     sections_by_tab: dict[str, list[dict[str, object]]] = {}
-    for tab in ["monitoring", "command", "connectors", "workspace", "lab"]:
+    for tab in ["monitoring", "command", "connectors", "workspace", "lab", "code"]:
         tab_block = extract_key_array(section_items_block, tab)
         tab_entries: list[dict[str, object]] = []
         for obj in split_top_level_objects(tab_block):
-            if re.search(r"hidden:\s*true", obj):
-                continue
+            hidden = re.search(r"hidden:\s*true", obj) is not None
             section_id = extract_string(r"id:\s*'([^']+)'", obj, label=f"{tab} id")
             label = extract_string(r"label:\s*'([^']+)'", obj, label=f"{tab}.{section_id} label")
             tab_entries.append(
@@ -141,31 +150,41 @@ def parse_navigation_contract() -> list[dict[str, object]]:
                     "id": f"{tab}.{section_id}",
                     "label": label,
                     "route_hash": f"#{tab}?section={section_id}",
-                    "exposure_status": "lab" if tab == "lab" else "main",
-                    "hidden_from_nav": False,
-                    "meets_main_gate": tab != "lab",
+                    "exposure_status": exposure_for(tab, hidden),
+                    "hidden_from_nav": hidden,
+                    "meets_main_gate": meets_main_gate_for(tab, hidden),
                 }
             )
         sections_by_tab[tab] = tab_entries
 
     contract: list[dict[str, object]] = []
     for obj in split_top_level_objects(surfaces_block):
-        if re.search(r"hidden:\s*true", obj):
-            continue
+        hidden = re.search(r"hidden:\s*true", obj) is not None
         surface_id = extract_string(r"id:\s*'([^']+)'", obj, label="surface id")
         label = extract_string(r"label:\s*'([^']+)'", obj, label=f"{surface_id} label")
         has_default_params = re.search(r"defaultParams\s*:", obj) is not None
         if has_default_params:
-            contract.extend(sections_by_tab.get(surface_id, []))
+            entries = sections_by_tab.get(surface_id, [])
+            if hidden:
+                entries = [
+                    {
+                        **entry,
+                        "exposure_status": "diagnostic",
+                        "hidden_from_nav": True,
+                        "meets_main_gate": False,
+                    }
+                    for entry in entries
+                ]
+            contract.extend(entries)
             continue
         contract.append(
             {
                 "id": surface_id,
                 "label": label,
                 "route_hash": f"#{surface_id}",
-                "exposure_status": "main",
-                "hidden_from_nav": False,
-                "meets_main_gate": True,
+                "exposure_status": "diagnostic" if hidden else "main",
+                "hidden_from_nav": hidden,
+                "meets_main_gate": not hidden,
             }
         )
     return contract

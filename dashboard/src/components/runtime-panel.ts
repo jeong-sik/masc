@@ -9,10 +9,12 @@
 // NN/g progressive disclosure: respect working-memory limits, defer detail.
 //
 // Explicit drill-down via FilterChips remains unchanged:
-//   default    — Signal strip + collapsed diagnostic/raw accordions
-//   cascade    — cascade config + health only (설정 ↔ 실측)
-//   providers  — OAS health chip + runtime monitor only
-//   prometheus — raw Prometheus metrics only
+//   default      — Signal strip + collapsed diagnostic/raw accordions
+//   cascade      — cascade config + health only (설정 ↔ 실측)
+//   providers    — OAS health chip + runtime monitor only
+//   cost         — model/keeper cost and latency only
+//   inspector    — cascade strategy trace/provider health drill-down
+//   prometheus   — raw Prometheus metrics only
 //   verification — formal specs only
 // Pattern: mirrors fleet-health-panel.ts (unidirectional flow via URL).
 
@@ -26,10 +28,12 @@ import { RuntimeMonitor } from './runtime-monitor'
 import { PrometheusMetrics } from './prometheus-metrics'
 import { CascadeConfigPanel } from './cascade-config-panel'
 import { VerificationSpecsPanel } from './verification-specs-panel'
+import { CostDashboard } from './cost-dashboard'
+import { CascadeInspector } from './cascade-inspector'
 
-type RuntimeView = 'default' | 'cascade' | 'providers' | 'prometheus' | 'verification'
+type RuntimeView = 'default' | 'cascade' | 'providers' | 'cost' | 'inspector' | 'prometheus' | 'verification'
 
-const RUNTIME_VIEWS: RuntimeView[] = ['default', 'cascade', 'providers', 'prometheus', 'verification']
+const RUNTIME_VIEWS: RuntimeView[] = ['default', 'cascade', 'providers', 'cost', 'inspector', 'prometheus', 'verification']
 
 function isRuntimeView(v: string | undefined): v is RuntimeView {
   return !!v && (RUNTIME_VIEWS as string[]).includes(v)
@@ -44,6 +48,8 @@ const VIEW_CHIPS: Array<{ key: RuntimeView; label: string }> = [
   { key: 'default', label: '전체' },
   { key: 'cascade', label: 'Cascade' },
   { key: 'providers', label: '프로바이더' },
+  { key: 'cost', label: '비용 / 지연' },
+  { key: 'inspector', label: '검사기' },
   { key: 'prometheus', label: '메트릭' },
   { key: 'verification', label: '형식검증' },
 ]
@@ -74,6 +80,10 @@ export function RuntimePanel() {
             <${OasHealthChip} />
             <${RuntimeMonitor} />
           `
+        : view === 'cost'
+          ? html`<${CostDashboard} mode="cost-only" />`
+        : view === 'inspector'
+          ? html`<${CascadeInspector} />`
         : view === 'prometheus'
           ? html`<${PrometheusMetrics} />`
         : view === 'verification'

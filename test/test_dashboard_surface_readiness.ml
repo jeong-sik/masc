@@ -152,10 +152,20 @@ let test_legacy_surfaces_removed_from_readiness_inventory () =
     [
       "monitoring.sessions";
       "monitoring.safe_autonomy";
+      "monitoring.safe-autonomy";
       "monitoring.activity";
+      "monitoring.live";
+      "monitoring.git-graph";
+      "monitoring.cascade-inspector";
+      "monitoring.cost";
+      "monitoring.attribution";
       "command.intervene";
       "command.namespace";
       "command.governance";
+      "connectors.connector-discord";
+      "connectors.connector-imessage";
+      "connectors.connector-slack";
+      "connectors.connector-telegram";
       "workspace.evidence";
       "workspace.goals";
       "workspace.worktrees";
@@ -169,17 +179,27 @@ let test_legacy_surfaces_removed_from_readiness_inventory () =
         (Option.is_none (find_surface surfaces legacy_id)))
     legacy_ids
 
-let test_safe_autonomy_surface_matches_monitoring_contract () =
+let test_hidden_diagnostic_surfaces_are_not_main_gate () =
   let surfaces =
-    Dashboard_surface_readiness.json ~surface_id:"monitoring.safe-autonomy" ()
-    |> load_surface_contracts_from_json
+    Dashboard_surface_readiness.json () |> load_surface_contracts_from_json
   in
-  match find_surface surfaces "monitoring.safe-autonomy" with
-  | None -> fail "monitoring.safe-autonomy missing"
-  | Some surface ->
-      check string "exposure_status" "main" surface.exposure_status;
-      check bool "hidden_from_nav" false surface.hidden_from_nav;
-      check bool "meets_main_gate" true surface.meets_main_gate
+  let check_hidden surface_id =
+    match find_surface surfaces surface_id with
+    | None -> fail (surface_id ^ " missing")
+    | Some surface ->
+        check string (surface_id ^ " exposure_status") "diagnostic"
+          surface.exposure_status;
+        check bool (surface_id ^ " hidden_from_nav") true surface.hidden_from_nav;
+        check bool (surface_id ^ " meets_main_gate") false
+          surface.meets_main_gate
+  in
+  List.iter check_hidden
+    [
+      "monitoring.observatory";
+      "monitoring.memory-subsystems";
+      "workspace.collab-mvp";
+      "code.ide-shell";
+    ]
 
 let () =
   run "Dashboard_surface_readiness"
@@ -196,7 +216,7 @@ let () =
             test_live_spotcheck_keeps_script_values_as_scripts;
           test_case "legacy surfaces removed from readiness inventory" `Quick
             test_legacy_surfaces_removed_from_readiness_inventory;
-          test_case "safe autonomy matches monitoring contract" `Quick
-            test_safe_autonomy_surface_matches_monitoring_contract;
+          test_case "hidden diagnostics are not main gate" `Quick
+            test_hidden_diagnostic_surfaces_are_not_main_gate;
         ] );
     ]

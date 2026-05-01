@@ -11,10 +11,11 @@ import { TelemetryUnified } from './telemetry-unified'
 import { FleetTelemetryPanel } from './fleet-telemetry-panel'
 import { ToolQualityPanel } from './tool-quality-panel'
 import { GovernanceMonitor } from './governance-monitor'
+import { AttributionPanel } from './attribution-panel'
 
-type FleetHealthView = 'default' | 'event-log' | 'comparison' | 'tool-quality' | 'governance'
+type FleetHealthView = 'default' | 'event-log' | 'comparison' | 'tool-quality' | 'governance' | 'attribution'
 
-const FLEET_VIEWS: FleetHealthView[] = ['default', 'event-log', 'comparison', 'tool-quality', 'governance']
+const FLEET_VIEWS: FleetHealthView[] = ['default', 'event-log', 'comparison', 'tool-quality', 'governance', 'attribution']
 
 function isFleetView(v: string | undefined): v is FleetHealthView {
   return !!v && (FLEET_VIEWS as string[]).includes(v)
@@ -34,6 +35,7 @@ const VIEW_CHIPS: Array<{ key: FleetHealthView; label: string }> = [
   { key: 'comparison',   label: 'Keeper 비교' },
   { key: 'tool-quality', label: '도구 품질' },
   { key: 'governance',   label: '거버넌스' },
+  { key: 'attribution',  label: 'Attribution' },
 ]
 
 function updateViewParam(view: FleetHealthView) {
@@ -84,7 +86,9 @@ export function FleetHealthPanel() {
           ? html`<${FleetTelemetryPanel} />`
         : view === 'tool-quality'
           ? html`<${ToolQualityPanel} />`
-        : html`<${GovernanceMonitor} />`}
+        : view === 'governance'
+          ? html`<${GovernanceMonitor} />`
+        : html`<${AttributionPanel} />`}
       </div>
     </div>
   `

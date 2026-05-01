@@ -245,7 +245,7 @@ process("dashboard/src/components/keeper-config-panel.ts", [
 
 # Let's fix pattern match in keeper_turn_up_args.ml directly to be robust
 process("lib/keeper/keeper_turn_up_args.ml", [
-    (r'match\n\s*compaction_profile_opt_res, tool_access_input_res, allowed_paths_opt_res,\n\s*active_goal_ids_opt_res, sandbox_profile_opt_res, network_mode_opt_res.*?\n\s*with\n\s*\| Error e, _, _, _, _, _, _\n\s*\| _, Error e, _, _, _, _, _\n\s*\| _, _, Error e, _, _, _, _\n\s*\| _, _, _, Error e, _, _, _\n\s*\| _, _, _, _, Error e, _, _\n\s*\| _, _, _, _, _, Error e, _\n\s*\| _, _, _, _, _, _, Error e -> Error \(false, e\)\n\s*\| Ok compaction_profile_opt,\n\s*Ok \(tool_access_opt, tool_preset_opt, tool_also_allow_opt\),\n\s*Ok allowed_paths_opt,\n\s*Ok active_goal_ids_opt,\n\s*Ok sandbox_profile_opt,\n\s*Ok network_mode_opt,\n\s*Ok shared_memory_scope_opt ->', 
+    (r'match\n\s*compaction_profile_opt_res, tool_access_input_res, allowed_paths_opt_res,\n\s*active_goal_ids_opt_res, sandbox_profile_opt_res, network_mode_opt_res.*?\n\s*with\n\s*\| Error e, _, _, _, _, _, _\n\s*\| _, Error e, _, _, _, _, _\n\s*\| _, _, Error e, _, _, _, _\n\s*\| _, _, _, Error e, _, _, _\n\s*\| _, _, _, _, Error e, _, _\n\s*\| _, _, _, _, _, Error e, _\n\s*\| _, _, _, _, _, _, Error e -> Error \(false, e\)\n\s*\| Ok compaction_profile_opt,\n\s*Ok \(tool_access_opt, tool_preset_opt, tool_also_allow_opt\),\n\s*Ok allowed_paths_opt,\n\s*Ok active_goal_ids_opt,\n\s*Ok sandbox_profile_opt,\n\s*Ok network_mode_opt,\n\s*Ok shared_memory_scope_opt ->',
     r'''match
       compaction_profile_opt_res, tool_access_input_res, allowed_paths_opt_res,
       active_goal_ids_opt_res, sandbox_profile_opt_res, network_mode_opt_res

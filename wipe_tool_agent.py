@@ -9,7 +9,7 @@ content = re.sub(r'\(\* Issue #8501: Variant SSOT for masc_collaboration_graph.*
 
 # Fix handle_agent_fitness
 content = re.sub(r'let max_collabs.*?in\n', '', content)
-content = re.sub(r'let \(score, completion, reliability, speed, handoff, collaboration\) = score_for ~min_avg ~max_collabs:max_col metrics in', 
+content = re.sub(r'let \(score, completion, reliability, speed, handoff, collaboration\) = score_for ~min_avg ~max_collabs:max_col metrics in',
                  'let (score, completion, reliability, speed, handoff) = score_for ~min_avg metrics in', content)
 content = re.sub(r'\("collaboration", `Float collaboration\);', '', content)
 

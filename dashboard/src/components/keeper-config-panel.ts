@@ -964,7 +964,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
       ` : html`
         <${ConfigRow} label="sandbox_profile" value=${c.sandbox_profile ?? 'local'} />
         <${ConfigRow} label="network_mode" value=${c.network_mode ?? 'inherit'} />
-        
+
         <${ConfigRow} label="effective_sandbox_image" value=${c.effective_sandbox_image || '--'} />
         <${ConfigRow} label="allowed_paths" value=${(c.allowed_paths ?? []).join(', ') || '(computed default)'} />
         <${ConfigRow} label="effective_paths" value=${(c.effective_allowed_paths ?? []).join(', ') || '(전체 허용)'} />

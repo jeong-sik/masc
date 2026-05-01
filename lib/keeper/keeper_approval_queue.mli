@@ -191,7 +191,7 @@ val submit_and_await :
   ?selected_model:string ->
   ?disposition:string ->
   ?disposition_reason:string ->
-  ?clock:#Eio.Time.clock ->
+  ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
   ?timeout_s:float ->
   unit ->
   Oas.Hooks.approval_decision

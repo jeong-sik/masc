@@ -338,6 +338,15 @@ let resolved_keeper_args_from_persona args :
              persona_name)
     | Some persona ->
         let defaults = load_keeper_profile_defaults persona_name in
+        (match persona_operator_todo_placeholder_fields persona defaults with
+        | _ :: _ as fields ->
+            Error
+              (Printf.sprintf
+                 "persona profile %s contains OPERATOR_TODO placeholder(s): %s; \
+                  replace placeholders before masc_keeper_create_from_persona"
+                 persona.profile_path
+                 (String.concat ", " fields))
+        | [] ->
         let name =
           get_string_opt args "name" |> Option.value ~default:persona_name
         in
@@ -476,4 +485,4 @@ let resolved_keeper_args_from_persona args :
                      ~auto_handoff ~handoff_threshold
                      ~handoff_cooldown_sec
                  in
-                 Ok (persona, resolved))
+                 Ok (persona, resolved)))

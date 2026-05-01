@@ -908,6 +908,36 @@ let test_persona_resolver_defaults_to_research_tool_access () =
          | `String _ -> true
          | _ -> false)
 
+let test_persona_resolver_rejects_operator_todo_profile () =
+  with_personas_dir @@ fun personas_dir ->
+  let persona_dir = Filename.concat personas_dir "probe" in
+  mkdir_p persona_dir;
+  write_file
+    (Filename.concat persona_dir "profile.json")
+    {|
+{
+  "name": "OPERATOR_TODO: probe display",
+  "role": "draft placeholder",
+  "keeper": {
+    "goal": "OPERATOR_TODO: fill before spawn"
+  }
+}
+|};
+  (match KTP.load_persona_summary "probe" with
+   | Some _ -> fail "placeholder persona summary should be hidden"
+   | None -> ());
+  let defaults = KTP.load_keeper_profile_defaults_from_persona "probe" in
+  check (option string) "placeholder manifest rejected" None defaults.manifest_path;
+  check (option string) "placeholder goal rejected" None defaults.goal;
+  match
+    KEP.resolved_keeper_args_from_persona
+      (`Assoc [ ("persona_name", `String "probe") ])
+  with
+  | Ok _ -> fail "placeholder persona should not resolve for keeper spawn"
+  | Error e ->
+      check bool "reports persona unavailable" true
+        (contains_substring e "persona not found")
+
 let test_persona_resolver_ignores_non_public_social_model_arg () =
   with_personas_dir @@ fun personas_dir ->
   let persona_dir = Filename.concat personas_dir "probe" in
@@ -1246,6 +1276,26 @@ let test_persona_authoring_rejects_unknown_keeper_fields () =
         (contains_substring e "unknown keeper fields");
       check bool "mentions schema tool" true
         (contains_substring e "masc_persona_schema")
+
+let test_persona_authoring_rejects_operator_todo_placeholders () =
+  let profile =
+    `Assoc
+      [
+        ("name", `String "OPERATOR_TODO: display label");
+        ( "keeper",
+          `Assoc
+            [
+              ("goal", `String "Find weak assumptions and make concrete tasks.");
+            ] );
+      ]
+  in
+  match KPA.normalize_profile ~handle:"probe" profile with
+  | Ok _ -> fail "expected OPERATOR_TODO placeholder rejection"
+  | Error e ->
+      check bool "mentions placeholder marker" true
+        (contains_substring e "OPERATOR_TODO");
+      check bool "mentions replace action" true
+        (contains_substring e "replace placeholders")
 
 let test_persona_authoring_save_dry_run_does_not_write () =
   with_personas_dir @@ fun personas_dir ->
@@ -1611,6 +1661,8 @@ let () =
           test_case "skips bad files" `Quick test_discover_skips_bad_files;
           test_case "persona resolver defaults to research tool_access" `Quick
             test_persona_resolver_defaults_to_research_tool_access;
+          test_case "persona resolver rejects OPERATOR_TODO profile" `Quick
+            test_persona_resolver_rejects_operator_todo_profile;
           test_case "persona resolver ignores non-public social_model arg" `Quick
             test_persona_resolver_ignores_non_public_social_model_arg;
           test_case "persona resolver preserves autoboot_enabled arg" `Quick
@@ -1635,6 +1687,8 @@ let () =
             test_persona_authoring_normalizes_keeper_defaults;
           test_case "persona authoring rejects unknown keeper fields" `Quick
             test_persona_authoring_rejects_unknown_keeper_fields;
+          test_case "persona authoring rejects OPERATOR_TODO placeholders" `Quick
+            test_persona_authoring_rejects_operator_todo_placeholders;
           test_case "persona authoring dry-run does not write" `Quick
             test_persona_authoring_save_dry_run_does_not_write;
           test_case "persona authoring save is loader-visible" `Quick

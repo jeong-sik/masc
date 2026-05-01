@@ -565,6 +565,10 @@ let normalize_keeper_json ~handle keeper_json =
 let normalize_profile ~handle profile =
   if not (Keeper_config.validate_name handle)
   then Error "handle must match [A-Za-z0-9._-]+"
+  else if Keeper_types_profile.json_has_operator_todo_placeholder profile
+  then
+    Error
+      "profile contains OPERATOR_TODO placeholder text; replace placeholders before saving"
   else (
     match profile with
     | `Assoc top_fields ->

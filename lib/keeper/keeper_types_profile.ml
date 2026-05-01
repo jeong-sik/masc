@@ -335,6 +335,63 @@ type persona_summary = {
   has_keeper_defaults : bool;
 }
 
+let operator_todo_placeholder_marker = "OPERATOR_TODO"
+
+let string_has_operator_todo_placeholder value =
+  String_util.contains_substring value operator_todo_placeholder_marker
+
+let rec json_has_operator_todo_placeholder = function
+  | `String value -> string_has_operator_todo_placeholder value
+  | `Assoc fields ->
+      List.exists
+        (fun (key, value) ->
+          string_has_operator_todo_placeholder key
+          || json_has_operator_todo_placeholder value)
+        fields
+  | `List values -> List.exists json_has_operator_todo_placeholder values
+  | `Tuple values -> List.exists json_has_operator_todo_placeholder values
+  | `Variant (name, value) ->
+      string_has_operator_todo_placeholder name
+      ||
+      (match value with
+       | Some json -> json_has_operator_todo_placeholder json
+       | None -> false)
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Floatlit _ -> false
+
+let reject_placeholder_persona_profile ~label ~path json =
+  if json_has_operator_todo_placeholder json then (
+    Log.Keeper.warn
+      "%s: rejecting persona profile %s because it contains %s placeholder text"
+      label path operator_todo_placeholder_marker;
+    true)
+  else false
+
+let operator_todo_placeholder_fields fields =
+  fields
+  |> List.filter_map (fun (field, value) ->
+    match value with
+    | Some raw when string_has_operator_todo_placeholder raw -> Some field
+    | _ -> None)
+
+let persona_operator_todo_placeholder_fields
+    (summary : persona_summary)
+    (defaults : keeper_profile_defaults) =
+  operator_todo_placeholder_fields
+    [
+      ("name", Some summary.display_name);
+      ("role", summary.role);
+      ("trait", summary.trait);
+      ("keeper.goal", defaults.goal);
+      ("keeper.short_goal", defaults.short_goal);
+      ("keeper.mid_goal", defaults.mid_goal);
+      ("keeper.long_goal", defaults.long_goal);
+      ("keeper.will", defaults.will);
+      ("keeper.needs", defaults.needs);
+      ("keeper.desires", defaults.desires);
+      ("keeper.instructions", defaults.instructions);
+      ("keeper.work_discovery_guidance", defaults.work_discovery_guidance);
+    ]
+
 let empty_keeper_profile_defaults = {
   id = None;
   manifest_path = None;
@@ -1030,6 +1087,11 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
       match Safe_ops.read_json_file_logged ~label:"load_keeper_profile_defaults" path with
       | None -> empty_keeper_profile_defaults
       | Some json ->
+          if
+            reject_placeholder_persona_profile
+              ~label:"load_keeper_profile_defaults" ~path json
+          then empty_keeper_profile_defaults
+          else
           let keeper_json = Yojson.Safe.Util.member "keeper" json in
           let per_provider_timeout_state, per_provider_timeout =
             per_provider_timeout_of_json_field
@@ -1541,6 +1603,11 @@ let load_persona_summary name : persona_summary option =
       match Safe_ops.read_json_file_logged ~label:"load_persona_summary" path with
       | None -> None
       | Some json ->
+          if
+            reject_placeholder_persona_profile ~label:"load_persona_summary"
+              ~path json
+          then None
+          else
           let display_name =
             Safe_ops.json_string_opt "name" json |> Option.value ~default:name
           in
@@ -1565,6 +1632,11 @@ let load_persona_summary_from_path name profile_path : persona_summary option =
   match Safe_ops.read_json_file_logged ~label:"load_persona_summary_from_path" profile_path with
   | None -> None
   | Some json ->
+      if
+        reject_placeholder_persona_profile
+          ~label:"load_persona_summary_from_path" ~path:profile_path json
+      then None
+      else
       let display_name =
         Safe_ops.json_string_opt "name" json |> Option.value ~default:name
       in

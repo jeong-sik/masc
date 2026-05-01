@@ -34,7 +34,8 @@ let with_room f =
 let coord_ctx config : Tool_coord.context =
   { Tool_coord.config; agent_name = "planner" }
 
-let parse_json_result = function
+let parse_json_result (result : Tool_coord.tool_result) =
+  match result with
   | { success = true; message = body } -> Yojson.Safe.from_string body
   | { success = false; message = body } -> fail body
 
@@ -91,8 +92,10 @@ let create_done_task config ~goal_id ~title =
   step Types.Done_action "test fixture done"
 
 let expect_error = function
-  | Some (false, body) -> Yojson.Safe.from_string body
-  | Some (true, _) -> fail "expected tool error"
+  | Some ({ success = false; message = body } : Tool_coord.tool_result) ->
+      Yojson.Safe.from_string body
+  | Some ({ success = true; message = _ } : Tool_coord.tool_result) ->
+      fail "expected tool error"
   | None -> fail "tool not handled"
 
 let test_goal_upsert_and_list () =

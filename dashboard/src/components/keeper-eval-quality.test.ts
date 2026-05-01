@@ -1,16 +1,63 @@
+// @vitest-environment happy-dom
+import { cleanup, render, screen, waitFor } from '@testing-library/preact'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { KeeperEvalResponse, EvalSnapshot } from '../api/keeper'
+import '@testing-library/jest-dom'
+import { html } from 'htm/preact'
+import {
+  fetchKeeperEval,
+  type EvalSnapshot,
+  type KeeperEvalResponse,
+} from '../api/keeper'
+import {
+  baselineLabel,
+  evalPassTone,
+  KeeperEvalQualityPanel,
+} from './keeper-eval-quality'
 
-// Mock fetchKeeperEval at the API layer
-const fetchKeeperEvalMock = vi.fn<(name: string, limit?: number) => Promise<KeeperEvalResponse>>()
+vi.mock('../api/keeper', async () => {
+  const actual = await vi.importActual<typeof import('../api/keeper')>('../api/keeper')
+  return {
+    ...actual,
+    fetchKeeperEval: vi.fn(),
+  }
+})
 
-vi.mock('../api/keeper', () => ({
-  fetchKeeperEval: (...args: Parameters<typeof fetchKeeperEvalMock>) => fetchKeeperEvalMock(...args),
-}))
+const fetchKeeperEvalMock = vi.mocked(fetchKeeperEval)
 
 afterEach(() => {
+  cleanup()
   vi.clearAllMocks()
 })
+
+function evalResponse({
+  allPassed = true,
+  baselineStatus = 'Improved',
+  coverage = 0.94,
+}: {
+  allPassed?: boolean
+  baselineStatus?: string | null
+  coverage?: number
+} = {}): KeeperEvalResponse {
+  return {
+    keeper: 'keeper-1',
+    count: 1,
+    latest_coverage: coverage,
+    latest_all_passed: allPassed,
+    snapshots: [{
+      agent_name: 'keeper-1',
+      session_id: 'session-1',
+      worker_run_id: 'run-1',
+      timestamp: Date.now() / 1000,
+      baseline_status: baselineStatus,
+      verdict: {
+        schema_version: 1,
+        all_passed: allPassed,
+        coverage,
+        layer_results: [],
+      },
+    }],
+  }
+}
 
 function makeSnapshot(overrides: Partial<EvalSnapshot> = {}): EvalSnapshot {
   return {
@@ -75,5 +122,45 @@ describe('fetchKeeperEval integration types', () => {
     expect(noBaseline.baseline_status).toBeNull()
     const improved = makeSnapshot({ baseline_status: 'Improved' })
     expect(improved.baseline_status).toBe('Improved')
+  })
+})
+
+describe('eval quality status tones', () => {
+  it.each([
+    [true, 'ok'],
+    [false, 'bad'],
+  ] as const)('maps all_passed=%s to StatusChip tone %s', (allPassed, tone) => {
+    expect(evalPassTone(allPassed)).toBe(tone)
+  })
+
+  it.each([
+    ['Improved', 'ok'],
+    ['Regressed', 'bad'],
+    ['Unchanged', 'neutral'],
+    ['Unknown', 'neutral'],
+  ] as const)('maps baseline %s to StatusChip tone %s', (status, tone) => {
+    expect(baselineLabel(status)).toEqual({ text: status, tone })
+  })
+
+  it('skips the baseline chip when status is empty', () => {
+    expect(baselineLabel(null)).toBeNull()
+  })
+})
+
+describe('KeeperEvalQualityPanel status chips', () => {
+  it('renders eval verdict and baseline through StatusChip', async () => {
+    fetchKeeperEvalMock.mockResolvedValue(evalResponse())
+
+    render(html`<${KeeperEvalQualityPanel} keeperName="keeper-status-chip" />`)
+
+    await waitFor(() => expect(fetchKeeperEvalMock).toHaveBeenCalledWith('keeper-status-chip', 20))
+
+    const verdictChip = await screen.findByText('ALL PASS')
+    const baselineChip = screen.getByText('Improved')
+
+    expect(verdictChip.closest('[data-status-chip]')).toHaveAttribute('data-status-chip-tone', 'ok')
+    expect(verdictChip.closest('[data-status-chip]')).toHaveAttribute('data-status-chip-uppercase', 'true')
+    expect(baselineChip.closest('[data-status-chip]')).toHaveAttribute('data-status-chip-tone', 'ok')
+    expect(baselineChip.closest('[data-status-chip]')).toHaveAttribute('data-status-chip-uppercase', 'false')
   })
 })

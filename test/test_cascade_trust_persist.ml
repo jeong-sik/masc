@@ -149,6 +149,7 @@ let test_snapshot_provider_record_shape () =
           ; "rejected_in_window"
           ; "top_fingerprints"
           ; "last_failure_at"
+          ; "trust_score"
           ]
         in
         List.iter

@@ -249,6 +249,13 @@ type provider_state = {
   mutable latency_ring: float array option;
   mutable latency_count: int;     (* slots filled, capped at array length *)
   mutable latency_cursor: int;    (* next insertion index, wraps mod length *)
+  (* Trust score in [0.0, 1.0].  Starts at [Cascade_trust.initial_trust]
+     (1.0).  Decays on each failure; recovers on each success.  When
+     [Cascade_trust.trust_rotation_enabled] is true, this multiplies
+     [effective_weight] so chronic failures reduce routing probability
+     before cooldown kicks in.  Stored unconditionally so the kill switch
+     can be toggled without losing accumulated evidence. *)
+  mutable trust_score: float;
 }
 
 type t = {
@@ -307,6 +314,7 @@ let get_or_create_state t key =
       latency_ring = None;
       latency_count = 0;
       latency_cursor = 0;
+      trust_score = Cascade_trust.initial_trust;
     } in
     Hashtbl.replace t.providers key s;
     s
@@ -384,11 +392,34 @@ let record t ~provider_key ~outcome ?error_kind ?error_reason
       bump_fingerprint state fp;
       state.last_failure_at <- now
     in
+    (* Determine whether the current failure is "persistent" (≥
+       [Cascade_trust.persistent_threshold] failure-class events recorded
+       in the last [Cascade_trust.persistent_window_sec] seconds, INCLUDING
+       the event just prepended above).  Only meaningful for non-success
+       outcomes; hoisted here so each failure branch can call it without
+       duplicating the scan. *)
+    let is_persistent_failure () =
+      let cutoff = now -. Cascade_trust.persistent_window_sec in
+      List.fold_left
+        (fun acc e ->
+           if e.time >= cutoff then
+             match e.outcome with
+             | Failure | Rejected | Hard_quota | Terminal_failure -> acc + 1
+             | Success | Soft_rate_limited -> acc
+           else acc)
+        0
+        state.events
+      >= Cascade_trust.persistent_threshold
+    in
     match outcome with
     | Success ->
       state.consecutive_failures <- 0;
       (* Clear cooldown on success — provider recovered *)
       state.cooldown_until <- 0.0;
+      (* Trust recovery: reward successful calls.  Trust is updated
+         unconditionally regardless of the kill switch so the distribution
+         is observable even when rotation is off. *)
+      state.trust_score <- Cascade_trust.apply_success state.trust_score;
       (* Append latency sample when caller provided one.  Non-success
          outcomes don't contribute to the percentile — a 200ms timeout
          and a 200ms successful response are not the same signal. *)
@@ -404,6 +435,9 @@ let record t ~provider_key ~outcome ?error_kind ?error_reason
          [provider_info] can count Rejected separately for dashboards. *)
       state.consecutive_failures <- state.consecutive_failures + 1;
       bump_failure_fp ();
+      state.trust_score <-
+        Cascade_trust.apply_failure ~persistent:(is_persistent_failure ())
+          state.trust_score;
       if state.consecutive_failures >= cooldown_threshold then begin
         let new_until = now +. cooldown_sec in
         if new_until > state.cooldown_until then begin
@@ -422,9 +456,13 @@ let record t ~provider_key ~outcome ?error_kind ?error_reason
          a multi-minute blackout.  Negative / zero / absent values fall
          back to [soft_rate_limit_cooldown_sec].  As with the other
          immediate-cooldown paths, never shorten an already-longer
-         cooldown (e.g. concurrent hard_quota + soft_rl events). *)
+         cooldown (e.g. concurrent hard_quota + soft_rl events).
+         Soft rate-limits are transient by definition — apply transient
+         decay regardless of recent failure count. *)
       state.consecutive_failures <- state.consecutive_failures + 1;
       bump_failure_fp ();
+      state.trust_score <-
+        Cascade_trust.apply_failure ~persistent:false state.trust_score;
       let cooldown_dur =
         match retry_after_s with
         | Some s when s > 0.0 -> Float.min s soft_rate_limit_max_clamp_sec
@@ -445,6 +483,9 @@ let record t ~provider_key ~outcome ?error_kind ?error_reason
          concurrently and the second arrives first in wall time). *)
       state.consecutive_failures <- state.consecutive_failures + 1;
       bump_failure_fp ();
+      state.trust_score <-
+        Cascade_trust.apply_failure ~persistent:(is_persistent_failure ())
+          state.trust_score;
       let new_until = now +. hard_quota_cooldown_sec in
       if new_until > state.cooldown_until then begin
         state.cooldown_until <- new_until;
@@ -455,12 +496,12 @@ let record t ~provider_key ~outcome ?error_kind ?error_reason
       (* Terminal structural errors are not quota exhaustion, but they have the
          same retry shape: the next cascade tick will hit the same provider
          state and fail again.  Cool down immediately to keep fallback from
-         becoming a hidden tax on every request.  #10441: the
-         [apply_trust_failure_locked] step was removed by #10412 (Phase 1
-         revert).  Keep [bump_failure_fp] for fingerprint history but discard
-         its return value — there's no trust adjustment to feed it into. *)
+         becoming a hidden tax on every request. *)
       state.consecutive_failures <- state.consecutive_failures + 1;
       bump_failure_fp ();
+      state.trust_score <-
+        Cascade_trust.apply_failure ~persistent:(is_persistent_failure ())
+          state.trust_score;
       let new_until = now +. terminal_failure_cooldown_sec in
       if new_until > state.cooldown_until then begin
         state.cooldown_until <- new_until;
@@ -531,15 +572,29 @@ let is_in_cooldown t ~provider_key =
 
 (** Compute effective weight for a provider.
 
-    [effective_weight = config_weight * success_rate]
+    When [Cascade_trust.trust_rotation_enabled] is [false] (default):
+      [effective_weight = config_weight * success_rate]
 
-    Providers in cooldown get weight 0 (skipped).  Unknown providers
-    get their full config weight (optimistic). *)
+    When [Cascade_trust.trust_rotation_enabled] is [true]:
+      [effective_weight = config_weight * success_rate * trust_score]
+
+    Trust is a multiplier in [0.0, 1.0] so it can only attenuate weight,
+    never amplify it past [config_weight].  Providers in cooldown get
+    weight 0 (skipped).  Unknown providers get their full config weight
+    (optimistic). *)
 let effective_weight t ~provider_key ~config_weight =
   if is_in_cooldown t ~provider_key then 0
   else
     let rate = success_rate t ~provider_key in
-    max 1 (int_of_float (float_of_int config_weight *. rate))
+    let trust =
+      if not Cascade_trust.trust_rotation_enabled then 1.0
+      else
+        with_lock t (fun () ->
+          match Hashtbl.find_opt t.providers provider_key with
+          | None -> Cascade_trust.initial_trust
+          | Some state -> state.trust_score)
+    in
+    max 1 (int_of_float (float_of_int config_weight *. rate *. trust))
 
 (** Summary for debugging/telemetry. *)
 let provider_summary t ~provider_key =
@@ -573,6 +628,11 @@ type provider_info = {
   p50_latency_ms : float option;
   p95_latency_ms : float option;
   latency_samples : int;
+  trust_score : float;
+  (** Current trust score in [0.0, 1.0].  Updated unconditionally on
+      every outcome regardless of [Cascade_trust.trust_rotation_enabled],
+      so the distribution is observable even when the kill switch is off.
+      Only applied to [effective_weight] when rotation is enabled. *)
 }
 
 (* Compute the [pct]-th percentile (0.0–1.0) of the populated portion of
@@ -646,6 +706,7 @@ let build_info_locked ~now ~key state =
     p50_latency_ms;
     p95_latency_ms;
     latency_samples = state.latency_count;
+    trust_score = state.trust_score;
   }
 
 let provider_info t ~provider_key =

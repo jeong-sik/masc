@@ -425,6 +425,7 @@ let zero_provider_info (key : string) : Health.provider_info =
   ; p50_latency_ms = None
   ; p95_latency_ms = None
   ; latency_samples = 0
+  ; trust_score = Cascade_trust.initial_trust
   }
 
 (** [provider_entry_to_json ~declared info] serialises a provider_info
@@ -500,6 +501,10 @@ let provider_entry_to_json ~(declared : bool)
        success-rate snapshot. *)
     ("top_fingerprints", top_fingerprints_json);
     ("last_failure_at", opt_float info.last_failure_at);
+    (* trust_score: Phase 1 redesign (kill switch + hardcoded calibration).
+       Exposed unconditionally so the dashboard can render the distribution
+       during the canary period even when MASC_CASCADE_TRUST_ROTATION=off. *)
+    ("trust_score", `Float info.trust_score);
     ("declared", `Bool declared);
     ("status", `String (provider_status info));
   ] @ perf_fields)
@@ -539,18 +544,63 @@ type recommendation = {
 
 (* Classifier — see RFC-0009 §"Phase 2a".
 
-   #10441: Phase 1 was reverted in #10412, removing [trust_score] and
-   [same_fingerprint_count] from [Health.provider_info].  This classifier was
-   shipped by #10416 against a base that still had those fields, so its
-   per-provider trust thresholds no longer have any input data.  Stub it to
-   always emit [None] until the trust pipeline is reinstated; the type
-   surface stays alive so consumers ([low_trust_recommendations],
-   [recommendations_json]) keep their signatures.  See #10428 for the
-   redesign discussion. *)
+   Now that [trust_score] is back in [Health.provider_info] (Phase 1
+   redesign with kill switch + hardcoded calibration, see cascade_trust.ml),
+   this classifier is active again.  [same_fingerprint_count] is derived
+   from [top_fingerprints]: the count of the most-frequent error fingerprint.
+
+   Thresholds:
+   - trust ∈ [0.3, 1.0]:        no recommendation (provider is acceptable)
+   - same_fingerprint_count ≥ 5: Investigate (stuck-streak / config bug)
+   - trust < 0.1 with events_in_window ≥ 30: Investigate (high-volume collapse)
+   - trust < 0.1:                Disable
+   - trust ∈ [0.1, 0.3):        Reduce_weight *)
 let classify_recommendation (info : Health.provider_info) :
     recommendation option =
-  let _ = info in
-  None
+  let trust = info.trust_score in
+  let same_fingerprint_count =
+    match info.top_fingerprints with
+    | (_, count) :: _ -> count
+    | [] -> 0
+  in
+  let top_fingerprint =
+    match info.top_fingerprints with
+    | (fp, _) :: _ -> Some fp
+    | [] -> None
+  in
+  if trust >= 0.3 && same_fingerprint_count < 5 then None
+  else
+    let action, rationale =
+      if same_fingerprint_count >= 5 then
+        Investigate,
+        Printf.sprintf
+          "same error fingerprint recurred %d times — likely a config or auth issue"
+          same_fingerprint_count
+      else if trust < 0.1 && info.events_in_window >= 30 then
+        Investigate,
+        Printf.sprintf
+          "trust=%.2f with %d events in window — high-volume collapse suggests auth or quota issue"
+          trust info.events_in_window
+      else if trust < 0.1 then
+        Disable,
+        Printf.sprintf
+          "trust=%.2f — provider has decayed across multiple persistent failures"
+          trust
+      else
+        Reduce_weight,
+        Printf.sprintf
+          "trust=%.2f — provider is partially working but unreliable; consider halving cascade weight"
+          trust
+    in
+    Some {
+      rec_provider_key = info.provider_key;
+      rec_trust_score = trust;
+      rec_same_fingerprint_count = same_fingerprint_count;
+      rec_events_in_window = info.events_in_window;
+      rec_top_fingerprint = top_fingerprint;
+      rec_action = action;
+      rec_rationale = rationale;
+    }
 
 let low_trust_recommendations (infos : Health.provider_info list) :
     recommendation list =

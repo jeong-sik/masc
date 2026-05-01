@@ -240,8 +240,14 @@ val is_in_cooldown : t -> provider_key:string -> bool
 
 (** Compute effective weight for weighted cascade selection.
 
-    [effective_weight = config_weight * success_rate]
+    When [Cascade_trust.trust_rotation_enabled] is [false] (default):
+      [effective_weight = config_weight * success_rate]
 
+    When [Cascade_trust.trust_rotation_enabled] is [true]:
+      [effective_weight = config_weight * success_rate * trust_score]
+
+    Trust is a multiplier in [0.0, 1.0] — it only attenuates weight,
+    never amplifies it past [config_weight].
     Returns 0 for providers in cooldown.
     Returns full [config_weight] for unknown providers. *)
 val effective_weight : t -> provider_key:string -> config_weight:int -> int
@@ -287,6 +293,13 @@ type provider_info = {
   (** Number of latency samples currently retained in the ring buffer.
       [0] iff both percentile fields are [None].  Bounded by
       {!latency_ring_size}.  @since 0.180.0 *)
+  trust_score : float;
+  (** Trust score in [0.0, 1.0].  Starts at 1.0 for new providers and
+      decays on each failure; recovers on each success.  Updated on every
+      outcome regardless of whether {!Cascade_trust.trust_rotation_enabled}
+      is set, so the distribution is observable (via dashboard / JSONL
+      snapshots) even during the kill-switch-off canary period.
+      @since 0.184.0 *)
 }
 
 (** Structured info for a single provider. Returns [None] if untracked.

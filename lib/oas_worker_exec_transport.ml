@@ -13,6 +13,16 @@ type cli_transport_overrides = {
   gemini_yolo : bool option;
 }
 
+let claude_code_max_turns_hard_cap = 30
+
+let provider_effective_max_turns kind requested =
+  match kind with
+  | Llm_provider.Provider_config.Claude_code ->
+      min requested claude_code_max_turns_hard_cap
+  | Anthropic | OpenAI_compat | Ollama | Gemini | Glm | Kimi | DashScope
+  | Gemini_cli | Kimi_cli | Codex_cli ->
+      requested
+
 (* #10097: codex_cli omits keeper-bound runtime MCP tools that require
    request-scoped auth headers.  That omission is a structural provider
    limitation, not a per-call incident:
@@ -695,7 +705,10 @@ module Kimi_cli_transport_local = struct
   let prompt_needs_stdin prompt =
     prompt_exceeds_argv_budget prompt || prompt_contains_non_ascii prompt
 
+  let sanitize_for_kimi prompt = Inference_utils.sanitize_text_utf8 prompt
+
   let stdin_for_prompt prompt =
+    let prompt = sanitize_for_kimi prompt in
     if prompt_needs_stdin prompt then Some prompt else None
 
   let cli_model_override ~(config : config)
@@ -708,6 +721,7 @@ module Kimi_cli_transport_local = struct
       ~(req_config : Llm_provider.Provider_config.t)
       ~(mcp_config_json : string list)
       ~prompt =
+    let prompt = sanitize_for_kimi prompt in
     let prompt_via_stdin = prompt_needs_stdin prompt in
     let args =
       ref [ config.kimi_path; "--print"; "--output-format"; "stream-json" ]
@@ -772,10 +786,13 @@ module Kimi_cli_transport_local = struct
              { tool_use_id; content; is_error = false; json = parsed_json })
     | None -> None
 
+  let parse_json_line line =
+    Yojson.Safe.from_string (Inference_utils.sanitize_text_utf8 line)
+
   let blocks_of_output_line line =
     let open Yojson.Safe.Util in
     try
-      let json = Yojson.Safe.from_string line in
+      let json = parse_json_line line in
       match json |> member "role" |> to_string_option with
       | Some "assistant" ->
           let content = blocks_of_message_content (json |> member "content") in
@@ -796,7 +813,7 @@ module Kimi_cli_transport_local = struct
     let open Yojson.Safe.Util in
     let find_id line =
       try
-        let json = Yojson.Safe.from_string line in
+        let json = parse_json_line line in
         match json |> member "id" |> to_string_option with
         | Some id when String.trim id <> "" -> Some id
         | _ -> (
@@ -811,7 +828,7 @@ module Kimi_cli_transport_local = struct
     let open Yojson.Safe.Util in
     let find_model line =
       try
-        let json = Yojson.Safe.from_string line in
+        let json = parse_json_line line in
         match json |> member "model" |> to_string_option with
         | Some model when String.trim model <> "" -> Some model
         | _ -> None
@@ -1086,6 +1103,7 @@ module Kimi_cli_transport_local = struct
             Llm_provider.Cli_common_prompt.prompt_with_system_prompt
               ~prompt ~system_prompt
           in
+          let prompt = sanitize_for_kimi prompt in
           let model_id =
             Option.value ~default:"kimi-for-coding"
               (cli_model_override ~config ~req_config:req.config)
@@ -1132,6 +1150,7 @@ module Kimi_cli_transport_local = struct
             Llm_provider.Cli_common_prompt.prompt_with_system_prompt
               ~prompt ~system_prompt
           in
+          let prompt = sanitize_for_kimi prompt in
           let model_id =
             Option.value ~default:"kimi-for-coding"
               (cli_model_override ~config ~req_config:req.config)
@@ -1252,7 +1271,10 @@ let non_http_transport_of_provider
               allowed_tools =
                 Option.value ~default:[] overrides.claude_allowed_tools;
               permission_mode = overrides.claude_permission_mode;
-              max_turns = overrides.claude_max_turns;
+              max_turns =
+                Option.map
+                  (provider_effective_max_turns provider_cfg.kind)
+                  overrides.claude_max_turns;
             }
           in
           Ok

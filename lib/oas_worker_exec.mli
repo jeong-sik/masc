@@ -157,6 +157,9 @@ val provider_caps_of_config :
   Llm_provider.Provider_config.t ->
   Llm_provider.Capabilities.capabilities
 val provider_label : Llm_provider.Provider_config.t -> string
+val claude_code_max_turns_hard_cap : int
+val provider_effective_max_turns :
+  Llm_provider.Provider_config.provider_kind -> int -> int
 
 (** {1 Kimi CLI configuration} *)
 

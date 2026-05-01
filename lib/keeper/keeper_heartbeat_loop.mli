@@ -65,6 +65,11 @@ val record_semaphore_wait_observation :
   kind:semaphore_wait_observation_kind ->
   unit
 
+val oas_timeout_budget_observation_reasons : string list
+
+val record_oas_timeout_budget_observation :
+  base_path:string -> keeper_name:string -> unit
+
 val run_keepalive_unified_turn :
   ctx:'a context ->
   meta_after_triage:keeper_meta ->

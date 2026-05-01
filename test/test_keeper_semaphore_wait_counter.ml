@@ -166,6 +166,51 @@ let test_wait_observation_updates_registry_skip_stamp () =
       | Some _ -> Alcotest.fail "last_skip_observation was not stamped"
       | None -> Alcotest.fail "registered keeper missing")
 
+let test_oas_timeout_budget_observation_reason_labels () =
+  Alcotest.(check (list string))
+    "timeout budget watchdog reasons"
+    [
+      "provider_runtime_error";
+      "oas_timeout_budget";
+      "keeper_turn_retry_backoff";
+    ]
+    Masc_mcp.Keeper_heartbeat_loop.oas_timeout_budget_observation_reasons
+
+let test_oas_timeout_budget_observation_updates_registry () =
+  let base_path =
+    Filename.concat (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc-oas-timeout-observation-%d" (Unix.getpid ()))
+  in
+  let keeper = "oas-timeout-observation-12431" in
+  Masc_mcp.Keeper_registry.unregister ~base_path keeper;
+  let meta = make_meta keeper in
+  ignore (Masc_mcp.Keeper_registry.register ~base_path keeper meta);
+  Fun.protect
+    ~finally:(fun () ->
+      Masc_mcp.Keeper_registry.unregister ~base_path keeper)
+    (fun () ->
+      let before =
+        match Masc_mcp.Keeper_registry.get ~base_path keeper with
+        | Some entry -> entry.meta.runtime.usage.last_turn_ts
+        | None -> Alcotest.fail "registered keeper missing before observation"
+      in
+      Masc_mcp.Keeper_heartbeat_loop.record_oas_timeout_budget_observation
+        ~base_path
+        ~keeper_name:keeper;
+      match Masc_mcp.Keeper_registry.get ~base_path keeper with
+      | Some { Masc_mcp.Keeper_registry.last_skip_observation = Some (_, reasons);
+               meta = updated_meta; _ } ->
+        Alcotest.(check (list string))
+          "timeout budget stamped for watchdog routing"
+          Masc_mcp.Keeper_heartbeat_loop.oas_timeout_budget_observation_reasons
+          reasons;
+        Alcotest.(check bool)
+          "last_turn_ts touched"
+          true
+          (updated_meta.runtime.usage.last_turn_ts >= before)
+      | Some _ -> Alcotest.fail "last_skip_observation was not stamped"
+      | None -> Alcotest.fail "registered keeper missing")
+
 let () =
   Alcotest.run "keeper_semaphore_wait_counter_9771" [
     "metric_name", [
@@ -189,5 +234,9 @@ let () =
         test_wait_observation_reason_labels;
       Alcotest.test_case "registry skip stamp is updated" `Quick
         test_wait_observation_updates_registry_skip_stamp;
+      Alcotest.test_case "oas timeout labels are stable" `Quick
+        test_oas_timeout_budget_observation_reason_labels;
+      Alcotest.test_case "oas timeout registry stamp is updated" `Quick
+        test_oas_timeout_budget_observation_updates_registry;
     ];
   ]

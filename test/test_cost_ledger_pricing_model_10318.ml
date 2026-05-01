@@ -23,7 +23,6 @@
 open Alcotest
 
 module H  = Masc_mcp.Keeper_hooks_oas
-module Oas = Masc_mcp.Oas
 
 (* ------------------------------------------------------------------ *)
 (* Helpers                                                             *)

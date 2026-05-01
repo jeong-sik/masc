@@ -719,9 +719,6 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
           let do_run ~(execution : cascade_execution) ~run_meta ~run_generation ~is_retry
               ~oas_timeout_s =
             last_execution := execution;
-            let execution_cascade_name =
-              KCP.runtime_name_to_string execution.cascade_name
-            in
             Otel_genai.with_keeper_turn_span
               ~keeper_name:run_meta.name
               ~agent_name:run_meta.agent_name
@@ -744,7 +741,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
                 try
                   Keeper_agent_run.run_turn ~config ~meta:run_meta ~base_dir
                     ~max_context:execution.max_context ~build_turn_prompt
-                    ~user_message ~cascade_name:execution_cascade_name
+                    ~user_message ~cascade_name:execution.cascade_name
                     ~world_observation:observation
                     ~turn_affordances
                     ?provider_filter:(Env_config_keeper.KeeperCascade.provider_allowlist ())

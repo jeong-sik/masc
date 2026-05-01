@@ -30,6 +30,18 @@ models = [
 temperature = 0.2
 max_tokens = 16384
 keeper_assignable = true
+fallback_cascade = "keeper_diverse"
+
+[keeper_diverse]
+comment = "Fallback cascade for contract violation retry. Different model composition from big_three to break correlated failure."
+models = [
+  "claude_code:claude-sonnet-4-6",
+  "gemini_cli:gemini-2.5-flash",
+  "codex_cli:gpt-5.3-codex-spark",
+]
+temperature = 0.3
+max_tokens = 16384
+keeper_assignable = true
 
 [tool_rerank]
 comment = "System-only short-output profile for rerank/scoring calls."

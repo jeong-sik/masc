@@ -41,16 +41,26 @@ export function SurfaceCard({
 
 // ── Section card with label header ──
 interface SectionCardProps {
-  label: string
+  label?: ComponentChildren
+  title?: ComponentChildren
+  right?: ComponentChildren
   class?: string
+  tone?: string
   variant?: CardVariant
+  testId?: string
+  'data-testid'?: string
   children: ComponentChildren
 }
 
 export function SectionCard({
   label,
+  title,
+  right,
   class: cx,
+  tone,
   variant = 'light',
+  testId,
+  'data-testid': dataTestId,
   children,
 }: SectionCardProps) {
   // SPEC `.section-head` upgrade — SectionHead atom replaces the
@@ -63,9 +73,15 @@ export function SectionCard({
   // above transparent body. Variant `compact` had p-3.5 in the legacy
   // path; the new wrapper uses p-3.5 to preserve that visual.
   const bodyPadding = variant === 'compact' ? 'p-3.5' : 'p-4'
+  const sectionLabel = label ?? title ?? ''
   return html`
-    <${SurfaceCard} variant=${variant} class="flex flex-col !p-0 overflow-hidden ${cx ?? ''}">
-      <${SectionHead}>${label}<//>
+    <${SurfaceCard}
+      variant=${variant}
+      tone=${tone}
+      testId=${testId ?? dataTestId}
+      class="flex flex-col !p-0 overflow-hidden ${cx ?? ''}"
+    >
+      <${SectionHead} tail=${right}>${sectionLabel}<//>
       <div class="${bodyPadding} flex flex-col gap-4">${children}</div>
     <//>
   `

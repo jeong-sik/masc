@@ -124,6 +124,7 @@
         test_credential_provider_bridge
         test_repo_sync
         test_repo_git
+        test_repo_e2e
         test_exec_core
         test_exec_dispatch
         test_keeper_bash_safety
@@ -313,6 +314,7 @@
           test_credential_provider_bridge
           test_repo_sync
           test_repo_git
+          test_repo_e2e
           test_exec_core
           test_exec_dispatch
           test_keeper_bash_safety

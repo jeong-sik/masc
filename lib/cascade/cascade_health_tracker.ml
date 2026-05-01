@@ -404,8 +404,11 @@ let record t ~provider_key ~outcome ?error_kind ?error_reason
          [provider_info] can count Rejected separately for dashboards. *)
       state.consecutive_failures <- state.consecutive_failures + 1;
       bump_failure_fp ();
-      if state.consecutive_failures >= cooldown_threshold then
-        state.cooldown_until <- now +. cooldown_sec
+      if state.consecutive_failures >= cooldown_threshold then begin
+        state.cooldown_until <- now +. cooldown_sec;
+        Prometheus.observe_histogram Prometheus.metric_keeper_provider_block_duration_sec
+          ~labels:[("provider", provider_key)] cooldown_sec
+      end
     | Soft_rate_limited ->
       (* Transient HTTP 429.  Apply an immediate short cooldown so the
          current cascade cycle skips this provider for the next selection
@@ -425,8 +428,11 @@ let record t ~provider_key ~outcome ?error_kind ?error_reason
         | _ -> soft_rate_limit_cooldown_sec
       in
       let new_until = now +. cooldown_dur in
-      if new_until > state.cooldown_until then
-        state.cooldown_until <- new_until
+      if new_until > state.cooldown_until then begin
+        state.cooldown_until <- new_until;
+        Prometheus.observe_histogram Prometheus.metric_keeper_provider_block_duration_sec
+          ~labels:[("provider", provider_key)] cooldown_dur
+      end
     | Hard_quota ->
       (* Hard-quota errors (balance depleted, quota exceeded, resource
          exhausted) don't recover on short-window retries — set a long
@@ -437,8 +443,11 @@ let record t ~provider_key ~outcome ?error_kind ?error_reason
       state.consecutive_failures <- state.consecutive_failures + 1;
       bump_failure_fp ();
       let new_until = now +. hard_quota_cooldown_sec in
-      if new_until > state.cooldown_until then
-        state.cooldown_until <- new_until
+      if new_until > state.cooldown_until then begin
+        state.cooldown_until <- new_until;
+        Prometheus.observe_histogram Prometheus.metric_keeper_provider_block_duration_sec
+          ~labels:[("provider", provider_key)] hard_quota_cooldown_sec
+      end
     | Terminal_failure ->
       (* Terminal structural errors are not quota exhaustion, but they have the
          same retry shape: the next cascade tick will hit the same provider
@@ -450,8 +459,11 @@ let record t ~provider_key ~outcome ?error_kind ?error_reason
       state.consecutive_failures <- state.consecutive_failures + 1;
       bump_failure_fp ();
       let new_until = now +. terminal_failure_cooldown_sec in
-      if new_until > state.cooldown_until then
-        state.cooldown_until <- new_until)
+      if new_until > state.cooldown_until then begin
+        state.cooldown_until <- new_until;
+        Prometheus.observe_histogram Prometheus.metric_keeper_provider_block_duration_sec
+          ~labels:[("provider", provider_key)] terminal_failure_cooldown_sec
+      end)
 
 let record_success t ~provider_key ?latency_ms () =
   record t ~provider_key ~outcome:Success ?latency_ms

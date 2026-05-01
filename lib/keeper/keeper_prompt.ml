@@ -114,7 +114,7 @@ let build_keeper_system_prompt
       |> Re.replace_string re_keeper_name_upper ~by:keeper_name
   in
   let persona_block =
-    let s = String.trim persona_extended in
+    let s = String_util.escape_xml (String.trim persona_extended) in
     if s = "" then ""
     else Printf.sprintf "<persona>\n%s\n</persona>\n\n" s
   in
@@ -125,7 +125,10 @@ let build_keeper_system_prompt
         let lines =
           List.map
             (fun (id, title, horizon) ->
-               Printf.sprintf "- %s [%s] %s" id horizon title)
+               Printf.sprintf "- %s [%s] %s"
+                 (String_util.escape_xml id)
+                 (String_util.escape_xml horizon)
+                 (String_util.escape_xml title))
             goals
         in
         Printf.sprintf "\n<available_goals>\n%s\n</available_goals>\n"

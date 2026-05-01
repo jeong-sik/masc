@@ -37,8 +37,18 @@ val interruptible_sleep :
   clock:'a Eio.Time.clock -> stop:bool Atomic.t -> wakeup:bool Atomic.t ->
   float -> sleep_outcome
 
-(** Wake up a specific keeper immediately. *)
-val wakeup_keeper : ?base_path:string -> string -> unit
+(** Wake up a specific keeper immediately.
+
+    When [?stimulus] is given, the stimulus is appended to the keeper's
+    Event Layer queue ([Keeper_registry.enqueue_event]) before the wakeup
+    flag flips. Callers that have a real payload (board post, mention,
+    operator directive) should pass it; callers that only need to break
+    the keeper out of [interruptible_sleep] may omit it and the call
+    behaves as before. See RFC-0020 §3 (data channel vs hint signal). *)
+val wakeup_keeper :
+  ?base_path:string ->
+  ?stimulus:Keeper_event_queue.stimulus ->
+  string -> unit
 
 (** Wake up all running keepers. [None] preserves legacy global wakeup. *)
 val wakeup_all_keepers : ?base_path:string -> unit -> unit

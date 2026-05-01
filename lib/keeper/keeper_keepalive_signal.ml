@@ -120,12 +120,24 @@ let interruptible_sleep ~clock ~stop ~wakeup duration : sleep_outcome =
 
 (** Wake up a specific keeper immediately, causing it to skip the rest of
     its sleep and run the next heartbeat cycle. Used by broadcast notification
-    when a @mention targets a running keeper. *)
-let wakeup_keeper ?base_path name =
+    when a @mention targets a running keeper.
+
+    When [?stimulus] is provided, the stimulus is appended to the keeper's
+    Event Layer queue ([Keeper_registry.enqueue_event]) before the wakeup
+    flag flips. This is RFC-0020 Rule 1 (enqueue is independent of policy)
+    + the data-channel half of the layer split — [fiber_wakeup] remains the
+    hint signal, the queue is the authoritative payload. *)
+let wakeup_keeper ?base_path ?stimulus name =
   Keeper_registry.all ?base_path ()
   |> List.iter (fun (entry : Keeper_registry.registry_entry) ->
     if String.equal entry.name name && entry.phase = Keeper_state_machine.Running
-    then Keeper_registry.wakeup ~base_path:entry.base_path name)
+    then begin
+      Option.iter
+        (fun s ->
+          Keeper_registry.enqueue_event ~base_path:entry.base_path name s)
+        stimulus;
+      Keeper_registry.wakeup ~base_path:entry.base_path name
+    end)
 ;;
 
 (** Wake up all running keepers — used when a broadcast mentions @@all

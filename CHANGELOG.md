@@ -1,23 +1,28 @@
 # Changelog
 
 
-## [0.19.0] - 2026-05-01
+## [0.18.25] - 2026-05-01
 
-Multi-repository architecture Phase 1. Introduces explicit repository registry and keeper-scoped access control, resolving the basepath mixing problem where all Git branches from nested projects were conflated.
+Post-v0.18.24 merge train for keeper event-queue registry wiring, silent-failure visibility, cascade typing/FSM message cleanup, runtime memory config, prompt XML escaping, and release-truth sync. No breaking API changes.
 
 ### Added
 
-- `Repo_store` module for repository CRUD, TOML persistence, git discovery, and backward-compatible default repo injection (#12401).
-- `Keeper_repo_mapping` module for keeper-to-repository access control with wildcard support and credential isolation (#12401).
-- `Credential_store` module for credential CRUD and type-safe storage (#12401).
-- `Repo_git` and `Repo_sync` modules for branch listing and sync scheduling (#12401).
-- HTTP API endpoints under `/api/v1/repositories` for listing, adding, removing, updating, discovering, and syncing repositories (#12401).
-- `Keeper_repo_mapping.validate_path_access` integration in `keeper_shell_ops` for path-level access enforcement (#12401).
+- Keeper registry entries now carry the `Keeper_event_queue` field, wiring the Event Layer queue into keeper registry construction and snapshots (#12403).
+- RFC-0020 now documents the keeper Event Layer / Policy Layer split, including the one-way Event-to-Policy data path and TLA+ correspondence for the queued heartbeat work (#12409).
+- Agent terminal reason reporting now has per-variant `Oas.Error.Agent` reason codes so dashboard chips and operator broadcast payloads can distinguish terminal agent failure classes (#12402).
 
 ### Changed
 
-- Package version advanced from `0.18.24` to `0.19.0`.
-- Spec baseline and snapshot metadata synced to `0.19.0`.
+- Runtime cascade lookups now use typed `Keeper_cascade_profile.runtime_name` boundaries internally while preserving existing public/OAS string entry points (#12404).
+- Package and release metadata advanced from `0.18.24` to `0.18.25`.
+- Roadmap, product operating plan, opam metadata, and spec baseline version references synced to `0.18.25`.
+
+### Fixed
+
+- Remaining dev-only diagnostics in agent, cascade, provider, repo-manager, sidecar, tool, and verification paths now surface through structured operator-visible logging instead of disappearing silently (#12400).
+- Keeper memory compaction knobs now route through `keeper_runtime.toml` / env precedence so boot-time runtime overrides are visible to memory-bank readers (#12384).
+- Cascade exhaustion user messages now render through the cascade FSM boundary instead of duplicated worker-side string formatting (#12383).
+- Persona and goal prompt blocks now escape XML predefined entities before injection into pseudo-XML prompt tags (#12408).
 
 ## [0.18.24] - 2026-05-01
 

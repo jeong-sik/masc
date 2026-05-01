@@ -185,3 +185,14 @@ let to_string = function
 let was_truncated = function
   | Untouched _ -> false
   | Truncated _ -> true
+
+(* XML 1.0 entity escape.  Order matters: [&] first so that the
+   ampersands introduced by the other replacements are not
+   double-escaped. *)
+let escape_xml s =
+  s
+  |> replace_substring ~needle:"&" ~by:"&amp;"
+  |> replace_substring ~needle:"<" ~by:"&lt;"
+  |> replace_substring ~needle:">" ~by:"&gt;"
+  |> replace_substring ~needle:"\"" ~by:"&quot;"
+  |> replace_substring ~needle:"'" ~by:"&apos;"

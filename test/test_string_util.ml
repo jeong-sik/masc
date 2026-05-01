@@ -246,6 +246,31 @@ let test_equals_ci_basic () =
   check bool "empty equals empty" true (SU.equals_ci "" "");
   check bool "empty vs non-empty" false (SU.equals_ci "" "x")
 
+(* ---- escape_xml ---- *)
+
+let test_escape_xml_all_entities () =
+  check string "all five"
+    "a &amp; b &lt; c &gt; d &quot;e&quot; &apos;f&apos;"
+    (SU.escape_xml "a & b < c > d \"e\" 'f'")
+
+let test_escape_xml_no_op () =
+  check string "clean string" "hello world"
+    (SU.escape_xml "hello world")
+
+let test_escape_xml_empty () =
+  check string "empty" "" (SU.escape_xml "")
+
+let test_escape_xml_ampersand_first () =
+  (* [&] must be replaced first so that [&lt;] does not become
+     [&amp;lt;] — wait, actually [&lt;] input should become [&amp;lt;]
+     because the [&] is escaped.  The important thing is that
+     a plain [<] becomes [&lt;], not double-escaped. *)
+  check string "pre-escaped ampersand"
+    "&amp;lt;" (SU.escape_xml "&lt;")
+
+let test_escape_xml_no_double_escape () =
+  (* A string with only [<] should become [&lt;], not [&amp;lt;]. *)
+  check string "plain less-than" "&lt;" (SU.escape_xml "<")
 
 (* ---- Test runner ---- *)
 
@@ -292,4 +317,12 @@ let () =
         [ test_case "basic" `Quick test_starts_with_ci_basic;
           test_case "boundaries" `Quick test_starts_with_ci_boundaries ] );
       ( "equals_ci",
-        [ test_case "basic" `Quick test_equals_ci_basic ] ) ]
+        [ test_case "basic" `Quick test_equals_ci_basic ] );
+      ( "escape_xml",
+        [ test_case "all entities" `Quick test_escape_xml_all_entities;
+          test_case "no-op clean" `Quick test_escape_xml_no_op;
+          test_case "empty" `Quick test_escape_xml_empty;
+          test_case "ampersand first ordering" `Quick
+            test_escape_xml_ampersand_first;
+          test_case "no double escape" `Quick
+            test_escape_xml_no_double_escape ] ) ]

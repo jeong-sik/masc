@@ -6,6 +6,10 @@ on:
     # Run weekly on Sundays at 3:15 AM UTC (reduced from daily to save CI costs)
     - cron: '15 3 * * 0'
 
+concurrency:
+  group: webrtc-live-interop-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   live-interop:
     name: WebRTC Live Interop

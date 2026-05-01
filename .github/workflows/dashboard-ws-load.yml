@@ -25,7 +25,7 @@ name: PR-0.2.G — Dashboard WS Load (k6)
 #
 # References:
 #   - dashboard/test/load/ws-100vu.js
-#   - .github/workflows/perf-baseline.yml          (mirror schedule pattern)
+#   - .github/workflows/perf-baseline.yml          (manual live-run pattern)
 #   - knowledge/research/2026-04-masc-ide-strategy/IMPLEMENTATION-QUEUE.md Q-P1-7
 #
 # Manual-only: this expects an operator-provided live dashboard endpoint, so

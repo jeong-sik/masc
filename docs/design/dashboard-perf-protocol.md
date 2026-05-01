@@ -89,7 +89,7 @@ Each step is a separate PR. This document is the contract; the workflow is the r
 ## 7. References
 
 - `dashboard/package.json` — `vite build`, `@preact/preset-vite`, `tailwindcss@^4.2.2`
-- `.github/workflows/perf-baseline.yml` — sibling: server-side perf cron
+- `.github/workflows/perf-baseline.yml` — sibling: manual server-side perf script validation
 - `.github/workflows/dashboard-ws-load.yml` — sibling: k6 WS load
 - `knowledge/research/2026-04-masc-ide-strategy/ch4_dashboard.md` §4 lines 230-378 — anti-RUM rationale
 - `knowledge/research/2026-04-masc-ide-strategy/track-c-coordination-perf.md` §3 line 148 — original lighthouse-vitals-pipeline scope

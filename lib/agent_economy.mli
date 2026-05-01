@@ -1,3 +1,22 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+module Random = Stdlib.Random
+
 (** Agent_economy — Currency/reward system for MASC agents
 
     Agents earn credits by completing tasks, writing board posts,
@@ -67,7 +86,7 @@ val earn :
   ?reputation_score:float ->
   ?metadata:Yojson.Safe.t ->
   unit ->
-  (float, string) result
+  (float, string) Result.t
 (** Record an earning. Returns new balance or error.
     Amount is determined by kind + env config + reputation multiplier.
     Pass [~reputation_score] (0.0-1.0) to enable reputation-based
@@ -81,7 +100,7 @@ val spend :
   reason:string ->
   ?metadata:Yojson.Safe.t ->
   unit ->
-  (float, string) result
+  (float, string) Result.t
 (** Record a spend. [amount] should be positive (will be negated internally).
     Returns new balance or error. *)
 

@@ -1,3 +1,22 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+module Random = Stdlib.Random
+
 (** Agent_card — A2A v0.3 agent card generation and caching.
 
     Builds the JSON agent card for Agent-to-Agent protocol discovery.
@@ -12,7 +31,7 @@ type provider = {
 }
 
 val provider_to_yojson : provider -> Yojson.Safe.t
-val provider_of_yojson : Yojson.Safe.t -> (provider, string) result
+val provider_of_yojson : Yojson.Safe.t -> (provider, string) Result.t
 val show_provider : provider -> string
 val equal_provider : provider -> provider -> bool
 
@@ -27,7 +46,7 @@ type skill = {
 }
 
 val skill_to_yojson : skill -> Yojson.Safe.t
-val skill_of_yojson : Yojson.Safe.t -> (skill, string) result
+val skill_of_yojson : Yojson.Safe.t -> (skill, string) Result.t
 val show_skill : skill -> string
 val equal_skill : skill -> skill -> bool
 
@@ -37,7 +56,7 @@ type binding = {
 }
 
 val binding_to_yojson : binding -> Yojson.Safe.t
-val binding_of_yojson : Yojson.Safe.t -> (binding, string) result
+val binding_of_yojson : Yojson.Safe.t -> (binding, string) Result.t
 val show_binding : binding -> string
 val equal_binding : binding -> binding -> bool
 
@@ -50,7 +69,7 @@ type security_scheme = {
 
 val security_scheme_to_yojson : security_scheme -> Yojson.Safe.t
 val security_scheme_of_yojson :
-  Yojson.Safe.t -> (security_scheme, string) result
+  Yojson.Safe.t -> (security_scheme, string) Result.t
 val show_security_scheme : security_scheme -> string
 val equal_security_scheme : security_scheme -> security_scheme -> bool
 
@@ -98,7 +117,7 @@ val capabilities_of_json : Yojson.Safe.t -> agent_capabilities
 val signature_to_json : agent_card_signature -> Yojson.Safe.t
 val signature_of_json : Yojson.Safe.t -> agent_card_signature option
 val to_json : agent_card -> Yojson.Safe.t
-val from_json : Yojson.Safe.t -> (agent_card, string) result
+val from_json : Yojson.Safe.t -> (agent_card, string) Result.t
 
 (** {1 Construction} *)
 

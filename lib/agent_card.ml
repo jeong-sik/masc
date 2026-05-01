@@ -1,3 +1,22 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+module Random = Stdlib.Random
+
 (** Agent Card - A2A Protocol v0.3.0 Compatible Agent Metadata
 
     Implements the A2A Agent Card specification for standardized agent discovery.
@@ -59,7 +78,7 @@ type agent_capabilities = {
 type string_assoc = (string * string) list [@@deriving show, eq]
 let string_assoc_to_yojson (xs : string_assoc) : Yojson.Safe.t =
   `Assoc (List.map (fun (k, v) -> (k, `String v)) xs)
-let string_assoc_of_yojson (json : Yojson.Safe.t) : (string_assoc, string) result =
+let string_assoc_of_yojson (json : Yojson.Safe.t) : (string_assoc, string) Result.t =
   match json with
   | `Assoc pairs ->
     Ok (List.filter_map (fun (k, v) ->
@@ -153,9 +172,9 @@ let to_json (card : agent_card) : Yojson.Safe.t =
     ("securitySchemes", `Assoc (List.map (fun (k, v) -> (k, security_scheme_to_yojson v)) card.security_schemes));
     ("defaultInputModes", `List (List.map (fun s -> `String s) card.default_input_modes));
     ("defaultOutputModes", `List (List.map (fun s -> `String s) card.default_output_modes));
-  ] @ (if card.extensions = [] then [] else [
+  ] @ (match card.extensions with [] -> [] | _ -> [
     ("extensions", `Assoc card.extensions)
-  ]) @ (if card.signatures = [] then [] else [
+  ]) @ (match card.signatures with [] -> [] | _ -> [
     ("signatures", `List (List.map signature_to_json card.signatures))
   ]) @ optional_string "iconUrl" card.icon_url
     @ optional_string "documentationUrl" card.documentation_url
@@ -165,7 +184,7 @@ let to_json (card : agent_card) : Yojson.Safe.t =
   ])
 
 (** Parse agent_card from JSON (accepts both v0.3 and legacy formats) *)
-let from_json (json : Yojson.Safe.t) : (agent_card, string) result =
+let from_json (json : Yojson.Safe.t) : (agent_card, string) Result.t =
   let open Yojson.Safe.Util in
   try
     let name = json |> member "name" |> to_string in
@@ -284,7 +303,7 @@ let from_json (json : Yojson.Safe.t) : (agent_card, string) result =
       updated_at;
     }
   with
-  | e -> Error (Printf.sprintf "Failed to parse agent card: %s" (Printexc.to_string e))
+  | e -> Error (Printf.sprintf "Failed to parse agent card: %s" (Stdlib.Printexc.to_string e))
 
 (** Get current ISO8601 timestamp *)
 let now_iso8601 () : string =
@@ -436,7 +455,7 @@ let with_bindings = with_interfaces
 let with_extension (card : agent_card) (key : string) (value : Yojson.Safe.t) : agent_card =
   let timestamp = now_iso8601 () in
   let extensions =
-    List.filter (fun (k, _) -> k <> key) card.extensions
+    List.filter (fun (k, _) -> not (String.equal k key)) card.extensions
     @ [(key, value)]
   in
   { card with extensions; updated_at = timestamp }
@@ -472,4 +491,4 @@ let get_cached
 
 (** Invalidate the cached agent card. Call when tools are added/removed. *)
 let invalidate_cache () =
-  incr _cache_generation
+  Stdlib.incr _cache_generation

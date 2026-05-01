@@ -356,6 +356,19 @@ let too_many_requests_body () =
 let too_many_agent_requests_body () =
   {|{"error":"Too Many Requests","message":"Per-agent rate limit exceeded"}|}
 
+(** Headers to include in a 429 Too Many Requests response.
+    Includes [Retry-After] (seconds until the bucket refills by one token)
+    in addition to the standard rate-limit informational headers. *)
+let too_many_requests_headers limiter ~key =
+  let base = headers limiter ~key in
+  (* Estimate refill time: one token arrives after 1/rate seconds. *)
+  let retry_after_s = if limiter.rate > 0.0 then
+    max 1 (int_of_float (Float.ceil (1.0 /. limiter.rate)))
+  else
+    1
+  in
+  ("Retry-After", string_of_int retry_after_s) :: base
+
 let headers_global ~key =
   headers (Eio.Lazy.force global) ~key
 

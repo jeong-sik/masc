@@ -158,6 +158,10 @@ val headers : t -> key:string -> (string * string) list
 val too_many_requests_body : unit -> string
 val too_many_agent_requests_body : unit -> string
 (** JSON body for per-agent 429 responses. *)
+
+(** Headers for a 429 response: [X-RateLimit-*] plus [Retry-After] (seconds). *)
+val too_many_requests_headers : t -> key:string -> (string * string) list
+
 val headers_global : key:string -> (string * string) list
 
 (** {1 Client Address Key Extraction} *)

@@ -22,175 +22,162 @@ module Random = Stdlib.Random
     Provides a singleton registry for tracking agent identities across
     MCP tool calls. Integrates with Agent_identity module.
 
+    Actor model: all mutable state is encapsulated in a single Mutex-protected
+    record.  The three previously independent global stores (identity registry,
+    session→key map, resolved-name cache) are now one coherent unit, eliminating
+    the TOCTOU window that existed between the old separate Atomic.t updates.
+
     Usage:
     - Call [init ()] once during server startup (within Eio context)
     - Use [get_or_create_identity] in tool handlers
     - Identity persists across tool calls via MCP session ID
+    - Optionally call [start_cleanup_loop ~sw ~clock] to enable background eviction
 
     @since 0.5.0
 *)
 
-(** {1 Global Registry} *)
-
-(** Global registry instance - must be initialized within Eio context.
-    All reads and writes go through [registry_lock] to prevent races. *)
-let global_registry : Agent_identity.Registry.registry option ref = ref None
-
-(** Initialize the global registry.
-    Idempotent: non-yielding ref check. *)
-let init () =
-  match !global_registry with
-  | Some _ -> ()
-  | None -> global_registry := Some (Agent_identity.Registry.create ())
-
-(** Raised when the agent registry cannot be initialized.
-    Contains the step name and detail of the failure. *)
-exception Registry_init_failed of string
-
-(** Get the global registry. Initializes if needed (must be in Eio context).
-    Returns [Error msg] if initialization fails instead of raising. *)
-let get_registry () : (Agent_identity.Registry.registry, string) Result.t =
-  match !global_registry with
-  | Some reg -> Ok reg
-  | None ->
-      global_registry := Some (Agent_identity.Registry.create ());
-      (match !global_registry with
-      | Some reg -> Ok reg
-      | None ->
-          Error "agent registry initialization failed: \
-                 global_registry is None after creation")
-
-(** Get the registry, raising [Registry_init_failed] on failure.
-    Used by internal callers that cannot change their return type. *)
-let get_registry_exn () =
-  match get_registry () with
-  | Ok reg -> reg
-  | Error msg -> raise (Registry_init_failed msg)
-
 module SMap = Map.Make(String)
 
-let atomic_update atomic f = Lockfree_atomic.update atomic f
+(** {1 Actor State} *)
 
-(** MCP session to identity mapping for fast lookup *)
-let session_identity_map : string SMap.t Atomic.t = Atomic.make SMap.empty
+(** Consolidated actor state – replaces three separate mutable globals.
+    Held behind a single Mutex so that read-modify-write sequences are
+    atomic (e.g. cache-miss create + map insert in [get_or_create_identity]). *)
+type state = {
+  registry : Agent_identity.Registry.registry;
+  session_map : string SMap.t;   (** mcp_session_id → session_key *)
+  resolved_map : string SMap.t;  (** mcp_session_id → resolved agent_name *)
+}
 
-(** Caches the final resolved agent_name per MCP session *)
-let resolved_names : string SMap.t Atomic.t = Atomic.make SMap.empty
+let make_state () = {
+  registry = Agent_identity.Registry.create ();
+  session_map = SMap.empty;
+  resolved_map = SMap.empty;
+}
+
+(** Single process-wide actor state.  Protected by [state_mu]. *)
+let state : state ref = ref (make_state ())
+let state_mu : Eio.Mutex.t = Eio.Mutex.create ()
+
+let with_state_rw f =
+  Eio.Mutex.use_rw ~protect:true state_mu (fun () -> f state)
+
+let with_state_ro f =
+  Eio.Mutex.use_ro state_mu (fun () -> f !state)
 
 (** Maximum session cache entries before forced eviction.
     Prevents unbounded growth when many MCP sessions connect over time. *)
 let max_session_cache_entries = 1024
 
-let clear_session_caches () =
-  Atomic.set session_identity_map SMap.empty;
-  Atomic.set resolved_names SMap.empty
+(** {1 Initialization} *)
 
-(** Evict all session cache entries if either cache exceeds [max_session_cache_entries].
-    A simple full-clear is safe because the caches are write-through
-    (identity is reconstructed from params on the next call).
-    Caller must hold [session_cache_mu]. *)
-let maybe_evict_session_caches_locked () =
-  let id_map = Atomic.get session_identity_map in
-  let res_map = Atomic.get resolved_names in
-  if SMap.cardinal id_map > max_session_cache_entries
-     || SMap.cardinal res_map > max_session_cache_entries
+(** Initialize (or re-initialize) the actor state.
+    Idempotent when called more than once – the existing state is kept. *)
+let init () = ()  (* state is created eagerly at module load time *)
+
+(** Reset registry for testing.
+    Replaces all state with a fresh empty record. *)
+let reset_for_testing () =
+  Eio.Mutex.use_rw ~protect:true state_mu (fun () ->
+    state := make_state ()
+  )
+
+let clear_session_caches () =
+  with_state_rw (fun s ->
+    s := { !s with session_map = SMap.empty; resolved_map = SMap.empty }
+  )
+
+(** Evict session caches when either map exceeds [max_session_cache_entries].
+    Caller must hold [state_mu]. *)
+let maybe_evict_caches_locked s =
+  if SMap.cardinal s.session_map > max_session_cache_entries
+     || SMap.cardinal s.resolved_map > max_session_cache_entries
   then begin
     Log.Identity.info
-      "[AgentRegistry] session cache eviction: identity=%d resolved=%d (max=%d)"
-      (SMap.cardinal id_map)
-      (SMap.cardinal res_map)
+      "[AgentRegistry] session cache eviction: session_map=%d resolved_map=%d (max=%d)"
+      (SMap.cardinal s.session_map)
+      (SMap.cardinal s.resolved_map)
       max_session_cache_entries;
-    Atomic.set session_identity_map SMap.empty;
-    Atomic.set resolved_names SMap.empty
-  end
+    { s with session_map = SMap.empty; resolved_map = SMap.empty }
+  end else s
 
-(** Reset registry for testing *)
-let reset_for_testing () =
-  Atomic.set session_identity_map SMap.empty;
-  Atomic.set resolved_names SMap.empty;
-  global_registry := Some (Agent_identity.Registry.create ())
+(** {1 Internal helpers — must be called under [state_mu]} *)
+
+let get_registry_locked s = s.registry
 
 (** {1 Identity Resolution} *)
 
 (** Get or create identity for an MCP request.
 
     Resolution order:
-    1. Check session_identity_map for existing session -> identity mapping
+    1. Check session_map for existing mcp_session_id → session_key mapping
     2. Extract identity from MCP params (_agent_name, _channel, etc.)
-    3. Create new identity if not found
+    3. Register new identity
+
+    The entire check-then-create sequence runs under [state_mu] so concurrent
+    callers with the same [mcp_session_id] are serialised — no more transient
+    orphan identities from the old lock-free path.
 
     @param mcp_session_id Optional MCP HTTP session ID
     @param params Tool call params (may contain _agent_name, etc.)
     @return Agent identity for this request
 *)
 let get_or_create_identity ?mcp_session_id params =
-  let reg = get_registry_exn () in
-
-  let touch_and_return identity =
-    let room_id = Yojson.Safe.Util.(
-      try Some (params |> member "room" |> to_string)
-      with Yojson.Safe.Util.Type_error _ -> None
-    ) in
-    Agent_identity.Registry.touch reg identity.Agent_identity.session_key
-      ?room_id ();
-    match Agent_identity.Registry.find_by_session reg identity.session_key with
-    | Some updated -> updated
-    | None -> identity
+  let room_id =
+    match Yojson.Safe.Util.(params |> member "room") with
+    | `String r -> Some r
+    | _ -> None
+    | exception Yojson.Safe.Util.Type_error _ -> None
   in
+  with_state_rw (fun s ->
+    let reg = get_registry_locked !s in
+    let find_from_cache sid =
+      match SMap.find_opt sid (!s).session_map with
+      | Some session_key -> Agent_identity.Registry.find_by_session reg session_key
+      | None -> None
+    in
+    let existing =
+      match mcp_session_id with
+      | None -> None
+      | Some sid -> find_from_cache sid
+    in
+    match existing with
+    | Some identity ->
+        Agent_identity.Registry.touch reg identity.Agent_identity.session_key
+          ?room_id ();
+        (match Agent_identity.Registry.find_by_session reg identity.session_key with
+         | Some updated -> updated
+         | None -> identity)
+    | None ->
+        let identity = Agent_identity.from_mcp_params params in
+        let registered = Agent_identity.Registry.register reg identity in
+        let s' =
+          match mcp_session_id with
+          | Some sid ->
+              { !s with session_map = SMap.add sid registered.Agent_identity.session_key (!s).session_map }
+          | None -> !s
+        in
+        let s'' = maybe_evict_caches_locked s' in
+        s := s'';
+        Log.Session.info "[AgentRegistry] New identity: %s (session=%s, mcp=%s)"
+          registered.agent_name
+          (String.sub registered.session_key 0
+             (min 8 (String.length registered.session_key)))
+          (Option.value mcp_session_id ~default:"none");
+        registered
+  )
 
-  (* Fast path: unlocked lookup is safe because values in
-     [session_identity_map] are immutable [session_key] strings and
-     [Hashtbl.find_opt] is atomic on a single Eio domain.  Registry
-     touches have their own internal lock. *)
-  let get_from_cache sid =
-    match SMap.find_opt sid (Atomic.get session_identity_map) with
-    | Some session_key -> Agent_identity.Registry.find_by_session reg session_key
-    | None -> None
-  in
-
-  let existing =
-    match mcp_session_id with
-    | None -> None
-    | Some sid -> get_from_cache sid
-  in
-
-  match existing with
-  | Some identity -> touch_and_return identity
-  | None ->
-      (* Lock-free identity creation path. Concurrent creation might result in
-         a transient orphaned identity in the registry which the zombie sweep
-         will eventually collect. This trade-off removes the multi-step Mutex
-         bottleneck on the hot path. *)
-      let identity = Agent_identity.from_mcp_params params in
-      let registered = Agent_identity.Registry.register reg identity in
-      (match mcp_session_id with
-       | Some sid ->
-           (* Use compare-and-swap loop to update the map *)
-           atomic_update session_identity_map (fun map -> SMap.add sid registered.session_key map)
-       | None -> ());
-      Log.Session.info "[AgentRegistry] New identity: %s (session=%s, mcp=%s)"
-        registered.agent_name
-        (String.sub registered.session_key 0
-           (min 8 (String.length registered.session_key)))
-        (Option.value mcp_session_id ~default:"none");
-      maybe_evict_session_caches_locked ();
-      registered
-
-(** Get identity by agent name (for backward compatibility) *)
+(** Get identity by agent name. Returns [None] if not found. *)
 let get_by_name agent_name =
-  match get_registry () with
-  | Ok reg -> Agent_identity.Registry.find_by_name reg agent_name
-  | Error e ->
-      Log.Identity.warn "get_by_name(%s): registry unavailable: %s" agent_name e;
-      None
+  with_state_ro (fun s ->
+    Agent_identity.Registry.find_by_name s.registry agent_name
+  )
 
-(** Get identity by session key *)
+(** Get identity by session key. Returns [None] if not found. *)
 let get_by_session session_key =
-  match get_registry () with
-  | Ok reg -> Agent_identity.Registry.find_by_session reg session_key
-  | Error e ->
-      Log.Identity.warn "get_by_session: registry unavailable: %s" e;
-      None
+  with_state_ro (fun s ->
+    Agent_identity.Registry.find_by_session s.registry session_key
+  )
 
 (** {1 Resolved Agent Name Cache}
 
@@ -198,84 +185,95 @@ let get_by_session session_key =
     ~180 lines of identity resolution on 2nd+ calls. *)
 
 let get_resolved_name sid =
-  SMap.find_opt sid (Atomic.get resolved_names)
+  with_state_ro (fun s -> SMap.find_opt sid s.resolved_map)
 
 let set_resolved_name sid name =
-  atomic_update resolved_names (fun map -> SMap.add sid name map)
+  with_state_rw (fun s ->
+    s := { !s with resolved_map = SMap.add sid name (!s).resolved_map }
+  )
 
 (** {1 Statistics} *)
 
 (** Get count of active agents *)
 let active_count ?(within_seconds = Env_config.Zombie.threshold_seconds) () =
-  match get_registry () with
-  | Ok reg -> List.length (Agent_identity.Registry.list_active reg ~within_seconds)
-  | Error e ->
-      Log.Identity.debug "active_count: registry unavailable: %s" e;
-      0
+  with_state_ro (fun s ->
+    List.length (Agent_identity.Registry.list_active s.registry ~within_seconds)
+  )
 
 (** Get total registered count *)
 let total_count () =
-  match get_registry () with
-  | Ok reg -> Agent_identity.Registry.count reg
-  | Error e ->
-      Log.Identity.debug "total_count: registry unavailable: %s" e;
-      0
+  with_state_ro (fun s -> Agent_identity.Registry.count s.registry)
 
 (** List all active identities *)
 let list_active ?(within_seconds = Env_config.Zombie.threshold_seconds) () =
-  match get_registry () with
-  | Ok reg -> Agent_identity.Registry.list_active reg ~within_seconds
-  | Error e ->
-      Log.Identity.debug "list_active: registry unavailable: %s" e;
-      []
+  with_state_ro (fun s ->
+    Agent_identity.Registry.list_active s.registry ~within_seconds
+  )
 
 (** {1 Cleanup} *)
 
 (** Clean up stale session mappings and resolved-name cache entries.
 
-    Two-phase under [session_cache_mu]: snapshot the [(sid, session_key)]
-    pairs inside the lock, look them up against the registry while still
-    holding the lock (Registry has its own lock but does not depend on
-    ours), then remove stale entries.  Holding the mutex across the
-    scan prevents a concurrent [get_or_create_identity] from installing
-    a fresh entry that this scan would then incorrectly remove. *)
+    Runs under [state_mu] so that a concurrent [get_or_create_identity]
+    cannot install a fresh entry between the stale-detection scan and the
+    removal step. *)
 let cleanup_stale_sessions () =
-  match get_registry () with
-  | Error e ->
-      Log.Identity.warn "cleanup_stale_sessions: registry unavailable: %s" e;
-      0
-  | Ok reg ->
-      let current_map = Atomic.get session_identity_map in
-      let to_remove = SMap.fold (fun sid session_key acc ->
+  with_state_rw (fun s ->
+    let reg = get_registry_locked !s in
+    let to_remove =
+      SMap.fold (fun sid session_key acc ->
         match Agent_identity.Registry.find_by_session reg session_key with
         | None -> sid :: acc
         | Some _ -> acc
-      ) current_map [] in
-      
-      atomic_update session_identity_map (fun map ->
-        List.fold_left (fun m sid -> SMap.remove sid m) map to_remove
-      );
-      atomic_update resolved_names (fun map ->
-        List.fold_left (fun m sid -> SMap.remove sid m) map to_remove
-      );
-      List.length to_remove
+      ) (!s).session_map []
+    in
+    let remove_from map sids =
+      List.fold_left (fun m sid -> SMap.remove sid m) map sids
+    in
+    s := { !s with
+      session_map = remove_from (!s).session_map to_remove;
+      resolved_map = remove_from (!s).resolved_map to_remove;
+    };
+    List.length to_remove
+  )
 
-(** Unregister an identity *)
+(** Unregister an identity and remove all associated cache entries. *)
 let unregister session_key =
-  match get_registry () with
-  | Error e ->
-      Log.Identity.warn "unregister(%s): registry unavailable: %s"
-        (String.sub session_key 0 (min 8 (String.length session_key))) e
-  | Ok reg ->
+  with_state_rw (fun s ->
+    let reg = get_registry_locked !s in
     Agent_identity.Registry.unregister reg session_key;
-    let current_map = Atomic.get session_identity_map in
-    let to_remove = SMap.fold (fun sid sk acc ->
-      if String.equal sk session_key then sid :: acc else acc
-    ) current_map [] in
-    
-    atomic_update session_identity_map (fun map ->
-      List.fold_left (fun m sid -> SMap.remove sid m) map to_remove
-    );
-    atomic_update resolved_names (fun map ->
-      List.fold_left (fun m sid -> SMap.remove sid m) map to_remove
-    )
+    let to_remove =
+      SMap.fold (fun sid sk acc ->
+        if String.equal sk session_key then sid :: acc else acc
+      ) (!s).session_map []
+    in
+    let remove_from map sids =
+      List.fold_left (fun m sid -> SMap.remove sid m) map sids
+    in
+    s := { !s with
+      session_map = remove_from (!s).session_map to_remove;
+      resolved_map = remove_from (!s).resolved_map to_remove;
+    }
+  )
+
+(** {1 Background Maintenance} *)
+
+(** Start a periodic cleanup fiber that removes stale sessions and evicts
+    caches when they grow too large.  Call once at server startup. *)
+let start_cleanup_loop ~sw ~clock ?(interval = 300.0) () =
+  Eio.Fiber.fork ~sw (fun () ->
+    let rec loop () =
+      Eio.Time.sleep clock interval;
+      (try
+         let removed = cleanup_stale_sessions () in
+         if removed > 0 then
+           Log.Identity.info "[AgentRegistry] cleanup: removed %d stale sessions" removed
+       with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | exn ->
+           Log.Identity.warn "[AgentRegistry] cleanup error: %s"
+             (Stdlib.Printexc.to_string exn));
+      loop ()
+    in
+    loop ()
+  )

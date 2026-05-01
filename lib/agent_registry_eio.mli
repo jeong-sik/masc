@@ -19,6 +19,10 @@ module Random = Stdlib.Random
 
 (** Agent Registry Eio - Global agent identity tracking
 
+    Actor model: all mutable state (identity registry, session→key map,
+    resolved-name cache) is held in a single Mutex-protected record, removing
+    the TOCTOU race in the previous three-Atomic-store design.
+
     @since 0.5.0
 *)
 
@@ -49,3 +53,14 @@ val list_active : ?within_seconds:float -> unit -> Agent_identity.t list
 val clear_session_caches : unit -> unit
 val cleanup_stale_sessions : unit -> int
 val unregister : string -> unit
+
+(** {1 Background Maintenance} *)
+
+(** Start a periodic cleanup fiber.  Call once at server startup within an
+    active Eio switch.  [interval] defaults to 300 seconds. *)
+val start_cleanup_loop :
+  sw:Eio.Switch.t ->
+  clock:_ Eio.Time.clock ->
+  ?interval:float ->
+  unit -> unit
+

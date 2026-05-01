@@ -35,30 +35,42 @@ let resolve_join_state ~room_initialized ~join_required ~agent_name
   if not (room_initialized && join_required) then false
   else if agent_name = "unknown" then false
   else
+    (* [try_candidate] probes an alias only when it differs from the
+       caller's own name, to avoid a redundant second lookup for the
+       common case where the caller IS already using the canonical name. *)
     let try_candidate name = name <> agent_name && check_join name in
-    try
-      if check_join agent_name then true
-      else
-        match
+    (* Primary check: the name as supplied by the caller. *)
+    if check_join agent_name then true
+    else
+      (* Secondary check: resolve through Keeper_identity to find aliases.
+         [normalize_all_names] may do filesystem I/O; we express the
+         result as [Result.t] and fold both paths to a plain [bool]. *)
+      let join_via_aliases () =
+        let ( let* ) = Result.bind in
+        let* bundle =
           Keeper_identity.normalize_all_names
             ~input_agent_name:agent_name
             ~base_path
             ~check_persona:false
             ~check_credential:false
             ()
-        with
-        | Ok bundle ->
-            (* Try the persona-level [keeper_name] first (e.g.
-               [nick0cave]), then the canonical agent-form alias
-               that [ensure_keeper_room_presence] writes to disk
-               (e.g. [keeper-nick0cave-agent]). [check_join]'s own
-               prefix-matching in [Coord.is_agent_joined] handles
-               the file-on-disk lookup. *)
-            try_candidate bundle.keeper_name
-            || try_candidate
-                 (Printf.sprintf "keeper-%s-agent" bundle.keeper_name)
-        | Error _ -> false
-    with Sys_error _ | Yojson.Json_error _ -> false
+        in
+        (* Try the persona-level [keeper_name] first (e.g. [nick0cave]),
+           then the canonical agent-form alias that
+           [ensure_keeper_room_presence] writes to disk
+           (e.g. [keeper-nick0cave-agent]). *)
+        Ok (
+          try_candidate bundle.keeper_name
+          || try_candidate
+               (Printf.sprintf "keeper-%s-agent" bundle.keeper_name)
+        )
+      in
+      (match (try join_via_aliases ()
+              with Sys_error _ | Yojson.Json_error _ -> Ok false)
+       with
+       | Ok joined -> joined
+       | Error _ -> false)
+
 
 let is_ephemeral_agent_name name =
   Base.String.is_prefix name ~prefix:"agent-"

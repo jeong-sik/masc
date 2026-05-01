@@ -320,6 +320,23 @@ let run_keepalive_unified_turn
   then meta_after_triage
   else (
     try
+      (* RFC-0020 §3 telemetry — log Event Layer queue depth at turn
+         entry. The queue itself is not consumed here (per-turn
+         [Keeper_event_queue.dequeue] lands once [Keeper_registry.dequeue_event]
+         is on main, see PR-B2). Reading the depth alone is enough to
+         confirm the layer split is observable in production: a non-zero
+         depth here pairs with the [TickQueueOverride] action in
+         [KeeperEventQueue.tla]. *)
+      let event_queue_depth =
+        Keeper_event_queue.length
+          (Keeper_registry.event_queue_snapshot
+             ~base_path:ctx.config.base_path
+             meta_after_triage.name)
+      in
+      if event_queue_depth > 0 then
+        Log.Keeper.debug
+          "turn entry: event_queue depth=%d (keeper=%s)"
+          event_queue_depth meta_after_triage.name;
       let obs =
         let allowed_tool_names =
           Keeper_tool_policy.keeper_allowed_tool_names meta_after_triage

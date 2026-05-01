@@ -147,7 +147,7 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
       let effective_cascade_name =
         match
           Keeper_world_observation.provider_cooldown_remaining_sec_for_cascade
-            ~cascade_name:effective_cascade_name
+            ~cascade_name:(KCP.runtime_name_of_string effective_cascade_name)
         with
         | Some remaining_sec ->
             Prometheus.set_gauge

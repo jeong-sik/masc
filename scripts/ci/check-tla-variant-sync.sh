@@ -82,7 +82,7 @@ echo "=== Scan: unexplained wildcard _ in match expressions ==="
 # If _ is intentional, add an inline comment: `| _ -> ... (* justification: ... *)`
 unexplained_wildcards=$(
   rg '^\s*\|\s+_\s*->' lib/keeper/ --type ml -n 2>/dev/null \
-    | grep -v '(\*' || true
+    | grep -v '->.*(\*' || true
 )
 if [ -n "$unexplained_wildcards" ]; then
   echo "WARN: unexplained wildcard match arms in keeper lib (add justification comment):"

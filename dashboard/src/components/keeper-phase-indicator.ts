@@ -68,7 +68,7 @@ function getPhaseStyle(phase: KeeperPhase | string | null | undefined): PhaseSty
   return PHASE_STYLES[phase as KeeperPhase] ?? PHASE_STYLES.Offline
 }
 
-/** Phase badge — color-coded pill showing 13-state lifecycle phase. */
+/** Phase badge — color-coded pill showing the keeper lifecycle phase. */
 export function KeeperPhaseBadge({ phase, compact }: { phase?: KeeperPhase | string | null; compact?: boolean }) {
   const style = getPhaseStyle(phase)
   const isBuffer = BUFFER_PHASES.has(phase ?? '')

@@ -20,7 +20,8 @@ set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
 if ! command -v rg >/dev/null 2>&1; then
-  echo "ERROR: check-variants.sh requires ripgrep (rg). Install with: apt-get install ripgrep" >&2
+  echo "ERROR: check-variants.sh requires ripgrep (rg)." >&2
+  echo "  Install: apt-get install ripgrep  |  brew install ripgrep  |  cargo install ripgrep" >&2
   exit 2
 fi
 

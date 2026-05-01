@@ -23,12 +23,16 @@ let mapping_of_toml toml keeper_id =
   let* repository_ids =
     Otoml.Helpers.find_strings_result toml (path "repositories")
   in
-  let github_credential_id =
-    match Otoml.find_result toml Otoml.get_string (path "credential_id") with
-    | Ok id ->
+  let* github_credential_id =
+    match Otoml.find_result toml Fun.id (path "credential_id") with
+    | Error _ -> Ok None
+    | Ok (Otoml.TomlString id) ->
         let id = String.trim id in
-        if id = "" then None else Some id
-    | Error _ -> None
+        Ok (if id = "" then None else Some id)
+    | Ok _ ->
+        Error
+          (Printf.sprintf
+             "mapping.%s.credential_id must be a string when present" keeper_id)
   in
   Ok { keeper_id; repository_ids; github_credential_id }
 

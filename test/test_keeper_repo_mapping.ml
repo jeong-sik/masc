@@ -300,6 +300,23 @@ let test_load_all_trims_credential_id () =
             loaded.github_credential_id
       | Ok rows -> Alcotest.failf "expected one mapping, got %d" (List.length rows))
 
+let test_load_all_rejects_non_string_credential_id () =
+  with_temp_base_path (fun base_path ->
+      let path = Filename.concat base_path ".masc/config/keeper_repo_mappings.toml" in
+      let oc = open_out path in
+      Fun.protect
+        ~finally:(fun () -> close_out_noerr oc)
+        (fun () ->
+          output_string oc
+            "[mapping.keeper-1]\nrepositories = [\"*\"]\ncredential_id = 42\n");
+      match Keeper_repo_mapping.load_all ~base_path with
+      | Ok _ -> Alcotest.fail "expected non-string credential_id to fail"
+      | Error msg ->
+          Alcotest.(check bool)
+            "mentions credential_id"
+            true
+            (contains_substring msg "credential_id"))
+
 let sample_credential id cred_type =
   {
     id;
@@ -463,6 +480,8 @@ let () =
           Alcotest.test_case "creates config dir" `Quick test_save_mapping_creates_config_dir;
           Alcotest.test_case "preserves credential id" `Quick test_save_mapping_preserves_credential_id;
           Alcotest.test_case "loads trimmed credential id" `Quick test_load_all_trims_credential_id;
+          Alcotest.test_case "rejects non-string credential id" `Quick
+            test_load_all_rejects_non_string_credential_id;
         ] );
       ( "credentials_for_keeper",
         [

@@ -300,6 +300,19 @@ jobs:
                 // for this startup race.
                 const ciGateStartupRaceAction =
                   action === "auto_merge_enabled" || action === "synchronize";
+                const ciWorkflowActiveCheckNames = new Set([
+                  "PR Sync Check",
+                  "Detect Changed Surfaces",
+                  "Keeper Cwd Leak Gate",
+                  "Meta Guards",
+                  "Health",
+                  "Build and Test",
+                  "Lint",
+                  "Dashboard",
+                  "OCaml Structure Ratchet",
+                  "TLA+ Model Checking",
+                  "CI Gate"
+                ]);
                 let activeHeadChecks = [];
                 if (
                   ciGateStartupRaceAction &&
@@ -314,7 +327,7 @@ jobs:
                   });
                   activeHeadChecks = (refChecks.data.check_runs || [])
                     .filter((run) => run.status !== "completed")
-                    .filter((run) => run.name !== "Draft Auto-Merge Guard")
+                    .filter((run) => ciWorkflowActiveCheckNames.has(run.name))
                     .map((run) => `${run.name}:${run.status}`);
                 }
                 const staleFailedCiGateDuringActiveRun =

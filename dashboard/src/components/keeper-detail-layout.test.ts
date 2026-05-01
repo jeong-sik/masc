@@ -23,7 +23,7 @@ describe('KeeperDetailSectionCard', () => {
 
   it('has decorative dot', () => {
     const container = makeContainer()
-    render(html`<${KeeperDetailSectionCard} title="T" />`, container)
+    render(html`<${KeeperDetailSectionCard} title="T"> <//>`, container)
     const dot = container.querySelector('[aria-hidden="true"]')
     expect(dot).not.toBeNull()
     render(null, container)

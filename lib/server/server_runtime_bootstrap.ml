@@ -881,10 +881,14 @@ let is_bearer_token_env_var_binding trimmed =
 let is_authorization_header_binding trimmed =
   let key = "authorization" in
   let key_len = String.length key in
-  let lower = String.lowercase_ascii trimmed in
-  if String.length lower < key_len then
+  if String.length trimmed < key_len then
     false
-  else if not (String.equal (String.sub lower 0 key_len) key) then
+  else if
+    not
+      (String.equal
+         (String.lowercase_ascii (String.sub trimmed 0 key_len))
+         key)
+  then
     false
   else
     match String.get trimmed key_len with

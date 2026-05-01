@@ -1,25 +1,5 @@
 #!/usr/bin/env bash
 # init-codex-mcp-config.sh — write the canonical [mcp_servers.masc] TOML stanza.
-#
-# Usage:
-#   scripts/init-codex-mcp-config.sh [--base-path PATH] [--host HOST] [--port PORT] [--dry-run]
-#
-# This script generates the correct [mcp_servers.masc] Codex config entry that
-# the MASC auth doctor (doctor auth) expects:
-#   - bearer_token_env_var = "MASC_MCP_TOKEN"   (no hardcoded Authorization header)
-#   - http_headers with Accept and X-MASC-Agent  (no Authorization header)
-#
-# After writing the stanza, mint a codex-mcp-client bearer token (if missing):
-#   BASE_PATH="${MASC_BASE_PATH:-$HOME}"
-#   eval "$(./_build/default/bin/main_eio.exe login \
-#     --base-path "$BASE_PATH" --agent codex-mcp-client --role worker --shell)"
-#   export MASC_MCP_TOKEN  # export to Codex's shell environment
-#
-# Security notes:
-#   - Never write the raw bearer token into ~/.codex/config.toml.
-#   - Use bearer_token_env_var so Codex reads the token from the environment
-#     at runtime; this avoids persisting the literal token in the config file.
-#   - Run `masc-mcp doctor auth` to verify the config is correct.
 
 set -euo pipefail
 
@@ -30,7 +10,33 @@ DRY_RUN=0
 CODEX_CONFIG_PATH="${MASC_CODEX_CONFIG_PATH:-${HOME}/.codex/config.toml}"
 
 usage() {
-  sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'
+  cat >&2 <<'EOF'
+init-codex-mcp-config.sh — write the canonical [mcp_servers.masc] TOML stanza.
+
+Usage:
+  scripts/init-codex-mcp-config.sh [--base-path PATH] [--host HOST] [--port PORT] [--dry-run]
+
+This script generates the correct [mcp_servers.masc] Codex config entry that
+the MASC auth doctor (doctor auth) expects:
+  - bearer_token_env_var = "MASC_MCP_TOKEN"   (no hardcoded Authorization header)
+  - http_headers with Accept and X-MASC-Agent  (no Authorization header)
+
+After writing the stanza, mint a codex-mcp-client bearer token (if missing):
+  BASE_PATH="${MASC_BASE_PATH:-$HOME}"
+  eval "$(masc-mcp login \
+    --base-path "$BASE_PATH" --agent codex-mcp-client --role worker --shell)"
+  export MASC_MCP_TOKEN  # export to Codex's shell environment
+
+Security notes:
+  - Never write the raw bearer token into ~/.codex/config.toml.
+  - Use bearer_token_env_var so Codex reads the token from the environment
+    at runtime; this avoids persisting the literal token in the config file.
+  - Run `masc-mcp doctor auth` to verify the config is correct.
+
+Env:
+  MASC_BASE_PATH         Base path for the MASC data root (default: $HOME)
+  MASC_CODEX_CONFIG_PATH Override the Codex config path (default: ~/.codex/config.toml)
+EOF
   exit 0
 }
 
@@ -83,7 +89,7 @@ if [ ! -f "$CODEX_CONFIG_PATH" ]; then
   # Config file does not exist; write it.
   printf '%s\n' "$MASC_STANZA" > "$CODEX_CONFIG_PATH"
   echo "==> Created ${CODEX_CONFIG_PATH} with [mcp_servers.masc] stanza." >&2
-elif grep -qF '[mcp_servers.masc]' "$CODEX_CONFIG_PATH" 2>/dev/null; then
+elif grep -qE '^\[mcp_servers\.masc\]' "$CODEX_CONFIG_PATH" 2>/dev/null; then
   # Stanza already present.
   echo "==> [mcp_servers.masc] already present in ${CODEX_CONFIG_PATH}." >&2
   echo "    Run: MASC_SYNC_CODEX_MCP_CONFIG=1 masc-mcp --base-path '${BASE_PATH}'" >&2

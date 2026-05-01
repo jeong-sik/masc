@@ -29,7 +29,7 @@ const syncing = signal(false)
 
 // ── API ──────────────────────────────────────────────────
 
-function normalizeBranch(raw: unknown): BranchInfo | null {
+export function normalizeBranch(raw: unknown): BranchInfo | null {
   if (!raw || typeof raw !== 'object') return null
   const b = raw as Record<string, unknown>
   const name = typeof b.name === 'string' ? b.name : ''
@@ -42,7 +42,7 @@ function normalizeBranch(raw: unknown): BranchInfo | null {
   }
 }
 
-function unwrapRepository(raw: unknown): Record<string, unknown> {
+export function unwrapRepository(raw: unknown): Record<string, unknown> {
   if (!raw || typeof raw !== 'object') throw new Error('Invalid repository response')
   const record = raw as Record<string, unknown>
   if (record.ok === true && record.data && typeof record.data === 'object') {
@@ -51,7 +51,7 @@ function unwrapRepository(raw: unknown): Record<string, unknown> {
   return record
 }
 
-function branchRows(raw: unknown): unknown[] {
+export function branchRows(raw: unknown): unknown[] {
   if (Array.isArray(raw)) return raw
   if (raw && typeof raw === 'object') {
     const record = raw as Record<string, unknown>
@@ -89,7 +89,7 @@ export async function loadRepoBranches(id: string): Promise<void> {
   })
 }
 
-function normalizeRepoStatus(raw: string | undefined): RepoStatus {
+export function normalizeRepoStatus(raw: string | undefined): RepoStatus {
   switch (raw?.toLowerCase()) {
     case 'active': return 'active'
     case 'paused': return 'paused'
@@ -121,7 +121,7 @@ function StatusBadge({ status }: { status: RepoStatus }) {
   `
 }
 
-function formatDate(value: string | number | null): string {
+export function formatDate(value: string | number | null): string {
   if (value === null || value === '') return '--'
   try {
     const d = typeof value === 'number' ? new Date(value * 1000) : new Date(value)

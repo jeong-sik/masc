@@ -14,7 +14,6 @@ lib/gate/channel_gate_imessage_state.ml:29
 lib/gate/channel_gate_imessage_state.ml:30
 lib/gate/channel_gate_imessage_state.ml:31
 lib/handover_eio.ml:139
-lib/hebbian_eio.ml:79
 lib/institution_eio.ml:629
 lib/keeper/keeper_alerting_path.ml:264
 lib/keeper/keeper_approval_queue.ml:403

@@ -207,7 +207,7 @@ lib/room/        lib/time_compat/ lib/types/
 | Issue | Count | Source |
 |-------|-------|--------|
 | Duplicate/trivial coverage files | 32 | ROADMAP |
-| Hollow test files (빈 테스트) | 5 | void, hebbian_eio, voice_stream, backend_eio, room_portal |
+| Hollow test files (빈 테스트) | 4 | void, voice_stream, backend_eio, room_portal |
 | Total test files | 319 | test/ 하위 |
 
 ### 32 Duplicate Coverage Files
@@ -215,15 +215,14 @@ lib/room/        lib/time_compat/ lib/types/
 test/ 디렉토리에 `*_coverage.ml` 파일이 32개 존재하며, 상당수가 원본 테스트와 중복이거나 stub만 포함한다.
 이들은 ~12K LOC로, 실질적 테스트 가치 없이 빌드/CI 시간을 소모한다.
 
-### 5 Hollow Tests
+### 4 Hollow Tests
 
 아래 파일은 빈 테스트(assert true 또는 테스트 본문 없음)로, 삭제 대상이다:
 
 1. `test_void.ml`
-2. `test_hebbian_eio.ml`
-3. `test_voice_stream.ml`
-4. `test_backend_eio.ml`
-5. `test_room_portal.ml`
+2. `test_voice_stream.ml`
+3. `test_backend_eio.ml`
+4. `test_room_portal.ml`
 
 ---
 

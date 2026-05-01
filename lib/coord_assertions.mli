@@ -83,7 +83,7 @@ val handle_check :
   inspect_state:(Coord_types.context -> agent_state) ->
   Coord_types.context ->
   Yojson.Safe.t ->
-  bool * string
+  Coord_types.tool_result
 (** [handle_check ~inspect_state ctx args] is the [masc_check]
     JSON-RPC entry point.
 
@@ -100,9 +100,10 @@ val handle_check :
       defaults so callers cannot accidentally pass nothing.
 
     {2 Return value}
-    [(true, json_string)] — the boolean is always [true] (the
-    handler does not use it to signal failure; failure is encoded
-    inside the JSON body).  The JSON body has shape:
+    [{ success = true; message = json_string }] — [success] is
+    always [true] (the handler does not use it to signal failure;
+    failure is encoded inside the JSON body).  The JSON body has
+    shape:
     {[
       `Assoc [
         ("assertions", `List [<per-assertion result>...]);

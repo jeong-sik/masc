@@ -47,6 +47,10 @@ let make_meta name =
   | Ok meta -> meta
   | Error err -> Alcotest.fail ("make_meta failed: " ^ err)
 
+let make_stimulus ?(urgency = Masc_mcp.Keeper_event_queue.Normal)
+    ?(arrived_at = 0.0) post_id payload =
+  Masc_mcp.Keeper_event_queue.{ post_id; urgency; arrived_at; payload }
+
 let test_bonsai_keepers_summary_uses_scoped_registry () =
   let base_path = temp_base_path "bonsai-summary" in
   let other_base_path = temp_base_path "bonsai-summary-other" in
@@ -633,6 +637,54 @@ let test_register_replaces () =
   | None -> fail "expected dup"
   | Some e ->
     check int "restart count reset" 0 e.restart_count
+
+let test_dequeue_event_consumes_fifo () =
+  R.clear ();
+  let keeper_name = "dequeue-fifo" in
+  ignore (R.register ~base_path:bp keeper_name (make_meta keeper_name));
+  let s1 = make_stimulus "post-1" "first" in
+  let s2 =
+    make_stimulus ~urgency:Masc_mcp.Keeper_event_queue.Immediate "post-2"
+      "second"
+  in
+  R.enqueue_event ~base_path:bp keeper_name s1;
+  R.enqueue_event ~base_path:bp keeper_name s2;
+  check int "queued before dequeue" 2
+    (Masc_mcp.Keeper_event_queue.length
+       (R.event_queue_snapshot ~base_path:bp keeper_name));
+  (match R.dequeue_event ~base_path:bp keeper_name with
+   | Some stim ->
+       check string "first post id" "post-1" stim.post_id;
+       check string "first payload" "first" stim.payload
+   | None -> fail "expected first stimulus");
+  check int "one queued after first dequeue" 1
+    (Masc_mcp.Keeper_event_queue.length
+       (R.event_queue_snapshot ~base_path:bp keeper_name));
+  (match R.dequeue_event ~base_path:bp keeper_name with
+   | Some stim ->
+       check string "second post id" "post-2" stim.post_id;
+       check string "second payload" "second" stim.payload
+   | None -> fail "expected second stimulus");
+  check bool "empty after drain" true
+    (Masc_mcp.Keeper_event_queue.is_empty
+       (R.event_queue_snapshot ~base_path:bp keeper_name));
+  check bool "dequeue empty returns None" true
+    (Option.is_none (R.dequeue_event ~base_path:bp keeper_name))
+
+let test_dequeue_event_respects_base_path_and_missing_keeper () =
+  R.clear ();
+  let name = "dequeue-scope" in
+  let other_bp = "/tmp/test-dequeue-scope-other" in
+  ignore (R.register ~base_path:bp name (make_meta name));
+  ignore (R.register ~base_path:other_bp name (make_meta name));
+  R.enqueue_event ~base_path:bp name (make_stimulus "scoped" "payload");
+  check bool "missing keeper returns None" true
+    (Option.is_none (R.dequeue_event ~base_path:bp "missing-dequeue"));
+  check bool "other base path stays empty" true
+    (Option.is_none (R.dequeue_event ~base_path:other_bp name));
+  match R.dequeue_event ~base_path:bp name with
+  | Some stim -> check string "scoped payload" "payload" stim.payload
+  | None -> fail "expected scoped stimulus"
 
 (* ── New fields: grpc_close, crash_log, wakeup, fiber_health ── *)
 
@@ -1251,6 +1303,10 @@ let () =
           eio_test "get returns None for missing" test_get_returns_none_for_missing;
           eio_test "noop on missing keys" test_noop_on_missing;
           eio_test "register replaces existing" test_register_replaces;
+          eio_test "dequeue event consumes FIFO"
+            test_dequeue_event_consumes_fifo;
+          eio_test "dequeue event respects base path and missing keeper"
+            test_dequeue_event_respects_base_path_and_missing_keeper;
         ] );
       ( "extended",
         [

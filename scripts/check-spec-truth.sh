@@ -21,13 +21,22 @@
 #   \* Mirrors: lib/some/path.ml (optional description)
 #   \* Mirrors: Module_name.function_name
 #
+# Multi-line blocks are also supported — continuation comment lines
+# immediately following a `Mirrors:` header are parsed for additional refs:
+#
+#   \* Mirrors: lib/foo.ml (inline ref on first line)
+#   \*          lib/bar.ml (continuation ref on subsequent comment line)
+#   \*
+#   \* Mirrors:
+#   \*   - lib/baz.ml (bullet-list continuation)
+#
 # Resolution rules (first match wins):
 #   1. If the reference starts with `lib/` or `bin/` or `test/` — treat as a
 #      repo-relative file path; check existence with `test -f`.
 #   2. Otherwise — treat as an OCaml module name (CamelCase or with `.`
-#      separator).  Convert to a filename stem by lower-casing and replacing
-#      `.` with `/`, then look for a matching `.ml` or `.mli` under `lib/`.
-#      E.g. `Keeper_cascade_routing.select_cascade` →
+#      separator).  Convert to a filename stem by lower-casing the first
+#      component before `.`, then look for a matching `.ml` or `.mli` under
+#      `lib/`.  E.g. `Keeper_cascade_routing.select_cascade` →
 #           look for `lib/**/keeper_cascade_routing.ml`.
 
 set -euo pipefail
@@ -64,17 +73,14 @@ verbose() {
 }
 
 # resolve_mirrors_ref <ref_token> → 0 = found, 1 = not found
+#
+# Callers must not pass empty strings; normalize before calling.
 resolve_mirrors_ref() {
   local ref="$1"
 
   # Strip trailing parenthetical annotation, e.g. "(SelectCascade action)"
   ref="${ref%% (*}"
   ref="${ref%% [*}"
-
-  # Empty ref (bare `Mirrors:` with no path) is intentionally skipped.
-  if [[ -z "$ref" ]]; then
-    return 2
-  fi
 
   # Rule 1: explicit repo-relative path
   if [[ "$ref" == lib/* || "$ref" == bin/* || "$ref" == test/* ]]; then
@@ -89,8 +95,7 @@ resolve_mirrors_ref() {
   # Rule 2: OCaml module name / qualified identifier
   # Take the first component before `.` for module resolution.
   local module_part="${ref%%.*}"
-  # Convert CamelCase or snake_case module name to filename stem.
-  # Lower-case the whole thing; module names are already snake_case in OCaml.
+  # Lower-case: OCaml module names map to lower-case filenames.
   local stem
   stem="$(echo "${module_part}" | tr '[:upper:]' '[:lower:]')"
 
@@ -107,6 +112,85 @@ resolve_mirrors_ref() {
   return 1
 }
 
+# parse_mirrors_blocks <tla_file>
+#
+# Parses full `Mirrors:` blocks (including continuation comment lines) and
+# emits one resolved ref token per line.  Emits the string "SKIP" for any
+# block that contains no extractable refs (bare annotation).
+#
+# Continuation rule: a `Mirrors:` block extends through subsequent TLA+
+# comment lines (`\* ...` or `(* ...`) until a blank comment line (`\*`
+# alone) or a non-comment line is encountered.
+#
+# Ref extraction per line: tokens matching `(lib|bin|test)/path` (stopping
+# at `:` for `:function_name` suffixes) or `Module.identifier` patterns.
+parse_mirrors_blocks() {
+  local tla_file="$1"
+  awk '
+    function trim(s) {
+      sub(/^[[:space:]]+/, "", s)
+      sub(/[[:space:]]+$/, "", s)
+      return s
+    }
+    function strip_comment(s) {
+      sub(/^[[:space:]]*\\\*[[:space:]]?/, "", s)
+      sub(/^[[:space:]]*\(\*[[:space:]]?/, "", s)
+      return s
+    }
+    # Emit path/module ref tokens found in text; return count emitted.
+    function emit_refs(text,    i, n, parts, tok, found) {
+      found = 0
+      n = split(text, parts, /[[:space:]]+/)
+      for (i = 1; i <= n; i++) {
+        tok = parts[i]
+        # Strip leading bullet markers (e.g. "- lib/..." or "* lib/...")
+        gsub(/^[-*]+/, "", tok)
+        # Strip trailing punctuation except path chars
+        gsub(/[,;)\]>]+$/, "", tok)
+        if (tok ~ /^(lib|bin|test)\//) {
+          # Strip ":function_name" suffix (e.g. "lib/foo.ml:bar")
+          sub(/:.*$/, "", tok)
+          print tok
+          found++
+        } else if (tok ~ /^[A-Za-z][A-Za-z0-9_]*\.[A-Za-z]/) {
+          print tok
+          found++
+        }
+      }
+      return found
+    }
+    BEGIN { in_block = 0; block_refs = 0 }
+    {
+      line = $0
+      if (in_block) {
+        if (line ~ /^[[:space:]]*\\\*/ || line ~ /^[[:space:]]*\(\*/) {
+          text = strip_comment(line)
+          if (trim(text) == "") {
+            # Blank comment line ends the current block
+            if (block_refs == 0) print "SKIP"
+            in_block = 0
+            next
+          }
+          block_refs += emit_refs(text)
+          next
+        }
+        # Non-comment line ends the current block
+        if (block_refs == 0) print "SKIP"
+        in_block = 0
+      }
+      if (line ~ /Mirrors:/) {
+        text = line
+        sub(/^.*Mirrors:[[:space:]]*/, "", text)
+        in_block = 1
+        block_refs = emit_refs(text)
+      }
+    }
+    END {
+      if (in_block && block_refs == 0) print "SKIP"
+    }
+  ' "$tla_file" 2>/dev/null || true
+}
+
 echo "=== check-spec-truth: scanning TLA+ spec Mirrors: annotations ==="
 echo "    Repo root: $REPO_ROOT"
 echo ""
@@ -115,44 +199,34 @@ echo ""
 while IFS= read -r -d '' tla_file; do
   rel_file="${tla_file#"${REPO_ROOT}/"}"
 
-  # Extract Mirrors: lines; strip TLA+ comment prefix `\* ` or `(* `.
-  while IFS= read -r raw_line; do
-    # Extract everything after `Mirrors:` (may be empty for bare annotation).
-    ref_raw="${raw_line#*Mirrors:}"
-    # Strip leading whitespace from the reference token.
-    ref_raw="$(echo "$ref_raw" | sed 's/^[[:space:]]*//')"
-
-    ((checked_count++)) || true
-
-    if [[ -z "$ref_raw" ]]; then
-      # Bare `Mirrors:` line — nothing to resolve; skip.
-      verbose "  SKIP (bare Mirrors:) in $rel_file"
+  # parse_mirrors_blocks emits one ref token per line, or "SKIP" for bare blocks.
+  while IFS= read -r token; do
+    if [[ "$token" == "SKIP" ]]; then
+      verbose "  SKIP (bare Mirrors: block) in $rel_file"
       ((skipped_count++)) || true
       continue
     fi
 
-    resolve_mirrors_ref "$ref_raw"
-    rc=$?
-    if [[ $rc -eq 0 ]]; then
+    ((checked_count++)) || true
+
+    resolve_mirrors_ref "$token"
+    if [[ $? -eq 0 ]]; then
       : # resolved
-    elif [[ $rc -eq 2 ]]; then
-      verbose "  SKIP (empty ref) in $rel_file"
-      ((skipped_count++)) || true
     else
       echo "FAIL: orphan spec reference in $rel_file"
-      echo "      Mirrors: $ref_raw"
+      echo "      Mirrors: $token"
       echo "      Neither a file nor a resolvable OCaml module was found."
       ((orphan_count++)) || true
       fail=1
     fi
-  done < <(rg --no-filename 'Mirrors:' "$tla_file" 2>/dev/null || true)
+  done < <(parse_mirrors_blocks "$tla_file")
 
 done < <(find specs -name '*.tla' -print0 2>/dev/null)
 
 echo ""
 echo "=== check-spec-truth summary ==="
-echo "  Annotations checked : $checked_count"
-echo "  Skipped (bare/empty): $skipped_count"
+echo "  Refs checked        : $checked_count"
+echo "  Skipped (bare block): $skipped_count"
 echo "  Orphan refs found   : $orphan_count"
 echo ""
 

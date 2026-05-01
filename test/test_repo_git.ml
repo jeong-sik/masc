@@ -41,7 +41,7 @@ let run_cmd ~cwd argv =
 let init_local_repo path =
   Unix.mkdir path 0o755;
   let () =
-    match run_cmd ~cwd:path ["git"; "init"] with
+    match run_cmd ~cwd:path ["git"; "init"; "-b"; "main"] with
     | Ok () -> ()
     | Error e -> failwith ("git init failed: " ^ e)
   in
@@ -195,7 +195,8 @@ let test_get_recent_commits () =
           match Repo_git.get_recent_commits ~repository:repo ~branch:"main" ~limit:5 with
           | Error e -> Alcotest.fail ("get_recent_commits failed: " ^ e)
           | Ok commits ->
-              Alcotest.(check int) "at least 1 commit" 1 (max 1 (List.length commits));
+              Alcotest.(check bool) "at least 1 commit" true
+                (List.length commits >= 1);
               Alcotest.(check bool) "contains initial" true
                 (List.exists (fun s -> contains_substring s "initial") commits)))
 

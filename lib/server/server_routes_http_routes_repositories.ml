@@ -308,14 +308,21 @@ let handle_update_repository state _agent_name req reqd =
               | Error msg ->
                   json_response ~status:`Bad_request req reqd (json_error msg)
               | Ok repo -> (
-                  let repo = { repo with id } in
-                  match Repo_store.update ~base_path id repo with
-                  | Error msg ->
-                      json_response ~status:`Not_found req reqd (json_error msg)
-                  | Ok () ->
-                      Http.Response.json ~request:req
-                        (Yojson.Safe.to_string (repository_json repo))
-                        reqd)))
+                  (* Check existence first so we can return 404 vs 500 *)
+                  match Repo_store.find ~base_path id with
+                  | Error _ ->
+                      json_response ~status:`Not_found req reqd
+                        (json_error (Printf.sprintf "Repository not found: %s" id))
+                  | Ok _ -> (
+                      let repo = { repo with id } in
+                      match Repo_store.update ~base_path id repo with
+                      | Error msg ->
+                          json_response ~status:`Internal_server_error req reqd
+                            (json_error msg)
+                      | Ok persisted ->
+                          Http.Response.json ~request:req
+                            (Yojson.Safe.to_string (repository_json persisted))
+                            reqd))))
       | _ ->
           json_response ~status:`Not_found req reqd
             (json_error "unknown repository endpoint"))

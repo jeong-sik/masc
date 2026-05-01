@@ -239,19 +239,36 @@ let update_status ~base_path id status =
 
 let update ~base_path id (repo : repository) =
   let* repos = load_all ~base_path in
-  let found = ref false in
   let now = now_unix_seconds () in
+  let result = ref (Error (Printf.sprintf "Repository not found: %s" id)) in
   let updated =
     List.map
       (fun (r : repository) ->
-        if String.equal r.id id then (
-          found := true;
-          { repo with created_at = r.created_at; updated_at = now })
+        if String.equal r.id id then
+          let normalised =
+            {
+              repo with
+              id;
+              local_path =
+                (if String.trim repo.local_path = "" then default_local_path id
+                 else repo.local_path);
+              credential_id =
+                (if String.trim repo.credential_id = "" then "default"
+                 else repo.credential_id);
+              created_at = r.created_at;
+              updated_at = now;
+            }
+          in
+          result := Ok normalised;
+          normalised
         else r)
       repos
   in
-  if not !found then Error (Printf.sprintf "Repository not found: %s" id)
-  else save_all ~base_path updated
+  match !result with
+  | Error _ as e -> e
+  | Ok _ ->
+      let* () = save_all ~base_path updated in
+      !result
 
 let local_path ~base_path repo =
   if Filename.is_relative repo.local_path then

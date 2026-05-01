@@ -16,7 +16,7 @@ Multi-repository architecture Phase 1. Introduces explicit repository registry a
 
 ### Changed
 
-- Package version advanced from `0.18.24` to `0.19.0`.
+- Package version advanced from `0.18.25` to `0.19.0`.
 - Spec baseline and snapshot metadata synced to `0.19.0`.
 
 ## [0.18.25] - 2026-05-01

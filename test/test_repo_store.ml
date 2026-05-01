@@ -58,7 +58,7 @@ let write_file path content =
 let init_empty_store base_path =
   let toml_path = Filename.concat (Filename.concat base_path ".masc") "config" in
   let toml_file = Filename.concat toml_path "repositories.toml" in
-  write_file toml_file "repositories = []\n"
+  write_file toml_file "[repository]\n"
 
 let test_load_all_backward_compat () =
   with_temp_base_path (fun base_path ->
@@ -178,12 +178,10 @@ let test_update_existing () =
           let updated = { repo with name = "updated-name"; url = "https://github.com/test/updated" } in
           match Repo_store.update ~base_path "update-test" updated with
           | Error e -> Alcotest.fail ("update failed: " ^ e)
-          | Ok () -> (
-              match Repo_store.find ~base_path "update-test" with
-              | Ok found ->
-                  Alcotest.(check string) "name updated" "updated-name" found.name;
-                  Alcotest.(check string) "url updated" "https://github.com/test/updated" found.url
-              | Error e -> Alcotest.fail ("find after update failed: " ^ e))))
+          | Ok persisted ->
+              Alcotest.(check string) "name updated" "updated-name" persisted.name;
+              Alcotest.(check string) "url updated" "https://github.com/test/updated" persisted.url;
+              Alcotest.(check bool) "updated_at non-zero" true (Int64.compare persisted.updated_at Int64.zero > 0)))
 
 let test_update_missing () =
   with_temp_base_path (fun base_path ->

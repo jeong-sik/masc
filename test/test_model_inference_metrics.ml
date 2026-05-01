@@ -613,6 +613,67 @@ let test_costs_jsonl_dedupes_matching_decision_sample () =
     check (option (float 0.001)) "decision tok/sec preserved"
       (Some 100.0) s.avg_tok_per_sec)
 
+let test_cost_latency_json_composes_axes_and_percentiles () =
+  let base = test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
+    let path = make_keeper_dir base "cost_latency" in
+    let ts = now_unix () in
+    write_decisions path [
+      success_entry ~model:"claude-sonnet" ~provider:"anthropic"
+        ~ts:(ts -. 30.0)
+        ~input_tokens:100 ~output_tokens:50 ~latency_ms:100
+        ~cost_usd:0.03 ();
+      success_entry ~model:"claude-sonnet" ~provider:"anthropic"
+        ~ts:(ts -. 20.0)
+        ~input_tokens:10 ~output_tokens:5 ~latency_ms:200
+        ~cost_usd:0.02 ();
+      success_entry ~model:"gpt-4o" ~provider:"openai"
+        ~ts:(ts -. 10.0)
+        ~input_tokens:20 ~output_tokens:10 ~latency_ms:1000
+        ~cost_usd:0.01 ();
+    ];
+    let json = M.compute_cost_latency_json ~base_path:base ~window_minutes:60 in
+    let open Yojson.Safe.Util in
+    let per_agent = json |> member "perAgent" |> to_list in
+    check int "perAgent row count" 2 (List.length per_agent);
+    let first = List.hd per_agent in
+    check string "highest cost first" "claude-sonnet"
+      (first |> member "agent" |> to_string);
+    check int "input tokens summed" 110
+      (first |> member "in_tok" |> to_int);
+    check int "output tokens summed" 55
+      (first |> member "out_tok" |> to_int);
+    check (float 0.001) "cost summed" 0.05
+      (first |> member "cost" |> to_float);
+
+    let matrix = json |> member "matrix" in
+    check (list string) "provider axis sorted"
+      ["anthropic"; "openai"]
+      (matrix |> member "providers" |> to_list |> List.map to_string);
+    check (list string) "model axis follows model aggregate order"
+      ["claude-sonnet"; "gpt-4o"]
+      (matrix |> member "models" |> to_list |> List.map to_string);
+    let grid = matrix |> member "grid" |> to_list in
+    let row0 = List.nth grid 0 |> to_list |> List.map to_float in
+    let row1 = List.nth grid 1 |> to_list |> List.map to_float in
+    check (list (float 0.001)) "anthropic row costs" [0.05; 0.0] row0;
+    check (list (float 0.001)) "openai row costs" [0.0; 0.01] row1;
+
+    check (float 0.001) "global p50" 200.0
+      (json |> member "p50" |> to_float);
+    check (float 0.001) "global p95" 920.0
+      (json |> member "p95" |> to_float);
+    check (float 0.001) "global cost" 0.06
+      (json |> member "total_cost_usd" |> to_float);
+    check int "window" 60
+      (json |> member "window_minutes" |> to_int);
+    let buckets = json |> member "latencyBuckets" |> to_list in
+    check int "bucket count" 4 (List.length buckets);
+    check int "sub-second bucket count" 2
+      (List.hd buckets |> member "n" |> to_int);
+    check int "1s-4s bucket count" 1
+      (List.nth buckets 1 |> member "n" |> to_int))
+
 (* ── thinking_fraction tests ─────────────────────── *)
 
 let success_entry_with_thinking ~model ~ts ~thinking_enabled () =
@@ -976,6 +1037,7 @@ let () =
       test_case "coverage diagnostics survive aggregation" `Quick test_coverage_diagnostics_survive_aggregation;
       test_case "costs.jsonl backfills wall tok/sec" `Quick test_costs_jsonl_backfills_wall_tok_per_sec;
       test_case "costs.jsonl dedupes matching decision sample" `Quick test_costs_jsonl_dedupes_matching_decision_sample;
+      test_case "cost latency json composes axes and percentiles" `Quick test_cost_latency_json_composes_axes_and_percentiles;
       test_case "json roundtrip" `Quick test_json_roundtrip;
     ];
     "thinking_fraction", [

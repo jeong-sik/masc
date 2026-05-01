@@ -2953,7 +2953,7 @@ function decodeCostMatrix(raw: unknown): CostMatrix | null {
   const grid = Array.isArray(raw.grid)
     ? (raw.grid as unknown[]).map(row =>
         Array.isArray(row)
-          ? (row as unknown[]).map(v => (typeof v === 'number' ? v : 0))
+          ? (row as unknown[]).map(v => asNumber(v) ?? 0)
           : []
       )
     : []

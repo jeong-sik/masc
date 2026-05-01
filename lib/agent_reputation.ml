@@ -123,6 +123,7 @@ let count_tasks_from_room (config : Coord.config) ~(agent_name : string)
            when String.equal assignee agent_name ->
              Stdlib.incr claimed
          | Types.Done { assignee; _ } when String.equal assignee agent_name ->
+             Stdlib.incr claimed;
              Stdlib.incr completed
          | Types.Todo
          | Types.Claimed _ | Types.InProgress _ | Types.AwaitingVerification _

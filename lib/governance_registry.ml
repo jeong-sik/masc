@@ -7,6 +7,10 @@
     - [board_policy]:      default TTL, message max count (Low risk)
     - [inference_config]:        default model, timeout (High risk)
 
+    De-hexagonalized: [register_int], [register_float], [register_bool], and
+    [register_string] combinators eliminate the per-parameter serialisation /
+    deserialisation boilerplate, reducing each registration to three lines.
+
     @since 2.96.0 *)
 
 (* ── validation helpers ──────────────────────────────────────── *)
@@ -44,49 +48,90 @@ let deserialize_bool json =
   | `Bool b -> Ok b
   | _ -> Error "expected boolean"
 
+(* ── registration combinators ───────────────────────────────── *)
+
+(** Register a bounded integer parameter.
+    Eliminates per-site [serialize]/[deserialize] boilerplate. *)
+let register_int ~key ~default ~min ~max ?meta () =
+  Runtime_params.register
+    ~key
+    ~default
+    ~validate:(validate_int_range ~min ~max key)
+    ~serialize:(fun v -> `Int v)
+    ~deserialize:deserialize_int
+    ?meta
+    ()
+
+(** Register a bounded float parameter. *)
+let register_float ~key ~default ~min ~max ?meta () =
+  Runtime_params.register
+    ~key
+    ~default
+    ~validate:(validate_float_range ~min ~max key)
+    ~serialize:(fun v -> `Float v)
+    ~deserialize:deserialize_float
+    ?meta
+    ()
+
+(** Register an unconstrained boolean parameter. *)
+let register_bool ~key ~default ?meta () =
+  Runtime_params.register
+    ~key
+    ~default
+    ~validate:(fun _ -> Ok ())
+    ~serialize:(fun v -> `Bool v)
+    ~deserialize:deserialize_bool
+    ?meta
+    ()
+
+(** Register a string parameter with a maximum length. *)
+let register_string ~key ~default ~max_len ?meta () =
+  Runtime_params.register
+    ~key
+    ~default
+    ~validate:(fun v ->
+      if String.length v > 0 && String.length v <= max_len then Ok ()
+      else Error (Printf.sprintf "%s must be 1-%d chars" key max_len))
+    ~serialize:(fun v -> `String v)
+    ~deserialize:deserialize_string
+    ?meta
+    ()
+
+
 (* ── board_policy surface ────────────────────────────────────── *)
 
 let message_max_count =
-  Runtime_params.register
+  register_int
     ~key:"message.max_count"
     ~default:(fun () -> Env_config_runtime.Message.max_count)
-    ~validate:(validate_int_range ~min:10 ~max:10000 "message_max_count")
-    ~serialize:(fun v -> `Int v)
-    ~deserialize:deserialize_int
+    ~min:10 ~max:10000
     ()
 
 (* ── inference_config surface (High risk) ──────────────────────────── *)
 
 let inference_default_model =
-  Runtime_params.register
+  register_string
     ~key:"inference.default_model"
     ~default:(fun () -> "auto")
-    ~validate:(fun v ->
-      if String.length v > 0 && String.length v <= 100 then Ok ()
-      else Error "model name must be 1-100 chars")
-    ~serialize:(fun v -> `String v)
-    ~deserialize:deserialize_string
+    ~max_len:100
     ()
 
 let inference_timeout =
-  Runtime_params.register
+  register_float
     ~key:"inference.timeout_seconds"
     ~default:(fun () -> Env_config_governance.Inference.timeout_seconds)
-    ~validate:(validate_float_range ~min:5.0 ~max:300.0 "inference_timeout")
-    ~serialize:(fun v -> `Float v)
-    ~deserialize:deserialize_float
+    ~min:5.0 ~max:300.0
+
     ()
 
 (* ── dashboard surface (Low risk, display-only) ──────────────── *)
 
 (** Maximum path length before truncation in dashboard output. *)
 let dashboard_max_path_length =
-  Runtime_params.register
+  register_int
     ~key:"dashboard.max_path_length"
     ~default:(fun () -> 30)
-    ~validate:(validate_int_range ~min:10 ~max:200 "dashboard_max_path_length")
-    ~serialize:(fun v -> `Int v)
-    ~deserialize:deserialize_int
+    ~min:10 ~max:200
     ~meta:{ description = "대시보드 경로 출력 최대 길이 (문자)";
             value_type = "int";
             min_value = Some (`Int 10); max_value = Some (`Int 200) }
@@ -94,12 +139,10 @@ let dashboard_max_path_length =
 
 (** Maximum message body length before truncation. *)
 let dashboard_max_message_length =
-  Runtime_params.register
+  register_int
     ~key:"dashboard.max_message_length"
     ~default:(fun () -> 35)
-    ~validate:(validate_int_range ~min:10 ~max:500 "dashboard_max_message_length")
-    ~serialize:(fun v -> `Int v)
-    ~deserialize:deserialize_int
+    ~min:10 ~max:500
     ~meta:{ description = "대시보드 메시지 출력 최대 길이 (문자)";
             value_type = "int";
             min_value = Some (`Int 10); max_value = Some (`Int 500) }
@@ -107,12 +150,10 @@ let dashboard_max_message_length =
 
 (** Maximum number of pending tasks to show in dashboard. *)
 let dashboard_max_pending_tasks =
-  Runtime_params.register
+  register_int
     ~key:"dashboard.max_pending_tasks"
     ~default:(fun () -> 5)
-    ~validate:(validate_int_range ~min:1 ~max:50 "dashboard_max_pending_tasks")
-    ~serialize:(fun v -> `Int v)
-    ~deserialize:deserialize_int
+    ~min:1 ~max:50
     ~meta:{ description = "대시보드 pending task 표시 최대 개수";
             value_type = "int";
             min_value = Some (`Int 1); max_value = Some (`Int 50) }
@@ -120,12 +161,10 @@ let dashboard_max_pending_tasks =
 
 (** Maximum number of recent messages to show. *)
 let dashboard_max_recent_messages =
-  Runtime_params.register
+  register_int
     ~key:"dashboard.max_recent_messages"
     ~default:(fun () -> 5)
-    ~validate:(validate_int_range ~min:1 ~max:50 "dashboard_max_recent_messages")
-    ~serialize:(fun v -> `Int v)
-    ~deserialize:deserialize_int
+    ~min:1 ~max:50
     ~meta:{ description = "대시보드 recent message 표시 최대 개수";
             value_type = "int";
             min_value = Some (`Int 1); max_value = Some (`Int 50) }
@@ -133,12 +172,10 @@ let dashboard_max_recent_messages =
 
 (** Minimum section border length. *)
 let dashboard_min_border_length =
-  Runtime_params.register
+  register_int
     ~key:"dashboard.min_border_length"
     ~default:(fun () -> 45)
-    ~validate:(validate_int_range ~min:20 ~max:200 "dashboard_min_border_length")
-    ~serialize:(fun v -> `Int v)
-    ~deserialize:deserialize_int
+    ~min:20 ~max:200
     ~meta:{ description = "대시보드 섹션 경계선 최소 길이";
             value_type = "int";
             min_value = Some (`Int 20); max_value = Some (`Int 200) }
@@ -146,40 +183,30 @@ let dashboard_min_border_length =
 
 (** Threshold for surfacing a quiet-agent warning in dashboard labels. *)
 let dashboard_agent_quiet_threshold_sec =
-  Runtime_params.register
+  register_float
     ~key:"dashboard.agent_quiet_threshold_sec"
     ~default:(fun () -> Env_config_runtime.InternalTimers.label_quiet_threshold_sec)
-    ~validate:
-      (validate_float_range ~min:30.0 ~max:Masc_time_constants.day
-         "dashboard_agent_quiet_threshold_sec")
-    ~serialize:(fun v -> `Float v)
-    ~deserialize:deserialize_float
-    ~meta:
-      {
-        description = "대시보드 quiet 상태 임계값(초)";
-        value_type = "float";
-        min_value = Some (`Float 30.0);
-        max_value = Some (`Float Masc_time_constants.day);
-      }
+    ~min:30.0 ~max:Masc_time_constants.day
+    ~meta:{
+      description = "대시보드 quiet 상태 임계값(초)";
+      value_type = "float";
+      min_value = Some (`Float 30.0);
+      max_value = Some (`Float Masc_time_constants.day);
+    }
     ()
 
 (** Threshold for surfacing a stuck-agent warning in dashboard labels. *)
 let dashboard_agent_stuck_threshold_sec =
-  Runtime_params.register
+  register_float
     ~key:"dashboard.agent_stuck_threshold_sec"
     ~default:(fun () -> Env_config_runtime.InternalTimers.label_stuck_threshold_sec)
-    ~validate:
-      (validate_float_range ~min:60.0 ~max:(7.0 *. Masc_time_constants.day)
-         "dashboard_agent_stuck_threshold_sec")
-    ~serialize:(fun v -> `Float v)
-    ~deserialize:deserialize_float
-    ~meta:
-      {
-        description = "대시보드 STUCK 상태 임계값(초)";
-        value_type = "float";
-        min_value = Some (`Float 60.0);
-        max_value = Some (`Float (7.0 *. Masc_time_constants.day));
-      }
+    ~min:60.0 ~max:(7.0 *. Masc_time_constants.day)
+    ~meta:{
+      description = "대시보드 STUCK 상태 임계값(초)";
+      value_type = "float";
+      min_value = Some (`Float 60.0);
+      max_value = Some (`Float (7.0 *. Masc_time_constants.day));
+    }
     ()
 
 (* ── cost_policy surface ──────────────────────────────────────── *)
@@ -189,86 +216,72 @@ let dashboard_agent_stuck_threshold_sec =
     (local llama + GLM fallback). 0.50 is ~3x worst-case observed session cost.
     Governs Eval_gate.max_cost_usd pre-execution gating. *)
 let _cost_max_session_usd =
-  Runtime_params.register
+  register_float
     ~key:"cost.max_session_usd"
     ~default:(fun () -> 0.50)
-    ~validate:(validate_float_range ~min:0.01 ~max:50.0 "cost_max_session_usd")
-    ~serialize:(fun v -> `Float v)
-    ~deserialize:deserialize_float
+    ~min:0.01 ~max:50.0
     ()
 
 (* ── keeper_lifecycle surface (Medium risk) ─────────────────── *)
 
 let keeper_max_hb_failures =
-  Runtime_params.register
+  register_int
     ~key:"keeper.max_consecutive_hb_failures"
     ~default:(fun () -> Env_config_keeper.KeeperKeepalive.max_consecutive_failures)
-    ~validate:(validate_int_range ~min:2 ~max:50 "keeper_max_hb_failures")
-    ~serialize:(fun v -> `Int v)
+    ~min:2 ~max:50
     ~meta:{ description = "Heartbeat 연속 실패 허용 횟수";
             value_type = "int";
             min_value = Some (`Int 2); max_value = Some (`Int 50) }
-    ~deserialize:deserialize_int
     ()
 
 let keeper_max_turn_failures =
-  Runtime_params.register
+  register_int
     ~key:"keeper.max_consecutive_turn_failures"
     ~default:(fun () -> Env_config_keeper.KeeperKeepalive.max_consecutive_turn_failures)
-    ~validate:(validate_int_range ~min:3 ~max:100 "keeper_max_turn_failures")
-    ~serialize:(fun v -> `Int v)
+    ~min:3 ~max:100
     ~meta:{ description = "Turn 연속 실패 허용 횟수";
             value_type = "int";
             min_value = Some (`Int 3); max_value = Some (`Int 100) }
-    ~deserialize:deserialize_int
     ()
 
 let keeper_supervisor_sweep_sec =
-  Runtime_params.register
+  register_float
     ~key:"keeper.supervisor_sweep_sec"
     ~default:(fun () -> Env_config_keeper.KeeperSupervisor.sweep_interval_sec)
-    ~validate:(validate_float_range ~min:10.0 ~max:120.0 "keeper_supervisor_sweep_sec")
-    ~serialize:(fun v -> `Float v)
+    ~min:10.0 ~max:120.0
     ~meta:{ description = "Supervisor sweep 주기(초)";
             value_type = "float";
             min_value = Some (`Float 10.0); max_value = Some (`Float 120.0) }
-    ~deserialize:deserialize_float
     ()
 
 let keeper_supervisor_max_restarts =
-  Runtime_params.register
+  register_int
     ~key:"keeper.supervisor_max_restarts"
     ~default:(fun () -> Env_config_keeper.KeeperSupervisor.max_restarts)
-    ~validate:(validate_int_range ~min:1 ~max:50 "keeper_supervisor_max_restarts")
-    ~serialize:(fun v -> `Int v)
+    ~min:1 ~max:50
     ~meta:{ description = "Crash 후 재시작 예산";
             value_type = "int";
             min_value = Some (`Int 1); max_value = Some (`Int 50) }
-    ~deserialize:deserialize_int
     ()
 
 let keeper_keepalive_interval_sec =
-  Runtime_params.register
+  register_int
     ~key:"keeper.keepalive_interval_sec"
     ~default:(fun () -> Env_config_keeper.KeeperKeepalive.interval_sec)
-    ~validate:(validate_int_range ~min:5 ~max:300 "keeper_keepalive_interval_sec")
-    ~serialize:(fun v -> `Int v)
+    ~min:5 ~max:300
     ~meta:{ description = "Heartbeat 주기(초)";
             value_type = "int";
             min_value = Some (`Int 5); max_value = Some (`Int 300) }
-    ~deserialize:deserialize_int
     ()
 
 let keeper_dead_ttl_sec =
-  Runtime_params.register
+  register_float
     ~key:"keeper.dead_ttl_sec"
     ~default:(fun () -> Env_config_keeper.KeeperSupervisor.dead_ttl_sec)
-    ~validate:(validate_float_range ~min:60.0 ~max:Masc_time_constants.day "keeper_dead_ttl_sec")
-    ~serialize:(fun v -> `Float v)
+    ~min:60.0 ~max:Masc_time_constants.day
     ~meta:{ description = "Dead 상태 유지 시간(초)";
             value_type = "float";
             min_value = Some (`Float 60.0); max_value = Some (`Float Masc_time_constants.day) }
-    ~deserialize:deserialize_float
     ()
 
 (* ── keeper_handoff surface (Medium risk) ─────────────────────── *)
@@ -276,160 +289,124 @@ let keeper_dead_ttl_sec =
 (** Default handoff threshold (context_ratio).
     When context ratio exceeds this, automatic handoff is considered. *)
 let keeper_handoff_threshold =
-  Runtime_params.register
+  register_float
     ~key:"keeper.handoff_threshold"
     ~default:(fun () -> 0.85)
-    ~validate:(validate_float_range ~min:0.5 ~max:0.99 "keeper.handoff_threshold")
-    ~serialize:(fun v -> `Float v)
+    ~min:0.5 ~max:0.99
     ~meta:{ description = "Handoff context ratio 임계값";
             value_type = "float";
             min_value = Some (`Float 0.5); max_value = Some (`Float 0.99) }
-    ~deserialize:deserialize_float
     ()
 
 (** Handoff cooldown in seconds.
     After a handoff, suppress further handoffs for this duration. *)
 let keeper_handoff_cooldown_sec =
-  Runtime_params.register
+  register_int
     ~key:"keeper.handoff_cooldown_sec"
     ~default:(fun () -> 300)
-    ~validate:(validate_int_range ~min:30 ~max:3600 "keeper.handoff_cooldown_sec")
-    ~serialize:(fun v -> `Int v)
+    ~min:30 ~max:3600
     ~meta:{ description = "Handoff 쿨다운(초)";
             value_type = "int";
             min_value = Some (`Int 30); max_value = Some (`Int 3600) }
-    ~deserialize:deserialize_int
     ()
 
 (** Context ratio above which handoff pressure alert fires. *)
 let keeper_handoff_pressure_threshold =
-  Runtime_params.register
+  register_float
     ~key:"keeper.handoff_pressure_threshold"
     ~default:(fun () -> 0.88)
-    ~validate:(validate_float_range ~min:0.5 ~max:0.99 "keeper.handoff_pressure_threshold")
-    ~serialize:(fun v -> `Float v)
+    ~min:0.5 ~max:0.99
     ~meta:{ description = "Handoff pressure 알림 임계값";
             value_type = "float";
             min_value = Some (`Float 0.5); max_value = Some (`Float 0.99) }
-    ~deserialize:deserialize_float
     ()
 
 (* ── relay_heuristic surface (Low risk) ───────────────────────── *)
 
 let relay_tokens_per_user_msg =
-  Runtime_params.register ~key:"relay.tokens_per_user_msg"
-    ~default:(fun () -> 150)
-    ~validate:(validate_int_range ~min:10 ~max:5000 "relay.tokens_per_user_msg")
-    ~serialize:(fun v -> `Int v) ~deserialize:deserialize_int ()
+  register_int ~key:"relay.tokens_per_user_msg"
+    ~default:(fun () -> 150) ~min:10 ~max:5000 ()
 
 let relay_tokens_per_assistant_msg =
-  Runtime_params.register ~key:"relay.tokens_per_assistant_msg"
-    ~default:(fun () -> 500)
-    ~validate:(validate_int_range ~min:10 ~max:10000 "relay.tokens_per_assistant_msg")
-    ~serialize:(fun v -> `Int v) ~deserialize:deserialize_int ()
+  register_int ~key:"relay.tokens_per_assistant_msg"
+    ~default:(fun () -> 500) ~min:10 ~max:10000 ()
 
 let relay_tokens_per_tool_call =
-  Runtime_params.register ~key:"relay.tokens_per_tool_call"
-    ~default:(fun () -> 200)
-    ~validate:(validate_int_range ~min:10 ~max:5000 "relay.tokens_per_tool_call")
-    ~serialize:(fun v -> `Int v) ~deserialize:deserialize_int ()
+  register_int ~key:"relay.tokens_per_tool_call"
+    ~default:(fun () -> 200) ~min:10 ~max:5000 ()
 
 let relay_tokens_per_tool_result =
-  Runtime_params.register ~key:"relay.tokens_per_tool_result"
-    ~default:(fun () -> 300)
-    ~validate:(validate_int_range ~min:10 ~max:10000 "relay.tokens_per_tool_result")
-    ~serialize:(fun v -> `Int v) ~deserialize:deserialize_int ()
+  register_int ~key:"relay.tokens_per_tool_result"
+    ~default:(fun () -> 300) ~min:10 ~max:10000 ()
 
 let relay_cost_large_file_read =
-  Runtime_params.register ~key:"relay.cost_large_file_read"
-    ~default:(fun () -> 10_000)
-    ~validate:(validate_int_range ~min:1000 ~max:100_000 "relay.cost_large_file_read")
-    ~serialize:(fun v -> `Int v) ~deserialize:deserialize_int ()
+  register_int ~key:"relay.cost_large_file_read"
+    ~default:(fun () -> 10_000) ~min:1000 ~max:100_000 ()
 
 let relay_cost_per_file_edit =
-  Runtime_params.register ~key:"relay.cost_per_file_edit"
-    ~default:(fun () -> 3_000)
-    ~validate:(validate_int_range ~min:500 ~max:50_000 "relay.cost_per_file_edit")
-    ~serialize:(fun v -> `Int v) ~deserialize:deserialize_int ()
+  register_int ~key:"relay.cost_per_file_edit"
+    ~default:(fun () -> 3_000) ~min:500 ~max:50_000 ()
 
 let relay_cost_long_running =
-  Runtime_params.register ~key:"relay.cost_long_running"
-    ~default:(fun () -> 20_000)
-    ~validate:(validate_int_range ~min:1000 ~max:200_000 "relay.cost_long_running")
-    ~serialize:(fun v -> `Int v) ~deserialize:deserialize_int ()
+  register_int ~key:"relay.cost_long_running"
+    ~default:(fun () -> 20_000) ~min:1000 ~max:200_000 ()
 
 let relay_cost_exploration =
-  Runtime_params.register ~key:"relay.cost_exploration"
-    ~default:(fun () -> 15_000)
-    ~validate:(validate_int_range ~min:1000 ~max:100_000 "relay.cost_exploration")
-    ~serialize:(fun v -> `Int v) ~deserialize:deserialize_int ()
+  register_int ~key:"relay.cost_exploration"
+    ~default:(fun () -> 15_000) ~min:1000 ~max:100_000 ()
 
 let relay_cost_simple =
-  Runtime_params.register ~key:"relay.cost_simple"
-    ~default:(fun () -> 1_000)
-    ~validate:(validate_int_range ~min:100 ~max:10_000 "relay.cost_simple")
-    ~serialize:(fun v -> `Int v) ~deserialize:deserialize_int ()
+  register_int ~key:"relay.cost_simple"
+    ~default:(fun () -> 1_000) ~min:100 ~max:10_000 ()
 
 (* ── keeper_diagnostics surface (Medium risk) ─────────────────── *)
 
 let keeper_snapshot_sec =
-  Runtime_params.register
+  register_int
     ~key:"keeper.snapshot_sec"
     ~default:(fun () -> Env_config_keeper.KeeperRuntime.snapshot_sec)
-    ~validate:(validate_int_range ~min:15 ~max:3600 "keeper_snapshot_sec")
-    ~serialize:(fun v -> `Int v)
+    ~min:15 ~max:3600
     ~meta:{ description = "Snapshot 캡처 주기(초)";
             value_type = "int";
             min_value = Some (`Int 15); max_value = Some (`Int 3600) }
-    ~deserialize:deserialize_int
     ()
 
 let keeper_work_as_hb_enabled =
-  Runtime_params.register
+  register_bool
     ~key:"keeper.work_as_hb_enabled"
     ~default:(fun () -> Env_config_keeper.WorkAsHeartbeat.enabled)
-    ~validate:(fun _ -> Ok ())
-    ~serialize:(fun v -> `Bool v)
     ~meta:{ description = "Work-as-heartbeat 활성화 여부";
             value_type = "bool";
             min_value = None; max_value = None }
-    ~deserialize:deserialize_bool
     ()
 
 let keeper_work_as_hb_max_silence_sec =
-  Runtime_params.register
+  register_float
     ~key:"keeper.work_as_hb_max_silence_sec"
     ~default:(fun () -> Env_config_keeper.WorkAsHeartbeat.max_silence_sec)
-    ~validate:(validate_float_range ~min:10.0 ~max:600.0 "keeper_work_as_hb_max_silence_sec")
-    ~serialize:(fun v -> `Float v)
+    ~min:10.0 ~max:600.0
     ~meta:{ description = "Work-as-heartbeat 최대 침묵 시간(초)";
             value_type = "float";
             min_value = Some (`Float 10.0); max_value = Some (`Float 600.0) }
-    ~deserialize:deserialize_float
     ()
 
 let keeper_smart_hb_enabled =
-  Runtime_params.register
+  register_bool
     ~key:"keeper.smart_hb_enabled"
     ~default:(fun () -> Env_config_keeper.SmartHeartbeat.enabled)
-    ~validate:(fun _ -> Ok ())
-    ~serialize:(fun v -> `Bool v)
     ~meta:{ description = "Smart heartbeat 적응형 스케줄링 활성화";
             value_type = "bool";
             min_value = None; max_value = None }
-    ~deserialize:deserialize_bool
     ()
 
 let keeper_stage_timing_ring_size =
-  Runtime_params.register
+  register_int
     ~key:"keeper.stage_timing_ring_size"
     ~default:(fun () -> Env_config_keeper.KeeperProactive.stage_timing_ring_size)
-    ~validate:(validate_int_range ~min:10 ~max:1000 "keeper_stage_timing_ring_size")
-    ~serialize:(fun v -> `Int v)
+    ~min:10 ~max:1000
     ~meta:{ description = "Stage timing ring buffer 크기 (fiber restart 시 적용)";
             value_type = "int";
             min_value = Some (`Int 10); max_value = Some (`Int 1000) }
-    ~deserialize:deserialize_int
     ()
 
 (* ── drift_guard heuristics (Low risk, detection tuning) ───── *)

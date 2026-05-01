@@ -27,8 +27,14 @@ let cancelled_status ~agent_name ~now ~reason =
     { cancelled_by = agent_name; cancelled_at = now; reason = option_of_non_empty reason }
 ;;
 
+let verification_deadline ~now ~timeout_seconds =
+  let submitted_at = Types.parse_iso8601 ~default_time:(Time_compat.now ()) now in
+  Some (Types.iso8601_of_unix_seconds (submitted_at +. timeout_seconds))
+;;
+
 let decide
       ~verification_enabled
+      ~verification_timeout_seconds
       ~new_verification_id
       ~agent_name
       ~task_id
@@ -106,7 +112,10 @@ let decide
               { assignee
               ; submitted_at = now
               ; verification_id = new_verification_id ()
-              ; deadline = None
+              ; deadline =
+                  verification_deadline
+                    ~now
+                    ~timeout_seconds:verification_timeout_seconds
               })
     else Error Invalid_transition
   | Types.Submit_for_verification,

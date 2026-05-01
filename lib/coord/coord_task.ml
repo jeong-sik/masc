@@ -97,6 +97,8 @@ let transition_task_r
           match
             Coord_task_lifecycle.decide
               ~verification_enabled:(Env_config_runtime.Verification.fsm_enabled ())
+              ~verification_timeout_seconds:
+                (Env_config_runtime.Verification.timeout_deadline_seconds ())
               ~new_verification_id:(fun () -> Random_id.prefixed ~prefix:"vrf-" ~bytes:16)
               ~agent_name
               ~task_id

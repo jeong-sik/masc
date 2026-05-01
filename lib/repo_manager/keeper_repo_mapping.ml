@@ -90,11 +90,11 @@ let load_all ~base_path =
 type mapping_lookup =
   | Mapping_found of keeper_repo_mapping
   | Mapping_missing of string
-  | Mapping_store_error of string
+  | Mapping_load_error of string
 
 let lookup_mapping ~base_path keeper_id =
   match load_all ~base_path with
-  | Error msg -> Mapping_store_error msg
+  | Error msg -> Mapping_load_error msg
   | Ok mappings -> (
       match
         List.find_opt
@@ -109,7 +109,7 @@ let find_mapping ~base_path keeper_id =
   | Mapping_found mapping -> Ok mapping
   | Mapping_missing keeper_id ->
       Error (Printf.sprintf "No mapping found for keeper: %s" keeper_id)
-  | Mapping_store_error msg -> Error msg
+  | Mapping_load_error msg -> Error msg
 
 let allowed_repositories ~keeper_id ~base_path =
   let* mapping = find_mapping ~base_path keeper_id in
@@ -125,14 +125,14 @@ let allowed_repositories ~keeper_id ~base_path =
     bridge (RFC-0019 PR-A): a keeper without a mapping continues to use
     the legacy [Keeper_gh_env.keeper_binding] resolver.
 
-    Returns [Error _] on mapping store infrastructure failures,
-    mapping parse/validation failures, or dangling references
+    Returns [Error _] on mapping load failures (including
+    parse/validation failures) or dangling references
     (repository not found, credential not found).  Absence of mapping is
     not an error. *)
 let credentials_for_keeper ~base_path ~keeper_id =
   match lookup_mapping ~base_path keeper_id with
   | Mapping_missing _ -> Ok []
-  | Mapping_store_error msg -> Error msg
+  | Mapping_load_error msg -> Error msg
   | Mapping_found mapping ->
       let resolve_credential id =
         match Credential_store.find ~base_path id with
@@ -191,11 +191,11 @@ let credentials_for_keeper ~base_path ~keeper_id =
 let is_allowed ~keeper_id ~repository_id ~base_path =
   match lookup_mapping ~base_path keeper_id with
   | Mapping_missing _ -> true
-  | Mapping_store_error msg ->
+  | Mapping_load_error msg ->
       if not (Hashtbl.mem logged_mapping_errors keeper_id) then begin
         Hashtbl.add logged_mapping_errors keeper_id ();
         Log.Misc.warn
-          "[KeeperRepoMapping] is_allowed: mapping store error for keeper %s \
+          "[KeeperRepoMapping] is_allowed: mapping load error for keeper %s \
            — access control bypassed (error: %s)"
           keeper_id msg
       end;
@@ -244,9 +244,9 @@ let save_mapping ~base_path mapping =
 let apply_mapping ~keeper_id ~base_path ~repositories =
   match lookup_mapping ~base_path keeper_id with
   | Mapping_missing _ -> repositories
-  | Mapping_store_error msg ->
+  | Mapping_load_error msg ->
       Log.Misc.warn
-        "[KeeperRepoMapping] apply_mapping: mapping store error for \
+        "[KeeperRepoMapping] apply_mapping: mapping load error for \
          keeper %s — returning unfiltered repositories (error: %s)"
         keeper_id msg;
       repositories

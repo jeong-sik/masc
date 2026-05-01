@@ -4,6 +4,9 @@ open Server_auth
 
 module Http = Http_server_eio
 
+let dashboard_feed_limit req =
+  int_query_param req "limit" ~default:200 |> clamp ~min_v:1 ~max_v:200
+
 let add_routes ~sw router =
   router
   |> Http.Router.get "/api/v1/providers" (fun request reqd ->
@@ -118,7 +121,7 @@ let add_routes ~sw router =
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/keeper-decisions" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         let limit = int_query_param req "limit" ~default:200 in
+         let limit = dashboard_feed_limit req in
          let config = state.Mcp_server.room_config in
          let keeper_names = Keeper_types.keeper_names config in
          let keepers =
@@ -130,6 +133,44 @@ let add_routes ~sw router =
          in
          let json =
            Dashboard_http_keeper.keeper_decisions_json
+             ~config ~keepers ~limit ()
+         in
+         Http.Response.json ~compress:true ~request:req
+           (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/keeper-decisions-log" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let limit = dashboard_feed_limit req in
+         let config = state.Mcp_server.room_config in
+         let keeper_names = Keeper_types.keeper_names config in
+         let keepers =
+           List.filter_map (fun name ->
+             match Keeper_types.read_meta config name with
+             | Ok (Some m) -> Some m
+             | _ -> None
+           ) keeper_names
+         in
+         let json =
+           Dashboard_http_keeper.keeper_decisions_log_json
+             ~config ~keepers ~limit ()
+         in
+         Http.Response.json ~compress:true ~request:req
+           (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+  |> Http.Router.get "/api/v1/dashboard/keeper-memory-log" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let limit = dashboard_feed_limit req in
+         let config = state.Mcp_server.room_config in
+         let keeper_names = Keeper_types.keeper_names config in
+         let keepers =
+           List.filter_map (fun name ->
+             match Keeper_types.read_meta config name with
+             | Ok (Some m) -> Some m
+             | _ -> None
+           ) keeper_names
+         in
+         let json =
+           Dashboard_http_keeper.keeper_memory_log_json
              ~config ~keepers ~limit ()
          in
          Http.Response.json ~compress:true ~request:req

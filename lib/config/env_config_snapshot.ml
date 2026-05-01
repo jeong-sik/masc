@@ -206,9 +206,7 @@ let runtime_entries =
 let rate_limiting_entries =
   [
     entry ~default:"100.0" "MASC_RATE_LIMIT" "Requests per second (per-client global bucket)";
-    entry ~default:"150" "MASC_RATE_BURST" "Burst capacity (per-client global bucket)";
     entry ~default:"20.0" "MASC_AGENT_RATE_LIMIT" "Requests per second per resolved agent/token";
-    entry ~default:"50" "MASC_AGENT_RATE_BURST" "Burst capacity per resolved agent/token";
     entry ~default:"300.0" "MASC_RATE_LIMIT_CLEANUP_INTERVAL_SEC"
       "Stale bucket cleanup interval (seconds)";
     entry ~default:"3600.0" "MASC_RATE_LIMIT_ENTRY_MAX_AGE_SEC"
@@ -798,17 +796,9 @@ let lock_entries =
       "Default lock timeout (seconds, 30 min)";
   ]
 
-let memory_entries =
-  [
-    entry ~default:"5" "MASC_MEMORY_OAS_DEFAULT_IMPORTANCE"
-      "Default importance for OAS-stored memories (clamped 1-10)";
-  ]
+let memory_entries = []
 
-let message_gc_entries =
-  [
-    entry ~default:"200" "MASC_MESSAGE_MAX_COUNT"
-      "Maximum message files retained per room";
-  ]
+let message_gc_entries = []
 
 let model_routing_entries =
   [
@@ -856,8 +846,6 @@ let orchestrator_entries =
       "Orchestrator background loop enabled (feature flag)";
     entry ~default:"300.0" "MASC_ORCHESTRATOR_INTERVAL"
       "Orchestrator check interval (seconds)";
-    entry ~default:"2" "MASC_ORCHESTRATOR_MIN_PRIORITY"
-      "Orchestrator minimum priority (clamped 0-10)";
     entry ~default:"300" "MASC_ORCHESTRATOR_TIMEOUT"
       "Orchestrator timeout (clamped 10-3600 seconds)";
   ]
@@ -886,15 +874,9 @@ let procedural_memory_entries =
   [
     entry ~default:"0.7" "MASC_PROC_MIN_CONFIDENCE"
       "Minimum confidence for crystallization (clamped 0-1)";
-    entry ~default:"3" "MASC_PROC_MIN_EVIDENCE"
-      "Minimum evidence count for crystallization (clamped >=1)";
   ]
 
-let pulse_entries =
-  [
-    entry ~default:"3" "MASC_PULSE_MAX_CONSUMER_FAILURES"
-      "Max consecutive consumer failures before recovery (clamped >=1)";
-  ]
+let pulse_entries = []
 
 let relay_entries =
   [
@@ -1012,8 +994,6 @@ let tool_entries =
       "Extra public tools (comma-separated names); None when unset";
     entry ~default:"(none)" "MASC_TOOL_DESCRIPTION_BUDGET"
       "Tool description budget max chars; None=unlimited";
-    entry ~default:"2" "MASC_TOOL_READONLY_RETRY_LIMIT"
-      "Read-only tool retry limit";
   ]
 
 let web_search_entries =

@@ -260,7 +260,7 @@ module Rate_bucket : sig
   val agent_rate : float
   (** Per-agent requests per second ([MASC_AGENT_RATE_LIMIT], default [20.0]). *)
   val agent_burst : int
-  (** Per-agent burst capacity ([MASC_AGENT_RATE_BURST], default [50]). *)
+  (** Per-agent burst capacity. Algorithm-class constant, default [50]. *)
 end
 
 (** {1 Per-agent rate limit bucket}

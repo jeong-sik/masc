@@ -16,6 +16,105 @@ let unique_key prefix =
 let comma_header_values value =
   List.map String.trim (String.split_on_char ',' value)
 
+let rate_limit_env_probe_arg = "--rate-limit-env-probe"
+
+let removed_algorithm_env_names =
+  [
+    "MASC_AGENT_RATE_BURST";
+    "MASC_CDAL_VERDICT_LOOKUP_LIMIT";
+    "MASC_MEMORY_OAS_DEFAULT_IMPORTANCE";
+    "MASC_MESSAGE_MAX_COUNT";
+    "MASC_ORCHESTRATOR_MIN_PRIORITY";
+    "MASC_PROC_MIN_EVIDENCE";
+    "MASC_PULSE_MAX_CONSUMER_FAILURES";
+    "MASC_RATE_BURST";
+    "MASC_TOOL_READONLY_RETRY_LIMIT";
+  ]
+
+let check_probe_int label expected actual =
+  if actual <> expected then (
+    Printf.eprintf "%s: expected %d, got %d\n%!" label expected actual;
+    exit 2)
+
+let run_rate_limit_env_probe_if_requested () =
+  if Array.exists (String.equal rate_limit_env_probe_arg) Sys.argv then (
+    check_probe_int "rate burst accessor" Rate_limit.default_burst
+      (Rate_limit.burst_from_env ());
+    check_probe_int "rate limiter burst" Rate_limit.default_burst
+      (Rate_limit.burst (Rate_limit.create_from_env ()));
+    check_probe_int "agent burst accessor" Rate_limit.default_agent_burst
+      (Rate_limit.agent_burst_from_env ());
+    check_probe_int "agent limiter burst" Rate_limit.default_agent_burst
+      (Rate_limit.burst (Rate_limit.create_agent_from_env ()));
+    check_probe_int "orchestrator min priority" 2
+      Env_config.Orchestrator.min_priority;
+    check_probe_int "message max count" 200 Env_config.Message.max_count;
+    check_probe_int "CDAL verdict lookup limit" 500
+      (Env_config.Cdal.verdict_lookup_limit ());
+    check_probe_int "procedural memory min evidence" 3
+      Env_config.ProcMemory.min_evidence;
+    check_probe_int "pulse consumer failures" 3
+      Env_config.Pulse_config.max_consumer_failures;
+    check_probe_int "readonly retry limit" 2
+      Env_config.Tools.readonly_retry_limit;
+    check_probe_int "memory OAS default importance" 5
+      Env_config.Memory_oas.default_importance;
+    exit 0)
+
+let env_binding_matches name binding =
+  let prefix = name ^ "=" in
+  let prefix_len = String.length prefix in
+  String.length binding >= prefix_len
+  && String.sub binding 0 prefix_len = prefix
+
+let env_with_overrides overrides =
+  let override_names = List.map fst overrides in
+  let inherited =
+    Unix.environment ()
+    |> Array.to_list
+    |> List.filter (fun binding ->
+      not
+        (List.exists
+           (fun name -> env_binding_matches name binding)
+           override_names))
+  in
+  Array.of_list
+    (inherited
+     @ List.map (fun (name, value) -> name ^ "=" ^ value) overrides)
+
+let removed_env_overrides =
+  List.map (fun name -> (name, "999999")) removed_algorithm_env_names
+
+let wait_status_to_string = function
+  | Unix.WEXITED code -> Printf.sprintf "exit %d" code
+  | Unix.WSIGNALED signal -> Printf.sprintf "signal %d" signal
+  | Unix.WSTOPPED signal -> Printf.sprintf "stopped %d" signal
+
+let rec waitpid_nointr pid =
+  try Unix.waitpid [] pid with
+  | Unix.Unix_error (Unix.EINTR, _, _) -> waitpid_nointr pid
+
+let snapshot_env_names () =
+  match Env_config_snapshot.to_json () with
+  | `Assoc fields -> (
+      match List.assoc_opt "categories" fields with
+      | Some (`Assoc categories) ->
+          List.concat_map
+            (function
+              | _, `List entries ->
+                  List.filter_map
+                    (function
+                      | `Assoc entry -> (
+                          match List.assoc_opt "env" entry with
+                          | Some (`String name) -> Some name
+                          | _ -> None)
+                      | _ -> None)
+                    entries
+              | _ -> [])
+            categories
+      | _ -> [])
+  | _ -> []
+
 (* ============================================================
    Constants Tests
    ============================================================ *)
@@ -252,6 +351,31 @@ let test_create_from_env () =
   let limiter = Rate_limit.create_from_env () in
   check bool "rate positive" true ((Rate_limit.rate limiter) > 0.0);
   check bool "burst positive" true ((Rate_limit.burst limiter) > 0)
+
+let test_removed_algorithm_env_knobs_do_not_affect_runtime () =
+  let exe = Sys.executable_name in
+  let argv = [| exe; rate_limit_env_probe_arg |] in
+  let env = env_with_overrides removed_env_overrides in
+  let pid = Unix.create_process_env exe argv env Unix.stdin Unix.stdout Unix.stderr in
+  match waitpid_nointr pid with
+  | _, Unix.WEXITED 0 -> ()
+  | _, status ->
+      fail
+        (Printf.sprintf "env probe failed with %s"
+           (wait_status_to_string status))
+
+let test_removed_algorithm_env_knobs_absent_from_snapshot () =
+  List.iter
+    (fun (name, value) -> Unix.putenv name value)
+    removed_env_overrides;
+  let names = snapshot_env_names () in
+  List.iter
+    (fun removed ->
+      check bool
+        (removed ^ " absent from config snapshot")
+        false
+        (List.mem removed names))
+    removed_algorithm_env_names
 
 (* ============================================================
    Global Instance Tests
@@ -513,6 +637,7 @@ let test_too_many_agent_requests_body () =
    ============================================================ *)
 
 let () =
+  run_rate_limit_env_probe_if_requested ();
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Time_compat.set_clock (Eio.Stdenv.clock env);
@@ -557,6 +682,10 @@ let () =
       test_case "rate_from_env" `Quick test_rate_from_env_returns_float;
       test_case "burst_from_env" `Quick test_burst_from_env_returns_int;
       test_case "create_from_env" `Quick test_create_from_env;
+      test_case "removed algorithm env knobs ignored" `Quick
+        test_removed_algorithm_env_knobs_do_not_affect_runtime;
+      test_case "removed algorithm env knobs absent from snapshot" `Quick
+        test_removed_algorithm_env_knobs_absent_from_snapshot;
     ];
     "global", [
       test_case "check_global" `Quick test_check_global;

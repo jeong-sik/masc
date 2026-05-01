@@ -2,9 +2,13 @@
 
     Provides token bucket rate limiting per client/agent.
 
-    Configuration via environment:
+    Configuration via environment is intentionally limited to rate values:
     - MASC_RATE_LIMIT: requests per second (default: 60)
-    - MASC_RATE_BURST: burst capacity (default: 150)
+    - MASC_AGENT_RATE_LIMIT: per-agent requests per second (default: 20)
+
+    Burst capacities are algorithm-class constants. The legacy [*_from_env]
+    accessor names are retained for API compatibility, but burst accessors no
+    longer read environment variables.
 
     @since 0.4.0 *)
 
@@ -53,16 +57,18 @@ val default_agent_burst : int
 (** Default per-agent burst capacity: [50]. *)
 val rate_from_env : unit -> float
 val burst_from_env : unit -> int
+(** Compatibility accessor; returns the fixed global burst constant. *)
 val agent_rate_from_env : unit -> float
 (** Per-agent rate from [MASC_AGENT_RATE_LIMIT] env var (default [20.0]). *)
 val agent_burst_from_env : unit -> int
-(** Per-agent burst from [MASC_AGENT_RATE_BURST] env var (default [50]). *)
+(** Compatibility accessor; returns the fixed per-agent burst constant. *)
 val rate : t -> float
 val burst : t -> int
 val create : ?rate:float -> ?burst:int -> unit -> t
 val create_from_env : unit -> t
 val create_agent_from_env : unit -> t
-(** Like [create_from_env] but uses the per-agent rate/burst env vars. *)
+(** Like [create_from_env] but uses [MASC_AGENT_RATE_LIMIT] plus the fixed
+    per-agent burst constant. *)
 
 (** {1 Agent Quota Tier Contract} *)
 

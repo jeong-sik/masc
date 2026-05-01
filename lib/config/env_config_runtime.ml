@@ -94,8 +94,9 @@ module Orchestrator = struct
   let agent_name =
     get_string ~default:"orchestrator" "MASC_ORCHESTRATOR_AGENT"
 
-  let min_priority =
-    max 0 (min 10 (get_int ~default:2 "MASC_ORCHESTRATOR_MIN_PRIORITY"))
+  (** Algorithm-class constant — not env-configurable per anti-hyperparameter policy.
+      Changing this requires a code change and review, not an env override. *)
+  let min_priority = 2
 
   let timeout_seconds =
     max 10 (min 3600 (get_int ~default:300 "MASC_ORCHESTRATOR_TIMEOUT"))
@@ -240,10 +241,10 @@ end
 (** {1 Message GC Configuration} *)
 
 module Message = struct
-  (** Maximum number of message files to retain per room (default 200).
-      Oldest messages (by filename sort) are deleted when count exceeds this. *)
-  let max_count =
-    get_int ~default:200 "MASC_MESSAGE_MAX_COUNT"
+  (** Algorithm-class constant — not env-configurable per anti-hyperparameter policy.
+      Maximum message files retained per room; oldest deleted when exceeded.
+      Changing this requires a code change and review, not an env override. *)
+  let max_count = 200
 end
 
 (** {1 Transport Configuration} *)
@@ -358,12 +359,12 @@ module Cdal = struct
   let gate_enabled () =
     Feature_flag_registry.get_bool "MASC_CDAL_GATE_ENABLED"
 
-  (** Max verdicts to scan when looking up the latest verdict by task_id.
+  (** Algorithm-class constant — not env-configurable per anti-hyperparameter policy.
+      Max verdicts to scan when looking up the latest verdict by task_id.
       Beyond this limit, older entries are silently skipped — WARN is logged
-      by the gate when the task_id is not found. Default: 500.
-      Issue #7546. *)
-  let verdict_lookup_limit () =
-    get_int ~default:500 "MASC_CDAL_VERDICT_LOOKUP_LIMIT"
+      by the gate when the task_id is not found. Issue #7546.
+      Changing this requires a code change and review, not an env override. *)
+  let verdict_lookup_limit () = 500
 end
 
 module Verification = struct
@@ -474,8 +475,10 @@ end
 (** {1 Procedural Memory Configuration} *)
 
 module ProcMemory = struct
-  (** Minimum evidence count for crystallization. Default: 3. *)
-  let min_evidence = max 1 (get_int ~default:3 "MASC_PROC_MIN_EVIDENCE")
+  (** Algorithm-class constant — not env-configurable per anti-hyperparameter policy.
+      Minimum evidence count for crystallization.
+      Changing this requires a code change and review, not an env override. *)
+  let min_evidence = 3
 
   (** Minimum confidence for crystallization, clamped to [0, 1]. Default: 0.7. *)
   let min_confidence =
@@ -485,8 +488,10 @@ end
 (** {1 Pulse Configuration} *)
 
 module Pulse_config = struct
-  (** Max consecutive consumer failures before recovery. Default: 3. *)
-  let max_consumer_failures = max 1 (get_int ~default:3 "MASC_PULSE_MAX_CONSUMER_FAILURES")
+  (** Algorithm-class constant — not env-configurable per anti-hyperparameter policy.
+      Max consecutive consumer failures before recovery.
+      Changing this requires a code change and review, not an env override. *)
+  let max_consumer_failures = 3
 end
 
 (** {1 Tool Surface Configuration} *)
@@ -515,8 +520,10 @@ module Tools = struct
         | _ -> None)
     | None -> None
 
-  (** Read-only tool retry limit. Default: 2. *)
-  let readonly_retry_limit = get_int ~default:2 "MASC_TOOL_READONLY_RETRY_LIMIT"
+  (** Algorithm-class constant — not env-configurable per anti-hyperparameter policy.
+      Read-only tool retry limit. Changing this requires a code change and review,
+      not an env override. *)
+  let readonly_retry_limit = 2
 
   (** Extra public tools (comma-separated names). *)
   let public_tools_extra_opt () =
@@ -554,14 +561,18 @@ module Rate_bucket = struct
   (** Requests per second. Default: 100. *)
   let rate = get_float ~default:100.0 "MASC_RATE_LIMIT"
 
-  (** Burst capacity. Default: 150. *)
-  let burst = get_int ~default:150 "MASC_RATE_BURST"
+  (** Algorithm-class constant — not env-configurable per anti-hyperparameter policy.
+      Burst capacity for the token-bucket rate limiter.
+      Changing this requires a code change and review, not an env override. *)
+  let burst = 150
 
   (** Per-agent requests per second. Default: 20. *)
   let agent_rate = get_float ~default:20.0 "MASC_AGENT_RATE_LIMIT"
 
-  (** Per-agent burst capacity. Default: 50. *)
-  let agent_burst = get_int ~default:50 "MASC_AGENT_RATE_BURST"
+  (** Algorithm-class constant — not env-configurable per anti-hyperparameter policy.
+      Per-agent burst capacity for the token-bucket rate limiter.
+      Changing this requires a code change and review, not an env override. *)
+  let agent_burst = 50
 end
 
 (** {1 Per-Agent Rate Limit Bucket Configuration}
@@ -613,8 +624,10 @@ end
 (** {1 Memory OAS Bridge Configuration} *)
 
 module Memory_oas = struct
-  (** Default importance for OAS-stored memories, clamped to [1, 10]. Default: 5. *)
-  let default_importance = max 1 (min 10 (get_int ~default:5 "MASC_MEMORY_OAS_DEFAULT_IMPORTANCE"))
+  (** Algorithm-class constant — not env-configurable per anti-hyperparameter policy.
+      Default importance for OAS-stored memories, clamped to [1, 10].
+      Changing this requires a code change and review, not an env override. *)
+  let default_importance = 5
 end
 
 (** {1 Smart Heartbeat Tuning} *)

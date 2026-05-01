@@ -2,9 +2,13 @@
 
     Provides token bucket rate limiting per client/agent.
 
-    Configuration via environment:
-    - MASC_RATE_LIMIT: requests per second (default: 20)
-    - MASC_RATE_BURST: burst capacity (default: 50)
+    Configuration via environment is intentionally limited to rate values:
+    - MASC_RATE_LIMIT: requests per second (default: 60)
+    - MASC_AGENT_RATE_LIMIT: per-agent requests per second (default: 20)
+
+    Burst capacities are fixed algorithm-class constants. Legacy [*_from_env]
+    accessor names are preserved for callers, but burst accessors no longer
+    read environment variables.
 
     @since 0.4.0
 *)

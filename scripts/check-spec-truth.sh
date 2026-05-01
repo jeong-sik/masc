@@ -145,14 +145,23 @@ parse_mirrors_blocks() {
         tok = parts[i]
         # Strip leading bullet markers (e.g. "- lib/..." or "* lib/...")
         gsub(/^[-*]+/, "", tok)
-        # Strip trailing punctuation except path chars
-        gsub(/[,;)\]>]+$/, "", tok)
+        # Strip trailing punctuation except path chars.  Trailing dots
+        # are stripped so that prose like "see Module.identifier." does
+        # not carry the sentence-ending period into resolution; this
+        # also keeps a final "." from making the trailing-letter
+        # constraint below pass on tokens like "Foo.".
+        gsub(/[.,;)\]>]+$/, "", tok)
         if (tok ~ /^(lib|bin|test)\//) {
           # Strip ":function_name" suffix (e.g. "lib/foo.ml:bar")
           sub(/:.*$/, "", tok)
           print tok
           found++
-        } else if (tok ~ /^[A-Za-z][A-Za-z0-9_]*\.[A-Za-z]/) {
+        } else if (tok ~ /^[A-Z][A-Za-z0-9_]*\.[A-Za-z]/) {
+          # OCaml module references are PascalCase by convention.
+          # Constraining the leading char to uppercase prevents prose
+          # tokens like "e.g.", "i.e.", or version-like text such as
+          # "v0.187" from being treated as a Module.identifier and
+          # surfacing as false orphans during resolution.
           print tok
           found++
         }

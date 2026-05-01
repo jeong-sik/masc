@@ -52,6 +52,9 @@ const CARD_BOX = 'rounded-sm border border-[var(--color-border-default)] bg-[var
 const DECK_LABEL = 'font-mono text-3xs font-semibold uppercase tracking-[0.08em] text-[var(--color-fg-muted)]'
 const DECK_META = 'font-mono text-3xs text-[var(--color-fg-disabled)]'
 const DECK_CHIP = 'rounded-sm border border-[var(--color-border-strong)] bg-[var(--color-bg-elevated)] px-1.5 py-0.5 font-mono text-3xs'
+const GOAL_PANEL = 'rounded border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] p-5'
+const TREE_NODE_CARD_BASE = 'group flex items-start gap-3 rounded border p-3 transition-colors w-full text-left'
+const TREE_NODE_CARD_ACTIVE = `${TREE_NODE_CARD_BASE} border-[var(--color-state-active-border)] bg-[var(--color-state-active-bg)] shadow-[0_0_0_1px_var(--color-brass-border)]`
 
 /**
  * Pure hierarchy filter for goal tree nodes.
@@ -197,7 +200,7 @@ function trustDispositionLabel(disposition: string | null | undefined): string |
 
 function healthClass(health: GoalTreeNode['health']): string {
   switch (health) {
-    case 'done': return 'border-sky-400/30 bg-sky-500/10 text-sky-300'
+    case 'done': return 'border-[var(--color-ok-border)] bg-[var(--color-ok-soft)] text-[var(--color-ok-fg)]'
     case 'paused': return 'border-warn/30 bg-warn/10 text-warn'
     case 'blocked': return 'border-bad/35 bg-bad/10 text-bad'
     case 'at_risk': return 'border-warn/30 bg-warn/10 text-warn'
@@ -629,8 +632,8 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
   const coordinationHasError = coordinationViolations.some(v => v.severity === 'error')
   const indent = depth * 20
   const headerBase = isSelected
-    ? 'group flex items-start gap-3 rounded border border-accent/35 bg-[rgba(11,18,32,0.94)] p-3 transition-colors w-full text-left shadow-[0_0_0_1px_rgba(110,231,255,0.08)]'
-    : 'group flex items-start gap-3 rounded border border-card-border/60 bg-[rgba(8,13,22,0.86)] p-3 transition-colors hover:border-card-border/90 w-full text-left'
+    ? TREE_NODE_CARD_ACTIVE
+    : `${TREE_NODE_CARD_BASE} border-[var(--color-border-default)] bg-[var(--color-bg-surface)] hover:border-[var(--color-border-strong)]`
 
   return html`
     <div class="flex flex-col" style="margin-left:${indent}px">
@@ -761,7 +764,7 @@ function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
         <div class="mt-1.5 flex flex-col gap-1.5">
           <${GoalVerificationEvidencePanel} summary=${verificationSummary} compact />
           ${node.tasks.length > 0 ? html`
-            <div class="ml-6 flex flex-col gap-1 rounded border border-card-border/40 bg-[rgba(5,9,16,0.6)] p-2">
+            <div class="ml-6 flex flex-col gap-1 rounded border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] p-2">
               <div class="mb-1 text-3xs font-semibold uppercase tracking-widest text-text-dim">연결된 태스크</div>
               ${node.tasks.map(task => html`<${TreeTask} key=${task.id} task=${task} />`)}
             </div>
@@ -943,7 +946,7 @@ function GoalDetailPanel({
 
   if (!selectedNode) {
     return html`
-      <section class="rounded border border-card-border/70 bg-[rgba(9,14,24,0.88)] p-5" aria-label="목표 상세">
+      <section class=${GOAL_PANEL} aria-label="목표 상세">
         <${EmptyState} message="왼쪽에서 목표를 선택하면 Summary / Tasks / Evidence가 표시됩니다." />
       </section>
     `
@@ -953,7 +956,7 @@ function GoalDetailPanel({
   const verificationSummary = selectedNode.verification_summary ?? EMPTY_GOAL_VERIFICATION_SUMMARY
 
   return html`
-    <section class="flex flex-col gap-4 rounded border border-card-border/70 bg-[rgba(9,14,24,0.88)] p-5" aria-label="목표 상세">
+    <section class=${`${GOAL_PANEL} flex flex-col gap-4`} aria-label="목표 상세">
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div class="max-w-150">
           <div class="text-2xs font-semibold uppercase tracking-[0.18em] text-text-muted">목표 상세</div>
@@ -1234,7 +1237,7 @@ export function GoalTree() {
 
   return html`
     <div class="flex flex-col gap-5">
-      <section class="rounded border border-card-border/70 bg-[rgba(9,14,24,0.88)] p-5" aria-label="목표 관리자">
+      <section class=${GOAL_PANEL} aria-label="목표 관리자">
         <div class="mb-4 flex flex-wrap items-start justify-between gap-4">
           <div class="max-w-190">
             <div class="text-2xs font-semibold uppercase tracking-[0.18em] text-text-muted">목표 관리자</div>

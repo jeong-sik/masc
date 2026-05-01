@@ -35,7 +35,7 @@ while [ "$#" -gt 0 ]; do
       shift 2
       ;;
     --require-reviewer)
-      [ "$#" -ge 2 ] || die "--require-reviewer requires a GitHub login"
+      [ "$#" -ge 2 ] || die "--require-reviewer requires a GitHub login or team slug"
       REQUIRE_REVIEWER="$2"
       shift 2
       ;;
@@ -57,7 +57,9 @@ command -v gh >/dev/null 2>&1 || die "gh CLI is required"
 command -v jq >/dev/null 2>&1 || die "jq is required"
 
 if [ -z "$REPO" ]; then
-  REPO="$(gh repo view --json nameWithOwner --jq '.nameWithOwner' 2>/dev/null || true)"
+  if ! REPO="$(gh repo view --json nameWithOwner --jq '.nameWithOwner')"; then
+    die "repository not found; pass --repo owner/name"
+  fi
 fi
 
 [ -n "$REPO" ] || die "repository not found; pass --repo owner/name"
@@ -66,8 +68,9 @@ case "$REPO" in
   *) die "--repo must be owner/name" ;;
 esac
 
+ENVIRONMENT_ENCODED="$(jq -nr --arg value "$ENVIRONMENT" '$value | @uri')"
 environment_json="$(
-  gh api "repos/$REPO/environments/$ENVIRONMENT" 2>/dev/null
+  gh api "repos/$REPO/environments/$ENVIRONMENT_ENCODED"
 )" || die "could not read environment '$ENVIRONMENT' in $REPO"
 
 required_rule_count="$(
@@ -96,11 +99,11 @@ fi
 if [ -n "$REQUIRE_REVIEWER" ]; then
   reviewer_present="$(
     printf '%s' "$environment_json" |
-      jq --arg login "$REQUIRE_REVIEWER" '
+      jq --arg reviewer "$REQUIRE_REVIEWER" '
         [.protection_rules[]?
          | select(.type == "required_reviewers")
          | .reviewers[]?
-         | select((.reviewer.login // "") == $login)]
+         | select(((.reviewer.login // .reviewer.slug // "") == $reviewer))]
         | length'
   )"
   if [ "$reviewer_present" -eq 0 ]; then
@@ -127,7 +130,12 @@ printf '%s\n' "$environment_json" |
     deployment_branch_policy,
     required_reviewer_count: ([.protection_rules[]? | select(.type == "required_reviewers") | .reviewers[]?] | length),
     prevent_self_review: ([.protection_rules[]? | select(.type == "required_reviewers") | .prevent_self_review][0] // false),
-    reviewers: [.protection_rules[]? | select(.type == "required_reviewers") | .reviewers[]?.reviewer.login]
+    reviewers: [
+      .protection_rules[]?
+      | select(.type == "required_reviewers")
+      | .reviewers[]?.reviewer
+      | (.login // .slug // .name // .id // empty)
+    ]
   }'
 
 if [ "$prevent_self_review" != "true" ]; then

@@ -1200,8 +1200,9 @@ let test_human_approval_environment_check_contracts () =
     (Sys.file_exists
        (source_path "scripts/check-human-approval-env.sh"));
   check bool "human approval environment check reads GitHub Environment" true
-    (file_contains_pattern "scripts/check-human-approval-env.sh"
-       "repos/$REPO/environments/$ENVIRONMENT");
+    ((file_contains_pattern "scripts/check-human-approval-env.sh"
+        "environments/$ENVIRONMENT_ENCODED")
+     && file_contains_pattern "scripts/check-human-approval-env.sh" "@uri");
   check bool "human approval environment check requires reviewer rule" true
     (file_contains_pattern "scripts/check-human-approval-env.sh"
        "required_reviewers");
@@ -1216,7 +1217,10 @@ let test_human_approval_environment_check_contracts () =
        "--require-prevent-self-review");
   check bool "human approval environment check warns when self-review remains allowed" true
     (file_contains_pattern "scripts/check-human-approval-env.sh"
-       "prevent_self_review is false")
+       "prevent_self_review is false");
+  check bool "human approval environment check reports normalized reviewers" true
+    (file_contains_pattern "scripts/check-human-approval-env.sh"
+       ".login // .slug // .name // .id // empty")
 
 let () =
   run "ci_hardening_source"

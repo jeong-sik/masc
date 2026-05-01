@@ -2,13 +2,15 @@
 
 open Alcotest
 
+let source_root () =
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some root -> root
+  | None -> Sys.getcwd ()
+
+let source_path file_rel = Filename.concat (source_root ()) file_rel
+
 let file_contains_pattern file_rel pattern =
-  let source_root =
-    match Sys.getenv_opt "DUNE_SOURCEROOT" with
-    | Some root -> root
-    | None -> Sys.getcwd ()
-  in
-  let path = Filename.concat source_root file_rel in
+  let path = source_path file_rel in
   if not (Sys.file_exists path) then false
   else
     let ic = open_in path in
@@ -26,12 +28,7 @@ let file_not_contains_pattern file_rel pattern =
   not (file_contains_pattern file_rel pattern)
 
 let file_contains_line_with_patterns file_rel patterns =
-  let source_root =
-    match Sys.getenv_opt "DUNE_SOURCEROOT" with
-    | Some root -> root
-    | None -> Sys.getcwd ()
-  in
-  let path = Filename.concat source_root file_rel in
+  let path = source_path file_rel in
   if not (Sys.file_exists path) then false
   else
     let ic = open_in path in
@@ -54,12 +51,7 @@ let file_contains_line_with_patterns file_rel patterns =
         loop ())
 
 let file_pattern_position file_rel pattern =
-  let source_root =
-    match Sys.getenv_opt "DUNE_SOURCEROOT" with
-    | Some root -> root
-    | None -> Sys.getcwd ()
-  in
-  let path = Filename.concat source_root file_rel in
+  let path = source_path file_rel in
   if not (Sys.file_exists path) then None
   else
     let ic = open_in path in
@@ -69,11 +61,6 @@ let file_pattern_position file_rel pattern =
         let content = In_channel.input_all ic in
         let re = Str.regexp_string pattern in
         try Some (Str.search_forward re content 0) with Not_found -> None)
-
-let source_root () =
-  match Sys.getenv_opt "DUNE_SOURCEROOT" with
-  | Some root -> root
-  | None -> Sys.getcwd ()
 
 let quote = Filename.quote
 
@@ -1138,6 +1125,12 @@ let test_ssot_fingerprint_gate_contracts () =
     (file_contains_pattern "scripts/check-spec-truth.sh" "resolve_mirrors_ref");
   check bool "check-spec-truth exits non-zero on orphan" true
     (file_contains_pattern "scripts/check-spec-truth.sh" "orphan_count");
+  check bool "check-spec-truth guards resolver failures under set -e" true
+    (file_contains_pattern "scripts/check-spec-truth.sh"
+       "if resolve_mirrors_ref \"$token\"; then");
+  check bool "check-spec-truth surfaces parser failures" true
+    (file_not_contains_pattern "scripts/check-spec-truth.sh"
+       "2>/dev/null || true");
   check bool "check-spec-truth references meta-issue #9516" true
     (file_contains_pattern "scripts/check-spec-truth.sh" "#9516");
   check bool "ci meta gates step runs check-spec-truth" true

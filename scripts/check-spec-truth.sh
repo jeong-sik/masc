@@ -6,9 +6,9 @@
 # codebase.  A spec that references a deleted or renamed implementation
 # module is classified as an *orphan spec* and causes CI to fail.
 #
-# This is one half of the `make check-ssot` gate (fingerprint diff side is
-# handled by scripts/ci/check-ssot-spawn-drift.sh and
-# scripts/ci/check-tla-variant-sync.sh).
+# This script is one of the checks run by `make check-ssot`, alongside
+# `scripts/check-ssot.sh` and
+# `scripts/ci/check-ssot-spawn-drift.sh`.
 #
 # Meta-issue: #9516 (SSOT root-cause prevention)
 #
@@ -188,7 +188,7 @@ parse_mirrors_blocks() {
     END {
       if (in_block && block_refs == 0) print "SKIP"
     }
-  ' "$tla_file" 2>/dev/null || true
+  ' "$tla_file"
 }
 
 echo "=== check-spec-truth: scanning TLA+ spec Mirrors: annotations ==="
@@ -200,6 +200,13 @@ while IFS= read -r -d '' tla_file; do
   rel_file="${tla_file#"${REPO_ROOT}/"}"
 
   # parse_mirrors_blocks emits one ref token per line, or "SKIP" for bare blocks.
+  tokens_file="$(mktemp "${TMPDIR:-/tmp}/check-spec-truth.XXXXXX")"
+  if ! parse_mirrors_blocks "$tla_file" > "$tokens_file"; then
+    rm -f "$tokens_file"
+    echo "ERROR: failed to parse Mirrors: blocks in $rel_file" >&2
+    exit 2
+  fi
+
   while IFS= read -r token; do
     if [[ "$token" == "SKIP" ]]; then
       verbose "  SKIP (bare Mirrors: block) in $rel_file"
@@ -209,8 +216,7 @@ while IFS= read -r -d '' tla_file; do
 
     ((checked_count++)) || true
 
-    resolve_mirrors_ref "$token"
-    if [[ $? -eq 0 ]]; then
+    if resolve_mirrors_ref "$token"; then
       : # resolved
     else
       echo "FAIL: orphan spec reference in $rel_file"
@@ -219,7 +225,8 @@ while IFS= read -r -d '' tla_file; do
       ((orphan_count++)) || true
       fail=1
     fi
-  done < <(parse_mirrors_blocks "$tla_file")
+  done < "$tokens_file"
+  rm -f "$tokens_file"
 
 done < <(find specs -name '*.tla' -print0 2>/dev/null)
 

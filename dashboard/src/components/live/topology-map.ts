@@ -16,6 +16,11 @@ import { computed, type ReadonlySignal } from '@preact/signals'
 import { useEffect, useRef } from 'preact/hooks'
 import { Network } from 'vis-network'
 import { DataSet } from 'vis-data'
+// Match the codebase convention from activity-graph-view.ts: pull the
+// vis-network base stylesheet locally so this surface renders with the
+// expected container/interaction/tooltip styles even when imported in
+// isolation.
+import 'vis-network/styles/vis-network.css'
 import { agents, tasks, keepers } from '../../store'
 import { openAgentDetail } from '../agent-detail-state'
 import type { Agent, Task, Keeper } from '../../types/core'
@@ -64,7 +69,12 @@ export function topologyNodeColor(kind: 'agent' | 'keeper' | 'task', status: str
  *
  * Inclusion rules:
  *   - All keepers (as anchor nodes for their agents).
- *   - All agents that are not "done" or retired.
+ *   - Every agent in `agentList` is included as a node; visual
+ *     de-emphasis for `offline` / `inactive` agents is delegated to
+ *     [topologyNodeColor]. (Agent.status is `string` and the runtime
+ *     does not currently emit a "done" / "retired" state, so the
+ *     filter is intentionally absent here rather than guessing at
+ *     status names that may not appear.)
  *   - Tasks that are currently in-progress, claimed, or awaiting_verification.
  *     Completed/cancelled tasks are omitted to keep the graph readable.
  *

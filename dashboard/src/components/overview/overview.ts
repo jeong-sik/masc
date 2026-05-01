@@ -81,8 +81,14 @@ export function deriveTaskAlerts(
   const alerts: TaskAlert[] = []
   for (const t of taskList) {
     if (t.status === 'awaiting_verification') {
-      const updatedMs = t.updated_at ? Date.parse(t.updated_at) : null
-      const isStale = updatedMs === null || nowMs - updatedMs > STALL_THRESHOLD_MS
+      // Date.parse returns NaN for missing or non-ISO strings.  Use
+      // Number.isFinite as the gate so an invalid `updated_at` is
+      // treated as stale (silent-failure prevention) rather than
+      // slipping through the `nowMs - NaN > THRESHOLD = false` hole
+      // that the previous `=== null` check left.
+      const parsedMs = t.updated_at ? Date.parse(t.updated_at) : NaN
+      const isStale =
+        !Number.isFinite(parsedMs) || nowMs - parsedMs > STALL_THRESHOLD_MS
       if (isStale) {
         alerts.push({
           id: t.id,

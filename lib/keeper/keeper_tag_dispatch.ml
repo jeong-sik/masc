@@ -89,6 +89,7 @@ let dispatch
       Tool_agent.dispatch { Tool_agent.config; agent_name } ~name ~args
   | Mod_room ->
       Tool_coord.dispatch { Tool_coord.config; agent_name } ~name ~args
+      |> Option.map (fun { Coord_types.success; message } -> (success, message))
   | Mod_control ->
       (* masc_pause_status is read-only — safe for keeper dispatch.
          masc_pause/masc_resume modify room lifecycle — blocked. *)

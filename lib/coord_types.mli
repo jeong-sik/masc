@@ -9,9 +9,12 @@
     All records are concrete because callers construct +
     destructure them field-by-field at the dispatch site. *)
 
-(** [tool_result] is [(success, message)].  Used by tool dispatch
-    return type before promotion to {!Tool_result.t}. *)
-type tool_result = bool * string
+(** [tool_result] carries the outcome of a coord tool handler.
+    Used by tool dispatch return type before promotion to {!Tool_result.t}. *)
+type tool_result = {
+  success : bool;
+  message : string;
+}
 
 (** Per-call coordination context.  Carries the resolved
     {!Coord.config} and the agent identifier. *)

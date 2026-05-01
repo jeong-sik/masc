@@ -1,6 +1,9 @@
 (** Coord_types - Shared types for coordination modules *)
 
-type tool_result = bool * string
+type tool_result = {
+  success : bool;
+  message : string;
+}
 
 type context = {
   config: Coord.config;

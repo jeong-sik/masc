@@ -126,4 +126,4 @@ let handle_check ~(inspect_state : context -> agent_state) ctx args =
       ("fix_hint", fix_hint);
     ]
   in
-  (true, Yojson.Safe.to_string result)
+  { success = true; message = Yojson.Safe.to_string result }

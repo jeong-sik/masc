@@ -518,17 +518,19 @@ let status_summary_string (ctx : context) =
 
 let handle_status ctx _args =
   let cache_key = Printf.sprintf "%s::%s" ctx.config.base_path ctx.agent_name in
-  (true, cached_text_by_key _status_cache ~key:cache_key
+  { success = true;
+    message = cached_text_by_key _status_cache ~key:cache_key
        ~ttl_s:(status_cache_ttl_s ()) (fun () ->
-       status_summary_string ctx))
+       status_summary_string ctx) }
 
 let handle_reset ctx args =
   let confirm = get_bool args "confirm" false in
   if not confirm then
-    (false, "⚠️ This will DELETE the entire .masc/ folder!\nCall with confirm=true to proceed.")
+    { success = false;
+      message = "⚠️ This will DELETE the entire .masc/ folder!\nCall with confirm=true to proceed." }
   else begin
     invalidate_status_cache ();
-    (true, Coord.reset ctx.config)
+    { success = true; message = Coord.reset ctx.config }
   end
 
 (* ── State inspection (shared by workflow_guide and check) ──────── *)
@@ -600,14 +602,14 @@ let handle_workflow_guide ctx _args =
       ("guidance", Workflow_guide.guidance_to_json guidance);
     ]
   in
-  (true, Yojson.Safe.to_string result)
+  { success = true; message = Yojson.Safe.to_string result }
 
 (* ── Coordination product FSM snapshot ─────────────────────────── *)
 
 let handle_coordination_fsm_snapshot ctx _args =
-  ( true,
-    Yojson.Safe.to_string
-      (Coordination_product_snapshot.safe_build_yojson ctx.config) )
+  { success = true;
+    message = Yojson.Safe.to_string
+      (Coordination_product_snapshot.safe_build_yojson ctx.config) }
 
 (* ── State check (assertion-based verification) ────────────────── *)
 
@@ -618,13 +620,13 @@ let handle_coordination_fsm_snapshot ctx _args =
     [assertion_kind_to_string] / [assertion_kind_of_string_lenient]
     aren't updated. Same shape as #8546 / #8601 / #8592. *)
 let handle_heartbeat ctx _args =
-  let result = Coord.heartbeat ctx.config ~agent_name:ctx.agent_name in
+  let message = Coord.heartbeat ctx.config ~agent_name:ctx.agent_name in
   (* Coord.heartbeat returns "⚠ ..." on failure (agent not found, invalid file) *)
-  let success = not (String.length result >= 3
-    && Char.code result.[0] = 0xe2
-    && Char.code result.[1] = 0x9a
-    && Char.code result.[2] = 0xa0) in
-  (success, result)
+  let success = not (String.length message >= 3
+    && Char.code message.[0] = 0xe2
+    && Char.code message.[1] = 0x9a
+    && Char.code message.[2] = 0xa0) in
+  { success; message }
 
 let dispatch ctx ~name ~args : tool_result option =
   match name with

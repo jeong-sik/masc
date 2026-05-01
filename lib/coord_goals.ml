@@ -3,6 +3,12 @@
 open Coord_types
 open Tool_args
 
+(* Local helpers: return Coord_types.tool_result record, shadowing Tool_args tuple versions. *)
+let ok_result fields = { success = true; message = ok_response fields }
+let error_result msg = { success = false; message = error_response msg }
+let error_result_typed ~code msg = { success = false; message = error_response_typed ~code msg }
+let validation_error_result errors = { success = false; message = validation_error_response errors }
+
 let goal_horizon_strings = [ "short"; "mid"; "long" ]
 let goal_status_strings = [ "active"; "paused"; "done"; "dropped" ]
 let goal_phase_strings =

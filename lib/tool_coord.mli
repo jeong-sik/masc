@@ -35,7 +35,7 @@
 (** {1 Tool result + context} *)
 
 type tool_result = Coord_types.tool_result
-(** Alias for [bool * string] — re-export of
+(** Alias for [{ success: bool; message: string }] — re-export of
     {!Coord_types.tool_result}. *)
 
 type context = Coord_types.context = {

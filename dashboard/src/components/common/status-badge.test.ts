@@ -45,6 +45,11 @@ describe('statusDotColor', () => {
     expect(statusDotColor('busy')).toBe('bg-[var(--color-status-warn)]')
   })
 
+  it('returns warn for paused', () => {
+    expect(statusDotColor('paused')).toBe('bg-[var(--color-status-warn)]')
+    expect(statusBadgeTone('paused')).toBe('warn')
+  })
+
   it('returns idle for stopped', () => {
     expect(statusDotColor('stopped')).toBe('bg-[var(--color-status-idle)]')
   })
@@ -64,6 +69,7 @@ describe('statusBadgeTone', () => {
   it('keeps semantic status groups explicit', () => {
     expect(statusBadgeTone('active')).toBe('ok')
     expect(statusBadgeTone('running')).toBe('warn')
+    expect(statusBadgeTone('paused')).toBe('warn')
     expect(statusBadgeTone('listening')).toBe('info')
     expect(statusBadgeTone('offline')).toBe('neutral')
     expect(statusBadgeTone('error')).toBe('bad')

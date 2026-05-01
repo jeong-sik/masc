@@ -37,6 +37,7 @@ export function statusBadgeTone(status: string): StatusBadgeTone {
     case 'in_progress':
     case 'claimed':
     case 'running':
+    case 'paused':
       return 'warn'
     case 'awaiting_verification':
     case 'interrupted':

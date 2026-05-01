@@ -8,6 +8,7 @@ import { createAsyncResource } from '../lib/async-state'
 import { LoadingState, ErrorState, EmptyState } from './common/feedback-state'
 import { selectedRepoId, syncRepository, deleteRepository, type Repository, type RepoStatus } from './repo-sidebar'
 import { requestConfirm } from './common/confirm-dialog'
+import { StatusBadge as CommonStatusBadge } from './common/status-badge'
 import { Trash2, GitBranch, Clock, Calendar, Folder, Link, Shield, RefreshCw } from 'lucide-preact'
 
 // ── Branch type ──────────────────────────────────────────
@@ -107,18 +108,10 @@ export function resetRepoDetail(): void {
 
 // ── Helpers ──────────────────────────────────────────────
 
-function StatusBadge({ status }: { status: RepoStatus }) {
-  const config = {
-    active: { label: '활성', bg: 'bg-[var(--ok-10)]', text: 'text-[var(--color-status-ok)]', border: 'border-[var(--ok-20)]' },
-    paused: { label: '일시정지', bg: 'bg-[var(--warn-10)]', text: 'text-[var(--color-status-warn)]', border: 'border-[var(--warn-20)]' },
-    error: { label: '오류', bg: 'bg-[var(--bad-12)]', text: 'text-[var(--color-status-err)]', border: 'border-[var(--bad-30)]' },
-  }
-  const c = config[status]
-  return html`
-    <span class="inline-flex items-center gap-1 text-2xs font-bold px-2.5 py-0.5 rounded border ${c.bg} ${c.text} ${c.border}">
-      ${c.label}
-    </span>
-  `
+const REPO_STATUS_LABEL: Record<RepoStatus, string> = {
+  active: '활성',
+  paused: '일시정지',
+  error: '오류',
 }
 
 export function formatDate(value: string | number | null): string {
@@ -244,7 +237,7 @@ export function RepoDetailPanel() {
       <div class="flex items-center justify-between">
         <div class="flex items-center gap-3">
           <h2 class="text-lg font-semibold text-[var(--color-fg-secondary)]">${repo.name}</h2>
-          <${StatusBadge} status=${repo.status} />
+          <${CommonStatusBadge} status=${repo.status} label=${REPO_STATUS_LABEL[repo.status]} />
         </div>
         <div class="flex items-center gap-2">
           <button

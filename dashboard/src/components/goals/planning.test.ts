@@ -32,7 +32,7 @@ describe('PlanningStat', () => {
       container,
     )
 
-    const valueDiv = container.querySelector('.text-3xl')
+    const valueDiv = container.querySelector('.text-2xl')
     expect(valueDiv?.classList.contains('text-text-strong')).toBe(true)
   })
 
@@ -42,7 +42,7 @@ describe('PlanningStat', () => {
       container,
     )
 
-    const valueDiv = container.querySelector('.text-3xl')
+    const valueDiv = container.querySelector('.text-2xl')
     expect(valueDiv?.classList.contains('text-bad')).toBe(true)
   })
 
@@ -52,7 +52,7 @@ describe('PlanningStat', () => {
       container,
     )
 
-    const valueDiv = container.querySelector('.text-3xl')
+    const valueDiv = container.querySelector('.text-2xl')
     expect(valueDiv?.classList.contains('text-warn')).toBe(true)
   })
 
@@ -62,7 +62,7 @@ describe('PlanningStat', () => {
       container,
     )
 
-    const valueDiv = container.querySelector('.text-3xl')
+    const valueDiv = container.querySelector('.text-2xl')
     expect(valueDiv?.classList.contains('text-ok')).toBe(true)
   })
 

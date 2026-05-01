@@ -153,7 +153,8 @@ let throughput_from_response ~(usage : Oas.Types.api_usage) ~ttfb_ms
         Float.of_int usage.output_tokens /. (decode_ms /. 1000.0)
 
 let sample_of_response ~provider_id ~model_id ?total_duration_ms
-    ?(retry_count = 0) ~status (response : Oas.Types.api_response) =
+    ?(serialization_ms = 0.0) ?(retry_count = 0) ~status
+    (response : Oas.Types.api_response) =
   let usage = Oas_response.usage_or_zero response in
   let total_duration_ms =
     duration_from_response ?total_duration_ms response
@@ -164,7 +165,7 @@ let sample_of_response ~provider_id ~model_id ?total_duration_ms
     model_id;
     ttfb_ms;
     total_duration_ms;
-    serialization_ms = 0.0;
+    serialization_ms;
     input_tokens = usage.input_tokens;
     output_tokens = usage.output_tokens;
     throughput_tokens_per_s =
@@ -175,11 +176,11 @@ let sample_of_response ~provider_id ~model_id ?total_duration_ms
     retry_count;
   }
 
-let record_response ~provider_id ~model_id ?total_duration_ms ?retry_count
-    ~status response =
+let record_response ~provider_id ~model_id ?total_duration_ms ?serialization_ms
+    ?retry_count ~status response =
   record
     (sample_of_response ~provider_id ~model_id ?total_duration_ms
-       ?retry_count ~status response)
+       ?serialization_ms ?retry_count ~status response)
 
 let snapshot_provider provider =
   with_lock (fun () ->

@@ -377,12 +377,7 @@ let provision_via_with_token ?credential_id ?identity_label
         Error "with_token provisioning requires a non-empty token"
       else (
         (try mkdir_p gh_config_dir 0o700
-         with
-         | Unix.Unix_error (err, _, _) ->
-             ()
-             |> ignore
-             |> fun () ->
-             ignore err);
+         with Unix.Unix_error _ -> ());
         if not (Sys.file_exists gh_config_dir) then
           Error
             (Printf.sprintf

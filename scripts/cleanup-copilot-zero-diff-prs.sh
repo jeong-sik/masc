@@ -23,7 +23,21 @@ CLOSE=0
 COMMENT="Closing this stale Copilot [WIP] draft because it is draft-only, authored by copilot-swe-agent, and currently has zero changed files. Reopen or recreate it if work resumes with a real diff."
 
 usage() {
-  sed -n '1,18p' "$0"
+  awk '
+    NR == 1 { next }
+    /^[[:space:]]*$/ {
+      if (started) print ""
+      next
+    }
+    /^#/ {
+      line = $0
+      sub(/^# ?/, "", line)
+      print line
+      started = 1
+      next
+    }
+    started { exit }
+  ' "$0"
 }
 
 die() {

@@ -35,6 +35,7 @@ let create_store () = {
   post_count = ref 0;
   last_sweep = Time_compat.now ();
   mutex = Eio.Mutex.create ();
+  persist_mutex = Eio.Mutex.create ();
   karma_cache = None;
   sorted_posts_cache = None;
   comments_by_post = Hashtbl.create 1024;
@@ -78,6 +79,10 @@ let mark_dirty_comment store comment_id =
 (** Execute f with mutex held, using Eio.Mutex for proper concurrency *)
 let with_lock store f =
   Eio.Mutex.use_rw ~protect:true store.mutex (fun () -> f ())
+
+(** Serialize JSONL writes without holding the state mutex. *)
+let with_persist_lock store f =
+  Eio.Mutex.use_rw ~protect:true store.persist_mutex (fun () -> f ())
 
 (** {1 Sweeper - Aggressive Cleanup} *)
 
@@ -379,7 +384,6 @@ let create_post store ~author ~content ?title ?body ~post_kind ?meta_json
         Hashtbl.add store.posts (Post_id.to_string post.id) post;
         Stdlib.incr store.post_count;
         invalidate_post_caches store;
-        append_post post;
         Ok post
       end)
   in
@@ -392,6 +396,7 @@ let create_post store ~author ~content ?title ?body ~post_kind ?meta_json
      post itself is already in the store and on disk. *)
   (match board_result with
    | Ok post ->
+       with_persist_lock store (fun () -> append_post post);
        (match Agent_economy.earn
           ~base_path:(board_base_path ()) ~agent_name:author
           ~kind:Earn_board_post ~reason:"board post" () with
@@ -629,55 +634,60 @@ let add_comment store ~post_id ~author ~content ?parent_id ?(ttl_hours=Limits.de
     Error (Validation_error "Content cannot be empty")
   else
 
-  with_lock store (fun () ->
-    (* Verify post exists *)
-    match Hashtbl.find_opt store.posts (Post_id.to_string pid) with
-    | None -> Error (Post_not_found post_id)
-    | Some post ->
-        (* Check comment count using index *)
-        let post_key = Post_id.to_string pid in
-        let post_comment_count =
-          Hashtbl.find_opt store.comments_by_post post_key
-          |> Option.value ~default:[] |> List.length
-        in
-        if post_comment_count >= Limits.max_comments_per_post then
-          Error (Capacity_exceeded { current = post_comment_count; max = Limits.max_comments_per_post })
-        else begin
-          let now = Time_compat.now () in
-          let ttl =
-            match post.post_kind with
-            | Automation_post | System_post ->
-                let forced = Limits.automation_ttl_hours in
-                if ttl_hours = 0 then forced
-                else min ttl_hours forced
-            | Human_post ->
-                if ttl_hours = 0 then 0 else min ttl_hours Limits.max_ttl_hours
-          in
-          let comment = {
-            id = Comment_id.generate ();
-            post_id = pid;
-            parent_id = parent_cid;
-            author = author_id;
-            content;
-            created_at = now;
-            expires_at = if ttl = 0 then 0.0 else now +. (Stdlib.Float.of_int ttl *. 3600.0);
-            votes_up = 0;
-            votes_down = 0;
-          } in
-          Hashtbl.add store.comments (Comment_id.to_string comment.id) comment;
-          (* Update comments_by_post index *)
+  let board_result =
+    with_lock store (fun () ->
+      (* Verify post exists *)
+      match Hashtbl.find_opt store.posts (Post_id.to_string pid) with
+      | None -> Error (Post_not_found post_id)
+      | Some post ->
+          (* Check comment count using index *)
           let post_key = Post_id.to_string pid in
-          let existing = Hashtbl.find_opt store.comments_by_post post_key |> Option.value ~default:[] in
-          Hashtbl.replace store.comments_by_post post_key (Comment_id.to_string comment.id :: existing);
-          (* Update post reply count and updated_at *)
-          Hashtbl.replace store.posts post_key
-            { post with reply_count = post.reply_count + 1; updated_at = now };
-          invalidate_post_caches store;
-          invalidate_comment_caches store;
-          append_comment comment;
-          Ok comment
-        end
-  )
+          let post_comment_count =
+            Hashtbl.find_opt store.comments_by_post post_key
+            |> Option.value ~default:[] |> List.length
+          in
+          if post_comment_count >= Limits.max_comments_per_post then
+            Error (Capacity_exceeded { current = post_comment_count; max = Limits.max_comments_per_post })
+          else begin
+            let now = Time_compat.now () in
+            let ttl =
+              match post.post_kind with
+              | Automation_post | System_post ->
+                  let forced = Limits.automation_ttl_hours in
+                  if ttl_hours = 0 then forced
+                  else min ttl_hours forced
+              | Human_post ->
+                  if ttl_hours = 0 then 0 else min ttl_hours Limits.max_ttl_hours
+            in
+            let comment = {
+              id = Comment_id.generate ();
+              post_id = pid;
+              parent_id = parent_cid;
+              author = author_id;
+              content;
+              created_at = now;
+              expires_at = if ttl = 0 then 0.0 else now +. (Stdlib.Float.of_int ttl *. 3600.0);
+              votes_up = 0;
+              votes_down = 0;
+            } in
+            Hashtbl.add store.comments (Comment_id.to_string comment.id) comment;
+            (* Update comments_by_post index *)
+            let post_key = Post_id.to_string pid in
+            let existing = Hashtbl.find_opt store.comments_by_post post_key |> Option.value ~default:[] in
+            Hashtbl.replace store.comments_by_post post_key (Comment_id.to_string comment.id :: existing);
+            (* Update post reply count and updated_at *)
+            Hashtbl.replace store.posts post_key
+              { post with reply_count = post.reply_count + 1; updated_at = now };
+            invalidate_post_caches store;
+            invalidate_comment_caches store;
+            Ok comment
+          end)
+  in
+  match board_result with
+  | Ok comment ->
+      with_persist_lock store (fun () -> append_comment comment);
+      Ok comment
+  | Error _ as e -> e
 
 let get_comments store ~post_id : (comment list, board_error) Result.t =
   maybe_sweep store;

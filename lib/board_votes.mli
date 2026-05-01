@@ -22,9 +22,8 @@
     - {b Vote log persistence}: [append_vote_log],
       [rewrite_vote_log].
     - {b Internal vote outcome}: the [vote_outcome] record
-      ({delta; earn_upvote_for}) is consumed only inside the
-      vote / vote_comment paths to gate the
-      [Agent_economy.earn] credit on the fresh-upvote path.
+      carries the score delta, optional fresh-upvote economy
+      credit, and post-lock vote log / feedback side effects.
     - {b Persistence loaders}: [load_persisted_posts],
       [load_persisted_comments], [load_persisted_votes],
       [recalculate_reply_counts].
@@ -91,8 +90,8 @@ val vote :
     author a credit via [Agent_economy.earn] {b outside}
     the lock so the ledger write does not block other
     readers.  Every vote is broadcast to
-    {!Thompson_sampling.record_vote} for posterior
-    feedback. *)
+    {!Thompson_sampling.record_vote} outside the state lock
+    for posterior feedback. *)
 
 val vote_comment :
   store ->
@@ -171,8 +170,9 @@ val reset_global_for_test : unit -> unit
 val flush_dirty : store -> unit
 (** Flushes dirty post/comment snapshots to the JSONL files
     with a short in-memory snapshot lock and append-only disk
-    writes.  Vote changes are already appended on the vote
-    path.  Stamps [last_flush] with the wall clock. *)
+    writes.  When dirty vote targets exist, compacts the vote
+    log from the same timestamp-preserving in-memory snapshot.
+    Stamps [last_flush] with the wall clock. *)
 
 (** {1 Karma} *)
 

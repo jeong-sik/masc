@@ -49,8 +49,8 @@ let sdk_error_kind = function
   | Oas.Error.Serialization _ -> "serialization"
   | Oas.Error.Io _ -> "io"
   | Oas.Error.Orchestration _ -> "orchestration"
-  | Oas.Error.A2a _ -> "a2a"
   | Oas.Error.Internal _ -> "internal"
+  | Oas.Error.A2a _ -> "a2a"
 
 (* Per-variant terminal_reason_code for Oas.Error.Api.
    Previously every API failure collapsed to "api_error", so 7 keepers
@@ -124,8 +124,8 @@ let terminal_reason_code_of_sdk_error = function
   | Oas.Error.Serialization _ -> "serialization_error"
   | Oas.Error.Io _ -> "io_error"
   | Oas.Error.Orchestration _ -> "orchestration_error"
-  | Oas.Error.A2a _ -> "a2a_error"
   | Oas.Error.Internal _ -> "internal_error"
+  | Oas.Error.A2a _ -> "a2a_error"
 
 let receipt_outcome_kind_of_sdk_error = function
   | Oas.Error.Api (Oas.Retry.Timeout _) -> `Cancelled

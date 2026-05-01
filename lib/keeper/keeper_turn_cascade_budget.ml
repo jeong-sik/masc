@@ -66,8 +66,8 @@ let sdk_error_kind = function
   | Oas.Error.Serialization _ -> "serialization"
   | Oas.Error.Io _ -> "io"
   | Oas.Error.Orchestration _ -> "orchestration"
-  | Oas.Error.A2a _ -> "a2a"
   | Oas.Error.Internal _ -> "internal"
+  | Oas.Error.A2a _ -> "a2a"
 
 let record_turn_failure_stress
     ~(meta : keeper_meta)

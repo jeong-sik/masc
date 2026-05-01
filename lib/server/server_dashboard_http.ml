@@ -125,8 +125,7 @@ let dashboard_memory_subsystems_http_json ~(config : Coord_utils.config) request
   in
   let hebbian =
     try
-      let g = Hebbian_eio.load_graph config in
-      Hebbian_eio.graph_to_json g
+      `Null
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | _ -> `Assoc [ ("synapses", `List []); ("last_consolidation", `Float 0.0) ]

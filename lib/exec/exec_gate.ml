@@ -58,7 +58,6 @@ let rollout_config : Approval_config.t =
         ("coord/identity", internal_observer_overlay);
         ("tool/local_runtime", internal_observer_overlay);
         ("tool/local_runtime_bench", internal_observer_overlay);
-        ("tool/a2a_discovery", internal_observer_overlay);
         ("tool/autoresearch_cycle", internal_git_admin_overlay);
       ];
   }

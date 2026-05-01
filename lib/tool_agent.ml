@@ -36,48 +36,6 @@ let result_to_response = function
    [tool_schemas_agent.ml] mirrors the SSOT (cycle-aware, sync test).
    The previous code used a string match with a wildcard `_ -> Get`
    branch which silently routed any unknown action to Get. *)
-type agent_card_action =
-  | Get
-  | Refresh
-
-let agent_card_action_to_string = function
-  | Get -> "get"
-  | Refresh -> "refresh"
-
-let agent_card_action_of_string_opt raw =
-  match String.trim (String.lowercase_ascii raw) with
-  | "get" | "" -> Some Get
-  | "refresh" -> Some Refresh
-  | _ -> None
-
-let all_agent_card_actions = [ Get; Refresh ]
-
-let valid_agent_card_action_strings =
-  List.map agent_card_action_to_string all_agent_card_actions
-
-(* Issue #8501: Variant SSOT for masc_collaboration_graph.format.  Same
-   pattern as agent_card_action above. The previous code used
-   [if String.equal format "json" then ... else (text)] which silently routed
-   any unknown format to text. *)
-type collaboration_format =
-  | Text
-  | Json
-
-let collaboration_format_to_string = function
-  | Text -> "text"
-  | Json -> "json"
-
-let collaboration_format_of_string_opt raw =
-  match String.trim (String.lowercase_ascii raw) with
-  | "text" | "" -> Some Text
-  | "json" -> Some Json
-  | _ -> None
-
-let all_collaboration_formats = [ Text; Json ]
-
-let valid_collaboration_format_strings =
-  List.map collaboration_format_to_string all_collaboration_formats
-
 (** Handle masc_agents *)
 let handle_agents ctx args =
   let limit = get_int args "limit" 20 |> max 1 |> min 50 in
@@ -178,20 +136,20 @@ type fitness_weights = {
   w_reliability : float;
   w_speed : float;
   w_handoff : float;
-  w_collaboration : float;
+  
 }
 
 let default_fitness_weights : fitness_weights = {
-  w_completion = 0.35;
-  w_reliability = 0.25;
+  w_completion = 0.40;
+  w_reliability = 0.30;
   w_speed = 0.15;
   w_handoff = 0.15;
-  w_collaboration = 0.10;
+  
 }
 
 (** Score function for fitness calculation.
     @param weights Optional custom weights (defaults to [default_fitness_weights]) *)
-let score_for ?(weights = default_fitness_weights) ~min_avg ~max_collabs metrics =
+let score_for ?(weights = default_fitness_weights) ~min_avg metrics =
   let has_data = metrics.Metrics_store_eio.total_tasks > 0 in
   let completion = metrics.Metrics_store_eio.task_completion_rate in
   let reliability = if has_data then 1.0 -. metrics.Metrics_store_eio.error_rate else 0.0 in
@@ -201,19 +159,14 @@ let score_for ?(weights = default_fitness_weights) ~min_avg ~max_collabs metrics
       Stdlib.Float.min 1.0 (min_avg /. metrics.Metrics_store_eio.avg_completion_time_s)
     else 0.0
   in
-  let collab_count = List.length metrics.Metrics_store_eio.unique_collaborators in
-  let collaboration =
-    if max_collabs = 0 then 0.0
-    else Stdlib.Float.of_int collab_count /. Stdlib.Float.of_int max_collabs
-  in
-  let score =
+    let score =
     (weights.w_completion *. completion)
     +. (weights.w_reliability *. reliability)
     +. (weights.w_speed *. speed)
     +. (weights.w_handoff *. handoff)
-    +. (weights.w_collaboration *. collaboration)
+    
   in
-  (score, completion, reliability, speed, handoff, collaboration)
+  (score, completion, reliability, speed, handoff)
 
 (** Handle masc_agent_fitness *)
 let handle_agent_fitness ctx args =
@@ -245,10 +198,10 @@ let handle_agent_fitness ctx args =
   else
     let metrics_list = List.map (fun a -> (a, metrics_for ctx ~days a)) agents in
     let min_avg = min_avg_time metrics_list in
-    let max_col = max_collabs metrics_list in
+    
     let agents_json =
       List.map (fun (agent_id, metrics) ->
-        let (score, completion, reliability, speed, handoff, collaboration) = score_for ~min_avg ~max_collabs:max_col metrics in
+        let (score, completion, reliability, speed, handoff) = score_for ~min_avg metrics in
         `Assoc [
           ("agent_id", `String agent_id);
           ("fitness", `Float score);
@@ -257,7 +210,7 @@ let handle_agent_fitness ctx args =
             ("reliability", `Float reliability);
             ("speed", `Float speed);
             ("handoff", `Float handoff);
-            ("collaboration", `Float collaboration);
+            
           ]);
           ("metrics", Metrics_store_eio.agent_metrics_to_yojson metrics);
         ]
@@ -270,67 +223,7 @@ let handle_agent_fitness ctx args =
     (true, Yojson.Safe.to_string json)
 
 (** Handle masc_collaboration_graph *)
-let handle_collaboration_graph ctx args =
-  (* Issue #8501: explicit Variant fallback to Text — back-compat with
-     prior `else` branch but unknown formats are visibly mapped, not
-     silently absorbed. *)
-  let format =
-    collaboration_format_of_string_opt (get_string args "format" "text")
-    |> Option.value ~default:Text
-  in
-  let limit = get_int args "limit" 20 |> max 1 |> min 100 in
-  let (synapses, agents) = Hebbian_eio.get_graph_data ctx.config in
-  match format with
-  | Json ->
-    let synapses = List.filteri (fun i _ -> i < limit) synapses in
-    let json = `Assoc [
-      ("agents", `List (List.map (fun a -> `String a) agents));
-      ("synapses", `List (List.map Hebbian_eio.synapse_to_json synapses));
-    ] in
-    (true, Yojson.Safe.to_string json)
-  | Text ->
-    let lines =
-      synapses
-      |> List.sort (fun a b -> Stdlib.Float.compare b.Hebbian_eio.weight a.Hebbian_eio.weight)
-      |> List.filteri (fun i _ -> i < limit)
-      |> List.map (fun s ->
-          Printf.sprintf "%s → %s (%.2f, success:%d, failure:%d)"
-            s.Hebbian_eio.from_agent s.Hebbian_eio.to_agent
-            s.Hebbian_eio.weight s.Hebbian_eio.success_count s.Hebbian_eio.failure_count)
-    in
-    if Stdlib.List.length lines = 0 then
-      (true, "No collaboration data yet.")
-    else
-      (true, String.concat "\n" lines)
-
 (** Handle masc_agent_card *)
-let handle_agent_card _ctx args =
-  (* Issue #8501: explicit Variant fallback to Get — back-compat with
-     prior wildcard `_ -> get` but unknown actions are now mapped via
-     [Option.value], making the fallback visible at the call site. *)
-  let action =
-    agent_card_action_of_string_opt (get_string args "action" "get")
-    |> Option.value ~default:Get
-  in
-  let card = Agent_card.generate_default ~schemas:Config.raw_all_tool_schemas () in
-  let json = Agent_card.to_json card in
-  let response = match action with
-    | Refresh ->
-        `Assoc [
-          ("status", `String "refreshed");
-          ("card", json);
-          ("endpoint", `String "/.well-known/agent.json");
-          ("legacy_endpoint", `String "/.well-known/agent-card.json");
-        ]
-    | Get ->
-        `Assoc [
-          ("card", json);
-          ("endpoint", `String "/.well-known/agent.json");
-          ("legacy_endpoint", `String "/.well-known/agent-card.json");
-        ]
-  in
-  (true, Yojson.Safe.to_string response)
-
 (** Dispatch handler. Returns Some (success, result) if handled, None otherwise *)
 let dispatch ctx ~name ~args =
   match name with
@@ -339,9 +232,7 @@ let dispatch ctx ~name ~args =
   | "masc_agent_update" -> Some (handle_agent_update ctx args)
   | "masc_get_metrics" -> Some (handle_get_metrics ctx args)
   | "masc_agent_fitness" -> Some (handle_agent_fitness ctx args)
-  | "masc_collaboration_graph" -> Some (handle_collaboration_graph ctx args)
-  | "masc_agent_card" -> Some (handle_agent_card ctx args)
-  | _ -> None
+      | _ -> None
 
 let schemas = Tool_schemas_agent.schemas
 
@@ -350,12 +241,11 @@ let schemas = Tool_schemas_agent.schemas
 (* ================================================================ *)
 
 let _tool_spec_read_only =
-  [ "masc_agents"; "masc_agent_card" ]
+  [ "masc_agents";  ]
 let _tool_spec_requires_join = [ "masc_register_capabilities" ]
 
 let tool_required_permission = function
-  | "masc_agents" | "masc_agent_card" | "masc_agent_fitness"
-  | "masc_collaboration_graph"
+  | "masc_agents" | "masc_agent_fitness"
   | "masc_get_metrics" ->
       Some Types.CanReadState
   | "masc_register_capabilities" | "masc_agent_update" ->

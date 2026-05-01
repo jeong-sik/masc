@@ -1009,14 +1009,6 @@ and handle_transition ?agent_tool_names ctx args =
   (* Notify A2A subscribers on successful transition *)
   (match result with
    | Ok _ ->
-       A2a_tools.notify_event
-         ~event_type:A2a_tools.TaskUpdate
-         ~agent:ctx.agent_name
-         ~data:(`Assoc [
-           ("task_id", `String task_id);
-           ("action", `String action_s);
-           ("notes", `String notes);
-         ]);
        (* Notification harness: push task transition to all active sessions *)
        Subscriptions.push_event_to_sessions (`Assoc [
          ("type", `String "masc/task_transition");

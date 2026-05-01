@@ -258,7 +258,7 @@ type checkpoint_load_error =
   | Parse_error of string
   | Io_error of string
   (** Catch-all for SDK errors outside the Io / Serialization families
-      (Api / Agent / Mcp / Config / Orchestration / A2a / Internal).
+      (Api / Agent / Mcp / Config / Orchestration / Internal).
       Distinct from Io_error so observers can tell a local
       checkpoint-store I/O failure apart from an SDK-level failure that
       surfaced during a load. (#8605 family) *)
@@ -309,7 +309,7 @@ let is_not_found_detail (detail : string) : bool =
 
 (* #8605 family: exhaustive on Oas.Error.sdk_error top-level
    variants. The previous wildcard collapsed Api / Agent / Mcp / Config
-   / Orchestration / A2a / Internal errors into Io_error, hiding
+   / Orchestration / Internal errors into Io_error, hiding
    non-IO failures from the dashboard. The wildcards on Io _ and
    Serialization _ remain narrow (one level deep) so future inner
    variants land in the semantically correct category, but a future
@@ -327,7 +327,7 @@ let classify_sdk_error (e : Oas.Error.sdk_error) : checkpoint_load_error =
   | Serialization (UnknownVariant r) ->
       Parse_error (sprintf "unknown variant %s: %s" r.type_name r.value)
   | Api _ | Agent _ | Mcp _ | Config _
-  | Orchestration _ | A2a _ | Internal _ ->
+  | Orchestration _ | Internal _ | A2a _ ->
       Sdk_other_error (Oas.Error.to_string e)
 
 let result_all items =

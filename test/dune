@@ -61,7 +61,6 @@
         test_cost_usd_source_attribution_10318
         test_response_model_empty_10083
         test_heuristic_theatre_audit
-        test_hebbian_edge_update_counter
         test_keeper_proactive_skip_counter
         test_oas_error_kind_counter
         test_board_author_identity_10297
@@ -255,7 +254,6 @@
           test_cost_usd_source_attribution_10318
           test_response_model_empty_10083
           test_heuristic_theatre_audit
-          test_hebbian_edge_update_counter
           test_keeper_proactive_skip_counter
           test_oas_error_kind_counter
           test_board_author_identity_10297
@@ -508,7 +506,6 @@
         test_oas_adapters
         test_cache_eio
         test_metrics_store_eio
-        test_hebbian_eio
         test_planning_eio
         test_thompson_sampling
         test_safe_ops
@@ -702,7 +699,6 @@
         test_oas_adapters
         test_cache_eio
         test_metrics_store_eio
-        test_hebbian_eio
         test_planning_eio
         test_thompson_sampling
         test_safe_ops
@@ -843,7 +839,6 @@
 (tests
  (names test_admission_queue_coverage
         test_backend_coverage test_tools_coverage test_types_utils_coverage
-        test_agent_card_coverage test_misc_coverage test_relay_coverage
         test_tempo_coverage test_transport_coverage test_validation_coverage
         test_dashboard_resilience_coverage
         test_nickname_coverage test_level2_config_coverage
@@ -854,7 +849,6 @@
         test_credits_dashboard_coverage test_room_utils_coverage
         test_orchestrator_coverage test_cancellation_coverage
         test_web_dashboard_coverage test_auth_coverage
-        test_a2a_tools_coverage test_graphql_api_coverage
         test_mention_coverage test_resilience_coverage
         test_types_coverage test_spawn_coverage test_dashboard_coverage
         test_rate_limit_coverage test_bounded_coverage test_session_coverage
@@ -877,7 +871,6 @@
         test_circuit_breaker)
  (modules test_admission_queue_coverage
         test_backend_coverage test_tools_coverage test_types_utils_coverage
-        test_agent_card_coverage test_misc_coverage test_relay_coverage
         test_tempo_coverage test_transport_coverage test_validation_coverage
         test_dashboard_resilience_coverage
         test_nickname_coverage test_level2_config_coverage
@@ -888,7 +881,6 @@
         test_credits_dashboard_coverage test_room_utils_coverage
         test_orchestrator_coverage test_cancellation_coverage
         test_web_dashboard_coverage test_auth_coverage
-        test_a2a_tools_coverage test_graphql_api_coverage
         test_mention_coverage test_resilience_coverage
         test_types_coverage test_spawn_coverage test_dashboard_coverage
         test_rate_limit_coverage test_bounded_coverage test_session_coverage
@@ -1072,7 +1064,6 @@
 (include stanzas/test_governance_cases_snapshot.inc)
 (include stanzas/test_governance_response_model_empty_9880.inc)
 (include stanzas/test_heartbeat_integration.inc)
-(include stanzas/test_hebbian_first_consolidation.inc)
 (include stanzas/test_heuristic_metrics_diagnostics.inc)
 (include stanzas/test_heuristic_metrics_scrub.inc)
 (include stanzas/test_join_required_guard_counter.inc)

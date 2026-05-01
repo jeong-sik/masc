@@ -110,7 +110,6 @@ type module_tag =
   | Mod_local_runtime
   | Mod_worktree
   | Mod_code | Mod_code_write
-  | Mod_a2a
   | Mod_run
   | Mod_compact
   | Mod_agent | Mod_task | Mod_room

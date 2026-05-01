@@ -4,7 +4,6 @@
 
 ## Product impact
 
-- Promise affected: `repo coordination` | `delivery swarm` | `ops visibility` | `none/internal`
 - User-visible change:
 
 ## Evidence

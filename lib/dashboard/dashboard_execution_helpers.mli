@@ -185,8 +185,7 @@ val is_session_blocked : Dashboard_utils.session_lifecycle -> bool
 (** {1 Tool audit + skill route} *)
 
 val tool_audit_snapshot : string -> tool_audit_snapshot
-(** Returns the most recent tool-audit projection for
-    [agent_name] from the A2A heartbeat snapshots. *)
+(** Returns the most recent tool-audit projection for *)
 
 val skill_route_summary_of_keeper : Yojson.Safe.t -> string option
 

@@ -329,9 +329,7 @@ let () = Atomic.set Coord_hooks.relation_on_task_done_fn Relation_materializer.o
 let () = Atomic.set Coord_hooks.hebbian_on_task_done_fn (fun config ~assignee ~active_agents ->
     List.iter (fun peer ->
       if peer <> assignee then begin
-        (try Hebbian_eio.strengthen config ~from_agent:assignee ~to_agent:peer ()
-         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-           Log.Coord.warn "hebbian strengthen failed: %s" (Printexc.to_string exn));
+        
         Safe_ops.protect ~default:() (fun () ->
           (Atomic.get Coord_hooks.activity_emit_fn) config
             ~actor:Coord_hooks.{ kind = "agent"; id = assignee }
@@ -350,9 +348,7 @@ let () = Atomic.set Coord_hooks.hebbian_on_task_done_fn (fun config ~assignee ~a
 let () = Atomic.set Coord_hooks.hebbian_on_task_cancelled_fn (fun config ~agent_name ~active_agents ->
     List.iter (fun peer ->
       if peer <> agent_name then begin
-        (try Hebbian_eio.weaken config ~from_agent:agent_name ~to_agent:peer ()
-         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-           Log.Coord.warn "hebbian weaken failed: %s" (Printexc.to_string exn));
+        
         Safe_ops.protect ~default:() (fun () ->
           (Atomic.get Coord_hooks.activity_emit_fn) config
             ~actor:Coord_hooks.{ kind = "agent"; id = agent_name }

@@ -64,49 +64,9 @@ let keeper_tool_audit_json_fields config registry_lookup keeper agent_name =
           }
     | None -> None
   in
-  let fallback_latest_action_source =
-    match file_snapshot with
-    | Some snapshot -> (
-        match snapshot.latest_action_source with
-        | Some _ as value -> value
-        | None -> fallback_action_source)
-    | None -> fallback_action_source
-  in
   let allowed_tool_names, latest_tool_names, latest_tool_call_count,
       latest_action_source, tool_audit_source, tool_audit_at =
-    match A2a_tools.latest_heartbeat_task agent_name,
-          A2a_tools.latest_heartbeat_result agent_name with
-    | Some task, Some result ->
-        if task.seq > result.seq then
-          ( task.allowed_tools,
-            result.tool_names,
-            Some result.tool_call_count,
-            fallback_latest_action_source,
-            Some "heartbeat_task_pending_result",
-            Some task.created_at )
-        else
-          ( task.allowed_tools,
-            result.tool_names,
-            Some result.tool_call_count,
-            fallback_latest_action_source,
-            Some "heartbeat_result",
-            Some result.updated_at )
-    | Some task, None ->
-        ( task.allowed_tools,
-          [],
-          None,
-          fallback_latest_action_source,
-          Some "heartbeat_task",
-          Some task.created_at )
-    | None, Some result ->
-        ( fallback_allowed,
-          result.tool_names,
-          Some result.tool_call_count,
-          fallback_latest_action_source,
-          Some "heartbeat_result",
-          Some result.updated_at )
-    | None, None ->
-        (match file_snapshot with
+    (match file_snapshot with
         | Some snapshot ->
             ( fallback_allowed,
               snapshot.latest_tool_names,

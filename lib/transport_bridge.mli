@@ -64,6 +64,5 @@ val enabled_protocols : unit -> Transport.protocol list
 
 (** {1 Agent Card} *)
 
-val agent_card_transports_json : host:string -> port:int -> Yojson.Safe.t
 (** Transport section for A2A Agent Card / MCP discovery.
     Includes enabled protocols, endpoints, session counts. *)

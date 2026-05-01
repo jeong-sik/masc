@@ -148,7 +148,6 @@ export async function fetchAgentTimeline(
 }
 
 export type {
-  AgentCollaborator,
   AgentRelation,
   AgentRelationsResponse,
 } from './schemas/agent-relations'

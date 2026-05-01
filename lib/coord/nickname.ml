@@ -23,7 +23,7 @@ let animals = [|
 (* RNG for nickname generation.  [Random.State.t] is NOT fiber-safe —
    the previous doc comment claiming otherwise was incorrect.  Guard
    the shared state with an [Eio.Mutex] and route every RNG access
-   through [with_nickname_rng].  Same discipline as [Lib.A2a_tools]
+   through [with_nickname_rng].
    ([a2a_rng] / [a2a_rng_mutex]). *)
 let nickname_rng = Random.State.make_self_init ()
 let nickname_rng_mutex = Eio.Mutex.create ()

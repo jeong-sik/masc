@@ -34,7 +34,8 @@ let with_room f =
 let coord_ctx config : Tool_coord.context =
   { Tool_coord.config; agent_name = "planner" }
 
-let parse_json_result = function
+let parse_json_result (result : Tool_coord.tool_result) =
+  match result with
   | { success = true; message = body } -> Yojson.Safe.from_string body
   | { success = false; message = body } -> fail body
 

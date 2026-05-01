@@ -404,7 +404,6 @@ export function SafeAutonomyPanel() {
                       <${StatusPill} status=${data.summary.status} />
                     </div>
                     <div class="mt-2 text-sm leading-paragraph text-[var(--color-fg-primary)]">
-                      Tool correctness, sandbox truth, approval gates, cascade/FSM gracefulness,
                       Shows tool correctness, sandbox truth, approval gates, cascade/FSM gracefulness,
                       and audit trail completeness per keeper.
                     </div>

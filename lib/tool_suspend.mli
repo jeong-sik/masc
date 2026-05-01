@@ -1,3 +1,5 @@
+open Base
+
 (** Tool_suspend — agent suspension and circuit-breaker tools.
 
     Implements the [masc_suspend] dispatch path (currently retired —
@@ -72,7 +74,7 @@ val dispatch :
 
 (** {1 Join guard} *)
 
-val check_can_join : agent_id:string -> (unit, string) result
+val check_can_join : agent_id:string -> (unit, string) Result.t
 (** [check_can_join ~agent_id] is called before allowing an agent
     to join a room.  Two-stage check:
 

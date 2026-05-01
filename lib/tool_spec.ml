@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 (** Tool_spec — Unified tool specification with compile-time safety.
 
     See [tool_spec.mli] for documentation.
@@ -87,7 +105,7 @@ let expects_handler : (string, unit) Hashtbl.t = Hashtbl.create 256
 (* ================================================================ *)
 
 let register (spec : t) =
-  if spec.name = "" then
+  if String.equal spec.name "" then
     invalid_arg "Tool_spec.register: name must not be empty";
   (* Track for handler coverage verification *)
   Hashtbl.replace registered_names spec.name ();
@@ -110,7 +128,7 @@ let register (spec : t) =
     Tool_catalog_surfaces.is_on_surface System_internal spec.name
   in
   let effective_visibility =
-    if is_system_internal && spec.visibility = Tool_catalog.Default
+    if is_system_internal && Poly.equal spec.visibility Tool_catalog.Default
     then Tool_catalog.Hidden
     else spec.visibility
   in

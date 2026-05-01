@@ -1,10 +1,28 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 (** Tool_local_runtime_http -- HTTP helpers for local runtime probing. *)
 
 include Tool_local_runtime_core
 
 let trim_to_option raw =
   let trimmed = String.trim raw in
-  if trimmed = "" then None else Some trimmed
+  if String.equal trimmed "" then None else Some trimmed
 
 let split_http_body_and_status body =
   match String.rindex_opt body '\n' with
@@ -35,7 +53,7 @@ let http_get_text_with_status_with_headers ?(timeout_sec = 10) ?(headers = []) u
         "-sS";
         "--http1.1";
         "--max-time";
-        string_of_int (max 1 timeout_sec);
+        Int.to_string (max 1 timeout_sec);
         "-w";
         "\n%{http_code}";
         url;
@@ -47,7 +65,7 @@ let http_get_text_with_status_with_headers ?(timeout_sec = 10) ?(headers = []) u
       ~actor:"tool/local_runtime"
       ~raw_source:(String.concat " " (List.map Filename.quote argv))
       ~summary:"tool local runtime http get"
-      ~timeout_sec:(float_of_int (max 1 timeout_sec))
+      ~timeout_sec:(Stdlib.Float.of_int (max 1 timeout_sec))
       argv
   in
   match status with
@@ -80,7 +98,7 @@ let http_post_json_text_with_status_with_headers ~timeout_sec ?(headers = []) ~u
         "-sS";
         "--http1.1";
         "--max-time";
-        string_of_int (max 1 timeout_sec);
+        Int.to_string (max 1 timeout_sec);
         "-H";
         "Content-Type: application/json";
         "-d";
@@ -96,7 +114,7 @@ let http_post_json_text_with_status_with_headers ~timeout_sec ?(headers = []) ~u
       ~actor:"tool/local_runtime"
       ~raw_source:(String.concat " " (List.map Filename.quote argv))
       ~summary:"tool local runtime http post"
-      ~timeout_sec:(float_of_int (max 1 timeout_sec))
+      ~timeout_sec:(Stdlib.Float.of_int (max 1 timeout_sec))
       argv
   in
   match status with

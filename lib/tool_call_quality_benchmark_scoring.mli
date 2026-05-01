@@ -1,3 +1,5 @@
+open Base
+
 (** Tool_call_quality_benchmark_scoring — score a single
     {!Tool_call_quality_benchmark_types.evidence_run} against
     its declared {!Tool_call_quality_benchmark_types.benchmark_case}.

@@ -1,3 +1,5 @@
+open Base
+
 (** Dashboard_provider_runs — Single-agent provider runs for the
     operator dashboard.
 
@@ -55,7 +57,7 @@ val start_run :
   provider:string ->
   model_opt:string option ->
   prompt:string ->
-  (Yojson.Safe.t, string) result
+  (Yojson.Safe.t, string) Result.t
 (** [start_run ~sw ~net ~provider ~model_opt ~prompt] queues a
     new single-agent run.  Validation:
 
@@ -78,7 +80,7 @@ val start_run :
     {!run_status_json}. *)
 
 val run_status_json :
-  string -> (Yojson.Safe.t, string) result
+  string -> (Yojson.Safe.t, string) Result.t
 (** [run_status_json run_id] returns the JSON encoding of the
     {!run_record} for [run_id], or [Error] when no record
     exists.  Records older than [finished_run_ttl_seconds]

@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 (** Tool_misc_admin — Auth, config, tool inventory, and feature flag handlers.
 
     Extracted from tool_misc.ml to reduce god file size.
@@ -34,7 +52,7 @@ type context = {
 (* ================================================================ *)
 
 let json_string_option = function
-  | Some value when String.trim value <> "" -> `String (String.trim value)
+  | Some value when not (String.equal (String.trim value) "") -> `String (String.trim value)
   | _ -> `Null
 
 let bool_arg_opt args key =
@@ -45,7 +63,7 @@ let bool_arg_opt args key =
 let int_arg_opt args key =
   match U.member key args with
   | `Int value -> Some value
-  | `Intlit raw -> Some (Safe_ops.int_of_string_with_default ~default:0 raw)
+  | `Intlit raw -> Some (Option.value ~default:0 (Stdlib.int_of_string_opt raw))
   | _ -> None
 
 (* ================================================================ *)
@@ -70,7 +88,7 @@ let auth_snapshot_json ctx =
            `Assoc
              [
                ("agent_name", `String cred.agent_name);
-               ("admin", `Bool (cred.role = Types.Admin));
+               ("admin", `Bool (Poly.equal cred.role Types.Admin));
                ("created_at", `String cred.created_at);
                ("expires_at", json_string_option cred.expires_at);
              ])
@@ -107,7 +125,7 @@ let tool_inventory_json _ctx ~include_hidden ~include_deprecated =
   List.iter
     (fun (seed : Capability_registry.capability_seed) ->
       let s = Capability_registry.surface_to_string seed.projection.surface in
-      if s <> "public_mcp" then (
+      if not (String.equal s "public_mcp") then (
         add_surface seed.projection.tool_name s;
         add_surface seed.projection.backend_tool_name s))
     (Capability_registry.all_projection_seeds_from Config.raw_all_tool_schemas);
@@ -218,7 +236,7 @@ let enforcement_summary_json () =
 let handle_feature_flags args : tool_result =
   let category_filter =
     match U.member "category" args with
-    | `String c when String.trim c <> "" -> Some (String.lowercase_ascii (String.trim c))
+    | `String c when not (String.equal (String.trim c) "") -> Some (String.lowercase_ascii (String.trim c))
     | _ -> None
   in
   let only_overridden =
@@ -232,7 +250,7 @@ let handle_feature_flags args : tool_result =
   in
   let flags = match category_filter with
     | None -> flags
-    | Some cat -> List.filter (fun (f : Feature_flag_registry.flag) -> f.category = cat) flags
+    | Some cat -> List.filter (fun (f : Feature_flag_registry.flag) -> String.equal f.category cat) flags
   in
   let deprecated_tools = Tool_catalog.deprecated_tool_entries in
   let json = `Assoc [
@@ -272,7 +290,7 @@ let handle_tool_admin_update ctx args =
   match section with
   | "auth" ->
       let current = Auth.load_auth_config ctx.config.base_path in
-      if U.member "default_role" args <> `Null then
+      if not (Poly.equal (U.member "default_role" args) `Null) then
         (false, "❌ default_role is no longer supported")
       else
       let require_token =

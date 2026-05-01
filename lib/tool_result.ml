@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 (** Structured tool result type for MASC *)
 
 type t = {
@@ -30,7 +48,7 @@ let structured_payload_of_message (message : string) : Yojson.Safe.t option =
               String.sub message (newline_idx + 1) (len - newline_idx - 1)
               |> String.trim
             in
-            if suffix = "" then loop (newline_idx + 1)
+            if String.equal suffix "" then loop (newline_idx + 1)
             else
               match suffix.[0] with
               | '{' | '[' -> (

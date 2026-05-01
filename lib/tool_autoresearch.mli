@@ -1,3 +1,5 @@
+open Base
+
 (** Tool_autoresearch — public surface for the autoresearch
     MCP tool family.
 

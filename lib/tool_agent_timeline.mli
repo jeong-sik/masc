@@ -1,3 +1,5 @@
+open Base
+
 (** Tool_agent_timeline — Per-agent activity timeline + summary.
 
     Implements the [masc_agent_timeline] MCP tool plus the

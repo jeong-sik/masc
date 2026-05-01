@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 module Sg = Oas.Tool_schema_gen
 
 let room_field =
@@ -57,7 +75,7 @@ let default_namespace = "default"
 
 let validate_team_memory_room room =
   let trimmed = String.trim room in
-  if trimmed = "" then
+  if String.equal trimmed "" then
     Error "room is required"
   else if String.equal (String.lowercase_ascii trimmed) default_namespace then
     Ok default_namespace
@@ -69,7 +87,7 @@ let validate_team_memory_room room =
 
 let resolve_keeper_access ~(config : Coord.config) ~(agent_name : string) =
   let trimmed = String.trim agent_name in
-  if trimmed = "" then
+  if String.equal trimmed "" then
     Error "team memory tools require keeper agent context"
   else
     match Keeper_types.keeper_name_from_agent_name trimmed with
@@ -109,19 +127,19 @@ let team_memory_root ~(config : Coord.config) room =
     (Printf.sprintf "shared/rooms/%s/memory" room)
 
 let is_safe_subpath ~parent ~child =
-  if child = parent then
+  if String.equal child parent then
     true
   else
     let prefix = parent ^ "/" in
     String.length child >= String.length prefix
-    && String.sub child 0 (String.length prefix) = prefix
+    && String.equal (Stdlib.String.sub child 0 (String.length prefix)) prefix
 
 let rec nearest_existing_path path =
   if Sys.file_exists path then
     path
   else
     let parent = Filename.dirname path in
-    if parent = path then
+    if String.equal parent path then
       path
     else
       nearest_existing_path parent
@@ -142,7 +160,7 @@ let contains_encoded_traversal key =
 
 let validate_team_memory_key key =
   let trimmed = String.trim key in
-  if trimmed = "" then
+  if String.equal trimmed "" then
     Error "key is required"
   else if String.contains trimmed '\x00' then
     Error "key must not contain NUL"
@@ -198,7 +216,7 @@ let contains_secret_token_prefix ~prefix ~min_suffix_len text =
   let rec loop idx =
     if idx + prefix_len > text_len then
       false
-    else if String.sub lowered idx prefix_len = prefix then
+    else if String.equal (Stdlib.String.sub lowered idx prefix_len) prefix then
       let boundary_ok = idx = 0 || not (is_secret_token_char lowered.[idx - 1]) in
       let suffix_len = count_suffix (idx + prefix_len) 0 in
       if boundary_ok && suffix_len >= min_suffix_len then true else loop (idx + 1)
@@ -312,7 +330,7 @@ let search_json ~config (room, query) =
   | Error err -> (false, err)
   | Ok room_id ->
       let normalized_query = String.trim query in
-      if normalized_query = "" then
+      if String.equal normalized_query "" then
         (false, "query is required")
       else
         let root = team_memory_root ~config room_id in

@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 open Tool_args
 
 type normalized_hit = {
@@ -96,18 +114,18 @@ let decode_html_entities text =
     let body = String.sub entity 2 (String.length entity - 3) in
     let maybe_n =
       if String.length body > 1
-         && (body.[0] = 'x' || body.[0] = 'X')
-      then int_of_string_opt ("0" ^ body)
-      else int_of_string_opt body
+         && (Char.equal body.[0] 'x' || Char.equal body.[0] 'X')
+      then Stdlib.int_of_string_opt ("0" ^ body)
+      else Stdlib.int_of_string_opt body
     in
     match maybe_n with
-    | Some n -> Uchar.of_int n |> Buffer.add_utf_8_uchar buf; Some ""
+    | Some n -> Stdlib.Uchar.of_int n |> Stdlib.Buffer.add_utf_8_uchar buf; Some ""
     | None -> None
   in
   let rec loop index =
     if index >= len then
       Buffer.contents buf
-    else if basic.[index] <> '&' then (
+    else if not (Char.equal basic.[index] '&') then (
       Buffer.add_char buf basic.[index];
       loop (index + 1))
     else
@@ -136,11 +154,11 @@ let clean_search_text text =
 
 let trim_nonempty text =
   let trimmed = String.trim text in
-  if trimmed = "" then None else Some trimmed
+  if String.equal trimmed "" then None else Some trimmed
 
 let valid_search_result_url url =
   let trimmed = String.trim url in
-  if trimmed = "" then
+  if String.equal trimmed "" then
     false
   else
     let uri = Uri.of_string trimmed in
@@ -163,10 +181,10 @@ let parse_bing_rss_items payload =
            search_field description_re block
          with
          | Some title, Some url, Some snippet
-           when title <> "" && valid_search_result_url url ->
+           when not (String.equal title "") && valid_search_result_url url ->
              Some (title, url, snippet)
          | Some title, Some url, None
-           when title <> "" && valid_search_result_url url ->
+           when not (String.equal title "") && valid_search_result_url url ->
              Some (title, url, "")
          | _ -> None)
 
@@ -185,7 +203,7 @@ let parse_ddg_html payload =
     in
     (title, url, snippet)
   ) results
-  |> List.filter (fun (title, url, _snippet) -> title <> "" && valid_search_result_url url)
+  |> List.filter (fun (title, url, _snippet) -> not (String.equal title "") && valid_search_result_url url)
 
 let parse_json_search_results ~results_path ~title_field ~snippet_field payload =
   let open Yojson.Safe.Util in
@@ -267,7 +285,7 @@ let parse_provider_csv raw =
 
 let env_present name =
   match Sys.getenv_opt name |> Option.map String.trim with
-  | Some value when value <> "" -> true
+  | Some value when not (String.equal value "") -> true
   | _ -> false
 
 let provider_has_credentials = function
@@ -288,7 +306,7 @@ let provider_order () =
   match Env_config.Tools.web_search_provider_order_opt () with
   | Some raw ->
       let configured = parse_provider_csv raw in
-      if configured = [] then default_provider_order ()
+      if Stdlib.List.length configured = 0 then default_provider_order ()
       else configured
   | None ->
       let primary =
@@ -328,7 +346,7 @@ let contains_secret_token_prefix ~prefix ~min_suffix_len query =
   let rec loop idx =
     if idx + prefix_len > query_len then
       false
-    else if String.sub lowered idx prefix_len = prefix then
+    else if String.equal (Stdlib.String.sub lowered idx prefix_len) prefix then
       let boundary_ok = idx = 0 || not (is_secret_token_char lowered.[idx - 1]) in
       let suffix_len = count_suffix_chars (idx + prefix_len) 0 in
       if boundary_ok && suffix_len >= min_suffix_len then true else loop (idx + 1)
@@ -364,7 +382,7 @@ let query_contains_secret_like_content query =
 
 let validate_query query =
   let normalized = normalize_spaces query in
-  if normalized = "" then
+  if String.equal normalized "" then
     Error "query is required"
   else if String.length normalized > max_web_search_query_length then
     Error
@@ -386,7 +404,7 @@ let take_results limit hits =
 
 let normalize_hits ~source tuples =
   tuples
-  |> List.filter (fun (title, url, _snippet) -> title <> "" && valid_search_result_url url)
+  |> List.filter (fun (title, url, _snippet) -> not (String.equal title "") && valid_search_result_url url)
   |> List.mapi (fun idx (title, url, snippet) ->
          {
            title;
@@ -436,11 +454,11 @@ let redact_transport_error_detail message =
     if i + 5 > len then
       None
     else if
-      message.[i] = ' '
-      && message.[i + 1] = 'f'
-      && message.[i + 2] = 'o'
-      && message.[i + 3] = 'r'
-      && message.[i + 4] = ' '
+      Char.equal message.[i] ' '
+      && Char.equal message.[i + 1] 'f'
+      && Char.equal message.[i + 2] 'o'
+      && Char.equal message.[i + 3] 'r'
+      && Char.equal message.[i + 4] ' '
     then
       Some i
     else
@@ -452,14 +470,14 @@ let redact_transport_error_detail message =
 
 let endpoint_error ~fallback detail =
   let detail = redact_transport_error_detail detail |> String.trim in
-  if detail = "" then fallback else Printf.sprintf "%s (%s)" fallback detail
+  if String.equal detail "" then fallback else Printf.sprintf "%s (%s)" fallback detail
 
 let searxng_default_url = Masc_network_defaults.searxng_default_url
 
 let strip_trailing_slashes s =
   let rec find_last_non_slash i =
     if i < 0 then -1
-    else if s.[i] = '/' then find_last_non_slash (i - 1)
+    else if Char.equal s.[i] '/' then find_last_non_slash (i - 1)
     else i
   in
   let last = find_last_non_slash (String.length s - 1) in
@@ -470,7 +488,7 @@ let searxng_base_url () =
     match Sys.getenv_opt "MASC_SEARXNG_URL" with
     | Some raw ->
         let normalized = raw |> String.trim |> strip_trailing_slashes in
-        if normalized = "" then searxng_default_url else normalized
+        if String.equal normalized "" then searxng_default_url else normalized
     | None -> searxng_default_url
   in
   match Uri.scheme (Uri.of_string url) |> Option.map String.lowercase_ascii with
@@ -524,7 +542,7 @@ let fetch_bing_rss ~timeout_sec ~query =
   | Ok (None, _) -> Error "search endpoint returned no HTTP status"
 
 let fetch_brave ~timeout_sec ~query ~limit =
-  match Sys.getenv_opt "BRAVE_SEARCH_API_KEY" |> Fun.flip Option.bind trim_nonempty with
+  match Sys.getenv_opt "BRAVE_SEARCH_API_KEY" |> Stdlib.Fun.flip Option.bind trim_nonempty with
   | None -> Error "missing BRAVE_SEARCH_API_KEY"
   | Some api_key ->
       let search_url =
@@ -555,7 +573,7 @@ let fetch_brave ~timeout_sec ~query ~limit =
       | Ok (None, _) -> Error "provider returned no HTTP status"
 
 let fetch_tavily ~timeout_sec ~query ~limit =
-  match Sys.getenv_opt "TAVILY_API_KEY" |> Fun.flip Option.bind trim_nonempty with
+  match Sys.getenv_opt "TAVILY_API_KEY" |> Stdlib.Fun.flip Option.bind trim_nonempty with
   | None -> Error "missing TAVILY_API_KEY"
   | Some api_key ->
       let search_url = "https://api.tavily.com/search" in
@@ -595,7 +613,7 @@ let fetch_tavily ~timeout_sec ~query ~limit =
       | Ok (None, _) -> Error "provider returned no HTTP status"
 
 let fetch_exa ~timeout_sec ~query ~limit =
-  match Sys.getenv_opt "EXA_API_KEY" |> Fun.flip Option.bind trim_nonempty with
+  match Sys.getenv_opt "EXA_API_KEY" |> Stdlib.Fun.flip Option.bind trim_nonempty with
   | None -> Error "missing EXA_API_KEY"
   | Some api_key ->
       let search_url = "https://api.exa.ai/search" in
@@ -633,9 +651,9 @@ let fetch_exa ~timeout_sec ~query ~limit =
 
 let fetch_bing_api ~timeout_sec ~query ~limit =
   let api_key =
-    match Sys.getenv_opt "BING_SEARCH_API_KEY" |> Fun.flip Option.bind trim_nonempty with
+    match Sys.getenv_opt "BING_SEARCH_API_KEY" |> Stdlib.Fun.flip Option.bind trim_nonempty with
     | Some key -> Some key
-    | None -> Sys.getenv_opt "AZURE_BING_SEARCH_API_KEY" |> Fun.flip Option.bind trim_nonempty
+    | None -> Sys.getenv_opt "AZURE_BING_SEARCH_API_KEY" |> Stdlib.Fun.flip Option.bind trim_nonempty
   in
   match api_key with
   | None -> Error "missing BING_SEARCH_API_KEY or AZURE_BING_SEARCH_API_KEY"
@@ -711,7 +729,7 @@ let fetch_provider ~query ~limit provider =
 
 let cache_key ~query ~limit =
   String.concat "|"
-    [ query; string_of_int limit; String.concat "," (provider_plan ()) ]
+    [ query; Int.to_string limit; String.concat "," (provider_plan ()) ]
 
 type cache_entry = {
   response : string;
@@ -726,20 +744,20 @@ let rate_limit_mutex = Eio.Mutex.create ()
 
 let cache_lookup key now =
   let ttl = Env_config.Tools.web_search_cache_ttl_sec () in
-  if ttl <= 0.0 then
+  if Stdlib.Float.compare ttl 0.0 <= 0 then
     None
   else
     Eio.Mutex.use_rw ~protect:true cache_mutex (fun () ->
         Hashtbl.filter_map_inplace
-          (fun _ entry -> if entry.expires_at <= now then None else Some entry)
+          (fun _ entry -> if Stdlib.Float.compare entry.expires_at now <= 0 then None else Some entry)
           cache_entries;
         match Hashtbl.find_opt cache_entries key with
-        | Some entry when entry.expires_at > now -> Some entry.response
+        | Some entry when Stdlib.Float.compare entry.expires_at now > 0 -> Some entry.response
         | _ -> None)
 
 let cache_store key response now =
   let ttl = Env_config.Tools.web_search_cache_ttl_sec () in
-  if ttl > 0.0 then
+  if Stdlib.Float.compare ttl 0.0 > 0 then
     Eio.Mutex.use_rw ~protect:true cache_mutex (fun () ->
         Hashtbl.replace cache_entries key { response; expires_at = now +. ttl })
 
@@ -748,7 +766,7 @@ let enforce_rate_limit now =
   let max_calls = Env_config.Tools.web_search_rate_limit_max_calls () in
   Eio.Mutex.use_rw ~protect:true rate_limit_mutex (fun () ->
       while Queue.length request_times > 0
-            && now -. Queue.peek request_times > window
+            && Stdlib.Float.compare (now -. Queue.peek request_times) window > 0
       do
         let (_ : float) = Queue.pop request_times in ()
       done;
@@ -762,7 +780,7 @@ let search_impl ~query ~limit =
   let rec loop errors = function
     | [] ->
         Error
-          (if errors = [] then "no web search providers configured"
+          (if Stdlib.List.length errors = 0 then "no web search providers configured"
            else
              "all web search providers failed: "
              ^ String.concat "; " (List.rev errors))
@@ -806,11 +824,11 @@ let simulate_for_test ~query ~limit outcomes =
     | [] ->
         ( false,
           json_error
-            (if errors = [] then "all web search providers failed"
+            (if Stdlib.List.length errors = 0 then "all web search providers failed"
              else String.concat "; " (List.rev errors)) )
     | (provider_name, outcome) :: rest -> (
         match outcome with
-        | `Hits hits when hits <> [] ->
+        | `Hits hits when Stdlib.List.length hits > 0 ->
             ( true,
               result_json ~query
                 ~search_url:("test://" ^ provider_name)

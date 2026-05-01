@@ -1,3 +1,5 @@
+open Base
+
 (** Public facade for keeper MCP tools. *)
 
 type 'a context = 'a Keeper_types.context = {

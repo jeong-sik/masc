@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 (** Tool_inline_dispatch_coord — room lifecycle tool handlers.
 
     Handles: masc_start, masc_join, masc_leave.
@@ -20,22 +38,22 @@ let handle_start (ctx : context) : tool_result option =
   let state = ctx.state in
   let path =
     let p = arg_get_string ctx "path" "" in
-    if p = "" then arg_get_string ctx "room" "" else p
+    if String.equal p "" then arg_get_string ctx "room" "" else p
   in
   let task_title = arg_get_string ctx "task_title" "" in
   (* Step 1: set project root *)
   let room_result =
-    if path = "" then begin
+    if String.equal path "" then begin
       if Coord.is_initialized state.Mcp_server.room_config then
         Ok config
       else
         Error "path is required when no project scope is set. Provide the project directory path."
     end else begin
       let expanded =
-        if String.length path >= 2 && path.[0] = '~' && path.[1] = '/' then
+        if String.length path >= 2 && Char.equal path.[0] '~' && Char.equal path.[1] '/' then
           let home = match Sys.getenv_opt "HOME" with Some h -> h | None -> "/tmp" in
           Filename.concat home (String.sub path 2 (String.length path - 2))
-        else if String.length path = 1 && path.[0] = '~' then
+        else if String.length path = 1 && Char.equal path.[0] '~' then
           (match Sys.getenv_opt "HOME" with Some h -> h | None -> "/tmp")
         else if Filename.is_relative path then
           Filename.concat (Sys.getcwd ()) path
@@ -69,14 +87,14 @@ let handle_start (ctx : context) : tool_result option =
         let _msg = Coord.join active_config ~agent_name ~capabilities:[] () in
         Ok ()
       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-        let msg = Printexc.to_string exn in
+        let msg = Stdlib.Printexc.to_string exn in
         if String.length msg > 0 then Error msg else Error "join failed"
     in
     match join_result with
     | Error e -> Some (false, Printf.sprintf "masc_start failed at join: %s\nHint: try masc_join separately." e)
     | Ok () ->
       (* Step 3: add_task + claim + plan_set_task (if task_title provided) *)
-      if task_title = "" then
+      if String.equal task_title "" then
         Some
           (true,
            Printf.sprintf
@@ -90,8 +108,8 @@ let handle_start (ctx : context) : tool_result option =
             let prefix = "Added " in
             let idx = ref 0 in
             while !idx < String.length add_result - String.length prefix &&
-                  String.sub add_result !idx (String.length prefix) <> prefix do
-              incr idx
+                  not (String.equal (Stdlib.String.sub add_result !idx (String.length prefix)) prefix) do
+              Stdlib.incr idx
             done;
             let start = !idx + String.length prefix in
             let end_idx = match String.index_from_opt add_result start ':' with
@@ -101,7 +119,7 @@ let handle_start (ctx : context) : tool_result option =
             String.sub add_result start (end_idx - start)
           with Eio.Cancel.Cancelled _ as e -> raise e | _ -> ""
         in
-        if task_id = "" then
+        if String.equal task_id "" then
           Some
             (true,
              Printf.sprintf
@@ -161,7 +179,7 @@ let handle_join (ctx : context) : tool_result option =
   (* GC: reap zombie agents on join. Best-effort. *)
   (try let _ = Coord.cleanup_zombies config in ()
    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-     Log.Gc.warn "[sid=%s] join GC failed: %s" sid (Printexc.to_string exn));
+     Log.Gc.warn "[sid=%s] join GC failed: %s" sid (Stdlib.Printexc.to_string exn));
   (* Extract nickname from join result (format: "  Nickname: xxx\n...") *)
   let nickname =
     try
@@ -169,8 +187,8 @@ let handle_join (ctx : context) : tool_result option =
       let start_idx =
         let idx = ref 0 in
         while !idx < String.length result - String.length prefix &&
-              String.sub result !idx (String.length prefix) <> prefix do
-          incr idx
+              not (String.equal (Stdlib.String.sub result !idx (String.length prefix)) prefix) do
+          Stdlib.incr idx
         done;
         !idx + String.length prefix
       in
@@ -195,7 +213,7 @@ let handle_join (ctx : context) : tool_result option =
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | e ->
-      Log.Misc.error "[sid=%s] Failed to write agent file %s: %s" sid agent_file (Printexc.to_string e))
+      Log.Misc.error "[sid=%s] Failed to write agent file %s: %s" sid agent_file (Stdlib.Printexc.to_string e))
   end;
   (* Cultural Inheritance: append institution welcome to join response *)
   let institution_welcome = match state.Mcp_server.fs with
@@ -205,10 +223,10 @@ let handle_join (ctx : context) : tool_result option =
          | Eio.Io _ | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> ""
          | Eio.Cancel.Cancelled _ as exn -> raise exn
          | exn ->
-             Log.Institution.warn "[sid=%s] Unexpected institution error: %s" sid (Printexc.to_string exn); "")
+             Log.Institution.warn "[sid=%s] Unexpected institution error: %s" sid (Stdlib.Printexc.to_string exn); "")
     | None -> ""
   in
-  let final_result = if institution_welcome = "" then result
+  let final_result = if String.equal institution_welcome "" then result
     else result ^ institution_welcome in
   let join_event = `Assoc [
     ("type", `String "masc/agent_joined");

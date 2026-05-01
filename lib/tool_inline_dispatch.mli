@@ -1,3 +1,5 @@
+open Base
+
 (** Tool_inline_dispatch — thin dispatch router for inline tool handlers.
 
     Delegates to sub-modules for coord, comm, and extra tool handling.

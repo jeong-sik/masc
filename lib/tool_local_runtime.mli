@@ -1,3 +1,5 @@
+open Base
+
 (** Tool_local_runtime — local model runtime management and
     benchmarking tools.
 
@@ -75,7 +77,7 @@ val run_bench :
   max_tokens:int ->
   timeout_sec:int ->
   unit ->
-  (Yojson.Safe.t, string) result
+  (Yojson.Safe.t, string) Result.t
 (** Re-export of {!Tool_local_runtime_bench.run_bench}. *)
 
 val provider_health_reachable :

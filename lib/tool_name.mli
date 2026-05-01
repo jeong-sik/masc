@@ -1,3 +1,5 @@
+open Base
+
 (** Compile-time verified tool name identifiers.
 
     Use [of_string] at MCP/JSON parse boundaries only.
@@ -60,7 +62,7 @@ module Keeper : sig
   val is_board : t -> bool
   val is_board_write : t -> bool
   val board_write_action_kind : t -> string option
-  val pp : Format.formatter -> t -> unit
+  val pp : Stdlib.Format.formatter -> t -> unit
 end
 
 module Masc : sig
@@ -174,7 +176,7 @@ module Masc : sig
   val to_string : t -> string
   val of_string : string -> t option
   val is_board : t -> bool
-  val pp : Format.formatter -> t -> unit
+  val pp : Stdlib.Format.formatter -> t -> unit
 end
 
 module Masc_keeper : sig
@@ -193,7 +195,7 @@ module Masc_keeper : sig
 
   val to_string : t -> string
   val of_string : string -> t option
-  val pp : Format.formatter -> t -> unit
+  val pp : Stdlib.Format.formatter -> t -> unit
 end
 
 type t =
@@ -203,7 +205,7 @@ type t =
 
 val to_string : t -> string
 val of_string : string -> t option
-val pp : Format.formatter -> t -> unit
+val pp : Stdlib.Format.formatter -> t -> unit
 
 val is_keeper : t -> bool
 val is_masc : t -> bool

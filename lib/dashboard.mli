@@ -1,3 +1,5 @@
+open Base
+
 (** MASC Dashboard — operator-first status visualization.
 
     Renders a text dashboard for MASC operators showing agents, tasks,

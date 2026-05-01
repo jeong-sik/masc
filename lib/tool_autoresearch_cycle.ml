@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 (** Tool_autoresearch_cycle — core handle_cycle ratchet logic for autoresearch. *)
 
 open Tool_args
@@ -124,7 +142,7 @@ let persist_failure_feedback
       keeper_name = Autoresearch_lineage.lesson_reviewer_actor_name;
       goal = state.goal;
       hypothesis;
-      evidence = if evidence = "" then summary else evidence;
+      evidence = if String.equal evidence "" then summary else evidence;
       conclusion =
         Option.value ~default:(clip summary 240) conclusion;
       confidence = Autoresearch_knowledge.Medium;
@@ -267,7 +285,7 @@ let handle_cycle (ctx : Tool_autoresearch_context.t) args =
           match Hashtbl.find_opt active_loops id with
           | None -> Error (Printf.sprintf "Loop %s not found" id)
           | Some state ->
-            if state.status <> Autoresearch.Running then
+            if not (Poly.equal state.status Autoresearch.Running) then
               Error "Loop is not running"
             else if not (Autoresearch.should_continue state) then begin
               let reason =
@@ -591,8 +609,8 @@ let handle_cycle (ctx : Tool_autoresearch_context.t) args =
                          | Autoresearch.Keep ->
                            let state = { state with consecutive_discards = 0 } in
                            let is_tag_worthy =
-                             if state.lower_is_better then score_after <= state.best_score
-                             else score_after >= state.best_score
+                             if state.lower_is_better then Stdlib.Float.compare score_after state.best_score <= 0
+                             else Stdlib.Float.compare score_after state.best_score >= 0
                            in
                            if is_tag_worthy then
                              Autoresearch.git_tag_best ~workdir

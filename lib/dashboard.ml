@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 (** MASC Dashboard - Operator-First Status Visualization
 
     Usage:
@@ -83,7 +101,7 @@ let format_section (s : section) : string =
   let top_border = header ^ String.make (border_len - String.length header) '=' in
   let bottom_border = String.make border_len '-' in
   let content =
-    if s.content = [] then
+    if Stdlib.List.length s.content = 0 then
       [Printf.sprintf "  %s" s.empty_msg]
     else
       List.map (fun line ->
@@ -123,7 +141,7 @@ let split_tasks (tasks : Types.task list) =
       | Types.Todo | Types.Done _ | Types.Cancelled _ -> false
     ) tasks
   in
-  let pending = List.filter (fun task -> task.Types.task_status = Types.Todo) tasks in
+  let pending = List.filter (fun task -> Poly.equal task.Types.task_status Types.Todo) tasks in
   (active, pending)
 
 let task_lines (tasks : Types.task list) =
@@ -156,7 +174,7 @@ let message_lines (messages : Types.message list) =
   ) messages
 
 let add_group label lines empty_msg =
-  if lines = [] then
+  if Stdlib.List.length lines = 0 then
     [Printf.sprintf "%s: %s" label empty_msg]
   else
     (label ^ ":") :: List.map (fun line -> "  " ^ line) lines
@@ -165,7 +183,7 @@ let normalize_worktree_branch branch =
   let branch = String.trim branch in
   let prefix = "refs/heads/" in
   if String.length branch >= String.length prefix
-     && String.sub branch 0 (String.length prefix) = prefix then
+     && String.equal (Stdlib.String.sub branch 0 (String.length prefix)) prefix then
     String.sub branch (String.length prefix)
       (String.length branch - String.length prefix)
   else
@@ -174,10 +192,10 @@ let normalize_worktree_branch branch =
 let worktree_path_of_json item =
   let module U = Yojson.Safe.Util in
   match item |> U.member "path" with
-  | `String path when String.trim path <> "" -> Some path
+  | `String path when not (String.equal (String.trim path) "") -> Some path
   | _ ->
       (match item |> U.member "worktree" with
-       | `String path when String.trim path <> "" -> Some path
+       | `String path when not (String.equal (String.trim path) "") -> Some path
        | _ -> None)
 
 let parse_worktrees (json : Yojson.Safe.t) : (string * string) list =
@@ -363,38 +381,38 @@ let agents_grouped_section now (agents : Types.agent list) : section =
   let working =
     List.filter
       (fun a ->
-        Dashboard_labels.classify_agent ~now a = Dashboard_labels.Working)
+        Poly.equal (Dashboard_labels.classify_agent ~now a) Dashboard_labels.Working)
       agents
   in
   let stuck =
     List.filter
       (fun a ->
-        Dashboard_labels.classify_agent ~now a = Dashboard_labels.Stuck)
+        Poly.equal (Dashboard_labels.classify_agent ~now a) Dashboard_labels.Stuck)
       agents
   in
   let idle =
     List.filter
       (fun a ->
-        Dashboard_labels.classify_agent ~now a = Dashboard_labels.Idle)
+        Poly.equal (Dashboard_labels.classify_agent ~now a) Dashboard_labels.Idle)
       agents
   in
   let offline =
     List.filter
       (fun a ->
-        Dashboard_labels.classify_agent ~now a = Dashboard_labels.Offline)
+        Poly.equal (Dashboard_labels.classify_agent ~now a) Dashboard_labels.Offline)
       agents
   in
   let content =
-    (if working <> [] then
+    (if Stdlib.List.length working > 0 then
        add_group "Working" (List.map format_agent working) ""
      else [])
-    @ (if stuck <> [] then
+    @ (if Stdlib.List.length stuck > 0 then
          add_group "Stuck" (List.map format_agent stuck) ""
        else [])
-    @ (if idle <> [] then
+    @ (if Stdlib.List.length idle > 0 then
          add_group "Idle" (List.map format_agent idle) ""
        else [])
-    @ (if offline <> [] then
+    @ (if Stdlib.List.length offline > 0 then
          add_group "Offline" (List.map format_agent offline) ""
        else [])
   in
@@ -403,9 +421,9 @@ let agents_grouped_section now (agents : Types.agent list) : section =
 (** Format elapsed seconds from a Unix timestamp to now. *)
 let format_elapsed_float now ts =
   let elapsed = now -. ts in
-  if elapsed < 0.0 then "0s"
-  else if elapsed < 60.0 then Printf.sprintf "%.0fs" elapsed
-  else if elapsed < 3600.0 then Printf.sprintf "%.0fm" (elapsed /. 60.0)
+  if Stdlib.Float.compare elapsed 0.0 < 0 then "0s"
+  else if Stdlib.Float.compare elapsed 60.0 < 0 then Printf.sprintf "%.0fs" elapsed
+  else if Stdlib.Float.compare elapsed 3600.0 < 0 then Printf.sprintf "%.0fm" (elapsed /. 60.0)
   else Printf.sprintf "%.1fh" (elapsed /. 3600.0)
 
 (** Keepers section: real-time FSM phase from Keeper_registry.
@@ -515,19 +533,19 @@ let generate_compact ?(scope = All) (config : Coord_utils.config) : string =
   let working_count =
     List.length
       (List.filter
-         (fun a -> Dashboard_labels.classify_agent ~now a = Dashboard_labels.Working)
+         (fun a -> Poly.equal (Dashboard_labels.classify_agent ~now a) Dashboard_labels.Working)
          all_agents)
   in
   let stuck_count =
     List.length
       (List.filter
-         (fun a -> Dashboard_labels.classify_agent ~now a = Dashboard_labels.Stuck)
+         (fun a -> Poly.equal (Dashboard_labels.classify_agent ~now a) Dashboard_labels.Stuck)
          all_agents)
   in
   let idle_count =
     List.length
       (List.filter
-         (fun a -> Dashboard_labels.classify_agent ~now a = Dashboard_labels.Idle)
+         (fun a -> Poly.equal (Dashboard_labels.classify_agent ~now a) Dashboard_labels.Idle)
          all_agents)
   in
   let offline_count =
@@ -537,7 +555,7 @@ let generate_compact ?(scope = All) (config : Coord_utils.config) : string =
   let keeper_entries = Keeper_registry.all () in
   let keeper_by_phase phase =
     List_util.count_if
-      (fun (e : Keeper_registry.registry_entry) -> e.phase = phase)
+      (fun (e : Keeper_registry.registry_entry) -> Poly.equal e.phase phase)
       keeper_entries
   in
   let k_running = keeper_by_phase Running in

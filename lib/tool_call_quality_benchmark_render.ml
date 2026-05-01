@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 open Tool_call_quality_benchmark_types
 
 let case_score_to_yojson (score : case_score) =
@@ -141,8 +159,8 @@ let summary_rows_to_csv ~view summary =
       value_or_empty row.provider;
       value_or_empty row.model;
       value_or_empty row.keeper_profile;
-      string_of_int row.cases_total;
-      string_of_int row.cases_passed;
+      Int.to_string row.cases_total;
+      Int.to_string row.cases_passed;
       Printf.sprintf "%.4f" row.task_pass_rate;
       Printf.sprintf "%.4f" row.correct_tool_rate;
       Printf.sprintf "%.4f" row.arg_valid_rate;
@@ -154,13 +172,13 @@ let summary_rows_to_csv ~view summary =
       Printf.sprintf "%.1f" row.avg_output_tokens;
       Printf.sprintf "%.6f" row.avg_cost_usd;
       Printf.sprintf "%.2f" row.composite_score;
-      string_of_int row.unsupported_runs;
-      string_of_int row.runtime_unreachable_runs;
+      Int.to_string row.unsupported_runs;
+      Int.to_string row.runtime_unreachable_runs;
       string_of_float_option row.stability_score;
       string_of_float_option row.tool_sequence_consistency_rate;
       string_of_float_option row.prompt_fingerprint_consistency_rate;
       string_of_float_option row.pass_consistency_rate;
-      string_of_int row.repeated_case_groups;
+      Int.to_string row.repeated_case_groups;
     ]
   in
   let lines =

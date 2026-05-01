@@ -1,3 +1,5 @@
+open Base
+
 (** Tool_autoresearch_context — shared environment record passed
     into autoresearch tool handlers.
 
@@ -26,7 +28,7 @@ type t = {
   start_operation :
     (goal:string ->
      target_file:string ->
-     (Yojson.Safe.t, string) result)
+     (Yojson.Safe.t, string) Result.t)
     option;
   config : Coord.config option;
   sw : Eio.Switch.t option;

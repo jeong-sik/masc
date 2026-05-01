@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 (** Tool_metrics_persist — JSONL disk persistence for tool metrics.
 
     Uses {!Dated_jsonl} for date-split storage under
@@ -30,7 +48,7 @@ type persisted_record = {
 }
 
 let parse_record (json : Yojson.Safe.t)
-  : (persisted_record, string) result =
+  : (persisted_record, string) Result.t =
   let tool_name = Safe_ops.json_string_opt "tool_name" json in
   let success = Safe_ops.json_bool_opt "success" json in
   let duration_ms = Safe_ops.json_float_opt "duration_ms" json in
@@ -93,10 +111,10 @@ let drain_to_store (store : Dated_jsonl.t) : int =
     | Some json ->
       (try
          Dated_jsonl.append store json;
-         incr count
+         Stdlib.incr count
        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
          Log.Metrics.error "tool_metrics_persist: append failed: %s"
-           (Printexc.to_string exn));
+           (Stdlib.Printexc.to_string exn));
       drain ()
   in
   drain ();
@@ -130,7 +148,7 @@ let start_flush_fiber ~sw ~clock ~base_path =
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->
          Log.Metrics.error "tool_metrics_persist: flush iteration failed: %s"
-           (Printexc.to_string exn));
+           (Stdlib.Printexc.to_string exn));
       loop ()
     in
     loop ());
@@ -142,7 +160,7 @@ let start_flush_fiber ~sw ~clock ~base_path =
         Log.Metrics.info "tool_metrics_persist: shutdown flush wrote %d records" n
     with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
       Log.Metrics.error "tool_metrics_persist: shutdown flush failed: %s"
-        (Printexc.to_string exn))
+        (Stdlib.Printexc.to_string exn))
 
 (* ── Restore on startup ─────────────────────────────── *)
 
@@ -164,9 +182,9 @@ let restore ~base_path : int =
            data = `Null;
          } in
          Tool_metrics.record result;
-         incr count
+         Stdlib.incr count
        | Error reason ->
-         incr skipped;
+         Stdlib.incr skipped;
          if Option.is_none !first_skip_reason then
            first_skip_reason := Some reason
      ) jsons;
@@ -181,5 +199,5 @@ let restore ~base_path : int =
    | Eio.Cancel.Cancelled _ as e -> raise e
    | exn ->
      Log.Metrics.error "tool_metrics_persist: restore failed: %s"
-       (Printexc.to_string exn));
+       (Stdlib.Printexc.to_string exn));
   !count

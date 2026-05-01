@@ -1,3 +1,5 @@
+open Base
+
 (** Tool_local_runtime_core — types, helpers, process discovery,
     and OpenAI-compatible model fetching for local llama-server
     runtime probing.
@@ -101,7 +103,7 @@ val process_matches_runtime_ports :
     processes to those bound to MASC-managed ports. *)
 
 val discover_processes :
-  unit -> (llama_process list, string) result
+  unit -> (llama_process list, string) Result.t
 (** [discover_processes ()] runs [ps -ax -o pid=,command=]
     through {!Masc_exec.Exec_gate.run_argv_with_status} and
     parses the output into typed records.
@@ -137,7 +139,7 @@ val discover_processes :
 (** {1 Model discovery} *)
 
 val fetch_models_at :
-  string -> (string * string list, string) result
+  string -> (string * string list, string) Result.t
 (** [fetch_models_at base_url] runs
     [curl -sS --max-time 10 <base_url>/<openai_models_path>]
     and parses the OpenAI-compatible response.
@@ -150,6 +152,6 @@ val fetch_models_at :
     {!Masc_network_defaults.openai_models_path} — pinning
     centrally so all siblings hit the same path. *)
 
-val fetch_models : unit -> (string * string list, string) result
+val fetch_models : unit -> (string * string list, string) Result.t
 (** Convenience wrapper over {!fetch_models_at} using
     {!Env_config.Llama.server_url} as the base URL. *)

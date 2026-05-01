@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 (** Typed broadcast tool — Phase 1 PoC for Typed_tool_masc.
     Derives parse + params from Tool_schema_gen combinators. *)
 
@@ -28,9 +46,9 @@ let encode_broadcast (output : broadcast_output) : Yojson.Safe.t =
     | None -> [])
 
 let handle_broadcast (message : string)
-    : (broadcast_output, string) result =
+    : (broadcast_output, string) Result.t =
   let trimmed = String.trim message in
-  if trimmed = "" then Error "Broadcast message cannot be empty"
+  if String.equal trimmed "" then Error "Broadcast message cannot be empty"
   else
     let mention = Mention.extract trimmed in
     Ok { delivered = true; room_message = trimmed; mention }

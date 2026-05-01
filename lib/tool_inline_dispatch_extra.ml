@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 
 (** Tool_inline_dispatch_extra — additional inline tool dispatch arms
     (recall, board, conversation).
@@ -10,7 +28,7 @@ let emit_activity config ~kind ~actor ?subject ?(tags = []) ~payload () =
       | `Assoc fields ->
           `Assoc
             (("actor_identity", Server_utils.board_actor_identity_json actor)
-            :: List.filter (fun (k, _) -> k <> "actor_identity") fields)
+            :: List.filter (fun (k, _) -> not (String.equal k "actor_identity")) fields)
       | other -> other
     in
     ignore
@@ -21,7 +39,7 @@ let emit_activity config ~kind ~actor ?subject ?(tags = []) ~payload () =
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
       Log.Misc.warn "activity emit failed (%s): %s" kind
-        (Printexc.to_string exn)
+        (Stdlib.Printexc.to_string exn)
 
 let extract_board_post_id (message : string) =
   match String.index_opt message '{' with
@@ -33,18 +51,18 @@ let extract_board_post_id (message : string) =
             (String.sub message idx (String.length message - idx))
         in
         match Yojson.Safe.Util.member "id" json with
-        | `String id when String.trim id <> "" -> Some id
+        | `String id when not (String.equal (String.trim id) "") -> Some id
         | _ -> None
       with
       | Invalid_argument _
       | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
 
 let json_upsert_assoc_field name value fields =
-  (name, value) :: List.filter (fun (k, _) -> k <> name) fields
+  (name, value) :: List.filter (fun (k, _) -> not (String.equal k name)) fields
 
 let json_upsert_meta_string_field name value fields =
   let value = String.trim value in
-  if value = "" then fields
+  if String.equal value "" then fields
   else
     let meta_json =
       match List.assoc_opt "meta" fields with
@@ -83,7 +101,7 @@ let canonical_board_author raw =
   Server_utils.board_actor_author_for_write (String.trim raw)
 
 let record_identity_raw_surface field raw canonical fields =
-  if raw = "" || String.equal raw canonical then fields
+  if String.equal raw "" || String.equal raw canonical then fields
   else json_upsert_meta_string_field (field ^ "_raw_agent_name") raw fields
 
 let record_author_legacy_mismatch claim fields =
@@ -123,7 +141,7 @@ let record_author_legacy_mismatch claim fields =
 let enforce_caller_identity ~tool ~field ~agent_name arguments =
   let ctx_raw = String.trim agent_name in
   let ctx_canonical =
-    if ctx_raw = "" then "" else canonical_board_author ctx_raw
+    if String.equal ctx_raw "" then "" else canonical_board_author ctx_raw
   in
   match arguments with
   | `Assoc fields -> (
@@ -137,7 +155,7 @@ let enforce_caller_identity ~tool ~field ~agent_name arguments =
           (* Fill from ctx when caller left the field blank or
              explicitly marked it anonymous; if ctx is also empty,
              leave the original arguments untouched. *)
-          if ctx_canonical = "" then arguments
+          if String.equal ctx_canonical "" then arguments
           else
             let fields =
               json_upsert_assoc_field field (`String ctx_canonical) fields
@@ -148,7 +166,7 @@ let enforce_caller_identity ~tool ~field ~agent_name arguments =
             `Assoc fields
       | claim ->
           let claim_canonical = canonical_board_author claim in
-          if ctx_canonical = "" then
+          if String.equal ctx_canonical "" then
             (* No ctx to compare against - preserve the caller's
                canonicalisation as the legacy code did. *)
             if String.equal claim_canonical claim then arguments
@@ -263,7 +281,7 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
            Metrics_store_eio.record config metric
          with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
            Log.Misc.error "board_post fitness record failed: %s"
-             (Printexc.to_string exn));
+             (Stdlib.Printexc.to_string exn));
         let notification = `Assoc [
           ("type", `String "masc/board_post");
           ("author", `String author);
@@ -331,7 +349,7 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
            Metrics_store_eio.record config metric
          with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
            Log.Misc.error "board_comment fitness record failed: %s"
-             (Printexc.to_string exn));
+             (Stdlib.Printexc.to_string exn));
         let notification = `Assoc [
           ("type", `String "board_comment");
           ("author", `String author);
@@ -378,7 +396,7 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
       if success then begin
         let voter = Safe_ops.json_string ~default:"anonymous" "voter" arguments in
         let target_id =
-          if name = "masc_board_vote" then
+          if String.equal name "masc_board_vote" then
             Safe_ops.json_string ~default:"unknown" "post_id" arguments
           else
             Safe_ops.json_string ~default:"unknown" "comment_id" arguments
@@ -400,7 +418,7 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
            Metrics_store_eio.record config metric
          with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
            Log.Misc.error "board_vote fitness record failed: %s"
-             (Printexc.to_string exn));
+             (Stdlib.Printexc.to_string exn));
         let subject_kind =
           if String.equal name "masc_board_vote" then "post" else "comment"
         in

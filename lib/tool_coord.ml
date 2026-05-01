@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 (** Tool_coord - Coord management operations
     Handles: status, reset, init, workflow_guide, check
     Note: join, leave, set_room, who require state/registry and remain in mcp_server_eio.ml
@@ -49,7 +67,7 @@ let cache_ttl_seconds env_var ~default =
   match Sys.getenv_opt env_var with
   | Some raw -> (
       match Float.of_string_opt (String.trim raw) with
-      | Some value when value >= 0.0 -> value
+      | Some value when Stdlib.Float.compare value 0.0 >= 0 -> value
       | _ -> default)
   | None -> default
 
@@ -64,7 +82,7 @@ let cached_text_by_key cache ~key ~ttl_s compute =
   let now = Time_compat.now () in
   match cache.key, cache.value with
   | Some cached_key, Some value
-    when String.equal cached_key key && now < cache.expires_at ->
+    when String.equal cached_key key && Stdlib.Float.compare now cache.expires_at < 0 ->
       value
   | _ ->
       let value = compute () in
@@ -93,7 +111,7 @@ let unique_strings items =
   List.fold_left
     (fun acc item ->
       let item = String.trim item in
-      if item = "" || List.exists (String.equal item) acc then acc
+      if String.equal item "" || List.exists (String.equal item) acc then acc
       else item :: acc)
     [] items
   |> List.rev
@@ -109,7 +127,7 @@ let credential_state (ctx : context) ~actual_name =
     with
     | Some _, Some raw ->
         let token = String.trim raw in
-        token <> ""
+        not (String.equal token "")
         && Auth.verify_internal_keeper_token ctx.config.base_path ~token
     | _ -> false
   in
@@ -143,7 +161,7 @@ let status_worktree_active (ctx : context) =
   with
   | Sys_error _ -> false
   | exn ->
-      Log.Coord.warn "worktree_active check failed: %s" (Printexc.to_string exn);
+      Log.Coord.warn "worktree_active check failed: %s" (Stdlib.Printexc.to_string exn);
       false
 
 let safe_resolve_agent_name (ctx : context) ~joined =
@@ -155,7 +173,7 @@ let safe_resolve_agent_name (ctx : context) ~joined =
     | Sys_error _ | Yojson.Json_error _ -> ctx.agent_name
     | exn ->
         Log.Coord.warn "resolve_agent_name failed for %s: %s" ctx.agent_name
-          (Printexc.to_string exn);
+          (Stdlib.Printexc.to_string exn);
         ctx.agent_name
 
 let safe_current_task (ctx : context) ~joined =
@@ -167,7 +185,7 @@ let safe_current_task (ctx : context) ~joined =
     | Sys_error _ | Yojson.Json_error _ -> None
     | exn ->
         Log.Coord.warn "get_current_task failed for %s: %s" ctx.agent_name
-        (Printexc.to_string exn);
+        (Stdlib.Printexc.to_string exn);
         None
 
 let safe_get_agents (ctx : context) =
@@ -175,7 +193,7 @@ let safe_get_agents (ctx : context) =
   with
   | Sys_error _ | Yojson.Json_error _ -> []
   | exn ->
-      Log.Coord.warn "get_agents_raw failed: %s" (Printexc.to_string exn);
+      Log.Coord.warn "get_agents_raw failed: %s" (Stdlib.Printexc.to_string exn);
       []
 
 let safe_is_zombie_agent ~agent_name last_seen =
@@ -184,7 +202,7 @@ let safe_is_zombie_agent ~agent_name last_seen =
   | Sys_error _ | Yojson.Json_error _ -> false
   | exn ->
       Log.Coord.warn "is_zombie_agent failed for %s: %s" agent_name
-        (Printexc.to_string exn);
+        (Stdlib.Printexc.to_string exn);
       false
 
 let todo_task_has_completed_deliverable_conflict (ctx : context)
@@ -250,7 +268,7 @@ let resolve_current_binding ~assigned_task_ids ~planning_current =
     effective_current;
     drift_reason;
     current_task_set;
-    claim_first_suppressed = assigned_task_ids <> [];
+    claim_first_suppressed = Stdlib.List.length assigned_task_ids > 0;
   }
 
 let planning_context_state (ctx : context) (binding : current_binding)
@@ -296,7 +314,7 @@ let coordination_fsm_attention_items ctx =
   with
   | exn ->
       Log.Coord.warn "coordination FSM status advisory failed: %s"
-        (Printexc.to_string exn);
+        (Stdlib.Printexc.to_string exn);
       []
 
 let status_summary_string (ctx : context) =
@@ -388,7 +406,7 @@ let status_summary_string (ctx : context) =
     Workflow_guide.current_state_guidance
       ~room_set:true
       ~joined
-      ~task_claimed:(binding.assigned_task_ids <> [])
+      ~task_claimed:(Stdlib.List.length binding.assigned_task_ids > 0)
       ~current_task_set:binding.current_task_set
       ~worktree_active ~session_active:false
   in
@@ -512,7 +530,7 @@ let status_summary_string (ctx : context) =
       else
         items
     in
-    if fresh_todo_count > 0 && binding.assigned_task_ids = [] then
+    if fresh_todo_count > 0 && Stdlib.List.length binding.assigned_task_ids = 0 then
       items
       @ [ Printf.sprintf "%d unclaimed task(s) are available right now."
             fresh_todo_count ]
@@ -577,7 +595,7 @@ let inspect_state ctx =
     else
       resolve_current_binding ~assigned_task_ids:[] ~planning_current:None
   in
-  let task_claimed = binding.assigned_task_ids <> [] in
+  let task_claimed = Stdlib.List.length binding.assigned_task_ids > 0 in
   let current_task_set = binding.current_task_set in
   let worktree_active =
     if room_set then

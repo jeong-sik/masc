@@ -1,3 +1,5 @@
+open Base
+
 (** Portal tools — agent-to-agent direct messaging.
     Tool handlers removed (deprecated #4999).
     Only filter_visible_tool_names retained for keeper agent run. *)

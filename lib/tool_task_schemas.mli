@@ -1,3 +1,5 @@
+open Base
+
 (** Tool_task_schemas — MCP tool schema definitions for task operations.
 
     Pure data module. Consumed by the MCP tool registry at startup to

@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 (** Code Navigation Tools - Ripgrep-based code search and file reading
 
     Phase 1: Core search tools (search, symbols, read)
@@ -44,7 +62,7 @@ let max_file_size = 500 * 1024
    Returns a clean absolute path with no traversal components. *)
 let normalize_path path =
   let parts = String.split_on_char '/' path in
-  let is_absolute = String.length path > 0 && path.[0] = '/' in
+  let is_absolute = String.length path > 0 && Char.equal path.[0] '/' in
   let rec resolve acc = function
     | [] -> List.rev acc
     | ("." | "") :: rest -> resolve acc rest
@@ -97,7 +115,7 @@ let normalize_agent_relative_path ~(config : Coord.config) ~(agent_name : string
         String.sub trimmed (String.length own_bundle_rel)
           (String.length trimmed - String.length own_bundle_rel)
       in
-      if rest = "" then "." else rest
+      if String.equal rest "" then "." else rest
     else trimmed
   in
   let trimmed =
@@ -173,7 +191,7 @@ let validate_path config path =
     else Error (IoError "Path traversal detected: access outside git root")
   with
   | Invalid_argument msg -> Error (IoError msg)
-  | exn -> Error (IoError (Printexc.to_string exn))
+  | exn -> Error (IoError (Stdlib.Printexc.to_string exn))
 
 (* #6637 iter11 — per-agent playground containment for code-read tools.
 
@@ -280,7 +298,7 @@ let validate_read_path ~agent_name config path =
                trailing slash for the prefix comparison. *)
             let own_rel =
               let n = String.length own_rel_trailing in
-              if n > 0 && own_rel_trailing.[n - 1] = '/'
+              if n > 0 && Char.equal own_rel_trailing.[n - 1] '/'
               then String.sub own_rel_trailing 0 (n - 1)
               else own_rel_trailing
             in
@@ -323,9 +341,9 @@ let handle_code_search ctx args =
   let is_regex = get_bool args "is_regex" false in
   let max_results = get_int args "max_results" 50 in
 
-  if query = "" then
+  if String.equal query "" then
     (false, "❌ Query required: 'query' parameter")
-  else if String.trim path = "" then
+  else if String.equal (String.trim path) "" then
     (false, "❌ Path required: 'path' parameter")
   else begin
     (* Validate path first *)
@@ -340,8 +358,8 @@ let handle_code_search ctx args =
       [ "--json" ]
       @ (if case_insensitive then [ "-i" ] else [])
       @ (if not is_regex then [ "--fixed-strings" ] else [])
-      @ (if file_pattern <> "" then [ "-g"; file_pattern ] else [])
-      @ [ "-C"; "2"; "--max-count"; string_of_int max_results; "--"; query; search_path ]
+      @ (if not (String.equal file_pattern "") then [ "-g"; file_pattern ] else [])
+      @ [ "-C"; "2"; "--max-count"; Int.to_string max_results; "--"; query; search_path ]
     in
     let cmd = "rg" :: rg_args in
 
@@ -350,7 +368,7 @@ let handle_code_search ctx args =
         (* Parse rg JSON output *)
         let lines = String.split_on_char '\n' output in
         let results = List.filter_map (fun line ->
-          if line = "" then None else
+          if String.equal line "" then None else
           try Some (Yojson.Safe.from_string line)
           with Yojson.Json_error _ -> None
         ) lines in
@@ -395,7 +413,7 @@ let handle_code_search ctx args =
             let ls = String.length s and lsub = String.length sub in
             let rec scan i =
               if i + lsub > ls then false
-              else if String.sub s i lsub = sub then true
+              else if String.equal (Stdlib.String.sub s i lsub) sub then true
               else scan (i + 1)
             in
             scan 0
@@ -416,7 +434,7 @@ let handle_code_search ctx args =
              try simplifying the query or set is_regex=true with a valid regex."
         in
         (false, Printf.sprintf "❌ %s\nrg output: %s" hint
-           (if trimmed_out = "" then "(empty)"
+           (if String.equal trimmed_out "" then "(empty)"
             else String_util.utf8_safe ~max_bytes:303 ~suffix:"..." trimmed_out |> String_util.to_string))
     | status, output ->
         let code = match status with
@@ -425,7 +443,7 @@ let handle_code_search ctx args =
           | Unix.WSTOPPED n -> Printf.sprintf "stopped %d" n
         in
         (false, Printf.sprintf "ripgrep failed (%s): %s" code
-           (if output = "" then "(no output — check rg is in PATH and query is valid)"
+           (if String.equal output "" then "(no output — check rg is in PATH and query is valid)"
             else output))
   end
 
@@ -433,7 +451,7 @@ let handle_code_search ctx args =
 let handle_code_symbols ctx args =
   let path = get_string args "path" "" in
 
-  if path = "" then
+  if String.equal path "" then
     (false, "❌ Path required: 'path' parameter")
   else begin
     match validate_read_path ~agent_name:ctx.agent_name ctx.config path with
@@ -467,9 +485,8 @@ let handle_code_symbols ctx args =
                         let name_end = ref 0 in
                         while !name_end < String.length rest &&
                               (let c = rest.[!name_end] in
-                               (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-                               (c >= '0' && c <= '9') || c = '_' || c = '\'') do
-                          incr name_end
+                               (match c with 'a'..'z' | 'A'..'Z' | '0'..'9' | '_' | '\'' -> true | _ -> false)) do
+                          Stdlib.incr name_end
                         done;
                         if !name_end > 0 then
                           Some (String.sub rest 0 !name_end, keyword)
@@ -502,7 +519,7 @@ let handle_code_symbols ctx args =
               ] in
               (true, Yojson.Safe.to_string response)
             with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-              (false, Printf.sprintf "❌ Failed to read file: %s" (Printexc.to_string exn))
+              (false, Printf.sprintf "❌ Failed to read file: %s" (Stdlib.Printexc.to_string exn))
           end
         end
   end
@@ -513,7 +530,7 @@ let handle_code_read ctx args =
   let offset = get_int args "offset" 0 in
   let limit = get_int args "limit" 100 in
 
-  if path = "" then
+  if String.equal path "" then
     (false, "❌ Path required: 'path' parameter")
   else begin
     match validate_read_path ~agent_name:ctx.agent_name ctx.config path with
@@ -557,7 +574,7 @@ let handle_code_read ctx args =
               ] in
               (true, Yojson.Safe.to_string response)
             with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-              (false, Printf.sprintf "❌ Failed to read file: %s" (Printexc.to_string exn))
+              (false, Printf.sprintf "❌ Failed to read file: %s" (Stdlib.Printexc.to_string exn))
           end
         end
   end

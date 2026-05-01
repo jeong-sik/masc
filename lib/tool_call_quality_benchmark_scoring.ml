@@ -1,14 +1,32 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 open Tool_call_quality_benchmark_types
 
 let avg_float values =
   match values with
   | [] -> 0.0
   | _ ->
-      List.fold_left ( +. ) 0.0 values /. float_of_int (List.length values)
+      List.fold_left ( +. ) 0.0 values /. Stdlib.Float.of_int (List.length values)
 
 let split_path path =
   let path = String.trim path in
-  if path = "$" then []
+  if String.equal path "$" then []
   else
     let path =
       if String.starts_with ~prefix:"$." path then
@@ -18,7 +36,7 @@ let split_path path =
       else
         path
     in
-    if path = "" then [] else String.split_on_char '.' path
+    if String.equal path "" then [] else String.split_on_char '.' path
 
 let rec json_at_path json segments =
   match segments, json with
@@ -28,7 +46,7 @@ let rec json_at_path json segments =
       | Some value -> json_at_path value rest
       | None -> None)
   | segment :: rest, `List items -> (
-      match int_of_string_opt segment with
+      match Stdlib.int_of_string_opt segment with
       | Some idx when idx >= 0 && idx < List.length items ->
           (match List.nth_opt items idx with
            | Some item -> json_at_path item rest
@@ -51,12 +69,12 @@ let evaluate_json_check ~(target : Yojson.Safe.t option) (check : json_check) =
     match check.present with
     | None -> true
     | Some true -> (match actual with Some `Null | None -> false | Some _ -> true)
-    | Some false -> (match actual with Some value when value <> `Null -> false | _ -> true)
+    | Some false -> (match actual with Some value when not (Poly.equal value `Null) -> false | _ -> true)
   in
   let equals_ok =
     match check.equals with
     | None -> true
-    | Some expected -> actual = Some expected
+    | Some expected -> Option.equal Poly.equal actual (Some expected)
   in
   let contains_ok =
     match check.contains with
@@ -72,7 +90,7 @@ let evaluate_json_check ~(target : Yojson.Safe.t option) (check : json_check) =
     | Some min_value -> (
         match actual with
         | Some (`Int value) -> value >= min_value
-        | Some (`Float value) -> value >= float_of_int min_value
+        | Some (`Float value) -> Stdlib.Float.compare value (Stdlib.Float.of_int min_value) >= 0
         | _ -> false)
   in
   present_ok && equals_ok && contains_ok && min_int_ok
@@ -99,7 +117,7 @@ let tool_sequence (run : evidence_run) =
 let required_tool_score (benchmark_case : benchmark_case) (run : evidence_run) =
   match benchmark_case.category with
   | Tool_forbidden ->
-      if run.tool_calls = [] then 1.0 else 0.0
+      if Stdlib.List.length run.tool_calls = 0 then 1.0 else 0.0
   | _ ->
       (match benchmark_case.required_tools with
        | [] -> 1.0
@@ -111,7 +129,7 @@ let required_tool_score (benchmark_case : benchmark_case) (run : evidence_run) =
 
 let forbidden_tool_used (benchmark_case : benchmark_case) (run : evidence_run) =
   match benchmark_case.category with
-  | Tool_forbidden -> run.tool_calls <> []
+  | Tool_forbidden -> Stdlib.List.length run.tool_calls > 0
   | _ ->
       List.exists (fun tool_name -> tool_used tool_name run) benchmark_case.forbidden_tools
 
@@ -155,7 +173,7 @@ let recovery_score (benchmark_case : benchmark_case) (run : evidence_run) task_p
         | Some failures, Some max_failures -> failures <= max_failures
         | None, _ -> false
       in
-      if task_pass = 1.0 && failure_limit_ok && success_after_failure <> None then 1.0
+      if Stdlib.Float.compare task_pass 1.0 = 0 && failure_limit_ok && Option.is_some success_after_failure then 1.0
       else 0.0
 
 let unnecessary_tool_rate (benchmark_case : benchmark_case) (run : evidence_run) =
@@ -171,8 +189,8 @@ let unnecessary_tool_rate (benchmark_case : benchmark_case) (run : evidence_run)
           |> List.length
         in
         let over_limit = max 0 (call_count - benchmark_case.max_tool_calls) in
-        min 1.0
-          (float_of_int (forbidden_count + over_limit) /. float_of_int call_count)
+        Stdlib.Float.min 1.0
+          (Stdlib.Float.of_int (forbidden_count + over_limit) /. Stdlib.Float.of_int call_count)
 
 let efficiency_score (benchmark_case : benchmark_case) (run : evidence_run) =
   let call_count = List.length run.tool_calls in
@@ -184,16 +202,16 @@ let efficiency_score (benchmark_case : benchmark_case) (run : evidence_run) =
         if call_count = 0 then 1.0 else 0.0
       else
         let over_limit = max 0 (call_count - benchmark_case.max_tool_calls) in
-        max 0.0
-          (1.0 -. (float_of_int over_limit /. float_of_int benchmark_case.max_tool_calls))
+        Stdlib.Float.max 0.0
+          (1.0 -. (Stdlib.Float.of_int over_limit /. Stdlib.Float.of_int benchmark_case.max_tool_calls))
 
 let score_run ~cases (run : evidence_run) =
-  if run.status <> Run_ok then None
+  if not (Poly.equal run.status Run_ok) then None
   else
     let cases_by_id =
       cases
       |> List.to_seq
-      |> Seq.map (fun case -> (case.id, case))
+      |> Stdlib.Seq.map (fun case -> (case.id, case))
       |> Hashtbl.of_seq
     in
     match Hashtbl.find_opt cases_by_id run.case_id with
@@ -218,11 +236,11 @@ let score_run ~cases (run : evidence_run) =
             +. (10.0 *. efficiency)
           in
           let passed =
-            task_pass = 1.0
-            && tool_selection = 1.0
-            && arg_validity = 1.0
-            && recovery = 1.0
-            && efficiency = 1.0
+            Stdlib.Float.compare task_pass 1.0 = 0
+            && Stdlib.Float.compare tool_selection 1.0 = 0
+            && Stdlib.Float.compare arg_validity 1.0 = 0
+            && Stdlib.Float.compare recovery 1.0 = 0
+            && Stdlib.Float.compare efficiency 1.0 = 0
           in
           Some
             {

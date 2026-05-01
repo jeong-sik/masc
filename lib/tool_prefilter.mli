@@ -1,3 +1,5 @@
+open Base
+
 (** Tool_prefilter — TF-IDF cosine similarity for tool relevance scoring.
 
     Stateless. Index built per-call from provided tools.

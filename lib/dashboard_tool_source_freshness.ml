@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 (** Dashboard_tool_source_freshness -- source freshness metadata helpers. *)
 
 let numeric_ts_field fields name =
@@ -32,7 +50,7 @@ let count_source_entries dir =
       Log.Dashboard.warn
         "dashboard source entry count failed for %s: %s"
         dir
-        (Printexc.to_string exn);
+        (Stdlib.Printexc.to_string exn);
       0
 
 let freshness_fields ~now latest_ts =
@@ -41,7 +59,7 @@ let freshness_fields ~now latest_ts =
     [
       ("latest_ts_unix", `Float ts);
       ("latest_ts_iso", `String (Types.iso8601_of_unix_seconds ts));
-      ("latest_age_s", `Float (max 0.0 (now -. ts)));
+      ("latest_age_s", `Float (Stdlib.Float.max 0.0 (now -. ts)));
     ]
   | None ->
     [
@@ -64,8 +82,8 @@ let health_fields ~now ~exists ~entry_count ~latest_ts ~freshness_slo_s
         match latest_ts with
         | None -> ("empty", "no_entries")
         | Some ts ->
-          let latest_age_s = max 0.0 (now -. ts) in
-          if latest_age_s > freshness_slo_s then
+          let latest_age_s = Stdlib.Float.max 0.0 (now -. ts) in
+          if Stdlib.Float.compare latest_age_s freshness_slo_s > 0 then
             ("stale", "freshness_slo_exceeded")
           else
             ("ok", "")
@@ -73,11 +91,11 @@ let health_fields ~now ~exists ~entry_count ~latest_ts ~freshness_slo_s
   [
     ("health", `String health);
     ( "stale_reason",
-      if stale_reason = "" then `Null else `String stale_reason );
+      if String.equal stale_reason "" then `Null else `String stale_reason );
   ]
 
 let coverage_gaps_for_store ~source_name ~durable_store =
-  if durable_store = "" then []
+  if String.equal durable_store "" then []
   else
     let masc_root = Filename.dirname durable_store in
     Telemetry_coverage_gap.read_recent ~masc_root ~n:50
@@ -88,7 +106,7 @@ let coverage_gaps_for_store ~source_name ~durable_store =
 let metadata_fields ~source_name ~source_producer ~dashboard_surface
     ~freshness_slo_s ~durable_store ~latest_record () =
   let now = Unix.gettimeofday () in
-  let exists = durable_store <> "" && Sys.file_exists durable_store in
+  let exists = not (String.equal durable_store "") && Sys.file_exists durable_store in
   let entry_count = if exists then count_source_entries durable_store else 0 in
   let latest_ts =
     if exists then Option.bind latest_record latest_ts_of_record else None

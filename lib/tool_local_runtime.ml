@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 (** Tool_local_runtime -- local model runtime management and benchmarking tools.
 
     Facade module that re-exports sub-modules and provides MCP dispatch/schemas.
@@ -117,7 +135,7 @@ let handle_runtime_bench _ctx args : tool_result =
   in
   let prompt =
     match member "prompt" args with
-    | `String value when String.trim value <> "" -> String.trim value
+    | `String value when not (String.equal (String.trim value) "") -> String.trim value
     | _ -> "Reply with exactly one short word: ready"
   in
   match

@@ -1,3 +1,5 @@
+open Base
+
 (** Tool_shard — Dynamic tool sharding for MASC agents.
 
     @since 2.62.0 *)
@@ -85,13 +87,13 @@ val tools_of_shards : string list -> Types.tool_schema list
 
 (** {1 Dynamic Shard Management} *)
 
-val grant_shard : string list -> string -> (string list, string) result
+val grant_shard : string list -> string -> (string list, string) Result.t
 (** Grant a shard to an agent. Returns new active_shards list.
     @param active_shards Current list of granted shard names
     @param shard_name Shard to grant
     @return Ok new_list on success, Error msg on failure *)
 
-val revoke_shard : string list -> string -> (string list, string) result
+val revoke_shard : string list -> string -> (string list, string) Result.t
 (** Revoke a shard from an agent. Returns new active_shards list.
     @param active_shards Current list of granted shard names
     @param shard_name Shard to revoke (must be removable)

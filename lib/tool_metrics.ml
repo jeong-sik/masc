@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 module StringMap = Map.Make (String)
 
 (** Per-tool timing metrics *)
@@ -32,7 +50,7 @@ let metrics_mu = Stdlib.Mutex.create ()
 
 let with_lock f =
   Stdlib.Mutex.lock metrics_mu;
-  Fun.protect
+  Stdlib.Fun.protect
     ~finally:(fun () -> Stdlib.Mutex.unlock metrics_mu)
     f
 
@@ -54,7 +72,7 @@ let percentile sorted_arr p =
   let n = Array.length sorted_arr in
   if n = 0 then 0.0
   else
-    let idx = Float.to_int (Float.round (float_of_int (n - 1) *. p)) in
+    let idx = Float.to_int (Float.round (Stdlib.Float.of_int (n - 1) *. p)) in
     let idx = max 0 (min (n - 1) idx) in
     sorted_arr.(idx)
 
@@ -63,7 +81,7 @@ let compute_stats tool_name acc =
   Array.sort Float.compare arr;
   let n = Array.length arr in
   let mean = if n = 0 then 0.0
-    else Array.fold_left ( +. ) 0.0 arr /. float_of_int n in
+    else Array.fold_left ( +. ) 0.0 arr /. Stdlib.Float.of_int n in
   { tool_name
   ; call_count = acc.successes + acc.failures
   ; success_count = acc.successes

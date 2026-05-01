@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 (** Tool_local_runtime_verify -- runtime contract verification. *)
 
 include Tool_local_runtime_http
@@ -15,7 +33,7 @@ let runtime_snapshots_for_pool runtime_pool =
             String.equal runtime.id pool || String.equal runtime.base_url pool)
           snapshots
       in
-      if filtered = [] then snapshots else filtered
+      if Stdlib.List.length filtered = 0 then snapshots else filtered
 
 let safe_discovery_endpoints () =
   try Some (Discovery_cache.get_cached_or_refresh ())
@@ -41,7 +59,7 @@ let discovery_endpoints_for_pool runtime_pool =
                  (Local_runtime_pool.runtime_id_of_base_url endpoint.url)
       in
       let filtered = List.filter matches_pool endpoints in
-      Some (if filtered = [] then endpoints else filtered)
+      Some (if Stdlib.List.length filtered = 0 then endpoints else filtered)
 
 let active_slots_of_json json =
   let open Yojson.Safe.Util in
@@ -68,7 +86,7 @@ let active_slots_of_json json =
        | `Int value -> value <> 0
        | `Intlit value -> Option.value ~default:0 (parse_int_opt value) <> 0
        | _ -> false)
-    || status = "processing" || status = "prompt" || status = "generating"
+    || String.equal status "processing" || String.equal status "prompt" || String.equal status "generating"
   in
   List.fold_left (fun acc slot -> if is_active slot then acc + 1 else acc) 0 slots
 
@@ -163,7 +181,7 @@ let probe_chat_completion_compatible
       let outcome =
         match env.clock with
         | Some clock -> (
-            try Ok (Eio.Time.with_timeout_exn clock (float_of_int timeout_sec) run_completion)
+            try Ok (Eio.Time.with_timeout_exn clock (Stdlib.Float.of_int timeout_sec) run_completion)
             with Eio.Time.Timeout -> Error "timeout")
         | None -> Ok (run_completion ())
       in
@@ -174,7 +192,7 @@ let probe_chat_completion_compatible
           (Some false, Some (error_message_of_http_error http_error))
 
 let provider_health_reachable ~status ~body:_ =
-  status = Some 200
+  Option.equal Int.equal status (Some 200)
 
 let chat_contract_probe_body ~model_id =
   Yojson.Safe.to_string
@@ -187,7 +205,7 @@ let chat_contract_probe_body ~model_id =
       ])
 
 let chat_contract_reachable ~status ~body =
-  if status <> Some 200 then
+  if not (Option.equal Int.equal status (Some 200)) then
     false
   else
     match body with
@@ -245,8 +263,8 @@ let classify_runtime_blocker ~provider_reachable ~slot_reachable
     ( Some "ctx_mismatch",
       Some
         (Printf.sprintf "expected ctx %s, got %s"
-           (match expected_ctx with Some value -> string_of_int value | None -> "<none>")
-           (match actual_ctx with Some value -> string_of_int value | None -> "<mixed-or-missing>")) )
+           (match expected_ctx with Some value -> Int.to_string value | None -> "<none>")
+           (match actual_ctx with Some value -> Int.to_string value | None -> "<mixed-or-missing>")) )
   else if String.equal chat_contract_status "rejected" then
     ( Some "chat_contract_incompatible",
       Some "runtime passed health/slots but failed /v1/chat/completions contract probe" )
@@ -313,7 +331,7 @@ let runtime_verify_json_from_discovery ?runtime_pool ?expected_slots ?expected_c
               ("props_error", `Null);
               ( "models_status_code",
                 int_opt_to_json
-                  (if endpoint.models <> [] then Some 200 else None) );
+                  (if Stdlib.List.length endpoint.models > 0 then Some 200 else None) );
               ("models_error", `Null);
               ("expected_model", string_opt_to_json expected_model);
               ("actual_model_id", string_opt_to_json actual_model);
@@ -378,14 +396,14 @@ let runtime_verify_json_from_discovery ?runtime_pool ?expected_slots ?expected_c
       ("available_model_permits", `Int available_model_permits);
       ("runtime_blocker", string_opt_to_json runtime_blocker);
       ("detail", string_opt_to_json detail);
-      ("pass", `Bool (runtime_blocker = None));
+      ("pass", `Bool (Option.is_none runtime_blocker));
       ("runtimes", `List (List.rev runtime_rows));
     ]
 
 let runtime_verify_json_legacy ?runtime_pool ?expected_slots ?expected_ctx
     ?expected_model () =
   let runtimes = runtime_snapshots_for_pool runtime_pool in
-  let has_runtimes = runtimes <> [] in
+  let has_runtimes = Stdlib.List.length runtimes > 0 in
   let configured_capacity =
     runtimes
     |> List.fold_left
@@ -433,7 +451,7 @@ let runtime_verify_json_legacy ?runtime_pool ?expected_slots ?expected_ctx
           provider_health_reachable ~status:provider_status ~body:provider_body
         in
         let provider_ok' = provider_ok && provider_ok_row in
-        let slot_ok_row = slot_status = Some 200 in
+        let slot_ok_row = Option.equal Int.equal slot_status (Some 200) in
         let slot_ok' = slot_ok && slot_ok_row in
         let actual_slots =
           match Option.bind props_json (fun json -> int_member json "total_slots") with
@@ -467,7 +485,7 @@ let runtime_verify_json_legacy ?runtime_pool ?expected_slots ?expected_ctx
           | Some model_id -> Some model_id
           | None -> (
               match expected_model with
-              | Some model_id when String.trim model_id <> "" -> Some (String.trim model_id)
+              | Some model_id when not (String.equal (String.trim model_id) "") -> Some (String.trim model_id)
               | _ -> runtime.model)
         in
         let chat_status, chat_body, chat_err =
@@ -579,7 +597,7 @@ let runtime_verify_json_legacy ?runtime_pool ?expected_slots ?expected_ctx
       ("available_model_permits", `Int available_model_permits);
       ("runtime_blocker", string_opt_to_json runtime_blocker);
       ("detail", string_opt_to_json detail);
-      ("pass", `Bool (runtime_blocker = None));
+      ("pass", `Bool (Option.is_none runtime_blocker));
       ("runtimes", `List (List.rev runtime_rows));
     ]
 

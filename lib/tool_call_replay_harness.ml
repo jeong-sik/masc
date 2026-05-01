@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 type tool_call = {
   name : string;
   arguments : Yojson.Safe.t;
@@ -33,7 +51,7 @@ let string_field fields key =
 
 let string_opt_field fields key =
   match List.assoc_opt key fields with
-  | Some (`String value) when String.trim value <> "" -> Ok (Some value)
+  | Some (`String value) when not (String.equal (String.trim value) "") -> Ok (Some value)
   | Some `Null | None -> Ok None
   | Some (`String _) -> Ok None
   | Some _ -> errorf "%s: expected string or null" key

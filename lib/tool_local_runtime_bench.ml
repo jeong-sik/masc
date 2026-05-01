@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 (** Tool_local_runtime_bench -- concurrency benchmark against runtime pool. *)
 
 include Tool_local_runtime_http
@@ -10,9 +28,9 @@ let pctl percentile values =
       let sorted = List.sort compare values in
       let len = List.length sorted in
       let index =
-        int_of_float
+        Stdlib.Int.of_float
           (Float.floor
-             (percentile *. float_of_int (max 0 (len - 1))))
+             (percentile *. Stdlib.Float.of_int (max 0 (len - 1))))
       in
       List.nth_opt sorted index
 
@@ -23,9 +41,7 @@ let per_runtime_breakdown_to_yojson counts =
   |> Hashtbl.to_seq_values
   |> List.of_seq
   |> List.sort (fun a b ->
-         compare
-           (Yojson.Safe.Util.member "runtime_id" a |> Yojson.Safe.Util.to_string)
-           (Yojson.Safe.Util.member "runtime_id" b |> Yojson.Safe.Util.to_string))
+         String.compare (Yojson.Safe.Util.member "runtime_id" a |> Yojson.Safe.Util.to_string) (Yojson.Safe.Util.member "runtime_id" b |> Yojson.Safe.Util.to_string))
 
 let update_runtime_breakdown counts ~runtime_id ~(sample : bench_sample) =
   let prev =
@@ -95,7 +111,7 @@ let is_oas_managed_runtime_pool = function
   | None -> true
   | Some pool ->
       let trimmed = String.trim pool in
-      trimmed = ""
+      String.equal trimmed ""
       || String.equal trimmed Local_runtime_pool.default_pool_label
       || String.equal trimmed "default"
 
@@ -150,7 +166,7 @@ let ensure_runtime_reachable ?runtime_pool ~timeout_sec () =
   | Ok (status, _) ->
       let status_text =
         match status with
-        | Some code -> string_of_int code
+        | Some code -> Int.to_string code
         | None -> "no-status"
       in
       Error
@@ -200,12 +216,12 @@ let oas_completion_at ?runtime_pool ~model_id ~prompt ~max_tokens ~timeout_sec (
           let outcome =
             match env.clock with
             | Some clock -> (
-                try Ok (Eio.Time.with_timeout_exn clock (float_of_int timeout_sec) run_completion)
+                try Ok (Eio.Time.with_timeout_exn clock (Stdlib.Float.of_int timeout_sec) run_completion)
                 with Eio.Time.Timeout -> Error "timeout")
             | None -> Ok (run_completion ())
           in
           let latency_ms =
-            int_of_float ((Time_compat.now () -. started) *. 1000.0)
+            Stdlib.Int.of_float ((Time_compat.now () -. started) *. 1000.0)
           in
           let sample =
             match outcome with
@@ -235,7 +251,7 @@ let run_bench ?model_id ?runtime_pool ~parallelism ~rounds ~prompt ~max_tokens
                fun () ->
                  let resolved_model_id =
                    match model_id with
-                   | Some model when String.trim model <> "" -> model
+                   | Some model when not (String.equal (String.trim model) "") -> model
                    | _ -> default_local_model_id ()
                  in
                  let sample, runtime_id =
@@ -282,10 +298,10 @@ let run_bench ?model_id ?runtime_pool ~parallelism ~rounds ~prompt ~max_tokens
             ("failure_count", `Int failure_count);
             ( "success_rate",
               `Float
-                (if samples = [] then 0.0
+                (if Stdlib.List.length samples = 0 then 0.0
                  else
-                   float_of_int success_count
-                   /. float_of_int (List.length samples)) );
+                   Stdlib.Float.of_int success_count
+                   /. Stdlib.Float.of_int (List.length samples)) );
             ("p50_latency_ms", int_opt_to_json (pctl 0.50 latencies));
             ("p95_latency_ms", int_opt_to_json (pctl 0.95 latencies));
             ("max_latency_ms", int_opt_to_json (pctl 1.0 latencies));

@@ -1,3 +1,5 @@
+open Base
+
 (** Tool_autoresearch_schemas — Autoresearch + swarm-facing synthesis
     schema definitions.
 

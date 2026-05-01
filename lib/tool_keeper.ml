@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 (** Tool_keeper facade.
 
     MCP entrypoints stay stable while keeper internals live in dedicated
@@ -38,7 +56,7 @@ let cache_ttl_seconds env_var ~default =
   match Sys.getenv_opt env_var with
   | Some raw -> (
       match Float.of_string_opt (String.trim raw) with
-      | Some value when value >= 0.0 -> value
+      | Some value when Stdlib.Float.compare value 0.0 >= 0 -> value
       | _ -> default)
   | None -> default
 
@@ -54,7 +72,7 @@ let cached_text_by_key cache ~key ~ttl_s compute =
   let now = Time_compat.now () in
   match cache.key, cache.value with
   | Some cached_key, Some value
-    when String.equal cached_key key && now < cache.expires_at ->
+    when String.equal cached_key key && Stdlib.Float.compare now cache.expires_at < 0 ->
       value
   | _ ->
       let value = compute () in
@@ -207,7 +225,7 @@ let keeper_list_skill_route_json config (meta : keeper_meta) =
   let metrics_path = keeper_metrics_path config meta.name in
   let lines =
     let dated = Dated_jsonl.read_recent_lines metrics_store 50 in
-    if dated <> [] then dated
+    if Stdlib.List.length dated > 0 then dated
     else Keeper_memory.read_file_tail_lines metrics_path ~max_bytes:16_000 ~max_lines:50
   in
   let open Yojson.Safe.Util in
@@ -217,13 +235,13 @@ let keeper_list_skill_route_json config (meta : keeper_meta) =
         try
           let json = Yojson.Safe.from_string line in
           match Safe_ops.json_string_opt "skill_primary" json with
-          | Some primary when String.trim primary <> "" ->
+          | Some primary when not (String.equal (String.trim primary) "") ->
               let secondary =
                 match json |> member "skill_secondary" with
                 | `List xs ->
                     xs
                     |> List.filter_map (function
-                         | `String s when String.trim s <> "" -> Some (`String s)
+                         | `String s when not (String.equal (String.trim s) "") -> Some (`String s)
                          | _ -> None)
                 | _ -> []
               in
@@ -285,8 +303,7 @@ let keeper_list_row_json ~runtime_class config name =
           @ Keeper_status_bridge.social_model_resolution_fields_json meta
           @ [
             ( "last_speech_act",
-              if String.trim meta.runtime.last_speech_act = ""
-              then `Null
+              if String.equal (String.trim meta.runtime.last_speech_act) "" then `Null
               else `String meta.runtime.last_speech_act );
             ( "delivery_surface_view",
               Json_util.string_opt_to_json
@@ -298,8 +315,7 @@ let keeper_list_row_json ~runtime_class config name =
                 (Keeper_social_model.delivery_surface_view_source_of_meta meta)
             );
             ( "last_social_transition_reason",
-              if String.trim meta.runtime.last_social_transition_reason = ""
-              then `Null
+              if String.equal (String.trim meta.runtime.last_social_transition_reason) "" then `Null
               else `String meta.runtime.last_social_transition_reason );
           ]))
 
@@ -443,7 +459,7 @@ let handle_keeper_msg ctx args : tool_result =
 
 let handle_keeper_msg_result _ctx args : tool_result =
   let request_id = get_string args "request_id" "" in
-  if request_id = "" then
+  if String.equal request_id "" then
     (false, {|{"error":"request_id is required"}|})
   else
     match Keeper_msg_async.poll request_id with
@@ -484,7 +500,7 @@ let default_keeper_model_label (meta : keeper_meta) =
         Cascade_runtime.models_of_cascade_name
           (Keeper_cascade_profile.Runtime_name meta.cascade_name)
       with
-      | first :: _ when String.trim first <> "" -> first
+      | first :: _ when not (String.equal (String.trim first) "") -> first
       | _ -> Env_config.Local_runtime.default_model)
   | model -> model
 
@@ -510,15 +526,15 @@ let annotate_keeper_repair_json ?identity_reseed ~(keeper_name : string) body =
 (* Playground path containment helpers (inlined from deleted Tool_repair_loop). *)
 
 let is_safe_subpath ~parent ~child =
-  if child = parent then true
+  if String.equal child parent then true
   else
     let parent_with_sep =
-      if Filename.check_suffix parent Filename.dir_sep then parent
+      if Filename.check_suffix parent Stdlib.Filename.dir_sep then parent
       else parent ^ Filename.dir_sep
     in
     let plen = String.length parent_with_sep in
     String.length child >= plen
-    && String.sub child 0 plen = parent_with_sep
+    && String.equal (Stdlib.String.sub child 0 plen) parent_with_sep
 
 let validate_target_file ~working_dir ~target_file =
   match target_file with
@@ -555,7 +571,7 @@ let resolve_playground_working_dir ~agent_name ~base_path ~working_dir_arg =
   | Error msg -> Error msg
   | Ok playground_abs ->
       let effective_arg =
-        if String.trim working_dir_arg = "" then playground_abs
+        if String.equal (String.trim working_dir_arg) "" then playground_abs
         else working_dir_arg
       in
       let resolved =
@@ -585,7 +601,7 @@ let handle_keeper_repair ctx args : tool_result =
       | Error err -> (false, err)
       | Ok (meta, identity_reseed) ->
           let task_spec = get_string args "task_spec" "" in
-          if String.trim task_spec = "" then
+          if String.equal (String.trim task_spec) "" then
             (false, "task_spec is required")
           else
             let target_mode = get_string args "target_mode" "snippet" in
@@ -747,7 +763,7 @@ let keeper_persona_audit_requested_names ctx args =
      | None -> names)
     |> dedupe_sorted_strings
   in
-  if explicit_names <> [] then explicit_names
+  if Stdlib.List.length explicit_names > 0 then explicit_names
   else
     let registry_names =
       Keeper_registry.all ~base_path:ctx.config.base_path ()
@@ -813,7 +829,7 @@ let keeper_persona_audit_item ctx requested_name =
   in
   let explicit_persona_name =
     match defaults.persona_name with
-    | Some name when String.trim name <> "" -> Some (String.trim name)
+    | Some name when not (String.equal (String.trim name) "") -> Some (String.trim name)
     | _ -> None
   in
   let default_source_kind = default_source.source_kind in
@@ -830,9 +846,9 @@ let keeper_persona_audit_item ctx requested_name =
     | Some name -> Some name
     | None -> (
         match default_source_kind, inferred_persona_profile_path with
-        | Some "persona", _ when inferred_persona_name <> "" ->
+        | Some "persona", _ when not (String.equal inferred_persona_name "") ->
             Some inferred_persona_name
-        | _, Some _ when inferred_persona_name <> "" -> Some inferred_persona_name
+        | _, Some _ when not (String.equal inferred_persona_name "") -> Some inferred_persona_name
         | _ -> None)
   in
   let persona_candidates =
@@ -901,7 +917,7 @@ let keeper_persona_audit_item ctx requested_name =
     |> add (match autoboot_enabled with Some false -> true | _ -> false)
          "autoboot_disabled"
     |> add (match paused with Some true -> true | _ -> false) "keeper_paused"
-    |> add (match runtime_meta with Some meta when meta.active_goal_ids = [] -> true | _ -> false)
+    |> add (match runtime_meta with Some meta when Stdlib.List.length meta.active_goal_ids = 0 -> true | _ -> false)
          "empty_active_goal_ids"
     |> add
          (match runtime_meta, autoboot_enabled, paused, keepalive_running with
@@ -947,7 +963,7 @@ let keeper_persona_audit_item ctx requested_name =
       ("keepalive_running", json_bool_opt keepalive_running);
       ("keepalive_started_at", json_float_opt keepalive_started_at);
       ("issues", `List (List.map (fun issue -> `String issue) issues));
-      ("ok", `Bool (issues = []));
+      ("ok", `Bool (Stdlib.List.length issues = 0));
     ]
 
 let keeper_persona_audit_summary items =
@@ -989,7 +1005,7 @@ let keeper_persona_audit_summary items =
 let handle_keeper_persona_audit ctx args : tool_result =
   let names = keeper_persona_audit_requested_names ctx args in
   let invalid_names = List.filter (fun name -> not (validate_name name)) names in
-  if invalid_names <> [] then
+  if Stdlib.List.length invalid_names > 0 then
     error_result_typed ~code:Validation_error
       (Printf.sprintf "invalid keeper name(s): %s"
          (String.concat ", " invalid_names))
@@ -1063,7 +1079,7 @@ let parse_network_mode_or_error raw =
 let handle_keeper_sandbox_status ctx args : tool_result =
   let verbose = get_bool args "verbose" false in
   let include_preflight = get_bool args "include_preflight" true in
-  let timeout_sec = min 20.0 (max 1.0 (get_float args "timeout_sec" 5.0)) in
+  let timeout_sec = Stdlib.Float.min 20.0 (Stdlib.Float.max 1.0 (get_float args "timeout_sec" 5.0)) in
   let render_item (meta : keeper_meta) =
     Keeper_sandbox_control.live_status_json
       ~include_preflight ~config:ctx.config ~meta ~timeout_sec ~verbose ()
@@ -1108,8 +1124,8 @@ let handle_keeper_sandbox_start ctx args : tool_result =
   match resolve_keeper_meta ctx args with
   | Error err -> (false, err)
   | Ok meta ->
-      let timeout_sec = min 30.0 (max 1.0 (get_float args "timeout_sec" 10.0)) in
-      let ttl_sec = min 86_400.0 (max 1.0 (get_float args "ttl_sec" 1800.0)) in
+      let timeout_sec = Stdlib.Float.min 30.0 (Stdlib.Float.max 1.0 (get_float args "timeout_sec" 10.0)) in
+      let ttl_sec = Stdlib.Float.min 86_400.0 (Stdlib.Float.max 1.0 (get_float args "ttl_sec" 1800.0)) in
       let network_mode_raw =
         String.trim
           (get_string args "network_mode"
@@ -1135,7 +1151,7 @@ let handle_keeper_sandbox_start ctx args : tool_result =
                       ]) )))
 
 let handle_keeper_sandbox_stop ctx args : tool_result =
-  let timeout_sec = min 30.0 (max 1.0 (get_float args "timeout_sec" 10.0)) in
+  let timeout_sec = Stdlib.Float.min 30.0 (Stdlib.Float.max 1.0 (get_float args "timeout_sec" 10.0)) in
   let prune_stale = get_bool args "prune_stale" false in
   let keeper_name =
     match String.trim (get_string args "name" "") with
@@ -1150,7 +1166,7 @@ let handle_keeper_sandbox_stop ctx args : tool_result =
     if prune_stale then
       Some
         (Keeper_sandbox_control.cleanup_stale ~config:ctx.config
-           ~timeout_sec:(min timeout_sec 5.0) ())
+           ~timeout_sec:(Stdlib.Float.min timeout_sec 5.0) ())
     else
       None
   in
@@ -1197,7 +1213,7 @@ let handle_keeper_sandbox_stop ctx args : tool_result =
 let should_bootstrap_existing_keepalives name args =
   match name with
   | "masc_keeper_msg" ->
-      String.trim (get_string args "message" "") <> ""
+      not (String.equal (String.trim (get_string args "message" "")) "")
   | _ -> false
 
 let maybe_bootstrap_existing_keepalives ctx ~name ~args =
@@ -1205,7 +1221,7 @@ let maybe_bootstrap_existing_keepalives ctx ~name ~args =
     (try start_existing_keepalives ctx
      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
        Log.Keeper.error "start_existing_keepalives failed: %s"
-         (Printexc.to_string exn))
+         (Stdlib.Printexc.to_string exn))
 
 (** Keeper tools are scoped to the caller's current base_path.
     Do not retarget requests across other base_path registries. *)
@@ -1348,7 +1364,7 @@ let handle_keeper_clear ctx args : tool_result =
   | Error err -> (false, err)
   | Ok name ->
     let reason = String.trim (get_string args "reason" "") in
-    if reason = "" then
+    if String.equal reason "" then
       error_result_typed ~code:Validation_error
         "reason is required for masc_keeper_clear (audit trail)"
     else
@@ -1402,7 +1418,7 @@ let handle_keeper_clear ctx args : tool_result =
               (* Keep only system-role messages *)
               List.filter
                 (fun (m : Oas.Types.message) ->
-                   m.role = Llm_provider.Types.System)
+                   Poly.equal m.role Llm_provider.Types.System)
                 existing_messages
             else
               []
@@ -1459,7 +1475,7 @@ let handle_keeper_clear ctx args : tool_result =
             | exn ->
                 Log.Keeper.warn
                   "%s: failed to remove legacy checkpoint shadow %s: %s"
-                  name path (Printexc.to_string exn);
+                  name path (Stdlib.Printexc.to_string exn);
                 count)
           0 files
       in
@@ -1500,7 +1516,7 @@ let handle_keeper_clear ctx args : tool_result =
         name reason preserve_system cleared_count;
       Prometheus.inc_counter Prometheus.metric_keeper_operator_clear
         ~labels:[("keeper", name);
-                 ("preserve_system", string_of_bool preserve_system)] ();
+                 ("preserve_system", Bool.to_string preserve_system)] ();
       (true,
        Yojson.Safe.to_string
          (`Assoc [

@@ -1,3 +1,22 @@
+open Base
+module Random = Stdlib.Random
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 (** Tool_assignment_telemetry — Unified tool assignment lifecycle events
 
     See .mli for design rationale and public API. *)
@@ -83,7 +102,7 @@ let event_to_json = function
         ; ("timestamp", `Float timestamp)
         ]
 
-let event_of_json json : (tool_event, string) result =
+let event_of_json json : (tool_event, string) Result.t =
   let open Yojson.Safe.Util in
   try
     match json |> member "event_type" |> to_string with
@@ -265,7 +284,7 @@ let find_latest_assignment_id ~agent_id : assignment_id option =
   Eio_guard.with_mutex_ro index_mu (fun () ->
     Hashtbl.find_opt agent_index agent_id)
 
-let read_recent ~n : (tool_event list, string) result =
+let read_recent ~n : (tool_event list, string) Result.t =
   try
     let store = get_or_create_store () in
     let jsons = Dated_jsonl.read_recent store n in
@@ -279,7 +298,7 @@ let read_recent ~n : (tool_event list, string) result =
     Ok (List.rev events)
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn -> Error (Printexc.to_string exn)
+  | exn -> Error (Stdlib.Printexc.to_string exn)
 
 let warm_up () : unit =
   try
@@ -296,7 +315,7 @@ let warm_up () : unit =
         jsons)
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn -> Log.Telemetry.warn "warm_up failed: %s" (Printexc.to_string exn)
+  | exn -> Log.Telemetry.warn "warm_up failed: %s" (Stdlib.Printexc.to_string exn)
 
 let reset_for_testing () : unit =
   store_ref := None;

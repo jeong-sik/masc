@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 (** Tool_access_policy — shared allow/deny selector ADT for runtime tool policies. *)
 
 module StringSet = Set.Make (String)
@@ -28,7 +46,7 @@ let dedupe_keep_order names =
 let normalize_names names =
   names
   |> List.map String.trim
-  |> List.filter (fun name -> name <> "")
+  |> List.filter (fun name -> not (String.equal name ""))
   |> dedupe_keep_order
 
 let empty = { allow = Empty; deny = Empty }

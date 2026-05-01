@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 (** Run Tool Handlers
 
     Extracted from mcp_server_eio.ml for testability.
@@ -18,7 +36,7 @@ open Tool_args
 
 let handle_run_init ctx args : tool_result =
   let task_id = get_string args "task_id" "" in
-  if task_id = "" then
+  if String.equal task_id "" then
     (false, "task_id is required")
   else
     let agent = get_string_opt args "agent_name" in
@@ -30,7 +48,7 @@ let handle_run_init ctx args : tool_result =
 
 let handle_run_plan ctx args : tool_result =
   let task_id = get_string args "task_id" "" in
-  if task_id = "" then
+  if String.equal task_id "" then
     (false, "task_id is required")
   else
     let plan = get_string args "plan" "" in
@@ -42,7 +60,7 @@ let handle_run_plan ctx args : tool_result =
 
 let handle_run_log ctx args : tool_result =
   let task_id = get_string args "task_id" "" in
-  if task_id = "" then
+  if String.equal task_id "" then
     (false, "task_id is required")
   else
     let note = get_string args "note" "" in
@@ -54,7 +72,7 @@ let handle_run_log ctx args : tool_result =
 
 let handle_run_deliverable ctx args : tool_result =
   let task_id = get_string args "task_id" "" in
-  if task_id = "" then
+  if String.equal task_id "" then
     (false, "task_id is required")
   else
     let deliverable = get_string args "deliverable" "" in
@@ -66,7 +84,7 @@ let handle_run_deliverable ctx args : tool_result =
 
 let handle_run_get ctx args : tool_result =
   let task_id = get_string args "task_id" "" in
-  if task_id = "" then
+  if String.equal task_id "" then
     (false, "task_id is required")
   else
     match Run_eio.get ctx.config ~task_id with

@@ -1,3 +1,5 @@
+open Base
+
 (** Tool_library — Agent knowledge-library MCP tools.
 
     Implements 5 tools ([masc_library_list], [masc_library_read],

@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 (** Tool_deep_review — Adversarial code review with isolated context.
 
     PR#814 Gap 2: Spawns a review pass using a different model perspective.
@@ -60,7 +78,7 @@ let build_prompt ~target_files ~question ~base_path =
           | None -> None
         ) target_files
       in
-      if file_sections = [] then
+      if Stdlib.List.length file_sections = 0 then
         Error "No readable target files found"
       else
         let files_str = String.concat "\n\n" file_sections in
@@ -92,7 +110,7 @@ let handle_deep_review (config : Coord.config) args : bool * string =
     | `String s -> s
     | _ -> ""
   in
-  if target_files = [] || question = "" then
+  if Stdlib.List.length target_files = 0 || String.equal question "" then
     (false, Yojson.Safe.to_string (`Assoc [
       ("error", `String "target_files (non-empty array) and question (string) are required")
     ]))
@@ -123,7 +141,7 @@ let handle_deep_review (config : Coord.config) args : bool * string =
         | Ok result ->
             let text = Oas_response.text_of_response result.response in
             let verdict =
-              if String.trim (String.uppercase_ascii text) = "NO_ISSUES_FOUND"
+              if String.equal (String.trim (String.uppercase_ascii text)) "NO_ISSUES_FOUND"
               then "no_issues"
               else "concern"
             in

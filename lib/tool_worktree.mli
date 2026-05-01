@@ -1,3 +1,5 @@
+open Base
+
 (** Worktree tools - Git worktree management for task isolation *)
 
 type context = {

@@ -1,3 +1,5 @@
+open Base
+
 (** Tool_local_runtime_status — Runtime pool status reporting.
 
     Aggregates configured runtime snapshots, healthy counts, matching

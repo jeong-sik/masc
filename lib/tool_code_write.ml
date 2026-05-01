@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 (** Code Write Tools — File write, edit, delete, shell, git for keeper agents.
 
     Security model:
@@ -30,7 +48,7 @@ let first_nonempty_line output =
   output
   |> String.split_on_char '\n'
   |> List.map String.trim
-  |> List.find_opt (fun s -> s <> "")
+  |> List.find_opt (fun s -> not (String.equal s ""))
 
 (* Shell command allowlist *)
 let allowed_shell_commands = [
@@ -40,7 +58,7 @@ let allowed_shell_commands = [
   "opam"; "ocamlfind"; "tsc";
 ]
 
-let validate_code_shell_command (command : string) : (unit, string) result =
+let validate_code_shell_command (command : string) : (unit, string) Result.t =
   Worker_dev_tools.validate_command_coding_with_allowlist
     ~allow_pipes:true
     ~allowed_commands:allowed_shell_commands
@@ -199,7 +217,7 @@ let truncate_output s =
 type policy_config_cache_entry = {
   base_path : string;
   env_config_dir : string option;
-  result : (Keeper_tool_policy_config.t, string) result;
+  result : (Keeper_tool_policy_config.t, string) Result.t;
 }
 
 let _policy_config_cache : policy_config_cache_entry option ref = ref None
@@ -211,7 +229,7 @@ let get_policy_config_result ~base_path =
   let env_config_dir = Env_config.config_dir_opt () in
   match !_policy_config_cache with
   | Some { base_path = cached_base_path; env_config_dir = cached_env; result }
-    when String.equal cached_base_path base_path && cached_env = env_config_dir ->
+    when String.equal cached_base_path base_path && Option.equal String.equal cached_env env_config_dir ->
     result
   | _ ->
     let result = Keeper_tool_policy_config.load ~base_path in
@@ -231,9 +249,9 @@ let load_clone_allowed_orgs ~base_path =
 
 let valid_github_org_slug org =
   let valid_org_char c =
-    (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c = '-'
+    (match c with 'a'..'z' | '0'..'9' | '-' -> true | _ -> false)
   in
-  org <> "" && Seq.for_all valid_org_char (String.to_seq org)
+  not (String.equal org "") && Stdlib.Seq.for_all valid_org_char (Stdlib.String.to_seq org)
 
 (** Extract GitHub org from clone URL (case-normalized to lowercase).
     Strict matching: URL must start with an exact known prefix to prevent
@@ -303,7 +321,7 @@ let extract_github_org_repo url =
     in
     (* Validate exactly "org/repo" — two segments, no deeper paths *)
     match String.split_on_char '/' stripped with
-    | [org; repo] when valid_github_org_slug org && repo <> "" ->
+    | [org; repo] when valid_github_org_slug org && not (String.equal repo "") ->
       Some (org ^ "/" ^ repo)
     | _ -> None
 
@@ -339,7 +357,7 @@ let validate_clone_url ~base_path url =
         Error (Printf.sprintf "Repository '%s' is in the denied list" org_repo)
       else
         match String.split_on_char '/' org_repo with
-        | _org :: _ when allowed_lc = [] ->
+        | _org :: _ when Stdlib.List.length allowed_lc = 0 ->
           (* Explicit empty allowed_orgs means "any supported GitHub org",
              still bounded by URL parsing and denied_repos. *)
           Ok ()
@@ -372,7 +390,7 @@ let validate_clone_cwd ~(agent_name : string) config cwd =
         (Filename.concat root
            (Keeper_alerting_path.playground_path_of_keeper agent_name)) in
       let in_worktrees =
-        canonical_path = worktree_prefix ||
+        String.equal canonical_path worktree_prefix ||
         String.starts_with ~prefix:(worktree_prefix ^ "/") canonical_path
       in
       let in_agent_playground_repos =
@@ -382,12 +400,12 @@ let validate_clone_cwd ~(agent_name : string) config cwd =
            the trailing slash before prefix matching. *)
         let prefix_no_slash =
           if String.length agent_playground_prefix > 0
-             && agent_playground_prefix.[String.length agent_playground_prefix - 1] = '/'
+             && Char.equal agent_playground_prefix.[String.length agent_playground_prefix - 1] '/'
           then String.sub agent_playground_prefix 0
                  (String.length agent_playground_prefix - 1)
           else agent_playground_prefix
         in
-        canonical_path = Filename.concat prefix_no_slash "repos"
+        String.equal canonical_path (Stdlib.Filename.concat prefix_no_slash "repos")
         || String.starts_with
              ~prefix:(Filename.concat prefix_no_slash "repos/")
              canonical_path
@@ -411,7 +429,7 @@ let handle_code_write ctx args =
   let content = get_string args "content" "" in
   let create_dirs = get_bool args "create_dirs" false in
 
-  if path = "" then
+  if String.equal path "" then
     (false, "path parameter required")
   else if String.length content > max_write_size then
     (false, Printf.sprintf "Content too large: %d bytes (max: %d)"
@@ -436,7 +454,7 @@ let handle_code_write ctx args =
         ] in
         (true, Yojson.Safe.to_string response)
       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-        (false, Printf.sprintf "Write failed: %s" (Printexc.to_string exn))
+        (false, Printf.sprintf "Write failed: %s" (Stdlib.Printexc.to_string exn))
   end
 
 (* Handler: masc_code_edit — Replace old_string with new_string in a file *)
@@ -446,9 +464,9 @@ let handle_code_edit ctx args =
   let new_string = get_string args "new_string" "" in
   let replace_all = get_bool args "replace_all" false in
 
-  if path = "" then (false, "path parameter required")
-  else if old_string = "" then (false, "old_string parameter required")
-  else if old_string = new_string then (false, "old_string and new_string are identical")
+  if String.equal path "" then (false, "path parameter required")
+  else if String.equal old_string "" then (false, "old_string parameter required")
+  else if String.equal old_string new_string then (false, "old_string and new_string are identical")
   else begin
     match validate_writable_path ~agent_name:ctx.agent_name ctx.config path with
     | Error e -> (false, Types.masc_error_to_string e)
@@ -463,11 +481,11 @@ let handle_code_edit ctx args =
           let pos = ref 0 in
           let old_len = String.length old_string in
           while !pos <= String.length content - old_len do
-            if String.sub content !pos old_len = old_string then begin
-              incr count;
+            if String.equal (Stdlib.String.sub content !pos old_len) old_string then begin
+              Stdlib.incr count;
               pos := !pos + old_len
             end else
-              incr pos
+              Stdlib.incr pos
           done;
 
           if !count = 0 then
@@ -515,12 +533,12 @@ let handle_code_edit ctx args =
                 let buf = Buffer.create (String.length content) in
                 let i = ref 0 in
                 while !i <= String.length content - old_len do
-                  if String.sub content !i old_len = old_string then begin
+                  if String.equal (Stdlib.String.sub content !i old_len) old_string then begin
                     Buffer.add_string buf new_string;
                     i := !i + old_len
                   end else begin
                     Buffer.add_char buf content.[!i];
-                    incr i
+                    Stdlib.incr i
                   end
                 done;
                 (* Add remaining characters *)
@@ -533,10 +551,10 @@ let handle_code_edit ctx args =
                 let idx = ref (-1) in
                 let i = ref 0 in
                 while !idx = -1 && !i <= String.length content - old_len do
-                  if String.sub content !i old_len = old_string then
+                  if String.equal (Stdlib.String.sub content !i old_len) old_string then
                     idx := !i
                   else
-                    incr i
+                    Stdlib.incr i
                 done;
                 match !idx with
                 | -1 -> content (* should not happen *)
@@ -557,7 +575,7 @@ let handle_code_edit ctx args =
             (true, Yojson.Safe.to_string response)
           end
         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-          (false, Printf.sprintf "Edit failed: %s" (Printexc.to_string exn))
+          (false, Printf.sprintf "Edit failed: %s" (Stdlib.Printexc.to_string exn))
       end
   end
 
@@ -565,7 +583,7 @@ let handle_code_edit ctx args =
 let handle_code_delete ctx args =
   let path = get_string args "path" "" in
 
-  if path = "" then (false, "path parameter required")
+  if String.equal path "" then (false, "path parameter required")
   else begin
     match validate_writable_path ~agent_name:ctx.agent_name ctx.config path with
     | Error e -> (false, Types.masc_error_to_string e)
@@ -584,7 +602,7 @@ let handle_code_delete ctx args =
           ] in
           (true, Yojson.Safe.to_string response)
         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-          (false, Printf.sprintf "Delete failed: %s" (Printexc.to_string exn))
+          (false, Printf.sprintf "Delete failed: %s" (Stdlib.Printexc.to_string exn))
       end
   end
 
@@ -594,14 +612,14 @@ let handle_code_shell ctx args =
   let cwd = get_string args "cwd" "" in
   let timeout = get_int args "timeout" 30 in
 
-  if command = "" then (false, "command parameter required")
+  if String.equal command "" then (false, "command parameter required")
   else
     match validate_code_shell_command command with
     | Error reason -> (false, reason)
     | Ok () ->
         (* Validate cwd if provided *)
         let cwd_result =
-          if cwd = "" then Ok None
+          if String.equal cwd "" then Ok None
           else
             match validate_writable_path ~agent_name:ctx.agent_name ctx.config cwd with
             | Ok abs_cwd -> Ok (Some abs_cwd)
@@ -645,20 +663,20 @@ let handle_code_git ctx args =
   in
   let cwd = get_string args "cwd" "" in
 
-  if action = "" then (false, "action parameter required")
+  if String.equal action "" then (false, "action parameter required")
   else if not (List.mem action allowed_git_actions) then
     (false, Printf.sprintf "Git action '%s' not allowed. Allowed: %s"
        action (String.concat ", " allowed_git_actions))
-  else if action = "clone" then begin
+  else if String.equal action "clone" then begin
     (* Clone: validate org allowlist + cwd within .worktrees/.
        Block all flag-like args to prevent --upload-pack injection (CVE-like). *)
     let url = match git_args with url :: _ -> url | [] -> "" in
-    let has_flag_args = List.exists (fun a -> String.length a > 0 && a.[0] = '-') git_args in
-    if url = "" then
+    let has_flag_args = List.exists (fun a -> String.length a > 0 && Char.equal a.[0] '-') git_args in
+    if String.equal url "" then
       (false, "clone requires a repository URL as first argument")
     else if has_flag_args then
       (false, "clone does not accept flags (security: --upload-pack injection blocked)")
-    else if cwd = "" then
+    else if String.equal cwd "" then
       (false, "cwd parameter required for clone")
     else
       match validate_clone_url ~base_path:ctx.config.Coord.base_path url with
@@ -704,19 +722,19 @@ let handle_code_git ctx args =
   else begin
     (* Non-clone actions: existing validation *)
     let is_dangerous =
-      (action = "push" && List.mem "--force" git_args) ||
-      (action = "push" && List.mem "-f" git_args) ||
-      (action = "push" && List.exists (fun a ->
-         a = "main" || a = "master" || a = "origin/main" || a = "origin/master"
+      (String.equal action "push" && List.mem "--force" git_args) ||
+      (String.equal action "push" && List.mem "-f" git_args) ||
+      (String.equal action "push" && List.exists (fun a ->
+         String.equal a "main" || String.equal a "master" || String.equal a "origin/main" || String.equal a "origin/master"
        ) git_args) ||
-      (action = "checkout" && List.mem "--" git_args &&
+      (String.equal action "checkout" && List.mem "--" git_args &&
        List.mem "." git_args)
     in
     if is_dangerous then
       (false, "Dangerous git operation blocked (force push, main push, or checkout .)")
     else begin
       let cwd_result =
-        if cwd = "" then (false, "cwd parameter required for git operations") |> fun (ok, msg) ->
+        if String.equal cwd "" then (false, "cwd parameter required for git operations") |> fun (ok, msg) ->
           if ok then Ok None else Error (IoError msg)
         else match validate_writable_path ~agent_name:ctx.agent_name ctx.config cwd with
           | Ok abs_cwd -> Ok (Some abs_cwd)
@@ -733,7 +751,7 @@ let handle_code_git ctx args =
                      (String.concat " " (List.map Filename.quote git_args))]
         in
         let env_opt =
-          if action = "commit" then
+          if String.equal action "commit" then
             Some (Keeper_identity.git_env_for_keeper ~keeper_name:ctx.agent_name)
           else None
         in

@@ -1,3 +1,5 @@
+open Base
+
 (** Per-tool timing metrics
 
     Collects duration and success/failure counts from {!Tool_result.t}

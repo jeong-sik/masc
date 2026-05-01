@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 (** Tool_inline_dispatch — thin dispatch router for inline tool handlers.
 
     Delegates to sub-modules:
@@ -92,7 +110,7 @@ let dispatch (ctx : context) ~(name : string) : tool_result option =
       Some (true, Yojson.Safe.to_string json)
   | "masc_approval_get" ->
       let id = arg_get_string "id" "" in
-      if id = "" then Some (false, "id is required")
+      if String.equal id "" then Some (false, "id is required")
       else
         (match Keeper_approval_queue.get_pending_json ~id with
          | Some json -> Some (true, Yojson.Safe.to_string json)
@@ -104,7 +122,7 @@ let dispatch (ctx : context) ~(name : string) : tool_result option =
   | "masc_approval_resolve" ->
       let id = arg_get_string "id" "" in
       let decision_str = arg_get_string "decision" "approve" in
-      if id = "" then Some (false, "id is required")
+      if String.equal id "" then Some (false, "id is required")
       else
         let decision = match String.lowercase_ascii decision_str with
           | "approve" -> Oas.Hooks.Approve
@@ -151,11 +169,11 @@ let dispatch (ctx : context) ~(name : string) : tool_result option =
             ])
         | Mcp_session.Get ->
             let session_id = arg_get_string "session_id" "" in
-            (match List.find_opt (fun (s : Mcp_server_eio_governance.mcp_session_record) -> s.id = session_id) sessions with
+            (match List.find_opt (fun (s : Mcp_server_eio_governance.mcp_session_record) -> String.equal s.id session_id) sessions with
              | None -> Error (Printf.sprintf "MCP session '%s' not found" session_id)
              | Some s ->
                  let updated = { s with last_seen = now } in
-                 let others = List.filter (fun (x : Mcp_server_eio_governance.mcp_session_record) -> x.id <> session_id) sessions in
+                 let others = List.filter (fun (x : Mcp_server_eio_governance.mcp_session_record) -> not (String.equal x.id session_id)) sessions in
                  save (updated :: others);
                  Ok (`Assoc [
                    ("status", `String "ok");
@@ -168,7 +186,7 @@ let dispatch (ctx : context) ~(name : string) : tool_result option =
             ])
         | Mcp_session.Cleanup ->
             let cutoff = now -. Masc_time_constants.days_to_seconds 7 in
-            let remaining = List.filter (fun (s : Mcp_server_eio_governance.mcp_session_record) -> s.last_seen >= cutoff) sessions in
+            let remaining = List.filter (fun (s : Mcp_server_eio_governance.mcp_session_record) -> Stdlib.Float.compare s.last_seen cutoff >= 0) sessions in
             let removed = List.length sessions - List.length remaining in
             save remaining;
             Ok (`Assoc [
@@ -178,7 +196,7 @@ let dispatch (ctx : context) ~(name : string) : tool_result option =
             ])
         | Mcp_session.Remove ->
             let session_id = arg_get_string "session_id" "" in
-            let remaining = List.filter (fun (s : Mcp_server_eio_governance.mcp_session_record) -> s.id <> session_id) sessions in
+            let remaining = List.filter (fun (s : Mcp_server_eio_governance.mcp_session_record) -> not (String.equal s.id session_id)) sessions in
             if List.length remaining = List.length sessions then
               Error (Printf.sprintf "MCP session '%s' not found" session_id)
             else begin
@@ -199,14 +217,14 @@ let dispatch (ctx : context) ~(name : string) : tool_result option =
   | "masc_spawn" ->
       let spawn_agent_name = arg_get_string "agent_name" "" in
       let prompt = arg_get_string "prompt" "" in
-      if prompt = "" then Some (false, "prompt is required")
+      if String.equal prompt "" then Some (false, "prompt is required")
       else
       let timeout_seconds = arg_get_int "timeout_seconds" 300 in
       let model_name =
         match arguments |> Yojson.Safe.Util.member "model" with
         | `String s ->
             let trimmed = String.trim s in
-            if trimmed = "" then None else Some trimmed
+            if String.equal trimmed "" then None else Some trimmed
         | _ -> None
       in
       let runtime_model_valid =
@@ -224,7 +242,7 @@ let dispatch (ctx : context) ~(name : string) : tool_result option =
       in
       let module U = Yojson.Safe.Util in
       let working_dir = match arguments |> U.member "working_dir" with
-        | `String s when s <> "" -> Some s
+        | `String s when not (String.equal s "") -> Some s
         | _ -> None
       in
        (match runtime_model_valid with
@@ -241,7 +259,7 @@ let dispatch (ctx : context) ~(name : string) : tool_result option =
   | "masc_discover_tools" ->
       let query = String.lowercase_ascii (arg_get_string "query" "") in
       let limit = arg_get_int "limit" 20 in
-      if query = "" then
+      if String.equal query "" then
         Some (false, "query is required")
       else
         let all_schemas = Config.visible_tool_schemas ~include_hidden:true ~include_deprecated:false () in

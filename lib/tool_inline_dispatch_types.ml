@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 (** Tool_inline_dispatch_types — shared types for inline dispatch modules.
 
     Extracted to avoid circular dependencies between
@@ -37,4 +55,4 @@ type context = {
 let safe_exec args =
   match Process_eio.run_argv_with_status ~timeout_sec:60.0 args with
   | Unix.WEXITED 0, output -> (true, output)
-  | _, output -> (false, if output = "" then "Command failed" else output)
+  | _, output -> (false, if String.equal output "" then "Command failed" else output)

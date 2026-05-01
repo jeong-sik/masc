@@ -1,3 +1,5 @@
+open Base
+
 (** A2A tools - Agent-to-Agent protocol.
     All tool handlers removed (poll_events, heartbeat_result pruned).
     Module retained for dispatch interface compatibility. *)

@@ -1,3 +1,5 @@
+open Base
+
 (** Tool_args — tool-convention argument extraction wrappers over
     {!Safe_ops} plus canonical error/OK response helpers.
 
@@ -83,14 +85,14 @@ val ok_result : (string * Yojson.Safe.t) list -> bool * string
     empty input. Combine with {!val-(let*!)} for early-return chaining. *)
 
 (** Trim whitespace; reject empty. *)
-val get_string_required : Yojson.Safe.t -> string -> (string, string) result
+val get_string_required : Yojson.Safe.t -> string -> (string, string) Result.t
 
-val get_int_required : Yojson.Safe.t -> string -> (int, string) result
+val get_int_required : Yojson.Safe.t -> string -> (int, string) Result.t
 
-(** Monadic bind for [(value, error_json) result] → [(bool * string)].
+(** Monadic bind for [(value, error_json) Result.t] → [(bool * string)].
     Chains required field extractions with early error return. *)
 val ( let*! ) :
-  ('a, string) result -> ('a -> bool * string) -> bool * string
+  ('a, string) Result.t -> ('a -> bool * string) -> bool * string
 
 (** {1 Structured field validation}
 
@@ -136,10 +138,10 @@ val validation_error_result : field_error list -> bool * string
     to collect multiple errors before returning. *)
 
 val validate_string_required :
-  Yojson.Safe.t -> string -> (string, field_error) result
+  Yojson.Safe.t -> string -> (string, field_error) Result.t
 
 val validate_int_required :
-  Yojson.Safe.t -> string -> (int, field_error) result
+  Yojson.Safe.t -> string -> (int, field_error) Result.t
 
 val validate_int_range :
   Yojson.Safe.t ->
@@ -147,15 +149,15 @@ val validate_int_range :
   min_v:int ->
   max_v:int ->
   default:int ->
-  (int, field_error) result
+  (int, field_error) Result.t
 
 val validate_one_of :
   Yojson.Safe.t ->
   string ->
   allowed:string list ->
   default:string ->
-  (string, field_error) result
+  (string, field_error) Result.t
 
 (** Collect any [Error]s from [results]; returns [Ok ()] when all pass. *)
 val validate_all :
-  (unit, field_error) result list -> (unit, field_error list) result
+  (unit, field_error) Result.t list -> (unit, field_error list) Result.t

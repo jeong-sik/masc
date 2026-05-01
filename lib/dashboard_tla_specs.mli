@@ -1,3 +1,5 @@
+open Base
+
 (** Dashboard projection for TLA+ specs.
 
     Enumerates [*.tla] files under {!specs_dir} (env [MASC_SPECS_DIR], default

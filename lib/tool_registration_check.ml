@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 (** Tool_registration_check — Startup validation of keeper tool policy coverage.
 
     Detects drift between the runtime keeper tool universe and
@@ -47,11 +65,11 @@ let validate () : validation_result =
     { orphan_toml; uncovered }
 
 let log_validation_result (r : validation_result) =
-  if r.orphan_toml <> [] then
+  if Stdlib.List.length r.orphan_toml > 0 then
     Log.Server.warn "tool_policy unknown tool names (%d): %s"
       (List.length r.orphan_toml)
       (String.concat ", " (List.filteri (fun i _ -> i < 10) r.orphan_toml));
-  if r.uncovered <> [] then
+  if Stdlib.List.length r.uncovered > 0 then
     Log.Server.info "tool_policy reverse coverage (%d): %s"
       (List.length r.uncovered)
       (String.concat ", " (List.filteri (fun i _ -> i < 10) r.uncovered))

@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 (** Tool_board - MCP tool handlers for MASC Internal Board
 
     Hardened implementation using Board module:
@@ -38,7 +56,7 @@ let cached_board_list ~key compute =
   let ttl_s = board_list_cache_ttl_s () in
   match _board_list_cache.key, _board_list_cache.value with
   | Some cached_key, Some value
-    when String.equal cached_key key && now < _board_list_cache.expires_at ->
+    when String.equal cached_key key && Stdlib.Float.compare now _board_list_cache.expires_at < 0 ->
     value
   | _ ->
     let value = compute () in
@@ -61,7 +79,7 @@ let strip_state_blocks_text (s : string) : string =
       match Re.exec_opt ~pos:from start_re s with
       | Some g ->
         let i = Re.Group.start g 0 in
-        if i > from then Buffer.add_substring buf s from (i - from);
+        if i > from then Stdlib.Buffer.add_substring buf s from (i - from);
         let block_start = i + String.length start_marker in
         let next_from =
           match Re.exec_opt ~pos:block_start end_re s with
@@ -70,7 +88,7 @@ let strip_state_blocks_text (s : string) : string =
         in
         loop next_from buf
       | None ->
-        Buffer.add_substring buf s from (len - from)
+        Stdlib.Buffer.add_substring buf s from (len - from)
   in
   let buf = Buffer.create len in
   loop 0 buf;
@@ -84,20 +102,20 @@ type tool_result = bool * string
 let format_timestamp_relative ts =
   let now = Time_compat.now () in
   let diff = now -. ts in
-  if diff < 60.0 then "just now"
-  else if diff < 3600.0 then Printf.sprintf "%dm ago" (int_of_float (diff /. 60.0))
-  else if diff < Masc_time_constants.day then Printf.sprintf "%dh ago" (int_of_float (diff /. 3600.0))
-  else Printf.sprintf "%dd ago" (int_of_float (diff /. Masc_time_constants.day))
+  if Stdlib.Float.compare diff 60.0 < 0 then "just now"
+  else if Stdlib.Float.compare diff 3600.0 < 0 then Printf.sprintf "%dm ago" (Stdlib.Int.of_float (diff /. 60.0))
+  else if Stdlib.Float.compare diff Masc_time_constants.day < 0 then Printf.sprintf "%dh ago" (Stdlib.Int.of_float (diff /. 3600.0))
+  else Printf.sprintf "%dd ago" (Stdlib.Int.of_float (diff /. Masc_time_constants.day))
 
 let format_ttl_remaining expires_at =
-  if expires_at = 0.0 then "permanent"
+  if Stdlib.Float.compare expires_at 0.0 = 0 then "permanent"
   else
   let now = Time_compat.now () in
   let remaining = expires_at -. now in
-  if remaining <= 0.0 then "expired"
-  else if remaining < 3600.0 then Printf.sprintf "%dm left" (int_of_float (remaining /. 60.0))
-  else if remaining < Masc_time_constants.day then Printf.sprintf "%dh left" (int_of_float (remaining /. 3600.0))
-  else Printf.sprintf "%dd left" (int_of_float (remaining /. Masc_time_constants.day))
+  if Stdlib.Float.compare remaining 0.0 <= 0 then "expired"
+  else if Stdlib.Float.compare remaining 3600.0 < 0 then Printf.sprintf "%dm left" (Stdlib.Int.of_float (remaining /. 60.0))
+  else if Stdlib.Float.compare remaining Masc_time_constants.day < 0 then Printf.sprintf "%dh left" (Stdlib.Int.of_float (remaining /. 3600.0))
+  else Printf.sprintf "%dd left" (Stdlib.Int.of_float (remaining /. Masc_time_constants.day))
 
 let board_error_to_string = function
   | Board.Invalid_id s -> Printf.sprintf "Invalid ID: %s" s
@@ -140,7 +158,7 @@ let resolve_board_post_kind ~author (raw_kind : string option) :
        | None -> Error (Printf.sprintf "unknown post_kind: %s" raw))
   | None ->
       let author_lc = String.lowercase_ascii (String.trim author) in
-      if author_lc = "" || author_lc = "anonymous" then
+      if String.equal author_lc "" || String.equal author_lc "anonymous" then
         (* Missing or default author is never direct/manual — classify as
            automation to prevent misleading direct-attributed posts (#4604). *)
         Ok Board.Automation_post
@@ -243,13 +261,13 @@ let format_comment_tree ?(max_depth=5) (comments : Board.comment list) =
 (** {1 Handlers} *)
 
 let assoc_replace key value fields =
-  (key, value) :: List.filter (fun (name, _) -> name <> key) fields
+  (key, value) :: List.filter (fun (name, _) -> not (String.equal name key)) fields
 
 let judgment_arg args =
   let value_of key =
     match Yojson.Safe.Util.member key args with
     | `Null -> None
-    | `String value when String.trim value = "" -> None
+    | `String value when String.equal (String.trim value) "" -> None
     | `String _ as value -> Some value
     | `Assoc _ as value -> Some value
     | _ -> None
@@ -274,7 +292,7 @@ let normalize_board_post_meta args =
     | Some judgment -> assoc_replace "judgment" judgment base_fields
     | None -> base_fields
   in
-  if base_fields = [] then None else Some (`Assoc base_fields)
+  if Stdlib.List.length base_fields = 0 then None else Some (`Assoc base_fields)
 
 (** Detect markdown that was cut mid-write by an LLM max_tokens limit.
 
@@ -319,28 +337,28 @@ let detect_truncated_markdown_with_reason (text : string) : truncation_signal op
   let i = ref 0 in
   while !i < len do
     if !i + 2 < len
-       && text.[!i] = '`' && text.[!i + 1] = '`' && text.[!i + 2] = '`'
+       && Char.equal text.[!i] '`' && Char.equal text.[!i + 1] '`' && Char.equal text.[!i + 2] '`'
     then begin
-      incr fences;
+      Stdlib.incr fences;
       in_fence := not !in_fence;
       i := !i + 3
     end else if !i + 1 < len
-                && text.[!i] = '*'
-                && text.[!i + 1] = '*'
+                && Char.equal text.[!i] '*'
+                && Char.equal text.[!i + 1] '*'
                 && (not !in_fence)
                 && not !in_inline
     then begin
-      incr double_ast_outside;
+      Stdlib.incr double_ast_outside;
       i := !i + 2
     end else begin
-      if text.[!i] = '`' && not !in_fence then begin
-        incr inline_outside;
+      if Char.equal text.[!i] '`' && not !in_fence then begin
+        Stdlib.incr inline_outside;
         in_inline := not !in_inline
       end;
-      incr i
+      Stdlib.incr i
     end
   done;
-  let odd n = n mod 2 = 1 in
+  let odd n = Int.rem n 2 = 1 in
   if odd !fences then Some Odd_fence
   else if odd !inline_outside then Some Odd_inline_tick
   else if odd !double_ast_outside then Some Odd_double_asterisk
@@ -353,24 +371,24 @@ let detect_truncated_markdown_with_reason (text : string) : truncation_signal op
     let last_open_paren = ref (-1) in
     let last_close_paren = ref (-1) in
     for j = len - 1 downto 0 do
-      if !last_open_paren < 0 && text.[j] = '(' then last_open_paren := j;
-      if !last_close_paren < 0 && text.[j] = ')' then last_close_paren := j
+      if !last_open_paren < 0 && Char.equal text.[j] '(' then last_open_paren := j;
+      if !last_close_paren < 0 && Char.equal text.[j] ')' then last_close_paren := j
     done;
     if !last_open_paren > !last_close_paren && !last_open_paren > 0 then
       (* Check the byte just before for ']'; that distinguishes
          a markdown link/image truncation from arbitrary parens in prose. *)
       let bracket_pos = !last_open_paren - 1 in
-      if bracket_pos >= 0 && text.[bracket_pos] = ']' then
+      if bracket_pos >= 0 && Char.equal text.[bracket_pos] ']' then
         (* Image is ![alt](url) — distinguished from link by '!' before '['. *)
         let is_image =
           let scan = ref (bracket_pos - 1) in
           let saw_image = ref false in
           (* find the matching '[' for this ']'; bail if we leave a line. *)
-          while !scan >= 0 && text.[!scan] <> '[' && text.[!scan] <> '\n' do
-            decr scan
+          while !scan >= 0 && not (Char.equal text.[!scan] '[') && not (Char.equal text.[!scan] '\n') do
+            Stdlib.decr scan
           done;
-          if !scan >= 0 && text.[!scan] = '[' && !scan > 0
-             && text.[!scan - 1] = '!'
+          if !scan >= 0 && Char.equal text.[!scan] '[' && !scan > 0
+             && Char.equal text.[!scan - 1] '!'
           then saw_image := true;
           !saw_image
         in
@@ -382,13 +400,13 @@ let detect_truncated_markdown_with_reason (text : string) : truncation_signal op
 
 (* Backwards-compatible boolean wrapper. *)
 let detect_truncated_markdown (text : string) : bool =
-  detect_truncated_markdown_with_reason text <> None
+  Option.is_some (detect_truncated_markdown_with_reason text)
 
 let handle_post_create args =
   let title = get_string_opt args "title" in
   (* Reject empty or whitespace-only titles *)
   match title with
-  | Some t when String.trim t = "" ->
+  | Some t when String.equal (String.trim t) "" ->
       (false, "Title must not be empty or whitespace-only")
   | _ ->
   let body = get_string_opt args "body" |> Option.map strip_state_blocks_text in
@@ -399,7 +417,7 @@ let handle_post_create args =
     | Some reason ->
       let author_label =
         match get_string_opt args "author" |> Option.map String.trim with
-        | Some a when a <> "" -> a
+        | Some a when not (String.equal a "") -> a
         | _ -> "unknown"
       in
       Prometheus.inc_counter Prometheus.metric_board_truncated_posts
@@ -418,12 +436,12 @@ let handle_post_create args =
   let author = get_string_opt args "author" |> Option.map String.trim in
   let title_is_empty =
     match title with
-    | Some value -> String.trim value = ""
+    | Some value -> String.equal (String.trim value) ""
     | None -> false
   in
   if title_is_empty then
     (false, "❌ title is required")
-  else if author = None || author = Some "" || author = Some "anonymous" then
+  else if Option.is_none author || Option.equal String.equal author (Some "") || Option.equal String.equal author (Some "anonymous") then
     (false, "❌ author is required")
   else if String.length content > Board.Limits.max_content_length then
     (false, Printf.sprintf "Content exceeds max length (%d > %d chars)"
@@ -497,7 +515,7 @@ let handle_post_list_uncached args =
     match get_string_opt args "author" with
     | Some s ->
         let s = String.trim s in
-        if s = "" then None else Some s
+        if String.equal s "" then None else Some s
     | None -> None
   in
   let since = get_float_opt args "since" in
@@ -536,7 +554,7 @@ let handle_post_list_uncached args =
         else
           List.filteri (fun i _ -> i < limit) sorted_posts
       in
-      if posts = [] then
+      if Stdlib.List.length posts = 0 then
         (true, "📭 No posts found.")
       else
         (* Check for new activity since timestamp *)
@@ -545,7 +563,7 @@ let handle_post_list_uncached args =
           | None -> false
           | Some ts ->
               (* Post itself is new *)
-              p.created_at > ts || p.updated_at > ts
+              Stdlib.Float.compare p.created_at ts > 0 || Stdlib.Float.compare p.updated_at ts > 0
         in
         let format_post_with_indicator p =
           let indicator = if has_new_activity p then " 🔔" else "" in
@@ -585,7 +603,7 @@ let handle_post_get args =
   | Error e -> (false, Printf.sprintf "❌ %s" (board_error_to_string e))
   | Ok (post, comments) ->
       let post_str = format_post post in
-      let comments_str = if comments = [] then
+      let comments_str = if Stdlib.List.length comments = 0 then
         "\n\n💬 No comments."
       else
         let formatted = format_comment_tree comments in
@@ -601,11 +619,11 @@ let handle_comment_add args =
   let author = get_string_opt args "author" |> Option.map String.trim in
   let parent_id = get_string_opt args "parent_id" in
   let ttl_hours = get_int args "ttl_hours" Board.Limits.default_ttl_hours in
-  if String.trim post_id = "" then
+  if String.equal (String.trim post_id) "" then
     (false, "post_id is required")
-  else if String.trim content = "" then
+  else if String.equal (String.trim content) "" then
     (false, "Content must not be empty")
-  else if author = None || author = Some "" || author = Some "anonymous" then
+  else if Option.is_none author || Option.equal String.equal author (Some "") || Option.equal String.equal author (Some "anonymous") then
     (false, "author is required")
   else if String.length content > Board.Limits.max_content_length then
     (false, Printf.sprintf "Content exceeds max length (%d > %d chars)"
@@ -635,14 +653,14 @@ let handle_vote args =
   let voter = get_string args "voter" "anonymous" in
   let direction_str =
     let from_direction = get_string args "direction" "" in
-    if from_direction <> "" then from_direction else get_string args "vote" "up"
+    if not (String.equal from_direction "") then from_direction else get_string args "vote" "up"
   in
 
-  let direction = if direction_str = "down" then Board.Down else Board.Up in
+  let direction = if String.equal direction_str "down" then Board.Down else Board.Up in
 
   match Board_dispatch.vote ~voter ~post_id ~direction with
   | Ok new_score ->
-      let arrow = if direction = Board.Up then "↑" else "↓" in
+      let arrow = if Poly.equal direction Board.Up then "↑" else "↓" in
       (* SOUL Evolution via callback (breaks compile-time dependency cycle) *)
       let evolution_msg =
         match Atomic.get evolution_hook with
@@ -657,7 +675,7 @@ let handle_vote args =
                     | Some pv -> pv
                     | None -> "Creativity"
                   in
-                  let is_positive = (direction = Board.Up) in
+                  let is_positive = (Poly.equal direction Board.Up) in
                   cb.record_feedback ~name:author ~dimension ~is_positive;
                   Printf.sprintf " [🧬 %s evolved: %s %s]"
                     author dimension (if is_positive then "+0.01" else "-0.01")
@@ -673,7 +691,7 @@ let handle_vote args =
       (match Board_dispatch.get_post ~post_id with
        | Ok post ->
            let score = post.votes_up - post.votes_down in
-           let arrow = if direction = Board.Up then "↑" else "↓" in
+           let arrow = if Poly.equal direction Board.Up then "↑" else "↓" in
            (true, Printf.sprintf "%s Already voted (idempotent). Score: %+d" arrow score)
        | Error _ ->
            (true, "Already voted (idempotent). Score unchanged."))
@@ -689,10 +707,10 @@ let handle_search args =
   let query = get_string args "query" "" in
   let limit = get_int args "limit" 20 |> max 1 |> min 100 in
   let compact = get_bool args "compact" true in
-  if query = "" then (false, "❌ query required")
+  if String.equal query "" then (false, "❌ query required")
   else
     let results = Board_dispatch.search ~query ~limit in
-    if results = [] then (true, Printf.sprintf "🔍 '%s' 검색 결과 없음" query)
+    if Stdlib.List.length results = 0 then (true, Printf.sprintf "🔍 '%s' 검색 결과 없음" query)
     else
       let fmt = if compact then format_post_compact else format_post in
       let formatted = List.map fmt results in
@@ -704,27 +722,27 @@ let handle_comment_vote args =
   let comment_id = get_string args "comment_id" "" in
   let voter = get_string args "voter" "anonymous" in
   let direction_str = get_string args "direction" "up" in
-  let direction = if direction_str = "down" then Board.Down else Board.Up in
-  if comment_id = "" then (false, "❌ comment_id required")
+  let direction = if String.equal direction_str "down" then Board.Down else Board.Up in
+  if String.equal comment_id "" then (false, "❌ comment_id required")
   else
     match Board_dispatch.vote_comment ~voter ~comment_id ~direction with
-    | Ok score -> (true, Printf.sprintf "%s 코멘트 투표 완료! 점수: %+d" (if direction_str = "down" then "👎" else "👍") score)
+    | Ok score -> (true, Printf.sprintf "%s 코멘트 투표 완료! 점수: %+d" (if String.equal direction_str "down" then "👎" else "👍") score)
     | Error (Board.Already_voted _) ->
-        (true, Printf.sprintf "%s Already voted (idempotent)." (if direction_str = "down" then "👎" else "👍"))
+        (true, Printf.sprintf "%s Already voted (idempotent)." (if String.equal direction_str "down" then "👎" else "👍"))
     | Error e -> (false, Printf.sprintf "❌ %s" (board_error_to_string e))
 
 (** Agent profile *)
 let handle_profile args =
   let agent = get_string args "agent" "" in
-  if agent = "" then (false, "❌ agent required")
+  if String.equal agent "" then (false, "❌ agent required")
   else
     let all_posts : Board.post list = Board_dispatch.list_posts ~limit:1000 () in
     let norm s = String.lowercase_ascii (String.trim s) in
     let agent_norm = norm agent in
-    let agent_posts = List.filter (fun (p : Board.post) -> norm (Board.Agent_id.to_string p.author) = agent_norm) all_posts in
+    let agent_posts = List.filter (fun (p : Board.post) -> String.equal (norm (Board.Agent_id.to_string p.author)) agent_norm) all_posts in
     let post_votes = List.fold_left (fun acc (p : Board.post) -> acc + p.votes_up - p.votes_down) 0 agent_posts in
     let all_comments : Board.comment list = Board_dispatch.list_comments () in
-    let agent_comments = List.filter (fun (c : Board.comment) -> norm (Board.Agent_id.to_string c.author) = agent_norm) all_comments in
+    let agent_comments = List.filter (fun (c : Board.comment) -> String.equal (norm (Board.Agent_id.to_string c.author)) agent_norm) all_comments in
     let comment_votes = List.fold_left (fun acc (c : Board.comment) -> acc + c.votes_up - c.votes_down) 0 agent_comments in
     (true, Printf.sprintf "📊 **%s** 프로필\n📝 게시물: %d개 (%+d점)\n💬 코멘트: %d개 (%+d점)\n⭐ 총: %+d점"
       agent (List.length agent_posts) post_votes (List.length agent_comments) comment_votes (post_votes + comment_votes))
@@ -732,7 +750,7 @@ let handle_profile args =
 (** Hearth list *)
 let handle_hearth_list _args =
   let hearths = Board_dispatch.list_hearths () in
-  if hearths = [] then (true, "🔥 No active hearths.")
+  if Stdlib.List.length hearths = 0 then (true, "🔥 No active hearths.")
   else
     let formatted = List.map (fun (name, count) ->
       Printf.sprintf "🔥 **%s** (%d posts)" name count
@@ -904,7 +922,7 @@ let tool_hearth_list : Types.tool_schema = {
 
 let handle_delete args =
   let post_id = String.trim (get_string args "post_id" "") in
-  if post_id = "" then
+  if String.equal post_id "" then
     (false, "post_id is required")
   else
     match Board_dispatch.delete_post ~post_id with
@@ -920,7 +938,7 @@ let handle_board_cleanup args =
   let title_pattern = get_string_opt args "title_pattern" in
   let author_pattern = get_string_opt args "author_pattern" in
   let now = Time_compat.now () in
-  let age_threshold = now -. (float_of_int max_age_hours *. 3600.0) in
+  let age_threshold = now -. (Stdlib.Float.of_int max_age_hours *. 3600.0) in
   let title_needle = Option.map String.lowercase_ascii title_pattern in
   let author_needle = Option.map String.lowercase_ascii author_pattern in
   let matches_opt needle s =
@@ -933,7 +951,7 @@ let handle_board_cleanup args =
   in
   let candidates =
     List.filter (fun (p : Board.post) ->
-      p.created_at < age_threshold
+      Stdlib.Float.compare p.created_at age_threshold < 0
       && (not require_no_comments || p.reply_count = 0)
       && (not require_no_votes || (p.votes_up = 0 && p.votes_down = 0))
       && matches_opt title_needle p.title
@@ -967,11 +985,11 @@ let handle_board_cleanup args =
       let pid = Board.Post_id.to_string p.id in
       (try
         match Board_dispatch.delete_post ~post_id:pid with
-        | Ok () -> incr deleted
-        | Error _ -> incr failed
+        | Ok () -> Stdlib.incr deleted
+        | Error _ -> Stdlib.incr failed
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
-      | _exn -> incr failed))
+      | _exn -> Stdlib.incr failed))
       targets;
     (true, Printf.sprintf "Cleanup done: %d deleted, %d failed (scanned %d, age>%dh)"
        !deleted !failed (List.length all_posts) max_age_hours)

@@ -1,3 +1,5 @@
+open Base
+
 (** Tool_assignment_telemetry — Unified tool assignment lifecycle events
 
     Tracks the full causal chain from tool provision through execution:
@@ -54,7 +56,7 @@ type tool_event =
     }
 
 val event_to_json : tool_event -> Yojson.Safe.t
-val event_of_json : Yojson.Safe.t -> (tool_event, string) result
+val event_of_json : Yojson.Safe.t -> (tool_event, string) Result.t
 
 (** Emit an [Assigned] event, update the in-memory agent→assignment index,
     and return the generated [assignment_id].
@@ -98,7 +100,7 @@ val emit_completed :
 val find_latest_assignment_id : agent_id:string -> assignment_id option
 
 (** Read up to [n] recent events from disk (newest first). *)
-val read_recent : n:int -> (tool_event list, string) result
+val read_recent : n:int -> (tool_event list, string) Result.t
 
 (** Rebuild the in-memory agent→assignment index from existing disk records.
     Called once at server startup. *)

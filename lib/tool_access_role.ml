@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 (** Tool_access_role — Role-based tool access policy builder.
 
     Derived mechanically from Tool_permission_map.permission_for_tool, which
@@ -41,7 +59,7 @@ let tools_for_required_role required_role =
          match Tool_permission_map.permission_for_tool tool_name with
          | None -> false
          | Some permission ->
-             required_role_of_permission permission = required_role)
+             Poly.equal (required_role_of_permission permission) required_role)
 
 (* ================================================================ *)
 (* Admin-only tools (CanInit + CanReset + CanAdmin)                 *)

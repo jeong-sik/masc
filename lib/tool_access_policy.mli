@@ -1,3 +1,5 @@
+open Base
+
 (** Tool_access_policy — shared allow/deny selector ADT for runtime tool policies.
 
     This module centralizes how runtime policy overlays select tool names.

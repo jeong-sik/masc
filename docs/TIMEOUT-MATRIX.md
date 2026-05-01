@@ -11,8 +11,8 @@ is effectively advisory.
 | Layer | Role | Typical cap | Source of truth |
 |-------|------|-------------|-----------------|
 | `Tool` | per-tool HTTP / shell invocation | 10–60 s | `Env_config_runtime.*`, `lib/tool_local_runtime_http.ml` |
-| `Oas_bridge` | single OAS `Agent.run` / `Model.call` | 60–300 s (adaptive) | `Env_config_keeper.oas_timeout_sec*` |
-| `Keeper_turn` | one keeper turn (may issue many OAS calls) | 3600 s | `MASC_KEEPER_TURN_TIMEOUT_SEC` |
+| `Oas_bridge` | single OAS `Agent.run` / `Model.call` | 300 s default; provider attempt caps may be lower | `Env_config_keeper.oas_timeout_sec*`, `Oas_worker_named.effective_provider_attempt_timeout_s` |
+| `Keeper_turn` | one keeper turn (may issue many OAS calls) | 600 s default/hard ceiling | `MASC_KEEPER_TURN_TIMEOUT_SEC` |
 | `Keeper_cycle` | full keeper lifecycle | N×turn | cycle supervisor |
 | `Shutdown` | graceful shutdown board flush | 2 s | `bin/main_eio.ml` |
 
@@ -86,7 +86,7 @@ logs. Candidates:
 
 | Site | Current cap | Owning issue |
 |------|-------------|--------------|
-| `keeper_llm_bridge` | 60–573 s (adaptive) | #9639, #9662 (this PR) |
+| `keeper_llm_bridge` | 300 s default inside 600 s keeper turn | #9639, #9662 |
 | Governance `compute_judgments` | 60 s | #9629 |
 | `Process_eio` `git status --porcelain` | 15 s | #9632 |
 | `Process_eio` `git rev-parse` | 5 s | #9765, #9775 |

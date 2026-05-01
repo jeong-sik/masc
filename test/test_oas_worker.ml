@@ -1609,6 +1609,16 @@ let make_claude_code_provider_cfg ?(model_id = "auto") () =
     ~kind:Llm_provider.Provider_config.Claude_code
     ~model_id ~base_url:"" ()
 
+let make_gemini_cli_provider_cfg ?(model_id = "gemini-2.5-pro") () =
+  Llm_provider.Provider_config.make
+    ~kind:Llm_provider.Provider_config.Gemini_cli
+    ~model_id ~base_url:"" ()
+
+let make_ollama_provider_cfg ?(model_id = "qwen3:27b") () =
+  Llm_provider.Provider_config.make
+    ~kind:Llm_provider.Provider_config.Ollama
+    ~model_id ~base_url:"http://127.0.0.1:11434" ()
+
 let make_openai_compat_provider_cfg ?(model_id = "gpt-4.1") () =
   Llm_provider.Provider_config.make
     ~kind:Llm_provider.Provider_config.OpenAI_compat
@@ -1673,6 +1683,56 @@ let test_provider_effective_max_turns_keeps_ollama_budget () =
     (Oas_worker_exec.provider_effective_max_turns
        Llm_provider.Provider_config.Ollama
        39)
+
+let check_timeout_opt label expected actual =
+  Alcotest.(check (option (float 0.001))) label expected actual
+
+let provider_timeout ?(is_last = false) ?configured provider_cfg =
+  Oas_worker_named.effective_provider_attempt_timeout_s
+    ~is_last
+    ~configured_timeout_s:configured
+    provider_cfg
+
+let test_provider_attempt_timeout_caps_claude_code () =
+  check_timeout_opt
+    "claude_code caps configured attempt timeout"
+    (Some 120.0)
+    (provider_timeout
+       ~configured:300.0
+       (make_claude_code_provider_cfg ()))
+
+let test_provider_attempt_timeout_caps_kimi_cli () =
+  check_timeout_opt
+    "kimi_cli caps configured attempt timeout"
+    (Some 60.0)
+    (provider_timeout
+       ~configured:300.0
+       (make_kimi_cli_provider_cfg ()))
+
+let test_provider_attempt_timeout_caps_gemini_cli () =
+  check_timeout_opt
+    "gemini_cli caps configured attempt timeout"
+    (Some 180.0)
+    (provider_timeout
+       ~configured:300.0
+       (make_gemini_cli_provider_cfg ()))
+
+let test_provider_attempt_timeout_floors_ollama () =
+  check_timeout_opt
+    "ollama floors too-short configured attempt timeout"
+    (Some 300.0)
+    (provider_timeout
+       ~configured:60.0
+       (make_ollama_provider_cfg ()))
+
+let test_provider_attempt_timeout_leaves_unconstrained_last_to_outer_budget () =
+  check_timeout_opt
+    "unconstrained final provider relies on enclosing keeper/OAS timeout"
+    None
+    (provider_timeout
+       ~is_last:true
+       ~configured:300.0
+       (make_openai_compat_provider_cfg ()))
 
 let test_cascade_provider_labels_preserve_registered_openai_compat_family () =
   let provider_name = Masc_mcp.Oas_worker_cascade.provider_name_of_config
@@ -3916,6 +3976,16 @@ let () =
         test_provider_effective_max_turns_clamps_claude_code;
       Alcotest.test_case "provider max_turns leaves ollama uncapped" `Quick
         test_provider_effective_max_turns_keeps_ollama_budget;
+      Alcotest.test_case "provider timeout caps claude_code" `Quick
+        test_provider_attempt_timeout_caps_claude_code;
+      Alcotest.test_case "provider timeout caps kimi_cli" `Quick
+        test_provider_attempt_timeout_caps_kimi_cli;
+      Alcotest.test_case "provider timeout caps gemini_cli" `Quick
+        test_provider_attempt_timeout_caps_gemini_cli;
+      Alcotest.test_case "provider timeout floors ollama" `Quick
+        test_provider_attempt_timeout_floors_ollama;
+      Alcotest.test_case "provider timeout leaves unconstrained final provider to outer budget" `Quick
+        test_provider_attempt_timeout_leaves_unconstrained_last_to_outer_budget;
       Alcotest.test_case "cascade provider labels preserve registered openai_compat family" `Quick
         test_cascade_provider_labels_preserve_registered_openai_compat_family;
       Alcotest.test_case "cascade provider labels detect kimi from endpoint metadata" `Quick

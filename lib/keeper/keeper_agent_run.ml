@@ -230,6 +230,11 @@ let run_turn
           Keeper_runtime_resolved.oas_timeout_for_estimated_input_tokens
             ~estimated_input_tokens
     in
+    let per_provider_timeout_s =
+      match meta.per_provider_timeout_s with
+      | Some _ as configured -> configured
+      | None -> Some timeout_s
+    in
     (* OAS [stream_idle_timeout_s] bounds inter-line idle on HTTP streams
        (Anthropic/OpenAI/Gemini/GLM/Ollama). The deadline resets after each
        successful line, so this is gap detection, not total run cap.
@@ -407,7 +412,7 @@ let run_turn
               natural completion (max_turns or model end_turn). *)
            ?oas_checkpoint:resume_oas_checkpoint
            ?event_bus
-           ?per_provider_timeout_s:meta.per_provider_timeout_s
+           ?per_provider_timeout_s
            ())
      with
      | Error e -> Error e

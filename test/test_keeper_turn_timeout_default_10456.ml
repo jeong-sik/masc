@@ -1,5 +1,5 @@
 (** #10456/#10716 — pin {!Env_config_keeper.KeeperKeepalive.turn_timeout_sec}
-    SSOT default (1800) and the source literal in
+    SSOT default (600) and the source literal in
     {!Keeper_runtime_resolved.turn_timeout_sec_live}.
 
     Original pre-fix drift was:
@@ -9,8 +9,8 @@
     Math: 1200 - 30 (oas_timeout_guard_sec) = 1170s — exact match for
     #10388 cascade ollama timeout walls.
 
-    #10716 later lowered the SSOT default from 3600 to 1800; this test pins
-    the new default while preserving the 1200 drift guard.
+    The audit hard-ceiling pass later lowered the SSOT default to 600 so the
+    keeper turn envelope cannot hide long OAS provider stalls.
 
     This test pins the SSOT and source-level literal so silent
     re-divergence shows up as a test failure. *)
@@ -21,10 +21,10 @@ module E = Env_config_keeper.KeeperKeepalive
 
 let approx = float 0.001
 
-let test_ssot_default_1800 () =
+let test_ssot_default_600 () =
   check approx
-    "env_config_keeper.KeeperKeepalive.turn_timeout_sec SSOT must stay at 1800 (#10716)"
-    1800.0 E.turn_timeout_sec
+    "env_config_keeper.KeeperKeepalive.turn_timeout_sec SSOT must stay at 600"
+    600.0 E.turn_timeout_sec
 
 let resolver_source_path =
   let candidates =
@@ -49,7 +49,7 @@ let test_resolver_default_matches_ssot () =
   | None -> skip ()
   | Some p ->
       let body = read_file p in
-      (* The fix replaces default:1200.0 with default:1800.0 in
+      (* The fix replaces stale long defaults with default:600.0 in
          turn_timeout_sec_live. Guard: must NOT contain the stale literal
          on the same line as MASC_KEEPER_TURN_TIMEOUT_SEC. *)
       let stale_pattern = "~default:1200.0 \"MASC_KEEPER_TURN_TIMEOUT_SEC\"" in
@@ -57,7 +57,7 @@ let test_resolver_default_matches_ssot () =
         "~default:3600.0 \"MASC_KEEPER_TURN_TIMEOUT_SEC\""
       in
       let canonical_pattern =
-        "~default:1800.0 \"MASC_KEEPER_TURN_TIMEOUT_SEC\""
+        "~default:600.0 \"MASC_KEEPER_TURN_TIMEOUT_SEC\""
       in
       let contains s sub =
         let n = String.length s and m = String.length sub in
@@ -73,17 +73,16 @@ let test_resolver_default_matches_ssot () =
       let has_canonical = contains body canonical_pattern in
       check bool "no stale 1200 default in resolver" false has_stale;
       check bool "no stale 3600 default in resolver" false has_stale_3600;
-      check bool "canonical 1800 default in resolver" true has_canonical
+      check bool "canonical 600 default in resolver" true has_canonical
 
 let test_resolver_upper_matches_ssot () =
   match resolver_source_path with
   | None -> skip ()
   | Some p ->
       let body = read_file p in
-      (* The fix raises Float.min upper bound from 3600.0 to 7200.0 in
-         turn_timeout_sec_live block. Both 3600.0 and 7200.0 may appear
-         elsewhere; we just guard that 7200.0 is present after the fix. *)
-      let canonical_upper = "Float.min 7200.0" in
+      (* The resolver must keep the same 600s hard ceiling as
+         Env_config_keeper.KeeperKeepalive.turn_timeout_sec. *)
+      let canonical_upper = "Float.min 600.0" in
       let contains s sub =
         let n = String.length s and m = String.length sub in
         let rec loop i =
@@ -93,7 +92,7 @@ let test_resolver_upper_matches_ssot () =
         in
         loop 0
       in
-      check bool "canonical 7200 upper bound in resolver" true
+      check bool "canonical 600 upper bound in resolver" true
         (contains body canonical_upper)
 
 let () =
@@ -101,14 +100,14 @@ let () =
     [
       ( "ssot-pin",
         [
-          test_case "env_config_keeper SSOT default is 1800 (post-#10716)"
-            `Quick test_ssot_default_1800;
+          test_case "env_config_keeper SSOT default is 600"
+            `Quick test_ssot_default_600;
         ] );
       ( "resolver-drift-gate",
         [
           test_case "resolver default literal matches SSOT (no 1200 drift)"
             `Quick test_resolver_default_matches_ssot;
-          test_case "resolver upper bound literal matches SSOT (7200)" `Quick
+          test_case "resolver upper bound literal matches SSOT (600)" `Quick
             test_resolver_upper_matches_ssot;
         ] );
     ]

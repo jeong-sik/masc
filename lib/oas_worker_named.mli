@@ -15,6 +15,21 @@ include module type of Oas_worker_named_cascade
 include module type of Oas_worker_named_error
 include module type of Oas_worker_named_fsm
 
+(** [effective_provider_attempt_timeout_s] applies provider-specific
+    timeout constraints to a configured cascade attempt budget.
+
+    - Ollama has a 300s floor for local model cold-load.
+    - Claude Code, Gemini, and Kimi CLI have shorter attempt caps so one
+      provider cannot spend the whole keeper turn budget before fallback.
+    - Providers without a known constraint keep the configured timeout unless
+      they are the last attempt, where the enclosing keeper/OAS timeout is
+      sufficient. *)
+val effective_provider_attempt_timeout_s :
+  is_last:bool ->
+  configured_timeout_s:float option ->
+  Llm_provider.Provider_config.t ->
+  float option
+
 (** {1 Named cascade execution} *)
 
 val run_named :

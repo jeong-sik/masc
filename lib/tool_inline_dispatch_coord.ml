@@ -229,13 +229,15 @@ let handle_join (ctx : context) : tool_result option =
       Prometheus.inc_counter Prometheus.metric_coord_join_normalize_outcome
         ~labels:[ ("outcome", outcome) ] ();
       Log.Misc.warn
-        "[sid=%s] [fail-closed:coord_join_normalize] agent=%s outcome=%s detail=%s          - join rejected"
+        "[sid=%s] [fail-closed:coord_join_normalize] agent=%s outcome=%s \
+         detail=%s - join rejected"
         sid agent_name outcome
         (Keeper_identity.show_validation_error err);
       Some
         ( false,
           Printf.sprintf
-            "masc_join rejected: identity validation failed for '%s' — %s.              Ensure the persona and credential files exist for this agent."
+            "masc_join rejected: identity validation failed for '%s' — %s. \
+             Ensure the persona and credential files exist for this agent."
             agent_name (Keeper_identity.show_validation_error err) )
 
 (** masc_leave — leave a MASC room *)

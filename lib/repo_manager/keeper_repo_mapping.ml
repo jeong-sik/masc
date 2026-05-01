@@ -125,18 +125,14 @@ let allowed_repositories ~keeper_id ~base_path =
     bridge (RFC-0019 PR-A): a keeper without a mapping continues to use
     the legacy [Keeper_gh_env.keeper_binding] resolver.
 
-    Returns [Error _] only on infrastructure failure (mapping store
-    unreadable, repository not found, credential not found).  Absence of
-    mapping is not an error. *)
+    Returns [Error _] on mapping store infrastructure failures,
+    mapping parse/validation failures, or dangling references
+    (repository not found, credential not found).  Absence of mapping is
+    not an error. *)
 let credentials_for_keeper ~base_path ~keeper_id =
   match lookup_mapping ~base_path keeper_id with
   | Mapping_missing _ -> Ok []
-  | Mapping_store_error msg ->
-      Log.Misc.warn
-        "[KeeperRepoMapping] credentials_for_keeper: mapping store error \
-         for keeper %s (error: %s)"
-        keeper_id msg;
-      Error msg
+  | Mapping_store_error msg -> Error msg
   | Mapping_found mapping ->
       let resolve_credential id =
         match Credential_store.find ~base_path id with

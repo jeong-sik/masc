@@ -20,8 +20,8 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.head.repo.full_name || github.repository }}-${{ github.head_ref || github.ref_name || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-# Draft PRs are collaboration scratch space. Keep only the lightweight
-# PR-sync/CI-Gate path there, then run the full matrix on ready_for_review.
+# Draft/ready policy lives in PR Automation. CI stays tied to code-changing
+# PR events so state flips do not cancel build jobs for the same PR group.
 jobs:
   pr-sync-check:
     name: PR Sync Check
@@ -619,7 +619,9 @@ jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Dependency installation plus @install warn-error build regularly exceeds
+    # 20 minutes on cold runners; keep this above the install-only worst case.
+    timeout-minutes: 40
     needs: [pr-sync-check, changes]
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false) && needs.changes.outputs.lint == 'true' && (needs.pr-sync-check.result == 'success' || needs.pr-sync-check.result == 'skipped') }}
 

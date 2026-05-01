@@ -272,6 +272,21 @@ let test_health_and_ci_runner_diagnostics () =
     (file_not_contains_pattern "scripts/ci-run-tests.sh" "> >(tee");
   check bool "ci runner tracks active build dir for diagnostics" true
     (file_contains_pattern "scripts/ci-run-tests.sh" "ACTIVE_TEST_BUILD_DIR");
+  let lint_job =
+    file_pattern_position ".github/workflows/ci.yml" "\n  lint:\n    name: Lint"
+  in
+  let lint_timeout =
+    file_pattern_position ".github/workflows/ci.yml"
+      "    timeout-minutes: 40"
+  in
+  let dashboard_job =
+    file_pattern_position ".github/workflows/ci.yml" "\n  dashboard:\n    name: Dashboard"
+  in
+  check bool "lint job has cold dependency install headroom" true
+    (match lint_job, lint_timeout, dashboard_job with
+     | Some lint_pos, Some timeout_pos, Some dashboard_pos ->
+       lint_pos < timeout_pos && timeout_pos < dashboard_pos
+     | _ -> false);
   check bool "quick suite excludes operator control from monolithic dune test" true
     (file_contains_pattern ".github/workflows/ci.yml"
        "MASC_INCLUDE_OPERATOR_CONTROL: \"false\"");

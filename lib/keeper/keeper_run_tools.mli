@@ -87,7 +87,7 @@ val prepare_agent_setup :
   -> start_turn_count:int
   -> generation:int
   -> max_turns:int
-  -> cascade_name:string
+  -> cascade_name:Keeper_cascade_profile.runtime_name
   -> is_retry:bool
   -> turn_affordances:string list
   -> config_root:string

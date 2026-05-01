@@ -96,10 +96,12 @@ let run_turn
   in
   Fun.protect ~finally:safe_emit_turn_end
   @@ fun () ->
+  let runtime_cascade_name = Keeper_cascade_profile.Runtime_name cascade_name in
   (* Steps 0–4: inference params, session dir, checkpoint, base prompt,
      working context, checkpoint hygiene — all in Keeper_run_context. *)
   let ctx = Keeper_run_context.prepare_run_context
-      ~config ~meta ~base_dir ~max_context ~cascade_name
+      ~config ~meta ~base_dir ~max_context
+      ~cascade_name:runtime_cascade_name
       ?temperature ?max_tokens ?shared_context ~generation
       ()
   in
@@ -141,7 +143,8 @@ let run_turn
       ~config ~meta ~ctx_work ~session ~base_system_prompt
       ~turn_system_prompt ~user_message ~dynamic_context
       ~history_messages ~prompt_metrics ~shared_context ~context_injector
-      ~start_turn_count ~generation ~max_turns ~cascade_name ~is_retry
+      ~start_turn_count ~generation ~max_turns
+      ~cascade_name:runtime_cascade_name ~is_retry
       ~turn_affordances ~config_root ~cascade_config_path ~gemini_mcp_disabled
       ~approval_mode_effective ~approval_mode_derived
       ?max_cost_usd ~trajectory_acc ~tool_overlay

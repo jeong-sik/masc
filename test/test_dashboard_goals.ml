@@ -417,10 +417,10 @@ let test_goal_fsm_withholds_stalled_when_activity_is_metadata_only () =
   let node = Dashboard_goals.dashboard_goals_tree_json ~config |> root_node in
   check string "phase remains the lifecycle source" "executing"
     (node |> member "phase" |> to_string);
-  check string "snapshot failure is surfaced as keeper runtime risk"
-    "keeper_runtime"
+  check string "metadata-only activity is not a runtime blocker"
+    "none"
     (node |> member "blocking_source" |> to_string);
-  check string "health is demoted by runtime-trust failure" "at_risk"
+  check string "metadata-only activity keeps health on track" "on_track"
     (node |> member "health" |> to_string);
   check bool "stalled badge withheld" false
     (List.mem "stalled" (string_list_field node "badges"));

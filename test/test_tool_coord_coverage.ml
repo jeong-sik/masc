@@ -1,6 +1,7 @@
 (** Coverage tests for Tool_coord *)
 
 open Masc_mcp
+open Tool_coord
 
 let () = Random.self_init ()
 
@@ -15,6 +16,18 @@ let str_contains s sub =
       else loop (i + 1)
     in
     loop 0
+
+let assert_contains output expected =
+  if not (str_contains output expected) then
+    failwith
+      (Printf.sprintf "missing expected substring %S in output:\n%s" expected
+         output)
+
+let assert_not_contains output unexpected =
+  if str_contains output unexpected then
+    failwith
+      (Printf.sprintf "unexpected substring %S in output:\n%s" unexpected
+         output)
 
 let with_env name value_opt f =
   let original = Sys.getenv_opt name in
@@ -59,6 +72,8 @@ let make_test_ctx () =
     (Printf.sprintf "masc-room-test-%d-%d" (int_of_float (Unix.gettimeofday () *. 1000.0)) !test_counter) in
   Unix.mkdir tmp 0o755;
   let config = Coord.default_config tmp in
+  Auth.save_auth_config config.base_path
+    { Types.default_auth_config with enabled = false; require_token = false };
   { Tool_coord.config; agent_name = "test-agent" }
 
 (* Test dispatch returns None for unknown tool *)
@@ -118,7 +133,7 @@ let () = test "dispatch_status_summary_and_cap" (fun () ->
       assert success;
       assert (str_contains result "tasks active=35 todo=35 claimed=0 in_progress=0");
       assert (str_contains result "⚠️ Attention:");
-      assert (str_contains result "35 unclaimed task(s) are available right now.");
+      assert_contains result "35 unclaimed task(s) are available right now.";
       assert (str_contains result "Summary: active=35, done=0, cancelled=0, total=35");
       assert (str_contains result "and 5 more active tasks")
   | None -> failwith "dispatch returned None"
@@ -299,9 +314,8 @@ let () = test "dispatch_status_surfaces_owned_current_drift" (fun () ->
       assert success;
       assert (str_contains result "owned=task-001");
       assert (str_contains result "current=task-002");
-      assert (
-        str_contains result
-          "Do not retry generic masc_plan_init from a drifted surface");
+      assert_contains result
+        "Do not retry generic masc_plan_init from a drifted surface";
       assert (not (str_contains result "💡 Suggested next: masc_plan_init -> masc_status"));
       assert (str_contains result "planning current_task is unset or drifted")
   | None -> failwith "dispatch returned None"
@@ -364,8 +378,8 @@ let () = test "dispatch_status_no_owned_prefers_claim_next_over_transition" (fun
       assert (str_contains result "owned=- | current=task-001");
       assert (str_contains result "drift_reason=no_owned");
       assert (str_contains result "claim_first_suppressed=no");
-      assert (str_contains result "💡 Suggested next: masc_claim_next -> masc_status");
-      assert (not (str_contains result "💡 Suggested next: masc_status -> masc_transition"))
+      assert_contains result "💡 Suggested next: masc_claim_next -> masc_status";
+      assert_not_contains result "💡 Suggested next: masc_status -> masc_transition"
   | None -> failwith "dispatch returned None"
 )
 
@@ -383,7 +397,7 @@ let () = test "dispatch_status_surfaces_missing_planning_for_owned_task" (fun ()
       assert success;
       assert (str_contains result "owned=task-001 | current=task-001");
       assert (str_contains result "📝 Planning: missing=yes | task=task-001");
-      assert (str_contains result "Owned task task-001 has no planning context.");
+      assert_contains result "Owned task task-001 has no planning context.";
       assert (
         str_contains result
           "Do not retry generic masc_plan_init from a drifted surface");
@@ -411,7 +425,8 @@ let () = test "dispatch_status_surfaces_completed_deliverable_conflict_for_activ
       assert success;
       assert (str_contains result "owned=task-001 | current=task-001");
       assert (str_contains result "📝 Planning: deliverable_conflict=yes | task=task-001");
-      assert (str_contains result "Owned task task-001 already has a completed-looking deliverable");
+      assert_contains result
+        "Owned task task-001 already has a completed-looking deliverable";
       assert (str_contains result "💡 Suggested next: masc_deliver -> masc_status");
       assert (not (str_contains result "💡 Suggested next: masc_status -> masc_transition"))
   | None -> failwith "dispatch returned None"
@@ -433,7 +448,8 @@ let () = test "dispatch_status_flags_todo_with_completed_deliverable_as_conflict
       assert success;
       assert (str_contains result "⚠️ task-001 P2 [todo_conflict] Conflicted todo (unclaimed)");
       assert (str_contains result "📋 task-002 P2 [todo] Fresh todo (unclaimed)");
-      assert (str_contains result "1 todo task(s) have completed-looking planning deliverables");
+      assert_contains result
+        "1 todo task(s) have completed-looking planning deliverables";
   | None -> failwith "dispatch returned None"
 )
 

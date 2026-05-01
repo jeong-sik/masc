@@ -91,9 +91,10 @@ let create_done_task config ~goal_id ~title =
   step Types.Start "test fixture start";
   step Types.Done_action "test fixture done"
 
-let expect_error = function
-  | Some (false, body) -> Yojson.Safe.from_string body
-  | Some (true, _) -> fail "expected tool error"
+let expect_error (result : Tool_coord.tool_result option) =
+  match result with
+  | Some { success = false; message = body } -> Yojson.Safe.from_string body
+  | Some { success = true; message = _ } -> fail "expected tool error"
   | None -> fail "tool not handled"
 
 let test_goal_upsert_and_list () =

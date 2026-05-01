@@ -1,3 +1,5 @@
+open Base
+
 (** Tool_access_role — Role-based tool access policy builder.
 
     Maps each authentication role (Worker, Admin) to a

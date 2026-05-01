@@ -1,3 +1,5 @@
+open Base
+
 (** Tool_control — Flow control operations (pause / pause_status /
     resume).
 

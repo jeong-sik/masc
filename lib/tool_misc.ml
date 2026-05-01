@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 (** Tool_misc — Miscellaneous operations (facade).
 
     Dispatches to sub-modules:
@@ -67,13 +85,13 @@ let handle_tool_stats _ctx args =
 let strip_mcp_prefix name =
   let prefix = "mcp__masc__" in
   let plen = String.length prefix in
-  if String.length name > plen && String.sub name 0 plen = prefix
+  if String.length name > plen && String.equal (Stdlib.String.sub name 0 plen) prefix
   then String.sub name plen (String.length name - plen)
   else name
 
 let handle_tool_help _ctx args =
   let raw_name = String.trim (get_string args "tool_name" "") in
-  if raw_name = "" then
+  if String.equal raw_name "" then
     (false, "❌ tool_name is required")
   else
     let tool_name = strip_mcp_prefix raw_name in

@@ -1,3 +1,5 @@
+open Base
+
 (** Tool_permission_map — Shared tool→permission resolution.
 
     Centralizes the permission mapping used by both auth enforcement and

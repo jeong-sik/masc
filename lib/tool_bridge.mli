@@ -1,3 +1,5 @@
+open Base
+
 (** OAS boundary adapter for tool results, schemas, and tool definitions.
 
     Converts between MASC tool conventions [(bool * string)] and

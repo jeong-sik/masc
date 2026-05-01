@@ -1,3 +1,5 @@
+open Base
+
 (** Tool_local_runtime_http — curl-shelled HTTP helpers for local
     runtime probing.
 
@@ -47,7 +49,7 @@ val http_get_text_with_status_with_headers :
   ?timeout_sec:int ->
   ?headers:(string * string) list ->
   string ->
-  ((int option * string), string) result
+  ((int option * string), string) Result.t
 (** [http_get_text_with_status_with_headers ?timeout_sec ?headers url]
     issues a [GET url] via curl.  Returns
     [Ok (http_status_opt, body)] on curl exit 0, where:
@@ -65,14 +67,14 @@ val http_get_text_with_status_with_headers :
 val http_get_text_with_status :
   ?timeout_sec:int ->
   string ->
-  ((int option * string), string) result
+  ((int option * string), string) Result.t
 (** [http_get_text_with_status] is
     {!http_get_text_with_status_with_headers} with no extra headers. *)
 
 val http_get_json_with_status :
   ?timeout_sec:int ->
   string ->
-  ((int option * Yojson.Safe.t), string) result
+  ((int option * Yojson.Safe.t), string) Result.t
 (** [http_get_json_with_status ?timeout_sec url] composes
     {!http_get_text_with_status} + [Yojson.Safe.from_string].  Returns
     [Error "invalid json from <url>: <msg>"] on parse failure. *)
@@ -85,7 +87,7 @@ val http_post_json_text_with_status_with_headers :
   url:string ->
   body_json:string ->
   unit ->
-  ((int option * string), string) result
+  ((int option * string), string) Result.t
 (** [http_post_json_text_with_status_with_headers ~timeout_sec
       ?headers ~url ~body_json ()] issues a [POST url] with
     [Content-Type: application/json] and [body_json] as the request
@@ -99,7 +101,7 @@ val http_post_json_text_with_status :
   timeout_sec:int ->
   url:string ->
   body_json:string ->
-  ((int option * string), string) result
+  ((int option * string), string) Result.t
 (** [http_post_json_text_with_status] is
     {!http_post_json_text_with_status_with_headers} with no extra
     headers. *)
@@ -108,7 +110,7 @@ val http_post_json_with_status :
   timeout_sec:int ->
   url:string ->
   body_json:string ->
-  ((int option * Yojson.Safe.t), string) result
+  ((int option * Yojson.Safe.t), string) Result.t
 (** [http_post_json_with_status ~timeout_sec ~url ~body_json] composes
     {!http_post_json_text_with_status} + [Yojson.Safe.from_string].
     Returns [Error "invalid json from <url>: <msg>"] on parse

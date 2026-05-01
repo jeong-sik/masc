@@ -1,3 +1,5 @@
+open Base
+
 (** Tool_team_memory — per-room key/value memory with safe-path
     + secret-token enforcement.
 

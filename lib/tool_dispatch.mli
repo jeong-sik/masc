@@ -1,3 +1,5 @@
+open Base
+
 (** Central Tool Dispatch Registry.
 
     Production MCP tool names route through {!Tool_name} and an exhaustive
@@ -23,7 +25,7 @@ val dispatch : token:Tool_token.t -> args:Yojson.Safe.t -> (bool * string) optio
     when a handler is found, [None] when the tool name is unknown.
     The token guarantees the name was validated at the I/O boundary. *)
 
-val mint_token : name:string -> (Tool_token.t, string) result
+val mint_token : name:string -> (Tool_token.t, string) Result.t
 (** Mint a [Tool_token.t] validated against both tag and handler registries.
     Thread-safe (protected by dispatch_mu). *)
 
@@ -46,7 +48,7 @@ type pre_hook = name:string -> args:Yojson.Safe.t -> pre_hook_action
 
 type post_hook = Tool_result.t -> Tool_result.t
 (** Post-hook: receives result after handler completes.
-    Return the (possibly transformed) result. *)
+    Return the (possibly transformed) tool result. *)
 
 val pre_hooks : pre_hook list ref
 (** Mutable list of registered pre-hooks. *)

@@ -1,7 +1,25 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 (** OAS boundary adapter for tool results, schemas, and tool definitions.
 
     MASC tools use [(bool * string)] internally (success flag + message).
-    OAS uses [Oas.Types.tool_result = (tool_output, tool_error) result].
+    OAS uses [Oas.Types.tool_result = (tool_output, tool_error) Result.t].
 
     This module converts at the OAS boundary only — internal MASC
     tool handlers keep their existing convention unchanged.
@@ -32,7 +50,7 @@ let externalize_threshold_bytes () =
   match Sys.getenv_opt "MASC_TOOL_EXTERNALIZE_THRESHOLD_BYTES" with
   | None -> default_externalize_threshold_bytes
   | Some s ->
-      (match int_of_string_opt (String.trim s) with
+      (match Stdlib.int_of_string_opt (String.trim s) with
        | Some n when n >= 0 -> n
        | _ -> default_externalize_threshold_bytes)
 

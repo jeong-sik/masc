@@ -266,6 +266,42 @@ let test_omitted_target_score_preserves_running_status () =
   check string "loop remains running" "running"
     (Lib.Autoresearch.status_to_string final_state.status)
 
+let test_persisted_summary_nan_target_fail_closed () =
+  let summary : Lib.Autoresearch.persisted_summary =
+    {
+      loop_id = "ar-nan";
+      author = None;
+      status = Lib.Autoresearch.Running;
+      current_cycle = 1;
+      baseline = 0.0;
+      best_score = nan;
+      best_cycle = 1;
+      queued_hypothesis = None;
+      total_keeps = 0;
+      total_discards = 0;
+      goal = "nan guard";
+      metric_fn = "metric";
+      model_model = "test";
+      target_file = "main.txt";
+      target_score = Some 1.0;
+      workdir = "/tmp";
+      cycle_timeout_s = 1.0;
+      max_cycles = 1;
+      error_message = None;
+      elapsed_s = 0.0;
+      updated_at = None;
+      source_workdir = "/tmp";
+      program_note = None;
+      warnings = [];
+      patience = 0;
+      consecutive_discards = 0;
+      build_verify_fn = None;
+      lower_is_better = true;
+    }
+  in
+  check bool "nan lower-is-better target fails closed" false
+    (Lib.Tool_autoresearch.persisted_summary_target_reached summary)
+
 let () =
   run "autoresearch_target_score"
     [
@@ -277,5 +313,7 @@ let () =
             test_target_score_reaches_completion_lower_is_better;
           test_case "omitted target score preserves running status" `Quick
             test_omitted_target_score_preserves_running_status;
+          test_case "persisted summary NaN target fails closed" `Quick
+            test_persisted_summary_nan_target_fail_closed;
         ] );
     ]

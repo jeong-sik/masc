@@ -1,3 +1,5 @@
+open Base
+
 (** Tool_call_quality_benchmark_loader — JSON loaders for the
     benchmark case set and the evidence-runs file.
 
@@ -27,7 +29,7 @@ val default_evidence_path : repo_root:string -> string
 val load_cases_from_file :
   string ->
   (Tool_call_quality_benchmark_types.benchmark_case list, string)
-  result
+  Result.t
 (** [load_cases_from_file path] reads the benchmark case set.
     Accepts both shapes:
     - [`List items] — the items are the cases directly.
@@ -59,7 +61,7 @@ val load_cases_from_file :
 val load_runs_from_file :
   string ->
   (Tool_call_quality_benchmark_types.evidence_run list, string)
-  result
+  Result.t
 (** [load_runs_from_file path] reads the evidence-runs file with
     the same `List` / `Assoc[runs]` accept shapes as
     {!load_cases_from_file}.

@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 (** Tool_shard — Dynamic tool sharding for MASC agents.
 
     Allows tools to be granted/revoked at runtime like equipment slots.
@@ -985,7 +1003,7 @@ let tools_of_shards (shard_names : string list) : Types.tool_schema list =
 (** Grant a shard to an agent. Returns new active_shards list.
     Fails if shard doesn't exist or is already granted. *)
 let grant_shard (active_shards : string list) (shard_name : string) :
-  (string list, string) result =
+  (string list, string) Result.t =
   match StringMap.find_opt shard_name all_shards with
   | None -> Error (Printf.sprintf "Unknown shard: %s" shard_name)
   | Some _ ->
@@ -997,7 +1015,7 @@ let grant_shard (active_shards : string list) (shard_name : string) :
 (** Revoke a shard from an agent. Returns new active_shards list.
     Fails if shard is not removable or not currently granted. *)
 let revoke_shard (active_shards : string list) (shard_name : string) :
-  (string list, string) result =
+  (string list, string) Result.t =
   match StringMap.find_opt shard_name all_shards with
   | None -> Error (Printf.sprintf "Unknown shard: %s" shard_name)
   | Some shard ->
@@ -1006,7 +1024,7 @@ let revoke_shard (active_shards : string list) (shard_name : string) :
     else if not (List.mem shard_name active_shards) then
       Error (Printf.sprintf "Shard not currently granted: %s" shard_name)
     else
-      Ok (List.filter (fun n -> n <> shard_name) active_shards)
+      Ok (List.filter (fun n -> not (String.equal n shard_name)) active_shards)
 
 (** List all available shards with their status *)
 let list_all_shards () : (string * bool * int) list =
@@ -1082,7 +1100,7 @@ let execute (tool_name : string) (arguments : Yojson.Safe.t) : (bool * Yojson.Sa
   let module U = Yojson.Safe.Util in
   let read_required_string key =
     match U.member key arguments with
-    | `String v when String.trim v <> "" -> Some v
+    | `String v when not (String.equal (String.trim v) "") -> Some v
     | _ -> None
   in
   match tool_name with
@@ -1110,7 +1128,7 @@ let execute (tool_name : string) (arguments : Yojson.Safe.t) : (bool * Yojson.Sa
 
   | "masc_tool_grant" | "masc_tool_revoke" ->
     let op_fn, status_label =
-      if tool_name = "masc_tool_grant" then (grant_shard, "granted")
+      if String.equal tool_name "masc_tool_grant" then (grant_shard, "granted")
       else (revoke_shard, "revoked")
     in
     let agent_name = read_required_string "agent_name" in

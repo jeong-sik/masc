@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 (** Tool_registration_check — Startup validation of keeper tool policy coverage.
 
     Detects drift between the runtime keeper tool universe and
@@ -13,14 +31,18 @@ let add_names names tbl =
   List.iter (fun name -> Hashtbl.replace tbl name ()) names;
   tbl
 
+let raw_masc_tool_names () =
+  Config.raw_all_tool_schemas
+  |> List.filter_map (fun (schema : Types.tool_schema) ->
+    if String.starts_with ~prefix:"masc_" schema.name then Some schema.name
+    else None)
+
 let runtime_keeper_tool_names () =
   Hashtbl.create 512
   |> add_names Keeper_exec_tools.keeper_internal_candidate_tool_names
   |> add_names (Keeper_exec_tools.effective_core_tools ())
   |> add_names Keeper_exec_tools.keeper_admin_dispatched_tools
-  |> add_names
-       (Keeper_tool_policy.keeper_supported_masc_tool_names_from_schemas
-          Config.raw_all_tool_schemas)
+  |> add_names (raw_masc_tool_names ())
 
 let validate () : validation_result =
   match Keeper_tool_policy.policy_config_for_validation () with
@@ -47,11 +69,15 @@ let validate () : validation_result =
     { orphan_toml; uncovered }
 
 let log_validation_result (r : validation_result) =
-  if r.orphan_toml <> [] then
+  (match r.orphan_toml with
+  | [] -> ()
+  | _ ->
     Log.Server.warn "tool_policy unknown tool names (%d): %s"
       (List.length r.orphan_toml)
-      (String.concat ", " (List.filteri (fun i _ -> i < 10) r.orphan_toml));
-  if r.uncovered <> [] then
+      (String.concat ", " (List.filteri (fun i _ -> i < 10) r.orphan_toml)));
+  (match r.uncovered with
+  | [] -> ()
+  | _ ->
     Log.Server.info "tool_policy reverse coverage (%d): %s"
       (List.length r.uncovered)
-      (String.concat ", " (List.filteri (fun i _ -> i < 10) r.uncovered))
+      (String.concat ", " (List.filteri (fun i _ -> i < 10) r.uncovered)))

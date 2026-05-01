@@ -1,3 +1,5 @@
+open Base
+
 (** Plan Tool Handlers
 
     Extracted from mcp_server_eio.ml for testability.

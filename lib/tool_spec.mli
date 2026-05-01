@@ -1,3 +1,5 @@
+open Base
+
 (** Tool_spec — Unified tool specification with compile-time safety.
 
     Replaces scattered registration across 6 separate systems with a single

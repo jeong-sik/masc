@@ -1,3 +1,5 @@
+open Base
+
 (** Tool_call_quality_benchmark_summary — aggregate evidence runs
     + case scores into a {!benchmark_summary}.
 

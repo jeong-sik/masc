@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 (** MASC Metrics Store - Agent Performance Tracking (Eio Native)
 
     Pure synchronous metrics operations.
@@ -74,7 +92,7 @@ let generate_id () =
      both [incr] before either [get], and both observe the same post-increment
      value, producing duplicate IDs for entries in the same millisecond. *)
   let sequence = Atomic.fetch_and_add metric_counter 1 + 1 in
-  let timestamp_ms = int_of_float (Time_compat.now () *. 1000.) in
+  let timestamp_ms = Stdlib.Int.of_float (Time_compat.now () *. 1000.) in
   Printf.sprintf "metric-%d-%06d" timestamp_ms sequence
 
 (* Async write queue: callers push (file, line) entries into a bounded stream.
@@ -118,7 +136,7 @@ let flush_pending () =
     (try Fs_compat.append_file file (Buffer.contents buf)
      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
        Log.Metrics.error "flush_pending: append failed for %s: %s"
-         file (Printexc.to_string exn))
+         file (Stdlib.Printexc.to_string exn))
   ) batch
 
 (** Start the background flush fiber. Call once inside Eio_main.run.
@@ -164,7 +182,7 @@ let read_metrics_file file : task_metric list =
   else
     let content = Fs_compat.load_file file in
     let lines = String.split_on_char '\n' content
-      |> List.filter (fun s -> String.trim s <> "") in
+      |> List.filter (fun s -> not (String.equal (String.trim s) "")) in
     List.filter_map (fun line ->
       try
         let json = Yojson.Safe.from_string line in
@@ -177,7 +195,7 @@ let read_metrics_file file : task_metric list =
       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
         let preview = String_util.utf8_safe ~max_bytes:53 ~suffix:"..." line |> String_util.to_string in
         Log.Metrics.error "JSON parse error: %s (line: %s)"
-          (Printexc.to_string exn) preview;
+          (Stdlib.Printexc.to_string exn) preview;
         None
     ) lines
 
@@ -197,7 +215,7 @@ let parse_month_key_from_filename filename =
   else
     match String.split_on_char '-' (Filename.chop_suffix filename ".jsonl") with
     | [ year_s; month_s ] -> (
-        match int_of_string_opt year_s, int_of_string_opt month_s with
+        match Stdlib.int_of_string_opt year_s, Stdlib.int_of_string_opt month_s with
         | Some year, Some month when month >= 1 && month <= 12 ->
             Some (month_key ~year ~month)
         | _ -> None)
@@ -235,12 +253,12 @@ let get_recent config ~agent_id ~days : task_metric list =
           read_metrics_file file)
         files
     in
-    List.filter (fun m -> m.started_at >= cutoff) all_metrics
+    List.filter (fun m -> Stdlib.Float.compare m.started_at cutoff >= 0) all_metrics
 
 (** Calculate aggregated metrics for fitness - synchronous *)
 let calculate_agent_metrics config ~agent_id ~days : agent_metrics option =
   let metrics = get_recent config ~agent_id ~days in
-  if metrics = [] then
+  if Stdlib.List.length metrics = 0 then
     None
   else
     let now = Time_compat.now () in
@@ -260,13 +278,13 @@ let calculate_agent_metrics config ~agent_id ~days : agent_metrics option =
       | [] -> 0.0
       | times ->
         let sum = List.fold_left (+.) 0.0 times in
-        sum /. (float_of_int (List.length times)) in
+        sum /. (Stdlib.Float.of_int (List.length times)) in
 
     (* Calculate handoff success rate *)
     let handoffs = List.filter (fun m -> Option.is_some m.handoff_from || Option.is_some m.handoff_to) metrics in
     let successful_handoffs = List.filter (fun m -> m.success) handoffs in
-    let handoff_rate = if handoffs <> [] then
-      float_of_int (List.length successful_handoffs) /. float_of_int (List.length handoffs)
+    let handoff_rate = if Stdlib.List.length handoffs > 0 then
+      Stdlib.Float.of_int (List.length successful_handoffs) /. Stdlib.Float.of_int (List.length handoffs)
     else 1.0 in  (* No handoffs = perfect handoff rate *)
 
     (* Unique collaborators *)
@@ -281,8 +299,8 @@ let calculate_agent_metrics config ~agent_id ~days : agent_metrics option =
       completed_tasks = List.length successful;
       failed_tasks = List.length failed;
       avg_completion_time_s = avg_time;
-      task_completion_rate = if total > 0 then float_of_int (List.length successful) /. float_of_int total else 0.0;
-      error_rate = if total > 0 then float_of_int (List.length failed) /. float_of_int total else 0.0;
+      task_completion_rate = if total > 0 then Stdlib.Float.of_int (List.length successful) /. Stdlib.Float.of_int total else 0.0;
+      error_rate = if total > 0 then Stdlib.Float.of_int (List.length failed) /. Stdlib.Float.of_int total else 0.0;
       handoff_success_rate = handoff_rate;
       unique_collaborators = unique_collabs;
     }

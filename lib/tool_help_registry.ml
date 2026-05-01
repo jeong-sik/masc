@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 (** Canonical MCP tool help content.
 
     The MCP schema description should stay short and discovery-oriented.
@@ -18,7 +36,7 @@ let normalize_spaces text =
   text
   |> String.split_on_char '\n'
   |> List.map String.trim
-  |> List.filter (fun chunk -> chunk <> "")
+  |> List.filter (fun chunk -> not (String.equal chunk ""))
   |> String.concat " "
 
 let trim_terminal_punctuation text =
@@ -223,7 +241,7 @@ let derived_short_description name original =
       let cleaned =
         seed |> normalize_spaces |> truncate ~max_len:120
       in
-      if cleaned = "" then
+      if String.equal cleaned "" then
         "MASC tool."
       else if String.ends_with ~suffix:"." cleaned then
         cleaned
@@ -233,7 +251,7 @@ let derived_short_description name original =
 let derived_details name original =
   let base = normalize_spaces original in
   let extra_constraints = constraints_from_metadata name in
-  if extra_constraints = [] then
+  if Stdlib.List.length extra_constraints = 0 then
     base
   else
     String.concat "\n\n"
@@ -321,7 +339,7 @@ let entry_markdown (entry : help_entry) =
     ]
   in
   let constraint_lines =
-    if entry.key_constraints = [] then
+    if Stdlib.List.length entry.key_constraints = 0 then
       []
     else
       [
@@ -340,7 +358,7 @@ let entry_markdown (entry : help_entry) =
     ]
   in
   let doc_lines =
-    if entry.doc_refs = [] then
+    if Stdlib.List.length entry.doc_refs = 0 then
       []
     else
       [
@@ -351,7 +369,7 @@ let entry_markdown (entry : help_entry) =
       @ List.map (fun item -> "- `" ^ item ^ "`") entry.doc_refs
   in
   let prompt_lines =
-    if entry.prompt_hints = [] then
+    if Stdlib.List.length entry.prompt_hints = 0 then
       []
     else
       [
@@ -368,9 +386,9 @@ let entry_markdown (entry : help_entry) =
         let after_items = List.map (fun t -> "- `" ^ t ^ "`") after in
         let mistake_items = List.map (fun m -> "- " ^ m) mistakes in
         [ ""; "## Workflow Context"; "" ]
-        @ (if before <> [] then [ "**Call before this tool:**" ] @ before_items else [])
-        @ (if after <> [] then [ ""; "**Call after this tool:**" ] @ after_items else [])
-        @ (if mistakes <> [] then [ ""; "**Common mistakes:**" ] @ mistake_items else [])
+        @ (if Stdlib.List.length before > 0 then [ "**Call before this tool:**" ] @ before_items else [])
+        @ (if Stdlib.List.length after > 0 then [ ""; "**Call after this tool:**" ] @ after_items else [])
+        @ (if Stdlib.List.length mistakes > 0 then [ ""; "**Common mistakes:**" ] @ mistake_items else [])
     | None -> []
   in
   String.concat "\n"

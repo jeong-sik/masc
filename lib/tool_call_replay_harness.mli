@@ -1,3 +1,5 @@
+open Base
+
 (** Tool_call_replay_harness — JSONL snapshot loader + validation
     for tool-call replay scoring.
 
@@ -44,7 +46,7 @@ type snapshot = {
 (** {1 Loader} *)
 
 val load_snapshots_from_jsonl :
-  string -> (snapshot list, string) result
+  string -> (snapshot list, string) Result.t
 (** [load_snapshots_from_jsonl path] reads a JSONL file and parses
     each row into a {!snapshot}.
 
@@ -66,7 +68,7 @@ val load_snapshots_from_jsonl :
 
 (** {1 Validator} *)
 
-val validate_snapshot : snapshot -> (unit, string list) result
+val validate_snapshot : snapshot -> (unit, string list) Result.t
 (** [validate_snapshot snapshot] checks the response against the
     declared expectations.
 

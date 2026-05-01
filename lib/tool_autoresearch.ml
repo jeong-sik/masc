@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 (** Tool_autoresearch — MCP tool dispatch for the Autoresearch loop.
 
     Inspired by Karpathy's autoresearch pattern: autonomous experiment cycles
@@ -17,6 +35,13 @@ let schemas = Tool_autoresearch_schemas.schemas
 
 type tool_result = bool * string
 
+let persisted_summary_target_reached (summary : Autoresearch.persisted_summary) =
+  match summary.target_score with
+  | Some target when Float.is_finite summary.best_score && Float.is_finite target ->
+      if summary.lower_is_better then Stdlib.( <= ) summary.best_score target
+      else Stdlib.( >= ) summary.best_score target
+  | _ -> false
+
 let persisted_summary_json (summary : Autoresearch.persisted_summary) =
   `Assoc
     [
@@ -27,12 +52,7 @@ let persisted_summary_json (summary : Autoresearch.persisted_summary) =
       ("target_file", `String summary.target_file);
       ("target_score", Json_util.float_opt_to_json summary.target_score);
       ( "target_reached",
-        `Bool
-          (match summary.target_score with
-           | None -> false
-           | Some target ->
-               if summary.lower_is_better then summary.best_score <= target
-               else summary.best_score >= target) );
+        `Bool (persisted_summary_target_reached summary) );
       ("status", `String (Autoresearch.status_to_string summary.status));
       ("current_cycle", `Int summary.current_cycle);
       ("baseline", `Float summary.baseline);
@@ -93,11 +113,11 @@ let prepare_start_params (ctx : context) args =
   match model_model_result with
   | Error e -> Error (Printf.sprintf "no default model configured: %s" e)
   | Ok model_model ->
-  if goal = "" then
+  if String.equal goal "" then
     Error "goal is required"
-  else if metric_fn = "" then
+  else if String.equal metric_fn "" then
     Error "metric_fn is required"
-  else if target_file = "" then
+  else if String.equal target_file "" then
     Error "target_file is required"
   else
     (* Validate metric_fn early to reject shell injection before any state is created *)
@@ -163,7 +183,7 @@ let prepare_managed_target_file ~source_workdir ~managed_workdir target_file =
                 Error
                   (Printf.sprintf
                      "Failed to seed target_file into managed worktree: %s"
-                     (Printexc.to_string exn)))
+                     (Stdlib.Printexc.to_string exn)))
 
 let setup_running_loop (ctx : context) (params : start_params) =
   let state =
@@ -267,7 +287,7 @@ let build_swarm_goal ~goal ~target_file ~program_note =
 
 let parse_operation_id json =
   match Yojson.Safe.Util.member "operation_id" json with
-  | `String value when String.trim value <> "" -> Some (String.trim value)
+  | `String value when not (String.equal (String.trim value) "") -> Some (String.trim value)
   | _ -> None
 
 let check_concurrency_limit (ctx : context) =
@@ -280,7 +300,7 @@ let check_concurrency_limit (ctx : context) =
           Hashtbl.fold
             (fun _ (state : Autoresearch_types.loop_state) acc ->
                match state.author with
-               | Some a when a = author -> acc + 1
+               | Some a when String.equal a author -> acc + 1
                | _ -> acc)
             Autoresearch.active_loops 0)
       in
@@ -349,7 +369,7 @@ let handle_stop (ctx : context) args =
             | None -> true
             | Some state ->
                 match state.author with
-                | Some a when a <> requester -> false
+                | Some a when not (String.equal a requester) -> false
                 | _ -> true
       in
       if not can_stop then
@@ -378,7 +398,7 @@ let handle_stop (ctx : context) args =
 
 let handle_inject (ctx : context) args =
   let hypothesis = get_string args "hypothesis" "" in
-  if hypothesis = "" then
+  if String.equal hypothesis "" then
     `Assoc [("error", `String "hypothesis is required")]
   else
     match resolve_loop_id args with
@@ -388,7 +408,7 @@ let handle_inject (ctx : context) args =
         match Hashtbl.find_opt active_loops id with
         | None -> `Assoc [("error", `String (Printf.sprintf "Loop %s not found" id))]
         | Some state ->
-          if state.status <> Autoresearch.Running then
+          if not (Poly.equal state.status Autoresearch.Running) then
             `Assoc [("error", `String "Loop is not running")]
           else begin
             let state = { state with queued_hypothesis = Some hypothesis } in
@@ -423,7 +443,7 @@ let arg_member key = function
 
 let parse_int_string s =
   let trimmed = String.trim s in
-  if trimmed = "" then None else int_of_string_opt trimmed
+  if String.equal trimmed "" then None else Stdlib.int_of_string_opt trimmed
 
 let parse_optional_int_arg key args =
   match arg_member key args with
@@ -452,7 +472,7 @@ let parse_limit_arg args =
 let parse_required_trimmed_strings keys args =
   let rec loop acc invalid = function
     | [] ->
-        if invalid = [] then Ok (List.rev acc)
+        if Stdlib.List.length invalid = 0 then Ok (List.rev acc)
         else
           Error
             (Printf.sprintf "%s are required and must be non-empty strings"
@@ -461,7 +481,7 @@ let parse_required_trimmed_strings keys args =
         match arg_member key args with
         | Some (`String value) ->
             let trimmed = String.trim value in
-            if trimmed = "" then loop acc (key :: invalid) rest
+            if String.equal trimmed "" then loop acc (key :: invalid) rest
             else loop ((key, trimmed) :: acc) invalid rest
         | _ -> loop acc (key :: invalid) rest)
   in
@@ -546,7 +566,7 @@ let handle_record_finding (ctx : context) args =
 (** Handle search_findings — search previous research findings by keyword. *)
 let handle_search_findings (ctx : context) args =
   let query = Safe_ops.json_string ~default:"" "query" args |> String.trim in
-  if query = "" then
+  if String.equal query "" then
     `Assoc [("error", `String "query is required")]
   else
     match parse_limit_arg args with

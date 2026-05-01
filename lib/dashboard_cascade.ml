@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 (** Dashboard projection for cascade configuration and runtime health. *)
 
 module CC = Cascade_config
@@ -353,7 +371,7 @@ let save_raw_config_json raw_json =
             Error (Printf.sprintf "invalid JSON: %s" msg)
         | exn ->
             Error
-              (Printf.sprintf "failed to parse JSON: %s" (Printexc.to_string exn))
+              (Printf.sprintf "failed to parse JSON: %s" (Stdlib.Printexc.to_string exn))
       in
       (match parse_result with
        | Error _ as err -> err
@@ -663,7 +681,7 @@ let health_json ?(window_minutes = 30)
       | exn ->
         Log.Keeper.warn
           "dashboard_cascade.health_json: provider perf aggregate failed: %s"
-          (Printexc.to_string exn)));
+          (Stdlib.Printexc.to_string exn)));
   let perf_for key =
     match Hashtbl.find_opt perf_by_provider key with
     | Some _ as some -> some
@@ -841,12 +859,12 @@ let slo_json () =
   let total, ordered, exhausted = compute_slo_counts events in
   let ordered_ratio =
     if total = 0 then 1.0
-    else float_of_int ordered /. float_of_int total
+    else Stdlib.Float.of_int ordered /. Stdlib.Float.of_int total
   in
   let burn_rate = (1.0 -. ordered_ratio) /. 0.01 in
-  let ratio_violated = ordered_ratio < slo_target_ordered_ratio in
+  let ratio_violated = Stdlib.Float.compare ordered_ratio slo_target_ordered_ratio < 0 in
   let exhaustion_violated = exhausted > slo_target_exhaustion_count in
-  let burn_violated = burn_rate > slo_target_burn_rate in
+  let burn_violated = Stdlib.Float.compare burn_rate slo_target_burn_rate > 0 in
   let violations =
     List.filter_map (fun (name, violated) ->
       if violated then Some (`String name) else None)

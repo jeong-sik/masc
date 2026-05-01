@@ -1,3 +1,5 @@
+open Base
+
 (** Tool_deep_review — Adversarial code review with isolated context.
 
     PR#814 Gap 2. Spawns a review pass via a different model
@@ -23,4 +25,4 @@ val build_prompt :
   target_files:string list ->
   question:string ->
   base_path:string ->
-  (string, string) result
+  (string, string) Result.t

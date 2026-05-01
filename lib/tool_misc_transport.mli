@@ -1,3 +1,5 @@
+open Base
+
 (** Tool_misc_transport — Transport, WebSocket, and WebRTC tool
     handlers.
 

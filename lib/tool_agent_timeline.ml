@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 (** Tool_agent_timeline - Unified agent activity timeline.
 
     Collects events from multiple data sources and merges them into
@@ -21,7 +39,7 @@ type context = {
 (* ISO timestamp parsing (reuses Dashboard logic) *)
 let parse_iso_timestamp (s : string) : float option =
   try
-    let open Scanf in
+    let open Stdlib.Scanf in
     sscanf s "%d-%d-%dT%d:%d:%d" (fun y m d h min sec ->
         let tm =
           {
@@ -41,7 +59,7 @@ let parse_iso_timestamp (s : string) : float option =
         let (utc_as_local, _) = Unix.mktime utc_tm in
         let tz_offset = local_t -. utc_as_local in
         Some (local_t -. tz_offset))
-  with Scanf.Scan_failure _ | Failure _ | End_of_file -> None
+  with Stdlib.Scanf.Scan_failure _ | Failure _ | End_of_file -> None
 
 (* Event type for the unified timeline *)
 type timeline_event = {
@@ -440,8 +458,8 @@ let build_timeline (config : Coord.config) ~agent_name ~since_hours ~limit
   (* Filter by time cutoff and sort chronologically *)
   let filtered =
     all_events
-    |> List.filter (fun e -> e.ts >= cutoff)
-    |> List.sort (fun a b -> compare a.ts b.ts)
+    |> List.filter (fun e -> Stdlib.Float.compare e.ts cutoff >= 0)
+    |> List.sort (fun a b -> Stdlib.Float.compare a.ts b.ts)
   in
   (* Truncate to limit — keep the most recent events (tail of sorted list) *)
   let events =

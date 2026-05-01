@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 (** Central Tool Dispatch Registry.
 
     Production MCP tool names route through {!Tool_name} and an exhaustive
@@ -56,7 +74,7 @@ type pre_hook_action =
 type pre_hook = name:string -> args:Yojson.Safe.t -> pre_hook_action
 
 (** Post-hook: receives result after handler completes.
-    Return the (possibly transformed) result. *)
+    Return the (possibly transformed) tool result. *)
 type post_hook = Tool_result.t -> Tool_result.t
 
 let pre_hooks : pre_hook list ref = ref []
@@ -108,7 +126,7 @@ let dispatch ~(token : Tool_token.t) ~args : (bool * string) option =
         Some
           ( false,
             Printf.sprintf "dispatch_v2 handler error for %s: %s" name
-              (Printexc.to_string exn) )
+              (Stdlib.Printexc.to_string exn) )
     in
     (match result with
      | Some (success, message) ->
@@ -370,7 +388,7 @@ let find_similar_names ?(limit = 3) ?(min_score = 0.4) ~query () =
     List.filter_map
       (fun n ->
         let s = Text_similarity.jaccard_similarity query n in
-        if s >= min_score then Some (s, n) else None)
+        if Stdlib.Float.compare s min_score >= 0 then Some (s, n) else None)
       candidates
   in
   let sorted =

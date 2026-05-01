@@ -1,3 +1,5 @@
+open Base
+
 type case_category =
   | Tool_required
   | Tool_forbidden

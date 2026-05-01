@@ -1,3 +1,5 @@
+open Base
+
 (** Tool_board — MCP tool family for the internal board.
 
     Owns:
@@ -81,7 +83,7 @@ type sort_order = Board_dispatch.sort_order =
     Identity preserved so [Tool_board.sort_order] and
     [Board_dispatch.sort_order] are interchangeable. *)
 
-val parse_sort_order : string -> (sort_order, string) result
+val parse_sort_order : string -> (sort_order, string) Result.t
 (** Delegates to
     {!Board_dispatch.sort_order_of_string_opt} (canonical
     + documented aliases [new] / [active] / [comments]).

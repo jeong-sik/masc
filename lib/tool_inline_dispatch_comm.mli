@@ -1,3 +1,5 @@
+open Base
+
 (** Tool_inline_dispatch_comm — communication tool handlers.
 
     Handles: masc_broadcast, masc_messages, masc_who.

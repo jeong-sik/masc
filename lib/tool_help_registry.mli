@@ -1,3 +1,5 @@
+open Base
+
 (** Tool_help_registry — derived per-tool help entries.
 
     Generates {!help_entry} records from {!Types.tool_schema} via

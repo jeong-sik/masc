@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 (** Tool_agent - Agent management, metrics, and capability discovery handlers *)
 
 open Tool_args
@@ -39,7 +57,7 @@ let valid_agent_card_action_strings =
 
 (* Issue #8501: Variant SSOT for masc_collaboration_graph.format.  Same
    pattern as agent_card_action above. The previous code used
-   [if format = "json" then ... else (text)] which silently routed
+   [if String.equal format "json" then ... else (text)] which silently routed
    any unknown format to text. *)
 type collaboration_format =
   | Text
@@ -124,8 +142,8 @@ let metrics_for ctx ~days agent_id =
 let min_avg_time metrics_list =
   metrics_list
   |> List.map (fun (_, m) -> m.Metrics_store_eio.avg_completion_time_s)
-  |> List.filter (fun t -> t > 0.0)
-  |> List.fold_left (fun acc t -> if acc = 0.0 || t < acc then t else acc) 0.0
+  |> List.filter (fun t -> Stdlib.Float.compare t 0.0 > 0)
+  |> List.fold_left (fun acc t -> if Stdlib.Float.compare acc 0.0 = 0 || Stdlib.Float.compare t acc < 0 then t else acc) 0.0
 
 (** Calculate max collaborators from metrics list *)
 let max_collabs metrics_list =
@@ -179,14 +197,14 @@ let score_for ?(weights = default_fitness_weights) ~min_avg ~max_collabs metrics
   let reliability = if has_data then 1.0 -. metrics.Metrics_store_eio.error_rate else 0.0 in
   let handoff = if has_data then metrics.Metrics_store_eio.handoff_success_rate else 0.0 in
   let speed =
-    if has_data && metrics.Metrics_store_eio.avg_completion_time_s > 0.0 && min_avg > 0.0 then
-      min 1.0 (min_avg /. metrics.Metrics_store_eio.avg_completion_time_s)
+    if has_data && Stdlib.Float.compare metrics.Metrics_store_eio.avg_completion_time_s 0.0 > 0 && Stdlib.Float.compare min_avg 0.0 > 0 then
+      Stdlib.Float.min 1.0 (min_avg /. metrics.Metrics_store_eio.avg_completion_time_s)
     else 0.0
   in
   let collab_count = List.length metrics.Metrics_store_eio.unique_collaborators in
   let collaboration =
     if max_collabs = 0 then 0.0
-    else float_of_int collab_count /. float_of_int max_collabs
+    else Stdlib.Float.of_int collab_count /. Stdlib.Float.of_int max_collabs
   in
   let score =
     (weights.w_completion *. completion)
@@ -217,12 +235,12 @@ let handle_agent_fitness ctx args =
         | Eio.Cancel.Cancelled _ as e -> raise e
         | exn ->
           Log.Misc.warn "room agents fallback (metrics_store still used): %s"
-            (Printexc.to_string exn);
+            (Stdlib.Printexc.to_string exn);
           []
       in
       List.sort_uniq String.compare (metrics_agents @ room_agents)
   in
-  if agents = [] then
+  if Stdlib.List.length agents = 0 then
     (true, Yojson.Safe.to_string (`Assoc [("count", `Int 0); ("agents", `List [])]))
   else
     let metrics_list = List.map (fun a -> (a, metrics_for ctx ~days a)) agents in
@@ -273,14 +291,14 @@ let handle_collaboration_graph ctx args =
   | Text ->
     let lines =
       synapses
-      |> List.sort (fun a b -> compare b.Hebbian_eio.weight a.Hebbian_eio.weight)
+      |> List.sort (fun a b -> Stdlib.Float.compare b.Hebbian_eio.weight a.Hebbian_eio.weight)
       |> List.filteri (fun i _ -> i < limit)
       |> List.map (fun s ->
           Printf.sprintf "%s → %s (%.2f, success:%d, failure:%d)"
             s.Hebbian_eio.from_agent s.Hebbian_eio.to_agent
             s.Hebbian_eio.weight s.Hebbian_eio.success_count s.Hebbian_eio.failure_count)
     in
-    if lines = [] then
+    if Stdlib.List.length lines = 0 then
       (true, "No collaboration data yet.")
     else
       (true, String.concat "\n" lines)

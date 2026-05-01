@@ -1,3 +1,5 @@
+open Base
+
 (** Tool_autoresearch_cycle — Core ratchet logic for the
     [masc_autoresearch_cycle] tool.
 

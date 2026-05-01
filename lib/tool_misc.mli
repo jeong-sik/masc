@@ -1,3 +1,5 @@
+open Base
+
 (** Tool_misc — miscellaneous MASC tool handlers.
 
     Dispatches: transport_status, websocket_discovery, webrtc,

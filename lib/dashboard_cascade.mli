@@ -1,3 +1,5 @@
+open Base
+
 (** Dashboard projection for cascade configuration and runtime health.
 
     Exposes the validated runtime cascade catalog alongside the live
@@ -94,7 +96,7 @@ val raw_config_json : unit -> Yojson.Safe.t
 
     @since 0.160.1 *)
 val save_raw_config_json :
-  string -> (Yojson.Safe.t, string) result
+  string -> (Yojson.Safe.t, string) Result.t
 
 (** Build the per-keeper row of [keeper_profiles] without a full
     {!Keeper_registry.registry_entry}. Exposed so the raw-vs-canonical

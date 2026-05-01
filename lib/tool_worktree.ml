@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 (** Worktree tools - Git worktree management for task isolation *)
 
 open Tool_args
@@ -28,8 +46,8 @@ let handle_worktree_create ctx args =
      ctx.agent_name. *)
   let agent_name_result =
     let from_args = String.trim (get_string args "agent_name" "") in
-    if from_args = "" then Ok ctx.agent_name
-    else if from_args = ctx.agent_name then Ok ctx.agent_name
+    if String.equal from_args "" then Ok ctx.agent_name
+    else if String.equal from_args ctx.agent_name then Ok ctx.agent_name
     else
       (* Normalize both forms via Playground_paths so "masc-improver"
          and "keeper-masc-improver-agent" compare equal — they are the
@@ -37,7 +55,7 @@ let handle_worktree_create ctx args =
          The security invariant is preserved: different keepers still
          have different normalized names. *)
       let normalize = Playground_paths.sanitize_keeper_name in
-      if normalize from_args = normalize ctx.agent_name then Ok ctx.agent_name
+      if String.equal (normalize from_args) (normalize ctx.agent_name) then Ok ctx.agent_name
       else
         Error (Printf.sprintf
           "agent_name mismatch: arg=%S but context agent is %S. \
@@ -57,13 +75,13 @@ let handle_worktree_create ctx args =
      re-validates defensively, but rejecting here gives a clearer
      error message back to the caller. *)
   let is_safe_repo_name s =
-    s <> "" && s <> "." && s <> ".."
+    not (String.equal s "") && not (String.equal s ".") && not (String.equal s "..")
     && not (String.contains s '/')
     && not (String.contains s '\\')
     && not (String.contains s '\x00')
     && String.for_all (fun c ->
-      (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
-      || (c >= '0' && c <= '9') || c = '-' || c = '_' || c = '.') s
+      (match c with 'A'..'Z' | 'a'..'z' -> true | _ -> false)
+      || (match c with '0'..'9' | '-' | '_' | '.' -> true | _ -> false)) s
   in
   let raw_repo_name = String.trim (get_string args "repo_name" "") in
   let repo_name, repo_name_error =
@@ -81,7 +99,7 @@ let handle_worktree_create ctx args =
   match repo_name_error with
   | Some err -> (false, err)
   | None ->
-  if raw_task_id = "" then
+  if String.equal raw_task_id "" then
     (false, "task_id is required. Example: task_id='fix-login', \
              task_id='add-auth'. Allowed characters: a-z, 0-9, hyphen, \
              underscore. Slashes and backslashes are auto-normalized \
@@ -89,8 +107,8 @@ let handle_worktree_create ctx args =
   else
   (* Normalize: replace / and \ with - so LLMs can use branch-style names *)
   let task_id =
-    String.to_seq raw_task_id
-    |> Seq.map (fun c -> if c = '/' || c = '\\' then '-' else c)
+    Stdlib.String.to_seq raw_task_id
+    |> Stdlib.Seq.map (fun c -> if Char.equal c '/' || Char.equal c '\\' then '-' else c)
     |> String.of_seq
   in
   match Coord.worktree_create_r ?repo_name ctx.config ~agent_name ~task_id ~base_branch with
@@ -99,7 +117,7 @@ let handle_worktree_create ctx args =
 
 let handle_worktree_remove ctx args =
   let task_id = get_string args "task_id" "" in
-  if task_id = "" then
+  if String.equal task_id "" then
     (false, "task_id is required. Use the same task_id you passed to masc_worktree_create.")
   else
   match Coord.worktree_remove_r ctx.config ~agent_name:ctx.agent_name ~task_id with

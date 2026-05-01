@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 (** Tool_misc_transport — Transport, WebSocket, and WebRTC tool handlers.
 
     Extracted from tool_misc.ml to reduce god file size.
@@ -25,7 +43,7 @@ let env_flag_enabled name =
   | None -> false
   | Some raw ->
       let v = String.trim raw |> String.lowercase_ascii in
-      v = "1" || v = "true" || v = "yes" || v = "y" || v = "on"
+      String.equal v "1" || String.equal v "true" || String.equal v "yes" || String.equal v "y" || String.equal v "on"
 
 (* ================================================================ *)
 (* Handlers                                                         *)

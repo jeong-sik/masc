@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 (** Tool_catalog — Visibility and lifecycle metadata for MCP tools.
 
     Central registry for tool access control:
@@ -347,7 +365,7 @@ let public_mcp_set : (string, unit) Hashtbl.t =
        String.split_on_char ',' raw
        |> List.iter (fun s ->
               let name = String.trim s in
-              if name <> "" then Hashtbl.replace tbl name ())
+              if not (String.equal name "") then Hashtbl.replace tbl name ())
    | None -> ());
   tbl
 
@@ -842,7 +860,7 @@ let lifecycle_to_string = function
 (** Precomputed list of deprecated tools from explicit_metadata.
     Static — computed once at module init. *)
 let deprecated_tool_entries : (string * metadata) list =
-  List.filter (fun (_name, meta) -> meta.lifecycle = Deprecated) explicit_metadata
+  List.filter (fun (_name, meta) -> Poly.equal meta.lifecycle Deprecated) explicit_metadata
 
 (* ================================================================ *)
 (* JSON metadata helpers                                            *)

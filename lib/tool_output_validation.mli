@@ -1,3 +1,5 @@
+open Base
+
 (** Tool_output_validation — Memory-protection cap.
 
     Context budget management belongs to OAS [context_reducer].

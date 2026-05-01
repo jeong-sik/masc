@@ -1,3 +1,5 @@
+open Base
+
 (** Tool_metrics_persist — JSONL disk persistence for tool metrics.
 
     Periodically flushes in-memory tool invocation records to

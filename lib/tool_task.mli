@@ -1,3 +1,5 @@
+open Base
+
 (** Tool_task - Core task CRUD operations *)
 
 type tool_result = bool * string

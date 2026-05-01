@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 (** Tool_inline_dispatch_comm — communication tool handlers.
 
     Handles: masc_broadcast, masc_messages, masc_who.
@@ -26,7 +44,7 @@ let handle_broadcast (ctx : context) : tool_result option =
   let sw = ctx.sw in
   let message = arg_get_string ctx "message" "" in
   let trimmed = String.trim message in
-  if trimmed = "" then
+  if String.equal trimmed "" then
     Some (false, "Broadcast message cannot be empty")
   else
   let allowed, wait_secs = Session.check_rate_limit registry ~agent_name in

@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 (** Tool_local_runtime core — types, helpers, process discovery, model fetching. *)
 
 type context = {
@@ -38,7 +56,7 @@ let string_opt_to_json = Json_util.string_opt_to_json
 let float_opt_to_json = Json_util.float_opt_to_json
 
 let parse_int_opt value =
-  int_of_string_opt ((String.trim value))
+  Stdlib.int_of_string_opt ((String.trim value))
 
 let unique_preserve_order = Json_util.dedupe_keep_order
 
@@ -46,13 +64,13 @@ let split_ws text =
   text
   |> String.split_on_char ' '
   |> List.map String.trim
-  |> List.filter (fun item -> item <> "")
+  |> List.filter (fun item -> not (String.equal item ""))
 
 let string_contains_substring = String_util.contains_substring
 
 let parse_pid_and_command line =
   let trimmed = String.trim line in
-  if trimmed = "" then
+  if String.equal trimmed "" then
     (None, "")
   else
     match String.index_opt trimmed ' ' with
@@ -125,7 +143,7 @@ let discover_processes () =
         |> String.split_on_char '\n'
         |> List.filter_map (fun line ->
                let pid, command = parse_pid_and_command line in
-               if command = "" || not (string_contains_substring command "llama-server") then
+               if String.equal command "" || not (string_contains_substring command "llama-server") then
                  None
                else
                  let tokens = split_ws command in

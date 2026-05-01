@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 open Tool_call_quality_benchmark_types
 
 let default_case_set_path ~repo_root =
@@ -19,7 +37,7 @@ let dedupe_keep_order items =
 let normalize_string_list items =
   items
   |> List.map String.trim
-  |> List.filter (fun item -> item <> "")
+  |> List.filter (fun item -> not (String.equal item ""))
   |> dedupe_keep_order
 
 let errorf fmt = Printf.ksprintf (fun s -> Error s) fmt
@@ -59,7 +77,7 @@ let member_opt key = function
 
 let required_string_field json key =
   match Yojson.Safe.Util.member key json |> Yojson.Safe.Util.to_string_option with
-  | Some value when String.trim value <> "" -> Ok value
+  | Some value when not (String.equal (String.trim value) "") -> Ok value
   | _ -> errorf "missing required string field %s" key
 
 let list_field json key =
@@ -116,12 +134,12 @@ let benchmark_case_of_yojson json =
   let* success_check_items = list_field json "success_checks" in
   let* success_checks = map_m parse_json_check success_check_items in
   let* () =
-    if keeper_profiles = [] then
+    if Stdlib.List.length keeper_profiles = 0 then
       errorf "benchmark case %s must declare keeper_profiles" id
     else Ok ()
   in
   let* () =
-    if success_checks = [] then
+    if Stdlib.List.length success_checks = 0 then
       errorf "benchmark case %s must declare success_checks" id
     else Ok ()
   in

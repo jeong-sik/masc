@@ -1,3 +1,5 @@
+open Base
+
 (** Tool_registry — in-memory call counters and usage statistics.
 
     Zero-allocation atomic counters for hot-path performance.

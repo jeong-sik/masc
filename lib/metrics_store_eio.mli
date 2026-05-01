@@ -1,3 +1,5 @@
+open Base
+
 (** Metrics_store_eio — agent performance metrics with async batched
     file I/O.
 

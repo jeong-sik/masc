@@ -1,3 +1,5 @@
+open Base
+
 (** Tool_catalog — Visibility and lifecycle metadata for MCP tools.
 
     Central registry for tool access control:

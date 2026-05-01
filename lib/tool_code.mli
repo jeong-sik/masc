@@ -1,3 +1,5 @@
+open Base
+
 (** Tool_code — Code navigation MCP tools (search, symbols, read).
 
     Phase-1 surface: ripgrep-backed search + ctags-style symbol
@@ -82,7 +84,7 @@ val normalize_agent_relative_path :
     Pure transformation — does NOT validate accessibility. *)
 
 val validate_path :
-  Coord.config -> string -> (string, Masc_error.t) result
+  Coord.config -> string -> (string, Masc_error.t) Result.t
 (** [validate_path config path] returns the canonical path on
     success, or an error variant (typically [IoError]) on:
 
@@ -99,7 +101,7 @@ val validate_read_path :
   agent_name:string ->
   Coord.config ->
   string ->
-  (string, Masc_error.t) result
+  (string, Masc_error.t) Result.t
 (** [validate_read_path ~agent_name config path] is the
     read-side gate: applies {!normalize_agent_relative_path}
     then {!validate_path}, then realpath-resolves the canonical

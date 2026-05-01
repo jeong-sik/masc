@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 (** Tool_local_runtime_probe -- native Ollama timing and warm-state diagnostics. *)
 
 include Tool_local_runtime_http
@@ -52,7 +70,7 @@ let clamp ~min_value ~max_value value = max min_value (min max_value value)
 
 let trim_to_option raw =
   let trimmed = String.trim raw in
-  if trimmed = "" then None else Some trimmed
+  if String.equal trimmed "" then None else Some trimmed
 
 let normalize_ollama_server_url raw =
   let trimmed = String.trim raw in
@@ -79,12 +97,12 @@ let ollama_http_error operation http_status =
   | None -> Printf.sprintf "ollama %s returned http unknown" operation
 
 let ns_to_ms value =
-  value |> Option.map (fun ns -> float_of_int ns /. 1_000_000.0)
+  value |> Option.map (fun ns -> Stdlib.Float.of_int ns /. 1_000_000.0)
 
 let tok_per_second ~count ~duration_ms =
   match count, duration_ms with
-  | Some token_count, Some elapsed_ms when token_count > 0 && elapsed_ms > 0.0 ->
-      Some (float_of_int token_count /. (elapsed_ms /. 1000.0))
+  | Some token_count, Some elapsed_ms when token_count > 0 && Stdlib.Float.compare elapsed_ms 0.0 > 0 ->
+      Some (Stdlib.Float.of_int token_count /. (elapsed_ms /. 1000.0))
   | _ -> None
 
 let collapse_preview text =
@@ -207,8 +225,8 @@ let prompt_eval_duration_ms_of_run_json json =
   let open Yojson.Safe.Util in
   match member "prompt_eval_duration_ms" json with
   | `Float value -> Some value
-  | `Int value -> Some (float_of_int value)
-  | `Intlit value -> Option.map float_of_int (parse_int_opt value)
+  | `Int value -> Some (Stdlib.Float.of_int value)
+  | `Intlit value -> Option.map Stdlib.Float.of_int (parse_int_opt value)
   | _ -> None
 
 let ollama_probe_run_of_generate_json ~run_index ~http_status ~wall_clock_ms json =
@@ -249,7 +267,7 @@ let ollama_probe_run_of_generate_json ~run_index ~http_status ~wall_clock_ms jso
     thinking_present =
       (match member "thinking" json with
       | `Null -> false
-      | `String value -> String.trim value <> ""
+      | `String value -> not (String.equal (String.trim value) "")
       | `List [] -> false
       | `Assoc [] -> false
       | _ -> true);
@@ -315,7 +333,7 @@ let kv_cache_assessment_json run_jsons =
             List.fold_left
               (fun ((_best_idx, best_ms) as best) candidate ->
                 let _candidate_idx, candidate_ms = candidate in
-                if candidate_ms < best_ms then
+                if Stdlib.Float.compare candidate_ms best_ms < 0 then
                   candidate
                 else
                   best)
@@ -323,17 +341,17 @@ let kv_cache_assessment_json run_jsons =
         | [] -> (None, baseline_ms)
       in
       let reduction_ratio =
-        if baseline_ms > 0.0 then
+        if Stdlib.Float.compare baseline_ms 0.0 > 0 then
           Some ((baseline_ms -. best_repeat_ms) /. baseline_ms)
         else
           None
       in
       let signal, note =
         match reduction_ratio with
-        | Some ratio when ratio >= 0.35 ->
+        | Some ratio when Stdlib.Float.compare ratio 0.35 >= 0 ->
             ( "likely_reused",
               "Prompt evaluation time dropped materially on a repeated prompt. Timing suggests warm repeated-prefix reuse." )
-        | Some ratio when ratio >= 0.15 ->
+        | Some ratio when Stdlib.Float.compare ratio 0.15 >= 0 ->
             ( "possible_reuse",
               "Prompt evaluation time improved on a repeated prompt, but not enough to treat as a strong signal." )
         | Some _ ->
@@ -377,7 +395,7 @@ let fetch_ollama_ps ?(timeout_sec = 8) ~server_url () =
   let url = ollama_ps_url server_url in
   match http_get_json_with_status ~timeout_sec url with
   | Ok (http_status, json) ->
-      if http_status <> Some 200 then
+      if not (Option.equal Int.equal http_status (Some 200)) then
         (http_status, [], Some (ollama_http_error "ps" http_status))
       else
         let models =
@@ -465,7 +483,7 @@ let request_body_json ~think_enabled ~keep_alive ~model_id ~prompt ~max_tokens =
               ("num_predict", `Int max_tokens);
             ] );
     ]
-    |> List.filter_map Fun.id
+    |> List.filter_map Stdlib.Fun.id
   in
   `Assoc fields |> Yojson.Safe.to_string
 
@@ -481,18 +499,18 @@ let run_single_probe ~think_enabled ~keep_alive ~server_url ~model_id ~prompt
   with
   | Error err ->
       failed_probe_run ~run_index ~http_status:None
-        ~wall_clock_ms:(int_of_float ((Time_compat.now () -. started) *. 1000.0))
+        ~wall_clock_ms:(Stdlib.Int.of_float ((Time_compat.now () -. started) *. 1000.0))
         ~error:err
   | Ok (http_status, payload) ->
       let wall_clock_ms =
-        int_of_float ((Time_compat.now () -. started) *. 1000.0)
+        Stdlib.Int.of_float ((Time_compat.now () -. started) *. 1000.0)
       in
-      if http_status <> Some 200 then
+      if not (Option.equal Int.equal http_status (Some 200)) then
         failed_probe_run ~run_index ~http_status ~wall_clock_ms
           ~error:
             (Printf.sprintf "ollama generate returned http %s"
                (match http_status with
-               | Some code -> string_of_int code
+               | Some code -> Int.to_string code
                | None -> "unknown"))
       else
         match Yojson.Safe.from_string payload with
@@ -612,10 +630,10 @@ let runtime_ollama_probe_json ?server_url ?model ?prompt ?(probe_runs = 2)
          else items)
     |> (fun items ->
          match runs with
-         | first :: _ when Option.value ~default:0.0 first.load_duration_ms >= 1000.0 ->
+         | first :: _ when Stdlib.Float.compare (Option.value ~default:0.0 first.load_duration_ms) 1000.0 >= 0 ->
              "First run reported a noticeable load_duration_ms, suggesting a colder path."
              :: items
-         | first :: _ when Option.value ~default:max_float first.load_duration_ms <= 100.0 ->
+         | first :: _ when Stdlib.Float.compare (Option.value ~default:Stdlib.max_float first.load_duration_ms) 100.0 <= 0 ->
              "First run load_duration_ms was small, which is consistent with a warm model."
              :: items
          | _ -> items)
@@ -677,5 +695,5 @@ let runtime_ollama_probe_json ?server_url ?model ?prompt ?(probe_runs = 2)
             `String
               "A repeated-prefix signal is inference from prompt_eval_duration_ms, not a stable Ollama-native cache metric.";
           ] );
-      ("probe_ok", `Bool (errors = [] && (runs <> [] || not run_generate)));
+      ("probe_ok", `Bool (Stdlib.List.length errors = 0 && (Stdlib.List.length runs > 0 || not run_generate)));
     ]

@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 type discovery_info = {
   discovered_model : string option;
   ctx_size : int option;
@@ -51,7 +69,7 @@ let max_finished_runs = 128
 
 let trim_nonempty value =
   let trimmed = String.trim value in
-  if trimmed = "" then None else Some trimmed
+  if String.equal trimmed "" then None else Some trimmed
 
 let dedupe_keep_order values =
   values
@@ -99,7 +117,7 @@ let prune_run_records_locked now_unix =
   Hashtbl.iter
     (fun run_id run ->
       match run.finished_at_unix with
-      | Some finished_at when now_unix -. finished_at > finished_run_ttl_seconds ->
+      | Some finished_at when Stdlib.Float.compare (now_unix -. finished_at) finished_run_ttl_seconds > 0 ->
           expired_finished := run_id :: !expired_finished
       | Some _ when is_terminal_status run.status ->
           finished_records := (run_id, run_sort_key run) :: !finished_records
@@ -130,7 +148,7 @@ let find_run_record run_id =
       Hashtbl.find_opt provider_runs run_id)
 
 let make_run_id () =
-  let ts_ms = int_of_float (Time_compat.now () *. 1000.0) in
+  let ts_ms = Stdlib.Int.of_float (Time_compat.now () *. 1000.0) in
   let hash = Hashtbl.hash (Unix.gettimeofday ()) land 0xFFFFFF in
   Printf.sprintf "run-%d-%06x" ts_ms hash
 
@@ -141,7 +159,7 @@ let model_id_of_label label =
         String.sub label (idx + 1) (String.length label - idx - 1)
         |> String.trim
       in
-      if model = "" then None else Some model
+      if String.equal model "" then None else Some model
   | _ -> None
 
 (* auth_kind_for_provider and endpoint_url_for_provider removed.
@@ -149,7 +167,7 @@ let model_id_of_label label =
 
 let catalog_models_for_provider provider =
   match Provider_adapter.resolve_direct_adapter provider with
-  | Some { canonical_name; _ } when canonical_name = Provider_adapter.cn_llama -> []
+  | Some { canonical_name; _ } when String.equal canonical_name Provider_adapter.cn_llama -> []
   | Some _ -> (
       match Provider_adapter.auto_models_for_provider provider with
       | Some models -> models
@@ -158,13 +176,13 @@ let catalog_models_for_provider provider =
 
 let default_model_for_provider provider =
   match Provider_adapter.resolve_direct_adapter provider with
-  | Some { canonical_name; _ } when canonical_name = Provider_adapter.cn_llama -> (
+  | Some { canonical_name; _ } when String.equal canonical_name Provider_adapter.cn_llama -> (
       match Provider_adapter.explicit_llama_model_id_result () with
       | Ok model_id -> trim_nonempty model_id
       | Error _ -> None)
   | Some { default_model_id; _ } -> (
       match catalog_models_for_provider provider with
-      | first :: _ when String.trim first <> "" && first <> "auto" -> Some first
+      | first :: _ when not (String.equal (String.trim first) "") && not (String.equal first "auto") -> Some first
       | _ -> default_model_id)
   | None -> None
 
@@ -192,7 +210,7 @@ let llama_snapshot () =
       let open Llm_provider.Discovery in
       Some {
         discovered_model = (match ep.props with
-          | Some p when p.model <> "" -> Some p.model
+          | Some p when not (String.equal p.model "") -> Some p.model
           | _ -> (match ep.models with
                   | m :: _ -> Some m.id
                   | [] -> None));
@@ -210,7 +228,7 @@ let llama_snapshot () =
     auth_kind = "none";
     status;
     available;
-    supports_single_agent_run = available && models <> [];
+    supports_single_agent_run = available && Stdlib.List.length models > 0;
     default_model = default_model_for_provider "llama";
     models;
     source = "masc/local-runtime";
@@ -239,7 +257,7 @@ let provider_snapshot_of_adapter (adapter : Provider_adapter.adapter) =
     auth_kind = detail.auth_kind;
     status = detail.status;
     available = detail.available;
-    supports_single_agent_run = detail.supports_run && default_model <> None;
+    supports_single_agent_run = detail.supports_run && Option.is_some default_model;
     default_model;
     models = candidate_models_for_provider provider;
     source = "masc/provider-adapter";
@@ -252,8 +270,8 @@ let provider_snapshots () : provider_snapshot list =
   let managed =
     Provider_adapter.direct_adapters
     |> List.filter (fun (a : Provider_adapter.adapter) ->
-         a.runtime_kind <> Provider_adapter.Local
-         && a.default_model_id <> None)
+         not (Poly.equal a.runtime_kind Provider_adapter.Local)
+         && Option.is_some a.default_model_id)
     |> List.map provider_snapshot_of_adapter
   in
   llama_snapshot () :: managed
@@ -301,21 +319,21 @@ let provider_inventory_json () =
   let snapshots = provider_snapshots () in
   let local_models =
     snapshots
-    |> List.filter (fun snapshot -> snapshot.kind = "local")
+    |> List.filter (fun snapshot -> String.equal snapshot.kind "local")
     |> List.fold_left
          (fun acc snapshot -> acc + List.length snapshot.models)
          0
   in
   let cloud_models =
     snapshots
-    |> List.filter (fun snapshot -> snapshot.runtime_kind = "direct_api")
+    |> List.filter (fun snapshot -> String.equal snapshot.runtime_kind "direct_api")
     |> List.fold_left
          (fun acc snapshot -> acc + List.length snapshot.models)
          0
   in
   let cli_models =
     snapshots
-    |> List.filter (fun snapshot -> snapshot.runtime_kind = "cli_agent")
+    |> List.filter (fun snapshot -> String.equal snapshot.runtime_kind "cli_agent")
     |> List.fold_left
          (fun acc snapshot -> acc + List.length snapshot.models)
          0
@@ -373,12 +391,12 @@ let resolve_provider_run_request ~provider ~model_opt ~prompt =
                  "Provider '%s' requires an explicit model"
                  provider)
         | Some model ->
-            if snapshot.models <> [] && not (List.mem model snapshot.models) then
+            if Stdlib.List.length snapshot.models > 0 && not (List.mem model snapshot.models) then
               Error
                 (Printf.sprintf
                    "Model '%s' is not available for provider '%s'"
                    model provider)
-            else if String.trim prompt = "" then
+            else if String.equal (String.trim prompt) "" then
               Error "prompt is required"
             else
               Ok (snapshot, model))
@@ -510,7 +528,7 @@ let start_run ~sw ~net ~provider ~model_opt ~prompt =
             mark_failed
               (Printf.sprintf
                  "Dashboard single-agent run crashed: %s"
-                 (Printexc.to_string exn)));
+                 (Stdlib.Printexc.to_string exn)));
       Ok
         (`Assoc
           [

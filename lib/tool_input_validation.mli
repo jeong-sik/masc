@@ -1,3 +1,5 @@
+open Base
+
 (** Tool_input_validation — pre-dispatch input validation hook.
 
     Registers a {!Tool_dispatch.register_pre_hook} that runs the

@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 type report = {
   agent_name : string;
   client_name : string;
@@ -13,13 +31,13 @@ type report = {
 
 let trim_to_option value =
   let trimmed = String.trim value in
-  if trimmed = "" then None else Some trimmed
+  if String.equal trimmed "" then None else Some trimmed
 
 let stringish_member_opt json key =
   let open Yojson.Safe.Util in
   match json |> member key with
   | `String value -> trim_to_option value
-  | `Int value -> Some (string_of_int value)
+  | `Int value -> Some (Int.to_string value)
   | `Intlit value -> trim_to_option value
   | `Float value -> Some (Printf.sprintf "%.0f" value)
   | `Null -> None
@@ -36,11 +54,11 @@ let parse_timeout_ms json =
   | `Null -> None
   | `Int value -> Some (max 1 value)
   | `Intlit value -> (
-      int_of_string_opt (value))
+      Stdlib.int_of_string_opt (value))
   | _ -> None
 
 let report_of_yojson ?fallback_agent (json : Yojson.Safe.t) :
-    (report, string) result =
+    (report, string) Result.t =
   match json with
   | `Assoc _ -> (
       match required_member json "tool_name", required_member json "message" with
@@ -94,7 +112,7 @@ let details_json (report : report) =
   Failure_envelope.attach_to_details
     (`Assoc
       (List.filter_map
-         Fun.id
+         Stdlib.Fun.id
          [
            Some ("client_name", `String report.client_name);
            Some ("tool_name", `String report.tool_name);

@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 module StringMap = Map.Make (String)
 module StringSet = Set.Make (String)
 
@@ -232,7 +250,7 @@ let synonym_text name =
 (* ================================================================ *)
 
 let is_alnum c =
-  (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')
+  (match c with 'a'..'z' | '0'..'9' -> true | _ -> false)
 
 (** Tokenize text into lowercase alphanumeric words. *)
 let tokenize (text : string) : string list =
@@ -267,7 +285,7 @@ let build_document (schema : Types.tool_schema) : string list =
   let name_words =
     schema.name
     |> String.split_on_char '_'
-    |> List.filter (fun w -> w <> "masc" && w <> "")
+    |> List.filter (fun w -> not (String.equal w "masc") && not (String.equal w ""))
   in
   let desc_tokens = tokenize schema.description in
   let param_tokens =
@@ -320,7 +338,7 @@ let compute_idf (docs : string list list) : float StringMap.t =
     ) seen df
   ) StringMap.empty docs in
   StringMap.map (fun doc_freq ->
-    log (float_of_int (n + 1) /. float_of_int (doc_freq + 1)) +. 1.0
+    Stdlib.log (Stdlib.Float.of_int (n + 1) /. Stdlib.Float.of_int (doc_freq + 1)) +. 1.0
   ) df
 
 (** Build TF-IDF sparse vector for a document given IDF table. *)
@@ -328,7 +346,7 @@ let tfidf_vector (tokens : string list) (idf : float StringMap.t) : sparse_vec =
   let tf = term_freq tokens in
   let doc_len = max (List.length tokens) 1 in
   StringMap.fold (fun term count acc ->
-    let tf_val = float_of_int count /. float_of_int doc_len in
+    let tf_val = Stdlib.Float.of_int count /. Stdlib.Float.of_int doc_len in
     let idf_val = match StringMap.find_opt term idf with Some v -> v | None -> 1.0 in
     (term, tf_val *. idf_val) :: acc
   ) tf []
@@ -341,12 +359,12 @@ let cosine (a : sparse_vec) (b : sparse_vec) : float =
     | Some wb -> acc +. (wa *. wb)
     | None -> acc
   ) 0.0 a in
-  if dot = 0.0 then 0.0
+  if Stdlib.Float.compare dot 0.0 = 0 then 0.0
   else
-    let norm v = sqrt (List.fold_left (fun acc (_, w) -> acc +. (w *. w)) 0.0 v) in
+    let norm v = Stdlib.Float.sqrt (List.fold_left (fun acc (_, w) -> acc +. (w *. w)) 0.0 v) in
     let na = norm a in
     let nb = norm b in
-    if na = 0.0 || nb = 0.0 then 0.0
+    if Stdlib.Float.compare na 0.0 = 0 || Stdlib.Float.compare nb 0.0 = 0 then 0.0
     else dot /. (na *. nb)
 
 (* ================================================================ *)
@@ -356,7 +374,7 @@ let cosine (a : sparse_vec) (b : sparse_vec) : float =
 let filter_with_scores ~(tools : Types.tool_schema list) ~(query : string)
     ~(k : int) : (Types.tool_schema * float) list =
   let query_tokens = tokenize query in
-  if query_tokens = [] then []
+  if Stdlib.List.length query_tokens = 0 then []
   else
     let docs = List.map build_document tools in
     let idf = compute_idf (query_tokens :: docs) in
@@ -367,8 +385,8 @@ let filter_with_scores ~(tools : Types.tool_schema list) ~(query : string)
       (schema, score)
     ) tools tool_vecs in
     (* Filter zero-score results *)
-    let nonzero = List.filter (fun (_, s) -> s > 0.0) scored in
-    if nonzero = [] then []
+    let nonzero = List.filter (fun (_, s) -> Stdlib.Float.compare s 0.0 > 0) scored in
+    if Stdlib.List.length nonzero = 0 then []
     else
       let sorted = List.sort (fun (_, a) (_, b) -> Float.compare b a) nonzero in
       let rec take n = function

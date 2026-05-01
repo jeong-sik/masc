@@ -1,3 +1,5 @@
+open Base
+
 (** Tool_catalog_surfaces — SSOT for tool-name surface membership.
 
     Each {!surface} variant maps to a curated string list of tool

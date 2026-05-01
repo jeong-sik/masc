@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 (** Tool_args -- Tool-convention argument extraction wrappers over Safe_ops.
 
     All tool_*.ml files should [open Tool_args] instead of defining local helpers.
@@ -7,7 +25,7 @@
     [Safe_ops.json_TYPE ~default key args] (labeled, key first).
 
     {b Empty-string filtering}: [get_string_opt] treats [""] as [None],
-    matching the majority tool convention ([when s <> ""] guard).
+    matching the majority tool convention ([when not (String.equal s "")] guard).
 
     {b Error response format} (canonical):
     Use [error_response] and [ok_response] below for all new tool handlers.
@@ -112,7 +130,7 @@ let ok_result fields = (true, ok_response fields)
 (** Required non-empty string. Trims whitespace. *)
 let get_string_required args key =
   match Safe_ops.json_string_opt key args with
-  | Some s when String.trim s <> "" -> Ok (String.trim s)
+  | Some s when not (String.equal (String.trim s) "") -> Ok (String.trim s)
   | Some _ -> Error (error_response (Printf.sprintf "%s must not be empty" key))
   | None -> Error (error_response (Printf.sprintf "%s is required" key))
 
@@ -122,7 +140,7 @@ let get_int_required args key =
   | Some i -> Ok i
   | None -> Error (error_response (Printf.sprintf "%s is required" key))
 
-(** Monadic bind for [(ok, string) result] → [(bool * string)].
+(** Monadic bind for [(ok, string) Result.t] → [(bool * string)].
     Chains required field extractions with early error return. *)
 let ( let*! ) r f = match r with Ok v -> f v | Error e -> (false, e)
 
@@ -198,9 +216,9 @@ let validation_error_result errors = (false, validation_error_response errors)
     Use [validate_all] to collect multiple errors before returning. *)
 
 (** Validate that a string field is present and non-empty. *)
-let validate_string_required args field : (string, field_error) result =
+let validate_string_required args field : (string, field_error) Result.t =
   match Safe_ops.json_string_opt field args with
-  | Some s when String.trim s <> "" -> Ok (String.trim s)
+  | Some s when not (String.equal (String.trim s) "") -> Ok (String.trim s)
   | Some s ->
     Error { field; constraint_violated = Non_empty;
             message = Printf.sprintf "%s must not be empty" field;
@@ -212,7 +230,7 @@ let validate_string_required args field : (string, field_error) result =
             expected = Some "string"; received = None }
 
 (** Validate that an integer field is present. *)
-let validate_int_required args field : (int, field_error) result =
+let validate_int_required args field : (int, field_error) Result.t =
   match Safe_ops.json_int_opt field args with
   | Some i -> Ok i
   | None ->
@@ -221,22 +239,22 @@ let validate_int_required args field : (int, field_error) result =
             expected = Some "integer"; received = None }
 
 (** Validate that an integer field (if present) is within [min, max]. *)
-let validate_int_range args field ~min_v ~max_v ~default : (int, field_error) result =
+let validate_int_range args field ~min_v ~max_v ~default : (int, field_error) Result.t =
   let v = get_int args field default in
   if v < min_v then
     Error { field; constraint_violated = Min_int min_v;
             message = Printf.sprintf "%s must be >= %d" field min_v;
             expected = Some (Printf.sprintf ">= %d" min_v);
-            received = Some (string_of_int v) }
+            received = Some (Int.to_string v) }
   else if v > max_v then
     Error { field; constraint_violated = Max_int max_v;
             message = Printf.sprintf "%s must be <= %d" field max_v;
             expected = Some (Printf.sprintf "<= %d" max_v);
-            received = Some (string_of_int v) }
+            received = Some (Int.to_string v) }
   else Ok v
 
 (** Validate that a string field (if present) is one of allowed values. *)
-let validate_one_of args field ~allowed ~default : (string, field_error) result =
+let validate_one_of args field ~allowed ~default : (string, field_error) Result.t =
   let v = get_string args field default in
   if List.mem v allowed then Ok v
   else
@@ -247,7 +265,7 @@ let validate_one_of args field ~allowed ~default : (string, field_error) result 
 
 (** Collect all field errors from a list of validation results.
     Returns [Ok values] if all pass, [Error field_errors] otherwise. *)
-let validate_all (results : (unit, field_error) result list) : (unit, field_error list) result =
+let validate_all (results : (unit, field_error) Result.t list) : (unit, field_error list) Result.t =
   let errors = List.filter_map (function Error e -> Some e | Ok () -> None) results in
-  if errors = [] then Ok ()
+  if Stdlib.List.length errors = 0 then Ok ()
   else Error errors

@@ -1,3 +1,5 @@
+open Base
+
 (** Shared JSON Schema builder helpers for MCP tool definitions. *)
 
 val string_prop : string -> Yojson.Safe.t

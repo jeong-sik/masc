@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 module StringSet = Set.Make (String)
 module StringMap = Map.Make (String)
 
@@ -68,7 +86,7 @@ let latest_ts_of_entries entries =
   List.fold_left
     (fun acc json ->
       match ts_of_record json with
-      | Some ts when ts > 0.0 -> max_ts_opt acc ts
+      | Some ts when Stdlib.Float.compare ts 0.0 > 0 -> (match acc with | None -> Some ts | Some prev -> Some (Stdlib.Float.max prev ts))
       | _ -> acc)
     None entries
 
@@ -78,7 +96,7 @@ let freshness_fields ~now latest_ts =
     [
       ("latest_ts_unix", `Float ts);
       ("latest_ts_iso", `String (Types.iso8601_of_unix_seconds ts));
-      ("latest_age_s", `Float (max 0.0 (now -. ts)));
+      ("latest_age_s", `Float (Stdlib.Float.max 0.0 (now -. ts)));
     ]
   | None ->
     [
@@ -100,8 +118,8 @@ let source_health_fields ~now ~exists ~entry_count ~latest_ts ?coverage_gap () =
         match latest_ts with
         | None -> ("empty", "no_entries")
         | Some ts ->
-          let latest_age_s = max 0.0 (now -. ts) in
-          if latest_age_s > freshness_slo_s then
+          let latest_age_s = Stdlib.Float.max 0.0 (now -. ts) in
+          if Stdlib.Float.compare latest_age_s freshness_slo_s > 0 then
             ("stale", "freshness_slo_exceeded")
           else
             ("ok", "")
@@ -109,7 +127,7 @@ let source_health_fields ~now ~exists ~entry_count ~latest_ts ?coverage_gap () =
   [
     ("health", `String health);
     ( "stale_reason",
-      if stale_reason = "" then `Null else `String stale_reason );
+      if String.equal stale_reason "" then `Null else `String stale_reason );
   ]
 
 let coverage_gaps masc_root =
@@ -140,13 +158,13 @@ let record_coverage_gap ~masc_root ~durable_store ~stale_reason ?caller
   let context =
     [ tool_name; caller ]
     |> List.filter_map (function
-      | Some value when String.trim value <> "" -> Some value
+      | Some value when not (String.equal (String.trim value) "") -> Some value
       | _ -> None)
     |> String.concat "/"
   in
   let error =
-    if context = "" then Printexc.to_string exn
-    else Printf.sprintf "%s: %s" context (Printexc.to_string exn)
+    if String.equal context "" then Stdlib.Printexc.to_string exn
+    else Printf.sprintf "%s: %s" context (Stdlib.Printexc.to_string exn)
   in
   try
     Telemetry_coverage_gap.record
@@ -162,7 +180,7 @@ let record_coverage_gap ~masc_root ~durable_store ~stale_reason ?caller
   | Eio.Cancel.Cancelled _ as cancel -> raise cancel
   | gap_exn ->
     Log.Misc.warn "tool_usage_log: coverage gap append failed: %s"
-      (Printexc.to_string gap_exn)
+      (Stdlib.Printexc.to_string gap_exn)
 
 let count_entries store =
   try Dated_jsonl.count_entries store with
@@ -170,7 +188,7 @@ let count_entries store =
   | exn ->
     Log.Misc.warn "tool_usage_log: count failed for %s: %s"
       (Dated_jsonl.base_dir store)
-      (Printexc.to_string exn);
+      (Stdlib.Printexc.to_string exn);
     0
 
 let latest_ts store =
@@ -179,7 +197,7 @@ let latest_ts store =
   | exn ->
     Log.Misc.warn "tool_usage_log: latest read failed for %s: %s"
       (Dated_jsonl.base_dir store)
-      (Printexc.to_string exn);
+      (Stdlib.Printexc.to_string exn);
     None
 
 let init ?cluster_name ~base_path () =
@@ -194,7 +212,7 @@ let init ?cluster_name ~base_path () =
      store_ref := Some store
    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
      store_ref := None;
-     Log.Misc.warn "tool_usage_log: init failed: %s" (Printexc.to_string exn);
+     Log.Misc.warn "tool_usage_log: init failed: %s" (Stdlib.Printexc.to_string exn);
      record_coverage_gap
        ~masc_root
        ~durable_store:dir
@@ -211,7 +229,7 @@ let record_to_json ~tool_name ~success ~caller =
     ]
   in
   let fields = match caller with
-    | Some c when c <> "" && c <> "unknown" ->
+    | Some c when not (String.equal c "") && not (String.equal c "unknown") ->
         fields @ [("caller", `String c)]
     | _ -> fields
   in
@@ -228,7 +246,7 @@ let log_call ~tool_name ~success ~caller =
       (try Dated_jsonl.append store json
        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
          Log.Misc.warn "tool_usage_log: append failed for %s: %s"
-           tool_name (Printexc.to_string exn);
+           tool_name (Stdlib.Printexc.to_string exn);
          let durable_store = Dated_jsonl.base_dir store in
          record_coverage_gap
            ~masc_root:(Filename.dirname durable_store)

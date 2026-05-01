@@ -1,3 +1,5 @@
+open Base
+
 (** Tool_autoresearch_registry — loop registry, pending hypothesis
     queue, and per-loop code-generator override state for the
     autoresearch loop.
@@ -17,7 +19,7 @@
     [Tool_autoresearch_cycle] (which does
     [open Tool_autoresearch_registry]) can share a single name. *)
 
-val active_loops : (string, Autoresearch.loop_state) Hashtbl.t
+val active_loops : (string, Autoresearch.loop_state) Stdlib.Hashtbl.t
 (** Re-export of [Autoresearch.active_loops]. The dashboard's
     cancellation handler and the cycle runner both mutate this
     table directly. *)
@@ -27,7 +29,7 @@ val latest_loop_id : string option ref
     sets this on loop start; consumers read it for the "most
     recent loop" UI affordance. *)
 
-val pending_hypotheses : (string, string) Hashtbl.t
+val pending_hypotheses : (string, string) Stdlib.Hashtbl.t
 (** Per-loop queue of operator-injected hypotheses awaiting the
     next cycle. Keys are loop ids; values are the hypothesis
     text. The dashboard's cancellation handler clears entries
@@ -45,9 +47,9 @@ type code_generator =
   insights:string list ->
   target_file:string ->
   file_content:string ->
-  (string * string, string) result
+  (string * string, string) Result.t
 
-val custom_generators : (string, code_generator) Hashtbl.t
+val custom_generators : (string, code_generator) Stdlib.Hashtbl.t
 (** Per-loop override table. The dashboard's cancellation handler
     clears entries via [Hashtbl.remove]; the test suite resets
     the table between cases. *)

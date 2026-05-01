@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 (** Tool_library - Agent Knowledge Library operations
 
     Manages the personal knowledge base at ~/me/docs/library/
@@ -59,7 +77,7 @@ let string_contains ~sub s =
   else
     let rec check i =
       if i > s_len - sub_len then false
-      else if String.sub s i sub_len = sub then true
+      else if String.equal (Stdlib.String.sub s i sub_len) sub then true
       else check (i + 1)
     in
     check 0
@@ -93,7 +111,7 @@ let parse_frontmatter content =
   let lines = String.split_on_char '\n' content in
   let rec find_end acc = function
     | [] -> (List.rev acc, [])
-    | "---" :: rest when acc <> [] -> (List.rev acc, rest)
+    | "---" :: rest when Stdlib.List.length acc > 0 -> (List.rev acc, rest)
     | line :: rest -> find_end (line :: acc) rest
   in
   match lines with
@@ -105,26 +123,26 @@ let parse_frontmatter content =
         let pattern = name ^ ":" in
         List.find_map (fun line ->
           if String.length line > String.length pattern &&
-             String.sub line 0 (String.length pattern) = pattern then
+             String.equal (Stdlib.String.sub line 0 (String.length pattern)) pattern then
             Some (String.trim (String.sub line (String.length pattern)
                     (String.length line - String.length pattern)))
           else None
         ) yaml_lines |> Option.value ~default:""
       in
       let get_float name default =
-        Option.value ~default (float_of_string_opt (get_field name))
+        Option.value ~default (Stdlib.float_of_string_opt (get_field name))
       in
       let get_tags () =
         let raw = get_field "tags" in
         (* Parse [tag1, tag2] format *)
         let stripped = String.trim raw in
         if String.length stripped > 2 &&
-           stripped.[0] = '[' &&
-           stripped.[String.length stripped - 1] = ']' then
+           Char.equal stripped.[0] '[' &&
+           Char.equal stripped.[String.length stripped - 1] ']' then
           let inner = String.sub stripped 1 (String.length stripped - 2) in
           String.split_on_char ',' inner
           |> List.map String.trim
-          |> List.filter (fun s -> s <> "")
+          |> List.filter (fun s -> not (String.equal s ""))
         else []
       in
       Some {
@@ -144,7 +162,7 @@ let list_documents ?(include_candidates=false) () =
     if Sys.file_exists dir && Sys.is_directory dir then
       Sys.readdir dir
       |> Array.to_list
-      |> List.filter (fun f -> Filename.check_suffix f ".md" && f <> "SCHEMA.md")
+      |> List.filter (fun f -> Filename.check_suffix f ".md" && not (String.equal f "SCHEMA.md"))
       |> List.map (fun f -> Filename.concat dir f)
     else []
   in
@@ -177,7 +195,7 @@ let handle_list _ctx args =
           Some (sprintf "- %s (no frontmatter)" (Filename.basename path))
     with Sys_error _ -> None
   ) docs in
-  let output = if entries = [] then "No documents in library"
+  let output = if Stdlib.List.length entries = 0 then "No documents in library"
     else sprintf "## Library Documents (%d)\n\n%s" (List.length entries) (String.concat "\n" entries)
   in
   (true, output)
@@ -186,7 +204,7 @@ let handle_list _ctx args =
 let handle_read _ctx args =
   let topic = Yojson.Safe.Util.(member "topic" args |> to_string_option)
     |> Option.value ~default:"" in
-  if topic = "" then (false, "topic is required")
+  if String.equal topic "" then (false, "topic is required")
   else begin
     (* Find matching file *)
     let files = list_documents ~include_candidates:true () in
@@ -200,7 +218,7 @@ let handle_read _ctx args =
         try
           let content = In_channel.with_open_text path In_channel.input_all in
           (true, sprintf "## %s\n\n%s" (Filename.basename path) content)
-        with Eio.Cancel.Cancelled _ as e -> raise e | exn -> (false, sprintf "Read error: %s" (Printexc.to_string exn))
+        with Eio.Cancel.Cancelled _ as e -> raise e | exn -> (false, sprintf "Read error: %s" (Stdlib.Printexc.to_string exn))
   end
 
 (* Add document *)
@@ -213,8 +231,8 @@ let handle_add ctx args =
     with Yojson.Safe.Util.Type_error (_, _) -> [] in
   let content = U.member "content" args |> U.to_string_option |> Option.value ~default:"" in
 
-  if title = "" then (false, "title is required")
-  else if content = "" then (false, "content is required")
+  if String.equal title "" then (false, "title is required")
+  else if String.equal content "" then (false, "content is required")
   else begin
     (* Issue #8601: validate via Variant SSOT instead of List.mem on a
        hand-rolled string list. source_of_string_opt returns None for
@@ -228,13 +246,13 @@ let handle_add ctx args =
          (String.concat ", " valid_source_strings))
     | Some _ -> begin
       (* Determine destination based on confidence *)
-      let dest_dir = if confidence < library_confidence_threshold then candidates_dir () else library_root () in
+      let dest_dir = if Stdlib.Float.compare confidence library_confidence_threshold < 0 then candidates_dir () else library_root () in
       let date = Time_compat.now () |> Unix.localtime in
       let date_str = sprintf "%04d%02d%02d" (date.tm_year + 1900) (date.tm_mon + 1) date.tm_mday in
       let topic_slug = String.lowercase_ascii title
-        |> String.map (fun c -> if c = ' ' then '-' else c)
-        |> String.to_seq |> Seq.filter (fun c ->
-            (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c = '-')
+        |> String.map (fun c -> if Char.equal c ' ' then '-' else c)
+        |> Stdlib.String.to_seq |> Stdlib.Seq.filter (fun c ->
+            (match c with 'a'..'z' | '0'..'9' | '-' -> true | _ -> false))
         |> String.of_seq in
       let filename = sprintf "%s-%s.md" topic_slug date_str in
       let filepath = Filename.concat dest_dir filename in
@@ -261,9 +279,9 @@ verified_by: []
       (* Write file *)
       try
         Out_channel.with_open_text filepath (fun oc -> Out_channel.output_string oc full_content);
-        let status = if confidence < 0.5 then "candidate (needs verification)" else "library" in
+        let status = if Stdlib.Float.compare confidence 0.5 < 0 then "candidate (needs verification)" else "library" in
         (true, sprintf "Document added to %s: %s" status filepath)
-      with Eio.Cancel.Cancelled _ as e -> raise e | exn -> (false, sprintf "Write error: %s" (Printexc.to_string exn))
+      with Eio.Cancel.Cancelled _ as e -> raise e | exn -> (false, sprintf "Write error: %s" (Stdlib.Printexc.to_string exn))
     end
   end
 
@@ -274,8 +292,8 @@ let handle_promote ctx args =
   let new_confidence = Yojson.Safe.Util.(member "confidence" args |> to_float_option)
     |> Option.value ~default:0.7 in
 
-  if topic = "" then (false, "topic is required")
-  else if new_confidence < 0.5 then (false, "confidence must be >= 0.5 to promote")
+  if String.equal topic "" then (false, "topic is required")
+  else if Stdlib.Float.compare new_confidence 0.5 < 0 then (false, "confidence must be >= 0.5 to promote")
   else begin
     let topic_lower = String.lowercase_ascii topic in
     let candidates = list_documents ~include_candidates:true () |> List.filter (fun f ->
@@ -302,14 +320,14 @@ let handle_promote ctx args =
           Out_channel.with_open_text dest_path (fun oc -> Out_channel.output_string oc with_verifier);
           Sys.remove src_path;
           (true, sprintf "Promoted to library: %s (confidence: %.2f)" dest_path new_confidence)
-        with Eio.Cancel.Cancelled _ as e -> raise e | exn -> (false, sprintf "Promote error: %s" (Printexc.to_string exn))
+        with Eio.Cancel.Cancelled _ as e -> raise e | exn -> (false, sprintf "Promote error: %s" (Stdlib.Printexc.to_string exn))
   end
 
 (* Search documents *)
 let handle_search _ctx args =
   let query = Yojson.Safe.Util.(member "query" args |> to_string_option)
     |> Option.value ~default:"" in
-  if query = "" then (false, "query is required")
+  if String.equal query "" then (false, "query is required")
   else begin
     let query_lower = String.lowercase_ascii query in
     let docs = list_documents ~include_candidates:true () in
@@ -324,7 +342,7 @@ let handle_search _ctx args =
         else None
       with Sys_error _ -> None
     ) docs in
-    if matches = [] then (true, sprintf "No documents matching '%s'" query)
+    if Stdlib.List.length matches = 0 then (true, sprintf "No documents matching '%s'" query)
     else (true, sprintf "## Search Results (%d)\n\n%s" (List.length matches) (String.concat "\n" matches))
   end
 

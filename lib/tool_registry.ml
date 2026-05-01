@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 (** Tool Registry - In-memory call counters and usage statistics
 
     Provides fast O(1) in-memory tracking of tool call frequency.
@@ -150,7 +168,7 @@ let get_unused_since (cutoff : float) : string list =
   with_registry_ro (fun () ->
     Hashtbl.fold
       (fun name stats acc ->
-        if Atomic.get stats.last_called_at < cutoff then name :: acc else acc)
+        if Stdlib.Float.compare (Atomic.get stats.last_called_at) cutoff < 0 then name :: acc else acc)
       registry [])
   |> List.sort String.compare
 
@@ -245,7 +263,7 @@ let warm_up (summary : Telemetry_eio.tool_usage_summary) : int =
               deprecated_alias_count = Atomic.make 0;
               last_assignment_id = Atomic.make None;
             };
-          incr count))
+          Stdlib.incr count))
       summary.stats_by_tool);
   !count
 

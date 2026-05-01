@@ -1,3 +1,5 @@
+open Base
+
 (** Structured tool result type for MASC
 
     Replaces the untyped [(bool * string)] return convention with a

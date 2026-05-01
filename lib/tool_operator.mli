@@ -1,3 +1,5 @@
+open Base
+
 (** Tool_operator — MCP tools for operator control plane
     (snapshot / digest / action / confirm / judgment / surface
     audit).

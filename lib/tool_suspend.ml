@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 (** Tool_suspend - Agent suspension and circuit breaker tools
 
     Implements masc_suspend handler and circuit breaker check_can_join.
@@ -32,12 +50,12 @@ let check_blacklist ~agent_id =
     if Hashtbl.length blacklist > 32
     then
       Hashtbl.filter_map_inplace
-        (fun _id (until, reason) -> if now >= until then None else Some (until, reason))
+        (fun _id (until, reason) -> if Stdlib.Float.compare now until >= 0 then None else Some (until, reason))
         blacklist;
     match Hashtbl.find_opt blacklist agent_id with
     | None -> None
     | Some (until, reason) ->
-      if now >= until
+      if Stdlib.Float.compare now until >= 0
       then (
         Hashtbl.remove blacklist agent_id;
         None)
@@ -62,7 +80,7 @@ let force_leave config ~agent_id ~reason =
   (* Use update_state for atomic read-modify-write (same pattern as Coord.leave) *)
   let _ =
     Coord.update_state config (fun s ->
-      { s with Types.active_agents = List.filter (( <> ) agent_id) s.active_agents })
+      { s with Types.active_agents = List.filter (fun a -> not (String.equal a agent_id)) s.active_agents })
   in
   (* Broadcast the forced leave *)
   let message =
@@ -72,7 +90,7 @@ let force_leave config ~agent_id ~reason =
     ignore (Coord.broadcast config ~from_agent:"system" ~content:message)
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn -> Log.Misc.error "broadcast (force leave) exception: %s" (Printexc.to_string exn)
+  | exn -> Log.Misc.error "broadcast (force leave) exception: %s" (Stdlib.Printexc.to_string exn)
 ;;
 
 (** masc_suspend removed: pruned from surfaces. *)
@@ -93,7 +111,7 @@ let check_can_join ~agent_id =
     (* Also check circuit breaker *)
     Circuit_breaker.check_global ~agent_id
   | Some (until, reason) ->
-    let remaining = int_of_float (until -. Time_compat.now ()) in
+    let remaining = Stdlib.Int.of_float (until -. Time_compat.now ()) in
     Error
       (Printf.sprintf
          "Agent '%s' is suspended for %d more seconds. Reason: %s"

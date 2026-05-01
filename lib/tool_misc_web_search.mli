@@ -1,3 +1,5 @@
+open Base
+
 (** Tool_misc_web_search — Web search MCP tool with multi-provider
     fallback chain.
 
@@ -60,7 +62,7 @@ val provider_plan : unit -> string list
 
 (** {1 Validation + redaction} *)
 
-val validate_query : string -> (string, string) result
+val validate_query : string -> (string, string) Result.t
 (** [validate_query query] returns [Ok normalized] (whitespace
     collapsed) when:
 

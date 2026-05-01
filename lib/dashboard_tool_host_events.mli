@@ -1,3 +1,5 @@
+open Base
+
 (** Dashboard_tool_host_events — typed surface for the
     `client_tool_host_failure` HTTP report and the matching
     `tool_assigned` lifecycle event.
@@ -32,7 +34,7 @@ type report = {
 }
 
 val report_of_yojson :
-  ?fallback_agent:string -> Yojson.Safe.t -> (report, string) result
+  ?fallback_agent:string -> Yojson.Safe.t -> (report, string) Result.t
 (** [report_of_yojson ?fallback_agent json] parses a tool-host failure
     JSON payload.  Required fields: [tool_name], [message] (both
     extracted via stringish coercion — `String / `Int / `Intlit /

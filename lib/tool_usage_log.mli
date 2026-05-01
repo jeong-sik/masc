@@ -1,3 +1,5 @@
+open Base
+
 (** Tool_usage_log -- Durable call logging for System_internal surface tools.
 
     Persists tool invocations to [.masc/tool_usage/YYYY-MM/DD.jsonl] via

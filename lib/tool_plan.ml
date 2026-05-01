@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 (** Plan Tool Handlers
 
     Extracted from mcp_server_eio.ml for testability.
@@ -67,7 +85,7 @@ let handle_deliver ctx args : tool_result =
   | Error e -> (false, Printf.sprintf "❌ %s" e)
   | Ok task_id ->
   let content = get_string args "content" "" in
-  if String.trim content = "" then
+  if String.equal (String.trim content) "" then
     (false, "❌ content is required for masc_deliver")
   else
   let result = Planning_eio.set_deliverable ctx.config ~task_id ~content in
@@ -102,7 +120,7 @@ let handle_plan_get ctx args : tool_result =
 
 let handle_plan_set_task ctx args : tool_result =
   let task_id = get_string args "task_id" "" in
-  if task_id = "" then
+  if String.equal task_id "" then
     (false, "❌ task_id is required")
   else begin
     Planning_eio.set_current_task ctx.config ~task_id;

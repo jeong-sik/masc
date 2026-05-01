@@ -1,3 +1,5 @@
+open Base
+
 (** Tool_code_write — File write / edit / delete / shell / git
     MCP tools for keeper agents.
 
@@ -103,7 +105,7 @@ val validate_writable_path :
   agent_name:string ->
   Coord.config ->
   string ->
-  (string, Masc_error.t) result
+  (string, Masc_error.t) Result.t
 (** [validate_writable_path ~agent_name config path] is the
     write-side sandbox gate:
 
@@ -126,7 +128,7 @@ val validate_writable_path :
     legacy server operations. *)
 
 val validate_code_shell_command :
-  string -> (unit, string) result
+  string -> (unit, string) Result.t
 (** [validate_code_shell_command command] delegates to
     {!Worker_dev_tools.validate_command_coding_with_allowlist}
     with [~allow_pipes:true] and the pinned
@@ -169,7 +171,7 @@ val normalize_github_clone_url : string -> string
     Non-GitHub or malformed inputs are returned unchanged. *)
 
 val validate_clone_url :
-  base_path:string -> string -> (unit, string) result
+  base_path:string -> string -> (unit, string) Result.t
 (** [validate_clone_url ~base_path url] validates the URL
     against the resolved [tool_policy.toml] for [base_path]:
 
@@ -192,7 +194,7 @@ val validate_clone_cwd :
   agent_name:string ->
   Coord.config ->
   string ->
-  (string, Masc_error.t) result
+  (string, Masc_error.t) Result.t
 (** [validate_clone_cwd ~agent_name config cwd] gates the clone
     target directory:
 

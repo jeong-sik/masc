@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 (** Tool_task - Core task CRUD operations
 
     Handles: add_task, batch_add_tasks, cancel_task, claim, claim_next,
@@ -64,15 +82,15 @@ let verdict_to_string (result : Anti_rationalization.review_result) =
 (** True when both cascades are non-empty AND distinct.
 
     Must match {!Eval_calibration.calibration_stats} inclusion criteria
-    exactly (both [evaluator_cascade <> ""] and [generator_cascade <> ""])
+    exactly (both [not (String.equal evaluator_cascade "")] and [not (String.equal generator_cascade "")])
     so that a real-time SSE event and the aggregated cross_model_rate
     agree on which verdicts count as cross-model. *)
 let is_cross_model_verdict (result : Anti_rationalization.review_result) : bool =
   match result.generator_cascade with
   | None -> false
   | Some g ->
-    g <> ""
-    && result.evaluator_cascade <> ""
+    not (String.equal g "")
+    && not (String.equal result.evaluator_cascade "")
     && not (String.equal g result.evaluator_cascade)
 
 (** Build the [verdict_recorded] SSE payload for a finished review.
@@ -111,7 +129,7 @@ let build_verdict_sse_payload
 
 (** Validate task_id is non-empty. Prevents phantom operations on empty IDs. *)
 let validate_task_id task_id =
-  if task_id = "" then Error (Types.TaskNotFound "")
+  if String.equal task_id "" then Error (Types.TaskNotFound "")
   else Ok task_id
 
 let sync_planning_current_task_with_owned_task (ctx : context) =
@@ -121,7 +139,7 @@ let sync_planning_current_task_with_owned_task (ctx : context) =
     | Sys_error _ | Yojson.Json_error _ -> ctx.agent_name
     | exn ->
         Log.Task.warn "resolve_agent_name failed for %s: %s" ctx.agent_name
-          (Printexc.to_string exn);
+          (Stdlib.Printexc.to_string exn);
         ctx.agent_name
   in
   let matches_you assignee =
@@ -155,7 +173,7 @@ let keeper_agent_tool_names (ctx : context) =
     | exn ->
         Log.Task.warn "resolve_agent_name failed for keeper tool surface %s: %s"
           ctx.agent_name
-          (Printexc.to_string exn);
+          (Stdlib.Printexc.to_string exn);
         ctx.agent_name
   in
   [ ctx.agent_name; resolved ]
@@ -195,7 +213,7 @@ let review_completion_notes
         | exn ->
             Log.Harness.warn
               "[anti-rationalization] verdict sse broadcast failed: %s"
-              (Printexc.to_string exn))
+              (Stdlib.Printexc.to_string exn))
       in
       let few_shot_block =
         Eval_calibration.format_few_shot_block
@@ -225,7 +243,7 @@ let can_review_completion ~(task_opt : Types.task option) ~(agent_name : string)
 let persisted_completion_contract ~(task_opt : Types.task option) =
   match task_opt with
   | Some ({ contract = Some contract; _ } : Types.task)
-    when contract.completion_contract <> [] ->
+    when Stdlib.List.length contract.completion_contract > 0 ->
       Some contract.completion_contract
   | _ -> None
 
@@ -266,7 +284,7 @@ let parse_task_contract args =
   | _ -> Error "contract must be an object when provided"
 
 let is_internal_marker key =
-  String.length key > 0 && key.[0] = '_'
+  String.length key > 0 && Char.equal key.[0] '_'
 
 let unknown_args ~valid_keys args =
   match args with
@@ -290,7 +308,7 @@ let synthesize_summary_from_siblings args =
     match args |> member key with
     | `String s ->
         let trimmed = String.trim s in
-        if trimmed = "" then None else Some trimmed
+        if String.equal trimmed "" then None else Some trimmed
     | _ -> None
   in
   let first_line s =
@@ -320,11 +338,11 @@ let parse_handoff_context ~(agent_name : string) args =
       | Ok handoff_context ->
           let summary = String.trim handoff_context.summary in
           let summary =
-            if summary = "" then
+            if String.equal summary "" then
               Option.value ~default:"" (synthesize_summary_from_siblings args)
             else summary
           in
-          if summary = "" then
+          if String.equal summary "" then
             Error
               "handoff_context.summary is required (non-empty string). \
                Example: {\"summary\": \"tests green, PR #123 pending review\", \
@@ -431,7 +449,7 @@ let persisted_contract_rejection ~(ctx : context)
 let handle_add_task ctx args =
   let valid_keys = [ "title"; "priority"; "description"; "goal_id"; "contract" ] in
   let unknown = unknown_args ~valid_keys args in
-  if unknown <> [] then
+  if Stdlib.List.length unknown > 0 then
     ( false
     , Printf.sprintf
         "Unknown argument(s): %s. Valid: %s"
@@ -443,13 +461,13 @@ let handle_add_task ctx args =
   let description = get_string args "description" "" in
   let goal_id =
     match Safe_ops.json_string_opt "goal_id" args with
-    | Some s when String.trim s <> "" -> Some (String.trim s)
+    | Some s when not (String.equal (String.trim s) "") -> Some (String.trim s)
     | _ -> None
   in
   let contract_result = parse_task_contract args in
   (* BUG-009/010: Validate title and priority *)
   let trimmed_title = String.trim title in
-  if trimmed_title = "" then
+  if String.equal trimmed_title "" then
     (false, "Task title cannot be empty or whitespace-only")
   else if priority < 1 || priority > 5 then
     (false, Printf.sprintf "Priority must be between 1 and 5, got %d" priority)
@@ -474,7 +492,7 @@ let handle_batch_add_tasks ctx args =
     | `List l -> l
     | _ -> []
   in
-  if tasks_json = [] then
+  if Stdlib.List.length tasks_json = 0 then
     (false, "tasks array is empty or missing")
   else
   let validated = List.mapi (fun idx t ->
@@ -483,7 +501,7 @@ let handle_batch_add_tasks ctx args =
     let description = t |> member "description" |> to_string_option |> Option.value ~default:"" in
     let goal_id =
       match t |> member "goal_id" |> to_string_option with
-      | Some s when String.trim s <> "" -> Some (String.trim s)
+      | Some s when not (String.equal (String.trim s) "") -> Some (String.trim s)
       | _ -> None
     in
     let contract =
@@ -498,7 +516,7 @@ let handle_batch_add_tasks ctx args =
                    error))
       | _ -> Error (Printf.sprintf "item[%d]: contract must be an object" idx)
     in
-    if title = "" then
+    if String.equal title "" then
       Error (Printf.sprintf "item[%d]: title cannot be empty" idx)
     else if priority < 1 || priority > 5 then
       Error (Printf.sprintf "item[%d]: priority must be 1-5, got %d" idx priority)
@@ -522,7 +540,7 @@ let handle_batch_add_tasks ctx args =
       | Error error -> Error error
   ) tasks_json in
   let errors = List.filter_map (function Error e -> Some e | Ok _ -> None) validated in
-  if errors <> [] then
+  if Stdlib.List.length errors > 0 then
     (false, Printf.sprintf "Validation failed:\n%s" (String.concat "\n" errors))
   else
     let tasks =
@@ -532,9 +550,9 @@ let handle_batch_add_tasks ctx args =
       ~created_by:ctx.agent_name ctx.config tasks)
 
 let handle_claim ?agent_tool_names ctx args =
-  if not (try Coord.is_agent_joined ctx.config ~agent_name:ctx.agent_name with Sys_error _ | Not_found -> false) then
+  if not (try Coord.is_agent_joined ctx.config ~agent_name:ctx.agent_name with Sys_error _ | Stdlib.Not_found -> false) then
     result_to_response (Error (Types.AgentNotJoined ctx.agent_name))
-  else if args |> member "agent_role" <> `Null then
+  else if not (Poly.equal (args |> member "agent_role") `Null) then
     (false, "agent_role is no longer supported")
   else
   let task_id = get_string args "task_id" "" in
@@ -564,7 +582,7 @@ let handle_claim ?agent_tool_names ctx args =
   result_to_response result
 
 let handle_claim_next ?agent_tool_names ctx _args =
-  if not (try Coord.is_agent_joined ctx.config ~agent_name:ctx.agent_name with Sys_error _ | Not_found -> false) then
+  if not (try Coord.is_agent_joined ctx.config ~agent_name:ctx.agent_name with Sys_error _ | Stdlib.Not_found -> false) then
     (false, Printf.sprintf "Agent '%s' is not a member of this room" ctx.agent_name)
   else
   let agent_tool_names =
@@ -595,7 +613,7 @@ let handle_release ctx args =
   | Ok task_id ->
   let expected_version = get_int_opt args "expected_version" in
   let tasks = Coord.get_tasks_raw ctx.config in
-  let task_opt = List.find_opt (fun (t : Types.task) -> t.id = task_id) tasks in
+  let task_opt = List.find_opt (fun (t : Types.task) -> String.equal t.id task_id) tasks in
   let handoff_context = parse_handoff_context ~agent_name:ctx.agent_name args in
   (match handoff_context with
    | Error error -> (false, error)
@@ -646,7 +664,7 @@ and handle_cancel_task ctx args =
   | Ok task_id ->
   let reason = get_string args "reason" "" in
   let tasks = Coord.get_tasks_raw ctx.config in
-  let task_opt = List.find_opt (fun (t : Types.task) -> t.id = task_id) tasks in
+  let task_opt = List.find_opt (fun (t : Types.task) -> String.equal t.id task_id) tasks in
   let started_at_actual = match task_opt with
     | Some t -> (match t.task_status with
         | Types.InProgress { started_at; _ } ->
@@ -663,19 +681,19 @@ and handle_cancel_task ctx args =
        sync_keeper_current_task_binding ctx;
        sync_planning_current_task_with_owned_task ctx;
        let metric : Metrics_store_eio.task_metric = {
-         id = Printf.sprintf "metric-%s-%d" task_id (int_of_float (Time_compat.now () *. 1000.));
+         id = Printf.sprintf "metric-%s-%d" task_id (Stdlib.Int.of_float (Time_compat.now () *. 1000.));
          agent_id = ctx.agent_name;
          task_id;
          started_at = started_at_actual;
          completed_at = Some (Time_compat.now ());
          success = false;
-         error_message = Some (if reason = "" then "Cancelled" else reason);
+         error_message = Some (if String.equal reason "" then "Cancelled" else reason);
          collaborators = [];
          handoff_from = None;
          handoff_to = None;
        } in
        (try let _ = Metrics_store_eio.record ctx.config metric in ()
-        with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Task.error "Metrics_store_eio.record(cancel) failed: %s" (Printexc.to_string exn));
+        with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Task.error "Metrics_store_eio.record(cancel) failed: %s" (Stdlib.Printexc.to_string exn));
        (* Feed failure into Thompson Sampling quality signal *)
        Thompson_sampling.record_vote ~agent_name:ctx.agent_name ~direction:`Down;
        (* Prometheus: record task failure *)
@@ -698,7 +716,7 @@ and handle_transition ?agent_tool_names ctx args =
      propagation. They are consumed upstream in Agent_identity and must not
      trigger the strict-schema "Unknown argument(s)" rejection here. *)
   let is_internal_marker k =
-    String.length k > 0 && k.[0] = '_'
+    String.length k > 0 && Char.equal k.[0] '_'
   in
   (* Issue #8312: small LLM keepers and operator UIs frequently send
      - target-state aliases via [to] instead of canonical [action]
@@ -724,7 +742,7 @@ and handle_transition ?agent_tool_names ctx args =
       in
       let kvs =
         match List.find_opt (fun (k, _) -> String.equal k "pr_url") kvs with
-        | Some (_, `String pr_url) when pr_url <> "" ->
+        | Some (_, `String pr_url) when not (String.equal pr_url "") ->
             let kvs = List.filter (fun (k, _) -> not (String.equal k "pr_url")) kvs in
             let kvs =
               match List.find_opt (fun (k, _) -> String.equal k "notes") kvs with
@@ -754,7 +772,7 @@ and handle_transition ?agent_tool_names ctx args =
         kvs
     | _ -> []
   in
-  if unknown <> [] then
+  if Stdlib.List.length unknown > 0 then
     let names = String.concat ", " (List.map fst unknown) in
     (false, Printf.sprintf "Unknown argument(s): %s. Valid: %s"
       names (String.concat ", " transition_known_args))
@@ -764,7 +782,7 @@ and handle_transition ?agent_tool_names ctx args =
   | Error e -> result_to_response (Error e)
   | Ok task_id ->
   let action_raw = get_string args "action" "" in
-  if action_raw = "" then
+  if String.equal action_raw "" then
     (false, Printf.sprintf "action is required (%s)" (String.concat ", " Types.valid_task_action_strings))
   else
   match Types.task_action_of_string_lenient action_raw with
@@ -794,17 +812,17 @@ and handle_transition ?agent_tool_names ctx args =
     else false
   in
   let tasks = Coord.get_tasks_raw ctx.config in
-  let task_opt = List.find_opt (fun (t : Types.task) -> t.id = task_id) tasks in
+  let task_opt = List.find_opt (fun (t : Types.task) -> String.equal t.id task_id) tasks in
   match handoff_context with
   | Error error -> (false, error)
   | Ok handoff_context ->
-  if action = Types.Release && strict_release_requires_handoff task_opt
+  if Poly.equal action Types.Release && strict_release_requires_handoff task_opt
      && Option.is_none handoff_context
   then
     (false, "Strict task release requires handoff_context.summary")
   else
   let completion_state_error =
-    if action = Types.Done_action && not force then
+    if Poly.equal action Types.Done_action && not force then
       completion_state_error ~task_id ~agent_name:ctx.agent_name ~task_opt
     else
       None
@@ -818,7 +836,7 @@ and handle_transition ?agent_tool_names ctx args =
     force || can_review_completion ~task_opt ~agent_name:ctx.agent_name
   in
   let persisted_gate_rejection =
-    if action = Types.Done_action && not force then
+    if Poly.equal action Types.Done_action && not force then
       if not completion_owned_by_caller then
         None
       else if task_has_persisted_contract task_opt then
@@ -833,7 +851,7 @@ and handle_transition ?agent_tool_names ctx args =
     (false, reason)
   | None ->
   let review_gate_rejection =
-    if action = Types.Done_action && not force then
+    if Poly.equal action Types.Done_action && not force then
       if not completion_owned_by_caller then
         None
       else if can_review_completion ~task_opt ~agent_name:ctx.agent_name then
@@ -863,7 +881,7 @@ and handle_transition ?agent_tool_names ctx args =
      above; this replaces Gate 2.5 (substring match) with real
      measurement by the verifier. See issue #7598. *)
   let action =
-    if action = Types.Done_action
+    if Poly.equal action Types.Done_action
        && Env_config_runtime.Verification.fsm_enabled ()
        && completion_owned_by_caller
     then
@@ -871,7 +889,7 @@ and handle_transition ?agent_tool_names ctx args =
       | Some task ->
         (match task.contract with
          | Some contract
-           when contract.completion_contract <> [] || contract.required_evidence <> [] ->
+           when Stdlib.List.length contract.completion_contract > 0 || Stdlib.List.length contract.required_evidence > 0 ->
            Log.Task.info
              "[verifier-gate] redirecting Done→Submit_for_verification task=%s agent=%s contract_items=%d"
              task_id ctx.agent_name
@@ -886,11 +904,11 @@ and handle_transition ?agent_tool_names ctx args =
     | Some t -> (match t.task_status with
         | Types.InProgress { started_at; assignee } ->
             let ts = Types.parse_iso8601 ~default_time started_at in
-            let collabs = if assignee <> "" && assignee <> ctx.agent_name then [assignee] else [] in
+            let collabs = if not (String.equal assignee "") && not (String.equal assignee ctx.agent_name) then [assignee] else [] in
             (ts, collabs)
         | Types.Claimed { claimed_at; assignee } ->
             let ts = Types.parse_iso8601 ~default_time claimed_at in
-            let collabs = if assignee <> "" && assignee <> ctx.agent_name then [assignee] else [] in
+            let collabs = if not (String.equal assignee "") && not (String.equal assignee ctx.agent_name) then [assignee] else [] in
             (ts, collabs)
         | _ -> (default_time, []))
     | None -> (default_time, [])
@@ -901,7 +919,7 @@ and handle_transition ?agent_tool_names ctx args =
     | Error (Types.TaskInvalidState msg) ->
         let prefix = "Version mismatch" in
         String.length msg >= String.length prefix
-        && String.sub msg 0 (String.length prefix) = prefix
+        && String.equal (Stdlib.String.sub msg 0 (String.length prefix)) prefix
     | _ -> false
   in
   let prepare_verification_request =
@@ -1010,7 +1028,7 @@ and handle_transition ?agent_tool_names ctx args =
        (match action with
         | Types.Submit_for_verification ->
           let tasks = Coord.get_tasks_raw ctx.config in
-          (match List.find_opt (fun (t : Types.task) -> t.id = task_id) tasks with
+          (match List.find_opt (fun (t : Types.task) -> String.equal t.id task_id) tasks with
            | Some task ->
              let evidence_refs = match task.contract with
                | Some c -> c.verify_gate_evidence
@@ -1039,7 +1057,7 @@ and handle_transition ?agent_tool_names ctx args =
           if Env_config_runtime.Cdal.gate_enabled () then
             ignore (Cdal_verdict_gate.gate_check ~task_id ())
         | Types.Reject_verification ->
-          let reason = if notes <> "" then notes else reason in
+          let reason = if not (String.equal notes "") then notes else reason in
           let verification_id = Option.value ~default:"" verification_id_before in
           Verification_protocol.notify_reject_verification
             ~task_id ~verifier:ctx.agent_name ~verification_id ~reason;
@@ -1052,7 +1070,7 @@ and handle_transition ?agent_tool_names ctx args =
   (match result, action with
    | Ok _, Types.Done_action ->
        let metric : Metrics_store_eio.task_metric = {
-         id = Printf.sprintf "metric-%s-%d" task_id (int_of_float (Time_compat.now () *. 1000.));
+         id = Printf.sprintf "metric-%s-%d" task_id (Stdlib.Int.of_float (Time_compat.now () *. 1000.));
          agent_id = ctx.agent_name;
          task_id;
          started_at = started_at_actual;
@@ -1064,24 +1082,24 @@ and handle_transition ?agent_tool_names ctx args =
          handoff_to = None;
        } in
        (try let _ = Metrics_store_eio.record ctx.config metric in ()
-        with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Task.error "Metrics_store_eio.record(transition-done) failed: %s" (Printexc.to_string exn));
+        with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Task.error "Metrics_store_eio.record(transition-done) failed: %s" (Stdlib.Printexc.to_string exn));
        Thompson_sampling.record_vote ~agent_name:ctx.agent_name ~direction:`Up;
        Prometheus.record_task_completed ()
    | Ok _, Types.Cancel ->
        let metric : Metrics_store_eio.task_metric = {
-         id = Printf.sprintf "metric-%s-%d" task_id (int_of_float (Time_compat.now () *. 1000.));
+         id = Printf.sprintf "metric-%s-%d" task_id (Stdlib.Int.of_float (Time_compat.now () *. 1000.));
          agent_id = ctx.agent_name;
          task_id;
          started_at = started_at_actual;
          completed_at = Some (Time_compat.now ());
          success = false;
-         error_message = Some (if reason = "" then "Cancelled" else reason);
+         error_message = Some (if String.equal reason "" then "Cancelled" else reason);
          collaborators = collaborators_from_task;
          handoff_from = None;
          handoff_to = None;
        } in
        (try let _ = Metrics_store_eio.record ctx.config metric in ()
-        with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Task.error "Metrics_store_eio.record(transition-cancel) failed: %s" (Printexc.to_string exn));
+        with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Log.Task.error "Metrics_store_eio.record(transition-cancel) failed: %s" (Stdlib.Printexc.to_string exn));
        Thompson_sampling.record_vote ~agent_name:ctx.agent_name ~direction:`Down;
        Prometheus.record_task_failed ()
    | Ok _, (Types.Claim | Types.Start | Types.Submit_for_verification
@@ -1099,7 +1117,7 @@ let handle_tasks ctx args =
   let include_cancelled = get_bool args "include_cancelled" false in
   let status =
     match args |> member "status" with
-    | `String s when s <> "" -> Some s
+    | `String s when not (String.equal s "") -> Some s
     | _ -> None
   in
   (true, Coord.list_tasks ctx.config ~include_done ~include_cancelled ?status)
@@ -1114,8 +1132,8 @@ let task_history_events_json (config : Coord.config) ~task_id ~limit =
     let task = json |> member "task" |> to_string_option in
     let task_id_field = json |> member "task_id" |> to_string_option in
     match task, task_id_field with
-    | Some t, _ when t = task_id -> true
-    | _, Some t when t = task_id -> true
+    | Some t, _ when String.equal t task_id -> true
+    | _, Some t when String.equal t task_id -> true
     | _ -> false
   in
   let rec take n xs =

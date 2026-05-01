@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 type spec_entry = {
   name : string;
   path : string;
@@ -30,12 +48,12 @@ type tlc_result_entry = {
 
 let specs_dir () =
   match Sys.getenv_opt "MASC_SPECS_DIR" with
-  | Some p when p <> "" -> p
+  | Some p when not (String.equal p "") -> p
   | _ -> "specs"
 
 let tlc_results_dir () =
   match Sys.getenv_opt "MASC_TLC_RESULTS_DIR" with
-  | Some p when p <> "" -> p
+  | Some p when not (String.equal p "") -> p
   | _ -> Filename.get_temp_dir_name ()
 
 let category_of_subdir = function
@@ -127,20 +145,20 @@ let specs_json () : Yojson.Safe.t =
 
 let read_file_safe path =
   try
-    let ic = open_in_bin path in
-    Fun.protect
-      ~finally:(fun () -> close_in_noerr ic)
+    let ic = Stdlib.open_in_bin path in
+    Stdlib.Fun.protect
+      ~finally:(fun () -> Stdlib.close_in_noerr ic)
       (fun () ->
-         let len = in_channel_length ic in
-         really_input_string ic len)
+         let len = Stdlib.in_channel_length ic in
+         Stdlib.really_input_string ic len)
     |> fun contents -> Some contents
   with Sys_error _ | End_of_file -> None
 
 let normalize_int s =
-  String.to_seq s
-  |> Seq.filter (fun c -> c <> ',')
+  Stdlib.String.to_seq s
+  |> Stdlib.Seq.filter (fun c -> not (Char.equal c ','))
   |> String.of_seq
-  |> int_of_string_opt
+  |> Stdlib.int_of_string_opt
 
 let contains_substring needle haystack =
   let needle_len = String.length needle in
@@ -150,7 +168,7 @@ let contains_substring needle haystack =
   else
     let rec loop i =
       i + needle_len <= haystack_len
-      && (String.sub haystack i needle_len = needle || loop (i + 1))
+      && (String.equal (Stdlib.String.sub haystack i needle_len) needle || loop (i + 1))
     in
     loop 0
 
@@ -160,13 +178,13 @@ let split_lines text =
 let digit_token_to_int token =
   let cleaned =
     token
-    |> String.to_seq
-    |> Seq.filter (function
+    |> Stdlib.String.to_seq
+    |> Stdlib.Seq.filter (function
          | '0' .. '9' | ',' -> true
          | _ -> false)
     |> String.of_seq
   in
-  if cleaned = "" then None else normalize_int cleaned
+  if String.equal cleaned "" then None else normalize_int cleaned
 
 let ints_in_line line =
   line

@@ -1,15 +1,33 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 open Tool_call_quality_benchmark_types
 
 let avg_float values =
   match values with
   | [] -> 0.0
   | _ ->
-      List.fold_left ( +. ) 0.0 values /. float_of_int (List.length values)
+      List.fold_left ( +. ) 0.0 values /. Stdlib.Float.of_int (List.length values)
 
 let avg_int_option values =
   values
   |> List.filter_map (fun value -> value)
-  |> List.map float_of_int
+  |> List.map Stdlib.Float.of_int
   |> avg_float
 
 let avg_float_option values =
@@ -24,11 +42,11 @@ let percentile95_int_option values =
   | _ ->
       let n = List.length values in
       let idx =
-        int_of_float (Float.ceil (0.95 *. float_of_int n)) - 1
+        Stdlib.Int.of_float (Float.ceil (0.95 *. Stdlib.Float.of_int n)) - 1
         |> max 0 |> min (n - 1)
       in
       match List.nth_opt values idx with
-      | Some v -> float_of_int v
+      | Some v -> Stdlib.Float.of_int v
       | None -> 0.0
 
 let dedupe_keep_order items =
@@ -44,7 +62,7 @@ let dedupe_keep_order items =
 let normalize_string_list items =
   items
   |> List.map String.trim
-  |> List.filter (fun item -> item <> "")
+  |> List.filter (fun item -> not (String.equal item ""))
   |> dedupe_keep_order
 
 let model_label (run : evidence_run) = run.provider ^ ":" ^ run.model
@@ -95,7 +113,7 @@ let modal_ratio values =
       let best =
         Hashtbl.fold (fun _ count acc -> max acc count) counts 0
       in
-      Some (float_of_int best /. float_of_int (List.length values))
+      Some (Stdlib.Float.of_int best /. Stdlib.Float.of_int (List.length values))
 
 let tool_sequence (run : evidence_run) =
   run.tool_calls |> List.map (fun call -> call.tool_name)
@@ -117,7 +135,7 @@ let repeated_metrics_for_view view runs =
   let grouped = Hashtbl.create 16 in
   List.iter
     (fun run ->
-      if run.status = Run_ok then
+      if Poly.equal run.status Run_ok then
         let (provider, model, keeper_profile) = summary_key_of_run view run in
         let key = (provider, model, keeper_profile, run.case_id) in
         let current = Hashtbl.find_opt grouped key |> Option.value ~default:[] in
@@ -142,7 +160,7 @@ let repeated_metrics_for_view view runs =
         let pass_ratio =
           grouped_runs
           |> List.map (fun (run : evidence_run) ->
-                 Option.value ~default:false run.task_success |> string_of_bool)
+                 Option.value ~default:false run.task_success |> Bool.to_string)
           |> modal_ratio
         in
         let stability =
@@ -200,17 +218,17 @@ let build_summary_rows view runs scores =
         runs
         |> List.filter (fun run ->
                let run_key = summary_key_of_run view run in
-               run_key = key)
+               Poly.equal run_key key)
       in
       let grouped_scores_by_case = group_scores_by_case grouped_scores in
       let unsupported_runs =
         grouped_runs
-        |> List.filter (fun run -> run.status = Run_unsupported)
+        |> List.filter (fun run -> Poly.equal run.status Run_unsupported)
         |> List.length
       in
       let runtime_unreachable_runs =
         grouped_runs
-        |> List.filter (fun run -> run.status = Run_runtime_unreachable)
+        |> List.filter (fun run -> Poly.equal run.status Run_runtime_unreachable)
         |> List.length
       in
       let stability_score, tool_sequence_consistency_rate,
@@ -257,7 +275,7 @@ let build_summary_rows view runs scores =
             |> avg_float;
           avg_tool_calls =
             grouped_scores
-            |> List.map (fun (score : case_score) -> float_of_int score.tool_call_count)
+            |> List.map (fun (score : case_score) -> Stdlib.Float.of_int score.tool_call_count)
             |> avg_float;
           p95_latency_ms =
             grouped_scores |> List.map (fun (score : case_score) -> score.latency_ms)
@@ -300,17 +318,17 @@ let summarize ~cases ~runs ?model_filters ?keeper_filters () =
     |> List.filter_map (Tool_call_quality_benchmark_scoring.score_run ~cases)
   in
   let unsupported_runs =
-    filtered_runs |> List.filter (fun run -> run.status = Run_unsupported) |> List.length
+    filtered_runs |> List.filter (fun run -> Poly.equal run.status Run_unsupported) |> List.length
   in
   let runtime_unreachable_runs =
     filtered_runs
-    |> List.filter (fun run -> run.status = Run_runtime_unreachable)
+    |> List.filter (fun run -> Poly.equal run.status Run_runtime_unreachable)
     |> List.length
   in
   let unknown_case_runs =
     filtered_runs
     |> List.filter (fun run ->
-           run.status = Run_ok
+           Poly.equal run.status Run_ok
            && not (List.exists (fun case -> String.equal case.id run.case_id) cases))
     |> List.length
   in

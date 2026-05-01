@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 (** Tool_input_validation — Pre-dispatch validation via OAS Tool_middleware.
 
     Delegates to [Oas.Tool_middleware.make_validation_hook] for type
@@ -45,7 +63,7 @@ let strip_internal_marker_args (args : Yojson.Safe.t) : Yojson.Safe.t =
   | `Assoc fields ->
       `Assoc
         (List.filter
-           (fun (key, _) -> String.length key = 0 || key.[0] <> '_')
+           (fun (key, _) -> String.length key = 0 || not (Char.equal key.[0] '_'))
            fields)
   | _ -> args
 
@@ -76,7 +94,7 @@ let normalize_transition_args (args : Yojson.Safe.t) : Yojson.Safe.t =
           | Some (`String value) -> (Some (`String value), true)
           | _ -> (None, false)
       in
-      if action_override = None && notes_override = None then
+      if Option.is_none action_override && Option.is_none notes_override then
         args
       else
         let filtered =
@@ -120,14 +138,14 @@ let string_contains haystack needle =
   else
     let rec scan i =
       if i + nlen > hlen then false
-      else if String.sub haystack i nlen = needle then true
+      else if String.equal (Stdlib.String.sub haystack i nlen) needle then true
       else scan (i + 1)
     in
     scan 0
 
 let param_name_similarity a b =
   let la = String.lowercase_ascii a and lb = String.lowercase_ascii b in
-  if la = lb then 1.0
+  if String.equal la lb then 1.0
   else if string_contains la lb || string_contains lb la then
     (* one contained in the other — very likely the LLM confusion case *)
     0.8
@@ -139,7 +157,7 @@ let augment_missing_param_hint ~(args : Yojson.Safe.t) (oas_message : string) =
     | `Assoc fields -> List.map fst fields
     | _ -> []
   in
-  if arg_keys = [] then oas_message
+  if Stdlib.List.length arg_keys = 0 then oas_message
   else
     let suggestions =
       Re.all missing_field_re oas_message
@@ -151,7 +169,7 @@ let augment_missing_param_hint ~(args : Yojson.Safe.t) (oas_message : string) =
             List.filter_map
               (fun k ->
                 let s = param_name_similarity missing k in
-                if s >= 0.4 then Some (s, k) else None)
+                if Stdlib.Float.compare s 0.4 >= 0 then Some (s, k) else None)
               arg_keys
           in
           let sorted =
@@ -165,7 +183,7 @@ let augment_missing_param_hint ~(args : Yojson.Safe.t) (oas_message : string) =
                  closest missing)
           | [] -> None)
     in
-    if suggestions = [] then oas_message
+    if Stdlib.List.length suggestions = 0 then oas_message
     else oas_message ^ "\n\nDid you mean:\n" ^ String.concat "\n" suggestions
 
 let register_pre_hook () =

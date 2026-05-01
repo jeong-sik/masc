@@ -1,6 +1,6 @@
 ---
 status: runbook
-last_verified: 2026-04-23
+last_verified: 2026-05-01
 code_refs:
   - lib/provider_adapter.ml
   - lib/provider_adapter.mli
@@ -36,6 +36,18 @@ code_refs:
 | `codex` | `cli_agent` | `cli_cached_login` | Codex CLI runtime |
 | `gemini` | `cli_agent` | `cli_cached_login` | Gemini CLI runtime |
 | `kimi` | `cli_agent` | `cli_cached_login` | Kimi CLI runtime |
+
+## Voice Adapters
+
+| Canonical name | Runtime | Auth | Aliases | Notes |
+|---|---|---|---|---|
+| `voice-openai-compat` | `direct_api` | `none` | `openai_compat`, `openai`, `railway-elevenlabs-proxy` | OpenAI-compatible TTS endpoint; endpoint-specific `api_key_env` can override auth when required |
+| `elevenlabs-direct` | `direct_api` | `api_key` (`ELEVENLABS_API_KEY`) | `elevenlabs`, `tts-elevenlabs` | ElevenLabs direct TTS |
+| `voice-mcp` | `local` | `none` | `voice_mcp`, `mcp`, `local-voice-mcp` | Local voice MCP bridge |
+
+## Custom Endpoint
+
+`custom:model@url` 형식으로 임의의 OpenAI-compatible 엔드포인트를 지정할 수 있다. `direct_adapters`에 등록되지는 않지만, `custom` prefix는 별도 direct adapter 등록 없이도 항상 resolve되며 `local`/self-hosted runtime으로 취급된다.
 
 ## Direct API Policy
 

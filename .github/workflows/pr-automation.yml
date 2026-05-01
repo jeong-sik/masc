@@ -293,10 +293,11 @@ jobs:
                   ? `${latestCiGate.status}/${latestCiGate.conclusion || "none"} ${latestCiGate.html_url}`
                   : "missing";
                 // CI Gate may not exist yet immediately after auto-merge is enabled
-                // (CI workflow is still starting). Only block when the gate is known
+                // (CI workflow is still starting) or after a force-push (synchronize)
+                // that invalidates the previous gate. Only block when the gate is known
                 // to exist but failed, or when this is not the auto_merge_enabled event.
-                if (!latestCiGate && action === "auto_merge_enabled") {
-                  core.info(`CI Gate not yet present for head ${pr.head.sha}; skipping block on auto_merge_enabled event.`);
+                if (!latestCiGate && (action === "auto_merge_enabled" || action === "synchronize")) {
+                  core.info(`CI Gate not yet present for head ${pr.head.sha}; skipping block on ${action} event.`);
                 } else {
                   policyFailures.push(`CI Gate is not completed successfully for head ${pr.head.sha}: ${ciGateStatus}`);
                   shouldDisableAutoMerge = true;

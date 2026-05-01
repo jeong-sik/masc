@@ -8,6 +8,7 @@ describe('ThemeSwitch', () => {
   beforeEach(() => {
     delete document.documentElement.dataset.theme
     localStorage.clear()
+    window.history.replaceState(null, '', '/')
   })
 
   it('renders DARK label by default', () => {
@@ -24,16 +25,19 @@ describe('ThemeSwitch', () => {
     btn!.click()
     expect(document.documentElement.dataset.theme).toBe('paper')
     expect(localStorage.getItem('dashboardTheme')).toBe('paper')
+    expect(window.location.search).toContain('theme=paper')
   })
 
   it('toggles back to dark on second click', () => {
     document.documentElement.dataset.theme = 'paper'
+    window.history.replaceState(null, '', '/?theme=paper')
     const container = document.createElement('div')
     render(h(ThemeSwitch), container)
     const btn = container.querySelector('button')
     btn!.click()
     expect(document.documentElement.dataset.theme).toBeUndefined()
     expect(localStorage.getItem('dashboardTheme')).toBeNull()
+    expect(window.location.search).not.toContain('theme=paper')
   })
 
   it('has correct aria-label for default', () => {

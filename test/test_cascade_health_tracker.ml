@@ -6,8 +6,19 @@
 
 open Alcotest
 module H = Masc_mcp.Cascade_health_tracker
+module P = Masc_mcp.Prometheus
 
 let kind value = H.error_kind_of_string value
+
+let provider_block_metric_labels provider_key = [("provider", provider_key)]
+
+let provider_block_duration_sum provider_key =
+  P.metric_value_or_zero P.metric_keeper_provider_block_duration_sec
+    ~labels:(provider_block_metric_labels provider_key) ()
+
+let provider_block_duration_count provider_key =
+  P.metric_value_or_zero (P.metric_keeper_provider_block_duration_sec ^ "_count")
+    ~labels:(provider_block_metric_labels provider_key) ()
 
 let test_record_success_keeps_rate_1 () =
   let t = H.create () in
@@ -142,6 +153,56 @@ let test_evict_idle_returns_zero_when_all_active () =
   H.record_failure t ~provider_key:"b" ();
   check int "no eviction when all providers have recent events"
     0 (H.evict_idle t)
+
+(* ── Provider block duration histogram (P-DASH-13) ──────────── *)
+
+let test_provider_block_duration_observed_after_failure_threshold () =
+  let provider_key = "p-dash-13-failure-threshold" in
+  let t = H.create () in
+  check (float 0.001) "no histogram count before failures" 0.0
+    (provider_block_duration_count provider_key);
+  H.record_failure t ~provider_key ();
+  H.record_failure t ~provider_key ();
+  check (float 0.001) "below threshold does not observe cooldown" 0.0
+    (provider_block_duration_count provider_key);
+  H.record_failure t ~provider_key ();
+  check (float 0.001) "threshold observes exactly once" 1.0
+    (provider_block_duration_count provider_key);
+  check bool "recorded block duration is positive" true
+    (provider_block_duration_sum provider_key > 0.0)
+
+let test_provider_block_duration_observed_for_immediate_cooldowns () =
+  let t = H.create () in
+  let soft_provider = "p-dash-13-soft-rl" in
+  let hard_provider = "p-dash-13-hard-quota" in
+  let terminal_provider = "p-dash-13-terminal" in
+  H.record_soft_rate_limited t ~provider_key:soft_provider ~retry_after_s:30.0 ();
+  check (float 0.001) "soft 429 count" 1.0
+    (provider_block_duration_count soft_provider);
+  check (float 0.001) "soft 429 observes Retry-After seconds" 30.0
+    (provider_block_duration_sum soft_provider);
+  H.record_hard_quota t ~provider_key:hard_provider ();
+  check (float 0.001) "hard quota count" 1.0
+    (provider_block_duration_count hard_provider);
+  check bool "hard quota duration is long" true
+    (provider_block_duration_sum hard_provider > 300.0);
+  H.record_terminal_failure t ~provider_key:terminal_provider ();
+  check (float 0.001) "terminal failure count" 1.0
+    (provider_block_duration_count terminal_provider);
+  check bool "terminal failure duration is long" true
+    (provider_block_duration_sum terminal_provider > 300.0)
+
+let test_provider_block_duration_skips_non_extending_cooldown () =
+  let provider_key = "p-dash-13-no-shortening" in
+  let t = H.create () in
+  H.record_hard_quota t ~provider_key ();
+  let count_after_hard_quota = provider_block_duration_count provider_key in
+  let sum_after_hard_quota = provider_block_duration_sum provider_key in
+  H.record_soft_rate_limited t ~provider_key ();
+  check (float 0.001) "shorter cooldown does not add observation"
+    count_after_hard_quota (provider_block_duration_count provider_key);
+  check (float 0.001) "shorter cooldown does not add duration"
+    sum_after_hard_quota (provider_block_duration_sum provider_key)
 
 (* ── Hard_quota outcome (0.161.0) ──────────────────── *)
 
@@ -682,6 +743,14 @@ let () =
         test_evict_idle_drops_no_event_providers;
       test_case "all-active → no eviction" `Quick
         test_evict_idle_returns_zero_when_all_active;
+    ];
+    "provider_block_duration", [
+      test_case "failure threshold observes one block duration" `Quick
+        test_provider_block_duration_observed_after_failure_threshold;
+      test_case "immediate cooldown outcomes observe block durations" `Quick
+        test_provider_block_duration_observed_for_immediate_cooldowns;
+      test_case "non-extending cooldown does not double-count" `Quick
+        test_provider_block_duration_skips_non_extending_cooldown;
     ];
     "hard_quota", [
       test_case "single event trips immediate cooldown" `Quick

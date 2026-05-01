@@ -267,8 +267,8 @@ let dashboard_status_of_stop_reason = function
   | MutationBoundaryReached _ ->
       Dashboard_oas_bridge.Cancelled { reason = "mutation_boundary_reached" }
 
-let record_dashboard_oas_response ~config ~total_duration_ms ~status
-    (response : Oas.Types.api_response) =
+let record_dashboard_oas_response ~config ~total_duration_ms ?serialization_ms
+    ~status (response : Oas.Types.api_response) =
   try
     let provider_id = Provider_adapter.provider_label_of_config config.provider_cfg in
     let model_id =
@@ -276,7 +276,7 @@ let record_dashboard_oas_response ~config ~total_duration_ms ~status
       if response_model = "" then config.model_id else response_model
     in
     Dashboard_oas_bridge.record_response ~provider_id ~model_id
-      ~total_duration_ms ~status response
+      ~total_duration_ms ?serialization_ms ~status response
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->

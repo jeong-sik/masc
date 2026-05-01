@@ -290,6 +290,75 @@ let test_record_response_records_missing_usage_as_zero_sample () =
   | xs ->
       Alcotest.failf "expected one sample, got %d" (List.length xs)
 
+(* --- 12-signal coverage ratchet --- *)
+
+(** Verify that all 12 telemetry signals are present as keys in the JSON output
+    of [sample_to_yojson].  This ratchet fails CI if any signal is dropped from
+    the serialization layer. *)
+let expected_signal_keys =
+  [
+    "provider_id";
+    "model_id";
+    "ttfb_ms";
+    "total_duration_ms";
+    "serialization_ms";
+    "input_tokens";
+    "output_tokens";
+    "throughput_tokens_per_s";
+    "cost_usd";
+    "cache_hit";
+    "status";
+    "retry_count";
+  ]
+
+let test_twelve_signal_json_keys_all_present () =
+  let json = DOB.sample_to_yojson (make_sample ()) in
+  let keys =
+    match json with
+    | `Assoc pairs -> List.map fst pairs
+    | _ -> Alcotest.fail "expected Assoc"
+  in
+  List.iter
+    (fun expected_key ->
+      Alcotest.(check bool)
+        (Printf.sprintf "signal key '%s' present" expected_key)
+        true (List.mem expected_key keys))
+    expected_signal_keys;
+  Alcotest.(check int) "exactly 12 signal keys" 12 (List.length keys)
+
+let test_serialization_ms_propagates_through_sample_of_response () =
+  let usage = make_usage ~input:10 ~output:5 () in
+  let response = make_response ~usage () in
+  let sample =
+    DOB.sample_of_response ~provider_id:"openai_compat" ~model_id:"gpt-4"
+      ~serialization_ms:7.5 ~status:DOB.Success response
+  in
+  Alcotest.(check (float 1e-9)) "serialization_ms preserved" 7.5
+    sample.serialization_ms
+
+let test_serialization_ms_defaults_to_zero () =
+  let response = make_response () in
+  let sample =
+    DOB.sample_of_response ~provider_id:"anthropic" ~model_id:"claude"
+      ~status:DOB.Success response
+  in
+  Alcotest.(check (float 1e-9)) "serialization_ms defaults to 0" 0.0
+    sample.serialization_ms
+
+let test_record_response_serialization_ms_round_trips () =
+  setup ();
+  let response =
+    make_response ~telemetry:(make_telemetry ~request_latency_ms:100 ()) ()
+  in
+  DOB.record_response ~provider_id:"anthropic" ~model_id:"claude"
+    ~serialization_ms:3.14 ~status:DOB.Success response;
+  match DOB.recent ~provider:"anthropic" () with
+  | [ (sample, _) ] ->
+      Alcotest.(check (float 1e-9)) "serialization_ms round-trips" 3.14
+        sample.serialization_ms
+  | xs ->
+      Alcotest.failf "expected one sample, got %d" (List.length xs)
+
 let () =
   Alcotest.run "Dashboard_oas_bridge"
     [
@@ -329,5 +398,16 @@ let () =
             test_sample_of_response_derives_wall_throughput;
           Alcotest.test_case "missing usage records zero sample" `Quick
             test_record_response_records_missing_usage_as_zero_sample;
+        ] );
+      ( "twelve_signal_ratchet",
+        [
+          Alcotest.test_case "all 12 JSON keys present" `Quick
+            test_twelve_signal_json_keys_all_present;
+          Alcotest.test_case "serialization_ms via sample_of_response" `Quick
+            test_serialization_ms_propagates_through_sample_of_response;
+          Alcotest.test_case "serialization_ms defaults to zero" `Quick
+            test_serialization_ms_defaults_to_zero;
+          Alcotest.test_case "serialization_ms round-trips via record_response"
+            `Quick test_record_response_serialization_ms_round_trips;
         ] );
     ]

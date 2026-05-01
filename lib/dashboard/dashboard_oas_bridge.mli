@@ -74,12 +74,14 @@ val sample_of_response :
   provider_id:string ->
   model_id:string ->
   ?total_duration_ms:float ->
+  ?serialization_ms:float ->
   ?retry_count:int ->
   status:status ->
   Oas.Types.api_response ->
   sample
-(** [sample_of_response ~provider_id ~model_id ?total_duration_ms response]
-    projects an OAS [api_response] into the twelve-signal bridge sample.
+(** [sample_of_response ~provider_id ~model_id ?total_duration_ms
+    ?serialization_ms response] projects an OAS [api_response] into the
+    twelve-signal bridge sample.
 
     - [usage] fields become token, cost, and cache-hit signals.
     - [response.telemetry.request_latency_ms] is used as duration when the
@@ -87,6 +89,8 @@ val sample_of_response :
     - native decode throughput is preferred when OAS telemetry exposes it;
       otherwise wall-clock throughput is derived from output tokens and
       duration.
+    - [serialization_ms] carries request-serialize + response-parse overhead
+      measured at the adapter boundary; defaults to [0.0] when not provided.
 
     Missing OAS usage or telemetry is represented as zero-valued additive
     data rather than dropping the sample, so coverage gaps stay visible. *)
@@ -95,6 +99,7 @@ val record_response :
   provider_id:string ->
   model_id:string ->
   ?total_duration_ms:float ->
+  ?serialization_ms:float ->
   ?retry_count:int ->
   status:status ->
   Oas.Types.api_response ->

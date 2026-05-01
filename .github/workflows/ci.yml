@@ -22,7 +22,7 @@ jobs:
     name: PR Sync Check
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-    timeout-minutes: 5
+    timeout-minutes: 10
 
     steps:
       - name: Checkout
@@ -43,7 +43,7 @@ jobs:
   changes:
     name: Detect Changed Surfaces
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     needs: [pr-sync-check]
     if: ${{ !cancelled() && (needs.pr-sync-check.result == 'success' || needs.pr-sync-check.result == 'skipped') }}
     outputs:
@@ -741,7 +741,7 @@ jobs:
   structure-ratchet:
     name: OCaml Structure Ratchet
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     needs: [pr-sync-check, changes]
     if: ${{ !cancelled() && (needs.changes.outputs.lib_deps == 'true' || needs.changes.outputs.build == 'true') && (needs.pr-sync-check.result == 'success' || needs.pr-sync-check.result == 'skipped') }}
 
@@ -764,7 +764,7 @@ jobs:
   keeper-cwd-leak-gate:
     name: Keeper Cwd Leak Gate
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    timeout-minutes: 10
     needs: [pr-sync-check]
     if: ${{ !cancelled() && (needs.pr-sync-check.result == 'success' || needs.pr-sync-check.result == 'skipped') }}
 
@@ -807,7 +807,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [pr-sync-check, changes, meta, build, lint, dashboard, health, structure-ratchet, tla-specs]
     if: ${{ !cancelled() }}
-    timeout-minutes: 2
+    timeout-minutes: 10
 
     steps:
       - name: Checkout

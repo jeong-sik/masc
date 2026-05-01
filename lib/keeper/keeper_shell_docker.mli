@@ -78,6 +78,17 @@ val ensure_keeper_sandbox_runtime :
 val cmd_targets_git_or_gh : string -> bool
 val cmd_targets_gh : string -> bool
 
+(** Resolve raw [keeper_bash] git/gh commands launched from the sandbox
+    mount root. The mount root is not a git repository: a single cloned
+    repo is auto-selected, zero repos or multiple repos return a
+    self-correcting error that tells the keeper to set [cwd] explicitly. *)
+val resolve_sandbox_root_git_cwd :
+  config:Coord.config ->
+  meta:Keeper_types.keeper_meta ->
+  cwd:string ->
+  cmd:string ->
+  string * string option
+
 (** [#10855] LLM hallucinated [gh --repo X api Y] (108 events / 24h).
     Returns [Some (repo_arg, endpoint)] when the misuse pattern is
     detected, [None] otherwise — caller emits a self-correcting

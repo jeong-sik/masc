@@ -514,6 +514,10 @@ let docker_run_line log_path =
 
 let run_git_creds_docker_shell ~config ~meta ~playground ~log_path =
   ensure_github_identity_bundle ~config Masc_mcp.Keeper_gh_env.root_github_identity;
+  let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
+  ensure_dir repo;
+  if not (Sys.file_exists (Filename.concat repo ".git")) then
+    run_ok ~cwd:repo "git init -q";
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
@@ -545,6 +549,66 @@ let run_git_creds_docker_shell ~config ~meta ~playground ~log_path =
           (fst observed) (snd observed) (read_file log_path)
           result.Keeper_shell_docker.output;
       docker_run_line log_path
+
+let test_sandbox_root_git_cwd_zero_repo_blocks_before_exec () =
+  setup ~sandbox:Keeper_types.Docker
+  @@ fun ~config ~meta ~playground ->
+  let cwd, error =
+    Keeper_shell_docker.resolve_sandbox_root_git_cwd ~config ~meta
+      ~cwd:playground ~cmd:"git status"
+  in
+  Alcotest.(check string) "cwd remains sandbox root" playground cwd;
+  match error with
+  | None -> Alcotest.fail "expected missing repo guidance"
+  | Some msg ->
+    Alcotest.(check bool) "mentions no sandbox clones" true
+      (contains_substring msg "no sandbox git clones");
+    Alcotest.(check bool) "mentions git_clone recovery" true
+      (contains_substring msg "keeper_shell op=git_clone");
+    Alcotest.(check bool) "mentions cwd recovery" true
+      (contains_substring msg "cwd=\"repos/<repo>\"")
+
+let test_sandbox_root_git_cwd_single_repo_auto_chdir () =
+  setup ~sandbox:Keeper_types.Docker
+  @@ fun ~config ~meta ~playground ->
+  let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
+  ensure_dir repo;
+  run_ok ~cwd:repo "git init -q";
+  let cwd, error =
+    Keeper_shell_docker.resolve_sandbox_root_git_cwd ~config ~meta
+      ~cwd:playground ~cmd:"git status"
+  in
+  let repo =
+    Keeper_alerting_path.normalize_path_for_check repo
+    |> Keeper_alerting_path.strip_trailing_slashes
+  in
+  Alcotest.(check (option string)) "no error" None error;
+  Alcotest.(check string) "auto cwd selects the only repo" repo cwd
+
+let test_sandbox_root_git_cwd_multi_repo_blocks_before_exec () =
+  setup ~sandbox:Keeper_types.Docker
+  @@ fun ~config ~meta ~playground ->
+  let repos = Filename.concat playground "repos" in
+  let repo_a = Filename.concat repos "alpha" in
+  let repo_b = Filename.concat repos "beta" in
+  ensure_dir repo_a;
+  ensure_dir repo_b;
+  run_ok ~cwd:repo_a "git init -q";
+  run_ok ~cwd:repo_b "git init -q";
+  let cwd, error =
+    Keeper_shell_docker.resolve_sandbox_root_git_cwd ~config ~meta
+      ~cwd:playground ~cmd:"gh pr list"
+  in
+  Alcotest.(check string) "cwd remains sandbox root" playground cwd;
+  match error with
+  | None -> Alcotest.fail "expected multi repo cwd guidance"
+  | Some msg ->
+    Alcotest.(check bool) "mentions multiple repos" true
+      (contains_substring msg "multiple sandbox repos");
+    Alcotest.(check bool) "mentions concrete cwd" true
+      (contains_substring msg "\"cwd\": \"repos/alpha\"");
+    Alcotest.(check bool) "lists beta too" true
+      (contains_substring msg "alpha, beta")
 
 let test_git_creds_skips_missing_ssh_auth_sock () =
   with_fake_docker fake_docker_echo_script @@ fun () ->
@@ -795,5 +859,14 @@ let () =
             test_hard_mode_git_clone_uses_brokered_route;
           Alcotest.test_case "git_clone repairs existing docker clone checkout"
             `Quick test_git_clone_repairs_existing_docker_clone_checkout;
+          Alcotest.test_case
+            "sandbox-root git with no repo blocks before docker exec"
+            `Quick test_sandbox_root_git_cwd_zero_repo_blocks_before_exec;
+          Alcotest.test_case
+            "sandbox-root git with one repo auto-selects cwd"
+            `Quick test_sandbox_root_git_cwd_single_repo_auto_chdir;
+          Alcotest.test_case
+            "sandbox-root git with multiple repos gives cwd correction"
+            `Quick test_sandbox_root_git_cwd_multi_repo_blocks_before_exec;
         ] );
     ]

@@ -188,6 +188,63 @@ let cmd_targets_gh cmd =
     let tokens = String.split_on_char ' ' trimmed in
     List.exists (fun tok -> tok = "gh") tokens
 
+let resolve_sandbox_root_git_cwd ~(config : Coord.config)
+    ~(meta : keeper_meta) ~cwd ~cmd =
+  let host_root =
+    keeper_playground_root ~config ~meta
+    |> Keeper_alerting_path.normalize_path_for_check
+    |> Keeper_alerting_path.strip_trailing_slashes
+  in
+  let cwd_normalized =
+    Keeper_alerting_path.normalize_path_for_check cwd
+    |> Keeper_alerting_path.strip_trailing_slashes
+  in
+  let repos_in_playground () =
+    let repos_dir = Filename.concat host_root "repos" in
+    if not (Sys.file_exists repos_dir && Sys.is_directory repos_dir) then []
+    else
+      try
+        Sys.readdir repos_dir
+        |> Array.to_list
+        |> List.filter (fun name ->
+          let p = Filename.concat repos_dir name in
+          try
+            Sys.is_directory p
+            && Sys.file_exists (Filename.concat p ".git")
+          with Sys_error _ -> false)
+        |> List.sort compare
+      with Sys_error _ -> []
+  in
+  if cwd_normalized = host_root && cmd_targets_git_or_gh cmd then
+    match repos_in_playground () with
+    | [single_repo] ->
+      (Filename.concat (Filename.concat host_root "repos") single_repo, None)
+    | [] ->
+      ( cwd,
+        Some
+          (Printf.sprintf
+             "sandbox root cannot run git/gh: mount point %s is not a git repository and no sandbox git clones exist under repos/. First clone a repo with keeper_shell op=git_clone path=\"repos/<repo>\", then retry with cwd=\"repos/<repo>\" or cwd=\"repos/<repo>/.worktrees/<task>\"."
+             host_root) )
+    | example_repo :: _ as many ->
+      (* #10680: keeper-executor-agent saw 17 events / 5min in a single
+         session (mcp_VHsjtow_92C_2a0o, 2026-04-26 08:00→08:06) where
+         the LLM read this descriptive error and still re-issued the
+         same bare git/gh in the next turn. Make the message
+         self-correcting: include the original cmd and the exact
+         next-call shape so the LLM can copy-paste rather than
+         re-derive the cwd convention from prose. *)
+      let cmd_preview =
+        let s = String.trim cmd in
+        if String.length s > 120 then String.sub s 0 117 ^ "..." else s
+      in
+      ( cwd,
+        Some
+          (Printf.sprintf
+             "sandbox root cannot run git/gh: mount point %s is not a git repository and multiple sandbox repos exist. Set cwd explicitly before retrying. Example next call: keeper_bash { \"cmd\": %S, \"cwd\": \"repos/%s\" }. Available repos: %s. Do not retry the same cmd from sandbox root."
+             host_root cmd_preview example_repo (String.concat ", " many)) )
+  else
+    (cwd, None)
+
 (* #10855: keeper LLM (issue_king, masc-improver) hallucinated gh syntax
    `gh --repo X api Y` (108 events / 24h, 2026-04-25→04-26). gh CLI
    semantics: `--repo` is a subcommand flag (gh issue/pr/release/...),
@@ -318,56 +375,9 @@ let run_docker_shell_command_with_status
          (repos/ enumeration)로 결정론적 분기:
          - single-repo → 자동 chdir (silent)
          - multi-repo → explicit error로 LLM이 정확한 경로 학습
-         - 0 repo → preserve (system misconfig은 별도 fail) *)
-      let cwd_normalized =
-        Keeper_alerting_path.normalize_path_for_check cwd
-        |> Keeper_alerting_path.strip_trailing_slashes
-      in
-      let repos_in_playground () =
-        let repos_dir = Filename.concat host_root "repos" in
-        if not (Sys.file_exists repos_dir && Sys.is_directory repos_dir) then []
-        else
-          try
-            Sys.readdir repos_dir
-            |> Array.to_list
-            |> List.filter (fun name ->
-              let p = Filename.concat repos_dir name in
-              try Sys.is_directory p with Sys_error _ -> false)
-            |> List.sort compare
-          with Sys_error _ -> []
-      in
+         - 0 repo → explicit error로 clone/cwd 복구 액션 학습 *)
       let cwd, multi_repo_blocker =
-        if cwd_normalized = host_root && cmd_targets_git_or_gh cmd then
-          match repos_in_playground () with
-          | [single_repo] ->
-            (Filename.concat (Filename.concat host_root "repos") single_repo, None)
-          | [] -> (cwd, None)
-          | example_repo :: _ as many ->
-            (* #10680: keeper-executor-agent saw 17 events / 5min in a single
-               session (mcp_VHsjtow_92C_2a0o, 2026-04-26 08:00→08:06) where
-               the LLM read this descriptive error and still re-issued the
-               same bare git/gh in the next turn.  Make the message
-               self-correcting: include the original cmd and the exact
-               next-call shape so the LLM can copy-paste rather than
-               re-derive the cwd convention from prose. *)
-            let cmd_preview =
-              let s = String.trim cmd in
-              if String.length s > 120 then String.sub s 0 117 ^ "..." else s
-            in
-            ( cwd
-            , Some
-                (Printf.sprintf
-                   "sandbox root에서 git/gh 직접 호출 불가 \
-                    (mount point %s는 git repo 아님). \
-                    필수: 다음 호출에서 cwd를 명시. 예: \
-                    keeper_bash { cmd: \"cd repos/%s && %s\" } \
-                    (가능한 repo: %s). \
-                    같은 cmd를 다음 turn에서 cwd 변경 없이 다시 호출하지 마세요."
-                   host_root
-                   example_repo
-                   cmd_preview
-                   (String.concat ", " many)) )
-        else (cwd, None)
+        resolve_sandbox_root_git_cwd ~config ~meta ~cwd ~cmd
       in
       match multi_repo_blocker with
       | Some msg -> sandbox_error msg
@@ -524,6 +534,12 @@ let run_docker_with_git_bash
     (match check_egress ~config ~meta ~cmd with
      | Some blocked_json -> blocked_json
      | None ->
+    let cwd, sandbox_root_git_blocker =
+      resolve_sandbox_root_git_cwd ~config ~meta ~cwd ~cmd
+    in
+    match sandbox_root_git_blocker with
+    | Some message -> sandbox_error_json message
+    | None ->
     match turn_sandbox_runtime with
     | Some runtime ->
       (match
@@ -612,6 +628,12 @@ let run_docker_hardened_bash
     sandbox_error_json
       "sandbox_profile=docker blocks nested container runtimes and host socket references"
   else
+    let cwd, sandbox_root_git_blocker =
+      resolve_sandbox_root_git_cwd ~config ~meta ~cwd ~cmd
+    in
+    match sandbox_root_git_blocker with
+    | Some message -> sandbox_error_json message
+    | None ->
     match turn_sandbox_runtime, network_mode with
     | Some runtime, Network_none ->
       (match

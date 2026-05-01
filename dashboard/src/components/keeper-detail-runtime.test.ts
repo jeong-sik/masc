@@ -6,7 +6,10 @@ import '@testing-library/jest-dom'
 import type { DashboardMissionKeeperBrief, Keeper, KeeperConfig } from '../types'
 import {
   AllowlistPreview,
+  BudgetSourceBadge,
   RuntimeSignals,
+  budgetSourceLabel,
+  budgetSourceTone,
   filterSignalGroups,
   resolveAllowlistPreview,
   resolveKeeperCurrentTaskLabel,
@@ -227,6 +230,25 @@ describe('resolveAllowlistPreview', () => {
       visibleTools: [],
       hiddenCount: 2,
     })
+  })
+})
+
+describe('budget source badges', () => {
+  it.each([
+    ['env', 'neutral', 'env'],
+    ['override', 'warn', 'override'],
+    ['override_invalid', 'bad', 'invalid'],
+  ] as const)('maps %s to StatusChip tone %s', (source, tone, label) => {
+    expect(budgetSourceTone(source)).toBe(tone)
+    expect(budgetSourceLabel(source)).toBe(label)
+  })
+
+  it('renders through the shared StatusChip primitive', () => {
+    render(h(BudgetSourceBadge, { source: 'override_invalid' }))
+
+    const chip = screen.getByText('invalid').closest('[data-status-chip]')
+    expect(chip).toHaveAttribute('data-status-chip-tone', 'bad')
+    expect(chip).toHaveAttribute('data-status-chip-uppercase', 'true')
   })
 })
 

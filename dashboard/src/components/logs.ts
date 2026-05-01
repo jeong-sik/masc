@@ -9,6 +9,7 @@ import { Select } from './common/select'
 import { Checkbox } from './common/checkbox'
 import { createAsyncResource, loaded } from '../lib/async-state'
 import { toolCategory } from './tool-call-shared'
+import { StatusChip } from './common/status-chip'
 
 interface LogData {
   entries: LogEntry[]
@@ -30,7 +31,7 @@ let moduleDebounceTimer: ReturnType<typeof setTimeout> | null = null
 let latestRequestId = 0
 
 function MetaTag({ children }: { children: unknown }) {
-  return html`<span class="rounded-sm border border-[var(--white-10)] px-2 py-0.5 text-3xs text-[var(--color-fg-muted)]">${children}</span>`
+  return html`<${StatusChip} tone="neutral" uppercase=${false}>${children}</${StatusChip}>`
 }
 
 const LEVEL_COLORS: Record<string, string> = {
@@ -227,7 +228,7 @@ async function loadLogs(mode: LoadMode = 'reset') {
   }
 }
 
-function renderLogRow(entry: LogEntry) {
+export function renderLogRow(entry: LogEntry) {
   const level = normalizedLevel(entry)
   const rawLevelChanged = entry.raw_level && entry.raw_level !== level
   const source = entry.source || 'structured'
@@ -263,9 +264,7 @@ function renderLogRow(entry: LogEntry) {
         ${entry.module || '(root)'}
       </div>
       <div class="flex flex-wrap items-start gap-1">
-        <span class="rounded-sm border px-2 py-0.5 text-3xs uppercase tracking-1 ${sourceClass}">
-          ${sourceLabel(source)}
-        </span>
+        <${StatusChip} tone=${sourceClass}>${sourceLabel(source)}</${StatusChip}>
         ${entry.legacy_classified
           ? html`<${MetaTag}>classified</${MetaTag}>`
           : null}
@@ -273,10 +272,10 @@ function renderLogRow(entry: LogEntry) {
           ? html`<${MetaTag}>${entry.raw_level}</${MetaTag}>`
           : null}
         ${clientName
-          ? html`<span class="rounded-sm border border-[var(--color-accent-soft)] px-2 py-0.5 text-3xs text-[#dff3ff]">${clientName}</span>`
+          ? html`<${StatusChip} tone="border-[var(--color-accent-soft)] text-[#dff3ff]" uppercase=${false}>${clientName}</${StatusChip}>`
           : null}
         ${toolName
-          ? html`<span class="inline-flex items-center gap-1 rounded-sm border border-[var(--white-10)] px-2 py-0.5 text-3xs"><span class="font-mono font-bold ${toolCategory(toolName).color}">${toolCategory(toolName).icon}</span><span class="text-[var(--color-fg-muted)]">${toolName}</span></span>`
+          ? html`<${StatusChip} tone="neutral" uppercase=${false} class="gap-1"><span class="font-mono font-bold ${toolCategory(toolName).color}">${toolCategory(toolName).icon}</span><span>${toolName}</span></${StatusChip}>`
           : null}
         ${fixes
           ? html`<${MetaTag}>fixes ${fixes}</${MetaTag}>`
@@ -291,13 +290,13 @@ function renderLogRow(entry: LogEntry) {
           ? html`<${MetaTag}>session ${sessionId}</${MetaTag}>`
           : null}
         ${failure
-          ? html`<span class="rounded-sm border border-[rgba(224,80,80,0.24)] bg-[var(--brick-soft)] px-2 py-0.5 text-3xs text-[var(--bad-light)]">${failure.cause_code}</span>`
+          ? html`<${StatusChip} tone="bad" uppercase=${false}>${failure.cause_code}</${StatusChip}>`
           : null}
         ${failure
           ? html`<${MetaTag}>${failure.recoverability}</${MetaTag}>`
           : null}
         ${failure?.operator_action
-          ? html`<span class="rounded-sm border border-[var(--accent-20)] bg-[var(--accent-10)] px-2 py-0.5 text-3xs text-[#dff3ff]">next ${failure.operator_action}</span>`
+          ? html`<${StatusChip} tone="info" uppercase=${false}>next ${failure.operator_action}</${StatusChip}>`
           : null}
       </div>
       <div

@@ -9,6 +9,7 @@ import { fetchKeeperEval } from '../api/keeper'
 import type { KeeperEvalResponse, EvalSnapshot, EvalLayerResult } from '../api/keeper'
 import { ProgressBar } from './common/progress-bar'
 import { Eyebrow } from './common/eyebrow'
+import { StatusChip, type StatusChipTone } from './common/status-chip'
 
 // ── Per-keeper cached state ─────────────────────────────
 
@@ -70,17 +71,25 @@ function coverageTone(coverage: number): string {
   return 'border-[var(--bad-20)] bg-[var(--bad-6)]'
 }
 
-function baselineLabel(status: string | null): { text: string; cls: string } | null {
+export function evalPassTone(allPassed: boolean): StatusChipTone {
+  return allPassed ? 'ok' : 'bad'
+}
+
+function evalPassLabel(allPassed: boolean): string {
+  return allPassed ? 'ALL PASS' : 'FAIL'
+}
+
+export function baselineLabel(status: string | null): { text: string; tone: StatusChipTone } | null {
   if (!status) return null
   switch (status) {
     case 'Improved':
-      return { text: 'Improved', cls: 'text-[var(--color-status-ok)]' }
+      return { text: 'Improved', tone: 'ok' }
     case 'Regressed':
-      return { text: 'Regressed', cls: 'text-[var(--color-status-err)]' }
+      return { text: 'Regressed', tone: 'bad' }
     case 'Unchanged':
-      return { text: 'Unchanged', cls: 'text-[var(--color-fg-muted)]' }
+      return { text: 'Unchanged', tone: 'neutral' }
     default:
-      return { text: status, cls: 'text-[var(--color-fg-muted)]' }
+      return { text: status, tone: 'neutral' }
   }
 }
 
@@ -182,11 +191,10 @@ export function KeeperEvalQualityPanel({ keeperName }: { keeperName: string }) {
       <div class="flex items-center justify-between mb-3">
         <div class="flex items-center gap-2">
           <span class="text-3xs font-semibold tracking-1 uppercase text-[var(--color-fg-muted)]">평가 품질</span>
-          ${allPassed
-            ? html`<span class="inline-flex items-center py-0.5 px-1.5 rounded text-3xs font-semibold bg-[rgba(74,222,128,0.12)] text-[var(--color-status-ok)]">ALL PASS</span>`
-            : html`<span class="inline-flex items-center py-0.5 px-1.5 rounded text-3xs font-semibold bg-[var(--bad-12)] text-[var(--color-status-err)]">FAIL</span>`
-          }
-          ${baseline ? html`<span class="text-3xs font-medium ${baseline.cls}">${baseline.text}</span>` : null}
+          <${StatusChip} tone=${evalPassTone(allPassed)} class="font-semibold">${evalPassLabel(allPassed)}</${StatusChip}>
+          ${baseline
+            ? html`<${StatusChip} tone=${baseline.tone} uppercase=${false} class="font-medium">${baseline.text}</${StatusChip}>`
+            : null}
         </div>
         <button
           type="button"

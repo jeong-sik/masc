@@ -1,19 +1,38 @@
-// theme-sync.ts — Preact↔Bonsai theme sync via localStorage + URL hash
+// theme-sync.ts — Preact↔Bonsai theme sync via localStorage + URL search params
 //
 // Kimi design system sec08 8.2.2: bidirectional theme synchronization across surfaces.
+//
+// Theme is persisted in localStorage and optionally reflected in the URL
+// *search* params (?theme=...) so it does not interfere with the hash-based
+// router (router.ts canonicalises #<tab>?...).
 
 import type { ThemeId } from './use-theme'
 
 export const THEME_STORAGE_KEY = 'masc-theme-v2'
+export const THEME_SEARCH_PARAM = 'theme'
+
+/** @deprecated Use updateThemeSearchParam — writing to location.hash breaks hash-based routing. */
 export const THEME_HASH_PREFIX = '#theme='
 
-export function updateUrlHash(theme: ThemeId) {
-  const newHash = `${THEME_HASH_PREFIX}${theme}`
-  if (typeof location !== 'undefined' && location.hash !== newHash) {
-    history.replaceState(null, '', newHash)
+export function updateThemeSearchParam(theme: ThemeId) {
+  if (typeof location === 'undefined') return
+  const url = new URL(location.href)
+  if (url.searchParams.get(THEME_SEARCH_PARAM) !== theme) {
+    url.searchParams.set(THEME_SEARCH_PARAM, theme)
+    history.replaceState(null, '', url.toString())
   }
 }
 
+export function parseThemeFromSearch(search: string): ThemeId | null {
+  const sp = new URLSearchParams(search.replace(/^\?/, ''))
+  const theme = sp.get(THEME_SEARCH_PARAM)
+  if (theme === 'dark' || theme === 'light' || theme === 'dark-fantasy' || theme === 'paper') {
+    return theme
+  }
+  return null
+}
+
+/** @deprecated Use parseThemeFromSearch — theme is no longer stored in location.hash. */
 export function parseThemeFromHash(hash: string): ThemeId | null {
   if (hash.startsWith(THEME_HASH_PREFIX)) {
     const theme = hash.slice(THEME_HASH_PREFIX.length)
@@ -26,7 +45,7 @@ export function parseThemeFromHash(hash: string): ThemeId | null {
 
 export interface ThemeSyncListeners {
   onStorageChange?: (theme: ThemeId) => void
-  onHashChange?: (theme: ThemeId) => void
+  onSearchChange?: (theme: ThemeId) => void
 }
 
 export function syncThemeAcrossSurfaces(listeners?: ThemeSyncListeners) {
@@ -36,25 +55,25 @@ export function syncThemeAcrossSurfaces(listeners?: ThemeSyncListeners) {
     if (e.key === THEME_STORAGE_KEY && e.newValue) {
       const theme = e.newValue as ThemeId
       document.documentElement.setAttribute('data-theme', theme)
-      updateUrlHash(theme)
+      updateThemeSearchParam(theme)
       listeners?.onStorageChange?.(theme)
     }
   }
 
-  const handleHashChange = () => {
-    const theme = parseThemeFromHash(location.hash)
+  const handlePopState = () => {
+    const theme = parseThemeFromSearch(location.search)
     if (theme) {
       localStorage.setItem(THEME_STORAGE_KEY, theme)
       document.documentElement.setAttribute('data-theme', theme)
-      listeners?.onHashChange?.(theme)
+      listeners?.onSearchChange?.(theme)
     }
   }
 
   window.addEventListener('storage', handleStorage)
-  window.addEventListener('hashchange', handleHashChange)
+  window.addEventListener('popstate', handlePopState)
 
   return () => {
     window.removeEventListener('storage', handleStorage)
-    window.removeEventListener('hashchange', handleHashChange)
+    window.removeEventListener('popstate', handlePopState)
   }
 }

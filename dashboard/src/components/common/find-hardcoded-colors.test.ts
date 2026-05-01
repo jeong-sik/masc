@@ -30,6 +30,24 @@ describe('findHardcodedColorsInContent', () => {
     const results = findHardcodedColorsInContent('test.css', css)
     expect(results[0].color).toBe('#ff000080')
   })
+
+  it('finds 4-digit hex (RGBA shorthand)', () => {
+    const css = '.btn { color: #f0f8; }'
+    const results = findHardcodedColorsInContent('test.css', css)
+    expect(results[0].color).toBe('#f0f8')
+  })
+
+  it('does not match invalid 5-digit hex', () => {
+    const css = '.btn { color: #12345; }'
+    const results = findHardcodedColorsInContent('test.css', css)
+    expect(results).toHaveLength(0)
+  })
+
+  it('does not match invalid 7-digit hex', () => {
+    const css = '.btn { color: #1234567; }'
+    const results = findHardcodedColorsInContent('test.css', css)
+    expect(results).toHaveLength(0)
+  })
 })
 
 describe('findHardcodedColorsInFiles', () => {

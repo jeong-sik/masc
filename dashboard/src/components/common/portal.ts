@@ -12,18 +12,19 @@ interface PortalProps {
 }
 
 export function Portal({ children }: PortalProps) {
-  const [container] = useState(() => {
+  const [container, setContainer] = useState<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return
     const el = document.createElement('div')
     el.setAttribute('data-masc-portal', '')
     document.body.appendChild(el)
-    return el
-  })
-
-  useEffect(() => {
+    setContainer(el)
     return () => {
-      document.body.removeChild(container)
+      document.body.removeChild(el)
     }
-  }, [container])
+  }, [])
 
+  if (!container) return null
   return createPortal(children, container)
 }

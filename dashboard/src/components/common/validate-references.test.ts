@@ -44,4 +44,25 @@ describe('validateTokenReferences', () => {
     const report = validateTokenReferences([], [])
     expect(report.usageRate).toBe(0)
   })
+
+  it('does not count substring matches as token usage', () => {
+    // token "color" should NOT be marked used by "--color-bg" or "--color-surface"
+    const defined = ['color']
+    const files = [
+      { path: 'a.css', content: '.btn { color: var(--color-bg); --color-surface: red; }' },
+    ]
+    const report = validateTokenReferences(defined, files)
+    expect(report.unused).toEqual(['color'])
+    expect(report.usageRate).toBe(0)
+  })
+
+  it('correctly detects exact token match alongside longer names', () => {
+    const defined = ['color', 'color-bg']
+    const files = [
+      { path: 'a.css', content: '.btn { color: var(--color); background: var(--color-bg); }' },
+    ]
+    const report = validateTokenReferences(defined, files)
+    expect(report.unused).toEqual([])
+    expect(report.usageRate).toBe(1)
+  })
 })

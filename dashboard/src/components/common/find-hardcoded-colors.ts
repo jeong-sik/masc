@@ -8,7 +8,10 @@ export interface HardcodedColorMatch {
   line: number
 }
 
-const HEX_COLOR_REGEX = /#([0-9a-fA-F]{3,8})/g
+// Valid CSS hex color lengths are 3 (#RGB), 4 (#RGBA), 6 (#RRGGBB), 8 (#RRGGBBAA).
+// Lengths 5 and 7 are not valid CSS and would be false positives.
+// The negative lookahead ensures we don't partially match longer sequences.
+const HEX_COLOR_REGEX = /#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{4}|[0-9a-fA-F]{3})(?![0-9a-fA-F])/g
 const ALLOWED_COLORS = new Set(['transparent', 'inherit', 'currentColor', 'none'])
 
 export function findHardcodedColorsInContent(

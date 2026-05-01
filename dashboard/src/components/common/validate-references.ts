@@ -15,15 +15,21 @@ export function validateTokenReferences(
   sourceFiles: Array<{ path: string; content: string }>
 ): TokenReferenceReport {
   const usedTokens = new Set<string>()
+  const definedSet = new Set(definedTokens)
+
+  // Regex patterns to extract referenced token names from file content.
+  // Using matchAll avoids the O(files × tokens) nested loop and prevents
+  // substring false positives (e.g. token "color" matching "--color-bg").
+  const VAR_USAGE_RE = /var\(--([a-zA-Z0-9_-]+)\)/g
+  // Matches --token-name that is not part of a longer custom property name.
+  const PROP_USAGE_RE = /(?<![a-zA-Z0-9_-])--([a-zA-Z0-9_-]+)(?![a-zA-Z0-9_-])/g
 
   for (const file of sourceFiles) {
-    for (const token of definedTokens) {
-      if (
-        file.content.includes(`var(--${token})`) ||
-        file.content.includes(`--${token}`)
-      ) {
-        usedTokens.add(token)
-      }
+    for (const [, name] of file.content.matchAll(VAR_USAGE_RE)) {
+      if (definedSet.has(name)) usedTokens.add(name)
+    }
+    for (const [, name] of file.content.matchAll(PROP_USAGE_RE)) {
+      if (definedSet.has(name)) usedTokens.add(name)
     }
   }
 

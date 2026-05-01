@@ -41,16 +41,25 @@ describe('popLayer', () => {
     resetZIndexStack()
   })
 
-  it('decrements current max when popping top', () => {
+  it('restores previous max when popping top', () => {
     const z = pushLayer('modal') // 410
     popLayer(z)
-    expect(currentZIndexMax()).toBe(409)
+    // stack is empty — max returns to 0
+    expect(currentZIndexMax()).toBe(0)
   })
 
-  it('ignores pop of non-top z-index', () => {
+  it('restores correct previous max across layer gaps', () => {
+    const z1 = pushLayer('modal')    // 410
+    const z2 = pushLayer('tooltip')  // 600
+    popLayer(z2)
+    // should restore to 410, not 599
+    expect(currentZIndexMax()).toBe(z1)
+  })
+
+  it('allows popping a non-top entry without affecting the top', () => {
     const z1 = pushLayer('modal') // 410
     pushLayer('modal') // 411
-    popLayer(z1) // not the top
+    popLayer(z1) // remove 410 from middle of stack
     expect(currentZIndexMax()).toBe(411)
   })
 

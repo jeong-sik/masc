@@ -264,3 +264,6 @@ let score_run ~cases (run : evidence_run) =
               prompt_fingerprint = run.prompt_fingerprint;
               tool_sequence = tool_sequence run;
             }
+
+let to_reward_advice ~agent_name ?task_id score =
+  Reward_advice_artifact.of_benchmark_case_score ~agent_name ?task_id score

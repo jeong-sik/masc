@@ -1,6 +1,9 @@
-import { describe, expect, it } from 'vitest'
+// @vitest-environment happy-dom
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { render } from 'preact'
+import { html } from 'htm/preact'
 import type { MemoryKindUsageEntry } from '../api/keeper'
-import { filterMemoryKindUsage } from './keeper-memory-tier-panel'
+import { filterMemoryKindUsage, MemoryTierBadge } from './keeper-memory-tier-panel'
 
 const sample: MemoryKindUsageEntry[] = [
   { kind: 'tool_result', used: 10, cap: 10, priority: 1 },
@@ -62,5 +65,34 @@ describe('filterMemoryKindUsage', () => {
       { kind: 'b', used: 0, cap: 5, priority: 2 },
     ]
     expect(filterMemoryKindUsage(noneSaturated, '', 'saturated')).toEqual([])
+  })
+})
+
+describe('MemoryTierBadge', () => {
+  let container: HTMLElement
+
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+  })
+
+  afterEach(() => {
+    render(null, container)
+    document.body.removeChild(container)
+  })
+
+  it('renders memory tier labels through StatusChip without uppercasing', () => {
+    render(html`<${MemoryTierBadge}>KMC compacting<//>`, container)
+
+    const chip = container.querySelector('[data-status-chip]')
+    expect(chip?.textContent).toBe('KMC compacting')
+    expect(chip?.getAttribute('data-status-chip-tone')).toBe('neutral')
+    expect(chip?.getAttribute('data-status-chip-uppercase')).toBe('false')
+  })
+
+  it('passes through the compacting warning tone', () => {
+    render(html`<${MemoryTierBadge} tone="warn">compacting<//>`, container)
+
+    expect(container.querySelector('[data-status-chip]')?.getAttribute('data-status-chip-tone')).toBe('warn')
   })
 })

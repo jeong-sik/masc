@@ -12,6 +12,7 @@ import { InlineSpinner } from './common/inline-spinner'
 import { CytoscapeFsm } from './common/cytoscape-fsm'
 import { FilterChips } from './common/filter-chips'
 import { TextInput } from './common/input'
+import { StatusChip, type StatusChipTone } from './common/status-chip'
 import { buildCompactionSpec } from './keeper-fsm-specs'
 import { setupVisibleAutoRefresh } from '../lib/auto-refresh'
 
@@ -24,8 +25,14 @@ interface KeeperMemoryTierPanelProps {
 
 type MemoryTierFilter = 'all' | 'saturated'
 
-function Badge({ children }: { children: unknown }) {
-  return html`<span class="inline-flex items-center rounded-sm border border-[var(--white-8)] bg-[var(--white-4)] px-2 py-0.5">${children}</span>`
+export function MemoryTierBadge({
+  tone = 'neutral',
+  children,
+}: {
+  tone?: StatusChipTone
+  children: unknown
+}) {
+  return html`<${StatusChip} tone=${tone} uppercase=${false}>${children}</${StatusChip}>`
 }
 
 /**
@@ -149,13 +156,11 @@ export function KeeperMemoryTierPanel({
   return html`
     <div class="flex flex-col gap-3">
       <div class="flex flex-wrap items-center gap-2 text-3xs text-[var(--color-fg-disabled)]">
-        <${Badge}>total ${totalUsed} / ${totalCap}</${Badge}>
-        <${Badge}>${usage.length} kinds</${Badge}>
-        <${Badge}>KMC ${compactionStage}</${Badge}>
+        <${MemoryTierBadge}>total ${totalUsed} / ${totalCap}</${MemoryTierBadge}>
+        <${MemoryTierBadge}>${usage.length} kinds</${MemoryTierBadge}>
+        <${MemoryTierBadge}>KMC ${compactionStage}</${MemoryTierBadge}>
         ${isCompacting ? html`
-          <span class="inline-flex items-center rounded-sm border border-[rgba(251,191,36,0.3)] bg-[var(--warn-10)] px-2 py-0.5 text-[var(--amber-bright)]">
-            compacting
-          </span>
+          <${MemoryTierBadge} tone="warn">compacting</${MemoryTierBadge}>
         ` : null}
       </div>
 

@@ -14,6 +14,7 @@
 import { html } from 'htm/preact'
 import type { VNode } from 'preact'
 import { KeeperBadge } from './keeper-badge'
+import { MONO_STACK } from './common/font-stacks'
 
 export type SidebarRowStatus = 'running' | 'idle' | 'stalled' | 'fail' | 'pending'
 
@@ -31,7 +32,6 @@ export interface SidebarRowProps {
   ariaLabel?: string
 }
 
-const MONO_STACK = 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace'
 
 /** Pure: compose the SR sentence. Exposed for tests + parent strips. */
 export function sidebarRowAriaLabel(props: SidebarRowProps): string {

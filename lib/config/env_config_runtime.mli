@@ -256,6 +256,10 @@ end
 module Rate_bucket : sig
   val rate : float
   val burst : int
+  val agent_rate : float
+  (** Per-agent requests per second ([MASC_AGENT_RATE_LIMIT], default [20.0]). *)
+  val agent_burst : int
+  (** Per-agent burst capacity ([MASC_AGENT_RATE_BURST], default [50]). *)
 end
 
 (** {1 Worker / local runtime} *)
@@ -321,6 +325,7 @@ module InternalTimers : sig
   val provider_run_ttl_sec : float
   val stalled_session_threshold_sec : float
   val janitor_interval_sec : float
+  val repo_sync_interval_sec : float
   val rate_limit_bucket_ttl_sec : int
 end
 

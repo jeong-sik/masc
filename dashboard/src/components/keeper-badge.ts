@@ -11,6 +11,7 @@
 
 import { html } from 'htm/preact'
 import type { VNode } from 'preact'
+import { MONO_STACK } from './common/font-stacks'
 
 export interface KeeperRegistryEntry {
   slot: number
@@ -58,7 +59,6 @@ export function kSigil(id: string): string {
   return s.slice(0, 2).toUpperCase()
 }
 
-const MONO_STACK = 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace'
 const SANS_STACK = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif'
 const HEARTBEAT_EASING = 'cubic-bezier(0.4, 0, 0.2, 1)'
 

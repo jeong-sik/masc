@@ -120,6 +120,21 @@ let rate_limit_decay_base =
            (must be in (0.0, 1.0)), using default 0.5" raw;
         0.5
 
+let rate_limit_skip_after =
+  match Sys.getenv_opt "MASC_CASCADE_RATE_LIMIT_SKIP_AFTER" with
+  | None -> 3
+  | Some raw ->
+    let trimmed = String.trim raw in
+    if trimmed = "" then 3
+    else
+      match Safe_ops.int_of_string_safe trimmed with
+      | Some n when n >= 0 -> n
+      | _ ->
+        Log.Misc.warn
+          "Invalid int for MASC_CASCADE_RATE_LIMIT_SKIP_AFTER=%S, using default 3"
+          raw;
+        3
+
 let rate_limit_score_for_provider health ~provider_key =
   if rate_limit_recency_window_s <= 0.0 then 1.0
   else
@@ -131,6 +146,7 @@ let rate_limit_score_for_provider health ~provider_key =
         ~window_s:rate_limit_recency_window_s
     in
     if count <= 0 then 1.0
+    else if rate_limit_skip_after > 0 && count >= rate_limit_skip_after then 0.0
     else Float.pow rate_limit_decay_base (float_of_int count)
 
 type cycle_policy = {
@@ -264,11 +280,10 @@ let weighted_shuffle adapter ctx cands =
          {!rate_limit_recency_window_s} window.  Providers with no
          recent 429 hit get 1.0.
 
-     Cooled-down providers stay at 0 (multiplication preserves zero),
-     and the [max 1] guard prevents a slow-or-throttled-but-alive
-     provider from being zeroed out purely by these factors —
-     strategy gives it a chance each cycle, just with less probability
-     than its healthier peers. *)
+     Cooled-down providers stay at 0.  Latency never zeroes a provider,
+     but a sustained rate-limit burst may return [rl = 0.0] and remove
+     the provider for this ordering pass; otherwise the [max 1] guard
+     prevents tiny fractional weights from rounding to zero. *)
   let weighted = List.map
       (fun c ->
          let provider_key = adapter.health_key c in
@@ -281,7 +296,8 @@ let weighted_shuffle adapter ctx cands =
            else
              let lat = latency_score_for_provider ctx.health ~provider_key in
              let rl  = rate_limit_score_for_provider ctx.health ~provider_key in
-             max 1 (int_of_float (float_of_int ew *. lat *. rl))
+             if lat <= 0.0 || rl <= 0.0 then 0
+             else max 1 (int_of_float (float_of_int ew *. lat *. rl))
          in
          (c, final))
       cands

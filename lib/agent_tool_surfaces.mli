@@ -1,3 +1,22 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+module Random = Stdlib.Random
+
 (** Agent_tool_surfaces — lightweight internal tool surface
     definitions.
 
@@ -104,7 +123,7 @@ val select_public_local_worker_schemas :
 val resolve_named_schemas :
   Types.tool_schema list ->
   string list ->
-  (Types.tool_schema list, string) result
+  (Types.tool_schema list, string) Result.t
 (** [resolve_named_schemas all_schemas values] is the [Result]-
     typed sibling of {!lookup_schemas_by_name_exn}: returns
     [Error "unknown tool schema(s): <list>"] for missing names
@@ -113,7 +132,7 @@ val resolve_named_schemas :
 val local_worker_tool_schemas :
   ?names:string list ->
   unit ->
-  (Types.tool_schema list, string) result
+  (Types.tool_schema list, string) Result.t
 (** [local_worker_tool_schemas ?names ()] returns the full local-
     worker schema set when [names] is omitted, or the named
     subset when provided.  The full set is the deduped union of

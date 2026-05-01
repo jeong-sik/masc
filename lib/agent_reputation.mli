@@ -1,3 +1,22 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+module Random = Stdlib.Random
+
 (** Agent_reputation — Reputation scoring from existing JSONL data
 
     Computes agent reputation from task transitions, mention inbox,
@@ -27,13 +46,26 @@ type agent_reputation = {
   accountability_source: string; (** direct_agent | canonical_keeper_fallback | none *)
   accountability_source_label: string; (** Operator-facing provenance label. *)
   overall_score: float;       (** Weighted composite after accountability penalty, 0.0-1.0 *)
+  (* v2 multi-dimensional scores *)
+  execution_reliability: float;
+  (** Tool-call success rate from the v2 reputation ledger. 0.0–1.0.
+      Defaults to 1.0 when no v2 ledger events exist. *)
+  goal_adherence: float;
+  (** Proportion of completed goals that were on-topic and within budget. 0.0–1.0.
+      Defaults to 1.0 when no v2 ledger events exist. *)
+  safety_compliance: float;
+  (** Penalty-adjusted safety score; decreases with sandbox violations. 0.0–1.0.
+      Defaults to 1.0 when no v2 ledger events exist. *)
+  autonomy_level: string;
+  (** Derived operational envelope: "restricted" | "standard" | "elevated" | "full".
+      Advisory only until calibration Phase 5 is complete. *)
 }
 
 val agent_reputation_to_yojson : agent_reputation -> Yojson.Safe.t
 (** PPX-generated serializer. *)
 
 val agent_reputation_of_yojson :
-  Yojson.Safe.t -> (agent_reputation, string) result
+  Yojson.Safe.t -> (agent_reputation, string) Result.t
 (** PPX-generated deserializer.  Returns [Error msg] on parse failure. *)
 
 val default_reputation : agent_name:string -> agent_reputation

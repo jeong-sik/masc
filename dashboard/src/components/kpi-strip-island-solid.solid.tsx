@@ -14,8 +14,9 @@
 // captures `*.solid.tsx`, the rest stays on Preact.
 
 import { For, createSignal, type JSX, type Setter } from 'solid-js'
-import { KpiStrip, type KpiStripVariant } from './kpi-strip.solid'
-import { KpiCell, type KpiCellProps } from './kpi-cell.solid'
+import { KpiStrip } from './kpi-strip.solid'
+import { KpiCell } from './kpi-cell.solid'
+import { type KpiCellProps, type KpiStripVariant } from './kpi-shared'
 
 export interface KpiStripIslandData {
   ariaLabel: string

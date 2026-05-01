@@ -27,6 +27,7 @@
 
 import { html } from 'htm/preact'
 import type { ComponentChildren, VNode } from 'preact'
+import { MONO_STACK } from './common/font-stacks'
 
 export interface KvRowProps {
   /** Label text (rendered uppercase via the SPEC font rule). */
@@ -46,8 +47,6 @@ export interface KvRowProps {
   testId?: string
 }
 
-const MONO_STACK =
-  'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace'
 
 export function KvRow(props: KvRowProps): VNode {
   const wide = props.wide === true

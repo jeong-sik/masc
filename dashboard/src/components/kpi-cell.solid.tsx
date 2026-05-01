@@ -11,64 +11,22 @@
 import { Show, type JSX } from 'solid-js'
 import { Bar, type BarKind } from './bar.solid'
 import { useKpiStripContext } from './kpi-strip.solid'
+import {
+  kpiCellAriaLabel,
+  VALUE_COLOR_BY_KIND,
+  DELTA_COLOR_BY_DIRECTION,
+  MONO_STACK,
+  type KpiCellProps,
+  type KpiCellVariant,
+} from './kpi-shared'
 
-export type KpiCellVariant = 'standard' | 'compact' | 'stacked'
-
-export type KpiCellKind = 'ok' | 'warn' | 'err'
-
-export interface KpiCellDelta {
-  value: string
-  direction: 'pos' | 'neg'
-}
-
-export interface KpiCellProps {
-  label: string
-  value: string | number
-  caption?: string
-  live?: boolean
-  kind?: KpiCellKind
-  variant?: KpiCellVariant
-  delta?: KpiCellDelta
-  id?: string
-  bare?: boolean
-  testId?: string
-  progress?: number
-}
-
-export function kpiCellAriaLabel(props: KpiCellProps): string {
-  const live = props.live ? ' (live)' : ''
-  const delta = props.delta
-    ? `, ${props.delta.direction === 'pos' ? 'up' : 'down'} ${props.delta.value}`
-    : ''
-  const kind =
-    props.kind === 'ok'
-      ? ' (passing)'
-      : props.kind === 'err'
-        ? ' (failing)'
-        : props.kind === 'warn'
-          ? ' (warning)'
-          : ''
-  const cap = props.caption ? ` ${props.caption}` : ''
-  const prog =
-    props.progress != null
-      ? `, progress ${Math.round(Math.min(Math.max(props.progress, 0), 100))}%`
-      : ''
-  return `${props.label}: ${props.value}${cap}${delta}${prog}${kind}${live}`
-}
-
-const VALUE_COLOR_BY_KIND: Record<KpiCellKind, string> = {
-  ok: 'var(--color-status-ok)',
-  warn: 'var(--color-status-warn)',
-  err: 'var(--color-status-err)',
-}
-
-const DELTA_COLOR_BY_DIRECTION: Record<'pos' | 'neg', string> = {
-  pos: 'var(--color-status-ok)',
-  neg: 'var(--color-status-err)',
-}
-
-const MONO_STACK =
-  'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace'
+export {
+  kpiCellAriaLabel,
+  type KpiCellProps,
+  type KpiCellKind,
+  type KpiCellVariant,
+  type KpiCellDelta,
+} from './kpi-shared'
 
 const surfaceStyle: JSX.CSSProperties = {
   background: 'var(--bg-panel)',

@@ -6,6 +6,8 @@ import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { formatTimeAgo } from '../lib/format-time'
 import { FilterChips } from './common/filter-chips'
+import { PanelCard } from './common/panel-card'
+import { ProgressBar } from './common/progress-bar'
 import {
   groupCrashCohorts,
   filterCrashLog,
@@ -14,6 +16,10 @@ import {
 } from './keeper-supervisor-helpers'
 import type { Keeper, KeeperSupervisorCrashLogEntry } from '../types'
 
+function MutedLabel({ children }: { children: unknown }) {
+  return html`<span class="text-xs text-[var(--color-fg-muted)]">${children}</span>`
+}
+
 type CrashFilterKey = 'all' | CrashCategory
 
 // Module-level signals (per-keeper instance ok — panel only renders for active keeper).
@@ -21,18 +27,6 @@ const crashCategoryFilter = signal<CrashFilterKey>('all')
 const crashShowAll = signal<boolean>(false)
 
 // ── Helpers ──────────────────────────────────────────────
-
-function SectionCard({ title, children }: { title: string; children: preact.ComponentChildren }) {
-  return html`
-    <div class="p-5 rounded border border-card-border bg-card/40 backdrop-blur-sm shadow-sm transition-[border-color,box-shadow] duration-[var(--t-med)] hover:border-accent/30 hover:shadow-sm">
-      <div class="text-2xs font-semibold uppercase tracking-widest text-text-muted mb-4 flex items-center gap-2">
-        <span class="w-1.5 h-1.5 rounded-full bg-accent/50" aria-hidden="true"></span>
-        ${title}
-      </div>
-      ${children}
-    </div>
-  `
-}
 
 function registryStateBadge(state: string | null) {
   if (!state) return null
@@ -125,38 +119,36 @@ export function SupervisorDiagnosticsPanel({ keeper }: { keeper: Keeper }) {
     dead_eta_sec,
   } = diag
   const budgetPct = max_restarts > 0 ? Math.min(100, (restart_count / max_restarts) * 100) : 0
-  const budgetColor = budgetPct >= 80 ? 'var(--color-status-err)' : budgetPct >= 50 ? 'var(--amber-bright)' : 'var(--color-status-ok)'
+  const budgetFillClass = budgetPct >= 80 ? 'bg-[var(--color-status-err)]' : budgetPct >= 50 ? 'bg-[var(--amber-bright)]' : 'bg-[var(--color-status-ok)]'
   const hs = typeof health_score === 'number' ? health_score : 100
   const hsColor = hs >= 80 ? 'var(--color-status-ok)' : hs >= 50 ? 'var(--amber-bright)' : 'var(--color-status-err)'
   return html`
-    <${SectionCard} title="감독 진단">
+    <${PanelCard} title="감독 진단">
       <div class="space-y-3">
         <div class="flex items-center justify-between">
-          <span class="text-xs text-[var(--color-fg-muted)]">건강도</span>
+          <${MutedLabel}>건강도</${MutedLabel}>
           <span class="text-sm font-bold font-mono" style="color: ${hsColor}">${hs}</span>
         </div>
         <div class="flex items-center justify-between">
-          <span class="text-xs text-[var(--color-fg-muted)]">실행 상태</span>
+          <${MutedLabel}>실행 상태</${MutedLabel}>
           ${registryStateBadge(keeper.registry_state ?? null)}
         </div>
         <div>
           <div class="flex items-center justify-between mb-1">
-            <span class="text-xs text-[var(--color-fg-muted)]">재시작 예산</span>
+            <${MutedLabel}>재시작 예산</${MutedLabel}>
             <span class="text-xs font-mono text-[var(--color-fg-primary)]">${restart_count}/${max_restarts}</span>
           </div>
-          <div class="w-full h-1.5 rounded-sm bg-[var(--white-5)] overflow-hidden">
-            <div class="h-full rounded-sm transition-all duration-300" style="width: ${budgetPct}%; background: ${budgetColor}"></div>
-          </div>
+          <${ProgressBar} pct=${budgetPct} size="sm" class=${budgetFillClass} />
         </div>
         ${typeof dead_eta_sec === 'number' && dead_eta_sec > 0 && dead_since == null ? html`
           <div class="flex items-center justify-between">
-            <span class="text-xs text-[var(--color-fg-muted)]">종료 예상</span>
+            <${MutedLabel}>종료 예상</${MutedLabel}>
             <span class="text-2xs font-mono" style="color: ${budgetPct >= 50 ? 'var(--amber-bright)' : 'var(--color-fg-primary)'}">${dead_eta_sec >= 3600 ? (dead_eta_sec / 3600).toFixed(1) + 'h' : (dead_eta_sec / 60).toFixed(0) + 'm'} 후</span>
           </div>
         ` : null}
         ${last_failure_reason ? html`
           <div class="flex items-center justify-between">
-            <span class="text-xs text-[var(--color-fg-muted)]">마지막 실패 원인</span>
+            <${MutedLabel}>마지막 실패 원인</${MutedLabel}>
             <span class="text-2xs font-mono text-[var(--rose-light)]">${last_failure_reason}</span>
           </div>
         ` : null}

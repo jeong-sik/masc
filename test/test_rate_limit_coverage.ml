@@ -8,6 +8,13 @@
 open Alcotest
 
 module Rate_limit = Masc_mcp.Rate_limit
+module Server_auth = Masc_mcp.Server_auth
+
+let unique_key prefix =
+  Printf.sprintf "%s_%d" prefix (Unix.getpid ())
+
+let comma_header_values value =
+  List.map String.trim (String.split_on_char ',' value)
 
 (* ============================================================
    Constants Tests
@@ -287,6 +294,17 @@ let test_too_many_requests_body () =
     (try let _ = Str.search_forward (Str.regexp "Too Many Requests") body 0 in true
      with Not_found -> false)
 
+let test_cors_exposes_rate_limit_headers () =
+  let hdrs = Server_auth.cors_headers "http://localhost:5173" in
+  match List.assoc_opt "access-control-expose-headers" hdrs with
+  | None -> fail "expected access-control-expose-headers"
+  | Some exposed ->
+      let names = comma_header_values exposed in
+      check bool "exposes rate limit limit" true
+        (List.mem "X-RateLimit-Limit" names);
+      check bool "exposes rate limit remaining" true
+        (List.mem "X-RateLimit-Remaining" names)
+
 (* ============================================================
    key_of_sockaddr Tests
    ============================================================ *)
@@ -333,6 +351,156 @@ let test_headers_global_has_remaining () =
   let hdrs = Rate_limit.headers_global ~key:"global_hdr_test_new" in
   check bool "has X-RateLimit-Remaining" true
     (List.mem_assoc "X-RateLimit-Remaining" hdrs)
+
+(* ============================================================
+   Per-Agent Configuration Tests
+   ============================================================ *)
+
+let test_default_agent_rate () =
+  check (float 0.001) "default agent rate" 20.0 Rate_limit.default_agent_rate
+
+let test_default_agent_burst () =
+  check int "default agent burst" 50 Rate_limit.default_agent_burst
+
+let test_agent_rate_from_env_returns_float () =
+  let rate = Rate_limit.agent_rate_from_env () in
+  check bool "agent rate is positive" true (rate > 0.0)
+
+let test_agent_burst_from_env_returns_int () =
+  let burst = Rate_limit.agent_burst_from_env () in
+  check bool "agent burst is positive" true (burst > 0)
+
+let test_create_agent_from_env () =
+  let limiter = Rate_limit.create_agent_from_env () in
+  check bool "agent rate positive" true ((Rate_limit.rate limiter) > 0.0);
+  check bool "agent burst positive" true ((Rate_limit.burst limiter) > 0)
+
+(* ============================================================
+   Per-Agent Global Instance Tests
+   ============================================================ *)
+
+let test_check_agent_global () =
+  let key = unique_key "agent_global_check" in
+  let before = Rate_limit.remaining_agent_global ~key in
+  check bool "fresh key has agent budget" true (before > 0);
+  check bool "fresh key allowed" true (Rate_limit.check_agent_global ~key);
+  let after = Rate_limit.remaining_agent_global ~key in
+  check int "agent budget decremented" (before - 1) after
+
+let test_remaining_agent_global () =
+  let rem = Rate_limit.remaining_agent_global ~key:"agent_global_new_key" in
+  check bool "agent global remaining non-negative" true (rem >= 0)
+
+let test_headers_agent_global_has_limit () =
+  let hdrs = Rate_limit.headers_agent_global ~key:"agent_hdr_test" in
+  check bool "has X-RateLimit-Limit" true
+    (List.mem_assoc "X-RateLimit-Limit" hdrs)
+
+let test_headers_agent_global_has_remaining () =
+  let hdrs = Rate_limit.headers_agent_global ~key:"agent_hdr_test_new" in
+  check bool "has X-RateLimit-Remaining" true
+    (List.mem_assoc "X-RateLimit-Remaining" hdrs)
+
+let test_agent_limiter_separate_from_global () =
+  let key = unique_key "shared_global_agent" in
+  let agent_before = Rate_limit.remaining_agent_global ~key in
+  let global_before = Rate_limit.remaining_global ~key in
+  check bool "fresh agent key has budget" true (agent_before > 0);
+  check bool "fresh global key has budget" true (global_before > 0);
+
+  check bool "agent global allows shared key" true
+    (Rate_limit.check_agent_global ~key);
+  check int "agent budget decremented" (agent_before - 1)
+    (Rate_limit.remaining_agent_global ~key);
+  check int "global budget untouched by agent limiter" global_before
+    (Rate_limit.remaining_global ~key);
+
+  check bool "global allows shared key" true (Rate_limit.check_global ~key);
+  check int "global budget decremented" (global_before - 1)
+    (Rate_limit.remaining_global ~key);
+  check int "agent budget untouched by global limiter" (agent_before - 1)
+    (Rate_limit.remaining_agent_global ~key)
+
+(* ============================================================
+   agent_key_of_token_or_name Tests
+   ============================================================ *)
+
+let test_agent_key_of_token () =
+  match Rate_limit.agent_key_of_token_or_name ~token:"secret-token-123" () with
+  | None -> fail "expected Some key for token"
+  | Some key ->
+      check bool "key starts with token:" true
+        (String.length key > 6 && String.sub key 0 6 = "token:");
+      (* "token:" prefix (6 chars) + 16 hex chars from SHA-256 = 22 chars total *)
+      check bool "key length ok" true (String.length key = 22)
+
+let test_agent_key_of_agent_name () =
+  match Rate_limit.agent_key_of_token_or_name ~agent_name:"my-agent" () with
+  | None -> fail "expected Some key for agent_name"
+  | Some key ->
+      check string "key is agent: prefixed" "agent:my-agent" key
+
+let test_agent_key_token_preferred_over_name () =
+  match Rate_limit.agent_key_of_token_or_name
+          ~token:"tok123" ~agent_name:"my-agent" () with
+  | None -> fail "expected Some key"
+  | Some key ->
+      check bool "token preferred" true
+        (String.length key > 6 && String.sub key 0 6 = "token:")
+
+let test_agent_key_empty_token_falls_back () =
+  match Rate_limit.agent_key_of_token_or_name
+          ~token:"" ~agent_name:"my-agent" () with
+  | None -> fail "expected Some key after empty token"
+  | Some key ->
+      check string "falls back to agent name" "agent:my-agent" key
+
+let test_agent_key_none_for_anonymous () =
+  match Rate_limit.agent_key_of_token_or_name () with
+  | None -> ()
+  | Some key -> fail ("expected None for anonymous request, got " ^ key)
+
+let test_agent_key_none_for_empty_name () =
+  match Rate_limit.agent_key_of_token_or_name ~agent_name:"" () with
+  | None -> ()
+  | Some key -> fail ("expected None for empty agent name, got " ^ key)
+
+let test_agent_key_stable_for_same_token () =
+  let token = "same-token-value" in
+  let k1 = Rate_limit.agent_key_of_token_or_name ~token () in
+  let k2 = Rate_limit.agent_key_of_token_or_name ~token () in
+  check (option string) "stable key" k1 k2
+
+let test_agent_key_different_tokens_give_different_keys () =
+  let k1 = Rate_limit.agent_key_of_token_or_name ~token:"token-a" () in
+  let k2 = Rate_limit.agent_key_of_token_or_name ~token:"token-b" () in
+  check bool "different tokens => different keys" true (k1 <> k2)
+
+(* ============================================================
+   Per-Agent Bucket Exhaustion Tests
+   ============================================================ *)
+
+let test_agent_bucket_blocks_after_burst () =
+  let lim = Rate_limit.create ~rate:0.0 ~burst:3 () in
+  let _ = Rate_limit.check lim ~key:"agent:x" in
+  let _ = Rate_limit.check lim ~key:"agent:x" in
+  let _ = Rate_limit.check lim ~key:"agent:x" in
+  let blocked = not (Rate_limit.check lim ~key:"agent:x") in
+  check bool "blocked after burst exhausted" true blocked
+
+let test_agent_bucket_independent_per_agent () =
+  let lim = Rate_limit.create ~rate:0.0 ~burst:1 () in
+  let _ = Rate_limit.check lim ~key:"agent:a" in
+  (* agent:a exhausted, agent:b still has capacity *)
+  let b_allowed = Rate_limit.check lim ~key:"agent:b" in
+  check bool "different agents are independent" true b_allowed
+
+let test_too_many_agent_requests_body () =
+  let body = Rate_limit.too_many_agent_requests_body () in
+  check bool "contains Per-agent" true
+    (match Str.search_forward (Str.regexp "Per-agent") body 0 with
+     | _ -> true
+     | exception Not_found -> false)
 
 (* ============================================================
    Test Runners
@@ -393,6 +561,8 @@ let () =
       test_case "headers has remaining" `Quick test_headers_has_remaining;
       test_case "headers limit value" `Quick test_headers_limit_value;
       test_case "too_many_requests_body" `Quick test_too_many_requests_body;
+      test_case "cors exposes rate limit headers" `Quick
+        test_cors_exposes_rate_limit_headers;
     ];
     "key_of_sockaddr", [
       test_case "ipv4 loopback" `Quick test_key_of_sockaddr_ipv4_loopback;
@@ -404,5 +574,35 @@ let () =
     "headers_global", [
       test_case "has limit header" `Quick test_headers_global_has_limit;
       test_case "has remaining header" `Quick test_headers_global_has_remaining;
+    ];
+    "per_agent_config", [
+      test_case "default_agent_rate" `Quick test_default_agent_rate;
+      test_case "default_agent_burst" `Quick test_default_agent_burst;
+      test_case "agent_rate_from_env" `Quick test_agent_rate_from_env_returns_float;
+      test_case "agent_burst_from_env" `Quick test_agent_burst_from_env_returns_int;
+      test_case "create_agent_from_env" `Quick test_create_agent_from_env;
+    ];
+    "per_agent_global", [
+      test_case "check_agent_global" `Quick test_check_agent_global;
+      test_case "remaining_agent_global" `Quick test_remaining_agent_global;
+      test_case "headers_agent_global has limit" `Quick test_headers_agent_global_has_limit;
+      test_case "headers_agent_global has remaining" `Quick test_headers_agent_global_has_remaining;
+      test_case "limiter separate from global" `Quick test_agent_limiter_separate_from_global;
+    ];
+    "agent_key_of_token_or_name", [
+      test_case "token gives token: key" `Quick test_agent_key_of_token;
+      test_case "agent_name gives agent: key" `Quick test_agent_key_of_agent_name;
+      test_case "token preferred over name" `Quick test_agent_key_token_preferred_over_name;
+      test_case "empty token falls back to name" `Quick test_agent_key_empty_token_falls_back;
+      test_case "None for anonymous" `Quick test_agent_key_none_for_anonymous;
+      test_case "None for empty name" `Quick test_agent_key_none_for_empty_name;
+      test_case "stable for same token" `Quick test_agent_key_stable_for_same_token;
+      test_case "different tokens => different keys" `Quick
+        test_agent_key_different_tokens_give_different_keys;
+    ];
+    "per_agent_bucket", [
+      test_case "blocks after burst" `Quick test_agent_bucket_blocks_after_burst;
+      test_case "independent per agent" `Quick test_agent_bucket_independent_per_agent;
+      test_case "too_many_agent_requests_body" `Quick test_too_many_agent_requests_body;
     ];
   ]

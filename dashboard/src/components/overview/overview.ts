@@ -1,7 +1,8 @@
 // MASC Dashboard — Overview (slim home)
 //
 // "What's the party doing today?" in one glance, no scroll.
-// 4 sections, top-to-bottom:
+// 5 sections, top-to-bottom (V2):
+//   0. Alert Panel     — failing agents + stalled tasks (actionable alerts first)
 //   1. Highlight       — mission.summary.top_attention 1줄
 //   2. Funnel          — 5칸 task 카운트 (신규/진행/검증 대기/완료/목표)
 //   3. Mission party   — active session 1건 (goal, members, progress bar, blocker)
@@ -12,19 +13,155 @@ import { useMemo } from 'preact/hooks'
 import { TimeAgo } from '../common/time-ago'
 import { StatusDot } from '../common/status-dot'
 import { RouteLink } from '../common/route-link'
-import type { KpiCellKind } from '../kpi-cell'
+import type { KpiCellKind } from '../kpi-shared'
+import { barPercent } from '../bar-shared'
 import { KpiStripIsland } from '../kpi-strip-island'
 import { AgentAvatar } from './agent-avatar'
 import { missionSnapshot } from '../../mission-store'
-import { tasks, keepers } from '../../store'
-import type { Task, Keeper } from '../../types/core'
+import { agents, tasks, keepers } from '../../store'
+import type { Agent, Task, Keeper } from '../../types/core'
 import type {
   DashboardMissionResponse,
   DashboardMissionSessionCard,
   OperatorAttentionItem,
 } from '../../types/dashboard-mission'
+import { openAgentDetail } from '../agent-detail-state'
+import { nowSecondsSignal, useNowSecondsTicker } from '../../lib/now-signal'
 
 const CARD = 'rounded border border-card-border/40 bg-card/18 p-4 shadow-sm shadow-black/8'
+
+// ─── Alert Panel ─────────────────────────────────────────────────────────────
+
+export interface AgentAlert {
+  name: string
+  display: string
+  reason: string
+  severity: 'critical' | 'warn'
+}
+
+export interface TaskAlert {
+  id: string
+  title: string
+  status: string
+  assignee: string | null
+  severity: 'critical' | 'warn'
+}
+
+/** Derive a list of failing / offline agent alerts from the live agent list.
+ *
+ * Severity rules:
+ *   - "offline" or "inactive" → critical (agent is unreachable)
+ *   - All other statuses are ignored (active/busy/idle are healthy).
+ */
+export function deriveAgentAlerts(agentList: readonly Agent[]): AgentAlert[] {
+  const alerts: AgentAlert[] = []
+  for (const a of agentList) {
+    const status = a.status ?? 'idle'
+    if (status === 'offline' || status === 'inactive') {
+      alerts.push({
+        name: a.name,
+        display: a.koreanName && a.koreanName !== '' ? a.koreanName : a.name,
+        reason: status === 'offline' ? '오프라인' : '비활성',
+        severity: 'critical',
+      })
+    }
+  }
+  return alerts
+}
+
+/** Derive stalled task alerts.
+ *
+ * Severity rules:
+ *   - awaiting_verification for > 10 minutes → warn (needs human review)
+ *   - "cancelled" tasks are not surfaced here.
+ */
+export function deriveTaskAlerts(
+  taskList: readonly Task[],
+  nowMs: number = Date.now(),
+): TaskAlert[] {
+  const STALL_THRESHOLD_MS = 10 * 60 * 1000 // 10 minutes
+  const alerts: TaskAlert[] = []
+  for (const t of taskList) {
+    if (t.status === 'awaiting_verification') {
+      // Date.parse returns NaN for missing or non-ISO strings.  Use
+      // Number.isFinite as the gate so an invalid `updated_at` is
+      // treated as stale (silent-failure prevention) rather than
+      // slipping through the `nowMs - NaN > THRESHOLD = false` hole
+      // that the previous `=== null` check left.
+      const parsedMs = t.updated_at ? Date.parse(t.updated_at) : NaN
+      const isStale =
+        !Number.isFinite(parsedMs) || nowMs - parsedMs > STALL_THRESHOLD_MS
+      if (isStale) {
+        alerts.push({
+          id: t.id,
+          title: t.title,
+          status: 'awaiting_verification',
+          assignee: t.assignee ?? null,
+          severity: 'warn',
+        })
+      }
+    }
+  }
+  return alerts
+}
+
+function AlertPanel({
+  agentAlerts,
+  taskAlerts,
+}: {
+  agentAlerts: AgentAlert[]
+  taskAlerts: TaskAlert[]
+}) {
+  const total = agentAlerts.length + taskAlerts.length
+  if (total === 0) return null
+
+  const criticalCount = agentAlerts.filter(a => a.severity === 'critical').length
+
+  return html`
+    <section
+      class="rounded border ${criticalCount > 0 ? 'border-[var(--color-status-err)]/40 bg-[var(--color-status-err)]/6' : 'border-[var(--color-status-warn)]/40 bg-[var(--color-status-warn)]/6'} p-4"
+      aria-label="주의 알림"
+      data-testid="overview-alerts"
+    >
+      <header class="flex items-center gap-2 mb-3">
+        <span class="${criticalCount > 0 ? 'text-[var(--color-status-err)]' : 'text-[var(--color-status-warn)]'} text-sm font-semibold">
+          ⚠ ${total}건 주의
+        </span>
+        ${criticalCount > 0
+          ? html`<span class="text-2xs text-[var(--color-status-err)] font-medium">${criticalCount}건 위험</span>`
+          : null}
+      </header>
+      <ul class="flex flex-col gap-2">
+        ${agentAlerts.map(a => html`
+          <li
+            key=${'agent:' + a.name}
+            class="flex items-center gap-2 min-w-0 text-sm"
+            data-testid="overview-alert-agent"
+          >
+            <span class="shrink-0 inline-block size-2 rounded-full bg-[var(--color-status-err)]"></span>
+            <button
+              type="button"
+              class="text-[var(--color-fg-secondary)] hover:underline truncate cursor-pointer bg-transparent border-0 p-0 text-left text-sm"
+              onClick=${() => openAgentDetail(a.name)}
+            >${a.display}</button>
+            <span class="ml-auto shrink-0 text-2xs text-[var(--color-status-err)] font-medium">${a.reason}</span>
+          </li>
+        `)}
+        ${taskAlerts.map(t => html`
+          <li
+            key=${'task:' + t.id}
+            class="flex items-center gap-2 min-w-0 text-sm"
+            data-testid="overview-alert-task"
+          >
+            <span class="shrink-0 inline-block size-2 rounded-sm bg-[var(--color-status-warn)]"></span>
+            <span class="text-[var(--color-fg-secondary)] truncate">${t.title}</span>
+            <span class="ml-auto shrink-0 text-2xs text-[var(--color-status-warn)] font-medium">검증 대기</span>
+          </li>
+        `)}
+      </ul>
+    </section>
+  `
+}
 
 // ─── Funnel ──────────────────────────────────────────────────────────────────
 
@@ -167,7 +304,7 @@ export function progressPct(active: DashboardMissionSessionCard | null): number 
   const req = active.required_count ?? 0
   if (req <= 0) return null
   const seen = active.seen_count ?? active.active_count ?? 0
-  return Math.min(100, Math.max(0, Math.round((seen / req) * 100)))
+  return barPercent((seen / req) * 100)
 }
 
 function MissionPartyCard({ active }: { active: DashboardMissionSessionCard | null }) {
@@ -303,14 +440,20 @@ function KeeperStrip({ keeperList }: { keeperList: readonly Keeper[] }) {
 // ─── Root ────────────────────────────────────────────────────────────────────
 
 export function Overview() {
+  useNowSecondsTicker()
   const snap = missionSnapshot.value
   const taskList = tasks.value
   const keeperList = keepers.value
+  const agentList = agents.value
+  const nowMs = nowSecondsSignal.value * 1000
   const active = useMemo(() => pickActiveSession(snap), [snap])
   const counts = useMemo(() => computeFunnelCounts(taskList, active), [taskList, active])
   const attention = snap?.summary?.top_attention ?? null
+  const agentAlerts = useMemo(() => deriveAgentAlerts(agentList), [agentList])
+  const taskAlerts = useMemo(() => deriveTaskAlerts(taskList, nowMs), [taskList, nowMs])
   return html`
     <div class="flex flex-col gap-5">
+      <${AlertPanel} agentAlerts=${agentAlerts} taskAlerts=${taskAlerts} />
       <${Highlight} attention=${attention} />
       <${FunnelCard} counts=${counts} />
       <${MissionPartyCard} active=${active} />

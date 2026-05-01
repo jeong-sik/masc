@@ -31,8 +31,9 @@
 
 import { html } from 'htm/preact'
 import { cloneElement, toChildArray, type VNode, type ComponentChildren } from 'preact'
+import { resolveStripCols, type KpiStripVariant } from './kpi-shared'
 
-export type KpiStripVariant = 'standard' | 'compact' | 'stacked'
+export { resolveStripCols, type KpiStripVariant } from './kpi-shared'
 
 export interface KpiStripProps {
   /** Strip layout variant. Drives the column count + density. */
@@ -53,23 +54,6 @@ export interface KpiStripProps {
   /** Extra Tailwind utility classes appended to the container. Kept
    *  narrow so callers cannot reset the strip's surface tokens. */
   class?: string
-}
-
-const COLS_BY_VARIANT: Record<KpiStripVariant, number> = {
-  standard: 6,
-  compact: 6,
-  stacked: 3,
-}
-
-/** Resolve the grid column count for a strip. Pure: exposed for tests
- *  + for callers that compose their own grid wrapper but want SPEC
- *  alignment with the strip cardinality table. */
-export function resolveStripCols(
-  variant: KpiStripVariant | undefined,
-  override: number | undefined,
-): number {
-  if (typeof override === 'number' && override > 0) return override
-  return COLS_BY_VARIANT[variant ?? 'standard']
 }
 
 /** Inject `bare` into a single KpiCell vnode. Preserves any prop the

@@ -81,7 +81,7 @@ let symlink_masc ~repo_root ~worktree_path =
     Ok ()
 
 let create ~config ~task_id ?(base_branch = "main") ?repo_name ~agent_name () =
-  (* Delegate worktree creation to Coord_worktree via the Coord facade *)
+  (* Delegate worktree creation to Coord_worktree via the Coord facade. *)
   match Coord_worktree.worktree_create_r ~link_task:true ?repo_name config
           ~agent_name ~task_id ~base_branch with
   | Error e ->

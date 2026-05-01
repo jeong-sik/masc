@@ -13,6 +13,7 @@
 import { html } from 'htm/preact'
 import type { VNode } from 'preact'
 import { KeeperBadge } from './keeper-badge'
+import { MONO_STACK } from './common/font-stacks'
 
 export type KanbanCardKind = 'queued' | 'running' | 'pending' | 'blocked' | 'fail' | 'done'
 
@@ -32,8 +33,6 @@ export interface KanbanCardProps {
   /** Custom aria-label override; default composes from id + title + keeper + time. */
   ariaLabel?: string
 }
-
-const MONO_STACK = 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace'
 
 const KIND_BORDER_LEFT_BY_KIND: Record<KanbanCardKind, string> = {
   queued: 'transparent',

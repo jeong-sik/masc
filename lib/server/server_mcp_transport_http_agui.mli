@@ -29,13 +29,13 @@ val handle_ag_ui_events :
     5. {!stop_sse_session_preserve_guard} on the session id (drops a
        previous SSE stream for the same session without re-arming the
        guard).
-    6. Register with {!Sse.register} — receives a per-client event
-       stream and a possibly-evicted prior session id.  Evicted
-       session is fully stopped.
+    6. Register as an {!Sse.Observer} with {!Sse.register} — receives a
+       per-client event stream and a possibly-evicted prior session id.
+       Evicted session is fully stopped.
     7. Send a synthetic AG-UI [Run_started] prime event so the client
        can observe the connection has settled.
-    8. If [last-event-id] was present, replay missed events via
-       {!Sse.get_events_after}.
+    8. If [last-event-id] was present, replay missed observer events via
+       {!Sse.get_events_after_for_kind}.
     9. Spawn two fibers under the runtime switch:
        - drain: pulls from per-session stream, writes raw to client,
          self-terminates on send failure.

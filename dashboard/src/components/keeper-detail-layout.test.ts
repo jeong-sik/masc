@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest'
 import { render } from 'preact'
 import { html } from 'htm/preact'
-import { KeeperDetailSectionCard } from './keeper-detail-layout'
+import { PanelCard as KeeperDetailSectionCard } from './common/panel-card'
 
 describe('KeeperDetailSectionCard', () => {
   const makeContainer = () => document.createElement('div')

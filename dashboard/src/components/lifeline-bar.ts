@@ -19,6 +19,7 @@
 
 import { html } from 'htm/preact'
 import type { VNode } from 'preact'
+import { MONO_STACK } from './common/font-stacks'
 
 const HEARTBEAT_SEGMENTS = 60
 const HEARTBEAT_DEFAULT_WIDTH = 320
@@ -93,7 +94,6 @@ export function Heartbeat({
   `
 }
 
-const MONO_STACK = 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace'
 
 const surfaceStyle = {
   background: 'var(--bg-panel)',

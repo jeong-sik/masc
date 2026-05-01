@@ -6,9 +6,11 @@ import {
   progressPct,
   pickActiveKeepers,
   severityToneClass,
+  deriveAgentAlerts,
+  deriveTaskAlerts,
   type FunnelCounts,
 } from './overview'
-import type { Task, Keeper } from '../../types/core'
+import type { Agent, Task, Keeper } from '../../types/core'
 import type {
   DashboardMissionResponse,
   DashboardMissionSessionCard,
@@ -233,5 +235,114 @@ describe('severityToneClass', () => {
     [undefined, 'text-[var(--color-fg-muted)]'],
   ])('maps severity %s to expected tone', (input, expected) => {
     expect(severityToneClass(input)).toBe(expected)
+  })
+})
+
+// ─── Alert Panel helpers ──────────────────────────────────────────────────────
+
+function makeAgent(partial: Partial<Agent> = {}): Agent {
+  return { name: 'agent-1', current_task: null, ...partial }
+}
+
+describe('deriveAgentAlerts', () => {
+  it('returns empty array when no agents', () => {
+    expect(deriveAgentAlerts([])).toEqual([])
+  })
+
+  it('returns empty array when all agents are healthy', () => {
+    const agents: Agent[] = [
+      makeAgent({ name: 'a1', status: 'active' }),
+      makeAgent({ name: 'a2', status: 'busy' }),
+      makeAgent({ name: 'a3', status: 'idle' }),
+    ]
+    expect(deriveAgentAlerts(agents)).toHaveLength(0)
+  })
+
+  it('returns critical alert for offline agent', () => {
+    const alerts = deriveAgentAlerts([makeAgent({ name: 'a1', status: 'offline' })])
+    expect(alerts).toHaveLength(1)
+    expect(alerts[0]!.severity).toBe('critical')
+    expect(alerts[0]!.name).toBe('a1')
+    expect(alerts[0]!.reason).toBe('오프라인')
+  })
+
+  it('returns critical alert for inactive agent', () => {
+    const alerts = deriveAgentAlerts([makeAgent({ name: 'a1', status: 'inactive' })])
+    expect(alerts).toHaveLength(1)
+    expect(alerts[0]!.severity).toBe('critical')
+    expect(alerts[0]!.reason).toBe('비활성')
+  })
+
+  it('uses koreanName as display when available', () => {
+    const alerts = deriveAgentAlerts([makeAgent({ name: 'a1', status: 'offline', koreanName: '수호자' })])
+    expect(alerts[0]!.display).toBe('수호자')
+  })
+
+  it('falls back to name when koreanName is empty', () => {
+    const alerts = deriveAgentAlerts([makeAgent({ name: 'a1', status: 'offline', koreanName: '' })])
+    expect(alerts[0]!.display).toBe('a1')
+  })
+
+  it('returns multiple alerts for multiple failing agents', () => {
+    const agents: Agent[] = [
+      makeAgent({ name: 'a1', status: 'offline' }),
+      makeAgent({ name: 'a2', status: 'inactive' }),
+      makeAgent({ name: 'a3', status: 'active' }),
+    ]
+    expect(deriveAgentAlerts(agents)).toHaveLength(2)
+  })
+})
+
+describe('deriveTaskAlerts', () => {
+  const NOW = new Date('2026-04-18T12:00:00Z').getTime()
+  const STALE_UPDATED = new Date('2026-04-18T11:00:00Z').toISOString() // 60 min ago → stale
+  const FRESH_UPDATED = new Date('2026-04-18T11:55:00Z').toISOString() // 5 min ago → not stale
+
+  it('returns empty array when no tasks', () => {
+    expect(deriveTaskAlerts([], NOW)).toEqual([])
+  })
+
+  it('returns empty array when no awaiting_verification tasks', () => {
+    const tasks: Task[] = [makeTask({ status: 'in_progress' }), makeTask({ status: 'done' })]
+    expect(deriveTaskAlerts(tasks, NOW)).toHaveLength(0)
+  })
+
+  it('returns warn alert for stale awaiting_verification task', () => {
+    const tasks: Task[] = [makeTask({ id: 't1', status: 'awaiting_verification', updated_at: STALE_UPDATED })]
+    const alerts = deriveTaskAlerts(tasks, NOW)
+    expect(alerts).toHaveLength(1)
+    expect(alerts[0]!.severity).toBe('warn')
+    expect(alerts[0]!.status).toBe('awaiting_verification')
+  })
+
+  it('does not alert for recently updated awaiting_verification task', () => {
+    const tasks: Task[] = [makeTask({ id: 't1', status: 'awaiting_verification', updated_at: FRESH_UPDATED })]
+    expect(deriveTaskAlerts(tasks, NOW)).toHaveLength(0)
+  })
+
+  it('treats missing updated_at as stale', () => {
+    const tasks: Task[] = [makeTask({ id: 't1', status: 'awaiting_verification' })]
+    const alerts = deriveTaskAlerts(tasks, NOW)
+    expect(alerts).toHaveLength(1)
+  })
+
+  it('treats invalid updated_at as stale', () => {
+    const tasks: Task[] = [
+      makeTask({ id: 't1', status: 'awaiting_verification', updated_at: 'not-a-date' }),
+    ]
+    const alerts = deriveTaskAlerts(tasks, NOW)
+    expect(alerts).toHaveLength(1)
+  })
+
+  it('returns task id and title in alert', () => {
+    const tasks: Task[] = [makeTask({ id: 't99', title: 'Fix bug', status: 'awaiting_verification', updated_at: STALE_UPDATED })]
+    const alerts = deriveTaskAlerts(tasks, NOW)
+    expect(alerts[0]!.id).toBe('t99')
+    expect(alerts[0]!.title).toBe('Fix bug')
+  })
+
+  it('returns assignee in alert when present', () => {
+    const tasks: Task[] = [makeTask({ id: 't1', status: 'awaiting_verification', updated_at: STALE_UPDATED, assignee: 'agent-x' })]
+    expect(deriveTaskAlerts(tasks, NOW)[0]!.assignee).toBe('agent-x')
   })
 })

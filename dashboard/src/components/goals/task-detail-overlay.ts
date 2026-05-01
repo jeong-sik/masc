@@ -36,6 +36,12 @@ import { TaskActivityList } from './task-activity-list'
 import { goalById, priorityLabel } from './goal-helpers'
 import type { Task, TaskGateEvaluation } from '../../types'
 
+const CARD_BOX = 'rounded border border-[var(--white-10)] bg-[var(--white-3)] px-4 py-3'
+
+function SectionTitle({ children }: { children: unknown }) {
+  return html`<div class="text-2xs font-semibold uppercase tracking-3 text-text-muted mb-2">${children}</div>`
+}
+
 // -- Event timeline (inline, NormalizedTaskEvent shape) --------------
 
 function eventBadge(label: string): { icon: any; color: string } {
@@ -163,8 +169,8 @@ function VerdictLineageSection() {
 
   return html`
     <div>
-      <div class="text-2xs font-semibold uppercase tracking-3 text-text-muted mb-2">검증 진행 이력</div>
-      <div class="rounded border border-[var(--white-10)] bg-[var(--white-3)] px-4 py-3">
+      <${SectionTitle}>검증 진행 이력</${SectionTitle}>
+      <div class=${CARD_BOX}>
         <div class="flex flex-col gap-2">
           ${verdictEvents.map((evt: NormalizedTaskEvent, i: number) => {
             const tone = verdictToneClass(evt.label)
@@ -209,7 +215,7 @@ function GateSection({
   if (!gate) return null
 
   return html`
-    <div class="rounded border border-[var(--white-10)] bg-[var(--white-3)] px-4 py-3">
+    <div class=${CARD_BOX}>
       <div class="flex items-center justify-between gap-3">
         <div class="text-xs font-medium text-text-strong">${title}</div>
         <span class=${`rounded border px-2 py-0.5 text-3xs font-semibold uppercase tracking-1 ${gateTone(gate.status)}`}>${gate.status}</span>
@@ -275,7 +281,7 @@ function ContractSection({ task }: { task: Task }) {
       <${GateSection} title="검증 → 리뷰" gate=${gate?.verify_to_review} />
 
       ${completionItems.length > 0 ? html`
-        <div class="rounded border border-[var(--white-10)] bg-[var(--white-3)] px-4 py-3">
+        <div class=${CARD_BOX}>
           <div class="text-xs font-medium text-text-strong">완료 계약</div>
           <div class="mt-2 flex flex-col gap-1">
             ${completionItems.map((item: string) => html`
@@ -286,7 +292,7 @@ function ContractSection({ task }: { task: Task }) {
       ` : null}
 
       ${requiredEvidence.length > 0 ? html`
-        <div class="rounded border border-[var(--white-10)] bg-[var(--white-3)] px-4 py-3">
+        <div class=${CARD_BOX}>
           <div class="text-xs font-medium text-text-strong">필수 증거</div>
           <div class="mt-2 flex flex-wrap gap-1.5">
             ${requiredEvidence.map((item: string) => html`
@@ -311,10 +317,10 @@ function ExecutionLinksSection({ task }: { task: Task }) {
 
   return html`
     <div>
-      <div class="text-2xs font-semibold uppercase tracking-3 text-text-muted mb-2">연결된 실행</div>
+      <${SectionTitle}>연결된 실행</${SectionTitle}>
       <div class="flex flex-col gap-2">
         ${items.map(([label, value]) => html`
-          <div key=${label} class="rounded border border-[var(--white-10)] bg-[var(--white-3)] px-4 py-3">
+          <div key=${label} class=${CARD_BOX}>
             <div class="text-3xs uppercase tracking-3 text-text-dim">${label}</div>
             <div class="mt-1 text-xs font-mono text-text-body break-all">${value}</div>
           </div>
@@ -330,7 +336,7 @@ function HandoffSection({ task }: { task: Task }) {
 
   return html`
     <div>
-      <div class="text-2xs font-semibold uppercase tracking-3 text-text-muted mb-2">최근 Handoff</div>
+      <${SectionTitle}>최근 Handoff</${SectionTitle}>
       <div class="rounded border border-warn/20 bg-warn/8 px-4 py-3">
         <div class="text-sm leading-relaxed text-text-body"><${RichContent} text=${handoff.summary} previewLimit=${2} /></div>
         ${handoff.reason ? html`<div class="mt-2 text-2xs text-text-muted">reason: ${handoff.reason}</div>` : null}
@@ -461,7 +467,7 @@ export function TaskDetailOverlay() {
           ${'' /* Description */}
           ${task.description ? html`
             <div>
-              <div class="text-2xs font-semibold uppercase tracking-3 text-text-muted mb-2">설명</div>
+              <${SectionTitle}>설명</${SectionTitle}>
               <div class="rounded border border-[var(--white-10)] bg-[var(--white-3)] px-4 py-3 text-sm leading-relaxed text-text-body">
                 <${RichContent} text=${task.description} previewLimit=${2} />
               </div>
@@ -478,7 +484,7 @@ export function TaskDetailOverlay() {
 
           ${'' /* Recent task events */}
           <div>
-            <div class="text-2xs font-semibold uppercase tracking-3 text-text-muted mb-2">최근 태스크 이벤트</div>
+            <${SectionTitle}>최근 태스크 이벤트</${SectionTitle}>
             <${TaskEventsSection} />
           </div>
 

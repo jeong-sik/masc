@@ -13,7 +13,11 @@ include module type of struct include Backend_types end
 module FileSystem : sig
   type t
 
-  val create : fs:Eio.Fs.dir_ty Eio.Path.t -> config -> t
+  val create :
+    fs:Eio.Fs.dir_ty Eio.Path.t ->
+    ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
+    config ->
+    t
   val validate_key : string -> (string, error) Stdlib.result
 
   (** Core operations *)

@@ -3226,7 +3226,7 @@ let test_run_keeper_cycle_skips_non_executable_phase () =
            with
            | None -> fail "expected skipped turn execution receipt"
            | Some receipt ->
-              check string "skipped receipt outcome" "skipped"
+              check string "skipped receipt outcome" "receipt_skipped"
                  Yojson.Safe.Util.(receipt |> member "outcome" |> to_string);
                check string "skipped receipt terminal reason"
                  "non_executable_phase:paused"
@@ -3490,7 +3490,8 @@ let test_decide_local_only_liveness_keeps_explicit_local_only () =
       [ "not-a-real-label" ]
   with
   | UT.Keep_effective_cascade cascade ->
-      check string "keeps explicit local_only" "local_only" cascade
+      check string "legacy local_only alias follows phase-buffer route"
+        KC.local_only_cascade_name cascade
   | UT.Probe_local_only_urls _ -> fail "unexpected local-only probe decision"
 
 let test_decide_local_only_liveness_requests_deduped_ollama_probe () =
@@ -3498,15 +3499,15 @@ let test_decide_local_only_liveness_requests_deduped_ollama_probe () =
   let cfg = provider_config_of_label label in
   match
     UT.decide_local_only_liveness
-      ~base_cascade:"keeper_unified"
-      ~effective_cascade:"local_only"
+      ~base_cascade:"tool_rerank"
+      ~effective_cascade:KC.local_only_cascade_name
       [ label; label ]
   with
   | UT.Keep_effective_cascade _ -> fail "expected Ollama liveness probe"
   | UT.Probe_local_only_urls
       { effective_cascade; fallback_cascade; ollama_base_urls } ->
-      check string "effective cascade" "local_only" effective_cascade;
-      check string "fallback cascade" "keeper_unified" fallback_cascade;
+      check string "effective cascade" KC.local_only_cascade_name effective_cascade;
+      check string "fallback cascade" "tool_rerank" fallback_cascade;
       check (list string) "deduped probe URLs" [ cfg.base_url ]
         ollama_base_urls
 
@@ -3515,7 +3516,7 @@ let test_fail_open_local_only_when_probe_fails () =
     UT.fail_open_local_only_when_unavailable
       ~probe_ollama_base_url:(fun _ -> false)
       ~base_cascade:"tool_rerank"
-      ~effective_cascade:"local_only"
+      ~effective_cascade:KC.local_only_cascade_name
       [ "ollama:qwen3.6:35b-a3b-mlx-bf16" ]
   in
   check string "falls back to base cascade" "tool_rerank" cascade
@@ -3532,17 +3533,19 @@ let test_fail_open_local_only_preserves_explicit_local_only_base () =
       [ "ollama:qwen3.6:35b-a3b-mlx-bf16" ]
   in
   check int "probe not called" 0 !probe_calls;
-  check string "explicit local_only stays local_only" "local_only" cascade
+  check string "legacy local_only alias follows phase-buffer route"
+    KC.local_only_cascade_name cascade
 
 let test_fail_open_local_only_preserves_healthy_local_only () =
   let cascade =
     UT.fail_open_local_only_when_unavailable
       ~probe_ollama_base_url:(fun _ -> true)
-      ~base_cascade:"keeper_unified"
-      ~effective_cascade:"local_only"
+      ~base_cascade:"tool_rerank"
+      ~effective_cascade:KC.local_only_cascade_name
       [ "ollama:qwen3.6:35b-a3b-mlx-bf16" ]
   in
-  check string "healthy ollama keeps local_only" "local_only" cascade
+  check string "healthy ollama keeps phase-buffer route"
+    KC.local_only_cascade_name cascade
 
 (* PR-B: ollama saturation pre-skip helpers. *)
 
@@ -3824,8 +3827,8 @@ let test_next_fail_open_cascade_for_turn_continues_to_local_recovery () =
         [ "tool_rerank"; KC.default_cascade_name ]
       (wrapped_claude_limit_error ())
   in
-  expect_degraded_retry "next degraded retry after default"
-    KC.local_recovery_cascade_name "hard_quota" degraded_retry
+  check bool "collapsed local_recovery is exhausted after default" true
+    (Option.is_none degraded_retry)
 
 let test_next_fail_open_cascade_for_turn_suppresses_exhausted_rotation_group () =
   let degraded_retry =
@@ -3860,9 +3863,9 @@ let test_next_fail_open_cascade_for_turn_allows_required_tool_rotation () =
   let degraded_retry =
     UT.next_fail_open_cascade_for_turn
       ~base_cascade:"tool_rerank"
-      ~effective_cascade:KC.tool_use_strict_cascade_name
+      ~effective_cascade:"strict_exec"
       ~tool_requirement:"required"
-      ~attempted_cascades:[ KC.tool_use_strict_cascade_name ]
+      ~attempted_cascades:[ "strict_exec" ]
       (wrapped_claude_limit_error ())
   in
   expect_degraded_retry "required tool degraded retry"
@@ -3872,9 +3875,9 @@ let test_next_fail_open_cascade_for_turn_retries_required_tool_contract_violatio
   let degraded_retry =
     UT.next_fail_open_cascade_for_turn
       ~base_cascade:KC.default_cascade_name
-      ~effective_cascade:KC.tool_use_strict_cascade_name
+      ~effective_cascade:"strict_exec"
       ~tool_requirement:"required"
-      ~attempted_cascades:[ KC.tool_use_strict_cascade_name ]
+      ~attempted_cascades:[ "strict_exec" ]
       (required_tool_contract_violation_error ())
   in
   expect_degraded_retry "required contract degraded retry"
@@ -3906,7 +3909,7 @@ let test_next_fail_open_cascade_for_turn_uses_catalog_rotation_profile () =
 let test_next_fail_open_cascade_for_turn_does_not_inject_default_when_catalog_omits_it () =
   let degraded_retry =
     UT.next_fail_open_cascade_for_turn
-      ~rotation_cascades:[ "resilient_breaker" ]
+      ~rotation_cascades:[ "resilient_profile" ]
       ~base_cascade:"tool_rerank"
       ~effective_cascade:"tool_rerank"
       ~tool_requirement:"optional"
@@ -3914,42 +3917,42 @@ let test_next_fail_open_cascade_for_turn_does_not_inject_default_when_catalog_om
       (wrapped_claude_limit_error ())
   in
   expect_degraded_retry "catalog-only degraded retry"
-    "resilient_breaker" "hard_quota" degraded_retry
+    "resilient_profile" "hard_quota" degraded_retry
 
 let test_next_fail_open_cascade_for_required_tool_filters_local_recovery_catalog () =
   let degraded_retry =
     UT.next_fail_open_cascade_for_turn
-      ~rotation_cascades:[ KC.local_recovery_cascade_name; "big_three" ]
+      ~rotation_cascades:[ KC.local_recovery_cascade_name; "required_safe" ]
       ~base_cascade:KC.default_cascade_name
-      ~effective_cascade:KC.tool_use_strict_cascade_name
+      ~effective_cascade:"strict_exec"
       ~tool_requirement:"required"
-      ~attempted_cascades:[ KC.tool_use_strict_cascade_name ]
+      ~attempted_cascades:[ "strict_exec" ]
       (required_tool_contract_violation_error ())
   in
   expect_degraded_retry "required catalog degraded retry"
-    "big_three" "required_tool_contract_violation" degraded_retry
+    KC.default_cascade_name "required_tool_contract_violation" degraded_retry
 
 let test_next_fail_open_cascade_for_required_tool_rejects_local_recovery_only_catalog () =
   let degraded_retry =
     UT.next_fail_open_cascade_for_turn
       ~rotation_cascades:[ KC.local_recovery_cascade_name ]
-      ~base_cascade:KC.tool_use_strict_cascade_name
-      ~effective_cascade:KC.tool_use_strict_cascade_name
+      ~base_cascade:"strict_exec"
+      ~effective_cascade:"strict_exec"
       ~tool_requirement:"required"
-      ~attempted_cascades:[ KC.tool_use_strict_cascade_name ]
+      ~attempted_cascades:[ "strict_exec" ]
       (required_tool_contract_violation_error ())
   in
-  check bool "required catalog local_recovery-only group is exhausted" true
-    (Option.is_none degraded_retry)
+  expect_degraded_retry "required catalog default-backed recovery"
+    KC.default_cascade_name "required_tool_contract_violation" degraded_retry
 
 let test_degraded_rotation_after_recoverable_error_filters_required_catalog_directly () =
   let degraded_retry =
     EC.degraded_rotation_after_recoverable_error
       ~rotation_cascades:[ KC.local_recovery_cascade_name; " big_three " ]
-      ~base_cascade:KC.tool_use_strict_cascade_name
-      ~effective_cascade:KC.tool_use_strict_cascade_name
+      ~base_cascade:"strict_exec"
+      ~effective_cascade:"strict_exec"
       ~tool_requirement:"required"
-      ~attempted_cascades:[ KC.tool_use_strict_cascade_name ]
+      ~attempted_cascades:[ "strict_exec" ]
       (required_tool_contract_violation_error ())
   in
   expect_degraded_retry "required catalog classifier rotation"
@@ -4026,7 +4029,6 @@ let test_fail_open_rotation_cascades_from_catalog_merges_reserved_and_assignable
     (Some
        [
          KC.default_cascade_name;
-         KC.local_recovery_cascade_name;
          "ollama_only";
        ])
     rotation
@@ -4046,7 +4048,6 @@ let test_fail_open_rotation_cascades_from_catalog_preserves_catalog_order () =
     (Some
        [
          "ollama_only";
-         KC.local_recovery_cascade_name;
          KC.default_cascade_name;
        ])
     rotation

@@ -5,6 +5,7 @@ import type { ComponentChildren } from 'preact'
 import { useMemo } from 'preact/hooks'
 import { EmptyState } from '../common/empty-state'
 import { ActionButton } from '../common/button'
+import { normalizeToolName } from '../tool-call-shared'
 import {
   goals,
   goalsLoading,
@@ -184,7 +185,7 @@ function KeeperToolActivity() {
             <div class="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-1.5">
               ${topTools.map(([name, count]) => html`
                 <div key=${name} class="flex items-center justify-between rounded bg-[var(--white-3)] px-3 py-1.5 text-xs">
-                  <span class="font-mono text-text-body truncate">${name.replace(/^(keeper_|masc_)/, '')}</span>
+                  <span class="font-mono text-text-body truncate">${normalizeToolName(name)}</span>
                   <span class="ml-2 flex-shrink-0 font-mono text-text-dim">${count}</span>
                 </div>
               `)}

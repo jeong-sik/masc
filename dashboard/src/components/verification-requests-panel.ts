@@ -31,7 +31,12 @@ import { FilterChips } from './common/filter-chips'
 import { TextInput } from './common/input'
 import type { ManagedAsyncResource } from '../lib/async-state'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
+import { truncate } from '../lib/truncate'
 import { route } from '../router'
+
+function ThLeft({ children }: { children: unknown }) {
+  return html`<th scope="col" class="text-left py-1 pr-2">${children}</th>`
+}
 
 const AUTO_REFRESH_MS = 15_000
 const DEFAULT_LIMIT = 100
@@ -174,11 +179,6 @@ function verdictTone(v: VerificationRequestVerdict): 'ok' | 'warn' | 'bad' {
 
 // ── Formatting helpers ────────────────────────────────
 
-function truncate(s: string, max = 20): string {
-  if (s.length <= max) return s
-  return s.slice(0, max - 1) + '…'
-}
-
 function parseIso(ts: string | null | undefined): number | null {
   if (!ts) return null
   const n = Date.parse(ts)
@@ -320,6 +320,14 @@ function RowActions({
   `
 }
 
+function DetailLabel({ children }: { children: unknown }) {
+  return html`
+    <div class="text-3xs font-semibold uppercase tracking-4 text-[var(--color-fg-muted)] mb-1">
+      ${children}
+    </div>
+  `
+}
+
 // ── Row ───────────────────────────────────────────────
 
 function VerificationRow({
@@ -399,9 +407,7 @@ function VerificationRow({
                   ${hasTaskTitle
                     ? html`
                         <div>
-                          <div class="text-3xs font-semibold uppercase tracking-4 text-[var(--color-fg-muted)] mb-1">
-                            Task Title
-                          </div>
+                          <${DetailLabel}>Task Title</${DetailLabel}>
                           <div class="text-[var(--color-fg-primary)]">${row.task_title}</div>
                         </div>
                       `
@@ -409,9 +415,7 @@ function VerificationRow({
                   ${hasRequestSummary
                     ? html`
                         <div>
-                          <div class="text-3xs font-semibold uppercase tracking-4 text-[var(--color-fg-muted)] mb-1">
-                            Verification Summary
-                          </div>
+                          <${DetailLabel}>Verification Summary</${DetailLabel}>
                           <div class="text-[var(--color-fg-primary)]">${row.request_summary}</div>
                         </div>
                       `
@@ -419,9 +423,7 @@ function VerificationRow({
                   ${hasNextAction
                     ? html`
                         <div>
-                          <div class="text-3xs font-semibold uppercase tracking-4 text-[var(--color-fg-muted)] mb-1">
-                            Next Action
-                          </div>
+                          <${DetailLabel}>Next Action</${DetailLabel}>
                           <div class="text-[var(--color-fg-primary)]">${row.next_action}</div>
                         </div>
                       `
@@ -429,9 +431,7 @@ function VerificationRow({
                   ${hasContract
                     ? html`
                         <div>
-                          <div class="text-3xs font-semibold uppercase tracking-4 text-[var(--color-fg-muted)] mb-1">
-                            Completion Contract
-                          </div>
+                          <${DetailLabel}>Completion Contract</${DetailLabel}>
                           <ul class="list-disc list-inside flex flex-col gap-1 text-[var(--color-fg-primary)]">
                             ${row.completion_contract.map((c) => html`<li>${c}</li>`)}
                           </ul>
@@ -441,9 +441,7 @@ function VerificationRow({
                   ${hasEvidence
                     ? html`
                         <div>
-                          <div class="text-3xs font-semibold uppercase tracking-4 text-[var(--color-fg-muted)] mb-1">
-                            Required Evidence
-                          </div>
+                          <${DetailLabel}>Required Evidence</${DetailLabel}>
                           <ul class="list-disc list-inside flex flex-col gap-1 text-[var(--color-fg-primary)]">
                             ${row.required_evidence.map((e) => html`<li><code>${e}</code></li>`)}
                           </ul>
@@ -453,9 +451,7 @@ function VerificationRow({
                   ${row.verdict_reason !== ''
                     ? html`
                         <div>
-                          <div class="text-3xs font-semibold uppercase tracking-4 text-[var(--color-fg-muted)] mb-1">
-                            Verdict Reason
-                          </div>
+                          <${DetailLabel}>Verdict Reason</${DetailLabel}>
                           <div class="text-[var(--color-fg-primary)]">${row.verdict_reason}</div>
                         </div>
                       `
@@ -500,14 +496,14 @@ function RequestsTable({
       <table class="w-full text-xs" aria-label="검증 요청 목록">
         <thead>
           <tr class="text-[var(--color-fg-muted)] border-b border-[var(--color-border-default)]">
-            <th scope="col" class="text-left py-1 pr-2">상태</th>
-            <th scope="col" class="text-left py-1 pr-2">요청</th>
-            <th scope="col" class="text-left py-1 pr-2">작업</th>
-            <th scope="col" class="text-left py-1 pr-2">제출자</th>
-            <th scope="col" class="text-left py-1 pr-2">승인자</th>
-            <th scope="col" class="text-left py-1 pr-2">생성</th>
-            <th scope="col" class="text-left py-1 pr-2">판정</th>
-            <th scope="col" class="text-left py-1 pr-2">액션</th>
+            <${ThLeft}>상태</${ThLeft}>
+            <${ThLeft}>요청</${ThLeft}>
+            <${ThLeft}>작업</${ThLeft}>
+            <${ThLeft}>제출자</${ThLeft}>
+            <${ThLeft}>승인자</${ThLeft}>
+            <${ThLeft}>생성</${ThLeft}>
+            <${ThLeft}>판정</${ThLeft}>
+            <${ThLeft}>액션</${ThLeft}>
             <th scope="col" class="text-left py-1">세부</th>
           </tr>
         </thead>

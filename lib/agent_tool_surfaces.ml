@@ -1,3 +1,22 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+module Random = Stdlib.Random
+
 (** Agent_tool_surfaces — lightweight internal tool surface definitions.
 
     This module stays dependency-light so spawned agents, local workers, and
@@ -29,7 +48,7 @@ let lookup_schemas_by_name_exn ~label all_schemas values =
   let requested =
     values
     |> List.map String.trim
-    |> List.filter (fun value -> value <> "")
+    |> List.filter (fun value -> not (String.equal value ""))
     |> unique_preserve_order
   in
   let by_name = Hashtbl.create (List.length all_schemas) in
@@ -42,10 +61,10 @@ let lookup_schemas_by_name_exn ~label all_schemas values =
     requested
     |> List.filter (fun tool_name -> not (Hashtbl.mem by_name tool_name))
   in
-  if missing <> [] then
+  (match missing with [] -> () | _ ->
     invalid_arg
       (Printf.sprintf "%s: unknown tool schema(s): %s" label
-         (String.concat ", " missing));
+         (String.concat ", " missing)));
   (* Guard above ensures all names exist *)
   requested |> List.filter_map (Hashtbl.find_opt by_name)
 
@@ -81,7 +100,7 @@ let local_worker_compat_passthrough_schemas : Types.tool_schema list =
 
 let local_worker_internal_schemas : Types.tool_schema list =
   List.filter
-    (fun (schema : Types.tool_schema) -> schema.name = "masc_heartbeat")
+    (fun (schema : Types.tool_schema) -> String.equal schema.name "masc_heartbeat")
     Tool_schemas_coord_core.schemas
 
 let local_worker_code_schemas : Types.tool_schema list =
@@ -95,7 +114,7 @@ let local_worker_run_schemas : Types.tool_schema list =
 
 let local_worker_spawn_schemas : Types.tool_schema list =
   List.filter
-    (fun (schema : Types.tool_schema) -> schema.name = "masc_spawn")
+    (fun (schema : Types.tool_schema) -> String.equal schema.name "masc_spawn")
     Tool_schemas_inline_infra.schemas
 
 let select_public_local_worker_schemas () =
@@ -112,11 +131,11 @@ let select_public_local_worker_schemas () =
          List.mem schema.name wanted)
 
 let resolve_named_schemas all_schemas values :
-    (Types.tool_schema list, string) result =
+    (Types.tool_schema list, string) Result.t =
   let requested =
     values
     |> List.map String.trim
-    |> List.filter (fun value -> value <> "")
+    |> List.filter (fun value -> not (String.equal value ""))
     |> unique_preserve_order
   in
   let schemas =
@@ -133,15 +152,15 @@ let resolve_named_schemas all_schemas values :
                   String.equal schema.name tool_name)
                 schemas))
   in
-  if missing <> [] then
+  match missing with [] ->
+    Ok schemas
+  | _ ->
     Error
       (Printf.sprintf "unknown tool schema(s): %s"
          (String.concat ", " missing))
-  else
-    Ok schemas
 
 let local_worker_tool_schemas ?names () :
-    (Types.tool_schema list, string) result =
+    (Types.tool_schema list, string) Result.t =
   let all_schemas =
     dedupe_schemas
       ( local_worker_internal_schemas

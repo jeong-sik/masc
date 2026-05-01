@@ -292,12 +292,21 @@ jobs:
                 const ciGateStatus = latestCiGate
                   ? `${latestCiGate.status}/${latestCiGate.conclusion || "none"} ${latestCiGate.html_url}`
                   : "missing";
-                // CI Gate may not exist yet immediately after auto-merge is enabled
-                // or after a force-push/synchronize event invalidates the old gate
-                // before the new CI workflow starts. Only block when the gate is
-                // known to exist but failed, or on events outside that startup race.
-                if (!latestCiGate && (action === "auto_merge_enabled" || action === "synchronize")) {
-                  core.info(`CI Gate not yet present for head ${pr.head.sha}; skipping block on ${action} event.`);
+                // CI Gate may be missing/pending, or left as cancelled by a
+                // superseded draft run, immediately after auto-merge is
+                // enabled or a synchronize event starts a replacement CI run.
+                // Branch protection still prevents merge until a successful
+                // current-head CI Gate exists, so do not disable auto-merge
+                // for this startup race.
+                const ciGateStartupRaceAction =
+                  action === "auto_merge_enabled" || action === "synchronize";
+                const ciGateStartupRace =
+                  ciGateStartupRaceAction &&
+                  (!latestCiGate ||
+                    latestCiGate.status !== "completed" ||
+                    latestCiGate.conclusion === "cancelled");
+                if (ciGateStartupRace) {
+                  core.info(`CI Gate is ${ciGateStatus} for head ${pr.head.sha}; skipping block on ${action} event.`);
                 } else {
                   policyFailures.push(`CI Gate is not completed successfully for head ${pr.head.sha}: ${ciGateStatus}`);
                   shouldDisableAutoMerge = true;

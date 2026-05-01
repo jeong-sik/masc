@@ -17,6 +17,22 @@ import { StatusChip } from '../common/status-chip'
 import { CopyIdButton } from '../common/copy-id-button'
 import { TextInput } from '../common/input'
 
+function ConfigCard({
+  class: cx,
+  title,
+  children,
+}: {
+  class?: string
+  title?: string
+  children: unknown
+}) {
+  return html`
+    <div class="rounded border border-[var(--color-border-default)] bg-[var(--white-3)] ${cx ?? ''}" title=${title}>
+      ${children}
+    </div>
+  `
+}
+
 /** Pure: what string goes into the clipboard when the operator taps the
     copy icon next to a path row? Always the absolute path — not the
     ~-collapsed display string — because the dominant use case (copy →
@@ -159,7 +175,7 @@ function ConfigRow({
   const showSourceBadge = !isRoot && (rootSource === '' || item.source !== rootSource)
 
   return html`
-    <div class="rounded border border-[var(--color-border-default)] bg-[var(--white-3)] px-3 py-3" title=${item.path}>
+    <${ConfigCard} class="px-3 py-3" title=${item.path}>
       <div class="mb-2 flex flex-wrap items-center gap-2">
         <div class="text-2xs uppercase tracking-1 text-[var(--color-fg-muted)]">${label}</div>
         <${StatusChip} tone=${toneClass(item.exists ? 'ready' : item.source === 'invalid_env' ? 'invalid_env' : 'warn')}>${item.exists ? 'present' : 'missing'}<//>
@@ -185,7 +201,7 @@ function ConfigRow({
             <div class="mt-2 text-2xs text-[var(--color-fg-muted)]">${pathInfo.context}</div>
           `
         : null}
-    </div>
+    <//>
   `
 }
 
@@ -218,16 +234,16 @@ function RuntimeMetaRow({
   value: string
 }) {
   return html`
-    <div class="flex items-center justify-between gap-3 rounded border border-[var(--color-border-default)] bg-[var(--white-3)] px-3 py-2">
+    <${ConfigCard} class="flex items-center justify-between gap-3 px-3 py-2">
       <div class="text-2xs uppercase tracking-1 text-[var(--color-fg-muted)]">${label}</div>
       <div class="break-all text-right font-mono text-xs text-[var(--color-fg-primary)]">${value}</div>
-    </div>
+    <//>
   `
 }
 
 function DiagnosticRow({ item }: { item: DashboardRuntimeDiagnostic }) {
   return html`
-    <div class="rounded border border-[var(--color-border-default)] bg-[var(--white-3)] px-3 py-3">
+    <${ConfigCard} class="px-3 py-3">
       <div class="mb-1 flex flex-wrap items-center gap-2">
         <${StatusChip} tone="neutral">${item.kind}<//>
         ${item.signal
@@ -238,7 +254,7 @@ function DiagnosticRow({ item }: { item: DashboardRuntimeDiagnostic }) {
         <span class="text-2xs text-[var(--color-fg-muted)]">${item.ts}</span>
       </div>
       <div class="text-xs leading-relaxed text-[var(--color-fg-primary)]">${item.message}</div>
-    </div>
+    <//>
   `
 }
 
@@ -326,7 +342,7 @@ function KeeperRuntimePanel({ runtime }: { runtime: KeeperRuntimeResolved | null
   const envCount = KEEPER_RUNTIME_ROWS.filter(r => runtime[r.key]?.source === 'env').length
 
   return html`
-    <div class="mt-4 rounded border border-[var(--color-border-default)] bg-[var(--white-3)] px-4 py-4">
+    <${ConfigCard} class="mt-4 px-4 py-4">
       <div class="mb-3 flex flex-wrap items-center gap-2">
         <div class="text-2xs uppercase tracking-1 text-[var(--color-fg-muted)]">keeper runtime limits</div>
         ${tomlCount > 0 ? html`
@@ -354,7 +370,7 @@ function KeeperRuntimePanel({ runtime }: { runtime: KeeperRuntimeResolved | null
           `
         })}
       </div>
-    </div>
+    <//>
   `
 }
 
@@ -393,7 +409,7 @@ function RuntimeProbePanel() {
   const signal = assessment?.signal ?? null
 
   return html`
-    <div class="mt-4 rounded border border-[var(--color-border-default)] bg-[var(--white-3)] px-4 py-4">
+    <${ConfigCard} class="mt-4 px-4 py-4">
       <div class="mb-3 flex flex-wrap items-center gap-2">
         <div class="text-2xs uppercase tracking-1 text-[var(--color-fg-muted)]">ollama warm / kv probe</div>
         <${StatusChip} tone=${probeTone(signal, probe?.probe_ok)}>${probeSignalLabel(signal)}<//>
@@ -490,7 +506,7 @@ function RuntimeProbePanel() {
               : null}
           `
         : null}
-    </div>
+    <//>
   `
 }
 
@@ -629,15 +645,15 @@ export function ConfigResolutionPanel({
                 <div class="flex flex-col gap-3">
                   ${runtimeResolution.diagnostics.length === 0
                     ? html`
-                        <div class="rounded border border-[var(--color-border-default)] bg-[var(--white-3)] px-3 py-3 text-xs text-[var(--color-fg-muted)]">
+                        <${ConfigCard} class="px-3 py-3 text-xs text-[var(--color-fg-muted)]">
                           최근 runtime warning이 없습니다.
-                        </div>
+                        <//>
                       `
                     : isFilteringDiagnostics && visibleDiagnostics.length === 0
                       ? html`
-                          <div class="rounded border border-[var(--color-border-default)] bg-[var(--white-3)] px-3 py-3 text-center text-xs text-[var(--color-fg-muted)]">
+                          <${ConfigCard} class="px-3 py-3 text-center text-xs text-[var(--color-fg-muted)]">
                             필터 결과 없음 (${runtimeResolution.diagnostics.length} diagnostics)
-                          </div>
+                          <//>
                         `
                       : visibleDiagnostics.map(item => html`<${DiagnosticRow} item=${item} />`)}
                 </div>

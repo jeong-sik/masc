@@ -30,6 +30,15 @@ import { ringFocusClasses } from './common/ring'
 
 const buildIdentityOpen = signal(false)
 
+function BuildInfoRow({ label, children }: { label: string; children: unknown }) {
+  return html`
+    <div class="flex justify-between gap-3 text-xs text-[color:var(--color-fg-muted)]">
+      <span>${label}</span>
+      ${children}
+    </div>
+  `
+}
+
 const LazyOverview = lazy(async () => ({ default: (await import('./overview/overview')).Overview }))
 const LazyStatus = lazy(async () => ({ default: (await import('./status')).Status }))
 const LazyWork = lazy(async () => ({ default: (await import('./work')).Work }))
@@ -242,12 +251,10 @@ export function BuildIdentityBadge() {
       ${buildIdentityOpen.value
         ? html`
             <div class="absolute top-[calc(100%+8px)] right-0 min-w-70 rounded border border-solid border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2.5 shadow-[0_10px_24px_rgba(0,0,0,0.22)] grid gap-1.5">
-              <div class="flex justify-between gap-3 text-xs text-[color:var(--color-fg-muted)]">
-                <span>릴리즈</span>
+              <${BuildInfoRow} label="릴리즈">
                 <strong class="text-[color:var(--color-fg-secondary)] text-right">${build?.release_version ?? status?.version ?? 'unknown'}</strong>
-              </div>
-              <div class="flex justify-between gap-3 text-xs text-[color:var(--color-fg-muted)]">
-                <span>커밋</span>
+              <//>
+              <${BuildInfoRow} label="커밋">
                 ${(() => {
                   const url = githubCommitUrl(build?.commit)
                   const text = build?.commit ?? 'git 미감지 (dev)'
@@ -262,22 +269,19 @@ export function BuildIdentityBadge() {
                       >${text} ↗</a>`
                     : html`<strong class="text-[color:var(--color-fg-secondary)] text-right">${text}</strong>`
                 })()}
-              </div>
-              <div class="flex justify-between gap-3 text-xs text-[color:var(--color-fg-muted)]">
-                <span>서버 시작</span>
+              <//>
+              <${BuildInfoRow} label="서버 시작">
                 <strong class="text-[color:var(--color-fg-secondary)] text-right">${build?.started_at ? html`<${TimeAgo} timestamp=${build.started_at} />` : '알 수 없음'}</strong>
-              </div>
-              <div class="flex justify-between gap-3 text-xs text-[color:var(--color-fg-muted)]">
-                <span>업타임</span>
+              <//>
+              <${BuildInfoRow} label="업타임">
                 <strong
                   class="text-[color:var(--color-fg-secondary)] text-right tabular-nums"
                   title=${typeof build?.uptime_seconds === 'number' ? `${build.uptime_seconds}s raw` : undefined}
                 >${formatUptimeSecondsHuman(build?.uptime_seconds)}</strong>
-              </div>
-              <div class="flex justify-between gap-3 text-xs text-[color:var(--color-fg-muted)]">
-                <span>쉘 스냅샷</span>
+              <//>
+              <${BuildInfoRow} label="쉘 스냅샷">
                 <strong class="text-[color:var(--color-fg-secondary)] text-right">${status?.generated_at ? html`<${TimeAgo} timestamp=${status.generated_at} />` : '알 수 없음'}</strong>
-              </div>
+              <//>
             </div>
           `
         : null}

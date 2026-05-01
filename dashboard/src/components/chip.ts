@@ -26,6 +26,7 @@
 
 import { html } from 'htm/preact'
 import type { ComponentChildren, VNode } from 'preact'
+import { MONO_STACK } from './common/font-stacks'
 
 export type ChipKind =
   | 'neutral'
@@ -125,8 +126,6 @@ const SIZE_STYLE: Record<ChipSize, SizeStyle> = {
   lg: { height: '22px', padding: '0 9px', fontSize: '11px' },
 }
 
-const MONO_STACK =
-  'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace'
 
 const KIND_ANNOUNCE: Record<Exclude<ChipKind, 'neutral' | 'ghost'>, string> = {
   brass: 'highlighted',

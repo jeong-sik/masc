@@ -60,6 +60,32 @@ function writeKeeperChatInternalVisible(value: boolean): void {
   } catch {}
 }
 
+function GhostButton({
+  disabled,
+  onClick,
+  ariaExpanded,
+  class: cx,
+  children,
+}: {
+  disabled?: boolean
+  onClick?: () => void
+  ariaExpanded?: boolean
+  class?: string
+  children: unknown
+}) {
+  return html`
+    <button
+      type="button"
+      class="rounded border border-[var(--color-border-default)] bg-[var(--white-3)] px-3 py-1.5 text-2xs text-[var(--color-fg-muted)] transition-colors hover:bg-[var(--white-6)] hover:text-[var(--color-fg-primary)] ${cx ?? ''}"
+      disabled=${disabled}
+      onClick=${onClick}
+      aria-expanded=${ariaExpanded}
+    >
+      ${children}
+    </button>
+  `
+}
+
 function quietReasonLabel(reason?: string | null): string {
   switch (reason) {
     case 'quiet_hours':
@@ -185,14 +211,9 @@ export function KeeperDiagnosticSummary({
     <div class="py-3 px-4 rounded border border-[var(--color-border-default)] bg-[rgba(5,14,31,0.55)]">
       <div class="mb-3 flex items-center justify-between gap-3">
         <div class="text-2xs font-semibold uppercase tracking-4 text-[var(--color-fg-muted)]">명시적 상태 조회</div>
-        <button
-          type="button"
-          class="rounded border border-[var(--color-border-default)] bg-[var(--white-3)] px-3 py-1.5 text-2xs text-[var(--color-fg-muted)] transition-colors hover:bg-[var(--white-6)] hover:text-[var(--color-fg-primary)]"
-          disabled=${busy}
-          onClick=${() => { void refreshStatus() }}
-        >
+        <${GhostButton} disabled=${busy} onClick=${() => { void refreshStatus() }}>
           ${busy ? '불러오는 중...' : (detail ? '상태 새로고침' : '상태 불러오기')}
-        </button>
+        <//>
       </div>
       <div class="flex flex-wrap gap-1.5 mb-2">
         ${continuityStateLabel(diagnostic?.continuity_state)
@@ -309,30 +330,19 @@ export function KeeperConversationPanel({
             </div>
           </div>
           <div class="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              class="rounded border border-[var(--color-border-default)] bg-[var(--white-3)] px-3 py-1.5 text-2xs text-[var(--color-fg-muted)] transition-colors hover:bg-[var(--white-6)] hover:text-[var(--color-fg-primary)]"
-              onClick=${toggleMetadata}
-              aria-expanded=${showMetadata}
-            >
+            <${GhostButton} onClick=${toggleMetadata} ariaExpanded=${showMetadata}>
               ${showMetadata ? '메타데이터 숨김' : '메타데이터 표시'}
-            </button>
-            <button
-              type="button"
-              class="rounded border border-[var(--color-border-default)] bg-[var(--white-3)] px-3 py-1.5 text-2xs text-[var(--color-fg-muted)] transition-colors hover:bg-[var(--white-6)] hover:text-[var(--color-fg-primary)] ${showInternal ? 'border-[rgba(167,139,250,0.3)] text-[var(--purple)]' : ''}"
+            <//>
+            <${GhostButton}
               onClick=${toggleInternal}
-              aria-expanded=${showInternal}
+              ariaExpanded=${showInternal}
+              class=${showInternal ? 'border-[rgba(167,139,250,0.3)] text-[var(--purple)]' : ''}
             >
               ${showInternal ? '내부 메시지 숨김' : '내부 메시지 표시'}
-            </button>
+            </${GhostButton}>
             ${!historyExpanded
               ? html`
-                  <button
-                    type="button"
-                    class="rounded border border-[var(--color-border-default)] bg-[var(--white-3)] px-3 py-1.5 text-2xs text-[var(--color-fg-muted)] transition-colors hover:bg-[var(--white-6)] hover:text-[var(--color-fg-primary)]"
-                    disabled=${hydrating}
-                    onClick=${() => { void expandHistory() }}
-                  >
+                  <${GhostButton} disabled=${hydrating} onClick=${() => { void expandHistory() }}>
                     ${hydrating
                       ? '불러오는 중...'
                       : rawThread.length === 0

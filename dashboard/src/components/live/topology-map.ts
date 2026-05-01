@@ -155,53 +155,109 @@ function nodeShape(kind: 'agent' | 'keeper' | 'task'): string {
   }
 }
 
+interface VisTopologyNode {
+  id: string
+  label: string
+  title: string
+  shape: string
+  color: {
+    background: string
+    border: string
+    highlight: { background: string; border: string }
+    hover: { background: string; border: string }
+  }
+  font: { color: string; size: number }
+  size: number
+}
+
+interface VisTopologyEdge {
+  id: string
+  from: string
+  to: string
+  color: { color: string; highlight: string }
+  arrows: { to: { enabled: boolean; scaleFactor: number } }
+  dashes: boolean
+  width: number
+}
+
+function toVisNodes(graph: TopologyGraph): VisTopologyNode[] {
+  return graph.nodes.map(n => {
+    const color = topologyNodeColor(n.kind, n.status)
+    return {
+      id: n.id,
+      label: n.label,
+      title: `${n.id} · ${n.status}`,
+      shape: nodeShape(n.kind),
+      color: {
+        background: color,
+        border: color,
+        highlight: { background: color, border: 'var(--color-status-warn)' },
+        hover: { background: color, border: 'var(--white-pure)' },
+      },
+      font: { color: 'var(--frost-100)', size: 11 },
+      size: n.kind === 'keeper' ? 14 : n.kind === 'task' ? 8 : 10,
+    }
+  })
+}
+
+function toVisEdges(graph: TopologyGraph): VisTopologyEdge[] {
+  return graph.edges.map(e => ({
+    id: `${e.kind}:${e.from}->${e.to}`,
+    from: e.from,
+    to: e.to,
+    color: {
+      color: e.kind === 'supervised_by'
+        ? 'rgba(74, 222, 128, 0.35)'
+        : 'rgba(251, 191, 36, 0.45)',
+      highlight: e.kind === 'supervised_by'
+        ? 'rgba(74, 222, 128, 0.7)'
+        : 'rgba(251, 191, 36, 0.8)',
+    },
+    arrows: { to: { enabled: true, scaleFactor: 0.45 } },
+    dashes: e.kind === 'assigned_to',
+    width: 1,
+  }))
+}
+
+function staleIdsFor<T extends { id: string }>(dataSet: DataSet<T>, nextItems: T[]) {
+  const nextIds = new Set(nextItems.map(item => item.id))
+  return dataSet.getIds().filter(id => !nextIds.has(String(id)))
+}
+
+function syncTopologyData(
+  nodesData: DataSet<VisTopologyNode>,
+  edgesData: DataSet<VisTopologyEdge>,
+  graph: TopologyGraph,
+) {
+  const nextNodes = toVisNodes(graph)
+  const staleNodeIds = staleIdsFor(nodesData, nextNodes)
+  if (staleNodeIds.length > 0) {
+    nodesData.remove(staleNodeIds)
+  }
+  if (nextNodes.length > 0) {
+    nodesData.update(nextNodes)
+  }
+
+  const nextEdges = toVisEdges(graph)
+  const staleEdgeIds = staleIdsFor(edgesData, nextEdges)
+  if (staleEdgeIds.length > 0) {
+    edgesData.remove(staleEdgeIds)
+  }
+  if (nextEdges.length > 0) {
+    edgesData.update(nextEdges)
+  }
+}
+
 export function LiveTopologyMap() {
   const graph = liveTopologyGraph.value
   const containerRef = useRef<HTMLDivElement>(null)
   const networkRef = useRef<Network | null>(null)
+  const nodesDataRef = useRef<DataSet<VisTopologyNode> | null>(null)
+  const edgesDataRef = useRef<DataSet<VisTopologyEdge> | null>(null)
 
   useEffect(() => {
     const container = containerRef.current
     if (!container) return
-
-    const nodesData = new DataSet(
-      graph.nodes.map(n => {
-        const color = topologyNodeColor(n.kind, n.status)
-        return {
-          id: n.id,
-          label: n.label,
-          title: `${n.id} · ${n.status}`,
-          shape: nodeShape(n.kind),
-          color: {
-            background: color,
-            border: color,
-            highlight: { background: color, border: 'var(--color-status-warn)' },
-            hover: { background: color, border: 'var(--white-pure)' },
-          },
-          font: { color: 'var(--frost-100)', size: 11 },
-          size: n.kind === 'keeper' ? 14 : n.kind === 'task' ? 8 : 10,
-        }
-      }),
-    )
-
-    const edgesData = new DataSet(
-      graph.edges.map((e, i) => ({
-        id: `e${i}`,
-        from: e.from,
-        to: e.to,
-        color: {
-          color: e.kind === 'supervised_by'
-            ? 'rgba(74, 222, 128, 0.35)'
-            : 'rgba(251, 191, 36, 0.45)',
-          highlight: e.kind === 'supervised_by'
-            ? 'rgba(74, 222, 128, 0.7)'
-            : 'rgba(251, 191, 36, 0.8)',
-        },
-        arrows: { to: { enabled: true, scaleFactor: 0.45 } },
-        dashes: e.kind === 'assigned_to',
-        width: 1,
-      })),
-    )
 
     const options = {
       nodes: { borderWidth: 1, borderWidthSelected: 2.5 },
@@ -228,12 +284,17 @@ export function LiveTopologyMap() {
       },
     }
 
+    const nodesData = new DataSet<VisTopologyNode>([])
+    const edgesData = new DataSet<VisTopologyEdge>([])
+    nodesDataRef.current = nodesData
+    edgesDataRef.current = edgesData
+
     const network = new Network(container, { nodes: nodesData, edges: edgesData }, options)
     networkRef.current = network
 
     network.on('click', params => {
       if (params.nodes.length > 0) {
-        const nodeId: string = params.nodes[0]
+        const nodeId = String(params.nodes[0])
         if (nodeId.startsWith('agent:')) {
           openAgentDetail(nodeId.slice('agent:'.length))
         }
@@ -243,20 +304,28 @@ export function LiveTopologyMap() {
     return () => {
       network.destroy()
       networkRef.current = null
+      nodesDataRef.current = null
+      edgesDataRef.current = null
     }
-  }, [graph])
+  }, [])
 
-  if (graph.nodes.length === 0) {
-    return html`
-      <div class="flex items-center justify-center h-48 text-sm text-[var(--color-fg-muted)] rounded border border-[var(--color-border-divider)] bg-[var(--white-2)]">
-        연결된 에이전트 없음 — 에이전트가 접속하면 여기에 표시됩니다.
-      </div>
-    `
-  }
+  useEffect(() => {
+    const nodesData = nodesDataRef.current
+    const edgesData = edgesDataRef.current
+    if (!nodesData || !edgesData) return
+    syncTopologyData(nodesData, edgesData, graph)
+  }, [graph])
 
   return html`
     <div class="relative w-full rounded border border-[var(--color-border-divider)] bg-[#0c1017] overflow-hidden">
       <div ref=${containerRef} class="w-full h-64" role="img" aria-label="라이브 에이전트 토폴로지 맵"></div>
+      ${graph.nodes.length === 0
+        ? html`
+          <div class="absolute inset-0 flex items-center justify-center text-sm text-[var(--color-fg-muted)]">
+            연결된 에이전트 없음 — 에이전트가 접속하면 여기에 표시됩니다.
+          </div>
+        `
+        : null}
       <div class="absolute bottom-2 right-2 flex flex-wrap gap-2.5 text-3xs text-[var(--color-fg-muted)]">
         <span class="flex items-center gap-1"><span class="inline-block size-2 rounded-full bg-[var(--color-status-ok)]"></span>Keeper</span>
         <span class="flex items-center gap-1"><span class="inline-block size-2 rounded-full bg-[var(--cyan)]"></span>에이전트</span>

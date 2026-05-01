@@ -326,6 +326,14 @@ describe('deriveTaskAlerts', () => {
     expect(alerts).toHaveLength(1)
   })
 
+  it('treats invalid updated_at as stale', () => {
+    const tasks: Task[] = [
+      makeTask({ id: 't1', status: 'awaiting_verification', updated_at: 'not-a-date' }),
+    ]
+    const alerts = deriveTaskAlerts(tasks, NOW)
+    expect(alerts).toHaveLength(1)
+  })
+
   it('returns task id and title in alert', () => {
     const tasks: Task[] = [makeTask({ id: 't99', title: 'Fix bug', status: 'awaiting_verification', updated_at: STALE_UPDATED })]
     const alerts = deriveTaskAlerts(tasks, NOW)

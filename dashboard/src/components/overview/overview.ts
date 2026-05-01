@@ -25,6 +25,7 @@ import type {
   OperatorAttentionItem,
 } from '../../types/dashboard-mission'
 import { openAgentDetail } from '../agent-detail-state'
+import { nowSecondsSignal, useNowSecondsTicker } from '../../lib/now-signal'
 
 const CARD = 'rounded border border-card-border/40 bg-card/18 p-4 shadow-sm shadow-black/8'
 
@@ -438,15 +439,17 @@ function KeeperStrip({ keeperList }: { keeperList: readonly Keeper[] }) {
 // ─── Root ────────────────────────────────────────────────────────────────────
 
 export function Overview() {
+  useNowSecondsTicker()
   const snap = missionSnapshot.value
   const taskList = tasks.value
   const keeperList = keepers.value
   const agentList = agents.value
+  const nowMs = nowSecondsSignal.value * 1000
   const active = useMemo(() => pickActiveSession(snap), [snap])
   const counts = useMemo(() => computeFunnelCounts(taskList, active), [taskList, active])
   const attention = snap?.summary?.top_attention ?? null
   const agentAlerts = useMemo(() => deriveAgentAlerts(agentList), [agentList])
-  const taskAlerts = useMemo(() => deriveTaskAlerts(taskList), [taskList])
+  const taskAlerts = useMemo(() => deriveTaskAlerts(taskList, nowMs), [taskList, nowMs])
   return html`
     <div class="flex flex-col gap-5">
       <${AlertPanel} agentAlerts=${agentAlerts} taskAlerts=${taskAlerts} />

@@ -178,6 +178,18 @@ let () =
                        true
                      with Not_found -> false)
               | Error msg -> fail msg);
+          test_case "render_prompt_template replaces whitespace placeholders" `Quick
+            (fun () ->
+              with_registry @@ fun ~dir:_ ~prompts_dir ->
+              write_file
+                (Filename.concat prompts_dir "test.unlisted.vars.md")
+                (markdown_fixture "test.unlisted.vars" "hello {{ missing_var }}");
+              match
+                Prompt_registry.render_prompt_template "test.unlisted.vars"
+                  [ (" missing_var ", "world") ]
+              with
+              | Ok rendered -> check string "rendered" "hello world" rendered
+              | Error msg -> fail msg);
           test_case "render_prompt_template detects variables without metadata" `Quick
             (fun () ->
               with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
@@ -190,6 +202,28 @@ let () =
                        ignore
                          (Str.search_forward
                             (Str.regexp_string "Unresolved variables")
+                            msg 0);
+                       true
+                     with Not_found -> false)
+              | Ok rendered ->
+                  fail ("expected unresolved variable error, got: " ^ rendered));
+          test_case "render_prompt_template validates effective template variables" `Quick
+            (fun () ->
+              with_registry @@ fun ~dir:_ ~prompts_dir ->
+              write_file
+                (Filename.concat prompts_dir "dashboard.operator_judge.md")
+                (markdown_fixture "dashboard.operator_judge"
+                   "operator facts {{runtime_only}}");
+              match
+                Prompt_registry.render_prompt_template "dashboard.operator_judge"
+                  [ ("facts_json", "{}") ]
+              with
+              | Error msg ->
+                  check bool "reports runtime-only variable" true
+                    (try
+                       ignore
+                         (Str.search_forward
+                            (Str.regexp_string "runtime_only")
                             msg 0);
                        true
                      with Not_found -> false)

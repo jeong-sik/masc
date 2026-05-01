@@ -124,7 +124,7 @@ function toolStyle(name: string): { icon: string; color: string } {
 function durableStyle(kind: unknown): { icon: string; color: string } | null {
   switch (kind) {
     case 'llm_request':      return { icon: '>', color: TRACE_TONE.infoText }
-    case 'llm_response':     return { icon: '<', color: TRACE_TONE.infoText }
+    case 'llm_response':     return { icon: '<', color: TRACE_TONE.brassText }
     case 'error_occurred':   return { icon: '!', color: 'text-[var(--color-status-err)]' }
     case 'tool_called':      return { icon: 't', color: 'text-[var(--color-status-ok)]' }
     case 'tool_completed':   return { icon: 'x', color: 'text-[var(--color-status-ok)]' }

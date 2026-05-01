@@ -27,6 +27,7 @@ const TOOL_TONE = {
   info: 'text-[var(--color-info-fg)]',
   ok: 'text-[var(--color-status-ok)]',
   warn: 'text-[var(--color-warn-fg)]',
+  accent: 'text-[var(--color-accent-fg)]',
 } as const
 
 const TOOL_CATEGORIES: ToolCategoryEntry[] = [
@@ -41,10 +42,10 @@ const TOOL_CATEGORIES: ToolCategoryEntry[] = [
     icon: 'E', color: 'text-[var(--color-status-warn)]', label: 'edit' },
   // File read / filesystem
   { match: n => n.includes('fs_read') || n.includes('code_read'),
-    icon: 'F', color: 'text-[var(--purple)]', label: 'file' },
+    icon: 'F', color: TOOL_TONE.info, label: 'file' },
   // Board / Social — community interaction
   { match: n => n.includes('board') || n.includes('social'),
-    icon: 'B', color: 'text-[var(--purple)]', label: 'board' },
+    icon: 'B', color: TOOL_TONE.accent, label: 'board' },
   // Search / Read / Library / Symbols
   { match: n => n.includes('search') || n.includes('symbols') || n.includes('library'),
     icon: 'S', color: TOOL_TONE.info, label: 'search' },

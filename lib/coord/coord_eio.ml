@@ -79,7 +79,7 @@ let create_config ~fs ?clock base_path =
     base_path = Common.masc_dir_from_base_path ~base_path;
     node_id = Printf.sprintf "node_%d" (Unix.getpid ());
     cluster_name = "default";
-    pubsub_max_messages = Backend.pubsub_max_messages_from_env ();
+    pubsub_max_messages = Backend.pubsub_max_messages;
   } in
   let backend = Backend.FileSystem.create ~fs ?clock backend_config in
   {

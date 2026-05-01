@@ -51,18 +51,18 @@ val default_agent_rate : float
 (** Default per-agent requests per second: [20.0]. *)
 val default_agent_burst : int
 (** Default per-agent burst capacity: [50]. *)
-val rate_from_env : unit -> float
-val burst_from_env : unit -> int
-val agent_rate_from_env : unit -> float
-(** Per-agent rate from [MASC_AGENT_RATE_LIMIT] env var (default [20.0]). *)
-val agent_burst_from_env : unit -> int
-(** Per-agent burst from [MASC_AGENT_RATE_BURST] env var (default [50]). *)
+val rate_of_config : unit -> float
+val burst_of_config : unit -> int
+val agent_rate_of_config : unit -> float
+(** Per-agent rate from cached [MASC_AGENT_RATE_LIMIT] config (default [20.0]). *)
+val agent_burst_of_config : unit -> int
+(** Per-agent burst from cached [MASC_AGENT_RATE_BURST] config (default [50]). *)
 val rate : t -> float
 val burst : t -> int
 val create : ?rate:float -> ?burst:int -> unit -> t
-val create_from_env : unit -> t
-val create_agent_from_env : unit -> t
-(** Like [create_from_env] but uses the per-agent rate/burst env vars. *)
+val create_of_config : unit -> t
+val create_agent_of_config : unit -> t
+(** Like [create_of_config] but uses the per-agent rate/burst config. *)
 
 (** {1 Agent Quota Tier Contract} *)
 

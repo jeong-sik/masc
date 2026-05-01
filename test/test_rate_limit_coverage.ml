@@ -241,15 +241,15 @@ let test_cleanup_keeps_recent () =
    ============================================================ *)
 
 let test_rate_from_env_returns_float () =
-  let rate = Rate_limit.rate_from_env () in
+  let rate = Rate_limit.rate_of_config () in
   check bool "rate is positive" true (rate > 0.0)
 
 let test_burst_from_env_returns_int () =
-  let burst = Rate_limit.burst_from_env () in
+  let burst = Rate_limit.burst_of_config () in
   check bool "burst is positive" true (burst > 0)
 
 let test_create_from_env () =
-  let limiter = Rate_limit.create_from_env () in
+  let limiter = Rate_limit.create_of_config () in
   check bool "rate positive" true ((Rate_limit.rate limiter) > 0.0);
   check bool "burst positive" true ((Rate_limit.burst limiter) > 0)
 
@@ -363,15 +363,15 @@ let test_default_agent_burst () =
   check int "default agent burst" 50 Rate_limit.default_agent_burst
 
 let test_agent_rate_from_env_returns_float () =
-  let rate = Rate_limit.agent_rate_from_env () in
+  let rate = Rate_limit.agent_rate_of_config () in
   check bool "agent rate is positive" true (rate > 0.0)
 
 let test_agent_burst_from_env_returns_int () =
-  let burst = Rate_limit.agent_burst_from_env () in
+  let burst = Rate_limit.agent_burst_of_config () in
   check bool "agent burst is positive" true (burst > 0)
 
 let test_create_agent_from_env () =
-  let limiter = Rate_limit.create_agent_from_env () in
+  let limiter = Rate_limit.create_agent_of_config () in
   check bool "agent rate positive" true ((Rate_limit.rate limiter) > 0.0);
   check bool "agent burst positive" true ((Rate_limit.burst limiter) > 0)
 

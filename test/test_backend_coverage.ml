@@ -74,7 +74,7 @@ let test_get_status_all_backends () =
 
 let test_pubsub_max_messages_env () =
   (* Test the default value - cannot easily test env override in unit test *)
-  let result = Backend_types.pubsub_max_messages_from_env () in
+  let result = Backend_types.pubsub_max_messages in
   check bool "pubsub default >= 100" true (result >= 100)
 
 (* ============================================================ *)

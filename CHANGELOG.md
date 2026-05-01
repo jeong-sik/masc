@@ -1,6 +1,24 @@
 # Changelog
 
 
+## [0.19.1] - 2026-05-01
+
+Post-v0.19.0 release-truth follow-up for the keeper Event Layer consumer path, dashboard design-system baseline, and `lib/dune` module-discovery cleanup. No breaking API changes.
+
+### Added
+
+- `Keeper_registry.dequeue_event` now provides the consumer-side registry API for FIFO stimulus consumption, snapshot depth updates, empty/missing-keeper `None`, and base-path isolation (#12413).
+- Turn entry now consumes one queued stimulus per tick, completing the producer-to-consumer Event Layer path after the `wakeup_keeper` and heartbeat-gate changes (#12420).
+- RFC-0020 Rule 2 now has a Prometheus override counter and decision-table regression coverage for the queue-non-empty heartbeat override (#12417, #12419).
+- Dashboard design-system primitives now cover focus, interaction, portal/z-index, IDE-grade components, agent-experience patterns, ARIA widgets, a11y helpers, token validation, and paired component tests (#12406, #12421).
+
+### Changed
+
+- Keeper run cascade context now uses a typed boundary for runtime cascade names (#12418).
+- `lib/dune` now relies on Dune `:standard` module auto-discovery while preserving the checked-in `private_modules` surface, reducing merge conflicts for new modules (#12422).
+- Package and release metadata advanced from `0.19.0` to `0.19.1`.
+- Roadmap, product operating plan, opam metadata, and spec baseline version references synced to `0.19.1`.
+
 ## [0.19.0] - 2026-05-01
 
 Multi-repository architecture Phase 1. Introduces explicit repository registry and keeper-scoped access control, resolving the basepath mixing problem where all Git branches from nested projects were conflated.
@@ -13,9 +31,13 @@ Multi-repository architecture Phase 1. Introduces explicit repository registry a
 - `Repo_git` and `Repo_sync` modules for branch listing and sync scheduling (#12401).
 - HTTP API endpoints under `/api/v1/repositories` for listing, adding, removing, updating, discovering, and syncing repositories (#12401).
 - `Keeper_repo_mapping.validate_path_access` integration in `keeper_shell_ops` for path-level access enforcement (#12401).
+- `wakeup_keeper` now accepts optional `?stimulus` payloads and enqueues them into the keeper Event Layer before flipping the existing wakeup hint (#12411).
+- Smart heartbeat gating now honors RFC-0020 Rule 2 by forcing emit when the keeper Event Layer queue is non-empty, preventing queued stimuli from being starved by skip decisions (#12412).
+- Keeper turn-entry telemetry now records Event Layer queue depth for operator-visible runtime diagnosis (#12415).
 
 ### Changed
 
+- Quadrant 1 quick wins externalize dashboard context thresholds and keeper watchdog/retry constants, add provider/cooldown/queue metrics, and replace the `auto` model-selector magic string with a typed boundary (#12416).
 - Package version advanced from `0.18.25` to `0.19.0`.
 - Spec baseline and snapshot metadata synced to `0.19.0`.
 

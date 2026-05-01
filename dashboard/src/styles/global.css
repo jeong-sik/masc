@@ -49,63 +49,63 @@
 
 @utility card {
   background: var(--card);
-  border: 1px solid var(--color-border-default);
-  border-radius: var(--r-2);
-  padding: 16px;
+  border: 1px solid var(--card-border);
+  border-radius: var(--r-1);
+  padding: var(--spacing-card);
   box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 0.03);
+    inset 0 1px 0 rgb(255 255 255 / 0.02);
   transition: border-color 0.15s, background 0.15s;
-  &:hover { border-color: var(--color-border-strong); background: var(--color-bg-elevated); }
+  &:hover { border-color: var(--border-strong); background: var(--bg-panel-hover); }
 }
 
 @utility monitor-headline {
-  font-size: 17px;
-  font-weight: 700;
+  font: var(--type-title);
+  font-weight: 650;
   color: var(--text-strong);
-  letter-spacing: 0;
+  letter-spacing: var(--track-normal);
   line-height: 1.25;
-  padding-bottom: 6px;
-  border-bottom: 1px solid var(--border-slate-12);
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--card-border);
 }
 
 @utility monitor-subheadline {
-  font-size: var(--fs-sm);
+  font-size: var(--fs-xs);
   color: var(--color-fg-muted);
-  line-height: 1.5;
-  margin-top: 6px;
+  line-height: 1.35;
+  margin-top: 4px;
 }
 
 @utility monitor-surface-card {
-  border: 1px solid var(--color-border-default);
-  border-radius: var(--r-2);
+  border: 1px solid var(--card-border);
+  border-radius: var(--r-1);
   background: var(--card);
 }
 
 @utility monitor-surface-card-strong {
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.03);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.02);
 }
 
 @utility monitor-surface-card-medium {
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.03);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.02);
 }
 
 @utility monitor-muted-panel {
-  border: 1px solid var(--border-slate-12);
-  border-radius: var(--r-2);
-  background: var(--white-3);
+  border: 1px solid var(--card-border);
+  border-radius: var(--r-1);
+  background: color-mix(in srgb, var(--color-bg-2) 72%, transparent);
 }
 
 /* ── Section header (reusable pattern) ─────────────────────── */
 
 @utility section-header {
-  font-size: 14px;
-  font-weight: 600;
+  font: var(--type-label);
+  font-weight: 650;
   color: var(--text-strong);
   text-transform: uppercase;
-  letter-spacing: 0.05em;
-  padding-bottom: 6px;
-  border-bottom: 1px solid var(--border-slate-12);
-  margin-bottom: 10px;
+  letter-spacing: var(--track-caps);
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--card-border);
+  margin-bottom: 8px;
 }
 
 /* ── Status Badge base ───────────────────────────────────────
@@ -116,13 +116,15 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 4px 12px;
-  border-radius: 9999px;
+  padding: 2px 7px;
+  border: 1px solid var(--card-border);
+  border-radius: var(--r-1);
   font-size: var(--fs-xs);
-  font-weight: 500;
-  letter-spacing: 0.02em;
-  line-height: 1.6;
+  font-weight: 650;
+  letter-spacing: var(--track-wide);
+  line-height: 1.35;
   white-space: nowrap;
+  text-transform: uppercase;
   background: var(--white-6);
   color: var(--color-fg-muted);
   &.active { background: var(--ok-22); color: var(--ok); }
@@ -140,17 +142,17 @@
 }
 
 @utility control-textarea {
-  padding: 8px 12px;
-  border: 1px solid var(--border-slate-16);
-  border-radius: 8px;
-  background: var(--white-3);
+  padding: 6px 8px;
+  border: 1px solid var(--card-border);
+  border-radius: var(--r-1);
+  background: color-mix(in srgb, var(--color-bg-2) 72%, transparent);
   color: var(--text-body);
-  font-size: var(--fs-base);
-  line-height: 1.5;
+  font-size: var(--fs-sm);
+  line-height: 1.4;
   transition: border-color 0.15s;
   resize: vertical;
   min-height: 64px;
-  &:focus { outline: none; border-color: rgba(71, 184, 255, 0.55); }
+  &:focus { outline: none; border-color: var(--border-strong); }
 }
 
 
@@ -164,19 +166,19 @@ table {
 
 thead th {
   text-align: left;
-  padding: 8px 12px;
+  padding: 6px 8px;
   font-size: var(--fs-xs);
-  font-weight: 600;
+  font-weight: 650;
   color: var(--color-fg-muted);
   text-transform: uppercase;
-  letter-spacing: 0.06em;
-  border-bottom: 1px solid var(--border-slate-16);
-  background: var(--white-3);
+  letter-spacing: var(--track-caps);
+  border-bottom: 1px solid var(--card-border);
+  background: color-mix(in srgb, var(--color-bg-2) 76%, transparent);
 }
 
 tbody td {
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border-slate-8);
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border-subtle);
   color: var(--text-body);
   vertical-align: top;
 }
@@ -187,6 +189,28 @@ tbody tr:nth-child(even) {
 
 tbody tr:hover {
   background: var(--white-5);
+}
+
+#app > div > header {
+  border-color: var(--card-border);
+  padding-block: 6px;
+  box-shadow: inset 0 -1px 0 rgb(var(--brass-glow) / 0.08);
+}
+
+#app > div > div.flex-1 {
+  gap: 6px;
+  padding: 6px;
+}
+
+#dashboard-side-rail,
+#main-content {
+  border-color: var(--card-border);
+  border-radius: var(--r-1);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.015);
+}
+
+#main-content > div {
+  padding: var(--spacing-card);
 }
 
 /* Tone border utilities — applied via toneClass() helper */

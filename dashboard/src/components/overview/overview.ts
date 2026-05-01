@@ -22,13 +22,11 @@ import { missionSnapshot } from '../../mission-store'
 import { agents, tasks, keepers } from '../../store'
 import type { Agent, Task, Keeper } from '../../types/core'
 import type {
-  DashboardMissionResponse,
   DashboardMissionSessionCard,
 } from '../../types/dashboard-mission'
 import { openAgentDetail } from '../agent-detail-state'
 import { openTaskDetail } from '../goals/task-detail-state'
 import { nowSecondsSignal, useNowSecondsTicker } from '../../lib/now-signal'
-
 
 // ─── Alert Panel ─────────────────────────────────────────────────────────────
 
@@ -49,35 +47,35 @@ export interface TaskAlert {
 }
 
 /** Derive a list of failing / offline agent alerts from the live agent list. */
-export function deriveAgentAlerts(agentList: readonly Agent[]): AgentAlert[] {
+export function deriveAgentAlerts(agentList: Agent[]): AgentAlert[] {
   return agentList
     .filter(a => a.status === 'offline' || a.status === 'inactive')
     .map(a => ({
       name: a.name,
-      display: a.koreanName && a.koreanName !== '' ? a.koreanName : a.name,
+      display: a.display_name || a.name,
       reason: a.status === 'offline' ? 'Offline' : 'Inactive',
       severity: 'critical',
     }))
 }
 
 /** Derive a list of stalled tasks or tasks needing attention. */
-export function deriveTaskAlerts(taskList: readonly Task[], nowMs: number): TaskAlert[] {
-  const STALL_THRESHOLD_MS = 10 * 60 * 1000
-  const alerts: TaskAlert[] = []
-  for (const t of taskList) {
-    if (t.status !== 'awaiting_verification') continue
-    const updated = t.updated_at ? Date.parse(t.updated_at) : NaN
-    if (Number.isFinite(updated) && nowMs - updated <= STALL_THRESHOLD_MS) continue
-    alerts.push({
+export function deriveTaskAlerts(taskList: Task[], nowMs: number): TaskAlert[] {
+  // Simple heuristic: tasks in 'awaiting_verification' for too long
+  const STALL_THRESHOLD_MS = 1000 * 60 * 10 // 10 mins
+  return taskList
+    .filter(t => t.status === 'awaiting_verification')
+    .filter(t => {
+      const updated = new Date(t.updated_at).getTime()
+      return nowMs - updated > STALL_THRESHOLD_MS
+    })
+    .map(t => ({
       id: t.id,
       title: t.title,
-      status: 'awaiting_verification',
-      assignee: t.assignee ?? null,
+      status: t.status,
+      assignee: t.assignee,
       severity: 'warn',
       task: t,
-    })
-  }
-  return alerts
+    }))
 }
 
 export function severityToneClass(severity?: string | null): string {
@@ -89,7 +87,7 @@ export function severityToneClass(severity?: string | null): string {
     case 'medium':
       return 'text-[var(--color-status-warn)]'
     default:
-      return 'text-[var(--color-fg-muted)]'
+      return 'text-[var(--color-fg-secondary)]'
   }
 }
 
@@ -111,7 +109,7 @@ function AlertPanel({ agentAlerts, taskAlerts }: { agentAlerts: AgentAlert[]; ta
         <${KpiStripIsland}
           cols=${2}
           cells=${[
-            { label: 'Critical', value: String(criticalCount), kind: 'err' },
+            { label: 'Critical', value: String(criticalCount), kind: 'danger' },
             { label: 'Warning', value: String(warnCount), kind: 'warn' },
           ]}
         />
@@ -151,56 +149,25 @@ export interface FunnelCounts {
   target: number | null
 }
 
-export function computeFunnelCounts(
-  taskList: readonly Task[],
-  active: DashboardMissionSessionCard | null,
-  nowMs: number = Date.now(),
-): FunnelCounts {
-  const todayMs = startOfTodayMs(nowMs)
-  let created = 0
-  let inProgress = 0
-  let awaiting = 0
-  let completed = 0
+export function computeFunnelCounts(taskList: Task[], active: DashboardMissionSessionCard | null): FunnelCounts {
+  const todayMs = startOfTodayMs()
+  const created = taskList.filter(t => parseIsoMs(t.created_at) >= todayMs).length
+  const inProgress = taskList.filter(t => t.status === 'claimed' || t.status === 'in_progress').length
+  const awaiting = taskList.filter(t => t.status === 'awaiting_verification').length
+  const completed = taskList.filter(t => t.status === 'done' && parseIsoMs(t.updated_at) >= todayMs).length
+  const target = active?.target_value ? parseInt(active.target_value, 10) : null
 
-  for (const t of taskList) {
-    const createdMs = parseIsoMs(t.created_at)
-    if (createdMs !== null && createdMs >= todayMs) created += 1
-
-    switch (t.status) {
-      case 'claimed':
-      case 'in_progress':
-        inProgress += 1
-        break
-      case 'awaiting_verification':
-        awaiting += 1
-        break
-      case 'done': {
-        const completedMs = parseIsoMs(t.completed_at)
-        if (completedMs !== null && completedMs >= todayMs) completed += 1
-        break
-      }
-      default:
-        break
-    }
-  }
-
-  const target =
-    typeof active?.required_count === 'number' && active.required_count > 0
-      ? active.required_count
-      : null
   return { created, inProgress, awaiting, completed, target }
 }
 
-function startOfTodayMs(nowMs: number): number {
-  const d = new Date(nowMs)
+function startOfTodayMs(): number {
+  const d = new Date()
   d.setHours(0, 0, 0, 0)
   return d.getTime()
 }
 
-function parseIsoMs(iso: string | null | undefined): number | null {
-  if (iso === null || iso === undefined || iso === '') return null
-  const ms = Date.parse(iso)
-  return Number.isFinite(ms) ? ms : null
+function parseIsoMs(iso: string): number {
+  return new Date(iso).getTime()
 }
 
 export function formatTargetRatio(counts: FunnelCounts): string {
@@ -230,10 +197,9 @@ function FunnelCard({ counts }: { counts: FunnelCounts }) {
 
 // ─── Mission Party ────────────────────────────────────────────────────────────
 
-export function progressPct(session: DashboardMissionSessionCard | null): number | null {
-  if (session === null) return null
+function progressPct(session: DashboardMissionSessionCard): number {
   const req = session.required_count ?? 0
-  if (req <= 0) return null
+  if (req <= 0) return 0
   const cur = session.seen_count ?? session.active_count ?? 0
   return Math.min(100, Math.round((cur / req) * 100))
 }
@@ -247,25 +213,23 @@ function MissionPartyCard({ active }: { active: DashboardMissionSessionCard | nu
     `
   }
 
-  const progress = progressPct(active) ?? 0
-  const status = active.status ?? 'unknown'
-  const members = active.member_names
+  const progress = progressPct(active)
 
   return html`
     <${SectionCard} title="Active Mission" data-testid="overview-party">
       <div class="space-y-4">
         <div class="flex items-center justify-between">
            <p class="text-xs font-semibold text-[var(--color-fg-default)] truncate flex-1 mr-4">
-             ${active.goal}
+             ${active.goal_id}
            </p>
            <div class="flex -space-x-1.5">
-             ${members.map(m => html`<${AgentAvatar} key=${m} name=${m} size="xs" class="ring-1 ring-[var(--color-bg-default)]" />`)}
+             ${active.members.map(m => html`<${AgentAvatar} key=${m} name=${m} size="xs" class="ring-1 ring-[var(--color-bg-default)]" />`)}
            </div>
         </div>
         
         <div class="grid grid-cols-2 gap-3">
           <${StatTile} label="Progress" value="${progress}%" variant="${progress > 80 ? 'accent' : 'default'}" />
-          <${StatTile} label="Status" value="${status.toUpperCase()}" variant="${status === 'running' || status === 'active' ? 'accent' : 'default'}" />
+          <${StatTile} label="Status" value="${active.status.toUpperCase()}" variant="${active.status === 'running' || active.status === 'active' ? 'accent' : 'default'}" />
         </div>
       </div>
     <//>
@@ -290,14 +254,12 @@ function keeperStatusToneClass(status?: string | null): string {
   }
 }
 
-export function pickActiveKeepers(keeperList: readonly Keeper[], max = 3): Keeper[] {
+function pickActiveKeepers(keeperList: Keeper[], max = 3): Keeper[] {
   return [...keeperList]
     .sort((a, b) => {
-      const tsA = parseIsoMs(a.last_heartbeat) ?? 0
-      const tsB = parseIsoMs(b.last_heartbeat) ?? 0
-      const pausedA = a.paused === true ? -1e15 : 0
-      const pausedB = b.paused === true ? -1e15 : 0
-      return tsB + pausedB - (tsA + pausedA)
+      const tsA = new Date(a.last_seen_at || 0).getTime()
+      const tsB = new Date(b.last_seen_at || 0).getTime()
+      return tsB - tsA
     })
     .slice(0, max)
 }
@@ -319,7 +281,7 @@ function KeeperStrip({ keeperList }: { keeperList: Keeper[] }) {
         ${activeKeepers.slice(0, 1).map(
           k => html`
             <${LifelineBar} 
-              label=${k.koreanName && k.koreanName !== '' ? k.koreanName : k.name} 
+              label=${k.display_name_ko || k.name} 
               bpm=${72} 
             />
           `,
@@ -330,10 +292,8 @@ function KeeperStrip({ keeperList }: { keeperList: Keeper[] }) {
               <li key=${k.name} class="flex items-center gap-2">
                 <${StatusDot} tone=${keeperStatusToneClass(k.status)} />
                 <div class="min-w-0">
-                  <p class="text-xs font-medium truncate">${k.koreanName && k.koreanName !== '' ? k.koreanName : k.name}</p>
-                  ${k.last_heartbeat !== undefined
-                    ? html`<${TimeAgo} timestamp=${k.last_heartbeat} class="text-3xs text-[var(--color-fg-muted)]" />`
-                    : null}
+                  <p class="text-xs font-medium truncate">${k.display_name_ko || k.name}</p>
+                  <${TimeAgo} timestamp=${k.last_seen_at} class="text-3xs text-[var(--color-fg-muted)]" />
                 </div>
               </li>
             `,
@@ -344,10 +304,10 @@ function KeeperStrip({ keeperList }: { keeperList: Keeper[] }) {
   `
 }
 
-export function pickActiveSession(snap: DashboardMissionResponse | null): DashboardMissionSessionCard | null {
-  if (snap === null) return null
-  const running = snap.sessions.find(s => s.status === 'running' || s.status === 'active' || s.status === 'busy')
-  return running ?? snap.sessions[0] ?? null
+export function pickActiveSession(snap: any): DashboardMissionSessionCard | null {
+  if (!snap) return null
+  const running = snap.sessions.find((s: any) => s.status === 'running' || s.status === 'active')
+  return running || snap.sessions[0] || null
 }
 
 // ─── Root ────────────────────────────────────────────────────────────────────
@@ -360,7 +320,7 @@ export function Overview() {
   const agentList = agents.value
   const nowMs = nowSecondsSignal.value * 1000
   const active = useMemo(() => pickActiveSession(snap), [snap])
-  const counts = useMemo(() => computeFunnelCounts(taskList, active, nowMs), [taskList, active, nowMs])
+  const counts = useMemo(() => computeFunnelCounts(taskList, active), [taskList, active])
   const agentAlerts = useMemo(() => deriveAgentAlerts(agentList), [agentList])
   const taskAlerts = useMemo(() => deriveTaskAlerts(taskList, nowMs), [taskList, nowMs])
   return html`

@@ -50,6 +50,7 @@
         test_multi_room test_worktree_detection test_bounded test_mention
         test_heartbeat_qw test_sse_qw test_sse_stream test_agent_health
         test_post_verifier
+        test_reward_advice_artifact
         test_keeper_cascade_profile
         test_keeper_hooks_oas_provider
         test_keeper_hooks_oas_pricing
@@ -246,6 +247,7 @@
           test_multi_room test_worktree_detection test_bounded test_mention
           test_heartbeat_qw test_sse_qw test_sse_stream test_agent_health
           test_post_verifier
+        test_reward_advice_artifact
           test_keeper_cascade_profile
           test_keeper_hooks_oas_provider
           test_keeper_hooks_oas_pricing
@@ -543,6 +545,7 @@
         test_credential_alias_10440
         test_credential_provider
         test_cascade_trust
+        test_dashboard_k2_feeds
         test_keeper_profile_normalize_10552
         test_personality_field_diff_10269
         test_toml_skip_dedup_10259
@@ -739,6 +742,7 @@
         test_credential_alias_10440
         test_credential_provider
         test_cascade_trust
+        test_dashboard_k2_feeds
         test_keeper_profile_normalize_10552
         test_personality_field_diff_10269
         test_toml_skip_dedup_10259

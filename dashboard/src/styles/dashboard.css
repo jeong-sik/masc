@@ -52,7 +52,7 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 48px 16px;
+  padding: 28px 12px;
   text-align: center;
 }
 
@@ -61,7 +61,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 48px 16px;
+  padding: 28px 12px;
   font-size: var(--fs-sm);
   color: var(--color-fg-muted);
 }
@@ -72,9 +72,9 @@
 }
 /* ── Agent card hover ── */
 .agent-card:hover {
-  box-shadow: 0 2px 8px var(--black-20);
-  transform: translateY(-2px);
-  border-color: var(--accent);
+  box-shadow: inset 2px 0 0 var(--accent);
+  transform: none;
+  border-color: var(--accent-30);
 }
 
 @utility logs-refresh-btn { &:hover { border-color: var(--accent); } }
@@ -87,8 +87,8 @@
   border-color: var(--color-border-default);
   content-visibility: auto;
   contain-intrinsic-size: auto 120px;
-  transition: border-color 0.2s, transform 0.2s, background 0.2s;
-  &:hover { border-color: var(--accent-30); background: var(--white-6); transform: translateY(-1px); }
+  transition: border-color 0.15s, background 0.15s;
+  &:hover { border-color: var(--accent-30); background: var(--white-6); transform: none; }
 }
 
 /* Vote column */
@@ -198,11 +198,11 @@
 .swimlane-vis-container .vis-tooltip {
   background-color: rgba(15, 23, 42, 0.95);
   border: 1px solid rgba(100, 116, 139, 0.3);
-  border-radius: 6px;
+  border-radius: var(--r-1);
   color: var(--frost-100);
   font-size: 11px;
-  padding: 8px 10px;
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  padding: 6px 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.24);
   white-space: pre-wrap;
 }
 
@@ -220,8 +220,8 @@
 }
 
 .card:hover {
-  border-color: var(--color-border-strong);
-  background: var(--color-bg-elevated);
+  border-color: var(--border-strong);
+  background: var(--bg-panel-hover);
 }
 
 /* ── Custom Webkit Scrollbar ── */
@@ -242,10 +242,73 @@
   
   .custom-scrollbar::-webkit-scrollbar-thumb {
     background: var(--white-10);
-    border-radius: 10px;
+    border-radius: var(--r-1);
   }
   
   .custom-scrollbar::-webkit-scrollbar-thumb:hover {
     background: var(--white-20);
+  }
+}
+
+/* ── IDE Plane Shell ── */
+.ide-plane-grid {
+  display: grid;
+  grid-template-columns: minmax(180px, 220px) minmax(0, 1fr) minmax(280px, 320px);
+  grid-template-rows: minmax(0, 1fr) auto;
+  min-width: 0;
+}
+
+.ide-plane-tree {
+  grid-column: 1;
+  grid-row: 1 / span 2;
+  min-width: 0;
+}
+
+.ide-plane-editor {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  min-width: 0;
+}
+
+.ide-plane-conversation {
+  grid-column: 3;
+  grid-row: 1;
+  min-width: 0;
+}
+
+.ide-plane-activity {
+  grid-column: 3;
+  grid-row: 2;
+  min-width: 0;
+}
+
+@media (max-width: 900px) {
+  .ide-plane-shell {
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .ide-plane-grid {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto auto auto;
+  }
+
+  .ide-plane-tree,
+  .ide-plane-editor,
+  .ide-plane-conversation,
+  .ide-plane-activity {
+    grid-column: 1;
+    grid-row: auto;
+  }
+
+  .ide-plane-tree,
+  .ide-plane-conversation,
+  .ide-plane-activity {
+    max-height: 22rem;
+    overflow: auto;
+  }
+
+  .ide-plane-editor {
+    overflow-x: auto;
   }
 }

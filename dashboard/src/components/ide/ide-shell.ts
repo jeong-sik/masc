@@ -1,11 +1,12 @@
 import { html } from 'htm/preact'
-import { useState } from 'preact/hooks'
+import { useEffect, useState } from 'preact/hooks'
 import { IdeExplorer } from './ide-explorer'
 import { IdeEditorMock } from './ide-editor-mock'
 import { IdeConversationRailMock } from './ide-conversation-rail-mock'
 import { IdeActivityMock } from './ide-activity-mock'
 import { IdeInterjectMock } from './ide-interject-mock'
 import { IdeToolbar } from './ide-toolbar'
+import { navigate, route } from '../../router'
 
 // PR-3: 4-pane CODE mode shell with editor toolbar (view tabs + LAYERS
 // toggle, RFC 0020 controller). Layout matches the cockpit IdePlane
@@ -25,8 +26,29 @@ import { IdeToolbar } from './ide-toolbar'
 
 type ViewTab = 'source' | 'split-diff' | 'unified' | 'blame'
 
+function viewFromRoute(raw: string | null | undefined): ViewTab {
+  const normalized = raw
+    ?.trim()
+    .toLowerCase()
+    .replace(/[_\s]+/g, '-')
+  if (normalized === 'split' || normalized === 'split-diff' || normalized === 'merge') return 'split-diff'
+  if (normalized === 'unified') return 'unified'
+  if (normalized === 'blame') return 'blame'
+  return 'source'
+}
+
 export function IdeShell() {
-  const [activeView, setActiveView] = useState<ViewTab>('source')
+  const [activeView, setActiveView] = useState<ViewTab>(() => viewFromRoute(route.value.params.view))
+
+  useEffect(() => {
+    const next = viewFromRoute(route.value.params.view)
+    setActiveView(current => current === next ? current : next)
+  }, [route.value.params.view])
+
+  const handleViewChange = (next: ViewTab) => {
+    setActiveView(next)
+    navigate('code', { ...route.value.params, section: 'ide-shell', view: next })
+  }
 
   return html`
     <section
@@ -58,27 +80,24 @@ export function IdeShell() {
         <span>* runtime / main / nick0cave@dkr-a1 / improver@wt-run-47</span>
         <span style=${{ marginLeft: 'auto', color: 'var(--color-status-ok, var(--ok))' }}>● mcp · connected</span>
       </header>
-      <${IdeToolbar} activeView=${activeView} onViewChange=${setActiveView} />
+      <${IdeToolbar} activeView=${activeView} onViewChange=${handleViewChange} />
       <div
         class="ide-plane-grid"
         role="presentation"
         style=${{
-          display: 'grid',
-          gridTemplateColumns: 'minmax(180px, 220px) minmax(0, 1fr) minmax(280px, 320px)',
-          gridTemplateRows: '1fr auto',
           minHeight: 0,
         }}
       >
-        <div style=${{ gridColumn: 1, gridRow: '1 / span 2' }}>
+        <div class="ide-plane-tree">
           <${IdeExplorer} />
         </div>
-        <div style=${{ gridColumn: 2, gridRow: '1 / span 2', minHeight: 0 }}>
+        <div class="ide-plane-editor" style=${{ minHeight: 0 }}>
           <${IdeEditorMock} />
         </div>
-        <div style=${{ gridColumn: 3, gridRow: 1, minHeight: 0 }}>
+        <div class="ide-plane-conversation" style=${{ minHeight: 0 }}>
           <${IdeConversationRailMock} />
         </div>
-        <div style=${{ gridColumn: 3, gridRow: 2, minHeight: 0 }}>
+        <div class="ide-plane-activity" style=${{ minHeight: 0 }}>
           <${IdeActivityMock} />
         </div>
       </div>

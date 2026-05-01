@@ -807,8 +807,12 @@ let render_prompt_template key vars =
   else
     let template_variables =
       with_mutex (fun () ->
-          Hashtbl.find_opt meta_tbl key
-          |> Option.map (fun meta -> meta.template_variables))
+          match Hashtbl.find_opt meta_tbl key with
+          | None -> None
+          | Some meta -> (
+              match meta.template_variables with
+              | [] -> None
+              | variables -> Some variables))
     in
     render_template ?template_variables ~template:resolved.effective ~vars ()
 

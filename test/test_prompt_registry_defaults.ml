@@ -68,6 +68,7 @@ let fixtures =
     ("governance.dry_run", "DRY RUN governance prompt");
     ("dashboard.operator_judge", "operator facts {{facts_json}}");
     ("dashboard.governance_judge", "governance facts {{facts_json}}");
+    ("test.unlisted.vars", "template body still has {{missing_var}}");
   ]
 
 let with_registry f =
@@ -118,7 +119,7 @@ let () =
           test_case "all markdown-backed prompts are registered" `Quick (fun () ->
               with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
               let prompts = Prompt_registry.list_prompts () in
-              check int "registered prompt count" 9 (List.length prompts));
+              check int "registered prompt count" 10 (List.length prompts));
           test_case "get_prompt resolves markdown content" `Quick (fun () ->
               with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
               check string "keeper.constitution"
@@ -177,6 +178,23 @@ let () =
                        true
                      with Not_found -> false)
               | Error msg -> fail msg);
+          test_case "render_prompt_template detects variables without metadata" `Quick
+            (fun () ->
+              with_registry @@ fun ~dir:_ ~prompts_dir:_ ->
+              match
+                Prompt_registry.render_prompt_template "test.unlisted.vars" []
+              with
+              | Error msg ->
+                  check bool "reports unresolved variable" true
+                    (try
+                       ignore
+                         (Str.search_forward
+                            (Str.regexp_string "Unresolved variables")
+                            msg 0);
+                       true
+                     with Not_found -> false)
+              | Ok rendered ->
+                  fail ("expected unresolved variable error, got: " ^ rendered));
         ] );
       ( "override",
         [

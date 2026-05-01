@@ -187,12 +187,6 @@ let runtime_mcp_policy_of_tool_names =
 let provider_label =
   Oas_worker_exec_transport.provider_label
 
-let claude_code_max_turns_hard_cap =
-  Oas_worker_exec_transport.claude_code_max_turns_hard_cap
-
-let provider_effective_max_turns =
-  Oas_worker_exec_transport.provider_effective_max_turns
-
 let resolve_tool_lane_for_oas_tools =
   Oas_worker_exec_transport.resolve_tool_lane_for_oas_tools
 

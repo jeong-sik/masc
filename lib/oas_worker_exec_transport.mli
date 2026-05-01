@@ -16,15 +16,6 @@ type cli_transport_overrides = {
   gemini_yolo : bool option;
 }
 
-(** Hard cap for Claude Code's internal agent loop.  MASC may run a keeper
-    for more turns overall, but a single Claude Code subprocess attempt must
-    not receive that keeper-level budget unchanged. *)
-val claude_code_max_turns_hard_cap : int
-
-(** Clamp provider-internal max_turns to provider hard constraints. *)
-val provider_effective_max_turns :
-  Llm_provider.Provider_config.provider_kind -> int -> int
-
 (** Sorted, comma-joined fingerprint of a tool list.  Used as the dedup key
     by the [#10097] omission machinery — identical sets fingerprint to the
     same string regardless of input order. *)

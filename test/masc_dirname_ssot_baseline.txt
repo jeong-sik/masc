@@ -29,4 +29,3 @@ lib/server/server_routes_http_routes_sidecar.ml:288
 lib/server/server_routes_http_routes_sidecar.ml:297
 lib/tool_blob_store/tool_blob_store.ml:21
 lib/tool_code.ml:279
-lib/tool_team_memory.ml:108

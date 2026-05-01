@@ -1076,7 +1076,6 @@ let test_masc_dirname_ssot_contracts () =
     "lib/oas_worker_cascade.ml";
     "lib/procedural_memory.ml";
     (* batch 3 (#10257) *)
-    "lib/tool_team_memory.ml";
     "lib/exec_core.ml";
     "lib/keeper/keeper_accountability.ml";
     (* batch 4 (#10262) *)
@@ -1194,6 +1193,36 @@ let test_human_approval_credential_boundary_contracts () =
     (file_contains_pattern "scripts/ci/check-agent-draft-policy.sh"
        "human-approval")
 
+let test_human_approval_environment_check_contracts () =
+  check bool "human approval environment check script exists" true
+    (Sys.file_exists
+       (source_path "scripts/check-human-approval-env.sh"));
+  check bool "human approval environment check reads GitHub Environment" true
+    ((file_contains_pattern "scripts/check-human-approval-env.sh"
+        "environments/$ENVIRONMENT_ENCODED")
+     && file_contains_pattern "scripts/check-human-approval-env.sh" "@uri");
+  check bool "human approval environment check documents environment override" true
+    (file_contains_pattern "scripts/check-human-approval-env.sh"
+       "--environment staging");
+  check bool "human approval environment check requires reviewer rule" true
+    (file_contains_pattern "scripts/check-human-approval-env.sh"
+       "required_reviewers");
+  check bool "human approval environment check fails empty reviewer rule" true
+    (file_contains_pattern "scripts/check-human-approval-env.sh"
+       "required reviewer protection rule missing or empty");
+  check bool "human approval environment check can require named reviewer" true
+    (file_contains_pattern "scripts/check-human-approval-env.sh"
+       "--require-reviewer");
+  check bool "human approval environment check can require prevent self-review" true
+    (file_contains_pattern "scripts/check-human-approval-env.sh"
+       "--require-prevent-self-review");
+  check bool "human approval environment check warns when self-review remains allowed" true
+    (file_contains_pattern "scripts/check-human-approval-env.sh"
+       "prevent_self_review is false");
+  check bool "human approval environment check reports normalized reviewers" true
+    (file_contains_pattern "scripts/check-human-approval-env.sh"
+       ".login // .slug // .name // .id // empty")
+
 let test_copilot_zero_diff_cleanup_contracts () =
   check bool "copilot zero-diff cleanup script exists" true
     (Sys.file_exists
@@ -1285,6 +1314,8 @@ let () =
              test_ssot_fingerprint_gate_contracts;
            test_case "human approval credential boundary contracts (#9733)" `Quick
              test_human_approval_credential_boundary_contracts;
+           test_case "human approval environment check contracts (#12561)" `Quick
+             test_human_approval_environment_check_contracts;
            test_case "copilot zero-diff cleanup contracts (#12567)" `Quick
              test_copilot_zero_diff_cleanup_contracts;
          ]);

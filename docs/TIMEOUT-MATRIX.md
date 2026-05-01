@@ -44,9 +44,11 @@ Timeout budget failures are not global shutdown signals. A single
 `oas_timeout_budget` is scoped to the keeper turn that exhausted its OAS
 budget. The turn ledger and runtime-trust snapshot must surface
 `terminal_reason.code = "oas_timeout_budget"` with
-`latest_next_action = "inspect_timeout_budget"`, and the runtime surface marks
-the keeper as needing attention with the same timeout action. Repeated
-consecutive budget strikes are promoted by the keepalive loop to
+`terminal_reason.next_action = "inspect_timeout_budget"`. The runtime-trust
+snapshot mirrors that as `latest_next_action`, and the runtime surface marks
+the keeper as needing attention with
+`next_human_action = "inspect_timeout_budget"`. Repeated consecutive budget
+strikes are promoted by the keepalive loop to
 `Oas_timeout_budget_loop`, which the supervisor auto-pauses instead of
 restart-looping.
 

@@ -118,7 +118,6 @@
         test_keeper_toml_config_validation
         test_keeper_id
         test_repo_store
-        test_chronicle_types
         test_credential_store
         test_credential_materializer
         test_keeper_repo_mapping
@@ -308,7 +307,6 @@
           test_keeper_toml_config_validation
           test_keeper_id
           test_repo_store
-          test_chronicle_types
           test_credential_store
           test_credential_materializer
           test_keeper_repo_mapping

@@ -81,7 +81,7 @@ val now_iso : unit -> string
 (** {1 Configuration} *)
 
 (** Create an Eio-native room configuration rooted at [base_path]. *)
-val create_config : fs:Eio.Fs.dir_ty Eio.Path.t -> string -> config
+val create_config : fs:Eio.Fs.dir_ty Eio.Path.t -> ?clock:#Eio.Time.clock -> string -> config
 
 (** Create a test configuration (short TTLs, isolated node id). *)
 val test_config : fs:Eio.Fs.dir_ty Eio.Path.t -> string -> config

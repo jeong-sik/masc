@@ -798,6 +798,7 @@ let sort_entries_by_requested_at entries =
 let submit_and_await ~keeper_name ~tool_name ~input ~risk_level
     ?turn_id ?task_id ?goal_id ?(goal_ids = []) ?runtime_contract
     ?selected_model ?disposition ?disposition_reason
+    ?clock ?(timeout_s = 600.0)
     ()
   : Oas.Hooks.approval_decision =
   let id = generate_id () in
@@ -810,8 +811,38 @@ let submit_and_await ~keeper_name ~tool_name ~input ~risk_level
   in
   atomic_update pending (fun map -> SMap.add id entry map);
   record_pending entry;
+  let await_with_timeout () =
+    match clock with
+    | Some clock ->
+      (match
+         Fiber.first
+           (fun () -> `Decision (Eio.Promise.await promise))
+           (fun () -> Eio.Time.sleep clock timeout_s; `Timeout)
+       with
+       | `Decision d -> d
+       | `Timeout ->
+         let reason =
+           Printf.sprintf "approval timeout after %.0fs" timeout_s
+         in
+         audit_approval_event
+           ~event_type:"approval_timeout"
+           ~id
+           ~keeper_name
+           ~tool_name
+           ~risk_level
+           ?turn_id
+           ?task_id
+           ?goal_id
+           ~goal_ids
+           ?runtime_contract
+           ?selected_model
+           ~decision:(Approval_expired reason)
+           ();
+         Oas.Hooks.Deny reason)
+    | None -> Eio.Promise.await promise
+  in
   Fun.protect
-    (fun () -> Eio.Promise.await promise)
+    await_with_timeout
     ~finally:(fun () ->
       Safe_ops.protect ~default:() (fun () ->
         atomic_update pending (fun map -> SMap.remove id map)))

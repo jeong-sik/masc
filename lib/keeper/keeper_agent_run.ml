@@ -397,6 +397,7 @@ let run_turn
                         ~governance_level:(Env_config_core.governance_level ())
                         ~keeper_name:meta.name
                         ~meta
+                        ?clock:(Eio_context.get_clock_opt ())
                         ())
            ~enable_thinking:(Keeper_config.keeper_enable_thinking ())
            (* exit_condition removed with mutation_boundary — OAS runs to

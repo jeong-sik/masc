@@ -40,10 +40,11 @@ module FileSystem = struct
         Executor_pool workers on non-Eio domains can safely
         read/write the shared hashtable. *)
     mutable key_index_promise: unit Eio.Promise.or_exn option;
+    clock: float Eio.Time.clock_ty Eio.Resource.t option;
   }
 
   (** Create a new FileSystem backend *)
-  let create ~fs config =
+  let create ~fs ?clock config =
     let path = Eio.Path.(fs / config.base_path) in
     (* Ensure base directory exists *)
     (try Eio.Path.mkdirs ~exists_ok:true ~perm:0o755 path
@@ -59,6 +60,7 @@ module FileSystem = struct
       key_index = Hashtbl.create 256;
       key_index_mu = Mutex.create ();
       key_index_promise = None;
+      clock;
     }
 
   (** {2 Domain-safe key_index helpers}
@@ -380,7 +382,23 @@ module FileSystem = struct
     match action with
     | `Done -> ()
     | `Wait p ->
-      (match Eio.Promise.await p with
+      let result =
+        match t.clock with
+        | Some clock -> (
+            match
+              Fiber.first
+                (fun () -> `Ok (Eio.Promise.await p))
+                (fun () ->
+                  Eio.Time.sleep clock 30.0;
+                  `Timeout)
+            with
+            | `Ok r -> r
+            | `Timeout ->
+                Log.Backend.warn "key_index populate wait timed out after 30s";
+                Ok ())
+        | None -> Eio.Promise.await p
+      in
+      (match result with
        | Ok () -> ()
        | Error (Eio.Cancel.Cancelled _ as exn) -> raise exn
        | Error exn ->

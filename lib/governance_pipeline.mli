@@ -110,6 +110,7 @@ val to_oas_approval_callback :
   governance_level:string ->
   keeper_name:string ->
   ?meta:Keeper_types.keeper_meta ->
+  ?clock:#Eio.Time.clock ->
   unit ->
   Oas.Hooks.approval_callback
 (** Build an OAS approval callback with genuine HITL fiber suspension.

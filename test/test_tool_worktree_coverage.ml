@@ -278,6 +278,7 @@ let test_dispatch_worktree_create_empty_agent_falls_back () =
   let args = `Assoc [
     ("task_id", `String "task-empty-fallback");
     ("base_branch", `String "main");
+    ("repo_name", `String "test-repo");
   ] in
   match Tool_worktree.dispatch ctx ~name:"masc_worktree_create" ~args with
   | None -> fail "dispatch returned None for masc_worktree_create"
@@ -294,6 +295,7 @@ let test_dispatch_worktree_create_whitespace_agent_trimmed () =
     ("agent_name", `String "   ");
     ("task_id", `String "task-ws");
     ("base_branch", `String "main");
+    ("repo_name", `String "test-repo");
   ] in
   match Tool_worktree.dispatch ctx ~name:"masc_worktree_create" ~args with
   | None -> fail "dispatch returned None for masc_worktree_create"

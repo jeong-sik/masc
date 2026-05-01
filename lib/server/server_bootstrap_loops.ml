@@ -29,17 +29,49 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
              (match meta.Keeper_meta_contract.sandbox_profile with
               | Keeper_types.Local -> "skip_local"
               | Keeper_types.Docker ->
-                (match Task_sandbox.create ~config ~task_id ~agent_name () with
-                 | Ok _sandbox ->
-                   Log.Misc.info
-                     "[claim_auto_provision] keeper=%s task=%s worktree provisioned"
-                     keeper_name task_id;
-                   "created"
-                 | Error msg ->
-                   Log.Misc.warn
-                     "[claim_auto_provision] keeper=%s task=%s worktree provisioning failed: %s"
-                     keeper_name task_id msg;
-                   "error")))
+                let repos_dir =
+                  Coord_worktree.repos_dir_of_keeper config agent_name
+                in
+                let repo_names =
+                  try
+                    Sys.readdir repos_dir
+                    |> Array.to_list
+                    |> List.filter (fun name ->
+                         Coord_worktree.is_git_clone
+                           (Filename.concat repos_dir name))
+                  with Sys_error _ -> []
+                in
+                (match repo_names with
+                 | [] ->
+                     Log.Misc.info
+                       "[claim_auto_provision] keeper=%s task=%s no sandbox repos \
+                        found under %s, skipping"
+                       keeper_name task_id repos_dir;
+                     "skip_no_repo"
+                 | [repo_name] ->
+                     (match
+                        Task_sandbox.create ~config ~task_id ~agent_name
+                          ~repo_name ()
+                      with
+                      | Ok _sandbox ->
+                          Log.Misc.info
+                            "[claim_auto_provision] keeper=%s task=%s \
+                             worktree provisioned (repo=%s)"
+                            keeper_name task_id repo_name;
+                          "created"
+                      | Error msg ->
+                          Log.Misc.warn
+                            "[claim_auto_provision] keeper=%s task=%s \
+                             worktree provisioning failed: %s"
+                            keeper_name task_id msg;
+                          "error")
+                 | _ ->
+                     Log.Misc.info
+                       "[claim_auto_provision] keeper=%s task=%s ambiguous \
+                        repos [%s], skipping auto-provision"
+                       keeper_name task_id
+                       (String.concat ", " repo_names);
+                     "skip_ambiguous"))
       in
       Prometheus.inc_counter "masc_keeper_claim_auto_provision_total"
         ~labels:[ ("outcome", outcome); ("agent_name", agent_name) ]

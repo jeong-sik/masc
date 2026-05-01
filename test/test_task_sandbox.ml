@@ -228,7 +228,8 @@ let test_full_lifecycle () =
       in
 
       match Task_sandbox.create ~config ~task_id:"task-life"
-              ~agent_name:"lifecycle-agent" () with
+              ~agent_name:"lifecycle-agent"
+              ~repo_name:(Filename.basename dir) () with
       | Error e ->
         fail (Printf.sprintf "sandbox create failed: %s" e)
       | Ok sb ->
@@ -322,6 +323,7 @@ let test_with_sandbox_lifecycle () =
 
       match Task_sandbox.with_sandbox ~config ~task_id:"task-with"
               ~agent_name:"with-agent"
+              ~repo_name:(Filename.basename dir)
               (fun sb ->
                 check bool "inside sandbox" true (Sys.file_exists sb.worktree_path);
                 42) with
@@ -383,6 +385,7 @@ let test_with_sandbox_cleans_up_on_exception () =
       (try
         let _ = Task_sandbox.with_sandbox ~config ~task_id:"task-exc"
           ~agent_name:"exc-agent"
+          ~repo_name:(Filename.basename dir)
           (fun sb ->
             worktree_path_ref := sb.worktree_path;
             failwith "intentional test failure") in

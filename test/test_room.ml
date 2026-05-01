@@ -184,7 +184,7 @@ let test_worktree_create_no_git () =
   let _ = Coord.init config ~agent_name:None in
 
   (* worktree_create_r should fail for non-git dir *)
-  let result = Coord.worktree_create_r config ~agent_name:"claude" ~task_id:"test" ~base_branch:"main" in
+  let result = Coord.worktree_create_r config ~agent_name:"claude" ~task_id:"test" ~base_branch:"main" ~repo_name:"test-repo" in
   Alcotest.(check bool) "returns error" true (match result with Error _ -> true | Ok _ -> false);
 
   (* Cleanup *)

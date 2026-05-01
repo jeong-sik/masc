@@ -199,7 +199,8 @@ export function App() {
   return html`
     <div class="flex min-h-screen h-screen flex-col overflow-hidden bg-[var(--color-bg-page)] text-[var(--color-fg-primary)]">
       <a href="#main-content" class="sr-only focus:not-sr-only focus:fixed focus:top-4 focus:left-4 focus:z-[100] focus:rounded-[var(--r-2)] focus:bg-[var(--color-bg-page)] focus:px-4 focus:py-2 focus:text-sm focus:text-[var(--color-fg-secondary)] focus:shadow-lg focus:ring-2 focus:ring-[var(--select-20)]">Skip to main content</a>
-      <header class="relative z-10 shrink-0 border-b border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2">
+      <header class="relative z-10 shrink-0 border-b border-[var(--color-border-default)] bg-[var(--shell-header-bg)] px-3 py-2 backdrop-blur-xl">
+        <div class="absolute inset-x-0 bottom-0 h-[1px] bg-gradient-to-r from-transparent via-[var(--accent-15)] to-transparent"></div>
         <div class="flex w-full items-center justify-between gap-3 max-[900px]:flex-col max-[900px]:items-stretch">
           <div class="min-w-0 flex items-center gap-3">
             <div class="flex shrink-0 items-center gap-2">
@@ -250,11 +251,11 @@ export function App() {
       <//>
 
       <div class="flex flex-1 gap-2 overflow-hidden p-2 max-[1100px]:flex-col">
-        <aside id="dashboard-side-rail" aria-label="Sidebar navigation" class="${sidebarCollapsed.value ? 'w-14' : 'w-55'} shrink-0 overflow-y-auto overflow-x-hidden rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] transition-[width] duration-300 ease-[var(--ease)] max-[1100px]:w-full max-[1100px]:max-h-75 ${mobileMenuOpen.value ? '' : 'max-[768px]:hidden'}">
+        <aside id="dashboard-side-rail" aria-label="Sidebar navigation" class="${sidebarCollapsed.value ? 'w-14' : 'w-55'} shrink-0 overflow-y-auto overflow-x-hidden rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--shell-rail-bg)] backdrop-blur-xl transition-[width] duration-300 ease-[var(--ease)] max-[1100px]:w-full max-[1100px]:max-h-75 ${mobileMenuOpen.value ? '' : 'max-[768px]:hidden'}">
           <${SideRail} collapsed=${sidebarCollapsed.value} onToggle=${() => { sidebarCollapsed.value = !sidebarCollapsed.value }} />
         </aside>
 
-        <main id="main-content" tabindex=${-1} class="min-w-0 flex-1 overflow-hidden rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)] max-[1100px]:min-h-0">
+        <main id="main-content" tabindex=${-1} class="min-w-0 flex-1 overflow-hidden rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--shell-main-bg)] backdrop-blur-lg max-[1100px]:min-h-0">
           <div class="h-full overflow-y-auto p-4">
             <${DashboardMain} />
           </div>

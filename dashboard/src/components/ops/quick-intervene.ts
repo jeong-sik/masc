@@ -25,7 +25,7 @@ function parseTarget(value: string): {
     const name = value.slice('keeper:'.length)
     return { action_type: 'keeper_message', target_type: 'keeper', target_id: name, label: name }
   }
-  return { action_type: 'broadcast', target_type: 'root', label: 'namespace' }
+  return { action_type: 'broadcast', target_type: 'root', label: 'All' }
 }
 
 async function submitQuickMessage() {

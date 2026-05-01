@@ -154,20 +154,24 @@ let try_rate_limit_block ~path ~client_addr ~request reqd =
       match auth_token_from_request request with
       | None -> false
       | Some token ->
-          let agent_key = Masc_mcp.Rate_limit.key_of_bearer_token token in
-          if Masc_mcp.Rate_limit.check_global_agent ~key:agent_key then false
-          else begin
-            let body = Masc_mcp.Rate_limit.too_many_requests_body () in
-            let rl_headers = Masc_mcp.Rate_limit.headers_global_agent ~key:agent_key in
-            let headers = Httpun.Headers.of_list (
-              ("content-type", "application/json") ::
-              ("content-length", string_of_int (String.length body)) ::
-              rl_headers
-            ) in
-            Httpun.Reqd.respond_with_string reqd
-              (Httpun.Response.create ~headers `Too_many_requests) body;
-            true
-          end
+          match Masc_mcp.Rate_limit.agent_key_of_token_or_name ~token () with
+          | None -> false
+          | Some agent_key ->
+              if Masc_mcp.Rate_limit.check_agent_global ~key:agent_key then false
+              else begin
+                let body = Masc_mcp.Rate_limit.too_many_requests_body () in
+                let rl_headers =
+                  Masc_mcp.Rate_limit.headers_agent_global ~key:agent_key
+                in
+                let headers = Httpun.Headers.of_list (
+                  ("content-type", "application/json") ::
+                  ("content-length", string_of_int (String.length body)) ::
+                  rl_headers
+                ) in
+                Httpun.Reqd.respond_with_string reqd
+                  (Httpun.Response.create ~headers `Too_many_requests) body;
+                true
+              end
 
 (** Path predicate: requests that go through the MCP transport surface
     (HTTP-based sessions, SSE, JSON-RPC messages) and therefore must pass

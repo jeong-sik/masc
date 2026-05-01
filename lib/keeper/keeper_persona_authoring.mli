@@ -114,3 +114,10 @@ val selected_archetype_effects_to_json :
 (** Tool-handler entry for [keeper_persona_generate]. *)
 val handle_persona_generate :
   _ Keeper_types.context -> Yojson.Safe.t -> bool * string
+
+(** {1 Challenger eligibility gate (A1 Dialectical Verification)} *)
+
+(** [is_challenger_eligible ~risk_posture] returns [true] when the
+    [risk_posture] archetype axis qualifies a keeper for the challenger
+    round.  Only the ["cautious"] value is currently eligible. *)
+val is_challenger_eligible : risk_posture:string option -> bool

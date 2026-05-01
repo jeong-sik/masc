@@ -43,3 +43,13 @@ models = [
 temperature = 0.0
 max_tokens = 200
 keeper_assignable = false
+
+[challenger]
+comment = "A1 Dialectical Verification challenger profile. Must use a different provider tier than the primary keeper cascade to reduce sycophantic convergence. Enabled when MASC_CHALLENGER_ENABLED=1. Default points to claude_code to contrast with codex_cli-first big_three ordering."
+models = [
+  "claude_code:auto",
+  "gemini_cli:auto",
+]
+temperature = 0.2
+max_tokens = 16384
+keeper_assignable = false

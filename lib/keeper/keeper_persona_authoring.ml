@@ -1012,3 +1012,21 @@ let handle_persona_generate ctx args =
                     ~code:Validation_error
                     (Printf.sprintf "generation did not return parseable JSON: %s" msg) )))
 ;;
+
+(** {1 Challenger eligibility gate (A1 Dialectical Verification)} *)
+
+(** [is_challenger_eligible ~risk_posture] returns [true] when the
+    archetype axis [risk_posture] qualifies a keeper as eligible to participate
+    in the challenger round.
+
+    Per the A1 spec, only keepers with [risk_posture = "cautious"] are
+    eligible.  The "cautious" archetype biases keepers toward dry-runs,
+    explicit approvals, and low autonomy.
+
+    The gate is purely structural: it checks the stored persona axis value
+    and does NOT mutate any keeper state or generation logic. *)
+let is_challenger_eligible ~risk_posture =
+  match risk_posture with
+  | Some "cautious" -> true
+  | _ -> false
+;;

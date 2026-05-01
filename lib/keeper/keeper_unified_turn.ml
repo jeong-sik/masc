@@ -1620,6 +1620,37 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
               ~model:used_model_id
               result.usage
           in
+          (* A1 Dialectical Verification: optional challenger round.
+             Runs after turn_cost is computed and before post-turn lifecycle
+             so the challenger can observe the full turn result while state
+             transitions are still reversible.
+
+             Eligibility gate: keeper must have risk_posture = "cautious"
+             in its persona archetype.  When [Keeper_challenger.evaluate]
+             returns [Veto], the turn result is logged for audit but the
+             PoC (cycle 1) does not block the lifecycle transition.
+             Full veto enforcement is deferred to cycle 2 (after A4
+             token-cost baseline is established). *)
+          let challenger_outcome =
+            if Keeper_challenger.challenger_enabled ()
+            then (
+              let keeper_cascade =
+                Option.value ~default:"" meta.cascade_name
+              in
+              Keeper_challenger.evaluate
+                ~keeper_name:meta.name
+                ~keeper_cascade
+                ~result_text:result.response_text
+                ())
+            else Keeper_challenger_outcome.No_challenger
+          in
+          (match challenger_outcome with
+           | Keeper_challenger_outcome.No_challenger
+           | Keeper_challenger_outcome.Accept -> ()
+           | Keeper_challenger_outcome.Veto reason ->
+               Log.Keeper.warn
+                 "%s: challenger veto (PoC — not enforced): rule=%s detail=%s challenger_cascade=%s"
+                 meta.name reason.rule reason.detail reason.challenger_cascade);
           let lifecycle =
             apply_post_turn_lifecycle ~base_dir
               ~on_compaction_started:(fun () ->

@@ -95,6 +95,8 @@
   keeper_rollover
   keeper_approval_queue
   keeper_post_turn
+  keeper_challenger_outcome
+  keeper_challenger
   keeper_tool_alias
   keeper_tool_disclosure
   keeper_turn_telemetry

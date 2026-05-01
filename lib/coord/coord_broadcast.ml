@@ -94,3 +94,25 @@ let broadcast ?trace_context config ~from_agent ~content =
      Log.Misc.warn "on_broadcast_mention callback failed: %s"
        (Printexc.to_string exn));
   Printf.sprintf "\xF0\x9F\x93\xA2 [%s] %s" safe_agent safe_content
+
+(** Broadcast a challenger round start notification to the room.
+    Emits a message indicating that the challenger evaluation has begun
+    for [keeper_name] using [challenger_cascade]. *)
+let broadcast_challenger_start config ~keeper_name ~challenger_cascade =
+  let content =
+    Printf.sprintf
+      "[challenger] %s: evaluation started (cascade=%s)"
+      keeper_name challenger_cascade
+  in
+  ignore (broadcast config ~from_agent:"masc" ~content)
+
+(** Broadcast a challenger veto outcome to the room.
+    Emits a structured message with the veto [rule] and [detail]
+    so operators can audit the divergence. *)
+let broadcast_challenger_veto config ~keeper_name ~rule ~detail ~challenger_cascade =
+  let content =
+    Printf.sprintf
+      "[challenger] %s: veto rule=%s cascade=%s — %s"
+      keeper_name rule challenger_cascade detail
+  in
+  ignore (broadcast config ~from_agent:"masc" ~content)

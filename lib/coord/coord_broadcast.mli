@@ -17,3 +17,19 @@ val on_broadcast_mention : (string option -> unit) ref
 val broadcast : ?trace_context:string ->
            Coord_utils_backend_setup.config ->
            from_agent:string -> content:string -> string
+
+val broadcast_challenger_start :
+  Coord_utils_backend_setup.config ->
+  keeper_name:string ->
+  challenger_cascade:string ->
+  unit
+(** Broadcast a challenger round start notification. *)
+
+val broadcast_challenger_veto :
+  Coord_utils_backend_setup.config ->
+  keeper_name:string ->
+  rule:string ->
+  detail:string ->
+  challenger_cascade:string ->
+  unit
+(** Broadcast a challenger veto result. *)

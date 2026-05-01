@@ -44,20 +44,44 @@ interface SectionCardProps {
   label?: ComponentChildren
   title?: ComponentChildren
   right?: ComponentChildren
-  class?: string
+  eyebrow?: ComponentChildren
+  status?: string
   tone?: string
+  class?: string
   variant?: CardVariant
   testId?: string
   'data-testid'?: string
   children: ComponentChildren
 }
 
+function statusDotClass(status?: string): string {
+  switch ((status ?? '').toLowerCase()) {
+    case 'ok':
+    case 'healthy':
+    case 'active':
+    case 'live':
+      return 'bg-[var(--color-status-ok)]'
+    case 'warn':
+    case 'watch':
+      return 'bg-[var(--color-status-warn)]'
+    case 'bad':
+    case 'danger':
+    case 'error':
+    case 'offline':
+      return 'bg-[var(--color-status-err)]'
+    default:
+      return 'bg-[var(--color-fg-muted)]'
+  }
+}
+
 export function SectionCard({
   label,
   title,
   right,
-  class: cx,
+  eyebrow,
+  status,
   tone,
+  class: cx,
   variant = 'light',
   testId,
   'data-testid': dataTestId,
@@ -74,6 +98,16 @@ export function SectionCard({
   // path; the new wrapper uses p-3.5 to preserve that visual.
   const bodyPadding = variant === 'compact' ? 'p-3.5' : 'p-4'
   const sectionLabel = label ?? title ?? ''
+  const tail = right ?? (
+    eyebrow != null || status != null
+      ? html`
+          <span class="inline-flex items-center gap-1.5 text-2xs text-[var(--color-fg-muted)]">
+            ${status != null ? html`<span class="h-1.5 w-1.5 rounded-full ${statusDotClass(status)}" />` : null}
+            ${eyebrow != null ? html`<span>${eyebrow}</span>` : null}
+          </span>
+        `
+      : null
+  )
   return html`
     <${SurfaceCard}
       variant=${variant}
@@ -81,7 +115,7 @@ export function SectionCard({
       testId=${testId ?? dataTestId}
       class="flex flex-col !p-0 overflow-hidden ${cx ?? ''}"
     >
-      <${SectionHead} tail=${right}>${sectionLabel}<//>
+      <${SectionHead} tail=${tail}>${sectionLabel}<//>
       <div class="${bodyPadding} flex flex-col gap-4">${children}</div>
     <//>
   `

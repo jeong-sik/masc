@@ -96,7 +96,7 @@ export function AgentDetailMemory({ agentName }: Props) {
   if (loading) return html`<${LoadingState}>메모리 컨텍스트 로드 중...<//>`
   if (error)
     return html`<div class="text-sm text-[var(--color-status-warn)]" role="alert">메모리 로드 실패: ${error}</div>`
-  if (!data) return null
+  if (!data) return html`<${LoadingState}>메모리 컨텍스트 로드 중...<//>`
 
   // Filter hebbian synapses where this keeper is either endpoint
   const allSynapses = data.hebbian?.synapses ?? []

@@ -18,7 +18,7 @@ import {
 import { refreshAutoresearchSurface } from './autoresearch-state'
 
 function LabelCol({ children }: { children: unknown }) {
-  return html`<${LabelCol}>${children}</${LabelCol}>`
+  return html`<label class="flex flex-col gap-1">${children}</label>`
 }
 
 // --- Form signals ---

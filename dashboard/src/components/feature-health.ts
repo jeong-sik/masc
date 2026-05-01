@@ -165,7 +165,7 @@ function FeatureItem({ item }: { item: FeatureHealthItem }) {
           </div>
         </div>
       </div>
-    <///>
+    <//>
   `
 }
 

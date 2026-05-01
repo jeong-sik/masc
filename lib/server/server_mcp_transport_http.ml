@@ -605,7 +605,7 @@ let handle_get_mcp ~deps ?legacy_messages_endpoint ?(profile = Full)
                   info.session_id);
           (match last_event_id with
           | Some last_id ->
-              let missed = Sse.get_events_after last_id in
+              let missed = Sse.get_events_after_for_kind sse_kind last_id in
               List.iter (fun ev ->
                 if not (send_raw info ev) then
                   Log.Server.debug "SSE replay send failed for session %s"

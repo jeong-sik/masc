@@ -1,3 +1,22 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+module Random = Stdlib.Random
+
 (** Agent_economy — Currency/reward system for MASC agents
 
     Append-only JSONL ledger with in-memory balance cache.
@@ -109,7 +128,7 @@ let json_float_field ~default key json =
   | `Assoc fields ->
     (match List.assoc_opt key fields with
      | Some (`Float f) -> f
-     | Some (`Int i) -> float_of_int i
+     | Some (`Int i) -> Float.of_int i
      | _ -> default)
   | _ -> default
 
@@ -117,7 +136,7 @@ let transaction_of_json (json : Yojson.Safe.t) : transaction option =
   let id = json_string_field ~default:"" "id" json in
   let agent_name = json_string_field ~default:"" "agent_name" json in
   let kind_str = json_string_field ~default:"" "kind" json in
-  if id = "" || agent_name = "" then None
+  if String.equal id "" || String.equal agent_name "" then None
   else
     match transaction_kind_of_string kind_str with
     | None -> None
@@ -161,7 +180,7 @@ let ensure_economy_dir base_path =
   let econ = economy_dir base_path in
   Fs_compat.mkdir_p econ
 
-let append_transaction base_path (txn : transaction) : (unit, string) result =
+let append_transaction base_path (txn : transaction) : (unit, string) Result.t =
   try
     ensure_economy_dir base_path;
     let path = ledger_path base_path in
@@ -172,7 +191,7 @@ let append_transaction base_path (txn : transaction) : (unit, string) result =
   | Eio.Cancel.Cancelled _ as e -> raise e
   | e ->
     Error (Printf.sprintf "[agent_economy] ledger write failed: %s"
-             (Printexc.to_string e))
+             (Stdlib.Printexc.to_string e))
 
 (** {1 Balance Cache} *)
 
@@ -232,7 +251,7 @@ let list_transactions ~base_path =
       |> String.split_on_char '\n'
       |> List.filter_map (fun line ->
         let trimmed = String.trim line in
-        if trimmed = "" then None
+        if String.equal trimmed "" then None
         else
           try transaction_of_json (Yojson.Safe.from_string trimmed)
           with Yojson.Json_error msg ->
@@ -244,7 +263,7 @@ let list_transactions ~base_path =
 
 let reward_multiplier ~overall_score =
   (* Map 0.0-1.0 score to 0.5x-1.5x multiplier *)
-  let clamped = max 0.0 (min 1.0 overall_score) in
+  let clamped = Stdlib.Float.max 0.0 (Stdlib.Float.min 1.0 overall_score) in
   0.5 +. clamped
 
 let base_reward_for_kind = function
@@ -266,7 +285,7 @@ let earn ~base_path ~agent_name ~kind ~reason ?reputation_score ?(metadata = `Nu
   if not (enabled ()) then Ok (get_balance ~base_path ~agent_name)
   else
     let base_amount = base_reward_for_kind kind in
-    if base_amount <= 0.0 then
+    if Stdlib.Float.compare base_amount 0.0 <= 0 then
       Error "[agent_economy] earn called with non-earning kind"
     else
       let multiplier =
@@ -307,7 +326,7 @@ let earn ~base_path ~agent_name ~kind ~reason ?reputation_score ?(metadata = `Nu
 let spend ~base_path ~agent_name ~amount ~kind ~reason ?(metadata = `Null) () =
   if not (enabled ()) then Ok (get_balance ~base_path ~agent_name)
   else
-    let neg_amount = -.(abs_float amount) in
+    let neg_amount = -.(Stdlib.abs_float amount) in
     load_balances_from_ledger base_path;
     with_economy_rw (fun () ->
       let current = current_balance_locked ~base_path ~agent_name in
@@ -340,6 +359,6 @@ let economic_pressure ~base_path ~agent_name =
   if not (enabled ()) then Normal
   else
     let balance = get_balance ~base_path ~agent_name in
-    if balance < hustle_threshold () then Hustle
-    else if balance < frugal_threshold () then Frugal
+    if Stdlib.Float.compare balance (hustle_threshold ()) < 0 then Hustle
+    else if Stdlib.Float.compare balance (frugal_threshold ()) < 0 then Frugal
     else Normal

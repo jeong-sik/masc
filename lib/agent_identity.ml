@@ -1,3 +1,22 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+module Random = Stdlib.Random
+
 (** Agent Identity - Unified Agent Identification across MCP sessions
 
     OpenClaw-inspired session tracking for multi-agent environments.
@@ -38,7 +57,7 @@ type channel =
 
 let normalize_channel_label s =
   let normalized = String.trim s |> String.lowercase_ascii in
-  if normalized = "" then "unknown" else normalized
+  if String.equal normalized "" then "unknown" else normalized
 
 let channel_of_string s =
   match normalize_channel_label s with
@@ -97,7 +116,7 @@ let generate_uuid ~agent_name =
   let random_part = with_identity_rng (fun rng -> Random.State.int rng 0xFFFFFF) in
   let input = Printf.sprintf "%s-%f-%d" agent_name timestamp random_part in
   (* Simple hash-based UUID: first 8 chars of hex digest *)
-  let hash = Digest.string input |> Digest.to_hex in
+  let hash = Stdlib.Digest.string input |> Stdlib.Digest.to_hex in
   Printf.sprintf "agent-%s" (String.sub hash 0 12)
 
 (** {1 Identity Creation} *)
@@ -125,13 +144,13 @@ let from_mcp_params params =
   in
   let fallback_agent_name session_key =
     let prefix = session_key_prefix session_key in
-    let prefix = if prefix = "unknown" then "anon" else prefix in
+    let prefix = if String.equal prefix "unknown" then "anon" else prefix in
     Printf.sprintf "agent-%s" prefix
   in
   let session_key = match get_opt "_session_key" with
     | Some k ->
         let k = String.trim k in
-        if k = "" then generate_session_key () else k
+        if String.equal k "" then generate_session_key () else k
     | None -> generate_session_key ()
   in
   let agent_name = match get_opt "_agent_name", get_opt "agent_name" with
@@ -268,7 +287,7 @@ module Registry = struct
       !(reg.identities)
       |> StringMap.bindings
       |> List.filter_map (fun (_, id) ->
-        if id.last_seen > cutoff then Some id else None)
+        if Stdlib.Float.compare id.last_seen cutoff > 0 then Some id else None)
     )
 
   (** Get identity count *)
@@ -307,7 +326,7 @@ let to_display_string identity =
 
 (** Check if two identities refer to the same agent *)
 let same_agent a b =
-  a.session_key = b.session_key || a.agent_name = b.agent_name
+  String.equal a.session_key b.session_key || String.equal a.agent_name b.agent_name
 
 (** {1 MAGI Archetype System} *)
 
@@ -365,8 +384,7 @@ let get_archetype identity =
 
 (** Set archetype in identity metadata *)
 let set_archetype identity archetype =
-  let filtered = List.filter (fun (k, _) -> k <> "archetype") identity.metadata in
-  { identity with metadata = ("archetype", archetype_to_string archetype) :: filtered }
+  let filtered = List.filter (fun (k, _) -> not (String.equal k "archetype")) identity.metadata in  { identity with metadata = ("archetype", archetype_to_string archetype) :: filtered }
 
 (** Voting weight modifier based on archetype and topic *)
 let archetype_weight archetype topic_category =

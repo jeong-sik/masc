@@ -15,7 +15,8 @@ local directory, Docker, a VM, or a cloud service, but tool paths stay the same:
 Repo worktrees live *inside* your sandbox clone at `repos/<REPO_NAME>/.worktrees/<branch-or-task>/` (typically `{your-name}-<task_id>`).
 - Directory name: `{your-name}-<task_id>` (e.g. `sangsu-fix-bug`)
 - Git branch: `{your-name}/<task_id>` (e.g. `sangsu/fix-bug`)
-- `masc_worktree_create` opens one under the first clone it finds in your `repos/` directory (alphabetical), or pass `repo_name=<clone>` to pick a specific one.
+- `masc_worktree_create` infers the repo from task repo/path evidence, or pass `repo_name=<clone>` to pick a specific one.
+- If multiple clones exist and the task has no clear repo evidence, worktree creation fails instead of guessing.
 - The returned path always starts with `repos/<REPO_NAME>/.worktrees/`.
 - Never use a server-root-relative worktree path — the harness rejects it as outside your sandbox.
 - Clone the target repo first if `repos/` is empty.

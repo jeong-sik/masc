@@ -16,6 +16,25 @@ include Oas_worker_named_cascade
 include Oas_worker_named_error
 include Oas_worker_named_fsm
 
+let provider_attempt_timeout_hint_s
+    (provider_cfg : Llm_provider.Provider_config.t) : float option =
+  match provider_cfg.kind with
+  | Llm_provider.Provider_config.Ollama -> Some 300.0
+  | Claude_code -> Some 120.0
+  | Gemini | Gemini_cli -> Some 180.0
+  | Kimi_cli -> Some 60.0
+  | Anthropic | Kimi | OpenAI_compat | Glm | DashScope | Codex_cli -> None
+
+let effective_provider_attempt_timeout_s
+    ~(is_last : bool)
+    ~(configured_timeout_s : float option)
+    (provider_cfg : Llm_provider.Provider_config.t) : float option =
+  match configured_timeout_s, provider_attempt_timeout_hint_s provider_cfg with
+  | Some configured, Some hinted -> Some (Float.max configured hinted)
+  | Some configured, None -> if is_last then None else Some configured
+  | None, Some hinted -> Some hinted
+  | None, None -> None
+
 (* ================================================================ *)
 (* Facade-only: run_named, run_model_by_label, and MASC tool bridges  *)
 (* ================================================================ *)
@@ -421,7 +440,12 @@ let run_named
     | (provider_cfg : Llm_provider.Provider_config.t) :: rest ->
       let is_last = rest = [] in
       Log.Misc.debug "cascade %s: trying %s (is_last=%b)" cascade_name provider_cfg.model_id is_last;
-      let pp_timeout = if is_last then None else per_provider_timeout_s in
+      let pp_timeout =
+        effective_provider_attempt_timeout_s
+          ~is_last
+          ~configured_timeout_s:per_provider_timeout_s
+          provider_cfg
+      in
       let attempt_started_at = Unix.gettimeofday () in
       let (result, checkpoint_after) = try_provider ?resume_checkpoint ?per_provider_timeout_s:pp_timeout provider_cfg in
       let attempt_latency_ms =
@@ -566,10 +590,17 @@ let run_named
             record_hard_quota global ~provider_key:provider_cfg.model_id
               ~error_kind:(error_kind_of_string "hard_quota")
               ~error_reason:err_str ())
-        else if sdk_error_is_resumable_cli_session sdk_err then
+        else if sdk_error_is_resumable_cli_session sdk_err
+                || sdk_error_is_terminal_provider_runtime_failure sdk_err
+        then
           Cascade_health_tracker.(
             record_terminal_failure global ~provider_key:provider_cfg.model_id
-              ~error_kind:(error_kind_of_string "resumable_cli_session")
+              ~error_kind:
+                (error_kind_of_string
+                   (if sdk_error_is_resumable_cli_session sdk_err then
+                      "resumable_cli_session"
+                    else
+                      "terminal_provider_runtime"))
               ~error_reason:err_str ())
         else (match sdk_error_soft_rate_limited sdk_err with
         | Some retry_after_opt ->

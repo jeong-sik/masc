@@ -141,7 +141,7 @@ describe('RuntimePanel', () => {
     expect(container.textContent).toContain('PrometheusMetrics')
   })
 
-  it('renders FilterChips with 7 options', async () => {
+  it('renders FilterChips with runtime view options', async () => {
     route.value.params = {}
     const { RuntimePanel } = await loadRuntimePanel()
     render(html`<${RuntimePanel} />`, container)

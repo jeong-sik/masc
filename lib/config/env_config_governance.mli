@@ -4,9 +4,8 @@
 
     All values cached at module-init from env vars; the cache
     means a runtime env-var change does not propagate without
-    process restart.  The few [() -> X] re-readers (for the
-    dashboard fixtures path and command-plane snapshot
-    refresh) are documented exceptions. *)
+    process restart.  The few [() -> X] re-readers for dashboard
+    fixture selection are documented exceptions. *)
 
 (** {1 Inference} *)
 
@@ -132,16 +131,6 @@ module Dashboard_config : sig
   (** [MASC_DASHBOARD_FIXTURES_ENABLED] feature flag.
       Re-readable within the process — does NOT imply
       shell-level hot reload as an operator contract. *)
-
-  val command_plane_snapshot_refresh_enabled : unit -> bool
-  (** [MASC_COMMAND_PLANE_SNAPSHOT_REFRESH_ENABLED] feature
-      flag.  Default [false] because large roots can make the
-      full snapshot too heavy for always-on background
-      refresh. *)
-
-  val command_plane_snapshot_cache_ttl_s : unit -> float
-  (** [MASC_COMMAND_PLANE_SNAPSHOT_CACHE_TTL_S] (default
-      [30.0]).  Floor [5.0]. *)
 
   val fixture_opt : unit -> string option
 

@@ -15,17 +15,11 @@ module Coord = Masc_mcp.Coord
 
 let temp_counter = ref 0
 
+(* Route to the SSOT helper rather than carrying yet another ad-hoc
+   substring search.  Local arg order is (needle haystack) so the
+   wrapper flips into the canonical (haystack needle) signature. *)
 let contains needle haystack =
-  let hlen = String.length haystack in
-  let nlen = String.length needle in
-  if nlen = 0 then true
-  else
-    let rec loop i =
-      if i + nlen > hlen then false
-      else if String.sub haystack i nlen = needle then true
-      else loop (i + 1)
-    in
-    loop 0
+  Masc_mcp.String_util.contains_substring haystack needle
 
 (** Create a temp directory with a unique name. *)
 let make_temp_dir () =

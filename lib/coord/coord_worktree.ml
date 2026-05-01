@@ -560,17 +560,10 @@ let tokenize_repo_evidence text =
   |> List.map trim_repo_token
   |> List.filter (fun token -> token <> "")
 
-let contains_substring haystack needle =
-  let hlen = String.length haystack in
-  let nlen = String.length needle in
-  if nlen = 0 then true
-  else
-    let rec loop i =
-      if i + nlen > hlen then false
-      else if String.sub haystack i nlen = needle then true
-      else loop (i + 1)
-    in
-    loop 0
+(* Route to the SSOT helper rather than allocating String.sub on every
+   step.  Keeps semantics aligned across modules (empty needle returns
+   true). *)
+let contains_substring = String_util.contains_substring
 
 let task_repo_text (task : task) =
   let handoff_texts =
@@ -586,21 +579,31 @@ let task_repo_text (task : task) =
   in
   String.concat "\n" (task.title :: task.description :: handoff_texts)
 
+(* Reject any path-hint candidate whose components include a literal
+   ".." segment.  Substring matching falsely flagged legitimate names
+   like "..config.ts.bak" (filename containing ".."), and missed
+   embedded segments such as "src/foo/../bar" only by accident.
+   Splitting on '/' and checking segments is both more precise and
+   the same definition the OS uses for parent-traversal. *)
+let has_parent_segment token =
+  String.split_on_char '/' token
+  |> List.exists (fun seg -> String.equal seg "..")
+
 let task_path_hints (task : task) =
   let text_paths =
     task_repo_text task
     |> tokenize_repo_evidence
     |> List.filter (fun token ->
            contains_substring token "/"
-           && not (String.starts_with ~prefix:"/" token)
-           && not (contains_substring token ".."))
+           && Filename.is_relative token
+           && not (has_parent_segment token))
   in
   (task.files @ text_paths)
   |> List.map trim_repo_token
   |> List.filter (fun token ->
          token <> ""
-         && not (String.starts_with ~prefix:"/" token)
-         && not (contains_substring token ".."))
+         && Filename.is_relative token
+         && not (has_parent_segment token))
   |> List.sort_uniq String.compare
 
 let repo_candidates_in_dir repos_dir =

@@ -37,11 +37,36 @@ let start_keeper_loops ~sw ~clock ~net ~domain_mgr ~proc_mgr
                          keeper_name task_id;
                        "created"
                    | Error msg ->
-                       Log.Misc.warn
-                         "[claim_auto_provision] keeper=%s task=%s \
-                          worktree provisioning failed: %s"
-                         keeper_name task_id msg;
-                       "error")))
+                       (* The error string is double-wrapped by the time it
+                          reaches us ("worktree creation failed: ❌ IO
+                          error: <inner>"), so prefix-match by substring on
+                          the inner tag rather than expecting an exact
+                          match.  ambiguous_task_repo and
+                          missing_sandbox_clone are expected
+                          "needs-disambiguation" outcomes — log info and
+                          report skip_* so they do not inflate the error
+                          metric / alerting. *)
+                       if String_util.contains_substring msg
+                            "ambiguous_task_repo:" then begin
+                         Log.Misc.info
+                           "[claim_auto_provision] keeper=%s task=%s \
+                            worktree provisioning skipped: %s"
+                           keeper_name task_id msg;
+                         "skip_ambiguous"
+                       end else if String_util.contains_substring msg
+                                     "missing_sandbox_clone:" then begin
+                         Log.Misc.info
+                           "[claim_auto_provision] keeper=%s task=%s \
+                            worktree provisioning skipped: %s"
+                           keeper_name task_id msg;
+                         "skip_missing_sandbox_clone"
+                       end else begin
+                         Log.Misc.warn
+                           "[claim_auto_provision] keeper=%s task=%s \
+                            worktree provisioning failed: %s"
+                           keeper_name task_id msg;
+                         "error"
+                       end)))
       in
       Prometheus.inc_counter "masc_keeper_claim_auto_provision_total"
         ~labels:[ ("outcome", outcome); ("agent_name", agent_name) ]

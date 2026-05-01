@@ -29,17 +29,19 @@ name: PR-0.2.H — Dashboard Lighthouse CI (synthetic perf budget)
 #   - dashboard/test/perf/lighthouse-budget.json
 #   - docs/design/dashboard-perf-protocol.md
 #   - knowledge/research/2026-04-masc-ide-strategy/ch4_dashboard.md §4
+#
+# Manual-only: the main CI Dashboard job owns PR build/typecheck coverage.
+# This synthetic, warn-only perf check should not occupy PR runners by default.
 
 on:
-  pull_request:
-    paths:
-      - 'dashboard/**'
-      - 'dashboard/test/perf/**'
-      - '.github/workflows/dashboard-lighthouse.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: dashboard-lighthouse-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   lighthouse-smoke:

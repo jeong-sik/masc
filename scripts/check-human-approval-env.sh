@@ -15,7 +15,21 @@ REQUIRE_REVIEWER=""
 REQUIRE_PREVENT_SELF_REVIEW=0
 
 usage() {
-  sed -n '1,/^$/p' "$0"
+  awk '
+    NR == 1 { next }
+    /^[[:space:]]*$/ {
+      if (started) print ""
+      next
+    }
+    /^#/ {
+      line = $0
+      sub(/^# ?/, "", line)
+      print line
+      started = 1
+      next
+    }
+    started { exit }
+  ' "$0"
 }
 
 die() {
@@ -74,20 +88,42 @@ environment_json="$(
   gh api "repos/$REPO/environments/$ENVIRONMENT_ENCODED"
 )" || die "could not read environment '$ENVIRONMENT' in $REPO"
 
-required_rule_count="$(
+environment_summary="$(
   printf '%s' "$environment_json" |
-    jq '[.protection_rules[]? | select(.type == "required_reviewers")] | length'
+    jq --arg reviewer "$REQUIRE_REVIEWER" '{
+      name,
+      deployment_branch_policy,
+      required_rule_count:
+        ([.protection_rules[]? | select(.type == "required_reviewers")] | length),
+      required_reviewer_count:
+        ([.protection_rules[]? | select(.type == "required_reviewers") | .reviewers[]?] | length),
+      prevent_self_review:
+        ([.protection_rules[]? | select(.type == "required_reviewers") | .prevent_self_review][0] // false),
+      reviewer_present:
+        (if $reviewer == "" then true
+         else
+           ([.protection_rules[]?
+             | select(.type == "required_reviewers")
+             | .reviewers[]?
+             | select(((.reviewer.login // .reviewer.slug // "") == $reviewer))]
+            | length) > 0
+         end),
+      reviewers: [
+        .protection_rules[]?
+        | select(.type == "required_reviewers")
+        | .reviewers[]?.reviewer
+        | (.login // .slug // .name // .id // empty)
+      ]
+    }'
 )"
 
-reviewer_count="$(
-  printf '%s' "$environment_json" |
-    jq '[.protection_rules[]? | select(.type == "required_reviewers") | .reviewers[]?] | length'
+summary_fields="$(
+  printf '%s' "$environment_summary" |
+    jq -r '[.required_rule_count, .required_reviewer_count, .prevent_self_review, .reviewer_present] | @tsv'
 )"
-
-prevent_self_review="$(
-  printf '%s' "$environment_json" |
-    jq -r '[.protection_rules[]? | select(.type == "required_reviewers") | .prevent_self_review][0] // false'
-)"
+IFS="$(printf '\t')" read -r required_rule_count reviewer_count prevent_self_review reviewer_present <<EOF
+$summary_fields
+EOF
 
 if [ "$required_rule_count" -eq 0 ] || [ "$reviewer_count" -eq 0 ]; then
   echo "human approval environment check: FAIL"
@@ -98,16 +134,7 @@ if [ "$required_rule_count" -eq 0 ] || [ "$reviewer_count" -eq 0 ]; then
 fi
 
 if [ -n "$REQUIRE_REVIEWER" ]; then
-  reviewer_present="$(
-    printf '%s' "$environment_json" |
-      jq --arg reviewer "$REQUIRE_REVIEWER" '
-        [.protection_rules[]?
-         | select(.type == "required_reviewers")
-         | .reviewers[]?
-         | select(((.reviewer.login // .reviewer.slug // "") == $reviewer))]
-        | length'
-  )"
-  if [ "$reviewer_present" -eq 0 ]; then
+  if [ "$reviewer_present" != "true" ]; then
     echo "human approval environment check: FAIL"
     echo "required reviewer '$REQUIRE_REVIEWER' is not configured for $REPO/$ENVIRONMENT"
     printf '%s\n' "$environment_json" |
@@ -125,18 +152,13 @@ if [ "$REQUIRE_PREVENT_SELF_REVIEW" -eq 1 ] && [ "$prevent_self_review" != "true
 fi
 
 echo "human approval environment check: PASS"
-printf '%s\n' "$environment_json" |
+printf '%s\n' "$environment_summary" |
   jq '{
     name,
     deployment_branch_policy,
-    required_reviewer_count: ([.protection_rules[]? | select(.type == "required_reviewers") | .reviewers[]?] | length),
-    prevent_self_review: ([.protection_rules[]? | select(.type == "required_reviewers") | .prevent_self_review][0] // false),
-    reviewers: [
-      .protection_rules[]?
-      | select(.type == "required_reviewers")
-      | .reviewers[]?.reviewer
-      | (.login // .slug // .name // .id // empty)
-    ]
+    required_reviewer_count,
+    prevent_self_review,
+    reviewers
   }'
 
 if [ "$prevent_self_review" != "true" ]; then

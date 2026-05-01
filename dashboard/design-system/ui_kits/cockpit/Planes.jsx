@@ -180,12 +180,7 @@ function IdePlane({ branch, keepers }) {
 
   // open shared drawer with terminal tab as a hint
   const openTerminal = () => {
-    const cur = (window.MASC_EXT && window.useCockpitState) ? null : null;
-    if (window.useCockpitState) {
-      // push a state change via the singleton helper
-      const ev = new CustomEvent("masc-drawer-set", { detail: { open: true, tab: "terminal" }});
-      window.dispatchEvent(ev);
-    }
+    window.dispatchEvent(new CustomEvent("masc-drawer-set", { detail: { open: true, tab: "terminal" } }));
   };
 
   const centerPanelId = `ide-v2-center-${mode}`;

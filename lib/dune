@@ -70,6 +70,7 @@
    keeper_gh_env
    credential_provider
    host_config_provider
+   in_container_login_provider
    keeper_gh_shared
    keeper_tool_pr_review
    keeper_exec_preflight

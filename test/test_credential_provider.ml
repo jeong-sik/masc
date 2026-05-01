@@ -338,6 +338,73 @@ let test_tear_down_idempotent () =
   HCP.tear_down b ~container_id:None;
   ()
 
+(* --- 5. F-1 security gate tests (In_container_login_provider) --- *)
+
+module ICLP = Masc_mcp.In_container_login_provider
+
+let test_f1_gate_matching_tokens_rejected () =
+  match
+    ICLP.For_testing.provider_gate
+      ~keeper_token:"ghp_same_token_value"
+      ~operator_token:"ghp_same_token_value"
+      ~identity:"test-keeper"
+  with
+  | Ok _ -> fail "matching tokens should be rejected by F-1 gate"
+  | Error (CP.Invalid_token { identity; reason }) ->
+      check string "identity" "test-keeper" identity;
+      check bool "reason mentions SHA-256" true
+        (try ignore (Str.search_forward (Str.regexp_string "SHA-256") reason 0); true
+         with Not_found -> false)
+  | Error other ->
+      failf "expected Invalid_token, got %s" (CP.pp_error other)
+
+let test_f1_gate_different_tokens_accepted () =
+  match
+    ICLP.For_testing.provider_gate
+      ~keeper_token:"ghp_keeper_token_abc"
+      ~operator_token:"ghp_operator_token_xyz"
+      ~identity:"test-keeper"
+  with
+  | Ok () -> ()
+  | Error err -> failf "different tokens should pass F-1 gate, got %s" (CP.pp_error err)
+
+let test_f1_gate_error_variant () =
+  let gate_result =
+    ICLP.For_testing.provider_gate
+      ~keeper_token:"tok"
+      ~operator_token:"tok"
+      ~identity:"keeper-1"
+  in
+  (match gate_result with
+  | Error (CP.Invalid_token _) ->
+      let rendered = CP.pp_error (Result.get_error gate_result) in
+      check bool "rendered contains identity" true
+        (try ignore (Str.search_forward (Str.regexp_string "keeper-1") rendered 0); true
+         with Not_found -> false)
+  | Ok _ -> fail "expected Error"
+  | Error other ->
+      failf "expected Invalid_token, got %s" (CP.pp_error other))
+
+let test_f1_gate_ct_hex_equal () =
+  let hash_a = Digestif.SHA256.(digest_string "hello" |> to_hex) in
+  let hash_b = Digestif.SHA256.(digest_string "hello" |> to_hex) in
+  let hash_c = Digestif.SHA256.(digest_string "world" |> to_hex) in
+  check bool "same input -> equal hashes" true (ICLP.For_testing.ct_hex_equal hash_a hash_b);
+  check bool "different input -> unequal hashes" false (ICLP.For_testing.ct_hex_equal hash_a hash_c);
+  check bool "non-64-char string -> false" false (ICLP.For_testing.ct_hex_equal "short" hash_a)
+
+let test_f1_gate_resolve_stub () =
+  let config = Masc_mcp.Coord.default_config "/tmp/nonexistent" in
+  match ICLP.resolve ~config ~identity:"test-keeper" with
+  | Error (CP.Missing_bundle { identity; path }) ->
+      check string "identity" "test-keeper" identity;
+      check bool "path mentions not implemented" true
+        (try ignore (Str.search_forward (Str.regexp_string "not yet implemented") path 0); true
+         with Not_found -> false)
+  | Ok _ -> fail "resolve stub should return Missing_bundle"
+  | Error other ->
+      failf "expected Missing_bundle, got %s" (CP.pp_error other)
+
 let () =
   run "credential_provider"
     [
@@ -372,5 +439,18 @@ let () =
         [
           test_case "finalize Ok" `Quick test_finalize_is_noop_ok;
           test_case "tear_down idempotent" `Quick test_tear_down_idempotent;
+        ] );
+      ( "f1_gate",
+        [
+          test_case "matching tokens rejected" `Quick
+            test_f1_gate_matching_tokens_rejected;
+          test_case "different tokens accepted" `Quick
+            test_f1_gate_different_tokens_accepted;
+          test_case "error variant is Invalid_token" `Quick
+            test_f1_gate_error_variant;
+          test_case "ct_hex_equal semantics" `Quick
+            test_f1_gate_ct_hex_equal;
+          test_case "resolve stub returns Missing_bundle" `Quick
+            test_f1_gate_resolve_stub;
         ] );
     ]

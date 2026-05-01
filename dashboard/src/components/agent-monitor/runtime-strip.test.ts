@@ -10,16 +10,16 @@ const mockKeeperActivityDisplay = vi.hoisted(() => vi.fn())
 const mockFormatDuration = vi.hoisted(() => vi.fn((s: number) => `${s}s`))
 
 vi.mock('../../lib/keeper-utils', () => ({
-  findKeeper: (...args: any[]) => mockFindKeeper(...args),
+  findKeeper: (...args: Parameters<typeof mockFindKeeper>) => mockFindKeeper(...args),
 }))
 
 vi.mock('../../lib/keeper-runtime-display', () => ({
-  keeperDisplayModel: (...args: any[]) => mockKeeperDisplayModel(...args),
-  keeperActivityDisplay: (...args: any[]) => mockKeeperActivityDisplay(...args),
+  keeperDisplayModel: (...args: Parameters<typeof mockKeeperDisplayModel>) => mockKeeperDisplayModel(...args),
+  keeperActivityDisplay: (...args: Parameters<typeof mockKeeperActivityDisplay>) => mockKeeperActivityDisplay(...args),
 }))
 
 vi.mock('../mission-utils', () => ({
-  formatDuration: (...args: any[]) => mockFormatDuration(...args),
+  formatDuration: (...args: Parameters<typeof mockFormatDuration>) => mockFormatDuration(...args),
 }))
 
 vi.mock('../keeper-pipeline-stage', () => ({

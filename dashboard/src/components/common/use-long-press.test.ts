@@ -1,10 +1,10 @@
 // @ts-nocheck
 import { describe, expect, it, vi } from 'vitest'
-import { h } from 'preact'
+import { h, type FunctionComponent } from 'preact'
 import { render } from 'preact'
 import { useLongPress } from './use-long-press'
 
-function LongPressUser({ onLongPress }: { onLongPress?: () => void }) {
+const LongPressUser: FunctionComponent<{ onLongPress?: () => void }> = ({ onLongPress }) => {
   const { longPressProps, pressing } = useLongPress({ onLongPress, threshold: 200 })
   return h('button', { ...longPressProps, 'data-pressing': pressing ? 'true' : undefined }, 'Hold')
 }

@@ -1,10 +1,12 @@
 // @ts-nocheck
 import { describe, expect, it, vi } from 'vitest'
-import { h } from 'preact'
+import { h, type FunctionComponent } from 'preact'
 import { render } from 'preact'
 import { useMove } from './use-move'
 
-function MoveConsumer({ onMoveStart, onMove, onMoveEnd }: Parameters<typeof useMove>[0] = {}) {
+type MoveOptions = NonNullable<Parameters<typeof useMove>[0]>
+
+const MoveConsumer: FunctionComponent<MoveOptions> = ({ onMoveStart, onMove, onMoveEnd }) => {
   const { moving, moveProps } = useMove({ onMoveStart, onMove, onMoveEnd })
   return h('div', { 'data-testid': 'move-target', ...moveProps }, moving ? 'moving' : 'idle')
 }

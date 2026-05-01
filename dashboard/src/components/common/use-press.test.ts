@@ -1,12 +1,12 @@
 // @ts-nocheck
 import { describe, expect, it, vi } from 'vitest'
-import { h } from 'preact'
+import { h, type FunctionComponent } from 'preact'
 import { render } from 'preact'
 import { usePress } from './use-press'
 
-function PressUser({ onPress }: { onPress?: () => void }) {
-  const { pressed, pressProps } = usePress(onPress)
-  return h('button', { 'data-pressed': pressed ? 'true' : undefined, ...pressProps }, 'Press')
+const PressUser: FunctionComponent<{ onPress?: () => void }> = ({ onPress }) => {
+  const { pressProps } = usePress(onPress)
+  return h('button', { ...pressProps }, 'Press')
 }
 
 describe('usePress', () => {

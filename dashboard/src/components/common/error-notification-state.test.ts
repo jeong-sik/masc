@@ -9,6 +9,24 @@ import {
   startErrorCleanup,
   stopErrorCleanup,
 } from './error-notification-state'
+import type { DashboardError } from '../../types/error'
+
+function makeError(overrides: Partial<DashboardError> = {}): DashboardError {
+  return {
+    id: '1',
+    fingerprint: 'fp-1',
+    agentName: 'Alpha',
+    taskId: null,
+    message: 'a',
+    errorCode: 'internal_error',
+    severity: 'critical',
+    timestamp: Date.now(),
+    acknowledged: false,
+    count: 1,
+    lastSeen: Date.now(),
+    ...overrides,
+  }
+}
 
 describe('error-notification-state', () => {
   beforeEach(() => {
@@ -29,9 +47,9 @@ describe('error-notification-state', () => {
 
   it('computes unacknowledged count', () => {
     errors.value = [
-      { id: '1', message: 'a', acknowledged: false, lastSeen: Date.now() },
-      { id: '2', message: 'b', acknowledged: true, lastSeen: Date.now() },
-      { id: '3', message: 'c', acknowledged: false, lastSeen: Date.now() },
+      makeError({ id: '1', message: 'a', acknowledged: false }),
+      makeError({ id: '2', message: 'b', acknowledged: true }),
+      makeError({ id: '3', message: 'c', acknowledged: false }),
     ]
     expect(unacknowledgedCount.value).toBe(2)
     expect(unacknowledgedErrors.value.length).toBe(2)
@@ -39,8 +57,8 @@ describe('error-notification-state', () => {
 
   it('acknowledges a specific error by id', () => {
     errors.value = [
-      { id: '1', message: 'a', acknowledged: false, lastSeen: Date.now() },
-      { id: '2', message: 'b', acknowledged: false, lastSeen: Date.now() },
+      makeError({ id: '1', message: 'a', acknowledged: false }),
+      makeError({ id: '2', message: 'b', acknowledged: false }),
     ]
     acknowledgeError('1')
     expect(errors.value[0].acknowledged).toBe(true)
@@ -50,7 +68,7 @@ describe('error-notification-state', () => {
 
   it('acknowledges non-existing id without error', () => {
     errors.value = [
-      { id: '1', message: 'a', acknowledged: false, lastSeen: Date.now() },
+      makeError({ id: '1', message: 'a', acknowledged: false }),
     ]
     acknowledgeError('999')
     expect(errors.value[0].acknowledged).toBe(false)
@@ -59,8 +77,8 @@ describe('error-notification-state', () => {
 
   it('clearAllErrors acknowledges every error', () => {
     errors.value = [
-      { id: '1', message: 'a', acknowledged: false, lastSeen: Date.now() },
-      { id: '2', message: 'b', acknowledged: false, lastSeen: Date.now() },
+      makeError({ id: '1', message: 'a', acknowledged: false }),
+      makeError({ id: '2', message: 'b', acknowledged: false }),
     ]
     clearAllErrors()
     expect(errors.value.every(e => e.acknowledged)).toBe(true)
@@ -75,9 +93,9 @@ describe('error-notification-state', () => {
 
       const old = now - 6 * 60 * 1000
       errors.value = [
-        { id: '1', message: 'old', acknowledged: true, lastSeen: old },
-        { id: '2', message: 'recent', acknowledged: true, lastSeen: now },
-        { id: '3', message: 'unack', acknowledged: false, lastSeen: old },
+        makeError({ id: '1', message: 'old', acknowledged: true, lastSeen: old }),
+        makeError({ id: '2', message: 'recent', acknowledged: true, lastSeen: now }),
+        makeError({ id: '3', message: 'unack', acknowledged: false, lastSeen: old }),
       ]
 
       startErrorCleanup()
@@ -99,7 +117,7 @@ describe('error-notification-state', () => {
 
       const old = now - 10 * 60 * 1000
       errors.value = [
-        { id: '1', message: 'old unack', acknowledged: false, lastSeen: old },
+        makeError({ id: '1', message: 'old unack', acknowledged: false, lastSeen: old }),
       ]
 
       startErrorCleanup()

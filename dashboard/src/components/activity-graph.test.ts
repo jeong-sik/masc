@@ -9,7 +9,7 @@ function makeGroup(overrides: Partial<ActionTimelineGroup> = {}): ActionTimeline
     id: "1",
     title: "Title",
     summary: "Summary",
-    actor: null,
+    actor: '',
     subjectId: null,
     category: "task",
     rawCount: 1,

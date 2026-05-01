@@ -57,8 +57,8 @@ describe('DTCG schema types (runtime shape validation)', () => {
       },
     }
     expect(group.$type).toBe('color')
-    expect(group.primary.$value).toBe('#ff0000')
-    expect((group.nested as DTCGTokenGroup).deep.$value).toBe('#0000ff')
+    expect((group.primary as DTCGToken).$value).toBe('#ff0000')
+    expect(((group.nested as DTCGTokenGroup).deep as DTCGToken).$value).toBe('#0000ff')
   })
 
   it('accepts shadow value structure', () => {

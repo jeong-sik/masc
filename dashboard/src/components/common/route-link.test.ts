@@ -10,8 +10,8 @@ const hashForRoute = vi.fn((tab: string, params?: Record<string, string>) => {
 })
 
 vi.mock('../../router', () => ({
-  navigate: (...args: any[]) => navigate(...args),
-  hashForRoute: (...args: any[]) => hashForRoute(...args),
+  navigate: (...args: Parameters<typeof navigate>) => navigate(...args),
+  hashForRoute: (...args: Parameters<typeof hashForRoute>) => hashForRoute(...args),
 }))
 
 describe('RouteLink', () => {

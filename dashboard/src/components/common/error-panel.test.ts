@@ -5,7 +5,7 @@ import { render } from 'preact'
 import { ErrorPanel } from './error-panel'
 import { errors } from './error-notification-state'
 
-function makeError(overrides: Partial<ReturnType<typeof errors.value>[0]> = {}) {
+function makeError(overrides: Partial<(typeof errors.value)[number]> = {}) {
   return {
     id: 'err-1',
     fingerprint: 'fp-1',

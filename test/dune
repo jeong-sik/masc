@@ -489,6 +489,7 @@
         test_board_vote_quarantine
         test_keeper_identity_parse
         test_keeper_identity_normalize
+        test_coord_join_fail_closed
         test_keeper_personality_io_parse
         test_keeper_personality_io_coerce
         test_keeper_personality_io_validate
@@ -683,6 +684,7 @@
         test_board_vote_quarantine
         test_keeper_identity_parse
         test_keeper_identity_normalize
+        test_coord_join_fail_closed
         test_keeper_personality_io_parse
         test_keeper_personality_io_coerce
         test_keeper_personality_io_validate

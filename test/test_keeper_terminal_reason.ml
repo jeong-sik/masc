@@ -74,11 +74,25 @@ let test_timeout_receipt_outcome_is_cancelled () =
 let test_non_timeout_receipt_outcome_is_error () =
   check string "auth receipt outcome" "error"
     (outcome_code
-       (mk_api (Agent_sdk.Retry.AuthError { message = "x" })));
-  check string "agent receipt outcome" "error"
+       (mk_api (Agent_sdk.Retry.AuthError { message = "x" })))
+
+let test_agent_max_turns_exceeded_receipt_is_cancelled () =
+  check string "max_turns receipt outcome" "cancelled"
     (outcome_code
        (Agent_sdk.Error.Agent
           (Agent_sdk.Error.MaxTurnsExceeded { turns = 1; limit = 1 })))
+
+let test_agent_idle_detected_receipt_is_cancelled () =
+  check string "idle_detected receipt outcome" "cancelled"
+    (outcome_code
+       (Agent_sdk.Error.Agent
+          (Agent_sdk.Error.IdleDetected { consecutive_idle_turns = 3 })))
+
+let test_agent_exit_condition_met_receipt_is_cancelled () =
+  check string "exit_condition_met receipt outcome" "cancelled"
+    (outcome_code
+       (Agent_sdk.Error.Agent
+          (Agent_sdk.Error.ExitConditionMet { turn = 5 })))
 
 let test_checkpoint_persistence_error_is_internal_error () =
   let err =
@@ -309,13 +323,19 @@ let () =
             test_timeout_receipt_outcome_is_cancelled;
           test_case "non-timeout receipt outcome -> error" `Quick
             test_non_timeout_receipt_outcome_is_error;
+          test_case "agent max_turns receipt outcome -> cancelled" `Quick
+            test_agent_max_turns_exceeded_receipt_is_cancelled;
+          test_case "agent idle_detected receipt outcome -> cancelled" `Quick
+            test_agent_idle_detected_receipt_is_cancelled;
+          test_case "agent exit_condition_met receipt outcome -> cancelled" `Quick
+            test_agent_exit_condition_met_receipt_is_cancelled;
           test_case "checkpoint persistence failure is terminal error" `Quick
             test_checkpoint_persistence_error_is_internal_error;
           test_case "non-Agent variants unchanged" `Quick
             test_non_agent_variants_unchanged;
           test_case "all 9 api codes are pairwise distinct" `Quick
             test_all_api_codes_distinct;
-          test_case "all 4 agent codes are pairwise distinct" `Quick
+          test_case "all 10 agent codes are pairwise distinct" `Quick
             test_all_agent_codes_distinct;
         ] );
       ( "agent_error variants",

@@ -129,6 +129,9 @@ let terminal_reason_code_of_sdk_error = function
 
 let receipt_outcome_kind_of_sdk_error = function
   | Oas.Error.Api (Oas.Retry.Timeout _) -> `Cancelled
+  | Oas.Error.Agent (Oas.Error.MaxTurnsExceeded _) -> `Cancelled
+  | Oas.Error.Agent (Oas.Error.IdleDetected _) -> `Cancelled
+  | Oas.Error.Agent (Oas.Error.ExitConditionMet _) -> `Cancelled
   | _ -> `Error
 
 let checkpoint_persistence_error ~keeper_name ~detail =

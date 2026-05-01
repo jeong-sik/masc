@@ -33,6 +33,10 @@ let () =
             `Quick
             Test_operator_control_snapshot
             .test_snapshot_prefers_metrics_context_truth_over_usage_counters;
+          Alcotest.test_case
+            "snapshot summary surfaces paused keeper runtime trust" `Quick
+            Test_operator_control_snapshot
+            .test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust;
           Alcotest.test_case "snapshot sections" `Quick
             Test_operator_control_snapshot.test_snapshot_has_expected_sections;
           Alcotest.test_case "snapshot pending confirm summary tracks actor scope"

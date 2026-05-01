@@ -254,6 +254,74 @@ let test_save_mapping_creates_config_dir () =
               Alcotest.(check int) "saved count" 2 (List.length ids);
               Alcotest.(check bool) "has repo-a" true (List.mem "repo-a" ids)))
 
+let sample_credential id cred_type =
+  {
+    id;
+    cred_type;
+    username = "user-" ^ id;
+    gh_config_dir = None;
+    ssh_key_path = None;
+    gpg_key_id = None;
+    state = Unmaterialized;
+    token_sha256_prefix = None;
+  }
+
+let test_credentials_for_keeper_explicit () =
+  with_temp_base_path (fun base_path ->
+      let cred1 = sample_credential "cred-1" Github in
+      let cred2 = sample_credential "cred-2" Gitlab in
+      let repo_a =
+        { (sample_repo "repo-a") with local_path = repo_under_base base_path "repo-a"; credential_id = "cred-1" }
+      in
+      let repo_b =
+        { (sample_repo "repo-b") with local_path = repo_under_base base_path "repo-b"; credential_id = "cred-2" }
+      in
+      write_repositories base_path [ repo_a; repo_b ];
+      (match Credential_store.add ~base_path cred1 with
+       | Error e -> Alcotest.fail ("add cred1 failed: " ^ e)
+       | Ok _ -> (
+           match Credential_store.add ~base_path cred2 with
+           | Error e -> Alcotest.fail ("add cred2 failed: " ^ e)
+           | Ok _ -> (
+               write_mapping base_path "keeper-1" [ "repo-a" ];
+               match Keeper_repo_mapping.credentials_for_keeper ~base_path ~keeper_id:"keeper-1" with
+               | Error e -> Alcotest.fail ("credentials_for_keeper failed: " ^ e)
+               | Ok creds ->
+                   Alcotest.(check int) "count" 1 (List.length creds);
+                   Alcotest.(check string) "cred id" "cred-1" (List.hd creds).id))))
+
+let test_credentials_for_keeper_wildcard () =
+  with_temp_base_path (fun base_path ->
+      let cred1 = sample_credential "cred-1" Github in
+      let cred2 = sample_credential "cred-2" Gitlab in
+      let repo_a =
+        { (sample_repo "repo-a") with local_path = repo_under_base base_path "repo-a"; credential_id = "cred-1" }
+      in
+      let repo_b =
+        { (sample_repo "repo-b") with local_path = repo_under_base base_path "repo-b"; credential_id = "cred-2" }
+      in
+      write_repositories base_path [ repo_a; repo_b ];
+      (match Credential_store.add ~base_path cred1 with
+       | Error e -> Alcotest.fail ("add cred1 failed: " ^ e)
+       | Ok _ -> (
+           match Credential_store.add ~base_path cred2 with
+           | Error e -> Alcotest.fail ("add cred2 failed: " ^ e)
+           | Ok _ -> (
+               write_mapping base_path "keeper-wild" [ "*" ];
+               match Keeper_repo_mapping.credentials_for_keeper ~base_path ~keeper_id:"keeper-wild" with
+               | Error e -> Alcotest.fail ("credentials_for_keeper failed: " ^ e)
+               | Ok creds ->
+                   Alcotest.(check int) "count" 2 (List.length creds);
+                   let ids = List.map (fun (c : credential) -> c.id) creds in
+                   Alcotest.(check bool) "has cred-1" true (List.mem "cred-1" ids);
+                   Alcotest.(check bool) "has cred-2" true (List.mem "cred-2" ids)))))
+
+let test_credentials_for_keeper_no_mapping () =
+  with_temp_base_path (fun base_path ->
+      match Keeper_repo_mapping.credentials_for_keeper ~base_path ~keeper_id:"unknown" with
+      | Error e -> Alcotest.fail ("unexpected error: " ^ e)
+      | Ok creds -> Alcotest.(check int) "empty for no mapping" 0 (List.length creds))
+
 let () =
   Alcotest.run "Keeper_repo_mapping"
     [
@@ -288,5 +356,11 @@ let () =
       ( "save_mapping",
         [
           Alcotest.test_case "creates config dir" `Quick test_save_mapping_creates_config_dir;
+        ] );
+      ( "credentials_for_keeper",
+        [
+          Alcotest.test_case "explicit mapping" `Quick test_credentials_for_keeper_explicit;
+          Alcotest.test_case "wildcard mapping" `Quick test_credentials_for_keeper_wildcard;
+          Alcotest.test_case "no mapping" `Quick test_credentials_for_keeper_no_mapping;
         ] );
     ]

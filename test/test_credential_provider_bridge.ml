@@ -24,6 +24,8 @@
        this rather than silently fall back.
     6. Wildcard ["*"] mapping → returns credentials for every
        registered repository (deduplicated by credential id).
+    7. Direct keeper credential mapping → returns that credential even
+       when repo-derived credentials are ambiguous or missing.
 
     Integration of [Host_config_provider.resolve] itself with
     [Coord.config] + filesystem bundles is exercised by
@@ -50,6 +52,11 @@ let with_temp_base_path f =
   Unix.mkdir masc_dir 0o755;
   let cfg_dir = Filename.concat masc_dir "config" in
   Unix.mkdir cfg_dir 0o755;
+  let repos_path = Filename.concat cfg_dir "repositories.toml" in
+  let oc = open_out repos_path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc "[repository]\n");
   Fun.protect
     ~finally:(fun () ->
       let rec rm_rf path =
@@ -64,15 +71,21 @@ let with_temp_base_path f =
       rm_rf dir)
     (fun () -> f dir)
 
-let write_mapping base_path keeper_id repo_ids =
+let write_mapping ?credential_id base_path keeper_id repo_ids =
   let path =
     Filename.concat base_path ".masc/config/keeper_repo_mappings.toml"
   in
   let entries =
     String.concat ", " (List.map (fun s -> "\"" ^ s ^ "\"") repo_ids)
   in
+  let credential_line =
+    match credential_id with
+    | Some id -> Printf.sprintf "credential_id = \"%s\"\n" id
+    | None -> ""
+  in
   let content =
-    Printf.sprintf "[mapping.%s]\nrepositories = [%s]\n" keeper_id entries
+    Printf.sprintf "[mapping.%s]\nrepositories = [%s]\n%s" keeper_id
+      entries credential_line
   in
   let oc = open_out path in
   Fun.protect
@@ -255,6 +268,29 @@ let test_wildcard_mapping_returns_all_credentials () =
           Alcotest.(check bool) "has cred-B" true (List.mem "cred-B" ids)
       | Error msg -> Alcotest.failf "unexpected error: %s" msg)
 
+(* --- 7. Direct keeper credential mapping wins over repo derivation --- *)
+
+let test_direct_mapping_returns_selected_credential () =
+  with_temp_base_path (fun base_path ->
+      seed_credential ~base_path
+        (make_credential ~id:"cred-selected" ~username:"keeper-user"
+           ~gh_config_dir:"/tmp/selected/gh");
+      seed_repo ~base_path
+        (make_repo ~id:"repo-1" ~credential_id:"cred-missing-repo");
+      write_mapping ~credential_id:"cred-selected" base_path "keeper-1"
+        [ "repo-1" ];
+      match
+        Keeper_repo_mapping.credentials_for_keeper
+          ~base_path ~keeper_id:"keeper-1"
+      with
+      | Ok [ c ] ->
+          Alcotest.(check string) "credential id" "cred-selected" c.id;
+          Alcotest.(check string) "credential username" "keeper-user" c.username
+      | Ok creds ->
+          Alcotest.failf "expected exactly one direct credential, got %d"
+            (List.length creds)
+      | Error msg -> Alcotest.failf "unexpected error: %s" msg)
+
 let () =
   Alcotest.run "credential_provider_bridge"
     [
@@ -272,5 +308,7 @@ let () =
             test_missing_credential_yields_error;
           Alcotest.test_case "wildcard mapping resolves all" `Quick
             test_wildcard_mapping_returns_all_credentials;
+          Alcotest.test_case "direct keeper credential mapping wins" `Quick
+            test_direct_mapping_returns_selected_credential;
         ] );
     ]

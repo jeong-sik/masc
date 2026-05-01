@@ -28,8 +28,9 @@
     gate and are not acceptable. *)
 
 module AC = Masc_mcp.Approval_callbacks
+module Hooks = Agent_sdk.Hooks
 
-let check_reject name (result : Masc_mcp.Agent_sdk.Hooks.approval_decision) =
+let check_reject name (result : Hooks.approval_decision) =
   match result with
   | Reject reason ->
       Alcotest.(check bool)
@@ -43,7 +44,7 @@ let check_reject name (result : Masc_mcp.Agent_sdk.Hooks.approval_decision) =
       Alcotest.fail
         (Printf.sprintf "%s: expected Reject, got Edit" name)
 
-let check_approve name (result : Masc_mcp.Agent_sdk.Hooks.approval_decision) =
+let check_approve name (result : Hooks.approval_decision) =
   match result with
   | Approve -> ()
   | Reject reason ->
@@ -69,7 +70,7 @@ let test_reject_by_default_rejects_any_tool () =
     tools
 
 let test_reject_by_default_reason_mentions_tool () =
-  let decision : Masc_mcp.Agent_sdk.Hooks.approval_decision =
+  let decision : Hooks.approval_decision =
     AC.reject_by_default ~tool_name:"masc_worktree_create"
       ~input:(`Assoc [])
   in

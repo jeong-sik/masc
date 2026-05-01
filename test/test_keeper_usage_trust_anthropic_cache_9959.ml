@@ -27,7 +27,6 @@
 *)
 
 module T = Masc_mcp.Keeper_usage_trust
-module Oas = Masc_mcp.Oas
 
 let mk_usage
     ?(cache_creation = 0) ?(cache_read = 0) ?(cost_usd = None)

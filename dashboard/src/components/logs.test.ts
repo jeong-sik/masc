@@ -1,6 +1,9 @@
-import { describe, expect, it } from 'vitest'
+// @vitest-environment happy-dom
+import { cleanup, render, screen } from '@testing-library/preact'
+import { afterEach, describe, expect, it } from 'vitest'
+import '@testing-library/jest-dom'
 import type { LogEntry } from '../api/dashboard'
-import { failureEnvelope, mergeLogEntries, renderLogMessage } from './logs'
+import { failureEnvelope, mergeLogEntries, renderLogMessage, renderLogRow } from './logs'
 
 function entry(seq: number, overrides: Partial<LogEntry> = {}): LogEntry {
   return {
@@ -17,6 +20,10 @@ function entry(seq: number, overrides: Partial<LogEntry> = {}): LogEntry {
     ...overrides,
   }
 }
+
+afterEach(() => {
+  cleanup()
+})
 
 describe('mergeLogEntries', () => {
   it('deduplicates by seq and keeps newest payload', () => {
@@ -107,5 +114,56 @@ describe('renderLogMessage', () => {
         }),
       ),
     ).toBe('tool keeper_github: correction_pipeline fixed 2 field(s)')
+  })
+})
+
+describe('renderLogRow', () => {
+  it('renders log metadata through StatusChip', () => {
+    render(renderLogRow(entry(10, {
+      source: 'client_tool_host',
+      legacy_classified: true,
+      raw_level: 'WARN',
+      normalized_level: 'INFO',
+      details: {
+        client_name: 'codex',
+        tool_name: 'masc_status',
+        fixes: 2,
+        phase: 'tools_call',
+        request_id: 'req-10',
+        session_id: 'session-10',
+        failure_envelope: {
+          surface: 'tool_host',
+          entity_kind: 'tool_call',
+          entity_id: 'req-10',
+          cause_code: 'tool_host_timeout',
+          severity: 'bad',
+          summary: 'tool host timed out',
+          recoverability: 'operator_action_required',
+          operator_action: 'masc_operator_digest',
+          evidence_ref: {
+            request_id: 'req-10',
+          },
+        },
+      },
+    })))
+
+    const chips = Array.from(document.querySelectorAll('[data-status-chip]'))
+    expect(chips.map(chip => chip.textContent?.trim())).toEqual(expect.arrayContaining([
+      'client tool-host',
+      'classified',
+      'WARN',
+      'codex',
+      'fixes 2',
+      'tools_call',
+      'req req-10',
+      'session session-10',
+      'tool_host_timeout',
+      'operator_action_required',
+      'next masc_operator_digest',
+    ]))
+    expect(screen.getByText('client tool-host').closest('[data-status-chip]')).toHaveAttribute('data-status-chip-uppercase', 'true')
+    expect(screen.getByText('codex').closest('[data-status-chip]')).toHaveAttribute('data-status-chip-uppercase', 'false')
+    expect(screen.getByText('masc_status').closest('[data-status-chip]')).toHaveAttribute('data-status-chip-uppercase', 'false')
+    expect(screen.getByText('tool_host_timeout').closest('[data-status-chip]')).toHaveAttribute('data-status-chip-tone', 'bad')
   })
 })

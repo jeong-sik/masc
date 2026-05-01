@@ -91,7 +91,11 @@ let dump_receipts ~base_path ~keeper ~turn_id =
                    if int_field json "turn_count" = Some turn_id then
                      Some (f, json)
                    else None
-                 with _ -> None))
+                 with exn ->
+                   Printf.eprintf
+                     "[masc-trace] warning: skipping malformed line in %s: %s\n"
+                     f (Printexc.to_string exn);
+                   None))
         files
     in
     if matches = [] then
@@ -166,7 +170,11 @@ let dump_fsm_transitions ~base_path ~keeper ~turn_id =
                    if keeper_match && turn_match && is_fsm then
                      Some json
                    else None
-                 with _ -> None))
+                 with exn ->
+                   Printf.eprintf
+                     "[masc-trace] warning: skipping malformed line in %s: %s\n"
+                     f (Printexc.to_string exn);
+                   None))
         files
     in
     if matches = [] then
@@ -287,7 +295,12 @@ let dump_tool_calls ~base_path ~keeper ~turn_id =
                    in
                    if keeper_match && turn_match then Some json
                    else None
-                 with _ -> None))
+                 with exn ->
+                   Printf.eprintf
+                     "[masc-trace] warning: skipping malformed line in %s: %s\n"
+                     (Filename.basename path)
+                       (Printexc.to_string exn);
+                   None))
         files
     in
     if matches = [] then

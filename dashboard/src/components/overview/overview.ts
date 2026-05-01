@@ -60,23 +60,22 @@ export function deriveAgentAlerts(agentList: readonly Agent[]): AgentAlert[] {
 }
 
 /** Derive a list of stalled tasks or tasks needing attention. */
-export function deriveTaskAlerts(taskList: readonly Task[], nowMs: number): TaskAlert[] {
-  const STALL_THRESHOLD_MS = 10 * 60 * 1000
-  const alerts: TaskAlert[] = []
-  for (const t of taskList) {
-    if (t.status !== 'awaiting_verification') continue
-    const updated = parseIsoMs(t.updated_at)
-    if (updated !== null && nowMs - updated <= STALL_THRESHOLD_MS) continue
-    alerts.push({
+export function deriveTaskAlerts(taskList: Task[], nowMs: number): TaskAlert[] {
+  const STALL_THRESHOLD_MS = 1000 * 60 * 10 // 10 mins
+  return taskList
+    .filter(t => t.status === 'awaiting_verification')
+    .filter(t => {
+      const updated = parseIsoMs(t.updated_at)
+      return updated === null || nowMs - updated > STALL_THRESHOLD_MS
+    })
+    .map(t => ({
       id: t.id,
       title: t.title,
-      status: 'awaiting_verification',
-      assignee: t.assignee ?? null,
+      status: t.status,
+      assignee: t.assignee || null,
       severity: 'warn',
       task: t,
-    })
-  }
-  return alerts
+    }))
 }
 
 export function severityToneClass(severity?: string | null): string {
@@ -150,11 +149,7 @@ export interface FunnelCounts {
   target: number | null
 }
 
-export function computeFunnelCounts(
-  taskList: readonly Task[],
-  active: DashboardMissionSessionCard | null,
-  nowMs: number = Date.now(),
-): FunnelCounts {
+export function computeFunnelCounts(taskList: Task[], active: DashboardMissionSessionCard | null, nowMs = Date.now()): FunnelCounts {
   const todayMs = startOfTodayMs(nowMs)
   let created = 0
   let inProgress = 0
@@ -176,8 +171,6 @@ export function computeFunnelCounts(
         if (completedMs !== null && completedMs >= todayMs) completed += 1
         break
       }
-      default:
-        break
     }
   }
   const target =
@@ -227,7 +220,7 @@ function FunnelCard({ counts }: { counts: FunnelCounts }) {
 // ─── Mission Party ────────────────────────────────────────────────────────────
 
 export function progressPct(session: DashboardMissionSessionCard | null): number | null {
-  if (session === null) return null
+  if (!session) return null
   const req = session.required_count ?? 0
   if (req <= 0) return null
   const cur = session.seen_count ?? session.active_count ?? 0
@@ -286,7 +279,7 @@ function keeperStatusToneClass(status?: string | null): string {
   }
 }
 
-export function pickActiveKeepers(keeperList: readonly Keeper[], max = 3): Keeper[] {
+export function pickActiveKeepers(keeperList: Keeper[], max = 3): Keeper[] {
   return [...keeperList]
     .sort((a, b) => {
       const tsA = parseIsoMs(a.last_heartbeat) ?? 0

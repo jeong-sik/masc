@@ -59,6 +59,35 @@ let test_buggy_thunk_in_counter_mode_swallows_and_bumps () =
     "Assert_failure is caught and counter bumped by one"
     (before +. 1.0) after
 
+(* Pin the contract change from commit eb6fc718b7 ("invert
+   MASC_FSM_GUARD_ASSERT default to assert mode"): when the env var is
+   unset / cleared, the policy must default to assert mode.  The
+   codebase uses [Unix.putenv NAME ""] as the unset approximation
+   (matched in [test_board_vote_quarantine.ml:17] and several siblings;
+   see the convention note there). *)
+let test_default_is_assert_mode_when_env_cleared () =
+  Unix.putenv "MASC_FSM_GUARD_ASSERT" "";
+  G.refresh_policy_for_test ();
+  Alcotest.(check bool)
+    "default with unset env is assert mode"
+    true (G.assert_mode_for_test ());
+  let action = "TestAction" in
+  let stage = "default_assert" in
+  let before = read_count ~action ~stage in
+  let raised =
+    try
+      G.wrap_unit ~action ~stage (fun () -> assert false);
+      false
+    with Assert_failure _ -> true
+  in
+  let after = read_count ~action ~stage in
+  Alcotest.(check bool)
+    "buggy thunk re-raises under default assert mode"
+    true raised;
+  Alcotest.(check (float 0.0001))
+    "counter is bumped before re-raise under default mode"
+    (before +. 1.0) after
+
 let test_buggy_thunk_in_assert_mode_reraises () =
   Unix.putenv "MASC_FSM_GUARD_ASSERT" "1";
   G.refresh_policy_for_test ();
@@ -131,7 +160,7 @@ let () =
       test_case "name matches documented series" `Quick
         test_counter_constant_is_stable;
     ];
-    "counter mode (default)", [
+    "counter mode (MASC_FSM_GUARD_ASSERT=0)", [
       test_case "honest thunk does not bump" `Quick
         test_honest_thunk_leaves_counter_alone;
       test_case "buggy thunk swallows + bumps" `Quick
@@ -141,7 +170,9 @@ let () =
       test_case "action label isolation" `Quick
         test_distinct_action_label_isolation;
     ];
-    "assert mode (MASC_FSM_GUARD_ASSERT=1)", [
+    "assert mode (default + MASC_FSM_GUARD_ASSERT=1)", [
+      test_case "default with cleared env is assert mode" `Quick
+        test_default_is_assert_mode_when_env_cleared;
       test_case "buggy thunk re-raises after bumping" `Quick
         test_buggy_thunk_in_assert_mode_reraises;
     ];

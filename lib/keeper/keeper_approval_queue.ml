@@ -858,7 +858,15 @@ let submit_and_await ~keeper_name ~tool_name ~input ~risk_level
           with
           | Eio.Cancel.Cancelled _ as e -> raise e
           | _ -> ());
-         Oas.Hooks.Deny reason)
+         (* Return the same decision we resolved the promise with so
+            the awaited result, the audit ([Approval_expired]), and
+            the caller observation all agree.  Returning [Deny] here
+            previously would have made awaited callers see [Reject]
+            (via the resolved promise) while the caller of
+            [submit_and_await] saw [Deny] for the same timeout — a
+            split signal that telemetry and policy code cannot
+            reconcile. *)
+         Oas.Hooks.Reject reason)
     | None -> Eio.Promise.await promise
   in
   Fun.protect

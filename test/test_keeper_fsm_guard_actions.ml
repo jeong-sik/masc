@@ -33,7 +33,7 @@ let test_counter_constant_is_stable () =
     counter_name
 
 let test_honest_thunk_leaves_counter_alone () =
-  Unix.putenv "MASC_FSM_GUARD_ASSERT" "";
+  Unix.putenv "MASC_FSM_GUARD_ASSERT" "0";
   G.refresh_policy_for_test ();
   let action = "TestAction" in
   let stage = "honest" in
@@ -45,7 +45,7 @@ let test_honest_thunk_leaves_counter_alone () =
     before after
 
 let test_buggy_thunk_in_counter_mode_swallows_and_bumps () =
-  Unix.putenv "MASC_FSM_GUARD_ASSERT" "";
+  Unix.putenv "MASC_FSM_GUARD_ASSERT" "0";
   G.refresh_policy_for_test ();
   let action = "TestAction" in
   let stage = "buggy_counter" in
@@ -80,12 +80,12 @@ let test_buggy_thunk_in_assert_mode_reraises () =
   Alcotest.(check (float 0.0001))
     "counter is bumped before re-raise"
     (before +. 1.0) after;
-  (* Restore counter mode for any subsequent tests. *)
+  (* Restore default assert mode for any subsequent tests. *)
   Unix.putenv "MASC_FSM_GUARD_ASSERT" "";
   G.refresh_policy_for_test ()
 
 let test_non_assert_exception_propagates_unchanged () =
-  Unix.putenv "MASC_FSM_GUARD_ASSERT" "";
+  Unix.putenv "MASC_FSM_GUARD_ASSERT" "0";
   G.refresh_policy_for_test ();
   let action = "TestAction" in
   let stage = "non_assert" in
@@ -105,7 +105,7 @@ let test_non_assert_exception_propagates_unchanged () =
     before after
 
 let test_distinct_action_label_isolation () =
-  Unix.putenv "MASC_FSM_GUARD_ASSERT" "";
+  Unix.putenv "MASC_FSM_GUARD_ASSERT" "0";
   G.refresh_policy_for_test ();
   let stage = "iso" in
   let action_a = "ActionA" in

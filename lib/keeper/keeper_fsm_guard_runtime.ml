@@ -6,8 +6,8 @@ let policy_assert_mode = ref None
 
 let read_assert_env () =
   match Sys.getenv_opt "MASC_FSM_GUARD_ASSERT" with
-  | Some "1" | Some "true" | Some "TRUE" -> true
-  | _ -> false
+  | Some "0" | Some "false" | Some "FALSE" -> false
+  | _ -> true
 
 let assert_mode () =
   match !policy_assert_mode with

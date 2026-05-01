@@ -11,9 +11,10 @@
     [wrap_unit] runs a [unit -> unit] thunk under that contract:
     catches [Assert_failure], bumps the
     [Prometheus.metric_fsm_guard_violation] counter labelled with
-    [action] / [stage], and either swallows the failure (default,
-    "counter mode") or re-raises ([MASC_FSM_GUARD_ASSERT=1], "assert
-    mode" — for tests, smoke runs, and CI).
+    [action] / [stage], and either re-raises (default, "assert mode")
+    or swallows the failure ([MASC_FSM_GUARD_ASSERT=0], "counter
+    mode" — for production soak periods where transient drift should
+    not crash the fleet).
 
     The thunk is expected to call an identity helper of return type
     [unit] (a function whose only purpose is to carry the

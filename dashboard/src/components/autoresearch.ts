@@ -59,7 +59,7 @@ export function resetAutoresearchState(): void {
 // --- Helpers ---
 
 function MonoBody({ children }: { children: unknown }) {
-  return html`<${MonoBody}>${children}</${MonoBody}>`
+  return html`<div class="text-[var(--text-body)] text-sm font-mono">${children}</div>`
 }
 
 function statusColor(status: string): string {

@@ -371,6 +371,11 @@ module Verification = struct
   let fsm_enabled () =
     Feature_flag_registry.get_bool "MASC_VERIFICATION_FSM_ENABLED"
 
+  (** Maximum time a task may remain AwaitingVerification before surfacing an
+      operator-visible timeout. Default: 24h. *)
+  let timeout_deadline_seconds () =
+    get_float ~default:(24.0 *. 60.0 *. 60.0) "MASC_VERIFICATION_TIMEOUT_DEADLINE_SEC"
+
   (** Interval for verification timeout check fiber (seconds). Default: 60.
       Issue #7549. *)
   let timeout_check_interval_seconds =

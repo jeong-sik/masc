@@ -20,6 +20,7 @@ type decision =
 
 val decide
   :  verification_enabled:bool
+  -> verification_timeout_seconds:float
   -> new_verification_id:(unit -> string)
   -> agent_name:string
   -> task_id:string

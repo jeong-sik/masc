@@ -76,6 +76,8 @@ export type SSEEventType =
   // Global audit ledger streaming events (O2 Phase 2)
   | 'audit_event'
   | 'masc/audit_event'
+  | 'masc:audit_event'
+  | 'oas:masc:audit_event'
 
 export type JournalSeverity = 'debug' | 'info' | 'warn' | 'error' | 'unknown'
 export type JournalSource = 'structured' | 'legacy_stderr' | 'legacy_traceln' | 'sse'

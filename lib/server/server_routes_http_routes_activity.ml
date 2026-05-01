@@ -176,11 +176,22 @@ let add_routes ~sw ~clock router =
          let severity_filter = query_param req "severity" in
          let since_filter =
            query_param req "since"
-           |> Option.bind (fun s -> float_of_string_opt (String.trim s))
+           |> Fun.flip Option.bind (fun s -> float_of_string_opt (String.trim s))
          in
          let until_filter =
            query_param req "until"
-           |> Option.bind (fun s -> float_of_string_opt (String.trim s))
+           |> Fun.flip Option.bind (fun s -> float_of_string_opt (String.trim s))
+         in
+         let entry_severity (e : Audit_log.audit_entry) =
+           match e.outcome with
+           | Audit_log.Failure _ -> (match e.action with
+             | Audit_log.AuthFailure | Audit_log.CircuitOpen -> "error"
+             | _ -> "warn")
+           | Audit_log.Success -> (match e.action with
+             | Audit_log.GovernanceDecision (Audit_log.Governance_deny)
+             | Audit_log.GovernanceDecision (Audit_log.Governance_unauthorized)
+             | Audit_log.CircuitClose -> "warn"
+             | _ -> "info")
          in
          let fetch_limit = match actor_filter, kind_filter, severity_filter with
            | None, None, None -> limit
@@ -211,17 +222,12 @@ let add_routes ~sw ~clock router =
                | Some ts ->
                    List.filter (fun (e : Audit_log.audit_entry) ->
                      e.timestamp <= ts))
-         in
-         let entry_severity (e : Audit_log.audit_entry) =
-           match e.outcome with
-           | Audit_log.Failure _ -> (match e.action with
-             | Audit_log.AuthFailure | Audit_log.CircuitOpen -> "error"
-             | _ -> "warn")
-           | Audit_log.Success -> (match e.action with
-             | Audit_log.GovernanceDecision (Audit_log.Governance_deny)
-             | Audit_log.GovernanceDecision (Audit_log.Governance_unauthorized)
-             | Audit_log.CircuitClose -> "warn"
-             | _ -> "info")
+           |> (match severity_filter with
+               | None -> Fun.id
+               | Some sf ->
+                   let sf = String.trim sf in
+                   List.filter (fun (e : Audit_log.audit_entry) ->
+                     String.equal (entry_severity e) sf))
          in
          let get_detail_str k (e : Audit_log.audit_entry) =
            match e.details with
@@ -275,49 +281,44 @@ let add_routes ~sw ~clock router =
          in
          let page = drop_front drop_n filtered in
          let entries_json =
-           List.filter_map (fun (e : Audit_log.audit_entry) ->
+           List.map (fun (e : Audit_log.audit_entry) ->
              let kind = Audit_log.action_to_string e.action in
              let severity = entry_severity e in
-             match severity_filter with
-             | Some sf when String.trim sf <> severity -> None
-             | _ ->
-               let ms = Int64.of_float (e.timestamp *. 1000.0) in
-               let hash =
-                 Digest.to_hex
-                   (Digest.string
-                      (e.agent_id ^ kind
-                       ^ Printf.sprintf "%.6f" e.timestamp))
-               in
-               let id =
-                 Printf.sprintf "aud-%016Lx-%s" ms (String.sub hash 0 8)
-               in
-               let t = Int64.to_int (Int64.of_float e.timestamp) in
-               let tm = Unix.gmtime (float_of_int t) in
-               let ts =
-                 Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
-                   (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1)
-                   tm.Unix.tm_mday tm.Unix.tm_hour tm.Unix.tm_min
-                   tm.Unix.tm_sec
-               in
-               let target = entry_target e in
-               let summary = entry_summary e kind in
-               let fields = [
-                 ("id",       `String id);
-                 ("ts",       `String ts);
-                 ("actor",    `String e.agent_id);
-                 ("kind",     `String kind);
-                 ("summary",  `String summary);
-                 ("severity", `String severity);
-               ] in
-               let fields = match target with
-                 | Some tgt -> ("target", `String tgt) :: fields
-                 | None     -> fields
-               in
-               let fields =
-                 if e.details = `Null then fields
-                 else ("payload", e.details) :: fields
-               in
-               Some (`Assoc fields)) page
+             let ms = Int64.of_float (e.timestamp *. 1000.0) in
+             let hash =
+               Digest.to_hex
+                 (Digest.string
+                    (e.agent_id ^ kind ^ Printf.sprintf "%.6f" e.timestamp))
+             in
+             let id =
+               Printf.sprintf "aud-%016Lx-%s" ms (String.sub hash 0 8)
+             in
+             let t = Int64.to_int (Int64.of_float e.timestamp) in
+             let tm = Unix.gmtime (float_of_int t) in
+             let ts =
+               Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
+                 (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1)
+                 tm.Unix.tm_mday tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
+             in
+             let target = entry_target e in
+             let summary = entry_summary e kind in
+             let fields = [
+               ("id",       `String id);
+               ("ts",       `String ts);
+               ("actor",    `String e.agent_id);
+               ("kind",     `String kind);
+               ("summary",  `String summary);
+               ("severity", `String severity);
+             ] in
+             let fields = match target with
+               | Some tgt -> ("target", `String tgt) :: fields
+               | None     -> fields
+             in
+             let fields =
+               if e.details = `Null then fields
+               else ("payload", e.details) :: fields
+             in
+             `Assoc fields) page
          in
          let json = `Assoc [
            ("entries", `List entries_json);

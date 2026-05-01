@@ -204,6 +204,21 @@ export function buildDashboardSseUrl(sessionId: string, locationSearch = window.
   return `/mcp?${sseParams.toString()}`
 }
 
+export function normalizeSSEDispatchType(rawType: string): string {
+  if (
+    rawType === 'oas:masc:audit_event'
+    || rawType === 'masc:audit_event'
+    || rawType === 'masc/audit_event'
+  ) {
+    return 'audit_event'
+  }
+  const mascPrefix = 'masc/'
+  return rawType.startsWith(mascPrefix)
+    && !rawType.startsWith('masc/board_')
+    ? rawType.slice(mascPrefix.length)
+    : rawType
+}
+
 function clearReconnectTimer(): void {
   if (reconnectTimer) {
     clearTimeout(reconnectTimer)
@@ -291,21 +306,15 @@ export function connectSSE(): void {
 }
 
 function handleEvent(event: SSEEvent): void {
-  // Normalize: server may emit "masc/agent_joined" or "agent_joined".
-  // Strip the "masc/" prefix for the core event types so both forms match
-  // the same switch cases.  Keep the original type for OAS/namespaced events
-  // that genuinely use colons or other prefixes.
+  // Normalize only dispatch aliases. The OAS Event_bus bridge relays
+  // MASC Custom("masc.*") payloads as oas:masc:* events; audit ledger
+  // events still belong to the dashboard audit stream.
   const rawType = event.type
   if (pauseOasRuntimeIngress && rawType.startsWith('oas:')) {
     queuedOasEvents.push(event)
     return
   }
-  const MASC_PREFIX = 'masc/'
-  const type =
-    rawType.startsWith(MASC_PREFIX)
-    && !rawType.startsWith('masc/board_')   // board_post/board_comment already have explicit cases
-      ? rawType.slice(MASC_PREFIX.length)
-      : rawType
+  const type = normalizeSSEDispatchType(rawType)
   const agent = event.agent ?? event.author ?? event.from ?? event.from_agent ?? ''
   if (rawType.startsWith('oas:')) {
     void loadOasRuntimeStore()

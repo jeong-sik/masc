@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { buildDashboardSseUrl } from './sse'
+import { buildDashboardSseUrl, normalizeSSEDispatchType } from './sse'
 
 describe('buildDashboardSseUrl', () => {
   afterEach(() => {
@@ -23,5 +23,19 @@ describe('buildDashboardSseUrl', () => {
     expect(buildDashboardSseUrl('dash_test', '')).toBe(
       '/mcp?session_id=dash_test&sse_kind=observer',
     )
+  })
+})
+
+describe('normalizeSSEDispatchType', () => {
+  it('routes Event_bus audit events to the audit handler', () => {
+    expect(normalizeSSEDispatchType('oas:masc:audit_event')).toBe('audit_event')
+  })
+
+  it('keeps board slash events on their explicit cases', () => {
+    expect(normalizeSSEDispatchType('masc/board_post')).toBe('masc/board_post')
+  })
+
+  it('strips legacy masc slash prefix for core events', () => {
+    expect(normalizeSSEDispatchType('masc/keeper_turn_complete')).toBe('keeper_turn_complete')
   })
 })

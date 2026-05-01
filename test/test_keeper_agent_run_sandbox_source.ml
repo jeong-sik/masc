@@ -41,6 +41,32 @@ let count_occurrences ~needle haystack =
 
 let contains ~needle haystack = count_occurrences ~needle haystack > 0
 
+let find_from ~needle ~start haystack =
+  let nlen = String.length needle in
+  let hlen = String.length haystack in
+  let rec loop pos =
+    if nlen = 0
+    then Some pos
+    else if pos + nlen > hlen
+    then None
+    else if String.sub haystack pos nlen = needle
+    then Some pos
+    else loop (pos + 1)
+  in
+  loop start
+;;
+
+let contains_ordered ~needles haystack =
+  let rec loop pos = function
+    | [] -> true
+    | needle :: rest ->
+      (match find_from ~needle ~start:pos haystack with
+       | None -> false
+       | Some found -> loop (found + String.length needle) rest)
+  in
+  loop 0 needles
+;;
+
 let test_cli_transport_cwd_is_keeper_sandbox_root () =
   let src = load_source target_file in
   check
@@ -125,7 +151,20 @@ let test_keeper_tool_bundle_cleanup_is_retained_and_invoked () =
     bool
     "agent run preserves exception propagation after cleanup"
     true
-    (contains ~needle:"raise e" agent_src)
+    (contains_ordered
+       ~needles:
+         [ "let backtrace = Printexc.get_raw_backtrace ()"
+         ; "cleanup_agent_setup ();"
+         ; "Printexc.raise_with_backtrace e backtrace"
+         ]
+       agent_src);
+  check
+    int
+    "agent run re-raises the original exception with its captured backtrace"
+    1
+    (count_occurrences
+       ~needle:"Printexc.raise_with_backtrace e backtrace"
+       agent_src)
 ;;
 
 let () =

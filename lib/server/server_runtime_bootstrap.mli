@@ -70,6 +70,24 @@ type codex_mcp_config_sync_status =
 
 val sync_codex_mcp_auth_header_content :
   string -> string * codex_mcp_config_sync_status
+(** [sync_codex_mcp_auth_header_content content] rewrites the TOML
+    content of a Codex config file to produce the canonical
+    [[mcp_servers.masc]] shape:
+
+    - Replaces any [http_headers = \{ ... \}] binding with the
+      canonical Accept + X-MASC-Agent form (removing any hardcoded
+      [Authorization] header inside that table).
+    - Replaces any [bearer_token_env_var = ...] binding with
+      [bearer_token_env_var = "MASC_MCP_TOKEN"].
+    - Drops bare [Authorization = ...] bindings directly in the
+      [[mcp_servers.masc]] section — literal auth headers conflict
+      with [bearer_token_env_var] and would persist raw tokens in
+      the config file.
+    - Inserts missing [http_headers] and [bearer_token_env_var]
+      bindings when the [[mcp_servers.masc]] section is present but
+      lacks them.
+    - Never modifies other sections (e.g., [[mcp_servers.other]]
+      or [[mcp_servers.masc.tools.status]]). *)
 
 (** {1 Main Entry Point} *)
 

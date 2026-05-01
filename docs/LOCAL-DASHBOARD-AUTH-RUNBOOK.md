@@ -136,6 +136,45 @@ projection instead of retrying OAuth login:
 Every required config stage should be `pass`; `codex_oauth_login` is expected
 to be `skip` because MASC uses bearer-token auth.
 
+### Codex Config Drift and Authorization Header Hardening
+
+External config generation scripts (e.g. `init-codex-config.sh`,
+`mcp-sync.sh`) can regress the Codex config if they overwrite
+`~/.codex/config.toml` without preserving the `[mcp_servers.masc]` stanza, or
+if they inject a literal `Authorization = "Bearer ..."` header.
+
+The canonical `[mcp_servers.masc]` shape — as checked by `doctor auth` — is:
+
+```toml
+[mcp_servers.masc]
+url = "http://127.0.0.1:8935/mcp"
+bearer_token_env_var = "MASC_MCP_TOKEN"
+http_headers = { "Accept" = "application/json, text/event-stream", "X-MASC-Agent" = "codex-mcp-client" }
+```
+
+**Do not include `Authorization = "Bearer ..."` inside `[mcp_servers.masc]`.**
+The server reads the token from `MASC_MCP_TOKEN` at runtime via
+`bearer_token_env_var`; hardcoding a literal token in the config file persists
+the raw value on disk and causes auth drift when the token is rotated.
+
+To initialise or repair the Codex config from the repo:
+
+```bash
+BASE_PATH="${MASC_BASE_PATH:-$HOME}"
+scripts/init-codex-mcp-config.sh --base-path "$BASE_PATH"
+```
+
+To let the server auto-repair the config on startup, set:
+
+```bash
+export MASC_SYNC_CODEX_MCP_CONFIG=1
+```
+
+The startup sync replaces any `http_headers` binding with the canonical form
+and strips any bare `Authorization = ...` binding directly in
+`[mcp_servers.masc]`.  It does **not** touch other MCP server sections or
+sub-sections.
+
 ## 5. Claude / Gemini MCP Bearers
 
 Claude and Gemini must not reuse the Codex bearer. Mint each local MCP client
@@ -163,6 +202,11 @@ Local startup also self-heals private non-expiring token files for `claude` and
 `gemini`. Manual `login` is for first-time setup or explicit rotation; after
 that, `~/me/scripts/mcp-sync.sh` can project those token files into client
 config.
+
+**Gemini and Claude configs should also use `bearer_token_env_var` (not a
+hardcoded `Authorization` header).** The `mcp-sync.sh` pattern should export
+`MASC_CLAUDE_MCP_TOKEN` and `MASC_GEMINI_MCP_TOKEN` from the respective token
+files rather than embedding literal tokens in the config.
 
 `doctor auth --json` exposes `.mcp_clients[]`; `claude` should use
 `MASC_CLAUDE_MCP_TOKEN` / `X-MASC-Agent: claude`, and `gemini` should use

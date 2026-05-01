@@ -1714,6 +1714,68 @@ bearer_token_env_var = "MASC_MCP_TOKEN"
   Alcotest.(check bool) "reported updated" true
     (status = Server_runtime_bootstrap.Codex_mcp_config_updated)
 
+let test_codex_mcp_config_sync_strips_standalone_authorization_in_masc_section
+    () =
+  let content =
+    {|[mcp_servers.other]
+Authorization = "Bearer keep-other"
+
+[mcp_servers.masc]
+url = "http://127.0.0.1:8935/mcp"
+Authorization = "Bearer stale-literal"
+http_headers = { "Accept" = "application/json, text/event-stream", "X-MASC-Agent" = "codex-mcp-client" }
+bearer_token_env_var = "MASC_MCP_TOKEN"
+
+[mcp_servers.masc.tools.status]
+Authorization = "Bearer nested-keep"
+|}
+  in
+  let expected =
+    {|[mcp_servers.other]
+Authorization = "Bearer keep-other"
+
+[mcp_servers.masc]
+url = "http://127.0.0.1:8935/mcp"
+http_headers = { "Accept" = "application/json, text/event-stream", "X-MASC-Agent" = "codex-mcp-client" }
+bearer_token_env_var = "MASC_MCP_TOKEN"
+
+[mcp_servers.masc.tools.status]
+Authorization = "Bearer nested-keep"
+|}
+  in
+  let updated, status =
+    Server_runtime_bootstrap.sync_codex_mcp_auth_header_content content
+  in
+  Alcotest.(check string) "standalone authorization stripped from masc" expected
+    updated;
+  Alcotest.(check bool) "reported updated" true
+    (status = Server_runtime_bootstrap.Codex_mcp_config_updated)
+
+let test_codex_mcp_config_sync_strips_standalone_authorization_when_no_bearer_env
+    () =
+  let content =
+    {|[mcp_servers.masc]
+url = "http://127.0.0.1:8935/mcp"
+Authorization = "Bearer stale-literal"
+|}
+  in
+  let expected =
+    {|[mcp_servers.masc]
+url = "http://127.0.0.1:8935/mcp"
+http_headers = { "Accept" = "application/json, text/event-stream", "X-MASC-Agent" = "codex-mcp-client" }
+bearer_token_env_var = "MASC_MCP_TOKEN"
+|}
+  in
+  (* Authorization is stripped; http_headers and bearer_token_env_var are
+     inserted because they are absent. *)
+  let updated, status =
+    Server_runtime_bootstrap.sync_codex_mcp_auth_header_content content
+  in
+  Alcotest.(check string) "authorization stripped, canonical bindings inserted"
+    expected updated;
+  Alcotest.(check bool) "reported updated" true
+    (status = Server_runtime_bootstrap.Codex_mcp_config_updated)
+
 let test_sync_bootable_keeper_credentials_mints_keeper_alias_token () =
   with_temp_dir "startup-keeper-credential-sync" (fun dir ->
       with_env "MASC_CONFIG_DIR" None @@ fun () ->
@@ -2338,6 +2400,14 @@ let () =
           Alcotest.test_case
             "codex mcp config sync inserts missing bearer env config"
             `Quick test_codex_mcp_config_sync_missing_header_is_inserted;
+          Alcotest.test_case
+            "codex mcp config sync strips standalone Authorization from masc section"
+            `Quick
+            test_codex_mcp_config_sync_strips_standalone_authorization_in_masc_section;
+          Alcotest.test_case
+            "codex mcp config sync strips standalone Authorization when no bearer env"
+            `Quick
+            test_codex_mcp_config_sync_strips_standalone_authorization_when_no_bearer_env;
           Alcotest.test_case
             "startup sync mints bootable keeper credentials"
             `Quick test_sync_bootable_keeper_credentials_mints_keeper_alias_token;

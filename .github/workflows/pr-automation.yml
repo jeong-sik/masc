@@ -225,15 +225,15 @@ jobs:
               shouldRestoreDraft = !current.isDraft;
               shouldDisableAutoMerge = hasAutoMergeRequest;
             }
-            // Keep the required guard fail-closed even while the PR is draft.
-            // A previous success on the same head SHA can otherwise let a
-            // ready_for_review + immediate merge race reuse that success before
-            // the new guard run has time to fail.
             const safeDraftOnlyState = current.isDraft && !hasAutoMergeRequest;
+            const unsafeDraftBoundaryAction =
+              action === "ready_for_review" ||
+              action === "auto_merge_enabled";
             const approvalRequired =
-              looksAgentAuthored ||
-              draftBoundaryAction ||
-              hasAutoMergeRequest ||
+              (!safeDraftOnlyState &&
+                (looksAgentAuthored ||
+                  unsafeDraftBoundaryAction ||
+                  hasAutoMergeRequest)) ||
               bypassPolicyFailures.length > 0;
             const missingVerifiedApproval =
               approvalRequired &&
@@ -293,10 +293,11 @@ jobs:
                   ? `${latestCiGate.status}/${latestCiGate.conclusion || "none"} ${latestCiGate.html_url}`
                   : "missing";
                 // CI Gate may not exist yet immediately after auto-merge is enabled
-                // (CI workflow is still starting). Only block when the gate is known
-                // to exist but failed, or when this is not the auto_merge_enabled event.
-                if (!latestCiGate && action === "auto_merge_enabled") {
-                  core.info(`CI Gate not yet present for head ${pr.head.sha}; skipping block on auto_merge_enabled event.`);
+                // or after a force-push/synchronize event invalidates the old gate
+                // before the new CI workflow starts. Only block when the gate is
+                // known to exist but failed, or on events outside that startup race.
+                if (!latestCiGate && (action === "auto_merge_enabled" || action === "synchronize")) {
+                  core.info(`CI Gate not yet present for head ${pr.head.sha}; skipping block on ${action} event.`);
                 } else {
                   policyFailures.push(`CI Gate is not completed successfully for head ${pr.head.sha}: ${ciGateStatus}`);
                   shouldDisableAutoMerge = true;

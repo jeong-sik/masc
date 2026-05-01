@@ -47,7 +47,11 @@ budget. The turn ledger and runtime-trust snapshot must surface
 `terminal_reason.next_action = "inspect_timeout_budget"`. The runtime-trust
 snapshot mirrors that as `latest_next_action`, and the runtime surface marks
 the keeper as needing attention with
-`next_human_action = "inspect_timeout_budget"`. Repeated consecutive budget
+`next_human_action = "inspect_timeout_budget"` when the keeper is not paused.
+Paused timeout-budget cases keep the paused workflow
+(`attention_reason = "paused_blocked"`,
+`next_human_action = "inspect_runtime_blocker"`) while still exposing
+`runtime_blocker_class = "oas_timeout_budget"`. Repeated consecutive budget
 strikes are promoted by the keepalive loop to
 `Oas_timeout_budget_loop`, which the supervisor auto-pauses instead of
 restart-looping.

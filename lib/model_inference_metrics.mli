@@ -223,3 +223,31 @@ val provider_stats_to_json : provider_stats -> Yojson.Safe.t
     zero means "reported and equal to zero".
 
     @since 0.173.0 *)
+
+val compute_cost_latency_json :
+  base_path:string -> window_minutes:int -> Yojson.Safe.t
+(** [compute_cost_latency_json ~base_path ~window_minutes] reads all
+    raw telemetry entries once and returns the composed O4 cost-latency
+    payload consumed by [GET /api/v1/dashboard/cost-latency]:
+
+    {[
+      {
+        "perAgent":      [ { "agent", "in_tok", "out_tok", "cost", "p50_ms", "p95_ms" } ],
+        "matrix":        { "providers": [...], "models": [...], "grid": [[...]] },
+        "latencyBuckets": [ { "lo", "hi", "n" } ],
+        "p50":           number,
+        "p95":           number,
+        "total_cost_usd": number,
+        "window_minutes": number,
+        "generated_at":  unix_seconds
+      }
+    ]}
+
+    [perAgent] rows are sorted by cost descending and omit models with
+    no cost/token signal.  [p50]/[p95] are exact global percentiles
+    computed from all raw latency samples in the window (not an average
+    of per-model estimates).  [matrix.grid] is a [providers × models]
+    2-D array of cost values in the same order as the [providers] /
+    [models] index arrays.
+
+    @since 2.300.0 *)

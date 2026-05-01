@@ -4,6 +4,8 @@ import {
   featureMatchesSearch,
   featureMatchesStatus,
   filterFeatures,
+  statusLabel,
+  statusChipClass,
 } from './feature-health'
 
 type FeatureStatus = 'healthy' | 'warning' | 'inactive' | 'deprecated'
@@ -152,5 +154,27 @@ describe('filterFeatures', () => {
   it('is case-insensitive when filtering by search query', () => {
     const result = filterFeatures(sample, 'KEEPER', 'all')
     expect(result.map((f) => f.env_name)).toEqual(['MASC_ENABLE_KEEPER_AUTOBOOT'])
+  })
+})
+
+describe('statusLabel', () => {
+  it.each([
+    ['healthy', '정상'],
+    ['warning', '실험적'],
+    ['inactive', '비활성'],
+    ['deprecated', '폐기 예정'],
+  ] as const)('statusLabel(%s) → %s', (status, expected) => {
+    expect(statusLabel(status)).toBe(expected)
+  })
+})
+
+describe('statusChipClass', () => {
+  it.each([
+    ['healthy', 'border-[var(--ok-30)] bg-[var(--ok-12)] text-[var(--color-status-ok)]'],
+    ['warning', 'border-[var(--warn-30)] bg-[var(--warn-12)] text-[var(--color-status-warn)]'],
+    ['inactive', 'border-[var(--white-12)] bg-[var(--white-4)] text-[var(--color-fg-muted)]'],
+    ['deprecated', 'border-[var(--bad-30)] bg-[var(--bad-12)] text-[var(--color-status-err)]'],
+  ] as const)('statusChipClass(%s) → %s', (status, expected) => {
+    expect(statusChipClass(status)).toBe(expected)
   })
 })

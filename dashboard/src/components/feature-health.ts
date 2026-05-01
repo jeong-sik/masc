@@ -103,7 +103,7 @@ export async function refreshFeatureHealth(): Promise<void> {
   await loadFeatureHealth()
 }
 
-function statusLabel(status: FeatureStatus): string {
+export function statusLabel(status: FeatureStatus): string {
   switch (status) {
     case 'healthy':
       return '정상'
@@ -117,7 +117,7 @@ function statusLabel(status: FeatureStatus): string {
   }
 }
 
-function statusChipClass(status: FeatureStatus): string {
+export function statusChipClass(status: FeatureStatus): string {
   switch (status) {
     case 'healthy':
       return 'border-[var(--ok-30)] bg-[var(--ok-12)] text-[var(--color-status-ok)]'

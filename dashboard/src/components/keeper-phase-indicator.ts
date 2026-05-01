@@ -3,9 +3,9 @@
 // Phase = lifecycle health (생명주기), complementary to pipeline_stage (활동).
 //
 // Color mapping follows the Anyang Sleepers design system (#8177,
-// #8235): the 12 phases collapse into 6 visual groups so that across
+// #8235): the 13 phases collapse into 6 visual groups so that across
 // a row of 40 keepers the palette reads as 6 semantic categories
-// rather than 12 similar-but-subtly-different hues. Individual phase
+// rather than 13 similar-but-subtly-different hues. Individual phase
 // is still distinguished by its icon and Korean label — the color
 // carries the health meaning, the icon carries the identity.
 //

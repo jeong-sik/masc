@@ -1,3 +1,22 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+module Random = Stdlib.Random
+
 (** Agent Registry Eio - Global agent identity tracking for MCP sessions
 
     Provides a singleton registry for tracking agent identities across
@@ -30,7 +49,7 @@ exception Registry_init_failed of string
 
 (** Get the global registry. Initializes if needed (must be in Eio context).
     Returns [Error msg] if initialization fails instead of raising. *)
-let get_registry () : (Agent_identity.Registry.registry, string) result =
+let get_registry () : (Agent_identity.Registry.registry, string) Result.t =
   match !global_registry with
   | Some reg -> Ok reg
   | None ->
@@ -251,7 +270,7 @@ let unregister session_key =
     Agent_identity.Registry.unregister reg session_key;
     let current_map = Atomic.get session_identity_map in
     let to_remove = SMap.fold (fun sid sk acc ->
-      if sk = session_key then sid :: acc else acc
+      if String.equal sk session_key then sid :: acc else acc
     ) current_map [] in
     
     atomic_update session_identity_map (fun map ->

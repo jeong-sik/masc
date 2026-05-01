@@ -1,3 +1,22 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+module Random = Stdlib.Random
+
 (** Agent_stress -- RFC-0001 Phase 0.2 stress indicator recording.
     See {!agent_stress.mli}. *)
 
@@ -98,7 +117,7 @@ let do_flush () =
     else begin
       ensure_dir path;
       match
-        try Some (open_out_gen [Open_append; Open_creat; Open_text] 0o644 path)
+        try Some (Stdlib.open_out_gen [Open_append; Open_creat; Open_text] 0o644 path)
         with Sys_error msg ->
           Log.warn ~ctx:"agent_stress" "cannot open %s: %s" path msg;
           None
@@ -107,10 +126,10 @@ let do_flush () =
           Log.warn ~ctx:"agent_stress" "flush skipped: %d records remain buffered"
             (Queue.length buffer)
       | Some oc ->
-        Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
+        Stdlib.Fun.protect ~finally:(fun () -> Stdlib.close_out_noerr oc) (fun () ->
           Queue.iter (fun json ->
-            output_string oc (Yojson.Safe.to_string json);
-            output_char oc '\n'
+            Stdlib.output_string oc (Yojson.Safe.to_string json);
+            Stdlib.output_char oc '\n'
           ) buffer);
         Queue.clear buffer
     end

@@ -1,3 +1,22 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+module Random = Stdlib.Random
+
 (** Agent Identity - Unified agent identification for MCP sessions
 
     @since 0.5.0
@@ -61,7 +80,7 @@ val same_agent : t -> t -> bool
 (** {1 JSON Serialization} *)
 
 val channel_to_yojson : channel -> Yojson.Safe.t
-val channel_of_yojson : Yojson.Safe.t -> (channel, string) result
+val channel_of_yojson : Yojson.Safe.t -> (channel, string) Result.t
 val to_yojson : t -> Yojson.Safe.t
 
 (** {1 MAGI Archetype System} *)

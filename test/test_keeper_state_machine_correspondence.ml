@@ -78,6 +78,8 @@ let all_set b : SM.conditions =
     context_overflow = b;
     compact_retry_exhausted = b;
     terminal_failure_latched = b;
+    credential_archived = b;
+    zombie_timeout_reached = b;
   }
 
 let json_field_diff (a : Yojson.Safe.t) (b : Yojson.Safe.t) : string list =

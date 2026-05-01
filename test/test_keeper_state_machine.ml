@@ -1349,6 +1349,8 @@ let test_invariant_fiber_started_reset_exhaustive () =
     context_overflow = true;
     compact_retry_exhausted = true;
     terminal_failure_latched = true;
+    credential_archived = true;
+    zombie_timeout_reached = true;
   } in
   let updated = match SM.apply_event ~current_phase:SM.Restarting
       ~conditions:dirty_conds ~event:SM.Fiber_started ~now:1000.0 with
@@ -1816,6 +1818,8 @@ let test_setclear_coverage () =
     context_overflow = true;
     compact_retry_exhausted = true;
     terminal_failure_latched = true;
+    credential_archived = true;
+    zombie_timeout_reached = true;
   } in
   (* auto_rules with all flags false *)
   let auto_rules_clean : SM.auto_rule_summary = {

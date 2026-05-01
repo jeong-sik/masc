@@ -1084,7 +1084,9 @@ let execute_entry_action_observability
   | Schedule_restart _
   | Mark_dead_tombstone
   | Mark_zombie_tombstone
-  | Cleanup_and_unregister ->
+  | Cleanup_and_unregister
+  | Trigger_immediate_cleanup
+  | Cancel_pending_oas ->
       ()
 
 let followup_event_of_entry_action

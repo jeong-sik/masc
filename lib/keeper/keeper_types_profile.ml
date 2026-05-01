@@ -43,6 +43,8 @@ type network_mode =
 type shared_memory_scope =
   | Shared_memory_disabled
   | Shared_memory_room
+  | Shared_memory_keeper_only
+  | Shared_memory_room_readonly
 
 let sandbox_profile_to_string = function
   | Local -> "local"
@@ -119,15 +121,19 @@ let valid_network_mode_strings =
 let shared_memory_scope_to_string = function
   | Shared_memory_disabled -> "disabled"
   | Shared_memory_room -> "room"
+  | Shared_memory_keeper_only -> "keeper_only"
+  | Shared_memory_room_readonly -> "room_readonly"
 
 let shared_memory_scope_of_string raw =
   match String.trim (String.lowercase_ascii raw) with
   | "disabled" -> Some Shared_memory_disabled
   | "room" -> Some Shared_memory_room
+  | "keeper_only" -> Some Shared_memory_keeper_only
+  | "room_readonly" -> Some Shared_memory_room_readonly
   | _ -> None
 
 (* Issue #8467: Variant SSOT for [shared_memory_scope]. *)
-let all_shared_memory_scopes = [ Shared_memory_disabled; Shared_memory_room ]
+let all_shared_memory_scopes = [ Shared_memory_disabled; Shared_memory_room; Shared_memory_keeper_only; Shared_memory_room_readonly ]
 let valid_shared_memory_scope_strings =
   List.map shared_memory_scope_to_string all_shared_memory_scopes
 
@@ -692,8 +698,8 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
             | None ->
                 Error
                   (Printf.sprintf
-                     "invalid shared_memory_scope '%s' (allowed: disabled, room)"
-                     raw))
+                     "invalid shared_memory_scope '%s' (allowed: %s)"
+                     raw (String.concat ", " valid_shared_memory_scope_strings)))
         | None -> Ok ())
   in
   let result =

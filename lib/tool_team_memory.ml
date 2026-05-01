@@ -107,7 +107,7 @@ let resolve_keeper_access ~(config : Coord.config) ~(agent_name : string) =
         | Ok (Some (_resolved_name, meta)) ->
             Ok (keeper_name, meta))
 
-let authorize_team_memory ~(config : Coord.config) ~(agent_name : string)
+let authorize_team_memory ~(operation: string) ~(config : Coord.config) ~(agent_name : string)
     ~room =
   match resolve_keeper_access ~config ~agent_name with
   | Error err -> Error err
@@ -119,7 +119,18 @@ let authorize_team_memory ~(config : Coord.config) ~(agent_name : string)
                "team memory is disabled for keeper '%s'; set shared_memory_scope=room to enable the flattened default namespace"
                keeper_name)
       | Keeper_types.Shared_memory_room ->
-          validate_team_memory_room room)
+          validate_team_memory_room room
+      | Keeper_types.Shared_memory_keeper_only ->
+          let private_room = Playground_paths.sanitize_keeper_name keeper_name in
+          if String.equal room "default" then
+            Ok private_room
+          else
+            Error "when using keeper_only memory, room must be 'default' in tool call"
+      | Keeper_types.Shared_memory_room_readonly ->
+          if String.equal operation "write" then
+            Error (Printf.sprintf "team memory is readonly for keeper '%s'" keeper_name)
+          else
+            validate_team_memory_room room)
 
 let team_memory_root ~(config : Coord.config) room =
   Filename.concat
@@ -399,23 +410,23 @@ let dispatch ~(config : Coord.config) ~(agent_name : string) ~name ~args
   | "masc_team_memory_read" -> (
       match parse read_schema ~tool_name:name args with
       | Ok ((room, _key) as parsed) -> (
-          match authorize_team_memory ~config ~agent_name ~room with
+          match authorize_team_memory ~operation:"read" ~config ~agent_name ~room with
           | Error err -> Some (false, err)
-          | Ok _room_id -> Some (read_json ~config parsed))
+          | Ok room_id -> Some (read_json ~config (room_id, snd parsed)))
       | Error err -> Some (false, err))
   | "masc_team_memory_write" -> (
       match parse write_schema ~tool_name:name args with
-      | Ok ((room, _key, _content) as parsed) -> (
-          match authorize_team_memory ~config ~agent_name ~room with
+      | Ok ((room, key, content)) -> (
+          match authorize_team_memory ~operation:"write" ~config ~agent_name ~room with
           | Error err -> Some (false, err)
-          | Ok _room_id -> Some (write_json ~config parsed))
+          | Ok room_id -> Some (write_json ~config (room_id, key, content)))
       | Error err -> Some (false, err))
   | "masc_team_memory_search" -> (
       match parse search_schema ~tool_name:name args with
       | Ok ((room, _query) as parsed) -> (
-          match authorize_team_memory ~config ~agent_name ~room with
+          match authorize_team_memory ~operation:"read" ~config ~agent_name ~room with
           | Error err -> Some (false, err)
-          | Ok _room_id -> Some (search_json ~config parsed))
+          | Ok room_id -> Some (search_json ~config (room_id, snd parsed)))
       | Error err -> Some (false, err))
   | _ -> None
 

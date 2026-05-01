@@ -7,7 +7,7 @@ import { useEffect, useRef, useMemo } from 'preact/hooks'
 import { TimeAgo } from '../common/time-ago'
 import { FilterChips } from '../common/filter-chips'
 import { EmptyState } from '../common/empty-state'
-import { StatusChip } from '../common/status-chip'
+import { StatusChip, type StatusChipTone } from '../common/status-chip'
 import { journal } from '../../sse'
 import { isErrorJournalEntry } from '../../journal-entry'
 import type { JournalEntry, JournalEventType } from '../../types'
@@ -48,39 +48,39 @@ export function eventMatchesFilter(entry: JournalEntry, filter: FilterKind): boo
   }
 }
 
-export function eventKindBadgeTone(entry: JournalEntry): string {
-  if (isErrorJournalEntry(entry)) return 'agent-event-badge--error'
+export function eventKindBadgeTone(entry: JournalEntry): StatusChipTone {
+  if (isErrorJournalEntry(entry)) return 'bad'
   const eventType = entry.eventType
   switch (eventType) {
     case 'keeper_heartbeat':
     case 'oas_keeper_snapshot':
-      return 'agent-event-badge--heartbeat'
+      return 'ok'
     case 'oas_turn':
-      return 'agent-event-badge--broadcast'
+      return 'info'
     case 'oas_tool':
-      return 'agent-event-badge--task'
+      return 'select'
     case 'oas_context':
-      return 'agent-event-badge--keeper'
+      return 'neutral'
     case 'oas_event':
     case 'oas_task':
-      return 'agent-event-badge--lifecycle'
+      return 'info'
     case 'agent_joined':
     case 'agent_left':
-      return 'agent-event-badge--lifecycle'
+      return 'neutral'
     case 'keeper_handoff':
     case 'keeper_compaction':
-      return 'agent-event-badge--keeper'
+      return 'paused'
     case 'keeper_guardrail':
-      return 'agent-event-badge--error'
+      return 'bad'
     case 'broadcast':
-      return 'agent-event-badge--broadcast'
+      return 'info'
     case 'task_update':
-      return 'agent-event-badge--task'
+      return 'select'
     case 'board_post':
     case 'board_comment':
-      return 'agent-event-badge--board'
+      return 'info'
     default:
-      return 'agent-event-badge--default'
+      return 'neutral'
   }
 }
 

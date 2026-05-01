@@ -138,7 +138,6 @@ const TAILWIND_RUNTIME_ALIAS_NAMES: ReadonlySet<string> = new Set([
 
 function shouldEmitTailwindRuntimeAlias(tok: TokenBase): boolean {
   return tok.kind === "color"
-    && !tok.name.startsWith("color-")
     && !TAILWIND_COLOR_PREFIX_OPTOUT.has(tok.name)
     && (
       TAILWIND_RUNTIME_ALIAS_NAMES.has(tok.name)

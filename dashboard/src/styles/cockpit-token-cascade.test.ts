@@ -35,6 +35,13 @@ describe('Cockpit token cascade', () => {
     expectDeclaration(generatedCss, '--state-idle', 'var(--color-state-idle)')
   })
 
+  it('does not emit raw aliases for palette color tokens', () => {
+    expectDeclaration(generatedCss, '--color-bg-0', '#0c0b08')
+    expectDeclaration(generatedCss, '--color-ok', '#6b9e6b')
+    expectNoDeclaration(generatedCss, '--bg-0', 'var(--color-bg-0)')
+    expectNoDeclaration(generatedCss, '--ok', 'var(--color-ok)')
+  })
+
   it('bridges legacy dashboard aliases to generated cockpit tokens', () => {
     expectDeclaration(variablesCss, '--bg-0', 'var(--color-bg-0)')
     expectDeclaration(variablesCss, '--text-body', 'var(--color-fg-2)')

@@ -110,6 +110,19 @@ describe('SectionCard', () => {
     )
     expect(container.innerHTML).toContain('bg-[var(--color-status-warn)]')
   })
+
+  it('maps offline status through the shared neutral dot tone', () => {
+    const container = document.createElement('div')
+    render(
+      h(
+        SectionCard,
+        { title: 'Transport', status: 'offline', eyebrow: 'not connected' },
+        h('p', null, 'Body'),
+      ),
+      container,
+    )
+    expect(container.innerHTML).toContain('bg-[var(--color-status-idle)]')
+  })
 })
 
 describe('Card', () => {

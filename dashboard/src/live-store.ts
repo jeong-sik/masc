@@ -9,6 +9,7 @@ import { journal } from './sse'
 import { agents, agentMotionMap, keepers, staleKeepers } from './store'
 import { contextThresholds } from './config/context-thresholds'
 import type { AgentMotionSnapshot } from './components/common/agent-motion'
+import type { StatusChipTone } from './components/common/status-chip'
 
 // --- Filter toggles ---
 
@@ -196,10 +197,25 @@ export function eventKindColor(entry: JournalEntry): string {
   return 'live-event-system'
 }
 
-export function eventKindTone(entry: JournalEntry): string {
+type LiveEventKindTone = Extract<StatusChipTone, 'ok' | 'warn' | 'bad' | 'info' | 'neutral'>
+
+export function eventKindTone(entry: JournalEntry): LiveEventKindTone {
+  const type = entry.eventType
+  if (type === 'broadcast') return 'info'
+  if (type === 'agent_joined') return 'ok'
+  if (type === 'agent_left') return 'neutral'
+  if (type === 'task_update') return 'ok'
+  if (type === 'board_post') return 'info'
+  if (type === 'board_comment') return 'info'
+  if (type === 'board_delete') return 'bad'
+  if (type === 'keeper_heartbeat') return 'ok'
+  if (type === 'keeper_handoff') return 'info'
+  if (type === 'keeper_compaction') return 'warn'
+  if (type === 'keeper_guardrail') return 'warn'
+  if (type === 'keeper_phase_changed') return 'info'
   if (entry.kind === 'board') return 'info'
   if (entry.kind === 'tasks') return 'ok'
-  if (entry.kind === 'keepers') return 'select'
+  if (entry.kind === 'keepers') return 'info'
   return 'neutral'
 }
 

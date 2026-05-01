@@ -7,12 +7,14 @@ import {
   type KeeperPressure,
 } from '../../live-store'
 import { contextThresholds } from '../../config/context-thresholds'
-import { StatusChip } from '../common/status-chip'
+import { StatusChip, type StatusChipTone } from '../common/status-chip'
+
+type KeeperHealthChipTone = Extract<StatusChipTone, 'ok' | 'warn' | 'bad'>
 
 interface KeeperHealthChip {
   key: string
   label: string
-  tone: string
+  tone: KeeperHealthChipTone
 }
 
 function pressureColor(ratio: number): string {

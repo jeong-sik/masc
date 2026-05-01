@@ -54,8 +54,15 @@ describe('eventKindTone', () => {
     expect(eventKindTone(makeEntry({ kind: 'tasks' }))).toBe('ok')
   })
 
-  it('maps keepers kind to select tone', () => {
-    expect(eventKindTone(makeEntry({ kind: 'keepers' }))).toBe('select')
+  it('maps keepers kind to info tone', () => {
+    expect(eventKindTone(makeEntry({ kind: 'keepers' }))).toBe('info')
+  })
+
+  it('uses eventType precedence before kind fallback', () => {
+    expect(eventKindTone(makeEntry({ eventType: 'broadcast' }))).toBe('info')
+    expect(eventKindTone(makeEntry({ eventType: 'task_update', kind: 'system' }))).toBe('ok')
+    expect(eventKindTone(makeEntry({ eventType: 'keeper_guardrail', kind: 'tasks' }))).toBe('warn')
+    expect(eventKindTone(makeEntry({ eventType: 'board_delete', kind: 'board' }))).toBe('bad')
   })
 
   it('falls back to neutral tone', () => {

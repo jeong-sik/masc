@@ -5,17 +5,18 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { get, post } from '../api/core'
+import {
+  normalizeCredentialsResponse,
+  type CredentialState,
+  type CredentialType,
+} from '../api/credentials'
 import { createAsyncResource } from '../lib/async-state'
 import { showToast } from './common/toast'
 import { ErrorState, LoadingState } from './common/feedback-state'
 import {
-  coerceCredentialType,
   credentialStateBadgeClass,
   credentialStateLabel,
   githubLoginCommand,
-  parseCredentialState,
-  type CredentialState,
-  type CredentialType,
 } from './credential-settings'
 import type { Keeper } from '../types'
 
@@ -99,23 +100,7 @@ async function fetchRepositories(): Promise<RepositoryOption[]> {
 
 async function fetchCredentials(): Promise<KeeperCredentialOption[]> {
   const data = await get<unknown>('/api/v1/credentials')
-  const rows = Array.isArray(data)
-    ? data
-    : data && typeof data === 'object' && Array.isArray((data as Record<string, unknown>).credentials)
-      ? (data as Record<string, unknown>).credentials as unknown[]
-      : []
-  return rows.map((row: unknown): KeeperCredentialOption => {
-    const r = row as Record<string, unknown>
-    const username = String(r.username ?? r.name ?? '')
-    return {
-      id: String(r.id ?? ''),
-      name: String(r.name ?? username ?? r.id ?? ''),
-      type: coerceCredentialType(r.type ?? r.cred_type),
-      username,
-      gh_config_dir: typeof r.gh_config_dir === 'string' ? r.gh_config_dir : null,
-      state: parseCredentialState(r.state),
-    }
-  }).filter(cred => cred.id !== '')
+  return normalizeCredentialsResponse(data).filter(cred => cred.id !== '')
 }
 
 async function fetchKeeperRepoMappings(): Promise<KeeperRepoMapping[]> {

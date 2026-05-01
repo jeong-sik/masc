@@ -25,8 +25,10 @@ let mapping_of_toml toml keeper_id =
   in
   let github_credential_id =
     match Otoml.find_result toml Otoml.get_string (path "credential_id") with
-    | Ok id when String.trim id <> "" -> Some id
-    | Ok _ | Error _ -> None
+    | Ok id ->
+        let id = String.trim id in
+        if id = "" then None else Some id
+    | Error _ -> None
   in
   Ok { keeper_id; repository_ids; github_credential_id }
 
@@ -45,9 +47,11 @@ let toml_of_mapping mapping =
   in
   let fields =
     match mapping.github_credential_id with
-    | Some id when String.trim id <> "" ->
-        ("credential_id", Otoml.TomlString id) :: fields
-    | Some _ | None -> fields
+    | Some id ->
+        let id = String.trim id in
+        if id = "" then fields
+        else ("credential_id", Otoml.TomlString id) :: fields
+    | None -> fields
   in
   Otoml.TomlTable fields
 
@@ -128,6 +132,7 @@ let credentials_for_keeper ~base_path ~keeper_id =
       in
       (match mapping.github_credential_id with
       | Some id when String.trim id <> "" ->
+          let id = String.trim id in
           let* credential = resolve_credential id in
           if credential.cred_type <> Github then
             Error

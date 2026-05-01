@@ -9,6 +9,7 @@ import {
   credentialTypeLabel,
   githubLoginCommand,
   isRecord,
+  normalizeCredentialsResponse,
   parseCredentialState,
   sanitizeOptionalString,
 } from "./credential-settings"
@@ -76,6 +77,37 @@ describe("credential state helpers", () => {
     expect(credentialStateLabel({ kind: "Unmaterialized" })).toBe("Unmaterialized")
     expect(credentialStateLabel(null)).toBe("Unknown")
     expect(credentialStateBadgeClass({ kind: "Materialized" }).length).toBeGreaterThan(0)
+  })
+})
+
+describe("normalizeCredentialsResponse", () => {
+  it("normalizes wrapped credential rows", () => {
+    expect(normalizeCredentialsResponse({
+      credentials: [
+        {
+          id: "gh-main",
+          name: "Main",
+          cred_type: "github",
+          username: "sangsu",
+          gh_config_dir: "/tmp/gh",
+          state: { kind: "Materialized" },
+        },
+      ],
+    })).toEqual([
+      expect.objectContaining({
+        id: "gh-main",
+        name: "Main",
+        type: "github",
+        username: "sangsu",
+        gh_config_dir: "/tmp/gh",
+        state: expect.objectContaining({ kind: "Materialized" }),
+      }),
+    ])
+  })
+
+  it("returns an empty list for unexpected payloads", () => {
+    expect(normalizeCredentialsResponse({ credentials: null })).toEqual([])
+    expect(normalizeCredentialsResponse(null)).toEqual([])
   })
 })
 

@@ -288,6 +288,18 @@ let test_save_mapping_preserves_credential_id () =
           | Ok rows ->
               Alcotest.failf "expected one mapping, got %d" (List.length rows)))
 
+let test_load_all_trims_credential_id () =
+  with_temp_base_path (fun base_path ->
+      write_mapping ~credential_id:" cred-selected " base_path "keeper-1" [ "*" ];
+      match Keeper_repo_mapping.load_all ~base_path with
+      | Error e -> Alcotest.fail ("load_all failed: " ^ e)
+      | Ok [loaded] ->
+          Alcotest.(check (option string))
+            "trimmed credential id"
+            (Some "cred-selected")
+            loaded.github_credential_id
+      | Ok rows -> Alcotest.failf "expected one mapping, got %d" (List.length rows))
+
 let sample_credential id cred_type =
   {
     id;
@@ -450,6 +462,7 @@ let () =
         [
           Alcotest.test_case "creates config dir" `Quick test_save_mapping_creates_config_dir;
           Alcotest.test_case "preserves credential id" `Quick test_save_mapping_preserves_credential_id;
+          Alcotest.test_case "loads trimmed credential id" `Quick test_load_all_trims_credential_id;
         ] );
       ( "credentials_for_keeper",
         [

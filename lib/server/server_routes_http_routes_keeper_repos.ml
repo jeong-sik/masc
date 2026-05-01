@@ -31,7 +31,8 @@ let mapping_json (m : Repo_manager_types.keeper_repo_mapping) : Yojson.Safe.t =
       ("allow_all", `Bool allow_all);
       ( "credential_id",
         match m.github_credential_id with
-        | Some id -> `String id
+        | Some id when String.trim id <> "" -> `String (String.trim id)
+        | Some _ -> `Null
         | None -> `Null );
     ]
 
@@ -95,32 +96,35 @@ let handle_list_mappings state req reqd =
 
 let handle_get_mapping state keeper_id req reqd =
   let base_path = state.Mcp_server.room_config.base_path in
-  let mapping =
-    match Keeper_repo_mapping.load_all ~base_path with
-    | Ok mappings ->
+  match Keeper_repo_mapping.load_all ~base_path with
+  | Error msg ->
+      Http.Response.json ~status:`Internal_server_error ~request:req
+        (Yojson.Safe.to_string
+           (`Assoc [("ok", `Bool false); ("error", `String msg)]))
+        reqd
+  | Ok mappings -> (
+      match
         List.find_opt
           (fun (m : Repo_manager_types.keeper_repo_mapping) ->
             String.equal m.keeper_id keeper_id)
           mappings
-    | Error _ -> None
-  in
-  match mapping with
-  | Some mapping ->
-      Http.Response.json ~compress:true ~request:req
-        (Yojson.Safe.to_string (mapping_json mapping))
-        reqd
-  | None ->
-      (* No mapping is intentionally treated as wildcard access for backward
-         compatibility with pre-repository keepers. *)
-      Http.Response.json ~compress:true ~request:req
-        (Yojson.Safe.to_string
-           (mapping_json
-              {
-                Repo_manager_types.keeper_id;
-                repository_ids = ["*"];
-                github_credential_id = None;
-              }))
-        reqd
+      with
+      | Some mapping ->
+          Http.Response.json ~compress:true ~request:req
+            (Yojson.Safe.to_string (mapping_json mapping))
+            reqd
+      | None ->
+          (* No mapping is intentionally treated as wildcard access for backward
+             compatibility with pre-repository keepers. *)
+          Http.Response.json ~compress:true ~request:req
+            (Yojson.Safe.to_string
+               (mapping_json
+                  {
+                    Repo_manager_types.keeper_id;
+                    repository_ids = ["*"];
+                    github_credential_id = None;
+                  }))
+            reqd)
 
 let credential_type_label = function
   | Repo_manager_types.Github -> "GitHub"

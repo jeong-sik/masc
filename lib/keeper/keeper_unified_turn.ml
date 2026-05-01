@@ -603,8 +603,10 @@ let run_keeper_cycle ~(config : Coord.config) ~(meta : keeper_meta)
            event_bus_drain_cancel := None;
            (try Eio.Cancel.cancel cc (Failure "event_bus_unsubscribed") with
             | Eio.Cancel.Cancelled _ -> ()
-            | Invalid_argument msg
-              when String.equal msg "Cancellation context finished!" -> ())
+            | Invalid_argument msg ->
+                Log.Keeper.debug
+                  "%s: event bus drain cancel ignored after context finish: %s"
+                  meta.name msg)
          | None -> ());
         ignore (drain_turn_event_bus ~site:"unsubscribe_final" ());
         match event_bus_sub, Keeper_event_bus.get () with

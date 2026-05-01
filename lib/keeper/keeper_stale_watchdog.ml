@@ -124,10 +124,15 @@ let has_recent_skip_observation ~now ~threshold
 
 let pending_oas_timeout_budget_count
     (entry : Keeper_registry.registry_entry) : int option =
+  let is_timeout_budget_observation_reason reason =
+    List.exists
+      (String.equal reason)
+      Keeper_heartbeat_loop.oas_timeout_budget_observation_reasons
+  in
   let has_timeout_observation =
     match entry.last_skip_observation with
     | Some (_, reasons) ->
-        List.exists (String.equal "oas_timeout_budget") reasons
+        List.exists is_timeout_budget_observation_reason reasons
     | None -> false
   in
   match entry.last_failure_reason, has_timeout_observation with

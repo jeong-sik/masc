@@ -3226,7 +3226,7 @@ let test_run_keeper_cycle_skips_non_executable_phase () =
            with
            | None -> fail "expected skipped turn execution receipt"
            | Some receipt ->
-              check string "skipped receipt outcome" "skipped"
+              check string "skipped receipt outcome" "receipt_skipped"
                  Yojson.Safe.Util.(receipt |> member "outcome" |> to_string);
                check string "skipped receipt terminal reason"
                  "non_executable_phase:paused"

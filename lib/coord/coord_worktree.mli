@@ -254,7 +254,8 @@ val worktree_create_r :
   agent_name:string ->
   task_id:string -> base_branch:string -> string Types.masc_result
 (** Create [<root>/.worktrees/<task_id>] tracking [base_branch] for
-    [agent_name].  Auto-provisions the sandbox clone when missing and
+    [agent_name].  [repo_name] is required to select the sandbox clone.
+    Auto-provisions the sandbox clone when missing and
     [docker_sandbox = true].  Returns the absolute worktree path on
     success. *)
 

@@ -737,10 +737,9 @@ let link_worktree_to_task config ~task_id ~worktree_info =
 
 (** Create worktree for agent - Result version
     @param link_task If true, links worktree info to the task in backlog (default: true)
-    @param repo_name If set, target the keeper's sandbox repo clone at
-           [.masc/playground/<agent>/repos/<repo_name>/] directly. If
-           unset, scan [repos/] and use the first git clone found
-           (alphabetical). A sandbox repo clone is required. *)
+    @param repo_name Required. Targets the keeper's sandbox repo clone at
+           [.masc/playground/<agent>/repos/<repo_name>/]. A sandbox repo
+           clone is required; omitting [repo_name] is an error. *)
 let worktree_create_r ?(link_task=true) ?repo_name config ~agent_name ~task_id ~base_branch : string masc_result =
   if not (is_initialized config) then
     Error NotInitialized
@@ -752,9 +751,8 @@ let worktree_create_r ?(link_task=true) ?repo_name config ~agent_name ~task_id ~
   | Ok _, Ok _ ->
     with_worktree_mutation_lock @@ fun () ->
     (* Prefer a keeper's sandbox repo clone under
-       the keeper's backend-specific sandbox repo lane. If [repo_name]
-       is supplied, target that clone directly; otherwise scan the
-       directory and pick the first git clone (alphabetical). Keepers
+       the keeper's backend-specific sandbox repo lane. [repo_name]
+       is required to disambiguate which clone to use. Keepers
        may work on any repo their [tool_policy.toml] allows, but the
        worktree root must come from a sandbox repo clone. *)
     let resolve_keeper_repo_root () =
@@ -769,26 +767,6 @@ let worktree_create_r ?(link_task=true) ?repo_name config ~agent_name ~task_id ~
           then Some (ensure_sandbox_clone_ready candidate |> Result.map (fun note -> (candidate, note)))
           else None
       in
-      let scan_first_git_repo dir =
-        if not (safe_is_dir dir) then None
-        else
-          let entries =
-            try Sys.readdir dir with Sys_error _ -> [||]
-          in
-          Array.sort compare entries;
-          let rec find i =
-            if i >= Array.length entries then None
-            else
-              let candidate = Filename.concat dir entries.(i) in
-              if is_git_clone candidate
-              then
-                Some
-                  (ensure_sandbox_clone_ready candidate
-                   |> Result.map (fun note -> (candidate, note)))
-              else find (i + 1)
-          in
-          find 0
-      in
       match repo_name with
       | Some name when String.trim name <> "" && safe_repo_name name -> (
           match explicit_repo with
@@ -796,12 +774,13 @@ let worktree_create_r ?(link_task=true) ?repo_name config ~agent_name ~task_id ~
           | None ->
               auto_provision_sandbox_clone ~config ~agent_name ~repos_dir
                 ~repo_name:name)
-      | _ -> (
-          match scan_first_git_repo repos_dir with
-          | Some result -> result
-          | None ->
-              Error
-                (missing_sandbox_clone_error ~agent_name ~repos_dir ~repo_name))
+      | _ ->
+          Error
+            (IoError
+               (Printf.sprintf
+                  "repo_name is required to select a sandbox clone for agent %s \
+                   under %s. Pass repo_name explicitly (e.g. 'masc-mcp')."
+                  agent_name repos_dir))
     in
     match resolve_keeper_repo_root () with
     | Error e -> Error e

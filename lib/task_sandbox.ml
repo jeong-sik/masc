@@ -80,9 +80,9 @@ let symlink_masc ~repo_root ~worktree_path =
   else
     Ok ()
 
-let create ~config ~task_id ?(base_branch = "main") ~agent_name () =
+let create ~config ~task_id ?(base_branch = "main") ?repo_name ~agent_name () =
   (* Delegate worktree creation to Coord_worktree via the Coord facade *)
-  match Coord_worktree.worktree_create_r ~link_task:true config
+  match Coord_worktree.worktree_create_r ~link_task:true ?repo_name config
           ~agent_name ~task_id ~base_branch with
   | Error e ->
     Error (Printf.sprintf "worktree creation failed: %s"
@@ -176,8 +176,8 @@ let cleanup ~config ~agent_name sandbox =
       Error (Printf.sprintf "cleanup failed for %s: %s"
                sandbox.task_id (Types.masc_error_to_string e))
 
-let with_sandbox ~config ~task_id ?base_branch ~agent_name f =
-  match create ~config ~task_id ?base_branch ~agent_name () with
+let with_sandbox ~config ~task_id ?base_branch ?repo_name ~agent_name f =
+  match create ~config ~task_id ?base_branch ?repo_name ~agent_name () with
   | Error e -> Error e
   | Ok sandbox ->
     let result_ref = ref None in

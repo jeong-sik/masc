@@ -38,9 +38,9 @@ export function filteredItemsByFilter(filter: GovernanceFilter, items: Governanc
 export function kindLabel(value: string): string {
   switch (value) {
     case 'case':
-      return '사건'
+      return 'Case'
     case 'petition':
-      return '청원'
+      return 'Petition'
     default:
       return value
   }
@@ -48,7 +48,7 @@ export function kindLabel(value: string): string {
 
 export function formatAgeSummary(seconds: number | null | undefined): string | null {
   if (seconds == null) return null
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}분`
-  if (seconds < 86400) return `${Math.floor(seconds / 3600)}시간`
-  return `${Math.floor(seconds / 86400)}일`
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`
+  return `${Math.floor(seconds / 86400)}d`
 }

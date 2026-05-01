@@ -54,11 +54,11 @@ function parseTimestamp(value?: string | null): number {
 function reviewDecisionLabel(value?: string | null): string {
   switch ((value ?? '').trim().toLowerCase()) {
     case 'resolved':
-      return '검토 해결'
+      return 'Review Resolved'
     case 'deferred':
-      return '검토 보류'
+      return 'Review Deferred'
     default:
-      return value?.trim() || '검토 처리'
+      return value?.trim() || 'Review Action'
   }
 }
 
@@ -92,7 +92,7 @@ function targetSummary(targetType?: string | null, targetId?: string | null): st
 
 function prettyTargetLabel(label?: string | null): string {
   const value = label?.trim()
-  if (!value) return '대상 없음'
+  if (!value) return 'No target'
   const separator = value.indexOf(':')
   if (separator < 0) return targetTypeLabel(value)
   const type = value.slice(0, separator)
@@ -108,7 +108,7 @@ function timelineEntries(limit = 10): OpsActivityTimelineEntry[] {
     actor: item.actor || 'unknown',
     label: reviewDecisionLabel(item.decision),
     target: targetSummary(item.target_type, item.target_id),
-    detail: item.reason || '사유 없음',
+    detail: item.reason || 'No reason recorded',
     tone: reviewDecisionTone(item.decision),
   }))
 
@@ -119,7 +119,7 @@ function timelineEntries(limit = 10): OpsActivityTimelineEntry[] {
     actor: entry.actor || 'unknown',
     label: actionTypeLabel(entry.action_type),
     target: prettyTargetLabel(entry.target_label),
-    detail: formatMessageContent(entry.message) || '세부 내용 없음',
+    detail: formatMessageContent(entry.message) || 'No detail',
     tone: actionLogTone(entry),
   }))
 
@@ -137,12 +137,12 @@ export function activityTimelineEmptyState(): { message: string; hint: string | 
     const by = root.paused_by?.trim()
     const parts = [reason, by ? `by ${by}` : null].filter(Boolean).join(' · ')
     return {
-      message: 'namespace가 일시정지 상태입니다. 재개 전까지 새 운영 활동이 기록되지 않습니다.',
+      message: 'Namespace is paused. New operator activity will not be recorded until resume.',
       hint: parts || null,
     }
   }
   return {
-    message: '최근 3일 내 운영 활동이 없습니다. 개입이 실행되거나 검토가 처리되면 자동 기록됩니다.',
+    message: 'No operator activity in the last 3 days. Interventions and reviews appear here automatically.',
     hint: null,
   }
 }
@@ -209,12 +209,12 @@ export function Ops() {
   ])
 
   return html`
-    <section class="flex flex-col gap-4" aria-label="운영 작업 패널">
+    <section class="flex flex-col gap-4" aria-label="Operations panel">
       ${operatorError.value ? html`<section class="ops-banner rounded py-3 px-3.5 border border-[var(--color-border-default)] error" role="alert">${operatorError.value}</section>` : null}
       ${operatorDigestError.value ? html`<section class="ops-banner rounded py-3 px-3.5 border border-[var(--color-border-default)] error" role="alert">${operatorDigestError.value}</section>` : null}
 
       ${workflowContext ? html`
-        <section class="ops-banner rounded py-3 px-3.5 border border-[var(--color-border-default)] ${workflowReady ? 'info' : 'warn'} grid gap-2" aria-label="워크플로우 컨텍스트">
+        <section class="ops-banner rounded py-3 px-3.5 border border-[var(--color-border-default)] ${workflowReady ? 'info' : 'warn'} grid gap-2" aria-label="Workflow context">
           <div class="flex gap-2 flex-wrap items-center text-[var(--color-fg-primary)]">
             <strong class="font-semibold">${workflowContext.source_label}</strong>
             <span>${workflowActionLabel(workflowContext.action_type)}</span>
@@ -224,23 +224,23 @@ export function Ops() {
           ${workflowContext.payload_preview ? html`<div class="mt-1 p-2 rounded bg-[var(--white-3)] text-xs font-mono">${workflowContext.payload_preview}</div>` : null}
           <div class="text-[var(--color-fg-muted)] text-xs">
             ${workflowReady
-              ? '추천 액션 기준으로 대상 선택과 입력값을 미리 맞춰 두었습니다.'
-              : '대상이 현재 snapshot에 없습니다. 일반 개입 화면으로 열렸고, 실제 대상 선택은 수동으로 해야 합니다.'}
+              ? 'Target and inputs were prefilled from the recommended action.'
+              : 'Target is not present in the current snapshot. Choose the concrete target manually.'}
           </div>
         </section>
       ` : null}
 
       <${FlowControlPanel} />
-      <section class="grid grid-cols-2 gap-4 max-[1200px]:grid-cols-1" aria-label="운영 제어 패널">
+      <section class="grid grid-cols-2 gap-4 max-[1200px]:grid-cols-1" aria-label="Operations controls">
         <div class="grid gap-4 order-1 max-[1200px]:order-2">
           <${QuickIntervene} />
           <${KeeperUtilitiesPanel} />
         </div>
 
-        <section class="${CARD_STANDARD} grid gap-3 order-2 max-[1200px]:order-1" aria-label="최근 운영 활동">
+        <section class="${CARD_STANDARD} grid gap-3 order-2 max-[1200px]:order-1" aria-label="Recent operator activity">
           <div>
-            <h2 class="text-sm font-semibold text-[var(--color-fg-secondary)]">최근 운영 활동</h2>
-            <p class="mt-1 text-xs text-[var(--color-fg-muted)]">최근 처리와 직접 개입을 시간순으로 함께 보여줍니다. 검토 큐와 Live Judge 판단은 거버넌스 페이지에서 처리합니다.</p>
+            <h2 class="text-sm font-semibold text-[var(--color-fg-secondary)]">Recent Activity</h2>
+            <p class="mt-1 text-xs text-[var(--color-fg-muted)]">Interventions and review outcomes, newest first. Governance queues stay in the governance view.</p>
           </div>
           <${renderActivityTimeline} />
         </section>

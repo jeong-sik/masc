@@ -202,7 +202,7 @@ describe('TelemetryUnified', () => {
     expect(container.textContent).toContain('런타임 진단')
     expect(container.textContent).toContain('MASC telemetry store')
     expect(container.textContent).toContain('Refresh')
-    expect(container.textContent).toContain('30초 자동 갱신')
+    expect(container.textContent).toContain('Auto-refresh 30s')
     expect(container.textContent).toContain('MASC telemetry store entries')
     expect(container.textContent).toContain('mcp__masc__masc_status')
 

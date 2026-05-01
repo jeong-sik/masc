@@ -64,24 +64,24 @@ export async function fetchPauseStatus(): Promise<void> {
 export async function pauseRoom(): Promise<void> {
   const access = dashboardAuthAccess(shellAuthSummary.value, 'worker')
   if (!access.allowed) {
-    showToast(access.reason ?? '프로젝트 일시정지 권한이 없습니다.', 'error', 6000)
+    showToast(access.reason ?? 'Missing permission to pause the project.', 'error', 6000)
     return
   }
   flowLoading.value = true
-  try { await callMcpTool('masc_pause', {}); flowState.value = 'paused'; showToast('프로젝트 일시정지', 'success') }
-  catch (err) { showToast(`일시정지 실패: ${err instanceof Error ? err.message : String(err)}`, 'error') }
+  try { await callMcpTool('masc_pause', {}); flowState.value = 'paused'; showToast('Project paused.', 'success') }
+  catch (err) { showToast(`Pause failed: ${err instanceof Error ? err.message : String(err)}`, 'error') }
   finally { flowLoading.value = false }
 }
 
 export async function resumeRoom(): Promise<void> {
   const access = dashboardAuthAccess(shellAuthSummary.value, 'worker')
   if (!access.allowed) {
-    showToast(access.reason ?? '프로젝트 재개 권한이 없습니다.', 'error', 6000)
+    showToast(access.reason ?? 'Missing permission to resume the project.', 'error', 6000)
     return
   }
   flowLoading.value = true
-  try { await callMcpTool('masc_resume', {}); flowState.value = 'running'; showToast('프로젝트 재개', 'success') }
-  catch (err) { showToast(`재개 실패: ${err instanceof Error ? err.message : String(err)}`, 'error') }
+  try { await callMcpTool('masc_resume', {}); flowState.value = 'running'; showToast('Project resumed.', 'success') }
+  catch (err) { showToast(`Resume failed: ${err instanceof Error ? err.message : String(err)}`, 'error') }
   finally { flowLoading.value = false }
 }
 
@@ -90,31 +90,31 @@ export async function resumeRoom(): Promise<void> {
 export async function runGarbageCollection(): Promise<void> {
   const access = dashboardAuthAccess(shellAuthSummary.value, 'worker')
   if (!access.allowed) {
-    showToast(access.reason ?? 'GC 실행 권한이 없습니다.', 'error', 6000)
+    showToast(access.reason ?? 'Missing permission to run GC.', 'error', 6000)
     return
   }
   maintenanceLoading.value = true
   try {
     const raw = await callMcpTool('masc_gc', {})
     maintenanceResult.value = raw
-    showToast('GC 완료', 'success')
+    showToast('GC complete.', 'success')
   } catch (err) {
-    showToast(`GC 실패: ${err instanceof Error ? err.message : String(err)}`, 'error')
+    showToast(`GC failed: ${err instanceof Error ? err.message : String(err)}`, 'error')
   } finally { maintenanceLoading.value = false }
 }
 
 export async function cleanupZombies(): Promise<void> {
   const access = dashboardAuthAccess(shellAuthSummary.value, 'worker')
   if (!access.allowed) {
-    showToast(access.reason ?? '좀비 정리 권한이 없습니다.', 'error', 6000)
+    showToast(access.reason ?? 'Missing permission to clean up zombie agents.', 'error', 6000)
     return
   }
   maintenanceLoading.value = true
   try {
     const raw = await callMcpTool('masc_cleanup_zombies', {})
     maintenanceResult.value = raw
-    showToast('좀비 정리 완료', 'success')
+    showToast('Zombie cleanup complete.', 'success')
   } catch (err) {
-    showToast(`좀비 정리 실패: ${err instanceof Error ? err.message : String(err)}`, 'error')
+    showToast(`Zombie cleanup failed: ${err instanceof Error ? err.message : String(err)}`, 'error')
   } finally { maintenanceLoading.value = false }
 }

@@ -17,19 +17,19 @@ export type TimeRangePreset = '5m' | '1h' | '6h' | '24h' | '7d'
 export const TIME_RANGE_PRESETS: ReadonlyArray<TimeRangePreset> = ['5m', '1h', '6h', '24h', '7d']
 
 const TIME_RANGE_SHORT_LABELS: Record<TimeRangePreset, string> = {
-  '5m': '5분',
-  '1h': '1시간',
-  '6h': '6시간',
-  '24h': '24시간',
-  '7d': '7일',
+  '5m': '5m',
+  '1h': '1h',
+  '6h': '6h',
+  '24h': '24h',
+  '7d': '7d',
 }
 
 const TIME_RANGE_LABELS: Record<TimeRangePreset, string> = {
-  '5m': '최근 5분',
-  '1h': '최근 1시간',
-  '6h': '최근 6시간',
-  '24h': '최근 24시간',
-  '7d': '최근 7일',
+  '5m': 'Last 5m',
+  '1h': 'Last 1h',
+  '6h': 'Last 6h',
+  '24h': 'Last 24h',
+  '7d': 'Last 7d',
 }
 
 export function timeRangeLabel(preset: TimeRangePreset): string {

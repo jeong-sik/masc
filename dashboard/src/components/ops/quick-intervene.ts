@@ -25,7 +25,7 @@ function parseTarget(value: string): {
     const name = value.slice('keeper:'.length)
     return { action_type: 'keeper_message', target_type: 'keeper', target_id: name, label: name }
   }
-  return { action_type: 'broadcast', target_type: 'root', label: '전체' }
+  return { action_type: 'broadcast', target_type: 'root', label: 'namespace' }
 }
 
 async function submitQuickMessage() {
@@ -37,7 +37,7 @@ async function submitQuickMessage() {
     target_type: target.target_type,
     target_id: target.target_id,
     payload: { message },
-    successMessage: `${target.label}에 메시지를 보냈습니다`,
+    successMessage: `Message sent to ${target.label}`,
   })
   if (result) quickMessage.value = ''
 }
@@ -51,11 +51,11 @@ export function QuickIntervene() {
   const onlineKeepers = keepers.filter(k => normalizeStatus(k.status) !== 'offline')
 
   return html`
-    <section class="${CARD_STANDARD} flex flex-col gap-3" aria-label="빠른 개입">
+    <section class="${CARD_STANDARD} flex flex-col gap-3" aria-label="Quick intervention">
       <div class="flex items-start justify-between gap-3">
         <div class="min-w-0">
-          <h3 class="text-sm font-semibold text-[var(--color-fg-secondary)]">빠른 개입</h3>
-          <p class="mt-1 text-xs leading-[1.45] text-[var(--color-fg-muted)]">메시지나 메모를 방 또는 키퍼에 바로 보냅니다.</p>
+          <h3 class="text-sm font-semibold text-[var(--color-fg-secondary)]">Quick Intervention</h3>
+          <p class="mt-1 text-xs leading-[1.45] text-[var(--color-fg-muted)]">Send a short note to the namespace or a keeper.</p>
         </div>
         <${ActionButton}
           variant="subtle"
@@ -63,7 +63,7 @@ export function QuickIntervene() {
           onClick=${() => { setShowAdvanced(current => !current) }}
           disabled=${busy}
         >
-          ${showAdvanced ? '고급 닫기' : '고급 설정'}
+          ${showAdvanced ? 'Close advanced' : 'Advanced'}
         <//>
       </div>
 
@@ -71,9 +71,9 @@ export function QuickIntervene() {
         <${Select}
           class="shrink-0 px-3 py-2 text-sm min-w-30"
           value=${quickTarget.value}
-          ariaLabel="개입 대상"
+          ariaLabel="Intervention target"
           options=${[
-            { value: 'namespace', label: '전체' },
+            { value: 'namespace', label: 'All' },
             ...onlineKeepers.map(k => ({ value: `keeper:${k.name}`, label: k.name })),
           ]}
           onInput=${(v: string) => { quickTarget.value = v }}
@@ -81,17 +81,17 @@ export function QuickIntervene() {
         />
         <${TextInput}
           class="min-w-50 flex-1 border-[var(--white-8)] bg-[var(--white-3)]"
-          placeholder="메시지"
+          placeholder="Message"
           value=${quickMessage.value}
           name="quick_intervene_message"
-          ariaLabel="빠른 개입 메시지"
+          ariaLabel="Quick intervention message"
           autoComplete="off"
           onInput=${(e: Event) => { quickMessage.value = (e.target as HTMLInputElement).value }}
           onKeyDown=${(e: KeyboardEvent) => { if (e.key === 'Enter') void submitQuickMessage() }}
           disabled=${busy}
         />
         <${ActionButton} variant="primary" size="lg" onClick=${() => { void submitQuickMessage() }} disabled=${busy || quickMessage.value.trim() === ''}>
-          보내기
+          Send
         <//>
       </div>
 
@@ -99,14 +99,14 @@ export function QuickIntervene() {
         ? html`
             <div class="rounded border border-[var(--white-8)] bg-[var(--white-2)] p-3">
               <label class="block text-2xs font-medium uppercase tracking-1 text-[var(--color-fg-muted)]" for="quick-intervene-actor">
-                기록 주체
+                Actor
               </label>
-              <p class="mt-1 text-xs leading-[1.45] text-[var(--color-fg-muted)]">개입과 승인 요청은 이 이름으로 기록됩니다.</p>
+              <p class="mt-1 text-xs leading-[1.45] text-[var(--color-fg-muted)]">Interventions and approval requests are recorded with this name.</p>
               <${TextInput}
                 class="mt-3 max-w-65 border-[var(--white-8)] bg-[var(--white-3)]"
                 value=${actorName.value.trim() || 'dashboard'}
                 name="quick_intervene_actor"
-                ariaLabel="개입 기록 주체"
+                ariaLabel="Intervention actor"
                 autoComplete="off"
                 onInput=${(event: Event) => { persistActorName((event.target as HTMLInputElement).value) }}
                 disabled=${busy}

@@ -173,7 +173,7 @@ export function workflowContextForRoute(routeState: Pick<RouteState, 'params'>):
   return {
     id: workflowContextId(
       sourceSurface,
-      sourceSurface === 'execution' ? 'Execution 이어보기' : '상황판 이어보기',
+      sourceSurface === 'execution' ? 'Continue execution' : 'Continue mission board',
       params.action_type ?? null,
       params.target_type ?? null,
       params.target_id ?? null,
@@ -182,7 +182,7 @@ export function workflowContextForRoute(routeState: Pick<RouteState, 'params'>):
       createdAt,
     ),
     source_surface: sourceSurface,
-    source_label: sourceSurface === 'execution' ? 'Execution 이어보기' : '상황판 이어보기',
+    source_label: sourceSurface === 'execution' ? 'Continue execution' : 'Continue mission board',
     action_type: params.action_type ?? null,
     target_type: params.target_type ?? null,
     target_id: params.target_id ?? null,
@@ -191,11 +191,11 @@ export function workflowContextForRoute(routeState: Pick<RouteState, 'params'>):
     summary:
       sourceSurface === 'execution'
         ? (params.focus_kind
-            ? `${params.focus_kind} 기준으로 열린 execution 컨텍스트입니다.`
-            : 'Execution에서 이어진 컨텍스트입니다.')
+            ? `Execution context opened from ${params.focus_kind}.`
+            : 'Context continued from Execution.')
         : (params.focus_kind
-            ? `${params.focus_kind} 기준으로 열린 컨텍스트입니다.`
-            : '상황판에서 이어진 컨텍스트입니다.'),
+            ? `Context opened from ${params.focus_kind}.`
+            : 'Context continued from Mission Board.'),
     payload_preview: null,
     suggested_payload: null,
     preview: null,
@@ -220,43 +220,43 @@ export function missionInterveneParams(context: DashboardWorkflowContext): Recor
 }
 
 export function workflowTargetLabel(context?: DashboardWorkflowContext | null): string {
-  if (!context?.target_type) return '대상 정보 없음'
-  const targetType = isRootTarget(context.target_type) ? '프로젝트' : context.target_type
+  if (!context?.target_type) return 'No target'
+  const targetType = isRootTarget(context.target_type) ? 'Namespace' : context.target_type
   return context.target_id ? `${targetType} · ${context.target_id}` : targetType
 }
 
 export function workflowActionLabel(actionType?: string | null): string {
   switch (actionType) {
     case 'broadcast':
-      return '전체 공지'
+      return 'Broadcast'
     case 'namespace_pause':
     case 'room_pause':
-      return '프로젝트 일시정지'
+      return 'Pause Namespace'
     case 'namespace_resume':
     case 'room_resume':
-      return '프로젝트 재개'
+      return 'Resume Namespace'
     case 'task_inject':
-      return '프로젝트 작업 주입'
+      return 'Inject Task'
     case 'social_sweep':
-      return '소셜 스위프'
+      return 'Social Sweep'
     case 'team_turn':
-      return 'session 업데이트'
+      return 'Session Update'
     case 'team_note':
-      return 'session 노트'
+      return 'Session Note'
     case 'team_broadcast':
-      return 'session 방송'
+      return 'Session Broadcast'
     case 'team_task_inject':
-      return 'session 작업'
+      return 'Session Task'
     case 'team_stop':
-      return 'session 중지'
+      return 'Stop Session'
     case 'keeper_msg':
     case 'keeper_message':
-      return 'keeper 메시지'
+      return 'Keeper Message'
     case 'keeper_probe':
       return 'keeper probe'
     case 'keeper_recover':
       return 'keeper recover'
     default:
-      return actionType?.trim() || '추천 액션'
+      return actionType?.trim() || 'Recommended Action'
   }
 }

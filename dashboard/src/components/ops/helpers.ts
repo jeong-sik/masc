@@ -47,46 +47,46 @@ function canonicalizeActionType(value?: string | null): string | null {
 export function actionTypeLabel(value?: string | null): string {
   switch (canonicalizeActionType(value)) {
     case 'broadcast':
-      return '전체 공지'
+      return 'Broadcast'
     case 'namespace_pause':
     case 'room_pause':
-      return '프로젝트 일시정지'
+      return 'Pause Namespace'
     case 'namespace_resume':
     case 'room_resume':
-      return '프로젝트 재개'
+      return 'Resume Namespace'
     case 'task_inject':
-      return '작업 주입'
+      return 'Inject Task'
     case 'social_sweep':
-      return '소셜 스위프'
+      return 'Social Sweep'
     case 'keeper_message':
-      return '키퍼 메시지'
+      return 'Keeper Message'
     case 'keeper_probe':
-      return '키퍼 점검'
+      return 'Keeper Probe'
     case 'keeper_recover':
-      return '키퍼 복구'
+      return 'Keeper Recover'
     case 'keeper_github_identity_status':
-      return 'GitHub 인증 상태'
+      return 'GitHub Identity Status'
     case 'keeper_github_identity_login_prepare':
-      return 'GitHub 로그인 준비'
+      return 'GitHub Login Prep'
     default:
-      return value?.trim() || '액션'
+      return value?.trim() || 'Action'
   }
 }
 
 export function targetTypeLabel(value?: string | null): string {
   switch (value) {
     case 'task':
-      return '작업'
+      return 'Task'
     case 'namespace':
-      return '프로젝트 범위'
+      return 'Namespace'
     case 'room':
-      return '프로젝트 범위'
+      return 'Namespace'
     case 'keeper':
-      return '키퍼'
+      return 'Keeper'
     case 'swarm_run':
-      return '스웜 실행'
+      return 'Swarm Run'
     default:
-      return value?.trim() || '대상'
+      return value?.trim() || 'Target'
   }
 }
 
@@ -126,7 +126,7 @@ function hydrateActionForm(input: {
       return
     }
     if (actionType === 'task_inject') {
-      taskTitle.value = workflowPayloadString(payload, 'title') ?? '운영자 주입 작업'
+      taskTitle.value = workflowPayloadString(payload, 'title') ?? 'Operator-injected task'
       taskDescription.value = workflowPayloadString(payload, 'description') ?? input.summary
       taskPriority.value = workflowPayloadString(payload, 'priority') ?? taskPriority.value
       return
@@ -182,13 +182,13 @@ export async function executeAction(input: {
       payload: input.payload,
     })
     if (result.confirm_required) {
-      showToast('확인 대기열에 올렸습니다', 'warning')
+      showToast('Queued for confirmation.', 'warning')
     } else {
       showToast(input.successMessage, 'success')
     }
     return result
   } catch (err) {
-    const message = err instanceof Error ? err.message : '개입 실행에 실패했습니다'
+    const message = err instanceof Error ? err.message : 'Intervention failed.'
     showToast(message, 'error')
     return null
   }

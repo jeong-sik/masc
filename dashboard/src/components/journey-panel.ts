@@ -24,9 +24,8 @@ import { Card } from './common/card'
 import { EmptyState } from './common/empty-state'
 import { TextInput } from './common/input'
 import { RouteLink } from './common/route-link'
-import { StatusBadge } from './common/status-badge'
 import { StatusChip, keeperStateTone } from './common/status-chip'
-import { TimeAgo } from './common/time-ago'
+import { formatTimeAgoEn } from '../lib/format-time'
 import { keeperActivityDisplay, keeperDisplayModel } from '../lib/keeper-runtime-display'
 
 type JourneyMissionSession = {
@@ -108,11 +107,38 @@ function normalizeText(value?: string | null): string | null {
 }
 
 function formatAgeSeconds(seconds?: number | null): string {
-  if (seconds == null || !Number.isFinite(seconds)) return '기록 없음'
-  if (seconds < 60) return `${Math.round(seconds)}s 전`
-  if (seconds < 3600) return `${Math.round(seconds / 60)}분 전`
-  if (seconds < 86_400) return `${Math.round(seconds / 3600)}시간 전`
-  return `${Math.round(seconds / 86_400)}일 전`
+  if (seconds == null || !Number.isFinite(seconds)) return 'not recorded'
+  if (seconds < 60) return `${Math.round(seconds)}s ago`
+  if (seconds < 3600) return `${Math.round(seconds / 60)}m ago`
+  if (seconds < 86_400) return `${Math.round(seconds / 3600)}h ago`
+  return `${Math.round(seconds / 86_400)}d ago`
+}
+
+function formatJourneyTimestamp(value: string | number): string {
+  const ms = typeof value === 'number'
+    ? (value < 1_000_000_000_000 ? value * 1000 : value)
+    : new Date(value).getTime()
+  if (!Number.isFinite(ms)) return 'unknown'
+  return formatTimeAgoEn(new Date(ms).toISOString())
+}
+
+function taskStatusLabel(status: string): string {
+  switch (status) {
+    case 'awaiting_verification':
+      return 'verification pending'
+    case 'in_progress':
+      return 'in progress'
+    case 'claimed':
+      return 'claimed'
+    case 'todo':
+      return 'todo'
+    case 'done':
+      return 'done'
+    case 'cancelled':
+      return 'cancelled'
+    default:
+      return status.replace(/_/g, ' ')
+  }
 }
 
 function pipelineTone(stage?: string | null): string {
@@ -462,14 +488,16 @@ function MetricChip({
 
 function JourneyTile({
   label,
+  class: cx,
   children,
 }: {
   label: string
+  class?: string
   children: preact.ComponentChildren
 }) {
   return html`
-    <section class="rounded-xl border border-[var(--color-border-default)] bg-[var(--white-3)] p-4 flex flex-col gap-3 min-h-[150px]" aria-label=${label}>
-      <div class="text-3xs font-semibold uppercase tracking-4 text-[var(--color-fg-disabled)]">${label}</div>
+    <section class="rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--white-3)] p-3 flex flex-col gap-3 min-h-[132px] ${cx ?? ''}" aria-label=${label}>
+      <div class="font-mono text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">${label}</div>
       <div class="flex flex-col gap-2 text-sm text-[var(--color-fg-primary)]">
         ${children}
       </div>
@@ -497,13 +525,15 @@ function JourneyCard({ record }: { record: JourneyRecord }) {
   const showExtended = useSignal(false)
 
   return html`
-    <${Card} class="flex flex-col gap-5 bg-gradient-to-br from-[rgba(var(--white-rgb,255),0.08)] via-[rgba(var(--white-rgb,255),0.04)] to-[rgba(var(--white-rgb,255),0.06)] border border-[var(--white-10)] backdrop-blur-md">
+    <${Card} class="flex flex-col gap-4">
       <div class="flex flex-wrap items-start justify-between gap-4">
         <div class="min-w-0 flex-1">
           <div class="flex flex-wrap items-center gap-2">
-            <h3 class="m-0 text-xl font-semibold text-[var(--color-fg-secondary)]">${record.title}</h3>
+            <h3 class="m-0 text-base font-semibold tracking-normal text-[var(--color-fg-secondary)]">${record.title}</h3>
             ${task?.status
-              ? html`<${StatusBadge} status=${task.status} />`
+              ? html`<${StatusChip} tone=${task.status === 'done' ? 'ok' : task.status === 'awaiting_verification' ? 'select' : 'neutral'}>
+                  ${taskStatusLabel(task.status)}
+                <//>`
               : keeper?.status
                 ? html`<${StatusChip} tone=${keeperStateTone(keeper.status)}>${keeper.status}<//>`
                 : null}
@@ -520,9 +550,9 @@ function JourneyCard({ record }: { record: JourneyRecord }) {
           <${RouteLink}
             tab="workspace"
             params=${{ section: 'planning' }}
-            class="inline-flex items-center rounded-full border border-[var(--white-10)] bg-[var(--white-5)] px-3 py-1.5 text-xs text-[var(--color-fg-primary)] hover:bg-[var(--white-8)]"
+            class="inline-flex items-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-4)] px-3 py-1.5 text-xs text-[var(--color-fg-primary)] hover:bg-[var(--white-5)]"
           >
-            작업 보기
+            View task
           <//>
           ${record.sessionId || record.operationId
             ? html`
@@ -534,9 +564,9 @@ function JourneyCard({ record }: { record: JourneyRecord }) {
                     ...(record.sessionId ? { session_id: record.sessionId } : {}),
                     ...(record.operationId ? { operation_id: record.operationId } : {}),
                   }}
-                  class="inline-flex items-center rounded-full border border-[var(--accent-20)] bg-[var(--accent-10)] px-3 py-1.5 text-xs text-[var(--color-accent-fg)] hover:bg-[var(--accent-20)]"
+                  class="inline-flex items-center rounded-[var(--r-1)] border border-[var(--select-20)] bg-[var(--select-10)] px-3 py-1.5 text-xs text-[var(--color-accent-fg)] hover:bg-[var(--select-20)]"
                 >
-                  실행 로그
+                  Execution log
                 <//>
               `
             : null}
@@ -545,9 +575,9 @@ function JourneyCard({ record }: { record: JourneyRecord }) {
                 <${RouteLink}
                   tab="monitoring"
                   params=${{ section: 'agents', agent: searchKeeperName }}
-                  class="inline-flex items-center rounded-full border border-[var(--ok-20)] bg-[var(--ok-10)] px-3 py-1.5 text-xs text-[var(--color-status-ok)] hover:bg-[var(--ok-20)]"
+                  class="inline-flex items-center rounded-[var(--r-1)] border border-[var(--ok-20)] bg-[var(--ok-10)] px-3 py-1.5 text-xs text-[var(--color-status-ok)] hover:bg-[var(--ok-20)]"
                 >
-                  키퍼 보기
+                  View keeper
                 <//>
               `
             : null}
@@ -556,24 +586,24 @@ function JourneyCard({ record }: { record: JourneyRecord }) {
 
       <div class="flex flex-col gap-4">
         <div class="grid gap-3 md:grid-cols-2">
-          <${JourneyTile} label="작업">
+          <${JourneyTile} label="Task">
             ${task
               ? html`
                   <div class="font-mono text-xs text-[var(--color-fg-secondary)]">${task.id}</div>
                   ${task.assignee
-                    ? html`<div>담당: <strong class="text-[var(--color-fg-secondary)]">${task.assignee}</strong></div>`
-                    : html`<${TileHint} text="아직 assignee가 없습니다." />`}
+                    ? html`<div>Owner: <strong class="text-[var(--color-fg-secondary)]">${task.assignee}</strong></div>`
+                    : html`<${TileHint} text="No assignee yet." />`}
                   ${task.updated_at
-                    ? html`<div class="text-xs text-[var(--color-fg-muted)]">최근 갱신 <${TimeAgo} timestamp=${task.updated_at} /></div>`
+                    ? html`<div class="text-xs text-[var(--color-fg-muted)]">Updated ${formatJourneyTimestamp(task.updated_at)}</div>`
                     : null}
                 `
-              : html`<${TileHint} text="현재 연결된 task 없이 keeper 연속성만 추적 중입니다." />`}
+              : html`<${TileHint} text="Tracking keeper continuity without a linked task." />`}
           <//>
 
-          <${JourneyTile} label="실행">
+          <${JourneyTile} label="Run">
             ${record.sessionId
               ? html`<div><span class="text-[var(--color-fg-disabled)]">session</span><div class="mt-1 font-mono text-xs text-[var(--color-fg-secondary)]">${truncate(record.sessionId, 24)}</div></div>`
-              : html`<${TileHint} text="아직 session_id가 연결되지 않았습니다." />`}
+              : html`<${TileHint} text="No session_id linked yet." />`}
             ${record.operationId
               ? html`<div><span class="text-[var(--color-fg-disabled)]">operation</span><div class="mt-1 font-mono text-xs text-[var(--color-fg-secondary)]">${truncate(record.operationId, 24)}</div></div>`
               : null}
@@ -585,7 +615,7 @@ function JourneyCard({ record }: { record: JourneyRecord }) {
               : null}
           <//>
 
-          <${JourneyTile} label="계약" class="md:col-span-2">
+          <${JourneyTile} label="Contract" class="md:col-span-2">
             ${task
               ? html`
                   <div class="flex flex-wrap items-center gap-2">
@@ -606,11 +636,11 @@ function JourneyCard({ record }: { record: JourneyRecord }) {
                     : null}
                 `
               : keeper?.runtime_blocker_class === 'completion_contract_violation'
-                ? html`<div class="text-xs leading-relaxed text-[var(--bad-light)]">최근 runtime blocker가 completion contract violation으로 관측됐습니다.</div>`
-                : html`<${TileHint} text="현재 contract gate가 연결된 task가 없습니다." />`}
+                ? html`<div class="text-xs leading-relaxed text-[var(--bad-light)]">Latest runtime blocker is a completion contract violation.</div>`
+                : html`<${TileHint} text="No contract gate is linked to this task." />`}
           <//>
 
-          <${JourneyTile} label="키퍼" class="md:col-span-2">
+          <${JourneyTile} label="Keeper" class="md:col-span-2">
             ${keeper
               ? html`
                   <div class="flex flex-wrap items-center gap-2">
@@ -627,7 +657,7 @@ function JourneyCard({ record }: { record: JourneyRecord }) {
                     ? html`<div class="text-xs leading-relaxed text-[var(--color-fg-muted)]">${trimText(record.continuity?.continuity_summary ?? record.continuity?.note, 100)}</div>`
                     : null}
                 `
-              : html`<${TileHint} text="현재 task에 연결된 keeper가 없습니다." />`}
+              : html`<${TileHint} text="No keeper is linked to this task." />`}
           <//>
         </div>
 
@@ -637,7 +667,7 @@ function JourneyCard({ record }: { record: JourneyRecord }) {
             aria-expanded=${showExtended.value ? 'true' : 'false'}
             onClick=${() => { showExtended.value = !showExtended.value }}
           >
-            ${showExtended.value ? '▼' : '▶'} 추가 정보
+            ${showExtended.value ? 'Hide' : 'Show'} details
           </button>
           <div class="text-2xs text-[var(--color-fg-disabled)]">
             thinking, memory, turn, lifecycle, cascade
@@ -647,10 +677,10 @@ function JourneyCard({ record }: { record: JourneyRecord }) {
         ${showExtended.value
           ? html`
               <div class="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-                <${JourneyTile} label="사고">
+                <${JourneyTile} label="Thinking">
                   ${keeper?.pipeline_stage
                     ? html`<${StatusChip} tone=${pipelineTone(keeper.pipeline_stage)}>${keeper.pipeline_stage}<//>`
-                    : html`<${TileHint} text="thinking stage가 아직 보고되지 않았습니다." />`}
+                    : html`<${TileHint} text="No thinking stage has been reported." />`}
                   ${keeper?.skill_primary
                     ? html`<div><span class="text-[var(--color-fg-disabled)]">skill</span><div class="mt-1 font-semibold text-[var(--color-fg-secondary)]">${keeper.skill_primary}</div></div>`
                     : null}
@@ -659,10 +689,10 @@ function JourneyCard({ record }: { record: JourneyRecord }) {
                     : null}
                 <//>
 
-                <${JourneyTile} label="기억">
+                <${JourneyTile} label="Memory">
                   ${trimText(keeper?.memory_recent_note, 100)
                     ? html`<div class="text-xs leading-relaxed text-[var(--color-fg-primary)]">${trimText(keeper?.memory_recent_note, 100)}</div>`
-                    : html`<${TileHint} text="최근 memory note가 아직 없습니다." />`}
+                    : html`<${TileHint} text="No recent memory note." />`}
                   ${keeper?.metrics_window
                     ? html`
                         <div class="grid grid-cols-3 gap-2">
@@ -674,7 +704,7 @@ function JourneyCard({ record }: { record: JourneyRecord }) {
                     : null}
                 <//>
 
-                <${JourneyTile} label="턴">
+                <${JourneyTile} label="Turn">
                   ${keeper
                     ? html`
                         <div class="grid grid-cols-3 gap-2">
@@ -686,10 +716,10 @@ function JourneyCard({ record }: { record: JourneyRecord }) {
                           ? html`<div class="text-xs leading-relaxed text-[var(--color-status-warn)]">${trimText(keeper.runtime_blocker_summary, 100)}</div>`
                           : null}
                       `
-                    : html`<${TileHint} text="연결된 keeper turn 정보가 없습니다." />`}
+                    : html`<${TileHint} text="No linked keeper turn data." />`}
                 <//>
 
-                <${JourneyTile} label="생애" class="lg:col-span-2">
+                <${JourneyTile} label="Life" class="lg:col-span-2">
                   ${lifeEntries.length > 0
                     ? html`
                         ${lifeEntries.map((entry) => html`
@@ -698,16 +728,16 @@ function JourneyCard({ record }: { record: JourneyRecord }) {
                               <${StatusChip} tone=${entry.source === 'journal' ? 'info' : entry.source === 'handoff' ? 'warn' : 'neutral'} uppercase=${false}>
                                 ${entry.source}
                               <//>
-                              ${entry.timestamp ? html`<${TimeAgo} timestamp=${entry.timestamp} class="text-2xs text-[var(--color-fg-disabled)]" />` : null}
+                              ${entry.timestamp ? html`<span class="text-2xs text-[var(--color-fg-disabled)]">${formatJourneyTimestamp(entry.timestamp)}</span>` : null}
                             </div>
                             <div class="mt-2 text-xs leading-relaxed text-[var(--color-fg-primary)]">${entry.text}</div>
                           </div>
                         `)}
                       `
-                    : html`<${TileHint} text="현재 컨텍스트에 엮인 recent life signal이 없습니다." />`}
+                    : html`<${TileHint} text="No recent life signal is linked to this context." />`}
                 <//>
 
-                <${JourneyTile} label="캐스케이드">
+                <${JourneyTile} label="Cascade">
                   ${keeper
                     ? html`
                         <div class="flex flex-wrap items-center gap-2">
@@ -715,7 +745,7 @@ function JourneyCard({ record }: { record: JourneyRecord }) {
                           ${keeperModel ? html`<${StatusChip} tone="neutral" uppercase=${false}>${keeperModel.value}<//>` : null}
                         </div>
                         <div class="text-xs text-[var(--color-fg-muted)]">
-                          ${keeperModel ? html`${keeperModel.label} ${keeperModel.value}` : 'model 기록 없음'}
+                          ${keeperModel ? html`${keeperModel.label} ${keeperModel.value}` : 'No model recorded'}
                         </div>
                         ${keeper.next_model_hint
                           ? html`<div class="text-xs text-[var(--color-fg-muted)]">next ${keeper.next_model_hint}</div>`
@@ -724,7 +754,7 @@ function JourneyCard({ record }: { record: JourneyRecord }) {
                           ? html`<div class="text-xs text-[var(--color-fg-muted)]">fallback ${formatPct(keeper.metrics_window.fallback_rate)}</div>`
                           : null}
                       `
-                    : html`<${TileHint} text="cascade 선택 정보는 keeper runtime에서만 노출됩니다." />`}
+                    : html`<${TileHint} text="Cascade selection is only exposed by keeper runtime." />`}
                 <//>
               </div>
             `
@@ -766,11 +796,11 @@ export function JourneyPanel() {
       <${Card} class="flex flex-col gap-4">
         <div class="flex flex-col gap-2">
           <div class="flex flex-wrap items-center gap-2">
-            <h2 class="m-0 text-2xl font-semibold text-[var(--color-fg-secondary)]">작업 → 실행 → 계약 → 키퍼 → 사고 → 기억 → 턴 → 생애 → 캐스케이드</h2>
-            <${StatusChip} tone="info">journey beta<//>
+            <h2 class="m-0 text-lg font-semibold tracking-normal text-[var(--color-fg-secondary)]">Task / Run / Contract / Keeper / Thinking / Memory / Turn / Life / Cascade</h2>
+            <${StatusChip} tone="info">beta<//>
           </div>
           <div class="text-sm leading-relaxed text-[var(--color-fg-muted)]">
-            task 중심 흐름과 task에 안 묶인 keeper 연속성을 같은 카드 문법으로 읽습니다. 실행 링크, contract gate, keeper stage, memory note, recent life signal, cascade 선택을 한 번에 붙여 봅니다.
+            Read task-centered work and standalone keeper continuity with one card grammar.
           </div>
         </div>
 
@@ -786,26 +816,26 @@ export function JourneyPanel() {
           <${TextInput}
             type="search"
             value=${query.value}
-            placeholder="task / keeper / session / operation / model / life 검색"
-            ariaLabel="journey 검색"
+            placeholder="Search task / keeper / session / operation / model / life"
+            ariaLabel="Search journeys"
             class="max-w-[460px]"
             onInput=${(event: Event) => {
               query.value = (event.target as HTMLInputElement).value
             }}
           />
           <div class="text-xs text-[var(--color-fg-muted)]">
-            ${query.value.trim() !== '' ? `${visible.length} / ${records.length}개 표시` : `${records.length}개 흐름`}
+            ${query.value.trim() !== '' ? `${visible.length} / ${records.length} shown` : `${records.length} flows`}
           </div>
         </div>
       <//>
 
       ${visible.length === 0
-        ? html`<${EmptyState} message="현재 조건에 맞는 journey가 없습니다." compact />`
+        ? html`<${EmptyState} message="No journeys match the current filters." compact />`
         : html`
             ${taskRecords.length > 0
               ? html`
                   <div class="flex flex-col gap-3">
-                    <div class="text-2xs font-semibold uppercase tracking-3 text-[var(--color-fg-muted)]">작업 여정</div>
+                    <div class="font-mono text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Task Journeys</div>
                     ${taskRecords.map((record) => html`<${JourneyCard} key=${record.key} record=${record} />`)}
                   </div>
                 `
@@ -814,7 +844,7 @@ export function JourneyPanel() {
             ${keeperRecords.length > 0
               ? html`
                   <div class="flex flex-col gap-3">
-                    <div class="text-2xs font-semibold uppercase tracking-3 text-[var(--color-fg-muted)]">독립 키퍼 여정</div>
+                    <div class="font-mono text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Keeper Journeys</div>
                     ${keeperRecords.map((record) => html`<${JourneyCard} key=${record.key} record=${record} />`)}
                   </div>
                 `

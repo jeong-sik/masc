@@ -907,7 +907,7 @@ describe('FleetTelemetryPanel', () => {
     expect(fetchToolQuality).toHaveBeenCalledTimes(2)
     expect(fetchTelemetrySummary).toHaveBeenCalledTimes(2)
     expect(fetchDashboardNamespaceTruth).toHaveBeenCalledTimes(2)
-    expect(container.textContent).toContain('30초 자동 갱신')
+    expect(container.textContent).toContain('Auto-refresh 30s')
   }, 60_000)
 
   it('ignores out-of-order fleet telemetry refresh responses', async () => {

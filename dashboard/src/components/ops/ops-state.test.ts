@@ -53,7 +53,7 @@ describe('ops-state', () => {
 
   it('has expected default signal values', () => {
     expect(broadcastMessage.value).toBe('')
-    expect(pauseReason.value).toBe('운영 점검')
+    expect(pauseReason.value).toBe('Operator maintenance')
     expect(taskPriority.value).toBe('2')
     expect(quickTarget.value).toBe('namespace')
     expect(quickMessage.value).toBe('')

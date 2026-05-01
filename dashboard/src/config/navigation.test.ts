@@ -17,7 +17,7 @@ describe('code (IDE plane) navigation', () => {
 
     expect(visibleCodeSections).toEqual([])
     expect(allCodeSections.map(item => item.id)).toEqual(['ide-shell'])
-    expect(allCodeSections.map(item => item.label)).toEqual(['코드 IDE'])
+    expect(allCodeSections.map(item => item.label)).toEqual(['Code IDE'])
   })
 
   it('normalizes unknown code section to default ide-shell', () => {
@@ -39,9 +39,9 @@ describe('lab navigation', () => {
     ])
 
     expect(labSections.map(item => item.label)).toEqual([
-      '도구',
-      '오토리서치',
-      '세이프티 하네스',
+      'Tools',
+      'Autoresearch',
+      'Safety Harness',
     ])
   })
 })
@@ -57,7 +57,7 @@ describe('command navigation', () => {
     ])
 
     expect(commandSections.map(item => item.label)).toEqual([
-      '운영 행동',
+      'Actions',
     ])
   })
 })
@@ -68,7 +68,7 @@ describe('connectors navigation (Phase 7, post-2026-04-30 merge)', () => {
 
     const sections = visibleSectionItemsForTab('connectors')
     expect(sections.map(item => item.id)).toEqual(['connector-status'])
-    expect(sections.map(item => item.label)).toEqual(['전체'])
+    expect(sections.map(item => item.label)).toEqual(['All'])
   })
 
   it('normalizes unknown connectors section to default', () => {
@@ -86,18 +86,18 @@ describe('connectors navigation (Phase 7, post-2026-04-30 merge)', () => {
 })
 
 describe('monitoring navigation labels', () => {
-  it('uses Korean labels for consolidated monitoring sections', () => {
+  it('uses design-system chrome labels for consolidated monitoring sections', () => {
     const sections = visibleSectionItemsForTab('monitoring')
     const labelFor = (id: string) => sections.find(item => item.id === id)?.label
 
-    expect(labelFor('journey')).toBe('여정 맵')
-    expect(labelFor('fleet-health')).toBe('플릿 텔레메트리')
-    // "캐스케이드" and "에이전트 디렉터리" replaced the duplicated
-    // "런타임" labels (one section renamed to cascade, the other to
+    expect(labelFor('journey')).toBe('Journey Map')
+    expect(labelFor('fleet-health')).toBe('Fleet Telemetry')
+    // "Cascade" and "Agent Directory" replaced the duplicated
+    // runtime labels (one section renamed to cascade, the other to
     // agent directory) so monitoring no longer has two sidebar items
     // whose labels collide on the same word.
-    expect(labelFor('runtime')).toBe('캐스케이드')
-    expect(labelFor('agents')).toBe('에이전트 디렉터리')
+    expect(labelFor('runtime')).toBe('Cascade')
+    expect(labelFor('agents')).toBe('Agent Directory')
   })
 
   it('does not expose sessions section (removed in Phase 0 of RFC-MASC-006)', () => {
@@ -152,11 +152,11 @@ describe('monitoring navigation labels', () => {
     const labels = sections.map(item => item.label)
     const uniq = new Set(labels)
     expect(uniq.size).toBe(labels.length)
-    // Regression guard: the word "런타임" used to label both
+    // Regression guard: the word "Runtime" used to label both
     // section[id=runtime] and section[id=agents], making it impossible
     // to tell process-instance liveness apart from cascade routing by
     // reading the sidebar alone.
-    const runtimeOccurrences = labels.filter(l => l === '런타임').length
+    const runtimeOccurrences = labels.filter(l => l === 'Runtime').length
     expect(runtimeOccurrences).toBe(0)
   })
 })
@@ -166,7 +166,7 @@ describe('workspace navigation labels', () => {
     const sections = visibleSectionItemsForTab('workspace')
     const labelFor = (id: string) => sections.find(item => item.id === id)?.label
 
-    expect(labelFor('planning')).toBe('계획 & 목표')
+    expect(labelFor('planning')).toBe('Plans & Goals')
     // goals is no longer a standalone section
     const ids = sections.map(item => item.id)
     expect(ids).not.toContain('goals')

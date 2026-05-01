@@ -46,14 +46,14 @@ export function computeBeaconView(args: {
     return {
       state: 'gray',
       label: 'WS+SSE (legacy)',
-      title: 'Parallel mode — 두 transport 모두 active. cut over 하려면 VITE_DASHBOARD_WS_ONLY=true 설정.',
+      title: 'Parallel mode: both transports are active. Set VITE_DASHBOARD_WS_ONLY=true to cut over.',
     }
   }
   if (!args.connected || !args.ready) {
     return {
       state: 'red',
       label: 'WS-only · disconnected',
-      title: 'WS-only mode 인데 socket 이 닫혀있음. socket 재연결까지 event 가 도착하지 않음. Hot rollback: window.__MASC_DASHBOARD_WS_ONLY__ = false; location.reload()',
+      title: 'WS-only mode, but the socket is closed. Events will pause until reconnect. Hot rollback: window.__MASC_DASHBOARD_WS_ONLY__ = false; location.reload()',
     }
   }
   const silentMs = args.now - args.lastEventAt
@@ -61,13 +61,13 @@ export function computeBeaconView(args: {
     return {
       state: 'yellow',
       label: 'WS-only · silent',
-      title: `WS-only mode 인데 최근 ${Math.floor(silentMs / 1000)}s 동안 event 없음. workload 가 실제 idle 이거나 WS fan-out 이 stuck.`,
+      title: `WS-only mode has received no events for ${Math.floor(silentMs / 1000)}s. The workload may be idle or WS fan-out may be stuck.`,
     }
   }
   return {
     state: 'green',
     label: `WS-only · open · ${args.eventCount60s} events / 60s`,
-    title: `WS-only mode active. 마지막 event ${Math.floor(silentMs / 1000)}s 전.`,
+    title: `WS-only mode active. Last event ${Math.floor(silentMs / 1000)}s ago.`,
   }
 }
 

@@ -106,6 +106,23 @@ let credential_of_json (json : Yojson.Safe.t) :
         }
   | _ -> Error "expected JSON object body"
 
+let default_github_gh_config_dir ~base_path ~credential_id =
+  Filename.concat
+    (Filename.concat base_path ".masc/github-identities")
+    (Filename.concat credential_id "gh")
+
+let apply_base_path_defaults ~base_path
+    (credential : Repo_manager_types.credential) =
+  match credential.cred_type, credential.gh_config_dir with
+  | Repo_manager_types.Github, None ->
+      { credential with
+        gh_config_dir =
+          Some
+            (default_github_gh_config_dir ~base_path
+               ~credential_id:credential.id)
+      }
+  | _ -> credential
+
 let add_routes router =
   router
   |> Http.Router.get "/api/v1/credentials" (fun request reqd ->
@@ -216,22 +233,13 @@ let add_routes router =
                          "credential id must be a non-empty filename \
                           fragment without slashes or directory traversal"
                      else
-                       (* When provisioning via with_token, derive a
-                          default gh_config_dir under the MASC-owned
-                          identity bundle layout so operators do not
-                          have to think about filesystem paths.  The
-                          path is path_safe by construction. *)
+                       (* GitHub credentials are rooted under the active
+                          server base_path when the operator leaves
+                          GH_CONFIG_DIR blank.  This keeps both web and
+                          with-token login flows on the same
+                          MASC-owned bundle layout. *)
                        let credential =
-                         if String.equal oauth_method "with_token"
-                            && credential.gh_config_dir = None then
-                           let derived =
-                             Filename.concat
-                               (Filename.concat base_path
-                                  ".masc/github-identities")
-                               (Filename.concat credential.id "gh")
-                           in
-                           { credential with gh_config_dir = Some derived }
-                         else credential
+                         apply_base_path_defaults ~base_path credential
                        in
                        match oauth_method with
                        | "web" -> (

@@ -24,8 +24,9 @@ val cred_root : string
     API; do not call from production code. *)
 module For_testing : sig
   val compose_env :
+    ?ssh_key_container:string ->
     git_author_name:string -> git_author_email:string ->
-    (string * string) list
+    unit -> (string * string) list
 
   val mount_if_present :
     host:string -> container:string -> Credential_provider.ro_mount list

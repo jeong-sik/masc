@@ -129,7 +129,9 @@ let has_background_capacity () =
       | ex ->
         Log.Autoresearch.warn "capacity check failed: %s" (Printexc.to_string ex);
         false)
-  | _ -> false
+  | _ ->
+    Log.Autoresearch.warn "capacity check skipped: no Eio switch/net context available (returning false)";
+    false
 
 (** Generate code change via the profile selected by [routes.autoresearch].
     Returns Ok (hypothesis, new_code) or Error reason. *)

@@ -1,4 +1,4 @@
-.PHONY: doctor-oas-pin doctor-disk-hygiene fix-disk-hygiene fix-disk-hygiene-hard doctor-oas-drift dashboard-drift-check dashboard-drift-regen fmt fmt-check health ocaml-health check-memory-leak ci
+.PHONY: doctor-oas-pin doctor-disk-hygiene fix-disk-hygiene fix-disk-hygiene-hard doctor-oas-drift dashboard-drift-check dashboard-drift-regen fmt fmt-check health ocaml-health check-memory-leak check-silent ci
 
 # Fast local-only doctor for OAS/agent_sdk pin drift in the current switch.
 doctor-oas-pin:
@@ -57,6 +57,19 @@ ocaml-health:
 # Build and run a Valgrind-based startup/MCP smoke check for memory leaks
 check-memory-leak:
 	bash scripts/check-memory-leak.sh
+
+# Silent failure gate — wildcard fallback + default value pattern grep.
+# Runs all three complementary lints:
+#   1. scripts/check_silent_failure.sh           — try/ignore + Result.iter_error swallows
+#   2. scripts/ci/check-silent-failure-patterns.sh — try/ignore, wildcard->(), Hashtbl.find, Option.get
+#   3. scripts/lint/no-unknown-permissive-default.sh — string-parsing match `| _ -> ConcreteDefault`
+# Meta-issue: #9517
+check-silent:
+	@echo "=== check-silent: noisy-by-default contract sweep ==="
+	bash scripts/check_silent_failure.sh
+	bash scripts/ci/check-silent-failure-patterns.sh
+	bash scripts/lint/no-unknown-permissive-default.sh
+	@echo "=== check-silent: PASS ==="
 
 # CI target (for GitHub Actions)
 ci: fmt-check test test-contract test-transport

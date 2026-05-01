@@ -66,6 +66,22 @@ describe('SectionCard', () => {
     render(h(SectionCard, { label: 'T', variant: 'compact' }, 'Body'), container)
     expect(container.innerHTML).toContain('p-3.5')
   })
+
+  it('accepts legacy title, right slot, and test id props', () => {
+    const container = document.createElement('div')
+    render(
+      h(
+        SectionCard,
+        { title: 'Section B', right: h('span', null, 'Tail'), testId: 'section-b' },
+        h('p', null, 'Body'),
+      ),
+      container,
+    )
+    expect(container.querySelector('[data-testid="section-b"]')).not.toBeNull()
+    expect(container.textContent).toContain('Section B')
+    expect(container.textContent).toContain('Tail')
+    expect(container.textContent).toContain('Body')
+  })
 })
 
 describe('Card', () => {

@@ -30,19 +30,25 @@ describe('eventMatchesFilter', () => {
 })
 
 describe('eventKindBadgeTone', () => {
-  it('maps heartbeat events to the heartbeat tone class', () => {
-    expect(eventKindBadgeTone(entry({ eventType: 'keeper_heartbeat' }))).toBe('agent-event-badge--heartbeat')
-    expect(eventKindBadgeTone(entry({ eventType: 'oas_keeper_snapshot' }))).toBe('agent-event-badge--heartbeat')
+  it('maps heartbeat events to the ok semantic tone', () => {
+    expect(eventKindBadgeTone(entry({ eventType: 'keeper_heartbeat' }))).toBe('ok')
+    expect(eventKindBadgeTone(entry({ eventType: 'oas_keeper_snapshot' }))).toBe('ok')
   })
 
-  it('maps explicit error entries to the error tone class', () => {
+  it('maps explicit error entries to the bad semantic tone', () => {
     expect(eventKindBadgeTone(entry({
       eventType: 'broadcast',
       text: 'Error: failed to claim task',
-    }))).toBe('agent-event-badge--error')
+    }))).toBe('bad')
   })
 
-  it('falls back to the default tone class', () => {
-    expect(eventKindBadgeTone(entry({ eventType: undefined }))).toBe('agent-event-badge--default')
+  it('maps operational events to supported semantic tones', () => {
+    expect(eventKindBadgeTone(entry({ eventType: 'oas_tool' }))).toBe('warn')
+    expect(eventKindBadgeTone(entry({ eventType: 'task_update' }))).toBe('ok')
+    expect(eventKindBadgeTone(entry({ eventType: 'keeper_compaction' }))).toBe('warn')
+  })
+
+  it('falls back to the neutral semantic tone', () => {
+    expect(eventKindBadgeTone(entry({ eventType: undefined }))).toBe('neutral')
   })
 })

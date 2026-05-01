@@ -27,6 +27,8 @@ const FILTER_CHIPS: { key: FilterKind; label: string }[] = [
   { key: 'lifecycle', label: '라이프사이클' },
 ]
 
+type EventBadgeTone = Extract<StatusChipTone, 'ok' | 'warn' | 'bad' | 'info' | 'neutral'>
+
 export function eventMatchesFilter(entry: JournalEntry, filter: FilterKind): boolean {
   if (filter === 'all') return true
   const et = entry.eventType ?? 'unknown'
@@ -48,7 +50,7 @@ export function eventMatchesFilter(entry: JournalEntry, filter: FilterKind): boo
   }
 }
 
-export function eventKindBadgeTone(entry: JournalEntry): StatusChipTone {
+export function eventKindBadgeTone(entry: JournalEntry): EventBadgeTone {
   if (isErrorJournalEntry(entry)) return 'bad'
   const eventType = entry.eventType
   switch (eventType) {
@@ -58,7 +60,7 @@ export function eventKindBadgeTone(entry: JournalEntry): StatusChipTone {
     case 'oas_turn':
       return 'info'
     case 'oas_tool':
-      return 'select'
+      return 'warn'
     case 'oas_context':
       return 'neutral'
     case 'oas_event':
@@ -66,16 +68,17 @@ export function eventKindBadgeTone(entry: JournalEntry): StatusChipTone {
       return 'info'
     case 'agent_joined':
     case 'agent_left':
-      return 'neutral'
+      return 'info'
     case 'keeper_handoff':
+      return 'info'
     case 'keeper_compaction':
-      return 'paused'
+      return 'warn'
     case 'keeper_guardrail':
       return 'bad'
     case 'broadcast':
       return 'info'
     case 'task_update':
-      return 'select'
+      return 'ok'
     case 'board_post':
     case 'board_comment':
       return 'info'

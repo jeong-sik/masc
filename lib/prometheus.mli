@@ -377,6 +377,16 @@ val metric_keeper_dead_total : string
     restart will be attempted. *)
 
 val metric_keeper_skip_idle_wake_resumed : string
+
+(** RFC-0020 Rule 2 evidence — incremented every time
+    [run_smart_heartbeat_gate] overrides a [Skip_busy] / [Skip_idle]
+    decision because the Event Layer queue
+    ([Keeper_registry.event_queue_snapshot]) was non-empty. A zero
+    rate against ongoing keeper activity means either the queue
+    write path (PR-C1 [wakeup_keeper ?stimulus]) is not firing or
+    the smart heartbeat is already returning [Emit] on its own —
+    either way operators can distinguish. Labels: [keeper]. *)
+val metric_keeper_event_queue_override : string
 (** Positive signal for the #12271 Skip_idle + Woken fix path. Increments
     each time [run_smart_heartbeat_gate] observes an external [wakeup_keeper]
     cut a Skip_idle backoff sleep short and the cycle was resumed

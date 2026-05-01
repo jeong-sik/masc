@@ -726,7 +726,12 @@ let run_smart_heartbeat_gate
       in
       if Keeper_event_queue.is_empty queue
       then smart_hb_decision
-      else Heartbeat_smart.Emit)
+      else (
+        Prometheus.inc_counter
+          Prometheus.metric_keeper_event_queue_override
+          ~labels:[ ("keeper", meta_current.name) ]
+          ();
+        Heartbeat_smart.Emit))
   in
   (* Run side-effects (idle sleep, cycle-timestamp update) per the
      decision, then delegate the gate answer to [cycle_continues_after_wake]

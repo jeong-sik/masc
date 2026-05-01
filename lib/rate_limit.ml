@@ -319,7 +319,8 @@ let remaining_agent_global ~key =
 
 (** Start a background fiber that periodically cleans up stale rate limit buckets.
     Call this once at server startup with the main switch. *)
-let start_cleanup_loop ~sw ~clock ?(interval=Env_config.RateLimit.cleanup_interval_seconds) limiter =
+let start_cleanup_loop ~sw ~clock ?(label = "rate-limit")
+    ?(interval=Env_config.RateLimit.cleanup_interval_seconds) limiter =
   Eio.Fiber.fork ~sw (fun () ->
     let rec loop () =
       Eio.Time.sleep clock interval;
@@ -329,12 +330,13 @@ let start_cleanup_loop ~sw ~clock ?(interval=Env_config.RateLimit.cleanup_interv
          in
          let removed = cleanup limiter ~older_than_seconds in
          if removed > 0 then
-           Log.Misc.info "Cleaned up %d stale buckets" removed
+           Log.Misc.info "Cleaned up %d stale %s buckets" removed label
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->
          Log.Misc.warn
-           "rate_limit cleanup iteration failed: %s"
+           "rate_limit cleanup iteration failed for %s limiter: %s"
+           label
            (Printexc.to_string exn));
       loop ()
     in
@@ -403,5 +405,5 @@ let agent_key_of_token_or_name ?token ?agent_name () =
 (** Start the global rate-limit cleanup loops.  Call once at server startup.
     Starts loops for both the per-IP global limiter and the per-agent limiter. *)
 let start_global_cleanup_loop ~sw ~clock =
-  start_cleanup_loop ~sw ~clock (Eio.Lazy.force global);
-  start_cleanup_loop ~sw ~clock (Eio.Lazy.force agent_global)
+  start_cleanup_loop ~sw ~clock ~label:"ip" (Eio.Lazy.force global);
+  start_cleanup_loop ~sw ~clock ~label:"agent" (Eio.Lazy.force agent_global)

@@ -749,14 +749,20 @@ let write_file path content =
   output_string oc content;
   close_out oc
 
+let restore_env name = function
+  | Some value -> Unix.putenv name value
+  | None ->
+      (* This OCaml Unix module does not expose [unsetenv]. Config_dir_resolver
+         normalizes empty env values to [None], so this restores the effective
+         resolver state for these tests. *)
+      Unix.putenv name ""
+
 let with_personas_dir f =
   with_temp_dir "keeper-personas" @@ fun personas_dir ->
   let original = Sys.getenv_opt "MASC_PERSONAS_DIR" in
   Fun.protect
     ~finally:(fun () ->
-      (match original with
-      | Some value -> Unix.putenv "MASC_PERSONAS_DIR" value
-      | None -> Unix.putenv "MASC_PERSONAS_DIR" "");
+      restore_env "MASC_PERSONAS_DIR" original;
       Masc_mcp.Config_dir_resolver.reset ())
     (fun () ->
       Unix.putenv "MASC_PERSONAS_DIR" personas_dir;
@@ -768,9 +774,7 @@ let with_config_dir f =
   let original = Sys.getenv_opt "MASC_CONFIG_DIR" in
   Fun.protect
     ~finally:(fun () ->
-      (match original with
-      | Some value -> Unix.putenv "MASC_CONFIG_DIR" value
-      | None -> Unix.putenv "MASC_CONFIG_DIR" "");
+      restore_env "MASC_CONFIG_DIR" original;
       Masc_mcp.Config_dir_resolver.reset ())
     (fun () ->
       Unix.putenv "MASC_CONFIG_DIR" config_dir;
@@ -989,6 +993,44 @@ goal = "OPERATOR_TODO: replace before spawn"
         (contains_substring e keeper_path);
       check bool "reports field" true
         (contains_substring e "keeper.goal")
+
+let test_persona_resolver_rejects_placeholder_in_resolved_payload () =
+  with_personas_dir @@ fun personas_dir ->
+  with_config_dir @@ fun config_dir ->
+  let persona_dir = Filename.concat personas_dir "probe" in
+  mkdir_p persona_dir;
+  write_file
+    (Filename.concat persona_dir "profile.json")
+    {|
+{
+  "name": "Probe",
+  "role": "runtime profile",
+  "keeper": {
+    "goal": "normal persona goal"
+  }
+}
+|};
+  let keepers_dir = Filename.concat config_dir "keepers" in
+  mkdir_p keepers_dir;
+  let keeper_path = Filename.concat keepers_dir "probe.toml" in
+  write_file keeper_path
+    {|
+[keeper]
+persona_name = "probe"
+tool_denylist = ["OPERATOR_TODO: remove before spawn"]
+|};
+  match
+    KEP.resolved_keeper_args_from_persona
+      (`Assoc [ ("persona_name", `String "probe") ])
+  with
+  | Ok _ -> fail "placeholder in resolved keeper args should not resolve"
+  | Error e ->
+      check bool "reports resolved args" true
+        (contains_substring e "resolved keeper args");
+      check bool "reports manifest path" true
+        (contains_substring e keeper_path);
+      check bool "reports resolved payload field" true
+        (contains_substring e "$.tool_denylist[0]")
 
 let test_persona_resolver_ignores_non_public_social_model_arg () =
   with_personas_dir @@ fun personas_dir ->
@@ -1717,6 +1759,8 @@ let () =
             test_persona_resolver_rejects_operator_todo_profile;
           test_case "persona resolver reports placeholder defaults source" `Quick
             test_persona_resolver_reports_placeholder_defaults_source;
+          test_case "persona resolver rejects placeholder in resolved payload" `Quick
+            test_persona_resolver_rejects_placeholder_in_resolved_payload;
           test_case "persona resolver ignores non-public social_model arg" `Quick
             test_persona_resolver_ignores_non_public_social_model_arg;
           test_case "persona resolver preserves autoboot_enabled arg" `Quick

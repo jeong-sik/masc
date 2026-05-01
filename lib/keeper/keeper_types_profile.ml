@@ -358,6 +358,43 @@ let rec json_has_operator_todo_placeholder = function
        | None -> false)
   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Floatlit _ -> false
 
+let json_operator_todo_placeholder_paths json =
+  let child_path path key =
+    if path = "$" then "$." ^ key else path ^ "." ^ key
+  in
+  let indexed_path path index =
+    Printf.sprintf "%s[%d]" path index
+  in
+  let rec loop path = function
+    | `String value ->
+        if string_has_operator_todo_placeholder value then [ path ] else []
+    | `Assoc fields ->
+        fields
+        |> List.map (fun (key, value) ->
+          let field_path = child_path path key in
+          let key_hits =
+            if string_has_operator_todo_placeholder key then [ field_path ] else []
+          in
+          key_hits @ loop field_path value)
+        |> List.concat
+    | `List values | `Tuple values ->
+        values
+        |> List.mapi (fun index value -> loop (indexed_path path index) value)
+        |> List.concat
+    | `Variant (name, value) ->
+        let variant_path = child_path path name in
+        let name_hits =
+          if string_has_operator_todo_placeholder name then [ variant_path ] else []
+        in
+        name_hits
+        @
+        (match value with
+         | Some json -> loop variant_path json
+         | None -> [])
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Floatlit _ -> []
+  in
+  loop "$" json
+
 let reject_placeholder_persona_profile ~label ~path json =
   if json_has_operator_todo_placeholder json then (
     Log.Keeper.warn

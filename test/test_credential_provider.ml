@@ -27,6 +27,7 @@ open Alcotest
 
 module CP = Masc_mcp.Credential_provider
 module HCP = Masc_mcp.Host_config_provider
+module ICLP = Masc_mcp.In_container_login_provider
 
 (* --- 1. pp_error covers every variant --- *)
 
@@ -192,6 +193,104 @@ let test_tear_down_idempotent () =
   HCP.tear_down b ~container_id:None;
   ()
 
+(* --- 5. In_container_login_provider pure helpers --- *)
+
+(* 5a. container_hosts_yml_path is anchored to cred_root/.config/gh *)
+let test_iclp_container_hosts_yml_path () =
+  let expected =
+    Filename.concat HCP.cred_root ".config/gh/hosts.yml"
+  in
+  check string "container_hosts_yml_path"
+    expected ICLP.For_testing.container_hosts_yml_path
+
+(* 5b. read_token_from_hosts_yml returns None for absent file *)
+let test_iclp_read_token_absent () =
+  let r =
+    ICLP.For_testing.read_token_from_hosts_yml
+      ~gh_config_dir:"/nonexistent-rfc0008-pr3-test"
+  in
+  check bool "absent file -> None" true (Option.is_none r)
+
+(* 5c. read_token_from_hosts_yml extracts bare oauth_token *)
+let test_iclp_read_token_bare () =
+  let dir = Filename.temp_file "iclp_test_bare_" "" in
+  Sys.remove dir;
+  Unix.mkdir dir 0o700;
+  Fun.protect
+    ~finally:(fun () ->
+      (try Sys.remove (Filename.concat dir "hosts.yml") with Sys_error _ -> ());
+      (try Unix.rmdir dir with Unix.Unix_error _ -> ()))
+    (fun () ->
+      let hosts_path = Filename.concat dir "hosts.yml" in
+      let oc = open_out hosts_path in
+      output_string oc
+        "github.com:\n\
+         \  oauth_token: ghp_testtoken12345\n\
+         \  user: real-user\n\
+         \  git_protocol: https\n";
+      close_out oc;
+      match ICLP.For_testing.read_token_from_hosts_yml ~gh_config_dir:dir with
+      | Some tok ->
+          check string "bare token extracted" "ghp_testtoken12345" tok
+      | None ->
+          failf "expected Some token for bare oauth_token value, got None")
+
+(* 5d. read_token_from_hosts_yml extracts single-quoted oauth_token *)
+let test_iclp_read_token_quoted () =
+  let dir = Filename.temp_file "iclp_test_quoted_" "" in
+  Sys.remove dir;
+  Unix.mkdir dir 0o700;
+  Fun.protect
+    ~finally:(fun () ->
+      (try Sys.remove (Filename.concat dir "hosts.yml") with Sys_error _ -> ());
+      (try Unix.rmdir dir with Unix.Unix_error _ -> ()))
+    (fun () ->
+      let hosts_path = Filename.concat dir "hosts.yml" in
+      let oc = open_out hosts_path in
+      output_string oc
+        "github.com:\n\
+         \  oauth_token: 'ghp_quoted9876'\n\
+         \  user: real-user\n";
+      close_out oc;
+      match ICLP.For_testing.read_token_from_hosts_yml ~gh_config_dir:dir with
+      | Some tok ->
+          check string "quoted token extracted" "ghp_quoted9876" tok
+      | None ->
+          failf "expected Some token for single-quoted value, got None")
+
+(* 5e. tear_down deletes token_host_path recorded in metadata *)
+let test_iclp_tear_down_removes_temp_file () =
+  let path = Filename.temp_file "iclp_teardown_" "" in
+  (* Write something so the file exists *)
+  let oc = open_out path in
+  output_string oc "tok\n";
+  close_out oc;
+  check bool "file exists before tear_down" true (Sys.file_exists path);
+  let b : CP.binding =
+    { identity = "test-keeper"
+    ; env = []
+    ; ro_mounts = []
+    ; bootstrap = None
+    ; metadata = [ "token_host_path", path ]
+    }
+  in
+  ICLP.tear_down b ~container_id:None;
+  check bool "file gone after tear_down" false (Sys.file_exists path)
+
+(* 5f. tear_down is idempotent when token_host_path is absent or already gone *)
+let test_iclp_tear_down_idempotent () =
+  let b_no_meta : CP.binding =
+    { identity = "k"; env = []; ro_mounts = []; bootstrap = None; metadata = [] }
+  in
+  ICLP.tear_down b_no_meta ~container_id:None;
+  ICLP.tear_down b_no_meta ~container_id:(Some "x");
+  let b_missing : CP.binding =
+    { identity = "k"; env = []; ro_mounts = []; bootstrap = None
+    ; metadata = [ "token_host_path", "/nonexistent-rfc0008-pr3-teardown" ] }
+  in
+  ICLP.tear_down b_missing ~container_id:None;
+  ()
+
 let () =
   run "credential_provider"
     [
@@ -219,5 +318,20 @@ let () =
         [
           test_case "finalize Ok" `Quick test_finalize_is_noop_ok;
           test_case "tear_down idempotent" `Quick test_tear_down_idempotent;
+        ] );
+      ( "in_container_login_provider (PR-3)",
+        [
+          test_case "container_hosts_yml_path anchored to cred_root" `Quick
+            test_iclp_container_hosts_yml_path;
+          test_case "read_token absent file -> None" `Quick
+            test_iclp_read_token_absent;
+          test_case "read_token bare oauth_token" `Quick
+            test_iclp_read_token_bare;
+          test_case "read_token single-quoted oauth_token" `Quick
+            test_iclp_read_token_quoted;
+          test_case "tear_down removes temp file" `Quick
+            test_iclp_tear_down_removes_temp_file;
+          test_case "tear_down idempotent" `Quick
+            test_iclp_tear_down_idempotent;
         ] );
     ]

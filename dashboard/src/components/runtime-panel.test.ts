@@ -27,6 +27,12 @@ async function loadRuntimePanel() {
   vi.doMock('./verification-specs-panel', () => ({
     VerificationSpecsPanel: () => html`<div data-testid="verification-specs">VerificationSpecsPanel</div>`,
   }))
+  vi.doMock('./cost-dashboard', () => ({
+    CostDashboard: () => html`<div data-testid="cost-dashboard">CostDashboard</div>`,
+  }))
+  vi.doMock('./cascade-inspector', () => ({
+    CascadeInspector: () => html`<div data-testid="cascade-inspector">CascadeInspector</div>`,
+  }))
   vi.doMock('./common/filter-chips', () => ({
     FilterChips: ({ chips, value }: { chips: { key: string; label: string }[]; value: string }) => html`
       <div data-testid="filter-chips" data-value=${value}>
@@ -60,6 +66,8 @@ describe('RuntimePanel', () => {
     vi.doUnmock('./prometheus-metrics')
     vi.doUnmock('./cascade-config-panel')
     vi.doUnmock('./verification-specs-panel')
+    vi.doUnmock('./cost-dashboard')
+    vi.doUnmock('./cascade-inspector')
     vi.doUnmock('./common/filter-chips')
   })
 
@@ -133,19 +141,21 @@ describe('RuntimePanel', () => {
     expect(container.textContent).toContain('PrometheusMetrics')
   })
 
-  it('renders FilterChips with 5 options', async () => {
+  it('renders FilterChips with 7 options', async () => {
     route.value.params = {}
     const { RuntimePanel } = await loadRuntimePanel()
     render(html`<${RuntimePanel} />`, container)
     await flushUi()
 
     const chips = container.querySelectorAll('[data-testid="chip"]')
-    expect(chips.length).toBe(5)
+    expect(chips.length).toBe(7)
     expect(chips[0]?.textContent).toBe('전체')
     expect(chips[1]?.textContent).toBe('Cascade')
     expect(chips[2]?.textContent).toBe('프로바이더')
-    expect(chips[3]?.textContent).toBe('메트릭')
-    expect(chips[4]?.textContent).toBe('형식검증')
+    expect(chips[3]?.textContent).toBe('비용 / 지연')
+    expect(chips[4]?.textContent).toBe('검사기')
+    expect(chips[5]?.textContent).toBe('메트릭')
+    expect(chips[6]?.textContent).toBe('형식검증')
   })
 
   it('falls back to default for unknown view param', async () => {

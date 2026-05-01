@@ -3,6 +3,7 @@
 #
 # Usage:
 #   scripts/check-human-approval-env.sh --repo owner/name
+#   scripts/check-human-approval-env.sh --repo owner/name --environment staging
 #   scripts/check-human-approval-env.sh --repo owner/name --require-reviewer jeong-sik
 #   scripts/check-human-approval-env.sh --repo owner/name --require-prevent-self-review
 
@@ -14,7 +15,7 @@ REQUIRE_REVIEWER=""
 REQUIRE_PREVENT_SELF_REVIEW=0
 
 usage() {
-  sed -n '1,9p' "$0"
+  sed -n '1,/^$/p' "$0"
 }
 
 die() {

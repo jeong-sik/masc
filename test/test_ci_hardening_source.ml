@@ -1201,6 +1201,9 @@ let test_human_approval_environment_check_contracts () =
     ((file_contains_pattern "scripts/check-human-approval-env.sh"
         "environments/$ENVIRONMENT_ENCODED")
      && file_contains_pattern "scripts/check-human-approval-env.sh" "@uri");
+  check bool "human approval environment check documents environment override" true
+    (file_contains_pattern "scripts/check-human-approval-env.sh"
+       "--environment staging");
   check bool "human approval environment check requires reviewer rule" true
     (file_contains_pattern "scripts/check-human-approval-env.sh"
        "required_reviewers");

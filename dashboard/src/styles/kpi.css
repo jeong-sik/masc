@@ -1,0 +1,149 @@
+/* kpi.css — Pilot refactor onto new token system (Type/Color/Elevation/Density/Motion).
+   Canonical KPI strip. Uses role tokens throughout.
+   Status colors reference semantic 4-slot (-soft/-fg/-border).
+   Spacing uses --sp-gutter so density swap propagates. */
+
+.zone-kpi {
+  grid-area: kpi;
+  display: grid;
+  grid-template-columns: repeat(12, minmax(72px, 1fr));
+
+  /* Elevation: resting chrome surface */
+  background: var(--elev-1-bg);
+  border-bottom: 1px solid var(--elev-1-border);
+  box-shadow: var(--elev-1-shadow);
+
+  overflow-x: auto; overflow-y: hidden;
+  scrollbar-width: thin;
+}
+
+.kpi-cell {
+  position: relative;
+  padding: calc(var(--sp-inline) + 2px) var(--sp-gutter);
+  border-right: 1px solid var(--line-1);
+  display: flex; flex-direction: column; justify-content: space-between;
+  gap: var(--sp-inline);
+  min-width: 0; overflow: hidden;
+
+  /* Motion: swap hover bg smoothly, respects reduced-motion */
+  transition: background var(--motion-swap), box-shadow var(--motion-swap);
+  cursor: default;
+}
+.kpi-cell:last-child { border-right: none; }
+
+/* Hover uses the shared interaction overlay token */
+.kpi-cell:hover {
+  background: linear-gradient(0deg, var(--hover-overlay), var(--hover-overlay));
+}
+
+/* Focused KPI — brass ring, keyboard-navigable */
+.kpi-cell:focus-visible {
+  outline: none;
+  box-shadow: inset var(--focus-ring);
+}
+
+/* ── Row 1: label + optional delta ── */
+.kpi-label {
+  font: var(--type-label);
+  letter-spacing: var(--track-caps);
+  text-transform: uppercase;
+  color: var(--fg-3);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  min-width: 0;
+}
+
+/* ── Row 2: value + unit + delta ── */
+.kpi-row {
+  display: flex; align-items: baseline; gap: var(--sp-inline);
+  min-width: 0;
+}
+
+.kpi-value {
+  font: var(--type-kpi-l);
+  font-weight: var(--fw-med);
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-1);
+  letter-spacing: var(--track-tight);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
+  transition: color var(--motion-swap);
+}
+
+.kpi-unit {
+  font: var(--type-caption);
+  color: var(--fg-3);
+  text-transform: uppercase;
+  letter-spacing: var(--track-wide);
+}
+
+.kpi-delta {
+  font: var(--type-caption);
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-4);
+}
+.kpi-delta.up   { color: var(--ok-fg); }
+.kpi-delta.down { color: var(--err-fg); }
+.kpi-delta.flat { color: var(--fg-4); }
+
+/* ── Spark (bottom-right corner) ── */
+.kpi-spark {
+  position: absolute;
+  bottom: var(--grid-half);
+  right: var(--grid-half);
+  opacity: .6;
+  pointer-events: none;
+  transition: opacity var(--motion-swap);
+}
+.kpi-cell:hover .kpi-spark { opacity: 1; }
+
+/* SVG sparks (polyline/path) */
+.spark path, .spark polyline {
+  fill: none;
+  stroke: var(--brass-1);
+  stroke-width: 1;
+  opacity: .7;
+}
+.spark.s-err polyline { stroke: var(--err-fg); }
+.spark.s-ok  polyline { stroke: var(--ok-fg); }
+.spark.s-warn polyline { stroke: var(--warn-fg); }
+
+/* ── Status variants — tint value + add a subtle inset accent bar ── */
+.kpi-cell.is-crit .kpi-value { color: var(--err-fg); }
+.kpi-cell.is-crit {
+  background: linear-gradient(0deg, var(--err-soft), transparent 60%);
+  box-shadow: inset 2px 0 0 var(--err);
+}
+.kpi-cell.is-crit:hover {
+  background: linear-gradient(0deg, var(--err-soft), var(--hover-overlay));
+}
+
+.kpi-cell.is-warn .kpi-value { color: var(--warn-fg); }
+.kpi-cell.is-warn {
+  background: linear-gradient(0deg, var(--warn-soft), transparent 70%);
+  box-shadow: inset 2px 0 0 var(--warn);
+}
+
+.kpi-cell.is-ok .kpi-value { color: var(--ok-fg); }
+.kpi-cell.is-ok {
+  box-shadow: inset 2px 0 0 var(--ok);
+}
+
+.kpi-cell.is-brass .kpi-value { color: var(--brass-fg); }
+.kpi-cell.is-brass {
+  background: linear-gradient(0deg, var(--brass-soft), transparent 70%);
+  box-shadow: inset 2px 0 0 var(--brass-1);
+}
+
+/* ── "Now" pulse — active / live-updating cell ── */
+.kpi-cell.is-live .kpi-value {
+  animation: anim-pulse-glow 2.4s var(--ease-inout) infinite;
+}
+
+/* ── Loading state ── */
+.kpi-cell.is-loading .kpi-value {
+  color: transparent;
+  background: linear-gradient(90deg,
+    var(--bg-2) 0%, var(--bg-3) 25%, var(--bg-2) 50%, var(--bg-3) 75%, var(--bg-2) 100%);
+  background-size: 200% 100%;
+  animation: anim-shimmer 2s linear infinite;
+  border-radius: var(--r-1);
+}

@@ -1,0 +1,501 @@
+/* cockpit-ext.css — Phase 1: viewport banner, repo selector, collapsible widgets
+   Loaded AFTER cockpit.css, so these rules win on specificity ties. */
+
+/* ═══════════ VIEWPORT BANNER ═══════════ */
+.vp-banner {
+  position: fixed; top: 0; left: 0; right: 0;
+  z-index: 9999;
+  background: linear-gradient(180deg, rgba(180,140,60,.18), rgba(180,140,60,.08));
+  border-bottom: 1px solid var(--brass-3, #6b5022);
+  color: var(--color-fg-primary);
+  font: 11px/1.4 var(--font-mono);
+  padding: 7px 14px 7px 16px;
+  display: flex; align-items: center; gap: 14px;
+  backdrop-filter: blur(6px);
+}
+.vp-banner .vp-icon {
+  width: 14px; height: 14px; flex: none;
+  border: 1px solid var(--brass-2, #c9a04a);
+  background: rgba(180,140,60,.15);
+  display: grid; place-items: center;
+  color: var(--brass-1, #f0c674);
+  font-size: 9px;
+}
+.vp-banner .vp-msg { flex: 1; }
+.vp-banner .vp-msg b { color: var(--brass-1, #f0c674); }
+.vp-banner .vp-msg .vp-cur {
+  margin-left: 10px;
+  color: var(--color-fg-muted);
+  font-size: 10px;
+}
+.vp-banner button {
+  font: inherit;
+  border: 1px solid var(--color-border-default);
+  background: transparent;
+  color: var(--color-fg-primary);
+  padding: 3px 10px;
+  cursor: pointer;
+  letter-spacing: .03em;
+}
+.vp-banner button:hover { border-color: var(--brass-2, #c9a04a); color: var(--brass-1, #f0c674); }
+.vp-banner button.vp-fs { background: rgba(180,140,60,.12); border-color: var(--brass-3, #6b5022); }
+.vp-banner button.vp-close { padding: 3px 8px; }
+body.has-vp-banner { padding-top: 32px; }
+
+/* ═══════════ REPO SELECTOR (Topbar) ═══════════ */
+.tb-repo {
+  display: inline-flex; align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  height: 22px;
+  border: 1px solid var(--color-border-default);
+  background: rgba(40,28,12,.35);
+  cursor: pointer;
+  font: 11px/1 var(--font-mono);
+  color: var(--color-fg-primary);
+  position: relative;
+  user-select: none;
+}
+.tb-repo:hover { border-color: var(--brass-2, #c9a04a); }
+.tb-repo .tb-repo-glyph {
+  display: inline-block; width: 9px; height: 9px;
+  border: 1px solid var(--brass-2, #c9a04a);
+  background: var(--brass-3, #6b5022);
+  transform: rotate(45deg);
+  flex: none;
+}
+.tb-repo .tb-repo-name { color: var(--brass-1, #f0c674); font-weight: 600; }
+.tb-repo .tb-repo-meta {
+  color: var(--color-fg-muted);
+  font-size: 10px;
+  letter-spacing: .02em;
+}
+.tb-repo .chev { color: var(--color-fg-muted); font-size: 9px; }
+
+/* repo pin strip (left of selector for multi-repo quick-toggle) */
+.tb-repo-pins {
+  display: inline-flex; align-items: center;
+  gap: 3px;
+  margin-right: 4px;
+}
+.tb-repo-pin {
+  width: 22px; height: 22px;
+  border: 1px solid var(--color-border-default);
+  background: transparent;
+  color: var(--color-fg-muted);
+  font: 10px/1 var(--font-mono);
+  display: grid; place-items: center;
+  cursor: pointer;
+  letter-spacing: 0;
+  position: relative;
+}
+.tb-repo-pin:hover {
+  border-color: var(--brass-3, #6b5022);
+  color: var(--color-fg-primary);
+}
+.tb-repo-pin.active {
+  border-color: var(--brass-2, #c9a04a);
+  background: rgba(180,140,60,.18);
+  color: var(--brass-1, #f0c674);
+}
+.tb-repo-pin .pin-badge {
+  position: absolute;
+  top: -3px; right: -3px;
+  min-width: 12px; height: 11px;
+  padding: 0 3px;
+  background: var(--err-fg, #d04848);
+  color: #fff;
+  font-size: 8px; line-height: 11px;
+  border-radius: 6px;
+  text-align: center;
+  font-weight: 600;
+}
+
+/* repo selector popover */
+.tb-repo-pop {
+  position: absolute;
+  top: 26px; left: 0;
+  width: 360px;
+  max-height: 420px;
+  overflow: auto;
+  background: var(--color-canvas-default, #161616);
+  border: 1px solid var(--color-border-default);
+  box-shadow: 0 12px 28px rgba(0,0,0,.6);
+  z-index: 200;
+  padding: 8px;
+  font: 11px/1.4 var(--font-mono);
+}
+.tb-repo-pop .h {
+  color: var(--color-fg-muted);
+  font-size: 9px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  padding: 4px 6px 8px;
+  border-bottom: 1px solid var(--color-border-default);
+  margin-bottom: 6px;
+}
+.tb-repo-pop .repo-row {
+  display: grid;
+  grid-template-columns: 14px 1fr auto auto;
+  gap: 8px;
+  align-items: center;
+  padding: 7px 8px;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+.tb-repo-pop .repo-row:hover { border-color: var(--color-border-default); background: rgba(180,140,60,.06); }
+.tb-repo-pop .repo-row.on { background: rgba(180,140,60,.14); border-color: var(--brass-3, #6b5022); }
+.tb-repo-pop .repo-row .glyph { color: var(--brass-2, #c9a04a); }
+.tb-repo-pop .repo-row .nm { color: var(--color-fg-primary); font-weight: 600; }
+.tb-repo-pop .repo-row .nm .ow { color: var(--color-fg-muted); font-weight: 400; }
+.tb-repo-pop .repo-row .desc {
+  grid-column: 2 / 3;
+  color: var(--color-fg-muted);
+  font-size: 10px;
+  margin-top: 2px;
+}
+.tb-repo-pop .repo-row .meta {
+  display: flex; gap: 6px;
+  font-size: 10px;
+  color: var(--color-fg-muted);
+}
+.tb-repo-pop .repo-row .meta .pr { color: var(--ok-fg, #6abf6a); }
+.tb-repo-pop .repo-row .meta .dirty { color: var(--err-fg, #d04848); }
+.tb-repo-pop .repo-row .pinbtn {
+  border: 1px solid var(--color-border-default);
+  background: transparent;
+  color: var(--color-fg-muted);
+  width: 20px; height: 20px;
+  display: grid; place-items: center;
+  cursor: pointer;
+  font-size: 11px;
+}
+.tb-repo-pop .repo-row .pinbtn.on { color: var(--brass-1, #f0c674); border-color: var(--brass-2, #c9a04a); }
+
+/* ═══════════ COLLAPSIBLE WIDGETS ═══════════ */
+/* Standardize collapse affordance — chevron rotates, body hides. */
+.wx-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 10px;
+  font: 9px/1 var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: .14em;
+  color: var(--color-fg-muted);
+  border-bottom: 1px solid var(--color-border-default);
+  cursor: pointer;
+  background: rgba(255,255,255,.012);
+  user-select: none;
+  height: 22px;
+  flex: none;
+}
+.wx-head:hover { color: var(--color-fg-primary); background: rgba(180,140,60,.05); }
+.wx-head .wx-chev {
+  display: inline-block;
+  width: 10px;
+  text-align: center;
+  font-size: 9px;
+  color: var(--color-fg-muted);
+  transition: transform .15s ease;
+}
+.wx-head[aria-expanded="false"] .wx-chev { transform: rotate(-90deg); }
+.wx-head .wx-title { flex: 1; }
+.wx-head .wx-meta {
+  font-size: 10px;
+  color: var(--color-fg-muted);
+  letter-spacing: 0;
+  text-transform: none;
+}
+.wx-head .wx-act {
+  display: inline-flex; gap: 4px;
+}
+.wx-head .wx-act button {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--color-fg-muted);
+  font: 9px/1 var(--font-mono);
+  padding: 2px 5px;
+  cursor: pointer;
+  text-transform: lowercase;
+  letter-spacing: 0;
+}
+.wx-head .wx-act button:hover { border-color: var(--color-border-default); color: var(--color-fg-primary); }
+
+.wx-body { flex: 1 1 auto; min-height: 0; overflow: hidden; }
+.wx-collapsed > .wx-body { display: none; }
+
+/* When sidebar/rail are collapsed, shrink to a thin rail */
+.app .side.wx-collapsed { width: 36px; min-width: 36px; }
+.app .rail.wx-collapsed { width: 36px; min-width: 36px; }
+.app .side.wx-collapsed .wx-head,
+.app .rail.wx-collapsed .wx-head {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  height: 100%;
+  border-bottom: none;
+  border-right: 1px solid var(--color-border-default);
+  padding: 10px 4px;
+  letter-spacing: .2em;
+}
+.app .side.wx-collapsed .wx-head .wx-meta,
+.app .side.wx-collapsed .wx-head .wx-act,
+.app .rail.wx-collapsed .wx-head .wx-meta,
+.app .rail.wx-collapsed .wx-head .wx-act { display: none; }
+
+/* When the central deck is collapsed, only header strip remains */
+.deck.wx-collapsed .deck-tabs,
+.deck.wx-collapsed .deck-body { display: none; }
+
+/* When KPI strip is collapsed, just keep a thin trace bar */
+.kpi.wx-collapsed { height: 22px; min-height: 22px; }
+.kpi.wx-collapsed .kpi-cell { display: none; }
+.kpi.wx-collapsed .kpi-collapse-tab { display: flex; flex: 1; padding: 0 12px; }
+
+/* KPI collapse tab — small chevron at the very left of the strip */
+.kpi-collapse-tab {
+  flex: 0 0 auto;
+  align-self: stretch;
+  display: flex; align-items: center; justify-content: center;
+  width: 22px;
+  border-right: 1px solid var(--color-border-default);
+  background: rgba(255,255,255,.012);
+  color: var(--color-fg-muted);
+  cursor: pointer;
+  font: 9px/1 var(--font-mono);
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  user-select: none;
+}
+.kpi-collapse-tab:hover { color: var(--brass-1, #f0c674); background: rgba(180,140,60,.06); }
+
+/* When lifeline is collapsed, just keep label */
+.life.wx-collapsed .life-trace { display: none; }
+.life.wx-collapsed { height: 22px; }
+
+/* Generic "open in new tab" floating button (fullscreen escape hatch) */
+.cockpit-fs-fab {
+  position: fixed;
+  right: 14px; bottom: 14px;
+  z-index: 200;
+  background: rgba(15,15,15,.85);
+  border: 1px solid var(--brass-3, #6b5022);
+  color: var(--brass-1, #f0c674);
+  padding: 8px 12px;
+  font: 10px/1 var(--font-mono);
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  cursor: pointer;
+  display: none;
+  backdrop-filter: blur(6px);
+}
+.cockpit-fs-fab:hover { background: rgba(180,140,60,.18); }
+body.has-vp-banner.compact-vp .cockpit-fs-fab { display: inline-block; }
+
+/* ═══════════ SECTION HEADER (sx) — collapsible per-section ═══════════ */
+/* fix sidebar/rail flex stacking — .app uses CSS grid so .side is a grid cell.
+   Make .side/.rail flex columns so children (sect-h + body) stack and Goals
+   gets remaining space via flex:1. */
+.app .side,
+.app .rail {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+.app .side > .side-sect,
+.app .rail > .rail-sect {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+/* Fleet section gets a sane cap so it can't push Goals off-screen on narrow viewports */
+.app .side > .side-sect:first-child > .side-sect-body {
+  max-height: clamp(140px, 28vh, 320px);
+  overflow-y: auto;
+}
+/* Filter sect (chips) is naturally short — leave it auto */
+.app .side > .side-sect-goals,
+.app .rail > .rail-sect.flex {
+  flex: 1 1 auto;
+  min-height: 120px;
+}
+.app .side > .side-sect-goals > .side-sect-body { flex: 1 1 auto; overflow-y: auto; }
+.app .rail > .rail-sect.flex > .rail-sect-body { flex: 1 1 auto; overflow-y: auto; }
+
+.side-sect-h.sx,
+.rail-sect-h.sx {
+  cursor: pointer;
+  display: flex; align-items: center; gap: 6px;
+  padding: 9px var(--sp-3) 6px;
+  user-select: none;
+  font: 600 9px/1 var(--font-mono);
+  letter-spacing: var(--track-caps, .14em);
+  text-transform: uppercase;
+  color: var(--color-fg-muted);
+  background: rgba(255,255,255,.012);
+}
+.side-sect-h.sx:hover,
+.rail-sect-h.sx:hover {
+  color: var(--color-fg-primary);
+  background: rgba(180,140,60,.05);
+}
+.side-sect-h.sx .sx-chev,
+.rail-sect-h.sx .sx-chev {
+  display: inline-block; width: 10px;
+  text-align: center; font-size: 9px;
+  color: var(--color-fg-muted);
+  flex: none;
+}
+.side-sect-h.sx:hover .sx-chev,
+.rail-sect-h.sx:hover .sx-chev { color: var(--brass-1, #f0c674); }
+.side-sect-h.sx .sx-lbl,
+.rail-sect-h.sx .sx-lbl { flex: 1; }
+.side-sect-h.sx .count,
+.rail-sect-h.sx .count {
+  color: var(--color-fg-disabled);
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  font-size: 10px;
+}
+.side-sect-h.sx .sx-rail,
+.rail-sect-h.sx .sx-rail {
+  margin-left: 6px;
+  width: 18px; height: 18px;
+  display: grid; place-items: center;
+  border: 1px solid transparent;
+  color: var(--color-fg-muted);
+  font-size: 12px;
+}
+.side-sect-h.sx .sx-rail:hover,
+.rail-sect-h.sx .sx-rail:hover {
+  border-color: var(--brass-3, #6b5022);
+  color: var(--brass-1, #f0c674);
+  background: rgba(180,140,60,.1);
+}
+
+/* Goals section gets remaining flex height with internal scroll */
+.side-sect-goals { flex: 1; min-height: 0; }
+.side-sect-goals .side-sect-body { flex: 1; overflow-y: auto; }
+
+/* Vertical label for collapsed sidebar/rail */
+.wx-rail-vlabel {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  height: 100%;
+  width: 100%;
+  display: flex; align-items: center; justify-content: center;
+  padding: 16px 0;
+  font: 600 9px/1 var(--font-mono);
+  letter-spacing: .25em;
+  color: var(--color-fg-muted);
+  cursor: pointer;
+  text-transform: uppercase;
+}
+.wx-rail-vlabel:hover { color: var(--brass-1, #f0c674); }
+.app .side.wx-collapsed,
+.app .rail.wx-collapsed { width: 36px; min-width: 36px; cursor: pointer; }
+.app .side.wx-collapsed { border-right: 1px solid var(--color-border-strong); }
+.app .rail.wx-collapsed { border-left: 1px solid var(--color-border-strong); }
+
+/* App grid must collapse its track widths to match the actual collapsed
+   width of side/rail (36px), otherwise a phantom gap appears between the
+   thin rail and the central plane. */
+.app:has(> .side.wx-collapsed):not(:has(> .rail.wx-collapsed)) {
+  grid-template-columns: 36px 1fr var(--w-rail);
+}
+.app:has(> .rail.wx-collapsed):not(:has(> .side.wx-collapsed)) {
+  grid-template-columns: var(--w-side) 1fr 36px;
+}
+.app:has(> .side.wx-collapsed):has(> .rail.wx-collapsed) {
+  grid-template-columns: 36px 1fr 36px;
+}
+
+/* ═══════════ KPI SPOTLIGHT ═══════════ */
+.kpi-cell.spotlight {
+  border-right: 1px solid var(--brass-3, #6b5022);
+  background: linear-gradient(180deg, rgba(180,140,60,.10), rgba(180,140,60,.02));
+  position: relative;
+  padding-left: 14px;
+}
+.kpi-cell.spotlight::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 8px; bottom: 8px;
+  width: 3px;
+  background: var(--brass-1, #f0c674);
+}
+.kpi-cell.spotlight.urgent::before { background: var(--err-fg, #d04848); animation: kpi-pulse 1.6s ease-in-out infinite; }
+.kpi-cell.spotlight .kpi-l {
+  color: var(--brass-1, #f0c674);
+  font-weight: 700;
+  letter-spacing: .12em;
+}
+.kpi-cell.spotlight.urgent .kpi-l { color: var(--err-fg, #d04848); }
+@keyframes kpi-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: .35; }
+}
+
+/* ═══════════ COMPOSER HISTORY ═══════════ */
+.compose-hist {
+  display: flex; align-items: center;
+  gap: 8px;
+  margin: 0 8px 0 4px;
+  max-width: 380px;
+  overflow: hidden;
+  flex: 0 1 auto;
+}
+.compose-hist .hb {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 2px 6px;
+  border: 1px solid var(--color-border-default);
+  background: rgba(255,255,255,.02);
+  font: 9px/1.4 var(--font-mono);
+  color: var(--color-fg-muted);
+  white-space: nowrap;
+  max-width: 130px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.compose-hist .hb.err { border-color: rgba(208,72,72,.4); color: var(--err-fg, #d04848); }
+.compose-hist .hb.ok:hover  { border-color: var(--brass-3, #6b5022); color: var(--color-fg-primary); }
+.compose-hist .hb .ht { color: var(--color-fg-disabled); }
+.compose-hist .hb .hk { color: var(--brass-1, #f0c674); font-weight: 600; }
+.compose-hist .hb .hc { overflow: hidden; text-overflow: ellipsis; }
+
+
+/* ═══════════════ IDE v3 (Phase B-C) ═══════════════ */
+/* IDE Plane re-design: drawer hint button + tightened modebar +
+   body without bottom terminal grid row (drawer handles it). */
+.ide-v3-body {
+  /* override v2's two-row grid (which had a terminal row) */
+  grid-template-rows: minmax(0, 1fr) !important;
+}
+.ide-v3-body.wide { grid-template-rows: minmax(0, 1fr) !important; }
+
+.ide-v3-modebar .ide-v2-branch .meta {
+  color: var(--color-fg-muted);
+  font-size: 10px;
+  letter-spacing: .04em;
+}
+
+.ide-v3-drawer-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  background: var(--color-bg-panel-alt);
+  border: 1px solid var(--color-border-default);
+  color: var(--color-fg-muted);
+  font: 10px/1.4 var(--font-mono);
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  border-radius: 0;
+}
+.ide-v3-drawer-hint:hover {
+  color: var(--brass-1, #f0c674);
+  border-color: var(--brass-3, #6b5022);
+  background: rgba(180,140,60,.08);
+}

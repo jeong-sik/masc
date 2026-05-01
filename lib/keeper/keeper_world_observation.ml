@@ -1009,7 +1009,7 @@ let keeper_cycle_decision
           if should_run
           then
             provider_cooldown_remaining_sec
-              ~cascade_name:(Keeper_cascade_profile.Runtime_name meta.cascade_name)
+              ~cascade_name:(Keeper_cascade_profile.runtime_name_of_string meta.cascade_name)
           else None
         in
         let provider_cooldown_fail_open =

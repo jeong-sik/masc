@@ -123,6 +123,28 @@ let apply_base_path_defaults ~base_path
       }
   | _ -> credential
 
+let credential_create_preflight ~base_path
+    (credential : Repo_manager_types.credential) =
+  if String.equal credential.id Credential_store.default_credential.id then
+    Error
+      (`Already_exists
+        (Printf.sprintf "Credential already exists: %s" credential.id))
+  else
+    match Credential_store.load_all ~base_path with
+    | Error msg -> Error (`Load_failed msg)
+    | Ok credentials ->
+        if
+          List.exists
+            (fun (c : Repo_manager_types.credential) ->
+              String.equal c.id credential.id)
+            credentials
+        then
+          Error
+            (`Already_exists
+              (Printf.sprintf "Credential already exists: %s"
+                 credential.id))
+        else Ok ()
+
 let add_routes router =
   router
   |> Http.Router.get "/api/v1/credentials" (fun request reqd ->
@@ -241,82 +263,109 @@ let add_routes router =
                        let credential =
                          apply_base_path_defaults ~base_path credential
                        in
-                       match oauth_method with
-                       | "web" -> (
-                           match Credential_store.add ~base_path credential with
-                           | Error msg -> response `Bad_request msg
-                           | Ok cred ->
-                               Http.Response.json ~request:req
-                                 (Yojson.Safe.to_string (credential_json cred))
-                                 reqd)
-                       | "with_token" -> (
-                           match token_opt with
-                           | None ->
-                               response `Bad_request
-                                 "with_token oauth_method requires a \
-                                  \"token\" field"
-                           | Some token -> (
-                               match credential.gh_config_dir with
-                               | None ->
-                                   response `Bad_request
-                                     "with_token oauth_method requires \
-                                      gh_config_dir or a server-derived \
-                                      default"
-                               | Some dir -> (
-                                   match
-                                     Credential_materializer
-                                     .provision_via_with_token
-                                       ~credential_id:credential.id
-                                       ~identity_label:credential.username
-                                       ~gh_config_dir:dir ~token ()
-                                   with
-                                   | Error msg -> response `Bad_request msg
-                                   | Ok _state -> (
-                                       (* RFC-0019 PR-C F-1 gate
-                                          (permissive): emit the
-                                          gate_warned counter when the
-                                          freshly-provisioned bundle's
-                                          token fingerprint matches the
-                                          operator ambient `gh auth
-                                          token`.  Operator can trace
-                                          credentials that share their
-                                          PAT via Prometheus before
-                                          PR-D ramps the gate to strict.
-                                          Never blocks materialisation. *)
-                                       (match
+                       (match
+                          credential_create_preflight ~base_path
+                            credential
+                        with
+                        | Error (`Load_failed msg) ->
+                            response `Internal_server_error msg
+                        | Error (`Already_exists msg) ->
+                            response `Bad_request msg
+                        | Ok () -> (
+                            match oauth_method with
+                            | "web" -> (
+                                match
+                                  Credential_store.add ~base_path
+                                    credential
+                                with
+                                | Error msg -> response `Bad_request msg
+                                | Ok cred ->
+                                    Http.Response.json ~request:req
+                                      (Yojson.Safe.to_string
+                                         (credential_json cred))
+                                      reqd)
+                            | "with_token" -> (
+                                match token_opt with
+                                | None ->
+                                    response `Bad_request
+                                      "with_token oauth_method requires a \
+                                       \"token\" field"
+                                | Some token -> (
+                                    match credential.gh_config_dir with
+                                    | None ->
+                                        response `Bad_request
+                                          "with_token oauth_method \
+                                           requires gh_config_dir or a \
+                                           server-derived default"
+                                    | Some dir -> (
+                                        match
                                           Credential_materializer
-                                          .f1_gate_check
-                                            ~credential_id:credential.id
-                                            ~gh_config_dir:dir
+                                          .provision_via_with_token
+                                            ~credential_id:
+                                              credential.id
+                                            ~identity_label:
+                                              credential.username
+                                            ~gh_config_dir:dir ~token
+                                            ()
                                         with
-                                        | Credential_materializer
-                                          .F1_shared_with_operator ->
-                                            Prometheus.inc_counter
-                                              "keeper_credential_provider_gate_warned_total"
-                                              ~labels:
-                                                [ ("credential_id",
-                                                   credential.id);
-                                                  ("scope",
-                                                   "shared_with_operator") ]
-                                              ()
-                                        | F1_distinct | F1_skipped _ ->
-                                            ());
-                                       match
-                                         Credential_store.add
-                                           ~base_path credential
-                                       with
-                                       | Error msg -> response `Bad_request msg
-                                       | Ok cred ->
-                                           Http.Response.json ~request:req
-                                             (Yojson.Safe.to_string
-                                                (credential_json cred))
-                                             reqd))))
-                       | other ->
-                           response `Bad_request
-                             (Printf.sprintf
-                                "unknown oauth_method: %S; expected \
-                                 \"web\" or \"with_token\""
-                                other))))
+                                        | Error msg ->
+                                            response `Bad_request msg
+                                        | Ok _state -> (
+                                            (* RFC-0019 PR-C F-1 gate
+                                               (permissive): emit the
+                                               gate_warned counter when
+                                               the freshly-provisioned
+                                               bundle's token fingerprint
+                                               matches the operator
+                                               ambient `gh auth token`.
+                                               Operator can trace
+                                               credentials that share
+                                               their PAT via Prometheus
+                                               before PR-D ramps the gate
+                                               to strict. Never blocks
+                                               materialisation. *)
+                                            (match
+                                               Credential_materializer
+                                               .f1_gate_check
+                                                 ~credential_id:
+                                                   credential.id
+                                                 ~gh_config_dir:dir
+                                             with
+                                             | Credential_materializer
+                                               .F1_shared_with_operator ->
+                                                 Prometheus.inc_counter
+                                                   "keeper_credential_provider_gate_warned_total"
+                                                   ~labels:
+                                                     [
+                                                       ( "credential_id",
+                                                         credential.id );
+                                                       ( "scope",
+                                                         "shared_with_operator"
+                                                       );
+                                                     ]
+                                                   ()
+                                             | F1_distinct
+                                             | F1_skipped _ ->
+                                                 ());
+                                            match
+                                              Credential_store.add
+                                                ~base_path credential
+                                            with
+                                            | Error msg ->
+                                                response `Bad_request msg
+                                            | Ok cred ->
+                                                Http.Response.json
+                                                  ~request:req
+                                                  (Yojson.Safe.to_string
+                                                     (credential_json
+                                                        cred))
+                                                  reqd))))
+                            | other ->
+                                response `Bad_request
+                                  (Printf.sprintf
+                                     "unknown oauth_method: %S; expected \
+                                      \"web\" or \"with_token\""
+                                     other))))))
          request reqd)
   |> Http.Router.add ~path:("PREFIX:/api/v1/credentials/")
        ~methods:[`DELETE]

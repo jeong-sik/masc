@@ -20,17 +20,63 @@ open Repo_manager_types
 let now_unix_ms () =
   Int64.of_float (Unix.gettimeofday () *. 1000.0)
 
-(** Run [gh auth status] against the supplied [GH_CONFIG_DIR] and
-    return whether it succeeded.  The implementation runs synchronously
-    via [Unix.system] for now; PR-C will move it to [Process_eio.run_argv]
-    once the lifecycle hooks land in the keeper-side path. *)
-let gh_auth_status_ok ~gh_config_dir =
-  let cmd =
-    Printf.sprintf
-      "GH_CONFIG_DIR=%s gh auth status >/dev/null 2>&1"
-      (Filename.quote gh_config_dir)
+let close_fd_noerr fd =
+  try Unix.close fd with Unix.Unix_error _ -> ()
+
+let env_key kv =
+  match String.index_opt kv '=' with
+  | None -> kv
+  | Some i -> String.sub kv 0 i
+
+let scrubbed_gh_env_key = function
+  | "GH_CONFIG_DIR"
+  | "GH_TOKEN"
+  | "GITHUB_TOKEN"
+  | "GH_ENTERPRISE_TOKEN"
+  | "GITHUB_ENTERPRISE_TOKEN"
+  | "GH_PROMPT_DISABLED"
+  | "GIT_TERMINAL_PROMPT" ->
+      true
+  | _ -> false
+
+let gh_bundle_env ~gh_config_dir =
+  let inherited =
+    Unix.environment ()
+    |> Array.to_list
+    |> List.filter (fun kv -> not (scrubbed_gh_env_key (env_key kv)))
   in
-  match Unix.system cmd with Unix.WEXITED 0 -> true | _ -> false
+  Array.of_list
+    (inherited
+     @ [
+         "GH_CONFIG_DIR=" ^ gh_config_dir;
+         "GIT_TERMINAL_PROMPT=0";
+         "GH_PROMPT_DISABLED=1";
+       ])
+
+(** Run [gh auth status] against the supplied [GH_CONFIG_DIR] and
+    return whether it succeeded.  The child process receives a
+    bundle-scoped environment only, so ambient GH_TOKEN/GITHUB_TOKEN
+    values cannot make a stale bundle look materialized. *)
+let gh_auth_status_ok ~gh_config_dir =
+  let devnull_in = Unix.openfile "/dev/null" [ Unix.O_RDONLY ] 0 in
+  let devnull_out = Unix.openfile "/dev/null" [ Unix.O_WRONLY ] 0o644 in
+  let pid =
+    try
+      Some
+        (Unix.create_process_env "gh"
+           [| "gh"; "auth"; "status" |]
+           (gh_bundle_env ~gh_config_dir)
+           devnull_in devnull_out devnull_out)
+    with Unix.Unix_error _ -> None
+  in
+  close_fd_noerr devnull_in;
+  close_fd_noerr devnull_out;
+  match pid with
+  | None -> false
+  | Some pid -> (
+      match snd (Unix.waitpid [] pid) with
+      | Unix.WEXITED 0 -> true
+      | _ -> false)
 
 (** Compute the new state for [gh_config_dir] without writing anywhere.
     Pure with respect to credential records; reads filesystem + invokes
@@ -308,6 +354,10 @@ let rec mkdir_p path mode =
       [/dev/null] so partial-failure messages from [gh] cannot
       accidentally surface a user-supplied token.
     - [gh_config_dir] is rejected if it contains a [".."] segment.
+    - [gh] receives only bundle-scoped GitHub auth env and is forced to
+      [--insecure-storage], so the token is written into
+      [GH_CONFIG_DIR/hosts.yml] instead of an operator keyring that a
+      keeper container cannot mount.
     - The resulting bundle is verified by [verify_state] before the
       function returns; the caller can rely on the returned [state]
       reflecting the actual on-disk outcome.
@@ -343,17 +393,12 @@ let provision_via_with_token ?credential_id ?identity_label
           let devnull_out =
             Unix.openfile "/dev/null" [ Unix.O_WRONLY ] 0o644
           in
-          let env =
-            Array.append (Unix.environment ())
-              [|
-                "GH_CONFIG_DIR=" ^ gh_config_dir;
-                "GIT_TERMINAL_PROMPT=0";
-              |]
-          in
+          let env = gh_bundle_env ~gh_config_dir in
           let argv =
             [|
               "gh"; "auth"; "login";
               "--with-token";
+              "--insecure-storage";
               "--hostname"; "github.com";
               "--git-protocol"; "https";
             |]

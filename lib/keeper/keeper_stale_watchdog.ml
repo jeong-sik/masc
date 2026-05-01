@@ -122,6 +122,23 @@ let has_recent_skip_observation ~now ~threshold
       reasons <> [] && now -. ts <= threshold
   | None -> false
 
+let pending_oas_timeout_budget_count
+    (entry : Keeper_registry.registry_entry) : int option =
+  let is_timeout_budget_observation_reason reason =
+    List.exists
+      (String.equal reason)
+      Keeper_heartbeat_loop.oas_timeout_budget_observation_reasons
+  in
+  let has_timeout_observation =
+    match entry.last_skip_observation with
+    | Some (_, reasons) ->
+        List.exists is_timeout_budget_observation_reason reasons
+    | None -> false
+  in
+  match entry.last_failure_reason, has_timeout_observation with
+  | Some (Keeper_registry.Oas_timeout_budget_loop { count }), true -> Some count
+  | _ -> None
+
 let () =
   Prometheus.register_counter
     ~name:"masc_keeper_stale_termination_by_class_total"
@@ -132,6 +149,15 @@ let () =
        only the keeper label — this counter adds the class dimension \
        so dashboards can attribute kills to root cause without \
        re-parsing the reason_desc string.  Labels: keeper, class."
+    ()
+
+let () =
+  Prometheus.register_counter
+    ~name:"masc_keeper_oas_timeout_budget_watchdog_termination_total"
+    ~help:
+      "Total watchdog terminations that preserved an unresolved \
+       oas_timeout_budget failure reason instead of reclassifying the \
+       keeper as an idle stale stall. Labels: keeper."
     ()
 
 (* #10765 phase 2: fleet-wide batch termination detection.
@@ -261,6 +287,23 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                || now -. !last_broadcast_ts > threshold
              in
              if stale && cooldown_ok then begin
+               match pending_oas_timeout_budget_count entry with
+               | Some count when idle_stale ->
+                 let stall_seconds = now -. last_turn in
+                 Keeper_registry.set_failure_reason ~base_path meta.name
+                   (Some (Keeper_registry.Oas_timeout_budget_loop { count }));
+                 (* tla-lint: allow-mutation: fiber signal — stop the keeper
+                    through the provider-timeout path, preserving the typed
+                    root cause for supervisor auto-pause. *)
+                 Atomic.set reg.fiber_stop true;
+                 Prometheus.inc_counter
+                   "masc_keeper_oas_timeout_budget_watchdog_termination_total"
+                   ~labels:[ ("keeper", meta.name) ]
+                   ();
+                 Log.Keeper.error
+                   "%s: watchdog terminating fiber (oas_timeout_budget unresolved after idle %.0fs; count=%d; preserving provider timeout root cause) [cascade=%s]"
+                   meta.name stall_seconds count meta.cascade_name
+               | _ ->
                (* #10940 follow-up: surface the most recent skip reasons
                   alongside [idle %.0fs] so operators can tell whether
                   the kill targeted a *stuck* fiber or a *deliberately

@@ -58,6 +58,7 @@ const PHASE_STYLES: Record<KeeperPhase, PhaseStyle> = {
   Crashed:    { label: '비정상종료',   color: 'var(--bad-light)',  bg: 'var(--bad-10)',    border: 'var(--bad-20)',     glow: STRONG_GLOW,   icon: '✕' },
   Restarting: { label: '재시작중',     color: 'var(--color-accent-fg)',     bg: 'var(--accent-10)', border: 'var(--accent-20)',  glow: SOFT_GLOW,     icon: '↺' },
   Dead:       { label: '종료',         color: 'var(--bad-light)',  bg: 'var(--bad-10)',    border: 'var(--bad-20)',     glow: 'none',        icon: '✦' },
+  Zombie:     { label: '좀비',         color: 'var(--bad-light)',  bg: 'var(--bad-10)',    border: 'var(--bad-20)',     glow: STRONG_GLOW,   icon: '☠' },
 }
 
 const BUFFER_PHASES = new Set<string>(['Failing', 'Overflowed', 'Compacting', 'HandingOff', 'Draining', 'Restarting'])
@@ -67,7 +68,7 @@ function getPhaseStyle(phase: KeeperPhase | string | null | undefined): PhaseSty
   return PHASE_STYLES[phase as KeeperPhase] ?? PHASE_STYLES.Offline
 }
 
-/** Phase badge — color-coded pill showing 12-state lifecycle phase. */
+/** Phase badge — color-coded pill showing 13-state lifecycle phase. */
 export function KeeperPhaseBadge({ phase, compact }: { phase?: KeeperPhase | string | null; compact?: boolean }) {
   const style = getPhaseStyle(phase)
   const isBuffer = BUFFER_PHASES.has(phase ?? '')

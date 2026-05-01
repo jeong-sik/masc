@@ -27,6 +27,19 @@ type agent_reputation = {
   accountability_source: string; (** direct_agent | canonical_keeper_fallback | none *)
   accountability_source_label: string; (** Operator-facing provenance label. *)
   overall_score: float;       (** Weighted composite after accountability penalty, 0.0-1.0 *)
+  (* v2 multi-dimensional scores *)
+  execution_reliability: float;
+  (** Tool-call success rate from the v2 reputation ledger. 0.0–1.0.
+      Defaults to 1.0 when no v2 ledger events exist. *)
+  goal_adherence: float;
+  (** Proportion of completed goals that were on-topic and within budget. 0.0–1.0.
+      Defaults to 1.0 when no v2 ledger events exist. *)
+  safety_compliance: float;
+  (** Penalty-adjusted safety score; decreases with sandbox violations. 0.0–1.0.
+      Defaults to 1.0 when no v2 ledger events exist. *)
+  autonomy_level: string;
+  (** Derived operational envelope: "restricted" | "standard" | "elevated" | "full".
+      Advisory only until calibration Phase 5 is complete. *)
 }
 
 val agent_reputation_to_yojson : agent_reputation -> Yojson.Safe.t

@@ -26,6 +26,16 @@ type agent_reputation = {
   accountability_source: string; [@default "none"]
   accountability_source_label: string; [@default "No accountability history"]
   overall_score: float; [@default 0.0]
+  (* v2 multi-dimensional scores — additive fields; absent in v1 records
+     are interpreted as the neutral default (1.0 for rates, "standard" for level). *)
+  execution_reliability: float; [@default 1.0]
+  (** Tool-call success rate from the v2 ledger. 0.0–1.0. *)
+  goal_adherence: float; [@default 1.0]
+  (** Proportion of goal completions that were on-topic and within budget. 0.0–1.0. *)
+  safety_compliance: float; [@default 1.0]
+  (** Penalty-adjusted safety score; decreases with each sandbox violation. 0.0–1.0. *)
+  autonomy_level: string; [@default "standard"]
+  (** Derived autonomy envelope: "restricted" | "standard" | "elevated" | "full". *)
 } [@@deriving yojson { strict = false }]
 
 (** {1 Defaults} *)
@@ -49,6 +59,10 @@ let default_reputation ~(agent_name : string) : agent_reputation =
     accountability_source = "none";
     accountability_source_label = "No accountability history";
     overall_score = 0.0;
+    execution_reliability = 1.0;
+    goal_adherence = 1.0;
+    safety_compliance = 1.0;
+    autonomy_level = "standard";
   }
 
 (** {1 JSON Serialization}
@@ -225,6 +239,9 @@ let accountability_metrics (config : Coord.config) ~(agent_name : string) =
 
 (** {1 Main Computation} *)
 
+(** Default window for v2 ledger metrics: 14 days matches accountability window. *)
+let v2_ledger_window_days = 14
+
 let compute_reputation (config : Coord.config) ~(agent_name : string)
     : agent_reputation =
   let (tasks_claimed, tasks_completed) =
@@ -258,6 +275,23 @@ let compute_reputation (config : Coord.config) ~(agent_name : string)
       ~response_rate ~board_posts ~board_comments
     *. clamp01 accountability_score
   in
+  (* v2: pull multi-dimensional metrics from the reputation ledger. *)
+  let v2_metrics =
+    (try
+       Reputation_ledger_v2.compute_ledger_metrics config
+         ~agent_id:agent_name ~window_days:v2_ledger_window_days
+     with
+     | Eio.Cancel.Cancelled _ as e -> raise e
+     | _exn ->
+       Reputation_ledger_v2.default_ledger_metrics)
+  in
+  let autonomy =
+    Reputation_autonomy.compute_autonomy_level
+      ~execution_reliability:v2_metrics.Reputation_ledger_v2.execution_reliability
+      ~goal_adherence:v2_metrics.Reputation_ledger_v2.goal_adherence
+      ~safety_compliance:v2_metrics.Reputation_ledger_v2.safety_compliance
+      ~accountability_score:(clamp01 accountability_score)
+  in
   { agent_name;
     tasks_completed; tasks_claimed; completion_rate;
     mentions_received; mentions_responded; response_rate;
@@ -271,4 +305,8 @@ let compute_reputation (config : Coord.config) ~(agent_name : string)
     accountability_source;
     accountability_source_label;
     overall_score;
+    execution_reliability = v2_metrics.Reputation_ledger_v2.execution_reliability;
+    goal_adherence = v2_metrics.Reputation_ledger_v2.goal_adherence;
+    safety_compliance = v2_metrics.Reputation_ledger_v2.safety_compliance;
+    autonomy_level = Reputation_autonomy.autonomy_level_to_string autonomy;
   }

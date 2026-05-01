@@ -1422,3 +1422,121 @@ let provider_stats_to_json (s : provider_stats) : Yojson.Safe.t =
     ; ("p95_latency_ms", opt_float s.ps_p95_latency_ms)
     ; ("total_cost_usd", opt_float s.ps_total_cost_usd)
     ]
+
+(* ── Cost & Latency aggregator ─────────────────────────────
+   Composes the O4 cost-latency payload consumed by the
+   /api/v1/dashboard/cost-latency endpoint.  All raw entries
+   are read once; per-agent stats, the provider×model cost
+   matrix, the latency histogram, and the global p50/p95 are
+   derived from that single pass. *)
+
+let compute_cost_latency_json ~base_path ~window_minutes : Yojson.Safe.t =
+  let since_unix = Time_compat.now () -. (Float.of_int window_minutes *. 60.0) in
+  let entries = read_all_entries ~base_path ~since_unix in
+  let model_stats_list = aggregate_by_model entries in
+
+  (* per-agent rows — sorted by cost descending, skip zero-signal rows *)
+  let per_agent =
+    model_stats_list
+    |> List.filter (fun (m : model_stats) ->
+         (Option.value ~default:0.0 m.total_cost_usd) > 0.0
+         || (Option.value ~default:0 m.total_input_tokens) > 0
+         || (Option.value ~default:0 m.total_output_tokens) > 0)
+    |> List.sort (fun a b ->
+         Float.compare
+           (Option.value ~default:0.0 b.total_cost_usd)
+           (Option.value ~default:0.0 a.total_cost_usd))
+    |> List.map (fun (m : model_stats) ->
+         `Assoc
+           [ ("agent", `String m.model_id)
+           ; ("in_tok", `Int (Option.value ~default:0 m.total_input_tokens))
+           ; ("out_tok", `Int (Option.value ~default:0 m.total_output_tokens))
+           ; ("cost", `Float (Option.value ~default:0.0 m.total_cost_usd))
+           ; ("p50_ms", `Float (Option.value ~default:0.0 m.p50_latency_ms))
+           ; ("p95_ms", `Float (Option.value ~default:0.0 m.p95_latency_ms))
+           ])
+  in
+
+  (* provider × model cost matrix *)
+  let providers =
+    model_stats_list
+    |> List.filter_map (fun (m : model_stats) -> m.provider)
+    |> List.sort_uniq String.compare
+  in
+  let model_ids =
+    model_stats_list
+    |> List.map (fun (m : model_stats) -> m.model_id)
+  in
+  let cost_map : (string * string, float) Hashtbl.t = Hashtbl.create 32 in
+  List.iter
+    (fun (m : model_stats) ->
+      match m.provider with
+      | Some p ->
+          Hashtbl.replace cost_map (p, m.model_id)
+            (Option.value ~default:0.0 m.total_cost_usd)
+      | None -> ())
+    model_stats_list;
+  let grid =
+    List.map
+      (fun provider ->
+        `List
+          (List.map
+             (fun model_id ->
+               let cost =
+                 match Hashtbl.find_opt cost_map (provider, model_id) with
+                 | Some c -> c
+                 | None -> 0.0
+               in
+               `Float cost)
+             model_ids))
+      providers
+  in
+
+  (* global p50/p95 from all entry latencies *)
+  let all_latencies =
+    entries
+    |> List.filter_map (fun (e : raw_entry) -> e.latency_ms)
+    |> Array.of_list
+  in
+  Array.sort Float.compare all_latencies;
+  let global_p50 =
+    if Array.length all_latencies = 0 then 0.0
+    else percentile all_latencies 50.0
+  in
+  let global_p95 =
+    if Array.length all_latencies = 0 then 0.0
+    else percentile all_latencies 95.0
+  in
+
+  (* total cost across all models *)
+  let total_cost_usd =
+    List.fold_left
+      (fun acc (m : model_stats) ->
+        acc +. Option.value ~default:0.0 m.total_cost_usd)
+      0.0 model_stats_list
+  in
+
+  let latency_buckets = latency_histogram entries in
+  let latency_bucket_to_json (b : latency_bucket) =
+    `Assoc
+      [ ("lo", `Int b.lo_ms)
+      ; ("hi", match b.hi_ms with Some n -> `Int n | None -> `Null)
+      ; ("n", `Int b.count)
+      ]
+  in
+
+  `Assoc
+    [ ("perAgent", `List per_agent)
+    ; ( "matrix",
+        `Assoc
+          [ ("providers", `List (List.map (fun p -> `String p) providers))
+          ; ("models", `List (List.map (fun m -> `String m) model_ids))
+          ; ("grid", `List grid)
+          ] )
+    ; ("latencyBuckets", `List (List.map latency_bucket_to_json latency_buckets))
+    ; ("p50", `Float global_p50)
+    ; ("p95", `Float global_p95)
+    ; ("total_cost_usd", `Float total_cost_usd)
+    ; ("window_minutes", `Int window_minutes)
+    ; ("generated_at", `Float (Time_compat.now ()))
+    ]

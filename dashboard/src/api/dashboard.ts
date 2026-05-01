@@ -2894,3 +2894,107 @@ export function fetchAuditLedger(
     signal: opts?.signal,
   })
 }
+
+// ── O4 Cost & Latency aggregator ─────────────────────────────────────
+// Consumes /api/v1/dashboard/cost-latency and exposes the composed
+// payload required by the CostPerAgent / CostMatrix / CostLatency
+// frontend components (Phase 2 spec cb-group-f.jsx:291-429).
+
+export interface CostPerAgentRow {
+  agent: string
+  in_tok: number
+  out_tok: number
+  cost: number
+  p50_ms: number
+  p95_ms: number
+}
+
+export interface CostMatrix {
+  providers: string[]
+  models: string[]
+  grid: number[][]
+}
+
+export interface CostLatencyBucket {
+  lo: number
+  hi: number | null
+  n: number
+}
+
+export interface CostLatencyResponse {
+  perAgent: CostPerAgentRow[]
+  matrix: CostMatrix
+  latencyBuckets: CostLatencyBucket[]
+  p50: number
+  p95: number
+  total_cost_usd: number
+  window_minutes: number
+  generated_at: number
+}
+
+function decodeCostPerAgentRow(raw: unknown): CostPerAgentRow | null {
+  if (!isRecord(raw)) return null
+  const agent = asString(raw.agent)
+  if (!agent) return null
+  return {
+    agent,
+    in_tok: asNumber(raw.in_tok) ?? 0,
+    out_tok: asNumber(raw.out_tok) ?? 0,
+    cost: asNumber(raw.cost) ?? 0,
+    p50_ms: asNumber(raw.p50_ms) ?? 0,
+    p95_ms: asNumber(raw.p95_ms) ?? 0,
+  }
+}
+
+function decodeCostMatrix(raw: unknown): CostMatrix | null {
+  if (!isRecord(raw)) return null
+  const providers = asStringArray(raw.providers)
+  const models = asStringArray(raw.models)
+  const grid = Array.isArray(raw.grid)
+    ? (raw.grid as unknown[]).map(row =>
+        Array.isArray(row)
+          ? (row as unknown[]).map(v => asNumber(v) ?? 0)
+          : []
+      )
+    : []
+  return { providers, models, grid }
+}
+
+function decodeCostLatencyResponse(raw: unknown): CostLatencyResponse | null {
+  if (!isRecord(raw)) return null
+  const matrix = decodeCostMatrix(raw.matrix)
+  if (!matrix) return null
+  return {
+    perAgent: asRecordArray(raw.perAgent)
+      .map(decodeCostPerAgentRow)
+      .filter((r): r is CostPerAgentRow => r !== null),
+    matrix,
+    latencyBuckets: Array.isArray(raw.latencyBuckets)
+      ? (raw.latencyBuckets as unknown[])
+          .filter(isRecord)
+          .map(b => ({
+            lo: asNumber(b.lo) ?? 0,
+            hi: b.hi == null ? null : (asNumber(b.hi) ?? null),
+            n: asNumber(b.n) ?? 0,
+          }))
+      : [],
+    p50: asNumber(raw.p50) ?? 0,
+    p95: asNumber(raw.p95) ?? 0,
+    total_cost_usd: asNumber(raw.total_cost_usd) ?? 0,
+    window_minutes: asNumber(raw.window_minutes) ?? 1440,
+    generated_at: asNumber(raw.generated_at) ?? 0,
+  }
+}
+
+export async function fetchCostLatency(
+  windowMinutes = 1440,
+  opts?: AbortableRequestOptions,
+): Promise<CostLatencyResponse> {
+  const raw = await get<Record<string, unknown>>(
+    `/api/v1/dashboard/cost-latency?window=${windowMinutes}`,
+    { signal: opts?.signal },
+  )
+  const decoded = decodeCostLatencyResponse(raw)
+  if (!decoded) throw new Error('유효하지 않은 cost-latency payload')
+  return decoded
+}

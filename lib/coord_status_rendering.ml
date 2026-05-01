@@ -1,3 +1,21 @@
+open Base
+module Format = Stdlib.Format
+module Map = Stdlib.Map
+module Set = Stdlib.Set
+module Queue = Stdlib.Queue
+module Hashtbl = Stdlib.Hashtbl
+module Mutex = Stdlib.Mutex
+module Option = Stdlib.Option
+module Result = Stdlib.Result
+module Sys = Stdlib.Sys
+module Filename = Stdlib.Filename
+module List = Stdlib.List
+module Array = Stdlib.Array
+module String = Stdlib.String
+module Char = Stdlib.Char
+module Int = Stdlib.Int
+module Float = Stdlib.Float
+
 (** Coord_status_rendering - Logic for masc_status rendering *)
 
 open Types
@@ -6,7 +24,7 @@ open Coord_types
 let bool_flag value = if value then "yes" else "no"
 
 let option_or_dash = function
-  | Some value when String.trim value <> "" -> value
+  | Some value when not (String.equal (String.trim value) "") -> value
   | _ -> "-"
 
 let take_items limit items =
@@ -77,7 +95,7 @@ let deliverable_claims_completion ~task_id deliverable =
     |> String.lowercase_ascii
     |> first_line
   in
-  normalized <> ""
+  not (String.equal normalized "")
   && (String.starts_with ~prefix:(String.lowercase_ascii task_id ^ " completed")
         normalized
       || String.starts_with ~prefix:"completed" normalized)
@@ -120,7 +138,7 @@ let status_summary_string
 
   let buf = Buffer.create 256 in
   Buffer.add_string buf (Printf.sprintf "🏢 Cluster: %s\n" effective_cluster_name);
-  if effective_cluster_name <> state.project then
+  if not (String.equal effective_cluster_name state.project) then
     Buffer.add_string buf (Printf.sprintf "📦 Project: %s\n" state.project);
   Buffer.add_string buf
     (Printf.sprintf "📍 Scope: %s (flattened)\n" current_room);
@@ -162,17 +180,18 @@ let status_summary_string
       (Printf.sprintf "🔐 Credential: required=yes | available=%s | candidates=%s\n"
          (bool_flag credential_state.credential_available)
          (String.concat "," credential_state.credential_candidates));
-  if suggested_next <> [] then
+  (match suggested_next with [] -> () | _ ->
     Buffer.add_string buf
       (Printf.sprintf "💡 Suggested next: %s\n"
-         (String.concat " -> " suggested_next));
-  if attention_items <> [] then begin
+         (String.concat " -> " suggested_next)));
+  (match attention_items with
+  | [] -> ()
+  | _ ->
     Buffer.add_string buf "\n⚠️ Attention:\n";
     List.iter
       (fun item ->
         Buffer.add_string buf (Printf.sprintf "  - %s\n" item))
-      attention_items
-  end;
+      attention_items);
   Buffer.add_string buf "📌 Players:\n";
   (match shown_agents with
   | [] ->
@@ -209,7 +228,7 @@ let status_summary_string
         (Printf.sprintf "  %s %s P%d [%s] %s (%s)\n" status_icon task.id
            task.priority status_label task.title assignee))
     shown_active_tasks;
-  if active_tasks = [] then
+  if (match active_tasks with [] -> true | _ -> false) then
     Buffer.add_string buf "  (no active tasks)\n";
   if List.length active_tasks > max_active_tasks_display then
     Buffer.add_string buf

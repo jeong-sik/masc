@@ -1,3 +1,5 @@
+open Base
+
 (** Board_dispatch — single-backend board dispatch + signal hooks.
 
     Wraps the JSONL-backed {!Board} store with: lazy initialisation,
@@ -120,9 +122,9 @@ val create_post :
   ?hearth:string ->
   ?thread_id:string ->
   unit ->
-  (Board.post, Board.board_error) result
+  (Board.post, Board.board_error) Result.t
 
-val get_post : post_id:string -> (Board.post, Board.board_error) result
+val get_post : post_id:string -> (Board.post, Board.board_error) Result.t
 
 val list_posts :
   ?visibility_filter:Board.visibility option ->
@@ -136,12 +138,12 @@ val list_posts :
   unit ->
   Board.post list
 
-val delete_post : post_id:string -> (unit, Board.board_error) result
+val delete_post : post_id:string -> (unit, Board.board_error) Result.t
 
 val set_thread_id :
   post_id:string ->
   thread_id:string ->
-  (unit, Board.board_error) result
+  (unit, Board.board_error) Result.t
 
 val search :
   query:string ->
@@ -163,15 +165,15 @@ val add_comment :
   ?parent_id:string ->
   ?ttl_hours:int ->
   unit ->
-  (Board.comment, Board.board_error) result
+  (Board.comment, Board.board_error) Result.t
 
 val get_comments :
   post_id:string ->
-  (Board.comment list, Board.board_error) result
+  (Board.comment list, Board.board_error) Result.t
 
 val get_post_and_comments :
   post_id:string ->
-  (Board.post * Board.comment list, Board.board_error) result
+  (Board.post * Board.comment list, Board.board_error) Result.t
 
 val list_comments : ?limit:int -> unit -> Board.comment list
 
@@ -181,13 +183,13 @@ val vote :
   voter:string ->
   post_id:string ->
   direction:Board.vote_direction ->
-  (int, Board.board_error) result
+  (int, Board.board_error) Result.t
 
 val vote_comment :
   voter:string ->
   comment_id:string ->
   direction:Board.vote_direction ->
-  (int, Board.board_error) result
+  (int, Board.board_error) Result.t
 
 (** {1 Karma} *)
 

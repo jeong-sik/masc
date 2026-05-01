@@ -33,6 +33,7 @@ import {
 import { ThemeSwitch } from './components/theme-switch'
 import { TransportBeacon } from './components/transport-beacon'
 import { SurfaceIcon } from './components/surface-icon'
+import { RouteLink } from './components/common/route-link'
 import { selectedAgentName } from './components/agent-detail-selection'
 import { selectedTask } from './components/goals/task-detail-selection'
 import { ToastContainer } from './components/common/toast'
@@ -195,15 +196,16 @@ export function App() {
   const currentTab = route.value.tab
   const currentView = DASHBOARD_NAV_ITEMS.find(item => item.id === currentTab)
   const currentSection = currentSectionForRoute(route.value)
+  const topbarNavItems = DASHBOARD_NAV_ITEMS.filter(item => item.id !== 'code')
 
   return html`
     <div class="flex min-h-screen h-screen flex-col overflow-hidden bg-[var(--color-bg-page)] text-[var(--color-fg-primary)]">
       <a href="#main-content" class="sr-only focus:not-sr-only focus:fixed focus:top-4 focus:left-4 focus:z-[100] focus:rounded-[var(--r-2)] focus:bg-[var(--color-bg-page)] focus:px-4 focus:py-2 focus:text-sm focus:text-[var(--color-fg-secondary)] focus:shadow-lg focus:ring-2 focus:ring-[var(--select-20)]">Skip to main content</a>
-      <header class="relative z-10 shrink-0 border-b border-[var(--color-border-default)] bg-[var(--shell-header-bg)] px-3 py-2 backdrop-blur-xl">
+      <header class="relative z-10 shrink-0 border-b border-[var(--color-border-default)] bg-[var(--shell-header-bg)] px-3 py-1.5 backdrop-blur-xl">
         <div class="absolute inset-x-0 bottom-0 h-[1px] bg-gradient-to-r from-transparent via-[var(--accent-15)] to-transparent"></div>
-        <div class="flex w-full items-center justify-between gap-3 max-[900px]:flex-col max-[900px]:items-stretch">
-          <div class="min-w-0 flex items-center gap-3">
-            <div class="flex shrink-0 items-center gap-2">
+        <div class="flex w-full items-center justify-between gap-3 max-[1080px]:flex-col max-[1080px]:items-stretch">
+          <div class="flex min-w-0 flex-1 items-center gap-3 max-[860px]:flex-wrap">
+            <div class="flex min-w-0 shrink-0 items-center gap-2.5 max-[520px]:w-full">
               <button type="button"
                 class=${`hidden max-[768px]:flex size-8 items-center justify-center rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--white-4)] text-[var(--color-fg-primary)] cursor-pointer transition-colors hover:bg-[var(--white-5)] ${ringFocusClasses({ tone: 'accent-medium', width: 2, offset: 2, offsetSurface: 'page' })}`}
                 aria-expanded=${mobileMenuOpen.value}
@@ -213,27 +215,53 @@ export function App() {
               >
                 ${mobileMenuOpen.value ? html`<${X} size=${20} />` : html`<${Menu} size=${20} />`}
               </button>
-              <div class="flex size-7 shrink-0 items-center justify-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-4)] text-[var(--select)]">
-                <${SurfaceIcon} icon=${currentView?.icon ?? 'overview'} size=${15} />
+              <div class="flex min-w-0 items-stretch overflow-hidden rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-4)]">
+                <div class="flex w-12 shrink-0 flex-col items-center justify-center border-r border-[var(--color-border-default)] bg-[rgba(198,161,91,0.08)] px-2 py-1 font-mono text-[10px] font-semibold uppercase leading-none tracking-[var(--track-caps)] text-[#e6c47a]">
+                  MASC
+                </div>
+                <div class="min-w-0 px-2.5 py-1">
+                  <div class="flex items-center gap-1.5 font-mono text-[9px] uppercase leading-none tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
+                    <span>${currentView?.label ?? 'Surface'}</span>
+                    ${currentSection && currentSection.label !== currentView?.label
+                      ? html`
+                          <span class="text-[#c6a15b]">/</span>
+                          <span class="truncate">${currentSection.label}</span>
+                        `
+                      : null}
+                  </div>
+                  <h1 class="mt-1 min-w-0 truncate text-xs font-semibold leading-tight tracking-normal text-[var(--color-fg-secondary)]">
+                    ${currentSection?.label ?? currentView?.label ?? 'Multi-Agent Namespace Console'}
+                  </h1>
+                </div>
               </div>
             </div>
 
-            <div class="min-w-0 flex flex-col justify-center">
-              ${currentSection && currentSection.label !== currentView?.label
-                ? html`
-                    <div class="mb-0.5 flex flex-wrap items-center gap-1.5 font-mono text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">
-                      <span>${currentView?.label ?? 'Home'}</span>
-                      <span>/</span>
-                    </div>
+            <nav class="min-w-0 flex-1 overflow-x-auto [scrollbar-width:none] max-[520px]:w-full" aria-label="Dashboard surfaces">
+              <div class="inline-flex min-w-max items-center gap-0.5 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--white-4)] p-0.5">
+                ${topbarNavItems.map(item => {
+                  const active = item.id === currentTab
+                  return html`
+                    <${RouteLink}
+                      tab=${item.id}
+                      params=${item.defaultParams}
+                      ariaCurrent=${active ? 'page' : undefined}
+                      title=${item.description}
+                      class=${`inline-flex h-7 items-center gap-1.5 whitespace-nowrap rounded-[4px] border px-2 font-mono text-[10px] uppercase leading-none tracking-[var(--track-caps)] transition-colors ${
+                        active
+                          ? 'border-[#c6a15b] bg-[rgba(198,161,91,0.16)] text-[#f2d58c] shadow-[inset_0_-1px_0_#c6a15b]'
+                          : 'border-transparent text-[var(--color-fg-muted)] hover:border-[var(--color-border-strong)] hover:bg-[var(--white-5)] hover:text-[var(--color-fg-secondary)]'
+                      }`}
+                    >
+                      <${SurfaceIcon} icon=${item.icon} size=${13} />
+                      <span>${item.label}</span>
+                    <//>
                   `
-                : null}
-              <h1 class="min-w-0 text-base font-semibold tracking-normal text-[var(--color-fg-secondary)] leading-tight [overflow-wrap:anywhere]">
-                ${currentSection?.label ?? currentView?.label ?? 'Multi-Agent Namespace Console'}
-              </h1>
-            </div>
+                })}
+              </div>
+            </nav>
           </div>
 
-          <div class="flex shrink-0 flex-wrap items-center justify-end gap-2">
+          <div class="flex shrink-0 flex-wrap items-center justify-end gap-2 max-[1080px]:justify-between">
             <${Suspense} fallback=${authStatusFallback()}>
               <${LazyAuthStatus} />
             <//>

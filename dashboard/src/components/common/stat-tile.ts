@@ -11,17 +11,17 @@ interface StatTileProps {
 }
 
 const VARIANT_STYLES = {
-  default: 'bg-[var(--white-4)] border-[var(--color-border-default)] text-[var(--color-fg-secondary)]',
-  gold: 'bg-[rgba(200,168,78,0.05)] border-[var(--ff-gold-10)] text-[var(--color-fg-secondary)]',
-  accent: 'bg-[var(--color-accent-soft)] border-[var(--accent-20)] text-[var(--color-fg-secondary)]',
-  warn: 'bg-[rgba(230,167,0,0.06)] border-[rgba(230,167,0,0.2)] text-[var(--color-status-warn)]',
+  default: 'bg-[var(--color-bg-elevated)] border-[var(--color-border-default)] text-[var(--color-fg-secondary)]',
+  gold: 'bg-[var(--color-brass-soft)] border-[var(--color-brass-border)] text-[var(--color-fg-secondary)]',
+  accent: 'bg-[var(--color-state-active-bg)] border-[var(--color-state-active-border)] text-[var(--color-fg-secondary)]',
+  warn: 'bg-[var(--color-warn-soft)] border-[var(--color-warn-border)] text-[var(--color-warn-fg)]',
 } as const
 
 const LABEL_STYLES = {
   default: 'text-[var(--color-fg-muted)]',
-  gold: 'text-[var(--ff-gold)]',
-  accent: 'text-[var(--color-accent-fg)]',
-  warn: 'text-[var(--color-status-warn)]',
+  gold: 'text-[var(--color-brass-fg)]',
+  accent: 'text-[var(--color-state-active-fg)]',
+  warn: 'text-[var(--color-warn-fg)]',
 } as const
 
 export function StatTile({ label, value, hint, variant = 'default' }: StatTileProps) {

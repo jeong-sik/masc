@@ -20,6 +20,38 @@ describe('Tabs', () => {
     expect(container.querySelectorAll('[role="tab"]').length).toBe(2)
   })
 
+  it('uses cockpit tab defaults when no class override is provided', () => {
+    const container = document.createElement('div')
+    render(
+      h(Tabs, { defaultValue: 'a' },
+        h(TabList, {},
+          h(Tab, { value: 'a' }, 'Tab A'),
+          h(Tab, { value: 'b' }, 'Tab B'),
+        ),
+      ),
+      container,
+    )
+    const tablist = container.querySelector('[role="tablist"]')
+    const tab = container.querySelector('[role="tab"]')
+    expect(tablist?.classList.contains('bg-[var(--color-bg-panel-alt)]')).toBe(true)
+    expect(tab?.classList.contains('aria-selected:bg-[var(--color-state-active-bg)]')).toBe(true)
+    expect(tab?.classList.contains('aria-selected:shadow-[inset_0_-1px_0_var(--color-tab-indicator)]')).toBe(true)
+  })
+
+  it('keeps caller classes as explicit tab overrides', () => {
+    const container = document.createElement('div')
+    render(
+      h(Tabs, { defaultValue: 'a' },
+        h(TabList, { class: 'custom-list' },
+          h(Tab, { value: 'a', class: 'custom-tab' }, 'Tab A'),
+        ),
+      ),
+      container,
+    )
+    expect(container.querySelector('[role="tablist"]')?.className).toBe('custom-list')
+    expect(container.querySelector('[role="tab"]')?.className).toBe('custom-tab')
+  })
+
   it('renders tabpanels', () => {
     const container = document.createElement('div')
     render(

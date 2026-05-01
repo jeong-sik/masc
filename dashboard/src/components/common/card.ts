@@ -4,6 +4,7 @@
 import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'
 import { SectionHead } from '../section-head'
+import { statusDotColor } from './status-badge'
 
 // ── Class constants (CARD_STANDARD exported for inline section usage) ──
 const CARD_BASE = 'card'
@@ -55,22 +56,18 @@ interface SectionCardProps {
 }
 
 function statusDotClass(status?: string): string {
-  switch ((status ?? '').toLowerCase()) {
-    case 'ok':
+  const normalized = (status ?? '').toLowerCase()
+  switch (normalized) {
     case 'healthy':
-    case 'active':
     case 'live':
-      return 'bg-[var(--color-status-ok)]'
-    case 'warn':
+      return statusDotColor('active')
     case 'watch':
-      return 'bg-[var(--color-status-warn)]'
-    case 'bad':
     case 'danger':
-    case 'error':
+      return statusDotColor(status === 'watch' ? 'warn' : 'bad')
     case 'offline':
-      return 'bg-[var(--color-status-err)]'
+      return statusDotColor('bad')
     default:
-      return 'bg-[var(--color-fg-muted)]'
+      return statusDotColor(normalized)
   }
 }
 

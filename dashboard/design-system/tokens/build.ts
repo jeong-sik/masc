@@ -114,13 +114,19 @@ function buildTailwindCss(): string {
   const tailwindNamed = (tok: TokenBase): string => {
     // For Tailwind v4 to expose utilities (text-*, bg-*, border-*),
     // color tokens must be prefixed with --color-. We re-prefix only
-    // those that aren't already in --color-* form. Non-color tokens
-    // pass through with their raw name.
+    // those that aren't already in --color-* form. Components also
+    // consume the raw runtime slot names (`var(--button-primary-bg)`,
+    // `var(--dialog-panel-bg)`, ...), so emit a raw alias beside the
+    // Tailwind-prefixed declaration instead of forcing callers to know
+    // about Tailwind's namespace.
     const isColorish = tok.kind === "color";
     const alreadyColorPrefixed = tok.name.startsWith("color-");
     const optedOut = TAILWIND_COLOR_PREFIX_OPTOUT.has(tok.name);
     if (isColorish && !alreadyColorPrefixed && !optedOut) {
-      return `  --color-${tok.name}: ${tok.value};`;
+      return [
+        `  --color-${tok.name}: ${tok.value};`,
+        `  --${tok.name}: var(--color-${tok.name});`,
+      ].join("\n");
     }
     return `  --${tok.name}: ${tok.value};`;
   };

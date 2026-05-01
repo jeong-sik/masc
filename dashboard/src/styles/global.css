@@ -125,20 +125,20 @@
   line-height: 1.35;
   white-space: nowrap;
   text-transform: uppercase;
-  background: var(--white-6);
+  background: var(--color-bg-elevated);
   color: var(--color-fg-muted);
-  &.active { background: var(--ok-22); color: var(--ok); }
-  &.busy { background: var(--warn-15); color: var(--warn); }
-  &.listening { background: rgba(56,189,248,0.15); color: var(--sky-400); }
-  &.idle { background: rgba(136,136,136,0.22); color: var(--state-idle); }
-  &.offline { background: rgba(85,85,85,0.22); color: var(--state-offline); }
-  &.todo { background: rgba(136,136,136,0.22); color: var(--state-idle); }
-  &.in-progress, &.in_progress { background: var(--warn-15); color: var(--warn); }
-  &.done, &.completed { background: var(--ok-22); color: var(--ok); }
-  &.running { background: var(--warn-15); color: var(--warn); }
-  &.interrupted { background: rgba(56,189,248,0.15); color: var(--sky-400); }
-  &.stopped { background: var(--slate-gray-15); color: var(--text-slate); }
-  &.error { background: rgba(251,113,133,0.15); color: var(--rose-light); }
+  &.active { background: var(--color-ok-soft); color: var(--color-ok-fg); }
+  &.busy { background: var(--color-warn-soft); color: var(--color-warn-fg); }
+  &.listening { background: var(--color-info-soft); color: var(--color-info-fg); }
+  &.idle { background: var(--color-idle-soft); color: var(--color-idle-fg); }
+  &.offline { background: var(--color-idle-soft); color: var(--color-idle-fg); }
+  &.todo { background: var(--color-idle-soft); color: var(--color-idle-fg); }
+  &.in-progress, &.in_progress { background: var(--color-warn-soft); color: var(--color-warn-fg); }
+  &.done, &.completed { background: var(--color-ok-soft); color: var(--color-ok-fg); }
+  &.running { background: var(--color-warn-soft); color: var(--color-warn-fg); }
+  &.interrupted { background: var(--color-info-soft); color: var(--color-info-fg); }
+  &.stopped { background: var(--color-idle-soft); color: var(--color-idle-fg); }
+  &.error { background: var(--color-err-soft); color: var(--color-err-fg); }
 }
 
 @utility control-textarea {

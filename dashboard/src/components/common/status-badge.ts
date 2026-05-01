@@ -1,43 +1,78 @@
 // Status indicator badge — reusable across agent/task/connection displays
 
 import { html } from 'htm/preact'
+import type { ComponentChildren } from 'preact'
 import { statusLabel } from '../../lib/status-label'
 
+type StatusBadgeTone = 'ok' | 'warn' | 'bad' | 'info' | 'neutral'
+
 interface StatusBadgeProps {
-  status: string
+  status?: string
   label?: string
+  tone?: StatusBadgeTone
+  children?: ComponentChildren
 }
 
-export function statusDotColor(status: string): string {
-  switch (status) {
+const DOT_CLASS: Record<StatusBadgeTone, string> = {
+  ok: 'bg-[var(--color-status-ok)]',
+  warn: 'bg-[var(--color-status-warn)]',
+  bad: 'bg-[var(--color-status-err)]',
+  info: 'bg-[var(--color-info-fg)]',
+  neutral: 'bg-[var(--color-status-idle)]',
+}
+
+export function statusBadgeTone(status: string): StatusBadgeTone {
+  switch (status.toLowerCase()) {
+    case 'ok':
+      return 'ok'
+    case 'warn':
+      return 'warn'
+    case 'bad':
+      return 'bad'
+    case 'info':
+      return 'info'
+    case 'neutral':
+      return 'neutral'
     case 'in_progress':
     case 'running':
-      return 'bg-[var(--color-status-warn)]'
+      return 'warn'
     case 'awaiting_verification':
-      return 'bg-[var(--color-accent-fg)]'
     case 'interrupted':
     case 'listening':
-      return 'bg-[var(--color-accent-fg)]'
+      return 'info'
     case 'inactive':
     case 'offline':
-      return 'bg-[#5f7199]'
-    case 'active':
-      return 'bg-[var(--color-status-ok)]'
-    case 'busy':
     case 'stopped':
-      return 'bg-[var(--text-slate)]'
+    case 'todo':
+      return 'neutral'
+    case 'active':
+    case 'done':
+    case 'completed':
+      return 'ok'
+    case 'busy':
+      return 'warn'
     case 'error':
-      return 'bg-[var(--color-status-err)]'
+      return 'bad'
     default:
-      return 'bg-[var(--color-fg-muted)]'
+      return 'neutral'
   }
 }
 
-export function StatusBadge({ status, label }: StatusBadgeProps) {
+export function statusDotColor(status: string): string {
+  return DOT_CLASS[statusBadgeTone(status)]
+}
+
+export function StatusBadge({ status, label, tone, children }: StatusBadgeProps) {
+  const resolvedTone = tone ?? (status != null ? statusBadgeTone(status) : 'neutral')
+  const statusClass = status ?? resolvedTone
+  const content = children ?? label ?? (status != null ? statusLabel(status) : '')
   return html`
-    <span class="border border-solid border-[var(--color-border-default)] ${status} ${status === 'offline' ? 'text-[var(--color-fg-disabled)]' : ''}">
-      <span class="size-1.5 rounded-sm inline-block ${statusDotColor(status)}"></span>
-      ${label ?? statusLabel(status)}
+    <span
+      class="status-badge border border-solid border-[var(--color-border-default)] ${statusClass} ${status === 'offline' ? 'text-[var(--color-fg-disabled)]' : ''}"
+      data-status-badge-tone=${resolvedTone}
+    >
+      <span class="size-1.5 rounded-sm inline-block ${DOT_CLASS[resolvedTone]}"></span>
+      ${content}
     </span>
   `
 }

@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
 const here = dirname(fileURLToPath(import.meta.url))
+const generatedCss = readFileSync(join(here, 'tokens.generated.css'), 'utf8')
 const variablesCss = readFileSync(join(here, 'variables.css'), 'utf8')
 const baseCss = readFileSync(join(here, 'base.css'), 'utf8')
 const appTs = readFileSync(join(here, '..', 'app.ts'), 'utf8')
@@ -23,6 +24,17 @@ function escapeRegExp(value: string): string {
 }
 
 describe('Cockpit token cascade', () => {
+  it('emits runtime aliases for Tailwind-prefixed component color slots', () => {
+    expectDeclaration(generatedCss, '--color-button-primary-bg', 'var(--accent-12)')
+    expectDeclaration(generatedCss, '--button-primary-bg', 'var(--color-button-primary-bg)')
+    expectDeclaration(generatedCss, '--color-input-bg', 'var(--white-4)')
+    expectDeclaration(generatedCss, '--input-bg', 'var(--color-input-bg)')
+    expectDeclaration(generatedCss, '--color-dialog-panel-bg', 'rgba(13,21,38,0.98)')
+    expectDeclaration(generatedCss, '--dialog-panel-bg', 'var(--color-dialog-panel-bg)')
+    expectDeclaration(generatedCss, '--color-state-idle', '#b8c0cc')
+    expectDeclaration(generatedCss, '--state-idle', 'var(--color-state-idle)')
+  })
+
   it('bridges legacy dashboard aliases to generated cockpit tokens', () => {
     expectDeclaration(variablesCss, '--bg-0', 'var(--color-bg-0)')
     expectDeclaration(variablesCss, '--text-body', 'var(--color-fg-2)')

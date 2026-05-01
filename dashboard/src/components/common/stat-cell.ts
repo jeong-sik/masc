@@ -15,8 +15,8 @@ interface StatCellProps {
 }
 
 const BG = {
-  'white-3': 'bg-[var(--white-3)]',
-  'white-4': 'bg-[var(--white-4)]',
+  'white-3': 'bg-[var(--color-bg-panel-alt)]',
+  'white-4': 'bg-[var(--color-bg-elevated)]',
 } as const
 
 const VALUE_SIZE = {
@@ -26,7 +26,7 @@ const VALUE_SIZE = {
 
 export function StatCell({ label, value, detail, tone, size = 'md', bg = 'white-4', class: className }: StatCellProps) {
   return html`
-    <div class="p-4 rounded ${BG[bg]} border border-[var(--white-6)] grid gap-1.5 ${tone ?? ''} ${className ?? ''}" role="group" aria-label="${label}: ${value}${detail != null ? ` (${detail})` : ''}">
+    <div class="p-4 rounded ${BG[bg]} border border-[var(--color-border-default)] grid gap-1.5 ${tone ?? ''} ${className ?? ''}" role="group" aria-label="${label}: ${value}${detail != null ? ` (${detail})` : ''}">
       <span class="text-3xs text-[var(--color-fg-muted)] tracking-wider uppercase font-medium">${label}</span>
       <strong class="text-[var(--color-fg-secondary)] ${VALUE_SIZE[size]} leading-tight tabular-nums">${value}</strong>
       ${detail != null ? html`<small class="text-[var(--color-fg-muted)] text-3xs leading-relaxed">${detail}</small>` : null}

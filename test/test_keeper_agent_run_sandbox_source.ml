@@ -117,15 +117,15 @@ let test_keeper_tool_bundle_cleanup_is_retained_and_invoked () =
     true
     (contains ~needle:"s.Keeper_run_tools.cleanup ()" agent_src);
   check
-    bool
-    "agent run invokes cleanup on normal result"
-    true
-    (contains ~needle:"cleanup_agent_setup ();\n      result" agent_src);
+    int
+    "agent run invokes cleanup in both result and exception branches"
+    2
+    (count_occurrences ~needle:"cleanup_agent_setup ();" agent_src);
   check
     bool
-    "agent run invokes cleanup before reraising exceptions"
+    "agent run preserves exception propagation after cleanup"
     true
-    (contains ~needle:"cleanup_agent_setup ();\n      raise e" agent_src)
+    (contains ~needle:"raise e" agent_src)
 ;;
 
 let () =

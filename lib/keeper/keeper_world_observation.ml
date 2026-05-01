@@ -857,10 +857,10 @@ let fallback_cascade_for_provider_cooldown
   else Some Keeper_config.default_cascade_name
 
 let provider_cooldown_remaining_sec_for_cascade
-    ~(cascade_name : string) : int option =
+    ~(cascade_name : Keeper_cascade_profile.runtime_name) : int option =
   let model_ids =
     Cascade_runtime.models_of_cascade_name
-      (Keeper_cascade_profile.Runtime_name cascade_name)
+      cascade_name
     |> Cascade_config.parse_model_strings
     |> List.map (fun (cfg : Llm_provider.Provider_config.t) ->
            String.trim cfg.model_id)
@@ -1007,7 +1007,9 @@ let keeper_cycle_decision
         in
         let provider_cooldown_remaining_sec =
           if should_run
-          then provider_cooldown_remaining_sec ~cascade_name:meta.cascade_name
+          then
+            provider_cooldown_remaining_sec
+              ~cascade_name:(Keeper_cascade_profile.Runtime_name meta.cascade_name)
           else None
         in
         let provider_cooldown_fail_open =

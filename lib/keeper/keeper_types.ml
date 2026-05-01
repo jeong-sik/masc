@@ -83,7 +83,7 @@ type tool_call_entry =
 (* ================================================================ *)
 
 type working_context =
-  { checkpoint : Oas.Checkpoint.t
+  { checkpoint : Agent_sdk.Checkpoint.t
   ; max_tokens : int
   }
 

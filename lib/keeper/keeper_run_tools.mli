@@ -22,7 +22,7 @@ type hook_accumulator =
   ; mutable required_tool_use_seen : bool
   ; mutable keeper_surface_tool_used : bool
   ; mutable discovered : Keeper_discovered_tools.t
-  ; mutable tool_overlay : Oas.Tool_op.t
+  ; mutable tool_overlay : Agent_sdk.Tool_op.t
   ; mutable tool_surface : tool_surface_metrics
   ; mutable requested_tool_names : string list
   ; mutable receipt_tool_contract_result : string
@@ -36,7 +36,7 @@ type hook_outputs =
   ; out_required_tool_use_seen : bool
   ; out_keeper_surface_tool_used : bool
   ; out_discovered : Keeper_discovered_tools.t
-  ; out_tool_overlay : Oas.Tool_op.t
+  ; out_tool_overlay : Agent_sdk.Tool_op.t
   ; out_tool_surface : tool_surface_metrics
   ; out_requested_tool_names : string list
   ; out_receipt_tool_contract_result : string
@@ -50,13 +50,13 @@ val freeze : hook_accumulator -> hook_outputs
     facade post-processing writes, and [agent_ref] is created locally
     at the OAS call site. *)
 type agent_setup =
-  { tools : Oas.Tool.t list
-  ; hooks : Oas.Hooks.hooks
-  ; reducer : Oas.Context_reducer.t
-  ; memory : Oas.Memory.t
+  { tools : Agent_sdk.Tool.t list
+  ; hooks : Agent_sdk.Hooks.hooks
+  ; reducer : Agent_sdk.Context_reducer.t
+  ; memory : Agent_sdk.Memory.t
   ; acc : hook_accumulator
   ; initial_tool_surface : computed_tool_surface
-  ; initial_tool_surface_blocker : Oas.Error.sdk_error option ref
+  ; initial_tool_surface_blocker : Agent_sdk.Error.sdk_error option ref
   ; all_tool_names : string list
   ; tool_usage_before : (string * int) list
   ; receipt_turn_count_ref : int option ref
@@ -80,9 +80,9 @@ val prepare_agent_setup :
   -> turn_system_prompt:string
   -> user_message:string
   -> dynamic_context:string
-  -> history_messages:Oas.Types.message list
+  -> history_messages:Agent_sdk.Types.message list
   -> prompt_metrics:Keeper_agent_prompt_metrics.prompt_metrics
-  -> shared_context:Oas.Context.t
+  -> shared_context:Agent_sdk.Context.t
   -> context_injector:Agent_sdk.Hooks.context_injector
   -> start_turn_count:int
   -> generation:int
@@ -97,6 +97,6 @@ val prepare_agent_setup :
   -> approval_mode_derived:bool
   -> ?max_cost_usd:float
   -> trajectory_acc:Trajectory.accumulator option
-  -> tool_overlay:Oas.Tool_op.t ref option
+  -> tool_overlay:Agent_sdk.Tool_op.t ref option
   -> unit
-  -> (agent_setup, Oas.Error.sdk_error) result
+  -> (agent_setup, Agent_sdk.Error.sdk_error) result

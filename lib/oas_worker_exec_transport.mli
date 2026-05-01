@@ -56,7 +56,7 @@ val label_resolution_error_to_string : label_resolution_error -> string
 
 (** Lift a label-resolution error into the OAS SDK error envelope. *)
 val label_resolution_error_to_sdk_error :
-  label_resolution_error -> Oas.Error.sdk_error
+  label_resolution_error -> Agent_sdk.Error.sdk_error
 
 (** Resolve a model label string to a provider config via the MASC cascade
     parser.  Explicit labels never silently fall through to discovery-only
@@ -64,9 +64,9 @@ val label_resolution_error_to_sdk_error :
 val resolve_provider_config_of_label :
   string -> (Llm_provider.Provider_config.t, label_resolution_error) result
 
-(** Construct an [Oas.Error.InvalidConfig] with the supplied [field] name and
+(** Construct an [Agent_sdk.Error.InvalidConfig] with the supplied [field] name and
     [detail] text. *)
-val invalid_runtime_config : string -> string -> Oas.Error.sdk_error
+val invalid_runtime_config : string -> string -> Agent_sdk.Error.sdk_error
 
 (** Normalize a CLI [model_id] to an explicit override.  Returns [None] when
     the model id is empty or [auto] (case-insensitive after trim). *)
@@ -108,11 +108,11 @@ val kimi_cli_config_json_for_provider :
 val dedupe_preserve_order : string list -> string list
 
 (** Extract the [name] field of every OAS tool. *)
-val public_mcp_tool_names_of_oas_tools : Oas.Tool.t list -> string list
+val public_mcp_tool_names_of_oas_tools : Agent_sdk.Tool.t list -> string list
 
 (** Filter [tools] to those whose name is a public MCP tool per
     {!Tool_catalog.is_public_mcp}. *)
-val public_mcp_tools_of_oas_tools : Oas.Tool.t list -> Oas.Tool.t list
+val public_mcp_tools_of_oas_tools : Agent_sdk.Tool.t list -> Agent_sdk.Tool.t list
 
 (** Whether every name in [tool_names] is a public MCP tool.  Empty input
     returns [false]. *)
@@ -190,11 +190,11 @@ val resolve_tool_lane_for_oas_tools :
   ?agent_name:string ->
   ?tool_requirement:[ `Required | `Optional ] ->
   provider_cfg:Llm_provider.Provider_config.t ->
-  tools:Oas.Tool.t list ->
+  tools:Agent_sdk.Tool.t list ->
   unit ->
-  ( Oas.Tool.t list
+  ( Agent_sdk.Tool.t list
     * Llm_provider.Llm_transport.runtime_mcp_policy option,
-    Oas.Error.sdk_error )
+    Agent_sdk.Error.sdk_error )
   result
 
 (** Wrap a CLI transport factory in a per-call sub-switch so that any
@@ -214,7 +214,7 @@ val non_http_transport_of_provider :
   ?runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy ->
   ?cli_transport_overrides:cli_transport_overrides ->
   unit ->
-  (Llm_provider.Llm_transport.t option, Oas.Error.sdk_error) result
+  (Llm_provider.Llm_transport.t option, Agent_sdk.Error.sdk_error) result
 
 (** kimi_cli print-mode transport.  Re-exported via [module type of] from
     {!Oas_worker_exec.Kimi_cli_transport_local}. *)

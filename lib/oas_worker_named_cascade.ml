@@ -24,12 +24,12 @@ let require_eio ?sw ?net () =
   | _, None -> Error "Eio net not available (running outside server context)"
 
 let eio_context_error_to_sdk_error detail =
-  Oas.Error.Config
-    (Oas.Error.InvalidConfig { field = "eio_context"; detail })
+  Agent_sdk.Error.Config
+    (Agent_sdk.Error.InvalidConfig { field = "eio_context"; detail })
 
 let cascade_catalog_error_to_sdk_error detail =
-  Oas.Error.Config
-    (Oas.Error.InvalidConfig { field = "cascade_name"; detail })
+  Agent_sdk.Error.Config
+    (Agent_sdk.Error.InvalidConfig { field = "cascade_name"; detail })
 
 (** Resolve cascade provider configs via MASC Cascade_config.
     Returns Provider_config.t list for the downstream OAS runtime,
@@ -60,18 +60,18 @@ let keeper_agent_name_opt (keeper_name : string) =
   if keeper_name = "" then None
   else Some (Keeper_types.keeper_agent_name keeper_name)
 
-let runtime_mcp_policy_for_tools ~(keeper_name : string) (tools : Oas.Tool.t list)
+let runtime_mcp_policy_for_tools ~(keeper_name : string) (tools : Agent_sdk.Tool.t list)
     =
   let agent_name = keeper_agent_name_opt keeper_name in
   let runtime_tool_names =
     tools
-    |> List.filter (fun (tool : Oas.Tool.t) ->
+    |> List.filter (fun (tool : Agent_sdk.Tool.t) ->
            Tool_catalog.is_public_mcp tool.schema.name
            ||
            (Option.is_some agent_name
             && Tool_catalog.is_on_surface Tool_catalog.Keeper_internal
                  tool.schema.name))
-    |> List.map (fun (tool : Oas.Tool.t) -> tool.schema.name)
+    |> List.map (fun (tool : Agent_sdk.Tool.t) -> tool.schema.name)
   in
   let has_keeper_internal =
     List.exists

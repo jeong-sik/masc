@@ -328,7 +328,7 @@ let clear_oas_timeout_budget_failure_reason ~base_path ~keeper_name =
       Keeper_registry.set_failure_reason ~base_path keeper_name None
   | _ -> ()
 
-let is_oas_timeout_budget_error (err : Oas.Error.sdk_error) =
+let is_oas_timeout_budget_error (err : Agent_sdk.Error.sdk_error) =
   match Oas_worker_named.classify_masc_internal_error err with
   | Some (Oas_worker_named.Oas_timeout_budget _) -> true
   | _ -> false
@@ -339,7 +339,7 @@ let run_keepalive_unified_turn
       ~pending_board_events
       ~(stop : bool Atomic.t)
       ~(proactive_warmup_elapsed : bool)
-      ~(shared_context : Oas.Context.t)
+      ~(shared_context : Agent_sdk.Context.t)
   : keeper_meta
   =
   if not proactive_warmup_elapsed
@@ -537,7 +537,7 @@ let run_keepalive_unified_turn
                     ())
             with
             | Error err ->
-              let e_str = Oas.Error.to_string err in
+              let e_str = Agent_sdk.Error.to_string err in
               (* The inner [run_keeper_cycle] already emits a detailed ERROR
                  ("keeper cycle FAILED cascade=... max_context=... error=...")
                  for every Error path, so re-logging at ERROR here duplicates
@@ -978,7 +978,7 @@ let run_heartbeat_loop
      metadata across turns, but per-turn context_injector-local timing
      and tool-call counters are recreated inside run_turn and therefore
      do not accumulate for the full keeper lifecycle. *)
-  let shared_context = Oas.Context.create () in
+  let shared_context = Agent_sdk.Context.create () in
   (* Mtime-based change detection for keeper meta disk reads.
      Avoids re-parsing the JSON file on every heartbeat cycle when
      no operator has modified it.  Initialized to 0.0 so the first

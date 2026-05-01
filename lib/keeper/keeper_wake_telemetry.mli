@@ -12,16 +12,16 @@ type sizes = {
   tool_count : int;
 }
 
-val role_key : Oas.Types.role -> string
+val role_key : Agent_sdk.Types.role -> string
 
-val bytes_of_content_block : Oas.Types.content_block -> int
+val bytes_of_content_block : Agent_sdk.Types.content_block -> int
 
-val bytes_of_message : Oas.Types.message -> int
+val bytes_of_message : Agent_sdk.Types.message -> int
 
-val estimate_tool_defs_bytes : Oas.Tool.t list -> int
+val estimate_tool_defs_bytes : Agent_sdk.Tool.t list -> int
 
 val role_counts_with_pending_user :
-  Oas.Types.message list -> (string * int) list
+  Agent_sdk.Types.message list -> (string * int) list
 
 (** Compute payload-size estimates and role distribution for a keeper
     turn about to invoke [Oas_worker.run_named]. The result assumes OAS
@@ -32,7 +32,7 @@ val role_counts_with_pending_user :
     Invariant: [message_count = sum_of_role_counts result.role_counts]. *)
 val compute_sizes :
   system_prompt:string ->
-  tools:Oas.Tool.t list ->
-  history_messages:Oas.Types.message list ->
+  tools:Agent_sdk.Tool.t list ->
+  history_messages:Agent_sdk.Types.message list ->
   user_message:string ->
   sizes

@@ -83,7 +83,7 @@ let add_reason reason reasons =
   if List.mem reason reasons then reasons else reason :: reasons
 
 let classify_with_provider_kind ~provider_kind ~(usage_reported : bool)
-    ~(usage : Oas.Types.api_usage)
+    ~(usage : Agent_sdk.Types.api_usage)
     ~(model_used : string)
     ~(resolved_model_id : string)
     ~(context_max : int) : t =
@@ -131,7 +131,7 @@ let classify_with_provider_kind ~provider_kind ~(usage_reported : bool)
     | reasons -> Usage_untrusted reasons
 
 let classify ~(usage_reported : bool)
-    ~(usage : Oas.Types.api_usage)
+    ~(usage : Agent_sdk.Types.api_usage)
     ~(model_used : string)
     ~(resolved_model_id : string)
     ~(context_max : int) : t =

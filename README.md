@@ -1,7 +1,7 @@
 # masc-mcp
 
 [![OCaml](https://img.shields.io/badge/OCaml-5.4+-orange.svg)](https://ocaml.org/)
-[![OAS](https://img.shields.io/badge/agent__sdk-%E2%89%A50.181.0-blue.svg)](https://github.com/jeong-sik/oas)
+[![OAS](https://img.shields.io/badge/agent__sdk-%E2%89%A50.187.6-blue.svg)](https://github.com/jeong-sik/oas)
 
 > Personal project. No production SLA, no external support, no compatibility guarantees. The API surface, schema, and dashboard change on the author's schedule.
 >
@@ -75,7 +75,7 @@ All protocols run concurrently from a single Eio fiber pool:
 ### Tech Stack
 
 - **OCaml 5.4+** with Eio structured concurrency (no Lwt)
-- **agent_sdk** >= 0.181.0 (OAS agent runtime; pinned floor in `dune-project`)
+- **agent_sdk** >= 0.187.6 (OAS agent runtime; pinned floor in `dune-project`)
 - **mcp_protocol** >= 1.3.0 (MCP JSON-RPC contract)
 - **h2-eio** (HTTP/2), **grpc-direct** (gRPC), **ocaml-webrtc** (WebRTC)
 - **caqti** + PostgreSQL (optional), **sqlite3** (fallback), **neo4j_bolt** (optional graph)

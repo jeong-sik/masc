@@ -16,7 +16,7 @@ val keeper_universe_tool_names : keeper_meta -> string list
 val keeper_internal_candidate_tool_names : string list
 
 (** Universe model tool schemas.  Returns schemas for all universe tools
-    so [make_tools] can build {!Oas.Tool.t} for the full search scope. *)
+    so [make_tools] can build {!Agent_sdk.Tool.t} for the full search scope. *)
 val keeper_universe_model_tools : keeper_meta -> Types.tool_schema list
 
 (** Preset-scoped universe: preset allowlist + core_always - denied.

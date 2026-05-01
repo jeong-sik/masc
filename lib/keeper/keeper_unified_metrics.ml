@@ -43,10 +43,10 @@ let string_contains_substring_ci ~(needle : string) (haystack : string) : bool =
 
 let cdal_mode_violations_ref_suffix = "evidence/mode_violations.json"
 
-let cdal_raw_evidence_ref_count (proof : Oas.Cdal_proof.t) : int =
+let cdal_raw_evidence_ref_count (proof : Agent_sdk.Cdal_proof.t) : int =
   List.length proof.raw_evidence_refs
 
-let cdal_violation_ref_count (proof : Oas.Cdal_proof.t) : int =
+let cdal_violation_ref_count (proof : Agent_sdk.Cdal_proof.t) : int =
   proof.raw_evidence_refs
   |> List.filter (String.ends_with ~suffix:cdal_mode_violations_ref_suffix)
   |> List.length
@@ -93,7 +93,7 @@ type usage_trust = Keeper_usage_trust.t =
   | Usage_untrusted of string list
 
 let classify_usage_trust ~(usage_reported : bool)
-    ~(usage : Oas.Types.api_usage)
+    ~(usage : Agent_sdk.Types.api_usage)
     ~(model_used : string)
     ~(resolved_model_id : string)
     ~(context_max : int) : usage_trust =
@@ -309,7 +309,7 @@ let is_noop_cycle ~has_text ~(tools_used : string list) : bool =
   && List.for_all Keeper_tool_disclosure.is_passive_status_tool_name tools_used
 
 let visible_run_validation (result : Keeper_agent_run.run_result) :
-    Oas.Raw_trace.run_validation option =
+    Agent_sdk.Raw_trace.run_validation option =
   match result.run_validation with
   | Some v when v.ok && (v.evidence <> [] || v.has_file_write) -> Some v
   | _ -> None
@@ -351,7 +351,7 @@ let has_visible_tool_signal (result : Keeper_agent_run.run_result) : bool =
   || Option.is_some (visible_run_validation result)
 
 let validated_evidence_preview
-    (v : Oas.Raw_trace.run_validation) : string =
+    (v : Agent_sdk.Raw_trace.run_validation) : string =
   if v.has_file_write then "(validated evidence: file_write)"
   else
     match v.tool_names with
@@ -364,7 +364,7 @@ let accountability_evidence_refs
     ~(trace_id : string)
     ~(turn_number : int)
     ~(result : Keeper_agent_run.run_result)
-    ~(validated_evidence : Oas.Raw_trace.run_validation option) =
+    ~(validated_evidence : Agent_sdk.Raw_trace.run_validation option) =
   let tool_refs =
     let stay_silent = Tool_name.Keeper.to_string Tool_name.Keeper.Stay_silent in
     result.tools_used
@@ -769,21 +769,21 @@ let append_decision_record
         ( "trace_ref",
           match result with
           | Some { trace_ref = Some trace_ref; _ } ->
-              Oas.Raw_trace.run_ref_to_yojson trace_ref
+              Agent_sdk.Raw_trace.run_ref_to_yojson trace_ref
           | _ -> `Null );
         ( "run_validation",
           match result with
           | Some { run_validation = Some validation; _ } ->
-              Oas.Raw_trace.run_validation_to_yojson validation
+              Agent_sdk.Raw_trace.run_validation_to_yojson validation
           | _ -> `Null );
         ( "cdal_proof",
           match result with
           | Some { proof = Some p; _ } ->
               `Assoc
                 [
-                  ("run_id", `String p.Oas.Cdal_proof.run_id);
+                  ("run_id", `String p.Agent_sdk.Cdal_proof.run_id);
                   ( "result_status",
-                    Oas.Cdal_proof.result_status_to_yojson p.result_status );
+                    Agent_sdk.Cdal_proof.result_status_to_yojson p.result_status );
                   ("tool_trace_count", `Int (List.length p.tool_trace_refs));
                 ]
           | _ -> `Null );
@@ -1414,22 +1414,22 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
         ( "trace_ref",
           match result.trace_ref with
           | Some trace_ref ->
-              Oas.Raw_trace.run_ref_to_yojson trace_ref
+              Agent_sdk.Raw_trace.run_ref_to_yojson trace_ref
           | None -> `Null );
         ( "run_validation",
           match result.run_validation with
           | Some validation ->
-              Oas.Raw_trace.run_validation_to_yojson validation
+              Agent_sdk.Raw_trace.run_validation_to_yojson validation
           | None -> `Null );
         ("cdal_proof",
          match result.proof with
          | Some p ->
            `Assoc [
-             ("run_id", `String p.Oas.Cdal_proof.run_id);
+             ("run_id", `String p.Agent_sdk.Cdal_proof.run_id);
              ("effective_mode",
-              Oas.Execution_mode.to_yojson p.effective_execution_mode);
+              Agent_sdk.Execution_mode.to_yojson p.effective_execution_mode);
              ("result_status",
-              Oas.Cdal_proof.result_status_to_yojson p.result_status);
+              Agent_sdk.Cdal_proof.result_status_to_yojson p.result_status);
              ("violation_count",
               `Int (cdal_violation_ref_count p));
              ("raw_evidence_ref_count",
@@ -1442,7 +1442,7 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
         ("inference_telemetry",
          match result.inference_telemetry with
          | Some t ->
-           Oas.Types.inference_telemetry_to_yojson t
+           Agent_sdk.Types.inference_telemetry_to_yojson t
          | None -> `Null);
       ]
   in

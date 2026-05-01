@@ -186,7 +186,7 @@ let blocker_class_of_string (reason : string) : blocker_class option =
   else
     None
 
-let blocker_class_of_sdk_error (err : Oas.Error.sdk_error) : blocker_class option =
+let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class option =
   match Oas_worker_named.classify_masc_internal_error err with
   | Some (Oas_worker_named.Cascade_exhausted { reason; _ }) ->
       Some (Cascade_exhausted reason)
@@ -210,7 +210,7 @@ let blocker_class_of_sdk_error (err : Oas.Error.sdk_error) : blocker_class optio
          else Ambiguous_post_commit_failure)
   | None -> (
       match err with
-      | Oas.Error.Internal msg -> blocker_class_of_string msg
+      | Agent_sdk.Error.Internal msg -> blocker_class_of_string msg
       | _ -> None)
 
 (* ── Runtime blocker surface ───────────────────────────────── *)

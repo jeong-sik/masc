@@ -19,7 +19,7 @@ module Float = Stdlib.Float
 (** OAS boundary adapter for tool results, schemas, and tool definitions.
 
     MASC tools use [(bool * string)] internally (success flag + message).
-    OAS uses [Oas.Types.tool_result = (tool_output, tool_error) Result.t].
+    OAS uses [Agent_sdk.Types.tool_result = (tool_output, tool_error) Result.t].
 
     This module converts at the OAS boundary only — internal MASC
     tool handlers keep their existing convention unchanged.
@@ -102,28 +102,28 @@ let maybe_externalize ?(mime = "text/plain") (msg : string) : string =
 
 (** {1 Result Conversion} *)
 
-let make_tool_error ?(recoverable = false) message : Oas.Types.tool_result =
-  Error { Oas.Types.message; recoverable; error_class = None }
+let make_tool_error ?(recoverable = false) message : Agent_sdk.Types.tool_result =
+  Error { Agent_sdk.Types.message; recoverable; error_class = None }
 
 let to_oas_tool_result ?(recoverable = false) (success, msg)
-  : Oas.Types.tool_result =
-  if success then Ok { Oas.Types.content = maybe_externalize msg }
+  : Agent_sdk.Types.tool_result =
+  if success then Ok { Agent_sdk.Types.content = maybe_externalize msg }
   else make_tool_error ~recoverable (maybe_externalize msg)
 
-let of_oas_tool_result : Oas.Types.tool_result -> bool * string = function
+let of_oas_tool_result : Agent_sdk.Types.tool_result -> bool * string = function
   | Ok { content } -> (true, content)
   | Error { message; _ } -> (false, message)
 
 (** {1 Schema Conversion}
 
-    Delegates to [Oas.Mcp.json_schema_to_params] — the canonical
+    Delegates to [Agent_sdk.Mcp.json_schema_to_params] — the canonical
     JSON Schema to OAS [tool_param list] conversion.
 
     @since 2.221.0 — delegates to OAS Mcp module (removes 40-line duplicate) *)
 
-let param_type_of_string = Oas.Mcp.json_schema_type_to_param_type
+let param_type_of_string = Agent_sdk.Mcp.json_schema_type_to_param_type
 
-let params_of_json_schema = Oas.Mcp.json_schema_to_params
+let params_of_json_schema = Agent_sdk.Mcp.json_schema_to_params
 
 (** {1 OAS Tool.t Creation}
 
@@ -133,26 +133,26 @@ let params_of_json_schema = Oas.Mcp.json_schema_to_params
 let oas_permission_of_masc_tool name =
   let meta = Tool_catalog.metadata name in
   match meta.destructive, meta.readonly with
-  | Some true, _ -> Some Oas.Tool.Destructive
-  | _, Some true -> Some Oas.Tool.ReadOnly
-  | _, Some false -> Some Oas.Tool.Write
-  | _ when Tool_dispatch.is_destructive name -> Some Oas.Tool.Destructive
-  | _ when Tool_dispatch.is_read_only name -> Some Oas.Tool.ReadOnly
+  | Some true, _ -> Some Agent_sdk.Tool.Destructive
+  | _, Some true -> Some Agent_sdk.Tool.ReadOnly
+  | _, Some false -> Some Agent_sdk.Tool.Write
+  | _ when Tool_dispatch.is_destructive name -> Some Agent_sdk.Tool.Destructive
+  | _ when Tool_dispatch.is_read_only name -> Some Agent_sdk.Tool.ReadOnly
   | _ -> None
 
 let oas_descriptor_of_masc_tool name =
   let descriptor_of_permission permission =
     let mutation_class, concurrency_class =
       match permission with
-      | Oas.Tool.ReadOnly ->
-          Some "read_only", Some Oas.Tool.Parallel_read
-      | Oas.Tool.Write ->
-          Some "workspace_mutating", Some Oas.Tool.Sequential_workspace
-      | Oas.Tool.Destructive ->
-          Some "external_effect", Some Oas.Tool.Exclusive_external
+      | Agent_sdk.Tool.ReadOnly ->
+          Some "read_only", Some Agent_sdk.Tool.Parallel_read
+      | Agent_sdk.Tool.Write ->
+          Some "workspace_mutating", Some Agent_sdk.Tool.Sequential_workspace
+      | Agent_sdk.Tool.Destructive ->
+          Some "external_effect", Some Agent_sdk.Tool.Exclusive_external
     in
     {
-      Oas.Tool.kind = Some "masc";
+      Agent_sdk.Tool.kind = Some "masc";
       mutation_class;
       concurrency_class;
       permission = Some permission;
@@ -176,11 +176,11 @@ let oas_descriptor_of_masc_tool name =
         (fun args -> handle_board_post ctx args)
     ]} *)
 let oas_tool_of_masc ~name ~description ~input_schema
-    handler : Oas.Tool.t =
+    handler : Agent_sdk.Tool.t =
   let parameters = params_of_json_schema input_schema in
   let descriptor = oas_descriptor_of_masc_tool name in
   let oas_handler json_args =
     let success, msg = handler json_args in
     to_oas_tool_result (success, msg)
   in
-  Oas.Tool.create ?descriptor ~name ~description ~parameters oas_handler
+  Agent_sdk.Tool.create ?descriptor ~name ~description ~parameters oas_handler

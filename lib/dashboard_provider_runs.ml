@@ -353,8 +353,8 @@ let provider_inventory_json () =
         `List (List.map provider_snapshot_to_json snapshots) );
     ]
 
-let response_text_of_api_response (response : Oas.Types.api_response) =
-  Oas.Types.text_of_content response.content |> String.trim
+let response_text_of_api_response (response : Agent_sdk.Types.api_response) =
+  Agent_sdk.Types.text_of_content response.content |> String.trim
 
 let provider_label_for_model provider model =
   match Provider_adapter.resolve_direct_adapter provider with
@@ -460,7 +460,7 @@ let execute_single_agent_run ~sw ~net ~run_id ~provider ~model ~prompt =
           with
           | Ok result ->
               Ok (response_text_of_api_response result.response)
-          | Error err -> Error (Oas.Error.to_string err)))
+          | Error err -> Error (Agent_sdk.Error.to_string err)))
 
 let start_run ~sw ~net ~provider ~model_opt ~prompt =
   match resolve_provider_run_request ~provider ~model_opt ~prompt with

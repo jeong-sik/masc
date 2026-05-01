@@ -13,7 +13,7 @@ include module type of Keeper_memory_bank
 (** {1 Cost Calculation} *)
 
 val cost_usd_of_usage :
-  Oas.Types.api_usage -> model_id:string -> float
+  Agent_sdk.Types.api_usage -> model_id:string -> float
 
 (** {1 File Reading} *)
 
@@ -58,12 +58,12 @@ val jaccard_similarity : string -> string -> float
 (** {1 Message Extraction} *)
 
 val latest_message_content_by_role :
-  role:Oas.Types.role ->
-  Oas.Types.message list ->
+  role:Agent_sdk.Types.role ->
+  Agent_sdk.Types.message list ->
   string option
 
 val previous_assistant_message_content :
-  Oas.Types.message list -> string option
+  Agent_sdk.Types.message list -> string option
 
 (** {1 Goal Alignment} *)
 
@@ -81,7 +81,7 @@ val goal_alignment_score :
 (** {1 Repetition Risk} *)
 
 val repetition_risk_score :
-  messages:Oas.Types.message list ->
+  messages:Agent_sdk.Types.message list ->
   candidate_reply:string option ->
   float
 
@@ -159,13 +159,13 @@ val learned_policy_auto_rules :
 (** {1 User Message Extraction} *)
 
 val recent_user_messages :
-  Oas.Types.message list -> max_n:int -> string list
+  Agent_sdk.Types.message list -> max_n:int -> string list
 
 val load_history_user_messages :
   path:string -> max_n:int -> string list
 
 val recall_candidates_with_history :
-  checkpoint_messages:Oas.Types.message list ->
+  checkpoint_messages:Agent_sdk.Types.message list ->
   history_path:string ->
   max_checkpoint:int ->
   max_history:int ->

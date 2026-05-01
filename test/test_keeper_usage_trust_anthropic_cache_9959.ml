@@ -31,7 +31,7 @@ module Oas = Masc_mcp.Oas
 
 let mk_usage
     ?(cache_creation = 0) ?(cache_read = 0) ?(cost_usd = None)
-    ~input ~output () : Oas.Types.api_usage =
+    ~input ~output () : Agent_sdk.Types.api_usage =
   {
     input_tokens = input;
     output_tokens = output;

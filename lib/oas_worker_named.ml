@@ -112,7 +112,7 @@ let run_named
     ?memory
     ?tool_retry_policy
     ?(required_tool_satisfaction =
-      Oas.Completion_contract.any_tool_call_satisfies)
+      Agent_sdk.Completion_contract.any_tool_call_satisfies)
     ?raw_trace
     ?on_event
     ?on_yield
@@ -142,7 +142,7 @@ let run_named
     ?net
     ?per_provider_timeout_s
     ()
-  : (Oas_worker_exec.run_result, Oas.Error.sdk_error) result =
+  : (Oas_worker_exec.run_result, Agent_sdk.Error.sdk_error) result =
   match require_eio ?sw ?net () with
   | Error e -> Error (eio_context_error_to_sdk_error e)
   | Ok (sw, net) ->
@@ -327,7 +327,7 @@ let run_named
                  cli_transport_overrides;
              })
     in
-    let local_agent_ref : Oas.Agent.t option ref = ref None in
+    let local_agent_ref : Agent_sdk.Agent.t option ref = ref None in
     match config_result with
     | Error err ->
       (Error err, None)
@@ -366,7 +366,7 @@ let run_named
                           Log.Misc.info
                             "[cascade-fallback] cascade %s: provider %s per-provider timeout after %.1fs, falling back"
                             cascade_name provider_cfg.model_id t;
-                          Error (Oas.Error.Api (Timeout { message = Printf.sprintf "Per-provider timeout after %.1fs" t })))
+                          Error (Agent_sdk.Error.Api (Timeout { message = Printf.sprintf "Per-provider timeout after %.1fs" t })))
                    | None -> run_fn ())
             in
             Ok result)
@@ -382,10 +382,10 @@ let run_named
       (* Extract checkpoint from the agent if it made progress.
          The agent's mutable state reflects all completed turns even on Error. *)
       let checkpoint_after = match !local_agent_ref with
-        | Some agent when (Oas.Agent.state agent).turn_count > 0 ->
+        | Some agent when (Agent_sdk.Agent.state agent).turn_count > 0 ->
           (* Also propagate to caller's agent_ref for final result *)
           (match agent_ref with Some r -> r := Some agent | None -> ());
-          Some (Oas.Agent.checkpoint agent)
+          Some (Agent_sdk.Agent.checkpoint agent)
         | Some agent ->
           (match agent_ref with Some r -> r := Some agent | None -> ());
           None
@@ -615,7 +615,7 @@ let run_named
            cooldown so weighted_random/failover selection does not waste later
            cascade turns on a provider that is terminal for the current runtime
            state. *)
-        let err_str = Oas.Error.to_string sdk_err in
+        let err_str = Agent_sdk.Error.to_string sdk_err in
         let (_ : Provider_error.t option) =
           emit_sdk_provider_error_metric ~cascade_name:error_cascade_name
             ~provider:provider_cfg.model_id sdk_err
@@ -752,15 +752,15 @@ let run_named
                   "[cascade-fallback] cascade %s: %s failed (%s%s), trying \
                    next [sunk cost; see #10982]"
                   cascade_name provider_cfg.model_id class_label
-                  (Oas.Error.to_string sdk_err)
+                  (Agent_sdk.Error.to_string sdk_err)
               else
                 Log.Misc.info
                   "[cascade-fallback] cascade %s: %s failed (%s%s), trying next"
                   cascade_name provider_cfg.model_id class_label
-                  (Oas.Error.to_string sdk_err);
+                  (Agent_sdk.Error.to_string sdk_err);
               Oas_worker_cascade.record_fallback_event capture ~candidate_cfgs
                 ~from_model:provider_cfg.model_id ~to_model:"next"
-                ~reason:(class_label ^ Oas.Error.to_string sdk_err);
+                ~reason:(class_label ^ Agent_sdk.Error.to_string sdk_err);
               try_cascade ?resume_checkpoint:next_resume rest new_err
             | Cascade_fsm.Exhausted _ ->
               let observation =
@@ -773,7 +773,7 @@ let run_named
                 ~cascade_name:error_cascade_name
                 ~outcome:`Failure ~observation:(Some observation) ();
               Log.Misc.error "cascade %s exhausted: all tiers failed (last model=%s, error=%s)"
-                cascade_name provider_cfg.model_id (Oas.Error.to_string sdk_err);
+                cascade_name provider_cfg.model_id (Agent_sdk.Error.to_string sdk_err);
               Error sdk_err
             | _ -> Error sdk_err)
          | None ->
@@ -788,7 +788,7 @@ let run_named
              ~cascade_name:error_cascade_name
              ~outcome:`Failure ~observation:(Some observation) ();
            Log.Misc.error "cascade %s: non-cascadable error from %s: %s"
-             cascade_name provider_cfg.model_id (Oas.Error.to_string sdk_err);
+             cascade_name provider_cfg.model_id (Agent_sdk.Error.to_string sdk_err);
            Error sdk_err))
   in
   (* Pluggable strategy + cycle/backoff wrapper (since 0.9.6).
@@ -1013,7 +1013,7 @@ let run_model_by_label
     ?sw
     ?net
     ()
-  : (Oas_worker_exec.run_result, Oas.Error.sdk_error) result =
+  : (Oas_worker_exec.run_result, Agent_sdk.Error.sdk_error) result =
   let* config =
     config_for_label ~name:"oas-label-model" ~model_label ~system_prompt
       ~tools ~max_turns ~max_tokens ?max_input_tokens ?max_cost_usd ~temperature
@@ -1086,7 +1086,7 @@ let run_named_with_masc_tools
     ?memory
     ?tool_retry_policy
     ?(required_tool_satisfaction =
-      Oas.Completion_contract.any_tool_call_satisfies)
+      Agent_sdk.Completion_contract.any_tool_call_satisfies)
     ?raw_trace
     ?on_event
     ?on_yield
@@ -1100,7 +1100,7 @@ let run_named_with_masc_tools
     ?sw
     ?net
     ()
-  : (Oas_worker_exec.run_result, Oas.Error.sdk_error) result =
+  : (Oas_worker_exec.run_result, Agent_sdk.Error.sdk_error) result =
   let oas_tools = List.map (fun (td : Types.tool_schema) ->
     Tool_bridge.oas_tool_of_masc
       ~name:td.name ~description:td.description
@@ -1145,7 +1145,7 @@ let run_model_with_masc_tools
     ?sw
     ?net
     ()
-  : (Oas_worker_exec.run_result, Oas.Error.sdk_error) result =
+  : (Oas_worker_exec.run_result, Agent_sdk.Error.sdk_error) result =
   let* config =
     config_for_label ~name:"oas-explicit-model" ~model_label ~system_prompt
       ~tools:[] ~max_turns ~max_tokens ?max_input_tokens ?max_cost_usd ~temperature

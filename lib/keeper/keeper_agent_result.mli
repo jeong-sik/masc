@@ -16,16 +16,16 @@ type run_result =
   ; cascade_observation : Oas_worker.cascade_observation option
   ; turn_count : int
   ; tool_calls_made : int
-  ; usage : Oas.Types.api_usage
+  ; usage : Agent_sdk.Types.api_usage
   ; usage_reported : bool
   ; tools_used : string list
   ; tool_calls : tool_call_detail list
-  ; checkpoint : Oas.Checkpoint.t option
-  ; proof : Oas.Cdal_proof.t option
-  ; trace_ref : Oas.Raw_trace.run_ref option
-  ; run_validation : Oas.Raw_trace.run_validation option
+  ; checkpoint : Agent_sdk.Checkpoint.t option
+  ; proof : Agent_sdk.Cdal_proof.t option
+  ; trace_ref : Agent_sdk.Raw_trace.run_ref option
+  ; run_validation : Agent_sdk.Raw_trace.run_validation option
   ; stop_reason : Oas_worker.stop_reason
-  ; inference_telemetry : Oas.Types.inference_telemetry option
+  ; inference_telemetry : Agent_sdk.Types.inference_telemetry option
   ; tool_surface : Keeper_agent_tool_surface.tool_surface_metrics
   }
 

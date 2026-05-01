@@ -48,10 +48,10 @@ let effective_max_turns (meta : Worker_container_types.worker_container_meta) : 
     Maps worker_name, model, thinking, max_turns, and temperature. *)
 let agent_config_of_worker_meta
     (meta : Worker_container_types.worker_container_meta)
-    ~(system_prompt : string) : Oas.Types.agent_config =
+    ~(system_prompt : string) : Agent_sdk.Types.agent_config =
   let max_tokens = Worker_container_types.local_worker_max_tokens () in
   {
-    Oas.Types.default_config with
+    Agent_sdk.Types.default_config with
     name = meta.worker_name;
     model = oas_model_of_effective_model meta.effective_model;
     system_prompt = Some system_prompt;
@@ -67,7 +67,7 @@ let agent_config_of_worker_meta
        avoids ambiguous_partial_commit when the gate has not propagated. *)
     min_p = None;
     enable_thinking = Some (Option.value ~default:false meta.thinking_enabled);
-    tool_choice = Some Oas.Types.Auto;
+    tool_choice = Some Agent_sdk.Types.Auto;
   }
 
 (* ================================================================ *)
@@ -119,7 +119,7 @@ let local_model_gate =
 (* Boundary: MASC selects the internal retry policy, but OAS owns
    retry classification, feedback synthesis, and loop control. *)
 let default_internal_tool_retry_policy =
-  Oas.Tool_retry_policy.default_internal
+  Agent_sdk.Tool_retry_policy.default_internal
 
 let default_gate_config () =
   { local_model_gate with denied_tools = [] }
@@ -139,21 +139,21 @@ let default_gate_config () =
 let build_agent
     ~(net : [> `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
     ~(meta : Worker_container_types.worker_container_meta)
-    ~(provider : Oas.Provider.config)
+    ~(provider : Agent_sdk.Provider.config)
     ~(system_prompt : string)
-    ~(tools : Oas.Tool.t list)
-    ~(hooks : Oas.Hooks.hooks)
-    ~(raw_trace : Oas.Raw_trace.t)
-    ~(heartbeat_callbacks : Oas.Agent.periodic_callback list)
+    ~(tools : Agent_sdk.Tool.t list)
+    ~(hooks : Agent_sdk.Hooks.hooks)
+    ~(raw_trace : Agent_sdk.Raw_trace.t)
+    ~(heartbeat_callbacks : Agent_sdk.Agent.periodic_callback list)
     ?(gate_config : Eval_gate.gate_config option)
     ?context_injector
     ?context
-    ?(approval : Oas.Hooks.approval_callback =
+    ?(approval : Agent_sdk.Hooks.approval_callback =
       Approval_callbacks.reject_by_default)
-    () : (Oas.Agent.t, string) result =
+    () : (Agent_sdk.Agent.t, string) result =
   let config = agent_config_of_worker_meta meta ~system_prompt in
   let tool_names =
-    List.map (fun (tool : Oas.Tool.t) -> tool.schema.name) tools
+    List.map (fun (tool : Agent_sdk.Tool.t) -> tool.schema.name) tools
   in
   let guardrails =
     match gate_config with
@@ -161,46 +161,46 @@ let build_agent
         Verifier_oas.eval_gate_to_oas_guardrails gate
     | None ->
         {
-          Oas.Guardrails.tool_filter = AllowList tool_names;
+          Agent_sdk.Guardrails.tool_filter = AllowList tool_names;
           max_tool_calls_per_turn = Some Oas_worker_cascade.worker_max_tool_calls_per_turn;
         }
   in
   let builder =
-    Oas.Builder.create ~net ~model:config.model
-    |> Oas.Builder.with_name config.name
-    |> Oas.Builder.with_system_prompt system_prompt
-    |> (fun b -> match config.max_tokens with Some n -> Oas.Builder.with_max_tokens n b | None -> b)
-    |> Oas.Builder.with_max_turns config.max_turns
-    |> Oas.Builder.with_temperature Oas_worker_cascade.worker_temperature
-    |> Oas.Builder.with_top_p Oas_worker_cascade.worker_top_p
-    |> Oas.Builder.with_top_k Oas_worker_cascade.worker_top_k
+    Agent_sdk.Builder.create ~net ~model:config.model
+    |> Agent_sdk.Builder.with_name config.name
+    |> Agent_sdk.Builder.with_system_prompt system_prompt
+    |> (fun b -> match config.max_tokens with Some n -> Agent_sdk.Builder.with_max_tokens n b | None -> b)
+    |> Agent_sdk.Builder.with_max_turns config.max_turns
+    |> Agent_sdk.Builder.with_temperature Oas_worker_cascade.worker_temperature
+    |> Agent_sdk.Builder.with_top_p Oas_worker_cascade.worker_top_p
+    |> Agent_sdk.Builder.with_top_k Oas_worker_cascade.worker_top_k
     (* with_min_p intentionally omitted — see agent_config_of_worker_meta
        above for the reason. The worker_min_p constant is 0.0 (a no-op)
        and cloud providers (Groq, GLM) reject the field itself. *)
-    |> Oas.Builder.with_enable_thinking
+    |> Agent_sdk.Builder.with_enable_thinking
          (Option.value ~default:false meta.thinking_enabled)
-    |> Oas.Builder.with_tool_choice Oas.Types.Auto
-    |> Oas.Builder.with_provider provider
-    |> Oas.Builder.with_tools tools
-    |> Oas.Builder.with_hooks hooks
-    |> Oas.Builder.with_guardrails guardrails
-    |> Oas.Builder.with_tool_retry_policy default_internal_tool_retry_policy
-    |> Oas.Builder.with_raw_trace raw_trace
-    |> Oas.Builder.with_periodic_callbacks heartbeat_callbacks
-    |> Oas.Builder.with_description (description_of_meta meta)
+    |> Agent_sdk.Builder.with_tool_choice Agent_sdk.Types.Auto
+    |> Agent_sdk.Builder.with_provider provider
+    |> Agent_sdk.Builder.with_tools tools
+    |> Agent_sdk.Builder.with_hooks hooks
+    |> Agent_sdk.Builder.with_guardrails guardrails
+    |> Agent_sdk.Builder.with_tool_retry_policy default_internal_tool_retry_policy
+    |> Agent_sdk.Builder.with_raw_trace raw_trace
+    |> Agent_sdk.Builder.with_periodic_callbacks heartbeat_callbacks
+    |> Agent_sdk.Builder.with_description (description_of_meta meta)
     (* #7883 *)
-    |> Oas.Builder.with_approval approval
+    |> Agent_sdk.Builder.with_approval approval
   in
   let builder = match context_injector with
-    | Some ci -> Oas.Builder.with_context_injector ci builder
+    | Some ci -> Agent_sdk.Builder.with_context_injector ci builder
     | None -> builder
   in
   let builder = match context with
-    | Some ctx -> Oas.Builder.with_context ctx builder
+    | Some ctx -> Agent_sdk.Builder.with_context ctx builder
     | None -> builder
   in
-  Oas.Builder.build_safe builder
-  |> Result.map_error Oas.Error.to_string
+  Agent_sdk.Builder.build_safe builder
+  |> Result.map_error Agent_sdk.Error.to_string
 
 (* ================================================================ *)
 (* Build heartbeat callback                                          *)
@@ -212,13 +212,13 @@ let make_heartbeat_callbacks
     ~(sw : Eio.Switch.t)
     ~(auth_token : string option)
     ~(session_id : string)
-    ~(worker_name : string) : Oas.Agent.periodic_callback list =
+    ~(worker_name : string) : Agent_sdk.Agent.periodic_callback list =
   let interval = Worker_container_types.local_worker_heartbeat_interval_sec () in
   if interval <= 0 then []
   else
     [
       {
-        Oas.Agent_types.interval_sec = float_of_int interval;
+        Agent_sdk.Agent_types.interval_sec = float_of_int interval;
         callback =
           (fun () ->
             match
@@ -302,17 +302,17 @@ let make_tool_tracking_hooks ?gate_config ?context () =
   let tool_names_ref = ref [] in
   let tracking =
     {
-      Oas.Hooks.empty with
+      Agent_sdk.Hooks.empty with
       pre_tool_use =
         Some
           (fun event ->
             match event with
-            | Oas.Hooks.PreToolUse { tool_name; input; accumulated_cost_usd; _ } ->
+            | Agent_sdk.Hooks.PreToolUse { tool_name; input; accumulated_cost_usd; _ } ->
               (* Always track tool names *)
               tool_names_ref := tool_name :: !tool_names_ref;
               (* Safety gates (when gate_config is provided) *)
               (match gate_config with
-               | None -> Oas.Hooks.Continue
+               | None -> Agent_sdk.Hooks.Continue
                | Some (gate : Eval_gate.gate_config) ->
                  (* Gate 0: Deny list *)
                  if Tool_access_policy.selector_matches_name
@@ -321,7 +321,7 @@ let make_tool_tracking_hooks ?gate_config ?context () =
                  then begin
                    Log.LocalWorker.warn "worker deny list: blocked %s"
                      tool_name;
-                   Oas.Hooks.Override
+                   Agent_sdk.Hooks.Override
                      (render_worker_skip_reason
                         ~tool_name
                         ~reason_code:"worker_deny"
@@ -338,7 +338,7 @@ let make_tool_tracking_hooks ?gate_config ?context () =
                    Log.LocalWorker.warn
                      "worker cost gate: $%.4f >= $%.4f limit, skipping %s"
                      accumulated_cost_usd gate.max_cost_usd tool_name;
-                   Oas.Hooks.Override
+                   Agent_sdk.Hooks.Override
                      (render_worker_skip_reason
                         ~tool_name ~reason_code:"cost_gate" ~reason_text)
                  end
@@ -356,56 +356,56 @@ let make_tool_tracking_hooks ?gate_config ?context () =
                       Log.LocalWorker.warn
                         "worker destructive pattern in %s: '%s' (%s)"
                         tool_name pattern desc;
-                      Oas.Hooks.Override
+                      Agent_sdk.Hooks.Override
                         (render_worker_skip_reason
                            ~tool_name
                            ~reason_code:"destructive_guard"
                            ~reason_text)
-                    | None -> Oas.Hooks.Continue)
+                    | None -> Agent_sdk.Hooks.Continue)
                  else
-                   Oas.Hooks.Continue)
-            | _ -> Oas.Hooks.Continue);
+                   Agent_sdk.Hooks.Continue)
+            | _ -> Agent_sdk.Hooks.Continue);
       on_error = Some (function
-        | Oas.Hooks.OnError { detail; context = err_ctx } ->
+        | Agent_sdk.Hooks.OnError { detail; context = err_ctx } ->
           Log.LocalWorker.warn "worker on_error: %s (context: %s)"
             detail err_ctx;
-          Oas.Hooks.Continue
-        | _ -> Oas.Hooks.Continue);
+          Agent_sdk.Hooks.Continue
+        | _ -> Agent_sdk.Hooks.Continue);
       on_tool_error = Some (function
-        | Oas.Hooks.OnToolError { tool_name; error } ->
+        | Agent_sdk.Hooks.OnToolError { tool_name; error } ->
           Log.LocalWorker.warn "worker tool_error: %s — %s"
             tool_name error;
-          Oas.Hooks.Continue
-        | _ -> Oas.Hooks.Continue);
+          Agent_sdk.Hooks.Continue
+        | _ -> Agent_sdk.Hooks.Continue);
     }
   in
   let hooks = match context with
     | Some ctx ->
       let temporal =
-        { Oas.Hooks.empty with
+        { Agent_sdk.Hooks.empty with
           before_turn_params =
             Some (function
-              | Oas.Hooks.BeforeTurnParams { current_params; _ } ->
+              | Agent_sdk.Hooks.BeforeTurnParams { current_params; _ } ->
                 (match Masc_context_injector.render_temporal_summary ctx with
-                 | None -> Oas.Hooks.Continue
+                 | None -> Agent_sdk.Hooks.Continue
                  | Some summary ->
-                   let ctx_str = match current_params.Oas.Hooks.extra_system_context with
+                   let ctx_str = match current_params.Agent_sdk.Hooks.extra_system_context with
                      | None -> summary
                      | Some prev -> prev ^ "\n\n" ^ summary
                    in
-                   Oas.Hooks.AdjustParams { current_params with
+                   Agent_sdk.Hooks.AdjustParams { current_params with
                      extra_system_context = Some ctx_str })
-              | _ -> Oas.Hooks.Continue);
+              | _ -> Agent_sdk.Hooks.Continue);
         }
       in
-      Oas.Hooks.compose ~outer:temporal ~inner:tracking
+      Agent_sdk.Hooks.compose ~outer:temporal ~inner:tracking
     | None -> tracking
   in
   (tool_names_ref, hooks)
 
 let resume_model_id_of_checkpoint
     (meta : Worker_container_types.worker_container_meta)
-    (checkpoint : Oas.Checkpoint.t) =
+    (checkpoint : Agent_sdk.Checkpoint.t) =
   if checkpoint.model <> "" then checkpoint.model else meta.effective_model
 
 (* ================================================================ *)
@@ -426,11 +426,11 @@ let rec run_worker_via_oas
     ~(base_path : string)
     ~(auth_token : string option)
     ~(meta : Worker_container_types.worker_container_meta)
-    ~(provider : Oas.Provider.config)
+    ~(provider : Agent_sdk.Provider.config)
     ~(system_prompt : string)
     ~(prompt : string)
-    ~(tools : Oas.Tool.t list)
-    ~(raw_trace : Oas.Raw_trace.t)
+    ~(tools : Agent_sdk.Tool.t list)
+    ~(raw_trace : Agent_sdk.Raw_trace.t)
     ?(gate_config : Eval_gate.gate_config option)
     ?contract
     ?worker_run_id
@@ -445,7 +445,7 @@ let rec run_worker_via_oas
   in
   let injector_config = Masc_context_injector.default_config () in
   let context_injector = Masc_context_injector.make ~config:injector_config () in
-  let shared_context = Oas.Context.create () in
+  let shared_context = Agent_sdk.Context.create () in
   let tool_names_ref, hooks = make_tool_tracking_hooks ?gate_config ~context:shared_context () in
   let* agent =
     build_agent ~net ~meta ~provider ~system_prompt ~tools ~hooks
@@ -481,13 +481,13 @@ and resume_worker_via_oas
     ~(base_path : string)
     ~(auth_token : string option)
     ~(meta : Worker_container_types.worker_container_meta)
-    ~(checkpoint : Oas.Checkpoint.t)
+    ~(checkpoint : Agent_sdk.Checkpoint.t)
     ~(prompt : string)
-    ~(tools : Oas.Tool.t list)
-    ~(raw_trace : Oas.Raw_trace.t)
+    ~(tools : Agent_sdk.Tool.t list)
+    ~(raw_trace : Agent_sdk.Raw_trace.t)
     ?contract
     ?worker_run_id
-    ?(approval : Oas.Hooks.approval_callback =
+    ?(approval : Agent_sdk.Hooks.approval_callback =
       Approval_callbacks.reject_by_default)
     () : (Worker_container_types.run_result, string) result =
   Masc_runtime_events.emit_turn_start ();
@@ -500,7 +500,7 @@ and resume_worker_via_oas
   in
   let injector_config = Masc_context_injector.default_config () in
   let context_injector = Masc_context_injector.make ~config:injector_config () in
-  let shared_context = Oas.Context.copy checkpoint.context in
+  let shared_context = Agent_sdk.Context.copy checkpoint.context in
   let gate_config = default_gate_config () in
   let tool_names_ref, hooks = make_tool_tracking_hooks ~gate_config ~context:shared_context () in
   let resume_model_id = resume_model_id_of_checkpoint meta checkpoint in
@@ -529,7 +529,7 @@ and resume_worker_via_oas
       ~tool_retry_policy:default_internal_tool_retry_policy ()
   in
   let options = { options with
-    Oas.Agent_types.context_injector = Some context_injector;
+    Agent_sdk.Agent_types.context_injector = Some context_injector;
     (* #7883 *)
     approval = Some approval } in
   Fun.protect
@@ -545,7 +545,7 @@ and resume_worker_via_oas
       | Error e -> Error ("worker join failed: " ^ e)
       | Ok _ ->
         let agent =
-          Oas.Agent.resume ~net ~checkpoint ~tools ~options ~config
+          Agent_sdk.Agent.resume ~net ~checkpoint ~tools ~options ~config
             ~context:shared_context ()
         in
         let workspace_path =
@@ -561,17 +561,17 @@ and run_existing_worker_agent
     ~(meta : Worker_container_types.worker_container_meta)
     ~(prompt : string)
     ~(workspace_path : string)
-    ~(raw_trace : Oas.Raw_trace.t)
+    ~(raw_trace : Agent_sdk.Raw_trace.t)
     ?worker_run_id
     ?contract
     ~(tool_names_ref : string list ref)
-    (agent : Oas.Agent.t)
+    (agent : Agent_sdk.Agent.t)
   : (Worker_container_types.run_result, string) result =
   let worker_name = meta.worker_name in
   let session_id = meta.mcp_session_id in
   Fun.protect
     ~finally:(fun () ->
-      try Oas.Agent.close agent
+      try Agent_sdk.Agent.close agent
       with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->
@@ -580,19 +580,19 @@ and run_existing_worker_agent
     (fun () ->
       let result, proof = match contract with
         | Some c ->
-          let cr = Oas.Contract_runner.run ~sw ~contract:c agent prompt in
+          let cr = Agent_sdk.Contract_runner.run ~sw ~contract:c agent prompt in
           (cr.response, Some cr.proof)
         | None ->
-          (Oas.Agent.run ~sw agent prompt, None)
+          (Agent_sdk.Agent.run ~sw agent prompt, None)
       in
-      let raw_trace_run = Oas.Agent.last_raw_trace_run agent in
+      let raw_trace_run = Agent_sdk.Agent.last_raw_trace_run agent in
       let evidence_session_id =
         Worker_container.evidence_session_id_of_worker_run
           (Option.map
-             (fun (run_ref : Oas.Raw_trace.run_ref) -> run_ref.worker_run_id)
+             (fun (run_ref : Agent_sdk.Raw_trace.run_ref) -> run_ref.worker_run_id)
              raw_trace_run)
       in
-      let checkpoint = Oas.Agent.checkpoint ~session_id agent in
+      let checkpoint = Agent_sdk.Agent.checkpoint ~session_id agent in
       let tool_names =
         List.rev !tool_names_ref
         |> Worker_container_types.unique_preserve_order
@@ -614,7 +614,7 @@ and run_existing_worker_agent
           let output =
             response.content
             |> List.filter_map (function
-                 | Oas.Types.Text text -> Some text
+                 | Agent_sdk.Types.Text text -> Some text
                  | _ -> None)
             |> String.concat "\n"
           in
@@ -624,10 +624,10 @@ and run_existing_worker_agent
               ~status:"ok" ~output
               ?raw_trace_run
               ?evidence_session_id
-              ?proof_run_id:(Option.map (fun p -> p.Oas.Cdal_proof.run_id) proof)
+              ?proof_run_id:(Option.map (fun p -> p.Agent_sdk.Cdal_proof.run_id) proof)
               ?proof_result_status:
                 (Option.map
-                   (fun p -> proof_result_status_to_string p.Oas.Cdal_proof.result_status)
+                   (fun p -> proof_result_status_to_string p.Agent_sdk.Cdal_proof.result_status)
                    proof)
               ()
           in
@@ -648,7 +648,7 @@ and run_existing_worker_agent
               proof;
             }
       | Error err ->
-          let detail = Oas.Error.to_string err in
+          let detail = Agent_sdk.Error.to_string err in
           (match proof with
            | Some p ->
              Log.LocalWorker.warn
@@ -664,10 +664,10 @@ and run_existing_worker_agent
               ~status:"error" ~output:detail ~error:detail
               ?raw_trace_run
               ?evidence_session_id
-              ?proof_run_id:(Option.map (fun p -> p.Oas.Cdal_proof.run_id) proof)
+              ?proof_run_id:(Option.map (fun p -> p.Agent_sdk.Cdal_proof.run_id) proof)
               ?proof_result_status:
                 (Option.map
-                   (fun p -> proof_result_status_to_string p.Oas.Cdal_proof.result_status)
+                   (fun p -> proof_result_status_to_string p.Agent_sdk.Cdal_proof.result_status)
                    proof)
               ()
           in
@@ -686,15 +686,15 @@ let orchestrate_workers
     ~(sw : Eio.Switch.t)
     ~(net : [> `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
     ~(workers : (Worker_container_types.worker_container_meta
-                 * Oas.Provider.config
+                 * Agent_sdk.Provider.config
                  * string (* system_prompt *)
-                 * Oas.Tool.t list
-                 * Oas.Raw_trace.t
-                 * Oas.Agent.periodic_callback list) list)
-    ~(plan : Oas.Orchestrator.plan)
+                 * Agent_sdk.Tool.t list
+                 * Agent_sdk.Raw_trace.t
+                 * Agent_sdk.Agent.periodic_callback list) list)
+    ~(plan : Agent_sdk.Orchestrator.plan)
     ?on_task_start
     ?on_task_complete
-    () : (Oas.Orchestrator.task_result list, string) result =
+    () : (Agent_sdk.Orchestrator.task_result list, string) result =
   let rec build_agents acc = function
     | [] -> Ok (List.rev acc)
     | ((meta : Worker_container_types.worker_container_meta), provider, system_prompt, tools, raw_trace, heartbeat_cbs) :: rest ->
@@ -711,11 +711,11 @@ let orchestrate_workers
   let* named_agents = build_agents [] workers in
   let config =
     {
-      Oas.Orchestrator.default_config with
+      Agent_sdk.Orchestrator.default_config with
       max_parallel = 4;
       on_task_start;
       on_task_complete;
     }
   in
-  let orch = Oas.Orchestrator.create ~config named_agents in
-  Ok (Oas.Orchestrator.execute ~sw orch plan)
+  let orch = Agent_sdk.Orchestrator.create ~config named_agents in
+  Ok (Agent_sdk.Orchestrator.execute ~sw orch plan)

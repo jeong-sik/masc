@@ -30,7 +30,7 @@ val model_uses_anthropic_caching_with_provider_kind :
 
 val classify :
   usage_reported:bool ->
-  usage:Oas.Types.api_usage ->
+  usage:Agent_sdk.Types.api_usage ->
   model_used:string ->
   resolved_model_id:string ->
   context_max:int ->
@@ -39,7 +39,7 @@ val classify :
 val classify_with_provider_kind :
   provider_kind:Llm_provider.Provider_config.provider_kind option ->
   usage_reported:bool ->
-  usage:Oas.Types.api_usage ->
+  usage:Agent_sdk.Types.api_usage ->
   model_used:string ->
   resolved_model_id:string ->
   context_max:int ->

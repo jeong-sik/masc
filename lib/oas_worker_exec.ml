@@ -30,11 +30,11 @@ type config =
   Oas_worker_exec_agent.config = {
   name : string;
   provider_cfg : Llm_provider.Provider_config.t;
-  provider : Oas.Provider.config;
+  provider : Agent_sdk.Provider.config;
   model_id : string;
   priority : Llm_provider.Request_priority.t option;
   system_prompt : string;
-  tools : Oas.Tool.t list;
+  tools : Agent_sdk.Tool.t list;
   runtime_mcp_policy :
     Llm_provider.Llm_transport.runtime_mcp_policy option;
   max_turns : int;
@@ -44,20 +44,20 @@ type config =
   max_input_tokens : int option;
   max_cost_usd : float option;
   temperature : float;
-  hooks : Oas.Hooks.hooks option;
-  context_reducer : Oas.Context_reducer.t option;
-  guardrails : Oas.Guardrails.t option;
-  event_bus : Oas.Event_bus.t option;
+  hooks : Agent_sdk.Hooks.hooks option;
+  context_reducer : Agent_sdk.Context_reducer.t option;
+  guardrails : Agent_sdk.Guardrails.t option;
+  event_bus : Agent_sdk.Event_bus.t option;
   checkpoint_dir : string option;
   session_id : string option;
   description : string option;
-  memory : Oas.Memory.t option;
-  initial_messages : Oas.Types.message list;
-  raw_trace : Oas.Raw_trace.t option;
-  tool_retry_policy : Oas.Tool_retry_policy.t option;
+  memory : Agent_sdk.Memory.t option;
+  initial_messages : Agent_sdk.Types.message list;
+  raw_trace : Agent_sdk.Raw_trace.t option;
+  tool_retry_policy : Agent_sdk.Tool_retry_policy.t option;
   required_tool_satisfaction :
-    Oas.Completion_contract.required_tool_satisfaction;
-  contract : Oas.Risk_contract.t option;
+    Agent_sdk.Completion_contract.required_tool_satisfaction;
+  contract : Agent_sdk.Risk_contract.t option;
   enable_thinking : bool option;
   transport : Masc_grpc_transport.t;
   allowed_paths : string list;
@@ -65,13 +65,13 @@ type config =
   cache_system_prompt : bool;
   yield_on_tool : bool;
   compact_ratio : float option;
-  context_injector : Oas.Hooks.context_injector option;
-  context : Oas.Context.t option;
+  context_injector : Agent_sdk.Hooks.context_injector option;
+  context : Agent_sdk.Context.t option;
   slot_id : int option;
-  approval : Oas.Hooks.approval_callback option;
+  approval : Agent_sdk.Hooks.approval_callback option;
   exit_condition : (int -> bool) option;
   exit_condition_result : (int -> stop_reason * string option) option;
-  summarizer : (Oas.Types.message list -> string) option;
+  summarizer : (Agent_sdk.Types.message list -> string) option;
   cli_transport_overrides : cli_transport_overrides option;
       (** Custom summarizer for OAS [Budget_strategy.reduce_for_budget]
           Emergency-phase compaction. Defaults to OAS's extractive
@@ -82,13 +82,13 @@ type config =
 let default_config = Oas_worker_exec_agent.default_config
 
 type run_result = {
-  response : Oas.Types.api_response;
-  checkpoint : Oas.Checkpoint.t option;
+  response : Agent_sdk.Types.api_response;
+  checkpoint : Agent_sdk.Checkpoint.t option;
   session_id : string;
   turns : int;
-  trace_ref : Oas.Raw_trace.run_ref option;
-  run_validation : Oas.Raw_trace.run_validation option;
-  proof : Oas.Cdal_proof.t option;
+  trace_ref : Agent_sdk.Raw_trace.run_ref option;
+  run_validation : Agent_sdk.Raw_trace.run_validation option;
+  proof : Agent_sdk.Cdal_proof.t option;
   cascade_observation : Oas_worker_cascade.cascade_observation option;
   stop_reason : stop_reason;
 }
@@ -103,7 +103,7 @@ let lowercase_enum_case_name raw =
   String.lowercase_ascii raw
 
 let proof_result_status_to_string status =
-  Oas.Cdal_proof.show_result_status status |> lowercase_enum_case_name
+  Agent_sdk.Cdal_proof.show_result_status status |> lowercase_enum_case_name
 
 (* ================================================================ *)
 (* Internal: resolve provider                                        *)
@@ -232,7 +232,7 @@ let build
     ~(sw : Eio.Switch.t)
     ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
     ~(config : config)
-  : (Oas.Agent.t, Oas.Error.sdk_error) result =
+  : (Agent_sdk.Agent.t, Agent_sdk.Error.sdk_error) result =
   match
     non_http_transport_of_provider ~sw ~provider_cfg:config.provider_cfg
       ?runtime_mcp_policy:config.runtime_mcp_policy
@@ -246,16 +246,16 @@ let build
       in
       let builder =
         match config.approval with
-        | Some cb -> Oas.Builder.with_approval cb builder
+        | Some cb -> Agent_sdk.Builder.with_approval cb builder
         | None -> builder
       in
-      Oas.Builder.build_safe builder
+      Agent_sdk.Builder.build_safe builder
 
 (* ================================================================ *)
 (* Idle-detail enrichment                                           *)
 (* ================================================================ *)
 
-(** Enrich an [Oas.Error.to_string] detail with the name of the most
+(** Enrich an [Agent_sdk.Error.to_string] detail with the name of the most
     recently called tool when the error is an "Idle detected" failure.
     For all other error strings the input is returned unchanged.
 
@@ -274,7 +274,7 @@ let dashboard_status_of_stop_reason = function
       Dashboard_oas_bridge.Cancelled { reason = "mutation_boundary_reached" }
 
 let record_dashboard_oas_response ~config ~total_duration_ms ?serialization_ms
-    ~status (response : Oas.Types.api_response) =
+    ~status (response : Agent_sdk.Types.api_response) =
   try
     let provider_id = Provider_adapter.provider_label_of_config config.provider_cfg in
     let model_id =
@@ -318,8 +318,8 @@ let resume_from_checkpoint
     ~(sw : Eio.Switch.t)
     ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
     ~(config : config)
-    ~(checkpoint : Oas.Checkpoint.t)
-  : (Oas.Agent.t, Oas.Error.sdk_error) result =
+    ~(checkpoint : Agent_sdk.Checkpoint.t)
+  : (Agent_sdk.Agent.t, Agent_sdk.Error.sdk_error) result =
   match
     non_http_transport_of_provider ~sw ~provider_cfg:config.provider_cfg
       ?runtime_mcp_policy:config.runtime_mcp_policy
@@ -337,7 +337,7 @@ let resume_from_checkpoint
         prepared_resume.agent_config.max_turns;
       let options = { prepared_resume.options with transport } in
       Ok
-        (Oas.Agent.resume ~net ~checkpoint:prepared_resume.patched_checkpoint
+        (Agent_sdk.Agent.resume ~net ~checkpoint:prepared_resume.patched_checkpoint
            ~tools:config.tools ?context:config.context
            ~options ~config:prepared_resume.agent_config ())
 
@@ -350,14 +350,14 @@ let run
     ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
     ~(config : config)
     ?oas_checkpoint
-    ?(on_event : (Oas.Types.sse_event -> unit) option)
+    ?(on_event : (Agent_sdk.Types.sse_event -> unit) option)
     ?(on_yield : (unit -> unit) option)
     ?(on_resume : (unit -> unit) option)
-    ?(agent_ref : Oas.Agent.t option ref option)
-    ?(proof_ref : Oas.Cdal_proof.t option ref option)
-    ?(contract : Oas.Risk_contract.t option)
+    ?(agent_ref : Agent_sdk.Agent.t option ref option)
+    ?(proof_ref : Agent_sdk.Cdal_proof.t option ref option)
+    ?(contract : Agent_sdk.Risk_contract.t option)
     (goal : string)
-  : (run_result, Oas.Error.sdk_error) result =
+  : (run_result, Agent_sdk.Error.sdk_error) result =
   let session_id = match config.session_id with
     | Some id -> id
     | None ->
@@ -390,8 +390,8 @@ let run
   | Error e ->
     Option.iter (fun bus ->
       publish_lifecycle bus ~name:config.name ~event:"build_error"
-        ~detail:(Oas.Error.to_string e)
-        ~error:(Oas.Error.to_string e)
+        ~detail:(Agent_sdk.Error.to_string e)
+        ~error:(Agent_sdk.Error.to_string e)
         ~status:"build_error"
         ~session_id
         ()
@@ -404,12 +404,12 @@ let run
   (try
     let result, proof = match effective_contract with
       | Some c ->
-        let cr = Oas.Contract_runner.run ~sw ~contract:c agent goal in
+        let cr = Agent_sdk.Contract_runner.run ~sw ~contract:c agent goal in
         (cr.response, Some cr.proof)
       | None ->
         let r = match on_event with
-          | Some cb -> Oas.Agent.run_stream ~sw ?on_yield ?on_resume ~on_event:cb agent goal
-          | None -> Oas.Agent.run ~sw ?on_yield ?on_resume agent goal
+          | Some cb -> Agent_sdk.Agent.run_stream ~sw ?on_yield ?on_resume ~on_event:cb agent goal
+          | None -> Agent_sdk.Agent.run ~sw ?on_yield ?on_resume agent goal
         in
         (r, None)
     in
@@ -434,7 +434,7 @@ let run
       let error =
         match result with
         | Ok _ -> None
-        | Error e -> Some (Oas.Error.to_string e)
+        | Error e -> Some (Agent_sdk.Error.to_string e)
       in
       publish_lifecycle bus ~name:config.name ~event:status
         ~detail:(Printf.sprintf "session=%s" session_id)
@@ -443,17 +443,17 @@ let run
         ~status
         ()
     ) config.event_bus;
-    let turns = (Oas.Agent.state agent).turn_count in
-    let trace_ref = Oas.Agent.last_raw_trace_run agent in
-    Oas.Agent.close agent;
+    let turns = (Agent_sdk.Agent.state agent).turn_count in
+    let trace_ref = Agent_sdk.Agent.last_raw_trace_run agent in
+    Agent_sdk.Agent.close agent;
     let run_validation =
       match trace_ref with
       | Some ref_ ->
-        (match Oas.Raw_trace_query.validate_run ref_ with
+        (match Agent_sdk.Raw_trace_query.validate_run ref_ with
          | Ok v -> Some v
          | Error err ->
            Log.Misc.warn "oas_worker: run_validation failed: %s"
-             (Oas.Error.to_string err);
+             (Agent_sdk.Error.to_string err);
            None)
       | None -> None
     in
@@ -474,7 +474,7 @@ let run
           cascade_observation = None;
           stop_reason = Completed;
         }
-    | Error (Oas.Error.Agent (Oas.Error.MaxTurnsExceeded r)) ->
+    | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.MaxTurnsExceeded r)) ->
       let partial_response =
         partial_response_of_stop
           ~session_id
@@ -497,7 +497,7 @@ let run
           cascade_observation = None;
           stop_reason = TurnBudgetExhausted { turns_used = r.turns; limit = r.limit };
         }
-    | Error (Oas.Error.Agent (Oas.Error.ExitConditionMet r)) -> (
+    | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.ExitConditionMet r)) -> (
       match config.exit_condition_result with
       | Some render ->
         let stop_reason, response_text_opt = render r.turn in
@@ -529,11 +529,11 @@ let run
             stop_reason;
           }
       | None ->
-        Error (Oas.Error.Agent (Oas.Error.ExitConditionMet r)))
+        Error (Agent_sdk.Error.Agent (Agent_sdk.Error.ExitConditionMet r)))
     | Error err ->
-      let detail = Oas.Error.to_string err in
+      let detail = Agent_sdk.Error.to_string err in
       let detail =
-        enrich_idle_detail detail (Oas.Agent.state agent).messages
+        enrich_idle_detail detail (Agent_sdk.Agent.state agent).messages
       in
       let error_response =
         partial_response_of_stop ~session_id ~model_id:config.model_id
@@ -561,7 +561,7 @@ let run
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
     let bt = Printexc.get_backtrace () in
-    (try Oas.Agent.close agent with close_exn ->
+    (try Agent_sdk.Agent.close agent with close_exn ->
       Log.Misc.warn "agent close failed during cleanup: %s" (Printexc.to_string close_exn));
     let detail =
       Printf.sprintf "execution exception: %s" (Printexc.to_string exn)
@@ -576,7 +576,7 @@ let run
       error_response;
     Log.Misc.error "oas_worker %s: execution exception: %s\nBacktrace: %s"
       config.name (Printexc.to_string exn) bt;
-    Error (Oas.Error.Internal (Printf.sprintf "execution exception: %s" (Printexc.to_string exn))))
+    Error (Agent_sdk.Error.Internal (Printf.sprintf "execution exception: %s" (Printexc.to_string exn))))
 
 (* ================================================================ *)
 (* Convenience: run_with_masc_tools                                  *)
@@ -593,7 +593,7 @@ let run_with_masc_tools
     ?on_yield
     ?on_resume
     (goal : string)
-  : (run_result, Oas.Error.sdk_error) result =
+  : (run_result, Agent_sdk.Error.sdk_error) result =
   match
     public_mcp_runtime_policy_of_tool_names
       (List.map (fun (td : Types.tool_schema) -> td.name) masc_tools)

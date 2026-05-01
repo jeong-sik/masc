@@ -16,7 +16,7 @@ module Char = Stdlib.Char
 module Int = Stdlib.Int
 module Float = Stdlib.Float
 
-module Sg = Oas.Tool_schema_gen
+module Sg = Agent_sdk.Tool_schema_gen
 
 let room_field =
   Sg.string_field "room" ~required:true
@@ -43,7 +43,7 @@ let parse schema ~tool_name json =
   | Ok value -> Ok value
   | Error errs ->
       Error
-        (Oas.Tool_input_validation.format_errors ~tool_name errs)
+        (Agent_sdk.Tool_input_validation.format_errors ~tool_name errs)
 
 let schema_to_tool_schema ~name ~description schema : Types.tool_schema =
   {

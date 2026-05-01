@@ -1219,13 +1219,13 @@ let init () =
      approaching this cap indicate impending publish blocking."
     Gauge;
   add metric_oas_bus_publish_block_seconds
-    "Cumulative seconds spent inside Oas.Event_bus.publish when routed \
+    "Cumulative seconds spent inside Agent_sdk.Event_bus.publish when routed \
      through Oas_bus_instrument.publish. A sustained ramp indicates a \
      subscriber drain loop has fallen behind and publishers are blocking \
      on Eio.Stream.add."
     Counter;
   add metric_oas_bus_publish
-    "Total Oas.Event_bus.publish calls routed through \
+    "Total Agent_sdk.Event_bus.publish calls routed through \
      Oas_bus_instrument.publish."
     Counter;
   add metric_runtime_ollama_probe_generate_skips

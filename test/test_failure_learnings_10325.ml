@@ -38,7 +38,7 @@ let extract_failure_learnings ~error_kind ~error_message =
         ~trace_id:"trace-1"
         ~error_kind:(Memory_oas_bridge.error_kind_of_string error_kind)
         ~error_message ();
-      let episodes = Oas.Memory.recall_episodes memory ~limit:10 () in
+      let episodes = Agent_sdk.Memory.recall_episodes memory ~limit:10 () in
       match episodes with
       | [] -> failwith "no episode persisted"
       | ep :: _ ->

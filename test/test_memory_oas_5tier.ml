@@ -83,13 +83,13 @@ let test_memory_scratchpad_lifecycle () =
     Memory_oas_bridge.create_memory ~agent_name:"test-scratch" ()
   in
   (* Store to scratchpad *)
-  ignore (Oas.Memory.store memory ~tier:Oas.Memory.Scratchpad
+  ignore (Agent_sdk.Memory.store memory ~tier:Agent_sdk.Memory.Scratchpad
     "current_tool" (`String "bash"));
-  let (sp, _, _, _, _) = Oas.Memory.stats memory in
+  let (sp, _, _, _, _) = Agent_sdk.Memory.stats memory in
   Alcotest.(check int) "scratchpad has 1" 1 sp;
   (* Clear scratchpad (simulating turn boundary) *)
-  Oas.Memory.clear_scratchpad memory;
-  let (sp2, _, _, _, _) = Oas.Memory.stats memory in
+  Agent_sdk.Memory.clear_scratchpad memory;
+  let (sp2, _, _, _, _) = Agent_sdk.Memory.stats memory in
   Alcotest.(check int) "scratchpad cleared" 0 sp2;
   cleanup_tmp_dir dir
 
@@ -98,15 +98,15 @@ let test_memory_working_survives_clear () =
   let memory =
     Memory_oas_bridge.create_memory ~agent_name:"test-working" ()
   in
-  ignore (Oas.Memory.store memory ~tier:Oas.Memory.Working
+  ignore (Agent_sdk.Memory.store memory ~tier:Agent_sdk.Memory.Working
     "session_goal" (`String "deploy v2"));
-  ignore (Oas.Memory.store memory ~tier:Oas.Memory.Scratchpad
+  ignore (Agent_sdk.Memory.store memory ~tier:Agent_sdk.Memory.Scratchpad
     "temp" (`String "ephemeral"));
-  Oas.Memory.clear_scratchpad memory;
-  let (sp, wk, _, _, _) = Oas.Memory.stats memory in
+  Agent_sdk.Memory.clear_scratchpad memory;
+  let (sp, wk, _, _, _) = Agent_sdk.Memory.stats memory in
   Alcotest.(check int) "scratchpad cleared" 0 sp;
   Alcotest.(check int) "working survives" 1 wk;
-  (match Oas.Memory.recall memory ~tier:Oas.Memory.Working "session_goal" with
+  (match Agent_sdk.Memory.recall memory ~tier:Agent_sdk.Memory.Working "session_goal" with
    | Some (`String g) ->
      Alcotest.(check string) "goal preserved" "deploy v2" g
    | _ -> Alcotest.fail "expected working memory to survive clear");
@@ -117,12 +117,12 @@ let test_memory_promote_scratchpad_to_working () =
   let memory =
     Memory_oas_bridge.create_memory ~agent_name:"test-promote" ()
   in
-  ignore (Oas.Memory.store memory ~tier:Oas.Memory.Scratchpad
+  ignore (Agent_sdk.Memory.store memory ~tier:Agent_sdk.Memory.Scratchpad
     "important_finding" (`String "bug in auth"));
-  let promoted = Oas.Memory.promote memory "important_finding" in
+  let promoted = Agent_sdk.Memory.promote memory "important_finding" in
   Alcotest.(check bool) "promote succeeded" true promoted;
-  Oas.Memory.clear_scratchpad memory;
-  (match Oas.Memory.recall memory ~tier:Oas.Memory.Working "important_finding" with
+  Agent_sdk.Memory.clear_scratchpad memory;
+  (match Agent_sdk.Memory.recall memory ~tier:Agent_sdk.Memory.Working "important_finding" with
    | Some (`String v) ->
      Alcotest.(check string) "promoted value" "bug in auth" v
    | _ -> Alcotest.fail "promoted value should be in Working after clear");
@@ -135,17 +135,17 @@ let test_memory_promote_scratchpad_to_working () =
 let test_episodic_store_recall () =
   let dir = setup_tmp_dir () in
   let memory = Memory_oas_bridge.create_memory ~agent_name:"test-ep" () in
-  let ep : Oas.Memory.episode = {
+  let ep : Agent_sdk.Memory.episode = {
     id = "ep-1";
     timestamp = Unix.gettimeofday ();
     participants = ["alice"; "bob"];
     action = "Deployed v2 to staging";
-    outcome = Oas.Memory.Success "all tests passed";
+    outcome = Agent_sdk.Memory.Success "all tests passed";
     salience = 0.8;
     metadata = [];
   } in
-  ignore (Oas.Memory.store_episode memory ep);
-  let recalled = Oas.Memory.recall_episodes memory ~limit:10 () in
+  ignore (Agent_sdk.Memory.store_episode memory ep);
+  let recalled = Agent_sdk.Memory.recall_episodes memory ~limit:10 () in
   Alcotest.(check int) "1 episode recalled" 1 (List.length recalled);
   let r = List.hd recalled in
   Alcotest.(check string) "id matches" "ep-1" r.id;
@@ -157,19 +157,19 @@ let test_episodic_salience_ordering () =
   let dir = setup_tmp_dir () in
   let memory = Memory_oas_bridge.create_memory ~agent_name:"test-sal" () in
   let now = Unix.gettimeofday () in
-  let ep_low : Oas.Memory.episode = {
+  let ep_low : Agent_sdk.Memory.episode = {
     id = "low"; timestamp = now;
     participants = []; action = "minor";
-    outcome = Oas.Memory.Neutral; salience = 0.2; metadata = [];
+    outcome = Agent_sdk.Memory.Neutral; salience = 0.2; metadata = [];
   } in
-  let ep_high : Oas.Memory.episode = {
+  let ep_high : Agent_sdk.Memory.episode = {
     id = "high"; timestamp = now;
     participants = []; action = "critical";
-    outcome = Oas.Memory.Neutral; salience = 0.9; metadata = [];
+    outcome = Agent_sdk.Memory.Neutral; salience = 0.9; metadata = [];
   } in
-  ignore (Oas.Memory.store_episode memory ep_low);
-  ignore (Oas.Memory.store_episode memory ep_high);
-  let recalled = Oas.Memory.recall_episodes memory ~limit:2 () in
+  ignore (Agent_sdk.Memory.store_episode memory ep_low);
+  ignore (Agent_sdk.Memory.store_episode memory ep_high);
+  let recalled = Agent_sdk.Memory.recall_episodes memory ~limit:2 () in
   Alcotest.(check int) "2 episodes" 2 (List.length recalled);
   Alcotest.(check string) "highest salience first"
     "high" (List.hd recalled).id;
@@ -182,7 +182,7 @@ let test_episodic_salience_ordering () =
 let test_procedural_store_recall () =
   let dir = setup_tmp_dir () in
   let memory = Memory_oas_bridge.create_memory ~agent_name:"test-pr" () in
-  let proc : Oas.Memory.procedure = {
+  let proc : Agent_sdk.Memory.procedure = {
     id = "pr-1";
     pattern = "deploy failure";
     action = "rollback and notify team";
@@ -192,8 +192,8 @@ let test_procedural_store_recall () =
     last_used = Unix.gettimeofday ();
     metadata = [];
   } in
-  ignore (Oas.Memory.store_procedure memory proc);
-  (match Oas.Memory.best_procedure memory ~pattern:"deploy" with
+  ignore (Agent_sdk.Memory.store_procedure memory proc);
+  (match Agent_sdk.Memory.best_procedure memory ~pattern:"deploy" with
    | Some p ->
      Alcotest.(check string) "id matches" "pr-1" p.id;
      Alcotest.(check int) "success" 5 p.success_count
@@ -203,7 +203,7 @@ let test_procedural_store_recall () =
 let test_procedural_record_success () =
   let dir = setup_tmp_dir () in
   let memory = Memory_oas_bridge.create_memory ~agent_name:"test-prs" () in
-  let proc : Oas.Memory.procedure = {
+  let proc : Agent_sdk.Memory.procedure = {
     id = "pr-s";
     pattern = "test pattern";
     action = "test action";
@@ -213,9 +213,9 @@ let test_procedural_record_success () =
     last_used = 0.0;
     metadata = [];
   } in
-  ignore (Oas.Memory.store_procedure memory proc);
-  Oas.Memory.record_success memory "pr-s";
-  (match Oas.Memory.best_procedure memory ~pattern:"test" with
+  ignore (Agent_sdk.Memory.store_procedure memory proc);
+  Agent_sdk.Memory.record_success memory "pr-s";
+  (match Agent_sdk.Memory.best_procedure memory ~pattern:"test" with
    | Some p ->
      Alcotest.(check int) "success incremented" 4 p.success_count;
      Alcotest.(check int) "failure unchanged" 1 p.failure_count
@@ -246,7 +246,7 @@ let test_flush_procedures_dedupes_legacy_records () =
   Procedural_memory.save_procedure ~agent_name existing_old;
   Procedural_memory.save_procedure ~agent_name existing_latest;
   let memory = Memory_oas_bridge.create_memory ~agent_name () in
-  let oas_proc : Oas.Memory.procedure = {
+  let oas_proc : Agent_sdk.Memory.procedure = {
     id = "proc-legacy";
     pattern = "deploy failure";
     action = "rollback";
@@ -256,7 +256,7 @@ let test_flush_procedures_dedupes_legacy_records () =
     last_used = 210.0;
     metadata = [];
   } in
-  ignore (Oas.Memory.store_procedure memory oas_proc);
+  ignore (Agent_sdk.Memory.store_procedure memory oas_proc);
   let flushed = Memory_oas_bridge.flush_procedures ~memory ~agent_name in
   Alcotest.(check int) "no flush when latest record already matches" 0 flushed;
   let persisted = Procedural_memory.load_procedures ~agent_name in
@@ -339,9 +339,9 @@ let test_flush_procedures_updates_cache_for_immediate_reload () =
   Procedural_memory.save_procedure ~agent_name existing;
   let memory = Memory_oas_bridge.create_memory ~agent_name () in
   ignore
-    (Oas.Memory.store_procedure memory
+    (Agent_sdk.Memory.store_procedure memory
        {
-         Oas.Memory.id = existing.id;
+         Agent_sdk.Memory.id = existing.id;
          pattern = existing.pattern;
          action = "rollback and notify";
          success_count = 7;
@@ -368,22 +368,22 @@ let test_flush_procedures_updates_cache_for_immediate_reload () =
 let test_stats_all_tiers () =
   let dir = setup_tmp_dir () in
   let memory = Memory_oas_bridge.create_memory ~agent_name:"test-stats" () in
-  ignore (Oas.Memory.store memory ~tier:Oas.Memory.Scratchpad "s1" (`Int 1));
-  ignore (Oas.Memory.store memory ~tier:Oas.Memory.Working "w1" (`Int 2));
-  ignore (Oas.Memory.store memory ~tier:Oas.Memory.Working "w2" (`Int 3));
-  let ep : Oas.Memory.episode = {
+  ignore (Agent_sdk.Memory.store memory ~tier:Agent_sdk.Memory.Scratchpad "s1" (`Int 1));
+  ignore (Agent_sdk.Memory.store memory ~tier:Agent_sdk.Memory.Working "w1" (`Int 2));
+  ignore (Agent_sdk.Memory.store memory ~tier:Agent_sdk.Memory.Working "w2" (`Int 3));
+  let ep : Agent_sdk.Memory.episode = {
     id = "stat-ep"; timestamp = 0.0; participants = [];
-    action = "a"; outcome = Oas.Memory.Neutral;
+    action = "a"; outcome = Agent_sdk.Memory.Neutral;
     salience = 0.5; metadata = [];
   } in
-  ignore (Oas.Memory.store_episode memory ep);
-  let proc : Oas.Memory.procedure = {
+  ignore (Agent_sdk.Memory.store_episode memory ep);
+  let proc : Agent_sdk.Memory.procedure = {
     id = "stat-pr"; pattern = "p"; action = "a";
     success_count = 1; failure_count = 0; confidence = 1.0;
     last_used = 0.0; metadata = [];
   } in
-  ignore (Oas.Memory.store_procedure memory proc);
-  let (sp, wk, epc, prc, _lt) = Oas.Memory.stats memory in
+  ignore (Agent_sdk.Memory.store_procedure memory proc);
+  let (sp, wk, epc, prc, _lt) = Agent_sdk.Memory.stats memory in
   Alcotest.(check int) "scratchpad = 1" 1 sp;
   Alcotest.(check int) "working = 2" 2 wk;
   Alcotest.(check int) "episodic = 1" 1 epc;
@@ -451,13 +451,13 @@ let test_flush_episodes_appends_only_new_records () =
   in
   let memory = Memory_oas_bridge.create_memory ~agent_name:"test-ep-flush" () in
   (* Store a new episode directly into OAS memory (no imperative seeding) *)
-  Oas.Memory.store_episode memory
+  Agent_sdk.Memory.store_episode memory
     {
-      Oas.Memory.id = "new-episode-id";
+      Agent_sdk.Memory.id = "new-episode-id";
       timestamp = Unix.gettimeofday ();
       participants = [];
       action = "new episode from oas";
-      outcome = Oas.Memory.Success "completed";
+      outcome = Agent_sdk.Memory.Success "completed";
       salience = 0.88;
       metadata =
         [

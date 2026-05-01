@@ -503,7 +503,7 @@ let compute_judgments
         ()
     )
   with
-  | Error err -> Error (Oas.Error.to_string err)
+  | Error err -> Error (Agent_sdk.Error.to_string err)
   | Ok result -> (
       let response = result.Oas_worker.response in
       try

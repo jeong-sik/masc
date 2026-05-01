@@ -178,10 +178,10 @@ let test_cap_message_tokens_integration () =
         Bytes.to_string buf)
     in
     let cap_pos =
-      find_substring content "Oas.Context_reducer.cap_message_tokens"
+      find_substring content "Agent_sdk.Context_reducer.cap_message_tokens"
     in
     let repair_pos =
-      find_substring content "Oas.Context_reducer.repair_dangling_tool_calls"
+      find_substring content "Agent_sdk.Context_reducer.repair_dangling_tool_calls"
     in
     Alcotest.(check bool)
       "keeper_agent_run.ml must integrate cap_message_tokens before repair_dangling_tool_calls"
@@ -231,7 +231,7 @@ let test_pair_repair_integration () =
         Bytes.to_string buf)
     in
     let repair_pos =
-      find_substring content "Oas.Context_reducer.repair_dangling_tool_calls"
+      find_substring content "Agent_sdk.Context_reducer.repair_dangling_tool_calls"
     in
     let local_pos =
       match repair_pos with

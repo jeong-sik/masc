@@ -24,12 +24,12 @@ val require_eio :
     context.  Returns [Ok (sw, net)] when both are present, or [Error msg]
     when running outside a server context. *)
 
-val eio_context_error_to_sdk_error : string -> Oas.Error.sdk_error
-(** Lift a context-missing diagnostic string into an [Oas.Error.Config]
+val eio_context_error_to_sdk_error : string -> Agent_sdk.Error.sdk_error
+(** Lift a context-missing diagnostic string into an [Agent_sdk.Error.Config]
     error with field ["eio_context"]. *)
 
-val cascade_catalog_error_to_sdk_error : string -> Oas.Error.sdk_error
-(** Lift a cascade-catalog diagnostic into an [Oas.Error.Config]
+val cascade_catalog_error_to_sdk_error : string -> Agent_sdk.Error.sdk_error
+(** Lift a cascade-catalog diagnostic into an [Agent_sdk.Error.Config]
     error with field ["cascade_name"]. *)
 
 (** {1 Provider resolution} *)
@@ -56,7 +56,7 @@ val keeper_agent_name_opt : string -> string option
 (** Derive the agent name from a keeper name; [None] when the name is empty. *)
 
 val runtime_mcp_policy_for_tools :
-  keeper_name:string -> Oas.Tool.t list ->
+  keeper_name:string -> Agent_sdk.Tool.t list ->
   Llm_provider.Llm_transport.runtime_mcp_policy option
 (** Build a runtime MCP policy from the tool list, honouring public MCP tools
     and keeper-internal surface classifications. *)
@@ -92,7 +92,7 @@ val filter_rejection_reason_label : filter_rejection_reason -> string
 val classify_filter_rejection :
   keeper_name:string ->
   ?runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy ->
-  ?tools:Oas.Tool.t list ->
+  ?tools:Agent_sdk.Tool.t list ->
   require_tool_choice_support:bool ->
   require_tool_support:bool ->
   Llm_provider.Provider_config.t ->
@@ -102,7 +102,7 @@ val classify_filter_rejection :
 val filter_candidate_providers_for_tool_support :
   keeper_name:string ->
   ?runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy ->
-  ?tools:Oas.Tool.t list ->
+  ?tools:Agent_sdk.Tool.t list ->
   require_tool_choice_support:bool ->
   require_tool_support:bool ->
   label:string ->
@@ -119,7 +119,7 @@ val resolve_tool_capable_provider_across_cascades :
   net:Eio_context.eio_net ->
   keeper_name:string ->
   ?runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy ->
-  ?tools:Oas.Tool.t list ->
+  ?tools:Agent_sdk.Tool.t list ->
   require_tool_choice_support:bool ->
   require_tool_support:bool ->
   exclude_cascade:string ->

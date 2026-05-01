@@ -5,7 +5,7 @@
     forming a dependency cycle through [Operator_pending_confirm] and
     the governance approval queue. *)
 
-val auto_approve : Oas.Hooks.approval_callback
+val auto_approve : Agent_sdk.Hooks.approval_callback
 (** Always-approve callback for system-level OAS runs that are
     explicitly trusted by MASC: judges, auto_responder, autoresearch
     codegen, deep_review, anti_rationalization, and the OpenAI-compat
@@ -15,7 +15,7 @@ val auto_approve : Oas.Hooks.approval_callback
     use [Governance_pipeline.to_oas_approval_callback]; system runs
     that have already decided the caller is trusted should use this. *)
 
-val reject_by_default : Oas.Hooks.approval_callback
+val reject_by_default : Agent_sdk.Hooks.approval_callback
 (** Fail-closed default callback for OAS Agent builder sites that do
     not have an explicit human-in-the-loop or MASC-trusted-system
     decision source. Returns [Reject _] on every ApprovalRequired

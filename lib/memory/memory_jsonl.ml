@@ -118,7 +118,7 @@ let read_lines ~path : (string * Yojson.Safe.t option * float) list =
     @param agent_name Agent identifier
     @param session_id Session identifier (e.g. "acd905b7") *)
 let make_backend ~base_dir ~agent_name ~session_id
-  : Oas.Memory.long_term_backend =
+  : Agent_sdk.Memory.long_term_backend =
   let path = session_path ~base_dir ~agent_name ~session_id in
 
   let persist ~key json =
@@ -216,4 +216,4 @@ let make_backend ~base_dir ~agent_name ~session_id
       []
   in
 
-  { Oas.Memory.persist; retrieve; remove; batch_persist; query }
+  { Agent_sdk.Memory.persist; retrieve; remove; batch_persist; query }

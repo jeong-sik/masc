@@ -29,7 +29,7 @@ module Oas = Masc_mcp.Oas
 (* Helpers                                                             *)
 (* ------------------------------------------------------------------ *)
 
-let make_telemetry ?canonical_model_id () : Oas.Types.inference_telemetry =
+let make_telemetry ?canonical_model_id () : Agent_sdk.Types.inference_telemetry =
   { system_fingerprint         = None
   ; timings                    = None
   ; reasoning_tokens           = None

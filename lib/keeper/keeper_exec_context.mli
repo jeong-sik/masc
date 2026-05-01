@@ -18,48 +18,48 @@ type session_context = Keeper_types.session_context
 
 (** {1 Working Context Operations} *)
 
-val text_of_message : Oas.Types.message -> string
-val msg_tokens : Oas.Types.message -> int
-val count_tokens : string -> Oas.Types.message list -> int
+val text_of_message : Agent_sdk.Types.message -> string
+val msg_tokens : Agent_sdk.Types.message -> int
+val count_tokens : string -> Agent_sdk.Types.message list -> int
 val max_tokens_of_context : working_context -> int
 val token_count : working_context -> int
 val message_count : working_context -> int
 val context_ratio : working_context -> float
-val checkpoint_of_context : working_context -> Oas.Checkpoint.t
-val oas_context_of_context : working_context -> Oas.Context.t
+val checkpoint_of_context : working_context -> Agent_sdk.Checkpoint.t
+val oas_context_of_context : working_context -> Agent_sdk.Context.t
 val with_max_tokens : working_context -> int -> working_context
 val system_prompt_of_context : working_context -> string
-val messages_of_context : working_context -> Oas.Types.message list
+val messages_of_context : working_context -> Agent_sdk.Types.message list
 val create : system_prompt:string -> max_tokens:int -> working_context
 val set_system_prompt : working_context -> system_prompt:string -> working_context
-val append : working_context -> Oas.Types.message -> working_context
-val append_many : working_context -> Oas.Types.message list -> working_context
+val append : working_context -> Agent_sdk.Types.message -> working_context
+val append_many : working_context -> Agent_sdk.Types.message list -> working_context
 val sync_oas_context : working_context -> working_context
-val role_to_string : Oas.Types.role -> string
-val role_of_string : string -> Oas.Types.role
+val role_to_string : Agent_sdk.Types.role -> string
+val role_of_string : string -> Agent_sdk.Types.role
 (** Backwards-compatible: unknown -> [Tool] (safest fallback) + warn log.
     See {!role_of_string_opt} for the strict version. Issue #8623. *)
 
-val role_of_string_opt : string -> Oas.Types.role option
+val role_of_string_opt : string -> Agent_sdk.Types.role option
 (** Strict variant — returns [None] for unrecognised role strings.
     Use this in checkpoint loaders / new code where silently
     misattributing a chat-history message would corrupt the
     LLM-visible conversation. *)
-val message_to_json : Oas.Types.message -> Yojson.Safe.t
-val message_of_json : Yojson.Safe.t -> Oas.Types.message
+val message_to_json : Agent_sdk.Types.message -> Yojson.Safe.t
+val message_of_json : Yojson.Safe.t -> Agent_sdk.Types.message
 val serialize_context : working_context -> string
 val deserialize_context : string -> max_tokens:int -> working_context
 val context_to_json : working_context -> Yojson.Safe.t
 val create_checkpoint : working_context -> generation:int -> checkpoint
 val create_session : session_id:string -> base_dir:string -> session_context
-val persist_message : ?source:string -> session_context -> Oas.Types.message -> unit
+val persist_message : ?source:string -> session_context -> Agent_sdk.Types.message -> unit
 
 (** {1 Inference Utilities} *)
 
 val timed : (unit -> 'a) -> 'a * int
-val zero_usage : Oas.Types.api_usage
-val usage_of_response : Oas.Types.api_response -> Oas.Types.api_usage
-val total_tokens : Oas.Types.api_usage -> int
+val zero_usage : Agent_sdk.Types.api_usage
+val usage_of_response : Agent_sdk.Types.api_response -> Agent_sdk.Types.api_usage
+val total_tokens : Agent_sdk.Types.api_usage -> int
 
 (** {1 Checkpoint Store Delegation} *)
 
@@ -70,12 +70,12 @@ val save_session_checkpoint : session_context -> checkpoint -> unit
 val log_keeper_exn : label:string -> exn -> unit
 
 val checkpoint_max_tokens :
-  Oas.Checkpoint.t -> fallback:int -> int
+  Agent_sdk.Checkpoint.t -> fallback:int -> int
 
 val context_of_oas_checkpoint :
   ?repair_orphans:bool ->
   max_checkpoint_messages:int ->
-  Oas.Checkpoint.t -> primary_model_max_tokens:int -> working_context
+  Agent_sdk.Checkpoint.t -> primary_model_max_tokens:int -> working_context
 
 val checkpoint_model_of_meta : keeper_meta -> string
 
@@ -86,7 +86,7 @@ val save_oas_checkpoint :
   model:string ->
   ctx:working_context ->
   generation:int ->
-  (Oas.Checkpoint.t, string) result
+  (Agent_sdk.Checkpoint.t, string) result
 
 (** {1 Handoff Rollover} *)
 
@@ -114,7 +114,7 @@ type compaction_event = {
 
 type post_turn_lifecycle = {
   updated_meta : keeper_meta;
-  checkpoint : Oas.Checkpoint.t option;
+  checkpoint : Agent_sdk.Checkpoint.t option;
   handoff_json : Yojson.Safe.t option;
   handoff_attempted : bool;
   handoff_failure_reason : string option;
@@ -135,7 +135,7 @@ type max_context_resolution = {
 }
 
 type overflow_retry_recovery = {
-  checkpoint : Oas.Checkpoint.t;
+  checkpoint : Agent_sdk.Checkpoint.t;
   compaction : compaction_event;
   turn_generation : int;
 }
@@ -147,7 +147,7 @@ val maybe_rollover_oas_handoff :
   model:string ->
   primary_model_max_tokens:int ->
   current_turn_overflow_blocker:string option ->
-  checkpoint:Oas.Checkpoint.t option ->
+  checkpoint:Agent_sdk.Checkpoint.t option ->
   handoff_rollover
 
 (** {2 Pure gate helpers (for testing)} *)
@@ -225,7 +225,7 @@ val apply_post_turn_lifecycle :
   model:string ->
   primary_model_max_tokens:int ->
   current_turn_overflow_blocker:string option ->
-  checkpoint:Oas.Checkpoint.t option ->
+  checkpoint:Agent_sdk.Checkpoint.t option ->
   post_turn_lifecycle
 
 val dispatch_keeper_phase_event :

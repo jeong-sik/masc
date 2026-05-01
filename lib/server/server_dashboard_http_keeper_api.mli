@@ -105,11 +105,11 @@ val truncate_text : max_chars:int -> string -> string
 (** Truncate [text] to [max_chars] (UTF-8 safe). *)
 
 val latest_preview_of_messages :
-  Oas.Types.message list -> string option
+  Agent_sdk.Types.message list -> string option
 (** Latest assistant-text preview suitable for the dashboard list view. *)
 
 val continuity_summary_of_messages :
-  Oas.Types.message list -> string option
+  Agent_sdk.Types.message list -> string option
 (** Latest [STATE]-derived continuity summary in the message history. *)
 
 (** {1 Checkpoint inventory} *)
@@ -123,7 +123,7 @@ val oas_checkpoint_summary_json :
   path:string ->
   is_current:bool ->
   fallback_generation:int ->
-  Oas.Checkpoint.t ->
+  Agent_sdk.Checkpoint.t ->
   Yojson.Safe.t
 (** JSON summary of an OAS checkpoint, used by the inventory listing. *)
 

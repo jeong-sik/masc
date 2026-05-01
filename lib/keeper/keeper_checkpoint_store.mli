@@ -63,13 +63,13 @@ val oas_history_path :
 (** Compose an OAS history archive snapshot id from a checkpoint
     (created_at_ms + keeper_generation suffix). *)
 val oas_history_snapshot_id_of_checkpoint :
-  Oas.Checkpoint.t -> string
+  Agent_sdk.Checkpoint.t -> string
 
 (** Save [ckpt] to the OAS history archive in [session_dir],
     pruning to [max_oas_history_retained] entries. Logs and
     swallows write failures. *)
 val save_oas_history :
-  session_dir:string -> Oas.Checkpoint.t -> unit
+  session_dir:string -> Agent_sdk.Checkpoint.t -> unit
 
 (** Delete OAS history archive entries by [snapshot_ids]. Returns
     [(deleted, missing)] in input-order, with [missing] containing
@@ -84,7 +84,7 @@ val delete_oas_history_files :
     appends to the OAS history archive on success. *)
 val save_oas :
   session_dir:string ->
-  Oas.Checkpoint.t ->
+  Agent_sdk.Checkpoint.t ->
   (unit, string) result
 
 (** Load failure classification used by callers to distinguish
@@ -101,43 +101,43 @@ type checkpoint_load_error =
     [no_such_file] short-form. *)
 val is_not_found_detail : string -> bool
 
-(** Project an [Oas.Error.sdk_error] to [checkpoint_load_error]. *)
+(** Project an [Agent_sdk.Error.sdk_error] to [checkpoint_load_error]. *)
 val classify_sdk_error :
-  Oas.Error.sdk_error -> checkpoint_load_error
+  Agent_sdk.Error.sdk_error -> checkpoint_load_error
 
 (** Sequence a [('a, 'e) result] list into [('a list, 'e) result],
     short-circuiting on the first [Error]. *)
 val result_all : ('a, 'e) result list -> ('a list, 'e) result
 
 (** Strict content-block parser used for compat OAS checkpoint
-    decode. Errors carry an [Oas.Error.sdk_error]. *)
+    decode. Errors carry an [Agent_sdk.Error.sdk_error]. *)
 val content_block_of_json_strict :
-  Yojson.Safe.t -> (Oas.Types.content_block, Oas.Error.sdk_error) result
+  Yojson.Safe.t -> (Agent_sdk.Types.content_block, Agent_sdk.Error.sdk_error) result
 
 (** Compat role parser — accepts trim/case variations and rejects
-    unknown roles via [Oas.Error.UnknownVariant]. *)
+    unknown roles via [Agent_sdk.Error.UnknownVariant]. *)
 val role_of_string_compat :
-  string -> (Oas.Types.role, Oas.Error.sdk_error) result
+  string -> (Agent_sdk.Types.role, Agent_sdk.Error.sdk_error) result
 
 (** Compat message-of-json parser. Errors carry an
-    [Oas.Error.sdk_error]. *)
+    [Agent_sdk.Error.sdk_error]. *)
 val message_of_json_compat :
-  Yojson.Safe.t -> (Oas.Types.message, Oas.Error.sdk_error) result
+  Yojson.Safe.t -> (Agent_sdk.Types.message, Agent_sdk.Error.sdk_error) result
 
 (** Re-shape legacy checkpoint JSON so unknown roles default to
     [assistant] before handing it to the OAS deserializer. *)
 val normalize_checkpoint_json_for_sdk : Yojson.Safe.t -> Yojson.Safe.t
 
-(** Compat [Oas.Checkpoint.of_json] that re-parses messages with
+(** Compat [Agent_sdk.Checkpoint.of_json] that re-parses messages with
     [message_of_json_compat] when the SDK rejects the raw shape. *)
 val checkpoint_of_json_compat :
-  Yojson.Safe.t -> (Oas.Checkpoint.t, Oas.Error.sdk_error) result
+  Yojson.Safe.t -> (Agent_sdk.Checkpoint.t, Agent_sdk.Error.sdk_error) result
 
-(** Compat [Oas.Checkpoint.of_string]: tries the SDK parser first,
+(** Compat [Agent_sdk.Checkpoint.of_string]: tries the SDK parser first,
     then falls back to [checkpoint_of_json_compat] on the
     UTF-8-sanitized raw JSON. *)
 val checkpoint_of_string_compat :
-  string -> (Oas.Checkpoint.t, Oas.Error.sdk_error) result
+  string -> (Agent_sdk.Checkpoint.t, Agent_sdk.Error.sdk_error) result
 
 (** Load a single OAS history archive entry. Returns [Not_found]
     when the file does not exist; classifies SDK errors via
@@ -145,7 +145,7 @@ val checkpoint_of_string_compat :
 val load_oas_history_file :
   session_dir:string ->
   snapshot_id:string ->
-  (Oas.Checkpoint.t, checkpoint_load_error) result
+  (Agent_sdk.Checkpoint.t, checkpoint_load_error) result
 
 (** Load the canonical OAS checkpoint for [session_id]. Uses the
     OAS Checkpoint_store when Eio FS is available; falls back to a
@@ -153,4 +153,4 @@ val load_oas_history_file :
 val load_oas :
   session_dir:string ->
   session_id:string ->
-  (Oas.Checkpoint.t, checkpoint_load_error) result
+  (Agent_sdk.Checkpoint.t, checkpoint_load_error) result

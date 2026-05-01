@@ -24,12 +24,12 @@
 (** {1 Active publishers} *)
 
 val publish_broadcast :
-  Oas.Event_bus.t -> agent_name:string -> content:string -> unit
+  Agent_sdk.Event_bus.t -> agent_name:string -> content:string -> unit
 (** Publishes [masc.broadcast] with payload
     [{agent_name, content, timestamp}]. *)
 
 val publish_heartbeat :
-  Oas.Event_bus.t ->
+  Agent_sdk.Event_bus.t ->
   agent_name:string ->
   turn:int ->
   context_pct:float ->
@@ -38,7 +38,7 @@ val publish_heartbeat :
     [{agent_name, turn, context_pct, timestamp}]. *)
 
 val publish_task_transition :
-  Oas.Event_bus.t ->
+  Agent_sdk.Event_bus.t ->
   agent_name:string ->
   task_id:string ->
   transition:Types.task_action ->
@@ -56,7 +56,7 @@ val publish_task_transition :
 (** {1 Keeper snapshot + lifecycle} *)
 
 val publish_keeper_snapshot :
-  Oas.Event_bus.t ->
+  Agent_sdk.Event_bus.t ->
   keeper_name:string ->
   generation:int ->
   context_ratio:float ->
@@ -67,7 +67,7 @@ val publish_keeper_snapshot :
     Emitted alongside SSE broadcast in [keeper_keepalive]. *)
 
 val publish_keeper_lifecycle :
-  Oas.Event_bus.t ->
+  Agent_sdk.Event_bus.t ->
   event:Keeper_lifecycle_events.lifecycle_event ->
   keeper_name:string ->
   detail:string ->
@@ -98,7 +98,7 @@ val publish_keeper_lifecycle :
     where observability matters most. *)
 
 val publish_keeper_dead :
-  Oas.Event_bus.t ->
+  Agent_sdk.Event_bus.t ->
   keeper_name:string ->
   reason:string ->
   restart_count:int ->
@@ -121,7 +121,7 @@ val publish_keeper_dead :
 (** {1 Autonomy lifecycle (deprecated — no producer)} *)
 
 val publish_agent_selected :
-  Oas.Event_bus.t ->
+  Agent_sdk.Event_bus.t ->
   agent_name:string ->
   trigger:string ->
   thompson_score:float ->
@@ -132,7 +132,7 @@ val publish_agent_selected :
                wiring in Thompson autonomy RFC (open)."]
 
 val publish_agent_decision :
-  Oas.Event_bus.t ->
+  Agent_sdk.Event_bus.t ->
   agent_name:string ->
   action:string ->
   trigger_reason:string ->
@@ -142,7 +142,7 @@ val publish_agent_decision :
                wiring in Thompson autonomy RFC (open)."]
 
 val publish_agent_action_executed :
-  Oas.Event_bus.t ->
+  Agent_sdk.Event_bus.t ->
   agent_name:string ->
   action:string ->
   success:bool ->
@@ -175,7 +175,7 @@ val publish_audit_event :
 (** {1 Phase 4 social (deprecated — no producer)} *)
 
 val publish_trust_updated :
-  Oas.Event_bus.t ->
+  Agent_sdk.Event_bus.t ->
   agent_a:string ->
   agent_b:string ->
   trust_score:float ->
@@ -186,7 +186,7 @@ val publish_trust_updated :
                (open)."]
 
 val publish_reputation_changed :
-  Oas.Event_bus.t ->
+  Agent_sdk.Event_bus.t ->
   agent_name:string ->
   old_score:float ->
   new_score:float ->

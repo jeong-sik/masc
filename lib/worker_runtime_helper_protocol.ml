@@ -72,12 +72,12 @@ let api_response_of_yojson = function
       | None -> Error "invalid api_response in worker helper payload")
 
 let proof_to_yojson =
-  option_to_yojson Oas.Cdal_proof.to_json
+  option_to_yojson Agent_sdk.Cdal_proof.to_json
 
 let proof_of_yojson = function
   | `Null -> Ok None
   | json -> (
-      match Oas.Cdal_proof.of_json json with
+      match Agent_sdk.Cdal_proof.of_json json with
       | Ok proof -> Ok (Some proof)
       | Error msg -> Error ("invalid proof in worker helper payload: " ^ msg))
 
@@ -93,7 +93,7 @@ let run_result_to_yojson (run_result : Worker_container_types.run_result) =
       ("tool_names", `List (List.map (fun name -> `String name) run_result.tool_names));
       ("session_id", `String run_result.session_id);
       ( "raw_trace_run",
-        option_to_yojson Oas.Raw_trace.run_ref_to_yojson run_result.raw_trace_run );
+        option_to_yojson Agent_sdk.Raw_trace.run_ref_to_yojson run_result.raw_trace_run );
       ("api_response", api_response_to_yojson run_result.api_response);
       ("proof", proof_to_yojson run_result.proof);
     ]
@@ -116,7 +116,7 @@ let run_result_of_yojson (json : Yojson.Safe.t) :
       match json |> member "raw_trace_run" with
       | `Null -> Ok None
       | value -> (
-          match Oas.Raw_trace.run_ref_of_yojson value with
+          match Agent_sdk.Raw_trace.run_ref_of_yojson value with
           | Ok run_ref -> Ok (Some run_ref)
           | Error msg ->
               Error ("invalid raw_trace_run in worker helper payload: " ^ msg))

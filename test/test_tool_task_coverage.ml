@@ -202,7 +202,7 @@ let () = test "masc_oas_bridge_runs_without_eio_env" (fun () ->
     match Masc_oas_bridge.run_safe ~timeout_s:0.1 (fun () -> Ok "ok") with
     | Ok "ok" -> ()
     | Ok other -> failwith ("unexpected result: " ^ other)
-    | Error err -> failwith (Oas.Error.to_string err)
+    | Error err -> failwith (Agent_sdk.Error.to_string err)
 )
 
 (* Test dispatch transition claim *)

@@ -69,11 +69,11 @@ type pending_approval = {
   selected_model : string option;
   disposition : string option;
   disposition_reason : string option;
-  resolver : Oas.Hooks.approval_decision Eio.Promise.u option;
-  on_resolution : (Oas.Hooks.approval_decision -> unit) option;
+  resolver : Agent_sdk.Hooks.approval_decision Eio.Promise.u option;
+  on_resolution : (Agent_sdk.Hooks.approval_decision -> unit) option;
 }
 
-type decision = Oas.Hooks.approval_decision
+type decision = Agent_sdk.Hooks.approval_decision
 
 type approval_audit_decision =
   | Approval_resolved of decision
@@ -124,9 +124,9 @@ let risk_level_of_string = function
   | _ -> None
 
 let approval_decision_to_string = function
-  | Oas.Hooks.Approve -> "approve"
-  | Oas.Hooks.Reject reason -> "reject:" ^ reason
-  | Oas.Hooks.Edit _ -> "edit"
+  | Agent_sdk.Hooks.Approve -> "approve"
+  | Agent_sdk.Hooks.Reject reason -> "reject:" ^ reason
+  | Agent_sdk.Hooks.Edit _ -> "edit"
 
 let approval_audit_decision_to_string = function
   | Approval_resolved decision -> approval_decision_to_string decision
@@ -809,7 +809,7 @@ let submit_and_await ~keeper_name ~tool_name ~input ~risk_level
     ?selected_model ?disposition ?disposition_reason
     ?clock ?(timeout_s = 600.0)
     ()
-  : Oas.Hooks.approval_decision =
+  : Agent_sdk.Hooks.approval_decision =
   let id = generate_id () in
   let promise, resolver = Eio.Promise.create () in
   let entry =
@@ -821,7 +821,7 @@ let submit_and_await ~keeper_name ~tool_name ~input ~risk_level
   atomic_update pending (fun map -> SMap.add id entry map);
   record_pending entry;
   let timeout_decision reason =
-    let decision = Oas.Hooks.Reject reason in
+    let decision = Agent_sdk.Hooks.Reject reason in
     match Eio.Promise.peek promise with
     | Some observed -> observed
     | None ->
@@ -941,7 +941,7 @@ let remember_rule_for_entry ?base_path ?created_by (entry : pending_approval) =
         entry.id (Printexc.to_string exn);
       None
 
-let resolve_with_policy ?base_path ~id ~(decision : Oas.Hooks.approval_decision)
+let resolve_with_policy ?base_path ~id ~(decision : Agent_sdk.Hooks.approval_decision)
     ?(remember_rule = false) ?created_by ()
     : (resolution_result, resolve_error) result =
   let result = ref (Error (Not_found id)) in
@@ -956,7 +956,7 @@ let resolve_with_policy ?base_path ~id ~(decision : Oas.Hooks.approval_decision)
   | Ok entry ->
       let remembered_rule =
         match decision with
-        | Oas.Hooks.Approve when remember_rule ->
+        | Agent_sdk.Hooks.Approve when remember_rule ->
             remember_rule_for_entry ?base_path ?created_by entry
         | _ -> None
       in
@@ -969,7 +969,7 @@ let resolve_with_policy ?base_path ~id ~(decision : Oas.Hooks.approval_decision)
     entry (concurrent resolve race).
     Called from the dashboard approval HTTP handler
     ([server_dashboard_http.ml]) and MCP inline dispatch. *)
-let resolve ~id ~(decision : Oas.Hooks.approval_decision) : (unit, resolve_error) result =
+let resolve ~id ~(decision : Agent_sdk.Hooks.approval_decision) : (unit, resolve_error) result =
   match resolve_with_policy ~id ~decision () with
   | Ok _ -> Ok ()
   | Error _ as err -> err
@@ -1072,11 +1072,11 @@ let expire_stale ~max_wait_s =
       ~decision:(Approval_expired reason) ();
     (match entry.resolver with
      | Some resolver ->
-       Eio.Promise.resolve resolver (Oas.Hooks.Reject reason)
+       Eio.Promise.resolve resolver (Agent_sdk.Hooks.Reject reason)
      | None -> ());
     (match entry.on_resolution with
      | Some f ->
-       (try f (Oas.Hooks.Reject reason)
+       (try f (Agent_sdk.Hooks.Reject reason)
         with
         | Eio.Cancel.Cancelled _ as e -> raise e
         | exn ->

@@ -7,7 +7,7 @@
     @since 2.255.0 *)
 
 (** Install the process-wide event bus. Call once at bootstrap. *)
-val set : Oas.Event_bus.t -> unit
+val set : Agent_sdk.Event_bus.t -> unit
 
 (** Read the installed event bus, if any. *)
-val get : unit -> Oas.Event_bus.t option
+val get : unit -> Agent_sdk.Event_bus.t option

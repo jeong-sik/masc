@@ -343,7 +343,7 @@ let run_keepalive_unified_turn
              | Keeper_event_queue.Low -> "low"
            in
            Log.Keeper.info
-             "turn entry: consumed stimulus post=%s urgency=%s payload_len=%d (keeper=%s)"
+             "turn entry: consumed stimulus stimulus_id=%s urgency=%s payload_len=%d (keeper=%s)"
              stim.post_id urgency_str
              (String.length stim.payload)
              meta_after_triage.name);

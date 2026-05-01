@@ -1,6 +1,8 @@
 (** See {!Host_config_provider} interface. *)
 
 let cred_root = "/tmp/keeper-creds"
+let explicit_ssh_key_container_path =
+  Filename.concat (Filename.concat cred_root ".ssh") "id_credential"
 
 let mount_if_present ~host ~container : Credential_provider.ro_mount list =
   if host = "" then []
@@ -90,7 +92,18 @@ let warn_mount_skips_if_any ~keeper_name (attempts : mount_attempt list) =
    credential dispatch container.  Ambient operator credential env is
    scrubbed before callers reach this provider; this block exposes only
    container-local GH/Git paths plus non-interactive git guards. *)
-let compose_env ~git_author_name ~git_author_email =
+let compose_env ?ssh_key_container ~git_author_name ~git_author_email () =
+  let ssh_env =
+    match ssh_key_container with
+    | None -> []
+    | Some key ->
+        [
+          ( "GIT_SSH_COMMAND",
+            Printf.sprintf
+              "ssh -i %s -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+              (Filename.quote key) );
+        ]
+  in
   [
     "HOME", cred_root;
     "GH_CONFIG_DIR", Filename.concat cred_root ".config/gh";
@@ -103,6 +116,7 @@ let compose_env ~git_author_name ~git_author_email =
     "GIT_COMMITTER_NAME", git_author_name;
     "GIT_COMMITTER_EMAIL", git_author_email;
   ]
+  @ ssh_env
   @ Env_git_noninteractive.env
 
 let compose_ro_mounts ?keeper_name (kb : Keeper_gh_env.keeper_binding) =
@@ -172,13 +186,28 @@ let count_resolve_outcome ~keeper_name ~source ~reason =
       [ ("keeper", keeper_name); ("source", source); ("reason", reason) ]
     ()
 
-let bind_from_keeper_binding ~keeper_name (kb : Keeper_gh_env.keeper_binding)
-    ~extra_metadata =
+let bind_from_keeper_binding ?ssh_key_path ~keeper_name
+    (kb : Keeper_gh_env.keeper_binding) ~extra_metadata =
   let git_author_name, git_author_email =
     resolve_git_identity kb ~keeper_name
   in
-  let env = compose_env ~git_author_name ~git_author_email in
-  let ro_mounts = compose_ro_mounts ~keeper_name kb in
+  let ssh_key_container =
+    Option.map (fun _ -> explicit_ssh_key_container_path) ssh_key_path
+  in
+  let env =
+    compose_env ?ssh_key_container ~git_author_name ~git_author_email ()
+  in
+  let ro_mounts =
+    compose_ro_mounts ~keeper_name kb
+    @
+    match ssh_key_path with
+    | None -> []
+    | Some host ->
+        [
+          Credential_provider.
+            { host; container = explicit_ssh_key_container_path };
+        ]
+  in
   (* β7 fail-closed: resolve is called only when git_creds_enabled
      (caller at keeper_shell_docker.ml:398-400).  If ALL credential
      host paths are empty or missing, ro_mounts will be [].  Returning
@@ -259,10 +288,40 @@ let bind_from_credential ~keeper_name (cred : Repo_manager_types.credential) =
         (Credential_provider.Missing_bundle
            { identity = keeper_name; path = reason })
   | Ok kb ->
-      bind_from_keeper_binding ~keeper_name kb
-        ~extra_metadata:
-          [ ("credential_source", "credential_store");
-            ("credential_id", cred.id) ]
+      let ssh_key_path =
+        match cred.ssh_key_path with
+        | Some path when String.trim path <> "" -> Some (String.trim path)
+        | _ -> None
+      in
+      (match ssh_key_path with
+      | Some path when not (Sys.file_exists path) ->
+          Error
+            (Credential_provider.Missing_bundle
+               { identity = keeper_name
+               ; path =
+                   Printf.sprintf
+                     "credential %s ssh_key_path %S does not exist"
+                     cred.id path
+               })
+      | Some path when Sys.is_directory path ->
+          Error
+            (Credential_provider.Missing_bundle
+               { identity = keeper_name
+               ; path =
+                   Printf.sprintf
+                     "credential %s ssh_key_path %S is a directory; \
+                      expected a private key file"
+                     cred.id path
+               })
+      | _ ->
+          bind_from_keeper_binding ?ssh_key_path ~keeper_name kb
+            ~extra_metadata:
+              ([ ("credential_source", "credential_store");
+                 ("credential_id", cred.id) ]
+              @
+              match ssh_key_path with
+              | None -> []
+              | Some path -> [ ("ssh_key_path", path) ]))
 
 let resolve ~config ~identity:keeper_name =
   match
@@ -318,6 +377,8 @@ let tear_down (_b : Credential_provider.binding) ~container_id:_ =
   ()
 
 module For_testing = struct
-  let compose_env = compose_env
+  let compose_env ?ssh_key_container ~git_author_name ~git_author_email () =
+    compose_env ?ssh_key_container ~git_author_name ~git_author_email ()
+
   let mount_if_present = mount_if_present
 end

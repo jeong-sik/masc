@@ -27,6 +27,88 @@ open Alcotest
 
 module CP = Masc_mcp.Credential_provider
 module HCP = Masc_mcp.Host_config_provider
+open Repo_manager_types
+
+let mkdir_p path =
+  let rec loop dir =
+    if dir = "" || dir = "." || Sys.file_exists dir then ()
+    else begin
+      loop (Filename.dirname dir);
+      Unix.mkdir dir 0o755
+    end
+  in
+  loop path
+
+let with_temp_base_path f =
+  let dir = Filename.temp_file "credential_provider" "" in
+  Sys.remove dir;
+  mkdir_p (Filename.concat dir ".masc/config");
+  Fun.protect
+    ~finally:(fun () ->
+      let rec rm_rf path =
+        if Sys.file_exists path then
+          if Sys.is_directory path then begin
+            Sys.readdir path
+            |> Array.iter (fun n -> rm_rf (Filename.concat path n));
+            Unix.rmdir path
+          end
+          else Sys.remove path
+      in
+      rm_rf dir)
+    (fun () -> f dir)
+
+let write_mapping base_path keeper_id repo_ids =
+  let path =
+    Filename.concat base_path ".masc/config/keeper_repo_mappings.toml"
+  in
+  let entries =
+    String.concat ", " (List.map (fun s -> "\"" ^ s ^ "\"") repo_ids)
+  in
+  let content =
+    Printf.sprintf "[mapping.%s]\nrepositories = [%s]\n" keeper_id entries
+  in
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc content)
+
+let seed_credential ~base_path cred =
+  match Credential_store.add ~base_path cred with
+  | Ok _ -> ()
+  | Error msg -> failf "seed credential %s: %s" cred.id msg
+
+let seed_repo ~base_path repo =
+  match Repo_store.add ~base_path repo with
+  | Ok _ -> ()
+  | Error msg -> failf "seed repo %s: %s" repo.id msg
+
+let make_credential ?ssh_key_path ~id ~username ~gh_config_dir () =
+  {
+    id;
+    cred_type = Github;
+    username;
+    gh_config_dir = Some gh_config_dir;
+    ssh_key_path;
+    gpg_key_id = None;
+    state = Unmaterialized;
+    token_sha256_prefix = None;
+  }
+
+let make_repo ~id ~credential_id : repository =
+  {
+    id;
+    name = "repo-" ^ id;
+    url = "git@github.com:test/" ^ id ^ ".git";
+    local_path = "repos/" ^ id;
+    default_branch = "main";
+    credential_id;
+    keepers = [];
+    status = Active;
+    auto_sync = false;
+    sync_interval = 0;
+    created_at = Int64.zero;
+    updated_at = Int64.zero;
+  }
 
 (* --- 1. pp_error covers every variant --- *)
 
@@ -134,7 +216,7 @@ let test_compose_env_key_set () =
   let env =
     HCP.For_testing.compose_env
       ~git_author_name:"keeper-A"
-      ~git_author_email:"keeper-A@example.invalid"
+      ~git_author_email:"keeper-A@example.invalid" ()
   in
   let actual_keys = List.sort compare (List.map fst env) in
   let expected_keys = List.sort compare expected_env_keys in
@@ -145,7 +227,7 @@ let test_compose_env_key_set () =
 let test_compose_env_path_values_anchored_to_cred_root () =
   let env =
     HCP.For_testing.compose_env
-      ~git_author_name:"k" ~git_author_email:"k@e"
+      ~git_author_name:"k" ~git_author_email:"k@e" ()
   in
   let lookup k = List.assoc k env in
   check string "HOME" HCP.cred_root (lookup "HOME");
@@ -160,13 +242,77 @@ let test_compose_env_git_identity_threaded () =
   let env =
     HCP.For_testing.compose_env
       ~git_author_name:"NAME-X"
-      ~git_author_email:"EMAIL-X"
+      ~git_author_email:"EMAIL-X" ()
   in
   let lookup k = List.assoc k env in
   check string "GIT_AUTHOR_NAME" "NAME-X" (lookup "GIT_AUTHOR_NAME");
   check string "GIT_AUTHOR_EMAIL" "EMAIL-X" (lookup "GIT_AUTHOR_EMAIL");
   check string "GIT_COMMITTER_NAME" "NAME-X" (lookup "GIT_COMMITTER_NAME");
   check string "GIT_COMMITTER_EMAIL" "EMAIL-X" (lookup "GIT_COMMITTER_EMAIL")
+
+let test_compose_env_explicit_ssh_key () =
+  let env =
+    HCP.For_testing.compose_env
+      ~ssh_key_container:"/tmp/keeper-creds/.ssh/id_credential"
+      ~git_author_name:"k" ~git_author_email:"k@e" ()
+  in
+  let cmd = List.assoc "GIT_SSH_COMMAND" env in
+  check bool "ssh command points at mounted key" true
+    (try
+       ignore
+         (Str.search_forward
+            (Str.regexp_string
+               "/tmp/keeper-creds/.ssh/id_credential")
+            cmd 0);
+       true
+     with Not_found -> false);
+  check bool "ssh command pins identity selection" true
+    (try
+       ignore
+         (Str.search_forward
+            (Str.regexp_string "-o IdentitiesOnly=yes") cmd 0);
+       true
+     with Not_found -> false)
+
+let test_resolve_credential_store_mounts_explicit_ssh_key () =
+  with_temp_base_path (fun base_path ->
+      let config = Masc_mcp.Coord.default_config base_path in
+      let gh_config_dir =
+        Filename.concat base_path ".masc/github-identities/cred-A/gh"
+      in
+      let ssh_key_path =
+        Filename.concat base_path ".masc/github-identities/cred-A/ssh/id_ed25519"
+      in
+      mkdir_p gh_config_dir;
+      mkdir_p (Filename.dirname ssh_key_path);
+      let oc = open_out ssh_key_path in
+      close_out oc;
+      seed_credential ~base_path
+        (make_credential ~id:"cred-A" ~username:"user-A"
+           ~gh_config_dir ~ssh_key_path ());
+      seed_repo ~base_path (make_repo ~id:"repo-1" ~credential_id:"cred-A");
+      write_mapping base_path "keeper-1" [ "repo-1" ];
+      match HCP.resolve ~config ~identity:"keeper-1" with
+      | Error err ->
+          failf "resolve failed: %s" (CP.pp_error err)
+      | Ok binding ->
+          let ssh_cmd = List.assoc "GIT_SSH_COMMAND" binding.CP.env in
+          check bool "ssh command points at projected key" true
+            (try
+               ignore
+                 (Str.search_forward
+                    (Str.regexp_string
+                       "/tmp/keeper-creds/.ssh/id_credential")
+                    ssh_cmd 0);
+               true
+             with Not_found -> false);
+          check bool "explicit ssh key mounted" true
+            (List.exists
+               (fun (m : CP.ro_mount) ->
+                 String.equal m.host ssh_key_path
+                 && String.equal m.container
+                      "/tmp/keeper-creds/.ssh/id_credential")
+               binding.ro_mounts))
 
 (* --- 4. finalize / tear_down noop semantics --- *)
 
@@ -214,6 +360,13 @@ let () =
             test_compose_env_path_values_anchored_to_cred_root;
           test_case "identity threaded" `Quick
             test_compose_env_git_identity_threaded;
+          test_case "explicit ssh key" `Quick
+            test_compose_env_explicit_ssh_key;
+        ] );
+      ( "credential_store_bridge",
+        [
+          test_case "explicit ssh key is mounted" `Quick
+            test_resolve_credential_store_mounts_explicit_ssh_key;
         ] );
       ( "lifecycle (PR-1 noop)",
         [

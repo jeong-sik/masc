@@ -1,6 +1,17 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from "vitest"
-import { coerceCredentialType, isRecord, credentialTypeLabel, credentialTypeBadgeClass } from "./credential-settings"
+import {
+  buildCredentialCreateRequest,
+  coerceCredentialType,
+  credentialStateBadgeClass,
+  credentialStateLabel,
+  credentialTypeBadgeClass,
+  credentialTypeLabel,
+  githubLoginCommand,
+  isRecord,
+  parseCredentialState,
+  sanitizeOptionalString,
+} from "./credential-settings"
 
 describe("coerceCredentialType", () => {
   it("returns github for unknown", () => {
@@ -45,5 +56,69 @@ describe("credentialTypeBadgeClass", () => {
     expect(credentialTypeBadgeClass("github").length).toBeGreaterThan(0)
     expect(credentialTypeBadgeClass("gitlab").length).toBeGreaterThan(0)
     expect(credentialTypeBadgeClass("local").length).toBeGreaterThan(0)
+  })
+})
+
+describe("credential state helpers", () => {
+  it("parses known state objects", () => {
+    expect(parseCredentialState({ kind: "Materialized", last_verified_at_unix_ms: "42" })).toEqual({
+      kind: "Materialized",
+      last_verified_at_unix_ms: "42",
+      reason: null,
+    })
+    expect(parseCredentialState(null)).toBeNull()
+    expect(parseCredentialState({ reason: "missing kind" })).toBeNull()
+  })
+
+  it("labels states and returns badge classes", () => {
+    expect(credentialStateLabel({ kind: "Materialized" })).toBe("Materialized")
+    expect(credentialStateLabel({ kind: "Stale" })).toBe("Stale")
+    expect(credentialStateLabel({ kind: "Unmaterialized" })).toBe("Unmaterialized")
+    expect(credentialStateLabel(null)).toBe("Unknown")
+    expect(credentialStateBadgeClass({ kind: "Materialized" }).length).toBeGreaterThan(0)
+  })
+})
+
+describe("credential create request", () => {
+  it("trims optional paths and omits web token", () => {
+    expect(sanitizeOptionalString("  ")).toBeNull()
+    expect(sanitizeOptionalString(" /tmp/key ")).toBe("/tmp/key")
+    expect(buildCredentialCreateRequest({
+      id: " gh-main ",
+      name: "",
+      type: "github",
+      username: " sangsu ",
+      gh_config_dir: " ",
+      ssh_key_path: " /tmp/id_ed25519 ",
+      oauth_method: "web",
+      token: "secret",
+    })).toEqual({
+      id: "gh-main",
+      cred_type: "github",
+      username: "sangsu",
+      gh_config_dir: null,
+      ssh_key_path: "/tmp/id_ed25519",
+      gpg_key_id: null,
+      oauth_method: "web",
+      token: null,
+    })
+  })
+
+  it("keeps with-token payload and command quoting explicit", () => {
+    expect(buildCredentialCreateRequest({
+      id: "keepers",
+      name: "",
+      type: "github",
+      username: "keeper-user",
+      gh_config_dir: "/Users/dancer/me/.masc/github-identities/keepers/gh",
+      oauth_method: "with_token",
+      token: "ghp_x",
+    })).toMatchObject({
+      oauth_method: "with_token",
+      token: "ghp_x",
+    })
+    expect(githubLoginCommand("/tmp/keeper's-gh")).toBe(
+      "GH_CONFIG_DIR='/tmp/keeper'\\''s-gh' gh auth login --hostname github.com --git-protocol https --web",
+    )
   })
 })

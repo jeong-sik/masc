@@ -79,6 +79,10 @@ val with_lock : store -> (unit -> 'a) -> 'a
     {b outside} the lock so the ledger write does not block
     every other reader / writer. *)
 
+val with_persist_lock : store -> (unit -> 'a) -> 'a
+(** [with_persist_lock store f] serializes JSONL writes that must run
+    after the state mutation lock has been released. *)
+
 val invalidate_post_caches : store -> unit
 (** Clears [karma_cache] and [sorted_posts_cache].  Called
     after every post mutation. *)
@@ -180,9 +184,9 @@ val create_post :
     posts are forced to {!Limits.automation_ttl_hours}).
     Errors on validation failure, capacity exhaustion
     ([Capacity_exceeded]), or content length overflow.  The
-    [Agent_economy.earn] credit is intentionally awarded
-    {b outside} the lock to avoid blocking concurrent
-    readers on the ledger write. *)
+    JSONL append and the [Agent_economy.earn] credit are intentionally
+    performed {b outside} the state lock to avoid blocking concurrent
+    readers on filesystem writes. *)
 
 val get_post :
   store -> post_id:string -> (post, board_error) Result.t

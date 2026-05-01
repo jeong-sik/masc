@@ -65,39 +65,45 @@ let append_vote_log ~target ~voter ~direction ~ts =
     rotate_if_needed path
   with Sys_error msg -> Log.BoardLog.error "persist error (append_vote_log): %s" msg
 
-let rewrite_vote_log store =
+let vote_log_jsonl store =
+  let buf = Buffer.create 4096 in
+  Hashtbl.iter
+    (fun target (direction, ts) ->
+      let voter =
+        match String.rindex_opt target ':' with
+        | Some idx when idx + 1 < String.length target ->
+            String.sub target (idx + 1) (String.length target - idx - 1)
+        | _ -> ""
+      in
+      let json =
+        `Assoc
+          [
+            ("target", `String target);
+            ("voter", `String voter);
+            ("direction", `String (vote_direction_to_string direction));
+            (* #10086: persist the cast ts stored alongside the
+               direction, NOT [Time_compat.now ()].  The previous
+               behaviour rewrote every row's timestamp on each
+               flush cycle, destroying audit and feeding wrong
+               values to hot-ranking / recency scoring. *)
+            ("ts", `Float ts);
+          ]
+      in
+      Buffer.add_string buf (Yojson.Safe.to_string json ^ "\n"))
+    store.vote_log;
+  Buffer.contents buf
+
+let save_vote_log_jsonl content =
   try
     ensure_masc_dir ();
     let path = vote_log_path () in
-    let buf = Buffer.create 4096 in
-    Hashtbl.iter
-      (fun target (direction, ts) ->
-        let voter =
-          match String.rindex_opt target ':' with
-          | Some idx when idx + 1 < String.length target ->
-              String.sub target (idx + 1) (String.length target - idx - 1)
-          | _ -> ""
-        in
-        let json =
-          `Assoc
-            [
-              ("target", `String target);
-              ("voter", `String voter);
-              ("direction", `String (vote_direction_to_string direction));
-              (* #10086: persist the cast ts stored alongside the
-                 direction, NOT [Time_compat.now ()].  The previous
-                 behaviour rewrote every row's timestamp on each
-                 flush cycle, destroying audit and feeding wrong
-                 values to hot-ranking / recency scoring. *)
-              ("ts", `Float ts);
-            ]
-        in
-        Buffer.add_string buf (Yojson.Safe.to_string json ^ "\n"))
-      store.vote_log;
-    (match Fs_compat.save_file_atomic path (Buffer.contents buf) with
+    (match Fs_compat.save_file_atomic path content with
      | Ok () -> ()
      | Error msg -> Log.BoardLog.error "persist error (rewrite_vote_log): %s" msg)
   with Sys_error msg -> Log.BoardLog.error "persist error (rewrite_vote_log): %s" msg
+
+let rewrite_vote_log store =
+  save_vote_log_jsonl (vote_log_jsonl store)
 
 (* [vote_outcome] carries the information needed to run the post-lock
    [Agent_economy.earn] call.  [earn_upvote_for] is [Some author] only
@@ -107,7 +113,26 @@ let rewrite_vote_log store =
 type vote_outcome = {
   delta : int;
   earn_upvote_for : string option;
+  vote_target : string;
+  vote_voter : string;
+  vote_direction : vote_direction;
+  vote_ts : float;
+  vote_author_name : string;
 }
+
+let record_vote_side_effect store outcome =
+  with_persist_lock store (fun () ->
+      append_vote_log
+        ~target:outcome.vote_target
+        ~voter:outcome.vote_voter
+        ~direction:outcome.vote_direction
+        ~ts:outcome.vote_ts);
+  let vote_dir =
+    match outcome.vote_direction with Up -> `Up | Down -> `Down
+  in
+  Thompson_sampling.record_vote
+    ~agent_name:outcome.vote_author_name
+    ~direction:vote_dir
 
 let vote store ~voter ~post_id ~direction : (int, board_error) Result.t =
   match Agent_id.of_string voter with
@@ -140,14 +165,15 @@ let vote store ~voter ~post_id ~direction : (int, board_error) Result.t =
                   Hashtbl.replace store.vote_log vote_key (direction, now);
                   mark_dirty_post store (Post_id.to_string pid);
                   invalidate_post_caches store;
-                  append_vote_log ~target:vote_key ~voter ~direction ~ts:now;
-                  (* Record vote for Thompson Sampling feedback *)
                   let author_name = Agent_id.to_string post.author in
-                  let vote_dir = match direction with Up -> `Up | Down -> `Down in
-                  Thompson_sampling.record_vote ~agent_name:author_name ~direction:vote_dir;
                   (* No economy earn on flip: prevents down/up alternation abuse *)
                   Ok { delta = flipped.votes_up - flipped.votes_down;
-                       earn_upvote_for = None }
+                       earn_upvote_for = None;
+                       vote_target = vote_key;
+                       vote_voter = voter;
+                       vote_direction = direction;
+                       vote_ts = now;
+                       vote_author_name = author_name }
               | None ->
                   let updated = match direction with
                     | Up -> { post with votes_up = post.votes_up + 1; updated_at = now }
@@ -157,16 +183,17 @@ let vote store ~voter ~post_id ~direction : (int, board_error) Result.t =
                   Hashtbl.replace store.vote_log vote_key (direction, now);
                   mark_dirty_post store (Post_id.to_string pid);
                   invalidate_post_caches store;
-                  append_vote_log ~target:vote_key ~voter ~direction ~ts:now;
-                  (* Record vote for Thompson Sampling feedback *)
                   let author_name = Agent_id.to_string post.author in
-                  let vote_dir = match direction with Up -> `Up | Down -> `Down in
-                  Thompson_sampling.record_vote ~agent_name:author_name ~direction:vote_dir;
                   let earn =
                     if Poly.equal direction Up then Some author_name else None
                   in
                   Ok { delta = updated.votes_up - updated.votes_down;
-                       earn_upvote_for = earn })
+                       earn_upvote_for = earn;
+                       vote_target = vote_key;
+                       vote_voter = voter;
+                       vote_direction = direction;
+                       vote_ts = now;
+                       vote_author_name = author_name })
       in
       (* Agent Economy: earn credits for an upvote received.  Moved
          OUTSIDE the store lock — [Agent_economy.earn] writes its own
@@ -174,7 +201,8 @@ let vote store ~voter ~post_id ~direction : (int, board_error) Result.t =
          so holding [store.mutex] across its disk I/O was gratuitous
          contention with every other reader/writer. *)
       (match board_result with
-       | Ok { delta; earn_upvote_for = Some author_name } ->
+       | Ok ({ delta; earn_upvote_for = Some author_name } as outcome) ->
+           record_vote_side_effect store outcome;
            (match Agent_economy.earn
               ~base_path:(board_base_path ()) ~agent_name:author_name
               ~kind:Earn_upvote ~reason:"upvote on post" () with
@@ -182,7 +210,9 @@ let vote store ~voter ~post_id ~direction : (int, board_error) Result.t =
             | Error e ->
                 Log.BoardLog.warn "board_votes: economy earn failed for %s: %s" author_name e);
            Ok delta
-       | Ok { delta; earn_upvote_for = None } -> Ok delta
+       | Ok ({ delta; earn_upvote_for = None } as outcome) ->
+           record_vote_side_effect store outcome;
+           Ok delta
        | Error _ as e -> e)
 
 (** Vote on a comment *)
@@ -214,12 +244,16 @@ let vote_comment store ~voter ~comment_id ~direction : (int, board_error) Result
                 Hashtbl.replace store.vote_log vote_key (direction, now);
                 mark_dirty_comment store (Comment_id.to_string cid);
                 invalidate_comment_caches store;
-                append_vote_log ~target:vote_key ~voter ~direction ~ts:now;
-                (* Record vote for Thompson Sampling feedback *)
                 let author_name = Agent_id.to_string cmt.author in
-                let vote_dir = match direction with Up -> `Up | Down -> `Down in
-                Thompson_sampling.record_vote ~agent_name:author_name ~direction:vote_dir;
-                Ok (flipped.votes_up - flipped.votes_down)
+                Ok {
+                  delta = flipped.votes_up - flipped.votes_down;
+                  earn_upvote_for = None;
+                  vote_target = vote_key;
+                  vote_voter = voter;
+                  vote_direction = direction;
+                  vote_ts = now;
+                  vote_author_name = author_name;
+                }
             | None ->
                 let updated = match direction with
                   | Up -> { cmt with votes_up = cmt.votes_up + 1 }
@@ -229,13 +263,20 @@ let vote_comment store ~voter ~comment_id ~direction : (int, board_error) Result
                 Hashtbl.replace store.vote_log vote_key (direction, now);
                 mark_dirty_comment store (Comment_id.to_string cid);
                 invalidate_comment_caches store;
-                append_vote_log ~target:vote_key ~voter ~direction ~ts:now;
-                (* Record vote for Thompson Sampling feedback *)
                 let author_name = Agent_id.to_string cmt.author in
-                let vote_dir = match direction with Up -> `Up | Down -> `Down in
-                Thompson_sampling.record_vote ~agent_name:author_name ~direction:vote_dir;
-                Ok (updated.votes_up - updated.votes_down)
+                Ok {
+                  delta = updated.votes_up - updated.votes_down;
+                  earn_upvote_for = None;
+                  vote_target = vote_key;
+                  vote_voter = voter;
+                  vote_direction = direction;
+                  vote_ts = now;
+                  vote_author_name = author_name;
+                }
       )
+      |> Result.map (fun outcome ->
+             record_vote_side_effect store outcome;
+             outcome.delta)
 
 (** {1 Stats} *)
 
@@ -643,8 +684,9 @@ let reset_global_for_test () =
 
 (** Flush any dirty state to disk. Call on shutdown to prevent data loss. *)
 let flush_dirty store =
-  let posts, comments =
+  let posts, comments, vote_log =
     with_lock store (fun () ->
+      let had_dirty = store.dirty_posts || store.dirty_comments in
       let posts =
         if store.dirty_posts then
           Hashtbl.fold
@@ -672,10 +714,15 @@ let flush_dirty store =
       store.dirty_posts <- false;
       store.dirty_comments <- false;
       store.last_flush <- Time_compat.now ();
-      (posts, comments))
+      let vote_log =
+        if had_dirty then Some (vote_log_jsonl store) else None
+      in
+      (posts, comments, vote_log))
   in
-  List.iter append_post posts;
-  List.iter append_comment comments
+  with_persist_lock store (fun () ->
+      List.iter append_post posts;
+      List.iter append_comment comments;
+      Option.iter save_vote_log_jsonl vote_log)
 
 
 (** {1 Karma & Flair - Reddit-style} *)

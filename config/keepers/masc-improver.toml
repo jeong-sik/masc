@@ -1,5 +1,6 @@
 [keeper]
 persona_name = "analyst"
+cascade_name = "big_three"
 sandbox_profile = "docker"
 network_mode = "inherit"
 work_discovery_enabled = true

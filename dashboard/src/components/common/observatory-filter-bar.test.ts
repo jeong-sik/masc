@@ -52,7 +52,7 @@ describe('ObservatoryFilterBar', () => {
     const container = document.createElement('div')
     render(h(ObservatoryFilterBar, {}), container)
     expect(container.textContent).toContain('keeper-a')
-    expect(container.textContent).toContain('키퍼')
+    expect(container.textContent).toContain('Keeper')
   })
 
   it('renders namespace chip', () => {
@@ -61,7 +61,7 @@ describe('ObservatoryFilterBar', () => {
     const container = document.createElement('div')
     render(h(ObservatoryFilterBar, {}), container)
     expect(container.textContent).toContain('ns-1')
-    expect(container.textContent).toContain('네임스페이스')
+    expect(container.textContent).toContain('Namespace')
   })
 
   it('renders operation chip', () => {
@@ -70,7 +70,7 @@ describe('ObservatoryFilterBar', () => {
     const container = document.createElement('div')
     render(h(ObservatoryFilterBar, {}), container)
     expect(container.textContent).toContain('op-x')
-    expect(container.textContent).toContain('작업')
+    expect(container.textContent).toContain('Operation')
   })
 
   it('renders range chip with label', () => {
@@ -80,7 +80,7 @@ describe('ObservatoryFilterBar', () => {
     const container = document.createElement('div')
     render(h(ObservatoryFilterBar, {}), container)
     expect(container.textContent).toContain('1시간')
-    expect(container.textContent).toContain('기간')
+    expect(container.textContent).toContain('Range')
   })
 
   it('calls setObservatoryFilter on chip clear', () => {
@@ -88,7 +88,7 @@ describe('ObservatoryFilterBar', () => {
     mockStore.keeper = 'k1'
     const container = document.createElement('div')
     render(h(ObservatoryFilterBar, {}), container)
-    const btn = container.querySelector('[aria-label="키퍼 필터 제거"]') as HTMLButtonElement
+    const btn = container.querySelector('[aria-label="Clear Keeper filter"]') as HTMLButtonElement
     btn?.click()
     expect(mockStore.setFilter).toHaveBeenCalledWith({ keeper: null })
   })
@@ -99,7 +99,7 @@ describe('ObservatoryFilterBar', () => {
     const container = document.createElement('div')
     render(h(ObservatoryFilterBar, {}), container)
     const clearAll = Array.from(container.querySelectorAll('button')).find(
-      (b) => b.textContent?.includes('모두 해제'),
+      (b) => b.textContent?.includes('Clear all'),
     )
     clearAll?.click()
     expect(mockStore.clearFilters).toHaveBeenCalled()
@@ -111,6 +111,6 @@ describe('ObservatoryFilterBar', () => {
     const container = document.createElement('div')
     render(h(ObservatoryFilterBar, {}), container)
     const region = container.querySelector('[role="region"]')
-    expect(region?.getAttribute('aria-label')).toBe('활성 관찰 필터')
+    expect(region?.getAttribute('aria-label')).toBe('Active observability filters')
   })
 })

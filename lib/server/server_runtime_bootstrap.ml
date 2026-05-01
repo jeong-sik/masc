@@ -878,6 +878,24 @@ let is_bearer_token_env_var_binding trimmed =
     | ' ' | '\t' | '=' -> true
     | _ -> false
 
+let is_authorization_header_binding trimmed =
+  let key = "authorization" in
+  let key_len = String.length key in
+  if String.length trimmed < key_len then
+    false
+  else if
+    not
+      (String.equal
+         (String.lowercase_ascii (String.sub trimmed 0 key_len))
+         key)
+  then
+    false
+  else
+    match String.get trimmed key_len with
+    | exception Invalid_argument _ -> true
+    | ' ' | '\t' | '=' -> true
+    | _ -> false
+
 let codex_mcp_headers_line indent =
   Printf.sprintf
     "%shttp_headers = { \"Accept\" = \"application/json, text/event-stream\", \"X-MASC-Agent\" = \"codex-mcp-client\" }"
@@ -974,8 +992,15 @@ let sync_codex_mcp_auth_header_content content =
           else
             (line, seen_header, seen_bearer_env, changed)
         in
-        loop ~in_masc_section ~seen_masc_section ~seen_header
-          ~seen_bearer_env ~changed (line :: acc) rest
+        (* Drop bare Authorization bindings from [mcp_servers.masc]: a literal
+           Authorization header conflicts with bearer_token_env_var and would
+           persist raw token values in the config file. *)
+        if in_masc_section && is_authorization_header_binding trimmed then
+          loop ~in_masc_section ~seen_masc_section ~seen_header
+            ~seen_bearer_env ~changed:true acc rest
+        else
+          loop ~in_masc_section ~seen_masc_section ~seen_header
+            ~seen_bearer_env ~changed (line :: acc) rest
   in
   loop ~in_masc_section:false ~seen_masc_section:false ~seen_header:false
     ~seen_bearer_env:false ~changed:false [] lines

@@ -12,6 +12,8 @@
 module Hooks = Masc_mcp.Keeper_hooks_oas
 module Pricing = Llm_provider.Pricing
 module Prom = Masc_mcp.Prometheus
+module Trust = Masc_mcp.Keeper_usage_trust
+module Json = Yojson.Safe.Util
 
 let mk_usage
     ?(cache_creation = 0) ?(cache_read = 0) ?(cost_usd = None)
@@ -23,6 +25,21 @@ let mk_usage
     cache_read_input_tokens = cache_read;
     cost_usd;
   }
+
+let check_json_string name expected json =
+  Alcotest.(check string)
+    name expected
+    (json |> Json.member name |> Json.to_string)
+
+let check_json_float name expected json =
+  Alcotest.(check (float 0.000_001))
+    name expected
+    (json |> Json.member name |> Json.to_float)
+
+let check_json_int name expected json =
+  Alcotest.(check int)
+    name expected
+    (json |> Json.member name |> Json.to_int)
 
 let catalog_miss_for model =
   Prom.metric_value_or_zero
@@ -146,6 +163,21 @@ let test_known_model_with_trusted_usage_gives_priced () =
     "known model with cost > 0 → priced"
     "priced" (Hooks.cost_status_to_string status)
 
+let test_positive_cost_zero_tokens_gives_priced () =
+  let status =
+    Hooks.cost_status_for_event
+      ~provider:"openai"
+      ~pricing_model:"openai:fixed-fee-zero-token-probe-2026"
+      ~usage_missing:false
+      ~usage_trusted:true
+      ~input_tokens:0
+      ~output_tokens:0
+      ~cost_usd:0.031
+  in
+  Alcotest.(check string)
+    "positive cost with zero tokens → priced"
+    "priced" (Hooks.cost_status_to_string status)
+
 let test_known_model_zero_cost_with_tokens_gives_known_free () =
   (* Known model, trusted usage, but cost_usd=0 (e.g. catalog hit but
      input/output are both zero-cost tiers). Still classified as
@@ -180,6 +212,43 @@ let test_missing_usage_gives_usage_missing () =
     "missing usage → usage_missing"
     "usage_missing" (Hooks.cost_status_to_string status)
 
+(* ── cost_event_payload ────────────────────────────────────────── *)
+
+let test_cost_event_payload_masks_unpriced_model () =
+  let payload =
+    Hooks.cost_event_payload
+      ~agent_name:"keeper-a"
+      ~task_id:(Some "task-a")
+      ~model:"openai:unpriced-cost-event-probe-2026"
+      ~input_tokens:500
+      ~output_tokens:200
+      ~cost_usd:0.0
+      ~usage_trust:Trust.Usage_trusted
+      ()
+  in
+  check_json_string "unpriced status" "unpriced_model" payload;
+  check_json_string "unpriced reason" "pricing_catalog_miss" payload;
+  check_json_string "unpriced source" "pricing_catalog_miss" payload;
+  check_json_float "unpriced cost masked" 0.0 payload
+
+let test_cost_event_payload_preserves_positive_zero_token_cost () =
+  let payload =
+    Hooks.cost_event_payload
+      ~agent_name:"keeper-a"
+      ~task_id:None
+      ~model:"openai:fixed-fee-zero-token-probe-2026"
+      ~input_tokens:0
+      ~output_tokens:0
+      ~cost_usd:0.031
+      ~usage_trust:Trust.Usage_trusted
+      ()
+  in
+  check_json_string "positive zero-token status" "priced" payload;
+  check_json_string "positive zero-token source" "computed" payload;
+  check_json_float "positive zero-token cost preserved" 0.031 payload;
+  check_json_int "positive zero-token input tokens" 0 payload;
+  check_json_int "positive zero-token output tokens" 0 payload
+
 let () =
   Alcotest.run "keeper_hooks_oas_pricing"
     [
@@ -210,10 +279,22 @@ let () =
             "known model + cost > 0 → priced"
             `Quick test_known_model_with_trusted_usage_gives_priced;
           Alcotest.test_case
+            "positive cost + zero tokens → priced"
+            `Quick test_positive_cost_zero_tokens_gives_priced;
+          Alcotest.test_case
             "known-free model + zero cost → known_free"
             `Quick test_known_model_zero_cost_with_tokens_gives_known_free;
           Alcotest.test_case
             "missing usage → usage_missing"
             `Quick test_missing_usage_gives_usage_missing;
+        ] );
+      ( "cost_event_payload",
+        [
+          Alcotest.test_case
+            "unpriced model status + mask"
+            `Quick test_cost_event_payload_masks_unpriced_model;
+          Alcotest.test_case
+            "positive cost + zero tokens preserved"
+            `Quick test_cost_event_payload_preserves_positive_zero_token_cost;
         ] );
     ]

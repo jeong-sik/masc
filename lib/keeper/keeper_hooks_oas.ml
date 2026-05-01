@@ -430,8 +430,8 @@ let cost_status_for_event
     ~(cost_usd : float) =
   if usage_missing then Cost_usage_missing
   else if not usage_trusted then Cost_usage_untrusted
-  else if input_tokens <= 0 && output_tokens <= 0 then Cost_no_tokens
   else if cost_usd > 0.0 then Cost_reported_or_estimated
+  else if input_tokens <= 0 && output_tokens <= 0 then Cost_no_tokens
   else if structurally_unmetered_provider provider then Cost_known_free
   else if String.equal provider "unknown" then Cost_provider_unknown
   else
@@ -609,8 +609,15 @@ let record_cost_emit_source source =
     why [cost_usd] is what it is.
 
     Called from [after_turn] hook when a trajectory accumulator is present. *)
-let emit_cost_event
-    ~(masc_root : string)
+type assembled_cost_event_payload = {
+  payload : Yojson.Safe.t;
+  provider : string;
+  cost_status_label : string;
+  cost_status_reason_label : string;
+  cost_usd_source : string;
+}
+
+let assemble_cost_event_payload
     ~(agent_name : string)
     ~(task_id : string option)
     ~(model : string)
@@ -620,8 +627,7 @@ let emit_cost_event
     ?(usage_missing : bool = false)
     ?usage_trust
     ?(telemetry : Agent_sdk.Types.inference_telemetry option)
-    () : unit =
-  let path = Filename.concat masc_root "costs.jsonl" in
+    () : assembled_cost_event_payload =
   let int_field name = function
     | Some n -> [ (name, `Int n) ]
     | None -> []
@@ -673,15 +679,6 @@ let emit_cost_event
   in
   let cost_status_label = cost_status_to_string cost_status in
   let cost_status_reason_label = cost_status_reason cost_status in
-  Prometheus.inc_counter
-    "masc_cost_ledger_status_total"
-    ~labels:
-      [
-        ("provider", provider);
-        ("status", cost_status_label);
-        ("reason", cost_status_reason_label);
-      ]
-    ();
   let raw_usage_fields =
     if usage_missing || usage_trusted then []
     else
@@ -715,7 +712,6 @@ let emit_cost_event
     classify_cost_usd_source ~usage_missing ~usage_trusted
       ~provider ~model:pricing_model ~cost_usd
   in
-  record_cost_emit_source cost_usd_source;
   let entry = `Assoc ([
     ("agent", `String agent_name);
     ("task_id", Json_util.string_opt_to_json task_id);
@@ -741,6 +737,74 @@ let emit_cost_event
   @ Keeper_usage_trust.json_fields usage_trust
   @ raw_usage_fields
   @ wall_tok_s_fields @ telemetry_fields) in
+  {
+    payload = entry;
+    provider;
+    cost_status_label;
+    cost_status_reason_label;
+    cost_usd_source;
+  }
+
+let cost_event_payload
+    ~(agent_name : string)
+    ~(task_id : string option)
+    ~(model : string)
+    ~(input_tokens : int)
+    ~(output_tokens : int)
+    ~(cost_usd : float)
+    ?(usage_missing : bool = false)
+    ?usage_trust
+    ?(telemetry : Agent_sdk.Types.inference_telemetry option)
+    () : Yojson.Safe.t =
+  (assemble_cost_event_payload
+     ~agent_name
+     ~task_id
+     ~model
+     ~input_tokens
+     ~output_tokens
+     ~cost_usd
+     ~usage_missing
+     ?usage_trust
+     ?telemetry
+     ()).payload
+
+let emit_cost_event
+    ~(masc_root : string)
+    ~(agent_name : string)
+    ~(task_id : string option)
+    ~(model : string)
+    ~(input_tokens : int)
+    ~(output_tokens : int)
+    ~(cost_usd : float)
+    ?(usage_missing : bool = false)
+    ?usage_trust
+    ?(telemetry : Agent_sdk.Types.inference_telemetry option)
+    () : unit =
+  let path = Filename.concat masc_root "costs.jsonl" in
+  let assembled =
+    assemble_cost_event_payload
+      ~agent_name
+      ~task_id
+      ~model
+      ~input_tokens
+      ~output_tokens
+      ~cost_usd
+      ~usage_missing
+      ?usage_trust
+      ?telemetry
+      ()
+  in
+  Prometheus.inc_counter
+    "masc_cost_ledger_status_total"
+    ~labels:
+      [
+        ("provider", assembled.provider);
+        ("status", assembled.cost_status_label);
+        ("reason", assembled.cost_status_reason_label);
+      ]
+    ();
+  record_cost_emit_source assembled.cost_usd_source;
+  let entry = assembled.payload in
   let line = Yojson.Safe.to_string entry ^ "\n" in
   (try Fs_compat.append_file path line
    with Eio.Cancel.Cancelled _ as e -> raise e

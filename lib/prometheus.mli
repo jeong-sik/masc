@@ -115,6 +115,12 @@ val metric_keeper_provider_cooldown_remaining_sec : string
     Exposes the current cooldown duration so operators can see
     which cascade is blocked and for how long.  Labels: [keeper, cascade]. *)
 
+val metric_keeper_provider_block_duration_sec : string
+(** P-DASH-13: provider block duration histogram.
+    Records the duration (in seconds) for which a provider is placed
+    in cooldown each time a cooldown is applied or extended.
+    Labels: [provider]. *)
+
 val metric_keeper_turn_queue_depth : string
 (** P-DASH-02: turn queue depth gauge.  Semaphore waiter count
     surfaced so operators can alert on queue pressure without log

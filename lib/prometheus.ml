@@ -298,6 +298,13 @@ let metric_keeper_provider_cooldown_skip =
 let metric_keeper_provider_cooldown_remaining_sec =
   "masc_keeper_provider_cooldown_remaining_sec"
 
+(* P-DASH-13: provider block duration histogram.
+   Records the duration (in seconds) for which a provider is placed
+   in cooldown each time a cooldown is applied or extended.
+   Labels: provider. *)
+let metric_keeper_provider_block_duration_sec =
+  "masc_keeper_provider_block_duration_sec"
+
 (* P-DASH-02: turn queue depth gauge.  Semaphore waiters are
    observable via [autonomous_waiter_snapshot_for_test] but were
    only emitted as a debug log line.  Surfacing as a gauge lets
@@ -948,6 +955,12 @@ let init () =
   add metric_keeper_turn_queue_depth
     "Current keeper turn wait queue depth (labels: channel=autonomous_queue)"
     Gauge;
+  (* P-DASH-13: provider block duration histogram.
+     Records the duration (in seconds) for which a provider is placed in
+     cooldown each time a cooldown is applied or extended.  Labels: provider. *)
+  register_histogram ~name:metric_keeper_provider_block_duration_sec
+    ~help:"Duration in seconds for which a provider is placed into cooldown \
+           (observed each time a cooldown is applied or extended). Labels: provider." ();
   add metric_timeout_policy_overshoot
     "Total cooperative-cancel timeout overshoots \
      (labels: layer, origin)"

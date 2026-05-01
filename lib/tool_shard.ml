@@ -523,7 +523,7 @@ Pass the PR number as `pr_number` (preferred) or `number` (legacy alias).";
            Keeper_tool_pr_review -> Keeper_alerting -> Tool_shard), so the
            sync regression test [test_types.ml :: pr_review_event_ssot]
            asserts these stay in lock-step. Same pattern as #8467
-           (sandbox_profile / network_mode / shared_memory_scope). *)
+           (sandbox_profile / network_mode). *)
         ("event", `Assoc [("type", `String "string"); ("enum", `List (List.map (fun s -> `String s) pr_review_event_enum_strings)); ("description", `String "Review event type")]);
         ("path", `Assoc [("type", `String "string"); ("description", `String "File path for inline comment (optional)")]);
         ("line", `Assoc [("type", `String "integer"); ("description", `String "Line number for inline comment (optional)")]);

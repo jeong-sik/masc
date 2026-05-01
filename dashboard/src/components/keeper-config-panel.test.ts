@@ -29,7 +29,6 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
     active_goal_ids: ['goal-runtime'],
     sandbox_profile: 'local',
     network_mode: 'inherit',
-    shared_memory_scope: 'disabled',
     sandbox_last_error: null,
     effective_sandbox_image: 'ubuntu:24.04@sha256:test',
     private_workspace_root: '/tmp/project-root/.masc/playground/keeper-sangsu',
@@ -260,7 +259,6 @@ function makeKeeperConfigForSandbox(overrides: Partial<KeeperConfig> = {}): Keep
     active_goal_ids: [],
     sandbox_profile: 'local',
     network_mode: 'inherit',
-    shared_memory_scope: 'disabled',
     allowed_paths: [],
     effective_allowed_paths: [],
     prompt: {} as KeeperConfig['prompt'],
@@ -303,36 +301,30 @@ describe('initRuntimeDraftFromConfig — sandbox fields', () => {
     const c = makeKeeperConfigForSandbox({
       sandbox_profile: 'docker',
       network_mode: 'none',
-      shared_memory_scope: 'room',
     })
     const draft = initRuntimeDraftFromConfig(c)
     expect(draft.sandbox_profile).toBe('docker')
     expect(draft.network_mode).toBe('none')
-    expect(draft.shared_memory_scope).toBe('room')
   })
 
   it('defaults sandbox fields when config is missing them', () => {
     const c = makeKeeperConfigForSandbox({
       sandbox_profile: undefined,
       network_mode: undefined,
-      shared_memory_scope: undefined,
     })
     const draft = initRuntimeDraftFromConfig(c)
     expect(draft.sandbox_profile).toBe('local')
     expect(draft.network_mode).toBe('inherit')
-    expect(draft.shared_memory_scope).toBe('disabled')
   })
 
   it('normalises unknown sandbox values via coerce helpers', () => {
     const c = makeKeeperConfigForSandbox({
       sandbox_profile: 'weird',
       network_mode: 'host',
-      shared_memory_scope: 'shared',
     })
     const draft = initRuntimeDraftFromConfig(c)
     expect(draft.sandbox_profile).toBe('local')
     expect(draft.network_mode).toBe('inherit')
-    expect(draft.shared_memory_scope).toBe('disabled')
   })
 })
 
@@ -345,12 +337,10 @@ describe('buildRuntimePayload — sandbox diffing', () => {
     const c = makeKeeperConfigForSandbox({
       sandbox_profile: 'local',
       network_mode: 'inherit',
-      shared_memory_scope: 'disabled',
     })
     const payload = buildRuntimePayload(draftFrom(c), c)
     expect(payload.sandbox_profile).toBeUndefined()
     expect(payload.network_mode).toBeUndefined()
-    expect(payload.shared_memory_scope).toBeUndefined()
   })
 
   it('emits sandbox_profile when toggled on', () => {
@@ -365,26 +355,17 @@ describe('buildRuntimePayload — sandbox diffing', () => {
     expect(payload.network_mode).toBe('none')
   })
 
-  it('emits shared_memory_scope when toggled to room', () => {
-    const c = makeKeeperConfigForSandbox({ shared_memory_scope: 'disabled' })
-    const payload = buildRuntimePayload(draftFrom(c, { shared_memory_scope: 'room' }), c)
-    expect(payload.shared_memory_scope).toBe('room')
-  })
-
   it('emits all three when switching to hardened+none+room in one save', () => {
     const c = makeKeeperConfigForSandbox({
       sandbox_profile: 'local',
       network_mode: 'inherit',
-      shared_memory_scope: 'disabled',
     })
     const payload = buildRuntimePayload(draftFrom(c, {
       sandbox_profile: 'docker',
       network_mode: 'none',
-      shared_memory_scope: 'room',
     }), c)
     expect(payload.sandbox_profile).toBe('docker')
     expect(payload.network_mode).toBe('none')
-    expect(payload.shared_memory_scope).toBe('room')
   })
 
   it('treats unknown backend sandbox value as local for diffing', () => {
@@ -608,7 +589,6 @@ describe('KeeperConfigPanel', () => {
       makeKeeperConfig({
         sandbox_profile: 'docker',
         network_mode: 'none',
-        shared_memory_scope: 'room',
       }),
     )
 
@@ -617,9 +597,7 @@ describe('KeeperConfigPanel', () => {
     await flush()
 
     const sandboxProfile = container.querySelector('select[aria-label="sandbox_profile"]') as HTMLSelectElement | null
-    const networkMode = container.querySelector('select[aria-label="network_mode"]') as HTMLSelectElement | null
-    const sharedMemory = container.querySelector('select[aria-label="shared_memory_scope"]') as HTMLSelectElement | null
-    expect(sandboxProfile).not.toBeNull()
+    const networkMode = container.querySelector('select[aria-label="network_mode"]') as HTMLSelectElement | null    expect(sandboxProfile).not.toBeNull()
     expect(networkMode).not.toBeNull()
     expect(sharedMemory).not.toBeNull()
 
@@ -647,7 +625,6 @@ describe('KeeperConfigPanel', () => {
       expect.objectContaining({
         sandbox_profile: 'docker',
         network_mode: 'none',
-        shared_memory_scope: 'room',
       }),
     )
   })

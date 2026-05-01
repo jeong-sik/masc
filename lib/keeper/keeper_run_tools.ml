@@ -1255,9 +1255,6 @@ let prepare_agent_setup
                  ~allowed_paths:(Keeper_alerting_path.effective_allowed_paths ~meta)
                  ~network_mode:
                    (Keeper_types.network_mode_to_string meta.network_mode)
-                 ~shared_memory_scope:
-                   (Keeper_types.shared_memory_scope_to_string
-                      meta.shared_memory_scope)
                  ?approval_mode:approval_mode_effective
                  ~tool_surface_class:computed_surface.tool_surface_class
                  ~visible_tool_count:(List.length all_allowed)

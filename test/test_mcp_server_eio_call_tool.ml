@@ -203,8 +203,6 @@ let test_runtime_mcp_keeper_log_context_uses_keeper_trace_and_current_turn () =
       check bool "sandbox root present" true (Option.is_some ctx.sandbox_root);
       check bool "allowed paths present" true (Option.is_some ctx.allowed_paths);
       check bool "network mode present" true (Option.is_some ctx.network_mode);
-      check bool "shared memory scope present" true
-        (Option.is_some ctx.shared_memory_scope);
       check bool "tool surface class present" true
         (Option.is_some ctx.tool_surface_class);
       check bool "visible tool count present" true

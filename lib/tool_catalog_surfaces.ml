@@ -164,8 +164,6 @@ let public_mcp_surface_tools =
     "masc_tool_help"; "masc_web_search"; "masc_check";
     (* HITL approval queue *)
     "masc_approval_get";
-    (* Shared memory lane — keeper-context-gated at dispatch time. *)
-    "masc_team_memory_read"; "masc_team_memory_write"; "masc_team_memory_search";
     (* Board extended *)
     "masc_board_comment_vote";
     (* Agent discovery *)

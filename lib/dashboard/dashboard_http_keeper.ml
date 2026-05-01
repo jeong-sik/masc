@@ -1653,10 +1653,7 @@ let keeper_config_json (config : Coord.config) (name : string)
          ("name", `String m.name);
          ("active_goal_ids", active_goal_ids_json);
          ("sandbox_profile", `String (Keeper_types.sandbox_profile_to_string m.sandbox_profile));
-         ("network_mode", `String (Keeper_types.network_mode_to_string m.network_mode));
-         ("shared_memory_scope",
-           `String (Keeper_types.shared_memory_scope_to_string m.shared_memory_scope));
-         ("sandbox_last_error", Json_util.string_opt_to_json sandbox_last_error);
+         ("network_mode", `String (Keeper_types.network_mode_to_string m.network_mode));         ("sandbox_last_error", Json_util.string_opt_to_json sandbox_last_error);
          ("sandbox_preflight",
            Json_util.option_to_yojson Fun.id sandbox_preflight);
          ("effective_sandbox_image",

@@ -197,7 +197,6 @@
         test_keeper_state_machine_correspondence
         test_keeper_social_model_magentic_ledger_fsm
         test_keeper_overflow_recovery
-        test_team_memory
         test_telemetry_unified
         test_telemetry_error_occurred_wire_10358
         test_keeper_topk_llm
@@ -395,7 +394,6 @@
           test_keeper_state_machine_correspondence
           test_keeper_social_model_magentic_ledger_fsm
           test_keeper_overflow_recovery
-          test_team_memory
           test_telemetry_unified
           test_telemetry_error_occurred_wire_10358
           test_keeper_topk_llm

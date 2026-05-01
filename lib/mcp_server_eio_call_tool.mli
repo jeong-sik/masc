@@ -89,7 +89,6 @@ type keeper_runtime_mcp_log_context = {
   sandbox_root : string option;
   allowed_paths : string list option;
   network_mode : string option;
-  shared_memory_scope : string option;
   approval_mode : string option;
   tool_surface_class : string option;
   visible_tool_count : int option;

@@ -1963,7 +1963,6 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
     active_goal_ids: normalizeStringList(data.active_goal_ids),
     sandbox_profile: asNullableString(data.sandbox_profile) ?? 'local',
     network_mode: asNullableString(data.network_mode) ?? 'inherit',
-    shared_memory_scope: asNullableString(data.shared_memory_scope) ?? 'disabled',
     sandbox_last_error: asNullableString(data.sandbox_last_error),
     effective_sandbox_image: asNullableString(data.effective_sandbox_image),
     private_workspace_root: asNullableString(data.private_workspace_root),
@@ -2135,7 +2134,6 @@ export type KeeperConfigUpdatePayload = {
   // Sandbox
   sandbox_profile?: SandboxProfile
   network_mode?: SandboxNetworkMode
-  shared_memory_scope?: SharedMemoryScope
   // Prompt fields
   goal?: string
   short_goal?: string

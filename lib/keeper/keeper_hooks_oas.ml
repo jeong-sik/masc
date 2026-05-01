@@ -1180,7 +1180,6 @@ let make_hooks
             , goal_ids
             , sandbox_profile
             , network_mode
-            , shared_memory_scope
             , approval_mode ) =
           Keeper_tool_call_log.get_turn_context
             ~keeper_name:(!meta_ref).name ()
@@ -1195,8 +1194,7 @@ let make_hooks
              ?lane ?tool_choice ?thinking_enabled ?thinking_budget
              ?prompt_fingerprint
              ?trace_id ?session_id ?turn ?keeper_turn_id ?task_id ?goal_ids
-             ?sandbox_profile ?network_mode
-             ?shared_memory_scope ?approval_mode
+             ?sandbox_profile ?network_mode ?approval_mode
              ~result_bytes ?truncated_to ()
          with
          | Eio.Cancel.Cancelled _ as e -> raise e

@@ -1047,8 +1047,6 @@ let handle_keeper_status ctx args : tool_result =
              `String (sandbox_profile_to_string m.sandbox_profile));
            ("network_mode",
              `String (network_mode_to_string m.network_mode));
-           ("shared_memory_scope",
-             `String (shared_memory_scope_to_string m.shared_memory_scope));
            ("sandbox_last_error",
              Json_util.string_opt_to_json sandbox_last_error);
            ("sandbox_preflight",
@@ -1109,8 +1107,6 @@ let handle_keeper_status ctx args : tool_result =
                `String (sandbox_profile_to_string m.sandbox_profile));
              ("network_mode",
                `String (network_mode_to_string m.network_mode));
-             ("shared_memory_scope",
-               `String (shared_memory_scope_to_string m.shared_memory_scope));
              ("effective_sandbox_image",
                Json_util.string_opt_to_json effective_sandbox_image);
              ("allowed_paths", string_list_to_json m.allowed_paths);
@@ -1257,8 +1253,6 @@ let handle_keeper_status ctx args : tool_result =
              ("private_workspace_root", `String keeper_visible_abs);
              ("sandbox_profile", `String (sandbox_profile_to_string m.sandbox_profile));
              ("network_mode", `String (network_mode_to_string m.network_mode));
-             ("shared_memory_scope",
-               `String (shared_memory_scope_to_string m.shared_memory_scope));
              ("sandbox_last_error",
                Json_util.string_opt_to_json sandbox_last_error);
              ("sandbox_preflight",

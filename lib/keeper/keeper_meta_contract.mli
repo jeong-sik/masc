@@ -232,7 +232,6 @@ type keeper_meta = {
   sandbox_profile : Keeper_types_profile.sandbox_profile;
   sandbox_image : string option;
   network_mode : Keeper_types_profile.network_mode;
-  shared_memory_scope : Keeper_types_profile.shared_memory_scope;
   allowed_paths : string list;
   tool_access : tool_access;
   tool_preset_source : string option;

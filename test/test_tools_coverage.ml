@@ -618,8 +618,6 @@ let test_masc_keeper_up_schema () =
             (List.mem_assoc "sandbox_profile" props);
           Alcotest.(check bool) "has network_mode" true
             (List.mem_assoc "network_mode" props);
-          Alcotest.(check bool) "has shared_memory_scope" true
-            (List.mem_assoc "shared_memory_scope" props);
           Alcotest.(check bool) "omits social_model" false
             (List.mem_assoc "social_model" props);
           Alcotest.(check bool) "has autoboot_enabled" true

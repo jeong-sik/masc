@@ -31,7 +31,6 @@ type parsed_keeper_policy =
   ; pp_sandbox_profile : sandbox_profile
   ; pp_sandbox_image : string option
   ; pp_network_mode : network_mode
-  ; pp_shared_memory_scope : shared_memory_scope
   ; pp_allowed_paths : string list
   ; pp_tool_access : tool_access
   ; pp_tool_denylist : string list
@@ -229,17 +228,6 @@ let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
     let pp_policy_voice_enabled =
       Safe_ops.json_bool ~default:voice_enabled_default "policy_voice_enabled" json
     in
-    let pp_shared_memory_scope =
-      let raw =
-        Safe_ops.json_string
-          ~default:(shared_memory_scope_to_string default_shared_memory_scope)
-          "shared_memory_scope"
-          json
-      in
-      Option.value
-        ~default:default_shared_memory_scope
-        (shared_memory_scope_of_string raw)
-    in
     let pp_allowed_paths = Safe_ops.json_string_list "allowed_paths" json in
     let pp_tool_denylist = Safe_ops.json_string_list "tool_denylist" json in
     let pp_mention_targets =
@@ -335,7 +323,6 @@ let parse_keeper_policy (json : Yojson.Safe.t) ~(keeper_name : string)
       ; pp_sandbox_profile
       ; pp_sandbox_image
       ; pp_network_mode
-      ; pp_shared_memory_scope
       ; pp_allowed_paths
       ; pp_tool_access
       ; pp_tool_denylist
@@ -594,7 +581,6 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
                    ; sandbox_profile = policy.pp_sandbox_profile
                    ; sandbox_image = policy.pp_sandbox_image
                    ; network_mode = policy.pp_network_mode
-                   ; shared_memory_scope = policy.pp_shared_memory_scope
                    ; allowed_paths = policy.pp_allowed_paths
                    ; tool_access = policy.pp_tool_access
                    ; tool_preset_source =

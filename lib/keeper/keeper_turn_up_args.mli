@@ -21,7 +21,6 @@ type parsed_args =
   ; autoboot_enabled_opt : bool option
   ; sandbox_profile_opt : sandbox_profile option
   ; network_mode_opt : network_mode option
-  ; shared_memory_scope_opt : shared_memory_scope option
   ; voice_enabled_opt : bool option
   ; voice_channel_opt : string option
   ; voice_agent_id_opt : string option
@@ -123,11 +122,6 @@ val resolve_network_mode :
   preferred:network_mode option ->
   fallback:network_mode option ->
   network_mode
-
-val resolve_shared_memory_scope :
-  preferred:shared_memory_scope option ->
-  fallback:shared_memory_scope option ->
-  shared_memory_scope
 
 (** Private workspace root path (relative to project root). *)
 val private_workspace_root_rel :

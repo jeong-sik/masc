@@ -18,8 +18,6 @@ val sandbox_profile_enum_strings : string list
 val network_mode_enum_strings : string list
 (** Allowed values for [meta.sandbox.network_mode]. *)
 
-val shared_memory_scope_enum_strings : string list
-(** Allowed values for [meta.shared_memory_scope]. *)
 
 val tail_order_enum_strings : string list
 (** Allowed values for log-tail ordering options. *)

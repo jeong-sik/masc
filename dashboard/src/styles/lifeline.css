@@ -1,0 +1,248 @@
+/* lifeline.css — v2
+   The heartbeat strip for the active keeper. Each cell = one event in a turn.
+   Structure: [label] [turns track with density bars, err/stall bands, heartbeat dot] [tail meta + zoom ctrls] */
+
+.zone-lifeline {
+  grid-area: lifeline;
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--divider);
+  display: grid;
+  grid-template-columns: var(--w-sidebar) minmax(0, 1fr) auto;
+  align-items: stretch;
+  overflow: hidden;
+  box-shadow: var(--elev-1-shadow);
+}
+
+/* ─── label col ─── */
+.ll-label {
+  padding: 0 var(--sp-3);
+  border-right: 1px solid var(--divider);
+  display: flex; align-items: center; gap: 6px;
+  overflow: hidden; min-width: 0;
+}
+.ll-label-caps {
+  font-size: var(--fs-10);
+  font-weight: 600;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+}
+.ll-label .active-name {
+  color: var(--brass-1);
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  letter-spacing: 0;
+  font-weight: 500;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ll-label .ll-hb {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--brass-1);
+  box-shadow: 0 0 6px rgb(var(--brass-glow) / .7);
+  animation: anim-heartbeat 1.4s var(--ease-inout) infinite;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+/* ─── track col ─── */
+.ll-track {
+  position: relative;
+  display: flex; flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* turn numbers row (top, tiny) */
+.ll-turns {
+  height: 10px;
+  position: relative;
+  border-bottom: 1px dotted var(--line-1);
+  font-family: var(--font-mono);
+  font-size: var(--fs-9);
+  color: var(--fg-4);
+  letter-spacing: 0;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.ll-turn-mark {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  line-height: 10px;
+  white-space: nowrap;
+  padding: 0 2px;
+  background: var(--bg-1);
+}
+.ll-turn-mark::before {
+  content: "";
+  position: absolute;
+  left: 50%; top: 10px;
+  width: 1px; height: 4px;
+  background: var(--line-2);
+}
+
+/* cells row — the actual density bars */
+.ll-cells {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  align-items: flex-end;
+  gap: 1px;
+  padding: 2px var(--sp-2) 2px var(--sp-2);
+  overflow-x: auto;
+  overflow-y: hidden;
+  white-space: nowrap;
+  scroll-behavior: smooth;
+}
+.ll-cells::-webkit-scrollbar { height: 0; }
+
+/* one event cell — width encodes duration, color encodes kind */
+.ll-cell {
+  flex: 0 0 auto;
+  height: 100%;
+  min-width: 2px;
+  border-radius: 1px;
+  background: var(--bg-3);
+  cursor: pointer;
+  position: relative;
+  transition: transform var(--t-fast) var(--ease), filter var(--t-fast), outline-color var(--t-fast);
+  outline: 1px solid transparent;
+}
+.ll-cell:hover { transform: scaleY(1.12); filter: brightness(1.3); outline-color: var(--fg-2); z-index: 2; }
+.ll-cell.is-active {
+  outline-color: var(--brass-1);
+  box-shadow: 0 0 8px rgb(var(--brass-glow) / .5);
+  z-index: 3;
+}
+.ll-cell.k-tool  { background: var(--brass-2); }
+.ll-cell.k-claim { background: var(--ok); }
+.ll-cell.k-text  { background: var(--info); }
+.ll-cell.k-noop  { background: var(--idle); opacity: .45; }
+.ll-cell.k-error { background: var(--err); }
+
+/* turn separator — thin dashed vertical */
+.ll-turnsep {
+  flex: 0 0 auto;
+  width: 0;
+  border-left: 1px dashed var(--line-2);
+  opacity: .5;
+  height: 100%;
+  margin: 0 2px;
+  align-self: stretch;
+}
+
+/* bands above cells — drawn via absolutely positioned overlays */
+.ll-bands {
+  position: absolute;
+  left: var(--sp-2);
+  right: var(--sp-2);
+  top: 10px;  /* directly under turns row */
+  height: 3px;
+  pointer-events: none;
+}
+.ll-band {
+  position: absolute;
+  top: 0; height: 2px;
+  border-radius: 1px;
+}
+.ll-band.k-err   { background: rgb(var(--err-glow) / .55); box-shadow: 0 0 4px rgb(var(--err-glow) / .45); }
+.ll-band.k-stall { background: rgb(var(--stalled-glow) / .5); }
+
+/* tooltip that follows hovered cell */
+.ll-tip {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--elev-4-bg);
+  border: 1px solid var(--elev-4-border);
+  box-shadow: var(--elev-4-shadow);
+  border-radius: var(--r-1);
+  padding: 4px 8px;
+  font: var(--type-caption);
+  color: var(--fg-1);
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--t-fast);
+  z-index: 10;
+}
+.ll-tip.is-open { opacity: 1; }
+.ll-tip-head { color: var(--brass-1); font-weight: 600; }
+.ll-tip-row { color: var(--fg-3); }
+.ll-tip-row b { color: var(--fg-2); font-weight: 400; }
+
+/* heartbeat dot at the far right of cells */
+.ll-hb-tail {
+  position: sticky;
+  right: 2px;
+  flex: 0 0 auto;
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--brass-1);
+  box-shadow: 0 0 8px rgb(var(--brass-glow) / .8);
+  animation: anim-heartbeat 1.4s var(--ease-inout) infinite;
+  align-self: center;
+  margin-left: 4px;
+}
+
+/* ─── tail col: meta + zoom ─── */
+.ll-tail {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: 0 var(--sp-3);
+  border-left: 1px solid var(--divider);
+  height: 100%;
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-10);
+  color: var(--fg-3);
+}
+.ll-tail-meta {
+  display: flex; align-items: center; gap: 6px;
+}
+.ll-tail-meta b {
+  color: var(--fg-1);
+  font-weight: 500;
+}
+.ll-zoom {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-1);
+  background: var(--bg-2);
+  overflow: hidden;
+}
+.ll-zoom button {
+  background: transparent;
+  border: 0;
+  color: var(--fg-2);
+  padding: 2px 6px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-10);
+  cursor: pointer;
+  min-width: 18px;
+  border-radius: 0;
+}
+.ll-zoom button + button { border-left: 1px solid var(--line-1); }
+.ll-zoom button:hover { background: var(--state-hover-bg); color: var(--fg-1); }
+.ll-zoom .ll-zoom-lvl {
+  padding: 2px 8px;
+  color: var(--fg-2);
+  font-variant-numeric: tabular-nums;
+  border-left: 1px solid var(--line-1);
+  border-right: 1px solid var(--line-1);
+  background: var(--bg-1);
+}
+
+.ll-legend {
+  display: flex; gap: var(--sp-3);
+  font-size: var(--fs-10);
+  color: var(--fg-3);
+  font-family: var(--font-mono);
+}
+.ll-legend .lg { display: flex; align-items: center; gap: 4px; }
+.ll-legend .sw { width: 8px; height: 8px; border-radius: 1px; }

@@ -9,6 +9,7 @@ import {
   credentialTypeLabel,
   githubLoginCommand,
   isRecord,
+  normalizeCredentialsResponse,
   parseCredentialState,
   sanitizeOptionalString,
 } from "./credential-settings"
@@ -79,6 +80,37 @@ describe("credential state helpers", () => {
   })
 })
 
+describe("normalizeCredentialsResponse", () => {
+  it("normalizes wrapped credential rows", () => {
+    expect(normalizeCredentialsResponse({
+      credentials: [
+        {
+          id: "gh-main",
+          name: "Main",
+          cred_type: "github",
+          username: "sangsu",
+          gh_config_dir: "/tmp/gh",
+          state: { kind: "Materialized" },
+        },
+      ],
+    })).toEqual([
+      expect.objectContaining({
+        id: "gh-main",
+        name: "Main",
+        type: "github",
+        username: "sangsu",
+        gh_config_dir: "/tmp/gh",
+        state: expect.objectContaining({ kind: "Materialized" }),
+      }),
+    ])
+  })
+
+  it("returns an empty list for unexpected payloads", () => {
+    expect(normalizeCredentialsResponse({ credentials: null })).toEqual([])
+    expect(normalizeCredentialsResponse(null)).toEqual([])
+  })
+})
+
 describe("credential create request", () => {
   it("trims optional paths and omits web token", () => {
     expect(sanitizeOptionalString("  ")).toBeNull()
@@ -118,7 +150,7 @@ describe("credential create request", () => {
       token: "ghp_x",
     })
     expect(githubLoginCommand("/tmp/keeper's-gh")).toBe(
-      "GH_CONFIG_DIR='/tmp/keeper'\\''s-gh' gh auth login --hostname github.com --git-protocol https --web",
+      "GH_CONFIG_DIR='/tmp/keeper'\\''s-gh' gh auth login --hostname github.com --git-protocol https --web --clipboard",
     )
   })
 })

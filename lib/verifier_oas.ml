@@ -52,7 +52,9 @@ let build_prompt (req : verification_request) : string =
     Prompt_registry.render_prompt_template "verification.action_verifier" vars
   with
   | Ok p -> p
-  | Error _ ->
+  | Error msg ->
+    Log.Verifier.warn
+      "verification action prompt render failed, using fallback: %s" msg;
     sprintf
 {|You are a verification agent. Evaluate whether this action was correct.
 

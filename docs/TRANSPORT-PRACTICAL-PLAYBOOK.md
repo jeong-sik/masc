@@ -8,8 +8,8 @@
 | --- | --- | --- | --- |
 | 현황판, wallboard, read-mostly viewer | `observer SSE` (`GET /mcp?sse_kind=observer`) | 브라우저 친화적이고 단방향 freshness에 충분함 | `SSE observer`, `queue max`, `broadcast avg` |
 | agent heartbeat, subscribe, fast fanout | `gRPC` (`:8936`) | 양방향 스트림, backlog replay, typed contract | `gRPC subscribers`, `active streams` |
-| browser/operator duplex bridge | `WebSocket` (`/ws`, standalone port `8937`) | request/response를 한 socket에서 처리하기 좋음 | `WebSocket sessions` |
-| peer-to-peer fast lane, edge a2a | `WebRTC` (`/webrtc/offer`, `/webrtc/answer`) | signaling 후 DataChannel로 직접 통신 | `connected channels`, `active peers` |
+| browser/operator duplex bridge | `WebSocket` (`/ws`, standalone port `8937`) **Experimental** | request/response를 한 socket에서 처리하기 좋음 | `WebSocket sessions` |
+| peer-to-peer fast lane, edge a2a | `WebRTC` (`/webrtc/offer`, `/webrtc/answer`) **Experimental** | signaling 후 DataChannel로 직접 통신 | `connected channels`, `active peers` |
 | stateless scripting, queue trigger, worker bootstrap | `Streamable HTTP` (`POST /mcp`) | curl/harness에서 가장 단순하고 canonical | `primary path`, `recent messages`, `active ops` |
 | 브라우저 다중 탭 / 다중 stream | `HTTP/2 h2c` (`MASC_USE_H2=1` 또는 `auto`) | SSE multiplexing으로 브라우저 connection limit 회피 | `HTTP listener_mode`, `multiplex_ready` |
 

@@ -51,3 +51,13 @@ val discover_repositories : base_path:string -> (repository list, string) result
     [repositories.toml] are excluded. This function is read-only and is
     intended for Phase 1 onboarding where the operator confirms discovered
     repositories before adding them to the store. *)
+
+val register_discovered : base_path:string -> (repository list, string) result
+(** [register_discovered ~base_path] scans [base_path] for git repositories
+    using {!discover_repositories} and automatically adds each candidate via
+    {!add}. Repositories that already exist (same [id]) are skipped rather
+    than failing. Returns the list of newly registered repositories.
+
+    This is the Week 8 migration helper: existing users with git
+    repositories under their base path can call this once to populate
+    [repositories.toml] without manual registration. *)

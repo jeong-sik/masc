@@ -368,3 +368,14 @@ let discover_repositories ~base_path =
       git_dirs
   in
   Ok candidates
+
+let register_discovered ~base_path =
+  let* candidates = discover_repositories ~base_path in
+  let rec loop acc = function
+    | [] -> Ok (List.rev acc)
+    | candidate :: rest -> (
+        match add ~base_path candidate with
+        | Ok registered -> loop (registered :: acc) rest
+        | Error _ -> loop acc rest)
+  in
+  loop [] candidates

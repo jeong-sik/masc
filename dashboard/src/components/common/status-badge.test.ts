@@ -106,6 +106,12 @@ describe('StatusBadge', () => {
     expect(el?.classList.contains('warn')).toBe(true)
   })
 
+  it('renders nothing without badge content', () => {
+    const container = document.createElement('div')
+    render(h(StatusBadge, {}), container)
+    expect(container.querySelector('[data-status-badge-tone]')).toBeNull()
+  })
+
   it('does not override offline utility colors inline', () => {
     const container = document.createElement('div')
     render(h(StatusBadge, { status: 'offline' }), container)

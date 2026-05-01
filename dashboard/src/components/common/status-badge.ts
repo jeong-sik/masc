@@ -70,6 +70,7 @@ export function StatusBadge({ status, label, tone, children }: StatusBadgeProps)
   const resolvedTone = tone ?? (status != null ? statusBadgeTone(status) : 'neutral')
   const normalizedStatus = status?.trim().toLowerCase().replace(/_/g, '-')
   const content = children ?? label ?? (status != null ? statusLabel(status) : '')
+  if (content == null || content === '') return null
   return html`
     <span
       class="status-badge ${resolvedTone}"

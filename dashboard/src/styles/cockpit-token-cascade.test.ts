@@ -16,7 +16,7 @@ function expectDeclaration(css: string, name: string, value: string) {
 }
 
 function expectDeclarationExists(css: string, name: string) {
-  expect(css).toMatch(new RegExp(`${name}:\\s*[^;]+;`))
+  expect(css).toMatch(new RegExp(`${escapeRegExp(name)}:\\s*[^;]+;`))
 }
 
 function expectNoDeclaration(css: string, name: string, value: string) {

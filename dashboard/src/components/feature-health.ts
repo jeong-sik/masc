@@ -12,7 +12,7 @@ import { FilterChips } from './common/filter-chips'
 import { TextInput } from './common/input'
 import { SectionCap } from './common/section-cap'
 import { InfoCard } from './common/info-card'
-import { StatusChip } from './common/status-chip'
+import { StatusChip, type StatusChipTone } from './common/status-chip'
 import { KpiStripIsland, type KpiStripIslandData } from './kpi-strip-island'
 
 type FeatureStatus = 'healthy' | 'warning' | 'inactive' | 'deprecated'
@@ -119,7 +119,9 @@ export function statusLabel(status: FeatureStatus): string {
   }
 }
 
-export function statusChipTone(status: FeatureStatus): 'ok' | 'warn' | 'neutral' | 'bad' {
+type FeatureHealthTone = Extract<StatusChipTone, 'ok' | 'warn' | 'neutral' | 'bad'>
+
+export function statusChipTone(status: FeatureStatus): FeatureHealthTone {
   switch (status) {
     case 'healthy':
       return 'ok'

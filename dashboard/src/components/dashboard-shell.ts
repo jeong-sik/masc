@@ -2,6 +2,7 @@ import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { lazy, Suspense } from 'preact/compat'
 import { useEffect } from 'preact/hooks'
+import type { RouteState } from '../types'
 import { route } from '../router'
 import { connected, reconnectCount, lastDisconnectedAt } from '../sse'
 import { dashboardLoading, serverStatus } from '../store'
@@ -329,6 +330,27 @@ export function composeHealthIndicatorTitle(
   if (attentionLines.length === 0) return label
   const indented = attentionLines.map(line => `  · ${line}`)
   return [label, ...indented].join('\n')
+}
+
+export function dashboardRouteBoundaryKey(routeState: RouteState): string {
+  const params = routeState.params
+  const parts = [
+    routeState.tab,
+    params.section,
+    params.view ? `view=${params.view}` : '',
+    params.session_id ? `session=${params.session_id}` : '',
+    params.operation_id ? `operation=${params.operation_id}` : '',
+    params.worker_run_id ? `worker=${params.worker_run_id}` : '',
+  ]
+
+  if (routeState.tab === 'monitoring' && params.section === 'agents') {
+    parts.push(
+      params.agent ? `agent=${params.agent}` : '',
+      params.keeper ? `keeper=${params.keeper}` : '',
+    )
+  }
+
+  return parts.filter(Boolean).join(':')
 }
 
 function HealthIndicator({ collapsed }: { collapsed?: boolean }) {
@@ -672,15 +694,7 @@ export function DashboardMain() {
     return html`<${LoadingState}>Loading dashboard...<//>`
   }
 
-  const routeLabel = [
-    route.value.tab,
-    route.value.params.section,
-    route.value.params.session_id,
-    route.value.params.operation_id,
-    route.value.params.worker_run_id,
-  ]
-    .filter(Boolean)
-    .join(':')
+  const routeLabel = dashboardRouteBoundaryKey(route.value)
 
   return html`
     ${namespaceTruthInitializing.value ? html`

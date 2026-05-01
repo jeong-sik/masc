@@ -173,7 +173,7 @@ async function loadHeuristicCoverage(limit = 100) {
 async function loadAuditLedger(limit = 50) {
   auditLedgerState.value = { status: 'loading' }
   try {
-    const resp = await fetchAuditLedger(limit)
+    const resp = await fetchAuditLedger({ limit })
     auditLedgerState.value = { status: 'loaded', data: resp }
   } catch (err) {
     const message = err instanceof Error ? err.message : 'audit ledger 불러오기 실패'
@@ -714,16 +714,10 @@ function HeuristicByModule({ coverage }: { coverage: HeuristicCoverage }) {
 }
 
 function AuditLedgerBoard({ entries, count }: { entries: AuditEntry[]; count: number }) {
-  const fmtTime = (ts: number): string => {
-    const d = new Date(ts * 1000)
-    return d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
-  }
-
-  const fmtValue = (v: unknown): string => {
-    if (v === null) return 'null'
-    if (v === undefined) return 'undefined'
-    if (typeof v === 'string') return v
-    return JSON.stringify(v)
+  const severityClass = (sev: string): string => {
+    if (sev === 'error') return 'text-[var(--color-danger-fg)]'
+    if (sev === 'warn') return 'text-[var(--color-warning-fg)]'
+    return 'text-text-muted'
   }
 
   return html`
@@ -733,26 +727,24 @@ function AuditLedgerBoard({ entries, count }: { entries: AuditEntry[]; count: nu
       </div>
 
       <div class="overflow-x-auto rounded border border-card-border/60 bg-[var(--backdrop-deep)]">
-        <table class="w-full" aria-label="Parameter audit entries">
+        <table class="w-full" aria-label="Audit ledger entries">
           <thead>
             <tr class="border-b border-[var(--color-border-default)] text-2xs uppercase tracking-1 text-text-muted">
               <th scope="col" class="px-2 py-1.5 text-left">time</th>
               <th scope="col" class="px-2 py-1.5 text-left">actor</th>
-              <th scope="col" class="px-2 py-1.5 text-left">key</th>
-              <th scope="col" class="px-2 py-1.5 text-left">old</th>
-              <th scope="col" class="px-2 py-1.5 text-left">new</th>
-              <th scope="col" class="px-2 py-1.5 text-left">case</th>
+              <th scope="col" class="px-2 py-1.5 text-left">kind</th>
+              <th scope="col" class="px-2 py-1.5 text-left">summary</th>
+              <th scope="col" class="px-2 py-1.5 text-left">sev</th>
             </tr>
           </thead>
           <tbody>
             ${entries.map((e, i) => html`
               <tr key=${i} class="border-b border-[var(--color-border-default)]/50 text-2xs">
-                <td class="px-2 py-1.5 text-left font-mono text-text-muted">${fmtTime(e.timestamp)}</td>
+                <td class="px-2 py-1.5 text-left font-mono text-text-muted">${e.ts}</td>
                 <td class="px-2 py-1.5 text-left font-mono text-xs text-[var(--color-accent-fg)]">${e.actor}</td>
-                <td class="px-2 py-1.5 text-left font-mono text-text-strong">${e.key}</td>
-                <td class="px-2 py-1.5 text-left font-mono text-text-muted max-w-[12ch] truncate" title=${fmtValue(e.old_value)}>${fmtValue(e.old_value)}</td>
-                <td class="px-2 py-1.5 text-left font-mono text-text-muted max-w-[12ch] truncate" title=${fmtValue(e.new_value)}>${fmtValue(e.new_value)}</td>
-                <td class="px-2 py-1.5 text-left font-mono text-text-muted">${e.case_id ?? '—'}</td>
+                <td class="px-2 py-1.5 text-left font-mono text-text-strong">${e.kind}</td>
+                <td class="px-2 py-1.5 text-left font-mono text-text-muted max-w-[24ch] truncate" title=${e.summary}>${e.summary}</td>
+                <td class="px-2 py-1.5 text-left font-mono ${severityClass(e.severity)}">${e.severity}</td>
               </tr>
             `)}
           </tbody>

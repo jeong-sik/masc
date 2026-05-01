@@ -73,6 +73,11 @@ export type SSEEventType =
   | 'operator_snapshot'
   | 'operator_digest'
   | 'transport_health_snapshot'
+  // Global audit ledger streaming events (O2 Phase 2)
+  | 'audit_event'
+  | 'masc/audit_event'
+  | 'masc:audit_event'
+  | 'oas:masc:audit_event'
 
 export type JournalSeverity = 'debug' | 'info' | 'warn' | 'error' | 'unknown'
 export type JournalSource = 'structured' | 'legacy_stderr' | 'legacy_traceln' | 'sse'
@@ -189,6 +194,15 @@ export interface SSEEvent {
   // attach this alongside existing reason/reason_code fields since 2.261.0.
   // See lib/attribution.mli for OCaml SSOT and evidence schema per gate.
   attribution?: Attribution
+  // Global audit ledger fields (O2 Phase 2 — masc.audit_event)
+  audit_id?: string
+  audit_ts?: string
+  audit_actor?: string
+  audit_kind?: string
+  audit_target?: string
+  audit_summary?: string
+  audit_severity?: string
+  audit_payload?: unknown
 }
 
 // --- Journal ---

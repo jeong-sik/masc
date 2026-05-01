@@ -167,6 +167,35 @@ let add_routes ~sw ~clock router =
          Http.Response.json (Yojson.Safe.to_string json) reqd
        ) request reqd)
 
+  |> Http.Router.get "/api/v1/audit" (fun request reqd ->
+       with_public_read (fun state req reqd ->
+         let config = state.Mcp_server.room_config in
+         let limit  = int_query_param req "limit"  ~default:100 |> clamp ~min_v:1 ~max_v:500 in
+         let actor_filter    = query_param req "actor" in
+         let kind_filter     = query_param req "kind" in
+         let severity_filter = query_param req "severity" in
+         let since_filter =
+           query_param req "since"
+           |> Fun.flip Option.bind (fun s -> float_of_string_opt (String.trim s))
+         in
+         let until_filter =
+           query_param req "until"
+           |> Fun.flip Option.bind (fun s -> float_of_string_opt (String.trim s))
+         in
+         let fetch_limit = match actor_filter, kind_filter, severity_filter with
+           | None, None, None -> limit
+           | _ -> min 5000 (limit * 20)
+         in
+         let all_entries = Audit_log.read_entries ~n:fetch_limit config in
+         let json =
+           Audit_log.audit_events_response_json ?actor:actor_filter
+             ?kind:kind_filter ?severity:severity_filter ?since:since_filter
+             ?until:until_filter ~limit all_entries
+         in
+         Http.Response.json ~compress:true ~request:req
+           (Yojson.Safe.to_string json) reqd
+       ) request reqd)
+
   |> Http.Router.get "/api/v1/board" (fun request reqd ->
        with_public_read (fun _state req reqd ->
          let hearth = query_param req "hearth" in

@@ -18,6 +18,12 @@ describe('SSEEventTypeSchema', () => {
     expect(SSEEventTypeSchema.parse('oas:future:event')).toBe('oas:future:event')
   })
 
+  it('accepts audit event wire aliases', () => {
+    expect(SSEEventTypeSchema.parse('audit_event')).toBe('audit_event')
+    expect(SSEEventTypeSchema.parse('masc:audit_event')).toBe('masc:audit_event')
+    expect(SSEEventTypeSchema.parse('oas:masc:audit_event')).toBe('oas:masc:audit_event')
+  })
+
   it('rejects an unknown event type', () => {
     const r = SSEEventTypeSchema.safeParse('this_is_not_a_real_event')
     expect(r.success).toBe(false)

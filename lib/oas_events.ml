@@ -211,6 +211,38 @@ let publish_keeper_dead (_bus : Oas.Event_bus.t)
   masc_publish
     (Oas.Event_bus.mk_event (Custom ("masc.keeper.dead", payload)))
 
+(** {1 Audit Ledger Events} *)
+
+(** Publish a global audit ledger event to the MASC Event_bus.
+
+    Emitted by [Audit_log.log_action] after each entry is persisted,
+    giving dashboard clients a real-time stream of audit events via
+    SSE without polling.  Wire event name: [masc.audit_event].
+
+    The shape mirrors the O2 spec: [{id, ts, actor, kind, target,
+    summary, severity, payload}]. *)
+let publish_audit_event ~id ~ts ~actor ~kind ?target ~summary ~severity
+    ?payload () =
+  let target_json = match target with
+    | Some t -> `String t
+    | None -> `Null
+  in
+  let payload_json = match payload with
+    | Some p -> p
+    | None -> `Null
+  in
+  let event_payload = `Assoc [
+    ("id", `String id);
+    ("ts", `String ts);
+    ("actor", `String actor);
+    ("kind", `String kind);
+    ("target", target_json);
+    ("summary", `String summary);
+    ("severity", `String severity);
+    ("payload", payload_json);
+  ] in
+  masc_publish (Oas.Event_bus.mk_event (Custom ("masc.audit_event", event_payload)))
+
 (** {1 Phase 4: Social Events}
 
     These two publishers were scaffolded in #1060 (OAS v0.23

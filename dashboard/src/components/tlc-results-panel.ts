@@ -26,7 +26,7 @@ import type { ManagedAsyncResource } from '../lib/async-state'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
 
 function ThCell({ children }: { children: unknown }) {
-  return html`<${ThCell}>${children}</th>`
+  return html`<th scope="col" class="py-1 pr-4">${children}</th>`
 }
 
 type StatusFilter = 'all' | TlcResultStatus
@@ -168,7 +168,7 @@ function ResultsTable({ entries }: { entries: TlcResultEntry[] }) {
             <${ThCell}>사양</${ThCell}>
             <${ThCell}>Cfg</${ThCell}>
             <${ThCell}>분류</${ThCell}>
-            <${ThCell}>상태</${${ThCell}>
+            <${ThCell}>상태</${ThCell}>
             <th scope="col" class="py-1 pr-4 text-right">States</th>
             <th scope="col" class="py-1 pr-4 text-right">Distinct</th>
             <th scope="col" class="py-1 pr-4 text-right">Diameter</th>

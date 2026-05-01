@@ -749,7 +749,7 @@ function PlaygroundReposPanel({ keeperName }: { keeperName: string }) {
   if (repos.length === 0 && prs.length === 0 && worktrees.length === 0) return null
 
   return html`
-    <${PanelCard}title="플레이그라운드">
+    <${PanelCard} title="플레이그라운드">
       <div class="flex flex-col gap-3">
         ${repos.length > 0 ? html`
           <div>
@@ -1077,7 +1077,7 @@ export function KeeperDetailPage() {
             description="운영자가 keeper와 바로 대화하고, 같은 화면에서 세션 이벤트를 대조할 수 있도록 묶었습니다."
           >
             <${KeeperCommsPanel} keeper=${keeper} />
-            <${PanelCard}title="세션 활동 로그">
+            <${PanelCard} title="세션 활동 로그">
               <div class="text-2xs text-[var(--color-fg-muted)] mb-3">현재 세션의 도구 호출, 태스크 완료, 메시지 등 이벤트 기록</div>
               <${SessionTraceView} agentName=${keeper.name} isKeeper=${true} keeperStatus=${keeper.status} keeperGeneration=${keeper.generation} />
             <//>
@@ -1110,7 +1110,7 @@ export function KeeperDetailPage() {
                 </div>
               </div>
             <//>
-            <${CollapsibleSection} title="품질 시그널 (고급 지표)"
+            <${CollapsibleSection} title="품질 시그널 (고급 지표)">
               <div class="mt-3 text-2xs text-[var(--color-fg-muted)] mb-3">폴백 비율, 정렬 품질, 자율 행동 비율 등 metrics_window 기반 런타임 품질 지표</div>
               <${RuntimeSignals} keeper=${keeper} />
             <//>
@@ -1123,7 +1123,7 @@ export function KeeperDetailPage() {
             description="프로필, 관계, 장비, generation lineage, checkpoints를 하나의 맥락으로 보고 continuity를 해석합니다."
           >
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <${PanelCard}title="프로필">
+              <${PanelCard} title="프로필">
             <${TraitsList} traits=${keeper.traits ?? []} label="특성" />
             <${TraitsList} traits=${keeper.interests ?? []} label="관심사" />
             ${keeper.primaryValue
@@ -1155,7 +1155,7 @@ export function KeeperDetailPage() {
 
           ${keeper.inventory && keeper.inventory.length > 0
             ? html`
-              <${PanelCard}title="장비 (${keeper.inventory.length})">
+              <${PanelCard} title="장비 (${keeper.inventory.length})">
                 <${EquipmentList} items=${keeper.inventory} />
               <//>
             `
@@ -1163,7 +1163,7 @@ export function KeeperDetailPage() {
 
           ${keeper.relationships && Object.keys(keeper.relationships).length > 0
             ? html`
-              <${PanelCard}title="관계 (${Object.keys(keeper.relationships).length})">
+              <${PanelCard} title="관계 (${Object.keys(keeper.relationships).length})">
                 <${RelationshipList} rels=${keeper.relationships} />
               <//>
             `
@@ -1172,7 +1172,7 @@ export function KeeperDetailPage() {
           <${GenerationLineagePanel} keeperName=${keeper.name} />
             </div>
 
-          <${CollapsibleSection} title="Checkpoint & Snapshots"
+          <${CollapsibleSection} title="Checkpoint & Snapshots">
             <div class="mt-4">
               <${KeeperCheckpointPanel}
                 keeperName=${keeper.name}
@@ -1189,13 +1189,13 @@ export function KeeperDetailPage() {
             description="분산되어 있던 허용 도구 목록, 작업 budget, playground repo, keeper config를 한 섹션으로 모았습니다."
           >
             <${TurnBudgetSection} keeper=${keeper} />
-            <${CollapsibleSection} title="허용 도구"
+            <${CollapsibleSection} title="허용 도구">
               <div class="mt-3">
                 <${KeeperNeighborhood} keeper=${keeper} />
               </div>
             <//>
             <${PlaygroundReposPanel} keeperName=${keeper.name} />
-            <${CollapsibleSection} title="Keeper 설정"
+            <${CollapsibleSection} title="Keeper 설정">
               <div class="mt-4">
                 <${KeeperConfigPanel} keeperName=${keeper.name} />
               </div>

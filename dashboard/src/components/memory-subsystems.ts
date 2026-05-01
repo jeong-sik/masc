@@ -14,6 +14,7 @@ import {
   type KeeperDecision,
 } from '../api/dashboard'
 import { formatTimeAgo } from '../lib/format-time'
+import { isAbortError } from '../lib/async-state'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
 import { setupVisibleAutoRefresh } from '../lib/auto-refresh'
 import { openAgentDetail } from './agent-detail-state'

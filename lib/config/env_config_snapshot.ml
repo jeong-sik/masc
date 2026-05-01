@@ -205,8 +205,10 @@ let runtime_entries =
 
 let rate_limiting_entries =
   [
-    entry ~default:"100.0" "MASC_RATE_LIMIT" "Requests per second";
-    entry ~default:"150" "MASC_RATE_BURST" "Burst capacity";
+    entry ~default:"100.0" "MASC_RATE_LIMIT" "Requests per second (per-client global bucket)";
+    entry ~default:"150" "MASC_RATE_BURST" "Burst capacity (per-client global bucket)";
+    entry ~default:"20.0" "MASC_AGENT_RATE_LIMIT" "Requests per second per resolved agent/token";
+    entry ~default:"50" "MASC_AGENT_RATE_BURST" "Burst capacity per resolved agent/token";
     entry ~default:"300.0" "MASC_RATE_LIMIT_CLEANUP_INTERVAL_SEC"
       "Stale bucket cleanup interval (seconds)";
     entry ~default:"3600.0" "MASC_RATE_LIMIT_ENTRY_MAX_AGE_SEC"

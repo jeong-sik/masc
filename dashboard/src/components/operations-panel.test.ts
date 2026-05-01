@@ -55,13 +55,14 @@ describe('OperationsPanel', () => {
     vi.doUnmock('./safe-autonomy')
   })
 
-  it('renders both Ops and Governance when view is not set (default)', async () => {
+  it('renders Ops, Governance, and Safety when view is not set (default)', async () => {
     const { OperationsPanel } = await loadPanel()
     render(html`<${OperationsPanel} />`, container)
     await flushUi()
 
     expect(container.textContent).toContain('Ops')
     expect(container.textContent).toContain('Governance')
+    expect(container.textContent).toContain('SafeAutonomy')
   })
 
   it('renders only Ops when view is ops', async () => {
@@ -72,6 +73,7 @@ describe('OperationsPanel', () => {
 
     expect(container.textContent).toContain('Ops')
     expect(container.textContent).not.toContain('Governance')
+    expect(container.textContent).not.toContain('SafeAutonomy')
   })
 
   it('renders only Governance when view is governance', async () => {
@@ -82,6 +84,7 @@ describe('OperationsPanel', () => {
 
     expect(container.textContent).not.toContain('Ops')
     expect(container.textContent).toContain('Governance')
+    expect(container.textContent).not.toContain('SafeAutonomy')
   })
 
   it('renders FilterChips options without legacy connectors view', async () => {
@@ -109,6 +112,7 @@ describe('OperationsPanel', () => {
 
     expect(container.textContent).toContain('Ops')
     expect(container.textContent).toContain('Governance')
+    expect(container.textContent).toContain('SafeAutonomy')
   })
 
   it('marks the active chip with aria-selected=true', async () => {

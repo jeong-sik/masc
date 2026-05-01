@@ -88,7 +88,7 @@ const CHIP_CLASS_BY_STATE: Record<string, string> = {
   Crashed:      'bg-[var(--bad-10)] text-[var(--bad-light)] border-[var(--bad-20)]',
   Restarting:   'bg-[var(--accent-10)] text-[var(--color-accent-fg)] border-[var(--accent-20)]',
   Dead:         'bg-[var(--white-5)] text-[var(--bad-light)] border-[var(--bad-20)]',
-  Offline:      'bg-[var(--white-5)] text-[var(--color-fg-muted)]0 border-[var(--white-10)]',
+  Offline:      'bg-[var(--white-5)] text-[var(--color-fg-muted)] border-[var(--white-10)]',
   // KTC
   idle:         'bg-[var(--white-5)] text-[var(--color-fg-muted)] border-[var(--white-10)]',
   prompting:    'bg-[var(--accent-10)] text-[var(--color-accent-fg)] border-[var(--accent-20)]',

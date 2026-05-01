@@ -551,6 +551,12 @@ module Rate_bucket = struct
 
   (** Burst capacity. Default: 150. *)
   let burst = get_int ~default:150 "MASC_RATE_BURST"
+
+  (** Per-agent requests per second. Default: 20. *)
+  let agent_rate = get_float ~default:20.0 "MASC_AGENT_RATE_LIMIT"
+
+  (** Per-agent burst capacity. Default: 50. *)
+  let agent_burst = get_int ~default:50 "MASC_AGENT_RATE_BURST"
 end
 
 (** {1 Worker / Local Runtime Configuration} *)

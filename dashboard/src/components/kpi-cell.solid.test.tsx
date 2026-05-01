@@ -8,7 +8,8 @@
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { render } from 'solid-js/web'
-import { KpiCell, kpiCellAriaLabel, type KpiCellProps } from './kpi-cell.solid'
+import { KpiCell } from './kpi-cell.solid'
+import { kpiCellAriaLabel, type KpiCellProps } from './kpi-shared'
 
 describe('kpiCellAriaLabel (pure, Solid mirror)', () => {
   it('returns "label: value" for the minimal case', () => {

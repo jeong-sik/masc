@@ -32,6 +32,7 @@
 
 import { html } from 'htm/preact'
 import type { ComponentChildren, VNode } from 'preact'
+import { MONO_STACK } from './common/font-stacks'
 
 export interface SectionHeadProps {
   /** The label text. Rendered uppercase via the SPEC font rule. */
@@ -53,8 +54,6 @@ export interface SectionHeadProps {
   ariaLabel?: string
 }
 
-const MONO_STACK =
-  'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace'
 
 export function SectionHead(props: SectionHeadProps): VNode {
   const noBorder = props.noBorder === true

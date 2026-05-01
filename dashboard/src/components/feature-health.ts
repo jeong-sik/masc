@@ -11,6 +11,7 @@ import { Card } from './common/card'
 import { FilterChips } from './common/filter-chips'
 import { TextInput } from './common/input'
 import { SectionCap } from './common/section-cap'
+import { InfoCard } from './common/info-card'
 import { KpiStripIsland, type KpiStripIslandData } from './kpi-strip-island'
 
 type FeatureStatus = 'healthy' | 'warning' | 'inactive' | 'deprecated'
@@ -141,7 +142,7 @@ function StatusPill({ status }: { status: FeatureStatus }) {
 
 function FeatureItem({ item }: { item: FeatureHealthItem }) {
   return html`
-    <div class="rounded border border-[var(--white-8)] bg-[var(--white-4)] p-3">
+    <${InfoCard}>
       <div class="flex items-start justify-between gap-3">
         <div class="flex-1">
           <div class="flex items-center gap-2">
@@ -164,7 +165,7 @@ function FeatureItem({ item }: { item: FeatureHealthItem }) {
           </div>
         </div>
       </div>
-    </div>
+    <//>
   `
 }
 

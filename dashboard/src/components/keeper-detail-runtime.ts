@@ -5,9 +5,11 @@
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
 import { ActionButton } from './common/button'
+import { CollapsibleSection } from './common/collapsible'
 import { DistributionBars, type DistributionItem } from './common/distribution-bars'
 import { TextInput } from './common/input'
 import { TimeAgo } from './common/time-ago'
+import { SectionHeader } from './common/section-header'
 import { toolCategory } from './tool-call-shared'
 import type { Keeper } from '../types'
 import { serverStatus } from '../store'
@@ -148,7 +150,7 @@ export function AllowlistPreview({
 function ToolSection({ title, description, tools, fallback }: { title: string; description?: string; tools: string[]; fallback: string }) {
   return html`
     <div class="flex flex-col gap-1.5 mt-3">
-      <span class="text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">${title}</span>
+      <${SectionHeader} size="xs">${title}</${SectionHeader}>
       ${description ? html`<span class="text-2xs text-[var(--color-fg-muted)] leading-snug">${description}</span>` : null}
       <div class="flex flex-wrap gap-1.5">
         ${tools.length > 0
@@ -268,9 +270,7 @@ function TurnBudgetPanel({ keeper }: { keeper: Keeper }) {
   return html`
     <div class="flex flex-col gap-1.5">
       <div class="flex items-center gap-2 mb-1">
-        <span class="text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">
-          턴 예산 (OAS 호출당)
-        </span>
+        <${SectionHeader} size="xs">턴 예산 (OAS 호출당)</${SectionHeader}>
         ${hasInvalid
           ? html`<span class="rounded-sm bg-[var(--bad-10)] px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-wider text-[var(--bad-light)]">invalid override</span>`
           : hasOverride
@@ -300,16 +300,13 @@ function TurnBudgetPanel({ keeper }: { keeper: Keeper }) {
 export function TurnBudgetSection({ keeper }: { keeper: Keeper }) {
   const diverges = hasTurnBudgetDivergence(keeper)
   return html`
-    <details class="p-5 rounded border border-card-border bg-card/40 backdrop-blur-sm shadow-sm" open=${diverges}>
-      <summary class="cursor-pointer text-2xs font-semibold uppercase tracking-widest text-text-muted list-none select-none flex items-center gap-2">
-        <span class="w-1.5 h-1.5 rounded-full ${diverges ? 'bg-[var(--warn-10)]' : 'bg-accent/50'}"></span>
-        턴 예산
-        ${diverges ? html`<span class="text-3xs text-[var(--color-status-warn)] font-normal normal-case tracking-normal">(재정의됨)</span>` : null}
-      </summary>
-      <div class="mt-3">
-        <${TurnBudgetPanel} keeper=${keeper} />
-      </div>
-    </details>
+    <${CollapsibleSection}
+      title=${html`터 예산 ${diverges ? html`<span class="text-3xs text-[var(--color-status-warn)] font-normal normal-case tracking-normal">(재정의됨)</span>` : null}`}
+      open=${diverges}
+      dotClass=${diverges ? 'bg-[var(--warn-10)]' : 'bg-accent/50'}
+    >
+      <${TurnBudgetPanel} keeper=${keeper} />
+    <//>
   `
 }
 
@@ -478,7 +475,7 @@ export function RuntimeSignals({ keeper }: { keeper: Keeper }) {
         : null}
       ${filteredGroups.map(g => html`
         <div class="flex flex-col gap-1">
-          <span class="text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)] px-1">${g.title}</span>
+          <${SectionHeader} size="xs" class="px-1">${g.title}</${SectionHeader}>
           <div class="flex flex-col gap-1">
             ${g.rows.map(r => html`<${SignalRow} label=${r.label} value=${r.value} />`)}
           </div>
@@ -607,7 +604,7 @@ export function KeeperNeighborhood({ keeper }: { keeper: Keeper }) {
       </div>
 
       <div class="flex items-center justify-between mt-3">
-        <span class="text-3xs font-semibold uppercase tracking-wider text-[var(--color-fg-muted)]">허용된 도구</span>
+        <${SectionHeader} size="xs">허용된 도구</${SectionHeader}>
         <span class="text-3xs text-[var(--color-fg-muted)]">${policyLoading ? '로딩 중' : policyError ? '설정 오류' : 'read-only'}</span>
       </div>
 

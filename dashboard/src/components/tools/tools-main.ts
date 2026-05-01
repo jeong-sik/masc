@@ -17,24 +17,10 @@ import { ConfigResolutionPanel } from './config-resolution-panel'
 import { ActionButton } from '../common/button'
 import { ToolExecutor } from '../tool-executor/tool-executor'
 import { formatElapsedCompact } from '../../lib/format-time'
+import { sourceHealthClass } from '../common/source-health'
 
 type ToolsView = 'inventory' | 'executor'
 const activeView = signal<ToolsView>('inventory')
-
-function sourceHealthClass(health?: string | null): string {
-  switch ((health ?? '').toLowerCase()) {
-    case 'ok':
-      return 'text-[var(--color-status-ok)]'
-    case 'stale':
-    case 'coverage_gap':
-    case 'empty':
-      return 'text-[var(--color-status-warn)]'
-    case 'missing':
-      return 'text-[var(--bad-light)]'
-    default:
-      return 'text-[var(--color-fg-muted)]'
-  }
-}
 
 function sourceFreshnessLabel(latestAge: number | null | undefined): string {
   if (typeof latestAge !== 'number' || !Number.isFinite(latestAge)) {

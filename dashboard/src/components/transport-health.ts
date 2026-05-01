@@ -343,6 +343,10 @@ function SectionCard({
   `
 }
 
+function TransportStatusBadge({ status, label }: { status: StatusTone; label: string }) {
+  return html`<span class="inline-flex items-center gap-1"><${StatusDot} size="xs" class=${statusDot(status)} />${label}</span>`
+}
+
 function CaseCard({ item, data }: { item: PracticalCase; data: TransportHealthData }) {
   return html`
     <div class="rounded border border-card-border/70 bg-card/40 p-4">
@@ -443,11 +447,11 @@ export function TransportHealthPanel() {
         <summary class="flex items-center gap-3 px-4 py-3 cursor-pointer text-sm font-semibold text-text-strong bg-card/28 hover:bg-card/44 transition-colors">
           <span>트랜스포트 상세</span>
           <span class="ml-auto flex items-center gap-2 text-2xs font-normal text-text-muted">
-            <span class="inline-flex items-center gap-1"><${StatusDot} size="xs" class=${statusDot(sseStatus)} />SSE</span>
-            <span class="inline-flex items-center gap-1"><${StatusDot} size="xs" class=${statusDot(grpcStatus)} />gRPC</span>
-            <span class="inline-flex items-center gap-1"><${StatusDot} size="xs" class=${statusDot(wsStatus)} />WS</span>
-            <span class="inline-flex items-center gap-1"><${StatusDot} size="xs" class=${statusDot(webrtcStatus)} />RTC</span>
-            <span class="inline-flex items-center gap-1"><${StatusDot} size="xs" class=${statusDot(h2Status)} />HTTP</span>
+            <${TransportStatusBadge} status=${sseStatus} label="SSE" />
+            <${TransportStatusBadge} status=${grpcStatus} label="gRPC" />
+            <${TransportStatusBadge} status=${wsStatus} label="WS" />
+            <${TransportStatusBadge} status=${webrtcStatus} label="RTC" />
+            <${TransportStatusBadge} status=${h2Status} label="HTTP" />
           </span>
         </summary>
         <div class="p-4">

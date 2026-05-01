@@ -6,6 +6,7 @@ import { AsyncContainer } from './common/async-container'
 import { Card } from './common/card'
 import { JsonViewerCard } from './common/json-viewer'
 import { EmptyState } from './common/empty-state'
+import { InfoCard } from './common/info-card'
 import { KeeperBadge } from './keeper-badge'
 import { KpiStripIsland, type KpiStripIslandData } from './kpi-strip-island'
 import { formatTimeAgo } from '../lib/format-time'
@@ -217,7 +218,7 @@ function StatusPill({ status }: { status: DomainStatus }) {
 
 function DomainCard({ item }: { item: ScorecardItem }) {
   return html`
-    <div class="rounded border border-[var(--white-8)] bg-[var(--white-4)] p-3">
+    <${InfoCard}>
       <div class="flex items-start justify-between gap-3">
         <div class="min-w-0">
           <div class="flex items-center gap-2">
@@ -233,7 +234,7 @@ function DomainCard({ item }: { item: ScorecardItem }) {
           </div>
         </div>
       </div>
-    </div>
+    <//>
   `
 }
 
@@ -289,7 +290,7 @@ function FindingsList({ findings }: { findings: FindingItem[] }) {
   return html`
     <div class="space-y-2">
       ${findings.map(item => html`
-        <div class="rounded border border-[var(--white-8)] bg-[var(--white-4)] p-3">
+        <${InfoCard}>
           <div class="flex items-start justify-between gap-3">
             <div class="min-w-0">
               <div class="flex flex-wrap items-center gap-2">
@@ -308,7 +309,7 @@ function FindingsList({ findings }: { findings: FindingItem[] }) {
               `
               : null}
           </div>
-        </div>
+        <//>
       `)}
     </div>
   `

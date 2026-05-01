@@ -13,6 +13,10 @@ import {
   type KeeperActivityDisplay,
 } from '../lib/keeper-runtime-display'
 
+function SectionLabel({ children }: { children: unknown }) {
+  return html`<div class="text-3xs font-semibold uppercase tracking-[0.18em] text-[var(--color-fg-muted)]">${children}</div>`
+}
+
 function KeeperModelChip({ keeper }: { keeper: Keeper }) {
   const display = keeperDisplayModel(keeper)
   if (!display) return null
@@ -141,7 +145,7 @@ export function KeeperDetailMissingState({
   return html`
     <div class="mx-auto flex w-full max-w-[1100px] flex-col gap-4">
       <div class="rounded-[28px] border border-[var(--color-border-default)] bg-[rgba(9,14,24,0.92)] px-6 py-6 shadow-[0_24px_48px_rgba(0,0,0,0.24)]">
-        <div class="text-3xs font-semibold uppercase tracking-[0.18em] text-[var(--color-fg-muted)]">키퍼 상세</div>
+        <${SectionLabel}>키퍼 상세</${SectionLabel}>
         <h2 class="m-0 mt-2 text-xl font-semibold text-[var(--text-strong)]">${keeperName}</h2>
         <p class="m-0 mt-2 text-sm leading-relaxed text-[var(--text-secondary)]">
           ${explanation}
@@ -183,7 +187,7 @@ export function KeeperDetailHeaderInfo({
       </button>
       <div class="size-12 shrink-0 rounded bg-[var(--white-5)] border border-[var(--white-8)] flex items-center justify-center text-2xl">${keeper.emoji}</div>
       <div class="flex flex-col gap-0.5">
-        <div class="text-3xs font-semibold uppercase tracking-[0.18em] text-[var(--color-fg-muted)]">모니터링 / 에이전트 / 키퍼 상세</div>
+        <${SectionLabel}>모니터링 / 에이전트 / 키퍼 상세</${SectionLabel}>
         <div class="mt-1 flex flex-wrap items-center gap-2.5">
           <h2 id=${titleId} class="m-0 text-lg font-semibold text-[var(--text-strong)]">${keeper.name}</h2>
           <${KeeperPhaseAndStage} phase=${keeper.phase} pipelineStage=${keeper.pipeline_stage} phaseEnteredAtSec=${phaseEnteredAtSec} />
@@ -259,7 +263,7 @@ function KeeperDetailQuickFact({
 }) {
   return html`
     <div class="rounded-2xl border border-[var(--white-8)] bg-[rgba(255,255,255,0.03)] px-3.5 py-3">
-      <div class="text-3xs font-semibold uppercase tracking-[0.18em] text-[var(--color-fg-muted)]">${label}</div>
+      <${SectionLabel}>${label}</${SectionLabel}>
       <div class="mt-1 text-sm font-medium leading-snug text-[var(--text-strong)]">${children}</div>
     </div>
   `
@@ -292,7 +296,7 @@ export function KeeperDetailOverviewSidebar({
     <aside class="order-2 xl:order-1 xl:sticky xl:top-[104px] xl:self-start" aria-label="키퍼 프로필 요약">
       <div class="flex flex-col gap-4 rounded-[28px] border border-[var(--color-border-default)] bg-[rgba(9,14,24,0.84)] p-4 shadow-[0_20px_48px_rgba(0,0,0,0.18)]">
         <div>
-          <div class="text-3xs font-semibold uppercase tracking-[0.18em] text-[var(--color-fg-muted)]">개요</div>
+          <${SectionLabel}>개요</${SectionLabel}>
           <p class="m-0 mt-2 text-sm leading-relaxed text-[var(--text-secondary)]">
             긴 단일 모달 대신 keeper 상세를 별도 화면으로 펼쳤습니다. 운영자가 자주 오가는 맥락 단위로 나눠서 바로 점프할 수 있습니다.
           </p>
@@ -308,7 +312,7 @@ export function KeeperDetailOverviewSidebar({
         </div>
 
         <div class="rounded-2xl border border-[var(--white-8)] bg-[rgba(255,255,255,0.03)] p-3.5">
-          <div class="text-3xs font-semibold uppercase tracking-[0.18em] text-[var(--color-fg-muted)]">빠른 이동</div>
+          <${SectionLabel}>빠른 이동</${SectionLabel}>
           <div class="mt-3 flex flex-col gap-2">
             ${KEEPER_DETAIL_SECTIONS.map((section) => html`
               <button

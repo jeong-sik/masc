@@ -13,7 +13,8 @@ import { useMemo } from 'preact/hooks'
 import { TimeAgo } from '../common/time-ago'
 import { StatusDot } from '../common/status-dot'
 import { RouteLink } from '../common/route-link'
-import type { KpiCellKind } from '../kpi-cell'
+import type { KpiCellKind } from '../kpi-shared'
+import { barPercent } from '../bar-shared'
 import { KpiStripIsland } from '../kpi-strip-island'
 import { AgentAvatar } from './agent-avatar'
 import { missionSnapshot } from '../../mission-store'
@@ -303,7 +304,7 @@ export function progressPct(active: DashboardMissionSessionCard | null): number 
   const req = active.required_count ?? 0
   if (req <= 0) return null
   const seen = active.seen_count ?? active.active_count ?? 0
-  return Math.min(100, Math.max(0, Math.round((seen / req) * 100)))
+  return barPercent((seen / req) * 100)
 }
 
 function MissionPartyCard({ active }: { active: DashboardMissionSessionCard | null }) {

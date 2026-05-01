@@ -10,7 +10,6 @@
    non-zero cost for non-zero tokens). *)
 
 module Hooks = Masc_mcp.Keeper_hooks_oas
-module Oas = Masc_mcp.Oas
 module Pricing = Llm_provider.Pricing
 module Prom = Masc_mcp.Prometheus
 

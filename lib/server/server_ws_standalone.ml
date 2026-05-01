@@ -71,7 +71,10 @@ let make_websocket_handler ~on_message _client_addr (wsd : Ws.Wsd.t) :
       | `Pong | `Other _ ->
         Ws.Payload.close payload
     );
-    eof = (fun ?error:_ () ->
+    eof = (fun ?error () ->
+      Log.Server.debug "WebSocket session %s eof%s (standalone port)"
+        session_id
+        (match error with None -> "" | Some _ -> " error");
       Server_mcp_transport_ws.cleanup_session session_id)
   }
 

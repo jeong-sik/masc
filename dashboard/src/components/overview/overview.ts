@@ -60,22 +60,23 @@ export function deriveAgentAlerts(agentList: readonly Agent[]): AgentAlert[] {
 }
 
 /** Derive a list of stalled tasks or tasks needing attention. */
-export function deriveTaskAlerts(taskList: Task[], nowMs: number): TaskAlert[] {
-  const STALL_THRESHOLD_MS = 1000 * 60 * 10 // 10 mins
-  return taskList
-    .filter(t => t.status === 'awaiting_verification')
-    .filter(t => {
-      const updated = parseIsoMs(t.updated_at)
-      return updated === null || nowMs - updated > STALL_THRESHOLD_MS
-    })
-    .map(t => ({
+export function deriveTaskAlerts(taskList: readonly Task[], nowMs: number): TaskAlert[] {
+  const STALL_THRESHOLD_MS = 10 * 60 * 1000
+  const alerts: TaskAlert[] = []
+  for (const t of taskList) {
+    if (t.status !== 'awaiting_verification') continue
+    const updated = parseIsoMs(t.updated_at)
+    if (updated !== null && nowMs - updated <= STALL_THRESHOLD_MS) continue
+    alerts.push({
       id: t.id,
       title: t.title,
-      status: t.status,
-      assignee: t.assignee || null,
+      status: 'awaiting_verification',
+      assignee: t.assignee ?? null,
       severity: 'warn',
       task: t,
-    }))
+    })
+  }
+  return alerts
 }
 
 export function severityToneClass(severity?: string | null): string {
@@ -279,7 +280,7 @@ function keeperStatusToneClass(status?: string | null): string {
   }
 }
 
-export function pickActiveKeepers(keeperList: Keeper[], max = 3): Keeper[] {
+export function pickActiveKeepers(keeperList: readonly Keeper[], max = 3): Keeper[] {
   return [...keeperList]
     .sort((a, b) => {
       const tsA = parseIsoMs(a.last_heartbeat) ?? 0

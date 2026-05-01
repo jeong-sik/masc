@@ -83,6 +83,17 @@ describe('StatusBadge', () => {
     const el = container.querySelector('[data-status-badge-tone]')
     expect(el?.classList.contains('status-badge')).toBe(true)
     expect(el?.getAttribute('data-status-badge-tone')).toBe('ok')
+    expect(el?.classList.contains('ok')).toBe(true)
+    expect(el?.classList.contains('active')).toBe(true)
+  })
+
+  it('keeps resolved tone styling for statuses without explicit CSS variants', () => {
+    const container = document.createElement('div')
+    render(h(StatusBadge, { status: 'awaiting_verification' }), container)
+    const el = container.querySelector('[data-status-badge-tone]')
+    expect(el?.getAttribute('data-status-badge-tone')).toBe('info')
+    expect(el?.classList.contains('info')).toBe(true)
+    expect(el?.classList.contains('awaiting-verification')).toBe(true)
   })
 
   it('accepts tone plus children for caller-owned labels', () => {

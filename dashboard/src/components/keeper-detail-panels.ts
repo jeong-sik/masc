@@ -10,6 +10,7 @@ import { CopyIdButton } from './common/copy-id-button'
 import { ProgressBar } from './common/progress-bar'
 import { Eyebrow } from './common/eyebrow'
 import { SectionHeader } from './common/section-header'
+import { StatusChip } from './common/status-chip'
 import type { Keeper, KeeperMetricPoint, PromptSegmentTelemetry } from '../types'
 
 function MutedSpan({ children }: { children: unknown }) {
@@ -281,10 +282,10 @@ function OutcomesLedger({ keeper, outcomes }: {
         </div>
         ${(successes.compactions_ok > 0 || successes.handoffs_ok > 0 || failures.compaction_failed > 0 || failures.handoff_failed > 0) ? html`
           <div class="mt-2 flex flex-wrap gap-1.5 text-3xs">
-            ${successes.compactions_ok > 0 ? html`<span class="px-2 py-0.5 rounded-sm border border-[var(--ok-20)] bg-[var(--ok-6)] text-[var(--color-status-ok)]">압축 ${successes.compactions_ok}</span>` : null}
-            ${failures.compaction_failed > 0 ? html`<span class="px-2 py-0.5 rounded-sm border border-[var(--bad-20)] bg-[var(--bad-6)] text-[var(--color-status-err)]">압축 실패 ${failures.compaction_failed}</span>` : null}
-            ${successes.handoffs_ok > 0 ? html`<span class="px-2 py-0.5 rounded-sm border border-[var(--ok-20)] bg-[var(--ok-6)] text-[var(--color-status-ok)]">인계 ${successes.handoffs_ok}</span>` : null}
-            ${failures.handoff_failed > 0 ? html`<span class="px-2 py-0.5 rounded-sm border border-[var(--bad-20)] bg-[var(--bad-6)] text-[var(--color-status-err)]">인계 실패 ${failures.handoff_failed}</span>` : null}
+            ${successes.compactions_ok > 0 ? html`<${StatusChip} tone="ok" uppercase=${false}>압축 ${successes.compactions_ok}<//>` : null}
+            ${failures.compaction_failed > 0 ? html`<${StatusChip} tone="bad" uppercase=${false}>압축 실패 ${failures.compaction_failed}<//>` : null}
+            ${successes.handoffs_ok > 0 ? html`<${StatusChip} tone="ok" uppercase=${false}>인계 ${successes.handoffs_ok}<//>` : null}
+            ${failures.handoff_failed > 0 ? html`<${StatusChip} tone="bad" uppercase=${false}>인계 실패 ${failures.handoff_failed}<//>` : null}
           </div>
         ` : null}
       <//>
@@ -1129,9 +1130,9 @@ export function MetricsCharts({ keeper }: { keeper: Keeper }) {
           </${DetailRow}>
           <div class="flex flex-wrap gap-1.5">
             ${modelSwitches.map(s => html`
-              <span class="text-3xs px-2 py-0.5 rounded-sm bg-[var(--warn-10)] text-[var(--color-status-warn)] border border-[var(--warn-20)] font-mono">
+              <${StatusChip} tone="warn" uppercase=${false} class="font-mono">
                 T${s.index} -> ${s.model.length > MODEL_NAME_MAX_LEN ? s.model.slice(0, MODEL_NAME_MAX_LEN) + '...' : s.model}
-              </span>
+              <//>
             `)}
           </div>
         <//>
@@ -1146,9 +1147,9 @@ export function MetricsCharts({ keeper }: { keeper: Keeper }) {
           </${DetailRow}>
           <div class="flex flex-wrap gap-1.5">
             ${series.filter((p: KeeperMetricPoint) => p.fallback_applied).slice(-10).map((p: KeeperMetricPoint) => html`
-              <span class="text-3xs px-2 py-0.5 rounded-sm bg-[var(--bad-10)] text-[var(--color-status-err)] border border-[var(--bad-20)] font-mono">
+              <${StatusChip} tone="bad" uppercase=${false} class="font-mono">
                 ${p.fallback_from ?? '?'} -> ${p.fallback_to ?? p.model_used}${p.fallback_reason ? ` (${p.fallback_reason.length > 20 ? p.fallback_reason.slice(0, 20) + '...' : p.fallback_reason})` : ''}
-              </span>
+              <//>
             `)}
           </div>
         </div>
@@ -1259,7 +1260,7 @@ export function RelationshipList({ rels }: { rels: Record<string, string> }) {
     <div class="max-h-55 overflow-y-auto flex flex-col gap-1.5">
       ${entries.map(([name, relation]) => html`
         <div class="flex items-center gap-2 py-2 px-3 bg-[var(--white-3)] rounded">
-          <span class="inline-flex items-center py-0.5 px-2 rounded-sm text-2xs font-medium bg-[var(--accent-12)] text-[var(--color-accent-fg)] border border-[var(--accent-30)]">${name}</span>
+          <${StatusChip} tone="info" uppercase=${false} class="text-2xs font-medium">${name}<//>
           <span class="text-2xs text-[var(--color-fg-muted)] font-mono">${relation}</span>
         </div>
       `)}
@@ -1274,7 +1275,7 @@ export function TraitsList({ traits, label }: { traits: string[]; label: string 
     <div class="mb-3">
       <div class="text-3xs text-[var(--color-fg-muted)] uppercase tracking-wider font-semibold mb-2">${label}</div>
       <div class="flex flex-wrap gap-1.5">
-        ${traits.map(t => html`<span class="inline-flex items-center py-0.5 px-2.5 rounded-sm text-2xs font-medium bg-[var(--accent-12)] text-[var(--color-accent-fg)] border border-[var(--accent-30)]">${t}</span>`)}
+        ${traits.map(t => html`<${StatusChip} tone="info" uppercase=${false} class="text-2xs font-medium">${t}<//>`)}
       </div>
     </div>
   `

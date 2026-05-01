@@ -4,9 +4,8 @@
 
     All values cached at module-init from env vars; the cache
     means a runtime env-var change does not propagate without
-    process restart.  The few [() -> X] re-readers (for the
-    dashboard fixtures path and command-plane snapshot
-    refresh) are documented exceptions. *)
+    process restart.  The few [() -> X] re-readers for dashboard
+    fixture selection are documented exceptions. *)
 
 (** {1 Inference} *)
 

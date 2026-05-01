@@ -196,6 +196,13 @@ export function eventKindColor(entry: JournalEntry): string {
   return 'live-event-system'
 }
 
+export function eventKindTone(entry: JournalEntry): string {
+  if (entry.kind === 'board') return 'info'
+  if (entry.kind === 'tasks') return 'ok'
+  if (entry.kind === 'keepers') return 'select'
+  return 'neutral'
+}
+
 export function eventKindLabel(entry: JournalEntry): string {
   const type = entry.eventType
   if (type === 'broadcast') return 'broadcast'

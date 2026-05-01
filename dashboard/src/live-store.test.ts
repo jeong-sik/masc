@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { eventKindColor, eventKindLabel } from './live-store'
+import { eventKindColor, eventKindLabel, eventKindTone } from './live-store'
 import type { JournalEntry } from './types'
 
 function makeEntry(overrides: Partial<JournalEntry> = {}): JournalEntry {
@@ -38,6 +38,29 @@ describe('eventKindColor', () => {
 
   it('returns system class when kind is undefined', () => {
     expect(eventKindColor(makeEntry({}))).toBe('live-event-system')
+  })
+})
+
+// ================================================================
+// eventKindTone
+// ================================================================
+
+describe('eventKindTone', () => {
+  it('maps board kind to info tone', () => {
+    expect(eventKindTone(makeEntry({ kind: 'board' }))).toBe('info')
+  })
+
+  it('maps tasks kind to ok tone', () => {
+    expect(eventKindTone(makeEntry({ kind: 'tasks' }))).toBe('ok')
+  })
+
+  it('maps keepers kind to select tone', () => {
+    expect(eventKindTone(makeEntry({ kind: 'keepers' }))).toBe('select')
+  })
+
+  it('falls back to neutral tone', () => {
+    expect(eventKindTone(makeEntry({ kind: 'system' }))).toBe('neutral')
+    expect(eventKindTone(makeEntry({}))).toBe('neutral')
   })
 })
 

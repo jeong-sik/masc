@@ -7,18 +7,20 @@ import {
   toggleLiveFilter,
   eventKindColor,
   eventKindLabel,
+  eventKindTone,
   type LiveFilterKind,
 } from '../../live-store'
 import { connected, totalEvents } from '../../sse'
 import { ActionButton } from '../common/button'
 import { EmptyState, ErrorState } from '../common/feedback-state'
+import { StatusChip } from '../common/status-chip'
 import { formatTimeAgo } from '../common/time-ago'
 
-const FILTER_OPTIONS: { kind: LiveFilterKind; label: string; cssClass: string }[] = [
-  { kind: 'broadcast', label: '브로드캐스트', cssClass: 'live-event-broadcast' },
-  { kind: 'tasks', label: '작업', cssClass: 'live-event-task' },
-  { kind: 'keepers', label: 'Keeper', cssClass: 'live-event-keeper' },
-  { kind: 'system', label: '시스템', cssClass: 'live-event-system' },
+const FILTER_OPTIONS: { kind: LiveFilterKind; label: string }[] = [
+  { kind: 'broadcast', label: '브로드캐스트' },
+  { kind: 'tasks', label: '작업' },
+  { kind: 'keepers', label: 'Keeper' },
+  { kind: 'system', label: '시스템' },
 ]
 
 function FilterBar() {
@@ -64,7 +66,7 @@ export function ActivityStream() {
               class="activity-item rounded border border-[var(--color-border-divider)] border-l-2 bg-[var(--white-2)] px-3.5 py-3 ${eventKindColor(entry)} ${i === 0 ? 'activity-item-new' : ''}"
             >
               <div class="activity-item-head flex items-center gap-2">
-                <span class="activity-kind-chip rounded px-2 py-0.5 text-3xs font-medium uppercase tracking-[0.04em] ${eventKindColor(entry)}">${eventKindLabel(entry)}</span>
+                <${StatusChip} tone=${eventKindTone(entry)}>${eventKindLabel(entry)}<//>
                 <span class="text-[0.75rem] text-[var(--color-fg-primary)] font-medium">${entry.agent}</span>
                 <span class="text-[0.7rem] text-[var(--color-fg-muted)] ml-auto">${formatTimeAgo(entry.timestamp)}</span>
               </div>

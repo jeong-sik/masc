@@ -35,6 +35,13 @@ let schemas = Tool_autoresearch_schemas.schemas
 
 type tool_result = bool * string
 
+let persisted_summary_target_reached (summary : Autoresearch.persisted_summary) =
+  match summary.target_score with
+  | Some target when Float.is_finite summary.best_score && Float.is_finite target ->
+      if summary.lower_is_better then Stdlib.( <= ) summary.best_score target
+      else Stdlib.( >= ) summary.best_score target
+  | _ -> false
+
 let persisted_summary_json (summary : Autoresearch.persisted_summary) =
   `Assoc
     [
@@ -45,12 +52,7 @@ let persisted_summary_json (summary : Autoresearch.persisted_summary) =
       ("target_file", `String summary.target_file);
       ("target_score", Json_util.float_opt_to_json summary.target_score);
       ( "target_reached",
-        `Bool
-          (match summary.target_score with
-           | None -> false
-           | Some target ->
-               if summary.lower_is_better then Stdlib.Float.compare summary.best_score target <= 0
-               else Stdlib.Float.compare summary.best_score target >= 0) );
+        `Bool (persisted_summary_target_reached summary) );
       ("status", `String (Autoresearch.status_to_string summary.status));
       ("current_cycle", `Int summary.current_cycle);
       ("baseline", `Float summary.baseline);

@@ -76,6 +76,12 @@ type tool_result = bool * string
     means the JSON contains an [error] field; the
     transport surfaces it as an MCP error response. *)
 
+val persisted_summary_target_reached :
+  Autoresearch.persisted_summary -> bool
+(** Target-score projection used when rendering persisted status.
+    Non-finite scores fail closed so malformed metric output cannot report
+    [target_reached = true] while the core loop remains incomplete. *)
+
 val dispatch :
   context -> name:string -> args:Yojson.Safe.t -> tool_result option
 (** Routes every [masc_autoresearch_*] tool name to its

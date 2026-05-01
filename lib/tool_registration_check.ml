@@ -31,14 +31,18 @@ let add_names names tbl =
   List.iter (fun name -> Hashtbl.replace tbl name ()) names;
   tbl
 
+let raw_masc_tool_names () =
+  Config.raw_all_tool_schemas
+  |> List.filter_map (fun (schema : Types.tool_schema) ->
+    if String.starts_with ~prefix:"masc_" schema.name then Some schema.name
+    else None)
+
 let runtime_keeper_tool_names () =
   Hashtbl.create 512
   |> add_names Keeper_exec_tools.keeper_internal_candidate_tool_names
   |> add_names (Keeper_exec_tools.effective_core_tools ())
   |> add_names Keeper_exec_tools.keeper_admin_dispatched_tools
-  |> add_names
-       (Keeper_tool_policy.keeper_supported_masc_tool_names_from_schemas
-          Config.raw_all_tool_schemas)
+  |> add_names (raw_masc_tool_names ())
 
 let validate () : validation_result =
   match Keeper_tool_policy.policy_config_for_validation () with

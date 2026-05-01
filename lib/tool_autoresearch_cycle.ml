@@ -609,8 +609,8 @@ let handle_cycle (ctx : Tool_autoresearch_context.t) args =
                          | Autoresearch.Keep ->
                            let state = { state with consecutive_discards = 0 } in
                            let is_tag_worthy =
-                             if state.lower_is_better then Stdlib.Float.compare score_after state.best_score <= 0
-                             else Stdlib.Float.compare score_after state.best_score >= 0
+                             if state.lower_is_better then Stdlib.( <= ) score_after state.best_score
+                             else Stdlib.( >= ) score_after state.best_score
                            in
                            if is_tag_worthy then
                              Autoresearch.git_tag_best ~workdir

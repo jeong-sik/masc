@@ -37,8 +37,7 @@ import { LoadingState, ErrorState } from './common/feedback-state'
 
 type ViewMode = 'model' | 'keeper'
 
-type CostView = 'cost' | 'heuristics' | 'stress' | 'audit' | 'decisions'
-type CostDashboardMode = 'cost-only'
+export type CostView = 'cost' | 'heuristics' | 'stress' | 'audit' | 'decisions'
 
 const COST_VIEWS: CostView[] = ['cost', 'heuristics', 'stress', 'audit', 'decisions']
 
@@ -1043,8 +1042,7 @@ function CostDashboardContent({ view }: { view: CostView }) {
   return null
 }
 
-export function CostDashboard({ mode: _mode = 'cost-only' }: { mode?: CostDashboardMode }) {
-  const view: CostView = 'cost'
+export function CostDashboard({ view = 'cost' }: { view?: CostView }) {
   return html`
     <div class="contain-content flex flex-col gap-4">
       <${CostDashboardContent} view=${view} />

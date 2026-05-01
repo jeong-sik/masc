@@ -13,6 +13,9 @@
 //   cascade      — cascade config + health only (설정 ↔ 실측)
 //   providers    — OAS health chip + runtime monitor only
 //   cost         — model/keeper cost and latency only
+//   audit        — dashboard audit ledger
+//   heuristics   — heuristic firing log + coverage by module
+//   stress       — agent stress events
 //   inspector    — cascade strategy trace/provider health drill-down
 //   prometheus   — raw Prometheus metrics only
 //   verification — formal specs only
@@ -28,12 +31,33 @@ import { RuntimeMonitor } from './runtime-monitor'
 import { PrometheusMetrics } from './prometheus-metrics'
 import { CascadeConfigPanel } from './cascade-config-panel'
 import { VerificationSpecsPanel } from './verification-specs-panel'
-import { CostDashboard } from './cost-dashboard'
+import { CostDashboard, type CostView } from './cost-dashboard'
 import { CascadeInspector } from './cascade-inspector'
 
-type RuntimeView = 'default' | 'cascade' | 'providers' | 'cost' | 'inspector' | 'prometheus' | 'verification'
+type RuntimeView =
+  | 'default'
+  | 'cascade'
+  | 'providers'
+  | 'cost'
+  | 'audit'
+  | 'heuristics'
+  | 'stress'
+  | 'inspector'
+  | 'prometheus'
+  | 'verification'
 
-const RUNTIME_VIEWS: RuntimeView[] = ['default', 'cascade', 'providers', 'cost', 'inspector', 'prometheus', 'verification']
+const RUNTIME_VIEWS: RuntimeView[] = [
+  'default',
+  'cascade',
+  'providers',
+  'cost',
+  'audit',
+  'heuristics',
+  'stress',
+  'inspector',
+  'prometheus',
+  'verification',
+]
 
 function isRuntimeView(v: string | undefined): v is RuntimeView {
   return !!v && (RUNTIME_VIEWS as string[]).includes(v)
@@ -49,10 +73,19 @@ const VIEW_CHIPS: Array<{ key: RuntimeView; label: string }> = [
   { key: 'cascade', label: 'Cascade' },
   { key: 'providers', label: '프로바이더' },
   { key: 'cost', label: '비용 / 지연' },
+  { key: 'audit', label: '감사' },
+  { key: 'heuristics', label: '휴리스틱' },
+  { key: 'stress', label: '스트레스' },
   { key: 'inspector', label: '검사기' },
   { key: 'prometheus', label: '메트릭' },
   { key: 'verification', label: '형식검증' },
 ]
+
+function costDiagnosticView(view: RuntimeView): CostView | null {
+  return view === 'cost' || view === 'audit' || view === 'heuristics' || view === 'stress'
+    ? view
+    : null
+}
 
 function updateViewParam(view: RuntimeView): void {
   replaceRoute(
@@ -65,6 +98,7 @@ function updateViewParam(view: RuntimeView): void {
 
 export function RuntimePanel() {
   const view = activeView.value
+  const costView = costDiagnosticView(view)
 
   return html`
     <div class="flex flex-col gap-4">
@@ -81,8 +115,8 @@ export function RuntimePanel() {
             <${OasHealthChip} />
             <${RuntimeMonitor} />
           `
-        : view === 'cost'
-          ? html`<${CostDashboard} mode="cost-only" />`
+        : costView
+          ? html`<${CostDashboard} view=${costView} />`
         : view === 'inspector'
           ? html`<${CascadeInspector} />`
         : view === 'prometheus'
